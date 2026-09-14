@@ -351,3 +351,21 @@ int main()
 
     return 0;
 }
+
+/*
+screenX = centerX + worldX * pixelsPerMeter;
+screenY = centerY - worldY * pixelsPerMeter;
+
+Vec2 gravity{ 0.0f, -9.8f };
+
+        +Y
+         ↑
+         |
+-X ←── (0,0) ──→ +X
+         |
+         ↓
+        -Y
+
+Vec2 WorldToScreen(const Vec2& world);
+Vec2 ScreenToWorld(const Vec2& screen);
+*/
