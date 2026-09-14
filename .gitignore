@@ -1,13 +1,39 @@
-﻿################################################################################
-# 이 .gitignore 파일은 Microsoft(R) Visual Studio에서 자동으로 만들어졌습니다.
-################################################################################
+﻿# CMake build output
+/build/
+/out/
+/cmake-build-*/
 
-/ZonaiMath/x64/Debug/ZonaiMath.tlog
-/ZonaiMath/x64/Debug
-/.vs/ZonaiEngine
-/x64/Debug
-/ZonaiEngine/x64/Debug
-/ZonaiPhysics/x64/Debug
-/ZonaiGraphics/x64/Debug
-/ZonaiSounds/x64/Debug
-/ZonaiUtility/x64/Debug
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+
+# User-specific CMake configuration
+CMakeUserPresets.json
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+
+# Build artifacts
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.ipdb
+*.iobj
+*.exp
+*.lib
+*.dll
+*.exe
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
