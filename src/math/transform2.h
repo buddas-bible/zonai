@@ -1,4 +1,6 @@
 #pragma once
+#include "vec2.h"
+#include "rot2.h"
 
 namespace zonai
 {
@@ -6,6 +8,5 @@ namespace zonai
 	{
 		vec2 position;
 		rot2 rotation;
-		vec2 scale;
 	};
 }
