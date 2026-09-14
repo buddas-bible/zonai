@@ -171,10 +171,6 @@ int main()
     swapChainDesc.SwapEffect =
         DXGI_SWAP_EFFECT_DISCARD;
 
-    ComPtr<ID3D11Device> device;
-    ComPtr<ID3D11DeviceContext> deviceContext;
-    ComPtr<IDXGISwapChain> swapChain;
-
     D3D_FEATURE_LEVEL featureLevel{};
 
     HRESULT result =
@@ -187,10 +183,10 @@ int main()
             0,
             D3D11_SDK_VERSION,
             &swapChainDesc,
-            &swapChain,
-            &device,
+            &g_d3d.swapChain,
+            &g_d3d.device,
             &featureLevel,
-            &deviceContext
+            &g_d3d.deviceContext
         );
 
     if (FAILED(result))
@@ -204,7 +200,7 @@ int main()
 
     ComPtr<ID3D11Texture2D> backBuffer;
 
-    result = swapChain->GetBuffer(
+    result = g_d3d.swapChain->GetBuffer(
         0,
         IID_PPV_ARGS(&backBuffer)
     );
@@ -214,12 +210,10 @@ int main()
         return 1;
     }
 
-    ComPtr<ID3D11RenderTargetView> renderTargetView;
-
-    result = device->CreateRenderTargetView(
+    result = g_d3d.device->CreateRenderTargetView(
         backBuffer.Get(),
         nullptr,
-        &renderTargetView
+        &g_d3d.renderTargetView
     );
 
     if (FAILED(result))
@@ -246,8 +240,8 @@ int main()
     }
 
     if (!ImGui_ImplDX11_Init(
-        device.Get(),
-        deviceContext.Get()))
+        g_d3d.device.Get(),
+        g_d3d.deviceContext.Get()))
     {
         return 1;
     }
@@ -317,13 +311,13 @@ int main()
             1.0f
         };
 
-        deviceContext->OMSetRenderTargets(
+        g_d3d.deviceContext->OMSetRenderTargets(
             1,
-            renderTargetView.GetAddressOf(),
+            g_d3d.renderTargetView.GetAddressOf(),
             nullptr
         );
 
-        deviceContext->ClearRenderTargetView(
+        g_d3d.deviceContext->ClearRenderTargetView(
             g_d3d.renderTargetView.Get(),
             clearColor
         );
@@ -332,7 +326,7 @@ int main()
             ImGui::GetDrawData()
         );
 
-        swapChain->Present(1, 0);
+        g_d3d.swapChain->Present(1, 0);
     }
 
     // ---------------------------------------------------------
@@ -344,10 +338,10 @@ int main()
 
     ImGui::DestroyContext();
 
-    renderTargetView.Reset();
-    swapChain.Reset();
-    deviceContext.Reset();
-    device.Reset();
+    g_d3d.renderTargetView.Reset();
+    g_d3d.swapChain.Reset();
+    g_d3d.deviceContext.Reset();
+    g_d3d.device.Reset();
 
     DestroyWindow(hwnd);
     UnregisterClassW(
