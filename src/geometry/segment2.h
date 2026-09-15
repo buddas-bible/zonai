@@ -60,9 +60,7 @@ namespace zonai
         return segment.a + ab * t;
     }
 
-    inline float DistanceSquared(
-        const segment2& segment,
-        const vec2& point)
+    inline float DistanceSquared(const segment2& segment, const vec2& point)
     {
         const vec2 closest = zonai::ClosestPoint(segment, point);
 

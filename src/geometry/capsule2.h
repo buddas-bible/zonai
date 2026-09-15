@@ -1,6 +1,9 @@
 #pragma once
 
+#include <algorithm>
+
 #include "math/vec2.h"
+#include "geometry/segment2.h"
 #include "collision/aabb2.h"
 
 namespace zonai
@@ -21,8 +24,8 @@ namespace zonai
 
     inline bool Contains(const capsule2& capsule, const vec2& point)
     {
-        // Implementation for checking if a point is inside the capsule
-        // This is a simplified version and might need adjustment based on specific requirements
-        return false;
+		const zonai::segment2 axis{ capsule.a, capsule.b };
+
+		return zonai::DistanceSquared(axis, point) <= capsule.radius * capsule.radius;
     }
 }

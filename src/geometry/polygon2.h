@@ -18,7 +18,7 @@ namespace zonai
         std::size_t vertexCount = 0;
     };
 
-	polygon2 MakePolygon(std::span<vec2> vertices);
+	polygon2 MakePolygon(std::span<const vec2> vertices);
 
     aabb2 ComputeAABB(const polygon2& polygon);
 }
