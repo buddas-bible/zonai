@@ -8,7 +8,10 @@ file(GLOB_RECURSE ZONAI_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
 )
 
-add_library(zonai INTERFACE)
+add_library(zonai STATIC
+    ${ZONAI_SOURCES}
+)
+
 add_library(zonai::zonai ALIAS zonai)
 
 target_sources(zonai

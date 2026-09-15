@@ -42,4 +42,30 @@ namespace zonai
             }
         };
     }
+
+    inline vec2 ClosestPoint(const segment2& segment, const vec2& point)
+    {
+        const vec2 ab = segment.b - segment.a;
+        const float lengthSquared = zonai::LengthSquared(ab);
+
+        if (lengthSquared == 0.0f)
+        {
+            return segment.a;
+        }
+
+        float t = zonai::Dot(point - segment.a, ab) / lengthSquared;
+
+        t = std::clamp(t, 0.0f, 1.0f);
+
+        return segment.a + ab * t;
+    }
+
+    inline float DistanceSquared(
+        const segment2& segment,
+        const vec2& point)
+    {
+        const vec2 closest = zonai::ClosestPoint(segment, point);
+
+        return zonai::LengthSquared(point - closest);
+    }
 }

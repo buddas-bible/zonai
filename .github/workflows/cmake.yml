@@ -1,0 +1,39 @@
+name: CMake
+
+on:
+  push:
+    branches:
+      - master
+
+  pull_request:
+    branches:
+      - master
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake
+          -S .
+          -B build
+          -G "Visual Studio 18 2026"
+          -A x64
+          -DZONAI_BUILD_SANDBOX=ON
+          -DZONAI_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
