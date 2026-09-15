@@ -7,19 +7,21 @@
 
 namespace zonai
 {
-    constexpr std::size_t maxManifoldPoints = 2;
 
-    struct manifoldPoint2
-    {
-        vec2 point{};
-        float separation = 0.0f;
-    };
+constexpr std::size_t MAX_MANIFOLD_POINTS = 2;
 
-    struct manifold2
-    {
-        vec2 normal{};
+struct manifoldPoint2
+{
+    vec2 point{};
+    float separation = 0.0f;
+};
 
-        std::array<manifoldPoint2, maxManifoldPoints> points{};
-        std::size_t pointCount = 0;
-    };
-}
+struct manifold2
+{
+    vec2 normal{};
+
+    std::array<manifoldPoint2, MAX_MANIFOLD_POINTS> points{};
+    std::size_t pointCount = 0;
+};
+
+} // namespace zonai

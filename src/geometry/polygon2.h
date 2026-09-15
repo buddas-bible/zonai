@@ -8,17 +8,20 @@
 
 namespace zonai
 {
-    constexpr std::size_t maxPolygonVertices = 8;
 
-    struct polygon2
-    {
-        std::array<vec2, maxPolygonVertices> vertices;
-		std::array<vec2, maxPolygonVertices> normals;
-        vec2 centroid{};
-        std::size_t vertexCount = 0;
-    };
+constexpr std::size_t MAX_POLYGON_VERTICES = 8;
 
-	polygon2 MakePolygon(std::span<const vec2> vertices);
+struct polygon2
+{
+    std::array<vec2, MAX_POLYGON_VERTICES> vertices;
+    std::array<vec2, MAX_POLYGON_VERTICES> normals;
+    vec2 centroid{};
+	float radius = 0.0f;
+    std::size_t vertexCount = 0;
+};
 
-    aabb2 ComputeAABB(const polygon2& polygon);
-}
+polygon2 MakePolygon( std::span<const vec2> vertices );
+
+aabb2 ComputeAABB( const polygon2& polygon );
+
+} // namespace zonai

@@ -8,24 +8,26 @@
 
 namespace zonai
 {
-	struct capsule2
-    {
-		vec2 a{};
-		vec2 b{};
-		float radius = 0.0f;
-    };
 
-    inline aabb2 ComputeAABB(const capsule2& capsule)
-    {
-        vec2 min = { std::min(capsule.a.x, capsule.b.x) - capsule.radius, std::min(capsule.a.y, capsule.b.y) - capsule.radius };
-        vec2 max = { std::max(capsule.a.x, capsule.b.x) + capsule.radius, std::max(capsule.a.y, capsule.b.y) + capsule.radius };
-        return { min, max };
-    }
+struct capsule2
+{
+    vec2 center1{};
+    vec2 center2{};
+    float radius = 0.0f;
+};
 
-    inline bool Contains(const capsule2& capsule, const vec2& point)
-    {
-		const zonai::segment2 axis{ capsule.a, capsule.b };
-
-		return zonai::DistanceSquared(axis, point) <= capsule.radius * capsule.radius;
-    }
+inline aabb2 ComputeAABB( const capsule2& capsule )
+{
+    vec2 min = { std::min( capsule.center1.x, capsule.center2.x ) - capsule.radius, std::min( capsule.center1.y, capsule.center2.y ) - capsule.radius };
+    vec2 max = { std::max( capsule.center1.x, capsule.center2.x ) + capsule.radius, std::max( capsule.center1.y, capsule.center2.y ) + capsule.radius };
+    return { min, max };
 }
+
+inline bool Contains( const capsule2& capsule, const vec2& point )
+{
+    const zonai::segment2 axis{ capsule.center1, capsule.center2 };
+
+    return zonai::DistanceSquared( axis, point ) <= capsule.radius * capsule.radius;
+}
+
+} // namespace zonai
