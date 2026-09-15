@@ -29,7 +29,6 @@ add_test(
     COMMAND rot2Tests
 )
 
-
 add_executable(transform2Tests
     math/transform2_test.cpp
 )
@@ -44,7 +43,6 @@ add_test(
     COMMAND transform2Tests
 )
 
-
 add_executable(aabb2Tests
     collision/aabb2_test.cpp
 )
@@ -57,4 +55,18 @@ target_link_libraries(aabb2Tests
 add_test(
     NAME aabb2Tests
     COMMAND aabb2Tests
+)
+
+add_executable(circle2Tests
+    geometry/circle2_test.cpp
+)
+
+target_link_libraries(circle2Tests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME circle2Tests
+    COMMAND circle2Tests
 )
