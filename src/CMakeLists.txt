@@ -15,7 +15,7 @@ add_library(zonai STATIC
 add_library(zonai::zonai ALIAS zonai)
 
 target_sources(zonai
-    INTERFACE
+    PUBLIC
         FILE_SET HEADERS
         BASE_DIRS
             ${CMAKE_CURRENT_SOURCE_DIR}
@@ -24,11 +24,11 @@ target_sources(zonai
 )
 
 target_include_directories(zonai
-    INTERFACE
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_compile_features(zonai
-    INTERFACE
+    PUBLIC
         cxx_std_20
 )
