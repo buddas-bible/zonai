@@ -4,6 +4,14 @@ on:
   push:
     branches:
       - master
+    paths:
+      - "src/**"
+      - "sandbox/**"
+      - "tests/**"
+      - "third_party/**"
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - ".github/workflows/**"
 
   pull_request:
     branches:
