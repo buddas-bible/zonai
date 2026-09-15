@@ -5,7 +5,7 @@
 namespace zonai
 {
 
-bool Collide(
+bool CollideCircles(
     const circle2& a, const transform2& transformA,
     const circle2& b, const transform2& transformB,
     manifold2& manifold )
@@ -45,8 +45,8 @@ bool Collide(
     return true;
 }
 
-bool Collide(
-    const circle2& circle, const transform2& circleTransform,
+bool CollideCircleCapsule(
+    const circle2& circle,
     const capsule2& capsule, const transform2& capsuleTransform,
     manifold2& manifold )
 {

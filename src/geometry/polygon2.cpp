@@ -5,6 +5,18 @@
 namespace zonai
 {
 
+polygon2 MakeBox( const vec2& halfExtents )
+{
+	polygon2 polygon{};
+	polygon.vertexCount = 4;
+	polygon.vertices[0] = { -halfExtents.x, -halfExtents.y };
+	polygon.vertices[1] = { halfExtents.x, -halfExtents.y };
+	polygon.vertices[2] = { halfExtents.x,  halfExtents.y };
+	polygon.vertices[3] = { -halfExtents.x,  halfExtents.y };
+
+	return polygon;
+}
+
 polygon2 MakePolygon( std::span<const vec2> vertices )
 {
     polygon2 polygon{};

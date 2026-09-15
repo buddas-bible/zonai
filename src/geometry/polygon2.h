@@ -20,6 +20,10 @@ struct polygon2
     std::size_t vertexCount = 0;
 };
 
+polygon2 MakeBox( const vec2& halfExtents );
+
+polygon2 MakeCapsule( const vec2& center1, const vec2& center2, float radius );
+
 polygon2 MakePolygon( std::span<const vec2> vertices );
 
 aabb2 ComputeAABB( const polygon2& polygon );
