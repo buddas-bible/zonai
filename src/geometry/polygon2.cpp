@@ -20,6 +20,17 @@ polygon2 MakeBox( const vec2& halfExtents )
     return MakePolygon( vertices );
 }
 
+polygon2 MakeCapsule( const vec2& center1, const vec2& center2, float radius )
+{
+	polygon2 capsule{};
+	capsule.vertexCount = 2;
+    capsule.vertices[0] = center1;
+	capsule.vertices[1] = center2;
+	capsule.radius = radius;
+
+	return capsule;
+}
+
 polygon2 MakePolygon( std::span<const vec2> vertices )
 {
     polygon2 polygon{};
