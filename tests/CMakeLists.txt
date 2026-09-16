@@ -70,3 +70,17 @@ add_test(
     NAME circle2Tests
     COMMAND circle2Tests
 )
+
+add_executable(collideTests
+    collision/narrowphase/collide_test.cpp
+)
+
+target_link_libraries(collideTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME collideTests
+    COMMAND collideTests
+)

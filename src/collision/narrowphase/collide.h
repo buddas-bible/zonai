@@ -6,7 +6,7 @@
 #include "geometry/polygon2.h"
 
 #include "math/transform2.h"
-#include "collision/narrowphase/manifold2.h"
+#include "collision/narrowphase/localManifold2.h"
 
 namespace zonai
 {
@@ -16,20 +16,17 @@ segment-circle
 segment-capsule
 segment-polygon
 */
-bool CollideSegmentCircle(
+localManifold2 CollideSegmentCircle(
     const segment2& segment,
-    const circle2& circle, const transform2& circleTransform,
-    manifold2& manifold );
+    const circle2& circle, const transform2& circleTransform);
 
-bool CollideCapsuleSegment(
+localManifold2 CollideCapsuleSegment(
     const capsule2& capsule, 
-    const segment2& segment, const transform2& segmentTransform,
-    manifold2& manifold );
+    const segment2& segment, const transform2& segmentTransform);
 
-bool CollidePolygonSegment(
+localManifold2 CollidePolygonSegment(
     const polygon2& polygon,
-    const segment2& segment, const transform2& segmentTransform,
-    manifold2& manifold );
+    const segment2& segment, const transform2& segmentTransform);
 
 
 /*
@@ -37,42 +34,36 @@ circle-circle
 circle-capsule
 circle-polygon
 */
-bool CollideCircles(
+localManifold2 CollideCircles(
     const circle2& a,
-    const circle2& b, const transform2& transformB,
-    manifold2& manifold );
+    const circle2& b, const transform2& transformB);
 
-bool CollideCapsuleCircle(
+localManifold2 CollideCapsuleCircle(
     const capsule2& capsule,
-    const circle2& circle, const transform2& circleTransform,
-    manifold2& manifold );
+    const circle2& circle, const transform2& circleTransform);
 
-bool CollidePolygonCircle(
+localManifold2 CollidePolygonCircle(
     const polygon2& polygon,
-    const circle2& circle, const transform2& circleTransform,
-    manifold2& manifold );
+    const circle2& circle, const transform2& circleTransform);
 
 /*
 capsule-capsule
 capsule-polygon
 */
-bool CollideCapsules(
+localManifold2 CollideCapsules(
     const capsule2& a,
-    const capsule2& b, const transform2& transformB,
-    manifold2& manifold );
+    const capsule2& b, const transform2& transformB);
 
-bool CollidePolygonCapsule(
+localManifold2 CollidePolygonCapsule(
     const polygon2& polygon, 
-    const capsule2& capsule, const transform2& capsuleTransform,
-    manifold2& manifold );
+    const capsule2& capsule, const transform2& capsuleTransform);
 
 
 /*
 polygon-polygon
 */
-bool CollidePolygons(
+localManifold2 CollidePolygons(
     const polygon2& a,
-    const polygon2& b, const transform2& transformB,
-    manifold2& manifold );
+    const polygon2& b, const transform2& transformB);
 
 } // namespace zonai

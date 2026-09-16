@@ -15,6 +15,10 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 option(ZONAI_BUILD_SANDBOX "Build the zonai sandbox application" ON)
 option(ZONAI_BUILD_TESTS "Build zonai tests" ON)
 
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
+
 add_subdirectory(src)
 
 if(ZONAI_BUILD_SANDBOX)

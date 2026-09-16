@@ -19,7 +19,6 @@ struct manifoldPoint2
 struct manifold2
 {
     vec2 normal{};
-
     std::array<manifoldPoint2, MAX_MANIFOLD_POINTS> points{};
     std::size_t pointCount = 0;
 };
