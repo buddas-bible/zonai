@@ -71,6 +71,20 @@ add_test(
     COMMAND circle2Tests
 )
 
+add_executable(polygon2Tests
+    geometry/polygon2_test.cpp
+)
+
+target_link_libraries(polygon2Tests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME polygon2Tests
+    COMMAND polygon2Tests
+)
+
 add_executable(collideTests
     collision/narrowphase/collide_test.cpp
 )
