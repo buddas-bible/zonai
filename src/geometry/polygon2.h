@@ -13,10 +13,10 @@ constexpr std::size_t MAX_POLYGON_VERTICES = 8;
 
 struct polygon2
 {
-    std::array<vec2, MAX_POLYGON_VERTICES> vertices;
-    std::array<vec2, MAX_POLYGON_VERTICES> normals;
+    std::array<vec2, MAX_POLYGON_VERTICES> vertices{};
+    std::array<vec2, MAX_POLYGON_VERTICES> normals{};
     vec2 centroid{};
-	float radius = 0.0f;
+    float radius = 0.0f;
     std::size_t vertexCount = 0;
 };
 
