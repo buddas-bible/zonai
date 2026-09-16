@@ -6,13 +6,13 @@ namespace zonai
 {
 
 bool CollideCircles(
-    const circle2& a, const transform2& transformA,
+    const circle2& a,
     const circle2& b, const transform2& transformB,
     manifold2& manifold )
 {
-    manifold.pointCount = 0;
+    manifold = {};
 
-    const vec2 centerA = zonai::TransformPoint( transformA, a.center );
+    const vec2 centerA = a.center;
     const vec2 centerB = zonai::TransformPoint( transformB, b.center );
 
     const vec2 delta = centerB - centerA;
@@ -27,7 +27,7 @@ bool CollideCircles(
 
     const float distance = std::sqrt( distanceSquared );
 
-    vec2 normal{ 1.f, 0.f };
+    vec2 normal{};
 
     if( distance > 0.0f )
     {
@@ -45,27 +45,23 @@ bool CollideCircles(
     return true;
 }
 
-bool CollideCircleCapsule(
-    const circle2& circle,
-    const capsule2& capsule, const transform2& capsuleTransform,
+bool CollideCapsuleCircle(
+    const capsule2& capsule,
+    const circle2& circle, const transform2& circleTransform,
     manifold2& manifold )
 {
-    manifold.pointCount = 0;
+    manifold = {};
 
     const vec2 circleCenter = zonai::TransformPoint( circleTransform, circle.center );
-
-    const segment2 capsuleAxis
-    {
-        zonai::TransformPoint( capsuleTransform, capsule.center1 ),
-        zonai::TransformPoint( capsuleTransform, capsule.center2 )
-    };
+    const segment2 capsuleAxis = { capsule.center1, capsule.center2 };
 
     const vec2 closestPoint = zonai::ClosestPoint( capsuleAxis, circleCenter );
 
-    const vec2 delta = closestPoint - circleCenter;
+    // capsule -> circle 
+    const vec2 delta = circleCenter - closestPoint;
     const float distanceSquared = zonai::LengthSquared( delta );
 
-    const float radiusSum = circle.radius + capsule.radius;
+    const float radiusSum = capsule.radius + circle.radius;
 
     if( distanceSquared > radiusSum * radiusSum )
     {
@@ -74,28 +70,15 @@ bool CollideCircleCapsule(
 
     const float distance = std::sqrt( distanceSquared );
 
-    vec2 normal{ 1.f, 0.f };
+    vec2 normal{};
 
     if( distance > 0.f )
     {
         normal = delta / distance;
     }
-    else
-    {
-        const vec2 axis = capsuleAxis.b - capsuleAxis.a;
-
-        if( zonai::LengthSquared( axis ) > 0.0f )
-        {
-            normal = zonai::Normalize( vec2{ -axis.y, axis.x } );
-        }
-        else
-        {
-            normal = { 1.0f, 0.0f };
-        }
-    }
-
-    const vec2 pointA = circleCenter + normal * circle.radius;
-    const vec2 pointB = closestPoint - normal * capsule.radius;
+    
+    const vec2 pointA = closestPoint + normal * capsule.radius;
+    const vec2 pointB = circleCenter - normal * circle.radius;
 
     manifold.normal = normal;
     manifold.points[0].point = ( pointA + pointB ) * 0.5f;

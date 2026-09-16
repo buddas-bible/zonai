@@ -13,7 +13,6 @@ namespace zonai
 
 /*
 segment-circle
-segment-box
 segment-capsule
 segment-polygon
 */
@@ -22,20 +21,19 @@ bool CollideSegmentCircle(
     const circle2& circle, const transform2& circleTransform,
     manifold2& manifold );
 
-bool CollideSegmentCapsule(
-    const segment2& segment,
-    const capsule2& capsule, const transform2& capsuleTransform,
+bool CollideCapsuleSegment(
+    const capsule2& capsule, 
+    const segment2& segment, const transform2& segmentTransform,
     manifold2& manifold );
 
-bool CollideSegmentPolygon(
-    const segment2& segment,
-    const polygon2& polygon, const transform2& polygonTransform,
+bool CollidePolygonSegment(
+    const polygon2& polygon,
+    const segment2& segment, const transform2& segmentTransform,
     manifold2& manifold );
 
 
 /*
 circle-circle
-circle-box
 circle-capsule
 circle-polygon
 */
@@ -44,14 +42,14 @@ bool CollideCircles(
     const circle2& b, const transform2& transformB,
     manifold2& manifold );
 
-bool CollideCircleCapsule(
-    const circle2& circle,
-    const capsule2& capsule, const transform2& capsuleTransform,
+bool CollideCapsuleCircle(
+    const capsule2& capsule,
+    const circle2& circle, const transform2& circleTransform,
     manifold2& manifold );
 
-bool CollideCirclePolygon(
-    const circle2& circle,
-    const polygon2& polygon, const transform2& polygonTransform,
+bool CollidePolygonCircle(
+    const polygon2& polygon,
+    const circle2& circle, const transform2& circleTransform,
     manifold2& manifold );
 
 /*
@@ -63,9 +61,9 @@ bool CollideCapsules(
     const capsule2& b, const transform2& transformB,
     manifold2& manifold );
 
-bool CollideCapsulePolygon(
-    const capsule2& capsule,
-    const polygon2& polygon, const transform2& polygonTransform,
+bool CollidePolygonCapsule(
+    const polygon2& polygon, 
+    const capsule2& capsule, const transform2& capsuleTransform,
     manifold2& manifold );
 
 
