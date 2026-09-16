@@ -70,7 +70,7 @@ localManifold2 CollideCapsuleCircle(
         // center1 영역
 		pointA = point1;
     }
-	else if( s2 > 0.f )
+	else if( s2 < 0.f )
 	{
 		// center2 영역
 		pointA = point2;

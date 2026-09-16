@@ -36,7 +36,7 @@ int main()
         transformB.position = { 3.0f, 0.0f };
 
         const localManifold2 manifold =
-            CollideCircles(
+            zonai::CollideCircles(
                 a,
                 b,
                 transformB
@@ -57,7 +57,7 @@ int main()
         transformB.position = { 2.0f, 0.0f };
 
         const localManifold2 manifold =
-            CollideCircles(
+            zonai::CollideCircles(
                 a,
                 b,
                 transformB
@@ -93,7 +93,7 @@ int main()
         transformB.position = { 1.5f, 0.0f };
 
         const localManifold2 manifold =
-            CollideCircles(
+            zonai::CollideCircles(
                 a,
                 b,
                 transformB
@@ -122,7 +122,7 @@ int main()
         { 0.0f, 1.0f };
 
         const localManifold2 manifold =
-            CollideCapsuleCircle(
+            zonai::CollideCapsuleCircle(
                 capsule,
                 circle,
                 circleTransform
@@ -156,7 +156,7 @@ int main()
         { -2.0f, 0.0f };
 
         const localManifold2 manifold =
-            CollideCapsuleCircle(
+            zonai::CollideCapsuleCircle(
                 capsule,
                 circle,
                 circleTransform
@@ -185,7 +185,7 @@ int main()
         { 2.0f, 0.0f };
 
         const localManifold2 manifold =
-            CollideCapsuleCircle(
+            zonai::CollideCapsuleCircle(
                 capsule,
                 circle,
                 circleTransform
@@ -195,7 +195,7 @@ int main()
 
         assert( NearlyEqual(
             manifold.normal,
-            { -1.0f, 0.0f }
+            { 1.0f, 0.0f }
         ) );
     }
 
