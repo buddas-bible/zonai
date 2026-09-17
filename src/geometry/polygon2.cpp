@@ -22,13 +22,28 @@ polygon2 MakeBox( const vec2& halfExtents )
 
 polygon2 MakeCapsule( const vec2& center1, const vec2& center2, float radius )
 {
-	polygon2 capsule{};
-	capsule.vertexCount = 2;
-    capsule.vertices[0] = center1;
-	capsule.vertices[1] = center2;
-	capsule.radius = radius;
+    polygon2 capsule{};
 
-	return capsule;
+    const vec2 direction = center2 - center1;
+
+    if( LengthSquared( direction ) <= FLT_EPSILON )
+    {
+        assert( false );
+        return capsule;
+    }
+
+    const vec2 axis = Normalize( direction );
+    const vec2 normal{ axis.y, -axis.x };
+
+    capsule.vertices[0] = center1;
+    capsule.vertices[1] = center2;
+    capsule.normals[0] = normal;
+    capsule.normals[1] = -normal;
+    capsule.centroid = ( center1 + center2 ) * 0.5f;
+    capsule.radius = radius;
+    capsule.vertexCount = 2;
+
+    return capsule;
 }
 
 polygon2 MakePolygon( std::span<const vec2> vertices )
