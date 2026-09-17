@@ -98,3 +98,17 @@ add_test(
     NAME collideTests
     COMMAND collideTests
 )
+
+add_executable(segmentCircleTests
+    collision/narrowphase/segment_circle_test.cpp
+)
+
+target_link_libraries(segmentCircleTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME segmentCircleTests
+    COMMAND segmentCircleTests
+)
