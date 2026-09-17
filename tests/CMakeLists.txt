@@ -154,3 +154,31 @@ add_test(
     NAME polygonCapsuleTests
     COMMAND polygonCapsuleTests
 )
+
+add_executable(segmentCapsuleTests
+    collision/narrowphase/segment_capsule_test.cpp
+)
+
+target_link_libraries(segmentCapsuleTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME segmentCapsuleTests
+    COMMAND segmentCapsuleTests
+)
+
+add_executable(polygonSegmentTests
+    collision/narrowphase/polygon_segment_test.cpp
+)
+
+target_link_libraries(polygonSegmentTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME polygonSegmentTests
+    COMMAND polygonSegmentTests
+)
