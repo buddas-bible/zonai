@@ -120,6 +120,23 @@ float FindMaxSeparation(
     return maxSeparation;
 }
 
+void AddContactPoint(
+    localManifold2& manifold,
+    const vec2& point,
+    float separation )
+{
+    // Zonai는 아직 speculative contact를 사용하지 않는다.
+    if( separation > FLT_EPSILON ||
+        manifold.pointCount >= MAX_LOCAL_MANIFOLD_POINTS )
+    {
+        return;
+    }
+
+    manifold.points[manifold.pointCount].point = point;
+    manifold.points[manifold.pointCount].separation = separation;
+    ++manifold.pointCount;
+}
+
 localManifold2 ClipPolygons(
     const polygon2& polygonA,
     const polygon2& polygonB,
@@ -219,32 +236,40 @@ localManifold2 ClipPolygons(
         ( 0.5f *
           ( radiusReference - radiusIncident - upperSeparation ) );
 
+    const float lowerContactSeparation =
+        lowerSeparation - radiusSum;
+    const float upperContactSeparation =
+        upperSeparation - radiusSum;
+
+    manifold.normal = flip ? -normal : normal;
+
     if( !flip )
     {
-        manifold.normal = normal;
-
-        manifold.points[0].point = lowerPoint;
-        manifold.points[0].separation =
-            lowerSeparation - radiusSum;
-
-        manifold.points[1].point = upperPoint;
-        manifold.points[1].separation =
-            upperSeparation - radiusSum;
+        AddContactPoint(
+            manifold,
+            lowerPoint,
+            lowerContactSeparation
+        );
+        AddContactPoint(
+            manifold,
+            upperPoint,
+            upperContactSeparation
+        );
     }
     else
     {
-        manifold.normal = -normal;
-
-        manifold.points[0].point = upperPoint;
-        manifold.points[0].separation =
-            upperSeparation - radiusSum;
-
-        manifold.points[1].point = lowerPoint;
-        manifold.points[1].separation =
-            lowerSeparation - radiusSum;
+        AddContactPoint(
+            manifold,
+            upperPoint,
+            upperContactSeparation
+        );
+        AddContactPoint(
+            manifold,
+            lowerPoint,
+            lowerContactSeparation
+        );
     }
 
-    manifold.pointCount = 2;
     return manifold;
 }
 
