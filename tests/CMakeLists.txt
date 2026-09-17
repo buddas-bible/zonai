@@ -126,3 +126,17 @@ add_test(
     NAME capsuleCapsuleTests
     COMMAND capsuleCapsuleTests
 )
+
+add_executable(polygonPolygonTests
+    collision/narrowphase/polygon_polygon_test.cpp
+)
+
+target_link_libraries(polygonPolygonTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME polygonPolygonTests
+    COMMAND polygonPolygonTests
+)
