@@ -51,6 +51,23 @@ int main()
     }
 
     {
+        // capsule은 2개의 core vertex와 서로 반대인 normal을 가져야 한다.
+        const polygon2 capsule = MakeCapsule(
+            { -1.0f, 0.0f },
+            { 1.0f, 0.0f },
+            0.5f
+        );
+
+        assert( capsule.vertexCount == 2 );
+        assert( NearlyEqual( capsule.vertices[0], { -1.0f, 0.0f } ) );
+        assert( NearlyEqual( capsule.vertices[1], { 1.0f, 0.0f } ) );
+        assert( NearlyEqual( capsule.centroid, { 0.0f, 0.0f } ) );
+        assert( NearlyEqual( capsule.normals[0], { 0.0f, -1.0f } ) );
+        assert( NearlyEqual( capsule.normals[1], { 0.0f, 1.0f } ) );
+        assert( NearlyEqual( capsule.radius, 0.5f ) );
+    }
+
+    {
         // CCW triangle의 centroid와 outward normal을 계산해야 한다.
         const vec2 vertices[] =
         {
