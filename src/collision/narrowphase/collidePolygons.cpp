@@ -502,4 +502,21 @@ localManifold2 CollidePolygonCapsule(
     );
 }
 
+localManifold2 CollidePolygonSegment(
+    const polygon2& polygon,
+    const segment2& segment, const transform2& segmentTransform )
+{
+    const polygon2 segmentPolygon = MakeCapsule(
+        segment.a,
+        segment.b,
+        0.0f
+    );
+
+    return CollidePolygons(
+        polygon,
+        segmentPolygon,
+        segmentTransform
+    );
+}
+
 } // namespace zonai
