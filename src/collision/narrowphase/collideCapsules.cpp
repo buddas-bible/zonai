@@ -327,4 +327,22 @@ localManifold2 CollideCapsules(
     return manifold;
 }
 
+localManifold2 CollideSegmentCapsule(
+    const segment2& segment,
+    const capsule2& capsuleB, const transform2& capsuleBTransform )
+{
+    const capsule2 capsuleA =
+    {
+        segment.a,
+        segment.b,
+        0.0f
+    };
+
+    return CollideCapsules(
+        capsuleA,
+        capsuleB,
+        capsuleBTransform
+    );
+}
+
 } // namespace zonai
