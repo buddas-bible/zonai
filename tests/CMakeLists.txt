@@ -112,3 +112,17 @@ add_test(
     NAME segmentCircleTests
     COMMAND segmentCircleTests
 )
+
+add_executable(capsuleCapsuleTests
+    collision/narrowphase/capsule_capsule_test.cpp
+)
+
+target_link_libraries(capsuleCapsuleTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME capsuleCapsuleTests
+    COMMAND capsuleCapsuleTests
+)
