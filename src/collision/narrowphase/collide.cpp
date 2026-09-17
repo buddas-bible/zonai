@@ -46,6 +46,20 @@ localManifold2 CollideCircles(
     return manifold;
 }
 
+localManifold2 CollideSegmentCircle(
+    const segment2& segment,
+    const circle2& circle, const transform2& circleTransform )
+{
+    const capsule2 capsule =
+    {
+        segment.a,
+        segment.b,
+        0.0f
+    };
+
+    return CollideCapsuleCircle( capsule, circle, circleTransform );
+}
+
 localManifold2 CollideCapsuleCircle(
     const capsule2& capsule,
     const circle2& circle, const transform2& circleTransform )
