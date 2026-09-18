@@ -36,6 +36,7 @@ public:
     DynamicTree();
 
     int CreateProxy( const aabb2& aabb, int shapeIndex );
+    void DestroyProxy( int proxyId );
 
     std::size_t GetProxyCount() const;
     int GetHeight() const;
@@ -78,11 +79,15 @@ private:
     TreeNode MakeInternalNode( std::int32_t childPair ) const;
 
     int AllocateProxy();
+    void FreeProxy( int proxyId );
+
     std::int32_t AllocateSiblingPair();
+    void FreeSiblingPair( std::int32_t pair );
 
     std::int32_t FindBestSibling( const aabb2& aabb ) const;
     void LinkChildren( std::int32_t nodeIndex );
     void InsertLeaf( const TreeNode& leaf );
+    void RemoveLeaf( std::int32_t leafIndex );
     void RefitAncestors( std::int32_t nodeIndex );
 
     std::vector<TreeNode> nodes_{};
@@ -90,6 +95,7 @@ private:
     std::vector<TreeProxy> proxies_{};
 
     std::int32_t proxyFreeList_ = NULL_INDEX;
+    std::int32_t pairFreeList_ = NULL_INDEX;
     std::size_t proxyCount_ = 0;
 };
 

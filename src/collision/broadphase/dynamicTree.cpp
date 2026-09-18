@@ -49,6 +49,19 @@ int DynamicTree::CreateProxy( const aabb2& aabb, int shapeIndex )
     return proxyId;
 }
 
+void DynamicTree::DestroyProxy( int proxyId )
+{
+    assert( 0 <= proxyId );
+    assert( static_cast<std::size_t>( proxyId ) < proxies_.size() );
+    assert( proxies_[proxyId].node != NULL_INDEX );
+
+    const std::int32_t leafIndex =
+        proxies_[proxyId].node;
+
+    RemoveLeaf( leafIndex );
+    FreeProxy( proxyId );
+}
+
 std::size_t DynamicTree::GetProxyCount() const
 {
     return proxyCount_;
@@ -222,8 +235,36 @@ int DynamicTree::AllocateProxy()
     return proxyId;
 }
 
+void DynamicTree::FreeProxy( int proxyId )
+{
+    TreeProxy& proxy = proxies_[proxyId];
+
+    proxy.node = NULL_INDEX;
+    proxy.next = proxyFreeList_;
+
+    proxyFreeList_ = proxyId;
+
+    assert( proxyCount_ > 0 );
+    --proxyCount_;
+}
+
 std::int32_t DynamicTree::AllocateSiblingPair()
 {
+    if( pairFreeList_ != NULL_INDEX )
+    {
+        const std::int32_t pair = pairFreeList_;
+
+        pairFreeList_ = parents_[pair];
+
+        nodes_[pair] = MakeEmptyNode();
+        nodes_[pair + 1] = MakeEmptyNode();
+
+        parents_[pair] = NULL_INDEX;
+        parents_[pair + 1] = NULL_INDEX;
+
+        return pair;
+    }
+
     const std::int32_t pair =
         static_cast<std::int32_t>( nodes_.size() );
 
@@ -237,6 +278,22 @@ std::int32_t DynamicTree::AllocateSiblingPair()
     nodes_[pair + 1] = MakeEmptyNode();
 
     return pair;
+}
+
+void DynamicTree::FreeSiblingPair( std::int32_t pair )
+{
+    assert( pair >= 2 );
+    assert( ( pair & 1 ) == 0 );
+
+    nodes_[pair] = MakeEmptyNode();
+    nodes_[pair + 1] = MakeEmptyNode();
+
+    // 비어 있는 pair에서는 첫 슬롯의 parent 필드를
+    // free-list의 next index로 재사용한다.
+    parents_[pair] = pairFreeList_;
+    parents_[pair + 1] = NULL_INDEX;
+
+    pairFreeList_ = pair;
 }
 
 std::int32_t DynamicTree::FindBestSibling(
@@ -411,6 +468,51 @@ void DynamicTree::InsertLeaf( const TreeNode& leaf )
     parents_[siblingIndex] = oldParent;
 
     RefitAncestors( siblingIndex );
+}
+
+void DynamicTree::RemoveLeaf(
+    std::int32_t leafIndex )
+{
+    if( leafIndex == ROOT_NODE )
+    {
+        nodes_[ROOT_NODE] = MakeEmptyNode();
+        parents_[ROOT_NODE] = NULL_INDEX;
+        return;
+    }
+
+    const std::int32_t parentIndex =
+        parents_[leafIndex];
+
+    assert( parentIndex != NULL_INDEX );
+    assert( !IsLeaf( nodes_[parentIndex] ) );
+
+    const std::int32_t childPair =
+        GetChildPair( nodes_[parentIndex] );
+
+    assert(
+        leafIndex == childPair ||
+        leafIndex == childPair + 1
+    );
+
+    const std::int32_t siblingIndex =
+        leafIndex == childPair ?
+            childPair + 1 :
+            childPair;
+
+    const std::int32_t grandParent =
+        parents_[parentIndex];
+
+    // 제거되는 parent 자리로 살아남은 sibling을 승격한다.
+    nodes_[parentIndex] = nodes_[siblingIndex];
+    parents_[parentIndex] = grandParent;
+
+    // sibling이 leaf면 proxy->node를, internal이면
+    // 그 자식들의 parent를 새 위치에 맞게 고친다.
+    LinkChildren( parentIndex );
+
+    FreeSiblingPair( childPair );
+
+    RefitAncestors( parentIndex );
 }
 
 void DynamicTree::RefitAncestors(
