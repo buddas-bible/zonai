@@ -61,7 +61,12 @@ int main()
         const int proxyB = pairTree.CreateProxy( boxB, 20 );
 
         assert( proxyA >= 0 );
-        assert( proxyB >= 0 );
+
+        if( proxyB < 0 )
+        {
+            return 1;
+        }
+
         assert( proxyA != proxyB );
 
         assert( pairTree.GetProxyCount() == 2 );
