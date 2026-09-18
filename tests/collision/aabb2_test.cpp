@@ -46,8 +46,8 @@ int main()
             {  1.0f,  1.0f }
         };
 
-        assert(Contains(box, { 0.0f, 0.0f }));
-        assert(Contains(box, { 0.5f, -0.5f }));
+        assert(Contains( box, vec2{ 0.0f, 0.0f } ));
+        assert(Contains( box, vec2{ 0.5f, -0.5f } ));
     }
 
     // Point outside
@@ -57,8 +57,8 @@ int main()
             {  1.0f,  1.0f }
         };
 
-        assert(!Contains(box, { 2.0f, 0.0f }));
-        assert(!Contains(box, { 0.0f, -2.0f }));
+        assert(!Contains( box, vec2{ 2.0f, 0.0f } ));
+        assert(!Contains( box, vec2{ 0.0f, -2.0f } ));
     }
 
     // Point on boundary
@@ -68,8 +68,8 @@ int main()
             {  1.0f,  1.0f }
         };
 
-        assert(Contains(box, { 1.0f, 0.0f }));
-        assert(Contains(box, { -1.0f, -1.0f }));
+        assert(Contains( box, vec2{ 1.0f, 0.0f } ));
+        assert(Contains( box, vec2{ -1.0f, -1.0f } ));
     }
 
     // Overlapping boxes
@@ -215,8 +215,8 @@ int main()
             {  3.0f,  1.0f }
         };
 
-        assert( Contains( outer, inner ) );
-        assert( !Contains( outer, escaped ) );
+        assert( ContainsAABB( outer, inner ) );
+        assert( !ContainsAABB( outer, escaped ) );
     }
 
     return 0;
