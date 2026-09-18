@@ -55,7 +55,7 @@ inline bool Contains( const aabb2& box, const vec2& point )
         point.y <= box.max.y;
 }
 
-inline bool Contains( const aabb2& outer, const aabb2& inner )
+inline bool ContainsAABB( const aabb2& outer, const aabb2& inner )
 {
     return
         inner.min.x >= outer.min.x &&
