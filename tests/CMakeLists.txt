@@ -182,3 +182,17 @@ add_test(
     NAME polygonSegmentTests
     COMMAND polygonSegmentTests
 )
+
+add_executable(dynamicTreeTests
+    collision/broadphase/dynamic_tree_test.cpp
+)
+
+target_link_libraries(dynamicTreeTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME dynamicTreeTests
+    COMMAND dynamicTreeTests
+)
