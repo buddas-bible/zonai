@@ -115,5 +115,48 @@ int main()
         assert( NearlyEqual( sahTree.GetAreaRatio(), 1.75f ) );
     }
 
+
+    {
+        DynamicTree removalTree{};
+
+        const aabb2 boxA{
+            { 0.0f, 0.0f },
+            { 1.0f, 1.0f }
+        };
+
+        const aabb2 boxB{
+            { 10.0f, 0.0f },
+            { 11.0f, 1.0f }
+        };
+
+        const aabb2 boxC{
+            { 1.0f, 0.0f },
+            { 2.0f, 1.0f }
+        };
+
+        const int proxyA = removalTree.CreateProxy( boxA, 1 );
+        const int proxyB = removalTree.CreateProxy( boxB, 2 );
+        const int proxyC = removalTree.CreateProxy( boxC, 3 );
+
+        removalTree.DestroyProxy( proxyC );
+
+        assert( removalTree.GetProxyCount() == 2 );
+        assert( removalTree.GetHeight() == 1 );
+        assert( NearlyEqual( removalTree.GetProxyAABB( proxyA ), boxA ) );
+        assert( NearlyEqual( removalTree.GetProxyAABB( proxyB ), boxB ) );
+
+        removalTree.DestroyProxy( proxyA );
+
+        assert( removalTree.GetProxyCount() == 1 );
+        assert( removalTree.GetHeight() == 0 );
+        assert( NearlyEqual( removalTree.GetProxyAABB( proxyB ), boxB ) );
+
+        removalTree.DestroyProxy( proxyB );
+
+        assert( removalTree.GetProxyCount() == 0 );
+        assert( removalTree.GetHeight() == 0 );
+        assert( NearlyEqual( removalTree.GetAreaRatio(), 0.0f ) );
+    }
+
     return 0;
 }
