@@ -158,5 +158,52 @@ int main()
         assert( NearlyEqual( removalTree.GetAreaRatio(), 0.0f ) );
     }
 
+
+    {
+        DynamicTree moveTree{};
+
+        const aabb2 boxA{
+            { 0.0f, 0.0f },
+            { 1.0f, 1.0f }
+        };
+
+        const aabb2 boxB{
+            { 10.0f, 0.0f },
+            { 11.0f, 1.0f }
+        };
+
+        const aabb2 boxC{
+            { 1.0f, 0.0f },
+            { 2.0f, 1.0f }
+        };
+
+        const aabb2 movedC{
+            { 11.0f, 0.0f },
+            { 12.0f, 1.0f }
+        };
+
+        const int proxyA = moveTree.CreateProxy( boxA, 1 );
+        const int proxyB = moveTree.CreateProxy( boxB, 2 );
+        const int proxyC = moveTree.CreateProxy( boxC, 3 );
+
+        moveTree.MoveProxy( proxyC, movedC );
+
+        assert( moveTree.GetProxyCount() == 3 );
+        assert( moveTree.GetHeight() == 2 );
+
+        assert( NearlyEqual( moveTree.GetProxyAABB( proxyA ), boxA ) );
+        assert( NearlyEqual( moveTree.GetProxyAABB( proxyB ), boxB ) );
+        assert( NearlyEqual( moveTree.GetProxyAABB( proxyC ), movedC ) );
+
+        // 이동 후에는 C가 B와 묶이는 것이 가장 작다.
+        // root=26, (B+C)=6, leaf 3개=12 -> 44 / 26
+        assert(
+            NearlyEqual(
+                moveTree.GetAreaRatio(),
+                44.0f / 26.0f
+            )
+        );
+    }
+
     return 0;
 }
