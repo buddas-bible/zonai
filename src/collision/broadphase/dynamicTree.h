@@ -35,7 +35,7 @@ struct TreeNode
 class DynamicTree
 {
 
-}
+};
 
 
 }
