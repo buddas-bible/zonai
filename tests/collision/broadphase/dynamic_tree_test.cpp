@@ -43,5 +43,33 @@ int main()
     assert( tree.GetHeight() == 0 );
     assert( NearlyEqual( tree.GetProxyAABB( proxyId ), box ) );
 
+
+    {
+        DynamicTree pairTree{};
+
+        const aabb2 boxA{
+            { -2.0f, -1.0f },
+            {  0.0f,  1.0f }
+        };
+
+        const aabb2 boxB{
+            {  1.0f, -2.0f },
+            {  3.0f,  2.0f }
+        };
+
+        const int proxyA = pairTree.CreateProxy( boxA, 10 );
+        const int proxyB = pairTree.CreateProxy( boxB, 20 );
+
+        assert( proxyA >= 0 );
+        assert( proxyB >= 0 );
+        assert( proxyA != proxyB );
+
+        assert( pairTree.GetProxyCount() == 2 );
+        assert( pairTree.GetHeight() == 1 );
+
+        assert( NearlyEqual( pairTree.GetProxyAABB( proxyA ), boxA ) );
+        assert( NearlyEqual( pairTree.GetProxyAABB( proxyB ), boxB ) );
+    }
+
     return 0;
 }
