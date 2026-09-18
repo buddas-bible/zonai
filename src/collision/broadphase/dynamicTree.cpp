@@ -29,20 +29,48 @@ DynamicTree::DynamicTree()
 
 int DynamicTree::CreateProxy( const aabb2& aabb, int shapeIndex )
 {
-    // 첫 번째 구현 단계에서는 root leaf 하나만 지원한다.
-    // 두 번째 proxy 삽입은 다음 단계에서 sibling pair로 확장한다.
-    if( proxyCount_ != 0 )
+    if( proxyCount_ >= 2 )
     {
+        // 세 번째 proxy부터는 best sibling 탐색이 필요하다.
+        // 이 경로는 다음 단계에서 구현한다.
         return NULL_INDEX;
     }
 
     const int proxyId = AllocateProxy();
-
-    nodes_[ROOT_NODE] =
+    const TreeNode newLeaf =
         MakeLeafNode( aabb, proxyId, shapeIndex );
 
+    if( proxyCount_ == 1 )
+    {
+        // 첫 proxy는 root 자체가 leaf다.
+        nodes_[ROOT_NODE] = newLeaf;
+        parents_[ROOT_NODE] = NULL_INDEX;
+        proxies_[proxyId].node = ROOT_NODE;
+
+        return proxyId;
+    }
+
+    // 두 번째 proxy가 들어오면 기존 root leaf와 새 leaf를
+    // 첫 sibling pair인 index 2, 3으로 내리고 root를 internal로 바꾼다.
+    constexpr std::int32_t childPair = 2;
+
+    nodes_.resize( 4 );
+    parents_.resize( 4, NULL_INDEX );
+
+    const TreeNode oldRootLeaf = nodes_[ROOT_NODE];
+    const std::int32_t oldProxyId = GetProxyId( oldRootLeaf );
+
+    nodes_[childPair] = oldRootLeaf;
+    nodes_[childPair + 1] = newLeaf;
+
+    parents_[childPair] = ROOT_NODE;
+    parents_[childPair + 1] = ROOT_NODE;
+
+    proxies_[oldProxyId].node = childPair;
+    proxies_[proxyId].node = childPair + 1;
+
+    nodes_[ROOT_NODE] = MakeInternalNode( childPair );
     parents_[ROOT_NODE] = NULL_INDEX;
-    proxies_[proxyId].node = ROOT_NODE;
 
     return proxyId;
 }
@@ -118,6 +146,23 @@ TreeNode DynamicTree::MakeLeafNode(
         TREE_LEAF_NODE |
         TREE_MOVED_NODE;
     node.shapeIndex = shapeIndex;
+
+    return node;
+}
+
+TreeNode DynamicTree::MakeInternalNode(
+    std::int32_t childPair ) const
+{
+    const TreeNode& child1 = nodes_[childPair];
+    const TreeNode& child2 = nodes_[childPair + 1];
+
+    TreeNode node{};
+
+    node.aabb = Union( child1.aabb, child2.aabb );
+    node.flagIndex =
+        static_cast<std::uint32_t>( childPair ) |
+        ( ( child1.flagIndex | child2.flagIndex ) & TREE_MOVED_NODE );
+    node.height = 1;
 
     return node;
 }

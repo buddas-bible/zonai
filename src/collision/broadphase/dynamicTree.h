@@ -72,6 +72,8 @@ private:
         int proxyId,
         int shapeIndex );
 
+    TreeNode MakeInternalNode( std::int32_t childPair ) const;
+
     int AllocateProxy();
 
     std::vector<TreeNode> nodes_{};
