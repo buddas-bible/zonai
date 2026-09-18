@@ -76,5 +76,44 @@ int main()
         assert( NearlyEqual( pairTree.GetProxyAABB( proxyB ), boxB ) );
     }
 
+
+    {
+        DynamicTree sahTree{};
+
+        const aabb2 boxA{
+            { 0.0f, 0.0f },
+            { 1.0f, 1.0f }
+        };
+
+        const aabb2 boxB{
+            { 10.0f, 0.0f },
+            { 11.0f, 1.0f }
+        };
+
+        const aabb2 boxC{
+            { 1.0f, 0.0f },
+            { 2.0f, 1.0f }
+        };
+
+        const int proxyA = sahTree.CreateProxy( boxA, 1 );
+        const int proxyB = sahTree.CreateProxy( boxB, 2 );
+        const int proxyC = sahTree.CreateProxy( boxC, 3 );
+
+        assert( proxyA >= 0 );
+        assert( proxyB >= 0 );
+
+        if( proxyC < 0 )
+        {
+            return 2;
+        }
+
+        assert( sahTree.GetProxyCount() == 3 );
+        assert( sahTree.GetHeight() == 2 );
+
+        // C는 B보다 A와 묶일 때 AABB 증가 비용이 훨씬 작다.
+        // root=24, (A+C)=6, leaf 3개=12 -> 42 / 24 = 1.75
+        assert( NearlyEqual( sahTree.GetAreaRatio(), 1.75f ) );
+    }
+
     return 0;
 }
