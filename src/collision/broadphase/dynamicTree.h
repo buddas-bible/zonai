@@ -39,6 +39,7 @@ public:
 
     std::size_t GetProxyCount() const;
     int GetHeight() const;
+    float GetAreaRatio() const;
     const aabb2& GetProxyAABB( int proxyId ) const;
 
 private:
@@ -64,7 +65,9 @@ private:
 
     static bool IsLeaf( const TreeNode& node );
     static bool IsEmptyNode( const TreeNode& node );
+    static std::int32_t GetChildPair( const TreeNode& node );
     static std::int32_t GetProxyId( const TreeNode& node );
+    static int GetNodeHeight( const TreeNode& node );
 
     static TreeNode MakeEmptyNode();
     static TreeNode MakeLeafNode(
@@ -75,6 +78,12 @@ private:
     TreeNode MakeInternalNode( std::int32_t childPair ) const;
 
     int AllocateProxy();
+    std::int32_t AllocateSiblingPair();
+
+    std::int32_t FindBestSibling( const aabb2& aabb ) const;
+    void LinkChildren( std::int32_t nodeIndex );
+    void InsertLeaf( const TreeNode& leaf );
+    void RefitAncestors( std::int32_t nodeIndex );
 
     std::vector<TreeNode> nodes_{};
     std::vector<std::int32_t> parents_{};

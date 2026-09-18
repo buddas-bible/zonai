@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <limits>
 
 namespace zonai
 {
@@ -29,13 +30,6 @@ DynamicTree::DynamicTree()
 
 int DynamicTree::CreateProxy( const aabb2& aabb, int shapeIndex )
 {
-    if( proxyCount_ >= 2 )
-    {
-        // 세 번째 proxy부터는 best sibling 탐색이 필요하다.
-        // 이 경로는 다음 단계에서 구현한다.
-        return NULL_INDEX;
-    }
-
     const int proxyId = AllocateProxy();
     const TreeNode newLeaf =
         MakeLeafNode( aabb, proxyId, shapeIndex );
@@ -50,27 +44,7 @@ int DynamicTree::CreateProxy( const aabb2& aabb, int shapeIndex )
         return proxyId;
     }
 
-    // 두 번째 proxy가 들어오면 기존 root leaf와 새 leaf를
-    // 첫 sibling pair인 index 2, 3으로 내리고 root를 internal로 바꾼다.
-    constexpr std::int32_t childPair = 2;
-
-    nodes_.resize( 4 );
-    parents_.resize( 4, NULL_INDEX );
-
-    const TreeNode oldRootLeaf = nodes_[ROOT_NODE];
-    const std::int32_t oldProxyId = GetProxyId( oldRootLeaf );
-
-    nodes_[childPair] = oldRootLeaf;
-    nodes_[childPair + 1] = newLeaf;
-
-    parents_[childPair] = ROOT_NODE;
-    parents_[childPair + 1] = ROOT_NODE;
-
-    proxies_[oldProxyId].node = childPair;
-    proxies_[proxyId].node = childPair + 1;
-
-    nodes_[ROOT_NODE] = MakeInternalNode( childPair );
-    parents_[ROOT_NODE] = NULL_INDEX;
+    InsertLeaf( newLeaf );
 
     return proxyId;
 }
@@ -87,12 +61,37 @@ int DynamicTree::GetHeight() const
         return 0;
     }
 
-    if( IsLeaf( nodes_[ROOT_NODE] ) )
+    return GetNodeHeight( nodes_[ROOT_NODE] );
+}
+
+float DynamicTree::GetAreaRatio() const
+{
+    if( proxyCount_ == 0 || IsEmptyNode( nodes_[ROOT_NODE] ) )
     {
-        return 0;
+        return 0.0f;
     }
 
-    return nodes_[ROOT_NODE].height;
+    const float rootPerimeter =
+        Perimeter( nodes_[ROOT_NODE].aabb );
+
+    if( rootPerimeter <= 0.0f )
+    {
+        return 0.0f;
+    }
+
+    float totalPerimeter = 0.0f;
+
+    for( const TreeNode& node : nodes_ )
+    {
+        if( IsEmptyNode( node ) )
+        {
+            continue;
+        }
+
+        totalPerimeter += Perimeter( node.aabb );
+    }
+
+    return totalPerimeter / rootPerimeter;
 }
 
 const aabb2& DynamicTree::GetProxyAABB( int proxyId ) const
@@ -117,11 +116,23 @@ bool DynamicTree::IsEmptyNode( const TreeNode& node )
     return node.flagIndex == TREE_EMPTY_NODE;
 }
 
+std::int32_t DynamicTree::GetChildPair( const TreeNode& node )
+{
+    return static_cast<std::int32_t>(
+        node.flagIndex & TREE_NODE_INDEX_MASK
+    );
+}
+
 std::int32_t DynamicTree::GetProxyId( const TreeNode& node )
 {
     return static_cast<std::int32_t>(
         node.flagIndex & TREE_NODE_INDEX_MASK
     );
+}
+
+int DynamicTree::GetNodeHeight( const TreeNode& node )
+{
+    return IsLeaf( node ) ? 0 : node.height;
 }
 
 TreeNode DynamicTree::MakeEmptyNode()
@@ -162,7 +173,11 @@ TreeNode DynamicTree::MakeInternalNode(
     node.flagIndex =
         static_cast<std::uint32_t>( childPair ) |
         ( ( child1.flagIndex | child2.flagIndex ) & TREE_MOVED_NODE );
-    node.height = 1;
+    node.height =
+        1 + std::max(
+            GetNodeHeight( child1 ),
+            GetNodeHeight( child2 )
+        );
 
     return node;
 }
@@ -205,6 +220,216 @@ int DynamicTree::AllocateProxy()
     ++proxyCount_;
 
     return proxyId;
+}
+
+std::int32_t DynamicTree::AllocateSiblingPair()
+{
+    const std::int32_t pair =
+        static_cast<std::int32_t>( nodes_.size() );
+
+    // root 0 + spare 1 때문에 이후 pair 시작점은 항상 짝수다.
+    assert( ( pair & 1 ) == 0 );
+
+    nodes_.resize( nodes_.size() + 2 );
+    parents_.resize( parents_.size() + 2, NULL_INDEX );
+
+    nodes_[pair] = MakeEmptyNode();
+    nodes_[pair + 1] = MakeEmptyNode();
+
+    return pair;
+}
+
+std::int32_t DynamicTree::FindBestSibling(
+    const aabb2& boxD ) const
+{
+    std::int32_t nodeIndex = ROOT_NODE;
+
+    if( IsLeaf( nodes_[nodeIndex] ) )
+    {
+        return nodeIndex;
+    }
+
+    const float areaD = Perimeter( boxD );
+
+    aabb2 nodeBox = nodes_[nodeIndex].aabb;
+    float areaBase = Perimeter( nodeBox );
+    float directCost = Perimeter( Union( nodeBox, boxD ) );
+    float inheritedCost = 0.0f;
+
+    std::int32_t bestSibling = nodeIndex;
+    float bestCost = directCost;
+
+    for( ;; )
+    {
+        const std::int32_t child1 =
+            GetChildPair( nodes_[nodeIndex] );
+        const std::int32_t child2 = child1 + 1;
+
+        const float currentCost =
+            directCost + inheritedCost;
+
+        if( currentCost < bestCost )
+        {
+            bestSibling = nodeIndex;
+            bestCost = currentCost;
+        }
+
+        // 이 노드의 AABB가 커지는 비용은 아래 어느 자식으로
+        // 내려가더라도 공통으로 상속된다.
+        inheritedCost += directCost - areaBase;
+
+        const bool leaf1 = IsLeaf( nodes_[child1] );
+        const bool leaf2 = IsLeaf( nodes_[child2] );
+
+        const aabb2 box1 = nodes_[child1].aabb;
+        const aabb2 box2 = nodes_[child2].aabb;
+
+        const float directCost1 =
+            Perimeter( Union( box1, boxD ) );
+        const float directCost2 =
+            Perimeter( Union( box2, boxD ) );
+
+        float area1 = 0.0f;
+        float area2 = 0.0f;
+
+        float lowerCost1 =
+            std::numeric_limits<float>::max();
+        float lowerCost2 =
+            std::numeric_limits<float>::max();
+
+        if( leaf1 )
+        {
+            const float cost1 =
+                directCost1 + inheritedCost;
+
+            if( cost1 < bestCost )
+            {
+                bestSibling = child1;
+                bestCost = cost1;
+            }
+        }
+        else
+        {
+            area1 = Perimeter( box1 );
+
+            lowerCost1 =
+                inheritedCost +
+                directCost1 +
+                std::min( areaD - area1, 0.0f );
+        }
+
+        if( leaf2 )
+        {
+            const float cost2 =
+                directCost2 + inheritedCost;
+
+            if( cost2 < bestCost )
+            {
+                bestSibling = child2;
+                bestCost = cost2;
+            }
+        }
+        else
+        {
+            area2 = Perimeter( box2 );
+
+            lowerCost2 =
+                inheritedCost +
+                directCost2 +
+                std::min( areaD - area2, 0.0f );
+        }
+
+        if( leaf1 && leaf2 )
+        {
+            break;
+        }
+
+        if( bestCost <= lowerCost1 &&
+            bestCost <= lowerCost2 )
+        {
+            break;
+        }
+
+        if( lowerCost1 <= lowerCost2 )
+        {
+            nodeIndex = child1;
+            areaBase = area1;
+            directCost = directCost1;
+        }
+        else
+        {
+            nodeIndex = child2;
+            areaBase = area2;
+            directCost = directCost2;
+        }
+    }
+
+    return bestSibling;
+}
+
+void DynamicTree::LinkChildren( std::int32_t nodeIndex )
+{
+    const TreeNode& node = nodes_[nodeIndex];
+
+    if( IsLeaf( node ) )
+    {
+        const std::int32_t proxyId = GetProxyId( node );
+        proxies_[proxyId].node = nodeIndex;
+        return;
+    }
+
+    const std::int32_t childPair = GetChildPair( node );
+
+    parents_[childPair] = nodeIndex;
+    parents_[childPair + 1] = nodeIndex;
+}
+
+void DynamicTree::InsertLeaf( const TreeNode& leaf )
+{
+    const std::int32_t siblingIndex =
+        FindBestSibling( leaf.aabb );
+
+    const std::int32_t oldParent =
+        parents_[siblingIndex];
+
+    const std::int32_t childPair =
+        AllocateSiblingPair();
+
+    // siblingIndex 자리를 새 internal parent로 재사용하고,
+    // 기존 sibling은 새 pair의 첫 슬롯으로 이동한다.
+    nodes_[childPair] = nodes_[siblingIndex];
+    nodes_[childPair + 1] = leaf;
+
+    parents_[childPair] = siblingIndex;
+    parents_[childPair + 1] = siblingIndex;
+
+    LinkChildren( childPair );
+    LinkChildren( childPair + 1 );
+
+    nodes_[siblingIndex] =
+        MakeInternalNode( childPair );
+    parents_[siblingIndex] = oldParent;
+
+    RefitAncestors( siblingIndex );
+}
+
+void DynamicTree::RefitAncestors(
+    std::int32_t nodeIndex )
+{
+    while( nodeIndex != NULL_INDEX )
+    {
+        TreeNode& node = nodes_[nodeIndex];
+
+        if( !IsLeaf( node ) )
+        {
+            const std::int32_t childPair =
+                GetChildPair( node );
+
+            node = MakeInternalNode( childPair );
+        }
+
+        nodeIndex = parents_[nodeIndex];
+    }
 }
 
 } // namespace zonai
