@@ -167,5 +167,57 @@ int main()
         assert(Overlaps(inner, outer));
     }
 
+
+    // Union
+    {
+        aabb2 a{
+            { -1.0f, -1.0f },
+            {  1.0f,  1.0f }
+        };
+
+        aabb2 b{
+            {  2.0f, -2.0f },
+            {  4.0f,  0.0f }
+        };
+
+        const aabb2 combined = Union( a, b );
+
+        assert( NearlyEqual( combined.min.x, -1.0f ) );
+        assert( NearlyEqual( combined.min.y, -2.0f ) );
+        assert( NearlyEqual( combined.max.x,  4.0f ) );
+        assert( NearlyEqual( combined.max.y,  1.0f ) );
+    }
+
+    // Perimeter
+    {
+        aabb2 box{
+            { -2.0f, -1.0f },
+            {  2.0f,  1.0f }
+        };
+
+        assert( NearlyEqual( Perimeter( box ), 12.0f ) );
+    }
+
+    // AABB containment
+    {
+        aabb2 outer{
+            { -2.0f, -2.0f },
+            {  2.0f,  2.0f }
+        };
+
+        aabb2 inner{
+            { -1.0f, -1.0f },
+            {  1.0f,  1.0f }
+        };
+
+        aabb2 escaped{
+            { -1.0f, -1.0f },
+            {  3.0f,  1.0f }
+        };
+
+        assert( Contains( outer, inner ) );
+        assert( !Contains( outer, escaped ) );
+    }
+
     return 0;
 }
