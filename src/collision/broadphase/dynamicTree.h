@@ -30,40 +30,53 @@ struct TreeNode
     };
 };
 
+struct TreeProxy
+{
+    std::uint64_t userData = 0;
+
+    // 이 proxy의 leaf가 현재 저장된 node index.
+    std::int32_t node = -1;
+
+    // free-list에서 다음 빈 proxy index.
+    std::int32_t next = -1;
+};
+
 class DynamicTree
 {
 public:
     DynamicTree();
 
-    int CreateProxy( const aabb2& aabb, int shapeIndex );
-    void DestroyProxy( int proxyId );
+public:
+	// aabb와 shapeIndex를 가지는 proxy를 생성하고, proxy id를 반환한다.
+    std::int32_t CreateProxy( const aabb2& aabb, std::int32_t shapeIndex );
+    
+	// proxy id에 해당하는 proxy를 제거한다.
+    void DestroyProxy( std::int32_t proxyId );
 
     std::size_t GetProxyCount() const;
-    int GetHeight() const;
+
+    std::int32_t GetHeight() const;
+
     float GetAreaRatio() const;
-    const aabb2& GetProxyAABB( int proxyId ) const;
+
+	// proxy id에 해당하는 proxy의 aabb를 반환한다.
+    const aabb2& GetProxyAABB( std::int32_t proxyId ) const;
 
 private:
-    struct TreeProxy
-    {
-        // 이 proxy의 leaf가 현재 저장된 node index.
-        std::int32_t node = -1;
-
-        // free-list에서 다음 빈 proxy index.
-        std::int32_t next = -1;
-    };
-
     static constexpr std::uint32_t TREE_MOVED_NODE = 1u << 30;
     static constexpr std::uint32_t TREE_LEAF_NODE = 1u << 31;
-    static constexpr std::uint32_t TREE_NODE_INDEX_MASK =
-        ~( TREE_MOVED_NODE | TREE_LEAF_NODE );
-    static constexpr std::uint32_t TREE_EMPTY_NODE =
-        TREE_NODE_INDEX_MASK | TREE_LEAF_NODE;
+    static constexpr std::uint32_t TREE_NODE_INDEX_MASK = ~( TREE_MOVED_NODE | TREE_LEAF_NODE );
+    static constexpr std::uint32_t TREE_EMPTY_NODE = TREE_NODE_INDEX_MASK | TREE_LEAF_NODE;
 
     static constexpr std::int32_t ROOT_NODE = 0;
     static constexpr std::int32_t NULL_INDEX = -1;
     static constexpr std::size_t INITIAL_PROXY_CAPACITY = 16;
 
+private:
+    /*
+	* private로 함수 노출 방지
+    * 객체 사용 없이 static으로 정의
+    */
     static bool IsLeaf( const TreeNode& node );
     static bool IsEmptyNode( const TreeNode& node );
     static std::int32_t GetChildPair( const TreeNode& node );
@@ -76,10 +89,11 @@ private:
         int proxyId,
         int shapeIndex );
 
+private:
     TreeNode MakeInternalNode( std::int32_t childPair ) const;
 
-    int AllocateProxy();
-    void FreeProxy( int proxyId );
+    std::int32_t AllocateProxy();
+    void FreeProxy( std::int32_t proxyId );
 
     std::int32_t AllocateSiblingPair();
     void FreeSiblingPair( std::int32_t pair );

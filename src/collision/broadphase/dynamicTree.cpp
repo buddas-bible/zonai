@@ -28,9 +28,9 @@ DynamicTree::DynamicTree()
     proxyFreeList_ = 0;
 }
 
-int DynamicTree::CreateProxy( const aabb2& aabb, int shapeIndex )
+std::int32_t DynamicTree::CreateProxy( const aabb2& aabb, std::int32_t shapeIndex )
 {
-    const int proxyId = AllocateProxy();
+    const std::int32_t proxyId = AllocateProxy();
     const TreeNode newLeaf =
         MakeLeafNode( aabb, proxyId, shapeIndex );
 
@@ -49,7 +49,7 @@ int DynamicTree::CreateProxy( const aabb2& aabb, int shapeIndex )
     return proxyId;
 }
 
-void DynamicTree::DestroyProxy( int proxyId )
+void DynamicTree::DestroyProxy( std::int32_t proxyId )
 {
     assert( 0 <= proxyId );
     assert( static_cast<std::size_t>( proxyId ) < proxies_.size() );
@@ -67,7 +67,7 @@ std::size_t DynamicTree::GetProxyCount() const
     return proxyCount_;
 }
 
-int DynamicTree::GetHeight() const
+std::int32_t DynamicTree::GetHeight() const
 {
     if( proxyCount_ == 0 || IsEmptyNode( nodes_[ROOT_NODE] ) )
     {
@@ -143,7 +143,7 @@ std::int32_t DynamicTree::GetProxyId( const TreeNode& node )
     );
 }
 
-int DynamicTree::GetNodeHeight( const TreeNode& node )
+std::int32_t DynamicTree::GetNodeHeight( const TreeNode& node )
 {
     return IsLeaf( node ) ? 0 : node.height;
 }
@@ -159,8 +159,8 @@ TreeNode DynamicTree::MakeEmptyNode()
 
 TreeNode DynamicTree::MakeLeafNode(
     const aabb2& aabb,
-    int proxyId,
-    int shapeIndex )
+    std::int32_t proxyId,
+    std::int32_t shapeIndex )
 {
     TreeNode node{};
 
@@ -195,7 +195,7 @@ TreeNode DynamicTree::MakeInternalNode(
     return node;
 }
 
-int DynamicTree::AllocateProxy()
+std::int32_t DynamicTree::AllocateProxy()
 {
     if( proxyFreeList_ == NULL_INDEX )
     {
@@ -222,7 +222,7 @@ int DynamicTree::AllocateProxy()
             static_cast<std::int32_t>( oldCapacity );
     }
 
-    const int proxyId = proxyFreeList_;
+    const std::int32_t proxyId = proxyFreeList_;
     TreeProxy& proxy = proxies_[proxyId];
 
     proxyFreeList_ = proxy.next;
@@ -235,7 +235,7 @@ int DynamicTree::AllocateProxy()
     return proxyId;
 }
 
-void DynamicTree::FreeProxy( int proxyId )
+void DynamicTree::FreeProxy( std::int32_t proxyId )
 {
     TreeProxy& proxy = proxies_[proxyId];
 
