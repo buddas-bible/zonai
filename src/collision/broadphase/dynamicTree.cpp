@@ -208,7 +208,7 @@ float DynamicTree::GetAreaRatio() const
 
 bool DynamicTree::Validate() const
 {
-    // node 배열과 parent 배열의 기본 불변조건부터 확인함.
+    // node 배열과 parent 배열의 기본 불변조건부터 확인
     if( nodes_.size() < 2 ||
         nodes_.size() != parents_.size() ||
         ( nodes_.size() & 1u ) != 0 )
@@ -462,26 +462,28 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
 
     if( IsLeaf( nodes_[nodeIndex] ) )
     {
+		// root가 leaf면 형제가 없음
         return nodeIndex;
     }
 
-    const float areaD = Perimeter( boxD );
+	const float areaD = Perimeter( boxD ); // 새 leaf AABB 둘레
 
-    aabb2 nodeBox = nodes_[nodeIndex].aabb;
-    float areaBase = Perimeter( nodeBox );
-    float directCost = Perimeter( Union( nodeBox, boxD ) );
-    float inheritedCost = 0.0f;
+	aabb2 nodeBox = nodes_[nodeIndex].aabb; // root AABB
+	float areaBase = Perimeter( nodeBox );  // root AABB 둘레
+	float directCost = Perimeter( Union( nodeBox, boxD ) ); // root AABB와 새 leaf AABB를 합친 둘레
+	float inheritedCost = 0.0f; // root부터 내려가며 늘어난 AABB 비용을 누적함.
 
     std::int32_t bestSibling = nodeIndex;
     float bestCost = directCost;
 
-    // root부터 한쪽으로 내려가며 새 leaf와 묶을 비용이 가장 작은 sibling을 찾음.
+    // root부터 한쪽으로 내려가며 새 leaf와 묶을 비용이 가장 작은 형제 노드를 찾음.
     for( ;; )
     {
         const std::int32_t child1 = GetChildPair( nodes_[nodeIndex] );
         const std::int32_t child2 = child1 + 1;
 
-        // 현재 node를 sibling으로 선택했을 때의 비용을 계산함.
+        // 현재 node를 형제 노드로 선택했을 때의 비용을 계산함.
+        // 지금 비용 = union( 현재 노드, newAABB ) + 비용 누적 
         const float currentCost = directCost + inheritedCost;
 
         if( currentCost < bestCost )
@@ -490,30 +492,26 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
             bestCost = currentCost;
         }
 
-        // 현재 node에서 늘어난 AABB 비용은 어느 child로 내려가도 그대로 따라감.
-        inheritedCost += directCost - areaBase;
+        // 새 AABB를 포함하면서 현재 노드의 perimeter가 증가한 만큼 누적 비용에 더함.
+        // 누적 비용 += Perimeter( Union( 현재 노드 AABB, 새 AABB ) ) - Perimeter( 현재 노드 AABB )
+        inheritedCost += ( directCost - areaBase );
 
         const bool leaf1 = IsLeaf( nodes_[child1] );
         const bool leaf2 = IsLeaf( nodes_[child2] );
-
         const aabb2 box1 = nodes_[child1].aabb;
         const aabb2 box2 = nodes_[child2].aabb;
 
         // 각 child로 내려갔을 때 늘어나는 AABB 비용을 계산함.
-        const float directCost1 =
-            Perimeter( Union( box1, boxD ) );
-        const float directCost2 =
-            Perimeter( Union( box2, boxD ) );
+        const float directCost1 = Perimeter( Union( box1, boxD ) );
+        const float directCost2 = Perimeter( Union( box2, boxD ) );
 
         float area1 = 0.0f;
         float area2 = 0.0f;
 
-        float lowerCost1 =
-            std::numeric_limits<float>::max();
-        float lowerCost2 =
-            std::numeric_limits<float>::max();
+        float lowerCost1 = std::numeric_limits<float>::max();
+        float lowerCost2 = std::numeric_limits<float>::max();
 
-        if( leaf1 )
+        if( leaf1 )     // 리프 노드라면 비용 확정
         {
             const float cost1 = directCost1 + inheritedCost;
 
@@ -523,14 +521,14 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
                 bestCost = cost1;
             }
         }
-        else
+        else            // 리프 노드가 아니라면 
         {
             area1 = Perimeter( box1 );
 
             lowerCost1 = inheritedCost + directCost1 + std::min( areaD - area1, 0.0f );
         }
 
-        if( leaf2 )
+        if( leaf2 )     // 리프 노드라면
         {
             const float cost2 = directCost2 + inheritedCost;
 
@@ -540,26 +538,26 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
                 bestCost = cost2;
             }
         }
-        else
+        else            // 리프 노드가 아니라면
         {
             area2 = Perimeter( box2 );
 
             lowerCost2 = inheritedCost + directCost2 + std::min( areaD - area2, 0.0f );
         }
 
-        // 둘 다 leaf면 더 내려갈 곳이 없어서 끝냄.
+        // 둘 다 리프면 더 내려갈 곳이 없어서 끝냄.
         if( leaf1 && leaf2 )
         {
             break;
         }
 
-        // 어느 child로 내려가도 현재 best보다 싸질 수 없으면 가지치기함.
+        // 어느 자식으로 내려가도 현재 best보다 싸질 수 없으면 가지치기함.
         if( bestCost <= lowerCost1 && bestCost <= lowerCost2 )
         {
             break;
         }
 
-        // 더 싸질 가능성이 있는 child 쪽으로만 내려감.
+        // 더 싸질 가능성이 있는 자식 쪽으로만 내려감.
         if( lowerCost1 <= lowerCost2 )
         {
             nodeIndex = child1;
@@ -713,22 +711,17 @@ void DynamicTree::RotateNode( std::int32_t nodeIndex )
     }
 }
 
-void DynamicTree::InsertLeaf(
-    const TreeNode& leaf,
-    bool shouldRotate )
+void DynamicTree::InsertLeaf( const TreeNode& leaf, bool shouldRotate )
 {
-    // 새 leaf와 묶였을 때 비용이 가장 작은 sibling을 찾음.
-    const std::int32_t siblingIndex =
-        FindBestSibling( leaf.aabb );
+    // 새 leaf와 묶였을 때 비용이 가장 작은 형제 노드를 찾음.
+    const std::int32_t siblingIndex = FindBestSibling( leaf.aabb );
 
-    const std::int32_t oldParent =
-        parents_[siblingIndex];
+    const std::int32_t oldParent = parents_[siblingIndex];
 
-    // sibling과 새 leaf를 담을 sibling pair를 확보함.
-    const std::int32_t childPair =
-        AllocateSiblingPair();
+    // 형제 노드와 새 leaf를 담을 sibling pair를 확보함.
+    const std::int32_t childPair = AllocateSiblingPair();
 
-    // sibling 자리는 새 parent로 재사용하고 기존 sibling은 pair로 내려보냄.
+    // 형제 노드 자리는 새 parent로 재사용하고 기존 형제 노드는 pair로 내려보냄.
     nodes_[childPair] = nodes_[siblingIndex];
     nodes_[childPair + 1] = leaf;
 
@@ -761,8 +754,7 @@ void DynamicTree::RemoveLeaf( std::int32_t leafIndex )
     assert( parentIndex != NULL_INDEX );
     assert( !IsLeaf( nodes_[parentIndex] ) );
 
-    const std::int32_t childPair =
-        GetChildPair( nodes_[parentIndex] );
+    const std::int32_t childPair = GetChildPair( nodes_[parentIndex] );
 
     assert(
         leafIndex == childPair ||
@@ -771,8 +763,7 @@ void DynamicTree::RemoveLeaf( std::int32_t leafIndex )
 
     const std::int32_t siblingIndex =
         leafIndex == childPair ?
-            childPair + 1 :
-            childPair;
+            childPair + 1 : childPair;
 
     const std::int32_t grandParent =
         parents_[parentIndex];
