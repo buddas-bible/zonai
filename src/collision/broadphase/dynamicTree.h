@@ -160,7 +160,7 @@ private:
     std::int32_t AllocateSiblingPair();
     void FreeSiblingPair( std::int32_t pair );
 
-	// 최적의 형제 노드를 찾아서 leaf를 붙일 수 있는 internal node를 반환함.
+	// 새 leaf와 묶였을 때 비용이 가장 작은 형제 노드 index를 반환함.
     std::int32_t FindBestSibling( const aabb2& aabb ) const;
     void LinkChildren( std::int32_t nodeIndex );
     void SwapNodes( std::int32_t downIndex, std::int32_t upIndex );

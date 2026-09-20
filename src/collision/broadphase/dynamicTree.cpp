@@ -13,24 +13,24 @@ namespace zonai
 * [Box2D DynamicTree 구조]
 * - DynamicTree는 BroadPhase에서 shape proxy의 AABB를 관리하는 BVH임.
 * - leaf node는 하나의 proxy를 나타내고, internal node는 두 child의 AABB를 합친 범위를 저장함.
-* - 같은 parent를 공유하는 두 child를 sibling이라 하며, 두 sibling은 항상 연속된 index의 pair로 배치함.
+* - 같은 parent를 공유하는 두 child를 형제 노드라고 하며, 두 형제 노드는 항상 연속된 index의 pair로 배치함.
 * - stable proxy id와 tree 안에서 바뀔 수 있는 node index를 분리해서 관리함.
 * - proxy는 AABB 외에도 category bits와 user data를 보관하고, leaf는 proxy id를 통해 이를 참조함.
 *
 * [삽입]
-* - 새 leaf를 넣을 때 SAH를 이용해 함께 묶을 sibling을 찾음.
-* - 기존 sibling과 새 leaf를 child로 가지는 internal node를 만들고 tree에 연결함.
+* - 새 leaf를 넣을 때 SAH를 이용해 함께 묶을 형제 노드를 찾음.
+* - 기존 형제 노드와 새 leaf를 child로 가지는 internal node를 만들고 tree에 연결함.
 * - 삽입 지점부터 root 방향으로 올라가며 AABB, height, moved 상태를 다시 계산함.
 * - 신규 삽입에서는 local rotation을 시도해 AABB perimeter 비용을 줄임.
 *
 * [local rotation]
 * - internal node와 아래 subtree의 연결 관계를 바꿨을 때 비용이 줄어드는지 비교함.
 * - 가능한 swap 중 perimeter를 가장 많이 줄이는 경우에만 rotation을 수행함.
-* - 기존 sibling pair 안에서 node를 재배치하므로 pair의 연속 index 구조는 유지됨.
+* - 기존 형제 노드 pair 안에서 node를 재배치하므로 pair의 연속 index 구조는 유지됨.
 *
 * [삭제]
-* - leaf를 제거하면 같은 parent를 공유하던 sibling을 기존 parent 자리로 올림.
-* - 더 이상 필요하지 않은 sibling pair는 free-list에 반환함.
+* - leaf를 제거하면 같은 parent를 공유하던 형제 노드를 기존 parent 자리로 올림.
+* - 더 이상 필요하지 않은 형제 노드 pair는 free-list에 반환함.
 * - 변경 지점부터 root 방향으로 AABB, height, moved 상태를 다시 계산함.
 *
 * [이동 / AABB 갱신]
@@ -50,11 +50,11 @@ namespace zonai
 * - moved 상태를 clear/gather하는 기능과 stale subtree를 다시 구성하는 Rebuild/Refit 기능을 가짐.
 *
 * [Zonai 현재 구현 상태]
-* - [완료] root 0번, 1번 비움, sibling pair를 연속 index로 배치하는 node 구조.
-* - [완료] stable proxy id와 node index 분리, proxy/sibling pair free-list.
-* - [완료] SAH 기반 sibling 탐색과 leaf 삽입.
+* - [완료] root 0번, 1번 비움, 형제 노드 pair를 연속 index로 배치하는 node 구조.
+* - [완료] stable proxy id와 node index 분리, proxy/형제 노드 pair free-list.
+* - [완료] SAH 기반 형제 노드 탐색과 leaf 삽입.
 * - [완료] local rotation과 ancestor refit.
-* - [완료] leaf 삭제와 남은 sibling 승격.
+* - [완료] leaf 삭제와 남은 형제 노드 승격.
 * - [완료] MoveProxy의 제거 후 재삽입, 재삽입 시 rotation 생략.
 * - [완료] AABB Query와 callback 조기 종료.
 * - [완료] GetProxyAABB, GetProxyCount, GetHeight, GetAreaRatio, Validate.
@@ -69,8 +69,8 @@ namespace zonai
 *
 * [DynamicTree 이후 BroadPhase 목표]
 * - static / kinematic / dynamic body를 별도 DynamicTree로 관리함.
-* - moved 상태가 있는 sibling pair를 모아 변경된 subtree만 pair 생성 대상으로 사용함.
-* - dynamic tree 내부는 sibling subtree끼리 self collision하고, static/kinematic tree와는 cross collision함.
+* - moved 상태가 있는 형제 노드 pair를 모아 변경된 subtree만 pair 생성 대상으로 사용함.
+* - dynamic tree 내부는 형제 subtree끼리 self collision하고, static/kinematic tree와는 cross collision함.
 * - 생성된 candidate pair는 기존 pair와 중복되는지 확인하고 collision filtering을 적용함.
 * - 살아남은 shape pair를 Contact 생성 단계로 넘김.
 */
@@ -78,7 +78,7 @@ namespace zonai
 DynamicTree::DynamicTree()
 {
     // root는 0번을 고정으로 쓰고 1번은 비워둠.
-    // sibling pair는 2,3 / 4,5 / ...처럼 짝수 index부터 연속 배치함.
+    // 같은 parent를 공유하는 두 형제 노드는 2,3 / 4,5 / ...처럼 연속된 pair로 배치함.
     nodes_.resize( 2 );
     parents_.assign( 2, NULL_INDEX );
 
@@ -112,7 +112,7 @@ std::int32_t DynamicTree::CreateProxy( const aabb2& aabb, std::int32_t shapeInde
         return proxyId;
     }
 
-    // 신규 삽입은 SAH로 sibling을 찾고 올라오면서 local rotation도 시도함.
+    // SAH로 새 leaf와 묶을 형제 노드를 찾고, 삽입 후 root까지 올라가며 local rotation을 시도함.
     InsertLeaf( newLeaf, true );
 
     return proxyId;
@@ -126,7 +126,7 @@ void DynamicTree::DestroyProxy( std::int32_t proxyId )
 
     const std::int32_t leafIndex = proxies_[proxyId].node;
 
-    // 먼저 leaf를 tree에서 제거함.
+    // tree에서 leaf를 제거하고 남은 형제 노드를 parent 자리로 올림.
     RemoveLeaf( leafIndex );
 
     // leaf 수명이 끝났으므로 proxy id도 free-list에 반환함.
@@ -347,10 +347,15 @@ TreeNode DynamicTree::MakeInternalNode( std::int32_t childPair ) const
 
     TreeNode node{};
 
+    // internal node AABB = 두 child AABB를 모두 감싸는 AABB.
     node.aabb = Union( child1.aabb, child2.aabb );
+
+    // child 중 하나라도 moved면 parent도 moved 상태로 올림.
     node.flagIndex =
         static_cast<std::uint32_t>( childPair ) |
         ( ( child1.flagIndex | child2.flagIndex ) & TREE_MOVED_NODE );
+
+    // internal node height = 더 깊은 child height + 1.
     node.height = 1 + std::max( GetNodeHeight( child1 ), GetNodeHeight( child2 ) );
 
     return node;
@@ -383,8 +388,10 @@ std::int32_t DynamicTree::AllocateProxy()
     const std::int32_t proxyId = proxyFreeList_;
     TreeProxy& proxy = proxies_[proxyId];
 
+    // free-list의 head를 다음 빈 proxy로 이동함.
     proxyFreeList_ = proxy.next;
 
+    // 꺼낸 proxy는 사용 중 상태로 초기화함.
     proxy.node = NULL_INDEX;
     proxy.next = NULL_INDEX;
 
@@ -409,7 +416,7 @@ void DynamicTree::FreeProxy( std::int32_t proxyId )
 
 std::int32_t DynamicTree::AllocateSiblingPair()
 {
-    // 반납된 sibling pair가 있으면 먼저 재활용함.
+    // 반납된 형제 노드 pair가 있으면 먼저 재활용함.
     if( pairFreeList_ != NULL_INDEX )
     {
         const std::int32_t pair = pairFreeList_;
@@ -442,7 +449,7 @@ std::int32_t DynamicTree::AllocateSiblingPair()
 
 void DynamicTree::FreeSiblingPair( std::int32_t pair )
 {
-    // sibling은 pair 단위로 관리하므로 짝수 index에서 시작해야 함.
+    // 형제 노드는 pair 단위로 관리하므로 시작 index는 항상 짝수여야 함.
     assert( pair >= 2 );
     assert( ( pair & 1 ) == 0 );
 
@@ -579,7 +586,7 @@ void DynamicTree::LinkChildren( std::int32_t nodeIndex )
 {
     const TreeNode& node = nodes_[nodeIndex];
 
-    // leaf면 stable proxy가 현재 node 위치를 가리키게 함.
+    // leaf가 이동한 경우 stable proxy가 현재 node index를 다시 가리키게 함.
     if( IsLeaf( node ) )
     {
         const std::int32_t proxyId = GetProxyId( node );
@@ -587,7 +594,7 @@ void DynamicTree::LinkChildren( std::int32_t nodeIndex )
         return;
     }
 
-    // internal node면 두 child의 parent를 현재 node로 맞춤.
+    // internal node면 두 child가 현재 node를 parent로 가리키게 맞춤.
     const std::int32_t childPair = GetChildPair( node );
 
     parents_[childPair] = nodeIndex;
@@ -596,14 +603,15 @@ void DynamicTree::LinkChildren( std::int32_t nodeIndex )
 
 void DynamicTree::SwapNodes( std::int32_t downIndex, std::int32_t upIndex )
 {
-    // rotation 후보인 child와 반대 subtree의 grandchild를 맞바꿈.
+    // rotation에서 아래로 내릴 child와 위로 올릴 grandchild의 node 내용을 교환함.
     std::swap( nodes_[downIndex], nodes_[upIndex] );
 
-    // 위치가 바뀐 node의 proxy / parent 연결을 다시 맞춤.
+    // node index가 바뀌었으므로 leaf면 proxy, internal이면 child의 parent 연결을 다시 맞춤.
     LinkChildren( downIndex );
     LinkChildren( upIndex );
 
-    // downIndex의 sibling 구성이 바뀌었으므로 AABB와 height를 다시 계산함.
+    // downIndex와 같은 pair의 반대 node는 rotation 후 child 구성이 바뀐 internal node임.
+    // 새 child 기준으로 AABB, moved flag, height를 다시 계산함.
     const std::int32_t siblingIndex = downIndex ^ 1;
 
     assert( !IsLeaf( nodes_[siblingIndex] ) );
@@ -626,16 +634,21 @@ void DynamicTree::RotateNode( std::int32_t nodeIndex )
     const bool leafB = IsLeaf( nodeB );
     const bool leafC = IsLeaf( nodeC );
 
+    // 현재 구조는 A-(B,C). B와 C가 모두 leaf면 바꿔 올릴 grandchild가 없어서 rotation 불가.
     if( leafB && leafC )
     {
         return;
     }
 
+    // bestDown : 아래로 내려갈 child
+    // bestUp   : 위로 올라올 grandchild
+    // bestDelta: rotation 전후 perimeter 차이. 음수일수록 비용이 더 많이 줄어듦.
     std::int32_t bestDown = NULL_INDEX;
     std::int32_t bestUp = NULL_INDEX;
     float bestDelta = 0.0f;
 
     // 가능한 swap 조합 중 perimeter를 가장 많이 줄이는 경우를 찾음.
+    // C가 internal이면 C=(F,G). B <-> F, B <-> G 두 경우를 비교함.
     if( !leafC )
     {
         const std::int32_t indexF = GetChildPair( nodeC );
@@ -643,6 +656,8 @@ void DynamicTree::RotateNode( std::int32_t nodeIndex )
 
         const float areaC = Perimeter( nodeC.aabb );
 
+        // B <-> F 후 C=(B,G)
+        // 비용 변화 = Perimeter( Union( B, G ) ) - 기존 C perimeter
         const float deltaBF =
             Perimeter( Union( nodeB.aabb, nodes_[indexG].aabb ) ) - areaC;
 
@@ -653,6 +668,8 @@ void DynamicTree::RotateNode( std::int32_t nodeIndex )
             bestDelta = deltaBF;
         }
 
+        // B <-> G 후 C=(F,B)
+        // 비용 변화 = Perimeter( Union( F, B ) ) - 기존 C perimeter
         const float deltaBG =
             Perimeter( Union( nodeB.aabb, nodes_[indexF].aabb ) ) - areaC;
 
@@ -664,6 +681,7 @@ void DynamicTree::RotateNode( std::int32_t nodeIndex )
         }
     }
 
+    // B가 internal이면 B=(D,E). C <-> D, C <-> E 두 경우를 비교함.
     if( !leafB )
     {
         const std::int32_t indexD =
@@ -674,6 +692,8 @@ void DynamicTree::RotateNode( std::int32_t nodeIndex )
         const float areaB =
             Perimeter( nodeB.aabb );
 
+        // C <-> D 후 B=(C,E)
+        // 비용 변화 = Perimeter( Union( C, E ) ) - 기존 B perimeter
         const float deltaCD =
             Perimeter(
                 Union(
@@ -689,6 +709,8 @@ void DynamicTree::RotateNode( std::int32_t nodeIndex )
             bestDelta = deltaCD;
         }
 
+        // C <-> E 후 B=(D,C)
+        // 비용 변화 = Perimeter( Union( D, C ) ) - 기존 B perimeter
         const float deltaCE =
             Perimeter(
                 Union(
@@ -704,7 +726,7 @@ void DynamicTree::RotateNode( std::int32_t nodeIndex )
         }
     }
 
-    // perimeter가 실제로 줄어드는 경우에만 swap함.
+    // bestDelta가 0보다 작은 경우만 후보가 선택되므로 실제 perimeter가 줄어드는 rotation만 수행함.
     if( bestDown != NULL_INDEX )
     {
         SwapNodes( bestDown, bestUp );
@@ -716,9 +738,10 @@ void DynamicTree::InsertLeaf( const TreeNode& leaf, bool shouldRotate )
     // 새 leaf와 묶였을 때 비용이 가장 작은 형제 노드를 찾음.
     const std::int32_t siblingIndex = FindBestSibling( leaf.aabb );
 
+    // 형제 노드 자리를 새 parent로 바꿀 예정이므로 기존 parent를 보관함.
     const std::int32_t oldParent = parents_[siblingIndex];
 
-    // 형제 노드와 새 leaf를 담을 sibling pair를 확보함.
+    // 형제 노드와 새 leaf를 담을 pair를 확보함.
     const std::int32_t childPair = AllocateSiblingPair();
 
     // 형제 노드 자리는 새 parent로 재사용하고 기존 형제 노드는 pair로 내려보냄.
@@ -728,10 +751,11 @@ void DynamicTree::InsertLeaf( const TreeNode& leaf, bool shouldRotate )
     parents_[childPair] = siblingIndex;
     parents_[childPair + 1] = siblingIndex;
 
+    // pair로 이동한 형제 노드와 새 leaf의 proxy / child 연결을 새 index에 맞춤.
     LinkChildren( childPair );
     LinkChildren( childPair + 1 );
 
-    // 기존 sibling 자리를 두 child를 감싸는 internal node로 바꿈.
+    // 기존 형제 노드 자리를 두 child를 감싸는 internal node로 바꿈.
     nodes_[siblingIndex] = MakeInternalNode( childPair );
     parents_[siblingIndex] = oldParent;
 
@@ -761,6 +785,7 @@ void DynamicTree::RemoveLeaf( std::int32_t leafIndex )
         leafIndex == childPair + 1
     );
 
+    // 같은 pair의 반대 node가 삭제 후 살아남을 형제 노드임.
     const std::int32_t siblingIndex =
         leafIndex == childPair ?
             childPair + 1 : childPair;
@@ -768,14 +793,14 @@ void DynamicTree::RemoveLeaf( std::int32_t leafIndex )
     const std::int32_t grandParent =
         parents_[parentIndex];
 
-    // 살아남은 sibling을 제거되는 parent 자리로 올림.
+    // 살아남은 형제 노드를 제거되는 parent 자리로 올림.
     nodes_[parentIndex] = nodes_[siblingIndex];
     parents_[parentIndex] = grandParent;
 
     // 올라온 node 종류에 맞춰 proxy 또는 child parent 연결을 다시 맞춤.
     LinkChildren( parentIndex );
 
-    // 비게 된 sibling pair를 free-list에 반환함.
+    // parent가 사라지면서 더 이상 필요하지 않은 child pair를 free-list에 반환함.
     FreeSiblingPair( childPair );
 
     // 구조가 바뀐 지점부터 root까지 AABB와 height를 다시 계산함.
@@ -800,6 +825,7 @@ void DynamicTree::RefitAncestors(
                 RotateNode( nodeIndex );
             }
 
+            // rotation으로 child 구성이 바뀔 수 있으므로 child pair는 rotation 뒤 다시 읽음.
             // 현재 child 기준으로 AABB, moved flag, height를 다시 계산함.
             const std::int32_t childPair =
                 GetChildPair( nodes_[nodeIndex] );
