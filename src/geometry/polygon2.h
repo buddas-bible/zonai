@@ -2,6 +2,8 @@
 
 #include <array>
 #include <span>
+#include <cstdint>
+#include <cstddef>
 
 #include "math/vec2.h"
 #include "collision/aabb2.h"

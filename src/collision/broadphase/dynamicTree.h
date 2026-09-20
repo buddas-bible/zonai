@@ -11,7 +11,7 @@ namespace zonai
 
 struct TreeNode
 {
-    // 이 노드 아래의 모든 leaf를 감싸는 경계 상자.
+    // 이 노드 아래의 모든 leaf를 감싸는 aabb.
     aabb2 aabb{};
 
     // bit 31 : leaf flag
@@ -81,13 +81,13 @@ private:
     static bool IsEmptyNode( const TreeNode& node );
     static std::int32_t GetChildPair( const TreeNode& node );
     static std::int32_t GetProxyId( const TreeNode& node );
-    static int GetNodeHeight( const TreeNode& node );
+    static std::int32_t GetNodeHeight( const TreeNode& node );
 
     static TreeNode MakeEmptyNode();
     static TreeNode MakeLeafNode(
         const aabb2& aabb,
-        int proxyId,
-        int shapeIndex );
+        std::int32_t proxyId,
+        std::int32_t shapeIndex );
 
 private:
     TreeNode MakeInternalNode( std::int32_t childPair ) const;
