@@ -53,6 +53,9 @@ public:
 	// proxy id에 해당하는 proxy를 제거한다.
     void DestroyProxy( std::int32_t proxyId );
 
+    // proxy id는 유지한 채 새 aabb 위치로 leaf를 다시 삽입한다.
+    void MoveProxy( std::int32_t proxyId, const aabb2& aabb );
+
     std::size_t GetProxyCount() const;
 
     std::int32_t GetHeight() const;

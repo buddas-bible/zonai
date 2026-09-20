@@ -62,6 +62,35 @@ void DynamicTree::DestroyProxy( std::int32_t proxyId )
     FreeProxy( proxyId );
 }
 
+void DynamicTree::MoveProxy(
+    std::int32_t proxyId,
+    const aabb2& aabb )
+{
+    assert( 0 <= proxyId );
+    assert( static_cast<std::size_t>( proxyId ) < proxies_.size() );
+    assert( proxies_[proxyId].node != NULL_INDEX );
+
+    const std::int32_t leafIndex =
+        proxies_[proxyId].node;
+    const std::int32_t shapeIndex =
+        nodes_[leafIndex].shapeIndex;
+
+    RemoveLeaf( leafIndex );
+
+    const TreeNode newLeaf =
+        MakeLeafNode( aabb, proxyId, shapeIndex );
+
+    if( proxyCount_ == 1 )
+    {
+        nodes_[ROOT_NODE] = newLeaf;
+        parents_[ROOT_NODE] = NULL_INDEX;
+        proxies_[proxyId].node = ROOT_NODE;
+        return;
+    }
+
+    InsertLeaf( newLeaf );
+}
+
 std::size_t DynamicTree::GetProxyCount() const
 {
     return proxyCount_;
@@ -107,7 +136,7 @@ float DynamicTree::GetAreaRatio() const
     return totalPerimeter / rootPerimeter;
 }
 
-const aabb2& DynamicTree::GetProxyAABB( int proxyId ) const
+const aabb2& DynamicTree::GetProxyAABB( std::int32_t proxyId ) const
 {
     assert( 0 <= proxyId );
     assert( static_cast<std::size_t>( proxyId ) < proxies_.size() );
