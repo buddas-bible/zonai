@@ -76,9 +76,11 @@ public:
             return;
         }
 
+        // 재귀 대신 고정 크기 stack으로 tree를 순회함.
         std::array<std::int32_t, TREE_STACK_SIZE> stack{};
         std::size_t stackCount = 0;
 
+        // root가 internal이면 첫 child pair부터 시작함.
         stack[stackCount++] =
             IsLeaf( nodes_[ROOT_NODE] ) ?
                 ROOT_NODE :
@@ -94,12 +96,14 @@ public:
                 const std::int32_t nodeIndex = pair + i;
                 const TreeNode& node = nodes_[nodeIndex];
 
+                // query AABB와 겹치지 않는 subtree는 더 내려가지 않고 버림.
                 if( IsEmptyNode( node ) ||
                     !Overlaps( aabb, node.aabb ) )
                 {
                     continue;
                 }
 
+                // leaf까지 내려왔으면 proxy id를 사용자 callback에 전달함.
                 if( IsLeaf( node ) )
                 {
                     const std::int32_t proxyId =
@@ -113,6 +117,7 @@ public:
                     continue;
                 }
 
+                // internal node면 child pair를 stack에 넣고 다음 순회에서 검사함.
                 assert( stackCount < TREE_STACK_SIZE );
                 stack[stackCount++] =
                     GetChildPair( node );
