@@ -67,6 +67,60 @@ public:
 	// proxy id에 해당하는 proxy의 aabb를 반환한다.
     const aabb2& GetProxyAABB( std::int32_t proxyId ) const;
 
+    // 주어진 aabb와 겹치는 모든 proxy를 callback으로 전달한다.
+    // callback이 false를 반환하면 query를 즉시 종료한다.
+    template <typename Callback>
+    void Query( const aabb2& aabb, Callback&& callback ) const
+    {
+        if( proxyCount_ == 0 )
+        {
+            return;
+        }
+
+        std::array<std::int32_t, TREE_STACK_SIZE> stack{};
+        std::size_t stackCount = 0;
+
+        stack[stackCount++] =
+            IsLeaf( nodes_[ROOT_NODE] ) ?
+                ROOT_NODE :
+                GetChildPair( nodes_[ROOT_NODE] );
+
+        while( stackCount > 0 )
+        {
+            const std::int32_t pair =
+                stack[--stackCount];
+
+            for( std::int32_t i = 0; i < 2; ++i )
+            {
+                const std::int32_t nodeIndex = pair + i;
+                const TreeNode& node = nodes_[nodeIndex];
+
+                if( IsEmptyNode( node ) ||
+                    !Overlaps( aabb, node.aabb ) )
+                {
+                    continue;
+                }
+
+                if( IsLeaf( node ) )
+                {
+                    const std::int32_t proxyId =
+                        GetProxyId( node );
+
+                    if( !callback( proxyId ) )
+                    {
+                        return;
+                    }
+
+                    continue;
+                }
+
+                assert( stackCount < TREE_STACK_SIZE );
+                stack[stackCount++] =
+                    GetChildPair( node );
+            }
+        }
+    }
+
 private:
     static constexpr std::uint32_t TREE_MOVED_NODE = 1u << 30;
     static constexpr std::uint32_t TREE_LEAF_NODE = 1u << 31;
