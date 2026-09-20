@@ -127,7 +127,7 @@ void AddContactPoint(
 {
     // Zonai는 아직 speculative contact를 사용하지 않는다.
     if( separation > FLT_EPSILON ||
-        manifold.pointCount >= MAX_LOCAL_MANIFOLD_POINTS )
+        manifold.pointCount >= MAX_MANIFOLD_POINTS )
     {
         return;
     }

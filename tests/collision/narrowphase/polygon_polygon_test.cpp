@@ -144,7 +144,7 @@ int main()
             CollidePolygons( a, b, transformB );
 
         assert( manifold.pointCount > 0 );
-        assert( manifold.pointCount <= MAX_LOCAL_MANIFOLD_POINTS );
+        assert( manifold.pointCount <= MAX_MANIFOLD_POINTS );
         assert( NearlyEqual( Length( manifold.normal ), 1.0f, 1e-4f ) );
 
         for( std::size_t i = 0; i < manifold.pointCount; ++i )
