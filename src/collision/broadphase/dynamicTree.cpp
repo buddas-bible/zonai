@@ -7,6 +7,29 @@
 namespace zonai
 {
 
+/*
+* DynamicTree 동작 서술
+* 
+* 노드 삽입
+* AABB를 가진 leaf node를 삽입하면, 기존 tree에서 sibling을 SAH로 찾아서 internal node를 만들고 연결함.
+* 
+* 노드 조정
+* internal node의 child pair가 바뀌면, AABB를 다시 계산하고, 필요하면 local rotation을 시도함.
+* 
+* local rotation
+* 중간 노드의 child pair를 바꾸는 rotation을 시도함.
+* rotation은 항상 child pair를 바꾸는 것이므로, sibling pair의 index는 연속된 index로 유지됨.
+* 
+* 노드 삭제
+* 리프 노드를 삭제하면 트리에서 제거하고, parent internal node가 자식을 모두 잃으면 그 부모 노드도 제거함.
+* 
+* 노드 이동
+* 리프 노드를 이동하면 트리에서 제거하고, 새 AABB로 다시 삽입함.
+*/
+
+// sibling이란?
+// internal node의 두 child를 sibling pair라고 부름. sibling pair는 항상 연속된 index로 배치함.
+
 DynamicTree::DynamicTree()
 {
     // root는 0번을 고정으로 쓰고 1번은 비워둠.
@@ -33,7 +56,7 @@ std::int32_t DynamicTree::CreateProxy( const aabb2& aabb, std::int32_t shapeInde
     // 사용할 proxy id를 free-list에서 확보함.
     const std::int32_t proxyId = AllocateProxy();
     const TreeNode newLeaf = MakeLeafNode( aabb, proxyId, shapeIndex );
-
+    
     // 첫 proxy면 internal node 없이 root에 바로 넣음.
     if( proxyCount_ == 1 )
     {

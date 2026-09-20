@@ -114,7 +114,6 @@ public:
                     const std::int32_t proxyId = GetProxyId( node );
 
 					bool proceed = callback( proxyId );
-
                     if( proceed == false )
                     {
                         return;
