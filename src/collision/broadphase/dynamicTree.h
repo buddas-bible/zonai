@@ -13,7 +13,7 @@ namespace zonai
 
 struct TreeNode
 {
-    // 아래에 있는 모든 leaf를 감싸는 AABB.
+    // 이 node 아래 모든 leaf를 감싸는 AABB.
     aabb2 aabb{};
 
     // bit 31 : leaf flag
@@ -24,7 +24,7 @@ struct TreeNode
 
     union
     {
-        // internal node 높이, leaf는 0.
+        // internal node의 높이. leaf는 0.
         std::int32_t height = 0;
 
         // leaf가 가리키는 shape index.
@@ -36,10 +36,10 @@ struct TreeProxy
 {
     std::uint64_t userData = 0;
 
-    // 이 proxy의 leaf가 들어있는 node index.
+    // stable proxy가 현재 가리키는 leaf node index.
     std::int32_t node = -1;
 
-    // free-list의 다음 빈 proxy index.
+    // free-list에서 다음 빈 proxy index.
     std::int32_t next = -1;
 };
 
@@ -63,11 +63,11 @@ public:
 
     bool Validate() const;
 
-    // proxy가 가지고 있는 AABB를 가져옴.
+    // proxy가 가리키는 leaf의 AABB를 반환함.
     const aabb2& GetProxyAABB( std::int32_t proxyId ) const;
 
-    // AABB가 겹치는 proxy를 찾아서 callback으로 넘김.
-    // callback이 false면 바로 끝냄.
+    // AABB가 겹치는 proxy를 찾아 callback으로 전달함.
+    // callback이 false를 반환하면 즉시 순회를 끝냄.
     template <typename Callback>
     void Query( const aabb2& aabb, Callback&& callback ) const
     {
@@ -76,11 +76,11 @@ public:
             return;
         }
 
-        // 재귀 대신 고정 크기 stack으로 tree를 돎.
+        // Query 중 heap allocation을 피하려고 고정 크기 stack으로 순회함.
         std::array<std::int32_t, TREE_STACK_SIZE> stack{};
         std::size_t stackCount = 0;
 
-        // root가 internal이면 root의 child pair부터 시작함.
+        // root가 internal이면 첫 child pair부터, leaf면 root부터 시작함.
         stack[stackCount++] =
             IsLeaf( nodes_[ROOT_NODE] ) ?
                 ROOT_NODE :
@@ -96,14 +96,14 @@ public:
                 const std::int32_t nodeIndex = pair + i;
                 const TreeNode& node = nodes_[nodeIndex];
 
-                // AABB가 안 겹치면 그 아래는 볼 필요 없으니 넘김.
+                // AABB가 겹치지 않으면 subtree 전체를 가지치기함.
                 if( IsEmptyNode( node ) ||
                     !Overlaps( aabb, node.aabb ) )
                 {
                     continue;
                 }
 
-                // leaf를 찾았으면 proxy id를 callback에 넘김.
+                // leaf를 찾으면 stable proxy id를 callback에 넘김.
                 if( IsLeaf( node ) )
                 {
                     const std::int32_t proxyId =
@@ -117,7 +117,7 @@ public:
                     continue;
                 }
 
-                // internal node면 child pair를 stack에 넣고 계속 탐색함.
+                // internal node면 child pair를 stack에 넣어 계속 내려감.
                 assert( stackCount < TREE_STACK_SIZE );
                 stack[stackCount++] =
                     GetChildPair( node );
@@ -137,7 +137,7 @@ private:
     static constexpr std::size_t TREE_STACK_SIZE = 512;
 
 private:
-    // node 상태 체크
+    // flagIndex에서 node 상태와 index를 읽는 helper.
     static bool IsLeaf( const TreeNode& node );
     static bool IsEmptyNode( const TreeNode& node );
     static std::int32_t GetChildPair( const TreeNode& node );
