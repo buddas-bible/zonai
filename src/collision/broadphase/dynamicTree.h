@@ -64,6 +64,8 @@ public:
 
     float GetAreaRatio() const;
 
+    bool Validate() const;
+
 	// proxy id에 해당하는 proxy의 aabb를 반환한다.
     const aabb2& GetProxyAABB( std::int32_t proxyId ) const;
 
@@ -160,9 +162,17 @@ private:
 
     std::int32_t FindBestSibling( const aabb2& aabb ) const;
     void LinkChildren( std::int32_t nodeIndex );
-    void InsertLeaf( const TreeNode& leaf );
+    void SwapNodes( std::int32_t downIndex, std::int32_t upIndex );
+    void RotateNode( std::int32_t nodeIndex );
+
+    void InsertLeaf( const TreeNode& leaf, bool shouldRotate );
     void RemoveLeaf( std::int32_t leafIndex );
-    void RefitAncestors( std::int32_t nodeIndex );
+    void RefitAncestors( std::int32_t nodeIndex, bool shouldRotate );
+
+    bool ValidateSubtree(
+        std::int32_t nodeIndex,
+        std::int32_t& height,
+        std::size_t& leafCount ) const;
 
     std::vector<TreeNode> nodes_{};
     std::vector<std::int32_t> parents_{};

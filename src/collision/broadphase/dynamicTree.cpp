@@ -44,7 +44,7 @@ std::int32_t DynamicTree::CreateProxy( const aabb2& aabb, std::int32_t shapeInde
         return proxyId;
     }
 
-    InsertLeaf( newLeaf );
+    InsertLeaf( newLeaf, true );
 
     return proxyId;
 }
@@ -88,7 +88,7 @@ void DynamicTree::MoveProxy(
         return;
     }
 
-    InsertLeaf( newLeaf );
+    InsertLeaf( newLeaf, false );
 }
 
 std::size_t DynamicTree::GetProxyCount() const
@@ -134,6 +134,80 @@ float DynamicTree::GetAreaRatio() const
     }
 
     return totalPerimeter / rootPerimeter;
+}
+
+bool DynamicTree::Validate() const
+{
+    if( nodes_.size() < 2 ||
+        nodes_.size() != parents_.size() ||
+        ( nodes_.size() & 1u ) != 0 )
+    {
+        return false;
+    }
+
+    if( parents_[ROOT_NODE] != NULL_INDEX ||
+        !IsEmptyNode( nodes_[ROOT_NODE + 1] ) )
+    {
+        return false;
+    }
+
+    if( proxyCount_ == 0 )
+    {
+        return IsEmptyNode( nodes_[ROOT_NODE] );
+    }
+
+    if( IsEmptyNode( nodes_[ROOT_NODE] ) )
+    {
+        return false;
+    }
+
+    std::int32_t height = 0;
+    std::size_t leafCount = 0;
+
+    if( !ValidateSubtree( ROOT_NODE, height, leafCount ) )
+    {
+        return false;
+    }
+
+    if( leafCount != proxyCount_ ||
+        height != GetHeight() )
+    {
+        return false;
+    }
+
+    std::size_t liveProxyCount = 0;
+
+    for( std::size_t proxyId = 0;
+         proxyId < proxies_.size();
+         ++proxyId )
+    {
+        const std::int32_t nodeIndex =
+            proxies_[proxyId].node;
+
+        if( nodeIndex == NULL_INDEX )
+        {
+            continue;
+        }
+
+        if( nodeIndex < 0 ||
+            static_cast<std::size_t>( nodeIndex ) >= nodes_.size() )
+        {
+            return false;
+        }
+
+        const TreeNode& node = nodes_[nodeIndex];
+
+        if( IsEmptyNode( node ) ||
+            !IsLeaf( node ) ||
+            GetProxyId( node ) != static_cast<std::int32_t>( proxyId ) )
+        {
+            return false;
+        }
+
+        ++liveProxyCount;
+    }
+
+    return liveProxyCount == proxyCount_;
 }
 
 const aabb2& DynamicTree::GetProxyAABB( std::int32_t proxyId ) const
@@ -470,7 +544,146 @@ void DynamicTree::LinkChildren( std::int32_t nodeIndex )
     parents_[childPair + 1] = nodeIndex;
 }
 
-void DynamicTree::InsertLeaf( const TreeNode& leaf )
+void DynamicTree::SwapNodes(
+    std::int32_t downIndex,
+    std::int32_t upIndex )
+{
+    std::swap(
+        nodes_[downIndex],
+        nodes_[upIndex]
+    );
+
+    LinkChildren( downIndex );
+    LinkChildren( upIndex );
+
+    const std::int32_t siblingIndex =
+        downIndex ^ 1;
+
+    assert( !IsLeaf( nodes_[siblingIndex] ) );
+
+    nodes_[siblingIndex] =
+        MakeInternalNode(
+            GetChildPair( nodes_[siblingIndex] )
+        );
+}
+
+void DynamicTree::RotateNode(
+    std::int32_t nodeIndex )
+{
+    const TreeNode& nodeA = nodes_[nodeIndex];
+
+    assert( !IsLeaf( nodeA ) );
+
+    const std::int32_t indexB =
+        GetChildPair( nodeA );
+    const std::int32_t indexC =
+        indexB + 1;
+
+    const TreeNode& nodeB = nodes_[indexB];
+    const TreeNode& nodeC = nodes_[indexC];
+
+    const bool leafB = IsLeaf( nodeB );
+    const bool leafC = IsLeaf( nodeC );
+
+    if( leafB && leafC )
+    {
+        return;
+    }
+
+    std::int32_t bestDown = NULL_INDEX;
+    std::int32_t bestUp = NULL_INDEX;
+    float bestDelta = 0.0f;
+
+    if( !leafC )
+    {
+        const std::int32_t indexF =
+            GetChildPair( nodeC );
+        const std::int32_t indexG =
+            indexF + 1;
+
+        const float areaC =
+            Perimeter( nodeC.aabb );
+
+        const float deltaBF =
+            Perimeter(
+                Union(
+                    nodeB.aabb,
+                    nodes_[indexG].aabb
+                )
+            ) - areaC;
+
+        if( deltaBF < bestDelta )
+        {
+            bestDown = indexB;
+            bestUp = indexF;
+            bestDelta = deltaBF;
+        }
+
+        const float deltaBG =
+            Perimeter(
+                Union(
+                    nodeB.aabb,
+                    nodes_[indexF].aabb
+                )
+            ) - areaC;
+
+        if( deltaBG < bestDelta )
+        {
+            bestDown = indexB;
+            bestUp = indexG;
+            bestDelta = deltaBG;
+        }
+    }
+
+    if( !leafB )
+    {
+        const std::int32_t indexD =
+            GetChildPair( nodeB );
+        const std::int32_t indexE =
+            indexD + 1;
+
+        const float areaB =
+            Perimeter( nodeB.aabb );
+
+        const float deltaCD =
+            Perimeter(
+                Union(
+                    nodeC.aabb,
+                    nodes_[indexE].aabb
+                )
+            ) - areaB;
+
+        if( deltaCD < bestDelta )
+        {
+            bestDown = indexC;
+            bestUp = indexD;
+            bestDelta = deltaCD;
+        }
+
+        const float deltaCE =
+            Perimeter(
+                Union(
+                    nodeC.aabb,
+                    nodes_[indexD].aabb
+                )
+            ) - areaB;
+
+        if( deltaCE < bestDelta )
+        {
+            bestDown = indexC;
+            bestUp = indexE;
+        }
+    }
+
+    if( bestDown != NULL_INDEX )
+    {
+        SwapNodes( bestDown, bestUp );
+    }
+}
+
+void DynamicTree::InsertLeaf(
+    const TreeNode& leaf,
+    bool shouldRotate )
 {
     const std::int32_t siblingIndex =
         FindBestSibling( leaf.aabb );
@@ -496,7 +709,10 @@ void DynamicTree::InsertLeaf( const TreeNode& leaf )
         MakeInternalNode( childPair );
     parents_[siblingIndex] = oldParent;
 
-    RefitAncestors( siblingIndex );
+    RefitAncestors(
+        siblingIndex,
+        shouldRotate
+    );
 }
 
 void DynamicTree::RemoveLeaf(
@@ -541,26 +757,135 @@ void DynamicTree::RemoveLeaf(
 
     FreeSiblingPair( childPair );
 
-    RefitAncestors( parentIndex );
+    RefitAncestors(
+        parentIndex,
+        false
+    );
 }
 
 void DynamicTree::RefitAncestors(
-    std::int32_t nodeIndex )
+    std::int32_t nodeIndex,
+    bool shouldRotate )
 {
     while( nodeIndex != NULL_INDEX )
     {
-        TreeNode& node = nodes_[nodeIndex];
-
-        if( !IsLeaf( node ) )
+        if( !IsLeaf( nodes_[nodeIndex] ) )
         {
-            const std::int32_t childPair =
-                GetChildPair( node );
+            if( shouldRotate )
+            {
+                RotateNode( nodeIndex );
+            }
 
-            node = MakeInternalNode( childPair );
+            const std::int32_t childPair =
+                GetChildPair( nodes_[nodeIndex] );
+
+            nodes_[nodeIndex] =
+                MakeInternalNode( childPair );
         }
 
         nodeIndex = parents_[nodeIndex];
     }
+}
+
+bool DynamicTree::ValidateSubtree(
+    std::int32_t nodeIndex,
+    std::int32_t& height,
+    std::size_t& leafCount ) const
+{
+    if( nodeIndex < 0 ||
+        static_cast<std::size_t>( nodeIndex ) >= nodes_.size() )
+    {
+        return false;
+    }
+
+    const TreeNode& node = nodes_[nodeIndex];
+
+    if( IsEmptyNode( node ) )
+    {
+        return false;
+    }
+
+    if( IsLeaf( node ) )
+    {
+        const std::int32_t proxyId =
+            GetProxyId( node );
+
+        if( proxyId < 0 ||
+            static_cast<std::size_t>( proxyId ) >= proxies_.size() ||
+            proxies_[proxyId].node != nodeIndex )
+        {
+            return false;
+        }
+
+        height = 0;
+        ++leafCount;
+        return true;
+    }
+
+    const std::int32_t childPair =
+        GetChildPair( node );
+
+    if( childPair < 2 ||
+        ( childPair & 1 ) != 0 ||
+        static_cast<std::size_t>( childPair + 1 ) >= nodes_.size() )
+    {
+        return false;
+    }
+
+    if( parents_[childPair] != nodeIndex ||
+        parents_[childPair + 1] != nodeIndex )
+    {
+        return false;
+    }
+
+    const TreeNode& child1 = nodes_[childPair];
+    const TreeNode& child2 = nodes_[childPair + 1];
+
+    if( IsEmptyNode( child1 ) ||
+        IsEmptyNode( child2 ) )
+    {
+        return false;
+    }
+
+    const aabb2 combined =
+        Union( child1.aabb, child2.aabb );
+
+    if( !ContainsAABB( node.aabb, combined ) ||
+        !ContainsAABB( combined, node.aabb ) )
+    {
+        return false;
+    }
+
+    const bool moved =
+        ( node.flagIndex & TREE_MOVED_NODE ) != 0;
+    const bool childMoved =
+        ( ( child1.flagIndex | child2.flagIndex ) &
+          TREE_MOVED_NODE ) != 0;
+
+    if( moved != childMoved )
+    {
+        return false;
+    }
+
+    std::int32_t height1 = 0;
+    std::int32_t height2 = 0;
+
+    if( !ValidateSubtree(
+            childPair,
+            height1,
+            leafCount ) ||
+        !ValidateSubtree(
+            childPair + 1,
+            height2,
+            leafCount ) )
+    {
+        return false;
+    }
+
+    height =
+        1 + std::max( height1, height2 );
+
+    return node.height == height;
 }
 
 } // namespace zonai
