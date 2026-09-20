@@ -49,13 +49,10 @@ public:
     DynamicTree();
 
 public:
-	// aabb와 shapeIndex를 가지는 proxy를 생성하고, proxy id를 반환한다.
     std::int32_t CreateProxy( const aabb2& aabb, std::int32_t shapeIndex );
     
-	// proxy id에 해당하는 proxy를 제거한다.
     void DestroyProxy( std::int32_t proxyId );
 
-    // proxy id는 유지한 채 새 aabb 위치로 leaf를 다시 삽입한다.
     void MoveProxy( std::int32_t proxyId, const aabb2& aabb );
 
     std::size_t GetProxyCount() const;
@@ -139,7 +136,11 @@ private:
 	* private로 함수 노출 방지
     * 객체 사용 없이 static으로 정의
     */
+
+	// node가 leaf인지 확인
     static bool IsLeaf( const TreeNode& node );
+
+    // node가 empty인지 확인
     static bool IsEmptyNode( const TreeNode& node );
     static std::int32_t GetChildPair( const TreeNode& node );
     static std::int32_t GetProxyId( const TreeNode& node );
@@ -169,10 +170,7 @@ private:
     void RemoveLeaf( std::int32_t leafIndex );
     void RefitAncestors( std::int32_t nodeIndex, bool shouldRotate );
 
-    bool ValidateSubtree(
-        std::int32_t nodeIndex,
-        std::int32_t& height,
-        std::size_t& leafCount ) const;
+    bool ValidateSubtree( std::int32_t nodeIndex, std::int32_t& height, std::size_t& leafCount ) const;
 
     std::vector<TreeNode> nodes_{};
     std::vector<std::int32_t> parents_{};

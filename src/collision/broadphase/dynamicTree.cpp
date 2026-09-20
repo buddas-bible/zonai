@@ -31,8 +31,7 @@ DynamicTree::DynamicTree()
 std::int32_t DynamicTree::CreateProxy( const aabb2& aabb, std::int32_t shapeIndex )
 {
     const std::int32_t proxyId = AllocateProxy();
-    const TreeNode newLeaf =
-        MakeLeafNode( aabb, proxyId, shapeIndex );
+    const TreeNode newLeaf = MakeLeafNode( aabb, proxyId, shapeIndex );
 
     if( proxyCount_ == 1 )
     {
@@ -55,30 +54,24 @@ void DynamicTree::DestroyProxy( std::int32_t proxyId )
     assert( static_cast<std::size_t>( proxyId ) < proxies_.size() );
     assert( proxies_[proxyId].node != NULL_INDEX );
 
-    const std::int32_t leafIndex =
-        proxies_[proxyId].node;
+    const std::int32_t leafIndex = proxies_[proxyId].node;
 
     RemoveLeaf( leafIndex );
     FreeProxy( proxyId );
 }
 
-void DynamicTree::MoveProxy(
-    std::int32_t proxyId,
-    const aabb2& aabb )
+void DynamicTree::MoveProxy( std::int32_t proxyId, const aabb2& aabb )
 {
     assert( 0 <= proxyId );
     assert( static_cast<std::size_t>( proxyId ) < proxies_.size() );
     assert( proxies_[proxyId].node != NULL_INDEX );
 
-    const std::int32_t leafIndex =
-        proxies_[proxyId].node;
-    const std::int32_t shapeIndex =
-        nodes_[leafIndex].shapeIndex;
+    const std::int32_t leafIndex = proxies_[proxyId].node;
+    const std::int32_t shapeIndex = nodes_[leafIndex].shapeIndex;
 
     RemoveLeaf( leafIndex );
 
-    const TreeNode newLeaf =
-        MakeLeafNode( aabb, proxyId, shapeIndex );
+    const TreeNode newLeaf = MakeLeafNode( aabb, proxyId, shapeIndex );
 
     if( proxyCount_ == 1 )
     {
@@ -113,8 +106,7 @@ float DynamicTree::GetAreaRatio() const
         return 0.0f;
     }
 
-    const float rootPerimeter =
-        Perimeter( nodes_[ROOT_NODE].aabb );
+    const float rootPerimeter = Perimeter( nodes_[ROOT_NODE].aabb );
 
     if( rootPerimeter <= 0.0f )
     {
@@ -139,7 +131,7 @@ float DynamicTree::GetAreaRatio() const
 bool DynamicTree::Validate() const
 {
     if( nodes_.size() < 2 ||
-        nodes_.size() != parents_.size() ||
+        nodes_.size() != parents_.size() ||     // 
         ( nodes_.size() & 1u ) != 0 )
     {
         return false;
@@ -148,16 +140,19 @@ bool DynamicTree::Validate() const
     if( parents_[ROOT_NODE] != NULL_INDEX ||
         !IsEmptyNode( nodes_[ROOT_NODE + 1] ) )
     {
+		// root의 parent는 NULL_INDEX여야 하고, root 다음 노드는 비어 있어야 한다.
         return false;
     }
 
     if( proxyCount_ == 0 )
     {
+		// proxyCount_ == 0이면 root가 비어 있어야 한다.
         return IsEmptyNode( nodes_[ROOT_NODE] );
     }
 
     if( IsEmptyNode( nodes_[ROOT_NODE] ) )
     {
+		// proxyCount_ > 0인데 root가 비어있으면 안 된다.
         return false;
     }
 
@@ -169,37 +164,30 @@ bool DynamicTree::Validate() const
         return false;
     }
 
-    if( leafCount != proxyCount_ ||
-        height != GetHeight() )
+    if( leafCount != proxyCount_ || height != GetHeight() )
     {
         return false;
     }
 
     std::size_t liveProxyCount = 0;
 
-    for( std::size_t proxyId = 0;
-         proxyId < proxies_.size();
-         ++proxyId )
+    for( std::size_t proxyId = 0; proxyId < proxies_.size(); ++proxyId )
     {
-        const std::int32_t nodeIndex =
-            proxies_[proxyId].node;
+        const std::int32_t nodeIndex = proxies_[proxyId].node;
 
         if( nodeIndex == NULL_INDEX )
         {
             continue;
         }
 
-        if( nodeIndex < 0 ||
-            static_cast<std::size_t>( nodeIndex ) >= nodes_.size() )
+        if( nodeIndex < 0 || static_cast<std::size_t>( nodeIndex ) >= nodes_.size() )
         {
             return false;
         }
 
         const TreeNode& node = nodes_[nodeIndex];
 
-        if( IsEmptyNode( node ) ||
-            !IsLeaf( node ) ||
-            GetProxyId( node ) != static_cast<std::int32_t>( proxyId ) )
+        if( IsEmptyNode( node ) || !IsLeaf( node ) || GetProxyId( node ) != static_cast<std::int32_t>( proxyId ) )
         {
             return false;
         }
@@ -260,25 +248,18 @@ TreeNode DynamicTree::MakeEmptyNode()
     return node;
 }
 
-TreeNode DynamicTree::MakeLeafNode(
-    const aabb2& aabb,
-    std::int32_t proxyId,
-    std::int32_t shapeIndex )
+TreeNode DynamicTree::MakeLeafNode( const aabb2& aabb, std::int32_t proxyId, std::int32_t shapeIndex )
 {
     TreeNode node{};
 
     node.aabb = aabb;
-    node.flagIndex =
-        static_cast<std::uint32_t>( proxyId ) |
-        TREE_LEAF_NODE |
-        TREE_MOVED_NODE;
+    node.flagIndex = static_cast<std::uint32_t>( proxyId ) | TREE_LEAF_NODE | TREE_MOVED_NODE;
     node.shapeIndex = shapeIndex;
 
     return node;
 }
 
-TreeNode DynamicTree::MakeInternalNode(
-    std::int32_t childPair ) const
+TreeNode DynamicTree::MakeInternalNode( std::int32_t childPair ) const
 {
     const TreeNode& child1 = nodes_[childPair];
     const TreeNode& child2 = nodes_[childPair + 1];
@@ -289,11 +270,7 @@ TreeNode DynamicTree::MakeInternalNode(
     node.flagIndex =
         static_cast<std::uint32_t>( childPair ) |
         ( ( child1.flagIndex | child2.flagIndex ) & TREE_MOVED_NODE );
-    node.height =
-        1 + std::max(
-            GetNodeHeight( child1 ),
-            GetNodeHeight( child2 )
-        );
+    node.height = 1 + std::max( GetNodeHeight( child1 ), GetNodeHeight( child2 ) );
 
     return node;
 }
@@ -303,26 +280,21 @@ std::int32_t DynamicTree::AllocateProxy()
     if( proxyFreeList_ == NULL_INDEX )
     {
         const std::size_t oldCapacity = proxies_.size();
-        const std::size_t growth =
-            std::max<std::size_t>( oldCapacity / 2, 1 );
+        const std::size_t growth = std::max<std::size_t>( oldCapacity / 2, 1 );
         const std::size_t newCapacity = oldCapacity + growth;
 
         proxies_.resize( newCapacity );
 
-        for( std::size_t i = oldCapacity;
-             i + 1 < newCapacity;
-             ++i )
+        for( std::size_t i = oldCapacity; i + 1 < newCapacity; ++i )
         {
             proxies_[i].node = NULL_INDEX;
-            proxies_[i].next =
-                static_cast<std::int32_t>( i + 1 );
+            proxies_[i].next = static_cast<std::int32_t>( i + 1 );
         }
 
         proxies_[newCapacity - 1].node = NULL_INDEX;
         proxies_[newCapacity - 1].next = NULL_INDEX;
 
-        proxyFreeList_ =
-            static_cast<std::int32_t>( oldCapacity );
+        proxyFreeList_ = static_cast<std::int32_t>( oldCapacity );
     }
 
     const std::int32_t proxyId = proxyFreeList_;
@@ -368,8 +340,7 @@ std::int32_t DynamicTree::AllocateSiblingPair()
         return pair;
     }
 
-    const std::int32_t pair =
-        static_cast<std::int32_t>( nodes_.size() );
+    const std::int32_t pair = static_cast<std::int32_t>( nodes_.size() );
 
     // root 0 + spare 1 때문에 이후 pair 시작점은 항상 짝수다.
     assert( ( pair & 1 ) == 0 );
@@ -399,8 +370,7 @@ void DynamicTree::FreeSiblingPair( std::int32_t pair )
     pairFreeList_ = pair;
 }
 
-std::int32_t DynamicTree::FindBestSibling(
-    const aabb2& boxD ) const
+std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
 {
     std::int32_t nodeIndex = ROOT_NODE;
 
@@ -421,12 +391,10 @@ std::int32_t DynamicTree::FindBestSibling(
 
     for( ;; )
     {
-        const std::int32_t child1 =
-            GetChildPair( nodes_[nodeIndex] );
+        const std::int32_t child1 = GetChildPair( nodes_[nodeIndex] );
         const std::int32_t child2 = child1 + 1;
 
-        const float currentCost =
-            directCost + inheritedCost;
+        const float currentCost = directCost + inheritedCost;
 
         if( currentCost < bestCost )
         {
@@ -459,8 +427,7 @@ std::int32_t DynamicTree::FindBestSibling(
 
         if( leaf1 )
         {
-            const float cost1 =
-                directCost1 + inheritedCost;
+            const float cost1 = directCost1 + inheritedCost;
 
             if( cost1 < bestCost )
             {
@@ -472,16 +439,12 @@ std::int32_t DynamicTree::FindBestSibling(
         {
             area1 = Perimeter( box1 );
 
-            lowerCost1 =
-                inheritedCost +
-                directCost1 +
-                std::min( areaD - area1, 0.0f );
+            lowerCost1 = inheritedCost + directCost1 + std::min( areaD - area1, 0.0f );
         }
 
         if( leaf2 )
         {
-            const float cost2 =
-                directCost2 + inheritedCost;
+            const float cost2 = directCost2 + inheritedCost;
 
             if( cost2 < bestCost )
             {
@@ -493,10 +456,7 @@ std::int32_t DynamicTree::FindBestSibling(
         {
             area2 = Perimeter( box2 );
 
-            lowerCost2 =
-                inheritedCost +
-                directCost2 +
-                std::min( areaD - area2, 0.0f );
+            lowerCost2 = inheritedCost + directCost2 + std::min( areaD - area2, 0.0f );
         }
 
         if( leaf1 && leaf2 )
@@ -504,8 +464,7 @@ std::int32_t DynamicTree::FindBestSibling(
             break;
         }
 
-        if( bestCost <= lowerCost1 &&
-            bestCost <= lowerCost2 )
+        if( bestCost <= lowerCost1 && bestCost <= lowerCost2 )
         {
             break;
         }
@@ -544,40 +503,28 @@ void DynamicTree::LinkChildren( std::int32_t nodeIndex )
     parents_[childPair + 1] = nodeIndex;
 }
 
-void DynamicTree::SwapNodes(
-    std::int32_t downIndex,
-    std::int32_t upIndex )
+void DynamicTree::SwapNodes( std::int32_t downIndex, std::int32_t upIndex )
 {
-    std::swap(
-        nodes_[downIndex],
-        nodes_[upIndex]
-    );
+    std::swap( nodes_[downIndex], nodes_[upIndex] );
 
     LinkChildren( downIndex );
     LinkChildren( upIndex );
 
-    const std::int32_t siblingIndex =
-        downIndex ^ 1;
+    const std::int32_t siblingIndex = downIndex ^ 1;
 
     assert( !IsLeaf( nodes_[siblingIndex] ) );
 
-    nodes_[siblingIndex] =
-        MakeInternalNode(
-            GetChildPair( nodes_[siblingIndex] )
-        );
+    nodes_[siblingIndex] = MakeInternalNode( GetChildPair( nodes_[siblingIndex] ) );
 }
 
-void DynamicTree::RotateNode(
-    std::int32_t nodeIndex )
+void DynamicTree::RotateNode( std::int32_t nodeIndex )
 {
     const TreeNode& nodeA = nodes_[nodeIndex];
 
     assert( !IsLeaf( nodeA ) );
 
-    const std::int32_t indexB =
-        GetChildPair( nodeA );
-    const std::int32_t indexC =
-        indexB + 1;
+    const std::int32_t indexB = GetChildPair( nodeA );
+    const std::int32_t indexC = indexB + 1;
 
     const TreeNode& nodeB = nodes_[indexB];
     const TreeNode& nodeC = nodes_[indexC];
@@ -596,21 +543,13 @@ void DynamicTree::RotateNode(
 
     if( !leafC )
     {
-        const std::int32_t indexF =
-            GetChildPair( nodeC );
-        const std::int32_t indexG =
-            indexF + 1;
+        const std::int32_t indexF = GetChildPair( nodeC );
+        const std::int32_t indexG = indexF + 1;
 
-        const float areaC =
-            Perimeter( nodeC.aabb );
+        const float areaC = Perimeter( nodeC.aabb );
 
         const float deltaBF =
-            Perimeter(
-                Union(
-                    nodeB.aabb,
-                    nodes_[indexG].aabb
-                )
-            ) - areaC;
+            Perimeter( Union( nodeB.aabb, nodes_[indexG].aabb ) ) - areaC;
 
         if( deltaBF < bestDelta )
         {
@@ -620,12 +559,7 @@ void DynamicTree::RotateNode(
         }
 
         const float deltaBG =
-            Perimeter(
-                Union(
-                    nodeB.aabb,
-                    nodes_[indexF].aabb
-                )
-            ) - areaC;
+            Perimeter( Union( nodeB.aabb, nodes_[indexF].aabb ) ) - areaC;
 
         if( deltaBG < bestDelta )
         {
@@ -705,18 +639,13 @@ void DynamicTree::InsertLeaf(
     LinkChildren( childPair );
     LinkChildren( childPair + 1 );
 
-    nodes_[siblingIndex] =
-        MakeInternalNode( childPair );
+    nodes_[siblingIndex] = MakeInternalNode( childPair );
     parents_[siblingIndex] = oldParent;
 
-    RefitAncestors(
-        siblingIndex,
-        shouldRotate
-    );
+    RefitAncestors( siblingIndex, shouldRotate );
 }
 
-void DynamicTree::RemoveLeaf(
-    std::int32_t leafIndex )
+void DynamicTree::RemoveLeaf( std::int32_t leafIndex )
 {
     if( leafIndex == ROOT_NODE )
     {
@@ -725,8 +654,7 @@ void DynamicTree::RemoveLeaf(
         return;
     }
 
-    const std::int32_t parentIndex =
-        parents_[leafIndex];
+    const std::int32_t parentIndex = parents_[leafIndex];
 
     assert( parentIndex != NULL_INDEX );
     assert( !IsLeaf( nodes_[parentIndex] ) );
