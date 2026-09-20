@@ -12,7 +12,7 @@ struct segment2
 {
     vec2 a{};
     vec2 b{};
-};
+}; // sizeof: 16 bytes
 
 inline vec2 Direction( const segment2& segment )
 {

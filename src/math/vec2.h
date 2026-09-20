@@ -10,33 +10,6 @@ struct vec2
     float x = 0.0f;
     float y = 0.0f;
 
-/*    vec2 operator+( const vec2& rhs ) const
-    {
-        return { x + rhs.x, y + rhs.y };
-    }
-
-    vec2 operator-( const vec2& rhs ) const
-    {
-        return { x - rhs.x, y - rhs.y };
-    }
-
-    vec2 operator-(void) const
-	{
-		return { -x, -y };
-	}
-
-	vec2 operator*( float scalar ) const
-	{
-		return { x * scalar, y * scalar };
-	}
-
-	vec2 operator/( float scalar ) const
-	{
-		assert( scalar != 0.0f );
-		float temp = 1.0f / scalar;
-		return { x * temp, y * temp };
-	}*/
-
     vec2& operator+=( const vec2& rhs )
     {
         x += rhs.x;

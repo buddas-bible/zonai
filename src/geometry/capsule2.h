@@ -14,7 +14,7 @@ struct capsule2
     vec2 center1{};
     vec2 center2{};
     float radius = 0.0f;
-};
+};  // sizeof: 20 bytes
 
 inline aabb2 ComputeAABB( const capsule2& capsule )
 {
