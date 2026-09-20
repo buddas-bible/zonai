@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -74,6 +76,7 @@ private:
     static constexpr std::int32_t ROOT_NODE = 0;
     static constexpr std::int32_t NULL_INDEX = -1;
     static constexpr std::size_t INITIAL_PROXY_CAPACITY = 16;
+    static constexpr std::size_t TREE_STACK_SIZE = 512;
 
 private:
     /*
