@@ -113,7 +113,7 @@ int main()
         assert( sahTree.GetProxyCount() == 3 );
         assert( sahTree.GetHeight() == 2 );
 
-        // C는 B보다 A와 묶일 때 AABB 증가 비용이 훨씬 작다.
+        // C는 B보다 A랑 묶이는게 훨씬 쌈.
         // root=24, (A+C)=6, leaf 3개=12 -> 42 / 24 = 1.75
         assert( NearlyEqual( sahTree.GetAreaRatio(), 1.75f ) );
     }
@@ -198,7 +198,7 @@ int main()
         assert( NearlyEqual( moveTree.GetProxyAABB( proxyB ), boxB ) );
         assert( NearlyEqual( moveTree.GetProxyAABB( proxyC ), movedC ) );
 
-        // 이동 후에는 C가 B와 묶이는 것이 가장 작다.
+        // C를 옮긴 뒤에는 B랑 묶이는게 제일 쌈.
         // root=26, (B+C)=6, leaf 3개=12 -> 44 / 26
         assert(
             NearlyEqual(
@@ -273,7 +273,7 @@ int main()
             );
         }
 
-        // 순차 삽입으로 생기는 편향을 local rotation이 줄여야 한다.
+        // 한쪽으로 계속 쌓이는걸 local rotation으로 줄여줌.
         assert( balancedTree.GetHeight() == 3 );
         assert( balancedTree.Validate() );
     }
