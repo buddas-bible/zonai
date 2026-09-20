@@ -8,27 +8,72 @@ namespace zonai
 {
 
 /*
-* DynamicTree 동작 서술
-* 
-* 노드 삽입
-* AABB를 가진 leaf node를 삽입하면, 기존 tree에서 sibling을 SAH로 찾아서 internal node를 만들고 연결함.
-* 
-* 노드 조정
-* internal node의 child pair가 바뀌면, AABB를 다시 계산하고, 필요하면 local rotation을 시도함.
-* 
-* local rotation
-* 중간 노드의 child pair를 바꾸는 rotation을 시도함.
-* rotation은 항상 child pair를 바꾸는 것이므로, sibling pair의 index는 연속된 index로 유지됨.
-* 
-* 노드 삭제
-* 리프 노드를 삭제하면 트리에서 제거하고, parent internal node가 자식을 모두 잃으면 그 부모 노드도 제거함.
-* 
-* 노드 이동
-* 리프 노드를 이동하면 트리에서 제거하고, 새 AABB로 다시 삽입함.
+* DynamicTree 구현 목표
+*
+* [Box2D DynamicTree 구조]
+* - DynamicTree는 BroadPhase에서 shape proxy의 AABB를 관리하는 BVH임.
+* - leaf node는 하나의 proxy를 나타내고, internal node는 두 child의 AABB를 합친 범위를 저장함.
+* - 같은 parent를 공유하는 두 child를 sibling이라 하며, 두 sibling은 항상 연속된 index의 pair로 배치함.
+* - stable proxy id와 tree 안에서 바뀔 수 있는 node index를 분리해서 관리함.
+* - proxy는 AABB 외에도 category bits와 user data를 보관하고, leaf는 proxy id를 통해 이를 참조함.
+*
+* [삽입]
+* - 새 leaf를 넣을 때 SAH를 이용해 함께 묶을 sibling을 찾음.
+* - 기존 sibling과 새 leaf를 child로 가지는 internal node를 만들고 tree에 연결함.
+* - 삽입 지점부터 root 방향으로 올라가며 AABB, height, moved 상태를 다시 계산함.
+* - 신규 삽입에서는 local rotation을 시도해 AABB perimeter 비용을 줄임.
+*
+* [local rotation]
+* - internal node와 아래 subtree의 연결 관계를 바꿨을 때 비용이 줄어드는지 비교함.
+* - 가능한 swap 중 perimeter를 가장 많이 줄이는 경우에만 rotation을 수행함.
+* - 기존 sibling pair 안에서 node를 재배치하므로 pair의 연속 index 구조는 유지됨.
+*
+* [삭제]
+* - leaf를 제거하면 같은 parent를 공유하던 sibling을 기존 parent 자리로 올림.
+* - 더 이상 필요하지 않은 sibling pair는 free-list에 반환함.
+* - 변경 지점부터 root 방향으로 AABB, height, moved 상태를 다시 계산함.
+*
+* [이동 / AABB 갱신]
+* - 일반적인 MoveProxy는 기존 leaf를 제거하고 새 AABB로 다시 삽입함.
+* - MoveProxy 재삽입에서는 신규 삽입과 달리 local rotation을 수행하지 않음.
+* - Box2D는 필요에 따라 proxy AABB를 넓히는 EnlargeProxy와 별도의 moved 표시 경로도 사용함.
+*
+* [검색]
+* - Query는 주어진 AABB와 겹치는 leaf를 순회하며 callback으로 proxy를 전달함.
+* - callback이 false를 반환하면 탐색을 조기에 종료할 수 있음.
+* - category/mask bits로 후보를 필터링하고, node/leaf 방문 횟수를 통계로 반환함.
+* - AABB Query 외에도 RayCast와 BoxCast를 DynamicTree에서 처리함.
+*
+* [moved / rebuild]
+* - moved flag는 변경된 leaf에서 ancestor 방향으로 전파해 변경된 subtree를 표시함.
+* - BroadPhase는 이 정보를 이용해 충돌 pair를 다시 만들어야 할 영역을 찾음.
+* - moved 상태를 clear/gather하는 기능과 stale subtree를 다시 구성하는 Rebuild/Refit 기능을 가짐.
+*
+* [Zonai 현재 구현 상태]
+* - [완료] root 0번, 1번 비움, sibling pair를 연속 index로 배치하는 node 구조.
+* - [완료] stable proxy id와 node index 분리, proxy/sibling pair free-list.
+* - [완료] SAH 기반 sibling 탐색과 leaf 삽입.
+* - [완료] local rotation과 ancestor refit.
+* - [완료] leaf 삭제와 남은 sibling 승격.
+* - [완료] MoveProxy의 제거 후 재삽입, 재삽입 시 rotation 생략.
+* - [완료] AABB Query와 callback 조기 종료.
+* - [완료] GetProxyAABB, GetProxyCount, GetHeight, GetAreaRatio, Validate.
+* - [부분] moved flag 저장과 ancestor 전파는 구현됐지만 mark/clear/gather 수명 관리는 아직 없음.
+* - [부분] TreeProxy에 userData 공간은 있지만 생성/검색 경로에서 아직 사용하지 않음.
+* - [부분] Query는 겹치는 proxy 순회까지만 구현했고 category/mask filtering과 TreeStats는 아직 없음.
+* - [미구현] category bits 설정/조회, userData 조회.
+* - [미구현] EnlargeProxy와 별도의 proxy moved 표시 경로.
+* - [미구현] RayCast, BoxCast.
+* - [미구현] Rebuild, Refit, moved proxy gather/clear.
+* - [미구현] root bounds, byte count 등 보조 통계/조회 기능.
+*
+* [DynamicTree 이후 BroadPhase 목표]
+* - static / kinematic / dynamic body를 별도 DynamicTree로 관리함.
+* - moved 상태가 있는 sibling pair를 모아 변경된 subtree만 pair 생성 대상으로 사용함.
+* - dynamic tree 내부는 sibling subtree끼리 self collision하고, static/kinematic tree와는 cross collision함.
+* - 생성된 candidate pair는 기존 pair와 중복되는지 확인하고 collision filtering을 적용함.
+* - 살아남은 shape pair를 Contact 생성 단계로 넘김.
 */
-
-// sibling이란?
-// internal node의 두 child를 sibling pair라고 부름. sibling pair는 항상 연속된 index로 배치함.
 
 DynamicTree::DynamicTree()
 {
