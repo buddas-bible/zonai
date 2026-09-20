@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cassert>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -43,6 +44,13 @@ struct TreeProxy
     std::int32_t next = -1;
 };
 
+template <typename Callback>
+concept TreeQueryCallback =
+    requires( Callback& callback, std::int32_t proxyId )
+    {
+        { callback( proxyId ) } -> std::convertible_to<bool>;
+    };
+
 class DynamicTree
 {
 public:
@@ -68,7 +76,7 @@ public:
 
     // AABB가 겹치는 proxy를 찾아 callback으로 전달함.
     // callback이 false를 반환하면 즉시 순회를 끝냄.
-    template <typename Callback>
+    template <TreeQueryCallback Callback>
     void Query( const aabb2& aabb, Callback&& callback ) const
     {
         if( proxyCount_ == 0 )
