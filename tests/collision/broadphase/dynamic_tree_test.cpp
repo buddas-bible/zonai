@@ -257,5 +257,26 @@ int main()
         assert( hits == expected );
     }
 
+    {
+        DynamicTree balancedTree{};
+
+        for( int i = 0; i < 8; ++i )
+        {
+            const float x = static_cast<float>( i );
+
+            balancedTree.CreateProxy(
+                {
+                    { x, 0.0f },
+                    { x + 1.0f, 1.0f }
+                },
+                i
+            );
+        }
+
+        // 순차 삽입으로 생기는 편향을 local rotation이 줄여야 한다.
+        assert( balancedTree.GetHeight() == 3 );
+        assert( balancedTree.Validate() );
+    }
+
     return 0;
 }
