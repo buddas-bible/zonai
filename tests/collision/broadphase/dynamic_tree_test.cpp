@@ -1,5 +1,8 @@
+#include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
+#include <vector>
 
 #include "collision/broadphase/dynamicTree.h"
 
@@ -203,6 +206,55 @@ int main()
                 44.0f / 26.0f
             )
         );
+    }
+
+    {
+        DynamicTree queryTree{};
+
+        const aabb2 boxA{
+            { 0.0f, 0.0f },
+            { 1.0f, 1.0f }
+        };
+
+        const aabb2 boxB{
+            { 5.0f, 0.0f },
+            { 6.0f, 1.0f }
+        };
+
+        const aabb2 boxC{
+            { 10.0f, 0.0f },
+            { 11.0f, 1.0f }
+        };
+
+        const std::int32_t proxyA = queryTree.CreateProxy( boxA, 1 );
+        const std::int32_t proxyB = queryTree.CreateProxy( boxB, 2 );
+        queryTree.CreateProxy( boxC, 3 );
+
+        const aabb2 queryBox{
+            { -1.0f, -1.0f },
+            {  7.0f,  2.0f }
+        };
+
+        std::vector<std::int32_t> hits;
+
+        queryTree.Query(
+            queryBox,
+            [&]( std::int32_t proxyId )
+            {
+                hits.push_back( proxyId );
+                return true;
+            }
+        );
+
+        std::sort( hits.begin(), hits.end() );
+
+        std::vector<std::int32_t> expected{
+            proxyA,
+            proxyB
+        };
+        std::sort( expected.begin(), expected.end() );
+
+        assert( hits == expected );
     }
 
     return 0;
