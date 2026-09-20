@@ -83,13 +83,11 @@ public:
         // root가 internal이면 첫 child pair부터, leaf면 root부터 시작함.
         stack[stackCount++] =
             IsLeaf( nodes_[ROOT_NODE] ) ?
-                ROOT_NODE :
-                GetChildPair( nodes_[ROOT_NODE] );
+                ROOT_NODE : GetChildPair( nodes_[ROOT_NODE] );
 
         while( stackCount > 0 )
         {
-            const std::int32_t pair =
-                stack[--stackCount];
+            const std::int32_t pair = stack[--stackCount];
 
             for( std::int32_t i = 0; i < 2; ++i )
             {
@@ -97,8 +95,7 @@ public:
                 const TreeNode& node = nodes_[nodeIndex];
 
                 // AABB가 겹치지 않으면 subtree 전체를 가지치기함.
-                if( IsEmptyNode( node ) ||
-                    !Overlaps( aabb, node.aabb ) )
+                if( IsEmptyNode( node ) || !Overlaps( aabb, node.aabb ) )
                 {
                     continue;
                 }
@@ -106,10 +103,11 @@ public:
                 // leaf를 찾으면 stable proxy id를 callback에 넘김.
                 if( IsLeaf( node ) )
                 {
-                    const std::int32_t proxyId =
-                        GetProxyId( node );
+                    const std::int32_t proxyId = GetProxyId( node );
 
-                    if( !callback( proxyId ) )
+					bool proceed = callback( proxyId );
+
+                    if( proceed == false )
                     {
                         return;
                     }
@@ -119,8 +117,7 @@ public:
 
                 // internal node면 child pair를 stack에 넣어 계속 내려감.
                 assert( stackCount < TREE_STACK_SIZE );
-                stack[stackCount++] =
-                    GetChildPair( node );
+                stack[stackCount++] = GetChildPair( node );
             }
         }
     }
@@ -145,10 +142,7 @@ private:
     static std::int32_t GetNodeHeight( const TreeNode& node );
 
     static TreeNode MakeEmptyNode();
-    static TreeNode MakeLeafNode(
-        const aabb2& aabb,
-        std::int32_t proxyId,
-        std::int32_t shapeIndex );
+    static TreeNode MakeLeafNode( const aabb2& aabb, std::int32_t proxyId, std::int32_t shapeIndex );
 
 private:
     TreeNode MakeInternalNode( std::int32_t childPair ) const;
