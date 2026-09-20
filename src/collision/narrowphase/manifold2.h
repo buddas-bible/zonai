@@ -20,7 +20,7 @@ struct manifold2
 {
     vec2 normal{};
     std::array<manifoldPoint2, MAX_MANIFOLD_POINTS> points{};
-    std::int32_t pointCount{};
+    int pointCount{};
 }; // sizeof: 44 bytes
 
 } // namespace zonai

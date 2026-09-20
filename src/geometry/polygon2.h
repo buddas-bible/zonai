@@ -19,7 +19,7 @@ struct polygon2
     std::array<vec2, MAX_POLYGON_VERTICES> normals{};
     vec2 centroid{};
     float radius = 0.0f;
-    std::int32_t vertexCount = 0;
+    int vertexCount = 0;
 }; // sizeof: 144 bytes
 
 polygon2 MakeBox( const vec2& halfExtents );
