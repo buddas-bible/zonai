@@ -505,22 +505,22 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
 
         const bool leaf1 = IsLeaf( nodes_[child1] );
         const bool leaf2 = IsLeaf( nodes_[child2] );
-        const aabb2 box1 = nodes_[child1].aabb;
-        const aabb2 box2 = nodes_[child2].aabb;
+        const aabb2 leftBox = nodes_[child1].aabb;
+        const aabb2 rightBox = nodes_[child2].aabb;
 
-        // 각 child로 내려갔을 때 늘어나는 AABB 비용을 계산함.
-        const float directCost1 = Perimeter( Union( box1, boxD ) );
-        const float directCost2 = Perimeter( Union( box2, boxD ) );
+        // 각 자식들과 newLeaf를 포함하는 AABB의 둘레를 계산
+        const float leftUnionPerimeter = Perimeter( Union( leftBox, boxD ) );
+        const float rightUnionPerimeter = Perimeter( Union( rightBox, boxD ) );
 
-        float area1 = 0.0f;
-        float area2 = 0.0f;
+        float leftPerimeter = 0.0f;
+        float rightPerimeter = 0.0f;
 
-        float lowerCost1 = std::numeric_limits<float>::max();
-        float lowerCost2 = std::numeric_limits<float>::max();
+        float leftCost = std::numeric_limits<float>::max();
+        float rightCost = std::numeric_limits<float>::max();
 
-        if( leaf1 )     // 리프 노드라면 비용 확정
+        if( leaf1 )
         {
-            const float cost1 = directCost1 + inheritedCost;
+            const float cost1 = leftUnionPerimeter + inheritedCost;
 
             if( cost1 < bestCost )
             {
@@ -528,16 +528,18 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
                 bestCost = cost1;
             }
         }
-        else            // 리프 노드가 아니라면 
+        else
         {
-            area1 = Perimeter( box1 );
+            leftPerimeter = Perimeter( leftBox );
 
-            lowerCost1 = inheritedCost + directCost1 + std::min( areaD - area1, 0.0f );
+            // child1 subtree에서 나올 수 있는 최소 비용을 예상함.
+            // areaD < leftPerimeter이면 더 작은 자식과 묶일 가능성을 lower bound에 반영함.
+            leftCost = inheritedCost + leftUnionPerimeter + std::min( areaD - leftPerimeter, 0.0f );
         }
 
-        if( leaf2 )     // 리프 노드라면
+        if( leaf2 )
         {
-            const float cost2 = directCost2 + inheritedCost;
+            const float cost2 = rightUnionPerimeter + inheritedCost;
 
             if( cost2 < bestCost )
             {
@@ -545,11 +547,11 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
                 bestCost = cost2;
             }
         }
-        else            // 리프 노드가 아니라면
+        else
         {
-            area2 = Perimeter( box2 );
+            rightPerimeter = Perimeter( rightBox );
 
-            lowerCost2 = inheritedCost + directCost2 + std::min( areaD - area2, 0.0f );
+            rightCost = inheritedCost + rightUnionPerimeter + std::min( areaD - rightPerimeter, 0.0f );
         }
 
         // 둘 다 리프면 더 내려갈 곳이 없어서 끝냄.
@@ -559,23 +561,23 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
         }
 
         // 어느 자식으로 내려가도 현재 best보다 싸질 수 없으면 가지치기함.
-        if( bestCost <= lowerCost1 && bestCost <= lowerCost2 )
+        if( bestCost <= leftCost && bestCost <= rightCost )
         {
             break;
         }
 
         // 더 싸질 가능성이 있는 자식 쪽으로만 내려감.
-        if( lowerCost1 <= lowerCost2 )
+        if( leftCost <= rightCost )
         {
             nodeIndex = child1;
-            areaBase = area1;
-            directCost = directCost1;
+            areaBase = leftPerimeter;
+            directCost = leftUnionPerimeter;
         }
         else
         {
             nodeIndex = child2;
-            areaBase = area2;
-            directCost = directCost2;
+            areaBase = rightPerimeter;
+            directCost = rightUnionPerimeter;
         }
     }
 
