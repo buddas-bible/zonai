@@ -25,7 +25,7 @@ namespace zonai
 *
 * [현재 구현]
 * - proxy / sibling pair free-list, SAH 삽입, 삭제, MoveProxy, Query, local rotation, Validate 구현함.
-* - moved flag는 ancestor로 전파되지만 mark / clear / gather 수명 관리는 아직 없음.
+* - moved flag는 ancestor로 전파되고 ClearMoved로 소비 후 초기화할 수 있음. explicit mark / gather는 아직 없음.
 * - TreeProxy에 userData 공간은 있지만 생성/조회 경로에는 아직 연결하지 않음.
 * - category / mask filtering과 TreeStats는 아직 없음.
 *
@@ -126,6 +126,62 @@ void DynamicTree::MoveProxy( std::int32_t proxyId, const aabb2& aabb )
 
     // MoveProxy 재삽입에서는 Box2D처럼 local rotation을 수행하지 않음.
     InsertLeaf( newLeaf, false );
+}
+
+bool DynamicTree::HasMoved() const
+{
+    if( proxyCount_ == 0 )
+    {
+        return false;
+    }
+
+    return ( nodes_[ROOT_NODE].flagIndex & TREE_MOVED_NODE ) != 0;
+}
+
+void DynamicTree::ClearMoved()
+{
+    if( !HasMoved() )
+    {
+        return;
+    }
+
+    TreeNode& root = nodes_[ROOT_NODE];
+    root.flagIndex &= ~TREE_MOVED_NODE;
+
+    if( IsLeaf( root ) )
+    {
+        return;
+    }
+
+    std::array<std::int32_t, TREE_STACK_SIZE> stack{};
+    std::size_t stackCount = 0;
+    stack[stackCount++] = GetChildPair( root );
+
+    // moved가 전파된 branch만 내려가며 flag를 지움.
+    while( stackCount > 0 )
+    {
+        const std::int32_t pair = stack[--stackCount];
+
+        for( std::int32_t i = 0; i < 2; ++i )
+        {
+            TreeNode& node = nodes_[pair + i];
+
+            if( ( node.flagIndex & TREE_MOVED_NODE ) == 0 )
+            {
+                continue;
+            }
+
+            node.flagIndex &= ~TREE_MOVED_NODE;
+
+            if( IsLeaf( node ) )
+            {
+                continue;
+            }
+
+            assert( stackCount < TREE_STACK_SIZE );
+            stack[stackCount++] = GetChildPair( node );
+        }
+    }
 }
 
 std::size_t DynamicTree::GetProxyCount() const

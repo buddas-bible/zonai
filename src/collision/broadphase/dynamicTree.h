@@ -63,6 +63,10 @@ public:
 
     void MoveProxy( std::int32_t proxyId, const aabb2& aabb );
 
+    bool HasMoved() const;
+
+    void ClearMoved();
+
     std::size_t GetProxyCount() const;
 
     std::int32_t GetHeight() const;
