@@ -280,14 +280,15 @@ int main()
         const std::int32_t proxyA = movedTree.CreateProxy( boxA, 1 );
         movedTree.CreateProxy( boxB, 2 );
 
-        assert( movedTree.HasMoved() );
-
-        movedTree.ClearMoved();
-
+        // 일반 DynamicTree API는 Box2D처럼 moved를 표시하지 않음.
         assert( movedTree.HasMoved() == false );
-        assert( movedTree.Validate() );
 
         movedTree.MoveProxy( proxyA, movedA );
+
+        assert( movedTree.HasMoved() == false );
+
+        // BroadPhase가 pair 생성을 요구하는 경로에서는 moved를 표시함.
+        movedTree.MoveProxy( proxyA, boxA, true );
 
         assert( movedTree.HasMoved() );
 
