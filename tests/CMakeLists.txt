@@ -196,3 +196,17 @@ add_test(
     NAME dynamicTreeTests
     COMMAND dynamicTreeTests
 )
+
+add_executable(bodyTypeTests
+    collision/broadphase/body_type_test.cpp
+)
+
+target_link_libraries(bodyTypeTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME bodyTypeTests
+    COMMAND bodyTypeTests
+)
