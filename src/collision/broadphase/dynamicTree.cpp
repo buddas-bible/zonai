@@ -421,7 +421,7 @@ std::int32_t DynamicTree::AllocateSiblingPair()
     {
         const std::int32_t pair = pairFreeList_;
 
-        pairFreeList_ = parents_[pair];
+        pairFreeList_ = parents_[pair]; // FreeNode Head 변경
 
         nodes_[pair] = MakeEmptyNode();
         nodes_[pair + 1] = MakeEmptyNode();
@@ -660,8 +660,9 @@ void DynamicTree::RotateNode( std::int32_t nodeIndex )
 
         // B <-> F 후 C=(B,G)
         // 비용 변화 = Perimeter( Union( B, G ) ) - 기존 C perimeter
-        const float deltaBF =
-            Perimeter( Union( nodeB.aabb, nodes_[indexG].aabb ) ) - areaC;
+        const aabb2 BGUnion = Union( nodeB.aabb, nodes_[indexG].aabb );
+        const float BGUnionPerimeter = Perimeter( BGUnion );
+        const float deltaBF = BGUnionPerimeter - areaC;
 
         if( deltaBF < bestDelta )
         {
@@ -672,8 +673,9 @@ void DynamicTree::RotateNode( std::int32_t nodeIndex )
 
         // B <-> G 후 C=(F,B)
         // 비용 변화 = Perimeter( Union( F, B ) ) - 기존 C perimeter
-        const float deltaBG =
-            Perimeter( Union( nodeB.aabb, nodes_[indexF].aabb ) ) - areaC;
+        const aabb2 FBUnion = Union( nodeB.aabb, nodes_[indexF].aabb );
+        const float FBUnionPerimeter = Perimeter( FBUnion );
+        const float deltaBG = FBUnionPerimeter - areaC;
 
         if( deltaBG < bestDelta )
         {
@@ -686,23 +688,16 @@ void DynamicTree::RotateNode( std::int32_t nodeIndex )
     // B가 internal이면 B=(D,E). C <-> D, C <-> E 두 경우를 비교함.
     if( !leafB )
     {
-        const std::int32_t indexD =
-            GetChildPair( nodeB );
-        const std::int32_t indexE =
-            indexD + 1;
+        const std::int32_t indexD = GetChildPair( nodeB );
+        const std::int32_t indexE = indexD + 1;
 
-        const float areaB =
-            Perimeter( nodeB.aabb );
+        const float areaB = Perimeter( nodeB.aabb );
 
         // C <-> D 후 B=(C,E)
         // 비용 변화 = Perimeter( Union( C, E ) ) - 기존 B perimeter
-        const float deltaCD =
-            Perimeter(
-                Union(
-                    nodeC.aabb,
-                    nodes_[indexE].aabb
-                )
-            ) - areaB;
+        const aabb2 CEUnion = Union( nodeC.aabb, nodes_[indexE].aabb );
+        const float CEUnionPerimeter = Perimeter( CEUnion );
+        const float deltaCD = CEUnionPerimeter - areaB;
 
         if( deltaCD < bestDelta )
         {
@@ -713,13 +708,9 @@ void DynamicTree::RotateNode( std::int32_t nodeIndex )
 
         // C <-> E 후 B=(D,C)
         // 비용 변화 = Perimeter( Union( D, C ) ) - 기존 B perimeter
-        const float deltaCE =
-            Perimeter(
-                Union(
-                    nodeC.aabb,
-                    nodes_[indexD].aabb
-                )
-            ) - areaB;
+        const aabb2 CDUnion = Union( nodeC.aabb, nodes_[indexD].aabb );
+        const float CDUnionPerimeter = Perimeter( CDUnion );
+        const float deltaCE = CDUnionPerimeter - areaB;
 
         if( deltaCE < bestDelta )
         {

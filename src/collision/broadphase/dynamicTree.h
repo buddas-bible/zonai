@@ -154,9 +154,11 @@ private:
 private:
     TreeNode MakeInternalNode( std::int32_t childPair ) const;
 
+    // 프록시 할당 및 해제
     std::int32_t AllocateProxy();
     void FreeProxy( std::int32_t proxyId );
 
+    // 형제 노드 할당 및 해제
     std::int32_t AllocateSiblingPair();
     void FreeSiblingPair( std::int32_t pair );
 
