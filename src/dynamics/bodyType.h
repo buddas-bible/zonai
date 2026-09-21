@@ -1,11 +1,9 @@
 #pragma once
 
-#include <cstddef>
-
 namespace zonai
 {
 
-enum class BodyType : std::size_t
+enum class BodyType
 {
     Static = 0,
     Kinematic = 1,
