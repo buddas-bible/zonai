@@ -25,7 +25,7 @@ namespace zonai
 *
 * [현재 구현]
 * - proxy / sibling pair free-list, SAH 삽입, 삭제, MoveProxy, Query, local rotation, Validate 구현함.
-* - moved flag는 ancestor로 전파되고 ClearMoved로 소비 후 초기화할 수 있음. explicit mark / gather는 아직 없음.
+* - CreateProxy / MoveProxy는 필요할 때만 moved를 표시하고 ancestor로 전파함. ClearMoved로 소비 후 초기화함.
 * - TreeProxy에 userData 공간은 있지만 생성/조회 경로에는 아직 연결하지 않음.
 * - category / mask filtering과 TreeStats는 아직 없음.
 *
@@ -62,11 +62,11 @@ DynamicTree::DynamicTree()
     proxyFreeList_ = 0;
 }
 
-std::int32_t DynamicTree::CreateProxy( const aabb2& aabb, std::int32_t shapeIndex )
+std::int32_t DynamicTree::CreateProxy( const aabb2& aabb, std::int32_t shapeIndex, bool markMoved )
 {
     // 사용할 proxy id를 free-list에서 확보함.
     const std::int32_t proxyId = AllocateProxy();
-    const TreeNode newLeaf = MakeLeafNode( aabb, proxyId, shapeIndex );
+    const TreeNode newLeaf = MakeLeafNode( aabb, proxyId, shapeIndex, markMoved );
     
     // 첫 proxy면 internal node 없이 root에 바로 넣음.
     if( proxyCount_ == 1 )
@@ -99,7 +99,7 @@ void DynamicTree::DestroyProxy( std::int32_t proxyId )
     FreeProxy( proxyId );
 }
 
-void DynamicTree::MoveProxy( std::int32_t proxyId, const aabb2& aabb )
+void DynamicTree::MoveProxy( std::int32_t proxyId, const aabb2& aabb, bool markMoved )
 {
     assert( 0 <= proxyId );
     assert( static_cast<std::size_t>( proxyId ) < proxies_.size() );
@@ -114,7 +114,7 @@ void DynamicTree::MoveProxy( std::int32_t proxyId, const aabb2& aabb )
     RemoveLeaf( leafIndex );
 
     // 같은 proxy id로 새 AABB의 leaf를 만들어 다시 연결함.
-    const TreeNode newLeaf = MakeLeafNode( aabb, proxyId, shapeIndex );
+    const TreeNode newLeaf = MakeLeafNode( aabb, proxyId, shapeIndex, markMoved );
 
     if( proxyCount_ == 1 )
     {
@@ -351,12 +351,22 @@ TreeNode DynamicTree::MakeEmptyNode()
     return node;
 }
 
-TreeNode DynamicTree::MakeLeafNode( const aabb2& aabb, std::int32_t proxyId, std::int32_t shapeIndex )
+TreeNode DynamicTree::MakeLeafNode(
+    const aabb2& aabb,
+    std::int32_t proxyId,
+    std::int32_t shapeIndex,
+    bool moved )
 {
     TreeNode node{};
 
     node.aabb = aabb;
-    node.flagIndex = static_cast<std::uint32_t>( proxyId ) | TREE_LEAF_NODE | TREE_MOVED_NODE;
+    node.flagIndex = static_cast<std::uint32_t>( proxyId ) | TREE_LEAF_NODE;
+
+    if( moved )
+    {
+        node.flagIndex |= TREE_MOVED_NODE;
+    }
+
     node.shapeIndex = shapeIndex;
 
     return node;

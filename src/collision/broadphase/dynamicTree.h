@@ -57,11 +57,11 @@ public:
     DynamicTree();
 
 public:
-    std::int32_t CreateProxy( const aabb2& aabb, std::int32_t shapeIndex );
+    std::int32_t CreateProxy( const aabb2& aabb, std::int32_t shapeIndex, bool markMoved = false );
     
     void DestroyProxy( std::int32_t proxyId );
 
-    void MoveProxy( std::int32_t proxyId, const aabb2& aabb );
+    void MoveProxy( std::int32_t proxyId, const aabb2& aabb, bool markMoved = false );
 
     bool HasMoved() const;
 
@@ -153,7 +153,7 @@ private:
     static std::int32_t GetNodeHeight( const TreeNode& node );
 
     static TreeNode MakeEmptyNode();
-    static TreeNode MakeLeafNode( const aabb2& aabb, std::int32_t proxyId, std::int32_t shapeIndex );
+    static TreeNode MakeLeafNode( const aabb2& aabb, std::int32_t proxyId, std::int32_t shapeIndex, bool moved );
 
 private:
     TreeNode MakeInternalNode( std::int32_t childPair ) const;
