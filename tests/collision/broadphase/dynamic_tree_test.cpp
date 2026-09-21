@@ -258,6 +258,46 @@ int main()
     }
 
     {
+        DynamicTree movedTree{};
+
+        assert( movedTree.HasMoved() == false );
+
+        const aabb2 boxA{
+            { 0.0f, 0.0f },
+            { 1.0f, 1.0f }
+        };
+
+        const aabb2 boxB{
+            { 2.0f, 0.0f },
+            { 3.0f, 1.0f }
+        };
+
+        const aabb2 movedA{
+            { 4.0f, 0.0f },
+            { 5.0f, 1.0f }
+        };
+
+        const std::int32_t proxyA = movedTree.CreateProxy( boxA, 1 );
+        movedTree.CreateProxy( boxB, 2 );
+
+        assert( movedTree.HasMoved() );
+
+        movedTree.ClearMoved();
+
+        assert( movedTree.HasMoved() == false );
+        assert( movedTree.Validate() );
+
+        movedTree.MoveProxy( proxyA, movedA );
+
+        assert( movedTree.HasMoved() );
+
+        movedTree.ClearMoved();
+
+        assert( movedTree.HasMoved() == false );
+        assert( movedTree.Validate() );
+    }
+
+    {
         DynamicTree balancedTree{};
 
         for( int i = 0; i < 8; ++i )
