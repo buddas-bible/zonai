@@ -2,12 +2,39 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 
 #include "collision/broadphase/dynamicTree.h"
 #include "dynamics/bodyType.h"
 
 namespace zonai
 {
+
+using ProxyKey = std::int32_t;
+
+constexpr ProxyKey MakeProxyKey( std::int32_t proxyId, BodyType type )
+{
+    constexpr std::uint32_t TYPE_BITS = 2;
+
+    const std::uint32_t id = static_cast<std::uint32_t>( proxyId );
+    const std::uint32_t bodyType = static_cast<std::uint32_t>( type );
+
+    return static_cast<ProxyKey>( ( id << TYPE_BITS ) | bodyType );
+}
+
+constexpr std::int32_t GetProxyId( ProxyKey key )
+{
+    constexpr std::uint32_t TYPE_BITS = 2;
+
+    return static_cast<std::int32_t>( static_cast<std::uint32_t>( key ) >> TYPE_BITS );
+}
+
+constexpr BodyType GetProxyType( ProxyKey key )
+{
+    constexpr std::uint32_t TYPE_MASK = 0x3u;
+
+    return static_cast<BodyType>( static_cast<std::uint32_t>( key ) & TYPE_MASK );
+}
 
 class BroadPhase
 {
