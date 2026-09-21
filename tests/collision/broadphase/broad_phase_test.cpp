@@ -50,5 +50,32 @@ int main()
     assert( kinematicTree.GetProxyCount() == 1 );
     assert( dynamicTree.GetProxyCount() == 1 );
 
+    BroadPhase proxyBroadPhase{};
+
+    const ProxyKey staticKey = proxyBroadPhase.CreateProxy( BodyType::Static, box, 11 );
+    const ProxyKey kinematicKey = proxyBroadPhase.CreateProxy( BodyType::Kinematic, box, 12 );
+    const ProxyKey dynamicKey = proxyBroadPhase.CreateProxy( BodyType::Dynamic, box, 13 );
+
+    assert( GetProxyType( staticKey ) == BodyType::Static );
+    assert( GetProxyType( kinematicKey ) == BodyType::Kinematic );
+    assert( GetProxyType( dynamicKey ) == BodyType::Dynamic );
+
+    assert( GetProxyId( staticKey ) == 0 );
+    assert( GetProxyId( kinematicKey ) == 0 );
+    assert( GetProxyId( dynamicKey ) == 0 );
+
+    assert( proxyBroadPhase.GetTree( BodyType::Static ).GetProxyCount() == 1 );
+    assert( proxyBroadPhase.GetTree( BodyType::Kinematic ).GetProxyCount() == 1 );
+    assert( proxyBroadPhase.GetTree( BodyType::Dynamic ).GetProxyCount() == 1 );
+
+    // Box2D처럼 static은 기본적으로 moved 처리하지 않고 kinematic / dynamic은 moved 처리함.
+    assert( proxyBroadPhase.GetTree( BodyType::Static ).HasMoved() == false );
+    assert( proxyBroadPhase.GetTree( BodyType::Kinematic ).HasMoved() );
+    assert( proxyBroadPhase.GetTree( BodyType::Dynamic ).HasMoved() );
+
+    proxyBroadPhase.CreateProxy( BodyType::Static, box, 14, true );
+
+    assert( proxyBroadPhase.GetTree( BodyType::Static ).HasMoved() );
+
     return 0;
 }
