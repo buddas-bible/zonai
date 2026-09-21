@@ -141,7 +141,7 @@ private:
     static constexpr std::size_t TREE_STACK_SIZE = 512;
 
 private:
-    // flagIndex에서 node 상태와 index를 읽는 helper.
+    // flagIndex에서 node 상태와 저장된 index를 읽는 helper.
     static bool IsLeaf( const TreeNode& node );
     static bool IsEmptyNode( const TreeNode& node );
     static std::int32_t GetChildPair( const TreeNode& node );
@@ -154,11 +154,11 @@ private:
 private:
     TreeNode MakeInternalNode( std::int32_t childPair ) const;
 
-    // 프록시 할당 및 해제
+    // proxy 할당 및 해제
     std::int32_t AllocateProxy();
     void FreeProxy( std::int32_t proxyId );
 
-    // 형제 노드 할당 및 해제
+    // 형제 노드 pair 할당 및 해제
     std::int32_t AllocateSiblingPair();
     void FreeSiblingPair( std::int32_t pair );
 
@@ -178,8 +178,12 @@ private:
     std::vector<std::int32_t> parents_{};
     std::vector<TreeProxy> proxies_{};
 
+    // free proxy 연결 리스트의 head index.
     std::int32_t proxyFreeList_ = NULL_INDEX;
+
+    // free pair 연결 리스트의 head index. free pair의 parents_[pair]는 next index로 사용함.
     std::int32_t pairFreeList_ = NULL_INDEX;
+
     std::size_t proxyCount_ = 0;
 };
 

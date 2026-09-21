@@ -8,71 +8,37 @@ namespace zonai
 {
 
 /*
-* DynamicTree 구현 목표
+* DynamicTree 구현 메모
 *
-* [Box2D DynamicTree 구조]
-* - DynamicTree는 BroadPhase에서 shape proxy의 AABB를 관리하는 BVH임.
-* - leaf node는 하나의 proxy를 나타내고, internal node는 두 child의 AABB를 합친 범위를 저장함.
-* - 같은 parent를 공유하는 두 child를 형제 노드라고 하며, 두 형제 노드는 항상 연속된 index의 pair로 배치함.
-* - stable proxy id와 tree 안에서 바뀔 수 있는 node index를 분리해서 관리함.
-* - proxy는 AABB 외에도 category bits와 user data를 보관하고, leaf는 proxy id를 통해 이를 참조함.
+* [구조]
+* - BroadPhase에서 proxy AABB를 관리하는 BVH임.
+* - leaf는 proxy 하나를 나타내고 internal node는 두 child AABB의 Union을 저장함.
+* - root는 0번, 1번은 비워두고 같은 parent의 두 child를 연속된 pair로 배치함.
+* - stable proxy id와 tree 내부에서 바뀔 수 있는 node index를 분리함.
 *
-* [삽입]
-* - 새 leaf를 넣을 때 SAH를 이용해 함께 묶을 형제 노드를 찾음.
-* - 기존 형제 노드와 새 leaf를 child로 가지는 internal node를 만들고 tree에 연결함.
-* - 삽입 지점부터 root 방향으로 올라가며 AABB, height, moved 상태를 다시 계산함.
-* - 신규 삽입에서는 local rotation을 시도해 AABB perimeter 비용을 줄임.
+* [주요 흐름]
+* - 삽입: SAH로 새 leaf와 묶을 형제 노드를 찾고 parent를 만든 뒤 root까지 refit함.
+* - 신규 삽입에서는 refit 중 local rotation을 시도해 perimeter 비용을 줄임.
+* - 삭제: 남은 형제 노드를 parent 자리로 올리고 비어진 pair를 free-list에 반환함.
+* - 이동: 기존 leaf를 제거하고 같은 proxy id로 재삽입함. MoveProxy에서는 rotation을 생략함.
+* - Query: AABB가 겹치는 subtree만 내려가며 leaf proxy를 callback에 전달함.
 *
-* [local rotation]
-* - internal node와 아래 subtree의 연결 관계를 바꿨을 때 비용이 줄어드는지 비교함.
-* - 가능한 swap 중 perimeter를 가장 많이 줄이는 경우에만 rotation을 수행함.
-* - 기존 형제 노드 pair 안에서 node를 재배치하므로 pair의 연속 index 구조는 유지됨.
+* [현재 구현]
+* - proxy / sibling pair free-list, SAH 삽입, 삭제, MoveProxy, Query, local rotation, Validate 구현함.
+* - moved flag는 ancestor로 전파되지만 mark / clear / gather 수명 관리는 아직 없음.
+* - TreeProxy에 userData 공간은 있지만 생성/조회 경로에는 아직 연결하지 않음.
+* - category / mask filtering과 TreeStats는 아직 없음.
 *
-* [삭제]
-* - leaf를 제거하면 같은 parent를 공유하던 형제 노드를 기존 parent 자리로 올림.
-* - 더 이상 필요하지 않은 형제 노드 pair는 free-list에 반환함.
-* - 변경 지점부터 root 방향으로 AABB, height, moved 상태를 다시 계산함.
+* [Box2D에서 이어서 참고할 기능]
+* - category bits / userData 조회, EnlargeProxy
+* - CastRay / CastBox
+* - moved mark / clear / gather, Rebuild / Refit
+* - root bounds / byte count 등 보조 조회 기능
 *
-* [이동 / AABB 갱신]
-* - 일반적인 MoveProxy는 기존 leaf를 제거하고 새 AABB로 다시 삽입함.
-* - MoveProxy 재삽입에서는 신규 삽입과 달리 local rotation을 수행하지 않음.
-* - Box2D는 필요에 따라 proxy AABB를 넓히는 EnlargeProxy와 별도의 moved 표시 경로도 사용함.
-*
-* [검색]
-* - Query는 주어진 AABB와 겹치는 leaf를 순회하며 callback으로 proxy를 전달함.
-* - callback이 false를 반환하면 탐색을 조기에 종료할 수 있음.
-* - category/mask bits로 후보를 필터링하고, node/leaf 방문 횟수를 통계로 반환함.
-* - AABB Query 외에도 RayCast와 BoxCast를 DynamicTree에서 처리함.
-*
-* [moved / rebuild]
-* - moved flag는 변경된 leaf에서 ancestor 방향으로 전파해 변경된 subtree를 표시함.
-* - BroadPhase는 이 정보를 이용해 충돌 pair를 다시 만들어야 할 영역을 찾음.
-* - moved 상태를 clear/gather하는 기능과 stale subtree를 다시 구성하는 Rebuild/Refit 기능을 가짐.
-*
-* [Zonai 현재 구현 상태]
-* - [완료] root 0번, 1번 비움, 형제 노드 pair를 연속 index로 배치하는 node 구조.
-* - [완료] stable proxy id와 node index 분리, proxy/형제 노드 pair free-list.
-* - [완료] SAH 기반 형제 노드 탐색과 leaf 삽입.
-* - [완료] local rotation과 ancestor refit.
-* - [완료] leaf 삭제와 남은 형제 노드 승격.
-* - [완료] MoveProxy의 제거 후 재삽입, 재삽입 시 rotation 생략.
-* - [완료] AABB Query와 callback 조기 종료.
-* - [완료] GetProxyAABB, GetProxyCount, GetHeight, GetAreaRatio, Validate.
-* - [부분] moved flag 저장과 ancestor 전파는 구현됐지만 mark/clear/gather 수명 관리는 아직 없음.
-* - [부분] TreeProxy에 userData 공간은 있지만 생성/검색 경로에서 아직 사용하지 않음.
-* - [부분] Query는 겹치는 proxy 순회까지만 구현했고 category/mask filtering과 TreeStats는 아직 없음.
-* - [미구현] category bits 설정/조회, userData 조회.
-* - [미구현] EnlargeProxy와 별도의 proxy moved 표시 경로.
-* - [미구현] RayCast, BoxCast.
-* - [미구현] Rebuild, Refit, moved proxy gather/clear.
-* - [미구현] root bounds, byte count 등 보조 통계/조회 기능.
-*
-* [DynamicTree 이후 BroadPhase 목표]
-* - static / kinematic / dynamic body를 별도 DynamicTree로 관리함.
-* - moved 상태가 있는 형제 노드 pair를 모아 변경된 subtree만 pair 생성 대상으로 사용함.
-* - dynamic tree 내부는 형제 subtree끼리 self collision하고, static/kinematic tree와는 cross collision함.
-* - 생성된 candidate pair는 기존 pair와 중복되는지 확인하고 collision filtering을 적용함.
-* - 살아남은 shape pair를 Contact 생성 단계로 넘김.
+* [BroadPhase 다음 목표]
+* - static / kinematic / dynamic body를 별도 tree로 관리함.
+* - moved 형제 pair를 기준으로 dynamic self collision과 static / kinematic cross collision 후보를 생성함.
+* - 중복 제거와 collision filtering 후 살아남은 pair를 Contact 생성 단계로 넘김.
 */
 
 DynamicTree::DynamicTree()
@@ -208,7 +174,7 @@ float DynamicTree::GetAreaRatio() const
 
 bool DynamicTree::Validate() const
 {
-    // node 배열과 parent 배열의 기본 불변조건부터 확인
+    // node 배열과 parent 배열의 기본 불변조건부터 확인함.
     if( nodes_.size() < 2 ||
         nodes_.size() != parents_.size() ||
         ( nodes_.size() & 1u ) != 0 )
@@ -347,15 +313,13 @@ TreeNode DynamicTree::MakeInternalNode( std::int32_t childPair ) const
 
     TreeNode node{};
 
-    // internal node AABB = 두 child AABB를 모두 감싸는 AABB.
+    // 두 child 기준으로 AABB, moved flag, height를 다시 구성함.
     node.aabb = Union( child1.aabb, child2.aabb );
 
-    // child 중 하나라도 moved면 parent도 moved 상태로 올림.
     node.flagIndex =
         static_cast<std::uint32_t>( childPair ) |
         ( ( child1.flagIndex | child2.flagIndex ) & TREE_MOVED_NODE );
 
-    // internal node height = 더 깊은 child height + 1.
     node.height = 1 + std::max( GetNodeHeight( child1 ), GetNodeHeight( child2 ) );
 
     return node;
@@ -384,14 +348,13 @@ std::int32_t DynamicTree::AllocateProxy()
         proxyFreeList_ = static_cast<std::int32_t>( oldCapacity );
     }
 
-    // free-list 맨 앞에서 사용할 proxy id를 꺼냄.
+    // free-list head에서 proxy 하나를 꺼내고 다음 빈 proxy로 head를 옮김.
     const std::int32_t proxyId = proxyFreeList_;
     TreeProxy& proxy = proxies_[proxyId];
 
-    // free-list의 head를 다음 빈 proxy로 이동함.
     proxyFreeList_ = proxy.next;
 
-    // 꺼낸 proxy는 사용 중 상태로 초기화함.
+    // 꺼낸 proxy를 사용 상태로 초기화함.
     proxy.node = NULL_INDEX;
     proxy.next = NULL_INDEX;
 
@@ -404,7 +367,7 @@ void DynamicTree::FreeProxy( std::int32_t proxyId )
 {
     TreeProxy& proxy = proxies_[proxyId];
 
-    // 반환된 proxy id를 free-list 맨 앞에 다시 붙임.
+    // 반환된 proxy id를 free-list head 앞에 다시 붙임.
     proxy.node = NULL_INDEX;
     proxy.next = proxyFreeList_;
 
@@ -416,13 +379,14 @@ void DynamicTree::FreeProxy( std::int32_t proxyId )
 
 std::int32_t DynamicTree::AllocateSiblingPair()
 {
-    // 반납된 형제 노드 pair가 있으면 먼저 재활용함.
+    // free-list head에서 반납된 pair 하나를 꺼내고 다음 pair로 head를 옮김.
     if( pairFreeList_ != NULL_INDEX )
     {
         const std::int32_t pair = pairFreeList_;
 
-        pairFreeList_ = parents_[pair]; // FreeNode Head 변경
+        pairFreeList_ = parents_[pair];
 
+        // 재사용하기 전에 node와 parent 상태를 초기화함.
         nodes_[pair] = MakeEmptyNode();
         nodes_[pair + 1] = MakeEmptyNode();
 
@@ -456,7 +420,7 @@ void DynamicTree::FreeSiblingPair( std::int32_t pair )
     nodes_[pair] = MakeEmptyNode();
     nodes_[pair + 1] = MakeEmptyNode();
 
-    // 빈 pair의 첫 parent 값을 free-list의 next로 재활용함.
+    // free pair의 parents_[pair]를 next로 재활용하고 기존 head 앞에 붙임.
     parents_[pair] = pairFreeList_;
     parents_[pair + 1] = NULL_INDEX;
 
@@ -469,16 +433,16 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
 
     if( IsLeaf( nodes_[nodeIndex] ) )
     {
-		// root가 leaf면 형제가 없음
+		// 더 내려갈 child가 없으므로 root를 새 leaf의 형제 노드로 선택함.
         return nodeIndex;
     }
 
-	const float areaD = Perimeter( boxD ); // 새 leaf AABB 둘레
+	const float areaD = Perimeter( boxD ); // 새 leaf perimeter
 
-	aabb2 nodeBox = nodes_[nodeIndex].aabb; // root AABB
-	float areaBase = Perimeter( nodeBox );  // root AABB 둘레
-	float directCost = Perimeter( Union( nodeBox, boxD ) ); // root AABB와 새 leaf AABB를 합친 둘레
-	float inheritedCost = 0.0f; // root부터 내려가며 늘어난 AABB 비용을 누적함.
+	aabb2 nodeBox = nodes_[nodeIndex].aabb; // 현재 node AABB
+	float areaBase = Perimeter( nodeBox );  // 현재 node perimeter
+	float directCost = Perimeter( Union( nodeBox, boxD ) ); // 새 leaf를 포함한 Union perimeter
+	float inheritedCost = 0.0f; // ancestor에서 누적된 perimeter 증가 비용
 
     std::int32_t bestSibling = nodeIndex;
     float bestCost = directCost;
@@ -489,8 +453,8 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
         const std::int32_t child1 = GetChildPair( nodes_[nodeIndex] );
         const std::int32_t child2 = child1 + 1;
 
-        // 현재 node를 형제 노드로 선택했을 때의 비용을 계산함.
-        // 지금 비용 = union( 현재 노드, newAABB ) + 비용 누적 
+        // 현재 node를 형제 노드로 선택하면 Union perimeter에 ancestor 증가 비용까지 부담함.
+        // 선택 비용 = directCost + inheritedCost
         const float currentCost = directCost + inheritedCost;
 
         if( currentCost < bestCost )
@@ -499,8 +463,8 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
             bestCost = currentCost;
         }
 
-        // 새 AABB를 포함하면서 현재 노드의 perimeter가 증가한 만큼 누적 비용에 더함.
-        // 누적 비용 += Perimeter( Union( 현재 노드 AABB, 새 AABB ) ) - Perimeter( 현재 노드 AABB )
+        // 아래로 더 내려갈 때도 현재 node가 새 leaf를 포함하며 늘어난 perimeter는 공통으로 부담함.
+        // inheritedCost += Union perimeter - 기존 node perimeter
         inheritedCost += ( directCost - areaBase );
 
         const bool leaf1 = IsLeaf( nodes_[child1] );
@@ -508,13 +472,14 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
         const aabb2 leftBox = nodes_[child1].aabb;
         const aabb2 rightBox = nodes_[child2].aabb;
 
-        // 각 자식들과 newLeaf를 포함하는 AABB의 둘레를 계산
+        // 각 child를 새 leaf와 바로 묶었을 때의 Union perimeter를 구함.
         const float leftUnionPerimeter = Perimeter( Union( leftBox, boxD ) );
         const float rightUnionPerimeter = Perimeter( Union( rightBox, boxD ) );
 
         float leftPerimeter = 0.0f;
         float rightPerimeter = 0.0f;
 
+        // internal child는 실제 sibling이 아직 정해지지 않았으므로 subtree에서 가능한 최소 비용을 저장함.
         float leftCost = std::numeric_limits<float>::max();
         float rightCost = std::numeric_limits<float>::max();
 
@@ -532,8 +497,8 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
         {
             leftPerimeter = Perimeter( leftBox );
 
-            // child1 subtree에서 나올 수 있는 최소 비용을 예상함.
-            // areaD < leftPerimeter이면 더 작은 자식과 묶일 가능성을 lower bound에 반영함.
+            // child1 자체를 선택하거나 descendant까지 내려가는 경우 중 가능한 최소 비용을 구함.
+            // areaD < leftPerimeter이면 작은 descendant와 묶일 가능성만큼 lower bound가 낮아짐.
             leftCost = inheritedCost + leftUnionPerimeter + std::min( areaD - leftPerimeter, 0.0f );
         }
 
