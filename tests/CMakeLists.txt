@@ -210,3 +210,17 @@ add_test(
     NAME bodyTypeTests
     COMMAND bodyTypeTests
 )
+
+add_executable(broadPhaseTests
+    collision/broadphase/broad_phase_test.cpp
+)
+
+target_link_libraries(broadPhaseTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME broadPhaseTests
+    COMMAND broadPhaseTests
+)
