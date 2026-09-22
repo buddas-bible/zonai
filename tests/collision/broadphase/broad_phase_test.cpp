@@ -101,7 +101,13 @@ int main()
     moveBroadPhase.MoveProxy( movedStaticKey, movedBox );
 
     assert( moveBroadPhase.GetTree( BodyType::Static ).HasMoved() );
-    assert( moveBroadPhase.GetTree( BodyType::Static ).GetProxyAABB( GetProxyId( movedStaticKey ) ) == movedBox );
+
+    const aabb2& proxyAABB = moveBroadPhase.GetTree( BodyType::Static ).GetProxyAABB( GetProxyId( movedStaticKey ) );
+
+    assert( proxyAABB.min.x == movedBox.min.x );
+    assert( proxyAABB.min.y == movedBox.min.y );
+    assert( proxyAABB.max.x == movedBox.max.x );
+    assert( proxyAABB.max.y == movedBox.max.y );
     assert( moveBroadPhase.GetTree( BodyType::Static ).Validate() );
 
     return 0;
