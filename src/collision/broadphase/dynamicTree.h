@@ -53,6 +53,8 @@ concept TreeQueryCallback =
 
 class DynamicTree
 {
+    friend class BroadPhase;
+
 public:
     DynamicTree();
 

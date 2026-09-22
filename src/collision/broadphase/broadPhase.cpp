@@ -37,6 +37,29 @@ void BroadPhase::MoveProxy( ProxyKey proxyKey, const aabb2& aabb )
     GetTree( type ).MoveProxy( proxyId, aabb, true );
 }
 
+std::size_t BroadPhase::GatherMovedSiblings( const DynamicTree& tree, std::span<std::int32_t> pairIndices )
+{
+    const std::size_t pairCapacity = tree.nodes_.size() / 2;
+
+    assert( pairIndices.size() >= pairCapacity );
+
+    std::size_t count = 0;
+
+    // root를 제외하고 sibling pair를 순회하며 moved node가 포함된 pair만 모음.
+    for( std::int32_t pair = 2; static_cast<std::size_t>( pair ) < tree.nodes_.size(); pair += 2 )
+    {
+        const TreeNode& child1 = tree.nodes_[pair];
+        const TreeNode& child2 = tree.nodes_[pair + 1];
+
+        if( ( ( child1.flagIndex | child2.flagIndex ) & DynamicTree::TREE_MOVED_NODE ) != 0 )
+        {
+            pairIndices[count++] = pair;
+        }
+    }
+
+    return count;
+}
+
 DynamicTree& BroadPhase::GetTree( BodyType type )
 {
     const std::size_t index = static_cast<std::size_t>( type );

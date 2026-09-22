@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include "collision/broadphase/dynamicTree.h"
 #include "dynamics/bodyType.h"
@@ -48,6 +49,8 @@ public:
 
 private:
     static constexpr std::size_t BODY_TYPE_COUNT = static_cast<std::size_t>( BodyType::Count );
+
+    static std::size_t GatherMovedSiblings( const DynamicTree& tree, std::span<std::int32_t> pairIndices );
 
     // body type마다 독립된 DynamicTree를 사용함.
     std::array<DynamicTree, BODY_TYPE_COUNT> trees_{};
