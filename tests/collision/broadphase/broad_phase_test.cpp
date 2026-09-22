@@ -77,5 +77,15 @@ int main()
 
     assert( proxyBroadPhase.GetTree( BodyType::Static ).HasMoved() );
 
+    proxyBroadPhase.DestroyProxy( kinematicKey );
+
+    assert( proxyBroadPhase.GetTree( BodyType::Static ).GetProxyCount() == 2 );
+    assert( proxyBroadPhase.GetTree( BodyType::Kinematic ).GetProxyCount() == 0 );
+    assert( proxyBroadPhase.GetTree( BodyType::Dynamic ).GetProxyCount() == 1 );
+
+    assert( proxyBroadPhase.GetTree( BodyType::Static ).Validate() );
+    assert( proxyBroadPhase.GetTree( BodyType::Kinematic ).Validate() );
+    assert( proxyBroadPhase.GetTree( BodyType::Dynamic ).Validate() );
+
     return 0;
 }
