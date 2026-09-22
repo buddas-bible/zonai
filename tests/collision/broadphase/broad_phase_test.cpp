@@ -87,5 +87,22 @@ int main()
     assert( proxyBroadPhase.GetTree( BodyType::Kinematic ).Validate() );
     assert( proxyBroadPhase.GetTree( BodyType::Dynamic ).Validate() );
 
+    BroadPhase moveBroadPhase{};
+
+    const ProxyKey movedStaticKey = moveBroadPhase.CreateProxy( BodyType::Static, box, 21 );
+
+    assert( moveBroadPhase.GetTree( BodyType::Static ).HasMoved() == false );
+
+    const aabb2 movedBox{
+        { 2.0f, 0.0f },
+        { 3.0f, 1.0f }
+    };
+
+    moveBroadPhase.MoveProxy( movedStaticKey, movedBox );
+
+    assert( moveBroadPhase.GetTree( BodyType::Static ).HasMoved() );
+    assert( moveBroadPhase.GetTree( BodyType::Static ).GetProxyAABB( GetProxyId( movedStaticKey ) ) == movedBox );
+    assert( moveBroadPhase.GetTree( BodyType::Static ).Validate() );
+
     return 0;
 }
