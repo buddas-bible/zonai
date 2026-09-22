@@ -41,6 +41,7 @@ class BroadPhase
 public:
     ProxyKey CreateProxy( BodyType type, const aabb2& aabb, std::int32_t shapeIndex, bool forcePairCreation = false );
     void DestroyProxy( ProxyKey proxyKey );
+    void MoveProxy( ProxyKey proxyKey, const aabb2& aabb );
 
     DynamicTree& GetTree( BodyType type );
     const DynamicTree& GetTree( BodyType type ) const;

@@ -28,6 +28,15 @@ void BroadPhase::DestroyProxy( ProxyKey proxyKey )
     GetTree( type ).DestroyProxy( proxyId );
 }
 
+void BroadPhase::MoveProxy( ProxyKey proxyKey, const aabb2& aabb )
+{
+    const BodyType type = GetProxyType( proxyKey );
+    const std::int32_t proxyId = GetProxyId( proxyKey );
+
+    // BroadPhase에서 이동된 proxy는 새 pair 생성을 위해 항상 moved 처리함.
+    GetTree( type ).MoveProxy( proxyId, aabb, true );
+}
+
 DynamicTree& BroadPhase::GetTree( BodyType type )
 {
     const std::size_t index = static_cast<std::size_t>( type );
