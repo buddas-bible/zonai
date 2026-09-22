@@ -20,6 +20,14 @@ ProxyKey BroadPhase::CreateProxy(
     return MakeProxyKey( proxyId, type );
 }
 
+void BroadPhase::DestroyProxy( ProxyKey proxyKey )
+{
+    const BodyType type = GetProxyType( proxyKey );
+    const std::int32_t proxyId = GetProxyId( proxyKey );
+
+    GetTree( type ).DestroyProxy( proxyId );
+}
+
 DynamicTree& BroadPhase::GetTree( BodyType type )
 {
     const std::size_t index = static_cast<std::size_t>( type );
