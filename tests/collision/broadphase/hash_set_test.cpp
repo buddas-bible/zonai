@@ -37,5 +37,28 @@ int main()
         assert( set.Contains( 1000 + key ) );
     }
 
+    HashSet removalSet{};
+
+    // 1, 14, 27은 capacity 16에서 같은 initial slot을 사용해 probe chain을 만듦.
+    removalSet.Add( 1 );
+    removalSet.Add( 14 );
+    removalSet.Add( 27 );
+
+    assert( removalSet.GetCount() == 3 );
+
+    assert( removalSet.Remove( 1 ) );
+    assert( removalSet.GetCount() == 2 );
+    assert( removalSet.Contains( 1 ) == false );
+    assert( removalSet.Contains( 14 ) );
+    assert( removalSet.Contains( 27 ) );
+
+    assert( removalSet.Remove( 14 ) );
+    assert( removalSet.GetCount() == 1 );
+    assert( removalSet.Contains( 14 ) == false );
+    assert( removalSet.Contains( 27 ) );
+
+    assert( removalSet.Remove( 999 ) == false );
+    assert( removalSet.GetCount() == 1 );
+
     return 0;
 }
