@@ -20,6 +20,7 @@ ProxyKey BroadPhase::CreateProxy(
 
 void BroadPhase::DestroyProxy( ProxyKey proxyKey )
 {
+    // key 하나로 proxy가 속한 tree와 stable proxy id를 복원함.
     const BodyType type = GetProxyType( proxyKey );
     const std::int32_t proxyId = GetProxyId( proxyKey );
 
@@ -28,6 +29,7 @@ void BroadPhase::DestroyProxy( ProxyKey proxyKey )
 
 void BroadPhase::MoveProxy( ProxyKey proxyKey, const aabb2& aabb )
 {
+    // key에서 tree와 stable proxy id를 복원한 뒤 해당 proxy만 갱신함.
     const BodyType type = GetProxyType( proxyKey );
     const std::int32_t proxyId = GetProxyId( proxyKey );
 
@@ -48,6 +50,7 @@ bool BroadPhase::TestPair( const TreeNode& nodeA, const TreeNode& nodeB )
 
 std::size_t BroadPhase::GatherMovedSiblings( const DynamicTree& tree, std::span<std::int32_t> pairIndices )
 {
+    // sibling이 항상 2개씩 붙어 있으므로 전체 node 수의 절반이면 출력 공간이 충분함.
     const std::size_t pairCapacity = tree.nodes_.size() / 2;
 
     assert( pairIndices.size() >= pairCapacity );
