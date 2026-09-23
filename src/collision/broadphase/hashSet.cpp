@@ -36,6 +36,65 @@ bool HashSet::Add( std::uint64_t key )
     return false;
 }
 
+bool HashSet::Remove( std::uint64_t key )
+{
+    assert( key != 0 );
+
+    const std::uint64_t hash = KeyHash( key );
+    std::size_t emptyIndex = FindSlot( key, hash );
+
+    if( items_[emptyIndex] == 0 )
+    {
+        return false;
+    }
+
+    // 삭제한 slot을 비우고 뒤쪽 probe chain에서 필요한 항목을 앞으로 당김.
+    items_[emptyIndex] = 0;
+
+    assert( count_ > 0 );
+    --count_;
+
+    const std::size_t mask = items_.size() - 1;
+    std::size_t scanIndex = emptyIndex;
+
+    for( ;; )
+    {
+        scanIndex = ( scanIndex + 1 ) & mask;
+
+        if( items_[scanIndex] == 0 )
+        {
+            break;
+        }
+
+        // 현재 key가 hash상 처음 들어가려던 slot을 구함.
+        const std::size_t homeIndex = static_cast<std::size_t>( KeyHash( items_[scanIndex] ) ) & mask;
+
+        // homeIndex가 현재 빈 slot을 건너뛰지 않는 위치라면 그대로 둠.
+        if( emptyIndex <= scanIndex )
+        {
+            if( emptyIndex < homeIndex && homeIndex <= scanIndex )
+            {
+                continue;
+            }
+        }
+        else
+        {
+            // probe chain이 배열 끝에서 처음으로 wrap된 경우의 순환 구간을 처리함.
+            if( emptyIndex < homeIndex || homeIndex <= scanIndex )
+            {
+                continue;
+            }
+        }
+
+        // 빈 slot 때문에 탐색이 끊길 key를 앞으로 옮겨 probe chain을 복구함.
+        items_[emptyIndex] = items_[scanIndex];
+        items_[scanIndex] = 0;
+        emptyIndex = scanIndex;
+    }
+
+    return true;
+}
+
 bool HashSet::Contains( std::uint64_t key ) const
 {
     assert( key != 0 );

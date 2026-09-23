@@ -15,6 +15,9 @@ public:
     // 새 key면 false, 이미 존재하는 key면 true를 반환함.
     bool Add( std::uint64_t key );
 
+    // key를 찾으면 제거하고 true, 없으면 false를 반환함.
+    bool Remove( std::uint64_t key );
+
     bool Contains( std::uint64_t key ) const;
 
     std::size_t GetCount() const;
