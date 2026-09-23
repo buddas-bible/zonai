@@ -148,8 +148,10 @@ int main()
 
     std::sort( pairs.begin(), pairs.end() );
 
+    const std::pair<std::int32_t, std::int32_t> initialPair{ 31, 32 };
+
     assert( pairs.size() == 1 );
-    assert( pairs[0] == std::make_pair<std::int32_t, std::int32_t>( 31, 32 ) );
+    assert( pairs[0] == initialPair );
 
     pairBroadPhase.GetTree( BodyType::Dynamic ).ClearMoved();
     pairs.clear();
