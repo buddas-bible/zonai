@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <unordered_set>
 
 #include "collision/broadphase/dynamicTree.h"
 #include "collision/broadphase/hashSet.h"
@@ -323,6 +324,7 @@ private:
 
     // 이미 Contact를 가진 shape pair를 저장해 새 후보 생성에서 제외할 수 있게 함.
     HashSet pairSet_{ 32 };
+    std::unordered_set<std::uint64_t> pairSet_std_;
 };
 
 } // namespace zonai
