@@ -27,6 +27,17 @@ int main()
     static_assert( MakeShapePairKey( 10, 5 ) == shapePairKey );
     static_assert( MakeShapePairKey( 7, 7 ) == ( std::uint64_t{ 7 } << 32 | std::uint64_t{ 7 } ) );
 
+    BroadPhase pairSetBroadPhase{};
+    const ShapePairKey contactPairKey = MakeShapePairKey( 21, 34 );
+
+    assert( pairSetBroadPhase.HasPair( contactPairKey ) == false );
+    assert( pairSetBroadPhase.AddPair( contactPairKey ) == false );
+    assert( pairSetBroadPhase.HasPair( contactPairKey ) );
+    assert( pairSetBroadPhase.AddPair( contactPairKey ) );
+    assert( pairSetBroadPhase.RemovePair( contactPairKey ) );
+    assert( pairSetBroadPhase.HasPair( contactPairKey ) == false );
+    assert( pairSetBroadPhase.RemovePair( contactPairKey ) == false );
+
     BroadPhase broadPhase{};
 
     DynamicTree& staticTree = broadPhase.GetTree( BodyType::Static );
