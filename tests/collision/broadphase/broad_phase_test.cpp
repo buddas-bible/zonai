@@ -21,6 +21,12 @@ int main()
     static_assert( GetProxyId( key ) == 17 );
     static_assert( GetProxyType( key ) == BodyType::Kinematic );
 
+    constexpr ShapePairKey shapePairKey = MakeShapePairKey( 5, 10 );
+
+    static_assert( shapePairKey == ( std::uint64_t{ 5 } << 32 | std::uint64_t{ 10 } ) );
+    static_assert( MakeShapePairKey( 10, 5 ) == shapePairKey );
+    static_assert( MakeShapePairKey( 7, 7 ) == ( std::uint64_t{ 7 } << 32 | std::uint64_t{ 7 } ) );
+
     BroadPhase broadPhase{};
 
     DynamicTree& staticTree = broadPhase.GetTree( BodyType::Static );
