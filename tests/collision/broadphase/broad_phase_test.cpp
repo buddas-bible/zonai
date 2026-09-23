@@ -192,5 +192,81 @@ int main()
     assert( pairs == expectedPairs );
     assert( pairBroadPhase.GetTree( BodyType::Dynamic ).Validate() );
 
+    BroadPhase crossBroadPhase{};
+
+    const aabb2 staticBoxA{
+        { 0.0f, 0.0f },
+        { 2.0f, 2.0f }
+    };
+
+    const aabb2 staticBoxB{
+        { 10.0f, 0.0f },
+        { 12.0f, 2.0f }
+    };
+
+    const aabb2 dynamicBoxA{
+        { 1.0f, 0.0f },
+        { 3.0f, 2.0f }
+    };
+
+    const aabb2 dynamicBoxB{
+        { 20.0f, 0.0f },
+        { 21.0f, 1.0f }
+    };
+
+    crossBroadPhase.CreateProxy( BodyType::Static, staticBoxA, 41 );
+    const ProxyKey staticKeyB = crossBroadPhase.CreateProxy( BodyType::Static, staticBoxB, 42 );
+    crossBroadPhase.CreateProxy( BodyType::Dynamic, dynamicBoxA, 51 );
+    crossBroadPhase.CreateProxy( BodyType::Dynamic, dynamicBoxB, 52 );
+
+    std::vector<std::pair<std::int32_t, std::int32_t>> crossPairs;
+
+    crossBroadPhase.FindDynamicStaticPairs(
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            crossPairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    const std::pair<std::int32_t, std::int32_t> initialCrossPair{ 41, 51 };
+
+    assert( crossPairs.size() == 1 );
+    assert( crossPairs[0] == initialCrossPair );
+
+    crossBroadPhase.GetTree( BodyType::Static ).ClearMoved();
+    crossBroadPhase.GetTree( BodyType::Dynamic ).ClearMoved();
+    crossPairs.clear();
+
+    crossBroadPhase.FindDynamicStaticPairs(
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            crossPairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    assert( crossPairs.empty() );
+
+    const aabb2 movedStaticBoxB{
+        { 20.0f, 0.0f },
+        { 21.0f, 1.0f }
+    };
+
+    crossBroadPhase.MoveProxy( staticKeyB, movedStaticBoxB );
+    crossPairs.clear();
+
+    crossBroadPhase.FindDynamicStaticPairs(
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            crossPairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    const std::pair<std::int32_t, std::int32_t> movedStaticPair{ 42, 52 };
+
+    assert( crossPairs.size() == 1 );
+    assert( crossPairs[0] == movedStaticPair );
+    assert( crossBroadPhase.GetTree( BodyType::Static ).Validate() );
+    assert( crossBroadPhase.GetTree( BodyType::Dynamic ).Validate() );
+
     return 0;
 }
