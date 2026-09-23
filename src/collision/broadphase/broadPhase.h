@@ -15,6 +15,20 @@ namespace zonai
 // 상위 bit에는 proxy id, 하위 2bit에는 BodyType을 저장함.
 using ProxyKey = std::int32_t;
 
+// 두 shape index를 순서와 무관하게 식별하는 64-bit key.
+using ShapePairKey = std::uint64_t;
+
+// 작은 shape index를 상위 32bit에 두어 (A, B)와 (B, A)가 같은 key가 되게 함.
+constexpr ShapePairKey MakeShapePairKey( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+{
+    const std::uint32_t indexA = static_cast<std::uint32_t>( shapeIndexA );
+    const std::uint32_t indexB = static_cast<std::uint32_t>( shapeIndexB );
+    const std::uint32_t lower = indexA < indexB ? indexA : indexB;
+    const std::uint32_t upper = indexA < indexB ? indexB : indexA;
+
+    return static_cast<ShapePairKey>( lower ) << 32 | static_cast<ShapePairKey>( upper );
+}
+
 // BroadPhase가 찾은 후보 shape pair를 전달하는 callback 규약.
 template <typename Callback>
 concept BroadPhasePairCallback =
