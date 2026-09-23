@@ -37,6 +37,17 @@ void BroadPhase::MoveProxy( ProxyKey proxyKey, const aabb2& aabb )
     GetTree( type ).MoveProxy( proxyId, aabb, true );
 }
 
+bool BroadPhase::TestPair( const TreeNode& nodeA, const TreeNode& nodeB )
+{
+    // 둘 중 하나라도 moved이고 AABB가 겹칠 때만 새 pair 후보가 될 수 있음.
+    if( ( ( nodeA.flagIndex | nodeB.flagIndex ) & DynamicTree::TREE_MOVED_NODE ) == 0 )
+    {
+        return false;
+    }
+
+    return Overlaps( nodeA.aabb, nodeB.aabb );
+}
+
 std::size_t BroadPhase::GatherMovedSiblings( const DynamicTree& tree, std::span<std::int32_t> pairIndices )
 {
     const std::size_t pairCapacity = tree.nodes_.size() / 2;
