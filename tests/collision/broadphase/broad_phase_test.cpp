@@ -1,4 +1,8 @@
+#include <algorithm>
+#include <array>
 #include <cassert>
+#include <utility>
+#include <vector>
 
 #include "collision/broadphase/broadPhase.h"
 #include "dynamics/bodyType.h"
@@ -109,6 +113,82 @@ int main()
     assert( proxyAABB.max.x == movedBox.max.x );
     assert( proxyAABB.max.y == movedBox.max.y );
     assert( moveBroadPhase.GetTree( BodyType::Static ).Validate() );
+
+    BroadPhase pairBroadPhase{};
+
+    const aabb2 pairBoxA{
+        { 0.0f, 0.0f },
+        { 2.0f, 2.0f }
+    };
+
+    const aabb2 pairBoxB{
+        { 1.0f, 0.0f },
+        { 3.0f, 2.0f }
+    };
+
+    const aabb2 pairBoxC{
+        { 10.0f, 0.0f },
+        { 11.0f, 1.0f }
+    };
+
+    pairBroadPhase.CreateProxy( BodyType::Dynamic, pairBoxA, 31 );
+    pairBroadPhase.CreateProxy( BodyType::Dynamic, pairBoxB, 32 );
+    const ProxyKey pairKeyC = pairBroadPhase.CreateProxy( BodyType::Dynamic, pairBoxC, 33 );
+
+    std::array<std::int32_t, 16> movedSiblings{};
+    std::vector<std::pair<std::int32_t, std::int32_t>> pairs;
+
+    pairBroadPhase.FindDynamicSelfPairs(
+        movedSiblings,
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            pairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    std::sort( pairs.begin(), pairs.end() );
+
+    assert( pairs.size() == 1 );
+    assert( pairs[0] == std::make_pair<std::int32_t, std::int32_t>( 31, 32 ) );
+
+    pairBroadPhase.GetTree( BodyType::Dynamic ).ClearMoved();
+    pairs.clear();
+
+    pairBroadPhase.FindDynamicSelfPairs(
+        movedSiblings,
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            pairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    assert( pairs.empty() );
+
+    const aabb2 movedPairBoxC{
+        { 1.5f, 0.0f },
+        { 2.5f, 2.0f }
+    };
+
+    pairBroadPhase.MoveProxy( pairKeyC, movedPairBoxC );
+    pairs.clear();
+
+    pairBroadPhase.FindDynamicSelfPairs(
+        movedSiblings,
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            pairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    std::sort( pairs.begin(), pairs.end() );
+
+    const std::vector<std::pair<std::int32_t, std::int32_t>> expectedPairs{
+        { 31, 33 },
+        { 32, 33 }
+    };
+
+    assert( pairs == expectedPairs );
+    assert( pairBroadPhase.GetTree( BodyType::Dynamic ).Validate() );
 
     return 0;
 }
