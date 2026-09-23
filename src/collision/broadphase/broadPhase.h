@@ -81,6 +81,23 @@ public:
         }
     }
 
+    // dynamic tree와 static tree의 겹치는 subtree seed를 찾아 새 충돌 후보를 보고함.
+    template <BroadPhasePairCallback Callback>
+    void FindDynamicStaticPairs( Callback&& callback ) const
+    {
+        const DynamicTree& dynamicTree = GetTree( BodyType::Dynamic );
+        const DynamicTree& staticTree = GetTree( BodyType::Static );
+
+        std::array<TreeNodePair, CROSS_SEED_COUNT> seeds{};
+        const std::size_t seedCount = GatherCrossSeeds( dynamicTree, staticTree, seeds );
+
+        // 병렬 작업 시스템이 생기기 전까지는 seed를 현재 스레드에서 순서대로 처리함.
+        for( std::size_t i = 0; i < seedCount; ++i )
+        {
+            CollideCrossPairs( dynamicTree, staticTree, seeds[i].a, seeds[i].b, callback );
+        }
+    }
+
     DynamicTree& GetTree( BodyType type );
     const DynamicTree& GetTree( BodyType type ) const;
 
@@ -92,13 +109,29 @@ private:
         std::int32_t b = 0;
     };
 
+    // cross-tree 탐색을 병렬 작업 단위로 나누기 위한 subtree node 쌍.
+    struct TreeNodePair
+    {
+        TreeNode a{};
+        TreeNode b{};
+    };
+
     static constexpr std::size_t BODY_TYPE_COUNT = static_cast<std::size_t>( BodyType::Count );
+    static constexpr std::size_t CROSS_SEED_COUNT = 64;
+
+    static_assert( ( CROSS_SEED_COUNT & ( CROSS_SEED_COUNT - 1 ) ) == 0 );
 
     // 둘 중 하나가 moved이고 AABB가 겹치는지 확인함.
     static bool TestPair( const TreeNode& nodeA, const TreeNode& nodeB );
 
     // moved node가 포함된 sibling pair의 시작 index를 모음.
     static std::size_t GatherMovedSiblings( const DynamicTree& tree, std::span<std::int32_t> pairIndices );
+
+    // 서로 다른 tree의 root부터 BFS로 내려가며 겹치는 subtree 조합을 seed로 모음.
+    static std::size_t GatherCrossSeeds(
+        const DynamicTree& treeA,
+        const DynamicTree& treeB,
+        std::span<TreeNodePair> seeds );
 
     // leaf 두 개가 만나면 shape index 순서를 정규화해서 후보 pair를 전달함.
     template <BroadPhasePairCallback Callback>

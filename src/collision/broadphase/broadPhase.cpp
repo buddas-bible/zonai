@@ -72,6 +72,70 @@ std::size_t BroadPhase::GatherMovedSiblings( const DynamicTree& tree, std::span<
     return count;
 }
 
+std::size_t BroadPhase::GatherCrossSeeds(
+    const DynamicTree& treeA,
+    const DynamicTree& treeB,
+    std::span<TreeNodePair> seeds )
+{
+    assert( seeds.size() >= CROSS_SEED_COUNT );
+
+    // root 조합부터 BFS로 내려가며 병렬로 처리하기 좋은 subtree 단위까지 분할함.
+    std::array<TreeNodePair, 2 * CROSS_SEED_COUNT> queue{};
+    constexpr std::size_t QUEUE_MASK = 2 * CROSS_SEED_COUNT - 1;
+
+    std::size_t head = 0;
+    std::size_t tail = 0;
+
+    const TreeNode& rootA = treeA.nodes_[DynamicTree::ROOT_NODE];
+    const TreeNode& rootB = treeB.nodes_[DynamicTree::ROOT_NODE];
+
+    if( TestPair( rootA, rootB ) )
+    {
+        queue[tail++ & QUEUE_MASK] = { rootA, rootB };
+    }
+
+    std::size_t seedCount = 0;
+
+    // internal node 둘을 펼치면 최대 4개 조합이 생기므로 여유가 있을 때만 더 분할함.
+    while( head < tail && seedCount + ( tail - head ) + 3 < CROSS_SEED_COUNT )
+    {
+        const TreeNodePair pair = queue[head++ & QUEUE_MASK];
+
+        // 한쪽이라도 leaf면 더 균등하게 분할하기 어려우므로 현재 조합을 seed로 확정함.
+        if( DynamicTree::IsLeaf( pair.a ) || DynamicTree::IsLeaf( pair.b ) )
+        {
+            seeds[seedCount++] = pair;
+            continue;
+        }
+
+        const std::int32_t childPairA = DynamicTree::GetChildPair( pair.a );
+        const std::int32_t childPairB = DynamicTree::GetChildPair( pair.b );
+
+        // 두 internal node의 자식 2개씩을 조합해 최대 4개의 겹치는 subtree를 queue에 추가함.
+        for( std::int32_t i = 0; i < 2; ++i )
+        {
+            for( std::int32_t j = 0; j < 2; ++j )
+            {
+                const TreeNode& childA = treeA.nodes_[childPairA + i];
+                const TreeNode& childB = treeB.nodes_[childPairB + j];
+
+                if( TestPair( childA, childB ) )
+                {
+                    queue[tail++ & QUEUE_MASK] = { childA, childB };
+                }
+            }
+        }
+    }
+
+    // 더 분할하지 못한 queue 항목도 그대로 seed로 넘김.
+    while( head < tail )
+    {
+        seeds[seedCount++] = queue[head++ & QUEUE_MASK];
+    }
+
+    return seedCount;
+}
+
 DynamicTree& BroadPhase::GetTree( BodyType type )
 {
     const std::size_t index = static_cast<std::size_t>( type );
