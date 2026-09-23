@@ -361,5 +361,70 @@ int main()
     assert( kinematicCrossBroadPhase.GetTree( BodyType::Kinematic ).Validate() );
     assert( kinematicCrossBroadPhase.GetTree( BodyType::Dynamic ).Validate() );
 
+    BroadPhase candidateBroadPhase{};
+
+    const aabb2 candidateBox{
+        { 0.0f, 0.0f },
+        { 2.0f, 2.0f }
+    };
+
+    constexpr std::int32_t candidateDynamicShape = 200;
+    constexpr std::int32_t candidateStaticBase = 300;
+    constexpr std::int32_t candidateStaticCount = 40;
+
+    candidateBroadPhase.CreateProxy( BodyType::Dynamic, candidateBox, candidateDynamicShape );
+
+    for( std::int32_t i = 0; i < candidateStaticCount; ++i )
+    {
+        candidateBroadPhase.CreateProxy( BodyType::Static, candidateBox, candidateStaticBase + i );
+    }
+
+    std::vector<std::pair<std::int32_t, std::int32_t>> candidatePairs;
+
+    candidateBroadPhase.FindDynamicStaticPairs(
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    assert( candidatePairs.size() == candidateStaticCount );
+
+    constexpr std::int32_t existingStaticShape = candidateStaticBase + 15;
+    const ShapePairKey existingPairKey = MakeShapePairKey( candidateDynamicShape, existingStaticShape );
+
+    assert( candidateBroadPhase.AddPair( existingPairKey ) == false );
+
+    candidatePairs.clear();
+
+    candidateBroadPhase.FindDynamicStaticPairs(
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    assert( candidatePairs.size() == candidateStaticCount - 1 );
+    assert(
+        std::find(
+            candidatePairs.begin(),
+            candidatePairs.end(),
+            std::pair<std::int32_t, std::int32_t>{ candidateDynamicShape, existingStaticShape }
+        ) == candidatePairs.end()
+    );
+
+    assert( candidateBroadPhase.RemovePair( existingPairKey ) );
+
+    candidatePairs.clear();
+
+    candidateBroadPhase.FindDynamicStaticPairs(
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    assert( candidatePairs.size() == candidateStaticCount );
+
     return 0;
 }
