@@ -268,5 +268,81 @@ int main()
     assert( crossBroadPhase.GetTree( BodyType::Static ).Validate() );
     assert( crossBroadPhase.GetTree( BodyType::Dynamic ).Validate() );
 
+    BroadPhase kinematicCrossBroadPhase{};
+
+    const aabb2 kinematicBoxA{
+        { 0.0f, 0.0f },
+        { 2.0f, 2.0f }
+    };
+
+    const aabb2 kinematicBoxB{
+        { 10.0f, 0.0f },
+        { 12.0f, 2.0f }
+    };
+
+    const aabb2 kinematicDynamicBoxA{
+        { 1.0f, 0.0f },
+        { 3.0f, 2.0f }
+    };
+
+    const aabb2 kinematicDynamicBoxB{
+        { 20.0f, 0.0f },
+        { 21.0f, 1.0f }
+    };
+
+    kinematicCrossBroadPhase.CreateProxy( BodyType::Kinematic, kinematicBoxA, 61 );
+    const ProxyKey kinematicKeyB = kinematicCrossBroadPhase.CreateProxy( BodyType::Kinematic, kinematicBoxB, 62 );
+    kinematicCrossBroadPhase.CreateProxy( BodyType::Dynamic, kinematicDynamicBoxA, 71 );
+    kinematicCrossBroadPhase.CreateProxy( BodyType::Dynamic, kinematicDynamicBoxB, 72 );
+
+    std::vector<std::pair<std::int32_t, std::int32_t>> kinematicPairs;
+
+    kinematicCrossBroadPhase.FindDynamicKinematicPairs(
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            kinematicPairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    const std::pair<std::int32_t, std::int32_t> initialKinematicPair{ 61, 71 };
+
+    assert( kinematicPairs.size() == 1 );
+    assert( kinematicPairs[0] == initialKinematicPair );
+
+    kinematicCrossBroadPhase.GetTree( BodyType::Kinematic ).ClearMoved();
+    kinematicCrossBroadPhase.GetTree( BodyType::Dynamic ).ClearMoved();
+    kinematicPairs.clear();
+
+    kinematicCrossBroadPhase.FindDynamicKinematicPairs(
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            kinematicPairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    assert( kinematicPairs.empty() );
+
+    const aabb2 movedKinematicBoxB{
+        { 20.0f, 0.0f },
+        { 21.0f, 1.0f }
+    };
+
+    kinematicCrossBroadPhase.MoveProxy( kinematicKeyB, movedKinematicBoxB );
+    kinematicPairs.clear();
+
+    kinematicCrossBroadPhase.FindDynamicKinematicPairs(
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            kinematicPairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    const std::pair<std::int32_t, std::int32_t> movedKinematicPair{ 62, 72 };
+
+    assert( kinematicPairs.size() == 1 );
+    assert( kinematicPairs[0] == movedKinematicPair );
+    assert( kinematicCrossBroadPhase.GetTree( BodyType::Kinematic ).Validate() );
+    assert( kinematicCrossBroadPhase.GetTree( BodyType::Dynamic ).Validate() );
+
     return 0;
 }
