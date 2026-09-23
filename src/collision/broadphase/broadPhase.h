@@ -98,6 +98,23 @@ public:
         }
     }
 
+    // dynamic tree와 kinematic tree의 겹치는 subtree seed를 찾아 새 충돌 후보를 보고함.
+    template <BroadPhasePairCallback Callback>
+    void FindDynamicKinematicPairs( Callback&& callback ) const
+    {
+        const DynamicTree& dynamicTree = GetTree( BodyType::Dynamic );
+        const DynamicTree& kinematicTree = GetTree( BodyType::Kinematic );
+
+        std::array<TreeNodePair, CROSS_SEED_COUNT> seeds{};
+        const std::size_t seedCount = GatherCrossSeeds( dynamicTree, kinematicTree, seeds );
+
+        // static cross pair와 같은 탐색 경로를 kinematic tree에도 재사용함.
+        for( std::size_t i = 0; i < seedCount; ++i )
+        {
+            CollideCrossPairs( dynamicTree, kinematicTree, seeds[i].a, seeds[i].b, callback );
+        }
+    }
+
     DynamicTree& GetTree( BodyType type );
     const DynamicTree& GetTree( BodyType type ) const;
 
