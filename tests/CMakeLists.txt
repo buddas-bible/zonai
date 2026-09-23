@@ -224,3 +224,17 @@ add_test(
     NAME broadPhaseTests
     COMMAND broadPhaseTests
 )
+
+add_executable(hashSetTests
+    collision/broadphase/hash_set_test.cpp
+)
+
+target_link_libraries(hashSetTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME hashSetTests
+    COMMAND hashSetTests
+)
