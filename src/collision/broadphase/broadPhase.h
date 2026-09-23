@@ -7,6 +7,7 @@
 #include <span>
 
 #include "collision/broadphase/dynamicTree.h"
+#include "collision/broadphase/hashSet.h"
 #include "dynamics/bodyType.h"
 
 namespace zonai
@@ -75,6 +76,15 @@ public:
 
     // proxy AABB를 갱신하고 새 pair 탐색 대상이 되도록 moved 처리함.
     void MoveProxy( ProxyKey proxyKey, const aabb2& aabb );
+
+    // Contact가 존재하는 shape pair를 추적함. 새 pair면 false, 이미 있으면 true를 반환함.
+    bool AddPair( ShapePairKey pairKey );
+
+    // Contact가 사라진 shape pair를 추적 목록에서 제거함.
+    bool RemovePair( ShapePairKey pairKey );
+
+    // 이미 Contact가 존재하는 shape pair인지 확인함.
+    bool HasPair( ShapePairKey pairKey ) const;
 
     // moved sibling pair를 seed로 dynamic tree 내부의 새 충돌 후보를 찾음.
     // callback으로 전달되는 shape pair는 BroadPhase 후보이며 실제 충돌이 확정된 것은 아님.
@@ -310,6 +320,9 @@ private:
 
     // body type마다 독립된 DynamicTree를 사용함.
     std::array<DynamicTree, BODY_TYPE_COUNT> trees_{};
+
+    // 이미 Contact를 가진 shape pair를 저장해 새 후보 생성에서 제외할 수 있게 함.
+    HashSet pairSet_{ 32 };
 };
 
 } // namespace zonai

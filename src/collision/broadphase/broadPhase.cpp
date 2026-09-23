@@ -37,6 +37,21 @@ void BroadPhase::MoveProxy( ProxyKey proxyKey, const aabb2& aabb )
     GetTree( type ).MoveProxy( proxyId, aabb, true );
 }
 
+bool BroadPhase::AddPair( ShapePairKey pairKey )
+{
+    return pairSet_.Add( pairKey );
+}
+
+bool BroadPhase::RemovePair( ShapePairKey pairKey )
+{
+    return pairSet_.Remove( pairKey );
+}
+
+bool BroadPhase::HasPair( ShapePairKey pairKey ) const
+{
+    return pairSet_.Contains( pairKey );
+}
+
 bool BroadPhase::TestPair( const TreeNode& nodeA, const TreeNode& nodeB )
 {
     // 둘 중 하나라도 moved이고 AABB가 겹칠 때만 새 pair 후보가 될 수 있음.
