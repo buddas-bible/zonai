@@ -834,9 +834,7 @@ void DynamicTree::RemoveLeaf( std::int32_t leafIndex )
     );
 }
 
-void DynamicTree::RefitAncestors(
-    std::int32_t nodeIndex,
-    bool shouldRotate )
+void DynamicTree::RefitAncestors( std::int32_t nodeIndex, bool shouldRotate )
 {
     // 변경 지점에서 root 방향으로 한 단계씩 올라감.
     while( nodeIndex != NULL_INDEX )
@@ -862,10 +860,7 @@ void DynamicTree::RefitAncestors(
     }
 }
 
-bool DynamicTree::ValidateSubtree(
-    std::int32_t nodeIndex,
-    std::int32_t& height,
-    std::size_t& leafCount ) const
+bool DynamicTree::ValidateSubtree( std::int32_t nodeIndex, std::int32_t& height, std::size_t& leafCount ) const
 {
     // node index가 유효한 범위인지 확인함.
     if( nodeIndex < 0 ||
@@ -884,8 +879,7 @@ bool DynamicTree::ValidateSubtree(
     // leaf면 proxy -> leaf 매핑을 확인하고 height와 개수를 누적함.
     if( IsLeaf( node ) )
     {
-        const std::int32_t proxyId =
-            GetProxyId( node );
+        const std::int32_t proxyId = GetProxyId( node );
 
         if( proxyId < 0 ||
             static_cast<std::size_t>( proxyId ) >= proxies_.size() ||
@@ -900,8 +894,7 @@ bool DynamicTree::ValidateSubtree(
     }
 
     // internal node의 child pair가 2번 이후 짝수 index에서 시작하는지 확인함.
-    const std::int32_t childPair =
-        GetChildPair( node );
+    const std::int32_t childPair = GetChildPair( node );
 
     if( childPair < 2 ||
         ( childPair & 1 ) != 0 ||
@@ -927,8 +920,7 @@ bool DynamicTree::ValidateSubtree(
     }
 
     // 저장된 AABB가 두 child의 union과 정확히 같은지 확인함.
-    const aabb2 combined =
-        Union( child1.aabb, child2.aabb );
+    const aabb2 combined = Union( child1.aabb, child2.aabb );
 
     if( !ContainsAABB( node.aabb, combined ) ||
         !ContainsAABB( combined, node.aabb ) )
@@ -964,8 +956,7 @@ bool DynamicTree::ValidateSubtree(
         return false;
     }
 
-    height =
-        1 + std::max( height1, height2 );
+    height = 1 + std::max( height1, height2 );
 
     return node.height == height;
 }

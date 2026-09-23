@@ -59,6 +59,7 @@ public:
     DynamicTree();
 
 public:
+    // 
     std::int32_t CreateProxy( const aabb2& aabb, std::int32_t shapeIndex, bool markMoved = false );
     
     void DestroyProxy( std::int32_t proxyId );
