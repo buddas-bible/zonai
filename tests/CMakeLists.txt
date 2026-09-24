@@ -238,3 +238,18 @@ add_test(
     NAME hashSetTests
     COMMAND hashSetTests
 )
+
+
+add_executable(filterTests
+    collision/filter_test.cpp
+)
+
+target_link_libraries(filterTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME filterTests
+    COMMAND filterTests
+)
