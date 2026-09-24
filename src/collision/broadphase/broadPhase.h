@@ -145,6 +145,34 @@ public:
     // 이미 Contact가 존재하는 shape pair인지 확인함.
     bool HasPair( ShapePairKey pairKey ) const;
 
+    // BroadPhase의 한 update에서 후보 탐색과 tree maintenance를 순서대로 처리함.
+    template <BroadPhasePairCallback Callback>
+    void UpdatePairs( std::span<std::int32_t> movedSiblings, Callback&& callback )
+    {
+        DynamicTree& staticTree = GetTree( BodyType::Static );
+        DynamicTree& kinematicTree = GetTree( BodyType::Kinematic );
+        DynamicTree& dynamicTree = GetTree( BodyType::Dynamic );
+
+        // 최신 Box2D처럼 세 tree가 모두 깨끗하면 pair 탐색과 rebuild를 건너뜀.
+        const bool needUpdate =
+            staticTree.HasMoved() ||
+            kinematicTree.NeedsRebuild() ||
+            dynamicTree.NeedsRebuild();
+
+        if( !needUpdate )
+        {
+            return;
+        }
+
+        // moved 상태를 소비하기 전에 새 BroadPhase 후보를 모두 찾음.
+        FindPairs( movedSiblings, callback );
+
+        // static tree는 움직임 표시만 소비하고 dynamic / kinematic stale branch는 rebuild함.
+        staticTree.ClearMoved();
+        dynamicTree.Rebuild( false );
+        kinematicTree.Rebuild( false );
+    }
+
     // 세 BroadPhase 탐색 경로를 한 번에 실행해 새 충돌 후보를 모음.
     // moved flag 소비와 tree rebuild는 별도 단계에서 처리함.
     template <BroadPhasePairCallback Callback>
