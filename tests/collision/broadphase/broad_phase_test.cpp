@@ -490,5 +490,96 @@ int main()
     assert( combinedBroadPhase.GetTree( BodyType::Dynamic ).HasMoved() );
     assert( combinedBroadPhase.GetTree( BodyType::Kinematic ).HasMoved() );
 
+    BroadPhase updateBroadPhase{};
+
+    const aabb2 updateDynamicA{
+        { 0.0f, 0.0f },
+        { 1.0f, 1.0f }
+    };
+
+    const aabb2 updateDynamicB{
+        { 0.5f, 0.0f },
+        { 1.5f, 1.0f }
+    };
+
+    const aabb2 updateDynamicStatic{
+        { 10.0f, 0.0f },
+        { 11.0f, 1.0f }
+    };
+
+    const aabb2 updateStatic{
+        { 10.5f, 0.0f },
+        { 11.5f, 1.0f }
+    };
+
+    const aabb2 updateDynamicKinematic{
+        { 20.0f, 0.0f },
+        { 21.0f, 1.0f }
+    };
+
+    const aabb2 updateKinematic{
+        { 20.5f, 0.0f },
+        { 21.5f, 1.0f }
+    };
+
+    updateBroadPhase.CreateProxy( BodyType::Dynamic, updateDynamicA, 801 );
+    updateBroadPhase.CreateProxy( BodyType::Dynamic, updateDynamicB, 802 );
+    updateBroadPhase.CreateProxy( BodyType::Dynamic, updateDynamicStatic, 803 );
+
+    // static moved lifecycle도 검증하기 위해 pair 생성을 강제로 요청함.
+    updateBroadPhase.CreateProxy( BodyType::Static, updateStatic, 901, true );
+
+    updateBroadPhase.CreateProxy( BodyType::Dynamic, updateDynamicKinematic, 804 );
+    updateBroadPhase.CreateProxy( BodyType::Kinematic, updateKinematic, 1001 );
+
+    assert( updateBroadPhase.GetTree( BodyType::Static ).HasMoved() );
+    assert( updateBroadPhase.GetTree( BodyType::Dynamic ).NeedsRebuild() );
+    assert( updateBroadPhase.GetTree( BodyType::Kinematic ).NeedsRebuild() );
+
+    std::array<std::int32_t, 16> updateMovedSiblings{};
+    std::vector<std::pair<std::int32_t, std::int32_t>> updatePairs;
+
+    updateBroadPhase.UpdatePairs(
+        updateMovedSiblings,
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            updatePairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    std::sort( updatePairs.begin(), updatePairs.end() );
+
+    const std::vector<std::pair<std::int32_t, std::int32_t>> expectedUpdatePairs{
+        { 801, 802 },
+        { 803, 901 },
+        { 804, 1001 }
+    };
+
+    assert( updatePairs == expectedUpdatePairs );
+
+    // 한 update가 끝나면 static moved는 clear되고 dynamic / kinematic stale tree는 rebuild됨.
+    assert( updateBroadPhase.GetTree( BodyType::Static ).HasMoved() == false );
+    assert( updateBroadPhase.GetTree( BodyType::Dynamic ).HasMoved() == false );
+    assert( updateBroadPhase.GetTree( BodyType::Kinematic ).HasMoved() == false );
+    assert( updateBroadPhase.GetTree( BodyType::Dynamic ).NeedsRebuild() == false );
+    assert( updateBroadPhase.GetTree( BodyType::Kinematic ).NeedsRebuild() == false );
+
+    assert( updateBroadPhase.GetTree( BodyType::Static ).Validate() );
+    assert( updateBroadPhase.GetTree( BodyType::Dynamic ).Validate() );
+    assert( updateBroadPhase.GetTree( BodyType::Kinematic ).Validate() );
+
+    updatePairs.clear();
+
+    // 아무 tree도 dirty하지 않으면 다음 update는 바로 끝나서 후보를 다시 만들지 않음.
+    updateBroadPhase.UpdatePairs(
+        updateMovedSiblings,
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            updatePairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    assert( updatePairs.empty() );
+
     return 0;
 }
