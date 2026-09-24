@@ -426,5 +426,69 @@ int main()
 
     assert( candidatePairs.size() == candidateStaticCount );
 
+    BroadPhase combinedBroadPhase{};
+
+    const aabb2 selfBoxA{
+        { 0.0f, 0.0f },
+        { 1.0f, 1.0f }
+    };
+
+    const aabb2 selfBoxB{
+        { 0.5f, 0.0f },
+        { 1.5f, 1.0f }
+    };
+
+    const aabb2 staticDynamicBox{
+        { 10.0f, 0.0f },
+        { 11.0f, 1.0f }
+    };
+
+    const aabb2 staticCrossBox{
+        { 10.5f, 0.0f },
+        { 11.5f, 1.0f }
+    };
+
+    const aabb2 kinematicDynamicBox{
+        { 20.0f, 0.0f },
+        { 21.0f, 1.0f }
+    };
+
+    const aabb2 kinematicCrossBox{
+        { 20.5f, 0.0f },
+        { 21.5f, 1.0f }
+    };
+
+    combinedBroadPhase.CreateProxy( BodyType::Dynamic, selfBoxA, 501 );
+    combinedBroadPhase.CreateProxy( BodyType::Dynamic, selfBoxB, 502 );
+    combinedBroadPhase.CreateProxy( BodyType::Dynamic, staticDynamicBox, 503 );
+    combinedBroadPhase.CreateProxy( BodyType::Dynamic, kinematicDynamicBox, 504 );
+    combinedBroadPhase.CreateProxy( BodyType::Static, staticCrossBox, 601 );
+    combinedBroadPhase.CreateProxy( BodyType::Kinematic, kinematicCrossBox, 701 );
+
+    std::array<std::int32_t, 16> combinedMovedSiblings{};
+    std::vector<std::pair<std::int32_t, std::int32_t>> combinedPairs;
+
+    combinedBroadPhase.FindPairs(
+        combinedMovedSiblings,
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            combinedPairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    std::sort( combinedPairs.begin(), combinedPairs.end() );
+
+    const std::vector<std::pair<std::int32_t, std::int32_t>> expectedCombinedPairs{
+        { 501, 502 },
+        { 503, 601 },
+        { 504, 701 }
+    };
+
+    assert( combinedPairs == expectedCombinedPairs );
+
+    // pair 탐색과 moved 소비를 분리해 이후 Rebuild 단계에서 Box2D와 같은 lifecycle을 연결함.
+    assert( combinedBroadPhase.GetTree( BodyType::Dynamic ).HasMoved() );
+    assert( combinedBroadPhase.GetTree( BodyType::Kinematic ).HasMoved() );
+
     return 0;
 }
