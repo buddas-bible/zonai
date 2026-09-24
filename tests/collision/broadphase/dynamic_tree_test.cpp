@@ -369,6 +369,69 @@ int main()
     }
 
     {
+        DynamicTree rebuildTree{};
+
+        const aabb2 boxA{
+            { 0.0f, 0.0f },
+            { 1.0f, 1.0f }
+        };
+
+        const aabb2 boxB{
+            { 2.0f, 0.0f },
+            { 3.0f, 1.0f }
+        };
+
+        const aabb2 boxC{
+            { 10.0f, 0.0f },
+            { 11.0f, 1.0f }
+        };
+
+        const aabb2 boxD{
+            { 12.0f, 0.0f },
+            { 13.0f, 1.0f }
+        };
+
+        const aabb2 movedA{
+            { 0.25f, 0.0f },
+            { 1.25f, 1.0f }
+        };
+
+        const std::int32_t proxyA = rebuildTree.CreateProxy( boxA, 1 );
+        const std::int32_t proxyB = rebuildTree.CreateProxy( boxB, 2 );
+        const std::int32_t proxyC = rebuildTree.CreateProxy( boxC, 3 );
+        const std::int32_t proxyD = rebuildTree.CreateProxy( boxD, 4 );
+
+        // full rebuild는 모든 proxy를 build leaf로 사용하고 DFS 배열 순서를 복구함.
+        assert( rebuildTree.Rebuild( true ) == 4 );
+        assert( rebuildTree.NeedsRebuild() == false );
+        assert( rebuildTree.Validate() );
+
+        // 변화가 없으면 partial rebuild는 아무 작업도 하지 않음.
+        assert( rebuildTree.Rebuild( false ) == 0 );
+
+        rebuildTree.MoveProxy( proxyA, movedA, true );
+
+        assert( rebuildTree.HasMoved() );
+        assert( rebuildTree.NeedsRebuild() );
+
+        const std::size_t partialCount = rebuildTree.Rebuild( false );
+
+        // moved branch만 펼치고 untouched subtree는 하나의 build leaf로 유지함.
+        assert( partialCount > 0 );
+        assert( partialCount < rebuildTree.GetProxyCount() );
+
+        assert( rebuildTree.HasMoved() == false );
+        assert( rebuildTree.NeedsRebuild() == false );
+        assert( rebuildTree.Validate() );
+
+        // rebuild 뒤에도 stable proxy id와 각 proxy AABB는 유지되어야 함.
+        assert( NearlyEqual( rebuildTree.GetProxyAABB( proxyA ), movedA ) );
+        assert( NearlyEqual( rebuildTree.GetProxyAABB( proxyB ), boxB ) );
+        assert( NearlyEqual( rebuildTree.GetProxyAABB( proxyC ), boxC ) );
+        assert( NearlyEqual( rebuildTree.GetProxyAABB( proxyD ), boxD ) );
+    }
+
+    {
         DynamicTree balancedTree{};
 
         for( int i = 0; i < 8; ++i )
