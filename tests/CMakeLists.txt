@@ -253,3 +253,18 @@ add_test(
     NAME filterTests
     COMMAND filterTests
 )
+
+
+add_executable(shapeTests
+    collision/shape_test.cpp
+)
+
+target_link_libraries(shapeTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME shapeTests
+    COMMAND shapeTests
+)
