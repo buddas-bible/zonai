@@ -138,6 +138,12 @@ bool DynamicTree::HasMoved() const
     return ( nodes_[ROOT_NODE].flagIndex & TREE_MOVED_NODE ) != 0;
 }
 
+bool DynamicTree::NeedsRebuild() const
+{
+    // 최신 Box2D처럼 moved branch뿐 아니라 DFS node 순서가 깨진 경우에도 rebuild가 필요함.
+    return HasMoved() || !dfsOrdered_;
+}
+
 void DynamicTree::ClearMoved()
 {
     if( !HasMoved() )
@@ -340,6 +346,14 @@ std::int32_t DynamicTree::GetProxyId( const TreeNode& node )
 std::int32_t DynamicTree::GetNodeHeight( const TreeNode& node )
 {
     return IsLeaf( node ) ? 0 : node.height;
+}
+
+bool DynamicTree::IsNodeOrdered( std::int32_t nodeIndex ) const
+{
+    const TreeNode& node = nodes_[nodeIndex];
+
+    // leaf는 child가 없어서 항상 ordered이고 internal node는 parent index가 child pair보다 앞에 있어야 함.
+    return IsLeaf( node ) || nodeIndex < GetChildPair( node );
 }
 
 TreeNode DynamicTree::MakeEmptyNode()
@@ -643,6 +657,12 @@ void DynamicTree::SwapNodes( std::int32_t downIndex, std::int32_t upIndex )
     LinkChildren( downIndex );
     LinkChildren( upIndex );
 
+    // rotation으로 parent가 child보다 뒤 index로 이동할 수 있으므로 DFS 배열 순서를 추적함.
+    if( !IsNodeOrdered( downIndex ) || !IsNodeOrdered( upIndex ) )
+    {
+        dfsOrdered_ = false;
+    }
+
     // downIndex와 같은 pair의 반대 node는 rotation 후 child 구성이 바뀐 internal node임.
     // 새 child 기준으로 AABB, moved flag, height를 다시 계산함.
     const std::int32_t siblingIndex = downIndex ^ 1;
@@ -782,6 +802,12 @@ void DynamicTree::InsertLeaf( const TreeNode& leaf, bool shouldRotate )
     // 기존 형제 노드 자리를 두 child를 감싸는 internal node로 바꿈.
     nodes_[siblingIndex] = MakeInternalNode( childPair );
     parents_[siblingIndex] = oldParent;
+
+    // internal sibling을 새 pair로 내려보내면 기존 child가 더 앞 index에 남아 DFS 순서가 깨질 수 있음.
+    if( !IsNodeOrdered( siblingIndex ) || !IsNodeOrdered( childPair ) )
+    {
+        dfsOrdered_ = false;
+    }
 
     // 변경 지점부터 root까지 refit하고 신규 삽입이면 local rotation도 시도함.
     RefitAncestors( siblingIndex, shouldRotate );

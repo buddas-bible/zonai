@@ -68,6 +68,9 @@ public:
 
     bool HasMoved() const;
 
+    // moved branch가 있거나 DFS 배열 순서가 깨졌으면 rebuild가 필요함.
+    bool NeedsRebuild() const;
+
     void ClearMoved();
 
     std::size_t GetProxyCount() const;
@@ -155,6 +158,9 @@ private:
     static std::int32_t GetProxyId( const TreeNode& node );
     static std::int32_t GetNodeHeight( const TreeNode& node );
 
+    // sweep refit을 위해 internal node가 자기 child pair보다 앞 index에 있는지 확인함.
+    bool IsNodeOrdered( std::int32_t nodeIndex ) const;
+
     static TreeNode MakeEmptyNode();
     static TreeNode MakeLeafNode( const aabb2& aabb, std::int32_t proxyId, std::int32_t shapeIndex, bool moved );
 
@@ -192,6 +198,10 @@ private:
     std::int32_t pairFreeList_ = NULL_INDEX;
 
     std::size_t proxyCount_ = 0;
+
+    // Rebuild 후에는 parent가 child보다 앞에 놓이는 DFS 순서를 유지함.
+    // 삽입이나 rotation으로 이 순서가 깨지면 다음 rebuild까지 false로 유지함.
+    bool dfsOrdered_ = true;
 };
 
 } // namespace zonai
