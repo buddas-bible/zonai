@@ -145,6 +145,19 @@ public:
     // 이미 Contact가 존재하는 shape pair인지 확인함.
     bool HasPair( ShapePairKey pairKey ) const;
 
+    // 세 BroadPhase 탐색 경로를 한 번에 실행해 새 충돌 후보를 모음.
+    // moved flag 소비와 tree rebuild는 별도 단계에서 처리함.
+    template <BroadPhasePairCallback Callback>
+    void FindPairs( std::span<std::int32_t> movedSiblings, Callback&& callback ) const
+    {
+        // Box2D처럼 dynamic tree를 static / kinematic tree와 먼저 교차 검사함.
+        FindDynamicStaticPairs( callback );
+        FindDynamicKinematicPairs( callback );
+
+        // cross pair를 찾은 뒤 dynamic tree 내부의 self pair를 검사함.
+        FindDynamicSelfPairs( movedSiblings, callback );
+    }
+
     // moved sibling pair를 seed로 dynamic tree 내부의 새 충돌 후보를 찾음.
     // callback으로 전달되는 shape pair는 BroadPhase 후보이며 실제 충돌이 확정된 것은 아님.
     template <BroadPhasePairCallback Callback>
