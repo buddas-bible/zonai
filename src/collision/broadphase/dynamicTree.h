@@ -71,6 +71,10 @@ public:
     // moved branch가 있거나 DFS 배열 순서가 깨졌으면 rebuild가 필요함.
     bool NeedsRebuild() const;
 
+    // stale branch만 다시 만들고 untouched subtree는 유지함.
+    // 실제로 정렬한 build leaf 개수를 반환함.
+    std::size_t Rebuild( bool fullBuild = false );
+
     void ClearMoved();
 
     std::size_t GetProxyCount() const;
@@ -140,6 +144,22 @@ public:
     }
 
 private:
+    struct RebuildItem
+    {
+        std::int32_t nodeIndex = 0;
+        std::int32_t pair = 0;
+        std::int32_t childCount = 0;
+        std::size_t startIndex = 0;
+        std::size_t splitIndex = 0;
+        std::size_t endIndex = 0;
+    };
+
+    struct CopyItem
+    {
+        std::int32_t oldPair = 0;
+        std::int32_t newIndex = 0;
+    };
+
     static constexpr std::uint32_t TREE_MOVED_NODE = 1u << 30;
     static constexpr std::uint32_t TREE_LEAF_NODE = 1u << 31;
     static constexpr std::uint32_t TREE_NODE_INDEX_MASK = ~( TREE_MOVED_NODE | TREE_LEAF_NODE );
@@ -157,6 +177,7 @@ private:
     static std::int32_t GetChildPair( const TreeNode& node );
     static std::int32_t GetProxyId( const TreeNode& node );
     static std::int32_t GetNodeHeight( const TreeNode& node );
+    static void SetChildPair( TreeNode& node, std::int32_t pair );
 
     // sweep refit을 위해 internal node가 자기 child pair보다 앞 index에 있는지 확인함.
     bool IsNodeOrdered( std::int32_t nodeIndex ) const;
@@ -165,7 +186,17 @@ private:
     static TreeNode MakeLeafNode( const aabb2& aabb, std::int32_t proxyId, std::int32_t shapeIndex, bool moved );
 
 private:
+    static TreeNode MakeInternalNodeFrom(
+        const std::vector<TreeNode>& nodes,
+        std::int32_t childPair );
+
     TreeNode MakeInternalNode( std::int32_t childPair ) const;
+
+    std::size_t PartitionRebuildLeaves( std::size_t startIndex, std::size_t count );
+    std::int32_t BumpRebuildPair( std::int32_t parent, std::int32_t& nodeEnd );
+    void CopySubtree( TreeNode node, std::int32_t newIndex, std::int32_t& nodeEnd );
+    void PlaceRebuildLeaf( const TreeNode& node, std::int32_t newIndex, std::int32_t& nodeEnd );
+    void BuildRebuildTree( std::size_t leafCount );
 
     // proxy 할당 및 해제
     std::int32_t AllocateProxy();
@@ -190,6 +221,12 @@ private:
     std::vector<TreeNode> nodes_{};
     std::vector<std::int32_t> parents_{};
     std::vector<TreeProxy> proxies_{};
+
+    // Rebuild에서 재사용하는 scratch buffer. 매 frame 작은 allocation이 생기지 않게 유지함.
+    std::vector<TreeNode> rebuildNodes_{};
+    std::vector<std::int32_t> rebuildLeafIndices_{};
+    std::vector<TreeNode> rebuildLeafNodes_{};
+    std::vector<vec2> rebuildLeafCenters_{};
 
     // free proxy 연결 리스트의 head index.
     std::int32_t proxyFreeList_ = NULL_INDEX;

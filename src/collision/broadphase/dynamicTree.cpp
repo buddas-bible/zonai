@@ -144,6 +144,88 @@ bool DynamicTree::NeedsRebuild() const
     return HasMoved() || !dfsOrdered_;
 }
 
+std::size_t DynamicTree::Rebuild( bool fullBuild )
+{
+    if( proxyCount_ == 0 )
+    {
+        return 0;
+    }
+
+    // DFS 순서도 정상이고 moved branch도 없으면 partial rebuild는 할 일이 없음.
+    if( !fullBuild && !NeedsRebuild() )
+    {
+        return 0;
+    }
+
+    rebuildLeafIndices_.resize( proxyCount_ );
+    rebuildLeafNodes_.resize( proxyCount_ );
+    rebuildLeafCenters_.resize( proxyCount_ );
+
+    const TreeNode& root = nodes_[ROOT_NODE];
+
+    std::size_t leafCount = 0;
+    std::array<std::int32_t, TREE_STACK_SIZE> stack{};
+    std::size_t stackCount = 0;
+
+    auto addBuildLeaf =
+        [&]( TreeNode node )
+        {
+            // build leaf로 채택된 subtree는 이번 rebuild에서 소비 완료된 상태로 저장함.
+            node.flagIndex &= ~TREE_MOVED_NODE;
+
+            rebuildLeafIndices_[leafCount] = static_cast<std::int32_t>( leafCount );
+            rebuildLeafNodes_[leafCount] = node;
+            rebuildLeafCenters_[leafCount] = Center( node.aabb );
+            ++leafCount;
+        };
+
+    // moved internal node만 펼치고 untouched subtree는 하나의 build leaf로 유지함.
+    if( !IsLeaf( root ) &&
+        ( fullBuild || ( root.flagIndex & TREE_MOVED_NODE ) != 0 ) )
+    {
+        stack[stackCount++] = GetChildPair( root );
+    }
+    else
+    {
+        addBuildLeaf( root );
+    }
+
+    while( stackCount > 0 )
+    {
+        const std::int32_t pair = stack[--stackCount];
+
+        for( std::int32_t i = 0; i < 2; ++i )
+        {
+            TreeNode node = nodes_[pair + i];
+
+            if( !IsLeaf( node ) &&
+                ( fullBuild || ( node.flagIndex & TREE_MOVED_NODE ) != 0 ) )
+            {
+                assert( stackCount < stack.size() );
+                stack[stackCount++] = GetChildPair( node );
+                continue;
+            }
+
+            addBuildLeaf( node );
+        }
+    }
+
+    assert( leafCount > 0 );
+    assert( leafCount <= proxyCount_ );
+
+    BuildRebuildTree( leafCount );
+
+    // 새 배열은 DFS 순서로 조밀하게 구성되므로 free pair가 남지 않음.
+    nodes_.swap( rebuildNodes_ );
+    pairFreeList_ = NULL_INDEX;
+    dfsOrdered_ = true;
+
+    assert( Validate() );
+    assert( !HasMoved() );
+
+    return leafCount;
+}
+
 void DynamicTree::ClearMoved()
 {
     if( !HasMoved() )
@@ -348,6 +430,13 @@ std::int32_t DynamicTree::GetNodeHeight( const TreeNode& node )
     return IsLeaf( node ) ? 0 : node.height;
 }
 
+void DynamicTree::SetChildPair( TreeNode& node, std::int32_t pair )
+{
+    node.flagIndex =
+        ( node.flagIndex & ~TREE_NODE_INDEX_MASK ) |
+        static_cast<std::uint32_t>( pair );
+}
+
 bool DynamicTree::IsNodeOrdered( std::int32_t nodeIndex ) const
 {
     const TreeNode& node = nodes_[nodeIndex];
@@ -386,10 +475,12 @@ TreeNode DynamicTree::MakeLeafNode(
     return node;
 }
 
-TreeNode DynamicTree::MakeInternalNode( std::int32_t childPair ) const
+TreeNode DynamicTree::MakeInternalNodeFrom(
+    const std::vector<TreeNode>& nodes,
+    std::int32_t childPair )
 {
-    const TreeNode& child1 = nodes_[childPair];
-    const TreeNode& child2 = nodes_[childPair + 1];
+    const TreeNode& child1 = nodes[childPair];
+    const TreeNode& child2 = nodes[childPair + 1];
 
     TreeNode node{};
 
@@ -403,6 +494,305 @@ TreeNode DynamicTree::MakeInternalNode( std::int32_t childPair ) const
     node.height = 1 + std::max( GetNodeHeight( child1 ), GetNodeHeight( child2 ) );
 
     return node;
+}
+
+TreeNode DynamicTree::MakeInternalNode( std::int32_t childPair ) const
+{
+    return MakeInternalNodeFrom( nodes_, childPair );
+}
+
+std::size_t DynamicTree::PartitionRebuildLeaves(
+    std::size_t startIndex,
+    std::size_t count )
+{
+    if( count <= 2 )
+    {
+        return count / 2;
+    }
+
+    vec2 lower = rebuildLeafCenters_[startIndex];
+    vec2 upper = lower;
+
+    for( std::size_t i = 1; i < count; ++i )
+    {
+        const vec2 center = rebuildLeafCenters_[startIndex + i];
+
+        lower.x = std::min( lower.x, center.x );
+        lower.y = std::min( lower.y, center.y );
+        upper.x = std::max( upper.x, center.x );
+        upper.y = std::max( upper.y, center.y );
+    }
+
+    const vec2 extent = upper - lower;
+    const vec2 midpoint = ( lower + upper ) * 0.5f;
+
+    std::size_t first = 0;
+    std::size_t last = count;
+
+    // 최신 Box2D처럼 center가 가장 넓게 퍼진 축의 중간값을 기준으로 Hoare partition함.
+    if( extent.x > extent.y )
+    {
+        const float pivot = midpoint.x;
+
+        while( first < last )
+        {
+            while( first < last &&
+                rebuildLeafCenters_[startIndex + first].x < pivot )
+            {
+                ++first;
+            }
+
+            while( first < last &&
+                rebuildLeafCenters_[startIndex + last - 1].x >= pivot )
+            {
+                --last;
+            }
+
+            if( first < last )
+            {
+                std::swap(
+                    rebuildLeafIndices_[startIndex + first],
+                    rebuildLeafIndices_[startIndex + last - 1] );
+                std::swap(
+                    rebuildLeafCenters_[startIndex + first],
+                    rebuildLeafCenters_[startIndex + last - 1] );
+
+                ++first;
+                --last;
+            }
+        }
+    }
+    else
+    {
+        const float pivot = midpoint.y;
+
+        while( first < last )
+        {
+            while( first < last &&
+                rebuildLeafCenters_[startIndex + first].y < pivot )
+            {
+                ++first;
+            }
+
+            while( first < last &&
+                rebuildLeafCenters_[startIndex + last - 1].y >= pivot )
+            {
+                --last;
+            }
+
+            if( first < last )
+            {
+                std::swap(
+                    rebuildLeafIndices_[startIndex + first],
+                    rebuildLeafIndices_[startIndex + last - 1] );
+                std::swap(
+                    rebuildLeafCenters_[startIndex + first],
+                    rebuildLeafCenters_[startIndex + last - 1] );
+
+                ++first;
+                --last;
+            }
+        }
+    }
+
+    assert( first == last );
+
+    // 한쪽이 비는 퇴화 partition은 단순 중앙 분할로 보정함.
+    if( first == 0 || first == count )
+    {
+        return count / 2;
+    }
+
+    return first;
+}
+
+std::int32_t DynamicTree::BumpRebuildPair(
+    std::int32_t parent,
+    std::int32_t& nodeEnd )
+{
+    const std::int32_t pair = nodeEnd;
+
+    assert( pair >= 2 );
+    assert( ( pair & 1 ) == 0 );
+    assert( static_cast<std::size_t>( pair + 1 ) < rebuildNodes_.size() );
+
+    nodeEnd += 2;
+    parents_[pair] = parent;
+    parents_[pair + 1] = parent;
+
+    return pair;
+}
+
+void DynamicTree::CopySubtree(
+    TreeNode node,
+    std::int32_t newIndex,
+    std::int32_t& nodeEnd )
+{
+    if( IsLeaf( node ) )
+    {
+        rebuildNodes_[newIndex] = node;
+        proxies_[GetProxyId( node )].node = newIndex;
+        return;
+    }
+
+    std::array<CopyItem, TREE_STACK_SIZE> stack{};
+    std::size_t stackCount = 0;
+
+    std::int32_t oldPair = GetChildPair( node );
+    std::int32_t newPair = BumpRebuildPair( newIndex, nodeEnd );
+    SetChildPair( node, newPair );
+
+    // retained subtree root를 새 DFS 배열의 지정된 위치에 복사함.
+    rebuildNodes_[newIndex] = node;
+
+    for( ;; )
+    {
+        rebuildNodes_[newPair] = nodes_[oldPair];
+        rebuildNodes_[newPair + 1] = nodes_[oldPair + 1];
+
+        TreeNode& right = rebuildNodes_[newPair + 1];
+
+        if( IsLeaf( right ) )
+        {
+            proxies_[GetProxyId( right )].node = newPair + 1;
+        }
+        else
+        {
+            assert( stackCount < stack.size() );
+            stack[stackCount++] = { GetChildPair( right ), newPair + 1 };
+        }
+
+        TreeNode& left = rebuildNodes_[newPair];
+
+        if( !IsLeaf( left ) )
+        {
+            const std::int32_t leftIndex = newPair;
+
+            oldPair = GetChildPair( left );
+            newPair = BumpRebuildPair( leftIndex, nodeEnd );
+            SetChildPair( rebuildNodes_[leftIndex], newPair );
+            continue;
+        }
+
+        proxies_[GetProxyId( left )].node = newPair;
+
+        if( stackCount == 0 )
+        {
+            break;
+        }
+
+        const CopyItem item = stack[--stackCount];
+
+        oldPair = item.oldPair;
+        newPair = BumpRebuildPair( item.newIndex, nodeEnd );
+        SetChildPair( rebuildNodes_[item.newIndex], newPair );
+    }
+}
+
+void DynamicTree::PlaceRebuildLeaf(
+    const TreeNode& node,
+    std::int32_t newIndex,
+    std::int32_t& nodeEnd )
+{
+    if( IsLeaf( node ) )
+    {
+        rebuildNodes_[newIndex] = node;
+        proxies_[GetProxyId( node )].node = newIndex;
+        return;
+    }
+
+    CopySubtree( node, newIndex, nodeEnd );
+}
+
+void DynamicTree::BuildRebuildTree( std::size_t leafCount )
+{
+    const std::size_t nodeCount = std::max<std::size_t>( 2, 2 * proxyCount_ );
+
+    rebuildNodes_.resize( nodeCount );
+    parents_.resize( nodeCount, NULL_INDEX );
+
+    std::int32_t nodeEnd = 2;
+
+    rebuildNodes_[ROOT_NODE + 1] = MakeEmptyNode();
+    parents_[ROOT_NODE] = NULL_INDEX;
+    parents_[ROOT_NODE + 1] = NULL_INDEX;
+
+    if( leafCount == 1 )
+    {
+        PlaceRebuildLeaf(
+            rebuildLeafNodes_[rebuildLeafIndices_[0]],
+            ROOT_NODE,
+            nodeEnd );
+
+        assert( static_cast<std::size_t>( nodeEnd ) == nodeCount );
+        return;
+    }
+
+    std::array<RebuildItem, TREE_STACK_SIZE> stack{};
+    std::size_t top = 0;
+
+    stack[0].nodeIndex = ROOT_NODE;
+    stack[0].pair = BumpRebuildPair( ROOT_NODE, nodeEnd );
+    stack[0].childCount = -1;
+    stack[0].startIndex = 0;
+    stack[0].endIndex = leafCount;
+    stack[0].splitIndex = PartitionRebuildLeaves( 0, leafCount );
+
+    for( ;; )
+    {
+        RebuildItem& item = stack[top];
+        ++item.childCount;
+
+        if( item.childCount == 2 )
+        {
+            rebuildNodes_[item.nodeIndex] =
+                MakeInternalNodeFrom( rebuildNodes_, item.pair );
+
+            if( top == 0 )
+            {
+                break;
+            }
+
+            --top;
+            continue;
+        }
+
+        const std::int32_t slot = item.childCount;
+        const std::size_t startIndex =
+            slot == 0 ? item.startIndex : item.splitIndex;
+        const std::size_t endIndex =
+            slot == 0 ? item.splitIndex : item.endIndex;
+        const std::size_t count = endIndex - startIndex;
+
+        assert( count > 0 );
+
+        const std::int32_t nodeIndex = item.pair + slot;
+
+        if( count == 1 )
+        {
+            PlaceRebuildLeaf(
+                rebuildLeafNodes_[rebuildLeafIndices_[startIndex]],
+                nodeIndex,
+                nodeEnd );
+            continue;
+        }
+
+        assert( top + 1 < stack.size() );
+
+        ++top;
+
+        RebuildItem& child = stack[top];
+
+        child.nodeIndex = nodeIndex;
+        child.pair = BumpRebuildPair( nodeIndex, nodeEnd );
+        child.childCount = -1;
+        child.startIndex = startIndex;
+        child.endIndex = endIndex;
+        child.splitIndex =
+            startIndex + PartitionRebuildLeaves( startIndex, count );
+    }
+
+    assert( static_cast<std::size_t>( nodeEnd ) == nodeCount );
 }
 
 std::int32_t DynamicTree::AllocateProxy()
@@ -925,6 +1315,12 @@ bool DynamicTree::ValidateSubtree( std::int32_t nodeIndex, std::int32_t& height,
     if( childPair < 2 ||
         ( childPair & 1 ) != 0 ||
         static_cast<std::size_t>( childPair + 1 ) >= nodes_.size() )
+    {
+        return false;
+    }
+
+    // Rebuild가 보장한 DFS 순서에서는 parent가 child pair보다 항상 앞에 있어야 함.
+    if( dfsOrdered_ && nodeIndex >= childPair )
     {
         return false;
     }
