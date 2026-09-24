@@ -299,6 +299,76 @@ int main()
     }
 
     {
+        DynamicTree rebuildStateTree{};
+
+        assert( rebuildStateTree.NeedsRebuild() == false );
+
+        const aabb2 boxA{
+            { 0.0f, 0.0f },
+            { 1.0f, 1.0f }
+        };
+
+        const aabb2 boxB{
+            { 3.0f, 0.0f },
+            { 4.0f, 1.0f }
+        };
+
+        // 기존 tree 전체를 감싸는 큰 leaf를 넣으면 internal root가 새 pair 아래로 내려가
+        // DFS 배열 순서가 깨지므로 moved가 없어도 rebuild가 필요해짐.
+        const aabb2 enclosingBox{
+            { -10.0f, -10.0f },
+            {  10.0f,  10.0f }
+        };
+
+        rebuildStateTree.CreateProxy( boxA, 1 );
+        rebuildStateTree.CreateProxy( boxB, 2 );
+
+        assert( rebuildStateTree.HasMoved() == false );
+        assert( rebuildStateTree.NeedsRebuild() == false );
+
+        rebuildStateTree.CreateProxy( enclosingBox, 3 );
+
+        assert( rebuildStateTree.HasMoved() == false );
+        assert( rebuildStateTree.NeedsRebuild() );
+        assert( rebuildStateTree.Validate() );
+    }
+
+    {
+        DynamicTree movedRebuildTree{};
+
+        const aabb2 boxA{
+            { 0.0f, 0.0f },
+            { 1.0f, 1.0f }
+        };
+
+        const aabb2 boxB{
+            { 2.0f, 0.0f },
+            { 3.0f, 1.0f }
+        };
+
+        const aabb2 movedA{
+            { 4.0f, 0.0f },
+            { 5.0f, 1.0f }
+        };
+
+        const std::int32_t proxyA = movedRebuildTree.CreateProxy( boxA, 1 );
+        movedRebuildTree.CreateProxy( boxB, 2 );
+
+        assert( movedRebuildTree.NeedsRebuild() == false );
+
+        movedRebuildTree.MoveProxy( proxyA, movedA, true );
+
+        assert( movedRebuildTree.HasMoved() );
+        assert( movedRebuildTree.NeedsRebuild() );
+
+        movedRebuildTree.ClearMoved();
+
+        assert( movedRebuildTree.HasMoved() == false );
+        assert( movedRebuildTree.NeedsRebuild() == false );
+        assert( movedRebuildTree.Validate() );
+    }
+
+    {
         DynamicTree balancedTree{};
 
         for( int i = 0; i < 8; ++i )
