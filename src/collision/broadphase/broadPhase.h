@@ -9,6 +9,7 @@
 
 #include "collision/broadphase/dynamicTree.h"
 #include "collision/broadphase/hashSet.h"
+#include "collision/shape.h"
 #include "dynamics/bodyType.h"
 
 namespace zonai
@@ -83,6 +84,7 @@ private:
     {
         const HashSet& pairSet;
         Callback& callback;
+        std::span<const Shape> shapes{};
         std::array<CandidatePair, CANDIDATE_BATCH_SIZE> batch{};
         std::size_t batchCount = 0;
 
@@ -119,6 +121,23 @@ private:
                 if( pairSet.Contains( pairKey ) )
                 {
                     continue;
+                }
+
+                if( !shapes.empty() )
+                {
+                    assert( candidate.shapeIndexA >= 0 );
+                    assert( candidate.shapeIndexB >= 0 );
+                    assert( static_cast<std::size_t>( candidate.shapeIndexA ) < shapes.size() );
+                    assert( static_cast<std::size_t>( candidate.shapeIndexB ) < shapes.size() );
+
+                    const Shape& shapeA = shapes[candidate.shapeIndexA];
+                    const Shape& shapeB = shapes[candidate.shapeIndexB];
+
+                    // 같은 Body의 Shape끼리는 Contact를 만들지 않음.
+                    if( shapeA.bodyId == shapeB.bodyId )
+                    {
+                        continue;
+                    }
                 }
 
                 callback( candidate.shapeIndexA, candidate.shapeIndexB );
@@ -206,6 +225,28 @@ public:
         }
 
         // 32개 미만으로 남은 마지막 후보들도 처리함.
+        context.Flush();
+    }
+
+    // Shape runtime 상태까지 사용해 dynamic self 후보를 필터링함.
+    template <BroadPhasePairCallback Callback>
+    void FindDynamicSelfPairs(
+        std::span<std::int32_t> movedSiblings,
+        std::span<const Shape> shapes,
+        Callback&& callback ) const
+    {
+        const DynamicTree& tree = GetTree( BodyType::Dynamic );
+        PairContext<Callback> context{ pairSet_, callback, shapes };
+
+        const std::size_t movedCount = GatherMovedSiblings( tree, movedSiblings );
+
+        for( std::size_t i = 0; i < movedCount; ++i )
+        {
+            const std::int32_t pair = movedSiblings[i];
+
+            CollideCrossPairs( tree, tree, tree.nodes_[pair], tree.nodes_[pair + 1], context );
+        }
+
         context.Flush();
     }
 
