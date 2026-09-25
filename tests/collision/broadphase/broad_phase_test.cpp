@@ -632,5 +632,91 @@ int main()
     assert( sameBodyPairs.size() == 1 );
     assert( sameBodyPairs[0] == differentBodyPair );
 
+    BroadPhase filteredUpdateBroadPhase{};
+
+    const aabb2 filterSelfBoxA{
+        { 0.0f, 0.0f },
+        { 2.0f, 2.0f }
+    };
+
+    const aabb2 filterSelfBoxB{
+        { 1.0f, 0.0f },
+        { 3.0f, 2.0f }
+    };
+
+    const aabb2 filterDynamicStaticBox{
+        { 10.0f, 0.0f },
+        { 12.0f, 2.0f }
+    };
+
+    const aabb2 filterStaticBox{
+        { 11.0f, 0.0f },
+        { 13.0f, 2.0f }
+    };
+
+    const aabb2 filterDynamicKinematicBox{
+        { 20.0f, 0.0f },
+        { 22.0f, 2.0f }
+    };
+
+    const aabb2 filterKinematicBox{
+        { 21.0f, 0.0f },
+        { 23.0f, 2.0f }
+    };
+
+    filteredUpdateBroadPhase.CreateProxy( BodyType::Dynamic, filterSelfBoxA, 0 );
+    filteredUpdateBroadPhase.CreateProxy( BodyType::Dynamic, filterSelfBoxB, 1 );
+    filteredUpdateBroadPhase.CreateProxy( BodyType::Dynamic, filterDynamicStaticBox, 2 );
+    filteredUpdateBroadPhase.CreateProxy( BodyType::Static, filterStaticBox, 3 );
+    filteredUpdateBroadPhase.CreateProxy( BodyType::Dynamic, filterDynamicKinematicBox, 4 );
+    filteredUpdateBroadPhase.CreateProxy( BodyType::Kinematic, filterKinematicBox, 5 );
+
+    std::array<Shape, 6> filteredShapes{};
+
+    for( std::int32_t i = 0; i < static_cast<std::int32_t>( filteredShapes.size() ); ++i )
+    {
+        filteredShapes[i].bodyId = i;
+    }
+
+    // dynamic self pair는 서로의 category를 허용하지 않아 제거됨.
+    filteredShapes[0].filter.categoryBits = 1ull << 0;
+    filteredShapes[0].filter.maskBits = 1ull << 0;
+    filteredShapes[1].filter.categoryBits = 1ull << 1;
+    filteredShapes[1].filter.maskBits = 1ull << 1;
+
+    // dynamic / static pair도 서로의 category를 허용하지 않아 제거됨.
+    filteredShapes[2].filter.categoryBits = 1ull << 2;
+    filteredShapes[2].filter.maskBits = 1ull << 2;
+    filteredShapes[3].filter.categoryBits = 1ull << 3;
+    filteredShapes[3].filter.maskBits = 1ull << 3;
+
+    // dynamic / kinematic pair는 서로의 category를 허용하므로 후보로 남음.
+    filteredShapes[4].filter.categoryBits = 1ull << 4;
+    filteredShapes[4].filter.maskBits = 1ull << 5;
+    filteredShapes[5].filter.categoryBits = 1ull << 5;
+    filteredShapes[5].filter.maskBits = 1ull << 4;
+
+    std::array<std::int32_t, 16> filteredMovedSiblings{};
+    std::vector<std::pair<std::int32_t, std::int32_t>> filteredPairs;
+
+    filteredUpdateBroadPhase.UpdatePairs(
+        filteredMovedSiblings,
+        filteredShapes,
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            filteredPairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    const std::pair<std::int32_t, std::int32_t> allowedFilteredPair{ 4, 5 };
+
+    assert( filteredPairs.size() == 1 );
+    assert( filteredPairs[0] == allowedFilteredPair );
+
+    // Shape-aware UpdatePairs도 기존 update lifecycle과 동일하게 moved / stale 상태를 소비함.
+    assert( filteredUpdateBroadPhase.GetTree( BodyType::Static ).HasMoved() == false );
+    assert( filteredUpdateBroadPhase.GetTree( BodyType::Dynamic ).NeedsRebuild() == false );
+    assert( filteredUpdateBroadPhase.GetTree( BodyType::Kinematic ).NeedsRebuild() == false );
+
     return 0;
 }
