@@ -138,6 +138,12 @@ private:
                     {
                         continue;
                     }
+
+                    // 양쪽 Shape의 category / mask / group 설정이 충돌을 허용해야 함.
+                    if( !ShouldShapesCollide( shapeA.filter, shapeB.filter ) )
+                    {
+                        continue;
+                    }
                 }
 
                 callback( candidate.shapeIndexA, candidate.shapeIndexB );
@@ -192,6 +198,34 @@ public:
         kinematicTree.Rebuild( false );
     }
 
+    // Shape runtime 상태를 사용해 후보를 필터링한 뒤 tree maintenance까지 처리함.
+    template <BroadPhasePairCallback Callback>
+    void UpdatePairs(
+        std::span<std::int32_t> movedSiblings,
+        std::span<const Shape> shapes,
+        Callback&& callback )
+    {
+        DynamicTree& staticTree = GetTree( BodyType::Static );
+        DynamicTree& kinematicTree = GetTree( BodyType::Kinematic );
+        DynamicTree& dynamicTree = GetTree( BodyType::Dynamic );
+
+        const bool needUpdate =
+            staticTree.HasMoved() ||
+            kinematicTree.NeedsRebuild() ||
+            dynamicTree.NeedsRebuild();
+
+        if( !needUpdate )
+        {
+            return;
+        }
+
+        FindPairs( movedSiblings, shapes, callback );
+
+        staticTree.ClearMoved();
+        dynamicTree.Rebuild( false );
+        kinematicTree.Rebuild( false );
+    }
+
     // 세 BroadPhase 탐색 경로를 한 번에 실행해 새 충돌 후보를 모음.
     // moved flag 소비와 tree rebuild는 별도 단계에서 처리함.
     template <BroadPhasePairCallback Callback>
@@ -203,6 +237,18 @@ public:
 
         // cross pair를 찾은 뒤 dynamic tree 내부의 self pair를 검사함.
         FindDynamicSelfPairs( movedSiblings, callback );
+    }
+
+    // Shape runtime 상태를 세 탐색 경로 모두에 전달해 후보를 필터링함.
+    template <BroadPhasePairCallback Callback>
+    void FindPairs(
+        std::span<std::int32_t> movedSiblings,
+        std::span<const Shape> shapes,
+        Callback&& callback ) const
+    {
+        FindDynamicStaticPairs( shapes, callback );
+        FindDynamicKinematicPairs( shapes, callback );
+        FindDynamicSelfPairs( movedSiblings, shapes, callback );
     }
 
     // moved sibling pair를 seed로 dynamic tree 내부의 새 충돌 후보를 찾음.
@@ -270,6 +316,25 @@ public:
         context.Flush();
     }
 
+    // Shape runtime 상태까지 사용해 dynamic / static 후보를 필터링함.
+    template <BroadPhasePairCallback Callback>
+    void FindDynamicStaticPairs( std::span<const Shape> shapes, Callback&& callback ) const
+    {
+        const DynamicTree& dynamicTree = GetTree( BodyType::Dynamic );
+        const DynamicTree& staticTree = GetTree( BodyType::Static );
+        PairContext<Callback> context{ pairSet_, callback, shapes };
+
+        std::array<TreeNodePair, CROSS_SEED_COUNT> seeds{};
+        const std::size_t seedCount = GatherCrossSeeds( dynamicTree, staticTree, seeds );
+
+        for( std::size_t i = 0; i < seedCount; ++i )
+        {
+            CollideCrossPairs( dynamicTree, staticTree, seeds[i].a, seeds[i].b, context );
+        }
+
+        context.Flush();
+    }
+
     // dynamic tree와 kinematic tree의 겹치는 subtree seed를 찾아 새 충돌 후보를 보고함.
     template <BroadPhasePairCallback Callback>
     void FindDynamicKinematicPairs( Callback&& callback ) const
@@ -282,6 +347,25 @@ public:
         const std::size_t seedCount = GatherCrossSeeds( dynamicTree, kinematicTree, seeds );
 
         // static cross pair와 같은 탐색 경로를 kinematic tree에도 재사용함.
+        for( std::size_t i = 0; i < seedCount; ++i )
+        {
+            CollideCrossPairs( dynamicTree, kinematicTree, seeds[i].a, seeds[i].b, context );
+        }
+
+        context.Flush();
+    }
+
+    // Shape runtime 상태까지 사용해 dynamic / kinematic 후보를 필터링함.
+    template <BroadPhasePairCallback Callback>
+    void FindDynamicKinematicPairs( std::span<const Shape> shapes, Callback&& callback ) const
+    {
+        const DynamicTree& dynamicTree = GetTree( BodyType::Dynamic );
+        const DynamicTree& kinematicTree = GetTree( BodyType::Kinematic );
+        PairContext<Callback> context{ pairSet_, callback, shapes };
+
+        std::array<TreeNodePair, CROSS_SEED_COUNT> seeds{};
+        const std::size_t seedCount = GatherCrossSeeds( dynamicTree, kinematicTree, seeds );
+
         for( std::size_t i = 0; i < seedCount; ++i )
         {
             CollideCrossPairs( dynamicTree, kinematicTree, seeds[i].a, seeds[i].b, context );
