@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "collision/broadphase/broadPhase.h"
+#include "collision/shape.h"
 #include "dynamics/bodyType.h"
 
 using namespace zonai;
@@ -580,6 +581,56 @@ int main()
     );
 
     assert( updatePairs.empty() );
+
+    BroadPhase sameBodyBroadPhase{};
+
+    const aabb2 sameBodyBoxA{
+        { 0.0f, 0.0f },
+        { 2.0f, 2.0f }
+    };
+
+    const aabb2 sameBodyBoxB{
+        { 1.0f, 0.0f },
+        { 3.0f, 2.0f }
+    };
+
+    sameBodyBroadPhase.CreateProxy( BodyType::Dynamic, sameBodyBoxA, 0 );
+    sameBodyBroadPhase.CreateProxy( BodyType::Dynamic, sameBodyBoxB, 1 );
+
+    std::array<Shape, 2> sameBodyShapes{};
+    sameBodyShapes[0].bodyId = 10;
+    sameBodyShapes[1].bodyId = 10;
+
+    std::array<std::int32_t, 4> sameBodyMovedSiblings{};
+    std::vector<std::pair<std::int32_t, std::int32_t>> sameBodyPairs;
+
+    sameBodyBroadPhase.FindDynamicSelfPairs(
+        sameBodyMovedSiblings,
+        sameBodyShapes,
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            sameBodyPairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    // 같은 Body에 속한 두 Shape는 BroadPhase overlap이 있어도 Contact 후보가 되지 않음.
+    assert( sameBodyPairs.empty() );
+
+    sameBodyShapes[1].bodyId = 11;
+
+    sameBodyBroadPhase.FindDynamicSelfPairs(
+        sameBodyMovedSiblings,
+        sameBodyShapes,
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            sameBodyPairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    const std::pair<std::int32_t, std::int32_t> differentBodyPair{ 0, 1 };
+
+    assert( sameBodyPairs.size() == 1 );
+    assert( sameBodyPairs[0] == differentBodyPair );
 
     return 0;
 }
