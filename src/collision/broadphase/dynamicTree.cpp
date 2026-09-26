@@ -301,19 +301,23 @@ float DynamicTree::GetAreaRatio() const
         return 0.0f;
     }
 
-    float totalPerimeter = 0.0f;
+    // SAH가 줄일 수 있는 비용은 root와 leaf를 제외한 internal node 영역임.
+    float internalPerimeter = 0.0f;
 
-    for( const TreeNode& node : nodes_ )
+    for( std::size_t i = 2; i < nodes_.size(); ++i )
     {
-        if( IsEmptyNode( node ) )
+        const TreeNode& node = nodes_[i];
+
+        // empty/free node와 leaf는 둘 다 leaf tagged이므로 internal만 합산함.
+        if( IsLeaf( node ) )
         {
             continue;
         }
 
-        totalPerimeter += Perimeter( node.aabb );
+        internalPerimeter += Perimeter( node.aabb );
     }
 
-    return totalPerimeter / rootPerimeter;
+    return internalPerimeter / rootPerimeter;
 }
 
 bool DynamicTree::Validate() const
@@ -448,6 +452,16 @@ bool DynamicTree::IsNodeOrdered( std::int32_t nodeIndex ) const
 TreeNode DynamicTree::MakeEmptyNode()
 {
     TreeNode node{};
+
+    // Box2D와 같은 sentinel AABB.
+    // min > max인 inverted box라 어떤 정상 AABB와도 overlap하지 않음.
+    const float infinity = std::numeric_limits<float>::infinity();
+
+    node.aabb = {
+        { infinity, infinity },
+        { -infinity, -infinity }
+    };
+
     node.flagIndex = TREE_EMPTY_NODE;
     node.height = 0;
 
