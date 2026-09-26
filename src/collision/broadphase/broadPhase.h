@@ -139,6 +139,13 @@ private:
                         continue;
                     }
 
+                    // Sensor overlap은 Contact와 별도 단계에서 처리하므로 여기서는 제외함.
+                    if( shapeA.sensorIndex != Shape::NULL_INDEX ||
+                        shapeB.sensorIndex != Shape::NULL_INDEX )
+                    {
+                        continue;
+                    }
+
                     // 양쪽 Shape의 category / mask / group 설정이 충돌을 허용해야 함.
                     if( !ShouldShapesCollide( shapeA.filter, shapeB.filter ) )
                     {
