@@ -566,7 +566,7 @@ TreeNode DynamicTree::MakeLeafNode(
 }
 
 TreeNode DynamicTree::MakeInternalNodeFrom(
-    const std::vector<TreeNode>& nodes,
+    const TreeNodeStorage& nodes,
     std::int32_t childPair )
 {
     const TreeNode& child1 = nodes[childPair];
