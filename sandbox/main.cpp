@@ -498,13 +498,11 @@ int main()
         );
     }
 
-    std::array<std::int32_t, 256> movedSiblings{};
     std::vector<std::pair<std::int32_t, std::int32_t>> candidatePairs;
     std::vector<DebugContact> contacts;
 
     // 초기 proxy의 moved 상태를 한 번 소비해 drag 전 상태를 깨끗하게 맞춤.
     broadPhase.UpdatePairs(
-        movedSiblings,
         shapes,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
@@ -753,7 +751,6 @@ int main()
                 candidatePairs.clear();
 
                 broadPhase.UpdatePairs(
-                    movedSiblings,
                     shapes,
                     [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
                     {
