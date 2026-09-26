@@ -42,3 +42,9 @@ target_compile_features(zonaiSandbox
     PRIVATE
         cxx_std_20
 )
+
+target_compile_definitions(zonaiSandbox
+    PRIVATE
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
+)
