@@ -191,9 +191,15 @@ public:
                     continue;
                 }
 
-                // internal node면 child pair를 stack에 넣어 계속 내려감.
-                assert( stackCount < TREE_STACK_SIZE );
-                stack[stackCount++] = GetChildPair( node );
+                // Box2D처럼 release에서도 고정 stack 바깥에 쓰지 않도록 먼저 범위를 확인함.
+                if( stackCount < stack.size() )
+                {
+                    stack[stackCount++] = GetChildPair( node );
+                }
+                else
+                {
+                    assert( stackCount < stack.size() );
+                }
             }
         }
     }
