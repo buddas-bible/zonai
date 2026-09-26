@@ -75,7 +75,13 @@ std::size_t BroadPhase::GatherMovedSiblings( const DynamicTree& tree, std::span<
     // sibling이 항상 2개씩 붙어 있으므로 전체 node 수의 절반이면 출력 공간이 충분함.
     const std::size_t pairCapacity = tree.nodes_.size() / 2;
 
-    assert( pairIndices.size() >= pairCapacity );
+    if( pairIndices.size() < pairCapacity )
+    {
+        // Box2D는 필요한 크기를 update 시점에 정확히 할당함.
+        // Zonai는 caller scratch span을 받으므로 release에서도 overflow를 막아야 함.
+        assert( pairIndices.size() >= pairCapacity );
+        return 0;
+    }
 
     std::size_t count = 0;
 
