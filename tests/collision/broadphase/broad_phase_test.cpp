@@ -153,11 +153,9 @@ int main()
     pairBroadPhase.CreateProxy( BodyType::Dynamic, pairBoxB, 32 );
     const ProxyKey pairKeyC = pairBroadPhase.CreateProxy( BodyType::Dynamic, pairBoxC, 33 );
 
-    std::array<std::int32_t, 16> movedSiblings{};
     std::vector<std::pair<std::int32_t, std::int32_t>> pairs;
 
     pairBroadPhase.FindDynamicSelfPairs(
-        movedSiblings,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             pairs.emplace_back( shapeIndexA, shapeIndexB );
@@ -175,7 +173,6 @@ int main()
     pairs.clear();
 
     pairBroadPhase.FindDynamicSelfPairs(
-        movedSiblings,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             pairs.emplace_back( shapeIndexA, shapeIndexB );
@@ -193,7 +190,6 @@ int main()
     pairs.clear();
 
     pairBroadPhase.FindDynamicSelfPairs(
-        movedSiblings,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             pairs.emplace_back( shapeIndexA, shapeIndexB );
@@ -466,11 +462,9 @@ int main()
     combinedBroadPhase.CreateProxy( BodyType::Static, staticCrossBox, 601 );
     combinedBroadPhase.CreateProxy( BodyType::Kinematic, kinematicCrossBox, 701 );
 
-    std::array<std::int32_t, 16> combinedMovedSiblings{};
     std::vector<std::pair<std::int32_t, std::int32_t>> combinedPairs;
 
     combinedBroadPhase.FindPairs(
-        combinedMovedSiblings,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             combinedPairs.emplace_back( shapeIndexA, shapeIndexB );
@@ -537,11 +531,9 @@ int main()
     assert( updateBroadPhase.GetTree( BodyType::Dynamic ).NeedsRebuild() );
     assert( updateBroadPhase.GetTree( BodyType::Kinematic ).NeedsRebuild() );
 
-    std::array<std::int32_t, 16> updateMovedSiblings{};
     std::vector<std::pair<std::int32_t, std::int32_t>> updatePairs;
 
     updateBroadPhase.UpdatePairs(
-        updateMovedSiblings,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             updatePairs.emplace_back( shapeIndexA, shapeIndexB );
@@ -573,7 +565,6 @@ int main()
 
     // 아무 tree도 dirty하지 않으면 다음 update는 바로 끝나서 후보를 다시 만들지 않음.
     updateBroadPhase.UpdatePairs(
-        updateMovedSiblings,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             updatePairs.emplace_back( shapeIndexA, shapeIndexB );
@@ -636,11 +627,9 @@ int main()
     sameBodyShapes[0].bodyId = 10;
     sameBodyShapes[1].bodyId = 10;
 
-    std::array<std::int32_t, 4> sameBodyMovedSiblings{};
     std::vector<std::pair<std::int32_t, std::int32_t>> sameBodyPairs;
 
     sameBodyBroadPhase.FindDynamicSelfPairs(
-        sameBodyMovedSiblings,
         sameBodyShapes,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
@@ -654,7 +643,6 @@ int main()
     sameBodyShapes[1].bodyId = 11;
 
     sameBodyBroadPhase.FindDynamicSelfPairs(
-        sameBodyMovedSiblings,
         sameBodyShapes,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
@@ -687,11 +675,9 @@ int main()
     sensorShapes[1].bodyId = 21;
     sensorShapes[0].sensorIndex = 0;
 
-    std::array<std::int32_t, 4> sensorMovedSiblings{};
     std::vector<std::pair<std::int32_t, std::int32_t>> sensorPairs;
 
     sensorBroadPhase.FindDynamicSelfPairs(
-        sensorMovedSiblings,
         sensorShapes,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
@@ -705,7 +691,6 @@ int main()
     sensorShapes[0].sensorIndex = Shape::NULL_INDEX;
 
     sensorBroadPhase.FindDynamicSelfPairs(
-        sensorMovedSiblings,
         sensorShapes,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
@@ -782,11 +767,9 @@ int main()
     filteredShapes[5].filter.categoryBits = 1ull << 5;
     filteredShapes[5].filter.maskBits = 1ull << 4;
 
-    std::array<std::int32_t, 16> filteredMovedSiblings{};
     std::vector<std::pair<std::int32_t, std::int32_t>> filteredPairs;
 
     filteredUpdateBroadPhase.UpdatePairs(
-        filteredMovedSiblings,
         filteredShapes,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
