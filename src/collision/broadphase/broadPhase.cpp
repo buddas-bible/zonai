@@ -86,8 +86,8 @@ std::size_t BroadPhase::GatherMovedSiblings( const DynamicTree& tree, std::span<
 
     if( pairIndices.size() < pairCapacity )
     {
-        // Box2D는 필요한 크기를 update 시점에 정확히 할당함.
-        // Zonai는 caller scratch span을 받으므로 release에서도 overflow를 막아야 함.
+        // PrepareMovedSiblingScratch가 필요한 크기를 보장하지만
+        // 이 함수 자체도 release에서 범위를 넘겨 쓰지 않도록 방어함.
         assert( pairIndices.size() >= pairCapacity );
         return 0;
     }
