@@ -157,9 +157,9 @@ int main()
         assert( sahTree.GetProxyCount() == 3 );
         assert( sahTree.GetHeight() == 2 );
 
-        // C는 B보다 A랑 묶이는게 훨씬 쌈.
-        // root=24, (A+C)=6, leaf 3개=12 -> 42 / 24 = 1.75
-        assert( NearlyEqual( sahTree.GetAreaRatio(), 1.75f ) );
+        // SAH 품질 지표는 root와 leaf를 제외한 internal node perimeter만 사용함.
+        // root=24, (A+C)=6 -> 6 / 24 = 0.25
+        assert( NearlyEqual( sahTree.GetAreaRatio(), 0.25f ) );
     }
 
 
@@ -243,11 +243,11 @@ int main()
         assert( NearlyEqual( moveTree.GetProxyAABB( proxyC ), movedC ) );
 
         // C를 옮긴 뒤에는 B랑 묶이는게 제일 쌈.
-        // root=26, (B+C)=6, leaf 3개=12 -> 44 / 26
+        // root=26, (B+C)=6 -> 6 / 26
         assert(
             NearlyEqual(
                 moveTree.GetAreaRatio(),
-                44.0f / 26.0f
+                6.0f / 26.0f
             )
         );
     }
