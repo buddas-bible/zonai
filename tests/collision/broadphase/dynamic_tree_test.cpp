@@ -90,6 +90,17 @@ void CheckQueryAgainstBruteForce(
 
 int main()
 {
+    {
+        // Box2D는 tree node 배열을 64-byte 정렬해 sibling pair가 cache-line 단위로 놓이게 함.
+        TreeNodeStorage storage( 4 );
+
+        const std::uintptr_t address =
+            reinterpret_cast<std::uintptr_t>( storage.data() );
+
+        assert( address % 64u == 0u );
+        assert( sizeof( TreeNode ) == 32 );
+    }
+
     DynamicTree tree{};
 
     assert( tree.GetProxyCount() == 0 );
