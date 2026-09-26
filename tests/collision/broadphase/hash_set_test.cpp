@@ -114,14 +114,16 @@ int main()
         {
             state = state * 1664525u + 1013904223u;
 
+            // 작은 key pool을 반복 사용해서 add/remove/contains가 실제로 같은 key에 교차 적용되게 함.
             const std::uint64_t key =
-                ( static_cast<std::uint64_t>( state ) << 32 ) |
-                static_cast<std::uint64_t>( step + 1 );
+                1ull + static_cast<std::uint64_t>( state % 2048u );
 
             // key 0은 sentinel이므로 생성식 자체가 항상 non-zero여야 함.
             assert( key != 0 );
 
-            switch( step % 3 )
+            const std::uint32_t operation = ( state >> 16 ) % 3u;
+
+            switch( operation )
             {
             case 0:
             {
