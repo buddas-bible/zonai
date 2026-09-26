@@ -64,10 +64,15 @@ DynamicTree::DynamicTree()
 
 std::int32_t DynamicTree::CreateProxy( const aabb2& aabb, std::int32_t shapeIndex, bool markMoved )
 {
+    assert( IsValidAABB( aabb ) );
     assert( shapeIndex >= 0 );
 
     // 사용할 proxy id를 free-list에서 확보함.
     const std::int32_t proxyId = AllocateProxy();
+
+    // Box2D처럼 proxy와 leaf 양쪽에 shape index를 보관해 mapping 불변조건을 검증할 수 있게 함.
+    proxies_[proxyId].userData = static_cast<std::uint64_t>( shapeIndex );
+
     const TreeNode newLeaf = MakeLeafNode( aabb, proxyId, shapeIndex, markMoved );
     
     // 첫 proxy면 internal node 없이 root에 바로 넣음.
@@ -94,6 +99,10 @@ void DynamicTree::DestroyProxy( std::int32_t proxyId )
 
     const std::int32_t leafIndex = proxies_[proxyId].node;
 
+    assert( static_cast<std::size_t>( leafIndex ) < nodes_.size() );
+    assert( IsLeaf( nodes_[leafIndex] ) );
+    assert( GetProxyId( nodes_[leafIndex] ) == proxyId );
+
     // tree에서 leaf를 제거하고 남은 형제 노드를 parent 자리로 올림.
     RemoveLeaf( leafIndex );
 
@@ -103,14 +112,24 @@ void DynamicTree::DestroyProxy( std::int32_t proxyId )
 
 void DynamicTree::MoveProxy( std::int32_t proxyId, const aabb2& aabb, bool markMoved )
 {
+    assert( IsValidAABB( aabb ) );
+    assert( aabb.max.x - aabb.min.x < MAX_TREE_AABB_EXTENT );
+    assert( aabb.max.y - aabb.min.y < MAX_TREE_AABB_EXTENT );
+
     assert( 0 <= proxyId );
     assert( static_cast<std::size_t>( proxyId ) < proxies_.size() );
     assert( proxies_[proxyId].node != NULL_INDEX );
 
     const std::int32_t leafIndex = proxies_[proxyId].node;
 
+    assert( static_cast<std::size_t>( leafIndex ) < nodes_.size() );
+    assert( IsLeaf( nodes_[leafIndex] ) );
+    assert( GetProxyId( nodes_[leafIndex] ) == proxyId );
+
     // 재삽입해도 stable proxy id와 shape index는 그대로 유지함.
     const std::int32_t shapeIndex = nodes_[leafIndex].shapeIndex;
+
+    assert( static_cast<std::int32_t>( proxies_[proxyId].userData ) == shapeIndex );
 
     // 기존 leaf만 tree에서 제거해서 proxy id의 수명은 유지함.
     RemoveLeaf( leafIndex );
@@ -816,6 +835,8 @@ std::int32_t DynamicTree::AllocateProxy()
     // free-list가 비었으면 proxy pool을 50% 정도 늘림.
     if( proxyFreeList_ == NULL_INDEX )
     {
+        assert( proxyCount_ == proxies_.size() );
+
         const std::size_t oldCapacity = proxies_.size();
         const std::size_t growth = std::max<std::size_t>( oldCapacity / 2, 1 );
         const std::size_t newCapacity = oldCapacity + growth;
@@ -841,6 +862,7 @@ std::int32_t DynamicTree::AllocateProxy()
     proxyFreeList_ = proxy.next;
 
     // 꺼낸 proxy를 사용 상태로 초기화함.
+    proxy.userData = 0;
     proxy.node = NULL_INDEX;
     proxy.next = NULL_INDEX;
 
@@ -851,15 +873,19 @@ std::int32_t DynamicTree::AllocateProxy()
 
 void DynamicTree::FreeProxy( std::int32_t proxyId )
 {
+    assert( proxyId >= 0 );
+    assert( static_cast<std::size_t>( proxyId ) < proxies_.size() );
+    assert( proxyCount_ > 0 );
+
     TreeProxy& proxy = proxies_[proxyId];
 
     // 반환된 proxy id를 free-list head 앞에 다시 붙임.
+    proxy.userData = 0;
     proxy.node = NULL_INDEX;
     proxy.next = proxyFreeList_;
 
     proxyFreeList_ = proxyId;
 
-    assert( proxyCount_ > 0 );
     --proxyCount_;
 }
 
@@ -902,6 +928,7 @@ void DynamicTree::FreeSiblingPair( std::int32_t pair )
     // 형제 노드는 pair 단위로 관리하므로 시작 index는 항상 짝수여야 함.
     assert( pair >= 2 );
     assert( ( pair & 1 ) == 0 );
+    assert( static_cast<std::size_t>( pair + 1 ) < nodes_.size() );
 
     nodes_[pair] = MakeEmptyNode();
     nodes_[pair + 1] = MakeEmptyNode();
@@ -932,6 +959,7 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
 
     std::int32_t bestSibling = nodeIndex;
     float bestCost = directCost;
+    const vec2 centerD = Center( boxD );
 
     // root부터 한쪽으로 내려가며 새 leaf와 묶을 비용이 가장 작은 형제 노드를 찾음.
     for( ;; )
@@ -1017,8 +1045,21 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
             break;
         }
 
-        // 더 싸질 가능성이 있는 자식 쪽으로만 내려감.
-        if( leftCost <= rightCost )
+        // lower bound가 같으면 Box2D처럼 새 leaf 중심과 더 가까운 subtree를 선택함.
+        if( leftCost == rightCost && !leaf1 )
+        {
+            assert( leftCost < std::numeric_limits<float>::max() );
+            assert( rightCost < std::numeric_limits<float>::max() );
+
+            const vec2 delta1 = Center( leftBox ) - centerD;
+            const vec2 delta2 = Center( rightBox ) - centerD;
+
+            leftCost = LengthSquared( delta1 );
+            rightCost = LengthSquared( delta2 );
+        }
+
+        // 더 싸질 가능성이 있는 internal child 쪽으로만 내려감.
+        if( leftCost < rightCost && !leaf1 )
         {
             nodeIndex = child1;
             areaBase = leftPerimeter;
@@ -1173,6 +1214,7 @@ void DynamicTree::RotateNode( std::int32_t nodeIndex )
         {
             bestDown = indexC;
             bestUp = indexE;
+            bestDelta = deltaCE;
         }
     }
 
@@ -1315,7 +1357,8 @@ bool DynamicTree::ValidateSubtree( std::int32_t nodeIndex, std::int32_t& height,
 
         if( proxyId < 0 ||
             static_cast<std::size_t>( proxyId ) >= proxies_.size() ||
-            proxies_[proxyId].node != nodeIndex )
+            proxies_[proxyId].node != nodeIndex ||
+            static_cast<std::int32_t>( proxies_[proxyId].userData ) != node.shapeIndex )
         {
             return false;
         }
