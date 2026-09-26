@@ -492,6 +492,9 @@ const aabb2& DynamicTree::GetProxyAABB( std::int32_t proxyId ) const
     const std::int32_t nodeIndex = proxies_[proxyId].node;
 
     assert( nodeIndex != NULL_INDEX );
+    assert( static_cast<std::size_t>( nodeIndex ) < nodes_.size() );
+    assert( IsLeaf( nodes_[nodeIndex] ) );
+    assert( GetProxyId( nodes_[nodeIndex] ) == proxyId );
 
     return nodes_[nodeIndex].aabb;
 }
