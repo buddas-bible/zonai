@@ -1,5 +1,6 @@
 #include <cassert>
 #include <cmath>
+#include <limits>
 
 #include "math/vec2.h"
 #include "collision/aabb2.h"
@@ -13,6 +14,37 @@ bool NearlyEqual(float a, float b, float epsilon = 1e-5f)
 
 int main()
 {
+    // Box2D와 같은 AABB 유효성 규약.
+    {
+        const aabb2 valid{
+            { -1.0f, -2.0f },
+            {  3.0f,  4.0f }
+        };
+
+        const aabb2 invertedX{
+            { 2.0f, 0.0f },
+            { 1.0f, 1.0f }
+        };
+
+        const float infinity = std::numeric_limits<float>::infinity();
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+
+        const aabb2 infiniteBox{
+            { 0.0f, 0.0f },
+            { infinity, 1.0f }
+        };
+
+        const aabb2 nanBox{
+            { nan, 0.0f },
+            { 1.0f, 1.0f }
+        };
+
+        assert( IsValidAABB( valid ) );
+        assert( !IsValidAABB( invertedX ) );
+        assert( !IsValidAABB( infiniteBox ) );
+        assert( !IsValidAABB( nanBox ) );
+    }
+
     // Center
     {
         aabb2 box{
