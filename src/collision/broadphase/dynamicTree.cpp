@@ -26,8 +26,8 @@ namespace zonai
 * [현재 구현]
 * - proxy / sibling pair free-list, SAH 삽입, 삭제, MoveProxy, Query, local rotation, Validate 구현함.
 * - CreateProxy / MoveProxy는 필요할 때만 moved를 표시하고 ancestor로 전파함. ClearMoved로 소비 후 초기화함.
-* - TreeProxy에 userData 공간은 있지만 생성/조회 경로에는 아직 연결하지 않음.
-* - category / mask filtering과 TreeStats는 아직 없음.
+* - TreeProxy::userData에는 leaf의 shape index를 복제해 proxy <-> leaf mapping 검증에 사용함.
+* - category bits 기반 tree query와 TreeStats는 아직 없음.
 *
 * [Box2D에서 이어서 참고할 기능]
 * - category bits / userData 조회, EnlargeProxy
