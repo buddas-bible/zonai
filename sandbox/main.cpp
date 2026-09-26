@@ -4,7 +4,9 @@
 
 #include <array>
 #include <cstdint>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <imgui.h>
@@ -15,6 +17,7 @@
 #include "debug/debugDraw.h"
 
 #include "collision/broadphase/broadPhase.h"
+#include "collision/narrowphase/collide.h"
 #include "geometry/capsule2.h"
 #include "geometry/circle2.h"
 #include "geometry/polygon2.h"
@@ -86,6 +89,65 @@ polygon2 MakeDebugBox( const vec2& center, const vec2& halfExtents )
     polygon.centroid += center;
 
     return polygon;
+}
+
+using DebugGeometryRef =
+    std::variant<
+        const circle2*,
+        const capsule2*,
+        const segment2*,
+        const polygon2*
+    >;
+
+struct DebugContact
+{
+    std::int32_t otherShape = -1;
+    localManifold2 manifold{};
+};
+
+// Sandbox geometry는 이미 world 좌표로 배치되어 있으므로 identity transform을 사용함.
+// 시각화 normal은 항상 움직이는 Circle에서 상대 Shape를 향하도록 맞춤.
+localManifold2 CollideDebugCircle(
+    const circle2& circle,
+    const DebugGeometryRef& otherGeometry )
+{
+    return std::visit(
+        [&]( const auto* geometry ) -> localManifold2
+        {
+            using Geometry =
+                std::remove_cv_t<std::remove_pointer_t<decltype( geometry )>>;
+
+            if constexpr( std::is_same_v<Geometry, circle2> )
+            {
+                return CollideCircles( circle, *geometry, {} );
+            }
+            else
+            {
+                localManifold2 manifold{};
+
+                if constexpr( std::is_same_v<Geometry, capsule2> )
+                {
+                    manifold = CollideCapsuleCircle( *geometry, circle, {} );
+                }
+                else if constexpr( std::is_same_v<Geometry, segment2> )
+                {
+                    manifold = CollideSegmentCircle( *geometry, circle, {} );
+                }
+                else if constexpr( std::is_same_v<Geometry, polygon2> )
+                {
+                    manifold = CollidePolygonCircle( *geometry, circle, {} );
+                }
+
+                if( manifold.pointCount > 0 )
+                {
+                    manifold.normal = -manifold.normal;
+                }
+
+                return manifold;
+            }
+        },
+        otherGeometry
+    );
 }
 
 LRESULT CALLBACK WndProc(
@@ -327,12 +389,17 @@ int main()
 
     std::vector<Shape> shapes;
     std::vector<vec2> shapeCenters;
+    std::vector<DebugGeometryRef> geometryRefs;
 
     shapes.reserve( 24 );
     shapeCenters.reserve( 24 );
+    geometryRefs.reserve( 24 );
 
     auto createSceneProxy =
-        [&]( BodyType type, const aabb2& aabb, const vec2& center )
+        [&]( BodyType type,
+             const aabb2& aabb,
+             const vec2& center,
+             DebugGeometryRef geometry )
         {
             const std::int32_t shapeIndex =
                 static_cast<std::int32_t>( shapes.size() );
@@ -342,6 +409,7 @@ int main()
 
             shapes.push_back( shape );
             shapeCenters.push_back( center );
+            geometryRefs.push_back( geometry );
 
             const ProxyKey proxyKey =
                 broadPhase.CreateProxy( type, aabb, shapeIndex );
@@ -350,21 +418,33 @@ int main()
         };
 
     const auto [circleShape, circleProxy] =
-        createSceneProxy( BodyType::Dynamic, circleAABB, circle.center );
+        createSceneProxy(
+            BodyType::Dynamic,
+            circleAABB,
+            circle.center,
+            &circle
+        );
 
     createSceneProxy(
         BodyType::Static,
         capsuleAABB,
-        ( capsule.center1 + capsule.center2 ) * 0.5f
+        ( capsule.center1 + capsule.center2 ) * 0.5f,
+        &capsule
     );
 
     createSceneProxy(
         BodyType::Static,
         segmentAABB,
-        ( segment.a + segment.b ) * 0.5f
+        ( segment.a + segment.b ) * 0.5f,
+        &segment
     );
 
-    createSceneProxy( BodyType::Static, polygonAABB, polygon.centroid );
+    createSceneProxy(
+        BodyType::Static,
+        polygonAABB,
+        polygon.centroid,
+        &polygon
+    );
 
     for( std::size_t i = 0; i < extraCircles.size(); ++i )
     {
@@ -374,7 +454,8 @@ int main()
         createSceneProxy(
             type,
             ComputeAABB( extraCircles[i] ),
-            extraCircles[i].center
+            extraCircles[i].center,
+            &extraCircles[i]
         );
     }
 
@@ -386,7 +467,8 @@ int main()
         createSceneProxy(
             type,
             ComputeAABB( extraCapsules[i] ),
-            ( extraCapsules[i].center1 + extraCapsules[i].center2 ) * 0.5f
+            ( extraCapsules[i].center1 + extraCapsules[i].center2 ) * 0.5f,
+            &extraCapsules[i]
         );
     }
 
@@ -398,7 +480,8 @@ int main()
         createSceneProxy(
             type,
             ComputeAABB( extraSegments[i] ),
-            ( extraSegments[i].a + extraSegments[i].b ) * 0.5f
+            ( extraSegments[i].a + extraSegments[i].b ) * 0.5f,
+            &extraSegments[i]
         );
     }
 
@@ -410,12 +493,14 @@ int main()
         createSceneProxy(
             type,
             ComputeAABB( extraPolygons[i] ),
-            extraPolygons[i].centroid
+            extraPolygons[i].centroid,
+            &extraPolygons[i]
         );
     }
 
     std::array<std::int32_t, 256> movedSiblings{};
     std::vector<std::pair<std::int32_t, std::int32_t>> candidatePairs;
+    std::vector<DebugContact> contacts;
 
     // 초기 proxy의 moved 상태를 한 번 소비해 drag 전 상태를 깨끗하게 맞춤.
     broadPhase.UpdatePairs(
@@ -528,6 +613,7 @@ int main()
         ImGui::Text( "Scale: %.1f px/m", camera.pixelsPerMeter );
         ImGui::Text( "Scene shapes: %zu", shapes.size() );
         ImGui::Text( "BroadPhase pairs: %zu", candidatePairs.size() );
+        ImGui::Text( "NarrowPhase contacts: %zu", contacts.size() );
 
         ImGui::Spacing();
         ImGui::TextWrapped(
@@ -636,6 +722,36 @@ int main()
                         candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
                     }
                 );
+
+                contacts.clear();
+
+                for( const auto& pair : candidatePairs )
+                {
+                    if( pair.first != circleShape && pair.second != circleShape )
+                    {
+                        continue;
+                    }
+
+                    const std::int32_t otherShape =
+                        pair.first == circleShape ? pair.second : pair.first;
+
+                    if( otherShape < 0 ||
+                        static_cast<std::size_t>( otherShape ) >= geometryRefs.size() )
+                    {
+                        continue;
+                    }
+
+                    const localManifold2 manifold =
+                        CollideDebugCircle(
+                            circle,
+                            geometryRefs[otherShape]
+                        );
+
+                    if( manifold.pointCount > 0 )
+                    {
+                        contacts.push_back( { otherShape, manifold } );
+                    }
+                }
             }
             else
             {
@@ -714,6 +830,8 @@ int main()
         constexpr ImU32 AABB_COLOR = IM_COL32( 210, 100, 230, 210 );
         constexpr ImU32 LABEL_COLOR = IM_COL32( 230, 232, 238, 255 );
         constexpr ImU32 PAIR_COLOR = IM_COL32( 255, 80, 100, 255 );
+        constexpr ImU32 CONTACT_COLOR = IM_COL32( 255, 220, 70, 255 );
+        constexpr ImU32 NORMAL_COLOR = IM_COL32( 100, 255, 140, 255 );
 
         debugDraw.DrawCircle( circle, CIRCLE_OUTLINE, CIRCLE_FILL );
         debugDraw.DrawCapsule( capsule, CAPSULE_OUTLINE, CAPSULE_FILL );
@@ -797,6 +915,28 @@ int main()
                 PAIR_COLOR,
                 3.0f
             );
+        }
+
+        for( const DebugContact& contact : contacts )
+        {
+            for( int i = 0; i < contact.manifold.pointCount; ++i )
+            {
+                const localManifoldPoint2& point =
+                    contact.manifold.points[i];
+
+                debugDraw.DrawPoint(
+                    point.point,
+                    CONTACT_COLOR,
+                    5.0f
+                );
+
+                debugDraw.DrawArrow(
+                    point.point,
+                    contact.manifold.normal,
+                    NORMAL_COLOR,
+                    0.8f
+                );
+            }
         }
 
         drawList->PopClipRect();
