@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 
 namespace zonai::sandbox
 {
@@ -82,6 +83,89 @@ void DebugDraw::DrawAABB(
     const ImVec2 max = ToScreen( { box.max.x, box.min.y } );
 
     drawList_->AddRect( min, max, color, 0.0f, 0, thickness );
+}
+
+void DebugDraw::DrawTree(
+    const DynamicTree& tree,
+    const char* treeName,
+    bool showLeaves,
+    bool showInternal,
+    bool showLabels,
+    ImU32 leafColor,
+    ImU32 internalColor ) const
+{
+    constexpr ImU32 ROOT_COLOR = IM_COL32( 245, 245, 245, 235 );
+    constexpr ImU32 MOVED_COLOR = IM_COL32( 255, 80, 100, 255 );
+
+    tree.VisitNodes(
+        [&]( const TreeNodeDebugInfo& info )
+        {
+            if( info.isLeaf && !showLeaves )
+            {
+                return;
+            }
+
+            if( !info.isLeaf && !showInternal )
+            {
+                return;
+            }
+
+            ImU32 color = info.isLeaf ? leafColor : internalColor;
+            float thickness = info.isLeaf ? 2.0f : 1.25f;
+
+            if( info.isRoot )
+            {
+                color = ROOT_COLOR;
+                thickness = 3.0f;
+            }
+
+            if( info.isMoved )
+            {
+                color = MOVED_COLOR;
+                thickness = 3.0f;
+            }
+
+            DrawAABB( info.aabb, color, thickness );
+
+            if( !showLabels )
+            {
+                return;
+            }
+
+            char label[128]{};
+
+            if( info.isLeaf )
+            {
+                std::snprintf(
+                    label,
+                    sizeof( label ),
+                    "%s L n%d p%d proxy%d shape%d%s",
+                    treeName,
+                    info.nodeIndex,
+                    info.parentIndex,
+                    info.proxyId,
+                    info.shapeIndex,
+                    info.isMoved ? " moved" : ""
+                );
+            }
+            else
+            {
+                std::snprintf(
+                    label,
+                    sizeof( label ),
+                    "%s I n%d p%d child%d h%d%s",
+                    treeName,
+                    info.nodeIndex,
+                    info.parentIndex,
+                    info.childPair,
+                    info.height,
+                    info.isMoved ? " moved" : ""
+                );
+            }
+
+            DrawLabel( Center( info.aabb ), label, color );
+        }
+    );
 }
 
 void DebugDraw::DrawSegment(
