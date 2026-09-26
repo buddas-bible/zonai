@@ -549,10 +549,10 @@ int main()
 
         ImGui::Separator();
         ImGui::TextUnformatted( "Visible geometry" );
-        ImGui::BulletText( "Circle" );
-        ImGui::BulletText( "Capsule" );
-        ImGui::BulletText( "Segment" );
-        ImGui::BulletText( "Polygon" );
+        ImGui::BulletText( "Circle x6" );
+        ImGui::BulletText( "Capsule x6" );
+        ImGui::BulletText( "Segment x6" );
+        ImGui::BulletText( "Polygon x6" );
 
         ImGui::EndChild();
 
