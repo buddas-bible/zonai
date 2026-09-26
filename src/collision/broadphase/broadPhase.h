@@ -94,6 +94,7 @@ private:
             assert( shapeIndexA >= 0 );
             assert( shapeIndexB >= 0 );
             assert( shapeIndexA != shapeIndexB );
+            assert( batchCount < batch.size() );
 
             CandidatePair& candidate = batch[batchCount++];
 
@@ -407,6 +408,7 @@ private:
     static constexpr std::size_t BODY_TYPE_COUNT = static_cast<std::size_t>( BodyType::Count );
     static constexpr std::size_t CROSS_SEED_COUNT = 64;
 
+    static_assert( BODY_TYPE_COUNT == 3 );
     static_assert( ( CROSS_SEED_COUNT & ( CROSS_SEED_COUNT - 1 ) ) == 0 );
 
     // 둘 중 하나가 moved이고 AABB가 겹치는지 확인함.
@@ -470,8 +472,14 @@ private:
                     continue;
                 }
 
-                assert( stackCount < stack.size() );
-                stack[stackCount++] = DynamicTree::GetChildPair( node );
+                if( stackCount < stack.size() )
+                {
+                    stack[stackCount++] = DynamicTree::GetChildPair( node );
+                }
+                else
+                {
+                    assert( stackCount < stack.size() );
+                }
             }
         }
     }
@@ -511,11 +519,17 @@ private:
         else
         {
             // 둘 다 internal이면 각 child 조합을 다음 순회에서 비교함.
-            assert( stackCount < stack.size() );
-            stack[stackCount++] = {
-                DynamicTree::GetChildPair( nodeA ),
-                DynamicTree::GetChildPair( nodeB )
-            };
+            if( stackCount < stack.size() )
+            {
+                stack[stackCount++] = {
+                    DynamicTree::GetChildPair( nodeA ),
+                    DynamicTree::GetChildPair( nodeB )
+                };
+            }
+            else
+            {
+                assert( stackCount < stack.size() );
+            }
         }
     }
 
