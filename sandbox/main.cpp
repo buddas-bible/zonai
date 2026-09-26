@@ -73,6 +73,21 @@ void DestroyRenderTarget()
     g_d3d.renderTargetView.Reset();
 }
 
+// MakeBox()는 원점 기준이므로 Sandbox 배치용으로 world 위치만 이동함.
+polygon2 MakeDebugBox( const vec2& center, const vec2& halfExtents )
+{
+    polygon2 polygon = MakeBox( halfExtents );
+
+    for( int i = 0; i < polygon.vertexCount; ++i )
+    {
+        polygon.vertices[i] += center;
+    }
+
+    polygon.centroid += center;
+
+    return polygon;
+}
+
 LRESULT CALLBACK WndProc(
     HWND hwnd,
     UINT message,
@@ -266,6 +281,39 @@ int main()
 
     const polygon2 polygon = MakePolygon( polygonVertices );
 
+    // AABB Tree 구조를 관찰하기 위한 추가 geometry.
+    const std::array<circle2, 5> extraCircles{
+        circle2{ { -7.0f, -3.6f }, 0.65f },
+        circle2{ { -6.2f,  4.0f }, 0.80f },
+        circle2{ { -2.0f,  4.6f }, 0.55f },
+        circle2{ {  5.7f,  3.8f }, 0.75f },
+        circle2{ {  7.0f, -3.4f }, 0.90f }
+    };
+
+    const std::array<capsule2, 5> extraCapsules{
+        capsule2{ { -7.2f,  0.5f }, { -5.9f,  1.4f }, 0.30f },
+        capsule2{ { -5.0f, -4.1f }, { -3.5f, -3.2f }, 0.38f },
+        capsule2{ { -0.3f, -3.8f }, {  1.4f, -4.5f }, 0.30f },
+        capsule2{ {  3.7f,  4.1f }, {  5.1f,  4.6f }, 0.34f },
+        capsule2{ {  5.8f, -0.6f }, {  7.1f,  0.6f }, 0.42f }
+    };
+
+    const std::array<segment2, 5> extraSegments{
+        segment2{ { -7.5f, -1.1f }, { -6.0f, -2.3f } },
+        segment2{ { -3.6f,  3.0f }, { -2.2f,  3.8f } },
+        segment2{ {  0.8f,  2.7f }, {  2.4f,  3.4f } },
+        segment2{ {  3.8f, -2.1f }, {  5.4f, -3.1f } },
+        segment2{ {  6.0f,  2.0f }, {  7.4f,  1.0f } }
+    };
+
+    const std::array<polygon2, 5> extraPolygons{
+        MakeDebugBox( { -5.2f,  2.5f }, { 0.65f, 0.45f } ),
+        MakeDebugBox( { -2.4f, -2.7f }, { 0.55f, 0.85f } ),
+        MakeDebugBox( {  0.3f,  0.8f }, { 0.75f, 0.50f } ),
+        MakeDebugBox( {  3.1f,  1.1f }, { 0.50f, 0.90f } ),
+        MakeDebugBox( {  6.1f, -4.0f }, { 0.70f, 0.45f } )
+    };
+
     aabb2 circleAABB = ComputeAABB( circle );
     const aabb2 capsuleAABB = ComputeAABB( capsule );
     const aabb2 segmentAABB = ComputeAABB( segment );
@@ -275,25 +323,95 @@ int main()
     // BroadPhase visual test
     // ---------------------------------------------------------
 
-    constexpr std::int32_t CIRCLE_SHAPE = 0;
-    constexpr std::int32_t CAPSULE_SHAPE = 1;
-    constexpr std::int32_t SEGMENT_SHAPE = 2;
-    constexpr std::int32_t POLYGON_SHAPE = 3;
-
     BroadPhase broadPhase{};
 
-    const ProxyKey circleProxy =
-        broadPhase.CreateProxy( BodyType::Dynamic, circleAABB, CIRCLE_SHAPE );
+    std::vector<Shape> shapes;
+    std::vector<vec2> shapeCenters;
 
-    broadPhase.CreateProxy( BodyType::Static, capsuleAABB, CAPSULE_SHAPE );
-    broadPhase.CreateProxy( BodyType::Static, segmentAABB, SEGMENT_SHAPE );
-    broadPhase.CreateProxy( BodyType::Static, polygonAABB, POLYGON_SHAPE );
+    shapes.reserve( 24 );
+    shapeCenters.reserve( 24 );
 
-    std::array<Shape, 4> shapes{};
+    auto createSceneProxy =
+        [&]( BodyType type, const aabb2& aabb, const vec2& center )
+        {
+            const std::int32_t shapeIndex =
+                static_cast<std::int32_t>( shapes.size() );
 
-    for( std::int32_t i = 0; i < static_cast<std::int32_t>( shapes.size() ); ++i )
+            Shape shape{};
+            shape.bodyId = shapeIndex;
+
+            shapes.push_back( shape );
+            shapeCenters.push_back( center );
+
+            const ProxyKey proxyKey =
+                broadPhase.CreateProxy( type, aabb, shapeIndex );
+
+            return std::pair{ shapeIndex, proxyKey };
+        };
+
+    const auto [circleShape, circleProxy] =
+        createSceneProxy( BodyType::Dynamic, circleAABB, circle.center );
+
+    createSceneProxy(
+        BodyType::Static,
+        capsuleAABB,
+        ( capsule.center1 + capsule.center2 ) * 0.5f
+    );
+
+    createSceneProxy(
+        BodyType::Static,
+        segmentAABB,
+        ( segment.a + segment.b ) * 0.5f
+    );
+
+    createSceneProxy( BodyType::Static, polygonAABB, polygon.centroid );
+
+    for( std::size_t i = 0; i < extraCircles.size(); ++i )
     {
-        shapes[i].bodyId = i;
+        const BodyType type =
+            ( i & 1u ) == 0 ? BodyType::Dynamic : BodyType::Static;
+
+        createSceneProxy(
+            type,
+            ComputeAABB( extraCircles[i] ),
+            extraCircles[i].center
+        );
+    }
+
+    for( std::size_t i = 0; i < extraCapsules.size(); ++i )
+    {
+        const BodyType type =
+            ( i & 1u ) == 0 ? BodyType::Static : BodyType::Dynamic;
+
+        createSceneProxy(
+            type,
+            ComputeAABB( extraCapsules[i] ),
+            ( extraCapsules[i].center1 + extraCapsules[i].center2 ) * 0.5f
+        );
+    }
+
+    for( std::size_t i = 0; i < extraSegments.size(); ++i )
+    {
+        const BodyType type =
+            ( i & 1u ) == 0 ? BodyType::Dynamic : BodyType::Static;
+
+        createSceneProxy(
+            type,
+            ComputeAABB( extraSegments[i] ),
+            ( extraSegments[i].a + extraSegments[i].b ) * 0.5f
+        );
+    }
+
+    for( std::size_t i = 0; i < extraPolygons.size(); ++i )
+    {
+        const BodyType type =
+            ( i & 1u ) == 0 ? BodyType::Static : BodyType::Dynamic;
+
+        createSceneProxy(
+            type,
+            ComputeAABB( extraPolygons[i] ),
+            extraPolygons[i].centroid
+        );
     }
 
     std::array<std::int32_t, 256> movedSiblings{};
@@ -408,11 +526,12 @@ int main()
 
         ImGui::Text( "FPS: %.1f", io.Framerate );
         ImGui::Text( "Scale: %.1f px/m", camera.pixelsPerMeter );
+        ImGui::Text( "Scene shapes: %zu", shapes.size() );
         ImGui::Text( "BroadPhase pairs: %zu", candidatePairs.size() );
 
         ImGui::Spacing();
         ImGui::TextWrapped(
-            "Left drag Circle: move proxy\n"
+            "Left drag blue Circle: move proxy\n"
             "Mouse wheel: zoom\n"
             "Middle drag: pan"
         );
@@ -502,6 +621,7 @@ int main()
             {
                 circle.center = mouseWorld + circleGrabOffset;
                 circleAABB = ComputeAABB( circle );
+                shapeCenters[circleShape] = circle.center;
 
                 // 실제 BroadPhase proxy를 새 Circle AABB로 이동시킴.
                 broadPhase.MoveProxy( circleProxy, circleAABB );
@@ -600,12 +720,52 @@ int main()
         debugDraw.DrawSegment( segment, SEGMENT_COLOR, 3.0f );
         debugDraw.DrawPolygon( polygon, POLYGON_OUTLINE, POLYGON_FILL );
 
+        for( const circle2& extraCircle : extraCircles )
+        {
+            debugDraw.DrawCircle( extraCircle, CIRCLE_OUTLINE, CIRCLE_FILL );
+        }
+
+        for( const capsule2& extraCapsule : extraCapsules )
+        {
+            debugDraw.DrawCapsule( extraCapsule, CAPSULE_OUTLINE, CAPSULE_FILL );
+        }
+
+        for( const segment2& extraSegment : extraSegments )
+        {
+            debugDraw.DrawSegment( extraSegment, SEGMENT_COLOR, 3.0f );
+        }
+
+        for( const polygon2& extraPolygon : extraPolygons )
+        {
+            debugDraw.DrawPolygon( extraPolygon, POLYGON_OUTLINE, POLYGON_FILL );
+        }
+
         if( showAABBs )
         {
             debugDraw.DrawAABB( circleAABB, AABB_COLOR );
             debugDraw.DrawAABB( capsuleAABB, AABB_COLOR );
             debugDraw.DrawAABB( segmentAABB, AABB_COLOR );
             debugDraw.DrawAABB( polygonAABB, AABB_COLOR );
+
+            for( const circle2& extraCircle : extraCircles )
+            {
+                debugDraw.DrawAABB( ComputeAABB( extraCircle ), AABB_COLOR );
+            }
+
+            for( const capsule2& extraCapsule : extraCapsules )
+            {
+                debugDraw.DrawAABB( ComputeAABB( extraCapsule ), AABB_COLOR );
+            }
+
+            for( const segment2& extraSegment : extraSegments )
+            {
+                debugDraw.DrawAABB( ComputeAABB( extraSegment ), AABB_COLOR );
+            }
+
+            for( const polygon2& extraPolygon : extraPolygons )
+            {
+                debugDraw.DrawAABB( ComputeAABB( extraPolygon ), AABB_COLOR );
+            }
         }
 
         if( showLabels )
@@ -618,31 +778,22 @@ int main()
 
         for( const auto& pair : candidatePairs )
         {
-            const std::int32_t otherShape =
-                pair.first == CIRCLE_SHAPE ? pair.second : pair.first;
-
-            vec2 otherCenter{};
-
-            switch( otherShape )
+            if( pair.first != circleShape && pair.second != circleShape )
             {
-            case CAPSULE_SHAPE:
-                otherCenter = ( capsule.center1 + capsule.center2 ) * 0.5f;
-                break;
+                continue;
+            }
 
-            case SEGMENT_SHAPE:
-                otherCenter = ( segment.a + segment.b ) * 0.5f;
-                break;
+            const std::int32_t otherShape =
+                pair.first == circleShape ? pair.second : pair.first;
 
-            case POLYGON_SHAPE:
-                otherCenter = polygon.centroid;
-                break;
-
-            default:
+            if( otherShape < 0 ||
+                static_cast<std::size_t>( otherShape ) >= shapeCenters.size() )
+            {
                 continue;
             }
 
             debugDraw.DrawSegment(
-                { circle.center, otherCenter },
+                { circle.center, shapeCenters[otherShape] },
                 PAIR_COLOR,
                 3.0f
             );
