@@ -358,6 +358,68 @@ bool DynamicTree::Validate() const
         return false;
     }
 
+    // Box2D처럼 free sibling-pair list 자체도 검증함.
+    std::size_t freePairCount = 0;
+    std::int32_t freePair = pairFreeList_;
+
+    while( freePair != NULL_INDEX )
+    {
+        if( freePair < 2 ||
+            ( freePair & 1 ) != 0 ||
+            static_cast<std::size_t>( freePair + 1 ) >= nodes_.size() ||
+            !IsEmptyNode( nodes_[freePair] ) ||
+            !IsEmptyNode( nodes_[freePair + 1] ) )
+        {
+            return false;
+        }
+
+        freePair = parents_[freePair];
+        ++freePairCount;
+
+        // cycle가 생긴 free-list는 node 수보다 길어질 수 없음.
+        if( 2 * freePairCount >= nodes_.size() )
+        {
+            return false;
+        }
+    }
+
+    // proxy free-list의 범위, free 상태, 개수 보존을 검증함.
+    std::size_t freeProxyCount = 0;
+    std::int32_t freeProxy = proxyFreeList_;
+
+    while( freeProxy != NULL_INDEX )
+    {
+        if( freeProxy < 0 ||
+            static_cast<std::size_t>( freeProxy ) >= proxies_.size() ||
+            proxies_[freeProxy].node != NULL_INDEX )
+        {
+            return false;
+        }
+
+        freeProxy = proxies_[freeProxy].next;
+        ++freeProxyCount;
+
+        if( freeProxyCount > proxies_.size() )
+        {
+            return false;
+        }
+    }
+
+    if( proxyCount_ + freeProxyCount != proxies_.size() )
+    {
+        return false;
+    }
+
+    // n개의 live proxy는 2n개의 live/root slots를 사용하고 free pair마다 두 slot이 추가됨.
+    const std::size_t expectedNodeCount =
+        2 * std::max<std::size_t>( proxyCount_, 1 ) +
+        2 * freePairCount;
+
+    if( nodes_.size() != expectedNodeCount )
+    {
+        return false;
+    }
+
     if( proxyCount_ == 0 )
     {
         // proxy가 없으면 root도 비어있어야 함.
