@@ -234,6 +234,12 @@ int main()
     bool showAABBs = true;
     bool showLabels = true;
 
+    bool showDynamicTree = true;
+    bool showStaticTree = true;
+    bool showTreeLeaves = true;
+    bool showTreeInternal = true;
+    bool showTreeLabels = false;
+
     circle2 circle{
         { -4.0f, 2.0f },
         0.9f
@@ -305,6 +311,9 @@ int main()
 
     candidatePairs.clear();
 
+    const DynamicTree& dynamicTree = broadPhase.GetTree( BodyType::Dynamic );
+    const DynamicTree& staticTree = broadPhase.GetTree( BodyType::Static );
+
     bool draggingCircle = false;
     vec2 circleGrabOffset{};
 
@@ -362,6 +371,31 @@ int main()
         ImGui::Checkbox( "Grid / Axis", &showGrid );
         ImGui::Checkbox( "Shape AABBs", &showAABBs );
         ImGui::Checkbox( "Labels", &showLabels );
+
+        ImGui::Separator();
+        ImGui::TextUnformatted( "AABB Tree" );
+
+        ImGui::Checkbox( "Dynamic Tree", &showDynamicTree );
+        ImGui::Checkbox( "Static Tree", &showStaticTree );
+        ImGui::Checkbox( "Tree Leaves", &showTreeLeaves );
+        ImGui::Checkbox( "Tree Internal", &showTreeInternal );
+        ImGui::Checkbox( "Tree Labels", &showTreeLabels );
+
+        ImGui::Spacing();
+
+        ImGui::Text(
+            "Dynamic: proxies %zu / height %d",
+            dynamicTree.GetProxyCount(),
+            dynamicTree.GetHeight()
+        );
+        ImGui::Text( "Dynamic area ratio: %.2f", dynamicTree.GetAreaRatio() );
+
+        ImGui::Text(
+            "Static: proxies %zu / height %d",
+            staticTree.GetProxyCount(),
+            staticTree.GetHeight()
+        );
+        ImGui::Text( "Static area ratio: %.2f", staticTree.GetAreaRatio() );
 
         ImGui::Spacing();
 
@@ -512,6 +546,38 @@ int main()
         if( showGrid )
         {
             debugDraw.DrawGrid();
+        }
+
+        constexpr ImU32 DYNAMIC_TREE_LEAF = IM_COL32( 70, 200, 255, 220 );
+        constexpr ImU32 DYNAMIC_TREE_INTERNAL = IM_COL32( 80, 120, 255, 150 );
+
+        constexpr ImU32 STATIC_TREE_LEAF = IM_COL32( 110, 220, 130, 220 );
+        constexpr ImU32 STATIC_TREE_INTERNAL = IM_COL32( 230, 180, 80, 150 );
+
+        if( showStaticTree )
+        {
+            debugDraw.DrawTree(
+                staticTree,
+                "S",
+                showTreeLeaves,
+                showTreeInternal,
+                showTreeLabels,
+                STATIC_TREE_LEAF,
+                STATIC_TREE_INTERNAL
+            );
+        }
+
+        if( showDynamicTree )
+        {
+            debugDraw.DrawTree(
+                dynamicTree,
+                "D",
+                showTreeLeaves,
+                showTreeInternal,
+                showTreeLabels,
+                DYNAMIC_TREE_LEAF,
+                DYNAMIC_TREE_INTERNAL
+            );
         }
 
         constexpr ImU32 CIRCLE_OUTLINE = IM_COL32( 90, 200, 255, 255 );
