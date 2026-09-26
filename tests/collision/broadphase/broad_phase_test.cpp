@@ -632,6 +632,57 @@ int main()
     assert( sameBodyPairs.size() == 1 );
     assert( sameBodyPairs[0] == differentBodyPair );
 
+    BroadPhase sensorBroadPhase{};
+
+    const aabb2 sensorBoxA{
+        { 0.0f, 0.0f },
+        { 2.0f, 2.0f }
+    };
+
+    const aabb2 sensorBoxB{
+        { 1.0f, 0.0f },
+        { 3.0f, 2.0f }
+    };
+
+    sensorBroadPhase.CreateProxy( BodyType::Dynamic, sensorBoxA, 0 );
+    sensorBroadPhase.CreateProxy( BodyType::Dynamic, sensorBoxB, 1 );
+
+    std::array<Shape, 2> sensorShapes{};
+    sensorShapes[0].bodyId = 20;
+    sensorShapes[1].bodyId = 21;
+    sensorShapes[0].sensorIndex = 0;
+
+    std::array<std::int32_t, 4> sensorMovedSiblings{};
+    std::vector<std::pair<std::int32_t, std::int32_t>> sensorPairs;
+
+    sensorBroadPhase.FindDynamicSelfPairs(
+        sensorMovedSiblings,
+        sensorShapes,
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            sensorPairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    // Sensor overlap은 일반 Contact 생성 경로에서 제외됨.
+    assert( sensorPairs.empty() );
+
+    sensorShapes[0].sensorIndex = Shape::NULL_INDEX;
+
+    sensorBroadPhase.FindDynamicSelfPairs(
+        sensorMovedSiblings,
+        sensorShapes,
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            sensorPairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    const std::pair<std::int32_t, std::int32_t> nonSensorPair{ 0, 1 };
+
+    assert( sensorPairs.size() == 1 );
+    assert( sensorPairs[0] == nonSensorPair );
+
     BroadPhase filteredUpdateBroadPhase{};
 
     const aabb2 filterSelfBoxA{
