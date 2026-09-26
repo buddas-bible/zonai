@@ -54,6 +54,13 @@ bool BroadPhase::HasPair( ShapePairKey pairKey ) const
 
 bool BroadPhase::TestPair( const TreeNode& nodeA, const TreeNode& nodeB )
 {
+    // 빈 tree의 root는 leaf bit를 포함한 sentinel이므로 실제 proxy처럼 취급하면 안 됨.
+    if( DynamicTree::IsEmptyNode( nodeA ) ||
+        DynamicTree::IsEmptyNode( nodeB ) )
+    {
+        return false;
+    }
+
     // 둘 중 하나라도 moved이고 AABB가 겹칠 때만 새 pair 후보가 될 수 있음.
     if( ( ( nodeA.flagIndex | nodeB.flagIndex ) & DynamicTree::TREE_MOVED_NODE ) == 0 )
     {
