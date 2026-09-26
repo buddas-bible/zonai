@@ -46,6 +46,17 @@ public:
         ImU32 color,
         float thickness = 2.0f ) const;
 
+    void DrawPoint(
+        const vec2& point,
+        ImU32 color,
+        float radiusPixels = 4.0f ) const;
+
+    void DrawArrow(
+        const vec2& start,
+        const vec2& direction,
+        ImU32 color,
+        float length = 1.0f ) const;
+
     void DrawCircle(
         const circle2& circle,
         ImU32 outlineColor,
