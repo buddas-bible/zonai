@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "collision/aabb2.h"
+#include "memory/alignedAllocator.h"
 
 namespace zonai
 {
@@ -50,6 +51,9 @@ struct TreeProxy
 
 static_assert( sizeof( TreeNode ) == 32 );
 static_assert( sizeof( TreeProxy ) == 16 );
+
+using TreeNodeStorage =
+    std::vector<TreeNode, AlignedAllocator<TreeNode, 64>>;
 
 // Debug Draw가 tree 내부 저장구조를 직접 노출받지 않고 node 상태를 읽기 위한 view.
 struct TreeNodeDebugInfo
@@ -260,7 +264,7 @@ private:
 
 private:
     static TreeNode MakeInternalNodeFrom(
-        const std::vector<TreeNode>& nodes,
+        const TreeNodeStorage& nodes,
         std::int32_t childPair );
 
     TreeNode MakeInternalNode( std::int32_t childPair ) const;
@@ -291,14 +295,14 @@ private:
 
     bool ValidateSubtree( std::int32_t nodeIndex, std::int32_t& height, std::size_t& leafCount ) const;
 
-    std::vector<TreeNode> nodes_{};
+    TreeNodeStorage nodes_{};
     std::vector<std::int32_t> parents_{};
     std::vector<TreeProxy> proxies_{};
 
     // Rebuild에서 재사용하는 scratch buffer. 매 frame 작은 allocation이 생기지 않게 유지함.
-    std::vector<TreeNode> rebuildNodes_{};
+    TreeNodeStorage rebuildNodes_{};
     std::vector<std::int32_t> rebuildLeafIndices_{};
-    std::vector<TreeNode> rebuildLeafNodes_{};
+    TreeNodeStorage rebuildLeafNodes_{};
     std::vector<vec2> rebuildLeafCenters_{};
 
     // free proxy 연결 리스트의 head index.
