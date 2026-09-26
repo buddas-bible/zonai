@@ -2,32 +2,48 @@
 #include <d3d11.h>
 #include <wrl/client.h>
 
+#include <array>
+
 #include <imgui.h>
-#include <imgui_impl_win32.h>
 #include <imgui_impl_dx11.h>
+#include <imgui_impl_win32.h>
+
+#include "debug/debugCamera.h"
+#include "debug/debugDraw.h"
+
+#include "geometry/capsule2.h"
+#include "geometry/circle2.h"
+#include "geometry/polygon2.h"
+#include "geometry/segment2.h"
 
 using Microsoft::WRL::ComPtr;
 
+namespace
+{
+
+using namespace zonai;
+using namespace zonai::sandbox;
+
 struct D3D11Context
 {
-    Microsoft::WRL::ComPtr<ID3D11Device> device;
-    Microsoft::WRL::ComPtr<ID3D11DeviceContext> deviceContext;
-    Microsoft::WRL::ComPtr<IDXGISwapChain> swapChain;
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> renderTargetView;
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> deviceContext;
+    ComPtr<IDXGISwapChain> swapChain;
+    ComPtr<ID3D11RenderTargetView> renderTargetView;
 };
 
 D3D11Context g_d3d;
 
 bool CreateRenderTarget()
 {
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> backBuffer;
+    ComPtr<ID3D11Texture2D> backBuffer;
 
     HRESULT result = g_d3d.swapChain->GetBuffer(
         0,
-        IID_PPV_ARGS(&backBuffer)
+        IID_PPV_ARGS( &backBuffer )
     );
 
-    if (FAILED(result))
+    if( FAILED( result ) )
     {
         return false;
     }
@@ -38,7 +54,7 @@ bool CreateRenderTarget()
         &g_d3d.renderTargetView
     );
 
-    return SUCCEEDED(result);
+    return SUCCEEDED( result );
 }
 
 void DestroyRenderTarget()
@@ -57,31 +73,26 @@ LRESULT CALLBACK WndProc(
     HWND hwnd,
     UINT message,
     WPARAM wParam,
-    LPARAM lParam)
+    LPARAM lParam )
 {
-    if (ImGui_ImplWin32_WndProcHandler(
-        hwnd,
-        message,
-        wParam,
-        lParam))
+    if( ImGui_ImplWin32_WndProcHandler( hwnd, message, wParam, lParam ) )
     {
         return true;
     }
 
-    switch (message)
+    switch( message )
     {
     case WM_DESTROY:
-        PostQuitMessage(0);
+        PostQuitMessage( 0 );
         return 0;
 
     case WM_SIZE:
-    {
-        if (g_d3d.swapChain && wParam != SIZE_MINIMIZED)
+        if( g_d3d.swapChain && wParam != SIZE_MINIMIZED )
         {
             DestroyRenderTarget();
 
-            UINT width = LOWORD(lParam);
-            UINT height = HIWORD(lParam);
+            const UINT width = LOWORD( lParam );
+            const UINT height = HIWORD( lParam );
 
             g_d3d.swapChain->ResizeBuffers(
                 0,
@@ -96,21 +107,18 @@ LRESULT CALLBACK WndProc(
 
         return 0;
     }
-    }
 
-
-
-    return DefWindowProcW(
-        hwnd,
-        message,
-        wParam,
-        lParam
-    );
+    return DefWindowProcW( hwnd, message, wParam, lParam );
 }
+
+} // namespace
 
 int main()
 {
-    HINSTANCE instance = GetModuleHandleW(nullptr);
+    using namespace zonai;
+    using namespace zonai::sandbox;
+
+    HINSTANCE instance = GetModuleHandleW( nullptr );
 
     const wchar_t* className = L"ZonaiSandboxWindow";
 
@@ -119,7 +127,7 @@ int main()
     windowClass.hInstance = instance;
     windowClass.lpszClassName = className;
 
-    if (!RegisterClassW(&windowClass))
+    if( !RegisterClassW( &windowClass ) )
     {
         return 1;
     }
@@ -139,37 +147,27 @@ int main()
         nullptr
     );
 
-    if (!hwnd)
+    if( !hwnd )
     {
         return 1;
     }
 
-    ShowWindow(hwnd, SW_SHOW);
+    ShowWindow( hwnd, SW_SHOW );
 
     // ---------------------------------------------------------
     // D3D11
     // ---------------------------------------------------------
 
     DXGI_SWAP_CHAIN_DESC swapChainDesc{};
-
     swapChainDesc.BufferCount = 2;
-
     swapChainDesc.BufferDesc.Width = 0;
     swapChainDesc.BufferDesc.Height = 0;
-    swapChainDesc.BufferDesc.Format =
-        DXGI_FORMAT_R8G8B8A8_UNORM;
-
-    swapChainDesc.BufferUsage =
-        DXGI_USAGE_RENDER_TARGET_OUTPUT;
-
+    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapChainDesc.OutputWindow = hwnd;
-
     swapChainDesc.SampleDesc.Count = 1;
-
     swapChainDesc.Windowed = TRUE;
-
-    swapChainDesc.SwapEffect =
-        DXGI_SWAP_EFFECT_DISCARD;
+    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
 
     D3D_FEATURE_LEVEL featureLevel{};
 
@@ -189,34 +187,12 @@ int main()
             &g_d3d.deviceContext
         );
 
-    if (FAILED(result))
+    if( FAILED( result ) )
     {
         return 1;
     }
 
-    // ---------------------------------------------------------
-    // Render Target
-    // ---------------------------------------------------------
-
-    ComPtr<ID3D11Texture2D> backBuffer;
-
-    result = g_d3d.swapChain->GetBuffer(
-        0,
-        IID_PPV_ARGS(&backBuffer)
-    );
-
-    if (FAILED(result))
-    {
-        return 1;
-    }
-
-    result = g_d3d.device->CreateRenderTargetView(
-        backBuffer.Get(),
-        nullptr,
-        &g_d3d.renderTargetView
-    );
-
-    if (FAILED(result))
+    if( !CreateRenderTarget() )
     {
         return 1;
     }
@@ -226,25 +202,64 @@ int main()
     // ---------------------------------------------------------
 
     IMGUI_CHECKVERSION();
-
     ImGui::CreateContext();
 
     ImGuiIO& io = ImGui::GetIO();
-    (void)io;
 
     ImGui::StyleColorsDark();
 
-    if (!ImGui_ImplWin32_Init(hwnd))
+    if( !ImGui_ImplWin32_Init( hwnd ) )
     {
         return 1;
     }
 
-    if (!ImGui_ImplDX11_Init(
+    if( !ImGui_ImplDX11_Init(
         g_d3d.device.Get(),
-        g_d3d.deviceContext.Get()))
+        g_d3d.deviceContext.Get() ) )
     {
         return 1;
     }
+
+    // ---------------------------------------------------------
+    // Visual test scene
+    // ---------------------------------------------------------
+
+    DebugCamera camera{};
+
+    bool showGrid = true;
+    bool showAABBs = true;
+    bool showLabels = true;
+
+    const circle2 circle{
+        { -4.0f, 2.0f },
+        0.9f
+    };
+
+    const capsule2 capsule{
+        { -1.5f, -1.5f },
+        { 1.0f, -0.4f },
+        0.45f
+    };
+
+    const segment2 segment{
+        { 2.5f, 2.2f },
+        { 5.2f, 1.0f }
+    };
+
+    const std::array<vec2, 5> polygonVertices{
+        vec2{ 2.4f, -0.8f },
+        vec2{ 3.8f, 0.2f },
+        vec2{ 5.3f, -0.7f },
+        vec2{ 4.8f, -2.3f },
+        vec2{ 2.5f, -2.5f }
+    };
+
+    const polygon2 polygon = MakePolygon( polygonVertices );
+
+    const aabb2 circleAABB = ComputeAABB( circle );
+    const aabb2 capsuleAABB = ComputeAABB( capsule );
+    const aabb2 segmentAABB = ComputeAABB( segment );
+    const aabb2 polygonAABB = ComputeAABB( polygon );
 
     // ---------------------------------------------------------
     // Main Loop
@@ -253,48 +268,191 @@ int main()
     MSG message{};
     bool running = true;
 
-    while (running)
+    while( running )
     {
-        while (PeekMessageW(
-            &message,
-            nullptr,
-            0,
-            0,
-            PM_REMOVE))
+        while( PeekMessageW( &message, nullptr, 0, 0, PM_REMOVE ) )
         {
-            if (message.message == WM_QUIT)
+            if( message.message == WM_QUIT )
             {
                 running = false;
                 break;
             }
 
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
+            TranslateMessage( &message );
+            DispatchMessageW( &message );
         }
 
-        if (!running)
+        if( !running )
         {
             break;
         }
-
-        // -----------------------------------------------------
-        // ImGui Frame
-        // -----------------------------------------------------
 
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
-        ImGui::Begin("Zonai Physics Sandbox");
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
 
-        ImGui::Text("Hello, Zonai!");
+        ImGui::SetNextWindowPos( viewport->WorkPos );
+        ImGui::SetNextWindowSize( viewport->WorkSize );
+
+        constexpr ImGuiWindowFlags WINDOW_FLAGS =
+            ImGuiWindowFlags_NoCollapse |
+            ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoResize;
+
+        ImGui::Begin( "Zonai Physics Sandbox", nullptr, WINDOW_FLAGS );
+
+        // -----------------------------------------------------
+        // Controls
+        // -----------------------------------------------------
+
+        ImGui::BeginChild( "Controls", ImVec2( 230.0f, 0.0f ), true );
+
+        ImGui::TextUnformatted( "Geometry Debug View" );
         ImGui::Separator();
 
-        ImGui::Text(
-            "FPS: %.1f",
-            io.Framerate
+        ImGui::Checkbox( "Grid / Axis", &showGrid );
+        ImGui::Checkbox( "Shape AABBs", &showAABBs );
+        ImGui::Checkbox( "Labels", &showLabels );
+
+        ImGui::Spacing();
+
+        if( ImGui::Button( "Reset Camera" ) )
+        {
+            camera = {};
+        }
+
+        ImGui::Separator();
+
+        ImGui::Text( "FPS: %.1f", io.Framerate );
+        ImGui::Text( "Scale: %.1f px/m", camera.pixelsPerMeter );
+
+        ImGui::Spacing();
+        ImGui::TextWrapped(
+            "Mouse wheel: zoom\n"
+            "Middle drag: pan"
         );
 
+        ImGui::Separator();
+        ImGui::TextUnformatted( "Visible geometry" );
+        ImGui::BulletText( "Circle" );
+        ImGui::BulletText( "Capsule" );
+        ImGui::BulletText( "Segment" );
+        ImGui::BulletText( "Polygon" );
+
+        ImGui::EndChild();
+
+        ImGui::SameLine();
+
+        // -----------------------------------------------------
+        // Physics Canvas
+        // -----------------------------------------------------
+
+        ImGui::BeginChild(
+            "PhysicsCanvas",
+            ImVec2( 0.0f, 0.0f ),
+            true,
+            ImGuiWindowFlags_NoScrollbar |
+            ImGuiWindowFlags_NoScrollWithMouse
+        );
+
+        ImVec2 canvasMin = ImGui::GetCursorScreenPos();
+        ImVec2 canvasSize = ImGui::GetContentRegionAvail();
+
+        canvasSize.x = canvasSize.x < 1.0f ? 1.0f : canvasSize.x;
+        canvasSize.y = canvasSize.y < 1.0f ? 1.0f : canvasSize.y;
+
+        ImGui::InvisibleButton(
+            "CanvasInput",
+            canvasSize,
+            ImGuiButtonFlags_MouseButtonMiddle
+        );
+
+        const bool canvasHovered = ImGui::IsItemHovered();
+
+        if( canvasHovered && io.MouseWheel != 0.0f )
+        {
+            const vec2 beforeZoom =
+                camera.ScreenToWorld( io.MousePos, canvasMin, canvasSize );
+
+            camera.Zoom( io.MouseWheel );
+
+            const vec2 afterZoom =
+                camera.ScreenToWorld( io.MousePos, canvasMin, canvasSize );
+
+            // cursor 아래 world 좌표가 줌 전후에도 같은 위치에 머물게 함.
+            camera.center += beforeZoom - afterZoom;
+        }
+
+        if( canvasHovered && ImGui::IsMouseDragging( ImGuiMouseButton_Middle ) )
+        {
+            camera.PanPixels( io.MouseDelta );
+        }
+
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        const ImVec2 canvasMax{
+            canvasMin.x + canvasSize.x,
+            canvasMin.y + canvasSize.y
+        };
+
+        drawList->PushClipRect( canvasMin, canvasMax, true );
+        drawList->AddRectFilled(
+            canvasMin,
+            canvasMax,
+            IM_COL32( 23, 25, 31, 255 )
+        );
+
+        DebugDraw debugDraw{
+            drawList,
+            camera,
+            canvasMin,
+            canvasSize
+        };
+
+        if( showGrid )
+        {
+            debugDraw.DrawGrid();
+        }
+
+        constexpr ImU32 CIRCLE_OUTLINE = IM_COL32( 90, 200, 255, 255 );
+        constexpr ImU32 CIRCLE_FILL = IM_COL32( 90, 200, 255, 70 );
+
+        constexpr ImU32 CAPSULE_OUTLINE = IM_COL32( 120, 220, 130, 255 );
+        constexpr ImU32 CAPSULE_FILL = IM_COL32( 120, 220, 130, 70 );
+
+        constexpr ImU32 SEGMENT_COLOR = IM_COL32( 245, 205, 90, 255 );
+
+        constexpr ImU32 POLYGON_OUTLINE = IM_COL32( 235, 135, 80, 255 );
+        constexpr ImU32 POLYGON_FILL = IM_COL32( 235, 135, 80, 70 );
+
+        constexpr ImU32 AABB_COLOR = IM_COL32( 210, 100, 230, 210 );
+        constexpr ImU32 LABEL_COLOR = IM_COL32( 230, 232, 238, 255 );
+
+        debugDraw.DrawCircle( circle, CIRCLE_OUTLINE, CIRCLE_FILL );
+        debugDraw.DrawCapsule( capsule, CAPSULE_OUTLINE, CAPSULE_FILL );
+        debugDraw.DrawSegment( segment, SEGMENT_COLOR, 3.0f );
+        debugDraw.DrawPolygon( polygon, POLYGON_OUTLINE, POLYGON_FILL );
+
+        if( showAABBs )
+        {
+            debugDraw.DrawAABB( circleAABB, AABB_COLOR );
+            debugDraw.DrawAABB( capsuleAABB, AABB_COLOR );
+            debugDraw.DrawAABB( segmentAABB, AABB_COLOR );
+            debugDraw.DrawAABB( polygonAABB, AABB_COLOR );
+        }
+
+        if( showLabels )
+        {
+            debugDraw.DrawLabel( circle.center, "Circle", LABEL_COLOR );
+            debugDraw.DrawLabel( capsule.center1, "Capsule", LABEL_COLOR );
+            debugDraw.DrawLabel( segment.a, "Segment", LABEL_COLOR );
+            debugDraw.DrawLabel( polygon.centroid, "Polygon", LABEL_COLOR );
+        }
+
+        drawList->PopClipRect();
+
+        ImGui::EndChild();
         ImGui::End();
 
         ImGui::Render();
@@ -303,11 +461,10 @@ int main()
         // Render
         // -----------------------------------------------------
 
-        const float clearColor[4] =
-        {
+        const float clearColor[4]{
+            0.08f,
+            0.08f,
             0.1f,
-            0.1f,
-            0.15f,
             1.0f
         };
 
@@ -322,11 +479,9 @@ int main()
             clearColor
         );
 
-        ImGui_ImplDX11_RenderDrawData(
-            ImGui::GetDrawData()
-        );
+        ImGui_ImplDX11_RenderDrawData( ImGui::GetDrawData() );
 
-        g_d3d.swapChain->Present(1, 0);
+        g_d3d.swapChain->Present( 1, 0 );
     }
 
     // ---------------------------------------------------------
@@ -335,7 +490,6 @@ int main()
 
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
-
     ImGui::DestroyContext();
 
     g_d3d.renderTargetView.Reset();
@@ -343,29 +497,8 @@ int main()
     g_d3d.deviceContext.Reset();
     g_d3d.device.Reset();
 
-    DestroyWindow(hwnd);
-    UnregisterClassW(
-        className,
-        instance
-    );
+    DestroyWindow( hwnd );
+    UnregisterClassW( className, instance );
 
     return 0;
 }
-
-/*
-screenX = centerX + worldX * pixelsPerMeter;
-screenY = centerY - worldY * pixelsPerMeter;
-
-Vec2 gravity{ 0.0f, -9.8f };
-
-        +Y
-         ↑
-         |
--X ←── (0,0) ──→ +X
-         |
-         ↓
-        -Y
-
-Vec2 WorldToScreen(const Vec2& world);
-Vec2 ScreenToWorld(const Vec2& screen);
-*/
