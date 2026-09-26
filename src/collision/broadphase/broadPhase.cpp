@@ -170,6 +170,7 @@ std::size_t BroadPhase::GatherCrossSeeds(
         seeds[seedCount++] = queue[head++ & QUEUE_MASK];
     }
 
+    assert( seedCount <= CROSS_SEED_COUNT );
     return seedCount;
 }
 
