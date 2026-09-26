@@ -17,6 +17,10 @@ struct TreeNode
     // 이 node 아래 모든 leaf를 감싸는 AABB.
     aabb2 aabb{};
 
+    // Box2D와 같은 32-byte node layout을 유지함.
+    // 향후 3D에서는 z bounds 공간으로 재사용할 수 있음.
+    std::uint64_t padding = 0;
+
     // bit 31 : leaf flag
     // bit 30 : moved flag
     // bit 0~29 : internal node면 child pair index,
@@ -43,6 +47,9 @@ struct TreeProxy
     // free-list에서 다음 빈 proxy index.
     std::int32_t next = -1;
 };
+
+static_assert( sizeof( TreeNode ) == 32 );
+static_assert( sizeof( TreeProxy ) == 16 );
 
 // Debug Draw가 tree 내부 저장구조를 직접 노출받지 않고 node 상태를 읽기 위한 view.
 struct TreeNodeDebugInfo
