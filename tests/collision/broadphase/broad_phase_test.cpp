@@ -582,6 +582,41 @@ int main()
 
     assert( updatePairs.empty() );
 
+    // 반대쪽 tree가 비어 있으면 empty root를 leaf처럼 취급해
+    // shape 0과 가짜 (0, 0) pair를 만들면 안 됨.
+    {
+        BroadPhase emptyCrossBroadPhase{};
+
+        const aabb2 originSpanningBox{
+            { -1.0f, -1.0f },
+            {  1.0f,  1.0f }
+        };
+
+        emptyCrossBroadPhase.CreateProxy(
+            BodyType::Dynamic,
+            originSpanningBox,
+            0
+        );
+
+        std::vector<std::pair<std::int32_t, std::int32_t>> emptyCrossPairs;
+
+        emptyCrossBroadPhase.FindDynamicStaticPairs(
+            [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+            {
+                emptyCrossPairs.emplace_back( shapeIndexA, shapeIndexB );
+            }
+        );
+
+        emptyCrossBroadPhase.FindDynamicKinematicPairs(
+            [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+            {
+                emptyCrossPairs.emplace_back( shapeIndexA, shapeIndexB );
+            }
+        );
+
+        assert( emptyCrossPairs.empty() );
+    }
+
     BroadPhase sameBodyBroadPhase{};
 
     const aabb2 sameBodyBoxA{
