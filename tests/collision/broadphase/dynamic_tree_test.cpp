@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -26,6 +27,65 @@ bool NearlyEqual(
         NearlyEqual( a.min.y, b.min.y, epsilon ) &&
         NearlyEqual( a.max.x, b.max.x, epsilon ) &&
         NearlyEqual( a.max.y, b.max.y, epsilon );
+}
+
+std::uint32_t g_randomState = 12345u;
+
+float RandomFloat( float lower, float upper )
+{
+    g_randomState = 1664525u * g_randomState + 1013904223u;
+
+    const float unit =
+        static_cast<float>( g_randomState >> 8 ) *
+        ( 1.0f / 16777216.0f );
+
+    return lower + ( upper - lower ) * unit;
+}
+
+aabb2 RandomBox( float maxHalfExtent )
+{
+    const float x = RandomFloat( -50.0f, 50.0f );
+    const float y = RandomFloat( -50.0f, 50.0f );
+    const float hx = RandomFloat( 0.25f, maxHalfExtent );
+    const float hy = RandomFloat( 0.25f, maxHalfExtent );
+
+    return {
+        { x - hx, y - hy },
+        { x + hx, y + hy }
+    };
+}
+
+void CheckQueryAgainstBruteForce(
+    const DynamicTree& tree,
+    const std::vector<std::int32_t>& proxyIds,
+    const std::vector<aabb2>& boxes,
+    const aabb2& query )
+{
+    std::vector<std::int32_t> actual;
+
+    tree.Query(
+        query,
+        [&]( std::int32_t proxyId )
+        {
+            actual.push_back( proxyId );
+            return true;
+        }
+    );
+
+    std::sort( actual.begin(), actual.end() );
+
+    std::vector<std::int32_t> expected;
+
+    for( std::size_t i = 0; i < proxyIds.size(); ++i )
+    {
+        if( Overlaps( boxes[i], query ) )
+        {
+            expected.push_back( proxyIds[i] );
+        }
+    }
+
+    std::sort( expected.begin(), expected.end() );
+    assert( actual == expected );
 }
 
 int main()
@@ -494,6 +554,86 @@ int main()
         // 한쪽으로 계속 쌓이는걸 local rotation으로 줄여줌.
         assert( balancedTree.GetHeight() == 3 );
         assert( balancedTree.Validate() );
+    }
+
+    {
+        // Box2D의 brute-force query 테스트와 같은 방식으로 tree 탐색 결과를 직접 비교함.
+        constexpr std::int32_t PROXY_COUNT = 200;
+
+        DynamicTree stressTree{};
+        std::vector<std::int32_t> proxyIds;
+        std::vector<aabb2> boxes;
+
+        proxyIds.reserve( PROXY_COUNT );
+        boxes.reserve( PROXY_COUNT );
+
+        for( std::int32_t i = 0; i < PROXY_COUNT; ++i )
+        {
+            const aabb2 box = RandomBox( 2.0f );
+            proxyIds.push_back( stressTree.CreateProxy( box, i ) );
+            boxes.push_back( box );
+        }
+
+        assert( stressTree.Validate() );
+
+        for( int i = 0; i < 64; ++i )
+        {
+            CheckQueryAgainstBruteForce(
+                stressTree,
+                proxyIds,
+                boxes,
+                RandomBox( 8.0f )
+            );
+        }
+
+        // 이동 뒤에도 stable proxy id와 query 결과가 유지되어야 함.
+        for( std::int32_t i = 0; i < PROXY_COUNT; i += 2 )
+        {
+            boxes[i] = RandomBox( 2.0f );
+            stressTree.MoveProxy( proxyIds[i], boxes[i] );
+        }
+
+        assert( stressTree.Validate() );
+
+        for( int i = 0; i < 64; ++i )
+        {
+            CheckQueryAgainstBruteForce(
+                stressTree,
+                proxyIds,
+                boxes,
+                RandomBox( 8.0f )
+            );
+        }
+
+        assert( stressTree.Rebuild( true ) == PROXY_COUNT );
+        assert( stressTree.Validate() );
+
+        for( int i = 0; i < 64; ++i )
+        {
+            CheckQueryAgainstBruteForce(
+                stressTree,
+                proxyIds,
+                boxes,
+                RandomBox( 8.0f )
+            );
+        }
+
+        // 삭제로 free pair/proxy list에 hole을 만들고 매 단계 불변조건을 검사함.
+        for( std::int32_t i = 0; i < PROXY_COUNT; i += 3 )
+        {
+            stressTree.DestroyProxy( proxyIds[i] );
+            assert( stressTree.Validate() );
+        }
+
+        // 다시 삽입해 free-list가 실제로 재사용되는 경로도 검증함.
+        for( std::int32_t i = 0; i < PROXY_COUNT / 3; ++i )
+        {
+            stressTree.CreateProxy( RandomBox( 2.0f ), 1000 + i );
+            assert( stressTree.Validate() );
+        }
+
+        stressTree.Rebuild( true );
+        assert( stressTree.Validate() );
     }
 
     return 0;
