@@ -508,7 +508,10 @@ int main()
         shapes,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
-            candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
+            if( shapeIndexA == circleShape || shapeIndexB == circleShape )
+            {
+                candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
+            }
         }
     );
 
@@ -612,8 +615,8 @@ int main()
         ImGui::Text( "FPS: %.1f", io.Framerate );
         ImGui::Text( "Scale: %.1f px/m", camera.pixelsPerMeter );
         ImGui::Text( "Scene shapes: %zu", shapes.size() );
-        ImGui::Text( "BroadPhase pairs: %zu", candidatePairs.size() );
-        ImGui::Text( "NarrowPhase contacts: %zu", contacts.size() );
+        ImGui::Text( "Circle BroadPhase candidates: %zu", candidatePairs.size() );
+        ImGui::Text( "Circle NarrowPhase contacts: %zu", contacts.size() );
 
         ImGui::Spacing();
         ImGui::TextWrapped(
@@ -630,6 +633,41 @@ int main()
             for( const auto& pair : candidatePairs )
             {
                 ImGui::BulletText( "%d <-> %d", pair.first, pair.second );
+            }
+        }
+
+        if( !contacts.empty() )
+        {
+            ImGui::Separator();
+            ImGui::TextUnformatted( "NarrowPhase contacts" );
+
+            for( const DebugContact& contact : contacts )
+            {
+                ImGui::Text(
+                    "Circle %d <-> Shape %d",
+                    circleShape,
+                    contact.otherShape
+                );
+
+                ImGui::Text(
+                    "  normal: (%.2f, %.2f)",
+                    contact.manifold.normal.x,
+                    contact.manifold.normal.y
+                );
+
+                for( int i = 0; i < contact.manifold.pointCount; ++i )
+                {
+                    const localManifoldPoint2& point =
+                        contact.manifold.points[i];
+
+                    ImGui::Text(
+                        "  p%d (%.2f, %.2f) sep %.3f",
+                        i,
+                        point.point.x,
+                        point.point.y,
+                        point.separation
+                    );
+                }
             }
         }
 
@@ -719,7 +757,10 @@ int main()
                     shapes,
                     [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
                     {
-                        candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
+                        if( shapeIndexA == circleShape || shapeIndexB == circleShape )
+                        {
+                            candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
+                        }
                     }
                 );
 
