@@ -3,6 +3,9 @@
 #include <wrl/client.h>
 
 #include <array>
+#include <cstdint>
+#include <utility>
+#include <vector>
 
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -11,6 +14,7 @@
 #include "debug/debugCamera.h"
 #include "debug/debugDraw.h"
 
+#include "collision/broadphase/broadPhase.h"
 #include "geometry/capsule2.h"
 #include "geometry/circle2.h"
 #include "geometry/polygon2.h"
@@ -230,7 +234,7 @@ int main()
     bool showAABBs = true;
     bool showLabels = true;
 
-    const circle2 circle{
+    circle2 circle{
         { -4.0f, 2.0f },
         0.9f
     };
@@ -256,10 +260,53 @@ int main()
 
     const polygon2 polygon = MakePolygon( polygonVertices );
 
-    const aabb2 circleAABB = ComputeAABB( circle );
+    aabb2 circleAABB = ComputeAABB( circle );
     const aabb2 capsuleAABB = ComputeAABB( capsule );
     const aabb2 segmentAABB = ComputeAABB( segment );
     const aabb2 polygonAABB = ComputeAABB( polygon );
+
+    // ---------------------------------------------------------
+    // BroadPhase visual test
+    // ---------------------------------------------------------
+
+    constexpr std::int32_t CIRCLE_SHAPE = 0;
+    constexpr std::int32_t CAPSULE_SHAPE = 1;
+    constexpr std::int32_t SEGMENT_SHAPE = 2;
+    constexpr std::int32_t POLYGON_SHAPE = 3;
+
+    BroadPhase broadPhase{};
+
+    const ProxyKey circleProxy =
+        broadPhase.CreateProxy( BodyType::Dynamic, circleAABB, CIRCLE_SHAPE );
+
+    broadPhase.CreateProxy( BodyType::Static, capsuleAABB, CAPSULE_SHAPE );
+    broadPhase.CreateProxy( BodyType::Static, segmentAABB, SEGMENT_SHAPE );
+    broadPhase.CreateProxy( BodyType::Static, polygonAABB, POLYGON_SHAPE );
+
+    std::array<Shape, 4> shapes{};
+
+    for( std::int32_t i = 0; i < static_cast<std::int32_t>( shapes.size() ); ++i )
+    {
+        shapes[i].bodyId = i;
+    }
+
+    std::array<std::int32_t, 256> movedSiblings{};
+    std::vector<std::pair<std::int32_t, std::int32_t>> candidatePairs;
+
+    // 초기 proxy의 moved 상태를 한 번 소비해 drag 전 상태를 깨끗하게 맞춤.
+    broadPhase.UpdatePairs(
+        movedSiblings,
+        shapes,
+        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+        {
+            candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
+        }
+    );
+
+    candidatePairs.clear();
+
+    bool draggingCircle = false;
+    vec2 circleGrabOffset{};
 
     // ---------------------------------------------------------
     // Main Loop
@@ -327,12 +374,25 @@ int main()
 
         ImGui::Text( "FPS: %.1f", io.Framerate );
         ImGui::Text( "Scale: %.1f px/m", camera.pixelsPerMeter );
+        ImGui::Text( "BroadPhase pairs: %zu", candidatePairs.size() );
 
         ImGui::Spacing();
         ImGui::TextWrapped(
+            "Left drag Circle: move proxy\n"
             "Mouse wheel: zoom\n"
             "Middle drag: pan"
         );
+
+        if( !candidatePairs.empty() )
+        {
+            ImGui::Separator();
+            ImGui::TextUnformatted( "Candidate pairs" );
+
+            for( const auto& pair : candidatePairs )
+            {
+                ImGui::BulletText( "%d <-> %d", pair.first, pair.second );
+            }
+        }
 
         ImGui::Separator();
         ImGui::TextUnformatted( "Visible geometry" );
@@ -366,6 +426,7 @@ int main()
         ImGui::InvisibleButton(
             "CanvasInput",
             canvasSize,
+            ImGuiButtonFlags_MouseButtonLeft |
             ImGuiButtonFlags_MouseButtonMiddle
         );
 
@@ -388,6 +449,44 @@ int main()
         if( canvasHovered && ImGui::IsMouseDragging( ImGuiMouseButton_Middle ) )
         {
             camera.PanPixels( io.MouseDelta );
+        }
+
+        const vec2 mouseWorld =
+            camera.ScreenToWorld( io.MousePos, canvasMin, canvasSize );
+
+        if( canvasHovered &&
+            ImGui::IsMouseClicked( ImGuiMouseButton_Left ) &&
+            Contains( circle, mouseWorld ) )
+        {
+            draggingCircle = true;
+            circleGrabOffset = circle.center - mouseWorld;
+        }
+
+        if( draggingCircle )
+        {
+            if( ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
+            {
+                circle.center = mouseWorld + circleGrabOffset;
+                circleAABB = ComputeAABB( circle );
+
+                // 실제 BroadPhase proxy를 새 Circle AABB로 이동시킴.
+                broadPhase.MoveProxy( circleProxy, circleAABB );
+
+                candidatePairs.clear();
+
+                broadPhase.UpdatePairs(
+                    movedSiblings,
+                    shapes,
+                    [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
+                    {
+                        candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
+                    }
+                );
+            }
+            else
+            {
+                draggingCircle = false;
+            }
         }
 
         ImDrawList* drawList = ImGui::GetWindowDrawList();
@@ -428,6 +527,7 @@ int main()
 
         constexpr ImU32 AABB_COLOR = IM_COL32( 210, 100, 230, 210 );
         constexpr ImU32 LABEL_COLOR = IM_COL32( 230, 232, 238, 255 );
+        constexpr ImU32 PAIR_COLOR = IM_COL32( 255, 80, 100, 255 );
 
         debugDraw.DrawCircle( circle, CIRCLE_OUTLINE, CIRCLE_FILL );
         debugDraw.DrawCapsule( capsule, CAPSULE_OUTLINE, CAPSULE_FILL );
@@ -444,10 +544,42 @@ int main()
 
         if( showLabels )
         {
-            debugDraw.DrawLabel( circle.center, "Circle", LABEL_COLOR );
-            debugDraw.DrawLabel( capsule.center1, "Capsule", LABEL_COLOR );
-            debugDraw.DrawLabel( segment.a, "Segment", LABEL_COLOR );
-            debugDraw.DrawLabel( polygon.centroid, "Polygon", LABEL_COLOR );
+            debugDraw.DrawLabel( circle.center, "Circle [0] Dynamic", LABEL_COLOR );
+            debugDraw.DrawLabel( capsule.center1, "Capsule [1] Static", LABEL_COLOR );
+            debugDraw.DrawLabel( segment.a, "Segment [2] Static", LABEL_COLOR );
+            debugDraw.DrawLabel( polygon.centroid, "Polygon [3] Static", LABEL_COLOR );
+        }
+
+        for( const auto& pair : candidatePairs )
+        {
+            const std::int32_t otherShape =
+                pair.first == CIRCLE_SHAPE ? pair.second : pair.first;
+
+            vec2 otherCenter{};
+
+            switch( otherShape )
+            {
+            case CAPSULE_SHAPE:
+                otherCenter = ( capsule.center1 + capsule.center2 ) * 0.5f;
+                break;
+
+            case SEGMENT_SHAPE:
+                otherCenter = ( segment.a + segment.b ) * 0.5f;
+                break;
+
+            case POLYGON_SHAPE:
+                otherCenter = polygon.centroid;
+                break;
+
+            default:
+                continue;
+            }
+
+            debugDraw.DrawSegment(
+                { circle.center, otherCenter },
+                PAIR_COLOR,
+                3.0f
+            );
         }
 
         drawList->PopClipRect();
