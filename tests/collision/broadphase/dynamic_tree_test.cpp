@@ -77,6 +77,50 @@ int main()
 
         assert( NearlyEqual( pairTree.GetProxyAABB( proxyA ), boxA ) );
         assert( NearlyEqual( pairTree.GetProxyAABB( proxyB ), boxB ) );
+
+        std::vector<TreeNodeDebugInfo> debugNodes;
+
+        pairTree.VisitNodes(
+            [&]( const TreeNodeDebugInfo& info )
+            {
+                debugNodes.push_back( info );
+            }
+        );
+
+        assert( debugNodes.size() == 3 );
+
+        const auto rootIt =
+            std::find_if(
+                debugNodes.begin(),
+                debugNodes.end(),
+                []( const TreeNodeDebugInfo& info )
+                {
+                    return info.isRoot;
+                }
+            );
+
+        assert( rootIt != debugNodes.end() );
+        assert( rootIt->isLeaf == false );
+        assert( rootIt->parentIndex == -1 );
+        assert( rootIt->childPair >= 0 );
+        assert( rootIt->height == 1 );
+
+        std::vector<std::int32_t> debugShapeIndices;
+
+        for( const TreeNodeDebugInfo& info : debugNodes )
+        {
+            if( info.isLeaf )
+            {
+                assert( info.proxyId >= 0 );
+                assert( info.parentIndex == rootIt->nodeIndex );
+                debugShapeIndices.push_back( info.shapeIndex );
+            }
+        }
+
+        std::sort( debugShapeIndices.begin(), debugShapeIndices.end() );
+
+        const std::vector<std::int32_t> expectedDebugShapeIndices{ 10, 20 };
+        assert( debugShapeIndices == expectedDebugShapeIndices );
     }
 
 
