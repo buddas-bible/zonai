@@ -91,35 +91,31 @@ polygon2 MakeDebugBox( const vec2& center, const vec2& halfExtents )
     return polygon;
 }
 
-using DebugGeometryRef =
-    std::variant<
-        const circle2*,
-        const capsule2*,
-        const segment2*,
-        const polygon2*
-    >;
-
 struct DebugContact
 {
     std::int32_t otherShape = -1;
     localManifold2 manifold{};
 };
 
-// Sandbox geometry는 이미 world 좌표로 배치되어 있으므로 identity transform을 사용함.
+// Sandbox geometry는 아직 world 좌표로 직접 저장하므로 identity transform을 사용함.
 // 시각화 normal은 항상 움직이는 Circle에서 상대 Shape를 향하도록 맞춤.
 localManifold2 CollideDebugCircle(
     const circle2& circle,
-    const DebugGeometryRef& otherGeometry )
+    const ShapeGeometry& otherGeometry )
 {
     return std::visit(
-        [&]( const auto* geometry ) -> localManifold2
+        [&]( const auto& geometry ) -> localManifold2
         {
             using Geometry =
-                std::remove_cv_t<std::remove_pointer_t<decltype( geometry )>>;
+                std::remove_cvref_t<decltype( geometry )>;
 
-            if constexpr( std::is_same_v<Geometry, circle2> )
+            if constexpr( std::is_same_v<Geometry, std::monostate> )
             {
-                return CollideCircles( circle, *geometry, {} );
+                return {};
+            }
+            else if constexpr( std::is_same_v<Geometry, circle2> )
+            {
+                return CollideCircles( circle, geometry, {} );
             }
             else
             {
@@ -127,15 +123,15 @@ localManifold2 CollideDebugCircle(
 
                 if constexpr( std::is_same_v<Geometry, capsule2> )
                 {
-                    manifold = CollideCapsuleCircle( *geometry, circle, {} );
+                    manifold = CollideCapsuleCircle( geometry, circle, {} );
                 }
                 else if constexpr( std::is_same_v<Geometry, segment2> )
                 {
-                    manifold = CollideSegmentCircle( *geometry, circle, {} );
+                    manifold = CollideSegmentCircle( geometry, circle, {} );
                 }
                 else if constexpr( std::is_same_v<Geometry, polygon2> )
                 {
-                    manifold = CollidePolygonCircle( *geometry, circle, {} );
+                    manifold = CollidePolygonCircle( geometry, circle, {} );
                 }
 
                 if( manifold.pointCount > 0 )
@@ -389,27 +385,25 @@ int main()
 
     std::vector<Shape> shapes;
     std::vector<vec2> shapeCenters;
-    std::vector<DebugGeometryRef> geometryRefs;
 
     shapes.reserve( 24 );
     shapeCenters.reserve( 24 );
-    geometryRefs.reserve( 24 );
 
     auto createSceneProxy =
         [&]( BodyType type,
              const aabb2& aabb,
              const vec2& center,
-             DebugGeometryRef geometry )
+             ShapeGeometry geometry )
         {
             const std::int32_t shapeIndex =
                 static_cast<std::int32_t>( shapes.size() );
 
             Shape shape{};
             shape.bodyId = shapeIndex;
+            shape.geometry = std::move( geometry );
 
-            shapes.push_back( shape );
+            shapes.push_back( std::move( shape ) );
             shapeCenters.push_back( center );
-            geometryRefs.push_back( geometry );
 
             const ProxyKey proxyKey =
                 broadPhase.CreateProxy( type, aabb, shapeIndex );
@@ -422,28 +416,28 @@ int main()
             BodyType::Dynamic,
             circleAABB,
             circle.center,
-            &circle
+            circle
         );
 
     createSceneProxy(
         BodyType::Static,
         capsuleAABB,
         ( capsule.center1 + capsule.center2 ) * 0.5f,
-        &capsule
+        capsule
     );
 
     createSceneProxy(
         BodyType::Static,
         segmentAABB,
         ( segment.a + segment.b ) * 0.5f,
-        &segment
+        segment
     );
 
     createSceneProxy(
         BodyType::Static,
         polygonAABB,
         polygon.centroid,
-        &polygon
+        polygon
     );
 
     for( std::size_t i = 0; i < extraCircles.size(); ++i )
@@ -455,7 +449,7 @@ int main()
             type,
             ComputeAABB( extraCircles[i] ),
             extraCircles[i].center,
-            &extraCircles[i]
+            extraCircles[i]
         );
     }
 
@@ -468,7 +462,7 @@ int main()
             type,
             ComputeAABB( extraCapsules[i] ),
             ( extraCapsules[i].center1 + extraCapsules[i].center2 ) * 0.5f,
-            &extraCapsules[i]
+            extraCapsules[i]
         );
     }
 
@@ -481,7 +475,7 @@ int main()
             type,
             ComputeAABB( extraSegments[i] ),
             ( extraSegments[i].a + extraSegments[i].b ) * 0.5f,
-            &extraSegments[i]
+            extraSegments[i]
         );
     }
 
@@ -494,7 +488,7 @@ int main()
             type,
             ComputeAABB( extraPolygons[i] ),
             extraPolygons[i].centroid,
-            &extraPolygons[i]
+            extraPolygons[i]
         );
     }
 
@@ -744,6 +738,7 @@ int main()
                 circle.center = mouseWorld + circleGrabOffset;
                 circleAABB = ComputeAABB( circle );
                 shapeCenters[circleShape] = circle.center;
+                shapes[circleShape].geometry = circle;
 
                 // 실제 BroadPhase proxy를 새 Circle AABB로 이동시킴.
                 broadPhase.MoveProxy( circleProxy, circleAABB );
@@ -774,7 +769,7 @@ int main()
                         pair.first == circleShape ? pair.second : pair.first;
 
                     if( otherShape < 0 ||
-                        static_cast<std::size_t>( otherShape ) >= geometryRefs.size() )
+                        static_cast<std::size_t>( otherShape ) >= shapes.size() )
                     {
                         continue;
                     }
@@ -782,7 +777,7 @@ int main()
                     const localManifold2 manifold =
                         CollideDebugCircle(
                             circle,
-                            geometryRefs[otherShape]
+                            shapes[otherShape].geometry
                         );
 
                     if( manifold.pointCount > 0 )

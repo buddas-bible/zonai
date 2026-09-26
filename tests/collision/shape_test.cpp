@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cstdint>
 #include <limits>
+#include <variant>
 
 #include "collision/shape.h"
 
