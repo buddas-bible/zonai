@@ -90,6 +90,11 @@ private:
 
         void Add( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
+            // BroadPhase는 실제 서로 다른 Shape끼리만 candidate로 만들 수 있음.
+            assert( shapeIndexA >= 0 );
+            assert( shapeIndexB >= 0 );
+            assert( shapeIndexA != shapeIndexB );
+
             CandidatePair& candidate = batch[batchCount++];
 
             if( shapeIndexA < shapeIndexB )
