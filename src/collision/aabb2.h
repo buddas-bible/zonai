@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 
 #include "math/vec2.h"
 
@@ -12,6 +13,18 @@ struct aabb2
     vec2 min{};
     vec2 max{};
 };
+
+// 정상 AABB는 유한한 좌표를 가지며 max가 min보다 작지 않아야 함.
+inline bool IsValidAABB( const aabb2& box )
+{
+    return
+        std::isfinite( box.min.x ) &&
+        std::isfinite( box.min.y ) &&
+        std::isfinite( box.max.x ) &&
+        std::isfinite( box.max.y ) &&
+        box.max.x >= box.min.x &&
+        box.max.y >= box.min.y;
+}
 
 inline vec2 Center( const aabb2& box )
 {
