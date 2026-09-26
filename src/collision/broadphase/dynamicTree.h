@@ -225,6 +225,9 @@ private:
     static constexpr std::size_t INITIAL_PROXY_CAPACITY = 16;
     static constexpr std::size_t TREE_STACK_SIZE = 512;
 
+    // Box2D의 single-precision broad-phase 범위 보호와 같은 상한.
+    static constexpr float MAX_TREE_AABB_EXTENT = 1.0e5f;
+
 private:
     // flagIndex에서 node 상태와 저장된 index를 읽는 helper.
     static bool IsLeaf( const TreeNode& node );
