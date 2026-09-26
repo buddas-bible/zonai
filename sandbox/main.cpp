@@ -16,6 +16,13 @@
 #include "geometry/polygon2.h"
 #include "geometry/segment2.h"
 
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
+    HWND hwnd,
+    UINT message,
+    WPARAM wParam,
+    LPARAM lParam
+);
+
 using Microsoft::WRL::ComPtr;
 
 namespace
