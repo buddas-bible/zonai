@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <span>
 #include <unordered_set>
+#include <vector>
 
 #include "collision/broadphase/dynamicTree.h"
 #include "collision/broadphase/hashSet.h"
@@ -185,7 +186,7 @@ public:
 
     // BroadPhase의 한 update에서 후보 탐색과 tree maintenance를 순서대로 처리함.
     template <BroadPhasePairCallback Callback>
-    void UpdatePairs( std::span<std::int32_t> movedSiblings, Callback&& callback )
+    void UpdatePairs( Callback&& callback )
     {
         DynamicTree& staticTree = GetTree( BodyType::Static );
         DynamicTree& kinematicTree = GetTree( BodyType::Kinematic );
@@ -203,7 +204,7 @@ public:
         }
 
         // moved 상태를 소비하기 전에 새 BroadPhase 후보를 모두 찾음.
-        FindPairs( movedSiblings, callback );
+        FindPairs( callback );
 
         // static tree는 움직임 표시만 소비하고 dynamic / kinematic stale branch는 rebuild함.
         staticTree.ClearMoved();
@@ -214,7 +215,6 @@ public:
     // Shape runtime 상태를 사용해 후보를 필터링한 뒤 tree maintenance까지 처리함.
     template <BroadPhasePairCallback Callback>
     void UpdatePairs(
-        std::span<std::int32_t> movedSiblings,
         std::span<const Shape> shapes,
         Callback&& callback )
     {
@@ -232,7 +232,7 @@ public:
             return;
         }
 
-        FindPairs( movedSiblings, shapes, callback );
+        FindPairs( shapes, callback );
 
         staticTree.ClearMoved();
         dynamicTree.Rebuild( false );
@@ -242,35 +242,37 @@ public:
     // 세 BroadPhase 탐색 경로를 한 번에 실행해 새 충돌 후보를 모음.
     // moved flag 소비와 tree rebuild는 별도 단계에서 처리함.
     template <BroadPhasePairCallback Callback>
-    void FindPairs( std::span<std::int32_t> movedSiblings, Callback&& callback ) const
+    void FindPairs( Callback&& callback ) const
     {
         // Box2D처럼 dynamic tree를 static / kinematic tree와 먼저 교차 검사함.
         FindDynamicStaticPairs( callback );
         FindDynamicKinematicPairs( callback );
 
         // cross pair를 찾은 뒤 dynamic tree 내부의 self pair를 검사함.
-        FindDynamicSelfPairs( movedSiblings, callback );
+        FindDynamicSelfPairs( callback );
     }
 
     // Shape runtime 상태를 세 탐색 경로 모두에 전달해 후보를 필터링함.
     template <BroadPhasePairCallback Callback>
     void FindPairs(
-        std::span<std::int32_t> movedSiblings,
         std::span<const Shape> shapes,
         Callback&& callback ) const
     {
         FindDynamicStaticPairs( shapes, callback );
         FindDynamicKinematicPairs( shapes, callback );
-        FindDynamicSelfPairs( movedSiblings, shapes, callback );
+        FindDynamicSelfPairs( shapes, callback );
     }
 
     // moved sibling pair를 seed로 dynamic tree 내부의 새 충돌 후보를 찾음.
     // callback으로 전달되는 shape pair는 BroadPhase 후보이며 실제 충돌이 확정된 것은 아님.
     template <BroadPhasePairCallback Callback>
-    void FindDynamicSelfPairs( std::span<std::int32_t> movedSiblings, Callback&& callback ) const
+    void FindDynamicSelfPairs( Callback&& callback ) const
     {
         const DynamicTree& tree = GetTree( BodyType::Dynamic );
         PairContext<Callback> context{ pairSet_, callback };
+
+        // Box2D처럼 필요한 scratch 크기를 BroadPhase 내부에서 보장함.
+        const std::span<std::int32_t> movedSiblings = PrepareMovedSiblingScratch();
 
         // moved node가 포함된 sibling pair만 모아 self collision의 시작점으로 사용함.
         const std::size_t movedCount = GatherMovedSiblings( tree, movedSiblings );
@@ -290,13 +292,13 @@ public:
     // Shape runtime 상태까지 사용해 dynamic self 후보를 필터링함.
     template <BroadPhasePairCallback Callback>
     void FindDynamicSelfPairs(
-        std::span<std::int32_t> movedSiblings,
         std::span<const Shape> shapes,
         Callback&& callback ) const
     {
         const DynamicTree& tree = GetTree( BodyType::Dynamic );
         PairContext<Callback> context{ pairSet_, callback, shapes };
 
+        const std::span<std::int32_t> movedSiblings = PrepareMovedSiblingScratch();
         const std::size_t movedCount = GatherMovedSiblings( tree, movedSiblings );
 
         for( std::size_t i = 0; i < movedCount; ++i )
@@ -413,6 +415,9 @@ private:
 
     // 둘 중 하나가 moved이고 AABB가 겹치는지 확인함.
     static bool TestPair( const TreeNode& nodeA, const TreeNode& nodeB );
+
+    // dynamic tree 크기에 맞춰 재사용 scratch를 준비함.
+    std::span<std::int32_t> PrepareMovedSiblingScratch() const;
 
     // moved node가 포함된 sibling pair의 시작 index를 모음.
     static std::size_t GatherMovedSiblings( const DynamicTree& tree, std::span<std::int32_t> pairIndices );
@@ -574,6 +579,9 @@ private:
 
     // body type마다 독립된 DynamicTree를 사용함.
     std::array<DynamicTree, BODY_TYPE_COUNT> trees_{};
+
+    // pair 탐색에서 재사용하는 scratch. tree가 커질 때만 vector가 증가함.
+    mutable std::vector<std::int32_t> movedSiblings_{};
 
     // 이미 Contact를 가진 shape pair를 저장해 새 후보 생성에서 제외할 수 있게 함.
     HashSet pairSet_{ 32 };
