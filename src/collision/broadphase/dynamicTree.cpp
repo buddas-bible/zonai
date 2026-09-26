@@ -287,8 +287,16 @@ void DynamicTree::ClearMoved()
                 continue;
             }
 
-            assert( stackCount < TREE_STACK_SIZE );
-            stack[stackCount++] = GetChildPair( node );
+            if( stackCount < stack.size() )
+            {
+                stack[stackCount++] = GetChildPair( node );
+            }
+            else
+            {
+                // moved flag를 일부 남기는 것보다 메모리를 덮어쓰는 것이 더 위험하므로
+                // Box2D처럼 release에서는 push를 생략하고 debug에서 즉시 실패시킴.
+                assert( stackCount < stack.size() );
+            }
         }
     }
 }
