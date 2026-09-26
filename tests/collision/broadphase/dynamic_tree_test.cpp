@@ -608,6 +608,15 @@ int main()
         assert( stressTree.Rebuild( true ) == PROXY_COUNT );
         assert( stressTree.Validate() );
 
+        bool hasMovedNode = false;
+        stressTree.VisitNodes(
+            [&]( const TreeNodeDebugInfo& info )
+            {
+                hasMovedNode = hasMovedNode || info.isMoved;
+            }
+        );
+        assert( hasMovedNode == false );
+
         for( int i = 0; i < 64; ++i )
         {
             CheckQueryAgainstBruteForce(
@@ -619,18 +628,23 @@ int main()
         }
 
         // 삭제로 free pair/proxy list에 hole을 만들고 매 단계 불변조건을 검사함.
+        std::int32_t removedCount = 0;
+
         for( std::int32_t i = 0; i < PROXY_COUNT; i += 3 )
         {
             stressTree.DestroyProxy( proxyIds[i] );
+            ++removedCount;
             assert( stressTree.Validate() );
         }
 
-        // 다시 삽입해 free-list가 실제로 재사용되는 경로도 검증함.
-        for( std::int32_t i = 0; i < PROXY_COUNT / 3; ++i )
+        // 삭제한 수만큼 다시 삽입해 free pair/proxy list를 끝까지 재사용함.
+        for( std::int32_t i = 0; i < removedCount; ++i )
         {
             stressTree.CreateProxy( RandomBox( 2.0f ), 1000 + i );
             assert( stressTree.Validate() );
         }
+
+        assert( stressTree.GetProxyCount() == PROXY_COUNT );
 
         stressTree.Rebuild( true );
         assert( stressTree.Validate() );
