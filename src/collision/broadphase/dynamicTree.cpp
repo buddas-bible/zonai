@@ -74,18 +74,8 @@ std::int32_t DynamicTree::CreateProxy( const aabb2& aabb, std::int32_t shapeInde
     proxies_[proxyId].userData = static_cast<std::uint64_t>( shapeIndex );
 
     const TreeNode newLeaf = MakeLeafNode( aabb, proxyId, shapeIndex, markMoved );
-    
-    // 첫 proxy면 internal node 없이 root에 바로 넣음.
-    if( proxyCount_ == 1 )
-    {
-        nodes_[ROOT_NODE] = newLeaf;
-        parents_[ROOT_NODE] = NULL_INDEX;
-        proxies_[proxyId].node = ROOT_NODE;
 
-        return proxyId;
-    }
-
-    // SAH로 새 leaf와 묶을 형제 노드를 찾고, 삽입 후 root까지 올라가며 local rotation을 시도함.
+    // 삽입 경로 자체가 empty root를 처리하므로 첫 proxy도 같은 invariant를 사용함.
     InsertLeaf( newLeaf, true );
 
     return proxyId;
@@ -136,14 +126,6 @@ void DynamicTree::MoveProxy( std::int32_t proxyId, const aabb2& aabb, bool markM
 
     // 같은 proxy id로 새 AABB의 leaf를 만들어 다시 연결함.
     const TreeNode newLeaf = MakeLeafNode( aabb, proxyId, shapeIndex, markMoved );
-
-    if( proxyCount_ == 1 )
-    {
-        nodes_[ROOT_NODE] = newLeaf;
-        parents_[ROOT_NODE] = NULL_INDEX;
-        proxies_[proxyId].node = ROOT_NODE;
-        return;
-    }
 
     // MoveProxy 재삽입에서는 Box2D처럼 local rotation을 수행하지 않음.
     InsertLeaf( newLeaf, false );
@@ -1300,6 +1282,15 @@ void DynamicTree::RotateNode( std::int32_t nodeIndex )
 
 void DynamicTree::InsertLeaf( const TreeNode& leaf, bool shouldRotate )
 {
+    // Box2D처럼 empty root 처리를 삽입 함수에 중앙화함.
+    if( IsEmptyNode( nodes_[ROOT_NODE] ) )
+    {
+        nodes_[ROOT_NODE] = leaf;
+        parents_[ROOT_NODE] = NULL_INDEX;
+        LinkChildren( ROOT_NODE );
+        return;
+    }
+
     // 새 leaf와 묶였을 때 비용이 가장 작은 형제 노드를 찾음.
     const std::int32_t siblingIndex = FindBestSibling( leaf.aabb );
 
