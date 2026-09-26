@@ -181,6 +181,55 @@ void DebugDraw::DrawSegment(
     );
 }
 
+void DebugDraw::DrawPoint(
+    const vec2& point,
+    ImU32 color,
+    float radiusPixels ) const
+{
+    drawList_->AddCircleFilled(
+        ToScreen( point ),
+        radiusPixels,
+        color
+    );
+}
+
+void DebugDraw::DrawArrow(
+    const vec2& start,
+    const vec2& direction,
+    ImU32 color,
+    float length ) const
+{
+    if( LengthSquared( direction ) == 0.0f || length <= 0.0f )
+    {
+        return;
+    }
+
+    const vec2 normal = Normalize( direction );
+    const vec2 end = start + normal * length;
+
+    const vec2 perpendicular{ -normal.y, normal.x };
+    const float headLength = length * 0.22f;
+    const float headWidth = length * 0.12f;
+
+    const vec2 headBase = end - normal * headLength;
+    const vec2 headLeft = headBase + perpendicular * headWidth;
+    const vec2 headRight = headBase - perpendicular * headWidth;
+
+    drawList_->AddLine(
+        ToScreen( start ),
+        ToScreen( end ),
+        color,
+        2.0f
+    );
+
+    drawList_->AddTriangleFilled(
+        ToScreen( end ),
+        ToScreen( headLeft ),
+        ToScreen( headRight ),
+        color
+    );
+}
+
 void DebugDraw::DrawCircle(
     const circle2& circle,
     ImU32 outlineColor,
