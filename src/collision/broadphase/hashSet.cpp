@@ -18,6 +18,10 @@ bool HashSet::Add( std::uint64_t key )
     assert( key != 0 );
 
     const std::uint64_t hash = KeyHash( key );
+
+    // Murmur finalizer는 0 이외의 key를 0으로 보내지 않는 permutation임.
+    assert( hash != 0 );
+
     const std::size_t index = FindSlot( key, hash );
 
     if( items_[index] != 0 )
