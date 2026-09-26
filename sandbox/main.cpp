@@ -62,13 +62,6 @@ void DestroyRenderTarget()
     g_d3d.renderTargetView.Reset();
 }
 
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
-    HWND hwnd,
-    UINT message,
-    WPARAM wParam,
-    LPARAM lParam
-);
-
 LRESULT CALLBACK WndProc(
     HWND hwnd,
     UINT message,
