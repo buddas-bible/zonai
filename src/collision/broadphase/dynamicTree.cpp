@@ -64,6 +64,8 @@ DynamicTree::DynamicTree()
 
 std::int32_t DynamicTree::CreateProxy( const aabb2& aabb, std::int32_t shapeIndex, bool markMoved )
 {
+    assert( shapeIndex >= 0 );
+
     // 사용할 proxy id를 free-list에서 확보함.
     const std::int32_t proxyId = AllocateProxy();
     const TreeNode newLeaf = MakeLeafNode( aabb, proxyId, shapeIndex, markMoved );
