@@ -70,6 +70,15 @@ bool BroadPhase::TestPair( const TreeNode& nodeA, const TreeNode& nodeB )
     return Overlaps( nodeA.aabb, nodeB.aabb );
 }
 
+std::span<std::int32_t> BroadPhase::PrepareMovedSiblingScratch() const
+{
+    const DynamicTree& dynamicTree = GetTree( BodyType::Dynamic );
+    const std::size_t required = dynamicTree.nodes_.size() / 2;
+
+    movedSiblings_.resize( required );
+    return movedSiblings_;
+}
+
 std::size_t BroadPhase::GatherMovedSiblings( const DynamicTree& tree, std::span<std::int32_t> pairIndices )
 {
     // sibling이 항상 2개씩 붙어 있으므로 전체 node 수의 절반이면 출력 공간이 충분함.
