@@ -44,6 +44,29 @@ struct TreeProxy
     std::int32_t next = -1;
 };
 
+// Debug Draw가 tree 내부 저장구조를 직접 노출받지 않고 node 상태를 읽기 위한 view.
+struct TreeNodeDebugInfo
+{
+    aabb2 aabb{};
+
+    std::int32_t nodeIndex = -1;
+    std::int32_t parentIndex = -1;
+
+    // internal node면 첫 child index, leaf면 -1.
+    std::int32_t childPair = -1;
+
+    // leaf에서만 유효함.
+    std::int32_t proxyId = -1;
+    std::int32_t shapeIndex = -1;
+
+    // leaf는 0, internal node는 subtree height.
+    std::int32_t height = 0;
+
+    bool isLeaf = false;
+    bool isMoved = false;
+    bool isRoot = false;
+};
+
 template <typename Callback>
 concept TreeQueryCallback =
     requires( Callback& callback, std::int32_t proxyId )
@@ -87,6 +110,38 @@ public:
 
     // proxy가 가리키는 leaf의 AABB를 반환함.
     const aabb2& GetProxyAABB( std::int32_t proxyId ) const;
+
+    // Debug / tooling에서 live node를 read-only로 순회함.
+    // 내부 vector와 flag bit layout은 외부에 노출하지 않음.
+    template <typename Callback>
+    void VisitNodes( Callback&& callback ) const
+    {
+        for( std::size_t i = 0; i < nodes_.size(); ++i )
+        {
+            const TreeNode& node = nodes_[i];
+
+            if( IsEmptyNode( node ) )
+            {
+                continue;
+            }
+
+            const bool isLeaf = IsLeaf( node );
+
+            TreeNodeDebugInfo info{};
+            info.aabb = node.aabb;
+            info.nodeIndex = static_cast<std::int32_t>( i );
+            info.parentIndex = parents_[i];
+            info.childPair = isLeaf ? NULL_INDEX : GetChildPair( node );
+            info.proxyId = isLeaf ? GetProxyId( node ) : NULL_INDEX;
+            info.shapeIndex = isLeaf ? node.shapeIndex : NULL_INDEX;
+            info.height = GetNodeHeight( node );
+            info.isLeaf = isLeaf;
+            info.isMoved = ( node.flagIndex & TREE_MOVED_NODE ) != 0;
+            info.isRoot = static_cast<std::int32_t>( i ) == ROOT_NODE;
+
+            callback( info );
+        }
+    }
 
     // AABB가 겹치는 proxy를 찾아 callback으로 전달함.
     // callback이 false를 반환하면 즉시 순회를 끝냄.
