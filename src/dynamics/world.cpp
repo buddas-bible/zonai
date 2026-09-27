@@ -1,6 +1,7 @@
 #include "dynamics/world.h"
 
 #include <cassert>
+#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -71,6 +72,54 @@ std::int32_t World::CreateShape(
     LinkShape( body, bodyId, shapes_, shapeId );
 
     return shapeId;
+}
+
+
+void World::SetBodyTransform(
+    std::int32_t bodyId,
+    transform2 transform )
+{
+    assert( bodyId >= 0 );
+    assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
+
+    // transform이 NaN / infinity를 포함하면 tree AABB까지 오염되므로 입구에서 차단함.
+    assert( std::isfinite( transform.position.x ) );
+    assert( std::isfinite( transform.position.y ) );
+    assert( std::isfinite( transform.rotation.c ) );
+    assert( std::isfinite( transform.rotation.s ) );
+
+    Body& body = bodies_[bodyId];
+    body.transform = transform;
+
+    std::int32_t shapeId = body.headShapeId;
+    std::int32_t visitedCount = 0;
+
+    while( shapeId != Body::NULL_INDEX )
+    {
+        assert( shapeId >= 0 );
+        assert( static_cast<std::size_t>( shapeId ) < shapes_.size() );
+        assert( visitedCount < body.shapeCount );
+
+        Shape& shape = shapes_[shapeId];
+
+        assert( shape.bodyId == bodyId );
+
+        const aabb2 worldAABB =
+            ComputeShapeAABB( shape.geometry, body.transform );
+
+        // disabled Body 개념은 아직 없지만 Box2D와 같은 수명 규칙을 위해
+        // proxy가 실제로 존재하는 Shape만 BroadPhase에서 이동시킴.
+        if( shape.proxyKey != Shape::NULL_INDEX )
+        {
+            broadPhase_.MoveProxy( shape.proxyKey, worldAABB );
+        }
+
+        shapeId = shape.nextShapeId;
+        ++visitedCount;
+    }
+
+    // linked list와 Body의 shapeCount가 서로 일치해야 함.
+    assert( visitedCount == body.shapeCount );
 }
 
 Body& World::GetBody( std::int32_t bodyId )
