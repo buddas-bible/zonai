@@ -10,9 +10,7 @@
 namespace zonai
 {
 
-std::int32_t World::CreateBody(
-    BodyType type,
-    transform2 transform )
+std::int32_t World::CreateBody( BodyType type, transform2 transform )
 {
     assert(
         bodies_.size() <
@@ -32,10 +30,7 @@ std::int32_t World::CreateBody(
 }
 
 
-std::int32_t World::CreateShape(
-    std::int32_t bodyId,
-    ShapeGeometry geometry,
-    Filter filter )
+std::int32_t World::CreateShape( std::int32_t bodyId, ShapeGeometry geometry, Filter filter )
 {
     assert( bodyId >= 0 );
     assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
@@ -45,8 +40,7 @@ std::int32_t World::CreateShape(
         static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() )
     );
 
-    const std::int32_t shapeId =
-        static_cast<std::int32_t>( shapes_.size() );
+    const std::int32_t shapeId = static_cast<std::int32_t>( shapes_.size() );
 
     Shape shape{};
     shape.geometry = std::move( geometry );
@@ -57,8 +51,7 @@ std::int32_t World::CreateShape(
     Body& body = bodies_[bodyId];
     Shape& storedShape = shapes_[shapeId];
 
-    const aabb2 worldAABB =
-        ComputeShapeAABB( storedShape.geometry, body.transform );
+    const aabb2 worldAABB = ComputeShapeAABB( storedShape.geometry, body.transform );
 
     // Box2D의 기본 Shape 생성처럼 static Shape도 즉시 pair 탐색 대상이 되게 함.
     storedShape.proxyKey =
@@ -75,9 +68,7 @@ std::int32_t World::CreateShape(
 }
 
 
-void World::SetBodyTransform(
-    std::int32_t bodyId,
-    transform2 transform )
+void World::SetBodyTransform( std::int32_t bodyId, transform2 transform )
 {
     assert( bodyId >= 0 );
     assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
@@ -104,8 +95,7 @@ void World::SetBodyTransform(
 
         assert( shape.bodyId == bodyId );
 
-        const aabb2 worldAABB =
-            ComputeShapeAABB( shape.geometry, body.transform );
+        const aabb2 worldAABB = ComputeShapeAABB( shape.geometry, body.transform );
 
         // disabled Body 개념은 아직 없지만 Box2D와 같은 수명 규칙을 위해
         // proxy가 실제로 존재하는 Shape만 BroadPhase에서 이동시킴.
