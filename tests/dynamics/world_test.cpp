@@ -204,9 +204,111 @@ int main()
         );
 
         assert( contactCount == 1 );
+        assert( collisionWorld.GetContactCount() == 1 );
+
+        const contact2& contact =
+            collisionWorld.GetContact( 0 );
+
+        assert( contact.shapeIdA == groundShape );
+        assert( contact.shapeIdB == circleShapeId );
+        assert( contact.manifold.pointCount == 1 );
+
+        const ShapePairKey pairKey =
+            MakeShapePairKey( groundShape, circleShapeId );
+
+        assert( collisionWorld.GetBroadPhase().HasPair( pairKey ) );
+
+        // BroadPhase에 새 moved proxy가 없어도 persistent Contact는 매 update 갱신됨.
+        contactCount = 0;
+
+        collisionWorld.UpdateCollisions(
+            [&]( std::int32_t,
+                 std::int32_t,
+                 const localManifold2& manifold )
+            {
+                ++contactCount;
+                assert( manifold.pointCount == 1 );
+            }
+        );
+
+        assert( contactCount == 1 );
+        assert( collisionWorld.GetContactCount() == 1 );
+
+        // AABB가 분리되면 Contact와 pairSet entry를 함께 제거해야 함.
+        collisionWorld.SetBodyTransform(
+            circleBody,
+            {
+                { 0.0f, 5.0f },
+                {}
+            }
+        );
+
+        contactCount = 0;
+
+        collisionWorld.UpdateCollisions(
+            [&]( std::int32_t,
+                 std::int32_t,
+                 const localManifold2& )
+            {
+                ++contactCount;
+            }
+        );
+
+        assert( contactCount == 0 );
+        assert( collisionWorld.GetContactCount() == 0 );
+        assert( !collisionWorld.GetBroadPhase().HasPair( pairKey ) );
     }
 
-    // Box2D처럼 segment-segment 조합은 BroadPhase 후보여도 NarrowPhase contact를 만들지 않음.
+    // AABB pair가 겹치면 실제 manifold가 비어 있어도 Contact 자체는 유지함.
+    {
+        World contactWorld{};
+
+        const std::int32_t staticBodyId =
+            contactWorld.CreateBody( BodyType::Static );
+
+        const std::int32_t staticCircle =
+            contactWorld.CreateShape(
+                staticBodyId,
+                circle2{ {}, 1.0f }
+            );
+
+        const std::int32_t dynamicBodyId =
+            contactWorld.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 1.5f, 1.5f },
+                    {}
+                }
+            );
+
+        const std::int32_t dynamicCircle =
+            contactWorld.CreateShape(
+                dynamicBodyId,
+                circle2{ {}, 1.0f }
+            );
+
+        int touchingCount = 0;
+
+        contactWorld.UpdateCollisions(
+            [&]( std::int32_t,
+                 std::int32_t,
+                 const localManifold2& )
+            {
+                ++touchingCount;
+            }
+        );
+
+        assert( touchingCount == 0 );
+        assert( contactWorld.GetContactCount() == 1 );
+
+        const contact2& contact = contactWorld.GetContact( 0 );
+        assert( contact.manifold.pointCount == 0 );
+        assert( contactWorld.GetBroadPhase().HasPair(
+            MakeShapePairKey( staticCircle, dynamicCircle )
+        ) );
+    }
+
+    // Box2D처럼 segment-segment 조합은 BroadPhase 후보여도 Contact를 만들지 않음.
     {
         World segmentWorld{};
 
@@ -238,6 +340,7 @@ int main()
         );
 
         assert( contactCount == 0 );
+        assert( segmentWorld.GetContactCount() == 0 );
     }
 
     return 0;
