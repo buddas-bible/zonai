@@ -16,6 +16,7 @@ int main()
     assert( shape.prevShapeId == Shape::NULL_INDEX );
     assert( shape.nextShapeId == Shape::NULL_INDEX );
     assert( shape.sensorIndex == Shape::NULL_INDEX );
+    assert( shape.proxyKey == Shape::NULL_INDEX );
 
     // 기본 filter는 Box2D처럼 category 1이 모든 category와 충돌하도록 설정됨.
     assert( shape.filter.categoryBits == 1 );
