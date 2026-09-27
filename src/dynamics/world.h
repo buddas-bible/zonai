@@ -140,7 +140,10 @@ public:
                 assert( shapeB.bodyId >= 0 );
                 assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
                 assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
-                assert( CanCollideShapes( shapeA.geometry, shapeB.geometry ) );
+                if( !CanCollideShapes( shapeA.geometry, shapeB.geometry ) )
+                {
+                    return;
+                }
 
                 const Body& bodyA = bodies_[shapeA.bodyId];
                 const Body& bodyB = bodies_[shapeB.bodyId];
