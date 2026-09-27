@@ -122,5 +122,44 @@ int main()
     assert( world.GetShape( segmentShape ).nextShapeId == circleShape );
     assert( world.GetShape( circleShape ).prevShapeId == segmentShape );
 
+    // Body 이동은 연결된 모든 Shape의 BroadPhase proxy를 함께 갱신해야 함.
+    world.SetBodyTransform(
+        shapeBody,
+        {
+            { 20.0f, -3.0f },
+            { 1.0f, 0.0f }
+        }
+    );
+
+    const Body& movedBody = world.GetBody( shapeBody );
+    assert( movedBody.transform.position.x == 20.0f );
+    assert( movedBody.transform.position.y == -3.0f );
+
+    const Shape& movedCircle = world.GetShape( circleShape );
+    const aabb2& movedCircleAABB =
+        world.GetBroadPhase()
+            .GetTree( BodyType::Dynamic )
+            .GetProxyAABB( GetProxyId( movedCircle.proxyKey ) );
+
+    assert( std::fabs( movedCircleAABB.min.x - 21.0f ) < epsilon );
+    assert( std::fabs( movedCircleAABB.min.y + 4.0f ) < epsilon );
+    assert( std::fabs( movedCircleAABB.max.x - 23.0f ) < epsilon );
+    assert( std::fabs( movedCircleAABB.max.y + 2.0f ) < epsilon );
+
+    const Shape& movedSegment = world.GetShape( segmentShape );
+    const aabb2& movedSegmentAABB =
+        world.GetBroadPhase()
+            .GetTree( BodyType::Dynamic )
+            .GetProxyAABB( GetProxyId( movedSegment.proxyKey ) );
+
+    assert( std::fabs( movedSegmentAABB.min.x - 20.0f ) < epsilon );
+    assert( std::fabs( movedSegmentAABB.min.y + 3.0f ) < epsilon );
+    assert( std::fabs( movedSegmentAABB.max.x - 21.0f ) < epsilon );
+    assert( std::fabs( movedSegmentAABB.max.y + 3.0f ) < epsilon );
+
+    assert( world.GetBroadPhase()
+                .GetTree( BodyType::Dynamic )
+                .Validate() );
+
     return 0;
 }
