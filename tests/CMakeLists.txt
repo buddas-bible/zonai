@@ -313,7 +313,7 @@ add_test(
     NAME worldTests
     COMMAND worldTests
 )
-\n
+
 add_executable(shapeDispatchTests
     collision/narrowphase/shape_dispatch_test.cpp
 )
