@@ -31,6 +31,11 @@ struct Shape
     // 이 shape를 소유하는 body index. 아직 연결되지 않았으면 NULL_INDEX임.
     std::int32_t bodyId = NULL_INDEX;
 
+    // 같은 Body에 연결된 이전 / 다음 Shape index.
+    // Body의 head부터 index 기반 doubly linked list로 순회함.
+    std::int32_t prevShapeId = NULL_INDEX;
+    std::int32_t nextShapeId = NULL_INDEX;
+
     // sensor overlap 저장소 index. NULL_INDEX면 일반 collision shape임.
     std::int32_t sensorIndex = NULL_INDEX;
 
