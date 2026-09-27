@@ -13,6 +13,8 @@ int main()
 
     // 아직 body / sensor에 연결되지 않은 runtime shape의 기본 상태를 확인함.
     assert( shape.bodyId == Shape::NULL_INDEX );
+    assert( shape.prevShapeId == Shape::NULL_INDEX );
+    assert( shape.nextShapeId == Shape::NULL_INDEX );
     assert( shape.sensorIndex == Shape::NULL_INDEX );
 
     // 기본 filter는 Box2D처럼 category 1이 모든 category와 충돌하도록 설정됨.
