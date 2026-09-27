@@ -9,6 +9,7 @@
 #include "geometry/segment2.h"
 
 #include "collision/filter.h"
+#include "math/transform2.h"
 
 namespace zonai
 {
@@ -39,11 +40,20 @@ struct Shape
     // sensor overlap 저장소 index. NULL_INDEX면 일반 collision shape임.
     std::int32_t sensorIndex = NULL_INDEX;
 
-    // 실제 collision geometry. variant가 Box2D의 type + union 역할을 대신함.
+    // BroadPhase에 등록된 proxy key. 아직 proxy가 없으면 NULL_INDEX임.
+    std::int32_t proxyKey = NULL_INDEX;
+
+    // Body local space에 저장되는 실제 collision geometry.
+    // variant가 Box2D의 type + union 역할을 대신함.
     ShapeGeometry geometry{};
 
     // category / mask / group 기반 collision filter.
     Filter filter{};
 };
+
+// Body local geometry에 transform을 적용해 world-space AABB를 계산함.
+aabb2 ComputeShapeAABB(
+    const ShapeGeometry& geometry,
+    const transform2& transform );
 
 } // namespace zonai
