@@ -157,5 +157,88 @@ int main()
                 .GetTree( BodyType::Dynamic )
                 .Validate() );
 
+    // World collision pipeline: BroadPhase 후보를 실제 NarrowPhase 접촉까지 연결함.
+    {
+        World collisionWorld{};
+
+        const std::int32_t groundBody =
+            collisionWorld.CreateBody( BodyType::Static );
+
+        const std::int32_t groundShape =
+            collisionWorld.CreateShape(
+                groundBody,
+                MakeBox( { 1.0f, 1.0f } )
+            );
+
+        const std::int32_t circleBody =
+            collisionWorld.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 0.0f, 1.5f },
+                    {}
+                }
+            );
+
+        const std::int32_t circleShapeId =
+            collisionWorld.CreateShape(
+                circleBody,
+                circle2{ {}, 0.5f }
+            );
+
+        int contactCount = 0;
+
+        collisionWorld.UpdateCollisions(
+            [&]( std::int32_t shapeIdA,
+                 std::int32_t shapeIdB,
+                 const localManifold2& manifold )
+            {
+                ++contactCount;
+
+                assert( shapeIdA == groundShape );
+                assert( shapeIdB == circleShapeId );
+                assert( manifold.pointCount == 1 );
+                assert( std::fabs( manifold.normal.x ) < epsilon );
+                assert( std::fabs( manifold.normal.y - 1.0f ) < epsilon );
+                assert( std::fabs( manifold.points[0].separation ) < epsilon );
+            }
+        );
+
+        assert( contactCount == 1 );
+    }
+
+    // Box2D처럼 segment-segment 조합은 BroadPhase 후보여도 NarrowPhase contact를 만들지 않음.
+    {
+        World segmentWorld{};
+
+        const std::int32_t staticBodyId =
+            segmentWorld.CreateBody( BodyType::Static );
+
+        segmentWorld.CreateShape(
+            staticBodyId,
+            segment2{ { -1.0f, 0.0f }, { 1.0f, 0.0f } }
+        );
+
+        const std::int32_t dynamicBodyId =
+            segmentWorld.CreateBody( BodyType::Dynamic );
+
+        segmentWorld.CreateShape(
+            dynamicBodyId,
+            segment2{ { -1.0f, 0.0f }, { 1.0f, 0.0f } }
+        );
+
+        int contactCount = 0;
+
+        segmentWorld.UpdateCollisions(
+            [&]( std::int32_t,
+                 std::int32_t,
+                 const localManifold2& )
+            {
+                ++contactCount;
+            }
+        );
+
+        assert( contactCount == 0 );
+    }
+
     return 0;
 }
