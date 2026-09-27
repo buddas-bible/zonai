@@ -1,15 +1,29 @@
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include "collision/broadphase/broadPhase.h"
+#include "collision/narrowphase/collide.h"
 #include "collision/shape.h"
 #include "dynamics/body.h"
 
 namespace zonai
 {
+
+template <typename Callback>
+concept WorldCollisionCallback =
+    requires(
+        Callback& callback,
+        std::int32_t shapeIdA,
+        std::int32_t shapeIdB,
+        const localManifold2& manifold )
+    {
+        { callback( shapeIdA, shapeIdB, manifold ) } -> std::same_as<void>;
+    };
 
 class World
 {
@@ -29,6 +43,56 @@ public:
     void SetBodyTransform(
         std::int32_t bodyId,
         transform2 transform );
+
+    // BroadPhase의 새 후보를 NarrowPhase까지 검사해 실제 접촉 중인 pair만 callback으로 전달함.
+    // manifold는 shapeIdA가 속한 Body의 local space 기준임.
+    template <WorldCollisionCallback Callback>
+    void UpdateCollisions( Callback&& callback )
+    {
+        broadPhase_.UpdatePairs(
+            std::span<const Shape>{ shapes_.data(), shapes_.size() },
+            [this, &callback](
+                std::int32_t shapeIdA,
+                std::int32_t shapeIdB )
+            {
+                assert( shapeIdA >= 0 );
+                assert( shapeIdB >= 0 );
+                assert( static_cast<std::size_t>( shapeIdA ) < shapes_.size() );
+                assert( static_cast<std::size_t>( shapeIdB ) < shapes_.size() );
+
+                const Shape& shapeA = shapes_[shapeIdA];
+                const Shape& shapeB = shapes_[shapeIdB];
+
+                assert( shapeA.bodyId >= 0 );
+                assert( shapeB.bodyId >= 0 );
+                assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
+                assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
+
+                if( !CanCollideShapes( shapeA.geometry, shapeB.geometry ) )
+                {
+                    return;
+                }
+
+                const Body& bodyA = bodies_[shapeA.bodyId];
+                const Body& bodyB = bodies_[shapeB.bodyId];
+
+                const localManifold2 manifold =
+                    CollideShapes(
+                        shapeA.geometry,
+                        bodyA.transform,
+                        shapeB.geometry,
+                        bodyB.transform
+                    );
+
+                if( manifold.pointCount == 0 )
+                {
+                    return;
+                }
+
+                callback( shapeIdA, shapeIdB, manifold );
+            }
+        );
+    }
 
     [[nodiscard]] const Body& GetBody( std::int32_t bodyId ) const;
     [[nodiscard]] const Shape& GetShape( std::int32_t shapeId ) const;
