@@ -63,4 +63,16 @@ localManifold2 CollidePolygonSegment(
     const polygon2& polygon,
     const segment2& segment, const transform2& segmentTransform );
 
+// 현재 NarrowPhase가 지원하는 geometry 조합인지 확인함.
+bool CanCollideShapes(
+    const ShapeGeometry& geometryA,
+    const ShapeGeometry& geometryB );
+
+// geometry 타입에 맞는 collider를 선택하며 반환 manifold는 항상 Shape A local space 기준임.
+localManifold2 CollideShapes(
+    const ShapeGeometry& geometryA,
+    const transform2& transformA,
+    const ShapeGeometry& geometryB,
+    const transform2& transformB );
+
 } // namespace zonai
