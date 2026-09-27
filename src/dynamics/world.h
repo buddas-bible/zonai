@@ -30,16 +30,8 @@ public:
         std::int32_t bodyId,
         transform2 transform );
 
-    [[nodiscard]] Body& GetBody( std::int32_t bodyId );
     [[nodiscard]] const Body& GetBody( std::int32_t bodyId ) const;
-
-    [[nodiscard]] Shape& GetShape( std::int32_t shapeId );
     [[nodiscard]] const Shape& GetShape( std::int32_t shapeId ) const;
-
-    [[nodiscard]] BroadPhase& GetBroadPhase() noexcept
-    {
-        return broadPhase_;
-    }
 
     [[nodiscard]] const BroadPhase& GetBroadPhase() const noexcept
     {
