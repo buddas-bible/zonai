@@ -268,3 +268,18 @@ add_test(
     NAME shapeTests
     COMMAND shapeTests
 )
+
+
+add_executable(bodyTests
+    dynamics/body_test.cpp
+)
+
+target_link_libraries(bodyTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME bodyTests
+    COMMAND bodyTests
+)
