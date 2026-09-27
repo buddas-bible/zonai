@@ -9,6 +9,7 @@
 
 #include "collision/broadphase/broadPhase.h"
 #include "collision/narrowphase/collide.h"
+#include "collision/narrowphase/contact2.h"
 #include "collision/shape.h"
 #include "dynamics/body.h"
 
@@ -45,11 +46,82 @@ public:
         std::int32_t bodyId,
         transform2 transform );
 
-    // BroadPhase의 새 후보를 NarrowPhase까지 검사해 실제 접촉 중인 pair만 callback으로 전달함.
-    // manifold는 shapeIdA가 속한 Body의 local space 기준임.
+    // 기존 Contact를 갱신하고 BroadPhase의 새 AABB pair는 persistent Contact로 생성함.
+    // callback은 현재 실제 접촉점이 존재하는 Contact만 받음.
     template <WorldCollisionCallback Callback>
     void UpdateCollisions( Callback&& callback )
     {
+        // 기존 Contact는 BroadPhase에서 다시 후보로 나오지 않으므로 직접 갱신함.
+        std::size_t contactIndex = 0;
+
+        while( contactIndex < contacts_.size() )
+        {
+            contact2& contact = contacts_[contactIndex];
+
+            assert( contact.shapeIdA >= 0 );
+            assert( contact.shapeIdB >= 0 );
+            assert( static_cast<std::size_t>( contact.shapeIdA ) < shapes_.size() );
+            assert( static_cast<std::size_t>( contact.shapeIdB ) < shapes_.size() );
+
+            const Shape& shapeA = shapes_[contact.shapeIdA];
+            const Shape& shapeB = shapes_[contact.shapeIdB];
+
+            assert( shapeA.proxyKey != Shape::NULL_INDEX );
+            assert( shapeB.proxyKey != Shape::NULL_INDEX );
+
+            const aabb2& aabbA =
+                broadPhase_
+                    .GetTree( GetProxyType( shapeA.proxyKey ) )
+                    .GetProxyAABB( GetProxyId( shapeA.proxyKey ) );
+
+            const aabb2& aabbB =
+                broadPhase_
+                    .GetTree( GetProxyType( shapeB.proxyKey ) )
+                    .GetProxyAABB( GetProxyId( shapeB.proxyKey ) );
+
+            // AABB pair 자체가 끝났으면 Contact와 pairSet을 함께 제거함.
+            if( !Overlaps( aabbA, aabbB ) )
+            {
+                const ShapePairKey pairKey =
+                    MakeShapePairKey( contact.shapeIdA, contact.shapeIdB );
+
+                const bool removed = broadPhase_.RemovePair( pairKey );
+                assert( removed );
+
+                contacts_[contactIndex] = contacts_.back();
+                contacts_.pop_back();
+                continue;
+            }
+
+            assert( shapeA.bodyId >= 0 );
+            assert( shapeB.bodyId >= 0 );
+            assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
+            assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
+
+            const Body& bodyA = bodies_[shapeA.bodyId];
+            const Body& bodyB = bodies_[shapeB.bodyId];
+
+            contact.manifold =
+                CollideShapes(
+                    shapeA.geometry,
+                    bodyA.transform,
+                    shapeB.geometry,
+                    bodyB.transform
+                );
+
+            if( contact.manifold.pointCount > 0 )
+            {
+                callback(
+                    contact.shapeIdA,
+                    contact.shapeIdB,
+                    contact.manifold
+                );
+            }
+
+            ++contactIndex;
+        }
+
+        // 기존 pair는 pairSet이 걸러주므로 여기에는 새 AABB pair만 들어옴.
         broadPhase_.UpdatePairs(
             std::span<const Shape>{ shapes_.data(), shapes_.size() },
             [this, &callback](
@@ -68,16 +140,15 @@ public:
                 assert( shapeB.bodyId >= 0 );
                 assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
                 assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
-
-                if( !CanCollideShapes( shapeA.geometry, shapeB.geometry ) )
-                {
-                    return;
-                }
+                assert( CanCollideShapes( shapeA.geometry, shapeB.geometry ) );
 
                 const Body& bodyA = bodies_[shapeA.bodyId];
                 const Body& bodyB = bodies_[shapeB.bodyId];
 
-                const localManifold2 manifold =
+                contact2 contact{};
+                contact.shapeIdA = shapeIdA;
+                contact.shapeIdB = shapeIdB;
+                contact.manifold =
                     CollideShapes(
                         shapeA.geometry,
                         bodyA.transform,
@@ -85,12 +156,19 @@ public:
                         bodyB.transform
                     );
 
-                if( manifold.pointCount == 0 )
-                {
-                    return;
-                }
+                const ShapePairKey pairKey =
+                    MakeShapePairKey( shapeIdA, shapeIdB );
 
-                callback( shapeIdA, shapeIdB, manifold );
+                // HashSet::Add는 새 key면 false, 이미 있으면 true를 반환함.
+                const bool alreadyExists = broadPhase_.AddPair( pairKey );
+                assert( !alreadyExists );
+
+                contacts_.push_back( contact );
+
+                if( contact.manifold.pointCount > 0 )
+                {
+                    callback( shapeIdA, shapeIdB, contact.manifold );
+                }
             }
         );
     }
@@ -113,6 +191,17 @@ public:
         return shapes_.size();
     }
 
+    [[nodiscard]] std::size_t GetContactCount() const noexcept
+    {
+        return contacts_.size();
+    }
+
+    [[nodiscard]] const contact2& GetContact( std::size_t contactIndex ) const
+    {
+        assert( contactIndex < contacts_.size() );
+        return contacts_[contactIndex];
+    }
+
 private:
     // 현재 단계에서는 Body를 연속 배열로 보관함.
     // DestroyBody / id 재사용은 추후 Body id pool을 추가할 때 구현함.
@@ -120,6 +209,9 @@ private:
 
     // Shape도 World가 연속 storage로 소유하고 bodyId / shapeId로 서로 연결함.
     std::vector<Shape> shapes_;
+
+    // BroadPhase AABB pair가 유지되는 동안 persistent Contact를 보관함.
+    std::vector<contact2> contacts_;
 
     // 모든 Shape의 broad-phase proxy를 body type별 DynamicTree에 관리함.
     BroadPhase broadPhase_;
