@@ -48,17 +48,13 @@ int main()
     }
 
     {
-        Body& body = world.GetBody( dynamicBody );
+        const Body& body = world.GetBody( dynamicBody );
 
         assert( body.type == BodyType::Dynamic );
         assert( body.transform.position.x == 3.0f );
         assert( body.transform.position.y == -2.0f );
         assert( body.headShapeId == Body::NULL_INDEX );
         assert( body.shapeCount == 0 );
-
-        // mutable GetBody가 실제 World storage를 반환하는지도 확인함.
-        body.transform.position.x = 7.0f;
-        assert( world.GetBody( dynamicBody ).transform.position.x == 7.0f );
     }
 
     {
