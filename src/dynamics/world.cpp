@@ -122,14 +122,6 @@ void World::SetBodyTransform(
     assert( visitedCount == body.shapeCount );
 }
 
-Body& World::GetBody( std::int32_t bodyId )
-{
-    assert( bodyId >= 0 );
-    assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
-
-    return bodies_[bodyId];
-}
-
 const Body& World::GetBody( std::int32_t bodyId ) const
 {
     assert( bodyId >= 0 );
@@ -138,14 +130,6 @@ const Body& World::GetBody( std::int32_t bodyId ) const
     return bodies_[bodyId];
 }
 
-
-Shape& World::GetShape( std::int32_t shapeId )
-{
-    assert( shapeId >= 0 );
-    assert( static_cast<std::size_t>( shapeId ) < shapes_.size() );
-
-    return shapes_[shapeId];
-}
 
 const Shape& World::GetShape( std::int32_t shapeId ) const
 {
