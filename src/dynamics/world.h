@@ -25,6 +25,11 @@ public:
         ShapeGeometry geometry,
         Filter filter = {} );
 
+    // Body transform을 변경하고 연결된 모든 Shape proxy의 world AABB를 함께 갱신함.
+    void SetBodyTransform(
+        std::int32_t bodyId,
+        transform2 transform );
+
     [[nodiscard]] Body& GetBody( std::int32_t bodyId );
     [[nodiscard]] const Body& GetBody( std::int32_t bodyId ) const;
 
