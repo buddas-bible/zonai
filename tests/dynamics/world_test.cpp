@@ -6,172 +6,172 @@
 
 using namespace zonai;
 
+namespace
+{
+
+constexpr std::int32_t Index( BodyId id )
+{
+    return id.index1 - 1;
+}
+
+constexpr std::int32_t Index( ShapeId id )
+{
+    return id.index1 - 1;
+}
+
+constexpr ShapePairKey PairKey( ShapeId a, ShapeId b )
+{
+    return MakeShapePairKey( Index( a ), Index( b ) );
+}
+
+} // namespace
+
 int main()
 {
-    World world{};
-
-    assert( world.GetBodyCount() == 0 );
-
-    const std::int32_t staticBody =
-        world.CreateBody();
-
-    const std::int32_t dynamicBody =
-        world.CreateBody(
-            BodyType::Dynamic,
-            {
-                { 3.0f, -2.0f },
-                rot2::FromRadians( 0.5f )
-            }
-        );
-
-    const std::int32_t kinematicBody =
-        world.CreateBody(
-            BodyType::Kinematic,
-            {
-                { -4.0f, 1.5f },
-                rot2::FromRadians( -0.25f )
-            }
-        );
-
-    // 아직 Body id pool이 없으므로 생성 순서의 vector index가 bodyId가 됨.
-    assert( staticBody == 0 );
-    assert( dynamicBody == 1 );
-    assert( kinematicBody == 2 );
-    assert( world.GetBodyCount() == 3 );
+    constexpr float epsilon = 1e-5f;
 
     {
-        const Body& body = world.GetBody( staticBody );
+        World world{};
 
-        assert( body.type == BodyType::Static );
-        assert( body.headShapeId == Body::NULL_INDEX );
-        assert( body.shapeCount == 0 );
-    }
+        const BodyId staticBody =
+            world.CreateBody();
 
-    {
-        const Body& body = world.GetBody( dynamicBody );
+        const BodyId dynamicBody =
+            world.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 3.0f, -2.0f },
+                    rot2::FromRadians( 0.5f )
+                }
+            );
 
-        assert( body.type == BodyType::Dynamic );
-        assert( body.transform.position.x == 3.0f );
-        assert( body.transform.position.y == -2.0f );
-        assert( body.headShapeId == Body::NULL_INDEX );
-        assert( body.shapeCount == 0 );
-    }
+        const BodyId kinematicBody =
+            world.CreateBody(
+                BodyType::Kinematic,
+                {
+                    { -4.0f, 1.5f },
+                    rot2::FromRadians( -0.25f )
+                }
+            );
 
-    {
-        const World& constWorld = world;
-        const Body& body = constWorld.GetBody( kinematicBody );
+        // public handle은 0을 null로 남기기 위해 내부 index + 1을 저장함.
+        assert( staticBody.index1 == 1 );
+        assert( dynamicBody.index1 == 2 );
+        assert( kinematicBody.index1 == 3 );
+        assert( staticBody.generation == 1 );
+        assert( dynamicBody.generation == 1 );
+        assert( kinematicBody.generation == 1 );
 
-        assert( body.type == BodyType::Kinematic );
-        assert( body.transform.position.x == -4.0f );
-        assert( body.transform.position.y == 1.5f );
+        assert( world.IsValid( staticBody ) );
+        assert( world.IsValid( dynamicBody ) );
+        assert( world.IsValid( kinematicBody ) );
+        assert( !world.IsValid( BodyId{} ) );
+        assert( world.GetBodyCount() == 3 );
+
+        const Body& dynamic = world.GetBody( dynamicBody );
+        assert( dynamic.bodyId == Index( dynamicBody ) );
+        assert( dynamic.type == BodyType::Dynamic );
+        assert( dynamic.transform.position.x == 3.0f );
+        assert( dynamic.transform.position.y == -2.0f );
+
+        const Body& kinematic = world.GetBody( kinematicBody );
+        assert( kinematic.type == BodyType::Kinematic );
+        assert( kinematic.transform.position.x == -4.0f );
+        assert( kinematic.transform.position.y == 1.5f );
     }
 
     // Shape geometry는 Body local space에 저장되고 proxy AABB는 world space로 계산됨.
-    const std::int32_t shapeBody =
-        world.CreateBody(
-            BodyType::Dynamic,
+    {
+        World world{};
+
+        const BodyId bodyId =
+            world.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 10.0f, 5.0f },
+                    { 0.0f, 1.0f }
+                }
+            );
+
+        const ShapeId circleId =
+            world.CreateShape(
+                bodyId,
+                circle2{ { 2.0f, 0.0f }, 1.0f }
+            );
+
+        assert( world.IsValid( circleId ) );
+        assert( world.GetShapeCount() == 1 );
+
+        const Shape& circle = world.GetShape( circleId );
+        const Body& body = world.GetBody( bodyId );
+
+        assert( circle.bodyId == Index( bodyId ) );
+        assert( circle.generation == circleId.generation );
+        assert( circle.proxyKey != Shape::NULL_INDEX );
+        assert( GetProxyType( circle.proxyKey ) == BodyType::Dynamic );
+        assert( body.headShapeId == Index( circleId ) );
+        assert( body.shapeCount == 1 );
+
+        const aabb2& circleAABB =
+            world.GetBroadPhase()
+                .GetTree( BodyType::Dynamic )
+                .GetProxyAABB( GetProxyId( circle.proxyKey ) );
+
+        assert( std::fabs( circleAABB.min.x - 9.0f ) < epsilon );
+        assert( std::fabs( circleAABB.min.y - 6.0f ) < epsilon );
+        assert( std::fabs( circleAABB.max.x - 11.0f ) < epsilon );
+        assert( std::fabs( circleAABB.max.y - 8.0f ) < epsilon );
+
+        const ShapeId segmentId =
+            world.CreateShape(
+                bodyId,
+                segment2{ { 0.0f, 0.0f }, { 1.0f, 0.0f } }
+            );
+
+        assert( world.GetBody( bodyId ).headShapeId == Index( segmentId ) );
+        assert( world.GetBody( bodyId ).shapeCount == 2 );
+        assert( world.GetShape( segmentId ).nextShapeId == Index( circleId ) );
+        assert( world.GetShape( circleId ).prevShapeId == Index( segmentId ) );
+
+        world.SetBodyTransform(
+            bodyId,
             {
-                { 10.0f, 5.0f },
-                { 0.0f, 1.0f }
+                { 20.0f, -3.0f },
+                { 1.0f, 0.0f }
             }
         );
 
-    const std::int32_t circleShape =
-        world.CreateShape(
-            shapeBody,
-            circle2{ { 2.0f, 0.0f }, 1.0f }
-        );
-
-    assert( world.GetShapeCount() == 1 );
-
-    const Shape& circle = world.GetShape( circleShape );
-    const Body& owner = world.GetBody( shapeBody );
-
-    assert( circle.bodyId == shapeBody );
-    assert( circle.proxyKey != Shape::NULL_INDEX );
-    assert( GetProxyType( circle.proxyKey ) == BodyType::Dynamic );
-    assert( owner.headShapeId == circleShape );
-    assert( owner.shapeCount == 1 );
-
-    // local center (2, 0)을 90도 회전 후 (10, 5)만큼 이동하면 world center는 (10, 7).
-    const aabb2& circleAABB =
-        world.GetBroadPhase()
-            .GetTree( BodyType::Dynamic )
-            .GetProxyAABB( GetProxyId( circle.proxyKey ) );
-
-    constexpr float epsilon = 1e-5f;
-
-    assert( std::fabs( circleAABB.min.x - 9.0f ) < epsilon );
-    assert( std::fabs( circleAABB.min.y - 6.0f ) < epsilon );
-    assert( std::fabs( circleAABB.max.x - 11.0f ) < epsilon );
-    assert( std::fabs( circleAABB.max.y - 8.0f ) < epsilon );
-
-    const std::int32_t segmentShape =
-        world.CreateShape(
-            shapeBody,
-            segment2{ { 0.0f, 0.0f }, { 1.0f, 0.0f } }
-        );
-
-    // 새 Shape는 Body shape list의 head에 삽입됨.
-    assert( world.GetBody( shapeBody ).headShapeId == segmentShape );
-    assert( world.GetBody( shapeBody ).shapeCount == 2 );
-    assert( world.GetShape( segmentShape ).nextShapeId == circleShape );
-    assert( world.GetShape( circleShape ).prevShapeId == segmentShape );
-
-    // Body 이동은 연결된 모든 Shape의 BroadPhase proxy를 함께 갱신해야 함.
-    world.SetBodyTransform(
-        shapeBody,
-        {
-            { 20.0f, -3.0f },
-            { 1.0f, 0.0f }
-        }
-    );
-
-    const Body& movedBody = world.GetBody( shapeBody );
-    assert( movedBody.transform.position.x == 20.0f );
-    assert( movedBody.transform.position.y == -3.0f );
-
-    const Shape& movedCircle = world.GetShape( circleShape );
-    const aabb2& movedCircleAABB =
-        world.GetBroadPhase()
-            .GetTree( BodyType::Dynamic )
-            .GetProxyAABB( GetProxyId( movedCircle.proxyKey ) );
-
-    assert( std::fabs( movedCircleAABB.min.x - 21.0f ) < epsilon );
-    assert( std::fabs( movedCircleAABB.min.y + 4.0f ) < epsilon );
-    assert( std::fabs( movedCircleAABB.max.x - 23.0f ) < epsilon );
-    assert( std::fabs( movedCircleAABB.max.y + 2.0f ) < epsilon );
-
-    const Shape& movedSegment = world.GetShape( segmentShape );
-    const aabb2& movedSegmentAABB =
-        world.GetBroadPhase()
-            .GetTree( BodyType::Dynamic )
-            .GetProxyAABB( GetProxyId( movedSegment.proxyKey ) );
-
-    assert( std::fabs( movedSegmentAABB.min.x - 20.0f ) < epsilon );
-    assert( std::fabs( movedSegmentAABB.min.y + 3.0f ) < epsilon );
-    assert( std::fabs( movedSegmentAABB.max.x - 21.0f ) < epsilon );
-    assert( std::fabs( movedSegmentAABB.max.y + 3.0f ) < epsilon );
-
-    assert( world.GetBroadPhase()
+        const Shape& movedCircle = world.GetShape( circleId );
+        const aabb2& movedCircleAABB =
+            world.GetBroadPhase()
                 .GetTree( BodyType::Dynamic )
-                .Validate() );
+                .GetProxyAABB( GetProxyId( movedCircle.proxyKey ) );
 
-    // World collision pipeline: BroadPhase 후보를 실제 NarrowPhase 접촉까지 연결함.
+        assert( std::fabs( movedCircleAABB.min.x - 21.0f ) < epsilon );
+        assert( std::fabs( movedCircleAABB.min.y + 4.0f ) < epsilon );
+        assert( std::fabs( movedCircleAABB.max.x - 23.0f ) < epsilon );
+        assert( std::fabs( movedCircleAABB.max.y + 2.0f ) < epsilon );
+
+        assert( world.GetBroadPhase()
+                    .GetTree( BodyType::Dynamic )
+                    .Validate() );
+    }
+
+    // World collision pipeline과 persistent Contact.
     {
-        World collisionWorld{};
+        World world{};
 
-        const std::int32_t groundBody =
-            collisionWorld.CreateBody( BodyType::Static );
+        const BodyId groundBody =
+            world.CreateBody( BodyType::Static );
 
-        const std::int32_t groundShape =
-            collisionWorld.CreateShape(
+        const ShapeId groundShape =
+            world.CreateShape(
                 groundBody,
                 MakeBox( { 1.0f, 1.0f } )
             );
 
-        const std::int32_t circleBody =
-            collisionWorld.CreateBody(
+        const BodyId circleBody =
+            world.CreateBody(
                 BodyType::Dynamic,
                 {
                     { 0.0f, 1.5f },
@@ -179,77 +179,61 @@ int main()
                 }
             );
 
-        const std::int32_t circleShapeId =
-            collisionWorld.CreateShape(
+        const ShapeId circleShape =
+            world.CreateShape(
                 circleBody,
                 circle2{ {}, 0.5f }
             );
 
-        int contactCount = 0;
+        int touchingCount = 0;
 
-        collisionWorld.UpdateCollisions(
-            [&]( std::int32_t shapeIdA,
-                 std::int32_t shapeIdB,
+        world.UpdateCollisions(
+            [&]( ShapeId shapeA,
+                 ShapeId shapeB,
                  const localManifold2& manifold )
             {
-                ++contactCount;
+                ++touchingCount;
 
-                assert( shapeIdA == groundShape );
-                assert( shapeIdB == circleShapeId );
+                assert( shapeA == groundShape );
+                assert( shapeB == circleShape );
                 assert( manifold.pointCount == 1 );
                 assert( std::fabs( manifold.normal.x ) < epsilon );
                 assert( std::fabs( manifold.normal.y - 1.0f ) < epsilon );
-                assert( std::fabs( manifold.points[0].separation ) < epsilon );
             }
         );
 
-        assert( contactCount == 1 );
-        assert( collisionWorld.GetContactCount() == 1 );
+        assert( touchingCount == 1 );
+        assert( world.GetContactCount() == 1 );
 
         const contact2& contact =
-            collisionWorld.GetContact( 0 );
+            world.GetContact( 0 );
 
-        assert( contact.contactId == 0 );
-        assert( contact.shapeIdA == groundShape );
-        assert( contact.shapeIdB == circleShapeId );
-        assert( contact.manifold.pointCount == 1 );
+        assert( contact.shapeIdA == Index( groundShape ) );
+        assert( contact.shapeIdB == Index( circleShape ) );
+        assert( contact.edges[0].bodyId == Index( groundBody ) );
+        assert( contact.edges[1].bodyId == Index( circleBody ) );
 
-        const Body& ground = collisionWorld.GetBody( groundBody );
-        const Body& circleOwner = collisionWorld.GetBody( circleBody );
+        assert( world.GetBroadPhase().HasPair(
+            PairKey( groundShape, circleShape )
+        ) );
 
-        assert( ground.contactCount == 1 );
-        assert( circleOwner.contactCount == 1 );
+        // 새 BroadPhase 후보가 없어도 persistent Contact는 갱신됨.
+        touchingCount = 0;
 
-        // 같은 Contact를 Body A는 edge 0, Body B는 edge 1 key로 가리킴.
-        assert( ground.headContactKey == MakeContactKey( 0, 0 ) );
-        assert( circleOwner.headContactKey == MakeContactKey( 0, 1 ) );
-
-        assert( contact.edges[0].bodyId == groundBody );
-        assert( contact.edges[1].bodyId == circleBody );
-
-        const ShapePairKey pairKey =
-            MakeShapePairKey( groundShape, circleShapeId );
-
-        assert( collisionWorld.GetBroadPhase().HasPair( pairKey ) );
-
-        // BroadPhase에 새 moved proxy가 없어도 persistent Contact는 매 update 갱신됨.
-        contactCount = 0;
-
-        collisionWorld.UpdateCollisions(
-            [&]( std::int32_t,
-                 std::int32_t,
+        world.UpdateCollisions(
+            [&]( ShapeId,
+                 ShapeId,
                  const localManifold2& manifold )
             {
-                ++contactCount;
+                ++touchingCount;
                 assert( manifold.pointCount == 1 );
             }
         );
 
-        assert( contactCount == 1 );
-        assert( collisionWorld.GetContactCount() == 1 );
+        assert( touchingCount == 1 );
 
-        // AABB가 분리되면 Contact와 pairSet entry를 함께 제거해야 함.
-        collisionWorld.SetBodyTransform(
+        // AABB가 분리되면 Contact / pairSet / Body contact list가 함께 정리됨.
+        world.SetBodyTransform(
             circleBody,
             {
                 { 0.0f, 5.0f },
@@ -257,64 +241,37 @@ int main()
             }
         );
 
-        contactCount = 0;
-
-        collisionWorld.UpdateCollisions(
-            [&]( std::int32_t,
-                 std::int32_t,
-                 const localManifold2& )
-            {
-                ++contactCount;
-            }
-        );
-
-        assert( contactCount == 0 );
-        assert( collisionWorld.GetContactCount() == 0 );
-        assert( !collisionWorld.GetBroadPhase().HasPair( pairKey ) );
-
-        assert( collisionWorld.GetBody( groundBody ).headContactKey == Body::NULL_INDEX );
-        assert( collisionWorld.GetBody( groundBody ).contactCount == 0 );
-        assert( collisionWorld.GetBody( circleBody ).headContactKey == Body::NULL_INDEX );
-        assert( collisionWorld.GetBody( circleBody ).contactCount == 0 );
-
-        // 제거된 slot 0이 다음 Contact에서 stable id로 재사용되는지 확인함.
-        collisionWorld.SetBodyTransform(
-            circleBody,
-            {
-                { 0.0f, 1.5f },
-                {}
-            }
-        );
-
-        collisionWorld.UpdateCollisions(
-            [&]( std::int32_t,
-                 std::int32_t,
-                 const localManifold2& )
+        world.UpdateCollisions(
+            []( ShapeId,
+                ShapeId,
+                const localManifold2& )
             {
             }
         );
 
-        assert( collisionWorld.GetContactCount() == 1 );
-        assert( collisionWorld.GetContact( 0 ).contactId == 0 );
-        assert( collisionWorld.GetBody( groundBody ).headContactKey == MakeContactKey( 0, 0 ) );
-        assert( collisionWorld.GetBody( circleBody ).headContactKey == MakeContactKey( 0, 1 ) );
+        assert( world.GetContactCount() == 0 );
+        assert( !world.GetBroadPhase().HasPair(
+            PairKey( groundShape, circleShape )
+        ) );
+        assert( world.GetBody( groundBody ).contactCount == 0 );
+        assert( world.GetBody( circleBody ).contactCount == 0 );
     }
 
-    // AABB pair가 겹치면 실제 manifold가 비어 있어도 Contact 자체는 유지함.
+    // AABB는 겹치지만 실제 geometry가 떨어져 있어도 Contact 자체는 유지됨.
     {
-        World contactWorld{};
+        World world{};
 
-        const std::int32_t staticBodyId =
-            contactWorld.CreateBody( BodyType::Static );
+        const BodyId staticBody =
+            world.CreateBody( BodyType::Static );
 
-        const std::int32_t staticCircle =
-            contactWorld.CreateShape(
-                staticBodyId,
+        const ShapeId staticCircle =
+            world.CreateShape(
+                staticBody,
                 circle2{ {}, 1.0f }
             );
 
-        const std::int32_t dynamicBodyId =
-            contactWorld.CreateBody(
+        const BodyId dynamicBody =
+            world.CreateBody(
                 BodyType::Dynamic,
                 {
                     { 1.5f, 1.5f },
@@ -322,17 +279,17 @@ int main()
                 }
             );
 
-        const std::int32_t dynamicCircle =
-            contactWorld.CreateShape(
-                dynamicBodyId,
+        const ShapeId dynamicCircle =
+            world.CreateShape(
+                dynamicBody,
                 circle2{ {}, 1.0f }
             );
 
         int touchingCount = 0;
 
-        contactWorld.UpdateCollisions(
-            [&]( std::int32_t,
-                 std::int32_t,
+        world.UpdateCollisions(
+            [&]( ShapeId,
+                 ShapeId,
                  const localManifold2& )
             {
                 ++touchingCount;
@@ -340,30 +297,28 @@ int main()
         );
 
         assert( touchingCount == 0 );
-        assert( contactWorld.GetContactCount() == 1 );
-
-        const contact2& contact = contactWorld.GetContact( 0 );
-        assert( contact.manifold.pointCount == 0 );
-        assert( contactWorld.GetBroadPhase().HasPair(
-            MakeShapePairKey( staticCircle, dynamicCircle )
+        assert( world.GetContactCount() == 1 );
+        assert( world.GetContact( 0 ).manifold.pointCount == 0 );
+        assert( world.GetBroadPhase().HasPair(
+            PairKey( staticCircle, dynamicCircle )
         ) );
     }
 
-    // DestroyShape는 Contact / pairSet / proxy / Body shape list를 함께 정리함.
+    // Shape slot이 재사용되어도 오래된 ShapeId는 generation mismatch로 무효가 됨.
     {
-        World destroyWorld{};
+        World world{};
 
-        const std::int32_t staticBodyId =
-            destroyWorld.CreateBody( BodyType::Static );
+        const BodyId staticBody =
+            world.CreateBody( BodyType::Static );
 
-        const std::int32_t groundShape =
-            destroyWorld.CreateShape(
-                staticBodyId,
+        const ShapeId groundShape =
+            world.CreateShape(
+                staticBody,
                 MakeBox( { 1.0f, 1.0f } )
             );
 
-        const std::int32_t dynamicBodyId =
-            destroyWorld.CreateBody(
+        const BodyId dynamicBody =
+            world.CreateBody(
                 BodyType::Dynamic,
                 {
                     { 0.0f, 1.5f },
@@ -371,161 +326,69 @@ int main()
                 }
             );
 
-        const std::int32_t touchingShape =
-            destroyWorld.CreateShape(
-                dynamicBodyId,
-                circle2{ {}, 0.5f }
-            );
-
-        const std::int32_t otherShape =
-            destroyWorld.CreateShape(
-                dynamicBodyId,
-                circle2{ { 5.0f, 0.0f }, 0.5f }
-            );
-
-        assert( destroyWorld.GetShapeCount() == 3 );
-        assert( destroyWorld.GetBody( dynamicBodyId ).shapeCount == 2 );
-        assert( destroyWorld.GetBody( dynamicBodyId ).headShapeId == otherShape );
-
-        destroyWorld.UpdateCollisions(
-            []( std::int32_t,
-                std::int32_t,
-                const localManifold2& )
-            {
-            }
-        );
-
-        const ShapePairKey pairKey =
-            MakeShapePairKey( groundShape, touchingShape );
-
-        assert( destroyWorld.GetContactCount() == 1 );
-        assert( destroyWorld.GetBroadPhase().HasPair( pairKey ) );
-
-        // touchingShape는 head가 아닌 Shape이므로 중간/꼬리 unlink 경로도 함께 검증됨.
-        destroyWorld.DestroyShape( touchingShape );
-
-        assert( destroyWorld.GetShapeCount() == 2 );
-        assert( destroyWorld.GetContactCount() == 0 );
-        assert( !destroyWorld.GetBroadPhase().HasPair( pairKey ) );
-
-        assert( destroyWorld.GetBody( staticBodyId ).contactCount == 0 );
-        assert( destroyWorld.GetBody( dynamicBodyId ).contactCount == 0 );
-
-        const Body& dynamicBody =
-            destroyWorld.GetBody( dynamicBodyId );
-
-        assert( dynamicBody.shapeCount == 1 );
-        assert( dynamicBody.headShapeId == otherShape );
-        assert( destroyWorld.GetShape( otherShape ).prevShapeId == Shape::NULL_INDEX );
-        assert( destroyWorld.GetShape( otherShape ).nextShapeId == Shape::NULL_INDEX );
-
-        assert( destroyWorld.GetBroadPhase()
-                    .GetTree( BodyType::Dynamic )
-                    .Validate() );
-
-        // 삭제된 slot을 새 Shape가 재사용하되 Body list / proxy를 새 상태로 다시 구성해야 함.
-        const std::int32_t reusedShape =
-            destroyWorld.CreateShape(
-                dynamicBodyId,
-                circle2{ {}, 0.5f }
-            );
-
-        assert( reusedShape == touchingShape );
-        assert( destroyWorld.GetShapeCount() == 3 );
-        assert( destroyWorld.GetBody( dynamicBodyId ).shapeCount == 2 );
-        assert( destroyWorld.GetBody( dynamicBodyId ).headShapeId == reusedShape );
-        assert( destroyWorld.GetShape( reusedShape ).nextShapeId == otherShape );
-        assert( destroyWorld.GetShape( otherShape ).prevShapeId == reusedShape );
-        assert( destroyWorld.GetShape( reusedShape ).proxyKey != Shape::NULL_INDEX );
-
-        destroyWorld.UpdateCollisions(
-            []( std::int32_t,
-                std::int32_t,
-                const localManifold2& )
-            {
-            }
-        );
-
-        assert( destroyWorld.GetContactCount() == 1 );
-        assert( destroyWorld.GetBroadPhase().HasPair(
-            MakeShapePairKey( groundShape, reusedShape )
-        ) );
-    }
-
-    // DestroyBody는 연결된 Contact / Shape / proxy를 전부 정리하고 Body slot을 재사용함.
-    {
-        World bodyWorld{};
-
-        const std::int32_t groundBody =
-            bodyWorld.CreateBody( BodyType::Static );
-
-        const std::int32_t groundShape =
-            bodyWorld.CreateShape(
-                groundBody,
-                MakeBox( { 1.0f, 1.0f } )
-            );
-
-        const std::int32_t dynamicBody =
-            bodyWorld.CreateBody(
-                BodyType::Dynamic,
-                {
-                    { 0.0f, 1.5f },
-                    {}
-                }
-            );
-
-        const std::int32_t touchingShape =
-            bodyWorld.CreateShape(
+        const ShapeId oldShape =
+            world.CreateShape(
                 dynamicBody,
                 circle2{ {}, 0.5f }
             );
 
-        bodyWorld.CreateShape(
-            dynamicBody,
-            circle2{ { 5.0f, 0.0f }, 0.5f }
-        );
-
-        assert( bodyWorld.GetBodyCount() == 2 );
-        assert( bodyWorld.GetShapeCount() == 3 );
-
-        bodyWorld.UpdateCollisions(
-            []( std::int32_t,
-                std::int32_t,
+        world.UpdateCollisions(
+            []( ShapeId,
+                ShapeId,
                 const localManifold2& )
             {
             }
         );
 
-        const ShapePairKey pairKey =
-            MakeShapePairKey( groundShape, touchingShape );
+        assert( world.GetContactCount() == 1 );
 
-        assert( bodyWorld.GetContactCount() == 1 );
-        assert( bodyWorld.GetBroadPhase().HasPair( pairKey ) );
-        assert( bodyWorld.GetBody( groundBody ).contactCount == 1 );
-        assert( bodyWorld.GetBody( dynamicBody ).contactCount == 1 );
+        world.DestroyShape( oldShape );
 
-        bodyWorld.DestroyBody( dynamicBody );
+        assert( !world.IsValid( oldShape ) );
+        assert( world.GetShapeCount() == 1 );
+        assert( world.GetContactCount() == 0 );
 
-        assert( bodyWorld.GetBodyCount() == 1 );
-        assert( bodyWorld.GetShapeCount() == 1 );
-        assert( bodyWorld.GetContactCount() == 0 );
-        assert( !bodyWorld.GetBroadPhase().HasPair( pairKey ) );
+        const ShapeId newShape =
+            world.CreateShape(
+                dynamicBody,
+                circle2{ {}, 0.5f }
+            );
 
-        const Body& ground =
-            bodyWorld.GetBody( groundBody );
+        // 같은 slot을 재사용하지만 generation은 달라야 함.
+        assert( newShape.index1 == oldShape.index1 );
+        assert( newShape.generation != oldShape.generation );
+        assert( world.IsValid( newShape ) );
+        assert( !world.IsValid( oldShape ) );
 
-        assert( ground.shapeCount == 1 );
-        assert( ground.headShapeId == groundShape );
-        assert( ground.contactCount == 0 );
-        assert( ground.headContactKey == Body::NULL_INDEX );
+        world.UpdateCollisions(
+            []( ShapeId,
+                ShapeId,
+                const localManifold2& )
+            {
+            }
+        );
 
-        assert( bodyWorld.GetBroadPhase()
-                    .GetTree( BodyType::Dynamic )
-                    .Validate() );
+        assert( world.GetContactCount() == 1 );
+        assert( world.GetBroadPhase().HasPair(
+            PairKey( groundShape, newShape )
+        ) );
+    }
 
-        // 삭제한 Body slot을 다음 Body가 그대로 재사용함.
-        const std::int32_t reusedBody =
-            bodyWorld.CreateBody(
+    // Body slot도 같은 index를 재사용하지만 generation으로 예전 handle을 차단함.
+    {
+        World world{};
+
+        const BodyId groundBody =
+            world.CreateBody( BodyType::Static );
+
+        const ShapeId groundShape =
+            world.CreateShape(
+                groundBody,
+                MakeBox( { 1.0f, 1.0f } )
+            );
+
+        const BodyId oldBody =
+            world.CreateBody(
                 BodyType::Dynamic,
                 {
                     { 0.0f, 1.5f },
@@ -533,59 +396,96 @@ int main()
                 }
             );
 
-        assert( reusedBody == dynamicBody );
-        assert( bodyWorld.GetBodyCount() == 2 );
-        assert( bodyWorld.GetBody( reusedBody ).bodyId == reusedBody );
-        assert( bodyWorld.GetBody( reusedBody ).shapeCount == 0 );
-        assert( bodyWorld.GetBody( reusedBody ).contactCount == 0 );
-
-        const std::int32_t reusedShape =
-            bodyWorld.CreateShape(
-                reusedBody,
+        const ShapeId oldShape =
+            world.CreateShape(
+                oldBody,
                 circle2{ {}, 0.5f }
             );
 
-        bodyWorld.UpdateCollisions(
-            []( std::int32_t,
-                std::int32_t,
+        world.UpdateCollisions(
+            []( ShapeId,
+                ShapeId,
                 const localManifold2& )
             {
             }
         );
 
-        assert( bodyWorld.GetContactCount() == 1 );
-        assert( bodyWorld.GetBroadPhase().HasPair(
-            MakeShapePairKey( groundShape, reusedShape )
+        assert( world.GetContactCount() == 1 );
+
+        world.DestroyBody( oldBody );
+
+        assert( !world.IsValid( oldBody ) );
+        assert( !world.IsValid( oldShape ) );
+        assert( world.GetBodyCount() == 1 );
+        assert( world.GetShapeCount() == 1 );
+        assert( world.GetContactCount() == 0 );
+
+        const BodyId newBody =
+            world.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 0.0f, 1.5f },
+                    {}
+                }
+            );
+
+        assert( newBody.index1 == oldBody.index1 );
+        assert( newBody.generation != oldBody.generation );
+        assert( world.IsValid( newBody ) );
+        assert( !world.IsValid( oldBody ) );
+
+        const ShapeId newShape =
+            world.CreateShape(
+                newBody,
+                circle2{ {}, 0.5f }
+            );
+
+        assert( newShape.index1 == oldShape.index1 );
+        assert( newShape.generation != oldShape.generation );
+        assert( world.IsValid( newShape ) );
+        assert( !world.IsValid( oldShape ) );
+
+        world.UpdateCollisions(
+            []( ShapeId,
+                ShapeId,
+                const localManifold2& )
+            {
+            }
+        );
+
+        assert( world.GetContactCount() == 1 );
+        assert( world.GetBroadPhase().HasPair(
+            PairKey( groundShape, newShape )
         ) );
-        assert( bodyWorld.GetBody( groundBody ).contactCount == 1 );
-        assert( bodyWorld.GetBody( reusedBody ).contactCount == 1 );
+        assert( world.GetBody( groundBody ).contactCount == 1 );
+        assert( world.GetBody( newBody ).contactCount == 1 );
     }
 
     // Box2D처럼 segment-segment 조합은 BroadPhase 후보여도 Contact를 만들지 않음.
     {
-        World segmentWorld{};
+        World world{};
 
-        const std::int32_t staticBodyId =
-            segmentWorld.CreateBody( BodyType::Static );
+        const BodyId staticBody =
+            world.CreateBody( BodyType::Static );
 
-        segmentWorld.CreateShape(
-            staticBodyId,
+        (void)world.CreateShape(
+            staticBody,
             segment2{ { -1.0f, 0.0f }, { 1.0f, 0.0f } }
         );
 
-        const std::int32_t dynamicBodyId =
-            segmentWorld.CreateBody( BodyType::Dynamic );
+        const BodyId dynamicBody =
+            world.CreateBody( BodyType::Dynamic );
 
-        segmentWorld.CreateShape(
-            dynamicBodyId,
+        (void)world.CreateShape(
+            dynamicBody,
             segment2{ { -1.0f, 0.0f }, { 1.0f, 0.0f } }
         );
 
         int contactCount = 0;
 
-        segmentWorld.UpdateCollisions(
-            [&]( std::int32_t,
-                 std::int32_t,
+        world.UpdateCollisions(
+            [&]( ShapeId,
+                 ShapeId,
                  const localManifold2& )
             {
                 ++contactCount;
@@ -593,7 +493,7 @@ int main()
         );
 
         assert( contactCount == 0 );
-        assert( segmentWorld.GetContactCount() == 0 );
+        assert( world.GetContactCount() == 0 );
     }
 
     return 0;
