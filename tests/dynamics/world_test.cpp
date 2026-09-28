@@ -452,6 +452,115 @@ int main()
         ) );
     }
 
+    // DestroyBody는 연결된 Contact / Shape / proxy를 전부 정리하고 Body slot을 재사용함.
+    {
+        World bodyWorld{};
+
+        const std::int32_t groundBody =
+            bodyWorld.CreateBody( BodyType::Static );
+
+        const std::int32_t groundShape =
+            bodyWorld.CreateShape(
+                groundBody,
+                MakeBox( { 1.0f, 1.0f } )
+            );
+
+        const std::int32_t dynamicBody =
+            bodyWorld.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 0.0f, 1.5f },
+                    {}
+                }
+            );
+
+        const std::int32_t touchingShape =
+            bodyWorld.CreateShape(
+                dynamicBody,
+                circle2{ {}, 0.5f }
+            );
+
+        bodyWorld.CreateShape(
+            dynamicBody,
+            circle2{ { 5.0f, 0.0f }, 0.5f }
+        );
+
+        assert( bodyWorld.GetBodyCount() == 2 );
+        assert( bodyWorld.GetShapeCount() == 3 );
+
+        bodyWorld.UpdateCollisions(
+            []( std::int32_t,
+                std::int32_t,
+                const localManifold2& )
+            {
+            }
+        );
+
+        const ShapePairKey pairKey =
+            MakeShapePairKey( groundShape, touchingShape );
+
+        assert( bodyWorld.GetContactCount() == 1 );
+        assert( bodyWorld.GetBroadPhase().HasPair( pairKey ) );
+        assert( bodyWorld.GetBody( groundBody ).contactCount == 1 );
+        assert( bodyWorld.GetBody( dynamicBody ).contactCount == 1 );
+
+        bodyWorld.DestroyBody( dynamicBody );
+
+        assert( bodyWorld.GetBodyCount() == 1 );
+        assert( bodyWorld.GetShapeCount() == 1 );
+        assert( bodyWorld.GetContactCount() == 0 );
+        assert( !bodyWorld.GetBroadPhase().HasPair( pairKey ) );
+
+        const Body& ground =
+            bodyWorld.GetBody( groundBody );
+
+        assert( ground.shapeCount == 1 );
+        assert( ground.headShapeId == groundShape );
+        assert( ground.contactCount == 0 );
+        assert( ground.headContactKey == Body::NULL_INDEX );
+
+        assert( bodyWorld.GetBroadPhase()
+                    .GetTree( BodyType::Dynamic )
+                    .Validate() );
+
+        // 삭제한 Body slot을 다음 Body가 그대로 재사용함.
+        const std::int32_t reusedBody =
+            bodyWorld.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 0.0f, 1.5f },
+                    {}
+                }
+            );
+
+        assert( reusedBody == dynamicBody );
+        assert( bodyWorld.GetBodyCount() == 2 );
+        assert( bodyWorld.GetBody( reusedBody ).bodyId == reusedBody );
+        assert( bodyWorld.GetBody( reusedBody ).shapeCount == 0 );
+        assert( bodyWorld.GetBody( reusedBody ).contactCount == 0 );
+
+        const std::int32_t reusedShape =
+            bodyWorld.CreateShape(
+                reusedBody,
+                circle2{ {}, 0.5f }
+            );
+
+        bodyWorld.UpdateCollisions(
+            []( std::int32_t,
+                std::int32_t,
+                const localManifold2& )
+            {
+            }
+        );
+
+        assert( bodyWorld.GetContactCount() == 1 );
+        assert( bodyWorld.GetBroadPhase().HasPair(
+            MakeShapePairKey( groundShape, reusedShape )
+        ) );
+        assert( bodyWorld.GetBody( groundBody ).contactCount == 1 );
+        assert( bodyWorld.GetBody( reusedBody ).contactCount == 1 );
+    }
+
     // Box2D처럼 segment-segment 조합은 BroadPhase 후보여도 Contact를 만들지 않음.
     {
         World segmentWorld{};
