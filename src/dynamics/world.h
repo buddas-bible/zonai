@@ -12,6 +12,7 @@
 #include "collision/narrowphase/contact2.h"
 #include "collision/shape.h"
 #include "dynamics/body.h"
+#include "dynamics/contactData.h"
 #include "dynamics/id.h"
 
 namespace zonai
@@ -21,14 +22,9 @@ template <typename Callback>
 concept WorldCollisionCallback =
     requires(
         Callback& callback,
-        ContactId contactId,
-        ShapeId shapeIdA,
-        ShapeId shapeIdB,
-        const localManifold2& manifold )
+        const ContactData& contactData )
     {
-        {
-            callback( contactId, shapeIdA, shapeIdB, manifold )
-        } -> std::same_as<void>;
+        { callback( contactData ) } -> std::same_as<void>;
     };
 
 class World
@@ -126,12 +122,7 @@ public:
 
             if( contact.manifold.pointCount > 0 )
             {
-                callback(
-                    MakeContactId( contactId ),
-                    MakeShapeId( contact.shapeIdA ),
-                    MakeShapeId( contact.shapeIdB ),
-                    contact.manifold
-                );
+                callback( MakeContactData( contactId ) );
             }
 
         }
@@ -178,12 +169,7 @@ public:
 
                 if( contact.manifold.pointCount > 0 )
                 {
-                    callback(
-                        MakeContactId( contactId ),
-                        MakeShapeId( shapeIdA ),
-                        MakeShapeId( shapeIdB ),
-                        contact.manifold
-                    );
+                    callback( MakeContactData( contactId ) );
                 }
             }
         );
@@ -191,7 +177,9 @@ public:
 
     [[nodiscard]] const Body& GetBody( BodyId bodyId ) const;
     [[nodiscard]] const Shape& GetShape( ShapeId shapeId ) const;
-    [[nodiscard]] const contact2& GetContact( ContactId contactId ) const;
+
+    // 내부 Contact를 public snapshot으로 변환해 반환함.
+    [[nodiscard]] ContactData GetContactData( ContactId contactId ) const;
 
     [[nodiscard]] const BroadPhase& GetBroadPhase() const noexcept
     {
@@ -221,6 +209,7 @@ private:
     [[nodiscard]] BodyId MakeBodyId( std::int32_t bodyIndex ) const;
     [[nodiscard]] ShapeId MakeShapeId( std::int32_t shapeIndex ) const;
     [[nodiscard]] ContactId MakeContactId( std::int32_t contactIndex ) const;
+    [[nodiscard]] ContactData MakeContactData( std::int32_t contactIndex ) const;
 
     void DestroyBodyByIndex( std::int32_t bodyIndex );
     void DestroyShapeByIndex( std::int32_t shapeIndex );
