@@ -40,6 +40,9 @@ struct Shape
     // sensor overlap 저장소 index. NULL_INDEX면 일반 collision shape임.
     std::int32_t sensorIndex = NULL_INDEX;
 
+    // free slot일 때 다음 재사용 가능한 Shape index.
+    std::int32_t nextFreeId = NULL_INDEX;
+
     // BroadPhase에 등록된 proxy key. 아직 proxy가 없으면 NULL_INDEX임.
     std::int32_t proxyKey = NULL_INDEX;
 
