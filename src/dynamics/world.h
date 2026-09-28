@@ -35,6 +35,9 @@ public:
         BodyType type = BodyType::Static,
         transform2 transform = {} );
 
+    // Body에 연결된 Contact / Shape / proxy를 정리하고 slot을 재사용 가능 상태로 만듦.
+    void DestroyBody( std::int32_t bodyId );
+
     // local geometry를 Body에 연결하고 BroadPhase proxy까지 생성함.
     [[nodiscard]] std::int32_t CreateShape(
         std::int32_t bodyId,
@@ -181,7 +184,7 @@ public:
 
     [[nodiscard]] std::size_t GetBodyCount() const noexcept
     {
-        return bodies_.size();
+        return bodyCount_;
     }
 
     [[nodiscard]] std::size_t GetShapeCount() const noexcept
@@ -212,9 +215,14 @@ private:
     // Body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함.
     void DestroyContact( std::int32_t contactId );
 
-    // 현재 단계에서는 Body를 연속 배열로 보관함.
-    // DestroyBody / id 재사용은 추후 Body id pool을 추가할 때 구현함.
+    // bodyId가 변하지 않는 stable slot storage.
     std::vector<Body> bodies_;
+
+    // 제거된 Body slot 재사용을 위한 free-list head.
+    std::int32_t bodyFreeList_ = Body::NULL_INDEX;
+
+    // bodies_.size()와 별개인 현재 활성 Body 개수.
+    std::size_t bodyCount_ = 0;
 
     // shapeId가 변하지 않는 stable slot storage.
     std::vector<Shape> shapes_;
