@@ -25,12 +25,27 @@ struct ShapeId
     constexpr bool operator==( const ShapeId& ) const = default;
 };
 
+// World 외부에서 Contact를 참조하는 handle.
+// Contact는 자동 생성/파괴 빈도가 높으므로 generation을 32bit로 유지함.
+struct ContactId
+{
+    std::int32_t index1 = 0;
+    std::uint32_t generation = 0;
+
+    constexpr bool operator==( const ContactId& ) const = default;
+};
+
 constexpr bool IsNull( BodyId id ) noexcept
 {
     return id.index1 == 0;
 }
 
 constexpr bool IsNull( ShapeId id ) noexcept
+{
+    return id.index1 == 0;
+}
+
+constexpr bool IsNull( ContactId id ) noexcept
 {
     return id.index1 == 0;
 }
