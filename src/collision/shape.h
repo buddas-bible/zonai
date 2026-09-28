@@ -37,6 +37,9 @@ struct Shape
     std::int32_t prevShapeId = NULL_INDEX;
     std::int32_t nextShapeId = NULL_INDEX;
 
+    // slot이 재사용될 때 증가해 오래된 ShapeId를 검출함.
+    std::uint16_t generation = 0;
+
     // sensor overlap 저장소 index. NULL_INDEX면 일반 collision shape임.
     std::int32_t sensorIndex = NULL_INDEX;
 
