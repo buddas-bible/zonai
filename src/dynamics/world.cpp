@@ -12,21 +12,84 @@ namespace zonai
 
 std::int32_t World::CreateBody( BodyType type, transform2 transform )
 {
-    assert(
-        bodies_.size() <
-        static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() )
-    );
+    std::int32_t bodyId = Body::NULL_INDEX;
 
-    const std::int32_t bodyId =
-        static_cast<std::int32_t>( bodies_.size() );
+    if( bodyFreeList_ != Body::NULL_INDEX )
+    {
+        bodyId = bodyFreeList_;
 
-    Body body{};
+        assert( bodyId >= 0 );
+        assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
+
+        Body& freeBody = bodies_[bodyId];
+        assert( freeBody.bodyId == Body::NULL_INDEX );
+        assert( freeBody.headShapeId == Body::NULL_INDEX );
+        assert( freeBody.headContactKey == Body::NULL_INDEX );
+
+        bodyFreeList_ = freeBody.nextFreeId;
+        freeBody = {};
+    }
+    else
+    {
+        assert(
+            bodies_.size() <
+            static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() )
+        );
+
+        bodyId = static_cast<std::int32_t>( bodies_.size() );
+        bodies_.push_back( {} );
+    }
+
+    Body& body = bodies_[bodyId];
+    body.bodyId = bodyId;
     body.type = type;
     body.transform = transform;
 
-    bodies_.push_back( body );
+    ++bodyCount_;
 
     return bodyId;
+}
+
+void World::DestroyBody( std::int32_t bodyId )
+{
+    assert( bodyId >= 0 );
+    assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
+    assert( bodyCount_ > 0 );
+
+    Body& body = bodies_[bodyId];
+
+    assert( body.bodyId == bodyId );
+
+    // Box2D처럼 먼저 이 Body에 연결된 모든 Contact를 제거함.
+    while( body.headContactKey != Body::NULL_INDEX )
+    {
+        const std::int32_t contactId =
+            GetContactId( body.headContactKey );
+
+        assert( contactId >= 0 );
+        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+        DestroyContact( contactId );
+    }
+
+    assert( body.contactCount == 0 );
+
+    // Shape를 하나씩 제거하면 각 proxy와 Shape slot도 함께 정리됨.
+    while( body.headShapeId != Body::NULL_INDEX )
+    {
+        DestroyShape( body.headShapeId );
+    }
+
+    assert( body.shapeCount == 0 );
+    assert( body.headShapeId == Body::NULL_INDEX );
+    assert( body.headContactKey == Body::NULL_INDEX );
+
+    // slot index는 유지하고 free-list에 연결해 다음 CreateBody에서 재사용함.
+    body = {};
+    body.nextFreeId = bodyFreeList_;
+    bodyFreeList_ = bodyId;
+
+    --bodyCount_;
 }
 
 
@@ -34,6 +97,7 @@ std::int32_t World::CreateShape( std::int32_t bodyId, ShapeGeometry geometry, Fi
 {
     assert( bodyId >= 0 );
     assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
+    assert( bodies_[bodyId].bodyId == bodyId );
     assert( !std::holds_alternative<std::monostate>( geometry ) );
 
     std::int32_t shapeId = Shape::NULL_INDEX;
@@ -151,6 +215,7 @@ void World::SetBodyTransform( std::int32_t bodyId, transform2 transform )
 {
     assert( bodyId >= 0 );
     assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
+    assert( bodies_[bodyId].bodyId == bodyId );
 
     // transform이 NaN / infinity를 포함하면 tree AABB까지 오염되므로 입구에서 차단함.
     assert( std::isfinite( transform.position.x ) );
@@ -195,6 +260,7 @@ const Body& World::GetBody( std::int32_t bodyId ) const
 {
     assert( bodyId >= 0 );
     assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
+    assert( bodies_[bodyId].bodyId == bodyId );
 
     return bodies_[bodyId];
 }
