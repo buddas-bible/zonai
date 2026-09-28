@@ -11,7 +11,7 @@ namespace zonai
 {
 
 // Shape를 Body의 doubly linked list head에 연결함.
-// bodyId / shapeId는 나중에 World가 관리하게 될 stable index임.
+// bodyId / shapeId는 World 내부 storage의 index이며 slot은 삭제 후 재사용될 수 있음.
 inline void LinkShape(
     Body& body,
     std::int32_t bodyId,
