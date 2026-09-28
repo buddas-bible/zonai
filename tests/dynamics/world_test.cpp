@@ -209,9 +209,23 @@ int main()
         const contact2& contact =
             collisionWorld.GetContact( 0 );
 
+        assert( contact.contactId == 0 );
         assert( contact.shapeIdA == groundShape );
         assert( contact.shapeIdB == circleShapeId );
         assert( contact.manifold.pointCount == 1 );
+
+        const Body& ground = collisionWorld.GetBody( groundBody );
+        const Body& circleOwner = collisionWorld.GetBody( circleBody );
+
+        assert( ground.contactCount == 1 );
+        assert( circleOwner.contactCount == 1 );
+
+        // 같은 Contact를 Body A는 edge 0, Body B는 edge 1 key로 가리킴.
+        assert( ground.headContactKey == MakeContactKey( 0, 0 ) );
+        assert( circleOwner.headContactKey == MakeContactKey( 0, 1 ) );
+
+        assert( contact.edges[0].bodyId == groundBody );
+        assert( contact.edges[1].bodyId == circleBody );
 
         const ShapePairKey pairKey =
             MakeShapePairKey( groundShape, circleShapeId );
@@ -257,6 +271,33 @@ int main()
         assert( contactCount == 0 );
         assert( collisionWorld.GetContactCount() == 0 );
         assert( !collisionWorld.GetBroadPhase().HasPair( pairKey ) );
+
+        assert( collisionWorld.GetBody( groundBody ).headContactKey == Body::NULL_INDEX );
+        assert( collisionWorld.GetBody( groundBody ).contactCount == 0 );
+        assert( collisionWorld.GetBody( circleBody ).headContactKey == Body::NULL_INDEX );
+        assert( collisionWorld.GetBody( circleBody ).contactCount == 0 );
+
+        // 제거된 slot 0이 다음 Contact에서 stable id로 재사용되는지 확인함.
+        collisionWorld.SetBodyTransform(
+            circleBody,
+            {
+                { 0.0f, 1.5f },
+                {}
+            }
+        );
+
+        collisionWorld.UpdateCollisions(
+            [&]( std::int32_t,
+                 std::int32_t,
+                 const localManifold2& )
+            {
+            }
+        );
+
+        assert( collisionWorld.GetContactCount() == 1 );
+        assert( collisionWorld.GetContact( 0 ).contactId == 0 );
+        assert( collisionWorld.GetBody( groundBody ).headContactKey == MakeContactKey( 0, 0 ) );
+        assert( collisionWorld.GetBody( circleBody ).headContactKey == MakeContactKey( 0, 1 ) );
     }
 
     // AABB pair가 겹치면 실제 manifold가 비어 있어도 Contact 자체는 유지함.
