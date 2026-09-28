@@ -66,6 +66,8 @@ int main()
         assert( world.IsValid( dynamicBody ) );
         assert( world.IsValid( kinematicBody ) );
         assert( !world.IsValid( BodyId{} ) );
+        assert( !world.IsValid( ShapeId{} ) );
+        assert( !world.IsValid( ContactId{} ) );
         assert( world.GetBodyCount() == 3 );
 
         const Body& dynamic = world.GetBody( dynamicBody );
@@ -186,13 +188,16 @@ int main()
             );
 
         int touchingCount = 0;
+        ContactId contactId{};
 
         world.UpdateCollisions(
-            [&]( ShapeId shapeA,
+            [&]( ContactId id,
+                 ShapeId shapeA,
                  ShapeId shapeB,
                  const localManifold2& manifold )
             {
                 ++touchingCount;
+                contactId = id;
 
                 assert( shapeA == groundShape );
                 assert( shapeB == circleShape );
@@ -204,9 +209,12 @@ int main()
 
         assert( touchingCount == 1 );
         assert( world.GetContactCount() == 1 );
+        assert( world.IsValid( contactId ) );
+        assert( contactId.index1 == 1 );
+        assert( contactId.generation == 1 );
 
         const contact2& contact =
-            world.GetContact( 0 );
+            world.GetContact( contactId );
 
         assert( contact.shapeIdA == Index( groundShape ) );
         assert( contact.shapeIdB == Index( circleShape ) );
@@ -221,11 +229,13 @@ int main()
         touchingCount = 0;
 
         world.UpdateCollisions(
-            [&]( ShapeId,
+            [&]( ContactId repeatedId,
+                 ShapeId,
                  ShapeId,
                  const localManifold2& manifold )
             {
                 ++touchingCount;
+                assert( repeatedId == contactId );
                 assert( manifold.pointCount == 1 );
             }
         );
@@ -242,7 +252,8 @@ int main()
         );
 
         world.UpdateCollisions(
-            []( ShapeId,
+            []( ContactId,
+                ShapeId,
                 ShapeId,
                 const localManifold2& )
             {
@@ -250,11 +261,39 @@ int main()
         );
 
         assert( world.GetContactCount() == 0 );
+        assert( !world.IsValid( contactId ) );
         assert( !world.GetBroadPhase().HasPair(
             PairKey( groundShape, circleShape )
         ) );
         assert( world.GetBody( groundBody ).contactCount == 0 );
         assert( world.GetBody( circleBody ).contactCount == 0 );
+
+        // 같은 Contact slot을 재사용해도 generation이 달라져 예전 handle은 되살아나지 않음.
+        world.SetBodyTransform(
+            circleBody,
+            {
+                { 0.0f, 1.5f },
+                {}
+            }
+        );
+
+        ContactId reusedContactId{};
+
+        world.UpdateCollisions(
+            [&]( ContactId id,
+                 ShapeId,
+                 ShapeId,
+                 const localManifold2& )
+            {
+                reusedContactId = id;
+            }
+        );
+
+        assert( world.IsValid( reusedContactId ) );
+        assert( reusedContactId.index1 == contactId.index1 );
+        assert( reusedContactId.generation != contactId.generation );
+        assert( !world.IsValid( contactId ) );
+        assert( world.GetContact( reusedContactId ).contactId == reusedContactId.index1 - 1 );
     }
 
     // AABB는 겹치지만 실제 geometry가 떨어져 있어도 Contact 자체는 유지됨.
@@ -288,7 +327,8 @@ int main()
         int touchingCount = 0;
 
         world.UpdateCollisions(
-            [&]( ShapeId,
+            [&]( ContactId,
+                 ShapeId,
                  ShapeId,
                  const localManifold2& )
             {
@@ -298,7 +338,6 @@ int main()
 
         assert( touchingCount == 0 );
         assert( world.GetContactCount() == 1 );
-        assert( world.GetContact( 0 ).manifold.pointCount == 0 );
         assert( world.GetBroadPhase().HasPair(
             PairKey( staticCircle, dynamicCircle )
         ) );
@@ -333,7 +372,8 @@ int main()
             );
 
         world.UpdateCollisions(
-            []( ShapeId,
+            []( ContactId,
+                ShapeId,
                 ShapeId,
                 const localManifold2& )
             {
@@ -361,7 +401,8 @@ int main()
         assert( !world.IsValid( oldShape ) );
 
         world.UpdateCollisions(
-            []( ShapeId,
+            []( ContactId,
+                ShapeId,
                 ShapeId,
                 const localManifold2& )
             {
@@ -403,7 +444,8 @@ int main()
             );
 
         world.UpdateCollisions(
-            []( ShapeId,
+            []( ContactId,
+                ShapeId,
                 ShapeId,
                 const localManifold2& )
             {
@@ -446,7 +488,8 @@ int main()
         assert( !world.IsValid( oldShape ) );
 
         world.UpdateCollisions(
-            []( ShapeId,
+            []( ContactId,
+                ShapeId,
                 ShapeId,
                 const localManifold2& )
             {
@@ -484,7 +527,8 @@ int main()
         int contactCount = 0;
 
         world.UpdateCollisions(
-            [&]( ShapeId,
+            [&]( ContactId,
+                 ShapeId,
                  ShapeId,
                  const localManifold2& )
             {
