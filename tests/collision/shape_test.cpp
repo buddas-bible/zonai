@@ -15,6 +15,7 @@ int main()
     assert( shape.bodyId == Shape::NULL_INDEX );
     assert( shape.prevShapeId == Shape::NULL_INDEX );
     assert( shape.nextShapeId == Shape::NULL_INDEX );
+    assert( shape.generation == 0 );
     assert( shape.sensorIndex == Shape::NULL_INDEX );
     assert( shape.nextFreeId == Shape::NULL_INDEX );
     assert( shape.proxyKey == Shape::NULL_INDEX );
