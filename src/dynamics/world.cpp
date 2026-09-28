@@ -412,9 +412,42 @@ const Shape& World::GetShape( ShapeId shapeId ) const
     return shapes_[GetShapeIndex( shapeId )];
 }
 
-const contact2& World::GetContact( ContactId contactId ) const
+ContactData World::GetContactData( ContactId contactId ) const
 {
-    return contacts_[GetContactIndex( contactId )];
+    return MakeContactData( GetContactIndex( contactId ) );
+}
+
+ContactData World::MakeContactData( std::int32_t contactIndex ) const
+{
+    assert( contactIndex >= 0 );
+    assert( static_cast<std::size_t>( contactIndex ) < contacts_.size() );
+
+    const contact2& contact = contacts_[contactIndex];
+
+    assert( contact.contactId == contactIndex );
+    assert( contact.shapeIdA >= 0 );
+    assert( contact.shapeIdB >= 0 );
+    assert( static_cast<std::size_t>( contact.shapeIdA ) < shapes_.size() );
+    assert( static_cast<std::size_t>( contact.shapeIdB ) < shapes_.size() );
+
+    const Shape& shapeA = shapes_[contact.shapeIdA];
+
+    assert( shapeA.bodyId >= 0 );
+    assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
+
+    const Body& bodyA = bodies_[shapeA.bodyId];
+
+    ContactData data{};
+    data.contactId = MakeContactId( contactIndex );
+    data.shapeIdA = MakeShapeId( contact.shapeIdA );
+    data.shapeIdB = MakeShapeId( contact.shapeIdB );
+    data.manifold =
+        ToWorldManifold(
+            contact.manifold,
+            bodyA.transform
+        );
+
+    return data;
 }
 
 
