@@ -12,6 +12,7 @@
 #include "collision/narrowphase/contact2.h"
 #include "collision/shape.h"
 #include "dynamics/body.h"
+#include "dynamics/id.h"
 
 namespace zonai
 {
@@ -20,8 +21,8 @@ template <typename Callback>
 concept WorldCollisionCallback =
     requires(
         Callback& callback,
-        std::int32_t shapeIdA,
-        std::int32_t shapeIdB,
+        ShapeId shapeIdA,
+        ShapeId shapeIdB,
         const localManifold2& manifold )
     {
         { callback( shapeIdA, shapeIdB, manifold ) } -> std::same_as<void>;
@@ -30,27 +31,31 @@ concept WorldCollisionCallback =
 class World
 {
 public:
-    // Body를 World storage 끝에 생성하고 해당 Body index를 반환함.
-    [[nodiscard]] std::int32_t CreateBody(
+    // 새 Body를 만들고 slot index + generation으로 구성된 외부 handle을 반환함.
+    [[nodiscard]] BodyId CreateBody(
         BodyType type = BodyType::Static,
         transform2 transform = {} );
 
-    // Body에 연결된 Contact / Shape / proxy를 정리하고 slot을 재사용 가능 상태로 만듦.
-    void DestroyBody( std::int32_t bodyId );
+    // handle이 가리키는 Body와 연결된 Contact / Shape / proxy를 모두 정리함.
+    void DestroyBody( BodyId bodyId );
 
-    // local geometry를 Body에 연결하고 BroadPhase proxy까지 생성함.
-    [[nodiscard]] std::int32_t CreateShape(
-        std::int32_t bodyId,
+    // local geometry를 Body에 연결하고 Shape handle을 반환함.
+    [[nodiscard]] ShapeId CreateShape(
+        BodyId bodyId,
         ShapeGeometry geometry,
         Filter filter = {} );
 
-    // Shape에 연결된 Contact / proxy / Body list를 정리하고 slot을 재사용 가능 상태로 만듦.
-    void DestroyShape( std::int32_t shapeId );
+    // handle이 가리키는 Shape의 Contact / proxy / Body list 연결을 정리함.
+    void DestroyShape( ShapeId shapeId );
 
     // Body transform을 변경하고 연결된 모든 Shape proxy의 world AABB를 함께 갱신함.
     void SetBodyTransform(
-        std::int32_t bodyId,
+        BodyId bodyId,
         transform2 transform );
+
+    // null / 범위 / generation / 활성 slot을 모두 확인함.
+    [[nodiscard]] bool IsValid( BodyId bodyId ) const noexcept;
+    [[nodiscard]] bool IsValid( ShapeId shapeId ) const noexcept;
 
     // 기존 Contact를 갱신하고 BroadPhase의 새 AABB pair는 persistent Contact로 생성함.
     // callback은 현재 실제 접촉점이 존재하는 Contact만 받음.
@@ -118,8 +123,8 @@ public:
             if( contact.manifold.pointCount > 0 )
             {
                 callback(
-                    contact.shapeIdA,
-                    contact.shapeIdB,
+                    MakeShapeId( contact.shapeIdA ),
+                    MakeShapeId( contact.shapeIdB ),
                     contact.manifold
                 );
             }
@@ -168,14 +173,18 @@ public:
 
                 if( contact.manifold.pointCount > 0 )
                 {
-                    callback( shapeIdA, shapeIdB, contact.manifold );
+                    callback(
+                        MakeShapeId( shapeIdA ),
+                        MakeShapeId( shapeIdB ),
+                        contact.manifold
+                    );
                 }
             }
         );
     }
 
-    [[nodiscard]] const Body& GetBody( std::int32_t bodyId ) const;
-    [[nodiscard]] const Shape& GetShape( std::int32_t shapeId ) const;
+    [[nodiscard]] const Body& GetBody( BodyId bodyId ) const;
+    [[nodiscard]] const Shape& GetShape( ShapeId shapeId ) const;
 
     [[nodiscard]] const BroadPhase& GetBroadPhase() const noexcept
     {
@@ -206,6 +215,15 @@ public:
     }
 
 private:
+    [[nodiscard]] std::int32_t GetBodyIndex( BodyId bodyId ) const;
+    [[nodiscard]] std::int32_t GetShapeIndex( ShapeId shapeId ) const;
+
+    [[nodiscard]] BodyId MakeBodyId( std::int32_t bodyIndex ) const;
+    [[nodiscard]] ShapeId MakeShapeId( std::int32_t shapeIndex ) const;
+
+    void DestroyBodyByIndex( std::int32_t bodyIndex );
+    void DestroyShapeByIndex( std::int32_t shapeIndex );
+
     // stable Contact slot을 할당하고 두 Body의 intrusive contact list에 연결함.
     [[nodiscard]] std::int32_t CreateContact(
         std::int32_t shapeIdA,
