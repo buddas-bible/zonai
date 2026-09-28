@@ -52,6 +52,27 @@ bool World::IsValid( ShapeId shapeId ) const noexcept
         shape.generation == shapeId.generation;
 }
 
+bool World::IsValid( ContactId contactId ) const noexcept
+{
+    if( contactId.index1 <= 0 )
+    {
+        return false;
+    }
+
+    const std::int32_t contactIndex = contactId.index1 - 1;
+
+    if( static_cast<std::size_t>( contactIndex ) >= contacts_.size() )
+    {
+        return false;
+    }
+
+    const contact2& contact = contacts_[contactIndex];
+
+    return
+        contact.contactId == contactIndex &&
+        contact.generation == contactId.generation;
+}
+
 std::int32_t World::GetBodyIndex( BodyId bodyId ) const
 {
     assert( IsValid( bodyId ) );
@@ -62,6 +83,12 @@ std::int32_t World::GetShapeIndex( ShapeId shapeId ) const
 {
     assert( IsValid( shapeId ) );
     return shapeId.index1 - 1;
+}
+
+std::int32_t World::GetContactIndex( ContactId contactId ) const
+{
+    assert( IsValid( contactId ) );
+    return contactId.index1 - 1;
 }
 
 BodyId World::MakeBodyId( std::int32_t bodyIndex ) const
@@ -86,6 +113,18 @@ ShapeId World::MakeShapeId( std::int32_t shapeIndex ) const
     assert( shape.bodyId != Shape::NULL_INDEX );
 
     return { shapeIndex + 1, shape.generation };
+}
+
+ContactId World::MakeContactId( std::int32_t contactIndex ) const
+{
+    assert( contactIndex >= 0 );
+    assert( static_cast<std::size_t>( contactIndex ) < contacts_.size() );
+
+    const contact2& contact = contacts_[contactIndex];
+
+    assert( contact.contactId == contactIndex );
+
+    return { contactIndex + 1, contact.generation };
 }
 
 BodyId World::CreateBody( BodyType type, transform2 transform )
@@ -373,6 +412,11 @@ const Shape& World::GetShape( ShapeId shapeId ) const
     return shapes_[GetShapeIndex( shapeId )];
 }
 
+const contact2& World::GetContact( ContactId contactId ) const
+{
+    return contacts_[GetContactIndex( contactId )];
+}
+
 
 std::int32_t World::CreateContact(
     std::int32_t shapeIdA,
@@ -411,8 +455,13 @@ std::int32_t World::CreateContact(
     }
 
     contact2& contact = contacts_[contactId];
+
+    const std::uint32_t generation =
+        contact.generation + 1u;
+
     contact = {};
     contact.contactId = contactId;
+    contact.generation = generation;
     contact.shapeIdA = shapeIdA;
     contact.shapeIdB = shapeIdB;
     contact.manifold = manifold;
@@ -526,7 +575,10 @@ void World::DestroyContact( std::int32_t contactId )
     const bool removed = broadPhase_.RemovePair( pairKey );
     assert( removed );
 
+    const std::uint32_t generation = contact.generation;
+
     contact = {};
+    contact.generation = generation;
     contact.nextFreeId = contactFreeList_;
     contactFreeList_ = contactId;
 
