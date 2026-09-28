@@ -18,6 +18,13 @@ struct Body
     // 아직 solver용 BodySim이 없으므로 현재는 Body가 world transform을 직접 보관함.
     transform2 transform{};
 
+    // [contactId : edgeIndex] key로 연결된 첫 Contact.
+    // 하위 1bit는 Contact의 어느 edge가 이 Body에 연결됐는지 나타냄.
+    std::int32_t headContactKey = NULL_INDEX;
+
+    // 이 Body에 연결된 Contact 개수.
+    std::int32_t contactCount = 0;
+
     // 이 Body에 연결된 첫 Shape index.
     std::int32_t headShapeId = NULL_INDEX;
 
