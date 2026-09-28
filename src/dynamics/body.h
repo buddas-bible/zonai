@@ -15,6 +15,9 @@ struct Body
     // World 내부 stable slot id. NULL_INDEX면 현재 free slot임.
     std::int32_t bodyId = NULL_INDEX;
 
+    // slot이 재사용될 때 증가해 오래된 BodyId를 검출함.
+    std::uint16_t generation = 0;
+
     // free slot일 때 다음 재사용 가능한 Body index.
     std::int32_t nextFreeId = NULL_INDEX;
 
