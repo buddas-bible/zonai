@@ -21,11 +21,14 @@ template <typename Callback>
 concept WorldCollisionCallback =
     requires(
         Callback& callback,
+        ContactId contactId,
         ShapeId shapeIdA,
         ShapeId shapeIdB,
         const localManifold2& manifold )
     {
-        { callback( shapeIdA, shapeIdB, manifold ) } -> std::same_as<void>;
+        {
+            callback( contactId, shapeIdA, shapeIdB, manifold )
+        } -> std::same_as<void>;
     };
 
 class World
@@ -56,6 +59,7 @@ public:
     // null / 범위 / generation / 활성 slot을 모두 확인함.
     [[nodiscard]] bool IsValid( BodyId bodyId ) const noexcept;
     [[nodiscard]] bool IsValid( ShapeId shapeId ) const noexcept;
+    [[nodiscard]] bool IsValid( ContactId contactId ) const noexcept;
 
     // 기존 Contact를 갱신하고 BroadPhase의 새 AABB pair는 persistent Contact로 생성함.
     // callback은 현재 실제 접촉점이 존재하는 Contact만 받음.
@@ -123,6 +127,7 @@ public:
             if( contact.manifold.pointCount > 0 )
             {
                 callback(
+                    MakeContactId( contactId ),
                     MakeShapeId( contact.shapeIdA ),
                     MakeShapeId( contact.shapeIdB ),
                     contact.manifold
@@ -174,6 +179,7 @@ public:
                 if( contact.manifold.pointCount > 0 )
                 {
                     callback(
+                        MakeContactId( contactId ),
                         MakeShapeId( shapeIdA ),
                         MakeShapeId( shapeIdB ),
                         contact.manifold
@@ -185,6 +191,7 @@ public:
 
     [[nodiscard]] const Body& GetBody( BodyId bodyId ) const;
     [[nodiscard]] const Shape& GetShape( ShapeId shapeId ) const;
+    [[nodiscard]] const contact2& GetContact( ContactId contactId ) const;
 
     [[nodiscard]] const BroadPhase& GetBroadPhase() const noexcept
     {
@@ -206,20 +213,14 @@ public:
         return contactCount_;
     }
 
-    [[nodiscard]] const contact2& GetContact( std::int32_t contactId ) const
-    {
-        assert( contactId >= 0 );
-        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
-        assert( contacts_[contactId].contactId == contactId );
-        return contacts_[contactId];
-    }
-
 private:
     [[nodiscard]] std::int32_t GetBodyIndex( BodyId bodyId ) const;
     [[nodiscard]] std::int32_t GetShapeIndex( ShapeId shapeId ) const;
+    [[nodiscard]] std::int32_t GetContactIndex( ContactId contactId ) const;
 
     [[nodiscard]] BodyId MakeBodyId( std::int32_t bodyIndex ) const;
     [[nodiscard]] ShapeId MakeShapeId( std::int32_t shapeIndex ) const;
+    [[nodiscard]] ContactId MakeContactId( std::int32_t contactIndex ) const;
 
     void DestroyBodyByIndex( std::int32_t bodyIndex );
     void DestroyShapeByIndex( std::int32_t shapeIndex );
