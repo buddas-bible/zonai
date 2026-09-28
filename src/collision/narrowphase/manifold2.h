@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "math/transform2.h"
 #include "math/vec2.h"
 
 namespace zonai
@@ -38,5 +39,33 @@ struct manifold2
     std::array<manifoldPoint2, MAX_MANIFOLD_POINTS> points{};
     int pointCount{};
 }; // sizeof: 44 bytes
+
+// Shape A local-space manifold을 world-space public manifold로 변환함.
+inline manifold2 ToWorldManifold(
+    const localManifold2& localManifold,
+    const transform2& transformA )
+{
+    manifold2 manifold{};
+    manifold.normal =
+        TransformVector( transformA, localManifold.normal );
+    manifold.pointCount = localManifold.pointCount;
+
+    for( int i = 0; i < localManifold.pointCount; ++i )
+    {
+        manifold.points[i].point =
+            TransformPoint(
+                transformA,
+                localManifold.points[i].point
+            );
+
+        manifold.points[i].separation =
+            localManifold.points[i].separation;
+
+        manifold.points[i].id =
+            localManifold.points[i].id;
+    }
+
+    return manifold;
+}
 
 } // namespace zonai
