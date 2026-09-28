@@ -11,6 +11,7 @@ int main()
 
         // 기본 Body는 정적이고 아직 Shape가 연결되지 않은 상태로 시작함.
         assert( body.bodyId == Body::NULL_INDEX );
+        assert( body.generation == 0 );
         assert( body.nextFreeId == Body::NULL_INDEX );
         assert( body.type == BodyType::Static );
         assert( body.headContactKey == Body::NULL_INDEX );
