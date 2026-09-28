@@ -191,19 +191,16 @@ int main()
         ContactId contactId{};
 
         world.UpdateCollisions(
-            [&]( ContactId id,
-                 ShapeId shapeA,
-                 ShapeId shapeB,
-                 const localManifold2& manifold )
+            [&]( const ContactData& data )
             {
                 ++touchingCount;
-                contactId = id;
+                contactId = data.contactId;
 
-                assert( shapeA == groundShape );
-                assert( shapeB == circleShape );
-                assert( manifold.pointCount == 1 );
-                assert( std::fabs( manifold.normal.x ) < epsilon );
-                assert( std::fabs( manifold.normal.y - 1.0f ) < epsilon );
+                assert( data.shapeIdA == groundShape );
+                assert( data.shapeIdB == circleShape );
+                assert( data.manifold.pointCount == 1 );
+                assert( std::fabs( data.manifold.normal.x ) < epsilon );
+                assert( std::fabs( data.manifold.normal.y - 1.0f ) < epsilon );
             }
         );
 
@@ -213,13 +210,13 @@ int main()
         assert( contactId.index1 == 1 );
         assert( contactId.generation == 1 );
 
-        const contact2& contact =
-            world.GetContact( contactId );
+        const ContactData contactData =
+            world.GetContactData( contactId );
 
-        assert( contact.shapeIdA == Index( groundShape ) );
-        assert( contact.shapeIdB == Index( circleShape ) );
-        assert( contact.edges[0].bodyId == Index( groundBody ) );
-        assert( contact.edges[1].bodyId == Index( circleBody ) );
+        assert( contactData.contactId == contactId );
+        assert( contactData.shapeIdA == groundShape );
+        assert( contactData.shapeIdB == circleShape );
+        assert( contactData.manifold.pointCount == 1 );
 
         assert( world.GetBroadPhase().HasPair(
             PairKey( groundShape, circleShape )
@@ -229,14 +226,11 @@ int main()
         touchingCount = 0;
 
         world.UpdateCollisions(
-            [&]( ContactId repeatedId,
-                 ShapeId,
-                 ShapeId,
-                 const localManifold2& manifold )
+            [&]( const ContactData& data )
             {
                 ++touchingCount;
-                assert( repeatedId == contactId );
-                assert( manifold.pointCount == 1 );
+                assert( data.contactId == contactId );
+                assert( data.manifold.pointCount == 1 );
             }
         );
 
@@ -252,10 +246,7 @@ int main()
         );
 
         world.UpdateCollisions(
-            []( ContactId,
-                ShapeId,
-                ShapeId,
-                const localManifold2& )
+            []( const ContactData& )
             {
             }
         );
@@ -280,12 +271,9 @@ int main()
         ContactId reusedContactId{};
 
         world.UpdateCollisions(
-            [&]( ContactId id,
-                 ShapeId,
-                 ShapeId,
-                 const localManifold2& )
+            [&]( const ContactData& data )
             {
-                reusedContactId = id;
+                reusedContactId = data.contactId;
             }
         );
 
@@ -293,7 +281,83 @@ int main()
         assert( reusedContactId.index1 == contactId.index1 );
         assert( reusedContactId.generation != contactId.generation );
         assert( !world.IsValid( contactId ) );
-        assert( world.GetContact( reusedContactId ).contactId == reusedContactId.index1 - 1 );
+        const ContactData reusedData =
+            world.GetContactData( reusedContactId );
+
+        assert( reusedData.contactId == reusedContactId );
+        assert( reusedData.shapeIdA == groundShape );
+        assert( reusedData.shapeIdB == circleShape );
+    }
+
+    // ContactData manifold는 Shape A local이 아니라 world space로 공개됨.
+    {
+        World world{};
+
+        constexpr float halfPi = 1.57079632679f;
+
+        const BodyId boxBody =
+            world.CreateBody(
+                BodyType::Static,
+                {
+                    { 10.0f, 5.0f },
+                    rot2::FromRadians( halfPi )
+                }
+            );
+
+        const ShapeId boxShape =
+            world.CreateShape(
+                boxBody,
+                MakeBox( { 1.0f, 1.0f } )
+            );
+
+        const BodyId circleBody =
+            world.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 10.0f, 6.5f },
+                    {}
+                }
+            );
+
+        const ShapeId circleShape =
+            world.CreateShape(
+                circleBody,
+                circle2{ {}, 0.5f }
+            );
+
+        ContactData data{};
+        int contactCount = 0;
+
+        world.UpdateCollisions(
+            [&]( const ContactData& contactData )
+            {
+                data = contactData;
+                ++contactCount;
+            }
+        );
+
+        assert( contactCount == 1 );
+        assert( data.shapeIdA == boxShape );
+        assert( data.shapeIdB == circleShape );
+        assert( data.manifold.pointCount == 1 );
+
+        // A local +X normal / (1, 0) contact point가
+        // 90도 회전 + (10, 5) 이동되어 world +Y / (10, 6)이 됨.
+        assert( std::fabs( data.manifold.normal.x ) < epsilon );
+        assert( std::fabs( data.manifold.normal.y - 1.0f ) < epsilon );
+        assert( std::fabs( data.manifold.points[0].point.x - 10.0f ) < epsilon );
+        assert( std::fabs( data.manifold.points[0].point.y - 6.0f ) < epsilon );
+
+        const ContactData snapshot =
+            world.GetContactData( data.contactId );
+
+        assert( snapshot.contactId == data.contactId );
+        assert( snapshot.shapeIdA == data.shapeIdA );
+        assert( snapshot.shapeIdB == data.shapeIdB );
+        assert( std::fabs(
+            snapshot.manifold.points[0].point.y -
+            data.manifold.points[0].point.y
+        ) < epsilon );
     }
 
     // AABB는 겹치지만 실제 geometry가 떨어져 있어도 Contact 자체는 유지됨.
@@ -327,10 +391,7 @@ int main()
         int touchingCount = 0;
 
         world.UpdateCollisions(
-            [&]( ContactId,
-                 ShapeId,
-                 ShapeId,
-                 const localManifold2& )
+            [&]( const ContactData& )
             {
                 ++touchingCount;
             }
@@ -372,10 +433,7 @@ int main()
             );
 
         world.UpdateCollisions(
-            []( ContactId,
-                ShapeId,
-                ShapeId,
-                const localManifold2& )
+            []( const ContactData& )
             {
             }
         );
@@ -401,10 +459,7 @@ int main()
         assert( !world.IsValid( oldShape ) );
 
         world.UpdateCollisions(
-            []( ContactId,
-                ShapeId,
-                ShapeId,
-                const localManifold2& )
+            []( const ContactData& )
             {
             }
         );
@@ -444,10 +499,7 @@ int main()
             );
 
         world.UpdateCollisions(
-            []( ContactId,
-                ShapeId,
-                ShapeId,
-                const localManifold2& )
+            []( const ContactData& )
             {
             }
         );
@@ -488,10 +540,7 @@ int main()
         assert( !world.IsValid( oldShape ) );
 
         world.UpdateCollisions(
-            []( ContactId,
-                ShapeId,
-                ShapeId,
-                const localManifold2& )
+            []( const ContactData& )
             {
             }
         );
@@ -527,10 +576,7 @@ int main()
         int contactCount = 0;
 
         world.UpdateCollisions(
-            [&]( ContactId,
-                 ShapeId,
-                 ShapeId,
-                 const localManifold2& )
+            [&]( const ContactData& )
             {
                 ++contactCount;
             }
