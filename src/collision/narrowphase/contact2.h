@@ -51,6 +51,9 @@ struct contact2
     // stable slot id. NULL_INDEX면 현재 free slot임.
     std::int32_t contactId = NULL_INDEX;
 
+    // slot이 재사용될 때 증가해 오래된 ContactId를 검출함.
+    std::uint32_t generation = 0;
+
     // free slot일 때만 다음 free contact id를 저장함.
     std::int32_t nextFreeId = NULL_INDEX;
 
