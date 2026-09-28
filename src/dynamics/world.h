@@ -41,6 +41,9 @@ public:
         ShapeGeometry geometry,
         Filter filter = {} );
 
+    // Shape에 연결된 Contact / proxy / Body list를 정리하고 slot을 재사용 가능 상태로 만듦.
+    void DestroyShape( std::int32_t shapeId );
+
     // Body transform을 변경하고 연결된 모든 Shape proxy의 world AABB를 함께 갱신함.
     void SetBodyTransform(
         std::int32_t bodyId,
@@ -183,7 +186,7 @@ public:
 
     [[nodiscard]] std::size_t GetShapeCount() const noexcept
     {
-        return shapes_.size();
+        return shapeCount_;
     }
 
     [[nodiscard]] std::size_t GetContactCount() const noexcept
@@ -213,8 +216,14 @@ private:
     // DestroyBody / id 재사용은 추후 Body id pool을 추가할 때 구현함.
     std::vector<Body> bodies_;
 
-    // Shape도 World가 연속 storage로 소유하고 bodyId / shapeId로 서로 연결함.
+    // shapeId가 변하지 않는 stable slot storage.
     std::vector<Shape> shapes_;
+
+    // 제거된 Shape slot 재사용을 위한 free-list head.
+    std::int32_t shapeFreeList_ = Shape::NULL_INDEX;
+
+    // shapes_.size()와 별개인 현재 활성 Shape 개수.
+    std::size_t shapeCount_ = 0;
 
     // contactId가 변하지 않는 stable slot storage.
     std::vector<contact2> contacts_;
