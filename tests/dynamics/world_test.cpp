@@ -349,6 +349,109 @@ int main()
         ) );
     }
 
+    // DestroyShape는 Contact / pairSet / proxy / Body shape list를 함께 정리함.
+    {
+        World destroyWorld{};
+
+        const std::int32_t staticBodyId =
+            destroyWorld.CreateBody( BodyType::Static );
+
+        const std::int32_t groundShape =
+            destroyWorld.CreateShape(
+                staticBodyId,
+                MakeBox( { 1.0f, 1.0f } )
+            );
+
+        const std::int32_t dynamicBodyId =
+            destroyWorld.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 0.0f, 1.5f },
+                    {}
+                }
+            );
+
+        const std::int32_t touchingShape =
+            destroyWorld.CreateShape(
+                dynamicBodyId,
+                circle2{ {}, 0.5f }
+            );
+
+        const std::int32_t otherShape =
+            destroyWorld.CreateShape(
+                dynamicBodyId,
+                circle2{ { 5.0f, 0.0f }, 0.5f }
+            );
+
+        assert( destroyWorld.GetShapeCount() == 3 );
+        assert( destroyWorld.GetBody( dynamicBodyId ).shapeCount == 2 );
+        assert( destroyWorld.GetBody( dynamicBodyId ).headShapeId == otherShape );
+
+        destroyWorld.UpdateCollisions(
+            []( std::int32_t,
+                std::int32_t,
+                const localManifold2& )
+            {
+            }
+        );
+
+        const ShapePairKey pairKey =
+            MakeShapePairKey( groundShape, touchingShape );
+
+        assert( destroyWorld.GetContactCount() == 1 );
+        assert( destroyWorld.GetBroadPhase().HasPair( pairKey ) );
+
+        // touchingShape는 head가 아닌 Shape이므로 중간/꼬리 unlink 경로도 함께 검증됨.
+        destroyWorld.DestroyShape( touchingShape );
+
+        assert( destroyWorld.GetShapeCount() == 2 );
+        assert( destroyWorld.GetContactCount() == 0 );
+        assert( !destroyWorld.GetBroadPhase().HasPair( pairKey ) );
+
+        assert( destroyWorld.GetBody( staticBodyId ).contactCount == 0 );
+        assert( destroyWorld.GetBody( dynamicBodyId ).contactCount == 0 );
+
+        const Body& dynamicBody =
+            destroyWorld.GetBody( dynamicBodyId );
+
+        assert( dynamicBody.shapeCount == 1 );
+        assert( dynamicBody.headShapeId == otherShape );
+        assert( destroyWorld.GetShape( otherShape ).prevShapeId == Shape::NULL_INDEX );
+        assert( destroyWorld.GetShape( otherShape ).nextShapeId == Shape::NULL_INDEX );
+
+        assert( destroyWorld.GetBroadPhase()
+                    .GetTree( BodyType::Dynamic )
+                    .Validate() );
+
+        // 삭제된 slot을 새 Shape가 재사용하되 Body list / proxy를 새 상태로 다시 구성해야 함.
+        const std::int32_t reusedShape =
+            destroyWorld.CreateShape(
+                dynamicBodyId,
+                circle2{ {}, 0.5f }
+            );
+
+        assert( reusedShape == touchingShape );
+        assert( destroyWorld.GetShapeCount() == 3 );
+        assert( destroyWorld.GetBody( dynamicBodyId ).shapeCount == 2 );
+        assert( destroyWorld.GetBody( dynamicBodyId ).headShapeId == reusedShape );
+        assert( destroyWorld.GetShape( reusedShape ).nextShapeId == otherShape );
+        assert( destroyWorld.GetShape( otherShape ).prevShapeId == reusedShape );
+        assert( destroyWorld.GetShape( reusedShape ).proxyKey != Shape::NULL_INDEX );
+
+        destroyWorld.UpdateCollisions(
+            []( std::int32_t,
+                std::int32_t,
+                const localManifold2& )
+            {
+            }
+        );
+
+        assert( destroyWorld.GetContactCount() == 1 );
+        assert( destroyWorld.GetBroadPhase().HasPair(
+            MakeShapePairKey( groundShape, reusedShape )
+        ) );
+    }
+
     // Box2D처럼 segment-segment 조합은 BroadPhase 후보여도 Contact를 만들지 않음.
     {
         World segmentWorld{};
