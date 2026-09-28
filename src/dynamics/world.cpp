@@ -35,23 +35,42 @@ std::int32_t World::CreateShape( std::int32_t bodyId, ShapeGeometry geometry, Fi
     assert( bodyId >= 0 );
     assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
     assert( !std::holds_alternative<std::monostate>( geometry ) );
-    assert(
-        shapes_.size() <
-        static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() )
-    );
 
-    const std::int32_t shapeId = static_cast<std::int32_t>( shapes_.size() );
+    std::int32_t shapeId = Shape::NULL_INDEX;
 
-    Shape shape{};
-    shape.geometry = std::move( geometry );
-    shape.filter = filter;
+    if( shapeFreeList_ != Shape::NULL_INDEX )
+    {
+        shapeId = shapeFreeList_;
 
-    shapes_.push_back( std::move( shape ) );
+        assert( shapeId >= 0 );
+        assert( static_cast<std::size_t>( shapeId ) < shapes_.size() );
+
+        Shape& freeShape = shapes_[shapeId];
+        assert( freeShape.bodyId == Shape::NULL_INDEX );
+        assert( std::holds_alternative<std::monostate>( freeShape.geometry ) );
+
+        shapeFreeList_ = freeShape.nextFreeId;
+        freeShape = {};
+    }
+    else
+    {
+        assert(
+            shapes_.size() <
+            static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() )
+        );
+
+        shapeId = static_cast<std::int32_t>( shapes_.size() );
+        shapes_.push_back( {} );
+    }
+
+    Shape& storedShape = shapes_[shapeId];
+    storedShape.geometry = std::move( geometry );
+    storedShape.filter = filter;
 
     Body& body = bodies_[bodyId];
-    Shape& storedShape = shapes_[shapeId];
 
-    const aabb2 worldAABB = ComputeShapeAABB( storedShape.geometry, body.transform );
+    const aabb2 worldAABB =
+        ComputeShapeAABB( storedShape.geometry, body.transform );
 
     // Box2D의 기본 Shape 생성처럼 static Shape도 즉시 pair 탐색 대상이 되게 함.
     storedShape.proxyKey =
@@ -63,8 +82,68 @@ std::int32_t World::CreateShape( std::int32_t bodyId, ShapeGeometry geometry, Fi
         );
 
     LinkShape( body, bodyId, shapes_, shapeId );
+    ++shapeCount_;
 
     return shapeId;
+}
+
+void World::DestroyShape( std::int32_t shapeId )
+{
+    assert( shapeId >= 0 );
+    assert( static_cast<std::size_t>( shapeId ) < shapes_.size() );
+    assert( shapeCount_ > 0 );
+
+    Shape& shape = shapes_[shapeId];
+
+    assert( shape.bodyId != Shape::NULL_INDEX );
+    assert( shape.proxyKey != Shape::NULL_INDEX );
+    assert( !std::holds_alternative<std::monostate>( shape.geometry ) );
+
+    // Sensor 저장소는 아직 구현하지 않았으므로 현재는 일반 collision Shape만 제거함.
+    assert( shape.sensorIndex == Shape::NULL_INDEX );
+
+    const std::int32_t bodyId = shape.bodyId;
+    Body& body = bodies_[bodyId];
+
+    // Box2D처럼 먼저 Body의 Shape list에서 분리함.
+    UnlinkShape( body, bodyId, shapes_, shapeId );
+
+    // 더 이상 BroadPhase 후보가 되지 않도록 proxy를 제거함.
+    broadPhase_.DestroyProxy( shape.proxyKey );
+    shape.proxyKey = Shape::NULL_INDEX;
+
+    // 이 Body의 Contact list에서 삭제 Shape가 관여한 Contact만 제거함.
+    std::int32_t contactKey = body.headContactKey;
+
+    while( contactKey != Body::NULL_INDEX )
+    {
+        const std::int32_t contactId =
+            GetContactId( contactKey );
+        const std::int32_t edgeIndex =
+            GetContactEdgeIndex( contactKey );
+
+        assert( contactId >= 0 );
+        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+        contact2& contact = contacts_[contactId];
+        assert( contact.contactId == contactId );
+
+        // DestroyContact가 list를 수정하므로 다음 key를 먼저 저장함.
+        contactKey = contact.edges[edgeIndex].nextKey;
+
+        if( contact.shapeIdA == shapeId ||
+            contact.shapeIdB == shapeId )
+        {
+            DestroyContact( contactId );
+        }
+    }
+
+    // slot index는 유지하고 free-list에 연결해 다음 CreateShape에서 재사용함.
+    shape = {};
+    shape.nextFreeId = shapeFreeList_;
+    shapeFreeList_ = shapeId;
+
+    --shapeCount_;
 }
 
 
@@ -126,6 +205,7 @@ const Shape& World::GetShape( std::int32_t shapeId ) const
     assert( shapeId >= 0 );
     assert( static_cast<std::size_t>( shapeId ) < shapes_.size() );
 
+    assert( shapes_[shapeId].bodyId != Shape::NULL_INDEX );
     return shapes_[shapeId];
 }
 
