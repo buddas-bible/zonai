@@ -12,6 +12,12 @@ struct Body
 {
     static constexpr std::int32_t NULL_INDEX = -1;
 
+    // World 내부 stable slot id. NULL_INDEX면 현재 free slot임.
+    std::int32_t bodyId = NULL_INDEX;
+
+    // free slot일 때 다음 재사용 가능한 Body index.
+    std::int32_t nextFreeId = NULL_INDEX;
+
     // Body의 물리 동작 종류.
     BodyType type = BodyType::Static;
 
