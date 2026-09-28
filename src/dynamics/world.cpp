@@ -10,55 +10,143 @@
 namespace zonai
 {
 
-std::int32_t World::CreateBody( BodyType type, transform2 transform )
+bool World::IsValid( BodyId bodyId ) const noexcept
 {
-    std::int32_t bodyId = Body::NULL_INDEX;
+    if( bodyId.index1 <= 0 )
+    {
+        return false;
+    }
+
+    const std::int32_t bodyIndex = bodyId.index1 - 1;
+
+    if( static_cast<std::size_t>( bodyIndex ) >= bodies_.size() )
+    {
+        return false;
+    }
+
+    const Body& body = bodies_[bodyIndex];
+
+    return
+        body.bodyId == bodyIndex &&
+        body.generation == bodyId.generation;
+}
+
+bool World::IsValid( ShapeId shapeId ) const noexcept
+{
+    if( shapeId.index1 <= 0 )
+    {
+        return false;
+    }
+
+    const std::int32_t shapeIndex = shapeId.index1 - 1;
+
+    if( static_cast<std::size_t>( shapeIndex ) >= shapes_.size() )
+    {
+        return false;
+    }
+
+    const Shape& shape = shapes_[shapeIndex];
+
+    return
+        shape.bodyId != Shape::NULL_INDEX &&
+        shape.generation == shapeId.generation;
+}
+
+std::int32_t World::GetBodyIndex( BodyId bodyId ) const
+{
+    assert( IsValid( bodyId ) );
+    return bodyId.index1 - 1;
+}
+
+std::int32_t World::GetShapeIndex( ShapeId shapeId ) const
+{
+    assert( IsValid( shapeId ) );
+    return shapeId.index1 - 1;
+}
+
+BodyId World::MakeBodyId( std::int32_t bodyIndex ) const
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+
+    const Body& body = bodies_[bodyIndex];
+
+    assert( body.bodyId == bodyIndex );
+
+    return { bodyIndex + 1, body.generation };
+}
+
+ShapeId World::MakeShapeId( std::int32_t shapeIndex ) const
+{
+    assert( shapeIndex >= 0 );
+    assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+
+    const Shape& shape = shapes_[shapeIndex];
+
+    assert( shape.bodyId != Shape::NULL_INDEX );
+
+    return { shapeIndex + 1, shape.generation };
+}
+
+BodyId World::CreateBody( BodyType type, transform2 transform )
+{
+    std::int32_t bodyIndex = Body::NULL_INDEX;
 
     if( bodyFreeList_ != Body::NULL_INDEX )
     {
-        bodyId = bodyFreeList_;
+        bodyIndex = bodyFreeList_;
 
-        assert( bodyId >= 0 );
-        assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
+        assert( bodyIndex >= 0 );
+        assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
 
-        Body& freeBody = bodies_[bodyId];
+        Body& freeBody = bodies_[bodyIndex];
         assert( freeBody.bodyId == Body::NULL_INDEX );
         assert( freeBody.headShapeId == Body::NULL_INDEX );
         assert( freeBody.headContactKey == Body::NULL_INDEX );
 
         bodyFreeList_ = freeBody.nextFreeId;
-        freeBody = {};
     }
     else
     {
         assert(
             bodies_.size() <
-            static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() )
+            static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() - 1 )
         );
 
-        bodyId = static_cast<std::int32_t>( bodies_.size() );
+        bodyIndex = static_cast<std::int32_t>( bodies_.size() );
         bodies_.push_back( {} );
     }
 
-    Body& body = bodies_[bodyId];
-    body.bodyId = bodyId;
+    Body& body = bodies_[bodyIndex];
+
+    const std::uint16_t generation =
+        static_cast<std::uint16_t>( body.generation + 1u );
+
+    body = {};
+    body.bodyId = bodyIndex;
+    body.generation = generation;
     body.type = type;
     body.transform = transform;
 
     ++bodyCount_;
 
-    return bodyId;
+    return MakeBodyId( bodyIndex );
 }
 
-void World::DestroyBody( std::int32_t bodyId )
+void World::DestroyBody( BodyId bodyId )
 {
-    assert( bodyId >= 0 );
-    assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
+    DestroyBodyByIndex( GetBodyIndex( bodyId ) );
+}
+
+void World::DestroyBodyByIndex( std::int32_t bodyIndex )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
     assert( bodyCount_ > 0 );
 
-    Body& body = bodies_[bodyId];
+    Body& body = bodies_[bodyIndex];
 
-    assert( body.bodyId == bodyId );
+    assert( body.bodyId == bodyIndex );
 
     // Box2D처럼 먼저 이 Body에 연결된 모든 Contact를 제거함.
     while( body.headContactKey != Body::NULL_INDEX )
@@ -77,61 +165,72 @@ void World::DestroyBody( std::int32_t bodyId )
     // Shape를 하나씩 제거하면 각 proxy와 Shape slot도 함께 정리됨.
     while( body.headShapeId != Body::NULL_INDEX )
     {
-        DestroyShape( body.headShapeId );
+        DestroyShapeByIndex( body.headShapeId );
     }
 
     assert( body.shapeCount == 0 );
     assert( body.headShapeId == Body::NULL_INDEX );
     assert( body.headContactKey == Body::NULL_INDEX );
 
-    // slot index는 유지하고 free-list에 연결해 다음 CreateBody에서 재사용함.
+    const std::uint16_t generation = body.generation;
+
+    // generation은 보존하고 slot만 free-list에 반환함.
     body = {};
+    body.generation = generation;
     body.nextFreeId = bodyFreeList_;
-    bodyFreeList_ = bodyId;
+    bodyFreeList_ = bodyIndex;
 
     --bodyCount_;
 }
 
 
-std::int32_t World::CreateShape( std::int32_t bodyId, ShapeGeometry geometry, Filter filter )
+ShapeId World::CreateShape(
+    BodyId bodyId,
+    ShapeGeometry geometry,
+    Filter filter )
 {
-    assert( bodyId >= 0 );
-    assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
-    assert( bodies_[bodyId].bodyId == bodyId );
+    const std::int32_t bodyIndex =
+        GetBodyIndex( bodyId );
+
     assert( !std::holds_alternative<std::monostate>( geometry ) );
 
-    std::int32_t shapeId = Shape::NULL_INDEX;
+    std::int32_t shapeIndex = Shape::NULL_INDEX;
 
     if( shapeFreeList_ != Shape::NULL_INDEX )
     {
-        shapeId = shapeFreeList_;
+        shapeIndex = shapeFreeList_;
 
-        assert( shapeId >= 0 );
-        assert( static_cast<std::size_t>( shapeId ) < shapes_.size() );
+        assert( shapeIndex >= 0 );
+        assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
 
-        Shape& freeShape = shapes_[shapeId];
+        Shape& freeShape = shapes_[shapeIndex];
         assert( freeShape.bodyId == Shape::NULL_INDEX );
         assert( std::holds_alternative<std::monostate>( freeShape.geometry ) );
 
         shapeFreeList_ = freeShape.nextFreeId;
-        freeShape = {};
     }
     else
     {
         assert(
             shapes_.size() <
-            static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() )
+            static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() - 1 )
         );
 
-        shapeId = static_cast<std::int32_t>( shapes_.size() );
+        shapeIndex = static_cast<std::int32_t>( shapes_.size() );
         shapes_.push_back( {} );
     }
 
-    Shape& storedShape = shapes_[shapeId];
+    Shape& storedShape = shapes_[shapeIndex];
+
+    const std::uint16_t generation =
+        static_cast<std::uint16_t>( storedShape.generation + 1u );
+
+    storedShape = {};
+    storedShape.generation = generation;
     storedShape.geometry = std::move( geometry );
     storedShape.filter = filter;
 
-    Body& body = bodies_[bodyId];
+    Body& body = bodies_[bodyIndex];
 
     const aabb2 worldAABB =
         ComputeShapeAABB( storedShape.geometry, body.transform );
@@ -141,23 +240,28 @@ std::int32_t World::CreateShape( std::int32_t bodyId, ShapeGeometry geometry, Fi
         broadPhase_.CreateProxy(
             body.type,
             worldAABB,
-            shapeId,
+            shapeIndex,
             true
         );
 
-    LinkShape( body, bodyId, shapes_, shapeId );
+    LinkShape( body, bodyIndex, shapes_, shapeIndex );
     ++shapeCount_;
 
-    return shapeId;
+    return MakeShapeId( shapeIndex );
 }
 
-void World::DestroyShape( std::int32_t shapeId )
+void World::DestroyShape( ShapeId shapeId )
 {
-    assert( shapeId >= 0 );
-    assert( static_cast<std::size_t>( shapeId ) < shapes_.size() );
+    DestroyShapeByIndex( GetShapeIndex( shapeId ) );
+}
+
+void World::DestroyShapeByIndex( std::int32_t shapeIndex )
+{
+    assert( shapeIndex >= 0 );
+    assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
     assert( shapeCount_ > 0 );
 
-    Shape& shape = shapes_[shapeId];
+    Shape& shape = shapes_[shapeIndex];
 
     assert( shape.bodyId != Shape::NULL_INDEX );
     assert( shape.proxyKey != Shape::NULL_INDEX );
@@ -166,11 +270,11 @@ void World::DestroyShape( std::int32_t shapeId )
     // Sensor 저장소는 아직 구현하지 않았으므로 현재는 일반 collision Shape만 제거함.
     assert( shape.sensorIndex == Shape::NULL_INDEX );
 
-    const std::int32_t bodyId = shape.bodyId;
-    Body& body = bodies_[bodyId];
+    const std::int32_t bodyIndex = shape.bodyId;
+    Body& body = bodies_[bodyIndex];
 
     // Box2D처럼 먼저 Body의 Shape list에서 분리함.
-    UnlinkShape( body, bodyId, shapes_, shapeId );
+    UnlinkShape( body, bodyIndex, shapes_, shapeIndex );
 
     // 더 이상 BroadPhase 후보가 되지 않도록 proxy를 제거함.
     broadPhase_.DestroyProxy( shape.proxyKey );
@@ -195,27 +299,29 @@ void World::DestroyShape( std::int32_t shapeId )
         // DestroyContact가 list를 수정하므로 다음 key를 먼저 저장함.
         contactKey = contact.edges[edgeIndex].nextKey;
 
-        if( contact.shapeIdA == shapeId ||
-            contact.shapeIdB == shapeId )
+        if( contact.shapeIdA == shapeIndex ||
+            contact.shapeIdB == shapeIndex )
         {
             DestroyContact( contactId );
         }
     }
 
-    // slot index는 유지하고 free-list에 연결해 다음 CreateShape에서 재사용함.
+    const std::uint16_t generation = shape.generation;
+
+    // generation은 보존하고 slot만 free-list에 반환함.
     shape = {};
+    shape.generation = generation;
     shape.nextFreeId = shapeFreeList_;
-    shapeFreeList_ = shapeId;
+    shapeFreeList_ = shapeIndex;
 
     --shapeCount_;
 }
 
 
-void World::SetBodyTransform( std::int32_t bodyId, transform2 transform )
+void World::SetBodyTransform( BodyId bodyId, transform2 transform )
 {
-    assert( bodyId >= 0 );
-    assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
-    assert( bodies_[bodyId].bodyId == bodyId );
+    const std::int32_t bodyIndex =
+        GetBodyIndex( bodyId );
 
     // transform이 NaN / infinity를 포함하면 tree AABB까지 오염되므로 입구에서 차단함.
     assert( std::isfinite( transform.position.x ) );
@@ -223,7 +329,7 @@ void World::SetBodyTransform( std::int32_t bodyId, transform2 transform )
     assert( std::isfinite( transform.rotation.c ) );
     assert( std::isfinite( transform.rotation.s ) );
 
-    Body& body = bodies_[bodyId];
+    Body& body = bodies_[bodyIndex];
     body.transform = transform;
 
     std::int32_t shapeId = body.headShapeId;
@@ -237,7 +343,7 @@ void World::SetBodyTransform( std::int32_t bodyId, transform2 transform )
 
         Shape& shape = shapes_[shapeId];
 
-        assert( shape.bodyId == bodyId );
+        assert( shape.bodyId == bodyIndex );
 
         const aabb2 worldAABB = ComputeShapeAABB( shape.geometry, body.transform );
 
@@ -256,23 +362,15 @@ void World::SetBodyTransform( std::int32_t bodyId, transform2 transform )
     assert( visitedCount == body.shapeCount );
 }
 
-const Body& World::GetBody( std::int32_t bodyId ) const
+const Body& World::GetBody( BodyId bodyId ) const
 {
-    assert( bodyId >= 0 );
-    assert( static_cast<std::size_t>( bodyId ) < bodies_.size() );
-    assert( bodies_[bodyId].bodyId == bodyId );
-
-    return bodies_[bodyId];
+    return bodies_[GetBodyIndex( bodyId )];
 }
 
 
-const Shape& World::GetShape( std::int32_t shapeId ) const
+const Shape& World::GetShape( ShapeId shapeId ) const
 {
-    assert( shapeId >= 0 );
-    assert( static_cast<std::size_t>( shapeId ) < shapes_.size() );
-
-    assert( shapes_[shapeId].bodyId != Shape::NULL_INDEX );
-    return shapes_[shapeId];
+    return shapes_[GetShapeIndex( shapeId )];
 }
 
 
