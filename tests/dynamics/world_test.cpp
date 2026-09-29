@@ -231,6 +231,195 @@ int main()
         assert( world.GetBodyRotationalInertia( staticBody ) == 0.0f );
     }
 
+    // Linear impulse는 timeStep 없이 즉시 COM velocity를 변경함.
+    {
+        World world{};
+        world.SetGravity( {} );
+
+        const BodyId bodyId =
+            world.CreateBody( BodyType::Dynamic );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f },
+            {},
+            2.0f
+        );
+
+        const float mass =
+            world.GetBodyMass( bodyId );
+
+        // J = M * 3 이므로
+        //
+        //     DeltaV = J / M = 3
+        world.ApplyLinearImpulseToCenter(
+            bodyId,
+            { mass * 3.0f, 0.0f }
+        );
+
+        // Step을 호출하지 않아도 impulse는 즉시 velocity에 반영됨.
+        assert(
+            std::fabs(
+                world.GetBodyLinearVelocity( bodyId ).x -
+                3.0f
+            ) < epsilon
+        );
+        assert( world.GetBodyAngularVelocity( bodyId ) == 0.0f );
+
+        world.Step( 0.5f );
+
+        // impulse는 force처럼 누적되어 다시 적용되지 않고
+        // 이미 바뀐 velocity만 position 적분에 사용됨.
+        assert(
+            std::fabs(
+                world.GetBodyLinearVelocity( bodyId ).x -
+                3.0f
+            ) < epsilon
+        );
+        assert(
+            std::fabs(
+                world.GetBodyTransform( bodyId ).position.x -
+                1.5f
+            ) < epsilon
+        );
+    }
+
+    // COM에서 벗어난 point의 linear impulse는 선속도와 각속도를 동시에 변경함.
+    {
+        World world{};
+        world.SetGravity( {} );
+
+        const BodyId bodyId =
+            world.CreateBody( BodyType::Dynamic );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f }
+        );
+
+        const float mass =
+            world.GetBodyMass( bodyId );
+
+        const float inertia =
+            world.GetBodyRotationalInertia( bodyId );
+
+        /*
+        * point = (1, 0), impulse = (0, I*2)
+        *
+        *     r = (1, 0)
+        *
+        *     angularImpulse
+        *         = r x J
+        *         = I * 2
+        *
+        *     DeltaW
+        *         = angularImpulse / I
+        *         = 2 rad/s
+        */
+        world.ApplyLinearImpulse(
+            bodyId,
+            { 0.0f, inertia * 2.0f },
+            { 1.0f, 0.0f }
+        );
+
+        assert(
+            std::fabs(
+                world.GetBodyAngularVelocity( bodyId ) -
+                2.0f
+            ) < epsilon
+        );
+
+        // 같은 impulse 자체도 COM 선운동량을 바꾸므로 +Y velocity가 생김.
+        assert(
+            std::fabs(
+                world.GetBodyLinearVelocity( bodyId ).y -
+                ( inertia * 2.0f / mass )
+            ) < epsilon
+        );
+    }
+
+    // Angular impulse는 선속도에 영향을 주지 않고 각속도만 즉시 변경함.
+    {
+        World world{};
+        world.SetGravity( {} );
+
+        const BodyId bodyId =
+            world.CreateBody( BodyType::Dynamic );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f }
+        );
+
+        const float inertia =
+            world.GetBodyRotationalInertia( bodyId );
+
+        // L = I * 4 이므로
+        //
+        //     DeltaW = L / I = 4 rad/s
+        world.ApplyAngularImpulse(
+            bodyId,
+            inertia * 4.0f
+        );
+
+        assert(
+            std::fabs(
+                world.GetBodyAngularVelocity( bodyId ) -
+                4.0f
+            ) < epsilon
+        );
+        assert( world.GetBodyLinearVelocity( bodyId ).x == 0.0f );
+        assert( world.GetBodyLinearVelocity( bodyId ).y == 0.0f );
+    }
+
+    // Static / Kinematic Body는 impulse에 의해 velocity가 바뀌지 않음.
+    {
+        World world{};
+        world.SetGravity( {} );
+
+        const BodyId staticBody =
+            world.CreateBody( BodyType::Static );
+
+        const BodyId kinematicBody =
+            world.CreateBody( BodyType::Kinematic );
+
+        world.SetBodyLinearVelocity(
+            kinematicBody,
+            { 1.0f, 2.0f }
+        );
+        world.SetBodyAngularVelocity(
+            kinematicBody,
+            3.0f
+        );
+
+        world.ApplyLinearImpulseToCenter(
+            staticBody,
+            { 100.0f, 100.0f }
+        );
+        world.ApplyAngularImpulse(
+            staticBody,
+            100.0f
+        );
+
+        world.ApplyLinearImpulse(
+            kinematicBody,
+            { 100.0f, 100.0f },
+            { 10.0f, 0.0f }
+        );
+        world.ApplyAngularImpulse(
+            kinematicBody,
+            100.0f
+        );
+
+        assert( world.GetBodyLinearVelocity( staticBody ).x == 0.0f );
+        assert( world.GetBodyLinearVelocity( staticBody ).y == 0.0f );
+        assert( world.GetBodyAngularVelocity( staticBody ) == 0.0f );
+
+        assert( world.GetBodyLinearVelocity( kinematicBody ).x == 1.0f );
+        assert( world.GetBodyLinearVelocity( kinematicBody ).y == 2.0f );
+        assert( world.GetBodyAngularVelocity( kinematicBody ) == 3.0f );
+    }
+
     // 기본 gravity는 Dynamic Body의 COM velocity에만 적용됨.
     {
         World world{};
