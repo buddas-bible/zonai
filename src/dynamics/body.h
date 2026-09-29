@@ -23,6 +23,12 @@ struct Body
     // Body의 물리 동작 종류.
     BodyType type = BodyType::Static;
 
+    // Dynamic Body에 연결된 Shape 질량의 합.
+    float mass = 0.0f;
+
+    // Dynamic Body의 center of mass 기준 회전 관성.
+    float inertia = 0.0f;
+
     // [contactId : edgeIndex] key로 연결된 첫 Contact.
     // 하위 1bit는 Contact의 어느 edge가 이 Body에 연결됐는지 나타냄.
     std::int32_t headContactKey = NULL_INDEX;
