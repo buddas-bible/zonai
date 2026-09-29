@@ -150,6 +150,158 @@ int main()
         assert( world.GetBodyAngularVelocity( reusedBody ) == 0.0f );
     }
 
+    // 초기 Step은 velocity로 Dynamic / Kinematic transform을 적분하고 proxy를 동기화함.
+    {
+        World world{};
+
+        const BodyId staticBody =
+            world.CreateBody(
+                BodyType::Static,
+                {
+                    { 5.0f, 2.0f },
+                    {}
+                }
+            );
+
+        const BodyId dynamicBody =
+            world.CreateBody( BodyType::Dynamic );
+
+        const ShapeId dynamicShape =
+            world.CreateShape(
+                dynamicBody,
+                circle2{ { 1.0f, 0.0f }, 0.25f }
+            );
+
+        const BodyId kinematicBody =
+            world.CreateBody(
+                BodyType::Kinematic,
+                {
+                    { -2.0f, 3.0f },
+                    {}
+                }
+            );
+
+        world.SetBodyLinearVelocity( staticBody, { 100.0f, 100.0f } );
+        world.SetBodyAngularVelocity( staticBody, 10.0f );
+
+        world.SetBodyLinearVelocity( dynamicBody, { 2.0f, -1.0f } );
+        world.SetBodyAngularVelocity(
+            dynamicBody,
+            1.57079632679f
+        );
+
+        world.SetBodyLinearVelocity( kinematicBody, { 0.0f, 4.0f } );
+
+        world.Step( 0.5f );
+
+        const transform2 staticTransform =
+            world.GetBodyTransform( staticBody );
+
+        assert( std::fabs( staticTransform.position.x - 5.0f ) < epsilon );
+        assert( std::fabs( staticTransform.position.y - 2.0f ) < epsilon );
+
+        const transform2 dynamicTransform =
+            world.GetBodyTransform( dynamicBody );
+
+        assert( std::fabs( dynamicTransform.position.x - 1.0f ) < epsilon );
+        assert( std::fabs( dynamicTransform.position.y + 0.5f ) < epsilon );
+
+        const float sqrtHalf = std::sqrt( 0.5f );
+
+        assert( std::fabs( dynamicTransform.rotation.c - sqrtHalf ) < epsilon );
+        assert( std::fabs( dynamicTransform.rotation.s - sqrtHalf ) < epsilon );
+
+        const transform2 kinematicTransform =
+            world.GetBodyTransform( kinematicBody );
+
+        assert( std::fabs( kinematicTransform.position.x + 2.0f ) < epsilon );
+        assert( std::fabs( kinematicTransform.position.y - 5.0f ) < epsilon );
+
+        // local (1, 0)인 circle 중심도 Body 회전에 따라 움직였는지 proxy AABB로 확인함.
+        const Shape& movedShape = world.GetShape( dynamicShape );
+        const aabb2& movedAABB =
+            world.GetBroadPhase()
+                .GetTree( BodyType::Dynamic )
+                .GetProxyAABB( GetProxyId( movedShape.proxyKey ) );
+
+        const float expectedCenterX = 1.0f + sqrtHalf;
+        const float expectedCenterY = -0.5f + sqrtHalf;
+
+        assert(
+            std::fabs(
+                movedAABB.min.x -
+                ( expectedCenterX - 0.25f )
+            ) < epsilon
+        );
+        assert(
+            std::fabs(
+                movedAABB.max.y -
+                ( expectedCenterY + 0.25f )
+            ) < epsilon
+        );
+    }
+
+    // Step 뒤에는 BroadPhase pair와 Contact도 새 transform 기준으로 갱신됨.
+    {
+        World world{};
+
+        const BodyId staticBody =
+            world.CreateBody(
+                BodyType::Static,
+                {
+                    { 2.5f, 0.0f },
+                    {}
+                }
+            );
+
+        const ShapeId staticShape =
+            world.CreateShape(
+                staticBody,
+                circle2{ {}, 1.0f }
+            );
+
+        const BodyId dynamicBody =
+            world.CreateBody( BodyType::Dynamic );
+
+        const ShapeId dynamicShape =
+            world.CreateShape(
+                dynamicBody,
+                circle2{ {}, 1.0f }
+            );
+
+        world.UpdateCollisions(
+            []( const ContactData& )
+            {
+            }
+        );
+
+        assert( world.GetContactCount() == 0 );
+
+        world.SetBodyLinearVelocity(
+            dynamicBody,
+            { 2.0f, 0.0f }
+        );
+
+        world.Step( 0.5f );
+
+        assert( world.GetContactCount() == 1 );
+        assert(
+            world.GetBroadPhase().HasPair(
+                PairKey( staticShape, dynamicShape )
+            )
+        );
+
+        std::array<ContactData, 1> contacts{};
+
+        assert(
+            world.GetBodyContactData(
+                dynamicBody,
+                contacts
+            ) == 1
+        );
+        assert( contacts[0].manifold.pointCount > 0 );
+    }
+
     // Shape geometry는 Body local space에 저장되고 proxy AABB는 world space로 계산됨.
     {
         World world{};
