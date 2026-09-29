@@ -143,6 +143,7 @@ BodyId World::CreateBody( BodyType type, transform2 transform )
         assert( freeBody.headShapeId == Body::NULL_INDEX );
         assert( freeBody.headContactKey == Body::NULL_INDEX );
         assert( bodySims_.size() == bodies_.size() );
+        assert( bodyStates_.size() == bodies_.size() );
         assert( bodySims_[bodyIndex].bodyId == BodySim::NULL_INDEX );
 
         bodyFreeList_ = freeBody.nextFreeId;
@@ -157,6 +158,7 @@ BodyId World::CreateBody( BodyType type, transform2 transform )
         bodyIndex = static_cast<std::int32_t>( bodies_.size() );
         bodies_.push_back( {} );
         bodySims_.push_back( {} );
+        bodyStates_.push_back( {} );
     }
 
     Body& body = bodies_[bodyIndex];
@@ -175,6 +177,9 @@ BodyId World::CreateBody( BodyType type, transform2 transform )
     bodySim = {};
     bodySim.bodyId = bodyIndex;
     bodySim.transform = transform;
+
+    assert( bodyStates_.size() == bodies_.size() );
+    bodyStates_[bodyIndex] = {};
 
     ++bodyCount_;
 
@@ -228,6 +233,11 @@ void World::DestroyBodyByIndex( std::int32_t bodyIndex )
 
     // simulation 데이터도 함께 비워 재사용 slot에 이전 transform이 남지 않게 함.
     bodySim = {};
+
+    assert( bodyStates_.size() == bodies_.size() );
+
+    // 운동 상태도 함께 초기화해 재사용 slot에 이전 Body 속도가 남지 않게 함.
+    bodyStates_[bodyIndex] = {};
 
     // generation은 보존하고 slot만 free-list에 반환함.
     body = {};
@@ -441,6 +451,63 @@ transform2 World::GetBodyTransform( BodyId bodyId ) const
     assert( bodySim.bodyId == bodyIndex );
 
     return bodySim.transform;
+}
+
+void World::SetBodyLinearVelocity(
+    BodyId bodyId,
+    vec2 linearVelocity )
+{
+    assert( std::isfinite( linearVelocity.x ) );
+    assert( std::isfinite( linearVelocity.y ) );
+
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+    const Body& body = bodies_[bodyIndex];
+
+    // Box2D와 같이 정적 Body에는 velocity를 부여하지 않음.
+    if( body.type == BodyType::Static )
+    {
+        return;
+    }
+
+    assert( bodyStates_.size() == bodies_.size() );
+    bodyStates_[bodyIndex].linearVelocity = linearVelocity;
+}
+
+vec2 World::GetBodyLinearVelocity( BodyId bodyId ) const
+{
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( bodyStates_.size() == bodies_.size() );
+
+    // Static Body의 state도 항상 zero로 유지되므로 그대로 반환할 수 있음.
+    return bodyStates_[bodyIndex].linearVelocity;
+}
+
+void World::SetBodyAngularVelocity(
+    BodyId bodyId,
+    float angularVelocity )
+{
+    assert( std::isfinite( angularVelocity ) );
+
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+    const Body& body = bodies_[bodyIndex];
+
+    // Box2D와 같이 정적 Body에는 angular velocity를 부여하지 않음.
+    if( body.type == BodyType::Static )
+    {
+        return;
+    }
+
+    assert( bodyStates_.size() == bodies_.size() );
+    bodyStates_[bodyIndex].angularVelocity = angularVelocity;
+}
+
+float World::GetBodyAngularVelocity( BodyId bodyId ) const
+{
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( bodyStates_.size() == bodies_.size() );
+    return bodyStates_[bodyIndex].angularVelocity;
 }
 
 
