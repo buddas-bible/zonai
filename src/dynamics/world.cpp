@@ -142,6 +142,8 @@ BodyId World::CreateBody( BodyType type, transform2 transform )
         assert( freeBody.bodyId == Body::NULL_INDEX );
         assert( freeBody.headShapeId == Body::NULL_INDEX );
         assert( freeBody.headContactKey == Body::NULL_INDEX );
+        assert( bodySims_.size() == bodies_.size() );
+        assert( bodySims_[bodyIndex].bodyId == BodySim::NULL_INDEX );
 
         bodyFreeList_ = freeBody.nextFreeId;
     }
@@ -154,6 +156,7 @@ BodyId World::CreateBody( BodyType type, transform2 transform )
 
         bodyIndex = static_cast<std::int32_t>( bodies_.size() );
         bodies_.push_back( {} );
+        bodySims_.push_back( {} );
     }
 
     Body& body = bodies_[bodyIndex];
@@ -165,7 +168,13 @@ BodyId World::CreateBody( BodyType type, transform2 transform )
     body.bodyId = bodyIndex;
     body.generation = generation;
     body.type = type;
-    body.transform = transform;
+
+    assert( bodySims_.size() == bodies_.size() );
+
+    BodySim& bodySim = bodySims_[bodyIndex];
+    bodySim = {};
+    bodySim.bodyId = bodyIndex;
+    bodySim.transform = transform;
 
     ++bodyCount_;
 
@@ -212,6 +221,13 @@ void World::DestroyBodyByIndex( std::int32_t bodyIndex )
     assert( body.headContactKey == Body::NULL_INDEX );
 
     const std::uint16_t generation = body.generation;
+
+    assert( bodySims_.size() == bodies_.size() );
+    BodySim& bodySim = bodySims_[bodyIndex];
+    assert( bodySim.bodyId == bodyIndex );
+
+    // simulation 데이터도 함께 비워 재사용 slot에 이전 transform이 남지 않게 함.
+    bodySim = {};
 
     // generation은 보존하고 slot만 free-list에 반환함.
     body = {};
@@ -271,8 +287,12 @@ ShapeId World::CreateShape(
 
     Body& body = bodies_[bodyIndex];
 
+    assert( bodySims_.size() == bodies_.size() );
+    const BodySim& bodySim = bodySims_[bodyIndex];
+    assert( bodySim.bodyId == bodyIndex );
+
     const aabb2 worldAABB =
-        ComputeShapeAABB( storedShape.geometry, body.transform );
+        ComputeShapeAABB( storedShape.geometry, bodySim.transform );
 
     // Box2D의 기본 Shape 생성처럼 static Shape도 즉시 pair 탐색 대상이 되게 함.
     storedShape.proxyKey =
@@ -369,7 +389,12 @@ void World::SetBodyTransform( BodyId bodyId, transform2 transform )
     assert( std::isfinite( transform.rotation.s ) );
 
     Body& body = bodies_[bodyIndex];
-    body.transform = transform;
+
+    assert( bodySims_.size() == bodies_.size() );
+    BodySim& bodySim = bodySims_[bodyIndex];
+    assert( bodySim.bodyId == bodyIndex );
+
+    bodySim.transform = transform;
 
     std::int32_t shapeId = body.headShapeId;
     std::int32_t visitedCount = 0;
@@ -384,7 +409,7 @@ void World::SetBodyTransform( BodyId bodyId, transform2 transform )
 
         assert( shape.bodyId == bodyIndex );
 
-        const aabb2 worldAABB = ComputeShapeAABB( shape.geometry, body.transform );
+        const aabb2 worldAABB = ComputeShapeAABB( shape.geometry, bodySim.transform );
 
         // disabled Body 개념은 아직 없지만 Box2D와 같은 수명 규칙을 위해
         // proxy가 실제로 존재하는 Shape만 BroadPhase에서 이동시킴.
@@ -404,6 +429,18 @@ void World::SetBodyTransform( BodyId bodyId, transform2 transform )
 const Body& World::GetBody( BodyId bodyId ) const
 {
     return bodies_[GetBodyIndex( bodyId )];
+}
+
+transform2 World::GetBodyTransform( BodyId bodyId ) const
+{
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+
+    const BodySim& bodySim = bodySims_[bodyIndex];
+    assert( bodySim.bodyId == bodyIndex );
+
+    return bodySim.transform;
 }
 
 
@@ -564,7 +601,10 @@ ContactData World::MakeContactData( std::int32_t contactIndex ) const
     assert( shapeA.bodyId >= 0 );
     assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
 
-    const Body& bodyA = bodies_[shapeA.bodyId];
+    assert( bodySims_.size() == bodies_.size() );
+
+    const BodySim& bodySimA = bodySims_[shapeA.bodyId];
+    assert( bodySimA.bodyId == shapeA.bodyId );
 
     ContactData data{};
     data.contactId = MakeContactId( contactIndex );
@@ -573,7 +613,7 @@ ContactData World::MakeContactData( std::int32_t contactIndex ) const
     data.manifold =
         ToWorldManifold(
             contact.manifold,
-            bodyA.transform
+            bodySimA.transform
         );
 
     return data;
