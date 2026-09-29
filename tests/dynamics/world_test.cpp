@@ -1,3 +1,4 @@
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -551,6 +552,155 @@ int main()
         ) );
         assert( world.GetBody( groundBody ).contactCount == 1 );
         assert( world.GetBody( newBody ).contactCount == 1 );
+    }
+
+    // Body / Shape Contact query는 capacity와 실제 touching 수를 구분함.
+    {
+        World world{};
+
+        const BodyId dynamicBody =
+            world.CreateBody( BodyType::Dynamic );
+
+        const ShapeId touchingShape =
+            world.CreateShape(
+                dynamicBody,
+                circle2{ {}, 1.0f }
+            );
+
+        const ShapeId nonTouchingShape =
+            world.CreateShape(
+                dynamicBody,
+                circle2{ { 10.0f, 0.0f }, 1.0f }
+            );
+
+        const BodyId touchingStaticBody =
+            world.CreateBody(
+                BodyType::Static,
+                {
+                    { 1.5f, 0.0f },
+                    {}
+                }
+            );
+
+        const ShapeId touchingStaticShape =
+            world.CreateShape(
+                touchingStaticBody,
+                circle2{ {}, 1.0f }
+            );
+
+        const BodyId overlapStaticBody =
+            world.CreateBody(
+                BodyType::Static,
+                {
+                    { 11.5f, 1.5f },
+                    {}
+                }
+            );
+
+        const ShapeId overlapStaticShape =
+            world.CreateShape(
+                overlapStaticBody,
+                circle2{ {}, 1.0f }
+            );
+
+        int touchingCallbackCount = 0;
+
+        world.UpdateCollisions(
+            [&]( const ContactData& )
+            {
+                ++touchingCallbackCount;
+            }
+        );
+
+        // dynamicBody에는 AABB Contact가 2개지만 실제 geometry 접촉은 1개뿐임.
+        assert( world.GetContactCount() == 2 );
+        assert( world.GetBody( dynamicBody ).contactCount == 2 );
+        assert( touchingCallbackCount == 1 );
+
+        const std::size_t bodyCapacity =
+            world.GetBodyContactCapacity( dynamicBody );
+
+        assert( bodyCapacity == 2 );
+
+        std::array<ContactData, 2> bodyContacts{};
+
+        const std::size_t bodyContactCount =
+            world.GetBodyContactData(
+                dynamicBody,
+                bodyContacts
+            );
+
+        assert( bodyContactCount == 1 );
+        assert( bodyContacts[0].manifold.pointCount > 0 );
+
+        const bool bodyHasTouchingPair =
+            ( bodyContacts[0].shapeIdA == touchingShape &&
+              bodyContacts[0].shapeIdB == touchingStaticShape ) ||
+            ( bodyContacts[0].shapeIdA == touchingStaticShape &&
+              bodyContacts[0].shapeIdB == touchingShape );
+
+        assert( bodyHasTouchingPair );
+
+        // Shape capacity도 Body contactCount를 그대로 사용하므로 보수적으로 2임.
+        assert( world.GetShapeContactCapacity( touchingShape ) == 2 );
+        assert( world.GetShapeContactCapacity( nonTouchingShape ) == 2 );
+
+        std::array<ContactData, 2> touchingContacts{};
+        const std::size_t touchingCount =
+            world.GetShapeContactData(
+                touchingShape,
+                touchingContacts
+            );
+
+        assert( touchingCount == 1 );
+        assert(
+            touchingContacts[0].shapeIdA == touchingShape ||
+            touchingContacts[0].shapeIdB == touchingShape
+        );
+
+        std::array<ContactData, 2> nonTouchingContacts{};
+        const std::size_t nonTouchingCount =
+            world.GetShapeContactData(
+                nonTouchingShape,
+                nonTouchingContacts
+            );
+
+        // AABB Contact는 존재하지만 manifold가 비어 있으므로 public query에서는 제외됨.
+        assert( nonTouchingCount == 0 );
+
+        // 정적 Body/Shape 쪽에서도 같은 touching Contact를 조회할 수 있음.
+        assert( world.GetBodyContactCapacity( touchingStaticBody ) == 1 );
+        assert( world.GetShapeContactCapacity( touchingStaticShape ) == 1 );
+
+        std::array<ContactData, 1> staticContacts{};
+        const std::size_t staticCount =
+            world.GetBodyContactData(
+                touchingStaticBody,
+                staticContacts
+            );
+
+        assert( staticCount == 1 );
+        assert( staticContacts[0].contactId == bodyContacts[0].contactId );
+
+        // 두 번째 정적 Shape는 AABB overlap만 있으므로 capacity 1, 실제 반환 0.
+        assert( world.GetBodyContactCapacity( overlapStaticBody ) == 1 );
+        assert( world.GetShapeContactCapacity( overlapStaticShape ) == 1 );
+
+        std::array<ContactData, 1> overlapContacts{};
+        assert(
+            world.GetShapeContactData(
+                overlapStaticShape,
+                overlapContacts
+            ) == 0
+        );
+
+        // output span이 비어 있으면 아무 것도 쓰지 않고 0을 반환함.
+        assert(
+            world.GetBodyContactData(
+                dynamicBody,
+                std::span<ContactData>{}
+            ) == 0
+        );
     }
 
     // Box2D처럼 segment-segment 조합은 BroadPhase 후보여도 Contact를 만들지 않음.
