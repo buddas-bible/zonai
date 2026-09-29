@@ -80,7 +80,32 @@ public:
     [[nodiscard]] float GetBodyRotationalInertia( BodyId bodyId ) const;
     [[nodiscard]] vec2 GetBodyLocalCenter( BodyId bodyId ) const;
 
-    // 현재 velocity로 non-static Body를 적분하고 proxy / Contact 상태를 갱신함.
+    // World 전체 Dynamic Body에 적용되는 중력 가속도.
+    void SetGravity( vec2 gravity );
+    [[nodiscard]] vec2 GetGravity() const noexcept;
+
+    // Dynamic Body에 world-space 힘을 누적함.
+    // point가 center of mass에서 벗어나 있으면 torque도 함께 누적됨.
+    void ApplyForce(
+        BodyId bodyId,
+        vec2 force,
+        vec2 point );
+
+    // center of mass에 힘을 가해 회전 없이 선가속도만 만듦.
+    void ApplyForceToCenter(
+        BodyId bodyId,
+        vec2 force );
+
+    // Dynamic Body에 z축 torque를 누적함.
+    void ApplyTorque(
+        BodyId bodyId,
+        float torque );
+
+    // 아직 Step에서 소비되지 않은 누적 force / torque를 직접 제거함.
+    void ClearForces( BodyId bodyId );
+
+    // force / gravity로 velocity를 갱신한 뒤 non-static Body를 적분하고
+    // proxy / Contact 상태를 갱신함. constraint solver는 아직 포함하지 않음.
     // 아직 force / mass / constraint solver는 포함하지 않는 초기 simulation step임.
     void Step( float timeStep );
 
@@ -315,6 +340,9 @@ private:
 
     // contacts_.size()와 별개인 현재 활성 Contact 개수.
     std::size_t contactCount_ = 0;
+
+    // 모든 Dynamic Body에 적용되는 world-space 중력 가속도.
+    vec2 gravity_{ 0.0f, -10.0f };
 
     // 모든 Shape의 broad-phase proxy를 body type별 DynamicTree에 관리함.
     BroadPhase broadPhase_;
