@@ -177,6 +177,7 @@ BodyId World::CreateBody( BodyType type, transform2 transform )
     bodySim = {};
     bodySim.bodyId = bodyIndex;
     bodySim.transform = transform;
+    bodySim.center = transform.position;
 
     assert( bodyStates_.size() == bodies_.size() );
     bodyStates_[bodyIndex] = {};
@@ -252,12 +253,15 @@ void World::DestroyBodyByIndex( std::int32_t bodyIndex )
 ShapeId World::CreateShape(
     BodyId bodyId,
     ShapeGeometry geometry,
-    Filter filter )
+    Filter filter,
+    float density )
 {
     const std::int32_t bodyIndex =
         GetBodyIndex( bodyId );
 
     assert( !std::holds_alternative<std::monostate>( geometry ) );
+    assert( std::isfinite( density ) );
+    assert( density >= 0.0f );
 
     std::int32_t shapeIndex = Shape::NULL_INDEX;
 
@@ -293,6 +297,7 @@ ShapeId World::CreateShape(
     storedShape = {};
     storedShape.generation = generation;
     storedShape.geometry = std::move( geometry );
+    storedShape.density = density;
     storedShape.filter = filter;
 
     Body& body = bodies_[bodyIndex];
@@ -316,12 +321,33 @@ ShapeId World::CreateShape(
     LinkShape( body, bodyIndex, shapes_, shapeIndex );
     ++shapeCount_;
 
+    UpdateBodyMassData( bodyIndex );
+
     return MakeShapeId( shapeIndex );
 }
 
 void World::DestroyShape( ShapeId shapeId )
 {
     DestroyShapeByIndex( GetShapeIndex( shapeId ) );
+}
+
+void World::SetShapeDensity( ShapeId shapeId, float density )
+{
+    assert( std::isfinite( density ) );
+    assert( density >= 0.0f );
+
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+    Shape& shape = shapes_[shapeIndex];
+
+    shape.density = density;
+
+    assert( shape.bodyId != Shape::NULL_INDEX );
+    UpdateBodyMassData( shape.bodyId );
+}
+
+float World::GetShapeDensity( ShapeId shapeId ) const
+{
+    return shapes_[GetShapeIndex( shapeId )].density;
 }
 
 void World::DestroyShapeByIndex( std::int32_t shapeIndex )
@@ -375,6 +401,8 @@ void World::DestroyShapeByIndex( std::int32_t shapeIndex )
         }
     }
 
+    UpdateBodyMassData( bodyIndex );
+
     const std::uint16_t generation = shape.generation;
 
     // generation은 보존하고 slot만 free-list에 반환함.
@@ -404,6 +432,8 @@ void World::SetBodyTransform( BodyId bodyId, transform2 transform )
     assert( bodySim.bodyId == bodyIndex );
 
     bodySim.transform = transform;
+    bodySim.center =
+        TransformPoint( bodySim.transform, bodySim.localCenter );
 
     SyncBodyProxies( bodyIndex );
 }
@@ -447,6 +477,97 @@ void World::SyncBodyProxies( std::int32_t bodyIndex )
     }
 
     assert( visitedCount == body.shapeCount );
+}
+
+void World::UpdateBodyMassData( std::int32_t bodyIndex )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+    assert( bodySims_.size() == bodies_.size() );
+
+    Body& body = bodies_[bodyIndex];
+    BodySim& bodySim = bodySims_[bodyIndex];
+
+    assert( body.bodyId == bodyIndex );
+    assert( bodySim.bodyId == bodyIndex );
+
+    body.mass = 0.0f;
+    body.inertia = 0.0f;
+
+    bodySim.invMass = 0.0f;
+    bodySim.invInertia = 0.0f;
+    bodySim.localCenter = {};
+
+    // Static / Kinematic Body는 solver에서 무한 질량으로 취급함.
+    if( body.type != BodyType::Dynamic )
+    {
+        bodySim.center = bodySim.transform.position;
+        return;
+    }
+
+    std::vector<massData2> masses;
+    masses.reserve( static_cast<std::size_t>( body.shapeCount ) );
+
+    vec2 weightedCenter{};
+
+    std::int32_t shapeIndex = body.headShapeId;
+    std::int32_t visitedCount = 0;
+
+    while( shapeIndex != Body::NULL_INDEX )
+    {
+        assert( shapeIndex >= 0 );
+        assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+        assert( visitedCount < body.shapeCount );
+
+        const Shape& shape = shapes_[shapeIndex];
+        assert( shape.bodyId == bodyIndex );
+
+        const massData2 massData = ComputeShapeMass( shape );
+
+        body.mass += massData.mass;
+        weightedCenter += massData.center * massData.mass;
+        masses.push_back( massData );
+
+        shapeIndex = shape.nextShapeId;
+        ++visitedCount;
+    }
+
+    assert( visitedCount == body.shapeCount );
+
+    if( body.mass > 0.0f )
+    {
+        bodySim.invMass = 1.0f / body.mass;
+        bodySim.localCenter =
+            weightedCenter * bodySim.invMass;
+    }
+
+    for( const massData2& massData : masses )
+    {
+        if( massData.mass == 0.0f )
+        {
+            continue;
+        }
+
+        const vec2 offset =
+            bodySim.localCenter - massData.center;
+
+        body.inertia +=
+            massData.rotationalInertia +
+            massData.mass * LengthSquared( offset );
+    }
+
+    assert( body.inertia >= 0.0f );
+
+    if( body.inertia > 0.0f )
+    {
+        bodySim.invInertia = 1.0f / body.inertia;
+    }
+
+    bodySim.center =
+        TransformPoint(
+            bodySim.transform,
+            bodySim.localCenter
+        );
 }
 
 const Body& World::GetBody( BodyId bodyId ) const
@@ -523,6 +644,24 @@ float World::GetBodyAngularVelocity( BodyId bodyId ) const
     return bodyStates_[bodyIndex].angularVelocity;
 }
 
+float World::GetBodyMass( BodyId bodyId ) const
+{
+    return bodies_[GetBodyIndex( bodyId )].mass;
+}
+
+float World::GetBodyRotationalInertia( BodyId bodyId ) const
+{
+    return bodies_[GetBodyIndex( bodyId )].inertia;
+}
+
+vec2 World::GetBodyLocalCenter( BodyId bodyId ) const
+{
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    return bodySims_[bodyIndex].localCenter;
+}
+
 void World::Step( float timeStep )
 {
     assert( std::isfinite( timeStep ) );
@@ -565,6 +704,12 @@ void World::Step( float timeStep )
                     rot2::FromRadians( deltaAngle ) *
                     bodySim.transform.rotation;
             }
+
+            bodySim.center =
+                TransformPoint(
+                    bodySim.transform,
+                    bodySim.localCenter
+                );
 
             SyncBodyProxies( bodyIndex );
         }
