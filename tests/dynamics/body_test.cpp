@@ -50,6 +50,9 @@ int main()
         assert( bodySim.localCenter.y == 0.0f );
         assert( bodySim.center.x == 0.0f );
         assert( bodySim.center.y == 0.0f );
+        assert( bodySim.force.x == 0.0f );
+        assert( bodySim.force.y == 0.0f );
+        assert( bodySim.torque == 0.0f );
         assert( bodySim.invMass == 0.0f );
         assert( bodySim.invInertia == 0.0f );
 
