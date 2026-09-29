@@ -106,7 +106,6 @@ public:
 
     // force / gravity로 velocity를 갱신한 뒤 non-static Body를 적분하고
     // proxy / Contact 상태를 갱신함. constraint solver는 아직 포함하지 않음.
-    // 아직 force / mass / constraint solver는 포함하지 않는 초기 simulation step임.
     void Step( float timeStep );
 
     // null / 범위 / generation / 활성 slot을 모두 확인함.
