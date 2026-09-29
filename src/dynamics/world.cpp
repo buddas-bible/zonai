@@ -398,13 +398,27 @@ void World::SetBodyTransform( BodyId bodyId, transform2 transform )
     assert( std::isfinite( transform.rotation.c ) );
     assert( std::isfinite( transform.rotation.s ) );
 
-    Body& body = bodies_[bodyIndex];
-
     assert( bodySims_.size() == bodies_.size() );
+
     BodySim& bodySim = bodySims_[bodyIndex];
     assert( bodySim.bodyId == bodyIndex );
 
     bodySim.transform = transform;
+
+    SyncBodyProxies( bodyIndex );
+}
+
+void World::SyncBodyProxies( std::int32_t bodyIndex )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+    assert( bodySims_.size() == bodies_.size() );
+
+    const Body& body = bodies_[bodyIndex];
+    const BodySim& bodySim = bodySims_[bodyIndex];
+
+    assert( body.bodyId == bodyIndex );
+    assert( bodySim.bodyId == bodyIndex );
 
     std::int32_t shapeId = body.headShapeId;
     std::int32_t visitedCount = 0;
@@ -419,10 +433,10 @@ void World::SetBodyTransform( BodyId bodyId, transform2 transform )
 
         assert( shape.bodyId == bodyIndex );
 
-        const aabb2 worldAABB = ComputeShapeAABB( shape.geometry, bodySim.transform );
+        const aabb2 worldAABB =
+            ComputeShapeAABB( shape.geometry, bodySim.transform );
 
-        // disabled Body 개념은 아직 없지만 Box2D와 같은 수명 규칙을 위해
-        // proxy가 실제로 존재하는 Shape만 BroadPhase에서 이동시킴.
+        // disabled Body 개념이 들어오면 proxy가 없는 Shape는 그대로 건너뜀.
         if( shape.proxyKey != Shape::NULL_INDEX )
         {
             broadPhase_.MoveProxy( shape.proxyKey, worldAABB );
@@ -432,7 +446,6 @@ void World::SetBodyTransform( BodyId bodyId, transform2 transform )
         ++visitedCount;
     }
 
-    // linked list와 Body의 shapeCount가 서로 일치해야 함.
     assert( visitedCount == body.shapeCount );
 }
 
@@ -508,6 +521,61 @@ float World::GetBodyAngularVelocity( BodyId bodyId ) const
 
     assert( bodyStates_.size() == bodies_.size() );
     return bodyStates_[bodyIndex].angularVelocity;
+}
+
+void World::Step( float timeStep )
+{
+    assert( std::isfinite( timeStep ) );
+    assert( timeStep >= 0.0f );
+
+    assert( bodySims_.size() == bodies_.size() );
+    assert( bodyStates_.size() == bodies_.size() );
+
+    if( timeStep > 0.0f )
+    {
+        for( std::int32_t bodyIndex = 0;
+             bodyIndex < static_cast<std::int32_t>( bodies_.size() );
+             ++bodyIndex )
+        {
+            const Body& body = bodies_[bodyIndex];
+
+            // free slot과 Static Body는 적분하지 않음.
+            if( body.bodyId == Body::NULL_INDEX ||
+                body.type == BodyType::Static )
+            {
+                continue;
+            }
+
+            BodySim& bodySim = bodySims_[bodyIndex];
+            const BodyState& bodyState = bodyStates_[bodyIndex];
+
+            assert( body.bodyId == bodyIndex );
+            assert( bodySim.bodyId == bodyIndex );
+
+            bodySim.transform.position +=
+                bodyState.linearVelocity * timeStep;
+
+            const float deltaAngle =
+                bodyState.angularVelocity * timeStep;
+
+            if( deltaAngle != 0.0f )
+            {
+                // 기존 회전에 이번 step의 delta rotation을 합성함.
+                bodySim.transform.rotation =
+                    rot2::FromRadians( deltaAngle ) *
+                    bodySim.transform.rotation;
+            }
+
+            SyncBodyProxies( bodyIndex );
+        }
+    }
+
+    // 이동 후 AABB pair / manifold를 즉시 최신 상태로 맞춤.
+    UpdateCollisions(
+        []( const ContactData& )
+        {
+        }
+    );
 }
 
 
