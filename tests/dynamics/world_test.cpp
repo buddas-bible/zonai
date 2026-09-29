@@ -150,6 +150,87 @@ int main()
         assert( world.GetBodyAngularVelocity( reusedBody ) == 0.0f );
     }
 
+    // Dynamic Body의 mass data는 연결된 Shape density / geometry를 합산해 계산됨.
+    {
+        World world{};
+
+        const BodyId dynamicBody =
+            world.CreateBody( BodyType::Dynamic );
+
+        const ShapeId rightCircle =
+            world.CreateShape(
+                dynamicBody,
+                circle2{ { 2.0f, 0.0f }, 1.0f },
+                {},
+                2.0f
+            );
+
+        constexpr float pi = 3.14159265358979323846f;
+
+        assert( std::fabs( world.GetShapeDensity( rightCircle ) - 2.0f ) < epsilon );
+        assert( std::fabs( world.GetBodyMass( dynamicBody ) - 2.0f * pi ) < epsilon );
+        assert( std::fabs( world.GetBodyLocalCenter( dynamicBody ).x - 2.0f ) < epsilon );
+        assert( std::fabs( world.GetBodyLocalCenter( dynamicBody ).y ) < epsilon );
+        assert(
+            std::fabs(
+                world.GetBodyRotationalInertia( dynamicBody ) -
+                pi
+            ) < epsilon
+        );
+
+        const ShapeId leftCircle =
+            world.CreateShape(
+                dynamicBody,
+                circle2{ { -2.0f, 0.0f }, 1.0f },
+                {},
+                2.0f
+            );
+
+        assert( std::fabs( world.GetBodyMass( dynamicBody ) - 4.0f * pi ) < epsilon );
+        assert( std::fabs( world.GetBodyLocalCenter( dynamicBody ).x ) < epsilon );
+        assert( std::fabs( world.GetBodyLocalCenter( dynamicBody ).y ) < epsilon );
+        assert(
+            std::fabs(
+                world.GetBodyRotationalInertia( dynamicBody ) -
+                18.0f * pi
+            ) < epsilon
+        );
+
+        // density 0 Shape는 collision geometry로는 남지만 Body mass에는 기여하지 않음.
+        world.SetShapeDensity( leftCircle, 0.0f );
+
+        assert( world.GetShapeDensity( leftCircle ) == 0.0f );
+        assert( std::fabs( world.GetBodyMass( dynamicBody ) - 2.0f * pi ) < epsilon );
+        assert( std::fabs( world.GetBodyLocalCenter( dynamicBody ).x - 2.0f ) < epsilon );
+        assert(
+            std::fabs(
+                world.GetBodyRotationalInertia( dynamicBody ) -
+                pi
+            ) < epsilon
+        );
+
+        world.DestroyShape( rightCircle );
+
+        assert( world.GetBodyMass( dynamicBody ) == 0.0f );
+        assert( world.GetBodyRotationalInertia( dynamicBody ) == 0.0f );
+        assert( world.GetBodyLocalCenter( dynamicBody ).x == 0.0f );
+        assert( world.GetBodyLocalCenter( dynamicBody ).y == 0.0f );
+
+        // Static / Kinematic은 Shape density와 무관하게 solver mass가 0임.
+        const BodyId staticBody =
+            world.CreateBody( BodyType::Static );
+
+        (void)world.CreateShape(
+            staticBody,
+            circle2{ {}, 2.0f },
+            {},
+            5.0f
+        );
+
+        assert( world.GetBodyMass( staticBody ) == 0.0f );
+        assert( world.GetBodyRotationalInertia( staticBody ) == 0.0f );
+    }
+
     // 초기 Step은 velocity로 Dynamic / Kinematic transform을 적분하고 proxy를 동기화함.
     {
         World world{};
