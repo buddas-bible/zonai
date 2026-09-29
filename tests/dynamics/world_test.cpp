@@ -74,13 +74,21 @@ int main()
         const Body& dynamic = world.GetBody( dynamicBody );
         assert( dynamic.bodyId == Index( dynamicBody ) );
         assert( dynamic.type == BodyType::Dynamic );
-        assert( dynamic.transform.position.x == 3.0f );
-        assert( dynamic.transform.position.y == -2.0f );
+
+        const transform2 dynamicTransform =
+            world.GetBodyTransform( dynamicBody );
+
+        assert( dynamicTransform.position.x == 3.0f );
+        assert( dynamicTransform.position.y == -2.0f );
 
         const Body& kinematic = world.GetBody( kinematicBody );
         assert( kinematic.type == BodyType::Kinematic );
-        assert( kinematic.transform.position.x == -4.0f );
-        assert( kinematic.transform.position.y == 1.5f );
+
+        const transform2 kinematicTransform =
+            world.GetBodyTransform( kinematicBody );
+
+        assert( kinematicTransform.position.x == -4.0f );
+        assert( kinematicTransform.position.y == 1.5f );
     }
 
     // Shape geometry는 Body local space에 저장되고 proxy AABB는 world space로 계산됨.
