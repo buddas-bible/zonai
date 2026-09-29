@@ -91,6 +91,65 @@ int main()
         assert( kinematicTransform.position.y == 1.5f );
     }
 
+    // BodyState는 non-static Body의 선속도 / 각속도를 보관함.
+    {
+        World world{};
+
+        const BodyId staticBody =
+            world.CreateBody( BodyType::Static );
+
+        const BodyId dynamicBody =
+            world.CreateBody( BodyType::Dynamic );
+
+        const BodyId kinematicBody =
+            world.CreateBody( BodyType::Kinematic );
+
+        assert( world.GetBodyLinearVelocity( staticBody ).x == 0.0f );
+        assert( world.GetBodyLinearVelocity( staticBody ).y == 0.0f );
+        assert( world.GetBodyAngularVelocity( staticBody ) == 0.0f );
+
+        world.SetBodyLinearVelocity( staticBody, { 3.0f, 4.0f } );
+        world.SetBodyAngularVelocity( staticBody, 5.0f );
+
+        // Static Body는 setter를 무시함.
+        assert( world.GetBodyLinearVelocity( staticBody ).x == 0.0f );
+        assert( world.GetBodyLinearVelocity( staticBody ).y == 0.0f );
+        assert( world.GetBodyAngularVelocity( staticBody ) == 0.0f );
+
+        world.SetBodyLinearVelocity( dynamicBody, { 3.0f, -4.0f } );
+        world.SetBodyAngularVelocity( dynamicBody, 2.0f );
+
+        const vec2 dynamicVelocity =
+            world.GetBodyLinearVelocity( dynamicBody );
+
+        assert( dynamicVelocity.x == 3.0f );
+        assert( dynamicVelocity.y == -4.0f );
+        assert( world.GetBodyAngularVelocity( dynamicBody ) == 2.0f );
+
+        world.SetBodyLinearVelocity( kinematicBody, { -1.0f, 6.0f } );
+        world.SetBodyAngularVelocity( kinematicBody, -0.5f );
+
+        const vec2 kinematicVelocity =
+            world.GetBodyLinearVelocity( kinematicBody );
+
+        assert( kinematicVelocity.x == -1.0f );
+        assert( kinematicVelocity.y == 6.0f );
+        assert( world.GetBodyAngularVelocity( kinematicBody ) == -0.5f );
+
+        // Body slot 재사용 시 이전 Body의 운동 상태는 남지 않아야 함.
+        const BodyId oldBody = dynamicBody;
+        world.DestroyBody( oldBody );
+
+        const BodyId reusedBody =
+            world.CreateBody( BodyType::Dynamic );
+
+        assert( reusedBody.index1 == oldBody.index1 );
+        assert( reusedBody.generation != oldBody.generation );
+        assert( world.GetBodyLinearVelocity( reusedBody ).x == 0.0f );
+        assert( world.GetBodyLinearVelocity( reusedBody ).y == 0.0f );
+        assert( world.GetBodyAngularVelocity( reusedBody ) == 0.0f );
+    }
+
     // Shape geometry는 Body local space에 저장되고 proxy AABB는 world space로 계산됨.
     {
         World world{};
