@@ -491,6 +491,30 @@ void World::UpdateBodyMassData( std::int32_t bodyIndex )
     assert( body.bodyId == bodyIndex );
     assert( bodySim.bodyId == bodyIndex );
 
+    /*
+    * Body 질량 특성 계산
+    *
+    * 각 Shape i가 다음 값을 가진다고 하면:
+    *
+    *     mi : Shape 질량
+    *     ci : Shape의 local center of mass
+    *     Ii : ci를 지나는 z축 기준 Shape 회전 관성
+    *
+    * Body 전체 질량:
+    *
+    *     M = sum( mi )
+    *
+    * Body 전체 local center of mass:
+    *
+    *     C = sum( mi * ci ) / M
+    *
+    * Body center C 기준 회전 관성:
+    *
+    *     I = sum( Ii + mi * |ci - C|^2 )
+    *
+    * 마지막 식의 mi * |ci - C|^2가 평행축 정리로 추가되는 항임.
+    */
+
     body.mass = 0.0f;
     body.inertia = 0.0f;
 
@@ -498,21 +522,33 @@ void World::UpdateBodyMassData( std::int32_t bodyIndex )
     bodySim.invInertia = 0.0f;
     bodySim.localCenter = {};
 
-    // Static / Kinematic Body는 solver에서 무한 질량으로 취급함.
+    // Static / Kinematic Body는 외력이나 impulse로 가속되지 않으므로
+    // solver 관점에서 무한 질량으로 취급하고 inverse mass / inertia를 0으로 둠.
     if( body.type != BodyType::Dynamic )
     {
         bodySim.center = bodySim.transform.position;
         return;
     }
 
+    // 두 번째 관성 계산에서 Shape별 mass / center / inertia가 다시 필요하므로
+    // 첫 순회 결과를 임시 배열에 저장함.
     std::vector<massData2> masses;
     masses.reserve( static_cast<std::size_t>( body.shapeCount ) );
 
+    // sum( mi * ci )
     vec2 weightedCenter{};
 
     std::int32_t shapeIndex = body.headShapeId;
     std::int32_t visitedCount = 0;
 
+    /*
+    * 첫 번째 순회
+    *
+    *     M = sum( mi )
+    *     centerNumerator = sum( mi * ci )
+    *
+    * 을 계산함.
+    */
     while( shapeIndex != Body::NULL_INDEX )
     {
         assert( shapeIndex >= 0 );
@@ -526,6 +562,7 @@ void World::UpdateBodyMassData( std::int32_t bodyIndex )
 
         body.mass += massData.mass;
         weightedCenter += massData.center * massData.mass;
+
         masses.push_back( massData );
 
         shapeIndex = shape.nextShapeId;
@@ -536,11 +573,31 @@ void World::UpdateBodyMassData( std::int32_t bodyIndex )
 
     if( body.mass > 0.0f )
     {
+        // Solver에서는 나눗셈을 반복하지 않도록 역질량을 미리 저장함.
+        //
+        //     invMass = 1 / M
         bodySim.invMass = 1.0f / body.mass;
+
+        //     C = sum( mi * ci ) / M
+        //       = weightedCenter * invMass
         bodySim.localCenter =
             weightedCenter * bodySim.invMass;
     }
 
+    /*
+    * 두 번째 순회
+    *
+    * 각 Shape의 회전 관성 Ii는 자기 center ci 기준이므로
+    * Body center C 기준으로 바로 더할 수 없음.
+    *
+    * 평행축 정리:
+    *
+    *     I_shifted = Ii + mi * d^2
+    *
+    *     d = |ci - C|
+    *
+    * 를 적용한 뒤 모든 Shape의 관성을 합산함.
+    */
     for( const massData2& massData : masses )
     {
         if( massData.mass == 0.0f )
@@ -560,9 +617,14 @@ void World::UpdateBodyMassData( std::int32_t bodyIndex )
 
     if( body.inertia > 0.0f )
     {
+        // Constraint solver에서 angular impulse를 곱셈으로 적용하기 위해
+        // 역관성도 미리 계산해 보관함.
+        //
+        //     invInertia = 1 / I
         bodySim.invInertia = 1.0f / body.inertia;
     }
 
+    // local center of mass C를 현재 Body transform으로 world space에 옮김.
     bodySim.center =
         TransformPoint(
             bodySim.transform,
