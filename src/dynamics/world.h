@@ -71,6 +71,10 @@ public:
 
     [[nodiscard]] float GetBodyAngularVelocity( BodyId bodyId ) const;
 
+    // 현재 velocity로 non-static Body를 적분하고 proxy / Contact 상태를 갱신함.
+    // 아직 force / mass / constraint solver는 포함하지 않는 초기 simulation step임.
+    void Step( float timeStep );
+
     // null / 범위 / generation / 활성 slot을 모두 확인함.
     [[nodiscard]] bool IsValid( BodyId bodyId ) const noexcept;
     [[nodiscard]] bool IsValid( ShapeId shapeId ) const noexcept;
@@ -254,6 +258,9 @@ private:
 
     void DestroyBodyByIndex( std::int32_t bodyIndex );
     void DestroyShapeByIndex( std::int32_t shapeIndex );
+
+    // BodySim transform을 기준으로 이 Body의 모든 Shape proxy를 BroadPhase에 동기화함.
+    void SyncBodyProxies( std::int32_t bodyIndex );
 
     // stable Contact slot을 할당하고 두 Body의 intrusive contact list에 연결함.
     [[nodiscard]] std::int32_t CreateContact(
