@@ -181,6 +181,22 @@ public:
     // 내부 Contact를 public snapshot으로 변환해 반환함.
     [[nodiscard]] ContactData GetContactData( ContactId contactId ) const;
 
+    // Body에 연결된 Contact 전체 개수. 실제 touching Contact 수보다 클 수 있음.
+    [[nodiscard]] std::size_t GetBodyContactCapacity( BodyId bodyId ) const;
+
+    // Body에 연결된 touching Contact만 output에 채우고 실제 작성 개수를 반환함.
+    [[nodiscard]] std::size_t GetBodyContactData(
+        BodyId bodyId,
+        std::span<ContactData> output ) const;
+
+    // Shape가 속한 Body의 Contact 개수이므로 보수적인 capacity임.
+    [[nodiscard]] std::size_t GetShapeContactCapacity( ShapeId shapeId ) const;
+
+    // 이 Shape가 실제로 참여한 touching Contact만 output에 채움.
+    [[nodiscard]] std::size_t GetShapeContactData(
+        ShapeId shapeId,
+        std::span<ContactData> output ) const;
+
     [[nodiscard]] const BroadPhase& GetBroadPhase() const noexcept
     {
         return broadPhase_;
