@@ -6,6 +6,7 @@
 
 #include "collision/aabb2.h"
 #include "collision/broadphase/dynamicTree.h"
+#include "collision/shape.h"
 #include "geometry/capsule2.h"
 #include "geometry/circle2.h"
 #include "geometry/polygon2.h"
@@ -25,6 +26,13 @@ public:
         const ImVec2& viewportSize );
 
     void DrawGrid( float spacing = 1.0f ) const;
+
+    // Body local-space Shape geometry를 transform으로 world space에 옮겨 그림.
+    void DrawShape(
+        const ShapeGeometry& geometry,
+        const transform2& transform,
+        ImU32 outlineColor,
+        ImU32 fillColor ) const;
 
     void DrawAABB(
         const aabb2& box,
