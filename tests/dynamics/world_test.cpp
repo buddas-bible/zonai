@@ -231,9 +231,256 @@ int main()
         assert( world.GetBodyRotationalInertia( staticBody ) == 0.0f );
     }
 
-    // 초기 Step은 velocity로 Dynamic / Kinematic transform을 적분하고 proxy를 동기화함.
+    // 기본 gravity는 Dynamic Body의 COM velocity에만 적용됨.
     {
         World world{};
+
+        const vec2 defaultGravity = world.GetGravity();
+        assert( defaultGravity.x == 0.0f );
+        assert( defaultGravity.y == -10.0f );
+
+        const BodyId dynamicBody =
+            world.CreateBody( BodyType::Dynamic );
+
+        (void)world.CreateShape(
+            dynamicBody,
+            circle2{ {}, 1.0f }
+        );
+
+        const BodyId kinematicBody =
+            world.CreateBody( BodyType::Kinematic );
+
+        world.SetBodyLinearVelocity(
+            kinematicBody,
+            { 0.0f, 2.0f }
+        );
+
+        world.Step( 0.5f );
+
+        const vec2 dynamicVelocity =
+            world.GetBodyLinearVelocity( dynamicBody );
+
+        // v = 0 + g * dt = -10 * 0.5 = -5
+        assert( std::fabs( dynamicVelocity.y + 5.0f ) < epsilon );
+
+        const transform2 dynamicTransform =
+            world.GetBodyTransform( dynamicBody );
+
+        // semi-implicit Euler:
+        // y = 0 + v_new * dt = -5 * 0.5 = -2.5
+        assert( std::fabs( dynamicTransform.position.y + 2.5f ) < epsilon );
+
+        // Kinematic은 gravity를 받지 않고 지정한 velocity만 적분함.
+        assert(
+            std::fabs(
+                world.GetBodyLinearVelocity( kinematicBody ).y -
+                2.0f
+            ) < epsilon
+        );
+        assert(
+            std::fabs(
+                world.GetBodyTransform( kinematicBody ).position.y -
+                1.0f
+            ) < epsilon
+        );
+    }
+
+    // Force는 F=Ma에 따라 질량으로 나뉘어 velocity를 바꾸고 한 Step 뒤 초기화됨.
+    {
+        World world{};
+        world.SetGravity( {} );
+
+        const BodyId bodyId =
+            world.CreateBody( BodyType::Dynamic );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f },
+            {},
+            2.0f
+        );
+
+        const float mass = world.GetBodyMass( bodyId );
+
+        // F = M * 4 이므로 acceleration.x = 4.
+        world.ApplyForceToCenter(
+            bodyId,
+            { mass * 4.0f, 0.0f }
+        );
+
+        world.Step( 0.5f );
+
+        // v = a * dt = 4 * 0.5 = 2
+        assert(
+            std::fabs(
+                world.GetBodyLinearVelocity( bodyId ).x -
+                2.0f
+            ) < epsilon
+        );
+
+        // x = v_new * dt = 2 * 0.5 = 1
+        assert(
+            std::fabs(
+                world.GetBodyTransform( bodyId ).position.x -
+                1.0f
+            ) < epsilon
+        );
+
+        // force는 이전 Step에서 소비됐으므로 다시 Apply하지 않으면
+        // 다음 Step에서는 같은 velocity로만 이동함.
+        world.Step( 0.5f );
+
+        assert(
+            std::fabs(
+                world.GetBodyLinearVelocity( bodyId ).x -
+                2.0f
+            ) < epsilon
+        );
+        assert(
+            std::fabs(
+                world.GetBodyTransform( bodyId ).position.x -
+                2.0f
+            ) < epsilon
+        );
+    }
+
+    // center에서 벗어난 point에 Force를 가하면 r x F만큼 torque도 누적됨.
+    {
+        World world{};
+        world.SetGravity( {} );
+
+        const BodyId bodyId =
+            world.CreateBody( BodyType::Dynamic );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f }
+        );
+
+        const float inertia =
+            world.GetBodyRotationalInertia( bodyId );
+
+        // r=(1,0), F=(0,inertia*2)이므로
+        // torque = r x F = inertia*2
+        // angularAcceleration = torque / inertia = 2 rad/s^2
+        world.ApplyForce(
+            bodyId,
+            { 0.0f, inertia * 2.0f },
+            { 1.0f, 0.0f }
+        );
+
+        world.Step( 0.5f );
+
+        // w = alpha * dt = 2 * 0.5 = 1 rad/s
+        assert(
+            std::fabs(
+                world.GetBodyAngularVelocity( bodyId ) -
+                1.0f
+            ) < epsilon
+        );
+
+        // 같은 Force는 COM에도 선가속도를 만들므로 +Y velocity도 생김.
+        assert( world.GetBodyLinearVelocity( bodyId ).y > 0.0f );
+    }
+
+    // 순수 torque는 COM 위치를 움직이지 않고 Body origin만 COM 주위로 회전시킴.
+    {
+        World world{};
+        world.SetGravity( {} );
+
+        const BodyId bodyId =
+            world.CreateBody( BodyType::Dynamic );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ { 2.0f, 0.0f }, 1.0f }
+        );
+
+        const vec2 localCenter =
+            world.GetBodyLocalCenter( bodyId );
+
+        const transform2 before =
+            world.GetBodyTransform( bodyId );
+
+        const vec2 worldCenterBefore =
+            TransformPoint( before, localCenter );
+
+        const float inertia =
+            world.GetBodyRotationalInertia( bodyId );
+
+        // alpha = torque * invInertia = 2 rad/s^2
+        world.ApplyTorque(
+            bodyId,
+            inertia * 2.0f
+        );
+
+        world.Step( 0.5f );
+
+        const transform2 after =
+            world.GetBodyTransform( bodyId );
+
+        const vec2 worldCenterAfter =
+            TransformPoint( after, localCenter );
+
+        assert(
+            std::fabs(
+                worldCenterAfter.x -
+                worldCenterBefore.x
+            ) < epsilon
+        );
+        assert(
+            std::fabs(
+                worldCenterAfter.y -
+                worldCenterBefore.y
+            ) < epsilon
+        );
+
+        // COM이 local origin에서 떨어져 있으므로 회전 후 Body origin은 이동함.
+        assert(
+            std::fabs(
+                after.position.x -
+                before.position.x
+            ) > epsilon ||
+            std::fabs(
+                after.position.y -
+                before.position.y
+            ) > epsilon
+        );
+    }
+
+    // ClearForces는 아직 소비하지 않은 force / torque를 제거함.
+    {
+        World world{};
+        world.SetGravity( {} );
+
+        const BodyId bodyId =
+            world.CreateBody( BodyType::Dynamic );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f }
+        );
+
+        world.ApplyForceToCenter(
+            bodyId,
+            { 100.0f, 0.0f }
+        );
+        world.ApplyTorque(
+            bodyId,
+            100.0f
+        );
+
+        world.ClearForces( bodyId );
+        world.Step( 0.5f );
+
+        assert( world.GetBodyLinearVelocity( bodyId ).x == 0.0f );
+        assert( world.GetBodyAngularVelocity( bodyId ) == 0.0f );
+    }
+
+    // Step은 COM velocity로 Dynamic / Kinematic transform을 적분하고 proxy를 동기화함.
+    {
+        World world{};
+        world.SetGravity( {} );
 
         const BodyId staticBody =
             world.CreateBody(
@@ -284,10 +531,23 @@ int main()
         const transform2 dynamicTransform =
             world.GetBodyTransform( dynamicBody );
 
-        assert( std::fabs( dynamicTransform.position.x - 1.0f ) < epsilon );
-        assert( std::fabs( dynamicTransform.position.y + 0.5f ) < epsilon );
-
         const float sqrtHalf = std::sqrt( 0.5f );
+
+        // circle 하나만 있으므로 localCenter=(1,0)이고,
+        // COM은 (1,0) -> (2,-0.5)로 이동한 뒤 45도 회전함.
+        // Body origin은 center - R * localCenter로 다시 계산됨.
+        assert(
+            std::fabs(
+                dynamicTransform.position.x -
+                ( 2.0f - sqrtHalf )
+            ) < epsilon
+        );
+        assert(
+            std::fabs(
+                dynamicTransform.position.y -
+                ( -0.5f - sqrtHalf )
+            ) < epsilon
+        );
 
         assert( std::fabs( dynamicTransform.rotation.c - sqrtHalf ) < epsilon );
         assert( std::fabs( dynamicTransform.rotation.s - sqrtHalf ) < epsilon );
@@ -305,8 +565,8 @@ int main()
                 .GetTree( BodyType::Dynamic )
                 .GetProxyAABB( GetProxyId( movedShape.proxyKey ) );
 
-        const float expectedCenterX = 1.0f + sqrtHalf;
-        const float expectedCenterY = -0.5f + sqrtHalf;
+        const float expectedCenterX = 2.0f;
+        const float expectedCenterY = -0.5f;
 
         assert(
             std::fabs(
@@ -325,6 +585,7 @@ int main()
     // Step 뒤에는 BroadPhase pair와 Contact도 새 transform 기준으로 갱신됨.
     {
         World world{};
+        world.SetGravity( {} );
 
         const BodyId staticBody =
             world.CreateBody(
