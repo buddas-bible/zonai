@@ -9,6 +9,7 @@
 #include "geometry/segment2.h"
 
 #include "collision/filter.h"
+#include "collision/massData2.h"
 #include "math/transform2.h"
 
 namespace zonai
@@ -53,6 +54,9 @@ struct Shape
     // variant가 Box2D의 type + union 역할을 대신함.
     ShapeGeometry geometry{};
 
+    // 면적당 질량. Box2D 기본값과 같이 1로 시작함.
+    float density = 1.0f;
+
     // category / mask / group 기반 collision filter.
     Filter filter{};
 };
@@ -61,5 +65,8 @@ struct Shape
 aabb2 ComputeShapeAABB(
     const ShapeGeometry& geometry,
     const transform2& transform );
+
+// Shape geometry와 density로 local-space 질량 특성을 계산함.
+massData2 ComputeShapeMass( const Shape& shape );
 
 } // namespace zonai
