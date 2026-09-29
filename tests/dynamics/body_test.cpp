@@ -16,6 +16,8 @@ int main()
         assert( body.generation == 0 );
         assert( body.nextFreeId == Body::NULL_INDEX );
         assert( body.type == BodyType::Static );
+        assert( body.mass == 0.0f );
+        assert( body.inertia == 0.0f );
         assert( body.headContactKey == Body::NULL_INDEX );
         assert( body.contactCount == 0 );
         assert( body.headShapeId == Body::NULL_INDEX );
@@ -44,6 +46,12 @@ int main()
         assert( bodySim.transform.position.y == 0.0f );
         assert( bodySim.transform.rotation.c == 1.0f );
         assert( bodySim.transform.rotation.s == 0.0f );
+        assert( bodySim.localCenter.x == 0.0f );
+        assert( bodySim.localCenter.y == 0.0f );
+        assert( bodySim.center.x == 0.0f );
+        assert( bodySim.center.y == 0.0f );
+        assert( bodySim.invMass == 0.0f );
+        assert( bodySim.invInertia == 0.0f );
 
         bodySim.bodyId = 7;
         bodySim.transform.position = { 3.0f, -2.0f };
