@@ -22,6 +22,11 @@ struct BodySim
     // center of mass의 world-space 위치.
     vec2 center{};
 
+    // 한 simulation step 동안 누적되는 외력 / 토크.
+    // Step에서 velocity에 반영한 뒤 0으로 초기화함.
+    vec2 force{};
+    float torque = 0.0f;
+
     // Solver에서 곱셈으로 사용하기 위한 역질량 / 역관성.
     float invMass = 0.0f;
     float invInertia = 0.0f;
