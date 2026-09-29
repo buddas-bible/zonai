@@ -630,10 +630,7 @@ void World::UpdateBodyMassData( std::int32_t bodyIndex )
 
     BodyState& bodyState = bodyStates_[bodyIndex];
     bodyState.linearVelocity +=
-        Cross(
-            bodyState.angularVelocity,
-            bodySim.center - oldCenter
-        );
+        Cross( bodyState.angularVelocity,  bodySim.center - oldCenter );
 }
 
 const Body& World::GetBody( BodyId bodyId ) const

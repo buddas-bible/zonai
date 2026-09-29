@@ -73,6 +73,7 @@ public:
     void SetGravity( vec2 gravity );
     [[nodiscard]] vec2 GetGravity() const noexcept;
 
+
     // Dynamic Body에 world-space 힘을 누적함.
     // point가 center of mass에서 벗어나 있으면 torque도 함께 누적됨.
     void ApplyForce( BodyId bodyId, vec2 force, vec2 point );
