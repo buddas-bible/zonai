@@ -44,10 +44,15 @@ public:
     [[nodiscard]] ShapeId CreateShape(
         BodyId bodyId,
         ShapeGeometry geometry,
-        Filter filter = {} );
+        Filter filter = {},
+        float density = 1.0f );
 
     // handle이 가리키는 Shape의 Contact / proxy / Body list 연결을 정리함.
     void DestroyShape( ShapeId shapeId );
+
+    // Shape density를 변경하고 owning Dynamic Body의 mass data를 다시 계산함.
+    void SetShapeDensity( ShapeId shapeId, float density );
+    [[nodiscard]] float GetShapeDensity( ShapeId shapeId ) const;
 
     // Body transform을 변경하고 연결된 모든 Shape proxy의 world AABB를 함께 갱신함.
     void SetBodyTransform(
@@ -70,6 +75,10 @@ public:
         float angularVelocity );
 
     [[nodiscard]] float GetBodyAngularVelocity( BodyId bodyId ) const;
+
+    [[nodiscard]] float GetBodyMass( BodyId bodyId ) const;
+    [[nodiscard]] float GetBodyRotationalInertia( BodyId bodyId ) const;
+    [[nodiscard]] vec2 GetBodyLocalCenter( BodyId bodyId ) const;
 
     // 현재 velocity로 non-static Body를 적분하고 proxy / Contact 상태를 갱신함.
     // 아직 force / mass / constraint solver는 포함하지 않는 초기 simulation step임.
@@ -261,6 +270,9 @@ private:
 
     // BodySim transform을 기준으로 이 Body의 모든 Shape proxy를 BroadPhase에 동기화함.
     void SyncBodyProxies( std::int32_t bodyIndex );
+
+    // 연결된 Shape들의 density / geometry를 합산해 Dynamic Body의 mass data를 갱신함.
+    void UpdateBodyMassData( std::int32_t bodyIndex );
 
     // stable Contact slot을 할당하고 두 Body의 intrusive contact list에 연결함.
     [[nodiscard]] std::int32_t CreateContact(
