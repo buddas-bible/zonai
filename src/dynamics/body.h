@@ -3,7 +3,6 @@
 #include <cstdint>
 
 #include "dynamics/bodyType.h"
-#include "math/transform2.h"
 
 namespace zonai
 {
@@ -23,9 +22,6 @@ struct Body
 
     // Body의 물리 동작 종류.
     BodyType type = BodyType::Static;
-
-    // 아직 solver용 BodySim이 없으므로 현재는 Body가 world transform을 직접 보관함.
-    transform2 transform{};
 
     // [contactId : edgeIndex] key로 연결된 첫 Contact.
     // 하위 1bit는 Contact의 어느 edge가 이 Body에 연결됐는지 나타냄.
