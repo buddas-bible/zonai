@@ -1,6 +1,7 @@
 #include <cassert>
 
 #include "dynamics/body.h"
+#include "dynamics/bodySim.h"
 
 using namespace zonai;
 
@@ -19,27 +20,37 @@ int main()
         assert( body.headShapeId == Body::NULL_INDEX );
         assert( body.shapeCount == 0 );
 
-        // 기본 transform은 원점 + identity rotation임.
-        assert( body.transform.position.x == 0.0f );
-        assert( body.transform.position.y == 0.0f );
-        assert( body.transform.rotation.c == 1.0f );
-        assert( body.transform.rotation.s == 0.0f );
     }
 
     {
         Body body{};
 
         body.type = BodyType::Dynamic;
-        body.transform.position = { 3.0f, -2.0f };
-        body.transform.rotation = rot2::FromRadians( 0.5f );
         body.headShapeId = 7;
         body.shapeCount = 3;
 
         assert( body.type == BodyType::Dynamic );
-        assert( body.transform.position.x == 3.0f );
-        assert( body.transform.position.y == -2.0f );
         assert( body.headShapeId == 7 );
         assert( body.shapeCount == 3 );
+    }
+
+    {
+        BodySim bodySim{};
+
+        // 기본 simulation slot은 비어 있고 transform은 identity임.
+        assert( bodySim.bodyId == BodySim::NULL_INDEX );
+        assert( bodySim.transform.position.x == 0.0f );
+        assert( bodySim.transform.position.y == 0.0f );
+        assert( bodySim.transform.rotation.c == 1.0f );
+        assert( bodySim.transform.rotation.s == 0.0f );
+
+        bodySim.bodyId = 7;
+        bodySim.transform.position = { 3.0f, -2.0f };
+        bodySim.transform.rotation = rot2::FromRadians( 0.5f );
+
+        assert( bodySim.bodyId == 7 );
+        assert( bodySim.transform.position.x == 3.0f );
+        assert( bodySim.transform.position.y == -2.0f );
     }
 
     return 0;
