@@ -9,11 +9,18 @@
 namespace zonai
 {
 
-// Shape의 질량, local center of mass, center 기준 회전 관성을 묶음.
+// Shape 하나의 local-space 질량 특성.
+// 2D에서는 z축 회전만 존재하므로 rotationalInertia는 관성 텐서의 z축 성분에 해당하는 스칼라 I임.
 struct massData2
 {
+    // M = density * area
     float mass = 0.0f;
+
+    // Shape local space에서의 center of mass.
     vec2 center{};
+
+    // center를 지나는 z축 기준 회전 관성.
+    // I = integral( r^2 dm )
     float rotationalInertia = 0.0f;
 };
 
