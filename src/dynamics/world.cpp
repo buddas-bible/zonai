@@ -835,6 +835,135 @@ void World::ClearForces( BodyId bodyId )
     bodySim.torque = 0.0f;
 }
 
+void World::ApplyLinearImpulse(
+    BodyId bodyId,
+    vec2 impulse,
+    vec2 point )
+{
+    assert( std::isfinite( impulse.x ) );
+    assert( std::isfinite( impulse.y ) );
+    assert( std::isfinite( point.x ) );
+    assert( std::isfinite( point.y ) );
+
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+    const Body& body = bodies_[bodyIndex];
+
+    // Static / Kinematic Body는 impulse로 속도가 바뀌지 않음.
+    if( body.type != BodyType::Dynamic )
+    {
+        return;
+    }
+
+    assert( bodySims_.size() == bodies_.size() );
+    assert( bodyStates_.size() == bodies_.size() );
+
+    const BodySim& bodySim = bodySims_[bodyIndex];
+    BodyState& bodyState = bodyStates_[bodyIndex];
+
+    /*
+    * Linear impulse
+    *
+    * impulse J는 힘을 시간에 대해 적분한 값:
+    *
+    *     J = integral( F dt )
+    *
+    * 선운동량 변화:
+    *
+    *     J = DeltaP = M * DeltaV
+    *
+    * 따라서:
+    *
+    *     DeltaV = J / M
+    *            = J * invMass
+    *
+    * Force와 달리 이미 시간이 적분된 값이므로
+    * timeStep을 다시 곱하지 않고 즉시 velocity를 변경함.
+    */
+    bodyState.linearVelocity +=
+        impulse * bodySim.invMass;
+
+    /*
+    * center of mass에서 벗어난 위치에 impulse가 들어오면
+    * angular impulse도 함께 발생함.
+    *
+    *     r = point - center
+    *
+    *     L = r x J
+    *
+    *     DeltaW = L / I
+    *            = invInertia * ( r x J )
+    */
+    const vec2 r =
+        point - bodySim.center;
+
+    bodyState.angularVelocity +=
+        bodySim.invInertia *
+        Cross( r, impulse );
+}
+
+void World::ApplyLinearImpulseToCenter(
+    BodyId bodyId,
+    vec2 impulse )
+{
+    assert( std::isfinite( impulse.x ) );
+    assert( std::isfinite( impulse.y ) );
+
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+    const Body& body = bodies_[bodyIndex];
+
+    if( body.type != BodyType::Dynamic )
+    {
+        return;
+    }
+
+    assert( bodySims_.size() == bodies_.size() );
+    assert( bodyStates_.size() == bodies_.size() );
+
+    const BodySim& bodySim = bodySims_[bodyIndex];
+    BodyState& bodyState = bodyStates_[bodyIndex];
+
+    // center에 적용하므로 r=0이고 angular impulse는 발생하지 않음.
+    //
+    //     DeltaV = J * invMass
+    bodyState.linearVelocity +=
+        impulse * bodySim.invMass;
+}
+
+void World::ApplyAngularImpulse(
+    BodyId bodyId,
+    float impulse )
+{
+    assert( std::isfinite( impulse ) );
+
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+    const Body& body = bodies_[bodyIndex];
+
+    if( body.type != BodyType::Dynamic )
+    {
+        return;
+    }
+
+    assert( bodySims_.size() == bodies_.size() );
+    assert( bodyStates_.size() == bodies_.size() );
+
+    const BodySim& bodySim = bodySims_[bodyIndex];
+    BodyState& bodyState = bodyStates_[bodyIndex];
+
+    /*
+    * Angular impulse L은 각운동량의 변화량:
+    *
+    *     L = DeltaAngularMomentum
+    *       = I * DeltaW
+    *
+    * 따라서:
+    *
+    *     DeltaW = L / I
+    *            = L * invInertia
+    */
+    bodyState.angularVelocity +=
+        impulse * bodySim.invInertia;
+}
+
 void World::Step( float timeStep )
 {
     assert( std::isfinite( timeStep ) );
