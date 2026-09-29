@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <type_traits>
 
 namespace zonai::sandbox
 {
@@ -72,6 +73,107 @@ void DebugDraw::DrawGrid( float spacing ) const
         const bool isAxis = std::abs( y ) < spacing * 0.001f;
         drawList_->AddLine( a, b, isAxis ? X_AXIS_COLOR : GRID_COLOR, isAxis ? 2.0f : 1.0f );
     }
+}
+
+void DebugDraw::DrawShape(
+    const ShapeGeometry& geometry,
+    const transform2& transform,
+    ImU32 outlineColor,
+    ImU32 fillColor ) const
+{
+    std::visit(
+        [&]( const auto& localGeometry )
+        {
+            using Geometry =
+                std::remove_cvref_t<decltype( localGeometry )>;
+
+            if constexpr( std::is_same_v<Geometry, std::monostate> )
+            {
+                return;
+            }
+            else if constexpr( std::is_same_v<Geometry, circle2> )
+            {
+                circle2 worldCircle = localGeometry;
+                worldCircle.center =
+                    TransformPoint(
+                        transform,
+                        localGeometry.center
+                    );
+
+                DrawCircle(
+                    worldCircle,
+                    outlineColor,
+                    fillColor
+                );
+            }
+            else if constexpr( std::is_same_v<Geometry, capsule2> )
+            {
+                capsule2 worldCapsule = localGeometry;
+                worldCapsule.center1 =
+                    TransformPoint(
+                        transform,
+                        localGeometry.center1
+                    );
+                worldCapsule.center2 =
+                    TransformPoint(
+                        transform,
+                        localGeometry.center2
+                    );
+
+                DrawCapsule(
+                    worldCapsule,
+                    outlineColor,
+                    fillColor
+                );
+            }
+            else if constexpr( std::is_same_v<Geometry, segment2> )
+            {
+                segment2 worldSegment = localGeometry;
+                worldSegment.a =
+                    TransformPoint(
+                        transform,
+                        localGeometry.a
+                    );
+                worldSegment.b =
+                    TransformPoint(
+                        transform,
+                        localGeometry.b
+                    );
+
+                DrawSegment(
+                    worldSegment,
+                    outlineColor,
+                    3.0f
+                );
+            }
+            else if constexpr( std::is_same_v<Geometry, polygon2> )
+            {
+                polygon2 worldPolygon = localGeometry;
+
+                for( int i = 0; i < worldPolygon.vertexCount; ++i )
+                {
+                    worldPolygon.vertices[i] =
+                        TransformPoint(
+                            transform,
+                            localGeometry.vertices[i]
+                        );
+                }
+
+                worldPolygon.centroid =
+                    TransformPoint(
+                        transform,
+                        localGeometry.centroid
+                    );
+
+                DrawPolygon(
+                    worldPolygon,
+                    outlineColor,
+                    fillColor
+                );
+            }
+        },
+        geometry
+    );
 }
 
 void DebugDraw::DrawAABB(
