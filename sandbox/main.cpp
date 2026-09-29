@@ -2,11 +2,10 @@
 #include <d3d11.h>
 #include <wrl/client.h>
 
-#include <array>
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
-#include <type_traits>
-#include <utility>
-#include <variant>
+#include <memory>
 #include <vector>
 
 #include <imgui.h>
@@ -16,8 +15,7 @@
 #include "debug/debugCamera.h"
 #include "debug/debugDraw.h"
 
-#include "collision/broadphase/broadPhase.h"
-#include "collision/narrowphase/collide.h"
+#include "dynamics/world.h"
 #include "geometry/capsule2.h"
 #include "geometry/circle2.h"
 #include "geometry/polygon2.h"
@@ -52,21 +50,23 @@ bool CreateRenderTarget()
 {
     ComPtr<ID3D11Texture2D> backBuffer;
 
-    HRESULT result = g_d3d.swapChain->GetBuffer(
-        0,
-        IID_PPV_ARGS( &backBuffer )
-    );
+    HRESULT result =
+        g_d3d.swapChain->GetBuffer(
+            0,
+            IID_PPV_ARGS( &backBuffer )
+        );
 
     if( FAILED( result ) )
     {
         return false;
     }
 
-    result = g_d3d.device->CreateRenderTargetView(
-        backBuffer.Get(),
-        nullptr,
-        &g_d3d.renderTargetView
-    );
+    result =
+        g_d3d.device->CreateRenderTargetView(
+            backBuffer.Get(),
+            nullptr,
+            &g_d3d.renderTargetView
+        );
 
     return SUCCEEDED( result );
 }
@@ -76,83 +76,17 @@ void DestroyRenderTarget()
     g_d3d.renderTargetView.Reset();
 }
 
-// MakeBox()는 원점 기준이므로 Sandbox 배치용으로 world 위치만 이동함.
-polygon2 MakeDebugBox( const vec2& center, const vec2& halfExtents )
-{
-    polygon2 polygon = MakeBox( halfExtents );
-
-    for( int i = 0; i < polygon.vertexCount; ++i )
-    {
-        polygon.vertices[i] += center;
-    }
-
-    polygon.centroid += center;
-
-    return polygon;
-}
-
-struct DebugContact
-{
-    std::int32_t otherShape = -1;
-    localManifold2 manifold{};
-};
-
-// Sandbox geometry는 아직 world 좌표로 직접 저장하므로 identity transform을 사용함.
-// 시각화 normal은 항상 움직이는 Circle에서 상대 Shape를 향하도록 맞춤.
-localManifold2 CollideDebugCircle(
-    const circle2& circle,
-    const ShapeGeometry& otherGeometry )
-{
-    return std::visit(
-        [&]( const auto& geometry ) -> localManifold2
-        {
-            using Geometry =
-                std::remove_cvref_t<decltype( geometry )>;
-
-            if constexpr( std::is_same_v<Geometry, std::monostate> )
-            {
-                return {};
-            }
-            else if constexpr( std::is_same_v<Geometry, circle2> )
-            {
-                return CollideCircles( circle, geometry, {} );
-            }
-            else
-            {
-                localManifold2 manifold{};
-
-                if constexpr( std::is_same_v<Geometry, capsule2> )
-                {
-                    manifold = CollideCapsuleCircle( geometry, circle, {} );
-                }
-                else if constexpr( std::is_same_v<Geometry, segment2> )
-                {
-                    manifold = CollideSegmentCircle( geometry, circle, {} );
-                }
-                else if constexpr( std::is_same_v<Geometry, polygon2> )
-                {
-                    manifold = CollidePolygonCircle( geometry, circle, {} );
-                }
-
-                if( manifold.pointCount > 0 )
-                {
-                    manifold.normal = -manifold.normal;
-                }
-
-                return manifold;
-            }
-        },
-        otherGeometry
-    );
-}
-
 LRESULT CALLBACK WndProc(
     HWND hwnd,
     UINT message,
     WPARAM wParam,
     LPARAM lParam )
 {
-    if( ImGui_ImplWin32_WndProcHandler( hwnd, message, wParam, lParam ) )
+    if( ImGui_ImplWin32_WndProcHandler(
+        hwnd,
+        message,
+        wParam,
+        lParam ) )
     {
         return true;
     }
@@ -164,7 +98,8 @@ LRESULT CALLBACK WndProc(
         return 0;
 
     case WM_SIZE:
-        if( g_d3d.swapChain && wParam != SIZE_MINIMIZED )
+        if( g_d3d.swapChain &&
+            wParam != SIZE_MINIMIZED )
         {
             DestroyRenderTarget();
 
@@ -185,7 +120,237 @@ LRESULT CALLBACK WndProc(
         return 0;
     }
 
-    return DefWindowProcW( hwnd, message, wParam, lParam );
+    return DefWindowProcW(
+        hwnd,
+        message,
+        wParam,
+        lParam
+    );
+}
+
+struct VisualShape
+{
+    BodyId bodyId{};
+    ShapeId shapeId{};
+    const char* label = "";
+};
+
+struct VisualScene
+{
+    World world{};
+    std::vector<VisualShape> shapes;
+
+    BodyId impulseBody{};
+    BodyId torqueBody{};
+    BodyId kinematicBody{};
+
+    VisualScene()
+    {
+        world.SetGravity( { 0.0f, -10.0f } );
+        shapes.reserve( 8 );
+
+        // 넓은 정적 바닥.
+        const BodyId ground =
+            world.CreateBody(
+                BodyType::Static,
+                {
+                    { 0.0f, -4.0f },
+                    {}
+                }
+            );
+
+        const ShapeId groundShape =
+            world.CreateShape(
+                ground,
+                MakeBox( { 8.0f, 0.5f } )
+            );
+
+        shapes.push_back(
+            { ground, groundShape, "Ground [Static]" }
+        );
+
+        // 기울어진 정적 ramp.
+        const BodyId ramp =
+            world.CreateBody(
+                BodyType::Static,
+                {
+                    { 4.0f, -1.6f },
+                    rot2::FromRadians( 0.22f )
+                }
+            );
+
+        const ShapeId rampShape =
+            world.CreateShape(
+                ramp,
+                segment2
+                {
+                    { -2.0f, 0.0f },
+                    {  2.0f, 0.0f }
+                }
+            );
+
+        shapes.push_back(
+            { ramp, rampShape, "Ramp [Static]" }
+        );
+
+        // impulse 버튼으로 직접 밀어볼 Dynamic Circle.
+        impulseBody =
+            world.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { -3.2f, 3.5f },
+                    {}
+                }
+            );
+
+        const ShapeId circleShape =
+            world.CreateShape(
+                impulseBody,
+                circle2{ {}, 0.65f }
+            );
+
+        shapes.push_back(
+            { impulseBody, circleShape, "Circle [Dynamic]" }
+        );
+
+        // COM이 origin과 일치하는 Dynamic Box.
+        torqueBody =
+            world.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 0.0f, 5.0f },
+                    rot2::FromRadians( 0.15f )
+                }
+            );
+
+        const ShapeId boxShape =
+            world.CreateShape(
+                torqueBody,
+                MakeBox( { 0.75f, 0.55f } )
+            );
+
+        shapes.push_back(
+            { torqueBody, boxShape, "Box [Dynamic]" }
+        );
+
+        // 길쭉한 Dynamic Capsule.
+        const BodyId capsuleBody =
+            world.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 3.0f, 4.0f },
+                    rot2::FromRadians( -0.25f )
+                }
+            );
+
+        const ShapeId capsuleShape =
+            world.CreateShape(
+                capsuleBody,
+                capsule2
+                {
+                    { -0.8f, 0.0f },
+                    {  0.8f, 0.0f },
+                    0.35f
+                }
+            );
+
+        shapes.push_back(
+            { capsuleBody, capsuleShape, "Capsule [Dynamic]" }
+        );
+
+        // gravity와 force의 영향을 받지 않고 지정한 velocity로만 움직이는 Kinematic Body.
+        kinematicBody =
+            world.CreateBody(
+                BodyType::Kinematic,
+                {
+                    { -5.5f, -1.5f },
+                    {}
+                }
+            );
+
+        const ShapeId kinematicShape =
+            world.CreateShape(
+                kinematicBody,
+                MakeBox( { 0.8f, 0.3f } )
+            );
+
+        world.SetBodyLinearVelocity(
+            kinematicBody,
+            { 1.25f, 0.0f }
+        );
+
+        shapes.push_back(
+            {
+                kinematicBody,
+                kinematicShape,
+                "Platform [Kinematic]"
+            }
+        );
+    }
+};
+
+struct ShapeColors
+{
+    ImU32 outline = 0;
+    ImU32 fill = 0;
+};
+
+ShapeColors GetShapeColors( BodyType type )
+{
+    switch( type )
+    {
+    case BodyType::Static:
+        return
+        {
+            IM_COL32( 120, 220, 140, 255 ),
+            IM_COL32( 120, 220, 140, 55 )
+        };
+
+    case BodyType::Kinematic:
+        return
+        {
+            IM_COL32( 245, 205, 90, 255 ),
+            IM_COL32( 245, 205, 90, 60 )
+        };
+
+    case BodyType::Dynamic:
+        return
+        {
+            IM_COL32( 90, 190, 255, 255 ),
+            IM_COL32( 90, 190, 255, 70 )
+        };
+
+    default:
+        return
+        {
+            IM_COL32( 230, 230, 230, 255 ),
+            IM_COL32( 230, 230, 230, 50 )
+        };
+    }
+}
+
+void RefreshContacts(
+    VisualScene& scene,
+    std::vector<ContactData>& contacts )
+{
+    contacts.clear();
+
+    scene.world.UpdateCollisions(
+        [&]( const ContactData& data )
+        {
+            contacts.push_back( data );
+        }
+    );
+}
+
+vec2 GetWorldCenter(
+    const World& world,
+    BodyId bodyId )
+{
+    return TransformPoint(
+        world.GetBodyTransform( bodyId ),
+        world.GetBodyLocalCenter( bodyId )
+    );
 }
 
 } // namespace
@@ -195,9 +360,11 @@ int main()
     using namespace zonai;
     using namespace zonai::sandbox;
 
-    HINSTANCE instance = GetModuleHandleW( nullptr );
+    HINSTANCE instance =
+        GetModuleHandleW( nullptr );
 
-    const wchar_t* className = L"ZonaiSandboxWindow";
+    const wchar_t* className =
+        L"ZonaiSandboxWindow";
 
     WNDCLASSW windowClass{};
     windowClass.lpfnWndProc = WndProc;
@@ -209,20 +376,21 @@ int main()
         return 1;
     }
 
-    HWND hwnd = CreateWindowExW(
-        0,
-        className,
-        L"Zonai Physics Sandbox",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        1280,
-        720,
-        nullptr,
-        nullptr,
-        instance,
-        nullptr
-    );
+    HWND hwnd =
+        CreateWindowExW(
+            0,
+            className,
+            L"Zonai Physics Sandbox",
+            WS_OVERLAPPEDWINDOW,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            1280,
+            720,
+            nullptr,
+            nullptr,
+            instance,
+            nullptr
+        );
 
     if( !hwnd )
     {
@@ -239,16 +407,19 @@ int main()
     swapChainDesc.BufferCount = 2;
     swapChainDesc.BufferDesc.Width = 0;
     swapChainDesc.BufferDesc.Height = 0;
-    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapChainDesc.BufferDesc.Format =
+        DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapChainDesc.BufferUsage =
+        DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapChainDesc.OutputWindow = hwnd;
     swapChainDesc.SampleDesc.Count = 1;
     swapChainDesc.Windowed = TRUE;
-    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    swapChainDesc.SwapEffect =
+        DXGI_SWAP_EFFECT_DISCARD;
 
     D3D_FEATURE_LEVEL featureLevel{};
 
-    HRESULT result =
+    const HRESULT result =
         D3D11CreateDeviceAndSwapChain(
             nullptr,
             D3D_DRIVER_TYPE_HARDWARE,
@@ -298,225 +469,48 @@ int main()
     }
 
     // ---------------------------------------------------------
-    // Visual test scene
+    // Physics visual test
     // ---------------------------------------------------------
 
     DebugCamera camera{};
+    camera.center = { 0.0f, 0.5f };
+    camera.pixelsPerMeter = 55.0f;
 
+    std::unique_ptr<VisualScene> scene =
+        std::make_unique<VisualScene>();
+
+    std::vector<ContactData> contacts;
+    contacts.reserve( 16 );
+
+    bool playing = false;
     bool showGrid = true;
     bool showAABBs = true;
+    bool showContacts = true;
+    bool showCOM = true;
     bool showLabels = true;
 
-    bool showDynamicTree = true;
-    bool showStaticTree = true;
+    bool showDynamicTree = false;
+    bool showKinematicTree = false;
+    bool showStaticTree = false;
     bool showTreeLeaves = true;
     bool showTreeInternal = true;
     bool showTreeLabels = false;
 
-    circle2 circle{
-        { -4.0f, 2.0f },
-        0.9f
-    };
+    constexpr float FIXED_TIME_STEP =
+        1.0f / 60.0f;
 
-    const capsule2 capsule{
-        { -1.5f, -1.5f },
-        { 1.0f, -0.4f },
-        0.45f
-    };
+    constexpr int MAX_STEPS_PER_FRAME = 8;
 
-    const segment2 segment{
-        { 2.5f, 2.2f },
-        { 5.2f, 1.0f }
-    };
+    float accumulator = 0.0f;
+    std::uint64_t stepCount = 0;
 
-    const std::array<vec2, 5> polygonVertices{
-        vec2{ 2.4f, -0.8f },
-        vec2{ 3.8f, 0.2f },
-        vec2{ 5.3f, -0.7f },
-        vec2{ 4.8f, -2.3f },
-        vec2{ 2.5f, -2.5f }
-    };
-
-    const polygon2 polygon = MakePolygon( polygonVertices );
-
-    // AABB Tree 구조를 관찰하기 위한 추가 geometry.
-    const std::array<circle2, 5> extraCircles{
-        circle2{ { -7.0f, -3.6f }, 0.65f },
-        circle2{ { -6.2f,  4.0f }, 0.80f },
-        circle2{ { -2.0f,  4.6f }, 0.55f },
-        circle2{ {  5.7f,  3.8f }, 0.75f },
-        circle2{ {  7.0f, -3.4f }, 0.90f }
-    };
-
-    const std::array<capsule2, 5> extraCapsules{
-        capsule2{ { -7.2f,  0.5f }, { -5.9f,  1.4f }, 0.30f },
-        capsule2{ { -5.0f, -4.1f }, { -3.5f, -3.2f }, 0.38f },
-        capsule2{ { -0.3f, -3.8f }, {  1.4f, -4.5f }, 0.30f },
-        capsule2{ {  3.7f,  4.1f }, {  5.1f,  4.6f }, 0.34f },
-        capsule2{ {  5.8f, -0.6f }, {  7.1f,  0.6f }, 0.42f }
-    };
-
-    const std::array<segment2, 5> extraSegments{
-        segment2{ { -7.5f, -1.1f }, { -6.0f, -2.3f } },
-        segment2{ { -3.6f,  3.0f }, { -2.2f,  3.8f } },
-        segment2{ {  0.8f,  2.7f }, {  2.4f,  3.4f } },
-        segment2{ {  3.8f, -2.1f }, {  5.4f, -3.1f } },
-        segment2{ {  6.0f,  2.0f }, {  7.4f,  1.0f } }
-    };
-
-    const std::array<polygon2, 5> extraPolygons{
-        MakeDebugBox( { -5.2f,  2.5f }, { 0.65f, 0.45f } ),
-        MakeDebugBox( { -2.4f, -2.7f }, { 0.55f, 0.85f } ),
-        MakeDebugBox( {  0.3f,  0.8f }, { 0.75f, 0.50f } ),
-        MakeDebugBox( {  3.1f,  1.1f }, { 0.50f, 0.90f } ),
-        MakeDebugBox( {  6.1f, -4.0f }, { 0.70f, 0.45f } )
-    };
-
-    aabb2 circleAABB = ComputeAABB( circle );
-    const aabb2 capsuleAABB = ComputeAABB( capsule );
-    const aabb2 segmentAABB = ComputeAABB( segment );
-    const aabb2 polygonAABB = ComputeAABB( polygon );
+    RefreshContacts(
+        *scene,
+        contacts
+    );
 
     // ---------------------------------------------------------
-    // BroadPhase visual test
-    // ---------------------------------------------------------
-
-    BroadPhase broadPhase{};
-
-    std::vector<Shape> shapes;
-    std::vector<vec2> shapeCenters;
-
-    shapes.reserve( 24 );
-    shapeCenters.reserve( 24 );
-
-    auto createSceneProxy =
-        [&]( BodyType type,
-             const aabb2& aabb,
-             const vec2& center,
-             ShapeGeometry geometry )
-        {
-            const std::int32_t shapeIndex =
-                static_cast<std::int32_t>( shapes.size() );
-
-            Shape shape{};
-            shape.bodyId = shapeIndex;
-            shape.geometry = std::move( geometry );
-
-            shapes.push_back( std::move( shape ) );
-            shapeCenters.push_back( center );
-
-            const ProxyKey proxyKey =
-                broadPhase.CreateProxy( type, aabb, shapeIndex );
-
-            return std::pair{ shapeIndex, proxyKey };
-        };
-
-    const auto [circleShape, circleProxy] =
-        createSceneProxy(
-            BodyType::Dynamic,
-            circleAABB,
-            circle.center,
-            circle
-        );
-
-    createSceneProxy(
-        BodyType::Static,
-        capsuleAABB,
-        ( capsule.center1 + capsule.center2 ) * 0.5f,
-        capsule
-    );
-
-    createSceneProxy(
-        BodyType::Static,
-        segmentAABB,
-        ( segment.a + segment.b ) * 0.5f,
-        segment
-    );
-
-    createSceneProxy(
-        BodyType::Static,
-        polygonAABB,
-        polygon.centroid,
-        polygon
-    );
-
-    for( std::size_t i = 0; i < extraCircles.size(); ++i )
-    {
-        const BodyType type =
-            ( i & 1u ) == 0 ? BodyType::Dynamic : BodyType::Static;
-
-        createSceneProxy(
-            type,
-            ComputeAABB( extraCircles[i] ),
-            extraCircles[i].center,
-            extraCircles[i]
-        );
-    }
-
-    for( std::size_t i = 0; i < extraCapsules.size(); ++i )
-    {
-        const BodyType type =
-            ( i & 1u ) == 0 ? BodyType::Static : BodyType::Dynamic;
-
-        createSceneProxy(
-            type,
-            ComputeAABB( extraCapsules[i] ),
-            ( extraCapsules[i].center1 + extraCapsules[i].center2 ) * 0.5f,
-            extraCapsules[i]
-        );
-    }
-
-    for( std::size_t i = 0; i < extraSegments.size(); ++i )
-    {
-        const BodyType type =
-            ( i & 1u ) == 0 ? BodyType::Dynamic : BodyType::Static;
-
-        createSceneProxy(
-            type,
-            ComputeAABB( extraSegments[i] ),
-            ( extraSegments[i].a + extraSegments[i].b ) * 0.5f,
-            extraSegments[i]
-        );
-    }
-
-    for( std::size_t i = 0; i < extraPolygons.size(); ++i )
-    {
-        const BodyType type =
-            ( i & 1u ) == 0 ? BodyType::Static : BodyType::Dynamic;
-
-        createSceneProxy(
-            type,
-            ComputeAABB( extraPolygons[i] ),
-            extraPolygons[i].centroid,
-            extraPolygons[i]
-        );
-    }
-
-    std::vector<std::pair<std::int32_t, std::int32_t>> candidatePairs;
-    std::vector<DebugContact> contacts;
-
-    // 초기 proxy의 moved 상태를 한 번 소비해 drag 전 상태를 깨끗하게 맞춤.
-    broadPhase.UpdatePairs(
-        shapes,
-        [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
-        {
-            if( shapeIndexA == circleShape || shapeIndexB == circleShape )
-            {
-                candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
-            }
-        }
-    );
-
-    candidatePairs.clear();
-
-    const DynamicTree& dynamicTree = broadPhase.GetTree( BodyType::Dynamic );
-    const DynamicTree& staticTree = broadPhase.GetTree( BodyType::Static );
-
-    bool draggingCircle = false;
-    vec2 circleGrabOffset{};
-
-    // ---------------------------------------------------------
-    // Main Loop
+    // Main loop
     // ---------------------------------------------------------
 
     MSG message{};
@@ -524,7 +518,12 @@ int main()
 
     while( running )
     {
-        while( PeekMessageW( &message, nullptr, 0, 0, PM_REMOVE ) )
+        while( PeekMessageW(
+            &message,
+            nullptr,
+            0,
+            0,
+            PM_REMOVE ) )
         {
             if( message.message == WM_QUIT )
             {
@@ -545,130 +544,382 @@ int main()
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
-        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        // 렌더링 FPS와 물리 simulation 주기를 분리하기 위해 fixed time step을 사용함.
+        if( playing )
+        {
+            accumulator +=
+                std::min( io.DeltaTime, 0.25f );
 
-        ImGui::SetNextWindowPos( viewport->WorkPos );
-        ImGui::SetNextWindowSize( viewport->WorkSize );
+            int frameStepCount = 0;
+
+            while( accumulator >= FIXED_TIME_STEP &&
+                   frameStepCount < MAX_STEPS_PER_FRAME )
+            {
+                scene->world.Step(
+                    FIXED_TIME_STEP
+                );
+
+                accumulator -= FIXED_TIME_STEP;
+                ++frameStepCount;
+                ++stepCount;
+            }
+
+            // 너무 긴 frame 뒤에 끝없이 따라잡는 상황은 방지함.
+            if( frameStepCount == MAX_STEPS_PER_FRAME )
+            {
+                accumulator = 0.0f;
+            }
+
+            RefreshContacts(
+                *scene,
+                contacts
+            );
+        }
+
+        const ImGuiViewport* viewport =
+            ImGui::GetMainViewport();
+
+        ImGui::SetNextWindowPos(
+            viewport->WorkPos
+        );
+        ImGui::SetNextWindowSize(
+            viewport->WorkSize
+        );
 
         constexpr ImGuiWindowFlags WINDOW_FLAGS =
             ImGuiWindowFlags_NoCollapse |
             ImGuiWindowFlags_NoMove |
             ImGuiWindowFlags_NoResize;
 
-        ImGui::Begin( "Zonai Physics Sandbox", nullptr, WINDOW_FLAGS );
+        ImGui::Begin(
+            "Zonai Physics Sandbox",
+            nullptr,
+            WINDOW_FLAGS
+        );
 
         // -----------------------------------------------------
         // Controls
         // -----------------------------------------------------
 
-        ImGui::BeginChild( "Controls", ImVec2( 230.0f, 0.0f ), true );
+        ImGui::BeginChild(
+            "Controls",
+            ImVec2( 270.0f, 0.0f ),
+            true
+        );
 
-        ImGui::TextUnformatted( "Geometry Debug View" );
+        ImGui::TextUnformatted(
+            "World Simulation"
+        );
         ImGui::Separator();
 
-        ImGui::Checkbox( "Grid / Axis", &showGrid );
-        ImGui::Checkbox( "Shape AABBs", &showAABBs );
-        ImGui::Checkbox( "Labels", &showLabels );
+        if( ImGui::Button(
+            playing ? "Pause" : "Play",
+            ImVec2( 78.0f, 0.0f ) ) )
+        {
+            playing = !playing;
+        }
 
+        ImGui::SameLine();
+
+        if( ImGui::Button(
+            "Step",
+            ImVec2( 72.0f, 0.0f ) ) )
+        {
+            scene->world.Step(
+                FIXED_TIME_STEP
+            );
+
+            ++stepCount;
+            accumulator = 0.0f;
+
+            RefreshContacts(
+                *scene,
+                contacts
+            );
+        }
+
+        ImGui::SameLine();
+
+        if( ImGui::Button(
+            "Reset",
+            ImVec2( 72.0f, 0.0f ) ) )
+        {
+            scene =
+                std::make_unique<VisualScene>();
+
+            contacts.clear();
+            accumulator = 0.0f;
+            stepCount = 0;
+            playing = false;
+
+            RefreshContacts(
+                *scene,
+                contacts
+            );
+        }
+
+        ImGui::Spacing();
+
+        vec2 gravity =
+            scene->world.GetGravity();
+
+        float gravityValues[2]
+        {
+            gravity.x,
+            gravity.y
+        };
+
+        if( ImGui::DragFloat2(
+            "Gravity",
+            gravityValues,
+            0.1f,
+            -30.0f,
+            30.0f,
+            "%.2f" ) )
+        {
+            scene->world.SetGravity(
+                {
+                    gravityValues[0],
+                    gravityValues[1]
+                }
+            );
+        }
+
+        ImGui::Text(
+            "Fixed dt: %.5f s",
+            FIXED_TIME_STEP
+        );
+        ImGui::Text(
+            "Steps: %llu",
+            static_cast<unsigned long long>( stepCount )
+        );
+
+        ImGui::Spacing();
         ImGui::Separator();
-        ImGui::TextUnformatted( "AABB Tree" );
+        ImGui::TextUnformatted(
+            "Impulse Test"
+        );
 
-        ImGui::Checkbox( "Dynamic Tree", &showDynamicTree );
-        ImGui::Checkbox( "Static Tree", &showStaticTree );
-        ImGui::Checkbox( "Tree Leaves", &showTreeLeaves );
-        ImGui::Checkbox( "Tree Internal", &showTreeInternal );
-        ImGui::Checkbox( "Tree Labels", &showTreeLabels );
+        const float circleMass =
+            scene->world.GetBodyMass(
+                scene->impulseBody
+            );
+
+        if( ImGui::Button(
+            "Jump impulse",
+            ImVec2( -1.0f, 0.0f ) ) )
+        {
+            // DeltaV = J / M = 5 m/s
+            scene->world.ApplyLinearImpulseToCenter(
+                scene->impulseBody,
+                { 0.0f, circleMass * 5.0f }
+            );
+        }
+
+        if( ImGui::Button(
+            "Off-center kick",
+            ImVec2( -1.0f, 0.0f ) ) )
+        {
+            const vec2 center =
+                GetWorldCenter(
+                    scene->world,
+                    scene->impulseBody
+                );
+
+            // COM 위쪽을 오른쪽으로 밀어 translation + rotation을 동시에 확인함.
+            scene->world.ApplyLinearImpulse(
+                scene->impulseBody,
+                { circleMass * 4.0f, 0.0f },
+                center + vec2{ 0.0f, 0.8f }
+            );
+        }
+
+        const float boxInertia =
+            scene->world.GetBodyRotationalInertia(
+                scene->torqueBody
+            );
+
+        if( ImGui::Button(
+            "Spin box",
+            ImVec2( -1.0f, 0.0f ) ) )
+        {
+            // DeltaW = L / I = 3 rad/s
+            scene->world.ApplyAngularImpulse(
+                scene->torqueBody,
+                boxInertia * 3.0f
+            );
+        }
+
+        const vec2 circleVelocity =
+            scene->world.GetBodyLinearVelocity(
+                scene->impulseBody
+            );
+
+        const float circleAngularVelocity =
+            scene->world.GetBodyAngularVelocity(
+                scene->impulseBody
+            );
+
+        ImGui::Text(
+            "Circle v: (%.2f, %.2f)",
+            circleVelocity.x,
+            circleVelocity.y
+        );
+        ImGui::Text(
+            "Circle w: %.2f rad/s",
+            circleAngularVelocity
+        );
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextUnformatted(
+            "Debug Draw"
+        );
+
+        ImGui::Checkbox(
+            "Grid / Axis",
+            &showGrid
+        );
+        ImGui::Checkbox(
+            "Shape AABBs",
+            &showAABBs
+        );
+        ImGui::Checkbox(
+            "Contact points",
+            &showContacts
+        );
+        ImGui::Checkbox(
+            "Center of mass",
+            &showCOM
+        );
+        ImGui::Checkbox(
+            "Labels",
+            &showLabels
+        );
+
+        ImGui::Spacing();
+        ImGui::TextUnformatted(
+            "AABB Tree"
+        );
+
+        ImGui::Checkbox(
+            "Dynamic Tree",
+            &showDynamicTree
+        );
+        ImGui::Checkbox(
+            "Kinematic Tree",
+            &showKinematicTree
+        );
+        ImGui::Checkbox(
+            "Static Tree",
+            &showStaticTree
+        );
+
+        ImGui::Checkbox(
+            "Tree Leaves",
+            &showTreeLeaves
+        );
+        ImGui::Checkbox(
+            "Tree Internal",
+            &showTreeInternal
+        );
+        ImGui::Checkbox(
+            "Tree Labels",
+            &showTreeLabels
+        );
+
+        const BroadPhase& broadPhase =
+            scene->world.GetBroadPhase();
+
+        const DynamicTree& dynamicTree =
+            broadPhase.GetTree(
+                BodyType::Dynamic
+            );
+
+        const DynamicTree& kinematicTree =
+            broadPhase.GetTree(
+                BodyType::Kinematic
+            );
+
+        const DynamicTree& staticTree =
+            broadPhase.GetTree(
+                BodyType::Static
+            );
 
         ImGui::Spacing();
 
         ImGui::Text(
-            "Dynamic: proxies %zu / height %d",
+            "Bodies: %zu",
+            scene->world.GetBodyCount()
+        );
+        ImGui::Text(
+            "Shapes: %zu",
+            scene->world.GetShapeCount()
+        );
+        ImGui::Text(
+            "Persistent contacts: %zu",
+            scene->world.GetContactCount()
+        );
+        ImGui::Text(
+            "Touching contacts: %zu",
+            contacts.size()
+        );
+
+        ImGui::Text(
+            "Dynamic tree: %zu / h%d",
             dynamicTree.GetProxyCount(),
             dynamicTree.GetHeight()
         );
-        ImGui::Text( "Dynamic area ratio: %.2f", dynamicTree.GetAreaRatio() );
-
         ImGui::Text(
-            "Static: proxies %zu / height %d",
+            "Kinematic tree: %zu / h%d",
+            kinematicTree.GetProxyCount(),
+            kinematicTree.GetHeight()
+        );
+        ImGui::Text(
+            "Static tree: %zu / h%d",
             staticTree.GetProxyCount(),
             staticTree.GetHeight()
         );
-        ImGui::Text( "Static area ratio: %.2f", staticTree.GetAreaRatio() );
 
         ImGui::Spacing();
 
-        if( ImGui::Button( "Reset Camera" ) )
+        if( ImGui::Button(
+            "Reset Camera",
+            ImVec2( -1.0f, 0.0f ) ) )
         {
             camera = {};
+            camera.center = { 0.0f, 0.5f };
+            camera.pixelsPerMeter = 55.0f;
         }
 
-        ImGui::Separator();
-
-        ImGui::Text( "FPS: %.1f", io.Framerate );
-        ImGui::Text( "Scale: %.1f px/m", camera.pixelsPerMeter );
-        ImGui::Text( "Scene shapes: %zu", shapes.size() );
-        ImGui::Text( "Circle BroadPhase candidates: %zu", candidatePairs.size() );
-        ImGui::Text( "Circle NarrowPhase contacts: %zu", contacts.size() );
+        ImGui::Text(
+            "FPS: %.1f",
+            io.Framerate
+        );
+        ImGui::Text(
+            "Scale: %.1f px/m",
+            camera.pixelsPerMeter
+        );
 
         ImGui::Spacing();
+        ImGui::Separator();
+
+        ImGui::TextColored(
+            ImVec4( 1.0f, 0.65f, 0.25f, 1.0f ),
+            "Contact Solver: not implemented"
+        );
+
         ImGui::TextWrapped(
-            "Left drag blue Circle: move proxy\n"
+            "Contacts and normals are visualized, "
+            "but Dynamic bodies currently pass through other shapes."
+        );
+
+        ImGui::Spacing();
+
+        ImGui::TextWrapped(
             "Mouse wheel: zoom\n"
             "Middle drag: pan"
         );
-
-        if( !candidatePairs.empty() )
-        {
-            ImGui::Separator();
-            ImGui::TextUnformatted( "Candidate pairs" );
-
-            for( const auto& pair : candidatePairs )
-            {
-                ImGui::BulletText( "%d <-> %d", pair.first, pair.second );
-            }
-        }
-
-        if( !contacts.empty() )
-        {
-            ImGui::Separator();
-            ImGui::TextUnformatted( "NarrowPhase contacts" );
-
-            for( const DebugContact& contact : contacts )
-            {
-                ImGui::Text(
-                    "Circle %d <-> Shape %d",
-                    circleShape,
-                    contact.otherShape
-                );
-
-                ImGui::Text(
-                    "  normal: (%.2f, %.2f)",
-                    contact.manifold.normal.x,
-                    contact.manifold.normal.y
-                );
-
-                for( int i = 0; i < contact.manifold.pointCount; ++i )
-                {
-                    const localManifoldPoint2& point =
-                        contact.manifold.points[i];
-
-                    ImGui::Text(
-                        "  p%d (%.2f, %.2f) sep %.3f",
-                        i,
-                        point.point.x,
-                        point.point.y,
-                        point.separation
-                    );
-                }
-            }
-        }
-
-        ImGui::Separator();
-        ImGui::TextUnformatted( "Visible geometry" );
-        ImGui::BulletText( "Circle x6" );
-        ImGui::BulletText( "Capsule x6" );
-        ImGui::BulletText( "Segment x6" );
-        ImGui::BulletText( "Polygon x6" );
 
         ImGui::EndChild();
 
@@ -686,126 +937,84 @@ int main()
             ImGuiWindowFlags_NoScrollWithMouse
         );
 
-        ImVec2 canvasMin = ImGui::GetCursorScreenPos();
-        ImVec2 canvasSize = ImGui::GetContentRegionAvail();
+        const ImVec2 canvasMin =
+            ImGui::GetCursorScreenPos();
 
-        canvasSize.x = canvasSize.x < 1.0f ? 1.0f : canvasSize.x;
-        canvasSize.y = canvasSize.y < 1.0f ? 1.0f : canvasSize.y;
+        ImVec2 canvasSize =
+            ImGui::GetContentRegionAvail();
+
+        canvasSize.x =
+            std::max( canvasSize.x, 1.0f );
+        canvasSize.y =
+            std::max( canvasSize.y, 1.0f );
 
         ImGui::InvisibleButton(
             "CanvasInput",
             canvasSize,
-            ImGuiButtonFlags_MouseButtonLeft |
             ImGuiButtonFlags_MouseButtonMiddle
         );
 
-        const bool canvasHovered = ImGui::IsItemHovered();
-
-        if( canvasHovered && io.MouseWheel != 0.0f )
-        {
-            const vec2 beforeZoom =
-                camera.ScreenToWorld( io.MousePos, canvasMin, canvasSize );
-
-            camera.Zoom( io.MouseWheel );
-
-            const vec2 afterZoom =
-                camera.ScreenToWorld( io.MousePos, canvasMin, canvasSize );
-
-            // cursor 아래 world 좌표가 줌 전후에도 같은 위치에 머물게 함.
-            camera.center += beforeZoom - afterZoom;
-        }
-
-        if( canvasHovered && ImGui::IsMouseDragging( ImGuiMouseButton_Middle ) )
-        {
-            camera.PanPixels( io.MouseDelta );
-        }
-
-        const vec2 mouseWorld =
-            camera.ScreenToWorld( io.MousePos, canvasMin, canvasSize );
+        const bool canvasHovered =
+            ImGui::IsItemHovered();
 
         if( canvasHovered &&
-            ImGui::IsMouseClicked( ImGuiMouseButton_Left ) &&
-            Contains( circle, mouseWorld ) )
+            io.MouseWheel != 0.0f )
         {
-            draggingCircle = true;
-            circleGrabOffset = circle.center - mouseWorld;
-        }
-
-        if( draggingCircle )
-        {
-            if( ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
-            {
-                circle.center = mouseWorld + circleGrabOffset;
-                circleAABB = ComputeAABB( circle );
-                shapeCenters[circleShape] = circle.center;
-                shapes[circleShape].geometry = circle;
-
-                // 실제 BroadPhase proxy를 새 Circle AABB로 이동시킴.
-                broadPhase.MoveProxy( circleProxy, circleAABB );
-
-                candidatePairs.clear();
-
-                broadPhase.UpdatePairs(
-                    shapes,
-                    [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
-                    {
-                        if( shapeIndexA == circleShape || shapeIndexB == circleShape )
-                        {
-                            candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
-                        }
-                    }
+            const vec2 beforeZoom =
+                camera.ScreenToWorld(
+                    io.MousePos,
+                    canvasMin,
+                    canvasSize
                 );
 
-                contacts.clear();
+            camera.Zoom(
+                io.MouseWheel
+            );
 
-                for( const auto& pair : candidatePairs )
-                {
-                    if( pair.first != circleShape && pair.second != circleShape )
-                    {
-                        continue;
-                    }
+            const vec2 afterZoom =
+                camera.ScreenToWorld(
+                    io.MousePos,
+                    canvasMin,
+                    canvasSize
+                );
 
-                    const std::int32_t otherShape =
-                        pair.first == circleShape ? pair.second : pair.first;
-
-                    if( otherShape < 0 ||
-                        static_cast<std::size_t>( otherShape ) >= shapes.size() )
-                    {
-                        continue;
-                    }
-
-                    const localManifold2 manifold =
-                        CollideDebugCircle(
-                            circle,
-                            shapes[otherShape].geometry
-                        );
-
-                    if( manifold.pointCount > 0 )
-                    {
-                        contacts.push_back( { otherShape, manifold } );
-                    }
-                }
-            }
-            else
-            {
-                draggingCircle = false;
-            }
+            // cursor 아래 world 위치가 zoom 전후에도 고정되게 camera center를 보정함.
+            camera.center +=
+                beforeZoom - afterZoom;
         }
 
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-        const ImVec2 canvasMax{
+        if( canvasHovered &&
+            ImGui::IsMouseDragging(
+                ImGuiMouseButton_Middle ) )
+        {
+            camera.PanPixels(
+                io.MouseDelta
+            );
+        }
+
+        ImDrawList* drawList =
+            ImGui::GetWindowDrawList();
+
+        const ImVec2 canvasMax
+        {
             canvasMin.x + canvasSize.x,
             canvasMin.y + canvasSize.y
         };
 
-        drawList->PushClipRect( canvasMin, canvasMax, true );
+        drawList->PushClipRect(
+            canvasMin,
+            canvasMax,
+            true
+        );
+
         drawList->AddRectFilled(
             canvasMin,
             canvasMax,
             IM_COL32( 23, 25, 31, 255 )
         );
 
-        DebugDraw debugDraw{
+        DebugDraw debugDraw
+        {
             drawList,
             camera,
             canvasMin,
@@ -817,11 +1026,20 @@ int main()
             debugDraw.DrawGrid();
         }
 
-        constexpr ImU32 DYNAMIC_TREE_LEAF = IM_COL32( 70, 200, 255, 220 );
-        constexpr ImU32 DYNAMIC_TREE_INTERNAL = IM_COL32( 80, 120, 255, 150 );
+        constexpr ImU32 DYNAMIC_TREE_LEAF =
+            IM_COL32( 70, 200, 255, 220 );
+        constexpr ImU32 DYNAMIC_TREE_INTERNAL =
+            IM_COL32( 80, 120, 255, 140 );
 
-        constexpr ImU32 STATIC_TREE_LEAF = IM_COL32( 110, 220, 130, 220 );
-        constexpr ImU32 STATIC_TREE_INTERNAL = IM_COL32( 230, 180, 80, 150 );
+        constexpr ImU32 KINEMATIC_TREE_LEAF =
+            IM_COL32( 245, 205, 90, 220 );
+        constexpr ImU32 KINEMATIC_TREE_INTERNAL =
+            IM_COL32( 210, 165, 70, 130 );
+
+        constexpr ImU32 STATIC_TREE_LEAF =
+            IM_COL32( 110, 220, 130, 220 );
+        constexpr ImU32 STATIC_TREE_INTERNAL =
+            IM_COL32( 80, 160, 100, 130 );
 
         if( showStaticTree )
         {
@@ -833,6 +1051,19 @@ int main()
                 showTreeLabels,
                 STATIC_TREE_LEAF,
                 STATIC_TREE_INTERNAL
+            );
+        }
+
+        if( showKinematicTree )
+        {
+            debugDraw.DrawTree(
+                kinematicTree,
+                "K",
+                showTreeLeaves,
+                showTreeInternal,
+                showTreeLabels,
+                KINEMATIC_TREE_LEAF,
+                KINEMATIC_TREE_INTERNAL
             );
         }
 
@@ -849,126 +1080,117 @@ int main()
             );
         }
 
-        constexpr ImU32 CIRCLE_OUTLINE = IM_COL32( 90, 200, 255, 255 );
-        constexpr ImU32 CIRCLE_FILL = IM_COL32( 90, 200, 255, 70 );
+        constexpr ImU32 AABB_COLOR =
+            IM_COL32( 210, 100, 230, 210 );
 
-        constexpr ImU32 CAPSULE_OUTLINE = IM_COL32( 120, 220, 130, 255 );
-        constexpr ImU32 CAPSULE_FILL = IM_COL32( 120, 220, 130, 70 );
+        constexpr ImU32 LABEL_COLOR =
+            IM_COL32( 230, 232, 238, 255 );
 
-        constexpr ImU32 SEGMENT_COLOR = IM_COL32( 245, 205, 90, 255 );
+        constexpr ImU32 COM_COLOR =
+            IM_COL32( 255, 90, 180, 255 );
 
-        constexpr ImU32 POLYGON_OUTLINE = IM_COL32( 235, 135, 80, 255 );
-        constexpr ImU32 POLYGON_FILL = IM_COL32( 235, 135, 80, 70 );
-
-        constexpr ImU32 AABB_COLOR = IM_COL32( 210, 100, 230, 210 );
-        constexpr ImU32 LABEL_COLOR = IM_COL32( 230, 232, 238, 255 );
-        constexpr ImU32 PAIR_COLOR = IM_COL32( 255, 80, 100, 255 );
-        constexpr ImU32 CONTACT_COLOR = IM_COL32( 255, 220, 70, 255 );
-        constexpr ImU32 NORMAL_COLOR = IM_COL32( 100, 255, 140, 255 );
-
-        debugDraw.DrawCircle( circle, CIRCLE_OUTLINE, CIRCLE_FILL );
-        debugDraw.DrawCapsule( capsule, CAPSULE_OUTLINE, CAPSULE_FILL );
-        debugDraw.DrawSegment( segment, SEGMENT_COLOR, 3.0f );
-        debugDraw.DrawPolygon( polygon, POLYGON_OUTLINE, POLYGON_FILL );
-
-        for( const circle2& extraCircle : extraCircles )
+        for( const VisualShape& visual : scene->shapes )
         {
-            debugDraw.DrawCircle( extraCircle, CIRCLE_OUTLINE, CIRCLE_FILL );
-        }
+            const Body& body =
+                scene->world.GetBody(
+                    visual.bodyId
+                );
 
-        for( const capsule2& extraCapsule : extraCapsules )
-        {
-            debugDraw.DrawCapsule( extraCapsule, CAPSULE_OUTLINE, CAPSULE_FILL );
-        }
+            const Shape& shape =
+                scene->world.GetShape(
+                    visual.shapeId
+                );
 
-        for( const segment2& extraSegment : extraSegments )
-        {
-            debugDraw.DrawSegment( extraSegment, SEGMENT_COLOR, 3.0f );
-        }
+            const transform2 transform =
+                scene->world.GetBodyTransform(
+                    visual.bodyId
+                );
 
-        for( const polygon2& extraPolygon : extraPolygons )
-        {
-            debugDraw.DrawPolygon( extraPolygon, POLYGON_OUTLINE, POLYGON_FILL );
-        }
+            const ShapeColors colors =
+                GetShapeColors(
+                    body.type
+                );
 
-        if( showAABBs )
-        {
-            debugDraw.DrawAABB( circleAABB, AABB_COLOR );
-            debugDraw.DrawAABB( capsuleAABB, AABB_COLOR );
-            debugDraw.DrawAABB( segmentAABB, AABB_COLOR );
-            debugDraw.DrawAABB( polygonAABB, AABB_COLOR );
-
-            for( const circle2& extraCircle : extraCircles )
-            {
-                debugDraw.DrawAABB( ComputeAABB( extraCircle ), AABB_COLOR );
-            }
-
-            for( const capsule2& extraCapsule : extraCapsules )
-            {
-                debugDraw.DrawAABB( ComputeAABB( extraCapsule ), AABB_COLOR );
-            }
-
-            for( const segment2& extraSegment : extraSegments )
-            {
-                debugDraw.DrawAABB( ComputeAABB( extraSegment ), AABB_COLOR );
-            }
-
-            for( const polygon2& extraPolygon : extraPolygons )
-            {
-                debugDraw.DrawAABB( ComputeAABB( extraPolygon ), AABB_COLOR );
-            }
-        }
-
-        if( showLabels )
-        {
-            debugDraw.DrawLabel( circle.center, "Circle [0] Dynamic", LABEL_COLOR );
-            debugDraw.DrawLabel( capsule.center1, "Capsule [1] Static", LABEL_COLOR );
-            debugDraw.DrawLabel( segment.a, "Segment [2] Static", LABEL_COLOR );
-            debugDraw.DrawLabel( polygon.centroid, "Polygon [3] Static", LABEL_COLOR );
-        }
-
-        for( const auto& pair : candidatePairs )
-        {
-            if( pair.first != circleShape && pair.second != circleShape )
-            {
-                continue;
-            }
-
-            const std::int32_t otherShape =
-                pair.first == circleShape ? pair.second : pair.first;
-
-            if( otherShape < 0 ||
-                static_cast<std::size_t>( otherShape ) >= shapeCenters.size() )
-            {
-                continue;
-            }
-
-            debugDraw.DrawSegment(
-                { circle.center, shapeCenters[otherShape] },
-                PAIR_COLOR,
-                3.0f
+            debugDraw.DrawShape(
+                shape.geometry,
+                transform,
+                colors.outline,
+                colors.fill
             );
+
+            if( showAABBs &&
+                shape.proxyKey != Shape::NULL_INDEX )
+            {
+                const DynamicTree& tree =
+                    broadPhase.GetTree(
+                        GetProxyType(
+                            shape.proxyKey
+                        )
+                    );
+
+                debugDraw.DrawAABB(
+                    tree.GetProxyAABB(
+                        GetProxyId(
+                            shape.proxyKey
+                        )
+                    ),
+                    AABB_COLOR
+                );
+            }
+
+            if( showCOM &&
+                body.type != BodyType::Static )
+            {
+                debugDraw.DrawPoint(
+                    GetWorldCenter(
+                        scene->world,
+                        visual.bodyId
+                    ),
+                    COM_COLOR,
+                    4.5f
+                );
+            }
+
+            if( showLabels )
+            {
+                debugDraw.DrawLabel(
+                    transform.position,
+                    visual.label,
+                    LABEL_COLOR
+                );
+            }
         }
 
-        for( const DebugContact& contact : contacts )
+        if( showContacts )
         {
-            for( int i = 0; i < contact.manifold.pointCount; ++i )
+            constexpr ImU32 CONTACT_COLOR =
+                IM_COL32( 255, 220, 70, 255 );
+
+            constexpr ImU32 NORMAL_COLOR =
+                IM_COL32( 100, 255, 140, 255 );
+
+            for( const ContactData& contact : contacts )
             {
-                const localManifoldPoint2& point =
-                    contact.manifold.points[i];
+                for( int i = 0;
+                     i < contact.manifold.pointCount;
+                     ++i )
+                {
+                    const manifoldPoint2& point =
+                        contact.manifold.points[i];
 
-                debugDraw.DrawPoint(
-                    point.point,
-                    CONTACT_COLOR,
-                    5.0f
-                );
+                    debugDraw.DrawPoint(
+                        point.point,
+                        CONTACT_COLOR,
+                        5.0f
+                    );
 
-                debugDraw.DrawArrow(
-                    point.point,
-                    contact.manifold.normal,
-                    NORMAL_COLOR,
-                    0.8f
-                );
+                    debugDraw.DrawArrow(
+                        point.point,
+                        contact.manifold.normal,
+                        NORMAL_COLOR,
+                        0.8f
+                    );
+                }
             }
         }
 
@@ -983,7 +1205,8 @@ int main()
         // Render
         // -----------------------------------------------------
 
-        const float clearColor[4]{
+        const float clearColor[4]
+        {
             0.08f,
             0.08f,
             0.1f,
@@ -1001,9 +1224,14 @@ int main()
             clearColor
         );
 
-        ImGui_ImplDX11_RenderDrawData( ImGui::GetDrawData() );
+        ImGui_ImplDX11_RenderDrawData(
+            ImGui::GetDrawData()
+        );
 
-        g_d3d.swapChain->Present( 1, 0 );
+        g_d3d.swapChain->Present(
+            1,
+            0
+        );
     }
 
     // ---------------------------------------------------------
@@ -1020,7 +1248,10 @@ int main()
     g_d3d.device.Reset();
 
     DestroyWindow( hwnd );
-    UnregisterClassW( className, instance );
+    UnregisterClassW(
+        className,
+        instance
+    );
 
     return 0;
 }
