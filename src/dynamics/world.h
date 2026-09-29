@@ -13,6 +13,7 @@
 #include "collision/shape.h"
 #include "dynamics/body.h"
 #include "dynamics/bodySim.h"
+#include "dynamics/bodyState.h"
 #include "dynamics/contactData.h"
 #include "dynamics/id.h"
 
@@ -55,6 +56,20 @@ public:
 
     // Body의 simulation storage에 보관된 현재 world transform을 반환함.
     [[nodiscard]] transform2 GetBodyTransform( BodyId bodyId ) const;
+
+    // 정적 Body는 움직이지 않으므로 setter를 무시함.
+    void SetBodyLinearVelocity(
+        BodyId bodyId,
+        vec2 linearVelocity );
+
+    [[nodiscard]] vec2 GetBodyLinearVelocity( BodyId bodyId ) const;
+
+    // 정적 Body는 움직이지 않으므로 setter를 무시함.
+    void SetBodyAngularVelocity(
+        BodyId bodyId,
+        float angularVelocity );
+
+    [[nodiscard]] float GetBodyAngularVelocity( BodyId bodyId ) const;
 
     // null / 범위 / generation / 활성 slot을 모두 확인함.
     [[nodiscard]] bool IsValid( BodyId bodyId ) const noexcept;
@@ -254,6 +269,9 @@ private:
 
     // solver set 도입 전까지 Body와 같은 stable slot index로 보관하는 simulation 데이터.
     std::vector<BodySim> bodySims_;
+
+    // solver set 도입 전까지 Body와 같은 stable slot index로 보관하는 운동 상태.
+    std::vector<BodyState> bodyStates_;
 
     // 제거된 Body slot 재사용을 위한 free-list head.
     std::int32_t bodyFreeList_ = Body::NULL_INDEX;
