@@ -9,7 +9,8 @@ namespace zonai
 // sleep / awake solver set이 도입되기 전까지는 World가 Body와 같은 stable slot index로 보관함.
 struct BodyState
 {
-    // Body 원점의 world-space 선속도.
+    // 현재 초기 Step에서 사용하는 Body origin의 world-space 선속도.
+    // constraint solver 도입 시 center of mass 기준 상태로 전환할 예정임.
     vec2 linearVelocity{};
 
     // 2D z축 기준 각속도(rad/s).
