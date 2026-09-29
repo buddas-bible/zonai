@@ -73,6 +73,7 @@ bool World::IsValid( ContactId contactId ) const noexcept
         contact.generation == contactId.generation;
 }
 
+
 std::int32_t World::GetBodyIndex( BodyId bodyId ) const
 {
     assert( IsValid( bodyId ) );
@@ -90,6 +91,7 @@ std::int32_t World::GetContactIndex( ContactId contactId ) const
     assert( IsValid( contactId ) );
     return contactId.index1 - 1;
 }
+
 
 BodyId World::MakeBodyId( std::int32_t bodyIndex ) const
 {
@@ -127,6 +129,7 @@ ContactId World::MakeContactId( std::int32_t contactIndex ) const
     return { contactIndex + 1, contact.generation };
 }
 
+
 BodyId World::CreateBody( BodyType type, transform2 transform )
 {
     std::int32_t bodyIndex = Body::NULL_INDEX;
@@ -163,8 +166,7 @@ BodyId World::CreateBody( BodyType type, transform2 transform )
 
     Body& body = bodies_[bodyIndex];
 
-    const std::uint16_t generation =
-        static_cast<std::uint16_t>( body.generation + 1u );
+    const std::uint16_t generation = static_cast<std::uint16_t>( body.generation + 1u );
 
     body = {};
     body.bodyId = bodyIndex;
@@ -205,8 +207,7 @@ void World::DestroyBodyByIndex( std::int32_t bodyIndex )
     // Box2D처럼 먼저 이 Body에 연결된 모든 Contact를 제거함.
     while( body.headContactKey != Body::NULL_INDEX )
     {
-        const std::int32_t contactId =
-            GetContactId( body.headContactKey );
+        const std::int32_t contactId = GetContactId( body.headContactKey );
 
         assert( contactId >= 0 );
         assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
@@ -250,14 +251,9 @@ void World::DestroyBodyByIndex( std::int32_t bodyIndex )
 }
 
 
-ShapeId World::CreateShape(
-    BodyId bodyId,
-    ShapeGeometry geometry,
-    Filter filter,
-    float density )
+ShapeId World::CreateShape( BodyId bodyId, ShapeGeometry geometry, Filter filter, float density )
 {
-    const std::int32_t bodyIndex =
-        GetBodyIndex( bodyId );
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( !std::holds_alternative<std::monostate>( geometry ) );
     assert( std::isfinite( density ) );
@@ -380,10 +376,8 @@ void World::DestroyShapeByIndex( std::int32_t shapeIndex )
 
     while( contactKey != Body::NULL_INDEX )
     {
-        const std::int32_t contactId =
-            GetContactId( contactKey );
-        const std::int32_t edgeIndex =
-            GetContactEdgeIndex( contactKey );
+        const std::int32_t contactId = GetContactId( contactKey );
+        const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
 
         assert( contactId >= 0 );
         assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
@@ -417,8 +411,7 @@ void World::DestroyShapeByIndex( std::int32_t shapeIndex )
 
 void World::SetBodyTransform( BodyId bodyId, transform2 transform )
 {
-    const std::int32_t bodyIndex =
-        GetBodyIndex( bodyId );
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     // transform이 NaN / infinity를 포함하면 tree AABB까지 오염되므로 입구에서 차단함.
     assert( std::isfinite( transform.position.x ) );
@@ -432,8 +425,7 @@ void World::SetBodyTransform( BodyId bodyId, transform2 transform )
     assert( bodySim.bodyId == bodyIndex );
 
     bodySim.transform = transform;
-    bodySim.center =
-        TransformPoint( bodySim.transform, bodySim.localCenter );
+    bodySim.center = TransformPoint( bodySim.transform, bodySim.localCenter );
 
     SyncBodyProxies( bodyIndex );
 }
@@ -463,8 +455,7 @@ void World::SyncBodyProxies( std::int32_t bodyIndex )
 
         assert( shape.bodyId == bodyIndex );
 
-        const aabb2 worldAABB =
-            ComputeShapeAABB( shape.geometry, bodySim.transform );
+        const aabb2 worldAABB = ComputeShapeAABB( shape.geometry, bodySim.transform );
 
         // disabled Body 개념이 들어오면 proxy가 없는 Shape는 그대로 건너뜀.
         if( shape.proxyKey != Shape::NULL_INDEX )
@@ -662,9 +653,7 @@ transform2 World::GetBodyTransform( BodyId bodyId ) const
     return bodySim.transform;
 }
 
-void World::SetBodyLinearVelocity(
-    BodyId bodyId,
-    vec2 linearVelocity )
+void World::SetBodyLinearVelocity( BodyId bodyId, vec2 linearVelocity )
 {
     assert( std::isfinite( linearVelocity.x ) );
     assert( std::isfinite( linearVelocity.y ) );
@@ -672,9 +661,9 @@ void World::SetBodyLinearVelocity(
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
     const Body& body = bodies_[bodyIndex];
 
-    // Box2D와 같이 정적 Body에는 velocity를 부여하지 않음.
     if( body.type == BodyType::Static )
     {
+        // 정적 Body는 움직이지 않으므로 setter를 무시함.
         return;
     }
 
@@ -692,18 +681,16 @@ vec2 World::GetBodyLinearVelocity( BodyId bodyId ) const
     return bodyStates_[bodyIndex].linearVelocity;
 }
 
-void World::SetBodyAngularVelocity(
-    BodyId bodyId,
-    float angularVelocity )
+void World::SetBodyAngularVelocity( BodyId bodyId, float angularVelocity )
 {
     assert( std::isfinite( angularVelocity ) );
 
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
     const Body& body = bodies_[bodyIndex];
 
-    // Box2D와 같이 정적 Body에는 angular velocity를 부여하지 않음.
     if( body.type == BodyType::Static )
     {
+        // 정적 Body는 움직이지 않으므로 setter를 무시함.
         return;
     }
 
@@ -750,10 +737,7 @@ vec2 World::GetGravity() const noexcept
     return gravity_;
 }
 
-void World::ApplyForce(
-    BodyId bodyId,
-    vec2 force,
-    vec2 point )
+void World::ApplyForce( BodyId bodyId, vec2 force, vec2 point )
 {
     assert( std::isfinite( force.x ) );
     assert( std::isfinite( force.y ) );
@@ -787,9 +771,7 @@ void World::ApplyForce(
         );
 }
 
-void World::ApplyForceToCenter(
-    BodyId bodyId,
-    vec2 force )
+void World::ApplyForceToCenter( BodyId bodyId, vec2 force )
 {
     assert( std::isfinite( force.x ) );
     assert( std::isfinite( force.y ) );
@@ -806,9 +788,7 @@ void World::ApplyForceToCenter(
     bodySims_[bodyIndex].force += force;
 }
 
-void World::ApplyTorque(
-    BodyId bodyId,
-    float torque )
+void World::ApplyTorque( BodyId bodyId, float torque )
 {
     assert( std::isfinite( torque ) );
 
@@ -835,10 +815,7 @@ void World::ClearForces( BodyId bodyId )
     bodySim.torque = 0.0f;
 }
 
-void World::ApplyLinearImpulse(
-    BodyId bodyId,
-    vec2 impulse,
-    vec2 point )
+void World::ApplyLinearImpulse( BodyId bodyId, vec2 impulse, vec2 point )
 {
     assert( std::isfinite( impulse.x ) );
     assert( std::isfinite( impulse.y ) );

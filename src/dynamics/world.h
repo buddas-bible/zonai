@@ -33,22 +33,18 @@ class World
 {
 public:
     // 새 Body를 만들고 slot index + generation으로 구성된 외부 handle을 반환함.
-    [[nodiscard]] BodyId CreateBody(
-        BodyType type = BodyType::Static,
-        transform2 transform = {} );
+    [[nodiscard]] BodyId CreateBody( BodyType type = BodyType::Static, transform2 transform = {} );
 
     // handle이 가리키는 Body와 연결된 Contact / Shape / proxy를 모두 정리함.
     void DestroyBody( BodyId bodyId );
 
+
     // local geometry를 Body에 연결하고 Shape handle을 반환함.
-    [[nodiscard]] ShapeId CreateShape(
-        BodyId bodyId,
-        ShapeGeometry geometry,
-        Filter filter = {},
-        float density = 1.0f );
+    [[nodiscard]] ShapeId CreateShape( BodyId bodyId, ShapeGeometry geometry, Filter filter = {}, float density = 1.0f );
 
     // handle이 가리키는 Shape의 Contact / proxy / Body list 연결을 정리함.
     void DestroyShape( ShapeId shapeId );
+
 
     // Shape density를 변경하고 owning Dynamic Body의 mass data를 다시 계산함.
     void SetShapeDensity( ShapeId shapeId, float density );
@@ -60,23 +56,18 @@ public:
     // Body의 simulation storage에 보관된 현재 world transform을 반환함.
     [[nodiscard]] transform2 GetBodyTransform( BodyId bodyId ) const;
 
-    // 정적 Body는 움직이지 않으므로 setter를 무시함.
-    void SetBodyLinearVelocity(
-        BodyId bodyId,
-        vec2 linearVelocity );
 
+    void SetBodyLinearVelocity( BodyId bodyId, vec2 linearVelocity );
     [[nodiscard]] vec2 GetBodyLinearVelocity( BodyId bodyId ) const;
 
-    // 정적 Body는 움직이지 않으므로 setter를 무시함.
-    void SetBodyAngularVelocity(
-        BodyId bodyId,
-        float angularVelocity );
-
+    void SetBodyAngularVelocity( BodyId bodyId, float angularVelocity );
     [[nodiscard]] float GetBodyAngularVelocity( BodyId bodyId ) const;
+
 
     [[nodiscard]] float GetBodyMass( BodyId bodyId ) const;
     [[nodiscard]] float GetBodyRotationalInertia( BodyId bodyId ) const;
     [[nodiscard]] vec2 GetBodyLocalCenter( BodyId bodyId ) const;
+
 
     // World 전체 Dynamic Body에 적용되는 중력 가속도.
     void SetGravity( vec2 gravity );
@@ -104,6 +95,7 @@ public:
 
     // Dynamic Body의 angular velocity를 즉시 변경하는 z축 angular impulse.
     void ApplyAngularImpulse( BodyId bodyId, float impulse );
+
 
     // force / gravity로 velocity를 갱신한 뒤 non-static Body를 적분하고
     // proxy / Contact 상태를 갱신함. constraint solver는 아직 포함하지 않음.
@@ -248,17 +240,13 @@ public:
     [[nodiscard]] std::size_t GetBodyContactCapacity( BodyId bodyId ) const;
 
     // Body에 연결된 touching Contact만 output에 채우고 실제 작성 개수를 반환함.
-    [[nodiscard]] std::size_t GetBodyContactData(
-        BodyId bodyId,
-        std::span<ContactData> output ) const;
+    [[nodiscard]] std::size_t GetBodyContactData( BodyId bodyId, std::span<ContactData> output ) const;
 
     // Shape가 속한 Body의 Contact 개수이므로 보수적인 capacity임.
     [[nodiscard]] std::size_t GetShapeContactCapacity( ShapeId shapeId ) const;
 
     // 이 Shape가 실제로 참여한 touching Contact만 output에 채움.
-    [[nodiscard]] std::size_t GetShapeContactData(
-        ShapeId shapeId,
-        std::span<ContactData> output ) const;
+    [[nodiscard]] std::size_t GetShapeContactData( ShapeId shapeId, std::span<ContactData> output ) const;
 
     [[nodiscard]] const BroadPhase& GetBroadPhase() const noexcept
     {
@@ -301,8 +289,7 @@ private:
 
     // stable Contact slot을 할당하고 두 Body의 intrusive contact list에 연결함.
     [[nodiscard]] std::int32_t CreateContact(
-        std::int32_t shapeIdA,
-        std::int32_t shapeIdB,
+        std::int32_t shapeIdA, std::int32_t shapeIdB,
         const localManifold2& manifold );
 
     // Body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함.
