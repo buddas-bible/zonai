@@ -515,6 +515,8 @@ void World::UpdateBodyMassData( std::int32_t bodyIndex )
     * 마지막 식의 mi * |ci - C|^2가 평행축 정리로 추가되는 항임.
     */
 
+    const vec2 oldCenter = bodySim.center;
+
     body.mass = 0.0f;
     body.inertia = 0.0f;
 
@@ -630,6 +632,17 @@ void World::UpdateBodyMassData( std::int32_t bodyIndex )
             bodySim.transform,
             bodySim.localCenter
         );
+
+    // center of mass가 이동해도 Body origin의 순간 속도가 갑자기 변하지 않도록
+    // v_new = v_old + w x ( C_new - C_old ) 로 COM 선속도를 보정함.
+    assert( bodyStates_.size() == bodies_.size() );
+
+    BodyState& bodyState = bodyStates_[bodyIndex];
+    bodyState.linearVelocity +=
+        Cross(
+            bodyState.angularVelocity,
+            bodySim.center - oldCenter
+        );
 }
 
 const Body& World::GetBody( BodyId bodyId ) const
@@ -724,6 +737,104 @@ vec2 World::GetBodyLocalCenter( BodyId bodyId ) const
     return bodySims_[bodyIndex].localCenter;
 }
 
+void World::SetGravity( vec2 gravity )
+{
+    assert( std::isfinite( gravity.x ) );
+    assert( std::isfinite( gravity.y ) );
+
+    gravity_ = gravity;
+}
+
+vec2 World::GetGravity() const noexcept
+{
+    return gravity_;
+}
+
+void World::ApplyForce(
+    BodyId bodyId,
+    vec2 force,
+    vec2 point )
+{
+    assert( std::isfinite( force.x ) );
+    assert( std::isfinite( force.y ) );
+    assert( std::isfinite( point.x ) );
+    assert( std::isfinite( point.y ) );
+
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+    const Body& body = bodies_[bodyIndex];
+
+    // Static / Kinematic Body는 외력으로 속도가 바뀌지 않음.
+    if( body.type != BodyType::Dynamic )
+    {
+        return;
+    }
+
+    assert( bodySims_.size() == bodies_.size() );
+
+    BodySim& bodySim = bodySims_[bodyIndex];
+
+    // F_total += F
+    bodySim.force += force;
+
+    // center of mass 기준 torque:
+    //
+    //     tau = r x F
+    //     r   = point - center
+    bodySim.torque +=
+        Cross(
+            point - bodySim.center,
+            force
+        );
+}
+
+void World::ApplyForceToCenter(
+    BodyId bodyId,
+    vec2 force )
+{
+    assert( std::isfinite( force.x ) );
+    assert( std::isfinite( force.y ) );
+
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+    const Body& body = bodies_[bodyIndex];
+
+    if( body.type != BodyType::Dynamic )
+    {
+        return;
+    }
+
+    assert( bodySims_.size() == bodies_.size() );
+    bodySims_[bodyIndex].force += force;
+}
+
+void World::ApplyTorque(
+    BodyId bodyId,
+    float torque )
+{
+    assert( std::isfinite( torque ) );
+
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+    const Body& body = bodies_[bodyIndex];
+
+    if( body.type != BodyType::Dynamic )
+    {
+        return;
+    }
+
+    assert( bodySims_.size() == bodies_.size() );
+    bodySims_[bodyIndex].torque += torque;
+}
+
+void World::ClearForces( BodyId bodyId )
+{
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+
+    BodySim& bodySim = bodySims_[bodyIndex];
+    bodySim.force = {};
+    bodySim.torque = 0.0f;
+}
+
 void World::Step( float timeStep )
 {
     assert( std::isfinite( timeStep ) );
@@ -740,7 +851,7 @@ void World::Step( float timeStep )
         {
             const Body& body = bodies_[bodyIndex];
 
-            // free slot과 Static Body는 적분하지 않음.
+            // free slot과 Static Body는 simulation 적분 대상이 아님.
             if( body.bodyId == Body::NULL_INDEX ||
                 body.type == BodyType::Static )
             {
@@ -748,12 +859,69 @@ void World::Step( float timeStep )
             }
 
             BodySim& bodySim = bodySims_[bodyIndex];
-            const BodyState& bodyState = bodyStates_[bodyIndex];
+            BodyState& bodyState = bodyStates_[bodyIndex];
 
             assert( body.bodyId == bodyIndex );
             assert( bodySim.bodyId == bodyIndex );
 
-            bodySim.transform.position +=
+            /*
+            * Dynamic Body velocity 적분
+            *
+            * Newton 제2법칙:
+            *
+            *     F = M * a
+            *     a = F / M = F * invMass
+            *
+            * 중력을 포함하면:
+            *
+            *     dv = dt * ( gravity + F * invMass )
+            *
+            * 회전은:
+            *
+            *     torque = I * angularAcceleration
+            *     angularAcceleration = torque * invInertia
+            *
+            *     dw = dt * torque * invInertia
+            *
+            * Kinematic Body는 사용자가 지정한 velocity만 사용하므로
+            * force / torque / gravity의 영향을 받지 않음.
+            */
+            if( body.type == BodyType::Dynamic )
+            {
+                // 질량이 없는 Dynamic Body에는 gravity도 적용하지 않음.
+                // Box2D도 invMass == 0이면 gravityScale을 0으로 처리함.
+                if( bodySim.invMass > 0.0f )
+                {
+                    const vec2 acceleration =
+                        gravity_ +
+                        bodySim.force * bodySim.invMass;
+
+                    bodyState.linearVelocity +=
+                        acceleration * timeStep;
+                }
+
+                if( bodySim.invInertia > 0.0f )
+                {
+                    bodyState.angularVelocity +=
+                        timeStep *
+                        bodySim.invInertia *
+                        bodySim.torque;
+                }
+            }
+
+            /*
+            * semi-implicit Euler
+            *
+            * 1. force로 velocity를 먼저 갱신
+            * 2. 갱신된 velocity로 position을 적분
+            *
+            *     v(t + dt) = v(t) + a * dt
+            *     x(t + dt) = x(t) + v(t + dt) * dt
+            *
+            * BodyState::linearVelocity는 center of mass의 속도이므로
+            * Body origin이 아니라 bodySim.center를 직접 이동시킴.
+            */
+            bodySim.center +=
                 bodyState.linearVelocity * timeStep;
 
             const float deltaAngle =
@@ -761,19 +929,34 @@ void World::Step( float timeStep )
 
             if( deltaAngle != 0.0f )
             {
-                // 기존 회전에 이번 step의 delta rotation을 합성함.
                 bodySim.transform.rotation =
                     rot2::FromRadians( deltaAngle ) *
                     bodySim.transform.rotation;
             }
 
-            bodySim.center =
-                TransformPoint(
-                    bodySim.transform,
+            // transform.position은 Body origin이므로
+            //
+            //     center = origin + R * localCenter
+            //
+            // 에서 origin을 다시 구함:
+            //
+            //     origin = center - R * localCenter
+            bodySim.transform.position =
+                bodySim.center -
+                Rotate(
+                    bodySim.transform.rotation,
                     bodySim.localCenter
                 );
 
             SyncBodyProxies( bodyIndex );
+
+            // force / torque는 한 step 동안만 누적되는 값이므로
+            // velocity에 반영한 뒤 다음 step을 위해 초기화함.
+            if( body.type == BodyType::Dynamic )
+            {
+                bodySim.force = {};
+                bodySim.torque = 0.0f;
+            }
         }
     }
 
@@ -784,7 +967,6 @@ void World::Step( float timeStep )
         }
     );
 }
-
 
 const Shape& World::GetShape( ShapeId shapeId ) const
 {
