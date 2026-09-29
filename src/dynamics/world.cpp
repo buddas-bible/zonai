@@ -417,6 +417,135 @@ ContactData World::GetContactData( ContactId contactId ) const
     return MakeContactData( GetContactIndex( contactId ) );
 }
 
+std::size_t World::GetBodyContactCapacity( BodyId bodyId ) const
+{
+    const Body& body =
+        bodies_[GetBodyIndex( bodyId )];
+
+    // Box2D와 같이 빠르고 보수적으로 Body의 전체 Contact 수를 반환함.
+    return static_cast<std::size_t>( body.contactCount );
+}
+
+std::size_t World::GetBodyContactData(
+    BodyId bodyId,
+    std::span<ContactData> output ) const
+{
+    const Body& body =
+        bodies_[GetBodyIndex( bodyId )];
+
+    std::int32_t contactKey = body.headContactKey;
+    std::size_t count = 0;
+
+    while( contactKey != Body::NULL_INDEX &&
+           count < output.size() )
+    {
+        const std::int32_t contactId =
+            GetContactId( contactKey );
+        const std::int32_t edgeIndex =
+            GetContactEdgeIndex( contactKey );
+
+        assert( contactId >= 0 );
+        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+        const contact2& contact = contacts_[contactId];
+
+        assert( contact.contactId == contactId );
+        assert( edgeIndex == 0 || edgeIndex == 1 );
+
+        // Contact는 AABB pair만으로도 존재할 수 있으므로 실제 접촉점이 있는 것만 공개함.
+        if( contact.manifold.pointCount > 0 )
+        {
+            output[count] =
+                MakeContactData( contactId );
+            ++count;
+        }
+
+        contactKey =
+            contact.edges[edgeIndex].nextKey;
+    }
+
+    return count;
+}
+
+std::size_t World::GetShapeContactCapacity( ShapeId shapeId ) const
+{
+    const std::int32_t shapeIndex =
+        GetShapeIndex( shapeId );
+
+    const Shape& shape = shapes_[shapeIndex];
+
+    // Sensor Contact query는 Sensor 저장소를 구현할 때 별도로 연결함.
+    if( shape.sensorIndex != Shape::NULL_INDEX )
+    {
+        return 0;
+    }
+
+    assert( shape.bodyId >= 0 );
+    assert( static_cast<std::size_t>( shape.bodyId ) < bodies_.size() );
+
+    const Body& body = bodies_[shape.bodyId];
+
+    // 같은 Body의 다른 Shape Contact도 포함하므로 실제 필요량보다 클 수 있음.
+    return static_cast<std::size_t>( body.contactCount );
+}
+
+std::size_t World::GetShapeContactData(
+    ShapeId shapeId,
+    std::span<ContactData> output ) const
+{
+    const std::int32_t shapeIndex =
+        GetShapeIndex( shapeId );
+
+    const Shape& shape = shapes_[shapeIndex];
+
+    if( shape.sensorIndex != Shape::NULL_INDEX )
+    {
+        return 0;
+    }
+
+    assert( shape.bodyId >= 0 );
+    assert( static_cast<std::size_t>( shape.bodyId ) < bodies_.size() );
+
+    const Body& body = bodies_[shape.bodyId];
+
+    std::int32_t contactKey = body.headContactKey;
+    std::size_t count = 0;
+
+    while( contactKey != Body::NULL_INDEX &&
+           count < output.size() )
+    {
+        const std::int32_t contactId =
+            GetContactId( contactKey );
+        const std::int32_t edgeIndex =
+            GetContactEdgeIndex( contactKey );
+
+        assert( contactId >= 0 );
+        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+        const contact2& contact = contacts_[contactId];
+
+        assert( contact.contactId == contactId );
+        assert( edgeIndex == 0 || edgeIndex == 1 );
+
+        const bool involvesShape =
+            contact.shapeIdA == shapeIndex ||
+            contact.shapeIdB == shapeIndex;
+
+        if( involvesShape &&
+            contact.manifold.pointCount > 0 )
+        {
+            output[count] =
+                MakeContactData( contactId );
+            ++count;
+        }
+
+        contactKey =
+            contact.edges[edgeIndex].nextKey;
+    }
+
+    return count;
+}
+
 ContactData World::MakeContactData( std::int32_t contactIndex ) const
 {
     assert( contactIndex >= 0 );
