@@ -104,6 +104,23 @@ public:
     // 아직 Step에서 소비되지 않은 누적 force / torque를 직접 제거함.
     void ClearForces( BodyId bodyId );
 
+    // Dynamic Body에 world-space linear impulse를 즉시 적용함.
+    // point가 center of mass에서 벗어나 있으면 angular velocity도 함께 바뀜.
+    void ApplyLinearImpulse(
+        BodyId bodyId,
+        vec2 impulse,
+        vec2 point );
+
+    // center of mass에 linear impulse를 적용해 선속도만 즉시 변경함.
+    void ApplyLinearImpulseToCenter(
+        BodyId bodyId,
+        vec2 impulse );
+
+    // Dynamic Body의 angular velocity를 즉시 변경하는 z축 angular impulse.
+    void ApplyAngularImpulse(
+        BodyId bodyId,
+        float impulse );
+
     // force / gravity로 velocity를 갱신한 뒤 non-static Body를 적분하고
     // proxy / Contact 상태를 갱신함. constraint solver는 아직 포함하지 않음.
     void Step( float timeStep );
