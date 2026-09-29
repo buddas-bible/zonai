@@ -12,6 +12,7 @@
 #include "collision/narrowphase/contact2.h"
 #include "collision/shape.h"
 #include "dynamics/body.h"
+#include "dynamics/bodySim.h"
 #include "dynamics/contactData.h"
 #include "dynamics/id.h"
 
@@ -51,6 +52,9 @@ public:
     void SetBodyTransform(
         BodyId bodyId,
         transform2 transform );
+
+    // Body의 simulation storage에 보관된 현재 world transform을 반환함.
+    [[nodiscard]] transform2 GetBodyTransform( BodyId bodyId ) const;
 
     // null / 범위 / generation / 활성 slot을 모두 확인함.
     [[nodiscard]] bool IsValid( BodyId bodyId ) const noexcept;
@@ -109,15 +113,18 @@ public:
             assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
             assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
 
-            const Body& bodyA = bodies_[shapeA.bodyId];
-            const Body& bodyB = bodies_[shapeB.bodyId];
+            const BodySim& bodySimA = bodySims_[shapeA.bodyId];
+            const BodySim& bodySimB = bodySims_[shapeB.bodyId];
+
+            assert( bodySimA.bodyId == shapeA.bodyId );
+            assert( bodySimB.bodyId == shapeB.bodyId );
 
             contact.manifold =
                 CollideShapes(
                     shapeA.geometry,
-                    bodyA.transform,
+                    bodySimA.transform,
                     shapeB.geometry,
-                    bodyB.transform
+                    bodySimB.transform
                 );
 
             if( contact.manifold.pointCount > 0 )
@@ -151,15 +158,18 @@ public:
                     return;
                 }
 
-                const Body& bodyA = bodies_[shapeA.bodyId];
-                const Body& bodyB = bodies_[shapeB.bodyId];
+                const BodySim& bodySimA = bodySims_[shapeA.bodyId];
+                const BodySim& bodySimB = bodySims_[shapeB.bodyId];
+
+                assert( bodySimA.bodyId == shapeA.bodyId );
+                assert( bodySimB.bodyId == shapeB.bodyId );
 
                 const localManifold2 manifold =
                     CollideShapes(
                         shapeA.geometry,
-                        bodyA.transform,
+                        bodySimA.transform,
                         shapeB.geometry,
-                        bodyB.transform
+                        bodySimB.transform
                     );
 
                 const std::int32_t contactId =
@@ -241,6 +251,9 @@ private:
 
     // bodyId가 변하지 않는 stable slot storage.
     std::vector<Body> bodies_;
+
+    // solver set 도입 전까지 Body와 같은 stable slot index로 보관하는 simulation 데이터.
+    std::vector<BodySim> bodySims_;
 
     // 제거된 Body slot 재사용을 위한 free-list head.
     std::int32_t bodyFreeList_ = Body::NULL_INDEX;
