@@ -13,10 +13,8 @@ namespace zonai
 // Shape를 Body의 doubly linked list head에 연결함.
 // bodyId / shapeId는 World 내부 storage의 index이며 slot은 삭제 후 재사용될 수 있음.
 inline void LinkShape(
-    Body& body,
-    std::int32_t bodyId,
-    std::span<Shape> shapes,
-    std::int32_t shapeId )
+    Body& body, std::int32_t bodyId,
+    std::span<Shape> shapes, std::int32_t shapeId )
 {
     assert( bodyId >= 0 );
     assert( shapeId >= 0 );
@@ -51,10 +49,8 @@ inline void LinkShape(
 
 // Shape를 Body의 doubly linked list에서 제거하고 양쪽 이웃을 다시 연결함.
 inline void UnlinkShape(
-    Body& body,
-    std::int32_t bodyId,
-    std::span<Shape> shapes,
-    std::int32_t shapeId )
+    Body& body, std::int32_t bodyId,
+    std::span<Shape> shapes, std::int32_t shapeId )
 {
     assert( bodyId >= 0 );
     assert( shapeId >= 0 );

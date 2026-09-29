@@ -55,9 +55,7 @@ public:
     [[nodiscard]] float GetShapeDensity( ShapeId shapeId ) const;
 
     // Body transform을 변경하고 연결된 모든 Shape proxy의 world AABB를 함께 갱신함.
-    void SetBodyTransform(
-        BodyId bodyId,
-        transform2 transform );
+    void SetBodyTransform( BodyId bodyId, transform2 transform );
 
     // Body의 simulation storage에 보관된 현재 world transform을 반환함.
     [[nodiscard]] transform2 GetBodyTransform( BodyId bodyId ) const;
@@ -86,40 +84,26 @@ public:
 
     // Dynamic Body에 world-space 힘을 누적함.
     // point가 center of mass에서 벗어나 있으면 torque도 함께 누적됨.
-    void ApplyForce(
-        BodyId bodyId,
-        vec2 force,
-        vec2 point );
+    void ApplyForce( BodyId bodyId, vec2 force, vec2 point );
 
     // center of mass에 힘을 가해 회전 없이 선가속도만 만듦.
-    void ApplyForceToCenter(
-        BodyId bodyId,
-        vec2 force );
+    void ApplyForceToCenter( BodyId bodyId, vec2 force );
 
     // Dynamic Body에 z축 torque를 누적함.
-    void ApplyTorque(
-        BodyId bodyId,
-        float torque );
+    void ApplyTorque( BodyId bodyId, float torque );
 
     // 아직 Step에서 소비되지 않은 누적 force / torque를 직접 제거함.
     void ClearForces( BodyId bodyId );
 
     // Dynamic Body에 world-space linear impulse를 즉시 적용함.
     // point가 center of mass에서 벗어나 있으면 angular velocity도 함께 바뀜.
-    void ApplyLinearImpulse(
-        BodyId bodyId,
-        vec2 impulse,
-        vec2 point );
+    void ApplyLinearImpulse( BodyId bodyId, vec2 impulse, vec2 point );
 
     // center of mass에 linear impulse를 적용해 선속도만 즉시 변경함.
-    void ApplyLinearImpulseToCenter(
-        BodyId bodyId,
-        vec2 impulse );
+    void ApplyLinearImpulseToCenter( BodyId bodyId, vec2 impulse );
 
     // Dynamic Body의 angular velocity를 즉시 변경하는 z축 angular impulse.
-    void ApplyAngularImpulse(
-        BodyId bodyId,
-        float impulse );
+    void ApplyAngularImpulse( BodyId bodyId, float impulse );
 
     // force / gravity로 velocity를 갱신한 뒤 non-static Body를 적분하고
     // proxy / Contact 상태를 갱신함. constraint solver는 아직 포함하지 않음.
@@ -324,6 +308,7 @@ private:
     // Body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함.
     void DestroyContact( std::int32_t contactId );
 
+    /// body
     // bodyId가 변하지 않는 stable slot storage.
     std::vector<Body> bodies_;
 
@@ -339,6 +324,8 @@ private:
     // bodies_.size()와 별개인 현재 활성 Body 개수.
     std::size_t bodyCount_ = 0;
 
+
+    /// shape
     // shapeId가 변하지 않는 stable slot storage.
     std::vector<Shape> shapes_;
 
@@ -348,6 +335,8 @@ private:
     // shapes_.size()와 별개인 현재 활성 Shape 개수.
     std::size_t shapeCount_ = 0;
 
+
+    /// contact
     // contactId가 변하지 않는 stable slot storage.
     std::vector<contact2> contacts_;
 
