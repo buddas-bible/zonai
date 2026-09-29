@@ -47,6 +47,18 @@ int main()
     }
 
     {
+        const vec2 v{ 3.0f, 4.0f };
+
+        const vec2 scalarCrossVector = Cross( 2.0f, v );
+        assert(NearlyEqual(scalarCrossVector.x, -8.0f));
+        assert(NearlyEqual(scalarCrossVector.y, 6.0f));
+
+        const vec2 vectorCrossScalar = Cross( v, 2.0f );
+        assert(NearlyEqual(vectorCrossScalar.x, 8.0f));
+        assert(NearlyEqual(vectorCrossScalar.y, -6.0f));
+    }
+
+    {
         vec2 v{ 3.0f, 4.0f };
 
         vec2 normalized = Normalize(v);
