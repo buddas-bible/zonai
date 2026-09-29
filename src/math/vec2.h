@@ -87,10 +87,31 @@ inline float Dot( const vec2& a, const vec2& b )
     return a.x * b.x + a.y * b.y;
 }
 
-// 벡터 a와 b의 외적(cross product)을 계산하여 반환합니다.
+// 벡터 a와 b의 외적(cross product)을 계산하여 z축 scalar를 반환합니다.
 inline float Cross( const vec2& a, const vec2& b )
 {
     return a.x * b.y - a.y * b.x;
+}
+
+// z축 scalar와 XY 벡터의 외적을 계산합니다.
+// angular velocity * 위치 벡터로 회전에 의한 선속도를 구할 때 사용함.
+inline vec2 Cross( float scalar, const vec2& vector )
+{
+    return
+    {
+        -scalar * vector.y,
+         scalar * vector.x
+    };
+}
+
+// XY 벡터와 z축 scalar의 외적을 계산합니다.
+inline vec2 Cross( const vec2& vector, float scalar )
+{
+    return
+    {
+         scalar * vector.y,
+        -scalar * vector.x
+    };
 }
 
 // 벡터 value의 길이(length)의 제곱을 계산하여 반환합니다.
