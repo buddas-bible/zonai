@@ -2,6 +2,7 @@
 
 #include "dynamics/body.h"
 #include "dynamics/bodySim.h"
+#include "dynamics/bodyState.h"
 
 using namespace zonai;
 
@@ -51,6 +52,21 @@ int main()
         assert( bodySim.bodyId == 7 );
         assert( bodySim.transform.position.x == 3.0f );
         assert( bodySim.transform.position.y == -2.0f );
+    }
+
+    {
+        BodyState state{};
+
+        assert( state.linearVelocity.x == 0.0f );
+        assert( state.linearVelocity.y == 0.0f );
+        assert( state.angularVelocity == 0.0f );
+
+        state.linearVelocity = { 4.0f, -3.0f };
+        state.angularVelocity = 2.5f;
+
+        assert( state.linearVelocity.x == 4.0f );
+        assert( state.linearVelocity.y == -3.0f );
+        assert( state.angularVelocity == 2.5f );
     }
 
     return 0;
