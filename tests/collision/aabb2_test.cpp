@@ -47,10 +47,10 @@ int main()
             { 1.0f, 1.0f }
         };
 
-        assert(  IsValidAABB( valid )  );
-        assert(  !IsValidAABB( invertedX )  );
-        assert(  !IsValidAABB( infiniteBox )  );
-        assert(  !IsValidAABB( nanBox )  );
+        assert( IsValidAABB( valid ) );
+        assert( !IsValidAABB( invertedX ) );
+        assert( !IsValidAABB( infiniteBox ) );
+        assert( !IsValidAABB( nanBox ) );
     }
 
     // Center
@@ -86,8 +86,8 @@ int main()
             {  1.0f,  1.0f }
         };
 
-        assert( Contains(  box, vec2{ 0.0f, 0.0f }  ) );
-        assert( Contains(  box, vec2{ 0.5f, -0.5f }  ) );
+        assert( Contains( box, vec2{ 0.0f, 0.0f } ) );
+        assert( Contains( box, vec2{ 0.5f, -0.5f } ) );
     }
 
     // Point outside
@@ -97,8 +97,8 @@ int main()
             {  1.0f,  1.0f }
         };
 
-        assert( !Contains(  box, vec2{ 2.0f, 0.0f }  ) );
-        assert( !Contains(  box, vec2{ 0.0f, -2.0f }  ) );
+        assert( !Contains( box, vec2{ 2.0f, 0.0f } ) );
+        assert( !Contains( box, vec2{ 0.0f, -2.0f } ) );
     }
 
     // Point on boundary
@@ -108,8 +108,8 @@ int main()
             {  1.0f,  1.0f }
         };
 
-        assert( Contains(  box, vec2{ 1.0f, 0.0f }  ) );
-        assert( Contains(  box, vec2{ -1.0f, -1.0f }  ) );
+        assert( Contains( box, vec2{ 1.0f, 0.0f } ) );
+        assert( Contains( box, vec2{ -1.0f, -1.0f } ) );
     }
 
     // Overlapping boxes
@@ -222,10 +222,10 @@ int main()
 
         const aabb2 combined = Union( a, b );
 
-        assert(  NearlyEqual(  combined.min.x, -1.0f  )  );
-        assert(  NearlyEqual(  combined.min.y, -2.0f  )  );
-        assert(  NearlyEqual(  combined.max.x, 4.0f  )  );
-        assert(  NearlyEqual(  combined.max.y, 1.0f  )  );
+        assert( NearlyEqual( combined.min.x, -1.0f ) );
+        assert( NearlyEqual( combined.min.y, -2.0f ) );
+        assert( NearlyEqual( combined.max.x, 4.0f ) );
+        assert( NearlyEqual( combined.max.y, 1.0f ) );
     }
 
     // Perimeter
@@ -235,7 +235,7 @@ int main()
             {  2.0f,  1.0f }
         };
 
-        assert(  NearlyEqual( Perimeter( box ), 12.0f )  );
+        assert( NearlyEqual( Perimeter( box ), 12.0f ) );
     }
 
     // AABB containment
@@ -255,8 +255,8 @@ int main()
             {  3.0f,  1.0f }
         };
 
-        assert(  ContainsAABB( outer, inner )  );
-        assert(  !ContainsAABB( outer, escaped )  );
+        assert( ContainsAABB( outer, inner ) );
+        assert( !ContainsAABB( outer, escaped ) );
     }
 
     return 0;

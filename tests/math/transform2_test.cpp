@@ -35,7 +35,7 @@ int main()
         // identity
         transform2 t{};
 
-        vec2 p{ 2.0f, 3.0f };
+        const vec2 p{ 2.0f, 3.0f };
 
         const vec2 result = TransformPoint( t, p );
 
@@ -96,7 +96,7 @@ int main()
         const vec2 restored =
             TransformPoint( inverse, world );
 
-        assert(  NearlyEqual(  restored, point  )  );
+        assert( NearlyEqual( restored, point ) );
     }
 
     // mul
@@ -115,7 +115,7 @@ int main()
             TransformPoint(
                 a,
                 TransformPoint( b, point )
-            );
+ );
 
         const transform2 combined =
             Mul( a, b );
@@ -123,7 +123,7 @@ int main()
         const vec2 actual =
             TransformPoint( combined, point );
 
-        assert(  NearlyEqual(  actual, expected  )  );
+        assert( NearlyEqual( actual, expected ) );
     }
 
     // inverse mul
@@ -144,27 +144,27 @@ int main()
             TransformPoint(
                 transformB,
                 pointB
-            );
+ );
 
         const vec2 expected =
             InverseTransformPoint(
                 transformA,
                 worldPoint
-            );
+ );
 
         const transform2 relative =
             InverseMul(
                 transformA,
                 transformB
-            );
+ );
 
         const vec2 actual =
             TransformPoint(
                 relative,
                 pointB
-            );
+ );
 
-        assert(  NearlyEqual(  actual, expected  )  );
+        assert( NearlyEqual( actual, expected ) );
     }
 
     {
@@ -179,17 +179,17 @@ int main()
         assert( NearlyEqual(
             relative.position,
             vec2{}
-        ) );
+ ) );
 
         assert( NearlyEqual(
             relative.rotation.c,
             1.0f
-        ) );
+ ) );
 
         assert( NearlyEqual(
             relative.rotation.s,
             0.0f
-        ) );
+ ) );
     }
 
     return 0;

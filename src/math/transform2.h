@@ -76,4 +76,4 @@ inline transform2 InverseMul( const transform2& a, const transform2& b )
     };
 }
 
-}
+} // namespace zonai
