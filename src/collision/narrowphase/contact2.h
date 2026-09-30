@@ -3,8 +3,6 @@
 #include <array>
 #include <cstdint>
 
-#include "collision/narrowphase/manifold2.h"
-
 namespace zonai
 {
 
@@ -36,8 +34,9 @@ constexpr std::int32_t GetContactEdgeIndex(
     return contactKey & 1;
 }
 
-// BroadPhase AABB pair가 유지되는 동안 World가 보관하는 최소 persistent Contact.
-// 실제 geometry가 닿지 않는 순간에는 manifold.pointCount가 0일 수 있음.
+// BroadPhase AABB pair가 유지되는 동안 World가 보관하는 persistent Contact.
+// 수명 / Shape 연결 / Body intrusive list 같은 cold data만 보관하고
+// manifold과 solver hot data는 contactSim2에 분리함.
 struct contact2
 {
     static constexpr std::int32_t NULL_INDEX = -1;
@@ -56,8 +55,6 @@ struct contact2
 
     // free slot일 때만 다음 free contact id를 저장함.
     std::int32_t nextFreeId = NULL_INDEX;
-
-    localManifold2 manifold{};
 };
 
 } // namespace zonai
