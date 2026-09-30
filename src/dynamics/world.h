@@ -14,6 +14,7 @@
 #include "dynamics/body.h"
 #include "dynamics/bodySim.h"
 #include "dynamics/bodyState.h"
+#include "dynamics/contactConstraint2.h"
 #include "dynamics/contactData.h"
 #include "dynamics/contactSim2.h"
 #include "dynamics/id.h"
@@ -208,6 +209,13 @@ public:
                 assert( shapeB.bodyId >= 0 );
                 assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
                 assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
+
+                // 같은 Body에 연결된 Shape끼리는 self collision을 만들지 않음.
+                if( shapeA.bodyId == shapeB.bodyId )
+                {
+                    return;
+                }
+
                 if( !CanCollideShapes( shapeA.geometry, shapeB.geometry ) )
                 {
                     return;
@@ -307,6 +315,9 @@ private:
     void UpdateContactSim(
         std::int32_t contactId,
         const localManifold2& manifold );
+
+    // touching Contact를 transient constraint로 준비하고 normal impulse를 반복해서 풂.
+    void SolveContacts();
 
     // Body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함.
     void DestroyContact( std::int32_t contactId );
