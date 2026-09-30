@@ -260,5 +260,130 @@ int main()
         );
     }
 
+
+    // Prepare 단계에서 ContactSim에 캐싱된 normal impulse를 constraint 초기값으로 가져옴.
+    {
+        contactSim2 contactSim{};
+        contactSim.contactId = 7;
+        contactSim.bodyIdA = 0;
+        contactSim.bodyIdB = 1;
+        contactSim.invMassA = 0.0f;
+        contactSim.invMassB = 0.5f;
+        contactSim.manifold.normal = { 1.0f, 0.0f };
+        contactSim.manifold.pointCount = 1;
+        contactSim.manifold.points[0].point = {};
+        contactSim.impulses[0].normalImpulse = 6.0f;
+
+        BodySim bodySimA{};
+        bodySimA.bodyId = 0;
+
+        BodySim bodySimB{};
+        bodySimB.bodyId = 1;
+
+        BodyState bodyStateA{};
+        BodyState bodyStateB{};
+
+        const contactConstraint2 constraint =
+            PrepareContactConstraint(
+                contactSim,
+                bodySimA,
+                bodyStateA,
+                bodySimB,
+                bodyStateB
+            );
+
+        assert( constraint.contactId == 7 );
+        assert(
+            NearlyEqual(
+                constraint.points[0].normalImpulse,
+                6.0f
+            )
+        );
+    }
+
+    // Warm start는 이전 step의 누적 impulse 전체를 solver 시작 전에 한 번 적용함.
+    {
+        contactConstraint2 constraint{};
+        constraint.contactId = 0;
+        constraint.bodyIdA = 0;
+        constraint.bodyIdB = 1;
+        constraint.normal = { 1.0f, 0.0f };
+        constraint.invMassA = 0.0f;
+        constraint.invInertiaA = 0.0f;
+        constraint.invMassB = 0.5f;
+        constraint.invInertiaB = 0.0f;
+        constraint.pointCount = 1;
+
+        contactConstraintPoint2& point =
+            constraint.points[0];
+
+        point.normalMass = 2.0f;
+        point.normalImpulse = 6.0f;
+
+        BodyState bodyStateA{};
+
+        BodyState bodyStateB{};
+        bodyStateB.linearVelocity = { -3.0f, 0.0f };
+
+        WarmStartContactConstraint(
+            constraint,
+            bodyStateA,
+            bodyStateB
+        );
+
+        // 이전 impulse 6을 먼저 적용하면:
+        //
+        // DeltaV_B = invMassB * 6
+        //          = 0.5 * 6
+        //          = 3
+        //
+        // 따라서 -3 + 3 = 0.
+        assert(
+            NearlyEqual(
+                bodyStateB.linearVelocity.x,
+                0.0f
+            )
+        );
+
+        // 이미 warm start 결과로 vn == 0이므로
+        // 다음 solve에서는 추가 impulse가 없어야 함.
+        SolveContactConstraint(
+            constraint,
+            bodyStateA,
+            bodyStateB
+        );
+
+        assert(
+            NearlyEqual(
+                point.normalImpulse,
+                6.0f
+            )
+        );
+    }
+
+    // Solve가 끝난 누적 impulse를 persistent ContactSim에 다시 저장함.
+    {
+        contactConstraint2 constraint{};
+        constraint.contactId = 3;
+        constraint.pointCount = 1;
+        constraint.points[0].normalImpulse = 4.25f;
+
+        contactSim2 contactSim{};
+        contactSim.contactId = 3;
+        contactSim.manifold.pointCount = 1;
+
+        StoreContactImpulses(
+            constraint,
+            contactSim
+        );
+
+        assert(
+            NearlyEqual(
+                contactSim.impulses[0].normalImpulse,
+                4.25f
+            )
+        );
+    }
+
     return 0;
 }

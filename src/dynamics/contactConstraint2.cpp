@@ -24,6 +24,7 @@ contactConstraint2 PrepareContactConstraint(
 
     contactConstraint2 constraint{};
 
+    constraint.contactId = contactSim.contactId;
     constraint.bodyIdA = contactSim.bodyIdA;
     constraint.bodyIdB = contactSim.bodyIdB;
 
@@ -72,6 +73,11 @@ contactConstraint2 PrepareContactConstraint(
 
         point.separation =
             manifoldPoint.separation;
+
+        // 같은 contact point가 이전 step에도 존재했다면
+        // 누적 normal impulse를 초기 추정값으로 가져옴.
+        point.normalImpulse =
+            contactSim.impulses[i].normalImpulse;
 
         /*
         * Contact point의 실제 선속도
@@ -159,6 +165,75 @@ contactConstraint2 PrepareContactConstraint(
     }
 
     return constraint;
+}
+
+
+void WarmStartContactConstraint(
+    const contactConstraint2& constraint,
+    BodyState& bodyStateA,
+    BodyState& bodyStateB )
+{
+    vec2 linearVelocityA =
+        bodyStateA.linearVelocity;
+
+    float angularVelocityA =
+        bodyStateA.angularVelocity;
+
+    vec2 linearVelocityB =
+        bodyStateB.linearVelocity;
+
+    float angularVelocityB =
+        bodyStateB.angularVelocity;
+
+    /*
+    * 이전 step에서 수렴한 누적 impulse를 초기값으로 먼저 적용함.
+    *
+    * 이후 iterative solve는 0부터 다시 계산하지 않고
+    * 이 impulse에서 필요한 DeltaLambda만 추가 / 제거함.
+    */
+    for( int i = 0; i < constraint.pointCount; ++i )
+    {
+        const contactConstraintPoint2& point =
+            constraint.points[i];
+
+        const vec2 impulseVector =
+            constraint.normal *
+            point.normalImpulse;
+
+        linearVelocityA -=
+            impulseVector *
+            constraint.invMassA;
+
+        angularVelocityA -=
+            constraint.invInertiaA *
+            Cross(
+                point.anchorA,
+                impulseVector
+            );
+
+        linearVelocityB +=
+            impulseVector *
+            constraint.invMassB;
+
+        angularVelocityB +=
+            constraint.invInertiaB *
+            Cross(
+                point.anchorB,
+                impulseVector
+            );
+    }
+
+    bodyStateA.linearVelocity =
+        linearVelocityA;
+
+    bodyStateA.angularVelocity =
+        angularVelocityA;
+
+    bodyStateB.linearVelocity =
+        linearVelocityB;
+
+    bodyStateB.angularVelocity =
+        angularVelocityB;
 }
 
 void SolveContactConstraint(
@@ -291,5 +366,22 @@ void SolveContactConstraint(
     bodyStateB.angularVelocity =
         angularVelocityB;
 }
+
+
+void StoreContactImpulses(
+    const contactConstraint2& constraint,
+    contactSim2& contactSim )
+{
+    assert( constraint.contactId != contactSim2::NULL_INDEX );
+    assert( constraint.contactId == contactSim.contactId );
+    assert( constraint.pointCount == contactSim.manifold.pointCount );
+
+    for( int i = 0; i < constraint.pointCount; ++i )
+    {
+        contactSim.impulses[i].normalImpulse =
+            constraint.points[i].normalImpulse;
+    }
+}
+
 
 } // namespace zonai

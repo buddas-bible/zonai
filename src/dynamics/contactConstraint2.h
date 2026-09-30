@@ -36,6 +36,9 @@ struct contactConstraintPoint2
 // persistent ContactSim을 한 solver step에서 바로 사용할 transient constraint로 변환한 값.
 struct contactConstraint2
 {
+    // Solve가 끝난 뒤 impulse를 원래 ContactSim에 되돌려 저장하기 위한 stable id.
+    std::int32_t contactId = contactSim2::NULL_INDEX;
+
     std::int32_t bodyIdA = contactSim2::NULL_INDEX;
     std::int32_t bodyIdB = contactSim2::NULL_INDEX;
 
@@ -60,11 +63,22 @@ struct contactConstraint2
     const BodySim& bodySimB,
     const BodyState& bodyStateB );
 
+// 이전 step에서 캐싱한 누적 normal impulse를 solver 시작 전에 먼저 적용함.
+void WarmStartContactConstraint(
+    const contactConstraint2& constraint,
+    BodyState& bodyStateA,
+    BodyState& bodyStateB );
+
 // 한 Contact의 normal constraint를 한 번 풀어 Body velocity에 impulse를 적용함.
 // 여러 Contact를 여러 번 반복 호출하면 sequential impulse solver가 됨.
 void SolveContactConstraint(
     contactConstraint2& constraint,
     BodyState& bodyStateA,
     BodyState& bodyStateB );
+
+// 이번 step에서 수렴한 누적 impulse를 persistent ContactSim에 저장함.
+void StoreContactImpulses(
+    const contactConstraint2& constraint,
+    contactSim2& contactSim );
 
 } // namespace zonai

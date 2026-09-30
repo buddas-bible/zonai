@@ -1442,6 +1442,14 @@ void World::UpdateContactSim(
     contactSim2& contactSim =
         contactSims_[contactId];
 
+    // narrow-phase가 새 manifold를 만들기 전에 이전 point id와
+    // solver impulse를 보존해 같은 접촉점에 다시 연결함.
+    const localManifold2 oldManifold =
+        contactSim.manifold;
+
+    const auto oldImpulses =
+        contactSim.impulses;
+
     contactSim = {};
     contactSim.contactId = contactId;
 
@@ -1458,6 +1466,32 @@ void World::UpdateContactSim(
     contactSim.invInertiaB = bodySimB.invInertia;
 
     contactSim.manifold = manifold;
+
+    /*
+    * Contact point persistence
+    *
+    * 새 manifold의 point id가 이전 manifold의 id와 같으면
+    * 같은 geometric feature에서 만들어진 접촉점으로 간주함.
+    *
+    * 이 경우 이전 step의 누적 impulse를 그대로 이어받아
+    * 다음 solver의 warm start 초기값으로 사용함.
+    */
+    for( int i = 0; i < contactSim.manifold.pointCount; ++i )
+    {
+        const std::uint16_t newId =
+            contactSim.manifold.points[i].id;
+
+        for( int j = 0; j < oldManifold.pointCount; ++j )
+        {
+            if( oldManifold.points[j].id == newId )
+            {
+                contactSim.impulses[i] =
+                    oldImpulses[j];
+
+                break;
+            }
+        }
+    }
 }
 
 void World::SolveContacts()
@@ -1513,6 +1547,21 @@ void World::SolveContacts()
     }
 
     /*
+    * Warm start
+    *
+    * 이전 step에서 수렴한 누적 impulse를 먼저 적용함.
+    * 같은 접촉 상태가 이어질 때 solver가 0부터 다시 시작하지 않게 함.
+    */
+    for( const contactConstraint2& constraint : constraints )
+    {
+        WarmStartContactConstraint(
+            constraint,
+            bodyStates_[constraint.bodyIdA],
+            bodyStates_[constraint.bodyIdB]
+        );
+    }
+
+    /*
     * Sequential impulse
     *
     * Contact 하나를 풀 때 Body velocity가 즉시 바뀌고,
@@ -1537,6 +1586,27 @@ void World::SolveContacts()
             );
         }
     }
+
+    /*
+    * Store impulses
+    *
+    * 이번 step에서 수렴한 누적 impulse를 ContactSim에 되돌려 저장함.
+    * 다음 narrow-phase 갱신 때 point id가 유지되면 이 값이 다시 이어짐.
+    */
+    for( const contactConstraint2& constraint : constraints )
+    {
+        assert( constraint.contactId >= 0 );
+        assert(
+            static_cast<std::size_t>( constraint.contactId ) <
+            contactSims_.size()
+        );
+
+        StoreContactImpulses(
+            constraint,
+            contactSims_[constraint.contactId]
+        );
+    }
+
 }
 
 void World::DestroyContact( std::int32_t contactId )
