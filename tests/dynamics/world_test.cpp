@@ -420,6 +420,191 @@ int main()
         assert( world.GetBodyAngularVelocity( kinematicBody ) == 3.0f );
     }
 
+    // 최소 Contact Solver는 normal 방향 접근 속도를 제거해 더 깊은 관통을 막음.
+    {
+        World world{};
+        world.SetGravity( {} );
+
+        const BodyId staticBody =
+            world.CreateBody(
+                BodyType::Static,
+                {
+                    { 0.0f, 0.0f },
+                    {}
+                }
+            );
+
+        (void)world.CreateShape(
+            staticBody,
+            circle2{ {}, 1.0f }
+        );
+
+        const BodyId dynamicBody =
+            world.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 1.5f, 0.0f },
+                    {}
+                }
+            );
+
+        (void)world.CreateShape(
+            dynamicBody,
+            circle2{ {}, 1.0f }
+        );
+
+        world.SetBodyLinearVelocity(
+            dynamicBody,
+            { -2.0f, 0.0f }
+        );
+
+        world.Step( 0.25f );
+
+        const vec2 velocity =
+            world.GetBodyLinearVelocity(
+                dynamicBody
+            );
+
+        const transform2 transform =
+            world.GetBodyTransform(
+                dynamicBody
+            );
+
+        // 이미 0.5m 겹쳐 있지만 Step 시작 시 solver가 접근 속도를 제거하므로
+        // 이 Step에서는 더 안쪽으로 이동하지 않음.
+        assert(
+            std::fabs( velocity.x ) <
+            epsilon
+        );
+        assert(
+            std::fabs(
+                transform.position.x -
+                1.5f
+            ) < epsilon
+        );
+    }
+
+    // Contact가 있어도 서로 분리 중인 Body에는 음수 normal impulse를 가하지 않음.
+    {
+        World world{};
+        world.SetGravity( {} );
+
+        const BodyId staticBody =
+            world.CreateBody(
+                BodyType::Static,
+                {
+                    { 0.0f, 0.0f },
+                    {}
+                }
+            );
+
+        (void)world.CreateShape(
+            staticBody,
+            circle2{ {}, 1.0f }
+        );
+
+        const BodyId dynamicBody =
+            world.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 1.5f, 0.0f },
+                    {}
+                }
+            );
+
+        (void)world.CreateShape(
+            dynamicBody,
+            circle2{ {}, 1.0f }
+        );
+
+        world.SetBodyLinearVelocity(
+            dynamicBody,
+            { 2.0f, 0.0f }
+        );
+
+        world.Step( 0.25f );
+
+        assert(
+            std::fabs(
+                world.GetBodyLinearVelocity(
+                    dynamicBody
+                ).x -
+                2.0f
+            ) < epsilon
+        );
+
+        assert(
+            std::fabs(
+                world.GetBodyTransform(
+                    dynamicBody
+                ).position.x -
+                2.0f
+            ) < epsilon
+        );
+    }
+
+    // 같은 질량의 Dynamic Body 둘이 정면으로 접근하면 normal impulse가 상대속도를 제거함.
+    {
+        World world{};
+        world.SetGravity( {} );
+
+        const BodyId bodyA =
+            world.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { -0.75f, 0.0f },
+                    {}
+                }
+            );
+
+        const BodyId bodyB =
+            world.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 0.75f, 0.0f },
+                    {}
+                }
+            );
+
+        (void)world.CreateShape(
+            bodyA,
+            circle2{ {}, 1.0f }
+        );
+
+        (void)world.CreateShape(
+            bodyB,
+            circle2{ {}, 1.0f }
+        );
+
+        world.SetBodyLinearVelocity(
+            bodyA,
+            { 1.0f, 0.0f }
+        );
+
+        world.SetBodyLinearVelocity(
+            bodyB,
+            { -1.0f, 0.0f }
+        );
+
+        world.Step( 0.25f );
+
+        assert(
+            std::fabs(
+                world.GetBodyLinearVelocity(
+                    bodyA
+                ).x
+            ) < epsilon
+        );
+
+        assert(
+            std::fabs(
+                world.GetBodyLinearVelocity(
+                    bodyB
+                ).x
+            ) < epsilon
+        );
+    }
+
     // 기본 gravity는 Dynamic Body의 COM velocity에만 적용됨.
     {
         World world{};
