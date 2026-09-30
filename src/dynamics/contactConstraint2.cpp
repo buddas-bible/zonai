@@ -1,5 +1,6 @@
 #include "dynamics/contactConstraint2.h"
 
+#include <algorithm>
 #include <cassert>
 
 namespace zonai
@@ -158,6 +159,137 @@ contactConstraint2 PrepareContactConstraint(
     }
 
     return constraint;
+}
+
+void SolveContactConstraint(
+    contactConstraint2& constraint,
+    BodyState& bodyStateA,
+    BodyState& bodyStateB )
+{
+    vec2 linearVelocityA =
+        bodyStateA.linearVelocity;
+
+    float angularVelocityA =
+        bodyStateA.angularVelocity;
+
+    vec2 linearVelocityB =
+        bodyStateB.linearVelocity;
+
+    float angularVelocityB =
+        bodyStateB.angularVelocity;
+
+    for( int i = 0; i < constraint.pointCount; ++i )
+    {
+        contactConstraintPoint2& point =
+            constraint.points[i];
+
+        /*
+        * 현재 contact point의 normal 상대속도를 매 iteration마다 다시 계산함.
+        *
+        * 앞의 Contact가 velocity를 바꾸면 뒤 Contact가 보는 상대속도도 바뀌므로
+        * Prepare 단계에서 계산한 값만 계속 사용하면 sequential impulse가 되지 않음.
+        */
+        const vec2 velocityA =
+            linearVelocityA +
+            Cross(
+                angularVelocityA,
+                point.anchorA
+            );
+
+        const vec2 velocityB =
+            linearVelocityB +
+            Cross(
+                angularVelocityB,
+                point.anchorB
+            );
+
+        const float normalVelocity =
+            Dot(
+                velocityB - velocityA,
+                constraint.normal
+            );
+
+        /*
+        * normal 방향 상대속도를 0으로 만들기 위한 incremental impulse:
+        *
+        *     DeltaLambda = -normalMass * vn
+        *
+        * 하지만 Contact는 두 Body를 서로 당길 수 없음.
+        * 따라서 누적 impulse lambda는 항상 0 이상이어야 함.
+        *
+        *     lambdaNew = max( lambdaOld + DeltaLambda, 0 )
+        *     DeltaLambda = lambdaNew - lambdaOld
+        *
+        * 이미 서로 멀어지고 있으면 vn > 0이므로
+        * 음수 impulse가 clamp되어 아무 힘도 가하지 않음.
+        */
+        const float oldImpulse =
+            point.normalImpulse;
+
+        const float candidateImpulse =
+            oldImpulse -
+            point.normalMass * normalVelocity;
+
+        point.normalImpulse =
+            std::max(
+                candidateImpulse,
+                0.0f
+            );
+
+        const float impulse =
+            point.normalImpulse -
+            oldImpulse;
+
+        const vec2 impulseVector =
+            constraint.normal * impulse;
+
+        /*
+        * A에는 -P, B에는 +P를 적용함.
+        *
+        * 선속도:
+        *
+        *     vA -= invMassA * P
+        *     vB += invMassB * P
+        *
+        * 각속도:
+        *
+        *     wA -= invIA * ( rA x P )
+        *     wB += invIB * ( rB x P )
+        */
+        linearVelocityA -=
+            impulseVector *
+            constraint.invMassA;
+
+        angularVelocityA -=
+            constraint.invInertiaA *
+            Cross(
+                point.anchorA,
+                impulseVector
+            );
+
+        linearVelocityB +=
+            impulseVector *
+            constraint.invMassB;
+
+        angularVelocityB +=
+            constraint.invInertiaB *
+            Cross(
+                point.anchorB,
+                impulseVector
+            );
+    }
+
+    bodyStateA.linearVelocity =
+        linearVelocityA;
+
+    bodyStateA.angularVelocity =
+        angularVelocityA;
+
+    bodyStateB.linearVelocity =
+        linearVelocityB;
+
+    bodyStateB.angularVelocity =
+        angularVelocityB;
 }
 
 } // namespace zonai
