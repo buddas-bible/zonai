@@ -79,8 +79,10 @@ struct contactConstraint2
     float maxPushSpeed = 0.0f;
 
     // 두 shape 사이의 Coulomb friction coefficient.
-    // material 시스템 도입 전까지 world가 기본값을 넣어줌.
     float friction = 0.0f;
+
+    // 두 shape의 restitution을 mix한 반발계수.
+    float restitution = 0.0f;
 
     std::array<contactConstraintPoint2, MAX_MANIFOLD_POINTS> points{};
     int pointCount = 0;
@@ -109,6 +111,14 @@ void SolveContactConstraint(
     bodyState& bodyStateA,
     bodyState& bodyStateB,
     bool useBias );
+
+// 충돌 전 접근 속도가 threshold보다 충분히 클 때
+// relax가 제거한 normal 속도에 restitution 목표 속도를 다시 적용함.
+void ApplyRestitutionContactConstraint(
+    contactConstraint2& constraint,
+    bodyState& bodyStateA,
+    bodyState& bodyStateB,
+    float threshold );
 
 // 이번 step에서 수렴한 누적 impulse를 persistent ContactSim에 저장함.
 void StoreContactImpulses(

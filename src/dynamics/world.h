@@ -52,6 +52,12 @@ public:
     void SetShapeDensity( shapeId shapeId, float density );
     [[nodiscard]] float GetShapeDensity( shapeId shapeId ) const;
 
+    void SetShapeFriction( shapeId shapeId, float friction );
+    [[nodiscard]] float GetShapeFriction( shapeId shapeId ) const;
+
+    void SetShapeRestitution( shapeId shapeId, float restitution );
+    [[nodiscard]] float GetShapeRestitution( shapeId shapeId ) const;
+
     // body transform을 변경하고 연결된 모든 shape proxy의 world AABB를 함께 갱신함.
     void SetBodyTransform( bodyId bodyId, transform2 transform );
 
@@ -329,6 +335,10 @@ private:
     void SolveContactConstraints(
         std::span<contactConstraint2> constraints,
         bool useBias );
+
+    // 충돌 전 접근 속도가 충분히 빠른 Contact에 restitution impulse를 적용함.
+    void ApplyRestitutionContacts(
+        std::span<contactConstraint2> constraints );
 
     // 최종 누적 impulse를 persistent ContactSim으로 되돌림.
     void StoreContactConstraintImpulses(

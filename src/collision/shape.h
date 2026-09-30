@@ -57,6 +57,12 @@ struct shape
     // 면적당 질량. Box2D 기본값과 같이 1로 시작함.
     float density = 1.0f;
 
+    // 접촉면의 Coulomb friction coefficient.
+    float friction = 0.6f;
+
+    // 충돌 전 normal 상대속도 중 얼마를 반대 방향으로 되돌릴지 결정함.
+    float restitution = 0.0f;
+
     // category / mask / group 기반 collision filter.
     collisionFilter filter{};
 };

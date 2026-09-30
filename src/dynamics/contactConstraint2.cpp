@@ -593,6 +593,148 @@ void SolveContactConstraint(
 }
 
 
+void ApplyRestitutionContactConstraint(
+    contactConstraint2& constraint,
+    bodyState& bodyStateA,
+    bodyState& bodyStateB,
+    float threshold )
+{
+    assert( std::isfinite( threshold ) );
+    assert( threshold >= 0.0f );
+
+    if( constraint.restitution <= 0.0f )
+    {
+        return;
+    }
+
+    vec2 linearVelocityA =
+        bodyStateA.linearVelocity;
+
+    float angularVelocityA =
+        bodyStateA.angularVelocity;
+
+    vec2 linearVelocityB =
+        bodyStateB.linearVelocity;
+
+    float angularVelocityB =
+        bodyStateB.angularVelocity;
+
+    for( int i = 0; i < constraint.pointCount; ++i )
+    {
+        contactConstraintPoint2& point =
+            constraint.points[i];
+
+        /*
+        * restitution은 현재 vn이 아니라 Prepare 때 저장한
+        * 충돌 전 relativeNormalVelocity를 기준으로 결정함.
+        *
+        * 예를 들어:
+        *
+        *     relativeNormalVelocity = -4
+        *     restitution = 0.5
+        *
+        * 이면 normal solve가 접근 속도를 0까지 막은 뒤
+        * restitution은 최종 목표를 +2로 만듦.
+        *
+        * 낮은 속도 접촉까지 튀기면 resting contact가 떨릴 수 있으므로
+        * threshold보다 빠른 충돌에만 적용함.
+        */
+        if( point.relativeNormalVelocity >= -threshold ||
+            point.normalImpulse <= 0.0f )
+        {
+            continue;
+        }
+
+        const vec2 velocityA =
+            linearVelocityA +
+            Cross(
+                angularVelocityA,
+                point.anchorA
+            );
+
+        const vec2 velocityB =
+            linearVelocityB +
+            Cross(
+                angularVelocityB,
+                point.anchorB
+            );
+
+        const float normalVelocity =
+            Dot(
+                velocityB - velocityA,
+                constraint.normal
+            );
+
+        // targetVn = -restitution * relativeNormalVelocity
+        //
+        // 따라서:
+        //
+        //     DeltaLambda
+        //         = normalMass * ( targetVn - vn )
+        //         = -normalMass *
+        //           ( vn + restitution * relativeNormalVelocity )
+        const float oldImpulse =
+            point.normalImpulse;
+
+        const float incrementalImpulse =
+            -point.normalMass *
+            (
+                normalVelocity +
+                constraint.restitution *
+                point.relativeNormalVelocity
+            );
+
+        point.normalImpulse =
+            std::max(
+                oldImpulse + incrementalImpulse,
+                0.0f
+            );
+
+        const float impulse =
+            point.normalImpulse -
+            oldImpulse;
+
+        const vec2 impulseVector =
+            constraint.normal *
+            impulse;
+
+        linearVelocityA -=
+            impulseVector *
+            constraint.invMassA;
+
+        angularVelocityA -=
+            constraint.invInertiaA *
+            Cross(
+                point.anchorA,
+                impulseVector
+            );
+
+        linearVelocityB +=
+            impulseVector *
+            constraint.invMassB;
+
+        angularVelocityB +=
+            constraint.invInertiaB *
+            Cross(
+                point.anchorB,
+                impulseVector
+            );
+    }
+
+    bodyStateA.linearVelocity =
+        linearVelocityA;
+
+    bodyStateA.angularVelocity =
+        angularVelocityA;
+
+    bodyStateB.linearVelocity =
+        linearVelocityB;
+
+    bodyStateB.angularVelocity =
+        angularVelocityB;
+}
+
+
 void StoreContactImpulses(
     const contactConstraint2& constraint,
     contactSim2& contactSim )

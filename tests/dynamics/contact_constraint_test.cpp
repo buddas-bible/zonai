@@ -591,6 +591,72 @@ int main()
         assert( NearlyEqual( bodyStateB.linearVelocity.x, 4.0f ) );
     }
 
+    // restitution은 solver 전 접근 속도를 기준으로 목표 반발 속도를 만듦.
+    {
+        contactConstraint2 constraint{};
+        constraint.bodyIdA = 0;
+        constraint.bodyIdB = 1;
+        constraint.normal = { 1.0f, 0.0f };
+        constraint.invMassA = 0.0f;
+        constraint.invMassB = 1.0f;
+        constraint.restitution = 0.5f;
+        constraint.pointCount = 1;
+
+        contactConstraintPoint2& point =
+            constraint.points[0];
+
+        point.normalMass = 1.0f;
+        point.normalImpulse = 4.0f;
+        point.relativeNormalVelocity = -4.0f;
+
+        bodyState bodyStateA{};
+        bodyState bodyStateB{};
+
+        ApplyRestitutionContactConstraint(
+            constraint,
+            bodyStateA,
+            bodyStateB,
+            1.0f
+        );
+
+        // normal solve가 vn을 0까지 막았다고 가정하면
+        // e=0.5, 충돌 전 vn=-4이므로 최종 목표 vn은 +2임.
+        assert( NearlyEqual( bodyStateB.linearVelocity.x, 2.0f ) );
+        assert( NearlyEqual( point.normalImpulse, 6.0f ) );
+    }
+
+    // threshold보다 느린 접촉은 restitution을 적용하지 않아 resting contact가 튀지 않음.
+    {
+        contactConstraint2 constraint{};
+        constraint.bodyIdA = 0;
+        constraint.bodyIdB = 1;
+        constraint.normal = { 1.0f, 0.0f };
+        constraint.invMassA = 0.0f;
+        constraint.invMassB = 1.0f;
+        constraint.restitution = 1.0f;
+        constraint.pointCount = 1;
+
+        contactConstraintPoint2& point =
+            constraint.points[0];
+
+        point.normalMass = 1.0f;
+        point.normalImpulse = 0.5f;
+        point.relativeNormalVelocity = -0.5f;
+
+        bodyState bodyStateA{};
+        bodyState bodyStateB{};
+
+        ApplyRestitutionContactConstraint(
+            constraint,
+            bodyStateA,
+            bodyStateB,
+            1.0f
+        );
+
+        assert( NearlyEqual( bodyStateB.linearVelocity.x, 0.0f ) );
+        assert( NearlyEqual( point.normalImpulse, 0.5f ) );
+    }
+
     // Solve가 끝난 누적 impulse를 persistent ContactSim에 다시 저장함.
     {
         contactConstraint2 constraint{};

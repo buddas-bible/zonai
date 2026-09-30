@@ -231,6 +231,29 @@ int main()
         assert( world.GetBodyRotationalInertia( staticBody ) == 0.0f );
     }
 
+    // shape surface 값은 mass와 독립적으로 저장되고 필요할 때 Contact에서 mix됨.
+    {
+        world world{};
+
+        const bodyId bodyId =
+            world.CreateBody( bodyType::Dynamic );
+
+        const shapeId shapeId =
+            world.CreateShape(
+                bodyId,
+                circle2{ {}, 1.0f }
+            );
+
+        assert( std::fabs( world.GetShapeFriction( shapeId ) - 0.6f ) < epsilon );
+        assert( world.GetShapeRestitution( shapeId ) == 0.0f );
+
+        world.SetShapeFriction( shapeId, 0.25f );
+        world.SetShapeRestitution( shapeId, 0.75f );
+
+        assert( std::fabs( world.GetShapeFriction( shapeId ) - 0.25f ) < epsilon );
+        assert( std::fabs( world.GetShapeRestitution( shapeId ) - 0.75f ) < epsilon );
+    }
+
     // Linear impulse는 timeStep 없이 즉시 COM velocity를 변경함.
     {
         world world{};
@@ -706,6 +729,69 @@ int main()
         assert( std::fabs( velocity.y ) < epsilon );
         assert( velocity.x > 0.0f );
         assert( velocity.x < 4.0f );
+    }
+
+    // restitution은 충돌 전 normal 접근 속도를 반대 방향 속도로 되돌림.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId staticBody =
+            world.CreateBody(
+                bodyType::Static,
+                {
+                    { 0.0f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId staticShape =
+            world.CreateShape(
+                staticBody,
+                circle2{ {}, 1.0f }
+            );
+
+        const bodyId dynamicBody =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 1.9f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId dynamicShape =
+            world.CreateShape(
+                dynamicBody,
+                circle2{ {}, 1.0f }
+            );
+
+        // 기본 restitution 0인 static shape와 1인 dynamic shape는
+        // max mixing으로 Contact restitution 1이 됨.
+        world.SetShapeRestitution(
+            dynamicShape,
+            1.0f
+        );
+
+        assert( world.GetShapeRestitution( staticShape ) == 0.0f );
+        assert( world.GetShapeRestitution( dynamicShape ) == 1.0f );
+
+        world.SetBodyLinearVelocity(
+            dynamicBody,
+            { -4.0f, 0.0f }
+        );
+
+        world.Step( 1.0f / 60.0f );
+
+        // 충돌 전 vn=-4, e=1이므로 relax 뒤 restitution 목표는 +4임.
+        assert(
+            std::fabs(
+                world.GetBodyLinearVelocity(
+                    dynamicBody
+                ).x -
+                4.0f
+            ) < 1e-3f
+        );
     }
 
     // 기본 gravity는 Dynamic body의 COM velocity에만 적용됨.

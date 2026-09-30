@@ -347,6 +347,34 @@ float world::GetShapeDensity( shapeId shapeId ) const
     return shapes_[GetShapeIndex( shapeId )].density;
 }
 
+void world::SetShapeFriction( shapeId shapeId, float friction )
+{
+    assert( std::isfinite( friction ) );
+    assert( friction >= 0.0f );
+
+    shapes_[GetShapeIndex( shapeId )].friction =
+        friction;
+}
+
+float world::GetShapeFriction( shapeId shapeId ) const
+{
+    return shapes_[GetShapeIndex( shapeId )].friction;
+}
+
+void world::SetShapeRestitution( shapeId shapeId, float restitution )
+{
+    assert( std::isfinite( restitution ) );
+    assert( restitution >= 0.0f );
+
+    shapes_[GetShapeIndex( shapeId )].restitution =
+        restitution;
+}
+
+float world::GetShapeRestitution( shapeId shapeId ) const
+{
+    return shapes_[GetShapeIndex( shapeId )].restitution;
+}
+
 void world::DestroyShapeByIndex( std::int32_t shapeIndex )
 {
     assert( shapeIndex >= 0 );
@@ -958,7 +986,8 @@ void world::Step( float timeStep )
         * 4. soft push로 penetration correction 속도 생성
         * 5. 보정된 velocity로 transform 적분
         * 6. bias 없이 다시 풀어 correction 속도 제거(relax)
-        * 7. 최종 normal impulse 저장
+        * 7. 충돌 전 접근 속도를 기준으로 restitution 적용
+        * 8. 최종 impulse 저장
         *
         * Push에서 만든 분리 속도는 position을 회복시키는 데만 사용하고
         * Relax가 적분 뒤 제거하므로 보정 자체가 운동 에너지로 남지 않음.
@@ -1117,7 +1146,14 @@ void world::Step( float timeStep )
         );
 
         // -----------------------------------------------------
-        // 7. Store impulses
+        // 7. Apply restitution
+        // -----------------------------------------------------
+        ApplyRestitutionContacts(
+            contactConstraints
+        );
+
+        // -----------------------------------------------------
+        // 8. Store impulses
         // -----------------------------------------------------
         StoreContactConstraintImpulses(
             contactConstraints
@@ -1545,10 +1581,6 @@ std::vector<contactConstraint2> world::PrepareContactConstraints(
     constexpr float CONTACT_DAMPING_RATIO = 10.0f;
     constexpr float MAX_CONTACT_PUSH_SPEED = 3.0f;
 
-    // shape material 시스템이 생기기 전까지 Box2D의 기본값을 사용함.
-    // 이후에는 shape A/B의 friction을 mix한 값으로 교체할 예정임.
-    constexpr float DEFAULT_FRICTION = 0.6f;
-
     const float invTimeStep =
         1.0f / timeStep;
 
@@ -1626,8 +1658,29 @@ std::vector<contactConstraint2> world::PrepareContactConstraints(
         constraint.maxPushSpeed =
             MAX_CONTACT_PUSH_SPEED;
 
+        assert( contactSim.shapeIdA >= 0 );
+        assert( contactSim.shapeIdB >= 0 );
+        assert( static_cast<std::size_t>( contactSim.shapeIdA ) < shapes_.size() );
+        assert( static_cast<std::size_t>( contactSim.shapeIdB ) < shapes_.size() );
+
+        const shape& shapeA =
+            shapes_[contactSim.shapeIdA];
+
+        const shape& shapeB =
+            shapes_[contactSim.shapeIdB];
+
+        // Box2D 기본 mixing rule.
         constraint.friction =
-            DEFAULT_FRICTION;
+            std::sqrt(
+                shapeA.friction *
+                shapeB.friction
+            );
+
+        constraint.restitution =
+            std::max(
+                shapeA.restitution,
+                shapeB.restitution
+            );
 
         constraints.push_back( constraint );
     }
@@ -1682,6 +1735,43 @@ void world::SolveContactConstraints(
                 bodyStates_[constraint.bodyIdA],
                 bodyStates_[constraint.bodyIdB],
                 useBias
+            );
+        }
+    }
+}
+
+void world::ApplyRestitutionContacts(
+    std::span<contactConstraint2> constraints )
+{
+    constexpr float RESTITUTION_THRESHOLD = 1.0f;
+    constexpr int RESTITUTION_ITERATIONS = 2;
+
+    /*
+    * normal solve가 이미 penetration / 접근 속도를 처리한 뒤
+    * 충돌 전 relativeNormalVelocity를 기준으로 bounce만 별도 적용함.
+    *
+    * 낮은 속도 접촉은 threshold 아래에서 restitution을 끄므로
+    * resting contact가 계속 미세하게 튀는 현상을 막음.
+    */
+    for( int iteration = 0;
+         iteration < RESTITUTION_ITERATIONS;
+         ++iteration )
+    {
+        for( contactConstraint2& constraint : constraints )
+        {
+            if( constraint.restitution <= 0.0f )
+            {
+                continue;
+            }
+
+            assert( constraint.bodyIdA >= 0 );
+            assert( constraint.bodyIdB >= 0 );
+
+            ApplyRestitutionContactConstraint(
+                constraint,
+                bodyStates_[constraint.bodyIdA],
+                bodyStates_[constraint.bodyIdB],
+                RESTITUTION_THRESHOLD
             );
         }
     }
