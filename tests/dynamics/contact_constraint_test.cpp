@@ -179,5 +179,86 @@ int main()
         );
     }
 
+    // Static A와 Dynamic B가 서로 접근할 때 normal impulse가 B의 접근 속도를 제거함.
+    {
+        contactConstraint2 constraint{};
+        constraint.bodyIdA = 0;
+        constraint.bodyIdB = 1;
+        constraint.normal = { 1.0f, 0.0f };
+        constraint.invMassA = 0.0f;
+        constraint.invInertiaA = 0.0f;
+        constraint.invMassB = 0.5f;
+        constraint.invInertiaB = 0.0f;
+        constraint.pointCount = 1;
+
+        contactConstraintPoint2& point =
+            constraint.points[0];
+
+        point.normalMass = 2.0f;
+
+        BodyState bodyStateA{};
+
+        BodyState bodyStateB{};
+        bodyStateB.linearVelocity = { -3.0f, 0.0f };
+
+        SolveContactConstraint(
+            constraint,
+            bodyStateA,
+            bodyStateB
+        );
+
+        // DeltaLambda = -normalMass * vn
+        //             = -2 * (-3) = 6
+        //
+        // DeltaV_B = invMassB * 6 = 3
+        //
+        // 따라서 -3 + 3 = 0.
+        assert(
+            NearlyEqual(
+                bodyStateB.linearVelocity.x,
+                0.0f
+            )
+        );
+        assert(
+            NearlyEqual(
+                point.normalImpulse,
+                6.0f
+            )
+        );
+    }
+
+    // 이미 분리 중이면 Contact가 음수 impulse로 서로 끌어당기면 안 됨.
+    {
+        contactConstraint2 constraint{};
+        constraint.bodyIdA = 0;
+        constraint.bodyIdB = 1;
+        constraint.normal = { 1.0f, 0.0f };
+        constraint.invMassA = 0.0f;
+        constraint.invMassB = 0.5f;
+        constraint.pointCount = 1;
+        constraint.points[0].normalMass = 2.0f;
+
+        BodyState bodyStateA{};
+
+        BodyState bodyStateB{};
+        bodyStateB.linearVelocity = { 3.0f, 0.0f };
+
+        SolveContactConstraint(
+            constraint,
+            bodyStateA,
+            bodyStateB
+        );
+
+        assert(
+            NearlyEqual(
+                bodyStateB.linearVelocity.x,
+                3.0f
+            )
+        );
+        assert(
+            constraint.points[0].normalImpulse == 0.0f
+        );
+    }
+
     return 0;
 }
