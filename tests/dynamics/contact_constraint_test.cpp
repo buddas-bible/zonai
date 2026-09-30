@@ -275,6 +275,7 @@ int main()
         contactSim.manifold.pointCount = 1;
         contactSim.manifold.points[0].point = {};
         contactSim.impulses[0].normalImpulse = 6.0f;
+        contactSim.impulses[0].tangentImpulse = -1.5f;
 
         BodySim bodySimA{};
         bodySimA.bodyId = 0;
@@ -299,6 +300,12 @@ int main()
             NearlyEqual(
                 constraint.points[0].normalImpulse,
                 6.0f
+            )
+        );
+        assert(
+            NearlyEqual(
+                constraint.points[0].tangentImpulse,
+                -1.5f
             )
         );
     }
@@ -455,12 +462,142 @@ int main()
         );
     }
 
+    // tangent effective mass도 lever arm과 inverse mass / inertia를 포함해 계산함.
+    {
+        contactSim2 contactSim{};
+        contactSim.contactId = 11;
+        contactSim.bodyIdA = 0;
+        contactSim.bodyIdB = 1;
+        contactSim.invMassA = 0.0f;
+        contactSim.invMassB = 0.5f;
+        contactSim.manifold.normal = { 0.0f, 1.0f };
+        contactSim.manifold.pointCount = 1;
+        contactSim.manifold.points[0].point = {};
+
+        BodySim bodySimA{};
+        bodySimA.bodyId = 0;
+
+        BodySim bodySimB{};
+        bodySimB.bodyId = 1;
+
+        BodyState bodyStateA{};
+        BodyState bodyStateB{};
+
+        const contactConstraint2 constraint =
+            PrepareContactConstraint(
+                contactSim,
+                bodySimA,
+                bodyStateA,
+                bodySimB,
+                bodyStateB
+            );
+
+        // tangent=(1,0), lever arm=0이므로
+        // Kt=invMassB=0.5 -> tangentMass=2.
+        assert(
+            NearlyEqual(
+                constraint.points[0].tangentMass,
+                2.0f
+            )
+        );
+    }
+
+    // Warm start는 normal impulse뿐 아니라 이전 tangent impulse도 함께 적용함.
+    {
+        contactConstraint2 constraint{};
+        constraint.bodyIdA = 0;
+        constraint.bodyIdB = 1;
+        constraint.normal = { 0.0f, 1.0f };
+        constraint.invMassA = 0.0f;
+        constraint.invMassB = 1.0f;
+        constraint.pointCount = 1;
+        constraint.points[0].normalImpulse = 2.0f;
+        constraint.points[0].tangentImpulse = -0.5f;
+
+        BodyState bodyStateA{};
+        BodyState bodyStateB{};
+
+        WarmStartContactConstraint(
+            constraint,
+            bodyStateA,
+            bodyStateB
+        );
+
+        // normal=(0,1), tangent=(1,0)
+        assert( NearlyEqual( bodyStateB.linearVelocity.x, -0.5f ) );
+        assert( NearlyEqual( bodyStateB.linearVelocity.y, 2.0f ) );
+    }
+
+    // Coulomb friction은 tangent 속도를 줄이되 mu * normalImpulse를 넘지 않음.
+    {
+        contactConstraint2 constraint{};
+        constraint.bodyIdA = 0;
+        constraint.bodyIdB = 1;
+        constraint.normal = { 0.0f, 1.0f };
+        constraint.invMassA = 0.0f;
+        constraint.invMassB = 1.0f;
+        constraint.friction = 0.5f;
+        constraint.pointCount = 1;
+
+        contactConstraintPoint2& point =
+            constraint.points[0];
+
+        point.normalMass = 1.0f;
+        point.tangentMass = 1.0f;
+        point.normalImpulse = 2.0f;
+
+        BodyState bodyStateA{};
+        BodyState bodyStateB{};
+        bodyStateB.linearVelocity = { 4.0f, 0.0f };
+
+        SolveContactConstraint(
+            constraint,
+            bodyStateA,
+            bodyStateB,
+            false
+        );
+
+        // 필요한 friction impulse는 -4지만
+        // max = mu * normalImpulse = 0.5 * 2 = 1.
+        assert( NearlyEqual( point.tangentImpulse, -1.0f ) );
+        assert( NearlyEqual( bodyStateB.linearVelocity.x, 3.0f ) );
+    }
+
+    // normal impulse가 없으면 Coulomb friction도 물체를 임의로 멈출 수 없음.
+    {
+        contactConstraint2 constraint{};
+        constraint.bodyIdA = 0;
+        constraint.bodyIdB = 1;
+        constraint.normal = { 0.0f, 1.0f };
+        constraint.invMassA = 0.0f;
+        constraint.invMassB = 1.0f;
+        constraint.friction = 0.6f;
+        constraint.pointCount = 1;
+        constraint.points[0].normalMass = 1.0f;
+        constraint.points[0].tangentMass = 1.0f;
+
+        BodyState bodyStateA{};
+        BodyState bodyStateB{};
+        bodyStateB.linearVelocity = { 4.0f, 0.0f };
+
+        SolveContactConstraint(
+            constraint,
+            bodyStateA,
+            bodyStateB,
+            false
+        );
+
+        assert( NearlyEqual( constraint.points[0].tangentImpulse, 0.0f ) );
+        assert( NearlyEqual( bodyStateB.linearVelocity.x, 4.0f ) );
+    }
+
     // Solve가 끝난 누적 impulse를 persistent ContactSim에 다시 저장함.
     {
         contactConstraint2 constraint{};
         constraint.contactId = 3;
         constraint.pointCount = 1;
         constraint.points[0].normalImpulse = 4.25f;
+        constraint.points[0].tangentImpulse = -0.75f;
 
         contactSim2 contactSim{};
         contactSim.contactId = 3;
@@ -475,6 +612,12 @@ int main()
             NearlyEqual(
                 contactSim.impulses[0].normalImpulse,
                 4.25f
+            )
+        );
+        assert(
+            NearlyEqual(
+                contactSim.impulses[0].tangentImpulse,
+                -0.75f
             )
         );
     }

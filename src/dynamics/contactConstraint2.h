@@ -43,9 +43,16 @@ struct contactConstraintPoint2
     // normal impulse를 velocity 변화로 환산하는 effective mass의 역수.
     float normalMass = 0.0f;
 
+    // tangent impulse를 velocity 변화로 환산하는 effective mass의 역수.
+    float tangentMass = 0.0f;
+
     // iterative solver가 누적하는 normal impulse.
     // 접촉은 서로 밀어낼 수만 있으므로 항상 0 이상으로 유지함.
     float normalImpulse = 0.0f;
+
+    // 접촉면을 따라 미끄러지는 상대속도를 줄이는 누적 friction impulse.
+    // Coulomb cone에 의해 |tangentImpulse| <= friction * normalImpulse로 제한됨.
+    float tangentImpulse = 0.0f;
 };
 
 // persistent ContactSim을 한 solver step에서 바로 사용할 transient constraint로 변환한 값.
@@ -71,6 +78,10 @@ struct contactConstraint2
     // correction 때문에 한 step에서 만들어질 수 있는 최대 분리 속도.
     float maxPushSpeed = 0.0f;
 
+    // 두 Shape 사이의 Coulomb friction coefficient.
+    // material 시스템 도입 전까지 World가 기본값을 넣어줌.
+    float friction = 0.0f;
+
     std::array<contactConstraintPoint2, MAX_MANIFOLD_POINTS> points{};
     int pointCount = 0;
 };
@@ -90,9 +101,9 @@ void WarmStartContactConstraint(
     BodyState& bodyStateA,
     BodyState& bodyStateB );
 
-// 한 Contact의 normal constraint를 한 번 풀어 Body velocity에 impulse를 적용함.
-// useBias=true면 penetration을 줄이는 soft push를 포함하고,
-// false면 correction bias 없이 순수 velocity constraint만 풂.
+// 한 Contact의 constraint를 한 번 풀어 Body velocity에 impulse를 적용함.
+// useBias=true면 penetration을 줄이는 normal soft push만 수행하고,
+// false면 normal relax 뒤 tangent Coulomb friction까지 풂.
 void SolveContactConstraint(
     contactConstraint2& constraint,
     BodyState& bodyStateA,

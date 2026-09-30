@@ -1545,6 +1545,10 @@ std::vector<contactConstraint2> World::PrepareContactConstraints(
     constexpr float CONTACT_DAMPING_RATIO = 10.0f;
     constexpr float MAX_CONTACT_PUSH_SPEED = 3.0f;
 
+    // Shape material 시스템이 생기기 전까지 Box2D의 기본값을 사용함.
+    // 이후에는 Shape A/B의 friction을 mix한 값으로 교체할 예정임.
+    constexpr float DEFAULT_FRICTION = 0.6f;
+
     const float invTimeStep =
         1.0f / timeStep;
 
@@ -1622,6 +1626,9 @@ std::vector<contactConstraint2> World::PrepareContactConstraints(
         constraint.maxPushSpeed =
             MAX_CONTACT_PUSH_SPEED;
 
+        constraint.friction =
+            DEFAULT_FRICTION;
+
         constraints.push_back( constraint );
     }
 
@@ -1659,6 +1666,7 @@ void World::SolveContactConstraints(
     *
     * useBias=false:
     *     position 적분 뒤 correction velocity를 제거하는 rigid relax
+    *     + tangent 방향 Coulomb friction
     */
     for( int iteration = 0;
          iteration < VELOCITY_ITERATIONS;

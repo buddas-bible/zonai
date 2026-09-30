@@ -656,6 +656,58 @@ int main()
         );
     }
 
+    // Contact friction은 normal impulse의 Coulomb 한계 안에서 tangential velocity를 줄임.
+    {
+        World world{};
+        world.SetGravity( {} );
+
+        const BodyId staticBody =
+            world.CreateBody(
+                BodyType::Static,
+                {
+                    { 0.0f, 0.0f },
+                    {}
+                }
+            );
+
+        (void)world.CreateShape(
+            staticBody,
+            circle2{ {}, 1.0f }
+        );
+
+        const BodyId dynamicBody =
+            world.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 0.0f, 1.5f },
+                    {}
+                }
+            );
+
+        (void)world.CreateShape(
+            dynamicBody,
+            circle2{ {}, 1.0f }
+        );
+
+        world.SetBodyLinearVelocity(
+            dynamicBody,
+            { 4.0f, -1.0f }
+        );
+
+        world.Step( 1.0f / 60.0f );
+
+        const vec2 velocity =
+            world.GetBodyLinearVelocity(
+                dynamicBody
+            );
+
+        // normal constraint는 아래쪽 접근 속도를 제거하고,
+        // 그 normal impulse를 한계로 friction이 +X 미끄러짐을 줄임.
+        assert( std::fabs( velocity.y ) < epsilon );
+        assert( velocity.x > 0.0f );
+        assert( velocity.x < 4.0f );
+    }
+
     // 기본 gravity는 Dynamic Body의 COM velocity에만 적용됨.
     {
         World world{};

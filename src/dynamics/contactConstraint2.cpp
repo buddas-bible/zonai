@@ -117,9 +117,12 @@ contactConstraint2 PrepareContactConstraint(
             manifoldPoint.separation;
 
         // 같은 contact point가 이전 step에도 존재했다면
-        // 누적 normal impulse를 초기 추정값으로 가져옴.
+        // 이전 normal / tangent 누적 impulse를 초기 추정값으로 가져옴.
         point.normalImpulse =
             contactSim.impulses[i].normalImpulse;
+
+        point.tangentImpulse =
+            contactSim.impulses[i].tangentImpulse;
 
         /*
         * Contact point의 실제 선속도
@@ -204,6 +207,45 @@ contactConstraint2 PrepareContactConstraint(
             inverseEffectiveMass > 0.0f
                 ? 1.0f / inverseEffectiveMass
                 : 0.0f;
+
+        /*
+        * tangent 방향도 같은 방식으로 effective mass를 계산함.
+        *
+        * normal n=(nx, ny)에 대한 right perpendicular:
+        *
+        *     tangent = (ny, -nx)
+        *
+        * friction impulse는 이 축의 상대속도를 0에 가깝게 만들되
+        * Coulomb 한계 안에서만 누적됨.
+        */
+        const vec2 tangent
+        {
+            constraint.normal.y,
+            -constraint.normal.x
+        };
+
+        const float rtA =
+            Cross(
+                point.anchorA,
+                tangent
+            );
+
+        const float rtB =
+            Cross(
+                point.anchorB,
+                tangent
+            );
+
+        const float tangentInverseEffectiveMass =
+            constraint.invMassA +
+            constraint.invMassB +
+            constraint.invInertiaA * rtA * rtA +
+            constraint.invInertiaB * rtB * rtB;
+
+        point.tangentMass =
+            tangentInverseEffectiveMass > 0.0f
+                ? 1.0f / tangentInverseEffectiveMass
+                : 0.0f;
     }
 
     return constraint;
@@ -227,8 +269,15 @@ void WarmStartContactConstraint(
     float angularVelocityB =
         bodyStateB.angularVelocity;
 
+    const vec2 tangent
+    {
+        constraint.normal.y,
+        -constraint.normal.x
+    };
+
     /*
-    * 이전 step에서 수렴한 누적 impulse를 초기값으로 먼저 적용함.
+    * 이전 step에서 수렴한 normal / tangent 누적 impulse를
+    * 초기값으로 먼저 적용함.
     *
     * 이후 iterative solve는 0부터 다시 계산하지 않고
     * 이 impulse에서 필요한 DeltaLambda만 추가 / 제거함.
@@ -239,8 +288,8 @@ void WarmStartContactConstraint(
             constraint.points[i];
 
         const vec2 impulseVector =
-            constraint.normal *
-            point.normalImpulse;
+            constraint.normal * point.normalImpulse +
+            tangent * point.tangentImpulse;
 
         linearVelocityA -=
             impulseVector *
@@ -435,6 +484,101 @@ void SolveContactConstraint(
             );
     }
 
+    /*
+    * Friction
+    *
+    * penetration push 단계에서는 normal correction만 만들고,
+    * position 적분 뒤의 relax 단계에서 실제 tangential velocity를 줄임.
+    *
+    *     DeltaLambdaT = -tangentMass * vt
+    *
+    * Coulomb friction은 normal impulse가 만들어낼 수 있는 범위 안에서만
+    * tangent impulse를 허용함.
+    *
+    *     |lambdaT| <= mu * lambdaN
+    */
+    if( !useBias && constraint.friction > 0.0f )
+    {
+        const vec2 tangent
+        {
+            constraint.normal.y,
+            -constraint.normal.x
+        };
+
+        for( int i = 0; i < constraint.pointCount; ++i )
+        {
+            contactConstraintPoint2& point =
+                constraint.points[i];
+
+            const vec2 velocityA =
+                linearVelocityA +
+                Cross(
+                    angularVelocityA,
+                    point.anchorA
+                );
+
+            const vec2 velocityB =
+                linearVelocityB +
+                Cross(
+                    angularVelocityB,
+                    point.anchorB
+                );
+
+            const float tangentVelocity =
+                Dot(
+                    velocityB - velocityA,
+                    tangent
+                );
+
+            const float oldImpulse =
+                point.tangentImpulse;
+
+            const float incrementalImpulse =
+                -point.tangentMass *
+                tangentVelocity;
+
+            const float maxFrictionImpulse =
+                constraint.friction *
+                point.normalImpulse;
+
+            point.tangentImpulse =
+                std::clamp(
+                    oldImpulse + incrementalImpulse,
+                    -maxFrictionImpulse,
+                    maxFrictionImpulse
+                );
+
+            const float impulse =
+                point.tangentImpulse -
+                oldImpulse;
+
+            const vec2 impulseVector =
+                tangent * impulse;
+
+            linearVelocityA -=
+                impulseVector *
+                constraint.invMassA;
+
+            angularVelocityA -=
+                constraint.invInertiaA *
+                Cross(
+                    point.anchorA,
+                    impulseVector
+                );
+
+            linearVelocityB +=
+                impulseVector *
+                constraint.invMassB;
+
+            angularVelocityB +=
+                constraint.invInertiaB *
+                Cross(
+                    point.anchorB,
+                    impulseVector
+                );
+        }
+    }
+
     bodyStateA.linearVelocity =
         linearVelocityA;
 
@@ -461,6 +605,9 @@ void StoreContactImpulses(
     {
         contactSim.impulses[i].normalImpulse =
             constraint.points[i].normalImpulse;
+
+        contactSim.impulses[i].tangentImpulse =
+            constraint.points[i].tangentImpulse;
     }
 }
 
