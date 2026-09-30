@@ -22,6 +22,7 @@ int main()
         assert( body.contactCount == 0 );
         assert( body.headShapeId == Body::NULL_INDEX );
         assert( body.shapeCount == 0 );
+
     }
 
     {

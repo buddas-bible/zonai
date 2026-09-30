@@ -11,7 +11,7 @@ localManifold2 CollideCapsules(
     const capsule2& a,
     const capsule2& b, const transform2& transformB )
 {
-    localManifold2 manifold{};
+    localManifold2 manifold = {};
 
     // 계산 오차를 줄이기 위해 capsule A의 첫 점을 원점으로 이동한다.
     const vec2 origin = a.center1;

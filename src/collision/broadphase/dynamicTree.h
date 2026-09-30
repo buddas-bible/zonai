@@ -92,9 +92,10 @@ class DynamicTree
 public:
     DynamicTree();
 
-    // 새 stable proxy를 만들고 tree leaf에 연결함.
+public:
+    // 
     std::int32_t CreateProxy( const aabb2& aabb, std::int32_t shapeIndex, bool markMoved = false );
-
+    
     void DestroyProxy( std::int32_t proxyId );
 
     void MoveProxy( std::int32_t proxyId, const aabb2& aabb, bool markMoved = false );
@@ -192,7 +193,7 @@ public:
                 {
                     const std::int32_t proxyId = GetProxyId( node );
 
-                    const bool proceed = callback( proxyId );
+					bool proceed = callback( proxyId );
                     if( proceed == false )
                     {
                         return;
@@ -246,6 +247,7 @@ private:
     // Box2D의 single-precision broad-phase 범위 보호와 같은 상한.
     static constexpr float MAX_TREE_AABB_EXTENT = 1.0e5f;
 
+private:
     // flagIndex에서 node 상태와 저장된 index를 읽는 helper.
     static bool IsLeaf( const TreeNode& node );
     static bool IsEmptyNode( const TreeNode& node );
@@ -260,6 +262,7 @@ private:
     static TreeNode MakeEmptyNode();
     static TreeNode MakeLeafNode( const aabb2& aabb, std::int32_t proxyId, std::int32_t shapeIndex, bool moved );
 
+private:
     static TreeNode MakeInternalNodeFrom(
         const TreeNodeStorage& nodes,
         std::int32_t childPair );
@@ -280,7 +283,7 @@ private:
     std::int32_t AllocateSiblingPair();
     void FreeSiblingPair( std::int32_t pair );
 
-    // 새 leaf와 묶였을 때 비용이 가장 작은 형제 노드 index를 반환함.
+	// 새 leaf와 묶였을 때 비용이 가장 작은 형제 노드 index를 반환함.
     std::int32_t FindBestSibling( const aabb2& aabb ) const;
     void LinkChildren( std::int32_t nodeIndex );
     void SwapNodes( std::int32_t downIndex, std::int32_t upIndex );

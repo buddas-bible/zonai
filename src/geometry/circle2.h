@@ -1,7 +1,7 @@
 #pragma once
 
-#include "collision/aabb2.h"
 #include "math/vec2.h"
+#include "collision/aabb2.h"
 
 namespace zonai
 {

@@ -26,7 +26,9 @@ public:
 
     // count개의 T를 저장할 Alignment byte 정렬 메모리를 할당함.
     // std::vector가 allocator를 통해 호출하며 반환된 메모리의 객체 생성은 vector가 담당함.
-    [[nodiscard]] T* allocate( std::size_t count )
+
+    [[nodiscard]] // 반환된 메모리 주소를 실수로 버리지 않도록 경고하게 함.
+    T* allocate( std::size_t count )
     {
         // byte 크기를 계산하기 전에 정수 overflow가 발생할 수 있는지 검사함.
         if( count > std::numeric_limits<std::size_t>::max() / sizeof( T ) )
@@ -38,8 +40,7 @@ public:
         return static_cast<T*>(
             ::operator new(
                 count * sizeof( T ),
-                std::align_val_t{ Alignment }
-            )
+                std::align_val_t{ Alignment } ) // aligned operator new에 정렬 크기를 전달함.
         );
     }
 

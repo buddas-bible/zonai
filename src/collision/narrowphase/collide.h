@@ -1,12 +1,13 @@
 #pragma once
 
+#include "geometry/segment2.h"
+#include "geometry/circle2.h"
+#include "geometry/capsule2.h"
+#include "geometry/polygon2.h"
+
+#include "math/transform2.h"
 #include "collision/narrowphase/manifold2.h"
 #include "collision/shape.h"
-#include "geometry/capsule2.h"
-#include "geometry/circle2.h"
-#include "geometry/polygon2.h"
-#include "geometry/segment2.h"
-#include "math/transform2.h"
 
 namespace zonai
 {
@@ -19,23 +20,19 @@ namespace zonai
 */
 localManifold2 CollideCircles(
     const circle2& a,
-    const circle2& b,
-    const transform2& transformB );
+    const circle2& b, const transform2& transformB);
 
 localManifold2 CollideSegmentCircle(
     const segment2& segment,
-    const circle2& circle,
-    const transform2& circleTransform );
+    const circle2& circle, const transform2& circleTransform );
 
 localManifold2 CollideCapsuleCircle(
     const capsule2& capsule,
-    const circle2& circle,
-    const transform2& circleTransform );
+    const circle2& circle, const transform2& circleTransform );
 
 localManifold2 CollidePolygonCircle(
     const polygon2& polygon,
-    const circle2& circle,
-    const transform2& circleTransform );
+    const circle2& circle, const transform2& circleTransform );
 
 /*
 * capsule-capsule
@@ -44,18 +41,15 @@ localManifold2 CollidePolygonCircle(
 */
 localManifold2 CollideCapsules(
     const capsule2& a,
-    const capsule2& b,
-    const transform2& transformB );
+    const capsule2& b, const transform2& transformB );
 
 localManifold2 CollideSegmentCapsule(
     const segment2& segment,
-    const capsule2& capsuleB,
-    const transform2& capsuleBTransform );
+    const capsule2& capsuleB, const transform2& capsuleBTransform );
 
 localManifold2 CollidePolygonCapsule(
     const polygon2& polygon,
-    const capsule2& capsule,
-    const transform2& capsuleTransform );
+    const capsule2& capsule, const transform2& capsuleTransform );
 
 /*
 * polygon-polygon
@@ -63,13 +57,11 @@ localManifold2 CollidePolygonCapsule(
 */
 localManifold2 CollidePolygons(
     const polygon2& a,
-    const polygon2& b,
-    const transform2& transformB );
+    const polygon2& b, const transform2& transformB );
 
 localManifold2 CollidePolygonSegment(
     const polygon2& polygon,
-    const segment2& segment,
-    const transform2& segmentTransform );
+    const segment2& segment, const transform2& segmentTransform );
 
 // 현재 NarrowPhase가 지원하는 geometry 조합인지 확인함.
 bool CanCollideShapes(

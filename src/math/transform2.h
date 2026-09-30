@@ -1,7 +1,7 @@
 #pragma once
 
-#include "math/rot2.h"
-#include "math/vec2.h"
+#include "vec2.h"
+#include "rot2.h"
 
 namespace zonai
 {
@@ -12,68 +12,68 @@ struct transform2
     rot2 rotation{};
 };
 
-// local-space point를 world space로 변환함.
+// local-space point를 transform의 world space로 변환합니다.
 inline vec2 TransformPoint(
     const transform2& transform,
     const vec2& point )
 {
-    return transform.position + Rotate( transform.rotation, point );
+    return transform.position + zonai::Rotate( transform.rotation, point );
 }
 
-// world-space point를 local space로 변환함.
+// world-space point를 transform의 local space로 변환합니다.
 inline vec2 InverseTransformPoint(
     const transform2& transform,
     const vec2& point )
 {
-    return InverseRotate( transform.rotation, point - transform.position );
+    return zonai::InverseRotate( transform.rotation, point - transform.position );
 }
 
-// local-space vector를 world space로 변환함.
+// local-space vector를 transform의 world space로 변환합니다.
 inline vec2 TransformVector(
     const transform2& transform,
     const vec2& vector )
 {
-    return Rotate( transform.rotation, vector );
+    return zonai::Rotate( transform.rotation, vector );
 }
 
-// world-space vector를 local space로 변환함.
+// world-space vector를 transform의 local space로 변환합니다.
 inline vec2 InverseTransformVector(
     const transform2& transform,
     const vec2& vector )
 {
-    return InverseRotate( transform.rotation, vector );
+    return zonai::InverseRotate( transform.rotation, vector );
 }
 
-// transform2의 역변환을 계산함.
+// transform2의 역변환을 계산합니다.
 inline transform2 Inverse( const transform2& transform )
 {
-    const rot2 inverseRotation = Inverse( transform.rotation );
+    const rot2 inverseRotation = zonai::Inverse( transform.rotation );
 
     return
     {
-        Rotate( inverseRotation, -transform.position ),
+        zonai::Rotate( inverseRotation, -transform.position ),
         inverseRotation
     };
 }
 
-// a * b 합성 transform을 계산함.
+// // a * b 합성 transform을 계산합니다.
 inline transform2 Mul( const transform2& a, const transform2& b )
 {
     return
     {
-        TransformPoint( a, b.position ),
+        zonai::TransformPoint( a, b.position ),
         a.rotation * b.rotation
     };
 }
 
-// inverse(a) * b를 계산해 B local에서 A local로의 상대 transform을 반환함.
+// inverse(a) * b를 계산하여 B local space에서 A local space로의 상대 transform을 반환합니다.
 inline transform2 InverseMul( const transform2& a, const transform2& b )
 {
     return
     {
-        InverseTransformPoint( a, b.position ),
-        Inverse( a.rotation ) * b.rotation
+        zonai::InverseTransformPoint( a, b.position ),
+        zonai::Inverse( a.rotation ) * b.rotation
     };
 }
 
-} // namespace zonai
+}
