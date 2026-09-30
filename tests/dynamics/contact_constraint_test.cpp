@@ -591,6 +591,47 @@ int main()
         assert( NearlyEqual( bodyStateB.linearVelocity.x, 4.0f ) );
     }
 
+    // speculative contact는 separation / dt보다 빠르게 gap을 닫지 못하게 함.
+    {
+        contactConstraint2 constraint{};
+        constraint.bodyIdA = 0;
+        constraint.bodyIdB = 1;
+        constraint.normal = { 1.0f, 0.0f };
+        constraint.invMassA = 0.0f;
+        constraint.invMassB = 1.0f;
+        constraint.invTimeStep = 60.0f;
+        constraint.pointCount = 1;
+
+        contactConstraintPoint2& point =
+            constraint.points[0];
+
+        point.separation = 0.01f;
+        point.normalMass = 1.0f;
+
+        bodyState bodyStateA{};
+        bodyState bodyStateB{};
+        bodyStateB.linearVelocity = { -2.0f, 0.0f };
+
+        SolveContactConstraint(
+            constraint,
+            bodyStateA,
+            bodyStateB,
+            true
+        );
+
+        assert( NearlyEqual( bodyStateB.linearVelocity.x, -0.6f ) );
+        assert( NearlyEqual( point.normalImpulse, 1.4f ) );
+
+        SolveContactConstraint(
+            constraint,
+            bodyStateA,
+            bodyStateB,
+            false
+        );
+
+        assert( NearlyEqual( bodyStateB.linearVelocity.x, -0.6f ) );
+    }
+
     // restitution은 solver 전 접근 속도를 기준으로 목표 반발 속도를 만듦.
     {
         contactConstraint2 constraint{};

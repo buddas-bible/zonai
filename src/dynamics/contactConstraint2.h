@@ -78,6 +78,9 @@ struct contactConstraint2
     // correction 때문에 한 step에서 만들어질 수 있는 최대 분리 속도.
     float maxPushSpeed = 0.0f;
 
+    // positive separation을 이번 step 안에서 닫지 않도록 speculative bias에 사용함.
+    float invTimeStep = 0.0f;
+
     // 두 shape 사이의 Coulomb friction coefficient.
     float friction = 0.0f;
 

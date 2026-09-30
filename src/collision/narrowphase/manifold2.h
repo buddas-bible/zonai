@@ -40,6 +40,19 @@ struct manifold2
     int pointCount{};
 }; // sizeof: 44 bytes
 
+inline bool IsTouchingManifold( const localManifold2& manifold )
+{
+    for( int i = 0; i < manifold.pointCount; ++i )
+    {
+        if( manifold.points[i].separation <= 0.0f )
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // Shape A local-space manifold을 world-space public manifold로 변환함.
 inline manifold2 ToWorldManifold(
     const localManifold2& localManifold,

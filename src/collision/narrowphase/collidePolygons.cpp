@@ -4,6 +4,8 @@
 #include <cfloat>
 #include <cmath>
 
+#include "collision/constants.h"
+
 namespace zonai
 {
 namespace
@@ -125,8 +127,7 @@ void AddContactPoint(
     const vec2& point,
     float separation )
 {
-    // Zonai는 아직 speculative contact를 사용하지 않는다.
-    if( separation > FLT_EPSILON ||
+    if( separation > SPECULATIVE_DISTANCE ||
         manifold.pointCount >= MAX_MANIFOLD_POINTS )
     {
         return;
@@ -351,9 +352,8 @@ localManifold2 CollidePolygons(
 
     const float radiusSum = localA.radius + localB.radius;
 
-    // TODO: speculative contacts
-    if( separationA > radiusSum ||
-        separationB > radiusSum )
+    if( separationA > radiusSum + SPECULATIVE_DISTANCE ||
+        separationB > radiusSum + SPECULATIVE_DISTANCE )
     {
         return manifold;
     }
@@ -404,7 +404,7 @@ localManifold2 CollidePolygons(
         }
     }
 
-    constexpr float linearSlop = 0.005f;
+    constexpr float linearSlop = LINEAR_SLOP;
 
     // Core polygon들이 떨어져 있지만 radius 때문에 접촉하는 경우에는
     // reference/incident edge의 실제 최근접 feature를 확인한다.
@@ -428,7 +428,7 @@ localManifold2 CollidePolygons(
         const float distance = std::sqrt( result.distanceSquared );
         const float closestSeparation = distance - radiusSum;
 
-        if( closestSeparation > 0.0f )
+        if( closestSeparation > SPECULATIVE_DISTANCE )
         {
             return manifold;
         }

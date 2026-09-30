@@ -46,6 +46,29 @@ int main()
     }
 
     {
+        // speculative distance 안에 있으면 아직 떨어져 있어도 manifold를 만든다.
+        circle2 a{};
+        a.radius = 1.0f;
+
+        circle2 b{};
+        b.radius = 1.0f;
+
+        transform2 transformB{};
+        transformB.position = { 2.01f, 0.0f };
+
+        const localManifold2 manifold =
+            zonai::CollideCircles(
+                a,
+                b,
+                transformB
+            );
+
+        assert( manifold.pointCount == 1 );
+        assert( NearlyEqual( manifold.points[0].separation, 0.01f ) );
+        assert( !IsTouchingManifold( manifold ) );
+    }
+
+    {
         // 두 원이 접촉하는 경우
         circle2 a{};
         a.radius = 1.0f;

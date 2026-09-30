@@ -36,6 +36,15 @@ inline vec2 Extents( const aabb2& box )
     return ( box.max - box.min ) * 0.5f;
 }
 
+inline aabb2 ExpandAABB( const aabb2& box, float margin )
+{
+    return
+    {
+        { box.min.x - margin, box.min.y - margin },
+        { box.max.x + margin, box.max.y + margin }
+    };
+}
+
 // 두 aabb2의 합집합
 inline aabb2 Union( const aabb2& a, const aabb2& b )
 {

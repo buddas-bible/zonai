@@ -3,6 +3,8 @@
 #include <cfloat>
 #include <cmath>
 
+#include "collision/constants.h"
+
 namespace zonai
 {
 
@@ -20,8 +22,11 @@ localManifold2 CollideCircles(
 
     const float radiusSum = a.radius + b.radius;
 
-    // TODO: speculative contacts
-    if( distanceSquared > radiusSum * radiusSum )
+    const float speculativeRadius =
+        radiusSum + SPECULATIVE_DISTANCE;
+
+    if( distanceSquared >
+        speculativeRadius * speculativeRadius )
     {
         return manifold;
     }
@@ -105,8 +110,11 @@ localManifold2 CollideCapsuleCircle(
 
     const float radiusSum = capsule.radius + circle.radius;
 
-    // TODO: speculative contacts
-    if( distanceSquared > radiusSum * radiusSum )
+    const float speculativeRadius =
+        radiusSum + SPECULATIVE_DISTANCE;
+
+    if( distanceSquared >
+        speculativeRadius * speculativeRadius )
     {
         return manifold;
     }
@@ -167,8 +175,8 @@ localManifold2 CollidePolygonCircle(
         }
     }
 
-    // TODO: speculative contacts
-    if( separation > radiusSum )
+    if( separation >
+        radiusSum + SPECULATIVE_DISTANCE )
     {
         return manifold;
     }
@@ -196,7 +204,11 @@ localManifold2 CollidePolygonCircle(
         const vec2 delta = center - vertex1;
         const float distanceSquared = zonai::LengthSquared( delta );
 
-        if( distanceSquared > radiusSum * radiusSum )
+        const float speculativeRadius =
+            radiusSum + SPECULATIVE_DISTANCE;
+
+        if( distanceSquared >
+            speculativeRadius * speculativeRadius )
         {
             return manifold;
         }
@@ -218,7 +230,11 @@ localManifold2 CollidePolygonCircle(
         const vec2 delta = center - vertex2;
         const float distanceSquared = zonai::LengthSquared( delta );
 
-        if( distanceSquared > radiusSum * radiusSum )
+        const float speculativeRadius =
+            radiusSum + SPECULATIVE_DISTANCE;
+
+        if( distanceSquared >
+            speculativeRadius * speculativeRadius )
         {
             return manifold;
         }

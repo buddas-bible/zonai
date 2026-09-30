@@ -189,7 +189,7 @@ public:
             const contactSim2& contactSim =
                 contactSims_[contactId];
 
-            if( contactSim.manifold.pointCount > 0 )
+            if( IsTouchingManifold( contactSim.manifold ) )
             {
                 callback( MakeContactData( contactId ) );
             }
@@ -247,7 +247,7 @@ public:
                 const contactSim2& contactSim =
                     contactSims_[contactId];
 
-                if( contactSim.manifold.pointCount > 0 )
+                if( IsTouchingManifold( contactSim.manifold ) )
                 {
                     callback( MakeContactData( contactId ) );
                 }

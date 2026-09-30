@@ -6,6 +6,7 @@
 #include <limits>
 #include <utility>
 
+#include "collision/constants.h"
 #include "dynamics/bodyShape.h"
 
 namespace zonai
@@ -306,11 +307,18 @@ shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilt
     const aabb2 worldAABB =
         ComputeShapeAABB( storedShape.geometry, bodySim.transform );
 
-    // Box2D의 기본 shape 생성처럼 static shape도 즉시 pair 탐색 대상이 되게 함.
+    const aabb2 proxyAABB =
+        ExpandAABB(
+            worldAABB,
+            SPECULATIVE_DISTANCE
+        );
+
+    // speculative contact가 실제 overlap 전에 broadPhase 후보가 되도록
+    // proxy에는 tight AABB보다 조금 넓은 bounds를 저장함.
     storedShape.proxyKey =
         broadPhase_.CreateProxy(
             body.type,
-            worldAABB,
+            proxyAABB,
             shapeIndex,
             true
         );
@@ -486,10 +494,16 @@ void world::SyncBodyProxies( std::int32_t bodyIndex )
 
         const aabb2 worldAABB = ComputeShapeAABB( shape.geometry, bodySim.transform );
 
+        const aabb2 proxyAABB =
+            ExpandAABB(
+                worldAABB,
+                SPECULATIVE_DISTANCE
+            );
+
         // disabled body 개념이 들어오면 proxy가 없는 shape는 그대로 건너뜀.
         if( shape.proxyKey != shape::NULL_INDEX )
         {
-            broadPhase_.MoveProxy( shape.proxyKey, worldAABB );
+            broadPhase_.MoveProxy( shape.proxyKey, proxyAABB );
         }
 
         shapeId = shape.nextShapeId;
@@ -1221,8 +1235,8 @@ std::size_t world::GetBodyContactData(
 
         assert( contactSim.contactId == contactId );
 
-        // Contact는 AABB pair만으로도 존재할 수 있으므로 실제 접촉점이 있는 것만 공개함.
-        if( contactSim.manifold.pointCount > 0 )
+        // speculative point는 solver에는 사용하지만 실제 touching query에서는 제외함.
+        if( IsTouchingManifold( contactSim.manifold ) )
         {
             output[count] =
                 MakeContactData( contactId );
@@ -1657,6 +1671,9 @@ std::vector<contactConstraint2> world::PrepareContactConstraints(
 
         constraint.maxPushSpeed =
             MAX_CONTACT_PUSH_SPEED;
+
+        constraint.invTimeStep =
+            invTimeStep;
 
         assert( contactSim.shapeIdA >= 0 );
         assert( contactSim.shapeIdB >= 0 );

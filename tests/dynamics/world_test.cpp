@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 
+#include "collision/constants.h"
 #include "dynamics/world.h"
 
 using namespace zonai;
@@ -731,6 +732,96 @@ int main()
         assert( velocity.x < 4.0f );
     }
 
+    // speculative contact는 실제 overlap 전에 접근 속도를 제한해 이번 step의 관통을 막음.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId staticBody =
+            world.CreateBody( bodyType::Static );
+
+        const shapeId staticShape =
+            world.CreateShape(
+                staticBody,
+                circle2{ {}, 1.0f }
+            );
+
+        const bodyId dynamicBody =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 2.01f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId dynamicShape =
+            world.CreateShape(
+                dynamicBody,
+                circle2{ {}, 1.0f }
+            );
+
+        int touchingCount = 0;
+
+        world.UpdateCollisions(
+            [&]( const contactData& )
+            {
+                ++touchingCount;
+            }
+        );
+
+        assert( world.GetContactCount() == 1 );
+        assert( touchingCount == 0 );
+
+        std::array<contactData, 1> contacts{};
+
+        assert(
+            world.GetBodyContactData(
+                dynamicBody,
+                contacts
+            ) == 0
+        );
+
+        world.SetBodyLinearVelocity(
+            dynamicBody,
+            { -2.0f, 0.0f }
+        );
+
+        world.Step( 1.0f / 60.0f );
+
+        const transform2 transform =
+            world.GetBodyTransform(
+                dynamicBody
+            );
+
+        const vec2 velocity =
+            world.GetBodyLinearVelocity(
+                dynamicBody
+            );
+
+        assert( std::fabs( transform.position.x - 2.0f ) < 1e-4f );
+        assert( std::fabs( velocity.x + 0.6f ) < 1e-4f );
+
+        touchingCount = 0;
+
+        world.UpdateCollisions(
+            [&]( const contactData& data )
+            {
+                ++touchingCount;
+                assert(
+                    data.shapeA == staticShape ||
+                    data.shapeB == staticShape
+                );
+                assert(
+                    data.shapeA == dynamicShape ||
+                    data.shapeB == dynamicShape
+                );
+            }
+        );
+
+        assert( touchingCount == 1 );
+    }
+
     // restitution은 충돌 전 normal 접근 속도를 반대 방향 속도로 되돌림.
     {
         world world{};
@@ -1244,10 +1335,10 @@ int main()
                 .GetTree( bodyType::Dynamic )
                 .GetProxyAABB( GetProxyId( circle.proxyKey ) );
 
-        assert( std::fabs( circleAABB.min.x - 9.0f ) < epsilon );
-        assert( std::fabs( circleAABB.min.y - 6.0f ) < epsilon );
-        assert( std::fabs( circleAABB.max.x - 11.0f ) < epsilon );
-        assert( std::fabs( circleAABB.max.y - 8.0f ) < epsilon );
+        assert( std::fabs( circleAABB.min.x - ( 9.0f - SPECULATIVE_DISTANCE ) ) < epsilon );
+        assert( std::fabs( circleAABB.min.y - ( 6.0f - SPECULATIVE_DISTANCE ) ) < epsilon );
+        assert( std::fabs( circleAABB.max.x - ( 11.0f + SPECULATIVE_DISTANCE ) ) < epsilon );
+        assert( std::fabs( circleAABB.max.y - ( 8.0f + SPECULATIVE_DISTANCE ) ) < epsilon );
 
         const shapeId segmentId =
             world.CreateShape(
@@ -1274,10 +1365,10 @@ int main()
                 .GetTree( bodyType::Dynamic )
                 .GetProxyAABB( GetProxyId( movedCircle.proxyKey ) );
 
-        assert( std::fabs( movedCircleAABB.min.x - 21.0f ) < epsilon );
-        assert( std::fabs( movedCircleAABB.min.y + 4.0f ) < epsilon );
-        assert( std::fabs( movedCircleAABB.max.x - 23.0f ) < epsilon );
-        assert( std::fabs( movedCircleAABB.max.y + 2.0f ) < epsilon );
+        assert( std::fabs( movedCircleAABB.min.x - ( 21.0f - SPECULATIVE_DISTANCE ) ) < epsilon );
+        assert( std::fabs( movedCircleAABB.min.y - ( -4.0f - SPECULATIVE_DISTANCE ) ) < epsilon );
+        assert( std::fabs( movedCircleAABB.max.x - ( 23.0f + SPECULATIVE_DISTANCE ) ) < epsilon );
+        assert( std::fabs( movedCircleAABB.max.y - ( -2.0f + SPECULATIVE_DISTANCE ) ) < epsilon );
 
         assert( world.GetBroadPhase()
                     .GetTree( bodyType::Dynamic )

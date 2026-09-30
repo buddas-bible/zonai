@@ -403,7 +403,20 @@ void SolveContactConstraint(
         float impulseScale = 0.0f;
         float velocityBias = 0.0f;
 
-        if( useBias && point.separation <= 0.0f )
+        if( point.separation > 0.0f )
+        {
+            /*
+            * speculative contact
+            *
+            * 아직 떨어져 있는 거리 s를 이번 step dt보다 빠르게 닫지 못하게 함.
+            *
+            *     vn + s / dt >= 0
+            */
+            velocityBias =
+                point.separation *
+                constraint.invTimeStep;
+        }
+        else if( useBias )
         {
             massScale =
                 constraint.softness.massScale;

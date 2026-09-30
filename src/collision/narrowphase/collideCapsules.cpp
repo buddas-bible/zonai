@@ -4,6 +4,8 @@
 #include <cfloat>
 #include <cmath>
 
+#include "collision/constants.h"
+
 namespace zonai
 {
 
@@ -94,8 +96,11 @@ localManifold2 CollideCapsules(
 
     const float radiusSum = a.radius + b.radius;
 
-    // TODO: speculative contacts
-    if( distanceSquared > radiusSum * radiusSum )
+    const float speculativeRadius =
+        radiusSum + SPECULATIVE_DISTANCE;
+
+    if( distanceSquared >
+        speculativeRadius * speculativeRadius )
     {
         return manifold;
     }
@@ -164,7 +169,7 @@ localManifold2 CollideCapsules(
             normalB = -normalB;
         }
 
-        constexpr float linearSlop = 0.005f;
+        constexpr float linearSlop = LINEAR_SLOP;
 
         if( separationA + 0.1f * linearSlop >= separationB )
         {
