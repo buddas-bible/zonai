@@ -948,13 +948,28 @@ void World::Step( float timeStep )
 
     if( timeStep > 0.0f )
     {
+        /*
+        * Step 순서
+        *
+        * 1. force / gravity로 velocity 갱신
+        * 2. 현재 transform의 Contact manifold 갱신
+        * 3. Contact normal constraint를 풀어 velocity 보정
+        * 4. 보정된 velocity로 transform 적분
+        * 5. proxy 이동 후 Contact를 다시 갱신
+        *
+        * Solver를 position 적분보다 먼저 실행해야 이미 생성된 Contact가
+        * 다음 frame에 더 깊게 파고드는 것을 막을 수 있음.
+        */
+
+        // -----------------------------------------------------
+        // 1. Integrate velocities
+        // -----------------------------------------------------
         for( std::int32_t bodyIndex = 0;
              bodyIndex < static_cast<std::int32_t>( bodies_.size() );
              ++bodyIndex )
         {
             const Body& body = bodies_[bodyIndex];
 
-            // free slot과 Static Body는 simulation 적분 대상이 아님.
             if( body.bodyId == Body::NULL_INDEX ||
                 body.type == BodyType::Static )
             {
@@ -967,32 +982,21 @@ void World::Step( float timeStep )
             assert( body.bodyId == bodyIndex );
             assert( bodySim.bodyId == bodyIndex );
 
-            /*
-            * Dynamic Body velocity 적분
-            *
-            * Newton 제2법칙:
-            *
-            *     F = M * a
-            *     a = F / M = F * invMass
-            *
-            * 중력을 포함하면:
-            *
-            *     dv = dt * ( gravity + F * invMass )
-            *
-            * 회전은:
-            *
-            *     torque = I * angularAcceleration
-            *     angularAcceleration = torque * invInertia
-            *
-            *     dw = dt * torque * invInertia
-            *
-            * Kinematic Body는 사용자가 지정한 velocity만 사용하므로
-            * force / torque / gravity의 영향을 받지 않음.
-            */
             if( body.type == BodyType::Dynamic )
             {
-                // 질량이 없는 Dynamic Body에는 gravity도 적용하지 않음.
-                // Box2D도 invMass == 0이면 gravityScale을 0으로 처리함.
+                /*
+                * Newton 제2법칙:
+                *
+                *     F = M * a
+                *     a = F * invMass
+                *
+                *     dv = dt * ( gravity + F * invMass )
+                *
+                * 회전:
+                *
+                *     torque = I * angularAcceleration
+                *     dw = dt * torque * invInertia
+                */
                 if( bodySim.invMass > 0.0f )
                 {
                     const vec2 acceleration =
@@ -1010,19 +1014,52 @@ void World::Step( float timeStep )
                         bodySim.invInertia *
                         bodySim.torque;
                 }
+
+                // force / torque는 한 step 동안만 누적됨.
+                bodySim.force = {};
+                bodySim.torque = 0.0f;
             }
+        }
+
+        // -----------------------------------------------------
+        // 2. Update current contacts
+        // -----------------------------------------------------
+        UpdateCollisions(
+            []( const ContactData& )
+            {
+            }
+        );
+
+        // -----------------------------------------------------
+        // 3. Solve normal contact constraints
+        // -----------------------------------------------------
+        SolveContacts();
+
+        // -----------------------------------------------------
+        // 4. Integrate positions
+        // -----------------------------------------------------
+        for( std::int32_t bodyIndex = 0;
+             bodyIndex < static_cast<std::int32_t>( bodies_.size() );
+             ++bodyIndex )
+        {
+            const Body& body = bodies_[bodyIndex];
+
+            if( body.bodyId == Body::NULL_INDEX ||
+                body.type == BodyType::Static )
+            {
+                continue;
+            }
+
+            BodySim& bodySim = bodySims_[bodyIndex];
+            const BodyState& bodyState = bodyStates_[bodyIndex];
 
             /*
             * semi-implicit Euler
             *
-            * 1. force로 velocity를 먼저 갱신
-            * 2. 갱신된 velocity로 position을 적분
+            * velocity는 force와 Contact Solver에서 먼저 갱신됐고,
+            * 여기서는 그 최종 velocity로 COM transform을 적분함.
             *
-            *     v(t + dt) = v(t) + a * dt
             *     x(t + dt) = x(t) + v(t + dt) * dt
-            *
-            * BodyState::linearVelocity는 center of mass의 속도이므로
-            * Body origin이 아니라 bodySim.center를 직접 이동시킴.
             */
             bodySim.center +=
                 bodyState.linearVelocity * timeStep;
@@ -1037,13 +1074,11 @@ void World::Step( float timeStep )
                     bodySim.transform.rotation;
             }
 
-            // transform.position은 Body origin이므로
+            // center = origin + R * localCenter
             //
-            //     center = origin + R * localCenter
+            // 따라서:
             //
-            // 에서 origin을 다시 구함:
-            //
-            //     origin = center - R * localCenter
+            // origin = center - R * localCenter
             bodySim.transform.position =
                 bodySim.center -
                 Rotate(
@@ -1052,24 +1087,18 @@ void World::Step( float timeStep )
                 );
 
             SyncBodyProxies( bodyIndex );
-
-            // force / torque는 한 step 동안만 누적되는 값이므로
-            // velocity에 반영한 뒤 다음 step을 위해 초기화함.
-            if( body.type == BodyType::Dynamic )
-            {
-                bodySim.force = {};
-                bodySim.torque = 0.0f;
-            }
         }
     }
 
-    // 이동 후 AABB pair / manifold를 즉시 최신 상태로 맞춤.
+    // 이동 후 새 BroadPhase pair와 manifold를 만들어 다음 Step의 solver가 사용할
+    // Contact 상태를 최신 transform 기준으로 준비함.
     UpdateCollisions(
         []( const ContactData& )
         {
         }
     );
 }
+
 
 const Shape& World::GetShape( ShapeId shapeId ) const
 {
@@ -1429,6 +1458,85 @@ void World::UpdateContactSim(
     contactSim.invInertiaB = bodySimB.invInertia;
 
     contactSim.manifold = manifold;
+}
+
+void World::SolveContacts()
+{
+    constexpr int VELOCITY_ITERATIONS = 8;
+
+    std::vector<contactConstraint2> constraints;
+    constraints.reserve( contactCount_ );
+
+    /*
+    * Prepare
+    *
+    * persistent ContactSim 중 실제 manifold point가 있는 Contact만
+    * 이번 Step에서 사용할 transient solver constraint로 변환함.
+    */
+    for( const contactSim2& contactSim : contactSims_ )
+    {
+        if( contactSim.contactId == contactSim2::NULL_INDEX ||
+            contactSim.manifold.pointCount == 0 )
+        {
+            continue;
+        }
+
+        assert( contactSim.bodyIdA >= 0 );
+        assert( contactSim.bodyIdB >= 0 );
+        assert( static_cast<std::size_t>( contactSim.bodyIdA ) < bodies_.size() );
+        assert( static_cast<std::size_t>( contactSim.bodyIdB ) < bodies_.size() );
+
+        // 같은 Body의 Shape끼리는 Contact를 만들지 않아야 함.
+        assert( contactSim.bodyIdA != contactSim.bodyIdB );
+
+        const BodySim& bodySimA =
+            bodySims_[contactSim.bodyIdA];
+
+        const BodySim& bodySimB =
+            bodySims_[contactSim.bodyIdB];
+
+        const BodyState& bodyStateA =
+            bodyStates_[contactSim.bodyIdA];
+
+        const BodyState& bodyStateB =
+            bodyStates_[contactSim.bodyIdB];
+
+        constraints.push_back(
+            PrepareContactConstraint(
+                contactSim,
+                bodySimA,
+                bodyStateA,
+                bodySimB,
+                bodyStateB
+            )
+        );
+    }
+
+    /*
+    * Sequential impulse
+    *
+    * Contact 하나를 풀 때 Body velocity가 즉시 바뀌고,
+    * 다음 Contact는 그 갱신된 velocity를 사용함.
+    *
+    * 한 번의 순회로는 여러 Contact가 서로 영향을 주는 값을 충분히 전파하지 못하므로
+    * 같은 constraint 목록을 여러 번 반복함.
+    */
+    for( int iteration = 0;
+         iteration < VELOCITY_ITERATIONS;
+         ++iteration )
+    {
+        for( contactConstraint2& constraint : constraints )
+        {
+            assert( constraint.bodyIdA >= 0 );
+            assert( constraint.bodyIdB >= 0 );
+
+            SolveContactConstraint(
+                constraint,
+                bodyStates_[constraint.bodyIdA],
+                bodyStates_[constraint.bodyIdB]
+            );
+        }
+    }
 }
 
 void World::DestroyContact( std::int32_t contactId )
