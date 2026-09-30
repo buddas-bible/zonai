@@ -15,6 +15,7 @@
 #include "dynamics/bodySim.h"
 #include "dynamics/bodyState.h"
 #include "dynamics/contactData.h"
+#include "dynamics/contactSim2.h"
 #include "dynamics/id.h"
 
 namespace zonai
@@ -165,7 +166,7 @@ public:
             assert( bodySimA.bodyId == shapeA.bodyId );
             assert( bodySimB.bodyId == shapeB.bodyId );
 
-            contact.manifold =
+            const localManifold2 manifold =
                 CollideShapes(
                     shapeA.geometry,
                     bodySimA.transform,
@@ -173,7 +174,15 @@ public:
                     bodySimB.transform
                 );
 
-            if( contact.manifold.pointCount > 0 )
+            UpdateContactSim(
+                contactId,
+                manifold
+            );
+
+            const contactSim2& contactSim =
+                contactSims_[contactId];
+
+            if( contactSim.manifold.pointCount > 0 )
             {
                 callback( MakeContactData( contactId ) );
             }
@@ -221,9 +230,10 @@ public:
                 const std::int32_t contactId =
                     CreateContact( shapeIdA, shapeIdB, manifold );
 
-                const contact2& contact = contacts_[contactId];
+                const contactSim2& contactSim =
+                    contactSims_[contactId];
 
-                if( contact.manifold.pointCount > 0 )
+                if( contactSim.manifold.pointCount > 0 )
                 {
                     callback( MakeContactData( contactId ) );
                 }
@@ -293,6 +303,11 @@ private:
         std::int32_t shapeIdA, std::int32_t shapeIdB,
         const localManifold2& manifold );
 
+    // 현재 BodySim / narrow-phase manifold를 solver용 ContactSim에 동기화함.
+    void UpdateContactSim(
+        std::int32_t contactId,
+        const localManifold2& manifold );
+
     // Body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함.
     void DestroyContact( std::int32_t contactId );
 
@@ -326,7 +341,11 @@ private:
 
     /// contact
     // contactId가 변하지 않는 stable slot storage.
+    // 수명 / Shape 연결 / Body intrusive list 같은 cold data를 보관함.
     std::vector<contact2> contacts_;
+
+    // solver set 도입 전까지 Contact와 같은 stable slot index로 보관하는 hot data.
+    std::vector<contactSim2> contactSims_;
 
     // 제거된 Contact slot을 재사용하기 위한 free-list head.
     std::int32_t contactFreeList_ = contact2::NULL_INDEX;
