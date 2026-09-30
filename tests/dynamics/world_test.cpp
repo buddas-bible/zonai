@@ -1227,7 +1227,7 @@ int main()
             );
 
         int touchingCount = 0;
-        contactHandle contactHandle{};
+        contactId contactHandle{};
 
         world.UpdateCollisions(
             [&]( const contactData& data )
