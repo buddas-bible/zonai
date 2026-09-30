@@ -13,95 +13,95 @@ namespace zonai
 // shape를 body의 doubly linked list head에 연결함.
 // bodyId / shapeId는 World 내부 storage의 index이며 slot은 삭제 후 재사용될 수 있음.
 inline void LinkShape(
-    body& body, std::int32_t bodyId,
+    body& bodyRef, std::int32_t bodyId,
     std::span<shape> shapes, std::int32_t shapeId )
 {
     assert( bodyId >= 0 );
     assert( shapeId >= 0 );
     assert( static_cast<std::size_t>( shapeId ) < shapes.size() );
 
-    shape& shape = shapes[shapeId];
+    shape& linkedShape = shapes[shapeId];
 
     // 이미 다른 body/list에 연결된 shape를 중복 삽입하면 안 됨.
-    assert( shape.bodyId == shape::NULL_INDEX );
-    assert( shape.prevShapeId == shape::NULL_INDEX );
-    assert( shape.nextShapeId == shape::NULL_INDEX );
+    assert( linkedShape.bodyId == shape::NULL_INDEX );
+    assert( linkedShape.prevShapeId == shape::NULL_INDEX );
+    assert( linkedShape.nextShapeId == shape::NULL_INDEX );
 
-    if( body.headShapeId != body::NULL_INDEX )
+    if( bodyRef.headShapeId != body::NULL_INDEX )
     {
-        assert( body.headShapeId >= 0 );
-        assert( static_cast<std::size_t>( body.headShapeId ) < shapes.size() );
+        assert( bodyRef.headShapeId >= 0 );
+        assert( static_cast<std::size_t>( bodyRef.headShapeId ) < shapes.size() );
 
-        shape& oldHead = shapes[body.headShapeId];
+        shape& oldHead = shapes[bodyRef.headShapeId];
         assert( oldHead.bodyId == bodyId );
         assert( oldHead.prevShapeId == shape::NULL_INDEX );
 
         oldHead.prevShapeId = shapeId;
     }
 
-    shape.bodyId = bodyId;
-    shape.prevShapeId = shape::NULL_INDEX;
-    shape.nextShapeId = body.headShapeId;
+    linkedShape.bodyId = bodyId;
+    linkedShape.prevShapeId = shape::NULL_INDEX;
+    linkedShape.nextShapeId = bodyRef.headShapeId;
 
-    body.headShapeId = shapeId;
-    ++body.shapeCount;
+    bodyRef.headShapeId = shapeId;
+    ++bodyRef.shapeCount;
 }
 
 // shape를 body의 doubly linked list에서 제거하고 양쪽 이웃을 다시 연결함.
 inline void UnlinkShape(
-    body& body, std::int32_t bodyId,
+    body& bodyRef, std::int32_t bodyId,
     std::span<shape> shapes, std::int32_t shapeId )
 {
     assert( bodyId >= 0 );
     assert( shapeId >= 0 );
     assert( static_cast<std::size_t>( shapeId ) < shapes.size() );
-    assert( body.shapeCount > 0 );
+    assert( bodyRef.shapeCount > 0 );
 
-    shape& shape = shapes[shapeId];
+    shape& linkedShape = shapes[shapeId];
 
-    assert( shape.bodyId == bodyId );
+    assert( linkedShape.bodyId == bodyId );
 
-    if( shape.prevShapeId != shape::NULL_INDEX )
+    if( linkedShape.prevShapeId != shape::NULL_INDEX )
     {
-        assert( static_cast<std::size_t>( shape.prevShapeId ) < shapes.size() );
+        assert( static_cast<std::size_t>( linkedShape.prevShapeId ) < shapes.size() );
 
-        shape& previous = shapes[shape.prevShapeId];
+        shape& previous = shapes[linkedShape.prevShapeId];
         assert( previous.bodyId == bodyId );
         assert( previous.nextShapeId == shapeId );
 
-        previous.nextShapeId = shape.nextShapeId;
+        previous.nextShapeId = linkedShape.nextShapeId;
     }
 
-    if( shape.nextShapeId != shape::NULL_INDEX )
+    if( linkedShape.nextShapeId != shape::NULL_INDEX )
     {
-        assert( static_cast<std::size_t>( shape.nextShapeId ) < shapes.size() );
+        assert( static_cast<std::size_t>( linkedShape.nextShapeId ) < shapes.size() );
 
-        shape& next = shapes[shape.nextShapeId];
+        shape& next = shapes[linkedShape.nextShapeId];
         assert( next.bodyId == bodyId );
         assert( next.prevShapeId == shapeId );
 
-        next.prevShapeId = shape.prevShapeId;
+        next.prevShapeId = linkedShape.prevShapeId;
     }
 
-    if( body.headShapeId == shapeId )
+    if( bodyRef.headShapeId == shapeId )
     {
-        body.headShapeId = shape.nextShapeId;
+        bodyRef.headShapeId = linkedShape.nextShapeId;
     }
     else
     {
         // head가 아닌 shape라면 반드시 이전 shape가 있어야 함.
-        assert( shape.prevShapeId != shape::NULL_INDEX );
+        assert( linkedShape.prevShapeId != shape::NULL_INDEX );
     }
 
-    shape.bodyId = shape::NULL_INDEX;
-    shape.prevShapeId = shape::NULL_INDEX;
-    shape.nextShapeId = shape::NULL_INDEX;
+    linkedShape.bodyId = shape::NULL_INDEX;
+    linkedShape.prevShapeId = shape::NULL_INDEX;
+    linkedShape.nextShapeId = shape::NULL_INDEX;
 
-    --body.shapeCount;
+    --bodyRef.shapeCount;
 
-    if( body.shapeCount == 0 )
+    if( bodyRef.shapeCount == 0 )
     {
-        assert( body.headShapeId == body::NULL_INDEX );
+        assert( bodyRef.headShapeId == body::NULL_INDEX );
     }
 }
 
