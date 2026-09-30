@@ -13,7 +13,7 @@ namespace
 
 constexpr float PI = 3.14159265358979323846f;
 
-}
+} // namespace
 
 /*
 * Shape 질량 특성 계산 메모

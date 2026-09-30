@@ -30,6 +30,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check style
+        run: python tools/check_style.py
+
       - name: Configure
         run: >
           cmake

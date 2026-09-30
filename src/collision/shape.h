@@ -3,13 +3,12 @@
 #include <cstdint>
 #include <variant>
 
+#include "collision/filter.h"
+#include "collision/massData2.h"
 #include "geometry/capsule2.h"
 #include "geometry/circle2.h"
 #include "geometry/polygon2.h"
 #include "geometry/segment2.h"
-
-#include "collision/filter.h"
-#include "collision/massData2.h"
 #include "math/transform2.h"
 
 namespace zonai

@@ -10,7 +10,7 @@ localManifold2 CollideCircles(
     const circle2& a,
     const circle2& b, const transform2& transformB )
 {
-    localManifold2 manifold = {};
+    localManifold2 manifold{};
 
     const vec2 pointA = a.center;
     const vec2 pointB = zonai::TransformPoint( transformB, b.center );
@@ -64,7 +64,7 @@ localManifold2 CollideCapsuleCircle(
     const capsule2& capsule,
     const circle2& circle, const transform2& circleTransform )
 {
-    localManifold2 manifold = {};
+    localManifold2 manifold{};
 
     // circle B를 capsule A의 로컬 좌표계로 변환
     const vec2 pointB = zonai::TransformPoint( circleTransform, circle.center );
@@ -135,7 +135,7 @@ localManifold2 CollidePolygonCircle(
     const polygon2& polygon,
     const circle2& circle, const transform2& circleTransform )
 {
-    localManifold2 manifold = {};
+    localManifold2 manifold{};
 
     if( polygon.vertexCount == 0 )
     {

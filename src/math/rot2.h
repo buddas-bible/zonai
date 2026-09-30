@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-#include "vec2.h"
+#include "math/vec2.h"
 
 namespace zonai
 {
@@ -31,13 +31,13 @@ inline rot2 operator*( const rot2& a, const rot2& b )
     };
 }
 
-// 주어진 회전(rot2)의 역방향 회전을 반환합니다.
+// rotation의 역회전을 반환함.
 inline rot2 Inverse( const rot2& rotation )
 {
     return { rotation.c, -rotation.s };
 }
 
-// 주어진 회전(rot2)과 벡터(vec2)를 받아서, 벡터를 회전시킨 결과를 반환합니다.
+// vector를 rotation만큼 회전해 반환함.
 inline vec2 Rotate( const rot2& rotation, const vec2& vector )
 {
     return
@@ -47,7 +47,7 @@ inline vec2 Rotate( const rot2& rotation, const vec2& vector )
     };
 }
 
-// 주어진 회전(rot2)과 벡터(vec2)를 받아서, 벡터를 회전의 역방향으로 회전시킨 결과를 반환합니다.
+// vector를 rotation의 역방향으로 회전해 반환함.
 // x' = c * x + s * y;
 // y' = -s * x + c * y;
 inline vec2 InverseRotate( const rot2& rotation, const vec2& vector )
@@ -59,4 +59,4 @@ inline vec2 InverseRotate( const rot2& rotation, const vec2& vector )
     };
 }
 
-}
+} // namespace zonai

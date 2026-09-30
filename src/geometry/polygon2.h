@@ -1,12 +1,12 @@
 #pragma once
 
 #include <array>
-#include <span>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
+#include <span>
 
-#include "math/vec2.h"
 #include "collision/aabb2.h"
+#include "math/vec2.h"
 
 namespace zonai
 {

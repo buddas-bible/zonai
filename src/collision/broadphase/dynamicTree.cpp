@@ -1001,16 +1001,16 @@ std::int32_t DynamicTree::FindBestSibling( const aabb2& boxD ) const
 
     if( IsLeaf( nodes_[nodeIndex] ) )
     {
-		// 더 내려갈 child가 없으므로 root를 새 leaf의 형제 노드로 선택함.
+        // 더 내려갈 child가 없으므로 root를 새 leaf의 형제 노드로 선택함.
         return nodeIndex;
     }
 
-	const float areaD = Perimeter( boxD ); // 새 leaf perimeter
+    const float areaD = Perimeter( boxD ); // 새 leaf perimeter
 
-	aabb2 nodeBox = nodes_[nodeIndex].aabb; // 현재 node AABB
-	float areaBase = Perimeter( nodeBox );  // 현재 node perimeter
-	float directCost = Perimeter( Union( nodeBox, boxD ) ); // 새 leaf를 포함한 Union perimeter
-	float inheritedCost = 0.0f; // ancestor에서 누적된 perimeter 증가 비용
+    aabb2 nodeBox = nodes_[nodeIndex].aabb; // 현재 node AABB
+    float areaBase = Perimeter( nodeBox );  // 현재 node perimeter
+    float directCost = Perimeter( Union( nodeBox, boxD ) ); // 새 leaf를 포함한 Union perimeter
+    float inheritedCost = 0.0f; // ancestor에서 누적된 perimeter 증가 비용
 
     std::int32_t bestSibling = nodeIndex;
     float bestCost = directCost;
