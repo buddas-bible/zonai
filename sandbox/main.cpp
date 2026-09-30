@@ -828,21 +828,21 @@ int main()
             &showTreeLabels
         );
 
-        const broadPhase& broadPhase =
+        const broadPhase& phase =
             scene->world.GetBroadPhase();
 
-        const dynamicTree& dynamicTree =
-            broadPhase.GetTree(
+        const dynamicTree& dynamicTreeRef =
+            phase.GetTree(
                 bodyType::Dynamic
             );
 
         const dynamicTree& kinematicTree =
-            broadPhase.GetTree(
+            phase.GetTree(
                 bodyType::Kinematic
             );
 
         const dynamicTree& staticTree =
-            broadPhase.GetTree(
+            phase.GetTree(
                 bodyType::Static
             );
 
@@ -867,8 +867,8 @@ int main()
 
         ImGui::Text(
             "Dynamic tree: %zu / h%d",
-            dynamicTree.GetProxyCount(),
-            dynamicTree.GetHeight()
+            dynamicTreeRef.GetProxyCount(),
+            dynamicTreeRef.GetHeight()
         );
         ImGui::Text(
             "Kinematic tree: %zu / h%d",
@@ -1070,7 +1070,7 @@ int main()
         if( showDynamicTree )
         {
             debugDraw.DrawTree(
-                dynamicTree,
+                dynamicTreeRef,
                 "D",
                 showTreeLeaves,
                 showTreeInternal,
@@ -1091,12 +1091,12 @@ int main()
 
         for( const visualShape& visual : scene->shapes )
         {
-            const Body& body =
+            const body& bodyRef =
                 scene->world.GetBody(
                     visual.bodyHandle
                 );
 
-            const shape& shape =
+            const shape& shapeRef =
                 scene->world.GetShape(
                     visual.shapeHandle
                 );
@@ -1108,30 +1108,30 @@ int main()
 
             const shapeColors colors =
                 GetShapeColors(
-                    body.type
+                    bodyRef.type
                 );
 
             debugDraw.DrawShape(
-                shape.geometry,
+                shapeRef.geometry,
                 transform,
                 colors.outline,
                 colors.fill
             );
 
             if( showAABBs &&
-                shape.proxyKey != shape::NULL_INDEX )
+                shapeRef.proxyKey != shape::NULL_INDEX )
             {
                 const dynamicTree& tree =
-                    broadPhase.GetTree(
+                    phase.GetTree(
                         GetProxyType(
-                            shape.proxyKey
+                            shapeRef.proxyKey
                         )
                     );
 
                 debugDraw.DrawAABB(
                     tree.GetProxyAABB(
                         GetProxyId(
-                            shape.proxyKey
+                            shapeRef.proxyKey
                         )
                     ),
                     AABB_COLOR
@@ -1139,7 +1139,7 @@ int main()
             }
 
             if( showCOM &&
-                body.type != bodyType::Static )
+                bodyRef.type != bodyType::Static )
             {
                 debugDraw.DrawPoint(
                     GetWorldCenter(

@@ -22,10 +22,10 @@ int main()
     static_assert( GetProxyId( key ) == 17 );
     static_assert( GetProxyType( key ) == bodyType::Kinematic );
 
-    constexpr shapePairKey shapePairKey = MakeShapePairKey( 5, 10 );
+    constexpr shapePairKey pairKey = MakeShapePairKey( 5, 10 );
 
     static_assert( shapePairKey == ( std::uint64_t{ 5 } << 32 | std::uint64_t{ 10 } ) );
-    static_assert( MakeShapePairKey( 10, 5 ) == shapePairKey );
+    static_assert( MakeShapePairKey( 10, 5 ) == pairKey );
     static_assert( MakeShapePairKey( 7, 7 ) == ( std::uint64_t{ 7 } << 32 | std::uint64_t{ 7 } ) );
 
     broadPhase pairSetBroadPhase{};
@@ -39,15 +39,15 @@ int main()
     assert( pairSetBroadPhase.HasPair( contactPairKey ) == false );
     assert( pairSetBroadPhase.RemovePair( contactPairKey ) == false );
 
-    broadPhase broadPhase{};
+    broadPhase phase{};
 
-    dynamicTree& staticTree = broadPhase.GetTree( bodyType::Static );
-    dynamicTree& kinematicTree = broadPhase.GetTree( bodyType::Kinematic );
-    dynamicTree& dynamicTree = broadPhase.GetTree( bodyType::Dynamic );
+    dynamicTree& staticTree = phase.GetTree( bodyType::Static );
+    dynamicTree& kinematicTree = phase.GetTree( bodyType::Kinematic );
+    dynamicTree& dynamicTreeRef = phase.GetTree( bodyType::Dynamic );
 
     assert( &staticTree != &kinematicTree );
-    assert( &staticTree != &dynamicTree );
-    assert( &kinematicTree != &dynamicTree );
+    assert( &staticTree != &dynamicTreeRef );
+    assert( &kinematicTree != &dynamicTreeRef );
 
     const aabb2 box{
         { 0.0f, 0.0f },
@@ -58,19 +58,19 @@ int main()
 
     assert( staticTree.GetProxyCount() == 1 );
     assert( kinematicTree.GetProxyCount() == 0 );
-    assert( dynamicTree.GetProxyCount() == 0 );
+    assert( dynamicTreeRef.GetProxyCount() == 0 );
 
     kinematicTree.CreateProxy( box, 2 );
 
     assert( staticTree.GetProxyCount() == 1 );
     assert( kinematicTree.GetProxyCount() == 1 );
-    assert( dynamicTree.GetProxyCount() == 0 );
+    assert( dynamicTreeRef.GetProxyCount() == 0 );
 
-    dynamicTree.CreateProxy( box, 3 );
+    dynamicTreeRef.CreateProxy( box, 3 );
 
     assert( staticTree.GetProxyCount() == 1 );
     assert( kinematicTree.GetProxyCount() == 1 );
-    assert( dynamicTree.GetProxyCount() == 1 );
+    assert( dynamicTreeRef.GetProxyCount() == 1 );
 
     broadPhase proxyBroadPhase{};
 

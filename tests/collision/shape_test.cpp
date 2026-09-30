@@ -4,40 +4,40 @@
 #include <limits>
 #include <variant>
 
-#include "collision/shape.h"
+#include "collision/defaultShape.h"
 
 using namespace zonai;
 
 int main()
 {
-    shape shape{};
+    shape defaultShape{};
 
     // 아직 body / sensor에 연결되지 않은 runtime shape의 기본 상태를 확인함.
-    assert( shape.bodyId == shape::NULL_INDEX );
-    assert( shape.prevShapeId == shape::NULL_INDEX );
-    assert( shape.nextShapeId == shape::NULL_INDEX );
-    assert( shape.generation == 0 );
-    assert( shape.sensorIndex == shape::NULL_INDEX );
-    assert( shape.nextFreeId == shape::NULL_INDEX );
-    assert( shape.proxyKey == shape::NULL_INDEX );
-    assert( shape.density == 1.0f );
+    assert( defaultShape.bodyId == shape::NULL_INDEX );
+    assert( defaultShape.prevShapeId == shape::NULL_INDEX );
+    assert( defaultShape.nextShapeId == shape::NULL_INDEX );
+    assert( defaultShape.generation == 0 );
+    assert( defaultShape.sensorIndex == shape::NULL_INDEX );
+    assert( defaultShape.nextFreeId == shape::NULL_INDEX );
+    assert( defaultShape.proxyKey == shape::NULL_INDEX );
+    assert( defaultShape.density == 1.0f );
 
     // 기본 filter는 Box2D처럼 category 1이 모든 category와 충돌하도록 설정됨.
-    assert( shape.filter.categoryBits == 1 );
-    assert( shape.filter.maskBits == std::numeric_limits<std::uint64_t>::max() );
-    assert( shape.filter.groupIndex == 0 );
+    assert( defaultShape.filter.categoryBits == 1 );
+    assert( defaultShape.filter.maskBits == std::numeric_limits<std::uint64_t>::max() );
+    assert( defaultShape.filter.groupIndex == 0 );
 
-    shape.bodyId = 7;
-    shape.sensorIndex = 3;
-    shape.filter.categoryBits = 0x00000004;
-    shape.filter.maskBits = 0x00000002;
-    shape.filter.groupIndex = -5;
+    defaultShape.bodyId = 7;
+    defaultShape.sensorIndex = 3;
+    defaultShape.filter.categoryBits = 0x00000004;
+    defaultShape.filter.maskBits = 0x00000002;
+    defaultShape.filter.groupIndex = -5;
 
-    assert( shape.bodyId == 7 );
-    assert( shape.sensorIndex == 3 );
-    assert( shape.filter.categoryBits == 0x00000004 );
-    assert( shape.filter.maskBits == 0x00000002 );
-    assert( shape.filter.groupIndex == -5 );
+    assert( defaultShape.bodyId == 7 );
+    assert( defaultShape.sensorIndex == 3 );
+    assert( defaultShape.filter.categoryBits == 0x00000004 );
+    assert( defaultShape.filter.maskBits == 0x00000002 );
+    assert( defaultShape.filter.groupIndex == -5 );
 
     constexpr float epsilon = 1e-4f;
     constexpr float pi = 3.14159265358979323846f;

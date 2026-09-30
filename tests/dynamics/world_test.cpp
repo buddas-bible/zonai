@@ -1249,13 +1249,13 @@ int main()
         assert( contactId.index1 == 1 );
         assert( contactId.generation == 1 );
 
-        const contactData contactData =
+        const contactData contactSnapshot =
             world.GetContactData( contactId );
 
-        assert( contactData.id == contactId );
-        assert( contactData.shapeA == groundShape );
-        assert( contactData.shapeB == circleShape );
-        assert( contactData.manifold.pointCount == 1 );
+        assert( contactSnapshot.id == contactId );
+        assert( contactSnapshot.shapeA == groundShape );
+        assert( contactSnapshot.shapeB == circleShape );
+        assert( contactSnapshot.manifold.pointCount == 1 );
 
         assert( world.GetBroadPhase().HasPair(
             PairKey( groundShape, circleShape )
