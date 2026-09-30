@@ -1227,13 +1227,13 @@ int main()
             );
 
         int touchingCount = 0;
-        contactId contactId{};
+        contactHandle contactHandle{};
 
         world.UpdateCollisions(
             [&]( const contactData& data )
             {
                 ++touchingCount;
-                contactId = data.id;
+                contactHandle = data.id;
 
                 assert( data.shapeA == groundShape );
                 assert( data.shapeB == circleShape );
@@ -1245,14 +1245,14 @@ int main()
 
         assert( touchingCount == 1 );
         assert( world.GetContactCount() == 1 );
-        assert( world.IsValid( contactId ) );
-        assert( contactId.index1 == 1 );
-        assert( contactId.generation == 1 );
+        assert( world.IsValid( contactHandle ) );
+        assert( contactHandle.index1 == 1 );
+        assert( contactHandle.generation == 1 );
 
         const contactData contactSnapshot =
-            world.GetContactData( contactId );
+            world.GetContactData( contactHandle );
 
-        assert( contactSnapshot.id == contactId );
+        assert( contactSnapshot.id == contactHandle );
         assert( contactSnapshot.shapeA == groundShape );
         assert( contactSnapshot.shapeB == circleShape );
         assert( contactSnapshot.manifold.pointCount == 1 );
@@ -1268,7 +1268,7 @@ int main()
             [&]( const contactData& data )
             {
                 ++touchingCount;
-                assert( data.id == contactId );
+                assert( data.id == contactHandle );
                 assert( data.manifold.pointCount == 1 );
             }
         );
@@ -1291,7 +1291,7 @@ int main()
         );
 
         assert( world.GetContactCount() == 0 );
-        assert( !world.IsValid( contactId ) );
+        assert( !world.IsValid( contactHandle ) );
         assert( !world.GetBroadPhase().HasPair(
             PairKey( groundShape, circleShape )
         ) );
@@ -1317,9 +1317,9 @@ int main()
         );
 
         assert( world.IsValid( reusedContactId ) );
-        assert( reusedContactId.index1 == contactId.index1 );
-        assert( reusedContactId.generation != contactId.generation );
-        assert( !world.IsValid( contactId ) );
+        assert( reusedContactId.index1 == contactHandle.index1 );
+        assert( reusedContactId.generation != contactHandle.generation );
+        assert( !world.IsValid( contactHandle ) );
         const contactData reusedData =
             world.GetContactData( reusedContactId );
 

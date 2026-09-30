@@ -4,7 +4,7 @@
 #include <limits>
 #include <variant>
 
-#include "collision/defaultShape.h"
+#include "collision/shape.h"
 
 using namespace zonai;
 

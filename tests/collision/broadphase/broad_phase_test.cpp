@@ -24,7 +24,7 @@ int main()
 
     constexpr shapePairKey pairKey = MakeShapePairKey( 5, 10 );
 
-    static_assert( shapePairKey == ( std::uint64_t{ 5 } << 32 | std::uint64_t{ 10 } ) );
+    static_assert( pairKey == ( std::uint64_t{ 5 } << 32 | std::uint64_t{ 10 } ) );
     static_assert( MakeShapePairKey( 10, 5 ) == pairKey );
     static_assert( MakeShapePairKey( 7, 7 ) == ( std::uint64_t{ 7 } << 32 | std::uint64_t{ 7 } ) );
 
