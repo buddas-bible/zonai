@@ -125,12 +125,6 @@ ContactId World::MakeContactId( std::int32_t contactIndex ) const
     const contact2& contact = contacts_[contactIndex];
 
     assert( contact.contactId == contactIndex );
-    assert( contactSims_.size() == contacts_.size() );
-
-    const contactSim2& contactSim =
-        contactSims_[contactIndex];
-
-    assert( contactSim.contactId == contactIndex );
 
     return { contactIndex + 1, contact.generation };
 }
