@@ -5,64 +5,64 @@
 namespace zonai
 {
 
-ProxyKey BroadPhase::CreateProxy(
-    BodyType type, const aabb2& aabb, std::int32_t shapeIndex, 
+proxyKey broadPhase::CreateProxy(
+    bodyType type, const aabb2& aabb, std::int32_t shapeIndex, 
     bool forcePairCreation )
 {
     // static은 강제 요청이 있을 때만 moved 처리하고 나머지 type은 새 pair 생성을 위해 moved 처리함.
-    const bool markMoved = type != BodyType::Static || forcePairCreation;
+    const bool markMoved = type != bodyType::Static || forcePairCreation;
 
-    DynamicTree& tree = GetTree( type );
+    dynamicTree& tree = GetTree( type );
     const std::int32_t proxyId = tree.CreateProxy( aabb, shapeIndex, markMoved );
 
     return MakeProxyKey( proxyId, type );
 }
 
-void BroadPhase::DestroyProxy( ProxyKey proxyKey )
+void broadPhase::DestroyProxy( proxyKey proxyKey )
 {
     // key 하나로 proxy가 속한 tree와 stable proxy id를 복원함.
-    const BodyType type = GetProxyType( proxyKey );
+    const bodyType type = GetProxyType( proxyKey );
     const std::int32_t proxyId = GetProxyId( proxyKey );
 
     GetTree( type ).DestroyProxy( proxyId );
 }
 
-void BroadPhase::MoveProxy( ProxyKey proxyKey, const aabb2& aabb )
+void broadPhase::MoveProxy( proxyKey proxyKey, const aabb2& aabb )
 {
     // key에서 tree와 stable proxy id를 복원한 뒤 해당 proxy만 갱신함.
-    const BodyType type = GetProxyType( proxyKey );
+    const bodyType type = GetProxyType( proxyKey );
     const std::int32_t proxyId = GetProxyId( proxyKey );
 
-    // BroadPhase에서 이동된 proxy는 새 pair 생성을 위해 항상 moved 처리함.
+    // broadPhase에서 이동된 proxy는 새 pair 생성을 위해 항상 moved 처리함.
     GetTree( type ).MoveProxy( proxyId, aabb, true );
 }
 
-bool BroadPhase::AddPair( ShapePairKey pairKey )
+bool broadPhase::AddPair( shapePairKey pairKey )
 {
     return pairSet_.Add( pairKey );
 }
 
-bool BroadPhase::RemovePair( ShapePairKey pairKey )
+bool broadPhase::RemovePair( shapePairKey pairKey )
 {
     return pairSet_.Remove( pairKey );
 }
 
-bool BroadPhase::HasPair( ShapePairKey pairKey ) const
+bool broadPhase::HasPair( shapePairKey pairKey ) const
 {
     return pairSet_.Contains( pairKey );
 }
 
-bool BroadPhase::TestPair( const TreeNode& nodeA, const TreeNode& nodeB )
+bool broadPhase::TestPair( const treeNode& nodeA, const treeNode& nodeB )
 {
     // 빈 tree의 root는 leaf bit를 포함한 sentinel이므로 실제 proxy처럼 취급하면 안 됨.
-    if( DynamicTree::IsEmptyNode( nodeA ) ||
-        DynamicTree::IsEmptyNode( nodeB ) )
+    if( dynamicTree::IsEmptyNode( nodeA ) ||
+        dynamicTree::IsEmptyNode( nodeB ) )
     {
         return false;
     }
 
     // 둘 중 하나라도 moved이고 AABB가 겹칠 때만 새 pair 후보가 될 수 있음.
-    if( ( ( nodeA.flagIndex | nodeB.flagIndex ) & DynamicTree::TREE_MOVED_NODE ) == 0 )
+    if( ( ( nodeA.flagIndex | nodeB.flagIndex ) & dynamicTree::TREE_MOVED_NODE ) == 0 )
     {
         return false;
     }
@@ -70,16 +70,16 @@ bool BroadPhase::TestPair( const TreeNode& nodeA, const TreeNode& nodeB )
     return Overlaps( nodeA.aabb, nodeB.aabb );
 }
 
-std::span<std::int32_t> BroadPhase::PrepareMovedSiblingScratch() const
+std::span<std::int32_t> broadPhase::PrepareMovedSiblingScratch() const
 {
-    const DynamicTree& dynamicTree = GetTree( BodyType::Dynamic );
+    const dynamicTree& dynamicTree = GetTree( bodyType::Dynamic );
     const std::size_t required = dynamicTree.nodes_.size() / 2;
 
     movedSiblings_.resize( required );
     return movedSiblings_;
 }
 
-std::size_t BroadPhase::GatherMovedSiblings( const DynamicTree& tree, std::span<std::int32_t> pairIndices )
+std::size_t broadPhase::GatherMovedSiblings( const dynamicTree& tree, std::span<std::int32_t> pairIndices )
 {
     // sibling이 항상 2개씩 붙어 있으므로 전체 node 수의 절반이면 출력 공간이 충분함.
     const std::size_t pairCapacity = tree.nodes_.size() / 2;
@@ -97,10 +97,10 @@ std::size_t BroadPhase::GatherMovedSiblings( const DynamicTree& tree, std::span<
     // root를 제외하고 sibling pair를 순회하며 moved node가 포함된 pair만 모음.
     for( std::int32_t pair = 2; static_cast<std::size_t>( pair ) < tree.nodes_.size(); pair += 2 )
     {
-        const TreeNode& child1 = tree.nodes_[pair];
-        const TreeNode& child2 = tree.nodes_[pair + 1];
+        const treeNode& child1 = tree.nodes_[pair];
+        const treeNode& child2 = tree.nodes_[pair + 1];
 
-        if( ( ( child1.flagIndex | child2.flagIndex ) & DynamicTree::TREE_MOVED_NODE ) != 0 )
+        if( ( ( child1.flagIndex | child2.flagIndex ) & dynamicTree::TREE_MOVED_NODE ) != 0 )
         {
             pairIndices[count++] = pair;
         }
@@ -109,22 +109,22 @@ std::size_t BroadPhase::GatherMovedSiblings( const DynamicTree& tree, std::span<
     return count;
 }
 
-std::size_t BroadPhase::GatherCrossSeeds(
-    const DynamicTree& treeA,
-    const DynamicTree& treeB,
-    std::span<TreeNodePair> seeds )
+std::size_t broadPhase::GatherCrossSeeds(
+    const dynamicTree& treeA,
+    const dynamicTree& treeB,
+    std::span<treeNodePair> seeds )
 {
     assert( seeds.size() >= CROSS_SEED_COUNT );
 
     // root 조합부터 BFS로 내려가며 병렬로 처리하기 좋은 subtree 단위까지 분할함.
-    std::array<TreeNodePair, 2 * CROSS_SEED_COUNT> queue{};
+    std::array<treeNodePair, 2 * CROSS_SEED_COUNT> queue{};
     constexpr std::size_t QUEUE_MASK = 2 * CROSS_SEED_COUNT - 1;
 
     std::size_t head = 0;
     std::size_t tail = 0;
 
-    const TreeNode& rootA = treeA.nodes_[DynamicTree::ROOT_NODE];
-    const TreeNode& rootB = treeB.nodes_[DynamicTree::ROOT_NODE];
+    const treeNode& rootA = treeA.nodes_[dynamicTree::ROOT_NODE];
+    const treeNode& rootB = treeB.nodes_[dynamicTree::ROOT_NODE];
 
     if( TestPair( rootA, rootB ) )
     {
@@ -136,25 +136,25 @@ std::size_t BroadPhase::GatherCrossSeeds(
     // internal node 둘을 펼치면 최대 4개 조합이 생기므로 여유가 있을 때만 더 분할함.
     while( head < tail && seedCount + ( tail - head ) + 3 < CROSS_SEED_COUNT )
     {
-        const TreeNodePair pair = queue[head++ & QUEUE_MASK];
+        const treeNodePair pair = queue[head++ & QUEUE_MASK];
 
         // 한쪽이라도 leaf면 더 균등하게 분할하기 어려우므로 현재 조합을 seed로 확정함.
-        if( DynamicTree::IsLeaf( pair.a ) || DynamicTree::IsLeaf( pair.b ) )
+        if( dynamicTree::IsLeaf( pair.a ) || dynamicTree::IsLeaf( pair.b ) )
         {
             seeds[seedCount++] = pair;
             continue;
         }
 
-        const std::int32_t childPairA = DynamicTree::GetChildPair( pair.a );
-        const std::int32_t childPairB = DynamicTree::GetChildPair( pair.b );
+        const std::int32_t childPairA = dynamicTree::GetChildPair( pair.a );
+        const std::int32_t childPairB = dynamicTree::GetChildPair( pair.b );
 
         // 두 internal node의 자식 2개씩을 조합해 최대 4개의 겹치는 subtree를 queue에 추가함.
         for( std::int32_t i = 0; i < 2; ++i )
         {
             for( std::int32_t j = 0; j < 2; ++j )
             {
-                const TreeNode& childA = treeA.nodes_[childPairA + i];
-                const TreeNode& childB = treeB.nodes_[childPairB + j];
+                const treeNode& childA = treeA.nodes_[childPairA + i];
+                const treeNode& childB = treeB.nodes_[childPairB + j];
 
                 if( TestPair( childA, childB ) )
                 {
@@ -174,7 +174,7 @@ std::size_t BroadPhase::GatherCrossSeeds(
     return seedCount;
 }
 
-DynamicTree& BroadPhase::GetTree( BodyType type )
+dynamicTree& broadPhase::GetTree( bodyType type )
 {
     const std::size_t index = static_cast<std::size_t>( type );
 
@@ -183,7 +183,7 @@ DynamicTree& BroadPhase::GetTree( BodyType type )
     return trees_[index];
 }
 
-const DynamicTree& BroadPhase::GetTree( BodyType type ) const
+const dynamicTree& broadPhase::GetTree( bodyType type ) const
 {
     const std::size_t index = static_cast<std::size_t>( type );
 

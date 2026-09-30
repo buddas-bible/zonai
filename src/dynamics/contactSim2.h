@@ -22,7 +22,7 @@ struct contactSim2
 {
     static constexpr std::int32_t NULL_INDEX = -1;
 
-    // 이 simulation 데이터가 대응하는 World 내부 Contact index.
+    // 이 simulation 데이터가 대응하는 world 내부 Contact index.
     // NULL_INDEX면 현재 free slot임.
     std::int32_t contactId = NULL_INDEX;
 
@@ -39,7 +39,7 @@ struct contactSim2
     float invMassB = 0.0f;
     float invInertiaB = 0.0f;
 
-    // Shape A local space에 저장되는 현재 narrow-phase manifold.
+    // shape A local space에 저장되는 현재 narrow-phase manifold.
     // AABB pair만 유지되고 geometry는 떨어져 있으면 pointCount가 0일 수 있음.
     localManifold2 manifold{};
 

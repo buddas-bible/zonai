@@ -20,7 +20,7 @@ int main()
 {
     using namespace zonai;
 
-    // 회전이 있는 두 Body의 contact point 상대속도와 normal effective mass를 검증함.
+    // 회전이 있는 두 body의 contact point 상대속도와 normal effective mass를 검증함.
     {
         contactSim2 contactSim{};
         contactSim.contactId = 0;
@@ -38,21 +38,21 @@ int main()
         contactSim.manifold.points[0].point = { 1.0f, 1.0f };
         contactSim.manifold.points[0].separation = -0.1f;
 
-        BodySim bodySimA{};
+        bodySim bodySimA{};
         bodySimA.bodyId = 0;
         bodySimA.transform = {};
         bodySimA.center = { 0.0f, 0.0f };
 
-        BodySim bodySimB{};
+        bodySim bodySimB{};
         bodySimB.bodyId = 1;
         bodySimB.transform = {};
         bodySimB.center = { 2.0f, 0.0f };
 
-        BodyState bodyStateA{};
+        bodyState bodyStateA{};
         bodyStateA.linearVelocity = { 1.0f, 0.0f };
         bodyStateA.angularVelocity = 2.0f;
 
-        BodyState bodyStateB{};
+        bodyState bodyStateB{};
         bodyStateB.linearVelocity = { -1.0f, 0.0f };
         bodyStateB.angularVelocity = -1.0f;
 
@@ -122,8 +122,8 @@ int main()
         );
     }
 
-    // Body A가 Static처럼 inverse mass / inertia가 0이면
-    // Dynamic Body B의 질량만 effective mass에 기여함.
+    // body A가 Static처럼 inverse mass / inertia가 0이면
+    // Dynamic body B의 질량만 effective mass에 기여함.
     {
         contactSim2 contactSim{};
         contactSim.contactId = 0;
@@ -140,14 +140,14 @@ int main()
         contactSim.manifold.pointCount = 1;
         contactSim.manifold.points[0].point = {};
 
-        BodySim bodySimA{};
+        bodySim bodySimA{};
         bodySimA.bodyId = 0;
 
-        BodySim bodySimB{};
+        bodySim bodySimB{};
         bodySimB.bodyId = 1;
 
-        BodyState bodyStateA{};
-        BodyState bodyStateB{};
+        bodyState bodyStateA{};
+        bodyState bodyStateB{};
         bodyStateB.linearVelocity = { 0.0f, -3.0f };
 
         const contactConstraint2 constraint =
@@ -196,9 +196,9 @@ int main()
 
         point.normalMass = 2.0f;
 
-        BodyState bodyStateA{};
+        bodyState bodyStateA{};
 
-        BodyState bodyStateB{};
+        bodyState bodyStateB{};
         bodyStateB.linearVelocity = { -3.0f, 0.0f };
 
         SolveContactConstraint(
@@ -239,9 +239,9 @@ int main()
         constraint.pointCount = 1;
         constraint.points[0].normalMass = 2.0f;
 
-        BodyState bodyStateA{};
+        bodyState bodyStateA{};
 
-        BodyState bodyStateB{};
+        bodyState bodyStateB{};
         bodyStateB.linearVelocity = { 3.0f, 0.0f };
 
         SolveContactConstraint(
@@ -277,14 +277,14 @@ int main()
         contactSim.impulses[0].normalImpulse = 6.0f;
         contactSim.impulses[0].tangentImpulse = -1.5f;
 
-        BodySim bodySimA{};
+        bodySim bodySimA{};
         bodySimA.bodyId = 0;
 
-        BodySim bodySimB{};
+        bodySim bodySimB{};
         bodySimB.bodyId = 1;
 
-        BodyState bodyStateA{};
-        BodyState bodyStateB{};
+        bodyState bodyStateA{};
+        bodyState bodyStateB{};
 
         const contactConstraint2 constraint =
             PrepareContactConstraint(
@@ -329,9 +329,9 @@ int main()
         point.normalMass = 2.0f;
         point.normalImpulse = 6.0f;
 
-        BodyState bodyStateA{};
+        bodyState bodyStateA{};
 
-        BodyState bodyStateB{};
+        bodyState bodyStateB{};
         bodyStateB.linearVelocity = { -3.0f, 0.0f };
 
         WarmStartContactConstraint(
@@ -414,8 +414,8 @@ int main()
         point.separation = -0.1f;
         point.normalMass = 1.0f;
 
-        BodyState bodyStateA{};
-        BodyState bodyStateB{};
+        bodyState bodyStateA{};
+        bodyState bodyStateB{};
 
         SolveContactConstraint(
             constraint,
@@ -439,7 +439,7 @@ int main()
             )
         );
 
-        // 실제 World::Step에서는 여기 사이에 position integration이 일어남.
+        // 실제 world::Step에서는 여기 사이에 position integration이 일어남.
         // Relax는 correction velocity만 제거하고 이미 이동한 position은 보존함.
         SolveContactConstraint(
             constraint,
@@ -474,14 +474,14 @@ int main()
         contactSim.manifold.pointCount = 1;
         contactSim.manifold.points[0].point = {};
 
-        BodySim bodySimA{};
+        bodySim bodySimA{};
         bodySimA.bodyId = 0;
 
-        BodySim bodySimB{};
+        bodySim bodySimB{};
         bodySimB.bodyId = 1;
 
-        BodyState bodyStateA{};
-        BodyState bodyStateB{};
+        bodyState bodyStateA{};
+        bodyState bodyStateB{};
 
         const contactConstraint2 constraint =
             PrepareContactConstraint(
@@ -514,8 +514,8 @@ int main()
         constraint.points[0].normalImpulse = 2.0f;
         constraint.points[0].tangentImpulse = -0.5f;
 
-        BodyState bodyStateA{};
-        BodyState bodyStateB{};
+        bodyState bodyStateA{};
+        bodyState bodyStateB{};
 
         WarmStartContactConstraint(
             constraint,
@@ -546,8 +546,8 @@ int main()
         point.tangentMass = 1.0f;
         point.normalImpulse = 2.0f;
 
-        BodyState bodyStateA{};
-        BodyState bodyStateB{};
+        bodyState bodyStateA{};
+        bodyState bodyStateB{};
         bodyStateB.linearVelocity = { 4.0f, 0.0f };
 
         SolveContactConstraint(
@@ -576,8 +576,8 @@ int main()
         constraint.points[0].normalMass = 1.0f;
         constraint.points[0].tangentMass = 1.0f;
 
-        BodyState bodyStateA{};
-        BodyState bodyStateB{};
+        bodyState bodyStateA{};
+        bodyState bodyStateB{};
         bodyStateB.linearVelocity = { 4.0f, 0.0f };
 
         SolveContactConstraint(

@@ -78,36 +78,36 @@ struct contactConstraint2
     // correction 때문에 한 step에서 만들어질 수 있는 최대 분리 속도.
     float maxPushSpeed = 0.0f;
 
-    // 두 Shape 사이의 Coulomb friction coefficient.
-    // material 시스템 도입 전까지 World가 기본값을 넣어줌.
+    // 두 shape 사이의 Coulomb friction coefficient.
+    // material 시스템 도입 전까지 world가 기본값을 넣어줌.
     float friction = 0.0f;
 
     std::array<contactConstraintPoint2, MAX_MANIFOLD_POINTS> points{};
     int pointCount = 0;
 };
 
-// ContactSim의 local manifold와 Body simulation 상태를 이용해
+// ContactSim의 local manifold와 body simulation 상태를 이용해
 // normal solver가 바로 사용할 world-space constraint를 준비함.
 [[nodiscard]] contactConstraint2 PrepareContactConstraint(
     const contactSim2& contactSim,
-    const BodySim& bodySimA,
-    const BodyState& bodyStateA,
-    const BodySim& bodySimB,
-    const BodyState& bodyStateB );
+    const bodySim& bodySimA,
+    const bodyState& bodyStateA,
+    const bodySim& bodySimB,
+    const bodyState& bodyStateB );
 
 // 이전 step에서 캐싱한 누적 normal impulse를 solver 시작 전에 먼저 적용함.
 void WarmStartContactConstraint(
     const contactConstraint2& constraint,
-    BodyState& bodyStateA,
-    BodyState& bodyStateB );
+    bodyState& bodyStateA,
+    bodyState& bodyStateB );
 
-// 한 Contact의 constraint를 한 번 풀어 Body velocity에 impulse를 적용함.
+// 한 Contact의 constraint를 한 번 풀어 body velocity에 impulse를 적용함.
 // useBias=true면 penetration을 줄이는 normal soft push만 수행하고,
 // false면 normal relax 뒤 tangent Coulomb friction까지 풂.
 void SolveContactConstraint(
     contactConstraint2& constraint,
-    BodyState& bodyStateA,
-    BodyState& bodyStateB,
+    bodyState& bodyStateA,
+    bodyState& bodyStateB,
     bool useBias );
 
 // 이번 step에서 수렴한 누적 impulse를 persistent ContactSim에 저장함.

@@ -30,13 +30,13 @@ bool NearlyEqual(
 
 int main()
 {
-    const ShapeGeometry circle =
+    const shapeGeometry circle =
         circle2{ {}, 0.5f };
 
-    const ShapeGeometry polygon =
+    const shapeGeometry polygon =
         MakeBox( { 1.0f, 1.0f } );
 
-    const ShapeGeometry segment =
+    const shapeGeometry segment =
         segment2{ { -1.0f, 0.0f }, { 1.0f, 0.0f } };
 
     assert( CanCollideShapes( circle, polygon ) );
@@ -64,7 +64,7 @@ int main()
     }
 
     {
-        // 입력 순서가 뒤집혀도 결과는 원래 Shape A(circle)의 local space여야 함.
+        // 입력 순서가 뒤집혀도 결과는 원래 shape A(circle)의 local space여야 함.
         transform2 transformA{};
         transformA.position = { 0.0f, 1.5f };
 

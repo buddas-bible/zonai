@@ -10,16 +10,16 @@ using namespace zonai;
 
 int main()
 {
-    Shape shape{};
+    shape shape{};
 
     // 아직 body / sensor에 연결되지 않은 runtime shape의 기본 상태를 확인함.
-    assert( shape.bodyId == Shape::NULL_INDEX );
-    assert( shape.prevShapeId == Shape::NULL_INDEX );
-    assert( shape.nextShapeId == Shape::NULL_INDEX );
+    assert( shape.bodyId == shape::NULL_INDEX );
+    assert( shape.prevShapeId == shape::NULL_INDEX );
+    assert( shape.nextShapeId == shape::NULL_INDEX );
     assert( shape.generation == 0 );
-    assert( shape.sensorIndex == Shape::NULL_INDEX );
-    assert( shape.nextFreeId == Shape::NULL_INDEX );
-    assert( shape.proxyKey == Shape::NULL_INDEX );
+    assert( shape.sensorIndex == shape::NULL_INDEX );
+    assert( shape.nextFreeId == shape::NULL_INDEX );
+    assert( shape.proxyKey == shape::NULL_INDEX );
     assert( shape.density == 1.0f );
 
     // 기본 filter는 Box2D처럼 category 1이 모든 category와 충돌하도록 설정됨.
@@ -44,7 +44,7 @@ int main()
 
     // 원의 mass / center / center 기준 inertia.
     {
-        Shape circleShape{};
+        shape circleShape{};
         circleShape.geometry = circle2{ { 3.0f, -1.0f }, 2.0f };
         circleShape.density = 3.0f;
 
@@ -64,7 +64,7 @@ int main()
 
     // 4x2 box, density 3 => mass 24, inertia = m(w^2+h^2)/12 = 40.
     {
-        Shape boxShape{};
+        shape boxShape{};
         boxShape.geometry = MakeBox( { 2.0f, 1.0f } );
         boxShape.density = 3.0f;
 
@@ -79,7 +79,7 @@ int main()
 
     // Segment는 면적이 없으므로 density가 있어도 질량은 0임.
     {
-        Shape segmentShape{};
+        shape segmentShape{};
         segmentShape.geometry =
             segment2{ { -2.0f, 0.0f }, { 2.0f, 0.0f } };
         segmentShape.density = 10.0f;

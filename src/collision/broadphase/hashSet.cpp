@@ -7,12 +7,12 @@
 namespace zonai
 {
 
-HashSet::HashSet( std::size_t capacity )
+hashSet::hashSet( std::size_t capacity )
     : items_( NormalizeCapacity( capacity ), 0 )
 {
 }
 
-bool HashSet::Add( std::uint64_t key )
+bool hashSet::Add( std::uint64_t key )
 {
     // 0은 빈 slot을 나타내는 sentinel이므로 key로 사용할 수 없음.
     assert( key != 0 );
@@ -40,7 +40,7 @@ bool HashSet::Add( std::uint64_t key )
     return false;
 }
 
-bool HashSet::Remove( std::uint64_t key )
+bool hashSet::Remove( std::uint64_t key )
 {
     assert( key != 0 );
 
@@ -99,7 +99,7 @@ bool HashSet::Remove( std::uint64_t key )
     return true;
 }
 
-bool HashSet::Contains( std::uint64_t key ) const
+bool hashSet::Contains( std::uint64_t key ) const
 {
     assert( key != 0 );
 
@@ -109,17 +109,17 @@ bool HashSet::Contains( std::uint64_t key ) const
     return items_[index] == key;
 }
 
-std::size_t HashSet::GetCount() const
+std::size_t hashSet::GetCount() const
 {
     return count_;
 }
 
-std::size_t HashSet::GetCapacity() const
+std::size_t hashSet::GetCapacity() const
 {
     return items_.size();
 }
 
-std::size_t HashSet::NormalizeCapacity( std::size_t capacity )
+std::size_t hashSet::NormalizeCapacity( std::size_t capacity )
 {
     if( capacity <= MIN_CAPACITY )
     {
@@ -129,7 +129,7 @@ std::size_t HashSet::NormalizeCapacity( std::size_t capacity )
     return std::bit_ceil( capacity );
 }
 
-std::uint64_t HashSet::KeyHash( std::uint64_t key )
+std::uint64_t hashSet::KeyHash( std::uint64_t key )
 {
     // Box2D와 같은 Murmur hash finalizer를 사용함.
     std::uint64_t hash = key;
@@ -141,7 +141,7 @@ std::uint64_t HashSet::KeyHash( std::uint64_t key )
     return hash;
 }
 
-std::size_t HashSet::FindSlot( std::uint64_t key, std::uint64_t hash ) const
+std::size_t hashSet::FindSlot( std::uint64_t key, std::uint64_t hash ) const
 {
     const std::size_t mask = items_.size() - 1;
     std::size_t index = static_cast<std::size_t>( hash ) & mask;
@@ -155,7 +155,7 @@ std::size_t HashSet::FindSlot( std::uint64_t key, std::uint64_t hash ) const
     return index;
 }
 
-void HashSet::AddHaveCapacity( std::uint64_t key, std::uint64_t hash )
+void hashSet::AddHaveCapacity( std::uint64_t key, std::uint64_t hash )
 {
     const std::size_t index = FindSlot( key, hash );
 
@@ -165,7 +165,7 @@ void HashSet::AddHaveCapacity( std::uint64_t key, std::uint64_t hash )
     ++count_;
 }
 
-void HashSet::Grow()
+void hashSet::Grow()
 {
     const std::size_t oldCount = count_;
     std::vector<std::uint64_t> oldItems = std::move( items_ );

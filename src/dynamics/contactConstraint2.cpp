@@ -50,10 +50,10 @@ contactSoftness2 MakeContactSoftness(
 
 contactConstraint2 PrepareContactConstraint(
     const contactSim2& contactSim,
-    const BodySim& bodySimA,
-    const BodyState& bodyStateA,
-    const BodySim& bodySimB,
-    const BodyState& bodyStateB )
+    const bodySim& bodySimA,
+    const bodyState& bodyStateA,
+    const bodySim& bodySimB,
+    const bodyState& bodyStateB )
 {
     assert( contactSim.contactId != contactSim2::NULL_INDEX );
     assert( contactSim.bodyIdA == bodySimA.bodyId );
@@ -77,7 +77,7 @@ contactConstraint2 PrepareContactConstraint(
     constraint.invInertiaB = contactSim.invInertiaB;
 
     /*
-    * local manifold은 Shape A local space 기준이므로
+    * local manifold은 shape A local space 기준이므로
     * solver가 사용할 normal과 contact point를 world space로 변환함.
     */
     constraint.normal =
@@ -127,7 +127,7 @@ contactConstraint2 PrepareContactConstraint(
         /*
         * Contact point의 실제 선속도
         *
-        * Body의 COM 선속도 v에 회전에 의한 접선속도 w x r을 더함.
+        * body의 COM 선속도 v에 회전에 의한 접선속도 w x r을 더함.
         *
         *     vPointA = vA + wA x rA
         *     vPointB = vB + wB x rB
@@ -254,8 +254,8 @@ contactConstraint2 PrepareContactConstraint(
 
 void WarmStartContactConstraint(
     const contactConstraint2& constraint,
-    BodyState& bodyStateA,
-    BodyState& bodyStateB )
+    bodyState& bodyStateA,
+    bodyState& bodyStateB )
 {
     vec2 linearVelocityA =
         bodyStateA.linearVelocity;
@@ -329,8 +329,8 @@ void WarmStartContactConstraint(
 
 void SolveContactConstraint(
     contactConstraint2& constraint,
-    BodyState& bodyStateA,
-    BodyState& bodyStateB,
+    bodyState& bodyStateA,
+    bodyState& bodyStateB,
     bool useBias )
 {
     vec2 linearVelocityA =

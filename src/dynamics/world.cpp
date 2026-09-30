@@ -11,7 +11,7 @@
 namespace zonai
 {
 
-bool World::IsValid( BodyId bodyId ) const noexcept
+bool world::IsValid( bodyId bodyId ) const noexcept
 {
     if( bodyId.index1 <= 0 )
     {
@@ -25,14 +25,14 @@ bool World::IsValid( BodyId bodyId ) const noexcept
         return false;
     }
 
-    const Body& body = bodies_[bodyIndex];
+    const body& body = bodies_[bodyIndex];
 
     return
         body.bodyId == bodyIndex &&
         body.generation == bodyId.generation;
 }
 
-bool World::IsValid( ShapeId shapeId ) const noexcept
+bool world::IsValid( shapeId shapeId ) const noexcept
 {
     if( shapeId.index1 <= 0 )
     {
@@ -46,14 +46,14 @@ bool World::IsValid( ShapeId shapeId ) const noexcept
         return false;
     }
 
-    const Shape& shape = shapes_[shapeIndex];
+    const shape& shape = shapes_[shapeIndex];
 
     return
-        shape.bodyId != Shape::NULL_INDEX &&
+        shape.bodyId != shape::NULL_INDEX &&
         shape.generation == shapeId.generation;
 }
 
-bool World::IsValid( ContactId contactId ) const noexcept
+bool world::IsValid( contactId contactId ) const noexcept
 {
     if( contactId.index1 <= 0 )
     {
@@ -75,50 +75,50 @@ bool World::IsValid( ContactId contactId ) const noexcept
 }
 
 
-std::int32_t World::GetBodyIndex( BodyId bodyId ) const
+std::int32_t world::GetBodyIndex( bodyId bodyId ) const
 {
     assert( IsValid( bodyId ) );
     return bodyId.index1 - 1;
 }
 
-std::int32_t World::GetShapeIndex( ShapeId shapeId ) const
+std::int32_t world::GetShapeIndex( shapeId shapeId ) const
 {
     assert( IsValid( shapeId ) );
     return shapeId.index1 - 1;
 }
 
-std::int32_t World::GetContactIndex( ContactId contactId ) const
+std::int32_t world::GetContactIndex( contactId contactId ) const
 {
     assert( IsValid( contactId ) );
     return contactId.index1 - 1;
 }
 
 
-BodyId World::MakeBodyId( std::int32_t bodyIndex ) const
+bodyId world::MakeBodyId( std::int32_t bodyIndex ) const
 {
     assert( bodyIndex >= 0 );
     assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
 
-    const Body& body = bodies_[bodyIndex];
+    const body& body = bodies_[bodyIndex];
 
     assert( body.bodyId == bodyIndex );
 
     return { bodyIndex + 1, body.generation };
 }
 
-ShapeId World::MakeShapeId( std::int32_t shapeIndex ) const
+shapeId world::MakeShapeId( std::int32_t shapeIndex ) const
 {
     assert( shapeIndex >= 0 );
     assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
 
-    const Shape& shape = shapes_[shapeIndex];
+    const shape& shape = shapes_[shapeIndex];
 
-    assert( shape.bodyId != Shape::NULL_INDEX );
+    assert( shape.bodyId != shape::NULL_INDEX );
 
     return { shapeIndex + 1, shape.generation };
 }
 
-ContactId World::MakeContactId( std::int32_t contactIndex ) const
+contactId world::MakeContactId( std::int32_t contactIndex ) const
 {
     assert( contactIndex >= 0 );
     assert( static_cast<std::size_t>( contactIndex ) < contacts_.size() );
@@ -131,24 +131,24 @@ ContactId World::MakeContactId( std::int32_t contactIndex ) const
 }
 
 
-BodyId World::CreateBody( BodyType type, transform2 transform )
+bodyId world::CreateBody( bodyType type, transform2 transform )
 {
-    std::int32_t bodyIndex = Body::NULL_INDEX;
+    std::int32_t bodyIndex = body::NULL_INDEX;
 
-    if( bodyFreeList_ != Body::NULL_INDEX )
+    if( bodyFreeList_ != body::NULL_INDEX )
     {
         bodyIndex = bodyFreeList_;
 
         assert( bodyIndex >= 0 );
         assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
 
-        Body& freeBody = bodies_[bodyIndex];
-        assert( freeBody.bodyId == Body::NULL_INDEX );
-        assert( freeBody.headShapeId == Body::NULL_INDEX );
-        assert( freeBody.headContactKey == Body::NULL_INDEX );
+        body& freeBody = bodies_[bodyIndex];
+        assert( freeBody.bodyId == body::NULL_INDEX );
+        assert( freeBody.headShapeId == body::NULL_INDEX );
+        assert( freeBody.headContactKey == body::NULL_INDEX );
         assert( bodySims_.size() == bodies_.size() );
         assert( bodyStates_.size() == bodies_.size() );
-        assert( bodySims_[bodyIndex].bodyId == BodySim::NULL_INDEX );
+        assert( bodySims_[bodyIndex].bodyId == bodySim::NULL_INDEX );
 
         bodyFreeList_ = freeBody.nextFreeId;
     }
@@ -165,7 +165,7 @@ BodyId World::CreateBody( BodyType type, transform2 transform )
         bodyStates_.push_back( {} );
     }
 
-    Body& body = bodies_[bodyIndex];
+    body& body = bodies_[bodyIndex];
 
     const std::uint16_t generation = static_cast<std::uint16_t>( body.generation + 1u );
 
@@ -176,7 +176,7 @@ BodyId World::CreateBody( BodyType type, transform2 transform )
 
     assert( bodySims_.size() == bodies_.size() );
 
-    BodySim& bodySim = bodySims_[bodyIndex];
+    bodySim& bodySim = bodySims_[bodyIndex];
     bodySim = {};
     bodySim.bodyId = bodyIndex;
     bodySim.transform = transform;
@@ -190,23 +190,23 @@ BodyId World::CreateBody( BodyType type, transform2 transform )
     return MakeBodyId( bodyIndex );
 }
 
-void World::DestroyBody( BodyId bodyId )
+void world::DestroyBody( bodyId bodyId )
 {
     DestroyBodyByIndex( GetBodyIndex( bodyId ) );
 }
 
-void World::DestroyBodyByIndex( std::int32_t bodyIndex )
+void world::DestroyBodyByIndex( std::int32_t bodyIndex )
 {
     assert( bodyIndex >= 0 );
     assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
     assert( bodyCount_ > 0 );
 
-    Body& body = bodies_[bodyIndex];
+    body& body = bodies_[bodyIndex];
 
     assert( body.bodyId == bodyIndex );
 
-    // Box2D처럼 먼저 이 Body에 연결된 모든 Contact를 제거함.
-    while( body.headContactKey != Body::NULL_INDEX )
+    // Box2D처럼 먼저 이 body에 연결된 모든 Contact를 제거함.
+    while( body.headContactKey != body::NULL_INDEX )
     {
         const std::int32_t contactId = GetContactId( body.headContactKey );
 
@@ -218,20 +218,20 @@ void World::DestroyBodyByIndex( std::int32_t bodyIndex )
 
     assert( body.contactCount == 0 );
 
-    // Shape를 하나씩 제거하면 각 proxy와 Shape slot도 함께 정리됨.
-    while( body.headShapeId != Body::NULL_INDEX )
+    // shape를 하나씩 제거하면 각 proxy와 shape slot도 함께 정리됨.
+    while( body.headShapeId != body::NULL_INDEX )
     {
         DestroyShapeByIndex( body.headShapeId );
     }
 
     assert( body.shapeCount == 0 );
-    assert( body.headShapeId == Body::NULL_INDEX );
-    assert( body.headContactKey == Body::NULL_INDEX );
+    assert( body.headShapeId == body::NULL_INDEX );
+    assert( body.headContactKey == body::NULL_INDEX );
 
     const std::uint16_t generation = body.generation;
 
     assert( bodySims_.size() == bodies_.size() );
-    BodySim& bodySim = bodySims_[bodyIndex];
+    bodySim& bodySim = bodySims_[bodyIndex];
     assert( bodySim.bodyId == bodyIndex );
 
     // simulation 데이터도 함께 비워 재사용 slot에 이전 transform이 남지 않게 함.
@@ -239,7 +239,7 @@ void World::DestroyBodyByIndex( std::int32_t bodyIndex )
 
     assert( bodyStates_.size() == bodies_.size() );
 
-    // 운동 상태도 함께 초기화해 재사용 slot에 이전 Body 속도가 남지 않게 함.
+    // 운동 상태도 함께 초기화해 재사용 slot에 이전 body 속도가 남지 않게 함.
     bodyStates_[bodyIndex] = {};
 
     // generation은 보존하고 slot만 free-list에 반환함.
@@ -252,7 +252,7 @@ void World::DestroyBodyByIndex( std::int32_t bodyIndex )
 }
 
 
-ShapeId World::CreateShape( BodyId bodyId, ShapeGeometry geometry, Filter filter, float density )
+shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter, float density )
 {
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
@@ -260,17 +260,17 @@ ShapeId World::CreateShape( BodyId bodyId, ShapeGeometry geometry, Filter filter
     assert( std::isfinite( density ) );
     assert( density >= 0.0f );
 
-    std::int32_t shapeIndex = Shape::NULL_INDEX;
+    std::int32_t shapeIndex = shape::NULL_INDEX;
 
-    if( shapeFreeList_ != Shape::NULL_INDEX )
+    if( shapeFreeList_ != shape::NULL_INDEX )
     {
         shapeIndex = shapeFreeList_;
 
         assert( shapeIndex >= 0 );
         assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
 
-        Shape& freeShape = shapes_[shapeIndex];
-        assert( freeShape.bodyId == Shape::NULL_INDEX );
+        shape& freeShape = shapes_[shapeIndex];
+        assert( freeShape.bodyId == shape::NULL_INDEX );
         assert( std::holds_alternative<std::monostate>( freeShape.geometry ) );
 
         shapeFreeList_ = freeShape.nextFreeId;
@@ -286,7 +286,7 @@ ShapeId World::CreateShape( BodyId bodyId, ShapeGeometry geometry, Filter filter
         shapes_.push_back( {} );
     }
 
-    Shape& storedShape = shapes_[shapeIndex];
+    shape& storedShape = shapes_[shapeIndex];
 
     const std::uint16_t generation =
         static_cast<std::uint16_t>( storedShape.generation + 1u );
@@ -297,16 +297,16 @@ ShapeId World::CreateShape( BodyId bodyId, ShapeGeometry geometry, Filter filter
     storedShape.density = density;
     storedShape.filter = filter;
 
-    Body& body = bodies_[bodyIndex];
+    body& body = bodies_[bodyIndex];
 
     assert( bodySims_.size() == bodies_.size() );
-    const BodySim& bodySim = bodySims_[bodyIndex];
+    const bodySim& bodySim = bodySims_[bodyIndex];
     assert( bodySim.bodyId == bodyIndex );
 
     const aabb2 worldAABB =
         ComputeShapeAABB( storedShape.geometry, bodySim.transform );
 
-    // Box2D의 기본 Shape 생성처럼 static Shape도 즉시 pair 탐색 대상이 되게 함.
+    // Box2D의 기본 shape 생성처럼 static shape도 즉시 pair 탐색 대상이 되게 함.
     storedShape.proxyKey =
         broadPhase_.CreateProxy(
             body.type,
@@ -323,59 +323,59 @@ ShapeId World::CreateShape( BodyId bodyId, ShapeGeometry geometry, Filter filter
     return MakeShapeId( shapeIndex );
 }
 
-void World::DestroyShape( ShapeId shapeId )
+void world::DestroyShape( shapeId shapeId )
 {
     DestroyShapeByIndex( GetShapeIndex( shapeId ) );
 }
 
-void World::SetShapeDensity( ShapeId shapeId, float density )
+void world::SetShapeDensity( shapeId shapeId, float density )
 {
     assert( std::isfinite( density ) );
     assert( density >= 0.0f );
 
     const std::int32_t shapeIndex = GetShapeIndex( shapeId );
-    Shape& shape = shapes_[shapeIndex];
+    shape& shape = shapes_[shapeIndex];
 
     shape.density = density;
 
-    assert( shape.bodyId != Shape::NULL_INDEX );
+    assert( shape.bodyId != shape::NULL_INDEX );
     UpdateBodyMassData( shape.bodyId );
 }
 
-float World::GetShapeDensity( ShapeId shapeId ) const
+float world::GetShapeDensity( shapeId shapeId ) const
 {
     return shapes_[GetShapeIndex( shapeId )].density;
 }
 
-void World::DestroyShapeByIndex( std::int32_t shapeIndex )
+void world::DestroyShapeByIndex( std::int32_t shapeIndex )
 {
     assert( shapeIndex >= 0 );
     assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
     assert( shapeCount_ > 0 );
 
-    Shape& shape = shapes_[shapeIndex];
+    shape& shape = shapes_[shapeIndex];
 
-    assert( shape.bodyId != Shape::NULL_INDEX );
-    assert( shape.proxyKey != Shape::NULL_INDEX );
+    assert( shape.bodyId != shape::NULL_INDEX );
+    assert( shape.proxyKey != shape::NULL_INDEX );
     assert( !std::holds_alternative<std::monostate>( shape.geometry ) );
 
-    // Sensor 저장소는 아직 구현하지 않았으므로 현재는 일반 collision Shape만 제거함.
-    assert( shape.sensorIndex == Shape::NULL_INDEX );
+    // Sensor 저장소는 아직 구현하지 않았으므로 현재는 일반 collision shape만 제거함.
+    assert( shape.sensorIndex == shape::NULL_INDEX );
 
     const std::int32_t bodyIndex = shape.bodyId;
-    Body& body = bodies_[bodyIndex];
+    body& body = bodies_[bodyIndex];
 
-    // Box2D처럼 먼저 Body의 Shape list에서 분리함.
+    // Box2D처럼 먼저 body의 shape list에서 분리함.
     UnlinkShape( body, bodyIndex, shapes_, shapeIndex );
 
-    // 더 이상 BroadPhase 후보가 되지 않도록 proxy를 제거함.
+    // 더 이상 broadPhase 후보가 되지 않도록 proxy를 제거함.
     broadPhase_.DestroyProxy( shape.proxyKey );
-    shape.proxyKey = Shape::NULL_INDEX;
+    shape.proxyKey = shape::NULL_INDEX;
 
-    // 이 Body의 Contact list에서 삭제 Shape가 관여한 Contact만 제거함.
+    // 이 body의 Contact list에서 삭제 shape가 관여한 Contact만 제거함.
     std::int32_t contactKey = body.headContactKey;
 
-    while( contactKey != Body::NULL_INDEX )
+    while( contactKey != body::NULL_INDEX )
     {
         const std::int32_t contactId = GetContactId( contactKey );
         const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
@@ -410,7 +410,7 @@ void World::DestroyShapeByIndex( std::int32_t shapeIndex )
 }
 
 
-void World::SetBodyTransform( BodyId bodyId, transform2 transform )
+void world::SetBodyTransform( bodyId bodyId, transform2 transform )
 {
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
@@ -422,7 +422,7 @@ void World::SetBodyTransform( BodyId bodyId, transform2 transform )
 
     assert( bodySims_.size() == bodies_.size() );
 
-    BodySim& bodySim = bodySims_[bodyIndex];
+    bodySim& bodySim = bodySims_[bodyIndex];
     assert( bodySim.bodyId == bodyIndex );
 
     bodySim.transform = transform;
@@ -431,14 +431,14 @@ void World::SetBodyTransform( BodyId bodyId, transform2 transform )
     SyncBodyProxies( bodyIndex );
 }
 
-void World::SyncBodyProxies( std::int32_t bodyIndex )
+void world::SyncBodyProxies( std::int32_t bodyIndex )
 {
     assert( bodyIndex >= 0 );
     assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
     assert( bodySims_.size() == bodies_.size() );
 
-    const Body& body = bodies_[bodyIndex];
-    const BodySim& bodySim = bodySims_[bodyIndex];
+    const body& body = bodies_[bodyIndex];
+    const bodySim& bodySim = bodySims_[bodyIndex];
 
     assert( body.bodyId == bodyIndex );
     assert( bodySim.bodyId == bodyIndex );
@@ -446,20 +446,20 @@ void World::SyncBodyProxies( std::int32_t bodyIndex )
     std::int32_t shapeId = body.headShapeId;
     std::int32_t visitedCount = 0;
 
-    while( shapeId != Body::NULL_INDEX )
+    while( shapeId != body::NULL_INDEX )
     {
         assert( shapeId >= 0 );
         assert( static_cast<std::size_t>( shapeId ) < shapes_.size() );
         assert( visitedCount < body.shapeCount );
 
-        Shape& shape = shapes_[shapeId];
+        shape& shape = shapes_[shapeId];
 
         assert( shape.bodyId == bodyIndex );
 
         const aabb2 worldAABB = ComputeShapeAABB( shape.geometry, bodySim.transform );
 
-        // disabled Body 개념이 들어오면 proxy가 없는 Shape는 그대로 건너뜀.
-        if( shape.proxyKey != Shape::NULL_INDEX )
+        // disabled body 개념이 들어오면 proxy가 없는 shape는 그대로 건너뜀.
+        if( shape.proxyKey != shape::NULL_INDEX )
         {
             broadPhase_.MoveProxy( shape.proxyKey, worldAABB );
         }
@@ -471,36 +471,36 @@ void World::SyncBodyProxies( std::int32_t bodyIndex )
     assert( visitedCount == body.shapeCount );
 }
 
-void World::UpdateBodyMassData( std::int32_t bodyIndex )
+void world::UpdateBodyMassData( std::int32_t bodyIndex )
 {
     assert( bodyIndex >= 0 );
     assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
     assert( bodySims_.size() == bodies_.size() );
 
-    Body& body = bodies_[bodyIndex];
-    BodySim& bodySim = bodySims_[bodyIndex];
+    body& body = bodies_[bodyIndex];
+    bodySim& bodySim = bodySims_[bodyIndex];
 
     assert( body.bodyId == bodyIndex );
     assert( bodySim.bodyId == bodyIndex );
 
     /*
-    * Body 질량 특성 계산
+    * body 질량 특성 계산
     *
-    * 각 Shape i가 다음 값을 가진다고 하면:
+    * 각 shape i가 다음 값을 가진다고 하면:
     *
-    *     mi : Shape 질량
-    *     ci : Shape의 local center of mass
-    *     Ii : ci를 지나는 z축 기준 Shape 회전 관성
+    *     mi : shape 질량
+    *     ci : shape의 local center of mass
+    *     Ii : ci를 지나는 z축 기준 shape 회전 관성
     *
-    * Body 전체 질량:
+    * body 전체 질량:
     *
     *     M = sum( mi )
     *
-    * Body 전체 local center of mass:
+    * body 전체 local center of mass:
     *
     *     C = sum( mi * ci ) / M
     *
-    * Body center C 기준 회전 관성:
+    * body center C 기준 회전 관성:
     *
     *     I = sum( Ii + mi * |ci - C|^2 )
     *
@@ -516,15 +516,15 @@ void World::UpdateBodyMassData( std::int32_t bodyIndex )
     bodySim.invInertia = 0.0f;
     bodySim.localCenter = {};
 
-    // Static / Kinematic Body는 외력이나 impulse로 가속되지 않으므로
+    // Static / Kinematic body는 외력이나 impulse로 가속되지 않으므로
     // solver 관점에서 무한 질량으로 취급하고 inverse mass / inertia를 0으로 둠.
-    if( body.type != BodyType::Dynamic )
+    if( body.type != bodyType::Dynamic )
     {
         bodySim.center = bodySim.transform.position;
         return;
     }
 
-    // 두 번째 관성 계산에서 Shape별 mass / center / inertia가 다시 필요하므로
+    // 두 번째 관성 계산에서 shape별 mass / center / inertia가 다시 필요하므로
     // 첫 순회 결과를 임시 배열에 저장함.
     std::vector<massData2> masses;
     masses.reserve( static_cast<std::size_t>( body.shapeCount ) );
@@ -543,13 +543,13 @@ void World::UpdateBodyMassData( std::int32_t bodyIndex )
     *
     * 을 계산함.
     */
-    while( shapeIndex != Body::NULL_INDEX )
+    while( shapeIndex != body::NULL_INDEX )
     {
         assert( shapeIndex >= 0 );
         assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
         assert( visitedCount < body.shapeCount );
 
-        const Shape& shape = shapes_[shapeIndex];
+        const shape& shape = shapes_[shapeIndex];
         assert( shape.bodyId == bodyIndex );
 
         const massData2 massData = ComputeShapeMass( shape );
@@ -581,8 +581,8 @@ void World::UpdateBodyMassData( std::int32_t bodyIndex )
     /*
     * 두 번째 순회
     *
-    * 각 Shape의 회전 관성 Ii는 자기 center ci 기준이므로
-    * Body center C 기준으로 바로 더할 수 없음.
+    * 각 shape의 회전 관성 Ii는 자기 center ci 기준이므로
+    * body center C 기준으로 바로 더할 수 없음.
     *
     * 평행축 정리:
     *
@@ -590,7 +590,7 @@ void World::UpdateBodyMassData( std::int32_t bodyIndex )
     *
     *     d = |ci - C|
     *
-    * 를 적용한 뒤 모든 Shape의 관성을 합산함.
+    * 를 적용한 뒤 모든 shape의 관성을 합산함.
     */
     for( const massData2& massData : masses )
     {
@@ -618,50 +618,50 @@ void World::UpdateBodyMassData( std::int32_t bodyIndex )
         bodySim.invInertia = 1.0f / body.inertia;
     }
 
-    // local center of mass C를 현재 Body transform으로 world space에 옮김.
+    // local center of mass C를 현재 body transform으로 world space에 옮김.
     bodySim.center =
         TransformPoint(
             bodySim.transform,
             bodySim.localCenter
         );
 
-    // center of mass가 이동해도 Body origin의 순간 속도가 갑자기 변하지 않도록
+    // center of mass가 이동해도 body origin의 순간 속도가 갑자기 변하지 않도록
     // v_new = v_old + w x ( C_new - C_old ) 로 COM 선속도를 보정함.
     assert( bodyStates_.size() == bodies_.size() );
 
-    BodyState& bodyState = bodyStates_[bodyIndex];
+    bodyState& bodyState = bodyStates_[bodyIndex];
     bodyState.linearVelocity +=
         Cross( bodyState.angularVelocity,  bodySim.center - oldCenter );
 }
 
-const Body& World::GetBody( BodyId bodyId ) const
+const body& world::GetBody( bodyId bodyId ) const
 {
     return bodies_[GetBodyIndex( bodyId )];
 }
 
-transform2 World::GetBodyTransform( BodyId bodyId ) const
+transform2 world::GetBodyTransform( bodyId bodyId ) const
 {
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
 
-    const BodySim& bodySim = bodySims_[bodyIndex];
+    const bodySim& bodySim = bodySims_[bodyIndex];
     assert( bodySim.bodyId == bodyIndex );
 
     return bodySim.transform;
 }
 
-void World::SetBodyLinearVelocity( BodyId bodyId, vec2 linearVelocity )
+void world::SetBodyLinearVelocity( bodyId bodyId, vec2 linearVelocity )
 {
     assert( std::isfinite( linearVelocity.x ) );
     assert( std::isfinite( linearVelocity.y ) );
 
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
-    const Body& body = bodies_[bodyIndex];
+    const body& body = bodies_[bodyIndex];
 
-    if( body.type == BodyType::Static )
+    if( body.type == bodyType::Static )
     {
-        // 정적 Body는 움직이지 않으므로 setter를 무시함.
+        // 정적 body는 움직이지 않으므로 setter를 무시함.
         return;
     }
 
@@ -669,26 +669,26 @@ void World::SetBodyLinearVelocity( BodyId bodyId, vec2 linearVelocity )
     bodyStates_[bodyIndex].linearVelocity = linearVelocity;
 }
 
-vec2 World::GetBodyLinearVelocity( BodyId bodyId ) const
+vec2 world::GetBodyLinearVelocity( bodyId bodyId ) const
 {
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodyStates_.size() == bodies_.size() );
 
-    // Static Body의 state도 항상 zero로 유지되므로 그대로 반환할 수 있음.
+    // Static body의 state도 항상 zero로 유지되므로 그대로 반환할 수 있음.
     return bodyStates_[bodyIndex].linearVelocity;
 }
 
-void World::SetBodyAngularVelocity( BodyId bodyId, float angularVelocity )
+void world::SetBodyAngularVelocity( bodyId bodyId, float angularVelocity )
 {
     assert( std::isfinite( angularVelocity ) );
 
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
-    const Body& body = bodies_[bodyIndex];
+    const body& body = bodies_[bodyIndex];
 
-    if( body.type == BodyType::Static )
+    if( body.type == bodyType::Static )
     {
-        // 정적 Body는 움직이지 않으므로 setter를 무시함.
+        // 정적 body는 움직이지 않으므로 setter를 무시함.
         return;
     }
 
@@ -696,7 +696,7 @@ void World::SetBodyAngularVelocity( BodyId bodyId, float angularVelocity )
     bodyStates_[bodyIndex].angularVelocity = angularVelocity;
 }
 
-float World::GetBodyAngularVelocity( BodyId bodyId ) const
+float world::GetBodyAngularVelocity( bodyId bodyId ) const
 {
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
@@ -704,17 +704,17 @@ float World::GetBodyAngularVelocity( BodyId bodyId ) const
     return bodyStates_[bodyIndex].angularVelocity;
 }
 
-float World::GetBodyMass( BodyId bodyId ) const
+float world::GetBodyMass( bodyId bodyId ) const
 {
     return bodies_[GetBodyIndex( bodyId )].mass;
 }
 
-float World::GetBodyRotationalInertia( BodyId bodyId ) const
+float world::GetBodyRotationalInertia( bodyId bodyId ) const
 {
     return bodies_[GetBodyIndex( bodyId )].inertia;
 }
 
-vec2 World::GetBodyLocalCenter( BodyId bodyId ) const
+vec2 world::GetBodyLocalCenter( bodyId bodyId ) const
 {
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
@@ -722,7 +722,7 @@ vec2 World::GetBodyLocalCenter( BodyId bodyId ) const
     return bodySims_[bodyIndex].localCenter;
 }
 
-void World::SetGravity( vec2 gravity )
+void world::SetGravity( vec2 gravity )
 {
     assert( std::isfinite( gravity.x ) );
     assert( std::isfinite( gravity.y ) );
@@ -730,12 +730,12 @@ void World::SetGravity( vec2 gravity )
     gravity_ = gravity;
 }
 
-vec2 World::GetGravity() const noexcept
+vec2 world::GetGravity() const noexcept
 {
     return gravity_;
 }
 
-void World::ApplyForce( BodyId bodyId, vec2 force, vec2 point )
+void world::ApplyForce( bodyId bodyId, vec2 force, vec2 point )
 {
     assert( std::isfinite( force.x ) );
     assert( std::isfinite( force.y ) );
@@ -743,17 +743,17 @@ void World::ApplyForce( BodyId bodyId, vec2 force, vec2 point )
     assert( std::isfinite( point.y ) );
 
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
-    const Body& body = bodies_[bodyIndex];
+    const body& body = bodies_[bodyIndex];
 
-    // Static / Kinematic Body는 외력으로 속도가 바뀌지 않음.
-    if( body.type != BodyType::Dynamic )
+    // Static / Kinematic body는 외력으로 속도가 바뀌지 않음.
+    if( body.type != bodyType::Dynamic )
     {
         return;
     }
 
     assert( bodySims_.size() == bodies_.size() );
 
-    BodySim& bodySim = bodySims_[bodyIndex];
+    bodySim& bodySim = bodySims_[bodyIndex];
 
     // F_total += F
     bodySim.force += force;
@@ -769,15 +769,15 @@ void World::ApplyForce( BodyId bodyId, vec2 force, vec2 point )
         );
 }
 
-void World::ApplyForceToCenter( BodyId bodyId, vec2 force )
+void world::ApplyForceToCenter( bodyId bodyId, vec2 force )
 {
     assert( std::isfinite( force.x ) );
     assert( std::isfinite( force.y ) );
 
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
-    const Body& body = bodies_[bodyIndex];
+    const body& body = bodies_[bodyIndex];
 
-    if( body.type != BodyType::Dynamic )
+    if( body.type != bodyType::Dynamic )
     {
         return;
     }
@@ -786,14 +786,14 @@ void World::ApplyForceToCenter( BodyId bodyId, vec2 force )
     bodySims_[bodyIndex].force += force;
 }
 
-void World::ApplyTorque( BodyId bodyId, float torque )
+void world::ApplyTorque( bodyId bodyId, float torque )
 {
     assert( std::isfinite( torque ) );
 
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
-    const Body& body = bodies_[bodyIndex];
+    const body& body = bodies_[bodyIndex];
 
-    if( body.type != BodyType::Dynamic )
+    if( body.type != bodyType::Dynamic )
     {
         return;
     }
@@ -802,18 +802,18 @@ void World::ApplyTorque( BodyId bodyId, float torque )
     bodySims_[bodyIndex].torque += torque;
 }
 
-void World::ClearForces( BodyId bodyId )
+void world::ClearForces( bodyId bodyId )
 {
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
 
-    BodySim& bodySim = bodySims_[bodyIndex];
+    bodySim& bodySim = bodySims_[bodyIndex];
     bodySim.force = {};
     bodySim.torque = 0.0f;
 }
 
-void World::ApplyLinearImpulse( BodyId bodyId, vec2 impulse, vec2 point )
+void world::ApplyLinearImpulse( bodyId bodyId, vec2 impulse, vec2 point )
 {
     assert( std::isfinite( impulse.x ) );
     assert( std::isfinite( impulse.y ) );
@@ -821,10 +821,10 @@ void World::ApplyLinearImpulse( BodyId bodyId, vec2 impulse, vec2 point )
     assert( std::isfinite( point.y ) );
 
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
-    const Body& body = bodies_[bodyIndex];
+    const body& body = bodies_[bodyIndex];
 
-    // Static / Kinematic Body는 impulse로 속도가 바뀌지 않음.
-    if( body.type != BodyType::Dynamic )
+    // Static / Kinematic body는 impulse로 속도가 바뀌지 않음.
+    if( body.type != bodyType::Dynamic )
     {
         return;
     }
@@ -832,8 +832,8 @@ void World::ApplyLinearImpulse( BodyId bodyId, vec2 impulse, vec2 point )
     assert( bodySims_.size() == bodies_.size() );
     assert( bodyStates_.size() == bodies_.size() );
 
-    const BodySim& bodySim = bodySims_[bodyIndex];
-    BodyState& bodyState = bodyStates_[bodyIndex];
+    const bodySim& bodySim = bodySims_[bodyIndex];
+    bodyState& bodyState = bodyStates_[bodyIndex];
 
     /*
     * Linear impulse
@@ -876,17 +876,17 @@ void World::ApplyLinearImpulse( BodyId bodyId, vec2 impulse, vec2 point )
         Cross( r, impulse );
 }
 
-void World::ApplyLinearImpulseToCenter(
-    BodyId bodyId,
+void world::ApplyLinearImpulseToCenter(
+    bodyId bodyId,
     vec2 impulse )
 {
     assert( std::isfinite( impulse.x ) );
     assert( std::isfinite( impulse.y ) );
 
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
-    const Body& body = bodies_[bodyIndex];
+    const body& body = bodies_[bodyIndex];
 
-    if( body.type != BodyType::Dynamic )
+    if( body.type != bodyType::Dynamic )
     {
         return;
     }
@@ -894,8 +894,8 @@ void World::ApplyLinearImpulseToCenter(
     assert( bodySims_.size() == bodies_.size() );
     assert( bodyStates_.size() == bodies_.size() );
 
-    const BodySim& bodySim = bodySims_[bodyIndex];
-    BodyState& bodyState = bodyStates_[bodyIndex];
+    const bodySim& bodySim = bodySims_[bodyIndex];
+    bodyState& bodyState = bodyStates_[bodyIndex];
 
     // center에 적용하므로 r=0이고 angular impulse는 발생하지 않음.
     //
@@ -904,16 +904,16 @@ void World::ApplyLinearImpulseToCenter(
         impulse * bodySim.invMass;
 }
 
-void World::ApplyAngularImpulse(
-    BodyId bodyId,
+void world::ApplyAngularImpulse(
+    bodyId bodyId,
     float impulse )
 {
     assert( std::isfinite( impulse ) );
 
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
-    const Body& body = bodies_[bodyIndex];
+    const body& body = bodies_[bodyIndex];
 
-    if( body.type != BodyType::Dynamic )
+    if( body.type != bodyType::Dynamic )
     {
         return;
     }
@@ -921,8 +921,8 @@ void World::ApplyAngularImpulse(
     assert( bodySims_.size() == bodies_.size() );
     assert( bodyStates_.size() == bodies_.size() );
 
-    const BodySim& bodySim = bodySims_[bodyIndex];
-    BodyState& bodyState = bodyStates_[bodyIndex];
+    const bodySim& bodySim = bodySims_[bodyIndex];
+    bodyState& bodyState = bodyStates_[bodyIndex];
 
     /*
     * Angular impulse L은 각운동량의 변화량:
@@ -939,7 +939,7 @@ void World::ApplyAngularImpulse(
         impulse * bodySim.invInertia;
 }
 
-void World::Step( float timeStep )
+void world::Step( float timeStep )
 {
     assert( std::isfinite( timeStep ) );
     assert( timeStep >= 0.0f );
@@ -971,21 +971,21 @@ void World::Step( float timeStep )
              bodyIndex < static_cast<std::int32_t>( bodies_.size() );
              ++bodyIndex )
         {
-            const Body& body = bodies_[bodyIndex];
+            const body& body = bodies_[bodyIndex];
 
-            if( body.bodyId == Body::NULL_INDEX ||
-                body.type == BodyType::Static )
+            if( body.bodyId == body::NULL_INDEX ||
+                body.type == bodyType::Static )
             {
                 continue;
             }
 
-            BodySim& bodySim = bodySims_[bodyIndex];
-            BodyState& bodyState = bodyStates_[bodyIndex];
+            bodySim& bodySim = bodySims_[bodyIndex];
+            bodyState& bodyState = bodyStates_[bodyIndex];
 
             assert( body.bodyId == bodyIndex );
             assert( bodySim.bodyId == bodyIndex );
 
-            if( body.type == BodyType::Dynamic )
+            if( body.type == bodyType::Dynamic )
             {
                 /*
                 * Newton 제2법칙:
@@ -1028,7 +1028,7 @@ void World::Step( float timeStep )
         // 2. Update current contacts
         // -----------------------------------------------------
         UpdateCollisions(
-            []( const ContactData& )
+            []( const contactData& )
             {
             }
         );
@@ -1056,16 +1056,16 @@ void World::Step( float timeStep )
              bodyIndex < static_cast<std::int32_t>( bodies_.size() );
              ++bodyIndex )
         {
-            const Body& body = bodies_[bodyIndex];
+            const body& body = bodies_[bodyIndex];
 
-            if( body.bodyId == Body::NULL_INDEX ||
-                body.type == BodyType::Static )
+            if( body.bodyId == body::NULL_INDEX ||
+                body.type == bodyType::Static )
             {
                 continue;
             }
 
-            BodySim& bodySim = bodySims_[bodyIndex];
-            const BodyState& bodyState = bodyStates_[bodyIndex];
+            bodySim& bodySim = bodySims_[bodyIndex];
+            const bodyState& bodyState = bodyStates_[bodyIndex];
 
             /*
             * semi-implicit Euler
@@ -1124,46 +1124,46 @@ void World::Step( float timeStep )
         );
     }
 
-    // 이동 후 새 BroadPhase pair와 manifold를 만들어 다음 Step의 solver가 사용할
+    // 이동 후 새 broadPhase pair와 manifold를 만들어 다음 Step의 solver가 사용할
     // Contact 상태를 최신 transform 기준으로 준비함.
     UpdateCollisions(
-        []( const ContactData& )
+        []( const contactData& )
         {
         }
     );
 }
 
 
-const Shape& World::GetShape( ShapeId shapeId ) const
+const shape& world::GetShape( shapeId shapeId ) const
 {
     return shapes_[GetShapeIndex( shapeId )];
 }
 
-ContactData World::GetContactData( ContactId contactId ) const
+contactData world::GetContactData( contactId contactId ) const
 {
     return MakeContactData( GetContactIndex( contactId ) );
 }
 
-std::size_t World::GetBodyContactCapacity( BodyId bodyId ) const
+std::size_t world::GetBodyContactCapacity( bodyId bodyId ) const
 {
-    const Body& body =
+    const body& body =
         bodies_[GetBodyIndex( bodyId )];
 
-    // Box2D와 같이 빠르고 보수적으로 Body의 전체 Contact 수를 반환함.
+    // Box2D와 같이 빠르고 보수적으로 body의 전체 Contact 수를 반환함.
     return static_cast<std::size_t>( body.contactCount );
 }
 
-std::size_t World::GetBodyContactData(
-    BodyId bodyId,
-    std::span<ContactData> output ) const
+std::size_t world::GetBodyContactData(
+    bodyId bodyId,
+    std::span<contactData> output ) const
 {
-    const Body& body =
+    const body& body =
         bodies_[GetBodyIndex( bodyId )];
 
     std::int32_t contactKey = body.headContactKey;
     std::size_t count = 0;
 
-    while( contactKey != Body::NULL_INDEX &&
+    while( contactKey != body::NULL_INDEX &&
            count < output.size() )
     {
         const std::int32_t contactId =
@@ -1200,15 +1200,15 @@ std::size_t World::GetBodyContactData(
     return count;
 }
 
-std::size_t World::GetShapeContactCapacity( ShapeId shapeId ) const
+std::size_t world::GetShapeContactCapacity( shapeId shapeId ) const
 {
     const std::int32_t shapeIndex =
         GetShapeIndex( shapeId );
 
-    const Shape& shape = shapes_[shapeIndex];
+    const shape& shape = shapes_[shapeIndex];
 
     // Sensor Contact query는 Sensor 저장소를 구현할 때 별도로 연결함.
-    if( shape.sensorIndex != Shape::NULL_INDEX )
+    if( shape.sensorIndex != shape::NULL_INDEX )
     {
         return 0;
     }
@@ -1216,22 +1216,22 @@ std::size_t World::GetShapeContactCapacity( ShapeId shapeId ) const
     assert( shape.bodyId >= 0 );
     assert( static_cast<std::size_t>( shape.bodyId ) < bodies_.size() );
 
-    const Body& body = bodies_[shape.bodyId];
+    const body& body = bodies_[shape.bodyId];
 
-    // 같은 Body의 다른 Shape Contact도 포함하므로 실제 필요량보다 클 수 있음.
+    // 같은 body의 다른 shape Contact도 포함하므로 실제 필요량보다 클 수 있음.
     return static_cast<std::size_t>( body.contactCount );
 }
 
-std::size_t World::GetShapeContactData(
-    ShapeId shapeId,
-    std::span<ContactData> output ) const
+std::size_t world::GetShapeContactData(
+    shapeId shapeId,
+    std::span<contactData> output ) const
 {
     const std::int32_t shapeIndex =
         GetShapeIndex( shapeId );
 
-    const Shape& shape = shapes_[shapeIndex];
+    const shape& shape = shapes_[shapeIndex];
 
-    if( shape.sensorIndex != Shape::NULL_INDEX )
+    if( shape.sensorIndex != shape::NULL_INDEX )
     {
         return 0;
     }
@@ -1239,12 +1239,12 @@ std::size_t World::GetShapeContactData(
     assert( shape.bodyId >= 0 );
     assert( static_cast<std::size_t>( shape.bodyId ) < bodies_.size() );
 
-    const Body& body = bodies_[shape.bodyId];
+    const body& body = bodies_[shape.bodyId];
 
     std::int32_t contactKey = body.headContactKey;
     std::size_t count = 0;
 
-    while( contactKey != Body::NULL_INDEX &&
+    while( contactKey != body::NULL_INDEX &&
            count < output.size() )
     {
         const std::int32_t contactId =
@@ -1285,7 +1285,7 @@ std::size_t World::GetShapeContactData(
     return count;
 }
 
-ContactData World::MakeContactData( std::int32_t contactIndex ) const
+contactData world::MakeContactData( std::int32_t contactIndex ) const
 {
     assert( contactIndex >= 0 );
     assert( static_cast<std::size_t>( contactIndex ) < contacts_.size() );
@@ -1304,20 +1304,20 @@ ContactData World::MakeContactData( std::int32_t contactIndex ) const
     assert( static_cast<std::size_t>( contact.shapeIdA ) < shapes_.size() );
     assert( static_cast<std::size_t>( contact.shapeIdB ) < shapes_.size() );
 
-    const Shape& shapeA = shapes_[contact.shapeIdA];
+    const shape& shapeA = shapes_[contact.shapeIdA];
 
     assert( shapeA.bodyId >= 0 );
     assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
 
     assert( bodySims_.size() == bodies_.size() );
 
-    const BodySim& bodySimA = bodySims_[shapeA.bodyId];
+    const bodySim& bodySimA = bodySims_[shapeA.bodyId];
     assert( bodySimA.bodyId == shapeA.bodyId );
 
-    ContactData data{};
-    data.contactId = MakeContactId( contactIndex );
-    data.shapeIdA = MakeShapeId( contact.shapeIdA );
-    data.shapeIdB = MakeShapeId( contact.shapeIdB );
+    contactData data{};
+    data.id = MakeContactId( contactIndex );
+    data.shapeA = MakeShapeId( contact.shapeIdA );
+    data.shapeB = MakeShapeId( contact.shapeIdB );
     data.manifold =
         ToWorldManifold(
             contactSim.manifold,
@@ -1328,7 +1328,7 @@ ContactData World::MakeContactData( std::int32_t contactIndex ) const
 }
 
 
-std::int32_t World::CreateContact(
+std::int32_t world::CreateContact(
     std::int32_t shapeIdA,
     std::int32_t shapeIdB,
     const localManifold2& manifold )
@@ -1396,12 +1396,12 @@ std::int32_t World::CreateContact(
 
     for( std::int32_t edgeIndex = 0; edgeIndex < 2; ++edgeIndex )
     {
-        const Shape& shape = shapes_[shapeIds[edgeIndex]];
+        const shape& shape = shapes_[shapeIds[edgeIndex]];
 
         assert( shape.bodyId >= 0 );
         assert( static_cast<std::size_t>( shape.bodyId ) < bodies_.size() );
 
-        Body& body = bodies_[shape.bodyId];
+        body& body = bodies_[shape.bodyId];
         contactEdge2& edge = contact.edges[edgeIndex];
 
         edge.bodyId = shape.bodyId;
@@ -1411,7 +1411,7 @@ std::int32_t World::CreateContact(
         const std::int32_t contactKey =
             MakeContactKey( contactId, edgeIndex );
 
-        if( body.headContactKey != Body::NULL_INDEX )
+        if( body.headContactKey != body::NULL_INDEX )
         {
             const std::int32_t headContactId =
                 GetContactId( body.headContactKey );
@@ -1431,10 +1431,10 @@ std::int32_t World::CreateContact(
         ++body.contactCount;
     }
 
-    const ShapePairKey pairKey =
+    const shapePairKey pairKey =
         MakeShapePairKey( shapeIdA, shapeIdB );
 
-    // HashSet::Add는 새 key면 false, 이미 존재하면 true를 반환함.
+    // hashSet::Add는 새 key면 false, 이미 존재하면 true를 반환함.
     const bool alreadyExists = broadPhase_.AddPair( pairKey );
     assert( !alreadyExists );
 
@@ -1443,7 +1443,7 @@ std::int32_t World::CreateContact(
     return contactId;
 }
 
-void World::UpdateContactSim(
+void world::UpdateContactSim(
     std::int32_t contactId,
     const localManifold2& manifold )
 {
@@ -1459,16 +1459,16 @@ void World::UpdateContactSim(
     assert( static_cast<std::size_t>( contact.shapeIdA ) < shapes_.size() );
     assert( static_cast<std::size_t>( contact.shapeIdB ) < shapes_.size() );
 
-    const Shape& shapeA = shapes_[contact.shapeIdA];
-    const Shape& shapeB = shapes_[contact.shapeIdB];
+    const shape& shapeA = shapes_[contact.shapeIdA];
+    const shape& shapeB = shapes_[contact.shapeIdB];
 
     assert( shapeA.bodyId >= 0 );
     assert( shapeB.bodyId >= 0 );
     assert( static_cast<std::size_t>( shapeA.bodyId ) < bodySims_.size() );
     assert( static_cast<std::size_t>( shapeB.bodyId ) < bodySims_.size() );
 
-    const BodySim& bodySimA = bodySims_[shapeA.bodyId];
-    const BodySim& bodySimB = bodySims_[shapeB.bodyId];
+    const bodySim& bodySimA = bodySims_[shapeA.bodyId];
+    const bodySim& bodySimB = bodySims_[shapeB.bodyId];
 
     assert( bodySimA.bodyId == shapeA.bodyId );
     assert( bodySimB.bodyId == shapeB.bodyId );
@@ -1528,7 +1528,7 @@ void World::UpdateContactSim(
     }
 }
 
-std::vector<contactConstraint2> World::PrepareContactConstraints(
+std::vector<contactConstraint2> world::PrepareContactConstraints(
     float timeStep )
 {
     assert( std::isfinite( timeStep ) );
@@ -1545,8 +1545,8 @@ std::vector<contactConstraint2> World::PrepareContactConstraints(
     constexpr float CONTACT_DAMPING_RATIO = 10.0f;
     constexpr float MAX_CONTACT_PUSH_SPEED = 3.0f;
 
-    // Shape material 시스템이 생기기 전까지 Box2D의 기본값을 사용함.
-    // 이후에는 Shape A/B의 friction을 mix한 값으로 교체할 예정임.
+    // shape material 시스템이 생기기 전까지 Box2D의 기본값을 사용함.
+    // 이후에는 shape A/B의 friction을 mix한 값으로 교체할 예정임.
     constexpr float DEFAULT_FRICTION = 0.6f;
 
     const float invTimeStep =
@@ -1590,19 +1590,19 @@ std::vector<contactConstraint2> World::PrepareContactConstraints(
         assert( static_cast<std::size_t>( contactSim.bodyIdA ) < bodies_.size() );
         assert( static_cast<std::size_t>( contactSim.bodyIdB ) < bodies_.size() );
 
-        // 같은 Body의 Shape끼리는 Contact를 만들지 않아야 함.
+        // 같은 body의 shape끼리는 Contact를 만들지 않아야 함.
         assert( contactSim.bodyIdA != contactSim.bodyIdB );
 
-        const BodySim& bodySimA =
+        const bodySim& bodySimA =
             bodySims_[contactSim.bodyIdA];
 
-        const BodySim& bodySimB =
+        const bodySim& bodySimB =
             bodySims_[contactSim.bodyIdB];
 
-        const BodyState& bodyStateA =
+        const bodyState& bodyStateA =
             bodyStates_[contactSim.bodyIdA];
 
-        const BodyState& bodyStateB =
+        const bodyState& bodyStateB =
             bodyStates_[contactSim.bodyIdB];
 
         contactConstraint2 constraint =
@@ -1615,8 +1615,8 @@ std::vector<contactConstraint2> World::PrepareContactConstraints(
             );
 
         const bool hasStaticBody =
-            bodies_[contactSim.bodyIdA].type == BodyType::Static ||
-            bodies_[contactSim.bodyIdB].type == BodyType::Static;
+            bodies_[contactSim.bodyIdA].type == bodyType::Static ||
+            bodies_[contactSim.bodyIdB].type == bodyType::Static;
 
         constraint.softness =
             hasStaticBody
@@ -1635,7 +1635,7 @@ std::vector<contactConstraint2> World::PrepareContactConstraints(
     return constraints;
 }
 
-void World::WarmStartContacts(
+void world::WarmStartContacts(
     std::span<const contactConstraint2> constraints )
 {
     for( const contactConstraint2& constraint : constraints )
@@ -1651,7 +1651,7 @@ void World::WarmStartContacts(
     }
 }
 
-void World::SolveContactConstraints(
+void world::SolveContactConstraints(
     std::span<contactConstraint2> constraints,
     bool useBias )
 {
@@ -1687,7 +1687,7 @@ void World::SolveContactConstraints(
     }
 }
 
-void World::StoreContactConstraintImpulses(
+void world::StoreContactConstraintImpulses(
     std::span<const contactConstraint2> constraints )
 {
     for( const contactConstraint2& constraint : constraints )
@@ -1705,7 +1705,7 @@ void World::StoreContactConstraintImpulses(
     }
 }
 
-void World::DestroyContact( std::int32_t contactId )
+void world::DestroyContact( std::int32_t contactId )
 {
     assert( contactId >= 0 );
     assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
@@ -1715,7 +1715,7 @@ void World::DestroyContact( std::int32_t contactId )
     assert( contact.contactId == contactId );
     assert( contactCount_ > 0 );
 
-    const ShapePairKey pairKey =
+    const shapePairKey pairKey =
         MakeShapePairKey( contact.shapeIdA, contact.shapeIdB );
 
     for( std::int32_t edgeIndex = 0; edgeIndex < 2; ++edgeIndex )
@@ -1725,7 +1725,7 @@ void World::DestroyContact( std::int32_t contactId )
         assert( edge.bodyId >= 0 );
         assert( static_cast<std::size_t>( edge.bodyId ) < bodies_.size() );
 
-        Body& body = bodies_[edge.bodyId];
+        body& body = bodies_[edge.bodyId];
         const std::int32_t contactKey =
             MakeContactKey( contactId, edgeIndex );
 

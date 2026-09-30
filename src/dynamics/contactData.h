@@ -6,13 +6,13 @@
 namespace zonai
 {
 
-// World 외부에 노출하는 Contact snapshot.
+// world 외부에 노출하는 Contact snapshot.
 // 내부 linked-list / free-list / raw index 정보는 포함하지 않음.
-struct ContactData
+struct contactData
 {
-    ContactId contactId{};
-    ShapeId shapeIdA{};
-    ShapeId shapeIdB{};
+    contactId id{};
+    shapeId shapeA{};
+    shapeId shapeB{};
     manifold2 manifold{};
 };
 

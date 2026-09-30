@@ -9,9 +9,9 @@
 namespace zonai::sandbox
 {
 
-DebugDraw::DebugDraw(
+debugDraw::debugDraw(
     ImDrawList* drawList,
-    const DebugCamera& camera,
+    const debugCamera& camera,
     const ImVec2& viewportMin,
     const ImVec2& viewportSize )
     : drawList_( drawList ),
@@ -21,7 +21,7 @@ DebugDraw::DebugDraw(
 {
 }
 
-void DebugDraw::DrawGrid( float spacing ) const
+void debugDraw::DrawGrid( float spacing ) const
 {
     if( spacing <= 0.0f )
     {
@@ -75,8 +75,8 @@ void DebugDraw::DrawGrid( float spacing ) const
     }
 }
 
-void DebugDraw::DrawShape(
-    const ShapeGeometry& geometry,
+void debugDraw::DrawShape(
+    const shapeGeometry& geometry,
     const transform2& transform,
     ImU32 outlineColor,
     ImU32 fillColor ) const
@@ -176,7 +176,7 @@ void DebugDraw::DrawShape(
     );
 }
 
-void DebugDraw::DrawAABB(
+void debugDraw::DrawAABB(
     const aabb2& box,
     ImU32 color,
     float thickness ) const
@@ -187,8 +187,8 @@ void DebugDraw::DrawAABB(
     drawList_->AddRect( min, max, color, 0.0f, 0, thickness );
 }
 
-void DebugDraw::DrawTree(
-    const DynamicTree& tree,
+void debugDraw::DrawTree(
+    const dynamicTree& tree,
     const char* treeName,
     bool showLeaves,
     bool showInternal,
@@ -200,7 +200,7 @@ void DebugDraw::DrawTree(
     constexpr ImU32 MOVED_COLOR = IM_COL32( 255, 80, 100, 255 );
 
     tree.VisitNodes(
-        [&]( const TreeNodeDebugInfo& info )
+        [&]( const treeNodeDebugInfo& info )
         {
             if( info.isLeaf && !showLeaves )
             {
@@ -270,7 +270,7 @@ void DebugDraw::DrawTree(
     );
 }
 
-void DebugDraw::DrawSegment(
+void debugDraw::DrawSegment(
     const segment2& segment,
     ImU32 color,
     float thickness ) const
@@ -283,7 +283,7 @@ void DebugDraw::DrawSegment(
     );
 }
 
-void DebugDraw::DrawPoint(
+void debugDraw::DrawPoint(
     const vec2& point,
     ImU32 color,
     float radiusPixels ) const
@@ -295,7 +295,7 @@ void DebugDraw::DrawPoint(
     );
 }
 
-void DebugDraw::DrawArrow(
+void debugDraw::DrawArrow(
     const vec2& start,
     const vec2& direction,
     ImU32 color,
@@ -332,7 +332,7 @@ void DebugDraw::DrawArrow(
     );
 }
 
-void DebugDraw::DrawCircle(
+void debugDraw::DrawCircle(
     const circle2& circle,
     ImU32 outlineColor,
     ImU32 fillColor ) const
@@ -344,7 +344,7 @@ void DebugDraw::DrawCircle(
     drawList_->AddCircle( center, radius, outlineColor, 0, 2.0f );
 }
 
-void DebugDraw::DrawCapsule(
+void debugDraw::DrawCapsule(
     const capsule2& capsule,
     ImU32 outlineColor,
     ImU32 fillColor ) const
@@ -390,7 +390,7 @@ void DebugDraw::DrawCapsule(
     drawList_->AddCircle( center2, radius, outlineColor, 0, 2.0f );
 }
 
-void DebugDraw::DrawPolygon(
+void debugDraw::DrawPolygon(
     const polygon2& polygon,
     ImU32 outlineColor,
     ImU32 fillColor ) const
@@ -425,7 +425,7 @@ void DebugDraw::DrawPolygon(
     );
 }
 
-void DebugDraw::DrawLabel(
+void debugDraw::DrawLabel(
     const vec2& worldPosition,
     const char* text,
     ImU32 color ) const
@@ -439,7 +439,7 @@ void DebugDraw::DrawLabel(
     );
 }
 
-ImVec2 DebugDraw::ToScreen( const vec2& world ) const
+ImVec2 debugDraw::ToScreen( const vec2& world ) const
 {
     return camera_.WorldToScreen( world, viewportMin_, viewportSize_ );
 }

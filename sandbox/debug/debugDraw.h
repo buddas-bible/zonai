@@ -16,20 +16,20 @@ namespace zonai::sandbox
 {
 
 // Zonai의 geometry / broad-phase 데이터를 ImGui canvas에 그리는 debug 전용 renderer.
-class DebugDraw
+class debugDraw
 {
 public:
-    DebugDraw(
+    debugDraw(
         ImDrawList* drawList,
-        const DebugCamera& camera,
+        const debugCamera& camera,
         const ImVec2& viewportMin,
         const ImVec2& viewportSize );
 
     void DrawGrid( float spacing = 1.0f ) const;
 
-    // Body local-space Shape geometry를 transform으로 world space에 옮겨 그림.
+    // Body local-space shape geometry를 transform으로 world space에 옮겨 그림.
     void DrawShape(
-        const ShapeGeometry& geometry,
+        const shapeGeometry& geometry,
         const transform2& transform,
         ImU32 outlineColor,
         ImU32 fillColor ) const;
@@ -39,9 +39,9 @@ public:
         ImU32 color,
         float thickness = 1.0f ) const;
 
-    // DynamicTree의 live node AABB와 debug metadata를 world 위에 표시함.
+    // dynamicTree의 live node AABB와 debug metadata를 world 위에 표시함.
     void DrawTree(
-        const DynamicTree& tree,
+        const dynamicTree& tree,
         const char* treeName,
         bool showLeaves,
         bool showInternal,
@@ -89,7 +89,7 @@ private:
     ImVec2 ToScreen( const vec2& world ) const;
 
     ImDrawList* drawList_ = nullptr;
-    const DebugCamera& camera_;
+    const debugCamera& camera_;
     ImVec2 viewportMin_{};
     ImVec2 viewportSize_{};
 };

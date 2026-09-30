@@ -8,7 +8,7 @@ namespace zonai::sandbox
 {
 
 // Physics world 좌표와 ImGui canvas의 screen 좌표를 서로 변환함.
-struct DebugCamera
+struct debugCamera
 {
     vec2 center{};
     float pixelsPerMeter = 60.0f;

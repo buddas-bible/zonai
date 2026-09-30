@@ -10,17 +10,17 @@ using namespace zonai;
 namespace
 {
 
-constexpr std::int32_t Index( BodyId id )
+constexpr std::int32_t Index( bodyId id )
 {
     return id.index1 - 1;
 }
 
-constexpr std::int32_t Index( ShapeId id )
+constexpr std::int32_t Index( shapeId id )
 {
     return id.index1 - 1;
 }
 
-constexpr ShapePairKey PairKey( ShapeId a, ShapeId b )
+constexpr shapePairKey PairKey( shapeId a, shapeId b )
 {
     return MakeShapePairKey( Index( a ), Index( b ) );
 }
@@ -32,23 +32,23 @@ int main()
     constexpr float epsilon = 1e-5f;
 
     {
-        World world{};
+        world world{};
 
-        const BodyId staticBody =
+        const bodyId staticBody =
             world.CreateBody();
 
-        const BodyId dynamicBody =
+        const bodyId dynamicBody =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 3.0f, -2.0f },
                     rot2::FromRadians( 0.5f )
                 }
             );
 
-        const BodyId kinematicBody =
+        const bodyId kinematicBody =
             world.CreateBody(
-                BodyType::Kinematic,
+                bodyType::Kinematic,
                 {
                     { -4.0f, 1.5f },
                     rot2::FromRadians( -0.25f )
@@ -66,14 +66,14 @@ int main()
         assert( world.IsValid( staticBody ) );
         assert( world.IsValid( dynamicBody ) );
         assert( world.IsValid( kinematicBody ) );
-        assert( !world.IsValid( BodyId{} ) );
-        assert( !world.IsValid( ShapeId{} ) );
-        assert( !world.IsValid( ContactId{} ) );
+        assert( !world.IsValid( bodyId{} ) );
+        assert( !world.IsValid( shapeId{} ) );
+        assert( !world.IsValid( contactId{} ) );
         assert( world.GetBodyCount() == 3 );
 
-        const Body& dynamic = world.GetBody( dynamicBody );
+        const body& dynamic = world.GetBody( dynamicBody );
         assert( dynamic.bodyId == Index( dynamicBody ) );
-        assert( dynamic.type == BodyType::Dynamic );
+        assert( dynamic.type == bodyType::Dynamic );
 
         const transform2 dynamicTransform =
             world.GetBodyTransform( dynamicBody );
@@ -81,8 +81,8 @@ int main()
         assert( dynamicTransform.position.x == 3.0f );
         assert( dynamicTransform.position.y == -2.0f );
 
-        const Body& kinematic = world.GetBody( kinematicBody );
-        assert( kinematic.type == BodyType::Kinematic );
+        const body& kinematic = world.GetBody( kinematicBody );
+        assert( kinematic.type == bodyType::Kinematic );
 
         const transform2 kinematicTransform =
             world.GetBodyTransform( kinematicBody );
@@ -91,18 +91,18 @@ int main()
         assert( kinematicTransform.position.y == 1.5f );
     }
 
-    // BodyState는 non-static Body의 선속도 / 각속도를 보관함.
+    // BodyState는 non-static body의 선속도 / 각속도를 보관함.
     {
-        World world{};
+        world world{};
 
-        const BodyId staticBody =
-            world.CreateBody( BodyType::Static );
+        const bodyId staticBody =
+            world.CreateBody( bodyType::Static );
 
-        const BodyId dynamicBody =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId dynamicBody =
+            world.CreateBody( bodyType::Dynamic );
 
-        const BodyId kinematicBody =
-            world.CreateBody( BodyType::Kinematic );
+        const bodyId kinematicBody =
+            world.CreateBody( bodyType::Kinematic );
 
         assert( world.GetBodyLinearVelocity( staticBody ).x == 0.0f );
         assert( world.GetBodyLinearVelocity( staticBody ).y == 0.0f );
@@ -111,7 +111,7 @@ int main()
         world.SetBodyLinearVelocity( staticBody, { 3.0f, 4.0f } );
         world.SetBodyAngularVelocity( staticBody, 5.0f );
 
-        // Static Body는 setter를 무시함.
+        // Static body는 setter를 무시함.
         assert( world.GetBodyLinearVelocity( staticBody ).x == 0.0f );
         assert( world.GetBodyLinearVelocity( staticBody ).y == 0.0f );
         assert( world.GetBodyAngularVelocity( staticBody ) == 0.0f );
@@ -136,12 +136,12 @@ int main()
         assert( kinematicVelocity.y == 6.0f );
         assert( world.GetBodyAngularVelocity( kinematicBody ) == -0.5f );
 
-        // Body slot 재사용 시 이전 Body의 운동 상태는 남지 않아야 함.
-        const BodyId oldBody = dynamicBody;
+        // body slot 재사용 시 이전 body의 운동 상태는 남지 않아야 함.
+        const bodyId oldBody = dynamicBody;
         world.DestroyBody( oldBody );
 
-        const BodyId reusedBody =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId reusedBody =
+            world.CreateBody( bodyType::Dynamic );
 
         assert( reusedBody.index1 == oldBody.index1 );
         assert( reusedBody.generation != oldBody.generation );
@@ -150,14 +150,14 @@ int main()
         assert( world.GetBodyAngularVelocity( reusedBody ) == 0.0f );
     }
 
-    // Dynamic Body의 mass data는 연결된 Shape density / geometry를 합산해 계산됨.
+    // Dynamic body의 mass data는 연결된 shape density / geometry를 합산해 계산됨.
     {
-        World world{};
+        world world{};
 
-        const BodyId dynamicBody =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId dynamicBody =
+            world.CreateBody( bodyType::Dynamic );
 
-        const ShapeId rightCircle =
+        const shapeId rightCircle =
             world.CreateShape(
                 dynamicBody,
                 circle2{ { 2.0f, 0.0f }, 1.0f },
@@ -178,7 +178,7 @@ int main()
             ) < epsilon
         );
 
-        const ShapeId leftCircle =
+        const shapeId leftCircle =
             world.CreateShape(
                 dynamicBody,
                 circle2{ { -2.0f, 0.0f }, 1.0f },
@@ -196,7 +196,7 @@ int main()
             ) < epsilon
         );
 
-        // density 0 Shape는 collision geometry로는 남지만 Body mass에는 기여하지 않음.
+        // density 0 shape는 collision geometry로는 남지만 body mass에는 기여하지 않음.
         world.SetShapeDensity( leftCircle, 0.0f );
 
         assert( world.GetShapeDensity( leftCircle ) == 0.0f );
@@ -216,9 +216,9 @@ int main()
         assert( world.GetBodyLocalCenter( dynamicBody ).x == 0.0f );
         assert( world.GetBodyLocalCenter( dynamicBody ).y == 0.0f );
 
-        // Static / Kinematic은 Shape density와 무관하게 solver mass가 0임.
-        const BodyId staticBody =
-            world.CreateBody( BodyType::Static );
+        // Static / Kinematic은 shape density와 무관하게 solver mass가 0임.
+        const bodyId staticBody =
+            world.CreateBody( bodyType::Static );
 
         (void)world.CreateShape(
             staticBody,
@@ -233,11 +233,11 @@ int main()
 
     // Linear impulse는 timeStep 없이 즉시 COM velocity를 변경함.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId bodyId =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId bodyId =
+            world.CreateBody( bodyType::Dynamic );
 
         (void)world.CreateShape(
             bodyId,
@@ -286,11 +286,11 @@ int main()
 
     // COM에서 벗어난 point의 linear impulse는 선속도와 각속도를 동시에 변경함.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId bodyId =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId bodyId =
+            world.CreateBody( bodyType::Dynamic );
 
         (void)world.CreateShape(
             bodyId,
@@ -340,11 +340,11 @@ int main()
 
     // Angular impulse는 선속도에 영향을 주지 않고 각속도만 즉시 변경함.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId bodyId =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId bodyId =
+            world.CreateBody( bodyType::Dynamic );
 
         (void)world.CreateShape(
             bodyId,
@@ -372,16 +372,16 @@ int main()
         assert( world.GetBodyLinearVelocity( bodyId ).y == 0.0f );
     }
 
-    // Static / Kinematic Body는 impulse에 의해 velocity가 바뀌지 않음.
+    // Static / Kinematic body는 impulse에 의해 velocity가 바뀌지 않음.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId staticBody =
-            world.CreateBody( BodyType::Static );
+        const bodyId staticBody =
+            world.CreateBody( bodyType::Static );
 
-        const BodyId kinematicBody =
-            world.CreateBody( BodyType::Kinematic );
+        const bodyId kinematicBody =
+            world.CreateBody( bodyType::Kinematic );
 
         world.SetBodyLinearVelocity(
             kinematicBody,
@@ -422,12 +422,12 @@ int main()
 
     // Contact Solver는 접근 속도를 막는 동시에 기존 penetration도 조금씩 회복함.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId staticBody =
+        const bodyId staticBody =
             world.CreateBody(
-                BodyType::Static,
+                bodyType::Static,
                 {
                     { 0.0f, 0.0f },
                     {}
@@ -439,9 +439,9 @@ int main()
             circle2{ {}, 1.0f }
         );
 
-        const BodyId dynamicBody =
+        const bodyId dynamicBody =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 1.5f, 0.0f },
                     {}
@@ -482,12 +482,12 @@ int main()
 
     // 접근 속도가 전혀 없어도 이미 겹친 Contact는 position만 점진적으로 회복함.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId staticBody =
+        const bodyId staticBody =
             world.CreateBody(
-                BodyType::Static,
+                bodyType::Static,
                 {
                     { 0.0f, 0.0f },
                     {}
@@ -499,9 +499,9 @@ int main()
             circle2{ {}, 1.0f }
         );
 
-        const BodyId dynamicBody =
+        const bodyId dynamicBody =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 1.5f, 0.0f },
                     {}
@@ -535,14 +535,14 @@ int main()
         );
     }
 
-    // Contact가 있어도 서로 분리 중인 Body에는 음수 normal impulse를 가하지 않음.
+    // Contact가 있어도 서로 분리 중인 body에는 음수 normal impulse를 가하지 않음.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId staticBody =
+        const bodyId staticBody =
             world.CreateBody(
-                BodyType::Static,
+                bodyType::Static,
                 {
                     { 0.0f, 0.0f },
                     {}
@@ -554,9 +554,9 @@ int main()
             circle2{ {}, 1.0f }
         );
 
-        const BodyId dynamicBody =
+        const bodyId dynamicBody =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 1.5f, 0.0f },
                     {}
@@ -594,23 +594,23 @@ int main()
         );
     }
 
-    // 같은 질량의 Dynamic Body 둘이 정면으로 접근하면 normal impulse가 상대속도를 제거함.
+    // 같은 질량의 Dynamic body 둘이 정면으로 접근하면 normal impulse가 상대속도를 제거함.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId bodyA =
+        const bodyId bodyA =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { -0.75f, 0.0f },
                     {}
                 }
             );
 
-        const BodyId bodyB =
+        const bodyId bodyB =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 0.75f, 0.0f },
                     {}
@@ -658,12 +658,12 @@ int main()
 
     // Contact friction은 normal impulse의 Coulomb 한계 안에서 tangential velocity를 줄임.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId staticBody =
+        const bodyId staticBody =
             world.CreateBody(
-                BodyType::Static,
+                bodyType::Static,
                 {
                     { 0.0f, 0.0f },
                     {}
@@ -675,9 +675,9 @@ int main()
             circle2{ {}, 1.0f }
         );
 
-        const BodyId dynamicBody =
+        const bodyId dynamicBody =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 0.0f, 1.5f },
                     {}
@@ -708,24 +708,24 @@ int main()
         assert( velocity.x < 4.0f );
     }
 
-    // 기본 gravity는 Dynamic Body의 COM velocity에만 적용됨.
+    // 기본 gravity는 Dynamic body의 COM velocity에만 적용됨.
     {
-        World world{};
+        world world{};
 
         const vec2 defaultGravity = world.GetGravity();
         assert( defaultGravity.x == 0.0f );
         assert( defaultGravity.y == -10.0f );
 
-        const BodyId dynamicBody =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId dynamicBody =
+            world.CreateBody( bodyType::Dynamic );
 
         (void)world.CreateShape(
             dynamicBody,
             circle2{ {}, 1.0f }
         );
 
-        const BodyId kinematicBody =
-            world.CreateBody( BodyType::Kinematic );
+        const bodyId kinematicBody =
+            world.CreateBody( bodyType::Kinematic );
 
         world.SetBodyLinearVelocity(
             kinematicBody,
@@ -764,11 +764,11 @@ int main()
 
     // Force는 F=Ma에 따라 질량으로 나뉘어 velocity를 바꾸고 한 Step 뒤 초기화됨.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId bodyId =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId bodyId =
+            world.CreateBody( bodyType::Dynamic );
 
         (void)world.CreateShape(
             bodyId,
@@ -823,11 +823,11 @@ int main()
 
     // center에서 벗어난 point에 Force를 가하면 r x F만큼 torque도 누적됨.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId bodyId =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId bodyId =
+            world.CreateBody( bodyType::Dynamic );
 
         (void)world.CreateShape(
             bodyId,
@@ -860,13 +860,13 @@ int main()
         assert( world.GetBodyLinearVelocity( bodyId ).y > 0.0f );
     }
 
-    // 순수 torque는 COM 위치를 움직이지 않고 Body origin만 COM 주위로 회전시킴.
+    // 순수 torque는 COM 위치를 움직이지 않고 body origin만 COM 주위로 회전시킴.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId bodyId =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId bodyId =
+            world.CreateBody( bodyType::Dynamic );
 
         (void)world.CreateShape(
             bodyId,
@@ -912,7 +912,7 @@ int main()
             ) < epsilon
         );
 
-        // COM이 local origin에서 떨어져 있으므로 회전 후 Body origin은 이동함.
+        // COM이 local origin에서 떨어져 있으므로 회전 후 body origin은 이동함.
         assert(
             std::fabs(
                 after.position.x -
@@ -927,11 +927,11 @@ int main()
 
     // ClearForces는 아직 소비하지 않은 force / torque를 제거함.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId bodyId =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId bodyId =
+            world.CreateBody( bodyType::Dynamic );
 
         (void)world.CreateShape(
             bodyId,
@@ -956,30 +956,30 @@ int main()
 
     // Step은 COM velocity로 Dynamic / Kinematic transform을 적분하고 proxy를 동기화함.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId staticBody =
+        const bodyId staticBody =
             world.CreateBody(
-                BodyType::Static,
+                bodyType::Static,
                 {
                     { 5.0f, 2.0f },
                     {}
                 }
             );
 
-        const BodyId dynamicBody =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId dynamicBody =
+            world.CreateBody( bodyType::Dynamic );
 
-        const ShapeId dynamicShape =
+        const shapeId dynamicShape =
             world.CreateShape(
                 dynamicBody,
                 circle2{ { 1.0f, 0.0f }, 0.25f }
             );
 
-        const BodyId kinematicBody =
+        const bodyId kinematicBody =
             world.CreateBody(
-                BodyType::Kinematic,
+                bodyType::Kinematic,
                 {
                     { -2.0f, 3.0f },
                     {}
@@ -1012,7 +1012,7 @@ int main()
 
         // circle 하나만 있으므로 localCenter=(1,0)이고,
         // COM은 (1,0) -> (2,-0.5)로 이동한 뒤 45도 회전함.
-        // Body origin은 center - R * localCenter로 다시 계산됨.
+        // body origin은 center - R * localCenter로 다시 계산됨.
         assert(
             std::fabs(
                 dynamicTransform.position.x -
@@ -1035,11 +1035,11 @@ int main()
         assert( std::fabs( kinematicTransform.position.x + 2.0f ) < epsilon );
         assert( std::fabs( kinematicTransform.position.y - 5.0f ) < epsilon );
 
-        // local (1, 0)인 circle 중심도 Body 회전에 따라 움직였는지 proxy AABB로 확인함.
-        const Shape& movedShape = world.GetShape( dynamicShape );
+        // local (1, 0)인 circle 중심도 body 회전에 따라 움직였는지 proxy AABB로 확인함.
+        const shape& movedShape = world.GetShape( dynamicShape );
         const aabb2& movedAABB =
             world.GetBroadPhase()
-                .GetTree( BodyType::Dynamic )
+                .GetTree( bodyType::Dynamic )
                 .GetProxyAABB( GetProxyId( movedShape.proxyKey ) );
 
         const float expectedCenterX = 2.0f;
@@ -1059,37 +1059,37 @@ int main()
         );
     }
 
-    // Step 뒤에는 BroadPhase pair와 Contact도 새 transform 기준으로 갱신됨.
+    // Step 뒤에는 broadPhase pair와 Contact도 새 transform 기준으로 갱신됨.
     {
-        World world{};
+        world world{};
         world.SetGravity( {} );
 
-        const BodyId staticBody =
+        const bodyId staticBody =
             world.CreateBody(
-                BodyType::Static,
+                bodyType::Static,
                 {
                     { 2.5f, 0.0f },
                     {}
                 }
             );
 
-        const ShapeId staticShape =
+        const shapeId staticShape =
             world.CreateShape(
                 staticBody,
                 circle2{ {}, 1.0f }
             );
 
-        const BodyId dynamicBody =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId dynamicBody =
+            world.CreateBody( bodyType::Dynamic );
 
-        const ShapeId dynamicShape =
+        const shapeId dynamicShape =
             world.CreateShape(
                 dynamicBody,
                 circle2{ {}, 1.0f }
             );
 
         world.UpdateCollisions(
-            []( const ContactData& )
+            []( const contactData& )
             {
             }
         );
@@ -1110,7 +1110,7 @@ int main()
             )
         );
 
-        std::array<ContactData, 1> contacts{};
+        std::array<contactData, 1> contacts{};
 
         assert(
             world.GetBodyContactData(
@@ -1121,20 +1121,20 @@ int main()
         assert( contacts[0].manifold.pointCount > 0 );
     }
 
-    // Shape geometry는 Body local space에 저장되고 proxy AABB는 world space로 계산됨.
+    // shape geometry는 body local space에 저장되고 proxy AABB는 world space로 계산됨.
     {
-        World world{};
+        world world{};
 
-        const BodyId bodyId =
+        const bodyId bodyId =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 10.0f, 5.0f },
                     { 0.0f, 1.0f }
                 }
             );
 
-        const ShapeId circleId =
+        const shapeId circleId =
             world.CreateShape(
                 bodyId,
                 circle2{ { 2.0f, 0.0f }, 1.0f }
@@ -1143,19 +1143,19 @@ int main()
         assert( world.IsValid( circleId ) );
         assert( world.GetShapeCount() == 1 );
 
-        const Shape& circle = world.GetShape( circleId );
-        const Body& body = world.GetBody( bodyId );
+        const shape& circle = world.GetShape( circleId );
+        const body& body = world.GetBody( bodyId );
 
         assert( circle.bodyId == Index( bodyId ) );
         assert( circle.generation == circleId.generation );
-        assert( circle.proxyKey != Shape::NULL_INDEX );
-        assert( GetProxyType( circle.proxyKey ) == BodyType::Dynamic );
+        assert( circle.proxyKey != shape::NULL_INDEX );
+        assert( GetProxyType( circle.proxyKey ) == bodyType::Dynamic );
         assert( body.headShapeId == Index( circleId ) );
         assert( body.shapeCount == 1 );
 
         const aabb2& circleAABB =
             world.GetBroadPhase()
-                .GetTree( BodyType::Dynamic )
+                .GetTree( bodyType::Dynamic )
                 .GetProxyAABB( GetProxyId( circle.proxyKey ) );
 
         assert( std::fabs( circleAABB.min.x - 9.0f ) < epsilon );
@@ -1163,7 +1163,7 @@ int main()
         assert( std::fabs( circleAABB.max.x - 11.0f ) < epsilon );
         assert( std::fabs( circleAABB.max.y - 8.0f ) < epsilon );
 
-        const ShapeId segmentId =
+        const shapeId segmentId =
             world.CreateShape(
                 bodyId,
                 segment2{ { 0.0f, 0.0f }, { 1.0f, 0.0f } }
@@ -1182,10 +1182,10 @@ int main()
             }
         );
 
-        const Shape& movedCircle = world.GetShape( circleId );
+        const shape& movedCircle = world.GetShape( circleId );
         const aabb2& movedCircleAABB =
             world.GetBroadPhase()
-                .GetTree( BodyType::Dynamic )
+                .GetTree( bodyType::Dynamic )
                 .GetProxyAABB( GetProxyId( movedCircle.proxyKey ) );
 
         assert( std::fabs( movedCircleAABB.min.x - 21.0f ) < epsilon );
@@ -1194,49 +1194,49 @@ int main()
         assert( std::fabs( movedCircleAABB.max.y + 2.0f ) < epsilon );
 
         assert( world.GetBroadPhase()
-                    .GetTree( BodyType::Dynamic )
+                    .GetTree( bodyType::Dynamic )
                     .Validate() );
     }
 
-    // World collision pipeline과 persistent Contact.
+    // world collision pipeline과 persistent Contact.
     {
-        World world{};
+        world world{};
 
-        const BodyId groundBody =
-            world.CreateBody( BodyType::Static );
+        const bodyId groundBody =
+            world.CreateBody( bodyType::Static );
 
-        const ShapeId groundShape =
+        const shapeId groundShape =
             world.CreateShape(
                 groundBody,
                 MakeBox( { 1.0f, 1.0f } )
             );
 
-        const BodyId circleBody =
+        const bodyId circleBody =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 0.0f, 1.5f },
                     {}
                 }
             );
 
-        const ShapeId circleShape =
+        const shapeId circleShape =
             world.CreateShape(
                 circleBody,
                 circle2{ {}, 0.5f }
             );
 
         int touchingCount = 0;
-        ContactId contactId{};
+        contactId contactId{};
 
         world.UpdateCollisions(
-            [&]( const ContactData& data )
+            [&]( const contactData& data )
             {
                 ++touchingCount;
-                contactId = data.contactId;
+                contactId = data.id;
 
-                assert( data.shapeIdA == groundShape );
-                assert( data.shapeIdB == circleShape );
+                assert( data.shapeA == groundShape );
+                assert( data.shapeB == circleShape );
                 assert( data.manifold.pointCount == 1 );
                 assert( std::fabs( data.manifold.normal.x ) < epsilon );
                 assert( std::fabs( data.manifold.normal.y - 1.0f ) < epsilon );
@@ -1249,33 +1249,33 @@ int main()
         assert( contactId.index1 == 1 );
         assert( contactId.generation == 1 );
 
-        const ContactData contactData =
+        const contactData contactData =
             world.GetContactData( contactId );
 
-        assert( contactData.contactId == contactId );
-        assert( contactData.shapeIdA == groundShape );
-        assert( contactData.shapeIdB == circleShape );
+        assert( contactData.id == contactId );
+        assert( contactData.shapeA == groundShape );
+        assert( contactData.shapeB == circleShape );
         assert( contactData.manifold.pointCount == 1 );
 
         assert( world.GetBroadPhase().HasPair(
             PairKey( groundShape, circleShape )
         ) );
 
-        // 새 BroadPhase 후보가 없어도 persistent Contact는 갱신됨.
+        // 새 broadPhase 후보가 없어도 persistent Contact는 갱신됨.
         touchingCount = 0;
 
         world.UpdateCollisions(
-            [&]( const ContactData& data )
+            [&]( const contactData& data )
             {
                 ++touchingCount;
-                assert( data.contactId == contactId );
+                assert( data.id == contactId );
                 assert( data.manifold.pointCount == 1 );
             }
         );
 
         assert( touchingCount == 1 );
 
-        // AABB가 분리되면 Contact / pairSet / Body contact list가 함께 정리됨.
+        // AABB가 분리되면 Contact / pairSet / body contact list가 함께 정리됨.
         world.SetBodyTransform(
             circleBody,
             {
@@ -1285,7 +1285,7 @@ int main()
         );
 
         world.UpdateCollisions(
-            []( const ContactData& )
+            []( const contactData& )
             {
             }
         );
@@ -1307,12 +1307,12 @@ int main()
             }
         );
 
-        ContactId reusedContactId{};
+        contactId reusedContactId{};
 
         world.UpdateCollisions(
-            [&]( const ContactData& data )
+            [&]( const contactData& data )
             {
-                reusedContactId = data.contactId;
+                reusedContactId = data.id;
             }
         );
 
@@ -1320,55 +1320,55 @@ int main()
         assert( reusedContactId.index1 == contactId.index1 );
         assert( reusedContactId.generation != contactId.generation );
         assert( !world.IsValid( contactId ) );
-        const ContactData reusedData =
+        const contactData reusedData =
             world.GetContactData( reusedContactId );
 
-        assert( reusedData.contactId == reusedContactId );
-        assert( reusedData.shapeIdA == groundShape );
-        assert( reusedData.shapeIdB == circleShape );
+        assert( reusedData.id == reusedContactId );
+        assert( reusedData.shapeA == groundShape );
+        assert( reusedData.shapeB == circleShape );
     }
 
-    // ContactData manifold는 Shape A local이 아니라 world space로 공개됨.
+    // contactData manifold는 shape A local이 아니라 world space로 공개됨.
     {
-        World world{};
+        world world{};
 
         constexpr float halfPi = 1.57079632679f;
 
-        const BodyId boxBody =
+        const bodyId boxBody =
             world.CreateBody(
-                BodyType::Static,
+                bodyType::Static,
                 {
                     { 10.0f, 5.0f },
                     rot2::FromRadians( halfPi )
                 }
             );
 
-        const ShapeId boxShape =
+        const shapeId boxShape =
             world.CreateShape(
                 boxBody,
                 MakeBox( { 1.0f, 1.0f } )
             );
 
-        const BodyId circleBody =
+        const bodyId circleBody =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 10.0f, 6.5f },
                     {}
                 }
             );
 
-        const ShapeId circleShape =
+        const shapeId circleShape =
             world.CreateShape(
                 circleBody,
                 circle2{ {}, 0.5f }
             );
 
-        ContactData data{};
+        contactData data{};
         int contactCount = 0;
 
         world.UpdateCollisions(
-            [&]( const ContactData& contactData )
+            [&]( const contactData& contactData )
             {
                 data = contactData;
                 ++contactCount;
@@ -1376,8 +1376,8 @@ int main()
         );
 
         assert( contactCount == 1 );
-        assert( data.shapeIdA == boxShape );
-        assert( data.shapeIdB == circleShape );
+        assert( data.shapeA == boxShape );
+        assert( data.shapeB == circleShape );
         assert( data.manifold.pointCount == 1 );
 
         // A local +X normal / (1, 0) contact point가
@@ -1387,12 +1387,12 @@ int main()
         assert( std::fabs( data.manifold.points[0].point.x - 10.0f ) < epsilon );
         assert( std::fabs( data.manifold.points[0].point.y - 6.0f ) < epsilon );
 
-        const ContactData snapshot =
-            world.GetContactData( data.contactId );
+        const contactData snapshot =
+            world.GetContactData( data.id );
 
-        assert( snapshot.contactId == data.contactId );
-        assert( snapshot.shapeIdA == data.shapeIdA );
-        assert( snapshot.shapeIdB == data.shapeIdB );
+        assert( snapshot.id == data.id );
+        assert( snapshot.shapeA == data.shapeA );
+        assert( snapshot.shapeB == data.shapeB );
         assert( std::fabs(
             snapshot.manifold.points[0].point.y -
             data.manifold.points[0].point.y
@@ -1401,27 +1401,27 @@ int main()
 
     // AABB는 겹치지만 실제 geometry가 떨어져 있어도 Contact 자체는 유지됨.
     {
-        World world{};
+        world world{};
 
-        const BodyId staticBody =
-            world.CreateBody( BodyType::Static );
+        const bodyId staticBody =
+            world.CreateBody( bodyType::Static );
 
-        const ShapeId staticCircle =
+        const shapeId staticCircle =
             world.CreateShape(
                 staticBody,
                 circle2{ {}, 1.0f }
             );
 
-        const BodyId dynamicBody =
+        const bodyId dynamicBody =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 1.5f, 1.5f },
                     {}
                 }
             );
 
-        const ShapeId dynamicCircle =
+        const shapeId dynamicCircle =
             world.CreateShape(
                 dynamicBody,
                 circle2{ {}, 1.0f }
@@ -1430,7 +1430,7 @@ int main()
         int touchingCount = 0;
 
         world.UpdateCollisions(
-            [&]( const ContactData& )
+            [&]( const contactData& )
             {
                 ++touchingCount;
             }
@@ -1443,36 +1443,36 @@ int main()
         ) );
     }
 
-    // Shape slot이 재사용되어도 오래된 ShapeId는 generation mismatch로 무효가 됨.
+    // shape slot이 재사용되어도 오래된 shapeId는 generation mismatch로 무효가 됨.
     {
-        World world{};
+        world world{};
 
-        const BodyId staticBody =
-            world.CreateBody( BodyType::Static );
+        const bodyId staticBody =
+            world.CreateBody( bodyType::Static );
 
-        const ShapeId groundShape =
+        const shapeId groundShape =
             world.CreateShape(
                 staticBody,
                 MakeBox( { 1.0f, 1.0f } )
             );
 
-        const BodyId dynamicBody =
+        const bodyId dynamicBody =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 0.0f, 1.5f },
                     {}
                 }
             );
 
-        const ShapeId oldShape =
+        const shapeId oldShape =
             world.CreateShape(
                 dynamicBody,
                 circle2{ {}, 0.5f }
             );
 
         world.UpdateCollisions(
-            []( const ContactData& )
+            []( const contactData& )
             {
             }
         );
@@ -1485,7 +1485,7 @@ int main()
         assert( world.GetShapeCount() == 1 );
         assert( world.GetContactCount() == 0 );
 
-        const ShapeId newShape =
+        const shapeId newShape =
             world.CreateShape(
                 dynamicBody,
                 circle2{ {}, 0.5f }
@@ -1498,7 +1498,7 @@ int main()
         assert( !world.IsValid( oldShape ) );
 
         world.UpdateCollisions(
-            []( const ContactData& )
+            []( const contactData& )
             {
             }
         );
@@ -1509,36 +1509,36 @@ int main()
         ) );
     }
 
-    // Body slot도 같은 index를 재사용하지만 generation으로 예전 handle을 차단함.
+    // body slot도 같은 index를 재사용하지만 generation으로 예전 handle을 차단함.
     {
-        World world{};
+        world world{};
 
-        const BodyId groundBody =
-            world.CreateBody( BodyType::Static );
+        const bodyId groundBody =
+            world.CreateBody( bodyType::Static );
 
-        const ShapeId groundShape =
+        const shapeId groundShape =
             world.CreateShape(
                 groundBody,
                 MakeBox( { 1.0f, 1.0f } )
             );
 
-        const BodyId oldBody =
+        const bodyId oldBody =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 0.0f, 1.5f },
                     {}
                 }
             );
 
-        const ShapeId oldShape =
+        const shapeId oldShape =
             world.CreateShape(
                 oldBody,
                 circle2{ {}, 0.5f }
             );
 
         world.UpdateCollisions(
-            []( const ContactData& )
+            []( const contactData& )
             {
             }
         );
@@ -1553,9 +1553,9 @@ int main()
         assert( world.GetShapeCount() == 1 );
         assert( world.GetContactCount() == 0 );
 
-        const BodyId newBody =
+        const bodyId newBody =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 0.0f, 1.5f },
                     {}
@@ -1567,7 +1567,7 @@ int main()
         assert( world.IsValid( newBody ) );
         assert( !world.IsValid( oldBody ) );
 
-        const ShapeId newShape =
+        const shapeId newShape =
             world.CreateShape(
                 newBody,
                 circle2{ {}, 0.5f }
@@ -1579,7 +1579,7 @@ int main()
         assert( !world.IsValid( oldShape ) );
 
         world.UpdateCollisions(
-            []( const ContactData& )
+            []( const contactData& )
             {
             }
         );
@@ -1592,50 +1592,50 @@ int main()
         assert( world.GetBody( newBody ).contactCount == 1 );
     }
 
-    // Body / Shape Contact query는 capacity와 실제 touching 수를 구분함.
+    // body / shape Contact query는 capacity와 실제 touching 수를 구분함.
     {
-        World world{};
+        world world{};
 
-        const BodyId dynamicBody =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId dynamicBody =
+            world.CreateBody( bodyType::Dynamic );
 
-        const ShapeId touchingShape =
+        const shapeId touchingShape =
             world.CreateShape(
                 dynamicBody,
                 circle2{ {}, 1.0f }
             );
 
-        const ShapeId nonTouchingShape =
+        const shapeId nonTouchingShape =
             world.CreateShape(
                 dynamicBody,
                 circle2{ { 10.0f, 0.0f }, 1.0f }
             );
 
-        const BodyId touchingStaticBody =
+        const bodyId touchingStaticBody =
             world.CreateBody(
-                BodyType::Static,
+                bodyType::Static,
                 {
                     { 1.5f, 0.0f },
                     {}
                 }
             );
 
-        const ShapeId touchingStaticShape =
+        const shapeId touchingStaticShape =
             world.CreateShape(
                 touchingStaticBody,
                 circle2{ {}, 1.0f }
             );
 
-        const BodyId overlapStaticBody =
+        const bodyId overlapStaticBody =
             world.CreateBody(
-                BodyType::Static,
+                bodyType::Static,
                 {
                     { 11.5f, 1.5f },
                     {}
                 }
             );
 
-        const ShapeId overlapStaticShape =
+        const shapeId overlapStaticShape =
             world.CreateShape(
                 overlapStaticBody,
                 circle2{ {}, 1.0f }
@@ -1644,7 +1644,7 @@ int main()
         int touchingCallbackCount = 0;
 
         world.UpdateCollisions(
-            [&]( const ContactData& )
+            [&]( const contactData& )
             {
                 ++touchingCallbackCount;
             }
@@ -1660,7 +1660,7 @@ int main()
 
         assert( bodyCapacity == 2 );
 
-        std::array<ContactData, 2> bodyContacts{};
+        std::array<contactData, 2> bodyContacts{};
 
         const std::size_t bodyContactCount =
             world.GetBodyContactData(
@@ -1672,18 +1672,18 @@ int main()
         assert( bodyContacts[0].manifold.pointCount > 0 );
 
         const bool bodyHasTouchingPair =
-            ( bodyContacts[0].shapeIdA == touchingShape &&
-              bodyContacts[0].shapeIdB == touchingStaticShape ) ||
-            ( bodyContacts[0].shapeIdA == touchingStaticShape &&
-              bodyContacts[0].shapeIdB == touchingShape );
+            ( bodyContacts[0].shapeA == touchingShape &&
+              bodyContacts[0].shapeB == touchingStaticShape ) ||
+            ( bodyContacts[0].shapeA == touchingStaticShape &&
+              bodyContacts[0].shapeB == touchingShape );
 
         assert( bodyHasTouchingPair );
 
-        // Shape capacity도 Body contactCount를 그대로 사용하므로 보수적으로 2임.
+        // shape capacity도 body contactCount를 그대로 사용하므로 보수적으로 2임.
         assert( world.GetShapeContactCapacity( touchingShape ) == 2 );
         assert( world.GetShapeContactCapacity( nonTouchingShape ) == 2 );
 
-        std::array<ContactData, 2> touchingContacts{};
+        std::array<contactData, 2> touchingContacts{};
         const std::size_t touchingCount =
             world.GetShapeContactData(
                 touchingShape,
@@ -1692,11 +1692,11 @@ int main()
 
         assert( touchingCount == 1 );
         assert(
-            touchingContacts[0].shapeIdA == touchingShape ||
-            touchingContacts[0].shapeIdB == touchingShape
+            touchingContacts[0].shapeA == touchingShape ||
+            touchingContacts[0].shapeB == touchingShape
         );
 
-        std::array<ContactData, 2> nonTouchingContacts{};
+        std::array<contactData, 2> nonTouchingContacts{};
         const std::size_t nonTouchingCount =
             world.GetShapeContactData(
                 nonTouchingShape,
@@ -1706,11 +1706,11 @@ int main()
         // AABB Contact는 존재하지만 manifold가 비어 있으므로 public query에서는 제외됨.
         assert( nonTouchingCount == 0 );
 
-        // 정적 Body/Shape 쪽에서도 같은 touching Contact를 조회할 수 있음.
+        // 정적 body/shape 쪽에서도 같은 touching Contact를 조회할 수 있음.
         assert( world.GetBodyContactCapacity( touchingStaticBody ) == 1 );
         assert( world.GetShapeContactCapacity( touchingStaticShape ) == 1 );
 
-        std::array<ContactData, 1> staticContacts{};
+        std::array<contactData, 1> staticContacts{};
         const std::size_t staticCount =
             world.GetBodyContactData(
                 touchingStaticBody,
@@ -1718,13 +1718,13 @@ int main()
             );
 
         assert( staticCount == 1 );
-        assert( staticContacts[0].contactId == bodyContacts[0].contactId );
+        assert( staticContacts[0].id == bodyContacts[0].id );
 
-        // 두 번째 정적 Shape는 AABB overlap만 있으므로 capacity 1, 실제 반환 0.
+        // 두 번째 정적 shape는 AABB overlap만 있으므로 capacity 1, 실제 반환 0.
         assert( world.GetBodyContactCapacity( overlapStaticBody ) == 1 );
         assert( world.GetShapeContactCapacity( overlapStaticShape ) == 1 );
 
-        std::array<ContactData, 1> overlapContacts{};
+        std::array<contactData, 1> overlapContacts{};
         assert(
             world.GetShapeContactData(
                 overlapStaticShape,
@@ -1736,25 +1736,25 @@ int main()
         assert(
             world.GetBodyContactData(
                 dynamicBody,
-                std::span<ContactData>{}
+                std::span<contactData>{}
             ) == 0
         );
     }
 
-    // Box2D처럼 segment-segment 조합은 BroadPhase 후보여도 Contact를 만들지 않음.
+    // Box2D처럼 segment-segment 조합은 broadPhase 후보여도 Contact를 만들지 않음.
     {
-        World world{};
+        world world{};
 
-        const BodyId staticBody =
-            world.CreateBody( BodyType::Static );
+        const bodyId staticBody =
+            world.CreateBody( bodyType::Static );
 
         (void)world.CreateShape(
             staticBody,
             segment2{ { -1.0f, 0.0f }, { 1.0f, 0.0f } }
         );
 
-        const BodyId dynamicBody =
-            world.CreateBody( BodyType::Dynamic );
+        const bodyId dynamicBody =
+            world.CreateBody( bodyType::Dynamic );
 
         (void)world.CreateShape(
             dynamicBody,
@@ -1764,7 +1764,7 @@ int main()
         int contactCount = 0;
 
         world.UpdateCollisions(
-            [&]( const ContactData& )
+            [&]( const contactData& )
             {
                 ++contactCount;
             }

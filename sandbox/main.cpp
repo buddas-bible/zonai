@@ -36,7 +36,7 @@ namespace
 using namespace zonai;
 using namespace zonai::sandbox;
 
-struct D3D11Context
+struct d3d11Context
 {
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> deviceContext;
@@ -44,14 +44,14 @@ struct D3D11Context
     ComPtr<ID3D11RenderTargetView> renderTargetView;
 };
 
-D3D11Context g_d3d;
+d3d11Context gD3d;
 
 bool CreateRenderTarget()
 {
     ComPtr<ID3D11Texture2D> backBuffer;
 
     HRESULT result =
-        g_d3d.swapChain->GetBuffer(
+        gD3d.swapChain->GetBuffer(
             0,
             IID_PPV_ARGS( &backBuffer )
         );
@@ -62,10 +62,10 @@ bool CreateRenderTarget()
     }
 
     result =
-        g_d3d.device->CreateRenderTargetView(
+        gD3d.device->CreateRenderTargetView(
             backBuffer.Get(),
             nullptr,
-            &g_d3d.renderTargetView
+            &gD3d.renderTargetView
         );
 
     return SUCCEEDED( result );
@@ -73,7 +73,7 @@ bool CreateRenderTarget()
 
 void DestroyRenderTarget()
 {
-    g_d3d.renderTargetView.Reset();
+    gD3d.renderTargetView.Reset();
 }
 
 LRESULT CALLBACK WndProc(
@@ -98,7 +98,7 @@ LRESULT CALLBACK WndProc(
         return 0;
 
     case WM_SIZE:
-        if( g_d3d.swapChain &&
+        if( gD3d.swapChain &&
             wParam != SIZE_MINIMIZED )
         {
             DestroyRenderTarget();
@@ -106,7 +106,7 @@ LRESULT CALLBACK WndProc(
             const UINT width = LOWORD( lParam );
             const UINT height = HIWORD( lParam );
 
-            g_d3d.swapChain->ResizeBuffers(
+            gD3d.swapChain->ResizeBuffers(
                 0,
                 width,
                 height,
@@ -128,38 +128,38 @@ LRESULT CALLBACK WndProc(
     );
 }
 
-struct VisualShape
+struct visualShape
 {
-    BodyId bodyId{};
-    ShapeId shapeId{};
+    bodyId bodyHandle{};
+    shapeId shapeHandle{};
     const char* label = "";
 };
 
-struct VisualScene
+struct visualScene
 {
-    World world{};
-    std::vector<VisualShape> shapes;
+    world world{};
+    std::vector<visualShape> shapes;
 
-    BodyId impulseBody{};
-    BodyId torqueBody{};
-    BodyId kinematicBody{};
+    bodyId impulseBody{};
+    bodyId torqueBody{};
+    bodyId kinematicBody{};
 
-    VisualScene()
+    visualScene()
     {
         world.SetGravity( { 0.0f, -10.0f } );
         shapes.reserve( 8 );
 
         // 넓은 정적 바닥.
-        const BodyId ground =
+        const bodyId ground =
             world.CreateBody(
-                BodyType::Static,
+                bodyType::Static,
                 {
                     { 0.0f, -4.0f },
                     {}
                 }
             );
 
-        const ShapeId groundShape =
+        const shapeId groundShape =
             world.CreateShape(
                 ground,
                 MakeBox( { 8.0f, 0.5f } )
@@ -170,16 +170,16 @@ struct VisualScene
         );
 
         // 기울어진 정적 ramp.
-        const BodyId ramp =
+        const bodyId ramp =
             world.CreateBody(
-                BodyType::Static,
+                bodyType::Static,
                 {
                     { 4.0f, -1.6f },
                     rot2::FromRadians( 0.22f )
                 }
             );
 
-        const ShapeId rampShape =
+        const shapeId rampShape =
             world.CreateShape(
                 ramp,
                 segment2
@@ -196,14 +196,14 @@ struct VisualScene
         // impulse 버튼으로 직접 밀어볼 Dynamic Circle.
         impulseBody =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { -3.2f, 3.5f },
                     {}
                 }
             );
 
-        const ShapeId circleShape =
+        const shapeId circleShape =
             world.CreateShape(
                 impulseBody,
                 circle2{ {}, 0.65f }
@@ -216,14 +216,14 @@ struct VisualScene
         // COM이 origin과 일치하는 Dynamic Box.
         torqueBody =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 0.0f, 5.0f },
                     rot2::FromRadians( 0.15f )
                 }
             );
 
-        const ShapeId boxShape =
+        const shapeId boxShape =
             world.CreateShape(
                 torqueBody,
                 MakeBox( { 0.75f, 0.55f } )
@@ -234,16 +234,16 @@ struct VisualScene
         );
 
         // 길쭉한 Dynamic Capsule.
-        const BodyId capsuleBody =
+        const bodyId capsuleBody =
             world.CreateBody(
-                BodyType::Dynamic,
+                bodyType::Dynamic,
                 {
                     { 3.0f, 4.0f },
                     rot2::FromRadians( -0.25f )
                 }
             );
 
-        const ShapeId capsuleShape =
+        const shapeId capsuleShape =
             world.CreateShape(
                 capsuleBody,
                 capsule2
@@ -261,14 +261,14 @@ struct VisualScene
         // gravity와 force의 영향을 받지 않고 지정한 velocity로만 움직이는 Kinematic Body.
         kinematicBody =
             world.CreateBody(
-                BodyType::Kinematic,
+                bodyType::Kinematic,
                 {
                     { -5.5f, -1.5f },
                     {}
                 }
             );
 
-        const ShapeId kinematicShape =
+        const shapeId kinematicShape =
             world.CreateShape(
                 kinematicBody,
                 MakeBox( { 0.8f, 0.3f } )
@@ -289,31 +289,31 @@ struct VisualScene
     }
 };
 
-struct ShapeColors
+struct shapeColors
 {
     ImU32 outline = 0;
     ImU32 fill = 0;
 };
 
-ShapeColors GetShapeColors( BodyType type )
+shapeColors GetShapeColors( bodyType type )
 {
     switch( type )
     {
-    case BodyType::Static:
+    case bodyType::Static:
         return
         {
             IM_COL32( 120, 220, 140, 255 ),
             IM_COL32( 120, 220, 140, 55 )
         };
 
-    case BodyType::Kinematic:
+    case bodyType::Kinematic:
         return
         {
             IM_COL32( 245, 205, 90, 255 ),
             IM_COL32( 245, 205, 90, 60 )
         };
 
-    case BodyType::Dynamic:
+    case bodyType::Dynamic:
         return
         {
             IM_COL32( 90, 190, 255, 255 ),
@@ -330,13 +330,13 @@ ShapeColors GetShapeColors( BodyType type )
 }
 
 void RefreshContacts(
-    VisualScene& scene,
-    std::vector<ContactData>& contacts )
+    visualScene& scene,
+    std::vector<contactData>& contacts )
 {
     contacts.clear();
 
     scene.world.UpdateCollisions(
-        [&]( const ContactData& data )
+        [&]( const contactData& data )
         {
             contacts.push_back( data );
         }
@@ -344,8 +344,8 @@ void RefreshContacts(
 }
 
 vec2 GetWorldCenter(
-    const World& world,
-    BodyId bodyId )
+    const world& world,
+    bodyId bodyId )
 {
     return TransformPoint(
         world.GetBodyTransform( bodyId ),
@@ -429,10 +429,10 @@ int main()
             0,
             D3D11_SDK_VERSION,
             &swapChainDesc,
-            &g_d3d.swapChain,
-            &g_d3d.device,
+            &gD3d.swapChain,
+            &gD3d.device,
             &featureLevel,
-            &g_d3d.deviceContext
+            &gD3d.deviceContext
         );
 
     if( FAILED( result ) )
@@ -462,8 +462,8 @@ int main()
     }
 
     if( !ImGui_ImplDX11_Init(
-        g_d3d.device.Get(),
-        g_d3d.deviceContext.Get() ) )
+        gD3d.device.Get(),
+        gD3d.deviceContext.Get() ) )
     {
         return 1;
     }
@@ -472,14 +472,14 @@ int main()
     // Physics visual test
     // ---------------------------------------------------------
 
-    DebugCamera camera{};
+    debugCamera camera{};
     camera.center = { 0.0f, 0.5f };
     camera.pixelsPerMeter = 55.0f;
 
-    std::unique_ptr<VisualScene> scene =
-        std::make_unique<VisualScene>();
+    std::unique_ptr<visualScene> scene =
+        std::make_unique<visualScene>();
 
-    std::vector<ContactData> contacts;
+    std::vector<contactData> contacts;
     contacts.reserve( 16 );
 
     bool playing = false;
@@ -608,7 +608,7 @@ int main()
         );
 
         ImGui::TextUnformatted(
-            "World Simulation"
+            "world Simulation"
         );
         ImGui::Separator();
 
@@ -645,7 +645,7 @@ int main()
             ImVec2( 72.0f, 0.0f ) ) )
         {
             scene =
-                std::make_unique<VisualScene>();
+                std::make_unique<visualScene>();
 
             contacts.clear();
             accumulator = 0.0f;
@@ -781,7 +781,7 @@ int main()
             &showGrid
         );
         ImGui::Checkbox(
-            "Shape AABBs",
+            "shape AABBs",
             &showAABBs
         );
         ImGui::Checkbox(
@@ -828,22 +828,22 @@ int main()
             &showTreeLabels
         );
 
-        const BroadPhase& broadPhase =
+        const broadPhase& broadPhase =
             scene->world.GetBroadPhase();
 
-        const DynamicTree& dynamicTree =
+        const dynamicTree& dynamicTree =
             broadPhase.GetTree(
-                BodyType::Dynamic
+                bodyType::Dynamic
             );
 
-        const DynamicTree& kinematicTree =
+        const dynamicTree& kinematicTree =
             broadPhase.GetTree(
-                BodyType::Kinematic
+                bodyType::Kinematic
             );
 
-        const DynamicTree& staticTree =
+        const dynamicTree& staticTree =
             broadPhase.GetTree(
-                BodyType::Static
+                bodyType::Static
             );
 
         ImGui::Spacing();
@@ -1013,7 +1013,7 @@ int main()
             IM_COL32( 23, 25, 31, 255 )
         );
 
-        DebugDraw debugDraw
+        debugDraw debugDraw
         {
             drawList,
             camera,
@@ -1089,24 +1089,24 @@ int main()
         constexpr ImU32 COM_COLOR =
             IM_COL32( 255, 90, 180, 255 );
 
-        for( const VisualShape& visual : scene->shapes )
+        for( const visualShape& visual : scene->shapes )
         {
             const Body& body =
                 scene->world.GetBody(
-                    visual.bodyId
+                    visual.bodyHandle
                 );
 
-            const Shape& shape =
+            const shape& shape =
                 scene->world.GetShape(
-                    visual.shapeId
+                    visual.shapeHandle
                 );
 
             const transform2 transform =
                 scene->world.GetBodyTransform(
-                    visual.bodyId
+                    visual.bodyHandle
                 );
 
-            const ShapeColors colors =
+            const shapeColors colors =
                 GetShapeColors(
                     body.type
                 );
@@ -1119,9 +1119,9 @@ int main()
             );
 
             if( showAABBs &&
-                shape.proxyKey != Shape::NULL_INDEX )
+                shape.proxyKey != shape::NULL_INDEX )
             {
-                const DynamicTree& tree =
+                const dynamicTree& tree =
                     broadPhase.GetTree(
                         GetProxyType(
                             shape.proxyKey
@@ -1139,12 +1139,12 @@ int main()
             }
 
             if( showCOM &&
-                body.type != BodyType::Static )
+                body.type != bodyType::Static )
             {
                 debugDraw.DrawPoint(
                     GetWorldCenter(
                         scene->world,
-                        visual.bodyId
+                        visual.bodyHandle
                     ),
                     COM_COLOR,
                     4.5f
@@ -1169,7 +1169,7 @@ int main()
             constexpr ImU32 NORMAL_COLOR =
                 IM_COL32( 100, 255, 140, 255 );
 
-            for( const ContactData& contact : contacts )
+            for( const contactData& contact : contacts )
             {
                 for( int i = 0;
                      i < contact.manifold.pointCount;
@@ -1213,14 +1213,14 @@ int main()
             1.0f
         };
 
-        g_d3d.deviceContext->OMSetRenderTargets(
+        gD3d.deviceContext->OMSetRenderTargets(
             1,
-            g_d3d.renderTargetView.GetAddressOf(),
+            gD3d.renderTargetView.GetAddressOf(),
             nullptr
         );
 
-        g_d3d.deviceContext->ClearRenderTargetView(
-            g_d3d.renderTargetView.Get(),
+        gD3d.deviceContext->ClearRenderTargetView(
+            gD3d.renderTargetView.Get(),
             clearColor
         );
 
@@ -1228,7 +1228,7 @@ int main()
             ImGui::GetDrawData()
         );
 
-        g_d3d.swapChain->Present(
+        gD3d.swapChain->Present(
             1,
             0
         );
@@ -1242,10 +1242,10 @@ int main()
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
 
-    g_d3d.renderTargetView.Reset();
-    g_d3d.swapChain.Reset();
-    g_d3d.deviceContext.Reset();
-    g_d3d.device.Reset();
+    gD3d.renderTargetView.Reset();
+    gD3d.swapChain.Reset();
+    gD3d.deviceContext.Reset();
+    gD3d.device.Reset();
 
     DestroyWindow( hwnd );
     UnregisterClassW(

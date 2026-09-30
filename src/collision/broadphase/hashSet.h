@@ -7,10 +7,10 @@
 namespace zonai
 {
 
-class HashSet
+class hashSet
 {
 public:
-    explicit HashSet( std::size_t capacity = MIN_CAPACITY );
+    explicit hashSet( std::size_t capacity = MIN_CAPACITY );
 
     // 새 key면 false, 이미 존재하는 key면 true를 반환함.
     bool Add( std::uint64_t key );

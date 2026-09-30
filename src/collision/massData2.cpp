@@ -16,7 +16,7 @@ constexpr float PI = 3.14159265358979323846f;
 }
 
 /*
-* Shape 질량 특성 계산 메모
+* shape 질량 특성 계산 메모
 *
 * [공통]
 * - density(rho)는 단위 면적당 질량임.
@@ -25,13 +25,13 @@ constexpr float PI = 3.14159265358979323846f;
 *            = (1 / A) * integral( p * dA )  // density가 일정한 경우
 * - 2D에서는 회전축이 화면에 수직인 z축 하나뿐이므로
 *   3D 관성 텐서 행렬 대신 z축에 대한 스칼라 회전 관성 I만 저장함.
-* - rotationalInertia는 Shape 자신의 center of mass를 지나는 z축 기준 값임.
+* - rotationalInertia는 shape 자신의 center of mass를 지나는 z축 기준 값임.
 *
 * [평행축 정리]
 * - center of mass에서 거리 d만큼 떨어진 평행한 축으로 옮기면
 *   I_shifted = I_center + M * d^2
-* - 여러 Shape를 하나의 Body로 합칠 때 각 Shape 관성을
-*   Body center of mass 기준으로 옮기는 데 사용함.
+* - 여러 shape를 하나의 body로 합칠 때 각 shape 관성을
+*   body center of mass 기준으로 옮기는 데 사용함.
 */
 
 massData2 ComputeMass( const circle2& circle, float density )
@@ -343,7 +343,7 @@ massData2 ComputeMass( const polygon2& polygon, float density )
     *     I_reference =
     *         density * integral( x^2 + y^2 ) dA
     *
-    * 반환값은 Shape center of mass 기준이어야 하므로
+    * 반환값은 shape center of mass 기준이어야 하므로
     * 평행축 정리를 반대로 적용함:
     *
     *     I_reference = I_center + M * d^2

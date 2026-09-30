@@ -9,39 +9,39 @@ using namespace zonai;
 int main()
 {
     {
-        Body body{};
+        body body{};
 
-        // 기본 Body는 정적이고 아직 Shape가 연결되지 않은 상태로 시작함.
-        assert( body.bodyId == Body::NULL_INDEX );
+        // 기본 body는 정적이고 아직 shape가 연결되지 않은 상태로 시작함.
+        assert( body.bodyId == body::NULL_INDEX );
         assert( body.generation == 0 );
-        assert( body.nextFreeId == Body::NULL_INDEX );
-        assert( body.type == BodyType::Static );
+        assert( body.nextFreeId == body::NULL_INDEX );
+        assert( body.type == bodyType::Static );
         assert( body.mass == 0.0f );
         assert( body.inertia == 0.0f );
-        assert( body.headContactKey == Body::NULL_INDEX );
+        assert( body.headContactKey == body::NULL_INDEX );
         assert( body.contactCount == 0 );
-        assert( body.headShapeId == Body::NULL_INDEX );
+        assert( body.headShapeId == body::NULL_INDEX );
         assert( body.shapeCount == 0 );
 
     }
 
     {
-        Body body{};
+        body body{};
 
-        body.type = BodyType::Dynamic;
+        body.type = bodyType::Dynamic;
         body.headShapeId = 7;
         body.shapeCount = 3;
 
-        assert( body.type == BodyType::Dynamic );
+        assert( body.type == bodyType::Dynamic );
         assert( body.headShapeId == 7 );
         assert( body.shapeCount == 3 );
     }
 
     {
-        BodySim bodySim{};
+        bodySim bodySim{};
 
         // 기본 simulation slot은 비어 있고 transform은 identity임.
-        assert( bodySim.bodyId == BodySim::NULL_INDEX );
+        assert( bodySim.bodyId == bodySim::NULL_INDEX );
         assert( bodySim.transform.position.x == 0.0f );
         assert( bodySim.transform.position.y == 0.0f );
         assert( bodySim.transform.rotation.c == 1.0f );
@@ -66,7 +66,7 @@ int main()
     }
 
     {
-        BodyState state{};
+        bodyState state{};
 
         assert( state.linearVelocity.x == 0.0f );
         assert( state.linearVelocity.y == 0.0f );

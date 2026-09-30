@@ -6,7 +6,7 @@
 namespace zonai
 {
 
-struct Filter
+struct collisionFilter
 {
     // shape가 속한 collision category를 나타냄.
     std::uint64_t categoryBits = 1;
@@ -19,7 +19,7 @@ struct Filter
 };
 
 // 두 shape filter가 실제 충돌을 허용하는지 확인함.
-constexpr bool ShouldShapesCollide( const Filter& filterA, const Filter& filterB )
+constexpr bool ShouldShapesCollide( const collisionFilter& filterA, const collisionFilter& filterB )
 {
     // 같은 non-zero group은 category / mask보다 우선함.
     if( filterA.groupIndex == filterB.groupIndex && filterA.groupIndex != 0 )

@@ -9,7 +9,7 @@ namespace zonai
 {
 
 template <typename T, std::size_t Alignment>
-class AlignedAllocator
+class alignedAllocator
 {
 public:
     using value_type = T;
@@ -17,10 +17,10 @@ public:
     static_assert( ( Alignment & ( Alignment - 1 ) ) == 0 );
     static_assert( Alignment >= alignof( T ) );
 
-    AlignedAllocator() noexcept = default;
+    alignedAllocator() noexcept = default;
 
     template <typename U>
-    AlignedAllocator( const AlignedAllocator<U, Alignment>& ) noexcept
+    alignedAllocator( const alignedAllocator<U, Alignment>& ) noexcept
     {
     }
 
@@ -57,22 +57,22 @@ public:
     template <typename U>
     struct rebind
     {
-        using other = AlignedAllocator<U, Alignment>;
+        using other = alignedAllocator<U, Alignment>;
     };
 };
 
 template <typename T, typename U, std::size_t Alignment>
 constexpr bool operator==(
-    const AlignedAllocator<T, Alignment>&,
-    const AlignedAllocator<U, Alignment>& ) noexcept
+    const alignedAllocator<T, Alignment>&,
+    const alignedAllocator<U, Alignment>& ) noexcept
 {
     return true;
 }
 
 template <typename T, typename U, std::size_t Alignment>
 constexpr bool operator!=(
-    const AlignedAllocator<T, Alignment>&,
-    const AlignedAllocator<U, Alignment>& ) noexcept
+    const alignedAllocator<T, Alignment>&,
+    const alignedAllocator<U, Alignment>& ) noexcept
 {
     return false;
 }

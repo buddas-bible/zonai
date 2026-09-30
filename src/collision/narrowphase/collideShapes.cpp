@@ -66,8 +66,8 @@ constexpr bool IsSupportedPair()
 } // namespace
 
 bool CanCollideShapes(
-    const ShapeGeometry& geometryA,
-    const ShapeGeometry& geometryB )
+    const shapeGeometry& geometryA,
+    const shapeGeometry& geometryB )
 {
     return std::visit(
         []( const auto& a, const auto& b )
@@ -83,9 +83,9 @@ bool CanCollideShapes(
 }
 
 localManifold2 CollideShapes(
-    const ShapeGeometry& geometryA,
+    const shapeGeometry& geometryA,
     const transform2& transformA,
-    const ShapeGeometry& geometryB,
+    const shapeGeometry& geometryB,
     const transform2& transformB )
 {
     // 기존 collider들은 A local space에서 계산하므로 B를 A local space로 변환함.

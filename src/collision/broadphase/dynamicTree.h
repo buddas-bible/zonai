@@ -13,7 +13,7 @@
 namespace zonai
 {
 
-struct TreeNode
+struct treeNode
 {
     // 이 node 아래 모든 leaf를 감싸는 AABB.
     aabb2 aabb{};
@@ -38,7 +38,7 @@ struct TreeNode
     };
 };
 
-struct TreeProxy
+struct treeProxy
 {
     std::uint64_t userData = 0;
 
@@ -49,14 +49,14 @@ struct TreeProxy
     std::int32_t next = -1;
 };
 
-static_assert( sizeof( TreeNode ) == 32 );
-static_assert( sizeof( TreeProxy ) == 16 );
+static_assert( sizeof( treeNode ) == 32 );
+static_assert( sizeof( treeProxy ) == 16 );
 
-using TreeNodeStorage =
-    std::vector<TreeNode, AlignedAllocator<TreeNode, 64>>;
+using treeNodeStorage =
+    std::vector<treeNode, alignedAllocator<treeNode, 64>>;
 
 // Debug Draw가 tree 내부 저장구조를 직접 노출받지 않고 node 상태를 읽기 위한 view.
-struct TreeNodeDebugInfo
+struct treeNodeDebugInfo
 {
     aabb2 aabb{};
 
@@ -79,18 +79,18 @@ struct TreeNodeDebugInfo
 };
 
 template <typename Callback>
-concept TreeQueryCallback =
+concept treeQueryCallback =
     requires( Callback& callback, std::int32_t proxyId )
     {
         { callback( proxyId ) } -> std::convertible_to<bool>;
     };
 
-class DynamicTree
+class dynamicTree
 {
-    friend class BroadPhase;
+    friend class broadPhase;
 
 public:
-    DynamicTree();
+    dynamicTree();
 
 public:
     // 
@@ -129,7 +129,7 @@ public:
     {
         for( std::size_t i = 0; i < nodes_.size(); ++i )
         {
-            const TreeNode& node = nodes_[i];
+            const treeNode& node = nodes_[i];
 
             if( IsEmptyNode( node ) )
             {
@@ -138,7 +138,7 @@ public:
 
             const bool isLeaf = IsLeaf( node );
 
-            TreeNodeDebugInfo info{};
+            treeNodeDebugInfo info{};
             info.aabb = node.aabb;
             info.nodeIndex = static_cast<std::int32_t>( i );
             info.parentIndex = parents_[i];
@@ -156,7 +156,7 @@ public:
 
     // AABB가 겹치는 proxy를 찾아 callback으로 전달함.
     // callback이 false를 반환하면 즉시 순회를 끝냄.
-    template <TreeQueryCallback Callback>
+    template <treeQueryCallback Callback>
     void Query( const aabb2& aabb, Callback&& callback ) const
     {
         if( proxyCount_ == 0 )
@@ -180,7 +180,7 @@ public:
             for( std::int32_t i = 0; i < 2; ++i )
             {
                 const std::int32_t nodeIndex = pair + i;
-                const TreeNode& node = nodes_[nodeIndex];
+                const treeNode& node = nodes_[nodeIndex];
 
                 // AABB가 겹치지 않으면 subtree 전체를 가지치기함.
                 if( IsEmptyNode( node ) || !Overlaps( aabb, node.aabb ) )
@@ -216,7 +216,7 @@ public:
     }
 
 private:
-    struct RebuildItem
+    struct rebuildItem
     {
         std::int32_t nodeIndex = 0;
         std::int32_t pair = 0;
@@ -226,7 +226,7 @@ private:
         std::size_t endIndex = 0;
     };
 
-    struct CopyItem
+    struct copyItem
     {
         std::int32_t oldPair = 0;
         std::int32_t newIndex = 0;
@@ -249,30 +249,30 @@ private:
 
 private:
     // flagIndex에서 node 상태와 저장된 index를 읽는 helper.
-    static bool IsLeaf( const TreeNode& node );
-    static bool IsEmptyNode( const TreeNode& node );
-    static std::int32_t GetChildPair( const TreeNode& node );
-    static std::int32_t GetProxyId( const TreeNode& node );
-    static std::int32_t GetNodeHeight( const TreeNode& node );
-    static void SetChildPair( TreeNode& node, std::int32_t pair );
+    static bool IsLeaf( const treeNode& node );
+    static bool IsEmptyNode( const treeNode& node );
+    static std::int32_t GetChildPair( const treeNode& node );
+    static std::int32_t GetProxyId( const treeNode& node );
+    static std::int32_t GetNodeHeight( const treeNode& node );
+    static void SetChildPair( treeNode& node, std::int32_t pair );
 
     // sweep refit을 위해 internal node가 자기 child pair보다 앞 index에 있는지 확인함.
     bool IsNodeOrdered( std::int32_t nodeIndex ) const;
 
-    static TreeNode MakeEmptyNode();
-    static TreeNode MakeLeafNode( const aabb2& aabb, std::int32_t proxyId, std::int32_t shapeIndex, bool moved );
+    static treeNode MakeEmptyNode();
+    static treeNode MakeLeafNode( const aabb2& aabb, std::int32_t proxyId, std::int32_t shapeIndex, bool moved );
 
 private:
-    static TreeNode MakeInternalNodeFrom(
-        const TreeNodeStorage& nodes,
+    static treeNode MakeInternalNodeFrom(
+        const treeNodeStorage& nodes,
         std::int32_t childPair );
 
-    TreeNode MakeInternalNode( std::int32_t childPair ) const;
+    treeNode MakeInternalNode( std::int32_t childPair ) const;
 
     std::size_t PartitionRebuildLeaves( std::size_t startIndex, std::size_t count );
     std::int32_t BumpRebuildPair( std::int32_t parent, std::int32_t& nodeEnd );
-    void CopySubtree( TreeNode node, std::int32_t newIndex, std::int32_t& nodeEnd );
-    void PlaceRebuildLeaf( const TreeNode& node, std::int32_t newIndex, std::int32_t& nodeEnd );
+    void CopySubtree( treeNode node, std::int32_t newIndex, std::int32_t& nodeEnd );
+    void PlaceRebuildLeaf( const treeNode& node, std::int32_t newIndex, std::int32_t& nodeEnd );
     void BuildRebuildTree( std::size_t leafCount );
 
     // proxy 할당 및 해제
@@ -289,20 +289,20 @@ private:
     void SwapNodes( std::int32_t downIndex, std::int32_t upIndex );
     void RotateNode( std::int32_t nodeIndex );
 
-    void InsertLeaf( const TreeNode& leaf, bool shouldRotate );
+    void InsertLeaf( const treeNode& leaf, bool shouldRotate );
     void RemoveLeaf( std::int32_t leafIndex );
     void RefitAncestors( std::int32_t nodeIndex, bool shouldRotate );
 
     bool ValidateSubtree( std::int32_t nodeIndex, std::int32_t& height, std::size_t& leafCount ) const;
 
-    TreeNodeStorage nodes_{};
+    treeNodeStorage nodes_{};
     std::vector<std::int32_t> parents_{};
-    std::vector<TreeProxy> proxies_{};
+    std::vector<treeProxy> proxies_{};
 
     // Rebuild에서 재사용하는 scratch buffer. 매 frame 작은 allocation이 생기지 않게 유지함.
-    TreeNodeStorage rebuildNodes_{};
+    treeNodeStorage rebuildNodes_{};
     std::vector<std::int32_t> rebuildLeafIndices_{};
-    TreeNodeStorage rebuildLeafNodes_{};
+    treeNodeStorage rebuildLeafNodes_{};
     std::vector<vec2> rebuildLeafCenters_{};
 
     // free proxy 연결 리스트의 head index.

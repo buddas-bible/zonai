@@ -9,7 +9,7 @@ using namespace zonai;
 
 int main()
 {
-    HashSet set{ 1 };
+    hashSet set{ 1 };
 
     assert( set.GetCount() == 0 );
     assert( set.GetCapacity() == 16 );
@@ -39,7 +39,7 @@ int main()
         assert( set.Contains( 1000 + key ) );
     }
 
-    HashSet removalSet{};
+    hashSet removalSet{};
 
     // 1, 14, 27은 capacity 16에서 같은 initial slot을 사용해 probe chain을 만듦.
     removalSet.Add( 1 );
@@ -64,7 +64,7 @@ int main()
 
     {
         // Box2D와 같은 큰 key / growth / removal stress.
-        HashSet stressSet{ 32 };
+        hashSet stressSet{ 32 };
 
         constexpr std::size_t TEST_SIZE = 1000;
         std::vector<std::uint64_t> keys;
@@ -104,8 +104,8 @@ int main()
     }
 
     {
-        // custom HashSet을 std::unordered_set과 같은 연산열로 대조함.
-        HashSet customSet{ 16 };
+        // custom hashSet을 std::unordered_set과 같은 연산열로 대조함.
+        hashSet customSet{ 16 };
         std::unordered_set<std::uint64_t> referenceSet;
 
         std::uint32_t state = 0x12345678u;
@@ -163,8 +163,8 @@ int main()
     }
 
     {
-        // Shape pair key는 순서가 바뀌어도 같고 서로 다른 pair끼리는 충돌하지 않아야 함.
-        HashSet pairSet{};
+        // shape pair key는 순서가 바뀌어도 같고 서로 다른 pair끼리는 충돌하지 않아야 함.
+        hashSet pairSet{};
 
         constexpr std::int32_t N = 128;
         std::size_t expectedCount = 0;

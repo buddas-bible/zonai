@@ -5,7 +5,7 @@
 namespace zonai::sandbox
 {
 
-ImVec2 DebugCamera::WorldToScreen(
+ImVec2 debugCamera::WorldToScreen(
     const vec2& world,
     const ImVec2& viewportMin,
     const ImVec2& viewportSize ) const
@@ -20,7 +20,7 @@ ImVec2 DebugCamera::WorldToScreen(
     };
 }
 
-vec2 DebugCamera::ScreenToWorld(
+vec2 debugCamera::ScreenToWorld(
     const ImVec2& screen,
     const ImVec2& viewportMin,
     const ImVec2& viewportSize ) const
@@ -35,7 +35,7 @@ vec2 DebugCamera::ScreenToWorld(
     };
 }
 
-void DebugCamera::Zoom( float wheelDelta )
+void debugCamera::Zoom( float wheelDelta )
 {
     constexpr float ZOOM_STEP = 1.1f;
     constexpr float MIN_PIXELS_PER_METER = 10.0f;
@@ -54,7 +54,7 @@ void DebugCamera::Zoom( float wheelDelta )
         std::clamp( pixelsPerMeter, MIN_PIXELS_PER_METER, MAX_PIXELS_PER_METER );
 }
 
-void DebugCamera::PanPixels( const ImVec2& delta )
+void debugCamera::PanPixels( const ImVec2& delta )
 {
     center.x -= delta.x / pixelsPerMeter;
     center.y += delta.y / pixelsPerMeter;

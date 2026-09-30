@@ -56,7 +56,7 @@ aabb2 RandomBox( float maxHalfExtent )
 }
 
 void CheckQueryAgainstBruteForce(
-    const DynamicTree& tree,
+    const dynamicTree& tree,
     const std::vector<std::int32_t>& proxyIds,
     const std::vector<aabb2>& boxes,
     const aabb2& query )
@@ -98,10 +98,10 @@ int main()
             reinterpret_cast<std::uintptr_t>( storage.data() );
 
         assert( address % 64u == 0u );
-        assert( sizeof( TreeNode ) == 32 );
+        assert( sizeof( treeNode ) == 32 );
     }
 
-    DynamicTree tree{};
+    dynamicTree tree{};
 
     assert( tree.GetProxyCount() == 0 );
 
@@ -119,7 +119,7 @@ int main()
 
 
     {
-        DynamicTree pairTree{};
+        dynamicTree pairTree{};
 
         const aabb2 boxA{
             { -2.0f, -1.0f },
@@ -149,10 +149,10 @@ int main()
         assert( NearlyEqual( pairTree.GetProxyAABB( proxyA ), boxA ) );
         assert( NearlyEqual( pairTree.GetProxyAABB( proxyB ), boxB ) );
 
-        std::vector<TreeNodeDebugInfo> debugNodes;
+        std::vector<treeNodeDebugInfo> debugNodes;
 
         pairTree.VisitNodes(
-            [&]( const TreeNodeDebugInfo& info )
+            [&]( const treeNodeDebugInfo& info )
             {
                 debugNodes.push_back( info );
             }
@@ -164,7 +164,7 @@ int main()
             std::find_if(
                 debugNodes.begin(),
                 debugNodes.end(),
-                []( const TreeNodeDebugInfo& info )
+                []( const treeNodeDebugInfo& info )
                 {
                     return info.isRoot;
                 }
@@ -178,7 +178,7 @@ int main()
 
         std::vector<std::int32_t> debugShapeIndices;
 
-        for( const TreeNodeDebugInfo& info : debugNodes )
+        for( const treeNodeDebugInfo& info : debugNodes )
         {
             if( info.isLeaf )
             {
@@ -196,7 +196,7 @@ int main()
 
 
     {
-        DynamicTree sahTree{};
+        dynamicTree sahTree{};
 
         const aabb2 boxA{
             { 0.0f, 0.0f },
@@ -235,7 +235,7 @@ int main()
 
 
     {
-        DynamicTree removalTree{};
+        dynamicTree removalTree{};
 
         const aabb2 boxA{
             { 0.0f, 0.0f },
@@ -278,7 +278,7 @@ int main()
 
 
     {
-        DynamicTree moveTree{};
+        dynamicTree moveTree{};
 
         const aabb2 boxA{
             { 0.0f, 0.0f },
@@ -324,7 +324,7 @@ int main()
     }
 
     {
-        DynamicTree queryTree{};
+        dynamicTree queryTree{};
 
         const aabb2 boxA{
             { 0.0f, 0.0f },
@@ -373,7 +373,7 @@ int main()
     }
 
     {
-        DynamicTree movedTree{};
+        dynamicTree movedTree{};
 
         assert( movedTree.HasMoved() == false );
 
@@ -395,14 +395,14 @@ int main()
         const std::int32_t proxyA = movedTree.CreateProxy( boxA, 1 );
         movedTree.CreateProxy( boxB, 2 );
 
-        // 일반 DynamicTree API는 Box2D처럼 moved를 표시하지 않음.
+        // 일반 dynamicTree API는 Box2D처럼 moved를 표시하지 않음.
         assert( movedTree.HasMoved() == false );
 
         movedTree.MoveProxy( proxyA, movedA );
 
         assert( movedTree.HasMoved() == false );
 
-        // BroadPhase가 pair 생성을 요구하는 경로에서는 moved를 표시함.
+        // broadPhase가 pair 생성을 요구하는 경로에서는 moved를 표시함.
         movedTree.MoveProxy( proxyA, boxA, true );
 
         assert( movedTree.HasMoved() );
@@ -414,7 +414,7 @@ int main()
     }
 
     {
-        DynamicTree rebuildStateTree{};
+        dynamicTree rebuildStateTree{};
 
         assert( rebuildStateTree.NeedsRebuild() == false );
 
@@ -449,7 +449,7 @@ int main()
     }
 
     {
-        DynamicTree movedRebuildTree{};
+        dynamicTree movedRebuildTree{};
 
         const aabb2 boxA{
             { 0.0f, 0.0f },
@@ -484,7 +484,7 @@ int main()
     }
 
     {
-        DynamicTree rebuildTree{};
+        dynamicTree rebuildTree{};
 
         const aabb2 boxA{
             { 0.0f, 0.0f },
@@ -547,7 +547,7 @@ int main()
     }
 
     {
-        DynamicTree balancedTree{};
+        dynamicTree balancedTree{};
 
         for( int i = 0; i < 8; ++i )
         {
@@ -571,7 +571,7 @@ int main()
         // Box2D의 brute-force query 테스트와 같은 방식으로 tree 탐색 결과를 직접 비교함.
         constexpr std::int32_t PROXY_COUNT = 200;
 
-        DynamicTree stressTree{};
+        dynamicTree stressTree{};
         std::vector<std::int32_t> proxyIds;
         std::vector<aabb2> boxes;
 
@@ -621,7 +621,7 @@ int main()
 
         bool hasMovedNode = false;
         stressTree.VisitNodes(
-            [&]( const TreeNodeDebugInfo& info )
+            [&]( const treeNodeDebugInfo& info )
             {
                 hasMovedNode = hasMovedNode || info.isMoved;
             }

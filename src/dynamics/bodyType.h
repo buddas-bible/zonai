@@ -3,7 +3,7 @@
 namespace zonai
 {
 
-enum class BodyType
+enum class bodyType
 {
     Static = 0,
     Kinematic = 1,

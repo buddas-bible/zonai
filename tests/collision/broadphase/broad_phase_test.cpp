@@ -12,24 +12,24 @@ using namespace zonai;
 
 int main()
 {
-    static_assert( MakeProxyKey( 0, BodyType::Static ) == 0 );
-    static_assert( MakeProxyKey( 0, BodyType::Kinematic ) == 1 );
-    static_assert( MakeProxyKey( 0, BodyType::Dynamic ) == 2 );
-    static_assert( MakeProxyKey( 7, BodyType::Dynamic ) == 30 );
+    static_assert( MakeProxyKey( 0, bodyType::Static ) == 0 );
+    static_assert( MakeProxyKey( 0, bodyType::Kinematic ) == 1 );
+    static_assert( MakeProxyKey( 0, bodyType::Dynamic ) == 2 );
+    static_assert( MakeProxyKey( 7, bodyType::Dynamic ) == 30 );
 
-    constexpr ProxyKey key = MakeProxyKey( 17, BodyType::Kinematic );
+    constexpr proxyKey key = MakeProxyKey( 17, bodyType::Kinematic );
 
     static_assert( GetProxyId( key ) == 17 );
-    static_assert( GetProxyType( key ) == BodyType::Kinematic );
+    static_assert( GetProxyType( key ) == bodyType::Kinematic );
 
-    constexpr ShapePairKey shapePairKey = MakeShapePairKey( 5, 10 );
+    constexpr shapePairKey shapePairKey = MakeShapePairKey( 5, 10 );
 
     static_assert( shapePairKey == ( std::uint64_t{ 5 } << 32 | std::uint64_t{ 10 } ) );
     static_assert( MakeShapePairKey( 10, 5 ) == shapePairKey );
     static_assert( MakeShapePairKey( 7, 7 ) == ( std::uint64_t{ 7 } << 32 | std::uint64_t{ 7 } ) );
 
-    BroadPhase pairSetBroadPhase{};
-    const ShapePairKey contactPairKey = MakeShapePairKey( 21, 34 );
+    broadPhase pairSetBroadPhase{};
+    const shapePairKey contactPairKey = MakeShapePairKey( 21, 34 );
 
     assert( pairSetBroadPhase.HasPair( contactPairKey ) == false );
     assert( pairSetBroadPhase.AddPair( contactPairKey ) == false );
@@ -39,11 +39,11 @@ int main()
     assert( pairSetBroadPhase.HasPair( contactPairKey ) == false );
     assert( pairSetBroadPhase.RemovePair( contactPairKey ) == false );
 
-    BroadPhase broadPhase{};
+    broadPhase broadPhase{};
 
-    DynamicTree& staticTree = broadPhase.GetTree( BodyType::Static );
-    DynamicTree& kinematicTree = broadPhase.GetTree( BodyType::Kinematic );
-    DynamicTree& dynamicTree = broadPhase.GetTree( BodyType::Dynamic );
+    dynamicTree& staticTree = broadPhase.GetTree( bodyType::Static );
+    dynamicTree& kinematicTree = broadPhase.GetTree( bodyType::Kinematic );
+    dynamicTree& dynamicTree = broadPhase.GetTree( bodyType::Dynamic );
 
     assert( &staticTree != &kinematicTree );
     assert( &staticTree != &dynamicTree );
@@ -72,48 +72,48 @@ int main()
     assert( kinematicTree.GetProxyCount() == 1 );
     assert( dynamicTree.GetProxyCount() == 1 );
 
-    BroadPhase proxyBroadPhase{};
+    broadPhase proxyBroadPhase{};
 
-    const ProxyKey staticKey = proxyBroadPhase.CreateProxy( BodyType::Static, box, 11 );
-    const ProxyKey kinematicKey = proxyBroadPhase.CreateProxy( BodyType::Kinematic, box, 12 );
-    const ProxyKey dynamicKey = proxyBroadPhase.CreateProxy( BodyType::Dynamic, box, 13 );
+    const proxyKey staticKey = proxyBroadPhase.CreateProxy( bodyType::Static, box, 11 );
+    const proxyKey kinematicKey = proxyBroadPhase.CreateProxy( bodyType::Kinematic, box, 12 );
+    const proxyKey dynamicKey = proxyBroadPhase.CreateProxy( bodyType::Dynamic, box, 13 );
 
-    assert( GetProxyType( staticKey ) == BodyType::Static );
-    assert( GetProxyType( kinematicKey ) == BodyType::Kinematic );
-    assert( GetProxyType( dynamicKey ) == BodyType::Dynamic );
+    assert( GetProxyType( staticKey ) == bodyType::Static );
+    assert( GetProxyType( kinematicKey ) == bodyType::Kinematic );
+    assert( GetProxyType( dynamicKey ) == bodyType::Dynamic );
 
     assert( GetProxyId( staticKey ) == 0 );
     assert( GetProxyId( kinematicKey ) == 0 );
     assert( GetProxyId( dynamicKey ) == 0 );
 
-    assert( proxyBroadPhase.GetTree( BodyType::Static ).GetProxyCount() == 1 );
-    assert( proxyBroadPhase.GetTree( BodyType::Kinematic ).GetProxyCount() == 1 );
-    assert( proxyBroadPhase.GetTree( BodyType::Dynamic ).GetProxyCount() == 1 );
+    assert( proxyBroadPhase.GetTree( bodyType::Static ).GetProxyCount() == 1 );
+    assert( proxyBroadPhase.GetTree( bodyType::Kinematic ).GetProxyCount() == 1 );
+    assert( proxyBroadPhase.GetTree( bodyType::Dynamic ).GetProxyCount() == 1 );
 
     // Box2D처럼 static은 기본적으로 moved 처리하지 않고 kinematic / dynamic은 moved 처리함.
-    assert( proxyBroadPhase.GetTree( BodyType::Static ).HasMoved() == false );
-    assert( proxyBroadPhase.GetTree( BodyType::Kinematic ).HasMoved() );
-    assert( proxyBroadPhase.GetTree( BodyType::Dynamic ).HasMoved() );
+    assert( proxyBroadPhase.GetTree( bodyType::Static ).HasMoved() == false );
+    assert( proxyBroadPhase.GetTree( bodyType::Kinematic ).HasMoved() );
+    assert( proxyBroadPhase.GetTree( bodyType::Dynamic ).HasMoved() );
 
-    proxyBroadPhase.CreateProxy( BodyType::Static, box, 14, true );
+    proxyBroadPhase.CreateProxy( bodyType::Static, box, 14, true );
 
-    assert( proxyBroadPhase.GetTree( BodyType::Static ).HasMoved() );
+    assert( proxyBroadPhase.GetTree( bodyType::Static ).HasMoved() );
 
     proxyBroadPhase.DestroyProxy( kinematicKey );
 
-    assert( proxyBroadPhase.GetTree( BodyType::Static ).GetProxyCount() == 2 );
-    assert( proxyBroadPhase.GetTree( BodyType::Kinematic ).GetProxyCount() == 0 );
-    assert( proxyBroadPhase.GetTree( BodyType::Dynamic ).GetProxyCount() == 1 );
+    assert( proxyBroadPhase.GetTree( bodyType::Static ).GetProxyCount() == 2 );
+    assert( proxyBroadPhase.GetTree( bodyType::Kinematic ).GetProxyCount() == 0 );
+    assert( proxyBroadPhase.GetTree( bodyType::Dynamic ).GetProxyCount() == 1 );
 
-    assert( proxyBroadPhase.GetTree( BodyType::Static ).Validate() );
-    assert( proxyBroadPhase.GetTree( BodyType::Kinematic ).Validate() );
-    assert( proxyBroadPhase.GetTree( BodyType::Dynamic ).Validate() );
+    assert( proxyBroadPhase.GetTree( bodyType::Static ).Validate() );
+    assert( proxyBroadPhase.GetTree( bodyType::Kinematic ).Validate() );
+    assert( proxyBroadPhase.GetTree( bodyType::Dynamic ).Validate() );
 
-    BroadPhase moveBroadPhase{};
+    broadPhase moveBroadPhase{};
 
-    const ProxyKey movedStaticKey = moveBroadPhase.CreateProxy( BodyType::Static, box, 21 );
+    const proxyKey movedStaticKey = moveBroadPhase.CreateProxy( bodyType::Static, box, 21 );
 
-    assert( moveBroadPhase.GetTree( BodyType::Static ).HasMoved() == false );
+    assert( moveBroadPhase.GetTree( bodyType::Static ).HasMoved() == false );
 
     const aabb2 movedBox{
         { 2.0f, 0.0f },
@@ -122,17 +122,17 @@ int main()
 
     moveBroadPhase.MoveProxy( movedStaticKey, movedBox );
 
-    assert( moveBroadPhase.GetTree( BodyType::Static ).HasMoved() );
+    assert( moveBroadPhase.GetTree( bodyType::Static ).HasMoved() );
 
-    const aabb2& proxyAABB = moveBroadPhase.GetTree( BodyType::Static ).GetProxyAABB( GetProxyId( movedStaticKey ) );
+    const aabb2& proxyAABB = moveBroadPhase.GetTree( bodyType::Static ).GetProxyAABB( GetProxyId( movedStaticKey ) );
 
     assert( proxyAABB.min.x == movedBox.min.x );
     assert( proxyAABB.min.y == movedBox.min.y );
     assert( proxyAABB.max.x == movedBox.max.x );
     assert( proxyAABB.max.y == movedBox.max.y );
-    assert( moveBroadPhase.GetTree( BodyType::Static ).Validate() );
+    assert( moveBroadPhase.GetTree( bodyType::Static ).Validate() );
 
-    BroadPhase pairBroadPhase{};
+    broadPhase pairBroadPhase{};
 
     const aabb2 pairBoxA{
         { 0.0f, 0.0f },
@@ -149,9 +149,9 @@ int main()
         { 11.0f, 1.0f }
     };
 
-    pairBroadPhase.CreateProxy( BodyType::Dynamic, pairBoxA, 31 );
-    pairBroadPhase.CreateProxy( BodyType::Dynamic, pairBoxB, 32 );
-    const ProxyKey pairKeyC = pairBroadPhase.CreateProxy( BodyType::Dynamic, pairBoxC, 33 );
+    pairBroadPhase.CreateProxy( bodyType::Dynamic, pairBoxA, 31 );
+    pairBroadPhase.CreateProxy( bodyType::Dynamic, pairBoxB, 32 );
+    const proxyKey pairKeyC = pairBroadPhase.CreateProxy( bodyType::Dynamic, pairBoxC, 33 );
 
     std::vector<std::pair<std::int32_t, std::int32_t>> pairs;
 
@@ -169,7 +169,7 @@ int main()
     assert( pairs.size() == 1 );
     assert( pairs[0] == initialPair );
 
-    pairBroadPhase.GetTree( BodyType::Dynamic ).ClearMoved();
+    pairBroadPhase.GetTree( bodyType::Dynamic ).ClearMoved();
     pairs.clear();
 
     pairBroadPhase.FindDynamicSelfPairs(
@@ -204,9 +204,9 @@ int main()
     };
 
     assert( pairs == expectedPairs );
-    assert( pairBroadPhase.GetTree( BodyType::Dynamic ).Validate() );
+    assert( pairBroadPhase.GetTree( bodyType::Dynamic ).Validate() );
 
-    BroadPhase crossBroadPhase{};
+    broadPhase crossBroadPhase{};
 
     const aabb2 staticBoxA{
         { 0.0f, 0.0f },
@@ -228,10 +228,10 @@ int main()
         { 21.0f, 1.0f }
     };
 
-    crossBroadPhase.CreateProxy( BodyType::Static, staticBoxA, 41 );
-    const ProxyKey staticKeyB = crossBroadPhase.CreateProxy( BodyType::Static, staticBoxB, 42 );
-    crossBroadPhase.CreateProxy( BodyType::Dynamic, dynamicBoxA, 51 );
-    crossBroadPhase.CreateProxy( BodyType::Dynamic, dynamicBoxB, 52 );
+    crossBroadPhase.CreateProxy( bodyType::Static, staticBoxA, 41 );
+    const proxyKey staticKeyB = crossBroadPhase.CreateProxy( bodyType::Static, staticBoxB, 42 );
+    crossBroadPhase.CreateProxy( bodyType::Dynamic, dynamicBoxA, 51 );
+    crossBroadPhase.CreateProxy( bodyType::Dynamic, dynamicBoxB, 52 );
 
     std::vector<std::pair<std::int32_t, std::int32_t>> crossPairs;
 
@@ -247,8 +247,8 @@ int main()
     assert( crossPairs.size() == 1 );
     assert( crossPairs[0] == initialCrossPair );
 
-    crossBroadPhase.GetTree( BodyType::Static ).ClearMoved();
-    crossBroadPhase.GetTree( BodyType::Dynamic ).ClearMoved();
+    crossBroadPhase.GetTree( bodyType::Static ).ClearMoved();
+    crossBroadPhase.GetTree( bodyType::Dynamic ).ClearMoved();
     crossPairs.clear();
 
     crossBroadPhase.FindDynamicStaticPairs(
@@ -279,10 +279,10 @@ int main()
 
     assert( crossPairs.size() == 1 );
     assert( crossPairs[0] == movedStaticPair );
-    assert( crossBroadPhase.GetTree( BodyType::Static ).Validate() );
-    assert( crossBroadPhase.GetTree( BodyType::Dynamic ).Validate() );
+    assert( crossBroadPhase.GetTree( bodyType::Static ).Validate() );
+    assert( crossBroadPhase.GetTree( bodyType::Dynamic ).Validate() );
 
-    BroadPhase kinematicCrossBroadPhase{};
+    broadPhase kinematicCrossBroadPhase{};
 
     const aabb2 kinematicBoxA{
         { 0.0f, 0.0f },
@@ -304,10 +304,10 @@ int main()
         { 21.0f, 1.0f }
     };
 
-    kinematicCrossBroadPhase.CreateProxy( BodyType::Kinematic, kinematicBoxA, 61 );
-    const ProxyKey kinematicKeyB = kinematicCrossBroadPhase.CreateProxy( BodyType::Kinematic, kinematicBoxB, 62 );
-    kinematicCrossBroadPhase.CreateProxy( BodyType::Dynamic, kinematicDynamicBoxA, 71 );
-    kinematicCrossBroadPhase.CreateProxy( BodyType::Dynamic, kinematicDynamicBoxB, 72 );
+    kinematicCrossBroadPhase.CreateProxy( bodyType::Kinematic, kinematicBoxA, 61 );
+    const proxyKey kinematicKeyB = kinematicCrossBroadPhase.CreateProxy( bodyType::Kinematic, kinematicBoxB, 62 );
+    kinematicCrossBroadPhase.CreateProxy( bodyType::Dynamic, kinematicDynamicBoxA, 71 );
+    kinematicCrossBroadPhase.CreateProxy( bodyType::Dynamic, kinematicDynamicBoxB, 72 );
 
     std::vector<std::pair<std::int32_t, std::int32_t>> kinematicPairs;
 
@@ -323,8 +323,8 @@ int main()
     assert( kinematicPairs.size() == 1 );
     assert( kinematicPairs[0] == initialKinematicPair );
 
-    kinematicCrossBroadPhase.GetTree( BodyType::Kinematic ).ClearMoved();
-    kinematicCrossBroadPhase.GetTree( BodyType::Dynamic ).ClearMoved();
+    kinematicCrossBroadPhase.GetTree( bodyType::Kinematic ).ClearMoved();
+    kinematicCrossBroadPhase.GetTree( bodyType::Dynamic ).ClearMoved();
     kinematicPairs.clear();
 
     kinematicCrossBroadPhase.FindDynamicKinematicPairs(
@@ -355,10 +355,10 @@ int main()
 
     assert( kinematicPairs.size() == 1 );
     assert( kinematicPairs[0] == movedKinematicPair );
-    assert( kinematicCrossBroadPhase.GetTree( BodyType::Kinematic ).Validate() );
-    assert( kinematicCrossBroadPhase.GetTree( BodyType::Dynamic ).Validate() );
+    assert( kinematicCrossBroadPhase.GetTree( bodyType::Kinematic ).Validate() );
+    assert( kinematicCrossBroadPhase.GetTree( bodyType::Dynamic ).Validate() );
 
-    BroadPhase candidateBroadPhase{};
+    broadPhase candidateBroadPhase{};
 
     const aabb2 candidateBox{
         { 0.0f, 0.0f },
@@ -369,11 +369,11 @@ int main()
     constexpr std::int32_t candidateStaticBase = 300;
     constexpr std::int32_t candidateStaticCount = 40;
 
-    candidateBroadPhase.CreateProxy( BodyType::Dynamic, candidateBox, candidateDynamicShape );
+    candidateBroadPhase.CreateProxy( bodyType::Dynamic, candidateBox, candidateDynamicShape );
 
     for( std::int32_t i = 0; i < candidateStaticCount; ++i )
     {
-        candidateBroadPhase.CreateProxy( BodyType::Static, candidateBox, candidateStaticBase + i );
+        candidateBroadPhase.CreateProxy( bodyType::Static, candidateBox, candidateStaticBase + i );
     }
 
     std::vector<std::pair<std::int32_t, std::int32_t>> candidatePairs;
@@ -388,7 +388,7 @@ int main()
     assert( candidatePairs.size() == candidateStaticCount );
 
     constexpr std::int32_t existingStaticShape = candidateStaticBase + 15;
-    const ShapePairKey existingPairKey = MakeShapePairKey( candidateDynamicShape, existingStaticShape );
+    const shapePairKey existingPairKey = MakeShapePairKey( candidateDynamicShape, existingStaticShape );
 
     assert( candidateBroadPhase.AddPair( existingPairKey ) == false );
 
@@ -423,7 +423,7 @@ int main()
 
     assert( candidatePairs.size() == candidateStaticCount );
 
-    BroadPhase combinedBroadPhase{};
+    broadPhase combinedBroadPhase{};
 
     const aabb2 selfBoxA{
         { 0.0f, 0.0f },
@@ -455,12 +455,12 @@ int main()
         { 21.5f, 1.0f }
     };
 
-    combinedBroadPhase.CreateProxy( BodyType::Dynamic, selfBoxA, 501 );
-    combinedBroadPhase.CreateProxy( BodyType::Dynamic, selfBoxB, 502 );
-    combinedBroadPhase.CreateProxy( BodyType::Dynamic, staticDynamicBox, 503 );
-    combinedBroadPhase.CreateProxy( BodyType::Dynamic, kinematicDynamicBox, 504 );
-    combinedBroadPhase.CreateProxy( BodyType::Static, staticCrossBox, 601 );
-    combinedBroadPhase.CreateProxy( BodyType::Kinematic, kinematicCrossBox, 701 );
+    combinedBroadPhase.CreateProxy( bodyType::Dynamic, selfBoxA, 501 );
+    combinedBroadPhase.CreateProxy( bodyType::Dynamic, selfBoxB, 502 );
+    combinedBroadPhase.CreateProxy( bodyType::Dynamic, staticDynamicBox, 503 );
+    combinedBroadPhase.CreateProxy( bodyType::Dynamic, kinematicDynamicBox, 504 );
+    combinedBroadPhase.CreateProxy( bodyType::Static, staticCrossBox, 601 );
+    combinedBroadPhase.CreateProxy( bodyType::Kinematic, kinematicCrossBox, 701 );
 
     std::vector<std::pair<std::int32_t, std::int32_t>> combinedPairs;
 
@@ -482,10 +482,10 @@ int main()
     assert( combinedPairs == expectedCombinedPairs );
 
     // pair 탐색과 moved 소비를 분리해 이후 Rebuild 단계에서 Box2D와 같은 lifecycle을 연결함.
-    assert( combinedBroadPhase.GetTree( BodyType::Dynamic ).HasMoved() );
-    assert( combinedBroadPhase.GetTree( BodyType::Kinematic ).HasMoved() );
+    assert( combinedBroadPhase.GetTree( bodyType::Dynamic ).HasMoved() );
+    assert( combinedBroadPhase.GetTree( bodyType::Kinematic ).HasMoved() );
 
-    BroadPhase updateBroadPhase{};
+    broadPhase updateBroadPhase{};
 
     const aabb2 updateDynamicA{
         { 0.0f, 0.0f },
@@ -517,19 +517,19 @@ int main()
         { 21.5f, 1.0f }
     };
 
-    updateBroadPhase.CreateProxy( BodyType::Dynamic, updateDynamicA, 801 );
-    updateBroadPhase.CreateProxy( BodyType::Dynamic, updateDynamicB, 802 );
-    updateBroadPhase.CreateProxy( BodyType::Dynamic, updateDynamicStatic, 803 );
+    updateBroadPhase.CreateProxy( bodyType::Dynamic, updateDynamicA, 801 );
+    updateBroadPhase.CreateProxy( bodyType::Dynamic, updateDynamicB, 802 );
+    updateBroadPhase.CreateProxy( bodyType::Dynamic, updateDynamicStatic, 803 );
 
     // static moved lifecycle도 검증하기 위해 pair 생성을 강제로 요청함.
-    updateBroadPhase.CreateProxy( BodyType::Static, updateStatic, 901, true );
+    updateBroadPhase.CreateProxy( bodyType::Static, updateStatic, 901, true );
 
-    updateBroadPhase.CreateProxy( BodyType::Dynamic, updateDynamicKinematic, 804 );
-    updateBroadPhase.CreateProxy( BodyType::Kinematic, updateKinematic, 1001 );
+    updateBroadPhase.CreateProxy( bodyType::Dynamic, updateDynamicKinematic, 804 );
+    updateBroadPhase.CreateProxy( bodyType::Kinematic, updateKinematic, 1001 );
 
-    assert( updateBroadPhase.GetTree( BodyType::Static ).HasMoved() );
-    assert( updateBroadPhase.GetTree( BodyType::Dynamic ).NeedsRebuild() );
-    assert( updateBroadPhase.GetTree( BodyType::Kinematic ).NeedsRebuild() );
+    assert( updateBroadPhase.GetTree( bodyType::Static ).HasMoved() );
+    assert( updateBroadPhase.GetTree( bodyType::Dynamic ).NeedsRebuild() );
+    assert( updateBroadPhase.GetTree( bodyType::Kinematic ).NeedsRebuild() );
 
     std::vector<std::pair<std::int32_t, std::int32_t>> updatePairs;
 
@@ -551,15 +551,15 @@ int main()
     assert( updatePairs == expectedUpdatePairs );
 
     // 한 update가 끝나면 static moved는 clear되고 dynamic / kinematic stale tree는 rebuild됨.
-    assert( updateBroadPhase.GetTree( BodyType::Static ).HasMoved() == false );
-    assert( updateBroadPhase.GetTree( BodyType::Dynamic ).HasMoved() == false );
-    assert( updateBroadPhase.GetTree( BodyType::Kinematic ).HasMoved() == false );
-    assert( updateBroadPhase.GetTree( BodyType::Dynamic ).NeedsRebuild() == false );
-    assert( updateBroadPhase.GetTree( BodyType::Kinematic ).NeedsRebuild() == false );
+    assert( updateBroadPhase.GetTree( bodyType::Static ).HasMoved() == false );
+    assert( updateBroadPhase.GetTree( bodyType::Dynamic ).HasMoved() == false );
+    assert( updateBroadPhase.GetTree( bodyType::Kinematic ).HasMoved() == false );
+    assert( updateBroadPhase.GetTree( bodyType::Dynamic ).NeedsRebuild() == false );
+    assert( updateBroadPhase.GetTree( bodyType::Kinematic ).NeedsRebuild() == false );
 
-    assert( updateBroadPhase.GetTree( BodyType::Static ).Validate() );
-    assert( updateBroadPhase.GetTree( BodyType::Dynamic ).Validate() );
-    assert( updateBroadPhase.GetTree( BodyType::Kinematic ).Validate() );
+    assert( updateBroadPhase.GetTree( bodyType::Static ).Validate() );
+    assert( updateBroadPhase.GetTree( bodyType::Dynamic ).Validate() );
+    assert( updateBroadPhase.GetTree( bodyType::Kinematic ).Validate() );
 
     updatePairs.clear();
 
@@ -576,7 +576,7 @@ int main()
     // 반대쪽 tree가 비어 있으면 empty root를 leaf처럼 취급해
     // shape 0과 가짜 (0, 0) pair를 만들면 안 됨.
     {
-        BroadPhase emptyCrossBroadPhase{};
+        broadPhase emptyCrossBroadPhase{};
 
         const aabb2 originSpanningBox{
             { -1.0f, -1.0f },
@@ -584,7 +584,7 @@ int main()
         };
 
         emptyCrossBroadPhase.CreateProxy(
-            BodyType::Dynamic,
+            bodyType::Dynamic,
             originSpanningBox,
             0
         );
@@ -608,7 +608,7 @@ int main()
         assert( emptyCrossPairs.empty() );
     }
 
-    BroadPhase sameBodyBroadPhase{};
+    broadPhase sameBodyBroadPhase{};
 
     const aabb2 sameBodyBoxA{
         { 0.0f, 0.0f },
@@ -620,10 +620,10 @@ int main()
         { 3.0f, 2.0f }
     };
 
-    sameBodyBroadPhase.CreateProxy( BodyType::Dynamic, sameBodyBoxA, 0 );
-    sameBodyBroadPhase.CreateProxy( BodyType::Dynamic, sameBodyBoxB, 1 );
+    sameBodyBroadPhase.CreateProxy( bodyType::Dynamic, sameBodyBoxA, 0 );
+    sameBodyBroadPhase.CreateProxy( bodyType::Dynamic, sameBodyBoxB, 1 );
 
-    std::array<Shape, 2> sameBodyShapes{};
+    std::array<shape, 2> sameBodyShapes{};
     sameBodyShapes[0].bodyId = 10;
     sameBodyShapes[1].bodyId = 10;
 
@@ -637,7 +637,7 @@ int main()
         }
     );
 
-    // 같은 Body에 속한 두 Shape는 BroadPhase overlap이 있어도 Contact 후보가 되지 않음.
+    // 같은 Body에 속한 두 shape는 broadPhase overlap이 있어도 Contact 후보가 되지 않음.
     assert( sameBodyPairs.empty() );
 
     sameBodyShapes[1].bodyId = 11;
@@ -655,7 +655,7 @@ int main()
     assert( sameBodyPairs.size() == 1 );
     assert( sameBodyPairs[0] == differentBodyPair );
 
-    BroadPhase sensorBroadPhase{};
+    broadPhase sensorBroadPhase{};
 
     const aabb2 sensorBoxA{
         { 0.0f, 0.0f },
@@ -667,10 +667,10 @@ int main()
         { 3.0f, 2.0f }
     };
 
-    sensorBroadPhase.CreateProxy( BodyType::Dynamic, sensorBoxA, 0 );
-    sensorBroadPhase.CreateProxy( BodyType::Dynamic, sensorBoxB, 1 );
+    sensorBroadPhase.CreateProxy( bodyType::Dynamic, sensorBoxA, 0 );
+    sensorBroadPhase.CreateProxy( bodyType::Dynamic, sensorBoxB, 1 );
 
-    std::array<Shape, 2> sensorShapes{};
+    std::array<shape, 2> sensorShapes{};
     sensorShapes[0].bodyId = 20;
     sensorShapes[1].bodyId = 21;
     sensorShapes[0].sensorIndex = 0;
@@ -688,7 +688,7 @@ int main()
     // Sensor overlap은 일반 Contact 생성 경로에서 제외됨.
     assert( sensorPairs.empty() );
 
-    sensorShapes[0].sensorIndex = Shape::NULL_INDEX;
+    sensorShapes[0].sensorIndex = shape::NULL_INDEX;
 
     sensorBroadPhase.FindDynamicSelfPairs(
         sensorShapes,
@@ -703,7 +703,7 @@ int main()
     assert( sensorPairs.size() == 1 );
     assert( sensorPairs[0] == nonSensorPair );
 
-    BroadPhase filteredUpdateBroadPhase{};
+    broadPhase filteredUpdateBroadPhase{};
 
     const aabb2 filterSelfBoxA{
         { 0.0f, 0.0f },
@@ -735,14 +735,14 @@ int main()
         { 23.0f, 2.0f }
     };
 
-    filteredUpdateBroadPhase.CreateProxy( BodyType::Dynamic, filterSelfBoxA, 0 );
-    filteredUpdateBroadPhase.CreateProxy( BodyType::Dynamic, filterSelfBoxB, 1 );
-    filteredUpdateBroadPhase.CreateProxy( BodyType::Dynamic, filterDynamicStaticBox, 2 );
-    filteredUpdateBroadPhase.CreateProxy( BodyType::Static, filterStaticBox, 3 );
-    filteredUpdateBroadPhase.CreateProxy( BodyType::Dynamic, filterDynamicKinematicBox, 4 );
-    filteredUpdateBroadPhase.CreateProxy( BodyType::Kinematic, filterKinematicBox, 5 );
+    filteredUpdateBroadPhase.CreateProxy( bodyType::Dynamic, filterSelfBoxA, 0 );
+    filteredUpdateBroadPhase.CreateProxy( bodyType::Dynamic, filterSelfBoxB, 1 );
+    filteredUpdateBroadPhase.CreateProxy( bodyType::Dynamic, filterDynamicStaticBox, 2 );
+    filteredUpdateBroadPhase.CreateProxy( bodyType::Static, filterStaticBox, 3 );
+    filteredUpdateBroadPhase.CreateProxy( bodyType::Dynamic, filterDynamicKinematicBox, 4 );
+    filteredUpdateBroadPhase.CreateProxy( bodyType::Kinematic, filterKinematicBox, 5 );
 
-    std::array<Shape, 6> filteredShapes{};
+    std::array<shape, 6> filteredShapes{};
 
     for( std::int32_t i = 0; i < static_cast<std::int32_t>( filteredShapes.size() ); ++i )
     {
@@ -782,10 +782,10 @@ int main()
     assert( filteredPairs.size() == 1 );
     assert( filteredPairs[0] == allowedFilteredPair );
 
-    // Shape-aware UpdatePairs도 기존 update lifecycle과 동일하게 moved / stale 상태를 소비함.
-    assert( filteredUpdateBroadPhase.GetTree( BodyType::Static ).HasMoved() == false );
-    assert( filteredUpdateBroadPhase.GetTree( BodyType::Dynamic ).NeedsRebuild() == false );
-    assert( filteredUpdateBroadPhase.GetTree( BodyType::Kinematic ).NeedsRebuild() == false );
+    // shape-aware UpdatePairs도 기존 update lifecycle과 동일하게 moved / stale 상태를 소비함.
+    assert( filteredUpdateBroadPhase.GetTree( bodyType::Static ).HasMoved() == false );
+    assert( filteredUpdateBroadPhase.GetTree( bodyType::Dynamic ).NeedsRebuild() == false );
+    assert( filteredUpdateBroadPhase.GetTree( bodyType::Kinematic ).NeedsRebuild() == false );
 
     return 0;
 }

@@ -5,9 +5,9 @@
 namespace zonai
 {
 
-// Solver가 반복해서 읽고 쓰는 Body의 운동 상태.
-// sleep / awake solver set이 도입되기 전까지는 World가 Body와 같은 stable slot index로 보관함.
-struct BodyState
+// Solver가 반복해서 읽고 쓰는 body의 운동 상태.
+// sleep / awake solver set이 도입되기 전까지는 world가 body와 같은 stable slot index로 보관함.
+struct bodyState
 {
     // center of mass의 world-space 선속도.
     // force / impulse / constraint solver는 모두 이 속도를 기준으로 계산함.

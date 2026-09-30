@@ -23,81 +23,81 @@ namespace zonai
 {
 
 template <typename Callback>
-concept WorldCollisionCallback =
+concept worldCollisionCallback =
     requires(
         Callback& callback,
-        const ContactData& contactData )
+        const contactData& contactData )
     {
         { callback( contactData ) } -> std::same_as<void>;
     };
 
-class World
+class world
 {
 public:
-    // 새 Body를 만들고 slot index + generation으로 구성된 외부 handle을 반환함.
-    [[nodiscard]] BodyId CreateBody( BodyType type = BodyType::Static, transform2 transform = {} );
+    // 새 body를 만들고 slot index + generation으로 구성된 외부 handle을 반환함.
+    [[nodiscard]] bodyId CreateBody( bodyType type = bodyType::Static, transform2 transform = {} );
 
-    // handle이 가리키는 Body와 연결된 Contact / Shape / proxy를 모두 정리함.
-    void DestroyBody( BodyId bodyId );
-
-
-    // local geometry를 Body에 연결하고 Shape handle을 반환함.
-    [[nodiscard]] ShapeId CreateShape( BodyId bodyId, ShapeGeometry geometry, Filter filter = {}, float density = 1.0f );
-
-    // handle이 가리키는 Shape의 Contact / proxy / Body list 연결을 정리함.
-    void DestroyShape( ShapeId shapeId );
+    // handle이 가리키는 body와 연결된 Contact / shape / proxy를 모두 정리함.
+    void DestroyBody( bodyId bodyId );
 
 
-    // Shape density를 변경하고 owning Dynamic Body의 mass data를 다시 계산함.
-    void SetShapeDensity( ShapeId shapeId, float density );
-    [[nodiscard]] float GetShapeDensity( ShapeId shapeId ) const;
+    // local geometry를 body에 연결하고 shape handle을 반환함.
+    [[nodiscard]] shapeId CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter = {}, float density = 1.0f );
 
-    // Body transform을 변경하고 연결된 모든 Shape proxy의 world AABB를 함께 갱신함.
-    void SetBodyTransform( BodyId bodyId, transform2 transform );
-
-    // Body의 simulation storage에 보관된 현재 world transform을 반환함.
-    [[nodiscard]] transform2 GetBodyTransform( BodyId bodyId ) const;
+    // handle이 가리키는 shape의 Contact / proxy / body list 연결을 정리함.
+    void DestroyShape( shapeId shapeId );
 
 
-    void SetBodyLinearVelocity( BodyId bodyId, vec2 linearVelocity );
-    [[nodiscard]] vec2 GetBodyLinearVelocity( BodyId bodyId ) const;
+    // shape density를 변경하고 owning Dynamic body의 mass data를 다시 계산함.
+    void SetShapeDensity( shapeId shapeId, float density );
+    [[nodiscard]] float GetShapeDensity( shapeId shapeId ) const;
 
-    void SetBodyAngularVelocity( BodyId bodyId, float angularVelocity );
-    [[nodiscard]] float GetBodyAngularVelocity( BodyId bodyId ) const;
+    // body transform을 변경하고 연결된 모든 shape proxy의 world AABB를 함께 갱신함.
+    void SetBodyTransform( bodyId bodyId, transform2 transform );
+
+    // body의 simulation storage에 보관된 현재 world transform을 반환함.
+    [[nodiscard]] transform2 GetBodyTransform( bodyId bodyId ) const;
 
 
-    [[nodiscard]] float GetBodyMass( BodyId bodyId ) const;
-    [[nodiscard]] float GetBodyRotationalInertia( BodyId bodyId ) const;
-    [[nodiscard]] vec2 GetBodyLocalCenter( BodyId bodyId ) const;
+    void SetBodyLinearVelocity( bodyId bodyId, vec2 linearVelocity );
+    [[nodiscard]] vec2 GetBodyLinearVelocity( bodyId bodyId ) const;
+
+    void SetBodyAngularVelocity( bodyId bodyId, float angularVelocity );
+    [[nodiscard]] float GetBodyAngularVelocity( bodyId bodyId ) const;
 
 
-    // World 전체 Dynamic Body에 적용되는 중력 가속도.
+    [[nodiscard]] float GetBodyMass( bodyId bodyId ) const;
+    [[nodiscard]] float GetBodyRotationalInertia( bodyId bodyId ) const;
+    [[nodiscard]] vec2 GetBodyLocalCenter( bodyId bodyId ) const;
+
+
+    // world 전체 Dynamic body에 적용되는 중력 가속도.
     void SetGravity( vec2 gravity );
     [[nodiscard]] vec2 GetGravity() const noexcept;
 
 
-    // Dynamic Body에 world-space 힘을 누적함.
+    // Dynamic body에 world-space 힘을 누적함.
     // point가 center of mass에서 벗어나 있으면 torque도 함께 누적됨.
-    void ApplyForce( BodyId bodyId, vec2 force, vec2 point );
+    void ApplyForce( bodyId bodyId, vec2 force, vec2 point );
 
     // center of mass에 힘을 가해 회전 없이 선가속도만 만듦.
-    void ApplyForceToCenter( BodyId bodyId, vec2 force );
+    void ApplyForceToCenter( bodyId bodyId, vec2 force );
 
-    // Dynamic Body에 z축 torque를 누적함.
-    void ApplyTorque( BodyId bodyId, float torque );
+    // Dynamic body에 z축 torque를 누적함.
+    void ApplyTorque( bodyId bodyId, float torque );
 
     // 아직 Step에서 소비되지 않은 누적 force / torque를 직접 제거함.
-    void ClearForces( BodyId bodyId );
+    void ClearForces( bodyId bodyId );
 
-    // Dynamic Body에 world-space linear impulse를 즉시 적용함.
+    // Dynamic body에 world-space linear impulse를 즉시 적용함.
     // point가 center of mass에서 벗어나 있으면 angular velocity도 함께 바뀜.
-    void ApplyLinearImpulse( BodyId bodyId, vec2 impulse, vec2 point );
+    void ApplyLinearImpulse( bodyId bodyId, vec2 impulse, vec2 point );
 
     // center of mass에 linear impulse를 적용해 선속도만 즉시 변경함.
-    void ApplyLinearImpulseToCenter( BodyId bodyId, vec2 impulse );
+    void ApplyLinearImpulseToCenter( bodyId bodyId, vec2 impulse );
 
-    // Dynamic Body의 angular velocity를 즉시 변경하는 z축 angular impulse.
-    void ApplyAngularImpulse( BodyId bodyId, float impulse );
+    // Dynamic body의 angular velocity를 즉시 변경하는 z축 angular impulse.
+    void ApplyAngularImpulse( bodyId bodyId, float impulse );
 
 
     // force / gravity, Contact solver, position integration을 순서대로 수행하고
@@ -105,16 +105,16 @@ public:
     void Step( float timeStep );
 
     // null / 범위 / generation / 활성 slot을 모두 확인함.
-    [[nodiscard]] bool IsValid( BodyId bodyId ) const noexcept;
-    [[nodiscard]] bool IsValid( ShapeId shapeId ) const noexcept;
-    [[nodiscard]] bool IsValid( ContactId contactId ) const noexcept;
+    [[nodiscard]] bool IsValid( bodyId bodyId ) const noexcept;
+    [[nodiscard]] bool IsValid( shapeId shapeId ) const noexcept;
+    [[nodiscard]] bool IsValid( contactId contactId ) const noexcept;
 
-    // 기존 Contact를 갱신하고 BroadPhase의 새 AABB pair는 persistent Contact로 생성함.
+    // 기존 Contact를 갱신하고 broadPhase의 새 AABB pair는 persistent Contact로 생성함.
     // callback은 현재 실제 접촉점이 존재하는 Contact만 받음.
-    template <WorldCollisionCallback Callback>
+    template <worldCollisionCallback Callback>
     void UpdateCollisions( Callback&& callback )
     {
-        // 기존 Contact는 BroadPhase에서 다시 후보로 나오지 않으므로 stable slot을 직접 갱신함.
+        // 기존 Contact는 broadPhase에서 다시 후보로 나오지 않으므로 stable slot을 직접 갱신함.
         for( std::int32_t contactId = 0;
              contactId < static_cast<std::int32_t>( contacts_.size() );
              ++contactId )
@@ -133,11 +133,11 @@ public:
             assert( static_cast<std::size_t>( contact.shapeIdA ) < shapes_.size() );
             assert( static_cast<std::size_t>( contact.shapeIdB ) < shapes_.size() );
 
-            const Shape& shapeA = shapes_[contact.shapeIdA];
-            const Shape& shapeB = shapes_[contact.shapeIdB];
+            const shape& shapeA = shapes_[contact.shapeIdA];
+            const shape& shapeB = shapes_[contact.shapeIdB];
 
-            assert( shapeA.proxyKey != Shape::NULL_INDEX );
-            assert( shapeB.proxyKey != Shape::NULL_INDEX );
+            assert( shapeA.proxyKey != shape::NULL_INDEX );
+            assert( shapeB.proxyKey != shape::NULL_INDEX );
 
             const aabb2& aabbA =
                 broadPhase_
@@ -161,8 +161,8 @@ public:
             assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
             assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
 
-            const BodySim& bodySimA = bodySims_[shapeA.bodyId];
-            const BodySim& bodySimB = bodySims_[shapeB.bodyId];
+            const bodySim& bodySimA = bodySims_[shapeA.bodyId];
+            const bodySim& bodySimB = bodySims_[shapeB.bodyId];
 
             assert( bodySimA.bodyId == shapeA.bodyId );
             assert( bodySimB.bodyId == shapeB.bodyId );
@@ -192,7 +192,7 @@ public:
 
         // 기존 pair는 pairSet이 걸러주므로 여기에는 새 AABB pair만 들어옴.
         broadPhase_.UpdatePairs(
-            std::span<const Shape>{ shapes_.data(), shapes_.size() },
+            std::span<const shape>{ shapes_.data(), shapes_.size() },
             [this, &callback](
                 std::int32_t shapeIdA,
                 std::int32_t shapeIdB )
@@ -202,15 +202,15 @@ public:
                 assert( static_cast<std::size_t>( shapeIdA ) < shapes_.size() );
                 assert( static_cast<std::size_t>( shapeIdB ) < shapes_.size() );
 
-                const Shape& shapeA = shapes_[shapeIdA];
-                const Shape& shapeB = shapes_[shapeIdB];
+                const shape& shapeA = shapes_[shapeIdA];
+                const shape& shapeB = shapes_[shapeIdB];
 
                 assert( shapeA.bodyId >= 0 );
                 assert( shapeB.bodyId >= 0 );
                 assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
                 assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
 
-                // 같은 Body에 연결된 Shape끼리는 self collision을 만들지 않음.
+                // 같은 body에 연결된 shape끼리는 self collision을 만들지 않음.
                 if( shapeA.bodyId == shapeB.bodyId )
                 {
                     return;
@@ -221,8 +221,8 @@ public:
                     return;
                 }
 
-                const BodySim& bodySimA = bodySims_[shapeA.bodyId];
-                const BodySim& bodySimB = bodySims_[shapeB.bodyId];
+                const bodySim& bodySimA = bodySims_[shapeA.bodyId];
+                const bodySim& bodySimB = bodySims_[shapeB.bodyId];
 
                 assert( bodySimA.bodyId == shapeA.bodyId );
                 assert( bodySimB.bodyId == shapeB.bodyId );
@@ -249,25 +249,25 @@ public:
         );
     }
 
-    [[nodiscard]] const Body& GetBody( BodyId bodyId ) const;
-    [[nodiscard]] const Shape& GetShape( ShapeId shapeId ) const;
+    [[nodiscard]] const body& GetBody( bodyId bodyId ) const;
+    [[nodiscard]] const shape& GetShape( shapeId shapeId ) const;
 
     // 내부 Contact를 public snapshot으로 변환해 반환함.
-    [[nodiscard]] ContactData GetContactData( ContactId contactId ) const;
+    [[nodiscard]] contactData GetContactData( contactId contactId ) const;
 
-    // Body에 연결된 Contact 전체 개수. 실제 touching Contact 수보다 클 수 있음.
-    [[nodiscard]] std::size_t GetBodyContactCapacity( BodyId bodyId ) const;
+    // body에 연결된 Contact 전체 개수. 실제 touching Contact 수보다 클 수 있음.
+    [[nodiscard]] std::size_t GetBodyContactCapacity( bodyId bodyId ) const;
 
-    // Body에 연결된 touching Contact만 output에 채우고 실제 작성 개수를 반환함.
-    [[nodiscard]] std::size_t GetBodyContactData( BodyId bodyId, std::span<ContactData> output ) const;
+    // body에 연결된 touching Contact만 output에 채우고 실제 작성 개수를 반환함.
+    [[nodiscard]] std::size_t GetBodyContactData( bodyId bodyId, std::span<contactData> output ) const;
 
-    // Shape가 속한 Body의 Contact 개수이므로 보수적인 capacity임.
-    [[nodiscard]] std::size_t GetShapeContactCapacity( ShapeId shapeId ) const;
+    // shape가 속한 body의 Contact 개수이므로 보수적인 capacity임.
+    [[nodiscard]] std::size_t GetShapeContactCapacity( shapeId shapeId ) const;
 
-    // 이 Shape가 실제로 참여한 touching Contact만 output에 채움.
-    [[nodiscard]] std::size_t GetShapeContactData( ShapeId shapeId, std::span<ContactData> output ) const;
+    // 이 shape가 실제로 참여한 touching Contact만 output에 채움.
+    [[nodiscard]] std::size_t GetShapeContactData( shapeId shapeId, std::span<contactData> output ) const;
 
-    [[nodiscard]] const BroadPhase& GetBroadPhase() const noexcept
+    [[nodiscard]] const broadPhase& GetBroadPhase() const noexcept
     {
         return broadPhase_;
     }
@@ -288,30 +288,30 @@ public:
     }
 
 private:
-    [[nodiscard]] std::int32_t GetBodyIndex( BodyId bodyId ) const;
-    [[nodiscard]] std::int32_t GetShapeIndex( ShapeId shapeId ) const;
-    [[nodiscard]] std::int32_t GetContactIndex( ContactId contactId ) const;
+    [[nodiscard]] std::int32_t GetBodyIndex( bodyId bodyId ) const;
+    [[nodiscard]] std::int32_t GetShapeIndex( shapeId shapeId ) const;
+    [[nodiscard]] std::int32_t GetContactIndex( contactId contactId ) const;
 
-    [[nodiscard]] BodyId MakeBodyId( std::int32_t bodyIndex ) const;
-    [[nodiscard]] ShapeId MakeShapeId( std::int32_t shapeIndex ) const;
-    [[nodiscard]] ContactId MakeContactId( std::int32_t contactIndex ) const;
-    [[nodiscard]] ContactData MakeContactData( std::int32_t contactIndex ) const;
+    [[nodiscard]] bodyId MakeBodyId( std::int32_t bodyIndex ) const;
+    [[nodiscard]] shapeId MakeShapeId( std::int32_t shapeIndex ) const;
+    [[nodiscard]] contactId MakeContactId( std::int32_t contactIndex ) const;
+    [[nodiscard]] contactData MakeContactData( std::int32_t contactIndex ) const;
 
     void DestroyBodyByIndex( std::int32_t bodyIndex );
     void DestroyShapeByIndex( std::int32_t shapeIndex );
 
-    // BodySim transform을 기준으로 이 Body의 모든 Shape proxy를 BroadPhase에 동기화함.
+    // bodySim transform을 기준으로 이 body의 모든 shape proxy를 broadPhase에 동기화함.
     void SyncBodyProxies( std::int32_t bodyIndex );
 
-    // 연결된 Shape들의 density / geometry를 합산해 Dynamic Body의 mass data를 갱신함.
+    // 연결된 shape들의 density / geometry를 합산해 Dynamic body의 mass data를 갱신함.
     void UpdateBodyMassData( std::int32_t bodyIndex );
 
-    // stable Contact slot을 할당하고 두 Body의 intrusive contact list에 연결함.
+    // stable Contact slot을 할당하고 두 body의 intrusive contact list에 연결함.
     [[nodiscard]] std::int32_t CreateContact(
         std::int32_t shapeIdA, std::int32_t shapeIdB,
         const localManifold2& manifold );
 
-    // 현재 BodySim / narrow-phase manifold를 solver용 ContactSim에 동기화함.
+    // 현재 bodySim / narrow-phase manifold를 solver용 ContactSim에 동기화함.
     void UpdateContactSim(
         std::int32_t contactId,
         const localManifold2& manifold );
@@ -320,7 +320,7 @@ private:
     [[nodiscard]] std::vector<contactConstraint2> PrepareContactConstraints(
         float timeStep );
 
-    // 이전 step의 cached impulse를 Body velocity에 먼저 적용함.
+    // 이전 step의 cached impulse를 body velocity에 먼저 적용함.
     void WarmStartContacts(
         std::span<const contactConstraint2> constraints );
 
@@ -334,40 +334,40 @@ private:
     void StoreContactConstraintImpulses(
         std::span<const contactConstraint2> constraints );
 
-    // Body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함.
+    // body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함.
     void DestroyContact( std::int32_t contactId );
 
     /// body
     // bodyId가 변하지 않는 stable slot storage.
-    std::vector<Body> bodies_;
+    std::vector<body> bodies_;
 
-    // solver set 도입 전까지 Body와 같은 stable slot index로 보관하는 simulation 데이터.
-    std::vector<BodySim> bodySims_;
+    // solver set 도입 전까지 body와 같은 stable slot index로 보관하는 simulation 데이터.
+    std::vector<bodySim> bodySims_;
 
-    // solver set 도입 전까지 Body와 같은 stable slot index로 보관하는 운동 상태.
-    std::vector<BodyState> bodyStates_;
+    // solver set 도입 전까지 body와 같은 stable slot index로 보관하는 운동 상태.
+    std::vector<bodyState> bodyStates_;
 
-    // 제거된 Body slot 재사용을 위한 free-list head.
-    std::int32_t bodyFreeList_ = Body::NULL_INDEX;
+    // 제거된 body slot 재사용을 위한 free-list head.
+    std::int32_t bodyFreeList_ = body::NULL_INDEX;
 
-    // bodies_.size()와 별개인 현재 활성 Body 개수.
+    // bodies_.size()와 별개인 현재 활성 body 개수.
     std::size_t bodyCount_ = 0;
 
 
     /// shape
     // shapeId가 변하지 않는 stable slot storage.
-    std::vector<Shape> shapes_;
+    std::vector<shape> shapes_;
 
-    // 제거된 Shape slot 재사용을 위한 free-list head.
-    std::int32_t shapeFreeList_ = Shape::NULL_INDEX;
+    // 제거된 shape slot 재사용을 위한 free-list head.
+    std::int32_t shapeFreeList_ = shape::NULL_INDEX;
 
-    // shapes_.size()와 별개인 현재 활성 Shape 개수.
+    // shapes_.size()와 별개인 현재 활성 shape 개수.
     std::size_t shapeCount_ = 0;
 
 
     /// contact
     // contactId가 변하지 않는 stable slot storage.
-    // 수명 / Shape 연결 / Body intrusive list 같은 cold data를 보관함.
+    // 수명 / shape 연결 / body intrusive list 같은 cold data를 보관함.
     std::vector<contact2> contacts_;
 
     // solver set 도입 전까지 Contact와 같은 stable slot index로 보관하는 hot data.
@@ -379,11 +379,11 @@ private:
     // contacts_.size()와 별개인 현재 활성 Contact 개수.
     std::size_t contactCount_ = 0;
 
-    // 모든 Dynamic Body에 적용되는 world-space 중력 가속도.
+    // 모든 Dynamic body에 적용되는 world-space 중력 가속도.
     vec2 gravity_{ 0.0f, -10.0f };
 
-    // 모든 Shape의 broad-phase proxy를 body type별 DynamicTree에 관리함.
-    BroadPhase broadPhase_;
+    // 모든 shape의 broad-phase proxy를 body type별 DynamicTree에 관리함.
+    broadPhase broadPhase_;
 };
 
 } // namespace zonai

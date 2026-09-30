@@ -9,7 +9,7 @@ namespace zonai
 {
 
 aabb2 ComputeShapeAABB(
-    const ShapeGeometry& geometry,
+    const shapeGeometry& geometry,
     const transform2& transform )
 {
     return std::visit(
@@ -67,7 +67,7 @@ aabb2 ComputeShapeAABB(
     );
 }
 
-massData2 ComputeShapeMass( const Shape& shape )
+massData2 ComputeShapeMass( const shape& shape )
 {
     if( shape.density == 0.0f )
     {
