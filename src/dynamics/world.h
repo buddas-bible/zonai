@@ -100,8 +100,8 @@ public:
     void ApplyAngularImpulse( BodyId bodyId, float impulse );
 
 
-    // force / gravity로 velocity를 갱신한 뒤 non-static Body를 적분하고
-    // proxy / Contact 상태를 갱신함. constraint solver는 아직 포함하지 않음.
+    // force / gravity, Contact solver, position integration을 순서대로 수행하고
+    // 이동한 proxy / Contact 상태를 다음 step 기준으로 갱신함.
     void Step( float timeStep );
 
     // null / 범위 / generation / 활성 slot을 모두 확인함.
@@ -316,8 +316,23 @@ private:
         std::int32_t contactId,
         const localManifold2& manifold );
 
-    // touching Contact를 transient constraint로 준비하고 normal impulse를 반복해서 풂.
-    void SolveContacts();
+    // touching Contact를 이번 step의 transient solver constraint로 변환함.
+    [[nodiscard]] std::vector<contactConstraint2> PrepareContactConstraints(
+        float timeStep );
+
+    // 이전 step의 cached impulse를 Body velocity에 먼저 적용함.
+    void WarmStartContacts(
+        std::span<const contactConstraint2> constraints );
+
+    // normal constraint를 반복해서 풂.
+    // useBias=true는 penetration push, false는 적분 후 velocity relaxation임.
+    void SolveContactConstraints(
+        std::span<contactConstraint2> constraints,
+        bool useBias );
+
+    // 최종 누적 impulse를 persistent ContactSim으로 되돌림.
+    void StoreContactConstraintImpulses(
+        std::span<const contactConstraint2> constraints );
 
     // Body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함.
     void DestroyContact( std::int32_t contactId );

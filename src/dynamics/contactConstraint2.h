@@ -11,6 +11,21 @@
 namespace zonai
 {
 
+// Contact penetration을 부드럽게 줄이기 위한 solver softness.
+// massScale + impulseScale = 1 관계를 이용해 correction을 안정적으로 감쇠함.
+struct contactSoftness2
+{
+    float biasRate = 0.0f;
+    float massScale = 1.0f;
+    float impulseScale = 0.0f;
+};
+
+// Hertz / damping ratio를 한 step에서 사용할 softness 계수로 변환함.
+[[nodiscard]] contactSoftness2 MakeContactSoftness(
+    float hertz,
+    float dampingRatio,
+    float timeStep );
+
 // Contact solver가 한 접촉점에 대해 반복해서 사용하는 계산 결과.
 struct contactConstraintPoint2
 {
@@ -50,6 +65,12 @@ struct contactConstraint2
     float invMassB = 0.0f;
     float invInertiaB = 0.0f;
 
+    // penetration correction에서 사용할 soft constraint 계수.
+    contactSoftness2 softness{};
+
+    // correction 때문에 한 step에서 만들어질 수 있는 최대 분리 속도.
+    float maxPushSpeed = 0.0f;
+
     std::array<contactConstraintPoint2, MAX_MANIFOLD_POINTS> points{};
     int pointCount = 0;
 };
@@ -70,11 +91,13 @@ void WarmStartContactConstraint(
     BodyState& bodyStateB );
 
 // 한 Contact의 normal constraint를 한 번 풀어 Body velocity에 impulse를 적용함.
-// 여러 Contact를 여러 번 반복 호출하면 sequential impulse solver가 됨.
+// useBias=true면 penetration을 줄이는 soft push를 포함하고,
+// false면 correction bias 없이 순수 velocity constraint만 풂.
 void SolveContactConstraint(
     contactConstraint2& constraint,
     BodyState& bodyStateA,
-    BodyState& bodyStateB );
+    BodyState& bodyStateB,
+    bool useBias );
 
 // 이번 step에서 수렴한 누적 impulse를 persistent ContactSim에 저장함.
 void StoreContactImpulses(

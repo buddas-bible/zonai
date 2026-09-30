@@ -1,5 +1,6 @@
 #include "dynamics/world.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <limits>
@@ -953,12 +954,14 @@ void World::Step( float timeStep )
         *
         * 1. force / gravity로 velocity 갱신
         * 2. 현재 transform의 Contact manifold 갱신
-        * 3. Contact normal constraint를 풀어 velocity 보정
-        * 4. 보정된 velocity로 transform 적분
-        * 5. proxy 이동 후 Contact를 다시 갱신
+        * 3. Contact constraint 준비 + warm start
+        * 4. soft push로 penetration correction 속도 생성
+        * 5. 보정된 velocity로 transform 적분
+        * 6. bias 없이 다시 풀어 correction 속도 제거(relax)
+        * 7. 최종 normal impulse 저장
         *
-        * Solver를 position 적분보다 먼저 실행해야 이미 생성된 Contact가
-        * 다음 frame에 더 깊게 파고드는 것을 막을 수 있음.
+        * Push에서 만든 분리 속도는 position을 회복시키는 데만 사용하고
+        * Relax가 적분 뒤 제거하므로 보정 자체가 운동 에너지로 남지 않음.
         */
 
         // -----------------------------------------------------
@@ -1031,12 +1034,23 @@ void World::Step( float timeStep )
         );
 
         // -----------------------------------------------------
-        // 3. Solve normal contact constraints
+        // 3. Prepare + warm start
         // -----------------------------------------------------
-        SolveContacts();
+        std::vector<contactConstraint2> contactConstraints =
+            PrepareContactConstraints( timeStep );
+
+        WarmStartContacts( contactConstraints );
 
         // -----------------------------------------------------
-        // 4. Integrate positions
+        // 4. Solve with penetration bias
+        // -----------------------------------------------------
+        SolveContactConstraints(
+            contactConstraints,
+            true
+        );
+
+        // -----------------------------------------------------
+        // 5. Integrate positions
         // -----------------------------------------------------
         for( std::int32_t bodyIndex = 0;
              bodyIndex < static_cast<std::int32_t>( bodies_.size() );
@@ -1058,6 +1072,8 @@ void World::Step( float timeStep )
             *
             * velocity는 force와 Contact Solver에서 먼저 갱신됐고,
             * 여기서는 그 최종 velocity로 COM transform을 적분함.
+            *
+            * penetration이 있으면 이 velocity에는 push correction도 포함되어 있음.
             *
             *     x(t + dt) = x(t) + v(t + dt) * dt
             */
@@ -1088,6 +1104,24 @@ void World::Step( float timeStep )
 
             SyncBodyProxies( bodyIndex );
         }
+
+        // -----------------------------------------------------
+        // 6. Relax contact velocities
+        // -----------------------------------------------------
+        // position은 이미 push velocity로 이동했으므로,
+        // 이제 bias 없이 같은 constraint를 다시 풀어
+        // correction 때문에 생긴 분리 속도만 제거함.
+        SolveContactConstraints(
+            contactConstraints,
+            false
+        );
+
+        // -----------------------------------------------------
+        // 7. Store impulses
+        // -----------------------------------------------------
+        StoreContactConstraintImpulses(
+            contactConstraints
+        );
     }
 
     // 이동 후 새 BroadPhase pair와 manifold를 만들어 다음 Step의 solver가 사용할
@@ -1494,19 +1528,51 @@ void World::UpdateContactSim(
     }
 }
 
-void World::SolveContacts()
+std::vector<contactConstraint2> World::PrepareContactConstraints(
+    float timeStep )
 {
-    constexpr int VELOCITY_ITERATIONS = 8;
+    assert( std::isfinite( timeStep ) );
+    assert( timeStep > 0.0f );
+
+    /*
+    * 현재 Box2D contact softness의 기본값을 시작점으로 사용함.
+    * 아직 WorldDef / solver tuning API가 없으므로 내부 상수로 둠.
+    *
+    * 큰 timeStep에서는 Hertz를 낮춰 한 step에서 지나치게 강한
+    * correction을 만들지 않도록 제한함.
+    */
+    constexpr float CONTACT_HERTZ = 30.0f;
+    constexpr float CONTACT_DAMPING_RATIO = 10.0f;
+    constexpr float MAX_CONTACT_PUSH_SPEED = 3.0f;
+
+    const float invTimeStep =
+        1.0f / timeStep;
+
+    const float contactHertz =
+        std::min(
+            CONTACT_HERTZ,
+            0.125f * invTimeStep
+        );
+
+    const contactSoftness2 contactSoftness =
+        MakeContactSoftness(
+            contactHertz,
+            CONTACT_DAMPING_RATIO,
+            timeStep
+        );
+
+    // Static contact는 지면을 뚫고 내려가는 현상을 줄이기 위해
+    // 일반 dynamic contact보다 조금 더 단단하게 풂.
+    const contactSoftness2 staticSoftness =
+        MakeContactSoftness(
+            2.0f * contactHertz,
+            CONTACT_DAMPING_RATIO,
+            timeStep
+        );
 
     std::vector<contactConstraint2> constraints;
     constraints.reserve( contactCount_ );
 
-    /*
-    * Prepare
-    *
-    * persistent ContactSim 중 실제 manifold point가 있는 Contact만
-    * 이번 Step에서 사용할 transient solver constraint로 변환함.
-    */
     for( const contactSim2& contactSim : contactSims_ )
     {
         if( contactSim.contactId == contactSim2::NULL_INDEX ||
@@ -1535,40 +1601,64 @@ void World::SolveContacts()
         const BodyState& bodyStateB =
             bodyStates_[contactSim.bodyIdB];
 
-        constraints.push_back(
+        contactConstraint2 constraint =
             PrepareContactConstraint(
                 contactSim,
                 bodySimA,
                 bodyStateA,
                 bodySimB,
                 bodyStateB
-            )
-        );
+            );
+
+        const bool hasStaticBody =
+            bodies_[contactSim.bodyIdA].type == BodyType::Static ||
+            bodies_[contactSim.bodyIdB].type == BodyType::Static;
+
+        constraint.softness =
+            hasStaticBody
+                ? staticSoftness
+                : contactSoftness;
+
+        constraint.maxPushSpeed =
+            MAX_CONTACT_PUSH_SPEED;
+
+        constraints.push_back( constraint );
     }
 
-    /*
-    * Warm start
-    *
-    * 이전 step에서 수렴한 누적 impulse를 먼저 적용함.
-    * 같은 접촉 상태가 이어질 때 solver가 0부터 다시 시작하지 않게 함.
-    */
+    return constraints;
+}
+
+void World::WarmStartContacts(
+    std::span<const contactConstraint2> constraints )
+{
     for( const contactConstraint2& constraint : constraints )
     {
+        assert( constraint.bodyIdA >= 0 );
+        assert( constraint.bodyIdB >= 0 );
+
         WarmStartContactConstraint(
             constraint,
             bodyStates_[constraint.bodyIdA],
             bodyStates_[constraint.bodyIdB]
         );
     }
+}
+
+void World::SolveContactConstraints(
+    std::span<contactConstraint2> constraints,
+    bool useBias )
+{
+    constexpr int VELOCITY_ITERATIONS = 8;
 
     /*
-    * Sequential impulse
+    * Contact 하나를 풀 때 velocity가 즉시 바뀌고
+    * 다음 Contact가 그 결과를 사용하므로 sequential impulse가 됨.
     *
-    * Contact 하나를 풀 때 Body velocity가 즉시 바뀌고,
-    * 다음 Contact는 그 갱신된 velocity를 사용함.
+    * useBias=true:
+    *     penetration correction을 포함한 soft push
     *
-    * 한 번의 순회로는 여러 Contact가 서로 영향을 주는 값을 충분히 전파하지 못하므로
-    * 같은 constraint 목록을 여러 번 반복함.
+    * useBias=false:
+    *     position 적분 뒤 correction velocity를 제거하는 rigid relax
     */
     for( int iteration = 0;
          iteration < VELOCITY_ITERATIONS;
@@ -1582,17 +1672,16 @@ void World::SolveContacts()
             SolveContactConstraint(
                 constraint,
                 bodyStates_[constraint.bodyIdA],
-                bodyStates_[constraint.bodyIdB]
+                bodyStates_[constraint.bodyIdB],
+                useBias
             );
         }
     }
+}
 
-    /*
-    * Store impulses
-    *
-    * 이번 step에서 수렴한 누적 impulse를 ContactSim에 되돌려 저장함.
-    * 다음 narrow-phase 갱신 때 point id가 유지되면 이 값이 다시 이어짐.
-    */
+void World::StoreContactConstraintImpulses(
+    std::span<const contactConstraint2> constraints )
+{
     for( const contactConstraint2& constraint : constraints )
     {
         assert( constraint.contactId >= 0 );
@@ -1606,7 +1695,6 @@ void World::SolveContacts()
             contactSims_[constraint.contactId]
         );
     }
-
 }
 
 void World::DestroyContact( std::int32_t contactId )

@@ -204,7 +204,8 @@ int main()
         SolveContactConstraint(
             constraint,
             bodyStateA,
-            bodyStateB
+            bodyStateB,
+            false
         );
 
         // DeltaLambda = -normalMass * vn
@@ -246,7 +247,8 @@ int main()
         SolveContactConstraint(
             constraint,
             bodyStateA,
-            bodyStateB
+            bodyStateB,
+            false
         );
 
         assert(
@@ -350,13 +352,105 @@ int main()
         SolveContactConstraint(
             constraint,
             bodyStateA,
-            bodyStateB
+            bodyStateB,
+            false
         );
 
         assert(
             NearlyEqual(
                 point.normalImpulse,
                 6.0f
+            )
+        );
+    }
+
+    // Hertz / damping ratio로 만든 softness는 massScale + impulseScale = 1을 유지함.
+    {
+        const contactSoftness2 softness =
+            MakeContactSoftness(
+                7.5f,
+                10.0f,
+                1.0f / 60.0f
+            );
+
+        assert( softness.biasRate > 0.0f );
+        assert( softness.massScale > 0.0f );
+        assert( softness.massScale < 1.0f );
+        assert( softness.impulseScale > 0.0f );
+        assert( softness.impulseScale < 1.0f );
+        assert(
+            NearlyEqual(
+                softness.massScale + softness.impulseScale,
+                1.0f
+            )
+        );
+    }
+
+    // Push는 penetration을 줄일 분리 속도를 만들고,
+    // position 적분 뒤의 Relax는 그 보정 속도를 다시 제거할 수 있음.
+    {
+        contactConstraint2 constraint{};
+        constraint.bodyIdA = 0;
+        constraint.bodyIdB = 1;
+        constraint.normal = { 1.0f, 0.0f };
+        constraint.invMassA = 0.0f;
+        constraint.invMassB = 1.0f;
+        constraint.softness.biasRate = 2.0f;
+        constraint.softness.massScale = 0.5f;
+        constraint.softness.impulseScale = 0.5f;
+        constraint.maxPushSpeed = 3.0f;
+        constraint.pointCount = 1;
+
+        contactConstraintPoint2& point =
+            constraint.points[0];
+
+        point.separation = -0.1f;
+        point.normalMass = 1.0f;
+
+        BodyState bodyStateA{};
+        BodyState bodyStateB{};
+
+        SolveContactConstraint(
+            constraint,
+            bodyStateA,
+            bodyStateB,
+            true
+        );
+
+        // velocityBias = 0.5 * 2 * -0.1 = -0.1
+        // DeltaLambda = -(0 + -0.1) = 0.1
+        assert(
+            NearlyEqual(
+                bodyStateB.linearVelocity.x,
+                0.1f
+            )
+        );
+        assert(
+            NearlyEqual(
+                point.normalImpulse,
+                0.1f
+            )
+        );
+
+        // 실제 World::Step에서는 여기 사이에 position integration이 일어남.
+        // Relax는 correction velocity만 제거하고 이미 이동한 position은 보존함.
+        SolveContactConstraint(
+            constraint,
+            bodyStateA,
+            bodyStateB,
+            false
+        );
+
+        assert(
+            NearlyEqual(
+                bodyStateB.linearVelocity.x,
+                0.0f
+            )
+        );
+        assert(
+            NearlyEqual(
+                point.normalImpulse,
+                0.0f
             )
         );
     }

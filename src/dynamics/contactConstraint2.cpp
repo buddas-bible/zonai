@@ -2,9 +2,51 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
+#include <numbers>
 
 namespace zonai
 {
+
+contactSoftness2 MakeContactSoftness(
+    float hertz,
+    float dampingRatio,
+    float timeStep )
+{
+    assert( std::isfinite( hertz ) );
+    assert( std::isfinite( dampingRatio ) );
+    assert( std::isfinite( timeStep ) );
+    assert( hertz >= 0.0f );
+    assert( dampingRatio >= 0.0f );
+    assert( timeStep >= 0.0f );
+
+    // Hertz가 0이면 penetration bias만 끄고
+    // 기존 rigid normal solve 동작은 그대로 유지함.
+    if( hertz == 0.0f || timeStep == 0.0f )
+    {
+        return {};
+    }
+
+    const float omega =
+        2.0f * std::numbers::pi_v<float> * hertz;
+
+    const float a1 =
+        2.0f * dampingRatio +
+        timeStep * omega;
+
+    const float a2 =
+        timeStep * omega * a1;
+
+    const float a3 =
+        1.0f / ( 1.0f + a2 );
+
+    contactSoftness2 softness{};
+    softness.biasRate = omega / a1;
+    softness.massScale = a2 * a3;
+    softness.impulseScale = a3;
+
+    return softness;
+}
 
 contactConstraint2 PrepareContactConstraint(
     const contactSim2& contactSim,
@@ -239,7 +281,8 @@ void WarmStartContactConstraint(
 void SolveContactConstraint(
     contactConstraint2& constraint,
     BodyState& bodyStateA,
-    BodyState& bodyStateB )
+    BodyState& bodyStateB,
+    bool useBias )
 {
     vec2 linearVelocityA =
         bodyStateA.linearVelocity;
@@ -285,25 +328,63 @@ void SolveContactConstraint(
             );
 
         /*
-        * normal 방향 상대속도를 0으로 만들기 위한 incremental impulse:
+        * penetration correction은 실제 위치를 바로 순간이동시키지 않고
+        * 이번 position integration에서 사용할 분리 속도를 만들어냄.
         *
-        *     DeltaLambda = -normalMass * vn
+        * separation < 0이면:
         *
-        * 하지만 Contact는 두 Body를 서로 당길 수 없음.
-        * 따라서 누적 impulse lambda는 항상 0 이상이어야 함.
+        *     velocityBias =
+        *         massScale * biasRate * separation
         *
-        *     lambdaNew = max( lambdaOld + DeltaLambda, 0 )
-        *     DeltaLambda = lambdaNew - lambdaOld
+        * separation이 음수이므로 velocityBias도 음수이고,
+        * solver는 이를 상쇄하기 위해 +normal impulse를 생성함.
         *
-        * 이미 서로 멀어지고 있으면 vn > 0이므로
-        * 음수 impulse가 clamp되어 아무 힘도 가하지 않음.
+        * soft constraint:
+        *
+        *     DeltaLambda =
+        *         -normalMass *
+        *          ( massScale * vn + velocityBias )
+        *         -impulseScale * lambdaOld
+        *
+        * useBias=false인 relax 단계에서는
+        * massScale=1, impulseScale=0, velocityBias=0으로 돌아가
+        * 기존 rigid velocity constraint와 같은 식이 됨.
         */
+        float massScale = 1.0f;
+        float impulseScale = 0.0f;
+        float velocityBias = 0.0f;
+
+        if( useBias && point.separation <= 0.0f )
+        {
+            massScale =
+                constraint.softness.massScale;
+
+            impulseScale =
+                constraint.softness.impulseScale;
+
+            velocityBias =
+                massScale *
+                constraint.softness.biasRate *
+                point.separation;
+
+            // 깊은 관통에서도 지나치게 큰 보정 속도를 만들지 않음.
+            velocityBias =
+                std::max(
+                    velocityBias,
+                    -constraint.maxPushSpeed
+                );
+        }
+
         const float oldImpulse =
             point.normalImpulse;
 
+        const float incrementalImpulse =
+            -point.normalMass *
+            ( massScale * normalVelocity + velocityBias ) -
+            impulseScale * oldImpulse;
+
         const float candidateImpulse =
-            oldImpulse -
-            point.normalMass * normalVelocity;
+            oldImpulse + incrementalImpulse;
 
         point.normalImpulse =
             std::max(

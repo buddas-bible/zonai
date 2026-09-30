@@ -420,7 +420,7 @@ int main()
         assert( world.GetBodyAngularVelocity( kinematicBody ) == 3.0f );
     }
 
-    // 최소 Contact Solver는 normal 방향 접근 속도를 제거해 더 깊은 관통을 막음.
+    // Contact Solver는 접근 속도를 막는 동시에 기존 penetration도 조금씩 회복함.
     {
         World world{};
         world.SetGravity( {} );
@@ -470,16 +470,67 @@ int main()
                 dynamicBody
             );
 
-        // 이미 0.5m 겹쳐 있지만 Step 시작 시 solver가 접근 속도를 제거하므로
-        // 이 Step에서는 더 안쪽으로 이동하지 않음.
+        // Push가 penetration을 줄이는 방향으로 position을 이동시키고,
+        // Relax가 그 과정에서 만든 correction velocity는 다시 제거함.
         assert(
             std::fabs( velocity.x ) <
             epsilon
         );
+        assert( transform.position.x > 1.5f );
+        assert( transform.position.x < 2.0f );
+    }
+
+    // 접근 속도가 전혀 없어도 이미 겹친 Contact는 position만 점진적으로 회복함.
+    {
+        World world{};
+        world.SetGravity( {} );
+
+        const BodyId staticBody =
+            world.CreateBody(
+                BodyType::Static,
+                {
+                    { 0.0f, 0.0f },
+                    {}
+                }
+            );
+
+        (void)world.CreateShape(
+            staticBody,
+            circle2{ {}, 1.0f }
+        );
+
+        const BodyId dynamicBody =
+            world.CreateBody(
+                BodyType::Dynamic,
+                {
+                    { 1.5f, 0.0f },
+                    {}
+                }
+            );
+
+        (void)world.CreateShape(
+            dynamicBody,
+            circle2{ {}, 1.0f }
+        );
+
+        world.Step( 1.0f / 60.0f );
+
+        const transform2 transform =
+            world.GetBodyTransform(
+                dynamicBody
+            );
+
+        // 처음에는 중심 거리가 1.5m라 0.5m 관통 상태임.
+        // soft push가 한 step에서 일부를 회복하되 순간적으로 전부 밀어내지는 않음.
+        assert( transform.position.x > 1.5f );
+        assert( transform.position.x < 2.0f );
+
+        // correction용 분리 속도는 position 적분 뒤 relax에서 제거됨.
         assert(
             std::fabs(
-                transform.position.x -
-                1.5f
+                world.GetBodyLinearVelocity(
+                    dynamicBody
+                ).x
             ) < epsilon
         );
     }
