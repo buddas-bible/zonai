@@ -1236,6 +1236,12 @@ ContactData World::MakeContactData( std::int32_t contactIndex ) const
     const contact2& contact = contacts_[contactIndex];
 
     assert( contact.contactId == contactIndex );
+    assert( contactSims_.size() == contacts_.size() );
+
+    const contactSim2& contactSim =
+        contactSims_[contactIndex];
+
+    assert( contactSim.contactId == contactIndex );
     assert( contact.shapeIdA >= 0 );
     assert( contact.shapeIdB >= 0 );
     assert( static_cast<std::size_t>( contact.shapeIdA ) < shapes_.size() );
