@@ -1225,13 +1225,13 @@ int main()
         assert(
             std::fabs(
                 movedAABB.min.x -
-                ( expectedCenterX - 0.25f )
+                ( expectedCenterX - 0.25f - SPECULATIVE_DISTANCE )
             ) < epsilon
         );
         assert(
             std::fabs(
                 movedAABB.max.y -
-                ( expectedCenterY + 0.25f )
+                ( expectedCenterY + 0.25f + SPECULATIVE_DISTANCE )
             ) < epsilon
         );
     }
