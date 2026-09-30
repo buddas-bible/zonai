@@ -327,3 +327,18 @@ add_test(
     NAME shapeDispatchTests
     COMMAND shapeDispatchTests
 )
+
+
+add_executable(contactConstraintTests
+    dynamics/contact_constraint_test.cpp
+)
+
+target_link_libraries(contactConstraintTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME contactConstraintTests
+    COMMAND contactConstraintTests
+)
