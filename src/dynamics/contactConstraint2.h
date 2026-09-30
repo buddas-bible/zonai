@@ -27,6 +27,10 @@ struct contactConstraintPoint2
 
     // normal impulse를 velocity 변화로 환산하는 effective mass의 역수.
     float normalMass = 0.0f;
+
+    // iterative solver가 누적하는 normal impulse.
+    // 접촉은 서로 밀어낼 수만 있으므로 항상 0 이상으로 유지함.
+    float normalImpulse = 0.0f;
 };
 
 // persistent ContactSim을 한 solver step에서 바로 사용할 transient constraint로 변환한 값.
@@ -55,5 +59,12 @@ struct contactConstraint2
     const BodyState& bodyStateA,
     const BodySim& bodySimB,
     const BodyState& bodyStateB );
+
+// 한 Contact의 normal constraint를 한 번 풀어 Body velocity에 impulse를 적용함.
+// 여러 Contact를 여러 번 반복 호출하면 sequential impulse solver가 됨.
+void SolveContactConstraint(
+    contactConstraint2& constraint,
+    BodyState& bodyStateA,
+    BodyState& bodyStateB );
 
 } // namespace zonai
