@@ -316,17 +316,17 @@ public:
     template <broadPhasePairCallback Callback>
     void FindDynamicStaticPairs( Callback&& callback ) const
     {
-        const dynamicTree& dynamicTree = GetTree( bodyType::Dynamic );
+        const dynamicTree& dynamicTreeRef = GetTree( bodyType::Dynamic );
         const dynamicTree& staticTree = GetTree( bodyType::Static );
         pairContext<Callback> context{ pairSet_, callback };
 
         std::array<treeNodePair, CROSS_SEED_COUNT> seeds{};
-        const std::size_t seedCount = GatherCrossSeeds( dynamicTree, staticTree, seeds );
+        const std::size_t seedCount = GatherCrossSeeds( dynamicTreeRef, staticTree, seeds );
 
         // 병렬 작업 시스템이 생기기 전까지는 seed를 현재 스레드에서 순서대로 처리함.
         for( std::size_t i = 0; i < seedCount; ++i )
         {
-            CollideCrossPairs( dynamicTree, staticTree, seeds[i].a, seeds[i].b, context );
+            CollideCrossPairs( dynamicTreeRef, staticTree, seeds[i].a, seeds[i].b, context );
         }
 
         context.Flush();
@@ -336,16 +336,16 @@ public:
     template <broadPhasePairCallback Callback>
     void FindDynamicStaticPairs( std::span<const shape> shapes, Callback&& callback ) const
     {
-        const dynamicTree& dynamicTree = GetTree( bodyType::Dynamic );
+        const dynamicTree& dynamicTreeRef = GetTree( bodyType::Dynamic );
         const dynamicTree& staticTree = GetTree( bodyType::Static );
         pairContext<Callback> context{ pairSet_, callback, shapes };
 
         std::array<treeNodePair, CROSS_SEED_COUNT> seeds{};
-        const std::size_t seedCount = GatherCrossSeeds( dynamicTree, staticTree, seeds );
+        const std::size_t seedCount = GatherCrossSeeds( dynamicTreeRef, staticTree, seeds );
 
         for( std::size_t i = 0; i < seedCount; ++i )
         {
-            CollideCrossPairs( dynamicTree, staticTree, seeds[i].a, seeds[i].b, context );
+            CollideCrossPairs( dynamicTreeRef, staticTree, seeds[i].a, seeds[i].b, context );
         }
 
         context.Flush();
@@ -355,17 +355,17 @@ public:
     template <broadPhasePairCallback Callback>
     void FindDynamicKinematicPairs( Callback&& callback ) const
     {
-        const dynamicTree& dynamicTree = GetTree( bodyType::Dynamic );
+        const dynamicTree& dynamicTreeRef = GetTree( bodyType::Dynamic );
         const dynamicTree& kinematicTree = GetTree( bodyType::Kinematic );
         pairContext<Callback> context{ pairSet_, callback };
 
         std::array<treeNodePair, CROSS_SEED_COUNT> seeds{};
-        const std::size_t seedCount = GatherCrossSeeds( dynamicTree, kinematicTree, seeds );
+        const std::size_t seedCount = GatherCrossSeeds( dynamicTreeRef, kinematicTree, seeds );
 
         // static cross pair와 같은 탐색 경로를 kinematic tree에도 재사용함.
         for( std::size_t i = 0; i < seedCount; ++i )
         {
-            CollideCrossPairs( dynamicTree, kinematicTree, seeds[i].a, seeds[i].b, context );
+            CollideCrossPairs( dynamicTreeRef, kinematicTree, seeds[i].a, seeds[i].b, context );
         }
 
         context.Flush();
@@ -375,16 +375,16 @@ public:
     template <broadPhasePairCallback Callback>
     void FindDynamicKinematicPairs( std::span<const shape> shapes, Callback&& callback ) const
     {
-        const dynamicTree& dynamicTree = GetTree( bodyType::Dynamic );
+        const dynamicTree& dynamicTreeRef = GetTree( bodyType::Dynamic );
         const dynamicTree& kinematicTree = GetTree( bodyType::Kinematic );
         pairContext<Callback> context{ pairSet_, callback, shapes };
 
         std::array<treeNodePair, CROSS_SEED_COUNT> seeds{};
-        const std::size_t seedCount = GatherCrossSeeds( dynamicTree, kinematicTree, seeds );
+        const std::size_t seedCount = GatherCrossSeeds( dynamicTreeRef, kinematicTree, seeds );
 
         for( std::size_t i = 0; i < seedCount; ++i )
         {
-            CollideCrossPairs( dynamicTree, kinematicTree, seeds[i].a, seeds[i].b, context );
+            CollideCrossPairs( dynamicTreeRef, kinematicTree, seeds[i].a, seeds[i].b, context );
         }
 
         context.Flush();
