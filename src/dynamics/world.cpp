@@ -125,6 +125,12 @@ ContactId World::MakeContactId( std::int32_t contactIndex ) const
     const contact2& contact = contacts_[contactIndex];
 
     assert( contact.contactId == contactIndex );
+    assert( contactSims_.size() == contacts_.size() );
+
+    const contactSim2& contactSim =
+        contactSims_[contactIndex];
+
+    assert( contactSim.contactId == contactIndex );
 
     return { contactIndex + 1, contact.generation };
 }
@@ -1115,9 +1121,15 @@ std::size_t World::GetBodyContactData(
 
         assert( contact.contactId == contactId );
         assert( edgeIndex == 0 || edgeIndex == 1 );
+        assert( contactSims_.size() == contacts_.size() );
+
+        const contactSim2& contactSim =
+            contactSims_[contactId];
+
+        assert( contactSim.contactId == contactId );
 
         // Contact는 AABB pair만으로도 존재할 수 있으므로 실제 접촉점이 있는 것만 공개함.
-        if( contact.manifold.pointCount > 0 )
+        if( contactSim.manifold.pointCount > 0 )
         {
             output[count] =
                 MakeContactData( contactId );
@@ -1190,13 +1202,19 @@ std::size_t World::GetShapeContactData(
 
         assert( contact.contactId == contactId );
         assert( edgeIndex == 0 || edgeIndex == 1 );
+        assert( contactSims_.size() == contacts_.size() );
+
+        const contactSim2& contactSim =
+            contactSims_[contactId];
+
+        assert( contactSim.contactId == contactId );
 
         const bool involvesShape =
             contact.shapeIdA == shapeIndex ||
             contact.shapeIdB == shapeIndex;
 
         if( involvesShape &&
-            contact.manifold.pointCount > 0 )
+            contactSim.manifold.pointCount > 0 )
         {
             output[count] =
                 MakeContactData( contactId );
@@ -1239,7 +1257,7 @@ ContactData World::MakeContactData( std::int32_t contactIndex ) const
     data.shapeIdB = MakeShapeId( contact.shapeIdB );
     data.manifold =
         ToWorldManifold(
-            contact.manifold,
+            contactSim.manifold,
             bodySimA.transform
         );
 
@@ -1269,6 +1287,11 @@ std::int32_t World::CreateContact(
 
         contact2& freeContact = contacts_[contactId];
         assert( freeContact.contactId == contact2::NULL_INDEX );
+        assert( contactSims_.size() == contacts_.size() );
+        assert(
+            contactSims_[contactId].contactId ==
+            contactSim2::NULL_INDEX
+        );
 
         contactFreeList_ = freeContact.nextFreeId;
     }
@@ -1281,6 +1304,7 @@ std::int32_t World::CreateContact(
 
         contactId = static_cast<std::int32_t>( contacts_.size() );
         contacts_.push_back( {} );
+        contactSims_.push_back( {} );
     }
 
     contact2& contact = contacts_[contactId];
@@ -1293,7 +1317,13 @@ std::int32_t World::CreateContact(
     contact.generation = generation;
     contact.shapeIdA = shapeIdA;
     contact.shapeIdB = shapeIdB;
-    contact.manifold = manifold;
+
+    assert( contactSims_.size() == contacts_.size() );
+
+    UpdateContactSim(
+        contactId,
+        manifold
+    );
 
     const std::array<std::int32_t, 2> shapeIds =
     {
@@ -1350,6 +1380,57 @@ std::int32_t World::CreateContact(
     return contactId;
 }
 
+void World::UpdateContactSim(
+    std::int32_t contactId,
+    const localManifold2& manifold )
+{
+    assert( contactId >= 0 );
+    assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+    assert( contactSims_.size() == contacts_.size() );
+
+    const contact2& contact = contacts_[contactId];
+
+    assert( contact.contactId == contactId );
+    assert( contact.shapeIdA >= 0 );
+    assert( contact.shapeIdB >= 0 );
+    assert( static_cast<std::size_t>( contact.shapeIdA ) < shapes_.size() );
+    assert( static_cast<std::size_t>( contact.shapeIdB ) < shapes_.size() );
+
+    const Shape& shapeA = shapes_[contact.shapeIdA];
+    const Shape& shapeB = shapes_[contact.shapeIdB];
+
+    assert( shapeA.bodyId >= 0 );
+    assert( shapeB.bodyId >= 0 );
+    assert( static_cast<std::size_t>( shapeA.bodyId ) < bodySims_.size() );
+    assert( static_cast<std::size_t>( shapeB.bodyId ) < bodySims_.size() );
+
+    const BodySim& bodySimA = bodySims_[shapeA.bodyId];
+    const BodySim& bodySimB = bodySims_[shapeB.bodyId];
+
+    assert( bodySimA.bodyId == shapeA.bodyId );
+    assert( bodySimB.bodyId == shapeB.bodyId );
+
+    contactSim2& contactSim =
+        contactSims_[contactId];
+
+    contactSim = {};
+    contactSim.contactId = contactId;
+
+    contactSim.bodyIdA = shapeA.bodyId;
+    contactSim.bodyIdB = shapeB.bodyId;
+
+    contactSim.shapeIdA = contact.shapeIdA;
+    contactSim.shapeIdB = contact.shapeIdB;
+
+    contactSim.invMassA = bodySimA.invMass;
+    contactSim.invInertiaA = bodySimA.invInertia;
+
+    contactSim.invMassB = bodySimB.invMass;
+    contactSim.invInertiaB = bodySimB.invInertia;
+
+    contactSim.manifold = manifold;
+}
+
 void World::DestroyContact( std::int32_t contactId )
 {
     assert( contactId >= 0 );
@@ -1403,6 +1484,10 @@ void World::DestroyContact( std::int32_t contactId )
 
     const bool removed = broadPhase_.RemovePair( pairKey );
     assert( removed );
+
+    assert( contactSims_.size() == contacts_.size() );
+
+    contactSims_[contactId] = {};
 
     const std::uint32_t generation = contact.generation;
 
