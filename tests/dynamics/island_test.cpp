@@ -1,10 +1,38 @@
 #include <cassert>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include "dynamics/island2.h"
 
 using namespace zonai;
+
+namespace
+{
+
+std::span<const std::int32_t> GetBodyIds(
+    const islandGraph2& graph,
+    const island2& island )
+{
+    return
+    {
+        graph.bodyIds.data() + island.bodyStart,
+        island.bodyCount
+    };
+}
+
+std::span<const std::int32_t> GetContactIds(
+    const islandGraph2& graph,
+    const island2& island )
+{
+    return
+    {
+        graph.contactIds.data() + island.contactStart,
+        island.contactCount
+    };
+}
+
+} // namespace
 
 int main()
 {
@@ -21,21 +49,27 @@ int main()
         bodies[2].bodyId = 2;
         bodies[2].type = bodyType::Static;
 
-        const std::vector<island2> islands =
+        const islandGraph2 graph =
             BuildIslands(
                 bodies,
                 std::span<const contactSim2>{}
             );
 
-        assert( islands.size() == 2 );
+        assert( graph.islands.size() == 2 );
+        assert( graph.bodyIds.size() == 2 );
+        assert( graph.contactIds.empty() );
 
-        assert( islands[0].bodyIds.size() == 1 );
-        assert( islands[0].bodyIds[0] == 0 );
-        assert( islands[0].contactIds.empty() );
+        const std::span<const std::int32_t> bodies0 =
+            GetBodyIds( graph, graph.islands[0] );
 
-        assert( islands[1].bodyIds.size() == 1 );
-        assert( islands[1].bodyIds[0] == 1 );
-        assert( islands[1].contactIds.empty() );
+        const std::span<const std::int32_t> bodies1 =
+            GetBodyIds( graph, graph.islands[1] );
+
+        assert( bodies0.size() == 1 );
+        assert( bodies0[0] == 0 );
+
+        assert( bodies1.size() == 1 );
+        assert( bodies1[0] == 1 );
     }
 
     // solver-active Contact가 두 non-static body를 하나의 island로 연결함.
@@ -55,18 +89,26 @@ int main()
         contacts[0].bodyIdB = 1;
         contacts[0].manifold.pointCount = 1;
 
-        const std::vector<island2> islands =
+        const islandGraph2 graph =
             BuildIslands(
                 bodies,
                 contacts
             );
 
-        assert( islands.size() == 1 );
-        assert( islands[0].bodyIds.size() == 2 );
-        assert( islands[0].bodyIds[0] == 0 );
-        assert( islands[0].bodyIds[1] == 1 );
-        assert( islands[0].contactIds.size() == 1 );
-        assert( islands[0].contactIds[0] == 0 );
+        assert( graph.islands.size() == 1 );
+
+        const std::span<const std::int32_t> bodyIds =
+            GetBodyIds( graph, graph.islands[0] );
+
+        const std::span<const std::int32_t> contactIds =
+            GetContactIds( graph, graph.islands[0] );
+
+        assert( bodyIds.size() == 2 );
+        assert( bodyIds[0] == 0 );
+        assert( bodyIds[1] == 1 );
+
+        assert( contactIds.size() == 1 );
+        assert( contactIds[0] == 0 );
     }
 
     // Static body는 island body 목록에서 제외되지만 Contact constraint는 island에 포함됨.
@@ -86,17 +128,25 @@ int main()
         contacts[0].bodyIdB = 1;
         contacts[0].manifold.pointCount = 1;
 
-        const std::vector<island2> islands =
+        const islandGraph2 graph =
             BuildIslands(
                 bodies,
                 contacts
             );
 
-        assert( islands.size() == 1 );
-        assert( islands[0].bodyIds.size() == 1 );
-        assert( islands[0].bodyIds[0] == 1 );
-        assert( islands[0].contactIds.size() == 1 );
-        assert( islands[0].contactIds[0] == 0 );
+        assert( graph.islands.size() == 1 );
+
+        const std::span<const std::int32_t> bodyIds =
+            GetBodyIds( graph, graph.islands[0] );
+
+        const std::span<const std::int32_t> contactIds =
+            GetContactIds( graph, graph.islands[0] );
+
+        assert( bodyIds.size() == 1 );
+        assert( bodyIds[0] == 1 );
+
+        assert( contactIds.size() == 1 );
+        assert( contactIds[0] == 0 );
     }
 
     // AABB pair만 있고 manifold가 비어 있으면 island를 연결하지 않음.
@@ -116,15 +166,14 @@ int main()
         contacts[0].bodyIdB = 1;
         contacts[0].manifold.pointCount = 0;
 
-        const std::vector<island2> islands =
+        const islandGraph2 graph =
             BuildIslands(
                 bodies,
                 contacts
             );
 
-        assert( islands.size() == 2 );
-        assert( islands[0].contactIds.empty() );
-        assert( islands[1].contactIds.empty() );
+        assert( graph.islands.size() == 2 );
+        assert( graph.contactIds.empty() );
     }
 
     // speculative point도 실제 solver constraint이므로 island를 연결해야 함.
@@ -145,15 +194,22 @@ int main()
         contacts[0].manifold.pointCount = 1;
         contacts[0].manifold.points[0].separation = 0.01f;
 
-        const std::vector<island2> islands =
+        const islandGraph2 graph =
             BuildIslands(
                 bodies,
                 contacts
             );
 
-        assert( islands.size() == 1 );
-        assert( islands[0].bodyIds.size() == 2 );
-        assert( islands[0].contactIds.size() == 1 );
+        assert( graph.islands.size() == 1 );
+
+        const std::span<const std::int32_t> bodyIds =
+            GetBodyIds( graph, graph.islands[0] );
+
+        const std::span<const std::int32_t> contactIds =
+            GetContactIds( graph, graph.islands[0] );
+
+        assert( bodyIds.size() == 2 );
+        assert( contactIds.size() == 1 );
     }
 
     return 0;

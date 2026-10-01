@@ -69,7 +69,7 @@ void UnionBodies(
 
 } // namespace
 
-std::vector<island2> BuildIslands(
+islandGraph2 BuildIslands(
     std::span<const body> bodies,
     std::span<const contactSim2> contactSims )
 {
@@ -82,6 +82,8 @@ std::vector<island2> BuildIslands(
         bodies.size(),
         0
     );
+
+    std::size_t nonStaticBodyCount = 0;
 
     // Static body는 solver island에 들어가지 않음.
     // Dynamic / Kinematic body는 Contact가 없어도 독립 island 하나를 가짐.
@@ -99,7 +101,9 @@ std::vector<island2> BuildIslands(
         }
 
         assert( currentBody.bodyId == bodyId );
+
         parents[bodyId] = bodyId;
+        ++nonStaticBodyCount;
     }
 
     /*
@@ -149,9 +153,10 @@ std::vector<island2> BuildIslands(
         body::NULL_INDEX
     );
 
-    std::vector<island2> islands;
+    islandGraph2 graph{};
+    graph.islands.reserve( nonStaticBodyCount );
 
-    // body index 순서대로 island와 body 목록을 만들어 결과 순서를 결정적으로 유지함.
+    // 먼저 island 수와 각 island의 body 개수를 결정함.
     for( std::int32_t bodyId = 0;
          bodyId < static_cast<std::int32_t>( bodies.size() );
          ++bodyId )
@@ -170,18 +175,16 @@ std::vector<island2> BuildIslands(
         if( islandIndex == body::NULL_INDEX )
         {
             islandIndex =
-                static_cast<std::int32_t>( islands.size() );
+                static_cast<std::int32_t>( graph.islands.size() );
 
             islandIndices[root] = islandIndex;
-            islands.push_back( {} );
+            graph.islands.push_back( {} );
         }
 
-        islands[islandIndex].bodyIds.push_back(
-            bodyId
-        );
+        ++graph.islands[islandIndex].bodyCount;
     }
 
-    // 각 solver-active Contact를 두 non-static endpoint가 속한 island에 한 번만 추가함.
+    // Contact도 어느 island에 속하는지 먼저 세어 flat 배열 구간 크기를 확정함.
     for( const contactSim2& contactSim : contactSims )
     {
         if( contactSim.contactId == contactSim2::NULL_INDEX ||
@@ -218,14 +221,115 @@ std::vector<island2> BuildIslands(
             islandIndices[root];
 
         assert( islandIndex >= 0 );
-        assert( static_cast<std::size_t>( islandIndex ) < islands.size() );
+        assert( static_cast<std::size_t>( islandIndex ) < graph.islands.size() );
 
-        islands[islandIndex].contactIds.push_back(
-            contactSim.contactId
-        );
+        ++graph.islands[islandIndex].contactCount;
     }
 
-    return islands;
+    std::size_t totalBodyCount = 0;
+    std::size_t totalContactCount = 0;
+
+    for( island2& island : graph.islands )
+    {
+        island.bodyStart = totalBodyCount;
+        island.contactStart = totalContactCount;
+
+        totalBodyCount += island.bodyCount;
+        totalContactCount += island.contactCount;
+    }
+
+    assert( totalBodyCount == nonStaticBodyCount );
+
+    graph.bodyIds.resize( totalBodyCount );
+    graph.contactIds.resize( totalContactCount );
+
+    std::vector<std::size_t> bodyOffsets(
+        graph.islands.size(),
+        0
+    );
+
+    std::vector<std::size_t> contactOffsets(
+        graph.islands.size(),
+        0
+    );
+
+    // body index 순서대로 채워 island 내부 순서도 결정적으로 유지함.
+    for( std::int32_t bodyId = 0;
+         bodyId < static_cast<std::int32_t>( bodies.size() );
+         ++bodyId )
+    {
+        if( parents[bodyId] == body::NULL_INDEX )
+        {
+            continue;
+        }
+
+        const std::int32_t root =
+            FindRoot( parents, bodyId );
+
+        const std::int32_t islandIndex =
+            islandIndices[root];
+
+        island2& island =
+            graph.islands[islandIndex];
+
+        const std::size_t writeIndex =
+            island.bodyStart +
+            bodyOffsets[islandIndex]++;
+
+        assert( writeIndex < graph.bodyIds.size() );
+
+        graph.bodyIds[writeIndex] =
+            bodyId;
+    }
+
+    // Contact stable slot 순서대로 채워 solver constraint 순서도 결정적으로 유지함.
+    for( const contactSim2& contactSim : contactSims )
+    {
+        if( contactSim.contactId == contactSim2::NULL_INDEX ||
+            contactSim.manifold.pointCount == 0 )
+        {
+            continue;
+        }
+
+        const bool hasBodyA =
+            parents[contactSim.bodyIdA] != body::NULL_INDEX;
+
+        const bool hasBodyB =
+            parents[contactSim.bodyIdB] != body::NULL_INDEX;
+
+        if( !hasBodyA && !hasBodyB )
+        {
+            continue;
+        }
+
+        const std::int32_t ownerBodyId =
+            hasBodyA
+                ? contactSim.bodyIdA
+                : contactSim.bodyIdB;
+
+        const std::int32_t root =
+            FindRoot(
+                parents,
+                ownerBodyId
+            );
+
+        const std::int32_t islandIndex =
+            islandIndices[root];
+
+        island2& island =
+            graph.islands[islandIndex];
+
+        const std::size_t writeIndex =
+            island.contactStart +
+            contactOffsets[islandIndex]++;
+
+        assert( writeIndex < graph.contactIds.size() );
+
+        graph.contactIds[writeIndex] =
+            contactSim.contactId;
+    }
+
+    return graph;
 }
 
 } // namespace zonai

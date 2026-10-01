@@ -997,12 +997,15 @@ void world::Step( float timeStep )
         * 1. force / gravity로 velocity 갱신
         * 2. 현재 transform의 Contact manifold 갱신
         * 3. solver-active Contact로 island 구성
-        * 4. island별 Contact constraint 준비 + warm start
+        * 4. Contact constraint 준비 + island별 warm start
         * 5. island별 soft push / speculative constraint solve
         * 6. island body의 transform 적분
         * 7. island별 bias 없는 relax
         * 8. island별 restitution
         * 9. 최종 impulse 저장
+        *
+        * Push에서 만든 분리 속도는 position을 회복시키는 데만 사용하고
+        * Relax가 적분 뒤 제거하므로 보정 자체가 운동 에너지로 남지 않음.
         *
         * 현재 island는 매 Step 다시 만드는 transient connected component임.
         * sleep이 들어오면 island 전체를 한 단위로 깨우고 재우는 기반이 됨.
@@ -1031,6 +1034,19 @@ void world::Step( float timeStep )
 
             if( body.type == bodyType::Dynamic )
             {
+                /*
+                * Newton 제2법칙:
+                *
+                *     F = M * a
+                *     a = F * invMass
+                *
+                *     dv = dt * ( gravity + F * invMass )
+                *
+                * 회전:
+                *
+                *     torque = I * angularAcceleration
+                *     dw = dt * torque * invInertia
+                */
                 if( bodySim.invMass > 0.0f )
                 {
                     const vec2 acceleration =
@@ -1049,6 +1065,7 @@ void world::Step( float timeStep )
                         bodySim.torque;
                 }
 
+                // force / torque는 한 step 동안만 누적됨.
                 bodySim.force = {};
                 bodySim.torque = 0.0f;
             }
@@ -1066,40 +1083,47 @@ void world::Step( float timeStep )
         // -----------------------------------------------------
         // 3. Build islands
         // -----------------------------------------------------
-        const std::vector<island2> islands =
+        const islandGraph2 islandGraph =
             BuildIslands(
                 bodies_,
                 contactSims_
             );
 
-        // 각 island은 독립적으로 풀 수 있으므로 constraint도 island별로 보관함.
-        std::vector<std::vector<contactConstraint2>> islandConstraints;
-        islandConstraints.reserve( islands.size() );
+        // Contact id 배열 자체가 island별 연속 구간이므로 constraint도 같은 순서로 한 번만 준비함.
+        std::vector<contactConstraint2> contactConstraints =
+            PrepareContactConstraints(
+                islandGraph.contactIds,
+                timeStep
+            );
+
+        assert(
+            contactConstraints.size() ==
+            islandGraph.contactIds.size()
+        );
 
         // -----------------------------------------------------
-        // 4. Prepare + warm start
+        // 4. Warm start each island
         // -----------------------------------------------------
-        for( const island2& island : islands )
+        for( const island2& island : islandGraph.islands )
         {
-            std::vector<contactConstraint2> constraints =
-                PrepareContactConstraints(
-                    island.contactIds,
-                    timeStep
-                );
+            std::span<const contactConstraint2> constraints{
+                contactConstraints.data() + island.contactStart,
+                island.contactCount
+            };
 
             WarmStartContacts( constraints );
-
-            islandConstraints.push_back(
-                std::move( constraints )
-            );
         }
 
         // -----------------------------------------------------
         // 5. Solve with penetration / speculative bias
         // -----------------------------------------------------
-        for( std::vector<contactConstraint2>& constraints :
-             islandConstraints )
+        for( const island2& island : islandGraph.islands )
         {
+            std::span<contactConstraint2> constraints{
+                contactConstraints.data() + island.contactStart,
+                island.contactCount
+            };
+
             SolveContactConstraints(
                 constraints,
                 true
@@ -1109,9 +1133,14 @@ void world::Step( float timeStep )
         // -----------------------------------------------------
         // 6. Integrate island positions
         // -----------------------------------------------------
-        for( const island2& island : islands )
+        for( const island2& island : islandGraph.islands )
         {
-            for( const std::int32_t bodyIndex : island.bodyIds )
+            const std::span<const std::int32_t> bodyIds{
+                islandGraph.bodyIds.data() + island.bodyStart,
+                island.bodyCount
+            };
+
+            for( const std::int32_t bodyIndex : bodyIds )
             {
                 assert( bodyIndex >= 0 );
                 assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
@@ -1124,6 +1153,16 @@ void world::Step( float timeStep )
                 assert( body.type != bodyType::Static );
                 assert( bodySim.bodyId == bodyIndex );
 
+                /*
+                * semi-implicit Euler
+                *
+                * velocity는 force와 Contact Solver에서 먼저 갱신됐고,
+                * 여기서는 그 최종 velocity로 COM transform을 적분함.
+                *
+                * penetration이 있으면 이 velocity에는 push correction도 포함되어 있음.
+                *
+                *     x(t + dt) = x(t) + v(t + dt) * dt
+                */
                 bodySim.center +=
                     bodyState.linearVelocity * timeStep;
 
@@ -1137,6 +1176,11 @@ void world::Step( float timeStep )
                         bodySim.transform.rotation;
                 }
 
+                // center = origin + R * localCenter
+                //
+                // 따라서:
+                //
+                // origin = center - R * localCenter
                 bodySim.transform.position =
                     bodySim.center -
                     Rotate(
@@ -1151,9 +1195,16 @@ void world::Step( float timeStep )
         // -----------------------------------------------------
         // 7. Relax contact velocities
         // -----------------------------------------------------
-        for( std::vector<contactConstraint2>& constraints :
-             islandConstraints )
+        // position은 이미 push velocity로 이동했으므로,
+        // 이제 bias 없이 같은 constraint를 다시 풀어
+        // correction 때문에 생긴 분리 속도만 제거함.
+        for( const island2& island : islandGraph.islands )
         {
+            std::span<contactConstraint2> constraints{
+                contactConstraints.data() + island.contactStart,
+                island.contactCount
+            };
+
             SolveContactConstraints(
                 constraints,
                 false
@@ -1163,9 +1214,13 @@ void world::Step( float timeStep )
         // -----------------------------------------------------
         // 8. Apply restitution
         // -----------------------------------------------------
-        for( std::vector<contactConstraint2>& constraints :
-             islandConstraints )
+        for( const island2& island : islandGraph.islands )
         {
+            std::span<contactConstraint2> constraints{
+                contactConstraints.data() + island.contactStart,
+                island.contactCount
+            };
+
             ApplyRestitutionContacts(
                 constraints
             );
@@ -1174,15 +1229,13 @@ void world::Step( float timeStep )
         // -----------------------------------------------------
         // 9. Store impulses
         // -----------------------------------------------------
-        for( const std::vector<contactConstraint2>& constraints :
-             islandConstraints )
-        {
-            StoreContactConstraintImpulses(
-                constraints
-            );
-        }
+        StoreContactConstraintImpulses(
+            contactConstraints
+        );
     }
 
+    // 이동 후 새 broadPhase pair와 manifold를 만들어 다음 Step의 solver가 사용할
+    // Contact 상태를 최신 transform 기준으로 준비함.
     UpdateCollisions(
         []( const contactData& )
         {
