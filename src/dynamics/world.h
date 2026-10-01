@@ -72,6 +72,15 @@ public:
     void SetBodyAngularVelocity( bodyId bodyId, float angularVelocity );
     [[nodiscard]] float GetBodyAngularVelocity( bodyId bodyId ) const;
 
+    void SetBodyLinearDamping( bodyId bodyId, float damping );
+    [[nodiscard]] float GetBodyLinearDamping( bodyId bodyId ) const;
+
+    void SetBodyAngularDamping( bodyId bodyId, float damping );
+    [[nodiscard]] float GetBodyAngularDamping( bodyId bodyId ) const;
+
+    void SetBodyGravityScale( bodyId bodyId, float scale );
+    [[nodiscard]] float GetBodyGravityScale( bodyId bodyId ) const;
+
 
     void SetBodyAwake( bodyId bodyId, bool awake );
     [[nodiscard]] bool IsBodyAwake( bodyId bodyId ) const;

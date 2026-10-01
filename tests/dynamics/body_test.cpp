@@ -55,6 +55,9 @@ int main()
         assert( bodySim.torque == 0.0f );
         assert( bodySim.invMass == 0.0f );
         assert( bodySim.invInertia == 0.0f );
+        assert( bodySim.linearDamping == 0.0f );
+        assert( bodySim.angularDamping == 0.0f );
+        assert( bodySim.gravityScale == 1.0f );
 
         bodySim.bodyId = 7;
         bodySim.transform.position = { 3.0f, -2.0f };

@@ -31,6 +31,15 @@ struct bodySim
     float invMass = 0.0f;
     float invInertia = 0.0f;
 
+    // velocity integration에서 사용하는 감쇠 계수.
+    // 0이면 감쇠하지 않고 값이 클수록 현재 속도를 더 빠르게 줄임.
+    float linearDamping = 0.0f;
+    float angularDamping = 0.0f;
+
+    // world gravity에 곱하는 body별 배율.
+    // Kinematic / Static은 invMass가 0이므로 solver에서 gravity를 적용하지 않음.
+    float gravityScale = 1.0f;
+
     // local center of mass에서 가장 먼 shape bounds까지의 거리.
     // 회전 속도를 실제 body point의 선속도로 환산할 때 사용함.
     float maxExtent = 0.0f;

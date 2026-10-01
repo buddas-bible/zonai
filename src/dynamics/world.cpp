@@ -1207,6 +1207,62 @@ float world::GetBodyAngularVelocity( bodyId bodyId ) const
     return bodyStates_[bodyIndex].angularVelocity;
 }
 
+void world::SetBodyLinearDamping( bodyId bodyId, float damping )
+{
+    assert( std::isfinite( damping ) );
+    assert( damping >= 0.0f );
+
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    bodySims_[bodyIndex].linearDamping = damping;
+}
+
+float world::GetBodyLinearDamping( bodyId bodyId ) const
+{
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    return bodySims_[bodyIndex].linearDamping;
+}
+
+void world::SetBodyAngularDamping( bodyId bodyId, float damping )
+{
+    assert( std::isfinite( damping ) );
+    assert( damping >= 0.0f );
+
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    bodySims_[bodyIndex].angularDamping = damping;
+}
+
+float world::GetBodyAngularDamping( bodyId bodyId ) const
+{
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    return bodySims_[bodyIndex].angularDamping;
+}
+
+void world::SetBodyGravityScale( bodyId bodyId, float scale )
+{
+    assert( std::isfinite( scale ) );
+
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    bodySims_[bodyIndex].gravityScale = scale;
+}
+
+float world::GetBodyGravityScale( bodyId bodyId ) const
+{
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    return bodySims_[bodyIndex].gravityScale;
+}
+
 void world::SetBodyAwake( bodyId bodyId, bool awake )
 {
     const std::int32_t bodyIndex =
@@ -1633,7 +1689,7 @@ void world::Step( float timeStep, int subStepCount )
         * 2. solver-active Contact로 island 구성
         * 3. Contact constraint 준비
         * 4. 각 sub-step에서:
-        *    - force / gravity로 velocity 갱신
+        *    - force / gravity / damping으로 velocity 갱신
         *    - warm start
         *    - penetration / speculative solve
         *    - delta transform 적분
@@ -1695,19 +1751,44 @@ void world::Step( float timeStep, int subStepCount )
                 assert( body.bodyId == bodyIndex );
                 assert( bodySim.bodyId == bodyIndex );
 
+                /*
+                * Box2D와 같은 Pade 근사 damping:
+                *
+                *     v2 = v1 / ( 1 + c * h )
+                *
+                * 현재 velocity에 damping을 적용한 뒤
+                * 이번 sub-step의 force / gravity 변화량을 더함.
+                */
+                const float linearDamping =
+                    1.0f / ( 1.0f + subStepTime * bodySim.linearDamping );
+
+                const float angularDamping =
+                    1.0f / ( 1.0f + subStepTime * bodySim.angularDamping );
+
+                vec2 linearVelocityDelta{};
+                float angularVelocityDelta = 0.0f;
+
                 if( body.type == bodyType::Dynamic )
                 {
-                    if( bodySim.invMass > 0.0f )
-                    {
-                        const vec2 acceleration = gravity_ + bodySim.force * bodySim.invMass;
-                        bodyState.linearVelocity += acceleration * subStepTime;
-                    }
+                    linearVelocityDelta =
+                        (
+                            bodySim.force * bodySim.invMass +
+                            gravity_ * bodySim.gravityScale
+                        ) * subStepTime;
 
-                    if( bodySim.invInertia > 0.0f )
-                    {
-                        bodyState.angularVelocity += subStepTime * bodySim.invInertia * bodySim.torque;
-                    }
+                    angularVelocityDelta =
+                        subStepTime *
+                        bodySim.invInertia *
+                        bodySim.torque;
                 }
+
+                bodyState.linearVelocity =
+                    bodyState.linearVelocity * linearDamping +
+                    linearVelocityDelta;
+
+                bodyState.angularVelocity =
+                    bodyState.angularVelocity * angularDamping +
+                    angularVelocityDelta;
             }
 
             // -------------------------------------------------

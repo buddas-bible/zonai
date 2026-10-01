@@ -1080,6 +1080,98 @@ int main()
         assert( std::fabs( world.GetBodyLinearVelocity( dynamicBody ).x - 2.0f ) < 1e-3f );
     }
 
+    // body별 gravity scale은 world gravity의 적용량만 조절함.
+    {
+        world world{};
+
+        const bodyId bodyId =
+            world.CreateBody( bodyType::Dynamic );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f }
+        );
+
+        assert( std::fabs( world.GetBodyGravityScale( bodyId ) - 1.0f ) < epsilon );
+
+        world.SetBodyGravityScale( bodyId, 0.25f );
+        assert( std::fabs( world.GetBodyGravityScale( bodyId ) - 0.25f ) < epsilon );
+
+        world.Step( 0.5f );
+
+        // gravity=-10, scale=0.25, dt=0.5
+        // v = -10 * 0.25 * 0.5 = -1.25
+        assert( std::fabs( world.GetBodyLinearVelocity( bodyId ).y + 1.25f ) < epsilon );
+
+        // semi-implicit Euler:
+        // y = -1.25 * 0.5 = -0.625
+        assert( std::fabs( world.GetBodyTransform( bodyId ).position.y + 0.625f ) < epsilon );
+    }
+
+    // damping은 Pade 근사 1 / (1 + c*h)로 현재 velocity를 감쇠함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId bodyId =
+            world.CreateBody( bodyType::Dynamic );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f }
+        );
+
+        assert( world.GetBodyLinearDamping( bodyId ) == 0.0f );
+        assert( world.GetBodyAngularDamping( bodyId ) == 0.0f );
+
+        world.SetBodyLinearVelocity( bodyId, { 10.0f, 0.0f } );
+        world.SetBodyAngularVelocity( bodyId, 4.0f );
+
+        world.SetBodyLinearDamping( bodyId, 2.0f );
+        world.SetBodyAngularDamping( bodyId, 3.0f );
+
+        assert( std::fabs( world.GetBodyLinearDamping( bodyId ) - 2.0f ) < epsilon );
+        assert( std::fabs( world.GetBodyAngularDamping( bodyId ) - 3.0f ) < epsilon );
+
+        world.Step( 0.5f );
+
+        // linear: 10 / (1 + 2*0.5) = 5
+        assert( std::fabs( world.GetBodyLinearVelocity( bodyId ).x - 5.0f ) < epsilon );
+
+        // angular: 4 / (1 + 3*0.5) = 1.6
+        assert( std::fabs( world.GetBodyAngularVelocity( bodyId ) - 1.6f ) < epsilon );
+
+        // 감쇠된 선속도로 position을 적분함.
+        assert( std::fabs( world.GetBodyTransform( bodyId ).position.x - 2.5f ) < epsilon );
+    }
+
+    // damping은 기존 velocity에만 적용하고 같은 sub-step의 force 변화량은 그대로 더함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId bodyId =
+            world.CreateBody( bodyType::Dynamic );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f }
+        );
+
+        const float mass = world.GetBodyMass( bodyId );
+
+        world.SetBodyLinearVelocity( bodyId, { 10.0f, 0.0f } );
+        world.SetBodyLinearDamping( bodyId, 2.0f );
+        world.ApplyForceToCenter( bodyId, { 4.0f * mass, 0.0f } );
+
+        world.Step( 0.5f );
+
+        // 기존 velocity: 10 / (1 + 2*0.5) = 5
+        // force delta: a*h = 4*0.5 = 2
+        // 최종 velocity = 7
+        assert( std::fabs( world.GetBodyLinearVelocity( bodyId ).x - 7.0f ) < epsilon );
+    }
+
     // 기본 gravity는 Dynamic body의 COM velocity에만 적용됨.
     {
         world world{};
