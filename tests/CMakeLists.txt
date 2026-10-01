@@ -342,3 +342,17 @@ add_test(
     NAME contactConstraintTests
     COMMAND contactConstraintTests
 )
+
+add_executable(islandTests
+    dynamics/island_test.cpp
+)
+
+target_link_libraries(islandTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME islandTests
+    COMMAND islandTests
+)

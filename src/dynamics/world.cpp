@@ -996,15 +996,16 @@ void world::Step( float timeStep )
         *
         * 1. force / gravity로 velocity 갱신
         * 2. 현재 transform의 Contact manifold 갱신
-        * 3. Contact constraint 준비 + warm start
-        * 4. soft push로 penetration correction 속도 생성
-        * 5. 보정된 velocity로 transform 적분
-        * 6. bias 없이 다시 풀어 correction 속도 제거(relax)
-        * 7. 충돌 전 접근 속도를 기준으로 restitution 적용
-        * 8. 최종 impulse 저장
+        * 3. solver-active Contact로 island 구성
+        * 4. island별 Contact constraint 준비 + warm start
+        * 5. island별 soft push / speculative constraint solve
+        * 6. island body의 transform 적분
+        * 7. island별 bias 없는 relax
+        * 8. island별 restitution
+        * 9. 최종 impulse 저장
         *
-        * Push에서 만든 분리 속도는 position을 회복시키는 데만 사용하고
-        * Relax가 적분 뒤 제거하므로 보정 자체가 운동 에너지로 남지 않음.
+        * 현재 island는 매 Step 다시 만드는 transient connected component임.
+        * sleep이 들어오면 island 전체를 한 단위로 깨우고 재우는 기반이 됨.
         */
 
         // -----------------------------------------------------
@@ -1030,19 +1031,6 @@ void world::Step( float timeStep )
 
             if( body.type == bodyType::Dynamic )
             {
-                /*
-                * Newton 제2법칙:
-                *
-                *     F = M * a
-                *     a = F * invMass
-                *
-                *     dv = dt * ( gravity + F * invMass )
-                *
-                * 회전:
-                *
-                *     torque = I * angularAcceleration
-                *     dw = dt * torque * invInertia
-                */
                 if( bodySim.invMass > 0.0f )
                 {
                     const vec2 acceleration =
@@ -1061,7 +1049,6 @@ void world::Step( float timeStep )
                         bodySim.torque;
                 }
 
-                // force / torque는 한 step 동안만 누적됨.
                 bodySim.force = {};
                 bodySim.torque = 0.0f;
             }
@@ -1077,112 +1064,131 @@ void world::Step( float timeStep )
         );
 
         // -----------------------------------------------------
-        // 3. Prepare + warm start
+        // 3. Build islands
         // -----------------------------------------------------
-        std::vector<contactConstraint2> contactConstraints =
-            PrepareContactConstraints( timeStep );
+        const std::vector<island2> islands =
+            BuildIslands(
+                bodies_,
+                contactSims_
+            );
 
-        WarmStartContacts( contactConstraints );
-
-        // -----------------------------------------------------
-        // 4. Solve with penetration bias
-        // -----------------------------------------------------
-        SolveContactConstraints(
-            contactConstraints,
-            true
-        );
+        // 각 island은 독립적으로 풀 수 있으므로 constraint도 island별로 보관함.
+        std::vector<std::vector<contactConstraint2>> islandConstraints;
+        islandConstraints.reserve( islands.size() );
 
         // -----------------------------------------------------
-        // 5. Integrate positions
+        // 4. Prepare + warm start
         // -----------------------------------------------------
-        for( std::int32_t bodyIndex = 0;
-             bodyIndex < static_cast<std::int32_t>( bodies_.size() );
-             ++bodyIndex )
+        for( const island2& island : islands )
         {
-            const body& body = bodies_[bodyIndex];
-
-            if( body.bodyId == body::NULL_INDEX ||
-                body.type == bodyType::Static )
-            {
-                continue;
-            }
-
-            bodySim& bodySim = bodySims_[bodyIndex];
-            const bodyState& bodyState = bodyStates_[bodyIndex];
-
-            /*
-            * semi-implicit Euler
-            *
-            * velocity는 force와 Contact Solver에서 먼저 갱신됐고,
-            * 여기서는 그 최종 velocity로 COM transform을 적분함.
-            *
-            * penetration이 있으면 이 velocity에는 push correction도 포함되어 있음.
-            *
-            *     x(t + dt) = x(t) + v(t + dt) * dt
-            */
-            bodySim.center +=
-                bodyState.linearVelocity * timeStep;
-
-            const float deltaAngle =
-                bodyState.angularVelocity * timeStep;
-
-            if( deltaAngle != 0.0f )
-            {
-                bodySim.transform.rotation =
-                    rot2::FromRadians( deltaAngle ) *
-                    bodySim.transform.rotation;
-            }
-
-            // center = origin + R * localCenter
-            //
-            // 따라서:
-            //
-            // origin = center - R * localCenter
-            bodySim.transform.position =
-                bodySim.center -
-                Rotate(
-                    bodySim.transform.rotation,
-                    bodySim.localCenter
+            std::vector<contactConstraint2> constraints =
+                PrepareContactConstraints(
+                    island.contactIds,
+                    timeStep
                 );
 
-            SyncBodyProxies( bodyIndex );
+            WarmStartContacts( constraints );
+
+            islandConstraints.push_back(
+                std::move( constraints )
+            );
         }
 
         // -----------------------------------------------------
-        // 6. Relax contact velocities
+        // 5. Solve with penetration / speculative bias
         // -----------------------------------------------------
-        // position은 이미 push velocity로 이동했으므로,
-        // 이제 bias 없이 같은 constraint를 다시 풀어
-        // correction 때문에 생긴 분리 속도만 제거함.
-        SolveContactConstraints(
-            contactConstraints,
-            false
-        );
+        for( std::vector<contactConstraint2>& constraints :
+             islandConstraints )
+        {
+            SolveContactConstraints(
+                constraints,
+                true
+            );
+        }
 
         // -----------------------------------------------------
-        // 7. Apply restitution
+        // 6. Integrate island positions
         // -----------------------------------------------------
-        ApplyRestitutionContacts(
-            contactConstraints
-        );
+        for( const island2& island : islands )
+        {
+            for( const std::int32_t bodyIndex : island.bodyIds )
+            {
+                assert( bodyIndex >= 0 );
+                assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+
+                const body& body = bodies_[bodyIndex];
+                bodySim& bodySim = bodySims_[bodyIndex];
+                const bodyState& bodyState = bodyStates_[bodyIndex];
+
+                assert( body.bodyId == bodyIndex );
+                assert( body.type != bodyType::Static );
+                assert( bodySim.bodyId == bodyIndex );
+
+                bodySim.center +=
+                    bodyState.linearVelocity * timeStep;
+
+                const float deltaAngle =
+                    bodyState.angularVelocity * timeStep;
+
+                if( deltaAngle != 0.0f )
+                {
+                    bodySim.transform.rotation =
+                        rot2::FromRadians( deltaAngle ) *
+                        bodySim.transform.rotation;
+                }
+
+                bodySim.transform.position =
+                    bodySim.center -
+                    Rotate(
+                        bodySim.transform.rotation,
+                        bodySim.localCenter
+                    );
+
+                SyncBodyProxies( bodyIndex );
+            }
+        }
 
         // -----------------------------------------------------
-        // 8. Store impulses
+        // 7. Relax contact velocities
         // -----------------------------------------------------
-        StoreContactConstraintImpulses(
-            contactConstraints
-        );
+        for( std::vector<contactConstraint2>& constraints :
+             islandConstraints )
+        {
+            SolveContactConstraints(
+                constraints,
+                false
+            );
+        }
+
+        // -----------------------------------------------------
+        // 8. Apply restitution
+        // -----------------------------------------------------
+        for( std::vector<contactConstraint2>& constraints :
+             islandConstraints )
+        {
+            ApplyRestitutionContacts(
+                constraints
+            );
+        }
+
+        // -----------------------------------------------------
+        // 9. Store impulses
+        // -----------------------------------------------------
+        for( const std::vector<contactConstraint2>& constraints :
+             islandConstraints )
+        {
+            StoreContactConstraintImpulses(
+                constraints
+            );
+        }
     }
 
-    // 이동 후 새 broadPhase pair와 manifold를 만들어 다음 Step의 solver가 사용할
-    // Contact 상태를 최신 transform 기준으로 준비함.
     UpdateCollisions(
         []( const contactData& )
         {
         }
     );
 }
-
 
 const shape& world::GetShape( shapeId shapeId ) const
 {
@@ -1579,6 +1585,7 @@ void world::UpdateContactSim(
 }
 
 std::vector<contactConstraint2> world::PrepareContactConstraints(
+    std::span<const std::int32_t> contactIds,
     float timeStep )
 {
     assert( std::isfinite( timeStep ) );
@@ -1621,15 +1628,18 @@ std::vector<contactConstraint2> world::PrepareContactConstraints(
         );
 
     std::vector<contactConstraint2> constraints;
-    constraints.reserve( contactCount_ );
+    constraints.reserve( contactIds.size() );
 
-    for( const contactSim2& contactSim : contactSims_ )
+    for( const std::int32_t contactId : contactIds )
     {
-        if( contactSim.contactId == contactSim2::NULL_INDEX ||
-            contactSim.manifold.pointCount == 0 )
-        {
-            continue;
-        }
+        assert( contactId >= 0 );
+        assert( static_cast<std::size_t>( contactId ) < contactSims_.size() );
+
+        const contactSim2& contactSim =
+            contactSims_[contactId];
+
+        assert( contactSim.contactId == contactId );
+        assert( contactSim.manifold.pointCount > 0 );
 
         assert( contactSim.bodyIdA >= 0 );
         assert( contactSim.bodyIdB >= 0 );

@@ -18,6 +18,7 @@
 #include "dynamics/contactData.h"
 #include "dynamics/contactSim2.h"
 #include "dynamics/id.h"
+#include "dynamics/island2.h"
 
 namespace zonai
 {
@@ -322,8 +323,9 @@ private:
         std::int32_t contactId,
         const localManifold2& manifold );
 
-    // touching Contact를 이번 step의 transient solver constraint로 변환함.
+    // 한 island의 solver-active Contact를 이번 step의 transient constraint로 변환함.
     [[nodiscard]] std::vector<contactConstraint2> PrepareContactConstraints(
+        std::span<const std::int32_t> contactIds,
         float timeStep );
 
     // 이전 step의 cached impulse를 body velocity에 먼저 적용함.
