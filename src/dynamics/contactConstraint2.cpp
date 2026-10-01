@@ -281,8 +281,7 @@ void SolveContactConstraint( contactConstraint2& constraint, bodyState& bodyStat
         const float normalVelocity = Dot( v_r, constraint.normal );
 
         // Position integration에서 누적된 delta transform으로 현재 separation을 다시 계산함.
-        const vec2 ds =
-            dp + Rotate( dqB, point.anchorB ) - Rotate( dqA, point.anchorA );
+        const vec2 ds = dp + Rotate( dqB, point.anchorB ) - Rotate( dqA, point.anchorA );
 
         const float separation = point.baseSeparation + Dot( ds, constraint.normal );
 
@@ -468,8 +467,7 @@ void ApplyRestitutionContactConstraint(
         * restitutionImpulse는 이미 반발에 사용한 impulse를 따로 추적해서
         * 여러 restitution iteration이 같은 압축량으로 에너지를 반복해서 만들지 않게 함.
         */
-        const float compressionImpulse =
-            point.totalNormalImpulse - point.restitutionImpulse;
+        const float compressionImpulse = point.totalNormalImpulse - point.restitutionImpulse;
 
         const bool armed =
             point.relativeNormalVelocity < -threshold &&
@@ -480,41 +478,29 @@ void ApplyRestitutionContactConstraint(
         if( armed )
         {
             // targetVn = -restitution * relativeNormalVelocity
-            velocityBias =
-                constraint.restitution *
-                point.relativeNormalVelocity;
+            velocityBias = constraint.restitution * point.relativeNormalVelocity;
         }
         else
         {
             // restitution이 발동하지 않은 point도 speculative constraint는 유지함.
-            const vec2 ds =
-                dp + Rotate( dqB, point.anchorB ) - Rotate( dqA, point.anchorA );
+            const vec2 ds = dp + Rotate( dqB, point.anchorB ) - Rotate( dqA, point.anchorA );
 
-            const float separation =
-                point.baseSeparation + Dot( ds, constraint.normal );
+            const float separation = point.baseSeparation + Dot( ds, constraint.normal );
 
             if( separation > 0.0f )
             {
-                velocityBias =
-                    separation * constraint.invTimeStep;
+                velocityBias = separation * constraint.invTimeStep;
             }
         }
 
-        const vec2 velocityA =
-            linearVelocityA + Cross( angularVelocityA, point.anchorA );
+        const vec2 velocityA = linearVelocityA + Cross( angularVelocityA, point.anchorA );
+        const vec2 velocityB = linearVelocityB + Cross( angularVelocityB, point.anchorB );
 
-        const vec2 velocityB =
-            linearVelocityB + Cross( angularVelocityB, point.anchorB );
+        const float normalVelocity = Dot( velocityB - velocityA, constraint.normal );
 
-        const float normalVelocity =
-            Dot( velocityB - velocityA, constraint.normal );
+        float impulse = -point.normalMass * ( normalVelocity + velocityBias );
 
-        float impulse =
-            -point.normalMass *
-            ( normalVelocity + velocityBias );
-
-        const float newImpulse =
-            std::max( point.normalImpulse + impulse, 0.0f );
+        const float newImpulse = std::max( point.normalImpulse + impulse, 0.0f );
 
         impulse = newImpulse - point.normalImpulse;
 
@@ -544,29 +530,26 @@ void ApplyRestitutionContactConstraint(
                 ( compressionImpulse + approachImpulse ) -
                 point.restitutionImpulse;
 
-            impulse =
-                std::min(
-                    impulse,
-                    approachImpulse + std::max( allowance, 0.0f )
-                );
+            impulse = std::min( impulse, approachImpulse + std::max( allowance, 0.0f ) );
         }
 
         point.normalImpulse += impulse;
         point.restitutionImpulse += impulse - approachImpulse;
         point.totalNormalImpulse += impulse;
 
-        const vec2 impulseVector =
-            constraint.normal * impulse;
+        const vec2 impulseVector = constraint.normal * impulse;
 
-        linearVelocityA -= impulseVector * constraint.invMassA;
-        angularVelocityA -=
-            constraint.invInertiaA *
-            Cross( point.anchorA, impulseVector );
+		const vec2 dv_a = impulseVector * constraint.invMassA;
+		const float dw_a = constraint.invInertiaA * Cross( point.anchorA, impulseVector );
 
-        linearVelocityB += impulseVector * constraint.invMassB;
-        angularVelocityB +=
-            constraint.invInertiaB *
-            Cross( point.anchorB, impulseVector );
+		const vec2 dv_b = impulseVector * constraint.invMassB;
+		const float dw_b = constraint.invInertiaB * Cross( point.anchorB, impulseVector );
+
+        linearVelocityA -= dv_a;
+        angularVelocityA -= dw_a;
+
+        linearVelocityB += dv_b;
+        angularVelocityB += dw_b;
     }
 
     bodyStateA.linearVelocity = linearVelocityA;
