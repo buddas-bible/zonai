@@ -1103,6 +1103,54 @@ int main()
         );
     }
 
+    // sub-step은 전체 timeStep을 h로 나눠 velocity / position을 여러 번 적분함.
+    {
+        world world{};
+
+        const bodyId bodyId = world.CreateBody( bodyType::Dynamic );
+
+        world.Step( 0.5f, 2 );
+
+        // h=0.25
+        // sub-step 1: v=-2.5, y=-0.625
+        // sub-step 2: v=-5.0, y=-1.875
+        assert( std::fabs( world.GetBodyLinearVelocity( bodyId ).y + 5.0f ) < epsilon );
+        assert( std::fabs( world.GetBodyTransform( bodyId ).position.y + 1.875f ) < epsilon );
+    }
+
+    // force는 모든 sub-step에서 같은 외력으로 적용되고 Step이 끝난 뒤 한 번만 초기화됨.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId bodyId = world.CreateBody( bodyType::Dynamic );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f },
+            {},
+            2.0f
+        );
+
+        const float mass = world.GetBodyMass( bodyId );
+
+        world.ApplyForceToCenter( bodyId, { mass * 4.0f, 0.0f } );
+        world.Step( 0.5f, 2 );
+
+        // h=0.25에서 acceleration=4를 두 번 적용하므로 최종 v=2.
+        assert( std::fabs( world.GetBodyLinearVelocity( bodyId ).x - 2.0f ) < epsilon );
+
+        // sub-step 1: v=1, x=0.25
+        // sub-step 2: v=2, x=0.75
+        assert( std::fabs( world.GetBodyTransform( bodyId ).position.x - 0.75f ) < epsilon );
+
+        world.Step( 0.5f, 2 );
+
+        // force는 이미 소비됐으므로 v=2를 유지한 채 1m만 추가 이동함.
+        assert( std::fabs( world.GetBodyLinearVelocity( bodyId ).x - 2.0f ) < epsilon );
+        assert( std::fabs( world.GetBodyTransform( bodyId ).position.x - 1.75f ) < epsilon );
+    }
+
     // Force는 F=Ma에 따라 질량으로 나뉘어 velocity를 바꾸고 한 Step 뒤 초기화됨.
     {
         world world{};
