@@ -33,8 +33,8 @@ struct contactConstraintPoint2
     vec2 anchorA{};
     vec2 anchorB{};
 
-    // narrow-phase가 계산한 signed separation.
-    float separation = 0.0f;
+    // solver가 delta transform으로 현재 separation을 다시 계산하기 위한 기준값.
+    float baseSeparation = 0.0f;
 
     // 접촉 normal 방향 상대속도.
     // 음수면 서로 접근 중, 양수면 서로 멀어지는 중임.
