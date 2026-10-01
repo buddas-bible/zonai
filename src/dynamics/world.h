@@ -120,9 +120,8 @@ public:
     void ApplyAngularImpulse( bodyId bodyId, float impulse );
 
 
-    // force / gravity, Contact solver, position integration을 순서대로 수행하고
-    // 이동한 proxy / Contact 상태를 다음 step 기준으로 갱신함.
-    void Step( float timeStep );
+    // Contact constraint를 준비한 뒤 sub-step마다 force / gravity, solve, position integration을 수행함.
+    void Step( float timeStep, int subStepCount = 1 );
 
     // null / 범위 / generation / 활성 slot을 모두 확인함.
     [[nodiscard]] bool IsValid( bodyId bodyId ) const noexcept;
