@@ -1,5 +1,6 @@
 #pragma once
 
+#include "math/rot2.h"
 #include "math/vec2.h"
 
 namespace zonai
@@ -15,6 +16,12 @@ struct bodyState
 
     // 2D z축 기준 각속도(rad/s).
     float angularVelocity = 0.0f;
+
+    // 이번 solver step에서 아직 bodySim transform에 반영하지 않은 COM 이동량.
+    vec2 deltaPosition{};
+
+    // 이번 solver step에서 아직 bodySim transform에 반영하지 않은 회전량.
+    rot2 deltaRotation{};
 };
 
 } // namespace zonai
