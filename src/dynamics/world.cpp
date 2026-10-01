@@ -1854,8 +1854,7 @@ std::size_t world::GetBodyContactData( bodyId bodyId, std::span<contactData> out
     std::int32_t contactKey = body.headContactKey;
     std::size_t count = 0;
 
-    while( contactKey != body::NULL_INDEX &&
-           count < output.size() )
+    while( contactKey != body::NULL_INDEX && count < output.size() )
     {
         const std::int32_t contactId = GetContactId( contactKey );
         const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
@@ -2328,8 +2327,8 @@ void world::SolveContactConstraints(
     constexpr int VELOCITY_ITERATIONS = 8;
 
     /*
-    * Contact 하나를 풀 때 velocity가 즉시 바뀌고
-    * 다음 Contact가 그 결과를 사용하므로 sequential impulse가 됨.
+    * 접점 하나를 풀 때 속도가 즉시 바뀌고
+    * 다음 접점이 그 결과를 사용하므로 sequential impulse가 됨.
     *
     * useBias=true:
     *     penetration correction을 포함한 soft push
@@ -2368,9 +2367,7 @@ void world::ApplyRestitutionContacts(
     * 낮은 속도 접촉은 threshold 아래에서 restitution을 끄므로
     * resting contact가 계속 미세하게 튀는 현상을 막음.
     */
-    for( int iteration = 0;
-         iteration < RESTITUTION_ITERATIONS;
-         ++iteration )
+    for( int iteration = 0; iteration < RESTITUTION_ITERATIONS; ++iteration )
     {
         for( contactConstraint2& constraint : constraints )
         {

@@ -8,10 +8,7 @@
 namespace zonai
 {
 
-contactSoftness2 MakeContactSoftness(
-    float hertz,
-    float dampingRatio,
-    float timeStep )
+contactSoftness2 MakeContactSoftness( float hertz, float dampingRatio, float timeStep )
 {
     assert( std::isfinite( hertz ) );
     assert( std::isfinite( dampingRatio ) );
@@ -27,18 +24,13 @@ contactSoftness2 MakeContactSoftness(
         return {};
     }
 
-    const float omega =
-        2.0f * std::numbers::pi_v<float> * hertz;
+    const float omega = 2.0f * std::numbers::pi_v<float> * hertz;
 
-    const float a1 =
-        2.0f * dampingRatio +
-        timeStep * omega;
+    const float a1 = 2.0f * dampingRatio + timeStep * omega;
 
-    const float a2 =
-        timeStep * omega * a1;
+    const float a2 = timeStep * omega * a1;
 
-    const float a3 =
-        1.0f / ( 1.0f + a2 );
+    const float a3 = 1.0f / ( 1.0f + a2 );
 
     contactSoftness2 softness{};
     softness.biasRate = omega / a1;
@@ -57,10 +49,7 @@ contactConstraint2 PrepareContactConstraint(
     assert( contactSim.bodyIdA == bodySimA.bodyId );
     assert( contactSim.bodyIdB == bodySimB.bodyId );
     assert( contactSim.manifold.pointCount > 0 );
-    assert(
-        contactSim.manifold.pointCount <=
-        static_cast<int>( MAX_MANIFOLD_POINTS )
-    );
+    assert( contactSim.manifold.pointCount <= static_cast<int>( MAX_MANIFOLD_POINTS ) );
 
     contactConstraint2 constraint{};
 
@@ -78,8 +67,7 @@ contactConstraint2 PrepareContactConstraint(
     * local manifold은 shape A local space 기준이므로
     * solver가 사용할 normal과 contact point를 world space로 변환함.
     */
-    constraint.normal =
-        TransformVector( bodySimA.transform, contactSim.manifold.normal );
+    constraint.normal = TransformVector( bodySimA.transform, contactSim.manifold.normal );
 
     constraint.pointCount = contactSim.manifold.pointCount;
 
@@ -257,10 +245,7 @@ void WarmStartContactConstraint( const contactConstraint2& constraint, bodyState
     bodyStateB.angularVelocity = angularVelocityB;
 }
 
-void SolveContactConstraint(
-    contactConstraint2& constraint,
-    bodyState& bodyStateA, bodyState& bodyStateB,
-    bool useBias )
+void SolveContactConstraint( contactConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB, bool useBias )
 {
     vec2 v_a = bodyStateA.linearVelocity;
     float w_a = bodyStateA.angularVelocity;
@@ -328,11 +313,7 @@ void SolveContactConstraint(
         {
             massScale = constraint.softness.massScale;
             impulseScale = constraint.softness.impulseScale;
-
-            velocityBias =
-                massScale *
-                constraint.softness.biasRate *
-                point.separation;
+            velocityBias = massScale * constraint.softness.biasRate * point.separation;
 
             // 깊은 관통에서도 지나치게 큰 보정 속도를 만들지 않음.
             velocityBias = std::max( velocityBias, -constraint.maxPushSpeed );
@@ -340,10 +321,11 @@ void SolveContactConstraint(
 
         const float oldImpulse = point.normalImpulse;
 
+        // useBias == false라면
+        // 
+		// DeltaLambda = -normalMass * vn
         const float incrementalImpulse =
-            -point.normalMass *
-            ( massScale * normalVelocity + velocityBias ) -
-            impulseScale * oldImpulse;
+            -point.normalMass * ( massScale * normalVelocity + velocityBias ) - impulseScale * oldImpulse;
 
         const float candidateImpulse = oldImpulse + incrementalImpulse;
 
@@ -358,29 +340,23 @@ void SolveContactConstraint(
         *
         * 선속도:
         *
-        *     vA -= invMassA * P
-        *     vB += invMassB * P
+        *     v_A -= invMassA * P
+        *     v_B += invMassB * P
         *
         * 각속도:
         *
-        *     wA -= invIA * ( rA x P )
-        *     wB += invIB * ( rB x P )
+        *     w_A -= invIA * ( rA x P )
+        *     w_B += invIB * ( rB x P )
         */
         v_a -= impulseVector * constraint.invMassA;
-
-        w_a -=
-            constraint.invInertiaA *
-            Cross( point.anchorA, impulseVector );
+        w_a -= constraint.invInertiaA * Cross( point.anchorA, impulseVector );
 
         v_b += impulseVector * constraint.invMassB;
-
-        w_b +=
-            constraint.invInertiaB *
-            Cross( point.anchorB, impulseVector );
+        w_b += constraint.invInertiaB * Cross( point.anchorB, impulseVector );
     }
 
     /*
-    * Friction
+    * 마찰 Friction
     *
     * penetration push 단계에서는 normal correction만 만들고,
     * position 적분 뒤의 relax 단계에서 실제 tangential velocity를 줄임.
@@ -404,11 +380,11 @@ void SolveContactConstraint(
         {
             contactConstraintPoint2& point = constraint.points[i];
 
-            const vec2 velocityA = v_a + Cross( w_a, point.anchorA );
+            const vec2 v_p1 = v_a + Cross( w_a, point.anchorA );
+            const vec2 v_p2 = v_b + Cross( w_b, point.anchorB );
+			const vec2 v_r = v_p2 - v_p1;
 
-            const vec2 velocityB = v_b + Cross( w_b, point.anchorB );
-
-            const float tangentVelocity = Dot( velocityB - velocityA, tangent );
+            const float tangentVelocity = Dot( v_r, tangent );
 
             const float oldImpulse = point.tangentImpulse;
 
@@ -416,28 +392,19 @@ void SolveContactConstraint(
 
             const float maxFrictionImpulse = constraint.friction * point.normalImpulse;
 
-            point.tangentImpulse =
-                std::clamp(
-                    oldImpulse + incrementalImpulse,
-                    -maxFrictionImpulse,
-                    maxFrictionImpulse
-                );
+            const float candidateImpulse = oldImpulse + incrementalImpulse;
+
+            point.tangentImpulse = std::clamp( candidateImpulse, -maxFrictionImpulse, maxFrictionImpulse );
 
             const float impulse = point.tangentImpulse - oldImpulse;
 
             const vec2 impulseVector = tangent * impulse;
 
             v_a -= impulseVector * constraint.invMassA;
-
-            w_a -=
-                constraint.invInertiaA *
-                Cross( point.anchorA, impulseVector );
+            w_a -= constraint.invInertiaA * Cross( point.anchorA, impulseVector );
 
             v_b += impulseVector * constraint.invMassB;
-
-            w_b +=
-                constraint.invInertiaB *
-                Cross( point.anchorB, impulseVector );
+            w_b += constraint.invInertiaB * Cross( point.anchorB, impulseVector );
         }
     }
 
@@ -463,22 +430,15 @@ void ApplyRestitutionContactConstraint(
         return;
     }
 
-    vec2 linearVelocityA =
-        bodyStateA.linearVelocity;
+    vec2 linearVelocityA = bodyStateA.linearVelocity;
+    float angularVelocityA = bodyStateA.angularVelocity;
 
-    float angularVelocityA =
-        bodyStateA.angularVelocity;
-
-    vec2 linearVelocityB =
-        bodyStateB.linearVelocity;
-
-    float angularVelocityB =
-        bodyStateB.angularVelocity;
+    vec2 linearVelocityB = bodyStateB.linearVelocity;
+    float angularVelocityB = bodyStateB.angularVelocity;
 
     for( int i = 0; i < constraint.pointCount; ++i )
     {
-        contactConstraintPoint2& point =
-            constraint.points[i];
+        contactConstraintPoint2& point = constraint.points[i];
 
         /*
         * restitution은 현재 vn이 아니라 Prepare 때 저장한
@@ -501,25 +461,10 @@ void ApplyRestitutionContactConstraint(
             continue;
         }
 
-        const vec2 velocityA =
-            linearVelocityA +
-            Cross(
-                angularVelocityA,
-                point.anchorA
-            );
+        const vec2 velocityA = linearVelocityA + Cross( angularVelocityA, point.anchorA );
+        const vec2 velocityB = linearVelocityB + Cross( angularVelocityB, point.anchorB );
 
-        const vec2 velocityB =
-            linearVelocityB +
-            Cross(
-                angularVelocityB,
-                point.anchorB
-            );
-
-        const float normalVelocity =
-            Dot(
-                velocityB - velocityA,
-                constraint.normal
-            );
+        const float normalVelocity = Dot( velocityB - velocityA, constraint.normal );
 
         // targetVn = -restitution * relativeNormalVelocity
         //
@@ -529,71 +474,33 @@ void ApplyRestitutionContactConstraint(
         //         = normalMass * ( targetVn - vn )
         //         = -normalMass *
         //           ( vn + restitution * relativeNormalVelocity )
-        const float oldImpulse =
-            point.normalImpulse;
+        const float oldImpulse = point.normalImpulse;
 
         const float incrementalImpulse =
-            -point.normalMass *
-            (
-                normalVelocity +
-                constraint.restitution *
-                point.relativeNormalVelocity
-            );
+            -point.normalMass * ( normalVelocity + constraint.restitution * point.relativeNormalVelocity );
 
-        point.normalImpulse =
-            std::max(
-                oldImpulse + incrementalImpulse,
-                0.0f
-            );
+        point.normalImpulse = std::max( oldImpulse + incrementalImpulse, 0.0f );
 
-        const float impulse =
-            point.normalImpulse -
-            oldImpulse;
+        const float impulse = point.normalImpulse - oldImpulse;
 
-        const vec2 impulseVector =
-            constraint.normal *
-            impulse;
+        const vec2 impulseVector = constraint.normal * impulse;
 
-        linearVelocityA -=
-            impulseVector *
-            constraint.invMassA;
+        linearVelocityA -= impulseVector * constraint.invMassA;
+        angularVelocityA -= constraint.invInertiaA * Cross( point.anchorA, impulseVector );
 
-        angularVelocityA -=
-            constraint.invInertiaA *
-            Cross(
-                point.anchorA,
-                impulseVector
-            );
-
-        linearVelocityB +=
-            impulseVector *
-            constraint.invMassB;
-
-        angularVelocityB +=
-            constraint.invInertiaB *
-            Cross(
-                point.anchorB,
-                impulseVector
-            );
+        linearVelocityB += impulseVector * constraint.invMassB;
+        angularVelocityB += constraint.invInertiaB * Cross( point.anchorB, impulseVector );
     }
 
-    bodyStateA.linearVelocity =
-        linearVelocityA;
+    bodyStateA.linearVelocity = linearVelocityA;
+    bodyStateA.angularVelocity = angularVelocityA;
 
-    bodyStateA.angularVelocity =
-        angularVelocityA;
-
-    bodyStateB.linearVelocity =
-        linearVelocityB;
-
-    bodyStateB.angularVelocity =
-        angularVelocityB;
+    bodyStateB.linearVelocity = linearVelocityB;
+    bodyStateB.angularVelocity = angularVelocityB;
 }
 
 
-void StoreContactImpulses(
-    const contactConstraint2& constraint,
-    contactSim2& contactSim )
+void StoreContactImpulses( const contactConstraint2& constraint, contactSim2& contactSim )
 {
     assert( constraint.contactId != contactSim2::NULL_INDEX );
     assert( constraint.contactId == contactSim.contactId );
@@ -601,11 +508,8 @@ void StoreContactImpulses(
 
     for( int i = 0; i < constraint.pointCount; ++i )
     {
-        contactSim.impulses[i].normalImpulse =
-            constraint.points[i].normalImpulse;
-
-        contactSim.impulses[i].tangentImpulse =
-            constraint.points[i].tangentImpulse;
+        contactSim.impulses[i].normalImpulse = constraint.points[i].normalImpulse;
+        contactSim.impulses[i].tangentImpulse = constraint.points[i].tangentImpulse;
     }
 }
 
