@@ -1655,6 +1655,9 @@ void world::Step( float timeStep )
                 body.type == bodyType::Static ||
                 !body.awake )
             {
+                // null body는 무시함.
+				// 정적 body는 무시함.
+				// sleep 상태의 body는 무시함.
                 continue;
             }
 
@@ -1667,37 +1670,26 @@ void world::Step( float timeStep )
             if( body.type == bodyType::Dynamic )
             {
                 /*
-                * Newton 제2법칙:
-                *
                 *     F = M * a
                 *     a = F * invMass
-                *
                 *     dv = dt * ( gravity + F * invMass )
-                *
-                * 회전:
-                *
-                *     torque = I * angularAcceleration
-                *     dw = dt * torque * invInertia
                 */
                 if( bodySim.invMass > 0.0f )
                 {
-                    const vec2 acceleration =
-                        gravity_ +
-                        bodySim.force * bodySim.invMass;
-
-                    bodyState.linearVelocity +=
-                        acceleration * timeStep;
+                    const vec2 acceleration = gravity_ + bodySim.force * bodySim.invMass;
+                    bodyState.linearVelocity += acceleration * timeStep;
                 }
 
+                /*
+                *     torque = I * angularAcceleration
+                *     dw = dt * torque * invInertia
+                */
                 if( bodySim.invInertia > 0.0f )
                 {
-                    bodyState.angularVelocity +=
-                        timeStep *
-                        bodySim.invInertia *
-                        bodySim.torque;
+                    bodyState.angularVelocity += timeStep * bodySim.invInertia * bodySim.torque;
                 }
 
-                // force / torque는 한 step 동안만 누적됨.
+                // 속도에 적용됐으니 외력은 초기화함
                 bodySim.force = {};
                 bodySim.torque = 0.0f;
             }
@@ -1719,23 +1711,13 @@ void world::Step( float timeStep )
         // -----------------------------------------------------
         // 3. Build islands
         // -----------------------------------------------------
-        const islandGraph2 islandGraph =
-            BuildIslands(
-                bodies_,
-                contactSims_
-            );
+        const islandGraph2 islandGraph = BuildIslands( bodies_, contactSims_ );
 
         // Contact id 배열 자체가 island별 연속 구간이므로 constraint도 같은 순서로 한 번만 준비함.
         std::vector<contactConstraint2> contactConstraints =
-            PrepareContactConstraints(
-                islandGraph.contactIds,
-                timeStep
-            );
+            PrepareContactConstraints( islandGraph.contactIds, timeStep );
 
-        assert(
-            contactConstraints.size() ==
-            islandGraph.contactIds.size()
-        );
+        assert( contactConstraints.size() == islandGraph.contactIds.size() );
 
         // -----------------------------------------------------
         // 4. Warm start each island
@@ -1743,11 +1725,7 @@ void world::Step( float timeStep )
         for( const island2& island : islandGraph.islands )
         {
             const std::span<const contactConstraint2> constraints =
-                std::span<const contactConstraint2>{ contactConstraints }
-                    .subspan(
-                        island.contactStart,
-                        island.contactCount
-                    );
+                std::span<const contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
 
             WarmStartContacts( constraints );
         }
@@ -1758,16 +1736,9 @@ void world::Step( float timeStep )
         for( const island2& island : islandGraph.islands )
         {
             const std::span<contactConstraint2> constraints =
-                std::span<contactConstraint2>{ contactConstraints }
-                    .subspan(
-                        island.contactStart,
-                        island.contactCount
-                    );
+                std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
 
-            SolveContactConstraints(
-                constraints,
-                true
-            );
+            SolveContactConstraints( constraints, true );
         }
 
         // -----------------------------------------------------
@@ -1776,11 +1747,7 @@ void world::Step( float timeStep )
         for( const island2& island : islandGraph.islands )
         {
             const std::span<const std::int32_t> bodyIds =
-                std::span<const std::int32_t>{ islandGraph.bodyIds }
-                    .subspan(
-                        island.bodyStart,
-                        island.bodyCount
-                    );
+                std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
 
             for( const std::int32_t bodyIndex : bodyIds )
             {
@@ -1798,37 +1765,25 @@ void world::Step( float timeStep )
                 /*
                 * semi-implicit Euler
                 *
-                * velocity는 force와 Contact Solver에서 먼저 갱신됐고,
-                * 여기서는 그 최종 velocity로 COM transform을 적분함.
+                * 속도는 힘과 접점 해결(Contact Solver)에서 먼저 갱신됐고,
+                * 여기서는 그 최종 속도로 질량 중심 transform을 적분함.
                 *
-                * penetration이 있으면 이 velocity에는 push correction도 포함되어 있음.
-                *
-                *     x(t + dt) = x(t) + v(t + dt) * dt
+                * 침투(penetration)가 있으면 이 속도에는 침투를 해결하기 위한 속도(push correction)도 포함되어 있음.
                 */
-                bodySim.center +=
-                    bodyState.linearVelocity * timeStep;
+                bodySim.center += bodyState.linearVelocity * timeStep;
 
-                const float deltaAngle =
-                    bodyState.angularVelocity * timeStep;
+                const float deltaAngle = bodyState.angularVelocity * timeStep;
 
                 if( deltaAngle != 0.0f )
                 {
-                    bodySim.transform.rotation =
-                        rot2::FromRadians( deltaAngle ) *
-                        bodySim.transform.rotation;
+                    // 각속도로 오브젝트를 회전
+                    bodySim.transform.rotation = rot2::FromRadians( deltaAngle ) * bodySim.transform.rotation;
                 }
 
-                // center = origin + R * localCenter
-                //
-                // 따라서:
-                //
-                // origin = center - R * localCenter
-                bodySim.transform.position =
-                    bodySim.center -
-                    Rotate(
-                        bodySim.transform.rotation,
-                        bodySim.localCenter
-                    );
+				// 월드 = 위치 + 회전 * 로컬 중심
+                // 
+				// 위치 = 월드 - 회전 * 로컬 중심
+                bodySim.transform.position = bodySim.center - Rotate( bodySim.transform.rotation, bodySim.localCenter );
 
                 SyncBodyProxies( bodyIndex );
             }
@@ -1837,22 +1792,13 @@ void world::Step( float timeStep )
         // -----------------------------------------------------
         // 7. Relax contact velocities
         // -----------------------------------------------------
-        // position은 이미 push velocity로 이동했으므로,
-        // 이제 bias 없이 같은 constraint를 다시 풀어
-        // correction 때문에 생긴 분리 속도만 제거함.
+        // 침투 보정을 위해 추가된 분리 속도를 제거
         for( const island2& island : islandGraph.islands )
         {
             const std::span<contactConstraint2> constraints =
-                std::span<contactConstraint2>{ contactConstraints }
-                    .subspan(
-                        island.contactStart,
-                        island.contactCount
-                    );
+                std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
 
-            SolveContactConstraints(
-                constraints,
-                false
-            );
+            SolveContactConstraints( constraints, false );
         }
 
         // -----------------------------------------------------
@@ -1861,28 +1807,17 @@ void world::Step( float timeStep )
         for( const island2& island : islandGraph.islands )
         {
             const std::span<contactConstraint2> constraints =
-                std::span<contactConstraint2>{ contactConstraints }
-                    .subspan(
-                        island.contactStart,
-                        island.contactCount
-                    );
+                std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
 
-            ApplyRestitutionContacts(
-                constraints
-            );
+            ApplyRestitutionContacts( constraints );
         }
 
         // -----------------------------------------------------
         // 9. Store impulses
         // -----------------------------------------------------
-        StoreContactConstraintImpulses(
-            contactConstraints
-        );
+        StoreContactConstraintImpulses( contactConstraints );
 
-        UpdateIslandSleepStates(
-            islandGraph,
-            timeStep
-        );
+        UpdateIslandSleepStates( islandGraph, timeStep );
     }
 
     // 이동 후 새 broadPhase pair와 manifold를 만들어 다음 Step의 solver가 사용할
@@ -1906,19 +1841,15 @@ contactData world::GetContactData( contactId contactId ) const
 
 std::size_t world::GetBodyContactCapacity( bodyId bodyId ) const
 {
-    const body& body =
-        bodies_[GetBodyIndex( bodyId )];
+    const body& body = bodies_[GetBodyIndex( bodyId )];
 
     // Box2D와 같이 빠르고 보수적으로 body의 전체 Contact 수를 반환함.
     return static_cast<std::size_t>( body.contactCount );
 }
 
-std::size_t world::GetBodyContactData(
-    bodyId bodyId,
-    std::span<contactData> output ) const
+std::size_t world::GetBodyContactData( bodyId bodyId, std::span<contactData> output ) const
 {
-    const body& body =
-        bodies_[GetBodyIndex( bodyId )];
+    const body& body = bodies_[GetBodyIndex( bodyId )];
 
     std::int32_t contactKey = body.headContactKey;
     std::size_t count = 0;
@@ -1926,10 +1857,8 @@ std::size_t world::GetBodyContactData(
     while( contactKey != body::NULL_INDEX &&
            count < output.size() )
     {
-        const std::int32_t contactId =
-            GetContactId( contactKey );
-        const std::int32_t edgeIndex =
-            GetContactEdgeIndex( contactKey );
+        const std::int32_t contactId = GetContactId( contactKey );
+        const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
 
         assert( contactId >= 0 );
         assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
@@ -1940,21 +1869,18 @@ std::size_t world::GetBodyContactData(
         assert( edgeIndex == 0 || edgeIndex == 1 );
         assert( contactSims_.size() == contacts_.size() );
 
-        const contactSim2& contactSim =
-            contactSims_[contactId];
+        const contactSim2& contactSim = contactSims_[contactId];
 
         assert( contactSim.contactId == contactId );
 
         // speculative point는 solver에는 사용하지만 실제 touching query에서는 제외함.
         if( IsTouchingManifold( contactSim.manifold ) )
         {
-            output[count] =
-                MakeContactData( contactId );
+            output[count] = MakeContactData( contactId );
             ++count;
         }
 
-        contactKey =
-            contact.edges[edgeIndex].nextKey;
+        contactKey = contact.edges[edgeIndex].nextKey;
     }
 
     return count;
@@ -1962,8 +1888,7 @@ std::size_t world::GetBodyContactData(
 
 std::size_t world::GetShapeContactCapacity( shapeId shapeId ) const
 {
-    const std::int32_t shapeIndex =
-        GetShapeIndex( shapeId );
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
 
     const shape& shape = shapes_[shapeIndex];
 
@@ -1982,12 +1907,9 @@ std::size_t world::GetShapeContactCapacity( shapeId shapeId ) const
     return static_cast<std::size_t>( body.contactCount );
 }
 
-std::size_t world::GetShapeContactData(
-    shapeId shapeId,
-    std::span<contactData> output ) const
+std::size_t world::GetShapeContactData( shapeId shapeId, std::span<contactData> output ) const
 {
-    const std::int32_t shapeIndex =
-        GetShapeIndex( shapeId );
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
 
     const shape& shape = shapes_[shapeIndex];
 
@@ -2004,13 +1926,10 @@ std::size_t world::GetShapeContactData(
     std::int32_t contactKey = body.headContactKey;
     std::size_t count = 0;
 
-    while( contactKey != body::NULL_INDEX &&
-           count < output.size() )
+    while( contactKey != body::NULL_INDEX && count < output.size() )
     {
-        const std::int32_t contactId =
-            GetContactId( contactKey );
-        const std::int32_t edgeIndex =
-            GetContactEdgeIndex( contactKey );
+        const std::int32_t contactId = GetContactId( contactKey );
+        const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
 
         assert( contactId >= 0 );
         assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
@@ -2021,8 +1940,7 @@ std::size_t world::GetShapeContactData(
         assert( edgeIndex == 0 || edgeIndex == 1 );
         assert( contactSims_.size() == contacts_.size() );
 
-        const contactSim2& contactSim =
-            contactSims_[contactId];
+        const contactSim2& contactSim = contactSims_[contactId];
 
         assert( contactSim.contactId == contactId );
 
@@ -2030,16 +1948,13 @@ std::size_t world::GetShapeContactData(
             contact.shapeIdA == shapeIndex ||
             contact.shapeIdB == shapeIndex;
 
-        if( involvesShape &&
-            contactSim.manifold.pointCount > 0 )
+        if( involvesShape && contactSim.manifold.pointCount > 0 )
         {
-            output[count] =
-                MakeContactData( contactId );
+            output[count] = MakeContactData( contactId );
             ++count;
         }
 
-        contactKey =
-            contact.edges[edgeIndex].nextKey;
+        contactKey = contact.edges[edgeIndex].nextKey;
     }
 
     return count;
@@ -2055,8 +1970,7 @@ contactData world::MakeContactData( std::int32_t contactIndex ) const
     assert( contact.contactId == contactIndex );
     assert( contactSims_.size() == contacts_.size() );
 
-    const contactSim2& contactSim =
-        contactSims_[contactIndex];
+    const contactSim2& contactSim = contactSims_[contactIndex];
 
     assert( contactSim.contactId == contactIndex );
     assert( contact.shapeIdA >= 0 );
@@ -2078,11 +1992,7 @@ contactData world::MakeContactData( std::int32_t contactIndex ) const
     data.id = MakeContactId( contactIndex );
     data.shapeA = MakeShapeId( contact.shapeIdA );
     data.shapeB = MakeShapeId( contact.shapeIdB );
-    data.manifold =
-        ToWorldManifold(
-            contactSim.manifold,
-            bodySimA.transform
-        );
+    data.manifold = ToWorldManifold( contactSim.manifold, bodySimA.transform  );
 
     return data;
 }
@@ -2132,8 +2042,7 @@ std::int32_t world::CreateContact(
 
     contact2& contact = contacts_[contactId];
 
-    const std::uint32_t generation =
-        contact.generation + 1u;
+    const std::uint32_t generation = contact.generation + 1u;
 
     contact = {};
     contact.contactId = contactId;
@@ -2143,10 +2052,7 @@ std::int32_t world::CreateContact(
 
     assert( contactSims_.size() == contacts_.size() );
 
-    UpdateContactSim(
-        contactId,
-        manifold
-    );
+    UpdateContactSim( contactId, manifold );
 
     const std::array<std::int32_t, 2> shapeIds =
     {
@@ -2168,15 +2074,12 @@ std::int32_t world::CreateContact(
         edge.prevKey = contact2::NULL_INDEX;
         edge.nextKey = body.headContactKey;
 
-        const std::int32_t contactKey =
-            MakeContactKey( contactId, edgeIndex );
+        const std::int32_t contactKey = MakeContactKey( contactId, edgeIndex );
 
         if( body.headContactKey != body::NULL_INDEX )
         {
-            const std::int32_t headContactId =
-                GetContactId( body.headContactKey );
-            const std::int32_t headEdgeIndex =
-                GetContactEdgeIndex( body.headContactKey );
+            const std::int32_t headContactId = GetContactId( body.headContactKey );
+            const std::int32_t headEdgeIndex = GetContactEdgeIndex( body.headContactKey );
 
             assert( headContactId >= 0 );
             assert( static_cast<std::size_t>( headContactId ) < contacts_.size() );
@@ -2191,8 +2094,7 @@ std::int32_t world::CreateContact(
         ++body.contactCount;
     }
 
-    const shapePairKey pairKey =
-        MakeShapePairKey( shapeIdA, shapeIdB );
+    const shapePairKey pairKey = MakeShapePairKey( shapeIdA, shapeIdB );
 
     // hashSet::Add는 새 key면 false, 이미 존재하면 true를 반환함.
     const bool alreadyExists = broadPhase_.AddPair( pairKey );
@@ -2202,17 +2104,13 @@ std::int32_t world::CreateContact(
 
     if( manifold.pointCount > 0 )
     {
-        WakeBodyByIndex(
-            contact.edges[0].bodyId
-        );
+        WakeBodyByIndex( contact.edges[0].bodyId );
     }
 
     return contactId;
 }
 
-void world::UpdateContactSim(
-    std::int32_t contactId,
-    const localManifold2& manifold )
+void world::UpdateContactSim( std::int32_t contactId, const localManifold2& manifold )
 {
     assert( contactId >= 0 );
     assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
@@ -2240,16 +2138,13 @@ void world::UpdateContactSim(
     assert( bodySimA.bodyId == shapeA.bodyId );
     assert( bodySimB.bodyId == shapeB.bodyId );
 
-    contactSim2& contactSim =
-        contactSims_[contactId];
+    contactSim2& contactSim = contactSims_[contactId];
 
     // narrow-phase가 새 manifold를 만들기 전에 이전 point id와
     // solver impulse를 보존해 같은 접촉점에 다시 연결함.
-    const localManifold2 oldManifold =
-        contactSim.manifold;
+    const localManifold2 oldManifold = contactSim.manifold;
 
-    const auto oldImpulses =
-        contactSim.impulses;
+    const auto oldImpulses = contactSim.impulses;
 
     contactSim = {};
     contactSim.contactId = contactId;
@@ -2308,8 +2203,7 @@ void world::UpdateContactSim(
 }
 
 std::vector<contactConstraint2> world::PrepareContactConstraints(
-    std::span<const std::int32_t> contactIds,
-    float timeStep )
+    std::span<const std::int32_t> contactIds, float timeStep )
 {
     assert( std::isfinite( timeStep ) );
     assert( timeStep > 0.0f );
@@ -2325,14 +2219,9 @@ std::vector<contactConstraint2> world::PrepareContactConstraints(
     constexpr float CONTACT_DAMPING_RATIO = 10.0f;
     constexpr float MAX_CONTACT_PUSH_SPEED = 3.0f;
 
-    const float invTimeStep =
-        1.0f / timeStep;
+    const float invTimeStep = 1.0f / timeStep;
 
-    const float contactHertz =
-        std::min(
-            CONTACT_HERTZ,
-            0.125f * invTimeStep
-        );
+    const float contactHertz = std::min( CONTACT_HERTZ, 0.125f * invTimeStep );
 
     const contactSoftness2 contactSoftness =
         MakeContactSoftness(
@@ -2358,8 +2247,7 @@ std::vector<contactConstraint2> world::PrepareContactConstraints(
         assert( contactId >= 0 );
         assert( static_cast<std::size_t>( contactId ) < contactSims_.size() );
 
-        const contactSim2& contactSim =
-            contactSims_[contactId];
+        const contactSim2& contactSim = contactSims_[contactId];
 
         assert( contactSim.contactId == contactId );
         assert( contactSim.manifold.pointCount > 0 );
@@ -2372,25 +2260,17 @@ std::vector<contactConstraint2> world::PrepareContactConstraints(
         // 같은 body의 shape끼리는 Contact를 만들지 않아야 함.
         assert( contactSim.bodyIdA != contactSim.bodyIdB );
 
-        const bodySim& bodySimA =
-            bodySims_[contactSim.bodyIdA];
+        const bodySim& bodySimA = bodySims_[contactSim.bodyIdA];
+        const bodySim& bodySimB = bodySims_[contactSim.bodyIdB];
 
-        const bodySim& bodySimB =
-            bodySims_[contactSim.bodyIdB];
-
-        const bodyState& bodyStateA =
-            bodyStates_[contactSim.bodyIdA];
-
-        const bodyState& bodyStateB =
-            bodyStates_[contactSim.bodyIdB];
+        const bodyState& bodyStateA = bodyStates_[contactSim.bodyIdA];
+        const bodyState& bodyStateB = bodyStates_[contactSim.bodyIdB];
 
         contactConstraint2 constraint =
             PrepareContactConstraint(
                 contactSim,
-                bodySimA,
-                bodyStateA,
-                bodySimB,
-                bodyStateB
+                bodySimA, bodyStateA,
+                bodySimB, bodyStateB
             );
 
         const bool hasStaticBody =
@@ -2402,35 +2282,22 @@ std::vector<contactConstraint2> world::PrepareContactConstraints(
                 ? staticSoftness
                 : contactSoftness;
 
-        constraint.maxPushSpeed =
-            MAX_CONTACT_PUSH_SPEED;
+        constraint.maxPushSpeed = MAX_CONTACT_PUSH_SPEED;
 
-        constraint.invTimeStep =
-            invTimeStep;
+        constraint.invTimeStep = invTimeStep;
 
         assert( contactSim.shapeIdA >= 0 );
         assert( contactSim.shapeIdB >= 0 );
         assert( static_cast<std::size_t>( contactSim.shapeIdA ) < shapes_.size() );
         assert( static_cast<std::size_t>( contactSim.shapeIdB ) < shapes_.size() );
 
-        const shape& shapeA =
-            shapes_[contactSim.shapeIdA];
+        const shape& shapeA = shapes_[contactSim.shapeIdA];
 
-        const shape& shapeB =
-            shapes_[contactSim.shapeIdB];
+        const shape& shapeB = shapes_[contactSim.shapeIdB];
 
         // Box2D 기본 mixing rule.
-        constraint.friction =
-            std::sqrt(
-                shapeA.friction *
-                shapeB.friction
-            );
-
-        constraint.restitution =
-            std::max(
-                shapeA.restitution,
-                shapeB.restitution
-            );
+        constraint.friction = std::sqrt( shapeA.friction * shapeB.friction );
+        constraint.restitution = std::max( shapeA.restitution, shapeB.restitution );
 
         constraints.push_back( constraint );
     }
@@ -2471,9 +2338,7 @@ void world::SolveContactConstraints(
     *     position 적분 뒤 correction velocity를 제거하는 rigid relax
     *     + tangent 방향 Coulomb friction
     */
-    for( int iteration = 0;
-         iteration < VELOCITY_ITERATIONS;
-         ++iteration )
+    for( int iteration = 0; iteration < VELOCITY_ITERATIONS; ++iteration )
     {
         for( contactConstraint2& constraint : constraints )
         {

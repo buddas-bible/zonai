@@ -50,10 +50,8 @@ contactSoftness2 MakeContactSoftness(
 
 contactConstraint2 PrepareContactConstraint(
     const contactSim2& contactSim,
-    const bodySim& bodySimA,
-    const bodyState& bodyStateA,
-    const bodySim& bodySimB,
-    const bodyState& bodyStateB )
+    const bodySim& bodySimA, const bodyState& bodyStateA,
+    const bodySim& bodySimB, const bodyState& bodyStateB )
 {
     assert( contactSim.contactId != contactSim2::NULL_INDEX );
     assert( contactSim.bodyIdA == bodySimA.bodyId );
@@ -81,48 +79,32 @@ contactConstraint2 PrepareContactConstraint(
     * solver가 사용할 normal과 contact point를 world space로 변환함.
     */
     constraint.normal =
-        TransformVector(
-            bodySimA.transform,
-            contactSim.manifold.normal
-        );
+        TransformVector( bodySimA.transform, contactSim.manifold.normal );
 
-    constraint.pointCount =
-        contactSim.manifold.pointCount;
+    constraint.pointCount = contactSim.manifold.pointCount;
 
     for( int i = 0; i < constraint.pointCount; ++i )
     {
-        const localManifoldPoint2& manifoldPoint =
-            contactSim.manifold.points[i];
+        const localManifoldPoint2& manifoldPoint = contactSim.manifold.points[i];
 
-        contactConstraintPoint2& point =
-            constraint.points[i];
+        contactConstraintPoint2& point = constraint.points[i];
 
-        const vec2 worldPoint =
-            TransformPoint(
-                bodySimA.transform,
-                manifoldPoint.point
-            );
+        const vec2 worldPoint = TransformPoint( bodySimA.transform, manifoldPoint.point );
 
         // center of mass에서 contact point까지의 lever arm.
         //
         //     rA = P - cA
         //     rB = P - cB
-        point.anchorA =
-            worldPoint - bodySimA.center;
+        point.anchorA = worldPoint - bodySimA.center;
+        point.anchorB = worldPoint - bodySimB.center;
 
-        point.anchorB =
-            worldPoint - bodySimB.center;
-
-        point.separation =
-            manifoldPoint.separation;
+        point.separation = manifoldPoint.separation;
 
         // 같은 contact point가 이전 step에도 존재했다면
         // 이전 normal / tangent 누적 impulse를 초기 추정값으로 가져옴.
-        point.normalImpulse =
-            contactSim.impulses[i].normalImpulse;
+        point.normalImpulse = contactSim.impulses[i].normalImpulse;
 
-        point.tangentImpulse =
-            contactSim.impulses[i].tangentImpulse;
+        point.tangentImpulse = contactSim.impulses[i].tangentImpulse;
 
         /*
         * Contact point의 실제 선속도
@@ -142,25 +124,20 @@ contactConstraint2 PrepareContactConstraint(
         * vn < 0 : 서로 접근 중
         * vn > 0 : 서로 멀어지는 중
         */
-        const vec2 velocityA =
-            bodyStateA.linearVelocity +
-            Cross(
-                bodyStateA.angularVelocity,
-                point.anchorA
-            );
+		const vec2& v_a = bodyStateA.linearVelocity;
+		const float& w_a = bodyStateA.angularVelocity;
 
-        const vec2 velocityB =
-            bodyStateB.linearVelocity +
-            Cross(
-                bodyStateB.angularVelocity,
-                point.anchorB
-            );
+		const vec2& v_b = bodyStateB.linearVelocity;
+		const float& w_b = bodyStateB.angularVelocity;
 
-        point.relativeNormalVelocity =
-            Dot(
-                velocityB - velocityA,
-                constraint.normal
-            );
+        const vec2& r_a = point.anchorA;
+        const vec2& r_b = point.anchorB;
+
+        const vec2 v_p1 = v_a + Cross( w_a, r_a );
+        const vec2 v_p2 = v_b + Cross( w_b, r_b );
+		const vec2 v_r = v_p2 - v_p1;
+
+        point.relativeNormalVelocity = Dot( v_r, constraint.normal );
 
         /*
         * normal impulse Jn을 contact point에 적용하면
@@ -185,28 +162,18 @@ contactConstraint2 PrepareContactConstraint(
         *
         *     normalMass = 1 / K
         */
-        const float rnA =
-            Cross(
-                point.anchorA,
-                constraint.normal
-            );
+        const float rnA = Cross( r_a, constraint.normal );
+        const float rnB = Cross( r_b, constraint.normal );
 
-        const float rnB =
-            Cross(
-                point.anchorB,
-                constraint.normal
-            );
-
+		// 임펄스 공식의 분모에 해당하는 effective mass의 역수.
         const float inverseEffectiveMass =
             constraint.invMassA +
             constraint.invMassB +
             constraint.invInertiaA * rnA * rnA +
             constraint.invInertiaB * rnB * rnB;
 
-        point.normalMass =
-            inverseEffectiveMass > 0.0f
-                ? 1.0f / inverseEffectiveMass
-                : 0.0f;
+        point.normalMass = inverseEffectiveMass > 0.0f ?
+            1.0f / inverseEffectiveMass : 0.0f;
 
         /*
         * tangent 방향도 같은 방식으로 effective mass를 계산함.
@@ -224,17 +191,8 @@ contactConstraint2 PrepareContactConstraint(
             -constraint.normal.x
         };
 
-        const float rtA =
-            Cross(
-                point.anchorA,
-                tangent
-            );
-
-        const float rtB =
-            Cross(
-                point.anchorB,
-                tangent
-            );
+        const float rtA = Cross( r_a, tangent );
+        const float rtB = Cross( r_b, tangent );
 
         const float tangentInverseEffectiveMass =
             constraint.invMassA +
@@ -242,32 +200,21 @@ contactConstraint2 PrepareContactConstraint(
             constraint.invInertiaA * rtA * rtA +
             constraint.invInertiaB * rtB * rtB;
 
-        point.tangentMass =
-            tangentInverseEffectiveMass > 0.0f
-                ? 1.0f / tangentInverseEffectiveMass
-                : 0.0f;
+        point.tangentMass = tangentInverseEffectiveMass > 0.0f ? 
+            1.0f / tangentInverseEffectiveMass : 0.0f;
     }
 
     return constraint;
 }
 
 
-void WarmStartContactConstraint(
-    const contactConstraint2& constraint,
-    bodyState& bodyStateA,
-    bodyState& bodyStateB )
+void WarmStartContactConstraint( const contactConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB )
 {
-    vec2 linearVelocityA =
-        bodyStateA.linearVelocity;
+    vec2 linearVelocityA = bodyStateA.linearVelocity;
+    float angularVelocityA = bodyStateA.angularVelocity;
 
-    float angularVelocityA =
-        bodyStateA.angularVelocity;
-
-    vec2 linearVelocityB =
-        bodyStateB.linearVelocity;
-
-    float angularVelocityB =
-        bodyStateB.angularVelocity;
+    vec2 linearVelocityB = bodyStateB.linearVelocity;
+    float angularVelocityB = bodyStateB.angularVelocity;
 
     const vec2 tangent
     {
@@ -284,71 +231,46 @@ void WarmStartContactConstraint(
     */
     for( int i = 0; i < constraint.pointCount; ++i )
     {
-        const contactConstraintPoint2& point =
-            constraint.points[i];
+        const contactConstraintPoint2& point = constraint.points[i];
 
         const vec2 impulseVector =
             constraint.normal * point.normalImpulse +
             tangent * point.tangentImpulse;
 
-        linearVelocityA -=
-            impulseVector *
-            constraint.invMassA;
+        linearVelocityA -= impulseVector * constraint.invMassA;
 
         angularVelocityA -=
             constraint.invInertiaA *
-            Cross(
-                point.anchorA,
-                impulseVector
-            );
+            Cross( point.anchorA, impulseVector );
 
-        linearVelocityB +=
-            impulseVector *
-            constraint.invMassB;
+        linearVelocityB += impulseVector * constraint.invMassB;
 
         angularVelocityB +=
             constraint.invInertiaB *
-            Cross(
-                point.anchorB,
-                impulseVector
-            );
+            Cross( point.anchorB, impulseVector );
     }
 
-    bodyStateA.linearVelocity =
-        linearVelocityA;
+    bodyStateA.linearVelocity = linearVelocityA;
+    bodyStateA.angularVelocity = angularVelocityA;
 
-    bodyStateA.angularVelocity =
-        angularVelocityA;
-
-    bodyStateB.linearVelocity =
-        linearVelocityB;
-
-    bodyStateB.angularVelocity =
-        angularVelocityB;
+    bodyStateB.linearVelocity = linearVelocityB;
+    bodyStateB.angularVelocity = angularVelocityB;
 }
 
 void SolveContactConstraint(
     contactConstraint2& constraint,
-    bodyState& bodyStateA,
-    bodyState& bodyStateB,
+    bodyState& bodyStateA, bodyState& bodyStateB,
     bool useBias )
 {
-    vec2 linearVelocityA =
-        bodyStateA.linearVelocity;
+    vec2 v_a = bodyStateA.linearVelocity;
+    float w_a = bodyStateA.angularVelocity;
 
-    float angularVelocityA =
-        bodyStateA.angularVelocity;
-
-    vec2 linearVelocityB =
-        bodyStateB.linearVelocity;
-
-    float angularVelocityB =
-        bodyStateB.angularVelocity;
+    vec2 v_b = bodyStateB.linearVelocity;
+    float w_b = bodyStateB.angularVelocity;
 
     for( int i = 0; i < constraint.pointCount; ++i )
     {
-        contactConstraintPoint2& point =
-            constraint.points[i];
+        contactConstraintPoint2& point = constraint.points[i];
 
         /*
         * 현재 contact point의 normal 상대속도를 매 iteration마다 다시 계산함.
@@ -356,25 +278,13 @@ void SolveContactConstraint(
         * 앞의 Contact가 velocity를 바꾸면 뒤 Contact가 보는 상대속도도 바뀌므로
         * Prepare 단계에서 계산한 값만 계속 사용하면 sequential impulse가 되지 않음.
         */
-        const vec2 velocityA =
-            linearVelocityA +
-            Cross(
-                angularVelocityA,
-                point.anchorA
-            );
+        // 질량 중심에서 충돌 지점까지의 벡터
+        const vec2 v_p1 = v_a + Cross( w_a, point.anchorA );
+        const vec2 v_p2 = v_b + Cross( w_b, point.anchorB );
+		const vec2 v_r = v_p2 - v_p1;
 
-        const vec2 velocityB =
-            linearVelocityB +
-            Cross(
-                angularVelocityB,
-                point.anchorB
-            );
-
-        const float normalVelocity =
-            Dot(
-                velocityB - velocityA,
-                constraint.normal
-            );
+        // 충돌 지점에서 노말 방향으로의 상대 속도
+        const float normalVelocity = Dot( v_r, constraint.normal );
 
         /*
         * penetration correction은 실제 위치를 바로 순간이동시키지 않고
@@ -412,17 +322,12 @@ void SolveContactConstraint(
             *
             *     vn + s / dt >= 0
             */
-            velocityBias =
-                point.separation *
-                constraint.invTimeStep;
+            velocityBias = point.separation * constraint.invTimeStep;
         }
         else if( useBias )
         {
-            massScale =
-                constraint.softness.massScale;
-
-            impulseScale =
-                constraint.softness.impulseScale;
+            massScale = constraint.softness.massScale;
+            impulseScale = constraint.softness.impulseScale;
 
             velocityBias =
                 massScale *
@@ -430,36 +335,23 @@ void SolveContactConstraint(
                 point.separation;
 
             // 깊은 관통에서도 지나치게 큰 보정 속도를 만들지 않음.
-            velocityBias =
-                std::max(
-                    velocityBias,
-                    -constraint.maxPushSpeed
-                );
+            velocityBias = std::max( velocityBias, -constraint.maxPushSpeed );
         }
 
-        const float oldImpulse =
-            point.normalImpulse;
+        const float oldImpulse = point.normalImpulse;
 
         const float incrementalImpulse =
             -point.normalMass *
             ( massScale * normalVelocity + velocityBias ) -
             impulseScale * oldImpulse;
 
-        const float candidateImpulse =
-            oldImpulse + incrementalImpulse;
+        const float candidateImpulse = oldImpulse + incrementalImpulse;
 
-        point.normalImpulse =
-            std::max(
-                candidateImpulse,
-                0.0f
-            );
+        point.normalImpulse = std::max( candidateImpulse, 0.0f );
 
-        const float impulse =
-            point.normalImpulse -
-            oldImpulse;
+        const float impulse = point.normalImpulse - oldImpulse;
 
-        const vec2 impulseVector =
-            constraint.normal * impulse;
+        const vec2 impulseVector = constraint.normal * impulse;
 
         /*
         * A에는 -P, B에는 +P를 적용함.
@@ -474,27 +366,17 @@ void SolveContactConstraint(
         *     wA -= invIA * ( rA x P )
         *     wB += invIB * ( rB x P )
         */
-        linearVelocityA -=
-            impulseVector *
-            constraint.invMassA;
+        v_a -= impulseVector * constraint.invMassA;
 
-        angularVelocityA -=
+        w_a -=
             constraint.invInertiaA *
-            Cross(
-                point.anchorA,
-                impulseVector
-            );
+            Cross( point.anchorA, impulseVector );
 
-        linearVelocityB +=
-            impulseVector *
-            constraint.invMassB;
+        v_b += impulseVector * constraint.invMassB;
 
-        angularVelocityB +=
+        w_b +=
             constraint.invInertiaB *
-            Cross(
-                point.anchorB,
-                impulseVector
-            );
+            Cross( point.anchorB, impulseVector );
     }
 
     /*
@@ -520,39 +402,19 @@ void SolveContactConstraint(
 
         for( int i = 0; i < constraint.pointCount; ++i )
         {
-            contactConstraintPoint2& point =
-                constraint.points[i];
+            contactConstraintPoint2& point = constraint.points[i];
 
-            const vec2 velocityA =
-                linearVelocityA +
-                Cross(
-                    angularVelocityA,
-                    point.anchorA
-                );
+            const vec2 velocityA = v_a + Cross( w_a, point.anchorA );
 
-            const vec2 velocityB =
-                linearVelocityB +
-                Cross(
-                    angularVelocityB,
-                    point.anchorB
-                );
+            const vec2 velocityB = v_b + Cross( w_b, point.anchorB );
 
-            const float tangentVelocity =
-                Dot(
-                    velocityB - velocityA,
-                    tangent
-                );
+            const float tangentVelocity = Dot( velocityB - velocityA, tangent );
 
-            const float oldImpulse =
-                point.tangentImpulse;
+            const float oldImpulse = point.tangentImpulse;
 
-            const float incrementalImpulse =
-                -point.tangentMass *
-                tangentVelocity;
+            const float incrementalImpulse = -point.tangentMass * tangentVelocity;
 
-            const float maxFrictionImpulse =
-                constraint.friction *
-                point.normalImpulse;
+            const float maxFrictionImpulse = constraint.friction * point.normalImpulse;
 
             point.tangentImpulse =
                 std::clamp(
@@ -561,48 +423,29 @@ void SolveContactConstraint(
                     maxFrictionImpulse
                 );
 
-            const float impulse =
-                point.tangentImpulse -
-                oldImpulse;
+            const float impulse = point.tangentImpulse - oldImpulse;
 
-            const vec2 impulseVector =
-                tangent * impulse;
+            const vec2 impulseVector = tangent * impulse;
 
-            linearVelocityA -=
-                impulseVector *
-                constraint.invMassA;
+            v_a -= impulseVector * constraint.invMassA;
 
-            angularVelocityA -=
+            w_a -=
                 constraint.invInertiaA *
-                Cross(
-                    point.anchorA,
-                    impulseVector
-                );
+                Cross( point.anchorA, impulseVector );
 
-            linearVelocityB +=
-                impulseVector *
-                constraint.invMassB;
+            v_b += impulseVector * constraint.invMassB;
 
-            angularVelocityB +=
+            w_b +=
                 constraint.invInertiaB *
-                Cross(
-                    point.anchorB,
-                    impulseVector
-                );
+                Cross( point.anchorB, impulseVector );
         }
     }
 
-    bodyStateA.linearVelocity =
-        linearVelocityA;
+    bodyStateA.linearVelocity = v_a;
+    bodyStateA.angularVelocity = w_a;
 
-    bodyStateA.angularVelocity =
-        angularVelocityA;
-
-    bodyStateB.linearVelocity =
-        linearVelocityB;
-
-    bodyStateB.angularVelocity =
-        angularVelocityB;
+    bodyStateB.linearVelocity = v_b;
+    bodyStateB.angularVelocity = w_b;
 }
 
 
