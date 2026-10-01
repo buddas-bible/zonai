@@ -31,6 +31,10 @@ struct bodySim
     float invMass = 0.0f;
     float invInertia = 0.0f;
 
+    // local center of mass에서 가장 먼 shape bounds까지의 거리.
+    // 회전 속도를 실제 body point의 선속도로 환산할 때 사용함.
+    float maxExtent = 0.0f;
+
     // 이 simulation 데이터가 대응하는 World 내부 body index.
     // NULL_INDEX면 현재 free slot임.
     std::int32_t bodyId = NULL_INDEX;

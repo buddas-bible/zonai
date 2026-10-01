@@ -73,6 +73,16 @@ public:
     [[nodiscard]] float GetBodyAngularVelocity( bodyId bodyId ) const;
 
 
+    void SetBodyAwake( bodyId bodyId, bool awake );
+    [[nodiscard]] bool IsBodyAwake( bodyId bodyId ) const;
+
+    void SetBodySleepEnabled( bodyId bodyId, bool enabled );
+    [[nodiscard]] bool IsBodySleepEnabled( bodyId bodyId ) const;
+
+    void SetBodySleepThreshold( bodyId bodyId, float threshold );
+    [[nodiscard]] float GetBodySleepThreshold( bodyId bodyId ) const;
+
+
     [[nodiscard]] float GetBodyMass( bodyId bodyId ) const;
     [[nodiscard]] float GetBodyRotationalInertia( bodyId bodyId ) const;
     [[nodiscard]] vec2 GetBodyLocalCenter( bodyId bodyId ) const;
@@ -81,6 +91,9 @@ public:
     // world 전체 Dynamic body에 적용되는 중력 가속도.
     void SetGravity( vec2 gravity );
     [[nodiscard]] vec2 GetGravity() const noexcept;
+
+    void SetSleepingEnabled( bool enabled );
+    [[nodiscard]] bool IsSleepingEnabled() const noexcept;
 
 
     // Dynamic body에 world-space 힘을 누적함.
@@ -313,6 +326,21 @@ private:
     // 연결된 shape들의 density / geometry를 합산해 Dynamic body의 mass data를 갱신함.
     void UpdateBodyMassData( std::int32_t bodyIndex );
 
+    // 현재 solver-active Contact graph를 따라 연결된 body 전체를 깨움.
+    // Static body가 시작점이면 연결된 non-static body만 깨움.
+    void WakeBodyByIndex( std::int32_t bodyIndex );
+
+    // 명시적으로 body 하나를 sleep시키면 현재 연결된 island 전체를 함께 sleep시킴.
+    void SleepBodyByIndex( std::int32_t bodyIndex );
+
+    // active Contact가 awake / sleeping 경계를 가로지르지 않도록 wake 상태를 전파함.
+    void WakeSleepingBodiesFromContacts();
+
+    // solver가 끝난 island의 motion이 threshold 아래에 충분히 오래 머물렀는지 판정함.
+    void UpdateIslandSleepStates(
+        const islandGraph2& islandGraph,
+        float timeStep );
+
     // stable Contact slot을 할당하고 두 body의 intrusive contact list에 연결함.
     [[nodiscard]] std::int32_t CreateContact(
         std::int32_t shapeIdA, std::int32_t shapeIdB,
@@ -393,6 +421,9 @@ private:
 
     // 모든 Dynamic body에 적용되는 world-space 중력 가속도.
     vec2 gravity_{ 0.0f, -10.0f };
+
+    // false면 모든 non-static body를 계속 awake 상태로 유지함.
+    bool sleepingEnabled_ = true;
 
     // 모든 shape의 broad-phase proxy를 body type별 DynamicTree에 관리함.
     broadPhase broadPhase_;

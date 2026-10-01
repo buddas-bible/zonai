@@ -151,6 +151,170 @@ int main()
         assert( world.GetBodyAngularVelocity( reusedBody ) == 0.0f );
     }
 
+    // 정지한 non-static body는 threshold 아래에서 일정 시간이 지나면 sleep함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId staticBody =
+            world.CreateBody( bodyType::Static );
+
+        const bodyId dynamicBody =
+            world.CreateBody( bodyType::Dynamic );
+
+        (void)world.CreateShape(
+            dynamicBody,
+            circle2{ {}, 1.0f }
+        );
+
+        assert( !world.IsBodyAwake( staticBody ) );
+        assert( world.IsBodyAwake( dynamicBody ) );
+        assert( world.IsBodySleepEnabled( dynamicBody ) );
+        assert(
+            std::fabs(
+                world.GetBodySleepThreshold( dynamicBody ) -
+                0.05f
+            ) < epsilon
+        );
+
+        for( int i = 0; i < 20; ++i )
+        {
+            world.Step( 1.0f / 60.0f );
+        }
+
+        assert( world.IsBodyAwake( dynamicBody ) );
+
+        for( int i = 0; i < 20; ++i )
+        {
+            world.Step( 1.0f / 60.0f );
+        }
+
+        assert( !world.IsBodyAwake( dynamicBody ) );
+        assert( world.GetBodyLinearVelocity( dynamicBody ).x == 0.0f );
+        assert( world.GetBodyLinearVelocity( dynamicBody ).y == 0.0f );
+        assert( world.GetBodyAngularVelocity( dynamicBody ) == 0.0f );
+
+        const float mass =
+            world.GetBodyMass( dynamicBody );
+
+        world.ApplyLinearImpulseToCenter(
+            dynamicBody,
+            { mass, 0.0f }
+        );
+
+        assert( world.IsBodyAwake( dynamicBody ) );
+        assert(
+            std::fabs(
+                world.GetBodyLinearVelocity( dynamicBody ).x -
+                1.0f
+            ) < epsilon
+        );
+    }
+
+    // Contact로 연결된 body는 island 전체가 함께 sleep / wake함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId bodyA =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 0.0f, 0.0f },
+                    {}
+                }
+            );
+
+        const bodyId bodyB =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 2.0f, 0.0f },
+                    {}
+                }
+            );
+
+        (void)world.CreateShape(
+            bodyA,
+            circle2{ {}, 1.0f }
+        );
+
+        (void)world.CreateShape(
+            bodyB,
+            circle2{ {}, 1.0f }
+        );
+
+        for( int i = 0; i < 40; ++i )
+        {
+            world.Step( 1.0f / 60.0f );
+        }
+
+        assert( !world.IsBodyAwake( bodyA ) );
+        assert( !world.IsBodyAwake( bodyB ) );
+
+        world.SetBodyAwake(
+            bodyA,
+            true
+        );
+
+        assert( world.IsBodyAwake( bodyA ) );
+        assert( world.IsBodyAwake( bodyB ) );
+
+        world.SetBodyAwake(
+            bodyA,
+            false
+        );
+
+        assert( !world.IsBodyAwake( bodyA ) );
+        assert( !world.IsBodyAwake( bodyB ) );
+
+        world.SetBodySleepEnabled(
+            bodyA,
+            false
+        );
+
+        // sleep을 금지한 body를 깨우면 연결된 island도 함께 깨어남.
+        assert( world.IsBodyAwake( bodyA ) );
+        assert( world.IsBodyAwake( bodyB ) );
+        assert( !world.IsBodySleepEnabled( bodyA ) );
+
+        for( int i = 0; i < 40; ++i )
+        {
+            world.Step( 1.0f / 60.0f );
+        }
+
+        assert( world.IsBodyAwake( bodyA ) );
+        assert( world.IsBodyAwake( bodyB ) );
+    }
+
+    // World sleep을 끄면 이미 잠든 body도 모두 다시 awake 상태가 됨.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId dynamicBody =
+            world.CreateBody( bodyType::Dynamic );
+
+        for( int i = 0; i < 40; ++i )
+        {
+            world.Step( 1.0f / 60.0f );
+        }
+
+        assert( !world.IsBodyAwake( dynamicBody ) );
+
+        world.SetSleepingEnabled( false );
+
+        assert( !world.IsSleepingEnabled() );
+        assert( world.IsBodyAwake( dynamicBody ) );
+
+        for( int i = 0; i < 40; ++i )
+        {
+            world.Step( 1.0f / 60.0f );
+        }
+
+        assert( world.IsBodyAwake( dynamicBody ) );
+    }
+
     // Dynamic body의 mass data는 연결된 shape density / geometry를 합산해 계산됨.
     {
         world world{};

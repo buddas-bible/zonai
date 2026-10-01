@@ -83,10 +83,10 @@ islandGraph2 BuildIslands(
         0
     );
 
-    std::size_t nonStaticBodyCount = 0;
+    std::size_t awakeBodyCount = 0;
 
-    // Static body는 solver island에 들어가지 않음.
-    // Dynamic / Kinematic body는 Contact가 없어도 독립 island 하나를 가짐.
+    // Static / sleeping body는 이번 solver island에 들어가지 않음.
+    // Awake Dynamic / Kinematic body는 Contact가 없어도 독립 island 하나를 가짐.
     for( std::int32_t bodyId = 0;
          bodyId < static_cast<std::int32_t>( bodies.size() );
          ++bodyId )
@@ -95,7 +95,8 @@ islandGraph2 BuildIslands(
             bodies[bodyId];
 
         if( currentBody.bodyId == body::NULL_INDEX ||
-            currentBody.type == bodyType::Static )
+            currentBody.type == bodyType::Static ||
+            !currentBody.awake )
         {
             continue;
         }
@@ -103,7 +104,7 @@ islandGraph2 BuildIslands(
         assert( currentBody.bodyId == bodyId );
 
         parents[bodyId] = bodyId;
-        ++nonStaticBodyCount;
+        ++awakeBodyCount;
     }
 
     /*
@@ -131,6 +132,19 @@ islandGraph2 BuildIslands(
         assert( static_cast<std::size_t>( contactSim.bodyIdA ) < bodies.size() );
         assert( static_cast<std::size_t>( contactSim.bodyIdB ) < bodies.size() );
 
+        const body& bodyA =
+            bodies[contactSim.bodyIdA];
+
+        const body& bodyB =
+            bodies[contactSim.bodyIdB];
+
+        if( bodyA.type != bodyType::Static &&
+            bodyB.type != bodyType::Static )
+        {
+            // active Contact가 awake / sleeping 경계를 가로지르면 안 됨.
+            assert( bodyA.awake == bodyB.awake );
+        }
+
         const bool hasBodyA =
             parents[contactSim.bodyIdA] != body::NULL_INDEX;
 
@@ -154,7 +168,7 @@ islandGraph2 BuildIslands(
     );
 
     islandGraph2 graph{};
-    graph.islands.reserve( nonStaticBodyCount );
+    graph.islands.reserve( awakeBodyCount );
 
     // 먼저 island 수와 각 island의 body 개수를 결정함.
     for( std::int32_t bodyId = 0;
@@ -238,7 +252,7 @@ islandGraph2 BuildIslands(
         totalContactCount += island.contactCount;
     }
 
-    assert( totalBodyCount == nonStaticBodyCount );
+    assert( totalBodyCount == awakeBodyCount );
 
     graph.bodyIds.resize( totalBodyCount );
     graph.contactIds.resize( totalContactCount );

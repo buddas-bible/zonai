@@ -176,6 +176,29 @@ int main()
         assert( graph.contactIds.empty() );
     }
 
+    // sleeping body는 이번 solver island graph에서 제외됨.
+    {
+        std::vector<body> bodies( 2 );
+
+        bodies[0].bodyId = 0;
+        bodies[0].type = bodyType::Dynamic;
+        bodies[0].awake = false;
+
+        bodies[1].bodyId = 1;
+        bodies[1].type = bodyType::Dynamic;
+        bodies[1].awake = true;
+
+        const islandGraph2 graph =
+            BuildIslands(
+                bodies,
+                std::span<const contactSim2>{}
+            );
+
+        assert( graph.islands.size() == 1 );
+        assert( graph.bodyIds.size() == 1 );
+        assert( graph.bodyIds[0] == 1 );
+    }
+
     // speculative point도 실제 solver constraint이므로 island를 연결해야 함.
     {
         std::vector<body> bodies( 2 );

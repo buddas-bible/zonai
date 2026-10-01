@@ -29,6 +29,18 @@ struct body
     // Dynamic body의 center of mass 기준 회전 관성.
     float inertia = 0.0f;
 
+    // Static이 아닌 body가 현재 solver에 참여하는지 나타냄.
+    bool awake = true;
+
+    // false면 자동 sleep 대상에서 제외됨.
+    bool enableSleep = true;
+
+    // sleep threshold 아래에서 연속으로 머문 시간.
+    float sleepTime = 0.0f;
+
+    // 가장 빠른 body point의 속도가 이 값 이하일 때 sleep timer가 증가함.
+    float sleepThreshold = 0.05f;
+
     // [contactId : edgeIndex] key로 연결된 첫 Contact.
     // 하위 1bit는 Contact의 어느 edge가 이 body에 연결됐는지 나타냄.
     std::int32_t headContactKey = NULL_INDEX;

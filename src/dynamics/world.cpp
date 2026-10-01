@@ -8,6 +8,7 @@
 
 #include "collision/constants.h"
 #include "dynamics/bodyShape.h"
+#include "dynamics/constants.h"
 
 namespace zonai
 {
@@ -174,6 +175,9 @@ bodyId world::CreateBody( bodyType type, transform2 transform )
     body.bodyId = bodyIndex;
     body.generation = generation;
     body.type = type;
+    body.awake = type != bodyType::Static;
+
+    WakeBodyByIndex( bodyIndex );
 
     assert( bodySims_.size() == bodies_.size() );
 
@@ -300,6 +304,8 @@ shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilt
 
     body& body = bodies_[bodyIndex];
 
+    WakeBodyByIndex( bodyIndex );
+
     assert( bodySims_.size() == bodies_.size() );
     const bodySim& bodySim = bodySims_[bodyIndex];
     assert( bodySim.bodyId == bodyIndex );
@@ -347,6 +353,8 @@ void world::SetShapeDensity( shapeId shapeId, float density )
     shape.density = density;
 
     assert( shape.bodyId != shape::NULL_INDEX );
+
+    WakeBodyByIndex( shape.bodyId );
     UpdateBodyMassData( shape.bodyId );
 }
 
@@ -400,6 +408,8 @@ void world::DestroyShapeByIndex( std::int32_t shapeIndex )
 
     const std::int32_t bodyIndex = shape.bodyId;
     body& body = bodies_[bodyIndex];
+
+    WakeBodyByIndex( bodyIndex );
 
     // Box2D처럼 먼저 body의 shape list에서 분리함.
     UnlinkShape( body, bodyIndex, shapes_, shapeIndex );
@@ -557,12 +567,78 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
     bodySim.invMass = 0.0f;
     bodySim.invInertia = 0.0f;
     bodySim.localCenter = {};
+    bodySim.maxExtent = 0.0f;
+
+    const auto updateMaxExtent =
+        [&]()
+        {
+            std::int32_t shapeIndex = body.headShapeId;
+            std::int32_t visitedCount = 0;
+
+            while( shapeIndex != body::NULL_INDEX )
+            {
+                assert( shapeIndex >= 0 );
+                assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+                assert( visitedCount < body.shapeCount );
+
+                const shape& shape = shapes_[shapeIndex];
+                assert( shape.bodyId == bodyIndex );
+
+                const aabb2 localAABB =
+                    ComputeShapeAABB(
+                        shape.geometry,
+                        {}
+                    );
+
+                bodySim.maxExtent =
+                    std::max(
+                        bodySim.maxExtent,
+                        Length(
+                            vec2{ localAABB.min.x, localAABB.min.y } -
+                            bodySim.localCenter
+                        )
+                    );
+
+                bodySim.maxExtent =
+                    std::max(
+                        bodySim.maxExtent,
+                        Length(
+                            vec2{ localAABB.min.x, localAABB.max.y } -
+                            bodySim.localCenter
+                        )
+                    );
+
+                bodySim.maxExtent =
+                    std::max(
+                        bodySim.maxExtent,
+                        Length(
+                            vec2{ localAABB.max.x, localAABB.min.y } -
+                            bodySim.localCenter
+                        )
+                    );
+
+                bodySim.maxExtent =
+                    std::max(
+                        bodySim.maxExtent,
+                        Length(
+                            vec2{ localAABB.max.x, localAABB.max.y } -
+                            bodySim.localCenter
+                        )
+                    );
+
+                shapeIndex = shape.nextShapeId;
+                ++visitedCount;
+            }
+
+            assert( visitedCount == body.shapeCount );
+        };
 
     // Static / Kinematic body는 외력이나 impulse로 가속되지 않으므로
     // solver 관점에서 무한 질량으로 취급하고 inverse mass / inertia를 0으로 둠.
     if( body.type != bodyType::Dynamic )
     {
         bodySim.center = bodySim.transform.position;
+        updateMaxExtent();
         return;
     }
 
@@ -660,6 +736,8 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
         bodySim.invInertia = 1.0f / body.inertia;
     }
 
+    updateMaxExtent();
+
     // local center of mass C를 현재 body transform으로 world space에 옮김.
     bodySim.center =
         TransformPoint(
@@ -674,6 +752,375 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
     bodyState& bodyState = bodyStates_[bodyIndex];
     bodyState.linearVelocity +=
         Cross( bodyState.angularVelocity,  bodySim.center - oldCenter );
+}
+
+void world::WakeBodyByIndex( std::int32_t bodyIndex )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+
+    const body& startBody =
+        bodies_[bodyIndex];
+
+    if( startBody.bodyId == body::NULL_INDEX )
+    {
+        return;
+    }
+
+    std::vector<std::uint8_t> visited(
+        bodies_.size(),
+        0
+    );
+
+    std::vector<std::int32_t> stack;
+
+    const auto pushBody =
+        [&]( std::int32_t candidateId )
+        {
+            assert( candidateId >= 0 );
+            assert( static_cast<std::size_t>( candidateId ) < bodies_.size() );
+
+            const body& candidate =
+                bodies_[candidateId];
+
+            if( candidate.bodyId == body::NULL_INDEX ||
+                candidate.type == bodyType::Static ||
+                visited[candidateId] != 0 )
+            {
+                return;
+            }
+
+            visited[candidateId] = 1;
+            stack.push_back( candidateId );
+        };
+
+    if( startBody.type == bodyType::Static )
+    {
+        std::int32_t contactKey =
+            startBody.headContactKey;
+
+        while( contactKey != body::NULL_INDEX )
+        {
+            const std::int32_t contactId =
+                GetContactId( contactKey );
+
+            const std::int32_t edgeIndex =
+                GetContactEdgeIndex( contactKey );
+
+            assert( contactId >= 0 );
+            assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+            const contact2& contact =
+                contacts_[contactId];
+
+            assert( contact.contactId == contactId );
+
+            contactKey =
+                contact.edges[edgeIndex].nextKey;
+
+            const contactSim2& contactSim =
+                contactSims_[contactId];
+
+            if( contactSim.manifold.pointCount == 0 )
+            {
+                continue;
+            }
+
+            pushBody(
+                contact.edges[edgeIndex ^ 1].bodyId
+            );
+        }
+    }
+    else
+    {
+        pushBody( bodyIndex );
+    }
+
+    while( !stack.empty() )
+    {
+        const std::int32_t currentBodyId =
+            stack.back();
+
+        stack.pop_back();
+
+        body& currentBody =
+            bodies_[currentBodyId];
+
+        currentBody.awake = true;
+        currentBody.sleepTime = 0.0f;
+
+        std::int32_t contactKey =
+            currentBody.headContactKey;
+
+        while( contactKey != body::NULL_INDEX )
+        {
+            const std::int32_t contactId =
+                GetContactId( contactKey );
+
+            const std::int32_t edgeIndex =
+                GetContactEdgeIndex( contactKey );
+
+            assert( contactId >= 0 );
+            assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+            const contact2& contact =
+                contacts_[contactId];
+
+            assert( contact.contactId == contactId );
+
+            contactKey =
+                contact.edges[edgeIndex].nextKey;
+
+            const contactSim2& contactSim =
+                contactSims_[contactId];
+
+            if( contactSim.manifold.pointCount == 0 )
+            {
+                continue;
+            }
+
+            pushBody(
+                contact.edges[edgeIndex ^ 1].bodyId
+            );
+        }
+    }
+}
+
+void world::SleepBodyByIndex( std::int32_t bodyIndex )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+
+    const body& startBody =
+        bodies_[bodyIndex];
+
+    if( startBody.bodyId == body::NULL_INDEX ||
+        startBody.type == bodyType::Static )
+    {
+        return;
+    }
+
+    std::vector<std::uint8_t> visited(
+        bodies_.size(),
+        0
+    );
+
+    std::vector<std::int32_t> stack;
+    std::vector<std::int32_t> connectedBodies;
+
+    visited[bodyIndex] = 1;
+    stack.push_back( bodyIndex );
+
+    while( !stack.empty() )
+    {
+        const std::int32_t currentBodyId =
+            stack.back();
+
+        stack.pop_back();
+
+        connectedBodies.push_back(
+            currentBodyId
+        );
+
+        const body& currentBody =
+            bodies_[currentBodyId];
+
+        std::int32_t contactKey =
+            currentBody.headContactKey;
+
+        while( contactKey != body::NULL_INDEX )
+        {
+            const std::int32_t contactId =
+                GetContactId( contactKey );
+
+            const std::int32_t edgeIndex =
+                GetContactEdgeIndex( contactKey );
+
+            assert( contactId >= 0 );
+            assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+            const contact2& contact =
+                contacts_[contactId];
+
+            contactKey =
+                contact.edges[edgeIndex].nextKey;
+
+            const contactSim2& contactSim =
+                contactSims_[contactId];
+
+            if( contactSim.manifold.pointCount == 0 )
+            {
+                continue;
+            }
+
+            const std::int32_t otherBodyId =
+                contact.edges[edgeIndex ^ 1].bodyId;
+
+            assert( otherBodyId >= 0 );
+            assert( static_cast<std::size_t>( otherBodyId ) < bodies_.size() );
+
+            const body& otherBody =
+                bodies_[otherBodyId];
+
+            if( otherBody.type == bodyType::Static ||
+                visited[otherBodyId] != 0 )
+            {
+                continue;
+            }
+
+            visited[otherBodyId] = 1;
+            stack.push_back( otherBodyId );
+        }
+    }
+
+    for( const std::int32_t connectedBodyId :
+         connectedBodies )
+    {
+        body& connectedBody =
+            bodies_[connectedBodyId];
+
+        connectedBody.awake = false;
+        connectedBody.sleepTime = 0.0f;
+
+        bodyStates_[connectedBodyId] = {};
+
+        bodySims_[connectedBodyId].force = {};
+        bodySims_[connectedBodyId].torque = 0.0f;
+    }
+}
+
+void world::WakeSleepingBodiesFromContacts()
+{
+    for( const contactSim2& contactSim :
+         contactSims_ )
+    {
+        if( contactSim.contactId == contactSim2::NULL_INDEX ||
+            contactSim.manifold.pointCount == 0 )
+        {
+            continue;
+        }
+
+        body& bodyA =
+            bodies_[contactSim.bodyIdA];
+
+        body& bodyB =
+            bodies_[contactSim.bodyIdB];
+
+        const bool bodyAAwake =
+            bodyA.type != bodyType::Static &&
+            bodyA.awake;
+
+        const bool bodyBAwake =
+            bodyB.type != bodyType::Static &&
+            bodyB.awake;
+
+        if( bodyAAwake &&
+            bodyB.type != bodyType::Static &&
+            !bodyB.awake )
+        {
+            WakeBodyByIndex(
+                contactSim.bodyIdB
+            );
+        }
+        else if( bodyBAwake &&
+                 bodyA.type != bodyType::Static &&
+                 !bodyA.awake )
+        {
+            WakeBodyByIndex(
+                contactSim.bodyIdA
+            );
+        }
+    }
+}
+
+void world::UpdateIslandSleepStates(
+    const islandGraph2& islandGraph,
+    float timeStep )
+{
+    assert( std::isfinite( timeStep ) );
+    assert( timeStep > 0.0f );
+
+    if( !sleepingEnabled_ )
+    {
+        return;
+    }
+
+    for( const island2& island :
+         islandGraph.islands )
+    {
+        const std::span<const std::int32_t> bodyIds =
+            std::span<const std::int32_t>{ islandGraph.bodyIds }
+                .subspan(
+                    island.bodyStart,
+                    island.bodyCount
+                );
+
+        bool canSleep = true;
+
+        for( const std::int32_t bodyId :
+             bodyIds )
+        {
+            body& body =
+                bodies_[bodyId];
+
+            assert( body.awake );
+            assert( body.type != bodyType::Static );
+
+            if( !body.enableSleep )
+            {
+                body.sleepTime = 0.0f;
+                canSleep = false;
+                continue;
+            }
+
+            const bodyState& state =
+                bodyStates_[bodyId];
+
+            const bodySim& sim =
+                bodySims_[bodyId];
+
+            // 가장 먼 점의 속도를 보수적으로 사용해 회전 중인 큰 body가
+            // 중심 속도만 작다는 이유로 잠드는 것을 막음.
+            const float motionSpeed =
+                Length( state.linearVelocity ) +
+                std::fabs( state.angularVelocity ) *
+                sim.maxExtent;
+
+            if( motionSpeed > body.sleepThreshold )
+            {
+                body.sleepTime = 0.0f;
+                canSleep = false;
+                continue;
+            }
+
+            body.sleepTime += timeStep;
+
+            if( body.sleepTime < TIME_TO_SLEEP )
+            {
+                canSleep = false;
+            }
+        }
+
+        if( !canSleep )
+        {
+            continue;
+        }
+
+        for( const std::int32_t bodyId :
+             bodyIds )
+        {
+            body& body =
+                bodies_[bodyId];
+
+            body.awake = false;
+            body.sleepTime = 0.0f;
+
+            bodyStates_[bodyId] = {};
+
+            bodySims_[bodyId].force = {};
+            bodySims_[bodyId].torque = 0.0f;
+        }
+    }
 }
 
 const body& world::GetBody( bodyId bodyId ) const
@@ -707,6 +1154,12 @@ void world::SetBodyLinearVelocity( bodyId bodyId, vec2 linearVelocity )
         return;
     }
 
+    if( linearVelocity.x != 0.0f ||
+        linearVelocity.y != 0.0f )
+    {
+        WakeBodyByIndex( bodyIndex );
+    }
+
     assert( bodyStates_.size() == bodies_.size() );
     bodyStates_[bodyIndex].linearVelocity = linearVelocity;
 }
@@ -734,6 +1187,11 @@ void world::SetBodyAngularVelocity( bodyId bodyId, float angularVelocity )
         return;
     }
 
+    if( angularVelocity != 0.0f )
+    {
+        WakeBodyByIndex( bodyIndex );
+    }
+
     assert( bodyStates_.size() == bodies_.size() );
     bodyStates_[bodyIndex].angularVelocity = angularVelocity;
 }
@@ -744,6 +1202,93 @@ float world::GetBodyAngularVelocity( bodyId bodyId ) const
 
     assert( bodyStates_.size() == bodies_.size() );
     return bodyStates_[bodyIndex].angularVelocity;
+}
+
+void world::SetBodyAwake( bodyId bodyId, bool awake )
+{
+    const std::int32_t bodyIndex =
+        GetBodyIndex( bodyId );
+
+    const body& body =
+        bodies_[bodyIndex];
+
+    if( body.type == bodyType::Static )
+    {
+        return;
+    }
+
+    if( awake )
+    {
+        WakeBodyByIndex( bodyIndex );
+    }
+    else
+    {
+        SleepBodyByIndex( bodyIndex );
+    }
+}
+
+bool world::IsBodyAwake( bodyId bodyId ) const
+{
+    const body& body =
+        bodies_[GetBodyIndex( bodyId )];
+
+    return
+        body.type != bodyType::Static &&
+        body.awake;
+}
+
+void world::SetBodySleepEnabled( bodyId bodyId, bool enabled )
+{
+    const std::int32_t bodyIndex =
+        GetBodyIndex( bodyId );
+
+    body& body =
+        bodies_[bodyIndex];
+
+    if( body.type == bodyType::Static )
+    {
+        return;
+    }
+
+    if( body.enableSleep == enabled )
+    {
+        return;
+    }
+
+    body.enableSleep = enabled;
+    body.sleepTime = 0.0f;
+
+    if( !enabled )
+    {
+        WakeBodyByIndex( bodyIndex );
+    }
+}
+
+bool world::IsBodySleepEnabled( bodyId bodyId ) const
+{
+    const body& body =
+        bodies_[GetBodyIndex( bodyId )];
+
+    return body.enableSleep;
+}
+
+void world::SetBodySleepThreshold( bodyId bodyId, float threshold )
+{
+    assert( std::isfinite( threshold ) );
+    assert( threshold >= 0.0f );
+
+    body& body =
+        bodies_[GetBodyIndex( bodyId )];
+
+    body.sleepThreshold = threshold;
+    body.sleepTime = 0.0f;
+}
+
+float world::GetBodySleepThreshold( bodyId bodyId ) const
+{
+    return
+        bodies_[GetBodyIndex( bodyId )]
+            .sleepThreshold;
 }
 
 float world::GetBodyMass( bodyId bodyId ) const
@@ -769,12 +1314,64 @@ void world::SetGravity( vec2 gravity )
     assert( std::isfinite( gravity.x ) );
     assert( std::isfinite( gravity.y ) );
 
+    if( gravity.x == gravity_.x &&
+        gravity.y == gravity_.y )
+    {
+        return;
+    }
+
     gravity_ = gravity;
+
+    // 중력장이 달라지면 sleeping Dynamic body도 다시 반응해야 함.
+    for( body& body : bodies_ )
+    {
+        if( body.bodyId == body::NULL_INDEX ||
+            body.type != bodyType::Dynamic )
+        {
+            continue;
+        }
+
+        body.awake = true;
+        body.sleepTime = 0.0f;
+    }
 }
 
 vec2 world::GetGravity() const noexcept
 {
     return gravity_;
+}
+
+void world::SetSleepingEnabled( bool enabled )
+{
+    if( sleepingEnabled_ == enabled )
+    {
+        return;
+    }
+
+    sleepingEnabled_ = enabled;
+
+    if( enabled )
+    {
+        return;
+    }
+
+    // World sleep을 끄는 순간 모든 non-static body를 다시 solver에 참여시킴.
+    for( body& body : bodies_ )
+    {
+        if( body.bodyId == body::NULL_INDEX ||
+            body.type == bodyType::Static )
+        {
+            continue;
+        }
+
+        body.awake = true;
+        body.sleepTime = 0.0f;
+    }
+}
+
+bool world::IsSleepingEnabled() const noexcept
+{
+    return sleepingEnabled_;
 }
 
 void world::ApplyForce( bodyId bodyId, vec2 force, vec2 point )
@@ -791,6 +1388,12 @@ void world::ApplyForce( bodyId bodyId, vec2 force, vec2 point )
     if( body.type != bodyType::Dynamic )
     {
         return;
+    }
+
+    if( force.x != 0.0f ||
+        force.y != 0.0f )
+    {
+        WakeBodyByIndex( bodyIndex );
     }
 
     assert( bodySims_.size() == bodies_.size() );
@@ -824,6 +1427,12 @@ void world::ApplyForceToCenter( bodyId bodyId, vec2 force )
         return;
     }
 
+    if( force.x != 0.0f ||
+        force.y != 0.0f )
+    {
+        WakeBodyByIndex( bodyIndex );
+    }
+
     assert( bodySims_.size() == bodies_.size() );
     bodySims_[bodyIndex].force += force;
 }
@@ -838,6 +1447,11 @@ void world::ApplyTorque( bodyId bodyId, float torque )
     if( body.type != bodyType::Dynamic )
     {
         return;
+    }
+
+    if( torque != 0.0f )
+    {
+        WakeBodyByIndex( bodyIndex );
     }
 
     assert( bodySims_.size() == bodies_.size() );
@@ -869,6 +1483,12 @@ void world::ApplyLinearImpulse( bodyId bodyId, vec2 impulse, vec2 point )
     if( body.type != bodyType::Dynamic )
     {
         return;
+    }
+
+    if( impulse.x != 0.0f ||
+        impulse.y != 0.0f )
+    {
+        WakeBodyByIndex( bodyIndex );
     }
 
     assert( bodySims_.size() == bodies_.size() );
@@ -933,6 +1553,12 @@ void world::ApplyLinearImpulseToCenter(
         return;
     }
 
+    if( impulse.x != 0.0f ||
+        impulse.y != 0.0f )
+    {
+        WakeBodyByIndex( bodyIndex );
+    }
+
     assert( bodySims_.size() == bodies_.size() );
     assert( bodyStates_.size() == bodies_.size() );
 
@@ -958,6 +1584,11 @@ void world::ApplyAngularImpulse(
     if( body.type != bodyType::Dynamic )
     {
         return;
+    }
+
+    if( impulse != 0.0f )
+    {
+        WakeBodyByIndex( bodyIndex );
     }
 
     assert( bodySims_.size() == bodies_.size() );
@@ -1021,7 +1652,8 @@ void world::Step( float timeStep )
             const body& body = bodies_[bodyIndex];
 
             if( body.bodyId == body::NULL_INDEX ||
-                body.type == bodyType::Static )
+                body.type == bodyType::Static ||
+                !body.awake )
             {
                 continue;
             }
@@ -1079,6 +1711,10 @@ void world::Step( float timeStep )
             {
             }
         );
+
+        // Contact가 새로 생기거나 외부에서 한 body만 깨어난 경우
+        // solver-active graph 전체로 awake 상태를 전파함.
+        WakeSleepingBodiesFromContacts();
 
         // -----------------------------------------------------
         // 3. Build islands
@@ -1241,6 +1877,11 @@ void world::Step( float timeStep )
         // -----------------------------------------------------
         StoreContactConstraintImpulses(
             contactConstraints
+        );
+
+        UpdateIslandSleepStates(
+            islandGraph,
+            timeStep
         );
     }
 
@@ -1559,6 +2200,13 @@ std::int32_t world::CreateContact(
 
     ++contactCount_;
 
+    if( manifold.pointCount > 0 )
+    {
+        WakeBodyByIndex(
+            contact.edges[0].bodyId
+        );
+    }
+
     return contactId;
 }
 
@@ -1644,6 +2292,18 @@ void world::UpdateContactSim(
                 break;
             }
         }
+    }
+
+    const bool wasSolverActive =
+        oldManifold.pointCount > 0;
+
+    const bool isSolverActive =
+        contactSim.manifold.pointCount > 0;
+
+    if( wasSolverActive != isSolverActive )
+    {
+        WakeBodyByIndex( contactSim.bodyIdA );
+        WakeBodyByIndex( contactSim.bodyIdB );
     }
 }
 
@@ -1897,6 +2557,14 @@ void world::DestroyContact( std::int32_t contactId )
 
     const shapePairKey pairKey =
         MakeShapePairKey( contact.shapeIdA, contact.shapeIdB );
+
+    WakeBodyByIndex(
+        contact.edges[0].bodyId
+    );
+
+    WakeBodyByIndex(
+        contact.edges[1].bodyId
+    );
 
     for( std::int32_t edgeIndex = 0; edgeIndex < 2; ++edgeIndex )
     {
