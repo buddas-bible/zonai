@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -295,8 +296,17 @@ struct shapeColors
     ImU32 fill = 0;
 };
 
-shapeColors GetShapeColors( bodyType type )
+shapeColors GetShapeColors( bodyType type, bool awake )
 {
+    if( type == bodyType::Dynamic && !awake )
+    {
+        return
+        {
+            IM_COL32( 100, 125, 145, 220 ),
+            IM_COL32( 100, 125, 145, 45 )
+        };
+    }
+
     switch( type )
     {
     case bodyType::Static:
@@ -486,7 +496,9 @@ int main()
     bool showGrid = true;
     bool showAABBs = true;
     bool showContacts = true;
+    bool showContactDetails = true;
     bool showCOM = true;
+    bool showVelocities = true;
     bool showLabels = true;
 
     bool showDynamicTree = false;
@@ -789,8 +801,16 @@ int main()
             &showContacts
         );
         ImGui::Checkbox(
+            "Contact details",
+            &showContactDetails
+        );
+        ImGui::Checkbox(
             "Center of mass",
             &showCOM
+        );
+        ImGui::Checkbox(
+            "Velocity vectors",
+            &showVelocities
         );
         ImGui::Checkbox(
             "Labels",
@@ -905,13 +925,18 @@ int main()
         ImGui::Separator();
 
         ImGui::TextColored(
-            ImVec4( 1.0f, 0.65f, 0.25f, 1.0f ),
-            "Contact Solver: not implemented"
+            ImVec4( 0.45f, 0.9f, 0.55f, 1.0f ),
+            "Contact Solver: active"
         );
 
         ImGui::TextWrapped(
-            "Contacts and normals are visualized, "
-            "but Dynamic bodies currently pass through other shapes."
+            "Contact labels: s = separation, "
+            "Jn = normal impulse, Jt = friction impulse."
+        );
+
+        ImGui::TextWrapped(
+            "Cyan arrows show body velocity. "
+            "Dim blue Dynamic bodies are sleeping."
         );
 
         ImGui::Spacing();
@@ -1089,6 +1114,9 @@ int main()
         constexpr ImU32 COM_COLOR =
             IM_COL32( 255, 90, 180, 255 );
 
+        constexpr ImU32 VELOCITY_COLOR =
+            IM_COL32( 80, 220, 255, 245 );
+
         for( const visualShape& visual : scene->shapes )
         {
             const body& bodyRef =
@@ -1108,7 +1136,8 @@ int main()
 
             const shapeColors colors =
                 GetShapeColors(
-                    bodyRef.type
+                    bodyRef.type,
+                    bodyRef.awake
                 );
 
             debugDraw.DrawShape(
@@ -1138,17 +1167,46 @@ int main()
                 );
             }
 
+            const vec2 worldCenter =
+                GetWorldCenter(
+                    scene->world,
+                    visual.bodyHandle
+                );
+
             if( showCOM &&
                 bodyRef.type != bodyType::Static )
             {
                 debugDraw.DrawPoint(
-                    GetWorldCenter(
-                        scene->world,
-                        visual.bodyHandle
-                    ),
+                    worldCenter,
                     COM_COLOR,
                     4.5f
                 );
+            }
+
+            if( showVelocities &&
+                bodyRef.type != bodyType::Static )
+            {
+                const vec2 velocity =
+                    scene->world.GetBodyLinearVelocity(
+                        visual.bodyHandle
+                    );
+
+                if( LengthSquared( velocity ) > 1e-6f )
+                {
+                    const float arrowLength =
+                        std::clamp(
+                            Length( velocity ) * 0.18f,
+                            0.2f,
+                            2.0f
+                        );
+
+                    debugDraw.DrawArrow(
+                        worldCenter,
+                        velocity,
+                        VELOCITY_COLOR,
+                        arrowLength
+                    );
+                }
             }
 
             if( showLabels )
@@ -1166,8 +1224,14 @@ int main()
             constexpr ImU32 CONTACT_COLOR =
                 IM_COL32( 255, 220, 70, 255 );
 
+            constexpr ImU32 PENETRATION_COLOR =
+                IM_COL32( 255, 105, 90, 255 );
+
             constexpr ImU32 NORMAL_COLOR =
                 IM_COL32( 100, 255, 140, 255 );
+
+            constexpr ImU32 CONTACT_TEXT_COLOR =
+                IM_COL32( 245, 245, 245, 255 );
 
             for( const contactData& contact : contacts )
             {
@@ -1178,9 +1242,14 @@ int main()
                     const manifoldPoint2& point =
                         contact.manifold.points[i];
 
+                    const ImU32 pointColor =
+                        point.separation < -0.01f
+                            ? PENETRATION_COLOR
+                            : CONTACT_COLOR;
+
                     debugDraw.DrawPoint(
                         point.point,
-                        CONTACT_COLOR,
+                        pointColor,
                         5.0f
                     );
 
@@ -1188,8 +1257,28 @@ int main()
                         point.point,
                         contact.manifold.normal,
                         NORMAL_COLOR,
-                        0.8f
+                        0.7f
                     );
+
+                    if( showContactDetails )
+                    {
+                        char label[96]{};
+
+                        std::snprintf(
+                            label,
+                            sizeof( label ),
+                            "s %.3f  Jn %.2f  Jt %.2f",
+                            point.separation,
+                            point.normalImpulse,
+                            point.tangentImpulse
+                        );
+
+                        debugDraw.DrawLabel(
+                            point.point,
+                            label,
+                            CONTACT_TEXT_COLOR
+                        );
+                    }
                 }
             }
         }

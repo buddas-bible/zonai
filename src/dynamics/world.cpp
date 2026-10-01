@@ -2088,6 +2088,16 @@ contactData world::MakeContactData( std::int32_t contactIndex ) const
     data.shapeB = MakeShapeId( contact.shapeIdB );
     data.manifold = ToWorldManifold( contactSim.manifold, bodySimA.transform  );
 
+    // world-space geometry와 함께 마지막 solver impulse도 public snapshot에 복사함.
+    for( int i = 0; i < data.manifold.pointCount; ++i )
+    {
+        data.manifold.points[i].normalImpulse =
+            contactSim.impulses[i].normalImpulse;
+
+        data.manifold.points[i].tangentImpulse =
+            contactSim.impulses[i].tangentImpulse;
+    }
+
     return data;
 }
 

@@ -1047,6 +1047,23 @@ int main()
                 4.0f
             ) < 1e-3f
         );
+
+        std::array<contactData, 1> contactData{};
+        assert(
+            world.GetBodyContactData(
+                dynamicBody,
+                contactData
+            ) == 1
+        );
+
+        // public manifold에도 마지막 solver impulse가 전달되어
+        // sandbox / tooling에서 실제 contact response를 시각화할 수 있어야 함.
+        assert( contactData[0].manifold.points[0].normalImpulse > 0.0f );
+        assert(
+            std::fabs(
+                contactData[0].manifold.points[0].tangentImpulse
+            ) < epsilon
+        );
     }
 
     // restitution은 이번 Step의 force가 섞이기 전 Prepare 시점의 충돌 속도를 기준으로 함.

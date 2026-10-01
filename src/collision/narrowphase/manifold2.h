@@ -30,15 +30,21 @@ struct manifoldPoint2
 {
     vec2 point{};
     float separation{};
+
+    // 마지막 solver step에서 이 접점에 남은 누적 impulse.
+    // debug draw / contact query에서 실제 solver 반응을 확인할 수 있게 공개함.
+    float normalImpulse{};
+    float tangentImpulse{};
+
     std::uint16_t id{};
-}; // sizeof: 16 bytes
+}; // sizeof: 24 bytes
 
 struct manifold2
 {
     vec2 normal{};
     std::array<manifoldPoint2, MAX_MANIFOLD_POINTS> points{};
     int pointCount{};
-}; // sizeof: 44 bytes
+}; // sizeof: 60 bytes
 
 inline bool IsTouchingManifold( const localManifold2& manifold )
 {
