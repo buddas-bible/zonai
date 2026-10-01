@@ -1049,6 +1049,37 @@ int main()
         );
     }
 
+    // restitution은 이번 Step의 force가 섞이기 전 Prepare 시점의 충돌 속도를 기준으로 함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId staticBody = world.CreateBody( bodyType::Static );
+        (void)world.CreateShape( staticBody, circle2{ {}, 1.0f } );
+
+        const bodyId dynamicBody =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 1.9f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId dynamicShape = world.CreateShape( dynamicBody, circle2{ {}, 1.0f } );
+        world.SetShapeRestitution( dynamicShape, 1.0f );
+        world.SetBodyLinearVelocity( dynamicBody, { -2.0f, 0.0f } );
+
+        const float mass = world.GetBodyMass( dynamicBody );
+        world.ApplyForceToCenter( dynamicBody, { -120.0f * mass, 0.0f } );
+
+        world.Step( 1.0f / 60.0f, 2 );
+
+        // force는 전체 Step 동안 속도를 -2만큼 더 바꾸지만
+        // restitution target은 Prepare 때 저장한 vn=-2를 사용하므로 +2로 튕김.
+        assert( std::fabs( world.GetBodyLinearVelocity( dynamicBody ).x - 2.0f ) < 1e-3f );
+    }
+
     // 기본 gravity는 Dynamic body의 COM velocity에만 적용됨.
     {
         world world{};
