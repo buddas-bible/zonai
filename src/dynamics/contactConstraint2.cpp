@@ -86,7 +86,8 @@ contactConstraint2 PrepareContactConstraint(
         point.anchorA = worldPoint - bodySimA.center;
         point.anchorB = worldPoint - bodySimB.center;
 
-        point.separation = manifoldPoint.separation;
+        point.baseSeparation =
+            manifoldPoint.separation - Dot( point.anchorB - point.anchorA, constraint.normal );
 
         // 같은 contact point가 이전 step에도 존재했다면
         // 이전 normal / tangent 누적 impulse를 초기 추정값으로 가져옴.
@@ -253,6 +254,10 @@ void SolveContactConstraint( contactConstraint2& constraint, bodyState& bodyStat
     vec2 v_b = bodyStateB.linearVelocity;
     float w_b = bodyStateB.angularVelocity;
 
+    const vec2 dp = bodyStateB.deltaPosition - bodyStateA.deltaPosition;
+    const rot2& dqA = bodyStateA.deltaRotation;
+    const rot2& dqB = bodyStateB.deltaRotation;
+
     for( int i = 0; i < constraint.pointCount; ++i )
     {
         contactConstraintPoint2& point = constraint.points[i];
@@ -270,6 +275,12 @@ void SolveContactConstraint( contactConstraint2& constraint, bodyState& bodyStat
 
         // 충돌 지점에서 노말 방향으로의 상대 속도
         const float normalVelocity = Dot( v_r, constraint.normal );
+
+        // Position integration에서 누적된 delta transform으로 현재 separation을 다시 계산함.
+        const vec2 ds =
+            dp + Rotate( dqB, point.anchorB ) - Rotate( dqA, point.anchorA );
+
+        const float separation = point.baseSeparation + Dot( ds, constraint.normal );
 
         /*
         * penetration correction은 실제 위치를 바로 순간이동시키지 않고
@@ -298,7 +309,7 @@ void SolveContactConstraint( contactConstraint2& constraint, bodyState& bodyStat
         float impulseScale = 0.0f;
         float velocityBias = 0.0f;
 
-        if( point.separation > 0.0f )
+        if( separation > 0.0f )
         {
             /*
             * speculative contact
@@ -307,13 +318,13 @@ void SolveContactConstraint( contactConstraint2& constraint, bodyState& bodyStat
             *
             *     vn + s / dt >= 0
             */
-            velocityBias = point.separation * constraint.invTimeStep;
+            velocityBias = separation * constraint.invTimeStep;
         }
         else if( useBias )
         {
             massScale = constraint.softness.massScale;
             impulseScale = constraint.softness.impulseScale;
-            velocityBias = massScale * constraint.softness.biasRate * point.separation;
+            velocityBias = massScale * constraint.softness.biasRate * separation;
 
             // 깊은 관통에서도 지나치게 큰 보정 속도를 만들지 않음.
             velocityBias = std::max( velocityBias, -constraint.maxPushSpeed );
