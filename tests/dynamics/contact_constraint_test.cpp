@@ -499,6 +499,37 @@ int main()
         assert( NearlyEqual( point.normalImpulse, 0.0f ) );
     }
 
+    // deltaRotation도 contact anchor를 회전시켜 현재 separation에 반영됨.
+    {
+        contactConstraint2 constraint{};
+        constraint.bodyIdA = 0;
+        constraint.bodyIdB = 1;
+        constraint.normal = { 1.0f, 0.0f };
+        constraint.invMassA = 0.0f;
+        constraint.invMassB = 1.0f;
+        constraint.softness.biasRate = 2.0f;
+        constraint.softness.massScale = 0.5f;
+        constraint.softness.impulseScale = 0.5f;
+        constraint.maxPushSpeed = 3.0f;
+        constraint.pointCount = 1;
+
+        contactConstraintPoint2& point = constraint.points[0];
+        point.anchorB = { 0.0f, 1.0f };
+        point.baseSeparation = 0.0f;
+        point.normalMass = 1.0f;
+
+        bodyState bodyStateA{};
+        bodyState bodyStateB{};
+        bodyStateB.deltaRotation = rot2::FromRadians( 1.57079632679f );
+
+        SolveContactConstraint( constraint, bodyStateA, bodyStateB, true );
+
+        // anchorB=(0,1)이 90도 회전하면 (-1,0)이 되어 separation=-1.
+        // velocityBias=0.5*2*-1=-1이므로 +normal impulse 1이 만들어짐.
+        assert( NearlyEqual( bodyStateB.linearVelocity.x, 1.0f ) );
+        assert( NearlyEqual( point.normalImpulse, 1.0f ) );
+    }
+
     // tangent effective mass도 lever arm과 inverse mass / inertia를 포함해 계산함.
     {
         contactSim2 contactSim{};
