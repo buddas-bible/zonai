@@ -1031,6 +1031,17 @@ int main()
         assert( world.GetShapeRestitution( staticShape ) == 0.0f );
         assert( world.GetShapeRestitution( dynamicShape ) == 1.0f );
 
+        contactId contactHandle{};
+
+        world.UpdateCollisions(
+            [&]( const contactData& data )
+            {
+                contactHandle = data.id;
+            }
+        );
+
+        assert( world.IsValid( contactHandle ) );
+
         world.SetBodyLinearVelocity(
             dynamicBody,
             { -4.0f, 0.0f }
@@ -1048,20 +1059,15 @@ int main()
             ) < 1e-3f
         );
 
-        std::array<contactData, 1> contactData{};
-        assert(
-            world.GetBodyContactData(
-                dynamicBody,
-                contactData
-            ) == 1
-        );
+        const contactData solvedContact =
+            world.GetContactData( contactHandle );
 
         // public manifold에도 마지막 solver impulse가 전달되어
         // sandbox / tooling에서 실제 contact response를 시각화할 수 있어야 함.
-        assert( contactData[0].manifold.points[0].normalImpulse > 0.0f );
+        assert( solvedContact.manifold.points[0].normalImpulse > 0.0f );
         assert(
             std::fabs(
-                contactData[0].manifold.points[0].tangentImpulse
+                solvedContact.manifold.points[0].tangentImpulse
             ) < epsilon
         );
     }
