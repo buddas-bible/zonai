@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "collision/constants.h"
+#include "dynamics/constants.h"
 #include "dynamics/world.h"
 
 using namespace zonai;
@@ -1193,6 +1194,98 @@ int main()
         // force delta: a*h = 4*0.5 = 2
         // 최종 velocity = 7
         assert( std::fabs( world.GetBodyLinearVelocity( bodyId ).x - 7.0f ) < epsilon );
+    }
+
+    // world 최대 선속도는 방향을 유지한 채 position 적분 전에 clamp함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        assert(
+            std::fabs(
+                world.GetMaximumLinearSpeed() -
+                DEFAULT_MAX_LINEAR_SPEED
+            ) < epsilon
+        );
+
+        world.SetMaximumLinearSpeed( 5.0f );
+        assert( std::fabs( world.GetMaximumLinearSpeed() - 5.0f ) < epsilon );
+
+        const bodyId bodyId =
+            world.CreateBody( bodyType::Dynamic );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f }
+        );
+
+        world.SetBodyLinearVelocity(
+            bodyId,
+            { 30.0f, 40.0f }
+        );
+
+        world.Step( 0.5f );
+
+        // |v|=50인 (30, 40)을 |v|=5인 (3, 4)로 줄임.
+        const vec2 velocity =
+            world.GetBodyLinearVelocity( bodyId );
+
+        assert( std::fabs( velocity.x - 3.0f ) < epsilon );
+        assert( std::fabs( velocity.y - 4.0f ) < epsilon );
+
+        // clamp된 velocity로 0.5초 적분함.
+        const transform2 transform =
+            world.GetBodyTransform( bodyId );
+
+        assert( std::fabs( transform.position.x - 1.5f ) < epsilon );
+        assert( std::fabs( transform.position.y - 2.0f ) < epsilon );
+    }
+
+    // 최대 각속도는 sub-step h가 아니라 전체 Step의 최대 회전량으로 제한함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId bodyId =
+            world.CreateBody( bodyType::Dynamic );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f }
+        );
+
+        world.SetBodyAngularVelocity(
+            bodyId,
+            100.0f
+        );
+
+        world.Step( 1.0f, 4 );
+
+        // 전체 dt=1초 동안 최대 MAX_ROTATION만 회전하므로
+        // sub-step 수와 무관하게 최종 w도 MAX_ROTATION rad/s로 제한됨.
+        assert(
+            std::fabs(
+                world.GetBodyAngularVelocity( bodyId ) -
+                MAX_ROTATION
+            ) < epsilon
+        );
+
+        const transform2 transform =
+            world.GetBodyTransform( bodyId );
+
+        assert(
+            std::fabs(
+                transform.rotation.c -
+                std::cos( MAX_ROTATION )
+            ) < 1e-4f
+        );
+
+        assert(
+            std::fabs(
+                transform.rotation.s -
+                std::sin( MAX_ROTATION )
+            ) < 1e-4f
+        );
     }
 
     // 기본 gravity는 Dynamic body의 COM velocity에만 적용됨.

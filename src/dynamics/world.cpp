@@ -1400,6 +1400,19 @@ vec2 world::GetGravity() const noexcept
     return gravity_;
 }
 
+void world::SetMaximumLinearSpeed( float speed )
+{
+    assert( std::isfinite( speed ) );
+    assert( speed > 0.0f );
+
+    maximumLinearSpeed_ = speed;
+}
+
+float world::GetMaximumLinearSpeed() const noexcept
+{
+    return maximumLinearSpeed_;
+}
+
 void world::SetSleepingEnabled( bool enabled )
 {
     if( sleepingEnabled_ == enabled )
@@ -1692,7 +1705,7 @@ void world::Step( float timeStep, int subStepCount )
         *    - force / gravity / damping으로 velocity 갱신
         *    - warm start
         *    - penetration / speculative solve
-        *    - delta transform 적분
+        *    - velocity 제한 후 delta transform 적분
         *    - bias 없는 relax
         * 5. restitution
         * 6. 최종 impulse 저장
@@ -1702,6 +1715,17 @@ void world::Step( float timeStep, int subStepCount )
         * 각 sub-step의 이동은 bodyState delta transform에 누적함.
         */
         const float subStepTime = timeStep / static_cast<float>( subStepCount );
+
+        const float maxLinearSpeedSquared =
+            maximumLinearSpeed_ * maximumLinearSpeed_;
+
+        // 전체 Step에서 MAX_ROTATION 이상 회전하지 못하게 함.
+        // sub-step 수가 바뀌어도 한 Step의 최대 회전량은 동일함.
+        const float maxAngularSpeed =
+            MAX_ROTATION / timeStep;
+
+        const float maxAngularSpeedSquared =
+            maxAngularSpeed * maxAngularSpeed;
 
         // -----------------------------------------------------
         // 1. Update current contacts
@@ -1830,6 +1854,31 @@ void world::Step( float timeStep, int subStepCount )
                     assert( body.bodyId == bodyIndex );
                     assert( body.type != bodyType::Static );
                     assert( bodySim.bodyId == bodyIndex );
+
+                    const float linearSpeedSquared =
+                        LengthSquared( bodyState.linearVelocity );
+
+                    if( linearSpeedSquared > maxLinearSpeedSquared )
+                    {
+                        const float ratio =
+                            maximumLinearSpeed_ /
+                            std::sqrt( linearSpeedSquared );
+
+                        bodyState.linearVelocity *= ratio;
+                    }
+
+                    const float angularSpeedSquared =
+                        bodyState.angularVelocity *
+                        bodyState.angularVelocity;
+
+                    if( angularSpeedSquared > maxAngularSpeedSquared )
+                    {
+                        const float ratio =
+                            maxAngularSpeed /
+                            std::abs( bodyState.angularVelocity );
+
+                        bodyState.angularVelocity *= ratio;
+                    }
 
                     bodyState.deltaPosition += bodyState.linearVelocity * subStepTime;
 

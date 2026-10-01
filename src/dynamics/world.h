@@ -17,6 +17,7 @@
 #include "dynamics/contactConstraint2.h"
 #include "dynamics/contactData.h"
 #include "dynamics/contactSim2.h"
+#include "dynamics/constants.h"
 #include "dynamics/id.h"
 #include "dynamics/island2.h"
 
@@ -100,6 +101,10 @@ public:
     // world 전체 Dynamic body에 적용되는 중력 가속도.
     void SetGravity( vec2 gravity );
     [[nodiscard]] vec2 GetGravity() const noexcept;
+
+    // position integration 전에 적용하는 world 최대 선속도.
+    void SetMaximumLinearSpeed( float speed );
+    [[nodiscard]] float GetMaximumLinearSpeed() const noexcept;
 
     void SetSleepingEnabled( bool enabled );
     [[nodiscard]] bool IsSleepingEnabled() const noexcept;
@@ -429,6 +434,9 @@ private:
 
     // 모든 Dynamic body에 적용되는 world-space 중력 가속도.
     vec2 gravity_{ 0.0f, -10.0f };
+
+    // 지나치게 큰 이동으로 solver가 불안정해지는 것을 막는 world 최대 선속도.
+    float maximumLinearSpeed_ = DEFAULT_MAX_LINEAR_SPEED;
 
     // false면 모든 non-static body를 계속 awake 상태로 유지함.
     bool sleepingEnabled_ = true;
