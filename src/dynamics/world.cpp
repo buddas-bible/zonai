@@ -1079,12 +1079,15 @@ void world::UpdateIslandSleepStates(
             const bodySim& sim =
                 bodySims_[bodyId];
 
-            // 가장 먼 점의 속도를 보수적으로 사용해 회전 중인 큰 body가
-            // 중심 속도만 작다는 이유로 잠드는 것을 막음.
-            const float motionSpeed =
-                Length( state.linearVelocity ) +
-                std::fabs( state.angularVelocity ) *
-                sim.maxExtent;
+            // 가장 먼 점의 속도와 이번 step의 position correction을 함께 확인함.
+            const float velocitySpeed =
+                Length( state.linearVelocity ) + std::fabs( state.angularVelocity ) * sim.maxExtent;
+
+            const float deltaDistance =
+                Length( state.deltaPosition ) + std::fabs( state.deltaRotation.s ) * sim.maxExtent;
+
+            const float correctionSpeed = 0.5f * deltaDistance / timeStep;
+            const float motionSpeed = std::max( velocitySpeed, correctionSpeed );
 
             if( motionSpeed > body.sleepThreshold )
             {
@@ -1630,10 +1633,11 @@ void world::Step( float timeStep )
         * 3. solver-active Contact로 island 구성
         * 4. Contact constraint 준비 + island별 warm start
         * 5. island별 soft push / speculative constraint solve
-        * 6. island body의 transform 적분
+        * 6. island body의 delta transform 적분
         * 7. island별 bias 없는 relax
         * 8. island별 restitution
         * 9. 최종 impulse 저장
+        * 10. delta transform을 bodySim에 반영
         *
         * Push에서 만든 분리 속도는 position을 회복시키는 데만 사용하고
         * Relax가 적분 뒤 제거하므로 보정 자체가 운동 에너지로 남지 않음.
@@ -1742,7 +1746,7 @@ void world::Step( float timeStep )
         }
 
         // -----------------------------------------------------
-        // 6. Integrate island positions
+        // 6. Integrate island position deltas
         // -----------------------------------------------------
         for( const island2& island : islandGraph.islands )
         {
@@ -1755,37 +1759,22 @@ void world::Step( float timeStep )
                 assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
 
                 const body& body = bodies_[bodyIndex];
-                bodySim& bodySim = bodySims_[bodyIndex];
-                const bodyState& bodyState = bodyStates_[bodyIndex];
+                const bodySim& bodySim = bodySims_[bodyIndex];
+                bodyState& bodyState = bodyStates_[bodyIndex];
 
                 assert( body.bodyId == bodyIndex );
                 assert( body.type != bodyType::Static );
                 assert( bodySim.bodyId == bodyIndex );
 
-                /*
-                * semi-implicit Euler
-                *
-                * 속도는 힘과 접점 해결(Contact Solver)에서 먼저 갱신됐고,
-                * 여기서는 그 최종 속도로 질량 중심 transform을 적분함.
-                *
-                * 침투(penetration)가 있으면 이 속도에는 침투를 해결하기 위한 속도(push correction)도 포함되어 있음.
-                */
-                bodySim.center += bodyState.linearVelocity * timeStep;
+                // transform을 바로 바꾸지 않고 solver가 현재 separation을 다시 계산할 수 있게 delta로 누적함.
+                bodyState.deltaPosition += bodyState.linearVelocity * timeStep;
 
                 const float deltaAngle = bodyState.angularVelocity * timeStep;
 
                 if( deltaAngle != 0.0f )
                 {
-                    // 각속도로 오브젝트를 회전
-                    bodySim.transform.rotation = rot2::FromRadians( deltaAngle ) * bodySim.transform.rotation;
+                    bodyState.deltaRotation = rot2::FromRadians( deltaAngle ) * bodyState.deltaRotation;
                 }
-
-				// 월드 = 위치 + 회전 * 로컬 중심
-                // 
-				// 위치 = 월드 - 회전 * 로컬 중심
-                bodySim.transform.position = bodySim.center - Rotate( bodySim.transform.rotation, bodySim.localCenter );
-
-                SyncBodyProxies( bodyIndex );
             }
         }
 
@@ -1817,7 +1806,35 @@ void world::Step( float timeStep )
         // -----------------------------------------------------
         StoreContactConstraintImpulses( contactConstraints );
 
+        // -----------------------------------------------------
+        // 10. Commit island position deltas
+        // -----------------------------------------------------
+        for( const island2& island : islandGraph.islands )
+        {
+            const std::span<const std::int32_t> bodyIds =
+                std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
+
+            for( const std::int32_t bodyIndex : bodyIds )
+            {
+                bodySim& bodySim = bodySims_[bodyIndex];
+                const bodyState& bodyState = bodyStates_[bodyIndex];
+
+                bodySim.center += bodyState.deltaPosition;
+                bodySim.transform.rotation = bodyState.deltaRotation * bodySim.transform.rotation;
+                bodySim.transform.position = bodySim.center - Rotate( bodySim.transform.rotation, bodySim.localCenter );
+
+                SyncBodyProxies( bodyIndex );
+            }
+        }
+
         UpdateIslandSleepStates( islandGraph, timeStep );
+
+        // delta transform은 다음 Step으로 넘기지 않음.
+        for( const std::int32_t bodyIndex : islandGraph.bodyIds )
+        {
+            bodyStates_[bodyIndex].deltaPosition = {};
+            bodyStates_[bodyIndex].deltaRotation = {};
+        }
     }
 
     // 이동 후 새 broadPhase pair와 manifold를 만들어 다음 Step의 solver가 사용할
