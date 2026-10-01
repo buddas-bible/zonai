@@ -177,8 +177,6 @@ bodyId world::CreateBody( bodyType type, transform2 transform )
     body.type = type;
     body.awake = type != bodyType::Static;
 
-    WakeBodyByIndex( bodyIndex );
-
     assert( bodySims_.size() == bodies_.size() );
 
     bodySim& bodySim = bodySims_[bodyIndex];
@@ -465,6 +463,8 @@ void world::SetBodyTransform( bodyId bodyId, transform2 transform )
     assert( std::isfinite( transform.position.y ) );
     assert( std::isfinite( transform.rotation.c ) );
     assert( std::isfinite( transform.rotation.s ) );
+
+    WakeBodyByIndex( bodyIndex );
 
     assert( bodySims_.size() == bodies_.size() );
 
