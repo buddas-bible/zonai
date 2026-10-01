@@ -1109,6 +1109,11 @@ int main()
 
         const bodyId bodyId = world.CreateBody( bodyType::Dynamic );
 
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f }
+        );
+
         world.Step( 0.5f, 2 );
 
         // h=0.25
