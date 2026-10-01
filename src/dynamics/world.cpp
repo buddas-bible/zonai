@@ -1106,10 +1106,12 @@ void world::Step( float timeStep )
         // -----------------------------------------------------
         for( const island2& island : islandGraph.islands )
         {
-            std::span<const contactConstraint2> constraints{
-                contactConstraints.data() + island.contactStart,
-                island.contactCount
-            };
+            const std::span<const contactConstraint2> constraints =
+                std::span<const contactConstraint2>{ contactConstraints }
+                    .subspan(
+                        island.contactStart,
+                        island.contactCount
+                    );
 
             WarmStartContacts( constraints );
         }
@@ -1119,10 +1121,12 @@ void world::Step( float timeStep )
         // -----------------------------------------------------
         for( const island2& island : islandGraph.islands )
         {
-            std::span<contactConstraint2> constraints{
-                contactConstraints.data() + island.contactStart,
-                island.contactCount
-            };
+            const std::span<contactConstraint2> constraints =
+                std::span<contactConstraint2>{ contactConstraints }
+                    .subspan(
+                        island.contactStart,
+                        island.contactCount
+                    );
 
             SolveContactConstraints(
                 constraints,
@@ -1135,10 +1139,12 @@ void world::Step( float timeStep )
         // -----------------------------------------------------
         for( const island2& island : islandGraph.islands )
         {
-            const std::span<const std::int32_t> bodyIds{
-                islandGraph.bodyIds.data() + island.bodyStart,
-                island.bodyCount
-            };
+            const std::span<const std::int32_t> bodyIds =
+                std::span<const std::int32_t>{ islandGraph.bodyIds }
+                    .subspan(
+                        island.bodyStart,
+                        island.bodyCount
+                    );
 
             for( const std::int32_t bodyIndex : bodyIds )
             {
@@ -1200,10 +1206,12 @@ void world::Step( float timeStep )
         // correction 때문에 생긴 분리 속도만 제거함.
         for( const island2& island : islandGraph.islands )
         {
-            std::span<contactConstraint2> constraints{
-                contactConstraints.data() + island.contactStart,
-                island.contactCount
-            };
+            const std::span<contactConstraint2> constraints =
+                std::span<contactConstraint2>{ contactConstraints }
+                    .subspan(
+                        island.contactStart,
+                        island.contactCount
+                    );
 
             SolveContactConstraints(
                 constraints,
@@ -1216,10 +1224,12 @@ void world::Step( float timeStep )
         // -----------------------------------------------------
         for( const island2& island : islandGraph.islands )
         {
-            std::span<contactConstraint2> constraints{
-                contactConstraints.data() + island.contactStart,
-                island.contactCount
-            };
+            const std::span<contactConstraint2> constraints =
+                std::span<contactConstraint2>{ contactConstraints }
+                    .subspan(
+                        island.contactStart,
+                        island.contactCount
+                    );
 
             ApplyRestitutionContacts(
                 constraints
