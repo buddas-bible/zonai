@@ -446,11 +446,11 @@ void ApplyRestitutionContactConstraint(
         return;
     }
 
-    vec2 linearVelocityA = bodyStateA.linearVelocity;
-    float angularVelocityA = bodyStateA.angularVelocity;
+    vec2 v_a = bodyStateA.linearVelocity;
+    float w_a = bodyStateA.angularVelocity;
 
-    vec2 linearVelocityB = bodyStateB.linearVelocity;
-    float angularVelocityB = bodyStateB.angularVelocity;
+    vec2 v_b = bodyStateB.linearVelocity;
+    float w_b = bodyStateB.angularVelocity;
 
     const vec2 dp = bodyStateB.deltaPosition - bodyStateA.deltaPosition;
     const rot2& dqA = bodyStateA.deltaRotation;
@@ -493,10 +493,11 @@ void ApplyRestitutionContactConstraint(
             }
         }
 
-        const vec2 velocityA = linearVelocityA + Cross( angularVelocityA, point.anchorA );
-        const vec2 velocityB = linearVelocityB + Cross( angularVelocityB, point.anchorB );
+        const vec2 v_p1 = v_a + Cross( w_a, point.anchorA );
+        const vec2 v_p2 = v_b + Cross( w_b, point.anchorB );
+        const vec2 v_r = v_p2 - v_p1;
 
-        const float normalVelocity = Dot( velocityB - velocityA, constraint.normal );
+        const float normalVelocity = Dot( v_r, constraint.normal );
 
         float impulse = -point.normalMass * ( normalVelocity + velocityBias );
 
@@ -545,18 +546,18 @@ void ApplyRestitutionContactConstraint(
 		const vec2 dv_b = impulseVector * constraint.invMassB;
 		const float dw_b = constraint.invInertiaB * Cross( point.anchorB, impulseVector );
 
-        linearVelocityA -= dv_a;
-        angularVelocityA -= dw_a;
+        v_a -= dv_a;
+        w_a -= dw_a;
 
-        linearVelocityB += dv_b;
-        angularVelocityB += dw_b;
+        v_b += dv_b;
+        w_b += dw_b;
     }
 
-    bodyStateA.linearVelocity = linearVelocityA;
-    bodyStateA.angularVelocity = angularVelocityA;
+    bodyStateA.linearVelocity = v_a;
+    bodyStateA.angularVelocity = w_a;
 
-    bodyStateB.linearVelocity = linearVelocityB;
-    bodyStateB.angularVelocity = angularVelocityB;
+    bodyStateB.linearVelocity = v_b;
+    bodyStateB.angularVelocity = w_b;
 }
 
 void StoreContactImpulses( const contactConstraint2& constraint, contactSim2& contactSim )
