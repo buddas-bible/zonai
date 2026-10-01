@@ -76,7 +76,12 @@ int main()
         assert( NearlyEqual( point.anchorA.y, 1.0f ) );
         assert( NearlyEqual( point.anchorB.x, -1.0f ) );
         assert( NearlyEqual( point.anchorB.y, 1.0f ) );
-        assert( NearlyEqual( point.separation, -0.1f ) );
+        // baseSeparation은 anchor 차이를 제외한 기준값이고,
+        // identity delta transform을 다시 더하면 원래 separation -0.1이 복원됨.
+        assert( NearlyEqual( point.baseSeparation, 1.9f ) );
+
+        const vec2 ds = point.anchorB - point.anchorA;
+        assert( NearlyEqual( point.baseSeparation + Dot( ds, constraint.normal ), -0.1f ) );
 
         /*
         * A contact point velocity:
@@ -411,7 +416,7 @@ int main()
         contactConstraintPoint2& point =
             constraint.points[0];
 
-        point.separation = -0.1f;
+        point.baseSeparation = -0.1f;
         point.normalMass = 1.0f;
 
         bodyState bodyStateA{};
@@ -460,6 +465,38 @@ int main()
                 0.0f
             )
         );
+    }
+
+    // Position integration에서 생긴 deltaPosition을 반영해 현재 separation을 다시 계산함.
+    {
+        contactConstraint2 constraint{};
+        constraint.bodyIdA = 0;
+        constraint.bodyIdB = 1;
+        constraint.normal = { 1.0f, 0.0f };
+        constraint.invMassA = 0.0f;
+        constraint.invMassB = 1.0f;
+        constraint.softness.biasRate = 2.0f;
+        constraint.softness.massScale = 0.5f;
+        constraint.softness.impulseScale = 0.5f;
+        constraint.maxPushSpeed = 3.0f;
+        constraint.invTimeStep = 60.0f;
+        constraint.pointCount = 1;
+
+        contactConstraintPoint2& point = constraint.points[0];
+        point.baseSeparation = -0.1f;
+        point.normalMass = 1.0f;
+
+        bodyState bodyStateA{};
+        bodyState bodyStateB{};
+
+        // Prepare 때는 0.1m 관통했지만 position integration에서 B가 +0.2m 이동해
+        // 현재 separation은 +0.1m가 되었으므로 penetration push가 더 생기면 안 됨.
+        bodyStateB.deltaPosition = { 0.2f, 0.0f };
+
+        SolveContactConstraint( constraint, bodyStateA, bodyStateB, true );
+
+        assert( NearlyEqual( bodyStateB.linearVelocity.x, 0.0f ) );
+        assert( NearlyEqual( point.normalImpulse, 0.0f ) );
     }
 
     // tangent effective mass도 lever arm과 inverse mass / inertia를 포함해 계산함.
@@ -605,7 +642,7 @@ int main()
         contactConstraintPoint2& point =
             constraint.points[0];
 
-        point.separation = 0.01f;
+        point.baseSeparation = 0.01f;
         point.normalMass = 1.0f;
 
         bodyState bodyStateA{};
