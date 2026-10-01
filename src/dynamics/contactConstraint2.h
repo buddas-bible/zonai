@@ -50,6 +50,14 @@ struct contactConstraintPoint2
     // 접촉은 서로 밀어낼 수만 있으므로 항상 0 이상으로 유지함.
     float normalImpulse = 0.0f;
 
+    // 이번 step에서 normal 방향으로 실제 적용된 impulse의 누적값.
+    // warm start / push / relax 결과를 합쳐 restitution의 압축량 판정에 사용함.
+    float totalNormalImpulse = 0.0f;
+
+    // totalNormalImpulse 중 restitution 단계에서 만든 반발 성분.
+    // restitution iteration이 이미 사용한 반발량을 다시 만들지 않게 함.
+    float restitutionImpulse = 0.0f;
+
     // 접촉면을 따라 미끄러지는 상대속도를 줄이는 누적 friction impulse.
     // Coulomb cone에 의해 |tangentImpulse| <= friction * normalImpulse로 제한됨.
     float tangentImpulse = 0.0f;
@@ -102,7 +110,7 @@ struct contactConstraint2
 
 // 이전 step에서 캐싱한 누적 normal impulse를 solver 시작 전에 먼저 적용함.
 void WarmStartContactConstraint(
-    const contactConstraint2& constraint,
+    contactConstraint2& constraint,
     bodyState& bodyStateA,
     bodyState& bodyStateB );
 

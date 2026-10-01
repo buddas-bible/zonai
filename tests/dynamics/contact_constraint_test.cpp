@@ -374,6 +374,14 @@ int main()
                 6.0f
             )
         );
+
+        // warm start로 실제 적용한 normal impulse도 이번 step의 compression 양으로 추적함.
+        assert(
+            NearlyEqual(
+                point.totalNormalImpulse,
+                6.0f
+            )
+        );
     }
 
     // Hertz / damping ratio로 만든 softness는 massScale + impulseScale = 1을 유지함.
@@ -716,6 +724,7 @@ int main()
 
         point.normalMass = 1.0f;
         point.normalImpulse = 4.0f;
+        point.totalNormalImpulse = 4.0f;
         point.relativeNormalVelocity = -4.0f;
 
         bodyState bodyStateA{};
@@ -732,6 +741,47 @@ int main()
         // e=0.5, 충돌 전 vn=-4이므로 최종 목표 vn은 +2임.
         assert( NearlyEqual( bodyStateB.linearVelocity.x, 2.0f ) );
         assert( NearlyEqual( point.normalImpulse, 6.0f ) );
+        assert( NearlyEqual( point.totalNormalImpulse, 6.0f ) );
+        assert( NearlyEqual( point.restitutionImpulse, 2.0f ) );
+    }
+
+    // 이전 normal impulse가 남아 있어도 이번 step에 실제 compression이 없으면 bounce를 만들지 않음.
+    {
+        contactConstraint2 constraint{};
+        constraint.bodyIdA = 0;
+        constraint.bodyIdB = 1;
+        constraint.normal = { 1.0f, 0.0f };
+        constraint.invMassA = 0.0f;
+        constraint.invMassB = 1.0f;
+        constraint.restitution = 1.0f;
+        constraint.invTimeStep = 10.0f;
+        constraint.pointCount = 1;
+
+        contactConstraintPoint2& point =
+            constraint.points[0];
+
+        point.baseSeparation = 0.1f;
+        point.normalMass = 1.0f;
+        point.normalImpulse = 4.0f;
+        point.relativeNormalVelocity = -4.0f;
+
+        bodyState bodyStateA{};
+
+        bodyState bodyStateB{};
+        bodyStateB.linearVelocity = { -1.0f, 0.0f };
+
+        ApplyRestitutionContactConstraint(
+            constraint,
+            bodyStateA,
+            bodyStateB,
+            1.0f
+        );
+
+        // compressionImpulse=0이므로 restitution은 armed되지 않음.
+        // speculative bias s/dt=1이 현재 vn=-1을 그대로 허용함.
+        assert( NearlyEqual( bodyStateB.linearVelocity.x, -1.0f ) );
+        assert( NearlyEqual( point.normalImpulse, 4.0f ) );
+        assert( NearlyEqual( point.restitutionImpulse, 0.0f ) );
     }
 
     // threshold보다 느린 접촉은 restitution을 적용하지 않아 resting contact가 튀지 않음.

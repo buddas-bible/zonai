@@ -197,7 +197,7 @@ contactConstraint2 PrepareContactConstraint(
 }
 
 
-void WarmStartContactConstraint( const contactConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB )
+void WarmStartContactConstraint( contactConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB )
 {
     vec2 linearVelocityA = bodyStateA.linearVelocity;
     float angularVelocityA = bodyStateA.angularVelocity;
@@ -220,11 +220,15 @@ void WarmStartContactConstraint( const contactConstraint2& constraint, bodyState
     */
     for( int i = 0; i < constraint.pointCount; ++i )
     {
-        const contactConstraintPoint2& point = constraint.points[i];
+        contactConstraintPoint2& point = constraint.points[i];
 
         const vec2 impulseVector =
             constraint.normal * point.normalImpulse +
             tangent * point.tangentImpulse;
+
+        // 이번 sub-step에 실제 적용된 warm-start normal impulse도
+        // restitution이 보는 compression impulse에 포함함.
+        point.totalNormalImpulse += point.normalImpulse;
 
         linearVelocityA -= impulseVector * constraint.invMassA;
 
@@ -344,6 +348,8 @@ void SolveContactConstraint( contactConstraint2& constraint, bodyState& bodyStat
 
         const float impulse = point.normalImpulse - oldImpulse;
 
+        point.totalNormalImpulse += impulse;
+
         const vec2 impulseVector = constraint.normal * impulse;
 
         /*
@@ -447,60 +453,120 @@ void ApplyRestitutionContactConstraint(
     vec2 linearVelocityB = bodyStateB.linearVelocity;
     float angularVelocityB = bodyStateB.angularVelocity;
 
+    const vec2 dp = bodyStateB.deltaPosition - bodyStateA.deltaPosition;
+    const rot2& dqA = bodyStateA.deltaRotation;
+    const rot2& dqB = bodyStateB.deltaRotation;
+
     for( int i = 0; i < constraint.pointCount; ++i )
     {
         contactConstraintPoint2& point = constraint.points[i];
 
         /*
-        * restitution은 현재 vn이 아니라 Prepare 때 저장한
-        * 충돌 전 relativeNormalVelocity를 기준으로 결정함.
+        * restitution은 Prepare 때 저장한 충돌 전 접근 속도뿐 아니라
+        * 이번 step에서 실제로 만들어진 compression impulse가 있어야 활성화됨.
         *
-        * 예를 들어:
-        *
-        *     relativeNormalVelocity = -4
-        *     restitution = 0.5
-        *
-        * 이면 normal solve가 접근 속도를 0까지 막은 뒤
-        * restitution은 최종 목표를 +2로 만듦.
-        *
-        * 낮은 속도 접촉까지 튀기면 resting contact가 떨릴 수 있으므로
-        * threshold보다 빠른 충돌에만 적용함.
+        * restitutionImpulse는 이미 반발에 사용한 impulse를 따로 추적해서
+        * 여러 restitution iteration이 같은 압축량으로 에너지를 반복해서 만들지 않게 함.
         */
-        if( point.relativeNormalVelocity >= -threshold ||
-            point.normalImpulse <= 0.0f )
+        const float compressionImpulse =
+            point.totalNormalImpulse - point.restitutionImpulse;
+
+        const bool armed =
+            point.relativeNormalVelocity < -threshold &&
+            compressionImpulse > 0.0f;
+
+        float velocityBias = 0.0f;
+
+        if( armed )
         {
-            continue;
+            // targetVn = -restitution * relativeNormalVelocity
+            velocityBias =
+                constraint.restitution *
+                point.relativeNormalVelocity;
+        }
+        else
+        {
+            // restitution이 발동하지 않은 point도 speculative constraint는 유지함.
+            const vec2 ds =
+                dp + Rotate( dqB, point.anchorB ) - Rotate( dqA, point.anchorA );
+
+            const float separation =
+                point.baseSeparation + Dot( ds, constraint.normal );
+
+            if( separation > 0.0f )
+            {
+                velocityBias =
+                    separation * constraint.invTimeStep;
+            }
         }
 
-        const vec2 velocityA = linearVelocityA + Cross( angularVelocityA, point.anchorA );
-        const vec2 velocityB = linearVelocityB + Cross( angularVelocityB, point.anchorB );
+        const vec2 velocityA =
+            linearVelocityA + Cross( angularVelocityA, point.anchorA );
 
-        const float normalVelocity = Dot( velocityB - velocityA, constraint.normal );
+        const vec2 velocityB =
+            linearVelocityB + Cross( angularVelocityB, point.anchorB );
 
-        // targetVn = -restitution * relativeNormalVelocity
-        //
-        // 따라서:
-        //
-        //     DeltaLambda
-        //         = normalMass * ( targetVn - vn )
-        //         = -normalMass *
-        //           ( vn + restitution * relativeNormalVelocity )
-        const float oldImpulse = point.normalImpulse;
+        const float normalVelocity =
+            Dot( velocityB - velocityA, constraint.normal );
 
-        const float incrementalImpulse =
-            -point.normalMass * ( normalVelocity + constraint.restitution * point.relativeNormalVelocity );
+        float impulse =
+            -point.normalMass *
+            ( normalVelocity + velocityBias );
 
-        point.normalImpulse = std::max( oldImpulse + incrementalImpulse, 0.0f );
+        const float newImpulse =
+            std::max( point.normalImpulse + impulse, 0.0f );
 
-        const float impulse = point.normalImpulse - oldImpulse;
+        impulse = newImpulse - point.normalImpulse;
 
-        const vec2 impulseVector = constraint.normal * impulse;
+        /*
+        * 먼저 현재 접근 속도를 0까지 막는 데 필요한 부분을 분리함.
+        * 그보다 더 큰 +normal impulse만 실제 restitution 성분이 됨.
+        */
+        const float approachImpulse =
+            std::min(
+                std::max( -point.normalMass * normalVelocity, 0.0f ),
+                std::max( impulse, 0.0f )
+            );
+
+        if( armed )
+        {
+            /*
+            * Poisson restitution:
+            *
+            *     restitutionImpulse
+            *         <= restitution * compressionImpulse
+            *
+            * 이번 iteration에서 새로 생긴 approach impulse도 압축량에 포함하되
+            * 이미 사용한 restitutionImpulse는 allowance에서 뺌.
+            */
+            const float allowance =
+                constraint.restitution *
+                ( compressionImpulse + approachImpulse ) -
+                point.restitutionImpulse;
+
+            impulse =
+                std::min(
+                    impulse,
+                    approachImpulse + std::max( allowance, 0.0f )
+                );
+        }
+
+        point.normalImpulse += impulse;
+        point.restitutionImpulse += impulse - approachImpulse;
+        point.totalNormalImpulse += impulse;
+
+        const vec2 impulseVector =
+            constraint.normal * impulse;
 
         linearVelocityA -= impulseVector * constraint.invMassA;
-        angularVelocityA -= constraint.invInertiaA * Cross( point.anchorA, impulseVector );
+        angularVelocityA -=
+            constraint.invInertiaA *
+            Cross( point.anchorA, impulseVector );
 
         linearVelocityB += impulseVector * constraint.invMassB;
-        angularVelocityB += constraint.invInertiaB * Cross( point.anchorB, impulseVector );
+        angularVelocityB +=
+            constraint.invInertiaB *
+            Cross( point.anchorB, impulseVector );
     }
 
     bodyStateA.linearVelocity = linearVelocityA;
@@ -509,7 +575,6 @@ void ApplyRestitutionContactConstraint(
     bodyStateB.linearVelocity = linearVelocityB;
     bodyStateB.angularVelocity = angularVelocityB;
 }
-
 
 void StoreContactImpulses( const contactConstraint2& constraint, contactSim2& contactSim )
 {

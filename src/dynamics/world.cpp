@@ -1715,8 +1715,8 @@ void world::Step( float timeStep, int subStepCount )
             // -------------------------------------------------
             for( const island2& island : islandGraph.islands )
             {
-                const std::span<const contactConstraint2> constraints =
-                    std::span<const contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
+                const std::span<contactConstraint2> constraints =
+                    std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
 
                 WarmStartContacts( constraints );
             }
@@ -2319,9 +2319,9 @@ std::vector<contactConstraint2> world::PrepareContactConstraints(
 }
 
 void world::WarmStartContacts(
-    std::span<const contactConstraint2> constraints )
+    std::span<contactConstraint2> constraints )
 {
-    for( const contactConstraint2& constraint : constraints )
+    for( contactConstraint2& constraint : constraints )
     {
         assert( constraint.bodyIdA >= 0 );
         assert( constraint.bodyIdB >= 0 );
@@ -2376,10 +2376,11 @@ void world::ApplyRestitutionContacts(
 
     /*
     * normal solve가 이미 penetration / 접근 속도를 처리한 뒤
-    * 충돌 전 relativeNormalVelocity를 기준으로 bounce만 별도 적용함.
+    * 충돌 전 relativeNormalVelocity와 이번 step의 compression impulse를 기준으로
+    * 실제 충돌한 point에만 bounce를 별도 적용함.
     *
-    * 낮은 속도 접촉은 threshold 아래에서 restitution을 끄므로
-    * resting contact가 계속 미세하게 튀는 현상을 막음.
+    * 낮은 속도 접촉은 threshold 아래에서 restitution을 끄고,
+    * restitutionImpulse를 따로 추적해 반복 solve의 에너지 증가를 제한함.
     */
     for( int iteration = 0; iteration < RESTITUTION_ITERATIONS; ++iteration )
     {

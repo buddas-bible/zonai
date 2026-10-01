@@ -357,7 +357,7 @@ private:
 
     // 이전 step의 cached impulse를 body velocity에 먼저 적용함.
     void WarmStartContacts(
-        std::span<const contactConstraint2> constraints );
+        std::span<contactConstraint2> constraints );
 
     // normal constraint를 반복해서 풂.
     // useBias=true는 penetration push, false는 적분 후 velocity relaxation임.
