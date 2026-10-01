@@ -1615,10 +1615,11 @@ void world::ApplyAngularImpulse(
         impulse * bodySim.invInertia;
 }
 
-void world::Step( float timeStep )
+void world::Step( float timeStep, int subStepCount )
 {
     assert( std::isfinite( timeStep ) );
     assert( timeStep >= 0.0f );
+    assert( subStepCount > 0 );
 
     assert( bodySims_.size() == bodies_.size() );
     assert( bodyStates_.size() == bodies_.size() );
@@ -1628,79 +1629,26 @@ void world::Step( float timeStep )
         /*
         * Step 순서
         *
-        * 1. force / gravity로 velocity 갱신
-        * 2. 현재 transform의 Contact manifold 갱신
-        * 3. solver-active Contact로 island 구성
-        * 4. Contact constraint 준비 + island별 warm start
-        * 5. island별 soft push / speculative constraint solve
-        * 6. island body의 delta transform 적분
-        * 7. island별 bias 없는 relax
-        * 8. island별 restitution
-        * 9. 최종 impulse 저장
-        * 10. delta transform을 bodySim에 반영
+        * 1. 현재 transform의 Contact manifold 갱신
+        * 2. solver-active Contact로 island 구성
+        * 3. Contact constraint 준비
+        * 4. 각 sub-step에서:
+        *    - force / gravity로 velocity 갱신
+        *    - warm start
+        *    - penetration / speculative solve
+        *    - delta transform 적분
+        *    - bias 없는 relax
+        * 5. restitution
+        * 6. 최종 impulse 저장
+        * 7. delta transform을 bodySim에 반영
         *
-        * Push에서 만든 분리 속도는 position을 회복시키는 데만 사용하고
-        * Relax가 적분 뒤 제거하므로 보정 자체가 운동 에너지로 남지 않음.
-        *
-        * 현재 island는 매 Step 다시 만드는 transient connected component임.
-        * sleep이 들어오면 island 전체를 한 단위로 깨우고 재우는 기반이 됨.
+        * Contact는 sub-step 전에 한 번만 준비하고,
+        * 각 sub-step의 이동은 bodyState delta transform에 누적함.
         */
+        const float subStepTime = timeStep / static_cast<float>( subStepCount );
 
         // -----------------------------------------------------
-        // 1. Integrate velocities
-        // -----------------------------------------------------
-        for( std::int32_t bodyIndex = 0;
-             bodyIndex < static_cast<std::int32_t>( bodies_.size() );
-             ++bodyIndex )
-        {
-            const body& body = bodies_[bodyIndex];
-
-            if( body.bodyId == body::NULL_INDEX ||
-                body.type == bodyType::Static ||
-                !body.awake )
-            {
-                // null body는 무시함.
-				// 정적 body는 무시함.
-				// sleep 상태의 body는 무시함.
-                continue;
-            }
-
-            bodySim& bodySim = bodySims_[bodyIndex];
-            bodyState& bodyState = bodyStates_[bodyIndex];
-
-            assert( body.bodyId == bodyIndex );
-            assert( bodySim.bodyId == bodyIndex );
-
-            if( body.type == bodyType::Dynamic )
-            {
-                /*
-                *     F = M * a
-                *     a = F * invMass
-                *     dv = dt * ( gravity + F * invMass )
-                */
-                if( bodySim.invMass > 0.0f )
-                {
-                    const vec2 acceleration = gravity_ + bodySim.force * bodySim.invMass;
-                    bodyState.linearVelocity += acceleration * timeStep;
-                }
-
-                /*
-                *     torque = I * angularAcceleration
-                *     dw = dt * torque * invInertia
-                */
-                if( bodySim.invInertia > 0.0f )
-                {
-                    bodyState.angularVelocity += timeStep * bodySim.invInertia * bodySim.torque;
-                }
-
-                // 속도에 적용됐으니 외력은 초기화함
-                bodySim.force = {};
-                bodySim.torque = 0.0f;
-            }
-        }
-
-        // -----------------------------------------------------
-        // 2. Update current contacts
+        // 1. Update current contacts
         // -----------------------------------------------------
         UpdateCollisions(
             []( const contactData& )
@@ -1708,90 +1656,125 @@ void world::Step( float timeStep )
             }
         );
 
-        // Contact가 새로 생기거나 외부에서 한 body만 깨어난 경우
-        // solver-active graph 전체로 awake 상태를 전파함.
         WakeSleepingBodiesFromContacts();
 
         // -----------------------------------------------------
-        // 3. Build islands
+        // 2. Build islands
         // -----------------------------------------------------
         const islandGraph2 islandGraph = BuildIslands( bodies_, contactSims_ );
 
-        // Contact id 배열 자체가 island별 연속 구간이므로 constraint도 같은 순서로 한 번만 준비함.
+        // -----------------------------------------------------
+        // 3. Prepare contact constraints
+        // -----------------------------------------------------
+        // restitution용 relativeNormalVelocity도 이 시점에서 저장되므로
+        // 이번 step의 force / gravity가 아직 섞이지 않은 충돌 전 속도를 사용함.
         std::vector<contactConstraint2> contactConstraints =
-            PrepareContactConstraints( islandGraph.contactIds, timeStep );
+            PrepareContactConstraints( islandGraph.contactIds, subStepTime );
 
         assert( contactConstraints.size() == islandGraph.contactIds.size() );
 
-        // -----------------------------------------------------
-        // 4. Warm start each island
-        // -----------------------------------------------------
-        for( const island2& island : islandGraph.islands )
+        for( int subStepIndex = 0; subStepIndex < subStepCount; ++subStepIndex )
         {
-            const std::span<const contactConstraint2> constraints =
-                std::span<const contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
+            (void)subStepIndex;
 
-            WarmStartContacts( constraints );
-        }
-
-        // -----------------------------------------------------
-        // 5. Solve with penetration / speculative bias
-        // -----------------------------------------------------
-        for( const island2& island : islandGraph.islands )
-        {
-            const std::span<contactConstraint2> constraints =
-                std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
-
-            SolveContactConstraints( constraints, true );
-        }
-
-        // -----------------------------------------------------
-        // 6. Integrate island position deltas
-        // -----------------------------------------------------
-        for( const island2& island : islandGraph.islands )
-        {
-            const std::span<const std::int32_t> bodyIds =
-                std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
-
-            for( const std::int32_t bodyIndex : bodyIds )
+            // -------------------------------------------------
+            // 4-1. Integrate velocities
+            // -------------------------------------------------
+            for( std::int32_t bodyIndex = 0; bodyIndex < static_cast<std::int32_t>( bodies_.size() ); ++bodyIndex )
             {
-                assert( bodyIndex >= 0 );
-                assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
-
                 const body& body = bodies_[bodyIndex];
-                const bodySim& bodySim = bodySims_[bodyIndex];
+
+                if( body.bodyId == body::NULL_INDEX || body.type == bodyType::Static || !body.awake )
+                {
+                    continue;
+                }
+
+                bodySim& bodySim = bodySims_[bodyIndex];
                 bodyState& bodyState = bodyStates_[bodyIndex];
 
                 assert( body.bodyId == bodyIndex );
-                assert( body.type != bodyType::Static );
                 assert( bodySim.bodyId == bodyIndex );
 
-                // transform을 바로 바꾸지 않고 solver가 현재 separation을 다시 계산할 수 있게 delta로 누적함.
-                bodyState.deltaPosition += bodyState.linearVelocity * timeStep;
-
-                const float deltaAngle = bodyState.angularVelocity * timeStep;
-
-                if( deltaAngle != 0.0f )
+                if( body.type == bodyType::Dynamic )
                 {
-                    bodyState.deltaRotation = rot2::FromRadians( deltaAngle ) * bodyState.deltaRotation;
+                    if( bodySim.invMass > 0.0f )
+                    {
+                        const vec2 acceleration = gravity_ + bodySim.force * bodySim.invMass;
+                        bodyState.linearVelocity += acceleration * subStepTime;
+                    }
+
+                    if( bodySim.invInertia > 0.0f )
+                    {
+                        bodyState.angularVelocity += subStepTime * bodySim.invInertia * bodySim.torque;
+                    }
                 }
+            }
+
+            // -------------------------------------------------
+            // 4-2. Warm start
+            // -------------------------------------------------
+            for( const island2& island : islandGraph.islands )
+            {
+                const std::span<const contactConstraint2> constraints =
+                    std::span<const contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
+
+                WarmStartContacts( constraints );
+            }
+
+            // -------------------------------------------------
+            // 4-3. Solve with penetration / speculative bias
+            // -------------------------------------------------
+            for( const island2& island : islandGraph.islands )
+            {
+                const std::span<contactConstraint2> constraints =
+                    std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
+
+                SolveContactConstraints( constraints, true );
+            }
+
+            // -------------------------------------------------
+            // 4-4. Integrate island position deltas
+            // -------------------------------------------------
+            for( const island2& island : islandGraph.islands )
+            {
+                const std::span<const std::int32_t> bodyIds =
+                    std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
+
+                for( const std::int32_t bodyIndex : bodyIds )
+                {
+                    const body& body = bodies_[bodyIndex];
+                    const bodySim& bodySim = bodySims_[bodyIndex];
+                    bodyState& bodyState = bodyStates_[bodyIndex];
+
+                    assert( body.bodyId == bodyIndex );
+                    assert( body.type != bodyType::Static );
+                    assert( bodySim.bodyId == bodyIndex );
+
+                    bodyState.deltaPosition += bodyState.linearVelocity * subStepTime;
+
+                    const float deltaAngle = bodyState.angularVelocity * subStepTime;
+
+                    if( deltaAngle != 0.0f )
+                    {
+                        bodyState.deltaRotation = rot2::FromRadians( deltaAngle ) * bodyState.deltaRotation;
+                    }
+                }
+            }
+
+            // -------------------------------------------------
+            // 4-5. Relax contact velocities
+            // -------------------------------------------------
+            for( const island2& island : islandGraph.islands )
+            {
+                const std::span<contactConstraint2> constraints =
+                    std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
+
+                SolveContactConstraints( constraints, false );
             }
         }
 
         // -----------------------------------------------------
-        // 7. Relax contact velocities
-        // -----------------------------------------------------
-        // 침투 보정을 위해 추가된 분리 속도를 제거
-        for( const island2& island : islandGraph.islands )
-        {
-            const std::span<contactConstraint2> constraints =
-                std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
-
-            SolveContactConstraints( constraints, false );
-        }
-
-        // -----------------------------------------------------
-        // 8. Apply restitution
+        // 5. Apply restitution
         // -----------------------------------------------------
         for( const island2& island : islandGraph.islands )
         {
@@ -1802,12 +1785,12 @@ void world::Step( float timeStep )
         }
 
         // -----------------------------------------------------
-        // 9. Store impulses
+        // 6. Store impulses
         // -----------------------------------------------------
         StoreContactConstraintImpulses( contactConstraints );
 
         // -----------------------------------------------------
-        // 10. Commit island position deltas
+        // 7. Commit island position deltas
         // -----------------------------------------------------
         for( const island2& island : islandGraph.islands )
         {
@@ -1828,6 +1811,20 @@ void world::Step( float timeStep )
         }
 
         UpdateIslandSleepStates( islandGraph, timeStep );
+
+        // force / torque는 모든 sub-step에서 같은 외력으로 사용한 뒤 한 번만 소비함.
+        for( std::int32_t bodyIndex = 0; bodyIndex < static_cast<std::int32_t>( bodies_.size() ); ++bodyIndex )
+        {
+            const body& body = bodies_[bodyIndex];
+
+            if( body.bodyId == body::NULL_INDEX || body.type != bodyType::Dynamic )
+            {
+                continue;
+            }
+
+            bodySims_[bodyIndex].force = {};
+            bodySims_[bodyIndex].torque = 0.0f;
+        }
 
         // delta transform은 다음 Step으로 넘기지 않음.
         for( const std::int32_t bodyIndex : islandGraph.bodyIds )
