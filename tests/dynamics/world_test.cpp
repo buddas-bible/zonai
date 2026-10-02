@@ -1063,7 +1063,10 @@ int main()
             );
 
         assert( std::fabs( transform.position.x - 2.0f ) < 1e-4f );
-        assert( std::fabs( velocity.x + 0.6f ) < 1e-4f );
+
+        // speculative solve가 이번 Step 안에서 contact 지점까지 이동시키고,
+        // relax 단계는 남아 있는 normal 접근 속도도 제거함.
+        assert( std::fabs( velocity.x ) < 1e-4f );
 
         touchingCount = 0;
 
