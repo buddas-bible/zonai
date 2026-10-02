@@ -255,6 +255,21 @@ add_test(
 )
 
 
+add_executable(shapeCast2Tests
+    collision/shape_cast_test.cpp
+)
+
+target_link_libraries(shapeCast2Tests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME shapeCast2Tests
+    COMMAND shapeCast2Tests
+)
+
+
 add_executable(distance2Tests
     collision/distance_test.cpp
 )
