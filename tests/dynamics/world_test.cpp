@@ -3555,5 +3555,413 @@ int main()
         );
     }
 
+    // Sensor는 Contact를 만들지 않고 overlap + begin/end event만 추적함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId sensorBody =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        const shapeId sensorShape =
+            world.CreateSensorShape(
+                sensorBody,
+                circle2{ {}, 2.0f }
+            );
+
+        assert(
+            world.IsShapeSensor(
+                sensorShape
+            )
+        );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 0
+        );
+
+        const bodyId visitorBody =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 1.5f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId visitorShape =
+            world.CreateShape(
+                visitorBody,
+                circle2{ {}, 0.5f }
+            );
+
+        assert(
+            !world.IsShapeSensor(
+                visitorShape
+            )
+        );
+
+        world.Step( 0.0f );
+
+        // Sensor pair는 broad-phase Contact path에서 제외되어 solver Contact가 생기지 않음.
+        assert( world.GetContactCount() == 0 );
+        assert(
+            world.GetShapeContactCapacity(
+                sensorShape
+            ) == 0
+        );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 1
+        );
+
+        std::array<shapeId, 4> overlaps{};
+
+        const std::size_t overlapCount =
+            world.GetShapeSensorData(
+                sensorShape,
+                overlaps
+            );
+
+        assert( overlapCount == 1 );
+        assert(
+            overlaps[0] ==
+            visitorShape
+        );
+
+        const auto beginEvents =
+            world.GetSensorBeginEvents();
+
+        const auto endEvents =
+            world.GetSensorEndEvents();
+
+        assert( beginEvents.size() == 1 );
+        assert( endEvents.empty() );
+
+        assert(
+            beginEvents[0].sensorShapeId ==
+            sensorShape
+        );
+
+        assert(
+            beginEvents[0].visitorShapeId ==
+            visitorShape
+        );
+
+        // 지속 overlap은 begin event를 반복해서 만들지 않음.
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 1
+        );
+
+        assert(
+            world.GetSensorBeginEvents().empty()
+        );
+
+        assert(
+            world.GetSensorEndEvents().empty()
+        );
+
+        // visitor가 sensor 밖으로 나가면 end event가 한 번 생성됨.
+        world.SetBodyTransform(
+            visitorBody,
+            {
+                { 5.0f, 0.0f },
+                {}
+            }
+        );
+
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 0
+        );
+
+        assert(
+            world.GetSensorBeginEvents().empty()
+        );
+
+        assert(
+            world.GetSensorEndEvents().size() == 1
+        );
+
+        assert(
+            world.GetSensorEndEvents()[0]
+                .visitorShapeId ==
+            visitorShape
+        );
+    }
+
+    // Sensor filter 변경은 Contact와 별개로 다음 Step sensor query에 반영됨.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        collisionFilter sensorFilter{};
+        sensorFilter.categoryBits =
+            1ull << 0;
+
+        sensorFilter.maskBits =
+            1ull << 1;
+
+        const bodyId sensorBody =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        const shapeId sensorShape =
+            world.CreateSensorShape(
+                sensorBody,
+                circle2{ {}, 2.0f },
+                sensorFilter
+            );
+
+        collisionFilter visitorFilter{};
+        visitorFilter.categoryBits =
+            1ull << 1;
+
+        visitorFilter.maskBits =
+            1ull << 0;
+
+        const bodyId visitorBody =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 1.5f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId visitorShape =
+            world.CreateShape(
+                visitorBody,
+                circle2{ {}, 0.5f },
+                visitorFilter
+            );
+
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 1
+        );
+
+        collisionFilter blocked =
+            sensorFilter;
+
+        blocked.maskBits = 0;
+
+        world.SetShapeFilter(
+            sensorShape,
+            blocked
+        );
+
+        // SetFilter 자체는 sensor overlap을 즉시 바꾸지 않음.
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 1
+        );
+
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 0
+        );
+
+        assert(
+            world.GetSensorEndEvents().size() == 1
+        );
+
+        world.SetShapeFilter(
+            sensorShape,
+            sensorFilter
+        );
+
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 1
+        );
+
+        assert(
+            world.GetSensorBeginEvents().size() == 1
+        );
+
+        assert(
+            world.GetSensorBeginEvents()[0]
+                .visitorShapeId ==
+            visitorShape
+        );
+    }
+
+    // visitor가 파괴되면 다음 sensor update에서 old generation으로 end event를 남김.
+    {
+        world world{};
+
+        const bodyId sensorBody =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        const shapeId sensorShape =
+            world.CreateSensorShape(
+                sensorBody,
+                circle2{ {}, 2.0f }
+            );
+
+        const bodyId visitorBody =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 1.0f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId visitorShape =
+            world.CreateShape(
+                visitorBody,
+                circle2{ {}, 0.5f }
+            );
+
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 1
+        );
+
+        world.DestroyShape(
+            visitorShape
+        );
+
+        assert(
+            !world.IsValid(
+                visitorShape
+            )
+        );
+
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 0
+        );
+
+        assert(
+            world.GetSensorEndEvents().size() == 1
+        );
+
+        assert(
+            world.GetSensorEndEvents()[0]
+                .visitorShapeId ==
+            visitorShape
+        );
+    }
+
+    // Dense sensor storage는 sensor 삭제 시 swap-fixup 후에도 다른 sensor의 index를 유지함.
+    {
+        world world{};
+
+        const bodyId bodyA =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        const bodyId bodyB =
+            world.CreateBody(
+                bodyType::Static,
+                {
+                    { 10.0f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId sensorA =
+            world.CreateSensorShape(
+                bodyA,
+                circle2{ {}, 2.0f }
+            );
+
+        const shapeId sensorB =
+            world.CreateSensorShape(
+                bodyB,
+                circle2{ {}, 2.0f }
+            );
+
+        const bodyId visitorBody =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 10.0f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId visitor =
+            world.CreateShape(
+                visitorBody,
+                circle2{ {}, 0.5f }
+            );
+
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorA
+            ) == 0
+        );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorB
+            ) == 1
+        );
+
+        world.DestroyShape(
+            sensorA
+        );
+
+        assert(
+            world.IsShapeSensor(
+                sensorB
+            )
+        );
+
+        world.Step( 0.0f );
+
+        std::array<shapeId, 1> overlaps{};
+
+        assert(
+            world.GetShapeSensorData(
+                sensorB,
+                overlaps
+            ) == 1
+        );
+
+        assert(
+            overlaps[0] ==
+            visitor
+        );
+    }
+
     return 0;
 }

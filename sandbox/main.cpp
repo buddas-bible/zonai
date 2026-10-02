@@ -1208,6 +1208,26 @@ int main()
                 );
             }
 
+            const bool isSensor =
+                scene->world.IsShapeSensor(
+                    visual.shapeHandle
+                );
+
+            ImGui::Text(
+                "Sensor: %s",
+                isSensor ? "yes" : "no"
+            );
+
+            if( isSensor )
+            {
+                ImGui::Text(
+                    "Sensor overlaps: %zu",
+                    scene->world.GetShapeSensorCapacity(
+                        visual.shapeHandle
+                    )
+                );
+            }
+
             collisionFilter filter =
                 scene->world.GetShapeFilter(
                     visual.shapeHandle

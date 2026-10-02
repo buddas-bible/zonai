@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "collision/constants.h"
+#include "collision/distance2.h"
 #include "collision/shapeProxy2.h"
 #include "collision/sweep2.h"
 #include "collision/timeOfImpact2.h"
@@ -410,6 +411,49 @@ shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilt
     return MakeShapeId( shapeIndex );
 }
 
+shapeId world::CreateSensorShape(
+    bodyId bodyId,
+    shapeGeometry geometry,
+    collisionFilter filter,
+    float density )
+{
+    const shapeId sensorShapeId =
+        CreateShape(
+            bodyId,
+            std::move( geometry ),
+            filter,
+            density
+        );
+
+    const std::int32_t shapeIndex =
+        GetShapeIndex(
+            sensorShapeId
+        );
+
+    shape& sensorShape =
+        shapes_[shapeIndex];
+
+    assert(
+        sensorShape.sensorIndex ==
+        shape::NULL_INDEX
+    );
+
+    sensorShape.sensorIndex =
+        static_cast<std::int32_t>(
+            sensors_.size()
+        );
+
+    sensor2 sensor{};
+    sensor.shapeIndex =
+        shapeIndex;
+
+    sensors_.push_back(
+        std::move( sensor )
+    );
+
+    return sensorShapeId;
+}
+
 void world::DestroyShape( shapeId shapeId )
 {
     DestroyShapeByIndex( GetShapeIndex( shapeId ) );
@@ -547,6 +591,79 @@ collisionFilter world::GetShapeFilter(
             .filter;
 }
 
+bool world::IsShapeSensor(
+    shapeId shapeId ) const
+{
+    return
+        shapes_[GetShapeIndex( shapeId )]
+            .sensorIndex !=
+        shape::NULL_INDEX;
+}
+
+std::size_t world::GetShapeSensorCapacity(
+    shapeId shapeId ) const
+{
+    const shape& sensorShape =
+        shapes_[GetShapeIndex( shapeId )];
+
+    if( sensorShape.sensorIndex ==
+        shape::NULL_INDEX )
+    {
+        return 0;
+    }
+
+    assert( sensorShape.sensorIndex >= 0 );
+    assert(
+        static_cast<std::size_t>(
+            sensorShape.sensorIndex
+        ) <
+        sensors_.size()
+    );
+
+    return
+        sensors_[sensorShape.sensorIndex]
+            .overlaps.size();
+}
+
+std::size_t world::GetShapeSensorData(
+    shapeId sensorShapeId,
+    std::span<shapeId> output ) const
+{
+    const shape& sensorShape =
+        shapes_[GetShapeIndex( sensorShapeId )];
+
+    if( sensorShape.sensorIndex ==
+        shape::NULL_INDEX )
+    {
+        return 0;
+    }
+
+    const sensor2& sensor =
+        sensors_[sensorShape.sensorIndex];
+
+    const std::size_t count =
+        std::min(
+            output.size(),
+            sensor.overlaps.size()
+        );
+
+    for( std::size_t i = 0;
+         i < count;
+         ++i )
+    {
+        const sensorVisitor2& visitor =
+            sensor.overlaps[i];
+
+        output[i] =
+        {
+            visitor.shapeIndex + 1,
+            visitor.generation
+        };
+    }
+
+    return count;
+}
+
 const aabb2& world::GetShapeAABB( shapeId shapeId ) const
 {
     return
@@ -574,8 +691,12 @@ void world::DestroyShapeByIndex( std::int32_t shapeIndex )
     assert( shape.proxyKey != shape::NULL_INDEX );
     assert( !std::holds_alternative<std::monostate>( shape.geometry ) );
 
-    // Sensor 저장소는 아직 구현하지 않았으므로 현재는 일반 collision shape만 제거함.
-    assert( shape.sensorIndex == shape::NULL_INDEX );
+    if( shape.sensorIndex != shape::NULL_INDEX )
+    {
+        DestroySensorByShapeIndex(
+            shapeIndex
+        );
+    }
 
     const std::int32_t bodyIndex = shape.bodyId;
     body& body = bodies_[bodyIndex];
@@ -2471,6 +2592,399 @@ void world::Step( float timeStep, int subStepCount )
         {
         }
     );
+
+    // Sensor는 Contact와 독립적으로 최종 transform 기준 overlap을 갱신함.
+    UpdateSensors();
+}
+
+void world::UpdateSensors()
+{
+    sensorBeginEvents_.clear();
+    sensorEndEvents_.clear();
+
+    if( !pendingSensorEndEvents_.empty() )
+    {
+        sensorEndEvents_.insert(
+            sensorEndEvents_.end(),
+            pendingSensorEndEvents_.begin(),
+            pendingSensorEndEvents_.end()
+        );
+
+        pendingSensorEndEvents_.clear();
+    }
+
+    if( sensors_.empty() )
+    {
+        return;
+    }
+
+    const auto makeVisitorId =
+        []( const sensorVisitor2& visitor )
+        {
+            return shapeId
+            {
+                visitor.shapeIndex + 1,
+                visitor.generation
+            };
+        };
+
+    constexpr float OVERLAP_EPSILON =
+        10.0f *
+        std::numeric_limits<float>::epsilon();
+
+    for( sensor2& sensor : sensors_ )
+    {
+        assert( sensor.shapeIndex >= 0 );
+        assert(
+            static_cast<std::size_t>(
+                sensor.shapeIndex
+            ) <
+            shapes_.size()
+        );
+
+        shape& sensorShape =
+            shapes_[sensor.shapeIndex];
+
+        assert(
+            sensorShape.sensorIndex >= 0
+        );
+
+        const bodySim& sensorBodySim =
+            bodySims_[sensorShape.bodyId];
+
+        std::vector<sensorVisitor2> newOverlaps;
+        newOverlaps.reserve(
+            sensor.overlaps.size()
+        );
+
+        const shapeProxy2 sensorProxy =
+            MakeShapeProxy(
+                sensorShape.geometry
+            );
+
+        const auto queryTree =
+            [&]( bodyType type )
+            {
+                const dynamicTree& tree =
+                    broadPhase_.GetTree(
+                        type
+                    );
+
+                tree.Query(
+                    sensorShape.aabb,
+                    [&]( std::int32_t proxyId )
+                    {
+                        const std::int32_t otherShapeIndex =
+                            tree.GetProxyShapeIndex(
+                                proxyId
+                            );
+
+                        if( otherShapeIndex ==
+                            sensor.shapeIndex )
+                        {
+                            return true;
+                        }
+
+                        assert( otherShapeIndex >= 0 );
+                        assert(
+                            static_cast<std::size_t>(
+                                otherShapeIndex
+                            ) <
+                            shapes_.size()
+                        );
+
+                        const shape& otherShape =
+                            shapes_[otherShapeIndex];
+
+                        if( otherShape.bodyId ==
+                                shape::NULL_INDEX ||
+                            otherShape.bodyId ==
+                                sensorShape.bodyId )
+                        {
+                            return true;
+                        }
+
+                        if( !ShouldShapesCollide(
+                                sensorShape.filter,
+                                otherShape.filter ) )
+                        {
+                            return true;
+                        }
+
+                        const bodySim& otherBodySim =
+                            bodySims_[otherShape.bodyId];
+
+                        distanceInput2 input{};
+                        input.proxyA =
+                            sensorProxy;
+
+                        input.proxyB =
+                            MakeShapeProxy(
+                                otherShape.geometry
+                            );
+
+                        input.transform =
+                            InverseMul(
+                                sensorBodySim.transform,
+                                otherBodySim.transform
+                            );
+
+                        input.useRadii = true;
+
+                        simplexCache2 cache{};
+
+                        const distanceOutput2 distance =
+                            ShapeDistance(
+                                input,
+                                cache
+                            );
+
+                        if( distance.distance <=
+                            OVERLAP_EPSILON )
+                        {
+                            newOverlaps.push_back(
+                                {
+                                    otherShapeIndex,
+                                    otherShape.generation
+                                }
+                            );
+                        }
+
+                        return true;
+                    }
+                );
+            };
+
+        queryTree(
+            bodyType::Static
+        );
+
+        queryTree(
+            bodyType::Kinematic
+        );
+
+        queryTree(
+            bodyType::Dynamic
+        );
+
+        std::sort(
+            newOverlaps.begin(),
+            newOverlaps.end(),
+            []( const sensorVisitor2& a,
+                const sensorVisitor2& b )
+            {
+                if( a.shapeIndex !=
+                    b.shapeIndex )
+                {
+                    return
+                        a.shapeIndex <
+                        b.shapeIndex;
+                }
+
+                return
+                    a.generation <
+                    b.generation;
+            }
+        );
+
+        newOverlaps.erase(
+            std::unique(
+                newOverlaps.begin(),
+                newOverlaps.end()
+            ),
+            newOverlaps.end()
+        );
+
+        const shapeId sensorShapeId =
+            MakeShapeId(
+                sensor.shapeIndex
+            );
+
+        std::size_t oldIndex = 0;
+        std::size_t newIndex = 0;
+
+        while( oldIndex <
+                   sensor.overlaps.size() &&
+               newIndex <
+                   newOverlaps.size() )
+        {
+            const sensorVisitor2& oldVisitor =
+                sensor.overlaps[oldIndex];
+
+            const sensorVisitor2& newVisitor =
+                newOverlaps[newIndex];
+
+            if( oldVisitor.shapeIndex ==
+                    newVisitor.shapeIndex &&
+                oldVisitor.generation ==
+                    newVisitor.generation )
+            {
+                ++oldIndex;
+                ++newIndex;
+                continue;
+            }
+
+            const bool oldComesFirst =
+                oldVisitor.shapeIndex <
+                    newVisitor.shapeIndex ||
+                (
+                    oldVisitor.shapeIndex ==
+                        newVisitor.shapeIndex &&
+                    oldVisitor.generation <
+                        newVisitor.generation
+                );
+
+            if( oldComesFirst )
+            {
+                sensorEndEvents_.push_back(
+                    {
+                        sensorShapeId,
+                        makeVisitorId(
+                            oldVisitor
+                        )
+                    }
+                );
+
+                ++oldIndex;
+            }
+            else
+            {
+                sensorBeginEvents_.push_back(
+                    {
+                        sensorShapeId,
+                        makeVisitorId(
+                            newVisitor
+                        )
+                    }
+                );
+
+                ++newIndex;
+            }
+        }
+
+        while( oldIndex <
+               sensor.overlaps.size() )
+        {
+            sensorEndEvents_.push_back(
+                {
+                    sensorShapeId,
+                    makeVisitorId(
+                        sensor.overlaps[oldIndex]
+                    )
+                }
+            );
+
+            ++oldIndex;
+        }
+
+        while( newIndex <
+               newOverlaps.size() )
+        {
+            sensorBeginEvents_.push_back(
+                {
+                    sensorShapeId,
+                    makeVisitorId(
+                        newOverlaps[newIndex]
+                    )
+                }
+            );
+
+            ++newIndex;
+        }
+
+        sensor.overlaps =
+            std::move(
+                newOverlaps
+            );
+    }
+}
+
+void world::DestroySensorByShapeIndex(
+    std::int32_t shapeIndex )
+{
+    assert( shapeIndex >= 0 );
+    assert(
+        static_cast<std::size_t>(
+            shapeIndex
+        ) <
+        shapes_.size()
+    );
+
+    shape& sensorShape =
+        shapes_[shapeIndex];
+
+    assert(
+        sensorShape.sensorIndex !=
+        shape::NULL_INDEX
+    );
+
+    const std::int32_t sensorIndex =
+        sensorShape.sensorIndex;
+
+    assert( sensorIndex >= 0 );
+    assert(
+        static_cast<std::size_t>(
+            sensorIndex
+        ) <
+        sensors_.size()
+    );
+
+    const shapeId sensorShapeId =
+        MakeShapeId(
+            shapeIndex
+        );
+
+    const sensor2& sensor =
+        sensors_[sensorIndex];
+
+    for( const sensorVisitor2& visitor :
+         sensor.overlaps )
+    {
+        pendingSensorEndEvents_.push_back(
+            {
+                sensorShapeId,
+                {
+                    visitor.shapeIndex + 1,
+                    visitor.generation
+                }
+            }
+        );
+    }
+
+    const std::int32_t lastSensorIndex =
+        static_cast<std::int32_t>(
+            sensors_.size() - 1
+        );
+
+    if( sensorIndex !=
+        lastSensorIndex )
+    {
+        sensors_[sensorIndex] =
+            std::move(
+                sensors_[lastSensorIndex]
+            );
+
+        const std::int32_t movedShapeIndex =
+            sensors_[sensorIndex]
+                .shapeIndex;
+
+        assert( movedShapeIndex >= 0 );
+        assert(
+            static_cast<std::size_t>(
+                movedShapeIndex
+            ) <
+            shapes_.size()
+        );
+
+        shapes_[movedShapeIndex]
+            .sensorIndex =
+            sensorIndex;
+    }
+
+    sensors_.pop_back();
+
+    sensorShape.sensorIndex =
+        shape::NULL_INDEX;
 }
 
 void world::SolveContinuousBody(

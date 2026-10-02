@@ -22,6 +22,7 @@
 #include "dynamics/constants.h"
 #include "dynamics/id.h"
 #include "dynamics/island2.h"
+#include "dynamics/sensor2.h"
 
 namespace zonai
 {
@@ -51,6 +52,13 @@ public:
     // local geometry를 body에 연결하고 shape handle을 반환함.
     [[nodiscard]] shapeId CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter = {}, float density = 1.0f );
 
+    // Contact를 만들지 않고 overlap만 추적하는 sensor shape를 생성함.
+    [[nodiscard]] shapeId CreateSensorShape(
+        bodyId bodyId,
+        shapeGeometry geometry,
+        collisionFilter filter = {},
+        float density = 0.0f );
+
     // handle이 가리키는 shape의 Contact / proxy / body list 연결을 정리함.
     void DestroyShape( shapeId shapeId );
 
@@ -69,6 +77,27 @@ public:
     // 다음 collision update에서 이 shape의 broad-phase pair를 다시 탐색함.
     void SetShapeFilter( shapeId shapeId, collisionFilter filter );
     [[nodiscard]] collisionFilter GetShapeFilter( shapeId shapeId ) const;
+
+    [[nodiscard]] bool IsShapeSensor( shapeId shapeId ) const;
+
+    // sensor가 현재 추적 중인 visitor 개수. sensor가 아니면 0.
+    [[nodiscard]] std::size_t GetShapeSensorCapacity( shapeId shapeId ) const;
+
+    // sensor overlap handle을 output에 채우고 실제 작성 개수를 반환함.
+    [[nodiscard]] std::size_t GetShapeSensorData(
+        shapeId sensorShapeId,
+        std::span<shapeId> output ) const;
+
+    // 가장 최근 Step 끝에서 생성된 transient sensor begin / end events.
+    [[nodiscard]] std::span<const sensorBeginEvent2> GetSensorBeginEvents() const noexcept
+    {
+        return sensorBeginEvents_;
+    }
+
+    [[nodiscard]] std::span<const sensorEndEvent2> GetSensorEndEvents() const noexcept
+    {
+        return sensorEndEvents_;
+    }
 
     // 현재 shape의 speculative AABB와 broad-phase fat AABB를 반환함.
     [[nodiscard]] const aabb2& GetShapeAABB( shapeId shapeId ) const;
@@ -402,6 +431,12 @@ private:
     // 연결된 shape들의 density / geometry를 합산해 Dynamic body의 mass data를 갱신함.
     void UpdateBodyMassData( std::int32_t bodyIndex );
 
+    // 모든 sensor가 세 broad-phase tree를 query해 overlap과 begin/end event를 갱신함.
+    void UpdateSensors();
+
+    // sensor shape 파괴 시 dense sensor storage를 정리하고 기존 overlap end event를 예약함.
+    void DestroySensorByShapeIndex( std::int32_t shapeIndex );
+
     // 현재 solver-active Contact graph를 따라 연결된 body 전체를 깨움.
     // Static body가 시작점이면 연결된 non-static body만 깨움.
     void WakeBodyByIndex( std::int32_t bodyIndex );
@@ -487,6 +522,14 @@ private:
     // shape와 같은 stable slot index로 보관하는 broad-phase fat AABB.
     // tree proxy bounds와 동일한 값을 유지하되 Contact lifetime에서도 직접 사용함.
     std::vector<aabb2> fatAABBs_;
+
+    // Sensor는 Contact와 독립된 dense storage에서 overlap을 추적함.
+    std::vector<sensor2> sensors_;
+    std::vector<sensorBeginEvent2> sensorBeginEvents_;
+    std::vector<sensorEndEvent2> sensorEndEvents_;
+
+    // sensor 자체가 파괴될 때 생긴 end event는 다음 sensor update까지 보존함.
+    std::vector<sensorEndEvent2> pendingSensorEndEvents_;
 
     // 제거된 shape slot 재사용을 위한 free-list head.
     std::int32_t shapeFreeList_ = shape::NULL_INDEX;
