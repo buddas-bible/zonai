@@ -131,11 +131,14 @@ void dynamicTree::MoveProxy( std::int32_t proxyId, const aabb2& aabb, bool markM
     InsertLeaf( newLeaf, false );
 }
 
-void dynamicTree::EnlargeProxy(
+void dynamicTree::UpdateProxy(
     std::int32_t proxyId,
     const aabb2& aabb )
 {
     assert( IsValidAABB( aabb ) );
+    assert( aabb.max.x - aabb.min.x < MAX_TREE_AABB_EXTENT );
+    assert( aabb.max.y - aabb.min.y < MAX_TREE_AABB_EXTENT );
+
     assert( proxyId >= 0 );
     assert( static_cast<std::size_t>( proxyId ) < proxies_.size() );
     assert( proxies_[proxyId].node != NULL_INDEX );
@@ -146,15 +149,6 @@ void dynamicTree::EnlargeProxy(
     assert( static_cast<std::size_t>( leafIndex ) < nodes_.size() );
     assert( IsLeaf( nodes_[leafIndex] ) );
     assert( GetProxyId( nodes_[leafIndex] ) == proxyId );
-
-    // EnlargeProxy는 shrink / teleport 용도가 아님.
-    // caller가 기존 leaf bounds를 포함하는 새 bounds를 전달해야 함.
-    assert(
-        ContainsAABB(
-            aabb,
-            nodes_[leafIndex].aabb
-        )
-    );
 
     nodes_[leafIndex].aabb = aabb;
     nodes_[leafIndex].flagIndex |= TREE_MOVED_NODE;
@@ -186,6 +180,34 @@ void dynamicTree::EnlargeProxy(
         parentIndex =
             parents_[parentIndex];
     }
+}
+
+void dynamicTree::EnlargeProxy(
+    std::int32_t proxyId,
+    const aabb2& aabb )
+{
+    assert( proxyId >= 0 );
+    assert( static_cast<std::size_t>( proxyId ) < proxies_.size() );
+    assert( proxies_[proxyId].node != NULL_INDEX );
+
+    const std::int32_t leafIndex =
+        proxies_[proxyId].node;
+
+    assert( static_cast<std::size_t>( leafIndex ) < nodes_.size() );
+
+    // EnlargeProxy는 shrink / teleport 용도가 아님.
+    // caller가 기존 leaf bounds를 포함하는 새 bounds를 전달해야 함.
+    assert(
+        ContainsAABB(
+            aabb,
+            nodes_[leafIndex].aabb
+        )
+    );
+
+    UpdateProxy(
+        proxyId,
+        aabb
+    );
 }
 
 bool dynamicTree::HasMoved() const

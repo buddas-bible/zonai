@@ -414,6 +414,62 @@ int main()
     }
 
     {
+        dynamicTree updateTree{};
+
+        const aabb2 boxA{
+            { 0.0f, 0.0f },
+            { 1.0f, 1.0f }
+        };
+
+        const aabb2 boxB{
+            { 2.0f, 0.0f },
+            { 3.0f, 1.0f }
+        };
+
+        const aabb2 movedA{
+            { 8.0f, -1.0f },
+            { 9.0f,  0.0f }
+        };
+
+        const std::int32_t proxyA =
+            updateTree.CreateProxy(
+                boxA,
+                1
+            );
+
+        updateTree.CreateProxy(
+            boxB,
+            2
+        );
+
+        updateTree.UpdateProxy(
+            proxyA,
+            movedA
+        );
+
+        assert(
+            NearlyEqual(
+                updateTree.GetProxyAABB(
+                    proxyA
+                ),
+                movedA
+            )
+        );
+
+        // topology는 그대로지만 ancestor bounds는 즉시 정확히 refit되어
+        // pair query가 안전하고 다음 partial rebuild 대상이 됨.
+        assert( updateTree.HasMoved() );
+        assert( updateTree.NeedsRebuild() );
+        assert( updateTree.Validate() );
+
+        updateTree.Rebuild( false );
+
+        assert( !updateTree.HasMoved() );
+        assert( !updateTree.NeedsRebuild() );
+        assert( updateTree.Validate() );
+    }
+
+    {
         dynamicTree enlargeTree{};
 
         const aabb2 boxA{

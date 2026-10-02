@@ -100,6 +100,10 @@ public:
 
     void MoveProxy( std::int32_t proxyId, const aabb2& aabb, bool markMoved = false );
 
+    // leaf bounds만 새 AABB로 바꾸고 topology는 유지함.
+    // ancestor bounds를 정확히 refit하고 moved branch를 표시해 다음 partial rebuild 대상이 되게 함.
+    void UpdateProxy( std::int32_t proxyId, const aabb2& aabb );
+
     // 기존 proxy bounds를 포함하는 더 큰 AABB로 leaf를 넓히고
     // topology는 유지한 채 ancestor bounds와 moved flag만 갱신함.
     void EnlargeProxy( std::int32_t proxyId, const aabb2& aabb );

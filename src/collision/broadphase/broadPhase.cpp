@@ -29,12 +29,33 @@ void broadPhase::DestroyProxy( proxyKey proxyKey )
 
 void broadPhase::MoveProxy( proxyKey proxyKey, const aabb2& aabb )
 {
-    // key에서 tree와 stable proxy id를 복원한 뒤 해당 proxy만 갱신함.
-    const bodyType type = GetProxyType( proxyKey );
-    const std::int32_t proxyId = GetProxyId( proxyKey );
+    const bodyType type =
+        GetProxyType( proxyKey );
 
-    // broadPhase에서 이동된 proxy는 새 pair 생성을 위해 항상 moved 처리함.
-    GetTree( type ).MoveProxy( proxyId, aabb, true );
+    const std::int32_t proxyId =
+        GetProxyId( proxyKey );
+
+    dynamicTree& tree =
+        GetTree( type );
+
+    if( type == bodyType::Static )
+    {
+        // Static transform 변경은 드물고 위치가 크게 바뀔 수 있으므로 즉시 재배치함.
+        tree.MoveProxy(
+            proxyId,
+            aabb,
+            true
+        );
+
+        return;
+    }
+
+    // Dynamic / Kinematic은 topology를 즉시 뜯지 않고 bounds만 refit함.
+    // moved branch는 UpdatePairs 뒤 partial rebuild가 정리함.
+    tree.UpdateProxy(
+        proxyId,
+        aabb
+    );
 }
 
 void broadPhase::EnlargeProxy(
