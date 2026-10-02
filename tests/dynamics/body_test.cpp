@@ -27,6 +27,7 @@ int main()
         assert( definition.isAwake );
         assert( definition.sleepThreshold == 0.05f );
         assert( definition.safetyFactor == 0.5f );
+        assert( definition.enableContactRecycling );
         assert( !definition.isBullet );
         assert( !definition.allowFastRotation );
     }
@@ -82,6 +83,7 @@ int main()
         assert( bodySim.linearDamping == 0.0f );
         assert( bodySim.angularDamping == 0.0f );
         assert( bodySim.gravityScale == 1.0f );
+        assert( bodySim.enableContactRecycling );
         assert( !bodySim.isBullet );
         assert( !bodySim.isFast );
         assert( !bodySim.hadTimeOfImpact );

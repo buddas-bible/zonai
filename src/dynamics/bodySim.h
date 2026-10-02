@@ -41,6 +41,9 @@ struct bodySim
     // Kinematic / Static은 invMass가 0이므로 solver에서 gravity를 적용하지 않음.
     float gravityScale = 1.0f;
 
+    // 새 Contact를 만들 때 contact recycling 허용 여부를 결정함.
+    bool enableContactRecycling = true;
+
     // bullet은 이후 continuous collision pass에서 더 넓은 body type을 검사함.
     bool isBullet = false;
 

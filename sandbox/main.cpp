@@ -769,6 +769,22 @@ int main()
             );
         }
 
+        float contactRecycleDistance =
+            scene->world.GetContactRecycleDistance();
+
+        if( ImGui::DragFloat(
+            "Contact recycle dist",
+            &contactRecycleDistance,
+            0.001f,
+            0.0f,
+            0.2f,
+            "%.3f m" ) )
+        {
+            scene->world.SetContactRecycleDistance(
+                contactRecycleDistance
+            );
+        }
+
         ImGui::Text(
             "Fixed dt: %.5f s",
             FIXED_TIME_STEP
@@ -1075,6 +1091,21 @@ int main()
                     );
                 }
 
+                bool contactRecycling =
+                    scene->world.IsBodyContactRecyclingEnabled(
+                        visual.bodyHandle
+                    );
+
+                if( ImGui::Checkbox(
+                    "Contact recycling",
+                    &contactRecycling ) )
+                {
+                    scene->world.SetBodyContactRecyclingEnabled(
+                        visual.bodyHandle,
+                        contactRecycling
+                    );
+                }
+
                 bool bullet =
                     scene->world.IsBodyBullet(
                         visual.bodyHandle
@@ -1373,6 +1404,10 @@ int main()
         ImGui::Text(
             "Touching contacts: %zu",
             contacts.size()
+        );
+        ImGui::Text(
+            "Recycled contacts: %zu",
+            scene->world.GetRecycledContactCount()
         );
 
         ImGui::Text(

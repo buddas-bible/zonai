@@ -50,6 +50,10 @@ struct contact2
     // stable slot id. NULL_INDEX면 현재 free slot임.
     std::int32_t contactId = NULL_INDEX;
 
+    // 생성 시점에 두 body가 모두 허용했으면 작은 상대 이동에서 manifold를 재활용함.
+    // 이후 body 설정이 바뀌어도 기존 Contact의 값은 유지함.
+    bool enableRecycling = false;
+
     // slot이 재사용될 때 증가해 오래된 ContactId를 검출함.
     std::uint32_t generation = 0;
 

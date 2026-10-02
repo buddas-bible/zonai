@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "collision/broadphase/broadPhase.h"
+#include "collision/constants.h"
 #include "collision/narrowphase/collide.h"
 #include "collision/narrowphase/contact2.h"
 #include "collision/shape.h"
@@ -109,6 +110,10 @@ public:
     void SetBodyBullet( bodyId bodyId, bool bullet );
     [[nodiscard]] bool IsBodyBullet( bodyId bodyId ) const;
 
+    // 이 설정을 바꿔도 이미 만들어진 Contact의 recycling 허용 여부는 바뀌지 않음.
+    void SetBodyContactRecyclingEnabled( bodyId bodyId, bool enabled );
+    [[nodiscard]] bool IsBodyContactRecyclingEnabled( bodyId bodyId ) const;
+
     // 마지막 Step에서 continuous collision 후보로 분류됐는지 반환함.
     [[nodiscard]] bool IsBodyFast( bodyId bodyId ) const;
 
@@ -134,6 +139,15 @@ public:
 
     void SetContinuousEnabled( bool enabled ) noexcept;
     [[nodiscard]] bool IsContinuousEnabled() const noexcept;
+
+    void SetContactRecycleDistance( float distance );
+    [[nodiscard]] float GetContactRecycleDistance() const noexcept;
+
+    // 가장 최근 UpdateCollisions에서 narrowphase를 건너뛰고 재활용한 Contact 수.
+    [[nodiscard]] std::size_t GetRecycledContactCount() const noexcept
+    {
+        return recycledContactCount_;
+    }
 
 
     // Dynamic body에 world-space 힘을 누적함.
@@ -173,6 +187,8 @@ public:
     template <worldCollisionCallback Callback>
     void UpdateCollisions( Callback&& callback )
     {
+        recycledContactCount_ = 0;
+
         // 기존 Contact는 broadPhase에서 다시 후보로 나오지 않으므로 stable slot을 직접 갱신함.
         for( std::int32_t contactId = 0;
              contactId < static_cast<std::int32_t>( contacts_.size() );
@@ -223,6 +239,19 @@ public:
 
             assert( bodySimA.bodyId == shapeA.bodyId );
             assert( bodySimB.bodyId == shapeB.bodyId );
+
+            if( TryRecycleContact( contactId ) )
+            {
+                const contactSim2& contactSim =
+                    contactSims_[contactId];
+
+                if( IsTouchingManifold( contactSim.manifold ) )
+                {
+                    callback( MakeContactData( contactId ) );
+                }
+
+                continue;
+            }
 
             const localManifold2 manifold =
                 CollideShapes(
@@ -393,7 +422,12 @@ private:
         std::int32_t shapeIdA, std::int32_t shapeIdB,
         const localManifold2& manifold );
 
-    // 현재 bodySim / narrow-phase manifold를 solver용 ContactSim에 동기화함.
+    // 상대 transform 변화가 충분히 작으면 cached local anchor로 manifold를 갱신함.
+    [[nodiscard]] bool TryRecycleContact(
+        std::int32_t contactId );
+
+    // 현재 bodySim / narrow-phase manifold를 solver용 ContactSim에 동기화하고
+    // 다음 recycling에 사용할 anchor / transform cache를 다시 저장함.
     void UpdateContactSim(
         std::int32_t contactId,
         const localManifold2& manifold );
@@ -481,6 +515,12 @@ private:
 
     // false면 fast body를 분류만 하고 TOI pass는 실행하지 않음.
     bool continuousEnabled_ = true;
+
+    // 작은 상대 이동에서 persistent manifold를 재활용할 최대 거리.
+    float contactRecycleDistance_ = CONTACT_RECYCLE_DISTANCE;
+
+    // 가장 최근 collision update에서 재활용된 Contact 수.
+    std::size_t recycledContactCount_ = 0;
 
     // 모든 shape의 broad-phase proxy를 body type별 DynamicTree에 관리함.
     broadPhase broadPhase_;

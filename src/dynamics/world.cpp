@@ -224,6 +224,7 @@ bodyId world::CreateBody( const bodyDef& definition )
     bodySim.linearDamping = definition.linearDamping;
     bodySim.angularDamping = definition.angularDamping;
     bodySim.gravityScale = definition.gravityScale;
+    bodySim.enableContactRecycling = definition.enableContactRecycling;
     bodySim.isBullet = definition.isBullet;
     bodySim.allowFastRotation = definition.allowFastRotation;
 
@@ -1548,6 +1549,27 @@ bool world::IsBodyBullet( bodyId bodyId ) const
     return bodySims_[bodyIndex].isBullet;
 }
 
+void world::SetBodyContactRecyclingEnabled(
+    bodyId bodyId,
+    bool enabled )
+{
+    const std::int32_t bodyIndex =
+        GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    bodySims_[bodyIndex].enableContactRecycling = enabled;
+}
+
+bool world::IsBodyContactRecyclingEnabled(
+    bodyId bodyId ) const
+{
+    const std::int32_t bodyIndex =
+        GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    return bodySims_[bodyIndex].enableContactRecycling;
+}
+
 bool world::IsBodyFast( bodyId bodyId ) const
 {
     const std::int32_t bodyIndex =
@@ -1670,6 +1692,21 @@ void world::SetContinuousEnabled( bool enabled ) noexcept
 bool world::IsContinuousEnabled() const noexcept
 {
     return continuousEnabled_;
+}
+
+void world::SetContactRecycleDistance(
+    float distance )
+{
+    assert( std::isfinite( distance ) );
+    assert( distance >= 0.0f );
+
+    contactRecycleDistance_ =
+        distance;
+}
+
+float world::GetContactRecycleDistance() const noexcept
+{
+    return contactRecycleDistance_;
 }
 
 void world::ApplyForce( bodyId bodyId, vec2 force, vec2 point )
@@ -2847,6 +2884,23 @@ std::int32_t world::CreateContact(
     contact.shapeIdA = shapeIdA;
     contact.shapeIdB = shapeIdB;
 
+    const shape& shapeA =
+        shapes_[shapeIdA];
+
+    const shape& shapeB =
+        shapes_[shapeIdB];
+
+    assert( shapeA.bodyId >= 0 );
+    assert( shapeB.bodyId >= 0 );
+    assert( static_cast<std::size_t>( shapeA.bodyId ) < bodySims_.size() );
+    assert( static_cast<std::size_t>( shapeB.bodyId ) < bodySims_.size() );
+
+    // 최신 Box2D처럼 Contact가 만들어질 때 두 body의 설정을 snapshot함.
+    // 이후 body 설정을 바꿔도 기존 Contact에는 영향을 주지 않음.
+    contact.enableRecycling =
+        bodySims_[shapeA.bodyId].enableContactRecycling &&
+        bodySims_[shapeB.bodyId].enableContactRecycling;
+
     assert( contactSims_.size() == contacts_.size() );
 
     UpdateContactSim( contactId, manifold );
@@ -2905,6 +2959,182 @@ std::int32_t world::CreateContact(
     }
 
     return contactId;
+}
+
+bool world::TryRecycleContact(
+    std::int32_t contactId )
+{
+    assert( contactId >= 0 );
+    assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+    assert( contactSims_.size() == contacts_.size() );
+
+    const contact2& contact =
+        contacts_[contactId];
+
+    if( !contact.enableRecycling ||
+        contactRecycleDistance_ <= 0.0f )
+    {
+        return false;
+    }
+
+    contactSim2& contactSim =
+        contactSims_[contactId];
+
+    if( !contactSim.recycleCacheValid )
+    {
+        return false;
+    }
+
+    assert( contactSim.bodyIdA >= 0 );
+    assert( contactSim.bodyIdB >= 0 );
+    assert( static_cast<std::size_t>( contactSim.bodyIdA ) < bodySims_.size() );
+    assert( static_cast<std::size_t>( contactSim.bodyIdB ) < bodySims_.size() );
+
+    const bodySim& bodySimA =
+        bodySims_[contactSim.bodyIdA];
+
+    const bodySim& bodySimB =
+        bodySims_[contactSim.bodyIdB];
+
+    // fast body는 작은 transform 차이처럼 보여도 CCD 경로와 함께 움직일 수 있으므로
+    // fresh narrowphase를 사용함.
+    if( bodySimA.isFast ||
+        bodySimB.isFast )
+    {
+        return false;
+    }
+
+    const transform2 currentRelativeTransform =
+        InverseMul(
+            bodySimA.transform,
+            bodySimB.transform
+        );
+
+    const float cosA =
+        bodySimA.transform.rotation.c *
+            contactSim.cachedRotationA.c +
+        bodySimA.transform.rotation.s *
+            contactSim.cachedRotationA.s;
+
+    const float cosB =
+        bodySimB.transform.rotation.c *
+            contactSim.cachedRotationB.c +
+        bodySimB.transform.rotation.s *
+            contactSim.cachedRotationB.s;
+
+    if( std::min( cosA, cosB ) <=
+        CONTACT_RECYCLE_COS_ANGLE )
+    {
+        return false;
+    }
+
+    const vec2 relativeTranslation =
+        currentRelativeTransform.position -
+        contactSim.cachedRelativeTransform.position;
+
+    const rot2 relativeRotation =
+        Inverse(
+            currentRelativeTransform.rotation
+        ) *
+        contactSim.cachedRelativeTransform.rotation;
+
+    const float maxExtentA =
+        bodies_[contactSim.bodyIdA].type == bodyType::Static ?
+            0.0f :
+            bodySimA.maxExtent;
+
+    const float maxExtentB =
+        bodies_[contactSim.bodyIdB].type == bodyType::Static ?
+            0.0f :
+            bodySimB.maxExtent;
+
+    const float maxExtent =
+        std::max(
+            maxExtentA,
+            maxExtentB
+        );
+
+    const float relativeMotion =
+        Length( relativeTranslation ) +
+        maxExtent *
+        std::fabs( relativeRotation.s );
+
+    // non-touching Contact는 새 speculative point를 놓치지 않도록 더 엄격하게 검사함.
+    const float tolerance =
+        contactSim.manifold.pointCount > 0 ?
+            contactRecycleDistance_ :
+            std::min(
+                contactRecycleDistance_,
+                SPECULATIVE_DISTANCE
+            );
+
+    if( relativeMotion >= tolerance )
+    {
+        return false;
+    }
+
+    // mass data는 shape density 변경 등으로 Contact 수명 중에도 바뀔 수 있으므로
+    // narrowphase를 건너뛰더라도 최신 값을 반영함.
+    contactSim.invMassA =
+        bodySimA.invMass;
+
+    contactSim.invInertiaA =
+        bodySimA.invInertia;
+
+    contactSim.invMassB =
+        bodySimB.invMass;
+
+    contactSim.invInertiaB =
+        bodySimB.invInertia;
+
+    const vec2 worldNormal =
+        TransformVector(
+            bodySimA.transform,
+            contactSim.manifold.normal
+        );
+
+    for( int i = 0;
+         i < contactSim.manifold.pointCount;
+         ++i )
+    {
+        const vec2 worldPointA =
+            TransformPoint(
+                bodySimA.transform,
+                contactSim.recyclePointA[i]
+            );
+
+        const vec2 worldPointB =
+            TransformPoint(
+                bodySimB.transform,
+                contactSim.recyclePointB[i]
+            );
+
+        const vec2 worldPoint =
+            (
+                worldPointA +
+                worldPointB
+            ) * 0.5f;
+
+        localManifoldPoint2& point =
+            contactSim.manifold.points[i];
+
+        // public/debug contact point도 현재 두 cached anchor의 중간으로 갱신함.
+        point.point =
+            InverseTransformPoint(
+                bodySimA.transform,
+                worldPoint
+            );
+
+        point.separation =
+            contactSim.recycleSeparation[i] +
+            Dot(
+                worldPointB - worldPointA,
+                worldNormal
+            );
+    }
+
+    ++recycledContactCount_;
+    return true;
 }
 
 void world::UpdateContactSim( std::int32_t contactId, const localManifold2& manifold )
@@ -2985,6 +3215,47 @@ void world::UpdateContactSim( std::int32_t contactId, const localManifold2& mani
             }
         }
     }
+
+    // fresh narrowphase 결과를 다음 recycling의 기준 pose / anchor로 저장함.
+    contactSim.cachedRotationA =
+        bodySimA.transform.rotation;
+
+    contactSim.cachedRotationB =
+        bodySimB.transform.rotation;
+
+    contactSim.cachedRelativeTransform =
+        InverseMul(
+            bodySimA.transform,
+            bodySimB.transform
+        );
+
+    for( int i = 0;
+         i < contactSim.manifold.pointCount;
+         ++i )
+    {
+        const localManifoldPoint2& point =
+            contactSim.manifold.points[i];
+
+        const vec2 worldPoint =
+            TransformPoint(
+                bodySimA.transform,
+                point.point
+            );
+
+        contactSim.recyclePointA[i] =
+            point.point;
+
+        contactSim.recyclePointB[i] =
+            InverseTransformPoint(
+                bodySimB.transform,
+                worldPoint
+            );
+
+        contactSim.recycleSeparation[i] =
+            point.separation;
+    }
+
+    contactSim.recycleCacheValid = true;
 
     const bool wasSolverActive =
         oldManifold.pointCount > 0;

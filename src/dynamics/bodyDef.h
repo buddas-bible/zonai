@@ -27,6 +27,10 @@ struct bodyDef
     // 한 Step의 이동량이 shape 최소 두께의 이 비율을 넘으면 fast body로 분류함.
     float safetyFactor = 0.5f;
 
+    // Contact recycling은 작은 상대 이동에서 기존 manifold anchor를 재사용함.
+    // 캐릭터처럼 매 step fresh manifold가 필요한 경우 끌 수 있음.
+    bool enableContactRecycling = true;
+
     // bullet은 CCD에서 static뿐 아니라 kinematic / dynamic body까지 검사함.
     bool isBullet = false;
     bool allowFastRotation = false;

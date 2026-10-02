@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "collision/narrowphase/manifold2.h"
+#include "math/transform2.h"
 
 namespace zonai
 {
@@ -46,6 +47,20 @@ struct contactSim2
     // manifold.points[i]와 같은 순서의 cached solver impulse.
     // narrow-phase가 새 manifold를 만들면 point id로 이전 값을 다시 연결함.
     std::array<contactImpulse2, MAX_MANIFOLD_POINTS> impulses{};
+
+    // Contact recycling용 cache.
+    //
+    // fresh narrowphase 시점의 동일 world contact point를 A/B local anchor로 각각 저장하고,
+    // 작은 상대 이동에서는 이 두 anchor를 새 transform으로 옮겨 separation만 갱신함.
+    std::array<vec2, MAX_MANIFOLD_POINTS> recyclePointA{};
+    std::array<vec2, MAX_MANIFOLD_POINTS> recyclePointB{};
+    std::array<float, MAX_MANIFOLD_POINTS> recycleSeparation{};
+
+    transform2 cachedRelativeTransform{};
+    rot2 cachedRotationA{};
+    rot2 cachedRotationB{};
+
+    bool recycleCacheValid = false;
 };
 
 } // namespace zonai

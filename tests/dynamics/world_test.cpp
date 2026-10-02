@@ -3007,5 +3007,234 @@ int main()
         assert( world.HadBodyTimeOfImpact( bulletBody ) );
     }
 
+    // Contact recycling은 작은 상대 이동에서 fresh narrowphase를 건너뛰고
+    // cached A/B local anchor로 separation을 갱신함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        assert(
+            std::fabs(
+                world.GetContactRecycleDistance() -
+                CONTACT_RECYCLE_DISTANCE
+            ) < epsilon
+        );
+
+        const bodyId bodyA =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        const shapeId shapeA =
+            world.CreateShape(
+                bodyA,
+                circle2{ {}, 1.0f }
+            );
+
+        bodyDef definition{};
+        definition.type =
+            bodyType::Dynamic;
+
+        definition.transform.position =
+            { 2.0f, 0.0f };
+
+        definition.enableSleep = false;
+
+        const bodyId bodyB =
+            world.CreateBody(
+                definition
+            );
+
+        const shapeId shapeB =
+            world.CreateShape(
+                bodyB,
+                circle2{ {}, 1.0f }
+            );
+
+        contactId persistentContact{};
+        int touchingCount = 0;
+
+        world.UpdateCollisions(
+            [&]( const contactData& data )
+            {
+                ++touchingCount;
+                persistentContact = data.id;
+            }
+        );
+
+        assert( touchingCount == 1 );
+        assert( world.GetContactCount() == 1 );
+        assert( world.GetRecycledContactCount() == 0 );
+        assert( world.IsValid( persistentContact ) );
+
+        // Box2D와 같이 body 설정은 새 Contact 생성에만 적용되므로
+        // 이미 만들어진 Contact는 recycling 허용 상태를 유지함.
+        world.SetBodyContactRecyclingEnabled(
+            bodyB,
+            false
+        );
+
+        assert(
+            !world.IsBodyContactRecyclingEnabled(
+                bodyB
+            )
+        );
+
+        world.SetBodyTransform(
+            bodyB,
+            {
+                { 2.01f, 0.0f },
+                {}
+            }
+        );
+
+        touchingCount = 0;
+
+        world.UpdateCollisions(
+            [&]( const contactData& )
+            {
+                ++touchingCount;
+            }
+        );
+
+        assert( touchingCount == 0 );
+        assert( world.GetContactCount() == 1 );
+        assert( world.GetRecycledContactCount() == 1 );
+        assert( world.IsValid( persistentContact ) );
+
+        const contactData recycled =
+            world.GetContactData(
+                persistentContact
+            );
+
+        assert( recycled.manifold.pointCount == 1 );
+        assert(
+            std::fabs(
+                recycled.manifold.points[0].separation -
+                0.01f
+            ) < 1e-4f
+        );
+
+        // cached pose에서 recycle distance보다 멀어지면 fresh narrowphase를 수행함.
+        world.SetBodyTransform(
+            bodyB,
+            {
+                { 2.07f, 0.0f },
+                {}
+            }
+        );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        assert( world.GetRecycledContactCount() == 0 );
+        assert( world.GetContactCount() == 1 );
+        assert(
+            world.GetContactData(
+                persistentContact
+            ).manifold.pointCount == 0
+        );
+
+        // fat AABB까지 분리되면 persistent Contact와 pairSet이 함께 제거됨.
+        world.SetBodyTransform(
+            bodyB,
+            {
+                { 2.2f, 0.0f },
+                {}
+            }
+        );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        assert( world.GetContactCount() == 0 );
+        assert( !world.IsValid( persistentContact ) );
+        assert(
+            !world.GetBroadPhase().HasPair(
+                PairKey(
+                    shapeA,
+                    shapeB
+                )
+            )
+        );
+    }
+
+    // Contact 생성 전에 한 body가 recycling을 끄면 그 Contact는 매번 fresh narrowphase를 사용함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId bodyA =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        (void)world.CreateShape(
+            bodyA,
+            circle2{ {}, 1.0f }
+        );
+
+        bodyDef definition{};
+        definition.type =
+            bodyType::Dynamic;
+
+        definition.transform.position =
+            { 2.0f, 0.0f };
+
+        definition.enableSleep = false;
+        definition.enableContactRecycling = false;
+
+        const bodyId bodyB =
+            world.CreateBody(
+                definition
+            );
+
+        (void)world.CreateShape(
+            bodyB,
+            circle2{ {}, 1.0f }
+        );
+
+        assert(
+            !world.IsBodyContactRecyclingEnabled(
+                bodyB
+            )
+        );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        world.SetBodyTransform(
+            bodyB,
+            {
+                { 2.01f, 0.0f },
+                {}
+            }
+        );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        assert( world.GetContactCount() == 1 );
+        assert( world.GetRecycledContactCount() == 0 );
+
+        world.SetContactRecycleDistance(
+            0.0f
+        );
+
+        assert( world.GetContactRecycleDistance() == 0.0f );
+    }
+
     return 0;
 }
