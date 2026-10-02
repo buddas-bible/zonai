@@ -3599,6 +3599,49 @@ int main()
             );
 
         assert(
+            !world.AreShapeSensorEventsEnabled(
+                sensorShape
+            )
+        );
+
+        assert(
+            !world.AreShapeSensorEventsEnabled(
+                visitorShape
+            )
+        );
+
+        // 최신 Box2D와 같이 sensor / visitor 양쪽이 opt-in 해야 overlap event에 참여함.
+        world.SetShapeSensorEventsEnabled(
+            sensorShape,
+            true
+        );
+
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 0
+        );
+
+        world.SetShapeSensorEventsEnabled(
+            visitorShape,
+            true
+        );
+
+        assert(
+            world.AreShapeSensorEventsEnabled(
+                sensorShape
+            )
+        );
+
+        assert(
+            world.AreShapeSensorEventsEnabled(
+                visitorShape
+            )
+        );
+
+        assert(
             !world.IsShapeSensor(
                 visitorShape
             )
@@ -3749,6 +3792,16 @@ int main()
                 visitorFilter
             );
 
+        world.SetShapeSensorEventsEnabled(
+            sensorShape,
+            true
+        );
+
+        world.SetShapeSensorEventsEnabled(
+            visitorShape,
+            true
+        );
+
         world.Step( 0.0f );
 
         assert(
@@ -3840,6 +3893,16 @@ int main()
                 circle2{ {}, 0.5f }
             );
 
+        world.SetShapeSensorEventsEnabled(
+            sensorShape,
+            true
+        );
+
+        world.SetShapeSensorEventsEnabled(
+            visitorShape,
+            true
+        );
+
         world.Step( 0.0f );
 
         assert(
@@ -3922,6 +3985,16 @@ int main()
                 circle2{ {}, 0.5f }
             );
 
+        world.SetShapeSensorEventsEnabled(
+            sensorB,
+            true
+        );
+
+        world.SetShapeSensorEventsEnabled(
+            visitor,
+            true
+        );
+
         world.Step( 0.0f );
 
         assert(
@@ -3963,7 +4036,124 @@ int main()
         );
     }
 
-    // Fast body가 한 Step 안에 Sensor를 완전히 통과해도 CCD hit으로 Begin을 놓치지 않음.
+        // Sensor event opt-in은 runtime에 바꿀 수 있고 결과는 다음 Step에 반영됨.
+    {
+        world world{};
+
+        const bodyId sensorBody =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        const shapeId sensorShape =
+            world.CreateSensorShape(
+                sensorBody,
+                circle2{ {}, 2.0f }
+            );
+
+        const bodyId visitorBody =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 1.0f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId visitorShape =
+            world.CreateShape(
+                visitorBody,
+                circle2{ {}, 0.5f }
+            );
+
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 0
+        );
+
+        // Sensor만 켜서는 visitor가 opt-in하지 않았으므로 overlap을 만들지 않음.
+        world.SetShapeSensorEventsEnabled(
+            sensorShape,
+            true
+        );
+
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 0
+        );
+
+        world.SetShapeSensorEventsEnabled(
+            visitorShape,
+            true
+        );
+
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 1
+        );
+
+        assert(
+            world.GetSensorBeginEvents().size() == 1
+        );
+
+        // visitor opt-out은 기존 overlap을 다음 sensor update에서 End로 전환함.
+        world.SetShapeSensorEventsEnabled(
+            visitorShape,
+            false
+        );
+
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 0
+        );
+
+        assert(
+            world.GetSensorEndEvents().size() == 1
+        );
+
+        world.SetShapeSensorEventsEnabled(
+            visitorShape,
+            true
+        );
+
+        world.Step( 0.0f );
+
+        assert(
+            world.GetSensorBeginEvents().size() == 1
+        );
+
+        // Sensor 자체 opt-out도 같은 방식으로 모든 기존 overlap을 End 처리함.
+        world.SetShapeSensorEventsEnabled(
+            sensorShape,
+            false
+        );
+
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 0
+        );
+
+        assert(
+            world.GetSensorEndEvents().size() == 1
+        );
+    }
+
+// Fast body가 한 Step 안에 Sensor를 완전히 통과해도 CCD hit으로 Begin을 놓치지 않음.
     {
         world world{};
         world.SetGravity( {} );
@@ -4001,6 +4191,16 @@ int main()
                 visitorBody,
                 circle2{ {}, 0.25f }
             );
+
+        world.SetShapeSensorEventsEnabled(
+            sensorShape,
+            true
+        );
+
+        world.SetShapeSensorEventsEnabled(
+            visitorShape,
+            true
+        );
 
         world.Step( 0.1f );
 
@@ -4106,9 +4306,20 @@ int main()
                 visitorDefinition
             );
 
-        (void)world.CreateShape(
-            visitorBody,
-            circle2{ {}, 0.25f }
+        const shapeId visitorShape =
+            world.CreateShape(
+                visitorBody,
+                circle2{ {}, 0.25f }
+            );
+
+        world.SetShapeSensorEventsEnabled(
+            sensorShape,
+            true
+        );
+
+        world.SetShapeSensorEventsEnabled(
+            visitorShape,
+            true
         );
 
         world.Step( 0.1f );
@@ -4183,9 +4394,20 @@ int main()
                 visitorDefinition
             );
 
-        (void)world.CreateShape(
-            visitorBody,
-            circle2{ {}, 0.25f }
+        const shapeId visitorShape =
+            world.CreateShape(
+                visitorBody,
+                circle2{ {}, 0.25f }
+            );
+
+        world.SetShapeSensorEventsEnabled(
+            sensorShape,
+            true
+        );
+
+        world.SetShapeSensorEventsEnabled(
+            visitorShape,
+            true
         );
 
         world.Step( 0.1f );
@@ -4267,6 +4489,16 @@ int main()
                 visitorBody,
                 circle2{ {}, 0.25f }
             );
+
+        world.SetShapeSensorEventsEnabled(
+            sensorShape,
+            true
+        );
+
+        world.SetShapeSensorEventsEnabled(
+            visitorShape,
+            true
+        );
 
         world.Step( 0.1f );
 

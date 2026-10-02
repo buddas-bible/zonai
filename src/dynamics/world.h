@@ -80,6 +80,11 @@ public:
 
     [[nodiscard]] bool IsShapeSensor( shapeId shapeId ) const;
 
+    // Sensor event는 sensor/visitor 양쪽 shape가 모두 켜져 있어야 생성됨.
+    // 변경 결과는 다음 Step의 sensor update부터 반영됨.
+    void SetShapeSensorEventsEnabled( shapeId shapeId, bool enabled );
+    [[nodiscard]] bool AreShapeSensorEventsEnabled( shapeId shapeId ) const;
+
     // sensor가 현재 추적 중인 visitor 개수. sensor가 아니면 0.
     [[nodiscard]] std::size_t GetShapeSensorCapacity( shapeId shapeId ) const;
 

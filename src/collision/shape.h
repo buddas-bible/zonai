@@ -79,6 +79,10 @@ struct shape
 
     // category / mask / group 기반 collision filter.
     collisionFilter filter{};
+
+    // Sensor overlap event 참여 여부. 최신 Box2D처럼 기본값은 false이며
+    // sensor와 visitor 양쪽 shape가 모두 true여야 begin/end 및 CCD sensor hit을 생성함.
+    bool enableSensorEvents = false;
 };
 
 // body local geometry에 transform을 적용해 world-space AABB를 계산함.

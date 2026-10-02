@@ -600,6 +600,23 @@ bool world::IsShapeSensor(
         shape::NULL_INDEX;
 }
 
+void world::SetShapeSensorEventsEnabled(
+    shapeId shapeId,
+    bool enabled )
+{
+    shapes_[GetShapeIndex( shapeId )]
+        .enableSensorEvents =
+        enabled;
+}
+
+bool world::AreShapeSensorEventsEnabled(
+    shapeId shapeId ) const
+{
+    return
+        shapes_[GetShapeIndex( shapeId )]
+            .enableSensorEvents;
+}
+
 std::size_t world::GetShapeSensorCapacity(
     shapeId shapeId ) const
 {
@@ -2649,6 +2666,40 @@ void world::UpdateSensors()
             sensorShape.sensorIndex >= 0
         );
 
+        // Sensor shape 자체가 이벤트를 끄면 기존 overlap은 아래 diff에서 모두 End로 빠짐.
+        if( !sensorShape.enableSensorEvents )
+        {
+            sensor.hits.clear();
+
+            std::vector<sensorVisitor2> emptyOverlaps;
+
+            const shapeId sensorShapeId =
+                MakeShapeId(
+                    sensor.shapeIndex
+                );
+
+            for( const sensorVisitor2& oldVisitor :
+                 sensor.overlaps )
+            {
+                sensorEndEvents_.push_back(
+                    {
+                        sensorShapeId,
+                        {
+                            oldVisitor.shapeIndex + 1,
+                            oldVisitor.generation
+                        }
+                    }
+                );
+            }
+
+            sensor.overlaps =
+                std::move(
+                    emptyOverlaps
+                );
+
+            continue;
+        }
+
         const bodySim& sensorBodySim =
             bodySims_[sensorShape.bodyId];
 
@@ -2711,6 +2762,11 @@ void world::UpdateSensors()
                                 shape::NULL_INDEX ||
                             otherShape.bodyId ==
                                 sensorShape.bodyId )
+                        {
+                            return true;
+                        }
+
+                        if( !otherShape.enableSensorEvents )
                         {
                             return true;
                         }
@@ -3097,6 +3153,15 @@ void world::SolveContinuousBody(
             const bool isSensor =
                 otherShape.sensorIndex !=
                 shape::NULL_INDEX;
+
+            if( isSensor &&
+                (
+                    !otherShape.enableSensorEvents ||
+                    !fastShape.enableSensorEvents
+                ) )
+            {
+                return;
+            }
 
             if( !isSensor &&
                 !CanCollideShapes(

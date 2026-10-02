@@ -1218,6 +1218,21 @@ int main()
                 isSensor ? "yes" : "no"
             );
 
+            bool sensorEventsEnabled =
+                scene->world.AreShapeSensorEventsEnabled(
+                    visual.shapeHandle
+                );
+
+            if( ImGui::Checkbox(
+                    "Sensor events",
+                    &sensorEventsEnabled ) )
+            {
+                scene->world.SetShapeSensorEventsEnabled(
+                    visual.shapeHandle,
+                    sensorEventsEnabled
+                );
+            }
+
             if( isSensor )
             {
                 ImGui::Text(
