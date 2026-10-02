@@ -255,6 +255,21 @@ add_test(
 )
 
 
+add_executable(distance2Tests
+    collision/distance_test.cpp
+)
+
+target_link_libraries(distance2Tests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME distance2Tests
+    COMMAND distance2Tests
+)
+
+
 add_executable(sweep2Tests
     collision/sweep_test.cpp
 )
