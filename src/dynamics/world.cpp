@@ -161,6 +161,8 @@ bodyId world::CreateBody( const bodyDef& definition )
     assert( std::isfinite( definition.gravityScale ) );
     assert( std::isfinite( definition.sleepThreshold ) );
     assert( definition.sleepThreshold >= 0.0f );
+    assert( std::isfinite( definition.safetyFactor ) );
+    assert( definition.safetyFactor >= 0.0f );
 
     std::int32_t bodyIndex = body::NULL_INDEX;
 
@@ -204,6 +206,7 @@ bodyId world::CreateBody( const bodyDef& definition )
     body.type = definition.type;
     body.enableSleep = definition.enableSleep;
     body.sleepThreshold = definition.sleepThreshold;
+    body.safetyFactor = definition.safetyFactor;
     body.awake =
         definition.type != bodyType::Static &&
         ( definition.isAwake || !definition.enableSleep );
@@ -218,6 +221,7 @@ bodyId world::CreateBody( const bodyDef& definition )
     bodySim.linearDamping = definition.linearDamping;
     bodySim.angularDamping = definition.angularDamping;
     bodySim.gravityScale = definition.gravityScale;
+    bodySim.isBullet = definition.isBullet;
     bodySim.allowFastRotation = definition.allowFastRotation;
 
     assert( bodyStates_.size() == bodies_.size() );
@@ -610,9 +614,10 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
     bodySim.invMass = 0.0f;
     bodySim.invInertia = 0.0f;
     bodySim.localCenter = {};
+    bodySim.minExtent = std::numeric_limits<float>::max();
     bodySim.maxExtent = 0.0f;
 
-    const auto updateMaxExtent =
+    const auto updateExtents =
         [&]()
         {
             std::int32_t shapeIndex = body.headShapeId;
@@ -627,46 +632,22 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
                 const shape& shape = shapes_[shapeIndex];
                 assert( shape.bodyId == bodyIndex );
 
-                const aabb2 localAABB =
-                    ComputeShapeAABB(
+                const shapeExtent2 extent =
+                    ComputeShapeExtent(
                         shape.geometry,
-                        {}
+                        bodySim.localCenter
+                    );
+
+                bodySim.minExtent =
+                    std::min(
+                        bodySim.minExtent,
+                        extent.minExtent
                     );
 
                 bodySim.maxExtent =
                     std::max(
                         bodySim.maxExtent,
-                        Length(
-                            vec2{ localAABB.min.x, localAABB.min.y } -
-                            bodySim.localCenter
-                        )
-                    );
-
-                bodySim.maxExtent =
-                    std::max(
-                        bodySim.maxExtent,
-                        Length(
-                            vec2{ localAABB.min.x, localAABB.max.y } -
-                            bodySim.localCenter
-                        )
-                    );
-
-                bodySim.maxExtent =
-                    std::max(
-                        bodySim.maxExtent,
-                        Length(
-                            vec2{ localAABB.max.x, localAABB.min.y } -
-                            bodySim.localCenter
-                        )
-                    );
-
-                bodySim.maxExtent =
-                    std::max(
-                        bodySim.maxExtent,
-                        Length(
-                            vec2{ localAABB.max.x, localAABB.max.y } -
-                            bodySim.localCenter
-                        )
+                        extent.maxExtent
                     );
 
                 shapeIndex = shape.nextShapeId;
@@ -681,7 +662,7 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
     if( body.type != bodyType::Dynamic )
     {
         bodySim.center = bodySim.transform.position;
-        updateMaxExtent();
+        updateExtents();
         return;
     }
 
@@ -779,7 +760,7 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
         bodySim.invInertia = 1.0f / body.inertia;
     }
 
-    updateMaxExtent();
+    updateExtents();
 
     // local center of mass C를 현재 body transform으로 world space에 옮김.
     bodySim.center =
@@ -1409,6 +1390,49 @@ float world::GetBodySleepThreshold( bodyId bodyId ) const
             .sleepThreshold;
 }
 
+void world::SetBodySafetyFactor( bodyId bodyId, float safetyFactor )
+{
+    assert( std::isfinite( safetyFactor ) );
+    assert( safetyFactor >= 0.0f );
+
+    bodies_[GetBodyIndex( bodyId )].safetyFactor =
+        safetyFactor;
+}
+
+float world::GetBodySafetyFactor( bodyId bodyId ) const
+{
+    return
+        bodies_[GetBodyIndex( bodyId )]
+            .safetyFactor;
+}
+
+void world::SetBodyBullet( bodyId bodyId, bool bullet )
+{
+    const std::int32_t bodyIndex =
+        GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    bodySims_[bodyIndex].isBullet = bullet;
+}
+
+bool world::IsBodyBullet( bodyId bodyId ) const
+{
+    const std::int32_t bodyIndex =
+        GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    return bodySims_[bodyIndex].isBullet;
+}
+
+bool world::IsBodyFast( bodyId bodyId ) const
+{
+    const std::int32_t bodyIndex =
+        GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    return bodySims_[bodyIndex].isFast;
+}
+
 float world::GetBodyMass( bodyId bodyId ) const
 {
     return bodies_[GetBodyIndex( bodyId )].mass;
@@ -1752,6 +1776,12 @@ void world::Step( float timeStep, int subStepCount )
     assert( bodySims_.size() == bodies_.size() );
     assert( bodyStates_.size() == bodies_.size() );
 
+    // isFast는 현재 Step의 이동량으로 매번 다시 판정하는 transient 상태임.
+    for( bodySim& sim : bodySims_ )
+    {
+        sim.isFast = false;
+    }
+
     if( timeStep > 0.0f )
     {
         /*
@@ -1962,12 +1992,52 @@ void world::Step( float timeStep, int subStepCount )
         }
 
         // -----------------------------------------------------
-        // 6. Store impulses
+        // 6. Classify fast bodies for continuous collision
+        // -----------------------------------------------------
+        for( const island2& island : islandGraph.islands )
+        {
+            const std::span<const std::int32_t> bodyIds =
+                std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
+
+            for( const std::int32_t bodyIndex : bodyIds )
+            {
+                const body& body = bodies_[bodyIndex];
+                bodySim& sim = bodySims_[bodyIndex];
+                const bodyState& state = bodyStates_[bodyIndex];
+
+                if( body.type != bodyType::Dynamic ||
+                    body.shapeCount == 0 )
+                {
+                    continue;
+                }
+
+                const float maxVelocity =
+                    Length( state.linearVelocity ) +
+                    std::fabs( state.angularVelocity ) * sim.maxExtent;
+
+                const float maxDeltaPosition =
+                    Length( state.deltaPosition ) +
+                    std::fabs( state.deltaRotation.s ) * sim.maxExtent;
+
+                const float maxMotion =
+                    std::max(
+                        maxDeltaPosition,
+                        maxVelocity * timeStep
+                    );
+
+                sim.isFast =
+                    maxMotion >
+                    body.safetyFactor * sim.minExtent;
+            }
+        }
+
+        // -----------------------------------------------------
+        // 7. Store impulses
         // -----------------------------------------------------
         StoreContactConstraintImpulses( contactConstraints );
 
         // -----------------------------------------------------
-        // 7. Commit island position deltas
+        // 8. Commit island position deltas
         // -----------------------------------------------------
         for( const island2& island : islandGraph.islands )
         {

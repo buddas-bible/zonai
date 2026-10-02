@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 
 #include "math/transform2.h"
 
@@ -40,12 +41,19 @@ struct bodySim
     // Kinematic / Static은 invMass가 0이므로 solver에서 gravity를 적용하지 않음.
     float gravityScale = 1.0f;
 
+    // bullet은 이후 continuous collision pass에서 더 넓은 body type을 검사함.
+    bool isBullet = false;
+
+    // 이번 Step에서 CCD가 필요한 속도로 움직였는지 나타내는 transient 상태.
+    bool isFast = false;
+
     // true면 MAX_ROTATION 기반 각속도 제한을 적용하지 않음.
     // 원형 바퀴처럼 빠른 회전이 안전한 body에만 사용함.
     bool allowFastRotation = false;
 
-    // local center of mass에서 가장 먼 shape bounds까지의 거리.
-    // 회전 속도를 실제 body point의 선속도로 환산할 때 사용함.
+    // CCD 기준이 되는 shape의 최소 두께와
+    // 가장 먼 body point의 속도를 계산하기 위한 최대 반경.
+    float minExtent = std::numeric_limits<float>::max();
     float maxExtent = 0.0f;
 
     // 이 simulation 데이터가 대응하는 World 내부 body index.

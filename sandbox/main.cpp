@@ -1043,6 +1043,47 @@ int main()
                     );
                 }
 
+                float safetyFactor =
+                    scene->world.GetBodySafetyFactor(
+                        visual.bodyHandle
+                    );
+
+                if( ImGui::DragFloat(
+                    "CCD safety factor",
+                    &safetyFactor,
+                    0.01f,
+                    0.01f,
+                    2.0f,
+                    "%.2f" ) )
+                {
+                    scene->world.SetBodySafetyFactor(
+                        visual.bodyHandle,
+                        safetyFactor
+                    );
+                }
+
+                bool bullet =
+                    scene->world.IsBodyBullet(
+                        visual.bodyHandle
+                    );
+
+                if( ImGui::Checkbox(
+                    "Bullet",
+                    &bullet ) )
+                {
+                    scene->world.SetBodyBullet(
+                        visual.bodyHandle,
+                        bullet
+                    );
+                }
+
+                ImGui::Text(
+                    "Fast body: %s",
+                    scene->world.IsBodyFast(
+                        visual.bodyHandle
+                    ) ? "yes" : "no"
+                );
+
                 bool fastRotation =
                     scene->world.IsBodyFastRotationAllowed(
                         visual.bodyHandle

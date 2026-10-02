@@ -41,6 +41,9 @@ struct body
     // 가장 빠른 body point의 속도가 이 값 이하일 때 sleep timer가 증가함.
     float sleepThreshold = 0.05f;
 
+    // CCD fast-body 판정 기준. 작을수록 더 이른 속도에서 continuous 대상으로 분류됨.
+    float safetyFactor = 0.5f;
+
     // [contactId : edgeIndex] key로 연결된 첫 Contact.
     // 하위 1bit는 Contact의 어느 edge가 이 body에 연결됐는지 나타냄.
     std::int32_t headContactKey = NULL_INDEX;

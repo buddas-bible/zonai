@@ -99,6 +99,15 @@ public:
     void SetBodySleepThreshold( bodyId bodyId, float threshold );
     [[nodiscard]] float GetBodySleepThreshold( bodyId bodyId ) const;
 
+    void SetBodySafetyFactor( bodyId bodyId, float safetyFactor );
+    [[nodiscard]] float GetBodySafetyFactor( bodyId bodyId ) const;
+
+    void SetBodyBullet( bodyId bodyId, bool bullet );
+    [[nodiscard]] bool IsBodyBullet( bodyId bodyId ) const;
+
+    // 마지막 Step에서 continuous collision 후보로 분류됐는지 반환함.
+    [[nodiscard]] bool IsBodyFast( bodyId bodyId ) const;
+
 
     [[nodiscard]] float GetBodyMass( bodyId bodyId ) const;
     [[nodiscard]] float GetBodyRotationalInertia( bodyId bodyId ) const;

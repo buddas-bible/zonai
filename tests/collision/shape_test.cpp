@@ -42,6 +42,50 @@ int main()
     constexpr float epsilon = 1e-4f;
     constexpr float pi = 3.14159265358979323846f;
 
+    // CCD extent는 local center 기준 최소 두께와 최대 반경을 계산함.
+    {
+        const shapeExtent2 circleExtent =
+            ComputeShapeExtent(
+                circle2{ { 3.0f, -1.0f }, 2.0f },
+                { 1.0f, -1.0f }
+            );
+
+        assert( std::fabs( circleExtent.minExtent - 2.0f ) < epsilon );
+        assert( std::fabs( circleExtent.maxExtent - 4.0f ) < epsilon );
+
+        const shapeExtent2 capsuleExtent =
+            ComputeShapeExtent(
+                capsule2
+                {
+                    { -1.0f, 0.0f },
+                    { 1.0f, 0.0f },
+                    0.5f
+                },
+                {}
+            );
+
+        assert( std::fabs( capsuleExtent.minExtent - 0.5f ) < epsilon );
+        assert( std::fabs( capsuleExtent.maxExtent - 1.5f ) < epsilon );
+
+        const shapeExtent2 boxExtent =
+            ComputeShapeExtent(
+                MakeBox( { 2.0f, 1.0f } ),
+                {}
+            );
+
+        assert( std::fabs( boxExtent.minExtent - 1.0f ) < epsilon );
+        assert( std::fabs( boxExtent.maxExtent - std::sqrt( 5.0f ) ) < epsilon );
+
+        const shapeExtent2 segmentExtent =
+            ComputeShapeExtent(
+                segment2{ { -2.0f, 0.0f }, { 2.0f, 0.0f } },
+                {}
+            );
+
+        assert( segmentExtent.minExtent == 0.0f );
+        assert( std::fabs( segmentExtent.maxExtent - 2.0f ) < epsilon );
+    }
+
     // 원의 mass / center / center 기준 inertia.
     {
         shape circleShape{};

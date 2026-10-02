@@ -112,6 +112,8 @@ int main()
         definition.enableSleep = false;
         definition.isAwake = false;
         definition.sleepThreshold = 0.1f;
+        definition.safetyFactor = 0.2f;
+        definition.isBullet = true;
         definition.allowFastRotation = true;
 
         const bodyId bodyId =
@@ -135,7 +137,58 @@ int main()
         assert( !world.IsBodySleepEnabled( bodyId ) );
         assert( world.IsBodyAwake( bodyId ) );
         assert( std::fabs( world.GetBodySleepThreshold( bodyId ) - 0.1f ) < epsilon );
+        assert( std::fabs( world.GetBodySafetyFactor( bodyId ) - 0.2f ) < epsilon );
+        assert( world.IsBodyBullet( bodyId ) );
         assert( world.IsBodyFastRotationAllowed( bodyId ) );
+    }
+
+    // 한 Step의 이동량이 safetyFactor * minExtent를 넘으면 fast body로 분류함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        bodyDef definition{};
+        definition.type = bodyType::Dynamic;
+        definition.enableSleep = false;
+        definition.safetyFactor = 0.5f;
+
+        const bodyId bodyId =
+            world.CreateBody( definition );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f }
+        );
+
+        assert( !world.IsBodyFast( bodyId ) );
+        assert( !world.IsBodyBullet( bodyId ) );
+        assert( std::fabs( world.GetBodySafetyFactor( bodyId ) - 0.5f ) < epsilon );
+
+        world.SetBodyLinearVelocity(
+            bodyId,
+            { 10.0f, 0.0f }
+        );
+
+        world.Step( 0.1f );
+
+        // maxMotion = 1m, circle minExtent = 1m, threshold = 0.5m.
+        assert( world.IsBodyFast( bodyId ) );
+
+        world.SetBodySafetyFactor(
+            bodyId,
+            2.0f
+        );
+
+        world.SetBodyBullet(
+            bodyId,
+            true
+        );
+
+        world.Step( 0.1f );
+
+        assert( !world.IsBodyFast( bodyId ) );
+        assert( world.IsBodyBullet( bodyId ) );
+        assert( std::fabs( world.GetBodySafetyFactor( bodyId ) - 2.0f ) < epsilon );
     }
 
     // BodyState는 non-static body의 선속도 / 각속도를 보관함.

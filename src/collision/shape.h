@@ -26,6 +26,12 @@ using shapeGeometry =
         segment2
     >;
 
+struct shapeExtent2
+{
+    float minExtent = 0.0f;
+    float maxExtent = 0.0f;
+};
+
 struct shape
 {
     static constexpr std::int32_t NULL_INDEX = -1;
@@ -71,6 +77,11 @@ struct shape
 aabb2 ComputeShapeAABB(
     const shapeGeometry& geometry,
     const transform2& transform );
+
+// localCenter 기준으로 CCD에 사용할 최소 / 최대 shape extent를 계산함.
+shapeExtent2 ComputeShapeExtent(
+    const shapeGeometry& geometry,
+    const vec2& localCenter );
 
 // shape geometry와 density로 local-space 질량 특성을 계산함.
 massData2 ComputeShapeMass( const shape& shape );

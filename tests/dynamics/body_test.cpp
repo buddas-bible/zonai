@@ -1,4 +1,5 @@
 #include <cassert>
+#include <limits>
 
 #include "dynamics/body.h"
 #include "dynamics/bodyDef.h"
@@ -25,6 +26,8 @@ int main()
         assert( definition.enableSleep );
         assert( definition.isAwake );
         assert( definition.sleepThreshold == 0.05f );
+        assert( definition.safetyFactor == 0.5f );
+        assert( !definition.isBullet );
         assert( !definition.allowFastRotation );
     }
 
@@ -42,6 +45,7 @@ int main()
         assert( body.contactCount == 0 );
         assert( body.headShapeId == body::NULL_INDEX );
         assert( body.shapeCount == 0 );
+        assert( body.safetyFactor == 0.5f );
 
     }
 
@@ -78,7 +82,11 @@ int main()
         assert( bodySim.linearDamping == 0.0f );
         assert( bodySim.angularDamping == 0.0f );
         assert( bodySim.gravityScale == 1.0f );
+        assert( !bodySim.isBullet );
+        assert( !bodySim.isFast );
         assert( !bodySim.allowFastRotation );
+        assert( bodySim.minExtent == std::numeric_limits<float>::max() );
+        assert( bodySim.maxExtent == 0.0f );
 
         bodySim.bodyId = 7;
         bodySim.transform.position = { 3.0f, -2.0f };
