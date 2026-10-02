@@ -24,24 +24,63 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            sandbox: "ON"
+
+          - name: Ubuntu
+            os: ubuntu-latest
+            sandbox: "OFF"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure
+      - name: Install CMake 4.2
+        if: runner.os == 'Linux'
+        run: python3 -m pip install "cmake>=4.2,<4.3"
+
+      - name: Configure Windows
+        if: runner.os == 'Windows'
         run: >
           cmake
           -S .
           -B build
           -G "Visual Studio 18 2026"
           -A x64
-          -DZONAI_BUILD_SANDBOX=ON
+          -DZONAI_BUILD_SANDBOX=${{ matrix.sandbox }}
           -DZONAI_BUILD_TESTS=ON
 
-      - name: Build
+      - name: Configure Ubuntu
+        if: runner.os == 'Linux'
+        run: >
+          cmake
+          -S .
+          -B build
+          -DZONAI_BUILD_SANDBOX=${{ matrix.sandbox }}
+          -DZONAI_BUILD_TESTS=ON
+          -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build Windows
+        if: runner.os == 'Windows'
         run: cmake --build build --config Debug --parallel
 
-      - name: Test
+      - name: Build Ubuntu
+        if: runner.os == 'Linux'
+        run: cmake --build build --parallel 2
+
+      - name: Test Windows
+        if: runner.os == 'Windows'
         run: ctest --test-dir build -C Debug --output-on-failure
+
+      - name: Test Ubuntu
+        if: runner.os == 'Linux'
+        run: ctest --test-dir build --output-on-failure
