@@ -432,11 +432,7 @@ void SolveContactConstraint( contactConstraint2& constraint, bodyState& bodyStat
 }
 
 
-void ApplyRestitutionContactConstraint(
-    contactConstraint2& constraint,
-    bodyState& bodyStateA,
-    bodyState& bodyStateB,
-    float threshold )
+void ApplyRestitutionContactConstraint( contactConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB, float threshold )
 {
     assert( std::isfinite( threshold ) );
     assert( threshold >= 0.0f );
@@ -467,13 +463,17 @@ void ApplyRestitutionContactConstraint(
         * restitutionImpulse는 이미 반발에 사용한 impulse를 따로 추적해서
         * 여러 restitution iteration이 같은 압축량으로 에너지를 반복해서 만들지 않게 함.
         */
+
+		// 압축 임펄스 = 이번 step에서 만들어진 normal impulse - 이미 restitution에 사용한 impulse
         const float compressionImpulse = point.totalNormalImpulse - point.restitutionImpulse;
 
-        const bool armed =
-            point.relativeNormalVelocity < -threshold &&
-            compressionImpulse > 0.0f;
+		// threshold보다 빠르게 접근 중이고, 이번 step에서 압축 impulse가 만들어졌다면
+        const bool armed = ( point.relativeNormalVelocity < -threshold ) && ( compressionImpulse > 0.0f );
 
         float velocityBias = 0.0f;
+
+        const vec2& r_a = point.anchorA;
+        const vec2& r_b = point.anchorB;
 
         if( armed )
         {
@@ -483,7 +483,7 @@ void ApplyRestitutionContactConstraint(
         else
         {
             // restitution이 발동하지 않은 point도 speculative constraint는 유지함.
-            const vec2 ds = dp + Rotate( dqB, point.anchorB ) - Rotate( dqA, point.anchorA );
+            const vec2 ds = dp + Rotate( dqB, r_b ) - Rotate( dqA, r_a );
 
             const float separation = point.baseSeparation + Dot( ds, constraint.normal );
 
@@ -492,9 +492,10 @@ void ApplyRestitutionContactConstraint(
                 velocityBias = separation * constraint.invTimeStep;
             }
         }
-
-        const vec2 v_p1 = v_a + Cross( w_a, point.anchorA );
-        const vec2 v_p2 = v_b + Cross( w_b, point.anchorB );
+        
+        // 작용점에서의 현재 normal 방향 상대속도
+        const vec2 v_p1 = v_a + Cross( w_a, r_a );
+        const vec2 v_p2 = v_b + Cross( w_b, r_b );
         const vec2 v_r = v_p2 - v_p1;
 
         const float normalVelocity = Dot( v_r, constraint.normal );
@@ -553,6 +554,7 @@ void ApplyRestitutionContactConstraint(
         w_b += dw_b;
     }
 
+	// 속도 변화를 bodyState에 반영함.
     bodyStateA.linearVelocity = v_a;
     bodyStateA.angularVelocity = w_a;
 
