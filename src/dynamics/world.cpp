@@ -2654,8 +2654,19 @@ void world::UpdateSensors()
 
         std::vector<sensorVisitor2> newOverlaps;
         newOverlaps.reserve(
-            sensor.overlaps.size()
+            sensor.overlaps.size() +
+            sensor.hits.size()
         );
+
+        // Continuous pass에서 지나간 visitor도 이번 Step의 overlap state에 한 번 포함함.
+        // 최종 위치에서도 실제로 겹치면 아래 tree query 결과와 중복되지만 정렬 후 제거됨.
+        newOverlaps.insert(
+            newOverlaps.end(),
+            sensor.hits.begin(),
+            sensor.hits.end()
+        );
+
+        sensor.hits.clear();
 
         const shapeProxy2 sensorProxy =
             MakeShapeProxy(
@@ -3038,6 +3049,18 @@ void world::SolveContinuousBody(
 
     float hitFraction = 1.0f;
 
+    struct continuousSensorHit2
+    {
+        std::int32_t sensorShapeIndex = shape::NULL_INDEX;
+        sensorVisitor2 visitor{};
+        float fraction = 1.0f;
+    };
+
+    std::vector<continuousSensorHit2> sensorHits;
+    sensorHits.reserve(
+        MAX_CONTINUOUS_SENSOR_HITS
+    );
+
     const auto testCandidate =
         [&]( std::int32_t fastShapeIndex,
              std::int32_t otherShapeIndex )
@@ -3059,15 +3082,23 @@ void world::SolveContinuousBody(
                 shapes_[otherShapeIndex];
 
             if( otherShape.bodyId == shape::NULL_INDEX ||
-                otherShape.bodyId == bodyIndex ||
-                otherShape.sensorIndex != shape::NULL_INDEX )
+                otherShape.bodyId == bodyIndex )
             {
                 return;
             }
 
             if( !ShouldShapesCollide(
                     fastShape.filter,
-                    otherShape.filter ) ||
+                    otherShape.filter ) )
+            {
+                return;
+            }
+
+            const bool isSensor =
+                otherShape.sensorIndex !=
+                shape::NULL_INDEX;
+
+            if( !isSensor &&
                 !CanCollideShapes(
                     fastShape.geometry,
                     otherShape.geometry ) )
@@ -3125,6 +3156,31 @@ void world::SolveContinuousBody(
 
             const toiOutput2 output =
                 TimeOfImpact( input );
+
+            if( isSensor )
+            {
+                // Sensor는 fast body의 motion을 자르지 않음.
+                // 현재 solid TOI보다 앞선 crossing 후보만 작은 fixed budget 안에서 보관함.
+                if( output.fraction <= hitFraction &&
+                    sensorHits.size() <
+                        static_cast<std::size_t>(
+                            MAX_CONTINUOUS_SENSOR_HITS
+                        ) )
+                {
+                    sensorHits.push_back(
+                        {
+                            otherShapeIndex,
+                            {
+                                fastShapeIndex,
+                                fastShape.generation
+                            },
+                            output.fraction
+                        }
+                    );
+                }
+
+                return;
+            }
 
             // fraction 0은 이미 존재하던 overlap / touching Contact가 처리함.
             if( output.state == toiState2::Hit &&
@@ -3208,6 +3264,47 @@ void world::SolveContinuousBody(
 
         fastShapeIndex =
             nextShapeIndex;
+    }
+
+    // 최종 solid hit보다 먼저 지나간 Sensor만 publish함.
+    // solid 충돌 뒤쪽의 Sensor는 실제 body가 거기까지 도달하지 않으므로 버림.
+    for( const continuousSensorHit2& sensorHit :
+         sensorHits )
+    {
+        if( sensorHit.fraction >=
+            hitFraction )
+        {
+            continue;
+        }
+
+        assert( sensorHit.sensorShapeIndex >= 0 );
+        assert(
+            static_cast<std::size_t>(
+                sensorHit.sensorShapeIndex
+            ) <
+            shapes_.size()
+        );
+
+        const shape& sensorShape =
+            shapes_[sensorHit.sensorShapeIndex];
+
+        assert(
+            sensorShape.sensorIndex !=
+            shape::NULL_INDEX
+        );
+
+        assert( sensorShape.sensorIndex >= 0 );
+        assert(
+            static_cast<std::size_t>(
+                sensorShape.sensorIndex
+            ) <
+            sensors_.size()
+        );
+
+        sensors_[sensorShape.sensorIndex]
+            .hits.push_back(
+                sensorHit.visitor
+            );
     }
 
     if( hitFraction >= 1.0f )

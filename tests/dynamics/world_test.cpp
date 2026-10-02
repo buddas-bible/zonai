@@ -3963,5 +3963,335 @@ int main()
         );
     }
 
+    // Fast body가 한 Step 안에 Sensor를 완전히 통과해도 CCD hit으로 Begin을 놓치지 않음.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId sensorBody =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        const shapeId sensorShape =
+            world.CreateSensorShape(
+                sensorBody,
+                circle2{ {}, 1.0f }
+            );
+
+        bodyDef visitorDefinition{};
+        visitorDefinition.type =
+            bodyType::Dynamic;
+
+        visitorDefinition.transform.position =
+            { -5.0f, 0.0f };
+
+        visitorDefinition.linearVelocity =
+            { 100.0f, 0.0f };
+
+        visitorDefinition.enableSleep = false;
+
+        const bodyId visitorBody =
+            world.CreateBody(
+                visitorDefinition
+            );
+
+        const shapeId visitorShape =
+            world.CreateShape(
+                visitorBody,
+                circle2{ {}, 0.25f }
+            );
+
+        world.Step( 0.1f );
+
+        // 시작/끝 위치 모두 sensor 밖이지만 sweep 도중 실제로 통과함.
+        assert(
+            world.GetBodyTransform(
+                visitorBody
+            ).position.x > 4.9f
+        );
+
+        assert(
+            world.IsBodyFast(
+                visitorBody
+            )
+        );
+
+        // Sensor는 solid TOI가 아니므로 body motion을 자르지 않음.
+        assert(
+            !world.HadBodyTimeOfImpact(
+                visitorBody
+            )
+        );
+
+        assert( world.GetContactCount() == 0 );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 1
+        );
+
+        assert(
+            world.GetSensorBeginEvents().size() == 1
+        );
+
+        assert(
+            world.GetSensorBeginEvents()[0]
+                .sensorShapeId ==
+            sensorShape
+        );
+
+        assert(
+            world.GetSensorBeginEvents()[0]
+                .visitorShapeId ==
+            visitorShape
+        );
+
+        // 최종 위치에서는 실제 overlap이 없으므로 다음 update에서 transient hit가 End로 전환됨.
+        world.Step( 0.0f );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 0
+        );
+
+        assert(
+            world.GetSensorBeginEvents().empty()
+        );
+
+        assert(
+            world.GetSensorEndEvents().size() == 1
+        );
+
+        assert(
+            world.GetSensorEndEvents()[0]
+                .visitorShapeId ==
+            visitorShape
+        );
+    }
+
+    // Continuous collision을 끄면 동일한 fast pass-through는 최종 overlap query만으로는 감지되지 않음.
+    {
+        world world{};
+        world.SetGravity( {} );
+        world.SetContinuousEnabled( false );
+
+        const bodyId sensorBody =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        const shapeId sensorShape =
+            world.CreateSensorShape(
+                sensorBody,
+                circle2{ {}, 1.0f }
+            );
+
+        bodyDef visitorDefinition{};
+        visitorDefinition.type =
+            bodyType::Dynamic;
+
+        visitorDefinition.transform.position =
+            { -5.0f, 0.0f };
+
+        visitorDefinition.linearVelocity =
+            { 100.0f, 0.0f };
+
+        visitorDefinition.enableSleep = false;
+
+        const bodyId visitorBody =
+            world.CreateBody(
+                visitorDefinition
+            );
+
+        (void)world.CreateShape(
+            visitorBody,
+            circle2{ {}, 0.25f }
+        );
+
+        world.Step( 0.1f );
+
+        assert(
+            world.IsBodyFast(
+                visitorBody
+            )
+        );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 0
+        );
+
+        assert(
+            world.GetSensorBeginEvents().empty()
+        );
+
+        assert(
+            world.GetSensorEndEvents().empty()
+        );
+    }
+
+    // Solid TOI보다 뒤에서 발생한 Sensor crossing은 실제 body가 도달하지 않으므로 버림.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId wallBody =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        (void)world.CreateShape(
+            wallBody,
+            MakeBox(
+                { 0.05f, 2.0f }
+            )
+        );
+
+        const bodyId sensorBody =
+            world.CreateBody(
+                bodyType::Static,
+                {
+                    { 3.0f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId sensorShape =
+            world.CreateSensorShape(
+                sensorBody,
+                circle2{ {}, 0.5f }
+            );
+
+        bodyDef visitorDefinition{};
+        visitorDefinition.type =
+            bodyType::Dynamic;
+
+        visitorDefinition.transform.position =
+            { -5.0f, 0.0f };
+
+        visitorDefinition.linearVelocity =
+            { 100.0f, 0.0f };
+
+        visitorDefinition.enableSleep = false;
+
+        const bodyId visitorBody =
+            world.CreateBody(
+                visitorDefinition
+            );
+
+        (void)world.CreateShape(
+            visitorBody,
+            circle2{ {}, 0.25f }
+        );
+
+        world.Step( 0.1f );
+
+        assert(
+            world.HadBodyTimeOfImpact(
+                visitorBody
+            )
+        );
+
+        assert(
+            world.GetBodyTransform(
+                visitorBody
+            ).position.x < -0.25f
+        );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 0
+        );
+
+        assert(
+            world.GetSensorBeginEvents().empty()
+        );
+    }
+
+    // Solid TOI보다 앞에서 통과한 Sensor는 body가 실제로 지나온 경로이므로 기록함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId sensorBody =
+            world.CreateBody(
+                bodyType::Static,
+                {
+                    { -2.0f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId sensorShape =
+            world.CreateSensorShape(
+                sensorBody,
+                circle2{ {}, 0.5f }
+            );
+
+        const bodyId wallBody =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        (void)world.CreateShape(
+            wallBody,
+            MakeBox(
+                { 0.05f, 2.0f }
+            )
+        );
+
+        bodyDef visitorDefinition{};
+        visitorDefinition.type =
+            bodyType::Dynamic;
+
+        visitorDefinition.transform.position =
+            { -5.0f, 0.0f };
+
+        visitorDefinition.linearVelocity =
+            { 100.0f, 0.0f };
+
+        visitorDefinition.enableSleep = false;
+
+        const bodyId visitorBody =
+            world.CreateBody(
+                visitorDefinition
+            );
+
+        const shapeId visitorShape =
+            world.CreateShape(
+                visitorBody,
+                circle2{ {}, 0.25f }
+            );
+
+        world.Step( 0.1f );
+
+        assert(
+            world.HadBodyTimeOfImpact(
+                visitorBody
+            )
+        );
+
+        assert(
+            world.GetShapeSensorCapacity(
+                sensorShape
+            ) == 1
+        );
+
+        assert(
+            world.GetSensorBeginEvents().size() == 1
+        );
+
+        assert(
+            world.GetSensorBeginEvents()[0]
+                .visitorShapeId ==
+            visitorShape
+        );
+    }
+
     return 0;
 }
