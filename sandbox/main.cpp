@@ -296,6 +296,24 @@ struct shapeColors
     ImU32 fill = 0;
 };
 
+const char* GetBodyTypeName( bodyType type )
+{
+    switch( type )
+    {
+    case bodyType::Static:
+        return "Static";
+
+    case bodyType::Kinematic:
+        return "Kinematic";
+
+    case bodyType::Dynamic:
+        return "Dynamic";
+
+    default:
+        return "Unknown";
+    }
+}
+
 shapeColors GetShapeColors( bodyType type, bool awake )
 {
     if( type == bodyType::Dynamic && !awake )
@@ -508,6 +526,9 @@ int main()
     bool showTreeInternal = true;
     bool showTreeLabels = false;
 
+    int subStepCount = 1;
+    int selectedShapeIndex = 2;
+
     constexpr float FIXED_TIME_STEP =
         1.0f / 60.0f;
 
@@ -568,7 +589,8 @@ int main()
                    frameStepCount < MAX_STEPS_PER_FRAME )
             {
                 scene->world.Step(
-                    FIXED_TIME_STEP
+                    FIXED_TIME_STEP,
+                    subStepCount
                 );
 
                 accumulator -= FIXED_TIME_STEP;
@@ -615,7 +637,7 @@ int main()
 
         ImGui::BeginChild(
             "Controls",
-            ImVec2( 270.0f, 0.0f ),
+            ImVec2( 340.0f, 0.0f ),
             true
         );
 
@@ -638,7 +660,8 @@ int main()
             ImVec2( 72.0f, 0.0f ) ) )
         {
             scene->world.Step(
-                FIXED_TIME_STEP
+                FIXED_TIME_STEP,
+                subStepCount
             );
 
             ++stepCount;
@@ -663,6 +686,7 @@ int main()
             accumulator = 0.0f;
             stepCount = 0;
             playing = false;
+            selectedShapeIndex = 2;
 
             RefreshContacts(
                 *scene,
@@ -697,6 +721,41 @@ int main()
             );
         }
 
+        ImGui::SliderInt(
+            "Sub-steps",
+            &subStepCount,
+            1,
+            16
+        );
+
+        float maximumLinearSpeed =
+            scene->world.GetMaximumLinearSpeed();
+
+        if( ImGui::DragFloat(
+            "Max linear speed",
+            &maximumLinearSpeed,
+            1.0f,
+            1.0f,
+            1000.0f,
+            "%.1f m/s" ) )
+        {
+            scene->world.SetMaximumLinearSpeed(
+                maximumLinearSpeed
+            );
+        }
+
+        bool sleepingEnabled =
+            scene->world.IsSleepingEnabled();
+
+        if( ImGui::Checkbox(
+            "Enable sleeping",
+            &sleepingEnabled ) )
+        {
+            scene->world.SetSleepingEnabled(
+                sleepingEnabled
+            );
+        }
+
         ImGui::Text(
             "Fixed dt: %.5f s",
             FIXED_TIME_STEP
@@ -705,6 +764,372 @@ int main()
             "Steps: %llu",
             static_cast<unsigned long long>( stepCount )
         );
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextUnformatted(
+            "Object Inspector"
+        );
+
+        if( !scene->shapes.empty() )
+        {
+            selectedShapeIndex =
+                std::clamp(
+                    selectedShapeIndex,
+                    0,
+                    static_cast<int>( scene->shapes.size() ) - 1
+                );
+
+            const visualShape& selectedVisual =
+                scene->shapes[selectedShapeIndex];
+
+            if( ImGui::BeginCombo(
+                "Object",
+                selectedVisual.label ) )
+            {
+                for( int i = 0;
+                     i < static_cast<int>( scene->shapes.size() );
+                     ++i )
+                {
+                    const bool selected =
+                        i == selectedShapeIndex;
+
+                    if( ImGui::Selectable(
+                        scene->shapes[i].label,
+                        selected ) )
+                    {
+                        selectedShapeIndex = i;
+                    }
+
+                    if( selected )
+                    {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+
+                ImGui::EndCombo();
+            }
+
+            const visualShape& visual =
+                scene->shapes[selectedShapeIndex];
+
+            const body& bodyRef =
+                scene->world.GetBody(
+                    visual.bodyHandle
+                );
+
+            ImGui::Text(
+                "Body type: %s",
+                GetBodyTypeName( bodyRef.type )
+            );
+
+            transform2 transform =
+                scene->world.GetBodyTransform(
+                    visual.bodyHandle
+                );
+
+            float position[2]
+            {
+                transform.position.x,
+                transform.position.y
+            };
+
+            bool transformChanged = false;
+
+            if( ImGui::DragFloat2(
+                "Position",
+                position,
+                0.05f,
+                -100.0f,
+                100.0f,
+                "%.2f" ) )
+            {
+                transform.position =
+                {
+                    position[0],
+                    position[1]
+                };
+
+                transformChanged = true;
+            }
+
+            float rotation =
+                std::atan2(
+                    transform.rotation.s,
+                    transform.rotation.c
+                );
+
+            if( ImGui::DragFloat(
+                "Rotation",
+                &rotation,
+                0.01f,
+                -3.14159265f,
+                3.14159265f,
+                "%.3f rad" ) )
+            {
+                transform.rotation =
+                    rot2::FromRadians(
+                        rotation
+                    );
+
+                transformChanged = true;
+            }
+
+            if( transformChanged )
+            {
+                scene->world.SetBodyTransform(
+                    visual.bodyHandle,
+                    transform
+                );
+
+                RefreshContacts(
+                    *scene,
+                    contacts
+                );
+            }
+
+            if( bodyRef.type != bodyType::Static )
+            {
+                vec2 linearVelocity =
+                    scene->world.GetBodyLinearVelocity(
+                        visual.bodyHandle
+                    );
+
+                float velocity[2]
+                {
+                    linearVelocity.x,
+                    linearVelocity.y
+                };
+
+                if( ImGui::DragFloat2(
+                    "Linear velocity",
+                    velocity,
+                    0.05f,
+                    -100.0f,
+                    100.0f,
+                    "%.2f" ) )
+                {
+                    scene->world.SetBodyLinearVelocity(
+                        visual.bodyHandle,
+                        {
+                            velocity[0],
+                            velocity[1]
+                        }
+                    );
+                }
+
+                float angularVelocity =
+                    scene->world.GetBodyAngularVelocity(
+                        visual.bodyHandle
+                    );
+
+                if( ImGui::DragFloat(
+                    "Angular velocity",
+                    &angularVelocity,
+                    0.05f,
+                    -100.0f,
+                    100.0f,
+                    "%.2f rad/s" ) )
+                {
+                    scene->world.SetBodyAngularVelocity(
+                        visual.bodyHandle,
+                        angularVelocity
+                    );
+                }
+
+                float linearDamping =
+                    scene->world.GetBodyLinearDamping(
+                        visual.bodyHandle
+                    );
+
+                if( ImGui::DragFloat(
+                    "Linear damping",
+                    &linearDamping,
+                    0.05f,
+                    0.0f,
+                    20.0f,
+                    "%.2f" ) )
+                {
+                    scene->world.SetBodyLinearDamping(
+                        visual.bodyHandle,
+                        linearDamping
+                    );
+                }
+
+                float angularDamping =
+                    scene->world.GetBodyAngularDamping(
+                        visual.bodyHandle
+                    );
+
+                if( ImGui::DragFloat(
+                    "Angular damping",
+                    &angularDamping,
+                    0.05f,
+                    0.0f,
+                    20.0f,
+                    "%.2f" ) )
+                {
+                    scene->world.SetBodyAngularDamping(
+                        visual.bodyHandle,
+                        angularDamping
+                    );
+                }
+
+                float gravityScale =
+                    scene->world.GetBodyGravityScale(
+                        visual.bodyHandle
+                    );
+
+                if( ImGui::DragFloat(
+                    "Gravity scale",
+                    &gravityScale,
+                    0.05f,
+                    -10.0f,
+                    10.0f,
+                    "%.2f" ) )
+                {
+                    scene->world.SetBodyGravityScale(
+                        visual.bodyHandle,
+                        gravityScale
+                    );
+                }
+
+                bool awake =
+                    scene->world.IsBodyAwake(
+                        visual.bodyHandle
+                    );
+
+                if( ImGui::Checkbox(
+                    "Awake",
+                    &awake ) )
+                {
+                    scene->world.SetBodyAwake(
+                        visual.bodyHandle,
+                        awake
+                    );
+                }
+
+                bool sleepEnabled =
+                    scene->world.IsBodySleepEnabled(
+                        visual.bodyHandle
+                    );
+
+                if( ImGui::Checkbox(
+                    "Body sleep",
+                    &sleepEnabled ) )
+                {
+                    scene->world.SetBodySleepEnabled(
+                        visual.bodyHandle,
+                        sleepEnabled
+                    );
+                }
+
+                float sleepThreshold =
+                    scene->world.GetBodySleepThreshold(
+                        visual.bodyHandle
+                    );
+
+                if( ImGui::DragFloat(
+                    "Sleep threshold",
+                    &sleepThreshold,
+                    0.005f,
+                    0.0f,
+                    5.0f,
+                    "%.3f m/s" ) )
+                {
+                    scene->world.SetBodySleepThreshold(
+                        visual.bodyHandle,
+                        sleepThreshold
+                    );
+                }
+
+                bool fastRotation =
+                    scene->world.IsBodyFastRotationAllowed(
+                        visual.bodyHandle
+                    );
+
+                if( ImGui::Checkbox(
+                    "Allow fast rotation",
+                    &fastRotation ) )
+                {
+                    scene->world.SetBodyFastRotationAllowed(
+                        visual.bodyHandle,
+                        fastRotation
+                    );
+                }
+            }
+
+            float density =
+                scene->world.GetShapeDensity(
+                    visual.shapeHandle
+                );
+
+            if( ImGui::DragFloat(
+                "Density",
+                &density,
+                0.05f,
+                0.0f,
+                100.0f,
+                "%.2f" ) )
+            {
+                scene->world.SetShapeDensity(
+                    visual.shapeHandle,
+                    density
+                );
+            }
+
+            float friction =
+                scene->world.GetShapeFriction(
+                    visual.shapeHandle
+                );
+
+            if( ImGui::DragFloat(
+                "Friction",
+                &friction,
+                0.02f,
+                0.0f,
+                5.0f,
+                "%.2f" ) )
+            {
+                scene->world.SetShapeFriction(
+                    visual.shapeHandle,
+                    friction
+                );
+            }
+
+            float restitution =
+                scene->world.GetShapeRestitution(
+                    visual.shapeHandle
+                );
+
+            if( ImGui::DragFloat(
+                "Restitution",
+                &restitution,
+                0.02f,
+                0.0f,
+                2.0f,
+                "%.2f" ) )
+            {
+                scene->world.SetShapeRestitution(
+                    visual.shapeHandle,
+                    restitution
+                );
+            }
+
+            ImGui::Text(
+                "Mass: %.3f",
+                scene->world.GetBodyMass(
+                    visual.bodyHandle
+                )
+            );
+
+            ImGui::Text(
+                "Inertia: %.3f",
+                scene->world.GetBodyRotationalInertia(
+                    visual.bodyHandle
+                )
+            );
+        }
 
         ImGui::Spacing();
         ImGui::Separator();
