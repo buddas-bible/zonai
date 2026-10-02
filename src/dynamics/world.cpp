@@ -573,13 +573,33 @@ void world::SyncBodyProxies( std::int32_t bodyIndex )
     assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
     assert( bodySims_.size() == bodies_.size() );
 
-    const body& body = bodies_[bodyIndex];
-    const bodySim& bodySim = bodySims_[bodyIndex];
+    const bodySim& bodySim =
+        bodySims_[bodyIndex];
 
-    assert( body.bodyId == bodyIndex );
     assert( bodySim.bodyId == bodyIndex );
 
-    std::int32_t shapeId = body.headShapeId;
+    UpdateBodyProxyBounds(
+        bodyIndex,
+        bodySim.transform
+    );
+}
+
+void world::UpdateBodyProxyBounds(
+    std::int32_t bodyIndex,
+    const transform2& transform )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+    assert( fatAABBs_.size() == shapes_.size() );
+
+    const body& body =
+        bodies_[bodyIndex];
+
+    assert( body.bodyId == bodyIndex );
+
+    std::int32_t shapeId =
+        body.headShapeId;
+
     std::int32_t visitedCount = 0;
 
     while( shapeId != body::NULL_INDEX )
@@ -588,14 +608,15 @@ void world::SyncBodyProxies( std::int32_t bodyIndex )
         assert( static_cast<std::size_t>( shapeId ) < shapes_.size() );
         assert( visitedCount < body.shapeCount );
 
-        shape& shape = shapes_[shapeId];
+        shape& shape =
+            shapes_[shapeId];
 
         assert( shape.bodyId == bodyIndex );
 
         const aabb2 tightAABB =
             ComputeShapeAABB(
                 shape.geometry,
-                bodySim.transform
+                transform
             );
 
         shape.aabb =
@@ -604,42 +625,69 @@ void world::SyncBodyProxies( std::int32_t bodyIndex )
                 SPECULATIVE_DISTANCE
             );
 
-        assert( fatAABBs_.size() == shapes_.size() );
-
         aabb2& fatAABB =
             fatAABBs_[shapeId];
 
-        // 현재 speculative bounds가 기존 fat bounds 안에 있으면 tree를 건드리지 않음.
-        if( ContainsAABB(
+        if( !ContainsAABB(
                 fatAABB,
                 shape.aabb ) )
         {
-            shapeId = shape.nextShapeId;
-            ++visitedCount;
-            continue;
+            const float fatMargin =
+                body.type == bodyType::Static ?
+                    SPECULATIVE_DISTANCE :
+                    shape.aabbMargin;
+
+            const aabb2 newFatAABB =
+                ExpandAABB(
+                    shape.aabb,
+                    fatMargin
+                );
+
+            fatAABB =
+                newFatAABB;
+
+            if( shape.proxyKey != shape::NULL_INDEX )
+            {
+                const dynamicTree& tree =
+                    broadPhase_.GetTree(
+                        GetProxyType(
+                            shape.proxyKey
+                        )
+                    );
+
+                const aabb2& treeAABB =
+                    tree.GetProxyAABB(
+                        GetProxyId(
+                            shape.proxyKey
+                        )
+                    );
+
+                // 회전이나 geometry 변화처럼 새 fat bounds가 기존 tree bounds를
+                // 완전히 포함한다면 topology를 건드리지 않고 bounds만 확장함.
+                if( ContainsAABB(
+                        newFatAABB,
+                        treeAABB ) )
+                {
+                    broadPhase_.EnlargeProxy(
+                        shape.proxyKey,
+                        newFatAABB
+                    );
+                }
+                else
+                {
+                    // translation처럼 기존 bounds를 포함하지 않는 이동은
+                    // 현재 tree 구현에서는 leaf를 새 위치로 재배치함.
+                    broadPhase_.MoveProxy(
+                        shape.proxyKey,
+                        newFatAABB
+                    );
+                }
+            }
         }
 
-        const float fatMargin =
-            body.type == bodyType::Static ?
-                SPECULATIVE_DISTANCE :
-                shape.aabbMargin;
+        shapeId =
+            shape.nextShapeId;
 
-        fatAABB =
-            ExpandAABB(
-                shape.aabb,
-                fatMargin
-            );
-
-        // fat bounds를 벗어난 경우에만 새 pair 탐색 대상으로 proxy를 갱신함.
-        if( shape.proxyKey != shape::NULL_INDEX )
-        {
-            broadPhase_.MoveProxy(
-                shape.proxyKey,
-                fatAABB
-            );
-        }
-
-        shapeId = shape.nextShapeId;
         ++visitedCount;
     }
 
@@ -2132,7 +2180,8 @@ void world::Step( float timeStep, int subStepCount )
         // -----------------------------------------------------
         if( continuousEnabled_ )
         {
-            // 일반 fast body는 Box2D처럼 static geometry에 대해서만 CCD를 수행함.
+            // 일반 fast body는 먼저 static geometry에 대해서만 CCD를 수행함.
+            // 이 결과로 delta transform이 잘릴 수 있으므로 proxy finalize보다 먼저 처리함.
             for( const island2& island : islandGraph.islands )
             {
                 const std::span<const std::int32_t> bodyIds =
@@ -2140,7 +2189,8 @@ void world::Step( float timeStep, int subStepCount )
 
                 for( const std::int32_t bodyIndex : bodyIds )
                 {
-                    const bodySim& sim = bodySims_[bodyIndex];
+                    const bodySim& sim =
+                        bodySims_[bodyIndex];
 
                     if( sim.isFast &&
                         !sim.isBullet )
@@ -2153,7 +2203,43 @@ void world::Step( float timeStep, int subStepCount )
                 }
             }
 
-            // Bullet은 다른 bullet을 제외한 kinematic / dynamic body까지 추가로 검사함.
+            // Bullet을 처리하기 전에 non-bullet world의 이번 Step 최종 bounds를
+            // Dynamic Tree에 반영함. Bullet은 이 tree를 query해 moving target도 찾음.
+            for( const std::int32_t bodyIndex :
+                 islandGraph.bodyIds )
+            {
+                const bodySim& sim =
+                    bodySims_[bodyIndex];
+
+                const bodyState& state =
+                    bodyStates_[bodyIndex];
+
+                if( sim.isFast &&
+                    sim.isBullet )
+                {
+                    continue;
+                }
+
+                const sweep2 pendingSweep
+                {
+                    sim.localCenter,
+                    sim.center,
+                    sim.center + state.deltaPosition,
+                    sim.transform.rotation,
+                    state.deltaRotation * sim.transform.rotation
+                };
+
+                UpdateBodyProxyBounds(
+                    bodyIndex,
+                    GetSweepTransform(
+                        pendingSweep,
+                        1.0f
+                    )
+                );
+            }
+
+            // Bullet은 refit된 static / kinematic / dynamic tree를 query함.
+            // 다른 bullet은 순서 의존성을 피하기 위해 candidate에서 제외함.
             for( const island2& island : islandGraph.islands )
             {
                 const std::span<const std::int32_t> bodyIds =
@@ -2161,7 +2247,8 @@ void world::Step( float timeStep, int subStepCount )
 
                 for( const std::int32_t bodyIndex : bodyIds )
                 {
-                    const bodySim& sim = bodySims_[bodyIndex];
+                    const bodySim& sim =
+                        bodySims_[bodyIndex];
 
                     if( sim.isFast &&
                         sim.isBullet )
@@ -2169,6 +2256,26 @@ void world::Step( float timeStep, int subStepCount )
                         SolveContinuousBody(
                             bodyIndex,
                             timeStep
+                        );
+
+                        const bodyState& state =
+                            bodyStates_[bodyIndex];
+
+                        const sweep2 pendingSweep
+                        {
+                            sim.localCenter,
+                            sim.center,
+                            sim.center + state.deltaPosition,
+                            sim.transform.rotation,
+                            state.deltaRotation * sim.transform.rotation
+                        };
+
+                        UpdateBodyProxyBounds(
+                            bodyIndex,
+                            GetSweepTransform(
+                                pendingSweep,
+                                1.0f
+                            )
                         );
                     }
                 }
@@ -2431,73 +2538,37 @@ void world::SolveContinuousBody(
 
             if( fastSim.isBullet )
             {
-                // 현재 Zonai는 moving proxy의 swept bounds를 tree에 미리 enlarge하는
-                // finalize stage가 아직 없음. 따라서 moving 상대를 놓치지 않도록
-                // kinematic / dynamic shape는 swept AABB로 한 번 더 거른 뒤 TOI를 수행함.
-                for( std::int32_t otherShapeIndex = 0;
-                     otherShapeIndex < static_cast<std::int32_t>( shapes_.size() );
-                     ++otherShapeIndex )
-                {
-                    const shape& otherShape =
-                        shapes_[otherShapeIndex];
-
-                    if( otherShape.bodyId == shape::NULL_INDEX ||
-                        otherShape.bodyId == bodyIndex )
+                const auto queryMovingTree =
+                    [&]( bodyType type )
                     {
-                        continue;
-                    }
+                        const dynamicTree& tree =
+                            broadPhase_.GetTree(
+                                type
+                            );
 
-                    const body& otherBody =
-                        bodies_[otherShape.bodyId];
+                        tree.Query(
+                            sweptAABB,
+                            [&]( std::int32_t proxyId )
+                            {
+                                testCandidate(
+                                    fastShapeIndex,
+                                    tree.GetProxyShapeIndex(
+                                        proxyId
+                                    )
+                                );
 
-                    if( otherBody.type == bodyType::Static )
-                    {
-                        continue;
-                    }
-
-                    const bodySim& otherSim =
-                        bodySims_[otherShape.bodyId];
-
-                    if( otherSim.isBullet )
-                    {
-                        continue;
-                    }
-
-                    const bodyState& otherState =
-                        bodyStates_[otherShape.bodyId];
-
-                    const vec2 otherEndCenter =
-                        otherSim.center +
-                        otherState.deltaPosition;
-
-                    const float otherRadius =
-                        otherSim.maxExtent +
-                        SPECULATIVE_DISTANCE;
-
-                    const aabb2 otherSweptAABB
-                    {
-                        {
-                            std::min( otherSim.center.x, otherEndCenter.x ) - otherRadius,
-                            std::min( otherSim.center.y, otherEndCenter.y ) - otherRadius
-                        },
-                        {
-                            std::max( otherSim.center.x, otherEndCenter.x ) + otherRadius,
-                            std::max( otherSim.center.y, otherEndCenter.y ) + otherRadius
-                        }
+                                return true;
+                            }
+                        );
                     };
 
-                    if( !Overlaps(
-                        sweptAABB,
-                        otherSweptAABB ) )
-                    {
-                        continue;
-                    }
+                queryMovingTree(
+                    bodyType::Kinematic
+                );
 
-                    testCandidate(
-                        fastShapeIndex,
-                        otherShapeIndex
-                    );
-                }
+                queryMovingTree(
+                    bodyType::Dynamic
+                );
             }
         }
 

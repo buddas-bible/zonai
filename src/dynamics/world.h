@@ -360,6 +360,11 @@ private:
     // bodySim transform을 기준으로 이 body의 모든 shape proxy를 broadPhase에 동기화함.
     void SyncBodyProxies( std::int32_t bodyIndex );
 
+    // 아직 commit되지 않은 transform을 기준으로 speculative / fat bounds와 tree proxy를 갱신함.
+    void UpdateBodyProxyBounds(
+        std::int32_t bodyIndex,
+        const transform2& transform );
+
     // 연결된 shape들의 density / geometry를 합산해 Dynamic body의 mass data를 갱신함.
     void UpdateBodyMassData( std::int32_t bodyIndex );
 

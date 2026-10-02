@@ -2948,5 +2948,64 @@ int main()
         assert( world.GetContactCount() == 0 );
     }
 
+    // Bullet query는 non-bullet body의 이번 Step 최종 tree bounds를 사용함.
+    // target의 시작 proxy는 bullet sweep 밖에 있지만 끝 위치는 안으로 들어오므로
+    // pending bounds finalize가 빠지면 이 TOI를 broad-phase에서 찾지 못함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        bodyDef targetDefinition{};
+        targetDefinition.type =
+            bodyType::Dynamic;
+
+        targetDefinition.transform.position =
+            { 8.0f, 0.0f };
+
+        targetDefinition.linearVelocity =
+            { -80.0f, 0.0f };
+
+        targetDefinition.enableSleep = false;
+
+        const bodyId targetBody =
+            world.CreateBody(
+                targetDefinition
+            );
+
+        (void)world.CreateShape(
+            targetBody,
+            circle2{ {}, 0.25f }
+        );
+
+        bodyDef bulletDefinition{};
+        bulletDefinition.type =
+            bodyType::Dynamic;
+
+        bulletDefinition.transform.position =
+            { -5.0f, 0.0f };
+
+        bulletDefinition.linearVelocity =
+            { 100.0f, 0.0f };
+
+        bulletDefinition.enableSleep = false;
+        bulletDefinition.isBullet = true;
+
+        const bodyId bulletBody =
+            world.CreateBody(
+                bulletDefinition
+            );
+
+        (void)world.CreateShape(
+            bulletBody,
+            circle2{ {}, 0.25f }
+        );
+
+        world.Step( 0.1f );
+
+        assert( world.IsBodyFast( targetBody ) );
+        assert( world.IsBodyFast( bulletBody ) );
+        assert( world.HadBodyTimeOfImpact( bulletBody ) );
+    }
+
     return 0;
 }
