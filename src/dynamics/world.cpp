@@ -135,6 +135,33 @@ contactId world::MakeContactId( std::int32_t contactIndex ) const
 
 bodyId world::CreateBody( bodyType type, transform2 transform )
 {
+    bodyDef definition{};
+    definition.type = type;
+    definition.transform = transform;
+
+    return CreateBody( definition );
+}
+
+bodyId world::CreateBody( const bodyDef& definition )
+{
+    assert( std::isfinite( definition.transform.position.x ) );
+    assert( std::isfinite( definition.transform.position.y ) );
+    assert( std::isfinite( definition.transform.rotation.c ) );
+    assert( std::isfinite( definition.transform.rotation.s ) );
+
+    assert( std::isfinite( definition.linearVelocity.x ) );
+    assert( std::isfinite( definition.linearVelocity.y ) );
+    assert( std::isfinite( definition.angularVelocity ) );
+
+    assert( std::isfinite( definition.linearDamping ) );
+    assert( std::isfinite( definition.angularDamping ) );
+    assert( definition.linearDamping >= 0.0f );
+    assert( definition.angularDamping >= 0.0f );
+
+    assert( std::isfinite( definition.gravityScale ) );
+    assert( std::isfinite( definition.sleepThreshold ) );
+    assert( definition.sleepThreshold >= 0.0f );
+
     std::int32_t bodyIndex = body::NULL_INDEX;
 
     if( bodyFreeList_ != body::NULL_INDEX )
@@ -174,19 +201,35 @@ bodyId world::CreateBody( bodyType type, transform2 transform )
     body = {};
     body.bodyId = bodyIndex;
     body.generation = generation;
-    body.type = type;
-    body.awake = type != bodyType::Static;
+    body.type = definition.type;
+    body.enableSleep = definition.enableSleep;
+    body.sleepThreshold = definition.sleepThreshold;
+    body.awake =
+        definition.type != bodyType::Static &&
+        ( definition.isAwake || !definition.enableSleep );
 
     assert( bodySims_.size() == bodies_.size() );
 
     bodySim& bodySim = bodySims_[bodyIndex];
     bodySim = {};
     bodySim.bodyId = bodyIndex;
-    bodySim.transform = transform;
-    bodySim.center = transform.position;
+    bodySim.transform = definition.transform;
+    bodySim.center = definition.transform.position;
+    bodySim.linearDamping = definition.linearDamping;
+    bodySim.angularDamping = definition.angularDamping;
+    bodySim.gravityScale = definition.gravityScale;
+    bodySim.allowFastRotation = definition.allowFastRotation;
 
     assert( bodyStates_.size() == bodies_.size() );
-    bodyStates_[bodyIndex] = {};
+
+    bodyState& bodyState = bodyStates_[bodyIndex];
+    bodyState = {};
+
+    if( definition.type != bodyType::Static )
+    {
+        bodyState.linearVelocity = definition.linearVelocity;
+        bodyState.angularVelocity = definition.angularVelocity;
+    }
 
     ++bodyCount_;
 

@@ -93,6 +93,51 @@ int main()
         assert( kinematicTransform.position.y == 1.5f );
     }
 
+    // bodyDef는 생성 시점의 운동 / damping / sleep 설정을 한 번에 적용함.
+    {
+        world world{};
+
+        bodyDef definition{};
+        definition.type = bodyType::Dynamic;
+        definition.transform =
+        {
+            { 2.0f, 3.0f },
+            rot2::FromRadians( 0.25f )
+        };
+        definition.linearVelocity = { 4.0f, -2.0f };
+        definition.angularVelocity = 3.0f;
+        definition.linearDamping = 1.5f;
+        definition.angularDamping = 2.0f;
+        definition.gravityScale = 0.25f;
+        definition.enableSleep = false;
+        definition.isAwake = false;
+        definition.sleepThreshold = 0.1f;
+        definition.allowFastRotation = true;
+
+        const bodyId bodyId =
+            world.CreateBody( definition );
+
+        const transform2 transform =
+            world.GetBodyTransform( bodyId );
+
+        assert( std::fabs( transform.position.x - 2.0f ) < epsilon );
+        assert( std::fabs( transform.position.y - 3.0f ) < epsilon );
+
+        const vec2 velocity =
+            world.GetBodyLinearVelocity( bodyId );
+
+        assert( std::fabs( velocity.x - 4.0f ) < epsilon );
+        assert( std::fabs( velocity.y + 2.0f ) < epsilon );
+        assert( std::fabs( world.GetBodyAngularVelocity( bodyId ) - 3.0f ) < epsilon );
+        assert( std::fabs( world.GetBodyLinearDamping( bodyId ) - 1.5f ) < epsilon );
+        assert( std::fabs( world.GetBodyAngularDamping( bodyId ) - 2.0f ) < epsilon );
+        assert( std::fabs( world.GetBodyGravityScale( bodyId ) - 0.25f ) < epsilon );
+        assert( !world.IsBodySleepEnabled( bodyId ) );
+        assert( world.IsBodyAwake( bodyId ) );
+        assert( std::fabs( world.GetBodySleepThreshold( bodyId ) - 0.1f ) < epsilon );
+        assert( world.IsBodyFastRotationAllowed( bodyId ) );
+    }
+
     // BodyState는 non-static body의 선속도 / 각속도를 보관함.
     {
         world world{};

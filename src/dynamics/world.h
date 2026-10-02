@@ -12,6 +12,7 @@
 #include "collision/narrowphase/contact2.h"
 #include "collision/shape.h"
 #include "dynamics/body.h"
+#include "dynamics/bodyDef.h"
 #include "dynamics/bodySim.h"
 #include "dynamics/bodyState.h"
 #include "dynamics/contactConstraint2.h"
@@ -36,7 +37,10 @@ concept worldCollisionCallback =
 class world
 {
 public:
-    // 새 body를 만들고 slot index + generation으로 구성된 외부 handle을 반환함.
+    // definition의 초기 simulation 설정으로 새 body를 만듦.
+    [[nodiscard]] bodyId CreateBody( const bodyDef& definition );
+
+    // 기존 간단한 생성 경로. 내부에서 bodyDef를 만들어 같은 생성 로직을 사용함.
     [[nodiscard]] bodyId CreateBody( bodyType type = bodyType::Static, transform2 transform = {} );
 
     // handle이 가리키는 body와 연결된 Contact / shape / proxy를 모두 정리함.

@@ -1,6 +1,7 @@
 #include <cassert>
 
 #include "dynamics/body.h"
+#include "dynamics/bodyDef.h"
 #include "dynamics/bodySim.h"
 #include "dynamics/bodyState.h"
 
@@ -8,6 +9,25 @@ using namespace zonai;
 
 int main()
 {
+
+    {
+        bodyDef definition{};
+
+        assert( definition.type == bodyType::Static );
+        assert( definition.transform.position.x == 0.0f );
+        assert( definition.transform.position.y == 0.0f );
+        assert( definition.linearVelocity.x == 0.0f );
+        assert( definition.linearVelocity.y == 0.0f );
+        assert( definition.angularVelocity == 0.0f );
+        assert( definition.linearDamping == 0.0f );
+        assert( definition.angularDamping == 0.0f );
+        assert( definition.gravityScale == 1.0f );
+        assert( definition.enableSleep );
+        assert( definition.isAwake );
+        assert( definition.sleepThreshold == 0.05f );
+        assert( !definition.allowFastRotation );
+    }
+
     {
         body body{};
 
