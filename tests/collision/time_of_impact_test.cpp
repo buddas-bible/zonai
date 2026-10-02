@@ -123,7 +123,7 @@ int main()
         input.proxyB =
             MakeShapeProxy(
                 MakeBox(
-                    { 2.0f, 0.2f }
+                    { 3.0f, 0.2f }
                 )
             );
 
