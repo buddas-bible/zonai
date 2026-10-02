@@ -1250,7 +1250,7 @@ int main()
         assert( world.GetBodyAngularDamping( bodyId ) == 0.0f );
 
         world.SetBodyLinearVelocity( bodyId, { 10.0f, 0.0f } );
-        world.SetBodyAngularVelocity( bodyId, 4.0f );
+        world.SetBodyAngularVelocity( bodyId, 3.0f );
 
         world.SetBodyLinearDamping( bodyId, 2.0f );
         world.SetBodyAngularDamping( bodyId, 3.0f );
@@ -1263,8 +1263,9 @@ int main()
         // linear: 10 / (1 + 2*0.5) = 5
         assert( std::fabs( world.GetBodyLinearVelocity( bodyId ).x - 5.0f ) < epsilon );
 
-        // angular: 4 / (1 + 3*0.5) = 1.6
-        assert( std::fabs( world.GetBodyAngularVelocity( bodyId ) - 1.6f ) < epsilon );
+        // angular: 3 / (1 + 3*0.5) = 1.2
+        // MAX_ROTATION clamp보다 낮은 값으로 damping만 검증함.
+        assert( std::fabs( world.GetBodyAngularVelocity( bodyId ) - 1.2f ) < epsilon );
 
         // 감쇠된 선속도로 position을 적분함.
         assert( std::fabs( world.GetBodyTransform( bodyId ).position.x - 2.5f ) < epsilon );
