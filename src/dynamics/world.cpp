@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "collision/constants.h"
+#include "collision/sweep2.h"
 #include "dynamics/bodyShape.h"
 #include "dynamics/constants.h"
 
@@ -2049,9 +2050,21 @@ void world::Step( float timeStep, int subStepCount )
                 bodySim& bodySim = bodySims_[bodyIndex];
                 const bodyState& bodyState = bodyStates_[bodyIndex];
 
-                bodySim.center += bodyState.deltaPosition;
-                bodySim.transform.rotation = bodyState.deltaRotation * bodySim.transform.rotation;
-                bodySim.transform.position = bodySim.center - Rotate( bodySim.transform.rotation, bodySim.localCenter );
+                const sweep2 sweep
+                {
+                    bodySim.localCenter,
+                    bodySim.center,
+                    bodySim.center + bodyState.deltaPosition,
+                    bodySim.transform.rotation,
+                    bodyState.deltaRotation * bodySim.transform.rotation
+                };
+
+                bodySim.center = sweep.c2;
+                bodySim.transform =
+                    GetSweepTransform(
+                        sweep,
+                        1.0f
+                    );
 
                 SyncBodyProxies( bodyIndex );
             }

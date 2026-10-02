@@ -5,6 +5,7 @@
 #include <variant>
 
 #include "collision/shape.h"
+#include "collision/shapeProxy2.h"
 
 using namespace zonai;
 
@@ -84,6 +85,57 @@ int main()
 
         assert( segmentExtent.minExtent == 0.0f );
         assert( std::fabs( segmentExtent.maxExtent - 2.0f ) < epsilon );
+    }
+
+    // concrete geometry는 CCD / GJK가 공통으로 사용할 convex proxy로 변환됨.
+    {
+        const shapeProxy2 circleProxy =
+            MakeShapeProxy(
+                circle2{ { 2.0f, -1.0f }, 0.75f }
+            );
+
+        assert( circleProxy.count == 1 );
+        assert( circleProxy.points[0].x == 2.0f );
+        assert( circleProxy.points[0].y == -1.0f );
+        assert( circleProxy.radius == 0.75f );
+
+        const shapeProxy2 capsuleProxy =
+            MakeShapeProxy(
+                capsule2
+                {
+                    { -1.0f, 0.0f },
+                    { 1.0f, 0.0f },
+                    0.25f
+                }
+            );
+
+        assert( capsuleProxy.count == 2 );
+        assert( capsuleProxy.points[0].x == -1.0f );
+        assert( capsuleProxy.points[1].x == 1.0f );
+        assert( capsuleProxy.radius == 0.25f );
+
+        const polygon2 box =
+            MakeBox( { 2.0f, 1.0f } );
+
+        const shapeProxy2 polygonProxy =
+            MakeShapeProxy( box );
+
+        assert( polygonProxy.count == box.vertexCount );
+        assert( polygonProxy.radius == box.radius );
+
+        const shapeProxy2 segmentProxy =
+            MakeShapeProxy(
+                segment2
+                {
+                    { -2.0f, 0.5f },
+                    { 3.0f, 0.5f }
+                }
+            );
+
+        assert( segmentProxy.count == 2 );
+        assert( segmentProxy.points[0].x == -2.0f );
+        assert( segmentProxy.points[1].x == 3.0f );
+        assert( segmentProxy.radius == 0.0f );
     }
 
     // 원의 mass / center / center 기준 inertia.
