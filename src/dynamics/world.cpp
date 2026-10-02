@@ -464,6 +464,89 @@ float world::GetShapeRestitution( shapeId shapeId ) const
     return shapes_[GetShapeIndex( shapeId )].restitution;
 }
 
+void world::SetShapeFilter(
+    shapeId shapeId,
+    collisionFilter filter )
+{
+    const std::int32_t shapeIndex =
+        GetShapeIndex( shapeId );
+
+    shape& storedShape =
+        shapes_[shapeIndex];
+
+    const collisionFilter& oldFilter =
+        storedShape.filter;
+
+    if( oldFilter.categoryBits == filter.categoryBits &&
+        oldFilter.maskBits == filter.maskBits &&
+        oldFilter.groupIndex == filter.groupIndex )
+    {
+        return;
+    }
+
+    assert( storedShape.bodyId != shape::NULL_INDEX );
+    assert( storedShape.proxyKey != shape::NULL_INDEX );
+
+    const std::int32_t bodyIndex =
+        storedShape.bodyId;
+
+    body& owner =
+        bodies_[bodyIndex];
+
+    // Box2D와 같이 filter가 바뀐 shape가 참여하는 기존 Contact는 즉시 제거함.
+    // 같은 body의 다른 shape Contact는 유지해야 하므로 body list를 훑으며 shape id를 검사함.
+    std::int32_t contactKey =
+        owner.headContactKey;
+
+    while( contactKey != body::NULL_INDEX )
+    {
+        const std::int32_t contactId =
+            GetContactId( contactKey );
+
+        const std::int32_t edgeIndex =
+            GetContactEdgeIndex( contactKey );
+
+        assert( contactId >= 0 );
+        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+        contact2& contact =
+            contacts_[contactId];
+
+        assert( contact.contactId == contactId );
+
+        // DestroyContact가 intrusive list를 수정하므로 다음 key를 먼저 보존함.
+        contactKey =
+            contact.edges[edgeIndex].nextKey;
+
+        if( contact.shapeIdA == shapeIndex ||
+            contact.shapeIdB == shapeIndex )
+        {
+            DestroyContact(
+                contactId
+            );
+        }
+    }
+
+    storedShape.filter =
+        filter;
+
+    // Zonai tree는 categoryBits를 node sorting data로 저장하지 않으므로
+    // Box2D처럼 category 변경 시 proxy를 재생성할 필요는 없음.
+    // AABB는 그대로 유지하고 moved path만 표시해 다음 UpdatePairs가
+    // 새 filter로 이 shape의 후보를 다시 검사하도록 함.
+    broadPhase_.TouchProxy(
+        storedShape.proxyKey
+    );
+}
+
+collisionFilter world::GetShapeFilter(
+    shapeId shapeId ) const
+{
+    return
+        shapes_[GetShapeIndex( shapeId )]
+            .filter;
+}
+
 const aabb2& world::GetShapeAABB( shapeId shapeId ) const
 {
     return

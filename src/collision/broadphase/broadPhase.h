@@ -179,6 +179,9 @@ public:
     // 기존 tree bounds를 포함하는 더 큰 AABB로 proxy를 넓힘.
     void EnlargeProxy( proxyKey proxyKey, const aabb2& aabb );
 
+    // AABB를 바꾸지 않고 filter 등의 상태 변화 때문에 pair 후보만 다시 탐색함.
+    void TouchProxy( proxyKey proxyKey );
+
     // Contact가 존재하는 shape pair를 추적함. 새 pair면 false, 이미 있으면 true를 반환함.
     bool AddPair( shapePairKey pairKey );
 

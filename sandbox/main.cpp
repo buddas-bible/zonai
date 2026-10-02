@@ -1208,6 +1208,49 @@ int main()
                 );
             }
 
+            collisionFilter filter =
+                scene->world.GetShapeFilter(
+                    visual.shapeHandle
+                );
+
+            bool filterChanged = false;
+
+            filterChanged =
+                ImGui::InputScalar(
+                    "Category bits",
+                    ImGuiDataType_U64,
+                    &filter.categoryBits
+                ) ||
+                filterChanged;
+
+            filterChanged =
+                ImGui::InputScalar(
+                    "Mask bits",
+                    ImGuiDataType_U64,
+                    &filter.maskBits
+                ) ||
+                filterChanged;
+
+            filterChanged =
+                ImGui::InputInt(
+                    "Group index",
+                    &filter.groupIndex
+                ) ||
+                filterChanged;
+
+            if( filterChanged )
+            {
+                scene->world.SetShapeFilter(
+                    visual.shapeHandle,
+                    filter
+                );
+
+                RefreshContacts(
+                    *scene,
+                    contacts
+                );
+            }
+
             ImGui::Text(
                 "Mass: %.3f",
                 scene->world.GetBodyMass(

@@ -210,6 +210,32 @@ void dynamicTree::EnlargeProxy(
     );
 }
 
+void dynamicTree::MarkProxyMoved(
+    std::int32_t proxyId )
+{
+    assert( proxyId >= 0 );
+    assert( static_cast<std::size_t>( proxyId ) < proxies_.size() );
+    assert( proxies_[proxyId].node != NULL_INDEX );
+
+    std::int32_t nodeIndex =
+        proxies_[proxyId].node;
+
+    assert( static_cast<std::size_t>( nodeIndex ) < nodes_.size() );
+    assert( IsLeaf( nodes_[nodeIndex] ) );
+    assert( GetProxyId( nodes_[nodeIndex] ) == proxyId );
+
+    // Cross-tree pair 탐색은 root의 moved flag부터 가지치기하므로
+    // leaf에서 root까지 전체 경로를 표시함.
+    while( nodeIndex != NULL_INDEX )
+    {
+        nodes_[nodeIndex].flagIndex |=
+            TREE_MOVED_NODE;
+
+        nodeIndex =
+            parents_[nodeIndex];
+    }
+}
+
 bool dynamicTree::HasMoved() const
 {
     if( proxyCount_ == 0 )

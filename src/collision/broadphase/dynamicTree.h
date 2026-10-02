@@ -108,6 +108,9 @@ public:
     // topology는 유지한 채 ancestor bounds와 moved flag만 갱신함.
     void EnlargeProxy( std::int32_t proxyId, const aabb2& aabb );
 
+    // AABB / topology는 그대로 두고 이 proxy가 참여하는 pair만 다시 탐색하게 함.
+    void MarkProxyMoved( std::int32_t proxyId );
+
     bool HasMoved() const;
 
     // moved branch가 있거나 DFS 배열 순서가 깨졌으면 rebuild가 필요함.

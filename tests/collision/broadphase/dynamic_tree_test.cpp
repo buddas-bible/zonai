@@ -771,5 +771,58 @@ int main()
         assert( stressTree.Validate() );
     }
 
+    {
+        dynamicTree touchTree{};
+
+        const aabb2 boxA{
+            { 0.0f, 0.0f },
+            { 1.0f, 1.0f }
+        };
+
+        const aabb2 boxB{
+            { 3.0f, 0.0f },
+            { 4.0f, 1.0f }
+        };
+
+        const std::int32_t proxyA =
+            touchTree.CreateProxy(
+                boxA,
+                1
+            );
+
+        touchTree.CreateProxy(
+            boxB,
+            2
+        );
+
+        assert( !touchTree.HasMoved() );
+        assert( !touchTree.NeedsRebuild() );
+
+        touchTree.MarkProxyMoved(
+            proxyA
+        );
+
+        // filter 같은 runtime 상태 변화는 AABB를 바꾸지 않고
+        // leaf -> root 경로만 pair 재탐색 대상으로 표시함.
+        assert(
+            NearlyEqual(
+                touchTree.GetProxyAABB(
+                    proxyA
+                ),
+                boxA
+            )
+        );
+
+        assert( touchTree.HasMoved() );
+        assert( touchTree.NeedsRebuild() );
+        assert( touchTree.Validate() );
+
+        touchTree.Rebuild( false );
+
+        assert( !touchTree.HasMoved() );
+        assert( !touchTree.NeedsRebuild() );
+        assert( touchTree.Validate() );
+    }
+
     return 0;
 }

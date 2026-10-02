@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
 #include "collision/constants.h"
 #include "dynamics/constants.h"
@@ -3234,6 +3235,324 @@ int main()
         );
 
         assert( world.GetContactRecycleDistance() == 0.0f );
+    }
+
+    // Runtime filter 변경은 기존 Contact를 즉시 제거하고
+    // proxy를 touch해서 다음 collision update에서 새 filter로 pair를 다시 평가함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId staticBody =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        const shapeId staticShape =
+            world.CreateShape(
+                staticBody,
+                circle2{ {}, 1.0f }
+            );
+
+        const bodyId dynamicBody =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 1.5f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId dynamicShape =
+            world.CreateShape(
+                dynamicBody,
+                circle2{ {}, 1.0f }
+            );
+
+        contactId firstContact{};
+
+        world.UpdateCollisions(
+            [&]( const contactData& data )
+            {
+                firstContact =
+                    data.id;
+            }
+        );
+
+        assert( world.GetContactCount() == 1 );
+        assert( world.IsValid( firstContact ) );
+        assert(
+            world.GetBroadPhase().HasPair(
+                PairKey(
+                    staticShape,
+                    dynamicShape
+                )
+            )
+        );
+
+        // 같은 filter를 다시 넣는 것은 Contact 수명에 영향을 주지 않음.
+        const collisionFilter defaultFilter =
+            world.GetShapeFilter(
+                dynamicShape
+            );
+
+        world.SetShapeFilter(
+            dynamicShape,
+            defaultFilter
+        );
+
+        assert( world.GetContactCount() == 1 );
+        assert( world.IsValid( firstContact ) );
+
+        collisionFilter blocked =
+            defaultFilter;
+
+        blocked.maskBits = 0;
+
+        world.SetShapeFilter(
+            dynamicShape,
+            blocked
+        );
+
+        // Box2D처럼 기존 Contact는 API 호출 시점에 즉시 사라짐.
+        assert( world.GetContactCount() == 0 );
+        assert( !world.IsValid( firstContact ) );
+        assert(
+            !world.GetBroadPhase().HasPair(
+                PairKey(
+                    staticShape,
+                    dynamicShape
+                )
+            )
+        );
+
+        assert(
+            world.GetShapeFilter(
+                dynamicShape
+            ).maskBits == 0
+        );
+
+        // AABB는 여전히 겹치지만 filter가 막으므로 새 Contact는 만들어지지 않음.
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        assert( world.GetContactCount() == 0 );
+
+        // 위치를 전혀 움직이지 않고 filter만 다시 열어도 TouchProxy가
+        // 이 shape를 pair 후보로 다시 올려 다음 update에서 Contact가 재생성됨.
+        world.SetShapeFilter(
+            dynamicShape,
+            defaultFilter
+        );
+
+        assert( world.GetContactCount() == 0 );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        assert( world.GetContactCount() == 1 );
+        assert(
+            world.GetBroadPhase().HasPair(
+                PairKey(
+                    staticShape,
+                    dynamicShape
+                )
+            )
+        );
+    }
+
+    // 같은 non-zero groupIndex는 category/mask보다 우선함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId bodyA =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        const bodyId bodyB =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 1.5f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId shapeA =
+            world.CreateShape(
+                bodyA,
+                circle2{ {}, 1.0f }
+            );
+
+        const shapeId shapeB =
+            world.CreateShape(
+                bodyB,
+                circle2{ {}, 1.0f }
+            );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        assert( world.GetContactCount() == 1 );
+
+        collisionFilter positiveGroup{};
+        positiveGroup.categoryBits = 1;
+        positiveGroup.maskBits = 0;
+        positiveGroup.groupIndex = 7;
+
+        world.SetShapeFilter(
+            shapeA,
+            positiveGroup
+        );
+
+        world.SetShapeFilter(
+            shapeB,
+            positiveGroup
+        );
+
+        assert( world.GetContactCount() == 0 );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        // maskBits == 0이어도 같은 양수 group은 항상 충돌함.
+        assert( world.GetContactCount() == 1 );
+
+        collisionFilter negativeGroup =
+            positiveGroup;
+
+        negativeGroup.maskBits =
+            std::numeric_limits<std::uint64_t>::max();
+
+        negativeGroup.groupIndex = -7;
+
+        world.SetShapeFilter(
+            shapeA,
+            negativeGroup
+        );
+
+        world.SetShapeFilter(
+            shapeB,
+            negativeGroup
+        );
+
+        assert( world.GetContactCount() == 0 );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        // mask가 전부 열려 있어도 같은 음수 group은 절대 충돌하지 않음.
+        assert( world.GetContactCount() == 0 );
+    }
+
+    // category / mask는 양쪽이 서로를 허용해야 함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId bodyA =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        const bodyId bodyB =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 1.5f, 0.0f },
+                    {}
+                }
+            );
+
+        collisionFilter filterA{};
+        filterA.categoryBits = 1ull << 0;
+        filterA.maskBits = 1ull << 1;
+
+        collisionFilter filterB{};
+        filterB.categoryBits = 1ull << 1;
+        filterB.maskBits = 1ull << 0;
+
+        const shapeId shapeA =
+            world.CreateShape(
+                bodyA,
+                circle2{ {}, 1.0f },
+                filterA
+            );
+
+        const shapeId shapeB =
+            world.CreateShape(
+                bodyB,
+                circle2{ {}, 1.0f },
+                filterB
+            );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        assert( world.GetContactCount() == 1 );
+
+        filterB.maskBits =
+            1ull << 1;
+
+        world.SetShapeFilter(
+            shapeB,
+            filterB
+        );
+
+        assert( world.GetContactCount() == 0 );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        assert( world.GetContactCount() == 0 );
+
+        // 다시 A category를 허용하면 위치 변화 없이도 pair가 복구됨.
+        filterB.maskBits =
+            1ull << 0;
+
+        world.SetShapeFilter(
+            shapeB,
+            filterB
+        );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        assert( world.GetContactCount() == 1 );
+        assert(
+            world.GetBroadPhase().HasPair(
+                PairKey(
+                    shapeA,
+                    shapeB
+                )
+            )
+        );
     }
 
     return 0;

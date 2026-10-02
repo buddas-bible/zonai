@@ -74,6 +74,20 @@ void broadPhase::EnlargeProxy(
     );
 }
 
+void broadPhase::TouchProxy(
+    proxyKey proxyKey )
+{
+    const bodyType type =
+        GetProxyType( proxyKey );
+
+    const std::int32_t proxyId =
+        GetProxyId( proxyKey );
+
+    GetTree( type ).MarkProxyMoved(
+        proxyId
+    );
+}
+
 bool broadPhase::AddPair( shapePairKey pairKey )
 {
     return pairSet_.Add( pairKey );

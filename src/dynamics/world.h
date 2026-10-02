@@ -65,6 +65,11 @@ public:
     void SetShapeRestitution( shapeId shapeId, float restitution );
     [[nodiscard]] float GetShapeRestitution( shapeId shapeId ) const;
 
+    // runtime filter 변경은 기존 Contact를 즉시 제거하고
+    // 다음 collision update에서 이 shape의 broad-phase pair를 다시 탐색함.
+    void SetShapeFilter( shapeId shapeId, collisionFilter filter );
+    [[nodiscard]] collisionFilter GetShapeFilter( shapeId shapeId ) const;
+
     // 현재 shape의 speculative AABB와 broad-phase fat AABB를 반환함.
     [[nodiscard]] const aabb2& GetShapeAABB( shapeId shapeId ) const;
     [[nodiscard]] const aabb2& GetShapeFatAABB( shapeId shapeId ) const;
