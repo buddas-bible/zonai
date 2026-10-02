@@ -756,6 +756,18 @@ int main()
             );
         }
 
+        bool continuousEnabled =
+            scene->world.IsContinuousEnabled();
+
+        if( ImGui::Checkbox(
+            "Continuous collision",
+            &continuousEnabled ) )
+        {
+            scene->world.SetContinuousEnabled(
+                continuousEnabled
+            );
+        }
+
         ImGui::Text(
             "Fixed dt: %.5f s",
             FIXED_TIME_STEP
@@ -1080,6 +1092,13 @@ int main()
                 ImGui::Text(
                     "Fast body: %s",
                     scene->world.IsBodyFast(
+                        visual.bodyHandle
+                    ) ? "yes" : "no"
+                );
+
+                ImGui::Text(
+                    "TOI this step: %s",
+                    scene->world.HadBodyTimeOfImpact(
                         visual.bodyHandle
                     ) ? "yes" : "no"
                 );

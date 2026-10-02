@@ -84,6 +84,7 @@ int main()
         assert( bodySim.gravityScale == 1.0f );
         assert( !bodySim.isBullet );
         assert( !bodySim.isFast );
+        assert( !bodySim.hadTimeOfImpact );
         assert( !bodySim.allowFastRotation );
         assert( bodySim.minExtent == std::numeric_limits<float>::max() );
         assert( bodySim.maxExtent == 0.0f );

@@ -7,7 +7,9 @@
 #include <utility>
 
 #include "collision/constants.h"
+#include "collision/shapeProxy2.h"
 #include "collision/sweep2.h"
+#include "collision/timeOfImpact2.h"
 #include "dynamics/bodyShape.h"
 #include "dynamics/constants.h"
 
@@ -1434,6 +1436,15 @@ bool world::IsBodyFast( bodyId bodyId ) const
     return bodySims_[bodyIndex].isFast;
 }
 
+bool world::HadBodyTimeOfImpact( bodyId bodyId ) const
+{
+    const std::int32_t bodyIndex =
+        GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    return bodySims_[bodyIndex].hadTimeOfImpact;
+}
+
 float world::GetBodyMass( bodyId bodyId ) const
 {
     return bodies_[GetBodyIndex( bodyId )].mass;
@@ -1528,6 +1539,16 @@ void world::SetSleepingEnabled( bool enabled )
 bool world::IsSleepingEnabled() const noexcept
 {
     return sleepingEnabled_;
+}
+
+void world::SetContinuousEnabled( bool enabled ) noexcept
+{
+    continuousEnabled_ = enabled;
+}
+
+bool world::IsContinuousEnabled() const noexcept
+{
+    return continuousEnabled_;
 }
 
 void world::ApplyForce( bodyId bodyId, vec2 force, vec2 point )
@@ -1777,10 +1798,11 @@ void world::Step( float timeStep, int subStepCount )
     assert( bodySims_.size() == bodies_.size() );
     assert( bodyStates_.size() == bodies_.size() );
 
-    // isFast는 현재 Step의 이동량으로 매번 다시 판정하는 transient 상태임.
+    // fast / TOI 표시는 현재 Step에서 다시 계산하는 transient 상태임.
     for( bodySim& sim : bodySims_ )
     {
         sim.isFast = false;
+        sim.hadTimeOfImpact = false;
     }
 
     if( timeStep > 0.0f )
@@ -2033,12 +2055,60 @@ void world::Step( float timeStep, int subStepCount )
         }
 
         // -----------------------------------------------------
-        // 7. Store impulses
+        // 7. Continuous collision
+        // -----------------------------------------------------
+        if( continuousEnabled_ )
+        {
+            // 일반 fast body는 Box2D처럼 static geometry에 대해서만 CCD를 수행함.
+            for( const island2& island : islandGraph.islands )
+            {
+                const std::span<const std::int32_t> bodyIds =
+                    std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
+
+                for( const std::int32_t bodyIndex : bodyIds )
+                {
+                    const bodySim& sim = bodySims_[bodyIndex];
+
+                    if( sim.isFast &&
+                        !sim.isBullet )
+                    {
+                        SolveContinuousBody(
+                            bodyIndex,
+                            timeStep
+                        );
+                    }
+                }
+            }
+
+            // Bullet은 다른 bullet을 제외한 kinematic / dynamic body까지 추가로 검사함.
+            for( const island2& island : islandGraph.islands )
+            {
+                const std::span<const std::int32_t> bodyIds =
+                    std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
+
+                for( const std::int32_t bodyIndex : bodyIds )
+                {
+                    const bodySim& sim = bodySims_[bodyIndex];
+
+                    if( sim.isFast &&
+                        sim.isBullet )
+                    {
+                        SolveContinuousBody(
+                            bodyIndex,
+                            timeStep
+                        );
+                    }
+                }
+            }
+        }
+
+        // -----------------------------------------------------
+        // 8. Store impulses
         // -----------------------------------------------------
         StoreContactConstraintImpulses( contactConstraints );
 
         // -----------------------------------------------------
-        // 8. Commit island position deltas
+        // 9. Commit island position deltas
         // -----------------------------------------------------
         for( const island2& island : islandGraph.islands )
         {
@@ -2101,6 +2171,306 @@ void world::Step( float timeStep, int subStepCount )
         {
         }
     );
+}
+
+void world::SolveContinuousBody(
+    std::int32_t bodyIndex,
+    float timeStep )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+    assert( std::isfinite( timeStep ) );
+    assert( timeStep > 0.0f );
+
+    const body& fastBody =
+        bodies_[bodyIndex];
+
+    bodySim& fastSim =
+        bodySims_[bodyIndex];
+
+    bodyState& fastState =
+        bodyStates_[bodyIndex];
+
+    assert( fastBody.bodyId == bodyIndex );
+    assert( fastBody.type == bodyType::Dynamic );
+    assert( fastSim.bodyId == bodyIndex );
+    assert( fastSim.isFast );
+
+    const sweep2 fastSweep
+    {
+        fastSim.localCenter,
+        fastSim.center,
+        fastSim.center + fastState.deltaPosition,
+        fastSim.transform.rotation,
+        fastState.deltaRotation * fastSim.transform.rotation
+    };
+
+    // 회전 중 어느 방향을 향하더라도 body 전체가 들어오는 보수적인 swept bounds.
+    const float sweepRadius =
+        fastSim.maxExtent +
+        SPECULATIVE_DISTANCE;
+
+    const aabb2 sweptAABB
+    {
+        {
+            std::min( fastSweep.c1.x, fastSweep.c2.x ) - sweepRadius,
+            std::min( fastSweep.c1.y, fastSweep.c2.y ) - sweepRadius
+        },
+        {
+            std::max( fastSweep.c1.x, fastSweep.c2.x ) + sweepRadius,
+            std::max( fastSweep.c1.y, fastSweep.c2.y ) + sweepRadius
+        }
+    };
+
+    float hitFraction = 1.0f;
+
+    const auto testCandidate =
+        [&]( std::int32_t fastShapeIndex,
+             std::int32_t otherShapeIndex )
+        {
+            assert( fastShapeIndex >= 0 );
+            assert( otherShapeIndex >= 0 );
+            assert( static_cast<std::size_t>( fastShapeIndex ) < shapes_.size() );
+            assert( static_cast<std::size_t>( otherShapeIndex ) < shapes_.size() );
+
+            if( fastShapeIndex == otherShapeIndex )
+            {
+                return;
+            }
+
+            const shape& fastShape =
+                shapes_[fastShapeIndex];
+
+            const shape& otherShape =
+                shapes_[otherShapeIndex];
+
+            if( otherShape.bodyId == shape::NULL_INDEX ||
+                otherShape.bodyId == bodyIndex ||
+                otherShape.sensorIndex != shape::NULL_INDEX )
+            {
+                return;
+            }
+
+            if( !ShouldShapesCollide(
+                    fastShape.filter,
+                    otherShape.filter ) ||
+                !CanCollideShapes(
+                    fastShape.geometry,
+                    otherShape.geometry ) )
+            {
+                return;
+            }
+
+            const body& otherBody =
+                bodies_[otherShape.bodyId];
+
+            const bodySim& otherSim =
+                bodySims_[otherShape.bodyId];
+
+            if( fastSim.isBullet &&
+                otherSim.isBullet )
+            {
+                return;
+            }
+
+            const bodyState& otherState =
+                bodyStates_[otherShape.bodyId];
+
+            const bool otherMoves =
+                otherBody.type != bodyType::Static;
+
+            const sweep2 otherSweep
+            {
+                otherSim.localCenter,
+                otherSim.center,
+                otherSim.center +
+                    ( otherMoves ?
+                        otherState.deltaPosition :
+                        vec2{} ),
+                otherSim.transform.rotation,
+                otherMoves ?
+                    otherState.deltaRotation *
+                        otherSim.transform.rotation :
+                    otherSim.transform.rotation
+            };
+
+            toiInput2 input{};
+            input.proxyA =
+                MakeShapeProxy(
+                    otherShape.geometry
+                );
+
+            input.proxyB =
+                MakeShapeProxy(
+                    fastShape.geometry
+                );
+
+            input.sweepA = otherSweep;
+            input.sweepB = fastSweep;
+            input.maxFraction = hitFraction;
+
+            const toiOutput2 output =
+                TimeOfImpact( input );
+
+            // fraction 0은 이미 존재하던 overlap / touching Contact가 처리함.
+            if( output.state == toiState2::Hit &&
+                output.fraction > 0.0f &&
+                output.fraction < hitFraction )
+            {
+                hitFraction =
+                    output.fraction;
+            }
+        };
+
+    std::int32_t fastShapeIndex =
+        fastBody.headShapeId;
+
+    while( fastShapeIndex != body::NULL_INDEX )
+    {
+        const shape& fastShape =
+            shapes_[fastShapeIndex];
+
+        const std::int32_t nextShapeIndex =
+            fastShape.nextShapeId;
+
+        if( fastShape.sensorIndex == shape::NULL_INDEX )
+        {
+            // 일반 fast body와 bullet 모두 static tree는 broad-phase query로 좁힘.
+            const dynamicTree& staticTree =
+                broadPhase_.GetTree(
+                    bodyType::Static
+                );
+
+            staticTree.Query(
+                sweptAABB,
+                [&]( std::int32_t proxyId )
+                {
+                    testCandidate(
+                        fastShapeIndex,
+                        staticTree.GetProxyShapeIndex(
+                            proxyId
+                        )
+                    );
+
+                    return true;
+                }
+            );
+
+            if( fastSim.isBullet )
+            {
+                // 현재 Zonai는 moving proxy의 swept bounds를 tree에 미리 enlarge하는
+                // finalize stage가 아직 없음. 따라서 moving 상대를 놓치지 않도록
+                // kinematic / dynamic shape는 swept AABB로 한 번 더 거른 뒤 TOI를 수행함.
+                for( std::int32_t otherShapeIndex = 0;
+                     otherShapeIndex < static_cast<std::int32_t>( shapes_.size() );
+                     ++otherShapeIndex )
+                {
+                    const shape& otherShape =
+                        shapes_[otherShapeIndex];
+
+                    if( otherShape.bodyId == shape::NULL_INDEX ||
+                        otherShape.bodyId == bodyIndex )
+                    {
+                        continue;
+                    }
+
+                    const body& otherBody =
+                        bodies_[otherShape.bodyId];
+
+                    if( otherBody.type == bodyType::Static )
+                    {
+                        continue;
+                    }
+
+                    const bodySim& otherSim =
+                        bodySims_[otherShape.bodyId];
+
+                    if( otherSim.isBullet )
+                    {
+                        continue;
+                    }
+
+                    const bodyState& otherState =
+                        bodyStates_[otherShape.bodyId];
+
+                    const vec2 otherEndCenter =
+                        otherSim.center +
+                        otherState.deltaPosition;
+
+                    const float otherRadius =
+                        otherSim.maxExtent +
+                        SPECULATIVE_DISTANCE;
+
+                    const aabb2 otherSweptAABB
+                    {
+                        {
+                            std::min( otherSim.center.x, otherEndCenter.x ) - otherRadius,
+                            std::min( otherSim.center.y, otherEndCenter.y ) - otherRadius
+                        },
+                        {
+                            std::max( otherSim.center.x, otherEndCenter.x ) + otherRadius,
+                            std::max( otherSim.center.y, otherEndCenter.y ) + otherRadius
+                        }
+                    };
+
+                    if( !Overlaps(
+                        sweptAABB,
+                        otherSweptAABB ) )
+                    {
+                        continue;
+                    }
+
+                    testCandidate(
+                        fastShapeIndex,
+                        otherShapeIndex
+                    );
+                }
+            }
+        }
+
+        fastShapeIndex =
+            nextShapeIndex;
+    }
+
+    if( hitFraction >= 1.0f )
+    {
+        return;
+    }
+
+    const transform2 clippedTransform =
+        GetSweepTransform(
+            fastSweep,
+            hitFraction
+        );
+
+    const vec2 clippedCenter =
+        fastSweep.c1 *
+            ( 1.0f - hitFraction ) +
+        fastSweep.c2 *
+            hitFraction;
+
+    fastState.deltaPosition =
+        clippedCenter -
+        fastSim.center;
+
+    fastState.deltaRotation =
+        clippedTransform.rotation *
+        Inverse(
+            fastSim.transform.rotation
+        );
+
+    fastSim.hadTimeOfImpact = true;
+
+    // 이동 시간을 잃은 만큼 이번 Step에서 미리 더해졌던 gravity 성분을 되돌림.
+    // Box2D와 같이 다른 force / torque의 time loss는 아직 보정하지 않음.
+    const float timeLoss =
+        ( 1.0f - hitFraction ) *
+        timeStep;
+
+    fastState.linearVelocity -=
+        gravity_ *
+        fastSim.gravityScale *
+        timeLoss;
 }
 
 const shape& world::GetShape( shapeId shapeId ) const

@@ -122,6 +122,9 @@ public:
     // proxy가 가리키는 leaf의 AABB를 반환함.
     const aabb2& GetProxyAABB( std::int32_t proxyId ) const;
 
+    // stable proxy가 가리키는 shape index를 반환함.
+    std::int32_t GetProxyShapeIndex( std::int32_t proxyId ) const;
+
     // Debug / tooling에서 live node를 read-only로 순회함.
     // 내부 vector와 flag bit layout은 외부에 노출하지 않음.
     template <typename Callback>

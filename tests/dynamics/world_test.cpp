@@ -191,6 +191,165 @@ int main()
         assert( std::fabs( world.GetBodySafetyFactor( bodyId ) - 2.0f ) < epsilon );
     }
 
+    // Continuous collision은 fast Dynamic body가 얇은 Static wall을 tunneling하지 않게 함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        assert( world.IsContinuousEnabled() );
+
+        const bodyId wallBody =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        (void)world.CreateShape(
+            wallBody,
+            MakeBox(
+                { 0.05f, 2.0f }
+            )
+        );
+
+        bodyDef bulletDefinition{};
+        bulletDefinition.type =
+            bodyType::Dynamic;
+
+        bulletDefinition.transform.position =
+            { -5.0f, 0.0f };
+
+        bulletDefinition.linearVelocity =
+            { 100.0f, 0.0f };
+
+        bulletDefinition.enableSleep = false;
+
+        const bodyId fastBody =
+            world.CreateBody(
+                bulletDefinition
+            );
+
+        (void)world.CreateShape(
+            fastBody,
+            circle2{ {}, 0.25f }
+        );
+
+        world.Step( 0.1f );
+
+        const transform2 transform =
+            world.GetBodyTransform(
+                fastBody
+            );
+
+        assert( world.IsBodyFast( fastBody ) );
+        assert( world.HadBodyTimeOfImpact( fastBody ) );
+
+        // wall의 왼쪽 face(-0.05)보다 circle center가 왼쪽에서 멈춰야 함.
+        assert( transform.position.x < -0.25f );
+        assert( transform.position.x > -0.4f );
+    }
+
+    // Continuous collision을 끄면 같은 fast body는 discrete step에서 wall을 통과함.
+    {
+        world world{};
+        world.SetGravity( {} );
+        world.SetContinuousEnabled( false );
+
+        assert( !world.IsContinuousEnabled() );
+
+        const bodyId wallBody =
+            world.CreateBody(
+                bodyType::Static
+            );
+
+        (void)world.CreateShape(
+            wallBody,
+            MakeBox(
+                { 0.05f, 2.0f }
+            )
+        );
+
+        bodyDef definition{};
+        definition.type =
+            bodyType::Dynamic;
+
+        definition.transform.position =
+            { -5.0f, 0.0f };
+
+        definition.linearVelocity =
+            { 100.0f, 0.0f };
+
+        definition.enableSleep = false;
+
+        const bodyId fastBody =
+            world.CreateBody(
+                definition
+            );
+
+        (void)world.CreateShape(
+            fastBody,
+            circle2{ {}, 0.25f }
+        );
+
+        world.Step( 0.1f );
+
+        assert( world.IsBodyFast( fastBody ) );
+        assert( !world.HadBodyTimeOfImpact( fastBody ) );
+        assert( world.GetBodyTransform( fastBody ).position.x > 4.9f );
+    }
+
+    // Bullet은 일반 fast body와 달리 Dynamic body도 continuous collision 대상으로 검사함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        bodyDef targetDefinition{};
+        targetDefinition.type =
+            bodyType::Dynamic;
+
+        targetDefinition.enableSleep = false;
+
+        const bodyId targetBody =
+            world.CreateBody(
+                targetDefinition
+            );
+
+        (void)world.CreateShape(
+            targetBody,
+            MakeBox(
+                { 0.1f, 2.0f }
+            )
+        );
+
+        bodyDef bulletDefinition{};
+        bulletDefinition.type =
+            bodyType::Dynamic;
+
+        bulletDefinition.transform.position =
+            { -5.0f, 0.0f };
+
+        bulletDefinition.linearVelocity =
+            { 100.0f, 0.0f };
+
+        bulletDefinition.enableSleep = false;
+        bulletDefinition.isBullet = true;
+
+        const bodyId bulletBody =
+            world.CreateBody(
+                bulletDefinition
+            );
+
+        (void)world.CreateShape(
+            bulletBody,
+            circle2{ {}, 0.25f }
+        );
+
+        world.Step( 0.1f );
+
+        assert( world.IsBodyFast( bulletBody ) );
+        assert( world.IsBodyBullet( bulletBody ) );
+        assert( world.HadBodyTimeOfImpact( bulletBody ) );
+        assert( world.GetBodyTransform( bulletBody ).position.x < -0.25f );
+    }
+
     // BodyState는 non-static body의 선속도 / 각속도를 보관함.
     {
         world world{};

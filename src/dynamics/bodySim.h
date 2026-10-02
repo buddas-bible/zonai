@@ -47,6 +47,9 @@ struct bodySim
     // 이번 Step에서 CCD가 필요한 속도로 움직였는지 나타내는 transient 상태.
     bool isFast = false;
 
+    // 이번 Step에서 TOI가 실제 이동 fraction을 줄였는지 나타내는 debug 상태.
+    bool hadTimeOfImpact = false;
+
     // true면 MAX_ROTATION 기반 각속도 제한을 적용하지 않음.
     // 원형 바퀴처럼 빠른 회전이 안전한 body에만 사용함.
     bool allowFastRotation = false;

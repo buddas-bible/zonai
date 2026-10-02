@@ -27,7 +27,7 @@ struct bodyDef
     // 한 Step의 이동량이 shape 최소 두께의 이 비율을 넘으면 fast body로 분류함.
     float safetyFactor = 0.5f;
 
-    // bullet은 이후 CCD pass에서 dynamic / kinematic body까지 검사하기 위한 옵션임.
+    // bullet은 CCD에서 static뿐 아니라 kinematic / dynamic body까지 검사함.
     bool isBullet = false;
     bool allowFastRotation = false;
 };

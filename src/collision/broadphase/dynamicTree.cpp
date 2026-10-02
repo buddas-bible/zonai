@@ -481,6 +481,19 @@ const aabb2& dynamicTree::GetProxyAABB( std::int32_t proxyId ) const
     return nodes_[nodeIndex].aabb;
 }
 
+std::int32_t dynamicTree::GetProxyShapeIndex(
+    std::int32_t proxyId ) const
+{
+    assert( proxyId >= 0 );
+    assert( static_cast<std::size_t>( proxyId ) < proxies_.size() );
+    assert( proxies_[proxyId].node != NULL_INDEX );
+
+    return
+        static_cast<std::int32_t>(
+            proxies_[proxyId].userData
+        );
+}
+
 bool dynamicTree::IsLeaf( const treeNode& node )
 {
     return ( node.flagIndex & TREE_LEAF_NODE ) != 0;

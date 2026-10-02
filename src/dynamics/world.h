@@ -108,6 +108,9 @@ public:
     // 마지막 Step에서 continuous collision 후보로 분류됐는지 반환함.
     [[nodiscard]] bool IsBodyFast( bodyId bodyId ) const;
 
+    // 마지막 Step에서 실제 TOI로 이동이 잘렸는지 반환함.
+    [[nodiscard]] bool HadBodyTimeOfImpact( bodyId bodyId ) const;
+
 
     [[nodiscard]] float GetBodyMass( bodyId bodyId ) const;
     [[nodiscard]] float GetBodyRotationalInertia( bodyId bodyId ) const;
@@ -124,6 +127,9 @@ public:
 
     void SetSleepingEnabled( bool enabled );
     [[nodiscard]] bool IsSleepingEnabled() const noexcept;
+
+    void SetContinuousEnabled( bool enabled ) noexcept;
+    [[nodiscard]] bool IsContinuousEnabled() const noexcept;
 
 
     // Dynamic body에 world-space 힘을 누적함.
@@ -370,6 +376,11 @@ private:
         const islandGraph2& islandGraph,
         float timeStep );
 
+    // fast body의 swept path를 검사하고 가장 이른 TOI에서 delta transform을 잘라냄.
+    void SolveContinuousBody(
+        std::int32_t bodyIndex,
+        float timeStep );
+
     // stable Contact slot을 할당하고 두 body의 intrusive contact list에 연결함.
     [[nodiscard]] std::int32_t CreateContact(
         std::int32_t shapeIdA, std::int32_t shapeIdB,
@@ -456,6 +467,9 @@ private:
 
     // false면 모든 non-static body를 계속 awake 상태로 유지함.
     bool sleepingEnabled_ = true;
+
+    // false면 fast body를 분류만 하고 TOI pass는 실행하지 않음.
+    bool continuousEnabled_ = true;
 
     // 모든 shape의 broad-phase proxy를 body type별 DynamicTree에 관리함.
     broadPhase broadPhase_;
