@@ -1,5 +1,7 @@
 #include "collision/shape.h"
 
+#include "collision/constants.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -68,6 +70,78 @@ aabb2 ComputeShapeAABB(
         },
         geometry
     );
+}
+
+float ComputeShapeAABBMargin(
+    const shapeGeometry& geometry )
+{
+    const float shapeExtent =
+        std::visit(
+            []( const auto& localGeometry ) -> float
+            {
+                using Geometry =
+                    std::remove_cvref_t<decltype( localGeometry )>;
+
+                if constexpr( std::is_same_v<Geometry, std::monostate> )
+                {
+                    assert( false );
+                    return 0.0f;
+                }
+                else if constexpr( std::is_same_v<Geometry, circle2> )
+                {
+                    return localGeometry.radius;
+                }
+                else if constexpr( std::is_same_v<Geometry, capsule2> )
+                {
+                    return
+                        0.5f *
+                        Length(
+                            localGeometry.center2 -
+                            localGeometry.center1
+                        ) +
+                        localGeometry.radius;
+                }
+                else if constexpr( std::is_same_v<Geometry, segment2> )
+                {
+                    return
+                        0.5f *
+                        Length(
+                            localGeometry.b -
+                            localGeometry.a
+                        );
+                }
+                else
+                {
+                    float maxExtentSquared = 0.0f;
+
+                    for( int i = 0;
+                         i < localGeometry.vertexCount;
+                         ++i )
+                    {
+                        maxExtentSquared =
+                            std::max(
+                                maxExtentSquared,
+                                LengthSquared(
+                                    localGeometry.vertices[i] -
+                                    localGeometry.centroid
+                                )
+                            );
+                    }
+
+                    return
+                        std::sqrt(
+                            maxExtentSquared
+                        );
+                }
+            },
+            geometry
+        );
+
+    return
+        std::min(
+            MAX_AABB_MARGIN,
+            AABB_MARGIN_FRACTION * shapeExtent
+        );
 }
 
 shapeExtent2 ComputeShapeExtent(

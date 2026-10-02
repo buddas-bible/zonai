@@ -37,6 +37,22 @@ void broadPhase::MoveProxy( proxyKey proxyKey, const aabb2& aabb )
     GetTree( type ).MoveProxy( proxyId, aabb, true );
 }
 
+void broadPhase::EnlargeProxy(
+    proxyKey proxyKey,
+    const aabb2& aabb )
+{
+    const bodyType type =
+        GetProxyType( proxyKey );
+
+    const std::int32_t proxyId =
+        GetProxyId( proxyKey );
+
+    GetTree( type ).EnlargeProxy(
+        proxyId,
+        aabb
+    );
+}
+
 bool broadPhase::AddPair( shapePairKey pairKey )
 {
     return pairSet_.Add( pairKey );

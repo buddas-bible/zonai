@@ -131,6 +131,63 @@ void dynamicTree::MoveProxy( std::int32_t proxyId, const aabb2& aabb, bool markM
     InsertLeaf( newLeaf, false );
 }
 
+void dynamicTree::EnlargeProxy(
+    std::int32_t proxyId,
+    const aabb2& aabb )
+{
+    assert( IsValidAABB( aabb ) );
+    assert( proxyId >= 0 );
+    assert( static_cast<std::size_t>( proxyId ) < proxies_.size() );
+    assert( proxies_[proxyId].node != NULL_INDEX );
+
+    const std::int32_t leafIndex =
+        proxies_[proxyId].node;
+
+    assert( static_cast<std::size_t>( leafIndex ) < nodes_.size() );
+    assert( IsLeaf( nodes_[leafIndex] ) );
+    assert( GetProxyId( nodes_[leafIndex] ) == proxyId );
+
+    // EnlargeProxy는 shrink / teleport 용도가 아님.
+    // caller가 기존 leaf bounds를 포함하는 새 bounds를 전달해야 함.
+    assert(
+        ContainsAABB(
+            aabb,
+            nodes_[leafIndex].aabb
+        )
+    );
+
+    nodes_[leafIndex].aabb = aabb;
+    nodes_[leafIndex].flagIndex |= TREE_MOVED_NODE;
+
+    std::int32_t parentIndex =
+        parents_[leafIndex];
+
+    while( parentIndex != NULL_INDEX )
+    {
+        assert( parentIndex >= 0 );
+        assert( static_cast<std::size_t>( parentIndex ) < nodes_.size() );
+
+        treeNode& parent =
+            nodes_[parentIndex];
+
+        assert( !IsLeaf( parent ) );
+
+        const std::int32_t childPair =
+            GetChildPair( parent );
+
+        parent.aabb =
+            Union(
+                nodes_[childPair].aabb,
+                nodes_[childPair + 1].aabb
+            );
+
+        parent.flagIndex |= TREE_MOVED_NODE;
+
+        parentIndex =
+            parents_[parentIndex];
+    }
+}
+
 bool dynamicTree::HasMoved() const
 {
     if( proxyCount_ == 0 )

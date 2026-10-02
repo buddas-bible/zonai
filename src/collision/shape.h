@@ -8,6 +8,7 @@
 #include "geometry/polygon2.h"
 #include "geometry/segment2.h"
 
+#include "collision/aabb2.h"
 #include "collision/filter.h"
 #include "collision/massData2.h"
 #include "math/transform2.h"
@@ -56,6 +57,13 @@ struct shape
     // broadPhase에 등록된 proxy key. 아직 proxy가 없으면 NULL_INDEX임.
     std::int32_t proxyKey = NULL_INDEX;
 
+    // 현재 transform에서 geometry bounds에 speculative distance를 더한 AABB.
+    // narrowphase 후보 유지에 쓰이며 Dynamic Tree의 fat AABB와는 구분됨.
+    aabb2 aabb{};
+
+    // Dynamic Tree fat AABB에 추가하는 shape 크기 기반 margin.
+    float aabbMargin = 0.0f;
+
     // body local space에 저장되는 실제 collision geometry.
     // variant가 Box2D의 type + union 역할을 대신함.
     shapeGeometry geometry{};
@@ -77,6 +85,10 @@ struct shape
 aabb2 ComputeShapeAABB(
     const shapeGeometry& geometry,
     const transform2& transform );
+
+// Dynamic Tree fat AABB에 사용할 shape 크기 기반 margin을 계산함.
+float ComputeShapeAABBMargin(
+    const shapeGeometry& geometry );
 
 // localCenter 기준으로 CCD에 사용할 최소 / 최대 shape extent를 계산함.
 shapeExtent2 ComputeShapeExtent(

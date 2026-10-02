@@ -1968,12 +1968,12 @@ int main()
         assert( std::fabs( kinematicTransform.position.x + 2.0f ) < epsilon );
         assert( std::fabs( kinematicTransform.position.y - 5.0f ) < epsilon );
 
-        // local (1, 0)인 circle 중심도 body 회전에 따라 움직였는지 proxy AABB로 확인함.
-        const shape& movedShape = world.GetShape( dynamicShape );
+        // local (1, 0)인 circle 중심도 body 회전에 따라 움직였는지
+        // 현재 speculative shape AABB로 확인함.
         const aabb2& movedAABB =
-            world.GetBroadPhase()
-                .GetTree( bodyType::Dynamic )
-                .GetProxyAABB( GetProxyId( movedShape.proxyKey ) );
+            world.GetShapeAABB(
+                dynamicShape
+            );
 
         const float expectedCenterX = 2.0f;
         const float expectedCenterY = -0.5f;
@@ -2087,9 +2087,9 @@ int main()
         assert( body.shapeCount == 1 );
 
         const aabb2& circleAABB =
-            world.GetBroadPhase()
-                .GetTree( bodyType::Dynamic )
-                .GetProxyAABB( GetProxyId( circle.proxyKey ) );
+            world.GetShapeAABB(
+                circleId
+            );
 
         assert( std::fabs( circleAABB.min.x - ( 9.0f - SPECULATIVE_DISTANCE ) ) < epsilon );
         assert( std::fabs( circleAABB.min.y - ( 6.0f - SPECULATIVE_DISTANCE ) ) < epsilon );
@@ -2115,11 +2115,10 @@ int main()
             }
         );
 
-        const shape& movedCircle = world.GetShape( circleId );
         const aabb2& movedCircleAABB =
-            world.GetBroadPhase()
-                .GetTree( bodyType::Dynamic )
-                .GetProxyAABB( GetProxyId( movedCircle.proxyKey ) );
+            world.GetShapeAABB(
+                circleId
+            );
 
         assert( std::fabs( movedCircleAABB.min.x - ( 21.0f - SPECULATIVE_DISTANCE ) ) < epsilon );
         assert( std::fabs( movedCircleAABB.min.y - ( -4.0f - SPECULATIVE_DISTANCE ) ) < epsilon );
@@ -2704,6 +2703,248 @@ int main()
         );
 
         assert( contactCount == 0 );
+        assert( world.GetContactCount() == 0 );
+    }
+
+    // shape speculative AABB와 Dynamic Tree fat AABB는 서로 다른 bounds를 유지함.
+    {
+        world world{};
+
+        const bodyId bodyId =
+            world.CreateBody(
+                bodyType::Dynamic
+            );
+
+        const shapeId shapeId =
+            world.CreateShape(
+                bodyId,
+                circle2{ {}, 1.0f }
+            );
+
+        const aabb2& shapeAABB =
+            world.GetShapeAABB(
+                shapeId
+            );
+
+        const aabb2& fatAABB =
+            world.GetShapeFatAABB(
+                shapeId
+            );
+
+        assert(
+            std::fabs(
+                shapeAABB.min.x +
+                1.0f +
+                SPECULATIVE_DISTANCE
+            ) < epsilon
+        );
+
+        assert(
+            std::fabs(
+                fatAABB.min.x -
+                (
+                    shapeAABB.min.x -
+                    MAX_AABB_MARGIN
+                )
+            ) < epsilon
+        );
+
+        const shape& shape =
+            world.GetShape(
+                shapeId
+            );
+
+        const aabb2& treeAABB =
+            world.GetBroadPhase()
+                .GetTree(
+                    bodyType::Dynamic
+                )
+                .GetProxyAABB(
+                    GetProxyId(
+                        shape.proxyKey
+                    )
+                );
+
+        assert(
+            std::fabs(
+                treeAABB.min.x -
+                fatAABB.min.x
+            ) < epsilon
+        );
+
+        assert(
+            std::fabs(
+                treeAABB.max.x -
+                fatAABB.max.x
+            ) < epsilon
+        );
+    }
+
+    // 작은 이동은 기존 fat AABB 안에서 일어나므로 tree proxy를 갱신하지 않음.
+    {
+        world world{};
+
+        const bodyId bodyId =
+            world.CreateBody(
+                bodyType::Dynamic
+            );
+
+        const shapeId shapeId =
+            world.CreateShape(
+                bodyId,
+                circle2{ {}, 1.0f }
+            );
+
+        const shape& shapeBefore =
+            world.GetShape(
+                shapeId
+            );
+
+        const aabb2 treeBefore =
+            world.GetBroadPhase()
+                .GetTree(
+                    bodyType::Dynamic
+                )
+                .GetProxyAABB(
+                    GetProxyId(
+                        shapeBefore.proxyKey
+                    )
+                );
+
+        world.SetBodyTransform(
+            bodyId,
+            {
+                { 0.01f, 0.0f },
+                {}
+            }
+        );
+
+        const aabb2 treeAfter =
+            world.GetBroadPhase()
+                .GetTree(
+                    bodyType::Dynamic
+                )
+                .GetProxyAABB(
+                    GetProxyId(
+                        world.GetShape(
+                            shapeId
+                        ).proxyKey
+                    )
+                );
+
+        assert(
+            std::fabs(
+                treeAfter.min.x -
+                treeBefore.min.x
+            ) < epsilon
+        );
+
+        assert(
+            std::fabs(
+                treeAfter.max.x -
+                treeBefore.max.x
+            ) < epsilon
+        );
+
+        // current speculative AABB 자체는 새 transform으로 갱신되어야 함.
+        assert(
+            std::fabs(
+                world.GetShapeAABB(
+                    shapeId
+                ).min.x -
+                (
+                    -1.0f +
+                    0.01f -
+                    SPECULATIVE_DISTANCE
+                )
+            ) < epsilon
+        );
+    }
+
+    // Contact는 speculative AABB가 분리돼도 fat AABB가 겹치는 동안 유지됨.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId bodyA =
+            world.CreateBody(
+                bodyType::Dynamic
+            );
+
+        const shapeId shapeA =
+            world.CreateShape(
+                bodyA,
+                circle2{ {}, 1.0f }
+            );
+
+        const bodyId bodyB =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 2.0f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId shapeB =
+            world.CreateShape(
+                bodyB,
+                circle2{ {}, 1.0f }
+            );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        assert( world.GetContactCount() == 1 );
+
+        world.SetBodyTransform(
+            bodyB,
+            {
+                { 2.05f, 0.0f },
+                {}
+            }
+        );
+
+        assert(
+            !Overlaps(
+                world.GetShapeAABB( shapeA ),
+                world.GetShapeAABB( shapeB )
+            )
+        );
+
+        assert(
+            Overlaps(
+                world.GetShapeFatAABB( shapeA ),
+                world.GetShapeFatAABB( shapeB )
+            )
+        );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        assert( world.GetContactCount() == 1 );
+        assert( world.GetBodyContactCapacity( bodyA ) == 1 );
+
+        world.SetBodyTransform(
+            bodyB,
+            {
+                { 2.2f, 0.0f },
+                {}
+            }
+        );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
         assert( world.GetContactCount() == 0 );
     }
 

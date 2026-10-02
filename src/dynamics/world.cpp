@@ -337,7 +337,10 @@ shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilt
 
         shapeIndex = static_cast<std::int32_t>( shapes_.size() );
         shapes_.push_back( {} );
+        fatAABBs_.push_back( {} );
     }
+
+    assert( fatAABBs_.size() == shapes_.size() );
 
     shape& storedShape = shapes_[shapeIndex];
 
@@ -349,6 +352,10 @@ shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilt
     storedShape.geometry = std::move( geometry );
     storedShape.density = density;
     storedShape.filter = filter;
+    storedShape.aabbMargin =
+        ComputeShapeAABBMargin(
+            storedShape.geometry
+        );
 
     body& body = bodies_[bodyIndex];
 
@@ -358,21 +365,38 @@ shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilt
     const bodySim& bodySim = bodySims_[bodyIndex];
     assert( bodySim.bodyId == bodyIndex );
 
-    const aabb2 worldAABB =
-        ComputeShapeAABB( storedShape.geometry, bodySim.transform );
+    const aabb2 tightAABB =
+        ComputeShapeAABB(
+            storedShape.geometry,
+            bodySim.transform
+        );
 
-    const aabb2 proxyAABB =
+    storedShape.aabb =
         ExpandAABB(
-            worldAABB,
+            tightAABB,
             SPECULATIVE_DISTANCE
         );
 
-    // speculative contact가 실제 overlap 전에 broadPhase 후보가 되도록
-    // proxy에는 tight AABB보다 조금 넓은 bounds를 저장함.
+    // Static은 TOI tolerance 때문에 speculative distance를 한 번 더 사용하고,
+    // moving body는 shape 크기 기반 margin으로 persistent fat bounds를 만듦.
+    const float fatMargin =
+        body.type == bodyType::Static ?
+            SPECULATIVE_DISTANCE :
+            storedShape.aabbMargin;
+
+    aabb2& fatAABB =
+        fatAABBs_[shapeIndex];
+
+    fatAABB =
+        ExpandAABB(
+            storedShape.aabb,
+            fatMargin
+        );
+
     storedShape.proxyKey =
         broadPhase_.CreateProxy(
             body.type,
-            proxyAABB,
+            fatAABB,
             shapeIndex,
             true
         );
@@ -439,6 +463,21 @@ float world::GetShapeRestitution( shapeId shapeId ) const
     return shapes_[GetShapeIndex( shapeId )].restitution;
 }
 
+const aabb2& world::GetShapeAABB( shapeId shapeId ) const
+{
+    return
+        shapes_[GetShapeIndex( shapeId )]
+            .aabb;
+}
+
+const aabb2& world::GetShapeFatAABB( shapeId shapeId ) const
+{
+    assert( fatAABBs_.size() == shapes_.size() );
+
+    return
+        fatAABBs_[GetShapeIndex( shapeId )];
+}
+
 void world::DestroyShapeByIndex( std::int32_t shapeIndex )
 {
     assert( shapeIndex >= 0 );
@@ -496,6 +535,7 @@ void world::DestroyShapeByIndex( std::int32_t shapeIndex )
 
     // generation은 보존하고 slot만 free-list에 반환함.
     shape = {};
+    fatAABBs_[shapeIndex] = {};
     shape.generation = generation;
     shape.nextFreeId = shapeFreeList_;
     shapeFreeList_ = shapeIndex;
@@ -552,18 +592,51 @@ void world::SyncBodyProxies( std::int32_t bodyIndex )
 
         assert( shape.bodyId == bodyIndex );
 
-        const aabb2 worldAABB = ComputeShapeAABB( shape.geometry, bodySim.transform );
+        const aabb2 tightAABB =
+            ComputeShapeAABB(
+                shape.geometry,
+                bodySim.transform
+            );
 
-        const aabb2 proxyAABB =
+        shape.aabb =
             ExpandAABB(
-                worldAABB,
+                tightAABB,
                 SPECULATIVE_DISTANCE
             );
 
-        // disabled body 개념이 들어오면 proxy가 없는 shape는 그대로 건너뜀.
+        assert( fatAABBs_.size() == shapes_.size() );
+
+        aabb2& fatAABB =
+            fatAABBs_[shapeId];
+
+        // 현재 speculative bounds가 기존 fat bounds 안에 있으면 tree를 건드리지 않음.
+        if( ContainsAABB(
+                fatAABB,
+                shape.aabb ) )
+        {
+            shapeId = shape.nextShapeId;
+            ++visitedCount;
+            continue;
+        }
+
+        const float fatMargin =
+            body.type == bodyType::Static ?
+                SPECULATIVE_DISTANCE :
+                shape.aabbMargin;
+
+        fatAABB =
+            ExpandAABB(
+                shape.aabb,
+                fatMargin
+            );
+
+        // fat bounds를 벗어난 경우에만 새 pair 탐색 대상으로 proxy를 갱신함.
         if( shape.proxyKey != shape::NULL_INDEX )
         {
-            broadPhase_.MoveProxy( shape.proxyKey, proxyAABB );
+            broadPhase_.MoveProxy(
+                shape.proxyKey,
+                fatAABB
+            );
         }
 
         shapeId = shape.nextShapeId;

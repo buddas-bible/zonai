@@ -64,6 +64,10 @@ public:
     void SetShapeRestitution( shapeId shapeId, float restitution );
     [[nodiscard]] float GetShapeRestitution( shapeId shapeId ) const;
 
+    // 현재 shape의 speculative AABB와 broad-phase fat AABB를 반환함.
+    [[nodiscard]] const aabb2& GetShapeAABB( shapeId shapeId ) const;
+    [[nodiscard]] const aabb2& GetShapeFatAABB( shapeId shapeId ) const;
+
     // body transform을 변경하고 연결된 모든 shape proxy의 world AABB를 함께 갱신함.
     void SetBodyTransform( bodyId bodyId, transform2 transform );
 
@@ -194,18 +198,16 @@ public:
             assert( shapeA.proxyKey != shape::NULL_INDEX );
             assert( shapeB.proxyKey != shape::NULL_INDEX );
 
-            const aabb2& aabbA =
-                broadPhase_
-                    .GetTree( GetProxyType( shapeA.proxyKey ) )
-                    .GetProxyAABB( GetProxyId( shapeA.proxyKey ) );
+            assert( fatAABBs_.size() == shapes_.size() );
 
-            const aabb2& aabbB =
-                broadPhase_
-                    .GetTree( GetProxyType( shapeB.proxyKey ) )
-                    .GetProxyAABB( GetProxyId( shapeB.proxyKey ) );
+            const aabb2& fatAABBA =
+                fatAABBs_[contact.shapeIdA];
 
-            // AABB pair 자체가 끝났으면 Contact와 pairSet을 함께 제거함.
-            if( !Overlaps( aabbA, aabbB ) )
+            const aabb2& fatAABBB =
+                fatAABBs_[contact.shapeIdB];
+
+            // persistent broad-phase bounds가 완전히 분리됐을 때 Contact를 제거함.
+            if( !Overlaps( fatAABBA, fatAABBB ) )
             {
                 DestroyContact( contactId );
                 continue;
@@ -437,6 +439,10 @@ private:
     /// shape
     // shapeId가 변하지 않는 stable slot storage.
     std::vector<shape> shapes_;
+
+    // shape와 같은 stable slot index로 보관하는 broad-phase fat AABB.
+    // tree proxy bounds와 동일한 값을 유지하되 Contact lifetime에서도 직접 사용함.
+    std::vector<aabb2> fatAABBs_;
 
     // 제거된 shape slot 재사용을 위한 free-list head.
     std::int32_t shapeFreeList_ = shape::NULL_INDEX;

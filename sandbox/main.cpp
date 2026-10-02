@@ -512,7 +512,8 @@ int main()
 
     bool playing = false;
     bool showGrid = true;
-    bool showAABBs = true;
+    bool showShapeAABBs = true;
+    bool showFatAABBs = false;
     bool showContacts = true;
     bool showContactDetails = true;
     bool showCOM = true;
@@ -1278,8 +1279,12 @@ int main()
             &showGrid
         );
         ImGui::Checkbox(
-            "shape AABBs",
-            &showAABBs
+            "Shape AABBs",
+            &showShapeAABBs
+        );
+        ImGui::Checkbox(
+            "Fat AABBs",
+            &showFatAABBs
         );
         ImGui::Checkbox(
             "Contact points",
@@ -1593,6 +1598,9 @@ int main()
         constexpr ImU32 AABB_COLOR =
             IM_COL32( 210, 100, 230, 210 );
 
+        constexpr ImU32 FAT_AABB_COLOR =
+            IM_COL32( 255, 185, 80, 190 );
+
         constexpr ImU32 LABEL_COLOR =
             IM_COL32( 230, 232, 238, 255 );
 
@@ -1632,23 +1640,23 @@ int main()
                 colors.fill
             );
 
-            if( showAABBs &&
-                shapeRef.proxyKey != shape::NULL_INDEX )
+            if( showShapeAABBs )
             {
-                const dynamicTree& tree =
-                    phase.GetTree(
-                        GetProxyType(
-                            shapeRef.proxyKey
-                        )
-                    );
-
                 debugDraw.DrawAABB(
-                    tree.GetProxyAABB(
-                        GetProxyId(
-                            shapeRef.proxyKey
-                        )
+                    scene->world.GetShapeAABB(
+                        visual.shapeHandle
                     ),
                     AABB_COLOR
+                );
+            }
+
+            if( showFatAABBs )
+            {
+                debugDraw.DrawAABB(
+                    scene->world.GetShapeFatAABB(
+                        visual.shapeHandle
+                    ),
+                    FAT_AABB_COLOR
                 );
             }
 

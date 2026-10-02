@@ -100,6 +100,10 @@ public:
 
     void MoveProxy( std::int32_t proxyId, const aabb2& aabb, bool markMoved = false );
 
+    // 기존 proxy bounds를 포함하는 더 큰 AABB로 leaf를 넓히고
+    // topology는 유지한 채 ancestor bounds와 moved flag만 갱신함.
+    void EnlargeProxy( std::int32_t proxyId, const aabb2& aabb );
+
     bool HasMoved() const;
 
     // moved branch가 있거나 DFS 배열 순서가 깨졌으면 rebuild가 필요함.

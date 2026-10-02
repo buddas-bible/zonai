@@ -414,6 +414,60 @@ int main()
     }
 
     {
+        dynamicTree enlargeTree{};
+
+        const aabb2 boxA{
+            { 0.0f, 0.0f },
+            { 1.0f, 1.0f }
+        };
+
+        const aabb2 boxB{
+            { 3.0f, 0.0f },
+            { 4.0f, 1.0f }
+        };
+
+        const std::int32_t proxyA =
+            enlargeTree.CreateProxy(
+                boxA,
+                1
+            );
+
+        enlargeTree.CreateProxy(
+            boxB,
+            2
+        );
+
+        const aabb2 enlargedA{
+            { -0.5f, -0.5f },
+            {  1.5f,  1.5f }
+        };
+
+        enlargeTree.EnlargeProxy(
+            proxyA,
+            enlargedA
+        );
+
+        assert(
+            NearlyEqual(
+                enlargeTree.GetProxyAABB(
+                    proxyA
+                ),
+                enlargedA
+            )
+        );
+
+        assert( enlargeTree.HasMoved() );
+        assert( enlargeTree.NeedsRebuild() );
+        assert( enlargeTree.Validate() );
+
+        enlargeTree.Rebuild( false );
+
+        assert( !enlargeTree.HasMoved() );
+        assert( !enlargeTree.NeedsRebuild() );
+        assert( enlargeTree.Validate() );
+    }
+
+    {
         dynamicTree rebuildStateTree{};
 
         assert( rebuildStateTree.NeedsRebuild() == false );

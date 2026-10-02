@@ -4,6 +4,7 @@
 #include <limits>
 #include <variant>
 
+#include "collision/constants.h"
 #include "collision/shape.h"
 #include "collision/shapeProxy2.h"
 
@@ -42,6 +43,39 @@ int main()
 
     constexpr float epsilon = 1e-4f;
     constexpr float pi = 3.14159265358979323846f;
+
+    // Dynamic Tree fat margin은 shape 크기의 12.5%를 사용하되 5cm를 넘지 않음.
+    {
+        assert(
+            std::fabs(
+                ComputeShapeAABBMargin(
+                    circle2{ {}, 1.0f }
+                ) -
+                MAX_AABB_MARGIN
+            ) < epsilon
+        );
+
+        assert(
+            std::fabs(
+                ComputeShapeAABBMargin(
+                    circle2{ {}, 0.2f }
+                ) -
+                0.025f
+            ) < epsilon
+        );
+
+        assert(
+            std::fabs(
+                ComputeShapeAABBMargin(
+                    segment2{
+                        { -0.2f, 0.0f },
+                        {  0.2f, 0.0f }
+                    }
+                ) -
+                0.025f
+            ) < epsilon
+        );
+    }
 
     // CCD extent는 local center 기준 최소 두께와 최대 반경을 계산함.
     {
