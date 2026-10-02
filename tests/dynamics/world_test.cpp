@@ -1288,6 +1288,45 @@ int main()
         );
     }
 
+    // allowFastRotation body는 MAX_ROTATION 기반 각속도 제한을 우회함.
+    {
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId bodyId =
+            world.CreateBody( bodyType::Dynamic );
+
+        (void)world.CreateShape(
+            bodyId,
+            circle2{ {}, 1.0f }
+        );
+
+        assert( !world.IsBodyFastRotationAllowed( bodyId ) );
+
+        world.SetBodyFastRotationAllowed(
+            bodyId,
+            true
+        );
+
+        assert( world.IsBodyFastRotationAllowed( bodyId ) );
+
+        world.SetBodyAngularVelocity(
+            bodyId,
+            20.0f
+        );
+
+        world.Step( 0.1f, 2 );
+
+        // 일반 body라면 maxAngularSpeed = MAX_ROTATION / 0.1 이지만
+        // fast rotation을 허용했으므로 원래 각속도를 그대로 유지함.
+        assert(
+            std::fabs(
+                world.GetBodyAngularVelocity( bodyId ) -
+                20.0f
+            ) < epsilon
+        );
+    }
+
     // 기본 gravity는 Dynamic body의 COM velocity에만 적용됨.
     {
         world world{};

@@ -82,6 +82,9 @@ public:
     void SetBodyGravityScale( bodyId bodyId, float scale );
     [[nodiscard]] float GetBodyGravityScale( bodyId bodyId ) const;
 
+    void SetBodyFastRotationAllowed( bodyId bodyId, bool allowed );
+    [[nodiscard]] bool IsBodyFastRotationAllowed( bodyId bodyId ) const;
+
 
     void SetBodyAwake( bodyId bodyId, bool awake );
     [[nodiscard]] bool IsBodyAwake( bodyId bodyId ) const;

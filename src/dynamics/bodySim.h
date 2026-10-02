@@ -40,6 +40,10 @@ struct bodySim
     // Kinematic / Static은 invMass가 0이므로 solver에서 gravity를 적용하지 않음.
     float gravityScale = 1.0f;
 
+    // true면 MAX_ROTATION 기반 각속도 제한을 적용하지 않음.
+    // 원형 바퀴처럼 빠른 회전이 안전한 body에만 사용함.
+    bool allowFastRotation = false;
+
     // local center of mass에서 가장 먼 shape bounds까지의 거리.
     // 회전 속도를 실제 body point의 선속도로 환산할 때 사용함.
     float maxExtent = 0.0f;

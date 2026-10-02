@@ -1263,6 +1263,22 @@ float world::GetBodyGravityScale( bodyId bodyId ) const
     return bodySims_[bodyIndex].gravityScale;
 }
 
+void world::SetBodyFastRotationAllowed( bodyId bodyId, bool allowed )
+{
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    bodySims_[bodyIndex].allowFastRotation = allowed;
+}
+
+bool world::IsBodyFastRotationAllowed( bodyId bodyId ) const
+{
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( bodySims_.size() == bodies_.size() );
+    return bodySims_[bodyIndex].allowFastRotation;
+}
+
 void world::SetBodyAwake( bodyId bodyId, bool awake )
 {
     const std::int32_t bodyIndex =
@@ -1861,7 +1877,8 @@ void world::Step( float timeStep, int subStepCount )
 
                     const float angularSpeedSquared = bodyState.angularVelocity * bodyState.angularVelocity;
 
-                    if( angularSpeedSquared > maxAngularSpeedSquared )
+                    if( angularSpeedSquared > maxAngularSpeedSquared &&
+                        !bodySim.allowFastRotation )
                     {
                         const float ratio = maxAngularSpeed / std::abs( bodyState.angularVelocity );
                         bodyState.angularVelocity *= ratio;
