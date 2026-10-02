@@ -105,6 +105,23 @@ void debugDraw::DrawShape(
                     outlineColor,
                     fillColor
                 );
+
+                // 원은 외곽선만으로 회전을 구분할 수 없으므로
+                // body local +X 방향을 원 둘레까지 그려 회전 상태를 표시함.
+                const vec2 rotationDirection =
+                    TransformVector(
+                        transform,
+                        { localGeometry.radius, 0.0f }
+                    );
+
+                DrawSegment(
+                    {
+                        worldCircle.center,
+                        worldCircle.center + rotationDirection
+                    },
+                    outlineColor,
+                    2.0f
+                );
             }
             else if constexpr( std::is_same_v<Geometry, capsule2> )
             {
