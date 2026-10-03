@@ -147,19 +147,13 @@ int main()
         const localManifold2 manifold =
             CollidePolygons( a, b, transformB );
 
-        assert( manifold.pointCount > 0 );
-        assert( manifold.pointCount <= MAX_MANIFOLD_POINTS );
+        assert( manifold.pointCount == 2 );
         assert( NearlyEqual( Length( manifold.normal ), 1.0f, 1e-4f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
 
-        for( std::size_t i = 0; i < manifold.pointCount; ++i )
-        {
-            assert( manifold.points[i].separation <= 0.0f );
-        }
-
-        if( manifold.pointCount == 2 )
-        {
-            assert( manifold.points[0].id != manifold.points[1].id );
-        }
+        // Clip된 두 점 중 한 점은 positive separation일 수 있다.
+        // 적어도 한 점이 실제 접촉이면 manifold는 touching으로 취급된다.
+        assert( IsTouchingManifold( manifold ) );
     }
 
     {
@@ -179,6 +173,7 @@ int main()
 
         assert( manifold.pointCount == 2 );
         assert( manifold.points[0].id != manifold.points[1].id );
+        assert( IsTouchingManifold( manifold ) );
     }
 
     return 0;
