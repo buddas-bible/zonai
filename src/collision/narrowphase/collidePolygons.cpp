@@ -128,8 +128,7 @@ void AddContactPoint(
     float separation,
     std::uint16_t id )
 {
-    if( separation > SPECULATIVE_DISTANCE ||
-        manifold.pointCount >= MAX_MANIFOLD_POINTS )
+    if( manifold.pointCount >= MAX_MANIFOLD_POINTS )
     {
         return;
     }
