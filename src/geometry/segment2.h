@@ -1,9 +1,9 @@
-﻿#pragma once
+#pragma once
 
 #include <algorithm>
 
-#include "math/vec2.h"
 #include "collision/aabb2.h"
+#include "math/vec2.h"
 
 namespace zonai
 {
@@ -12,7 +12,7 @@ struct segment2
 {
     vec2 a{};
     vec2 b{};
-}; // sizeof: 16 bytes
+};
 
 inline vec2 Direction( const segment2& segment )
 {
@@ -21,12 +21,12 @@ inline vec2 Direction( const segment2& segment )
 
 inline float LengthSquared( const segment2& segment )
 {
-    return zonai::LengthSquared( Direction( segment ) );
+    return LengthSquared( Direction( segment ) );
 }
 
 inline float Length( const segment2& segment )
 {
-    return zonai::Length( Direction( segment ) );
+    return Length( Direction( segment ) );
 }
 
 inline aabb2 ComputeAABB( const segment2& segment )
@@ -47,25 +47,28 @@ inline aabb2 ComputeAABB( const segment2& segment )
 inline vec2 ClosestPoint( const segment2& segment, const vec2& point )
 {
     const vec2 ab = segment.b - segment.a;
-    const float lengthSquared = zonai::LengthSquared( ab );
+    const float lengthSquared = LengthSquared( ab );
 
     if( lengthSquared == 0.0f )
     {
         return segment.a;
     }
 
-    float t = zonai::Dot( point - segment.a, ab ) / lengthSquared;
+    const float projection =
+        Dot( point - segment.a, ab ) /
+        lengthSquared;
 
-    t = std::clamp( t, 0.0f, 1.0f );
+    const float t =
+        std::clamp( projection, 0.0f, 1.0f );
 
     return segment.a + ab * t;
 }
 
 inline float DistanceSquared( const segment2& segment, const vec2& point )
 {
-    const vec2 closest = zonai::ClosestPoint( segment, point );
+    const vec2 closest = ClosestPoint( segment, point );
 
-    return zonai::LengthSquared( point - closest );
+    return LengthSquared( point - closest );
 }
 
 } // namespace zonai
