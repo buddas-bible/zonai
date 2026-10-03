@@ -71,6 +71,34 @@ add_test(
     COMMAND circle2Tests
 )
 
+add_executable(segment2Tests
+    geometry/segment2_test.cpp
+)
+
+target_link_libraries(segment2Tests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME segment2Tests
+    COMMAND segment2Tests
+)
+
+add_executable(capsule2Tests
+    geometry/capsule2_test.cpp
+)
+
+target_link_libraries(capsule2Tests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME capsule2Tests
+    COMMAND capsule2Tests
+)
+
 add_executable(polygon2Tests
     geometry/polygon2_test.cpp
 )
