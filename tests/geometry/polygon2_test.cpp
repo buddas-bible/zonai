@@ -26,9 +26,9 @@ float SignedArea2( const polygon2& polygon )
 {
     float area2 = 0.0f;
 
-    for( std::size_t i = 0; i < polygon.vertexCount; ++i )
+    for( int i = 0; i < polygon.vertexCount; ++i )
     {
-        const std::size_t next = ( i + 1 ) % polygon.vertexCount;
+        const int next = ( i + 1 ) % polygon.vertexCount;
         area2 += Cross( polygon.vertices[i], polygon.vertices[next] );
     }
 
@@ -65,6 +65,19 @@ int main()
         assert( NearlyEqual( capsule.normals[0], { 0.0f, -1.0f } ) );
         assert( NearlyEqual( capsule.normals[1], { 0.0f, 1.0f } ) );
         assert( NearlyEqual( capsule.radius, 0.5f ) );
+    }
+
+    {
+        // epsilon보다 충분히 긴 작은 core도 정상 capsule로 유지해야 함.
+        const polygon2 capsule = MakeCapsule(
+            { 0.0f, 0.0f },
+            { 1.0e-5f, 0.0f },
+            0.1f
+        );
+
+        assert( capsule.vertexCount == 2 );
+        assert( NearlyEqual( capsule.normals[0], { 0.0f, -1.0f } ) );
+        assert( NearlyEqual( capsule.normals[1], { 0.0f, 1.0f } ) );
     }
 
     {

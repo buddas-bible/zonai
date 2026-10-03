@@ -1,6 +1,8 @@
 #pragma once
+
 #include <cassert>
 #include <cmath>
+#include <limits>
 
 namespace zonai
 {
@@ -35,10 +37,10 @@ struct vec2
     {
         assert( scalar != 0.0f );
 
-        float temp = 1.0f / scalar;
+        const float inverseScalar = 1.0f / scalar;
 
-        x *= temp;
-        y *= temp;
+        x *= inverseScalar;
+        y *= inverseScalar;
         return *this;
     }
 };
@@ -74,27 +76,28 @@ inline vec2 operator*( float scalar, vec2 value )
 
 inline vec2 operator/( vec2 value, float scalar )
 {
-    assert( scalar != 0.0f );
-
-    float temp = 1.0f / scalar;
-    value *= temp;
+    value /= scalar;
     return value;
 }
 
-// 벡터 a와 b의 내적(dot product)을 계산하여 반환합니다.
+inline bool IsFinite( const vec2& value )
+{
+    return
+        std::isfinite( value.x ) &&
+        std::isfinite( value.y );
+}
+
 inline float Dot( const vec2& a, const vec2& b )
 {
     return a.x * b.x + a.y * b.y;
 }
 
-// 벡터 a와 b의 외적(cross product)을 계산하여 z축 scalar를 반환합니다.
 inline float Cross( const vec2& a, const vec2& b )
 {
     return a.x * b.y - a.y * b.x;
 }
 
-// z축 scalar와 XY 벡터의 외적을 계산합니다.
-// angular velocity * 위치 벡터로 회전에 의한 선속도를 구할 때 사용함.
+// z scalar x XY vector.
 inline vec2 Cross( float scalar, const vec2& vector )
 {
     return
@@ -104,7 +107,7 @@ inline vec2 Cross( float scalar, const vec2& vector )
     };
 }
 
-// XY 벡터와 z축 scalar의 외적을 계산합니다.
+// XY vector x z scalar.
 inline vec2 Cross( const vec2& vector, float scalar )
 {
     return
@@ -114,29 +117,31 @@ inline vec2 Cross( const vec2& vector, float scalar )
     };
 }
 
-// 벡터 value의 길이(length)의 제곱을 계산하여 반환합니다.
 inline float LengthSquared( const vec2& value )
 {
     return Dot( value, value );
 }
 
-// 벡터 value의 길이(length)를 계산하여 반환합니다.
 inline float Length( const vec2& value )
 {
     return std::sqrt( LengthSquared( value ) );
 }
 
-// 벡터 value를 정규화(normalize)하여 반환합니다.
 inline vec2 Normalize( const vec2& value )
 {
-    const float length = Length( value );
+    const float lengthSquared =
+        LengthSquared( value );
 
-    if( length == 0.0f )
+    if( lengthSquared <=
+        1000.0f * std::numeric_limits<float>::min() )
     {
         return {};
     }
 
-    return value / length;
+    const float inverseLength =
+        1.0f / std::sqrt( lengthSquared );
+
+    return value * inverseLength;
 }
 
-}
+} // namespace zonai

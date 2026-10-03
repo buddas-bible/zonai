@@ -1,5 +1,6 @@
 #include <cassert>
 #include <cmath>
+#include <limits>
 
 #include "math/vec2.h"
 
@@ -75,6 +76,26 @@ int main()
 
         assert(normalized.x == 0.0f);
         assert(normalized.y == 0.0f);
+    }
+
+    {
+        const vec2 tiny{ 1.0e-20f, 0.0f };
+        const vec2 normalized = Normalize( tiny );
+
+        assert( normalized.x == 0.0f );
+        assert( normalized.y == 0.0f );
+    }
+
+    {
+        assert( IsFinite( { 1.0f, -2.0f } ) );
+        assert( !IsFinite( { std::numeric_limits<float>::infinity(), 0.0f } ) );
+    }
+
+    {
+        const vec2 result = vec2{ 6.0f, -3.0f } / 3.0f;
+
+        assert( result.x == 2.0f );
+        assert( result.y == -1.0f );
     }
 
     return 0;

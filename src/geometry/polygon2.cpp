@@ -2,32 +2,52 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cfloat>
 #include <cmath>
+#include <limits>
 
 namespace zonai
 {
 
 polygon2 MakeBox( const vec2& halfExtents )
 {
-    const std::array<vec2, 4> vertices =
+    if( !IsFinite( halfExtents ) ||
+        halfExtents.x <= 0.0f ||
+        halfExtents.y <= 0.0f )
     {
-        vec2{ -halfExtents.x, -halfExtents.y },
-        vec2{  halfExtents.x, -halfExtents.y },
-        vec2{  halfExtents.x,  halfExtents.y },
-        vec2{ -halfExtents.x,  halfExtents.y }
-    };
+        assert( false );
+        return {};
+    }
 
-    return MakePolygon( vertices );
+    polygon2 box{};
+    box.vertices[0] = { -halfExtents.x, -halfExtents.y };
+    box.vertices[1] = {  halfExtents.x, -halfExtents.y };
+    box.vertices[2] = {  halfExtents.x,  halfExtents.y };
+    box.vertices[3] = { -halfExtents.x,  halfExtents.y };
+    box.normals[0] = { 0.0f, -1.0f };
+    box.normals[1] = { 1.0f,  0.0f };
+    box.normals[2] = { 0.0f,  1.0f };
+    box.normals[3] = { -1.0f, 0.0f };
+    box.vertexCount = 4;
+    return box;
 }
 
 polygon2 MakeCapsule( const vec2& center1, const vec2& center2, float radius )
 {
     polygon2 capsule{};
 
-    const vec2 direction = center2 - center1;
+    if( !IsFinite( center1 ) ||
+        !IsFinite( center2 ) ||
+        !std::isfinite( radius ) ||
+        radius < 0.0f )
+    {
+        assert( false );
+        return capsule;
+    }
 
-    if( LengthSquared( direction ) <= FLT_EPSILON )
+    const vec2 direction = center2 - center1;
+    constexpr float epsilon = std::numeric_limits<float>::epsilon();
+
+    if( LengthSquared( direction ) <= epsilon * epsilon )
     {
         assert( false );
         return capsule;
@@ -57,18 +77,24 @@ polygon2 MakePolygon( std::span<const vec2> vertices )
         return polygon;
     }
 
-    polygon.vertexCount = vertices.size();
+    polygon.vertexCount = static_cast<int>( vertices.size() );
 
-    for( std::size_t i = 0; i < polygon.vertexCount; ++i )
+    for( int i = 0; i < polygon.vertexCount; ++i )
     {
+        if( !IsFinite( vertices[i] ) )
+        {
+            assert( false );
+            return {};
+        }
+
         polygon.vertices[i] = vertices[i];
     }
 
     float area2 = 0.0f;
 
-    for( std::size_t i = 0; i < polygon.vertexCount; ++i )
+    for( int i = 0; i < polygon.vertexCount; ++i )
     {
-        const std::size_t next = ( i + 1 ) % polygon.vertexCount;
+        const int next = ( i + 1 ) % polygon.vertexCount;
         area2 += Cross( polygon.vertices[i], polygon.vertices[next] );
     }
 
@@ -88,9 +114,9 @@ polygon2 MakePolygon( std::span<const vec2> vertices )
         );
     }
 
-    for( std::size_t i = 0; i < polygon.vertexCount; ++i )
+    for( int i = 0; i < polygon.vertexCount; ++i )
     {
-        const std::size_t next = ( i + 1 ) % polygon.vertexCount;
+        const int next = ( i + 1 ) % polygon.vertexCount;
         const vec2 edge = polygon.vertices[next] - polygon.vertices[i];
 
         if( LengthSquared( edge ) <= epsilon * epsilon )
@@ -102,10 +128,10 @@ polygon2 MakePolygon( std::span<const vec2> vertices )
         polygon.normals[i] = Normalize( { edge.y, -edge.x } );
     }
 
-    for( std::size_t i = 0; i < polygon.vertexCount; ++i )
+    for( int i = 0; i < polygon.vertexCount; ++i )
     {
-        const std::size_t next = ( i + 1 ) % polygon.vertexCount;
-        const std::size_t nextNext = ( i + 2 ) % polygon.vertexCount;
+        const int next = ( i + 1 ) % polygon.vertexCount;
+        const int nextNext = ( i + 2 ) % polygon.vertexCount;
 
         const vec2 edge1 = polygon.vertices[next] - polygon.vertices[i];
         const vec2 edge2 = polygon.vertices[nextNext] - polygon.vertices[next];
@@ -120,9 +146,9 @@ polygon2 MakePolygon( std::span<const vec2> vertices )
     vec2 centroid{};
     float crossSum = 0.0f;
 
-    for( std::size_t i = 0; i < polygon.vertexCount; ++i )
+    for( int i = 0; i < polygon.vertexCount; ++i )
     {
-        const std::size_t next = ( i + 1 ) % polygon.vertexCount;
+        const int next = ( i + 1 ) % polygon.vertexCount;
 
         const vec2& a = polygon.vertices[i];
         const vec2& b = polygon.vertices[next];
@@ -154,7 +180,7 @@ aabb2 ComputeAABB( const polygon2& polygon )
     vec2 min = polygon.vertices[0];
     vec2 max = polygon.vertices[0];
 
-    for( std::size_t i = 1; i < polygon.vertexCount; ++i )
+    for( int i = 1; i < polygon.vertexCount; ++i )
     {
         const vec2& vertex = polygon.vertices[i];
 
