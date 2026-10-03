@@ -1,7 +1,7 @@
 #pragma once
 
-#include "math/vec2.h"
 #include "collision/aabb2.h"
+#include "math/vec2.h"
 
 namespace zonai
 {
@@ -10,7 +10,7 @@ struct circle2
 {
     vec2 center{};
     float radius = 0.0f;
-}; // sizeof: 12 bytes
+};
 
 inline aabb2 ComputeAABB( const circle2& circle )
 {
