@@ -47,7 +47,8 @@ polygon2 MakeCapsule( const vec2& center1, const vec2& center2, float radius )
     const vec2 direction = center2 - center1;
     constexpr float epsilon = std::numeric_limits<float>::epsilon();
 
-    if( LengthSquared( direction ) <= epsilon * epsilon )
+    // 2-vertex core가 안정적인 normal을 가지도록 충분한 길이를 요구함.
+    if( LengthSquared( direction ) <= epsilon )
     {
         assert( false );
         return capsule;
