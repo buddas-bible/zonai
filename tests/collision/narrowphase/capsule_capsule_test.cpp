@@ -61,6 +61,7 @@ int main()
         assert( NearlyEqual( manifold.normal, { 1.0f, 0.0f } ) );
         assert( NearlyEqual( manifold.points[0].point, { 1.5f, 0.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
+        assert( manifold.points[0].id != 0 );
     }
 
     {
