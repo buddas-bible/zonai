@@ -69,6 +69,7 @@ int main()
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
         assert( NearlyEqual( manifold.points[1].separation, 0.0f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
         assert( HasPoint( manifold, { -1.0f, 1.0f } ) );
         assert( HasPoint( manifold, { 1.0f, 1.0f } ) );
     }
@@ -88,6 +89,7 @@ int main()
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, -0.5f ) );
         assert( NearlyEqual( manifold.points[1].separation, -0.5f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
     }
 
     {
@@ -106,6 +108,7 @@ int main()
         assert( NearlyEqual( manifold.normal, { 1.0f, 0.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
         assert( NearlyEqual( manifold.points[1].separation, 0.0f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
         assert( HasPoint( manifold, { 1.0f, -1.0f } ) );
         assert( HasPoint( manifold, { 1.0f, 1.0f } ) );
     }
@@ -127,6 +130,7 @@ int main()
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
         assert( NearlyEqual( manifold.points[1].separation, 0.0f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
         assert( HasPoint( manifold, { -1.0f, 1.25f } ) );
         assert( HasPoint( manifold, { 1.0f, 1.25f } ) );
     }
@@ -150,6 +154,11 @@ int main()
         for( std::size_t i = 0; i < manifold.pointCount; ++i )
         {
             assert( manifold.points[i].separation <= 0.0f );
+        }
+
+        if( manifold.pointCount == 2 )
+        {
+            assert( manifold.points[0].id != manifold.points[1].id );
         }
     }
 
