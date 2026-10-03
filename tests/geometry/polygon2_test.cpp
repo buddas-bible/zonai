@@ -68,10 +68,10 @@ int main()
     }
 
     {
-        // epsilon보다 충분히 긴 작은 core도 정상 capsule로 유지해야 함.
+        // Box2D의 core-length invariant를 만족하는 작은 capsule도 정상 처리해야 함.
         const polygon2 capsule = MakeCapsule(
             { 0.0f, 0.0f },
-            { 1.0e-5f, 0.0f },
+            { 1.0e-3f, 0.0f },
             0.1f
         );
 
