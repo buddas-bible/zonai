@@ -29,6 +29,20 @@ int main()
         assert( cache.count > 0 );
     }
 
+    // search direction이 float 정밀도보다 작으면 GJK를 더 진행하지 않고 overlap으로 처리함.
+    {
+        distanceInput2 input{};
+        input.proxyA = MakeShapeProxy( circle2{ {}, 0.0f } );
+        input.proxyB = MakeShapeProxy( circle2{ {}, 0.0f } );
+        input.transform.position = { 1.0e-8f, 0.0f };
+
+        simplexCache2 cache{};
+        const distanceOutput2 output = ShapeDistance( input, cache );
+
+        assert( output.distance == 0.0f );
+        assert( output.iterations == 0 );
+    }
+
     // circle radius를 포함하면 표면 사이 거리는 center distance - rA - rB.
     {
         distanceInput2 input{};
