@@ -82,6 +82,7 @@ int main()
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
         assert( NearlyEqual( manifold.points[1].separation, 0.0f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
 
         const vec2 point0 = manifold.points[0].point;
         const vec2 point1 = manifold.points[1].point;
@@ -113,6 +114,7 @@ int main()
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, -0.25f ) );
         assert( NearlyEqual( manifold.points[1].separation, -0.25f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
     }
 
     {
