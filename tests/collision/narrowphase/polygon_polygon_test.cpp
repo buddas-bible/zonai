@@ -69,6 +69,7 @@ int main()
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
         assert( NearlyEqual( manifold.points[1].separation, 0.0f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
         assert( HasPoint( manifold, { -1.0f, 1.0f } ) );
         assert( HasPoint( manifold, { 1.0f, 1.0f } ) );
     }
@@ -88,6 +89,7 @@ int main()
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, -0.5f ) );
         assert( NearlyEqual( manifold.points[1].separation, -0.5f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
     }
 
     {
@@ -106,6 +108,7 @@ int main()
         assert( NearlyEqual( manifold.normal, { 1.0f, 0.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
         assert( NearlyEqual( manifold.points[1].separation, 0.0f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
         assert( HasPoint( manifold, { 1.0f, -1.0f } ) );
         assert( HasPoint( manifold, { 1.0f, 1.0f } ) );
     }
@@ -127,6 +130,7 @@ int main()
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
         assert( NearlyEqual( manifold.points[1].separation, 0.0f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
         assert( HasPoint( manifold, { -1.0f, 1.25f } ) );
         assert( HasPoint( manifold, { 1.0f, 1.25f } ) );
     }
@@ -143,14 +147,33 @@ int main()
         const localManifold2 manifold =
             CollidePolygons( a, b, transformB );
 
-        assert( manifold.pointCount > 0 );
-        assert( manifold.pointCount <= MAX_MANIFOLD_POINTS );
+        assert( manifold.pointCount == 2 );
         assert( NearlyEqual( Length( manifold.normal ), 1.0f, 1e-4f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
 
-        for( std::size_t i = 0; i < manifold.pointCount; ++i )
-        {
-            assert( manifold.points[i].separation <= 0.0f );
-        }
+        // Clip된 두 점 중 한 점은 positive separation일 수 있다.
+        // 적어도 한 점이 실제 접촉이면 manifold는 touching으로 취급된다.
+        assert( IsTouchingManifold( manifold ) );
+    }
+
+    {
+        // SAT에서 겹친 face로 판단되면 clip된 두 점을 모두 유지한다.
+        // 한 점의 separation이 speculative distance보다 크더라도
+        // Box2D처럼 2점 manifold를 유지해 face contact의 회전 안정성을 보존한다.
+        const polygon2 a = MakeBox( { 1.0f, 1.0f } );
+        const polygon2 b = MakeBox( { 1.0f, 1.0f } );
+
+        transform2 transformB{};
+        transformB.position = { 1.1f, 1.1f };
+        transformB.rotation =
+            rot2::FromRadians( 0.25f * 3.14159265358979323846f );
+
+        const localManifold2 manifold =
+            CollidePolygons( a, b, transformB );
+
+        assert( manifold.pointCount == 2 );
+        assert( manifold.points[0].id != manifold.points[1].id );
+        assert( IsTouchingManifold( manifold ) );
     }
 
     return 0;

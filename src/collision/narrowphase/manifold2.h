@@ -12,6 +12,24 @@ namespace zonai
 
 constexpr std::size_t MAX_MANIFOLD_POINTS = 2;
 
+// Contact point id는 A/B feature index를 각각 8bit로 묶어 저장함.
+// 같은 feature pair가 다음 narrow-phase에도 유지되면 warm start impulse를 재사용할 수 있음.
+constexpr std::uint16_t MakeContactPointId(
+    std::size_t indexA,
+    std::size_t indexB ) noexcept
+{
+    const std::uint16_t featureA =
+        static_cast<std::uint8_t>( indexA );
+
+    const std::uint16_t featureB =
+        static_cast<std::uint8_t>( indexB );
+
+    return static_cast<std::uint16_t>(
+        ( featureA << 8u ) |
+        featureB
+    );
+}
+
 struct localManifoldPoint2
 {
     vec2 point{};
