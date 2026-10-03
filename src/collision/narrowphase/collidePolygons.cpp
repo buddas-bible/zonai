@@ -125,7 +125,8 @@ float FindMaxSeparation(
 void AddContactPoint(
     localManifold2& manifold,
     const vec2& point,
-    float separation )
+    float separation,
+    std::uint16_t id )
 {
     if( separation > SPECULATIVE_DISTANCE ||
         manifold.pointCount >= MAX_MANIFOLD_POINTS )
@@ -135,6 +136,7 @@ void AddContactPoint(
 
     manifold.points[manifold.pointCount].point = point;
     manifold.points[manifold.pointCount].separation = separation;
+    manifold.points[manifold.pointCount].id = id;
     ++manifold.pointCount;
 }
 
@@ -249,12 +251,20 @@ localManifold2 ClipPolygons(
         AddContactPoint(
             manifold,
             lowerPoint,
-            lowerContactSeparation
+            lowerContactSeparation,
+            MakeContactPointId(
+                referenceEdge,
+                incidentNext
+            )
         );
         AddContactPoint(
             manifold,
             upperPoint,
-            upperContactSeparation
+            upperContactSeparation,
+            MakeContactPointId(
+                referenceNext,
+                incidentEdge
+            )
         );
     }
     else
@@ -262,12 +272,20 @@ localManifold2 ClipPolygons(
         AddContactPoint(
             manifold,
             upperPoint,
-            upperContactSeparation
+            upperContactSeparation,
+            MakeContactPointId(
+                incidentEdge,
+                referenceNext
+            )
         );
         AddContactPoint(
             manifold,
             lowerPoint,
-            lowerContactSeparation
+            lowerContactSeparation,
+            MakeContactPointId(
+                incidentNext,
+                referenceEdge
+            )
         );
     }
 
@@ -281,6 +299,10 @@ bool IsEndpoint( float fraction )
 
 localManifold2 MakeClosestPointManifold(
     const segmentDistanceResult2& result,
+    std::size_t indexA1,
+    std::size_t indexA2,
+    std::size_t indexB1,
+    std::size_t indexB2,
     float radiusA,
     float radiusB )
 {
@@ -305,6 +327,23 @@ localManifold2 MakeClosestPointManifold(
         ( surfaceA + surfaceB ) * 0.5f;
     manifold.points[0].separation =
         distance - radiusA - radiusB;
+
+    const std::size_t featureA =
+        result.fraction1 == 0.0f ?
+            indexA1 :
+            indexA2;
+
+    const std::size_t featureB =
+        result.fraction2 == 0.0f ?
+            indexB1 :
+            indexB2;
+
+    manifold.points[0].id =
+        MakeContactPointId(
+            featureA,
+            featureB
+        );
+
     manifold.pointCount = 1;
 
     return manifold;
@@ -461,6 +500,10 @@ localManifold2 CollidePolygons(
         {
             manifold = MakeClosestPointManifold(
                 result,
+                a1,
+                a2,
+                b1,
+                b2,
                 localA.radius,
                 localB.radius
             );
