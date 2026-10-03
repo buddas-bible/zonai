@@ -162,5 +162,24 @@ int main()
         }
     }
 
+    {
+        // SAT에서 겹친 face로 판단되면 clip된 두 점을 모두 유지한다.
+        // 한 점의 separation이 speculative distance보다 크더라도
+        // Box2D처럼 2점 manifold를 유지해 face contact의 회전 안정성을 보존한다.
+        const polygon2 a = MakeBox( { 1.0f, 1.0f } );
+        const polygon2 b = MakeBox( { 1.0f, 1.0f } );
+
+        transform2 transformB{};
+        transformB.position = { 1.1f, 1.1f };
+        transformB.rotation =
+            rot2::FromRadians( 0.25f * 3.14159265358979323846f );
+
+        const localManifold2 manifold =
+            CollidePolygons( a, b, transformB );
+
+        assert( manifold.pointCount == 2 );
+        assert( manifold.points[0].id != manifold.points[1].id );
+    }
+
     return 0;
 }
