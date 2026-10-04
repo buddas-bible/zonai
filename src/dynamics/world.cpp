@@ -19,7 +19,8 @@ namespace zonai
 
 bool world::IsValid( bodyId bodyId ) const noexcept
 {
-    if( bodyId.index1 <= 0 )
+    if( bodyId.index1 <= 0 ||
+        bodyId.worldToken != reinterpret_cast<std::uintptr_t>( this ) )
     {
         return false;
     }
@@ -40,7 +41,8 @@ bool world::IsValid( bodyId bodyId ) const noexcept
 
 bool world::IsValid( shapeId shapeId ) const noexcept
 {
-    if( shapeId.index1 <= 0 )
+    if( shapeId.index1 <= 0 ||
+        shapeId.worldToken != reinterpret_cast<std::uintptr_t>( this ) )
     {
         return false;
     }
@@ -61,7 +63,8 @@ bool world::IsValid( shapeId shapeId ) const noexcept
 
 bool world::IsValid( contactId contactId ) const noexcept
 {
-    if( contactId.index1 <= 0 )
+    if( contactId.index1 <= 0 ||
+        contactId.worldToken != reinterpret_cast<std::uintptr_t>( this ) )
     {
         return false;
     }
@@ -109,7 +112,12 @@ bodyId world::MakeBodyId( std::int32_t bodyIndex ) const
 
     assert( body.bodyId == bodyIndex );
 
-    return { bodyIndex + 1, body.generation };
+    return
+    {
+        bodyIndex + 1,
+        body.generation,
+        reinterpret_cast<std::uintptr_t>( this )
+    };
 }
 
 shapeId world::MakeShapeId( std::int32_t shapeIndex ) const
@@ -121,7 +129,12 @@ shapeId world::MakeShapeId( std::int32_t shapeIndex ) const
 
     assert( shape.bodyId != shape::NULL_INDEX );
 
-    return { shapeIndex + 1, shape.generation };
+    return
+    {
+        shapeIndex + 1,
+        shape.generation,
+        reinterpret_cast<std::uintptr_t>( this )
+    };
 }
 
 contactId world::MakeContactId( std::int32_t contactIndex ) const
@@ -133,7 +146,12 @@ contactId world::MakeContactId( std::int32_t contactIndex ) const
 
     assert( contact.contactId == contactIndex );
 
-    return { contactIndex + 1, contact.generation };
+    return
+    {
+        contactIndex + 1,
+        contact.generation,
+        reinterpret_cast<std::uintptr_t>( this )
+    };
 }
 
 
@@ -674,7 +692,8 @@ std::size_t world::GetShapeSensorData(
         output[i] =
         {
             visitor.shapeIndex + 1,
-            visitor.generation
+            visitor.generation,
+            reinterpret_cast<std::uintptr_t>( this )
         };
     }
 
@@ -2636,12 +2655,13 @@ void world::UpdateSensors()
     }
 
     const auto makeVisitorId =
-        []( const sensorVisitor2& visitor )
+        [this]( const sensorVisitor2& visitor )
         {
             return shapeId
             {
                 visitor.shapeIndex + 1,
-                visitor.generation
+                visitor.generation,
+                reinterpret_cast<std::uintptr_t>( this )
             };
         };
 
@@ -2686,7 +2706,8 @@ void world::UpdateSensors()
                         sensorShapeId,
                         {
                             oldVisitor.shapeIndex + 1,
-                            oldVisitor.generation
+                            oldVisitor.generation,
+                            reinterpret_cast<std::uintptr_t>( this )
                         }
                     }
                 );
@@ -3012,7 +3033,8 @@ void world::DestroySensorByShapeIndex(
                 sensorShapeId,
                 {
                     visitor.shapeIndex + 1,
-                    visitor.generation
+                    visitor.generation,
+                    reinterpret_cast<std::uintptr_t>( this )
                 }
             }
         );
