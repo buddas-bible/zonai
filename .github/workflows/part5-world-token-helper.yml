@@ -1,0 +1,75 @@
+name: Part 5 World Token Helper
+
+on:
+  push:
+    branches:
+      - refactor/body-shape-contact-reaudit
+
+permissions:
+  contents: write
+
+jobs:
+  patch-world-lifetime-token:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/body-shape-contact-reaudit
+          fetch-depth: 0
+
+      - name: Replace address token with lifetime token
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          header = Path('src/dynamics/world.h')
+          header_text = header.read_text(encoding='utf-8')
+
+          old_ctor = '    world() = default;'
+          if header_text.count(old_ctor) != 1:
+              raise RuntimeError(f'expected one default world constructor, found {header_text.count(old_ctor)}')
+          header_text = header_text.replace(old_ctor, '    world();', 1)
+
+          old_private = '''private:\n    [[nodiscard]] std::int32_t GetBodyIndex( bodyId bodyId ) const;'''
+          new_private = '''private:\n    // Public handle이 world 수명을 구분할 때 사용하는 opaque token.\n    std::uint64_t worldToken_ = 0;\n\n    [[nodiscard]] std::int32_t GetBodyIndex( bodyId bodyId ) const;'''
+          if header_text.count(old_private) != 1:
+              raise RuntimeError(f'expected one world private section, found {header_text.count(old_private)}')
+          header_text = header_text.replace(old_private, new_private, 1)
+          header.write_text(header_text, encoding='utf-8')
+
+          source = Path('src/dynamics/world.cpp')
+          source_text = source.read_text(encoding='utf-8')
+
+          old_include = '#include <algorithm>\n#include <cassert>'
+          new_include = '#include <algorithm>\n#include <atomic>\n#include <cassert>'
+          if source_text.count(old_include) != 1:
+              raise RuntimeError(f'expected one include insertion point, found {source_text.count(old_include)}')
+          source_text = source_text.replace(old_include, new_include, 1)
+
+          old_namespace = '''namespace zonai\n{\n\nbool world::IsValid( bodyId bodyId ) const noexcept'''
+          new_namespace = '''namespace zonai\n{\n\nnamespace\n{\n\nstd::uint64_t AllocateWorldToken() noexcept\n{\n    static std::atomic<std::uint64_t> nextToken{ 1 };\n\n    for( ;; )\n    {\n        const std::uint64_t token =\n            nextToken.fetch_add( 1, std::memory_order_relaxed );\n\n        if( token != 0 )\n        {\n            return token;\n        }\n    }\n}\n\n} // namespace\n\nworld::world()\n    : worldToken_( AllocateWorldToken() )\n{\n}\n\nbool world::IsValid( bodyId bodyId ) const noexcept'''
+          if source_text.count(old_namespace) != 1:
+              raise RuntimeError(f'expected one namespace insertion point, found {source_text.count(old_namespace)}')
+          source_text = source_text.replace(old_namespace, new_namespace, 1)
+
+          old_token = 'reinterpret_cast<std::uintptr_t>( this )'
+          token_count = source_text.count(old_token)
+          if token_count != 10:
+              raise RuntimeError(f'expected 10 address-token uses, found {token_count}')
+          source_text = source_text.replace(old_token, 'worldToken_')
+
+          source.write_text(source_text, encoding='utf-8')
+          PY
+
+          rm .github/workflows/part5-world-token-helper.yml
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/dynamics/world.h src/dynamics/world.cpp .github/workflows/part5-world-token-helper.yml
+          git commit -m 'Use a lifetime token for world-owned handles'
+          git push origin HEAD:refactor/body-shape-contact-reaudit
