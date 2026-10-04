@@ -91,15 +91,18 @@ polygon2 MakePolygon( std::span<const vec2> vertices )
         polygon.vertices[i] = vertices[i];
     }
 
+    constexpr float epsilon = 1e-6f;
+
+    // 첫 vertex를 기준으로 삼각분할해 큰 좌표에서도 면적 정밀도를 유지함.
+    const vec2 windingOrigin = polygon.vertices[0];
     float area2 = 0.0f;
 
-    for( int i = 0; i < polygon.vertexCount; ++i )
+    for( int i = 1; i < polygon.vertexCount - 1; ++i )
     {
-        const int next = ( i + 1 ) % polygon.vertexCount;
-        area2 += Cross( polygon.vertices[i], polygon.vertices[next] );
+        const vec2 edge1 = polygon.vertices[i] - windingOrigin;
+        const vec2 edge2 = polygon.vertices[i + 1] - windingOrigin;
+        area2 += Cross( edge1, edge2 );
     }
-
-    constexpr float epsilon = 1e-6f;
 
     if( std::fabs( area2 ) <= epsilon )
     {
@@ -144,29 +147,31 @@ polygon2 MakePolygon( std::span<const vec2> vertices )
         }
     }
 
-    vec2 centroid{};
-    float crossSum = 0.0f;
+    // Box2D처럼 첫 vertex를 local origin으로 사용해 centroid 계산의 상쇄 오차를 줄임.
+    const vec2 centroidOrigin = polygon.vertices[0];
+    vec2 centroidOffset{};
+    float area = 0.0f;
 
-    for( int i = 0; i < polygon.vertexCount; ++i )
+    for( int i = 1; i < polygon.vertexCount - 1; ++i )
     {
-        const int next = ( i + 1 ) % polygon.vertexCount;
+        const vec2 edge1 = polygon.vertices[i] - centroidOrigin;
+        const vec2 edge2 = polygon.vertices[i + 1] - centroidOrigin;
+        const float triangleArea = 0.5f * Cross( edge1, edge2 );
 
-        const vec2& a = polygon.vertices[i];
-        const vec2& b = polygon.vertices[next];
-        const float cross = Cross( a, b );
-
-        crossSum += cross;
-        centroid += ( a + b ) * cross;
+        area += triangleArea;
+        centroidOffset +=
+            ( edge1 + edge2 ) *
+            ( triangleArea / 3.0f );
     }
 
-    if( std::fabs( crossSum ) <= epsilon )
+    if( area <= 0.5f * epsilon )
     {
         assert( false );
         return {};
     }
 
-    centroid /= 3.0f * crossSum;
-    polygon.centroid = centroid;
+    centroidOffset /= area;
+    polygon.centroid = centroidOrigin + centroidOffset;
 
     return polygon;
 }
