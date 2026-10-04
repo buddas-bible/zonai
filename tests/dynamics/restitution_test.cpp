@@ -1,6 +1,6 @@
+#include <array>
 #include <cassert>
 #include <cmath>
-#include <cstdio>
 
 #include "dynamics/world.h"
 
@@ -152,21 +152,68 @@ int main()
             previousSpeed = speed;
         }
 
-        std::fprintf(
-            stderr,
-            "elastic box drop: firstSpin=%.6f firstApex=%.6f\n",
-            firstBounceSpin,
-            firstApex
-        );
-
         assert( bounced );
         assert( reachedApex );
 
         // 완전탄성 충돌이므로 첫 apex가 시작 높이보다 높아지는 것은 solver가 만든 에너지임.
         assert( firstApex <= 1.001f * dropHeight );
 
-        // 대칭 수평 착지에서 한 번의 restitution sweep이 만드는 큰 회전을 허용하지 않음.
+        // 대칭 수평 착지의 restitution 반복은 큰 잔여 회전을 남기면 안 됨.
         assert( firstBounceSpin < 0.5f );
+    }
+
+    // 현재 Box2D식 4 sub-step에서 contact sweep 수를 줄여도
+    // 여러 body가 연결된 stack이 무너지거나 크게 압축되면 안 됨.
+    {
+        constexpr int boxCount = 12;
+
+        world world{};
+
+        const bodyId groundBody =
+            world.CreateBody( bodyType::Static );
+
+        (void)world.CreateShape(
+            groundBody,
+            segment2
+            {
+                { -20.0f, 0.0f },
+                {  20.0f, 0.0f }
+            }
+        );
+
+        std::array<bodyId, boxCount> boxes{};
+
+        for( int i = 0; i < boxCount; ++i )
+        {
+            bodyDef definition{};
+            definition.type = bodyType::Dynamic;
+            definition.transform.position =
+                { 0.0f, 0.5f + 1.01f * static_cast<float>( i ) };
+
+            boxes[i] = world.CreateBody( definition );
+
+            (void)world.CreateShape(
+                boxes[i],
+                MakeBox( { 0.5f, 0.5f } )
+            );
+        }
+
+        for( int i = 0; i < 600; ++i )
+        {
+            world.Step( timeStep, 4 );
+        }
+
+        for( int i = 0; i < boxCount; ++i )
+        {
+            const transform2 transform =
+                world.GetBodyTransform( boxes[i] );
+
+            const float expectedHeight =
+                0.5f + static_cast<float>( i );
+
+            assert( std::fabs( transform.position.x ) < 0.2f );
+            assert( std::fabs( transform.position.y - expectedHeight ) < 0.25f );
+        }
     }
 
     return 0;
