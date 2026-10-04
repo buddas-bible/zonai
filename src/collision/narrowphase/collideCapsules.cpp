@@ -222,6 +222,8 @@ localManifold2 CollideCapsules(
                       ( a.radius - b.radius - separation1 ) );
                 manifold.points[0].separation =
                     separation1 - radiusSum;
+                manifold.points[0].id =
+                    MakeContactPointId( 0, 0 );
 
                 manifold.points[1].point =
                     contact2 + normalA *
@@ -229,6 +231,8 @@ localManifold2 CollideCapsules(
                       ( a.radius - b.radius - separation2 ) );
                 manifold.points[1].separation =
                     separation2 - radiusSum;
+                manifold.points[1].id =
+                    MakeContactPointId( 0, 1 );
 
                 manifold.pointCount = 2;
             }
@@ -285,6 +289,8 @@ localManifold2 CollideCapsules(
                       ( b.radius - a.radius - separation1 ) );
                 manifold.points[0].separation =
                     separation1 - radiusSum;
+                manifold.points[0].id =
+                    MakeContactPointId( 0, 0 );
 
                 manifold.points[1].point =
                     contact2 + normalB *
@@ -292,6 +298,8 @@ localManifold2 CollideCapsules(
                       ( b.radius - a.radius - separation2 ) );
                 manifold.points[1].separation =
                     separation2 - radiusSum;
+                manifold.points[1].id =
+                    MakeContactPointId( 1, 0 );
 
                 manifold.pointCount = 2;
             }
@@ -321,6 +329,18 @@ localManifold2 CollideCapsules(
             ( surfaceA + surfaceB ) * 0.5f;
         manifold.points[0].separation =
             distance - radiusSum;
+
+        const std::size_t featureA =
+            fractionA == 0.0f ? 0u : 1u;
+        const std::size_t featureB =
+            fractionB == 0.0f ? 0u : 1u;
+
+        manifold.points[0].id =
+            MakeContactPointId(
+                featureA,
+                featureB
+            );
+
         manifold.pointCount = 1;
     }
 

@@ -12,13 +12,13 @@ localManifold2 CollideCircles(
     const circle2& a,
     const circle2& b, const transform2& transformB )
 {
-    localManifold2 manifold = {};
+    localManifold2 manifold{};
 
     const vec2 pointA = a.center;
-    const vec2 pointB = zonai::TransformPoint( transformB, b.center );
+    const vec2 pointB = TransformPoint( transformB, b.center );
 
     const vec2 delta = pointB - pointA;
-    const float distanceSquared = zonai::LengthSquared( delta );
+    const float distanceSquared = LengthSquared( delta );
 
     const float radiusSum = a.radius + b.radius;
 
@@ -37,7 +37,7 @@ localManifold2 CollideCircles(
 
     if( distance > 0.0f )
     {
-        normal = delta / distance; // normalize
+        normal = delta / distance;
     }
 
     const vec2 surfaceA = pointA + normal * a.radius;
@@ -69,44 +69,40 @@ localManifold2 CollideCapsuleCircle(
     const capsule2& capsule,
     const circle2& circle, const transform2& circleTransform )
 {
-    localManifold2 manifold = {};
+    localManifold2 manifold{};
 
-    // circle B를 capsule A의 로컬 좌표계로 변환
-    const vec2 pointB = zonai::TransformPoint( circleTransform, circle.center );
+    // 모든 계산을 capsule A의 local space에서 수행함.
+    const vec2 pointB = TransformPoint( circleTransform, circle.center );
 
     const vec2 point1 = capsule.center1;
     const vec2 point2 = capsule.center2;
-
     const vec2 edge = point2 - point1;
 
-    // circle center가 capsule axis의 어느 영역에 있는지 확인
-    const float s1 = zonai::Dot( pointB - point1, edge );
-    const float s2 = zonai::Dot( point2 - pointB, edge );
+    // circle center가 capsule axis의 어느 Voronoi 영역에 있는지 구분함.
+    const float s1 = Dot( pointB - point1, edge );
+    const float s2 = Dot( point2 - pointB, edge );
 
     vec2 pointA{};
 
     if( s1 < 0.0f )
     {
-        // center1 영역
         pointA = point1;
     }
     else if( s2 < 0.0f )
     {
-        // center2 영역
         pointA = point2;
     }
     else
     {
-        // capsule axis 영역
-        const float fraction = zonai::Dot( edge, edge );
-        const float t = s1 / fraction;
+        const float edgeLengthSquared = Dot( edge, edge );
+        const float fraction = s1 / edgeLengthSquared;
 
-        pointA = point1 + edge * t;
+        pointA = point1 + edge * fraction;
     }
 
-    // capsule -> circle
+    // manifold normal은 항상 shape A에서 B를 향함.
     const vec2 delta = pointB - pointA;
-    const float distanceSquared = zonai::LengthSquared( delta );
+    const float distanceSquared = LengthSquared( delta );
 
     const float radiusSum = capsule.radius + circle.radius;
 
@@ -125,7 +121,7 @@ localManifold2 CollideCapsuleCircle(
 
     if( distance > 0.0f )
     {
-        normal = delta / distance; // normalize
+        normal = delta / distance;
     }
 
     const vec2 surfaceA = pointA + normal * capsule.radius;
@@ -143,27 +139,27 @@ localManifold2 CollidePolygonCircle(
     const polygon2& polygon,
     const circle2& circle, const transform2& circleTransform )
 {
-    localManifold2 manifold = {};
+    localManifold2 manifold{};
 
     if( polygon.vertexCount == 0 )
     {
         return manifold;
     }
 
-    // circle B를 polygon A의 로컬 좌표계로 변환
-    const vec2 center = zonai::TransformPoint( circleTransform, circle.center );
+    // 모든 계산을 polygon A의 local space에서 수행함.
+    const vec2 center = TransformPoint( circleTransform, circle.center );
 
     const float radiusA = polygon.radius;
     const float radiusB = circle.radius;
     const float radiusSum = radiusA + radiusB;
 
-    // circle center에서 가장 가까운 separating face를 찾는다.
+    // 가장 큰 separation을 가진 face가 circle과 가장 가까운 separating face임.
     std::size_t normalIndex = 0;
     float separation = -FLT_MAX;
 
     for( std::size_t i = 0; i < polygon.vertexCount; ++i )
     {
-        const float currentSeparation = zonai::Dot(
+        const float currentSeparation = Dot(
             polygon.normals[i],
             center - polygon.vertices[i]
         );
@@ -188,21 +184,20 @@ localManifold2 CollidePolygonCircle(
     const vec2 vertex1 = polygon.vertices[vertexIndex1];
     const vec2 vertex2 = polygon.vertices[vertexIndex2];
 
-    const float u1 = zonai::Dot(
+    const float u1 = Dot(
         center - vertex1,
         vertex2 - vertex1
     );
 
-    const float u2 = zonai::Dot(
+    const float u2 = Dot(
         center - vertex2,
         vertex1 - vertex2
     );
 
     if( u1 < 0.0f && separation > FLT_EPSILON )
     {
-        // vertex1 영역
         const vec2 delta = center - vertex1;
-        const float distanceSquared = zonai::LengthSquared( delta );
+        const float distanceSquared = LengthSquared( delta );
 
         const float speculativeRadius =
             radiusSum + SPECULATIVE_DISTANCE;
@@ -226,9 +221,8 @@ localManifold2 CollidePolygonCircle(
     }
     else if( u2 < 0.0f && separation > FLT_EPSILON )
     {
-        // vertex2 영역
         const vec2 delta = center - vertex2;
-        const float distanceSquared = zonai::LengthSquared( delta );
+        const float distanceSquared = LengthSquared( delta );
 
         const float speculativeRadius =
             radiusSum + SPECULATIVE_DISTANCE;
@@ -252,10 +246,10 @@ localManifold2 CollidePolygonCircle(
     }
     else
     {
-        // face 영역. circle center가 polygon 내부에 있는 경우도 포함한다.
+        // face 영역에는 circle center가 polygon 내부인 경우도 포함됨.
         const vec2 normal = polygon.normals[normalIndex];
 
-        const float centerSeparation = zonai::Dot(
+        const float centerSeparation = Dot(
             center - vertex1,
             normal
         );

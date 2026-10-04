@@ -5,84 +5,12 @@
 #include <cmath>
 
 #include "collision/constants.h"
+#include "collision/distance2.h"
 
 namespace zonai
 {
 namespace
 {
-
-struct segmentDistanceResult2
-{
-    vec2 point1{};
-    vec2 point2{};
-    float fraction1 = 0.0f;
-    float fraction2 = 0.0f;
-    float distanceSquared = 0.0f;
-};
-
-segmentDistanceResult2 SegmentDistance(
-    const vec2& p1, const vec2& q1,
-    const vec2& p2, const vec2& q2 )
-{
-    const vec2 d1 = q1 - p1;
-    const vec2 d2 = q2 - p2;
-
-    const float dd1 = Dot( d1, d1 );
-    const float dd2 = Dot( d2, d2 );
-
-    const vec2 offset = p1 - p2;
-    const float offsetD1 = Dot( offset, d1 );
-    const float offsetD2 = Dot( offset, d2 );
-    const float d12 = Dot( d1, d2 );
-
-    const float denominator = dd1 * dd2 - d12 * d12;
-
-    float fraction1 = 0.0f;
-
-    if( denominator != 0.0f )
-    {
-        fraction1 = std::clamp(
-            ( d12 * offsetD2 - offsetD1 * dd2 ) /
-                denominator,
-            0.0f,
-            1.0f
-        );
-    }
-
-    float fraction2 =
-        ( d12 * fraction1 + offsetD2 ) / dd2;
-
-    if( fraction2 < 0.0f )
-    {
-        fraction2 = 0.0f;
-        fraction1 = std::clamp(
-            -offsetD1 / dd1,
-            0.0f,
-            1.0f
-        );
-    }
-    else if( fraction2 > 1.0f )
-    {
-        fraction2 = 1.0f;
-        fraction1 = std::clamp(
-            ( d12 - offsetD1 ) / dd1,
-            0.0f,
-            1.0f
-        );
-    }
-
-    const vec2 point1 = p1 + d1 * fraction1;
-    const vec2 point2 = p2 + d2 * fraction2;
-
-    return
-    {
-        point1,
-        point2,
-        fraction1,
-        fraction2,
-        LengthSquared( point2 - point1 )
-    };
-}
 
 float FindMaxSeparation(
     std::size_t& edgeIndex,
@@ -125,16 +53,17 @@ float FindMaxSeparation(
 void AddContactPoint(
     localManifold2& manifold,
     const vec2& point,
-    float separation )
+    float separation,
+    std::uint16_t id )
 {
-    if( separation > SPECULATIVE_DISTANCE ||
-        manifold.pointCount >= MAX_MANIFOLD_POINTS )
+    if( manifold.pointCount >= MAX_MANIFOLD_POINTS )
     {
         return;
     }
 
     manifold.points[manifold.pointCount].point = point;
     manifold.points[manifold.pointCount].separation = separation;
+    manifold.points[manifold.pointCount].id = id;
     ++manifold.pointCount;
 }
 
@@ -249,12 +178,20 @@ localManifold2 ClipPolygons(
         AddContactPoint(
             manifold,
             lowerPoint,
-            lowerContactSeparation
+            lowerContactSeparation,
+            MakeContactPointId(
+                referenceEdge,
+                incidentNext
+            )
         );
         AddContactPoint(
             manifold,
             upperPoint,
-            upperContactSeparation
+            upperContactSeparation,
+            MakeContactPointId(
+                referenceNext,
+                incidentEdge
+            )
         );
     }
     else
@@ -262,12 +199,20 @@ localManifold2 ClipPolygons(
         AddContactPoint(
             manifold,
             upperPoint,
-            upperContactSeparation
+            upperContactSeparation,
+            MakeContactPointId(
+                incidentEdge,
+                referenceNext
+            )
         );
         AddContactPoint(
             manifold,
             lowerPoint,
-            lowerContactSeparation
+            lowerContactSeparation,
+            MakeContactPointId(
+                incidentNext,
+                referenceEdge
+            )
         );
     }
 
@@ -281,12 +226,16 @@ bool IsEndpoint( float fraction )
 
 localManifold2 MakeClosestPointManifold(
     const segmentDistanceResult2& result,
+    std::size_t indexA1,
+    std::size_t indexA2,
+    std::size_t indexB1,
+    std::size_t indexB2,
     float radiusA,
     float radiusB )
 {
     localManifold2 manifold{};
 
-    const vec2 delta = result.point2 - result.point1;
+    const vec2 delta = result.closest2 - result.closest1;
     const float distanceSquared = LengthSquared( delta );
 
     if( distanceSquared <= FLT_EPSILON * FLT_EPSILON )
@@ -297,14 +246,31 @@ localManifold2 MakeClosestPointManifold(
     const float distance = std::sqrt( distanceSquared );
     const vec2 normal = delta / distance;
 
-    const vec2 surfaceA = result.point1 + normal * radiusA;
-    const vec2 surfaceB = result.point2 - normal * radiusB;
+    const vec2 surfaceA = result.closest1 + normal * radiusA;
+    const vec2 surfaceB = result.closest2 - normal * radiusB;
 
     manifold.normal = normal;
     manifold.points[0].point =
         ( surfaceA + surfaceB ) * 0.5f;
     manifold.points[0].separation =
         distance - radiusA - radiusB;
+
+    const std::size_t featureA =
+        result.fraction1 == 0.0f ?
+            indexA1 :
+            indexA2;
+
+    const std::size_t featureB =
+        result.fraction2 == 0.0f ?
+            indexB1 :
+            indexB2;
+
+    manifold.points[0].id =
+        MakeContactPointId(
+            featureA,
+            featureB
+        );
+
     manifold.pointCount = 1;
 
     return manifold;
@@ -461,6 +427,10 @@ localManifold2 CollidePolygons(
         {
             manifold = MakeClosestPointManifold(
                 result,
+                a1,
+                a2,
+                b1,
+                b2,
                 localA.radius,
                 localB.radius
             );
