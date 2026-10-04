@@ -1205,6 +1205,14 @@ int main()
             ) == 0
         );
 
+        // Shape query도 실제 touching 전 speculative Contact는 노출하지 않아야 함.
+        assert(
+            world.GetShapeContactData(
+                dynamicShape,
+                contacts
+            ) == 0
+        );
+
         world.SetBodyLinearVelocity(
             dynamicBody,
             { -2.0f, 0.0f }
