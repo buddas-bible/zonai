@@ -3478,8 +3478,8 @@ std::size_t world::GetBodyContactData( bodyId bodyId, std::span<contactData> out
 
         assert( contactSim.contactId == contactId );
 
-        // speculative point는 solver에는 사용하지만 실제 touching query에서는 제외함.
-        if( IsTouchingManifold( contactSim.manifold ) )
+        // pointCount가 있으면 speculative point도 solver-active Contact로 public query에 노출함.
+        if( contactSim.manifold.pointCount > 0 )
         {
             output[count] = MakeContactData( contactId );
             ++count;
