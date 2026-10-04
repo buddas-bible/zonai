@@ -9,76 +9,165 @@ using namespace zonai;
 int main()
 {
     constexpr float timeStep = 1.0f / 60.0f;
-    constexpr float impactSpeed = 5.0f;
 
-    world world{};
-    world.SetGravity( {} );
-
-    const bodyId groundBody =
-        world.CreateBody(
-            bodyType::Static,
-            {
-                { 0.0f, -1.0f },
-                {}
-            }
-        );
-
-    const shapeId groundShape =
-        world.CreateShape(
-            groundBody,
-            MakeBox( { 40.0f, 1.0f } )
-        );
-
-    world.SetShapeFriction( groundShape, 0.0f );
-    world.SetShapeRestitution( groundShape, 0.0f );
-
-    bodyDef boxDefinition{};
-    boxDefinition.type = bodyType::Dynamic;
-    boxDefinition.transform.position =
-        { 0.0f, 0.25f + 0.5f * impactSpeed * timeStep };
-    boxDefinition.linearVelocity =
-        { 0.0f, -impactSpeed };
-    boxDefinition.enableSleep = false;
-
-    const bodyId boxBody =
-        world.CreateBody( boxDefinition );
-
-    const shapeId boxShape =
-        world.CreateShape(
-            boxBody,
-            MakeBox( { 1.0f, 0.25f } )
-        );
-
-    world.SetShapeFriction( boxShape, 0.0f );
-    world.SetShapeRestitution( boxShape, 1.0f );
-
-    // 첫 Step 시작 시 아직 contact manifold가 없을 수 있으므로
-    // Box2D restitution 회귀 테스트처럼 실제 impact 이후까지 충분히 진행함.
-    for( int i = 0; i < 60; ++i )
+    // 두 point가 동시에 닿는 얇은 box의 단순 반발을 확인함.
     {
-        world.Step( timeStep, 4 );
+        constexpr float impactSpeed = 5.0f;
+
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId groundBody =
+            world.CreateBody(
+                bodyType::Static,
+                {
+                    { 0.0f, -1.0f },
+                    {}
+                }
+            );
+
+        const shapeId groundShape =
+            world.CreateShape(
+                groundBody,
+                MakeBox( { 40.0f, 1.0f } )
+            );
+
+        world.SetShapeFriction( groundShape, 0.0f );
+        world.SetShapeRestitution( groundShape, 0.0f );
+
+        bodyDef boxDefinition{};
+        boxDefinition.type = bodyType::Dynamic;
+        boxDefinition.transform.position =
+            { 0.0f, 0.25f + 0.5f * impactSpeed * timeStep };
+        boxDefinition.linearVelocity =
+            { 0.0f, -impactSpeed };
+        boxDefinition.enableSleep = false;
+
+        const bodyId boxBody =
+            world.CreateBody( boxDefinition );
+
+        const shapeId boxShape =
+            world.CreateShape(
+                boxBody,
+                MakeBox( { 1.0f, 0.25f } )
+            );
+
+        world.SetShapeFriction( boxShape, 0.0f );
+        world.SetShapeRestitution( boxShape, 1.0f );
+
+        // 첫 Step 시작 시 아직 contact manifold가 없을 수 있으므로
+        // 실제 impact 이후까지 충분히 진행함.
+        for( int i = 0; i < 60; ++i )
+        {
+            world.Step( timeStep, 4 );
+        }
+
+        const float bounceSpeed =
+            world.GetBodyLinearVelocity( boxBody ).y;
+
+        const float spin =
+            std::fabs(
+                world.GetBodyAngularVelocity( boxBody )
+            );
+
+        assert( bounceSpeed > 4.0f );
+        assert( spin < 0.5f );
     }
 
-    const float bounceSpeed =
-        world.GetBodyLinearVelocity( boxBody ).y;
+    // 완전탄성 정사각 box를 수평 낙하시킬 때 두 contact point의 순차 restitution이
+    // 에너지를 추가하거나 큰 잔여 회전을 만들면 안 됨.
+    {
+        constexpr float dropHeight = 10.0f;
 
-    const float spin =
-        std::fabs(
-            world.GetBodyAngularVelocity( boxBody )
+        world world{};
+
+        const bodyId groundBody =
+            world.CreateBody( bodyType::Static );
+
+        const shapeId groundShape =
+            world.CreateShape(
+                groundBody,
+                segment2
+                {
+                    { -20.0f, 0.0f },
+                    {  20.0f, 0.0f }
+                }
+            );
+
+        world.SetShapeFriction( groundShape, 0.0f );
+        world.SetShapeRestitution( groundShape, 0.0f );
+
+        bodyDef boxDefinition{};
+        boxDefinition.type = bodyType::Dynamic;
+        boxDefinition.transform.position =
+            { 0.0f, dropHeight };
+        boxDefinition.safetyFactor = 0.01f;
+        boxDefinition.enableSleep = false;
+
+        const bodyId boxBody =
+            world.CreateBody( boxDefinition );
+
+        const shapeId boxShape =
+            world.CreateShape(
+                boxBody,
+                MakeBox( { 0.5f, 0.5f } )
+            );
+
+        world.SetShapeFriction( boxShape, 0.0f );
+        world.SetShapeRestitution( boxShape, 1.0f );
+
+        float firstBounceSpin = 0.0f;
+        float firstApex = 0.0f;
+        float previousSpeed = 0.0f;
+        bool bounced = false;
+        bool reachedApex = false;
+
+        for( int i = 0; i < 600 && !reachedApex; ++i )
+        {
+            world.Step( timeStep, 4 );
+
+            const float speed =
+                world.GetBodyLinearVelocity( boxBody ).y;
+
+            if( !bounced &&
+                previousSpeed <= 0.0f &&
+                speed > 0.0f )
+            {
+                firstBounceSpin =
+                    std::fabs(
+                        world.GetBodyAngularVelocity( boxBody )
+                    );
+                bounced = true;
+            }
+
+            if( bounced &&
+                previousSpeed > 0.0f &&
+                speed <= 0.0f )
+            {
+                firstApex =
+                    world.GetBodyTransform( boxBody ).position.y;
+                reachedApex = true;
+            }
+
+            previousSpeed = speed;
+        }
+
+        std::fprintf(
+            stderr,
+            "elastic box drop: firstSpin=%.6f firstApex=%.6f\n",
+            firstBounceSpin,
+            firstApex
         );
 
-    std::fprintf(
-        stderr,
-        "flat restitution: bounce=%.6f spin=%.6f\n",
-        bounceSpeed,
-        spin
-    );
+        assert( bounced );
+        assert( reachedApex );
 
-    // 두 contact point의 restitution은 서로 velocity를 바꾸므로 한 번의 sweep으로 끝내면
-    // 첫 point가 만든 회전을 두 번째 point가 완전히 상쇄하지 못함.
-    // 최신 Box2D처럼 restitution stage를 반복하면 대칭 충돌의 잔여 spin이 빠르게 줄어듦.
-    assert( bounceSpeed > 4.0f );
-    assert( spin < 0.5f );
+        // 완전탄성 충돌이므로 첫 apex가 시작 높이보다 높아지는 것은 solver가 만든 에너지임.
+        assert( firstApex <= 1.001f * dropHeight );
+
+        // 대칭 수평 착지에서 한 번의 restitution sweep이 만드는 큰 회전을 허용하지 않음.
+        assert( firstBounceSpin < 0.5f );
+    }
 
     return 0;
 }
