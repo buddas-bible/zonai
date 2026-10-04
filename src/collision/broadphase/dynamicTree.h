@@ -92,16 +92,16 @@ class dynamicTree
 public:
     dynamicTree();
 
-public:
-    // 
+    // stable proxy id를 할당하고 새 leaf를 tree에 삽입함.
     std::int32_t CreateProxy( const aabb2& aabb, std::int32_t shapeIndex, bool markMoved = false );
-    
+
     void DestroyProxy( std::int32_t proxyId );
 
+    // leaf를 제거한 뒤 새 AABB 위치에 같은 stable proxy id로 다시 삽입함.
     void MoveProxy( std::int32_t proxyId, const aabb2& aabb, bool markMoved = false );
 
     // leaf bounds만 새 AABB로 바꾸고 topology는 유지함.
-    // ancestor bounds를 정확히 refit하고 moved branch를 표시해 다음 partial rebuild 대상이 되게 함.
+    // single-thread 경로라 ancestor bounds를 즉시 refit하고 다음 partial rebuild 대상으로 표시함.
     void UpdateProxy( std::int32_t proxyId, const aabb2& aabb );
 
     // 기존 proxy bounds를 포함하는 더 큰 AABB로 leaf를 넓히고
@@ -207,7 +207,7 @@ public:
                 {
                     const std::int32_t proxyId = GetProxyId( node );
 
-					bool proceed = callback( proxyId );
+                    const bool proceed = callback( proxyId );
                     if( proceed == false )
                     {
                         return;
@@ -261,7 +261,6 @@ private:
     // Box2D의 single-precision broad-phase 범위 보호와 같은 상한.
     static constexpr float MAX_TREE_AABB_EXTENT = 1.0e5f;
 
-private:
     // flagIndex에서 node 상태와 저장된 index를 읽는 helper.
     static bool IsLeaf( const treeNode& node );
     static bool IsEmptyNode( const treeNode& node );
@@ -276,7 +275,6 @@ private:
     static treeNode MakeEmptyNode();
     static treeNode MakeLeafNode( const aabb2& aabb, std::int32_t proxyId, std::int32_t shapeIndex, bool moved );
 
-private:
     static treeNode MakeInternalNodeFrom(
         const treeNodeStorage& nodes,
         std::int32_t childPair );
@@ -297,7 +295,7 @@ private:
     std::int32_t AllocateSiblingPair();
     void FreeSiblingPair( std::int32_t pair );
 
-	// 새 leaf와 묶였을 때 비용이 가장 작은 형제 노드 index를 반환함.
+    // 새 leaf와 묶였을 때 비용이 가장 작은 형제 노드 index를 반환함.
     std::int32_t FindBestSibling( const aabb2& aabb ) const;
     void LinkChildren( std::int32_t nodeIndex );
     void SwapNodes( std::int32_t downIndex, std::int32_t upIndex );

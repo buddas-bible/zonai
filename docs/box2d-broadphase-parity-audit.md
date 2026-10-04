@@ -188,6 +188,24 @@ a correctness change:
 - dynamic and kinematic stale trees are rebuilt after pair generation,
 - zero remains reserved by the custom hash set.
 
+## Deferred proxy update model
+
+Current Box2D has two different proxy movement paths:
+
+- explicit `b2BroadPhase_MoveProxy()` removes and reinserts the leaf immediately,
+- the solver updates moving-body leaf bounds with `b2DynamicTree_MarkProxyMoved()` and later
+  calls `b2DynamicTree_Refit()` before the stale tree is rebuilt.
+
+Zonai keeps the same distinction in a single-threaded form:
+
+- Static `broadPhase::MoveProxy()` uses `dynamicTree::MoveProxy()` and reinserts immediately,
+- Dynamic / Kinematic `broadPhase::MoveProxy()` uses `dynamicTree::UpdateProxy()`, which updates
+  the leaf AABB, marks the path as moved, and refits ancestor bounds immediately,
+- `UpdatePairs()` consumes the moved state and performs the partial rebuild afterward.
+
+Doing the ancestor refit immediately is intentional. Zonai does not currently need Box2D's
+atomic mark-then-refit split because proxy updates are not performed concurrently.
+
 ## Test coverage added during the audit
 
 DynamicTree tests now include:
@@ -198,14 +216,20 @@ DynamicTree tests now include:
 - full rebuild followed by brute-force Query comparison,
 - checking that rebuild clears moved flags on every live node,
 - repeated destruction with Validate after each operation,
-- complete free-list reuse by reinsertion with Validate after each operation.
+- complete free-list reuse by reinsertion with Validate after each operation,
+- topology-preserving `UpdateProxy()` followed by partial rebuild,
+- `EnlargeProxy()` moved-state and rebuild behavior,
+- explicit moved marking without changing the AABB.
 
-BroadPhase tests include the regression case that originally exposed the sentinel bug:
+BroadPhase tests include:
 
-- Dynamic shape index 0 spanning the origin,
-- empty Static tree,
-- empty Kinematic tree,
-- no candidate pair may be produced.
+- the empty-tree sentinel regression,
+- dynamic self pairs,
+- dynamic/static and dynamic/kinematic cross pairs,
+- candidate batches larger than 32 entries,
+- existing-contact pair suppression,
+- same-body, sensor, and collision-filter rejection,
+- moved-state consumption and stale-tree rebuild after `UpdatePairs()`.
 
 AABB tests cover invalid ordering, infinities, and NaN.
 
@@ -214,21 +238,22 @@ HashSet tests include reference comparison with `std::unordered_set`.
 ## Implemented paths that intentionally differ from current Box2D
 
 These are not classified as omissions because the corresponding Zonai subsystem/API does
-not exist yet:
+not exist yet or the current single-threaded engine does not need the same mechanism:
 
 - DynamicTree proxy category bits and category-mask Query pruning,
-- EnlargeProxy,
 - RayCast / ShapeCast / box-cast tree APIs,
-- public moved-mark / gather / refit workflow used by the solver,
 - tree root-bounds / byte-count / detailed TreeStats APIs,
 - parallel pair tasks and worker-local pair-key arrays,
 - final pair-key sorting before Contact creation,
-- ShapeType-level `CanCollide` filtering,
+- BroadPhase-level ShapeType `CanCollide` filtering,
 - joint-based body collision overrides,
 - user custom collision filtering.
 
-When these features are implemented, their Box2D preconditions and validation code should
-be ported at the same time as the algorithm.
+`EnlargeProxy`, moved marking/clearing, topology-preserving proxy updates, and partial/full
+`Rebuild()` are already implemented. They should not be treated as future BroadPhase work.
+
+When the remaining features are implemented, their Box2D preconditions and validation code
+should be ported at the same time as the algorithm.
 
 ## Upstream limitations retained
 
