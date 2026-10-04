@@ -5,44 +5,9 @@ on:
     branches:
       - refactor/body-shape-contact-audit
 
-permissions:
-  contents: write
-
 jobs:
-  patch-test:
-    if: github.actor != 'github-actions[bot]'
+  hold:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: refactor/body-shape-contact-audit
-          fetch-depth: 0
-
-      - name: Add speculative shape-query regression
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('tests/dynamics/world_test.cpp')
-          text = path.read_text(encoding='utf-8')
-
-          old = '''        assert(\n            world.GetBodyContactData(\n                dynamicBody,\n                contacts\n            ) == 0\n        );\n\n        world.SetBodyLinearVelocity('''
-
-          new = '''        assert(\n            world.GetBodyContactData(\n                dynamicBody,\n                contacts\n            ) == 0\n        );\n\n        // Shape query도 실제 touching 전 speculative Contact는 노출하지 않아야 함.\n        assert(\n            world.GetShapeContactData(\n                dynamicShape,\n                contacts\n            ) == 0\n        );\n\n        world.SetBodyLinearVelocity('''
-
-          count = text.count(old)
-          if count != 1:
-              raise RuntimeError(f'expected one insertion point, found {count}')
-
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
-          PY
-
-      - name: Commit regression test
-        shell: bash
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add tests/dynamics/world_test.cpp
-          git commit -m 'Test speculative shape contact queries'
-          git push origin HEAD:refactor/body-shape-contact-audit
+      - run: echo disabled
