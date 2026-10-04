@@ -3553,7 +3553,8 @@ std::size_t world::GetShapeContactData( shapeId shapeId, std::span<contactData> 
             contact.shapeIdA == shapeIndex ||
             contact.shapeIdB == shapeIndex;
 
-        if( involvesShape && contactSim.manifold.pointCount > 0 )
+        if( involvesShape &&
+  IsTouchingManifold( contactSim.manifold ) )
         {
             output[count] = MakeContactData( contactId );
             ++count;
