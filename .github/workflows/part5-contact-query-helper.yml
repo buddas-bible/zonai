@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  patch-world-query:
+  patch-world-format:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -18,7 +18,7 @@ jobs:
           ref: refactor/body-shape-contact-audit
           fetch-depth: 0
 
-      - name: Match shape query touching semantics
+      - name: Normalize query formatting
         shell: bash
         run: |
           python3 - <<'PY'
@@ -27,22 +27,21 @@ jobs:
           path = Path('src/dynamics/world.cpp')
           text = path.read_text(encoding='utf-8')
 
-          old = '''        if( involvesShape && contactSim.manifold.pointCount > 0 )'''
-          new = '''        if( involvesShape &&
-            IsTouchingManifold( contactSim.manifold ) )'''
+          old = '''        if( involvesShape &&\n  IsTouchingManifold( contactSim.manifold ) )'''
+          new = '''        if( involvesShape &&\n            IsTouchingManifold( contactSim.manifold ) )'''
 
           count = text.count(old)
           if count != 1:
-              raise RuntimeError(f'expected one query condition, found {count}')
+              raise RuntimeError(f'expected one formatting target, found {count}')
 
           path.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
 
-      - name: Commit production fix
+      - name: Commit formatting fix
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/dynamics/world.cpp
-          git commit -m 'Exclude speculative shape contact query results'
+          git commit -m 'Normalize shape contact query formatting'
           git push origin HEAD:refactor/body-shape-contact-audit
