@@ -6,6 +6,7 @@
 #include "dynamics/bodySim.h"
 #include "dynamics/bodyState.h"
 #include "dynamics/world.h"
+#include "geometry/circle2.h"
 
 using namespace zonai;
 
@@ -117,6 +118,7 @@ int main()
     }
 
     {
+        // Public handle은 생성된 world가 달라지면 같은 slot/generation이어도 유효하지 않아야 함.
         world worldA{};
         world worldB{};
 
@@ -126,7 +128,7 @@ int main()
         const bodyId bodyB =
             worldB.CreateBody( bodyType::Dynamic );
 
-        // 서로 다른 world의 첫 body는 slot / generation이 같아도 서로의 handle이 아님.
+        // 두 world의 첫 body라 내부 slot/generation은 의도적으로 같음.
         assert( bodyA.index1 == bodyB.index1 );
         assert( bodyA.generation == bodyB.generation );
 
@@ -134,6 +136,71 @@ int main()
         assert( worldB.IsValid( bodyB ) );
         assert( !worldA.IsValid( bodyB ) );
         assert( !worldB.IsValid( bodyA ) );
+
+        const shapeId shapeA =
+            worldA.CreateShape(
+                bodyA,
+                circle2{ {}, 0.5f }
+            );
+
+        const shapeId shapeB =
+            worldB.CreateShape(
+                bodyB,
+                circle2{ {}, 0.5f }
+            );
+
+        assert( shapeA.index1 == shapeB.index1 );
+        assert( shapeA.generation == shapeB.generation );
+
+        assert( worldA.IsValid( shapeA ) );
+        assert( worldB.IsValid( shapeB ) );
+        assert( !worldA.IsValid( shapeB ) );
+        assert( !worldB.IsValid( shapeA ) );
+
+        const bodyId staticBodyA =
+            worldA.CreateBody( bodyType::Static );
+
+        const bodyId staticBodyB =
+            worldB.CreateBody( bodyType::Static );
+
+        [[maybe_unused]] const shapeId staticShapeA =
+            worldA.CreateShape(
+                staticBodyA,
+                circle2{ {}, 0.5f }
+            );
+
+        [[maybe_unused]] const shapeId staticShapeB =
+            worldB.CreateShape(
+                staticBodyB,
+                circle2{ {}, 0.5f }
+            );
+
+        contactId contactA{};
+        contactId contactB{};
+
+        worldA.UpdateCollisions(
+            [&]( const contactData& data )
+            {
+                contactA = data.id;
+            }
+        );
+
+        worldB.UpdateCollisions(
+            [&]( const contactData& data )
+            {
+                contactB = data.id;
+            }
+        );
+
+        assert( !IsNull( contactA ) );
+        assert( !IsNull( contactB ) );
+        assert( contactA.index1 == contactB.index1 );
+        assert( contactA.generation == contactB.generation );
+
+        assert( worldA.IsValid( contactA ) );
+        assert( worldB.IsValid( contactB ) );
+        assert( !worldA.IsValid( contactB ) );
+        assert( !worldB.IsValid( contactA ) );
     }
 
     return 0;
