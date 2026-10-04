@@ -19,8 +19,7 @@ namespace zonai
 
 bool world::IsValid( bodyId bodyId ) const noexcept
 {
-    if( bodyId.owner != this ||
-        bodyId.index1 <= 0 )
+    if( bodyId.index1 <= 0 )
     {
         return false;
     }
@@ -110,7 +109,7 @@ bodyId world::MakeBodyId( std::int32_t bodyIndex ) const
 
     assert( body.bodyId == bodyIndex );
 
-    return { bodyIndex + 1, this, body.generation };
+    return { bodyIndex + 1, body.generation };
 }
 
 shapeId world::MakeShapeId( std::int32_t shapeIndex ) const
