@@ -5,18 +5,11 @@
 namespace zonai
 {
 
-class world;
-
 // world 외부에서 body를 참조하는 handle.
 // index1은 0을 null로 남기기 위해 내부 index + 1을 저장함.
 struct bodyId
 {
     std::int32_t index1 = 0;
-
-    // 같은 slot / generation이 다른 world에도 존재할 수 있으므로
-    // handle을 만든 world instance도 함께 기억함.
-    const world* owner = nullptr;
-
     std::uint16_t generation = 0;
 
     constexpr bool operator==( const bodyId& ) const = default;
