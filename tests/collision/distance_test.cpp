@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cmath>
 
+#include "collision/constants.h"
 #include "collision/distance2.h"
 #include "geometry/circle2.h"
 #include "geometry/polygon2.h"
@@ -10,6 +11,60 @@ using namespace zonai;
 int main()
 {
     constexpr float epsilon = 1e-4f;
+
+    // Box2D와 같은 segment-segment 최근접점 primitive를 제공해야 함.
+    {
+        const segmentDistanceResult2 result = SegmentDistance(
+            { -1.0f, -1.0f },
+            { -1.0f, 1.0f },
+            { 2.0f, 0.0f },
+            { 1.0f, 0.0f }
+        );
+
+        assert( std::fabs( result.fraction1 - 0.5f ) < epsilon );
+        assert( std::fabs( result.fraction2 - 1.0f ) < epsilon );
+        assert( std::fabs( result.closest1.x + 1.0f ) < epsilon );
+        assert( std::fabs( result.closest1.y ) < epsilon );
+        assert( std::fabs( result.closest2.x - 1.0f ) < epsilon );
+        assert( std::fabs( result.closest2.y ) < epsilon );
+        assert( std::fabs( result.distanceSquared - 4.0f ) < epsilon );
+    }
+
+    // 한쪽 또는 양쪽 선분이 점으로 퇴화해도 최근접점을 안정적으로 계산해야 함.
+    {
+        const segmentDistanceResult2 firstDegenerate = SegmentDistance(
+            { 0.0f, 0.0f },
+            { 0.0f, 0.0f },
+            { 2.0f, 0.0f },
+            { 4.0f, 0.0f }
+        );
+
+        assert( firstDegenerate.fraction1 == 0.0f );
+        assert( firstDegenerate.fraction2 == 0.0f );
+        assert( std::fabs( firstDegenerate.distanceSquared - 4.0f ) < epsilon );
+
+        const segmentDistanceResult2 secondDegenerate = SegmentDistance(
+            { 0.0f, 0.0f },
+            { 4.0f, 0.0f },
+            { 2.0f, 3.0f },
+            { 2.0f, 3.0f }
+        );
+
+        assert( std::fabs( secondDegenerate.fraction1 - 0.5f ) < epsilon );
+        assert( secondDegenerate.fraction2 == 0.0f );
+        assert( std::fabs( secondDegenerate.distanceSquared - 9.0f ) < epsilon );
+
+        const segmentDistanceResult2 bothDegenerate = SegmentDistance(
+            { 1.0f, 1.0f },
+            { 1.0f, 1.0f },
+            { 4.0f, 5.0f },
+            { 4.0f, 5.0f }
+        );
+
+        assert( bothDegenerate.fraction1 == 0.0f );
+        assert( bothDegenerate.fraction2 == 0.0f );
+        assert( std::fabs( bothDegenerate.distanceSquared - 25.0f ) < epsilon );
+    }
 
     // radius를 제외한 두 점 proxy 사이 거리.
     {
@@ -72,6 +127,33 @@ int main()
         const distanceOutput2 output = ShapeDistance( input, cache );
 
         assert( output.distance == 0.0f );
+    }
+
+    // 짧은 edge에서도 search direction을 잘못 0으로 보아 overlap 처리하면 안 됨.
+    {
+        constexpr float halfThickness = 0.0016f;
+
+        shapeProxy2 proxyA{};
+        proxyA.points[0] = { -0.5f, -halfThickness };
+        proxyA.points[1] = { 0.5f, -halfThickness };
+        proxyA.points[2] = { 0.5f, halfThickness };
+        proxyA.points[3] = { -0.5f, halfThickness };
+        proxyA.count = 4;
+
+        shapeProxy2 proxyB{};
+        proxyB.points[0] = { 0.5f + LINEAR_SLOP, 0.0f };
+        proxyB.count = 1;
+
+        distanceInput2 input{};
+        input.proxyA = proxyA;
+        input.proxyB = proxyB;
+
+        simplexCache2 cache{};
+        const distanceOutput2 output = ShapeDistance( input, cache );
+
+        assert( output.distance > 0.0f );
+        assert( std::fabs( Length( output.normal ) - 1.0f ) < 1e-6f );
+        assert( std::fabs( output.distance - LINEAR_SLOP ) < 1e-6f );
     }
 
     // relative transform의 회전도 B proxy에 적용됨.

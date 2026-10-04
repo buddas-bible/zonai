@@ -9,6 +9,23 @@
 namespace zonai
 {
 
+struct segmentDistanceResult2
+{
+    vec2 closest1{};
+    vec2 closest2{};
+
+    float fraction1 = 0.0f;
+    float fraction2 = 0.0f;
+    float distanceSquared = 0.0f;
+};
+
+// 두 선분 위의 최근접점을 계산하고 endpoint 범위로 fraction을 제한함.
+segmentDistanceResult2 SegmentDistance(
+    const vec2& p1,
+    const vec2& q1,
+    const vec2& p2,
+    const vec2& q2 );
+
 struct simplexCache2
 {
     std::array<std::uint8_t, 3> indexA{};
