@@ -897,8 +897,8 @@ void world::UpdateBodyProxyBounds(
                 }
                 else
                 {
-                    // 기존 tree bounds를 포함하지 않는 이동은 body type에 맞는 MoveProxy 경로를 사용함.
-                    // Static은 즉시 재삽입하고 Dynamic / Kinematic은 bounds를 refit한 뒤 partial rebuild 대상으로 남김.
+                    // translation처럼 기존 bounds를 포함하지 않는 이동은
+                    // 현재 tree 구현에서는 leaf를 새 위치로 재배치함.
                     broadPhase_.MoveProxy(
                         shape.proxyKey,
                         newFatAABB
@@ -2207,7 +2207,7 @@ void world::Step( float timeStep, int subStepCount )
         */
         const float subStepTime = timeStep / static_cast<float>( subStepCount );
 
-        const float maxLinearSpeedSquared = maximumLinearSpeed_ * maximumLinearSpeedSpeed_;
+        const float maxLinearSpeedSquared = maximumLinearSpeed_ * maximumLinearSpeed_;
 
         // 전체 Step에서 MAX_ROTATION 이상 회전하지 못하게 함.
         // sub-step 수가 바뀌어도 한 Step의 최대 회전량은 동일함.
