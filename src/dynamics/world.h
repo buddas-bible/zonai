@@ -39,7 +39,7 @@ concept worldCollisionCallback =
 class world
 {
 public:
-    world() = default;
+    world();
 
     world( const world& ) = delete;
     world& operator=( const world& ) = delete;
@@ -421,6 +421,9 @@ public:
     }
 
 private:
+    // Public handle이 world 수명을 구분할 때 사용하는 opaque token.
+    std::uint64_t worldToken_ = 0;
+
     [[nodiscard]] std::int32_t GetBodyIndex( bodyId bodyId ) const;
     [[nodiscard]] std::int32_t GetShapeIndex( shapeId shapeId ) const;
     [[nodiscard]] std::int32_t GetContactIndex( contactId contactId ) const;

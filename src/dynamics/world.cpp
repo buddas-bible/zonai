@@ -1,6 +1,7 @@
 #include "dynamics/world.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cmath>
 #include <limits>
@@ -17,10 +18,36 @@
 namespace zonai
 {
 
+namespace
+{
+
+std::uint64_t AllocateWorldToken() noexcept
+{
+    static std::atomic<std::uint64_t> nextToken{ 1 };
+
+    for( ;; )
+    {
+        const std::uint64_t token =
+            nextToken.fetch_add( 1, std::memory_order_relaxed );
+
+        if( token != 0 )
+        {
+            return token;
+        }
+    }
+}
+
+} // namespace
+
+world::world()
+    : worldToken_( AllocateWorldToken() )
+{
+}
+
 bool world::IsValid( bodyId bodyId ) const noexcept
 {
     if( bodyId.index1 <= 0 ||
-        bodyId.worldToken != reinterpret_cast<std::uintptr_t>( this ) )
+        bodyId.worldToken != worldToken_ )
     {
         return false;
     }
@@ -42,7 +69,7 @@ bool world::IsValid( bodyId bodyId ) const noexcept
 bool world::IsValid( shapeId shapeId ) const noexcept
 {
     if( shapeId.index1 <= 0 ||
-        shapeId.worldToken != reinterpret_cast<std::uintptr_t>( this ) )
+        shapeId.worldToken != worldToken_ )
     {
         return false;
     }
@@ -64,7 +91,7 @@ bool world::IsValid( shapeId shapeId ) const noexcept
 bool world::IsValid( contactId contactId ) const noexcept
 {
     if( contactId.index1 <= 0 ||
-        contactId.worldToken != reinterpret_cast<std::uintptr_t>( this ) )
+        contactId.worldToken != worldToken_ )
     {
         return false;
     }
@@ -116,7 +143,7 @@ bodyId world::MakeBodyId( std::int32_t bodyIndex ) const
     {
         bodyIndex + 1,
         body.generation,
-        reinterpret_cast<std::uintptr_t>( this )
+        worldToken_
     };
 }
 
@@ -133,7 +160,7 @@ shapeId world::MakeShapeId( std::int32_t shapeIndex ) const
     {
         shapeIndex + 1,
         shape.generation,
-        reinterpret_cast<std::uintptr_t>( this )
+        worldToken_
     };
 }
 
@@ -150,7 +177,7 @@ contactId world::MakeContactId( std::int32_t contactIndex ) const
     {
         contactIndex + 1,
         contact.generation,
-        reinterpret_cast<std::uintptr_t>( this )
+        worldToken_
     };
 }
 
@@ -693,7 +720,7 @@ std::size_t world::GetShapeSensorData(
         {
             visitor.shapeIndex + 1,
             visitor.generation,
-            reinterpret_cast<std::uintptr_t>( this )
+            worldToken_
         };
     }
 
@@ -2661,7 +2688,7 @@ void world::UpdateSensors()
             {
                 visitor.shapeIndex + 1,
                 visitor.generation,
-                reinterpret_cast<std::uintptr_t>( this )
+                worldToken_
             };
         };
 
@@ -2707,7 +2734,7 @@ void world::UpdateSensors()
                         {
                             oldVisitor.shapeIndex + 1,
                             oldVisitor.generation,
-                            reinterpret_cast<std::uintptr_t>( this )
+                            worldToken_
                         }
                     }
                 );
@@ -3034,7 +3061,7 @@ void world::DestroySensorByShapeIndex(
                 {
                     visitor.shapeIndex + 1,
                     visitor.generation,
-                    reinterpret_cast<std::uintptr_t>( this )
+                    worldToken_
                 }
             }
         );
