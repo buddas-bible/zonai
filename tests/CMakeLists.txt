@@ -253,6 +253,20 @@ add_test(
     COMMAND broadPhaseTests
 )
 
+add_executable(broadPhaseStressTests
+    collision/broadphase/broadphase_stress_test.cpp
+)
+
+target_link_libraries(broadPhaseStressTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME broadPhaseStressTests
+    COMMAND broadPhaseStressTests
+)
+
 add_executable(hashSetTests
     collision/broadphase/hash_set_test.cpp
 )
