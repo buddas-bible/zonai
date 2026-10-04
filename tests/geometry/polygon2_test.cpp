@@ -116,6 +116,22 @@ int main()
     }
 
     {
+        // 큰 world 좌표에서도 local 형상 면적과 centroid 정밀도를 잃지 않아야 함.
+        const vec2 vertices[] =
+        {
+            { 9999.0f,  9999.0f },
+            { 10001.0f, 9999.0f },
+            { 10001.0f, 10001.0f },
+            { 9999.0f,  10001.0f }
+        };
+
+        const polygon2 polygon = MakePolygon( vertices );
+
+        assert( polygon.vertexCount == 4 );
+        assert( NearlyEqual( polygon.centroid, { 10000.0f, 10000.0f } ) );
+    }
+
+    {
         // polygon radius는 AABB에 포함되어야 한다.
         polygon2 box = MakeBox( { 2.0f, 1.0f } );
         box.radius = 0.5f;
