@@ -69,6 +69,7 @@ int main()
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
         assert( NearlyEqual( manifold.points[1].separation, 0.0f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
         assert( HasPoint( manifold, { -1.0f, 1.0f } ) );
         assert( HasPoint( manifold, { 1.0f, 1.0f } ) );
     }
@@ -88,6 +89,7 @@ int main()
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, -0.5f ) );
         assert( NearlyEqual( manifold.points[1].separation, -0.5f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
     }
 
     {
@@ -106,6 +108,7 @@ int main()
         assert( NearlyEqual( manifold.normal, { 1.0f, 0.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
         assert( NearlyEqual( manifold.points[1].separation, 0.0f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
         assert( HasPoint( manifold, { 1.0f, -1.0f } ) );
         assert( HasPoint( manifold, { 1.0f, 1.0f } ) );
     }
@@ -127,12 +130,13 @@ int main()
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
         assert( NearlyEqual( manifold.points[1].separation, 0.0f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
         assert( HasPoint( manifold, { -1.0f, 1.25f } ) );
         assert( HasPoint( manifold, { 1.0f, 1.25f } ) );
     }
 
     {
-        // 회전된 polygon의 edge가 reference feature가 될 수 있다.
+        // 회전된 face contact는 clip된 두 점을 모두 유지한다.
         const polygon2 a = MakeBox( { 1.0f, 1.0f } );
         const polygon2 b = MakeBox( { 0.5f, 0.5f } );
 
@@ -143,14 +147,30 @@ int main()
         const localManifold2 manifold =
             CollidePolygons( a, b, transformB );
 
-        assert( manifold.pointCount > 0 );
-        assert( manifold.pointCount <= MAX_MANIFOLD_POINTS );
+        assert( manifold.pointCount == 2 );
         assert( NearlyEqual( Length( manifold.normal ), 1.0f, 1e-4f ) );
+        assert( manifold.points[0].id != manifold.points[1].id );
+        assert( IsTouchingManifold( manifold ) );
+    }
 
-        for( std::size_t i = 0; i < manifold.pointCount; ++i )
-        {
-            assert( manifold.points[i].separation <= 0.0f );
-        }
+    {
+        // SAT에서 face contact가 성립하면 clip된 두 점을 모두 유지한다.
+        // 한 점이 speculative distance보다 멀어도 다른 점이 닿아 있으면
+        // 2점 manifold가 회전 안정성을 유지하는 데 사용된다.
+        const polygon2 a = MakeBox( { 1.0f, 1.0f } );
+        const polygon2 b = MakeBox( { 1.0f, 1.0f } );
+
+        transform2 transformB{};
+        transformB.position = { 1.1f, 1.1f };
+        transformB.rotation =
+            rot2::FromRadians( 0.25f * 3.14159265358979323846f );
+
+        const localManifold2 manifold =
+            CollidePolygons( a, b, transformB );
+
+        assert( manifold.pointCount == 2 );
+        assert( manifold.points[0].id != manifold.points[1].id );
+        assert( IsTouchingManifold( manifold ) );
     }
 
     return 0;
