@@ -12,7 +12,7 @@
 
 using namespace zonai;
 
-// Public handle이 world 객체 주소를 ownership token으로 사용하므로 world는 주소가 고정되어야 함.
+// Public handle이 world 객체 주소를 ownership token으로 사용하므로 생성된 world의 주소는 고정되어야 함.
 static_assert( !std::is_copy_constructible_v<world> );
 static_assert( !std::is_copy_assignable_v<world> );
 static_assert( !std::is_move_constructible_v<world> );
