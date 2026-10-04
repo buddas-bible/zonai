@@ -52,7 +52,12 @@ int main()
     world.SetShapeFriction( boxShape, 0.0f );
     world.SetShapeRestitution( boxShape, 1.0f );
 
-    world.Step( timeStep, 4 );
+    // 첫 Step 시작 시 아직 contact manifold가 없을 수 있으므로
+    // Box2D restitution 회귀 테스트처럼 실제 impact 이후까지 충분히 진행함.
+    for( int i = 0; i < 60; ++i )
+    {
+        world.Step( timeStep, 4 );
+    }
 
     const float bounceSpeed =
         world.GetBodyLinearVelocity( boxBody ).y;
