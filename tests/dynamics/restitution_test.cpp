@@ -1,5 +1,6 @@
 #include <cassert>
 #include <cmath>
+#include <cstdio>
 
 #include "dynamics/world.h"
 
@@ -60,6 +61,13 @@ int main()
         std::fabs(
             world.GetBodyAngularVelocity( boxBody )
         );
+
+    std::fprintf(
+        stderr,
+        "flat restitution: bounce=%.6f spin=%.6f\n",
+        bounceSpeed,
+        spin
+    );
 
     // 두 contact point의 restitution은 서로 velocity를 바꾸므로 한 번의 sweep으로 끝내면
     // 첫 point가 만든 회전을 두 번째 point가 완전히 상쇄하지 못함.
