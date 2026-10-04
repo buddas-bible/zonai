@@ -63,7 +63,7 @@ int main()
 
     // 두 contact point의 restitution은 서로 velocity를 바꾸므로 한 번의 sweep으로 끝내면
     // 첫 point가 만든 회전을 두 번째 point가 완전히 상쇄하지 못함.
-    // 최신 Box2D처럼 반복 sweep을 사용하면 평평한 대칭 충돌은 거의 회전 없이 반발해야 함.
+    // 최신 Box2D처럼 restitution stage를 반복하면 대칭 충돌의 잔여 spin이 빠르게 줄어듦.
     assert( bounceSpeed > 4.0f );
     assert( spin < 0.5f );
 
