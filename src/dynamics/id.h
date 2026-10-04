@@ -12,6 +12,9 @@ struct bodyId
     std::int32_t index1 = 0;
     std::uint16_t generation = 0;
 
+    // 같은 slot / generation을 가진 다른 world의 handle과 구분함.
+    std::uint32_t worldId = 0;
+
     constexpr bool operator==( const bodyId& ) const = default;
 };
 
@@ -22,6 +25,9 @@ struct shapeId
     std::int32_t index1 = 0;
     std::uint16_t generation = 0;
 
+    // 이 handle을 만든 world의 identity.
+    std::uint32_t worldId = 0;
+
     constexpr bool operator==( const shapeId& ) const = default;
 };
 
@@ -31,6 +37,9 @@ struct contactId
 {
     std::int32_t index1 = 0;
     std::uint32_t generation = 0;
+
+    // 이 handle을 만든 world의 identity.
+    std::uint32_t worldId = 0;
 
     constexpr bool operator==( const contactId& ) const = default;
 };
