@@ -224,7 +224,7 @@ public:
     // Contact constraint를 준비한 뒤 sub-step마다 force / gravity, solve, position integration을 수행함.
     void Step( float timeStep, int subStepCount = 1 );
 
-    // null / 범위 / generation / 활성 slot을 모두 확인함.
+    // world lifetime / null / 범위 / generation / 활성 slot을 모두 확인함.
     [[nodiscard]] bool IsValid( bodyId bodyId ) const noexcept;
     [[nodiscard]] bool IsValid( shapeId shapeId ) const noexcept;
     [[nodiscard]] bool IsValid( contactId contactId ) const noexcept;

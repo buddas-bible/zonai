@@ -3524,7 +3524,7 @@ std::size_t world::GetShapeContactCapacity( shapeId shapeId ) const
 
     const shape& shape = shapes_[shapeIndex];
 
-    // Sensor Contact query는 Sensor 저장소를 구현할 때 별도로 연결함.
+    // Sensor는 Contact를 만들지 않으므로 overlap 정보는 Sensor API에서 별도로 조회함.
     if( shape.sensorIndex != shape::NULL_INDEX )
     {
         return 0;
@@ -3624,7 +3624,7 @@ contactData world::MakeContactData( std::int32_t contactIndex ) const
     data.id = MakeContactId( contactIndex );
     data.shapeA = MakeShapeId( contact.shapeIdA );
     data.shapeB = MakeShapeId( contact.shapeIdB );
-    data.manifold = ToWorldManifold( contactSim.manifold, bodySimA.transform  );
+    data.manifold = ToWorldManifold( contactSim.manifold, bodySimA.transform );
 
     // world-space geometry와 함께 마지막 solver impulse도 public snapshot에 복사함.
     for( int i = 0; i < data.manifold.pointCount; ++i )
