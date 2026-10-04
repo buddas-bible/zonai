@@ -5,7 +5,7 @@
 namespace zonai
 {
 
-// world 외부에서 body를 참조하는 handle.
+// world 외부에서 body를 참조하는 opaque handle.
 // index1은 0을 null로 남기기 위해 내부 index + 1을 저장함.
 struct bodyId
 {
@@ -18,7 +18,7 @@ struct bodyId
     constexpr bool operator==( const bodyId& ) const = default;
 };
 
-// world 외부에서 shape를 참조하는 handle.
+// world 외부에서 shape를 참조하는 opaque handle.
 // slot이 재사용되더라도 generation이 달라져 오래된 handle을 검출할 수 있음.
 struct shapeId
 {
@@ -31,7 +31,7 @@ struct shapeId
     constexpr bool operator==( const shapeId& ) const = default;
 };
 
-// world 외부에서 Contact를 참조하는 handle.
+// world 외부에서 Contact를 참조하는 opaque handle.
 // Contact는 자동 생성/파괴 빈도가 높으므로 generation을 32bit로 유지함.
 struct contactId
 {
