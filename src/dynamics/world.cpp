@@ -3554,7 +3554,7 @@ std::size_t world::GetShapeContactData( shapeId shapeId, std::span<contactData> 
             contact.shapeIdB == shapeIndex;
 
         if( involvesShape &&
-  IsTouchingManifold( contactSim.manifold ) )
+            IsTouchingManifold( contactSim.manifold ) )
         {
             output[count] = MakeContactData( contactId );
             ++count;
