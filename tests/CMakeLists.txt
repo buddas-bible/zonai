@@ -254,7 +254,7 @@ add_test(
 )
 
 add_executable(broadPhaseStressTests
-    collision/broadphase/broadphase_stress_test.cpp
+    collision/broadphase/broad_phase_stress_test.cpp
 )
 
 target_link_libraries(broadPhaseStressTests
