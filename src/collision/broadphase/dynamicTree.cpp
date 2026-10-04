@@ -8,37 +8,14 @@ namespace zonai
 {
 
 /*
-* dynamicTree 구현 메모
+* dynamicTree
 *
-* [구조]
-* - broadPhase에서 proxy AABB를 관리하는 BVH임.
-* - leaf는 proxy 하나를 나타내고 internal node는 두 child AABB의 Union을 저장함.
-* - root는 0번, 1번은 비워두고 같은 parent의 두 child를 연속된 pair로 배치함.
-* - stable proxy id와 tree 내부에서 바뀔 수 있는 node index를 분리함.
-*
-* [주요 흐름]
-* - 삽입: SAH로 새 leaf와 묶을 형제 노드를 찾고 parent를 만든 뒤 root까지 refit함.
-* - 신규 삽입에서는 refit 중 local rotation을 시도해 perimeter 비용을 줄임.
-* - 삭제: 남은 형제 노드를 parent 자리로 올리고 비어진 pair를 free-list에 반환함.
-* - 이동: 기존 leaf를 제거하고 같은 proxy id로 재삽입함. MoveProxy에서는 rotation을 생략함.
-* - Query: AABB가 겹치는 subtree만 내려가며 leaf proxy를 callback에 전달함.
-*
-* [현재 구현]
-* - proxy / sibling pair free-list, SAH 삽입, 삭제, MoveProxy, Query, local rotation, Validate 구현함.
-* - CreateProxy / MoveProxy는 필요할 때만 moved를 표시하고 ancestor로 전파함. ClearMoved로 소비 후 초기화함.
-* - treeProxy::userData에는 leaf의 shape index를 복제해 proxy <-> leaf mapping 검증에 사용함.
-* - category bits 기반 tree query와 TreeStats는 아직 없음.
-*
-* [Box2D에서 이어서 참고할 기능]
-* - category bits / userData 조회, EnlargeProxy
-* - CastRay / CastBox
-* - moved mark / clear / gather, Rebuild / Refit
-* - root bounds / byte count 등 보조 조회 기능
-*
-* [broadPhase 다음 목표]
-* - static / kinematic / dynamic body를 별도 tree로 관리함.
-* - moved 형제 pair를 기준으로 dynamic self collision과 static / kinematic cross collision 후보를 생성함.
-* - 중복 제거와 collision filtering 후 살아남은 pair를 Contact 생성 단계로 넘김.
+* - broadPhase의 proxy AABB를 관리하는 BVH임.
+* - root는 0번, 1번은 비워두고 sibling 두 개를 연속된 pair로 배치함.
+* - stable proxy id와 tree 내부에서 이동할 수 있는 node index를 분리함.
+* - 삽입은 SAH와 local rotation으로 perimeter 비용을 줄임.
+* - Dynamic / Kinematic 이동은 bounds를 즉시 refit하고 moved branch를 partial rebuild 대상으로 남김.
+* - Static 이동처럼 즉시 재배치가 필요한 경우에는 stable proxy id를 유지한 채 leaf를 재삽입함.
 */
 
 dynamicTree::dynamicTree()
@@ -1119,16 +1096,16 @@ std::int32_t dynamicTree::FindBestSibling( const aabb2& boxD ) const
 
     if( IsLeaf( nodes_[nodeIndex] ) )
     {
-		// 더 내려갈 child가 없으므로 root를 새 leaf의 형제 노드로 선택함.
+        // 더 내려갈 child가 없으므로 root를 새 leaf의 형제 노드로 선택함.
         return nodeIndex;
     }
 
-	const float areaD = Perimeter( boxD ); // 새 leaf perimeter
+    const float areaD = Perimeter( boxD ); // 새 leaf perimeter
 
-	aabb2 nodeBox = nodes_[nodeIndex].aabb; // 현재 node AABB
-	float areaBase = Perimeter( nodeBox );  // 현재 node perimeter
-	float directCost = Perimeter( Union( nodeBox, boxD ) ); // 새 leaf를 포함한 Union perimeter
-	float inheritedCost = 0.0f; // ancestor에서 누적된 perimeter 증가 비용
+    aabb2 nodeBox = nodes_[nodeIndex].aabb; // 현재 node AABB
+    float areaBase = Perimeter( nodeBox );  // 현재 node perimeter
+    float directCost = Perimeter( Union( nodeBox, boxD ) ); // 새 leaf를 포함한 Union perimeter
+    float inheritedCost = 0.0f; // ancestor에서 누적된 perimeter 증가 비용
 
     std::int32_t bestSibling = nodeIndex;
     float bestCost = directCost;
