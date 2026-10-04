@@ -1,3 +1,4 @@
+#include <array>
 #include <cassert>
 #include <limits>
 
@@ -201,6 +202,60 @@ int main()
         assert( worldB.IsValid( contactB ) );
         assert( !worldA.IsValid( contactB ) );
         assert( !worldB.IsValid( contactA ) );
+    }
+
+    {
+        // Speculative manifold도 solver-active Contact이므로 public Contact query에 포함함.
+        world world{};
+        world.SetGravity( {} );
+
+        const bodyId staticBody =
+            world.CreateBody( bodyType::Static );
+
+        (void)world.CreateShape(
+            staticBody,
+            circle2{ {}, 1.0f }
+        );
+
+        const bodyId dynamicBody =
+            world.CreateBody(
+                bodyType::Dynamic,
+                {
+                    { 2.01f, 0.0f },
+                    {}
+                }
+            );
+
+        const shapeId dynamicShape =
+            world.CreateShape(
+                dynamicBody,
+                circle2{ {}, 1.0f }
+            );
+
+        world.UpdateCollisions(
+            []( const contactData& )
+            {
+            }
+        );
+
+        std::array<contactData, 1> contacts{};
+
+        assert(
+            world.GetBodyContactData(
+                dynamicBody,
+                contacts
+            ) == 1
+        );
+
+        assert( contacts[0].manifold.pointCount == 1 );
+        assert( contacts[0].manifold.points[0].separation > 0.0f );
+
+        assert(
+            world.GetShapeContactData(
+                dynamicShape,
+                contacts
+            ) == 1
+        );
     }
 
     return 0;
