@@ -39,6 +39,14 @@ concept worldCollisionCallback =
 class world
 {
 public:
+    world() = default;
+
+    world( const world& ) = delete;
+    world& operator=( const world& ) = delete;
+
+    world( world&& ) = delete;
+    world& operator=( world&& ) = delete;
+
     // definition의 초기 simulation 설정으로 새 body를 만듦.
     [[nodiscard]] bodyId CreateBody( const bodyDef& definition );
 
