@@ -11,6 +11,24 @@ int main()
 {
     constexpr float epsilon = 1e-4f;
 
+    // Box2D와 같은 segment-segment 최근접점 primitive를 제공해야 함.
+    {
+        const segmentDistanceResult2 result = SegmentDistance(
+            { -1.0f, -1.0f },
+            { -1.0f, 1.0f },
+            { 2.0f, 0.0f },
+            { 1.0f, 0.0f }
+        );
+
+        assert( std::fabs( result.fraction1 - 0.5f ) < epsilon );
+        assert( std::fabs( result.fraction2 - 1.0f ) < epsilon );
+        assert( std::fabs( result.closest1.x + 1.0f ) < epsilon );
+        assert( std::fabs( result.closest1.y ) < epsilon );
+        assert( std::fabs( result.closest2.x - 1.0f ) < epsilon );
+        assert( std::fabs( result.closest2.y ) < epsilon );
+        assert( std::fabs( result.distanceSquared - 4.0f ) < epsilon );
+    }
+
     // radius를 제외한 두 점 proxy 사이 거리.
     {
         distanceInput2 input{};
