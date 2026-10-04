@@ -12,8 +12,8 @@ struct bodyId
     std::int32_t index1 = 0;
     std::uint16_t generation = 0;
 
-    // 같은 slot / generation을 가진 다른 world의 handle과 구분함.
-    std::uint32_t worldId = 0;
+    // Box2D의 world0 역할. owning world 객체를 opaque token으로 구분함.
+    std::uintptr_t worldToken = 0;
 
     constexpr bool operator==( const bodyId& ) const = default;
 };
@@ -25,8 +25,8 @@ struct shapeId
     std::int32_t index1 = 0;
     std::uint16_t generation = 0;
 
-    // 이 handle을 만든 world의 identity.
-    std::uint32_t worldId = 0;
+    // 같은 slot / generation을 가진 다른 world의 shape와 구분함.
+    std::uintptr_t worldToken = 0;
 
     constexpr bool operator==( const shapeId& ) const = default;
 };
@@ -38,8 +38,8 @@ struct contactId
     std::int32_t index1 = 0;
     std::uint32_t generation = 0;
 
-    // 이 handle을 만든 world의 identity.
-    std::uint32_t worldId = 0;
+    // 같은 slot / generation을 가진 다른 world의 Contact와 구분함.
+    std::uintptr_t worldToken = 0;
 
     constexpr bool operator==( const contactId& ) const = default;
 };
