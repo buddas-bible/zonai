@@ -12,8 +12,8 @@ namespace zonai
 
 constexpr std::size_t MAX_MANIFOLD_POINTS = 2;
 
-// Contact point id는 A/B feature index를 각각 8bit로 묶어 저장함.
-// 같은 feature pair가 다음 narrow-phase에도 유지되면 warm start impulse를 재사용할 수 있음.
+// A/B feature index를 각각 8bit로 묶어 contact point id로 사용함.
+// 같은 feature pair가 유지되면 이전 solver impulse를 warm start에 재사용할 수 있음.
 constexpr std::uint16_t MakeContactPointId(
     std::size_t indexA,
     std::size_t indexB ) noexcept
@@ -35,14 +35,14 @@ struct localManifoldPoint2
     vec2 point{};
     float separation{};
     std::uint16_t id{};
-}; // sizeof: 16 bytes
+};
 
 struct localManifold2
 {
     vec2 normal{};
     std::array<localManifoldPoint2, MAX_MANIFOLD_POINTS> points{};
     int pointCount{};
-}; // sizeof: 44 bytes
+};
 
 struct manifoldPoint2
 {
@@ -55,14 +55,14 @@ struct manifoldPoint2
     float tangentImpulse{};
 
     std::uint16_t id{};
-}; // sizeof: 24 bytes
+};
 
 struct manifold2
 {
     vec2 normal{};
     std::array<manifoldPoint2, MAX_MANIFOLD_POINTS> points{};
     int pointCount{};
-}; // sizeof: 60 bytes
+};
 
 inline bool IsTouchingManifold( const localManifold2& manifold )
 {
