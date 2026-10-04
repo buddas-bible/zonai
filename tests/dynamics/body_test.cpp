@@ -1,6 +1,7 @@
 #include <array>
 #include <cassert>
 #include <limits>
+#include <type_traits>
 
 #include "dynamics/body.h"
 #include "dynamics/bodyDef.h"
@@ -10,6 +11,12 @@
 #include "geometry/circle2.h"
 
 using namespace zonai;
+
+// Public handle이 world 객체 주소를 ownership token으로 사용하므로 world는 주소가 고정되어야 함.
+static_assert( !std::is_copy_constructible_v<world> );
+static_assert( !std::is_copy_assignable_v<world> );
+static_assert( !std::is_move_constructible_v<world> );
+static_assert( !std::is_move_assignable_v<world> );
 
 int main()
 {
