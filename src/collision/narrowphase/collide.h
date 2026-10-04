@@ -20,7 +20,7 @@ namespace zonai
 */
 localManifold2 CollideCircles(
     const circle2& a,
-    const circle2& b, const transform2& transformB);
+    const circle2& b, const transform2& transformB );
 
 localManifold2 CollideSegmentCircle(
     const segment2& segment,
