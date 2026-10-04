@@ -1,0 +1,104 @@
+name: Part 5 Patch Helper
+
+on:
+  push:
+    branches:
+      - refactor/body-shape-contact-audit
+
+permissions:
+  contents: write
+
+jobs:
+  patch-world-ids:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/body-shape-contact-audit
+          fetch-depth: 0
+
+      - name: Patch world-owned public IDs
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/dynamics/world.cpp')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_once(old: str, new: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'expected one occurrence, found {count}: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+
+          token = 'reinterpret_cast<std::uintptr_t>( this )'
+
+          replace_once(
+              '''    if( bodyId.index1 <= 0 )''',
+              f'''    if( bodyId.index1 <= 0 ||\n        bodyId.worldToken != {token} )'''
+          )
+
+          replace_once(
+              '''    if( shapeId.index1 <= 0 )''',
+              f'''    if( shapeId.index1 <= 0 ||\n        shapeId.worldToken != {token} )'''
+          )
+
+          replace_once(
+              '''    if( contactId.index1 <= 0 )''',
+              f'''    if( contactId.index1 <= 0 ||\n        contactId.worldToken != {token} )'''
+          )
+
+          replace_once(
+              '''    return { bodyIndex + 1, body.generation };''',
+              f'''    return\n    {{\n        bodyIndex + 1,\n        body.generation,\n        {token}\n    }};'''
+          )
+
+          replace_once(
+              '''    return { shapeIndex + 1, shape.generation };''',
+              f'''    return\n    {{\n        shapeIndex + 1,\n        shape.generation,\n        {token}\n    }};'''
+          )
+
+          replace_once(
+              '''    return { contactIndex + 1, contact.generation };''',
+              f'''    return\n    {{\n        contactIndex + 1,\n        contact.generation,\n        {token}\n    }};'''
+          )
+
+          replace_once(
+              '''        output[i] =\n        {\n            visitor.shapeIndex + 1,\n            visitor.generation\n        };''',
+              f'''        output[i] =\n        {{\n            visitor.shapeIndex + 1,\n            visitor.generation,\n            {token}\n        }};'''
+          )
+
+          replace_once(
+              '''    const auto makeVisitorId =\n        []( const sensorVisitor2& visitor )\n        {\n            return shapeId\n            {\n                visitor.shapeIndex + 1,\n                visitor.generation\n            };\n        };''',
+              f'''    const auto makeVisitorId =\n        [this]( const sensorVisitor2& visitor )\n        {{\n            return shapeId\n            {{\n                visitor.shapeIndex + 1,\n                visitor.generation,\n                {token}\n            }};\n        }};'''
+          )
+
+          replace_once(
+              '''                        {\n                            oldVisitor.shapeIndex + 1,\n                            oldVisitor.generation\n                        }''',
+              f'''                        {{\n                            oldVisitor.shapeIndex + 1,\n                            oldVisitor.generation,\n                            {token}\n                        }}'''
+          )
+
+          replace_once(
+              '''                {\n                    visitor.shapeIndex + 1,\n                    visitor.generation\n                }''',
+              f'''                {{\n                    visitor.shapeIndex + 1,\n                    visitor.generation,\n                    {token}\n                }}'''
+          )
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet -- src/dynamics/world.cpp; then
+            echo 'No changes produced'
+            exit 1
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/dynamics/world.cpp
+          git commit -m 'Validate public ids against owning world'
+          git push origin HEAD:refactor/body-shape-contact-audit
