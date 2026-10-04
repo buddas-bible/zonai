@@ -1,6 +1,8 @@
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <limits>
+#include <memory>
 #include <type_traits>
 
 #include "dynamics/body.h"
@@ -209,6 +211,36 @@ int main()
         assert( worldB.IsValid( contactB ) );
         assert( !worldA.IsValid( contactB ) );
         assert( !worldB.IsValid( contactA ) );
+    }
+
+    {
+        // 같은 메모리 주소에 새 world가 생성되어도 이전 world의 handle은 되살아나면 안 됨.
+        alignas( world ) std::byte storage[sizeof( world )];
+
+        world* firstWorld =
+            std::construct_at(
+                reinterpret_cast<world*>( storage )
+            );
+
+        const bodyId oldBody =
+            firstWorld->CreateBody( bodyType::Dynamic );
+
+        std::destroy_at( firstWorld );
+
+        world* secondWorld =
+            std::construct_at(
+                reinterpret_cast<world*>( storage )
+            );
+
+        const bodyId newBody =
+            secondWorld->CreateBody( bodyType::Dynamic );
+
+        assert( oldBody.index1 == newBody.index1 );
+        assert( oldBody.generation == newBody.generation );
+        assert( secondWorld->IsValid( newBody ) );
+        assert( !secondWorld->IsValid( oldBody ) );
+
+        std::destroy_at( secondWorld );
     }
 
     {
