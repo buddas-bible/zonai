@@ -5,6 +5,7 @@
 #include "dynamics/bodyDef.h"
 #include "dynamics/bodySim.h"
 #include "dynamics/bodyState.h"
+#include "dynamics/world.h"
 
 using namespace zonai;
 
@@ -113,6 +114,26 @@ int main()
         assert( state.linearVelocity.x == 4.0f );
         assert( state.linearVelocity.y == -3.0f );
         assert( state.angularVelocity == 2.5f );
+    }
+
+    {
+        world worldA{};
+        world worldB{};
+
+        const bodyId bodyA =
+            worldA.CreateBody( bodyType::Dynamic );
+
+        const bodyId bodyB =
+            worldB.CreateBody( bodyType::Dynamic );
+
+        // 서로 다른 world의 첫 body는 slot / generation이 같아도 서로의 handle이 아님.
+        assert( bodyA.index1 == bodyB.index1 );
+        assert( bodyA.generation == bodyB.generation );
+
+        assert( worldA.IsValid( bodyA ) );
+        assert( worldB.IsValid( bodyB ) );
+        assert( !worldA.IsValid( bodyB ) );
+        assert( !worldB.IsValid( bodyA ) );
     }
 
     return 0;
