@@ -34,11 +34,9 @@ jobs:
         include:
           - name: Windows
             os: windows-latest
-            sandbox: "ON"
 
           - name: Ubuntu
             os: ubuntu-latest
-            sandbox: "OFF"
 
     steps:
       - name: Checkout
@@ -56,7 +54,6 @@ jobs:
           -B build
           -G "Visual Studio 18 2026"
           -A x64
-          -DZONAI_BUILD_SANDBOX=${{ matrix.sandbox }}
           -DZONAI_BUILD_TESTS=ON
 
       - name: Configure Ubuntu
@@ -65,7 +62,6 @@ jobs:
           cmake
           -S .
           -B build
-          -DZONAI_BUILD_SANDBOX=${{ matrix.sandbox }}
           -DZONAI_BUILD_TESTS=ON
           -DCMAKE_BUILD_TYPE=Debug
 

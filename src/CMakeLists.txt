@@ -32,3 +32,8 @@ target_compile_features(zonai
     PUBLIC
         cxx_std_20
 )
+
+if(MSVC)
+    # 상위 프로젝트의 consumer도 zonai 헤더의 한글 주석을 UTF-8로 읽게 함.
+    target_compile_options(zonai PUBLIC /utf-8)
+endif()

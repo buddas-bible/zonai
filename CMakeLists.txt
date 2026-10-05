@@ -12,8 +12,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-option(ZONAI_BUILD_SANDBOX "Build the zonai sandbox application" ON)
+option(ZONAI_BUILD_SANDBOX "Build the zonai sandbox application" ${WIN32})
 option(ZONAI_BUILD_TESTS "Build zonai tests" ON)
+
+if(ZONAI_BUILD_SANDBOX AND NOT WIN32)
+    message(FATAL_ERROR "The zonai sandbox requires Windows. Set ZONAI_BUILD_SANDBOX=OFF to build the physics library and tests.")
+endif()
 
 if(MSVC)
     add_compile_options(/utf-8)

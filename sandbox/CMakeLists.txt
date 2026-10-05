@@ -1,7 +1,7 @@
-# The zonai sandbox target will be added with the Win32 + Direct3D 11 + Dear ImGui bootstrap.
 # Keep sandbox-only dependencies out of the zonai physics library.
 
-set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/third_party/imgui")
+# add_subdirectory로 포함해도 상위 프로젝트가 아닌 zonai의 vendored ImGui를 사용함.
+set(IMGUI_DIR "${PROJECT_SOURCE_DIR}/third_party/imgui")
 
 add_library(imgui STATIC
     "${IMGUI_DIR}/imgui.cpp"

@@ -1,9 +1,5 @@
 # Third Party
 
-External dependencies used by the project live here or are managed from CMake with their versions pinned.
+Dear ImGui 1.92.9b is vendored in `imgui/` for the Windows Sandbox/debug UI, with the Win32 and Direct3D 11 backends. The checked-in sources define the dependency used by this build; no download is needed during configuration.
 
-Initial planned dependency:
-
-- Dear ImGui for the sandbox/debug UI
-
-Third-party code must not leak into the public `zonai` physics API unless there is a strong reason.
+The original [MIT license](imgui/LICENSE.txt) is retained. ImGui and platform headers are confined to the Sandbox and do not appear in the `zonai` physics API. Dependency upgrades should be deliberate changes with Sandbox build verification.
