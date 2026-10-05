@@ -170,6 +170,7 @@ public:
 
     // AABB가 겹치는 proxy를 찾아 callback으로 전달함.
     // callback이 false를 반환하면 즉시 순회를 끝냄.
+    // Box2D처럼 callback 중 tree를 변경하지 않음. 조회 결과는 broad-phase AABB 후보임.
     template <treeQueryCallback Callback>
     void Query( const aabb2& aabb, Callback&& callback ) const
     {

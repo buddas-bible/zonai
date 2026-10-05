@@ -2718,8 +2718,6 @@ void world::UpdateSensors()
         {
             sensor.hits.clear();
 
-            std::vector<sensorVisitor2> emptyOverlaps;
-
             const shapeId sensorShapeId =
                 MakeShapeId(
                     sensor.shapeIndex
@@ -2740,10 +2738,7 @@ void world::UpdateSensors()
                 );
             }
 
-            sensor.overlaps =
-                std::move(
-                    emptyOverlaps
-                );
+            sensor.overlaps.clear();
 
             continue;
         }
