@@ -14,7 +14,7 @@ No production correctness defect was confirmed in the reviewed existing APIs. Zo
 - Sensor update queries Static/Kinematic/Dynamic trees, excludes same-body shapes, requires both shapes' event opt-in, applies bilateral 64-bit masks and signed group precedence, then uses GJK with radii to reject geometric false positives. Sensor-sensor overlaps are supported, independently of solid contact body-type exclusions.
 - Overlaps and event IDs are snapshots of the last Step, including Step(0). Transform/filter/opt-in changes affect the next sensor update. Like Box2D's public sensor-data contract, a destroyed visitor can remain in the snapshot until then; returning the historical generation is intentional. The header now specifies IsValid checks, bounded output, span lifetime and copying when retaining events.
 - Generation participates in sort/diff, so slot reuse produces old-generation End and new-generation Begin. Dense sensor removal fixes the moved sensor's shape index and queues historical End events for the next Step, even if no sensors remain. Pending events are published once; published event spans survive ordinary mutations until the next Step or world destruction.
-- Replaced the disabled sensor path's temporary empty vector/move with `overlaps.clear()`. This retains capacity for future re-enable and preserves the same End-event behavior with fewer statements. No new cache, event layer or query abstraction was needed.
+- Replaced the disabled sensor path's temporary empty vector/move with `overlaps.clear()`. This retains capacity while disabled and preserves the same End-event behavior with fewer statements. No new cache, event layer or query abstraction was needed.
 
 ## Verification
 
