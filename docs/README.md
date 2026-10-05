@@ -1,12 +1,14 @@
 # Documentation
 
-This directory contains design notes and project documentation for `zonai`.
+현재 감사 완료 범위와 다음 작업은 [감사 현황](audit-status.md)에서 확인한다. 개별 보고서의 다음 작업/미병합/CI 대기 문구는 작성 당시의 기록이며, 최신 진행 순서는 감사 현황을 따른다.
 
-Planned topics include:
+감사 상세 기록:
 
-- architecture and module boundaries
-- coding conventions
-- physics design notes and references
-- development roadmap
+- [Part 4 — DynamicTree / BroadPhase](box2d-broadphase-parity-audit.md)
+- [Part 5 — Body / Shape / Contact](part5-body-shape-contact-audit.md)
+- [Part 6 — Contact Solver](part6-contact-solver-audit.md)
+- [Island / Sleep / CCD 통합](island-sleep-ccd-audit.md)
+- [World Query / Sensor API](world-query-sensor-audit.md)
+- [Contact recycling/cache](contact-cache-audit.md)
 
-Keep implementation details close to the code, and use this directory for decisions and concepts that should remain understandable over time.
+기존 설계와 실행 계획은 `superpowers/specs`와 `superpowers/plans`에 보존한다. 구현 세부 사항은 코드 가까이에 두고, 이 디렉터리에는 근거·결정·검증 범위와 제한을 남긴다.
