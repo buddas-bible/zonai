@@ -1,11 +1,11 @@
 # Zonai 감사 현황과 남은 작업
 
-기준: 2026-10-05, master `4097e754356a81bb56378622bd6ecd1eb705011a`에서 시작한 Part 10 작업.
+기준: 2026-10-06, master `8fb0ae5c6fa29fc1115be16f823f1f4a69739b12`에서 시작한 최종 통합 확인.
 Part 4 이후 감사의 Box2D 기준은 `ac7c751eaeddbabdc1c4d41ae4f3a25d78627790`이다. 이 문서는 저장소 이력·API·테스트·기존 보고서를 종합하며, 모든 함수를 새로 재감사한 결과는 아니다.
 
 ## 병합된 감사
 
-기존 감사 병합 커밋 10개가 모두 기준 master의 ancestor임을 확인했다. 완료는 각 감사의 구현된 경로와 검증 범위에 한정하며, Box2D 전체 기능 구현 완료를 뜻하지 않는다. 원래 대화의 로드맵은 Part 1–10 → 최종 통합 확인 → Joint였다. Island/Sleep/CCD 통합은 Part 7/8의 구현 경로를 다루고, 조회·cache 감사는 관련 범위를 보완한다.
+기존 감사 병합 커밋 11개가 모두 기준 master의 ancestor임을 확인했다. 완료는 각 감사의 구현된 경로와 검증 범위에 한정하며, Box2D 전체 기능 구현 완료를 뜻하지 않는다. 원래 대화의 로드맵은 Part 1–10 → 최종 통합 확인 → Joint였다. Island/Sleep/CCD 통합은 Part 7/8의 구현 경로를 다루고, 조회·cache 감사는 관련 범위를 보완한다.
 
 | 범위 | 상태와 주요 결과 | 병합 근거 / 상세 기록 |
 | --- | --- | --- |
@@ -19,13 +19,14 @@ Part 4 이후 감사의 Box2D 기준은 `ac7c751eaeddbabdc1c4d41ae4f3a25d7862779
 | World Query / Sensor API | 재감사 병합. 제공 중인 Contact/Sensor 조회, 결과 제한, filter, 과거 ID와 이벤트 수명. | `4571ef0`, [PR #14](https://github.com/buddas-bible/zonai/pull/14), [보고서](world-query-sensor-audit.md) |
 | Contact recycling/cache | 재감사 병합. 누적 pose 기준, 임계값·회전·fast 제외, feature impulse와 mass 갱신. | `f9c5c50`, [PR #15](https://github.com/buddas-bible/zonai/pull/15), [보고서](contact-cache-audit.md) |
 | Part 9 — World / Public API / 파일 구조 | 감사 병합. World ownership·Step·API 경계와 Joint 연결 지점 검토, template 처리 분리·정의 순서·Contact record 위치 정리. | `4097e75`, [PR #17](https://github.com/buddas-bible/zonai/pull/17), [보고서](part9-world-api-structure-audit.md) |
-| Part 10 — Tests / Sandbox / Build / Docs | 이번 감사. 플랫폼 기본값, 외부 consumer의 dependency 경로/UTF-8 설정, 현재 빌드/사용 문서 정리. | [보고서](part10-tests-sandbox-build-docs-audit.md), 최종 검증·병합 근거는 해당 PR에 기록 |
+| Part 10 — Tests / Sandbox / Build / Docs | 감사 병합. 플랫폼 기본값, 외부 consumer의 dependency 경로/UTF-8 설정, 현재 빌드/사용 문서 정리. | `8fb0ae5`, [PR #18](https://github.com/buddas-bible/zonai/pull/18), [보고서](part10-tests-sandbox-build-docs-audit.md) |
+| 최종 통합 확인 | 이번 확인. 현재 경계와 Joint 확장 요구를 연결하고 학습용 첫 Distance Joint의 설계 제안을 작성함. Joint 구현 완료를 뜻하지 않음. | [보고서](final-integration-joint-readiness.md) |
 
 기존 보고서의 “다음 Part”, “CI 대기”, “미병합 브랜치” 문장은 작성 당시의 기록이다. 현재 순서는 이 문서를 따른다. 이전 설계/계획의 미체크 항목만으로 구현이 미완성이라고 판정하지 않고 실제 source·test·merge 이력과 함께 확인한다.
 
 ## 현재 검증과 공백
 
-이 기준에서 Windows MSVC 기본 설정으로 Sandbox를 포함해 전체를 다시 빌드하고 Debug 38/38, Release 38/38 CTest 실행 통과를 확인했다. 외부 consumer와 library-only 구성도 build/run했다. 원격 CI는 Ubuntu Debug library/test, Windows Debug library/test와 sandbox 빌드, Windows Release 아래 8개 target을 검증한다. 각 감사의 최종 원격 결과는 해당 PR에 기록돼 있고, Part 10의 CI 결과도 해당 PR에 기록한다. Sandbox UI 실행이나 시각 검증을 새로 수행한 것은 아니다.
+이 기준에서 Windows MSVC 기본 설정으로 Sandbox를 포함해 전체를 다시 빌드하고 Debug 38/38, Release 38/38 CTest 실행 통과를 확인했다. 외부 consumer와 library-only 구성도 build/run했다. 원격 CI는 Ubuntu Debug library/test, Windows Debug library/test와 sandbox 빌드, Windows Release 아래 8개 target을 검증한다. 각 감사의 최종 원격 결과는 해당 PR에 기록돼 있고, 이번 최종 통합 확인의 CI 결과도 해당 PR에 기록한다. Sandbox UI 실행이나 시각 검증을 새로 수행한 것은 아니다.
 
 | 테스트 종류 | 현재 구성 | 해석 |
 | --- | --- | --- |
@@ -37,9 +38,9 @@ Part 4 이후 감사의 Box2D 기준은 `ac7c751eaeddbabdc1c4d41ae4f3a25d7862779
 
 ## 다음 개발 순서
 
-1. **Part 1–9 감사 병합.** 구현된 경로와 API/파일 책임의 검토를 마쳤다. Box2D 전체 기능과의 차이는 개별 보고서에 남긴다.
-2. **Part 10 — Tests / Sandbox / Build / Docs.** 이번 작업에서 실제 build/use 문제를 정리한다. 테스트 framework 전환, packaging, 크기만 근거로 하는 파일 분할은 추가하지 않는다.
-3. **다음 작업: 최종 통합 확인 → Joint 구현.** 완료된 범위와 실제 미구현 경계를 확인한 뒤 첫 Joint 후보인 Distance Joint를 작은 단계로 구현한다. ID/lifecycle, Body 연결/filter, island/wake/sleep, solver를 함께 연결한다.
+1. **Part 1–10 감사 병합.** 구현된 경로와 API/파일 책임, 실제 build/use 흐름을 검토했다. Box2D 전체 기능과의 차이는 개별 보고서에 남긴다.
+2. **최종 통합 확인.** ID/수명, pair ownership, Island/wake/sleep, Step/CCD/Sensor 연결을 확인하고 첫 Joint의 학습·검증 순서를 구체화했다. 더 넓은 전면 재감사를 선행 조건으로 추가하지 않는다.
+3. **다음 작업: 기본 Distance Joint 구현.** [설계 제안](superpowers/specs/2026-10-06-distance-joint-design.md)의 고정 거리 제약과 Body/lifecycle/filter/island/wake/sleep/solver 통합부터 구현한다. Spring/limit/motor는 그다음 학습 단계다. 현재는 구현 전 검토 제안이며 Joint 완료나 설계 승인 기록이 아니다.
 
 Release 검증 보강은 사용자의 우선순위에 따라 보류한다. 테스트 실행 자체와 해당 변경을 확인할 회귀 검증은 계속 수행하지만, 전체 테스트 변환이 Joint 개발의 선행 조건은 아니다.
 
@@ -64,4 +65,4 @@ cache의 작은 feature/normal 근사, empty-manifold refresh 지연, 16-bit gen
 
 debug tip `342ccb250a8940def074ed8f78f917f477f9654b`는 master의 ancestor가 아니다. master에 없는 커밋은 CTest `--timeout 15`를 임시 추가한 1개이며, 이번 통합 현황 작업에서 병합하거나 삭제하지 않는다. 현재 master CI의 job timeout은 10분이다. 추후 정리할 때도 보존 근거를 확인하고, 의미 없는 변경을 이력 보존만을 위해 master에 넣지 않는다.
 
-완료된 작업 브랜치는 최종 검증·리뷰 후 병합하고, tip의 master 포함과 동일 tree를 확인한 뒤 로컬·원격에서 삭제한다. Part 10에서도 debug 변경과 실제 Joint 구현은 포함하지 않는다.
+완료된 작업 브랜치는 최종 검증·리뷰 후 병합하고, tip의 master 포함과 동일 tree를 확인한 뒤 로컬·원격에서 삭제한다. 이번 최종 통합 확인에서도 debug 변경과 실제 Joint 구현은 포함하지 않는다.
