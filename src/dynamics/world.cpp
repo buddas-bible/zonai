@@ -380,7 +380,10 @@ jointId world::createDistanceJoint( const distanceJointDef& definition )
     sim.localAnchorA = definition.localAnchorA; sim.localAnchorB = definition.localAnchorB;
     sim.length = std::max( LINEAR_SLOP, definition.length );
     ++jointCount_;
-    WakeBodyByIndex( bodyIndexA ); WakeBodyByIndex( bodyIndexB );
+    // Static pose 변경용 wake 경로를 쓰면 공통 anchor의 다른 Island까지 깨우게 됨.
+    // Joint 수명 변경은 non-static endpoint의 component만 깨움.
+    if( bodies_[bodyIndexA].type != bodyType::Static ) { WakeBodyByIndex( bodyIndexA ); }
+    if( bodies_[bodyIndexB].type != bodyType::Static ) { WakeBodyByIndex( bodyIndexB ); }
     return makeJointId( index );
 }
 
@@ -2199,7 +2202,10 @@ void world::destroyJointByIndex( std::int32_t jointIndex, bool touchProxies )
     joint = {}; joint.generation = generation; joint.nextFree = jointFreeList_;
     jointFreeList_ = jointIndex; jointSims_[jointIndex] = {}; --jointCount_;
     // 먼저 edge를 분리해야 남은 component별로 wake가 전파됨.
-    WakeBodyByIndex( bodyIndexA ); WakeBodyByIndex( bodyIndexB );
+    // Static pose 변경용 wake 경로를 쓰면 공통 anchor의 다른 Island까지 깨우게 됨.
+    // Joint 수명 변경은 non-static endpoint의 component만 깨움.
+    if( bodies_[bodyIndexA].type != bodyType::Static ) { WakeBodyByIndex( bodyIndexA ); }
+    if( bodies_[bodyIndexB].type != bodyType::Static ) { WakeBodyByIndex( bodyIndexB ); }
 }
 
 void world::resetJointImpulses( std::int32_t bodyIndex )

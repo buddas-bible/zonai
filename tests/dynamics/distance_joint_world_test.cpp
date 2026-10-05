@@ -120,6 +120,10 @@ void checkGraph()
     anchored.SetBodyAwake( left, false ); anchored.SetBodyAwake( right, false );
     anchored.SetBodyAwake( left, true );
     check( !anchored.IsBodyAwake( right ), "static anchor must not bridge islands" );
+    const auto extra = anchored.createDistanceJoint( definition( ground, left ) );
+    check( !anchored.IsBodyAwake( right ), "static joint creation wakes unrelated island" );
+    anchored.destroyJoint( extra );
+    check( !anchored.IsBodyAwake( right ), "static joint destruction wakes unrelated island" );
     anchored.destroyJoint( leftJoint ); check( anchored.IsBodyAwake( left ), "joint destruction wakes endpoint" );
     anchored.SetBodyTransform( ground, {} ); check( anchored.IsBodyAwake( right ), "static anchor pose wakes neighbors" );
 
