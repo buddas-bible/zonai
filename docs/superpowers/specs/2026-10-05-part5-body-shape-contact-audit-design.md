@@ -82,7 +82,7 @@ Part 5에서는 public `bodyId`, `shapeId`, `contactId`에 owning world lifetime
 #### CreateBody
 
 - stable slot을 새로 만들거나 free-list에서 재사용한다.
-- 재사용 시 generation은 이전 handle과 달라야 한다.
+- slot을 할당할 때 generation을 증가시켜 이전 handle과 구분한다.
 - `body`, `bodySim`, `bodyState`는 같은 stable index를 공유한다.
 - 이전 slot의 force, velocity, transform, contact/shape head가 남지 않아야 한다.
 
@@ -94,7 +94,7 @@ Part 5에서는 public `bodyId`, `shapeId`, `contactId`에 owning world lifetime
 2. 연결된 shape를 모두 제거한다.
 3. shape proxy와 sensor storage가 모두 정리되어야 한다.
 4. body simulation/state를 free 상태로 초기화한다.
-5. generation을 증가시키고 slot을 free-list로 반환한다.
+5. 현재 generation은 보존한 채 slot을 free-list로 반환하고, 다음 할당 시 generation을 증가시킨다.
 
 삭제 중 intrusive list를 순회할 때 현재 노드를 파괴해도 다음 노드를 잃지 않아야 한다.
 
@@ -110,7 +110,7 @@ Body와 shape의 관계는 현재 index 기반 doubly linked list를 유지한�
 #### CreateShape
 
 - owning body가 valid해야 한다.
-- shape stable slot을 초기화한다.
+- shape stable slot을 할당할 때 generation을 증가시킨다.
 - body shape list에 한 번만 연결한다.
 - world AABB와 fat AABB를 만든다.
 - broad-phase proxy를 만든다.
@@ -124,7 +124,7 @@ Body와 shape의 관계는 현재 index 기반 doubly linked list를 유지한�
 - broad-phase proxy를 제거한다.
 - body shape list에서 안전하게 unlink한다.
 - Dynamic body mass/extents를 다시 계산한다.
-- generation 증가 후 free-list로 반환한다.
+- 현재 generation은 보존한 채 free-list로 반환하고 다음 할당 시 증가시킨다.
 
 중간 shape 삭제, head 삭제, 마지막 shape 삭제를 각각 테스트한다.
 
@@ -136,7 +136,7 @@ Contact는 broad-phase pair가 유지되는 동안 존재하는 persistent objec
 
 - 같은 body의 shape pair는 생성하지 않는다.
 - unsupported geometry pair는 생성하지 않는다.
-- stable contact slot과 matching `contactSim2` slot을 초기화한다.
+- stable contact slot을 할당할 때 generation을 증가시키고 matching `contactSim2` slot을 초기화한다.
 - 두 body의 intrusive contact list에 각각 하나의 edge를 연결한다.
 - pairSet과 contact lifetime이 일치해야 한다.
 - recycling 설정은 생성 시점 정책에 따라 고정한다.
@@ -148,7 +148,7 @@ Contact는 broad-phase pair가 유지되는 동안 존재하는 persistent objec
 - body `contactCount`가 실제 edge 수와 일치해야 한다.
 - pairSet에서 pair를 제거한다.
 - contactSim cache를 free 상태로 초기화한다.
-- generation 증가 후 free-list에 반환한다.
+- 현재 generation은 보존한 채 free-list에 반환하고 다음 할당 시 증가시킨다.
 
 `contactKey = (contactId << 1) | edgeIndex` 규칙은 유지하며 key decode/encode의 invariant를 테스트한다.
 
