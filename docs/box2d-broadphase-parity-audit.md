@@ -86,6 +86,56 @@ Reference upstream:
 This audit is focused on behavior already implemented in Zonai. Missing future features are
 listed separately so they are not confused with accidental omissions.
 
+## Deep re-audit closure (2026-10-04)
+
+Part 4 was re-audited from the current `master` instead of treating the earlier audit as
+sufficient evidence. The second pass traced the complete implemented path:
+
+`World fat AABB update -> BroadPhase proxy update -> DynamicTree moved/refit state -> pair traversal -> pairSet -> Contact create/destroy`
+
+The implementation was compared again with the current Box2D reference above, including the
+important distinction between explicit proxy movement and the solver's deferred moved/refit
+path.
+
+No additional production correctness change was justified by this pass. In particular:
+
+- Dynamic / Kinematic `UpdateProxy()` is intentionally topology-preserving and is the
+  single-threaded counterpart of Box2D's solver `MarkProxyMoved()` + later `Refit()` path.
+- Static movement still uses the explicit remove/reinsert path because static transform
+  changes are exceptional and may move a proxy arbitrarily far.
+- a moving shape only updates its tree proxy after the shape AABB leaves its persistent
+  fat AABB; ordinary sub-step motion inside the fat bounds does not churn the tree.
+- partial rebuild keeps untouched subtrees, rebuilds moved branches, preserves stable proxy
+  ids, restores dense DFS storage, and clears stale moved state.
+- Dynamic-Self, Dynamic-Static, and Dynamic-Kinematic are the only pair classes generated;
+  the traversal does not report duplicate pairs in the tested single-threaded path.
+- Contact creation inserts the normalized shape pair into `pairSet_`; Contact destruction
+  removes the same key. Shape/body destruction and runtime filter changes therefore cannot
+  leave a verified stale persistent-pair entry behind.
+- runtime filter changes may use `TouchProxy()` rather than recreate a proxy because Zonai
+  does not store category bits in DynamicTree sorting data.
+- `pairSet_std_` is deliberately retained as a future benchmark alternative to the custom
+  `hashSet`; it is not dead-code cleanup for this audit.
+
+A deterministic stress regression was added to make those conclusions executable rather
+than documentation-only:
+
+- 192 DynamicTree proxies are repeatedly moved with `UpdateProxy()` over eight rounds.
+- before and after every partial rebuild, 48 random tree queries are compared against a
+  brute-force AABB oracle.
+- 96 mixed Static / Kinematic / Dynamic proxies are compared against a brute-force pair
+  oracle before and after a subset of proxies moves.
+- the pair oracle checks the supported body-type combinations, overlap result, moved-side
+  requirement, and duplicate suppression.
+- every rebuilt tree is validated after the stress operations.
+
+The audit regression is `tests/collision/broadphase/broad_phase_stress_test.cpp` and is
+registered as `broadPhaseStressTests`.
+
+The first full CI run with the stress coverage passed on both Ubuntu and Windows. The final
+branch must still pass the same two-platform CI after all audit-only cleanup before this
+Part is considered closed.
+
 ## Correctness / safety omissions found and fixed
 
 ### Empty-node sentinel AABB
@@ -287,7 +337,9 @@ DynamicTree tests now include:
 - complete free-list reuse by reinsertion with Validate after each operation,
 - topology-preserving `UpdateProxy()` followed by partial rebuild,
 - `EnlargeProxy()` moved-state and rebuild behavior,
-- explicit moved marking without changing the AABB.
+- explicit moved marking without changing the AABB,
+- repeated topology-preserving movement of 192 proxies with brute-force Query comparison
+  both before and after each partial rebuild.
 
 BroadPhase tests include:
 
@@ -297,7 +349,14 @@ BroadPhase tests include:
 - candidate batches larger than 32 entries,
 - existing-contact pair suppression,
 - same-body, sensor, and collision-filter rejection,
-- moved-state consumption and stale-tree rebuild after `UpdatePairs()`.
+- moved-state consumption and stale-tree rebuild after `UpdatePairs()`,
+- exact brute-force pair-set comparison across 96 mixed body-type proxies,
+- repeat comparison after a subset of Static / Kinematic / Dynamic proxies move,
+- explicit duplicate-pair rejection checks in the stress oracle.
+
+World-level integration tests also cover persistent Contact / `pairSet_` synchronization when
+proxies separate, shapes or bodies are destroyed and slots are reused, and runtime collision
+filters invalidate existing Contacts and request pair regeneration.
 
 AABB tests cover invalid ordering, infinities, and NaN.
 
