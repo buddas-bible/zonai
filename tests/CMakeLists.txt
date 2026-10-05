@@ -253,6 +253,20 @@ add_test(
     COMMAND broadPhaseTests
 )
 
+add_executable(broadPhaseStressTests
+    collision/broadphase/broad_phase_stress_test.cpp
+)
+
+target_link_libraries(broadPhaseStressTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME broadPhaseStressTests
+    COMMAND broadPhaseStressTests
+)
+
 add_executable(hashSetTests
     collision/broadphase/hash_set_test.cpp
 )
@@ -266,6 +280,10 @@ add_test(
     NAME hashSetTests
     COMMAND hashSetTests
 )
+
+add_executable(broadPhaseLifecycleTests collision/broadphase/broad_phase_lifecycle_test.cpp)
+target_link_libraries(broadPhaseLifecycleTests PRIVATE zonai::zonai)
+add_test(NAME broadPhaseLifecycleTests COMMAND broadPhaseLifecycleTests)
 
 
 add_executable(filterTests
@@ -458,3 +476,7 @@ add_test(
     NAME islandTests
     COMMAND islandTests
 )
+
+add_executable(bodyShapeContactLifecycleTests dynamics/body_shape_contact_lifecycle_test.cpp)
+target_link_libraries(bodyShapeContactLifecycleTests PRIVATE zonai::zonai)
+add_test(NAME bodyShapeContactLifecycleTests COMMAND bodyShapeContactLifecycleTests)

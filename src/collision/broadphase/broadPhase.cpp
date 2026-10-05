@@ -103,6 +103,24 @@ bool broadPhase::HasPair( shapePairKey pairKey ) const
     return pairSet_.Contains( pairKey );
 }
 
+dynamicTree& broadPhase::GetTree( bodyType type )
+{
+    const std::size_t index = static_cast<std::size_t>( type );
+
+    assert( index < trees_.size() );
+
+    return trees_[index];
+}
+
+const dynamicTree& broadPhase::GetTree( bodyType type ) const
+{
+    const std::size_t index = static_cast<std::size_t>( type );
+
+    assert( index < trees_.size() );
+
+    return trees_[index];
+}
+
 bool broadPhase::TestPair( const treeNode& nodeA, const treeNode& nodeB )
 {
     // 빈 tree의 root는 leaf bit를 포함한 sentinel이므로 실제 proxy처럼 취급하면 안 됨.
@@ -223,24 +241,6 @@ std::size_t broadPhase::GatherCrossSeeds(
 
     assert( seedCount <= CROSS_SEED_COUNT );
     return seedCount;
-}
-
-dynamicTree& broadPhase::GetTree( bodyType type )
-{
-    const std::size_t index = static_cast<std::size_t>( type );
-
-    assert( index < trees_.size() );
-
-    return trees_[index];
-}
-
-const dynamicTree& broadPhase::GetTree( bodyType type ) const
-{
-    const std::size_t index = static_cast<std::size_t>( type );
-
-    assert( index < trees_.size() );
-
-    return trees_[index];
 }
 
 } // namespace zonai

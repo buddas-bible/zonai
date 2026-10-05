@@ -21,7 +21,7 @@ namespace zonai
 namespace
 {
 
-std::uint64_t AllocateWorldToken() noexcept
+std::uint64_t allocateWorldToken() noexcept
 {
     static std::atomic<std::uint64_t> nextToken{ 1 };
 
@@ -40,7 +40,7 @@ std::uint64_t AllocateWorldToken() noexcept
 } // namespace
 
 world::world()
-    : worldToken_( AllocateWorldToken() )
+    : worldToken_( allocateWorldToken() )
 {
 }
 

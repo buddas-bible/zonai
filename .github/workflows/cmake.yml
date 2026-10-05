@@ -84,3 +84,11 @@ jobs:
       - name: Test Ubuntu
         if: runner.os == 'Linux'
         run: ctest --test-dir build --output-on-failure
+
+      - name: Build Release lifecycle tests
+        if: runner.os == 'Windows'
+        run: cmake --build build --config Release --target broadPhaseLifecycleTests bodyShapeContactLifecycleTests --parallel
+
+      - name: Test Release lifecycle invariants
+        if: runner.os == 'Windows'
+        run: ctest --test-dir build -C Release -R "^(broadPhaseLifecycleTests|bodyShapeContactLifecycleTests)$" --output-on-failure
