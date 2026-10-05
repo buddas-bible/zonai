@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cassert>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -9,13 +8,12 @@
 
 #include "collision/broadphase/broadPhase.h"
 #include "collision/constants.h"
-#include "collision/narrowphase/collide.h"
-#include "collision/narrowphase/contact2.h"
 #include "collision/shape.h"
 #include "dynamics/body.h"
 #include "dynamics/bodyDef.h"
 #include "dynamics/bodySim.h"
 #include "dynamics/bodyState.h"
+#include "dynamics/contact2.h"
 #include "dynamics/contactConstraint2.h"
 #include "dynamics/contactData.h"
 #include "dynamics/contactSim2.h"
@@ -39,6 +37,9 @@ concept worldCollisionCallback =
 class world
 {
 public:
+    // handle 입력은 IsValid가 true인 값이어야 함. 삭제/slot 재사용 후에는 다시 확인함.
+#pragma region WorldLifetime
+
     world();
 
     // world identity를 복제하지 않도록 값 복사/이동을 금지함.
@@ -47,6 +48,10 @@ public:
 
     world( world&& ) = delete;
     world& operator=( world&& ) = delete;
+
+#pragma endregion
+
+#pragma region BodyLifecycle
 
     // definition의 초기 simulation 설정으로 새 body를 만듦.
     [[nodiscard]] bodyId CreateBody( const bodyDef& definition );
@@ -57,6 +62,10 @@ public:
     // handle이 가리키는 body와 연결된 Contact / shape / proxy를 모두 정리함.
     void DestroyBody( bodyId bodyId );
 
+
+#pragma endregion
+
+#pragma region ShapeLifecycle
 
     // local geometry를 body에 연결하고 shape handle을 반환함.
     [[nodiscard]] shapeId CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter = {}, float density = 1.0f );
@@ -72,6 +81,10 @@ public:
     void DestroyShape( shapeId shapeId );
 
 
+#pragma endregion
+
+#pragma region ShapeProperties
+
     // shape density를 변경하고 owning Dynamic body의 mass data를 다시 계산함.
     void SetShapeDensity( shapeId shapeId, float density );
     [[nodiscard]] float GetShapeDensity( shapeId shapeId ) const;
@@ -86,6 +99,10 @@ public:
     // 다음 collision update에서 이 shape의 broad-phase pair를 다시 탐색함.
     void SetShapeFilter( shapeId shapeId, collisionFilter filter );
     [[nodiscard]] collisionFilter GetShapeFilter( shapeId shapeId ) const;
+
+#pragma endregion
+
+#pragma region SensorQueries
 
     [[nodiscard]] bool IsShapeSensor( shapeId shapeId ) const;
 
@@ -116,9 +133,18 @@ public:
         return sensorEndEvents_;
     }
 
+#pragma endregion
+
+#pragma region ShapeBounds
+
     // 현재 shape의 speculative AABB와 broad-phase fat AABB를 반환함.
+    // 내부 storage 참조이므로 shape 생성/파괴 또는 world 파괴를 넘겨 보관하지 않음.
     [[nodiscard]] const aabb2& GetShapeAABB( shapeId shapeId ) const;
     [[nodiscard]] const aabb2& GetShapeFatAABB( shapeId shapeId ) const;
+
+#pragma endregion
+
+#pragma region BodyProperties
 
     // body transform을 변경하고 연결된 모든 shape proxy의 world AABB를 함께 갱신함.
     void SetBodyTransform( bodyId bodyId, transform2 transform );
@@ -177,6 +203,10 @@ public:
     [[nodiscard]] vec2 GetBodyLocalCenter( bodyId bodyId ) const;
 
 
+#pragma endregion
+
+#pragma region WorldSettings
+
     // world 전체 Dynamic body에 적용되는 중력 가속도.
     void SetGravity( vec2 gravity );
     [[nodiscard]] vec2 GetGravity() const noexcept;
@@ -200,6 +230,10 @@ public:
         return recycledContactCount_;
     }
 
+
+#pragma endregion
+
+#pragma region ForcesAndImpulses
 
     // Dynamic body에 world-space 힘을 누적함.
     // point가 center of mass에서 벗어나 있으면 torque도 함께 누적됨.
@@ -225,13 +259,25 @@ public:
     void ApplyAngularImpulse( bodyId bodyId, float impulse );
 
 
+#pragma endregion
+
+#pragma region SimulationStep
+
     // Contact constraint를 준비한 뒤 sub-step마다 force / gravity, solve, position integration을 수행함.
     void Step( float timeStep, int subStepCount = 1 );
+
+#pragma endregion
+
+#pragma region HandleValidity
 
     // world lifetime / null / 범위 / generation / 활성 slot을 모두 확인함.
     [[nodiscard]] bool IsValid( bodyId bodyId ) const noexcept;
     [[nodiscard]] bool IsValid( shapeId shapeId ) const noexcept;
     [[nodiscard]] bool IsValid( contactId contactId ) const noexcept;
+
+#pragma endregion
+
+#pragma region CollisionCallbacks
 
     // 기존 Contact를 갱신하고 broadPhase의 새 AABB pair는 persistent Contact로 생성함.
     // callback은 현재 실제 접촉점이 존재하는 Contact만 받음.
@@ -241,152 +287,32 @@ public:
     {
         recycledContactCount_ = 0;
 
-        // 기존 Contact는 broadPhase에서 다시 후보로 나오지 않으므로 stable slot을 직접 갱신함.
-        for( std::int32_t contactId = 0;
-             contactId < static_cast<std::int32_t>( contacts_.size() );
-             ++contactId )
+        // 기존 Contact를 갱신한 직후 알림. 새 pair 생성 뒤로 callback을 미루지 않음.
+        for( std::int32_t contactId = 0; contactId < static_cast<std::int32_t>( contacts_.size() ); ++contactId )
         {
-            contact2& contact = contacts_[contactId];
-
-            // free-list에 들어간 slot은 현재 활성 Contact가 아님.
-            if( contact.contactId == contact2::NULL_INDEX )
-            {
-                continue;
-            }
-
-            assert( contact.contactId == contactId );
-            assert( contact.shapeIdA >= 0 );
-            assert( contact.shapeIdB >= 0 );
-            assert( static_cast<std::size_t>( contact.shapeIdA ) < shapes_.size() );
-            assert( static_cast<std::size_t>( contact.shapeIdB ) < shapes_.size() );
-
-            const shape& shapeA = shapes_[contact.shapeIdA];
-            const shape& shapeB = shapes_[contact.shapeIdB];
-
-            assert( shapeA.proxyKey != shape::NULL_INDEX );
-            assert( shapeB.proxyKey != shape::NULL_INDEX );
-
-            assert( fatAABBs_.size() == shapes_.size() );
-
-            const aabb2& fatAABBA =
-                fatAABBs_[contact.shapeIdA];
-
-            const aabb2& fatAABBB =
-                fatAABBs_[contact.shapeIdB];
-
-            // persistent broad-phase bounds가 완전히 분리됐을 때 Contact를 제거함.
-            if( !Overlaps( fatAABBA, fatAABBB ) )
-            {
-                DestroyContact( contactId );
-                continue;
-            }
-
-            assert( shapeA.bodyId >= 0 );
-            assert( shapeB.bodyId >= 0 );
-            assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
-            assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
-
-            const bodySim& bodySimA = bodySims_[shapeA.bodyId];
-            const bodySim& bodySimB = bodySims_[shapeB.bodyId];
-
-            assert( bodySimA.bodyId == shapeA.bodyId );
-            assert( bodySimB.bodyId == shapeB.bodyId );
-
-            if( TryRecycleContact( contactId ) )
-            {
-                const contactSim2& contactSim =
-                    contactSims_[contactId];
-
-                if( IsTouchingManifold( contactSim.manifold ) )
-                {
-                    callback( MakeContactData( contactId ) );
-                }
-
-                continue;
-            }
-
-            const localManifold2 manifold =
-                CollideShapes(
-                    shapeA.geometry,
-                    bodySimA.transform,
-                    shapeB.geometry,
-                    bodySimB.transform
-                );
-
-            UpdateContactSim(
-                contactId,
-                manifold
-            );
-
-            const contactSim2& contactSim =
-                contactSims_[contactId];
-
-            if( IsTouchingManifold( contactSim.manifold ) )
+            if( updateExistingContact( contactId ) )
             {
                 callback( MakeContactData( contactId ) );
             }
-
         }
 
-        // 기존 pair는 pairSet이 걸러주므로 여기에는 새 AABB pair만 들어옴.
-        broadPhase_.UpdatePairs(
-            std::span<const shape>{ shapes_.data(), shapes_.size() },
-            [this, &callback](
-                std::int32_t shapeIdA,
-                std::int32_t shapeIdB )
+        // pairSet이 기존 pair를 걸러줌. callable을 복사하거나 임시 event buffer를 만들지 않음.
+        broadPhase_.UpdatePairs( std::span<const shape>{ shapes_ }, [this, &callback]( std::int32_t shapeIdA, std::int32_t shapeIdB )
+        {
+            const std::int32_t contactId = createContactForPair( shapeIdA, shapeIdB );
+            if( contactId != contact2::NULL_INDEX && IsTouchingManifold( contactSims_[contactId].manifold ) )
             {
-                assert( shapeIdA >= 0 );
-                assert( shapeIdB >= 0 );
-                assert( static_cast<std::size_t>( shapeIdA ) < shapes_.size() );
-                assert( static_cast<std::size_t>( shapeIdB ) < shapes_.size() );
-
-                const shape& shapeA = shapes_[shapeIdA];
-                const shape& shapeB = shapes_[shapeIdB];
-
-                assert( shapeA.bodyId >= 0 );
-                assert( shapeB.bodyId >= 0 );
-                assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
-                assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
-
-                // 같은 body에 연결된 shape끼리는 self collision을 만들지 않음.
-                if( shapeA.bodyId == shapeB.bodyId )
-                {
-                    return;
-                }
-
-                if( !CanCollideShapes( shapeA.geometry, shapeB.geometry ) )
-                {
-                    return;
-                }
-
-                const bodySim& bodySimA = bodySims_[shapeA.bodyId];
-                const bodySim& bodySimB = bodySims_[shapeB.bodyId];
-
-                assert( bodySimA.bodyId == shapeA.bodyId );
-                assert( bodySimB.bodyId == shapeB.bodyId );
-
-                const localManifold2 manifold =
-                    CollideShapes(
-                        shapeA.geometry,
-                        bodySimA.transform,
-                        shapeB.geometry,
-                        bodySimB.transform
-                    );
-
-                const std::int32_t contactId =
-                    CreateContact( shapeIdA, shapeIdB, manifold );
-
-                const contactSim2& contactSim =
-                    contactSims_[contactId];
-
-                if( IsTouchingManifold( contactSim.manifold ) )
-                {
-                    callback( MakeContactData( contactId ) );
-                }
+                callback( MakeContactData( contactId ) );
             }
-        );
+        } );
     }
 
+#pragma endregion
+
+#pragma region DiagnosticQueries
+
+    // 내부 record를 읽는 진단용 API. body/shape 생성·파괴 또는 world 파괴 전까지만 참조함.
+    // 변경 후에도 보존할 데이터는 복사하고, entity 식별에는 stable handle을 사용함.
     [[nodiscard]] const body& GetBody( bodyId bodyId ) const;
     [[nodiscard]] const shape& GetShape( shapeId shapeId ) const;
 
@@ -406,6 +332,7 @@ public:
     // 이 shape가 참여한 pointCount > 0 Contact를 speculative point까지 output에 채움.
     [[nodiscard]] std::size_t GetShapeContactData( shapeId shapeId, std::span<contactData> output ) const;
 
+    // world가 소유하는 읽기 전용 진단 view. tree/proxy 참조를 world 변경 너머로 보관하지 않음.
     [[nodiscard]] const broadPhase& GetBroadPhase() const noexcept
     {
         return broadPhase_;
@@ -426,9 +353,13 @@ public:
         return contactCount_;
     }
 
+#pragma endregion
+
 private:
     // Public handle이 world 수명을 구분할 때 사용하는 opaque token.
     std::uint64_t worldToken_ = 0;
+
+#pragma region InternalHandles
 
     [[nodiscard]] std::int32_t GetBodyIndex( bodyId bodyId ) const;
     [[nodiscard]] std::int32_t GetShapeIndex( shapeId shapeId ) const;
@@ -438,6 +369,10 @@ private:
     [[nodiscard]] shapeId MakeShapeId( std::int32_t shapeIndex ) const;
     [[nodiscard]] contactId MakeContactId( std::int32_t contactIndex ) const;
     [[nodiscard]] contactData MakeContactData( std::int32_t contactIndex ) const;
+
+#pragma endregion
+
+#pragma region BodyShapeStorage
 
     void DestroyBodyByIndex( std::int32_t bodyIndex );
     void DestroyShapeByIndex( std::int32_t shapeIndex );
@@ -453,11 +388,19 @@ private:
     // 연결된 shape들의 density / geometry를 합산해 Dynamic body의 mass data를 갱신함.
     void UpdateBodyMassData( std::int32_t bodyIndex );
 
+#pragma endregion
+
+#pragma region SensorUpdate
+
     // 모든 sensor가 세 broad-phase tree를 query해 overlap과 begin/end event를 갱신함.
     void UpdateSensors();
 
     // sensor shape 파괴 시 dense sensor storage를 정리하고 기존 overlap end event를 예약함.
     void DestroySensorByShapeIndex( std::int32_t shapeIndex );
+
+#pragma endregion
+
+#pragma region SleepAndWake
 
     // 현재 solver-active Contact graph를 따라 연결된 body 전체를 깨움.
     // Static body가 시작점이면 연결된 non-static body만 깨움.
@@ -474,10 +417,22 @@ private:
         const islandGraph2& islandGraph,
         float timeStep );
 
+#pragma endregion
+
+#pragma region ContinuousCollision
+
     // fast body의 swept path를 검사하고 가장 이른 TOI에서 delta transform을 잘라냄.
     void SolveContinuousBody(
         std::int32_t bodyIndex,
         float timeStep );
+
+#pragma endregion
+
+#pragma region ContactUpdate
+
+    // callback과 무관한 갱신은 cpp에서 처리하고 실제 접촉 여부만 template에 반환함.
+    [[nodiscard]] bool updateExistingContact( std::int32_t contactId );
+    [[nodiscard]] std::int32_t createContactForPair( std::int32_t shapeIdA, std::int32_t shapeIdB );
 
     // stable Contact slot을 할당하고 두 body의 intrusive contact list에 연결함.
     [[nodiscard]] std::int32_t CreateContact(
@@ -493,6 +448,10 @@ private:
     void UpdateContactSim(
         std::int32_t contactId,
         const localManifold2& manifold );
+
+#pragma endregion
+
+#pragma region ContactSolver
 
     // 한 island의 solver-active Contact를 이번 step의 transient constraint로 변환함.
     [[nodiscard]] std::vector<contactConstraint2> PrepareContactConstraints(
@@ -517,8 +476,16 @@ private:
     void StoreContactConstraintImpulses(
         std::span<const contactConstraint2> constraints );
 
+#pragma endregion
+
+#pragma region ContactDestruction
+
     // body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함.
     void DestroyContact( std::int32_t contactId );
+
+#pragma endregion
+
+#pragma region Storage
 
     /// body
     // bodyId가 변하지 않는 stable slot storage.
@@ -594,6 +561,7 @@ private:
 
     // 모든 shape의 broad-phase proxy를 body type별 DynamicTree에 관리함.
     broadPhase broadPhase_;
+#pragma endregion
 };
 
 } // namespace zonai
