@@ -1,4 +1,4 @@
-# Test targets will be added together with the first math and physics implementations.
+# Focused executables keep regression failures attributable to their subsystem.
 
 add_executable(vec2Tests
     math/vec2_test.cpp
