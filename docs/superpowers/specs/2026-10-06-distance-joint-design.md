@@ -1,6 +1,6 @@
 # 기본 Distance Joint — 학습용 첫 구현 설계 제안
 
-상태: 구현 전 검토 제안. 기준 master `8fb0ae5c6fa29fc1115be16f823f1f4a69739b12`, Box2D `ac7c751eaeddbabdc1c4d41ae4f3a25d78627790`. 사용자 설계 승인 또는 구현 완료를 뜻하지 않는다.
+상태: 작성 당시 구현 전 검토 제안. 후속 작업 요청으로 기본 rigid 범위를 구현했으며 현재 결과는 [구현 기록](../../basic-distance-joint.md)을 따른다. 설계 작성 기준 master `8fb0ae5c6fa29fc1115be16f823f1f4a69739b12`, Box2D `ac7c751eaeddbabdc1c4d41ae4f3a25d78627790`. 아래는 설계 당시의 선택과 근거를 보존한다.
 
 ## 목표와 선택
 

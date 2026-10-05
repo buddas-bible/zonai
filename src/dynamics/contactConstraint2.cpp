@@ -3,41 +3,13 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
-#include <numbers>
 
 namespace zonai
 {
 
 contactSoftness2 MakeContactSoftness( float hertz, float dampingRatio, float timeStep )
 {
-    assert( std::isfinite( hertz ) );
-    assert( std::isfinite( dampingRatio ) );
-    assert( std::isfinite( timeStep ) );
-    assert( hertz >= 0.0f );
-    assert( dampingRatio >= 0.0f );
-    assert( timeStep >= 0.0f );
-
-    // Hertz가 0이면 penetration bias만 끄고
-    // 기존 rigid normal solve 동작은 그대로 유지함.
-    if( hertz == 0.0f || timeStep == 0.0f )
-    {
-        return {};
-    }
-
-    const float omega = 2.0f * std::numbers::pi_v<float> * hertz;
-
-    const float a1 = 2.0f * dampingRatio + timeStep * omega;
-
-    const float a2 = timeStep * omega * a1;
-
-    const float a3 = 1.0f / ( 1.0f + a2 );
-
-    contactSoftness2 softness{};
-    softness.biasRate = omega / a1;
-    softness.massScale = a2 * a3;
-    softness.impulseScale = a3;
-
-    return softness;
+    return makeConstraintSoftness( hertz, dampingRatio, timeStep );
 }
 
 contactConstraint2 PrepareContactConstraint(

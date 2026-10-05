@@ -18,6 +18,9 @@
 #include "dynamics/contactData.h"
 #include "dynamics/contactSim2.h"
 #include "dynamics/constants.h"
+#include "dynamics/distanceJoint2.h"
+#include "dynamics/distanceJointConstraint2.h"
+#include "dynamics/joint2.h"
 #include "dynamics/id.h"
 #include "dynamics/island2.h"
 #include "dynamics/sensor2.h"
@@ -59,7 +62,7 @@ public:
     // 기존 간단한 생성 경로. 내부에서 bodyDef를 만들어 같은 생성 로직을 사용함.
     [[nodiscard]] bodyId CreateBody( bodyType type = bodyType::Static, transform2 transform = {} );
 
-    // handle이 가리키는 body와 연결된 Contact / shape / proxy를 모두 정리함.
+    // handle이 가리키는 body와 연결된 Joint / Contact / shape / proxy를 모두 정리함.
     void DestroyBody( bodyId bodyId );
 
 
@@ -80,6 +83,17 @@ public:
     // handle이 가리키는 shape의 Contact / proxy / body list 연결을 정리함.
     void DestroyShape( shapeId shapeId );
 
+
+#pragma endregion
+
+#pragma region JointLifecycle
+
+    // 유효한 서로 다른 Body 두 개 중 하나 이상이 Dynamic이어야 함.
+    // Local anchor는 Body origin 기준, length는 양수이며 LINEAR_SLOP 이상으로 제한함.
+    [[nodiscard]] jointId createDistanceJoint( const distanceJointDef& definition );
+    void destroyJoint( jointId id );
+    [[nodiscard]] distanceJointData getDistanceJointData( jointId id ) const;
+    [[nodiscard]] std::size_t getJointCount() const noexcept { return jointCount_; }
 
 #pragma endregion
 
@@ -263,7 +277,7 @@ public:
 
 #pragma region SimulationStep
 
-    // Contact constraint를 준비한 뒤 sub-step마다 force / gravity, solve, position integration을 수행함.
+    // Contact / Joint constraint를 준비한 뒤 sub-step마다 force / gravity, solve, position integration을 수행함.
     void Step( float timeStep, int subStepCount = 1 );
 
 #pragma endregion
@@ -274,6 +288,7 @@ public:
     [[nodiscard]] bool IsValid( bodyId bodyId ) const noexcept;
     [[nodiscard]] bool IsValid( shapeId shapeId ) const noexcept;
     [[nodiscard]] bool IsValid( contactId contactId ) const noexcept;
+    [[nodiscard]] bool IsValid( jointId id ) const noexcept;
 
 #pragma endregion
 
@@ -364,11 +379,21 @@ private:
     [[nodiscard]] std::int32_t GetBodyIndex( bodyId bodyId ) const;
     [[nodiscard]] std::int32_t GetShapeIndex( shapeId shapeId ) const;
     [[nodiscard]] std::int32_t GetContactIndex( contactId contactId ) const;
+    [[nodiscard]] std::int32_t getJointIndex( jointId id ) const;
 
     [[nodiscard]] bodyId MakeBodyId( std::int32_t bodyIndex ) const;
     [[nodiscard]] shapeId MakeShapeId( std::int32_t shapeIndex ) const;
     [[nodiscard]] contactId MakeContactId( std::int32_t contactIndex ) const;
     [[nodiscard]] contactData MakeContactData( std::int32_t contactIndex ) const;
+    [[nodiscard]] jointId makeJointId( std::int32_t jointIndex ) const;
+
+#pragma endregion
+
+#pragma region JointStorage
+
+    void destroyJointByIndex( std::int32_t jointIndex, bool touchProxies );
+    void resetJointImpulses( std::int32_t bodyIndex );
+    [[nodiscard]] bool shouldBodiesCollide( std::int32_t bodyIndexA, std::int32_t bodyIndexB ) const;
 
 #pragma endregion
 
@@ -402,15 +427,15 @@ private:
 
 #pragma region SleepAndWake
 
-    // 현재 solver-active Contact graph를 따라 연결된 body 전체를 깨움.
+    // 현재 solver-active Contact / Joint graph를 따라 연결된 body 전체를 깨움.
     // Static body가 시작점이면 연결된 non-static body만 깨움.
     void WakeBodyByIndex( std::int32_t bodyIndex );
 
     // 명시적으로 body 하나를 sleep시키면 현재 연결된 island 전체를 함께 sleep시킴.
     void SleepBodyByIndex( std::int32_t bodyIndex );
 
-    // active Contact가 awake / sleeping 경계를 가로지르지 않도록 wake 상태를 전파함.
-    void WakeSleepingBodiesFromContacts();
+    // Contact / Joint가 awake / sleeping 경계를 가로지르지 않도록 wake 상태를 전파함.
+    void wakeSleepingBodiesFromConstraints();
 
     // solver가 끝난 island의 motion이 threshold 아래에 충분히 오래 머물렀는지 판정함.
     void UpdateIslandSleepStates(
@@ -448,6 +473,13 @@ private:
     void UpdateContactSim(
         std::int32_t contactId,
         const localManifold2& manifold );
+
+#pragma endregion
+
+#pragma region JointSolver
+
+    void warmStartDistanceJoints( std::span<distanceJointConstraint2> constraints );
+    void solveDistanceJoints( std::span<distanceJointConstraint2> constraints, bool useBias );
 
 #pragma endregion
 
@@ -540,6 +572,12 @@ private:
 
     // contacts_.size()와 별개인 현재 활성 Contact 개수.
     std::size_t contactCount_ = 0;
+
+    // Joint cold / hot 데이터는 동일한 stable slot과 free-list를 공유함.
+    std::vector<joint2> joints_;
+    std::vector<distanceJointSim2> jointSims_;
+    std::int32_t jointFreeList_ = -1;
+    std::size_t jointCount_ = 0;
 
     // 모든 Dynamic body에 적용되는 world-space 중력 가속도.
     vec2 gravity_{ 0.0f, -10.0f };

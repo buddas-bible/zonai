@@ -24,6 +24,10 @@ Part 4 이후 감사의 Box2D 기준은 `ac7c751eaeddbabdc1c4d41ae4f3a25d7862779
 
 기존 보고서의 “다음 Part”, “CI 대기”, “미병합 브랜치” 문장은 작성 당시의 기록이다. 현재 순서는 이 문서를 따른다. 이전 설계/계획의 미체크 항목만으로 구현이 미완성이라고 판정하지 않고 실제 source·test·merge 이력과 함께 확인한다.
 
+## 기본 Distance Joint
+
+2026-10-06, `c8c8d71` 이후 첫 Joint를 구현했다. 고정 거리 scalar constraint와 Body 연결/삭제, Joint handle, collision filter, Island/wake/sleep, substep solver를 함께 연결한다. [구현·학습·검증 기록](basic-distance-joint.md)의 범위와 한계를 따른다. Spring/limit/motor는 후속 학습 단계다. Windows Sandbox 포함 Debug/Release 전체 build와 40/40 CTest 실행, 새 두 runtime target 및 9가지 mutation 회귀 검사를 확인했다. 원격 CI의 Windows Release 대상은 10개로 늘렸다. 아래 38개/8개 기록은 최종 통합 확인 당시의 기준이다.
+
 ## 현재 검증과 공백
 
 이 기준에서 Windows MSVC 기본 설정으로 Sandbox를 포함해 전체를 다시 빌드하고 Debug 38/38, Release 38/38 CTest 실행 통과를 확인했다. 외부 consumer와 library-only 구성도 build/run했다. 원격 CI는 Ubuntu Debug library/test, Windows Debug library/test와 sandbox 빌드, Windows Release 아래 8개 target을 검증한다. 각 감사의 최종 원격 결과는 해당 PR에 기록돼 있고, 이번 최종 통합 확인의 CI 결과도 해당 PR에 기록한다. Sandbox UI 실행이나 시각 검증을 새로 수행한 것은 아니다.
@@ -40,7 +44,7 @@ Part 4 이후 감사의 Box2D 기준은 `ac7c751eaeddbabdc1c4d41ae4f3a25d7862779
 
 1. **Part 1–10 감사 병합.** 구현된 경로와 API/파일 책임, 실제 build/use 흐름을 검토했다. Box2D 전체 기능과의 차이는 개별 보고서에 남긴다.
 2. **최종 통합 확인.** ID/수명, pair ownership, Island/wake/sleep, Step/CCD/Sensor 연결을 확인하고 첫 Joint의 학습·검증 순서를 구체화했다. 더 넓은 전면 재감사를 선행 조건으로 추가하지 않는다.
-3. **다음 작업: 기본 Distance Joint 구현.** [설계 제안](superpowers/specs/2026-10-06-distance-joint-design.md)의 고정 거리 제약과 Body/lifecycle/filter/island/wake/sleep/solver 통합부터 구현한다. Spring/limit/motor는 그다음 학습 단계다. 현재는 구현 전 검토 제안이며 Joint 완료나 설계 승인 기록이 아니다.
+3. **기본 Distance Joint 구현.** 고정 거리 제약과 Body/lifecycle/filter/island/wake/sleep/solver 통합을 구현했다. Spring/limit/motor를 추가하기 전에 Sandbox 진자에서 거리·회전·impulse의 관계를 관찰할 수 있다. 다음 구현은 spring의 Hertz/damping과 rigid 안정화 softness의 차이를 학습하는 단계다.
 
 Release 검증 보강은 사용자의 우선순위에 따라 보류한다. 테스트 실행 자체와 해당 변경을 확인할 회귀 검증은 계속 수행하지만, 전체 테스트 변환이 Joint 개발의 선행 조건은 아니다.
 
@@ -55,7 +59,7 @@ cache의 작은 feature/normal 근사, empty-manifold refresh 지연, 16-bit gen
 
 ## 기능 구현과 감사의 구분
 
-현재 source는 serial 2D engine이다. World-level spatial overlap/ray/shape query와 query filter, joint/chain, body type/enable 전환 API, persistent solver sets/constraint graph, worker/SIMD scheduling은 현재 공개 API 또는 subsystem에 없다. Primitive `ShapeCast` 구현은 World/Tree cast API 구현을 의미하지 않는다. Rolling resistance, contact hit event, custom filter/material callback도 별도 기능이다.
+현재 source는 serial 2D engine이다. World-level spatial overlap/ray/shape query와 query filter, 다른 Joint 종류/chain, body type/enable 전환 API, persistent solver sets/constraint graph, worker/SIMD scheduling은 현재 공개 API 또는 subsystem에 없다. Primitive `ShapeCast` 구현은 World/Tree cast API 구현을 의미하지 않는다. Rolling resistance, contact hit event, custom filter/material callback도 별도 기능이다.
 
 `src/README.md`의 개발 순서는 core utility → math → 2D이며, 3D와 다른 simulation 영역은 실제 구현을 시작할 때 추가하도록 돼 있다. 이전 현황 문서는 대화에 있던 10파트 감사 이후 Joint 개발 순서를 반영하지 못했다. 위 다음 개발 순서로 바로잡으며, 그 밖의 미구현 기능은 요구에 따라 범위를 정한다.
 
@@ -65,4 +69,4 @@ cache의 작은 feature/normal 근사, empty-manifold refresh 지연, 16-bit gen
 
 debug tip `342ccb250a8940def074ed8f78f917f477f9654b`는 master의 ancestor가 아니다. master에 없는 커밋은 CTest `--timeout 15`를 임시 추가한 1개이며, 이번 통합 현황 작업에서 병합하거나 삭제하지 않는다. 현재 master CI의 job timeout은 10분이다. 추후 정리할 때도 보존 근거를 확인하고, 의미 없는 변경을 이력 보존만을 위해 master에 넣지 않는다.
 
-완료된 작업 브랜치는 최종 검증·리뷰 후 병합하고, tip의 master 포함과 동일 tree를 확인한 뒤 로컬·원격에서 삭제한다. 이번 최종 통합 확인에서도 debug 변경과 실제 Joint 구현은 포함하지 않는다.
+완료된 작업 브랜치는 최종 검증·리뷰 후 병합하고, tip의 master 포함과 동일 tree를 확인한 뒤 로컬·원격에서 삭제한다. 최종 통합 확인에는 Joint 구현이 없었고, 후속 기본 Distance Joint 작업도 debug 변경을 포함하지 않는다.

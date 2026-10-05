@@ -144,6 +144,8 @@ struct visualScene
     bodyId impulseBody{};
     bodyId torqueBody{};
     bodyId kinematicBody{};
+    bodyId pendulumBody{};
+    jointId pendulumJoint{};
 
     visualScene()
     {
@@ -287,6 +289,16 @@ struct visualScene
                 "Platform [Kinematic]"
             }
         );
+
+        // Ground origin은 (0,-4)이므로 local anchor (5,8)은 world (5,4)가 됨.
+        // 중력 아래에서 COM을 연결한 고정 거리 제약을 먼저 관찰함.
+        pendulumBody = world.CreateBody( bodyType::Dynamic, { { 5.0f, 2.0f }, {} } );
+        const shapeId pendulumShape = world.CreateShape( pendulumBody, circle2{ {}, 0.3f } );
+        shapes.push_back( { pendulumBody, pendulumShape, "Pendulum [Distance Joint]" } );
+        distanceJointDef joint{};
+        joint.bodyA = ground; joint.bodyB = pendulumBody;
+        joint.localAnchorA = { 5.0f, 8.0f }; joint.length = 2.0f;
+        pendulumJoint = world.createDistanceJoint( joint );
     }
 };
 
@@ -1303,6 +1315,14 @@ int main()
 
         ImGui::Spacing();
         ImGui::Separator();
+        ImGui::TextUnformatted( "Distance Joint" );
+        const distanceJointData pendulum = scene->world.getDistanceJointData( scene->pendulumJoint );
+        ImGui::Text( "Target: %.3f m / Current: %.3f m", pendulum.length, pendulum.currentLength );
+        if( ImGui::Button( "Kick pendulum", ImVec2( -1.0f, 0.0f ) ) )
+        {
+            scene->world.ApplyLinearImpulseToCenter( scene->pendulumBody, { scene->world.GetBodyMass( scene->pendulumBody ) * 2.0f, 0.0f } );
+        }
+        ImGui::Spacing();
         ImGui::TextUnformatted(
             "Impulse Test"
         );
@@ -1824,6 +1844,12 @@ int main()
                 );
             }
         }
+
+        constexpr ImU32 JOINT_COLOR = IM_COL32( 230, 170, 255, 255 );
+        const distanceJointData joint = scene->world.getDistanceJointData( scene->pendulumJoint );
+        debugDraw.DrawSegment( { joint.anchorA, joint.anchorB }, JOINT_COLOR );
+        debugDraw.DrawPoint( joint.anchorA, JOINT_COLOR );
+        debugDraw.DrawPoint( joint.anchorB, JOINT_COLOR );
 
         if( showContacts )
         {

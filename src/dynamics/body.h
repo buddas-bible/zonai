@@ -51,6 +51,10 @@ struct body
     // 이 body에 연결된 Contact 개수.
     std::int32_t contactCount = 0;
 
+    // Contact와 같은 edge key로 연결된 Joint list. Static도 endpoint를 보관함.
+    std::int32_t headJointKey = NULL_INDEX;
+    std::int32_t jointCount = 0;
+
     // 이 body에 연결된 첫 shape index.
     std::int32_t headShapeId = NULL_INDEX;
 
