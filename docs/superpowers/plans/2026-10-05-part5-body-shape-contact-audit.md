@@ -4,31 +4,30 @@
 
 **Goal:** Audit and minimally fix zonai's Body / Shape / Contact ownership and lifetime semantics against current Box2D intent without changing Part 6 solver behavior.
 
-**Architecture:** Keep the current stable-slot storage and cold/hot split (`body`/`bodySim`/`bodyState`, `contact2`/`contactSim2`). Add world ownership to public handles, then verify lifecycle invariants with regression tests before making only the fixes those tests justify. Existing Part 5 branches are reference material only; current `master` is the source of truth.
+**Architecture:** Keep the existing stable-slot storage and cold/hot split (`body`/`bodySim`/`bodyState`, `contact2`/`contactSim2`). Add world ownership to public handles, then prove body/shape/contact lifecycle invariants with regression tests and only change code when a test exposes a real defect. Existing Part 5 branches remain reference material only.
 
-**Tech Stack:** C++20, CMake 4.2, Visual Studio 2026/MSVC, CTest, zonai's existing assert-based test executables.
+**Tech Stack:** C++20, CMake 4.2, Visual Studio 2026/MSVC, CTest, existing assert-based zonai tests.
 
 **Spec:** `docs/superpowers/specs/2026-10-05-part5-body-shape-contact-audit-design.md`
 
 ## Global Constraints
 
-- Use lowerCamelCase for types/functions/variables according to the current zonai convention.
-- Keep the current private member naming convention.
+- Keep lowerCamelCase and the current private-member convention.
 - Keep cpp definition order aligned with header declaration order.
-- Preserve the current `#pragma region` organization where touched.
+- Preserve the existing `#pragma region` organization where touched.
 - Avoid unnecessary line breaks and aesthetic-only refactors.
-- Comments should explain Box2D rationale/invariants briefly rather than narrate obvious code.
+- Comments should explain Box2D rationale/invariants briefly.
 - Do not change contact constraint math, warm start math, bias/relaxation/restitution order, or other Part 6 solver behavior.
-- Do not wholesale merge `refactor/body-shape-contact-audit` or `refactor/body-shape-contact-reaudit`; inspect and reapply only justified changes.
-- Keep generation semantics as implemented today: deletion preserves the generation value; the next allocation of the same slot increments it.
+- Do not wholesale merge `refactor/body-shape-contact-audit` or `refactor/body-shape-contact-reaudit`.
+- Preserve current generation semantics: deletion keeps the generation value; reallocation of the slot increments it.
 
 ## Review Focus
 
-- Cross-world handles with the same `index1` and `generation` must be rejected by the wrong `world`.
-- Lifetime-token generation must never produce the null token value and must remain stable for the entire `world` lifetime.
-- Destroying a body or shape while iterating intrusive lists must not lose the next contact/shape link.
-- Reused stable slots must not retain old velocity, transform, manifold, impulse, proxy, or list state.
-- Persistent speculative contacts may remain allocated while not touching, but public contact-data queries must exclude them.
+- A handle from another `world` must be rejected even when `index1` and `generation` happen to match.
+- A world lifetime token must never be zero and must stay stable for the world lifetime.
+- Destroying nodes while walking body shape/contact lists must not lose remaining links.
+- Reused slots must not retain old simulation, manifold, impulse, proxy, or list state.
+- Persistent non-touching contacts may remain allocated, but public contact-data queries must exclude them.
 
 ---
 
@@ -41,25 +40,23 @@
 - Test: `tests/dynamics/world_test.cpp`
 
 **Interfaces:**
-- Consumes: current `bodyId`, `shapeId`, `contactId`, `world::IsValid`, `world::MakeBodyId`, `world::MakeShapeId`, `world::MakeContactId`.
-- Produces: `bodyId/shapeId/contactId` with `std::uint64_t worldToken`; `world()` lifetime-token initialization; world-aware `IsValid` semantics.
+- Consumes: existing `bodyId`, `shapeId`, `contactId`, `world::IsValid`, `world::MakeBodyId`, `world::MakeShapeId`, `world::MakeContactId`.
+- Produces: IDs with `std::uint64_t worldToken`; stable non-zero `world::worldToken_`; world-aware `IsValid`.
 
-- [ ] **Step 1: Add RED cross-world body handle coverage**
+- [ ] **Step 1: Add RED cross-world body/shape tests**
 
-Add a test block to `tests/dynamics/world_test.cpp` that creates `worldA` and `worldB`, creates one Dynamic body in each, verifies their `index1` and generation may match, and asserts:
+Create `worldA` and `worldB`, create equivalent body and shape slots in both, and assert each world's handles are valid only in the owning world:
 
 ```cpp
 assert( worldA.IsValid( bodyA ) );
 assert( worldB.IsValid( bodyB ) );
 assert( !worldA.IsValid( bodyB ) );
 assert( !worldB.IsValid( bodyA ) );
+assert( !worldA.IsValid( shapeB ) );
+assert( !worldB.IsValid( shapeA ) );
 ```
 
-Also create one shape in each world and assert the same cross-world invalidity for `shapeId`.
-
-- [ ] **Step 2: Run `worldTests` and confirm the RED failure**
-
-Run after configure/build:
+- [ ] **Step 2: Run the focused test and verify RED**
 
 ```bash
 cmake --preset vs2026
@@ -67,15 +64,15 @@ cmake --build --preset debug --target worldTests
 ctest --test-dir build -C Debug -R "^worldTests$" --output-on-failure
 ```
 
-Expected: test fails because public handles currently encode only slot + generation.
+Expected: FAIL because current public IDs contain only slot + generation.
 
-- [ ] **Step 3: Add `worldToken` to public IDs**
+- [ ] **Step 3: Add world ownership to public IDs**
 
-In `src/dynamics/id.h`, add `std::uint64_t worldToken = 0;` to `bodyId`, `shapeId`, and `contactId`. Keep `IsNull(id)` based only on `index1 == 0`.
+In `src/dynamics/id.h`, add `std::uint64_t worldToken = 0;` to `bodyId`, `shapeId`, and `contactId`. Keep all `IsNull(...)` helpers based on `index1 == 0`.
 
-- [ ] **Step 4: Give every world a stable non-zero lifetime token**
+- [ ] **Step 4: Add a stable non-zero world token**
 
-In `src/dynamics/world.h`, declare:
+In `world.h`, add:
 
 ```cpp
 world();
@@ -85,17 +82,13 @@ world( world&& ) = delete;
 world& operator=( world&& ) = delete;
 ```
 
-Add private:
+and private `std::uint64_t worldToken_ = 0;`.
 
-```cpp
-std::uint64_t worldToken_ = 0;
-```
+In `world.cpp`, add a translation-unit-local `AllocateWorldToken() noexcept` backed by `std::atomic<std::uint64_t>` using `memory_order_relaxed`, skipping token `0`, then initialize `worldToken_` in `world::world()`.
 
-In `src/dynamics/world.cpp`, implement a translation-unit-local `AllocateWorldToken() noexcept` using `std::atomic<std::uint64_t>` with `memory_order_relaxed`, skipping token `0`, and initialize `worldToken_` in `world::world()`.
+- [ ] **Step 5: Update public ID construction and validation**
 
-- [ ] **Step 5: Make all public ID creation and validation world-aware**
-
-Update:
+Update these exact interfaces without changing their names:
 
 ```cpp
 bool world::IsValid( bodyId bodyId ) const noexcept;
@@ -106,11 +99,11 @@ shapeId world::MakeShapeId( std::int32_t shapeIndex ) const;
 contactId world::MakeContactId( std::int32_t contactIndex ) const;
 ```
 
-`IsValid` must reject mismatched `worldToken` before indexing storage. `Make*Id` must embed `worldToken_`.
+`IsValid` rejects a mismatched token before indexing storage. `Make*Id` embeds `worldToken_`.
 
-- [ ] **Step 6: Add cross-world contact regression**
+- [ ] **Step 6: Add cross-world contact coverage**
 
-Create equivalent contacts in two worlds via overlapping Dynamic/Static shape pairs and `UpdateCollisions`, capture `contactId` through returned `contactData`, and assert the contact handle from one world is invalid in the other.
+Create one touching pair in each world, collect `contactData.id` through `UpdateCollisions`, and assert a contact handle from one world is invalid in the other.
 
 - [ ] **Step 7: Run Task 1 tests**
 
@@ -121,7 +114,7 @@ ctest --test-dir build -C Debug -R "^worldTests$" --output-on-failure
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit Task 1**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add src/dynamics/id.h src/dynamics/world.h src/dynamics/world.cpp tests/dynamics/world_test.cpp
@@ -138,55 +131,52 @@ git commit -m "fix(part5): validate public handles by world lifetime"
 - Test: `tests/dynamics/world_test.cpp`
 
 **Interfaces:**
-- Consumes: `world::CreateBody`, `world::DestroyBody`, `world::CreateShape`, `world::DestroyShape`, `world::GetBody`, `world::GetShape`, `world::GetBodyCount`, `world::GetShapeCount`, `world::GetBroadPhase`.
-- Produces: regression coverage proving stable-slot reset, intrusive shape-list integrity, and proxy cleanup.
+- Consumes: `CreateBody`, `DestroyBody`, `CreateShape`, `DestroyShape`, `GetBody`, `GetShape`, body/shape counts, broad-phase inspection already exposed by `world`.
+- Produces: regression coverage for stable-slot reset, intrusive shape-list integrity, and proxy/contact cascade cleanup.
 
-- [ ] **Step 1: Add body slot-reuse reset coverage**
+- [ ] **Step 1: Strengthen body slot-reuse coverage**
 
-Extend the existing body reuse test to set transform, linear/angular velocity, damping/gravity-relevant state, destroy the body, recreate a Dynamic body in the same slot, and assert:
+Before destroying a Dynamic body, assign non-default transform and velocities. Recreate a Dynamic body in the same slot and assert:
 
 ```cpp
 assert( reusedBody.index1 == oldBody.index1 );
 assert( reusedBody.generation != oldBody.generation );
 assert( !world.IsValid( oldBody ) );
-assert( world.GetBodyLinearVelocity( reusedBody ) == vec2{} );
+const vec2 reusedVelocity = world.GetBodyLinearVelocity( reusedBody );
+assert( reusedVelocity.x == 0.0f );
+assert( reusedVelocity.y == 0.0f );
 assert( world.GetBodyAngularVelocity( reusedBody ) == 0.0f );
 ```
 
-Also verify the recreated body has no shapes or contacts through public counts/query capacity.
+Also verify the recreated `body` has `shapeCount == 0`, `contactCount == 0`, and null list heads through `GetBody`.
 
 - [ ] **Step 2: Run `worldTests`**
 
-Expected: PASS if current reset logic is correct; if it fails, continue to Step 3 with the failing invariant only.
+Expected: PASS if current reset logic is already correct. If RED, change only `CreateBody` / `DestroyBodyByIndex` fields implicated by the failing assertions.
 
-- [ ] **Step 3: Minimally fix `world::CreateBody` / `DestroyBodyByIndex` if RED**
+- [ ] **Step 3: Add shape-list head/middle/tail deletion tests**
 
-Keep same-index `body`, `bodySim`, and `bodyState` storage. Reset all reused simulation/state fields before returning the new handle. Preserve generation on destroy and increment on allocation.
+Create one body with three shapes. In separate scenarios delete the current head, a middle shape, and the final remaining shape. Verify via `GetBody`/`GetShape` that:
 
-- [ ] **Step 4: Add shape list head/middle/tail deletion coverage**
+- head `prevShapeId == NULL_INDEX`
+- surviving neighbors reference each other after middle deletion
+- final deletion leaves `headShapeId == NULL_INDEX` and `shapeCount == 0`
+- destroyed handles become invalid and `GetShapeCount()` matches live shapes
 
-Create one body with three shapes and capture internal indices through `world.GetShape(...)`. Delete in three independent scenarios:
+- [ ] **Step 4: Run and minimally repair shape ownership if RED**
 
-- head deletion: new head has `prevShapeId == NULL_INDEX`
-- middle deletion: previous/next neighbors point to each other
-- final deletion: `body.headShapeId == NULL_INDEX` and `body.shapeCount == 0`
+Only touch `LinkShape`, `UnlinkShape`, `DestroyShapeByIndex`, mass refresh, or proxy cleanup that a failing test identifies. Keep the intrusive list design.
 
-For every scenario assert `world.GetShapeCount()` and `world.IsValid(oldShape)` are correct.
+- [ ] **Step 5: Add DestroyBody cascade coverage**
 
-- [ ] **Step 5: Run `worldTests` and fix only proven list/proxy defects**
+Create a body with multiple shapes and a touching contact to a surviving body. Call `DestroyBody` and assert:
 
-If RED, adjust only `LinkShape`, `UnlinkShape`, `DestroyShapeByIndex`, or proxy cleanup involved in the failing invariant. Do not replace the intrusive list data structure.
+- destroyed body and shape handles are invalid
+- body/shape/contact counts decrease correctly
+- surviving body's contact capacity no longer contains the destroyed pair
+- destroyed proxies are absent from broad-phase state exposed by current debug/query APIs
 
-- [ ] **Step 6: Add DestroyBody cascade coverage**
-
-Create one Dynamic body with multiple shapes and at least one touching contact to another body. Record shape handles and broad-phase proxy/pair counts. Call `DestroyBody` and assert:
-
-- body and all its shape handles are invalid
-- body/shape/contact counts drop by the expected amount
-- no proxy for destroyed shapes remains in broad phase
-- the surviving body's contact capacity no longer includes the destroyed pair
-
-- [ ] **Step 7: Run Task 2 tests**
+- [ ] **Step 6: Run Task 2 tests**
 
 ```bash
 cmake --build --preset debug --target worldTests
@@ -195,7 +185,7 @@ ctest --test-dir build -C Debug -R "^worldTests$" --output-on-failure
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit Task 2**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/dynamics/bodyShape.h src/dynamics/world.cpp tests/dynamics/world_test.cpp
@@ -204,7 +194,7 @@ git commit -m "test(part5): cover body and shape lifecycle invariants"
 
 ---
 
-### Task 3: Audit Contact intrusive lists and stable-slot reuse
+### Task 3: Audit Contact lifetime and intrusive-edge bookkeeping
 
 **Files:**
 - Modify if needed: `src/collision/narrowphase/contact2.h`
@@ -213,34 +203,32 @@ git commit -m "test(part5): cover body and shape lifecycle invariants"
 - Test: `tests/dynamics/world_test.cpp`
 
 **Interfaces:**
-- Consumes: `MakeContactKey`, `GetContactId`, `GetContactEdgeIndex`, `world::UpdateCollisions`, `world::GetBodyContactCapacity`, `world::GetBodyContactData`, `world::GetContactData`.
-- Produces: regression coverage proving both body edges remain valid through head/middle/tail removal and that reused contact slots have fresh simulation caches.
+- Consumes: `MakeContactKey`, `GetContactId`, `GetContactEdgeIndex`, `UpdateCollisions`, `GetBodyContactCapacity`, `GetBodyContactData`, `GetContactData`.
+- Produces: regression coverage that contact removal keeps both bodies observable as consistent and reused contact slots contain fresh state.
 
-- [ ] **Step 1: Add contact-key encoding regression**
+- [ ] **Step 1: Add contact-key encode/decode regression**
 
-Add constexpr/runtime assertions for representative contact IDs and both edge indices:
+For representative non-negative contact indices and both edge indices, assert `GetContactId(MakeContactKey(...))` and `GetContactEdgeIndex(...)` round-trip exactly.
 
-```cpp
-const auto key = MakeContactKey( contactIndex, edgeIndex );
-assert( GetContactId( key ) == contactIndex );
-assert( GetContactEdgeIndex( key ) == edgeIndex );
-```
+- [ ] **Step 2: Add head/middle/tail contact-removal scenarios**
 
-- [ ] **Step 2: Add contact-list head/middle/tail removal coverage**
+Create one body touching three separate bodies. Capture the returned `contactData.id` values and the central body's `headContactKey`. Remove counterpart shapes/bodies in orders that exercise removal of the current head and non-head contacts. After every removal assert:
 
-Construct one body touching three separate bodies so it owns three contact edges. Remove the corresponding shapes/bodies in orders that exercise head, middle, and tail deletion. After every deletion traverse the remaining chain through `world.GetBody(...).headContactKey` plus `world.GetContactData(...)`/public capacity and assert count/link consistency.
+- `GetBodyContactCapacity` decreases by exactly one
+- every surviving public `contactId` remains valid
+- the removed `contactId` becomes invalid
+- `GetBody(...).contactCount` equals public capacity
+- when no contacts remain, `headContactKey == NULL_INDEX`
+
+These externally observable invariants verify intrusive-edge bookkeeping without adding a test-only public API for private `prevKey`/`nextKey` storage.
 
 - [ ] **Step 3: Run `worldTests`**
 
-Expected: PASS if `DestroyContact` already maintains both sides correctly; otherwise capture the first broken invariant.
+Expected: PASS if current `DestroyContact` is correct. If RED, modify only predecessor/successor/head/count bookkeeping required by the failing case.
 
-- [ ] **Step 4: Minimally repair `world::DestroyContact` if RED**
+- [ ] **Step 4: Add contact slot-reuse regression**
 
-Keep the existing `contactKey = (contactId << 1) | edgeIndex` representation. Update only predecessor/successor/head/count bookkeeping necessary to satisfy the failing test on both bodies.
-
-- [ ] **Step 5: Add contact slot-reuse regression**
-
-Create a touching contact, record its public `contactId`, run at least one collision/step path that populates manifold/impulse cache, destroy the contact by separating/destroying its shape, then create a new contact that reuses the same stable slot. Assert:
+Create a contact, record its `contactId`, exercise collision update/step so `contactSim2` owns real manifold/cache state, destroy it, then create another contact that reuses the same slot. Assert:
 
 ```cpp
 assert( reusedContact.index1 == oldContact.index1 );
@@ -248,13 +236,13 @@ assert( reusedContact.generation != oldContact.generation );
 assert( !world.IsValid( oldContact ) );
 ```
 
-Verify the new contact's manifold and cached impulses reflect only the new pair.
+Verify the new `contactData.manifold` describes the new pair only; if internal cache reset is suspect, add a narrowly scoped test through the existing solver/contact behavior rather than exposing `contactSim2` publicly.
 
-- [ ] **Step 6: Fix contact/contactSim reset only if the reuse test fails**
+- [ ] **Step 5: Fix contact/contactSim reset only if RED**
 
-If needed, make `CreateContact`/`DestroyContact` fully reinitialize `contact2` and `contactSim2` while preserving the current generation-on-allocation policy.
+Keep generation-on-allocation semantics and fully reset only the slot fields proven stale by the test.
 
-- [ ] **Step 7: Run Task 3 tests**
+- [ ] **Step 6: Run Task 3 tests**
 
 ```bash
 cmake --build --preset debug --target worldTests
@@ -263,7 +251,7 @@ ctest --test-dir build -C Debug -R "^worldTests$" --output-on-failure
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit Task 3**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/collision/narrowphase/contact2.h src/dynamics/contactSim2.h src/dynamics/world.cpp tests/dynamics/world_test.cpp
@@ -280,35 +268,28 @@ git commit -m "test(part5): cover contact lifecycle invariants"
 - Test: `tests/dynamics/world_test.cpp`
 
 **Interfaces:**
-- Consumes: `world::SetShapeFilter`, `world::SetBodyTransform`, `world::UpdateCollisions`, `world::GetBodyContactCapacity`, `world::GetBodyContactData`, `world::GetShapeContactCapacity`, `world::GetShapeContactData`.
-- Produces: fixed semantics where persistent contacts and touching-contact data remain distinct across runtime changes.
+- Consumes: `SetShapeFilter`, `SetBodyTransform`, `UpdateCollisions`, `GetBodyContactCapacity/Data`, `GetShapeContactCapacity/Data`.
+- Produces: fixed distinction between persistent contacts and public touching-contact data across runtime mutations.
 
-- [ ] **Step 1: Add speculative persistent-contact query coverage**
+- [ ] **Step 1: Add persistent-but-non-touching query coverage**
 
-Create shapes whose fat/speculative broad-phase bounds produce a persistent contact while the narrow-phase manifold has no touching point. Assert:
-
-```cpp
-assert( world.GetBodyContactCapacity( bodyId ) >= 1 );
-assert( world.GetBodyContactData( bodyId, output ) == 0 );
-```
-
-Repeat with `GetShapeContactCapacity/Data`.
+Construct a pair that still has a persistent broad-phase contact while its narrow-phase manifold is not touching. Assert body and shape capacity may remain non-zero while both data queries write zero entries.
 
 - [ ] **Step 2: Add touching transition coverage**
 
-Move one body into actual contact, call collision update, assert body and shape contact-data queries return one touching contact. Move it back to a non-touching position that still preserves the persistent pair where possible, update again, and assert data queries return zero even if capacity remains non-zero.
+Move the pair into actual contact, update collisions, and assert body/shape contact-data queries return the touching contact. Move it back to a non-touching position that keeps the persistent pair when possible; after update, data queries must return zero again.
 
-- [ ] **Step 3: Reject old re-audit speculative-public-query behavior**
+- [ ] **Step 3: Explicitly reject the old speculative-public-query experiment**
 
-Do not port any old branch change that makes `GetBodyContactData`/`GetShapeContactData` expose non-touching speculative contacts. Keep public data queries gated by the current touching manifold semantics.
+Do not port old re-audit code that exposes non-touching speculative contacts through `GetBodyContactData` or `GetShapeContactData`.
 
-- [ ] **Step 4: Add runtime filter invalidation coverage**
+- [ ] **Step 4: Add SetShapeFilter invalidation coverage**
 
-Create a touching pair, verify one contact, then call `SetShapeFilter` with a mask that rejects the pair. Assert the existing contact is destroyed immediately. Restore a compatible filter, run collision update, and assert a new valid contact can be created without stale pair/contact state.
+Create a touching pair, change one shape's filter so the pair is rejected, and assert the existing contact disappears immediately. Restore a compatible filter, update collisions, and assert a fresh valid contact is created without stale pair/contact state.
 
-- [ ] **Step 5: Run `worldTests` and minimally fix mutation semantics if RED**
+- [ ] **Step 5: Run and minimally fix mutation semantics if RED**
 
-If failures appear, change only `SetShapeFilter`, contact destruction/pair invalidation, proxy buffering, or touching-query gating responsible for the test. Do not change broad-phase tree algorithms audited in Part 4.
+Only change filter/contact invalidation, proxy buffering, or touching-query gating identified by the tests. Do not alter Part 4 tree algorithms.
 
 - [ ] **Step 6: Run Task 4 tests**
 
@@ -319,7 +300,7 @@ ctest --test-dir build -C Debug -R "^worldTests$" --output-on-failure
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 4**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/dynamics/world.h src/dynamics/world.cpp tests/dynamics/world_test.cpp
@@ -328,7 +309,7 @@ git commit -m "test(part5): lock contact query and filter semantics"
 
 ---
 
-### Task 5: Final Part 5 audit, style pass, and verification
+### Task 5: Final audit and verification
 
 **Files:**
 - Modify only if justified: files touched by Tasks 1-4
@@ -336,24 +317,17 @@ git commit -m "test(part5): lock contact query and filter semantics"
 
 **Interfaces:**
 - Consumes: all Task 1-4 behavior and tests.
-- Produces: merge-ready Part 5 branch plus audit report documenting adopted/rejected prior-branch changes and any known issues.
+- Produces: merge-ready branch and a concise audit report.
 
-- [ ] **Step 1: Compare the new branch against both old Part 5 branches**
+- [ ] **Step 1: Compare against both old Part 5 branches**
 
-Use Git compare to classify old changes as:
+Classify meaningful old changes as adopted, already present, rejected/outdated, or aesthetic-only. Record the reasoning in the final audit report; do not merge history wholesale.
 
-- adopted because a regression test proves the need
-- already present in current master
-- rejected because semantics are wrong/outdated
-- unnecessary aesthetic refactor
+- [ ] **Step 2: Check style and declaration/definition order**
 
-Record only meaningful findings in the audit report.
+For every touched file, ensure header/cpp order, lowerCamelCase, current comments, `#pragma region`, and formatting remain consistent. Make no unrelated cleanup.
 
-- [ ] **Step 2: Check declaration/definition order and touched comments**
-
-For `world.h`/`world.cpp` and any other touched files, ensure cpp definitions follow header declaration order and comments describe lifetime/ownership rationale without excessive formatting changes.
-
-- [ ] **Step 3: Run focused Part 5 tests**
+- [ ] **Step 3: Run focused dynamics tests**
 
 ```bash
 cmake --build --preset debug --target bodyTests bodyShapeTests worldTests
@@ -362,7 +336,7 @@ ctest --test-dir build -C Debug -R "^(bodyTests|bodyShapeTests|worldTests)$" --o
 
 Expected: PASS.
 
-- [ ] **Step 4: Run the entire Debug suite**
+- [ ] **Step 4: Run full Debug verification**
 
 ```bash
 cmake --build --preset debug
@@ -371,7 +345,7 @@ ctest --test-dir build -C Debug --output-on-failure
 
 Expected: all tests PASS.
 
-- [ ] **Step 5: Verify Release build**
+- [ ] **Step 5: Run Release verification**
 
 ```bash
 cmake --build --preset release
@@ -380,23 +354,15 @@ ctest --test-dir build -C Release --output-on-failure
 
 Expected: build succeeds and all tests PASS.
 
-- [ ] **Step 6: Verify Part 6 solver isolation**
+- [ ] **Step 6: Verify Part 6 isolation**
 
-Inspect branch diff and confirm no intentional solver math/order change in `contactConstraint2.*`; if a solver-facing interface changed, document exactly why it was necessary and prove behavior with existing `contactConstraintTests`.
+Inspect the branch diff. There should be no intentional solver math/order change in `contactConstraint2.*`. Any unavoidable solver-facing interface change must be documented and covered by existing `contactConstraintTests`.
 
-- [ ] **Step 7: Write final audit report**
+- [ ] **Step 7: Write `docs/part5-body-shape-contact-audit.md`**
 
-Create `docs/part5-body-shape-contact-audit.md` with:
+Include audited invariants, correctness fixes, old-branch changes adopted/rejected, tests added, Debug/Release results, known issues, and merge recommendation.
 
-- audited components/invariants
-- correctness fixes made
-- old Part 5 changes adopted/rejected
-- tests added
-- Debug/Release verification results
-- remaining known issues, if any
-- merge recommendation
-
-- [ ] **Step 8: Commit final audit**
+- [ ] **Step 8: Commit final report**
 
 ```bash
 git add docs/part5-body-shape-contact-audit.md
