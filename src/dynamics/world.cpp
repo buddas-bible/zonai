@@ -3767,6 +3767,8 @@ std::int32_t world::CreateContact(
 bool world::TryRecycleContact(
     std::int32_t contactId )
 {
+    // Box2D contact recycling 기준: 작은 상대 이동에서는 anchor를 유지해 jitter를 줄임.
+    // https://github.com/erincatto/box2d/blob/ac7c751eaeddbabdc1c4d41ae4f3a25d78627790/src/physics_world.c#L530
     assert( contactId >= 0 );
     assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
     assert( contactSims_.size() == contacts_.size() );
@@ -3857,6 +3859,8 @@ bool world::TryRecycleContact(
             maxExtentB
         );
 
+    // Box2D conservative advancement metric. 작은 회전에서는 sin(theta) ~= theta임.
+    // cached pose는 fresh narrowphase에서만 갱신하므로 작은 이동이 반복돼도 누적 오차를 제한함.
     const float relativeMotion =
         Length( relativeTranslation ) +
         maxExtent *

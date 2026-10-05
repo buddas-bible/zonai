@@ -52,6 +52,7 @@ struct contactSim2
     //
     // fresh narrowphase 시점의 동일 world contact point를 A/B local anchor로 각각 저장하고,
     // 작은 상대 이동에서는 이 두 anchor를 새 transform으로 옮겨 separation만 갱신함.
+    // 재활용 중 기준 anchor / pose는 유지하고, fresh narrowphase에서만 다시 저장함.
     std::array<vec2, MAX_MANIFOLD_POINTS> recyclePointA{};
     std::array<vec2, MAX_MANIFOLD_POINTS> recyclePointB{};
     std::array<float, MAX_MANIFOLD_POINTS> recycleSeparation{};
