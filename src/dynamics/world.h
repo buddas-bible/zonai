@@ -39,6 +39,14 @@ concept worldCollisionCallback =
 class world
 {
 public:
+    world();
+
+    world( const world& ) = delete;
+    world& operator=( const world& ) = delete;
+
+    world( world&& ) = delete;
+    world& operator=( world&& ) = delete;
+
     // definition의 초기 simulation 설정으로 새 body를 만듦.
     [[nodiscard]] bodyId CreateBody( const bodyDef& definition );
 
@@ -216,7 +224,7 @@ public:
     // Contact constraint를 준비한 뒤 sub-step마다 force / gravity, solve, position integration을 수행함.
     void Step( float timeStep, int subStepCount = 1 );
 
-    // null / 범위 / generation / 활성 slot을 모두 확인함.
+    // world lifetime / null / 범위 / generation / 활성 slot을 모두 확인함.
     [[nodiscard]] bool IsValid( bodyId bodyId ) const noexcept;
     [[nodiscard]] bool IsValid( shapeId shapeId ) const noexcept;
     [[nodiscard]] bool IsValid( contactId contactId ) const noexcept;
@@ -413,6 +421,9 @@ public:
     }
 
 private:
+    // Public handle이 world 수명을 구분할 때 사용하는 opaque token.
+    std::uint64_t worldToken_ = 0;
+
     [[nodiscard]] std::int32_t GetBodyIndex( bodyId bodyId ) const;
     [[nodiscard]] std::int32_t GetShapeIndex( shapeId shapeId ) const;
     [[nodiscard]] std::int32_t GetContactIndex( contactId contactId ) const;
