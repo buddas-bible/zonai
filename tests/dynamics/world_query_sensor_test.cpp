@@ -1,6 +1,7 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 
 #include "dynamics/world.h"
 #include "geometry/circle2.h"
@@ -67,6 +68,69 @@ void checkContactQueries()
     simulation.SetBodyTransform( owner, { { 100.0f, 0.0f }, {} } );
     update( simulation );
     check( !simulation.IsValid( snapshot.id ) && snapshot.manifold.pointCount == 1, "copied contact snapshot changed after removal" );
+}
+
+#pragma endregion
+#pragma region CollisionCallbackTiming
+
+void checkCollisionCallbackTiming()
+{
+    world simulation{};
+    const bodyId owner = simulation.CreateBody( bodyType::Dynamic );
+    (void)simulation.CreateShape( owner, circle2{ {}, 1.0f } );
+    const bodyId target = simulation.CreateBody( bodyType::Static, { { 1.5f, 0.0f }, {} } );
+    (void)simulation.CreateShape( target, circle2{ {}, 1.0f } );
+    update( simulation );
+    std::array<contactData, 1> output{};
+    check( simulation.GetBodyContactData( owner, output ) == 1, "callback timing fixture" );
+    const contactId existing = output[0].id;
+    const bodyId newOwner = simulation.CreateBody( bodyType::Dynamic, { { 10.0f, 0.0f }, {} } );
+    (void)simulation.CreateShape( newOwner, circle2{ {}, 1.0f } );
+    const bodyId newTarget = simulation.CreateBody( bodyType::Static, { { 11.5f, 0.0f }, {} } );
+    (void)simulation.CreateShape( newTarget, circle2{ {}, 1.0f } );
+
+    // 기존 Contact의 callback은 새 pair 생성 전임. move-only callable을 복사하지 않아야 함.
+    int callbacks = 0;
+    auto callback = [&, calls = std::make_unique<int>( 0 )]( const contactData& data ) mutable
+    {
+        check( simulation.IsValid( data.id ) && data.manifold.pointCount == 1 && data.manifold.points[0].separation <= 0.0f, "callback touching snapshot" );
+        const contactData current = simulation.GetContactData( data.id );
+        check( current.shapeA == data.shapeA && current.shapeB == data.shapeB, "callback precedes contact creation or refresh" );
+        if( *calls == 0 )
+        {
+            check( data.id == existing && simulation.GetContactCount() == 1, "existing callback delayed until new pairs" );
+        }
+        else
+        {
+            check( *calls == 1 && data.id != existing && simulation.GetContactCount() == 2, "new pair callback timing" );
+        }
+        ++*calls;
+        ++callbacks;
+    };
+    simulation.UpdateCollisions( callback );
+    check( callbacks == 2 && simulation.GetRecycledContactCount() == 1, "existing/new callback count or recycling fixture" );
+
+    // fat pair를 유지한 채 speculative로 이동하면 public query에는 남고 callback에는 빠짐.
+    simulation.SetBodyTransform( target, { { 2.005f, 0.0f }, {} } );
+    int freshCalls = 0;
+    simulation.UpdateCollisions( [&]( const contactData& data )
+    {
+        check( data.id != existing, "speculative contact dispatched to callback" );
+        ++freshCalls;
+    } );
+    check( freshCalls == 1 && simulation.IsValid( existing ), "fresh callback count or persistent contact" );
+    check( simulation.GetBodyContactData( owner, output ) == 1 && output[0].manifold.points[0].separation > 0.0f, "speculative query after callback refresh" );
+    simulation.SetBodyTransform( target, { { 1.6f, 0.0f }, {} } );
+    int touchingCalls = 0;
+    simulation.UpdateCollisions( [&]( const contactData& data )
+    {
+        if( data.id == existing ) { check( data.manifold.points[0].separation < 0.0f, "fresh touching manifold" ); }
+        ++touchingCalls;
+    } );
+    check( touchingCalls == 2, "fresh touching callback omitted" );
+    simulation.SetBodyTransform( target, { { 100.0f, 0.0f }, {} } );
+    simulation.UpdateCollisions( [&]( const contactData& data ) { check( data.id != existing, "destroyed contact callback" ); } );
+    check( !simulation.IsValid( existing ) && simulation.GetContactCount() == 1, "separated contact not removed" );
 }
 
 #pragma endregion
@@ -237,6 +301,7 @@ void checkTreeCallback()
 int main()
 {
     checkContactQueries();
+    checkCollisionCallbackTiming();
     checkSensorQueries();
     checkSensorFilters();
     checkVisitorReuse();

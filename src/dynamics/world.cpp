@@ -9,6 +9,7 @@
 
 #include "collision/constants.h"
 #include "collision/distance2.h"
+#include "collision/narrowphase/collide.h"
 #include "collision/shapeProxy2.h"
 #include "collision/sweep2.h"
 #include "collision/timeOfImpact2.h"
@@ -39,157 +40,16 @@ std::uint64_t allocateWorldToken() noexcept
 
 } // namespace
 
+#pragma region WorldLifetime
+
 world::world()
     : worldToken_( allocateWorldToken() )
 {
 }
 
-bool world::IsValid( bodyId bodyId ) const noexcept
-{
-    if( bodyId.index1 <= 0 ||
-        bodyId.worldToken != worldToken_ )
-    {
-        return false;
-    }
+#pragma endregion
 
-    const std::int32_t bodyIndex = bodyId.index1 - 1;
-
-    if( static_cast<std::size_t>( bodyIndex ) >= bodies_.size() )
-    {
-        return false;
-    }
-
-    const body& body = bodies_[bodyIndex];
-
-    return
-        body.bodyId == bodyIndex &&
-        body.generation == bodyId.generation;
-}
-
-bool world::IsValid( shapeId shapeId ) const noexcept
-{
-    if( shapeId.index1 <= 0 ||
-        shapeId.worldToken != worldToken_ )
-    {
-        return false;
-    }
-
-    const std::int32_t shapeIndex = shapeId.index1 - 1;
-
-    if( static_cast<std::size_t>( shapeIndex ) >= shapes_.size() )
-    {
-        return false;
-    }
-
-    const shape& shape = shapes_[shapeIndex];
-
-    return
-        shape.bodyId != shape::NULL_INDEX &&
-        shape.generation == shapeId.generation;
-}
-
-bool world::IsValid( contactId contactId ) const noexcept
-{
-    if( contactId.index1 <= 0 ||
-        contactId.worldToken != worldToken_ )
-    {
-        return false;
-    }
-
-    const std::int32_t contactIndex = contactId.index1 - 1;
-
-    if( static_cast<std::size_t>( contactIndex ) >= contacts_.size() )
-    {
-        return false;
-    }
-
-    const contact2& contact = contacts_[contactIndex];
-
-    return
-        contact.contactId == contactIndex &&
-        contact.generation == contactId.generation;
-}
-
-
-std::int32_t world::GetBodyIndex( bodyId bodyId ) const
-{
-    assert( IsValid( bodyId ) );
-    return bodyId.index1 - 1;
-}
-
-std::int32_t world::GetShapeIndex( shapeId shapeId ) const
-{
-    assert( IsValid( shapeId ) );
-    return shapeId.index1 - 1;
-}
-
-std::int32_t world::GetContactIndex( contactId contactId ) const
-{
-    assert( IsValid( contactId ) );
-    return contactId.index1 - 1;
-}
-
-
-bodyId world::MakeBodyId( std::int32_t bodyIndex ) const
-{
-    assert( bodyIndex >= 0 );
-    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
-
-    const body& body = bodies_[bodyIndex];
-
-    assert( body.bodyId == bodyIndex );
-
-    return
-    {
-        bodyIndex + 1,
-        body.generation,
-        worldToken_
-    };
-}
-
-shapeId world::MakeShapeId( std::int32_t shapeIndex ) const
-{
-    assert( shapeIndex >= 0 );
-    assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
-
-    const shape& shape = shapes_[shapeIndex];
-
-    assert( shape.bodyId != shape::NULL_INDEX );
-
-    return
-    {
-        shapeIndex + 1,
-        shape.generation,
-        worldToken_
-    };
-}
-
-contactId world::MakeContactId( std::int32_t contactIndex ) const
-{
-    assert( contactIndex >= 0 );
-    assert( static_cast<std::size_t>( contactIndex ) < contacts_.size() );
-
-    const contact2& contact = contacts_[contactIndex];
-
-    assert( contact.contactId == contactIndex );
-
-    return
-    {
-        contactIndex + 1,
-        contact.generation,
-        worldToken_
-    };
-}
-
-
-bodyId world::CreateBody( bodyType type, transform2 transform )
-{
-    bodyDef definition{};
-    definition.type = type;
-    definition.transform = transform;
-
-    return CreateBody( definition );
-}
+#pragma region BodyLifecycle
 
 bodyId world::CreateBody( const bodyDef& definition )
 {
@@ -290,67 +150,23 @@ bodyId world::CreateBody( const bodyDef& definition )
     return MakeBodyId( bodyIndex );
 }
 
+bodyId world::CreateBody( bodyType type, transform2 transform )
+{
+    bodyDef definition{};
+    definition.type = type;
+    definition.transform = transform;
+
+    return CreateBody( definition );
+}
+
 void world::DestroyBody( bodyId bodyId )
 {
     DestroyBodyByIndex( GetBodyIndex( bodyId ) );
 }
 
-void world::DestroyBodyByIndex( std::int32_t bodyIndex )
-{
-    assert( bodyIndex >= 0 );
-    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
-    assert( bodyCount_ > 0 );
+#pragma endregion
 
-    body& body = bodies_[bodyIndex];
-
-    assert( body.bodyId == bodyIndex );
-
-    // Box2D처럼 먼저 이 body에 연결된 모든 Contact를 제거함.
-    while( body.headContactKey != body::NULL_INDEX )
-    {
-        const std::int32_t contactId = GetContactId( body.headContactKey );
-
-        assert( contactId >= 0 );
-        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
-
-        DestroyContact( contactId );
-    }
-
-    assert( body.contactCount == 0 );
-
-    // shape를 하나씩 제거하면 각 proxy와 shape slot도 함께 정리됨.
-    while( body.headShapeId != body::NULL_INDEX )
-    {
-        DestroyShapeByIndex( body.headShapeId );
-    }
-
-    assert( body.shapeCount == 0 );
-    assert( body.headShapeId == body::NULL_INDEX );
-    assert( body.headContactKey == body::NULL_INDEX );
-
-    const std::uint16_t generation = body.generation;
-
-    assert( bodySims_.size() == bodies_.size() );
-    bodySim& bodySim = bodySims_[bodyIndex];
-    assert( bodySim.bodyId == bodyIndex );
-
-    // simulation 데이터도 함께 비워 재사용 slot에 이전 transform이 남지 않게 함.
-    bodySim = {};
-
-    assert( bodyStates_.size() == bodies_.size() );
-
-    // 운동 상태도 함께 초기화해 재사용 slot에 이전 body 속도가 남지 않게 함.
-    bodyStates_[bodyIndex] = {};
-
-    // generation은 보존하고 slot만 free-list에 반환함.
-    body = {};
-    body.generation = generation;
-    body.nextFreeId = bodyFreeList_;
-    bodyFreeList_ = bodyIndex;
-
-    --bodyCount_;
-}
-
+#pragma region ShapeLifecycle
 
 shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter, float density )
 {
@@ -504,6 +320,10 @@ void world::DestroyShape( shapeId shapeId )
     DestroyShapeByIndex( GetShapeIndex( shapeId ) );
 }
 
+#pragma endregion
+
+#pragma region ShapeProperties
+
 void world::SetShapeDensity( shapeId shapeId, float density )
 {
     assert( std::isfinite( density ) );
@@ -636,6 +456,10 @@ collisionFilter world::GetShapeFilter(
             .filter;
 }
 
+#pragma endregion
+
+#pragma region SensorQueries
+
 bool world::IsShapeSensor(
     shapeId shapeId ) const
 {
@@ -727,6 +551,10 @@ std::size_t world::GetShapeSensorData(
     return count;
 }
 
+#pragma endregion
+
+#pragma region ShapeBounds
+
 const aabb2& world::GetShapeAABB( shapeId shapeId ) const
 {
     return
@@ -742,75 +570,9 @@ const aabb2& world::GetShapeFatAABB( shapeId shapeId ) const
         fatAABBs_[GetShapeIndex( shapeId )];
 }
 
-void world::DestroyShapeByIndex( std::int32_t shapeIndex )
-{
-    assert( shapeIndex >= 0 );
-    assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
-    assert( shapeCount_ > 0 );
+#pragma endregion
 
-    shape& shape = shapes_[shapeIndex];
-
-    assert( shape.bodyId != shape::NULL_INDEX );
-    assert( shape.proxyKey != shape::NULL_INDEX );
-    assert( !std::holds_alternative<std::monostate>( shape.geometry ) );
-
-    if( shape.sensorIndex != shape::NULL_INDEX )
-    {
-        DestroySensorByShapeIndex(
-            shapeIndex
-        );
-    }
-
-    const std::int32_t bodyIndex = shape.bodyId;
-    body& body = bodies_[bodyIndex];
-
-    WakeBodyByIndex( bodyIndex );
-
-    // Box2D처럼 먼저 body의 shape list에서 분리함.
-    UnlinkShape( body, bodyIndex, shapes_, shapeIndex );
-
-    // 더 이상 broadPhase 후보가 되지 않도록 proxy를 제거함.
-    broadPhase_.DestroyProxy( shape.proxyKey );
-    shape.proxyKey = shape::NULL_INDEX;
-
-    // 이 body의 Contact list에서 삭제 shape가 관여한 Contact만 제거함.
-    std::int32_t contactKey = body.headContactKey;
-
-    while( contactKey != body::NULL_INDEX )
-    {
-        const std::int32_t contactId = GetContactId( contactKey );
-        const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
-
-        assert( contactId >= 0 );
-        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
-
-        contact2& contact = contacts_[contactId];
-        assert( contact.contactId == contactId );
-
-        // DestroyContact가 list를 수정하므로 다음 key를 먼저 저장함.
-        contactKey = contact.edges[edgeIndex].nextKey;
-
-        if( contact.shapeIdA == shapeIndex ||
-            contact.shapeIdB == shapeIndex )
-        {
-            DestroyContact( contactId );
-        }
-    }
-
-    UpdateBodyMassData( bodyIndex );
-
-    const std::uint16_t generation = shape.generation;
-
-    // generation은 보존하고 slot만 free-list에 반환함.
-    shape = {};
-    fatAABBs_[shapeIndex] = {};
-    shape.generation = generation;
-    shape.nextFreeId = shapeFreeList_;
-    shapeFreeList_ = shapeIndex;
-
-    --shapeCount_;
-}
-
+#pragma region BodyProperties
 
 void world::SetBodyTransform( bodyId bodyId, transform2 transform )
 {
@@ -833,718 +595,6 @@ void world::SetBodyTransform( bodyId bodyId, transform2 transform )
     bodySim.center = TransformPoint( bodySim.transform, bodySim.localCenter );
 
     SyncBodyProxies( bodyIndex );
-}
-
-void world::SyncBodyProxies( std::int32_t bodyIndex )
-{
-    assert( bodyIndex >= 0 );
-    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
-    assert( bodySims_.size() == bodies_.size() );
-
-    const bodySim& bodySim =
-        bodySims_[bodyIndex];
-
-    assert( bodySim.bodyId == bodyIndex );
-
-    UpdateBodyProxyBounds(
-        bodyIndex,
-        bodySim.transform
-    );
-}
-
-void world::UpdateBodyProxyBounds(
-    std::int32_t bodyIndex,
-    const transform2& transform )
-{
-    assert( bodyIndex >= 0 );
-    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
-    assert( fatAABBs_.size() == shapes_.size() );
-
-    const body& body =
-        bodies_[bodyIndex];
-
-    assert( body.bodyId == bodyIndex );
-
-    std::int32_t shapeId =
-        body.headShapeId;
-
-    std::int32_t visitedCount = 0;
-
-    while( shapeId != body::NULL_INDEX )
-    {
-        assert( shapeId >= 0 );
-        assert( static_cast<std::size_t>( shapeId ) < shapes_.size() );
-        assert( visitedCount < body.shapeCount );
-
-        shape& shape =
-            shapes_[shapeId];
-
-        assert( shape.bodyId == bodyIndex );
-
-        const aabb2 tightAABB =
-            ComputeShapeAABB(
-                shape.geometry,
-                transform
-            );
-
-        shape.aabb =
-            ExpandAABB(
-                tightAABB,
-                SPECULATIVE_DISTANCE
-            );
-
-        aabb2& fatAABB =
-            fatAABBs_[shapeId];
-
-        if( !ContainsAABB(
-                fatAABB,
-                shape.aabb ) )
-        {
-            const float fatMargin =
-                body.type == bodyType::Static ?
-                    SPECULATIVE_DISTANCE :
-                    shape.aabbMargin;
-
-            const aabb2 newFatAABB =
-                ExpandAABB(
-                    shape.aabb,
-                    fatMargin
-                );
-
-            fatAABB =
-                newFatAABB;
-
-            if( shape.proxyKey != shape::NULL_INDEX )
-            {
-                const dynamicTree& tree =
-                    broadPhase_.GetTree(
-                        GetProxyType(
-                            shape.proxyKey
-                        )
-                    );
-
-                const aabb2& treeAABB =
-                    tree.GetProxyAABB(
-                        GetProxyId(
-                            shape.proxyKey
-                        )
-                    );
-
-                // 회전이나 geometry 변화처럼 새 fat bounds가 기존 tree bounds를
-                // 완전히 포함한다면 topology를 건드리지 않고 bounds만 확장함.
-                if( ContainsAABB(
-                        newFatAABB,
-                        treeAABB ) )
-                {
-                    broadPhase_.EnlargeProxy(
-                        shape.proxyKey,
-                        newFatAABB
-                    );
-                }
-                else
-                {
-                    // translation처럼 기존 bounds를 포함하지 않는 이동은
-                    // 현재 tree 구현에서는 leaf를 새 위치로 재배치함.
-                    broadPhase_.MoveProxy(
-                        shape.proxyKey,
-                        newFatAABB
-                    );
-                }
-            }
-        }
-
-        shapeId =
-            shape.nextShapeId;
-
-        ++visitedCount;
-    }
-
-    assert( visitedCount == body.shapeCount );
-}
-
-void world::UpdateBodyMassData( std::int32_t bodyIndex )
-{
-    assert( bodyIndex >= 0 );
-    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
-    assert( bodySims_.size() == bodies_.size() );
-
-    body& body = bodies_[bodyIndex];
-    bodySim& bodySim = bodySims_[bodyIndex];
-
-    assert( body.bodyId == bodyIndex );
-    assert( bodySim.bodyId == bodyIndex );
-
-    /*
-    * body 질량 특성 계산
-    *
-    * 각 shape i가 다음 값을 가진다고 하면:
-    *
-    *     mi : shape 질량
-    *     ci : shape의 local center of mass
-    *     Ii : ci를 지나는 z축 기준 shape 회전 관성
-    *
-    * body 전체 질량:
-    *
-    *     M = sum( mi )
-    *
-    * body 전체 local center of mass:
-    *
-    *     C = sum( mi * ci ) / M
-    *
-    * body center C 기준 회전 관성:
-    *
-    *     I = sum( Ii + mi * |ci - C|^2 )
-    *
-    * 마지막 식의 mi * |ci - C|^2가 평행축 정리로 추가되는 항임.
-    */
-
-    const vec2 oldCenter = bodySim.center;
-
-    body.mass = 0.0f;
-    body.inertia = 0.0f;
-
-    bodySim.invMass = 0.0f;
-    bodySim.invInertia = 0.0f;
-    bodySim.localCenter = {};
-    bodySim.minExtent = std::numeric_limits<float>::max();
-    bodySim.maxExtent = 0.0f;
-
-    const auto updateExtents =
-        [&]()
-        {
-            std::int32_t shapeIndex = body.headShapeId;
-            std::int32_t visitedCount = 0;
-
-            while( shapeIndex != body::NULL_INDEX )
-            {
-                assert( shapeIndex >= 0 );
-                assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
-                assert( visitedCount < body.shapeCount );
-
-                const shape& shape = shapes_[shapeIndex];
-                assert( shape.bodyId == bodyIndex );
-
-                const shapeExtent2 extent =
-                    ComputeShapeExtent(
-                        shape.geometry,
-                        bodySim.localCenter
-                    );
-
-                bodySim.minExtent =
-                    std::min(
-                        bodySim.minExtent,
-                        extent.minExtent
-                    );
-
-                bodySim.maxExtent =
-                    std::max(
-                        bodySim.maxExtent,
-                        extent.maxExtent
-                    );
-
-                shapeIndex = shape.nextShapeId;
-                ++visitedCount;
-            }
-
-            assert( visitedCount == body.shapeCount );
-        };
-
-    // Static / Kinematic body는 외력이나 impulse로 가속되지 않으므로
-    // solver 관점에서 무한 질량으로 취급하고 inverse mass / inertia를 0으로 둠.
-    if( body.type != bodyType::Dynamic )
-    {
-        bodySim.center = bodySim.transform.position;
-        updateExtents();
-        return;
-    }
-
-    // 두 번째 관성 계산에서 shape별 mass / center / inertia가 다시 필요하므로
-    // 첫 순회 결과를 임시 배열에 저장함.
-    std::vector<massData2> masses;
-    masses.reserve( static_cast<std::size_t>( body.shapeCount ) );
-
-    // sum( mi * ci )
-    vec2 weightedCenter{};
-
-    std::int32_t shapeIndex = body.headShapeId;
-    std::int32_t visitedCount = 0;
-
-    /*
-    * 첫 번째 순회
-    *
-    *     M = sum( mi )
-    *     centerNumerator = sum( mi * ci )
-    *
-    * 을 계산함.
-    */
-    while( shapeIndex != body::NULL_INDEX )
-    {
-        assert( shapeIndex >= 0 );
-        assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
-        assert( visitedCount < body.shapeCount );
-
-        const shape& shape = shapes_[shapeIndex];
-        assert( shape.bodyId == bodyIndex );
-
-        const massData2 massData = ComputeShapeMass( shape );
-
-        body.mass += massData.mass;
-        weightedCenter += massData.center * massData.mass;
-
-        masses.push_back( massData );
-
-        shapeIndex = shape.nextShapeId;
-        ++visitedCount;
-    }
-
-    assert( visitedCount == body.shapeCount );
-
-    if( body.mass > 0.0f )
-    {
-        // Solver에서는 나눗셈을 반복하지 않도록 역질량을 미리 저장함.
-        //
-        //     invMass = 1 / M
-        bodySim.invMass = 1.0f / body.mass;
-
-        //     C = sum( mi * ci ) / M
-        //       = weightedCenter * invMass
-        bodySim.localCenter =
-            weightedCenter * bodySim.invMass;
-    }
-
-    /*
-    * 두 번째 순회
-    *
-    * 각 shape의 회전 관성 Ii는 자기 center ci 기준이므로
-    * body center C 기준으로 바로 더할 수 없음.
-    *
-    * 평행축 정리:
-    *
-    *     I_shifted = Ii + mi * d^2
-    *
-    *     d = |ci - C|
-    *
-    * 를 적용한 뒤 모든 shape의 관성을 합산함.
-    */
-    for( const massData2& massData : masses )
-    {
-        if( massData.mass == 0.0f )
-        {
-            continue;
-        }
-
-        const vec2 offset =
-            bodySim.localCenter - massData.center;
-
-        body.inertia +=
-            massData.rotationalInertia +
-            massData.mass * LengthSquared( offset );
-    }
-
-    assert( body.inertia >= 0.0f );
-
-    if( body.inertia > 0.0f )
-    {
-        // Constraint solver에서 angular impulse를 곱셈으로 적용하기 위해
-        // 역관성도 미리 계산해 보관함.
-        //
-        //     invInertia = 1 / I
-        bodySim.invInertia = 1.0f / body.inertia;
-    }
-
-    updateExtents();
-
-    // local center of mass C를 현재 body transform으로 world space에 옮김.
-    bodySim.center =
-        TransformPoint(
-            bodySim.transform,
-            bodySim.localCenter
-        );
-
-    // center of mass가 이동해도 body origin의 순간 속도가 갑자기 변하지 않도록
-    // v_new = v_old + w x ( C_new - C_old ) 로 COM 선속도를 보정함.
-    assert( bodyStates_.size() == bodies_.size() );
-
-    bodyState& bodyState = bodyStates_[bodyIndex];
-    bodyState.linearVelocity +=
-        Cross( bodyState.angularVelocity,  bodySim.center - oldCenter );
-}
-
-void world::WakeBodyByIndex( std::int32_t bodyIndex )
-{
-    assert( bodyIndex >= 0 );
-    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
-
-    const body& startBody =
-        bodies_[bodyIndex];
-
-    if( startBody.bodyId == body::NULL_INDEX )
-    {
-        return;
-    }
-
-    std::vector<std::uint8_t> visited(
-        bodies_.size(),
-        0
-    );
-
-    std::vector<std::int32_t> stack;
-
-    const auto pushBody =
-        [&]( std::int32_t candidateId )
-        {
-            assert( candidateId >= 0 );
-            assert( static_cast<std::size_t>( candidateId ) < bodies_.size() );
-
-            const body& candidate =
-                bodies_[candidateId];
-
-            if( candidate.bodyId == body::NULL_INDEX ||
-                candidate.type == bodyType::Static ||
-                visited[candidateId] != 0 )
-            {
-                return;
-            }
-
-            visited[candidateId] = 1;
-            stack.push_back( candidateId );
-        };
-
-    if( startBody.type == bodyType::Static )
-    {
-        std::int32_t contactKey =
-            startBody.headContactKey;
-
-        while( contactKey != body::NULL_INDEX )
-        {
-            const std::int32_t contactId =
-                GetContactId( contactKey );
-
-            const std::int32_t edgeIndex =
-                GetContactEdgeIndex( contactKey );
-
-            assert( contactId >= 0 );
-            assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
-
-            const contact2& contact =
-                contacts_[contactId];
-
-            assert( contact.contactId == contactId );
-
-            contactKey =
-                contact.edges[edgeIndex].nextKey;
-
-            const contactSim2& contactSim =
-                contactSims_[contactId];
-
-            if( contactSim.manifold.pointCount == 0 )
-            {
-                continue;
-            }
-
-            pushBody(
-                contact.edges[edgeIndex ^ 1].bodyId
-            );
-        }
-    }
-    else
-    {
-        pushBody( bodyIndex );
-    }
-
-    while( !stack.empty() )
-    {
-        const std::int32_t currentBodyId =
-            stack.back();
-
-        stack.pop_back();
-
-        body& currentBody =
-            bodies_[currentBodyId];
-
-        currentBody.awake = true;
-        currentBody.sleepTime = 0.0f;
-
-        std::int32_t contactKey =
-            currentBody.headContactKey;
-
-        while( contactKey != body::NULL_INDEX )
-        {
-            const std::int32_t contactId =
-                GetContactId( contactKey );
-
-            const std::int32_t edgeIndex =
-                GetContactEdgeIndex( contactKey );
-
-            assert( contactId >= 0 );
-            assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
-
-            const contact2& contact =
-                contacts_[contactId];
-
-            assert( contact.contactId == contactId );
-
-            contactKey =
-                contact.edges[edgeIndex].nextKey;
-
-            const contactSim2& contactSim =
-                contactSims_[contactId];
-
-            if( contactSim.manifold.pointCount == 0 )
-            {
-                continue;
-            }
-
-            pushBody(
-                contact.edges[edgeIndex ^ 1].bodyId
-            );
-        }
-    }
-}
-
-void world::SleepBodyByIndex( std::int32_t bodyIndex )
-{
-    assert( bodyIndex >= 0 );
-    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
-
-    const body& startBody =
-        bodies_[bodyIndex];
-
-    if( startBody.bodyId == body::NULL_INDEX ||
-        startBody.type == bodyType::Static )
-    {
-        return;
-    }
-
-    std::vector<std::uint8_t> visited(
-        bodies_.size(),
-        0
-    );
-
-    std::vector<std::int32_t> stack;
-    std::vector<std::int32_t> connectedBodies;
-
-    visited[bodyIndex] = 1;
-    stack.push_back( bodyIndex );
-
-    while( !stack.empty() )
-    {
-        const std::int32_t currentBodyId =
-            stack.back();
-
-        stack.pop_back();
-
-        connectedBodies.push_back(
-            currentBodyId
-        );
-
-        const body& currentBody =
-            bodies_[currentBodyId];
-
-        std::int32_t contactKey =
-            currentBody.headContactKey;
-
-        while( contactKey != body::NULL_INDEX )
-        {
-            const std::int32_t contactId =
-                GetContactId( contactKey );
-
-            const std::int32_t edgeIndex =
-                GetContactEdgeIndex( contactKey );
-
-            assert( contactId >= 0 );
-            assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
-
-            const contact2& contact =
-                contacts_[contactId];
-
-            contactKey =
-                contact.edges[edgeIndex].nextKey;
-
-            const contactSim2& contactSim =
-                contactSims_[contactId];
-
-            if( contactSim.manifold.pointCount == 0 )
-            {
-                continue;
-            }
-
-            const std::int32_t otherBodyId =
-                contact.edges[edgeIndex ^ 1].bodyId;
-
-            assert( otherBodyId >= 0 );
-            assert( static_cast<std::size_t>( otherBodyId ) < bodies_.size() );
-
-            const body& otherBody =
-                bodies_[otherBodyId];
-
-            if( otherBody.type == bodyType::Static ||
-                visited[otherBodyId] != 0 )
-            {
-                continue;
-            }
-
-            visited[otherBodyId] = 1;
-            stack.push_back( otherBodyId );
-        }
-    }
-
-    for( const std::int32_t connectedBodyId :
-         connectedBodies )
-    {
-        body& connectedBody =
-            bodies_[connectedBodyId];
-
-        connectedBody.awake = false;
-        connectedBody.sleepTime = 0.0f;
-
-        bodyStates_[connectedBodyId] = {};
-
-        bodySims_[connectedBodyId].force = {};
-        bodySims_[connectedBodyId].torque = 0.0f;
-    }
-}
-
-void world::WakeSleepingBodiesFromContacts()
-{
-    for( const contactSim2& contactSim :
-         contactSims_ )
-    {
-        if( contactSim.contactId == contactSim2::NULL_INDEX ||
-            contactSim.manifold.pointCount == 0 )
-        {
-            continue;
-        }
-
-        body& bodyA =
-            bodies_[contactSim.bodyIdA];
-
-        body& bodyB =
-            bodies_[contactSim.bodyIdB];
-
-        const bool bodyAAwake =
-            bodyA.type != bodyType::Static &&
-            bodyA.awake;
-
-        const bool bodyBAwake =
-            bodyB.type != bodyType::Static &&
-            bodyB.awake;
-
-        if( bodyAAwake &&
-            bodyB.type != bodyType::Static &&
-            !bodyB.awake )
-        {
-            WakeBodyByIndex(
-                contactSim.bodyIdB
-            );
-        }
-        else if( bodyBAwake &&
-                 bodyA.type != bodyType::Static &&
-                 !bodyA.awake )
-        {
-            WakeBodyByIndex(
-                contactSim.bodyIdA
-            );
-        }
-    }
-}
-
-void world::UpdateIslandSleepStates(
-    const islandGraph2& islandGraph,
-    float timeStep )
-{
-    assert( std::isfinite( timeStep ) );
-    assert( timeStep > 0.0f );
-
-    if( !sleepingEnabled_ )
-    {
-        return;
-    }
-
-    for( const island2& island :
-         islandGraph.islands )
-    {
-        const std::span<const std::int32_t> bodyIds =
-            std::span<const std::int32_t>{ islandGraph.bodyIds }
-                .subspan(
-                    island.bodyStart,
-                    island.bodyCount
-                );
-
-        bool canSleep = true;
-
-        for( const std::int32_t bodyId :
-             bodyIds )
-        {
-            body& body =
-                bodies_[bodyId];
-
-            assert( body.awake );
-            assert( body.type != bodyType::Static );
-
-            if( !body.enableSleep )
-            {
-                body.sleepTime = 0.0f;
-                canSleep = false;
-                continue;
-            }
-
-            const bodyState& state =
-                bodyStates_[bodyId];
-
-            const bodySim& sim =
-                bodySims_[bodyId];
-
-            // 가장 먼 점의 속도와 이번 step의 position correction을 함께 확인함.
-            const float velocitySpeed =
-                Length( state.linearVelocity ) + std::fabs( state.angularVelocity ) * sim.maxExtent;
-
-            const float deltaDistance =
-                Length( state.deltaPosition ) + std::fabs( state.deltaRotation.s ) * sim.maxExtent;
-
-            const float correctionSpeed = 0.5f * deltaDistance / timeStep;
-            const float motionSpeed = std::max( velocitySpeed, correctionSpeed );
-
-            if( motionSpeed > body.sleepThreshold )
-            {
-                body.sleepTime = 0.0f;
-                canSleep = false;
-                continue;
-            }
-
-            body.sleepTime += timeStep;
-
-            if( body.sleepTime < TIME_TO_SLEEP )
-            {
-                canSleep = false;
-            }
-        }
-
-        if( !canSleep )
-        {
-            continue;
-        }
-
-        for( const std::int32_t bodyId :
-             bodyIds )
-        {
-            body& body =
-                bodies_[bodyId];
-
-            body.awake = false;
-            body.sleepTime = 0.0f;
-
-            bodyStates_[bodyId] = {};
-
-            bodySims_[bodyId].force = {};
-            bodySims_[bodyId].torque = 0.0f;
-        }
-    }
-}
-
-const body& world::GetBody( bodyId bodyId ) const
-{
-    return bodies_[GetBodyIndex( bodyId )];
 }
 
 transform2 world::GetBodyTransform( bodyId bodyId ) const
@@ -1873,6 +923,10 @@ vec2 world::GetBodyLocalCenter( bodyId bodyId ) const
     return bodySims_[bodyIndex].localCenter;
 }
 
+#pragma endregion
+
+#pragma region WorldSettings
+
 void world::SetGravity( vec2 gravity )
 {
     assert( std::isfinite( gravity.x ) );
@@ -1975,6 +1029,10 @@ float world::GetContactRecycleDistance() const noexcept
 {
     return contactRecycleDistance_;
 }
+
+#pragma endregion
+
+#pragma region ForcesAndImpulses
 
 void world::ApplyForce( bodyId bodyId, vec2 force, vec2 point )
 {
@@ -2213,6 +1271,10 @@ void world::ApplyAngularImpulse(
     bodyState.angularVelocity +=
         impulse * bodySim.invInertia;
 }
+
+#pragma endregion
+
+#pragma region SimulationStep
 
 void world::Step( float timeStep, int subStepCount )
 {
@@ -2660,6 +1722,803 @@ void world::Step( float timeStep, int subStepCount )
     UpdateSensors();
 }
 
+#pragma endregion
+
+#pragma region HandleValidity
+
+bool world::IsValid( bodyId bodyId ) const noexcept
+{
+    if( bodyId.index1 <= 0 ||
+        bodyId.worldToken != worldToken_ )
+    {
+        return false;
+    }
+
+    const std::int32_t bodyIndex = bodyId.index1 - 1;
+
+    if( static_cast<std::size_t>( bodyIndex ) >= bodies_.size() )
+    {
+        return false;
+    }
+
+    const body& body = bodies_[bodyIndex];
+
+    return
+        body.bodyId == bodyIndex &&
+        body.generation == bodyId.generation;
+}
+
+bool world::IsValid( shapeId shapeId ) const noexcept
+{
+    if( shapeId.index1 <= 0 ||
+        shapeId.worldToken != worldToken_ )
+    {
+        return false;
+    }
+
+    const std::int32_t shapeIndex = shapeId.index1 - 1;
+
+    if( static_cast<std::size_t>( shapeIndex ) >= shapes_.size() )
+    {
+        return false;
+    }
+
+    const shape& shape = shapes_[shapeIndex];
+
+    return
+        shape.bodyId != shape::NULL_INDEX &&
+        shape.generation == shapeId.generation;
+}
+
+bool world::IsValid( contactId contactId ) const noexcept
+{
+    if( contactId.index1 <= 0 ||
+        contactId.worldToken != worldToken_ )
+    {
+        return false;
+    }
+
+    const std::int32_t contactIndex = contactId.index1 - 1;
+
+    if( static_cast<std::size_t>( contactIndex ) >= contacts_.size() )
+    {
+        return false;
+    }
+
+    const contact2& contact = contacts_[contactIndex];
+
+    return
+        contact.contactId == contactIndex &&
+        contact.generation == contactId.generation;
+}
+
+#pragma endregion
+
+#pragma region DiagnosticQueries
+
+const body& world::GetBody( bodyId bodyId ) const
+{
+    return bodies_[GetBodyIndex( bodyId )];
+}
+
+const shape& world::GetShape( shapeId shapeId ) const
+{
+    return shapes_[GetShapeIndex( shapeId )];
+}
+
+contactData world::GetContactData( contactId contactId ) const
+{
+    return MakeContactData( GetContactIndex( contactId ) );
+}
+
+std::size_t world::GetBodyContactCapacity( bodyId bodyId ) const
+{
+    const body& body = bodies_[GetBodyIndex( bodyId )];
+
+    // Box2D와 같이 빠르고 보수적으로 body의 전체 Contact 수를 반환함.
+    return static_cast<std::size_t>( body.contactCount );
+}
+
+std::size_t world::GetBodyContactData( bodyId bodyId, std::span<contactData> output ) const
+{
+    const body& body = bodies_[GetBodyIndex( bodyId )];
+
+    std::int32_t contactKey = body.headContactKey;
+    std::size_t count = 0;
+
+    while( contactKey != body::NULL_INDEX && count < output.size() )
+    {
+        const std::int32_t contactId = GetContactId( contactKey );
+        const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
+
+        assert( contactId >= 0 );
+        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+        const contact2& contact = contacts_[contactId];
+
+        assert( contact.contactId == contactId );
+        assert( edgeIndex == 0 || edgeIndex == 1 );
+        assert( contactSims_.size() == contacts_.size() );
+
+        const contactSim2& contactSim = contactSims_[contactId];
+
+        assert( contactSim.contactId == contactId );
+
+        // pointCount가 있으면 speculative point도 solver-active Contact로 public query에 노출함.
+        if( contactSim.manifold.pointCount > 0 )
+        {
+            output[count] = MakeContactData( contactId );
+            ++count;
+        }
+
+        contactKey = contact.edges[edgeIndex].nextKey;
+    }
+
+    return count;
+}
+
+std::size_t world::GetShapeContactCapacity( shapeId shapeId ) const
+{
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    const shape& shape = shapes_[shapeIndex];
+
+    // Sensor는 Contact를 만들지 않으므로 overlap 정보는 Sensor API에서 별도로 조회함.
+    if( shape.sensorIndex != shape::NULL_INDEX )
+    {
+        return 0;
+    }
+
+    assert( shape.bodyId >= 0 );
+    assert( static_cast<std::size_t>( shape.bodyId ) < bodies_.size() );
+
+    const body& body = bodies_[shape.bodyId];
+
+    // 같은 body의 다른 shape Contact도 포함하므로 실제 필요량보다 클 수 있음.
+    return static_cast<std::size_t>( body.contactCount );
+}
+
+std::size_t world::GetShapeContactData( shapeId shapeId, std::span<contactData> output ) const
+{
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    const shape& shape = shapes_[shapeIndex];
+
+    if( shape.sensorIndex != shape::NULL_INDEX )
+    {
+        return 0;
+    }
+
+    assert( shape.bodyId >= 0 );
+    assert( static_cast<std::size_t>( shape.bodyId ) < bodies_.size() );
+
+    const body& body = bodies_[shape.bodyId];
+
+    std::int32_t contactKey = body.headContactKey;
+    std::size_t count = 0;
+
+    while( contactKey != body::NULL_INDEX && count < output.size() )
+    {
+        const std::int32_t contactId = GetContactId( contactKey );
+        const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
+
+        assert( contactId >= 0 );
+        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+        const contact2& contact = contacts_[contactId];
+
+        assert( contact.contactId == contactId );
+        assert( edgeIndex == 0 || edgeIndex == 1 );
+        assert( contactSims_.size() == contacts_.size() );
+
+        const contactSim2& contactSim = contactSims_[contactId];
+
+        assert( contactSim.contactId == contactId );
+
+        const bool involvesShape =
+            contact.shapeIdA == shapeIndex ||
+            contact.shapeIdB == shapeIndex;
+
+        if( involvesShape && contactSim.manifold.pointCount > 0 )
+        {
+            output[count] = MakeContactData( contactId );
+            ++count;
+        }
+
+        contactKey = contact.edges[edgeIndex].nextKey;
+    }
+
+    return count;
+}
+
+#pragma endregion
+
+#pragma region InternalHandles
+
+std::int32_t world::GetBodyIndex( bodyId bodyId ) const
+{
+    assert( IsValid( bodyId ) );
+    return bodyId.index1 - 1;
+}
+
+std::int32_t world::GetShapeIndex( shapeId shapeId ) const
+{
+    assert( IsValid( shapeId ) );
+    return shapeId.index1 - 1;
+}
+
+std::int32_t world::GetContactIndex( contactId contactId ) const
+{
+    assert( IsValid( contactId ) );
+    return contactId.index1 - 1;
+}
+
+bodyId world::MakeBodyId( std::int32_t bodyIndex ) const
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+
+    const body& body = bodies_[bodyIndex];
+
+    assert( body.bodyId == bodyIndex );
+
+    return
+    {
+        bodyIndex + 1,
+        body.generation,
+        worldToken_
+    };
+}
+
+shapeId world::MakeShapeId( std::int32_t shapeIndex ) const
+{
+    assert( shapeIndex >= 0 );
+    assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+
+    const shape& shape = shapes_[shapeIndex];
+
+    assert( shape.bodyId != shape::NULL_INDEX );
+
+    return
+    {
+        shapeIndex + 1,
+        shape.generation,
+        worldToken_
+    };
+}
+
+contactId world::MakeContactId( std::int32_t contactIndex ) const
+{
+    assert( contactIndex >= 0 );
+    assert( static_cast<std::size_t>( contactIndex ) < contacts_.size() );
+
+    const contact2& contact = contacts_[contactIndex];
+
+    assert( contact.contactId == contactIndex );
+
+    return
+    {
+        contactIndex + 1,
+        contact.generation,
+        worldToken_
+    };
+}
+
+contactData world::MakeContactData( std::int32_t contactIndex ) const
+{
+    assert( contactIndex >= 0 );
+    assert( static_cast<std::size_t>( contactIndex ) < contacts_.size() );
+
+    const contact2& contact = contacts_[contactIndex];
+
+    assert( contact.contactId == contactIndex );
+    assert( contactSims_.size() == contacts_.size() );
+
+    const contactSim2& contactSim = contactSims_[contactIndex];
+
+    assert( contactSim.contactId == contactIndex );
+    assert( contact.shapeIdA >= 0 );
+    assert( contact.shapeIdB >= 0 );
+    assert( static_cast<std::size_t>( contact.shapeIdA ) < shapes_.size() );
+    assert( static_cast<std::size_t>( contact.shapeIdB ) < shapes_.size() );
+
+    const shape& shapeA = shapes_[contact.shapeIdA];
+
+    assert( shapeA.bodyId >= 0 );
+    assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
+
+    assert( bodySims_.size() == bodies_.size() );
+
+    const bodySim& bodySimA = bodySims_[shapeA.bodyId];
+    assert( bodySimA.bodyId == shapeA.bodyId );
+
+    contactData data{};
+    data.id = MakeContactId( contactIndex );
+    data.shapeA = MakeShapeId( contact.shapeIdA );
+    data.shapeB = MakeShapeId( contact.shapeIdB );
+    data.manifold = ToWorldManifold( contactSim.manifold, bodySimA.transform );
+
+    // world-space geometry와 함께 마지막 solver impulse도 public snapshot에 복사함.
+    for( int i = 0; i < data.manifold.pointCount; ++i )
+    {
+        data.manifold.points[i].normalImpulse =
+            contactSim.impulses[i].normalImpulse;
+
+        data.manifold.points[i].tangentImpulse =
+            contactSim.impulses[i].tangentImpulse;
+    }
+
+    return data;
+}
+
+#pragma endregion
+
+#pragma region BodyShapeStorage
+
+void world::DestroyBodyByIndex( std::int32_t bodyIndex )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+    assert( bodyCount_ > 0 );
+
+    body& body = bodies_[bodyIndex];
+
+    assert( body.bodyId == bodyIndex );
+
+    // Box2D처럼 먼저 이 body에 연결된 모든 Contact를 제거함.
+    while( body.headContactKey != body::NULL_INDEX )
+    {
+        const std::int32_t contactId = GetContactId( body.headContactKey );
+
+        assert( contactId >= 0 );
+        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+        DestroyContact( contactId );
+    }
+
+    assert( body.contactCount == 0 );
+
+    // shape를 하나씩 제거하면 각 proxy와 shape slot도 함께 정리됨.
+    while( body.headShapeId != body::NULL_INDEX )
+    {
+        DestroyShapeByIndex( body.headShapeId );
+    }
+
+    assert( body.shapeCount == 0 );
+    assert( body.headShapeId == body::NULL_INDEX );
+    assert( body.headContactKey == body::NULL_INDEX );
+
+    const std::uint16_t generation = body.generation;
+
+    assert( bodySims_.size() == bodies_.size() );
+    bodySim& bodySim = bodySims_[bodyIndex];
+    assert( bodySim.bodyId == bodyIndex );
+
+    // simulation 데이터도 함께 비워 재사용 slot에 이전 transform이 남지 않게 함.
+    bodySim = {};
+
+    assert( bodyStates_.size() == bodies_.size() );
+
+    // 운동 상태도 함께 초기화해 재사용 slot에 이전 body 속도가 남지 않게 함.
+    bodyStates_[bodyIndex] = {};
+
+    // generation은 보존하고 slot만 free-list에 반환함.
+    body = {};
+    body.generation = generation;
+    body.nextFreeId = bodyFreeList_;
+    bodyFreeList_ = bodyIndex;
+
+    --bodyCount_;
+}
+
+void world::DestroyShapeByIndex( std::int32_t shapeIndex )
+{
+    assert( shapeIndex >= 0 );
+    assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+    assert( shapeCount_ > 0 );
+
+    shape& shape = shapes_[shapeIndex];
+
+    assert( shape.bodyId != shape::NULL_INDEX );
+    assert( shape.proxyKey != shape::NULL_INDEX );
+    assert( !std::holds_alternative<std::monostate>( shape.geometry ) );
+
+    if( shape.sensorIndex != shape::NULL_INDEX )
+    {
+        DestroySensorByShapeIndex(
+            shapeIndex
+        );
+    }
+
+    const std::int32_t bodyIndex = shape.bodyId;
+    body& body = bodies_[bodyIndex];
+
+    WakeBodyByIndex( bodyIndex );
+
+    // Box2D처럼 먼저 body의 shape list에서 분리함.
+    UnlinkShape( body, bodyIndex, shapes_, shapeIndex );
+
+    // 더 이상 broadPhase 후보가 되지 않도록 proxy를 제거함.
+    broadPhase_.DestroyProxy( shape.proxyKey );
+    shape.proxyKey = shape::NULL_INDEX;
+
+    // 이 body의 Contact list에서 삭제 shape가 관여한 Contact만 제거함.
+    std::int32_t contactKey = body.headContactKey;
+
+    while( contactKey != body::NULL_INDEX )
+    {
+        const std::int32_t contactId = GetContactId( contactKey );
+        const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
+
+        assert( contactId >= 0 );
+        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+        contact2& contact = contacts_[contactId];
+        assert( contact.contactId == contactId );
+
+        // DestroyContact가 list를 수정하므로 다음 key를 먼저 저장함.
+        contactKey = contact.edges[edgeIndex].nextKey;
+
+        if( contact.shapeIdA == shapeIndex ||
+            contact.shapeIdB == shapeIndex )
+        {
+            DestroyContact( contactId );
+        }
+    }
+
+    UpdateBodyMassData( bodyIndex );
+
+    const std::uint16_t generation = shape.generation;
+
+    // generation은 보존하고 slot만 free-list에 반환함.
+    shape = {};
+    fatAABBs_[shapeIndex] = {};
+    shape.generation = generation;
+    shape.nextFreeId = shapeFreeList_;
+    shapeFreeList_ = shapeIndex;
+
+    --shapeCount_;
+}
+
+void world::SyncBodyProxies( std::int32_t bodyIndex )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+    assert( bodySims_.size() == bodies_.size() );
+
+    const bodySim& bodySim =
+        bodySims_[bodyIndex];
+
+    assert( bodySim.bodyId == bodyIndex );
+
+    UpdateBodyProxyBounds(
+        bodyIndex,
+        bodySim.transform
+    );
+}
+
+void world::UpdateBodyProxyBounds(
+    std::int32_t bodyIndex,
+    const transform2& transform )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+    assert( fatAABBs_.size() == shapes_.size() );
+
+    const body& body =
+        bodies_[bodyIndex];
+
+    assert( body.bodyId == bodyIndex );
+
+    std::int32_t shapeId =
+        body.headShapeId;
+
+    std::int32_t visitedCount = 0;
+
+    while( shapeId != body::NULL_INDEX )
+    {
+        assert( shapeId >= 0 );
+        assert( static_cast<std::size_t>( shapeId ) < shapes_.size() );
+        assert( visitedCount < body.shapeCount );
+
+        shape& shape =
+            shapes_[shapeId];
+
+        assert( shape.bodyId == bodyIndex );
+
+        const aabb2 tightAABB =
+            ComputeShapeAABB(
+                shape.geometry,
+                transform
+            );
+
+        shape.aabb =
+            ExpandAABB(
+                tightAABB,
+                SPECULATIVE_DISTANCE
+            );
+
+        aabb2& fatAABB =
+            fatAABBs_[shapeId];
+
+        if( !ContainsAABB(
+                fatAABB,
+                shape.aabb ) )
+        {
+            const float fatMargin =
+                body.type == bodyType::Static ?
+                    SPECULATIVE_DISTANCE :
+                    shape.aabbMargin;
+
+            const aabb2 newFatAABB =
+                ExpandAABB(
+                    shape.aabb,
+                    fatMargin
+                );
+
+            fatAABB =
+                newFatAABB;
+
+            if( shape.proxyKey != shape::NULL_INDEX )
+            {
+                const dynamicTree& tree =
+                    broadPhase_.GetTree(
+                        GetProxyType(
+                            shape.proxyKey
+                        )
+                    );
+
+                const aabb2& treeAABB =
+                    tree.GetProxyAABB(
+                        GetProxyId(
+                            shape.proxyKey
+                        )
+                    );
+
+                // 회전이나 geometry 변화처럼 새 fat bounds가 기존 tree bounds를
+                // 완전히 포함한다면 topology를 건드리지 않고 bounds만 확장함.
+                if( ContainsAABB(
+                        newFatAABB,
+                        treeAABB ) )
+                {
+                    broadPhase_.EnlargeProxy(
+                        shape.proxyKey,
+                        newFatAABB
+                    );
+                }
+                else
+                {
+                    // translation처럼 기존 bounds를 포함하지 않는 이동은
+                    // 현재 tree 구현에서는 leaf를 새 위치로 재배치함.
+                    broadPhase_.MoveProxy(
+                        shape.proxyKey,
+                        newFatAABB
+                    );
+                }
+            }
+        }
+
+        shapeId =
+            shape.nextShapeId;
+
+        ++visitedCount;
+    }
+
+    assert( visitedCount == body.shapeCount );
+}
+
+void world::UpdateBodyMassData( std::int32_t bodyIndex )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+    assert( bodySims_.size() == bodies_.size() );
+
+    body& body = bodies_[bodyIndex];
+    bodySim& bodySim = bodySims_[bodyIndex];
+
+    assert( body.bodyId == bodyIndex );
+    assert( bodySim.bodyId == bodyIndex );
+
+    /*
+    * body 질량 특성 계산
+    *
+    * 각 shape i가 다음 값을 가진다고 하면:
+    *
+    *     mi : shape 질량
+    *     ci : shape의 local center of mass
+    *     Ii : ci를 지나는 z축 기준 shape 회전 관성
+    *
+    * body 전체 질량:
+    *
+    *     M = sum( mi )
+    *
+    * body 전체 local center of mass:
+    *
+    *     C = sum( mi * ci ) / M
+    *
+    * body center C 기준 회전 관성:
+    *
+    *     I = sum( Ii + mi * |ci - C|^2 )
+    *
+    * 마지막 식의 mi * |ci - C|^2가 평행축 정리로 추가되는 항임.
+    */
+
+    const vec2 oldCenter = bodySim.center;
+
+    body.mass = 0.0f;
+    body.inertia = 0.0f;
+
+    bodySim.invMass = 0.0f;
+    bodySim.invInertia = 0.0f;
+    bodySim.localCenter = {};
+    bodySim.minExtent = std::numeric_limits<float>::max();
+    bodySim.maxExtent = 0.0f;
+
+    const auto updateExtents =
+        [&]()
+        {
+            std::int32_t shapeIndex = body.headShapeId;
+            std::int32_t visitedCount = 0;
+
+            while( shapeIndex != body::NULL_INDEX )
+            {
+                assert( shapeIndex >= 0 );
+                assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+                assert( visitedCount < body.shapeCount );
+
+                const shape& shape = shapes_[shapeIndex];
+                assert( shape.bodyId == bodyIndex );
+
+                const shapeExtent2 extent =
+                    ComputeShapeExtent(
+                        shape.geometry,
+                        bodySim.localCenter
+                    );
+
+                bodySim.minExtent =
+                    std::min(
+                        bodySim.minExtent,
+                        extent.minExtent
+                    );
+
+                bodySim.maxExtent =
+                    std::max(
+                        bodySim.maxExtent,
+                        extent.maxExtent
+                    );
+
+                shapeIndex = shape.nextShapeId;
+                ++visitedCount;
+            }
+
+            assert( visitedCount == body.shapeCount );
+        };
+
+    // Static / Kinematic body는 외력이나 impulse로 가속되지 않으므로
+    // solver 관점에서 무한 질량으로 취급하고 inverse mass / inertia를 0으로 둠.
+    if( body.type != bodyType::Dynamic )
+    {
+        bodySim.center = bodySim.transform.position;
+        updateExtents();
+        return;
+    }
+
+    // 두 번째 관성 계산에서 shape별 mass / center / inertia가 다시 필요하므로
+    // 첫 순회 결과를 임시 배열에 저장함.
+    std::vector<massData2> masses;
+    masses.reserve( static_cast<std::size_t>( body.shapeCount ) );
+
+    // sum( mi * ci )
+    vec2 weightedCenter{};
+
+    std::int32_t shapeIndex = body.headShapeId;
+    std::int32_t visitedCount = 0;
+
+    /*
+    * 첫 번째 순회
+    *
+    *     M = sum( mi )
+    *     centerNumerator = sum( mi * ci )
+    *
+    * 을 계산함.
+    */
+    while( shapeIndex != body::NULL_INDEX )
+    {
+        assert( shapeIndex >= 0 );
+        assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+        assert( visitedCount < body.shapeCount );
+
+        const shape& shape = shapes_[shapeIndex];
+        assert( shape.bodyId == bodyIndex );
+
+        const massData2 massData = ComputeShapeMass( shape );
+
+        body.mass += massData.mass;
+        weightedCenter += massData.center * massData.mass;
+
+        masses.push_back( massData );
+
+        shapeIndex = shape.nextShapeId;
+        ++visitedCount;
+    }
+
+    assert( visitedCount == body.shapeCount );
+
+    if( body.mass > 0.0f )
+    {
+        // Solver에서는 나눗셈을 반복하지 않도록 역질량을 미리 저장함.
+        //
+        //     invMass = 1 / M
+        bodySim.invMass = 1.0f / body.mass;
+
+        //     C = sum( mi * ci ) / M
+        //       = weightedCenter * invMass
+        bodySim.localCenter =
+            weightedCenter * bodySim.invMass;
+    }
+
+    /*
+    * 두 번째 순회
+    *
+    * 각 shape의 회전 관성 Ii는 자기 center ci 기준이므로
+    * body center C 기준으로 바로 더할 수 없음.
+    *
+    * 평행축 정리:
+    *
+    *     I_shifted = Ii + mi * d^2
+    *
+    *     d = |ci - C|
+    *
+    * 를 적용한 뒤 모든 shape의 관성을 합산함.
+    */
+    for( const massData2& massData : masses )
+    {
+        if( massData.mass == 0.0f )
+        {
+            continue;
+        }
+
+        const vec2 offset =
+            bodySim.localCenter - massData.center;
+
+        body.inertia +=
+            massData.rotationalInertia +
+            massData.mass * LengthSquared( offset );
+    }
+
+    assert( body.inertia >= 0.0f );
+
+    if( body.inertia > 0.0f )
+    {
+        // Constraint solver에서 angular impulse를 곱셈으로 적용하기 위해
+        // 역관성도 미리 계산해 보관함.
+        //
+        //     invInertia = 1 / I
+        bodySim.invInertia = 1.0f / body.inertia;
+    }
+
+    updateExtents();
+
+    // local center of mass C를 현재 body transform으로 world space에 옮김.
+    bodySim.center =
+        TransformPoint(
+            bodySim.transform,
+            bodySim.localCenter
+        );
+
+    // center of mass가 이동해도 body origin의 순간 속도가 갑자기 변하지 않도록
+    // v_new = v_old + w x ( C_new - C_old ) 로 COM 선속도를 보정함.
+    assert( bodyStates_.size() == bodies_.size() );
+
+    bodyState& bodyState = bodyStates_[bodyIndex];
+    bodyState.linearVelocity +=
+        Cross( bodyState.angularVelocity,  bodySim.center - oldCenter );
+}
+
+#pragma endregion
+
+#pragma region SensorUpdate
+
 void world::UpdateSensors()
 {
     sensorBeginEvents_.clear();
@@ -3098,6 +2957,386 @@ void world::DestroySensorByShapeIndex(
         shape::NULL_INDEX;
 }
 
+#pragma endregion
+
+#pragma region SleepAndWake
+
+void world::WakeBodyByIndex( std::int32_t bodyIndex )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+
+    const body& startBody =
+        bodies_[bodyIndex];
+
+    if( startBody.bodyId == body::NULL_INDEX )
+    {
+        return;
+    }
+
+    std::vector<std::uint8_t> visited(
+        bodies_.size(),
+        0
+    );
+
+    std::vector<std::int32_t> stack;
+
+    const auto pushBody =
+        [&]( std::int32_t candidateId )
+        {
+            assert( candidateId >= 0 );
+            assert( static_cast<std::size_t>( candidateId ) < bodies_.size() );
+
+            const body& candidate =
+                bodies_[candidateId];
+
+            if( candidate.bodyId == body::NULL_INDEX ||
+                candidate.type == bodyType::Static ||
+                visited[candidateId] != 0 )
+            {
+                return;
+            }
+
+            visited[candidateId] = 1;
+            stack.push_back( candidateId );
+        };
+
+    if( startBody.type == bodyType::Static )
+    {
+        std::int32_t contactKey =
+            startBody.headContactKey;
+
+        while( contactKey != body::NULL_INDEX )
+        {
+            const std::int32_t contactId =
+                GetContactId( contactKey );
+
+            const std::int32_t edgeIndex =
+                GetContactEdgeIndex( contactKey );
+
+            assert( contactId >= 0 );
+            assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+            const contact2& contact =
+                contacts_[contactId];
+
+            assert( contact.contactId == contactId );
+
+            contactKey =
+                contact.edges[edgeIndex].nextKey;
+
+            const contactSim2& contactSim =
+                contactSims_[contactId];
+
+            if( contactSim.manifold.pointCount == 0 )
+            {
+                continue;
+            }
+
+            pushBody(
+                contact.edges[edgeIndex ^ 1].bodyId
+            );
+        }
+    }
+    else
+    {
+        pushBody( bodyIndex );
+    }
+
+    while( !stack.empty() )
+    {
+        const std::int32_t currentBodyId =
+            stack.back();
+
+        stack.pop_back();
+
+        body& currentBody =
+            bodies_[currentBodyId];
+
+        currentBody.awake = true;
+        currentBody.sleepTime = 0.0f;
+
+        std::int32_t contactKey =
+            currentBody.headContactKey;
+
+        while( contactKey != body::NULL_INDEX )
+        {
+            const std::int32_t contactId =
+                GetContactId( contactKey );
+
+            const std::int32_t edgeIndex =
+                GetContactEdgeIndex( contactKey );
+
+            assert( contactId >= 0 );
+            assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+            const contact2& contact =
+                contacts_[contactId];
+
+            assert( contact.contactId == contactId );
+
+            contactKey =
+                contact.edges[edgeIndex].nextKey;
+
+            const contactSim2& contactSim =
+                contactSims_[contactId];
+
+            if( contactSim.manifold.pointCount == 0 )
+            {
+                continue;
+            }
+
+            pushBody(
+                contact.edges[edgeIndex ^ 1].bodyId
+            );
+        }
+    }
+}
+
+void world::SleepBodyByIndex( std::int32_t bodyIndex )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+
+    const body& startBody =
+        bodies_[bodyIndex];
+
+    if( startBody.bodyId == body::NULL_INDEX ||
+        startBody.type == bodyType::Static )
+    {
+        return;
+    }
+
+    std::vector<std::uint8_t> visited(
+        bodies_.size(),
+        0
+    );
+
+    std::vector<std::int32_t> stack;
+    std::vector<std::int32_t> connectedBodies;
+
+    visited[bodyIndex] = 1;
+    stack.push_back( bodyIndex );
+
+    while( !stack.empty() )
+    {
+        const std::int32_t currentBodyId =
+            stack.back();
+
+        stack.pop_back();
+
+        connectedBodies.push_back(
+            currentBodyId
+        );
+
+        const body& currentBody =
+            bodies_[currentBodyId];
+
+        std::int32_t contactKey =
+            currentBody.headContactKey;
+
+        while( contactKey != body::NULL_INDEX )
+        {
+            const std::int32_t contactId =
+                GetContactId( contactKey );
+
+            const std::int32_t edgeIndex =
+                GetContactEdgeIndex( contactKey );
+
+            assert( contactId >= 0 );
+            assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+            const contact2& contact =
+                contacts_[contactId];
+
+            contactKey =
+                contact.edges[edgeIndex].nextKey;
+
+            const contactSim2& contactSim =
+                contactSims_[contactId];
+
+            if( contactSim.manifold.pointCount == 0 )
+            {
+                continue;
+            }
+
+            const std::int32_t otherBodyId =
+                contact.edges[edgeIndex ^ 1].bodyId;
+
+            assert( otherBodyId >= 0 );
+            assert( static_cast<std::size_t>( otherBodyId ) < bodies_.size() );
+
+            const body& otherBody =
+                bodies_[otherBodyId];
+
+            if( otherBody.type == bodyType::Static ||
+                visited[otherBodyId] != 0 )
+            {
+                continue;
+            }
+
+            visited[otherBodyId] = 1;
+            stack.push_back( otherBodyId );
+        }
+    }
+
+    for( const std::int32_t connectedBodyId :
+         connectedBodies )
+    {
+        body& connectedBody =
+            bodies_[connectedBodyId];
+
+        connectedBody.awake = false;
+        connectedBody.sleepTime = 0.0f;
+
+        bodyStates_[connectedBodyId] = {};
+
+        bodySims_[connectedBodyId].force = {};
+        bodySims_[connectedBodyId].torque = 0.0f;
+    }
+}
+
+void world::WakeSleepingBodiesFromContacts()
+{
+    for( const contactSim2& contactSim :
+         contactSims_ )
+    {
+        if( contactSim.contactId == contactSim2::NULL_INDEX ||
+            contactSim.manifold.pointCount == 0 )
+        {
+            continue;
+        }
+
+        body& bodyA =
+            bodies_[contactSim.bodyIdA];
+
+        body& bodyB =
+            bodies_[contactSim.bodyIdB];
+
+        const bool bodyAAwake =
+            bodyA.type != bodyType::Static &&
+            bodyA.awake;
+
+        const bool bodyBAwake =
+            bodyB.type != bodyType::Static &&
+            bodyB.awake;
+
+        if( bodyAAwake &&
+            bodyB.type != bodyType::Static &&
+            !bodyB.awake )
+        {
+            WakeBodyByIndex(
+                contactSim.bodyIdB
+            );
+        }
+        else if( bodyBAwake &&
+                 bodyA.type != bodyType::Static &&
+                 !bodyA.awake )
+        {
+            WakeBodyByIndex(
+                contactSim.bodyIdA
+            );
+        }
+    }
+}
+
+void world::UpdateIslandSleepStates(
+    const islandGraph2& islandGraph,
+    float timeStep )
+{
+    assert( std::isfinite( timeStep ) );
+    assert( timeStep > 0.0f );
+
+    if( !sleepingEnabled_ )
+    {
+        return;
+    }
+
+    for( const island2& island :
+         islandGraph.islands )
+    {
+        const std::span<const std::int32_t> bodyIds =
+            std::span<const std::int32_t>{ islandGraph.bodyIds }
+                .subspan(
+                    island.bodyStart,
+                    island.bodyCount
+                );
+
+        bool canSleep = true;
+
+        for( const std::int32_t bodyId :
+             bodyIds )
+        {
+            body& body =
+                bodies_[bodyId];
+
+            assert( body.awake );
+            assert( body.type != bodyType::Static );
+
+            if( !body.enableSleep )
+            {
+                body.sleepTime = 0.0f;
+                canSleep = false;
+                continue;
+            }
+
+            const bodyState& state =
+                bodyStates_[bodyId];
+
+            const bodySim& sim =
+                bodySims_[bodyId];
+
+            // 가장 먼 점의 속도와 이번 step의 position correction을 함께 확인함.
+            const float velocitySpeed =
+                Length( state.linearVelocity ) + std::fabs( state.angularVelocity ) * sim.maxExtent;
+
+            const float deltaDistance =
+                Length( state.deltaPosition ) + std::fabs( state.deltaRotation.s ) * sim.maxExtent;
+
+            const float correctionSpeed = 0.5f * deltaDistance / timeStep;
+            const float motionSpeed = std::max( velocitySpeed, correctionSpeed );
+
+            if( motionSpeed > body.sleepThreshold )
+            {
+                body.sleepTime = 0.0f;
+                canSleep = false;
+                continue;
+            }
+
+            body.sleepTime += timeStep;
+
+            if( body.sleepTime < TIME_TO_SLEEP )
+            {
+                canSleep = false;
+            }
+        }
+
+        if( !canSleep )
+        {
+            continue;
+        }
+
+        for( const std::int32_t bodyId :
+             bodyIds )
+        {
+            body& body =
+                bodies_[bodyId];
+
+            body.awake = false;
+            body.sleepTime = 0.0f;
+
+            bodyStates_[bodyId] = {};
+
+            bodySims_[bodyId].force = {};
+            bodySims_[bodyId].torque = 0.0f;
+        }
+    }
+}
+
+#pragma endregion
+
+#pragma region ContinuousCollision
+
 void world::SolveContinuousBody(
     std::int32_t bodyIndex,
     float timeStep )
@@ -3457,183 +3696,86 @@ void world::SolveContinuousBody(
         timeLoss;
 }
 
-const shape& world::GetShape( shapeId shapeId ) const
+#pragma endregion
+
+#pragma region ContactUpdate
+
+bool world::updateExistingContact( std::int32_t contactId )
 {
-    return shapes_[GetShapeIndex( shapeId )];
-}
+    contact2& contact = contacts_[contactId];
 
-contactData world::GetContactData( contactId contactId ) const
-{
-    return MakeContactData( GetContactIndex( contactId ) );
-}
-
-std::size_t world::GetBodyContactCapacity( bodyId bodyId ) const
-{
-    const body& body = bodies_[GetBodyIndex( bodyId )];
-
-    // Box2D와 같이 빠르고 보수적으로 body의 전체 Contact 수를 반환함.
-    return static_cast<std::size_t>( body.contactCount );
-}
-
-std::size_t world::GetBodyContactData( bodyId bodyId, std::span<contactData> output ) const
-{
-    const body& body = bodies_[GetBodyIndex( bodyId )];
-
-    std::int32_t contactKey = body.headContactKey;
-    std::size_t count = 0;
-
-    while( contactKey != body::NULL_INDEX && count < output.size() )
+    // free-list slot에는 이번 update에서 갱신하거나 알릴 Contact가 없음.
+    if( contact.contactId == contact2::NULL_INDEX )
     {
-        const std::int32_t contactId = GetContactId( contactKey );
-        const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
-
-        assert( contactId >= 0 );
-        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
-
-        const contact2& contact = contacts_[contactId];
-
-        assert( contact.contactId == contactId );
-        assert( edgeIndex == 0 || edgeIndex == 1 );
-        assert( contactSims_.size() == contacts_.size() );
-
-        const contactSim2& contactSim = contactSims_[contactId];
-
-        assert( contactSim.contactId == contactId );
-
-        // pointCount가 있으면 speculative point도 solver-active Contact로 public query에 노출함.
-        if( contactSim.manifold.pointCount > 0 )
-        {
-            output[count] = MakeContactData( contactId );
-            ++count;
-        }
-
-        contactKey = contact.edges[edgeIndex].nextKey;
+        return false;
     }
 
-    return count;
-}
-
-std::size_t world::GetShapeContactCapacity( shapeId shapeId ) const
-{
-    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
-
-    const shape& shape = shapes_[shapeIndex];
-
-    // Sensor는 Contact를 만들지 않으므로 overlap 정보는 Sensor API에서 별도로 조회함.
-    if( shape.sensorIndex != shape::NULL_INDEX )
-    {
-        return 0;
-    }
-
-    assert( shape.bodyId >= 0 );
-    assert( static_cast<std::size_t>( shape.bodyId ) < bodies_.size() );
-
-    const body& body = bodies_[shape.bodyId];
-
-    // 같은 body의 다른 shape Contact도 포함하므로 실제 필요량보다 클 수 있음.
-    return static_cast<std::size_t>( body.contactCount );
-}
-
-std::size_t world::GetShapeContactData( shapeId shapeId, std::span<contactData> output ) const
-{
-    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
-
-    const shape& shape = shapes_[shapeIndex];
-
-    if( shape.sensorIndex != shape::NULL_INDEX )
-    {
-        return 0;
-    }
-
-    assert( shape.bodyId >= 0 );
-    assert( static_cast<std::size_t>( shape.bodyId ) < bodies_.size() );
-
-    const body& body = bodies_[shape.bodyId];
-
-    std::int32_t contactKey = body.headContactKey;
-    std::size_t count = 0;
-
-    while( contactKey != body::NULL_INDEX && count < output.size() )
-    {
-        const std::int32_t contactId = GetContactId( contactKey );
-        const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
-
-        assert( contactId >= 0 );
-        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
-
-        const contact2& contact = contacts_[contactId];
-
-        assert( contact.contactId == contactId );
-        assert( edgeIndex == 0 || edgeIndex == 1 );
-        assert( contactSims_.size() == contacts_.size() );
-
-        const contactSim2& contactSim = contactSims_[contactId];
-
-        assert( contactSim.contactId == contactId );
-
-        const bool involvesShape =
-            contact.shapeIdA == shapeIndex ||
-            contact.shapeIdB == shapeIndex;
-
-        if( involvesShape && contactSim.manifold.pointCount > 0 )
-        {
-            output[count] = MakeContactData( contactId );
-            ++count;
-        }
-
-        contactKey = contact.edges[edgeIndex].nextKey;
-    }
-
-    return count;
-}
-
-contactData world::MakeContactData( std::int32_t contactIndex ) const
-{
-    assert( contactIndex >= 0 );
-    assert( static_cast<std::size_t>( contactIndex ) < contacts_.size() );
-
-    const contact2& contact = contacts_[contactIndex];
-
-    assert( contact.contactId == contactIndex );
-    assert( contactSims_.size() == contacts_.size() );
-
-    const contactSim2& contactSim = contactSims_[contactIndex];
-
-    assert( contactSim.contactId == contactIndex );
+    assert( contact.contactId == contactId );
     assert( contact.shapeIdA >= 0 );
     assert( contact.shapeIdB >= 0 );
     assert( static_cast<std::size_t>( contact.shapeIdA ) < shapes_.size() );
     assert( static_cast<std::size_t>( contact.shapeIdB ) < shapes_.size() );
 
     const shape& shapeA = shapes_[contact.shapeIdA];
+    const shape& shapeB = shapes_[contact.shapeIdB];
+    assert( shapeA.proxyKey != shape::NULL_INDEX );
+    assert( shapeB.proxyKey != shape::NULL_INDEX );
+    assert( fatAABBs_.size() == shapes_.size() );
 
-    assert( shapeA.bodyId >= 0 );
-    assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
-
-    assert( bodySims_.size() == bodies_.size() );
-
-    const bodySim& bodySimA = bodySims_[shapeA.bodyId];
-    assert( bodySimA.bodyId == shapeA.bodyId );
-
-    contactData data{};
-    data.id = MakeContactId( contactIndex );
-    data.shapeA = MakeShapeId( contact.shapeIdA );
-    data.shapeB = MakeShapeId( contact.shapeIdB );
-    data.manifold = ToWorldManifold( contactSim.manifold, bodySimA.transform );
-
-    // world-space geometry와 함께 마지막 solver impulse도 public snapshot에 복사함.
-    for( int i = 0; i < data.manifold.pointCount; ++i )
+    // Box2D처럼 fat bounds가 분리되기 전까지 zero-point pair도 persistent Contact로 유지함.
+    if( !Overlaps( fatAABBs_[contact.shapeIdA], fatAABBs_[contact.shapeIdB] ) )
     {
-        data.manifold.points[i].normalImpulse =
-            contactSim.impulses[i].normalImpulse;
-
-        data.manifold.points[i].tangentImpulse =
-            contactSim.impulses[i].tangentImpulse;
+        DestroyContact( contactId );
+        return false;
     }
 
-    return data;
+    assert( shapeA.bodyId >= 0 );
+    assert( shapeB.bodyId >= 0 );
+    assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
+    assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
+
+    const bodySim& bodySimA = bodySims_[shapeA.bodyId];
+    const bodySim& bodySimB = bodySims_[shapeB.bodyId];
+    assert( bodySimA.bodyId == shapeA.bodyId );
+    assert( bodySimB.bodyId == shapeB.bodyId );
+
+    if( !TryRecycleContact( contactId ) )
+    {
+        const localManifold2 manifold = CollideShapes( shapeA.geometry, bodySimA.transform, shapeB.geometry, bodySimB.transform );
+        UpdateContactSim( contactId, manifold );
+    }
+
+    // Contact query의 speculative point 포함 규칙과 실제 touching callback을 구분함.
+    return IsTouchingManifold( contactSims_[contactId].manifold );
 }
 
+std::int32_t world::createContactForPair( std::int32_t shapeIdA, std::int32_t shapeIdB )
+{
+    assert( shapeIdA >= 0 );
+    assert( shapeIdB >= 0 );
+    assert( static_cast<std::size_t>( shapeIdA ) < shapes_.size() );
+    assert( static_cast<std::size_t>( shapeIdB ) < shapes_.size() );
+
+    const shape& shapeA = shapes_[shapeIdA];
+    const shape& shapeB = shapes_[shapeIdB];
+    assert( shapeA.bodyId >= 0 );
+    assert( shapeB.bodyId >= 0 );
+    assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
+    assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
+
+    if( shapeA.bodyId == shapeB.bodyId || !CanCollideShapes( shapeA.geometry, shapeB.geometry ) )
+    {
+        return contact2::NULL_INDEX;
+    }
+
+    const bodySim& bodySimA = bodySims_[shapeA.bodyId];
+    const bodySim& bodySimB = bodySims_[shapeB.bodyId];
+    assert( bodySimA.bodyId == shapeA.bodyId );
+    assert( bodySimB.bodyId == shapeB.bodyId );
+
+    const localManifold2 manifold = CollideShapes( shapeA.geometry, bodySimA.transform, shapeB.geometry, bodySimB.transform );
+    return CreateContact( shapeIdA, shapeIdB, manifold );
+}
 
 std::int32_t world::CreateContact(
     std::int32_t shapeIdA,
@@ -4077,6 +4219,10 @@ void world::UpdateContactSim( std::int32_t contactId, const localManifold2& mani
     }
 }
 
+#pragma endregion
+
+#pragma region ContactSolver
+
 std::vector<contactConstraint2> world::PrepareContactConstraints(
     std::span<const std::int32_t> contactIds, float timeStep )
 {
@@ -4285,6 +4431,10 @@ void world::StoreContactConstraintImpulses(
     }
 }
 
+#pragma endregion
+
+#pragma region ContactDestruction
+
 void world::DestroyContact( std::int32_t contactId )
 {
     assert( contactId >= 0 );
@@ -4360,5 +4510,7 @@ void world::DestroyContact( std::int32_t contactId )
 
     --contactCount_;
 }
+
+#pragma endregion
 
 } // namespace zonai
