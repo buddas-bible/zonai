@@ -1,10 +1,27 @@
 #include <array>
-#include <cassert>
+#include <cstdio>
+#include <cstdlib>
+#include <source_location>
 #include <cmath>
 
 #include "dynamics/world.h"
 
 using namespace zonai;
+
+namespace
+{
+
+// Release에서도 solver 검사를 실행하고 실패한 위치를 출력함.
+void check( bool condition, const std::source_location& location = std::source_location::current() )
+{
+    if( !condition )
+    {
+        std::fprintf( stderr, "%s:%u: solver check failed\n", location.file_name(), location.line() );
+        std::exit( EXIT_FAILURE );
+    }
+}
+
+} // namespace
 
 int main()
 {
@@ -70,8 +87,8 @@ int main()
                 world.GetBodyAngularVelocity( boxBody )
             );
 
-        assert( bounceSpeed > 4.0f );
-        assert( spin < 0.5f );
+        check( bounceSpeed > 4.0f );
+        check( spin < 0.5f );
     }
 
     // 완전탄성 정사각 box를 수평 낙하시킬 때 두 contact point의 순차 restitution이
@@ -152,14 +169,14 @@ int main()
             previousSpeed = speed;
         }
 
-        assert( bounced );
-        assert( reachedApex );
+        check( bounced );
+        check( reachedApex );
 
         // 완전탄성 충돌이므로 첫 apex가 시작 높이보다 높아지는 것은 solver가 만든 에너지임.
-        assert( firstApex <= 1.001f * dropHeight );
+        check( firstApex <= 1.001f * dropHeight );
 
         // 대칭 수평 착지의 restitution 반복은 큰 잔여 회전을 남기면 안 됨.
-        assert( firstBounceSpin < 0.5f );
+        check( firstBounceSpin < 0.5f );
     }
 
     // 현재 Box2D식 4 sub-step에서 contact sweep 수를 줄여도
@@ -211,8 +228,8 @@ int main()
             const float expectedHeight =
                 0.5f + static_cast<float>( i );
 
-            assert( std::fabs( transform.position.x ) < 0.2f );
-            assert( std::fabs( transform.position.y - expectedHeight ) < 0.25f );
+            check( std::fabs( transform.position.x ) < 0.2f );
+            check( std::fabs( transform.position.y - expectedHeight ) < 0.25f );
         }
     }
 

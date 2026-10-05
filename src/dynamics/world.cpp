@@ -4235,6 +4235,7 @@ void world::ApplyRestitutionContacts(
     std::span<contactConstraint2> constraints )
 {
     constexpr float RESTITUTION_THRESHOLD = 1.0f;
+    // Box2D처럼 두 접점의 순차 impulse가 서로 영향을 주므로 restitution을 반복함.
     constexpr int RESTITUTION_ITERATIONS = 2;
 
     /*
