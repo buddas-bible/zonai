@@ -94,15 +94,18 @@ public:
     void SetShapeSensorEventsEnabled( shapeId shapeId, bool enabled );
     [[nodiscard]] bool AreShapeSensorEventsEnabled( shapeId shapeId ) const;
 
-    // sensor가 현재 추적 중인 visitor 개수. sensor가 아니면 0.
+    // 마지막 Step에서 sensor가 추적한 visitor 개수. sensor가 아니면 0.
     [[nodiscard]] std::size_t GetShapeSensorCapacity( shapeId shapeId ) const;
 
-    // sensor overlap handle을 output에 채우고 실제 작성 개수를 반환함.
+    // 마지막 Step의 overlap handle을 output 크기까지만 채우고 실제 작성 개수를 반환함.
+    // Box2D처럼 파괴된 visitor의 과거 handle도 포함할 수 있으므로 사용 전에 IsValid로 확인함.
     [[nodiscard]] std::size_t GetShapeSensorData(
         shapeId sensorShapeId,
         std::span<shapeId> output ) const;
 
     // 가장 최근 Step 끝에서 생성된 transient sensor begin / end events.
+    // span은 다음 Step 또는 world 파괴 전까지 유효함. 보존하려면 event를 복사함.
+    // Box2D처럼 sensor/visitor가 이미 파괴됐을 수 있으므로 handle은 IsValid로 확인함.
     [[nodiscard]] std::span<const sensorBeginEvent2> GetSensorBeginEvents() const noexcept
     {
         return sensorBeginEvents_;
@@ -232,6 +235,7 @@ public:
 
     // 기존 Contact를 갱신하고 broadPhase의 새 AABB pair는 persistent Contact로 생성함.
     // callback은 현재 실제 접촉점이 존재하는 Contact만 받음.
+    // callback 중 world 변경이나 Step / UpdateCollisions 재진입은 허용하지 않음.
     template <worldCollisionCallback Callback>
     void UpdateCollisions( Callback&& callback )
     {
@@ -393,9 +397,10 @@ public:
     [[nodiscard]] std::size_t GetBodyContactCapacity( bodyId bodyId ) const;
 
     // Box2D처럼 pointCount > 0인 Contact를 speculative point까지 output에 채움.
+    // output 크기까지만 작성하며 반환 개수 이후 원소는 변경하지 않음.
     [[nodiscard]] std::size_t GetBodyContactData( bodyId bodyId, std::span<contactData> output ) const;
 
-    // shape가 속한 body의 Contact 개수이므로 보수적인 capacity임.
+    // shape가 속한 body의 Contact 개수이므로 보수적인 capacity임. sensor는 0.
     [[nodiscard]] std::size_t GetShapeContactCapacity( shapeId shapeId ) const;
 
     // 이 shape가 참여한 pointCount > 0 Contact를 speculative point까지 output에 채움.

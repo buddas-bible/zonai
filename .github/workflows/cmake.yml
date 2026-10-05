@@ -87,8 +87,8 @@ jobs:
 
       - name: Build Release lifecycle tests
         if: runner.os == 'Windows'
-        run: cmake --build build --config Release --target broadPhaseLifecycleTests bodyShapeContactLifecycleTests contactConstraintTests restitutionTests islandTests islandSleepCcdTests --parallel
+        run: cmake --build build --config Release --target broadPhaseLifecycleTests bodyShapeContactLifecycleTests contactConstraintTests restitutionTests islandTests islandSleepCcdTests worldQuerySensorTests --parallel
 
       - name: Test Release lifecycle invariants
         if: runner.os == 'Windows'
-        run: ctest --test-dir build -C Release -R "^(broadPhaseLifecycleTests|bodyShapeContactLifecycleTests|contactConstraintTests|restitutionTests|islandTests|islandSleepCcdTests)$" --output-on-failure
+        run: ctest --test-dir build -C Release -R "^(broadPhaseLifecycleTests|bodyShapeContactLifecycleTests|contactConstraintTests|restitutionTests|islandTests|islandSleepCcdTests|worldQuerySensorTests)$" --output-on-failure

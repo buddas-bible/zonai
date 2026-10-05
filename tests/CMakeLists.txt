@@ -484,3 +484,7 @@ add_test(NAME bodyShapeContactLifecycleTests COMMAND bodyShapeContactLifecycleTe
 add_executable(islandSleepCcdTests dynamics/island_sleep_ccd_test.cpp)
 target_link_libraries(islandSleepCcdTests PRIVATE zonai::zonai)
 add_test(NAME islandSleepCcdTests COMMAND islandSleepCcdTests)
+
+add_executable(worldQuerySensorTests dynamics/world_query_sensor_test.cpp)
+target_link_libraries(worldQuerySensorTests PRIVATE zonai::zonai)
+add_test(NAME worldQuerySensorTests COMMAND worldQuerySensorTests)
