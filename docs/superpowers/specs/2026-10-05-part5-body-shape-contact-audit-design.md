@@ -14,7 +14,7 @@ Part 5 완료 조건은 다음과 같다.
 - body 생성/삭제에서 연결된 shape, contact, broad-phase proxy와 stable slot 상태가 일관되게 정리된다.
 - shape 생성/삭제에서 body intrusive shape list, mass data, sensor storage, broad-phase proxy, 관련 contact가 일관되게 갱신된다.
 - contact 생성/삭제에서 양쪽 body intrusive contact list, pairSet, contact/contactSim stable slot이 깨지지 않는다.
-- persistent contact와 touching contact의 의미가 분리되어 public query가 실제 touching contact만 노출한다.
+- persistent contact와 manifold의 의미가 분리되어 public query가 pointCount > 0인 contact를 speculative point까지 노출한다.
 - runtime filter 변경, transform 변경, slot 재사용 같은 파괴적인 경로에 regression test가 있다.
 - 전체 테스트와 빌드가 통과한다.
 - Part 6 solver 수식과 solve 순서는 변경하지 않는다.
@@ -48,7 +48,7 @@ Part 5 완료 조건은 다음과 같다.
 
 ### 1. Current master is the source of truth
 
-Part 4 DynamicTree / BroadPhase 재감사가 이미 `master`에 병합되어 있으므로 Part 5는 최신 `master`에서 새 브랜치로 진행한다. 과거 Part 5 브랜치는 설계 아이디어와 회귀 테스트 후보를 찾는 용도로만 사용한다.
+Part 4 DynamicTree / BroadPhase 재감사가 이미 `master`에 병합되어 있으므로 Part 5는 최신 `master`에서 새 브랜치로 진행한다. 과거 Part 5 브랜치는 변경 내용을 검토하고 검증이 통과하면 사용자 지시에 따라 통합할 수 있다.
 
 ### 2. Keep the current cold/hot split
 
@@ -157,11 +157,11 @@ Contact는 broad-phase pair가 유지되는 동안 존재하는 persistent objec
 Public API 의미를 다음처럼 고정한다.
 
 - Contact capacity/count 계열은 broad-phase상 persistent contact 수를 보수적으로 사용할 수 있다.
-- `GetBodyContactData`와 `GetShapeContactData`는 실제 touching manifold만 반환한다.
-- speculative/persistent contact가 아직 실제 접촉하지 않는 경우 public contact data에서 제외한다.
+- `GetBodyContactData`와 `GetShapeContactData`는 Box2D처럼 pointCount > 0인 manifold를 반환한다.
+- 양의 separation인 speculative contact도 접점이 있으면 public contact data에 포함하며, pointCount가 0인 persistent contact는 제외한다.
 - touching 상태가 끝나도 fat AABB overlap이 남아 contact 자체가 유지될 수 있다.
 
-과거 re-audit 브랜치의 speculative contact public 노출 실험은 채택하지 않는다.
+Box2D contact.c의 touching flag는 pointCount > 0으로 설정된다. 실제 separation 기반 callback 의미와 public query 의미는 구분한다.
 
 ### 8. Runtime mutation semantics
 
@@ -191,9 +191,9 @@ Part 5 수정은 regression test를 먼저 추가한 뒤 구현한다.
 6. shape list의 head/middle/tail 삭제가 링크와 count를 보존한다.
 7. contact list의 head/middle/tail 삭제가 양쪽 body 링크와 count를 보존한다.
 8. SetShapeFilter가 기존 contact를 제거하고 이후 pair를 재평가한다.
-9. persistent speculative contact는 capacity에는 포함될 수 있지만 contact data에는 노출되지 않는다.
-10. touching 전환 후 contact data에 나타난다.
-11. touching이 끝났지만 persistent pair가 남은 경우 contact data에서는 사라진다.
+9. pointCount가 0인 persistent contact는 capacity에는 포함될 수 있지만 contact data에는 노출되지 않는다.
+10. speculative 또는 실제 접점이 생성되면 contact data에 나타난다.
+11. 접점이 0개로 바뀌었지만 persistent pair가 남은 경우 contact data에서는 사라진다.
 12. slot 재사용 뒤 이전 simulation/cache 값이 남지 않는다.
 
 테스트는 기존 `tests/dynamics/world_test.cpp` 패턴을 우선 따르며, 파일이 과도하게 비대해질 경우에만 Part 5 lifecycle test를 별도 파일로 분리한다.

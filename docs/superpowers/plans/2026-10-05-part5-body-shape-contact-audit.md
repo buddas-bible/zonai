@@ -27,7 +27,7 @@
 - A world lifetime token must never be zero and must stay stable for the world lifetime.
 - Destroying nodes while walking body shape/contact lists must not lose remaining links.
 - Reused slots must not retain old simulation, manifold, impulse, proxy, or list state.
-- Persistent non-touching contacts may remain allocated, but public contact-data queries must exclude them.
+- Persistent zero-point contacts may remain allocated, but public contact-data queries exclude them. Speculative manifolds with pointCount > 0 are included, matching Box2D.
 
 ---
 
@@ -273,15 +273,15 @@ git commit -m "test(part5): cover contact lifecycle invariants"
 
 - [ ] **Step 1: Add persistent-but-non-touching query coverage**
 
-Construct a pair that still has a persistent broad-phase contact while its narrow-phase manifold is not touching. Assert body and shape capacity may remain non-zero while both data queries write zero entries.
+Construct a pair that still has a persistent broad-phase contact while its narrow-phase manifold has zero points (disable recycling in this fixture). Assert body and shape capacity may remain non-zero while both data queries write zero entries.
 
 - [ ] **Step 2: Add touching transition coverage**
 
-Move the pair into actual contact, update collisions, and assert body/shape contact-data queries return the touching contact. Move it back to a non-touching position that keeps the persistent pair when possible; after update, data queries must return zero again.
+Move the pair into actual contact, update collisions, and assert body/shape contact-data queries return the touching contact. Move it back to a zero-point position that keeps the persistent pair when possible; after update, data queries must return zero again.
 
-- [ ] **Step 3: Explicitly reject the old speculative-public-query experiment**
+- [ ] **Step 3: Verify speculative public queries against current Box2D**
 
-Do not port old re-audit code that exposes non-touching speculative contacts through `GetBodyContactData` or `GetShapeContactData`.
+Include speculative points in both queries: Box2D contact.c sets its touching flag from pointCount > 0. Keep the existing separation-based collision callback unchanged.
 
 - [ ] **Step 4: Add SetShapeFilter invalidation coverage**
 
