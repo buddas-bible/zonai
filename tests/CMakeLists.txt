@@ -267,6 +267,10 @@ add_test(
     COMMAND hashSetTests
 )
 
+add_executable(broadPhaseLifecycleTests collision/broadphase/broad_phase_lifecycle_test.cpp)
+target_link_libraries(broadPhaseLifecycleTests PRIVATE zonai::zonai)
+add_test(NAME broadPhaseLifecycleTests COMMAND broadPhaseLifecycleTests)
+
 
 add_executable(filterTests
     collision/filter_test.cpp

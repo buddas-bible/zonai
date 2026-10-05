@@ -1,5 +1,73 @@
 # Box2D BroadPhase / DynamicTree parity audit
 
+## Part 4 re-audit — 2026-10-05
+
+Baseline: Zonai `origin/master` at `0fbf498` (Part 4 re-audit merge).
+Current reference: [Box2D main at ac7c751eaeddbabdc1c4d41ae4f3a25d78627790](https://github.com/erincatto/box2d/tree/ac7c751eaeddbabdc1c4d41ae4f3a25d78627790).
+The reference below this section records the earlier audit; this section records the new comparison.
+
+### Function and invariant comparison
+
+| Zonai paths | Current Box2D intent checked | Result |
+| --- | --- | --- |
+| Constructor, MakeEmptyNode, Allocate/FreeProxy, Allocate/FreeSiblingPair | Root 0, empty slot 1, inverted sentinel bounds, even sibling pairs, stable proxy ids, pool growth and free lists | Equivalent implemented invariants; vector size replaces upstream nodeEnd |
+| FindBestSibling | Perimeter SAH, inherited growth cost, descendant lower bounds, centroid tie-break, greedy descent termination | Equivalent |
+| RotateNode, SwapNodes, LinkChildren | Four perimeter delta candidates, repair proxy/parent links, invalidate DFS order, refit changed sibling | Equivalent |
+| InsertLeaf, RemoveLeaf, RefitAncestors | Empty root, relocated sibling, promotion after removal, bounds/height/moved propagation | Equivalent |
+| MoveProxy, UpdateProxy, EnlargeProxy, MarkProxyMoved | Immediate reinsertion versus solver bounds update/refit; mark ancestors through root | Equivalent observable bounds and moved state within the documented serial API |
+| PartitionRebuildLeaves, CopySubtree, PlaceRebuildLeaf, BuildRebuildTree, Rebuild | Default midpoint heuristic, degenerate median fallback, retained subtrees, remap stable ids, dense DFS layout, clear moved state | Equivalent |
+| Query, ClearMoved, GetAreaRatio, Validate/ValidateSubtree | Overlap pruning and early exit, moved branch traversal, non-root internal perimeter, mapping/free-list/height validation | Equivalent implemented behavior; category filtering and query statistics remain absent |
+| GatherMovedSiblings, GatherCrossSeeds, TestPair, CollideProxyAndSubtree, VisitPair, CollideCrossPairs | Self pairs partitioned by sibling subtrees, bounded BFS seed queue, overlap and moved pruning, no duplicate candidates | Equivalent scalar traversal |
+| pairContext, FindPairs, UpdatePairs | Batch flush, existing-contact suppression, same-body/sensor/filter rejection, consume moved flags after pair generation | Equivalent implemented filtering and serial maintenance |
+
+No new algorithmic correctness defect was reproduced in these paths. This is a bounded
+audit of implemented APIs, not a claim of complete Box2D feature parity or proof for
+arbitrarily deep trees. Current Box2D SIMD dispatch, worker tasks and pair sorting do not
+require a correctness port into this serial implementation.
+
+`EnlargeProxy` intentionally requires the new AABB to contain the old AABB in Zonai;
+current Box2D's validation instead rejects a new AABB already contained by the old one.
+Zonai refits exact unions through `UpdateProxy`, so this stricter documented precondition
+is retained. Changing it would expand the API contract without a demonstrated need.
+
+### Necessary changes
+
+- Retained `pairSet_std_`: the prior audit explicitly reserves it for a future custom-hash-set benchmark. No benchmark implementation was added.
+- Moved both `GetTree` definitions ahead of private helpers to match header order.
+  Existing public naming and the underscore private-member convention are preserved.
+- Added `broad_phase_lifecycle_test.cpp` and its CTest target. The separate remote deep-audit
+  branch had stress coverage absent from master; its code and closure claim were inspected,
+  but no branch was merged. The new test extends coverage to mixed deletion/reuse,
+  movement, enlargement, touching, filtered/unfiltered updates and empty trees.
+- Added a Windows CI Release build/run of this stress target. Its runtime checks stay
+  active with NDEBUG; existing assert-based tests are most informative in Debug.
+
+The stress test uses four fixed seeds, 192 initial proxies per seed and 80 rounds,
+with 32 mixed operations in each round after the initial round. It compares queries,
+early termination and complete candidate multisets against brute force before and after
+maintenance. It checks proxy bounds/count/mapping, Validate(), partial/full rebuilds,
+identical-center partition fallback, existing-pair suppression and shape filtering.
+LowerCamelCase helpers, compact expressions and pragma regions follow the requested style.
+No speculative helper hierarchy, alternate hash set, allocator rewrite or overload/API
+redesign was added.
+
+### Validation and limits
+
+- Windows MSVC 19.51, x64; CMake 4.4.3; sandbox disabled for the library/test build.
+- Baseline Debug: 31/31 CTest tests passed.
+- Updated Debug and Release: library/tests built; 32/32 CTest tests passed in each.
+- Release sensitivity check: temporarily omitting the leaf bounds update made the new
+  stress test fail at round 1 with `proxy bounds`; restoring the original source restored
+  the passing result. No mutation is retained.
+- Linux and the sandbox executable were not built locally; existing CI remains responsible
+  for those checks. Remote CI has not run for these unpushed changes.
+- The 512-entry fixed stacks remain an inherited limitation: some traversals skip pushes
+  on exhaustion in Release; rebuild/copy sites are assert-only. Matching upstream does
+  not make arbitrarily deep input safe. Input validity checks also remain assert-based.
+
+Part 5/6 branches and source files were not merged or edited. Recommended next step:
+review this narrow Part 4 diff and run its remote CI, then resume Part 5 independently.
+
 Reference upstream:
 
 - Repository: `erincatto/box2d`
