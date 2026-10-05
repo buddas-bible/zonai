@@ -179,7 +179,7 @@ int main()
         check( firstBounceSpin < 0.5f );
     }
 
-    // 현재 Box2D식 4 sub-step에서 contact sweep 수를 줄여도
+    // 현재 solver의 4 sub-step에서 기존 contact sweep 수를 유지할 때
     // 여러 body가 연결된 stack이 무너지거나 크게 압축되면 안 됨.
     {
         constexpr int boxCount = 12;
