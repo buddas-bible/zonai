@@ -36,8 +36,8 @@ is retained. Changing it would expand the API contract without a demonstrated ne
 - Moved both `GetTree` definitions ahead of private helpers to match header order.
   Existing public naming and the underscore private-member convention are preserved.
 - Added `broad_phase_lifecycle_test.cpp` and its CTest target. The separate remote deep-audit
-  branch had stress coverage absent from master; its code and closure claim were inspected,
-  but no branch was merged. The new test extends coverage to mixed deletion/reuse,
+  branch's original `broad_phase_stress_test.cpp` is also retained in the combined work.
+  The new test extends coverage to mixed deletion/reuse,
   movement, enlargement, touching, filtered/unfiltered updates and empty trees.
 - Added a Windows CI Release build/run of this stress target. Its runtime checks stay
   active with NDEBUG; existing assert-based tests are most informative in Debug.
@@ -55,18 +55,19 @@ redesign was added.
 
 - Windows MSVC 19.51, x64; CMake 4.4.3; sandbox disabled for the library/test build.
 - Baseline Debug: 31/31 CTest tests passed.
-- Updated Debug and Release: library/tests built; 32/32 CTest tests passed in each.
+- Combined final work: library/tests built; 33/33 CTest tests passed in both Debug and Release.
 - Release sensitivity check: temporarily omitting the leaf bounds update made the new
   stress test fail at round 1 with `proxy bounds`; restoring the original source restored
   the passing result. No mutation is retained.
-- Linux and the sandbox executable were not built locally; existing CI remains responsible
-  for those checks. Remote CI has not run for these unpushed changes.
+- Linux and the sandbox executable were not built locally; the Ubuntu/Windows CI matrix
+  verifies those configurations. Final remote results are tracked in PR #12.
 - The 512-entry fixed stacks remain an inherited limitation: some traversals skip pushes
   on exhaustion in Release; rebuild/copy sites are assert-only. Matching upstream does
   not make arbitrarily deep input safe. Input validity checks also remain assert-based.
 
-Part 5/6 branches and source files were not merged or edited. Recommended next step:
-review this narrow Part 4 diff and run its remote CI, then resume Part 5 independently.
+Part 5/6 branches and source files were not merged or edited. The combined Part 4 work is
+ready for integration after final remote CI; merged work branches are deleted only after
+their tips are confirmed to be ancestors of master. The next audit is Part 5 independently.
 
 Reference upstream:
 
