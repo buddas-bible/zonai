@@ -1,5 +1,74 @@
 # Box2D BroadPhase / DynamicTree parity audit
 
+## Part 4 re-audit — 2026-10-05
+
+Baseline: Zonai `origin/master` at `0fbf498` (Part 4 re-audit merge).
+Current reference: [Box2D main at ac7c751eaeddbabdc1c4d41ae4f3a25d78627790](https://github.com/erincatto/box2d/tree/ac7c751eaeddbabdc1c4d41ae4f3a25d78627790).
+The reference below this section records the earlier audit; this section records the new comparison.
+
+### Function and invariant comparison
+
+| Zonai paths | Current Box2D intent checked | Result |
+| --- | --- | --- |
+| Constructor, MakeEmptyNode, Allocate/FreeProxy, Allocate/FreeSiblingPair | Root 0, empty slot 1, inverted sentinel bounds, even sibling pairs, stable proxy ids, pool growth and free lists | Equivalent implemented invariants; vector size replaces upstream nodeEnd |
+| FindBestSibling | Perimeter SAH, inherited growth cost, descendant lower bounds, centroid tie-break, greedy descent termination | Equivalent |
+| RotateNode, SwapNodes, LinkChildren | Four perimeter delta candidates, repair proxy/parent links, invalidate DFS order, refit changed sibling | Equivalent |
+| InsertLeaf, RemoveLeaf, RefitAncestors | Empty root, relocated sibling, promotion after removal, bounds/height/moved propagation | Equivalent |
+| MoveProxy, UpdateProxy, EnlargeProxy, MarkProxyMoved | Immediate reinsertion versus solver bounds update/refit; mark ancestors through root | Equivalent observable bounds and moved state within the documented serial API |
+| PartitionRebuildLeaves, CopySubtree, PlaceRebuildLeaf, BuildRebuildTree, Rebuild | Default midpoint heuristic, degenerate median fallback, retained subtrees, remap stable ids, dense DFS layout, clear moved state | Equivalent |
+| Query, ClearMoved, GetAreaRatio, Validate/ValidateSubtree | Overlap pruning and early exit, moved branch traversal, non-root internal perimeter, mapping/free-list/height validation | Equivalent implemented behavior; category filtering and query statistics remain absent |
+| GatherMovedSiblings, GatherCrossSeeds, TestPair, CollideProxyAndSubtree, VisitPair, CollideCrossPairs | Self pairs partitioned by sibling subtrees, bounded BFS seed queue, overlap and moved pruning, no duplicate candidates | Equivalent scalar traversal |
+| pairContext, FindPairs, UpdatePairs | Batch flush, existing-contact suppression, same-body/sensor/filter rejection, consume moved flags after pair generation | Equivalent implemented filtering and serial maintenance |
+
+No new algorithmic correctness defect was reproduced in these paths. This is a bounded
+audit of implemented APIs, not a claim of complete Box2D feature parity or proof for
+arbitrarily deep trees. Current Box2D SIMD dispatch, worker tasks and pair sorting do not
+require a correctness port into this serial implementation.
+
+`EnlargeProxy` intentionally requires the new AABB to contain the old AABB in Zonai;
+current Box2D's validation instead rejects a new AABB already contained by the old one.
+Zonai refits exact unions through `UpdateProxy`, so this stricter documented precondition
+is retained. Changing it would expand the API contract without a demonstrated need.
+
+### Necessary changes
+
+- Retained `pairSet_std_`: the prior audit explicitly reserves it for a future custom-hash-set benchmark. No benchmark implementation was added.
+- Moved both `GetTree` definitions ahead of private helpers to match header order.
+  Existing public naming and the underscore private-member convention are preserved.
+- Added `broad_phase_lifecycle_test.cpp` and its CTest target. The separate remote deep-audit
+  branch's original `broad_phase_stress_test.cpp` is also retained in the combined work.
+  The new test extends coverage to mixed deletion/reuse,
+  movement, enlargement, touching, filtered/unfiltered updates and empty trees.
+- Added a Windows CI Release build/run of this stress target. Its runtime checks stay
+  active with NDEBUG; existing assert-based tests are most informative in Debug.
+
+The stress test uses four fixed seeds, 192 initial proxies per seed and 80 rounds,
+with 32 mixed operations in each round after the initial round. It compares queries,
+early termination and complete candidate multisets against brute force before and after
+maintenance. It checks proxy bounds/count/mapping, Validate(), partial/full rebuilds,
+identical-center partition fallback, existing-pair suppression and shape filtering.
+LowerCamelCase helpers, compact expressions and pragma regions follow the requested style.
+No speculative helper hierarchy, alternate hash set, allocator rewrite or overload/API
+redesign was added.
+
+### Validation and limits
+
+- Windows MSVC 19.51, x64; CMake 4.4.3; sandbox disabled for the library/test build.
+- Baseline Debug: 31/31 CTest tests passed.
+- Combined final work: library/tests built; 33/33 CTest tests passed in both Debug and Release.
+- Release sensitivity check: temporarily omitting the leaf bounds update made the new
+  stress test fail at round 1 with `proxy bounds`; restoring the original source restored
+  the passing result. No mutation is retained.
+- Linux and the sandbox executable were not built locally; the Ubuntu/Windows CI matrix
+  verifies those configurations. Final remote results are tracked in PR #12.
+- The 512-entry fixed stacks remain an inherited limitation: some traversals skip pushes
+  on exhaustion in Release; rebuild/copy sites are assert-only. Matching upstream does
+  not make arbitrarily deep input safe. Input validity checks also remain assert-based.
+
+Part 5/6 branches and source files were not merged or edited. The combined Part 4 work is
+ready for integration after final remote CI; merged work branches are deleted only after
+their tips are confirmed to be ancestors of master. The next audit is Part 5 independently.
+
 Reference upstream:
 
 - Repository: `erincatto/box2d`
@@ -17,6 +86,56 @@ Reference upstream:
 
 This audit is focused on behavior already implemented in Zonai. Missing future features are
 listed separately so they are not confused with accidental omissions.
+
+## Deep re-audit closure (2026-10-04)
+
+Part 4 was re-audited from the current `master` instead of treating the earlier audit as
+sufficient evidence. The second pass traced the complete implemented path:
+
+`World fat AABB update -> BroadPhase proxy update -> DynamicTree moved/refit state -> pair traversal -> pairSet -> Contact create/destroy`
+
+The implementation was compared again with the current Box2D reference above, including the
+important distinction between explicit proxy movement and the solver's deferred moved/refit
+path.
+
+No additional production correctness change was justified by this pass. In particular:
+
+- Dynamic / Kinematic `UpdateProxy()` is intentionally topology-preserving and is the
+  single-threaded counterpart of Box2D's solver `MarkProxyMoved()` + later `Refit()` path.
+- Static movement still uses the explicit remove/reinsert path because static transform
+  changes are exceptional and may move a proxy arbitrarily far.
+- a moving shape only updates its tree proxy after the shape AABB leaves its persistent
+  fat AABB; ordinary sub-step motion inside the fat bounds does not churn the tree.
+- partial rebuild keeps untouched subtrees, rebuilds moved branches, preserves stable proxy
+  ids, restores dense DFS storage, and clears stale moved state.
+- Dynamic-Self, Dynamic-Static, and Dynamic-Kinematic are the only pair classes generated;
+  the traversal does not report duplicate pairs in the tested single-threaded path.
+- Contact creation inserts the normalized shape pair into `pairSet_`; Contact destruction
+  removes the same key. Shape/body destruction and runtime filter changes therefore cannot
+  leave a verified stale persistent-pair entry behind.
+- runtime filter changes may use `TouchProxy()` rather than recreate a proxy because Zonai
+  does not store category bits in DynamicTree sorting data.
+- `pairSet_std_` is deliberately retained as a future benchmark alternative to the custom
+  `hashSet`; it is not dead-code cleanup for this audit.
+
+A deterministic stress regression was added to make those conclusions executable rather
+than documentation-only:
+
+- 192 DynamicTree proxies are repeatedly moved with `UpdateProxy()` over eight rounds.
+- before and after every partial rebuild, 48 random tree queries are compared against a
+  brute-force AABB oracle.
+- 96 mixed Static / Kinematic / Dynamic proxies are compared against a brute-force pair
+  oracle before and after a subset of proxies moves.
+- the pair oracle checks the supported body-type combinations, overlap result, moved-side
+  requirement, and duplicate suppression.
+- every rebuilt tree is validated after the stress operations.
+
+The audit regression is `tests/collision/broadphase/broad_phase_stress_test.cpp` and is
+registered as `broadPhaseStressTests`.
+
+The first full CI run with the stress coverage passed on both Ubuntu and Windows. The final
+branch must still pass the same two-platform CI after all audit-only cleanup before this
+Part is considered closed.
 
 ## Correctness / safety omissions found and fixed
 
@@ -219,7 +338,9 @@ DynamicTree tests now include:
 - complete free-list reuse by reinsertion with Validate after each operation,
 - topology-preserving `UpdateProxy()` followed by partial rebuild,
 - `EnlargeProxy()` moved-state and rebuild behavior,
-- explicit moved marking without changing the AABB.
+- explicit moved marking without changing the AABB,
+- repeated topology-preserving movement of 192 proxies with brute-force Query comparison
+  both before and after each partial rebuild.
 
 BroadPhase tests include:
 
@@ -229,7 +350,14 @@ BroadPhase tests include:
 - candidate batches larger than 32 entries,
 - existing-contact pair suppression,
 - same-body, sensor, and collision-filter rejection,
-- moved-state consumption and stale-tree rebuild after `UpdatePairs()`.
+- moved-state consumption and stale-tree rebuild after `UpdatePairs()`,
+- exact brute-force pair-set comparison across 96 mixed body-type proxies,
+- repeat comparison after a subset of Static / Kinematic / Dynamic proxies move,
+- explicit duplicate-pair rejection checks in the stress oracle.
+
+World-level integration tests also cover persistent Contact / `pairSet_` synchronization when
+proxies separate, shapes or bodies are destroyed and slots are reused, and runtime collision
+filters invalidate existing Contacts and request pair regeneration.
 
 AABB tests cover invalid ordering, infinities, and NaN.
 
