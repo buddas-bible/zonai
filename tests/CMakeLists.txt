@@ -449,6 +449,20 @@ add_test(
     COMMAND contactConstraintTests
 )
 
+add_executable(restitutionTests
+    dynamics/restitution_test.cpp
+)
+
+target_link_libraries(restitutionTests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME restitutionTests
+    COMMAND restitutionTests
+)
+
 add_executable(islandTests
     dynamics/island_test.cpp
 )

@@ -1,10 +1,23 @@
-#include <cassert>
+#include <cstdio>
+#include <cstdlib>
+#include <initializer_list>
+#include <source_location>
 #include <cmath>
 
 #include "dynamics/contactConstraint2.h"
 
 namespace
 {
+
+// Release에서도 solver 검사를 실행하고 실패한 위치를 출력함.
+void check( bool condition, const std::source_location& location = std::source_location::current() )
+{
+    if( !condition )
+    {
+        std::fprintf( stderr, "%s:%u: solver check failed\n", location.file_name(), location.line() );
+        std::exit( EXIT_FAILURE );
+    }
+}
 
 bool NearlyEqual(
     float a,
@@ -65,23 +78,23 @@ int main()
                 bodyStateB
             );
 
-        assert( constraint.pointCount == 1 );
-        assert( NearlyEqual( constraint.normal.x, 1.0f ) );
-        assert( NearlyEqual( constraint.normal.y, 0.0f ) );
+        check( constraint.pointCount == 1 );
+        check( NearlyEqual( constraint.normal.x, 1.0f ) );
+        check( NearlyEqual( constraint.normal.y, 0.0f ) );
 
         const contactConstraintPoint2& point =
             constraint.points[0];
 
-        assert( NearlyEqual( point.anchorA.x, 1.0f ) );
-        assert( NearlyEqual( point.anchorA.y, 1.0f ) );
-        assert( NearlyEqual( point.anchorB.x, -1.0f ) );
-        assert( NearlyEqual( point.anchorB.y, 1.0f ) );
+        check( NearlyEqual( point.anchorA.x, 1.0f ) );
+        check( NearlyEqual( point.anchorA.y, 1.0f ) );
+        check( NearlyEqual( point.anchorB.x, -1.0f ) );
+        check( NearlyEqual( point.anchorB.y, 1.0f ) );
         // baseSeparation은 anchor 차이를 제외한 기준값이고,
         // identity delta transform을 다시 더하면 원래 separation -0.1이 복원됨.
-        assert( NearlyEqual( point.baseSeparation, 1.9f ) );
+        check( NearlyEqual( point.baseSeparation, 1.9f ) );
 
         const vec2 ds = point.anchorB - point.anchorA;
-        assert( NearlyEqual( point.baseSeparation + Dot( ds, constraint.normal ), -0.1f ) );
+        check( NearlyEqual( point.baseSeparation + Dot( ds, constraint.normal ), -0.1f ) );
 
         /*
         * A contact point velocity:
@@ -103,7 +116,7 @@ int main()
         *     vn = dot( (0,1)-(-1,2), (1,0) )
         *        = 1
         */
-        assert(
+        check(
             NearlyEqual(
                 point.relativeNormalVelocity,
                 1.0f
@@ -119,7 +132,7 @@ int main()
         *
         * normalMass = 1 / K
         */
-        assert(
+        check(
             NearlyEqual(
                 point.normalMass,
                 1.0f / 3.75f
@@ -168,7 +181,7 @@ int main()
             constraint.points[0];
 
         // B가 normal 반대 방향으로 움직이므로 서로 접근 중.
-        assert(
+        check(
             NearlyEqual(
                 point.relativeNormalVelocity,
                 -3.0f
@@ -176,7 +189,7 @@ int main()
         );
 
         // K = invMassB = 0.5 -> normalMass = 2.
-        assert(
+        check(
             NearlyEqual(
                 point.normalMass,
                 2.0f
@@ -219,13 +232,13 @@ int main()
         // DeltaV_B = invMassB * 6 = 3
         //
         // 따라서 -3 + 3 = 0.
-        assert(
+        check(
             NearlyEqual(
                 bodyStateB.linearVelocity.x,
                 0.0f
             )
         );
-        assert(
+        check(
             NearlyEqual(
                 point.normalImpulse,
                 6.0f
@@ -256,13 +269,13 @@ int main()
             false
         );
 
-        assert(
+        check(
             NearlyEqual(
                 bodyStateB.linearVelocity.x,
                 3.0f
             )
         );
-        assert(
+        check(
             constraint.points[0].normalImpulse == 0.0f
         );
     }
@@ -300,14 +313,14 @@ int main()
                 bodyStateB
             );
 
-        assert( constraint.contactId == 7 );
-        assert(
+        check( constraint.contactId == 7 );
+        check(
             NearlyEqual(
                 constraint.points[0].normalImpulse,
                 6.0f
             )
         );
-        assert(
+        check(
             NearlyEqual(
                 constraint.points[0].tangentImpulse,
                 -1.5f
@@ -352,7 +365,7 @@ int main()
         //          = 3
         //
         // 따라서 -3 + 3 = 0.
-        assert(
+        check(
             NearlyEqual(
                 bodyStateB.linearVelocity.x,
                 0.0f
@@ -368,7 +381,7 @@ int main()
             false
         );
 
-        assert(
+        check(
             NearlyEqual(
                 point.normalImpulse,
                 6.0f
@@ -376,7 +389,7 @@ int main()
         );
 
         // warm start로 실제 적용한 normal impulse도 이번 step의 compression 양으로 추적함.
-        assert(
+        check(
             NearlyEqual(
                 point.totalNormalImpulse,
                 6.0f
@@ -393,12 +406,12 @@ int main()
                 1.0f / 60.0f
             );
 
-        assert( softness.biasRate > 0.0f );
-        assert( softness.massScale > 0.0f );
-        assert( softness.massScale < 1.0f );
-        assert( softness.impulseScale > 0.0f );
-        assert( softness.impulseScale < 1.0f );
-        assert(
+        check( softness.biasRate > 0.0f );
+        check( softness.massScale > 0.0f );
+        check( softness.massScale < 1.0f );
+        check( softness.impulseScale > 0.0f );
+        check( softness.impulseScale < 1.0f );
+        check(
             NearlyEqual(
                 softness.massScale + softness.impulseScale,
                 1.0f
@@ -439,13 +452,13 @@ int main()
 
         // velocityBias = 0.5 * 2 * -0.1 = -0.1
         // DeltaLambda = -(0 + -0.1) = 0.1
-        assert(
+        check(
             NearlyEqual(
                 bodyStateB.linearVelocity.x,
                 0.1f
             )
         );
-        assert(
+        check(
             NearlyEqual(
                 point.normalImpulse,
                 0.1f
@@ -461,13 +474,13 @@ int main()
             false
         );
 
-        assert(
+        check(
             NearlyEqual(
                 bodyStateB.linearVelocity.x,
                 0.0f
             )
         );
-        assert(
+        check(
             NearlyEqual(
                 point.normalImpulse,
                 0.0f
@@ -503,8 +516,8 @@ int main()
 
         SolveContactConstraint( constraint, bodyStateA, bodyStateB, true );
 
-        assert( NearlyEqual( bodyStateB.linearVelocity.x, 0.0f ) );
-        assert( NearlyEqual( point.normalImpulse, 0.0f ) );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, 0.0f ) );
+        check( NearlyEqual( point.normalImpulse, 0.0f ) );
     }
 
     // deltaRotation도 contact anchor를 회전시켜 현재 separation에 반영됨.
@@ -534,8 +547,8 @@ int main()
 
         // anchorB=(0,1)이 90도 회전하면 (-1,0)이 되어 separation=-1.
         // velocityBias=0.5*2*-1=-1이므로 +normal impulse 1이 만들어짐.
-        assert( NearlyEqual( bodyStateB.linearVelocity.x, 1.0f ) );
-        assert( NearlyEqual( point.normalImpulse, 1.0f ) );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, 1.0f ) );
+        check( NearlyEqual( point.normalImpulse, 1.0f ) );
     }
 
     // tangent effective mass도 lever arm과 inverse mass / inertia를 포함해 계산함.
@@ -570,7 +583,7 @@ int main()
 
         // tangent=(1,0), lever arm=0이므로
         // Kt=invMassB=0.5 -> tangentMass=2.
-        assert(
+        check(
             NearlyEqual(
                 constraint.points[0].tangentMass,
                 2.0f
@@ -600,8 +613,8 @@ int main()
         );
 
         // normal=(0,1), tangent=(1,0)
-        assert( NearlyEqual( bodyStateB.linearVelocity.x, -0.5f ) );
-        assert( NearlyEqual( bodyStateB.linearVelocity.y, 2.0f ) );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, -0.5f ) );
+        check( NearlyEqual( bodyStateB.linearVelocity.y, 2.0f ) );
     }
 
     // Coulomb friction은 tangent 속도를 줄이되 mu * normalImpulse를 넘지 않음.
@@ -635,8 +648,8 @@ int main()
 
         // 필요한 friction impulse는 -4지만
         // max = mu * normalImpulse = 0.5 * 2 = 1.
-        assert( NearlyEqual( point.tangentImpulse, -1.0f ) );
-        assert( NearlyEqual( bodyStateB.linearVelocity.x, 3.0f ) );
+        check( NearlyEqual( point.tangentImpulse, -1.0f ) );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, 3.0f ) );
     }
 
     // normal impulse가 없으면 Coulomb friction도 물체를 임의로 멈출 수 없음.
@@ -663,8 +676,8 @@ int main()
             false
         );
 
-        assert( NearlyEqual( constraint.points[0].tangentImpulse, 0.0f ) );
-        assert( NearlyEqual( bodyStateB.linearVelocity.x, 4.0f ) );
+        check( NearlyEqual( constraint.points[0].tangentImpulse, 0.0f ) );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, 4.0f ) );
     }
 
     // speculative contact는 separation / dt보다 빠르게 gap을 닫지 못하게 함.
@@ -695,8 +708,8 @@ int main()
             true
         );
 
-        assert( NearlyEqual( bodyStateB.linearVelocity.x, -0.6f ) );
-        assert( NearlyEqual( point.normalImpulse, 1.4f ) );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, -0.6f ) );
+        check( NearlyEqual( point.normalImpulse, 1.4f ) );
 
         SolveContactConstraint(
             constraint,
@@ -705,7 +718,7 @@ int main()
             false
         );
 
-        assert( NearlyEqual( bodyStateB.linearVelocity.x, -0.6f ) );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, -0.6f ) );
     }
 
     // restitution은 solver 전 접근 속도를 기준으로 목표 반발 속도를 만듦.
@@ -739,10 +752,10 @@ int main()
 
         // normal solve가 vn을 0까지 막았다고 가정하면
         // e=0.5, 충돌 전 vn=-4이므로 최종 목표 vn은 +2임.
-        assert( NearlyEqual( bodyStateB.linearVelocity.x, 2.0f ) );
-        assert( NearlyEqual( point.normalImpulse, 6.0f ) );
-        assert( NearlyEqual( point.totalNormalImpulse, 6.0f ) );
-        assert( NearlyEqual( point.restitutionImpulse, 2.0f ) );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, 2.0f ) );
+        check( NearlyEqual( point.normalImpulse, 6.0f ) );
+        check( NearlyEqual( point.totalNormalImpulse, 6.0f ) );
+        check( NearlyEqual( point.restitutionImpulse, 2.0f ) );
     }
 
     // 이전 normal impulse가 남아 있어도 이번 step에 실제 compression이 없으면 bounce를 만들지 않음.
@@ -779,9 +792,9 @@ int main()
 
         // compressionImpulse=0이므로 restitution은 armed되지 않음.
         // speculative bias s/dt=1이 현재 vn=-1을 그대로 허용함.
-        assert( NearlyEqual( bodyStateB.linearVelocity.x, -1.0f ) );
-        assert( NearlyEqual( point.normalImpulse, 4.0f ) );
-        assert( NearlyEqual( point.restitutionImpulse, 0.0f ) );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, -1.0f ) );
+        check( NearlyEqual( point.normalImpulse, 4.0f ) );
+        check( NearlyEqual( point.restitutionImpulse, 0.0f ) );
     }
 
     // threshold보다 느린 접촉은 restitution을 적용하지 않아 resting contact가 튀지 않음.
@@ -812,9 +825,42 @@ int main()
             1.0f
         );
 
-        assert( NearlyEqual( bodyStateB.linearVelocity.x, 0.0f ) );
-        assert( NearlyEqual( point.normalImpulse, 0.5f ) );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, 0.0f ) );
+        check( NearlyEqual( point.normalImpulse, 0.5f ) );
     }
+
+#pragma region RestitutionConservation
+
+    // 두 Dynamic body의 대칭 충돌에서 momentum과 Poisson 반발 예산을 검사함.
+    // 반복 restitution이 이미 사용한 압축량을 다시 반발 에너지로 만들면 안 됨.
+    for( const float restitution : { 0.0f, 0.5f, 1.0f } )
+    {
+        contactConstraint2 constraint{};
+        constraint.normal = { 1.0f, 0.0f };
+        constraint.invMassA = 1.0f;
+        constraint.invMassB = 1.0f;
+        constraint.restitution = restitution;
+        constraint.pointCount = 1;
+        constraint.points[0].normalMass = 0.5f;
+        constraint.points[0].relativeNormalVelocity = -2.0f;
+        bodyState stateA{}, stateB{};
+        stateA.linearVelocity = { 1.0f, 0.0f };
+        stateB.linearVelocity = { -1.0f, 0.0f };
+        SolveContactConstraint( constraint, stateA, stateB, false );
+        for( int iteration = 0; iteration < 8; ++iteration )
+        {
+            ApplyRestitutionContactConstraint( constraint, stateA, stateB, 1.0f );
+            check( NearlyEqual( stateA.linearVelocity.x + stateB.linearVelocity.x, 0.0f ) );
+            check( NearlyEqual( stateA.linearVelocity.x, -restitution ) );
+            check( NearlyEqual( stateB.linearVelocity.x, restitution ) );
+            const auto& point = constraint.points[0];
+            check( NearlyEqual( point.totalNormalImpulse - point.restitutionImpulse, 1.0f ) );
+            check( NearlyEqual( point.restitutionImpulse, restitution ) );
+            check( LengthSquared( stateA.linearVelocity ) + LengthSquared( stateB.linearVelocity ) <= 2.0f + 1e-5f );
+        }
+    }
+
+#pragma endregion
 
     // Solve가 끝난 누적 impulse를 persistent ContactSim에 다시 저장함.
     {
@@ -833,13 +879,13 @@ int main()
             contactSim
         );
 
-        assert(
+        check(
             NearlyEqual(
                 contactSim.impulses[0].normalImpulse,
                 4.25f
             )
         );
-        assert(
+        check(
             NearlyEqual(
                 contactSim.impulses[0].tangentImpulse,
                 -0.75f
