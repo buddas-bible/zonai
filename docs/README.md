@@ -15,6 +15,6 @@
 - [World Query / Sensor API](world-query-sensor-audit.md)
 - [Contact recycling/cache](contact-cache-audit.md)
 
-다음 기능의 검토 제안: [기본 Distance Joint 설계](superpowers/specs/2026-10-06-distance-joint-design.md). 설계 제안과 구현 완료 기록을 구분한다.
+첫 Joint: [기본 Distance Joint 설계](superpowers/specs/2026-10-06-distance-joint-design.md), [구현·학습·검증 기록](basic-distance-joint.md).
 
 기존 설계와 실행 계획은 `superpowers/specs`와 `superpowers/plans`에 보존한다. 구현 세부 사항은 코드 가까이에 두고, 이 디렉터리에는 근거·결정·검증 범위와 제한을 남긴다.

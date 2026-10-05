@@ -492,3 +492,11 @@ add_test(NAME worldQuerySensorTests COMMAND worldQuerySensorTests)
 add_executable(contactCacheTests dynamics/contact_cache_test.cpp)
 target_link_libraries(contactCacheTests PRIVATE zonai::zonai)
 add_test(NAME contactCacheTests COMMAND contactCacheTests)
+
+add_executable(distanceJointTests dynamics/distance_joint_test.cpp)
+target_link_libraries(distanceJointTests PRIVATE zonai::zonai)
+add_test(NAME distanceJointTests COMMAND distanceJointTests)
+
+add_executable(distanceJointWorldTests dynamics/distance_joint_world_test.cpp)
+target_link_libraries(distanceJointWorldTests PRIVATE zonai::zonai)
+add_test(NAME distanceJointWorldTests COMMAND distanceJointWorldTests)

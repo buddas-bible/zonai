@@ -12,3 +12,7 @@ Windows용 Win32 / Direct3D 11 / Dear ImGui visual playground다. 빌드와 실�
 `main.cpp`는 platform 자원·scene·UI·fixed-step loop를 연결한다. `debugCamera`는 좌표 변환과 camera 조작, `debugDraw`는 geometry/tree 표시를 맡는다. 현재 한 scene을 위해 registry나 별도 application framework를 만들지 않는다.
 
 화면의 contact 수집은 `UpdateCollisions`를 호출하므로 순수 조회만 하는 UI는 아니다. 자동 테스트의 대체나 성능 benchmark로 사용하지 않는다. UI 시각 검증과 GPU/device-loss 복구는 빌드 통과만으로 보장하지 않는다.
+
+## Distance Joint 진자
+
+보라색 선과 두 anchor 점은 고정 거리 Joint다. `Kick pendulum`으로 옆으로 밀고 Target/Current 거리와 COM/velocity 표시를 함께 관찰한다. Body local anchor는 원점 기준이며 solver에서는 COM 기준 lever arm으로 바뀐다. Spring/limit/motor는 아직 구현하지 않았다. CCD가 이동을 자른 frame에서는 거리 오차가 일시적으로 커질 수 있다.

@@ -86,6 +86,7 @@ bodyId world::CreateBody( const bodyDef& definition )
         assert( freeBody.bodyId == body::NULL_INDEX );
         assert( freeBody.headShapeId == body::NULL_INDEX );
         assert( freeBody.headContactKey == body::NULL_INDEX );
+        assert( freeBody.headJointKey == body::NULL_INDEX && freeBody.jointCount == 0 );
         assert( bodySims_.size() == bodies_.size() );
         assert( bodyStates_.size() == bodies_.size() );
         assert( bodySims_[bodyIndex].bodyId == bodySim::NULL_INDEX );
@@ -318,6 +319,87 @@ shapeId world::CreateSensorShape(
 void world::DestroyShape( shapeId shapeId )
 {
     DestroyShapeByIndex( GetShapeIndex( shapeId ) );
+}
+
+#pragma endregion
+
+#pragma region JointLifecycle
+
+jointId world::createDistanceJoint( const distanceJointDef& definition )
+{
+    const std::int32_t bodyIndexA = GetBodyIndex( definition.bodyA );
+    const std::int32_t bodyIndexB = GetBodyIndex( definition.bodyB );
+    assert( bodyIndexA != bodyIndexB );
+    assert( bodies_[bodyIndexA].type == bodyType::Dynamic || bodies_[bodyIndexB].type == bodyType::Dynamic );
+    assert( IsFinite( definition.localAnchorA ) && IsFinite( definition.localAnchorB ) );
+    assert( std::isfinite( definition.length ) && definition.length > 0.0f );
+
+    if( !definition.collideConnected )
+    {
+        // Box2D처럼 이미 존재하는 Contact도 제거함. 삭제 전에 next key를 보존함.
+        const body& owner = bodies_[bodies_[bodyIndexA].contactCount < bodies_[bodyIndexB].contactCount ? bodyIndexA : bodyIndexB];
+        std::int32_t key = owner.headContactKey;
+        while( key != body::NULL_INDEX )
+        {
+            const std::int32_t index = GetContactId( key );
+            const contact2& contact = contacts_[index];
+            key = contact.edges[GetContactEdgeIndex( key )].nextKey;
+            if( ( contact.edges[0].bodyId == bodyIndexA && contact.edges[1].bodyId == bodyIndexB ) ||
+                ( contact.edges[0].bodyId == bodyIndexB && contact.edges[1].bodyId == bodyIndexA ) )
+            {
+                DestroyContact( index );
+            }
+        }
+    }
+
+    std::int32_t index = jointFreeList_;
+    if( index != -1 ) { jointFreeList_ = joints_[index].nextFree; }
+    else
+    {
+        // Edge key의 signed shift와 index1이 모두 표현 가능한 범위를 유지함.
+        assert( joints_.size() <= static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() / 2 ) );
+        index = static_cast<std::int32_t>( joints_.size() );
+        joints_.push_back( {} ); jointSims_.push_back( {} );
+    }
+    joint2& joint = joints_[index];
+    const auto generation = static_cast<std::uint16_t>( joint.generation + 1u );
+    joint = {}; joint.jointId = index; joint.generation = generation;
+    joint.collideConnected = definition.collideConnected;
+    joint.edges[0].bodyId = bodyIndexA; joint.edges[1].bodyId = bodyIndexB;
+    for( int edgeIndex = 0; edgeIndex < 2; ++edgeIndex )
+    {
+        jointEdge2& edge = joint.edges[edgeIndex];
+        body& endpoint = bodies_[edge.bodyId];
+        const std::int32_t key = ( index << 1 ) | edgeIndex;
+        edge.nextKey = endpoint.headJointKey;
+        if( edge.nextKey != -1 ) { joints_[edge.nextKey >> 1].edges[edge.nextKey & 1].prevKey = key; }
+        endpoint.headJointKey = key; ++endpoint.jointCount;
+    }
+    distanceJointSim2& sim = jointSims_[index];
+    sim = {}; sim.jointId = index; sim.bodyIdA = bodyIndexA; sim.bodyIdB = bodyIndexB;
+    sim.localAnchorA = definition.localAnchorA; sim.localAnchorB = definition.localAnchorB;
+    sim.length = std::max( LINEAR_SLOP, definition.length );
+    ++jointCount_;
+    WakeBodyByIndex( bodyIndexA ); WakeBodyByIndex( bodyIndexB );
+    return makeJointId( index );
+}
+
+void world::destroyJoint( jointId id )
+{
+    destroyJointByIndex( getJointIndex( id ), true );
+}
+
+distanceJointData world::getDistanceJointData( jointId id ) const
+{
+    const std::int32_t index = getJointIndex( id );
+    const distanceJointSim2& sim = jointSims_[index];
+    distanceJointData data{};
+    data.bodyA = MakeBodyId( sim.bodyIdA ); data.bodyB = MakeBodyId( sim.bodyIdB );
+    data.anchorA = TransformPoint( bodySims_[sim.bodyIdA].transform, sim.localAnchorA );
+    data.anchorB = TransformPoint( bodySims_[sim.bodyIdB].transform, sim.localAnchorB );
+    data.length = sim.length; data.currentLength = Length( data.anchorB - data.anchorA );
+    data.collideConnected = joints_[index].collideConnected;
+    return data;
 }
 
 #pragma endregion
@@ -585,6 +667,7 @@ void world::SetBodyTransform( bodyId bodyId, transform2 transform )
     assert( std::isfinite( transform.rotation.s ) );
 
     WakeBodyByIndex( bodyIndex );
+    resetJointImpulses( bodyIndex );
 
     assert( bodySims_.size() == bodies_.size() );
 
@@ -1298,8 +1381,8 @@ void world::Step( float timeStep, int subStepCount )
         * Step 순서
         *
         * 1. 현재 transform의 Contact manifold 갱신
-        * 2. solver-active Contact로 island 구성
-        * 3. Contact constraint 준비
+        * 2. solver-active Contact / Joint로 island 구성
+        * 3. Contact / Joint constraint 준비
         * 4. 각 sub-step에서:
         *    - force / gravity / damping으로 velocity 갱신
         *    - warm start
@@ -1310,7 +1393,7 @@ void world::Step( float timeStep, int subStepCount )
         * 6. 최종 impulse 저장
         * 7. delta transform을 bodySim에 반영
         *
-        * Contact는 sub-step 전에 한 번만 준비하고,
+        * Contact / Joint는 sub-step 전에 한 번만 준비하고,
         * 각 sub-step의 이동은 bodyState delta transform에 누적함.
         */
         const float subStepTime = timeStep / static_cast<float>( subStepCount );
@@ -1331,12 +1414,12 @@ void world::Step( float timeStep, int subStepCount )
             }
         );
 
-        WakeSleepingBodiesFromContacts();
+        wakeSleepingBodiesFromConstraints();
 
         // -----------------------------------------------------
         // 2. Build islands
         // -----------------------------------------------------
-        const islandGraph2 islandGraph = BuildIslands( bodies_, contactSims_ );
+        const islandGraph2 islandGraph = BuildIslands( bodies_, contactSims_, jointSims_ );
 
         // -----------------------------------------------------
         // 3. Prepare contact constraints
@@ -1347,6 +1430,13 @@ void world::Step( float timeStep, int subStepCount )
             PrepareContactConstraints( islandGraph.contactIds, subStepTime );
 
         assert( contactConstraints.size() == islandGraph.contactIds.size() );
+        std::vector<distanceJointConstraint2> jointConstraints;
+        jointConstraints.reserve( islandGraph.jointIds.size() );
+        for( const std::int32_t index : islandGraph.jointIds )
+        {
+            const distanceJointSim2& joint = jointSims_[index];
+            jointConstraints.push_back( prepareDistanceJointConstraint( joint, bodySims_[joint.bodyIdA], bodySims_[joint.bodyIdB], subStepTime ) );
+        }
 
         for( int subStepIndex = 0; subStepIndex < subStepCount; ++subStepIndex )
         {
@@ -1418,6 +1508,7 @@ void world::Step( float timeStep, int subStepCount )
                 const std::span<contactConstraint2> constraints =
                     std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
 
+                warmStartDistanceJoints( std::span<distanceJointConstraint2>{ jointConstraints }.subspan( island.jointStart, island.jointCount ) );
                 WarmStartContacts( constraints );
             }
 
@@ -1429,6 +1520,7 @@ void world::Step( float timeStep, int subStepCount )
                 const std::span<contactConstraint2> constraints =
                     std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
 
+                solveDistanceJoints( std::span<distanceJointConstraint2>{ jointConstraints }.subspan( island.jointStart, island.jointCount ), true );
                 SolveContactConstraints( constraints, true );
             }
 
@@ -1486,6 +1578,7 @@ void world::Step( float timeStep, int subStepCount )
                 const std::span<contactConstraint2> constraints =
                     std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
 
+                solveDistanceJoints( std::span<distanceJointConstraint2>{ jointConstraints }.subspan( island.jointStart, island.jointCount ), false );
                 SolveContactConstraints( constraints, false );
             }
         }
@@ -1651,6 +1744,11 @@ void world::Step( float timeStep, int subStepCount )
         // -----------------------------------------------------
         // 8. Store impulses
         // -----------------------------------------------------
+        for( const distanceJointConstraint2& constraint : jointConstraints )
+        {
+            distanceJointSim2& joint = jointSims_[constraint.jointId];
+            joint.impulse = constraint.impulse; joint.subStepTime = subStepTime;
+        }
         StoreContactConstraintImpulses( contactConstraints );
 
         // -----------------------------------------------------
@@ -1790,6 +1888,13 @@ bool world::IsValid( contactId contactId ) const noexcept
     return
         contact.contactId == contactIndex &&
         contact.generation == contactId.generation;
+}
+
+bool world::IsValid( jointId id ) const noexcept
+{
+    if( id.index1 <= 0 || id.worldToken != worldToken_ ) { return false; }
+    const std::int32_t index = id.index1 - 1;
+    return static_cast<std::size_t>( index ) < joints_.size() && joints_[index].jointId == index && joints_[index].generation == id.generation;
 }
 
 #pragma endregion
@@ -1953,6 +2058,12 @@ std::int32_t world::GetContactIndex( contactId contactId ) const
     return contactId.index1 - 1;
 }
 
+std::int32_t world::getJointIndex( jointId id ) const
+{
+    assert( IsValid( id ) );
+    return id.index1 - 1;
+}
+
 bodyId world::MakeBodyId( std::int32_t bodyIndex ) const
 {
     assert( bodyIndex >= 0 );
@@ -2051,6 +2162,69 @@ contactData world::MakeContactData( std::int32_t contactIndex ) const
     return data;
 }
 
+jointId world::makeJointId( std::int32_t jointIndex ) const
+{
+    assert( joints_[jointIndex].jointId == jointIndex );
+    return { jointIndex + 1, joints_[jointIndex].generation, worldToken_ };
+}
+
+#pragma endregion
+
+#pragma region JointStorage
+
+void world::destroyJointByIndex( std::int32_t jointIndex, bool touchProxies )
+{
+    joint2& joint = joints_[jointIndex];
+    assert( joint.jointId == jointIndex && jointCount_ > 0 );
+    const std::int32_t bodyIndexA = joint.edges[0].bodyId;
+    const std::int32_t bodyIndexB = joint.edges[1].bodyId;
+    const bool blocked = !joint.collideConnected;
+    for( const jointEdge2& edge : joint.edges )
+    {
+        body& endpoint = bodies_[edge.bodyId];
+        if( edge.prevKey != -1 ) { joints_[edge.prevKey >> 1].edges[edge.prevKey & 1].nextKey = edge.nextKey; }
+        else { endpoint.headJointKey = edge.nextKey; }
+        if( edge.nextKey != -1 ) { joints_[edge.nextKey >> 1].edges[edge.nextKey & 1].prevKey = edge.prevKey; }
+        --endpoint.jointCount;
+        if( blocked && touchProxies )
+        {
+            // 움직임이 없는 쌍도 다음 UpdatePairs에서 재검사함. Static proxy도 포함함.
+            for( std::int32_t shapeIndex = endpoint.headShapeId; shapeIndex != -1; shapeIndex = shapes_[shapeIndex].nextShapeId )
+            {
+                broadPhase_.TouchProxy( shapes_[shapeIndex].proxyKey );
+            }
+        }
+    }
+    const auto generation = joint.generation;
+    joint = {}; joint.generation = generation; joint.nextFree = jointFreeList_;
+    jointFreeList_ = jointIndex; jointSims_[jointIndex] = {}; --jointCount_;
+    // 먼저 edge를 분리해야 남은 component별로 wake가 전파됨.
+    WakeBodyByIndex( bodyIndexA ); WakeBodyByIndex( bodyIndexB );
+}
+
+void world::resetJointImpulses( std::int32_t bodyIndex )
+{
+    for( std::int32_t key = bodies_[bodyIndex].headJointKey; key != -1; key = joints_[key >> 1].edges[key & 1].nextKey )
+    {
+        jointSims_[key >> 1].impulse = 0.0f;
+    }
+}
+
+bool world::shouldBodiesCollide( std::int32_t bodyIndexA, std::int32_t bodyIndexB ) const
+{
+    if( bodyIndexA == bodyIndexB ) { return false; }
+    const body& a = bodies_[bodyIndexA]; const body& b = bodies_[bodyIndexB];
+    if( a.type != bodyType::Dynamic && b.type != bodyType::Dynamic ) { return false; }
+    const body& owner = a.jointCount < b.jointCount ? a : b;
+    for( std::int32_t key = owner.headJointKey; key != -1; key = joints_[key >> 1].edges[key & 1].nextKey )
+    {
+        const joint2& joint = joints_[key >> 1];
+        const std::int32_t other = joint.edges[( key & 1 ) ^ 1].bodyId;
+        if( !joint.collideConnected && ( other == bodyIndexA || other == bodyIndexB ) ) { return false; }
+    }
+    return true;
+}
+
 #pragma endregion
 
 #pragma region BodyShapeStorage
@@ -2064,6 +2238,10 @@ void world::DestroyBodyByIndex( std::int32_t bodyIndex )
     body& body = bodies_[bodyIndex];
 
     assert( body.bodyId == bodyIndex );
+
+    // Body가 살아 있는 동안 Joint edge를 먼저 정리하고, 이후 Contact / Shape를 제거함.
+    while( body.headJointKey != body::NULL_INDEX ) { destroyJointByIndex( body.headJointKey >> 1, false ); }
+    assert( body.jointCount == 0 );
 
     // Box2D처럼 먼저 이 body에 연결된 모든 Contact를 제거함.
     while( body.headContactKey != body::NULL_INDEX )
@@ -2342,6 +2520,9 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
     *
     * 마지막 식의 mi * |ci - C|^2가 평행축 정리로 추가되는 항임.
     */
+
+    // COM / mass 변경 전 Jacobian으로 만든 warm-start impulse는 버림.
+    resetJointImpulses( bodyIndex );
 
     const vec2 oldCenter = bodySim.center;
 
@@ -3001,8 +3182,17 @@ void world::WakeBodyByIndex( std::int32_t bodyIndex )
             stack.push_back( candidateId );
         };
 
+    const auto pushJointNeighbors = [&]( const body& endpoint )
+    {
+        for( std::int32_t key = endpoint.headJointKey; key != -1; key = joints_[key >> 1].edges[key & 1].nextKey )
+        {
+            pushBody( joints_[key >> 1].edges[( key & 1 ) ^ 1].bodyId );
+        }
+    };
+
     if( startBody.type == bodyType::Static )
     {
+        pushJointNeighbors( startBody );
         std::int32_t contactKey =
             startBody.headContactKey;
 
@@ -3055,6 +3245,7 @@ void world::WakeBodyByIndex( std::int32_t bodyIndex )
 
         currentBody.awake = true;
         currentBody.sleepTime = 0.0f;
+        pushJointNeighbors( currentBody );
 
         std::int32_t contactKey =
             currentBody.headContactKey;
@@ -3132,6 +3323,15 @@ void world::SleepBodyByIndex( std::int32_t bodyIndex )
         const body& currentBody =
             bodies_[currentBodyId];
 
+        for( std::int32_t key = currentBody.headJointKey; key != -1; key = joints_[key >> 1].edges[key & 1].nextKey )
+        {
+            const std::int32_t other = joints_[key >> 1].edges[( key & 1 ) ^ 1].bodyId;
+            if( bodies_[other].type != bodyType::Static && visited[other] == 0 )
+            {
+                visited[other] = 1; stack.push_back( other );
+            }
+        }
+
         std::int32_t contactKey =
             currentBody.headContactKey;
 
@@ -3196,7 +3396,7 @@ void world::SleepBodyByIndex( std::int32_t bodyIndex )
     }
 }
 
-void world::WakeSleepingBodiesFromContacts()
+void world::wakeSleepingBodiesFromConstraints()
 {
     for( const contactSim2& contactSim :
          contactSims_ )
@@ -3236,6 +3436,15 @@ void world::WakeSleepingBodiesFromContacts()
             WakeBodyByIndex(
                 contactSim.bodyIdA
             );
+        }
+    }
+    for( const distanceJointSim2& joint : jointSims_ )
+    {
+        if( joint.jointId == -1 ) { continue; }
+        const body& a = bodies_[joint.bodyIdA]; const body& b = bodies_[joint.bodyIdB];
+        if( a.type != bodyType::Static && b.type != bodyType::Static && a.awake != b.awake )
+        {
+            WakeBodyByIndex( a.awake ? joint.bodyIdB : joint.bodyIdA );
         }
     }
 }
@@ -3432,6 +3641,10 @@ void world::SolveContinuousBody(
             {
                 return;
             }
+
+            // Box2D continuous candidate는 sensor도 Body/Joint filter를 통과해야 함.
+            // Discrete sensor overlap은 UpdateSensors의 shape filter만 사용함.
+            if( !shouldBodiesCollide( bodyIndex, otherShape.bodyId ) ) { return; }
 
             const bool isSensor =
                 otherShape.sensorIndex !=
@@ -3763,7 +3976,7 @@ std::int32_t world::createContactForPair( std::int32_t shapeIdA, std::int32_t sh
     assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
     assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
 
-    if( shapeA.bodyId == shapeB.bodyId || !CanCollideShapes( shapeA.geometry, shapeB.geometry ) )
+    if( !shouldBodiesCollide( shapeA.bodyId, shapeB.bodyId ) || !CanCollideShapes( shapeA.geometry, shapeB.geometry ) )
     {
         return contact2::NULL_INDEX;
     }
@@ -4216,6 +4429,26 @@ void world::UpdateContactSim( std::int32_t contactId, const localManifold2& mani
     {
         WakeBodyByIndex( contactSim.bodyIdA );
         WakeBodyByIndex( contactSim.bodyIdB );
+    }
+}
+
+#pragma endregion
+
+#pragma region JointSolver
+
+void world::warmStartDistanceJoints( std::span<distanceJointConstraint2> constraints )
+{
+    for( const distanceJointConstraint2& constraint : constraints )
+    {
+        warmStartDistanceJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
+    }
+}
+
+void world::solveDistanceJoints( std::span<distanceJointConstraint2> constraints, bool useBias )
+{
+    for( distanceJointConstraint2& constraint : constraints )
+    {
+        solveDistanceJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB], useBias );
     }
 }
 

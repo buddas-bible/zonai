@@ -6,6 +6,7 @@
 #include "collision/narrowphase/manifold2.h"
 #include "dynamics/bodySim.h"
 #include "dynamics/bodyState.h"
+#include "dynamics/constraintSoftness2.h"
 #include "dynamics/contactSim2.h"
 
 namespace zonai
@@ -13,12 +14,7 @@ namespace zonai
 
 // Contact penetration을 부드럽게 줄이기 위한 solver softness.
 // massScale + impulseScale = 1 관계를 이용해 correction을 안정적으로 감쇠함.
-struct contactSoftness2
-{
-    float biasRate = 0.0f;
-    float massScale = 1.0f;
-    float impulseScale = 0.0f;
-};
+using contactSoftness2 = constraintSoftness2;
 
 // Hertz / damping ratio를 한 step에서 사용할 softness 계수로 변환함.
 [[nodiscard]] contactSoftness2 MakeContactSoftness(

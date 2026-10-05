@@ -71,7 +71,8 @@ void UnionBodies(
 
 islandGraph2 BuildIslands(
     std::span<const body> bodies,
-    std::span<const contactSim2> contactSims )
+    std::span<const contactSim2> contactSims,
+    std::span<const distanceJointSim2> jointSims )
 {
     std::vector<std::int32_t> parents(
         bodies.size(),
@@ -162,6 +163,20 @@ islandGraph2 BuildIslands(
         }
     }
 
+    // Joint는 manifold 없이도 active edge임. Static은 공유 anchor여도 union하지 않음.
+    for( const distanceJointSim2& joint : jointSims )
+    {
+        if( joint.jointId == -1 ) { continue; }
+        assert( joint.bodyIdA >= 0 && static_cast<std::size_t>( joint.bodyIdA ) < bodies.size() );
+        assert( joint.bodyIdB >= 0 && static_cast<std::size_t>( joint.bodyIdB ) < bodies.size() );
+        const body& a = bodies[joint.bodyIdA]; const body& b = bodies[joint.bodyIdB];
+        assert( a.type == bodyType::Static || b.type == bodyType::Static || a.awake == b.awake );
+        if( parents[joint.bodyIdA] != -1 && parents[joint.bodyIdB] != -1 )
+        {
+            UnionBodies( parents, ranks, joint.bodyIdA, joint.bodyIdB );
+        }
+    }
+
     std::vector<std::int32_t> islandIndices(
         bodies.size(),
         body::NULL_INDEX
@@ -240,6 +255,14 @@ islandGraph2 BuildIslands(
         ++graph.islands[islandIndex].contactCount;
     }
 
+    for( const distanceJointSim2& joint : jointSims )
+    {
+        if( joint.jointId == -1 ) { continue; }
+        const std::int32_t owner = parents[joint.bodyIdA] != -1 ? joint.bodyIdA : joint.bodyIdB;
+        if( parents[owner] != -1 ) { ++graph.islands[islandIndices[FindRoot( parents, owner )]].jointCount; }
+    }
+
+    std::size_t totalJointCount = 0;
     std::size_t totalBodyCount = 0;
     std::size_t totalContactCount = 0;
 
@@ -247,6 +270,8 @@ islandGraph2 BuildIslands(
     {
         island.bodyStart = totalBodyCount;
         island.contactStart = totalContactCount;
+        island.jointStart = totalJointCount;
+        totalJointCount += island.jointCount;
 
         totalBodyCount += island.bodyCount;
         totalContactCount += island.contactCount;
@@ -256,6 +281,8 @@ islandGraph2 BuildIslands(
 
     graph.bodyIds.resize( totalBodyCount );
     graph.contactIds.resize( totalContactCount );
+    graph.jointIds.resize( totalJointCount );
+    std::vector<std::size_t> jointOffsets( graph.islands.size(), 0 );
 
     std::vector<std::size_t> bodyOffsets(
         graph.islands.size(),
@@ -343,6 +370,15 @@ islandGraph2 BuildIslands(
             contactSim.contactId;
     }
 
+    for( const distanceJointSim2& joint : jointSims )
+    {
+        if( joint.jointId == -1 ) { continue; }
+        const std::int32_t owner = parents[joint.bodyIdA] != -1 ? joint.bodyIdA : joint.bodyIdB;
+        if( parents[owner] == -1 ) { continue; }
+        const std::int32_t islandIndex = islandIndices[FindRoot( parents, owner )];
+        const island2& island = graph.islands[islandIndex];
+        graph.jointIds[island.jointStart + jointOffsets[islandIndex]++] = joint.jointId;
+    }
     return graph;
 }
 

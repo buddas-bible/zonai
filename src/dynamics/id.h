@@ -18,6 +18,15 @@ struct bodyId
     constexpr bool operator==( const bodyId& ) const = default;
 };
 
+// World lifetime / slot / generation으로 Joint 수명을 식별함.
+struct jointId
+{
+    std::int32_t index1 = 0;
+    std::uint16_t generation = 0;
+    std::uint64_t worldToken = 0;
+    constexpr bool operator==( const jointId& ) const = default;
+};
+
 // world 외부에서 shape를 참조하는 opaque handle.
 // slot이 재사용되더라도 generation이 달라져 오래된 handle을 검출할 수 있음.
 struct shapeId
@@ -45,6 +54,11 @@ struct contactId
 };
 
 constexpr bool IsNull( bodyId id ) noexcept
+{
+    return id.index1 == 0;
+}
+
+constexpr bool IsNull( jointId id ) noexcept
 {
     return id.index1 == 0;
 }

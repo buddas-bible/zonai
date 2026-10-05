@@ -7,6 +7,7 @@
 
 #include "dynamics/body.h"
 #include "dynamics/contactSim2.h"
+#include "dynamics/distanceJointSim2.h"
 
 namespace zonai
 {
@@ -19,6 +20,9 @@ struct island2
 
     std::size_t contactStart = 0;
     std::size_t contactCount = 0;
+
+    std::size_t jointStart = 0;
+    std::size_t jointCount = 0;
 };
 
 // 한 simulation step에서 solver-active Contact로 구성한 transient connected components.
@@ -28,12 +32,14 @@ struct islandGraph2
     std::vector<island2> islands{};
     std::vector<std::int32_t> bodyIds{};
     std::vector<std::int32_t> contactIds{};
+    std::vector<std::int32_t> jointIds{};
 };
 
 // 현재 body / Contact 상태에서 solver island graph를 다시 구성함.
-// manifold point가 하나 이상인 Contact만 graph edge로 사용함.
+// manifold point가 하나 이상인 Contact와 모든 살아 있는 Joint를 graph edge로 사용함.
 [[nodiscard]] islandGraph2 BuildIslands(
     std::span<const body> bodies,
-    std::span<const contactSim2> contactSims );
+    std::span<const contactSim2> contactSims,
+    std::span<const distanceJointSim2> jointSims = {} );
 
 } // namespace zonai
