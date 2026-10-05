@@ -5,32 +5,41 @@
 namespace zonai
 {
 
-// world 외부에서 body를 참조하는 handle.
+// world 외부에서 body를 참조하는 opaque handle.
 // index1은 0을 null로 남기기 위해 내부 index + 1을 저장함.
 struct bodyId
 {
     std::int32_t index1 = 0;
     std::uint16_t generation = 0;
 
+    // Box2D의 world0 역할. owning world의 lifetime token을 저장함.
+    std::uint64_t worldToken = 0;
+
     constexpr bool operator==( const bodyId& ) const = default;
 };
 
-// world 외부에서 shape를 참조하는 handle.
+// world 외부에서 shape를 참조하는 opaque handle.
 // slot이 재사용되더라도 generation이 달라져 오래된 handle을 검출할 수 있음.
 struct shapeId
 {
     std::int32_t index1 = 0;
     std::uint16_t generation = 0;
 
+    // 같은 slot / generation을 가진 다른 world 수명과 구분함.
+    std::uint64_t worldToken = 0;
+
     constexpr bool operator==( const shapeId& ) const = default;
 };
 
-// world 외부에서 Contact를 참조하는 handle.
+// world 외부에서 Contact를 참조하는 opaque handle.
 // Contact는 자동 생성/파괴 빈도가 높으므로 generation을 32bit로 유지함.
 struct contactId
 {
     std::int32_t index1 = 0;
     std::uint32_t generation = 0;
+
+    // 같은 slot / generation을 가진 다른 world 수명과 구분함.
+    std::uint64_t worldToken = 0;
 
     constexpr bool operator==( const contactId& ) const = default;
 };

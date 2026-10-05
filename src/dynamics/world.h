@@ -39,6 +39,15 @@ concept worldCollisionCallback =
 class world
 {
 public:
+    world();
+
+    // world identity를 복제하지 않도록 값 복사/이동을 금지함.
+    world( const world& ) = delete;
+    world& operator=( const world& ) = delete;
+
+    world( world&& ) = delete;
+    world& operator=( world&& ) = delete;
+
     // definition의 초기 simulation 설정으로 새 body를 만듦.
     [[nodiscard]] bodyId CreateBody( const bodyDef& definition );
 
@@ -216,7 +225,7 @@ public:
     // Contact constraint를 준비한 뒤 sub-step마다 force / gravity, solve, position integration을 수행함.
     void Step( float timeStep, int subStepCount = 1 );
 
-    // null / 범위 / generation / 활성 slot을 모두 확인함.
+    // world lifetime / null / 범위 / generation / 활성 slot을 모두 확인함.
     [[nodiscard]] bool IsValid( bodyId bodyId ) const noexcept;
     [[nodiscard]] bool IsValid( shapeId shapeId ) const noexcept;
     [[nodiscard]] bool IsValid( contactId contactId ) const noexcept;
@@ -383,13 +392,13 @@ public:
     // body에 연결된 Contact 전체 개수. 실제 touching Contact 수보다 클 수 있음.
     [[nodiscard]] std::size_t GetBodyContactCapacity( bodyId bodyId ) const;
 
-    // body에 연결된 touching Contact만 output에 채우고 실제 작성 개수를 반환함.
+    // Box2D처럼 pointCount > 0인 Contact를 speculative point까지 output에 채움.
     [[nodiscard]] std::size_t GetBodyContactData( bodyId bodyId, std::span<contactData> output ) const;
 
     // shape가 속한 body의 Contact 개수이므로 보수적인 capacity임.
     [[nodiscard]] std::size_t GetShapeContactCapacity( shapeId shapeId ) const;
 
-    // 이 shape가 실제로 참여한 touching Contact만 output에 채움.
+    // 이 shape가 참여한 pointCount > 0 Contact를 speculative point까지 output에 채움.
     [[nodiscard]] std::size_t GetShapeContactData( shapeId shapeId, std::span<contactData> output ) const;
 
     [[nodiscard]] const broadPhase& GetBroadPhase() const noexcept
@@ -413,6 +422,9 @@ public:
     }
 
 private:
+    // Public handle이 world 수명을 구분할 때 사용하는 opaque token.
+    std::uint64_t worldToken_ = 0;
+
     [[nodiscard]] std::int32_t GetBodyIndex( bodyId bodyId ) const;
     [[nodiscard]] std::int32_t GetShapeIndex( shapeId shapeId ) const;
     [[nodiscard]] std::int32_t GetContactIndex( contactId contactId ) const;

@@ -1202,8 +1202,11 @@ int main()
             world.GetBodyContactData(
                 dynamicBody,
                 contacts
-            ) == 0
+            ) == 1
         );
+
+        assert( contacts[0].manifold.pointCount == 1 );
+        assert( contacts[0].manifold.points[0].separation > 0.0f );
 
         world.SetBodyLinearVelocity(
             dynamicBody,

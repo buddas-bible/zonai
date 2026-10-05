@@ -1,6 +1,7 @@
 #include "dynamics/world.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cmath>
 #include <limits>
@@ -17,9 +18,36 @@
 namespace zonai
 {
 
+namespace
+{
+
+std::uint64_t allocateWorldToken() noexcept
+{
+    static std::atomic<std::uint64_t> nextToken{ 1 };
+
+    for( ;; )
+    {
+        const std::uint64_t token =
+            nextToken.fetch_add( 1, std::memory_order_relaxed );
+
+        if( token != 0 )
+        {
+            return token;
+        }
+    }
+}
+
+} // namespace
+
+world::world()
+    : worldToken_( allocateWorldToken() )
+{
+}
+
 bool world::IsValid( bodyId bodyId ) const noexcept
 {
-    if( bodyId.index1 <= 0 )
+    if( bodyId.index1 <= 0 ||
+        bodyId.worldToken != worldToken_ )
     {
         return false;
     }
@@ -40,7 +68,8 @@ bool world::IsValid( bodyId bodyId ) const noexcept
 
 bool world::IsValid( shapeId shapeId ) const noexcept
 {
-    if( shapeId.index1 <= 0 )
+    if( shapeId.index1 <= 0 ||
+        shapeId.worldToken != worldToken_ )
     {
         return false;
     }
@@ -61,7 +90,8 @@ bool world::IsValid( shapeId shapeId ) const noexcept
 
 bool world::IsValid( contactId contactId ) const noexcept
 {
-    if( contactId.index1 <= 0 )
+    if( contactId.index1 <= 0 ||
+        contactId.worldToken != worldToken_ )
     {
         return false;
     }
@@ -109,7 +139,12 @@ bodyId world::MakeBodyId( std::int32_t bodyIndex ) const
 
     assert( body.bodyId == bodyIndex );
 
-    return { bodyIndex + 1, body.generation };
+    return
+    {
+        bodyIndex + 1,
+        body.generation,
+        worldToken_
+    };
 }
 
 shapeId world::MakeShapeId( std::int32_t shapeIndex ) const
@@ -121,7 +156,12 @@ shapeId world::MakeShapeId( std::int32_t shapeIndex ) const
 
     assert( shape.bodyId != shape::NULL_INDEX );
 
-    return { shapeIndex + 1, shape.generation };
+    return
+    {
+        shapeIndex + 1,
+        shape.generation,
+        worldToken_
+    };
 }
 
 contactId world::MakeContactId( std::int32_t contactIndex ) const
@@ -133,7 +173,12 @@ contactId world::MakeContactId( std::int32_t contactIndex ) const
 
     assert( contact.contactId == contactIndex );
 
-    return { contactIndex + 1, contact.generation };
+    return
+    {
+        contactIndex + 1,
+        contact.generation,
+        worldToken_
+    };
 }
 
 
@@ -674,7 +719,8 @@ std::size_t world::GetShapeSensorData(
         output[i] =
         {
             visitor.shapeIndex + 1,
-            visitor.generation
+            visitor.generation,
+            worldToken_
         };
     }
 
@@ -2636,12 +2682,13 @@ void world::UpdateSensors()
     }
 
     const auto makeVisitorId =
-        []( const sensorVisitor2& visitor )
+        [this]( const sensorVisitor2& visitor )
         {
             return shapeId
             {
                 visitor.shapeIndex + 1,
-                visitor.generation
+                visitor.generation,
+                worldToken_
             };
         };
 
@@ -2686,7 +2733,8 @@ void world::UpdateSensors()
                         sensorShapeId,
                         {
                             oldVisitor.shapeIndex + 1,
-                            oldVisitor.generation
+                            oldVisitor.generation,
+                            worldToken_
                         }
                     }
                 );
@@ -3012,7 +3060,8 @@ void world::DestroySensorByShapeIndex(
                 sensorShapeId,
                 {
                     visitor.shapeIndex + 1,
-                    visitor.generation
+                    visitor.generation,
+                    worldToken_
                 }
             }
         );
@@ -3456,8 +3505,8 @@ std::size_t world::GetBodyContactData( bodyId bodyId, std::span<contactData> out
 
         assert( contactSim.contactId == contactId );
 
-        // speculative point는 solver에는 사용하지만 실제 touching query에서는 제외함.
-        if( IsTouchingManifold( contactSim.manifold ) )
+        // pointCount가 있으면 speculative point도 solver-active Contact로 public query에 노출함.
+        if( contactSim.manifold.pointCount > 0 )
         {
             output[count] = MakeContactData( contactId );
             ++count;
@@ -3475,7 +3524,7 @@ std::size_t world::GetShapeContactCapacity( shapeId shapeId ) const
 
     const shape& shape = shapes_[shapeIndex];
 
-    // Sensor Contact query는 Sensor 저장소를 구현할 때 별도로 연결함.
+    // Sensor는 Contact를 만들지 않으므로 overlap 정보는 Sensor API에서 별도로 조회함.
     if( shape.sensorIndex != shape::NULL_INDEX )
     {
         return 0;
@@ -3575,7 +3624,7 @@ contactData world::MakeContactData( std::int32_t contactIndex ) const
     data.id = MakeContactId( contactIndex );
     data.shapeA = MakeShapeId( contact.shapeIdA );
     data.shapeB = MakeShapeId( contact.shapeIdB );
-    data.manifold = ToWorldManifold( contactSim.manifold, bodySimA.transform  );
+    data.manifold = ToWorldManifold( contactSim.manifold, bodySimA.transform );
 
     // world-space geometry와 함께 마지막 solver impulse도 public snapshot에 복사함.
     for( int i = 0; i < data.manifold.pointCount; ++i )

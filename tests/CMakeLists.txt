@@ -462,3 +462,7 @@ add_test(
     NAME islandTests
     COMMAND islandTests
 )
+
+add_executable(bodyShapeContactLifecycleTests dynamics/body_shape_contact_lifecycle_test.cpp)
+target_link_libraries(bodyShapeContactLifecycleTests PRIVATE zonai::zonai)
+add_test(NAME bodyShapeContactLifecycleTests COMMAND bodyShapeContactLifecycleTests)
