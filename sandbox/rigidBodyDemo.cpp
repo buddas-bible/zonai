@@ -26,11 +26,13 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
 {
     const bodyId target = kind_ == demoKind::playground ? impulseBody_ : pendulumBody_;
     const float direction = static_cast<float>( rightHeld_ ) - static_cast<float>( leftHeld_ );
+
     // 누르고 있는 이동 입력은 매 physics step에 힘으로 적용함. 입력을 취소해도 현재 물리 속도는 유지함.
     if( direction != 0.0f && world_.IsValid( target ) )
     {
         world_.ApplyForceToCenter( target, { direction * world_.GetBodyMass( target ) * 5.0f, 0.0f } );
     }
+
     world_.Step( timeStep, subStepCount );
     refreshContacts();
 }

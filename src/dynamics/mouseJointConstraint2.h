@@ -7,7 +7,6 @@
 
 namespace zonai
 {
-#pragma region Constraint
 
 struct mouseJointConstraint2
 {
@@ -30,10 +29,6 @@ struct mouseJointConstraint2
     constraintSoftness2 softness{};
 };
 
-#pragma endregion Constraint
-
-#pragma region Solver
-
 // 클릭 위치의 질량 중심 기준 작용점, 2x2 유효 질량, 힘 제한을 준비함.
 [[nodiscard]] mouseJointConstraint2 prepareMouseJointConstraint( const mouseJointSim2& joint, const bodySim& bodySimB, float subStepTime );
 
@@ -42,7 +37,5 @@ void warmStartMouseJointConstraint( const mouseJointConstraint2& constraint, bod
 
 // 월드 목표점을 향한 점 스프링을 풀며, 누적 임펄스의 크기를 dt * maxForce로 제한함.
 void solveMouseJointConstraint( mouseJointConstraint2& constraint, bodyState& bodyStateB );
-
-#pragma endregion Solver
 
 } // namespace zonai

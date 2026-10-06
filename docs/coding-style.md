@@ -28,7 +28,7 @@ Phyzzle 기준은 포트폴리오의 원래 C++ 물리엔진·게임 클라이�
 - 물리 계산에서는 작성자가 직접 쓴 r_a, r_b, v_a, w_a, v_p2, v_r 같은 수학 표기를 사용한다. 일반 API에 이 표기를 확장하지 않는다.
 - bodySimA와 bodyStateA처럼 물리 상태의 종류와 A/B 역할을 이름에 드러낸다. localAnchor와 world target의 좌표계도 분명히 한다.
 - 헤더의 함수 선언과 CPP 정의 순서를 맞춘다. 관련 초기화·입력·계산·조회 함수를 가까이 둔다.
-- 의미 있는 코드 묶음에 #pragma region을 사용하고 endregion에도 이름을 붙인다. 함수마다 형식적인 region을 만들 필요는 없다.
+- 긴 파일의 의미 있는 코드 묶음에 #pragma region을 사용하고 endregion에도 이름을 붙인다. 짧은 구조체나 함수마다 형식적인 region을 만들지 않는다. 작성자가 직접 제거한 Mouse Joint·조인트 슬롯의 region도 이 기준에 반영했다.
 - 기존 필드 순서와 객체 레이아웃을 스타일 때문에 바꾸지 않는다. 예전 프로젝트의 PascalCase, 인자 앞 underscore, tab 규칙보다 현재 zonai 규칙을 우선한다.
 
 ## 함수와 계산

@@ -5,7 +5,6 @@
 
 namespace zonai
 {
-#pragma region Simulation
 
 struct mouseJointSim2
 {
@@ -23,5 +22,4 @@ struct mouseJointSim2
     float subStepTime = 0.0f; // 누적 임펄스를 구한 시간 간격
 };
 
-#pragma endregion Simulation
 } // namespace zonai

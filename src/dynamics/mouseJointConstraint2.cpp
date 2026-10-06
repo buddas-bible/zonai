@@ -4,7 +4,6 @@
 
 namespace zonai
 {
-#pragma region Prepare
 mouseJointConstraint2 prepareMouseJointConstraint( const mouseJointSim2& joint, const bodySim& bodySimB, float subStepTime )
 {
     assert( subStepTime > 0.0f && joint.bodyIdB == bodySimB.bodyId );
@@ -47,9 +46,7 @@ mouseJointConstraint2 prepareMouseJointConstraint( const mouseJointSim2& joint, 
 
     return constraint;
 }
-#pragma endregion Prepare
 
-#pragma region WarmStart
 void warmStartMouseJointConstraint( const mouseJointConstraint2& constraint, bodyState& bodyStateB )
 {
     const vec2 r_b = Rotate( bodyStateB.deltaRotation, constraint.anchorB );
@@ -57,9 +54,7 @@ void warmStartMouseJointConstraint( const mouseJointConstraint2& constraint, bod
     bodyStateB.linearVelocity += constraint.invMass * constraint.impulse;
     bodyStateB.angularVelocity += constraint.invInertia * Cross( r_b, constraint.impulse );
 }
-#pragma endregion WarmStart
 
-#pragma region Solve
 void solveMouseJointConstraint( mouseJointConstraint2& constraint, bodyState& bodyStateB )
 {
     const vec2 r_b = Rotate( bodyStateB.deltaRotation, constraint.anchorB );
@@ -91,5 +86,4 @@ void solveMouseJointConstraint( mouseJointConstraint2& constraint, bodyState& bo
     bodyStateB.linearVelocity += constraint.invMass * impulse;
     bodyStateB.angularVelocity += constraint.invInertia * Cross( r_b, impulse );
 }
-#pragma endregion Solve
 } // namespace zonai

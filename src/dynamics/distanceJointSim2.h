@@ -6,7 +6,6 @@
 namespace zonai
 {
 // World의 조인트 슬롯과 같은 인덱스에 보관함. 누적 임펄스를 다음 step까지 유지함.
-#pragma region Simulation
 
 struct distanceJointSim2
 {
@@ -34,5 +33,4 @@ struct distanceJointSim2
     float upperImpulse = 0.0f;
 };
 
-#pragma endregion Simulation
 } // namespace zonai

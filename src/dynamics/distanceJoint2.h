@@ -5,7 +5,6 @@
 
 namespace zonai
 {
-#pragma region Definition
 
 struct distanceJointDef
 {
@@ -30,10 +29,6 @@ struct distanceJointDef
     float minLength = 0.0f;
     float maxLength = 1.0e5f;
 };
-
-#pragma endregion Definition
-
-#pragma region Data
 
 struct distanceJointData
 {
@@ -60,5 +55,4 @@ struct distanceJointData
     float maxLength = 0.0f;
 };
 
-#pragma endregion Data
 } // namespace zonai
