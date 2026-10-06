@@ -26,6 +26,9 @@ target_link_libraries(imgui
 
 add_executable(zonaiSandbox
     main.cpp
+    demo.cpp
+    rigidBodyDemo.cpp
+    rigidBodyDemoUi.cpp
     debug/debugCamera.cpp
     debug/debugDraw.cpp
 )
