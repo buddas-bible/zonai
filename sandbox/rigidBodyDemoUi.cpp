@@ -34,7 +34,7 @@ const char* getBodyTypeName( bodyType type )
         return "정적";
 
     case bodyType::Kinematic:
-        return "운동학적";
+        return "키네마틱";
 
     case bodyType::Dynamic:
         return "동적";
@@ -346,7 +346,7 @@ void rigidBodyDemoUi::drawWorldSettings()
 
     bool continuousEnabled = getWorld().IsContinuousEnabled();
 
-    if( ImGui::Checkbox( "연속 충돌 검사###Continuous collision", &continuousEnabled ) )
+    if( ImGui::Checkbox( "CCD 검사###Continuous collision", &continuousEnabled ) )
     {
         getWorld().SetContinuousEnabled( continuousEnabled );
     }
@@ -504,10 +504,10 @@ void rigidBodyDemoUi::drawInspector()
 #pragma endregion CollisionMask
 
 #pragma region SleepAndCcd
-        if( bodyRef.type != bodyType::Static && ImGui::CollapsingHeader( "수면과 연속 충돌###Sleep and CCD" ) )
+        if( bodyRef.type != bodyType::Static && ImGui::CollapsingHeader( "Sleep과 CCD###Sleep and CCD" ) )
         {
             bool awake = getWorld().IsBodyAwake( visual.bodyHandle );
-            if( ImGui::Checkbox( "깨어 있음###Awake", &awake ) )
+            if( ImGui::Checkbox( "Awake###Awake", &awake ) )
             {
                 getWorld().SetBodyAwake( visual.bodyHandle, awake );
             }
@@ -522,7 +522,7 @@ void rigidBodyDemoUi::drawInspector()
                 getWorld().SetBodySleepThreshold( visual.bodyHandle, sleepThreshold );
             }
             float safetyFactor = getWorld().GetBodySafetyFactor( visual.bodyHandle );
-            if( ImGui::DragFloat( "연속 충돌 안전 계수###CCD safety factor", &safetyFactor, 0.01f, 0.01f, 2.0f, "%.2f" ) )
+            if( ImGui::DragFloat( "CCD 안전 계수###CCD safety factor", &safetyFactor, 0.01f, 0.01f, 2.0f, "%.2f" ) )
             {
                 getWorld().SetBodySafetyFactor( visual.bodyHandle, safetyFactor );
             }
@@ -715,7 +715,7 @@ void rigidBodyDemoUi::drawDebugSettings()
     ImGui::TextUnformatted( "경계 상자 트리" );
 
     ImGui::Checkbox( "동적 오브젝트 트리###Dynamic Tree", &showDynamicTree_ );
-    ImGui::Checkbox( "운동학적 오브젝트 트리###Kinematic Tree", &showKinematicTree_ );
+    ImGui::Checkbox( "키네마틱 오브젝트 트리###Kinematic Tree", &showKinematicTree_ );
     ImGui::Checkbox( "정적 오브젝트 트리###Static Tree", &showStaticTree_ );
 
     ImGui::Checkbox( "트리 잎 노드###Tree Leaves", &showTreeLeaves_ );
@@ -739,7 +739,7 @@ void rigidBodyDemoUi::drawDebugSettings()
     ImGui::Text( "재사용한 접촉 수: %zu", getWorld().GetRecycledContactCount() );
 
     ImGui::Text( "동적 트리: %zu / 높이 %d", dynamicTreeRef.GetProxyCount(), dynamicTreeRef.GetHeight() );
-    ImGui::Text( "운동학적 트리: %zu / 높이 %d", kinematicTree.GetProxyCount(), kinematicTree.GetHeight() );
+    ImGui::Text( "키네마틱 트리: %zu / 높이 %d", kinematicTree.GetProxyCount(), kinematicTree.GetHeight() );
     ImGui::Text( "정적 트리: %zu / 높이 %d", staticTree.GetProxyCount(), staticTree.GetHeight() );
 
     ImGui::Spacing();
@@ -789,13 +789,13 @@ std::unique_ptr<demo> createDemoView( demoKind kind )
 
 void drawProjectCollisionSettings( demoSession& session, collisionSettingsUi& state )
 {
-    if( ImGui::Button( "공통 충돌 설정###Project collision matrix", ImVec2( -1.0f, 0.0f ) ) )
+    if( ImGui::Button( "충돌 레이어 설정###Project collision matrix", ImVec2( -1.0f, 0.0f ) ) )
     {
-        ImGui::OpenPopup( "공통 충돌 설정###Project collision settings" );
+        ImGui::OpenPopup( "충돌 레이어 설정###Project collision settings" );
     }
     const float minWidth = std::max( 460.0f, 140.0f + 56.0f * std::min( std::popcount( state.visibleLayers ), 8 ) );
     ImGui::SetNextWindowSizeConstraints( { minWidth, 0.0f }, { 640.0f, 900.0f } );
-    if( ImGui::BeginPopupModal( "공통 충돌 설정###Project collision settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
+    if( ImGui::BeginPopupModal( "충돌 레이어 설정###Project collision settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
     {
         ImGui::TextUnformatted( "선택한 레이어 사이의 충돌 허용 여부를 편집합니다." );
         drawCollisionBits( "표시할 레이어###VisibleCollisionLayers", "VisibleLayers", state.visibleLayers, 8 );

@@ -186,14 +186,14 @@ void rigidBodyDemo::createPlayground()
 
     shapes_.push_back( { capsuleBody, capsuleShape, "캡슐 [동적]" } );
 
-    // 중력과 힘의 영향을 받지 않고 지정한 속도로 움직이는 운동학적 발판.
+    // 중력과 힘의 영향을 받지 않고 지정한 속도로 움직이는 키네마틱 발판.
     const bodyId kinematicBody = world_.CreateBody( bodyType::Kinematic, { { -5.5f, -1.5f }, {} } );
 
     const shapeId kinematicShape = world_.CreateShape( kinematicBody, MakeBox( { 0.8f, 0.3f } ) );
 
     world_.SetBodyLinearVelocity( kinematicBody, { 1.25f, 0.0f } );
 
-    shapes_.push_back( { kinematicBody, kinematicShape, "발판 [운동학적]" } );
+    shapes_.push_back( { kinematicBody, kinematicShape, "발판 [키네마틱]" } );
 }
 
 void rigidBodyDemo::createPendulum()

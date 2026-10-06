@@ -246,7 +246,7 @@ int main()
             session.setPlaying( !session.isPlaying() );
         }
         ImGui::SameLine();
-        if( ImGui::Button( "한 단계###Step", ImVec2( 72.0f, 0.0f ) ) )
+        if( ImGui::Button( "1프레임###Step", ImVec2( 72.0f, 0.0f ) ) )
         {
             stepRequested = true;
         }
