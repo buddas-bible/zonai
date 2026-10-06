@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 #include <numbers>
 #include "dynamics/wheelJointConstraint2.h"
 
@@ -167,6 +168,137 @@ int main()
     warmStartWheelJointConstraint( constraint, stateA, stateB );
     solveWheelJointConstraint( constraint, stateA, stateB, true );
     check( IsFinite( stateB.linearVelocity ) && constraint.impulse == 0.0f && constraint.springImpulse == 0.0f, "zero effective mass produces neither impulse nor NaN" );
+
+    // 범위 안에서는 남은 거리 / h만큼 접근할 수 있지만 경계를 지나갈 속도는 제거함.
+    bodySimA = {};
+    bodySimA.bodyId = 0;
+    bodySimB = {};
+    bodySimB.bodyId = 1;
+    bodySimB.invMass = 1.0f;
+    bodySimB.invInertia = 1.0f;
+    joint = {};
+    joint.bodyIdA = 0;
+    joint.bodyIdB = 1;
+    joint.enableSpring = false;
+    joint.enableLimit = true;
+    joint.lowerTranslation = -0.5f;
+    joint.upperTranslation = 0.5f;
+    bodySimB.center = { 0.0f, 0.4f };
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    stateB.linearVelocity.y = 12.0f;
+    stateB.angularVelocity = 3.0f;
+    solveWheelJointConstraint( constraint, stateA, stateB, false );
+    check( near( stateB.linearVelocity.y, 6.0f ) && near( constraint.upperImpulse, 6.0f ) && constraint.lowerImpulse == 0.0f, "upper speculation permits remaining distance but prevents crossing" );
+    check( stateB.angularVelocity == 3.0f, "translation limit leaves centered wheel rotation free" );
+    solveWheelJointConstraint( constraint, stateA, stateB, false );
+    check( near( stateB.linearVelocity.y, 6.0f ) && near( constraint.upperImpulse, 6.0f ), "limit applies only increment of accumulated impulse" );
+
+    bodySimB.center.y = -0.4f;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    stateB.linearVelocity.y = -12.0f;
+    solveWheelJointConstraint( constraint, stateA, stateB, false );
+    check( near( stateB.linearVelocity.y, -6.0f ) && near( constraint.lowerImpulse, 6.0f ) && constraint.upperImpulse == 0.0f, "lower speculation has opposite reaction sign" );
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    stateB.linearVelocity.y = 2.0f;
+    solveWheelJointConstraint( constraint, stateA, stateB, false );
+    check( constraint.lowerImpulse == 0.0f && stateB.linearVelocity.y == 2.0f, "unilateral lower impulse permits return into range" );
+
+    bodySimB.center.y = 0.7f;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    solveWheelJointConstraint( constraint, stateA, stateB, false );
+    check( stateB.linearVelocity.y == 0.0f, "violated translation adds no position bias during relaxation" );
+    solveWheelJointConstraint( constraint, stateA, stateB, true );
+    check( stateB.linearVelocity.y < 0.0f && constraint.upperImpulse > 0.0f, "biased pass restores violated upper boundary" );
+    bodySimB.center.y = -0.7f;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    solveWheelJointConstraint( constraint, stateA, stateB, true );
+    check( stateB.linearVelocity.y > 0.0f && constraint.lowerImpulse > 0.0f, "biased pass restores violated lower boundary" );
+
+    bodySimB.center = {};
+    joint.lowerTranslation = 0.0f;
+    joint.upperTranslation = 0.0f;
+    for( const float speed : { -2.0f, 2.0f } )
+    {
+        constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+        stateB = {};
+        stateB.linearVelocity.y = speed;
+        solveWheelJointConstraint( constraint, stateA, stateB, false );
+        check( stateB.linearVelocity.y == 0.0f && constraint.lowerImpulse >= 0.0f && constraint.upperImpulse >= 0.0f, "equal translations hold axial velocity in both directions" );
+    }
+
+    // 중심 밖 상한 임펄스가 회전을 바꾸면, 뒤의 수직 제약은 갱신된 점 속도를 읽어야 함.
+    joint.localAnchorB = { 1.0f, 1.0f };
+    joint.lowerTranslation = -2.0f;
+    joint.upperTranslation = 1.0f;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    stateB.linearVelocity.y = 2.0f;
+    solveWheelJointConstraint( constraint, stateA, stateB, false );
+    check( near( constraint.upperImpulse, 1.0f ) && near( stateB.linearVelocity.x, -0.5f ) && near( stateB.angularVelocity, -0.5f ), "limit then lateral constraint uses latest off-center point velocity" );
+
+    joint.localAnchorB = {};
+    joint.lowerTranslation = -0.5f;
+    joint.upperTranslation = 0.5f;
+    joint.enableSpring = true;
+    bodySimB.center.y = 0.5f;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    solveWheelJointConstraint( constraint, stateA, stateB, false );
+    check( constraint.springImpulse < 0.0f && constraint.upperImpulse == 0.0f && stateB.linearVelocity.y < 0.0f, "spring can return inward from upper boundary without limit pulling outward" );
+    bodySimB.center.y = 0.2f;
+    joint.upperTranslation = 0.2f;
+    joint.lowerTranslation = 0.1f;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    stateB.deltaPosition.y = -0.1f;
+    solveWheelJointConstraint( constraint, stateA, stateB, false );
+    check( constraint.springImpulse < 0.0f && constraint.lowerImpulse > 0.0f && near( stateB.linearVelocity.y, 0.0f ), "lower limit uses current translation and spring updated velocity" );
+
+    joint.enableSpring = false;
+    joint.lowerTranslation = -0.5f;
+    joint.upperTranslation = 0.5f;
+    bodySimB.center = {};
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    stateA.deltaRotation = rot2::FromRadians( std::numbers::pi_v<float> / 2.0f );
+    stateB.deltaPosition = { -0.5f, 0.0f };
+    stateB.linearVelocity.x = -2.0f;
+    solveWheelJointConstraint( constraint, stateA, stateB, false );
+    check( std::abs( stateB.linearVelocity.x ) < 0.00001f && constraint.upperImpulse > 1.9f, "translation limit follows current A axis and accumulated position" );
+
+    bodySimA.invMass = 1.0f;
+    bodySimB.invMass = 2.0f;
+    joint.subStepTime = h;
+    joint.lowerImpulse = 2.0f;
+    joint.upperImpulse = 3.0f;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    warmStartWheelJointConstraint( constraint, stateA, stateB );
+    check( near( stateA.linearVelocity.y, 1.0f ) && near( stateB.linearVelocity.y, -2.0f ), "warm start combines signed lower minus upper impulses with both reactions" );
+    check( near( stateA.linearVelocity.y + stateB.linearVelocity.y / 2.0f, 0.0f ), "limit warm start preserves linear momentum" );
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h / 2.0f );
+    check( constraint.lowerImpulse == 0.0f && constraint.upperImpulse == 0.0f, "substep time change discards both limit caches" );
+    joint.enableLimit = false;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    check( constraint.lowerImpulse == 0.0f && constraint.upperImpulse == 0.0f, "disabled limits ignore old impulses" );
+    joint.enableLimit = true;
+    bodySimA.invMass = 0.0f;
+    bodySimB.invMass = 0.0f;
+    bodySimB.invInertia = 0.0f;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    warmStartWheelJointConstraint( constraint, stateA, stateB );
+    solveWheelJointConstraint( constraint, stateA, stateB, true );
+    check( constraint.lowerImpulse == 0.0f && constraint.upperImpulse == 0.0f && IsFinite( stateB.linearVelocity ), "zero axial mass discards limit caches and stays finite" );
 
     return EXIT_SUCCESS;
 }

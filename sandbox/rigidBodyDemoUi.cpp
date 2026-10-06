@@ -318,6 +318,15 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         draw.DrawArrow( joint.anchorA, joint.axis, AXIS_COLOR, 0.5f );
         draw.DrawPoint( joint.anchorA, AXIS_COLOR, 7.0f );
         draw.DrawPoint( joint.anchorB, WHEEL_COLOR );
+        if( joint.enableLimit )
+        {
+            const vec2 lower = joint.anchorA + joint.lowerTranslation * joint.axis;
+            const vec2 upper = joint.anchorA + joint.upperTranslation * joint.axis;
+            const vec2 tick = 0.09f * Cross( 1.0f, joint.axis );
+            draw.DrawSegment( { lower, upper }, IM_COL32( 190, 190, 190, 255 ) );
+            draw.DrawSegment( { lower - tick, lower + tick }, IM_COL32( 90, 220, 110, 255 ) );
+            draw.DrawSegment( { upper - tick, upper + tick }, IM_COL32( 245, 100, 100, 255 ) );
+        }
         // 지지대와 바퀴 사이 연결선. 물리 스프링의 변위 0은 별도의 청록색 기준점임.
         draw.DrawSegment( { getWorld().GetBodyTransform( joint.bodyA ).position, joint.anchorB }, WHEEL_COLOR );
         draw.DrawArrow( joint.anchorB, Rotate( getWorld().GetBodyTransform( joint.bodyB ).rotation, { 1.0f, 0.0f } ), WHEEL_COLOR, 0.3f );
@@ -778,11 +787,11 @@ void rigidBodyDemoUi::drawExperimentControls()
     else if( getKind() == demoKind::wheelSuspension )
     {
         ImGui::TextUnformatted( "서스펜션 관찰" );
-        const wheelJointData joint = getWorld().getWheelJointData( getWheelJoint() );
+        wheelJointData joint = getWorld().getWheelJointData( getWheelJoint() );
         ImGui::Text( "축 방향 변위: %.3f m / 축 옆 오차: %.4f m", joint.currentTranslation, joint.lateralError );
         const float angularVelocity = getWorld().GetBodyAngularVelocity( joint.bodyB ) - getWorld().GetBodyAngularVelocity( joint.bodyA );
         ImGui::Text( "바퀴 상대 각속도: %.2f rad/s", angularVelocity );
-        ImGui::Text( "서스펜션 힘: %.2f N", joint.springForce );
+        ImGui::Text( "스프링 힘: %.2f N / 제한 힘: %.2f N", joint.springForce, joint.limitForce );
         ImGui::TextWrapped( "청록색 점은 스프링 변위 0, 화살표는 이동 축의 양의 방향입니다. 보라색은 바퀴와 회전 방향입니다. 스프링을 꺼도 축 옆으로는 벗어나지 않으며 바퀴 회전은 자유롭습니다." );
 
         if( ImGui::TreeNode( "서스펜션 스프링###WheelSpringSettings" ) )
@@ -805,7 +814,33 @@ void rigidBodyDemoUi::drawExperimentControls()
             {
                 getWorld().setWheelJointSpring( getWheelJoint(), enableSpring, hertz, dampingRatio );
             }
-            ImGui::TextWrapped( "주파수는 스프링 강성, 감쇠 비율은 진동을 조절합니다. 스프링을 끄거나 0 Hz로 설정하면 축 방향 이동이 자유롭고 중력으로 떨어집니다. 이동 범위 제한과 구동 모터는 후속 단계입니다." );
+            ImGui::TextWrapped( "주파수는 스프링 강성, 감쇠 비율은 진동을 조절합니다. 스프링을 끄거나 0 Hz로 설정하면 축 방향 스프링 힘만 사라집니다. 이동 범위 제한도 꺼져 있으면 중력으로 떨어집니다." );
+            ImGui::TreePop();
+        }
+        if( ImGui::TreeNode( "이동 범위 제한###WheelLimitSettings" ) )
+        {
+            constexpr float MAX_TRANSLATION = 1.0f;
+            bool enableLimit = joint.enableLimit;
+            float lower = joint.lowerTranslation;
+            float upper = joint.upperTranslation;
+            bool changed = ImGui::Checkbox( "이동 제한 사용###Wheel limit", &enableLimit );
+            if( ImGui::SliderFloat( "최소 변위###Wheel lower", &lower, -MAX_TRANSLATION, upper, "%.2f m", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                lower = std::clamp( lower, -MAX_TRANSLATION, upper );
+                changed = true;
+            }
+            if( ImGui::SliderFloat( "최대 변위###Wheel upper", &upper, lower, MAX_TRANSLATION, "%.2f m", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                upper = std::clamp( upper, lower, MAX_TRANSLATION );
+                changed = true;
+            }
+            if( changed )
+            {
+                getWorld().setWheelJointLimit( getWheelJoint(), enableLimit, lower, upper );
+                joint = getWorld().getWheelJointData( getWheelJoint() );
+            }
+            ImGui::Text( "제한 힘: %.2f N", joint.limitForce );
+            ImGui::TextWrapped( "청록색 기준점에서 축 방향의 부호 있는 변위입니다. 초록은 최소, 빨강은 최대 변위이며 회색은 허용 범위입니다. 스프링을 꺼도 제한은 유지되고 바퀴 회전은 자유롭습니다. 두 변위가 같으면 해당 위치를 유지합니다. 제한은 부드럽게 보정하므로 하중에서 작은 오차가 남을 수 있습니다." );
             ImGui::TreePop();
         }
         if( ImGui::Button( "바퀴 축 방향으로 밀기###Kick wheel", ImVec2( -1.0f, 0.0f ) ) )

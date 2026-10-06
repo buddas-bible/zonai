@@ -30,12 +30,19 @@ struct wheelJointConstraint2
     bool enableSpring = false;
     float springImpulse = 0.0f;
     constraintSoftness2 springSoftness{}; // 축 방향의 물리 스프링.
+
+    bool enableLimit = false;
+    float lowerTranslation = 0.0f; // 부호 있는 축 방향 변위 (m). lower <= upper.
+    float upperTranslation = 0.0f;
+    float lowerImpulse = 0.0f;
+    float upperImpulse = 0.0f;
+    float invSubStepTime = 0.0f;
 };
 
 // 원점 작용점을 질량 중심 기준으로 바꾸고 회전하는 축의 유효 질량을 준비함.
 [[nodiscard]] wheelJointConstraint2 prepareWheelJointConstraint( const wheelJointSim2& joint, const bodySim& bodySimA, const bodySim& bodySimB, float subStepTime );
 void warmStartWheelJointConstraint( const wheelJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB );
-// 스프링 → 축 수직 제약. 물리 스프링은 relaxation에서도 복원 bias를 유지함.
+// 스프링 → 하한 → 상한 → 축 수직 제약. 물리 스프링은 relaxation에서도 복원 bias를 유지함.
 void solveWheelJointConstraint( wheelJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB, bool useBias );
 
 } // namespace zonai
