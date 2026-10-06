@@ -17,6 +17,130 @@ void check( bool condition, const char* message )
 bool near( float a, float b ) { return std::abs( a - b ) < 0.0001f; }
 }
 
+namespace
+{
+
+void checkMotor()
+{
+    bodySim bodySimA{}, bodySimB{};
+    bodySimA.bodyId = 0;
+    bodySimB.bodyId = 1;
+    bodySimA.invMass = 1.0f;
+    bodySimB.invMass = 0.5f;
+    bodySimB.center = { 2.0f, 0.0f };
+    distanceJointSim2 joint{};
+    joint.bodyIdA = 0;
+    joint.bodyIdB = 1;
+    joint.length = 2.0f;
+    joint.enableSpring = true;
+    joint.hertz = 0.0f;
+    joint.enableMotor = true;
+    joint.motorSpeed = 3.0f;
+    joint.maxMotorForce = 12.0f;
+    const float h = 1.0f / 60.0f;
+    auto constraint = prepareDistanceJointConstraint( joint, bodySimA, bodySimB, h );
+    bodyState bodyStateA{}, bodyStateB{};
+
+    // 반복 계산 횟수가 늘어도 총 임펄스는 F * h를 넘지 않아야 함.
+    for( int i = 0; i < 8; ++i )
+    {
+        solveDistanceJointConstraint( constraint, bodyStateA, bodyStateB, i % 2 == 0 );
+    }
+    check( near( constraint.motorImpulse, 0.2f ), "motor clamps accumulated impulse to force times substep" );
+    check( near( bodyStateA.linearVelocity.x, -0.2f ) && near( bodyStateB.linearVelocity.x, 0.1f ), "motor applies equal and opposite impulse" );
+    check( near( bodyStateA.linearVelocity.x + 2.0f * bodyStateB.linearVelocity.x, 0.0f ), "motor conserves two-body momentum" );
+
+    joint.motorSpeed = -3.0f;
+    constraint = prepareDistanceJointConstraint( joint, bodySimA, bodySimB, h );
+    bodyStateA = {};
+    bodyStateB = {};
+    solveDistanceJointConstraint( constraint, bodyStateA, bodyStateB, false );
+    check( near( constraint.motorImpulse, -0.2f ), "negative speed contracts distance" );
+    joint.motorSpeed = 2.0f;
+    joint.maxMotorForce = 1000.0f;
+    joint.hertz = 2.0f;
+    constraint = prepareDistanceJointConstraint( joint, bodySimA, bodySimB, h );
+    bodyStateA = {};
+    bodyStateB = {};
+    bodyStateB.linearVelocity.x = 3.0f;
+    solveDistanceJointConstraint( constraint, bodyStateA, bodyStateB, true );
+    check( near( bodyStateB.linearVelocity.x - bodyStateA.linearVelocity.x, 2.0f ), "motor reads velocity after spring impulse" );
+
+    joint.hertz = 0.0f;
+    joint.enableLimit = true;
+    joint.minLength = 1.0f;
+    joint.maxLength = 2.0f;
+    constraint = prepareDistanceJointConstraint( joint, bodySimA, bodySimB, h );
+    bodyStateA = {};
+    bodyStateB = {};
+    solveDistanceJointConstraint( constraint, bodyStateA, bodyStateB, false );
+    check( near( bodyStateB.linearVelocity.x - bodyStateA.linearVelocity.x, 0.0f ) && constraint.motorImpulse > 0.0f && constraint.upperImpulse > 0.0f, "upper limit opposes motor after motor solve" );
+    joint.motorSpeed = -2.0f;
+    bodySimB.center.x = 1.0f;
+    constraint = prepareDistanceJointConstraint( joint, bodySimA, bodySimB, h );
+    bodyStateA = {};
+    bodyStateB = {};
+    solveDistanceJointConstraint( constraint, bodyStateA, bodyStateB, true );
+    check( near( bodyStateB.linearVelocity.x - bodyStateA.linearVelocity.x, -2.0f * ( 1.0f - constraint.limitSoftness.massScale ) ) && constraint.lowerImpulse > 0.0f, "lower limit soft bias pass opposes negative motor" );
+    solveDistanceJointConstraint( constraint, bodyStateA, bodyStateB, false );
+    check( near( bodyStateB.linearVelocity.x - bodyStateA.linearVelocity.x, 0.0f ), "lower limit relax pass removes outward speed" );
+
+    joint.enableLimit = false;
+    joint.maxMotorForce = 12.0f;
+    joint.motorImpulse = 0.2f;
+    joint.subStepTime = h;
+    constraint = prepareDistanceJointConstraint( joint, bodySimA, bodySimB, h );
+    bodyStateA = {};
+    bodyStateB = {};
+    warmStartDistanceJointConstraint( constraint, bodyStateA, bodyStateB );
+    check( near( bodyStateA.linearVelocity.x, -0.2f ) && near( bodyStateB.linearVelocity.x, 0.1f ), "warm start includes motor cache" );
+    constraint = prepareDistanceJointConstraint( joint, bodySimA, bodySimB, h * 0.5f );
+    check( constraint.motorImpulse == 0.0f, "changed substep clears motor cache" );
+    joint.maxMotorForce = 6.0f;
+    constraint = prepareDistanceJointConstraint( joint, bodySimA, bodySimB, h );
+    check( near( constraint.motorImpulse, 0.1f ), "warm cache respects reduced force cap" );
+    joint.maxMotorForce = 0.0f;
+    constraint = prepareDistanceJointConstraint( joint, bodySimA, bodySimB, h );
+    bodyStateA = {};
+    bodyStateB = {};
+    warmStartDistanceJointConstraint( constraint, bodyStateA, bodyStateB );
+    solveDistanceJointConstraint( constraint, bodyStateA, bodyStateB, false );
+    check( constraint.motorImpulse == 0.0f && LengthSquared( bodyStateB.linearVelocity ) == 0.0f, "zero force discards cache and applies no motor impulse" );
+    joint.maxMotorForce = 12.0f;
+    joint.enableMotor = false;
+    constraint = prepareDistanceJointConstraint( joint, bodySimA, bodySimB, h );
+    check( constraint.motorImpulse == 0.0f, "disabled motor discards cache" );
+    joint.enableMotor = true;
+    joint.enableSpring = false;
+    constraint = prepareDistanceJointConstraint( joint, bodySimA, bodySimB, h );
+    check( !constraint.enableMotor && constraint.motorImpulse == 0.0f, "rigid mode ignores motor and its cache" );
+    joint.enableSpring = true;
+    joint.enableLimit = true;
+    joint.minLength = joint.maxLength;
+    constraint = prepareDistanceJointConstraint( joint, bodySimA, bodySimB, h );
+    check( !constraint.enableMotor && constraint.motorImpulse == 0.0f, "equal limits override motor" );
+
+    joint.enableLimit = false;
+    joint.motorImpulse = 0.0f;
+    joint.motorSpeed = 2.0f;
+    joint.maxMotorForce = 1000.0f;
+    joint.localAnchorA = { 0.0f, 1.0f };
+    joint.localAnchorB = { 0.0f, 1.0f };
+    bodySimA.invInertia = 2.0f;
+    constraint = prepareDistanceJointConstraint( joint, bodySimA, bodySimB, h );
+    bodyStateA = {};
+    bodyStateB = {};
+    solveDistanceJointConstraint( constraint, bodyStateA, bodyStateB, false );
+    check( bodyStateA.angularVelocity > 0.0f && near( bodyStateB.linearVelocity.x - bodyStateA.linearVelocity.x + bodyStateA.angularVelocity, 2.0f ), "motor includes off-center torque and point velocity" );
+    bodySimB.center = {};
+    constraint = prepareDistanceJointConstraint( joint, bodySimA, bodySimB, h );
+    bodyStateA = {};
+    bodyStateB = {};
+    solveDistanceJointConstraint( constraint, bodyStateA, bodyStateB, true );
+    check( IsFinite( bodyStateA.linearVelocity ) && IsFinite( bodyStateB.linearVelocity ) && std::isfinite( constraint.motorImpulse ) && LengthSquared( bodyStateB.linearVelocity ) == 0.0f, "coincident anchors keep motor finite without choosing a direction" );
+}
+}
+
 int main()
 {
     bodySim a{}, b{};
@@ -138,5 +262,6 @@ int main()
     constraint = prepareDistanceJointConstraint( joint, a, b, h ); stateA = {}; stateB = {};
     solveDistanceJointConstraint( constraint, stateA, stateB, true );
     check( stateB.linearVelocity.x > stateA.linearVelocity.x && constraint.lowerImpulse == 0.0f && constraint.upperImpulse == 0.0f, "equal limits use rigid rest length as Box2D does" );
+    checkMotor();
     return EXIT_SUCCESS;
 }

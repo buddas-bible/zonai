@@ -62,20 +62,21 @@ void checkDemoUi()
     // Keyboard navigation의 PreferInput은 Ctrl+click과 같은 실제 SliderFloat text 경로임.
     // 충분히 큰 viewport로 Inspector 아래의 tuning widget도 clipping 없이 실행함.
     io.DisplaySize = { 1280.0f, 4096.0f };
-    const char* labels[] = { "Mouse Hertz", "Mouse damping", "Mouse max force", "Distance Hertz", "Distance damping", "Distance min", "Distance max" };
-    for( int setting = 0; setting < 7; ++setting )
+    const char* labels[] = { "Mouse Hertz", "Mouse damping", "Mouse max force", "Distance Hertz", "Distance damping", "Distance min", "Distance max", "Distance motor speed", "Distance motor force" };
+    for( int setting = 0; setting < 9; ++setting )
     {
         for( int upper = 0; upper < 2; ++upper )
         {
             auto view = createDemoView( setting < 3 ? demoKind::playground : demoKind::distancePendulum );
             for( int phase = 0; phase < 3; ++phase )
             {
-                if( phase == 1 ) { io.AddInputCharactersUTF8( upper ? "9000" : "-1" ); }
+                if( phase == 1 ) { io.AddInputCharactersUTF8( upper ? "9000" : "-9000" ); }
                 if( phase == 2 ) { io.AddKeyEvent( ImGuiKey_Enter, true ); }
                 ImGui::NewFrame();
                 ImGui::SetNextWindowPos( { 0.0f, 0.0f } ); ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
                 ImGui::Begin( "Joint tuning input" );
                 ImGui::GetStateStorage()->SetInt( ImGui::GetID( "MouseControls" ), 1 );
+                ImGui::GetStateStorage()->SetInt( ImGui::GetID( "DistanceMotorSettings" ), 1 );
                 if( phase == 0 )
                 {
                     GImGui->NavActivateId = ImGui::GetID( labels[setting] );
@@ -88,9 +89,9 @@ void checkDemoUi()
             const auto& tuning = static_cast<rigidBodyDemo&>( *view ).getMouseSettings();
             auto& model = static_cast<rigidBodyDemo&>( *view );
             const auto spring = setting < 3 ? zonai::distanceJointData{} : model.getWorld().getDistanceJointData( model.getPendulumJoint() );
-            const float value = setting == 0 ? tuning.hertz : setting == 1 ? tuning.dampingRatio : setting == 2 ? tuning.maxForce : setting == 3 ? spring.hertz : setting == 4 ? spring.dampingRatio : setting == 5 ? spring.minLength : spring.maxLength;
-            const float limit = setting == 0 || setting == 3 ? 30.0f : setting == 2 ? 5000.0f : setting == 5 ? 2.5f : setting == 6 ? 4.0f : 2.0f;
-            const float minimum = setting == 5 ? zonai::LINEAR_SLOP : setting == 6 ? 1.5f : 0.0f;
+            const float value = setting == 0 ? tuning.hertz : setting == 1 ? tuning.dampingRatio : setting == 2 ? tuning.maxForce : setting == 3 ? spring.hertz : setting == 4 ? spring.dampingRatio : setting == 5 ? spring.minLength : setting == 6 ? spring.maxLength : setting == 7 ? spring.motorSpeed : spring.maxMotorForce;
+            const float limit = setting == 0 || setting == 3 ? 30.0f : setting == 2 ? 5000.0f : setting == 5 ? 2.5f : setting == 6 ? 4.0f : setting == 7 ? 5.0f : setting == 8 ? 50.0f : 2.0f;
+            const float minimum = setting == 5 ? zonai::LINEAR_SLOP : setting == 6 ? 1.5f : setting == 7 ? -5.0f : 0.0f;
             if( value != ( upper ? limit : minimum ) || ( setting >= 5 && spring.minLength > spring.maxLength ) )
             { std::fprintf( stderr, "manual tuning %s not clamped: %f\n", labels[setting], value ); std::exit( EXIT_FAILURE ); }
         }
@@ -120,6 +121,27 @@ void checkDemoUi()
         view->drawControls(); ImGui::End(); ImGui::Render();
         const auto data = model.getWorld().getDistanceJointData( model.getPendulumJoint() );
         if( data.enableLimit != ( frame < 2 ) ) { std::fprintf( stderr, "limit checkbox did not switch mode\n" ); std::exit( EXIT_FAILURE ); }
+    }
+    for( int frame = 0; frame < 4; ++frame )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
+        ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+        ImGui::Begin( "Motor actions" );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "DistanceMotorSettings" ), 1 );
+        if( frame == 0 || frame == 2 )
+        {
+            GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Distance motor" );
+        }
+        view->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        const auto data = model.getWorld().getDistanceJointData( model.getPendulumJoint() );
+        if( data.enableMotor != ( frame < 2 ) )
+        {
+            std::fprintf( stderr, "motor checkbox did not switch mode\n" );
+            std::exit( EXIT_FAILURE );
+        }
     }
     auto inspector = createDemoView( demoKind::playground );
     auto& inspected = static_cast<rigidBodyDemo&>( *inspector );

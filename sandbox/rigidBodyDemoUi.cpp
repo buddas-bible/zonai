@@ -712,7 +712,29 @@ void rigidBodyDemoUi::drawExperimentControls()
             pendulum = getWorld().getDistanceJointData( getPendulumJoint() );
         }
         const bool rigid = !enableSpring || ( enableLimit && minLength == maxLength );
-        ImGui::TextUnformatted( rigid ? "목표 거리에 고정" : hertz > 0.0f ? "거리 스프링" : enableLimit ? "거리 제한만 적용 (0 Hz)" : "거리 축 자유 이동 (0 Hz)" );
+        if( ImGui::CollapsingHeader( "거리 모터###DistanceMotorSettings" ) )
+        {
+            bool enableMotor = pendulum.enableMotor;
+            float motorSpeed = pendulum.motorSpeed;
+            float maxMotorForce = pendulum.maxMotorForce;
+            bool motorChanged = ImGui::Checkbox( "모터 사용###Distance motor", &enableMotor );
+            motorChanged |= ImGui::SliderFloat( "목표 축속도###Distance motor speed", &motorSpeed, -5.0f, 5.0f, "%.2f m/s", ImGuiSliderFlags_AlwaysClamp );
+            motorChanged |= ImGui::SliderFloat( "최대 모터 힘###Distance motor force", &maxMotorForce, 0.0f, 50.0f, "%.1f N", ImGuiSliderFlags_AlwaysClamp );
+            if( motorChanged )
+            {
+                getWorld().setDistanceJointMotor( getPendulumJoint(), enableMotor, motorSpeed, maxMotorForce );
+                pendulum = getWorld().getDistanceJointData( getPendulumJoint() );
+            }
+
+            ImGui::Text( "실제 모터 힘: %.2f N", pendulum.motorForce );
+            ImGui::TextWrapped( "양의 속도는 거리를 늘이고 음의 속도는 줄입니다. 속도 0은 제동, 힘 0은 모터 힘을 끕니다. 스프링 모드에서 작동하며 거리 제한도 함께 적용됩니다." );
+            if( rigid )
+            {
+                ImGui::TextWrapped( "현재 고정 거리 모드에서는 모터가 작동하지 않습니다. 스프링을 켜고 최소·최대 거리를 다르게 설정하세요. 0 Hz로 스프링 힘만 끌 수 있습니다." );
+            }
+        }
+
+        ImGui::TextUnformatted( rigid ? "목표 거리에 고정" : hertz > 0.0f ? "거리 스프링" : pendulum.enableMotor && pendulum.maxMotorForce > 0.0f ? "거리 모터 (0 Hz)" : enableLimit ? "거리 제한만 적용 (0 Hz)" : "거리 축 자유 이동 (0 Hz)" );
         ImGui::Text( "목표 거리: %.3f m / 현재 거리: %.3f m", pendulum.length, pendulum.currentLength );
         ImGui::Text( "늘어난 길이: %.3f m / 축 방향 힘: %.2f N", pendulum.currentLength - pendulum.length, pendulum.axialForce );
         ImGui::TextWrapped( "주파수는 스프링 강성, 감쇠 비율은 진동을 조절합니다. 음의 힘은 당기는 힘입니다. 거리 제한은 스프링을 켜야 적용되며 0 Hz에서도 작동합니다. 최소·최대 거리가 같으면 목표 거리에 고정됩니다." );

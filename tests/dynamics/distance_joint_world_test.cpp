@@ -205,7 +205,7 @@ void checkZeroStepAndCom()
     check( IsFinite( coincident.GetBodyTransform( duplicate ).position ), "coincident world anchors finite" );
 }
 
-void checkImpulseReset( int change, bool spring, bool limit = false )
+void checkImpulseReset( int change, bool spring, bool limit = false, bool motor = false )
 {
     world cached{}, fresh{};
     cached.SetContinuousEnabled( false ); fresh.SetContinuousEnabled( false );
@@ -225,6 +225,12 @@ void checkImpulseReset( int change, bool spring, bool limit = false )
         firstA.hertz = firstB.hertz = otherA.hertz = otherB.hertz = 0.0f;
         firstA.minLength = firstB.minLength = 1.5f; firstA.maxLength = firstB.maxLength = 2.0f;
         otherA.minLength = otherB.minLength = 2.5f; otherA.maxLength = otherB.maxLength = std::sqrt( 8.0f );
+    }
+    if( motor )
+    {
+        firstA.enableMotor = firstB.enableMotor = otherA.enableMotor = otherB.enableMotor = true;
+        firstA.motorSpeed = firstB.motorSpeed = otherA.motorSpeed = otherB.motorSpeed = 1.0f;
+        firstA.maxMotorForce = firstB.maxMotorForce = otherA.maxMotorForce = otherB.maxMotorForce = 10.0f;
     }
     (void)cached.createDistanceJoint( firstA );
     const auto old = fresh.createDistanceJoint( firstB );
@@ -378,6 +384,95 @@ void checkLimits( int subSteps )
     check( !simulation.IsBodyAwake( bob ), "normalized limit no-op preserves sleep" );
 }
 
+void checkMotor( int subSteps )
+{
+    world simulation;
+    simulation.SetGravity( {} );
+    const auto anchor = simulation.CreateBody();
+    const auto bob = ball( simulation, { 2.0f, 0.0f } );
+    simulation.SetBodySleepEnabled( bob, false );
+    auto def = definition( anchor, bob );
+    def.enableSpring = true;
+    def.hertz = 0.0f;
+    def.enableMotor = true;
+    def.motorSpeed = 1.0f;
+    def.maxMotorForce = simulation.GetBodyMass( bob ) * 2.0f;
+    const auto joint = simulation.createDistanceJoint( def );
+    const auto initial = simulation.getDistanceJointData( joint );
+    check( initial.enableMotor && initial.motorSpeed == 1.0f && initial.maxMotorForce == def.maxMotorForce && initial.motorForce == 0.0f, "motor creation and force before step" );
+    simulation.Step( 1.0f / 60.0f, subSteps );
+    auto data = simulation.getDistanceJointData( joint );
+    check( std::abs( simulation.GetBodyLinearVelocity( bob ).x - 2.0f / 60.0f ) < 0.0001f, "force cap independent of substep count" );
+    check( std::abs( data.motorForce - def.maxMotorForce ) < 0.0001f && data.axialForce == data.motorForce, "World stores motor impulse and reports signed force" );
+    for( int i = 0; i < 45; ++i )
+    {
+        simulation.Step( 1.0f / 60.0f, subSteps );
+    }
+    check( std::abs( simulation.GetBodyLinearVelocity( bob ).x - 1.0f ) < 0.0001f, "motor reaches target axial speed" );
+    simulation.setDistanceJointMotor( joint, true, -1.0f, def.maxMotorForce );
+    check( simulation.getDistanceJointData( joint ).motorForce == 0.0f, "speed change clears motor cache" );
+    for( int i = 0; i < 90; ++i )
+    {
+        simulation.Step( 1.0f / 60.0f, subSteps );
+    }
+    check( std::abs( simulation.GetBodyLinearVelocity( bob ).x + 1.0f ) < 0.0001f, "live motor direction reversal" );
+    simulation.setDistanceJointMotor( joint, true, 0.0f, def.maxMotorForce );
+    for( int i = 0; i < 45; ++i )
+    {
+        simulation.Step( 1.0f / 60.0f, subSteps );
+    }
+    check( std::abs( simulation.GetBodyLinearVelocity( bob ).x ) < 0.0001f, "zero speed brakes instead of disabling motor" );
+
+    // Static anchor를 공유하는 다른 island까지 깨우면 안 됨.
+    const auto other = ball( simulation, { 0.0f, 4.0f } );
+    (void)simulation.createDistanceJoint( definition( anchor, other, 4.0f ) );
+    simulation.SetBodyAwake( bob, false );
+    simulation.SetBodyAwake( other, false );
+    simulation.setDistanceJointMotor( joint, true, 0.0f, def.maxMotorForce );
+    check( !simulation.IsBodyAwake( bob ), "unchanged motor tuning preserves sleep" );
+    simulation.setDistanceJointMotor( joint, true, 2.0f, def.maxMotorForce );
+    check( simulation.IsBodyAwake( bob ) && !simulation.IsBodyAwake( other ), "motor change wakes only its component" );
+    simulation.setDistanceJointMotor( joint, false, 2.0f, def.maxMotorForce );
+    simulation.SetBodyLinearVelocity( bob, {} );
+    simulation.Step( 1.0f / 60.0f, subSteps );
+    check( simulation.getDistanceJointData( joint ).motorForce == 0.0f && simulation.GetBodyLinearVelocity( bob ).x == 0.0f, "disabled motor applies no cached force" );
+    simulation.setDistanceJointMotor( joint, true, 2.0f, 0.0f );
+    simulation.Step( 1.0f / 60.0f, subSteps );
+    check( simulation.getDistanceJointData( joint ).motorForce == 0.0f, "zero max force disables motor response" );
+
+    simulation.setDistanceJointLimit( joint, true, 1.0f, 3.0f );
+    simulation.setDistanceJointMotor( joint, true, 2.0f, def.maxMotorForce );
+    for( int i = 0; i < 150; ++i )
+    {
+        simulation.Step( 1.0f / 60.0f, subSteps );
+    }
+    data = simulation.getDistanceJointData( joint );
+    check( std::abs( data.currentLength - 3.0f ) < 0.005f && data.motorForce > 0.0f && std::abs( data.axialForce ) < 0.0001f, "upper limit stops motor while motor and limit forces cancel" );
+    simulation.setDistanceJointMotor( joint, true, 2.0f, def.maxMotorForce );
+    check( simulation.getDistanceJointData( joint ).motorForce == data.motorForce, "motor no-op retains loaded cache" );
+    simulation.setDistanceJointLimit( joint, true, 1.0f, 3.1f );
+    check( simulation.getDistanceJointData( joint ).motorForce == 0.0f, "limit range change clears loaded motor cache" );
+    simulation.setDistanceJointLimit( joint, true, 1.0f, 3.0f );
+    simulation.Step( 1.0f / 60.0f, subSteps );
+    check( simulation.getDistanceJointData( joint ).motorForce > 0.0f, "motor resumes loading after limit change" );
+    simulation.setDistanceJointMotor( joint, true, -2.0f, def.maxMotorForce );
+    check( simulation.getDistanceJointData( joint ).motorForce == 0.0f && simulation.getDistanceJointData( joint ).axialForce == 0.0f, "direction change clears opposing motor and limit caches" );
+    for( int i = 0; i < 180; ++i )
+    {
+        simulation.Step( 1.0f / 60.0f, subSteps );
+    }
+    data = simulation.getDistanceJointData( joint );
+    check( std::abs( data.currentLength - 1.0f ) < 0.005f && data.motorForce < 0.0f && std::abs( data.axialForce ) < 0.0001f, "lower limit stops negative motor" );
+    simulation.setDistanceJointSpring( joint, false, 2.0f, 0.7f );
+    check( simulation.getDistanceJointData( joint ).motorForce == 0.0f, "spring mode change clears motor cache" );
+    for( int i = 0; i < 120; ++i )
+    {
+        simulation.Step( 1.0f / 60.0f, subSteps );
+    }
+    data = simulation.getDistanceJointData( joint );
+    check( std::abs( data.currentLength - 2.0f ) < 0.005f && data.motorForce == 0.0f, "rigid mode holds target length despite enabled motor" );
+}
+
 void checkSpringLimits( float restLength, int subSteps )
 {
     world simulation; simulation.SetGravity( {} ); simulation.SetSleepingEnabled( false );
@@ -406,6 +501,12 @@ int main()
     for( int i = 0; i < 3; ++i ) { checkImpulseReset( i, false ); checkImpulseReset( i, true ); checkImpulseReset( i, true, true ); }
     for( const bool collide : { false, true } ) for( const bool sensor : { false, true } ) checkContinuousFilter( collide, sensor );
     checkSpring();
+    checkMotor( 1 );
+    checkMotor( 4 );
+    for( int i = 0; i < 3; ++i )
+    {
+        checkImpulseReset( i, true, true, true );
+    }
     for( int subSteps : { 1, 4 } ) { checkSpringResponse( 2.0f, 0.0f, subSteps ); checkSpringResponse( 4.0f, 0.0f, subSteps ); checkSpringResponse( 2.0f, 1.0f, subSteps ); }
     for( int subSteps : { 1, 4 } ) { checkLimits( subSteps ); checkSpringLimits( 0.5f, subSteps ); checkSpringLimits( 3.0f, subSteps ); }
     return EXIT_SUCCESS;

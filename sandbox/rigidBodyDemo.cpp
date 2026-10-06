@@ -195,7 +195,7 @@ void rigidBodyDemo::createPendulum()
     const shapeId pendulumShape = world_.CreateShape( pendulumBody_, circle2{ {}, 0.3f } );
     shapes_.push_back( { pendulumBody_, pendulumShape, "진자 [거리 조인트]" } );
 
-    // 고정 거리와 스프링, 거리 제한을 같은 진자에서 비교하기 위한 설정.
+    // 고정 거리와 스프링, 거리 제한, 축 방향 모터를 같은 진자에서 비교하기 위한 설정.
     distanceJointDef joint{};
     joint.bodyA = anchor;
     joint.bodyB = pendulumBody_;
@@ -204,6 +204,8 @@ void rigidBodyDemo::createPendulum()
     joint.dampingRatio = 0.7f;
     joint.minLength = 1.5f;
     joint.maxLength = 2.5f;
+    joint.motorSpeed = 1.0f;
+    joint.maxMotorForce = 10.0f;
     pendulumJoint_ = world_.createDistanceJoint( joint );
 }
 
