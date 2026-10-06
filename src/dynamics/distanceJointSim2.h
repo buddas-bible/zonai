@@ -5,8 +5,7 @@
 
 namespace zonai
 {
-// World의 Joint cold slot과 같은 index에 저장하는 persistent solver 데이터.
-#pragma region Simulation
+// World의 조인트 슬롯과 같은 인덱스에 보관함. 누적 임펄스를 다음 step까지 유지함.
 
 struct distanceJointSim2
 {
@@ -14,17 +13,17 @@ struct distanceJointSim2
     std::int32_t bodyIdA = -1;
     std::int32_t bodyIdB = -1;
 
-    // Body origin 기준 local anchor. COM 이동과 분리해서 보관함.
+    // 물체 원점 기준의 로컬 작용점. 질량 중심이 이동해도 유지함.
     vec2 localAnchorA{};
     vec2 localAnchorB{};
-    float length = 1.0f;
+    float length = 1.0f; // 고정 거리 또는 스프링의 목표 거리
     float impulse = 0.0f;
-    float subStepTime = 0.0f;
+    float subStepTime = 0.0f; // 누적 임펄스를 구한 시간 간격
 
-    // Spring 설정. Rigid 제약의 수치 안정화 계수와 구분함.
+    // 물리 스프링 설정. 고정 거리 제약의 수치 안정화 계수와 구분함.
     bool enableSpring = false;
-    float hertz = 5.0f;
-    float dampingRatio = 0.7f;
+    float hertz = 5.0f; // 스프링 주파수 (Hz)
+    float dampingRatio = 0.7f; // 감쇠비. 1이면 임계 감쇠
 
     // 거리의 하한과 상한. 각 limit의 임펄스는 별도로 누적함.
     bool enableLimit = false;
@@ -34,5 +33,4 @@ struct distanceJointSim2
     float upperImpulse = 0.0f;
 };
 
-#pragma endregion
 } // namespace zonai

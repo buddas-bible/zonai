@@ -368,7 +368,10 @@ void world::setDistanceJointSpring( jointId id, bool enableSpring, float hertz, 
     joint.hertz = hertz;
     joint.dampingRatio = dampingRatio;
     joint.impulse = 0.0f;
-    joint.lowerImpulse = joint.upperImpulse = 0.0f;
+    joint.upperImpulse = 0.0f;
+    joint.lowerImpulse = 0.0f;
+
+    // 계수가 바뀌면 연결된 비정적 물체를 깨워 새 설정으로 계산함.
     if( bodies_[joint.bodyIdA].type != bodyType::Static )
     {
         WakeBodyByIndex( joint.bodyIdA );
@@ -392,8 +395,12 @@ void world::setDistanceJointLimit( jointId id, bool enableLimit, float minLength
     joint.enableLimit = enableLimit;
     joint.minLength = minLength;
     joint.maxLength = maxLength;
-    // Range 변경이나 같은 limit으로의 전환은 spring/rigid mode도 바꿀 수 있어 모든 cache를 비움.
-    joint.impulse = joint.lowerImpulse = joint.upperImpulse = 0.0f;
+    // 거리 범위 변경은 스프링과 고정 거리 제약의 전환도 일으킬 수 있어 모든 누적 임펄스를 비움.
+    joint.upperImpulse = 0.0f;
+    joint.lowerImpulse = 0.0f;
+    joint.impulse = 0.0f;
+
+    // 계수가 바뀌면 연결된 비정적 물체를 깨워 새 설정으로 계산함.
     if( bodies_[joint.bodyIdA].type != bodyType::Static )
     {
         WakeBodyByIndex( joint.bodyIdA );
@@ -413,7 +420,8 @@ jointId world::createMouseJoint( const mouseJointDef& definition )
     assert( std::isfinite( definition.hertz ) && definition.hertz >= 0.0f );
     assert( std::isfinite( definition.dampingRatio ) && definition.dampingRatio >= 0.0f );
     assert( std::isfinite( definition.maxForce ) && definition.maxForce >= 0.0f );
-    // 기존 ground와의 Contact를 유지함. A에 반작용을 주지 않고 world target을 따라감.
+
+    // 바닥과의 접촉은 유지함. 정적 A에 반작용을 주지 않고 월드 목표점을 따라감.
     const std::int32_t index = allocateJoint( bodyIndexA, bodyIndexB, true );
     mouseJointSim2 sim{};
     sim.jointId = index;

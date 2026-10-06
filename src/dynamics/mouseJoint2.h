@@ -5,23 +5,18 @@
 
 namespace zonai
 {
-// A는 수명/graph 연결을 위한 Static Body, target은 world 좌표임.
-// B의 클릭 위치를 origin 기준 local anchor로 저장하고 COM 기준으로 풀어냄.
-#pragma region Definition
+// A는 수명과 연결 관계를 유지하는 정적 물체이며, target은 월드 좌표임.
+// B의 클릭 위치는 물체 원점 기준으로 저장하고 질량 중심 기준으로 계산함.
 
 struct mouseJointDef
 {
     bodyId bodyA{};
     bodyId bodyB{};
     vec2 target{};
-    float hertz = 5.0f;
-    float dampingRatio = 0.7f;
-    float maxForce = 1000.0f;
+    float hertz = 5.0f; // 스프링 주파수 (Hz)
+    float dampingRatio = 0.7f; // 감쇠비. 1이면 임계 감쇠
+    float maxForce = 1000.0f; // 허용하는 힘의 최대 크기
 };
-
-#pragma endregion
-
-#pragma region Data
 
 struct mouseJointData
 {
@@ -30,10 +25,9 @@ struct mouseJointData
     vec2 target{};
     vec2 anchorB{};
     vec2 force{};
-    float hertz = 0.0f;
-    float dampingRatio = 0.0f;
-    float maxForce = 0.0f;
+    float hertz = 0.0f; // 스프링 주파수 (Hz)
+    float dampingRatio = 0.0f; // 감쇠비. 1이면 임계 감쇠
+    float maxForce = 0.0f; // 허용하는 힘의 최대 크기
 };
 
-#pragma endregion
 } // namespace zonai
