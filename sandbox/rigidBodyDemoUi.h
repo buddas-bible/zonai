@@ -22,14 +22,14 @@ private:
 #pragma endregion
     int selectedShapeIndex_ = 0;
     bool showGrid_ = true;
-    bool showShapeAABBs_ = true;
-    bool showFatAABBs_ = false;
+    bool showShapeAABBs_ = false;
+    bool showFatAABBs_ = true;
     bool showContacts_ = true;
-    bool showContactDetails_ = true;
+    bool showContactDetails_ = false;
     bool showCOM_ = true;
     bool showVelocities_ = true;
-    bool showLabels_ = true;
-    bool showDynamicTree_ = false;
+    bool showLabels_ = false;
+    bool showDynamicTree_ = true;
     bool showKinematicTree_ = false;
     bool showStaticTree_ = false;
     bool showTreeLeaves_ = true;
