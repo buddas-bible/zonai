@@ -51,3 +51,8 @@ target_compile_definitions(zonaiSandbox
         NOMINMAX
         WIN32_LEAN_AND_MEAN
 )
+
+# 실행 파일 옆에서 폰트와 재배포 라이선스를 찾을 수 있도록 함께 복사함.
+add_custom_command(TARGET zonaiSandbox POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:zonaiSandbox>/assets"
+)

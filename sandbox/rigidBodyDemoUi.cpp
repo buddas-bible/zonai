@@ -4,7 +4,14 @@
 #include <bit>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <imgui.h>
+#include <imgui_internal.h>
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
 
 #include "debug/debugDraw.h"
 
@@ -23,16 +30,16 @@ const char* getBodyTypeName( bodyType type )
     switch( type )
     {
     case bodyType::Static:
-        return "Static";
+        return "정적";
 
     case bodyType::Kinematic:
-        return "Kinematic";
+        return "운동학적";
 
     case bodyType::Dynamic:
-        return "Dynamic";
+        return "동적";
 
     default:
-        return "Unknown";
+        return "알 수 없음";
     }
 }
 
@@ -91,20 +98,20 @@ vec2 getWorldCenter(
 
 bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits )
 {
-    char preview[32]; std::snprintf( preview, sizeof( preview ), "%d layers selected", std::popcount( bits ) );
+    char preview[32]; std::snprintf( preview, sizeof( preview ), "%d개 레이어 선택", std::popcount( bits ) );
     bool changed = false;
     if( ImGui::BeginCombo( label, preview, ImGuiComboFlags_HeightLarge ) )
     {
         ImGui::PushID( id );
-        if( ImGui::Button( "All" ) ) { bits = ~std::uint64_t{ 0 }; changed = true; }
+        if( ImGui::Button( "전체 선택###All" ) ) { bits = ~std::uint64_t{ 0 }; changed = true; }
         ImGui::SameLine();
-        if( ImGui::Button( "None" ) ) { bits = 0; changed = true; }
+        if( ImGui::Button( "전체 해제###None" ) ) { bits = 0; changed = true; }
         ImGui::PopID();
         for( int bit = 0; bit < 64; ++bit )
         {
             const auto flag = std::uint64_t{ 1 } << bit;
             bool enabled = ( bits & flag ) != 0;
-            char name[48]; std::snprintf( name, sizeof( name ), "Layer %02d##%s", bit + 1, id );
+            char name[48]; std::snprintf( name, sizeof( name ), "레이어 %02d##%s", bit + 1, id );
             if( ImGui::Checkbox( name, &enabled ) )
             { bits = enabled ? bits | flag : bits & ~flag; changed = true; }
         }
@@ -123,11 +130,14 @@ rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 
 void rigidBodyDemoUi::drawControls()
 {
+    // 한글 이름이 고정 폭 패널에서 잘리지 않도록 입력 영역과 이름의 폭을 나눔.
+    ImGui::PushItemWidth( ImGui::GetContentRegionAvail().x * 0.45f );
     drawWorldSettings();
     drawInspector();
     drawExperimentControls();
     drawMouseControls();
     drawDebugSettings();
+    ImGui::PopItemWidth();
 }
 
 void rigidBodyDemoUi::draw( debugDraw& draw ) const
@@ -160,7 +170,7 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
     {
         draw.DrawTree(
             staticTree,
-            "S",
+            "정",
             showTreeLeaves_,
             showTreeInternal_,
             showTreeLabels_,
@@ -173,7 +183,7 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
     {
         draw.DrawTree(
             kinematicTree,
-            "K",
+            "운",
             showTreeLeaves_,
             showTreeInternal_,
             showTreeLabels_,
@@ -186,7 +196,7 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
     {
         draw.DrawTree(
             dynamicTreeRef,
-            "D",
+            "동",
             showTreeLeaves_,
             showTreeInternal_,
             showTreeLabels_,
@@ -214,7 +224,7 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
     {
         if( !getWorld().IsValid( visual.bodyHandle ) || !getWorld().IsValid( visual.shapeHandle ) ) { continue; }
         if( !getWorld().IsValid( visual.bodyHandle ) || !getWorld().IsValid( visual.shapeHandle ) )
-        { ImGui::TextUnformatted( "Selected object was deleted." ); return; }
+        { ImGui::TextUnformatted( "선택한 오브젝트가 삭제되었습니다." ); return; }
         const body& bodyRef =
             getWorld().GetBody(
                 visual.bodyHandle
@@ -386,7 +396,7 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
                     std::snprintf(
                         label,
                         sizeof( label ),
-                        "s %.3f  Jn %.2f  Jt %.2f",
+                        "간격 %.3f  수직 충격량 %.2f  마찰 충격량 %.2f",
                         point.separation,
                         point.normalImpulse,
                         point.tangentImpulse
@@ -418,7 +428,7 @@ void rigidBodyDemoUi::drawWorldSettings()
     };
 
     if( ImGui::DragFloat2(
-        "Gravity",
+        "중력###Gravity",
         gravityValues,
         0.1f,
         -30.0f,
@@ -438,7 +448,7 @@ void rigidBodyDemoUi::drawWorldSettings()
         getWorld().GetMaximumLinearSpeed();
 
     if( ImGui::DragFloat(
-        "Max linear speed",
+        "최대 선속도###Max linear speed",
         &maximumLinearSpeed,
         1.0f,
         1.0f,
@@ -454,7 +464,7 @@ void rigidBodyDemoUi::drawWorldSettings()
         getWorld().IsSleepingEnabled();
 
     if( ImGui::Checkbox(
-        "Enable sleeping",
+        "수면 허용###Enable sleeping",
         &sleepingEnabled ) )
     {
         getWorld().SetSleepingEnabled(
@@ -466,7 +476,7 @@ void rigidBodyDemoUi::drawWorldSettings()
         getWorld().IsContinuousEnabled();
 
     if( ImGui::Checkbox(
-        "Continuous collision",
+        "연속 충돌 검사###Continuous collision",
         &continuousEnabled ) )
     {
         getWorld().SetContinuousEnabled(
@@ -478,7 +488,7 @@ void rigidBodyDemoUi::drawWorldSettings()
         getWorld().GetContactRecycleDistance();
 
     if( ImGui::DragFloat(
-        "Contact recycle dist",
+        "접촉 재사용 거리###Contact recycle dist",
         &contactRecycleDistance,
         0.001f,
         0.0f,
@@ -496,7 +506,7 @@ void rigidBodyDemoUi::drawInspector()
 {
     ImGui::Separator();
     ImGui::TextUnformatted(
-        "Object Inspector"
+        "오브젝트 인스펙터"
     );
 
     if( !getShapes().empty() )
@@ -512,7 +522,7 @@ void rigidBodyDemoUi::drawInspector()
             getShapes()[selectedShapeIndex_];
 
         if( ImGui::BeginCombo(
-            "Object",
+            "오브젝트###Object",
             selectedVisual.label ) )
         {
             for( int i = 0;
@@ -542,119 +552,119 @@ void rigidBodyDemoUi::drawInspector()
             getShapes()[selectedShapeIndex_];
 
         if( !getWorld().IsValid( visual.bodyHandle ) || !getWorld().IsValid( visual.shapeHandle ) )
-        { ImGui::TextUnformatted( "Selected object was deleted." ); return; }
+        { ImGui::TextUnformatted( "선택한 오브젝트가 삭제되었습니다." ); return; }
         const body& bodyRef =
             getWorld().GetBody(
                 visual.bodyHandle
             );
 
         ImGui::Text(
-            "Body type: %s",
+            "오브젝트 유형: %s",
             getBodyTypeName( bodyRef.type )
         );
 
 #pragma region Transform
-        if( ImGui::CollapsingHeader( "Transform", ImGuiTreeNodeFlags_DefaultOpen ) )
+        if( ImGui::CollapsingHeader( "위치와 회전###Transform", ImGuiTreeNodeFlags_DefaultOpen ) )
         {
             transform2 transform = getWorld().GetBodyTransform( visual.bodyHandle );
             float position[2]{ transform.position.x, transform.position.y };
-            bool changed = ImGui::DragFloat2( "Position", position, 0.05f, -100.0f, 100.0f, "%.2f" );
+            bool changed = ImGui::DragFloat2( "위치###Position", position, 0.05f, -100.0f, 100.0f, "%.2f" );
             if( changed ) { transform.position = { position[0], position[1] }; }
             float rotation = std::atan2( transform.rotation.s, transform.rotation.c );
-            if( ImGui::DragFloat( "Rotation", &rotation, 0.01f, -3.14159265f, 3.14159265f, "%.3f rad" ) )
+            if( ImGui::DragFloat( "회전###Rotation", &rotation, 0.01f, -3.14159265f, 3.14159265f, "%.3f rad" ) )
             { transform.rotation = rot2::FromRadians( rotation ); changed = true; }
             if( changed ) { getWorld().SetBodyTransform( visual.bodyHandle, transform ); refreshContacts(); }
         }
 #pragma endregion
 
 #pragma region PhysicsQuantities
-        if( ImGui::CollapsingHeader( "Physics quantities", ImGuiTreeNodeFlags_DefaultOpen ) )
+        if( ImGui::CollapsingHeader( "물리량###Physics quantities", ImGuiTreeNodeFlags_DefaultOpen ) )
         {
             if( bodyRef.type != bodyType::Static )
             {
                 const vec2 linearVelocity = getWorld().GetBodyLinearVelocity( visual.bodyHandle );
                 float velocity[2]{ linearVelocity.x, linearVelocity.y };
-                if( ImGui::DragFloat2( "Linear velocity", velocity, 0.05f, -100.0f, 100.0f, "%.2f" ) )
+                if( ImGui::DragFloat2( "선속도###Linear velocity", velocity, 0.05f, -100.0f, 100.0f, "%.2f" ) )
                 { getWorld().SetBodyLinearVelocity( visual.bodyHandle, { velocity[0], velocity[1] } ); }
                 float angularVelocity = getWorld().GetBodyAngularVelocity( visual.bodyHandle );
-                if( ImGui::DragFloat( "Angular velocity", &angularVelocity, 0.05f, -100.0f, 100.0f, "%.2f rad/s" ) )
+                if( ImGui::DragFloat( "각속도###Angular velocity", &angularVelocity, 0.05f, -100.0f, 100.0f, "%.2f rad/s" ) )
                 { getWorld().SetBodyAngularVelocity( visual.bodyHandle, angularVelocity ); }
                 float linearDamping = getWorld().GetBodyLinearDamping( visual.bodyHandle );
-                if( ImGui::DragFloat( "Linear damping", &linearDamping, 0.05f, 0.0f, 20.0f, "%.2f" ) )
+                if( ImGui::DragFloat( "선형 감쇠###Linear damping", &linearDamping, 0.05f, 0.0f, 20.0f, "%.2f" ) )
                 { getWorld().SetBodyLinearDamping( visual.bodyHandle, linearDamping ); }
                 float angularDamping = getWorld().GetBodyAngularDamping( visual.bodyHandle );
-                if( ImGui::DragFloat( "Angular damping", &angularDamping, 0.05f, 0.0f, 20.0f, "%.2f" ) )
+                if( ImGui::DragFloat( "회전 감쇠###Angular damping", &angularDamping, 0.05f, 0.0f, 20.0f, "%.2f" ) )
                 { getWorld().SetBodyAngularDamping( visual.bodyHandle, angularDamping ); }
                 float gravityScale = getWorld().GetBodyGravityScale( visual.bodyHandle );
-                if( ImGui::DragFloat( "Gravity scale", &gravityScale, 0.05f, -10.0f, 10.0f, "%.2f" ) )
+                if( ImGui::DragFloat( "중력 배율###Gravity scale", &gravityScale, 0.05f, -10.0f, 10.0f, "%.2f" ) )
                 { getWorld().SetBodyGravityScale( visual.bodyHandle, gravityScale ); }
             }
             float density = getWorld().GetShapeDensity( visual.shapeHandle );
-            if( ImGui::DragFloat( "Density", &density, 0.05f, 0.0f, 100.0f, "%.2f" ) )
+            if( ImGui::DragFloat( "밀도###Density", &density, 0.05f, 0.0f, 100.0f, "%.2f" ) )
             { getWorld().SetShapeDensity( visual.shapeHandle, density ); }
-            ImGui::Text( "Mass: %.3f", getWorld().GetBodyMass( visual.bodyHandle ) );
-            ImGui::Text( "Inertia: %.3f", getWorld().GetBodyRotationalInertia( visual.bodyHandle ) );
+            ImGui::Text( "질량: %.3f", getWorld().GetBodyMass( visual.bodyHandle ) );
+            ImGui::Text( "회전 관성: %.3f", getWorld().GetBodyRotationalInertia( visual.bodyHandle ) );
         }
 #pragma endregion
 
 #pragma region CollisionMaterial
-        if( ImGui::CollapsingHeader( "Collision material" ) )
+        if( ImGui::CollapsingHeader( "충돌 재질###Collision material" ) )
         {
             float friction = getWorld().GetShapeFriction( visual.shapeHandle );
-            if( ImGui::DragFloat( "Friction", &friction, 0.02f, 0.0f, 5.0f, "%.2f" ) )
+            if( ImGui::DragFloat( "마찰 계수###Friction", &friction, 0.02f, 0.0f, 5.0f, "%.2f" ) )
             { getWorld().SetShapeFriction( visual.shapeHandle, friction ); }
             float restitution = getWorld().GetShapeRestitution( visual.shapeHandle );
-            if( ImGui::DragFloat( "Restitution", &restitution, 0.02f, 0.0f, 2.0f, "%.2f" ) )
+            if( ImGui::DragFloat( "반발 계수###Restitution", &restitution, 0.02f, 0.0f, 2.0f, "%.2f" ) )
             { getWorld().SetShapeRestitution( visual.shapeHandle, restitution ); }
         }
 #pragma endregion
 
 #pragma region CollisionMask
-        if( ImGui::CollapsingHeader( "Collision mask" ) )
+        if( ImGui::CollapsingHeader( "충돌 마스크###Collision mask" ) )
         {
             collisionFilter filter = getWorld().GetShapeFilter( visual.shapeHandle );
-            ImGui::TextWrapped( "Choose the layers this shape belongs to and the layers it can collide with. Both shapes must allow each other." );
-            bool changed = drawCollisionBits( "Category membership", "Category", filter.categoryBits );
-            changed |= drawCollisionBits( "Collision partners", "Mask", filter.maskBits );
-            changed |= ImGui::InputInt( "Group index", &filter.groupIndex );
-            ImGui::TextWrapped( "Same non-zero group overrides object masks: positive allows, negative excludes. Project matrix exclusions still apply." );
+            ImGui::TextWrapped( "도형의 소속 레이어와 충돌할 상대 레이어를 선택합니다. 양쪽 도형이 서로를 허용해야 충돌합니다." );
+            bool changed = drawCollisionBits( "소속 레이어###Category membership", "Category", filter.categoryBits );
+            changed |= drawCollisionBits( "충돌 대상 레이어###Collision partners", "Mask", filter.maskBits );
+            changed |= ImGui::InputInt( "충돌 그룹###Group index", &filter.groupIndex );
+            ImGui::TextWrapped( "같은 0이 아닌 그룹은 개별 마스크보다 우선합니다. 양수는 허용, 음수는 제외합니다. 소속 레이어 쌍의 공통 매트릭스 금지는 여전히 적용됩니다." );
             if( changed ) { getWorld().SetShapeFilter( visual.shapeHandle, filter ); refreshContacts(); }
         }
 #pragma endregion
 
 #pragma region SleepAndCcd
-        if( bodyRef.type != bodyType::Static && ImGui::CollapsingHeader( "Sleep and CCD" ) )
+        if( bodyRef.type != bodyType::Static && ImGui::CollapsingHeader( "수면과 연속 충돌###Sleep and CCD" ) )
         {
             bool awake = getWorld().IsBodyAwake( visual.bodyHandle );
-            if( ImGui::Checkbox( "Awake", &awake ) ) { getWorld().SetBodyAwake( visual.bodyHandle, awake ); }
+            if( ImGui::Checkbox( "깨어 있음###Awake", &awake ) ) { getWorld().SetBodyAwake( visual.bodyHandle, awake ); }
             bool sleepEnabled = getWorld().IsBodySleepEnabled( visual.bodyHandle );
-            if( ImGui::Checkbox( "Body sleep", &sleepEnabled ) ) { getWorld().SetBodySleepEnabled( visual.bodyHandle, sleepEnabled ); }
+            if( ImGui::Checkbox( "오브젝트 수면 허용###Body sleep", &sleepEnabled ) ) { getWorld().SetBodySleepEnabled( visual.bodyHandle, sleepEnabled ); }
             float sleepThreshold = getWorld().GetBodySleepThreshold( visual.bodyHandle );
-            if( ImGui::DragFloat( "Sleep threshold", &sleepThreshold, 0.005f, 0.0f, 5.0f, "%.3f m/s" ) )
+            if( ImGui::DragFloat( "수면 속도 기준###Sleep threshold", &sleepThreshold, 0.005f, 0.0f, 5.0f, "%.3f m/s" ) )
             { getWorld().SetBodySleepThreshold( visual.bodyHandle, sleepThreshold ); }
             float safetyFactor = getWorld().GetBodySafetyFactor( visual.bodyHandle );
-            if( ImGui::DragFloat( "CCD safety factor", &safetyFactor, 0.01f, 0.01f, 2.0f, "%.2f" ) )
+            if( ImGui::DragFloat( "연속 충돌 안전 계수###CCD safety factor", &safetyFactor, 0.01f, 0.01f, 2.0f, "%.2f" ) )
             { getWorld().SetBodySafetyFactor( visual.bodyHandle, safetyFactor ); }
             bool contactRecycling = getWorld().IsBodyContactRecyclingEnabled( visual.bodyHandle );
-            if( ImGui::Checkbox( "Contact recycling", &contactRecycling ) )
+            if( ImGui::Checkbox( "접촉 재사용###Contact recycling", &contactRecycling ) )
             { getWorld().SetBodyContactRecyclingEnabled( visual.bodyHandle, contactRecycling ); }
             bool bullet = getWorld().IsBodyBullet( visual.bodyHandle );
-            if( ImGui::Checkbox( "Bullet", &bullet ) ) { getWorld().SetBodyBullet( visual.bodyHandle, bullet ); }
+            if( ImGui::Checkbox( "고속 충돌 검사###Bullet", &bullet ) ) { getWorld().SetBodyBullet( visual.bodyHandle, bullet ); }
             bool fastRotation = getWorld().IsBodyFastRotationAllowed( visual.bodyHandle );
-            if( ImGui::Checkbox( "Allow fast rotation", &fastRotation ) ) { getWorld().SetBodyFastRotationAllowed( visual.bodyHandle, fastRotation ); }
-            ImGui::Text( "Fast body: %s", getWorld().IsBodyFast( visual.bodyHandle ) ? "yes" : "no" );
-            ImGui::Text( "TOI this step: %s", getWorld().HadBodyTimeOfImpact( visual.bodyHandle ) ? "yes" : "no" );
+            if( ImGui::Checkbox( "빠른 회전 허용###Allow fast rotation", &fastRotation ) ) { getWorld().SetBodyFastRotationAllowed( visual.bodyHandle, fastRotation ); }
+            ImGui::Text( "고속 오브젝트: %s", getWorld().IsBodyFast( visual.bodyHandle ) ? "예" : "아니요" );
+            ImGui::Text( "이번 단계의 충돌 시점 감지: %s", getWorld().HadBodyTimeOfImpact( visual.bodyHandle ) ? "예" : "아니요" );
         }
 #pragma endregion
 
 #pragma region Sensors
-        if( ImGui::CollapsingHeader( "Sensors" ) )
+        if( ImGui::CollapsingHeader( "센서###Sensors" ) )
         {
             const bool isSensor = getWorld().IsShapeSensor( visual.shapeHandle );
-            ImGui::Text( "Sensor: %s", isSensor ? "yes" : "no" );
+            ImGui::Text( "센서: %s", isSensor ? "예" : "아니요" );
             bool enabled = getWorld().AreShapeSensorEventsEnabled( visual.shapeHandle );
-            if( ImGui::Checkbox( "Sensor events", &enabled ) ) { getWorld().SetShapeSensorEventsEnabled( visual.shapeHandle, enabled ); }
-            if( isSensor ) { ImGui::Text( "Sensor overlaps: %zu", getWorld().GetShapeSensorCapacity( visual.shapeHandle ) ); }
+            if( ImGui::Checkbox( "센서 이벤트###Sensor events", &enabled ) ) { getWorld().SetShapeSensorEventsEnabled( visual.shapeHandle, enabled ); }
+            if( isSensor ) { ImGui::Text( "센서 겹침 수: %zu", getWorld().GetShapeSensorCapacity( visual.shapeHandle ) ); }
         }
 #pragma endregion
     }
@@ -667,13 +677,13 @@ void rigidBodyDemoUi::drawExperimentControls()
     if( getKind() == demoKind::playground && ( !getWorld().IsValid( getImpulseBody() ) || !getWorld().IsValid( getTorqueBody() ) ) ) { return; }
     if( getKind() == demoKind::distancePendulum )
     {
-        ImGui::TextUnformatted( "Distance Joint" );
+        ImGui::TextUnformatted( "거리 조인트" );
         distanceJointData pendulum = getWorld().getDistanceJointData( getPendulumJoint() );
         bool enableSpring = pendulum.enableSpring;
         float hertz = pendulum.hertz, dampingRatio = pendulum.dampingRatio;
-        bool changed = ImGui::Checkbox( "Distance spring", &enableSpring );
-        changed |= ImGui::SliderFloat( "Distance Hertz", &hertz, 0.0f, 30.0f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp );
-        changed |= ImGui::SliderFloat( "Distance damping", &dampingRatio, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+        bool changed = ImGui::Checkbox( "거리 스프링###Distance spring", &enableSpring );
+        changed |= ImGui::SliderFloat( "거리 스프링 주파수###Distance Hertz", &hertz, 0.0f, 30.0f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp );
+        changed |= ImGui::SliderFloat( "거리 스프링 감쇠 비율###Distance damping", &dampingRatio, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
         if( changed )
         {
             getWorld().setDistanceJointSpring( getPendulumJoint(), enableSpring, hertz, dampingRatio );
@@ -681,25 +691,25 @@ void rigidBodyDemoUi::drawExperimentControls()
         }
         bool enableLimit = pendulum.enableLimit;
         float minLength = pendulum.minLength, maxLength = pendulum.maxLength;
-        bool limitChanged = ImGui::Checkbox( "Distance limit", &enableLimit );
-        limitChanged |= ImGui::SliderFloat( "Distance min", &minLength, LINEAR_SLOP, maxLength, "%.2f m", ImGuiSliderFlags_AlwaysClamp );
-        limitChanged |= ImGui::SliderFloat( "Distance max", &maxLength, minLength, 4.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp );
+        bool limitChanged = ImGui::Checkbox( "거리 제한###Distance limit", &enableLimit );
+        limitChanged |= ImGui::SliderFloat( "최소 거리###Distance min", &minLength, LINEAR_SLOP, maxLength, "%.2f m", ImGuiSliderFlags_AlwaysClamp );
+        limitChanged |= ImGui::SliderFloat( "최대 거리###Distance max", &maxLength, minLength, 4.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp );
         if( limitChanged )
         {
             getWorld().setDistanceJointLimit( getPendulumJoint(), enableLimit, minLength, maxLength );
             pendulum = getWorld().getDistanceJointData( getPendulumJoint() );
         }
         const bool rigid = !enableSpring || ( enableLimit && minLength == maxLength );
-        ImGui::TextUnformatted( rigid ? "Rigid distance at Target" : hertz > 0.0f ? "Spring distance" : enableLimit ? "Limit only (0 Hz)" : "Free distance axis (0 Hz)" );
-        ImGui::Text( "Target: %.3f m / Current: %.3f m", pendulum.length, pendulum.currentLength );
-        ImGui::Text( "Extension: %.3f m / Axial force: %.2f N", pendulum.currentLength - pendulum.length, pendulum.axialForce );
-        ImGui::TextWrapped( "Hertz controls spring stiffness; damping controls oscillation. Negative force is tension. Limits need spring enabled; 0 Hz keeps limits active. Equal limits use rigid Target." );
-        if( enableLimit && !rigid ) { ImGui::TextWrapped( "Green: min / Red: max. Limits correct softly; small errors can remain under load." ); }
-        if( ImGui::Button( "Kick pendulum", ImVec2( -1.0f, 0.0f ) ) )
+        ImGui::TextUnformatted( rigid ? "목표 거리에 고정" : hertz > 0.0f ? "거리 스프링" : enableLimit ? "거리 제한만 적용 (0 Hz)" : "거리 축 자유 이동 (0 Hz)" );
+        ImGui::Text( "목표 거리: %.3f m / 현재 거리: %.3f m", pendulum.length, pendulum.currentLength );
+        ImGui::Text( "늘어난 길이: %.3f m / 축 방향 힘: %.2f N", pendulum.currentLength - pendulum.length, pendulum.axialForce );
+        ImGui::TextWrapped( "주파수는 스프링 강성, 감쇠 비율은 진동을 조절합니다. 음의 힘은 당기는 힘입니다. 거리 제한은 스프링을 켜야 적용되며 0 Hz에서도 작동합니다. 최소·최대 거리가 같으면 목표 거리에 고정됩니다." );
+        if( enableLimit && !rigid ) { ImGui::TextWrapped( "초록색은 최소, 빨간색은 최대 거리입니다. 제한은 부드럽게 보정하므로 하중이 있으면 작은 오차가 남을 수 있습니다." ); }
+        if( ImGui::Button( "진자 옆으로 밀기###Kick pendulum", ImVec2( -1.0f, 0.0f ) ) )
         {
             getWorld().ApplyLinearImpulseToCenter( getPendulumBody(), { getWorld().GetBodyMass( getPendulumBody() ) * 2.0f, 0.0f } );
         }
-        if( ImGui::Button( "Radial kick", ImVec2( -1.0f, 0.0f ) ) )
+        if( ImGui::Button( "진자 축 방향으로 밀기###Radial kick", ImVec2( -1.0f, 0.0f ) ) )
         {
             const vec2 axis = Normalize( pendulum.anchorB - pendulum.anchorA );
             getWorld().ApplyLinearImpulseToCenter( getPendulumBody(), getWorld().GetBodyMass( getPendulumBody() ) * 2.0f * axis );
@@ -709,7 +719,7 @@ void rigidBodyDemoUi::drawExperimentControls()
     else
     {
         ImGui::TextUnformatted(
-            "Impulse Test"
+            "충격량 실험"
         );
 
         const float circleMass =
@@ -718,7 +728,7 @@ void rigidBodyDemoUi::drawExperimentControls()
             );
 
         if( ImGui::Button(
-            "Jump impulse",
+            "점프 충격량###Jump impulse",
             ImVec2( -1.0f, 0.0f ) ) )
         {
             // DeltaV = J / M = 5 m/s
@@ -729,7 +739,7 @@ void rigidBodyDemoUi::drawExperimentControls()
         }
 
         if( ImGui::Button(
-            "Off-center kick",
+            "중심 밖에서 밀기###Off-center kick",
             ImVec2( -1.0f, 0.0f ) ) )
         {
             const vec2 center =
@@ -752,7 +762,7 @@ void rigidBodyDemoUi::drawExperimentControls()
             );
 
         if( ImGui::Button(
-            "Spin box",
+            "상자 회전시키기###Spin box",
             ImVec2( -1.0f, 0.0f ) ) )
         {
             // DeltaW = L / I = 3 rad/s
@@ -773,12 +783,12 @@ void rigidBodyDemoUi::drawExperimentControls()
             );
 
         ImGui::Text(
-            "Circle v: (%.2f, %.2f)",
+            "원의 선속도: (%.2f, %.2f)",
             circleVelocity.x,
             circleVelocity.y
         );
         ImGui::Text(
-            "Circle w: %.2f rad/s",
+            "원의 각속도: %.2f rad/s",
             circleAngularVelocity
         );
 
@@ -789,19 +799,19 @@ void rigidBodyDemoUi::drawExperimentControls()
 
 void rigidBodyDemoUi::drawMouseControls()
 {
-    ImGui::Separator(); ImGui::TextUnformatted( "Mouse Joint" );
+    ImGui::Separator(); ImGui::TextUnformatted( "마우스 조인트" );
     float hertz = getMouseSettings().hertz, damping = getMouseSettings().dampingRatio, force = getMouseSettings().maxForce;
     // Ctrl+click의 숫자 입력도 solver의 비음수 전제조건과 화면 범위를 지켜야 함.
-    bool changed = ImGui::SliderFloat( "Mouse Hertz", &hertz, 0.0f, 30.0f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp );
-    changed |= ImGui::SliderFloat( "Mouse damping", &damping, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
-    changed |= ImGui::SliderFloat( "Mouse max force", &force, 0.0f, 5000.0f, "%.1f N", ImGuiSliderFlags_AlwaysClamp );
+    bool changed = ImGui::SliderFloat( "잡기 주파수###Mouse Hertz", &hertz, 0.0f, 30.0f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp );
+    changed |= ImGui::SliderFloat( "잡기 감쇠 비율###Mouse damping", &damping, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+    changed |= ImGui::SliderFloat( "잡기 최대 힘###Mouse max force", &force, 0.0f, 5000.0f, "%.1f N", ImGuiSliderFlags_AlwaysClamp );
     if( changed ) { setMouseSettings( hertz, damping, force ); }
-    ImGui::TextWrapped( "Left drag: pick a Dynamic solid. Orange line: grabbed point to target. UI/focus/canvas exit cancels drag. Right click: impulse experiment." );
-    ImGui::TextWrapped( "Hertz sets the point spring response, damping reduces oscillation. Zero Hertz gives velocity damping only; zero force disables the pull." );
+    ImGui::TextWrapped( "왼쪽 드래그로 동적 도형을 잡습니다. 주황색 선은 잡은 점과 목표점을 잇습니다. UI 조작·포커스 상실·캔버스 이탈 시 취소합니다. 오른쪽 클릭은 충격량 실험입니다." );
+    ImGui::TextWrapped( "주파수는 점 스프링의 반응을 정하고 감쇠 비율은 진동을 줄입니다. 0 Hz에서는 속도 감쇠만 적용하며 최대 힘이 0이면 끌어당기지 않습니다." );
     if( getWorld().IsValid( getMouseJoint() ) )
     {
         const auto joint = getWorld().getMouseJointData( getMouseJoint() );
-        ImGui::Text( "Point error: %.3f m / Force: %.2f N", Length( joint.anchorB - joint.target ), Length( joint.force ) );
+        ImGui::Text( "잡은 점의 오차: %.3f m / 힘: %.2f N", Length( joint.anchorB - joint.target ), Length( joint.force ) );
     }
     ImGui::Spacing();
 }
@@ -809,70 +819,70 @@ void rigidBodyDemoUi::drawMouseControls()
 void rigidBodyDemoUi::drawDebugSettings()
 {
     ImGui::TextUnformatted(
-        "Debug Draw"
+        "물리 정보 표시"
     );
 
     ImGui::Checkbox(
-        "Grid / Axis",
+        "격자와 축###Grid / Axis",
         &showGrid_
     );
     ImGui::Checkbox(
-        "Shape AABBs",
+        "도형 경계 상자###Shape AABBs",
         &showShapeAABBs_
     );
     ImGui::Checkbox(
-        "Fat AABBs",
+        "확장 경계 상자###Fat AABBs",
         &showFatAABBs_
     );
     ImGui::Checkbox(
-        "Contact points",
+        "접촉점###Contact points",
         &showContacts_
     );
     ImGui::Checkbox(
-        "Contact details",
+        "접촉 상세 정보###Contact details",
         &showContactDetails_
     );
     ImGui::Checkbox(
-        "Center of mass",
+        "질량 중심###Center of mass",
         &showCOM_
     );
     ImGui::Checkbox(
-        "Velocity vectors",
+        "속도 벡터###Velocity vectors",
         &showVelocities_
     );
     ImGui::Checkbox(
-        "Labels",
+        "이름 표시###Labels",
         &showLabels_
     );
 
     ImGui::Spacing();
     ImGui::TextUnformatted(
-        "AABB Tree"
+        "경계 상자 트리"
     );
 
     ImGui::Checkbox(
-        "Dynamic Tree",
+        "동적 오브젝트 트리###Dynamic Tree",
         &showDynamicTree_
     );
     ImGui::Checkbox(
-        "Kinematic Tree",
+        "운동학적 오브젝트 트리###Kinematic Tree",
         &showKinematicTree_
     );
     ImGui::Checkbox(
-        "Static Tree",
+        "정적 오브젝트 트리###Static Tree",
         &showStaticTree_
     );
 
     ImGui::Checkbox(
-        "Tree Leaves",
+        "트리 잎 노드###Tree Leaves",
         &showTreeLeaves_
     );
     ImGui::Checkbox(
-        "Tree Internal",
+        "트리 내부 노드###Tree Internal",
         &showTreeInternal_
     );
     ImGui::Checkbox(
-        "Tree Labels",
+        "트리 노드 정보###Tree Labels",
         &showTreeLabels_
     );
 
@@ -897,78 +907,107 @@ void rigidBodyDemoUi::drawDebugSettings()
     ImGui::Spacing();
 
     ImGui::Text(
-        "Bodies: %zu",
+        "오브젝트 수: %zu",
         getWorld().GetBodyCount()
     );
     ImGui::Text(
-        "Shapes: %zu",
+        "도형 수: %zu",
         getWorld().GetShapeCount()
     );
     ImGui::Text(
-        "Persistent contacts: %zu",
+        "유지 중인 접촉 수: %zu",
         getWorld().GetContactCount()
     );
     ImGui::Text(
-        "Touching contacts: %zu",
+        "실제로 닿은 접촉 수: %zu",
         getContacts().size()
     );
     ImGui::Text(
-        "Recycled contacts: %zu",
+        "재사용한 접촉 수: %zu",
         getWorld().GetRecycledContactCount()
     );
 
     ImGui::Text(
-        "Dynamic tree: %zu / h%d",
+        "동적 트리: %zu / 높이 %d",
         dynamicTreeRef.GetProxyCount(),
         dynamicTreeRef.GetHeight()
     );
     ImGui::Text(
-        "Kinematic tree: %zu / h%d",
+        "운동학적 트리: %zu / 높이 %d",
         kinematicTree.GetProxyCount(),
         kinematicTree.GetHeight()
     );
     ImGui::Text(
-        "Static tree: %zu / h%d",
+        "정적 트리: %zu / 높이 %d",
         staticTree.GetProxyCount(),
         staticTree.GetHeight()
     );
 
     ImGui::Spacing();
 
-    ImGui::TextWrapped( "Contact labels: s = separation, Jn = normal impulse, Jt = friction impulse. Cyan arrows show velocity; dim bodies are sleeping." );
+    ImGui::TextWrapped( "접촉 정보는 간격·수직 충격량·마찰 충격량을 표시합니다. 청록색 화살표는 속도이며 어두운 오브젝트는 수면 중입니다." );
 }
 #pragma endregion
+
+bool initializeDemoUi()
+{
+    // 작업 디렉터리와 무관하게 실행 파일과 함께 배포한 한글 폰트를 읽음.
+    wchar_t executable[32768];
+    const DWORD length = GetModuleFileNameW( nullptr, executable, static_cast<DWORD>( std::size( executable ) ) );
+    if( length == 0 || length >= std::size( executable ) ) { return false; }
+    const auto path = std::filesystem::path( executable ).parent_path() / "assets" / "NanumGothic-Regular.ttf";
+    if( !std::filesystem::exists( path ) ) { return false; }
+    const auto utf8Path = path.u8string();
+    ImGuiIO& io = ImGui::GetIO();
+    if( !io.Fonts->AddFontFromFileTTF( reinterpret_cast<const char*>( utf8Path.c_str() ), 16.0f, nullptr, io.Fonts->GetGlyphRangesKorean() ) ) { return false; }
+    // ImGui가 생성하는 공통 메뉴만 번역함. 내부 API이므로 vendored 버전에 맞춰 유지함.
+    static const ImGuiLocEntry entries[] = {
+        { ImGuiLocKey_TableSizeOne, "열 너비 맞추기###SizeOne" },
+        { ImGuiLocKey_TableSizeAllFit, "모든 열 너비 맞추기###SizeAll" },
+        { ImGuiLocKey_TableSizeAllDefault, "모든 열 너비 초기화###SizeAll" },
+        { ImGuiLocKey_TableReset, "초기화" },
+        { ImGuiLocKey_TableResetOrder, "순서 초기화###ResetOrder" },
+        { ImGuiLocKey_TableResetVisibility, "표시 초기화###ResetVisibility" },
+        { ImGuiLocKey_WindowingMainMenuBar, "(주 메뉴)" },
+        { ImGuiLocKey_WindowingPopup, "(팝업)" },
+        { ImGuiLocKey_WindowingUntitled, "(제목 없음)" },
+        { ImGuiLocKey_OpenLink_s, "'%s' 열기" },
+        { ImGuiLocKey_CopyLink, "링크 복사###CopyLink" }
+    };
+    ImGui::LocalizeRegisterEntries( entries, IM_ARRAYSIZE( entries ) );
+    return true;
+}
 
 std::unique_ptr<demo> createDemoView( demoKind kind ) { return std::make_unique<rigidBodyDemoUi>( kind ); }
 void drawProjectCollisionSettings( demoSession& session )
 {
-    if( ImGui::Button( "Project collision matrix", ImVec2( -1.0f, 0.0f ) ) ) { ImGui::OpenPopup( "Project collision settings" ); }
+    if( ImGui::Button( "공통 충돌 매트릭스###Project collision matrix", ImVec2( -1.0f, 0.0f ) ) ) { ImGui::OpenPopup( "공통 충돌 설정###Project collision settings" ); }
     ImGui::SetNextWindowSize( { 900.0f, 560.0f }, ImGuiCond_FirstUseEver );
-    if( ImGui::BeginPopupModal( "Project collision settings", nullptr ) )
+    if( ImGui::BeginPopupModal( "공통 충돌 설정###Project collision settings", nullptr ) )
     {
-        ImGui::TextWrapped( "Common rules for all demos. A checked pair permits collision; object masks can exclude more pairs. Changes survive demo switches and Reset during this session." );
+        ImGui::TextWrapped( "모든 데모의 공통 규칙입니다. 체크한 레이어 쌍은 충돌을 허용하며 개별 마스크로 추가 제한할 수 있습니다. 현재 실행 중에는 데모 전환과 초기화 후에도 유지됩니다." );
         collisionMatrix matrix = session.getCollisionMatrix();
         bool changed = false;
         ImGui::SetNextWindowContentSize( { 120.0f + 64.0f * 70.0f, 0.0f } );
         ImGui::BeginChild( "MatrixGrid", { 0.0f, 420.0f }, ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar );
-        ImGui::TextUnformatted( "Layer" );
+        ImGui::TextUnformatted( "레이어" );
         for( int column = 0; column < 64; ++column )
         { ImGui::SameLine( 120.0f + column * 70.0f ); ImGui::Text( "%02d", column + 1 ); }
         for( int row = 0; row < 64; ++row )
         {
-            ImGui::Text( "Layer %02d", row + 1 );
+            ImGui::Text( "레이어 %02d", row + 1 );
             for( int column = 0; column < 64; ++column )
             {
                 ImGui::SameLine( 120.0f + column * 70.0f );
                 char label[32]; std::snprintf( label, sizeof( label ), "##Pair%d_%d", row, column );
                 bool allowed = matrix.allows( std::uint64_t{ 1 } << row, std::uint64_t{ 1 } << column );
                 if( ImGui::Checkbox( label, &allowed ) ) { matrix.setPair( row, column, allowed ); changed = true; }
-                ImGui::SetItemTooltip( "Layer %02d / Layer %02d", row + 1, column + 1 );
+                ImGui::SetItemTooltip( "레이어 %02d / 레이어 %02d", row + 1, column + 1 );
             }
         }
         ImGui::EndChild();
         if( changed ) { session.setCollisionMatrix( matrix ); }
-        if( ImGui::Button( "Close" ) ) { ImGui::CloseCurrentPopup(); }
+        if( ImGui::Button( "닫기###Close" ) ) { ImGui::CloseCurrentPopup(); }
         ImGui::EndPopup();
     }
 }

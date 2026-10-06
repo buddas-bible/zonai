@@ -518,4 +518,7 @@ if(TARGET imgui)
     target_sources(sandboxDemoTests PRIVATE sandbox/demo_ui_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemoUi.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugCamera.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugDraw.cpp")
     target_link_libraries(sandboxDemoTests PRIVATE imgui)
     target_compile_definitions(sandboxDemoTests PRIVATE ZONAI_TEST_SANDBOX_UI)
+    add_custom_command(TARGET sandboxDemoTests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/sandbox/assets" "$<TARGET_FILE_DIR:sandboxDemoTests>/assets"
+    )
 endif()

@@ -101,7 +101,7 @@ void rigidBodyDemo::createPlayground()
         );
 
     shapes_.push_back(
-        { ground, groundShape, "Ground [Static]" }
+        { ground, groundShape, "바닥 [정적]" }
     );
 
     // 기울어진 정적 ramp.
@@ -125,7 +125,7 @@ void rigidBodyDemo::createPlayground()
         );
 
     shapes_.push_back(
-        { ramp, rampShape, "Ramp [Static]" }
+        { ramp, rampShape, "경사면 [정적]" }
     );
 
     // impulse 버튼으로 직접 밀어볼 Dynamic Circle.
@@ -145,7 +145,7 @@ void rigidBodyDemo::createPlayground()
         );
 
     shapes_.push_back(
-        { impulseBody_, circleShape, "Circle [Dynamic]" }
+        { impulseBody_, circleShape, "원 [동적]" }
     );
 
     // COM이 origin과 일치하는 Dynamic Box.
@@ -165,7 +165,7 @@ void rigidBodyDemo::createPlayground()
         );
 
     shapes_.push_back(
-        { torqueBody_, boxShape, "Box [Dynamic]" }
+        { torqueBody_, boxShape, "상자 [동적]" }
     );
 
     // 길쭉한 Dynamic Capsule.
@@ -190,7 +190,7 @@ void rigidBodyDemo::createPlayground()
         );
 
     shapes_.push_back(
-        { capsuleBody, capsuleShape, "Capsule [Dynamic]" }
+        { capsuleBody, capsuleShape, "캡슐 [동적]" }
     );
 
     // gravity와 force의 영향을 받지 않고 지정한 velocity로만 움직이는 Kinematic Body.
@@ -218,7 +218,7 @@ void rigidBodyDemo::createPlayground()
         {
             kinematicBody,
             kinematicShape,
-            "Platform [Kinematic]"
+            "발판 [운동학적]"
         }
     );
 
@@ -228,10 +228,10 @@ void rigidBodyDemo::createPendulum()
 {
     const bodyId anchor = world_.CreateBody();
     const shapeId anchorShape = world_.CreateShape( anchor, circle2{ {}, 0.08f } );
-    shapes_.push_back( { anchor, anchorShape, "Anchor [Static]" } );
+    shapes_.push_back( { anchor, anchorShape, "고정점 [정적]" } );
     pendulumBody_ = world_.CreateBody( bodyType::Dynamic, { { 0.0f, -2.0f }, {} } );
     const shapeId pendulumShape = world_.CreateShape( pendulumBody_, circle2{ {}, 0.3f } );
-    shapes_.push_back( { pendulumBody_, pendulumShape, "Pendulum [Distance Joint]" } );
+    shapes_.push_back( { pendulumBody_, pendulumShape, "진자 [거리 조인트]" } );
     distanceJointDef joint{};
     joint.bodyA = anchor; joint.bodyB = pendulumBody_; joint.length = 2.0f;
     joint.hertz = 2.0f; joint.dampingRatio = 0.7f;
