@@ -1,5 +1,7 @@
 # Sandbox
 
+화면의 버튼·설명·오브젝트·물리 정보는 한글로 표시한다. 빌드 시 나눔고딕과 라이선스를 실행 파일 옆 `assets` 폴더로 복사하므로 배포할 때 함께 제공한다. 내부 UI ID는 유지하고 단위·키 이름은 그대로 표시한다. ImGui가 생성하는 일부 공통 메뉴도 번역하지만 개발용 Metrics/Debugger 전체를 번역한 것은 아니다.
+
 Windows용 Win32 / Direct3D 11 / Dear ImGui visual playground다. 빌드와 실행은 [루트 문서](../README.md)를 따른다. 물리 library가 Sandbox나 ImGui에 의존하지 않는다.
 
 Demo 목록에서 **Playground** 또는 **Distance Pendulum**을 선택한다. 전환/Reset은 현재 데모의 World·선택·설정·입력을 새로 만들고 Pause와 초기 camera로 돌아간다. Sub-steps와 Project collision matrix는 공통 설정으로 유지한다.

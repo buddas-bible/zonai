@@ -13,8 +13,8 @@ constexpr float FIXED_TIME_STEP = 1.0f / 60.0f;
 constexpr int MAX_STEPS_PER_FRAME = 8;
 constexpr std::array entries
 {
-    demoEntry{ demoKind::playground, "Rigid Bodies", "Playground", "Canvas: A/D hold = push circle, Space = jump, S = spin box. Left drag = grab dynamic body. Right click = kick circle toward cursor.", { 0.0f, 0.5f }, 55.0f },
-    demoEntry{ demoKind::distancePendulum, "Joints", "Distance Pendulum", "Canvas: A/D hold = push pendulum, Space = kick. Left drag = grab pendulum. Right click = kick toward cursor. Controls: spring/Hertz/damping, limit/min/max, Radial kick. Purple line connects anchors; green/red mark limits.", { 0.0f, -0.5f }, 110.0f }
+    demoEntry{ demoKind::playground, "강체", "강체 실험", "캔버스: A/D 유지로 원 밀기, 스페이스로 점프, S로 상자 회전. 왼쪽 드래그로 동적 오브젝트 잡기. 오른쪽 클릭으로 원을 커서 방향으로 밀기.", { 0.0f, 0.5f }, 55.0f },
+    demoEntry{ demoKind::distancePendulum, "조인트", "거리 조인트 진자", "캔버스: A/D 유지로 진자 밀기, 스페이스로 충격량 가하기. 왼쪽 드래그로 진자 잡기, 오른쪽 클릭으로 커서 방향으로 밀기. 스프링·주파수·감쇠·거리 제한·축 방향 충격량을 조절합니다. 보라색 선은 고정점을 잇고 초록·빨강은 거리 제한입니다.", { 0.0f, -0.5f }, 110.0f }
 };
 }
 

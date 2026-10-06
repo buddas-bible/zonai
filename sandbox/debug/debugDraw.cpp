@@ -251,20 +251,20 @@ void debugDraw::DrawTree(
                 return;
             }
 
-            char label[128]{};
+            char label[256]{};
 
             if( info.isLeaf )
             {
                 std::snprintf(
                     label,
                     sizeof( label ),
-                    "%s L n%d p%d proxy%d shape%d%s",
+                    "%s 잎 노드%d 부모%d 프록시%d 도형%d%s",
                     treeName,
                     info.nodeIndex,
                     info.parentIndex,
                     info.proxyId,
                     info.shapeIndex,
-                    info.isMoved ? " moved" : ""
+                    info.isMoved ? " 이동됨" : ""
                 );
             }
             else
@@ -272,13 +272,13 @@ void debugDraw::DrawTree(
                 std::snprintf(
                     label,
                     sizeof( label ),
-                    "%s I n%d p%d child%d h%d%s",
+                    "%s 내부 노드%d 부모%d 자식%d 높이%d%s",
                     treeName,
                     info.nodeIndex,
                     info.parentIndex,
                     info.childPair,
                     info.height,
-                    info.isMoved ? " moved" : ""
+                    info.isMoved ? " 이동됨" : ""
                 );
             }
 

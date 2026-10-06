@@ -14,6 +14,7 @@ using namespace zonai::sandbox;
 void checkDemoUi()
 {
     ImGui::CreateContext();
+    if( !initializeDemoUi() ) { std::fprintf( stderr, "Korean font initialization failed\n" ); std::exit( EXIT_FAILURE ); }
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.DisplaySize = { 1280.0f, 720.0f };
@@ -22,6 +23,10 @@ void checkDemoUi()
     int width = 0, height = 0;
     io.Fonts->GetTexDataAsRGBA32( &pixels, &width, &height );
     io.Fonts->SetTexID( static_cast<ImTextureID>( 1 ) );
+    for( const ImWchar codepoint : { 0xAC00, 0xD55C, 0xD7A3 } )
+    { if( !io.Fonts->Fonts[0]->IsGlyphInFont( codepoint ) ) { std::fprintf( stderr, "Korean glyph missing\n" ); std::exit( EXIT_FAILURE ); } }
+    if( std::strcmp( ImGui::LocalizeGetMsg( ImGuiLocKey_TableReset ), "초기화" ) != 0 )
+    { std::fprintf( stderr, "ImGui common menu not localized\n" ); std::exit( EXIT_FAILURE ); }
     demoSession session{ createDemoView };
     for( int frame = 0; frame < 6; ++frame )
     {
@@ -121,7 +126,7 @@ void checkDemoUi()
     for( int field = 0; field < 2; ++field )
     {
         const char* label = field == 0 ? "Category membership" : "Collision partners";
-        const char* bitLabel = field == 0 ? "Layer 64##Category" : "Layer 64##Mask";
+        const char* bitLabel = field == 0 ? "레이어 64##Category" : "레이어 64##Mask";
         for( int frame = 0; frame < 3; ++frame )
         {
             ImGui::NewFrame();

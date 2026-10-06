@@ -148,7 +148,7 @@ int main()
         CreateWindowExW(
             0,
             className,
-            L"Zonai Physics Sandbox",
+            L"조나이 물리 실험실",
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -219,6 +219,13 @@ int main()
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+
+    if( !initializeDemoUi() )
+    {
+        MessageBoxW( hwnd, L"한글 폰트를 읽을 수 없습니다. 실행 파일 옆의 assets 폴더를 확인하세요.", L"조나이 물리 실험실", MB_OK | MB_ICONERROR );
+        ImGui::DestroyContext();
+        return 1;
+    }
 
     ImGuiIO& io = ImGui::GetIO();
 
@@ -307,7 +314,7 @@ int main()
             ImGuiWindowFlags_NoResize;
 
         ImGui::Begin(
-            "Zonai Physics Sandbox",
+            "조나이 물리 실험실",
             nullptr,
             WINDOW_FLAGS
         );
@@ -317,13 +324,14 @@ int main()
         // -----------------------------------------------------
 
         ImGui::BeginChild(
-            "Controls",
+            "조작 안내###Controls",
             ImVec2( 340.0f, 0.0f ),
             true
         );
 
         const demoEntry& selectedEntry = getDemoEntry( session.getKind() );
-        if( ImGui::BeginCombo( "Demo", selectedEntry.name ) )
+        ImGui::PushItemWidth( ImGui::GetContentRegionAvail().x * 0.45f );
+        if( ImGui::BeginCombo( "데모###Demo", selectedEntry.name ) )
         {
             for( const demoEntry& entry : getDemoEntries() )
             {
@@ -337,22 +345,23 @@ int main()
             ImGui::EndCombo();
         }
         ImGui::TextUnformatted( getDemoEntry( session.getKind() ).category );
-        if( ImGui::Button( session.isPlaying() ? "Pause" : "Play", ImVec2( 78.0f, 0.0f ) ) ) { session.setPlaying( !session.isPlaying() ); }
+        if( ImGui::Button( session.isPlaying() ? "일시 정지###Pause" : "재생###Play", ImVec2( 78.0f, 0.0f ) ) ) { session.setPlaying( !session.isPlaying() ); }
         ImGui::SameLine();
-        if( ImGui::Button( "Step", ImVec2( 72.0f, 0.0f ) ) ) { stepRequested = true; }
+        if( ImGui::Button( "한 단계###Step", ImVec2( 72.0f, 0.0f ) ) ) { stepRequested = true; }
         ImGui::SameLine();
-        if( ImGui::Button( "Reset", ImVec2( 72.0f, 0.0f ) ) ) { session.reset(); resetCamera(); demoChanged = true; }
-        ImGui::SliderInt( "Sub-steps", &subStepCount, 1, 16 );
-        ImGui::Text( "Fixed dt: %.5f s / Steps: %llu", 1.0f / 60.0f, static_cast<unsigned long long>( session.getStepCount() ) );
-        if( ImGui::Button( "Reset Camera", ImVec2( -1.0f, 0.0f ) ) ) { resetCamera(); }
-        ImGui::Text( "FPS: %.1f / Scale: %.1f px/m", io.Framerate, camera.pixelsPerMeter );
+        if( ImGui::Button( "초기화###Reset", ImVec2( 72.0f, 0.0f ) ) ) { session.reset(); resetCamera(); demoChanged = true; }
+        ImGui::SliderInt( "하위 단계 수###Sub-steps", &subStepCount, 1, 16 );
+        ImGui::Text( "고정 시간 간격: %.5f s / 진행 단계: %llu", 1.0f / 60.0f, static_cast<unsigned long long>( session.getStepCount() ) );
+        if( ImGui::Button( "카메라 초기화###Reset Camera", ImVec2( -1.0f, 0.0f ) ) ) { resetCamera(); }
+        ImGui::Text( "초당 프레임: %.1f / 화면 배율: %.1f px/m", io.Framerate, camera.pixelsPerMeter );
         drawProjectCollisionSettings( session );
         ImGui::Separator();
-        ImGui::TextUnformatted( "Controls" );
+        ImGui::TextUnformatted( "조작 안내" );
         ImGui::TextWrapped( "%s", getDemoEntry( session.getKind() ).controls );
-        ImGui::TextWrapped( "Mouse wheel: zoom. Middle drag: pan. Move the pointer onto the canvas for demo keys. UI edits suspend canvas input." );
+        ImGui::TextWrapped( "마우스 휠로 확대·축소하고 가운데 버튼 드래그로 화면을 이동합니다. 데모 키 조작은 캔버스 위에서 작동합니다. UI 편집 중에는 캔버스 입력을 중단합니다." );
         ImGui::Separator();
         session.getDemo().drawControls();
+        ImGui::PopItemWidth();
 
         ImGui::EndChild();
 
