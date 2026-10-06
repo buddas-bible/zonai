@@ -5,6 +5,7 @@
 #include <span>
 
 #include "math/vec2.h"
+#include "collision/filter.h"
 
 namespace zonai::sandbox
 {
@@ -43,6 +44,7 @@ public:
     virtual void step( float timeStep, int subStepCount ) = 0;
     virtual void handleInput( const demoInput& input ) = 0;
     virtual void cancelInput() = 0;
+    virtual void setCollisionMatrix( const collisionMatrix& ) {}
     // Headless model은 화면 callback을 쓰지 않음. World 소유를 공통 interface에 강제하지 않음.
     virtual void drawControls() {}
     virtual void draw( debugDraw& ) const {}
@@ -59,6 +61,7 @@ public:
     explicit demoSession( demoFactory factory );
     void selectDemo( demoKind kind );
     void reset();
+    void setCollisionMatrix( const collisionMatrix& matrix );
 #pragma endregion
 
 #pragma region PlaybackAndInput
@@ -73,10 +76,12 @@ public:
     [[nodiscard]] demoKind getKind() const noexcept { return kind_; }
     [[nodiscard]] bool isPlaying() const noexcept { return playing_; }
     [[nodiscard]] std::uint64_t getStepCount() const noexcept { return stepCount_; }
+    [[nodiscard]] const collisionMatrix& getCollisionMatrix() const noexcept { return collisionMatrix_; }
 #pragma endregion
 
 private:
     demoFactory factory_;
+    collisionMatrix collisionMatrix_{};
     std::unique_ptr<demo> demo_;
     demoKind kind_ = demoKind::playground;
     bool playing_ = false;

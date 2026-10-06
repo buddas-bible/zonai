@@ -22,6 +22,7 @@ public:
     void step( float timeStep, int subStepCount ) override;
     void handleInput( const demoInput& input ) override;
     void cancelInput() override;
+    void setCollisionMatrix( const collisionMatrix& matrix ) override;
     void setMouseSettings( float hertz, float dampingRatio, float maxForce );
     void refreshContacts();
 #pragma endregion

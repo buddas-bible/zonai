@@ -60,6 +60,11 @@ void rigidBodyDemo::cancelInput()
     mouseJoint_ = {};
 }
 
+void rigidBodyDemo::setCollisionMatrix( const collisionMatrix& matrix )
+{
+    world_.setCollisionMatrix( matrix ); refreshContacts();
+}
+
 void rigidBodyDemo::setMouseSettings( float hertz, float dampingRatio, float maxForce )
 {
     assert( std::isfinite( hertz ) && hertz >= 0.0f && std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );

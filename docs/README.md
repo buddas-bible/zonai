@@ -1,5 +1,7 @@
 # Documentation
 
+Sandbox의 [Inspector 분류·레이어 체크 목록·공통 충돌 매트릭스](sandbox-inspector.md)를 제공한다.
+
 현재 감사 완료 범위와 다음 작업은 [감사 현황](audit-status.md)에서 확인한다. 개별 보고서의 다음 작업/미병합/CI 대기 문구는 작성 당시의 기록이며, 최신 진행 순서는 감사 현황을 따른다.
 
 감사 상세 기록:

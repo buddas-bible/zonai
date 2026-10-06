@@ -125,5 +125,11 @@ int main()
 #ifdef ZONAI_TEST_SANDBOX_UI
     checkDemoUi();
 #endif
+    demoSession project{ createRigidBodyDemo };
+    collisionMatrix matrix; matrix.setPair( 0, 63, false ); project.setCollisionMatrix( matrix );
+    project.selectDemo( demoKind::distancePendulum ); project.reset();
+    check( !project.getCollisionMatrix().allows( 1, std::uint64_t{ 1 } << 63 ), "project matrix persists across demo switch and Reset" );
+    auto& shared = static_cast<rigidBodyDemo&>( project.getDemo() );
+    check( shared.getWorld().getCollisionMatrix() == project.getCollisionMatrix(), "new demo receives project matrix" );
     return EXIT_SUCCESS;
 }

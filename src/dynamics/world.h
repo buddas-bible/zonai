@@ -125,6 +125,9 @@ public:
     // 다음 collision update에서 이 shape의 broad-phase pair를 다시 탐색함.
     void SetShapeFilter( shapeId shapeId, collisionFilter filter );
     [[nodiscard]] collisionFilter GetShapeFilter( shapeId shapeId ) const;
+    // 공통 category 규칙 변경은 Contact를 무효화하고 정지 proxy도 다시 검사함.
+    void setCollisionMatrix( const collisionMatrix& matrix );
+    [[nodiscard]] const collisionMatrix& getCollisionMatrix() const noexcept { return collisionMatrix_; }
 
 #pragma endregion
 
@@ -409,6 +412,7 @@ private:
     void destroyJointByIndex( std::int32_t jointIndex, bool touchProxies );
     void resetJointImpulses( std::int32_t bodyIndex );
     [[nodiscard]] bool shouldBodiesCollide( std::int32_t bodyIndexA, std::int32_t bodyIndexB ) const;
+    [[nodiscard]] bool shouldShapeFiltersCollide( const collisionFilter& a, const collisionFilter& b ) const;
 
 #pragma endregion
 
@@ -596,6 +600,7 @@ private:
     std::size_t jointCount_ = 0;
 
     // 모든 Dynamic body에 적용되는 world-space 중력 가속도.
+    collisionMatrix collisionMatrix_{};
     vec2 gravity_{ 0.0f, -10.0f };
 
     // 지나치게 큰 이동으로 solver가 불안정해지는 것을 막는 world 최대 선속도.

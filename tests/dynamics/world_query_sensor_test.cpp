@@ -300,6 +300,46 @@ void checkTreeCallback()
 
 int main()
 {
+    world matrixWorld; matrixWorld.SetGravity( {} );
+    const auto ground = matrixWorld.CreateBody();
+    const auto moving = matrixWorld.CreateBody( bodyType::Dynamic );
+    const auto solid = matrixWorld.CreateShape( ground, circle2{ {}, 1.0f }, { 1, ~std::uint64_t{ 0 }, 0 } );
+    const auto visitor = matrixWorld.CreateShape( moving, circle2{ {}, 1.0f }, { std::uint64_t{ 1 } << 63, ~std::uint64_t{ 0 }, 0 } );
+    const auto sensor = matrixWorld.CreateSensorShape( ground, circle2{ {}, 1.0f }, { 1, ~std::uint64_t{ 0 }, 0 } );
+    matrixWorld.SetShapeSensorEventsEnabled( visitor, true );
+    matrixWorld.SetShapeSensorEventsEnabled( sensor, true );
+    matrixWorld.Step( 0.0f );
+    check( matrixWorld.GetContactCount() == 1 && matrixWorld.GetShapeSensorCapacity( sensor ) == 1, "default project matrix preserves filters" );
+    collisionMatrix matrix; matrix.setPair( 0, 63, false );
+    matrixWorld.setCollisionMatrix( matrix );
+    check( matrixWorld.GetContactCount() == 0, "matrix edit removes existing contacts immediately" );
+    matrixWorld.Step( 0.0f );
+    check( matrixWorld.GetContactCount() == 0 && matrixWorld.GetShapeSensorCapacity( sensor ) == 0, "matrix blocks stationary solid and sensor pairs" );
+    matrixWorld.SetShapeFilter( solid, { 1, 0, 7 } ); matrixWorld.SetShapeFilter( visitor, { std::uint64_t{ 1 } << 63, 0, 7 } );
+    matrixWorld.Step( 0.0f );
+    check( matrixWorld.GetContactCount() == 0, "positive group cannot bypass project matrix" );
+    matrix.setPair( 63, 0, true ); matrixWorld.setCollisionMatrix( matrix ); matrixWorld.Step( 0.0f );
+    check( matrixWorld.GetContactCount() == 1, "symmetric matrix edit discovers stationary pair again" );
+    matrixWorld.SetShapeFilter( solid, { 1, ~std::uint64_t{ 0 }, 0 } ); matrixWorld.SetShapeFilter( visitor, { std::uint64_t{ 1 } << 63, 0, 0 } );
+    matrixWorld.Step( 0.0f ); check( matrixWorld.GetContactCount() == 0, "object mask excludes project-allowed collision" );
+    matrixWorld.SetBodyAwake( moving, false ); matrixWorld.setCollisionMatrix( matrix );
+    check( !matrixWorld.IsBodyAwake( moving ), "unchanged project matrix preserves sleep" );
+    check( matrix.allows( 1 | 2, std::uint64_t{ 1 } << 63 ), "multiple categories use any project-allowed pair" );
+    for( const bool sensorTarget : { false, true } ) for( const bool allowed : { false, true } )
+    {
+        world continuous; continuous.SetGravity( {} );
+        const auto target = continuous.CreateBody();
+        const auto targetShape = sensorTarget ? continuous.CreateSensorShape( target, circle2{ {}, 0.25f } ) : continuous.CreateShape( target, circle2{ {}, 0.25f } );
+        const auto fast = continuous.CreateBody( bodyType::Dynamic, { { -2.0f, 0.0f }, {} } );
+        const auto fastShape = continuous.CreateShape( fast, circle2{ {}, 0.25f }, { std::uint64_t{ 1 } << 63, ~std::uint64_t{ 0 }, 0 } );
+        continuous.SetShapeSensorEventsEnabled( targetShape, true ); continuous.SetShapeSensorEventsEnabled( fastShape, true );
+        continuous.SetBodyBullet( fast, true ); continuous.SetBodyLinearVelocity( fast, { 120.0f, 0.0f } );
+        collisionMatrix rules; rules.setPair( 0, 63, allowed ); continuous.setCollisionMatrix( rules );
+        continuous.Step( 1.0f / 30.0f );
+        if( sensorTarget ) { check( continuous.GetShapeSensorCapacity( targetShape ) == ( allowed ? 1u : 0u ), "continuous sensor respects project matrix" ); }
+        else { check( continuous.HadBodyTimeOfImpact( fast ) == allowed, "solid CCD respects project matrix" ); }
+        if( !allowed ) { check( continuous.GetBodyTransform( fast ).position.x > 1.0f, "excluded CCD pair does not clip motion" ); }
+    }
     checkContactQueries();
     checkCollisionCallbackTiming();
     checkSensorQueries();

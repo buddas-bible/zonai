@@ -1,6 +1,7 @@
 #include "rigidBodyDemoUi.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <imgui.h>
@@ -86,6 +87,30 @@ vec2 getWorldCenter(
         world.GetBodyTransform( bodyId ),
         world.GetBodyLocalCenter( bodyId )
     );
+}
+
+bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits )
+{
+    char preview[32]; std::snprintf( preview, sizeof( preview ), "%d layers selected", std::popcount( bits ) );
+    bool changed = false;
+    if( ImGui::BeginCombo( label, preview, ImGuiComboFlags_HeightLarge ) )
+    {
+        ImGui::PushID( id );
+        if( ImGui::Button( "All" ) ) { bits = ~std::uint64_t{ 0 }; changed = true; }
+        ImGui::SameLine();
+        if( ImGui::Button( "None" ) ) { bits = 0; changed = true; }
+        ImGui::PopID();
+        for( int bit = 0; bit < 64; ++bit )
+        {
+            const auto flag = std::uint64_t{ 1 } << bit;
+            bool enabled = ( bits & flag ) != 0;
+            char name[48]; std::snprintf( name, sizeof( name ), "Layer %02d##%s", bit + 1, id );
+            if( ImGui::Checkbox( name, &enabled ) )
+            { bits = enabled ? bits | flag : bits & ~flag; changed = true; }
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
 }
 
 } // namespace
@@ -528,451 +553,112 @@ void rigidBodyDemoUi::drawInspector()
             getBodyTypeName( bodyRef.type )
         );
 
-        transform2 transform =
-            getWorld().GetBodyTransform(
-                visual.bodyHandle
-            );
-
-        float position[2]
+#pragma region Transform
+        if( ImGui::CollapsingHeader( "Transform", ImGuiTreeNodeFlags_DefaultOpen ) )
         {
-            transform.position.x,
-            transform.position.y
-        };
-
-        bool transformChanged = false;
-
-        if( ImGui::DragFloat2(
-            "Position",
-            position,
-            0.05f,
-            -100.0f,
-            100.0f,
-            "%.2f" ) )
-        {
-            transform.position =
-            {
-                position[0],
-                position[1]
-            };
-
-            transformChanged = true;
+            transform2 transform = getWorld().GetBodyTransform( visual.bodyHandle );
+            float position[2]{ transform.position.x, transform.position.y };
+            bool changed = ImGui::DragFloat2( "Position", position, 0.05f, -100.0f, 100.0f, "%.2f" );
+            if( changed ) { transform.position = { position[0], position[1] }; }
+            float rotation = std::atan2( transform.rotation.s, transform.rotation.c );
+            if( ImGui::DragFloat( "Rotation", &rotation, 0.01f, -3.14159265f, 3.14159265f, "%.3f rad" ) )
+            { transform.rotation = rot2::FromRadians( rotation ); changed = true; }
+            if( changed ) { getWorld().SetBodyTransform( visual.bodyHandle, transform ); refreshContacts(); }
         }
+#pragma endregion
 
-        float rotation =
-            std::atan2(
-                transform.rotation.s,
-                transform.rotation.c
-            );
-
-        if( ImGui::DragFloat(
-            "Rotation",
-            &rotation,
-            0.01f,
-            -3.14159265f,
-            3.14159265f,
-            "%.3f rad" ) )
+#pragma region PhysicsQuantities
+        if( ImGui::CollapsingHeader( "Physics quantities", ImGuiTreeNodeFlags_DefaultOpen ) )
         {
-            transform.rotation =
-                rot2::FromRadians(
-                    rotation
-                );
-
-            transformChanged = true;
+            if( bodyRef.type != bodyType::Static )
+            {
+                const vec2 linearVelocity = getWorld().GetBodyLinearVelocity( visual.bodyHandle );
+                float velocity[2]{ linearVelocity.x, linearVelocity.y };
+                if( ImGui::DragFloat2( "Linear velocity", velocity, 0.05f, -100.0f, 100.0f, "%.2f" ) )
+                { getWorld().SetBodyLinearVelocity( visual.bodyHandle, { velocity[0], velocity[1] } ); }
+                float angularVelocity = getWorld().GetBodyAngularVelocity( visual.bodyHandle );
+                if( ImGui::DragFloat( "Angular velocity", &angularVelocity, 0.05f, -100.0f, 100.0f, "%.2f rad/s" ) )
+                { getWorld().SetBodyAngularVelocity( visual.bodyHandle, angularVelocity ); }
+                float linearDamping = getWorld().GetBodyLinearDamping( visual.bodyHandle );
+                if( ImGui::DragFloat( "Linear damping", &linearDamping, 0.05f, 0.0f, 20.0f, "%.2f" ) )
+                { getWorld().SetBodyLinearDamping( visual.bodyHandle, linearDamping ); }
+                float angularDamping = getWorld().GetBodyAngularDamping( visual.bodyHandle );
+                if( ImGui::DragFloat( "Angular damping", &angularDamping, 0.05f, 0.0f, 20.0f, "%.2f" ) )
+                { getWorld().SetBodyAngularDamping( visual.bodyHandle, angularDamping ); }
+                float gravityScale = getWorld().GetBodyGravityScale( visual.bodyHandle );
+                if( ImGui::DragFloat( "Gravity scale", &gravityScale, 0.05f, -10.0f, 10.0f, "%.2f" ) )
+                { getWorld().SetBodyGravityScale( visual.bodyHandle, gravityScale ); }
+            }
+            float density = getWorld().GetShapeDensity( visual.shapeHandle );
+            if( ImGui::DragFloat( "Density", &density, 0.05f, 0.0f, 100.0f, "%.2f" ) )
+            { getWorld().SetShapeDensity( visual.shapeHandle, density ); }
+            ImGui::Text( "Mass: %.3f", getWorld().GetBodyMass( visual.bodyHandle ) );
+            ImGui::Text( "Inertia: %.3f", getWorld().GetBodyRotationalInertia( visual.bodyHandle ) );
         }
+#pragma endregion
 
-        if( transformChanged )
+#pragma region CollisionMaterial
+        if( ImGui::CollapsingHeader( "Collision material" ) )
         {
-            getWorld().SetBodyTransform(
-                visual.bodyHandle,
-                transform
-            );
-
-            refreshContacts();
+            float friction = getWorld().GetShapeFriction( visual.shapeHandle );
+            if( ImGui::DragFloat( "Friction", &friction, 0.02f, 0.0f, 5.0f, "%.2f" ) )
+            { getWorld().SetShapeFriction( visual.shapeHandle, friction ); }
+            float restitution = getWorld().GetShapeRestitution( visual.shapeHandle );
+            if( ImGui::DragFloat( "Restitution", &restitution, 0.02f, 0.0f, 2.0f, "%.2f" ) )
+            { getWorld().SetShapeRestitution( visual.shapeHandle, restitution ); }
         }
+#pragma endregion
 
-        if( bodyRef.type != bodyType::Static )
+#pragma region CollisionMask
+        if( ImGui::CollapsingHeader( "Collision mask" ) )
         {
-            vec2 linearVelocity =
-                getWorld().GetBodyLinearVelocity(
-                    visual.bodyHandle
-                );
-
-            float velocity[2]
-            {
-                linearVelocity.x,
-                linearVelocity.y
-            };
-
-            if( ImGui::DragFloat2(
-                "Linear velocity",
-                velocity,
-                0.05f,
-                -100.0f,
-                100.0f,
-                "%.2f" ) )
-            {
-                getWorld().SetBodyLinearVelocity(
-                    visual.bodyHandle,
-                    {
-                        velocity[0],
-                        velocity[1]
-                    }
-                );
-            }
-
-            float angularVelocity =
-                getWorld().GetBodyAngularVelocity(
-                    visual.bodyHandle
-                );
-
-            if( ImGui::DragFloat(
-                "Angular velocity",
-                &angularVelocity,
-                0.05f,
-                -100.0f,
-                100.0f,
-                "%.2f rad/s" ) )
-            {
-                getWorld().SetBodyAngularVelocity(
-                    visual.bodyHandle,
-                    angularVelocity
-                );
-            }
-
-            float linearDamping =
-                getWorld().GetBodyLinearDamping(
-                    visual.bodyHandle
-                );
-
-            if( ImGui::DragFloat(
-                "Linear damping",
-                &linearDamping,
-                0.05f,
-                0.0f,
-                20.0f,
-                "%.2f" ) )
-            {
-                getWorld().SetBodyLinearDamping(
-                    visual.bodyHandle,
-                    linearDamping
-                );
-            }
-
-            float angularDamping =
-                getWorld().GetBodyAngularDamping(
-                    visual.bodyHandle
-                );
-
-            if( ImGui::DragFloat(
-                "Angular damping",
-                &angularDamping,
-                0.05f,
-                0.0f,
-                20.0f,
-                "%.2f" ) )
-            {
-                getWorld().SetBodyAngularDamping(
-                    visual.bodyHandle,
-                    angularDamping
-                );
-            }
-
-            float gravityScale =
-                getWorld().GetBodyGravityScale(
-                    visual.bodyHandle
-                );
-
-            if( ImGui::DragFloat(
-                "Gravity scale",
-                &gravityScale,
-                0.05f,
-                -10.0f,
-                10.0f,
-                "%.2f" ) )
-            {
-                getWorld().SetBodyGravityScale(
-                    visual.bodyHandle,
-                    gravityScale
-                );
-            }
-
-            bool awake =
-                getWorld().IsBodyAwake(
-                    visual.bodyHandle
-                );
-
-            if( ImGui::Checkbox(
-                "Awake",
-                &awake ) )
-            {
-                getWorld().SetBodyAwake(
-                    visual.bodyHandle,
-                    awake
-                );
-            }
-
-            bool sleepEnabled =
-                getWorld().IsBodySleepEnabled(
-                    visual.bodyHandle
-                );
-
-            if( ImGui::Checkbox(
-                "Body sleep",
-                &sleepEnabled ) )
-            {
-                getWorld().SetBodySleepEnabled(
-                    visual.bodyHandle,
-                    sleepEnabled
-                );
-            }
-
-            float sleepThreshold =
-                getWorld().GetBodySleepThreshold(
-                    visual.bodyHandle
-                );
-
-            if( ImGui::DragFloat(
-                "Sleep threshold",
-                &sleepThreshold,
-                0.005f,
-                0.0f,
-                5.0f,
-                "%.3f m/s" ) )
-            {
-                getWorld().SetBodySleepThreshold(
-                    visual.bodyHandle,
-                    sleepThreshold
-                );
-            }
-
-            float safetyFactor =
-                getWorld().GetBodySafetyFactor(
-                    visual.bodyHandle
-                );
-
-            if( ImGui::DragFloat(
-                "CCD safety factor",
-                &safetyFactor,
-                0.01f,
-                0.01f,
-                2.0f,
-                "%.2f" ) )
-            {
-                getWorld().SetBodySafetyFactor(
-                    visual.bodyHandle,
-                    safetyFactor
-                );
-            }
-
-            bool contactRecycling =
-                getWorld().IsBodyContactRecyclingEnabled(
-                    visual.bodyHandle
-                );
-
-            if( ImGui::Checkbox(
-                "Contact recycling",
-                &contactRecycling ) )
-            {
-                getWorld().SetBodyContactRecyclingEnabled(
-                    visual.bodyHandle,
-                    contactRecycling
-                );
-            }
-
-            bool bullet =
-                getWorld().IsBodyBullet(
-                    visual.bodyHandle
-                );
-
-            if( ImGui::Checkbox(
-                "Bullet",
-                &bullet ) )
-            {
-                getWorld().SetBodyBullet(
-                    visual.bodyHandle,
-                    bullet
-                );
-            }
-
-            ImGui::Text(
-                "Fast body: %s",
-                getWorld().IsBodyFast(
-                    visual.bodyHandle
-                ) ? "yes" : "no"
-            );
-
-            ImGui::Text(
-                "TOI this step: %s",
-                getWorld().HadBodyTimeOfImpact(
-                    visual.bodyHandle
-                ) ? "yes" : "no"
-            );
-
-            bool fastRotation =
-                getWorld().IsBodyFastRotationAllowed(
-                    visual.bodyHandle
-                );
-
-            if( ImGui::Checkbox(
-                "Allow fast rotation",
-                &fastRotation ) )
-            {
-                getWorld().SetBodyFastRotationAllowed(
-                    visual.bodyHandle,
-                    fastRotation
-                );
-            }
+            collisionFilter filter = getWorld().GetShapeFilter( visual.shapeHandle );
+            ImGui::TextWrapped( "Choose the layers this shape belongs to and the layers it can collide with. Both shapes must allow each other." );
+            bool changed = drawCollisionBits( "Category membership", "Category", filter.categoryBits );
+            changed |= drawCollisionBits( "Collision partners", "Mask", filter.maskBits );
+            changed |= ImGui::InputInt( "Group index", &filter.groupIndex );
+            ImGui::TextWrapped( "Same non-zero group overrides object masks: positive allows, negative excludes. Project matrix exclusions still apply." );
+            if( changed ) { getWorld().SetShapeFilter( visual.shapeHandle, filter ); refreshContacts(); }
         }
+#pragma endregion
 
-        float density =
-            getWorld().GetShapeDensity(
-                visual.shapeHandle
-            );
-
-        if( ImGui::DragFloat(
-            "Density",
-            &density,
-            0.05f,
-            0.0f,
-            100.0f,
-            "%.2f" ) )
+#pragma region SleepAndCcd
+        if( bodyRef.type != bodyType::Static && ImGui::CollapsingHeader( "Sleep and CCD" ) )
         {
-            getWorld().SetShapeDensity(
-                visual.shapeHandle,
-                density
-            );
+            bool awake = getWorld().IsBodyAwake( visual.bodyHandle );
+            if( ImGui::Checkbox( "Awake", &awake ) ) { getWorld().SetBodyAwake( visual.bodyHandle, awake ); }
+            bool sleepEnabled = getWorld().IsBodySleepEnabled( visual.bodyHandle );
+            if( ImGui::Checkbox( "Body sleep", &sleepEnabled ) ) { getWorld().SetBodySleepEnabled( visual.bodyHandle, sleepEnabled ); }
+            float sleepThreshold = getWorld().GetBodySleepThreshold( visual.bodyHandle );
+            if( ImGui::DragFloat( "Sleep threshold", &sleepThreshold, 0.005f, 0.0f, 5.0f, "%.3f m/s" ) )
+            { getWorld().SetBodySleepThreshold( visual.bodyHandle, sleepThreshold ); }
+            float safetyFactor = getWorld().GetBodySafetyFactor( visual.bodyHandle );
+            if( ImGui::DragFloat( "CCD safety factor", &safetyFactor, 0.01f, 0.01f, 2.0f, "%.2f" ) )
+            { getWorld().SetBodySafetyFactor( visual.bodyHandle, safetyFactor ); }
+            bool contactRecycling = getWorld().IsBodyContactRecyclingEnabled( visual.bodyHandle );
+            if( ImGui::Checkbox( "Contact recycling", &contactRecycling ) )
+            { getWorld().SetBodyContactRecyclingEnabled( visual.bodyHandle, contactRecycling ); }
+            bool bullet = getWorld().IsBodyBullet( visual.bodyHandle );
+            if( ImGui::Checkbox( "Bullet", &bullet ) ) { getWorld().SetBodyBullet( visual.bodyHandle, bullet ); }
+            bool fastRotation = getWorld().IsBodyFastRotationAllowed( visual.bodyHandle );
+            if( ImGui::Checkbox( "Allow fast rotation", &fastRotation ) ) { getWorld().SetBodyFastRotationAllowed( visual.bodyHandle, fastRotation ); }
+            ImGui::Text( "Fast body: %s", getWorld().IsBodyFast( visual.bodyHandle ) ? "yes" : "no" );
+            ImGui::Text( "TOI this step: %s", getWorld().HadBodyTimeOfImpact( visual.bodyHandle ) ? "yes" : "no" );
         }
+#pragma endregion
 
-        float friction =
-            getWorld().GetShapeFriction(
-                visual.shapeHandle
-            );
-
-        if( ImGui::DragFloat(
-            "Friction",
-            &friction,
-            0.02f,
-            0.0f,
-            5.0f,
-            "%.2f" ) )
+#pragma region Sensors
+        if( ImGui::CollapsingHeader( "Sensors" ) )
         {
-            getWorld().SetShapeFriction(
-                visual.shapeHandle,
-                friction
-            );
+            const bool isSensor = getWorld().IsShapeSensor( visual.shapeHandle );
+            ImGui::Text( "Sensor: %s", isSensor ? "yes" : "no" );
+            bool enabled = getWorld().AreShapeSensorEventsEnabled( visual.shapeHandle );
+            if( ImGui::Checkbox( "Sensor events", &enabled ) ) { getWorld().SetShapeSensorEventsEnabled( visual.shapeHandle, enabled ); }
+            if( isSensor ) { ImGui::Text( "Sensor overlaps: %zu", getWorld().GetShapeSensorCapacity( visual.shapeHandle ) ); }
         }
-
-        float restitution =
-            getWorld().GetShapeRestitution(
-                visual.shapeHandle
-            );
-
-        if( ImGui::DragFloat(
-            "Restitution",
-            &restitution,
-            0.02f,
-            0.0f,
-            2.0f,
-            "%.2f" ) )
-        {
-            getWorld().SetShapeRestitution(
-                visual.shapeHandle,
-                restitution
-            );
-        }
-
-        const bool isSensor =
-            getWorld().IsShapeSensor(
-                visual.shapeHandle
-            );
-
-        ImGui::Text(
-            "Sensor: %s",
-            isSensor ? "yes" : "no"
-        );
-
-        bool sensorEventsEnabled =
-            getWorld().AreShapeSensorEventsEnabled(
-                visual.shapeHandle
-            );
-
-        if( ImGui::Checkbox(
-                "Sensor events",
-                &sensorEventsEnabled ) )
-        {
-            getWorld().SetShapeSensorEventsEnabled(
-                visual.shapeHandle,
-                sensorEventsEnabled
-            );
-        }
-
-        if( isSensor )
-        {
-            ImGui::Text(
-                "Sensor overlaps: %zu",
-                getWorld().GetShapeSensorCapacity(
-                    visual.shapeHandle
-                )
-            );
-        }
-
-        collisionFilter filter =
-            getWorld().GetShapeFilter(
-                visual.shapeHandle
-            );
-
-        bool filterChanged = false;
-
-        filterChanged =
-            ImGui::InputScalar(
-                "Category bits",
-                ImGuiDataType_U64,
-                &filter.categoryBits
-            ) ||
-            filterChanged;
-
-        filterChanged =
-            ImGui::InputScalar(
-                "Mask bits",
-                ImGuiDataType_U64,
-                &filter.maskBits
-            ) ||
-            filterChanged;
-
-        filterChanged =
-            ImGui::InputInt(
-                "Group index",
-                &filter.groupIndex
-            ) ||
-            filterChanged;
-
-        if( filterChanged )
-        {
-            getWorld().SetShapeFilter(
-                visual.shapeHandle,
-                filter
-            );
-
-            refreshContacts();
-        }
-
-        ImGui::Text(
-            "Mass: %.3f",
-            getWorld().GetBodyMass(
-                visual.bodyHandle
-            )
-        );
-
-        ImGui::Text(
-            "Inertia: %.3f",
-            getWorld().GetBodyRotationalInertia(
-                visual.bodyHandle
-            )
-        );
+#pragma endregion
     }
-
-    ImGui::Spacing();
-    ImGui::Separator();
+    ImGui::Spacing(); ImGui::Separator();
 }
 
 void rigidBodyDemoUi::drawExperimentControls()
@@ -1254,4 +940,36 @@ void rigidBodyDemoUi::drawDebugSettings()
 #pragma endregion
 
 std::unique_ptr<demo> createDemoView( demoKind kind ) { return std::make_unique<rigidBodyDemoUi>( kind ); }
+void drawProjectCollisionSettings( demoSession& session )
+{
+    if( ImGui::Button( "Project collision matrix", ImVec2( -1.0f, 0.0f ) ) ) { ImGui::OpenPopup( "Project collision settings" ); }
+    ImGui::SetNextWindowSize( { 900.0f, 560.0f }, ImGuiCond_FirstUseEver );
+    if( ImGui::BeginPopupModal( "Project collision settings", nullptr ) )
+    {
+        ImGui::TextWrapped( "Common rules for all demos. A checked pair permits collision; object masks can exclude more pairs. Changes survive demo switches and Reset during this session." );
+        collisionMatrix matrix = session.getCollisionMatrix();
+        bool changed = false;
+        ImGui::SetNextWindowContentSize( { 120.0f + 64.0f * 70.0f, 0.0f } );
+        ImGui::BeginChild( "MatrixGrid", { 0.0f, 420.0f }, ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar );
+        ImGui::TextUnformatted( "Layer" );
+        for( int column = 0; column < 64; ++column )
+        { ImGui::SameLine( 120.0f + column * 70.0f ); ImGui::Text( "%02d", column + 1 ); }
+        for( int row = 0; row < 64; ++row )
+        {
+            ImGui::Text( "Layer %02d", row + 1 );
+            for( int column = 0; column < 64; ++column )
+            {
+                ImGui::SameLine( 120.0f + column * 70.0f );
+                char label[32]; std::snprintf( label, sizeof( label ), "##Pair%d_%d", row, column );
+                bool allowed = matrix.allows( std::uint64_t{ 1 } << row, std::uint64_t{ 1 } << column );
+                if( ImGui::Checkbox( label, &allowed ) ) { matrix.setPair( row, column, allowed ); changed = true; }
+                ImGui::SetItemTooltip( "Layer %02d / Layer %02d", row + 1, column + 1 );
+            }
+        }
+        ImGui::EndChild();
+        if( changed ) { session.setCollisionMatrix( matrix ); }
+        if( ImGui::Button( "Close" ) ) { ImGui::CloseCurrentPopup(); }
+        ImGui::EndPopup();
+    }
+}
 } // namespace zonai::sandbox
