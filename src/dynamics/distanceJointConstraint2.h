@@ -25,6 +25,13 @@ struct distanceJointConstraint2
     constraintSoftness2 softness{};
     bool enableSpring = false;
     float hertz = 0.0f;
+    bool enableLimit = false;
+    float minLength = 0.0f;
+    float maxLength = 0.0f;
+    float lowerImpulse = 0.0f;
+    float upperImpulse = 0.0f;
+    float invSubStepTime = 0.0f;
+    constraintSoftness2 limitSoftness{};
 };
 
 [[nodiscard]] distanceJointConstraint2 prepareDistanceJointConstraint( const distanceJointSim2& joint, const bodySim& bodyA, const bodySim& bodyB, float subStepTime );

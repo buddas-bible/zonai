@@ -1,6 +1,6 @@
 # Distance Joint spring
 
-2026-10-06, master `52d35727274c05d7575bfac2d74ae7fe8c540026` 이후 구현했다. 기존 scalar Distance constraint에 spring 모드만 추가한다. Box2D 비교 기준은 다시 fetch한 `ac7c751eaeddbabdc1c4d41ae4f3a25d78627790`의 `src/distance_joint.c` prepare/solve와 `src/solver.h` softness다. 고정 거리 수학·수명·collision/Island 연결은 [기본 Distance Joint](basic-distance-joint.md)를 따른다.
+2026-10-06, master `52d35727274c05d7575bfac2d74ae7fe8c540026` 이후 구현했다. 기존 scalar Distance constraint에 spring 모드만 추가한다. Box2D 비교 기준은 다시 fetch한 `ac7c751eaeddbabdc1c4d41ae4f3a25d78627790`의 `src/distance_joint.c` prepare/solve와 `src/solver.h` softness다. 고정 거리 수학·수명·collision/Island 연결은 [기본 Distance Joint](basic-distance-joint.md)를 따른다. 아래는 spring 구현 회차의 기록이며 후속 [Distance limit](distance-limit.md)은 Hertz 0에서도 제한이 작동하는 mode와 합력 관찰을 추가했다.
 
 ## Rigid와 spring의 차이
 

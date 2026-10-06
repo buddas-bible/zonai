@@ -96,6 +96,8 @@ public:
     [[nodiscard]] jointId createDistanceJoint( const distanceJointDef& definition );
     // 같은 설정은 유지하고, mode/계수 변경은 cached impulse를 비우고 non-static component를 깨움.
     void setDistanceJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio );
+    // 유한한 비음수 min <= max를 stable minimum으로 제한하고 cache/wake를 갱신함.
+    void setDistanceJointLimit( jointId id, bool enableLimit, float minLength, float maxLength );
     // Static A / Dynamic B. target은 world 좌표, hertz/damping/maxForce는 유한한 비음수임.
     [[nodiscard]] jointId createMouseJoint( const mouseJointDef& definition );
     void setMouseJointTarget( jointId id, vec2 target );

@@ -335,6 +335,7 @@ jointId world::createDistanceJoint( const distanceJointDef& definition )
     assert( std::isfinite( definition.length ) && definition.length > 0.0f );
     assert( std::isfinite( definition.hertz ) && definition.hertz >= 0.0f );
     assert( std::isfinite( definition.dampingRatio ) && definition.dampingRatio >= 0.0f );
+    assert( std::isfinite( definition.minLength ) && std::isfinite( definition.maxLength ) && definition.minLength >= 0.0f && definition.minLength <= definition.maxLength );
 
     const std::int32_t index = allocateJoint( bodyIndexA, bodyIndexB, definition.collideConnected );
     jointSims_[index] = distanceJointSim2{};
@@ -343,6 +344,7 @@ jointId world::createDistanceJoint( const distanceJointDef& definition )
     sim.localAnchorA = definition.localAnchorA; sim.localAnchorB = definition.localAnchorB;
     sim.length = std::max( LINEAR_SLOP, definition.length );
     sim.enableSpring = definition.enableSpring; sim.hertz = definition.hertz; sim.dampingRatio = definition.dampingRatio;
+    sim.enableLimit = definition.enableLimit; sim.minLength = std::max( LINEAR_SLOP, definition.minLength ); sim.maxLength = std::max( sim.minLength, definition.maxLength );
     return makeJointId( index );
 }
 
@@ -352,6 +354,20 @@ void world::setDistanceJointSpring( jointId id, bool enableSpring, float hertz, 
     auto& joint = std::get<distanceJointSim2>( jointSims_[getJointIndex( id )] );
     if( joint.enableSpring == enableSpring && joint.hertz == hertz && joint.dampingRatio == dampingRatio ) { return; }
     joint.enableSpring = enableSpring; joint.hertz = hertz; joint.dampingRatio = dampingRatio; joint.impulse = 0.0f;
+    joint.lowerImpulse = joint.upperImpulse = 0.0f;
+    if( bodies_[joint.bodyIdA].type != bodyType::Static ) { WakeBodyByIndex( joint.bodyIdA ); }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static ) { WakeBodyByIndex( joint.bodyIdB ); }
+}
+
+void world::setDistanceJointLimit( jointId id, bool enableLimit, float minLength, float maxLength )
+{
+    assert( std::isfinite( minLength ) && std::isfinite( maxLength ) && minLength >= 0.0f && minLength <= maxLength );
+    minLength = std::max( LINEAR_SLOP, minLength ); maxLength = std::max( minLength, maxLength );
+    auto& joint = std::get<distanceJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.enableLimit == enableLimit && joint.minLength == minLength && joint.maxLength == maxLength ) { return; }
+    joint.enableLimit = enableLimit; joint.minLength = minLength; joint.maxLength = maxLength;
+    // Range 변경이나 같은 limit으로의 전환은 spring/rigid mode도 바꿀 수 있어 모든 cache를 비움.
+    joint.impulse = joint.lowerImpulse = joint.upperImpulse = 0.0f;
     if( bodies_[joint.bodyIdA].type != bodyType::Static ) { WakeBodyByIndex( joint.bodyIdA ); }
     if( bodies_[joint.bodyIdB].type != bodyType::Static ) { WakeBodyByIndex( joint.bodyIdB ); }
 }
@@ -420,7 +436,8 @@ distanceJointData world::getDistanceJointData( jointId id ) const
     data.length = sim.length; data.currentLength = Length( data.anchorB - data.anchorA );
     data.collideConnected = joints_[index].collideConnected;
     data.enableSpring = sim.enableSpring; data.hertz = sim.hertz; data.dampingRatio = sim.dampingRatio;
-    data.axialForce = sim.subStepTime > 0.0f ? sim.impulse / sim.subStepTime : 0.0f;
+    data.axialForce = sim.subStepTime > 0.0f ? ( sim.impulse + sim.lowerImpulse - sim.upperImpulse ) / sim.subStepTime : 0.0f;
+    data.enableLimit = sim.enableLimit; data.minLength = sim.minLength; data.maxLength = sim.maxLength;
     return data;
 }
 
@@ -1803,6 +1820,8 @@ void world::Step( float timeStep, int subStepCount )
                 using simType = std::conditional_t<std::is_same_v<std::remove_cvref_t<decltype( constraint )>, distanceJointConstraint2>, distanceJointSim2, mouseJointSim2>;
                 auto& joint = std::get<simType>( jointSims_[constraint.jointId] );
                 joint.impulse = constraint.impulse; joint.subStepTime = subStepTime;
+                if constexpr( std::is_same_v<simType, distanceJointSim2> )
+                { joint.lowerImpulse = constraint.lowerImpulse; joint.upperImpulse = constraint.upperImpulse; }
             }, value );
         }
         StoreContactConstraintImpulses( contactConstraints );
@@ -2315,7 +2334,12 @@ void world::resetJointImpulses( std::int32_t bodyIndex )
 {
     for( std::int32_t key = bodies_[bodyIndex].headJointKey; key != -1; key = joints_[key >> 1].edges[key & 1].nextKey )
     {
-        std::visit( []( auto& joint ) { joint.impulse = {}; }, jointSims_[key >> 1] );
+        std::visit( []( auto& joint )
+        {
+            joint.impulse = {};
+            if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, distanceJointSim2> )
+            { joint.lowerImpulse = joint.upperImpulse = 0.0f; }
+        }, jointSims_[key >> 1] );
     }
 }
 

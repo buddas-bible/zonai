@@ -230,6 +230,7 @@ void rigidBodyDemo::createPendulum()
     distanceJointDef joint{};
     joint.bodyA = anchor; joint.bodyB = pendulumBody_; joint.length = 2.0f;
     joint.hertz = 2.0f; joint.dampingRatio = 0.7f;
+    joint.minLength = 1.5f; joint.maxLength = 2.5f;
     pendulumJoint_ = world_.createDistanceJoint( joint );
 }
 

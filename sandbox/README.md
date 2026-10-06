@@ -22,4 +22,4 @@ Demo 목록에서 **Playground** 또는 **Distance Pendulum**을 선택한다. �
 
 ## Distance Joint 진자
 
-보라색 선과 두 anchor 점은 Distance Joint다. 처음에는 rigid이며 Controls에서 Distance spring을 켜고 Hertz/damping을 조절한다. `Radial kick`으로 축 방향 진동을 시작하고 `Kick pendulum`으로 옆으로 민다. Target/Current, Extension과 signed Axial force를 관찰한다. Spring 활성 상태의 0 Hz는 거리 축을 자유롭게 둔다. Reset은 rigid/2 Hz/감쇠 0.7로 돌아간다. [수학·조작·검증](../docs/distance-spring.md)을 따른다. Body local anchor는 원점 기준이며 solver에서는 COM 기준 lever arm으로 바뀐다. Limit/motor는 아직 없다. CCD가 이동을 자른 frame에서는 거리 오차가 일시적으로 커질 수 있다.
+보라색 선과 두 anchor 점은 Distance Joint다. 처음에는 rigid이며 Controls에서 Distance spring을 켜고 Hertz/damping을 조절한다. `Radial kick`으로 축 방향 진동을 시작하고 `Kick pendulum`으로 옆으로 민다. Target/Current, Extension과 signed Axial force를 관찰한다. Limit을 켜면 초록색 min/빨간색 max와 허용 구간을 표시한다. Spring on/0 Hz는 limit만 작동한다. Rigid는 range를 무시하고 같은 min/max는 Target의 rigid로 돌아간다. 부드러운 경계이므로 하중 아래 작은 오차가 남는다. Reset은 rigid/2 Hz/감쇠 0.7, limit off/min 1.5 m/max 2.5 m로 돌아간다. [Spring](../docs/distance-spring.md)과 [limit의 수학·조작·검증](../docs/distance-limit.md)을 따른다. Body local anchor는 원점 기준이며 solver에서는 COM 기준 lever arm으로 바뀐다. Motor는 아직 없다. CCD가 이동을 자른 frame에서는 거리 오차가 일시적으로 커질 수 있다.

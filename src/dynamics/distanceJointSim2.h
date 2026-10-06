@@ -19,5 +19,10 @@ struct distanceJointSim2
     bool enableSpring = false;
     float hertz = 5.0f;
     float dampingRatio = 0.7f;
+    bool enableLimit = false;
+    float minLength = 0.0f;
+    float maxLength = 1.0e5f;
+    float lowerImpulse = 0.0f;
+    float upperImpulse = 0.0f;
 };
 } // namespace zonai

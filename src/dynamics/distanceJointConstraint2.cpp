@@ -21,17 +21,25 @@ distanceJointConstraint2 prepareDistanceJointConstraint( const distanceJointSim2
     constraint.invMassA = bodyA.invMass; constraint.invMassB = bodyB.invMass;
     constraint.invInertiaA = bodyA.invInertia; constraint.invInertiaB = bodyB.invInertia;
     constraint.length = joint.length;
-    constraint.enableSpring = joint.enableSpring; constraint.hertz = joint.hertz;
+    // Box2D의 mode 우선순위: spring off 또는 같은 limit은 length를 고정하는 rigid임.
+    constraint.enableSpring = joint.enableSpring && ( !joint.enableLimit || joint.minLength < joint.maxLength );
+    constraint.hertz = joint.hertz;
+    constraint.enableLimit = joint.enableLimit && constraint.enableSpring;
+    constraint.minLength = joint.minLength; constraint.maxLength = joint.maxLength;
+    constraint.invSubStepTime = 1.0f / subStepTime;
     const vec2 axis = Normalize( constraint.deltaCenter + constraint.anchorB - constraint.anchorA );
     const float crossA = Cross( constraint.anchorA, axis );
     const float crossB = Cross( constraint.anchorB, axis );
     const float k = bodyA.invMass + bodyB.invMass + bodyA.invInertia * crossA * crossA + bodyB.invInertia * crossB * crossB;
     constraint.axialMass = k > 0.0f ? 1.0f / k : 0.0f;
     // 이전 h에서 만든 impulse를 새 h에 그대로 적용하지 않음.
-    constraint.impulse = joint.subStepTime == subStepTime && ( !joint.enableSpring || joint.hertz > 0.0f ) ? joint.impulse : 0.0f;
+    const bool sameStep = joint.subStepTime == subStepTime;
+    constraint.impulse = sameStep && ( !constraint.enableSpring || joint.hertz > 0.0f ) ? joint.impulse : 0.0f;
+    constraint.lowerImpulse = sameStep && constraint.enableLimit ? joint.lowerImpulse : 0.0f;
+    constraint.upperImpulse = sameStep && constraint.enableLimit ? joint.upperImpulse : 0.0f;
     // Rigid의 수치 안정화와 사용자가 지정하는 물리 spring 주파수를 구분함.
-    constraint.softness = joint.enableSpring ? makeConstraintSoftness( joint.hertz, joint.dampingRatio, subStepTime ) :
-        makeConstraintSoftness( std::min( 60.0f, 0.25f / subStepTime ), 2.0f, subStepTime );
+    constraint.limitSoftness = makeConstraintSoftness( std::min( 60.0f, 0.25f / subStepTime ), 2.0f, subStepTime );
+    constraint.softness = constraint.enableSpring ? makeConstraintSoftness( joint.hertz, joint.dampingRatio, subStepTime ) : constraint.limitSoftness;
     return constraint;
 }
 #pragma endregion
@@ -42,7 +50,7 @@ void warmStartDistanceJointConstraint( const distanceJointConstraint2& constrain
     const vec2 rA = Rotate( stateA.deltaRotation, constraint.anchorA );
     const vec2 rB = Rotate( stateB.deltaRotation, constraint.anchorB );
     const vec2 axis = Normalize( constraint.deltaCenter + stateB.deltaPosition - stateA.deltaPosition + rB - rA );
-    const vec2 impulse = constraint.impulse * axis;
+    const vec2 impulse = ( constraint.impulse + constraint.lowerImpulse - constraint.upperImpulse ) * axis;
     stateA.linearVelocity -= constraint.invMassA * impulse;
     stateA.angularVelocity -= constraint.invInertiaA * Cross( rA, impulse );
     stateB.linearVelocity += constraint.invMassB * impulse;
@@ -53,27 +61,56 @@ void warmStartDistanceJointConstraint( const distanceJointConstraint2& constrain
 #pragma region Solve
 void solveDistanceJointConstraint( distanceJointConstraint2& constraint, bodyState& stateA, bodyState& stateB, bool useBias )
 {
-    // Box2D처럼 spring이 켜져도 Hertz 0이면 이 축은 풀지 않음. Rigid로 fallback하지 않음.
-    if( constraint.enableSpring && constraint.hertz == 0.0f ) { return; }
     const vec2 rA = Rotate( stateA.deltaRotation, constraint.anchorA );
     const vec2 rB = Rotate( stateB.deltaRotation, constraint.anchorB );
     const vec2 delta = constraint.deltaCenter + stateB.deltaPosition - stateA.deltaPosition + rB - rA;
     // 완전히 겹친 anchor는 방향을 정할 수 없어 correction이 0임. NaN을 만들지 않음.
     const vec2 axis = Normalize( delta );
-    const vec2 relativeVelocity = stateB.linearVelocity + Cross( stateB.angularVelocity, rB ) - stateA.linearVelocity - Cross( stateA.angularVelocity, rA );
-    // 물리 spring은 두 pass 모두 같은 softness/bias를 사용함. Rigid만 relax에서 bias를 제거함.
-    const bool softPass = constraint.enableSpring || useBias;
-    const float bias = softPass ? constraint.softness.biasRate * ( Length( delta ) - constraint.length ) : 0.0f;
-    const float massScale = softPass ? constraint.softness.massScale : 1.0f;
-    const float impulseScale = softPass ? constraint.softness.impulseScale : 0.0f;
-    const float deltaImpulse = -massScale * constraint.axialMass * ( Dot( axis, relativeVelocity ) + bias ) - impulseScale * constraint.impulse;
-    // Contact와 달리 양방향 제약이므로 인장(음수) / 압축(양수) impulse를 모두 허용함.
-    constraint.impulse += deltaImpulse;
-    const vec2 impulse = deltaImpulse * axis;
-    stateA.linearVelocity -= constraint.invMassA * impulse;
-    stateA.angularVelocity -= constraint.invInertiaA * Cross( rA, impulse );
-    stateB.linearVelocity += constraint.invMassB * impulse;
-    stateB.angularVelocity += constraint.invInertiaB * Cross( rB, impulse );
+    const float currentLength = Length( delta );
+    auto axisVelocity = [&]() { return Dot( axis, stateB.linearVelocity + Cross( stateB.angularVelocity, rB ) - stateA.linearVelocity - Cross( stateA.angularVelocity, rA ) ); };
+    auto applyImpulse = [&]( float axialImpulse )
+    {
+        const vec2 impulse = axialImpulse * axis;
+        stateA.linearVelocity -= constraint.invMassA * impulse;
+        stateA.angularVelocity -= constraint.invInertiaA * Cross( rA, impulse );
+        stateB.linearVelocity += constraint.invMassB * impulse;
+        stateB.angularVelocity += constraint.invInertiaB * Cross( rB, impulse );
+    };
+    // Spring Hertz 0은 spring 힘만 끔. Limit은 독립적으로 계속 풀어야 함.
+    if( !constraint.enableSpring || constraint.hertz > 0.0f )
+    {
+        // 물리 spring은 두 pass 모두 같은 softness/bias를 사용함. Rigid만 relax에서 bias를 제거함.
+        const bool softPass = constraint.enableSpring || useBias;
+        const float bias = softPass ? constraint.softness.biasRate * ( currentLength - constraint.length ) : 0.0f;
+        const float massScale = softPass ? constraint.softness.massScale : 1.0f;
+        const float impulseScale = softPass ? constraint.softness.impulseScale : 0.0f;
+        const float deltaImpulse = -massScale * constraint.axialMass * ( axisVelocity() + bias ) - impulseScale * constraint.impulse;
+        // Spring/rigid는 양방향 제약이므로 인장(음수) / 압축(양수)을 모두 허용함.
+        constraint.impulse += deltaImpulse;
+        applyImpulse( deltaImpulse );
+    }
+    if( constraint.enableLimit )
+    {
+        auto solveLimit = [&]( float separation, float direction, float& accumulatedImpulse )
+        {
+            float bias = 0.0f, massScale = 1.0f, impulseScale = 0.0f;
+            // 범위 안에서는 남은 간격/h로 다음 적분의 boundary crossing을 미리 막음.
+            // 이미 범위를 벗어났으면 bias pass만 오차를 보정하고 relax는 속도만 제한함.
+            if( separation > 0.0f ) { bias = separation * constraint.invSubStepTime; }
+            else if( useBias )
+            {
+                bias = constraint.limitSoftness.biasRate * separation;
+                massScale = constraint.limitSoftness.massScale; impulseScale = constraint.limitSoftness.impulseScale;
+            }
+            const float deltaImpulse = -massScale * constraint.axialMass * ( direction * axisVelocity() + bias ) - impulseScale * accumulatedImpulse;
+            const float oldImpulse = accumulatedImpulse;
+            accumulatedImpulse = std::max( 0.0f, oldImpulse + deltaImpulse );
+            applyImpulse( direction * ( accumulatedImpulse - oldImpulse ) );
+        };
+        // Lower는 축 방향으로 밀고 upper는 반대 방향으로 당김. 각 cache는 비음수임.
+        solveLimit( currentLength - constraint.minLength, 1.0f, constraint.lowerImpulse );
+        solveLimit( constraint.maxLength - currentLength, -1.0f, constraint.upperImpulse );
+    }
 }
 #pragma endregion
 } // namespace zonai

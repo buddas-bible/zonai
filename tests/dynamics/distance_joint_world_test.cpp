@@ -205,7 +205,7 @@ void checkZeroStepAndCom()
     check( IsFinite( coincident.GetBodyTransform( duplicate ).position ), "coincident world anchors finite" );
 }
 
-void checkImpulseReset( int change, bool spring )
+void checkImpulseReset( int change, bool spring, bool limit = false )
 {
     world cached{}, fresh{};
     cached.SetContinuousEnabled( false ); fresh.SetContinuousEnabled( false );
@@ -219,6 +219,13 @@ void checkImpulseReset( int change, bool spring )
     auto firstA = definition( anchorA, bobA ), firstB = definition( anchorB, bobB );
     auto otherA = definition( secondA, bobA, std::sqrt( 8.0f ) ), otherB = definition( secondB, bobB, std::sqrt( 8.0f ) );
     firstA.enableSpring = firstB.enableSpring = otherA.enableSpring = otherB.enableSpring = spring;
+    if( limit )
+    {
+        firstA.enableLimit = firstB.enableLimit = otherA.enableLimit = otherB.enableLimit = true;
+        firstA.hertz = firstB.hertz = otherA.hertz = otherB.hertz = 0.0f;
+        firstA.minLength = firstB.minLength = 1.5f; firstA.maxLength = firstB.maxLength = 2.0f;
+        otherA.minLength = otherB.minLength = 2.5f; otherA.maxLength = otherB.maxLength = std::sqrt( 8.0f );
+    }
     (void)cached.createDistanceJoint( firstA );
     const auto old = fresh.createDistanceJoint( firstB );
     (void)cached.createDistanceJoint( otherA );
@@ -288,8 +295,9 @@ void checkSpring()
     const float omega = 2.0f * std::numbers::pi_v<float> * def.hertz;
     const auto data = simulation.getDistanceJointData( joint );
     check( data.enableSpring && data.hertz == 2.0f && data.dampingRatio == 1.0f, "spring creation/data fields" );
-    check( std::abs( data.currentLength - 2.0f - 9.8f / ( omega * omega ) ) < 0.003f, "spring gravity equilibrium mg/k" );
-    check( std::abs( data.axialForce + simulation.GetBodyMass( bob ) * 9.8f ) < 0.03f, "signed spring tension balances gravity" );
+    const float gravity = std::abs( simulation.GetGravity().y );
+    check( std::abs( data.currentLength - 2.0f - gravity / ( omega * omega ) ) < 0.003f, "spring gravity equilibrium mg/k" );
+    check( std::abs( data.axialForce + simulation.GetBodyMass( bob ) * gravity ) < 0.03f, "signed spring tension balances gravity" );
     simulation.SetBodyAwake( bob, false ); simulation.setDistanceJointSpring( joint, true, 2.0f, 1.0f );
     check( !simulation.IsBodyAwake( bob ), "unchanged spring tuning preserves sleep" );
     simulation.setDistanceJointSpring( joint, true, 3.0f, 0.7f );
@@ -327,15 +335,78 @@ void checkSpringResponse( float hertz, float damping, int subSteps )
     }
     else { check( minimum > 1.99f && std::abs( simulation.getDistanceJointData( joint ).currentLength - 2.0f ) < 0.01f, "critical damping settles without overshoot" ); }
 }
+
+void checkLimits( int subSteps )
+{
+    world simulation;
+    const auto anchor = simulation.CreateBody();
+    const auto bob = ball( simulation, { 0.0f, -1.5f } );
+    // 자동 sleep이 과도응답의 마지막 force를 보관하지 않도록 평형 검사는 계속 적분함.
+    simulation.SetBodySleepEnabled( bob, false );
+    auto def = definition( anchor, bob ); def.enableSpring = true; def.hertz = 0.0f;
+    def.enableLimit = true; def.minLength = 1.0f; def.maxLength = 2.0f;
+    const auto joint = simulation.createDistanceJoint( def );
+    for( int i = 0; i < 180; ++i ) { simulation.Step( 1.0f / 60.0f, subSteps ); }
+    auto data = simulation.getDistanceJointData( joint );
+    check( data.enableLimit && data.minLength == 1.0f && data.maxLength == 2.0f, "limit creation and data" );
+    const float gravity = std::abs( simulation.GetGravity().y );
+    check( std::abs( data.currentLength - 2.0f ) < 0.005f && std::abs( data.axialForce + simulation.GetBodyMass( bob ) * gravity ) < 0.03f, "upper limit persists and tension balances gravity" );
+    const auto other = ball( simulation, { 4.0f, -2.0f } );
+    (void)simulation.createDistanceJoint( definition( anchor, other, std::sqrt( 20.0f ) ) );
+    simulation.SetBodyAwake( bob, false ); simulation.SetBodyAwake( other, false );
+    simulation.setDistanceJointLimit( joint, true, 1.0f, 2.0f );
+    check( !simulation.IsBodyAwake( bob ), "limit no-op preserves sleep" );
+    simulation.setDistanceJointLimit( joint, true, 1.0f, 2.5f );
+    check( simulation.IsBodyAwake( bob ) && !simulation.IsBodyAwake( other ) && simulation.getDistanceJointData( joint ).axialForce == 0.0f, "range change clears caches and wakes only its component" );
+    simulation.SetGravity( { 0.0f, gravity } );
+    for( int i = 0; i < 180; ++i ) { simulation.Step( 1.0f / 60.0f, subSteps ); }
+    data = simulation.getDistanceJointData( joint );
+    check( std::abs( data.currentLength - 1.0f ) < 0.005f && std::abs( data.axialForce - simulation.GetBodyMass( bob ) * gravity ) < 0.03f, "lower limit persists and compression balances gravity" );
+    simulation.setDistanceJointSpring( joint, true, 3.0f, 0.7f );
+    check( simulation.getDistanceJointData( joint ).axialForce == 0.0f, "spring tuning clears limit caches too" );
+    simulation.SetGravity( {} ); simulation.setDistanceJointSpring( joint, true, 0.0f, 0.7f );
+    simulation.setDistanceJointLimit( joint, false, 1.0f, 2.5f );
+    simulation.SetBodyLinearVelocity( bob, { 0.0f, -3.0f } ); simulation.Step( 0.6f, subSteps );
+    check( simulation.getDistanceJointData( joint ).currentLength > 2.7f && simulation.getDistanceJointData( joint ).axialForce == 0.0f, "disabled limit and zero Hertz allow free motion" );
+    simulation.setDistanceJointLimit( joint, true, 1.5f, 1.5f );
+    for( int i = 0; i < 180; ++i ) { simulation.Step( 1.0f / 60.0f, subSteps ); }
+    check( std::abs( simulation.getDistanceJointData( joint ).currentLength - def.length ) < 0.005f, "equal limits restore rigid rest length" );
+    simulation.setDistanceJointLimit( joint, true, 0.0f, 0.0f );
+    data = simulation.getDistanceJointData( joint );
+    check( data.minLength == LINEAR_SLOP && data.maxLength == LINEAR_SLOP, "limit range normalized to stable minimum" );
+    simulation.SetBodyAwake( bob, false ); simulation.setDistanceJointLimit( joint, true, 0.0f, 0.0f );
+    check( !simulation.IsBodyAwake( bob ), "normalized limit no-op preserves sleep" );
+}
+
+void checkSpringLimits( float restLength, int subSteps )
+{
+    world simulation; simulation.SetGravity( {} ); simulation.SetSleepingEnabled( false );
+    const auto anchor = simulation.CreateBody(); const auto bob = ball( simulation, { 1.5f, 0.0f } );
+    auto def = definition( anchor, bob, restLength ); def.enableSpring = true; def.hertz = 2.0f; def.dampingRatio = 1.0f;
+    def.enableLimit = true; def.minLength = 1.0f; def.maxLength = 2.0f;
+    const auto joint = simulation.createDistanceJoint( def );
+    for( int i = 0; i < 180; ++i ) { simulation.Step( 1.0f / 60.0f, subSteps ); }
+    const auto data = simulation.getDistanceJointData( joint );
+    const float limitHertz = std::min( 60.0f, 0.25f * 60.0f * static_cast<float>( subSteps ) );
+    const float boundary = restLength < 1.0f ? 1.0f : 2.0f;
+    // Spring/limit의 k=mEff*omega^2가 평형을 이루는 위치. Substep을 늘리면 limit 오차가 줄어듦.
+    const float equilibrium = ( def.hertz * def.hertz * restLength + limitHertz * limitHertz * boundary ) / ( def.hertz * def.hertz + limitHertz * limitHertz );
+    check( std::abs( data.currentLength - equilibrium ) < 0.002f, "soft limit opposes spring at predicted stiffness equilibrium" );
+    check( std::abs( data.axialForce ) < 0.03f, "net spring and limit force cancels at equilibrium" );
+    simulation.setDistanceJointSpring( joint, false, 2.0f, 1.0f );
+    for( int i = 0; i < 180; ++i ) { simulation.Step( 1.0f / 60.0f, subSteps ); }
+    check( std::abs( simulation.getDistanceJointData( joint ).currentLength - restLength ) < 0.005f, "rigid mode overrides limits outside range" );
+}
 }
 
 int main()
 {
     checkLifetime(); checkFilters(); checkGraph();
     checkMotion( 1 ); checkMotion( 4 ); checkZeroStepAndCom();
-    for( int i = 0; i < 3; ++i ) { checkImpulseReset( i, false ); checkImpulseReset( i, true ); }
+    for( int i = 0; i < 3; ++i ) { checkImpulseReset( i, false ); checkImpulseReset( i, true ); checkImpulseReset( i, true, true ); }
     for( const bool collide : { false, true } ) for( const bool sensor : { false, true } ) checkContinuousFilter( collide, sensor );
     checkSpring();
     for( int subSteps : { 1, 4 } ) { checkSpringResponse( 2.0f, 0.0f, subSteps ); checkSpringResponse( 4.0f, 0.0f, subSteps ); checkSpringResponse( 2.0f, 1.0f, subSteps ); }
+    for( int subSteps : { 1, 4 } ) { checkLimits( subSteps ); checkSpringLimits( 0.5f, subSteps ); checkSpringLimits( 3.0f, subSteps ); }
     return EXIT_SUCCESS;
 }
