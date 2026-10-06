@@ -28,6 +28,11 @@ struct distanceJointDef
     // 하한과 상한이 같으면 Box2D처럼 length의 고정 거리 제약으로 돌아감.
     float minLength = 0.0f;
     float maxLength = 1.0e5f;
+
+    // 축 방향 속도 모터. 스프링 모드에서만 작동하며 0 Hz에서도 사용할 수 있음.
+    bool enableMotor = false;
+    float motorSpeed = 0.0f; // 목표 상대속도 (m/s). 양수는 늘이고 음수는 줄임
+    float maxMotorForce = 0.0f; // 양방향 최대 힘 (N). 유한한 비음수
 };
 
 struct distanceJointData
@@ -53,6 +58,12 @@ struct distanceJointData
     bool enableLimit = false;
     float minLength = 0.0f;
     float maxLength = 0.0f;
+
+    // 축 방향 속도 모터. 스프링 모드에서만 작동하며 0 Hz에서도 사용할 수 있음.
+    bool enableMotor = false;
+    float motorSpeed = 0.0f; // 목표 상대속도 (m/s). 양수는 늘이고 음수는 줄임
+    float maxMotorForce = 0.0f; // 양방향 최대 힘 (N). 유한한 비음수
+    float motorForce = 0.0f; // 마지막 substep의 모터 임펄스 / 시간 간격
 };
 
 } // namespace zonai

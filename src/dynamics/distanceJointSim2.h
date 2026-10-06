@@ -31,6 +31,12 @@ struct distanceJointSim2
     float maxLength = 1.0e5f;
     float lowerImpulse = 0.0f;
     float upperImpulse = 0.0f;
+
+    // 축 방향 속도 모터. 스프링 모드에서만 작동하며 0 Hz에서도 사용할 수 있음.
+    bool enableMotor = false;
+    float motorSpeed = 0.0f; // 목표 상대속도 (m/s). 양수는 늘이고 음수는 줄임
+    float maxMotorForce = 0.0f; // 양방향 최대 힘 (N). 유한한 비음수
+    float motorImpulse = 0.0f;
 };
 
 } // namespace zonai

@@ -36,6 +36,11 @@ distanceJointConstraint2 prepareDistanceJointConstraint( const distanceJointSim2
     constraint.maxLength = joint.maxLength;
     constraint.invSubStepTime = 1.0f / subStepTime;
 
+    // Box2D처럼 고정 거리 모드에서는 모터를 무시함. 0 Hz는 스프링 힘만 끄므로 모터는 유지함.
+    constraint.enableMotor = joint.enableMotor && constraint.enableSpring;
+    constraint.motorSpeed = joint.motorSpeed;
+    constraint.maxMotorImpulse = subStepTime * joint.maxMotorForce;
+
     /*
     * 축 방향의 임펄스 공식에서 분모 K를 구함. 두 작용점의 회전 효과까지 포함함.
     * K = invMassA + invMassB + invInertiaA * (r_a x axis)^2 + invInertiaB * (r_b x axis)^2
@@ -52,6 +57,7 @@ distanceJointConstraint2 prepareDistanceJointConstraint( const distanceJointSim2
     constraint.impulse = sameStep && ( !constraint.enableSpring || joint.hertz > 0.0f ) ? joint.impulse : 0.0f;
     constraint.lowerImpulse = sameStep && constraint.enableLimit ? joint.lowerImpulse : 0.0f;
     constraint.upperImpulse = sameStep && constraint.enableLimit ? joint.upperImpulse : 0.0f;
+    constraint.motorImpulse = sameStep && constraint.enableMotor ? std::clamp( joint.motorImpulse, -constraint.maxMotorImpulse, constraint.maxMotorImpulse ) : 0.0f;
 
     // 고정 거리와 거리 제한은 수치 안정화용 계수를 사용함. 물리 스프링은 사용자가 지정한 주파수를 사용함.
     constraint.limitSoftness = makeConstraintSoftness( std::min( 60.0f, 0.25f / subStepTime ), 2.0f, subStepTime );
@@ -70,7 +76,7 @@ void warmStartDistanceJointConstraint( const distanceJointConstraint2& constrain
     const vec2 axis = Normalize( constraint.deltaCenter + bodyStateB.deltaPosition - bodyStateA.deltaPosition + r_b - r_a );
 
     // 이전 step의 누적 임펄스. 하한은 축 방향으로 밀고 상한은 반대로 당기므로 부호가 반대임.
-    const vec2 impulse = ( constraint.impulse + constraint.lowerImpulse - constraint.upperImpulse ) * axis;
+    const vec2 impulse = ( constraint.impulse + constraint.lowerImpulse - constraint.upperImpulse + constraint.motorImpulse ) * axis;
 
     bodyStateA.linearVelocity -= constraint.invMassA * impulse;
     bodyStateA.angularVelocity -= constraint.invInertiaA * Cross( r_a, impulse );
@@ -131,6 +137,20 @@ void solveDistanceJointConstraint( distanceJointConstraint2& constraint, bodySta
         applyAxialImpulse( deltaImpulse );
     }
 
+    if( constraint.enableMotor )
+    {
+        /*
+        * 현재 축속도를 목표 속도로 바꾸는 임펄스. 위치 bias 없이 두 pass에서 같은 식을 사용함.
+        * dP = axialMass * (motorSpeed - v_r). 최대 힘 F는 시간 간격 h의 임펄스 F * h로 바꿈.
+        * 반복 계산마다 더하는 값이 아니라 누적값을 제한해야 전체 모터 힘이 F를 넘지 않음.
+        */
+        const float deltaImpulse = constraint.axialMass * ( constraint.motorSpeed - computeAxialVelocity() );
+        const float oldImpulse = constraint.motorImpulse;
+        constraint.motorImpulse = std::clamp( oldImpulse + deltaImpulse, -constraint.maxMotorImpulse, constraint.maxMotorImpulse );
+        applyAxialImpulse( constraint.motorImpulse - oldImpulse );
+    }
+
+    // Box2D처럼 모터 다음에 limit을 풀어 모터가 만든 속도도 거리 경계에서 제한함.
     if( constraint.enableLimit )
     {
         auto solveLimit = [&]( float separation, float direction, float& accumulatedImpulse )

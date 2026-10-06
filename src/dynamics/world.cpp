@@ -337,6 +337,9 @@ jointId world::createDistanceJoint( const distanceJointDef& definition )
     assert( std::isfinite( definition.dampingRatio ) && definition.dampingRatio >= 0.0f );
     assert( std::isfinite( definition.minLength ) && std::isfinite( definition.maxLength ) && definition.minLength >= 0.0f && definition.minLength <= definition.maxLength );
 
+    assert( std::isfinite( definition.motorSpeed ) );
+    assert( std::isfinite( definition.maxMotorForce ) && definition.maxMotorForce >= 0.0f );
+
     const std::int32_t index = allocateJoint( bodyIndexA, bodyIndexB, definition.collideConnected );
     jointSims_[index] = distanceJointSim2{};
     distanceJointSim2& sim = std::get<distanceJointSim2>( jointSims_[index] );
@@ -353,6 +356,9 @@ jointId world::createDistanceJoint( const distanceJointDef& definition )
     sim.enableLimit = definition.enableLimit;
     sim.minLength = std::max( LINEAR_SLOP, definition.minLength );
     sim.maxLength = std::max( sim.minLength, definition.maxLength );
+    sim.enableMotor = definition.enableMotor;
+    sim.motorSpeed = definition.motorSpeed;
+    sim.maxMotorForce = definition.maxMotorForce;
     return makeJointId( index );
 }
 
@@ -370,6 +376,7 @@ void world::setDistanceJointSpring( jointId id, bool enableSpring, float hertz, 
     joint.impulse = 0.0f;
     joint.upperImpulse = 0.0f;
     joint.lowerImpulse = 0.0f;
+    joint.motorImpulse = 0.0f;
 
     // 계수가 바뀌면 연결된 비정적 물체를 깨워 새 설정으로 계산함.
     if( bodies_[joint.bodyIdA].type != bodyType::Static )
@@ -399,8 +406,38 @@ void world::setDistanceJointLimit( jointId id, bool enableLimit, float minLength
     joint.upperImpulse = 0.0f;
     joint.lowerImpulse = 0.0f;
     joint.impulse = 0.0f;
+    joint.motorImpulse = 0.0f;
 
     // 계수가 바뀌면 연결된 비정적 물체를 깨워 새 설정으로 계산함.
+    if( bodies_[joint.bodyIdA].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdA );
+    }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdB );
+    }
+}
+
+void world::setDistanceJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorForce )
+{
+    assert( std::isfinite( motorSpeed ) );
+    assert( std::isfinite( maxMotorForce ) && maxMotorForce >= 0.0f );
+    auto& joint = std::get<distanceJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.enableMotor == enableMotor && joint.motorSpeed == motorSpeed && joint.maxMotorForce == maxMotorForce )
+    {
+        return;
+    }
+    joint.enableMotor = enableMotor;
+    joint.motorSpeed = motorSpeed;
+    joint.maxMotorForce = maxMotorForce;
+
+    // 모터와 스프링·limit이 같은 축에서 힘을 주므로 설정 변경 시 함께 누적한 값을 비움.
+    joint.impulse = 0.0f;
+    joint.lowerImpulse = 0.0f;
+    joint.upperImpulse = 0.0f;
+    joint.motorImpulse = 0.0f;
+
     if( bodies_[joint.bodyIdA].type != bodyType::Static )
     {
         WakeBodyByIndex( joint.bodyIdA );
@@ -499,10 +536,14 @@ distanceJointData world::getDistanceJointData( jointId id ) const
     data.enableSpring = sim.enableSpring;
     data.hertz = sim.hertz;
     data.dampingRatio = sim.dampingRatio;
-    data.axialForce = sim.subStepTime > 0.0f ? ( sim.impulse + sim.lowerImpulse - sim.upperImpulse ) / sim.subStepTime : 0.0f;
+    data.axialForce = sim.subStepTime > 0.0f ? ( sim.impulse + sim.lowerImpulse - sim.upperImpulse + sim.motorImpulse ) / sim.subStepTime : 0.0f;
     data.enableLimit = sim.enableLimit;
     data.minLength = sim.minLength;
     data.maxLength = sim.maxLength;
+    data.enableMotor = sim.enableMotor;
+    data.motorSpeed = sim.motorSpeed;
+    data.maxMotorForce = sim.maxMotorForce;
+    data.motorForce = sim.subStepTime > 0.0f ? sim.motorImpulse / sim.subStepTime : 0.0f;
     return data;
 }
 
@@ -1908,6 +1949,7 @@ void world::Step( float timeStep, int subStepCount )
                 {
                     joint.lowerImpulse = constraint.lowerImpulse;
                     joint.upperImpulse = constraint.upperImpulse;
+                    joint.motorImpulse = constraint.motorImpulse;
                 }
             }, value );
         }
@@ -2463,7 +2505,9 @@ void world::resetJointImpulses( std::int32_t bodyIndex )
             joint.impulse = {};
             if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, distanceJointSim2> )
             {
-                joint.lowerImpulse = joint.upperImpulse = 0.0f;
+                joint.lowerImpulse = 0.0f;
+                joint.upperImpulse = 0.0f;
+                joint.motorImpulse = 0.0f;
             }
         }, jointSims_[key >> 1] );
     }

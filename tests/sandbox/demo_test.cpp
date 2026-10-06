@@ -50,6 +50,7 @@ int main()
     const auto jointData = pendulum.getWorld().getDistanceJointData( pendulum.getPendulumJoint() );
     check( !jointData.enableSpring && jointData.hertz == 2.0f && jointData.dampingRatio == 0.7f, "pendulum starts rigid with reproducible spring tuning" );
     check( !jointData.enableLimit && jointData.minLength == 1.5f && jointData.maxLength == 2.5f, "pendulum starts with reproducible limit range" );
+    check( !jointData.enableMotor && jointData.motorSpeed == 1.0f && jointData.maxMotorForce == 10.0f, "pendulum starts with reproducible motor tuning" );
     const auto initial = pendulum.getWorld().GetBodyTransform( pendulum.getPendulumBody() );
     demoInput input{}; input.jumpPressed = true;
     session.handleInput( input, true );
@@ -58,12 +59,14 @@ int main()
     check( session.getStepCount() == 1 && !session.isPlaying(), "single step stays paused" );
     pendulum.getWorld().setDistanceJointSpring( pendulum.getPendulumJoint(), true, 3.0f, 1.0f );
     pendulum.getWorld().setDistanceJointLimit( pendulum.getPendulumJoint(), true, 1.0f, 3.0f );
+    pendulum.getWorld().setDistanceJointMotor( pendulum.getPendulumJoint(), true, -2.0f, 20.0f );
     session.reset();
     auto& reset = static_cast<rigidBodyDemo&>( session.getDemo() );
     check( reset.getWorld().GetBodyTransform( reset.getPendulumBody() ).position.x == initial.position.x && session.getStepCount() == 0, "restart current demo" );
     const auto resetJoint = reset.getWorld().getDistanceJointData( reset.getPendulumJoint() );
     check( !resetJoint.enableSpring && resetJoint.hertz == 2.0f && resetJoint.dampingRatio == 0.7f, "reset clears spring mode and tuning" );
     check( !resetJoint.enableLimit && resetJoint.minLength == 1.5f && resetJoint.maxLength == 2.5f, "reset clears limit mode and range" );
+    check( !resetJoint.enableMotor && resetJoint.motorSpeed == 1.0f && resetJoint.maxMotorForce == 10.0f, "reset clears motor mode and tuning" );
     input = {}; input.impulsePressed = true; input.mousePosition = { 2.0f, -2.0f };
     session.handleInput( input, true );
     check( reset.getWorld().GetBodyLinearVelocity( reset.getPendulumBody() ).x > 0.0f, "pendulum mouse experiment" );

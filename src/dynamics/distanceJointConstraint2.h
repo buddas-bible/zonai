@@ -40,6 +40,12 @@ struct distanceJointConstraint2
     float upperImpulse = 0.0f; // 상한의 누적 임펄스. 0 이상
     float invSubStepTime = 0.0f;
     constraintSoftness2 limitSoftness{};
+
+    // 축 방향 속도 모터. 스프링 모드에서만 작동하며 0 Hz에서도 사용할 수 있음.
+    bool enableMotor = false;
+    float motorSpeed = 0.0f; // 목표 상대속도 (m/s). 양수는 늘이고 음수는 줄임
+    float motorImpulse = 0.0f; // 양방향 누적 임펄스. 절댓값을 F * h로 제한함
+    float maxMotorImpulse = 0.0f;
 };
 
 #pragma endregion Constraint
