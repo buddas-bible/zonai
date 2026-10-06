@@ -252,6 +252,7 @@ int main()
     camera.pixelsPerMeter = 55.0f;
 
     demoSession session{ createDemoView };
+    collisionSettingsUi collisionUi;
     int subStepCount = 1;
     const auto resetCamera = [&]()
     {
@@ -354,7 +355,7 @@ int main()
         ImGui::Text( "고정 시간 간격: %.5f s / 진행 단계: %llu", 1.0f / 60.0f, static_cast<unsigned long long>( session.getStepCount() ) );
         if( ImGui::Button( "카메라 초기화###Reset Camera", ImVec2( -1.0f, 0.0f ) ) ) { resetCamera(); }
         ImGui::Text( "초당 프레임: %.1f / 화면 배율: %.1f px/m", io.Framerate, camera.pixelsPerMeter );
-        drawProjectCollisionSettings( session );
+        drawProjectCollisionSettings( session, collisionUi );
         ImGui::Separator();
         ImGui::TextUnformatted( "조작 안내" );
         ImGui::TextWrapped( "%s", getDemoEntry( session.getKind() ).controls );

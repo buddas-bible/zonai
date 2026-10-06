@@ -75,6 +75,7 @@ void checkDemoUi()
                 ImGui::NewFrame();
                 ImGui::SetNextWindowPos( { 0.0f, 0.0f } ); ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
                 ImGui::Begin( "Joint tuning input" );
+                ImGui::GetStateStorage()->SetInt( ImGui::GetID( "MouseControls" ), 1 );
                 if( phase == 0 )
                 {
                     GImGui->NavActivateId = ImGui::GetID( labels[setting] );
@@ -133,6 +134,7 @@ void checkDemoUi()
             ImGui::SetNextWindowPos( { 0.0f, 0.0f } ); ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
             ImGui::Begin( "Inspector filter" );
             ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Collision mask" ), 1 );
+            ImGui::GetStateStorage()->SetInt( ImGui::GetID( "ObjectCollisionOverrides" ), 1 );
             if( frame == 0 ) { GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( label ); }
             if( frame == 1 && !GImGui->OpenPopupStack.empty() )
             {
@@ -148,22 +150,77 @@ void checkDemoUi()
         ImGui::ClosePopupToLevel( 0, true );
     }
     demoSession project{ createDemoView };
-    for( int frame = 0; frame < 3; ++frame )
+    collisionSettingsUi collisionUi;
+    for( int frame = 0; frame < 5; ++frame )
     {
         ImGui::NewFrame();
         ImGui::Begin( "Project controls" );
         if( frame == 0 ) { GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Project collision matrix" ); }
         if( frame == 1 )
         {
+            auto* modal = GImGui->OpenPopupStack.back().Window;
+            GImGui->NavActivateId = GImGui->NavActivateDownId = modal->GetID( "VisibleCollisionLayers" );
+        }
+        if( frame == 2 )
+        {
+            auto* popup = GImGui->OpenPopupStack.back().Window;
+            GImGui->NavActivateId = GImGui->NavActivateDownId = popup->GetID( "레이어 64##VisibleLayers" );
+        }
+        if( frame == 3 )
+        {
             for( auto* window : GImGui->Windows )
             {
                 if( std::strstr( window->Name, "MatrixGrid" ) != nullptr )
-                { GImGui->NavActivateId = GImGui->NavActivateDownId = window->GetID( "##Pair0_63" ); }
+                { GImGui->NavActivateId = GImGui->NavActivateDownId = ImHashStr( "##Pair0_63", 0, window->GetID( "CollisionPairs" ) ); }
             }
         }
-        drawProjectCollisionSettings( project ); ImGui::End(); ImGui::Render();
+        if( frame == 4 ) { collisionUi.visibleLayers = 1; }
+        drawProjectCollisionSettings( project, collisionUi ); ImGui::End(); ImGui::Render();
+        for( auto* window : GImGui->Windows )
+        {
+            if( std::strstr( window->Name, "MatrixGrid" ) != nullptr && window->ContentSize.x > 640.0f )
+            { std::fprintf( stderr, "collision editor expands all 64 layers\n" ); std::exit( EXIT_FAILURE ); }
+        }
+        if( frame == 2 )
+        {
+            if( collisionUi.visibleLayers != ( 1 | ( std::uint64_t{ 1 } << 63 ) ) )
+            { std::fprintf( stderr, "matrix layer selection failed\n" ); std::exit( EXIT_FAILURE ); }
+            ImGui::ClosePopupToLevel( 1, true );
+        }
     }
     if( project.getCollisionMatrix().allows( 1, std::uint64_t{ 1 } << 63 ) || project.getCollisionMatrix().allows( std::uint64_t{ 1 } << 63, 1 ) )
-    { std::fprintf( stderr, "project matrix UI did not edit symmetric pair\n" ); std::exit( EXIT_FAILURE ); }
+    { std::fprintf( stderr, "project matrix UI did not edit/preserve symmetric pair\n" ); std::exit( EXIT_FAILURE ); }
+    collisionUi.visibleLayers = 0xFF;
+    for( int frame = 0; frame < 3; ++frame )
+    {
+        ImGui::NewFrame(); ImGui::Begin( "Project controls" );
+        if( frame == 0 )
+        {
+            auto* modal = GImGui->OpenPopupStack.back().Window;
+            GImGui->NavActivateId = GImGui->NavActivateDownId = modal->GetID( "VisibleCollisionLayers" );
+        }
+        if( frame == 1 )
+        {
+            auto* popup = GImGui->OpenPopupStack.back().Window;
+            GImGui->NavActivateId = GImGui->NavActivateDownId = popup->GetID( "레이어 64##VisibleLayers" );
+        }
+        drawProjectCollisionSettings( project, collisionUi ); ImGui::End(); ImGui::Render();
+    }
+    bool checkedEightLayers = false;
+    for( auto* window : GImGui->Windows )
+    {
+        if( std::strstr( window->Name, "MatrixGrid" ) == nullptr ) { continue; }
+        const auto* table = GImGui->Tables.GetByKey( window->GetID( "CollisionPairs" ) );
+        if( table == nullptr || table->ColumnsCount != 9 ) { continue; }
+        checkedEightLayers = true;
+        for( int column = 1; column < 9; ++column )
+        {
+            if( table->Columns[column].WorkMinX + ImGui::GetFrameHeight() > table->Columns[column].ClipRect.Max.x )
+            { std::fprintf( stderr, "eight-layer cell clipped: %d / %.1f / %.1f\n", column, table->Columns[column].WidthGiven, table->Columns[column].ClipRect.GetWidth() ); std::exit( EXIT_FAILURE ); }
+        }
+    }
+    if( !checkedEightLayers ) { std::fprintf( stderr, "eight-layer table not drawn\n" ); std::exit( EXIT_FAILURE ); }
+    if( collisionUi.visibleLayers != 0xFF )
+    { std::fprintf( stderr, "collision editor exceeded eight visible layers\n" ); std::exit( EXIT_FAILURE ); }
     ImGui::DestroyContext();
 }

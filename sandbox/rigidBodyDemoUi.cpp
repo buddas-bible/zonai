@@ -96,24 +96,33 @@ vec2 getWorldCenter(
     );
 }
 
-bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits )
+bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, int selectionLimit = 64 )
 {
-    char preview[32]; std::snprintf( preview, sizeof( preview ), "%d개 레이어 선택", std::popcount( bits ) );
+    char preview[96];
+    if( bits == 0 ) { std::snprintf( preview, sizeof( preview ), "선택 없음" ); }
+    else if( bits == ~std::uint64_t{ 0 } ) { std::snprintf( preview, sizeof( preview ), "전체 레이어" ); }
+    else if( std::popcount( bits ) == 1 ) { std::snprintf( preview, sizeof( preview ), "레이어 %02d", std::countr_zero( bits ) + 1 ); }
+    else { std::snprintf( preview, sizeof( preview ), "%d개 레이어 선택", std::popcount( bits ) ); }
     bool changed = false;
     if( ImGui::BeginCombo( label, preview, ImGuiComboFlags_HeightLarge ) )
     {
         ImGui::PushID( id );
-        if( ImGui::Button( "전체 선택###All" ) ) { bits = ~std::uint64_t{ 0 }; changed = true; }
-        ImGui::SameLine();
+        if( selectionLimit == 64 )
+        {
+            if( ImGui::Button( "전체 선택###All" ) ) { bits = ~std::uint64_t{ 0 }; changed = true; }
+            ImGui::SameLine();
+        }
         if( ImGui::Button( "전체 해제###None" ) ) { bits = 0; changed = true; }
         ImGui::PopID();
         for( int bit = 0; bit < 64; ++bit )
         {
             const auto flag = std::uint64_t{ 1 } << bit;
             bool enabled = ( bits & flag ) != 0;
+            ImGui::BeginDisabled( !enabled && std::popcount( bits ) >= selectionLimit );
             char name[48]; std::snprintf( name, sizeof( name ), "레이어 %02d##%s", bit + 1, id );
             if( ImGui::Checkbox( name, &enabled ) )
             { bits = enabled ? bits | flag : bits & ~flag; changed = true; }
+            ImGui::EndDisabled();
         }
         ImGui::EndCombo();
     }
@@ -132,11 +141,11 @@ void rigidBodyDemoUi::drawControls()
 {
     // 한글 이름이 고정 폭 패널에서 잘리지 않도록 입력 영역과 이름의 폭을 나눔.
     ImGui::PushItemWidth( ImGui::GetContentRegionAvail().x * 0.45f );
-    drawWorldSettings();
+    if( ImGui::CollapsingHeader( "월드 설정###WorldSettings" ) ) { drawWorldSettings(); }
     drawInspector();
     drawExperimentControls();
-    drawMouseControls();
-    drawDebugSettings();
+    if( ImGui::CollapsingHeader( "마우스 조인트 설정###MouseControls" ) ) { drawMouseControls(); }
+    if( ImGui::CollapsingHeader( "물리 정보 표시 설정###DebugDrawSettings" ) ) { drawDebugSettings(); }
     ImGui::PopItemWidth();
 }
 
@@ -623,11 +632,14 @@ void rigidBodyDemoUi::drawInspector()
         if( ImGui::CollapsingHeader( "충돌 마스크###Collision mask" ) )
         {
             collisionFilter filter = getWorld().GetShapeFilter( visual.shapeHandle );
-            ImGui::TextWrapped( "도형의 소속 레이어와 충돌할 상대 레이어를 선택합니다. 양쪽 도형이 서로를 허용해야 충돌합니다." );
             bool changed = drawCollisionBits( "소속 레이어###Category membership", "Category", filter.categoryBits );
-            changed |= drawCollisionBits( "충돌 대상 레이어###Collision partners", "Mask", filter.maskBits );
-            changed |= ImGui::InputInt( "충돌 그룹###Group index", &filter.groupIndex );
-            ImGui::TextWrapped( "같은 0이 아닌 그룹은 개별 마스크보다 우선합니다. 양수는 허용, 음수는 제외합니다. 소속 레이어 쌍의 공통 매트릭스 금지는 여전히 적용됩니다." );
+            ImGui::TextWrapped( "레이어 간 충돌 관계는 공통 충돌 설정에서 편집합니다." );
+            if( ImGui::CollapsingHeader( "개별 추가 제한 (고급)###ObjectCollisionOverrides" ) )
+            {
+                changed |= drawCollisionBits( "충돌 대상 레이어###Collision partners", "Mask", filter.maskBits );
+                changed |= ImGui::InputInt( "충돌 그룹###Group index", &filter.groupIndex );
+                ImGui::TextWrapped( "마스크는 개별 충돌을 추가 제한합니다. 양쪽 도형이 서로를 허용해야 합니다. 같은 0이 아닌 그룹은 개별 마스크보다 우선하며 양수는 허용, 음수는 제외합니다." );
+            }
             if( changed ) { getWorld().SetShapeFilter( visual.shapeHandle, filter ); refreshContacts(); }
         }
 #pragma endregion
@@ -799,7 +811,6 @@ void rigidBodyDemoUi::drawExperimentControls()
 
 void rigidBodyDemoUi::drawMouseControls()
 {
-    ImGui::Separator(); ImGui::TextUnformatted( "마우스 조인트" );
     float hertz = getMouseSettings().hertz, damping = getMouseSettings().dampingRatio, force = getMouseSettings().maxForce;
     // Ctrl+click의 숫자 입력도 solver의 비음수 전제조건과 화면 범위를 지켜야 함.
     bool changed = ImGui::SliderFloat( "잡기 주파수###Mouse Hertz", &hertz, 0.0f, 30.0f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp );
@@ -818,10 +829,6 @@ void rigidBodyDemoUi::drawMouseControls()
 
 void rigidBodyDemoUi::drawDebugSettings()
 {
-    ImGui::TextUnformatted(
-        "물리 정보 표시"
-    );
-
     ImGui::Checkbox(
         "격자와 축###Grid / Axis",
         &showGrid_
@@ -979,34 +986,58 @@ bool initializeDemoUi()
 }
 
 std::unique_ptr<demo> createDemoView( demoKind kind ) { return std::make_unique<rigidBodyDemoUi>( kind ); }
-void drawProjectCollisionSettings( demoSession& session )
+void drawProjectCollisionSettings( demoSession& session, collisionSettingsUi& state )
 {
-    if( ImGui::Button( "공통 충돌 매트릭스###Project collision matrix", ImVec2( -1.0f, 0.0f ) ) ) { ImGui::OpenPopup( "공통 충돌 설정###Project collision settings" ); }
-    ImGui::SetNextWindowSize( { 900.0f, 560.0f }, ImGuiCond_FirstUseEver );
-    if( ImGui::BeginPopupModal( "공통 충돌 설정###Project collision settings", nullptr ) )
+    if( ImGui::Button( "공통 충돌 설정###Project collision matrix", ImVec2( -1.0f, 0.0f ) ) ) { ImGui::OpenPopup( "공통 충돌 설정###Project collision settings" ); }
+    const float minWidth = std::max( 460.0f, 140.0f + 56.0f * std::min( std::popcount( state.visibleLayers ), 8 ) );
+    ImGui::SetNextWindowSizeConstraints( { minWidth, 0.0f }, { 640.0f, 900.0f } );
+    if( ImGui::BeginPopupModal( "공통 충돌 설정###Project collision settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
     {
-        ImGui::TextWrapped( "모든 데모의 공통 규칙입니다. 체크한 레이어 쌍은 충돌을 허용하며 개별 마스크로 추가 제한할 수 있습니다. 현재 실행 중에는 데모 전환과 초기화 후에도 유지됩니다." );
+        ImGui::TextUnformatted( "선택한 레이어 사이의 충돌 허용 여부를 편집합니다." );
+        drawCollisionBits( "표시할 레이어###VisibleCollisionLayers", "VisibleLayers", state.visibleLayers, 8 );
+        ImGui::TextUnformatted( "한 번에 8개까지 표시합니다. 숨긴 레이어의 규칙은 유지됩니다." );
         collisionMatrix matrix = session.getCollisionMatrix();
         bool changed = false;
-        ImGui::SetNextWindowContentSize( { 120.0f + 64.0f * 70.0f, 0.0f } );
-        ImGui::BeginChild( "MatrixGrid", { 0.0f, 420.0f }, ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar );
-        ImGui::TextUnformatted( "레이어" );
-        for( int column = 0; column < 64; ++column )
-        { ImGui::SameLine( 120.0f + column * 70.0f ); ImGui::Text( "%02d", column + 1 ); }
-        for( int row = 0; row < 64; ++row )
+        int layers[8]{}, count = 0;
+        for( int bit = 0; bit < 64 && count < 8; ++bit )
+        { if( ( state.visibleLayers & ( std::uint64_t{ 1 } << bit ) ) != 0 ) { layers[count++] = bit; } }
+        if( count == 0 ) { ImGui::TextUnformatted( "편집할 레이어를 선택하세요." ); }
+        else
         {
-            ImGui::Text( "레이어 %02d", row + 1 );
-            for( int column = 0; column < 64; ++column )
+            ImGui::BeginChild( "MatrixGrid", { 0.0f, ImGui::GetFrameHeightWithSpacing() * ( count + 1 ) + 8.0f } );
+            if( ImGui::BeginTable( "CollisionPairs", count + 1, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingFixedFit ) )
             {
-                ImGui::SameLine( 120.0f + column * 70.0f );
-                char label[32]; std::snprintf( label, sizeof( label ), "##Pair%d_%d", row, column );
-                bool allowed = matrix.allows( std::uint64_t{ 1 } << row, std::uint64_t{ 1 } << column );
-                if( ImGui::Checkbox( label, &allowed ) ) { matrix.setPair( row, column, allowed ); changed = true; }
-                ImGui::SetItemTooltip( "레이어 %02d / 레이어 %02d", row + 1, column + 1 );
+                ImGui::TableSetupColumn( "레이어", ImGuiTableColumnFlags_WidthFixed, 90.0f );
+                for( int column = 0; column < count; ++column )
+                {
+                    char label[8]; std::snprintf( label, sizeof( label ), "%02d", layers[column] + 1 );
+                    ImGui::TableSetupColumn( label, ImGuiTableColumnFlags_WidthFixed, 44.0f );
+                }
+                ImGui::TableHeadersRow();
+                for( int row = 0; row < count; ++row )
+                {
+                    ImGui::TableNextRow(); ImGui::TableSetColumnIndex( 0 );
+                    ImGui::Text( "레이어 %02d", layers[row] + 1 );
+                    for( int column = 0; column < count; ++column )
+                    {
+                        ImGui::TableSetColumnIndex( column + 1 );
+                        // 대칭 관계는 한 번만 편집함. 같은 레이어끼리의 충돌도 설정 가능함.
+                        if( column < row ) { ImGui::TextUnformatted( "—" ); continue; }
+                        char label[32]; std::snprintf( label, sizeof( label ), "##Pair%d_%d", layers[row], layers[column] );
+                        bool allowed = matrix.allows( std::uint64_t{ 1 } << layers[row], std::uint64_t{ 1 } << layers[column] );
+                        if( ImGui::Checkbox( label, &allowed ) ) { matrix.setPair( layers[row], layers[column], allowed ); changed = true; }
+                        ImGui::SetItemTooltip( "레이어 %02d / 레이어 %02d", layers[row] + 1, layers[column] + 1 );
+                    }
+                }
+                ImGui::EndTable();
             }
+            ImGui::EndChild();
         }
-        ImGui::EndChild();
         if( changed ) { session.setCollisionMatrix( matrix ); }
+        if( ImGui::CollapsingHeader( "규칙 설명###CollisionRulesHelp" ) )
+        {
+            ImGui::TextWrapped( "체크한 쌍은 충돌을 허용합니다. 같은 관계는 위쪽에서 한 번만 편집하며 개별 마스크는 추가 제한입니다. 모든 데모에 적용되고 현재 실행 중에는 전환·초기화 후에도 유지됩니다." );
+        }
         if( ImGui::Button( "닫기###Close" ) ) { ImGui::CloseCurrentPopup(); }
         ImGui::EndPopup();
     }
