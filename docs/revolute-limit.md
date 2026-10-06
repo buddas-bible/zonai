@@ -10,7 +10,7 @@
 
 두 경계가 같으면 그 각도를 유지한다. Distance Joint의 같은 min/max가 별도 `length` 모드로 돌아가는 규칙과 구분한다. 두 Body 모두 회전할 수 없으면 각도 제약은 적용하지 않지만 기존 연결점 제약은 유지한다.
 
-설정이 실제로 바뀌면 선형·하한·상한 임펄스를 모두 비우고 연결된 non-static component를 깨운다. 같은 설정은 cache/sleep을 유지한다. 질량·관성·pose 변경과 substep 시간 변경도 cache를 무효화한다. 기존 생성/삭제·ID·충돌 제외·Island 경로를 공유한다.
+설정이 실제로 바뀌면 연결점·하한·상한·후속 모터 임펄스를 모두 비우고 연결된 non-static component를 깨운다. 같은 설정은 cache/sleep을 유지한다. 질량·관성·pose 변경과 substep 시간 변경도 cache를 무효화한다. 기존 생성/삭제·ID·충돌 제외·Island 경로를 공유한다.
 
 조회의 `torque`는 **마지막 substep의 (lowerImpulse - upperImpulse) / h**, B에 작용하는 제한 반력 토크(N*m)다. 양수는 각도를 늘리고 음수는 줄인다. 중심 밖 연결점의 선형 임펄스가 만드는 `r x P`와 모터 토크는 이 값에 포함하지 않는다. `force`는 기존 연결점 반력이다. Paused/sleep 상태는 마지막 결과를 유지한다.
 
@@ -42,4 +42,4 @@ Windows ImGui headless 검사는 기본 접기와 toggle, 숫자 입력 clamp, �
 
 최종 로컬 검증은 Sandbox ON 전체 Debug/Release build와 각각 45/45 CTest, Sandbox OFF 전체 Release build와 45/45 CTest 통과다. 누적 임펄스 clamp 제거, 상한 부호 반전, warm start의 잘못된 합, speculative bias 제거, 현재 A 회전 누락의 다섯 mutation을 모두 검사에서 잡고 원본 복구 후 통과했다. 독립 최종 리뷰의 남은 지적은 없다.
 
-다음은 목표 각속도와 최대 토크를 가진 **회전 모터**다. 제한과 함께 방향 전환·제동·경계에서의 반력을 학습한 뒤 자동차나 조나이 선풍기 같은 연결 데모로 진행한다.
+목표 각속도와 최대 토크를 가진 **회전 모터**를 [후속 기록](revolute-motor.md)에 추가했다. 제한과 함께 방향 전환·제동·경계에서의 반력을 학습한 뒤 자동차나 조나이 선풍기 같은 연결 데모로 진행한다.

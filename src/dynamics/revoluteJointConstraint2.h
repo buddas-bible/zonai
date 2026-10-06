@@ -35,6 +35,10 @@ struct revoluteJointConstraint2
     float invSubStepTime = 0.0f;
     float lowerImpulse = 0.0f;
     float upperImpulse = 0.0f;
+    bool enableMotor = false;
+    float motorSpeed = 0.0f;
+    float maxMotorImpulse = 0.0f; // maxMotorTorque * subStepTime
+    float motorImpulse = 0.0f;
 };
 
 // 원점 기준 작용점을 질량 중심 기준으로 바꾸고 수치 안정화 계수를 준비함.
@@ -43,7 +47,7 @@ struct revoluteJointConstraint2
 // 이전 누적 임펄스를 두 작용점에 반대 방향으로 적용함.
 void warmStartRevoluteJointConstraint( const revoluteJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB );
 
-// 각도 제한 다음 연결점의 상대속도를 제거함. 위반한 위치는 useBias pass에서만 보정함.
+// 모터 → 각도 제한 → 연결점의 순서로 풂. 위반한 위치는 useBias pass에서만 보정함.
 void solveRevoluteJointConstraint( revoluteJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB, bool useBias );
 
 } // namespace zonai

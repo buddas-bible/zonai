@@ -243,5 +243,24 @@ int main()
     }
     check( maximumAngle > 0.7f, "rod impulse exercises upper boundary rather than only interior motion" );
 
+    session.reset();
+    auto& poweredHinge = static_cast<rigidBodyDemo&>( session.getDemo() );
+    const auto poweredJoint = poweredHinge.getRevoluteJoint();
+    const auto motorDefaults = poweredHinge.getWorld().getRevoluteJointData( poweredJoint );
+    check( !motorDefaults.enableMotor && motorDefaults.motorSpeed == 2.0f && motorDefaults.maxMotorTorque == 10.0f, "demo starts with motor off and useful editable settings" );
+    poweredHinge.getWorld().setRevoluteJointMotor( poweredJoint, true, 2.0f, 20.0f );
+    float turnedAngle = 0.0f;
+    for( int i = 0; i < 180; ++i )
+    {
+        session.stepOnce( 4 );
+        const auto data = poweredHinge.getWorld().getRevoluteJointData( poweredJoint );
+        turnedAngle = std::max( turnedAngle, std::abs( data.currentAngle ) );
+        check( Length( data.anchorB - data.anchorA ) < 0.015f && std::abs( data.motorTorque ) <= 20.001f, "powered rod keeps pivot under gravity within motor torque budget" );
+    }
+    check( turnedAngle > 2.0f, "motor demo exercises substantial rotation rather than only local motion" );
+    session.reset();
+    auto& freeHinge = static_cast<rigidBodyDemo&>( session.getDemo() );
+    check( !freeHinge.getWorld().getRevoluteJointData( freeHinge.getRevoluteJoint() ).enableMotor, "reset disables motor" );
+
     return EXIT_SUCCESS;
 }

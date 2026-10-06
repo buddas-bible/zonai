@@ -401,6 +401,8 @@ jointId world::createRevoluteJoint( const revoluteJointDef& definition )
     assert( bodies_[bodyIndexA].type == bodyType::Dynamic || bodies_[bodyIndexB].type == bodyType::Dynamic );
     assert( IsFinite( definition.localAnchorA ) && IsFinite( definition.localAnchorB ) );
     assert( std::isfinite( definition.referenceAngle ) && std::isfinite( definition.lowerAngle ) && std::isfinite( definition.upperAngle ) && definition.lowerAngle <= definition.upperAngle );
+    assert( std::isfinite( definition.motorSpeed ) );
+    assert( std::isfinite( definition.maxMotorTorque ) && definition.maxMotorTorque >= 0.0f );
 
     const std::int32_t index = allocateJoint( bodyIndexA, bodyIndexB, definition.collideConnected );
     revoluteJointSim2 sim{};
@@ -413,6 +415,9 @@ jointId world::createRevoluteJoint( const revoluteJointDef& definition )
     sim.enableLimit = definition.enableLimit;
     sim.lowerAngle = std::clamp( definition.lowerAngle, -0.99f * std::numbers::pi_v<float>, 0.99f * std::numbers::pi_v<float> );
     sim.upperAngle = std::clamp( definition.upperAngle, -0.99f * std::numbers::pi_v<float>, 0.99f * std::numbers::pi_v<float> );
+    sim.enableMotor = definition.enableMotor;
+    sim.motorSpeed = definition.motorSpeed;
+    sim.maxMotorTorque = definition.maxMotorTorque;
     jointSims_[index] = sim;
 
     return makeJointId( index );
@@ -434,6 +439,35 @@ void world::setRevoluteJointLimit( jointId id, bool enableLimit, float lowerAngl
     joint.impulse = {};
     joint.lowerImpulse = 0.0f;
     joint.upperImpulse = 0.0f;
+    joint.motorImpulse = 0.0f;
+
+    if( bodies_[joint.bodyIdA].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdA );
+    }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdB );
+    }
+}
+
+void world::setRevoluteJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorTorque )
+{
+    assert( std::isfinite( motorSpeed ) );
+    assert( std::isfinite( maxMotorTorque ) && maxMotorTorque >= 0.0f );
+
+    auto& joint = std::get<revoluteJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.enableMotor == enableMotor && joint.motorSpeed == motorSpeed && joint.maxMotorTorque == maxMotorTorque ) return;
+
+    joint.enableMotor = enableMotor;
+    joint.motorSpeed = motorSpeed;
+    joint.maxMotorTorque = maxMotorTorque;
+
+    // 모터·각도 제한·연결점은 서로 속도를 바꾸므로 설정 변경 시 함께 누적한 값을 비움.
+    joint.impulse = {};
+    joint.lowerImpulse = 0.0f;
+    joint.upperImpulse = 0.0f;
+    joint.motorImpulse = 0.0f;
 
     if( bodies_[joint.bodyIdA].type != bodyType::Static )
     {
@@ -464,6 +498,10 @@ revoluteJointData world::getRevoluteJointData( jointId id ) const
     data.lowerAngle = sim.lowerAngle;
     data.upperAngle = sim.upperAngle;
     data.torque = sim.subStepTime > 0.0f ? ( sim.lowerImpulse - sim.upperImpulse ) / sim.subStepTime : 0.0f;
+    data.enableMotor = sim.enableMotor;
+    data.motorSpeed = sim.motorSpeed;
+    data.maxMotorTorque = sim.maxMotorTorque;
+    data.motorTorque = sim.subStepTime > 0.0f ? sim.motorImpulse / sim.subStepTime : 0.0f;
 
     return data;
 }
@@ -1822,9 +1860,6 @@ void world::Step( float timeStep, int subStepCount )
                     {
                         joint.lowerImpulse = constraint.lowerImpulse;
                         joint.upperImpulse = constraint.upperImpulse;
-                    }
-                    if constexpr( std::is_same_v<simType, distanceJointSim2> )
-                    {
                         joint.motorImpulse = constraint.motorImpulse;
                     }
                 },
@@ -2336,9 +2371,6 @@ void world::resetJointImpulses( std::int32_t bodyIndex )
                 {
                     joint.lowerImpulse = 0.0f;
                     joint.upperImpulse = 0.0f;
-                }
-                if constexpr( std::is_same_v<simType, distanceJointSim2> )
-                {
                     joint.motorImpulse = 0.0f;
                 }
             },

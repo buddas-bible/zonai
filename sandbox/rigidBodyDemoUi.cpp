@@ -673,7 +673,7 @@ void rigidBodyDemoUi::drawExperimentControls()
     else if( getKind() == demoKind::revoluteHinge )
     {
         ImGui::TextUnformatted( "회전축 관찰" );
-        const revoluteJointData joint = getWorld().getRevoluteJointData( getRevoluteJoint() );
+        revoluteJointData joint = getWorld().getRevoluteJointData( getRevoluteJoint() );
         ImGui::Text( "기준 대비 각도: %.1f 도", joint.currentAngle * 180.0f / std::numbers::pi_v<float> );
         ImGui::Text( "연결점 오차: %.4f m", Length( joint.anchorB - joint.anchorA ) );
         ImGui::Text( "반력: (%.2f, %.2f) N", joint.force.x, joint.force.y );
@@ -702,9 +702,50 @@ void rigidBodyDemoUi::drawExperimentControls()
             if( changed )
             {
                 getWorld().setRevoluteJointLimit( getRevoluteJoint(), enableLimit, lower * TO_RADIANS, upper * TO_RADIANS );
+                joint = getWorld().getRevoluteJointData( getRevoluteJoint() );
             }
             ImGui::Text( "제한 토크: %.2f N·m", joint.torque );
             ImGui::TextWrapped( "초록은 최소, 빨강은 최대 각도이며 회색 호는 허용 범위입니다. 경계에서는 바깥 회전을 막고 안쪽 복귀는 허용합니다. 두 각도가 같으면 그 각도를 유지합니다." );
+            ImGui::TreePop();
+        }
+
+        if( ImGui::TreeNode( "회전 모터###RevoluteMotorSettings" ) )
+        {
+            bool enableMotor = joint.enableMotor;
+            float motorSpeed = joint.motorSpeed;
+            float maxMotorTorque = joint.maxMotorTorque;
+            bool changed = ImGui::Checkbox( "모터 사용###Revolute motor", &enableMotor );
+            if( ImGui::SliderFloat( "목표 각속도###Revolute motor speed", &motorSpeed, -5.0f, 5.0f, "%.2f rad/s", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                motorSpeed = std::clamp( motorSpeed, -5.0f, 5.0f );
+                changed = true;
+            }
+            if( ImGui::SliderFloat( "최대 모터 토크###Revolute motor torque", &maxMotorTorque, 0.0f, 50.0f, "%.1f N·m", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                maxMotorTorque = std::clamp( maxMotorTorque, 0.0f, 50.0f );
+                changed = true;
+            }
+            if( ImGui::Button( "회전 방향 바꾸기###Reverse revolute motor", ImVec2( -1.0f, 0.0f ) ) )
+            {
+                motorSpeed = -motorSpeed;
+                changed = true;
+            }
+            if( ImGui::Button( "제동하기###Brake revolute motor", ImVec2( -1.0f, 0.0f ) ) )
+            {
+                enableMotor = true;
+                motorSpeed = 0.0f;
+                changed = true;
+            }
+            if( changed )
+            {
+                getWorld().setRevoluteJointMotor( getRevoluteJoint(), enableMotor, motorSpeed, maxMotorTorque );
+                joint = getWorld().getRevoluteJointData( getRevoluteJoint() );
+            }
+
+            const float angularVelocity = getWorld().GetBodyAngularVelocity( joint.bodyB ) - getWorld().GetBodyAngularVelocity( joint.bodyA );
+            ImGui::Text( "현재 상대 각속도: %.2f rad/s", angularVelocity );
+            ImGui::Text( "실제 모터 토크: %.2f N·m", joint.motorTorque );
+            ImGui::TextWrapped( "양의 속도는 반시계, 음의 속도는 시계 방향입니다. 속도 0은 제동, 토크 0은 모터 힘을 끕니다. 토크가 중력 하중보다 작으면 목표 속도에 도달하지 못할 수 있습니다. 각도 제한을 켜면 경계에서 멈춥니다." );
             ImGui::TreePop();
         }
 

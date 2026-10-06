@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 #include <numbers>
 #include "dynamics/revoluteJointConstraint2.h"
 
@@ -233,6 +234,90 @@ int main()
     warmStartRevoluteJointConstraint( constraint, stateA, stateB );
     solveRevoluteJointConstraint( constraint, stateA, stateB, true );
     check( constraint.lowerImpulse == 0.0f && constraint.upperImpulse == 0.0f && std::isfinite( stateB.angularVelocity ), "zero rotational inverse mass disables angular correction" );
+
+    // 중심에서 연결한 두 물체: I_A=1, I_B=0.5. 상대속도 3에는 L=1이 필요함.
+    limitA.invInertia = 1.0f;
+    limitB.invInertia = 2.0f;
+    limitB.transform.rotation = {};
+    revoluteJointSim2 motor{};
+    motor.bodyIdA = 0;
+    motor.bodyIdB = 1;
+    motor.enableMotor = true;
+    motor.motorSpeed = 3.0f;
+    motor.maxMotorTorque = 120.0f;
+    for( const bool useBias : { false, true } )
+    {
+        constraint = prepareRevoluteJointConstraint( motor, limitA, limitB, h );
+        stateA = {};
+        stateB = {};
+        solveRevoluteJointConstraint( constraint, stateA, stateB, useBias );
+        check( near( stateA.angularVelocity, -1.0f ) && near( stateB.angularVelocity, 2.0f ), "motor reaches relative speed with equal and opposite angular impulses" );
+        check( near( stateA.angularVelocity + stateB.angularVelocity / 2.0f, 0.0f ), "motor preserves total angular momentum" );
+        solveRevoluteJointConstraint( constraint, stateA, stateB, useBias );
+        check( near( constraint.motorImpulse, 1.0f ), "repeated solve applies only motor impulse increment" );
+    }
+
+    motor.maxMotorTorque = 30.0f;
+    constraint = prepareRevoluteJointConstraint( motor, limitA, limitB, h );
+    stateA = {};
+    stateB = {};
+    for( int i = 0; i < 8; ++i ) solveRevoluteJointConstraint( constraint, stateA, stateB, false );
+    check( near( constraint.motorImpulse, 0.5f ) && near( stateB.angularVelocity - stateA.angularVelocity, 1.5f ), "accumulated motor impulse is bounded by torque times substep time" );
+    motor.motorSpeed = 0.0f;
+    constraint = prepareRevoluteJointConstraint( motor, limitA, limitB, h );
+    stateA = {};
+    stateB = {};
+    stateB.angularVelocity = 3.0f;
+    solveRevoluteJointConstraint( constraint, stateA, stateB, false );
+    check( near( constraint.motorImpulse, -0.5f ) && near( stateB.angularVelocity - stateA.angularVelocity, 1.5f ), "zero target speed brakes within negative torque bound" );
+    motor.maxMotorTorque = 0.0f;
+    constraint = prepareRevoluteJointConstraint( motor, limitA, limitB, h );
+    stateA = {};
+    stateB = {};
+    stateB.angularVelocity = 3.0f;
+    solveRevoluteJointConstraint( constraint, stateA, stateB, false );
+    check( stateB.angularVelocity == 3.0f && constraint.motorImpulse == 0.0f, "zero maximum torque leaves angular velocity unchanged" );
+
+    motor.motorSpeed = 3.0f;
+    motor.maxMotorTorque = 30.0f;
+    motor.enableLimit = true;
+    motor.lowerAngle = -0.5f;
+    motor.upperAngle = 0.5f;
+    limitB.transform.rotation = rot2::FromRadians( 0.5f );
+    constraint = prepareRevoluteJointConstraint( motor, limitA, limitB, h );
+    stateA = {};
+    stateB = {};
+    solveRevoluteJointConstraint( constraint, stateA, stateB, false );
+    check( near( constraint.motorImpulse, 0.5f ) && near( constraint.upperImpulse, 0.5f ) && near( stateB.angularVelocity - stateA.angularVelocity, 0.0f ), "upper limit opposes motor using newly updated velocity" );
+    motor.motorSpeed = -3.0f;
+    constraint = prepareRevoluteJointConstraint( motor, limitA, limitB, h );
+    stateA = {};
+    stateB = {};
+    solveRevoluteJointConstraint( constraint, stateA, stateB, false );
+    check( near( stateB.angularVelocity - stateA.angularVelocity, -1.5f ) && constraint.upperImpulse == 0.0f, "reversed motor can leave upper boundary" );
+
+    motor.subStepTime = h;
+    motor.motorImpulse = 2.0f;
+    motor.lowerImpulse = 0.25f;
+    motor.upperImpulse = 0.5f;
+    constraint = prepareRevoluteJointConstraint( motor, limitA, limitB, h );
+    stateA = {};
+    stateB = {};
+    warmStartRevoluteJointConstraint( constraint, stateA, stateB );
+    check( near( constraint.motorImpulse, 0.5f ) && near( stateA.angularVelocity, -0.25f ) && near( stateB.angularVelocity, 0.5f ), "warm start clamps motor cache and adds signed motor plus limits" );
+    constraint = prepareRevoluteJointConstraint( motor, limitA, limitB, h / 2.0f );
+    check( constraint.motorImpulse == 0.0f, "changed timestep discards motor cache" );
+    motor.enableMotor = false;
+    constraint = prepareRevoluteJointConstraint( motor, limitA, limitB, h );
+    check( constraint.motorImpulse == 0.0f, "disabled motor ignores stale cache" );
+    motor.enableMotor = true;
+    limitA.invInertia = 0.0f;
+    limitB.invInertia = 0.0f;
+    constraint = prepareRevoluteJointConstraint( motor, limitA, limitB, h );
+    stateA = {};
+    stateB = {};
+    solveRevoluteJointConstraint( constraint, stateA, stateB, false );
+    check( constraint.motorImpulse == 0.0f && stateA.angularVelocity == 0.0f && stateB.angularVelocity == 0.0f, "fixed rotation produces no motor impulse or NaN" );
 
     return EXIT_SUCCESS;
 }

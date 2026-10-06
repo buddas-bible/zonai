@@ -46,6 +46,13 @@ revoluteJointConstraint2 prepareRevoluteJointConstraint( const revoluteJointSim2
     constraint.lowerImpulse = keepAngularImpulse ? joint.lowerImpulse : 0.0f;
     constraint.upperImpulse = keepAngularImpulse ? joint.upperImpulse : 0.0f;
 
+    constraint.enableMotor = joint.enableMotor;
+    constraint.motorSpeed = joint.motorSpeed;
+    constraint.maxMotorImpulse = joint.maxMotorTorque * subStepTime;
+    // Box2D처럼 토크 * h로 누적 임펄스를 제한함. 이전 값도 현재 한도를 넘지 않게 준비함.
+    const bool keepMotorImpulse = joint.subStepTime == subStepTime && joint.enableMotor && k > 0.0f;
+    constraint.motorImpulse = keepMotorImpulse ? std::clamp( joint.motorImpulse, -constraint.maxMotorImpulse, constraint.maxMotorImpulse ) : 0.0f;
+
     return constraint;
 }
 
@@ -58,7 +65,7 @@ void warmStartRevoluteJointConstraint( const revoluteJointConstraint2& constrain
     const vec2 r_a = Rotate( bodyStateA.deltaRotation, constraint.anchorA );
     const vec2 r_b = Rotate( bodyStateB.deltaRotation, constraint.anchorB );
     const vec2 impulse = constraint.impulse;
-    const float angularImpulse = constraint.lowerImpulse - constraint.upperImpulse;
+    const float angularImpulse = constraint.motorImpulse + constraint.lowerImpulse - constraint.upperImpulse;
 
     // dV = P / m, dW = (r x P + L) / I. 연결점과 각도 임펄스의 반작용을 A에 적용함.
     bodyStateA.linearVelocity -= constraint.invMassA * impulse;
@@ -73,6 +80,18 @@ void warmStartRevoluteJointConstraint( const revoluteJointConstraint2& constrain
 
 void solveRevoluteJointConstraint( revoluteJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB, bool useBias )
 {
+    if( constraint.enableMotor && constraint.angularMass > 0.0f )
+    {
+        // Cdot = wB - wA - motorSpeed. 속도 제약이므로 위치 bias 없이 제동·역회전도 같은 식으로 풂.
+        const float velocity = bodyStateB.angularVelocity - bodyStateA.angularVelocity;
+        const float deltaImpulse = constraint.angularMass * ( constraint.motorSpeed - velocity );
+        const float oldImpulse = constraint.motorImpulse;
+        constraint.motorImpulse = std::clamp( oldImpulse + deltaImpulse, -constraint.maxMotorImpulse, constraint.maxMotorImpulse );
+        const float impulse = constraint.motorImpulse - oldImpulse;
+        bodyStateA.angularVelocity -= constraint.invInertiaA * impulse;
+        bodyStateB.angularVelocity += constraint.invInertiaB * impulse;
+    }
+
     if( constraint.enableLimit && constraint.angularMass > 0.0f )
     {
         const rot2 rotation = Inverse( bodyStateA.deltaRotation ) * bodyStateB.deltaRotation * constraint.relativeRotation;
@@ -107,7 +126,7 @@ void solveRevoluteJointConstraint( revoluteJointConstraint2& constraint, bodySta
             bodyStateB.angularVelocity += constraint.invInertiaB * impulse;
         };
 
-        // Box2D처럼 하한 → 상한 → 연결점 순서. 각 제약은 직전 제약이 갱신한 속도를 읽음.
+        // Box2D처럼 모터 → 하한 → 상한 → 연결점 순서. 제한이 모터의 바깥 회전도 막음.
         solveLimit( angle - constraint.lowerAngle, 1.0f, constraint.lowerImpulse );
         solveLimit( constraint.upperAngle - angle, -1.0f, constraint.upperImpulse );
     }

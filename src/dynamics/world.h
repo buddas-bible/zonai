@@ -100,6 +100,8 @@ public:
     [[nodiscard]] jointId createRevoluteJoint( const revoluteJointDef& definition );
     // 유한한 lower <= upper (rad). ±0.99*pi로 제한하며 변경 시 cache를 비우고 연결된 component를 깨움.
     void setRevoluteJointLimit( jointId id, bool enableLimit, float lowerAngle, float upperAngle );
+    // B의 A에 대한 목표 각속도 (rad/s)와 최대 토크 (N*m). 속도 0은 제동함.
+    void setRevoluteJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorTorque );
     [[nodiscard]] revoluteJointData getRevoluteJointData( jointId id ) const;
 
     // Static A / Dynamic B. target은 world 좌표, hertz/damping/maxForce는 유한한 비음수임.
