@@ -38,7 +38,9 @@ Part 4 이후 감사의 Box2D 기준은 `ac7c751eaeddbabdc1c4d41ae4f3a25d7862779
 
 ## 현재 검증과 공백
 
-현재 Joint 단계는 **Distance motor**다. 기존 rigid·spring·limit을 유지하고 목표 축속도·최대 힘·독립 모터 임펄스와 진자 설정을 추가했다. Spring → motor → lower → upper 순서로 풀며 누적 모터 임펄스를 F * h로 제한한다. Hertz 0에서도 모터·limit이 작동하며 rigid 또는 같은 min/max는 `length`의 고정 거리로 돌아간다. [Distance motor 기록](distance-motor.md)과 [limit 기록](distance-limit.md)의 mode·수학·검증 한계를 따른다. CTest 43개와 Windows Release runtime 13개는 유지한다. 다음은 Revolute Joint다. 아래 통합 확인 당시의 38개/8개 검증 수는 역사 기록이다.
+Distance motor는 기존 rigid·spring·limit을 유지하고 목표 축속도·최대 힘·독립 모터 임펄스와 진자 설정을 추가했다. Spring → motor → lower → upper 순서로 풀며 누적 모터 임펄스를 F * h로 제한한다. Hertz 0에서도 모터·limit이 작동하며 rigid 또는 같은 min/max는 `length`의 고정 거리로 돌아간다. [Distance motor 기록](distance-motor.md)과 [limit 기록](distance-limit.md)의 mode·수학·검증 한계를 따른다.
+
+현재 Joint 단계는 **기본 Revolute Joint**다. 두 연결점의 x/y 이동을 함께 제한하고 상대 회전은 허용한다. 기존 Joint lifecycle·충돌 제외·Island·substep solver를 공유하며, Sandbox에 독립된 ‘회전축과 막대’ 실험을 추가했다. 원점 기준 연결점, 현재 회전의 2×2 유효 질량, warm start·relaxation과 관찰값은 [회전 조인트 기록](revolute-joint.md)을 따른다. CTest 구성은 45개, Windows Release runtime 대상은 15개다. 다음은 각도 제한, 이어 회전 모터다. 아래 통합 확인 당시의 38개/8개 검증 수는 역사 기록이다.
 
 이 기준에서 Windows MSVC 기본 설정으로 Sandbox를 포함해 전체를 다시 빌드하고 Debug 38/38, Release 38/38 CTest 실행 통과를 확인했다. 외부 consumer와 library-only 구성도 build/run했다. 원격 CI는 Ubuntu Debug library/test, Windows Debug library/test와 sandbox 빌드, Windows Release 아래 8개 target을 검증한다. 각 감사의 최종 원격 결과는 해당 PR에 기록돼 있고, 이번 최종 통합 확인의 CI 결과도 해당 PR에 기록한다. Sandbox UI 실행이나 시각 검증을 새로 수행한 것은 아니다.
 
@@ -56,7 +58,7 @@ Part 4 이후 감사의 Box2D 기준은 `ac7c751eaeddbabdc1c4d41ae4f3a25d7862779
 2. **최종 통합 확인.** ID/수명, pair ownership, Island/wake/sleep, Step/CCD/Sensor 연결을 확인하고 첫 Joint의 학습·검증 순서를 구체화했다. 더 넓은 전면 재감사를 선행 조건으로 추가하지 않는다.
 3. **기본 Distance Joint 구현.** 고정 거리 제약과 Body/lifecycle/filter/island/wake/sleep/solver 통합을 구현했다. Spring/limit/motor를 추가하기 전에 Sandbox 진자에서 거리·회전·impulse의 관계를 관찰할 수 있다. 선택형 Sandbox에서 독립된 진자로 거리·회전·impulse의 관계를 관찰한다.
 
-4. **선택형 Sandbox 구현.** 한 프로그램에서 독립 데모와 입력·설정을 선택한다. Mouse Joint의 picking·target·soft constraint, Distance spring의 Hertz/damping과 limit·motor를 추가했다. 다음은 Revolute Joint이며, 이후 각도 제한·회전 모터와 다른 Joint → ragdoll/자동차/조나이 연결 데모로 이어간다. 천·유체·soft body·voxel/파괴·terrain은 실제 subsystem을 시작할 때 같은 데모 host에 추가한다.
+4. **선택형 Sandbox 구현.** 한 프로그램에서 독립 데모와 입력·설정을 선택한다. Mouse Joint의 picking·target·soft constraint, Distance spring의 Hertz/damping과 limit·motor, 기본 Revolute Joint와 회전축 실험을 추가했다. 다음은 각도 제한·회전 모터와 다른 Joint → ragdoll/자동차/조나이 연결 데모로 이어간다. 천·유체·soft body·voxel/파괴·terrain은 실제 subsystem을 시작할 때 같은 데모 host에 추가한다.
 
 Release 검증 보강은 사용자의 우선순위에 따라 보류한다. 테스트 실행 자체와 해당 변경을 확인할 회귀 검증은 계속 수행하지만, 전체 테스트 변환이 Joint 개발의 선행 조건은 아니다.
 

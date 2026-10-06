@@ -15,7 +15,8 @@ class debugDraw;
 enum class demoKind
 {
     playground,
-    distancePendulum
+    distancePendulum,
+    revoluteHinge
 };
 
 struct demoEntry

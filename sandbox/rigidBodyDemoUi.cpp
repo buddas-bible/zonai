@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <numbers>
 #include <imgui.h>
 #include <imgui_internal.h>
 
@@ -278,6 +279,17 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
             draw.DrawPoint( lower, IM_COL32( 100, 255, 140, 255 ) );
             draw.DrawPoint( upper, IM_COL32( 255, 105, 90, 255 ) );
         }
+    }
+
+    if( getWorld().IsValid( getRevoluteJoint() ) )
+    {
+        const revoluteJointData joint = getWorld().getRevoluteJointData( getRevoluteJoint() );
+        constexpr ImU32 ANCHOR_COLOR = IM_COL32( 100, 235, 220, 255 );
+        constexpr ImU32 ROD_COLOR = IM_COL32( 230, 170, 255, 255 );
+        draw.DrawPoint( joint.anchorA, ANCHOR_COLOR, 7.0f );
+        draw.DrawPoint( joint.anchorB, ROD_COLOR );
+        draw.DrawSegment( { joint.anchorA, joint.anchorB }, ROD_COLOR );
+        draw.DrawArrow( joint.anchorB, Rotate( getWorld().GetBodyTransform( joint.bodyB ).rotation, { 1.0f, 0.0f } ), ROD_COLOR, 0.5f );
     }
 
     if( showContacts_ )
@@ -571,6 +583,8 @@ void rigidBodyDemoUi::drawExperimentControls()
 {
     if( getKind() == demoKind::distancePendulum && !getWorld().IsValid( getPendulumJoint() ) ) return;
 
+    if( getKind() == demoKind::revoluteHinge && ( !getWorld().IsValid( getRevoluteJoint() ) || !getWorld().IsValid( getImpulseBody() ) ) ) return;
+
     if( getKind() == demoKind::playground && ( !getWorld().IsValid( getImpulseBody() ) || !getWorld().IsValid( getTorqueBody() ) ) ) return;
 
     if( getKind() == demoKind::distancePendulum )
@@ -636,6 +650,25 @@ void rigidBodyDemoUi::drawExperimentControls()
         {
             const vec2 axis = Normalize( pendulum.anchorB - pendulum.anchorA );
             getWorld().ApplyLinearImpulseToCenter( getPendulumBody(), getWorld().GetBodyMass( getPendulumBody() ) * 2.0f * axis );
+        }
+        ImGui::Spacing();
+    }
+    else if( getKind() == demoKind::revoluteHinge )
+    {
+        ImGui::TextUnformatted( "회전축 관찰" );
+        const revoluteJointData joint = getWorld().getRevoluteJointData( getRevoluteJoint() );
+        ImGui::Text( "상대 각도: %.1f 도", joint.currentAngle * 180.0f / std::numbers::pi_v<float> );
+        ImGui::Text( "연결점 오차: %.4f m", Length( joint.anchorB - joint.anchorA ) );
+        ImGui::Text( "반력: (%.2f, %.2f) N", joint.force.x, joint.force.y );
+        ImGui::TextWrapped( "청록색은 고정점, 보라색은 막대의 연결점과 방향입니다. 막대를 잡거나 충격량을 주면서 연결점이 유지되는지 관찰하세요." );
+
+        if( ImGui::Button( "막대 회전시키기###Spin hinge", ImVec2( -1.0f, 0.0f ) ) )
+        {
+            getWorld().ApplyAngularImpulse( getImpulseBody(), getWorld().GetBodyRotationalInertia( getImpulseBody() ) * 3.0f );
+        }
+        if( ImGui::Button( "막대 옆으로 밀기###Kick hinge", ImVec2( -1.0f, 0.0f ) ) )
+        {
+            getWorld().ApplyLinearImpulseToCenter( getImpulseBody(), { getWorld().GetBodyMass( getImpulseBody() ) * 2.0f, 0.0f } );
         }
         ImGui::Spacing();
     }

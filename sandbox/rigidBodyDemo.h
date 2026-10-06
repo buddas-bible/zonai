@@ -57,6 +57,8 @@ public:
 
     [[nodiscard]] jointId getPendulumJoint() const noexcept { return pendulumJoint_; }
 
+    [[nodiscard]] jointId getRevoluteJoint() const noexcept { return revoluteJoint_; }
+
     [[nodiscard]] jointId getMouseJoint() const noexcept { return mouseJoint_; }
 
     [[nodiscard]] const mouseJointDef& getMouseSettings() const noexcept { return mouseSettings_; }
@@ -67,6 +69,7 @@ private:
 #pragma region SceneSetup
     void createPlayground();
     void createPendulum();
+    void createRevoluteHinge();
 #pragma endregion SceneSetup
 
 #pragma region MouseDrag
@@ -83,6 +86,7 @@ private:
     bodyId torqueBody_{};  // 회전 임펄스를 적용할 물체
     bodyId pendulumBody_{};
     jointId pendulumJoint_{};
+    jointId revoluteJoint_{};
 
     jointId mouseJoint_{}; // 드래그 중인 마우스 조인트
     mouseJointDef mouseSettings_{};
