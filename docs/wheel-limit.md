@@ -40,4 +40,4 @@ NDEBUG 단위 검사는 양쪽 부호·예측 경계·안쪽 복귀·누적 증�
 
 Sandbox ON 전체 Debug/Release 및 OFF 전체 Release 빌드와 각각 CTest 47/47이 통과했다. 상한 부호 반전·unilateral clamp 제거·경계 예측 누락·limit warm start 누락·제한을 수직 제약 뒤로 이동하는 다섯 mutation을 모두 검출하고 원본 byte를 복구했다. 독립 읽기 전용 리뷰의 0 Hz 주석을 수정하여 남은 지적이 없으며 원격 최종 head CI 결과는 작업 PR에 기록한다.
 
-다음은 Wheel의 목표 상대 각속도·최대 토크를 갖는 회전 모터다. 제한·스프링·모터를 각각 확인한 뒤 자동차로 조합하며, ragdoll·조나이 연결 장치 및 같은 Sandbox의 천·유체·soft body·voxel·파괴·terrain 학습 방향도 유지한다.
+후속 [회전 모터](wheel-motor.md)를 추가했다. 현재 solver는 모터를 먼저 풀고 설정 변경 시 모터 cache도 함께 비운다. 이 문서의 제한 구현 당시 범위와 검증 기록은 유지한다. 다음은 모터 자동차 데모다. 제한·스프링·모터를 각각 확인한 뒤 자동차로 조합하며, ragdoll·조나이 연결 장치 및 같은 Sandbox의 천·유체·soft body·voxel·파괴·terrain 학습 방향도 유지한다.

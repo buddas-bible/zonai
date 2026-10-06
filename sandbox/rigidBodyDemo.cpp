@@ -269,6 +269,9 @@ void rigidBodyDemo::createWheelSuspension()
     joint.localAnchorA = { 0.0f, -1.3f };
     joint.lowerTranslation = -0.5f;
     joint.upperTranslation = 0.5f;
+    // 먼저 자유 회전을 관찰한 뒤 모터를 켜서 비교함.
+    joint.motorSpeed = 3.0f;
+    joint.maxMotorTorque = 1.0f;
     wheelJoint_ = world_.createWheelJoint( joint );
 }
 

@@ -300,5 +300,94 @@ int main()
     solveWheelJointConstraint( constraint, stateA, stateB, true );
     check( constraint.lowerImpulse == 0.0f && constraint.upperImpulse == 0.0f && IsFinite( stateB.linearVelocity ), "zero axial mass discards limit caches and stays finite" );
 
+    // 중심 연결의 I_A=1, I_B=0.5: 목표 상대속도 3에는 각임펄스 1이 필요함.
+    bodySimA = {};
+    bodySimA.bodyId = 0;
+    bodySimA.invMass = 1.0f;
+    bodySimA.invInertia = 1.0f;
+    bodySimB = {};
+    bodySimB.bodyId = 1;
+    bodySimB.invMass = 1.0f;
+    bodySimB.invInertia = 2.0f;
+    joint = {};
+    joint.bodyIdA = 0;
+    joint.bodyIdB = 1;
+    joint.enableSpring = false;
+    joint.enableMotor = true;
+    joint.motorSpeed = 3.0f;
+    joint.maxMotorTorque = 120.0f;
+    for( const bool useBias : { false, true } )
+    {
+        constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+        stateA = {};
+        stateB = {};
+        solveWheelJointConstraint( constraint, stateA, stateB, useBias );
+        check( near( stateA.angularVelocity, -1.0f ) && near( stateB.angularVelocity, 2.0f ), "wheel motor reaches relative speed with opposite angular reactions" );
+        check( near( stateA.angularVelocity + stateB.angularVelocity / 2.0f, 0.0f ), "centered motor preserves angular momentum" );
+        solveWheelJointConstraint( constraint, stateA, stateB, useBias );
+        check( near( constraint.motorImpulse, 1.0f ), "motor reapplies only accumulated impulse increment" );
+    }
+    joint.maxMotorTorque = 30.0f;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    for( int i = 0; i < 8; ++i ) solveWheelJointConstraint( constraint, stateA, stateB, false );
+    check( near( constraint.motorImpulse, 0.5f ) && near( stateB.angularVelocity - stateA.angularVelocity, 1.5f ), "motor torque times substep time bounds total impulse across iterations" );
+    joint.motorSpeed = 0.0f;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    stateB.angularVelocity = 3.0f;
+    solveWheelJointConstraint( constraint, stateA, stateB, false );
+    check( near( constraint.motorImpulse, -0.5f ) && near( stateB.angularVelocity - stateA.angularVelocity, 1.5f ), "zero speed brakes within negative torque limit" );
+    joint.maxMotorTorque = 0.0f;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    stateB.angularVelocity = 3.0f;
+    stateA = {};
+    solveWheelJointConstraint( constraint, stateA, stateB, false );
+    check( stateB.angularVelocity == 3.0f && constraint.motorImpulse == 0.0f, "zero torque turns off motor force" );
+
+    bodySimA.invMass = 0.0f;
+    bodySimA.invInertia = 0.0f;
+    bodySimB.invInertia = 1.0f;
+    joint.motorSpeed = 3.0f;
+    joint.maxMotorTorque = 30.0f;
+    joint.localAnchorB = { 1.0f, 1.0f };
+    joint.enableLimit = true;
+    joint.lowerTranslation = -2.0f;
+    joint.upperTranslation = 1.0f;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    solveWheelJointConstraint( constraint, stateA, stateB, false );
+    check( near( constraint.motorImpulse, 0.5f ) && near( constraint.upperImpulse, 0.25f ), "off-center upper limit reads motor updated angular velocity" );
+    check( near( stateB.linearVelocity.x, 0.125f ) && near( stateB.linearVelocity.y, -0.25f ) && near( stateB.angularVelocity, 0.125f ), "lateral constraint reads latest motor and limit point velocity" );
+
+    joint.localAnchorB = {};
+    joint.enableLimit = false;
+    bodySimA.invInertia = 1.0f;
+    bodySimB.invInertia = 2.0f;
+    joint.subStepTime = h;
+    joint.motorImpulse = 2.0f;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    warmStartWheelJointConstraint( constraint, stateA, stateB );
+    check( near( constraint.motorImpulse, 0.5f ) && near( stateA.angularVelocity, -0.5f ) && near( stateB.angularVelocity, 1.0f ), "warm motor cache is clamped and applies both angular reactions" );
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h / 2.0f );
+    check( constraint.motorImpulse == 0.0f, "changed substep time discards motor cache" );
+    joint.enableMotor = false;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    check( constraint.motorImpulse == 0.0f, "disabled motor ignores stale angular cache" );
+    joint.enableMotor = true;
+    bodySimA.invInertia = 0.0f;
+    bodySimB.invInertia = 0.0f;
+    constraint = prepareWheelJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    solveWheelJointConstraint( constraint, stateA, stateB, false );
+    check( constraint.motorImpulse == 0.0f && std::isfinite( stateB.angularVelocity ), "fixed rotation discards motor cache without NaN" );
+
     return EXIT_SUCCESS;
 }

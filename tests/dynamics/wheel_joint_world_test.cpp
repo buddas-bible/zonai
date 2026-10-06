@@ -200,5 +200,74 @@ int main()
         check( !limited.IsValid( joint ) && limited.getWheelJointData( reused ).limitForce == 0.0f, "reused Wheel slot discards old limit cache and handle" );
     }
 
+    for( const int subSteps : { 1, 4 } )
+    {
+        world powered;
+        const auto anchor = powered.CreateBody();
+        const auto wheel = powered.CreateBody( bodyType::Dynamic, { { 0.0f, -0.3f }, {} } );
+        const auto shape = powered.CreateShape( wheel, circle2{ {}, 0.3f } );
+        definition = {};
+        definition.bodyA = anchor;
+        definition.bodyB = wheel;
+        definition.enableLimit = true;
+        definition.lowerTranslation = -0.5f;
+        definition.upperTranslation = 0.5f;
+        definition.enableMotor = true;
+        definition.motorSpeed = 3.0f;
+        definition.maxMotorTorque = 0.005f;
+        const auto joint = powered.createWheelJoint( definition );
+        powered.Step( 1.0f / 60.0f, subSteps );
+        const float expectedSpeed = 0.005f / ( 60.0f * powered.GetBodyRotationalInertia( wheel ) );
+        check( std::abs( powered.GetBodyAngularVelocity( wheel ) - expectedSpeed ) < expectedSpeed * 0.01f, "motor angular acceleration uses substep impulse budget for one and four substeps" );
+        for( int i = 0; i < 180; ++i )
+        {
+            powered.Step( 1.0f / 60.0f, subSteps );
+            const auto current = powered.getWheelJointData( joint );
+            check( std::abs( current.motorTorque ) <= 0.005001f && std::abs( current.lateralError ) < 0.015f && current.currentTranslation >= -0.515f && current.currentTranslation <= 0.515f, "motor respects torque budget while suspension and limits retain wheel position" );
+        }
+        const float previousTorque = powered.getWheelJointData( joint ).motorTorque;
+        powered.SetBodyAwake( wheel, false );
+        powered.setWheelJointMotor( joint, true, 3.0f, 0.005f );
+        check( !powered.IsBodyAwake( wheel ) && previousTorque > 0.004f && powered.getWheelJointData( joint ).motorTorque == previousTorque, "identical motor settings preserve sleep and torque cache" );
+        const auto isolated = powered.CreateBody( bodyType::Dynamic, { { 5.0f, 5.0f }, {} } );
+        ( void )powered.CreateShape( isolated, circle2{ {}, 0.1f } );
+        powered.SetBodyAwake( isolated, false );
+        powered.setWheelJointMotor( joint, true, 3.0f, 0.5f );
+        check( powered.IsBodyAwake( wheel ) && !powered.IsBodyAwake( isolated ) && powered.getWheelJointData( joint ).motorTorque == 0.0f && LengthSquared( powered.getWheelJointData( joint ).force ) == 0.0f, "motor change clears coupled caches and wakes only connected component" );
+        for( int i = 0; i < 60; ++i ) powered.Step( 1.0f / 60.0f, subSteps );
+        check( std::abs( powered.GetBodyAngularVelocity( wheel ) - 3.0f ) < 0.001f, "centered wheel motor reaches target under suspension gravity load" );
+        powered.setWheelJointMotor( joint, true, -3.0f, 0.5f );
+        for( int i = 0; i < 60; ++i ) powered.Step( 1.0f / 60.0f, subSteps );
+        check( std::abs( powered.GetBodyAngularVelocity( wheel ) + 3.0f ) < 0.001f, "wheel motor reverses rotation" );
+        powered.setWheelJointMotor( joint, true, 0.0f, 0.5f );
+        for( int i = 0; i < 60; ++i ) powered.Step( 1.0f / 60.0f, subSteps );
+        check( std::abs( powered.GetBodyAngularVelocity( wheel ) ) < 0.001f, "zero target brakes wheel without fixing its angle" );
+        powered.setWheelJointMotor( joint, true, 3.0f, 0.005f );
+        powered.Step( 1.0f / 60.0f, subSteps );
+        check( powered.getWheelJointData( joint ).motorTorque > 0.004f, "motor query reports stored angular impulse divided by h" );
+        powered.setWheelJointLimit( joint, true, -0.4f, 0.4f );
+        check( powered.getWheelJointData( joint ).motorTorque == 0.0f, "limit setting change clears coupled motor cache" );
+        powered.Step( 1.0f / 60.0f, subSteps );
+        powered.setWheelJointSpring( joint, true, 4.0f, 0.7f );
+        check( powered.getWheelJointData( joint ).motorTorque == 0.0f, "spring setting change clears coupled motor cache" );
+        powered.Step( 1.0f / 60.0f, subSteps );
+        powered.SetShapeDensity( shape, 2.0f );
+        check( powered.getWheelJointData( joint ).motorTorque == 0.0f, "inertia change clears motor cache" );
+        powered.Step( 1.0f / 60.0f, subSteps );
+        powered.SetBodyTransform( wheel, {} );
+        check( powered.getWheelJointData( joint ).motorTorque == 0.0f, "pose change clears motor cache" );
+        powered.setWheelJointMotor( joint, false, 3.0f, 0.5f );
+        powered.SetBodyAngularVelocity( wheel, 2.0f );
+        powered.Step( 1.0f / 60.0f, subSteps );
+        check( powered.GetBodyAngularVelocity( wheel ) == 2.0f && powered.getWheelJointData( joint ).motorTorque == 0.0f, "motor off restores free rotation" );
+        powered.destroyJoint( joint );
+        const auto reused = powered.createWheelJoint( definition );
+        check( !powered.IsValid( joint ) && powered.getWheelJointData( reused ).motorTorque == 0.0f, "reused slot discards motor cache and old handle" );
+    }
+
+    moving.setWheelJointMotor( movingJoint, true, 2.0f, 1.0f );
+    for( int i = 0; i < 120; ++i ) moving.Step( 1.0f / 60.0f, 4 );
+    check( moving.GetBodyAngularVelocity( driver ) == drive.angularVelocity && std::abs( moving.GetBodyAngularVelocity( follower ) - drive.angularVelocity - 2.0f ) < 0.001f, "motor targets relative speed while preserving prescribed kinematic rotation" );
+
     return EXIT_SUCCESS;
 }

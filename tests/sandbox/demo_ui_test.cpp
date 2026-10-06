@@ -628,5 +628,64 @@ void checkDemoUi()
             }
         }
     }
+    auto wheelMotorView = createDemoView( demoKind::wheelSuspension );
+    auto& wheelMotorModel = static_cast<rigidBodyDemo&>( *wheelMotorView );
+    for( int frame = 0; frame < 6; ++frame )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+        ImGui::Begin( "Wheel motor actions" );
+        if( frame > 0 ) ImGui::GetStateStorage()->SetInt( ImGui::GetID( "WheelMotorSettings" ), 1 );
+        ImGui::PushID( "WheelMotorSettings" );
+        const char* action = frame < 2 || frame == 5 ? "Wheel motor" : frame == 2 ? "Reverse wheel motor" : frame == 3 ? "Brake wheel motor" : nullptr;
+        if( action ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( action );
+        ImGui::PopID();
+        wheelMotorView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        const auto data = wheelMotorModel.getWorld().getWheelJointData( wheelMotorModel.getWheelJoint() );
+        const float expectedSpeed = frame < 2 ? 3.0f : frame == 2 ? -3.0f : 0.0f;
+        if( data.enableMotor != ( frame > 0 && frame < 5 ) || data.motorSpeed != expectedSpeed || data.maxMotorTorque != 1.0f )
+        {
+            std::fprintf( stderr, "folded motor controls, toggle, reverse or brake failed: frame %d\n", frame );
+            std::exit( EXIT_FAILURE );
+        }
+    }
+    for( int setting = 0; setting < 2; ++setting )
+    {
+        for( int upper = 0; upper < 2; ++upper )
+        {
+            auto tuningView = createDemoView( demoKind::wheelSuspension );
+            auto& tuningModel = static_cast<rigidBodyDemo&>( *tuningView );
+            for( int phase = 0; phase < 3; ++phase )
+            {
+                if( phase == 1 ) io.AddInputCharactersUTF8( upper ? "9000" : "-9000" );
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+                ImGui::NewFrame();
+                ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+                ImGui::Begin( "Wheel motor input" );
+                ImGui::GetStateStorage()->SetInt( ImGui::GetID( "WheelMotorSettings" ), 1 );
+                if( phase == 0 )
+                {
+                    ImGui::PushID( "WheelMotorSettings" );
+                    GImGui->NavActivateId = ImGui::GetID( setting == 0 ? "Wheel motor speed" : "Wheel motor torque" );
+                    GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+                    ImGui::PopID();
+                }
+                tuningView->drawControls();
+                ImGui::End();
+                ImGui::Render();
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            }
+            const auto data = tuningModel.getWorld().getWheelJointData( tuningModel.getWheelJoint() );
+            const float value = setting == 0 ? data.motorSpeed : data.maxMotorTorque;
+            const float expected = setting == 0 ? ( upper ? 10.0f : -10.0f ) : ( upper ? 5.0f : 0.0f );
+            if( value != expected )
+            {
+                std::fprintf( stderr, "manual wheel motor input escaped valid range\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+    }
     ImGui::DestroyContext();
 }

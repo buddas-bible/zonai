@@ -314,5 +314,25 @@ int main()
     auto& freeSuspension = static_cast<rigidBodyDemo&>( session.getDemo() );
     check( !freeSuspension.getWorld().getWheelJointData( freeSuspension.getWheelJoint() ).enableLimit, "reset disables translation limit" );
 
+    const auto motorJoint = freeSuspension.getWheelJoint();
+    const auto wheelMotorDefaults = freeSuspension.getWorld().getWheelJointData( motorJoint );
+    check( !wheelMotorDefaults.enableMotor && wheelMotorDefaults.motorSpeed == 3.0f && wheelMotorDefaults.maxMotorTorque == 1.0f, "demo motor starts off with useful editable speed and torque" );
+    freeSuspension.getWorld().setWheelJointLimit( motorJoint, true, -0.5f, 0.5f );
+    freeSuspension.getWorld().setWheelJointMotor( motorJoint, true, 3.0f, 0.2f );
+    for( int i = 0; i < 180; ++i )
+    {
+        session.stepOnce( 4 );
+        const auto current = freeSuspension.getWorld().getWheelJointData( motorJoint );
+        check( std::abs( current.motorTorque ) <= 0.20001f && std::abs( current.lateralError ) < 0.015f && current.currentTranslation >= -0.515f && current.currentTranslation <= 0.515f, "demo motor coexists with spring and travel limit" );
+    }
+    check( std::abs( freeSuspension.getWorld().GetBodyAngularVelocity( freeSuspension.getImpulseBody() ) - 3.0f ) < 0.001f, "demo motor reaches target speed" );
+    freeSuspension.getWorld().setWheelJointMotor( motorJoint, true, -3.0f, 0.2f );
+    for( int i = 0; i < 60; ++i ) session.stepOnce( 4 );
+    check( std::abs( freeSuspension.getWorld().GetBodyAngularVelocity( freeSuspension.getImpulseBody() ) + 3.0f ) < 0.001f, "demo motor reverses direction" );
+    session.reset();
+    auto& resetMotor = static_cast<rigidBodyDemo&>( session.getDemo() );
+    const auto restoredMotor = resetMotor.getWorld().getWheelJointData( resetMotor.getWheelJoint() );
+    check( !restoredMotor.enableMotor && restoredMotor.motorSpeed == 3.0f && restoredMotor.maxMotorTorque == 1.0f && restoredMotor.motorTorque == 0.0f, "reset restores disabled motor and clears torque" );
+
     return EXIT_SUCCESS;
 }

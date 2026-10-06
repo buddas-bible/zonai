@@ -18,7 +18,7 @@ Inspector는 물리량·재질·충돌 마스크·수면/CCD·센서로 나뉜�
 | Playground | static 바닥/ramp, dynamic circle/box/capsule, kinematic platform | A/D 유지: circle에 힘, Space: jump, S: box 회전, 왼쪽 drag: Dynamic solid 잡기, 오른쪽 클릭: cursor 방향 impulse |
 | Distance Pendulum | static anchor와 dynamic circle의 고정 거리 Joint | A/D 유지: 진자에 힘, Space: 옆으로 impulse, 왼쪽 drag: Dynamic solid 잡기, 오른쪽 클릭: cursor 방향 impulse |
 | 회전축과 막대 | static 축과 dynamic 막대의 Revolute Joint | A/D: 수평 힘, Space: 위로 impulse, S: 회전, Mouse drag·cursor impulse. 접힌 각도 제한/모터 설정 |
-| 서스펜션과 바퀴 | static 지지대와 dynamic 원의 Wheel Joint | A/D: 축 옆 힘, Space: 위로 impulse, S: 회전, Mouse drag·cursor impulse. 접힌 주파수/감쇠·이동 제한 설정 |
+| 서스펜션과 바퀴 | static 지지대와 dynamic 원의 Wheel Joint | A/D: 축 옆 힘, Space: 위로 impulse, S: 회전, Mouse drag·cursor impulse. 접힌 주파수/감쇠·이동 제한·회전 모터 설정, 방향 전환·제동 |
 
 입력은 Canvas 위에서만 전달한다. UI 편집·창 focus 상실·가운데 drag 중에는 유지 입력을 취소한다. 왼쪽 drag는 Mouse Joint이며 오른쪽 클릭은 impulse 실험이다. Mouse Joint 설정에서 Hertz/damping/max force를 바꾸고 주황색 anchor/target과 point error/force를 관찰한다. Paused 상태는 다음 Step/Play까지 pose를 진행하지 않는다. 취소 뒤 재시작에는 새 press가 필요하다. [제약의 수학과 수명](../docs/mouse-joint.md)을 따른다.
 
@@ -32,4 +32,4 @@ Inspector는 물리량·재질·충돌 마스크·수면/CCD·센서로 나뉜�
 
 ## Wheel Joint 서스펜션
 
-‘서스펜션과 바퀴’의 접힌 스프링 설정에서 3 Hz/감쇠 0.7을 바꾸고 축 변위·수직 오차·힘·바퀴 각속도를 비교한다. 스프링 off/0 Hz는 스프링 힘만 끄며 수직 제약과 자유 회전은 유지한다. 접힌 ‘이동 범위 제한’에서 준비된 -0.5~0.5 m를 켜거나 편집하면 스프링을 꺼도 경계를 유지한다. 초록은 최소, 빨강은 최대, 회색은 허용 구간이다. 제한도 끄면 중력으로 떨어진다. 청록색 점은 중립점, 화살표는 축의 양의 방향, 보라색은 바퀴와 회전 방향이다. [기본 좌표계](../docs/wheel-joint.md)와 [이동 제한의 수학·검증](../docs/wheel-limit.md)을 따른다. 구동 모터는 다음 단계다.
+‘서스펜션과 바퀴’의 접힌 스프링 설정에서 3 Hz/감쇠 0.7을 바꾸고 축 변위·수직 오차·힘·바퀴 각속도를 비교한다. 스프링 off/0 Hz는 스프링 힘만 끄며 수직 제약과 자유 회전은 유지한다. 접힌 ‘이동 범위 제한’에서 준비된 -0.5~0.5 m를 켜거나 편집하면 스프링을 꺼도 경계를 유지한다. 초록은 최소, 빨강은 최대, 회색은 허용 구간이다. 제한도 끄면 중력으로 떨어진다. 청록색 점은 중립점, 화살표는 축의 양의 방향, 보라색은 바퀴와 회전 방향이다. [기본 좌표계](../docs/wheel-joint.md)와 [이동 제한의 수학·검증](../docs/wheel-limit.md)을 따른다. 접힌 [회전 모터](../docs/wheel-motor.md)는 off/목표 3 rad/s/최대 1 N·m로 시작한다. 펼쳐 사용 여부·속도·토크를 조절하고 방향 전환·제동을 비교한다. 속도 0은 제동하며 토크 0은 힘을 끈다. 다음은 모터 자동차 데모다.
