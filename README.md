@@ -1,6 +1,6 @@
 # Zonai
 
-Box2D의 알고리즘과 설계 근거를 이해하며 C++20으로 구현하는 2D 물리 엔진 학습 프로젝트다. 현재 serial rigid-body simulation, collision detection, contact solver, island/sleep, CCD와 sensor를 구현했다. 구현 범위와 Box2D와의 차이는 [감사 현황](docs/audit-status.md)에 기록한다. 기본 고정 거리 Distance Joint와 선택형 Sandbox 데모를 구현했다. [Mouse Joint](docs/mouse-joint.md)로 Dynamic solid를 잡아 끌 수 있다. 다음은 Distance spring/limit/motor와 연결 오브젝트 데모다. [데모 구조와 학습 방향](docs/sandbox-demos.md)을 따른다.
+Box2D의 알고리즘과 설계 근거를 이해하며 C++20으로 구현하는 2D 물리 엔진 학습 프로젝트다. 현재 serial rigid-body simulation, collision detection, contact solver, island/sleep, CCD와 sensor를 구현했다. 구현 범위와 Box2D와의 차이는 [감사 현황](docs/audit-status.md)에 기록한다. Rigid Distance Joint와 [Distance spring](docs/distance-spring.md), 선택형 Sandbox 데모를 구현했다. [Mouse Joint](docs/mouse-joint.md)로 Dynamic solid를 잡아 끌 수 있다. 다음은 Distance limit/motor와 연결 오브젝트 데모다. [데모 구조와 학습 방향](docs/sandbox-demos.md)을 따른다.
 
 학습을 위한 변경은 제약의 수학, 좌표계, 데이터 수명과 불변식을 코드·주석·작은 재현 실험으로 연결한다. Box2D 구현을 이해한 뒤 현재 C++ 구조에 필요한 부분을 적용하며, 기능 수나 생산용 기반 구조를 늘리는 것을 우선 목표로 삼지 않는다.
 

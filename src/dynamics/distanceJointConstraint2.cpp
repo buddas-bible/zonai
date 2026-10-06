@@ -21,15 +21,17 @@ distanceJointConstraint2 prepareDistanceJointConstraint( const distanceJointSim2
     constraint.invMassA = bodyA.invMass; constraint.invMassB = bodyB.invMass;
     constraint.invInertiaA = bodyA.invInertia; constraint.invInertiaB = bodyB.invInertia;
     constraint.length = joint.length;
+    constraint.enableSpring = joint.enableSpring; constraint.hertz = joint.hertz;
     const vec2 axis = Normalize( constraint.deltaCenter + constraint.anchorB - constraint.anchorA );
     const float crossA = Cross( constraint.anchorA, axis );
     const float crossB = Cross( constraint.anchorB, axis );
     const float k = bodyA.invMass + bodyB.invMass + bodyA.invInertia * crossA * crossA + bodyB.invInertia * crossB * crossB;
     constraint.axialMass = k > 0.0f ? 1.0f / k : 0.0f;
     // 이전 h에서 만든 impulse를 새 h에 그대로 적용하지 않음.
-    constraint.impulse = joint.subStepTime == subStepTime ? joint.impulse : 0.0f;
-    // Box2D rigid distance의 수치 안정화. Spring 기능을 의미하는 softness가 아님.
-    constraint.softness = makeConstraintSoftness( std::min( 60.0f, 0.25f / subStepTime ), 2.0f, subStepTime );
+    constraint.impulse = joint.subStepTime == subStepTime && ( !joint.enableSpring || joint.hertz > 0.0f ) ? joint.impulse : 0.0f;
+    // Rigid의 수치 안정화와 사용자가 지정하는 물리 spring 주파수를 구분함.
+    constraint.softness = joint.enableSpring ? makeConstraintSoftness( joint.hertz, joint.dampingRatio, subStepTime ) :
+        makeConstraintSoftness( std::min( 60.0f, 0.25f / subStepTime ), 2.0f, subStepTime );
     return constraint;
 }
 #pragma endregion
@@ -51,15 +53,19 @@ void warmStartDistanceJointConstraint( const distanceJointConstraint2& constrain
 #pragma region Solve
 void solveDistanceJointConstraint( distanceJointConstraint2& constraint, bodyState& stateA, bodyState& stateB, bool useBias )
 {
+    // Box2D처럼 spring이 켜져도 Hertz 0이면 이 축은 풀지 않음. Rigid로 fallback하지 않음.
+    if( constraint.enableSpring && constraint.hertz == 0.0f ) { return; }
     const vec2 rA = Rotate( stateA.deltaRotation, constraint.anchorA );
     const vec2 rB = Rotate( stateB.deltaRotation, constraint.anchorB );
     const vec2 delta = constraint.deltaCenter + stateB.deltaPosition - stateA.deltaPosition + rB - rA;
     // 완전히 겹친 anchor는 방향을 정할 수 없어 correction이 0임. NaN을 만들지 않음.
     const vec2 axis = Normalize( delta );
     const vec2 relativeVelocity = stateB.linearVelocity + Cross( stateB.angularVelocity, rB ) - stateA.linearVelocity - Cross( stateA.angularVelocity, rA );
-    const float bias = useBias ? constraint.softness.biasRate * ( Length( delta ) - constraint.length ) : 0.0f;
-    const float massScale = useBias ? constraint.softness.massScale : 1.0f;
-    const float impulseScale = useBias ? constraint.softness.impulseScale : 0.0f;
+    // 물리 spring은 두 pass 모두 같은 softness/bias를 사용함. Rigid만 relax에서 bias를 제거함.
+    const bool softPass = constraint.enableSpring || useBias;
+    const float bias = softPass ? constraint.softness.biasRate * ( Length( delta ) - constraint.length ) : 0.0f;
+    const float massScale = softPass ? constraint.softness.massScale : 1.0f;
+    const float impulseScale = softPass ? constraint.softness.impulseScale : 0.0f;
     const float deltaImpulse = -massScale * constraint.axialMass * ( Dot( axis, relativeVelocity ) + bias ) - impulseScale * constraint.impulse;
     // Contact와 달리 양방향 제약이므로 인장(음수) / 압축(양수) impulse를 모두 허용함.
     constraint.impulse += deltaImpulse;

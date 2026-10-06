@@ -976,11 +976,29 @@ void rigidBodyDemoUi::drawExperimentControls()
     if( getKind() == demoKind::distancePendulum )
     {
         ImGui::TextUnformatted( "Distance Joint" );
-        const distanceJointData pendulum = getWorld().getDistanceJointData( getPendulumJoint() );
+        distanceJointData pendulum = getWorld().getDistanceJointData( getPendulumJoint() );
+        bool enableSpring = pendulum.enableSpring;
+        float hertz = pendulum.hertz, dampingRatio = pendulum.dampingRatio;
+        bool changed = ImGui::Checkbox( "Distance spring", &enableSpring );
+        changed |= ImGui::SliderFloat( "Distance Hertz", &hertz, 0.0f, 30.0f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp );
+        changed |= ImGui::SliderFloat( "Distance damping", &dampingRatio, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+        if( changed )
+        {
+            getWorld().setDistanceJointSpring( getPendulumJoint(), enableSpring, hertz, dampingRatio );
+            pendulum = getWorld().getDistanceJointData( getPendulumJoint() );
+        }
+        ImGui::TextUnformatted( !enableSpring ? "Rigid distance" : hertz == 0.0f ? "Free distance axis (0 Hz)" : "Spring distance" );
         ImGui::Text( "Target: %.3f m / Current: %.3f m", pendulum.length, pendulum.currentLength );
+        ImGui::Text( "Extension: %.3f m / Axial force: %.2f N", pendulum.currentLength - pendulum.length, pendulum.axialForce );
+        ImGui::TextWrapped( "Spring: Hertz controls stiffness; damping controls oscillation. Negative force is tension. 0 Hz frees the distance axis." );
         if( ImGui::Button( "Kick pendulum", ImVec2( -1.0f, 0.0f ) ) )
         {
             getWorld().ApplyLinearImpulseToCenter( getPendulumBody(), { getWorld().GetBodyMass( getPendulumBody() ) * 2.0f, 0.0f } );
+        }
+        if( ImGui::Button( "Radial kick", ImVec2( -1.0f, 0.0f ) ) )
+        {
+            const vec2 axis = Normalize( pendulum.anchorB - pendulum.anchorA );
+            getWorld().ApplyLinearImpulseToCenter( getPendulumBody(), getWorld().GetBodyMass( getPendulumBody() ) * 2.0f * axis );
         }
         ImGui::Spacing();
     }
