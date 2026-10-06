@@ -101,6 +101,7 @@ void rigidBodyDemoUi::drawControls()
     drawWorldSettings();
     drawInspector();
     drawExperimentControls();
+    drawMouseControls();
     drawDebugSettings();
 }
 
@@ -186,6 +187,9 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
 
     for( const visualShape& visual : getShapes() )
     {
+        if( !getWorld().IsValid( visual.bodyHandle ) || !getWorld().IsValid( visual.shapeHandle ) ) { continue; }
+        if( !getWorld().IsValid( visual.bodyHandle ) || !getWorld().IsValid( visual.shapeHandle ) )
+        { ImGui::TextUnformatted( "Selected object was deleted." ); return; }
         const body& bodyRef =
             getWorld().GetBody(
                 visual.bodyHandle
@@ -286,6 +290,13 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         }
     }
 
+    if( getWorld().IsValid( getMouseJoint() ) )
+    {
+        const auto joint = getWorld().getMouseJointData( getMouseJoint() );
+        constexpr ImU32 MOUSE_COLOR = IM_COL32( 255, 170, 70, 255 );
+        draw.DrawSegment( { joint.anchorB, joint.target }, MOUSE_COLOR );
+        draw.DrawPoint( joint.anchorB, MOUSE_COLOR ); draw.DrawPoint( joint.target, MOUSE_COLOR );
+    }
     if( getWorld().IsValid( getPendulumJoint() ) )
     {
         constexpr ImU32 JOINT_COLOR = IM_COL32( 230, 170, 255, 255 );
@@ -499,6 +510,8 @@ void rigidBodyDemoUi::drawInspector()
         const visualShape& visual =
             getShapes()[selectedShapeIndex_];
 
+        if( !getWorld().IsValid( visual.bodyHandle ) || !getWorld().IsValid( visual.shapeHandle ) )
+        { ImGui::TextUnformatted( "Selected object was deleted." ); return; }
         const body& bodyRef =
             getWorld().GetBody(
                 visual.bodyHandle
@@ -958,6 +971,8 @@ void rigidBodyDemoUi::drawInspector()
 
 void rigidBodyDemoUi::drawExperimentControls()
 {
+    if( getKind() == demoKind::distancePendulum && !getWorld().IsValid( getPendulumJoint() ) ) { return; }
+    if( getKind() == demoKind::playground && ( !getWorld().IsValid( getImpulseBody() ) || !getWorld().IsValid( getTorqueBody() ) ) ) { return; }
     if( getKind() == demoKind::distancePendulum )
     {
         ImGui::TextUnformatted( "Distance Joint" );
@@ -1048,6 +1063,24 @@ void rigidBodyDemoUi::drawExperimentControls()
         ImGui::Spacing();
         ImGui::Separator();
     }
+}
+
+void rigidBodyDemoUi::drawMouseControls()
+{
+    ImGui::Separator(); ImGui::TextUnformatted( "Mouse Joint" );
+    float hertz = getMouseSettings().hertz, damping = getMouseSettings().dampingRatio, force = getMouseSettings().maxForce;
+    bool changed = ImGui::SliderFloat( "Mouse Hertz", &hertz, 0.0f, 30.0f, "%.1f Hz" );
+    changed |= ImGui::SliderFloat( "Mouse damping", &damping, 0.0f, 2.0f, "%.2f" );
+    changed |= ImGui::SliderFloat( "Mouse max force", &force, 0.0f, 5000.0f, "%.1f N" );
+    if( changed ) { setMouseSettings( hertz, damping, force ); }
+    ImGui::TextWrapped( "Left drag: pick a Dynamic solid. Orange line: grabbed point to target. UI/focus/canvas exit cancels drag. Right click: impulse experiment." );
+    ImGui::TextWrapped( "Hertz sets the point spring response, damping reduces oscillation. Zero Hertz gives velocity damping only; zero force disables the pull." );
+    if( getWorld().IsValid( getMouseJoint() ) )
+    {
+        const auto joint = getWorld().getMouseJointData( getMouseJoint() );
+        ImGui::Text( "Point error: %.3f m / Force: %.2f N", Length( joint.anchorB - joint.target ), Length( joint.force ) );
+    }
+    ImGui::Spacing();
 }
 
 void rigidBodyDemoUi::drawDebugSettings()

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <span>
 #include <vector>
+#include <variant>
 
 #include "collision/broadphase/broadPhase.h"
 #include "collision/constants.h"
@@ -21,6 +22,8 @@
 #include "dynamics/distanceJoint2.h"
 #include "dynamics/distanceJointConstraint2.h"
 #include "dynamics/joint2.h"
+#include "dynamics/mouseJoint2.h"
+#include "dynamics/mouseJointConstraint2.h"
 #include "dynamics/id.h"
 #include "dynamics/island2.h"
 #include "dynamics/sensor2.h"
@@ -91,6 +94,11 @@ public:
     // 유효한 서로 다른 Body 두 개 중 하나 이상이 Dynamic이어야 함.
     // Local anchor는 Body origin 기준, length는 양수이며 LINEAR_SLOP 이상으로 제한함.
     [[nodiscard]] jointId createDistanceJoint( const distanceJointDef& definition );
+    // Static A / Dynamic B. target은 world 좌표, hertz/damping/maxForce는 유한한 비음수임.
+    [[nodiscard]] jointId createMouseJoint( const mouseJointDef& definition );
+    void setMouseJointTarget( jointId id, vec2 target );
+    void setMouseJointTuning( jointId id, float hertz, float dampingRatio, float maxForce );
+    [[nodiscard]] mouseJointData getMouseJointData( jointId id ) const;
     void destroyJoint( jointId id );
     [[nodiscard]] distanceJointData getDistanceJointData( jointId id ) const;
     [[nodiscard]] std::size_t getJointCount() const noexcept { return jointCount_; }
@@ -153,6 +161,8 @@ public:
 
     // 현재 shape의 speculative AABB와 broad-phase fat AABB를 반환함.
     // 내부 storage 참조이므로 shape 생성/파괴 또는 world 파괴를 넘겨 보관하지 않음.
+    // Point를 Body local space로 옮겨 실제 geometry에 검사함. Segment는 면적이 없어 false임.
+    [[nodiscard]] bool testShapePoint( shapeId id, vec2 point ) const;
     [[nodiscard]] const aabb2& GetShapeAABB( shapeId shapeId ) const;
     [[nodiscard]] const aabb2& GetShapeFatAABB( shapeId shapeId ) const;
 
@@ -391,6 +401,7 @@ private:
 
 #pragma region JointStorage
 
+    [[nodiscard]] std::int32_t allocateJoint( std::int32_t bodyIndexA, std::int32_t bodyIndexB, bool collideConnected );
     void destroyJointByIndex( std::int32_t jointIndex, bool touchProxies );
     void resetJointImpulses( std::int32_t bodyIndex );
     [[nodiscard]] bool shouldBodiesCollide( std::int32_t bodyIndexA, std::int32_t bodyIndexB ) const;
@@ -478,8 +489,9 @@ private:
 
 #pragma region JointSolver
 
-    void warmStartDistanceJoints( std::span<distanceJointConstraint2> constraints );
-    void solveDistanceJoints( std::span<distanceJointConstraint2> constraints, bool useBias );
+    using jointConstraint = std::variant<distanceJointConstraint2, mouseJointConstraint2>;
+    void warmStartJoints( std::span<jointConstraint> constraints );
+    void solveJoints( std::span<jointConstraint> constraints, bool useBias );
 
 #pragma endregion
 
@@ -575,7 +587,7 @@ private:
 
     // Joint cold / hot 데이터는 동일한 stable slot과 free-list를 공유함.
     std::vector<joint2> joints_;
-    std::vector<distanceJointSim2> jointSims_;
+    std::vector<std::variant<distanceJointSim2, mouseJointSim2>> jointSims_;
     std::int32_t jointFreeList_ = -1;
     std::size_t jointCount_ = 0;
 

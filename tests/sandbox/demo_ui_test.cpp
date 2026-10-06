@@ -25,6 +25,12 @@ void checkDemoUi()
     {
         session.selectDemo( frame % 2 == 0 ? demoKind::playground : demoKind::distancePendulum );
         session.stepOnce( 4 );
+        auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
+        demoInput input{}; input.mousePressed = true; input.mouseHeld = true;
+        const auto body = model.getKind() == demoKind::playground ? model.getImpulseBody() : model.getPendulumBody();
+        input.mousePosition = model.getWorld().GetBodyTransform( body ).position;
+        session.handleInput( input, true );
+        if( !model.getWorld().IsValid( model.getMouseJoint() ) ) { std::fprintf( stderr, "smoke drag did not start\n" ); std::exit( EXIT_FAILURE ); }
         ImGui::NewFrame();
         ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
         ImGui::SetNextWindowSize( { 1280.0f, 720.0f } );

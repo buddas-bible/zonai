@@ -7,7 +7,7 @@
 
 #include "dynamics/body.h"
 #include "dynamics/contactSim2.h"
-#include "dynamics/distanceJointSim2.h"
+#include "dynamics/joint2.h"
 
 namespace zonai
 {
@@ -40,6 +40,6 @@ struct islandGraph2
 [[nodiscard]] islandGraph2 BuildIslands(
     std::span<const body> bodies,
     std::span<const contactSim2> contactSims,
-    std::span<const distanceJointSim2> jointSims = {} );
+    std::span<const joint2> jointSims = {} );
 
 } // namespace zonai

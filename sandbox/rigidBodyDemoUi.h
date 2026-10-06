@@ -17,6 +17,7 @@ private:
     void drawWorldSettings();
     void drawInspector();
     void drawExperimentControls();
+    void drawMouseControls();
     void drawDebugSettings();
 #pragma endregion
     int selectedShapeIndex_ = 0;
