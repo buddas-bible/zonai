@@ -28,6 +28,8 @@ struct demoInput
 {
     vec2 mousePosition{};
     bool mousePressed = false;
+    bool mouseHeld = false;
+    bool impulsePressed = false;
     bool left = false;
     bool right = false;
     bool jumpPressed = false;

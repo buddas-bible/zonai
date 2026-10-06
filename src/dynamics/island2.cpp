@@ -72,7 +72,7 @@ void UnionBodies(
 islandGraph2 BuildIslands(
     std::span<const body> bodies,
     std::span<const contactSim2> contactSims,
-    std::span<const distanceJointSim2> jointSims )
+    std::span<const joint2> jointSims )
 {
     std::vector<std::int32_t> parents(
         bodies.size(),
@@ -164,16 +164,16 @@ islandGraph2 BuildIslands(
     }
 
     // Joint는 manifold 없이도 active edge임. Static은 공유 anchor여도 union하지 않음.
-    for( const distanceJointSim2& joint : jointSims )
+    for( const joint2& joint : jointSims )
     {
         if( joint.jointId == -1 ) { continue; }
-        assert( joint.bodyIdA >= 0 && static_cast<std::size_t>( joint.bodyIdA ) < bodies.size() );
-        assert( joint.bodyIdB >= 0 && static_cast<std::size_t>( joint.bodyIdB ) < bodies.size() );
-        const body& a = bodies[joint.bodyIdA]; const body& b = bodies[joint.bodyIdB];
+        assert( joint.edges[0].bodyId >= 0 && static_cast<std::size_t>( joint.edges[0].bodyId ) < bodies.size() );
+        assert( joint.edges[1].bodyId >= 0 && static_cast<std::size_t>( joint.edges[1].bodyId ) < bodies.size() );
+        const body& a = bodies[joint.edges[0].bodyId]; const body& b = bodies[joint.edges[1].bodyId];
         assert( a.type == bodyType::Static || b.type == bodyType::Static || a.awake == b.awake );
-        if( parents[joint.bodyIdA] != -1 && parents[joint.bodyIdB] != -1 )
+        if( parents[joint.edges[0].bodyId] != -1 && parents[joint.edges[1].bodyId] != -1 )
         {
-            UnionBodies( parents, ranks, joint.bodyIdA, joint.bodyIdB );
+            UnionBodies( parents, ranks, joint.edges[0].bodyId, joint.edges[1].bodyId );
         }
     }
 
@@ -255,10 +255,10 @@ islandGraph2 BuildIslands(
         ++graph.islands[islandIndex].contactCount;
     }
 
-    for( const distanceJointSim2& joint : jointSims )
+    for( const joint2& joint : jointSims )
     {
         if( joint.jointId == -1 ) { continue; }
-        const std::int32_t owner = parents[joint.bodyIdA] != -1 ? joint.bodyIdA : joint.bodyIdB;
+        const std::int32_t owner = parents[joint.edges[0].bodyId] != -1 ? joint.edges[0].bodyId : joint.edges[1].bodyId;
         if( parents[owner] != -1 ) { ++graph.islands[islandIndices[FindRoot( parents, owner )]].jointCount; }
     }
 
@@ -370,10 +370,10 @@ islandGraph2 BuildIslands(
             contactSim.contactId;
     }
 
-    for( const distanceJointSim2& joint : jointSims )
+    for( const joint2& joint : jointSims )
     {
         if( joint.jointId == -1 ) { continue; }
-        const std::int32_t owner = parents[joint.bodyIdA] != -1 ? joint.bodyIdA : joint.bodyIdB;
+        const std::int32_t owner = parents[joint.edges[0].bodyId] != -1 ? joint.edges[0].bodyId : joint.edges[1].bodyId;
         if( parents[owner] == -1 ) { continue; }
         const std::int32_t islandIndex = islandIndices[FindRoot( parents, owner )];
         const island2& island = graph.islands[islandIndex];

@@ -6,12 +6,12 @@
 
 | 데모 | 장면 | Canvas 위 조작 |
 | --- | --- | --- |
-| Rigid Bodies / Playground | 기존 바닥·ramp·circle·box·capsule·kinematic platform | A/D 유지: circle에 힘, Space: jump impulse, S: box 회전 impulse, 왼쪽 클릭: circle을 cursor 방향으로 밀기 |
-| Joints / Distance Pendulum | 독립 Static anchor와 Dynamic bob, rigid Distance Joint | A/D 유지: 수평 힘, Space: kick, 왼쪽 클릭: cursor 방향으로 밀기, 보라색 선·목표/현재 길이로 제약 관찰 |
+| Rigid Bodies / Playground | 기존 바닥·ramp·circle·box·capsule·kinematic platform | A/D 유지: circle에 힘, Space: jump impulse, S: box 회전 impulse, 왼쪽 drag: Dynamic solid 잡기, 오른쪽 클릭: circle을 cursor 방향으로 밀기 |
+| Joints / Distance Pendulum | 독립 Static anchor와 Dynamic bob, rigid Distance Joint | A/D 유지: 수평 힘, Space: kick, 왼쪽 drag: 진자 잡기, 오른쪽 클릭: cursor 방향으로 밀기, 보라색 선·목표/현재 길이로 제약 관찰 |
 
 `Demo` 목록으로 장면을 고르고 Play/Pause, Step, Reset을 사용한다. 전환/reset은 paused 상태의 새 장면을 만들고 선택/contact/입력·시간·카메라를 초기화한다. Sub-steps는 공통 설정으로 유지한다. Wheel zoom/middle pan과 기존 pose/material/filter/sleep/CCD/force/Contact/Tree Inspector는 유지한다.
 
-키 조작은 pointer가 Canvas 위에 있을 때 전달한다. UI 편집이나 focus 상실, Canvas 밖, middle pan, 전환 frame에는 held 입력을 취소한다. A/D는 매 physics step에 힘으로 적용하고 Space/S/클릭은 한 번의 impulse로 적용한다. Paused 상태의 impulse는 속도를 바꾸지만 pose는 다음 step에서 진행한다. 현재 왼쪽 클릭은 impulse 실험이며 Mouse Joint drag나 물체 선택은 아니다.
+키 조작은 pointer가 Canvas 위에 있을 때 전달한다. UI 편집이나 focus 상실, Canvas 밖, middle pan, 전환 frame에는 held 입력을 취소한다. A/D는 매 physics step에 힘으로 적용하고 Space/S/오른쪽 클릭은 한 번의 impulse로 적용한다. Paused 상태의 impulse는 속도를 바꾸지만 pose는 다음 step에서 진행한다. 왼쪽 drag의 picking/Mouse Joint는 [후속 구현](mouse-joint.md)에 기록한다. 입력 취소는 held force와 drag Joint를 함께 비우며 새 press 없이 다시 잡지 않는다.
 
 ## 파일 책임과 학습 이유
 
@@ -32,6 +32,6 @@
 
 ## 사용자 목표와 다음 단계
 
-한 프로그램에 데모별 조작·설정·관찰값을 추가하는 물리 학습 공간이 장기 목표다. 다음 개발은 Mouse Joint와 필요한 picking, 이후 Distance spring/limit/motor와 다른 Joint를 독립 실험으로 확인하며 ragdoll·motor 자동차·조나이 선풍기/연결 장치로 조합한다.
+한 프로그램에 데모별 조작·설정·관찰값을 추가하는 물리 학습 공간이 장기 목표다. Mouse Joint와 필요한 picking을 추가했다. 다음은 Distance spring/limit/motor와 다른 Joint를 독립 실험으로 확인하며 ragdoll·motor 자동차·조나이 선풍기/연결 장치로 조합한다.
 
 천·유체·soft body·voxel physics/destruction/terrain·다양한 terrain collision·오목한 object/terrain·파괴 조각의 rigid body simulation도 같은 프로그램의 데모로 학습하고 싶다는 사용자 목표를 보존한다. 각 기능의 solver/data와 2D/3D 범위는 해당 구현 단계에서 정한다. Voxel은 파괴 → 조각 분리 → collision/mass 생성 → rigid body simulation을 단계별로 확인한다. 이 목록은 해당 기능의 현재 구현 완료를 의미하지 않는다.

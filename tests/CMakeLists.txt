@@ -501,6 +501,13 @@ add_executable(distanceJointWorldTests dynamics/distance_joint_world_test.cpp)
 target_link_libraries(distanceJointWorldTests PRIVATE zonai::zonai)
 add_test(NAME distanceJointWorldTests COMMAND distanceJointWorldTests)
 
+add_executable(mouseJointTests dynamics/mouse_joint_test.cpp)
+target_link_libraries(mouseJointTests PRIVATE zonai::zonai)
+add_test(NAME mouseJointTests COMMAND mouseJointTests)
+add_executable(mouseJointWorldTests dynamics/mouse_joint_world_test.cpp)
+target_link_libraries(mouseJointWorldTests PRIVATE zonai::zonai)
+add_test(NAME mouseJointWorldTests COMMAND mouseJointWorldTests)
+
 add_executable(sandboxDemoTests sandbox/demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp")
 target_include_directories(sandboxDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxDemoTests PRIVATE zonai::zonai)

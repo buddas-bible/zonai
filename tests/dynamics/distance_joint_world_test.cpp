@@ -130,14 +130,14 @@ void checkGraph()
     std::array<body, 4> bodies{};
     for( int i = 0; i < 4; ++i ) { bodies[i].bodyId = i; bodies[i].type = bodyType::Dynamic; }
     bodies[0].type = bodyType::Static;
-    std::array<distanceJointSim2, 3> joints{};
-    for( int i = 0; i < 3; ++i ) { joints[i].jointId = i; joints[i].bodyIdA = 0; joints[i].bodyIdB = i + 1; }
+    std::array<joint2, 3> joints{};
+    for( int i = 0; i < 3; ++i ) { joints[i].jointId = i; joints[i].edges[0].bodyId = 0; joints[i].edges[1].bodyId = i + 1; }
     const auto graph = BuildIslands( bodies, {}, joints );
     check( graph.islands.size() == 3 && graph.jointIds.size() == 3 && graph.bodyIds.size() == 3, "static joints assigned once to distinct islands" );
     for( const auto& island : graph.islands ) check( island.jointCount == 1, "joint island range" );
     bodies[1].awake = false;
     check( BuildIslands( bodies, {}, joints ).jointIds.size() == 2, "sleeping joint excluded" );
-    bodies[1].awake = true; joints[1].bodyIdA = 1;
+    bodies[1].awake = true; joints[1].edges[0].bodyId = 1;
     check( BuildIslands( bodies, {}, joints ).islands.size() == 2, "dynamic joint joins islands" );
 
     world mixed{}; mixed.SetGravity( {} );

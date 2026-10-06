@@ -22,6 +22,7 @@ public:
     void step( float timeStep, int subStepCount ) override;
     void handleInput( const demoInput& input ) override;
     void cancelInput() override;
+    void setMouseSettings( float hertz, float dampingRatio, float maxForce );
     void refreshContacts();
 #pragma endregion
 
@@ -35,11 +36,14 @@ public:
     [[nodiscard]] bodyId getTorqueBody() const noexcept { return torqueBody_; }
     [[nodiscard]] bodyId getPendulumBody() const noexcept { return pendulumBody_; }
     [[nodiscard]] jointId getPendulumJoint() const noexcept { return pendulumJoint_; }
+    [[nodiscard]] jointId getMouseJoint() const noexcept { return mouseJoint_; }
+    [[nodiscard]] const mouseJointDef& getMouseSettings() const noexcept { return mouseSettings_; }
 #pragma endregion
 
 private:
     void createPlayground();
     void createPendulum();
+    void startMouseDrag( vec2 point );
     demoKind kind_;
     world world_;
     std::vector<visualShape> shapes_;
@@ -48,6 +52,8 @@ private:
     bodyId torqueBody_{};
     bodyId pendulumBody_{};
     jointId pendulumJoint_{};
+    jointId mouseJoint_{};
+    mouseJointDef mouseSettings_{};
     bool leftHeld_ = false;
     bool rightHeld_ = false;
 };
