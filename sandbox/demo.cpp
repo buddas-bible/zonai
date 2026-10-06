@@ -14,7 +14,7 @@ constexpr int MAX_STEPS_PER_FRAME = 8;
 constexpr std::array entries
 {
     demoEntry{ demoKind::playground, "Rigid Bodies", "Playground", "Canvas: A/D hold = push circle, Space = jump, S = spin box. Left drag = grab dynamic body. Right click = kick circle toward cursor.", { 0.0f, 0.5f }, 55.0f },
-    demoEntry{ demoKind::distancePendulum, "Joints", "Distance Pendulum", "Canvas: A/D hold = push pendulum, Space = kick. Left drag = grab pendulum. Right click = kick toward cursor. Purple line shows the fixed distance.", { 0.0f, -0.5f }, 110.0f }
+    demoEntry{ demoKind::distancePendulum, "Joints", "Distance Pendulum", "Canvas: A/D hold = push pendulum, Space = kick. Left drag = grab pendulum. Right click = kick toward cursor. Controls: Distance spring/Hertz/damping, Radial kick. Purple line connects the anchors.", { 0.0f, -0.5f }, 110.0f }
 };
 }
 

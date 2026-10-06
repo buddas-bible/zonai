@@ -23,6 +23,8 @@ struct distanceJointConstraint2
     float axialMass = 0.0f;
     float impulse = 0.0f;
     constraintSoftness2 softness{};
+    bool enableSpring = false;
+    float hertz = 0.0f;
 };
 
 [[nodiscard]] distanceJointConstraint2 prepareDistanceJointConstraint( const distanceJointSim2& joint, const bodySim& bodyA, const bodySim& bodyB, float subStepTime );

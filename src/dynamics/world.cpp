@@ -333,6 +333,8 @@ jointId world::createDistanceJoint( const distanceJointDef& definition )
     assert( bodies_[bodyIndexA].type == bodyType::Dynamic || bodies_[bodyIndexB].type == bodyType::Dynamic );
     assert( IsFinite( definition.localAnchorA ) && IsFinite( definition.localAnchorB ) );
     assert( std::isfinite( definition.length ) && definition.length > 0.0f );
+    assert( std::isfinite( definition.hertz ) && definition.hertz >= 0.0f );
+    assert( std::isfinite( definition.dampingRatio ) && definition.dampingRatio >= 0.0f );
 
     const std::int32_t index = allocateJoint( bodyIndexA, bodyIndexB, definition.collideConnected );
     jointSims_[index] = distanceJointSim2{};
@@ -340,7 +342,18 @@ jointId world::createDistanceJoint( const distanceJointDef& definition )
     sim = {}; sim.jointId = index; sim.bodyIdA = bodyIndexA; sim.bodyIdB = bodyIndexB;
     sim.localAnchorA = definition.localAnchorA; sim.localAnchorB = definition.localAnchorB;
     sim.length = std::max( LINEAR_SLOP, definition.length );
+    sim.enableSpring = definition.enableSpring; sim.hertz = definition.hertz; sim.dampingRatio = definition.dampingRatio;
     return makeJointId( index );
+}
+
+void world::setDistanceJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio )
+{
+    assert( std::isfinite( hertz ) && hertz >= 0.0f && std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );
+    auto& joint = std::get<distanceJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.enableSpring == enableSpring && joint.hertz == hertz && joint.dampingRatio == dampingRatio ) { return; }
+    joint.enableSpring = enableSpring; joint.hertz = hertz; joint.dampingRatio = dampingRatio; joint.impulse = 0.0f;
+    if( bodies_[joint.bodyIdA].type != bodyType::Static ) { WakeBodyByIndex( joint.bodyIdA ); }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static ) { WakeBodyByIndex( joint.bodyIdB ); }
 }
 
 jointId world::createMouseJoint( const mouseJointDef& definition )
@@ -406,6 +419,8 @@ distanceJointData world::getDistanceJointData( jointId id ) const
     data.anchorB = TransformPoint( bodySims_[sim.bodyIdB].transform, sim.localAnchorB );
     data.length = sim.length; data.currentLength = Length( data.anchorB - data.anchorA );
     data.collideConnected = joints_[index].collideConnected;
+    data.enableSpring = sim.enableSpring; data.hertz = sim.hertz; data.dampingRatio = sim.dampingRatio;
+    data.axialForce = sim.subStepTime > 0.0f ? sim.impulse / sim.subStepTime : 0.0f;
     return data;
 }
 

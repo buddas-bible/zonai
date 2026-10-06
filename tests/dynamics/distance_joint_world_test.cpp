@@ -1,5 +1,6 @@
 #include <array>
 #include <cmath>
+#include <numbers>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -204,7 +205,7 @@ void checkZeroStepAndCom()
     check( IsFinite( coincident.GetBodyTransform( duplicate ).position ), "coincident world anchors finite" );
 }
 
-void checkImpulseReset( int change )
+void checkImpulseReset( int change, bool spring )
 {
     world cached{}, fresh{};
     cached.SetContinuousEnabled( false ); fresh.SetContinuousEnabled( false );
@@ -215,10 +216,13 @@ void checkImpulseReset( int change )
     const auto bobA = ball( cached, { 0.0f, -2.0f } ), bobB = ball( fresh, { 0.0f, -2.0f } );
     const auto shapeA = cached.CreateShape( bobA, circle2{ { 0.0f, 0.25f }, 0.25f } );
     const auto shapeB = fresh.CreateShape( bobB, circle2{ { 0.0f, 0.25f }, 0.25f } );
-    (void)cached.createDistanceJoint( definition( anchorA, bobA ) );
-    const auto old = fresh.createDistanceJoint( definition( anchorB, bobB ) );
-    (void)cached.createDistanceJoint( definition( secondA, bobA, std::sqrt( 8.0f ) ) );
-    const auto oldSecond = fresh.createDistanceJoint( definition( secondB, bobB, std::sqrt( 8.0f ) ) );
+    auto firstA = definition( anchorA, bobA ), firstB = definition( anchorB, bobB );
+    auto otherA = definition( secondA, bobA, std::sqrt( 8.0f ) ), otherB = definition( secondB, bobB, std::sqrt( 8.0f ) );
+    firstA.enableSpring = firstB.enableSpring = otherA.enableSpring = otherB.enableSpring = spring;
+    (void)cached.createDistanceJoint( firstA );
+    const auto old = fresh.createDistanceJoint( firstB );
+    (void)cached.createDistanceJoint( otherA );
+    const auto oldSecond = fresh.createDistanceJoint( otherB );
     for( int i = 0; i < 20; ++i ) { cached.Step( 1.0f / 60.0f, 4 ); fresh.Step( 1.0f / 60.0f, 4 ); }
     if( change == 0 )
     {
@@ -232,8 +236,8 @@ void checkImpulseReset( int change )
     // 재생성한 Joint는 impulse가 0임. 기존 Joint도 mass/pose/h 변경 후 같은 결과여야 함.
     // Free-list 재사용 순서도 맞춰 solver의 stable slot 순서를 유지함.
     fresh.destroyJoint( oldSecond ); fresh.destroyJoint( old );
-    (void)fresh.createDistanceJoint( definition( anchorB, bobB ) );
-    (void)fresh.createDistanceJoint( definition( secondB, bobB, std::sqrt( 8.0f ) ) );
+    (void)fresh.createDistanceJoint( firstB );
+    (void)fresh.createDistanceJoint( otherB );
     const float timeStep = change == 2 ? 1.0f / 120.0f : 1.0f / 60.0f;
     cached.Step( timeStep, 4 ); fresh.Step( timeStep, 4 );
     check( LengthSquared( cached.GetBodyTransform( bobA ).position - fresh.GetBodyTransform( bobB ).position ) == 0.0f, "stale joint impulse after mass/pose/h change" );
@@ -270,11 +274,68 @@ void checkContinuousFilter( bool collide, bool sensor )
 #pragma endregion
 }
 
+namespace
+{
+void checkSpring()
+{
+    world simulation;
+    const auto anchor = simulation.CreateBody();
+    const auto bob = simulation.CreateBody( bodyType::Dynamic, { { 0.0f, -2.0f }, {} } );
+    (void)simulation.CreateShape( bob, circle2{ {}, 0.2f } );
+    auto def = definition( anchor, bob ); def.enableSpring = true; def.hertz = 2.0f; def.dampingRatio = 1.0f;
+    const auto joint = simulation.createDistanceJoint( def );
+    for( int i = 0; i < 360; ++i ) { simulation.Step( 1.0f / 60.0f, 4 ); }
+    const float omega = 2.0f * std::numbers::pi_v<float> * def.hertz;
+    const auto data = simulation.getDistanceJointData( joint );
+    check( data.enableSpring && data.hertz == 2.0f && data.dampingRatio == 1.0f, "spring creation/data fields" );
+    check( std::abs( data.currentLength - 2.0f - 9.8f / ( omega * omega ) ) < 0.003f, "spring gravity equilibrium mg/k" );
+    check( std::abs( data.axialForce + simulation.GetBodyMass( bob ) * 9.8f ) < 0.03f, "signed spring tension balances gravity" );
+    simulation.SetBodyAwake( bob, false ); simulation.setDistanceJointSpring( joint, true, 2.0f, 1.0f );
+    check( !simulation.IsBodyAwake( bob ), "unchanged spring tuning preserves sleep" );
+    simulation.setDistanceJointSpring( joint, true, 3.0f, 0.7f );
+    check( simulation.IsBodyAwake( bob ) && simulation.getDistanceJointData( joint ).axialForce == 0.0f, "changed tuning wakes and clears cache" );
+    simulation.setDistanceJointSpring( joint, false, 0.0f, 0.0f );
+    for( int i = 0; i < 120; ++i ) { simulation.Step( 1.0f / 60.0f, 4 ); }
+    check( std::abs( simulation.getDistanceJointData( joint ).currentLength - 2.0f ) < 0.005f, "live spring-to-rigid switch" );
+    simulation.SetGravity( {} ); simulation.setDistanceJointSpring( joint, true, 0.0f, 0.7f );
+    simulation.SetBodyLinearVelocity( bob, { 0.0f, -1.0f } );
+    const auto before = simulation.GetBodyTransform( bob ); simulation.Step( 0.1f, 4 );
+    check( simulation.GetBodyTransform( bob ).position.y < before.position.y - 0.09f, "zero Hertz World motion unconstrained" );
+    check( simulation.getDistanceJointData( joint ).axialForce == 0.0f, "zero Hertz stores no force" );
+}
+
+void checkSpringResponse( float hertz, float damping, int subSteps )
+{
+    world simulation; simulation.SetGravity( {} ); simulation.SetSleepingEnabled( false );
+    const auto anchor = simulation.CreateBody();
+    const auto bob = simulation.CreateBody( bodyType::Dynamic, { { 2.5f, 0.0f }, {} } );
+    (void)simulation.CreateShape( bob, circle2{ {}, 0.2f } );
+    auto def = definition( anchor, bob ); def.enableSpring = true; def.hertz = hertz; def.dampingRatio = damping;
+    const auto joint = simulation.createDistanceJoint( def );
+    float firstCrossing = 0.0f, minimum = 2.5f;
+    for( int i = 0; i < 120; ++i )
+    {
+        simulation.Step( 1.0f / 120.0f, subSteps );
+        const float length = simulation.getDistanceJointData( joint ).currentLength;
+        minimum = std::min( minimum, length );
+        if( firstCrossing == 0.0f && length < 2.0f ) { firstCrossing = static_cast<float>( i + 1 ) / 120.0f; }
+    }
+    if( damping == 0.0f )
+    {
+        check( firstCrossing > 0.18f / hertz && firstCrossing < 0.32f / hertz, "frequency controls quarter-period crossing" );
+        check( minimum < 1.8f, "undamped spring oscillates around rest length" );
+    }
+    else { check( minimum > 1.99f && std::abs( simulation.getDistanceJointData( joint ).currentLength - 2.0f ) < 0.01f, "critical damping settles without overshoot" ); }
+}
+}
+
 int main()
 {
     checkLifetime(); checkFilters(); checkGraph();
     checkMotion( 1 ); checkMotion( 4 ); checkZeroStepAndCom();
-    for( int i = 0; i < 3; ++i ) checkImpulseReset( i );
+    for( int i = 0; i < 3; ++i ) { checkImpulseReset( i, false ); checkImpulseReset( i, true ); }
     for( const bool collide : { false, true } ) for( const bool sensor : { false, true } ) checkContinuousFilter( collide, sensor );
+    checkSpring();
+    for( int subSteps : { 1, 4 } ) { checkSpringResponse( 2.0f, 0.0f, subSteps ); checkSpringResponse( 4.0f, 0.0f, subSteps ); checkSpringResponse( 2.0f, 1.0f, subSteps ); }
     return EXIT_SUCCESS;
 }

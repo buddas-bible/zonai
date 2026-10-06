@@ -54,21 +54,21 @@ void checkDemoUi()
         session.reset();
     }
     // Keyboard navigation의 PreferInput은 Ctrl+click과 같은 실제 SliderFloat text 경로임.
-    // 충분히 큰 viewport로 Inspector 아래의 세 tuning widget도 clipping 없이 실행함.
+    // 충분히 큰 viewport로 Inspector 아래의 tuning widget도 clipping 없이 실행함.
     io.DisplaySize = { 1280.0f, 4096.0f };
-    const char* labels[] = { "Mouse Hertz", "Mouse damping", "Mouse max force" };
-    for( int setting = 0; setting < 3; ++setting )
+    const char* labels[] = { "Mouse Hertz", "Mouse damping", "Mouse max force", "Distance Hertz", "Distance damping" };
+    for( int setting = 0; setting < 5; ++setting )
     {
         for( int upper = 0; upper < 2; ++upper )
         {
-            auto view = createDemoView( demoKind::playground );
+            auto view = createDemoView( setting < 3 ? demoKind::playground : demoKind::distancePendulum );
             for( int phase = 0; phase < 3; ++phase )
             {
                 if( phase == 1 ) { io.AddInputCharactersUTF8( upper ? "9000" : "-1" ); }
                 if( phase == 2 ) { io.AddKeyEvent( ImGuiKey_Enter, true ); }
                 ImGui::NewFrame();
                 ImGui::SetNextWindowPos( { 0.0f, 0.0f } ); ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
-                ImGui::Begin( "Mouse tuning input" );
+                ImGui::Begin( "Joint tuning input" );
                 if( phase == 0 )
                 {
                     GImGui->NavActivateId = ImGui::GetID( labels[setting] );
@@ -79,11 +79,29 @@ void checkDemoUi()
                 if( phase == 2 ) { io.AddKeyEvent( ImGuiKey_Enter, false ); }
             }
             const auto& tuning = static_cast<rigidBodyDemo&>( *view ).getMouseSettings();
-            const float value = setting == 0 ? tuning.hertz : setting == 1 ? tuning.dampingRatio : tuning.maxForce;
-            const float limit = setting == 0 ? 30.0f : setting == 1 ? 2.0f : 5000.0f;
+            auto& model = static_cast<rigidBodyDemo&>( *view );
+            const auto spring = setting < 3 ? zonai::distanceJointData{} : model.getWorld().getDistanceJointData( model.getPendulumJoint() );
+            const float value = setting == 0 ? tuning.hertz : setting == 1 ? tuning.dampingRatio : setting == 2 ? tuning.maxForce : setting == 3 ? spring.hertz : spring.dampingRatio;
+            const float limit = setting == 0 || setting == 3 ? 30.0f : setting == 2 ? 5000.0f : 2.0f;
             if( value != ( upper ? limit : 0.0f ) )
             { std::fprintf( stderr, "manual tuning %s not clamped: %f\n", labels[setting], value ); std::exit( EXIT_FAILURE ); }
         }
+    }
+    auto view = createDemoView( demoKind::distancePendulum );
+    auto& model = static_cast<rigidBodyDemo&>( *view );
+    for( int frame = 0; frame < 4; ++frame )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0.0f, 0.0f } ); ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+        ImGui::Begin( "Spring actions" );
+        // Checkbox/Button의 keyboard press는 ActivateId와 DownId가 함께 전달됨.
+        if( frame == 0 || frame == 2 ) { GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Distance spring" ); }
+        if( frame == 1 ) { GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Radial kick" ); }
+        view->drawControls(); ImGui::End(); ImGui::Render();
+        const auto data = model.getWorld().getDistanceJointData( model.getPendulumJoint() );
+        if( data.enableSpring != ( frame < 2 ) ) { std::fprintf( stderr, "spring checkbox did not switch mode\n" ); std::exit( EXIT_FAILURE ); }
+        if( frame == 1 && model.getWorld().GetBodyLinearVelocity( model.getPendulumBody() ).y != -2.0f )
+        { std::fprintf( stderr, "radial kick did not excite the distance axis\n" ); std::exit( EXIT_FAILURE ); }
     }
     ImGui::DestroyContext();
 }

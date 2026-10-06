@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <numbers>
 
 #include "dynamics/distanceJointConstraint2.h"
 
@@ -69,5 +70,29 @@ int main()
     solveDistanceJointConstraint( constraint, stateA, stateB, true );
     check( IsFinite( stateA.linearVelocity ) && IsFinite( stateB.linearVelocity ) && std::isfinite( constraint.impulse ), "coincident anchors finite" );
     check( LengthSquared( stateB.linearVelocity ) == 0.0f, "zero axis cannot choose correction direction" );
+    a = {}; b = {}; a.bodyId = 0; b.bodyId = 1; a.invMass = 1.0f; b.invMass = 0.5f; b.center = { 2.0f, 0.0f };
+    joint = {}; joint.bodyIdA = 0; joint.bodyIdB = 1; joint.length = 1.0f;
+    joint.enableSpring = true; joint.hertz = 2.0f; joint.dampingRatio = 0.7f;
+    const float h = 1.0f / 60.0f, omega = 2.0f * std::numbers::pi_v<float> * joint.hertz;
+    const float expected = -( 2.0f / 3.0f ) * h * omega * omega / ( 1.0f + 2.0f * joint.dampingRatio * h * omega + h * h * omega * omega );
+    constraint = prepareDistanceJointConstraint( joint, a, b, h ); stateA = {}; stateB = {};
+    solveDistanceJointConstraint( constraint, stateA, stateB, false );
+    check( near( constraint.impulse, expected ), "spring relax uses physical Hertz/damping bias" );
+    check( near( stateA.linearVelocity.x + 2.0f * stateB.linearVelocity.x, 0.0f ), "spring conserves two-body linear momentum" );
+    auto biasConstraint = prepareDistanceJointConstraint( joint, a, b, h ); bodyState biasA{}, biasB{};
+    solveDistanceJointConstraint( biasConstraint, biasA, biasB, true );
+    check( near( biasConstraint.impulse, constraint.impulse ), "spring equation identical in both passes" );
+    joint.dampingRatio = 2.0f;
+    biasConstraint = prepareDistanceJointConstraint( joint, a, b, h ); biasA = {}; biasB = {};
+    solveDistanceJointConstraint( biasConstraint, biasA, biasB, false );
+    check( std::abs( biasConstraint.impulse ) < std::abs( expected ), "damping changes spring response" );
+    joint.hertz = 0.0f; joint.impulse = -3.0f; joint.subStepTime = h;
+    constraint = prepareDistanceJointConstraint( joint, a, b, h ); stateA = {}; stateB = {}; stateB.linearVelocity = { 2.0f, 0.0f };
+    warmStartDistanceJointConstraint( constraint, stateA, stateB ); solveDistanceJointConstraint( constraint, stateA, stateB, true );
+    check( constraint.impulse == 0.0f && near( stateB.linearVelocity.x, 2.0f ), "zero Hertz frees axis and discards warm impulse" );
+    joint.enableSpring = false;
+    constraint = prepareDistanceJointConstraint( joint, a, b, h ); stateA = {}; stateB = {}; stateB.linearVelocity = { 2.0f, 0.0f };
+    solveDistanceJointConstraint( constraint, stateA, stateB, false );
+    check( near( stateA.linearVelocity.x, stateB.linearVelocity.x ), "spring off restores rigid velocity constraint" );
     return EXIT_SUCCESS;
 }

@@ -32,6 +32,6 @@
 
 ## 사용자 목표와 다음 단계
 
-한 프로그램에 데모별 조작·설정·관찰값을 추가하는 물리 학습 공간이 장기 목표다. Mouse Joint와 필요한 picking을 추가했다. 다음은 Distance spring/limit/motor와 다른 Joint를 독립 실험으로 확인하며 ragdoll·motor 자동차·조나이 선풍기/연결 장치로 조합한다.
+한 프로그램에 데모별 조작·설정·관찰값을 추가하는 물리 학습 공간이 장기 목표다. Mouse Joint와 필요한 picking, [Distance spring의 Hertz·감쇠 실험](distance-spring.md)을 추가했다. 다음은 Distance limit/motor와 다른 Joint를 독립 실험으로 확인하며 ragdoll·motor 자동차·조나이 선풍기/연결 장치로 조합한다.
 
 천·유체·soft body·voxel physics/destruction/terrain·다양한 terrain collision·오목한 object/terrain·파괴 조각의 rigid body simulation도 같은 프로그램의 데모로 학습하고 싶다는 사용자 목표를 보존한다. 각 기능의 solver/data와 2D/3D 범위는 해당 구현 단계에서 정한다. Voxel은 파괴 → 조각 분리 → collision/mass 생성 → rigid body simulation을 단계별로 확인한다. 이 목록은 해당 기능의 현재 구현 완료를 의미하지 않는다.
