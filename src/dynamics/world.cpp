@@ -516,6 +516,7 @@ jointId world::createWheelJoint( const wheelJointDef& definition )
     assert( IsFinite( definition.localAxisA ) && std::abs( LengthSquared( definition.localAxisA ) - 1.0f ) < 0.0001f );
     assert( std::isfinite( definition.hertz ) && definition.hertz >= 0.0f && std::isfinite( definition.dampingRatio ) && definition.dampingRatio >= 0.0f );
     assert( std::isfinite( definition.lowerTranslation ) && std::isfinite( definition.upperTranslation ) && definition.lowerTranslation <= definition.upperTranslation );
+    assert( std::isfinite( definition.motorSpeed ) && std::isfinite( definition.maxMotorTorque ) && definition.maxMotorTorque >= 0.0f );
 
     const std::int32_t index = allocateJoint( bodyIndexA, bodyIndexB, definition.collideConnected );
     wheelJointSim2 sim{};
@@ -531,6 +532,9 @@ jointId world::createWheelJoint( const wheelJointDef& definition )
     sim.enableLimit = definition.enableLimit;
     sim.lowerTranslation = definition.lowerTranslation;
     sim.upperTranslation = definition.upperTranslation;
+    sim.enableMotor = definition.enableMotor;
+    sim.motorSpeed = definition.motorSpeed;
+    sim.maxMotorTorque = definition.maxMotorTorque;
     jointSims_[index] = sim;
 
     return makeJointId( index );
@@ -546,11 +550,12 @@ void world::setWheelJointSpring( jointId id, bool enableSpring, float hertz, flo
     joint.enableSpring = enableSpring;
     joint.hertz = hertz;
     joint.dampingRatio = dampingRatio;
-    // 스프링·제한·수직 제약이 결합하므로 이전 해를 함께 비움.
+    // 모터·스프링·제한·수직 제약이 결합하므로 이전 해를 함께 비움.
     joint.impulse = 0.0f;
     joint.springImpulse = 0.0f;
     joint.lowerImpulse = 0.0f;
     joint.upperImpulse = 0.0f;
+    joint.motorImpulse = 0.0f;
 
     if( bodies_[joint.bodyIdA].type != bodyType::Static )
     {
@@ -572,11 +577,39 @@ void world::setWheelJointLimit( jointId id, bool enableLimit, float lowerTransla
     joint.enableLimit = enableLimit;
     joint.lowerTranslation = lowerTranslation;
     joint.upperTranslation = upperTranslation;
-    // 새 경계에는 이전 스프링·제한·수직 제약의 결합된 해를 적용하지 않음.
+    // 새 경계에는 이전 모터·스프링·제한·수직 제약의 결합된 해를 적용하지 않음.
     joint.impulse = 0.0f;
     joint.springImpulse = 0.0f;
     joint.lowerImpulse = 0.0f;
     joint.upperImpulse = 0.0f;
+    joint.motorImpulse = 0.0f;
+
+    if( bodies_[joint.bodyIdA].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdA );
+    }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdB );
+    }
+}
+
+void world::setWheelJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorTorque )
+{
+    assert( std::isfinite( motorSpeed ) && std::isfinite( maxMotorTorque ) && maxMotorTorque >= 0.0f );
+
+    auto& joint = std::get<wheelJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.enableMotor == enableMotor && joint.motorSpeed == motorSpeed && joint.maxMotorTorque == maxMotorTorque ) return;
+
+    joint.enableMotor = enableMotor;
+    joint.motorSpeed = motorSpeed;
+    joint.maxMotorTorque = maxMotorTorque;
+    // 중심 밖 연결점에서는 회전이 스프링·제한·수직 제약과 결합함.
+    joint.impulse = 0.0f;
+    joint.springImpulse = 0.0f;
+    joint.lowerImpulse = 0.0f;
+    joint.upperImpulse = 0.0f;
+    joint.motorImpulse = 0.0f;
 
     if( bodies_[joint.bodyIdA].type != bodyType::Static )
     {
@@ -606,6 +639,7 @@ wheelJointData world::getWheelJointData( jointId id ) const
     data.force = sim.subStepTime > 0.0f ? ( sim.impulse * perpendicular + axialImpulse * data.axis ) / sim.subStepTime : vec2{};
     data.springForce = sim.subStepTime > 0.0f ? sim.springImpulse / sim.subStepTime : 0.0f;
     data.limitForce = sim.subStepTime > 0.0f ? ( sim.lowerImpulse - sim.upperImpulse ) / sim.subStepTime : 0.0f;
+    data.motorTorque = sim.subStepTime > 0.0f ? sim.motorImpulse / sim.subStepTime : 0.0f;
     data.collideConnected = joints_[index].collideConnected;
     data.enableSpring = sim.enableSpring;
     data.hertz = sim.hertz;
@@ -613,6 +647,9 @@ wheelJointData world::getWheelJointData( jointId id ) const
     data.enableLimit = sim.enableLimit;
     data.lowerTranslation = sim.lowerTranslation;
     data.upperTranslation = sim.upperTranslation;
+    data.enableMotor = sim.enableMotor;
+    data.motorSpeed = sim.motorSpeed;
+    data.maxMotorTorque = sim.maxMotorTorque;
 
     return data;
 }
@@ -1982,6 +2019,7 @@ void world::Step( float timeStep, int subStepCount )
                         joint.springImpulse = constraint.springImpulse;
                         joint.lowerImpulse = constraint.lowerImpulse;
                         joint.upperImpulse = constraint.upperImpulse;
+                        joint.motorImpulse = constraint.motorImpulse;
                     }
                 },
                 value );
@@ -2499,6 +2537,7 @@ void world::resetJointImpulses( std::int32_t bodyIndex )
                     joint.springImpulse = 0.0f;
                     joint.lowerImpulse = 0.0f;
                     joint.upperImpulse = 0.0f;
+                    joint.motorImpulse = 0.0f;
                 }
             },
             jointSims_[key >> 1] );

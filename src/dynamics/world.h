@@ -112,6 +112,8 @@ public:
     void setWheelJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio );
     // 유한한 lower <= upper 변위 (m). 스프링 off/0 Hz와 무관하게 제한함.
     void setWheelJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation );
+    // 유한한 상대 각속도와 비음수 토크. 변경 시 coupled cache와 wake를 갱신함.
+    void setWheelJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorTorque );
     [[nodiscard]] wheelJointData getWheelJointData( jointId id ) const;
 
     // Static A / Dynamic B. target은 world 좌표, hertz/damping/maxForce는 유한한 비음수임.

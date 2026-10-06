@@ -792,7 +792,7 @@ void rigidBodyDemoUi::drawExperimentControls()
         const float angularVelocity = getWorld().GetBodyAngularVelocity( joint.bodyB ) - getWorld().GetBodyAngularVelocity( joint.bodyA );
         ImGui::Text( "바퀴 상대 각속도: %.2f rad/s", angularVelocity );
         ImGui::Text( "스프링 힘: %.2f N / 제한 힘: %.2f N", joint.springForce, joint.limitForce );
-        ImGui::TextWrapped( "청록색 점은 스프링 변위 0, 화살표는 이동 축의 양의 방향입니다. 보라색은 바퀴와 회전 방향입니다. 스프링을 꺼도 축 옆으로는 벗어나지 않으며 바퀴 회전은 자유롭습니다." );
+        ImGui::TextWrapped( "청록색 점은 스프링 변위 0, 화살표는 이동 축의 양의 방향입니다. 보라색은 바퀴와 회전 방향입니다. 스프링을 꺼도 축 옆으로는 벗어나지 않으며 모터가 꺼져 있으면 바퀴 회전은 자유롭습니다." );
 
         if( ImGui::TreeNode( "서스펜션 스프링###WheelSpringSettings" ) )
         {
@@ -813,6 +813,7 @@ void rigidBodyDemoUi::drawExperimentControls()
             if( changed )
             {
                 getWorld().setWheelJointSpring( getWheelJoint(), enableSpring, hertz, dampingRatio );
+                joint = getWorld().getWheelJointData( getWheelJoint() );
             }
             ImGui::TextWrapped( "주파수는 스프링 강성, 감쇠 비율은 진동을 조절합니다. 스프링을 끄거나 0 Hz로 설정하면 축 방향 스프링 힘만 사라집니다. 이동 범위 제한도 꺼져 있으면 중력으로 떨어집니다." );
             ImGui::TreePop();
@@ -840,9 +841,47 @@ void rigidBodyDemoUi::drawExperimentControls()
                 joint = getWorld().getWheelJointData( getWheelJoint() );
             }
             ImGui::Text( "제한 힘: %.2f N", joint.limitForce );
-            ImGui::TextWrapped( "청록색 기준점에서 축 방향의 부호 있는 변위입니다. 초록은 최소, 빨강은 최대 변위이며 회색은 허용 범위입니다. 스프링을 꺼도 제한은 유지되고 바퀴 회전은 자유롭습니다. 두 변위가 같으면 해당 위치를 유지합니다. 제한은 부드럽게 보정하므로 하중에서 작은 오차가 남을 수 있습니다." );
+            ImGui::TextWrapped( "청록색 기준점에서 축 방향의 부호 있는 변위입니다. 초록은 최소, 빨강은 최대 변위이며 회색은 허용 범위입니다. 스프링을 꺼도 제한은 유지되고 회전은 별도 모터로 조절합니다. 두 변위가 같으면 해당 위치를 유지합니다. 제한은 부드럽게 보정하므로 하중에서 작은 오차가 남을 수 있습니다." );
             ImGui::TreePop();
         }
+        if( ImGui::TreeNode( "회전 모터###WheelMotorSettings" ) )
+        {
+            bool enableMotor = joint.enableMotor;
+            float motorSpeed = joint.motorSpeed;
+            float maxMotorTorque = joint.maxMotorTorque;
+            bool changed = ImGui::Checkbox( "모터 사용###Wheel motor", &enableMotor );
+            if( ImGui::SliderFloat( "목표 각속도###Wheel motor speed", &motorSpeed, -10.0f, 10.0f, "%.2f rad/s", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                motorSpeed = std::clamp( motorSpeed, -10.0f, 10.0f );
+                changed = true;
+            }
+            if( ImGui::SliderFloat( "최대 모터 토크###Wheel motor torque", &maxMotorTorque, 0.0f, 5.0f, "%.2f N·m", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                maxMotorTorque = std::clamp( maxMotorTorque, 0.0f, 5.0f );
+                changed = true;
+            }
+            if( ImGui::Button( "회전 방향 바꾸기###Reverse wheel motor", ImVec2( -1.0f, 0.0f ) ) )
+            {
+                motorSpeed = -motorSpeed;
+                changed = true;
+            }
+            if( ImGui::Button( "제동하기###Brake wheel motor", ImVec2( -1.0f, 0.0f ) ) )
+            {
+                enableMotor = true;
+                motorSpeed = 0.0f;
+                changed = true;
+            }
+            if( changed )
+            {
+                getWorld().setWheelJointMotor( getWheelJoint(), enableMotor, motorSpeed, maxMotorTorque );
+                joint = getWorld().getWheelJointData( getWheelJoint() );
+            }
+
+            ImGui::Text( "실제 모터 토크: %.2f N·m", joint.motorTorque );
+            ImGui::TextWrapped( "양의 속도는 반시계, 음의 속도는 시계 방향입니다. 속도 0은 제동, 토크 0은 모터 힘을 끕니다. 토크가 작거나 연결점이 중심 밖에 있으면 목표 속도에 도달하지 못할 수 있습니다. 모터는 각도를 고정하지 않으며 이동 제한과 함께 사용할 수 있습니다." );
+            ImGui::TreePop();
+        }
+
         if( ImGui::Button( "바퀴 축 방향으로 밀기###Kick wheel", ImVec2( -1.0f, 0.0f ) ) )
         {
             getWorld().ApplyLinearImpulseToCenter( getImpulseBody(), getWorld().GetBodyMass( getImpulseBody() ) * 2.0f * joint.axis );

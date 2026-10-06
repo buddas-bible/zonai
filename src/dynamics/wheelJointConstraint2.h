@@ -37,12 +37,18 @@ struct wheelJointConstraint2
     float lowerImpulse = 0.0f;
     float upperImpulse = 0.0f;
     float invSubStepTime = 0.0f;
+
+    bool enableMotor = false;
+    float motorSpeed = 0.0f;
+    float motorMass = 0.0f;
+    float maxMotorImpulse = 0.0f;
+    float motorImpulse = 0.0f;
 };
 
 // 원점 작용점을 질량 중심 기준으로 바꾸고 회전하는 축의 유효 질량을 준비함.
 [[nodiscard]] wheelJointConstraint2 prepareWheelJointConstraint( const wheelJointSim2& joint, const bodySim& bodySimA, const bodySim& bodySimB, float subStepTime );
 void warmStartWheelJointConstraint( const wheelJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB );
-// 스프링 → 하한 → 상한 → 축 수직 제약. 물리 스프링은 relaxation에서도 복원 bias를 유지함.
+// 모터 → 스프링 → 하한 → 상한 → 축 수직 제약. 물리 스프링은 relaxation에서도 복원 bias를 유지함.
 void solveWheelJointConstraint( wheelJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB, bool useBias );
 
 } // namespace zonai

@@ -24,6 +24,10 @@ struct wheelJointDef
     bool enableLimit = false;
     float lowerTranslation = 0.0f; // 부호 있는 축 방향 변위 (m). 유한하며 lower <= upper.
     float upperTranslation = 0.0f; // 두 값이 같으면 해당 변위를 유지함.
+
+    bool enableMotor = false;
+    float motorSpeed = 0.0f; // 목표 wB-wA (rad/s). 유한하며 0은 제동임.
+    float maxMotorTorque = 0.0f; // 최대 모터 토크 (N*m). 유한한 비음수, 0은 힘을 끔.
 };
 
 struct wheelJointData
@@ -38,6 +42,7 @@ struct wheelJointData
     vec2 force{}; // 마지막 substep의 누적 임펄스 / h. B에 작용하는 전체 반력 (N).
     float springForce = 0.0f; // 축 방향 스프링 힘 (N). 양수는 axis 방향.
     float limitForce = 0.0f; // (lowerImpulse - upperImpulse) / h. 양수는 axis 방향.
+    float motorTorque = 0.0f; // 마지막 substep의 motorImpulse / h (N*m). 양수는 B의 반시계 토크.
     bool collideConnected = false;
     bool enableSpring = true;
     float hertz = 3.0f;
@@ -45,6 +50,9 @@ struct wheelJointData
     bool enableLimit = false;
     float lowerTranslation = 0.0f;
     float upperTranslation = 0.0f;
+    bool enableMotor = false;
+    float motorSpeed = 0.0f;
+    float maxMotorTorque = 0.0f;
 };
 
 } // namespace zonai
