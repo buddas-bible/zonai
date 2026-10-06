@@ -173,5 +173,82 @@ int main()
         check( clamped.lowerAngle == -0.99f * std::numbers::pi_v<float> && clamped.upperAngle == 0.99f * std::numbers::pi_v<float>, "limit range stays away from wrapped angle branch cut" );
     }
 
+    for( const int subSteps : { 1, 4 } )
+    {
+        world motors;
+        motors.SetGravity( {} );
+        const auto base = motors.CreateBody();
+        const auto rotor = motors.CreateBody( bodyType::Dynamic );
+        const auto rotorShape = motors.CreateShape( rotor, circle2{ {}, 0.5f } );
+        const float inertia = motors.GetBodyRotationalInertia( rotor );
+        definition = {};
+        definition.bodyA = base;
+        definition.bodyB = rotor;
+        definition.enableMotor = true;
+        definition.motorSpeed = 2.0f;
+        definition.maxMotorTorque = inertia * 3.0f;
+        const auto motorJoint = motors.createRevoluteJoint( definition );
+        motors.Step( 1.0f / 60.0f, subSteps );
+        check( std::abs( motors.GetBodyAngularVelocity( rotor ) - 0.05f ) < 0.00001f, "World acceleration follows torque divided by inertia independently of substeps" );
+        check( std::abs( motors.getRevoluteJointData( motorJoint ).motorTorque - definition.maxMotorTorque ) < 0.00001f, "World stores signed motor impulse for torque query" );
+        for( int i = 0; i < 90; ++i ) motors.Step( 1.0f / 60.0f, subSteps );
+        check( std::abs( motors.GetBodyAngularVelocity( rotor ) - 2.0f ) < 0.00001f, "motor reaches target angular speed" );
+        check( std::abs( motors.getRevoluteJointData( motorJoint ).motorTorque ) < 0.00001f, "unloaded target speed needs no motor torque" );
+        for( int i = 0; i < 30; ++i )
+        {
+            motors.ApplyTorque( rotor, -inertia );
+            motors.Step( 1.0f / 60.0f, subSteps );
+        }
+        check( std::abs( motors.GetBodyAngularVelocity( rotor ) - 2.0f ) < 0.00001f && std::abs( motors.getRevoluteJointData( motorJoint ).motorTorque - inertia ) < 0.00001f, "motor balances external load within torque budget" );
+        motors.setRevoluteJointMotor( motorJoint, true, 0.0f, definition.maxMotorTorque );
+        check( motors.getRevoluteJointData( motorJoint ).motorTorque == 0.0f, "motor setting clears old torque cache" );
+        for( int i = 0; i < 60; ++i ) motors.Step( 1.0f / 60.0f, subSteps );
+        check( std::abs( motors.GetBodyAngularVelocity( rotor ) ) < 0.00001f, "zero target brakes rotor to rest" );
+        motors.setRevoluteJointMotor( motorJoint, true, -2.0f, definition.maxMotorTorque );
+        for( int i = 0; i < 60; ++i ) motors.Step( 1.0f / 60.0f, subSteps );
+        check( std::abs( motors.GetBodyAngularVelocity( rotor ) + 2.0f ) < 0.00001f, "World motor reverses direction" );
+        motors.SetBodyTransform( rotor, {} );
+        motors.SetBodyAngularVelocity( rotor, 0.0f );
+        motors.setRevoluteJointLimit( motorJoint, true, -0.4f, 0.4f );
+        motors.setRevoluteJointMotor( motorJoint, true, 2.0f, definition.maxMotorTorque );
+        for( int i = 0; i < 120; ++i ) motors.Step( 1.0f / 60.0f, subSteps );
+        const auto stalled = motors.getRevoluteJointData( motorJoint );
+        check( stalled.currentAngle > 0.39f && stalled.currentAngle < 0.41f && std::abs( motors.GetBodyAngularVelocity( rotor ) ) < 0.0001f, "angular limit stalls powered motor at upper boundary" );
+        check( std::abs( stalled.motorTorque - definition.maxMotorTorque ) < 0.00001f && std::abs( stalled.torque + stalled.motorTorque ) < 0.0001f, "limit and motor torque queries expose opposing loads" );
+        motors.setRevoluteJointMotor( motorJoint, true, -2.0f, definition.maxMotorTorque );
+        check( motors.getRevoluteJointData( motorJoint ).torque == 0.0f, "motor setting clears coupled limit cache" );
+        for( int i = 0; i < 20; ++i ) motors.Step( 1.0f / 60.0f, subSteps );
+        check( motors.getRevoluteJointData( motorJoint ).currentAngle < 0.3f, "reversed motor leaves boundary in World" );
+        motors.SetShapeDensity( rotorShape, 2.0f );
+        check( motors.getRevoluteJointData( motorJoint ).motorTorque == 0.0f, "mass change clears motor cache" );
+        motors.Step( 1.0f / 60.0f, subSteps );
+        motors.SetBodyTransform( rotor, {} );
+        check( motors.getRevoluteJointData( motorJoint ).motorTorque == 0.0f, "pose change clears motor cache" );
+        motors.Step( 1.0f / 60.0f, subSteps );
+        motors.setRevoluteJointLimit( motorJoint, false, -0.4f, 0.4f );
+        check( motors.getRevoluteJointData( motorJoint ).motorTorque == 0.0f, "limit change clears coupled motor cache" );
+        motors.SetBodyAwake( rotor, false );
+        motors.setRevoluteJointMotor( motorJoint, true, -2.0f, definition.maxMotorTorque );
+        check( !motors.IsBodyAwake( rotor ), "identical motor settings preserve sleep" );
+        const auto isolatedRotor = motors.CreateBody( bodyType::Dynamic );
+        ( void )motors.CreateShape( isolatedRotor, circle2{ {}, 0.2f } );
+        motors.SetBodyAwake( isolatedRotor, false );
+        motors.setRevoluteJointMotor( motorJoint, false, -2.0f, definition.maxMotorTorque );
+        check( motors.IsBodyAwake( rotor ) && !motors.IsBodyAwake( isolatedRotor ), "motor change wakes connected component without crossing static body" );
+        const float speedBefore = motors.GetBodyAngularVelocity( rotor );
+        motors.Step( 1.0f / 60.0f, subSteps );
+        check( motors.GetBodyAngularVelocity( rotor ) == speedBefore && motors.getRevoluteJointData( motorJoint ).motorTorque == 0.0f, "disabled motor restores free rotation without stale torque" );
+        motors.destroyJoint( motorJoint );
+        definition.enableMotor = false;
+        const auto reusedMotor = motors.createRevoluteJoint( definition );
+        check( motors.getRevoluteJointData( reusedMotor ).motorTorque == 0.0f && !motors.IsValid( motorJoint ), "reused joint slot does not inherit motor cache" );
+    }
+
+    // 모터 목표는 월드 각속도가 아니라 B의 A에 대한 상대 각속도임.
+    moving.setRevoluteJointMotor( movingJoint, true, 1.0f, 10.0f );
+    for( int i = 0; i < 120; ++i ) moving.Step( 1.0f / 60.0f, 4 );
+    check( std::abs( moving.GetBodyAngularVelocity( follower ) - moving.GetBodyAngularVelocity( driver ) - 1.0f ) < 0.01f, "motor follows relative angular speed of moving kinematic base" );
+    check( moving.GetBodyAngularVelocity( driver ) == drive.angularVelocity && Length( moving.getRevoluteJointData( movingJoint ).anchorB - moving.getRevoluteJointData( movingJoint ).anchorA ) < 0.02f, "motor preserves kinematic motion and off-center anchor" );
+
     return EXIT_SUCCESS;
 }

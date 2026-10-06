@@ -242,6 +242,9 @@ void rigidBodyDemo::createRevoluteHinge()
     joint.localAnchorB = { 0.0f, 1.0f };
     joint.lowerAngle = -0.25f * std::numbers::pi_v<float>;
     joint.upperAngle = 0.25f * std::numbers::pi_v<float>;
+    // 자유 회전으로 시작하고, 모터를 켜면 토크 한도와 중력 하중의 관계를 비교함.
+    joint.motorSpeed = 2.0f;
+    joint.maxMotorTorque = 10.0f;
     revoluteJoint_ = world_.createRevoluteJoint( joint );
 }
 

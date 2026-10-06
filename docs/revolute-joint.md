@@ -1,12 +1,12 @@
 # 기본 회전 조인트와 회전축 실험
 
-2026-10-07, master `ba50e1b` 이후 기본 Revolute Joint를 추가했다. 두 물체의 연결점은 일치시키고 상대 회전은 허용한다. 거리 조인트가 한 방향의 거리를 제한했다면, 회전 조인트는 연결점의 x/y 이동을 함께 제한한다. 이후 기준 각도와 [각도 제한](revolute-limit.md)을 추가했다. 제한은 기본 off이며, 회전 모터·각도 스프링은 후속 단계다.
+2026-10-07, master `ba50e1b` 이후 기본 Revolute Joint를 추가했다. 두 물체의 연결점은 일치시키고 상대 회전은 허용한다. 거리 조인트가 한 방향의 거리를 제한했다면, 회전 조인트는 연결점의 x/y 이동을 함께 제한한다. 이후 기준 각도와 [각도 제한](revolute-limit.md), [회전 모터](revolute-motor.md)를 추가했다. 제한과 모터는 기본 off이며, 사용자 각도 스프링은 아직 없다.
 
 ## API와 수명
 
 `world::createRevoluteJoint(revoluteJointDef)`로 생성하고 `getRevoluteJointData`로 관찰한다. Body A/B와 두 로컬 연결점을 지정하며, 적어도 한 물체는 Dynamic이어야 한다. 연결점은 물체 원점 기준이다. Shape 추가나 밀도 변경으로 질량 중심이 이동해도 실제 연결 위치는 유지한다.
 
-조회 값은 두 월드 연결점, 기준 각도를 뺀 B의 A에 대한 상대 각도(rad), 마지막 substep의 B에 작용한 반력(N)이다. 기준 각도는 기본 0이다. 각도는 -pi부터 pi까지이며 회전 횟수를 누적하지 않는다. 반력은 누적 임펄스를 substep 시간으로 나눈 값이다. 후속 각도 제한의 `torque`는 제한만의 반력이며 모터는 아직 없다.
+조회 값은 두 월드 연결점, 기준 각도를 뺀 B의 A에 대한 상대 각도(rad), 마지막 substep의 B에 작용한 반력(N)이다. 기준 각도는 기본 0이다. 각도는 -pi부터 pi까지이며 회전 횟수를 누적하지 않는다. 반력은 누적 임펄스를 substep 시간으로 나눈 값이다. 후속 각도 제한의 `torque`는 제한만의 반력이며 모터는 별도 `motorTorque`로 조회한다.
 
 기존 Joint 슬롯·ID·Body 연결·충돌 제외·Island·wake/sleep·삭제 경로를 공유한다. `collideConnected`는 기본 false이며 제거하면 해당 충돌 제외가 해제된다. Body 삭제는 연결된 Joint도 제거한다. 질량/관성/pose 변경 시 이전 임펄스를 비우고, 시간 간격이 바뀌면 warm start를 사용하지 않는다.
 
@@ -49,4 +49,4 @@ Box2D main [`ac7c751`의 revolute_joint.c](https://github.com/erincatto/box2d/bl
 
 최종 소스로 Windows Sandbox ON 전체 Debug/Release build와 각각 45/45 CTest, Sandbox OFF 전체 Release build와 45/45 CTest를 확인했다. 연결점의 회전 속도 누락, K의 결합항 제거, relaxation에 bias 적용, warm start의 현재 회전 누락이라는 네 가지 mutation을 모두 테스트가 잡았다. 원본 복구 후 다시 통과했으며, 최종 리뷰에서 권고한 중심 밖 Dynamic–Dynamic 검사도 추가해 양쪽 각속도·연결점 속도·총 선형 운동량을 확인했다. 원격 CI 결과는 해당 PR에 기록한다.
 
-기준 상대 각도와 각도 제한은 [후속 기록](revolute-limit.md)을 따른다. 다음은 회전 모터이며, 자동차나 조나이 선풍기는 모터까지 확인한 뒤 같은 데모 host에 추가한다.
+기준 상대 각도와 각도 제한은 [후속 기록](revolute-limit.md), 속도 모터와 제동은 [모터 기록](revolute-motor.md)을 따른다. 필요한 Joint 실험을 확인한 뒤 자동차나 조나이 선풍기를 같은 데모 host에 추가한다.

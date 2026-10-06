@@ -25,6 +25,10 @@ struct revoluteJointSim2
     float upperAngle = 0.0f;
     float lowerImpulse = 0.0f;
     float upperImpulse = 0.0f;
+    bool enableMotor = false;
+    float motorSpeed = 0.0f;
+    float maxMotorTorque = 0.0f;
+    float motorImpulse = 0.0f;
 };
 
 } // namespace zonai

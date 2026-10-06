@@ -445,5 +445,64 @@ void checkDemoUi()
             }
         }
     }
+    auto motorView = createDemoView( demoKind::revoluteHinge );
+    auto& motorModel = static_cast<rigidBodyDemo&>( *motorView );
+    for( int frame = 0; frame < 6; ++frame )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+        ImGui::Begin( "Revolute motor actions" );
+        if( frame > 0 ) ImGui::GetStateStorage()->SetInt( ImGui::GetID( "RevoluteMotorSettings" ), 1 );
+        ImGui::PushID( "RevoluteMotorSettings" );
+        const char* action = frame < 2 || frame == 5 ? "Revolute motor" : frame == 2 ? "Reverse revolute motor" : frame == 3 ? "Brake revolute motor" : nullptr;
+        if( action ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( action );
+        ImGui::PopID();
+        motorView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        const auto data = motorModel.getWorld().getRevoluteJointData( motorModel.getRevoluteJoint() );
+        const float expectedSpeed = frame < 2 ? 2.0f : frame == 2 ? -2.0f : 0.0f;
+        if( data.enableMotor != ( frame > 0 && frame < 5 ) || data.motorSpeed != expectedSpeed || data.maxMotorTorque != 10.0f )
+        {
+            std::fprintf( stderr, "folded motor controls, toggle, reverse or brake failed: frame %d\n", frame );
+            std::exit( EXIT_FAILURE );
+        }
+    }
+    for( int setting = 0; setting < 2; ++setting )
+    {
+        for( int upper = 0; upper < 2; ++upper )
+        {
+            auto tuningView = createDemoView( demoKind::revoluteHinge );
+            auto& tuningModel = static_cast<rigidBodyDemo&>( *tuningView );
+            for( int phase = 0; phase < 3; ++phase )
+            {
+                if( phase == 1 ) io.AddInputCharactersUTF8( upper ? "9000" : "-9000" );
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+                ImGui::NewFrame();
+                ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+                ImGui::Begin( "Revolute motor input" );
+                ImGui::GetStateStorage()->SetInt( ImGui::GetID( "RevoluteMotorSettings" ), 1 );
+                if( phase == 0 )
+                {
+                    ImGui::PushID( "RevoluteMotorSettings" );
+                    GImGui->NavActivateId = ImGui::GetID( setting == 0 ? "Revolute motor speed" : "Revolute motor torque" );
+                    GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+                    ImGui::PopID();
+                }
+                tuningView->drawControls();
+                ImGui::End();
+                ImGui::Render();
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            }
+            const auto data = tuningModel.getWorld().getRevoluteJointData( tuningModel.getRevoluteJoint() );
+            const float value = setting == 0 ? data.motorSpeed : data.maxMotorTorque;
+            const float expected = setting == 0 ? ( upper ? 5.0f : -5.0f ) : ( upper ? 50.0f : 0.0f );
+            if( value != expected )
+            {
+                std::fprintf( stderr, "manual revolute motor input escaped valid range\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+    }
     ImGui::DestroyContext();
 }

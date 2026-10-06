@@ -23,6 +23,9 @@ struct revoluteJointDef
     // 유한한 lower <= upper. World에서 ±0.99*pi로 제한하며 같으면 해당 각도를 유지함.
     float lowerAngle = 0.0f;
     float upperAngle = 0.0f;
+    bool enableMotor = false;
+    float motorSpeed = 0.0f; // B의 A에 대한 목표 각속도 (rad/s). 0이면 제동함.
+    float maxMotorTorque = 0.0f; // 유한한 비음수 토크 한도 (N*m). 0이면 모터 힘이 없음.
 };
 
 struct revoluteJointData
@@ -45,6 +48,11 @@ struct revoluteJointData
     float upperAngle = 0.0f;
     // 마지막 substep의 (lower - upper) 임펄스 / 시간 간격. B에 작용하는 제한 토크 (N*m).
     float torque = 0.0f;
+    bool enableMotor = false;
+    float motorSpeed = 0.0f;
+    float maxMotorTorque = 0.0f;
+    // 마지막 substep의 모터 임펄스 / 시간 간격. B에 작용하는 모터 토크 (N*m).
+    float motorTorque = 0.0f;
 };
 
 } // namespace zonai
