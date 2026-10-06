@@ -33,6 +33,19 @@ revoluteJointConstraint2 prepareRevoluteJointConstraint( const revoluteJointSim2
     constraint.softness = makeConstraintSoftness( std::min( 60.0f, 0.25f / subStepTime ), 2.0f, subStepTime );
     constraint.impulse = joint.subStepTime == subStepTime ? joint.impulse : vec2{};
 
+    constraint.relativeRotation = Inverse( bodySimA.transform.rotation * rot2::FromRadians( joint.referenceAngle ) ) * bodySimB.transform.rotation;
+    constraint.enableLimit = joint.enableLimit;
+    constraint.lowerAngle = joint.lowerAngle;
+    constraint.upperAngle = joint.upperAngle;
+    const float k = constraint.invInertiaA + constraint.invInertiaB;
+    constraint.angularMass = k > 0.0f ? 1.0f / k : 0.0f;
+    constraint.invSubStepTime = 1.0f / subStepTime;
+
+    // 회전할 수 없거나 제한을 끈 상태에서는 과거 제한 임펄스를 적용하지 않음.
+    const bool keepAngularImpulse = joint.subStepTime == subStepTime && joint.enableLimit && k > 0.0f;
+    constraint.lowerImpulse = keepAngularImpulse ? joint.lowerImpulse : 0.0f;
+    constraint.upperImpulse = keepAngularImpulse ? joint.upperImpulse : 0.0f;
+
     return constraint;
 }
 
@@ -45,12 +58,13 @@ void warmStartRevoluteJointConstraint( const revoluteJointConstraint2& constrain
     const vec2 r_a = Rotate( bodyStateA.deltaRotation, constraint.anchorA );
     const vec2 r_b = Rotate( bodyStateB.deltaRotation, constraint.anchorB );
     const vec2 impulse = constraint.impulse;
+    const float angularImpulse = constraint.lowerImpulse - constraint.upperImpulse;
 
-    // dV = P / m, dW = (r x P) / I. 같은 작용점 임펄스의 반작용을 A에 적용함.
+    // dV = P / m, dW = (r x P + L) / I. 연결점과 각도 임펄스의 반작용을 A에 적용함.
     bodyStateA.linearVelocity -= constraint.invMassA * impulse;
-    bodyStateA.angularVelocity -= constraint.invInertiaA * Cross( r_a, impulse );
+    bodyStateA.angularVelocity -= constraint.invInertiaA * ( Cross( r_a, impulse ) + angularImpulse );
     bodyStateB.linearVelocity += constraint.invMassB * impulse;
-    bodyStateB.angularVelocity += constraint.invInertiaB * Cross( r_b, impulse );
+    bodyStateB.angularVelocity += constraint.invInertiaB * ( Cross( r_b, impulse ) + angularImpulse );
 }
 
 #pragma endregion WarmStart
@@ -59,11 +73,50 @@ void warmStartRevoluteJointConstraint( const revoluteJointConstraint2& constrain
 
 void solveRevoluteJointConstraint( revoluteJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB, bool useBias )
 {
+    if( constraint.enableLimit && constraint.angularMass > 0.0f )
+    {
+        const rot2 rotation = Inverse( bodyStateA.deltaRotation ) * bodyStateB.deltaRotation * constraint.relativeRotation;
+        const float angle = std::atan2( rotation.s, rotation.c );
+
+        auto solveLimit = [&]( float separation, float direction, float& accumulatedImpulse )
+        {
+            float bias = 0.0f;
+            float massScale = 1.0f;
+            float impulseScale = 0.0f;
+
+            // 범위 안에서는 남은 각도 / h로 경계 통과를 예측함. 위반한 위치는 보정 pass에서만 줄임.
+            if( separation > 0.0f )
+            {
+                bias = separation * constraint.invSubStepTime;
+            }
+            else if( useBias )
+            {
+                bias = constraint.softness.biasRate * separation;
+                massScale = constraint.softness.massScale;
+                impulseScale = constraint.softness.impulseScale;
+            }
+
+            // Cdot = direction * (wB - wA), dP = -angularMass * (Cdot + bias).
+            // 각 경계는 바깥 회전만 막으므로 누적 임펄스를 0 이상으로 제한함. 안쪽 복귀는 허용함.
+            const float velocity = direction * ( bodyStateB.angularVelocity - bodyStateA.angularVelocity );
+            const float deltaImpulse = -massScale * constraint.angularMass * ( velocity + bias ) - impulseScale * accumulatedImpulse;
+            const float oldImpulse = accumulatedImpulse;
+            accumulatedImpulse = std::max( 0.0f, oldImpulse + deltaImpulse );
+            const float impulse = direction * ( accumulatedImpulse - oldImpulse );
+            bodyStateA.angularVelocity -= constraint.invInertiaA * impulse;
+            bodyStateB.angularVelocity += constraint.invInertiaB * impulse;
+        };
+
+        // Box2D처럼 하한 → 상한 → 연결점 순서. 각 제약은 직전 제약이 갱신한 속도를 읽음.
+        solveLimit( angle - constraint.lowerAngle, 1.0f, constraint.lowerImpulse );
+        solveLimit( constraint.upperAngle - angle, -1.0f, constraint.upperImpulse );
+    }
+
     // Box2D처럼 현재 누적 회전을 반영한 작용점으로 매 반복의 K를 다시 구함.
     const vec2 r_a = Rotate( bodyStateA.deltaRotation, constraint.anchorA );
     const vec2 r_b = Rotate( bodyStateB.deltaRotation, constraint.anchorB );
 
-    // 작용점 속도 v + w x r의 차이. 각도 자체를 고정하는 항은 없음.
+    // 작용점 속도 v + w x r의 차이. 연결점 제약은 각도 자체를 고정하지 않음.
     const vec2 v_a = bodyStateA.linearVelocity;
     const float w_a = bodyStateA.angularVelocity;
     const vec2 v_b = bodyStateB.linearVelocity;

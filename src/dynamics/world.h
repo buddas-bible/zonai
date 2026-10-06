@@ -98,6 +98,8 @@ public:
 
     // 두 작용점을 일치시키며 상대 회전은 허용함. 서로 다른 Body 중 하나 이상은 Dynamic이어야 함.
     [[nodiscard]] jointId createRevoluteJoint( const revoluteJointDef& definition );
+    // 유한한 lower <= upper (rad). ±0.99*pi로 제한하며 변경 시 cache를 비우고 연결된 component를 깨움.
+    void setRevoluteJointLimit( jointId id, bool enableLimit, float lowerAngle, float upperAngle );
     [[nodiscard]] revoluteJointData getRevoluteJointData( jointId id ) const;
 
     // Static A / Dynamic B. target은 world 좌표, hertz/damping/maxForce는 유한한 비음수임.

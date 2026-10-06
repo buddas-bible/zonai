@@ -25,6 +25,16 @@ struct revoluteJointConstraint2
     float invInertiaB = 0.0f;
     vec2 impulse{};
     constraintSoftness2 softness{};
+
+    // 기준 각도를 뺀 Step 시작 시 상대 회전. 누적 회전을 곱한 뒤 atan2로 각도를 구함.
+    rot2 relativeRotation{};
+    bool enableLimit = false;
+    float lowerAngle = 0.0f;
+    float upperAngle = 0.0f;
+    float angularMass = 0.0f; // 1 / (invInertiaA + invInertiaB)
+    float invSubStepTime = 0.0f;
+    float lowerImpulse = 0.0f;
+    float upperImpulse = 0.0f;
 };
 
 // 원점 기준 작용점을 질량 중심 기준으로 바꾸고 수치 안정화 계수를 준비함.
@@ -33,7 +43,7 @@ struct revoluteJointConstraint2
 // 이전 누적 임펄스를 두 작용점에 반대 방향으로 적용함.
 void warmStartRevoluteJointConstraint( const revoluteJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB );
 
-// 연결점의 상대속도를 제거함. 위치 오차는 useBias pass에서만 보정함.
+// 각도 제한 다음 연결점의 상대속도를 제거함. 위반한 위치는 useBias pass에서만 보정함.
 void solveRevoluteJointConstraint( revoluteJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB, bool useBias );
 
 } // namespace zonai

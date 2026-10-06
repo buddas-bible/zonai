@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | Rigid Bodies / Playground | 기존 바닥·ramp·circle·box·capsule·kinematic platform | A/D 유지: circle에 힘, Space: jump impulse, S: box 회전 impulse, 왼쪽 drag: Dynamic solid 잡기, 오른쪽 클릭: circle을 cursor 방향으로 밀기 |
 | Joints / Distance Pendulum | 독립 Static anchor와 Dynamic bob, rigid Distance Joint | A/D 유지: 수평 힘, Space: kick, 왼쪽 drag: 진자 잡기, 오른쪽 클릭: cursor 방향으로 밀기, 보라색 선·목표/현재 길이로 제약 관찰 |
-| 조인트 / 회전축과 막대 | Static 축과 Dynamic 막대, 기본 Revolute Joint | A/D 유지: 수평 힘, Space: 위쪽 impulse, S: 회전 impulse, 왼쪽 drag·오른쪽 클릭, 연결점 오차·상대 각도·반력 관찰 |
+| 조인트 / 회전축과 막대 | Static 축과 Dynamic 막대, Revolute Joint | A/D 유지: 수평 힘, Space: 위쪽 impulse, S: 회전 impulse, 왼쪽 drag·오른쪽 클릭, 연결점 오차·기준 대비 각도·반력, 접힌 각도 제한 설정과 경계/토크 관찰 |
 
 `Demo` 목록으로 장면을 고르고 Play/Pause, Step, Reset을 사용한다. 전환/reset은 paused 상태의 새 장면을 만들고 선택/contact/입력·시간·카메라를 초기화한다. Sub-steps는 공통 설정으로 유지한다. Wheel zoom/middle pan과 기존 pose/material/filter/sleep/CCD/force/Contact/Tree Inspector는 유지한다.
 
@@ -33,6 +33,6 @@
 
 ## 사용자 목표와 다음 단계
 
-한 프로그램에 데모별 조작·설정·관찰값을 추가하는 물리 학습 공간이 장기 목표다. Mouse Joint와 필요한 picking, [Distance spring의 Hertz·감쇠 실험](distance-spring.md), [limit의 최소·최대 거리 실험](distance-limit.md), [motor의 목표 축속도·최대 힘 실험](distance-motor.md), [기본 회전축 실험](revolute-joint.md)을 추가했다. 진자의 접힌 ‘거리 모터’에서 방향 전환·제동·경계와 실제 힘을 관찰하고, 막대에서는 두 연결점이 같은 축에 머물면서 회전하는지 확인한다. 다음은 회전축의 각도 제한·회전 모터이며, 다른 Joint와 함께 ragdoll·motor 자동차·조나이 선풍기/연결 장치로 조합한다.
+한 프로그램에 데모별 조작·설정·관찰값을 추가하는 물리 학습 공간이 장기 목표다. Mouse Joint와 필요한 picking, [Distance spring의 Hertz·감쇠 실험](distance-spring.md), [limit의 최소·최대 거리 실험](distance-limit.md), [motor의 목표 축속도·최대 힘 실험](distance-motor.md), [기본 회전축](revolute-joint.md)과 [각도 제한 실험](revolute-limit.md)을 추가했다. 진자의 접힌 ‘거리 모터’에서 방향 전환·제동·경계와 실제 힘을 관찰하고, 막대에서는 두 연결점이 같은 축에 머물면서 회전하는지와 각도 경계·복귀·제한 토크를 확인한다. 다음은 회전 모터이며, 다른 Joint와 함께 ragdoll·motor 자동차·조나이 선풍기/연결 장치로 조합한다.
 
 천·유체·soft body·voxel physics/destruction/terrain·다양한 terrain collision·오목한 object/terrain·파괴 조각의 rigid body simulation도 같은 프로그램의 데모로 학습하고 싶다는 사용자 목표를 보존한다. 각 기능의 solver/data와 2D/3D 범위는 해당 구현 단계에서 정한다. Voxel은 파괴 → 조각 분리 → collision/mass 생성 → rigid body simulation을 단계별로 확인한다. 이 목록은 해당 기능의 현재 구현 완료를 의미하지 않는다.

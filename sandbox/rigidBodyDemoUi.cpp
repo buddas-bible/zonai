@@ -289,7 +289,24 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         draw.DrawPoint( joint.anchorA, ANCHOR_COLOR, 7.0f );
         draw.DrawPoint( joint.anchorB, ROD_COLOR );
         draw.DrawSegment( { joint.anchorA, joint.anchorB }, ROD_COLOR );
-        draw.DrawArrow( joint.anchorB, Rotate( getWorld().GetBodyTransform( joint.bodyB ).rotation, { 1.0f, 0.0f } ), ROD_COLOR, 0.5f );
+        draw.DrawArrow( joint.anchorB, Rotate( getWorld().GetBodyTransform( joint.bodyB ).rotation, { 0.0f, -1.0f } ), ROD_COLOR, 0.5f );
+        if( joint.enableLimit )
+        {
+            // 막대의 초기 아래쪽 방향을 기준으로 허용 각도를 표시함. A가 회전하면 경계도 함께 회전함.
+            const rot2 reference = getWorld().GetBodyTransform( joint.bodyA ).rotation * rot2::FromRadians( joint.referenceAngle );
+            const vec2 lower = joint.anchorA + 0.85f * Rotate( reference * rot2::FromRadians( joint.lowerAngle ), { 0.0f, -1.0f } );
+            const vec2 upper = joint.anchorA + 0.85f * Rotate( reference * rot2::FromRadians( joint.upperAngle ), { 0.0f, -1.0f } );
+            draw.DrawSegment( { joint.anchorA, lower }, IM_COL32( 100, 255, 140, 255 ) );
+            draw.DrawSegment( { joint.anchorA, upper }, IM_COL32( 255, 105, 90, 255 ) );
+            vec2 previous = joint.anchorA + 0.65f * Rotate( reference * rot2::FromRadians( joint.lowerAngle ), { 0.0f, -1.0f } );
+            for( int i = 1; i <= 16; ++i )
+            {
+                const float angle = joint.lowerAngle + ( joint.upperAngle - joint.lowerAngle ) * static_cast<float>( i ) / 16.0f;
+                const vec2 next = joint.anchorA + 0.65f * Rotate( reference * rot2::FromRadians( angle ), { 0.0f, -1.0f } );
+                draw.DrawSegment( { previous, next }, IM_COL32( 180, 185, 200, 255 ), 1.0f );
+                previous = next;
+            }
+        }
     }
 
     if( showContacts_ )
@@ -657,10 +674,39 @@ void rigidBodyDemoUi::drawExperimentControls()
     {
         ImGui::TextUnformatted( "회전축 관찰" );
         const revoluteJointData joint = getWorld().getRevoluteJointData( getRevoluteJoint() );
-        ImGui::Text( "상대 각도: %.1f 도", joint.currentAngle * 180.0f / std::numbers::pi_v<float> );
+        ImGui::Text( "기준 대비 각도: %.1f 도", joint.currentAngle * 180.0f / std::numbers::pi_v<float> );
         ImGui::Text( "연결점 오차: %.4f m", Length( joint.anchorB - joint.anchorA ) );
         ImGui::Text( "반력: (%.2f, %.2f) N", joint.force.x, joint.force.y );
         ImGui::TextWrapped( "청록색은 고정점, 보라색은 막대의 연결점과 방향입니다. 막대를 잡거나 충격량을 주면서 연결점이 유지되는지 관찰하세요." );
+
+        if( ImGui::TreeNode( "각도 제한###RevoluteLimitSettings" ) )
+        {
+            constexpr float TO_DEGREES = 180.0f / std::numbers::pi_v<float>;
+            constexpr float TO_RADIANS = std::numbers::pi_v<float> / 180.0f;
+            constexpr float MAX_ANGLE = 178.2f;
+            bool enableLimit = joint.enableLimit;
+            float lower = joint.lowerAngle * TO_DEGREES;
+            float upper = joint.upperAngle * TO_DEGREES;
+            bool changed = ImGui::Checkbox( "각도 제한 사용###Revolute limit", &enableLimit );
+            ImGui::Text( "기준 각도: %.1f 도", joint.referenceAngle * TO_DEGREES );
+            if( ImGui::SliderFloat( "최소 각도###Revolute lower", &lower, -MAX_ANGLE, upper, "%.1f 도", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                lower = std::clamp( lower, -MAX_ANGLE, upper );
+                changed = true;
+            }
+            if( ImGui::SliderFloat( "최대 각도###Revolute upper", &upper, lower, MAX_ANGLE, "%.1f 도", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                upper = std::clamp( upper, lower, MAX_ANGLE );
+                changed = true;
+            }
+            if( changed )
+            {
+                getWorld().setRevoluteJointLimit( getRevoluteJoint(), enableLimit, lower * TO_RADIANS, upper * TO_RADIANS );
+            }
+            ImGui::Text( "제한 토크: %.2f N·m", joint.torque );
+            ImGui::TextWrapped( "초록은 최소, 빨강은 최대 각도이며 회색 호는 허용 범위입니다. 경계에서는 바깥 회전을 막고 안쪽 복귀는 허용합니다. 두 각도가 같으면 그 각도를 유지합니다." );
+            ImGui::TreePop();
+        }
 
         if( ImGui::Button( "막대 회전시키기###Spin hinge", ImVec2( -1.0f, 0.0f ) ) )
         {

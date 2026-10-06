@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <utility>
 
 #include "collision/constants.h"
@@ -399,6 +400,7 @@ jointId world::createRevoluteJoint( const revoluteJointDef& definition )
     assert( bodyIndexA != bodyIndexB );
     assert( bodies_[bodyIndexA].type == bodyType::Dynamic || bodies_[bodyIndexB].type == bodyType::Dynamic );
     assert( IsFinite( definition.localAnchorA ) && IsFinite( definition.localAnchorB ) );
+    assert( std::isfinite( definition.referenceAngle ) && std::isfinite( definition.lowerAngle ) && std::isfinite( definition.upperAngle ) && definition.lowerAngle <= definition.upperAngle );
 
     const std::int32_t index = allocateJoint( bodyIndexA, bodyIndexB, definition.collideConnected );
     revoluteJointSim2 sim{};
@@ -407,9 +409,40 @@ jointId world::createRevoluteJoint( const revoluteJointDef& definition )
     sim.bodyIdB = bodyIndexB;
     sim.localAnchorA = definition.localAnchorA;
     sim.localAnchorB = definition.localAnchorB;
+    sim.referenceAngle = definition.referenceAngle;
+    sim.enableLimit = definition.enableLimit;
+    sim.lowerAngle = std::clamp( definition.lowerAngle, -0.99f * std::numbers::pi_v<float>, 0.99f * std::numbers::pi_v<float> );
+    sim.upperAngle = std::clamp( definition.upperAngle, -0.99f * std::numbers::pi_v<float>, 0.99f * std::numbers::pi_v<float> );
     jointSims_[index] = sim;
 
     return makeJointId( index );
+}
+
+void world::setRevoluteJointLimit( jointId id, bool enableLimit, float lowerAngle, float upperAngle )
+{
+    assert( std::isfinite( lowerAngle ) && std::isfinite( upperAngle ) && lowerAngle <= upperAngle );
+
+    lowerAngle = std::clamp( lowerAngle, -0.99f * std::numbers::pi_v<float>, 0.99f * std::numbers::pi_v<float> );
+    upperAngle = std::clamp( upperAngle, -0.99f * std::numbers::pi_v<float>, 0.99f * std::numbers::pi_v<float> );
+    auto& joint = std::get<revoluteJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.enableLimit == enableLimit && joint.lowerAngle == lowerAngle && joint.upperAngle == upperAngle ) return;
+
+    joint.enableLimit = enableLimit;
+    joint.lowerAngle = lowerAngle;
+    joint.upperAngle = upperAngle;
+    // 새로운 각도 경계는 연결점 임펄스와도 결합하므로 이전 해를 모두 비움.
+    joint.impulse = {};
+    joint.lowerImpulse = 0.0f;
+    joint.upperImpulse = 0.0f;
+
+    if( bodies_[joint.bodyIdA].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdA );
+    }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdB );
+    }
 }
 
 revoluteJointData world::getRevoluteJointData( jointId id ) const
@@ -422,10 +455,15 @@ revoluteJointData world::getRevoluteJointData( jointId id ) const
     data.anchorA = TransformPoint( bodySims_[sim.bodyIdA].transform, sim.localAnchorA );
     data.anchorB = TransformPoint( bodySims_[sim.bodyIdB].transform, sim.localAnchorB );
 
-    const rot2 relativeRotation = Inverse( bodySims_[sim.bodyIdA].transform.rotation ) * bodySims_[sim.bodyIdB].transform.rotation;
+    const rot2 relativeRotation = Inverse( bodySims_[sim.bodyIdA].transform.rotation * rot2::FromRadians( sim.referenceAngle ) ) * bodySims_[sim.bodyIdB].transform.rotation;
     data.currentAngle = std::atan2( relativeRotation.s, relativeRotation.c );
     data.force = sim.subStepTime > 0.0f ? sim.impulse / sim.subStepTime : vec2{};
     data.collideConnected = joints_[index].collideConnected;
+    data.referenceAngle = sim.referenceAngle;
+    data.enableLimit = sim.enableLimit;
+    data.lowerAngle = sim.lowerAngle;
+    data.upperAngle = sim.upperAngle;
+    data.torque = sim.subStepTime > 0.0f ? ( sim.lowerImpulse - sim.upperImpulse ) / sim.subStepTime : 0.0f;
 
     return data;
 }
@@ -1780,10 +1818,13 @@ void world::Step( float timeStep, int subStepCount )
                     auto& joint = std::get<simType>( jointSims_[constraint.jointId] );
                     joint.impulse = constraint.impulse;
                     joint.subStepTime = subStepTime;
-                    if constexpr( std::is_same_v<simType, distanceJointSim2> )
+                    if constexpr( std::is_same_v<simType, distanceJointSim2> || std::is_same_v<simType, revoluteJointSim2> )
                     {
                         joint.lowerImpulse = constraint.lowerImpulse;
                         joint.upperImpulse = constraint.upperImpulse;
+                    }
+                    if constexpr( std::is_same_v<simType, distanceJointSim2> )
+                    {
                         joint.motorImpulse = constraint.motorImpulse;
                     }
                 },
@@ -2290,10 +2331,14 @@ void world::resetJointImpulses( std::int32_t bodyIndex )
             []( auto& joint )
             {
                 joint.impulse = {};
-                if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, distanceJointSim2> )
+                using simType = std::remove_cvref_t<decltype( joint )>;
+                if constexpr( std::is_same_v<simType, distanceJointSim2> || std::is_same_v<simType, revoluteJointSim2> )
                 {
                     joint.lowerImpulse = 0.0f;
                     joint.upperImpulse = 0.0f;
+                }
+                if constexpr( std::is_same_v<simType, distanceJointSim2> )
+                {
                     joint.motorImpulse = 0.0f;
                 }
             },

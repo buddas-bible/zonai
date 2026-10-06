@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -224,6 +225,23 @@ int main()
     session.reset();
     auto& resetHinge = static_cast<rigidBodyDemo&>( session.getDemo() );
     check( !resetHinge.getWorld().IsValid( hingeId ) && resetHinge.getWorld().getJointCount() == 1 && session.getStepCount() == 0, "reset reconstructs hinge and rejects old handle" );
+
+    const auto resetHingeJoint = resetHinge.getRevoluteJoint();
+    const auto resetData = resetHinge.getWorld().getRevoluteJointData( resetHingeJoint );
+    check( !resetData.enableLimit && resetData.lowerAngle < -0.78f && resetData.upperAngle > 0.78f, "reset restores free hinge with editable angle range" );
+    resetHinge.getWorld().setRevoluteJointLimit( resetHingeJoint, true, resetData.lowerAngle, resetData.upperAngle );
+    const auto resetRod = resetHinge.getImpulseBody();
+    resetHinge.getWorld().ApplyAngularImpulse( resetRod, resetHinge.getWorld().GetBodyRotationalInertia( resetRod ) * 10.0f );
+    float maximumAngle = 0.0f;
+    for( int i = 0; i < 180; ++i )
+    {
+        session.stepOnce( 4 );
+        const auto data = resetHinge.getWorld().getRevoluteJointData( resetHingeJoint );
+        maximumAngle = std::max( maximumAngle, data.currentAngle );
+        check( data.currentAngle >= data.lowerAngle - 0.025f && data.currentAngle <= data.upperAngle + 0.025f, "rod respects angular range under gravity and impulse" );
+        check( Length( data.anchorB - data.anchorA ) < 0.015f, "angular limit preserves off-center rod pivot" );
+    }
+    check( maximumAngle > 0.7f, "rod impulse exercises upper boundary rather than only interior motion" );
 
     return EXIT_SUCCESS;
 }
