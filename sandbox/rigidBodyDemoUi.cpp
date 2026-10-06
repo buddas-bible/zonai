@@ -309,6 +309,20 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         }
     }
 
+    if( getWorld().IsValid( getWheelJoint() ) )
+    {
+        const wheelJointData joint = getWorld().getWheelJointData( getWheelJoint() );
+        constexpr ImU32 AXIS_COLOR = IM_COL32( 100, 235, 220, 255 );
+        constexpr ImU32 WHEEL_COLOR = IM_COL32( 230, 170, 255, 255 );
+        draw.DrawSegment( { joint.anchorA - joint.axis, joint.anchorA + joint.axis }, IM_COL32( 160, 160, 160, 255 ) );
+        draw.DrawArrow( joint.anchorA, joint.axis, AXIS_COLOR, 0.5f );
+        draw.DrawPoint( joint.anchorA, AXIS_COLOR, 7.0f );
+        draw.DrawPoint( joint.anchorB, WHEEL_COLOR );
+        // 지지대와 바퀴 사이 연결선. 물리 스프링의 변위 0은 별도의 청록색 기준점임.
+        draw.DrawSegment( { getWorld().GetBodyTransform( joint.bodyA ).position, joint.anchorB }, WHEEL_COLOR );
+        draw.DrawArrow( joint.anchorB, Rotate( getWorld().GetBodyTransform( joint.bodyB ).rotation, { 1.0f, 0.0f } ), WHEEL_COLOR, 0.3f );
+    }
+
     if( showContacts_ )
     {
         constexpr ImU32 CONTACT_COLOR = IM_COL32( 255, 220, 70, 255 );
@@ -602,6 +616,8 @@ void rigidBodyDemoUi::drawExperimentControls()
 
     if( getKind() == demoKind::revoluteHinge && ( !getWorld().IsValid( getRevoluteJoint() ) || !getWorld().IsValid( getImpulseBody() ) ) ) return;
 
+    if( getKind() == demoKind::wheelSuspension && ( !getWorld().IsValid( getWheelJoint() ) || !getWorld().IsValid( getImpulseBody() ) ) ) return;
+
     if( getKind() == demoKind::playground && ( !getWorld().IsValid( getImpulseBody() ) || !getWorld().IsValid( getTorqueBody() ) ) ) return;
 
     if( getKind() == demoKind::distancePendulum )
@@ -756,6 +772,49 @@ void rigidBodyDemoUi::drawExperimentControls()
         if( ImGui::Button( "막대 옆으로 밀기###Kick hinge", ImVec2( -1.0f, 0.0f ) ) )
         {
             getWorld().ApplyLinearImpulseToCenter( getImpulseBody(), { getWorld().GetBodyMass( getImpulseBody() ) * 2.0f, 0.0f } );
+        }
+        ImGui::Spacing();
+    }
+    else if( getKind() == demoKind::wheelSuspension )
+    {
+        ImGui::TextUnformatted( "서스펜션 관찰" );
+        const wheelJointData joint = getWorld().getWheelJointData( getWheelJoint() );
+        ImGui::Text( "축 방향 변위: %.3f m / 축 옆 오차: %.4f m", joint.currentTranslation, joint.lateralError );
+        const float angularVelocity = getWorld().GetBodyAngularVelocity( joint.bodyB ) - getWorld().GetBodyAngularVelocity( joint.bodyA );
+        ImGui::Text( "바퀴 상대 각속도: %.2f rad/s", angularVelocity );
+        ImGui::Text( "서스펜션 힘: %.2f N", joint.springForce );
+        ImGui::TextWrapped( "청록색 점은 스프링 변위 0, 화살표는 이동 축의 양의 방향입니다. 보라색은 바퀴와 회전 방향입니다. 스프링을 꺼도 축 옆으로는 벗어나지 않으며 바퀴 회전은 자유롭습니다." );
+
+        if( ImGui::TreeNode( "서스펜션 스프링###WheelSpringSettings" ) )
+        {
+            bool enableSpring = joint.enableSpring;
+            float hertz = joint.hertz;
+            float dampingRatio = joint.dampingRatio;
+            bool changed = ImGui::Checkbox( "스프링 사용###Wheel spring", &enableSpring );
+            if( ImGui::SliderFloat( "스프링 주파수###Wheel hertz", &hertz, 0.0f, 10.0f, "%.2f Hz", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                hertz = std::clamp( hertz, 0.0f, 10.0f );
+                changed = true;
+            }
+            if( ImGui::SliderFloat( "감쇠 비율###Wheel damping", &dampingRatio, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                dampingRatio = std::clamp( dampingRatio, 0.0f, 2.0f );
+                changed = true;
+            }
+            if( changed )
+            {
+                getWorld().setWheelJointSpring( getWheelJoint(), enableSpring, hertz, dampingRatio );
+            }
+            ImGui::TextWrapped( "주파수는 스프링 강성, 감쇠 비율은 진동을 조절합니다. 스프링을 끄거나 0 Hz로 설정하면 축 방향 이동이 자유롭고 중력으로 떨어집니다. 이동 범위 제한과 구동 모터는 후속 단계입니다." );
+            ImGui::TreePop();
+        }
+        if( ImGui::Button( "바퀴 축 방향으로 밀기###Kick wheel", ImVec2( -1.0f, 0.0f ) ) )
+        {
+            getWorld().ApplyLinearImpulseToCenter( getImpulseBody(), getWorld().GetBodyMass( getImpulseBody() ) * 2.0f * joint.axis );
+        }
+        if( ImGui::Button( "바퀴 회전시키기###Spin wheel", ImVec2( -1.0f, 0.0f ) ) )
+        {
+            getWorld().ApplyAngularImpulse( getImpulseBody(), getWorld().GetBodyRotationalInertia( getImpulseBody() ) * 3.0f );
         }
         ImGui::Spacing();
     }
