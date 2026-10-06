@@ -1,6 +1,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
+#include <numbers>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -369,6 +371,79 @@ void checkDemoUi()
     {
         std::fprintf( stderr, "hinge experiment buttons did not apply impulses\n" );
         std::exit( EXIT_FAILURE );
+    }
+    auto limitView = createDemoView( demoKind::revoluteHinge );
+    auto& limitModel = static_cast<rigidBodyDemo&>( *limitView );
+    int unrestrictedVertices = 0;
+    for( int frame = 0; frame < 4; ++frame )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+        ImGui::Begin( "Angular limit actions" );
+        // 접혀 있을 때는 숨겨진 조작이 실행되지 않아야 함.
+        if( frame > 0 ) ImGui::GetStateStorage()->SetInt( ImGui::GetID( "RevoluteLimitSettings" ), 1 );
+        ImGui::PushID( "RevoluteLimitSettings" );
+        if( frame < 2 || frame == 3 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Revolute limit" );
+        ImGui::PopID();
+        limitView->drawControls();
+        debugCamera camera{};
+        camera.center = getDemoEntry( demoKind::revoluteHinge ).cameraCenter;
+        camera.pixelsPerMeter = 130.0f;
+        ImDrawList* list = ImGui::GetWindowDrawList();
+        const int before = list->VtxBuffer.Size;
+        debugDraw draw{ list, camera, { 0.0f, 0.0f }, { 600.0f, 600.0f } };
+        limitView->draw( draw );
+        const int vertices = list->VtxBuffer.Size - before;
+        if( frame == 0 ) unrestrictedVertices = vertices;
+        if( frame == 2 && vertices <= unrestrictedVertices )
+        {
+            std::fprintf( stderr, "enabled angular limit drew no boundary geometry\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        ImGui::End();
+        ImGui::Render();
+        const auto data = limitModel.getWorld().getRevoluteJointData( limitModel.getRevoluteJoint() );
+        if( data.enableLimit != ( frame == 1 || frame == 2 ) )
+        {
+            std::fprintf( stderr, "folded angular controls or limit toggle failed: frame %d\n", frame );
+            std::exit( EXIT_FAILURE );
+        }
+    }
+    for( int setting = 0; setting < 2; ++setting )
+    {
+        for( int upper = 0; upper < 2; ++upper )
+        {
+            auto tuningView = createDemoView( demoKind::revoluteHinge );
+            auto& tuningModel = static_cast<rigidBodyDemo&>( *tuningView );
+            for( int phase = 0; phase < 3; ++phase )
+            {
+                if( phase == 1 ) io.AddInputCharactersUTF8( upper ? "9000" : "-9000" );
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+                ImGui::NewFrame();
+                ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+                ImGui::Begin( "Angular limit input" );
+                ImGui::GetStateStorage()->SetInt( ImGui::GetID( "RevoluteLimitSettings" ), 1 );
+                if( phase == 0 )
+                {
+                    ImGui::PushID( "RevoluteLimitSettings" );
+                    GImGui->NavActivateId = ImGui::GetID( setting == 0 ? "Revolute lower" : "Revolute upper" );
+                    GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+                    ImGui::PopID();
+                }
+                tuningView->drawControls();
+                ImGui::End();
+                ImGui::Render();
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            }
+            const auto data = tuningModel.getWorld().getRevoluteJointData( tuningModel.getRevoluteJoint() );
+            const float value = setting == 0 ? data.lowerAngle : data.upperAngle;
+            const float expected = setting == 0 ? ( upper ? 0.25f : -0.99f ) : ( upper ? 0.99f : -0.25f );
+            if( std::abs( value - expected * std::numbers::pi_v<float> ) > 0.00001f || data.lowerAngle > data.upperAngle )
+            {
+                std::fprintf( stderr, "manual angular limit input escaped valid range\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
     }
     ImGui::DestroyContext();
 }

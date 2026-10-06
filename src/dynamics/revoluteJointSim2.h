@@ -18,6 +18,13 @@ struct revoluteJointSim2
 
     vec2 impulse{};
     float subStepTime = 0.0f;
+
+    float referenceAngle = 0.0f;
+    bool enableLimit = false;
+    float lowerAngle = 0.0f;
+    float upperAngle = 0.0f;
+    float lowerImpulse = 0.0f;
+    float upperImpulse = 0.0f;
 };
 
 } // namespace zonai

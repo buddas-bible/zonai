@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <numbers>
 
 namespace zonai::sandbox
 {
@@ -239,6 +240,8 @@ void rigidBodyDemo::createRevoluteHinge()
     joint.bodyA = anchor;
     joint.bodyB = impulseBody_;
     joint.localAnchorB = { 0.0f, 1.0f };
+    joint.lowerAngle = -0.25f * std::numbers::pi_v<float>;
+    joint.upperAngle = 0.25f * std::numbers::pi_v<float>;
     revoluteJoint_ = world_.createRevoluteJoint( joint );
 }
 
