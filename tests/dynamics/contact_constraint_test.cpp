@@ -66,7 +66,12 @@ int main()
         bodyStateB.linearVelocity = { -1.0f, 0.0f };
         bodyStateB.angularVelocity = -1.0f;
 
-        const contactConstraint2 constraint = PrepareContactConstraint( contactSim, bodySimA, bodyStateA, bodySimB, bodyStateB );
+        const contactConstraint2 constraint =
+            PrepareContactConstraint(
+                contactSim,
+                bodySimA, bodyStateA,
+                bodySimB, bodyStateB
+            );
 
         check( constraint.pointCount == 1 );
         check( NearlyEqual( constraint.normal.x, 1.0f ) );
@@ -147,7 +152,12 @@ int main()
         bodyState bodyStateB{};
         bodyStateB.linearVelocity = { 0.0f, -3.0f };
 
-        const contactConstraint2 constraint = PrepareContactConstraint( contactSim, bodySimA, bodyStateA, bodySimB, bodyStateB );
+        const contactConstraint2 constraint =
+            PrepareContactConstraint(
+                contactSim,
+                bodySimA, bodyStateA,
+                bodySimB, bodyStateB
+            );
 
         const contactConstraintPoint2& point = constraint.points[0];
 
@@ -236,7 +246,12 @@ int main()
         bodyState bodyStateA{};
         bodyState bodyStateB{};
 
-        const contactConstraint2 constraint = PrepareContactConstraint( contactSim, bodySimA, bodyStateA, bodySimB, bodyStateB );
+        const contactConstraint2 constraint =
+            PrepareContactConstraint(
+                contactSim,
+                bodySimA, bodyStateA,
+                bodySimB, bodyStateB
+            );
 
         check( constraint.contactId == 7 );
         check( NearlyEqual( constraint.points[0].normalImpulse, 6.0f ) );
@@ -421,7 +436,12 @@ int main()
         bodyState bodyStateA{};
         bodyState bodyStateB{};
 
-        const contactConstraint2 constraint = PrepareContactConstraint( contactSim, bodySimA, bodyStateA, bodySimB, bodyStateB );
+        const contactConstraint2 constraint =
+            PrepareContactConstraint(
+                contactSim,
+                bodySimA, bodyStateA,
+                bodySimB, bodyStateB
+            );
 
         // tangent=(1,0), lever arm=0이므로
         // Kt=invMassB=0.5 -> tangentMass=2.

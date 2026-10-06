@@ -3899,7 +3899,12 @@ std::vector<contactConstraint2> world::PrepareContactConstraints( std::span<cons
         const bodyState& bodyStateA = bodyStates_[contactSim.bodyIdA];
         const bodyState& bodyStateB = bodyStates_[contactSim.bodyIdB];
 
-        contactConstraint2 constraint = PrepareContactConstraint( contactSim, bodySimA, bodyStateA, bodySimB, bodyStateB );
+        contactConstraint2 constraint =
+            PrepareContactConstraint(
+                contactSim,
+                bodySimA, bodyStateA,
+                bodySimB, bodyStateB
+            );
 
         const bool hasStaticBody = bodies_[contactSim.bodyIdA].type == bodyType::Static || bodies_[contactSim.bodyIdB].type == bodyType::Static;
 
