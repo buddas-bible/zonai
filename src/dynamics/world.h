@@ -24,6 +24,8 @@
 #include "dynamics/joint2.h"
 #include "dynamics/mouseJoint2.h"
 #include "dynamics/mouseJointConstraint2.h"
+#include "dynamics/revoluteJoint2.h"
+#include "dynamics/revoluteJointConstraint2.h"
 #include "dynamics/id.h"
 #include "dynamics/island2.h"
 #include "dynamics/sensor2.h"
@@ -93,6 +95,10 @@ public:
 
     // 유한한 목표 축속도와 비음수 최대 힘. 변경 시 cache를 비우고 연결된 component를 깨움.
     void setDistanceJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorForce );
+
+    // 두 작용점을 일치시키며 상대 회전은 허용함. 서로 다른 Body 중 하나 이상은 Dynamic이어야 함.
+    [[nodiscard]] jointId createRevoluteJoint( const revoluteJointDef& definition );
+    [[nodiscard]] revoluteJointData getRevoluteJointData( jointId id ) const;
 
     // Static A / Dynamic B. target은 world 좌표, hertz/damping/maxForce는 유한한 비음수임.
     [[nodiscard]] jointId createMouseJoint( const mouseJointDef& definition );
@@ -456,7 +462,7 @@ private:
 
 #pragma region JointSolver
 
-    using jointConstraint = std::variant<distanceJointConstraint2, mouseJointConstraint2>;
+    using jointConstraint = std::variant<distanceJointConstraint2, mouseJointConstraint2, revoluteJointConstraint2>;
     void warmStartJoints( std::span<jointConstraint> constraints );
     void solveJoints( std::span<jointConstraint> constraints, bool useBias );
 
@@ -545,7 +551,7 @@ private:
 
     // Joint cold / hot 데이터는 동일한 stable slot과 free-list를 공유함.
     std::vector<joint2> joints_;
-    std::vector<std::variant<distanceJointSim2, mouseJointSim2>> jointSims_;
+    std::vector<std::variant<distanceJointSim2, mouseJointSim2, revoluteJointSim2>> jointSims_;
     std::int32_t jointFreeList_ = -1;
     std::size_t jointCount_ = 0;
 

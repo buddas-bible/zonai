@@ -16,18 +16,22 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createPlayground();
     }
+    else if( kind == demoKind::distancePendulum )
+    {
+        createPendulum();
+    }
     else
     {
-        assert( kind == demoKind::distancePendulum );
+        assert( kind == demoKind::revoluteHinge );
 
-        createPendulum();
+        createRevoluteHinge();
     }
     refreshContacts();
 }
 
 void rigidBodyDemo::step( float timeStep, int subStepCount )
 {
-    const bodyId target = kind_ == demoKind::playground ? impulseBody_ : pendulumBody_;
+    const bodyId target = kind_ == demoKind::distancePendulum ? pendulumBody_ : impulseBody_;
     const float direction = static_cast<float>( rightHeld_ ) - static_cast<float>( leftHeld_ );
 
     // 누르고 있는 이동 입력은 매 physics step에 힘으로 적용함. 입력을 취소해도 현재 물리 속도는 유지함.
@@ -75,13 +79,13 @@ void rigidBodyDemo::handleInput( const demoInput& input )
             world_.setMouseJointTarget( mouseJoint_, input.mousePosition );
         }
     }
-    const bodyId target = kind_ == demoKind::playground ? impulseBody_ : pendulumBody_;
+    const bodyId target = kind_ == demoKind::distancePendulum ? pendulumBody_ : impulseBody_;
     const float mass = world_.IsValid( target ) ? world_.GetBodyMass( target ) : 0.0f;
 
     // 한 번 누른 입력은 임펄스로 적용함. 누르고 있는 입력의 힘과 구분함.
     if( input.jumpPressed && world_.IsValid( target ) )
     {
-        world_.ApplyLinearImpulseToCenter( target, kind_ == demoKind::playground ? vec2{ 0.0f, mass * 5.0f } : vec2{ mass * 2.0f, 0.0f } );
+        world_.ApplyLinearImpulseToCenter( target, kind_ == demoKind::distancePendulum ? vec2{ mass * 2.0f, 0.0f } : vec2{ 0.0f, mass * 5.0f } );
     }
     if( input.spinPressed && world_.IsValid( torqueBody_ ) )
     {
@@ -217,6 +221,25 @@ void rigidBodyDemo::createPendulum()
     joint.motorSpeed = 1.0f;
     joint.maxMotorForce = 10.0f;
     pendulumJoint_ = world_.createDistanceJoint( joint );
+}
+
+void rigidBodyDemo::createRevoluteHinge()
+{
+    const bodyId anchor = world_.CreateBody();
+    const shapeId anchorShape = world_.CreateShape( anchor, circle2{ {}, 0.08f } );
+    shapes_.push_back( { anchor, anchorShape, "회전축 [정적]" } );
+
+    // 막대의 위쪽 끝을 연결함. 질량 중심 밖의 작용점으로 선형·회전 운동의 결합을 관찰함.
+    impulseBody_ = world_.CreateBody( bodyType::Dynamic, { { 0.0f, -1.0f }, {} } );
+    torqueBody_ = impulseBody_;
+    const shapeId rodShape = world_.CreateShape( impulseBody_, MakeBox( { 0.18f, 1.0f } ) );
+    shapes_.push_back( { impulseBody_, rodShape, "막대 [회전 조인트]" } );
+
+    revoluteJointDef joint{};
+    joint.bodyA = anchor;
+    joint.bodyB = impulseBody_;
+    joint.localAnchorB = { 0.0f, 1.0f };
+    revoluteJoint_ = world_.createRevoluteJoint( joint );
 }
 
 #pragma endregion SceneSetup

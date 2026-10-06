@@ -43,13 +43,13 @@ void checkDemoUi()
     demoSession session{ createDemoView };
     for( int frame = 0; frame < 6; ++frame )
     {
-        session.selectDemo( frame % 2 == 0 ? demoKind::playground : demoKind::distancePendulum );
+        session.selectDemo( getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
         input.mousePressed = true;
         input.mouseHeld = true;
-        const auto body = model.getKind() == demoKind::playground ? model.getImpulseBody() : model.getPendulumBody();
+        const auto body = model.getKind() == demoKind::distancePendulum ? model.getPendulumBody() : model.getImpulseBody();
         input.mousePosition = model.getWorld().GetBodyTransform( body ).position;
         session.handleInput( input, true );
         if( !model.getWorld().IsValid( model.getMouseJoint() ) )
@@ -349,6 +349,25 @@ void checkDemoUi()
     if( collisionUi.visibleLayers != 0xFF )
     {
         std::fprintf( stderr, "collision editor exceeded eight visible layers\n" );
+        std::exit( EXIT_FAILURE );
+    }
+    auto hingeView = createDemoView( demoKind::revoluteHinge );
+    auto& hingeModel = static_cast<rigidBodyDemo&>( *hingeView );
+    for( int frame = 0; frame < 2; ++frame )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
+        ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+        ImGui::Begin( "Hinge actions" );
+        const char* action = frame == 0 ? "Spin hinge" : "Kick hinge";
+        GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( action );
+        hingeView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+    }
+    if( hingeModel.getWorld().GetBodyAngularVelocity( hingeModel.getImpulseBody() ) < 2.9f || hingeModel.getWorld().GetBodyLinearVelocity( hingeModel.getImpulseBody() ).x < 1.9f )
+    {
+        std::fprintf( stderr, "hinge experiment buttons did not apply impulses\n" );
         std::exit( EXIT_FAILURE );
     }
     ImGui::DestroyContext();

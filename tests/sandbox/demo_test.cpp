@@ -49,7 +49,7 @@ std::unique_ptr<demo> createCounter( demoKind )
 
 int main()
 {
-    check( getDemoEntries().size() == 2, "two demo entries" );
+    check( getDemoEntries().size() == 3, "three demo entries" );
     demoSession session{ createRigidBodyDemo };
     auto& playground = static_cast<rigidBodyDemo&>( session.getDemo() );
     check( playground.getWorld().GetBodyCount() == 6 && playground.getWorld().getJointCount() == 0, "playground separated from pendulum" );
@@ -196,6 +196,34 @@ int main()
     check( !project.getCollisionMatrix().allows( 1, std::uint64_t{ 1 } << 63 ), "project matrix persists across demo switch and Reset" );
     auto& shared = static_cast<rigidBodyDemo&>( project.getDemo() );
     check( shared.getWorld().getCollisionMatrix() == project.getCollisionMatrix(), "new demo receives project matrix" );
+
+    session.selectDemo( demoKind::revoluteHinge );
+    auto& hinge = static_cast<rigidBodyDemo&>( session.getDemo() );
+    check( hinge.getWorld().GetBodyCount() == 2 && hinge.getWorld().getJointCount() == 1, "independent hinge scene" );
+    const auto hingeId = hinge.getRevoluteJoint();
+    const auto rod = hinge.getImpulseBody();
+    input = {};
+    input.spinPressed = true;
+    session.handleInput( input, true );
+    check( hinge.getWorld().GetBodyAngularVelocity( rod ) > 0.0f, "hinge keyboard spin" );
+    for( int i = 0; i < 120; ++i )
+    {
+        session.stepOnce( 4 );
+    }
+    const auto hingeData = hinge.getWorld().getRevoluteJointData( hingeId );
+    check( Length( hingeData.anchorB - hingeData.anchorA ) < 0.01f, "demo rod remains attached to pivot" );
+    const auto hingePose = hinge.getWorld().GetBodyTransform( rod );
+    input = {};
+    input.mousePressed = true;
+    input.mouseHeld = true;
+    input.mousePosition = hingePose.position;
+    session.handleInput( input, true );
+    check( hinge.getWorld().getJointCount() == 2 && hinge.getWorld().IsValid( hinge.getMouseJoint() ), "mouse drag coexists with hinge" );
+    session.handleInput( {}, false );
+    check( hinge.getWorld().getJointCount() == 1 && hinge.getWorld().IsValid( hingeId ), "UI capture cancels drag without destroying hinge" );
+    session.reset();
+    auto& resetHinge = static_cast<rigidBodyDemo&>( session.getDemo() );
+    check( !resetHinge.getWorld().IsValid( hingeId ) && resetHinge.getWorld().getJointCount() == 1 && session.getStepCount() == 0, "reset reconstructs hinge and rejects old handle" );
 
     return EXIT_SUCCESS;
 }
