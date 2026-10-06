@@ -39,5 +39,7 @@ private:
 
 [[nodiscard]] bool initializeDemoUi();
 [[nodiscard]] std::unique_ptr<demo> createDemoView( demoKind kind );
-void drawProjectCollisionSettings( demoSession& session );
+// 편집 화면에 표시할 레이어만 보관함. 숨기는 것은 충돌 규칙을 바꾸지 않음.
+struct collisionSettingsUi { std::uint64_t visibleLayers = 1; };
+void drawProjectCollisionSettings( demoSession& session, collisionSettingsUi& state );
 } // namespace zonai::sandbox

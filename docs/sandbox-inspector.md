@@ -1,5 +1,9 @@
 # Inspector와 공통 충돌 설정
 
+현재 화면은 한글이다. 공통 설정의 기본 표시는 레이어 01이며, 표시할 레이어 목록에서 64개 중 필요한 레이어를 최대 8개씩 골라 편집한다. 서로 다른 번호 구간도 함께 선택할 수 있다. 대칭 관계는 표의 위쪽에서 한 번만 편집하고, 표시에서 숨기는 것은 충돌 규칙을 바꾸지 않는다. 매트릭스 설정과 표시할 레이어는 데모 전환/초기화에도 유지된다.
+
+소속 레이어는 Inspector의 충돌 마스크에서 바로 편집한다. 개별 마스크/그룹은 추가 제한 (고급)을 펼쳐 편집한다. 월드·마우스 조인트·물리 정보 표시 설정도 필요할 때 펼친다. 기본 화면에 64×64 관계나 모든 고급 설정을 전개하지 않는다.
+
 Object Inspector는 Transform, Physics quantities, Collision material, Collision mask, Sleep and CCD, Sensors로 나눈다. 필요한 분류를 펼쳐 편집하며 기존 World setter를 사용한다.
 
 Collision mask의 Category membership은 shape가 속한 레이어, Collision partners는 충돌을 허용할 상대 레이어다. 숫자 입력 대신 체크 목록을 사용한다. Layer 01은 bit 0, Layer 64는 bit 63이며 All/None으로 전체 선택/해제를 할 수 있다. 여러 레이어에 속할 수도 있다. 기본 Category는 Layer 01, Mask는 전체 허용이다.
