@@ -47,6 +47,6 @@ Box2D main [`ac7c751`의 revolute_joint.c](https://github.com/erincatto/box2d/bl
 
 기존 `sandboxDemoTests`에 세 번째 데모의 전환·reset·키 입력·Mouse Joint 취소를 추가한다. Windows Sandbox ON 구성은 ImGui headless frame에서 그리기와 두 막대 버튼의 실제 임펄스 적용도 검사한다. 실제 창/GPU/OS 입력의 시각 검증은 별도다. 기존 assert 기반 테스트의 Release 공백을 해결했다고 주장하지 않는다.
 
-최종 소스로 Windows Sandbox ON 전체 Debug/Release build와 각각 45/45 CTest, Sandbox OFF 전체 Release build와 45/45 CTest를 확인했다. 연결점의 회전 속도 누락, K의 결합항 제거, relaxation에 bias 적용, warm start의 현재 회전 누락이라는 네 가지 mutation을 모두 테스트가 잡았다. 원본 복구 후 다시 통과했으며, 최종 리뷰에서 권한 중심 밖 Dynamic–Dynamic 검사도 추가해 양쪽 각속도·연결점 속도·총 선형 운동량을 확인했다. 원격 CI 결과는 해당 PR에 기록한다.
+최종 소스로 Windows Sandbox ON 전체 Debug/Release build와 각각 45/45 CTest, Sandbox OFF 전체 Release build와 45/45 CTest를 확인했다. 연결점의 회전 속도 누락, K의 결합항 제거, relaxation에 bias 적용, warm start의 현재 회전 누락이라는 네 가지 mutation을 모두 테스트가 잡았다. 원본 복구 후 다시 통과했으며, 최종 리뷰에서 권고한 중심 밖 Dynamic–Dynamic 검사도 추가해 양쪽 각속도·연결점 속도·총 선형 운동량을 확인했다. 원격 CI 결과는 해당 PR에 기록한다.
 
 다음 단계는 기준 상대 각도와 각도 제한을 학습하고, 이어 회전 모터를 추가하는 것이다. 자동차나 조나이 선풍기는 모터까지 확인한 뒤 같은 데모 host에 추가한다.
