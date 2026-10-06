@@ -712,7 +712,6 @@ bool world::testShapePoint( shapeId id, vec2 point ) const
     assert( IsFinite( point ) );
 
     const std::int32_t shapeIndex = GetShapeIndex( id );
-
     const shape& value = shapes_[shapeIndex];
     const vec2 localPoint = InverseTransformPoint( bodySims_[value.bodyId].transform, point );
 
@@ -720,6 +719,7 @@ bool world::testShapePoint( shapeId id, vec2 point ) const
         [&]( const auto& geometry ) -> bool
         {
             using geometryType = std::remove_cvref_t<decltype( geometry )>;
+
             if constexpr( std::is_same_v<geometryType, circle2> || std::is_same_v<geometryType, capsule2> )
             {
                 return Contains( geometry, localPoint );
@@ -728,15 +728,17 @@ bool world::testShapePoint( shapeId id, vec2 point ) const
             {
                 bool inside = geometry.vertexCount >= 3;
                 float distanceSquared = std::numeric_limits<float>::max();
+
                 for( int i = 0; i < geometry.vertexCount; ++i )
                 {
                     const vec2 a = geometry.vertices[i], b = geometry.vertices[( i + 1 ) % geometry.vertexCount];
+
                     if( Dot( geometry.normals[i], localPoint - a ) > 0.0f )
-                    {
                         inside = false;
-                    }
+
                     distanceSquared = std::min( distanceSquared, DistanceSquared( segment2{ a, b }, localPoint ) );
                 }
+
                 // Rounded core는 꼭짓점 주변의 circle 거리까지 검사함. 확장된 halfspace만으로는 모서리를 과하게 pick함.
                 return inside || distanceSquared <= geometry.radius * geometry.radius;
             }
@@ -744,8 +746,7 @@ bool world::testShapePoint( shapeId id, vec2 point ) const
             {
                 return false;
             }
-        },
-        value.geometry );
+        }, value.geometry );
 }
 
 const aabb2& world::GetShapeAABB( shapeId shapeId ) const
@@ -814,10 +815,8 @@ void world::SetBodyLinearVelocity( bodyId bodyId, vec2 linearVelocity )
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
     const body& body = bodies_[bodyIndex];
 
-    if( body.type == bodyType::Static )
-
-        // 정적 body는 움직이지 않으므로 setter를 무시함.
-        return;
+    // 정적 body는 움직이지 않으므로 setter를 무시함.
+    if( body.type == bodyType::Static ) return;
 
     if( linearVelocity.x != 0.0f || linearVelocity.y != 0.0f )
     {
@@ -846,10 +845,8 @@ void world::SetBodyAngularVelocity( bodyId bodyId, float angularVelocity )
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
     const body& body = bodies_[bodyIndex];
 
-    if( body.type == bodyType::Static )
-
-        // 정적 body는 움직이지 않으므로 setter를 무시함.
-        return;
+    // 정적 body는 움직이지 않으므로 setter를 무시함.
+    if( body.type == bodyType::Static ) return;
 
     if( angularVelocity != 0.0f )
     {
@@ -1171,7 +1168,8 @@ void world::SetSleepingEnabled( bool enabled )
     // World sleep을 끄는 순간 모든 non-static body를 다시 solver에 참여시킴.
     for( body& body : bodies_ )
     {
-        if( body.bodyId == body::NULL_INDEX || body.type == bodyType::Static ) continue;
+        if( body.bodyId == body::NULL_INDEX || body.type == bodyType::Static )
+            continue;
 
         body.awake = true;
         body.sleepTime = 0.0f;

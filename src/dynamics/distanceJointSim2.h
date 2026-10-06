@@ -7,7 +7,6 @@ namespace zonai
 {
 
 // World의 조인트 슬롯과 같은 인덱스에 보관함. 누적 임펄스를 다음 step까지 유지함.
-
 struct distanceJointSim2
 {
     std::int32_t jointId = -1;
@@ -17,6 +16,7 @@ struct distanceJointSim2
     // 물체 원점 기준의 로컬 작용점. 질량 중심이 이동해도 유지함.
     vec2 localAnchorA{};
     vec2 localAnchorB{};
+
     float length = 1.0f; // 고정 거리 또는 스프링의 목표 거리
     float impulse = 0.0f;
     float subStepTime = 0.0f; // 누적 임펄스를 구한 시간 간격

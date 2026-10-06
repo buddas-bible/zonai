@@ -60,3 +60,5 @@ Phyzzle 기준은 포트폴리오의 원래 C++ 물리엔진·게임 클라이�
 작성한 src·sandbox·tests C++ 전체에 위 기준을 적용한다. .clang-format은 중괄호·들여쓰기·인자·수식 배치의 기본값을 제공한다. 80/120열에 맞추기 위해 물리 수식과 인자를 잘게 나누지 않도록 넓은 열 한도를 사용한다. 의미별 여백, Body A/B 인자 묶음, 데이터 표의 행, region의 실제 용도는 코드 검토로 맞춘다. third_party와 build는 .clang-format-ignore에 지정한다.
 
 2026-10-06 작성자가 추가로 수정한 World 조회·guard, bodyShape의 참조/검증 여백, Contact 인자 묶음, constraintSoftness의 반환 및 짧은 조인트 region 제거를 이 기준에 반영했다.
+
+작성자가 직접 구분한 작용점·거리·임펄스 적용 사이의 여백과 guard의 줄바꿈은 자동 포맷보다 우선한다. 조건의 이유를 설명하는 주석은 조건 앞에 둔다. testShapePoint의 inside 갱신처럼 작성자가 중괄호 없이 다음 줄에 둔 단일 대입도 그 배치를 유지한다.

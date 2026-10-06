@@ -13,7 +13,8 @@ constraintSoftness2 makeConstraintSoftness( float hertz, float dampingRatio, flo
     assert( std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );
     assert( std::isfinite( timeStep ) && timeStep >= 0.0f );
 
-    if( hertz == 0.0f || timeStep == 0.0f ) return {};
+    if( hertz == 0.0f || timeStep == 0.0f )
+        return {};
 
     const float omega = 2.0f * std::numbers::pi_v<float> * hertz;
     const float a1 = 2.0f * dampingRatio + timeStep * omega;

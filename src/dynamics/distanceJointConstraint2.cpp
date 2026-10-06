@@ -21,6 +21,7 @@ distanceJointConstraint2 prepareDistanceJointConstraint( const distanceJointSim2
     // 물체 원점 기준의 작용점을 질량 중심 기준으로 바꿈. 회전 효과는 이 거리로 계산함.
     constraint.anchorA = Rotate( bodySimA.transform.rotation, joint.localAnchorA - bodySimA.localCenter );
     constraint.anchorB = Rotate( bodySimB.transform.rotation, joint.localAnchorB - bodySimB.localCenter );
+
     constraint.deltaCenter = bodySimB.center - bodySimA.center;
 
     // 역질량과 역관성. 임펄스를 선형 속도와 각속도로 환산할 때 사용함.
@@ -99,6 +100,7 @@ void solveDistanceJointConstraint( distanceJointConstraint2& constraint, bodySta
     const vec2 r_a = Rotate( bodyStateA.deltaRotation, constraint.anchorA );
     const vec2 r_b = Rotate( bodyStateB.deltaRotation, constraint.anchorB );
     const vec2 delta = constraint.deltaCenter + bodyStateB.deltaPosition - bodyStateA.deltaPosition + r_b - r_a;
+
     // 작용점이 같으면 방향을 정할 수 없으므로 Normalize가 영벡터를 반환함.
     const vec2 axis = Normalize( delta );
     const float currentLength = Length( delta );
@@ -139,6 +141,7 @@ void solveDistanceJointConstraint( distanceJointConstraint2& constraint, bodySta
 
         // 축 방향 속도와 위치 오차를 줄이는 임펄스 크기.
         const float deltaImpulse = -massScale * constraint.axialMass * ( computeAxialVelocity() + bias ) - impulseScale * constraint.impulse;
+
         // 스프링과 고정 거리 제약은 양방향으로 작용하므로 인장(음수)과 압축(양수)을 모두 허용함.
         constraint.impulse += deltaImpulse;
         applyAxialImpulse( deltaImpulse );
