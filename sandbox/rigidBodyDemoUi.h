@@ -38,4 +38,5 @@ private:
 };
 
 [[nodiscard]] std::unique_ptr<demo> createDemoView( demoKind kind );
+void drawProjectCollisionSettings( demoSession& session );
 } // namespace zonai::sandbox

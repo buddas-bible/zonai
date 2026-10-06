@@ -39,6 +39,7 @@ void demoSession::selectDemo( demoKind kind )
     // 새 데모 생성 후 교체함. UI 선택/contact/World handle은 이전 데모와 함께 파괴됨.
     auto replacement = factory_( kind );
     assert( replacement != nullptr );
+    replacement->setCollisionMatrix( collisionMatrix_ );
     if( demo_ ) { demo_->cancelInput(); }
     demo_ = std::move( replacement );
     kind_ = kind;
@@ -48,6 +49,11 @@ void demoSession::selectDemo( demoKind kind )
 }
 
 void demoSession::reset() { selectDemo( kind_ ); }
+void demoSession::setCollisionMatrix( const collisionMatrix& matrix )
+{
+    if( matrix == collisionMatrix_ ) { return; }
+    demo_->setCollisionMatrix( matrix ); collisionMatrix_ = matrix;
+}
 #pragma endregion
 
 #pragma region PlaybackAndInput

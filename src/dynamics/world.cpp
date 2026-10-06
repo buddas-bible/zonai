@@ -577,6 +577,19 @@ collisionFilter world::GetShapeFilter(
             .filter;
 }
 
+void world::setCollisionMatrix( const collisionMatrix& matrix )
+{
+    if( matrix == collisionMatrix_ ) { return; }
+    collisionMatrix_ = matrix;
+    // 공통 규칙 변경은 모든 category 쌍에 영향을 줌. 기존 cache/pair를 버리고 정지 shape도 다시 찾음.
+    for( std::int32_t index = 0; index < static_cast<std::int32_t>( contacts_.size() ); ++index )
+    { if( contacts_[index].contactId != contact2::NULL_INDEX ) { DestroyContact( index ); } }
+    for( const shape& value : shapes_ )
+    { if( value.bodyId != shape::NULL_INDEX ) { broadPhase_.TouchProxy( value.proxyKey ); } }
+    for( body& value : bodies_ )
+    { if( value.bodyId != body::NULL_INDEX && value.type != bodyType::Static ) { value.awake = true; value.sleepTime = 0.0f; } }
+}
+
 #pragma endregion
 
 #pragma region SensorQueries
@@ -2358,6 +2371,12 @@ bool world::shouldBodiesCollide( std::int32_t bodyIndexA, std::int32_t bodyIndex
     return true;
 }
 
+bool world::shouldShapeFiltersCollide( const collisionFilter& a, const collisionFilter& b ) const
+{
+    // 프로젝트 허용 범위 안에서만 기존 group/mask가 동작함. Positive group도 공통 금지를 우회하지 않음.
+    return collisionMatrix_.allows( a.categoryBits, b.categoryBits ) && ShouldShapesCollide( a, b );
+}
+
 #pragma endregion
 
 #pragma region BodyShapeStorage
@@ -2987,7 +3006,7 @@ void world::UpdateSensors()
                             return true;
                         }
 
-                        if( !ShouldShapesCollide(
+                        if( !shouldShapeFiltersCollide(
                                 sensorShape.filter,
                                 otherShape.filter ) )
                         {
@@ -3768,7 +3787,7 @@ void world::SolveContinuousBody(
                 return;
             }
 
-            if( !ShouldShapesCollide(
+            if( !shouldShapeFiltersCollide(
                     fastShape.filter,
                     otherShape.filter ) )
             {
@@ -4109,7 +4128,7 @@ std::int32_t world::createContactForPair( std::int32_t shapeIdA, std::int32_t sh
     assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
     assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
 
-    if( !shouldBodiesCollide( shapeA.bodyId, shapeB.bodyId ) || !CanCollideShapes( shapeA.geometry, shapeB.geometry ) )
+    if( !shouldShapeFiltersCollide( shapeA.filter, shapeB.filter ) || !shouldBodiesCollide( shapeA.bodyId, shapeB.bodyId ) || !CanCollideShapes( shapeA.geometry, shapeB.geometry ) )
     {
         return contact2::NULL_INDEX;
     }

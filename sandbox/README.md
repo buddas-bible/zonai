@@ -2,7 +2,9 @@
 
 Windows용 Win32 / Direct3D 11 / Dear ImGui visual playground다. 빌드와 실행은 [루트 문서](../README.md)를 따른다. 물리 library가 Sandbox나 ImGui에 의존하지 않는다.
 
-Demo 목록에서 **Playground** 또는 **Distance Pendulum**을 선택한다. 전환/Reset은 현재 데모의 World·선택·설정·입력을 새로 만들고 Pause와 초기 camera로 돌아간다. Sub-steps는 공통 설정으로 유지한다.
+Demo 목록에서 **Playground** 또는 **Distance Pendulum**을 선택한다. 전환/Reset은 현재 데모의 World·선택·설정·입력을 새로 만들고 Pause와 초기 camera로 돌아간다. Sub-steps와 Project collision matrix는 공통 설정으로 유지한다.
+
+Inspector는 물리량·재질·충돌 마스크·수면/CCD·센서로 나뉜다. Category/Mask는 레이어 체크 목록으로 편집하고 Project collision matrix 버튼에서 전체 데모의 충돌 관계를 설정한다. [설정의 범위와 우선순위](../docs/sandbox-inspector.md)를 따른다.
 
 - Play/Pause, Step, Reset으로 simulation을 제어한다. 물리는 1/60초 fixed step, 한 frame 최대 8 step이며 긴 frame 뒤 남은 누적 시간은 버린다. Sub-steps는 World solver의 내부 반복 단위를 설정한다.
 - Object Inspector에서 pose, velocity, damping, sleep/CCD와 shape material/filter를 편집한다. Playground의 Impulse Test는 중심/중심 밖 impulse와 angular impulse를 비교한다.

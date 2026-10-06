@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -114,5 +115,50 @@ void checkDemoUi()
         const auto data = model.getWorld().getDistanceJointData( model.getPendulumJoint() );
         if( data.enableLimit != ( frame < 2 ) ) { std::fprintf( stderr, "limit checkbox did not switch mode\n" ); std::exit( EXIT_FAILURE ); }
     }
+    auto inspector = createDemoView( demoKind::playground );
+    auto& inspected = static_cast<rigidBodyDemo&>( *inspector );
+    const auto shape = inspected.getShapes()[2].shapeHandle;
+    for( int field = 0; field < 2; ++field )
+    {
+        const char* label = field == 0 ? "Category membership" : "Collision partners";
+        const char* bitLabel = field == 0 ? "Layer 64##Category" : "Layer 64##Mask";
+        for( int frame = 0; frame < 3; ++frame )
+        {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0.0f, 0.0f } ); ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+            ImGui::Begin( "Inspector filter" );
+            ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Collision mask" ), 1 );
+            if( frame == 0 ) { GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( label ); }
+            if( frame == 1 && !GImGui->OpenPopupStack.empty() )
+            {
+                auto* popup = GImGui->OpenPopupStack.back().Window;
+                GImGui->NavActivateId = GImGui->NavActivateDownId = popup->GetID( bitLabel );
+            }
+            inspector->drawControls(); ImGui::End(); ImGui::Render();
+        }
+        const auto filter = inspected.getWorld().GetShapeFilter( shape );
+        const auto highBit = std::uint64_t{ 1 } << 63;
+        if( field == 0 ? filter.categoryBits != ( highBit | 1 ) : filter.maskBits != ( ~highBit ) )
+        { std::fprintf( stderr, "inspector bit toggle failed: %s\n", label ); std::exit( EXIT_FAILURE ); }
+        ImGui::ClosePopupToLevel( 0, true );
+    }
+    demoSession project{ createDemoView };
+    for( int frame = 0; frame < 3; ++frame )
+    {
+        ImGui::NewFrame();
+        ImGui::Begin( "Project controls" );
+        if( frame == 0 ) { GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Project collision matrix" ); }
+        if( frame == 1 )
+        {
+            for( auto* window : GImGui->Windows )
+            {
+                if( std::strstr( window->Name, "MatrixGrid" ) != nullptr )
+                { GImGui->NavActivateId = GImGui->NavActivateDownId = window->GetID( "##Pair0_63" ); }
+            }
+        }
+        drawProjectCollisionSettings( project ); ImGui::End(); ImGui::Render();
+    }
+    if( project.getCollisionMatrix().allows( 1, std::uint64_t{ 1 } << 63 ) || project.getCollisionMatrix().allows( std::uint64_t{ 1 } << 63, 1 ) )
+    { std::fprintf( stderr, "project matrix UI did not edit symmetric pair\n" ); std::exit( EXIT_FAILURE ); }
     ImGui::DestroyContext();
 }

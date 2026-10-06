@@ -346,6 +346,7 @@ int main()
         ImGui::Text( "Fixed dt: %.5f s / Steps: %llu", 1.0f / 60.0f, static_cast<unsigned long long>( session.getStepCount() ) );
         if( ImGui::Button( "Reset Camera", ImVec2( -1.0f, 0.0f ) ) ) { resetCamera(); }
         ImGui::Text( "FPS: %.1f / Scale: %.1f px/m", io.Framerate, camera.pixelsPerMeter );
+        drawProjectCollisionSettings( session );
         ImGui::Separator();
         ImGui::TextUnformatted( "Controls" );
         ImGui::TextWrapped( "%s", getDemoEntry( session.getKind() ).controls );
