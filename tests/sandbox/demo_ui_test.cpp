@@ -11,7 +11,7 @@
 
 using namespace zonai::sandbox;
 
-// ImGui frame을 GPU/window 없이 만들어 두 실제 view의 control/draw 수명을 검사함.
+// ImGui frame을 GPU/window 없이 만들어 실제 view의 control/draw 수명을 검사함.
 // 실제 OS focus/클릭 routing이나 최종 화면의 시각 검증을 대신하지 않음.
 void checkDemoUi()
 {
@@ -500,6 +500,74 @@ void checkDemoUi()
             if( value != expected )
             {
                 std::fprintf( stderr, "manual revolute motor input escaped valid range\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+    }
+    auto wheelView = createDemoView( demoKind::wheelSuspension );
+    auto& wheelModel = static_cast<rigidBodyDemo&>( *wheelView );
+    for( int frame = 0; frame < 5; ++frame )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+        ImGui::Begin( "Wheel suspension actions" );
+        if( frame > 0 ) ImGui::GetStateStorage()->SetInt( ImGui::GetID( "WheelSpringSettings" ), 1 );
+        if( frame < 3 )
+        {
+            ImGui::PushID( "WheelSpringSettings" );
+            GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Wheel spring" );
+            ImGui::PopID();
+        }
+        else
+        {
+            GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( frame == 3 ? "Kick wheel" : "Spin wheel" );
+        }
+        wheelView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        if( wheelModel.getWorld().getWheelJointData( wheelModel.getWheelJoint() ).enableSpring != ( frame != 1 ) )
+        {
+            std::fprintf( stderr, "folded suspension controls or spring toggle failed: frame %d\n", frame );
+            std::exit( EXIT_FAILURE );
+        }
+    }
+    if( wheelModel.getWorld().GetBodyLinearVelocity( wheelModel.getImpulseBody() ).y < 1.9f || wheelModel.getWorld().GetBodyAngularVelocity( wheelModel.getImpulseBody() ) < 2.9f )
+    {
+        std::fprintf( stderr, "wheel experiment buttons did not apply impulses\n" );
+        std::exit( EXIT_FAILURE );
+    }
+    for( int setting = 0; setting < 2; ++setting )
+    {
+        for( int upper = 0; upper < 2; ++upper )
+        {
+            auto tuningView = createDemoView( demoKind::wheelSuspension );
+            auto& tuningModel = static_cast<rigidBodyDemo&>( *tuningView );
+            for( int phase = 0; phase < 3; ++phase )
+            {
+                if( phase == 1 ) io.AddInputCharactersUTF8( upper ? "9000" : "-9000" );
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+                ImGui::NewFrame();
+                ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+                ImGui::Begin( "Wheel suspension input" );
+                ImGui::GetStateStorage()->SetInt( ImGui::GetID( "WheelSpringSettings" ), 1 );
+                if( phase == 0 )
+                {
+                    ImGui::PushID( "WheelSpringSettings" );
+                    GImGui->NavActivateId = ImGui::GetID( setting == 0 ? "Wheel hertz" : "Wheel damping" );
+                    GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+                    ImGui::PopID();
+                }
+                tuningView->drawControls();
+                ImGui::End();
+                ImGui::Render();
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            }
+            const auto data = tuningModel.getWorld().getWheelJointData( tuningModel.getWheelJoint() );
+            const float value = setting == 0 ? data.hertz : data.dampingRatio;
+            const float expected = upper ? ( setting == 0 ? 10.0f : 2.0f ) : 0.0f;
+            if( value != expected )
+            {
+                std::fprintf( stderr, "manual suspension input escaped valid range\n" );
                 std::exit( EXIT_FAILURE );
             }
         }

@@ -50,7 +50,7 @@ std::unique_ptr<demo> createCounter( demoKind )
 
 int main()
 {
-    check( getDemoEntries().size() == 3, "three demo entries" );
+    check( getDemoEntries().size() == 4, "four demo entries" );
     demoSession session{ createRigidBodyDemo };
     auto& playground = static_cast<rigidBodyDemo&>( session.getDemo() );
     check( playground.getWorld().GetBodyCount() == 6 && playground.getWorld().getJointCount() == 0, "playground separated from pendulum" );
@@ -261,6 +261,38 @@ int main()
     session.reset();
     auto& freeHinge = static_cast<rigidBodyDemo&>( session.getDemo() );
     check( !freeHinge.getWorld().getRevoluteJointData( freeHinge.getRevoluteJoint() ).enableMotor, "reset disables motor" );
+
+    session.selectDemo( demoKind::wheelSuspension );
+    auto& suspension = static_cast<rigidBodyDemo&>( session.getDemo() );
+    const auto wheelJoint = suspension.getWheelJoint();
+    const auto wheelBody = suspension.getImpulseBody();
+    check( suspension.getWorld().GetBodyCount() == 2 && suspension.getWorld().getJointCount() == 1 && suspension.getWorld().IsValid( wheelJoint ), "independent suspension scene" );
+    input = {};
+    input.spinPressed = true;
+    input.jumpPressed = true;
+    session.handleInput( input, true );
+    check( suspension.getWorld().GetBodyAngularVelocity( wheelBody ) > 2.9f && suspension.getWorld().GetBodyLinearVelocity( wheelBody ).y > 4.9f, "wheel keyboard rotation and suspension kick" );
+    for( int i = 0; i < 180; ++i )
+    {
+        session.stepOnce( 4 );
+        const auto data = suspension.getWorld().getWheelJointData( wheelJoint );
+        check( std::abs( data.lateralError ) < 0.015f && IsFinite( data.force ), "suspension demo keeps wheel on axis under gravity and impulse" );
+    }
+    const auto suspensionData = suspension.getWorld().getWheelJointData( wheelJoint );
+    check( suspensionData.currentTranslation < -0.01f && suspensionData.currentTranslation > -0.06f && suspension.getWorld().GetBodyAngularVelocity( wheelBody ) > 2.9f, "demo suspension settles while wheel rotation remains free" );
+    input = {};
+    input.mousePressed = true;
+    input.mouseHeld = true;
+    input.mousePosition = suspension.getWorld().GetBodyTransform( wheelBody ).position;
+    session.handleInput( input, true );
+    check( suspension.getWorld().getJointCount() == 2 && suspension.getWorld().IsValid( suspension.getMouseJoint() ), "mouse drag coexists with wheel joint" );
+    session.handleInput( {}, false );
+    check( suspension.getWorld().getJointCount() == 1 && suspension.getWorld().IsValid( wheelJoint ), "UI capture cancels mouse drag and preserves suspension" );
+    suspension.getWorld().setWheelJointSpring( wheelJoint, false, 0.0f, 0.0f );
+    session.reset();
+    auto& resetSuspension = static_cast<rigidBodyDemo&>( session.getDemo() );
+    const auto restoredSpring = resetSuspension.getWorld().getWheelJointData( resetSuspension.getWheelJoint() );
+    check( !resetSuspension.getWorld().IsValid( wheelJoint ) && restoredSpring.enableSpring && restoredSpring.hertz == 3.0f && restoredSpring.dampingRatio == 0.7f && session.getStepCount() == 0 && !session.isPlaying(), "reset restores suspension defaults and rejects old handles" );
 
     return EXIT_SUCCESS;
 }

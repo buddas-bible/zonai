@@ -4,7 +4,7 @@
 
 Windows용 Win32 / Direct3D 11 / Dear ImGui visual playground다. 빌드와 실행은 [루트 문서](../README.md)를 따른다. 물리 library가 Sandbox나 ImGui에 의존하지 않는다.
 
-Demo 목록에서 **Playground** 또는 **Distance Pendulum**을 선택한다. 전환/Reset은 현재 데모의 World·선택·설정·입력을 새로 만들고 Pause와 초기 camera로 돌아간다. Sub-steps와 Project collision matrix는 공통 설정으로 유지한다.
+데모 목록에서 **강체 실험**, **거리 조인트 진자**, **회전축과 막대**, **서스펜션과 바퀴**를 선택한다. 전환/Reset은 현재 데모의 World·선택·설정·입력을 새로 만들고 Pause와 초기 camera로 돌아간다. Sub-steps와 공통 충돌 매트릭스는 공통 설정으로 유지한다.
 
 Inspector는 물리량·재질·충돌 마스크·수면/CCD·센서로 나뉜다. 소속 레이어는 체크 목록으로 편집하며 개별 마스크/그룹은 고급 설정을 펼쳐 편집한다. 공통 충돌 설정에서는 필요한 레이어를 최대 8개씩 표시하고 대칭 관계를 한 번만 편집한다. 숨기는 것은 충돌 규칙을 바꾸지 않는다. 월드·마우스 조인트·물리 정보 표시 설정도 필요할 때 펼친다. [설정의 범위와 우선순위](../docs/sandbox-inspector.md)를 따른다.
 
@@ -17,6 +17,8 @@ Inspector는 물리량·재질·충돌 마스크·수면/CCD·센서로 나뉜�
 | --- | --- | --- |
 | Playground | static 바닥/ramp, dynamic circle/box/capsule, kinematic platform | A/D 유지: circle에 힘, Space: jump, S: box 회전, 왼쪽 drag: Dynamic solid 잡기, 오른쪽 클릭: cursor 방향 impulse |
 | Distance Pendulum | static anchor와 dynamic circle의 고정 거리 Joint | A/D 유지: 진자에 힘, Space: 옆으로 impulse, 왼쪽 drag: Dynamic solid 잡기, 오른쪽 클릭: cursor 방향 impulse |
+| 회전축과 막대 | static 축과 dynamic 막대의 Revolute Joint | A/D: 수평 힘, Space: 위로 impulse, S: 회전, Mouse drag·cursor impulse. 접힌 각도 제한/모터 설정 |
+| 서스펜션과 바퀴 | static 지지대와 dynamic 원의 Wheel Joint | A/D: 축 옆 힘, Space: 위로 impulse, S: 회전, Mouse drag·cursor impulse. 접힌 주파수/감쇠 설정 |
 
 입력은 Canvas 위에서만 전달한다. UI 편집·창 focus 상실·가운데 drag 중에는 유지 입력을 취소한다. 왼쪽 drag는 Mouse Joint이며 오른쪽 클릭은 impulse 실험이다. Mouse Joint 설정에서 Hertz/damping/max force를 바꾸고 주황색 anchor/target과 point error/force를 관찰한다. Paused 상태는 다음 Step/Play까지 pose를 진행하지 않는다. 취소 뒤 재시작에는 새 press가 필요하다. [제약의 수학과 수명](../docs/mouse-joint.md)을 따른다.
 
@@ -26,4 +28,8 @@ Inspector는 물리량·재질·충돌 마스크·수면/CCD·센서로 나뉜�
 
 ## Distance Joint 진자
 
-보라색 선과 두 anchor 점은 Distance Joint다. 처음에는 rigid이며 Controls에서 Distance spring을 켜고 Hertz/damping을 조절한다. `Radial kick`으로 축 방향 진동을 시작하고 `Kick pendulum`으로 옆으로 민다. Target/Current, Extension과 signed Axial force를 관찰한다. Limit을 켜면 초록색 min/빨간색 max와 허용 구간을 표시한다. Spring on/0 Hz는 limit만 작동한다. Rigid는 range를 무시하고 같은 min/max는 Target의 rigid로 돌아간다. 부드러운 경계이므로 하중 아래 작은 오차가 남는다. Reset은 rigid/2 Hz/감쇠 0.7, limit off/min 1.5 m/max 2.5 m로 돌아간다. [Spring](../docs/distance-spring.md)과 [limit의 수학·조작·검증](../docs/distance-limit.md)을 따른다. Body local anchor는 원점 기준이며 solver에서는 COM 기준 lever arm으로 바뀐다. Motor는 아직 없다. CCD가 이동을 자른 frame에서는 거리 오차가 일시적으로 커질 수 있다.
+보라색 선과 두 anchor 점은 Distance Joint다. 처음에는 rigid이며 Controls에서 Distance spring을 켜고 Hertz/damping을 조절한다. ‘진자 축 방향으로 밀기’로 축 방향 진동을 시작하고 ‘진자 옆으로 밀기’로 옆으로 민다. 목표/현재 거리, 늘어난 길이와 signed 축 방향 힘을 관찰한다. Limit을 켜면 초록색 min/빨간색 max와 허용 구간을 표시한다. Spring on/0 Hz는 스프링 힘만 끄며 limit과 motor는 유지한다. Rigid는 range와 motor를 무시하고 같은 min/max는 Target의 rigid로 돌아간다. 부드러운 경계이므로 하중 아래 작은 오차가 남는다. Reset은 rigid/2 Hz/감쇠 0.7, limit off/min 1.5 m/max 2.5 m로 돌아간다. [Spring](../docs/distance-spring.md), [limit](../docs/distance-limit.md), [motor](../docs/distance-motor.md)의 수학·조작·검증을 따른다. Body local anchor는 원점 기준이며 solver에서는 COM 기준 lever arm으로 바뀐다. CCD가 이동을 자른 frame에서는 거리 오차가 일시적으로 커질 수 있다.
+
+## Wheel Joint 서스펜션
+
+‘서스펜션과 바퀴’의 접힌 스프링 설정에서 3 Hz/감쇠 0.7을 바꾸고 축 변위·수직 오차·힘·바퀴 각속도를 비교한다. 스프링 off/0 Hz는 축 이동을 자유롭게 하므로 중력으로 떨어지지만 수직 제약과 자유 회전은 유지한다. 이동 제한과 구동 모터는 후속 단계다. 청록색 점은 중립점, 화살표는 축의 양의 방향, 보라색은 바퀴와 회전 방향이다. [좌표계·수학·검증](../docs/wheel-joint.md)을 따른다.

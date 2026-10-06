@@ -21,11 +21,15 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createPendulum();
     }
+    else if( kind == demoKind::revoluteHinge )
+    {
+        createRevoluteHinge();
+    }
     else
     {
-        assert( kind == demoKind::revoluteHinge );
+        assert( kind == demoKind::wheelSuspension );
 
-        createRevoluteHinge();
+        createWheelSuspension();
     }
     refreshContacts();
 }
@@ -246,6 +250,24 @@ void rigidBodyDemo::createRevoluteHinge()
     joint.motorSpeed = 2.0f;
     joint.maxMotorTorque = 10.0f;
     revoluteJoint_ = world_.createRevoluteJoint( joint );
+}
+
+void rigidBodyDemo::createWheelSuspension()
+{
+    const bodyId frame = world_.CreateBody( bodyType::Static, { { 0.0f, 0.8f }, {} } );
+    const shapeId frameShape = world_.CreateShape( frame, MakeBox( { 0.6f, 0.1f } ) );
+    shapes_.push_back( { frame, frameShape, "서스펜션 지지대 [정적]" } );
+    impulseBody_ = world_.CreateBody( bodyType::Dynamic, { { 0.0f, -0.8f }, {} } );
+    torqueBody_ = impulseBody_;
+    const shapeId wheelShape = world_.CreateShape( impulseBody_, circle2{ {}, 0.35f } );
+    shapes_.push_back( { impulseBody_, wheelShape, "바퀴 [서스펜션]" } );
+
+    // 지지대 원점 아래 1.3 m를 스프링 기준으로 둠. 바퀴는 그 위치보다 0.3 m 아래에서 시작함.
+    wheelJointDef joint{};
+    joint.bodyA = frame;
+    joint.bodyB = impulseBody_;
+    joint.localAnchorA = { 0.0f, -1.3f };
+    wheelJoint_ = world_.createWheelJoint( joint );
 }
 
 #pragma endregion SceneSetup

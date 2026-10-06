@@ -59,6 +59,8 @@ public:
 
     [[nodiscard]] jointId getRevoluteJoint() const noexcept { return revoluteJoint_; }
 
+    [[nodiscard]] jointId getWheelJoint() const noexcept { return wheelJoint_; }
+
     [[nodiscard]] jointId getMouseJoint() const noexcept { return mouseJoint_; }
 
     [[nodiscard]] const mouseJointDef& getMouseSettings() const noexcept { return mouseSettings_; }
@@ -70,6 +72,7 @@ private:
     void createPlayground();
     void createPendulum();
     void createRevoluteHinge();
+    void createWheelSuspension();
 #pragma endregion SceneSetup
 
 #pragma region MouseDrag
@@ -87,6 +90,7 @@ private:
     bodyId pendulumBody_{};
     jointId pendulumJoint_{};
     jointId revoluteJoint_{};
+    jointId wheelJoint_{};
 
     jointId mouseJoint_{}; // 드래그 중인 마우스 조인트
     mouseJointDef mouseSettings_{};

@@ -506,6 +506,80 @@ revoluteJointData world::getRevoluteJointData( jointId id ) const
     return data;
 }
 
+jointId world::createWheelJoint( const wheelJointDef& definition )
+{
+    const std::int32_t bodyIndexA = GetBodyIndex( definition.bodyA );
+    const std::int32_t bodyIndexB = GetBodyIndex( definition.bodyB );
+    assert( bodyIndexA != bodyIndexB );
+    assert( bodies_[bodyIndexA].type == bodyType::Dynamic || bodies_[bodyIndexB].type == bodyType::Dynamic );
+    assert( IsFinite( definition.localAnchorA ) && IsFinite( definition.localAnchorB ) );
+    assert( IsFinite( definition.localAxisA ) && std::abs( LengthSquared( definition.localAxisA ) - 1.0f ) < 0.0001f );
+    assert( std::isfinite( definition.hertz ) && definition.hertz >= 0.0f && std::isfinite( definition.dampingRatio ) && definition.dampingRatio >= 0.0f );
+
+    const std::int32_t index = allocateJoint( bodyIndexA, bodyIndexB, definition.collideConnected );
+    wheelJointSim2 sim{};
+    sim.jointId = index;
+    sim.bodyIdA = bodyIndexA;
+    sim.bodyIdB = bodyIndexB;
+    sim.localAnchorA = definition.localAnchorA;
+    sim.localAnchorB = definition.localAnchorB;
+    sim.localAxisA = definition.localAxisA;
+    sim.enableSpring = definition.enableSpring;
+    sim.hertz = definition.hertz;
+    sim.dampingRatio = definition.dampingRatio;
+    jointSims_[index] = sim;
+
+    return makeJointId( index );
+}
+
+void world::setWheelJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio )
+{
+    assert( std::isfinite( hertz ) && hertz >= 0.0f && std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );
+
+    auto& joint = std::get<wheelJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.enableSpring == enableSpring && joint.hertz == hertz && joint.dampingRatio == dampingRatio ) return;
+
+    joint.enableSpring = enableSpring;
+    joint.hertz = hertz;
+    joint.dampingRatio = dampingRatio;
+    // 중심 밖 작용점에서는 스프링과 수직 제약이 결합하므로 이전 해를 함께 비움.
+    joint.impulse = 0.0f;
+    joint.springImpulse = 0.0f;
+
+    if( bodies_[joint.bodyIdA].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdA );
+    }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdB );
+    }
+}
+
+wheelJointData world::getWheelJointData( jointId id ) const
+{
+    const std::int32_t index = getJointIndex( id );
+    const wheelJointSim2& sim = std::get<wheelJointSim2>( jointSims_[index] );
+    wheelJointData data{};
+    data.bodyA = MakeBodyId( sim.bodyIdA );
+    data.bodyB = MakeBodyId( sim.bodyIdB );
+    data.anchorA = TransformPoint( bodySims_[sim.bodyIdA].transform, sim.localAnchorA );
+    data.anchorB = TransformPoint( bodySims_[sim.bodyIdB].transform, sim.localAnchorB );
+    data.axis = Rotate( bodySims_[sim.bodyIdA].transform.rotation, sim.localAxisA );
+    const vec2 perpendicular = Cross( 1.0f, data.axis );
+    const vec2 d = data.anchorB - data.anchorA;
+    data.currentTranslation = Dot( data.axis, d );
+    data.lateralError = Dot( perpendicular, d );
+    data.force = sim.subStepTime > 0.0f ? ( sim.impulse * perpendicular + sim.springImpulse * data.axis ) / sim.subStepTime : vec2{};
+    data.springForce = sim.subStepTime > 0.0f ? sim.springImpulse / sim.subStepTime : 0.0f;
+    data.collideConnected = joints_[index].collideConnected;
+    data.enableSpring = sim.enableSpring;
+    data.hertz = sim.hertz;
+    data.dampingRatio = sim.dampingRatio;
+
+    return data;
+}
+
 jointId world::createMouseJoint( const mouseJointDef& definition )
 {
     const std::int32_t bodyIndexA = GetBodyIndex( definition.bodyA );
@@ -1615,6 +1689,10 @@ void world::Step( float timeStep, int subStepCount )
                     {
                         return prepareRevoluteJointConstraint( joint, bodySims_[joint.bodyIdA], bodySims_[joint.bodyIdB], subStepTime );
                     }
+                    else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, wheelJointSim2> )
+                    {
+                        return prepareWheelJointConstraint( joint, bodySims_[joint.bodyIdA], bodySims_[joint.bodyIdB], subStepTime );
+                    }
                     else
                     {
                         return prepareMouseJointConstraint( joint, bodySims_[joint.bodyIdB], subStepTime );
@@ -1852,7 +1930,7 @@ void world::Step( float timeStep, int subStepCount )
                 [&]( const auto& constraint )
                 {
                     using constraintType = std::remove_cvref_t<decltype( constraint )>;
-                    using simType = std::conditional_t<std::is_same_v<constraintType, distanceJointConstraint2>, distanceJointSim2, std::conditional_t<std::is_same_v<constraintType, revoluteJointConstraint2>, revoluteJointSim2, mouseJointSim2>>;
+                    using simType = std::conditional_t<std::is_same_v<constraintType, distanceJointConstraint2>, distanceJointSim2, std::conditional_t<std::is_same_v<constraintType, revoluteJointConstraint2>, revoluteJointSim2, std::conditional_t<std::is_same_v<constraintType, wheelJointConstraint2>, wheelJointSim2, mouseJointSim2>>>;
                     auto& joint = std::get<simType>( jointSims_[constraint.jointId] );
                     joint.impulse = constraint.impulse;
                     joint.subStepTime = subStepTime;
@@ -1861,6 +1939,10 @@ void world::Step( float timeStep, int subStepCount )
                         joint.lowerImpulse = constraint.lowerImpulse;
                         joint.upperImpulse = constraint.upperImpulse;
                         joint.motorImpulse = constraint.motorImpulse;
+                    }
+                    if constexpr( std::is_same_v<simType, wheelJointSim2> )
+                    {
+                        joint.springImpulse = constraint.springImpulse;
                     }
                 },
                 value );
@@ -2372,6 +2454,10 @@ void world::resetJointImpulses( std::int32_t bodyIndex )
                     joint.lowerImpulse = 0.0f;
                     joint.upperImpulse = 0.0f;
                     joint.motorImpulse = 0.0f;
+                }
+                if constexpr( std::is_same_v<simType, wheelJointSim2> )
+                {
+                    joint.springImpulse = 0.0f;
                 }
             },
             jointSims_[key >> 1] );
@@ -3935,6 +4021,10 @@ void world::warmStartJoints( std::span<jointConstraint> constraints )
                 {
                     warmStartRevoluteJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
                 }
+                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, wheelJointConstraint2> )
+                {
+                    warmStartWheelJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
+                }
                 else
                 {
                     warmStartMouseJointConstraint( constraint, bodyStates_[constraint.bodyIdB] );
@@ -3958,6 +4048,10 @@ void world::solveJoints( std::span<jointConstraint> constraints, bool useBias )
                 else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, revoluteJointConstraint2> )
                 {
                     solveRevoluteJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB], useBias );
+                }
+                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, wheelJointConstraint2> )
+                {
+                    solveWheelJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB], useBias );
                 }
                 else
                 {

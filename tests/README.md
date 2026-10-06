@@ -11,9 +11,9 @@ Tests should be added alongside implementation work, with emphasis on:
 
 Prefer small, focused tests that make failures easy to diagnose.
 
-현재 CTest target은 43개이며 실행 방법은 [루트 문서](../README.md)를 따른다. CI는 Windows/Ubuntu Debug 전체와 Windows Release 아래 13개를 build/run한다.
+현재 CTest target은 47개이며 실행 방법은 [루트 문서](../README.md)를 따른다. CI는 Windows/Ubuntu Debug 전체와 Windows Release 아래 17개를 build/run한다.
 
-`broadPhaseLifecycleTests`, `bodyShapeContactLifecycleTests`, `contactConstraintTests`, `restitutionTests`, `islandTests`, `islandSleepCcdTests`, `worldQuerySensorTests`, `contactCacheTests`, `distanceJointTests`, `distanceJointWorldTests`, `mouseJointTests`, `mouseJointWorldTests`, `sandboxDemoTests`는 NDEBUG와 무관하게 runtime check가 유지된다. 새 회귀 검사가 Release에서도 필요하면 이 패턴을 따른다.
+`broadPhaseLifecycleTests`, `bodyShapeContactLifecycleTests`, `contactConstraintTests`, `restitutionTests`, `islandTests`, `islandSleepCcdTests`, `worldQuerySensorTests`, `contactCacheTests`, `distanceJointTests`, `distanceJointWorldTests`, `mouseJointTests`, `mouseJointWorldTests`, `revoluteJointTests`, `revoluteJointWorldTests`, `wheelJointTests`, `wheelJointWorldTests`, `sandboxDemoTests`는 NDEBUG와 무관하게 runtime check가 유지된다. 새 회귀 검사가 Release에서도 필요하면 이 패턴을 따른다.
 
 나머지 중 29개는 runtime assert 기반이며 Release에서 검사가 제거된다. `bodyTypeTests`는 compile-time static_assert 검사다. 특히 assert 안의 상태 변경 호출도 Release에서 생략될 수 있다. 전체 Release 통과 수를 Debug와 동등하게 해석하지 않으며 기존 테스트의 일괄 변환은 현재 개발 순서에서 보류한다.
 
@@ -22,3 +22,5 @@ Prefer small, focused tests that make failures easy to diagnose.
 Distance spring 회귀는 기존 두 Distance target과 Sandbox target에 포함한다. Implicit Euler 축 응답, 주파수·감쇠·중력 평형, Hertz 0, cache/wake와 live mode 전환을 검사한다. UI는 slider text 입력의 범위 제한, spring checkbox와 radial impulse를 실제 ImGui frame으로 확인한다. [검증 범위](../docs/distance-spring.md)를 따른다.
 
 Distance limit도 같은 세 target에 포함한다. Speculative boundary crossing, unilateral 부호/clamp, warm sum, rigid/equal-range 우선순위, 두 limit의 중력·spring 평형, cache/wake/no-op와 substep 1/4를 검사한다. UI text 입력은 min/max 순서를 유지하며 Reset과 limit checkbox를 확인한다. [Limit 검증 범위](../docs/distance-limit.md)를 따른다.
+
+Wheel 두 target은 회전하는 축의 d+r_a Jacobian·현재 A/B 회전·warm 반작용, 축의 자유 이동/회전·물리 스프링·중력 반력과 World 수명/cache를 검사한다. Sandbox는 네 번째 독립 데모의 키/Mouse/Reset과 실제 ImGui 접기·toggle·버튼·Hz/감쇠 숫자 clamp를 확인한다. [Wheel 검증 범위](../docs/wheel-joint.md)를 따른다.

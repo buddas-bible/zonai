@@ -16,7 +16,8 @@ enum class demoKind
 {
     playground,
     distancePendulum,
-    revoluteHinge
+    revoluteHinge,
+    wheelSuspension
 };
 
 struct demoEntry

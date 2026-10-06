@@ -516,6 +516,14 @@ add_executable(revoluteJointWorldTests dynamics/revolute_joint_world_test.cpp)
 target_link_libraries(revoluteJointWorldTests PRIVATE zonai::zonai)
 add_test(NAME revoluteJointWorldTests COMMAND revoluteJointWorldTests)
 
+add_executable(wheelJointTests dynamics/wheel_joint_test.cpp)
+target_link_libraries(wheelJointTests PRIVATE zonai::zonai)
+add_test(NAME wheelJointTests COMMAND wheelJointTests)
+
+add_executable(wheelJointWorldTests dynamics/wheel_joint_world_test.cpp)
+target_link_libraries(wheelJointWorldTests PRIVATE zonai::zonai)
+add_test(NAME wheelJointWorldTests COMMAND wheelJointWorldTests)
+
 add_executable(sandboxDemoTests sandbox/demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp")
 target_include_directories(sandboxDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxDemoTests PRIVATE zonai::zonai)
