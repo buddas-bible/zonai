@@ -51,6 +51,13 @@ wheelJointConstraint2 prepareWheelJointConstraint( const wheelJointSim2& joint, 
     constraint.impulse = sameStep && kp > 0.0f ? joint.impulse : 0.0f;
     constraint.springImpulse = sameStep && constraint.enableSpring && ka > 0.0f ? joint.springImpulse : 0.0f;
 
+    constraint.enableLimit = joint.enableLimit;
+    constraint.lowerTranslation = joint.lowerTranslation;
+    constraint.upperTranslation = joint.upperTranslation;
+    constraint.invSubStepTime = 1.0f / subStepTime;
+    constraint.lowerImpulse = sameStep && constraint.enableLimit && ka > 0.0f ? joint.lowerImpulse : 0.0f;
+    constraint.upperImpulse = sameStep && constraint.enableLimit && ka > 0.0f ? joint.upperImpulse : 0.0f;
+
     return constraint;
 }
 
@@ -66,10 +73,11 @@ void warmStartWheelJointConstraint( const wheelJointConstraint2& constraint, bod
     const vec2 axis = Rotate( bodyStateA.deltaRotation, constraint.axisA );
     const vec2 perpendicular = Cross( 1.0f, axis );
 
-    // 이전 축 방향·수직 임펄스를 합쳐 적용함. A에는 회전하는 축의 반작용까지 포함함.
-    const vec2 impulse = constraint.springImpulse * axis + constraint.impulse * perpendicular;
-    const float angularImpulseA = constraint.springImpulse * Cross( d + r_a, axis ) + constraint.impulse * Cross( d + r_a, perpendicular );
-    const float angularImpulseB = constraint.springImpulse * Cross( r_b, axis ) + constraint.impulse * Cross( r_b, perpendicular );
+    // 하한은 양의 축 방향, 상한은 음의 축 방향임. A에는 회전하는 축의 반작용까지 포함함.
+    const float axialImpulse = constraint.springImpulse + constraint.lowerImpulse - constraint.upperImpulse;
+    const vec2 impulse = axialImpulse * axis + constraint.impulse * perpendicular;
+    const float angularImpulseA = axialImpulse * Cross( d + r_a, axis ) + constraint.impulse * Cross( d + r_a, perpendicular );
+    const float angularImpulseB = axialImpulse * Cross( r_b, axis ) + constraint.impulse * Cross( r_b, perpendicular );
     bodyStateA.linearVelocity -= constraint.invMassA * impulse;
     bodyStateA.angularVelocity -= constraint.invInertiaA * angularImpulseA;
     bodyStateB.linearVelocity += constraint.invMassB * impulse;
@@ -86,12 +94,12 @@ void solveWheelJointConstraint( wheelJointConstraint2& constraint, bodyState& bo
     const vec2 r_b = Rotate( bodyStateB.deltaRotation, constraint.anchorB );
     const vec2 d = constraint.deltaCenter + bodyStateB.deltaPosition - bodyStateA.deltaPosition + r_b - r_a;
     const vec2 axis = Rotate( bodyStateA.deltaRotation, constraint.axisA );
+    const float a1 = Cross( d + r_a, axis );
+    const float a2 = Cross( r_b, axis );
+    const float translation = Dot( axis, d );
 
     if( constraint.enableSpring )
     {
-        const float a1 = Cross( d + r_a, axis );
-        const float a2 = Cross( r_b, axis );
-        const float translation = Dot( axis, d );
         const vec2 v_a = bodyStateA.linearVelocity;
         const float w_a = bodyStateA.angularVelocity;
         const vec2 v_b = bodyStateB.linearVelocity;
@@ -109,7 +117,45 @@ void solveWheelJointConstraint( wheelJointConstraint2& constraint, bodyState& bo
         bodyStateB.angularVelocity += constraint.invInertiaB * impulse * a2;
     }
 
-    // 스프링이 갱신한 최신 속도로 수직 제약을 풂. 중심 밖 연결점도 바퀴의 각도를 고정하지는 않음.
+    if( constraint.enableLimit && constraint.axialMass > 0.0f )
+    {
+        auto solveLimit = [&]( float separation, float direction, float& accumulatedImpulse )
+        {
+            float bias = 0.0f;
+            float massScale = 1.0f;
+            float impulseScale = 0.0f;
+
+            // 범위 안에서는 남은 거리 / h로 경계 통과를 예측함. 위반한 위치는 보정 pass에서만 줄임.
+            if( separation > 0.0f )
+            {
+                bias = separation * constraint.invSubStepTime;
+            }
+            else if( useBias )
+            {
+                bias = constraint.softness.biasRate * separation;
+                massScale = constraint.softness.massScale;
+                impulseScale = constraint.softness.impulseScale;
+            }
+
+            // 하한/상한의 C와 Cdot 부호를 맞춰 누적 임펄스를 0 이상으로 제한함. 안쪽 복귀는 허용함.
+            const float velocity = direction * ( Dot( axis, bodyStateB.linearVelocity - bodyStateA.linearVelocity ) + a2 * bodyStateB.angularVelocity - a1 * bodyStateA.angularVelocity );
+            const float deltaImpulse = -massScale * constraint.axialMass * ( velocity + bias ) - impulseScale * accumulatedImpulse;
+            const float oldImpulse = accumulatedImpulse;
+            accumulatedImpulse = std::max( 0.0f, oldImpulse + deltaImpulse );
+            const float impulse = direction * ( accumulatedImpulse - oldImpulse );
+            const vec2 linearImpulse = impulse * axis;
+            bodyStateA.linearVelocity -= constraint.invMassA * linearImpulse;
+            bodyStateA.angularVelocity -= constraint.invInertiaA * impulse * a1;
+            bodyStateB.linearVelocity += constraint.invMassB * linearImpulse;
+            bodyStateB.angularVelocity += constraint.invInertiaB * impulse * a2;
+        };
+
+        // Box2D처럼 스프링 → 하한 → 상한 → 수직 제약 순서. 제한은 스프링 off/0 Hz에서도 작동함.
+        solveLimit( translation - constraint.lowerTranslation, 1.0f, constraint.lowerImpulse );
+        solveLimit( constraint.upperTranslation - translation, -1.0f, constraint.upperImpulse );
+    }
+
+    // 스프링과 제한이 갱신한 최신 속도로 수직 제약을 풂. 중심 밖 연결점도 각도를 고정하지는 않음.
     const vec2 perpendicular = Cross( 1.0f, axis );
     const float s1 = Cross( d + r_a, perpendicular );
     const float s2 = Cross( r_b, perpendicular );

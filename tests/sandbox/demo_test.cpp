@@ -293,6 +293,26 @@ int main()
     auto& resetSuspension = static_cast<rigidBodyDemo&>( session.getDemo() );
     const auto restoredSpring = resetSuspension.getWorld().getWheelJointData( resetSuspension.getWheelJoint() );
     check( !resetSuspension.getWorld().IsValid( wheelJoint ) && restoredSpring.enableSpring && restoredSpring.hertz == 3.0f && restoredSpring.dampingRatio == 0.7f && session.getStepCount() == 0 && !session.isPlaying(), "reset restores suspension defaults and rejects old handles" );
+    check( !restoredSpring.enableLimit && restoredSpring.lowerTranslation == -0.5f && restoredSpring.upperTranslation == 0.5f, "demo starts with limits off and useful editable travel range" );
+    const auto limitedJoint = resetSuspension.getWheelJoint();
+    const auto limitedWheel = resetSuspension.getImpulseBody();
+    resetSuspension.getWorld().setWheelJointSpring( limitedJoint, false, 0.0f, 0.7f );
+    resetSuspension.getWorld().setWheelJointLimit( limitedJoint, true, -0.5f, 0.5f );
+    resetSuspension.getWorld().SetBodyLinearVelocity( limitedWheel, { 0.0f, 8.0f } );
+    resetSuspension.getWorld().SetBodyAngularVelocity( limitedWheel, 3.0f );
+    float maximumTranslation = -0.5f;
+    for( int i = 0; i < 180; ++i )
+    {
+        session.stepOnce( 4 );
+        const auto current = resetSuspension.getWorld().getWheelJointData( limitedJoint );
+        maximumTranslation = std::max( maximumTranslation, current.currentTranslation );
+        check( current.currentTranslation >= -0.515f && current.currentTranslation <= 0.515f && std::abs( current.lateralError ) < 0.015f, "demo limits preserve translation range and axis with spring disabled" );
+    }
+    const auto limitedData = resetSuspension.getWorld().getWheelJointData( limitedJoint );
+    check( maximumTranslation > 0.45f && limitedData.currentTranslation < -0.48f && limitedData.limitForce > 0.0f && resetSuspension.getWorld().GetBodyAngularVelocity( limitedWheel ) > 2.9f, "demo exercises both boundaries and gravity reaction without locking wheel rotation" );
+    session.reset();
+    auto& freeSuspension = static_cast<rigidBodyDemo&>( session.getDemo() );
+    check( !freeSuspension.getWorld().getWheelJointData( freeSuspension.getWheelJoint() ).enableLimit, "reset disables translation limit" );
 
     return EXIT_SUCCESS;
 }

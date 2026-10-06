@@ -267,6 +267,8 @@ void rigidBodyDemo::createWheelSuspension()
     joint.bodyA = frame;
     joint.bodyB = impulseBody_;
     joint.localAnchorA = { 0.0f, -1.3f };
+    joint.lowerTranslation = -0.5f;
+    joint.upperTranslation = 0.5f;
     wheelJoint_ = world_.createWheelJoint( joint );
 }
 

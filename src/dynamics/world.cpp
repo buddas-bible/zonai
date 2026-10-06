@@ -515,6 +515,7 @@ jointId world::createWheelJoint( const wheelJointDef& definition )
     assert( IsFinite( definition.localAnchorA ) && IsFinite( definition.localAnchorB ) );
     assert( IsFinite( definition.localAxisA ) && std::abs( LengthSquared( definition.localAxisA ) - 1.0f ) < 0.0001f );
     assert( std::isfinite( definition.hertz ) && definition.hertz >= 0.0f && std::isfinite( definition.dampingRatio ) && definition.dampingRatio >= 0.0f );
+    assert( std::isfinite( definition.lowerTranslation ) && std::isfinite( definition.upperTranslation ) && definition.lowerTranslation <= definition.upperTranslation );
 
     const std::int32_t index = allocateJoint( bodyIndexA, bodyIndexB, definition.collideConnected );
     wheelJointSim2 sim{};
@@ -527,6 +528,9 @@ jointId world::createWheelJoint( const wheelJointDef& definition )
     sim.enableSpring = definition.enableSpring;
     sim.hertz = definition.hertz;
     sim.dampingRatio = definition.dampingRatio;
+    sim.enableLimit = definition.enableLimit;
+    sim.lowerTranslation = definition.lowerTranslation;
+    sim.upperTranslation = definition.upperTranslation;
     jointSims_[index] = sim;
 
     return makeJointId( index );
@@ -542,9 +546,37 @@ void world::setWheelJointSpring( jointId id, bool enableSpring, float hertz, flo
     joint.enableSpring = enableSpring;
     joint.hertz = hertz;
     joint.dampingRatio = dampingRatio;
-    // 중심 밖 작용점에서는 스프링과 수직 제약이 결합하므로 이전 해를 함께 비움.
+    // 스프링·제한·수직 제약이 결합하므로 이전 해를 함께 비움.
     joint.impulse = 0.0f;
     joint.springImpulse = 0.0f;
+    joint.lowerImpulse = 0.0f;
+    joint.upperImpulse = 0.0f;
+
+    if( bodies_[joint.bodyIdA].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdA );
+    }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdB );
+    }
+}
+
+void world::setWheelJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation )
+{
+    assert( std::isfinite( lowerTranslation ) && std::isfinite( upperTranslation ) && lowerTranslation <= upperTranslation );
+
+    auto& joint = std::get<wheelJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.enableLimit == enableLimit && joint.lowerTranslation == lowerTranslation && joint.upperTranslation == upperTranslation ) return;
+
+    joint.enableLimit = enableLimit;
+    joint.lowerTranslation = lowerTranslation;
+    joint.upperTranslation = upperTranslation;
+    // 새 경계에는 이전 스프링·제한·수직 제약의 결합된 해를 적용하지 않음.
+    joint.impulse = 0.0f;
+    joint.springImpulse = 0.0f;
+    joint.lowerImpulse = 0.0f;
+    joint.upperImpulse = 0.0f;
 
     if( bodies_[joint.bodyIdA].type != bodyType::Static )
     {
@@ -570,12 +602,17 @@ wheelJointData world::getWheelJointData( jointId id ) const
     const vec2 d = data.anchorB - data.anchorA;
     data.currentTranslation = Dot( data.axis, d );
     data.lateralError = Dot( perpendicular, d );
-    data.force = sim.subStepTime > 0.0f ? ( sim.impulse * perpendicular + sim.springImpulse * data.axis ) / sim.subStepTime : vec2{};
+    const float axialImpulse = sim.springImpulse + sim.lowerImpulse - sim.upperImpulse;
+    data.force = sim.subStepTime > 0.0f ? ( sim.impulse * perpendicular + axialImpulse * data.axis ) / sim.subStepTime : vec2{};
     data.springForce = sim.subStepTime > 0.0f ? sim.springImpulse / sim.subStepTime : 0.0f;
+    data.limitForce = sim.subStepTime > 0.0f ? ( sim.lowerImpulse - sim.upperImpulse ) / sim.subStepTime : 0.0f;
     data.collideConnected = joints_[index].collideConnected;
     data.enableSpring = sim.enableSpring;
     data.hertz = sim.hertz;
     data.dampingRatio = sim.dampingRatio;
+    data.enableLimit = sim.enableLimit;
+    data.lowerTranslation = sim.lowerTranslation;
+    data.upperTranslation = sim.upperTranslation;
 
     return data;
 }
@@ -1943,6 +1980,8 @@ void world::Step( float timeStep, int subStepCount )
                     if constexpr( std::is_same_v<simType, wheelJointSim2> )
                     {
                         joint.springImpulse = constraint.springImpulse;
+                        joint.lowerImpulse = constraint.lowerImpulse;
+                        joint.upperImpulse = constraint.upperImpulse;
                     }
                 },
                 value );
@@ -2458,6 +2497,8 @@ void world::resetJointImpulses( std::int32_t bodyIndex )
                 if constexpr( std::is_same_v<simType, wheelJointSim2> )
                 {
                     joint.springImpulse = 0.0f;
+                    joint.lowerImpulse = 0.0f;
+                    joint.upperImpulse = 0.0f;
                 }
             },
             jointSims_[key >> 1] );

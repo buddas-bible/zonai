@@ -22,6 +22,12 @@ struct wheelJointSim2
     float hertz = 3.0f;
     float dampingRatio = 0.7f;
     float springImpulse = 0.0f;
+
+    bool enableLimit = false;
+    float lowerTranslation = 0.0f;
+    float upperTranslation = 0.0f;
+    float lowerImpulse = 0.0f;
+    float upperImpulse = 0.0f;
 };
 
 } // namespace zonai

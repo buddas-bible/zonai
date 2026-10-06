@@ -110,6 +110,8 @@ public:
     [[nodiscard]] jointId createWheelJoint( const wheelJointDef& definition );
     // 유한한 비음수 Hz/감쇠. off/0 Hz는 축을 잠그지 않으며 변경 시 cache와 wake를 갱신함.
     void setWheelJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio );
+    // 유한한 lower <= upper 변위 (m). 스프링 off/0 Hz와 무관하게 제한함.
+    void setWheelJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation );
     [[nodiscard]] wheelJointData getWheelJointData( jointId id ) const;
 
     // Static A / Dynamic B. target은 world 좌표, hertz/damping/maxForce는 유한한 비음수임.

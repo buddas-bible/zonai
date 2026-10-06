@@ -93,6 +93,9 @@ int main()
     check( !pair.IsBodyAwake( b ), "wheel pair shares sleep" );
     pair.setWheelJointSpring( pairJoint, true, 5.0f, 0.7f );
     check( pair.IsBodyAwake( a ) && pair.IsBodyAwake( b ), "spring setter wakes both connected dynamic bodies" );
+    pair.SetBodyAwake( a, false );
+    pair.setWheelJointLimit( pairJoint, true, -0.5f, 0.5f );
+    check( pair.IsBodyAwake( a ) && pair.IsBodyAwake( b ), "limit setter wakes both connected dynamic bodies" );
     world foreign;
     check( !foreign.IsValid( pairJoint ), "foreign World rejects wheel ID" );
     pair.destroyJoint( pairJoint );
@@ -112,11 +115,90 @@ int main()
     definition.bodyA = driver;
     definition.bodyB = follower;
     definition.enableSpring = false;
+    definition.enableLimit = true;
+    definition.lowerTranslation = 1.5f;
+    definition.upperTranslation = 2.5f;
     const auto movingJoint = moving.createWheelJoint( definition );
     for( int i = 0; i < 120; ++i ) moving.Step( 1.0f / 60.0f, 4 );
     const auto data = moving.getWheelJointData( movingJoint );
     check( std::abs( data.lateralError ) < 0.02f && std::abs( data.axis.x ) > 0.5f, "wheel follows moving and rotating kinematic line" );
+    check( data.currentTranslation >= 1.48f && data.currentTranslation <= 2.52f, "translation range follows moving kinematic frame" );
     check( moving.GetBodyLinearVelocity( driver ).x == drive.linearVelocity.x && moving.GetBodyAngularVelocity( driver ) == drive.angularVelocity, "wheel leaves prescribed kinematic motion unchanged" );
+
+    for( const int subSteps : { 1, 4 } )
+    {
+        world limited;
+        const auto anchor = limited.CreateBody();
+        const auto wheel = limited.CreateBody( bodyType::Dynamic );
+        const auto shape = limited.CreateShape( wheel, circle2{ {}, 0.3f } );
+        definition = {};
+        definition.bodyA = anchor;
+        definition.bodyB = wheel;
+        definition.enableSpring = false;
+        definition.enableLimit = true;
+        definition.lowerTranslation = -0.5f;
+        definition.upperTranslation = 0.5f;
+        const auto joint = limited.createWheelJoint( definition );
+        limited.SetBodyAngularVelocity( wheel, 2.0f );
+        for( int i = 0; i < 240; ++i )
+        {
+            limited.Step( 1.0f / 60.0f, subSteps );
+            const auto current = limited.getWheelJointData( joint );
+            check( current.currentTranslation >= -0.515f && current.currentTranslation <= 0.515f && IsFinite( current.force ), "spring-off limit keeps gravity motion in range for one and four substeps" );
+        }
+        auto current = limited.getWheelJointData( joint );
+        const float weight = -limited.GetGravity().y * limited.GetBodyMass( wheel );
+        check( std::abs( current.limitForce - weight ) < weight * 0.03f && std::abs( current.force.y - current.limitForce ) < 0.00001f && current.springForce == 0.0f, "stored limit reaction balances gravity and contributes to total force" );
+        check( limited.GetBodyAngularVelocity( wheel ) == 2.0f, "linear limit preserves free wheel rotation" );
+        const float forceBefore = current.limitForce;
+        limited.SetBodyAwake( wheel, false );
+        limited.setWheelJointLimit( joint, true, -0.5f, 0.5f );
+        check( !limited.IsBodyAwake( wheel ) && limited.getWheelJointData( joint ).limitForce == forceBefore, "identical limits preserve sleep and cached reaction" );
+        const auto isolated = limited.CreateBody( bodyType::Dynamic, { { 5.0f, 5.0f }, {} } );
+        ( void )limited.CreateShape( isolated, circle2{ {}, 0.1f } );
+        limited.SetBodyAwake( isolated, false );
+        limited.setWheelJointLimit( joint, false, -0.5f, 0.5f );
+        check( limited.IsBodyAwake( wheel ) && !limited.IsBodyAwake( isolated ) && LengthSquared( limited.getWheelJointData( joint ).force ) == 0.0f, "limit change clears coupled caches and wakes only connected component" );
+        for( int i = 0; i < 30; ++i ) limited.Step( 1.0f / 60.0f, subSteps );
+        check( limited.getWheelJointData( joint ).currentTranslation < -1.0f && limited.getWheelJointData( joint ).limitForce == 0.0f, "disabling limit restores free gravity motion" );
+
+        limited.SetGravity( {} );
+        limited.SetBodyTransform( wheel, {} );
+        limited.SetBodyLinearVelocity( wheel, { 0.0f, 10.0f } );
+        limited.setWheelJointSpring( joint, true, 0.0f, 0.7f );
+        limited.setWheelJointLimit( joint, true, -0.3f, 0.3f );
+        for( int i = 0; i < 60; ++i ) limited.Step( 1.0f / 60.0f, subSteps );
+        current = limited.getWheelJointData( joint );
+        check( current.currentTranslation > 0.28f && current.currentTranslation < 0.315f && current.springForce == 0.0f, "zero Hertz limit stops positive axis impulse at upper boundary" );
+        limited.SetBodyLinearVelocity( wheel, { 0.0f, -2.0f } );
+        limited.Step( 1.0f / 60.0f, subSteps );
+        check( limited.GetBodyLinearVelocity( wheel ).y < -1.9f, "upper boundary permits inward return" );
+        limited.setWheelJointLimit( joint, true, 0.1f, 0.1f );
+        for( int i = 0; i < 120; ++i ) limited.Step( 1.0f / 60.0f, subSteps );
+        check( std::abs( limited.getWheelJointData( joint ).currentTranslation - 0.1f ) < 0.002f, "equal limit translations maintain chosen offset" );
+
+        limited.SetBodyTransform( wheel, { { 0.0f, 0.2f }, {} } );
+        limited.SetBodyLinearVelocity( wheel, {} );
+        limited.setWheelJointLimit( joint, true, 0.1f, 0.4f );
+        limited.setWheelJointSpring( joint, true, 3.0f, 0.7f );
+        for( int i = 0; i < 240; ++i ) limited.Step( 1.0f / 60.0f, subSteps );
+        current = limited.getWheelJointData( joint );
+        check( current.currentTranslation >= 0.08f && current.currentTranslation <= 0.11f && current.springForce < 0.0f && current.limitForce > 0.0f, "lower limit resists spring pulling toward excluded neutral position" );
+        check( std::abs( current.springForce + current.limitForce ) < std::abs( current.springForce ) * 0.03f, "separate spring and limit forces reveal opposing equilibrium reactions" );
+        limited.setWheelJointSpring( joint, false, 3.0f, 0.7f );
+        check( LengthSquared( limited.getWheelJointData( joint ).force ) == 0.0f, "spring change clears old limit reaction as well" );
+        limited.SetGravity( { 0.0f, -10.0f } );
+        for( int i = 0; i < 120; ++i ) limited.Step( 1.0f / 60.0f, subSteps );
+        check( limited.getWheelJointData( joint ).limitForce > 0.0f, "limit cache is repopulated by gravity after settings change" );
+        limited.SetShapeDensity( shape, 2.0f );
+        check( limited.getWheelJointData( joint ).limitForce == 0.0f, "mass change clears limit caches" );
+        limited.Step( 1.0f / 60.0f, subSteps );
+        limited.SetBodyTransform( wheel, {} );
+        check( limited.getWheelJointData( joint ).limitForce == 0.0f, "pose change clears limit caches" );
+        limited.destroyJoint( joint );
+        const auto reused = limited.createWheelJoint( definition );
+        check( !limited.IsValid( joint ) && limited.getWheelJointData( reused ).limitForce == 0.0f, "reused Wheel slot discards old limit cache and handle" );
+    }
 
     return EXIT_SUCCESS;
 }

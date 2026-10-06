@@ -44,4 +44,4 @@ Sandbox model은 키/물리 진행/축 오차·평형·자유 회전/Mouse/Reset
 
 Sandbox ON 전체 Debug/Release와 Sandbox OFF 전체 Release 빌드 및 각각 CTest 47/47이 통과했다. A의 d+r_a 누락, 오래된 A축/B작용점, 물리 스프링의 relaxation bias 누락, 수직 제약의 relaxation bias 적용을 각각 주입한 다섯 mutation을 모두 검출한 뒤 원본을 복구했다. 독립 읽기 전용 검토에서 계산·수명·UI의 기능 문제는 없었고 유효 질량의 준비 시점 설명을 실제 Step 흐름에 맞춰 바로잡았다.
 
-다음은 Wheel의 **최소·최대 이동 범위**다. 스프링을 끈 상태에서도 범위를 유지하고, 경계와 감쇠·서스펜션 힘을 비교한 뒤 회전 모터/자동차로 이어간다. Ragdoll·조나이 선풍기/연결 장치와 같은 Sandbox의 천·유체·soft body·voxel·파괴·terrain 학습 목표도 유지한다.
+후속 [최소·최대 이동 범위](wheel-limit.md)를 추가하여 스프링을 끈 상태에서도 경계와 별도의 제한 힘을 비교한다. 현재 전체 force에는 제한 반력도 포함한다. 이 문서의 기본 구현 당시 범위와 검증 기록은 유지하며 최신 동작은 제한 기록을 따른다. 다음은 회전 모터/자동차다. Ragdoll·조나이 선풍기/연결 장치와 같은 Sandbox의 천·유체·soft body·voxel·파괴·terrain 학습 목표도 유지한다.

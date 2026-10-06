@@ -17,7 +17,7 @@ Sandbox의 [Inspector 분류·레이어 체크 목록·공통 충돌 매트릭�
 - [World Query / Sensor API](world-query-sensor-audit.md)
 - [Contact recycling/cache](contact-cache-audit.md)
 
-선택형 Sandbox: [설계](superpowers/specs/2026-10-06-sandbox-demo-design.md), [데모 추가와 학습 방향](sandbox-demos.md). Mouse Joint: [수학·수명·조작·검증](mouse-joint.md). Distance: [spring·Hertz·감쇠](distance-spring.md), [limit·min/max·한쪽 방향 제약](distance-limit.md), [motor·속도·힘 한도](distance-motor.md). Revolute: [회전축](revolute-joint.md), [각도 제한](revolute-limit.md), [회전 모터](revolute-motor.md). Wheel: [기본 서스펜션·축 이동·자유 회전](wheel-joint.md). 다음 구현은 Wheel 이동 범위 제한이다.
+선택형 Sandbox: [설계](superpowers/specs/2026-10-06-sandbox-demo-design.md), [데모 추가와 학습 방향](sandbox-demos.md). Mouse Joint: [수학·수명·조작·검증](mouse-joint.md). Distance: [spring·Hertz·감쇠](distance-spring.md), [limit·min/max·한쪽 방향 제약](distance-limit.md), [motor·속도·힘 한도](distance-motor.md). Revolute: [회전축](revolute-joint.md), [각도 제한](revolute-limit.md), [회전 모터](revolute-motor.md). Wheel: [기본 서스펜션·축 이동·자유 회전](wheel-joint.md), [이동 범위 제한](wheel-limit.md). 다음 구현은 Wheel 회전 모터다.
 
 첫 Joint: [기본 Distance Joint 설계](superpowers/specs/2026-10-06-distance-joint-design.md), [구현·학습·검증 기록](basic-distance-joint.md).
 

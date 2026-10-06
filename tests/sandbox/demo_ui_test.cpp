@@ -572,5 +572,61 @@ void checkDemoUi()
             }
         }
     }
+    auto wheelLimitView = createDemoView( demoKind::wheelSuspension );
+    auto& wheelLimitModel = static_cast<rigidBodyDemo&>( *wheelLimitView );
+    for( int frame = 0; frame < 3; ++frame )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+        ImGui::Begin( "Wheel limit actions" );
+        if( frame > 0 ) ImGui::GetStateStorage()->SetInt( ImGui::GetID( "WheelLimitSettings" ), 1 );
+        ImGui::PushID( "WheelLimitSettings" );
+        GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Wheel limit" );
+        ImGui::PopID();
+        wheelLimitView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        if( wheelLimitModel.getWorld().getWheelJointData( wheelLimitModel.getWheelJoint() ).enableLimit != ( frame == 1 ) )
+        {
+            std::fprintf( stderr, "folded wheel limit controls or toggle failed: frame %d\n", frame );
+            std::exit( EXIT_FAILURE );
+        }
+    }
+    for( int setting = 0; setting < 2; ++setting )
+    {
+        for( int upper = 0; upper < 2; ++upper )
+        {
+            auto tuningView = createDemoView( demoKind::wheelSuspension );
+            auto& tuningModel = static_cast<rigidBodyDemo&>( *tuningView );
+            for( int phase = 0; phase < 3; ++phase )
+            {
+                if( phase == 1 ) io.AddInputCharactersUTF8( upper ? "9000" : "-9000" );
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+                ImGui::NewFrame();
+                ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+                ImGui::Begin( "Wheel limit input" );
+                ImGui::GetStateStorage()->SetInt( ImGui::GetID( "WheelLimitSettings" ), 1 );
+                if( phase == 0 )
+                {
+                    ImGui::PushID( "WheelLimitSettings" );
+                    GImGui->NavActivateId = ImGui::GetID( setting == 0 ? "Wheel lower" : "Wheel upper" );
+                    GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+                    ImGui::PopID();
+                }
+                tuningView->drawControls();
+                ImGui::End();
+                ImGui::Render();
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            }
+            const auto data = tuningModel.getWorld().getWheelJointData( tuningModel.getWheelJoint() );
+            const float value = setting == 0 ? data.lowerTranslation : data.upperTranslation;
+            const float expected = setting == 0 ? ( upper ? 0.5f : -1.0f ) : ( upper ? 1.0f : -0.5f );
+            if( value != expected || data.lowerTranslation > data.upperTranslation )
+            {
+                std::fprintf( stderr, "manual wheel limit input escaped valid ordered range\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+    }
     ImGui::DestroyContext();
 }
