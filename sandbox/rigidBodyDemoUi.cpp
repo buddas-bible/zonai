@@ -1069,9 +1069,10 @@ void rigidBodyDemoUi::drawMouseControls()
 {
     ImGui::Separator(); ImGui::TextUnformatted( "Mouse Joint" );
     float hertz = getMouseSettings().hertz, damping = getMouseSettings().dampingRatio, force = getMouseSettings().maxForce;
-    bool changed = ImGui::SliderFloat( "Mouse Hertz", &hertz, 0.0f, 30.0f, "%.1f Hz" );
-    changed |= ImGui::SliderFloat( "Mouse damping", &damping, 0.0f, 2.0f, "%.2f" );
-    changed |= ImGui::SliderFloat( "Mouse max force", &force, 0.0f, 5000.0f, "%.1f N" );
+    // Ctrl+click의 숫자 입력도 solver의 비음수 전제조건과 화면 범위를 지켜야 함.
+    bool changed = ImGui::SliderFloat( "Mouse Hertz", &hertz, 0.0f, 30.0f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp );
+    changed |= ImGui::SliderFloat( "Mouse damping", &damping, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+    changed |= ImGui::SliderFloat( "Mouse max force", &force, 0.0f, 5000.0f, "%.1f N", ImGuiSliderFlags_AlwaysClamp );
     if( changed ) { setMouseSettings( hertz, damping, force ); }
     ImGui::TextWrapped( "Left drag: pick a Dynamic solid. Orange line: grabbed point to target. UI/focus/canvas exit cancels drag. Right click: impulse experiment." );
     ImGui::TextWrapped( "Hertz sets the point spring response, damping reduces oscillation. Zero Hertz gives velocity damping only; zero force disables the pull." );
