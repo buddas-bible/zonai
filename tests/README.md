@@ -20,3 +20,5 @@ Prefer small, focused tests that make failures easy to diagnose.
 `sandboxDemoTests`는 Sandbox를 끈 구성에서도 데모 교체·World 수명·재시작·시간 진행·입력 취소를 검사한다. ImGui target이 있는 Windows 구성에서는 같은 target에 실제 데모 Controls/Canvas draw의 headless frame 검사도 포함한다. 창/GPU/실제 OS 입력과 화면 배치를 검증하는 검사는 아니다.
 
 Distance spring 회귀는 기존 두 Distance target과 Sandbox target에 포함한다. Implicit Euler 축 응답, 주파수·감쇠·중력 평형, Hertz 0, cache/wake와 live mode 전환을 검사한다. UI는 slider text 입력의 범위 제한, spring checkbox와 radial impulse를 실제 ImGui frame으로 확인한다. [검증 범위](../docs/distance-spring.md)를 따른다.
+
+Distance limit도 같은 세 target에 포함한다. Speculative boundary crossing, unilateral 부호/clamp, warm sum, rigid/equal-range 우선순위, 두 limit의 중력·spring 평형, cache/wake/no-op와 substep 1/4를 검사한다. UI text 입력은 min/max 순서를 유지하며 Reset과 limit checkbox를 확인한다. [Limit 검증 범위](../docs/distance-limit.md)를 따른다.

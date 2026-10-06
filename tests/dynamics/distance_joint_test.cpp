@@ -94,5 +94,49 @@ int main()
     constraint = prepareDistanceJointConstraint( joint, a, b, h ); stateA = {}; stateB = {}; stateB.linearVelocity = { 2.0f, 0.0f };
     solveDistanceJointConstraint( constraint, stateA, stateB, false );
     check( near( stateA.linearVelocity.x, stateB.linearVelocity.x ), "spring off restores rigid velocity constraint" );
+    // 0 Hz로 spring 힘을 끄면 limit의 unilateral/speculative 응답을 따로 확인할 수 있음.
+    joint = {}; joint.bodyIdA = 0; joint.bodyIdB = 1; joint.length = 2.0f;
+    joint.enableSpring = true; joint.hertz = 0.0f; joint.enableLimit = true; joint.minLength = 1.0f; joint.maxLength = 3.0f;
+    for( const float direction : { -1.0f, 1.0f } )
+    {
+        b.center = { 2.0f, 0.0f };
+        constraint = prepareDistanceJointConstraint( joint, a, b, h ); stateA = {}; stateB = {}; stateB.linearVelocity.x = direction * 120.0f;
+        solveDistanceJointConstraint( constraint, stateA, stateB, false );
+        check( near( stateB.linearVelocity.x - stateA.linearVelocity.x, direction * 60.0f ), "speculative limit permits travel only to boundary" );
+        check( near( stateA.linearVelocity.x + 2.0f * stateB.linearVelocity.x, direction * 240.0f ), "limit conserves linear momentum" );
+        check( near( direction < 0.0f ? constraint.lowerImpulse : constraint.upperImpulse, 40.0f ), "limit signed direction and unilateral impulse" );
+        constraint = prepareDistanceJointConstraint( joint, a, b, h ); stateA = {}; stateB = {}; stateB.linearVelocity.x = direction * 3.0f;
+        solveDistanceJointConstraint( constraint, stateA, stateB, true );
+        check( constraint.lowerImpulse == 0.0f && constraint.upperImpulse == 0.0f && near( stateB.linearVelocity.x, direction * 3.0f ), "interior motion not locked" );
+        b.center.x = direction < 0.0f ? 1.0f : 3.0f;
+        constraint = prepareDistanceJointConstraint( joint, a, b, h ); stateA = {}; stateB = {}; stateB.linearVelocity.x = direction * 3.0f;
+        solveDistanceJointConstraint( constraint, stateA, stateB, false );
+        check( near( stateA.linearVelocity.x, stateB.linearVelocity.x ), "boundary blocks outward axis velocity" );
+        constraint = prepareDistanceJointConstraint( joint, a, b, h ); stateA = {}; stateB = {}; stateB.linearVelocity.x = -direction * 3.0f;
+        solveDistanceJointConstraint( constraint, stateA, stateB, true );
+        check( constraint.lowerImpulse == 0.0f && constraint.upperImpulse == 0.0f, "boundary allows motion back into interval" );
+        b.center.x = direction < 0.0f ? 0.5f : 3.5f;
+        constraint = prepareDistanceJointConstraint( joint, a, b, h ); stateA = {}; stateB = {};
+        solveDistanceJointConstraint( constraint, stateA, stateB, true );
+        check( direction * ( stateB.linearVelocity.x - stateA.linearVelocity.x ) < 0.0f, "bias repairs violated limit" );
+        constraint = prepareDistanceJointConstraint( joint, a, b, h ); stateA = {}; stateB = {};
+        solveDistanceJointConstraint( constraint, stateA, stateB, false );
+        check( constraint.lowerImpulse == 0.0f && constraint.upperImpulse == 0.0f, "relax does not inject violation bias" );
+    }
+    b.center = { 2.0f, 0.0f }; joint.subStepTime = h; joint.lowerImpulse = 3.0f; joint.upperImpulse = 1.0f; joint.impulse = -4.0f;
+    constraint = prepareDistanceJointConstraint( joint, a, b, h ); stateA = {}; stateB = {};
+    warmStartDistanceJointConstraint( constraint, stateA, stateB );
+    check( near( stateA.linearVelocity.x, -2.0f ) && near( stateB.linearVelocity.x, 1.0f ), "warm start sums lower minus upper without inactive spring cache" );
+    constraint = prepareDistanceJointConstraint( joint, a, b, h * 0.5f );
+    check( constraint.impulse == 0.0f && constraint.lowerImpulse == 0.0f && constraint.upperImpulse == 0.0f, "changed h resets all three caches" );
+    joint.enableSpring = false;
+    constraint = prepareDistanceJointConstraint( joint, a, b, h );
+    check( constraint.lowerImpulse == 0.0f && constraint.upperImpulse == 0.0f, "rigid mode discards limit caches" );
+    stateA = {}; stateB = {}; stateB.linearVelocity.x = 3.0f; solveDistanceJointConstraint( constraint, stateA, stateB, false );
+    check( near( stateA.linearVelocity.x, stateB.linearVelocity.x ), "rigid mode overrides range" );
+    joint.enableSpring = true; joint.minLength = joint.maxLength = 1.5f; joint.impulse = 0.0f; b.center.x = 1.5f;
+    constraint = prepareDistanceJointConstraint( joint, a, b, h ); stateA = {}; stateB = {};
+    solveDistanceJointConstraint( constraint, stateA, stateB, true );
+    check( stateB.linearVelocity.x > stateA.linearVelocity.x && constraint.lowerImpulse == 0.0f && constraint.upperImpulse == 0.0f, "equal limits use rigid rest length as Box2D does" );
     return EXIT_SUCCESS;
 }

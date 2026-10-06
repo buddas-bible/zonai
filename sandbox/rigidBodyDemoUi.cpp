@@ -304,7 +304,13 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         draw.DrawSegment( { joint.anchorA, joint.anchorB }, JOINT_COLOR );
         draw.DrawPoint( joint.anchorA, JOINT_COLOR );
         draw.DrawPoint( joint.anchorB, JOINT_COLOR );
-
+        if( joint.enableSpring && joint.enableLimit && joint.minLength < joint.maxLength )
+        {
+            const vec2 axis = Normalize( joint.anchorB - joint.anchorA );
+            const vec2 lower = joint.anchorA + joint.minLength * axis, upper = joint.anchorA + joint.maxLength * axis;
+            draw.DrawSegment( { lower, upper }, IM_COL32( 160, 160, 160, 255 ) );
+            draw.DrawPoint( lower, IM_COL32( 100, 255, 140, 255 ) ); draw.DrawPoint( upper, IM_COL32( 255, 105, 90, 255 ) );
+        }
     }
 
     if( showContacts_ )
@@ -987,10 +993,22 @@ void rigidBodyDemoUi::drawExperimentControls()
             getWorld().setDistanceJointSpring( getPendulumJoint(), enableSpring, hertz, dampingRatio );
             pendulum = getWorld().getDistanceJointData( getPendulumJoint() );
         }
-        ImGui::TextUnformatted( !enableSpring ? "Rigid distance" : hertz == 0.0f ? "Free distance axis (0 Hz)" : "Spring distance" );
+        bool enableLimit = pendulum.enableLimit;
+        float minLength = pendulum.minLength, maxLength = pendulum.maxLength;
+        bool limitChanged = ImGui::Checkbox( "Distance limit", &enableLimit );
+        limitChanged |= ImGui::SliderFloat( "Distance min", &minLength, LINEAR_SLOP, maxLength, "%.2f m", ImGuiSliderFlags_AlwaysClamp );
+        limitChanged |= ImGui::SliderFloat( "Distance max", &maxLength, minLength, 4.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp );
+        if( limitChanged )
+        {
+            getWorld().setDistanceJointLimit( getPendulumJoint(), enableLimit, minLength, maxLength );
+            pendulum = getWorld().getDistanceJointData( getPendulumJoint() );
+        }
+        const bool rigid = !enableSpring || ( enableLimit && minLength == maxLength );
+        ImGui::TextUnformatted( rigid ? "Rigid distance at Target" : hertz > 0.0f ? "Spring distance" : enableLimit ? "Limit only (0 Hz)" : "Free distance axis (0 Hz)" );
         ImGui::Text( "Target: %.3f m / Current: %.3f m", pendulum.length, pendulum.currentLength );
         ImGui::Text( "Extension: %.3f m / Axial force: %.2f N", pendulum.currentLength - pendulum.length, pendulum.axialForce );
-        ImGui::TextWrapped( "Spring: Hertz controls stiffness; damping controls oscillation. Negative force is tension. 0 Hz frees the distance axis." );
+        ImGui::TextWrapped( "Hertz controls spring stiffness; damping controls oscillation. Negative force is tension. Limits need spring enabled; 0 Hz keeps limits active. Equal limits use rigid Target." );
+        if( enableLimit && !rigid ) { ImGui::TextWrapped( "Green: min / Red: max. Limits correct softly; small errors can remain under load." ); }
         if( ImGui::Button( "Kick pendulum", ImVec2( -1.0f, 0.0f ) ) )
         {
             getWorld().ApplyLinearImpulseToCenter( getPendulumBody(), { getWorld().GetBodyMass( getPendulumBody() ) * 2.0f, 0.0f } );

@@ -56,8 +56,8 @@ void checkDemoUi()
     // Keyboard navigation의 PreferInput은 Ctrl+click과 같은 실제 SliderFloat text 경로임.
     // 충분히 큰 viewport로 Inspector 아래의 tuning widget도 clipping 없이 실행함.
     io.DisplaySize = { 1280.0f, 4096.0f };
-    const char* labels[] = { "Mouse Hertz", "Mouse damping", "Mouse max force", "Distance Hertz", "Distance damping" };
-    for( int setting = 0; setting < 5; ++setting )
+    const char* labels[] = { "Mouse Hertz", "Mouse damping", "Mouse max force", "Distance Hertz", "Distance damping", "Distance min", "Distance max" };
+    for( int setting = 0; setting < 7; ++setting )
     {
         for( int upper = 0; upper < 2; ++upper )
         {
@@ -81,9 +81,10 @@ void checkDemoUi()
             const auto& tuning = static_cast<rigidBodyDemo&>( *view ).getMouseSettings();
             auto& model = static_cast<rigidBodyDemo&>( *view );
             const auto spring = setting < 3 ? zonai::distanceJointData{} : model.getWorld().getDistanceJointData( model.getPendulumJoint() );
-            const float value = setting == 0 ? tuning.hertz : setting == 1 ? tuning.dampingRatio : setting == 2 ? tuning.maxForce : setting == 3 ? spring.hertz : spring.dampingRatio;
-            const float limit = setting == 0 || setting == 3 ? 30.0f : setting == 2 ? 5000.0f : 2.0f;
-            if( value != ( upper ? limit : 0.0f ) )
+            const float value = setting == 0 ? tuning.hertz : setting == 1 ? tuning.dampingRatio : setting == 2 ? tuning.maxForce : setting == 3 ? spring.hertz : setting == 4 ? spring.dampingRatio : setting == 5 ? spring.minLength : spring.maxLength;
+            const float limit = setting == 0 || setting == 3 ? 30.0f : setting == 2 ? 5000.0f : setting == 5 ? 2.5f : setting == 6 ? 4.0f : 2.0f;
+            const float minimum = setting == 5 ? zonai::LINEAR_SLOP : setting == 6 ? 1.5f : 0.0f;
+            if( value != ( upper ? limit : minimum ) || ( setting >= 5 && spring.minLength > spring.maxLength ) )
             { std::fprintf( stderr, "manual tuning %s not clamped: %f\n", labels[setting], value ); std::exit( EXIT_FAILURE ); }
         }
     }
@@ -102,6 +103,16 @@ void checkDemoUi()
         if( data.enableSpring != ( frame < 2 ) ) { std::fprintf( stderr, "spring checkbox did not switch mode\n" ); std::exit( EXIT_FAILURE ); }
         if( frame == 1 && model.getWorld().GetBodyLinearVelocity( model.getPendulumBody() ).y != -2.0f )
         { std::fprintf( stderr, "radial kick did not excite the distance axis\n" ); std::exit( EXIT_FAILURE ); }
+    }
+    for( int frame = 0; frame < 4; ++frame )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0.0f, 0.0f } ); ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+        ImGui::Begin( "Limit actions" );
+        if( frame == 0 || frame == 2 ) { GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Distance limit" ); }
+        view->drawControls(); ImGui::End(); ImGui::Render();
+        const auto data = model.getWorld().getDistanceJointData( model.getPendulumJoint() );
+        if( data.enableLimit != ( frame < 2 ) ) { std::fprintf( stderr, "limit checkbox did not switch mode\n" ); std::exit( EXIT_FAILURE ); }
     }
     ImGui::DestroyContext();
 }
