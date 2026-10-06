@@ -32,13 +32,9 @@ namespace zonai
 {
 
 template <typename Callback>
-concept worldCollisionCallback =
-    requires(
-        Callback& callback,
-        const contactData& contactData )
-    {
-        { callback( contactData ) } -> std::same_as<void>;
-    };
+concept worldCollisionCallback = requires( Callback& callback, const contactData& contactData ) {
+    { callback( contactData ) } -> std::same_as<void>;
+};
 
 class world
 {
@@ -55,7 +51,7 @@ public:
     world( world&& ) = delete;
     world& operator=( world&& ) = delete;
 
-#pragma endregion
+#pragma endregion WorldLifetime
 
 #pragma region BodyLifecycle
 
@@ -68,8 +64,7 @@ public:
     // handle이 가리키는 body와 연결된 Joint / Contact / shape / proxy를 모두 정리함.
     void DestroyBody( bodyId bodyId );
 
-
-#pragma endregion
+#pragma endregion BodyLifecycle
 
 #pragma region ShapeLifecycle
 
@@ -77,17 +72,12 @@ public:
     [[nodiscard]] shapeId CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter = {}, float density = 1.0f );
 
     // Contact를 만들지 않고 overlap만 추적하는 sensor shape를 생성함.
-    [[nodiscard]] shapeId CreateSensorShape(
-        bodyId bodyId,
-        shapeGeometry geometry,
-        collisionFilter filter = {},
-        float density = 0.0f );
+    [[nodiscard]] shapeId CreateSensorShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter = {}, float density = 0.0f );
 
     // handle이 가리키는 shape의 Contact / proxy / body list 연결을 정리함.
     void DestroyShape( shapeId shapeId );
 
-
-#pragma endregion
+#pragma endregion ShapeLifecycle
 
 #pragma region JointLifecycle
 
@@ -112,9 +102,10 @@ public:
 
     void destroyJoint( jointId id );
     [[nodiscard]] distanceJointData getDistanceJointData( jointId id ) const;
+
     [[nodiscard]] std::size_t getJointCount() const noexcept { return jointCount_; }
 
-#pragma endregion
+#pragma endregion JointLifecycle
 
 #pragma region ShapeProperties
 
@@ -134,9 +125,10 @@ public:
     [[nodiscard]] collisionFilter GetShapeFilter( shapeId shapeId ) const;
     // 공통 category 규칙 변경은 Contact를 무효화하고 정지 proxy도 다시 검사함.
     void setCollisionMatrix( const collisionMatrix& matrix );
+
     [[nodiscard]] const collisionMatrix& getCollisionMatrix() const noexcept { return collisionMatrix_; }
 
-#pragma endregion
+#pragma endregion ShapeProperties
 
 #pragma region SensorQueries
 
@@ -152,24 +144,16 @@ public:
 
     // 마지막 Step의 overlap handle을 output 크기까지만 채우고 실제 작성 개수를 반환함.
     // Box2D처럼 파괴된 visitor의 과거 handle도 포함할 수 있으므로 사용 전에 IsValid로 확인함.
-    [[nodiscard]] std::size_t GetShapeSensorData(
-        shapeId sensorShapeId,
-        std::span<shapeId> output ) const;
+    [[nodiscard]] std::size_t GetShapeSensorData( shapeId sensorShapeId, std::span<shapeId> output ) const;
 
     // 가장 최근 Step 끝에서 생성된 transient sensor begin / end events.
     // span은 다음 Step 또는 world 파괴 전까지 유효함. 보존하려면 event를 복사함.
     // Box2D처럼 sensor/visitor가 이미 파괴됐을 수 있으므로 handle은 IsValid로 확인함.
-    [[nodiscard]] std::span<const sensorBeginEvent2> GetSensorBeginEvents() const noexcept
-    {
-        return sensorBeginEvents_;
-    }
+    [[nodiscard]] std::span<const sensorBeginEvent2> GetSensorBeginEvents() const noexcept { return sensorBeginEvents_; }
 
-    [[nodiscard]] std::span<const sensorEndEvent2> GetSensorEndEvents() const noexcept
-    {
-        return sensorEndEvents_;
-    }
+    [[nodiscard]] std::span<const sensorEndEvent2> GetSensorEndEvents() const noexcept { return sensorEndEvents_; }
 
-#pragma endregion
+#pragma endregion SensorQueries
 
 #pragma region ShapeBounds
 
@@ -180,7 +164,7 @@ public:
     [[nodiscard]] const aabb2& GetShapeAABB( shapeId shapeId ) const;
     [[nodiscard]] const aabb2& GetShapeFatAABB( shapeId shapeId ) const;
 
-#pragma endregion
+#pragma endregion ShapeBounds
 
 #pragma region BodyProperties
 
@@ -189,7 +173,6 @@ public:
 
     // body의 simulation storage에 보관된 현재 world transform을 반환함.
     [[nodiscard]] transform2 GetBodyTransform( bodyId bodyId ) const;
-
 
     void SetBodyLinearVelocity( bodyId bodyId, vec2 linearVelocity );
     [[nodiscard]] vec2 GetBodyLinearVelocity( bodyId bodyId ) const;
@@ -208,7 +191,6 @@ public:
 
     void SetBodyFastRotationAllowed( bodyId bodyId, bool allowed );
     [[nodiscard]] bool IsBodyFastRotationAllowed( bodyId bodyId ) const;
-
 
     void SetBodyAwake( bodyId bodyId, bool awake );
     [[nodiscard]] bool IsBodyAwake( bodyId bodyId ) const;
@@ -235,13 +217,11 @@ public:
     // 마지막 Step에서 실제 TOI로 이동이 잘렸는지 반환함.
     [[nodiscard]] bool HadBodyTimeOfImpact( bodyId bodyId ) const;
 
-
     [[nodiscard]] float GetBodyMass( bodyId bodyId ) const;
     [[nodiscard]] float GetBodyRotationalInertia( bodyId bodyId ) const;
     [[nodiscard]] vec2 GetBodyLocalCenter( bodyId bodyId ) const;
 
-
-#pragma endregion
+#pragma endregion BodyProperties
 
 #pragma region WorldSettings
 
@@ -263,13 +243,9 @@ public:
     [[nodiscard]] float GetContactRecycleDistance() const noexcept;
 
     // 가장 최근 UpdateCollisions에서 narrowphase를 건너뛰고 재활용한 Contact 수.
-    [[nodiscard]] std::size_t GetRecycledContactCount() const noexcept
-    {
-        return recycledContactCount_;
-    }
+    [[nodiscard]] std::size_t GetRecycledContactCount() const noexcept { return recycledContactCount_; }
 
-
-#pragma endregion
+#pragma endregion WorldSettings
 
 #pragma region ForcesAndImpulses
 
@@ -296,15 +272,14 @@ public:
     // Dynamic body의 angular velocity를 즉시 변경하는 z축 angular impulse.
     void ApplyAngularImpulse( bodyId bodyId, float impulse );
 
-
-#pragma endregion
+#pragma endregion ForcesAndImpulses
 
 #pragma region SimulationStep
 
     // Contact / Joint constraint를 준비한 뒤 sub-step마다 force / gravity, solve, position integration을 수행함.
     void Step( float timeStep, int subStepCount = 1 );
 
-#pragma endregion
+#pragma endregion SimulationStep
 
 #pragma region HandleValidity
 
@@ -314,15 +289,14 @@ public:
     [[nodiscard]] bool IsValid( contactId contactId ) const noexcept;
     [[nodiscard]] bool IsValid( jointId id ) const noexcept;
 
-#pragma endregion
+#pragma endregion HandleValidity
 
 #pragma region CollisionCallbacks
 
     // 기존 Contact를 갱신하고 broadPhase의 새 AABB pair는 persistent Contact로 생성함.
     // callback은 현재 실제 접촉점이 존재하는 Contact만 받음.
     // callback 중 world 변경이나 Step / UpdateCollisions 재진입은 허용하지 않음.
-    template <worldCollisionCallback Callback>
-    void UpdateCollisions( Callback&& callback )
+    template <worldCollisionCallback Callback> void UpdateCollisions( Callback&& callback )
     {
         recycledContactCount_ = 0;
 
@@ -336,17 +310,18 @@ public:
         }
 
         // pairSet이 기존 pair를 걸러줌. callable을 복사하거나 임시 event buffer를 만들지 않음.
-        broadPhase_.UpdatePairs( std::span<const shape>{ shapes_ }, [this, &callback]( std::int32_t shapeIdA, std::int32_t shapeIdB )
-        {
-            const std::int32_t contactId = createContactForPair( shapeIdA, shapeIdB );
-            if( contactId != contact2::NULL_INDEX && IsTouchingManifold( contactSims_[contactId].manifold ) )
+        broadPhase_.UpdatePairs( std::span<const shape>{ shapes_ },
+            [this, &callback]( std::int32_t shapeIdA, std::int32_t shapeIdB )
             {
-                callback( MakeContactData( contactId ) );
-            }
-        } );
+                const std::int32_t contactId = createContactForPair( shapeIdA, shapeIdB );
+                if( contactId != contact2::NULL_INDEX && IsTouchingManifold( contactSims_[contactId].manifold ) )
+                {
+                    callback( MakeContactData( contactId ) );
+                }
+            } );
     }
 
-#pragma endregion
+#pragma endregion CollisionCallbacks
 
 #pragma region DiagnosticQueries
 
@@ -372,27 +347,15 @@ public:
     [[nodiscard]] std::size_t GetShapeContactData( shapeId shapeId, std::span<contactData> output ) const;
 
     // world가 소유하는 읽기 전용 진단 view. tree/proxy 참조를 world 변경 너머로 보관하지 않음.
-    [[nodiscard]] const broadPhase& GetBroadPhase() const noexcept
-    {
-        return broadPhase_;
-    }
+    [[nodiscard]] const broadPhase& GetBroadPhase() const noexcept { return broadPhase_; }
 
-    [[nodiscard]] std::size_t GetBodyCount() const noexcept
-    {
-        return bodyCount_;
-    }
+    [[nodiscard]] std::size_t GetBodyCount() const noexcept { return bodyCount_; }
 
-    [[nodiscard]] std::size_t GetShapeCount() const noexcept
-    {
-        return shapeCount_;
-    }
+    [[nodiscard]] std::size_t GetShapeCount() const noexcept { return shapeCount_; }
 
-    [[nodiscard]] std::size_t GetContactCount() const noexcept
-    {
-        return contactCount_;
-    }
+    [[nodiscard]] std::size_t GetContactCount() const noexcept { return contactCount_; }
 
-#pragma endregion
+#pragma endregion DiagnosticQueries
 
 private:
     // Public handle이 world 수명을 구분할 때 사용하는 opaque token.
@@ -411,7 +374,7 @@ private:
     [[nodiscard]] contactData MakeContactData( std::int32_t contactIndex ) const;
     [[nodiscard]] jointId makeJointId( std::int32_t jointIndex ) const;
 
-#pragma endregion
+#pragma endregion InternalHandles
 
 #pragma region JointStorage
 
@@ -421,7 +384,7 @@ private:
     [[nodiscard]] bool shouldBodiesCollide( std::int32_t bodyIndexA, std::int32_t bodyIndexB ) const;
     [[nodiscard]] bool shouldShapeFiltersCollide( const collisionFilter& a, const collisionFilter& b ) const;
 
-#pragma endregion
+#pragma endregion JointStorage
 
 #pragma region BodyShapeStorage
 
@@ -432,14 +395,12 @@ private:
     void SyncBodyProxies( std::int32_t bodyIndex );
 
     // 아직 commit되지 않은 transform을 기준으로 speculative / fat bounds와 tree proxy를 갱신함.
-    void UpdateBodyProxyBounds(
-        std::int32_t bodyIndex,
-        const transform2& transform );
+    void UpdateBodyProxyBounds( std::int32_t bodyIndex, const transform2& transform );
 
     // 연결된 shape들의 density / geometry를 합산해 Dynamic body의 mass data를 갱신함.
     void UpdateBodyMassData( std::int32_t bodyIndex );
 
-#pragma endregion
+#pragma endregion BodyShapeStorage
 
 #pragma region SensorUpdate
 
@@ -449,7 +410,7 @@ private:
     // sensor shape 파괴 시 dense sensor storage를 정리하고 기존 overlap end event를 예약함.
     void DestroySensorByShapeIndex( std::int32_t shapeIndex );
 
-#pragma endregion
+#pragma endregion SensorUpdate
 
 #pragma region SleepAndWake
 
@@ -464,20 +425,16 @@ private:
     void wakeSleepingBodiesFromConstraints();
 
     // solver가 끝난 island의 motion이 threshold 아래에 충분히 오래 머물렀는지 판정함.
-    void UpdateIslandSleepStates(
-        const islandGraph2& islandGraph,
-        float timeStep );
+    void UpdateIslandSleepStates( const islandGraph2& islandGraph, float timeStep );
 
-#pragma endregion
+#pragma endregion SleepAndWake
 
 #pragma region ContinuousCollision
 
     // fast body의 swept path를 검사하고 가장 이른 TOI에서 delta transform을 잘라냄.
-    void SolveContinuousBody(
-        std::int32_t bodyIndex,
-        float timeStep );
+    void SolveContinuousBody( std::int32_t bodyIndex, float timeStep );
 
-#pragma endregion
+#pragma endregion ContinuousCollision
 
 #pragma region ContactUpdate
 
@@ -486,21 +443,16 @@ private:
     [[nodiscard]] std::int32_t createContactForPair( std::int32_t shapeIdA, std::int32_t shapeIdB );
 
     // stable Contact slot을 할당하고 두 body의 intrusive contact list에 연결함.
-    [[nodiscard]] std::int32_t CreateContact(
-        std::int32_t shapeIdA, std::int32_t shapeIdB,
-        const localManifold2& manifold );
+    [[nodiscard]] std::int32_t CreateContact( std::int32_t shapeIdA, std::int32_t shapeIdB, const localManifold2& manifold );
 
     // 상대 transform 변화가 충분히 작으면 cached local anchor로 manifold를 갱신함.
-    [[nodiscard]] bool TryRecycleContact(
-        std::int32_t contactId );
+    [[nodiscard]] bool TryRecycleContact( std::int32_t contactId );
 
     // 현재 bodySim / narrow-phase manifold를 solver용 ContactSim에 동기화하고
     // 다음 recycling에 사용할 anchor / transform cache를 다시 저장함.
-    void UpdateContactSim(
-        std::int32_t contactId,
-        const localManifold2& manifold );
+    void UpdateContactSim( std::int32_t contactId, const localManifold2& manifold );
 
-#pragma endregion
+#pragma endregion ContactUpdate
 
 #pragma region JointSolver
 
@@ -508,41 +460,34 @@ private:
     void warmStartJoints( std::span<jointConstraint> constraints );
     void solveJoints( std::span<jointConstraint> constraints, bool useBias );
 
-#pragma endregion
+#pragma endregion JointSolver
 
 #pragma region ContactSolver
 
     // 한 island의 solver-active Contact를 이번 step의 transient constraint로 변환함.
-    [[nodiscard]] std::vector<contactConstraint2> PrepareContactConstraints(
-        std::span<const std::int32_t> contactIds,
-        float timeStep );
+    [[nodiscard]] std::vector<contactConstraint2> PrepareContactConstraints( std::span<const std::int32_t> contactIds, float timeStep );
 
     // 이전 step의 cached impulse를 body velocity에 먼저 적용함.
-    void WarmStartContacts(
-        std::span<contactConstraint2> constraints );
+    void WarmStartContacts( std::span<contactConstraint2> constraints );
 
     // normal constraint를 반복해서 풂.
     // useBias=true는 penetration push, false는 적분 후 velocity relaxation임.
-    void SolveContactConstraints(
-        std::span<contactConstraint2> constraints,
-        bool useBias );
+    void SolveContactConstraints( std::span<contactConstraint2> constraints, bool useBias );
 
     // 충돌 전 접근 속도가 충분히 빠른 Contact에 restitution impulse를 적용함.
-    void ApplyRestitutionContacts(
-        std::span<contactConstraint2> constraints );
+    void ApplyRestitutionContacts( std::span<contactConstraint2> constraints );
 
     // 최종 누적 impulse를 persistent ContactSim으로 되돌림.
-    void StoreContactConstraintImpulses(
-        std::span<const contactConstraint2> constraints );
+    void StoreContactConstraintImpulses( std::span<const contactConstraint2> constraints );
 
-#pragma endregion
+#pragma endregion ContactSolver
 
 #pragma region ContactDestruction
 
     // body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함.
     void DestroyContact( std::int32_t contactId );
 
-#pragma endregion
+#pragma endregion ContactDestruction
 
 #pragma region Storage
 
@@ -561,7 +506,6 @@ private:
 
     // bodies_.size()와 별개인 현재 활성 body 개수.
     std::size_t bodyCount_ = 0;
-
 
     /// shape
     // shapeId가 변하지 않는 stable slot storage.
@@ -584,7 +528,6 @@ private:
 
     // shapes_.size()와 별개인 현재 활성 shape 개수.
     std::size_t shapeCount_ = 0;
-
 
     /// contact
     // contactId가 변하지 않는 stable slot storage.
@@ -627,7 +570,7 @@ private:
 
     // 모든 shape의 broad-phase proxy를 body type별 DynamicTree에 관리함.
     broadPhase broadPhase_;
-#pragma endregion
+#pragma endregion Storage
 };
 
 } // namespace zonai

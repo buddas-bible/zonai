@@ -5,9 +5,7 @@
 namespace zonai
 {
 
-proxyKey broadPhase::CreateProxy(
-    bodyType type, const aabb2& aabb, std::int32_t shapeIndex, 
-    bool forcePairCreation )
+proxyKey broadPhase::CreateProxy( bodyType type, const aabb2& aabb, std::int32_t shapeIndex, bool forcePairCreation )
 {
     // static은 강제 요청이 있을 때만 moved 처리하고 나머지 type은 새 pair 생성을 위해 moved 처리함.
     const bool markMoved = type != bodyType::Static || forcePairCreation;
@@ -29,63 +27,41 @@ void broadPhase::DestroyProxy( proxyKey proxyKey )
 
 void broadPhase::MoveProxy( proxyKey proxyKey, const aabb2& aabb )
 {
-    const bodyType type =
-        GetProxyType( proxyKey );
+    const bodyType type = GetProxyType( proxyKey );
 
-    const std::int32_t proxyId =
-        GetProxyId( proxyKey );
+    const std::int32_t proxyId = GetProxyId( proxyKey );
 
-    dynamicTree& tree =
-        GetTree( type );
+    dynamicTree& tree = GetTree( type );
 
     if( type == bodyType::Static )
     {
         // Static transform 변경은 드물고 위치가 크게 바뀔 수 있으므로 즉시 재배치함.
-        tree.MoveProxy(
-            proxyId,
-            aabb,
-            true
-        );
+        tree.MoveProxy( proxyId, aabb, true );
 
         return;
     }
 
     // Dynamic / Kinematic은 topology를 즉시 뜯지 않고 bounds만 refit함.
     // moved branch는 UpdatePairs 뒤 partial rebuild가 정리함.
-    tree.UpdateProxy(
-        proxyId,
-        aabb
-    );
+    tree.UpdateProxy( proxyId, aabb );
 }
 
-void broadPhase::EnlargeProxy(
-    proxyKey proxyKey,
-    const aabb2& aabb )
+void broadPhase::EnlargeProxy( proxyKey proxyKey, const aabb2& aabb )
 {
-    const bodyType type =
-        GetProxyType( proxyKey );
+    const bodyType type = GetProxyType( proxyKey );
 
-    const std::int32_t proxyId =
-        GetProxyId( proxyKey );
+    const std::int32_t proxyId = GetProxyId( proxyKey );
 
-    GetTree( type ).EnlargeProxy(
-        proxyId,
-        aabb
-    );
+    GetTree( type ).EnlargeProxy( proxyId, aabb );
 }
 
-void broadPhase::TouchProxy(
-    proxyKey proxyKey )
+void broadPhase::TouchProxy( proxyKey proxyKey )
 {
-    const bodyType type =
-        GetProxyType( proxyKey );
+    const bodyType type = GetProxyType( proxyKey );
 
-    const std::int32_t proxyId =
-        GetProxyId( proxyKey );
+    const std::int32_t proxyId = GetProxyId( proxyKey );
 
-    GetTree( type ).MarkProxyMoved(
-        proxyId
-    );
+    GetTree( type ).MarkProxyMoved( proxyId );
 }
 
 bool broadPhase::AddPair( shapePairKey pairKey )
@@ -124,17 +100,10 @@ const dynamicTree& broadPhase::GetTree( bodyType type ) const
 bool broadPhase::TestPair( const treeNode& nodeA, const treeNode& nodeB )
 {
     // 빈 tree의 root는 leaf bit를 포함한 sentinel이므로 실제 proxy처럼 취급하면 안 됨.
-    if( dynamicTree::IsEmptyNode( nodeA ) ||
-        dynamicTree::IsEmptyNode( nodeB ) )
-    {
-        return false;
-    }
+    if( dynamicTree::IsEmptyNode( nodeA ) || dynamicTree::IsEmptyNode( nodeB ) ) return false;
 
     // 둘 중 하나라도 moved이고 AABB가 겹칠 때만 새 pair 후보가 될 수 있음.
-    if( ( ( nodeA.flagIndex | nodeB.flagIndex ) & dynamicTree::TREE_MOVED_NODE ) == 0 )
-    {
-        return false;
-    }
+    if( ( ( nodeA.flagIndex | nodeB.flagIndex ) & dynamicTree::TREE_MOVED_NODE ) == 0 ) return false;
 
     return Overlaps( nodeA.aabb, nodeB.aabb );
 }
@@ -145,6 +114,7 @@ std::span<std::int32_t> broadPhase::PrepareMovedSiblingScratch() const
     const std::size_t required = dynamicTree.nodes_.size() / 2;
 
     movedSiblings_.resize( required );
+
     return movedSiblings_;
 }
 
@@ -158,6 +128,7 @@ std::size_t broadPhase::GatherMovedSiblings( const dynamicTree& tree, std::span<
         // PrepareMovedSiblingScratch가 필요한 크기를 보장하지만
         // 이 함수 자체도 release에서 범위를 넘겨 쓰지 않도록 방어함.
         assert( pairIndices.size() >= pairCapacity );
+
         return 0;
     }
 
@@ -178,10 +149,7 @@ std::size_t broadPhase::GatherMovedSiblings( const dynamicTree& tree, std::span<
     return count;
 }
 
-std::size_t broadPhase::GatherCrossSeeds(
-    const dynamicTree& treeA,
-    const dynamicTree& treeB,
-    std::span<treeNodePair> seeds )
+std::size_t broadPhase::GatherCrossSeeds( const dynamicTree& treeA, const dynamicTree& treeB, std::span<treeNodePair> seeds )
 {
     assert( seeds.size() >= CROSS_SEED_COUNT );
 
@@ -240,6 +208,7 @@ std::size_t broadPhase::GatherCrossSeeds(
     }
 
     assert( seedCount <= CROSS_SEED_COUNT );
+
     return seedCount;
 }
 

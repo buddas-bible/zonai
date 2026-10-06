@@ -15,7 +15,6 @@ struct shapeProxy2
     float radius = 0.0f;
 };
 
-shapeProxy2 MakeShapeProxy(
-    const shapeGeometry& geometry );
+shapeProxy2 MakeShapeProxy( const shapeGeometry& geometry );
 
 } // namespace zonai

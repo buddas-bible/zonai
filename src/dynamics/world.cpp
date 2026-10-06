@@ -28,13 +28,9 @@ std::uint64_t allocateWorldToken() noexcept
 
     for( ;; )
     {
-        const std::uint64_t token =
-            nextToken.fetch_add( 1, std::memory_order_relaxed );
+        const std::uint64_t token = nextToken.fetch_add( 1, std::memory_order_relaxed );
 
-        if( token != 0 )
-        {
-            return token;
-        }
+        if( token != 0 ) return token;
     }
 }
 
@@ -42,12 +38,11 @@ std::uint64_t allocateWorldToken() noexcept
 
 #pragma region WorldLifetime
 
-world::world()
-    : worldToken_( allocateWorldToken() )
+world::world() : worldToken_( allocateWorldToken() )
 {
 }
 
-#pragma endregion
+#pragma endregion WorldLifetime
 
 #pragma region BodyLifecycle
 
@@ -83,6 +78,7 @@ bodyId world::CreateBody( const bodyDef& definition )
         assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
 
         body& freeBody = bodies_[bodyIndex];
+
         assert( freeBody.bodyId == body::NULL_INDEX );
         assert( freeBody.headShapeId == body::NULL_INDEX );
         assert( freeBody.headContactKey == body::NULL_INDEX );
@@ -95,10 +91,7 @@ bodyId world::CreateBody( const bodyDef& definition )
     }
     else
     {
-        assert(
-            bodies_.size() <
-            static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() - 1 )
-        );
+        assert( bodies_.size() < static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() - 1 ) );
 
         bodyIndex = static_cast<std::int32_t>( bodies_.size() );
         bodies_.push_back( {} );
@@ -117,9 +110,7 @@ bodyId world::CreateBody( const bodyDef& definition )
     body.enableSleep = definition.enableSleep;
     body.sleepThreshold = definition.sleepThreshold;
     body.safetyFactor = definition.safetyFactor;
-    body.awake =
-        definition.type != bodyType::Static &&
-        ( definition.isAwake || !definition.enableSleep );
+    body.awake = definition.type != bodyType::Static && ( definition.isAwake || !definition.enableSleep );
 
     assert( bodySims_.size() == bodies_.size() );
 
@@ -162,10 +153,12 @@ bodyId world::CreateBody( bodyType type, transform2 transform )
 
 void world::DestroyBody( bodyId bodyId )
 {
-    DestroyBodyByIndex( GetBodyIndex( bodyId ) );
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    DestroyBodyByIndex( bodyIndex );
 }
 
-#pragma endregion
+#pragma endregion BodyLifecycle
 
 #pragma region ShapeLifecycle
 
@@ -187,6 +180,7 @@ shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilt
         assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
 
         shape& freeShape = shapes_[shapeIndex];
+
         assert( freeShape.bodyId == shape::NULL_INDEX );
         assert( std::holds_alternative<std::monostate>( freeShape.geometry ) );
 
@@ -194,10 +188,7 @@ shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilt
     }
     else
     {
-        assert(
-            shapes_.size() <
-            static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() - 1 )
-        );
+        assert( shapes_.size() < static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() - 1 ) );
 
         shapeIndex = static_cast<std::int32_t>( shapes_.size() );
         shapes_.push_back( {} );
@@ -208,62 +199,38 @@ shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilt
 
     shape& storedShape = shapes_[shapeIndex];
 
-    const std::uint16_t generation =
-        static_cast<std::uint16_t>( storedShape.generation + 1u );
+    const std::uint16_t generation = static_cast<std::uint16_t>( storedShape.generation + 1u );
 
     storedShape = {};
     storedShape.generation = generation;
     storedShape.geometry = std::move( geometry );
     storedShape.density = density;
     storedShape.filter = filter;
-    storedShape.aabbMargin =
-        ComputeShapeAABBMargin(
-            storedShape.geometry
-        );
+    storedShape.aabbMargin = ComputeShapeAABBMargin( storedShape.geometry );
 
     body& body = bodies_[bodyIndex];
 
     WakeBodyByIndex( bodyIndex );
 
     assert( bodySims_.size() == bodies_.size() );
+
     const bodySim& bodySim = bodySims_[bodyIndex];
+
     assert( bodySim.bodyId == bodyIndex );
 
-    const aabb2 tightAABB =
-        ComputeShapeAABB(
-            storedShape.geometry,
-            bodySim.transform
-        );
+    const aabb2 tightAABB = ComputeShapeAABB( storedShape.geometry, bodySim.transform );
 
-    storedShape.aabb =
-        ExpandAABB(
-            tightAABB,
-            SPECULATIVE_DISTANCE
-        );
+    storedShape.aabb = ExpandAABB( tightAABB, SPECULATIVE_DISTANCE );
 
     // Static은 TOI tolerance 때문에 speculative distance를 한 번 더 사용하고,
     // moving body는 shape 크기 기반 margin으로 persistent fat bounds를 만듦.
-    const float fatMargin =
-        body.type == bodyType::Static ?
-            SPECULATIVE_DISTANCE :
-            storedShape.aabbMargin;
+    const float fatMargin = body.type == bodyType::Static ? SPECULATIVE_DISTANCE : storedShape.aabbMargin;
 
-    aabb2& fatAABB =
-        fatAABBs_[shapeIndex];
+    aabb2& fatAABB = fatAABBs_[shapeIndex];
 
-    fatAABB =
-        ExpandAABB(
-            storedShape.aabb,
-            fatMargin
-        );
+    fatAABB = ExpandAABB( storedShape.aabb, fatMargin );
 
-    storedShape.proxyKey =
-        broadPhase_.CreateProxy(
-            body.type,
-            fatAABB,
-            shapeIndex,
-            true
-        );
+    storedShape.proxyKey = broadPhase_.CreateProxy( body.type, fatAABB, shapeIndex, true );
 
     LinkShape( body, bodyIndex, shapes_, shapeIndex );
     ++shapeCount_;
@@ -273,55 +240,34 @@ shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilt
     return MakeShapeId( shapeIndex );
 }
 
-shapeId world::CreateSensorShape(
-    bodyId bodyId,
-    shapeGeometry geometry,
-    collisionFilter filter,
-    float density )
+shapeId world::CreateSensorShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter, float density )
 {
-    const shapeId sensorShapeId =
-        CreateShape(
-            bodyId,
-            std::move( geometry ),
-            filter,
-            density
-        );
+    const shapeId sensorShapeId = CreateShape( bodyId, std::move( geometry ), filter, density );
 
-    const std::int32_t shapeIndex =
-        GetShapeIndex(
-            sensorShapeId
-        );
+    const std::int32_t shapeIndex = GetShapeIndex( sensorShapeId );
 
-    shape& sensorShape =
-        shapes_[shapeIndex];
+    shape& sensorShape = shapes_[shapeIndex];
 
-    assert(
-        sensorShape.sensorIndex ==
-        shape::NULL_INDEX
-    );
+    assert( sensorShape.sensorIndex == shape::NULL_INDEX );
 
-    sensorShape.sensorIndex =
-        static_cast<std::int32_t>(
-            sensors_.size()
-        );
+    sensorShape.sensorIndex = static_cast<std::int32_t>( sensors_.size() );
 
     sensor2 sensor{};
-    sensor.shapeIndex =
-        shapeIndex;
+    sensor.shapeIndex = shapeIndex;
 
-    sensors_.push_back(
-        std::move( sensor )
-    );
+    sensors_.push_back( std::move( sensor ) );
 
     return sensorShapeId;
 }
 
 void world::DestroyShape( shapeId shapeId )
 {
-    DestroyShapeByIndex( GetShapeIndex( shapeId ) );
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    DestroyShapeByIndex( shapeIndex );
 }
 
-#pragma endregion
+#pragma endregion ShapeLifecycle
 
 #pragma region JointLifecycle
 
@@ -359,17 +305,17 @@ jointId world::createDistanceJoint( const distanceJointDef& definition )
     sim.enableMotor = definition.enableMotor;
     sim.motorSpeed = definition.motorSpeed;
     sim.maxMotorForce = definition.maxMotorForce;
+
     return makeJointId( index );
 }
 
 void world::setDistanceJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio )
 {
     assert( std::isfinite( hertz ) && hertz >= 0.0f && std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );
+
     auto& joint = std::get<distanceJointSim2>( jointSims_[getJointIndex( id )] );
-    if( joint.enableSpring == enableSpring && joint.hertz == hertz && joint.dampingRatio == dampingRatio )
-    {
-        return;
-    }
+    if( joint.enableSpring == enableSpring && joint.hertz == hertz && joint.dampingRatio == dampingRatio ) return;
+
     joint.enableSpring = enableSpring;
     joint.hertz = hertz;
     joint.dampingRatio = dampingRatio;
@@ -392,13 +338,12 @@ void world::setDistanceJointSpring( jointId id, bool enableSpring, float hertz, 
 void world::setDistanceJointLimit( jointId id, bool enableLimit, float minLength, float maxLength )
 {
     assert( std::isfinite( minLength ) && std::isfinite( maxLength ) && minLength >= 0.0f && minLength <= maxLength );
+
     minLength = std::max( LINEAR_SLOP, minLength );
     maxLength = std::max( minLength, maxLength );
     auto& joint = std::get<distanceJointSim2>( jointSims_[getJointIndex( id )] );
-    if( joint.enableLimit == enableLimit && joint.minLength == minLength && joint.maxLength == maxLength )
-    {
-        return;
-    }
+    if( joint.enableLimit == enableLimit && joint.minLength == minLength && joint.maxLength == maxLength ) return;
+
     joint.enableLimit = enableLimit;
     joint.minLength = minLength;
     joint.maxLength = maxLength;
@@ -423,11 +368,10 @@ void world::setDistanceJointMotor( jointId id, bool enableMotor, float motorSpee
 {
     assert( std::isfinite( motorSpeed ) );
     assert( std::isfinite( maxMotorForce ) && maxMotorForce >= 0.0f );
+
     auto& joint = std::get<distanceJointSim2>( jointSims_[getJointIndex( id )] );
-    if( joint.enableMotor == enableMotor && joint.motorSpeed == motorSpeed && joint.maxMotorForce == maxMotorForce )
-    {
-        return;
-    }
+    if( joint.enableMotor == enableMotor && joint.motorSpeed == motorSpeed && joint.maxMotorForce == maxMotorForce ) return;
+
     joint.enableMotor = enableMotor;
     joint.motorSpeed = motorSpeed;
     joint.maxMotorForce = maxMotorForce;
@@ -470,17 +414,17 @@ jointId world::createMouseJoint( const mouseJointDef& definition )
     sim.dampingRatio = definition.dampingRatio;
     sim.maxForce = definition.maxForce;
     jointSims_[index] = sim;
+
     return makeJointId( index );
 }
 
 void world::setMouseJointTarget( jointId id, vec2 target )
 {
     assert( IsFinite( target ) );
+
     auto& joint = std::get<mouseJointSim2>( jointSims_[getJointIndex( id )] );
-    if( joint.target.x == target.x && joint.target.y == target.y )
-    {
-        return;
-    }
+    if( joint.target.x == target.x && joint.target.y == target.y ) return;
+
     joint.target = target;
     WakeBodyByIndex( joint.bodyIdB );
 }
@@ -489,11 +433,10 @@ void world::setMouseJointTuning( jointId id, float hertz, float dampingRatio, fl
 {
     assert( std::isfinite( hertz ) && hertz >= 0.0f && std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );
     assert( std::isfinite( maxForce ) && maxForce >= 0.0f );
+
     auto& joint = std::get<mouseJointSim2>( jointSims_[getJointIndex( id )] );
-    if( joint.hertz == hertz && joint.dampingRatio == dampingRatio && joint.maxForce == maxForce )
-    {
-        return;
-    }
+    if( joint.hertz == hertz && joint.dampingRatio == dampingRatio && joint.maxForce == maxForce ) return;
+
     joint.hertz = hertz;
     joint.dampingRatio = dampingRatio;
     joint.maxForce = maxForce;
@@ -513,6 +456,7 @@ mouseJointData world::getMouseJointData( jointId id ) const
     data.hertz = joint.hertz;
     data.dampingRatio = joint.dampingRatio;
     data.maxForce = joint.maxForce;
+
     return data;
 }
 
@@ -544,10 +488,11 @@ distanceJointData world::getDistanceJointData( jointId id ) const
     data.motorSpeed = sim.motorSpeed;
     data.maxMotorForce = sim.maxMotorForce;
     data.motorForce = sim.subStepTime > 0.0f ? sim.motorImpulse / sim.subStepTime : 0.0f;
+
     return data;
 }
 
-#pragma endregion
+#pragma endregion JointLifecycle
 
 #pragma region ShapeProperties
 
@@ -569,7 +514,9 @@ void world::SetShapeDensity( shapeId shapeId, float density )
 
 float world::GetShapeDensity( shapeId shapeId ) const
 {
-    return shapes_[GetShapeIndex( shapeId )].density;
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    return shapes_[shapeIndex].density;
 }
 
 void world::SetShapeFriction( shapeId shapeId, float friction )
@@ -577,13 +524,16 @@ void world::SetShapeFriction( shapeId shapeId, float friction )
     assert( std::isfinite( friction ) );
     assert( friction >= 0.0f );
 
-    shapes_[GetShapeIndex( shapeId )].friction =
-        friction;
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    shapes_[shapeIndex].friction = friction;
 }
 
 float world::GetShapeFriction( shapeId shapeId ) const
 {
-    return shapes_[GetShapeIndex( shapeId )].friction;
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    return shapes_[shapeIndex].friction;
 }
 
 void world::SetShapeRestitution( shapeId shapeId, float restitution )
@@ -591,252 +541,230 @@ void world::SetShapeRestitution( shapeId shapeId, float restitution )
     assert( std::isfinite( restitution ) );
     assert( restitution >= 0.0f );
 
-    shapes_[GetShapeIndex( shapeId )].restitution =
-        restitution;
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    shapes_[shapeIndex].restitution = restitution;
 }
 
 float world::GetShapeRestitution( shapeId shapeId ) const
 {
-    return shapes_[GetShapeIndex( shapeId )].restitution;
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    return shapes_[shapeIndex].restitution;
 }
 
-void world::SetShapeFilter(
-    shapeId shapeId,
-    collisionFilter filter )
+void world::SetShapeFilter( shapeId shapeId, collisionFilter filter )
 {
-    const std::int32_t shapeIndex =
-        GetShapeIndex( shapeId );
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
 
-    shape& storedShape =
-        shapes_[shapeIndex];
+    shape& storedShape = shapes_[shapeIndex];
 
-    const collisionFilter& oldFilter =
-        storedShape.filter;
+    const collisionFilter& oldFilter = storedShape.filter;
 
-    if( oldFilter.categoryBits == filter.categoryBits &&
-        oldFilter.maskBits == filter.maskBits &&
-        oldFilter.groupIndex == filter.groupIndex )
-    {
-        return;
-    }
+    if( oldFilter.categoryBits == filter.categoryBits && oldFilter.maskBits == filter.maskBits && oldFilter.groupIndex == filter.groupIndex ) return;
 
     assert( storedShape.bodyId != shape::NULL_INDEX );
     assert( storedShape.proxyKey != shape::NULL_INDEX );
 
-    const std::int32_t bodyIndex =
-        storedShape.bodyId;
+    const std::int32_t bodyIndex = storedShape.bodyId;
 
-    body& owner =
-        bodies_[bodyIndex];
+    body& owner = bodies_[bodyIndex];
 
     // Box2D와 같이 filter가 바뀐 shape가 참여하는 기존 Contact는 즉시 제거함.
     // 같은 body의 다른 shape Contact는 유지해야 하므로 body list를 훑으며 shape id를 검사함.
-    std::int32_t contactKey =
-        owner.headContactKey;
+    std::int32_t contactKey = owner.headContactKey;
 
     while( contactKey != body::NULL_INDEX )
     {
-        const std::int32_t contactId =
-            GetContactId( contactKey );
+        const std::int32_t contactId = GetContactId( contactKey );
 
-        const std::int32_t edgeIndex =
-            GetContactEdgeIndex( contactKey );
+        const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
 
         assert( contactId >= 0 );
         assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
 
-        contact2& contact =
-            contacts_[contactId];
+        contact2& contact = contacts_[contactId];
 
         assert( contact.contactId == contactId );
 
         // DestroyContact가 intrusive list를 수정하므로 다음 key를 먼저 보존함.
-        contactKey =
-            contact.edges[edgeIndex].nextKey;
+        contactKey = contact.edges[edgeIndex].nextKey;
 
-        if( contact.shapeIdA == shapeIndex ||
-            contact.shapeIdB == shapeIndex )
+        if( contact.shapeIdA == shapeIndex || contact.shapeIdB == shapeIndex )
         {
-            DestroyContact(
-                contactId
-            );
+            DestroyContact( contactId );
         }
     }
 
-    storedShape.filter =
-        filter;
+    storedShape.filter = filter;
 
     // Zonai tree는 categoryBits를 node sorting data로 저장하지 않으므로
     // Box2D처럼 category 변경 시 proxy를 재생성할 필요는 없음.
     // AABB는 그대로 유지하고 moved path만 표시해 다음 UpdatePairs가
     // 새 filter로 이 shape의 후보를 다시 검사하도록 함.
-    broadPhase_.TouchProxy(
-        storedShape.proxyKey
-    );
+    broadPhase_.TouchProxy( storedShape.proxyKey );
 }
 
-collisionFilter world::GetShapeFilter(
-    shapeId shapeId ) const
+collisionFilter world::GetShapeFilter( shapeId shapeId ) const
 {
-    return
-        shapes_[GetShapeIndex( shapeId )]
-            .filter;
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    return shapes_[shapeIndex].filter;
 }
 
 void world::setCollisionMatrix( const collisionMatrix& matrix )
 {
-    if( matrix == collisionMatrix_ ) { return; }
+    if( matrix == collisionMatrix_ ) return;
+
     collisionMatrix_ = matrix;
     // 공통 규칙 변경은 모든 category 쌍에 영향을 줌. 기존 cache/pair를 버리고 정지 shape도 다시 찾음.
     for( std::int32_t index = 0; index < static_cast<std::int32_t>( contacts_.size() ); ++index )
-    { if( contacts_[index].contactId != contact2::NULL_INDEX ) { DestroyContact( index ); } }
+    {
+        if( contacts_[index].contactId != contact2::NULL_INDEX )
+        {
+            DestroyContact( index );
+        }
+    }
     for( const shape& value : shapes_ )
-    { if( value.bodyId != shape::NULL_INDEX ) { broadPhase_.TouchProxy( value.proxyKey ); } }
+    {
+        if( value.bodyId != shape::NULL_INDEX )
+        {
+            broadPhase_.TouchProxy( value.proxyKey );
+        }
+    }
     for( body& value : bodies_ )
-    { if( value.bodyId != body::NULL_INDEX && value.type != bodyType::Static ) { value.awake = true; value.sleepTime = 0.0f; } }
+    {
+        if( value.bodyId != body::NULL_INDEX && value.type != bodyType::Static )
+        {
+            value.awake = true;
+            value.sleepTime = 0.0f;
+        }
+    }
 }
 
-#pragma endregion
+#pragma endregion ShapeProperties
 
 #pragma region SensorQueries
 
-bool world::IsShapeSensor(
-    shapeId shapeId ) const
+bool world::IsShapeSensor( shapeId shapeId ) const
 {
-    return
-        shapes_[GetShapeIndex( shapeId )]
-            .sensorIndex !=
-        shape::NULL_INDEX;
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    return shapes_[shapeIndex].sensorIndex != shape::NULL_INDEX;
 }
 
-void world::SetShapeSensorEventsEnabled(
-    shapeId shapeId,
-    bool enabled )
+void world::SetShapeSensorEventsEnabled( shapeId shapeId, bool enabled )
 {
-    shapes_[GetShapeIndex( shapeId )]
-        .enableSensorEvents =
-        enabled;
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    shapes_[shapeIndex].enableSensorEvents = enabled;
 }
 
-bool world::AreShapeSensorEventsEnabled(
-    shapeId shapeId ) const
+bool world::AreShapeSensorEventsEnabled( shapeId shapeId ) const
 {
-    return
-        shapes_[GetShapeIndex( shapeId )]
-            .enableSensorEvents;
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    return shapes_[shapeIndex].enableSensorEvents;
 }
 
-std::size_t world::GetShapeSensorCapacity(
-    shapeId shapeId ) const
+std::size_t world::GetShapeSensorCapacity( shapeId shapeId ) const
 {
-    const shape& sensorShape =
-        shapes_[GetShapeIndex( shapeId )];
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
 
-    if( sensorShape.sensorIndex ==
-        shape::NULL_INDEX )
-    {
-        return 0;
-    }
+    const shape& sensorShape = shapes_[shapeIndex];
+
+    if( sensorShape.sensorIndex == shape::NULL_INDEX ) return 0;
 
     assert( sensorShape.sensorIndex >= 0 );
-    assert(
-        static_cast<std::size_t>(
-            sensorShape.sensorIndex
-        ) <
-        sensors_.size()
-    );
+    assert( static_cast<std::size_t>( sensorShape.sensorIndex ) < sensors_.size() );
 
-    return
-        sensors_[sensorShape.sensorIndex]
-            .overlaps.size();
+    return sensors_[sensorShape.sensorIndex].overlaps.size();
 }
 
-std::size_t world::GetShapeSensorData(
-    shapeId sensorShapeId,
-    std::span<shapeId> output ) const
+std::size_t world::GetShapeSensorData( shapeId sensorShapeId, std::span<shapeId> output ) const
 {
-    const shape& sensorShape =
-        shapes_[GetShapeIndex( sensorShapeId )];
+    const std::int32_t shapeIndex = GetShapeIndex( sensorShapeId );
 
-    if( sensorShape.sensorIndex ==
-        shape::NULL_INDEX )
+    const shape& sensorShape = shapes_[shapeIndex];
+
+    if( sensorShape.sensorIndex == shape::NULL_INDEX ) return 0;
+
+    const sensor2& sensor = sensors_[sensorShape.sensorIndex];
+
+    const std::size_t count = std::min( output.size(), sensor.overlaps.size() );
+
+    for( std::size_t i = 0; i < count; ++i )
     {
-        return 0;
-    }
+        const sensorVisitor2& visitor = sensor.overlaps[i];
 
-    const sensor2& sensor =
-        sensors_[sensorShape.sensorIndex];
-
-    const std::size_t count =
-        std::min(
-            output.size(),
-            sensor.overlaps.size()
-        );
-
-    for( std::size_t i = 0;
-         i < count;
-         ++i )
-    {
-        const sensorVisitor2& visitor =
-            sensor.overlaps[i];
-
-        output[i] =
-        {
-            visitor.shapeIndex + 1,
-            visitor.generation,
-            worldToken_
-        };
+        output[i] = { visitor.shapeIndex + 1, visitor.generation, worldToken_ };
     }
 
     return count;
 }
 
-#pragma endregion
+#pragma endregion SensorQueries
 
 #pragma region ShapeBounds
 
 bool world::testShapePoint( shapeId id, vec2 point ) const
 {
     assert( IsFinite( point ) );
-    const shape& value = shapes_[GetShapeIndex( id )];
+
+    const std::int32_t shapeIndex = GetShapeIndex( id );
+
+    const shape& value = shapes_[shapeIndex];
     const vec2 localPoint = InverseTransformPoint( bodySims_[value.bodyId].transform, point );
-    return std::visit( [&]( const auto& geometry ) -> bool
-    {
-        using geometryType = std::remove_cvref_t<decltype( geometry )>;
-        if constexpr( std::is_same_v<geometryType, circle2> || std::is_same_v<geometryType, capsule2> ) { return Contains( geometry, localPoint ); }
-        else if constexpr( std::is_same_v<geometryType, polygon2> )
+
+    return std::visit(
+        [&]( const auto& geometry ) -> bool
         {
-            bool inside = geometry.vertexCount >= 3;
-            float distanceSquared = std::numeric_limits<float>::max();
-            for( int i = 0; i < geometry.vertexCount; ++i )
+            using geometryType = std::remove_cvref_t<decltype( geometry )>;
+            if constexpr( std::is_same_v<geometryType, circle2> || std::is_same_v<geometryType, capsule2> )
             {
-                const vec2 a = geometry.vertices[i], b = geometry.vertices[( i + 1 ) % geometry.vertexCount];
-                if( Dot( geometry.normals[i], localPoint - a ) > 0.0f ) { inside = false; }
-                distanceSquared = std::min( distanceSquared, DistanceSquared( segment2{ a, b }, localPoint ) );
+                return Contains( geometry, localPoint );
             }
-            // Rounded core는 꼭짓점 주변의 circle 거리까지 검사함. 확장된 halfspace만으로는 모서리를 과하게 pick함.
-            return inside || distanceSquared <= geometry.radius * geometry.radius;
-        }
-        else { return false; }
-    }, value.geometry );
+            else if constexpr( std::is_same_v<geometryType, polygon2> )
+            {
+                bool inside = geometry.vertexCount >= 3;
+                float distanceSquared = std::numeric_limits<float>::max();
+                for( int i = 0; i < geometry.vertexCount; ++i )
+                {
+                    const vec2 a = geometry.vertices[i], b = geometry.vertices[( i + 1 ) % geometry.vertexCount];
+                    if( Dot( geometry.normals[i], localPoint - a ) > 0.0f )
+                    {
+                        inside = false;
+                    }
+                    distanceSquared = std::min( distanceSquared, DistanceSquared( segment2{ a, b }, localPoint ) );
+                }
+                // Rounded core는 꼭짓점 주변의 circle 거리까지 검사함. 확장된 halfspace만으로는 모서리를 과하게 pick함.
+                return inside || distanceSquared <= geometry.radius * geometry.radius;
+            }
+            else
+            {
+                return false;
+            }
+        },
+        value.geometry );
 }
 
 const aabb2& world::GetShapeAABB( shapeId shapeId ) const
 {
-    return
-        shapes_[GetShapeIndex( shapeId )]
-            .aabb;
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    return shapes_[shapeIndex].aabb;
 }
 
 const aabb2& world::GetShapeFatAABB( shapeId shapeId ) const
 {
     assert( fatAABBs_.size() == shapes_.size() );
 
-    return
-        fatAABBs_[GetShapeIndex( shapeId )];
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    return fatAABBs_[shapeIndex];
 }
 
-#pragma endregion
+#pragma endregion ShapeBounds
 
 #pragma region BodyProperties
 
@@ -856,6 +784,7 @@ void world::SetBodyTransform( bodyId bodyId, transform2 transform )
     assert( bodySims_.size() == bodies_.size() );
 
     bodySim& bodySim = bodySims_[bodyIndex];
+
     assert( bodySim.bodyId == bodyIndex );
 
     bodySim.transform = transform;
@@ -871,6 +800,7 @@ transform2 world::GetBodyTransform( bodyId bodyId ) const
     assert( bodySims_.size() == bodies_.size() );
 
     const bodySim& bodySim = bodySims_[bodyIndex];
+
     assert( bodySim.bodyId == bodyIndex );
 
     return bodySim.transform;
@@ -885,18 +815,17 @@ void world::SetBodyLinearVelocity( bodyId bodyId, vec2 linearVelocity )
     const body& body = bodies_[bodyIndex];
 
     if( body.type == bodyType::Static )
-    {
+
         // 정적 body는 움직이지 않으므로 setter를 무시함.
         return;
-    }
 
-    if( linearVelocity.x != 0.0f ||
-        linearVelocity.y != 0.0f )
+    if( linearVelocity.x != 0.0f || linearVelocity.y != 0.0f )
     {
         WakeBodyByIndex( bodyIndex );
     }
 
     assert( bodyStates_.size() == bodies_.size() );
+
     bodyStates_[bodyIndex].linearVelocity = linearVelocity;
 }
 
@@ -918,10 +847,9 @@ void world::SetBodyAngularVelocity( bodyId bodyId, float angularVelocity )
     const body& body = bodies_[bodyIndex];
 
     if( body.type == bodyType::Static )
-    {
+
         // 정적 body는 움직이지 않으므로 setter를 무시함.
         return;
-    }
 
     if( angularVelocity != 0.0f )
     {
@@ -929,6 +857,7 @@ void world::SetBodyAngularVelocity( bodyId bodyId, float angularVelocity )
     }
 
     assert( bodyStates_.size() == bodies_.size() );
+
     bodyStates_[bodyIndex].angularVelocity = angularVelocity;
 }
 
@@ -937,6 +866,7 @@ float world::GetBodyAngularVelocity( bodyId bodyId ) const
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodyStates_.size() == bodies_.size() );
+
     return bodyStates_[bodyIndex].angularVelocity;
 }
 
@@ -948,6 +878,7 @@ void world::SetBodyLinearDamping( bodyId bodyId, float damping )
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     bodySims_[bodyIndex].linearDamping = damping;
 }
 
@@ -956,6 +887,7 @@ float world::GetBodyLinearDamping( bodyId bodyId ) const
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     return bodySims_[bodyIndex].linearDamping;
 }
 
@@ -967,6 +899,7 @@ void world::SetBodyAngularDamping( bodyId bodyId, float damping )
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     bodySims_[bodyIndex].angularDamping = damping;
 }
 
@@ -975,6 +908,7 @@ float world::GetBodyAngularDamping( bodyId bodyId ) const
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     return bodySims_[bodyIndex].angularDamping;
 }
 
@@ -985,6 +919,7 @@ void world::SetBodyGravityScale( bodyId bodyId, float scale )
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     bodySims_[bodyIndex].gravityScale = scale;
 }
 
@@ -993,6 +928,7 @@ float world::GetBodyGravityScale( bodyId bodyId ) const
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     return bodySims_[bodyIndex].gravityScale;
 }
 
@@ -1001,6 +937,7 @@ void world::SetBodyFastRotationAllowed( bodyId bodyId, bool allowed )
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     bodySims_[bodyIndex].allowFastRotation = allowed;
 }
 
@@ -1009,21 +946,17 @@ bool world::IsBodyFastRotationAllowed( bodyId bodyId ) const
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     return bodySims_[bodyIndex].allowFastRotation;
 }
 
 void world::SetBodyAwake( bodyId bodyId, bool awake )
 {
-    const std::int32_t bodyIndex =
-        GetBodyIndex( bodyId );
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
-    const body& body =
-        bodies_[bodyIndex];
+    const body& body = bodies_[bodyIndex];
 
-    if( body.type == bodyType::Static )
-    {
-        return;
-    }
+    if( body.type == bodyType::Static ) return;
 
     if( awake )
     {
@@ -1037,31 +970,22 @@ void world::SetBodyAwake( bodyId bodyId, bool awake )
 
 bool world::IsBodyAwake( bodyId bodyId ) const
 {
-    const body& body =
-        bodies_[GetBodyIndex( bodyId )];
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
-    return
-        body.type != bodyType::Static &&
-        body.awake;
+    const body& body = bodies_[bodyIndex];
+
+    return body.type != bodyType::Static && body.awake;
 }
 
 void world::SetBodySleepEnabled( bodyId bodyId, bool enabled )
 {
-    const std::int32_t bodyIndex =
-        GetBodyIndex( bodyId );
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
-    body& body =
-        bodies_[bodyIndex];
+    body& body = bodies_[bodyIndex];
 
-    if( body.type == bodyType::Static )
-    {
-        return;
-    }
+    if( body.type == bodyType::Static ) return;
 
-    if( body.enableSleep == enabled )
-    {
-        return;
-    }
+    if( body.enableSleep == enabled ) return;
 
     body.enableSleep = enabled;
     body.sleepTime = 0.0f;
@@ -1074,8 +998,9 @@ void world::SetBodySleepEnabled( bodyId bodyId, bool enabled )
 
 bool world::IsBodySleepEnabled( bodyId bodyId ) const
 {
-    const body& body =
-        bodies_[GetBodyIndex( bodyId )];
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    const body& body = bodies_[bodyIndex];
 
     return body.enableSleep;
 }
@@ -1085,8 +1010,9 @@ void world::SetBodySleepThreshold( bodyId bodyId, float threshold )
     assert( std::isfinite( threshold ) );
     assert( threshold >= 0.0f );
 
-    body& body =
-        bodies_[GetBodyIndex( bodyId )];
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    body& body = bodies_[bodyIndex];
 
     body.sleepThreshold = threshold;
     body.sleepTime = 0.0f;
@@ -1094,9 +1020,9 @@ void world::SetBodySleepThreshold( bodyId bodyId, float threshold )
 
 float world::GetBodySleepThreshold( bodyId bodyId ) const
 {
-    return
-        bodies_[GetBodyIndex( bodyId )]
-            .sleepThreshold;
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    return bodies_[bodyIndex].sleepThreshold;
 }
 
 void world::SetBodySafetyFactor( bodyId bodyId, float safetyFactor )
@@ -1104,82 +1030,84 @@ void world::SetBodySafetyFactor( bodyId bodyId, float safetyFactor )
     assert( std::isfinite( safetyFactor ) );
     assert( safetyFactor >= 0.0f );
 
-    bodies_[GetBodyIndex( bodyId )].safetyFactor =
-        safetyFactor;
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    bodies_[bodyIndex].safetyFactor = safetyFactor;
 }
 
 float world::GetBodySafetyFactor( bodyId bodyId ) const
 {
-    return
-        bodies_[GetBodyIndex( bodyId )]
-            .safetyFactor;
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    return bodies_[bodyIndex].safetyFactor;
 }
 
 void world::SetBodyBullet( bodyId bodyId, bool bullet )
 {
-    const std::int32_t bodyIndex =
-        GetBodyIndex( bodyId );
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     bodySims_[bodyIndex].isBullet = bullet;
 }
 
 bool world::IsBodyBullet( bodyId bodyId ) const
 {
-    const std::int32_t bodyIndex =
-        GetBodyIndex( bodyId );
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     return bodySims_[bodyIndex].isBullet;
 }
 
-void world::SetBodyContactRecyclingEnabled(
-    bodyId bodyId,
-    bool enabled )
+void world::SetBodyContactRecyclingEnabled( bodyId bodyId, bool enabled )
 {
-    const std::int32_t bodyIndex =
-        GetBodyIndex( bodyId );
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     bodySims_[bodyIndex].enableContactRecycling = enabled;
 }
 
-bool world::IsBodyContactRecyclingEnabled(
-    bodyId bodyId ) const
+bool world::IsBodyContactRecyclingEnabled( bodyId bodyId ) const
 {
-    const std::int32_t bodyIndex =
-        GetBodyIndex( bodyId );
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     return bodySims_[bodyIndex].enableContactRecycling;
 }
 
 bool world::IsBodyFast( bodyId bodyId ) const
 {
-    const std::int32_t bodyIndex =
-        GetBodyIndex( bodyId );
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     return bodySims_[bodyIndex].isFast;
 }
 
 bool world::HadBodyTimeOfImpact( bodyId bodyId ) const
 {
-    const std::int32_t bodyIndex =
-        GetBodyIndex( bodyId );
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     return bodySims_[bodyIndex].hadTimeOfImpact;
 }
 
 float world::GetBodyMass( bodyId bodyId ) const
 {
-    return bodies_[GetBodyIndex( bodyId )].mass;
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    return bodies_[bodyIndex].mass;
 }
 
 float world::GetBodyRotationalInertia( bodyId bodyId ) const
 {
-    return bodies_[GetBodyIndex( bodyId )].inertia;
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    return bodies_[bodyIndex].inertia;
 }
 
 vec2 world::GetBodyLocalCenter( bodyId bodyId ) const
@@ -1187,10 +1115,11 @@ vec2 world::GetBodyLocalCenter( bodyId bodyId ) const
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
     assert( bodySims_.size() == bodies_.size() );
+
     return bodySims_[bodyIndex].localCenter;
 }
 
-#pragma endregion
+#pragma endregion BodyProperties
 
 #pragma region WorldSettings
 
@@ -1199,22 +1128,14 @@ void world::SetGravity( vec2 gravity )
     assert( std::isfinite( gravity.x ) );
     assert( std::isfinite( gravity.y ) );
 
-    if( gravity.x == gravity_.x &&
-        gravity.y == gravity_.y )
-    {
-        return;
-    }
+    if( gravity.x == gravity_.x && gravity.y == gravity_.y ) return;
 
     gravity_ = gravity;
 
     // 중력장이 달라지면 sleeping Dynamic body도 다시 반응해야 함.
     for( body& body : bodies_ )
     {
-        if( body.bodyId == body::NULL_INDEX ||
-            body.type != bodyType::Dynamic )
-        {
-            continue;
-        }
+        if( body.bodyId == body::NULL_INDEX || body.type != bodyType::Dynamic ) continue;
 
         body.awake = true;
         body.sleepTime = 0.0f;
@@ -1241,26 +1162,16 @@ float world::GetMaximumLinearSpeed() const noexcept
 
 void world::SetSleepingEnabled( bool enabled )
 {
-    if( sleepingEnabled_ == enabled )
-    {
-        return;
-    }
+    if( sleepingEnabled_ == enabled ) return;
 
     sleepingEnabled_ = enabled;
 
-    if( enabled )
-    {
-        return;
-    }
+    if( enabled ) return;
 
     // World sleep을 끄는 순간 모든 non-static body를 다시 solver에 참여시킴.
     for( body& body : bodies_ )
     {
-        if( body.bodyId == body::NULL_INDEX ||
-            body.type == bodyType::Static )
-        {
-            continue;
-        }
+        if( body.bodyId == body::NULL_INDEX || body.type == bodyType::Static ) continue;
 
         body.awake = true;
         body.sleepTime = 0.0f;
@@ -1282,14 +1193,12 @@ bool world::IsContinuousEnabled() const noexcept
     return continuousEnabled_;
 }
 
-void world::SetContactRecycleDistance(
-    float distance )
+void world::SetContactRecycleDistance( float distance )
 {
     assert( std::isfinite( distance ) );
     assert( distance >= 0.0f );
 
-    contactRecycleDistance_ =
-        distance;
+    contactRecycleDistance_ = distance;
 }
 
 float world::GetContactRecycleDistance() const noexcept
@@ -1297,7 +1206,7 @@ float world::GetContactRecycleDistance() const noexcept
     return contactRecycleDistance_;
 }
 
-#pragma endregion
+#pragma endregion WorldSettings
 
 #pragma region ForcesAndImpulses
 
@@ -1312,13 +1221,9 @@ void world::ApplyForce( bodyId bodyId, vec2 force, vec2 point )
     const body& body = bodies_[bodyIndex];
 
     // Static / Kinematic body는 외력으로 속도가 바뀌지 않음.
-    if( body.type != bodyType::Dynamic )
-    {
-        return;
-    }
+    if( body.type != bodyType::Dynamic ) return;
 
-    if( force.x != 0.0f ||
-        force.y != 0.0f )
+    if( force.x != 0.0f || force.y != 0.0f )
     {
         WakeBodyByIndex( bodyIndex );
     }
@@ -1334,11 +1239,7 @@ void world::ApplyForce( bodyId bodyId, vec2 force, vec2 point )
     //
     //     tau = r x F
     //     r   = point - center
-    bodySim.torque +=
-        Cross(
-            point - bodySim.center,
-            force
-        );
+    bodySim.torque += Cross( point - bodySim.center, force );
 }
 
 void world::ApplyForceToCenter( bodyId bodyId, vec2 force )
@@ -1349,18 +1250,15 @@ void world::ApplyForceToCenter( bodyId bodyId, vec2 force )
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
     const body& body = bodies_[bodyIndex];
 
-    if( body.type != bodyType::Dynamic )
-    {
-        return;
-    }
+    if( body.type != bodyType::Dynamic ) return;
 
-    if( force.x != 0.0f ||
-        force.y != 0.0f )
+    if( force.x != 0.0f || force.y != 0.0f )
     {
         WakeBodyByIndex( bodyIndex );
     }
 
     assert( bodySims_.size() == bodies_.size() );
+
     bodySims_[bodyIndex].force += force;
 }
 
@@ -1371,10 +1269,7 @@ void world::ApplyTorque( bodyId bodyId, float torque )
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
     const body& body = bodies_[bodyIndex];
 
-    if( body.type != bodyType::Dynamic )
-    {
-        return;
-    }
+    if( body.type != bodyType::Dynamic ) return;
 
     if( torque != 0.0f )
     {
@@ -1382,6 +1277,7 @@ void world::ApplyTorque( bodyId bodyId, float torque )
     }
 
     assert( bodySims_.size() == bodies_.size() );
+
     bodySims_[bodyIndex].torque += torque;
 }
 
@@ -1407,13 +1303,9 @@ void world::ApplyLinearImpulse( bodyId bodyId, vec2 impulse, vec2 point )
     const body& body = bodies_[bodyIndex];
 
     // Static / Kinematic body는 impulse로 속도가 바뀌지 않음.
-    if( body.type != bodyType::Dynamic )
-    {
-        return;
-    }
+    if( body.type != bodyType::Dynamic ) return;
 
-    if( impulse.x != 0.0f ||
-        impulse.y != 0.0f )
+    if( impulse.x != 0.0f || impulse.y != 0.0f )
     {
         WakeBodyByIndex( bodyIndex );
     }
@@ -1443,8 +1335,7 @@ void world::ApplyLinearImpulse( bodyId bodyId, vec2 impulse, vec2 point )
     * Force와 달리 이미 시간이 적분된 값이므로
     * timeStep을 다시 곱하지 않고 즉시 velocity를 변경함.
     */
-    bodyState.linearVelocity +=
-        impulse * bodySim.invMass;
+    bodyState.linearVelocity += impulse * bodySim.invMass;
 
     /*
     * center of mass에서 벗어난 위치에 impulse가 들어오면
@@ -1457,17 +1348,12 @@ void world::ApplyLinearImpulse( bodyId bodyId, vec2 impulse, vec2 point )
     *     DeltaW = L / I
     *            = invInertia * ( r x J )
     */
-    const vec2 r =
-        point - bodySim.center;
+    const vec2 r = point - bodySim.center;
 
-    bodyState.angularVelocity +=
-        bodySim.invInertia *
-        Cross( r, impulse );
+    bodyState.angularVelocity += bodySim.invInertia * Cross( r, impulse );
 }
 
-void world::ApplyLinearImpulseToCenter(
-    bodyId bodyId,
-    vec2 impulse )
+void world::ApplyLinearImpulseToCenter( bodyId bodyId, vec2 impulse )
 {
     assert( std::isfinite( impulse.x ) );
     assert( std::isfinite( impulse.y ) );
@@ -1475,13 +1361,9 @@ void world::ApplyLinearImpulseToCenter(
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
     const body& body = bodies_[bodyIndex];
 
-    if( body.type != bodyType::Dynamic )
-    {
-        return;
-    }
+    if( body.type != bodyType::Dynamic ) return;
 
-    if( impulse.x != 0.0f ||
-        impulse.y != 0.0f )
+    if( impulse.x != 0.0f || impulse.y != 0.0f )
     {
         WakeBodyByIndex( bodyIndex );
     }
@@ -1495,23 +1377,17 @@ void world::ApplyLinearImpulseToCenter(
     // center에 적용하므로 r=0이고 angular impulse는 발생하지 않음.
     //
     //     DeltaV = J * invMass
-    bodyState.linearVelocity +=
-        impulse * bodySim.invMass;
+    bodyState.linearVelocity += impulse * bodySim.invMass;
 }
 
-void world::ApplyAngularImpulse(
-    bodyId bodyId,
-    float impulse )
+void world::ApplyAngularImpulse( bodyId bodyId, float impulse )
 {
     assert( std::isfinite( impulse ) );
 
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
     const body& body = bodies_[bodyIndex];
 
-    if( body.type != bodyType::Dynamic )
-    {
-        return;
-    }
+    if( body.type != bodyType::Dynamic ) return;
 
     if( impulse != 0.0f )
     {
@@ -1535,11 +1411,10 @@ void world::ApplyAngularImpulse(
     *     DeltaW = L / I
     *            = L * invInertia
     */
-    bodyState.angularVelocity +=
-        impulse * bodySim.invInertia;
+    bodyState.angularVelocity += impulse * bodySim.invInertia;
 }
 
-#pragma endregion
+#pragma endregion ForcesAndImpulses
 
 #pragma region SimulationStep
 
@@ -1595,8 +1470,7 @@ void world::Step( float timeStep, int subStepCount )
         UpdateCollisions(
             []( const contactData& )
             {
-            }
-        );
+            } );
 
         wakeSleepingBodiesFromConstraints();
 
@@ -1610,30 +1484,32 @@ void world::Step( float timeStep, int subStepCount )
         // -----------------------------------------------------
         // restitution용 relativeNormalVelocity도 이 시점에서 저장되므로
         // 이번 step의 force / gravity가 아직 섞이지 않은 충돌 전 속도를 사용함.
-        std::vector<contactConstraint2> contactConstraints =
-            PrepareContactConstraints( islandGraph.contactIds, subStepTime );
+        std::vector<contactConstraint2> contactConstraints = PrepareContactConstraints( islandGraph.contactIds, subStepTime );
 
         assert( contactConstraints.size() == islandGraph.contactIds.size() );
+
         std::vector<jointConstraint> jointConstraints;
         jointConstraints.reserve( islandGraph.jointIds.size() );
         for( const std::int32_t index : islandGraph.jointIds )
         {
-            jointConstraints.push_back( std::visit( [&]( const auto& joint ) -> jointConstraint
-            {
-                if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, distanceJointSim2> )
+            jointConstraints.push_back( std::visit(
+                [&]( const auto& joint ) -> jointConstraint
                 {
-                    return prepareDistanceJointConstraint( joint, bodySims_[joint.bodyIdA], bodySims_[joint.bodyIdB], subStepTime );
-                }
-                else
-                {
-                    return prepareMouseJointConstraint( joint, bodySims_[joint.bodyIdB], subStepTime );
-                }
-            }, jointSims_[index] ) );
+                    if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, distanceJointSim2> )
+                    {
+                        return prepareDistanceJointConstraint( joint, bodySims_[joint.bodyIdA], bodySims_[joint.bodyIdB], subStepTime );
+                    }
+                    else
+                    {
+                        return prepareMouseJointConstraint( joint, bodySims_[joint.bodyIdB], subStepTime );
+                    }
+                },
+                jointSims_[index] ) );
         }
 
         for( int subStepIndex = 0; subStepIndex < subStepCount; ++subStepIndex )
         {
-            (void)subStepIndex;
+            ( void )subStepIndex;
 
             // -------------------------------------------------
             // 4-1. Integrate velocities
@@ -1642,10 +1518,7 @@ void world::Step( float timeStep, int subStepCount )
             {
                 const body& body = bodies_[bodyIndex];
 
-                if( body.bodyId == body::NULL_INDEX || body.type == bodyType::Static || !body.awake )
-                {
-                    continue;
-                }
+                if( body.bodyId == body::NULL_INDEX || body.type == bodyType::Static || !body.awake ) continue;
 
                 bodySim& bodySim = bodySims_[bodyIndex];
                 bodyState& bodyState = bodyStates_[bodyIndex];
@@ -1661,36 +1534,23 @@ void world::Step( float timeStep, int subStepCount )
                 * 현재 velocity에 damping을 적용한 뒤
                 * 이번 sub-step의 force / gravity 변화량을 더함.
                 */
-                const float linearDamping =
-                    1.0f / ( 1.0f + subStepTime * bodySim.linearDamping );
+                const float linearDamping = 1.0f / ( 1.0f + subStepTime * bodySim.linearDamping );
 
-                const float angularDamping =
-                    1.0f / ( 1.0f + subStepTime * bodySim.angularDamping );
+                const float angularDamping = 1.0f / ( 1.0f + subStepTime * bodySim.angularDamping );
 
                 vec2 linearVelocityDelta{};
                 float angularVelocityDelta = 0.0f;
 
                 if( body.type == bodyType::Dynamic )
                 {
-                    linearVelocityDelta =
-                        (
-                            bodySim.force * bodySim.invMass +
-                            gravity_ * bodySim.gravityScale
-                        ) * subStepTime;
+                    linearVelocityDelta = ( bodySim.force * bodySim.invMass + gravity_ * bodySim.gravityScale ) * subStepTime;
 
-                    angularVelocityDelta =
-                        subStepTime *
-                        bodySim.invInertia *
-                        bodySim.torque;
+                    angularVelocityDelta = subStepTime * bodySim.invInertia * bodySim.torque;
                 }
 
-                bodyState.linearVelocity =
-                    bodyState.linearVelocity * linearDamping +
-                    linearVelocityDelta;
+                bodyState.linearVelocity = bodyState.linearVelocity * linearDamping + linearVelocityDelta;
 
-                bodyState.angularVelocity =
-                    bodyState.angularVelocity * angularDamping +
-                    angularVelocityDelta;
+                bodyState.angularVelocity = bodyState.angularVelocity * angularDamping + angularVelocityDelta;
             }
 
             // -------------------------------------------------
@@ -1698,8 +1558,7 @@ void world::Step( float timeStep, int subStepCount )
             // -------------------------------------------------
             for( const island2& island : islandGraph.islands )
             {
-                const std::span<contactConstraint2> constraints =
-                    std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
+                const std::span<contactConstraint2> constraints = std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
 
                 warmStartJoints( std::span<jointConstraint>{ jointConstraints }.subspan( island.jointStart, island.jointCount ) );
                 WarmStartContacts( constraints );
@@ -1710,8 +1569,7 @@ void world::Step( float timeStep, int subStepCount )
             // -------------------------------------------------
             for( const island2& island : islandGraph.islands )
             {
-                const std::span<contactConstraint2> constraints =
-                    std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
+                const std::span<contactConstraint2> constraints = std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
 
                 solveJoints( std::span<jointConstraint>{ jointConstraints }.subspan( island.jointStart, island.jointCount ), true );
                 SolveContactConstraints( constraints, true );
@@ -1722,8 +1580,7 @@ void world::Step( float timeStep, int subStepCount )
             // -------------------------------------------------
             for( const island2& island : islandGraph.islands )
             {
-                const std::span<const std::int32_t> bodyIds =
-                    std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
+                const std::span<const std::int32_t> bodyIds = std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
 
                 for( const std::int32_t bodyIndex : bodyIds )
                 {
@@ -1745,8 +1602,7 @@ void world::Step( float timeStep, int subStepCount )
 
                     const float angularSpeedSquared = bodyState.angularVelocity * bodyState.angularVelocity;
 
-                    if( angularSpeedSquared > maxAngularSpeedSquared &&
-                        !bodySim.allowFastRotation )
+                    if( angularSpeedSquared > maxAngularSpeedSquared && !bodySim.allowFastRotation )
                     {
                         const float ratio = maxAngularSpeed / std::abs( bodyState.angularVelocity );
                         bodyState.angularVelocity *= ratio;
@@ -1768,8 +1624,7 @@ void world::Step( float timeStep, int subStepCount )
             // -------------------------------------------------
             for( const island2& island : islandGraph.islands )
             {
-                const std::span<contactConstraint2> constraints =
-                    std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
+                const std::span<contactConstraint2> constraints = std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
 
                 solveJoints( std::span<jointConstraint>{ jointConstraints }.subspan( island.jointStart, island.jointCount ), false );
                 SolveContactConstraints( constraints, false );
@@ -1781,8 +1636,7 @@ void world::Step( float timeStep, int subStepCount )
         // -----------------------------------------------------
         for( const island2& island : islandGraph.islands )
         {
-            const std::span<contactConstraint2> constraints =
-                std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
+            const std::span<contactConstraint2> constraints = std::span<contactConstraint2>{ contactConstraints }.subspan( island.contactStart, island.contactCount );
 
             ApplyRestitutionContacts( constraints );
         }
@@ -1792,8 +1646,7 @@ void world::Step( float timeStep, int subStepCount )
         // -----------------------------------------------------
         for( const island2& island : islandGraph.islands )
         {
-            const std::span<const std::int32_t> bodyIds =
-                std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
+            const std::span<const std::int32_t> bodyIds = std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
 
             for( const std::int32_t bodyIndex : bodyIds )
             {
@@ -1801,29 +1654,15 @@ void world::Step( float timeStep, int subStepCount )
                 bodySim& sim = bodySims_[bodyIndex];
                 const bodyState& state = bodyStates_[bodyIndex];
 
-                if( body.type != bodyType::Dynamic ||
-                    body.shapeCount == 0 )
-                {
-                    continue;
-                }
+                if( body.type != bodyType::Dynamic || body.shapeCount == 0 ) continue;
 
-                const float maxVelocity =
-                    Length( state.linearVelocity ) +
-                    std::fabs( state.angularVelocity ) * sim.maxExtent;
+                const float maxVelocity = Length( state.linearVelocity ) + std::fabs( state.angularVelocity ) * sim.maxExtent;
 
-                const float maxDeltaPosition =
-                    Length( state.deltaPosition ) +
-                    std::fabs( state.deltaRotation.s ) * sim.maxExtent;
+                const float maxDeltaPosition = Length( state.deltaPosition ) + std::fabs( state.deltaRotation.s ) * sim.maxExtent;
 
-                const float maxMotion =
-                    std::max(
-                        maxDeltaPosition,
-                        maxVelocity * timeStep
-                    );
+                const float maxMotion = std::max( maxDeltaPosition, maxVelocity * timeStep );
 
-                sim.isFast =
-                    maxMotion >
-                    body.safetyFactor * sim.minExtent;
+                sim.isFast = maxMotion > body.safetyFactor * sim.minExtent;
             }
         }
 
@@ -1836,99 +1675,53 @@ void world::Step( float timeStep, int subStepCount )
             // 이 결과로 delta transform이 잘릴 수 있으므로 proxy finalize보다 먼저 처리함.
             for( const island2& island : islandGraph.islands )
             {
-                const std::span<const std::int32_t> bodyIds =
-                    std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
+                const std::span<const std::int32_t> bodyIds = std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
 
                 for( const std::int32_t bodyIndex : bodyIds )
                 {
-                    const bodySim& sim =
-                        bodySims_[bodyIndex];
+                    const bodySim& sim = bodySims_[bodyIndex];
 
-                    if( sim.isFast &&
-                        !sim.isBullet )
+                    if( sim.isFast && !sim.isBullet )
                     {
-                        SolveContinuousBody(
-                            bodyIndex,
-                            timeStep
-                        );
+                        SolveContinuousBody( bodyIndex, timeStep );
                     }
                 }
             }
 
             // Bullet을 처리하기 전에 non-bullet world의 이번 Step 최종 bounds를
             // Dynamic Tree에 반영함. Bullet은 이 tree를 query해 moving target도 찾음.
-            for( const std::int32_t bodyIndex :
-                 islandGraph.bodyIds )
+            for( const std::int32_t bodyIndex : islandGraph.bodyIds )
             {
-                const bodySim& sim =
-                    bodySims_[bodyIndex];
+                const bodySim& sim = bodySims_[bodyIndex];
 
-                const bodyState& state =
-                    bodyStates_[bodyIndex];
+                const bodyState& state = bodyStates_[bodyIndex];
 
-                if( sim.isFast &&
-                    sim.isBullet )
-                {
-                    continue;
-                }
+                if( sim.isFast && sim.isBullet ) continue;
 
-                const sweep2 pendingSweep
-                {
-                    sim.localCenter,
-                    sim.center,
-                    sim.center + state.deltaPosition,
-                    sim.transform.rotation,
-                    state.deltaRotation * sim.transform.rotation
-                };
+                const sweep2 pendingSweep{ sim.localCenter, sim.center, sim.center + state.deltaPosition, sim.transform.rotation, state.deltaRotation * sim.transform.rotation };
 
-                UpdateBodyProxyBounds(
-                    bodyIndex,
-                    GetSweepTransform(
-                        pendingSweep,
-                        1.0f
-                    )
-                );
+                UpdateBodyProxyBounds( bodyIndex, GetSweepTransform( pendingSweep, 1.0f ) );
             }
 
             // Bullet은 refit된 static / kinematic / dynamic tree를 query함.
             // 다른 bullet은 순서 의존성을 피하기 위해 candidate에서 제외함.
             for( const island2& island : islandGraph.islands )
             {
-                const std::span<const std::int32_t> bodyIds =
-                    std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
+                const std::span<const std::int32_t> bodyIds = std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
 
                 for( const std::int32_t bodyIndex : bodyIds )
                 {
-                    const bodySim& sim =
-                        bodySims_[bodyIndex];
+                    const bodySim& sim = bodySims_[bodyIndex];
 
-                    if( sim.isFast &&
-                        sim.isBullet )
+                    if( sim.isFast && sim.isBullet )
                     {
-                        SolveContinuousBody(
-                            bodyIndex,
-                            timeStep
-                        );
+                        SolveContinuousBody( bodyIndex, timeStep );
 
-                        const bodyState& state =
-                            bodyStates_[bodyIndex];
+                        const bodyState& state = bodyStates_[bodyIndex];
 
-                        const sweep2 pendingSweep
-                        {
-                            sim.localCenter,
-                            sim.center,
-                            sim.center + state.deltaPosition,
-                            sim.transform.rotation,
-                            state.deltaRotation * sim.transform.rotation
-                        };
+                        const sweep2 pendingSweep{ sim.localCenter, sim.center, sim.center + state.deltaPosition, sim.transform.rotation, state.deltaRotation * sim.transform.rotation };
 
-                        UpdateBodyProxyBounds(
-                            bodyIndex,
-                            GetSweepTransform(
-                                pendingSweep,
-                                1.0f
-                            )
-                        );
+                        UpdateBodyProxyBounds( bodyIndex, GetSweepTransform( pendingSweep, 1.0f ) );
                     }
                 }
             }
@@ -1939,19 +1732,21 @@ void world::Step( float timeStep, int subStepCount )
         // -----------------------------------------------------
         for( const jointConstraint& value : jointConstraints )
         {
-            std::visit( [&]( const auto& constraint )
-            {
-                using simType = std::conditional_t<std::is_same_v<std::remove_cvref_t<decltype( constraint )>, distanceJointConstraint2>, distanceJointSim2, mouseJointSim2>;
-                auto& joint = std::get<simType>( jointSims_[constraint.jointId] );
-                joint.impulse = constraint.impulse;
-                joint.subStepTime = subStepTime;
-                if constexpr( std::is_same_v<simType, distanceJointSim2> )
+            std::visit(
+                [&]( const auto& constraint )
                 {
-                    joint.lowerImpulse = constraint.lowerImpulse;
-                    joint.upperImpulse = constraint.upperImpulse;
-                    joint.motorImpulse = constraint.motorImpulse;
-                }
-            }, value );
+                    using simType = std::conditional_t<std::is_same_v<std::remove_cvref_t<decltype( constraint )>, distanceJointConstraint2>, distanceJointSim2, mouseJointSim2>;
+                    auto& joint = std::get<simType>( jointSims_[constraint.jointId] );
+                    joint.impulse = constraint.impulse;
+                    joint.subStepTime = subStepTime;
+                    if constexpr( std::is_same_v<simType, distanceJointSim2> )
+                    {
+                        joint.lowerImpulse = constraint.lowerImpulse;
+                        joint.upperImpulse = constraint.upperImpulse;
+                        joint.motorImpulse = constraint.motorImpulse;
+                    }
+                },
+                value );
         }
 
         StoreContactConstraintImpulses( contactConstraints );
@@ -1961,29 +1756,17 @@ void world::Step( float timeStep, int subStepCount )
         // -----------------------------------------------------
         for( const island2& island : islandGraph.islands )
         {
-            const std::span<const std::int32_t> bodyIds =
-                std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
+            const std::span<const std::int32_t> bodyIds = std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
 
             for( const std::int32_t bodyIndex : bodyIds )
             {
                 bodySim& bodySim = bodySims_[bodyIndex];
                 const bodyState& bodyState = bodyStates_[bodyIndex];
 
-                const sweep2 sweep
-                {
-                    bodySim.localCenter,
-                    bodySim.center,
-                    bodySim.center + bodyState.deltaPosition,
-                    bodySim.transform.rotation,
-                    bodyState.deltaRotation * bodySim.transform.rotation
-                };
+                const sweep2 sweep{ bodySim.localCenter, bodySim.center, bodySim.center + bodyState.deltaPosition, bodySim.transform.rotation, bodyState.deltaRotation * bodySim.transform.rotation };
 
                 bodySim.center = sweep.c2;
-                bodySim.transform =
-                    GetSweepTransform(
-                        sweep,
-                        1.0f
-                    );
+                bodySim.transform = GetSweepTransform( sweep, 1.0f );
 
                 SyncBodyProxies( bodyIndex );
             }
@@ -1996,10 +1779,7 @@ void world::Step( float timeStep, int subStepCount )
         {
             const body& body = bodies_[bodyIndex];
 
-            if( body.bodyId == body::NULL_INDEX || body.type != bodyType::Dynamic )
-            {
-                continue;
-            }
+            if( body.bodyId == body::NULL_INDEX || body.type != bodyType::Dynamic ) continue;
 
             bodySims_[bodyIndex].force = {};
             bodySims_[bodyIndex].torque = 0.0f;
@@ -2018,102 +1798,80 @@ void world::Step( float timeStep, int subStepCount )
     UpdateCollisions(
         []( const contactData& )
         {
-        }
-    );
+        } );
 
     // Sensor는 Contact와 독립적으로 최종 transform 기준 overlap을 갱신함.
     UpdateSensors();
 }
 
-#pragma endregion
+#pragma endregion SimulationStep
 
 #pragma region HandleValidity
 
 bool world::IsValid( bodyId bodyId ) const noexcept
 {
-    if( bodyId.index1 <= 0 ||
-        bodyId.worldToken != worldToken_ )
-    {
-        return false;
-    }
+    if( bodyId.index1 <= 0 || bodyId.worldToken != worldToken_ ) return false;
 
     const std::int32_t bodyIndex = bodyId.index1 - 1;
 
-    if( static_cast<std::size_t>( bodyIndex ) >= bodies_.size() )
-    {
-        return false;
-    }
+    if( static_cast<std::size_t>( bodyIndex ) >= bodies_.size() ) return false;
 
     const body& body = bodies_[bodyIndex];
 
-    return
-        body.bodyId == bodyIndex &&
-        body.generation == bodyId.generation;
+    return body.bodyId == bodyIndex && body.generation == bodyId.generation;
 }
 
 bool world::IsValid( shapeId shapeId ) const noexcept
 {
-    if( shapeId.index1 <= 0 ||
-        shapeId.worldToken != worldToken_ )
-    {
-        return false;
-    }
+    if( shapeId.index1 <= 0 || shapeId.worldToken != worldToken_ ) return false;
 
     const std::int32_t shapeIndex = shapeId.index1 - 1;
 
-    if( static_cast<std::size_t>( shapeIndex ) >= shapes_.size() )
-    {
-        return false;
-    }
+    if( static_cast<std::size_t>( shapeIndex ) >= shapes_.size() ) return false;
 
     const shape& shape = shapes_[shapeIndex];
 
-    return
-        shape.bodyId != shape::NULL_INDEX &&
-        shape.generation == shapeId.generation;
+    return shape.bodyId != shape::NULL_INDEX && shape.generation == shapeId.generation;
 }
 
 bool world::IsValid( contactId contactId ) const noexcept
 {
-    if( contactId.index1 <= 0 ||
-        contactId.worldToken != worldToken_ )
-    {
-        return false;
-    }
+    if( contactId.index1 <= 0 || contactId.worldToken != worldToken_ ) return false;
 
     const std::int32_t contactIndex = contactId.index1 - 1;
 
-    if( static_cast<std::size_t>( contactIndex ) >= contacts_.size() )
-    {
-        return false;
-    }
+    if( static_cast<std::size_t>( contactIndex ) >= contacts_.size() ) return false;
 
     const contact2& contact = contacts_[contactIndex];
 
-    return
-        contact.contactId == contactIndex &&
-        contact.generation == contactId.generation;
+    return contact.contactId == contactIndex && contact.generation == contactId.generation;
 }
 
 bool world::IsValid( jointId id ) const noexcept
 {
-    if( id.index1 <= 0 || id.worldToken != worldToken_ ) { return false; }
+    if( id.index1 <= 0 || id.worldToken != worldToken_ ) return false;
+
     const std::int32_t index = id.index1 - 1;
+
     return static_cast<std::size_t>( index ) < joints_.size() && joints_[index].jointId == index && joints_[index].generation == id.generation;
 }
 
-#pragma endregion
+#pragma endregion HandleValidity
 
 #pragma region DiagnosticQueries
 
 const body& world::GetBody( bodyId bodyId ) const
 {
-    return bodies_[GetBodyIndex( bodyId )];
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    return bodies_[bodyIndex];
 }
 
 const shape& world::GetShape( shapeId shapeId ) const
 {
-    return shapes_[GetShapeIndex( shapeId )];
+    const std::int32_t shapeIndex = GetShapeIndex( shapeId );
+
+    return shapes_[shapeIndex];
 }
 
 contactData world::GetContactData( contactId contactId ) const
@@ -2123,7 +1881,9 @@ contactData world::GetContactData( contactId contactId ) const
 
 std::size_t world::GetBodyContactCapacity( bodyId bodyId ) const
 {
-    const body& body = bodies_[GetBodyIndex( bodyId )];
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    const body& body = bodies_[bodyIndex];
 
     // Box2D와 같이 빠르고 보수적으로 body의 전체 Contact 수를 반환함.
     return static_cast<std::size_t>( body.contactCount );
@@ -2131,7 +1891,9 @@ std::size_t world::GetBodyContactCapacity( bodyId bodyId ) const
 
 std::size_t world::GetBodyContactData( bodyId bodyId, std::span<contactData> output ) const
 {
-    const body& body = bodies_[GetBodyIndex( bodyId )];
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    const body& body = bodies_[bodyIndex];
 
     std::int32_t contactKey = body.headContactKey;
     std::size_t count = 0;
@@ -2174,10 +1936,7 @@ std::size_t world::GetShapeContactCapacity( shapeId shapeId ) const
     const shape& shape = shapes_[shapeIndex];
 
     // Sensor는 Contact를 만들지 않으므로 overlap 정보는 Sensor API에서 별도로 조회함.
-    if( shape.sensorIndex != shape::NULL_INDEX )
-    {
-        return 0;
-    }
+    if( shape.sensorIndex != shape::NULL_INDEX ) return 0;
 
     assert( shape.bodyId >= 0 );
     assert( static_cast<std::size_t>( shape.bodyId ) < bodies_.size() );
@@ -2194,10 +1953,7 @@ std::size_t world::GetShapeContactData( shapeId shapeId, std::span<contactData> 
 
     const shape& shape = shapes_[shapeIndex];
 
-    if( shape.sensorIndex != shape::NULL_INDEX )
-    {
-        return 0;
-    }
+    if( shape.sensorIndex != shape::NULL_INDEX ) return 0;
 
     assert( shape.bodyId >= 0 );
     assert( static_cast<std::size_t>( shape.bodyId ) < bodies_.size() );
@@ -2225,9 +1981,7 @@ std::size_t world::GetShapeContactData( shapeId shapeId, std::span<contactData> 
 
         assert( contactSim.contactId == contactId );
 
-        const bool involvesShape =
-            contact.shapeIdA == shapeIndex ||
-            contact.shapeIdB == shapeIndex;
+        const bool involvesShape = contact.shapeIdA == shapeIndex || contact.shapeIdB == shapeIndex;
 
         if( involvesShape && contactSim.manifold.pointCount > 0 )
         {
@@ -2241,31 +1995,35 @@ std::size_t world::GetShapeContactData( shapeId shapeId, std::span<contactData> 
     return count;
 }
 
-#pragma endregion
+#pragma endregion DiagnosticQueries
 
 #pragma region InternalHandles
 
 std::int32_t world::GetBodyIndex( bodyId bodyId ) const
 {
     assert( IsValid( bodyId ) );
+
     return bodyId.index1 - 1;
 }
 
 std::int32_t world::GetShapeIndex( shapeId shapeId ) const
 {
     assert( IsValid( shapeId ) );
+
     return shapeId.index1 - 1;
 }
 
 std::int32_t world::GetContactIndex( contactId contactId ) const
 {
     assert( IsValid( contactId ) );
+
     return contactId.index1 - 1;
 }
 
 std::int32_t world::getJointIndex( jointId id ) const
 {
     assert( IsValid( id ) );
+
     return id.index1 - 1;
 }
 
@@ -2278,12 +2036,7 @@ bodyId world::MakeBodyId( std::int32_t bodyIndex ) const
 
     assert( body.bodyId == bodyIndex );
 
-    return
-    {
-        bodyIndex + 1,
-        body.generation,
-        worldToken_
-    };
+    return { bodyIndex + 1, body.generation, worldToken_ };
 }
 
 shapeId world::MakeShapeId( std::int32_t shapeIndex ) const
@@ -2295,12 +2048,7 @@ shapeId world::MakeShapeId( std::int32_t shapeIndex ) const
 
     assert( shape.bodyId != shape::NULL_INDEX );
 
-    return
-    {
-        shapeIndex + 1,
-        shape.generation,
-        worldToken_
-    };
+    return { shapeIndex + 1, shape.generation, worldToken_ };
 }
 
 contactId world::MakeContactId( std::int32_t contactIndex ) const
@@ -2312,12 +2060,7 @@ contactId world::MakeContactId( std::int32_t contactIndex ) const
 
     assert( contact.contactId == contactIndex );
 
-    return
-    {
-        contactIndex + 1,
-        contact.generation,
-        worldToken_
-    };
+    return { contactIndex + 1, contact.generation, worldToken_ };
 }
 
 contactData world::MakeContactData( std::int32_t contactIndex ) const
@@ -2346,6 +2089,7 @@ contactData world::MakeContactData( std::int32_t contactIndex ) const
     assert( bodySims_.size() == bodies_.size() );
 
     const bodySim& bodySimA = bodySims_[shapeA.bodyId];
+
     assert( bodySimA.bodyId == shapeA.bodyId );
 
     contactData data{};
@@ -2357,11 +2101,9 @@ contactData world::MakeContactData( std::int32_t contactIndex ) const
     // world-space geometry와 함께 마지막 solver impulse도 public snapshot에 복사함.
     for( int i = 0; i < data.manifold.pointCount; ++i )
     {
-        data.manifold.points[i].normalImpulse =
-            contactSim.impulses[i].normalImpulse;
+        data.manifold.points[i].normalImpulse = contactSim.impulses[i].normalImpulse;
 
-        data.manifold.points[i].tangentImpulse =
-            contactSim.impulses[i].tangentImpulse;
+        data.manifold.points[i].tangentImpulse = contactSim.impulses[i].tangentImpulse;
     }
 
     return data;
@@ -2370,10 +2112,11 @@ contactData world::MakeContactData( std::int32_t contactIndex ) const
 jointId world::makeJointId( std::int32_t jointIndex ) const
 {
     assert( joints_[jointIndex].jointId == jointIndex );
+
     return { jointIndex + 1, joints_[jointIndex].generation, worldToken_ };
 }
 
-#pragma endregion
+#pragma endregion InternalHandles
 
 #pragma region JointStorage
 
@@ -2389,8 +2132,7 @@ std::int32_t world::allocateJoint( std::int32_t bodyIndexA, std::int32_t bodyInd
             const std::int32_t index = GetContactId( key );
             const contact2& contact = contacts_[index];
             key = contact.edges[GetContactEdgeIndex( key )].nextKey;
-            if( ( contact.edges[0].bodyId == bodyIndexA && contact.edges[1].bodyId == bodyIndexB ) ||
-                ( contact.edges[0].bodyId == bodyIndexB && contact.edges[1].bodyId == bodyIndexA ) )
+            if( ( contact.edges[0].bodyId == bodyIndexA && contact.edges[1].bodyId == bodyIndexB ) || ( contact.edges[0].bodyId == bodyIndexB && contact.edges[1].bodyId == bodyIndexA ) )
             {
                 DestroyContact( index );
             }
@@ -2406,6 +2148,7 @@ std::int32_t world::allocateJoint( std::int32_t bodyIndexA, std::int32_t bodyInd
     {
         // Edge key의 signed shift와 index1이 모두 표현 가능한 범위를 유지함.
         assert( joints_.size() <= static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() / 2 ) );
+
         index = static_cast<std::int32_t>( joints_.size() );
         joints_.push_back( {} );
         jointSims_.push_back( {} );
@@ -2447,7 +2190,9 @@ std::int32_t world::allocateJoint( std::int32_t bodyIndexA, std::int32_t bodyInd
 void world::destroyJointByIndex( std::int32_t jointIndex, bool touchProxies )
 {
     joint2& joint = joints_[jointIndex];
+
     assert( joint.jointId == jointIndex && jointCount_ > 0 );
+
     const std::int32_t bodyIndexA = joint.edges[0].bodyId;
     const std::int32_t bodyIndexB = joint.edges[1].bodyId;
     const bool blocked = !joint.collideConnected;
@@ -2500,40 +2245,35 @@ void world::resetJointImpulses( std::int32_t bodyIndex )
 {
     for( std::int32_t key = bodies_[bodyIndex].headJointKey; key != -1; key = joints_[key >> 1].edges[key & 1].nextKey )
     {
-        std::visit( []( auto& joint )
-        {
-            joint.impulse = {};
-            if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, distanceJointSim2> )
+        std::visit(
+            []( auto& joint )
             {
-                joint.lowerImpulse = 0.0f;
-                joint.upperImpulse = 0.0f;
-                joint.motorImpulse = 0.0f;
-            }
-        }, jointSims_[key >> 1] );
+                joint.impulse = {};
+                if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, distanceJointSim2> )
+                {
+                    joint.lowerImpulse = 0.0f;
+                    joint.upperImpulse = 0.0f;
+                    joint.motorImpulse = 0.0f;
+                }
+            },
+            jointSims_[key >> 1] );
     }
 }
 
 bool world::shouldBodiesCollide( std::int32_t bodyIndexA, std::int32_t bodyIndexB ) const
 {
-    if( bodyIndexA == bodyIndexB )
-    {
-        return false;
-    }
+    if( bodyIndexA == bodyIndexB ) return false;
+
     const body& bodyA = bodies_[bodyIndexA];
     const body& bodyB = bodies_[bodyIndexB];
-    if( bodyA.type != bodyType::Dynamic && bodyB.type != bodyType::Dynamic )
-    {
-        return false;
-    }
+    if( bodyA.type != bodyType::Dynamic && bodyB.type != bodyType::Dynamic ) return false;
+
     const body& owner = bodyA.jointCount < bodyB.jointCount ? bodyA : bodyB;
     for( std::int32_t key = owner.headJointKey; key != -1; key = joints_[key >> 1].edges[key & 1].nextKey )
     {
         const joint2& joint = joints_[key >> 1];
         const std::int32_t other = joint.edges[( key & 1 ) ^ 1].bodyId;
-        if( !joint.collideConnected && ( other == bodyIndexA || other == bodyIndexB ) )
-        {
-            return false;
-        }
+        if( !joint.collideConnected && ( other == bodyIndexA || other == bodyIndexB ) ) return false;
     }
     return true;
 }
@@ -2544,7 +2284,7 @@ bool world::shouldShapeFiltersCollide( const collisionFilter& a, const collision
     return collisionMatrix_.allows( a.categoryBits, b.categoryBits ) && ShouldShapesCollide( a, b );
 }
 
-#pragma endregion
+#pragma endregion JointStorage
 
 #pragma region BodyShapeStorage
 
@@ -2559,7 +2299,10 @@ void world::DestroyBodyByIndex( std::int32_t bodyIndex )
     assert( body.bodyId == bodyIndex );
 
     // Body가 살아 있는 동안 Joint edge를 먼저 정리하고, 이후 Contact / Shape를 제거함.
-    while( body.headJointKey != body::NULL_INDEX ) { destroyJointByIndex( body.headJointKey >> 1, false ); }
+    while( body.headJointKey != body::NULL_INDEX )
+    {
+        destroyJointByIndex( body.headJointKey >> 1, false );
+    }
     assert( body.jointCount == 0 );
 
     // Box2D처럼 먼저 이 body에 연결된 모든 Contact를 제거함.
@@ -2588,7 +2331,9 @@ void world::DestroyBodyByIndex( std::int32_t bodyIndex )
     const std::uint16_t generation = body.generation;
 
     assert( bodySims_.size() == bodies_.size() );
+
     bodySim& bodySim = bodySims_[bodyIndex];
+
     assert( bodySim.bodyId == bodyIndex );
 
     // simulation 데이터도 함께 비워 재사용 slot에 이전 transform이 남지 않게 함.
@@ -2622,9 +2367,7 @@ void world::DestroyShapeByIndex( std::int32_t shapeIndex )
 
     if( shape.sensorIndex != shape::NULL_INDEX )
     {
-        DestroySensorByShapeIndex(
-            shapeIndex
-        );
+        DestroySensorByShapeIndex( shapeIndex );
     }
 
     const std::int32_t bodyIndex = shape.bodyId;
@@ -2651,13 +2394,13 @@ void world::DestroyShapeByIndex( std::int32_t shapeIndex )
         assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
 
         contact2& contact = contacts_[contactId];
+
         assert( contact.contactId == contactId );
 
         // DestroyContact가 list를 수정하므로 다음 key를 먼저 저장함.
         contactKey = contact.edges[edgeIndex].nextKey;
 
-        if( contact.shapeIdA == shapeIndex ||
-            contact.shapeIdB == shapeIndex )
+        if( contact.shapeIdA == shapeIndex || contact.shapeIdB == shapeIndex )
         {
             DestroyContact( contactId );
         }
@@ -2683,32 +2426,24 @@ void world::SyncBodyProxies( std::int32_t bodyIndex )
     assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
     assert( bodySims_.size() == bodies_.size() );
 
-    const bodySim& bodySim =
-        bodySims_[bodyIndex];
+    const bodySim& bodySim = bodySims_[bodyIndex];
 
     assert( bodySim.bodyId == bodyIndex );
 
-    UpdateBodyProxyBounds(
-        bodyIndex,
-        bodySim.transform
-    );
+    UpdateBodyProxyBounds( bodyIndex, bodySim.transform );
 }
 
-void world::UpdateBodyProxyBounds(
-    std::int32_t bodyIndex,
-    const transform2& transform )
+void world::UpdateBodyProxyBounds( std::int32_t bodyIndex, const transform2& transform )
 {
     assert( bodyIndex >= 0 );
     assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
     assert( fatAABBs_.size() == shapes_.size() );
 
-    const body& body =
-        bodies_[bodyIndex];
+    const body& body = bodies_[bodyIndex];
 
     assert( body.bodyId == bodyIndex );
 
-    std::int32_t shapeId =
-        body.headShapeId;
+    std::int32_t shapeId = body.headShapeId;
 
     std::int32_t visitedCount = 0;
 
@@ -2718,85 +2453,46 @@ void world::UpdateBodyProxyBounds(
         assert( static_cast<std::size_t>( shapeId ) < shapes_.size() );
         assert( visitedCount < body.shapeCount );
 
-        shape& shape =
-            shapes_[shapeId];
+        shape& shape = shapes_[shapeId];
 
         assert( shape.bodyId == bodyIndex );
 
-        const aabb2 tightAABB =
-            ComputeShapeAABB(
-                shape.geometry,
-                transform
-            );
+        const aabb2 tightAABB = ComputeShapeAABB( shape.geometry, transform );
 
-        shape.aabb =
-            ExpandAABB(
-                tightAABB,
-                SPECULATIVE_DISTANCE
-            );
+        shape.aabb = ExpandAABB( tightAABB, SPECULATIVE_DISTANCE );
 
-        aabb2& fatAABB =
-            fatAABBs_[shapeId];
+        aabb2& fatAABB = fatAABBs_[shapeId];
 
-        if( !ContainsAABB(
-                fatAABB,
-                shape.aabb ) )
+        if( !ContainsAABB( fatAABB, shape.aabb ) )
         {
-            const float fatMargin =
-                body.type == bodyType::Static ?
-                    SPECULATIVE_DISTANCE :
-                    shape.aabbMargin;
+            const float fatMargin = body.type == bodyType::Static ? SPECULATIVE_DISTANCE : shape.aabbMargin;
 
-            const aabb2 newFatAABB =
-                ExpandAABB(
-                    shape.aabb,
-                    fatMargin
-                );
+            const aabb2 newFatAABB = ExpandAABB( shape.aabb, fatMargin );
 
-            fatAABB =
-                newFatAABB;
+            fatAABB = newFatAABB;
 
             if( shape.proxyKey != shape::NULL_INDEX )
             {
-                const dynamicTree& tree =
-                    broadPhase_.GetTree(
-                        GetProxyType(
-                            shape.proxyKey
-                        )
-                    );
+                const dynamicTree& tree = broadPhase_.GetTree( GetProxyType( shape.proxyKey ) );
 
-                const aabb2& treeAABB =
-                    tree.GetProxyAABB(
-                        GetProxyId(
-                            shape.proxyKey
-                        )
-                    );
+                const aabb2& treeAABB = tree.GetProxyAABB( GetProxyId( shape.proxyKey ) );
 
                 // 회전이나 geometry 변화처럼 새 fat bounds가 기존 tree bounds를
                 // 완전히 포함한다면 topology를 건드리지 않고 bounds만 확장함.
-                if( ContainsAABB(
-                        newFatAABB,
-                        treeAABB ) )
+                if( ContainsAABB( newFatAABB, treeAABB ) )
                 {
-                    broadPhase_.EnlargeProxy(
-                        shape.proxyKey,
-                        newFatAABB
-                    );
+                    broadPhase_.EnlargeProxy( shape.proxyKey, newFatAABB );
                 }
                 else
                 {
                     // translation처럼 기존 bounds를 포함하지 않는 이동은
                     // 현재 tree 구현에서는 leaf를 새 위치로 재배치함.
-                    broadPhase_.MoveProxy(
-                        shape.proxyKey,
-                        newFatAABB
-                    );
+                    broadPhase_.MoveProxy( shape.proxyKey, newFatAABB );
                 }
             }
         }
 
-        shapeId =
-            shape.nextShapeId;
+        shapeId = shape.nextShapeId;
 
         ++visitedCount;
     }
@@ -2854,45 +2550,33 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
     bodySim.minExtent = std::numeric_limits<float>::max();
     bodySim.maxExtent = 0.0f;
 
-    const auto updateExtents =
-        [&]()
+    const auto updateExtents = [&]()
+    {
+        std::int32_t shapeIndex = body.headShapeId;
+        std::int32_t visitedCount = 0;
+
+        while( shapeIndex != body::NULL_INDEX )
         {
-            std::int32_t shapeIndex = body.headShapeId;
-            std::int32_t visitedCount = 0;
+            assert( shapeIndex >= 0 );
+            assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+            assert( visitedCount < body.shapeCount );
 
-            while( shapeIndex != body::NULL_INDEX )
-            {
-                assert( shapeIndex >= 0 );
-                assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
-                assert( visitedCount < body.shapeCount );
+            const shape& shape = shapes_[shapeIndex];
 
-                const shape& shape = shapes_[shapeIndex];
-                assert( shape.bodyId == bodyIndex );
+            assert( shape.bodyId == bodyIndex );
 
-                const shapeExtent2 extent =
-                    ComputeShapeExtent(
-                        shape.geometry,
-                        bodySim.localCenter
-                    );
+            const shapeExtent2 extent = ComputeShapeExtent( shape.geometry, bodySim.localCenter );
 
-                bodySim.minExtent =
-                    std::min(
-                        bodySim.minExtent,
-                        extent.minExtent
-                    );
+            bodySim.minExtent = std::min( bodySim.minExtent, extent.minExtent );
 
-                bodySim.maxExtent =
-                    std::max(
-                        bodySim.maxExtent,
-                        extent.maxExtent
-                    );
+            bodySim.maxExtent = std::max( bodySim.maxExtent, extent.maxExtent );
 
-                shapeIndex = shape.nextShapeId;
-                ++visitedCount;
-            }
+            shapeIndex = shape.nextShapeId;
+            ++visitedCount;
+        }
 
-            assert( visitedCount == body.shapeCount );
-        };
+        assert( visitedCount == body.shapeCount );
+    };
 
     // Static / Kinematic body는 외력이나 impulse로 가속되지 않으므로
     // solver 관점에서 무한 질량으로 취급하고 inverse mass / inertia를 0으로 둠.
@@ -2929,6 +2613,7 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
         assert( visitedCount < body.shapeCount );
 
         const shape& shape = shapes_[shapeIndex];
+
         assert( shape.bodyId == bodyIndex );
 
         const massData2 massData = ComputeShapeMass( shape );
@@ -2953,8 +2638,7 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
 
         //     C = sum( mi * ci ) / M
         //       = weightedCenter * invMass
-        bodySim.localCenter =
-            weightedCenter * bodySim.invMass;
+        bodySim.localCenter = weightedCenter * bodySim.invMass;
     }
 
     /*
@@ -2973,17 +2657,11 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
     */
     for( const massData2& massData : masses )
     {
-        if( massData.mass == 0.0f )
-        {
-            continue;
-        }
+        if( massData.mass == 0.0f ) continue;
 
-        const vec2 offset =
-            bodySim.localCenter - massData.center;
+        const vec2 offset = bodySim.localCenter - massData.center;
 
-        body.inertia +=
-            massData.rotationalInertia +
-            massData.mass * LengthSquared( offset );
+        body.inertia += massData.rotationalInertia + massData.mass * LengthSquared( offset );
     }
 
     assert( body.inertia >= 0.0f );
@@ -3000,22 +2678,17 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
     updateExtents();
 
     // local center of mass C를 현재 body transform으로 world space에 옮김.
-    bodySim.center =
-        TransformPoint(
-            bodySim.transform,
-            bodySim.localCenter
-        );
+    bodySim.center = TransformPoint( bodySim.transform, bodySim.localCenter );
 
     // center of mass가 이동해도 body origin의 순간 속도가 갑자기 변하지 않도록
     // v_new = v_old + w x ( C_new - C_old ) 로 COM 선속도를 보정함.
     assert( bodyStates_.size() == bodies_.size() );
 
     bodyState& bodyState = bodyStates_[bodyIndex];
-    bodyState.linearVelocity +=
-        Cross( bodyState.angularVelocity,  bodySim.center - oldCenter );
+    bodyState.linearVelocity += Cross( bodyState.angularVelocity, bodySim.center - oldCenter );
 }
 
-#pragma endregion
+#pragma endregion BodyShapeStorage
 
 #pragma region SensorUpdate
 
@@ -3026,75 +2699,39 @@ void world::UpdateSensors()
 
     if( !pendingSensorEndEvents_.empty() )
     {
-        sensorEndEvents_.insert(
-            sensorEndEvents_.end(),
-            pendingSensorEndEvents_.begin(),
-            pendingSensorEndEvents_.end()
-        );
+        sensorEndEvents_.insert( sensorEndEvents_.end(), pendingSensorEndEvents_.begin(), pendingSensorEndEvents_.end() );
 
         pendingSensorEndEvents_.clear();
     }
 
-    if( sensors_.empty() )
+    if( sensors_.empty() ) return;
+
+    const auto makeVisitorId = [this]( const sensorVisitor2& visitor )
     {
-        return;
-    }
+        return shapeId{ visitor.shapeIndex + 1, visitor.generation, worldToken_ };
+    };
 
-    const auto makeVisitorId =
-        [this]( const sensorVisitor2& visitor )
-        {
-            return shapeId
-            {
-                visitor.shapeIndex + 1,
-                visitor.generation,
-                worldToken_
-            };
-        };
-
-    constexpr float OVERLAP_EPSILON =
-        10.0f *
-        std::numeric_limits<float>::epsilon();
+    constexpr float OVERLAP_EPSILON = 10.0f * std::numeric_limits<float>::epsilon();
 
     for( sensor2& sensor : sensors_ )
     {
         assert( sensor.shapeIndex >= 0 );
-        assert(
-            static_cast<std::size_t>(
-                sensor.shapeIndex
-            ) <
-            shapes_.size()
-        );
+        assert( static_cast<std::size_t>( sensor.shapeIndex ) < shapes_.size() );
 
-        shape& sensorShape =
-            shapes_[sensor.shapeIndex];
+        shape& sensorShape = shapes_[sensor.shapeIndex];
 
-        assert(
-            sensorShape.sensorIndex >= 0
-        );
+        assert( sensorShape.sensorIndex >= 0 );
 
         // Sensor shape 자체가 이벤트를 끄면 기존 overlap은 아래 diff에서 모두 End로 빠짐.
         if( !sensorShape.enableSensorEvents )
         {
             sensor.hits.clear();
 
-            const shapeId sensorShapeId =
-                MakeShapeId(
-                    sensor.shapeIndex
-                );
+            const shapeId sensorShapeId = MakeShapeId( sensor.shapeIndex );
 
-            for( const sensorVisitor2& oldVisitor :
-                 sensor.overlaps )
+            for( const sensorVisitor2& oldVisitor : sensor.overlaps )
             {
-                sensorEndEvents_.push_back(
-                    {
-                        sensorShapeId,
-                        {
-                            oldVisitor.shapeIndex + 1,
-                            oldVisitor.generation,
-                            worldToken_
-                        }
-                    }
-                );
+                sensorEndEvents_.push_back( { sensorShapeId, { oldVisitor.shapeIndex + 1, oldVisitor.generation, worldToken_ } } );
             }
 
             sensor.overlaps.clear();
@@ -3102,362 +2739,176 @@ void world::UpdateSensors()
             continue;
         }
 
-        const bodySim& sensorBodySim =
-            bodySims_[sensorShape.bodyId];
+        const bodySim& sensorBodySim = bodySims_[sensorShape.bodyId];
 
         std::vector<sensorVisitor2> newOverlaps;
-        newOverlaps.reserve(
-            sensor.overlaps.size() +
-            sensor.hits.size()
-        );
+        newOverlaps.reserve( sensor.overlaps.size() + sensor.hits.size() );
 
         // Continuous pass에서 지나간 visitor도 이번 Step의 overlap state에 한 번 포함함.
         // 최종 위치에서도 실제로 겹치면 아래 tree query 결과와 중복되지만 정렬 후 제거됨.
-        newOverlaps.insert(
-            newOverlaps.end(),
-            sensor.hits.begin(),
-            sensor.hits.end()
-        );
+        newOverlaps.insert( newOverlaps.end(), sensor.hits.begin(), sensor.hits.end() );
 
         sensor.hits.clear();
 
-        const shapeProxy2 sensorProxy =
-            MakeShapeProxy(
-                sensorShape.geometry
-            );
+        const shapeProxy2 sensorProxy = MakeShapeProxy( sensorShape.geometry );
 
-        const auto queryTree =
-            [&]( bodyType type )
-            {
-                const dynamicTree& tree =
-                    broadPhase_.GetTree(
-                        type
-                    );
+        const auto queryTree = [&]( bodyType type )
+        {
+            const dynamicTree& tree = broadPhase_.GetTree( type );
 
-                tree.Query(
-                    sensorShape.aabb,
-                    [&]( std::int32_t proxyId )
-                    {
-                        const std::int32_t otherShapeIndex =
-                            tree.GetProxyShapeIndex(
-                                proxyId
-                            );
-
-                        if( otherShapeIndex ==
-                            sensor.shapeIndex )
-                        {
-                            return true;
-                        }
-
-                        assert( otherShapeIndex >= 0 );
-                        assert(
-                            static_cast<std::size_t>(
-                                otherShapeIndex
-                            ) <
-                            shapes_.size()
-                        );
-
-                        const shape& otherShape =
-                            shapes_[otherShapeIndex];
-
-                        if( otherShape.bodyId ==
-                                shape::NULL_INDEX ||
-                            otherShape.bodyId ==
-                                sensorShape.bodyId )
-                        {
-                            return true;
-                        }
-
-                        if( !otherShape.enableSensorEvents )
-                        {
-                            return true;
-                        }
-
-                        if( !shouldShapeFiltersCollide(
-                                sensorShape.filter,
-                                otherShape.filter ) )
-                        {
-                            return true;
-                        }
-
-                        const bodySim& otherBodySim =
-                            bodySims_[otherShape.bodyId];
-
-                        distanceInput2 input{};
-                        input.proxyA =
-                            sensorProxy;
-
-                        input.proxyB =
-                            MakeShapeProxy(
-                                otherShape.geometry
-                            );
-
-                        input.transform =
-                            InverseMul(
-                                sensorBodySim.transform,
-                                otherBodySim.transform
-                            );
-
-                        input.useRadii = true;
-
-                        simplexCache2 cache{};
-
-                        const distanceOutput2 distance =
-                            ShapeDistance(
-                                input,
-                                cache
-                            );
-
-                        if( distance.distance <=
-                            OVERLAP_EPSILON )
-                        {
-                            newOverlaps.push_back(
-                                {
-                                    otherShapeIndex,
-                                    otherShape.generation
-                                }
-                            );
-                        }
-
-                        return true;
-                    }
-                );
-            };
-
-        queryTree(
-            bodyType::Static
-        );
-
-        queryTree(
-            bodyType::Kinematic
-        );
-
-        queryTree(
-            bodyType::Dynamic
-        );
-
-        std::sort(
-            newOverlaps.begin(),
-            newOverlaps.end(),
-            []( const sensorVisitor2& a,
-                const sensorVisitor2& b )
-            {
-                if( a.shapeIndex !=
-                    b.shapeIndex )
+            tree.Query( sensorShape.aabb,
+                [&]( std::int32_t proxyId )
                 {
-                    return
-                        a.shapeIndex <
-                        b.shapeIndex;
-                }
+                    const std::int32_t otherShapeIndex = tree.GetProxyShapeIndex( proxyId );
 
-                return
-                    a.generation <
-                    b.generation;
-            }
-        );
+                    if( otherShapeIndex == sensor.shapeIndex ) return true;
 
-        newOverlaps.erase(
-            std::unique(
-                newOverlaps.begin(),
-                newOverlaps.end()
-            ),
-            newOverlaps.end()
-        );
+                    assert( otherShapeIndex >= 0 );
+                    assert( static_cast<std::size_t>( otherShapeIndex ) < shapes_.size() );
 
-        const shapeId sensorShapeId =
-            MakeShapeId(
-                sensor.shapeIndex
-            );
+                    const shape& otherShape = shapes_[otherShapeIndex];
+
+                    if( otherShape.bodyId == shape::NULL_INDEX || otherShape.bodyId == sensorShape.bodyId ) return true;
+
+                    if( !otherShape.enableSensorEvents ) return true;
+
+                    if( !shouldShapeFiltersCollide( sensorShape.filter, otherShape.filter ) ) return true;
+
+                    const bodySim& otherBodySim = bodySims_[otherShape.bodyId];
+
+                    distanceInput2 input{};
+                    input.proxyA = sensorProxy;
+
+                    input.proxyB = MakeShapeProxy( otherShape.geometry );
+
+                    input.transform = InverseMul( sensorBodySim.transform, otherBodySim.transform );
+
+                    input.useRadii = true;
+
+                    simplexCache2 cache{};
+
+                    const distanceOutput2 distance = ShapeDistance( input, cache );
+
+                    if( distance.distance <= OVERLAP_EPSILON )
+                    {
+                        newOverlaps.push_back( { otherShapeIndex, otherShape.generation } );
+                    }
+
+                    return true;
+                } );
+        };
+
+        queryTree( bodyType::Static );
+
+        queryTree( bodyType::Kinematic );
+
+        queryTree( bodyType::Dynamic );
+
+        std::sort( newOverlaps.begin(), newOverlaps.end(),
+            []( const sensorVisitor2& a, const sensorVisitor2& b )
+            {
+                if( a.shapeIndex != b.shapeIndex ) return a.shapeIndex < b.shapeIndex;
+
+                return a.generation < b.generation;
+            } );
+
+        newOverlaps.erase( std::unique( newOverlaps.begin(), newOverlaps.end() ), newOverlaps.end() );
+
+        const shapeId sensorShapeId = MakeShapeId( sensor.shapeIndex );
 
         std::size_t oldIndex = 0;
         std::size_t newIndex = 0;
 
-        while( oldIndex <
-                   sensor.overlaps.size() &&
-               newIndex <
-                   newOverlaps.size() )
+        while( oldIndex < sensor.overlaps.size() && newIndex < newOverlaps.size() )
         {
-            const sensorVisitor2& oldVisitor =
-                sensor.overlaps[oldIndex];
+            const sensorVisitor2& oldVisitor = sensor.overlaps[oldIndex];
 
-            const sensorVisitor2& newVisitor =
-                newOverlaps[newIndex];
+            const sensorVisitor2& newVisitor = newOverlaps[newIndex];
 
-            if( oldVisitor.shapeIndex ==
-                    newVisitor.shapeIndex &&
-                oldVisitor.generation ==
-                    newVisitor.generation )
+            if( oldVisitor.shapeIndex == newVisitor.shapeIndex && oldVisitor.generation == newVisitor.generation )
             {
                 ++oldIndex;
                 ++newIndex;
                 continue;
             }
 
-            const bool oldComesFirst =
-                oldVisitor.shapeIndex <
-                    newVisitor.shapeIndex ||
-                (
-                    oldVisitor.shapeIndex ==
-                        newVisitor.shapeIndex &&
-                    oldVisitor.generation <
-                        newVisitor.generation
-                );
+            const bool oldComesFirst = oldVisitor.shapeIndex < newVisitor.shapeIndex || ( oldVisitor.shapeIndex == newVisitor.shapeIndex && oldVisitor.generation < newVisitor.generation );
 
             if( oldComesFirst )
             {
-                sensorEndEvents_.push_back(
-                    {
-                        sensorShapeId,
-                        makeVisitorId(
-                            oldVisitor
-                        )
-                    }
-                );
+                sensorEndEvents_.push_back( { sensorShapeId, makeVisitorId( oldVisitor ) } );
 
                 ++oldIndex;
             }
             else
             {
-                sensorBeginEvents_.push_back(
-                    {
-                        sensorShapeId,
-                        makeVisitorId(
-                            newVisitor
-                        )
-                    }
-                );
+                sensorBeginEvents_.push_back( { sensorShapeId, makeVisitorId( newVisitor ) } );
 
                 ++newIndex;
             }
         }
 
-        while( oldIndex <
-               sensor.overlaps.size() )
+        while( oldIndex < sensor.overlaps.size() )
         {
-            sensorEndEvents_.push_back(
-                {
-                    sensorShapeId,
-                    makeVisitorId(
-                        sensor.overlaps[oldIndex]
-                    )
-                }
-            );
+            sensorEndEvents_.push_back( { sensorShapeId, makeVisitorId( sensor.overlaps[oldIndex] ) } );
 
             ++oldIndex;
         }
 
-        while( newIndex <
-               newOverlaps.size() )
+        while( newIndex < newOverlaps.size() )
         {
-            sensorBeginEvents_.push_back(
-                {
-                    sensorShapeId,
-                    makeVisitorId(
-                        newOverlaps[newIndex]
-                    )
-                }
-            );
+            sensorBeginEvents_.push_back( { sensorShapeId, makeVisitorId( newOverlaps[newIndex] ) } );
 
             ++newIndex;
         }
 
-        sensor.overlaps =
-            std::move(
-                newOverlaps
-            );
+        sensor.overlaps = std::move( newOverlaps );
     }
 }
 
-void world::DestroySensorByShapeIndex(
-    std::int32_t shapeIndex )
+void world::DestroySensorByShapeIndex( std::int32_t shapeIndex )
 {
     assert( shapeIndex >= 0 );
-    assert(
-        static_cast<std::size_t>(
-            shapeIndex
-        ) <
-        shapes_.size()
-    );
+    assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
 
-    shape& sensorShape =
-        shapes_[shapeIndex];
+    shape& sensorShape = shapes_[shapeIndex];
 
-    assert(
-        sensorShape.sensorIndex !=
-        shape::NULL_INDEX
-    );
+    assert( sensorShape.sensorIndex != shape::NULL_INDEX );
 
-    const std::int32_t sensorIndex =
-        sensorShape.sensorIndex;
+    const std::int32_t sensorIndex = sensorShape.sensorIndex;
 
     assert( sensorIndex >= 0 );
-    assert(
-        static_cast<std::size_t>(
-            sensorIndex
-        ) <
-        sensors_.size()
-    );
+    assert( static_cast<std::size_t>( sensorIndex ) < sensors_.size() );
 
-    const shapeId sensorShapeId =
-        MakeShapeId(
-            shapeIndex
-        );
+    const shapeId sensorShapeId = MakeShapeId( shapeIndex );
 
-    const sensor2& sensor =
-        sensors_[sensorIndex];
+    const sensor2& sensor = sensors_[sensorIndex];
 
-    for( const sensorVisitor2& visitor :
-         sensor.overlaps )
+    for( const sensorVisitor2& visitor : sensor.overlaps )
     {
-        pendingSensorEndEvents_.push_back(
-            {
-                sensorShapeId,
-                {
-                    visitor.shapeIndex + 1,
-                    visitor.generation,
-                    worldToken_
-                }
-            }
-        );
+        pendingSensorEndEvents_.push_back( { sensorShapeId, { visitor.shapeIndex + 1, visitor.generation, worldToken_ } } );
     }
 
-    const std::int32_t lastSensorIndex =
-        static_cast<std::int32_t>(
-            sensors_.size() - 1
-        );
+    const std::int32_t lastSensorIndex = static_cast<std::int32_t>( sensors_.size() - 1 );
 
-    if( sensorIndex !=
-        lastSensorIndex )
+    if( sensorIndex != lastSensorIndex )
     {
-        sensors_[sensorIndex] =
-            std::move(
-                sensors_[lastSensorIndex]
-            );
+        sensors_[sensorIndex] = std::move( sensors_[lastSensorIndex] );
 
-        const std::int32_t movedShapeIndex =
-            sensors_[sensorIndex]
-                .shapeIndex;
+        const std::int32_t movedShapeIndex = sensors_[sensorIndex].shapeIndex;
 
         assert( movedShapeIndex >= 0 );
-        assert(
-            static_cast<std::size_t>(
-                movedShapeIndex
-            ) <
-            shapes_.size()
-        );
+        assert( static_cast<std::size_t>( movedShapeIndex ) < shapes_.size() );
 
-        shapes_[movedShapeIndex]
-            .sensorIndex =
-            sensorIndex;
+        shapes_[movedShapeIndex].sensorIndex = sensorIndex;
     }
 
     sensors_.pop_back();
 
-    sensorShape.sensorIndex =
-        shape::NULL_INDEX;
+    sensorShape.sensorIndex = shape::NULL_INDEX;
 }
 
-#pragma endregion
+#pragma endregion SensorUpdate
 
 #pragma region SleepAndWake
 
@@ -3466,40 +2917,26 @@ void world::WakeBodyByIndex( std::int32_t bodyIndex )
     assert( bodyIndex >= 0 );
     assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
 
-    const body& startBody =
-        bodies_[bodyIndex];
+    const body& startBody = bodies_[bodyIndex];
 
-    if( startBody.bodyId == body::NULL_INDEX )
-    {
-        return;
-    }
+    if( startBody.bodyId == body::NULL_INDEX ) return;
 
-    std::vector<std::uint8_t> visited(
-        bodies_.size(),
-        0
-    );
+    std::vector<std::uint8_t> visited( bodies_.size(), 0 );
 
     std::vector<std::int32_t> stack;
 
-    const auto pushBody =
-        [&]( std::int32_t candidateId )
-        {
-            assert( candidateId >= 0 );
-            assert( static_cast<std::size_t>( candidateId ) < bodies_.size() );
+    const auto pushBody = [&]( std::int32_t candidateId )
+    {
+        assert( candidateId >= 0 );
+        assert( static_cast<std::size_t>( candidateId ) < bodies_.size() );
 
-            const body& candidate =
-                bodies_[candidateId];
+        const body& candidate = bodies_[candidateId];
 
-            if( candidate.bodyId == body::NULL_INDEX ||
-                candidate.type == bodyType::Static ||
-                visited[candidateId] != 0 )
-            {
-                return;
-            }
+        if( candidate.bodyId == body::NULL_INDEX || candidate.type == bodyType::Static || visited[candidateId] != 0 ) return;
 
-            visited[candidateId] = 1;
-            stack.push_back( candidateId );
-        };
+        visited[candidateId] = 1;
+        stack.push_back( candidateId );
+    };
 
     const auto pushJointNeighbors = [&]( const body& endpoint )
     {
@@ -3512,39 +2949,28 @@ void world::WakeBodyByIndex( std::int32_t bodyIndex )
     if( startBody.type == bodyType::Static )
     {
         pushJointNeighbors( startBody );
-        std::int32_t contactKey =
-            startBody.headContactKey;
+        std::int32_t contactKey = startBody.headContactKey;
 
         while( contactKey != body::NULL_INDEX )
         {
-            const std::int32_t contactId =
-                GetContactId( contactKey );
+            const std::int32_t contactId = GetContactId( contactKey );
 
-            const std::int32_t edgeIndex =
-                GetContactEdgeIndex( contactKey );
+            const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
 
             assert( contactId >= 0 );
             assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
 
-            const contact2& contact =
-                contacts_[contactId];
+            const contact2& contact = contacts_[contactId];
 
             assert( contact.contactId == contactId );
 
-            contactKey =
-                contact.edges[edgeIndex].nextKey;
+            contactKey = contact.edges[edgeIndex].nextKey;
 
-            const contactSim2& contactSim =
-                contactSims_[contactId];
+            const contactSim2& contactSim = contactSims_[contactId];
 
-            if( contactSim.manifold.pointCount == 0 )
-            {
-                continue;
-            }
+            if( contactSim.manifold.pointCount == 0 ) continue;
 
-            pushBody(
-                contact.edges[edgeIndex ^ 1].bodyId
-            );
+            pushBody( contact.edges[edgeIndex ^ 1].bodyId );
         }
     }
     else
@@ -3554,51 +2980,38 @@ void world::WakeBodyByIndex( std::int32_t bodyIndex )
 
     while( !stack.empty() )
     {
-        const std::int32_t currentBodyId =
-            stack.back();
+        const std::int32_t currentBodyId = stack.back();
 
         stack.pop_back();
 
-        body& currentBody =
-            bodies_[currentBodyId];
+        body& currentBody = bodies_[currentBodyId];
 
         currentBody.awake = true;
         currentBody.sleepTime = 0.0f;
         pushJointNeighbors( currentBody );
 
-        std::int32_t contactKey =
-            currentBody.headContactKey;
+        std::int32_t contactKey = currentBody.headContactKey;
 
         while( contactKey != body::NULL_INDEX )
         {
-            const std::int32_t contactId =
-                GetContactId( contactKey );
+            const std::int32_t contactId = GetContactId( contactKey );
 
-            const std::int32_t edgeIndex =
-                GetContactEdgeIndex( contactKey );
+            const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
 
             assert( contactId >= 0 );
             assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
 
-            const contact2& contact =
-                contacts_[contactId];
+            const contact2& contact = contacts_[contactId];
 
             assert( contact.contactId == contactId );
 
-            contactKey =
-                contact.edges[edgeIndex].nextKey;
+            contactKey = contact.edges[edgeIndex].nextKey;
 
-            const contactSim2& contactSim =
-                contactSims_[contactId];
+            const contactSim2& contactSim = contactSims_[contactId];
 
-            if( contactSim.manifold.pointCount == 0 )
-            {
-                continue;
-            }
+            if( contactSim.manifold.pointCount == 0 ) continue;
 
-            pushBody(
-                contact.edges[edgeIndex ^ 1].bodyId
-            );
+            pushBody( contact.edges[edgeIndex ^ 1].bodyId );
         }
     }
 }
@@ -3608,19 +3021,11 @@ void world::SleepBodyByIndex( std::int32_t bodyIndex )
     assert( bodyIndex >= 0 );
     assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
 
-    const body& startBody =
-        bodies_[bodyIndex];
+    const body& startBody = bodies_[bodyIndex];
 
-    if( startBody.bodyId == body::NULL_INDEX ||
-        startBody.type == bodyType::Static )
-    {
-        return;
-    }
+    if( startBody.bodyId == body::NULL_INDEX || startBody.type == bodyType::Static ) return;
 
-    std::vector<std::uint8_t> visited(
-        bodies_.size(),
-        0
-    );
+    std::vector<std::uint8_t> visited( bodies_.size(), 0 );
 
     std::vector<std::int32_t> stack;
     std::vector<std::int32_t> connectedBodies;
@@ -3630,17 +3035,13 @@ void world::SleepBodyByIndex( std::int32_t bodyIndex )
 
     while( !stack.empty() )
     {
-        const std::int32_t currentBodyId =
-            stack.back();
+        const std::int32_t currentBodyId = stack.back();
 
         stack.pop_back();
 
-        connectedBodies.push_back(
-            currentBodyId
-        );
+        connectedBodies.push_back( currentBodyId );
 
-        const body& currentBody =
-            bodies_[currentBodyId];
+        const body& currentBody = bodies_[currentBodyId];
 
         for( std::int32_t key = currentBody.headJointKey; key != -1; key = joints_[key >> 1].edges[key & 1].nextKey )
         {
@@ -3652,59 +3053,42 @@ void world::SleepBodyByIndex( std::int32_t bodyIndex )
             }
         }
 
-        std::int32_t contactKey =
-            currentBody.headContactKey;
+        std::int32_t contactKey = currentBody.headContactKey;
 
         while( contactKey != body::NULL_INDEX )
         {
-            const std::int32_t contactId =
-                GetContactId( contactKey );
+            const std::int32_t contactId = GetContactId( contactKey );
 
-            const std::int32_t edgeIndex =
-                GetContactEdgeIndex( contactKey );
+            const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
 
             assert( contactId >= 0 );
             assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
 
-            const contact2& contact =
-                contacts_[contactId];
+            const contact2& contact = contacts_[contactId];
 
-            contactKey =
-                contact.edges[edgeIndex].nextKey;
+            contactKey = contact.edges[edgeIndex].nextKey;
 
-            const contactSim2& contactSim =
-                contactSims_[contactId];
+            const contactSim2& contactSim = contactSims_[contactId];
 
-            if( contactSim.manifold.pointCount == 0 )
-            {
-                continue;
-            }
+            if( contactSim.manifold.pointCount == 0 ) continue;
 
-            const std::int32_t otherBodyId =
-                contact.edges[edgeIndex ^ 1].bodyId;
+            const std::int32_t otherBodyId = contact.edges[edgeIndex ^ 1].bodyId;
 
             assert( otherBodyId >= 0 );
             assert( static_cast<std::size_t>( otherBodyId ) < bodies_.size() );
 
-            const body& otherBody =
-                bodies_[otherBodyId];
+            const body& otherBody = bodies_[otherBodyId];
 
-            if( otherBody.type == bodyType::Static ||
-                visited[otherBodyId] != 0 )
-            {
-                continue;
-            }
+            if( otherBody.type == bodyType::Static || visited[otherBodyId] != 0 ) continue;
 
             visited[otherBodyId] = 1;
             stack.push_back( otherBodyId );
         }
     }
 
-    for( const std::int32_t connectedBodyId :
-         connectedBodies )
+    for( const std::int32_t connectedBodyId : connectedBodies )
     {
-        body& connectedBody =
-            bodies_[connectedBodyId];
+        body& connectedBody = bodies_[connectedBodyId];
 
         connectedBody.awake = false;
         connectedBody.sleepTime = 0.0f;
@@ -3718,52 +3102,31 @@ void world::SleepBodyByIndex( std::int32_t bodyIndex )
 
 void world::wakeSleepingBodiesFromConstraints()
 {
-    for( const contactSim2& contactSim :
-         contactSims_ )
+    for( const contactSim2& contactSim : contactSims_ )
     {
-        if( contactSim.contactId == contactSim2::NULL_INDEX ||
-            contactSim.manifold.pointCount == 0 )
+        if( contactSim.contactId == contactSim2::NULL_INDEX || contactSim.manifold.pointCount == 0 ) continue;
+
+        body& bodyA = bodies_[contactSim.bodyIdA];
+
+        body& bodyB = bodies_[contactSim.bodyIdB];
+
+        const bool bodyAAwake = bodyA.type != bodyType::Static && bodyA.awake;
+
+        const bool bodyBAwake = bodyB.type != bodyType::Static && bodyB.awake;
+
+        if( bodyAAwake && bodyB.type != bodyType::Static && !bodyB.awake )
         {
-            continue;
+            WakeBodyByIndex( contactSim.bodyIdB );
         }
-
-        body& bodyA =
-            bodies_[contactSim.bodyIdA];
-
-        body& bodyB =
-            bodies_[contactSim.bodyIdB];
-
-        const bool bodyAAwake =
-            bodyA.type != bodyType::Static &&
-            bodyA.awake;
-
-        const bool bodyBAwake =
-            bodyB.type != bodyType::Static &&
-            bodyB.awake;
-
-        if( bodyAAwake &&
-            bodyB.type != bodyType::Static &&
-            !bodyB.awake )
+        else if( bodyBAwake && bodyA.type != bodyType::Static && !bodyA.awake )
         {
-            WakeBodyByIndex(
-                contactSim.bodyIdB
-            );
-        }
-        else if( bodyBAwake &&
-                 bodyA.type != bodyType::Static &&
-                 !bodyA.awake )
-        {
-            WakeBodyByIndex(
-                contactSim.bodyIdA
-            );
+            WakeBodyByIndex( contactSim.bodyIdA );
         }
     }
     for( const joint2& joint : joints_ )
     {
-        if( joint.jointId == -1 )
-        {
-            continue;
-        }
+        if( joint.jointId == -1 ) continue;
+
         const body& a = bodies_[joint.edges[0].bodyId];
         const body& b = bodies_[joint.edges[1].bodyId];
         if( a.type != bodyType::Static && b.type != bodyType::Static && a.awake != b.awake )
@@ -3773,35 +3136,22 @@ void world::wakeSleepingBodiesFromConstraints()
     }
 }
 
-void world::UpdateIslandSleepStates(
-    const islandGraph2& islandGraph,
-    float timeStep )
+void world::UpdateIslandSleepStates( const islandGraph2& islandGraph, float timeStep )
 {
     assert( std::isfinite( timeStep ) );
     assert( timeStep > 0.0f );
 
-    if( !sleepingEnabled_ )
-    {
-        return;
-    }
+    if( !sleepingEnabled_ ) return;
 
-    for( const island2& island :
-         islandGraph.islands )
+    for( const island2& island : islandGraph.islands )
     {
-        const std::span<const std::int32_t> bodyIds =
-            std::span<const std::int32_t>{ islandGraph.bodyIds }
-                .subspan(
-                    island.bodyStart,
-                    island.bodyCount
-                );
+        const std::span<const std::int32_t> bodyIds = std::span<const std::int32_t>{ islandGraph.bodyIds }.subspan( island.bodyStart, island.bodyCount );
 
         bool canSleep = true;
 
-        for( const std::int32_t bodyId :
-             bodyIds )
+        for( const std::int32_t bodyId : bodyIds )
         {
-            body& body =
-                bodies_[bodyId];
+            body& body = bodies_[bodyId];
 
             assert( body.awake );
             assert( body.type != bodyType::Static );
@@ -3813,18 +3163,14 @@ void world::UpdateIslandSleepStates(
                 continue;
             }
 
-            const bodyState& state =
-                bodyStates_[bodyId];
+            const bodyState& state = bodyStates_[bodyId];
 
-            const bodySim& sim =
-                bodySims_[bodyId];
+            const bodySim& sim = bodySims_[bodyId];
 
             // 가장 먼 점의 속도와 이번 step의 position correction을 함께 확인함.
-            const float velocitySpeed =
-                Length( state.linearVelocity ) + std::fabs( state.angularVelocity ) * sim.maxExtent;
+            const float velocitySpeed = Length( state.linearVelocity ) + std::fabs( state.angularVelocity ) * sim.maxExtent;
 
-            const float deltaDistance =
-                Length( state.deltaPosition ) + std::fabs( state.deltaRotation.s ) * sim.maxExtent;
+            const float deltaDistance = Length( state.deltaPosition ) + std::fabs( state.deltaRotation.s ) * sim.maxExtent;
 
             const float correctionSpeed = 0.5f * deltaDistance / timeStep;
             const float motionSpeed = std::max( velocitySpeed, correctionSpeed );
@@ -3844,16 +3190,11 @@ void world::UpdateIslandSleepStates(
             }
         }
 
-        if( !canSleep )
-        {
-            continue;
-        }
+        if( !canSleep ) continue;
 
-        for( const std::int32_t bodyId :
-             bodyIds )
+        for( const std::int32_t bodyId : bodyIds )
         {
-            body& body =
-                bodies_[bodyId];
+            body& body = bodies_[bodyId];
 
             body.awake = false;
             body.sleepTime = 0.0f;
@@ -3866,58 +3207,34 @@ void world::UpdateIslandSleepStates(
     }
 }
 
-#pragma endregion
+#pragma endregion SleepAndWake
 
 #pragma region ContinuousCollision
 
-void world::SolveContinuousBody(
-    std::int32_t bodyIndex,
-    float timeStep )
+void world::SolveContinuousBody( std::int32_t bodyIndex, float timeStep )
 {
     assert( bodyIndex >= 0 );
     assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
     assert( std::isfinite( timeStep ) );
     assert( timeStep > 0.0f );
 
-    const body& fastBody =
-        bodies_[bodyIndex];
+    const body& fastBody = bodies_[bodyIndex];
 
-    bodySim& fastSim =
-        bodySims_[bodyIndex];
+    bodySim& fastSim = bodySims_[bodyIndex];
 
-    bodyState& fastState =
-        bodyStates_[bodyIndex];
+    bodyState& fastState = bodyStates_[bodyIndex];
 
     assert( fastBody.bodyId == bodyIndex );
     assert( fastBody.type == bodyType::Dynamic );
     assert( fastSim.bodyId == bodyIndex );
     assert( fastSim.isFast );
 
-    const sweep2 fastSweep
-    {
-        fastSim.localCenter,
-        fastSim.center,
-        fastSim.center + fastState.deltaPosition,
-        fastSim.transform.rotation,
-        fastState.deltaRotation * fastSim.transform.rotation
-    };
+    const sweep2 fastSweep{ fastSim.localCenter, fastSim.center, fastSim.center + fastState.deltaPosition, fastSim.transform.rotation, fastState.deltaRotation * fastSim.transform.rotation };
 
     // 회전 중 어느 방향을 향하더라도 body 전체가 들어오는 보수적인 swept bounds.
-    const float sweepRadius =
-        fastSim.maxExtent +
-        SPECULATIVE_DISTANCE;
+    const float sweepRadius = fastSim.maxExtent + SPECULATIVE_DISTANCE;
 
-    const aabb2 sweptAABB
-    {
-        {
-            std::min( fastSweep.c1.x, fastSweep.c2.x ) - sweepRadius,
-            std::min( fastSweep.c1.y, fastSweep.c2.y ) - sweepRadius
-        },
-        {
-            std::max( fastSweep.c1.x, fastSweep.c2.x ) + sweepRadius,
-            std::max( fastSweep.c1.y, fastSweep.c2.y ) + sweepRadius
-        }
-    };
+    const aabb2 sweptAABB{ { std::min( fastSweep.c1.x, fastSweep.c2.x ) - sweepRadius, std::min( fastSweep.c1.y, fastSweep.c2.y ) - sweepRadius }, { std::max( fastSweep.c1.x, fastSweep.c2.x ) + sweepRadius, std::max( fastSweep.c1.y, fastSweep.c2.y ) + sweepRadius } };
 
     float hitFraction = 1.0f;
 
@@ -3929,311 +3246,161 @@ void world::SolveContinuousBody(
     };
 
     std::vector<continuousSensorHit2> sensorHits;
-    sensorHits.reserve(
-        MAX_CONTINUOUS_SENSOR_HITS
-    );
+    sensorHits.reserve( MAX_CONTINUOUS_SENSOR_HITS );
 
-    const auto testCandidate =
-        [&]( std::int32_t fastShapeIndex,
-             std::int32_t otherShapeIndex )
+    const auto testCandidate = [&]( std::int32_t fastShapeIndex, std::int32_t otherShapeIndex )
+    {
+        assert( fastShapeIndex >= 0 );
+        assert( otherShapeIndex >= 0 );
+        assert( static_cast<std::size_t>( fastShapeIndex ) < shapes_.size() );
+        assert( static_cast<std::size_t>( otherShapeIndex ) < shapes_.size() );
+
+        if( fastShapeIndex == otherShapeIndex ) return;
+
+        const shape& fastShape = shapes_[fastShapeIndex];
+
+        const shape& otherShape = shapes_[otherShapeIndex];
+
+        if( otherShape.bodyId == shape::NULL_INDEX || otherShape.bodyId == bodyIndex ) return;
+
+        if( !shouldShapeFiltersCollide( fastShape.filter, otherShape.filter ) ) return;
+
+        // Box2D continuous candidate는 sensor도 Body/Joint filter를 통과해야 함.
+        // Discrete sensor overlap은 UpdateSensors의 shape filter만 사용함.
+        if( !shouldBodiesCollide( bodyIndex, otherShape.bodyId ) ) return;
+
+        const bool isSensor = otherShape.sensorIndex != shape::NULL_INDEX;
+
+        if( isSensor && ( !otherShape.enableSensorEvents || !fastShape.enableSensorEvents ) ) return;
+
+        if( !isSensor && !CanCollideShapes( fastShape.geometry, otherShape.geometry ) ) return;
+
+        const body& otherBody = bodies_[otherShape.bodyId];
+
+        const bodySim& otherSim = bodySims_[otherShape.bodyId];
+
+        if( fastSim.isBullet && otherSim.isBullet ) return;
+
+        const bodyState& otherState = bodyStates_[otherShape.bodyId];
+
+        const bool otherMoves = otherBody.type != bodyType::Static;
+
+        const sweep2 otherSweep{ otherSim.localCenter, otherSim.center, otherSim.center + ( otherMoves ? otherState.deltaPosition : vec2{} ), otherSim.transform.rotation, otherMoves ? otherState.deltaRotation * otherSim.transform.rotation : otherSim.transform.rotation };
+
+        toiInput2 input{};
+        input.proxyA = MakeShapeProxy( otherShape.geometry );
+
+        input.proxyB = MakeShapeProxy( fastShape.geometry );
+
+        input.sweepA = otherSweep;
+        input.sweepB = fastSweep;
+        input.maxFraction = hitFraction;
+
+        const toiOutput2 output = TimeOfImpact( input );
+
+        if( isSensor )
         {
-            assert( fastShapeIndex >= 0 );
-            assert( otherShapeIndex >= 0 );
-            assert( static_cast<std::size_t>( fastShapeIndex ) < shapes_.size() );
-            assert( static_cast<std::size_t>( otherShapeIndex ) < shapes_.size() );
-
-            if( fastShapeIndex == otherShapeIndex )
+            // Sensor는 fast body의 motion을 자르지 않음.
+            // 현재 solid TOI보다 앞선 crossing 후보만 작은 fixed budget 안에서 보관함.
+            if( output.fraction <= hitFraction && sensorHits.size() < static_cast<std::size_t>( MAX_CONTINUOUS_SENSOR_HITS ) )
             {
-                return;
+                sensorHits.push_back( { otherShapeIndex, { fastShapeIndex, fastShape.generation }, output.fraction } );
             }
 
-            const shape& fastShape =
-                shapes_[fastShapeIndex];
+            return;
+        }
 
-            const shape& otherShape =
-                shapes_[otherShapeIndex];
+        // fraction 0은 이미 존재하던 overlap / touching Contact가 처리함.
+        if( output.state == toiState2::Hit && output.fraction > 0.0f && output.fraction < hitFraction )
+        {
+            hitFraction = output.fraction;
+        }
+    };
 
-            if( otherShape.bodyId == shape::NULL_INDEX ||
-                otherShape.bodyId == bodyIndex )
-            {
-                return;
-            }
-
-            if( !shouldShapeFiltersCollide(
-                    fastShape.filter,
-                    otherShape.filter ) )
-            {
-                return;
-            }
-
-            // Box2D continuous candidate는 sensor도 Body/Joint filter를 통과해야 함.
-            // Discrete sensor overlap은 UpdateSensors의 shape filter만 사용함.
-            if( !shouldBodiesCollide( bodyIndex, otherShape.bodyId ) ) { return; }
-
-            const bool isSensor =
-                otherShape.sensorIndex !=
-                shape::NULL_INDEX;
-
-            if( isSensor &&
-                (
-                    !otherShape.enableSensorEvents ||
-                    !fastShape.enableSensorEvents
-                ) )
-            {
-                return;
-            }
-
-            if( !isSensor &&
-                !CanCollideShapes(
-                    fastShape.geometry,
-                    otherShape.geometry ) )
-            {
-                return;
-            }
-
-            const body& otherBody =
-                bodies_[otherShape.bodyId];
-
-            const bodySim& otherSim =
-                bodySims_[otherShape.bodyId];
-
-            if( fastSim.isBullet &&
-                otherSim.isBullet )
-            {
-                return;
-            }
-
-            const bodyState& otherState =
-                bodyStates_[otherShape.bodyId];
-
-            const bool otherMoves =
-                otherBody.type != bodyType::Static;
-
-            const sweep2 otherSweep
-            {
-                otherSim.localCenter,
-                otherSim.center,
-                otherSim.center +
-                    ( otherMoves ?
-                        otherState.deltaPosition :
-                        vec2{} ),
-                otherSim.transform.rotation,
-                otherMoves ?
-                    otherState.deltaRotation *
-                        otherSim.transform.rotation :
-                    otherSim.transform.rotation
-            };
-
-            toiInput2 input{};
-            input.proxyA =
-                MakeShapeProxy(
-                    otherShape.geometry
-                );
-
-            input.proxyB =
-                MakeShapeProxy(
-                    fastShape.geometry
-                );
-
-            input.sweepA = otherSweep;
-            input.sweepB = fastSweep;
-            input.maxFraction = hitFraction;
-
-            const toiOutput2 output =
-                TimeOfImpact( input );
-
-            if( isSensor )
-            {
-                // Sensor는 fast body의 motion을 자르지 않음.
-                // 현재 solid TOI보다 앞선 crossing 후보만 작은 fixed budget 안에서 보관함.
-                if( output.fraction <= hitFraction &&
-                    sensorHits.size() <
-                        static_cast<std::size_t>(
-                            MAX_CONTINUOUS_SENSOR_HITS
-                        ) )
-                {
-                    sensorHits.push_back(
-                        {
-                            otherShapeIndex,
-                            {
-                                fastShapeIndex,
-                                fastShape.generation
-                            },
-                            output.fraction
-                        }
-                    );
-                }
-
-                return;
-            }
-
-            // fraction 0은 이미 존재하던 overlap / touching Contact가 처리함.
-            if( output.state == toiState2::Hit &&
-                output.fraction > 0.0f &&
-                output.fraction < hitFraction )
-            {
-                hitFraction =
-                    output.fraction;
-            }
-        };
-
-    std::int32_t fastShapeIndex =
-        fastBody.headShapeId;
+    std::int32_t fastShapeIndex = fastBody.headShapeId;
 
     while( fastShapeIndex != body::NULL_INDEX )
     {
-        const shape& fastShape =
-            shapes_[fastShapeIndex];
+        const shape& fastShape = shapes_[fastShapeIndex];
 
-        const std::int32_t nextShapeIndex =
-            fastShape.nextShapeId;
+        const std::int32_t nextShapeIndex = fastShape.nextShapeId;
 
         if( fastShape.sensorIndex == shape::NULL_INDEX )
         {
             // 일반 fast body와 bullet 모두 static tree는 broad-phase query로 좁힘.
-            const dynamicTree& staticTree =
-                broadPhase_.GetTree(
-                    bodyType::Static
-                );
+            const dynamicTree& staticTree = broadPhase_.GetTree( bodyType::Static );
 
-            staticTree.Query(
-                sweptAABB,
+            staticTree.Query( sweptAABB,
                 [&]( std::int32_t proxyId )
                 {
-                    testCandidate(
-                        fastShapeIndex,
-                        staticTree.GetProxyShapeIndex(
-                            proxyId
-                        )
-                    );
+                    testCandidate( fastShapeIndex, staticTree.GetProxyShapeIndex( proxyId ) );
 
                     return true;
-                }
-            );
+                } );
 
             if( fastSim.isBullet )
             {
-                const auto queryMovingTree =
-                    [&]( bodyType type )
-                    {
-                        const dynamicTree& tree =
-                            broadPhase_.GetTree(
-                                type
-                            );
+                const auto queryMovingTree = [&]( bodyType type )
+                {
+                    const dynamicTree& tree = broadPhase_.GetTree( type );
 
-                        tree.Query(
-                            sweptAABB,
-                            [&]( std::int32_t proxyId )
-                            {
-                                testCandidate(
-                                    fastShapeIndex,
-                                    tree.GetProxyShapeIndex(
-                                        proxyId
-                                    )
-                                );
+                    tree.Query( sweptAABB,
+                        [&]( std::int32_t proxyId )
+                        {
+                            testCandidate( fastShapeIndex, tree.GetProxyShapeIndex( proxyId ) );
 
-                                return true;
-                            }
-                        );
-                    };
+                            return true;
+                        } );
+                };
 
-                queryMovingTree(
-                    bodyType::Kinematic
-                );
+                queryMovingTree( bodyType::Kinematic );
 
-                queryMovingTree(
-                    bodyType::Dynamic
-                );
+                queryMovingTree( bodyType::Dynamic );
             }
         }
 
-        fastShapeIndex =
-            nextShapeIndex;
+        fastShapeIndex = nextShapeIndex;
     }
 
     // 최종 solid hit보다 먼저 지나간 Sensor만 publish함.
     // solid 충돌 뒤쪽의 Sensor는 실제 body가 거기까지 도달하지 않으므로 버림.
-    for( const continuousSensorHit2& sensorHit :
-         sensorHits )
+    for( const continuousSensorHit2& sensorHit : sensorHits )
     {
-        if( sensorHit.fraction >=
-            hitFraction )
-        {
-            continue;
-        }
+        if( sensorHit.fraction >= hitFraction ) continue;
 
         assert( sensorHit.sensorShapeIndex >= 0 );
-        assert(
-            static_cast<std::size_t>(
-                sensorHit.sensorShapeIndex
-            ) <
-            shapes_.size()
-        );
+        assert( static_cast<std::size_t>( sensorHit.sensorShapeIndex ) < shapes_.size() );
 
-        const shape& sensorShape =
-            shapes_[sensorHit.sensorShapeIndex];
+        const shape& sensorShape = shapes_[sensorHit.sensorShapeIndex];
 
-        assert(
-            sensorShape.sensorIndex !=
-            shape::NULL_INDEX
-        );
+        assert( sensorShape.sensorIndex != shape::NULL_INDEX );
 
         assert( sensorShape.sensorIndex >= 0 );
-        assert(
-            static_cast<std::size_t>(
-                sensorShape.sensorIndex
-            ) <
-            sensors_.size()
-        );
+        assert( static_cast<std::size_t>( sensorShape.sensorIndex ) < sensors_.size() );
 
-        sensors_[sensorShape.sensorIndex]
-            .hits.push_back(
-                sensorHit.visitor
-            );
+        sensors_[sensorShape.sensorIndex].hits.push_back( sensorHit.visitor );
     }
 
-    if( hitFraction >= 1.0f )
-    {
-        return;
-    }
+    if( hitFraction >= 1.0f ) return;
 
-    const transform2 clippedTransform =
-        GetSweepTransform(
-            fastSweep,
-            hitFraction
-        );
+    const transform2 clippedTransform = GetSweepTransform( fastSweep, hitFraction );
 
-    const vec2 clippedCenter =
-        fastSweep.c1 *
-            ( 1.0f - hitFraction ) +
-        fastSweep.c2 *
-            hitFraction;
+    const vec2 clippedCenter = fastSweep.c1 * ( 1.0f - hitFraction ) + fastSweep.c2 * hitFraction;
 
-    fastState.deltaPosition =
-        clippedCenter -
-        fastSim.center;
+    fastState.deltaPosition = clippedCenter - fastSim.center;
 
-    fastState.deltaRotation =
-        clippedTransform.rotation *
-        Inverse(
-            fastSim.transform.rotation
-        );
+    fastState.deltaRotation = clippedTransform.rotation * Inverse( fastSim.transform.rotation );
 
     fastSim.hadTimeOfImpact = true;
 
     // 이동 시간을 잃은 만큼 이번 Step에서 미리 더해졌던 gravity 성분을 되돌림.
     // Box2D와 같이 다른 force / torque의 time loss는 아직 보정하지 않음.
-    const float timeLoss =
-        ( 1.0f - hitFraction ) *
-        timeStep;
+    const float timeLoss = ( 1.0f - hitFraction ) * timeStep;
 
-    fastState.linearVelocity -=
-        gravity_ *
-        fastSim.gravityScale *
-        timeLoss;
+    fastState.linearVelocity -= gravity_ * fastSim.gravityScale * timeLoss;
 }
 
-#pragma endregion
+#pragma endregion ContinuousCollision
 
 #pragma region ContactUpdate
 
@@ -4242,10 +3409,7 @@ bool world::updateExistingContact( std::int32_t contactId )
     contact2& contact = contacts_[contactId];
 
     // free-list slot에는 이번 update에서 갱신하거나 알릴 Contact가 없음.
-    if( contact.contactId == contact2::NULL_INDEX )
-    {
-        return false;
-    }
+    if( contact.contactId == contact2::NULL_INDEX ) return false;
 
     assert( contact.contactId == contactId );
     assert( contact.shapeIdA >= 0 );
@@ -4255,6 +3419,7 @@ bool world::updateExistingContact( std::int32_t contactId )
 
     const shape& shapeA = shapes_[contact.shapeIdA];
     const shape& shapeB = shapes_[contact.shapeIdB];
+
     assert( shapeA.proxyKey != shape::NULL_INDEX );
     assert( shapeB.proxyKey != shape::NULL_INDEX );
     assert( fatAABBs_.size() == shapes_.size() );
@@ -4263,6 +3428,7 @@ bool world::updateExistingContact( std::int32_t contactId )
     if( !Overlaps( fatAABBs_[contact.shapeIdA], fatAABBs_[contact.shapeIdB] ) )
     {
         DestroyContact( contactId );
+
         return false;
     }
 
@@ -4273,6 +3439,7 @@ bool world::updateExistingContact( std::int32_t contactId )
 
     const bodySim& bodySimA = bodySims_[shapeA.bodyId];
     const bodySim& bodySimB = bodySims_[shapeB.bodyId];
+
     assert( bodySimA.bodyId == shapeA.bodyId );
     assert( bodySimB.bodyId == shapeB.bodyId );
 
@@ -4295,29 +3462,26 @@ std::int32_t world::createContactForPair( std::int32_t shapeIdA, std::int32_t sh
 
     const shape& shapeA = shapes_[shapeIdA];
     const shape& shapeB = shapes_[shapeIdB];
+
     assert( shapeA.bodyId >= 0 );
     assert( shapeB.bodyId >= 0 );
     assert( static_cast<std::size_t>( shapeA.bodyId ) < bodies_.size() );
     assert( static_cast<std::size_t>( shapeB.bodyId ) < bodies_.size() );
 
-    if( !shouldShapeFiltersCollide( shapeA.filter, shapeB.filter ) || !shouldBodiesCollide( shapeA.bodyId, shapeB.bodyId ) || !CanCollideShapes( shapeA.geometry, shapeB.geometry ) )
-    {
-        return contact2::NULL_INDEX;
-    }
+    if( !shouldShapeFiltersCollide( shapeA.filter, shapeB.filter ) || !shouldBodiesCollide( shapeA.bodyId, shapeB.bodyId ) || !CanCollideShapes( shapeA.geometry, shapeB.geometry ) ) return contact2::NULL_INDEX;
 
     const bodySim& bodySimA = bodySims_[shapeA.bodyId];
     const bodySim& bodySimB = bodySims_[shapeB.bodyId];
+
     assert( bodySimA.bodyId == shapeA.bodyId );
     assert( bodySimB.bodyId == shapeB.bodyId );
 
     const localManifold2 manifold = CollideShapes( shapeA.geometry, bodySimA.transform, shapeB.geometry, bodySimB.transform );
+
     return CreateContact( shapeIdA, shapeIdB, manifold );
 }
 
-std::int32_t world::CreateContact(
-    std::int32_t shapeIdA,
-    std::int32_t shapeIdB,
-    const localManifold2& manifold )
+std::int32_t world::CreateContact( std::int32_t shapeIdA, std::int32_t shapeIdB, const localManifold2& manifold )
 {
     assert( shapeIdA >= 0 );
     assert( shapeIdB >= 0 );
@@ -4335,21 +3499,16 @@ std::int32_t world::CreateContact(
         assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
 
         contact2& freeContact = contacts_[contactId];
+
         assert( freeContact.contactId == contact2::NULL_INDEX );
         assert( contactSims_.size() == contacts_.size() );
-        assert(
-            contactSims_[contactId].contactId ==
-            contactSim2::NULL_INDEX
-        );
+        assert( contactSims_[contactId].contactId == contactSim2::NULL_INDEX );
 
         contactFreeList_ = freeContact.nextFreeId;
     }
     else
     {
-        assert(
-            contacts_.size() <
-            static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() )
-        );
+        assert( contacts_.size() < static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() ) );
 
         contactId = static_cast<std::int32_t>( contacts_.size() );
         contacts_.push_back( {} );
@@ -4366,11 +3525,9 @@ std::int32_t world::CreateContact(
     contact.shapeIdA = shapeIdA;
     contact.shapeIdB = shapeIdB;
 
-    const shape& shapeA =
-        shapes_[shapeIdA];
+    const shape& shapeA = shapes_[shapeIdA];
 
-    const shape& shapeB =
-        shapes_[shapeIdB];
+    const shape& shapeB = shapes_[shapeIdB];
 
     assert( shapeA.bodyId >= 0 );
     assert( shapeB.bodyId >= 0 );
@@ -4379,9 +3536,7 @@ std::int32_t world::CreateContact(
 
     // 최신 Box2D처럼 Contact가 만들어질 때 두 body의 설정을 snapshot함.
     // 이후 body 설정을 바꿔도 기존 Contact에는 영향을 주지 않음.
-    contact.enableRecycling =
-        bodySims_[shapeA.bodyId].enableContactRecycling &&
-        bodySims_[shapeB.bodyId].enableContactRecycling;
+    contact.enableRecycling = bodySims_[shapeA.bodyId].enableContactRecycling && bodySims_[shapeB.bodyId].enableContactRecycling;
 
     assert( contactSims_.size() == contacts_.size() );
 
@@ -4418,6 +3573,7 @@ std::int32_t world::CreateContact(
             assert( static_cast<std::size_t>( headContactId ) < contacts_.size() );
 
             contact2& headContact = contacts_[headContactId];
+
             assert( headContact.contactId == headContactId );
 
             headContact.edges[headEdgeIndex].prevKey = contactKey;
@@ -4443,8 +3599,7 @@ std::int32_t world::CreateContact(
     return contactId;
 }
 
-bool world::TryRecycleContact(
-    std::int32_t contactId )
+bool world::TryRecycleContact( std::int32_t contactId )
 {
     // Box2D contact recycling 기준: 작은 상대 이동에서는 anchor를 유지해 jitter를 줄임.
     // https://github.com/erincatto/box2d/blob/ac7c751eaeddbabdc1c4d41ae4f3a25d78627790/src/physics_world.c#L530
@@ -4452,174 +3607,84 @@ bool world::TryRecycleContact(
     assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
     assert( contactSims_.size() == contacts_.size() );
 
-    const contact2& contact =
-        contacts_[contactId];
+    const contact2& contact = contacts_[contactId];
 
-    if( !contact.enableRecycling ||
-        contactRecycleDistance_ <= 0.0f )
-    {
-        return false;
-    }
+    if( !contact.enableRecycling || contactRecycleDistance_ <= 0.0f ) return false;
 
-    contactSim2& contactSim =
-        contactSims_[contactId];
+    contactSim2& contactSim = contactSims_[contactId];
 
-    if( !contactSim.recycleCacheValid )
-    {
-        return false;
-    }
+    if( !contactSim.recycleCacheValid ) return false;
 
     assert( contactSim.bodyIdA >= 0 );
     assert( contactSim.bodyIdB >= 0 );
     assert( static_cast<std::size_t>( contactSim.bodyIdA ) < bodySims_.size() );
     assert( static_cast<std::size_t>( contactSim.bodyIdB ) < bodySims_.size() );
 
-    const bodySim& bodySimA =
-        bodySims_[contactSim.bodyIdA];
+    const bodySim& bodySimA = bodySims_[contactSim.bodyIdA];
 
-    const bodySim& bodySimB =
-        bodySims_[contactSim.bodyIdB];
+    const bodySim& bodySimB = bodySims_[contactSim.bodyIdB];
 
     // fast body는 작은 transform 차이처럼 보여도 CCD 경로와 함께 움직일 수 있으므로
     // fresh narrowphase를 사용함.
-    if( bodySimA.isFast ||
-        bodySimB.isFast )
-    {
-        return false;
-    }
+    if( bodySimA.isFast || bodySimB.isFast ) return false;
 
-    const transform2 currentRelativeTransform =
-        InverseMul(
-            bodySimA.transform,
-            bodySimB.transform
-        );
+    const transform2 currentRelativeTransform = InverseMul( bodySimA.transform, bodySimB.transform );
 
-    const float cosA =
-        bodySimA.transform.rotation.c *
-            contactSim.cachedRotationA.c +
-        bodySimA.transform.rotation.s *
-            contactSim.cachedRotationA.s;
+    const float cosA = bodySimA.transform.rotation.c * contactSim.cachedRotationA.c + bodySimA.transform.rotation.s * contactSim.cachedRotationA.s;
 
-    const float cosB =
-        bodySimB.transform.rotation.c *
-            contactSim.cachedRotationB.c +
-        bodySimB.transform.rotation.s *
-            contactSim.cachedRotationB.s;
+    const float cosB = bodySimB.transform.rotation.c * contactSim.cachedRotationB.c + bodySimB.transform.rotation.s * contactSim.cachedRotationB.s;
 
-    if( std::min( cosA, cosB ) <=
-        CONTACT_RECYCLE_COS_ANGLE )
-    {
-        return false;
-    }
+    if( std::min( cosA, cosB ) <= CONTACT_RECYCLE_COS_ANGLE ) return false;
 
-    const vec2 relativeTranslation =
-        currentRelativeTransform.position -
-        contactSim.cachedRelativeTransform.position;
+    const vec2 relativeTranslation = currentRelativeTransform.position - contactSim.cachedRelativeTransform.position;
 
-    const rot2 relativeRotation =
-        Inverse(
-            currentRelativeTransform.rotation
-        ) *
-        contactSim.cachedRelativeTransform.rotation;
+    const rot2 relativeRotation = Inverse( currentRelativeTransform.rotation ) * contactSim.cachedRelativeTransform.rotation;
 
-    const float maxExtentA =
-        bodies_[contactSim.bodyIdA].type == bodyType::Static ?
-            0.0f :
-            bodySimA.maxExtent;
+    const float maxExtentA = bodies_[contactSim.bodyIdA].type == bodyType::Static ? 0.0f : bodySimA.maxExtent;
 
-    const float maxExtentB =
-        bodies_[contactSim.bodyIdB].type == bodyType::Static ?
-            0.0f :
-            bodySimB.maxExtent;
+    const float maxExtentB = bodies_[contactSim.bodyIdB].type == bodyType::Static ? 0.0f : bodySimB.maxExtent;
 
-    const float maxExtent =
-        std::max(
-            maxExtentA,
-            maxExtentB
-        );
+    const float maxExtent = std::max( maxExtentA, maxExtentB );
 
     // Box2D conservative advancement metric. 작은 회전에서는 sin(theta) ~= theta임.
     // cached pose는 fresh narrowphase에서만 갱신하므로 작은 이동이 반복돼도 누적 오차를 제한함.
-    const float relativeMotion =
-        Length( relativeTranslation ) +
-        maxExtent *
-        std::fabs( relativeRotation.s );
+    const float relativeMotion = Length( relativeTranslation ) + maxExtent * std::fabs( relativeRotation.s );
 
     // non-touching Contact는 새 speculative point를 놓치지 않도록 더 엄격하게 검사함.
-    const float tolerance =
-        contactSim.manifold.pointCount > 0 ?
-            contactRecycleDistance_ :
-            std::min(
-                contactRecycleDistance_,
-                SPECULATIVE_DISTANCE
-            );
+    const float tolerance = contactSim.manifold.pointCount > 0 ? contactRecycleDistance_ : std::min( contactRecycleDistance_, SPECULATIVE_DISTANCE );
 
-    if( relativeMotion >= tolerance )
-    {
-        return false;
-    }
+    if( relativeMotion >= tolerance ) return false;
 
     // mass data는 shape density 변경 등으로 Contact 수명 중에도 바뀔 수 있으므로
     // narrowphase를 건너뛰더라도 최신 값을 반영함.
-    contactSim.invMassA =
-        bodySimA.invMass;
+    contactSim.invMassA = bodySimA.invMass;
 
-    contactSim.invInertiaA =
-        bodySimA.invInertia;
+    contactSim.invInertiaA = bodySimA.invInertia;
 
-    contactSim.invMassB =
-        bodySimB.invMass;
+    contactSim.invMassB = bodySimB.invMass;
 
-    contactSim.invInertiaB =
-        bodySimB.invInertia;
+    contactSim.invInertiaB = bodySimB.invInertia;
 
-    const vec2 worldNormal =
-        TransformVector(
-            bodySimA.transform,
-            contactSim.manifold.normal
-        );
+    const vec2 worldNormal = TransformVector( bodySimA.transform, contactSim.manifold.normal );
 
-    for( int i = 0;
-         i < contactSim.manifold.pointCount;
-         ++i )
+    for( int i = 0; i < contactSim.manifold.pointCount; ++i )
     {
-        const vec2 worldPointA =
-            TransformPoint(
-                bodySimA.transform,
-                contactSim.recyclePointA[i]
-            );
+        const vec2 worldPointA = TransformPoint( bodySimA.transform, contactSim.recyclePointA[i] );
 
-        const vec2 worldPointB =
-            TransformPoint(
-                bodySimB.transform,
-                contactSim.recyclePointB[i]
-            );
+        const vec2 worldPointB = TransformPoint( bodySimB.transform, contactSim.recyclePointB[i] );
 
-        const vec2 worldPoint =
-            (
-                worldPointA +
-                worldPointB
-            ) * 0.5f;
+        const vec2 worldPoint = ( worldPointA + worldPointB ) * 0.5f;
 
-        localManifoldPoint2& point =
-            contactSim.manifold.points[i];
+        localManifoldPoint2& point = contactSim.manifold.points[i];
 
         // public/debug contact point도 현재 두 cached anchor의 중간으로 갱신함.
-        point.point =
-            InverseTransformPoint(
-                bodySimA.transform,
-                worldPoint
-            );
+        point.point = InverseTransformPoint( bodySimA.transform, worldPoint );
 
-        point.separation =
-            contactSim.recycleSeparation[i] +
-            Dot(
-                worldPointB - worldPointA,
-                worldNormal
-            );
+        point.separation = contactSim.recycleSeparation[i] + Dot( worldPointB - worldPointA, worldNormal );
     }
 
     ++recycledContactCount_;
+
     return true;
 }
 
@@ -4687,15 +3752,13 @@ void world::UpdateContactSim( std::int32_t contactId, const localManifold2& mani
     */
     for( int i = 0; i < contactSim.manifold.pointCount; ++i )
     {
-        const std::uint16_t newId =
-            contactSim.manifold.points[i].id;
+        const std::uint16_t newId = contactSim.manifold.points[i].id;
 
         for( int j = 0; j < oldManifold.pointCount; ++j )
         {
             if( oldManifold.points[j].id == newId )
             {
-                contactSim.impulses[i] =
-                    oldImpulses[j];
+                contactSim.impulses[i] = oldImpulses[j];
 
                 break;
             }
@@ -4703,51 +3766,30 @@ void world::UpdateContactSim( std::int32_t contactId, const localManifold2& mani
     }
 
     // fresh narrowphase 결과를 다음 recycling의 기준 pose / anchor로 저장함.
-    contactSim.cachedRotationA =
-        bodySimA.transform.rotation;
+    contactSim.cachedRotationA = bodySimA.transform.rotation;
 
-    contactSim.cachedRotationB =
-        bodySimB.transform.rotation;
+    contactSim.cachedRotationB = bodySimB.transform.rotation;
 
-    contactSim.cachedRelativeTransform =
-        InverseMul(
-            bodySimA.transform,
-            bodySimB.transform
-        );
+    contactSim.cachedRelativeTransform = InverseMul( bodySimA.transform, bodySimB.transform );
 
-    for( int i = 0;
-         i < contactSim.manifold.pointCount;
-         ++i )
+    for( int i = 0; i < contactSim.manifold.pointCount; ++i )
     {
-        const localManifoldPoint2& point =
-            contactSim.manifold.points[i];
+        const localManifoldPoint2& point = contactSim.manifold.points[i];
 
-        const vec2 worldPoint =
-            TransformPoint(
-                bodySimA.transform,
-                point.point
-            );
+        const vec2 worldPoint = TransformPoint( bodySimA.transform, point.point );
 
-        contactSim.recyclePointA[i] =
-            point.point;
+        contactSim.recyclePointA[i] = point.point;
 
-        contactSim.recyclePointB[i] =
-            InverseTransformPoint(
-                bodySimB.transform,
-                worldPoint
-            );
+        contactSim.recyclePointB[i] = InverseTransformPoint( bodySimB.transform, worldPoint );
 
-        contactSim.recycleSeparation[i] =
-            point.separation;
+        contactSim.recycleSeparation[i] = point.separation;
     }
 
     contactSim.recycleCacheValid = true;
 
-    const bool wasSolverActive =
-        oldManifold.pointCount > 0;
+    const bool wasSolverActive = oldManifold.pointCount > 0;
 
-    const bool isSolverActive =
-        contactSim.manifold.pointCount > 0;
+    const bool isSolverActive = contactSim.manifold.pointCount > 0;
 
     if( wasSolverActive != isSolverActive )
     {
@@ -4756,7 +3798,7 @@ void world::UpdateContactSim( std::int32_t contactId, const localManifold2& mani
     }
 }
 
-#pragma endregion
+#pragma endregion ContactUpdate
 
 #pragma region JointSolver
 
@@ -4764,17 +3806,19 @@ void world::warmStartJoints( std::span<jointConstraint> constraints )
 {
     for( const jointConstraint& value : constraints )
     {
-        std::visit( [&]( const auto& constraint )
-        {
-            if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, distanceJointConstraint2> )
+        std::visit(
+            [&]( const auto& constraint )
             {
-                warmStartDistanceJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
-            }
-            else
-            {
-                warmStartMouseJointConstraint( constraint, bodyStates_[constraint.bodyIdB] );
-            }
-        }, value );
+                if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, distanceJointConstraint2> )
+                {
+                    warmStartDistanceJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
+                }
+                else
+                {
+                    warmStartMouseJointConstraint( constraint, bodyStates_[constraint.bodyIdB] );
+                }
+            },
+            value );
     }
 }
 
@@ -4782,26 +3826,27 @@ void world::solveJoints( std::span<jointConstraint> constraints, bool useBias )
 {
     for( jointConstraint& value : constraints )
     {
-        std::visit( [&]( auto& constraint )
-        {
-            if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, distanceJointConstraint2> )
+        std::visit(
+            [&]( auto& constraint )
             {
-                solveDistanceJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB], useBias );
-            }
-            else
-            {
-                solveMouseJointConstraint( constraint, bodyStates_[constraint.bodyIdB] );
-            }
-        }, value );
+                if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, distanceJointConstraint2> )
+                {
+                    solveDistanceJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB], useBias );
+                }
+                else
+                {
+                    solveMouseJointConstraint( constraint, bodyStates_[constraint.bodyIdB] );
+                }
+            },
+            value );
     }
 }
 
-#pragma endregion
+#pragma endregion JointSolver
 
 #pragma region ContactSolver
 
-std::vector<contactConstraint2> world::PrepareContactConstraints(
-    std::span<const std::int32_t> contactIds, float timeStep )
+std::vector<contactConstraint2> world::PrepareContactConstraints( std::span<const std::int32_t> contactIds, float timeStep )
 {
     assert( std::isfinite( timeStep ) );
     assert( timeStep > 0.0f );
@@ -4821,21 +3866,11 @@ std::vector<contactConstraint2> world::PrepareContactConstraints(
 
     const float contactHertz = std::min( CONTACT_HERTZ, 0.125f * invTimeStep );
 
-    const contactSoftness2 contactSoftness =
-        MakeContactSoftness(
-            contactHertz,
-            CONTACT_DAMPING_RATIO,
-            timeStep
-        );
+    const contactSoftness2 contactSoftness = MakeContactSoftness( contactHertz, CONTACT_DAMPING_RATIO, timeStep );
 
     // Static contact는 지면을 뚫고 내려가는 현상을 줄이기 위해
     // 일반 dynamic contact보다 조금 더 단단하게 풂.
-    const contactSoftness2 staticSoftness =
-        MakeContactSoftness(
-            2.0f * contactHertz,
-            CONTACT_DAMPING_RATIO,
-            timeStep
-        );
+    const contactSoftness2 staticSoftness = MakeContactSoftness( 2.0f * contactHertz, CONTACT_DAMPING_RATIO, timeStep );
 
     std::vector<contactConstraint2> constraints;
     constraints.reserve( contactIds.size() );
@@ -4864,21 +3899,11 @@ std::vector<contactConstraint2> world::PrepareContactConstraints(
         const bodyState& bodyStateA = bodyStates_[contactSim.bodyIdA];
         const bodyState& bodyStateB = bodyStates_[contactSim.bodyIdB];
 
-        contactConstraint2 constraint =
-            PrepareContactConstraint(
-                contactSim,
-                bodySimA, bodyStateA,
-                bodySimB, bodyStateB
-            );
+        contactConstraint2 constraint = PrepareContactConstraint( contactSim, bodySimA, bodyStateA, bodySimB, bodyStateB );
 
-        const bool hasStaticBody =
-            bodies_[contactSim.bodyIdA].type == bodyType::Static ||
-            bodies_[contactSim.bodyIdB].type == bodyType::Static;
+        const bool hasStaticBody = bodies_[contactSim.bodyIdA].type == bodyType::Static || bodies_[contactSim.bodyIdB].type == bodyType::Static;
 
-        constraint.softness =
-            hasStaticBody
-                ? staticSoftness
-                : contactSoftness;
+        constraint.softness = hasStaticBody ? staticSoftness : contactSoftness;
 
         constraint.maxPushSpeed = MAX_CONTACT_PUSH_SPEED;
 
@@ -4903,25 +3928,18 @@ std::vector<contactConstraint2> world::PrepareContactConstraints(
     return constraints;
 }
 
-void world::WarmStartContacts(
-    std::span<contactConstraint2> constraints )
+void world::WarmStartContacts( std::span<contactConstraint2> constraints )
 {
     for( contactConstraint2& constraint : constraints )
     {
         assert( constraint.bodyIdA >= 0 );
         assert( constraint.bodyIdB >= 0 );
 
-        WarmStartContactConstraint(
-            constraint,
-            bodyStates_[constraint.bodyIdA],
-            bodyStates_[constraint.bodyIdB]
-        );
+        WarmStartContactConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
     }
 }
 
-void world::SolveContactConstraints(
-    std::span<contactConstraint2> constraints,
-    bool useBias )
+void world::SolveContactConstraints( std::span<contactConstraint2> constraints, bool useBias )
 {
     constexpr int VELOCITY_ITERATIONS = 8;
 
@@ -4943,18 +3961,12 @@ void world::SolveContactConstraints(
             assert( constraint.bodyIdA >= 0 );
             assert( constraint.bodyIdB >= 0 );
 
-            SolveContactConstraint(
-                constraint,
-                bodyStates_[constraint.bodyIdA],
-                bodyStates_[constraint.bodyIdB],
-                useBias
-            );
+            SolveContactConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB], useBias );
         }
     }
 }
 
-void world::ApplyRestitutionContacts(
-    std::span<contactConstraint2> constraints )
+void world::ApplyRestitutionContacts( std::span<contactConstraint2> constraints )
 {
     constexpr float RESTITUTION_THRESHOLD = 1.0f;
     // Box2D처럼 두 접점의 순차 impulse가 서로 영향을 주므로 restitution을 반복함.
@@ -4972,43 +3984,28 @@ void world::ApplyRestitutionContacts(
     {
         for( contactConstraint2& constraint : constraints )
         {
-            if( constraint.restitution <= 0.0f )
-            {
-                continue;
-            }
+            if( constraint.restitution <= 0.0f ) continue;
 
             assert( constraint.bodyIdA >= 0 );
             assert( constraint.bodyIdB >= 0 );
 
-            ApplyRestitutionContactConstraint(
-                constraint,
-                bodyStates_[constraint.bodyIdA],
-                bodyStates_[constraint.bodyIdB],
-                RESTITUTION_THRESHOLD
-            );
+            ApplyRestitutionContactConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB], RESTITUTION_THRESHOLD );
         }
     }
 }
 
-void world::StoreContactConstraintImpulses(
-    std::span<const contactConstraint2> constraints )
+void world::StoreContactConstraintImpulses( std::span<const contactConstraint2> constraints )
 {
     for( const contactConstraint2& constraint : constraints )
     {
         assert( constraint.contactId >= 0 );
-        assert(
-            static_cast<std::size_t>( constraint.contactId ) <
-            contactSims_.size()
-        );
+        assert( static_cast<std::size_t>( constraint.contactId ) < contactSims_.size() );
 
-        StoreContactImpulses(
-            constraint,
-            contactSims_[constraint.contactId]
-        );
+        StoreContactImpulses( constraint, contactSims_[constraint.contactId] );
     }
 }
 
-#pragma endregion
+#pragma endregion ContactSolver
 
 #pragma region ContactDestruction
 
@@ -5022,16 +4019,11 @@ void world::DestroyContact( std::int32_t contactId )
     assert( contact.contactId == contactId );
     assert( contactCount_ > 0 );
 
-    const shapePairKey pairKey =
-        MakeShapePairKey( contact.shapeIdA, contact.shapeIdB );
+    const shapePairKey pairKey = MakeShapePairKey( contact.shapeIdA, contact.shapeIdB );
 
-    WakeBodyByIndex(
-        contact.edges[0].bodyId
-    );
+    WakeBodyByIndex( contact.edges[0].bodyId );
 
-    WakeBodyByIndex(
-        contact.edges[1].bodyId
-    );
+    WakeBodyByIndex( contact.edges[1].bodyId );
 
     for( std::int32_t edgeIndex = 0; edgeIndex < 2; ++edgeIndex )
     {
@@ -5041,25 +4033,20 @@ void world::DestroyContact( std::int32_t contactId )
         assert( static_cast<std::size_t>( edge.bodyId ) < bodies_.size() );
 
         body& body = bodies_[edge.bodyId];
-        const std::int32_t contactKey =
-            MakeContactKey( contactId, edgeIndex );
+        const std::int32_t contactKey = MakeContactKey( contactId, edgeIndex );
 
         if( edge.prevKey != contact2::NULL_INDEX )
         {
-            contact2& previous =
-                contacts_[GetContactId( edge.prevKey )];
+            contact2& previous = contacts_[GetContactId( edge.prevKey )];
 
-            previous.edges[GetContactEdgeIndex( edge.prevKey )].nextKey =
-                edge.nextKey;
+            previous.edges[GetContactEdgeIndex( edge.prevKey )].nextKey = edge.nextKey;
         }
 
         if( edge.nextKey != contact2::NULL_INDEX )
         {
-            contact2& next =
-                contacts_[GetContactId( edge.nextKey )];
+            contact2& next = contacts_[GetContactId( edge.nextKey )];
 
-            next.edges[GetContactEdgeIndex( edge.nextKey )].prevKey =
-                edge.prevKey;
+            next.edges[GetContactEdgeIndex( edge.nextKey )].prevKey = edge.prevKey;
         }
 
         if( body.headContactKey == contactKey )
@@ -5068,6 +4055,7 @@ void world::DestroyContact( std::int32_t contactId )
         }
 
         assert( body.contactCount > 0 );
+
         --body.contactCount;
     }
 
@@ -5088,6 +4076,6 @@ void world::DestroyContact( std::int32_t contactId )
     --contactCount_;
 }
 
-#pragma endregion
+#pragma endregion ContactDestruction
 
 } // namespace zonai

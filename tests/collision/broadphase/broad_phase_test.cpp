@@ -49,10 +49,7 @@ int main()
     assert( &staticTree != &dynamicTreeRef );
     assert( &kinematicTree != &dynamicTreeRef );
 
-    const aabb2 box{
-        { 0.0f, 0.0f },
-        { 1.0f, 1.0f }
-    };
+    const aabb2 box{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
 
     staticTree.CreateProxy( box, 1 );
 
@@ -115,10 +112,7 @@ int main()
 
     assert( moveBroadPhase.GetTree( bodyType::Static ).HasMoved() == false );
 
-    const aabb2 movedBox{
-        { 2.0f, 0.0f },
-        { 3.0f, 1.0f }
-    };
+    const aabb2 movedBox{ { 2.0f, 0.0f }, { 3.0f, 1.0f } };
 
     moveBroadPhase.MoveProxy( movedStaticKey, movedBox );
 
@@ -134,20 +128,11 @@ int main()
 
     broadPhase pairBroadPhase{};
 
-    const aabb2 pairBoxA{
-        { 0.0f, 0.0f },
-        { 2.0f, 2.0f }
-    };
+    const aabb2 pairBoxA{ { 0.0f, 0.0f }, { 2.0f, 2.0f } };
 
-    const aabb2 pairBoxB{
-        { 1.0f, 0.0f },
-        { 3.0f, 2.0f }
-    };
+    const aabb2 pairBoxB{ { 1.0f, 0.0f }, { 3.0f, 2.0f } };
 
-    const aabb2 pairBoxC{
-        { 10.0f, 0.0f },
-        { 11.0f, 1.0f }
-    };
+    const aabb2 pairBoxC{ { 10.0f, 0.0f }, { 11.0f, 1.0f } };
 
     pairBroadPhase.CreateProxy( bodyType::Dynamic, pairBoxA, 31 );
     pairBroadPhase.CreateProxy( bodyType::Dynamic, pairBoxB, 32 );
@@ -159,8 +144,7 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             pairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     std::sort( pairs.begin(), pairs.end() );
 
@@ -176,15 +160,11 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             pairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     assert( pairs.empty() );
 
-    const aabb2 movedPairBoxC{
-        { 1.5f, 0.0f },
-        { 2.5f, 2.0f }
-    };
+    const aabb2 movedPairBoxC{ { 1.5f, 0.0f }, { 2.5f, 2.0f } };
 
     pairBroadPhase.MoveProxy( pairKeyC, movedPairBoxC );
     pairs.clear();
@@ -193,40 +173,24 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             pairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     std::sort( pairs.begin(), pairs.end() );
 
-    const std::vector<std::pair<std::int32_t, std::int32_t>> expectedPairs{
-        { 31, 33 },
-        { 32, 33 }
-    };
+    const std::vector<std::pair<std::int32_t, std::int32_t>> expectedPairs{ { 31, 33 }, { 32, 33 } };
 
     assert( pairs == expectedPairs );
     assert( pairBroadPhase.GetTree( bodyType::Dynamic ).Validate() );
 
     broadPhase crossBroadPhase{};
 
-    const aabb2 staticBoxA{
-        { 0.0f, 0.0f },
-        { 2.0f, 2.0f }
-    };
+    const aabb2 staticBoxA{ { 0.0f, 0.0f }, { 2.0f, 2.0f } };
 
-    const aabb2 staticBoxB{
-        { 10.0f, 0.0f },
-        { 12.0f, 2.0f }
-    };
+    const aabb2 staticBoxB{ { 10.0f, 0.0f }, { 12.0f, 2.0f } };
 
-    const aabb2 dynamicBoxA{
-        { 1.0f, 0.0f },
-        { 3.0f, 2.0f }
-    };
+    const aabb2 dynamicBoxA{ { 1.0f, 0.0f }, { 3.0f, 2.0f } };
 
-    const aabb2 dynamicBoxB{
-        { 20.0f, 0.0f },
-        { 21.0f, 1.0f }
-    };
+    const aabb2 dynamicBoxB{ { 20.0f, 0.0f }, { 21.0f, 1.0f } };
 
     crossBroadPhase.CreateProxy( bodyType::Static, staticBoxA, 41 );
     const proxyKey staticKeyB = crossBroadPhase.CreateProxy( bodyType::Static, staticBoxB, 42 );
@@ -239,8 +203,7 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             crossPairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     const std::pair<std::int32_t, std::int32_t> initialCrossPair{ 41, 51 };
 
@@ -255,15 +218,11 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             crossPairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     assert( crossPairs.empty() );
 
-    const aabb2 movedStaticBoxB{
-        { 20.0f, 0.0f },
-        { 21.0f, 1.0f }
-    };
+    const aabb2 movedStaticBoxB{ { 20.0f, 0.0f }, { 21.0f, 1.0f } };
 
     crossBroadPhase.MoveProxy( staticKeyB, movedStaticBoxB );
     crossPairs.clear();
@@ -272,8 +231,7 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             crossPairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     const std::pair<std::int32_t, std::int32_t> movedStaticPair{ 42, 52 };
 
@@ -284,25 +242,13 @@ int main()
 
     broadPhase kinematicCrossBroadPhase{};
 
-    const aabb2 kinematicBoxA{
-        { 0.0f, 0.0f },
-        { 2.0f, 2.0f }
-    };
+    const aabb2 kinematicBoxA{ { 0.0f, 0.0f }, { 2.0f, 2.0f } };
 
-    const aabb2 kinematicBoxB{
-        { 10.0f, 0.0f },
-        { 12.0f, 2.0f }
-    };
+    const aabb2 kinematicBoxB{ { 10.0f, 0.0f }, { 12.0f, 2.0f } };
 
-    const aabb2 kinematicDynamicBoxA{
-        { 1.0f, 0.0f },
-        { 3.0f, 2.0f }
-    };
+    const aabb2 kinematicDynamicBoxA{ { 1.0f, 0.0f }, { 3.0f, 2.0f } };
 
-    const aabb2 kinematicDynamicBoxB{
-        { 20.0f, 0.0f },
-        { 21.0f, 1.0f }
-    };
+    const aabb2 kinematicDynamicBoxB{ { 20.0f, 0.0f }, { 21.0f, 1.0f } };
 
     kinematicCrossBroadPhase.CreateProxy( bodyType::Kinematic, kinematicBoxA, 61 );
     const proxyKey kinematicKeyB = kinematicCrossBroadPhase.CreateProxy( bodyType::Kinematic, kinematicBoxB, 62 );
@@ -315,8 +261,7 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             kinematicPairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     const std::pair<std::int32_t, std::int32_t> initialKinematicPair{ 61, 71 };
 
@@ -331,15 +276,11 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             kinematicPairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     assert( kinematicPairs.empty() );
 
-    const aabb2 movedKinematicBoxB{
-        { 20.0f, 0.0f },
-        { 21.0f, 1.0f }
-    };
+    const aabb2 movedKinematicBoxB{ { 20.0f, 0.0f }, { 21.0f, 1.0f } };
 
     kinematicCrossBroadPhase.MoveProxy( kinematicKeyB, movedKinematicBoxB );
     kinematicPairs.clear();
@@ -348,8 +289,7 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             kinematicPairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     const std::pair<std::int32_t, std::int32_t> movedKinematicPair{ 62, 72 };
 
@@ -360,10 +300,7 @@ int main()
 
     broadPhase candidateBroadPhase{};
 
-    const aabb2 candidateBox{
-        { 0.0f, 0.0f },
-        { 2.0f, 2.0f }
-    };
+    const aabb2 candidateBox{ { 0.0f, 0.0f }, { 2.0f, 2.0f } };
 
     constexpr std::int32_t candidateDynamicShape = 200;
     constexpr std::int32_t candidateStaticBase = 300;
@@ -382,8 +319,7 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     assert( candidatePairs.size() == candidateStaticCount );
 
@@ -398,17 +334,10 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     assert( candidatePairs.size() == candidateStaticCount - 1 );
-    assert(
-        std::find(
-            candidatePairs.begin(),
-            candidatePairs.end(),
-            std::pair<std::int32_t, std::int32_t>{ candidateDynamicShape, existingStaticShape }
-        ) == candidatePairs.end()
-    );
+    assert( std::find( candidatePairs.begin(), candidatePairs.end(), std::pair<std::int32_t, std::int32_t>{ candidateDynamicShape, existingStaticShape } ) == candidatePairs.end() );
 
     assert( candidateBroadPhase.RemovePair( existingPairKey ) );
 
@@ -418,42 +347,23 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             candidatePairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     assert( candidatePairs.size() == candidateStaticCount );
 
     broadPhase combinedBroadPhase{};
 
-    const aabb2 selfBoxA{
-        { 0.0f, 0.0f },
-        { 1.0f, 1.0f }
-    };
+    const aabb2 selfBoxA{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
 
-    const aabb2 selfBoxB{
-        { 0.5f, 0.0f },
-        { 1.5f, 1.0f }
-    };
+    const aabb2 selfBoxB{ { 0.5f, 0.0f }, { 1.5f, 1.0f } };
 
-    const aabb2 staticDynamicBox{
-        { 10.0f, 0.0f },
-        { 11.0f, 1.0f }
-    };
+    const aabb2 staticDynamicBox{ { 10.0f, 0.0f }, { 11.0f, 1.0f } };
 
-    const aabb2 staticCrossBox{
-        { 10.5f, 0.0f },
-        { 11.5f, 1.0f }
-    };
+    const aabb2 staticCrossBox{ { 10.5f, 0.0f }, { 11.5f, 1.0f } };
 
-    const aabb2 kinematicDynamicBox{
-        { 20.0f, 0.0f },
-        { 21.0f, 1.0f }
-    };
+    const aabb2 kinematicDynamicBox{ { 20.0f, 0.0f }, { 21.0f, 1.0f } };
 
-    const aabb2 kinematicCrossBox{
-        { 20.5f, 0.0f },
-        { 21.5f, 1.0f }
-    };
+    const aabb2 kinematicCrossBox{ { 20.5f, 0.0f }, { 21.5f, 1.0f } };
 
     combinedBroadPhase.CreateProxy( bodyType::Dynamic, selfBoxA, 501 );
     combinedBroadPhase.CreateProxy( bodyType::Dynamic, selfBoxB, 502 );
@@ -468,16 +378,11 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             combinedPairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     std::sort( combinedPairs.begin(), combinedPairs.end() );
 
-    const std::vector<std::pair<std::int32_t, std::int32_t>> expectedCombinedPairs{
-        { 501, 502 },
-        { 503, 601 },
-        { 504, 701 }
-    };
+    const std::vector<std::pair<std::int32_t, std::int32_t>> expectedCombinedPairs{ { 501, 502 }, { 503, 601 }, { 504, 701 } };
 
     assert( combinedPairs == expectedCombinedPairs );
 
@@ -487,35 +392,17 @@ int main()
 
     broadPhase updateBroadPhase{};
 
-    const aabb2 updateDynamicA{
-        { 0.0f, 0.0f },
-        { 1.0f, 1.0f }
-    };
+    const aabb2 updateDynamicA{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
 
-    const aabb2 updateDynamicB{
-        { 0.5f, 0.0f },
-        { 1.5f, 1.0f }
-    };
+    const aabb2 updateDynamicB{ { 0.5f, 0.0f }, { 1.5f, 1.0f } };
 
-    const aabb2 updateDynamicStatic{
-        { 10.0f, 0.0f },
-        { 11.0f, 1.0f }
-    };
+    const aabb2 updateDynamicStatic{ { 10.0f, 0.0f }, { 11.0f, 1.0f } };
 
-    const aabb2 updateStatic{
-        { 10.5f, 0.0f },
-        { 11.5f, 1.0f }
-    };
+    const aabb2 updateStatic{ { 10.5f, 0.0f }, { 11.5f, 1.0f } };
 
-    const aabb2 updateDynamicKinematic{
-        { 20.0f, 0.0f },
-        { 21.0f, 1.0f }
-    };
+    const aabb2 updateDynamicKinematic{ { 20.0f, 0.0f }, { 21.0f, 1.0f } };
 
-    const aabb2 updateKinematic{
-        { 20.5f, 0.0f },
-        { 21.5f, 1.0f }
-    };
+    const aabb2 updateKinematic{ { 20.5f, 0.0f }, { 21.5f, 1.0f } };
 
     updateBroadPhase.CreateProxy( bodyType::Dynamic, updateDynamicA, 801 );
     updateBroadPhase.CreateProxy( bodyType::Dynamic, updateDynamicB, 802 );
@@ -537,16 +424,11 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             updatePairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     std::sort( updatePairs.begin(), updatePairs.end() );
 
-    const std::vector<std::pair<std::int32_t, std::int32_t>> expectedUpdatePairs{
-        { 801, 802 },
-        { 803, 901 },
-        { 804, 1001 }
-    };
+    const std::vector<std::pair<std::int32_t, std::int32_t>> expectedUpdatePairs{ { 801, 802 }, { 803, 901 }, { 804, 1001 } };
 
     assert( updatePairs == expectedUpdatePairs );
 
@@ -568,8 +450,7 @@ int main()
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             updatePairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     assert( updatePairs.empty() );
 
@@ -578,16 +459,9 @@ int main()
     {
         broadPhase emptyCrossBroadPhase{};
 
-        const aabb2 originSpanningBox{
-            { -1.0f, -1.0f },
-            {  1.0f,  1.0f }
-        };
+        const aabb2 originSpanningBox{ { -1.0f, -1.0f }, { 1.0f, 1.0f } };
 
-        emptyCrossBroadPhase.CreateProxy(
-            bodyType::Dynamic,
-            originSpanningBox,
-            0
-        );
+        emptyCrossBroadPhase.CreateProxy( bodyType::Dynamic, originSpanningBox, 0 );
 
         std::vector<std::pair<std::int32_t, std::int32_t>> emptyCrossPairs;
 
@@ -595,30 +469,22 @@ int main()
             [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
             {
                 emptyCrossPairs.emplace_back( shapeIndexA, shapeIndexB );
-            }
-        );
+            } );
 
         emptyCrossBroadPhase.FindDynamicKinematicPairs(
             [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
             {
                 emptyCrossPairs.emplace_back( shapeIndexA, shapeIndexB );
-            }
-        );
+            } );
 
         assert( emptyCrossPairs.empty() );
     }
 
     broadPhase sameBodyBroadPhase{};
 
-    const aabb2 sameBodyBoxA{
-        { 0.0f, 0.0f },
-        { 2.0f, 2.0f }
-    };
+    const aabb2 sameBodyBoxA{ { 0.0f, 0.0f }, { 2.0f, 2.0f } };
 
-    const aabb2 sameBodyBoxB{
-        { 1.0f, 0.0f },
-        { 3.0f, 2.0f }
-    };
+    const aabb2 sameBodyBoxB{ { 1.0f, 0.0f }, { 3.0f, 2.0f } };
 
     sameBodyBroadPhase.CreateProxy( bodyType::Dynamic, sameBodyBoxA, 0 );
     sameBodyBroadPhase.CreateProxy( bodyType::Dynamic, sameBodyBoxB, 1 );
@@ -629,26 +495,22 @@ int main()
 
     std::vector<std::pair<std::int32_t, std::int32_t>> sameBodyPairs;
 
-    sameBodyBroadPhase.FindDynamicSelfPairs(
-        sameBodyShapes,
+    sameBodyBroadPhase.FindDynamicSelfPairs( sameBodyShapes,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             sameBodyPairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     // 같은 Body에 속한 두 shape는 broadPhase overlap이 있어도 Contact 후보가 되지 않음.
     assert( sameBodyPairs.empty() );
 
     sameBodyShapes[1].bodyId = 11;
 
-    sameBodyBroadPhase.FindDynamicSelfPairs(
-        sameBodyShapes,
+    sameBodyBroadPhase.FindDynamicSelfPairs( sameBodyShapes,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             sameBodyPairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     const std::pair<std::int32_t, std::int32_t> differentBodyPair{ 0, 1 };
 
@@ -657,15 +519,9 @@ int main()
 
     broadPhase sensorBroadPhase{};
 
-    const aabb2 sensorBoxA{
-        { 0.0f, 0.0f },
-        { 2.0f, 2.0f }
-    };
+    const aabb2 sensorBoxA{ { 0.0f, 0.0f }, { 2.0f, 2.0f } };
 
-    const aabb2 sensorBoxB{
-        { 1.0f, 0.0f },
-        { 3.0f, 2.0f }
-    };
+    const aabb2 sensorBoxB{ { 1.0f, 0.0f }, { 3.0f, 2.0f } };
 
     sensorBroadPhase.CreateProxy( bodyType::Dynamic, sensorBoxA, 0 );
     sensorBroadPhase.CreateProxy( bodyType::Dynamic, sensorBoxB, 1 );
@@ -677,26 +533,22 @@ int main()
 
     std::vector<std::pair<std::int32_t, std::int32_t>> sensorPairs;
 
-    sensorBroadPhase.FindDynamicSelfPairs(
-        sensorShapes,
+    sensorBroadPhase.FindDynamicSelfPairs( sensorShapes,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             sensorPairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     // Sensor overlap은 일반 Contact 생성 경로에서 제외됨.
     assert( sensorPairs.empty() );
 
     sensorShapes[0].sensorIndex = shape::NULL_INDEX;
 
-    sensorBroadPhase.FindDynamicSelfPairs(
-        sensorShapes,
+    sensorBroadPhase.FindDynamicSelfPairs( sensorShapes,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             sensorPairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     const std::pair<std::int32_t, std::int32_t> nonSensorPair{ 0, 1 };
 
@@ -705,35 +557,17 @@ int main()
 
     broadPhase filteredUpdateBroadPhase{};
 
-    const aabb2 filterSelfBoxA{
-        { 0.0f, 0.0f },
-        { 2.0f, 2.0f }
-    };
+    const aabb2 filterSelfBoxA{ { 0.0f, 0.0f }, { 2.0f, 2.0f } };
 
-    const aabb2 filterSelfBoxB{
-        { 1.0f, 0.0f },
-        { 3.0f, 2.0f }
-    };
+    const aabb2 filterSelfBoxB{ { 1.0f, 0.0f }, { 3.0f, 2.0f } };
 
-    const aabb2 filterDynamicStaticBox{
-        { 10.0f, 0.0f },
-        { 12.0f, 2.0f }
-    };
+    const aabb2 filterDynamicStaticBox{ { 10.0f, 0.0f }, { 12.0f, 2.0f } };
 
-    const aabb2 filterStaticBox{
-        { 11.0f, 0.0f },
-        { 13.0f, 2.0f }
-    };
+    const aabb2 filterStaticBox{ { 11.0f, 0.0f }, { 13.0f, 2.0f } };
 
-    const aabb2 filterDynamicKinematicBox{
-        { 20.0f, 0.0f },
-        { 22.0f, 2.0f }
-    };
+    const aabb2 filterDynamicKinematicBox{ { 20.0f, 0.0f }, { 22.0f, 2.0f } };
 
-    const aabb2 filterKinematicBox{
-        { 21.0f, 0.0f },
-        { 23.0f, 2.0f }
-    };
+    const aabb2 filterKinematicBox{ { 21.0f, 0.0f }, { 23.0f, 2.0f } };
 
     filteredUpdateBroadPhase.CreateProxy( bodyType::Dynamic, filterSelfBoxA, 0 );
     filteredUpdateBroadPhase.CreateProxy( bodyType::Dynamic, filterSelfBoxB, 1 );
@@ -769,13 +603,11 @@ int main()
 
     std::vector<std::pair<std::int32_t, std::int32_t>> filteredPairs;
 
-    filteredUpdateBroadPhase.UpdatePairs(
-        filteredShapes,
+    filteredUpdateBroadPhase.UpdatePairs( filteredShapes,
         [&]( std::int32_t shapeIndexA, std::int32_t shapeIndexB )
         {
             filteredPairs.emplace_back( shapeIndexA, shapeIndexB );
-        }
-    );
+        } );
 
     const std::pair<std::int32_t, std::int32_t> allowedFilteredPair{ 4, 5 };
 

@@ -7,18 +7,14 @@
 
 using namespace zonai;
 
-bool NearlyEqual(float a, float b, float epsilon = 1e-5f)
+bool NearlyEqual( float a, float b, float epsilon = 1e-5f )
 {
-    return std::fabs(a - b) <= epsilon;
+    return std::fabs( a - b ) <= epsilon;
 }
 
-bool NearlyEqual(
-    const vec2& a,
-    const vec2& b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( const vec2& a, const vec2& b, float epsilon = 1e-5f )
 {
-    return NearlyEqual( a.x, b.x, epsilon ) &&
-        NearlyEqual( a.y, b.y, epsilon );
+    return NearlyEqual( a.x, b.x, epsilon ) && NearlyEqual( a.y, b.y, epsilon );
 }
 
 int main()
@@ -29,10 +25,10 @@ int main()
 
         vec2 p{ 2.0f, 3.0f };
 
-        vec2 result = TransformPoint(t, p);
+        vec2 result = TransformPoint( t, p );
 
-        assert(NearlyEqual(result.x, 2.0f));
-        assert(NearlyEqual(result.y, 3.0f));
+        assert( NearlyEqual( result.x, 2.0f ) );
+        assert( NearlyEqual( result.y, 3.0f ) );
     }
 
     {
@@ -40,36 +36,36 @@ int main()
         transform2 t{};
         t.position = { 10.0f, 5.0f };
 
-        vec2 result = TransformPoint(t, { 1.0f, 2.0f });
+        vec2 result = TransformPoint( t, { 1.0f, 2.0f } );
 
-        assert(NearlyEqual(result.x, 11.0f));
-        assert(NearlyEqual(result.y, 7.0f));
+        assert( NearlyEqual( result.x, 11.0f ) );
+        assert( NearlyEqual( result.y, 7.0f ) );
     }
 
     {
         // translation + rotation
         transform2 t{};
         t.position = { 10.0f, 5.0f };
-        t.rotation = rot2::FromRadians(3.1415926535f * 0.5f);
+        t.rotation = rot2::FromRadians( 3.1415926535f * 0.5f );
 
-        vec2 result = TransformPoint(t, { 1.0f, 0.0f });
+        vec2 result = TransformPoint( t, { 1.0f, 0.0f } );
 
-        assert(NearlyEqual(result.x, 10.0f));
-        assert(NearlyEqual(result.y, 6.0f));
+        assert( NearlyEqual( result.x, 10.0f ) );
+        assert( NearlyEqual( result.y, 6.0f ) );
     }
 
     {
         transform2 t{};
         t.position = { 10.0f, -3.0f };
-        t.rotation = rot2::FromRadians(0.7f);
+        t.rotation = rot2::FromRadians( 0.7f );
 
         vec2 original{ 2.0f, 5.0f };
 
-        vec2 world = TransformPoint(t, original);
-        vec2 local = InverseTransformPoint(t, world);
+        vec2 world = TransformPoint( t, original );
+        vec2 local = InverseTransformPoint( t, world );
 
-        assert(NearlyEqual(local.x, original.x));
-        assert(NearlyEqual(local.y, original.y));
+        assert( NearlyEqual( local.x, original.x ) );
+        assert( NearlyEqual( local.y, original.y ) );
     }
 
     // inverse
@@ -82,11 +78,9 @@ int main()
 
         const vec2 point{ 2.0f, 5.0f };
 
-        const vec2 world =
-            TransformPoint( t, point );
+        const vec2 world = TransformPoint( t, point );
 
-        const vec2 restored =
-            TransformPoint( inverse, world );
+        const vec2 restored = TransformPoint( inverse, world );
 
         assert( NearlyEqual( restored, point ) );
     }
@@ -103,17 +97,11 @@ int main()
 
         const vec2 point{ 2.0f, 3.0f };
 
-        const vec2 expected =
-            TransformPoint(
-                a,
-                TransformPoint( b, point )
-            );
+        const vec2 expected = TransformPoint( a, TransformPoint( b, point ) );
 
-        const transform2 combined =
-            Mul( a, b );
+        const transform2 combined = Mul( a, b );
 
-        const vec2 actual =
-            TransformPoint( combined, point );
+        const vec2 actual = TransformPoint( combined, point );
 
         assert( NearlyEqual( actual, expected ) );
     }
@@ -122,39 +110,21 @@ int main()
     {
         transform2 transformA{};
         transformA.position = { 4.0f, 2.0f };
-        transformA.rotation =
-            rot2::FromRadians( 0.7f );
+        transformA.rotation = rot2::FromRadians( 0.7f );
 
         transform2 transformB{};
         transformB.position = { -3.0f, 6.0f };
-        transformB.rotation =
-            rot2::FromRadians( -0.4f );
+        transformB.rotation = rot2::FromRadians( -0.4f );
 
         const vec2 pointB{ 1.0f, 2.0f };
 
-        const vec2 worldPoint =
-            TransformPoint(
-                transformB,
-                pointB
-            );
+        const vec2 worldPoint = TransformPoint( transformB, pointB );
 
-        const vec2 expected =
-            InverseTransformPoint(
-                transformA,
-                worldPoint
-            );
+        const vec2 expected = InverseTransformPoint( transformA, worldPoint );
 
-        const transform2 relative =
-            InverseMul(
-                transformA,
-                transformB
-            );
+        const transform2 relative = InverseMul( transformA, transformB );
 
-        const vec2 actual =
-            TransformPoint(
-                relative,
-                pointB
-            );
+        const vec2 actual = TransformPoint( relative, pointB );
 
         assert( NearlyEqual( actual, expected ) );
     }
@@ -162,26 +132,15 @@ int main()
     {
         transform2 t{};
         t.position = { 5.0f, -7.0f };
-        t.rotation =
-            rot2::FromRadians( 1.2f );
+        t.rotation = rot2::FromRadians( 1.2f );
 
-        const transform2 relative =
-            InverseMul( t, t );
+        const transform2 relative = InverseMul( t, t );
 
-        assert( NearlyEqual(
-            relative.position,
-            vec2{}
-        ) );
+        assert( NearlyEqual( relative.position, vec2{} ) );
 
-        assert( NearlyEqual(
-            relative.rotation.c,
-            1.0f
-        ) );
+        assert( NearlyEqual( relative.rotation.c, 1.0f ) );
 
-        assert( NearlyEqual(
-            relative.rotation.s,
-            0.0f
-        ) );
+        assert( NearlyEqual( relative.rotation.s, 0.0f ) );
     }
 
     return 0;

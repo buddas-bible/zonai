@@ -14,12 +14,7 @@ int main()
 
     // Box2D와 같은 segment-segment 최근접점 primitive를 제공해야 함.
     {
-        const segmentDistanceResult2 result = SegmentDistance(
-            { -1.0f, -1.0f },
-            { -1.0f, 1.0f },
-            { 2.0f, 0.0f },
-            { 1.0f, 0.0f }
-        );
+        const segmentDistanceResult2 result = SegmentDistance( { -1.0f, -1.0f }, { -1.0f, 1.0f }, { 2.0f, 0.0f }, { 1.0f, 0.0f } );
 
         assert( std::fabs( result.fraction1 - 0.5f ) < epsilon );
         assert( std::fabs( result.fraction2 - 1.0f ) < epsilon );
@@ -32,34 +27,19 @@ int main()
 
     // 한쪽 또는 양쪽 선분이 점으로 퇴화해도 최근접점을 안정적으로 계산해야 함.
     {
-        const segmentDistanceResult2 firstDegenerate = SegmentDistance(
-            { 0.0f, 0.0f },
-            { 0.0f, 0.0f },
-            { 2.0f, 0.0f },
-            { 4.0f, 0.0f }
-        );
+        const segmentDistanceResult2 firstDegenerate = SegmentDistance( { 0.0f, 0.0f }, { 0.0f, 0.0f }, { 2.0f, 0.0f }, { 4.0f, 0.0f } );
 
         assert( firstDegenerate.fraction1 == 0.0f );
         assert( firstDegenerate.fraction2 == 0.0f );
         assert( std::fabs( firstDegenerate.distanceSquared - 4.0f ) < epsilon );
 
-        const segmentDistanceResult2 secondDegenerate = SegmentDistance(
-            { 0.0f, 0.0f },
-            { 4.0f, 0.0f },
-            { 2.0f, 3.0f },
-            { 2.0f, 3.0f }
-        );
+        const segmentDistanceResult2 secondDegenerate = SegmentDistance( { 0.0f, 0.0f }, { 4.0f, 0.0f }, { 2.0f, 3.0f }, { 2.0f, 3.0f } );
 
         assert( std::fabs( secondDegenerate.fraction1 - 0.5f ) < epsilon );
         assert( secondDegenerate.fraction2 == 0.0f );
         assert( std::fabs( secondDegenerate.distanceSquared - 9.0f ) < epsilon );
 
-        const segmentDistanceResult2 bothDegenerate = SegmentDistance(
-            { 1.0f, 1.0f },
-            { 1.0f, 1.0f },
-            { 4.0f, 5.0f },
-            { 4.0f, 5.0f }
-        );
+        const segmentDistanceResult2 bothDegenerate = SegmentDistance( { 1.0f, 1.0f }, { 1.0f, 1.0f }, { 4.0f, 5.0f }, { 4.0f, 5.0f } );
 
         assert( bothDegenerate.fraction1 == 0.0f );
         assert( bothDegenerate.fraction2 == 0.0f );
@@ -161,11 +141,7 @@ int main()
         distanceInput2 input{};
         input.proxyA = MakeShapeProxy( MakeBox( { 1.0f, 1.0f } ) );
         input.proxyB = MakeShapeProxy( MakeBox( { 2.0f, 0.5f } ) );
-        input.transform =
-        {
-            { 0.0f, 4.0f },
-            rot2::FromRadians( 0.5f * 3.14159265358979323846f )
-        };
+        input.transform = { { 0.0f, 4.0f }, rot2::FromRadians( 0.5f * 3.14159265358979323846f ) };
 
         simplexCache2 cache{};
         const distanceOutput2 output = ShapeDistance( input, cache );

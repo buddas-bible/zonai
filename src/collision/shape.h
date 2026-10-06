@@ -18,14 +18,7 @@ namespace zonai
 
 // Box2D의 shape type + union을 C++20에서 안전하게 표현함.
 // monostate는 아직 geometry가 연결되지 않은 shape 상태임.
-using shapeGeometry =
-    std::variant<
-        std::monostate,
-        circle2,
-        capsule2,
-        polygon2,
-        segment2
-    >;
+using shapeGeometry = std::variant<std::monostate, circle2, capsule2, polygon2, segment2>;
 
 struct shapeExtent2
 {
@@ -86,18 +79,13 @@ struct shape
 };
 
 // body local geometry에 transform을 적용해 world-space AABB를 계산함.
-aabb2 ComputeShapeAABB(
-    const shapeGeometry& geometry,
-    const transform2& transform );
+aabb2 ComputeShapeAABB( const shapeGeometry& geometry, const transform2& transform );
 
 // Dynamic Tree fat AABB에 사용할 shape 크기 기반 margin을 계산함.
-float ComputeShapeAABBMargin(
-    const shapeGeometry& geometry );
+float ComputeShapeAABBMargin( const shapeGeometry& geometry );
 
 // localCenter 기준으로 CCD에 사용할 최소 / 최대 shape extent를 계산함.
-shapeExtent2 ComputeShapeExtent(
-    const shapeGeometry& geometry,
-    const vec2& localCenter );
+shapeExtent2 ComputeShapeExtent( const shapeGeometry& geometry, const vec2& localCenter );
 
 // shape geometry와 density로 local-space 질량 특성을 계산함.
 massData2 ComputeShapeMass( const shape& shape );

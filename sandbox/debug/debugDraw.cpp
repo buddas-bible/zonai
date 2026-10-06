@@ -9,34 +9,18 @@
 namespace zonai::sandbox
 {
 
-debugDraw::debugDraw(
-    ImDrawList* drawList,
-    const debugCamera& camera,
-    const ImVec2& viewportMin,
-    const ImVec2& viewportSize )
-    : drawList_( drawList ),
-      camera_( camera ),
-      viewportMin_( viewportMin ),
-      viewportSize_( viewportSize )
+debugDraw::debugDraw( ImDrawList* drawList, const debugCamera& camera, const ImVec2& viewportMin, const ImVec2& viewportSize ) : drawList_( drawList ), camera_( camera ), viewportMin_( viewportMin ), viewportSize_( viewportSize )
 {
 }
 
 void debugDraw::DrawGrid( float spacing ) const
 {
-    if( spacing <= 0.0f )
-    {
-        return;
-    }
+    if( spacing <= 0.0f ) return;
 
-    const ImVec2 viewportMax{
-        viewportMin_.x + viewportSize_.x,
-        viewportMin_.y + viewportSize_.y
-    };
+    const ImVec2 viewportMax{ viewportMin_.x + viewportSize_.x, viewportMin_.y + viewportSize_.y };
 
-    const vec2 worldTopLeft =
-        camera_.ScreenToWorld( viewportMin_, viewportMin_, viewportSize_ );
-    const vec2 worldBottomRight =
-        camera_.ScreenToWorld( viewportMax, viewportMin_, viewportSize_ );
+    const vec2 worldTopLeft = camera_.ScreenToWorld( viewportMin_, viewportMin_, viewportSize_ );
+    const vec2 worldBottomRight = camera_.ScreenToWorld( viewportMax, viewportMin_, viewportSize_ );
 
     const float minX = std::min( worldTopLeft.x, worldBottomRight.x );
     const float maxX = std::max( worldTopLeft.x, worldBottomRight.x );
@@ -75,17 +59,12 @@ void debugDraw::DrawGrid( float spacing ) const
     }
 }
 
-void debugDraw::DrawShape(
-    const shapeGeometry& geometry,
-    const transform2& transform,
-    ImU32 outlineColor,
-    ImU32 fillColor ) const
+void debugDraw::DrawShape( const shapeGeometry& geometry, const transform2& transform, ImU32 outlineColor, ImU32 fillColor ) const
 {
     std::visit(
         [&]( const auto& localGeometry )
         {
-            using Geometry =
-                std::remove_cvref_t<decltype( localGeometry )>;
+            using Geometry = std::remove_cvref_t<decltype( localGeometry )>;
 
             if constexpr( std::is_same_v<Geometry, std::monostate> )
             {
@@ -94,74 +73,31 @@ void debugDraw::DrawShape(
             else if constexpr( std::is_same_v<Geometry, circle2> )
             {
                 circle2 worldCircle = localGeometry;
-                worldCircle.center =
-                    TransformPoint(
-                        transform,
-                        localGeometry.center
-                    );
+                worldCircle.center = TransformPoint( transform, localGeometry.center );
 
-                DrawCircle(
-                    worldCircle,
-                    outlineColor,
-                    fillColor
-                );
+                DrawCircle( worldCircle, outlineColor, fillColor );
 
                 // 원은 외곽선만으로 회전을 구분할 수 없으므로
                 // body local +X 방향을 원 둘레까지 그려 회전 상태를 표시함.
-                const vec2 rotationDirection =
-                    TransformVector(
-                        transform,
-                        { localGeometry.radius, 0.0f }
-                    );
+                const vec2 rotationDirection = TransformVector( transform, { localGeometry.radius, 0.0f } );
 
-                DrawSegment(
-                    {
-                        worldCircle.center,
-                        worldCircle.center + rotationDirection
-                    },
-                    outlineColor,
-                    2.0f
-                );
+                DrawSegment( { worldCircle.center, worldCircle.center + rotationDirection }, outlineColor, 2.0f );
             }
             else if constexpr( std::is_same_v<Geometry, capsule2> )
             {
                 capsule2 worldCapsule = localGeometry;
-                worldCapsule.center1 =
-                    TransformPoint(
-                        transform,
-                        localGeometry.center1
-                    );
-                worldCapsule.center2 =
-                    TransformPoint(
-                        transform,
-                        localGeometry.center2
-                    );
+                worldCapsule.center1 = TransformPoint( transform, localGeometry.center1 );
+                worldCapsule.center2 = TransformPoint( transform, localGeometry.center2 );
 
-                DrawCapsule(
-                    worldCapsule,
-                    outlineColor,
-                    fillColor
-                );
+                DrawCapsule( worldCapsule, outlineColor, fillColor );
             }
             else if constexpr( std::is_same_v<Geometry, segment2> )
             {
                 segment2 worldSegment = localGeometry;
-                worldSegment.a =
-                    TransformPoint(
-                        transform,
-                        localGeometry.a
-                    );
-                worldSegment.b =
-                    TransformPoint(
-                        transform,
-                        localGeometry.b
-                    );
+                worldSegment.a = TransformPoint( transform, localGeometry.a );
+                worldSegment.b = TransformPoint( transform, localGeometry.b );
 
-                DrawSegment(
-                    worldSegment,
-                    outlineColor,
-                    3.0f
-                );
+                DrawSegment( worldSegment, outlineColor, 3.0f );
             }
             else if constexpr( std::is_same_v<Geometry, polygon2> )
             {
@@ -169,34 +105,18 @@ void debugDraw::DrawShape(
 
                 for( int i = 0; i < worldPolygon.vertexCount; ++i )
                 {
-                    worldPolygon.vertices[i] =
-                        TransformPoint(
-                            transform,
-                            localGeometry.vertices[i]
-                        );
+                    worldPolygon.vertices[i] = TransformPoint( transform, localGeometry.vertices[i] );
                 }
 
-                worldPolygon.centroid =
-                    TransformPoint(
-                        transform,
-                        localGeometry.centroid
-                    );
+                worldPolygon.centroid = TransformPoint( transform, localGeometry.centroid );
 
-                DrawPolygon(
-                    worldPolygon,
-                    outlineColor,
-                    fillColor
-                );
+                DrawPolygon( worldPolygon, outlineColor, fillColor );
             }
         },
-        geometry
-    );
+        geometry );
 }
 
-void debugDraw::DrawAABB(
-    const aabb2& box,
-    ImU32 color,
-    float thickness ) const
+void debugDraw::DrawAABB( const aabb2& box, ImU32 color, float thickness ) const
 {
     const ImVec2 min = ToScreen( { box.min.x, box.max.y } );
     const ImVec2 max = ToScreen( { box.max.x, box.min.y } );
@@ -204,14 +124,7 @@ void debugDraw::DrawAABB(
     drawList_->AddRect( min, max, color, 0.0f, 0, thickness );
 }
 
-void debugDraw::DrawTree(
-    const dynamicTree& tree,
-    const char* treeName,
-    bool showLeaves,
-    bool showInternal,
-    bool showLabels,
-    ImU32 leafColor,
-    ImU32 internalColor ) const
+void debugDraw::DrawTree( const dynamicTree& tree, const char* treeName, bool showLeaves, bool showInternal, bool showLabels, ImU32 leafColor, ImU32 internalColor ) const
 {
     constexpr ImU32 ROOT_COLOR = IM_COL32( 245, 245, 245, 235 );
     constexpr ImU32 MOVED_COLOR = IM_COL32( 255, 80, 100, 255 );
@@ -219,15 +132,9 @@ void debugDraw::DrawTree(
     tree.VisitNodes(
         [&]( const treeNodeDebugInfo& info )
         {
-            if( info.isLeaf && !showLeaves )
-            {
-                return;
-            }
+            if( info.isLeaf && !showLeaves ) return;
 
-            if( !info.isLeaf && !showInternal )
-            {
-                return;
-            }
+            if( !info.isLeaf && !showInternal ) return;
 
             ImU32 color = info.isLeaf ? leafColor : internalColor;
             float thickness = info.isLeaf ? 2.0f : 1.25f;
@@ -246,82 +153,36 @@ void debugDraw::DrawTree(
 
             DrawAABB( info.aabb, color, thickness );
 
-            if( !showLabels )
-            {
-                return;
-            }
+            if( !showLabels ) return;
 
             char label[256]{};
 
             if( info.isLeaf )
             {
-                std::snprintf(
-                    label,
-                    sizeof( label ),
-                    "%s 잎 노드%d 부모%d 프록시%d 도형%d%s",
-                    treeName,
-                    info.nodeIndex,
-                    info.parentIndex,
-                    info.proxyId,
-                    info.shapeIndex,
-                    info.isMoved ? " 이동됨" : ""
-                );
+                std::snprintf( label, sizeof( label ), "%s 잎 노드%d 부모%d 프록시%d 도형%d%s", treeName, info.nodeIndex, info.parentIndex, info.proxyId, info.shapeIndex, info.isMoved ? " 이동됨" : "" );
             }
             else
             {
-                std::snprintf(
-                    label,
-                    sizeof( label ),
-                    "%s 내부 노드%d 부모%d 자식%d 높이%d%s",
-                    treeName,
-                    info.nodeIndex,
-                    info.parentIndex,
-                    info.childPair,
-                    info.height,
-                    info.isMoved ? " 이동됨" : ""
-                );
+                std::snprintf( label, sizeof( label ), "%s 내부 노드%d 부모%d 자식%d 높이%d%s", treeName, info.nodeIndex, info.parentIndex, info.childPair, info.height, info.isMoved ? " 이동됨" : "" );
             }
 
             DrawLabel( Center( info.aabb ), label, color );
-        }
-    );
+        } );
 }
 
-void debugDraw::DrawSegment(
-    const segment2& segment,
-    ImU32 color,
-    float thickness ) const
+void debugDraw::DrawSegment( const segment2& segment, ImU32 color, float thickness ) const
 {
-    drawList_->AddLine(
-        ToScreen( segment.a ),
-        ToScreen( segment.b ),
-        color,
-        thickness
-    );
+    drawList_->AddLine( ToScreen( segment.a ), ToScreen( segment.b ), color, thickness );
 }
 
-void debugDraw::DrawPoint(
-    const vec2& point,
-    ImU32 color,
-    float radiusPixels ) const
+void debugDraw::DrawPoint( const vec2& point, ImU32 color, float radiusPixels ) const
 {
-    drawList_->AddCircleFilled(
-        ToScreen( point ),
-        radiusPixels,
-        color
-    );
+    drawList_->AddCircleFilled( ToScreen( point ), radiusPixels, color );
 }
 
-void debugDraw::DrawArrow(
-    const vec2& start,
-    const vec2& direction,
-    ImU32 color,
-    float length ) const
+void debugDraw::DrawArrow( const vec2& start, const vec2& direction, ImU32 color, float length ) const
 {
-    if( LengthSquared( direction ) == 0.0f || length <= 0.0f )
-    {
-        return;
-    }
+    if( LengthSquared( direction ) == 0.0f || length <= 0.0f ) return;
 
     const vec2 normal = Normalize( direction );
     const vec2 end = start + normal * length;
@@ -334,25 +195,12 @@ void debugDraw::DrawArrow(
     const vec2 headLeft = headBase + perpendicular * headWidth;
     const vec2 headRight = headBase - perpendicular * headWidth;
 
-    drawList_->AddLine(
-        ToScreen( start ),
-        ToScreen( end ),
-        color,
-        2.0f
-    );
+    drawList_->AddLine( ToScreen( start ), ToScreen( end ), color, 2.0f );
 
-    drawList_->AddTriangleFilled(
-        ToScreen( end ),
-        ToScreen( headLeft ),
-        ToScreen( headRight ),
-        color
-    );
+    drawList_->AddTriangleFilled( ToScreen( end ), ToScreen( headLeft ), ToScreen( headRight ), color );
 }
 
-void debugDraw::DrawCircle(
-    const circle2& circle,
-    ImU32 outlineColor,
-    ImU32 fillColor ) const
+void debugDraw::DrawCircle( const circle2& circle, ImU32 outlineColor, ImU32 fillColor ) const
 {
     const ImVec2 center = ToScreen( circle.center );
     const float radius = circle.radius * camera_.pixelsPerMeter;
@@ -361,10 +209,7 @@ void debugDraw::DrawCircle(
     drawList_->AddCircle( center, radius, outlineColor, 0, 2.0f );
 }
 
-void debugDraw::DrawCapsule(
-    const capsule2& capsule,
-    ImU32 outlineColor,
-    ImU32 fillColor ) const
+void debugDraw::DrawCapsule( const capsule2& capsule, ImU32 outlineColor, ImU32 fillColor ) const
 {
     const ImVec2 center1 = ToScreen( capsule.center1 );
     const ImVec2 center2 = ToScreen( capsule.center2 );
@@ -384,38 +229,19 @@ void debugDraw::DrawCapsule(
         return;
     }
 
-    const vec2 normal{
-        -axis.y / axisLength * capsule.radius,
-        axis.x / axisLength * capsule.radius
-    };
+    const vec2 normal{ -axis.y / axisLength * capsule.radius, axis.x / axisLength * capsule.radius };
 
-    drawList_->AddLine(
-        ToScreen( capsule.center1 + normal ),
-        ToScreen( capsule.center2 + normal ),
-        outlineColor,
-        2.0f
-    );
+    drawList_->AddLine( ToScreen( capsule.center1 + normal ), ToScreen( capsule.center2 + normal ), outlineColor, 2.0f );
 
-    drawList_->AddLine(
-        ToScreen( capsule.center1 - normal ),
-        ToScreen( capsule.center2 - normal ),
-        outlineColor,
-        2.0f
-    );
+    drawList_->AddLine( ToScreen( capsule.center1 - normal ), ToScreen( capsule.center2 - normal ), outlineColor, 2.0f );
 
     drawList_->AddCircle( center1, radius, outlineColor, 0, 2.0f );
     drawList_->AddCircle( center2, radius, outlineColor, 0, 2.0f );
 }
 
-void debugDraw::DrawPolygon(
-    const polygon2& polygon,
-    ImU32 outlineColor,
-    ImU32 fillColor ) const
+void debugDraw::DrawPolygon( const polygon2& polygon, ImU32 outlineColor, ImU32 fillColor ) const
 {
-    if( polygon.vertexCount < 2 )
-    {
-        return;
-    }
+    if( polygon.vertexCount < 2 ) return;
 
     std::array<ImVec2, MAX_POLYGON_VERTICES> vertices{};
 
@@ -426,34 +252,17 @@ void debugDraw::DrawPolygon(
 
     if( polygon.vertexCount >= 3 )
     {
-        drawList_->AddConvexPolyFilled(
-            vertices.data(),
-            polygon.vertexCount,
-            fillColor
-        );
+        drawList_->AddConvexPolyFilled( vertices.data(), polygon.vertexCount, fillColor );
     }
 
-    drawList_->AddPolyline(
-        vertices.data(),
-        polygon.vertexCount,
-        outlineColor,
-        ImDrawFlags_Closed,
-        2.0f
-    );
+    drawList_->AddPolyline( vertices.data(), polygon.vertexCount, outlineColor, ImDrawFlags_Closed, 2.0f );
 }
 
-void debugDraw::DrawLabel(
-    const vec2& worldPosition,
-    const char* text,
-    ImU32 color ) const
+void debugDraw::DrawLabel( const vec2& worldPosition, const char* text, ImU32 color ) const
 {
     const ImVec2 screen = ToScreen( worldPosition );
 
-    drawList_->AddText(
-        { screen.x + 8.0f, screen.y - 18.0f },
-        color,
-        text
-    );
+    drawList_->AddText( { screen.x + 8.0f, screen.y - 18.0f }, color, text );
 }
 
 ImVec2 debugDraw::ToScreen( const vec2& world ) const

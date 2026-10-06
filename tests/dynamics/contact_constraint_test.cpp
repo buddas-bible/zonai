@@ -19,10 +19,7 @@ void check( bool condition, const std::source_location& location = std::source_l
     }
 }
 
-bool NearlyEqual(
-    float a,
-    float b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( float a, float b, float epsilon = 1e-5f )
 {
     return std::fabs( a - b ) <= epsilon;
 }
@@ -69,21 +66,13 @@ int main()
         bodyStateB.linearVelocity = { -1.0f, 0.0f };
         bodyStateB.angularVelocity = -1.0f;
 
-        const contactConstraint2 constraint =
-            PrepareContactConstraint(
-                contactSim,
-                bodySimA,
-                bodyStateA,
-                bodySimB,
-                bodyStateB
-            );
+        const contactConstraint2 constraint = PrepareContactConstraint( contactSim, bodySimA, bodyStateA, bodySimB, bodyStateB );
 
         check( constraint.pointCount == 1 );
         check( NearlyEqual( constraint.normal.x, 1.0f ) );
         check( NearlyEqual( constraint.normal.y, 0.0f ) );
 
-        const contactConstraintPoint2& point =
-            constraint.points[0];
+        const contactConstraintPoint2& point = constraint.points[0];
 
         check( NearlyEqual( point.anchorA.x, 1.0f ) );
         check( NearlyEqual( point.anchorA.y, 1.0f ) );
@@ -116,12 +105,7 @@ int main()
         *     vn = dot( (0,1)-(-1,2), (1,0) )
         *        = 1
         */
-        check(
-            NearlyEqual(
-                point.relativeNormalVelocity,
-                1.0f
-            )
-        );
+        check( NearlyEqual( point.relativeNormalVelocity, 1.0f ) );
 
         /*
         * rnA = rA x n = -1
@@ -132,12 +116,7 @@ int main()
         *
         * normalMass = 1 / K
         */
-        check(
-            NearlyEqual(
-                point.normalMass,
-                1.0f / 3.75f
-            )
-        );
+        check( NearlyEqual( point.normalMass, 1.0f / 3.75f ) );
     }
 
     // body A가 Static처럼 inverse mass / inertia가 0이면
@@ -168,33 +147,15 @@ int main()
         bodyState bodyStateB{};
         bodyStateB.linearVelocity = { 0.0f, -3.0f };
 
-        const contactConstraint2 constraint =
-            PrepareContactConstraint(
-                contactSim,
-                bodySimA,
-                bodyStateA,
-                bodySimB,
-                bodyStateB
-            );
+        const contactConstraint2 constraint = PrepareContactConstraint( contactSim, bodySimA, bodyStateA, bodySimB, bodyStateB );
 
-        const contactConstraintPoint2& point =
-            constraint.points[0];
+        const contactConstraintPoint2& point = constraint.points[0];
 
         // B가 normal 반대 방향으로 움직이므로 서로 접근 중.
-        check(
-            NearlyEqual(
-                point.relativeNormalVelocity,
-                -3.0f
-            )
-        );
+        check( NearlyEqual( point.relativeNormalVelocity, -3.0f ) );
 
         // K = invMassB = 0.5 -> normalMass = 2.
-        check(
-            NearlyEqual(
-                point.normalMass,
-                2.0f
-            )
-        );
+        check( NearlyEqual( point.normalMass, 2.0f ) );
     }
 
     // Static A와 Dynamic B가 서로 접근할 때 normal impulse가 B의 접근 속도를 제거함.
@@ -209,8 +170,7 @@ int main()
         constraint.invInertiaB = 0.0f;
         constraint.pointCount = 1;
 
-        contactConstraintPoint2& point =
-            constraint.points[0];
+        contactConstraintPoint2& point = constraint.points[0];
 
         point.normalMass = 2.0f;
 
@@ -219,12 +179,7 @@ int main()
         bodyState bodyStateB{};
         bodyStateB.linearVelocity = { -3.0f, 0.0f };
 
-        SolveContactConstraint(
-            constraint,
-            bodyStateA,
-            bodyStateB,
-            false
-        );
+        SolveContactConstraint( constraint, bodyStateA, bodyStateB, false );
 
         // DeltaLambda = -normalMass * vn
         //             = -2 * (-3) = 6
@@ -232,18 +187,8 @@ int main()
         // DeltaV_B = invMassB * 6 = 3
         //
         // 따라서 -3 + 3 = 0.
-        check(
-            NearlyEqual(
-                bodyStateB.linearVelocity.x,
-                0.0f
-            )
-        );
-        check(
-            NearlyEqual(
-                point.normalImpulse,
-                6.0f
-            )
-        );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, 0.0f ) );
+        check( NearlyEqual( point.normalImpulse, 6.0f ) );
     }
 
     // 이미 분리 중이면 Contact가 음수 impulse로 서로 끌어당기면 안 됨.
@@ -262,24 +207,11 @@ int main()
         bodyState bodyStateB{};
         bodyStateB.linearVelocity = { 3.0f, 0.0f };
 
-        SolveContactConstraint(
-            constraint,
-            bodyStateA,
-            bodyStateB,
-            false
-        );
+        SolveContactConstraint( constraint, bodyStateA, bodyStateB, false );
 
-        check(
-            NearlyEqual(
-                bodyStateB.linearVelocity.x,
-                3.0f
-            )
-        );
-        check(
-            constraint.points[0].normalImpulse == 0.0f
-        );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, 3.0f ) );
+        check( constraint.points[0].normalImpulse == 0.0f );
     }
-
 
     // Prepare 단계에서 ContactSim에 캐싱된 normal impulse를 constraint 초기값으로 가져옴.
     {
@@ -304,28 +236,11 @@ int main()
         bodyState bodyStateA{};
         bodyState bodyStateB{};
 
-        const contactConstraint2 constraint =
-            PrepareContactConstraint(
-                contactSim,
-                bodySimA,
-                bodyStateA,
-                bodySimB,
-                bodyStateB
-            );
+        const contactConstraint2 constraint = PrepareContactConstraint( contactSim, bodySimA, bodyStateA, bodySimB, bodyStateB );
 
         check( constraint.contactId == 7 );
-        check(
-            NearlyEqual(
-                constraint.points[0].normalImpulse,
-                6.0f
-            )
-        );
-        check(
-            NearlyEqual(
-                constraint.points[0].tangentImpulse,
-                -1.5f
-            )
-        );
+        check( NearlyEqual( constraint.points[0].normalImpulse, 6.0f ) );
+        check( NearlyEqual( constraint.points[0].tangentImpulse, -1.5f ) );
     }
 
     // Warm start는 이전 step의 누적 impulse 전체를 solver 시작 전에 한 번 적용함.
@@ -341,8 +256,7 @@ int main()
         constraint.invInertiaB = 0.0f;
         constraint.pointCount = 1;
 
-        contactConstraintPoint2& point =
-            constraint.points[0];
+        contactConstraintPoint2& point = constraint.points[0];
 
         point.normalMass = 2.0f;
         point.normalImpulse = 6.0f;
@@ -352,11 +266,7 @@ int main()
         bodyState bodyStateB{};
         bodyStateB.linearVelocity = { -3.0f, 0.0f };
 
-        WarmStartContactConstraint(
-            constraint,
-            bodyStateA,
-            bodyStateB
-        );
+        WarmStartContactConstraint( constraint, bodyStateA, bodyStateB );
 
         // 이전 impulse 6을 먼저 적용하면:
         //
@@ -365,58 +275,28 @@ int main()
         //          = 3
         //
         // 따라서 -3 + 3 = 0.
-        check(
-            NearlyEqual(
-                bodyStateB.linearVelocity.x,
-                0.0f
-            )
-        );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, 0.0f ) );
 
         // 이미 warm start 결과로 vn == 0이므로
         // 다음 solve에서는 추가 impulse가 없어야 함.
-        SolveContactConstraint(
-            constraint,
-            bodyStateA,
-            bodyStateB,
-            false
-        );
+        SolveContactConstraint( constraint, bodyStateA, bodyStateB, false );
 
-        check(
-            NearlyEqual(
-                point.normalImpulse,
-                6.0f
-            )
-        );
+        check( NearlyEqual( point.normalImpulse, 6.0f ) );
 
         // warm start로 실제 적용한 normal impulse도 이번 step의 compression 양으로 추적함.
-        check(
-            NearlyEqual(
-                point.totalNormalImpulse,
-                6.0f
-            )
-        );
+        check( NearlyEqual( point.totalNormalImpulse, 6.0f ) );
     }
 
     // Hertz / damping ratio로 만든 softness는 massScale + impulseScale = 1을 유지함.
     {
-        const contactSoftness2 softness =
-            MakeContactSoftness(
-                7.5f,
-                10.0f,
-                1.0f / 60.0f
-            );
+        const contactSoftness2 softness = MakeContactSoftness( 7.5f, 10.0f, 1.0f / 60.0f );
 
         check( softness.biasRate > 0.0f );
         check( softness.massScale > 0.0f );
         check( softness.massScale < 1.0f );
         check( softness.impulseScale > 0.0f );
         check( softness.impulseScale < 1.0f );
-        check(
-            NearlyEqual(
-                softness.massScale + softness.impulseScale,
-                1.0f
-            )
-        );
+        check( NearlyEqual( softness.massScale + softness.impulseScale, 1.0f ) );
     }
 
     // Push는 penetration을 줄일 분리 속도를 만들고,
@@ -434,8 +314,7 @@ int main()
         constraint.maxPushSpeed = 3.0f;
         constraint.pointCount = 1;
 
-        contactConstraintPoint2& point =
-            constraint.points[0];
+        contactConstraintPoint2& point = constraint.points[0];
 
         point.baseSeparation = -0.1f;
         point.normalMass = 1.0f;
@@ -443,49 +322,19 @@ int main()
         bodyState bodyStateA{};
         bodyState bodyStateB{};
 
-        SolveContactConstraint(
-            constraint,
-            bodyStateA,
-            bodyStateB,
-            true
-        );
+        SolveContactConstraint( constraint, bodyStateA, bodyStateB, true );
 
         // velocityBias = 0.5 * 2 * -0.1 = -0.1
         // DeltaLambda = -(0 + -0.1) = 0.1
-        check(
-            NearlyEqual(
-                bodyStateB.linearVelocity.x,
-                0.1f
-            )
-        );
-        check(
-            NearlyEqual(
-                point.normalImpulse,
-                0.1f
-            )
-        );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, 0.1f ) );
+        check( NearlyEqual( point.normalImpulse, 0.1f ) );
 
         // 실제 world::Step에서는 여기 사이에 position integration이 일어남.
         // Relax는 correction velocity만 제거하고 이미 이동한 position은 보존함.
-        SolveContactConstraint(
-            constraint,
-            bodyStateA,
-            bodyStateB,
-            false
-        );
+        SolveContactConstraint( constraint, bodyStateA, bodyStateB, false );
 
-        check(
-            NearlyEqual(
-                bodyStateB.linearVelocity.x,
-                0.0f
-            )
-        );
-        check(
-            NearlyEqual(
-                point.normalImpulse,
-                0.0f
-            )
-        );
+        check( NearlyEqual( bodyStateB.linearVelocity.x, 0.0f ) );
+        check( NearlyEqual( point.normalImpulse, 0.0f ) );
     }
 
     // Position integration에서 생긴 deltaPosition을 반영해 현재 separation을 다시 계산함.
@@ -572,23 +421,11 @@ int main()
         bodyState bodyStateA{};
         bodyState bodyStateB{};
 
-        const contactConstraint2 constraint =
-            PrepareContactConstraint(
-                contactSim,
-                bodySimA,
-                bodyStateA,
-                bodySimB,
-                bodyStateB
-            );
+        const contactConstraint2 constraint = PrepareContactConstraint( contactSim, bodySimA, bodyStateA, bodySimB, bodyStateB );
 
         // tangent=(1,0), lever arm=0이므로
         // Kt=invMassB=0.5 -> tangentMass=2.
-        check(
-            NearlyEqual(
-                constraint.points[0].tangentMass,
-                2.0f
-            )
-        );
+        check( NearlyEqual( constraint.points[0].tangentMass, 2.0f ) );
     }
 
     // Warm start는 normal impulse뿐 아니라 이전 tangent impulse도 함께 적용함.
@@ -606,11 +443,7 @@ int main()
         bodyState bodyStateA{};
         bodyState bodyStateB{};
 
-        WarmStartContactConstraint(
-            constraint,
-            bodyStateA,
-            bodyStateB
-        );
+        WarmStartContactConstraint( constraint, bodyStateA, bodyStateB );
 
         // normal=(0,1), tangent=(1,0)
         check( NearlyEqual( bodyStateB.linearVelocity.x, -0.5f ) );
@@ -628,8 +461,7 @@ int main()
         constraint.friction = 0.5f;
         constraint.pointCount = 1;
 
-        contactConstraintPoint2& point =
-            constraint.points[0];
+        contactConstraintPoint2& point = constraint.points[0];
 
         point.normalMass = 1.0f;
         point.tangentMass = 1.0f;
@@ -639,12 +471,7 @@ int main()
         bodyState bodyStateB{};
         bodyStateB.linearVelocity = { 4.0f, 0.0f };
 
-        SolveContactConstraint(
-            constraint,
-            bodyStateA,
-            bodyStateB,
-            false
-        );
+        SolveContactConstraint( constraint, bodyStateA, bodyStateB, false );
 
         // 필요한 friction impulse는 -4지만
         // max = mu * normalImpulse = 0.5 * 2 = 1.
@@ -669,12 +496,7 @@ int main()
         bodyState bodyStateB{};
         bodyStateB.linearVelocity = { 4.0f, 0.0f };
 
-        SolveContactConstraint(
-            constraint,
-            bodyStateA,
-            bodyStateB,
-            false
-        );
+        SolveContactConstraint( constraint, bodyStateA, bodyStateB, false );
 
         check( NearlyEqual( constraint.points[0].tangentImpulse, 0.0f ) );
         check( NearlyEqual( bodyStateB.linearVelocity.x, 4.0f ) );
@@ -691,8 +513,7 @@ int main()
         constraint.invTimeStep = 60.0f;
         constraint.pointCount = 1;
 
-        contactConstraintPoint2& point =
-            constraint.points[0];
+        contactConstraintPoint2& point = constraint.points[0];
 
         point.baseSeparation = 0.01f;
         point.normalMass = 1.0f;
@@ -701,22 +522,12 @@ int main()
         bodyState bodyStateB{};
         bodyStateB.linearVelocity = { -2.0f, 0.0f };
 
-        SolveContactConstraint(
-            constraint,
-            bodyStateA,
-            bodyStateB,
-            true
-        );
+        SolveContactConstraint( constraint, bodyStateA, bodyStateB, true );
 
         check( NearlyEqual( bodyStateB.linearVelocity.x, -0.6f ) );
         check( NearlyEqual( point.normalImpulse, 1.4f ) );
 
-        SolveContactConstraint(
-            constraint,
-            bodyStateA,
-            bodyStateB,
-            false
-        );
+        SolveContactConstraint( constraint, bodyStateA, bodyStateB, false );
 
         check( NearlyEqual( bodyStateB.linearVelocity.x, -0.6f ) );
     }
@@ -732,8 +543,7 @@ int main()
         constraint.restitution = 0.5f;
         constraint.pointCount = 1;
 
-        contactConstraintPoint2& point =
-            constraint.points[0];
+        contactConstraintPoint2& point = constraint.points[0];
 
         point.normalMass = 1.0f;
         point.normalImpulse = 4.0f;
@@ -743,12 +553,7 @@ int main()
         bodyState bodyStateA{};
         bodyState bodyStateB{};
 
-        ApplyRestitutionContactConstraint(
-            constraint,
-            bodyStateA,
-            bodyStateB,
-            1.0f
-        );
+        ApplyRestitutionContactConstraint( constraint, bodyStateA, bodyStateB, 1.0f );
 
         // normal solve가 vn을 0까지 막았다고 가정하면
         // e=0.5, 충돌 전 vn=-4이므로 최종 목표 vn은 +2임.
@@ -770,8 +575,7 @@ int main()
         constraint.invTimeStep = 10.0f;
         constraint.pointCount = 1;
 
-        contactConstraintPoint2& point =
-            constraint.points[0];
+        contactConstraintPoint2& point = constraint.points[0];
 
         point.baseSeparation = 0.1f;
         point.normalMass = 1.0f;
@@ -783,12 +587,7 @@ int main()
         bodyState bodyStateB{};
         bodyStateB.linearVelocity = { -1.0f, 0.0f };
 
-        ApplyRestitutionContactConstraint(
-            constraint,
-            bodyStateA,
-            bodyStateB,
-            1.0f
-        );
+        ApplyRestitutionContactConstraint( constraint, bodyStateA, bodyStateB, 1.0f );
 
         // compressionImpulse=0이므로 restitution은 armed되지 않음.
         // speculative bias s/dt=1이 현재 vn=-1을 그대로 허용함.
@@ -808,8 +607,7 @@ int main()
         constraint.restitution = 1.0f;
         constraint.pointCount = 1;
 
-        contactConstraintPoint2& point =
-            constraint.points[0];
+        contactConstraintPoint2& point = constraint.points[0];
 
         point.normalMass = 1.0f;
         point.normalImpulse = 0.5f;
@@ -818,12 +616,7 @@ int main()
         bodyState bodyStateA{};
         bodyState bodyStateB{};
 
-        ApplyRestitutionContactConstraint(
-            constraint,
-            bodyStateA,
-            bodyStateB,
-            1.0f
-        );
+        ApplyRestitutionContactConstraint( constraint, bodyStateA, bodyStateB, 1.0f );
 
         check( NearlyEqual( bodyStateB.linearVelocity.x, 0.0f ) );
         check( NearlyEqual( point.normalImpulse, 0.5f ) );
@@ -860,7 +653,7 @@ int main()
         }
     }
 
-#pragma endregion
+#pragma endregion RestitutionConservation
 
     // Solve가 끝난 누적 impulse를 persistent ContactSim에 다시 저장함.
     {
@@ -874,23 +667,10 @@ int main()
         contactSim.contactId = 3;
         contactSim.manifold.pointCount = 1;
 
-        StoreContactImpulses(
-            constraint,
-            contactSim
-        );
+        StoreContactImpulses( constraint, contactSim );
 
-        check(
-            NearlyEqual(
-                contactSim.impulses[0].normalImpulse,
-                4.25f
-            )
-        );
-        check(
-            NearlyEqual(
-                contactSim.impulses[0].tangentImpulse,
-                -0.75f
-            )
-        );
+        check( NearlyEqual( contactSim.impulses[0].normalImpulse, 4.25f ) );
+        check( NearlyEqual( contactSim.impulses[0].tangentImpulse, -0.75f ) );
     }
 
     return 0;

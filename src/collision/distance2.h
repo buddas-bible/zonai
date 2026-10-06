@@ -20,11 +20,7 @@ struct segmentDistanceResult2
 };
 
 // 두 선분 위의 최근접점을 계산하고 endpoint 범위로 fraction을 제한함.
-segmentDistanceResult2 SegmentDistance(
-    const vec2& p1,
-    const vec2& q1,
-    const vec2& p2,
-    const vec2& q2 );
+segmentDistanceResult2 SegmentDistance( const vec2& p1, const vec2& q1, const vec2& p2, const vec2& q2 );
 
 struct simplexCache2
 {
@@ -56,8 +52,6 @@ struct distanceOutput2
 
 // GJK로 두 convex proxy 사이의 최소 거리를 계산함.
 // cache는 이전 simplex를 다음 호출의 초기 simplex로 재사용하기 위한 저장소임.
-distanceOutput2 ShapeDistance(
-    const distanceInput2& input,
-    simplexCache2& cache );
+distanceOutput2 ShapeDistance( const distanceInput2& input, simplexCache2& cache );
 
 } // namespace zonai

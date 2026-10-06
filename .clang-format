@@ -1,0 +1,39 @@
+BasedOnStyle: Microsoft
+IndentWidth: 4
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+UseTab: Never
+ColumnLimit: 1000
+AlignAfterOpenBracket: false
+AlignOperands: DontAlign
+BreakBeforeBraces: Allman
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortBlocksOnASingleLine: Never
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: false
+AllowShortLambdasOnASingleLine: None
+NamespaceIndentation: None
+WrapNamespaceBodyWithEmptyLines: Always
+BinPackArguments: true
+BinPackParameters: true
+Cpp11BracedListStyle: false
+SpaceBeforeParens: Never
+SpacesInParens: Custom
+SpacesInParensOptions:
+  InConditionalStatements: true
+  InCStyleCasts: true
+  InEmptyParentheses: false
+  Other: true
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+SortIncludes: Never
+SortUsingDeclarations: Never
+IncludeBlocks: Preserve
+ReflowComments: Never
+BreakStringLiterals: false
+FixNamespaceComments: false
+RemoveBracesLLVM: false
+SeparateDefinitionBlocks: Always
+MaxEmptyLinesToKeep: 1
+LineEnding: DeriveLF

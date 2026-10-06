@@ -5,21 +5,14 @@
 
 using namespace zonai;
 
-bool NearlyEqual(
-    float a,
-    float b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( float a, float b, float epsilon = 1e-5f )
 {
     return std::fabs( a - b ) <= epsilon;
 }
 
-bool NearlyEqual(
-    const vec2& a,
-    const vec2& b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( const vec2& a, const vec2& b, float epsilon = 1e-5f )
 {
-    return NearlyEqual( a.x, b.x, epsilon ) &&
-        NearlyEqual( a.y, b.y, epsilon );
+    return NearlyEqual( a.x, b.x, epsilon ) && NearlyEqual( a.y, b.y, epsilon );
 }
 
 int main()
@@ -36,8 +29,7 @@ int main()
         transform2 transformB{};
         transformB.position = { 0.0f, 1.1f };
 
-        const localManifold2 manifold =
-            CollideCapsules( a, b, transformB );
+        const localManifold2 manifold = CollideCapsules( a, b, transformB );
 
         assert( manifold.pointCount == 0 );
     }
@@ -54,8 +46,7 @@ int main()
         b.center2 = { 4.0f, 0.0f };
         b.radius = 0.5f;
 
-        const localManifold2 manifold =
-            CollideCapsules( a, b, {} );
+        const localManifold2 manifold = CollideCapsules( a, b, {} );
 
         assert( manifold.pointCount == 1 );
         assert( NearlyEqual( manifold.normal, { 1.0f, 0.0f } ) );
@@ -78,8 +69,7 @@ int main()
         transform2 transformB{};
         transformB.position = { 0.0f, 1.0f };
 
-        const localManifold2 manifold =
-            CollideCapsules( a, b, transformB );
+        const localManifold2 manifold = CollideCapsules( a, b, transformB );
 
         assert( manifold.pointCount == 2 );
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
@@ -90,12 +80,7 @@ int main()
         const vec2 point0 = manifold.points[0].point;
         const vec2 point1 = manifold.points[1].point;
 
-        assert(
-            ( NearlyEqual( point0, { -1.0f, 0.5f } ) &&
-              NearlyEqual( point1, { 1.0f, 0.5f } ) ) ||
-            ( NearlyEqual( point1, { -1.0f, 0.5f } ) &&
-              NearlyEqual( point0, { 1.0f, 0.5f } ) )
-        );
+        assert( ( NearlyEqual( point0, { -1.0f, 0.5f } ) && NearlyEqual( point1, { 1.0f, 0.5f } ) ) || ( NearlyEqual( point1, { -1.0f, 0.5f } ) && NearlyEqual( point0, { 1.0f, 0.5f } ) ) );
     }
 
     {
@@ -110,8 +95,7 @@ int main()
         transform2 transformB{};
         transformB.position = { 0.0f, 0.75f };
 
-        const localManifold2 manifold =
-            CollideCapsules( a, b, transformB );
+        const localManifold2 manifold = CollideCapsules( a, b, transformB );
 
         assert( manifold.pointCount == 2 );
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
@@ -136,8 +120,7 @@ int main()
         transformB.position = { 1.6f, 0.0f };
         transformB.rotation = rot2::FromRadians( 3.1415926535f * 0.5f );
 
-        const localManifold2 manifold =
-            CollideCapsules( a, b, transformB );
+        const localManifold2 manifold = CollideCapsules( a, b, transformB );
 
         assert( manifold.pointCount == 1 );
         assert( NearlyEqual( manifold.normal, { 1.0f, 0.0f } ) );

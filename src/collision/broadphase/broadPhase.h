@@ -36,11 +36,9 @@ constexpr shapePairKey MakeShapePairKey( std::int32_t shapeIndexA, std::int32_t 
 
 // broadPhase가 찾은 후보 shape pair를 전달하는 callback 규약.
 template <typename Callback>
-concept broadPhasePairCallback =
-    requires( Callback& callback, std::int32_t shapeIndexA, std::int32_t shapeIndexB )
-    {
-        { callback( shapeIndexA, shapeIndexB ) } -> std::same_as<void>;
-    };
+concept broadPhasePairCallback = requires( Callback& callback, std::int32_t shapeIndexA, std::int32_t shapeIndexB ) {
+    { callback( shapeIndexA, shapeIndexB ) } -> std::same_as<void>;
+};
 
 // stable proxy id와 body type을 하나의 key로 묶음.
 constexpr proxyKey MakeProxyKey( std::int32_t proxyId, bodyType type )
@@ -81,8 +79,7 @@ private:
     static constexpr std::size_t CANDIDATE_BATCH_SIZE = 32;
 
     // leaf pair를 고정 크기 batch에 모은 뒤 기존 Contact pair를 한 번에 걸러냄.
-    template <typename Callback>
-    struct pairContext
+    template <typename Callback> struct pairContext
     {
         const hashSet& pairSet;
         Callback& callback;
@@ -126,10 +123,7 @@ private:
                 const shapePairKey pairKey = MakeShapePairKey( candidate.shapeIndexA, candidate.shapeIndexB );
 
                 // 이미 Contact가 존재하는 pair는 새 broadPhase 후보로 다시 보고하지 않음.
-                if( pairSet.Contains( pairKey ) )
-                {
-                    continue;
-                }
+                if( pairSet.Contains( pairKey ) ) continue;
 
                 if( !shapes.empty() )
                 {
@@ -142,23 +136,13 @@ private:
                     const shape& shapeB = shapes[candidate.shapeIndexB];
 
                     // 같은 Body의 shape끼리는 Contact를 만들지 않음.
-                    if( shapeA.bodyId == shapeB.bodyId )
-                    {
-                        continue;
-                    }
+                    if( shapeA.bodyId == shapeB.bodyId ) continue;
 
                     // Sensor overlap은 Contact와 별도 단계에서 처리하므로 여기서는 제외함.
-                    if( shapeA.sensorIndex != shape::NULL_INDEX ||
-                        shapeB.sensorIndex != shape::NULL_INDEX )
-                    {
-                        continue;
-                    }
+                    if( shapeA.sensorIndex != shape::NULL_INDEX || shapeB.sensorIndex != shape::NULL_INDEX ) continue;
 
                     // 양쪽 shape의 category / mask / group 설정이 충돌을 허용해야 함.
-                    if( !ShouldShapesCollide( shapeA.filter, shapeB.filter ) )
-                    {
-                        continue;
-                    }
+                    if( !ShouldShapesCollide( shapeA.filter, shapeB.filter ) ) continue;
                 }
 
                 callback( candidate.shapeIndexA, candidate.shapeIndexB );
@@ -192,23 +176,16 @@ public:
     bool HasPair( shapePairKey pairKey ) const;
 
     // broadPhase의 한 update에서 후보 탐색과 tree maintenance를 순서대로 처리함.
-    template <broadPhasePairCallback Callback>
-    void UpdatePairs( Callback&& callback )
+    template <broadPhasePairCallback Callback> void UpdatePairs( Callback&& callback )
     {
         dynamicTree& staticTree = GetTree( bodyType::Static );
         dynamicTree& kinematicTree = GetTree( bodyType::Kinematic );
         dynamicTree& dynamicTree = GetTree( bodyType::Dynamic );
 
         // 최신 Box2D처럼 세 tree가 모두 깨끗하면 pair 탐색과 rebuild를 건너뜀.
-        const bool needUpdate =
-            staticTree.HasMoved() ||
-            kinematicTree.NeedsRebuild() ||
-            dynamicTree.NeedsRebuild();
+        const bool needUpdate = staticTree.HasMoved() || kinematicTree.NeedsRebuild() || dynamicTree.NeedsRebuild();
 
-        if( !needUpdate )
-        {
-            return;
-        }
+        if( !needUpdate ) return;
 
         // moved 상태를 소비하기 전에 새 broadPhase 후보를 모두 찾음.
         FindPairs( callback );
@@ -220,24 +197,15 @@ public:
     }
 
     // shape runtime 상태를 사용해 후보를 필터링한 뒤 tree maintenance까지 처리함.
-    template <broadPhasePairCallback Callback>
-    void UpdatePairs(
-        std::span<const shape> shapes,
-        Callback&& callback )
+    template <broadPhasePairCallback Callback> void UpdatePairs( std::span<const shape> shapes, Callback&& callback )
     {
         dynamicTree& staticTree = GetTree( bodyType::Static );
         dynamicTree& kinematicTree = GetTree( bodyType::Kinematic );
         dynamicTree& dynamicTree = GetTree( bodyType::Dynamic );
 
-        const bool needUpdate =
-            staticTree.HasMoved() ||
-            kinematicTree.NeedsRebuild() ||
-            dynamicTree.NeedsRebuild();
+        const bool needUpdate = staticTree.HasMoved() || kinematicTree.NeedsRebuild() || dynamicTree.NeedsRebuild();
 
-        if( !needUpdate )
-        {
-            return;
-        }
+        if( !needUpdate ) return;
 
         FindPairs( shapes, callback );
 
@@ -248,8 +216,7 @@ public:
 
     // 세 broadPhase 탐색 경로를 한 번에 실행해 새 충돌 후보를 모음.
     // moved flag 소비와 tree rebuild는 별도 단계에서 처리함.
-    template <broadPhasePairCallback Callback>
-    void FindPairs( Callback&& callback ) const
+    template <broadPhasePairCallback Callback> void FindPairs( Callback&& callback ) const
     {
         // Box2D처럼 dynamic tree를 static / kinematic tree와 먼저 교차 검사함.
         FindDynamicStaticPairs( callback );
@@ -260,10 +227,7 @@ public:
     }
 
     // shape runtime 상태를 세 탐색 경로 모두에 전달해 후보를 필터링함.
-    template <broadPhasePairCallback Callback>
-    void FindPairs(
-        std::span<const shape> shapes,
-        Callback&& callback ) const
+    template <broadPhasePairCallback Callback> void FindPairs( std::span<const shape> shapes, Callback&& callback ) const
     {
         FindDynamicStaticPairs( shapes, callback );
         FindDynamicKinematicPairs( shapes, callback );
@@ -272,8 +236,7 @@ public:
 
     // moved sibling pair를 seed로 dynamic tree 내부의 새 충돌 후보를 찾음.
     // callback으로 전달되는 shape pair는 broadPhase 후보이며 실제 충돌이 확정된 것은 아님.
-    template <broadPhasePairCallback Callback>
-    void FindDynamicSelfPairs( Callback&& callback ) const
+    template <broadPhasePairCallback Callback> void FindDynamicSelfPairs( Callback&& callback ) const
     {
         const dynamicTree& tree = GetTree( bodyType::Dynamic );
         pairContext<Callback> context{ pairSet_, callback };
@@ -297,10 +260,7 @@ public:
     }
 
     // shape runtime 상태까지 사용해 dynamic self 후보를 필터링함.
-    template <broadPhasePairCallback Callback>
-    void FindDynamicSelfPairs(
-        std::span<const shape> shapes,
-        Callback&& callback ) const
+    template <broadPhasePairCallback Callback> void FindDynamicSelfPairs( std::span<const shape> shapes, Callback&& callback ) const
     {
         const dynamicTree& tree = GetTree( bodyType::Dynamic );
         pairContext<Callback> context{ pairSet_, callback, shapes };
@@ -319,8 +279,7 @@ public:
     }
 
     // dynamic tree와 static tree의 겹치는 subtree seed를 찾아 새 충돌 후보를 보고함.
-    template <broadPhasePairCallback Callback>
-    void FindDynamicStaticPairs( Callback&& callback ) const
+    template <broadPhasePairCallback Callback> void FindDynamicStaticPairs( Callback&& callback ) const
     {
         const dynamicTree& dynamicTreeRef = GetTree( bodyType::Dynamic );
         const dynamicTree& staticTree = GetTree( bodyType::Static );
@@ -339,8 +298,7 @@ public:
     }
 
     // shape runtime 상태까지 사용해 dynamic / static 후보를 필터링함.
-    template <broadPhasePairCallback Callback>
-    void FindDynamicStaticPairs( std::span<const shape> shapes, Callback&& callback ) const
+    template <broadPhasePairCallback Callback> void FindDynamicStaticPairs( std::span<const shape> shapes, Callback&& callback ) const
     {
         const dynamicTree& dynamicTreeRef = GetTree( bodyType::Dynamic );
         const dynamicTree& staticTree = GetTree( bodyType::Static );
@@ -358,8 +316,7 @@ public:
     }
 
     // dynamic tree와 kinematic tree의 겹치는 subtree seed를 찾아 새 충돌 후보를 보고함.
-    template <broadPhasePairCallback Callback>
-    void FindDynamicKinematicPairs( Callback&& callback ) const
+    template <broadPhasePairCallback Callback> void FindDynamicKinematicPairs( Callback&& callback ) const
     {
         const dynamicTree& dynamicTreeRef = GetTree( bodyType::Dynamic );
         const dynamicTree& kinematicTree = GetTree( bodyType::Kinematic );
@@ -378,8 +335,7 @@ public:
     }
 
     // shape runtime 상태까지 사용해 dynamic / kinematic 후보를 필터링함.
-    template <broadPhasePairCallback Callback>
-    void FindDynamicKinematicPairs( std::span<const shape> shapes, Callback&& callback ) const
+    template <broadPhasePairCallback Callback> void FindDynamicKinematicPairs( std::span<const shape> shapes, Callback&& callback ) const
     {
         const dynamicTree& dynamicTreeRef = GetTree( bodyType::Dynamic );
         const dynamicTree& kinematicTree = GetTree( bodyType::Kinematic );
@@ -430,28 +386,13 @@ private:
     static std::size_t GatherMovedSiblings( const dynamicTree& tree, std::span<std::int32_t> pairIndices );
 
     // 서로 다른 tree의 root부터 BFS로 내려가며 겹치는 subtree 조합을 seed로 모음.
-    static std::size_t GatherCrossSeeds(
-        const dynamicTree& treeA,
-        const dynamicTree& treeB,
-        std::span<treeNodePair> seeds );
+    static std::size_t GatherCrossSeeds( const dynamicTree& treeA, const dynamicTree& treeB, std::span<treeNodePair> seeds );
 
     // leaf 두 개가 만나면 shape index 순서를 정규화해서 candidate batch에 추가함.
-    template <typename Callback>
-    static void AddCandidatePair(
-        const treeNode& nodeA,
-        const treeNode& nodeB,
-        pairContext<Callback>& context )
-    {
-        context.Add( nodeA.shapeIndex, nodeB.shapeIndex );
-    }
+    template <typename Callback> static void AddCandidatePair( const treeNode& nodeA, const treeNode& nodeB, pairContext<Callback>& context ) { context.Add( nodeA.shapeIndex, nodeB.shapeIndex ); }
 
     // leaf 하나와 subtree 하나를 비교하며 겹치는 leaf까지 내려감.
-    template <typename Callback>
-    static void CollideProxyAndSubtree(
-        const treeNode& proxy,
-        const dynamicTree& tree,
-        std::int32_t pair,
-        pairContext<Callback>& context )
+    template <typename Callback> static void CollideProxyAndSubtree( const treeNode& proxy, const dynamicTree& tree, std::int32_t pair, pairContext<Callback>& context )
     {
         // proxy가 moved면 상대 subtree의 모든 겹치는 node가 대상이고,
         // 그렇지 않으면 상대 node가 moved인 경로만 탐색함.
@@ -471,11 +412,7 @@ private:
             {
                 const treeNode& node = tree.nodes_[pair + i];
 
-                if( ( ( node.flagIndex | proxyMoved ) & dynamicTree::TREE_MOVED_NODE ) == 0 ||
-                    !Overlaps( proxy.aabb, node.aabb ) )
-                {
-                    continue;
-                }
+                if( ( ( node.flagIndex | proxyMoved ) & dynamicTree::TREE_MOVED_NODE ) == 0 || !Overlaps( proxy.aabb, node.aabb ) ) continue;
 
                 if( dynamicTree::IsLeaf( node ) )
                 {
@@ -497,20 +434,9 @@ private:
     }
 
     // node 두 개의 상태에 따라 후보 보고, leaf-subtree 탐색, subtree 분할 중 하나를 수행함.
-    template <typename Callback>
-    static void VisitPair(
-        const dynamicTree& treeA,
-        const dynamicTree& treeB,
-        const treeNode& nodeA,
-        const treeNode& nodeB,
-        std::array<nodeIndexPair, dynamicTree::TREE_STACK_SIZE>& stack,
-        std::size_t& stackCount,
-        pairContext<Callback>& context )
+    template <typename Callback> static void VisitPair( const dynamicTree& treeA, const dynamicTree& treeB, const treeNode& nodeA, const treeNode& nodeB, std::array<nodeIndexPair, dynamicTree::TREE_STACK_SIZE>& stack, std::size_t& stackCount, pairContext<Callback>& context )
     {
-        if( !TestPair( nodeA, nodeB ) )
-        {
-            return;
-        }
+        if( !TestPair( nodeA, nodeB ) ) return;
 
         const bool leafA = dynamicTree::IsLeaf( nodeA );
         const bool leafB = dynamicTree::IsLeaf( nodeB );
@@ -533,10 +459,7 @@ private:
             // 둘 다 internal이면 각 child 조합을 다음 순회에서 비교함.
             if( stackCount < stack.size() )
             {
-                stack[stackCount++] = {
-                    dynamicTree::GetChildPair( nodeA ),
-                    dynamicTree::GetChildPair( nodeB )
-                };
+                stack[stackCount++] = { dynamicTree::GetChildPair( nodeA ), dynamicTree::GetChildPair( nodeB ) };
             }
             else
             {
@@ -547,13 +470,7 @@ private:
 
     // 두 subtree 사이에서 moved 조건과 AABB overlap을 만족하는 leaf pair를 찾음.
     // sibling subtree끼리 비교하면 같은 self pair를 중복 생성하지 않음.
-    template <typename Callback>
-    static void CollideCrossPairs(
-        const dynamicTree& treeA,
-        const dynamicTree& treeB,
-        const treeNode& subtreeA,
-        const treeNode& subtreeB,
-        pairContext<Callback>& context )
+    template <typename Callback> static void CollideCrossPairs( const dynamicTree& treeA, const dynamicTree& treeB, const treeNode& subtreeA, const treeNode& subtreeB, pairContext<Callback>& context )
     {
         // 재귀 대신 고정 크기 stack으로 subtree 조합을 순회함.
         std::array<nodeIndexPair, dynamicTree::TREE_STACK_SIZE> stack{};
@@ -570,15 +487,7 @@ private:
             {
                 for( std::int32_t j = 0; j < 2; ++j )
                 {
-                    VisitPair(
-                        treeA,
-                        treeB,
-                        treeA.nodes_[pair.a + i],
-                        treeB.nodes_[pair.b + j],
-                        stack,
-                        stackCount,
-                        context
-                    );
+                    VisitPair( treeA, treeB, treeA.nodes_[pair.a + i], treeB.nodes_[pair.b + j], stack, stackCount, context );
                 }
             }
         }

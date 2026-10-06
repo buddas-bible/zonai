@@ -8,8 +8,7 @@
 namespace zonai
 {
 
-template <typename T, std::size_t Alignment>
-class alignedAllocator
+template <typename T, std::size_t Alignment> class alignedAllocator
 {
 public:
     using value_type = T;
@@ -19,10 +18,7 @@ public:
 
     alignedAllocator() noexcept = default;
 
-    template <typename U>
-    alignedAllocator( const alignedAllocator<U, Alignment>& ) noexcept
-    {
-    }
+    template <typename U> alignedAllocator( const alignedAllocator<U, Alignment>& ) noexcept {}
 
     // count개의 T를 저장할 Alignment byte 정렬 메모리를 할당함.
     // std::vector가 allocator를 통해 호출하며 반환된 메모리의 객체 생성은 vector가 담당함.
@@ -37,10 +33,7 @@ public:
         }
 
         // count * sizeof(T) byte의 연속 메모리를 Alignment byte 경계에 맞춰 할당함.
-        return static_cast<T*>(
-            ::operator new(
-                count * sizeof( T ),
-                std::align_val_t{ Alignment } ) // aligned operator new에 정렬 크기를 전달함.
+        return static_cast<T*>( ::operator new( count * sizeof( T ), std::align_val_t{ Alignment } ) // aligned operator new에 정렬 크기를 전달함.
         );
     }
 
@@ -48,31 +41,21 @@ public:
     {
         // align_val_t를 사용해 할당한 메모리는
         // 동일한 Alignment를 지정한 aligned operator delete로 해제해야 함.
-        ::operator delete(
-            pointer,
-            std::align_val_t{ Alignment }
-        );
+        ::operator delete( pointer, std::align_val_t{ Alignment } );
     }
 
-    template <typename U>
-    struct rebind
+    template <typename U> struct rebind
     {
         using other = alignedAllocator<U, Alignment>;
     };
 };
 
-template <typename T, typename U, std::size_t Alignment>
-constexpr bool operator==(
-    const alignedAllocator<T, Alignment>&,
-    const alignedAllocator<U, Alignment>& ) noexcept
+template <typename T, typename U, std::size_t Alignment> constexpr bool operator==( const alignedAllocator<T, Alignment>&, const alignedAllocator<U, Alignment>& ) noexcept
 {
     return true;
 }
 
-template <typename T, typename U, std::size_t Alignment>
-constexpr bool operator!=(
-    const alignedAllocator<T, Alignment>&,
-    const alignedAllocator<U, Alignment>& ) noexcept
+template <typename T, typename U, std::size_t Alignment> constexpr bool operator!=( const alignedAllocator<T, Alignment>&, const alignedAllocator<U, Alignment>& ) noexcept
 {
     return false;
 }

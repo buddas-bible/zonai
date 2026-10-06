@@ -7,6 +7,7 @@
 
 namespace zonai::sandbox
 {
+
 struct visualShape
 {
     bodyId bodyHandle{};
@@ -37,17 +38,29 @@ public:
 #pragma endregion Contacts
 
 #pragma region Queries
+
     [[nodiscard]] demoKind getKind() const noexcept { return kind_; }
+
     [[nodiscard]] world& getWorld() noexcept { return world_; }
+
     [[nodiscard]] const world& getWorld() const noexcept { return world_; }
+
     [[nodiscard]] std::span<const visualShape> getShapes() const noexcept { return shapes_; }
+
     [[nodiscard]] std::span<const contactData> getContacts() const noexcept { return contacts_; }
+
     [[nodiscard]] bodyId getImpulseBody() const noexcept { return impulseBody_; }
+
     [[nodiscard]] bodyId getTorqueBody() const noexcept { return torqueBody_; }
+
     [[nodiscard]] bodyId getPendulumBody() const noexcept { return pendulumBody_; }
+
     [[nodiscard]] jointId getPendulumJoint() const noexcept { return pendulumJoint_; }
+
     [[nodiscard]] jointId getMouseJoint() const noexcept { return mouseJoint_; }
+
     [[nodiscard]] const mouseJointDef& getMouseSettings() const noexcept { return mouseSettings_; }
+
 #pragma endregion Queries
 
 private:
@@ -67,7 +80,7 @@ private:
     std::vector<contactData> contacts_;
 
     bodyId impulseBody_{}; // 이동과 임펄스 입력을 적용할 물체
-    bodyId torqueBody_{}; // 회전 임펄스를 적용할 물체
+    bodyId torqueBody_{};  // 회전 임펄스를 적용할 물체
     bodyId pendulumBody_{};
     jointId pendulumJoint_{};
 
@@ -80,4 +93,5 @@ private:
 };
 
 [[nodiscard]] std::unique_ptr<demo> createRigidBodyDemo( demoKind kind );
+
 } // namespace zonai::sandbox

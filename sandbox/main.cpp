@@ -14,12 +14,7 @@
 #include "demo.h"
 #include "rigidBodyDemoUi.h"
 
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
-    HWND hwnd,
-    UINT message,
-    WPARAM wParam,
-    LPARAM lParam
-);
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler( HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam );
 
 using Microsoft::WRL::ComPtr;
 
@@ -43,23 +38,11 @@ bool CreateRenderTarget()
 {
     ComPtr<ID3D11Texture2D> backBuffer;
 
-    HRESULT result =
-        gD3d.swapChain->GetBuffer(
-            0,
-            IID_PPV_ARGS( &backBuffer )
-        );
+    HRESULT result = gD3d.swapChain->GetBuffer( 0, IID_PPV_ARGS( &backBuffer ) );
 
-    if( FAILED( result ) )
-    {
-        return false;
-    }
+    if( FAILED( result ) ) return false;
 
-    result =
-        gD3d.device->CreateRenderTargetView(
-            backBuffer.Get(),
-            nullptr,
-            &gD3d.renderTargetView
-        );
+    result = gD3d.device->CreateRenderTargetView( backBuffer.Get(), nullptr, &gD3d.renderTargetView );
 
     return SUCCEEDED( result );
 }
@@ -69,43 +52,26 @@ void DestroyRenderTarget()
     gD3d.renderTargetView.Reset();
 }
 
-LRESULT CALLBACK WndProc(
-    HWND hwnd,
-    UINT message,
-    WPARAM wParam,
-    LPARAM lParam )
+LRESULT CALLBACK WndProc( HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam )
 {
-    if( ImGui_ImplWin32_WndProcHandler(
-        hwnd,
-        message,
-        wParam,
-        lParam ) )
-    {
-        return true;
-    }
+    if( ImGui_ImplWin32_WndProcHandler( hwnd, message, wParam, lParam ) ) return true;
 
     switch( message )
     {
     case WM_DESTROY:
         PostQuitMessage( 0 );
+
         return 0;
 
     case WM_SIZE:
-        if( gD3d.swapChain &&
-            wParam != SIZE_MINIMIZED )
+        if( gD3d.swapChain && wParam != SIZE_MINIMIZED )
         {
             DestroyRenderTarget();
 
             const UINT width = LOWORD( lParam );
             const UINT height = HIWORD( lParam );
 
-            gD3d.swapChain->ResizeBuffers(
-                0,
-                width,
-                height,
-                DXGI_FORMAT_UNKNOWN,
-                0
-            );
+            gD3d.swapChain->ResizeBuffers( 0, width, height, DXGI_FORMAT_UNKNOWN, 0 );
 
             CreateRenderTarget();
         }
@@ -113,12 +79,7 @@ LRESULT CALLBACK WndProc(
         return 0;
     }
 
-    return DefWindowProcW(
-        hwnd,
-        message,
-        wParam,
-        lParam
-    );
+    return DefWindowProcW( hwnd, message, wParam, lParam );
 }
 
 } // namespace
@@ -128,42 +89,20 @@ int main()
     using namespace zonai;
     using namespace zonai::sandbox;
 
-    HINSTANCE instance =
-        GetModuleHandleW( nullptr );
+    HINSTANCE instance = GetModuleHandleW( nullptr );
 
-    const wchar_t* className =
-        L"ZonaiSandboxWindow";
+    const wchar_t* className = L"ZonaiSandboxWindow";
 
     WNDCLASSW windowClass{};
     windowClass.lpfnWndProc = WndProc;
     windowClass.hInstance = instance;
     windowClass.lpszClassName = className;
 
-    if( !RegisterClassW( &windowClass ) )
-    {
-        return 1;
-    }
+    if( !RegisterClassW( &windowClass ) ) return 1;
 
-    HWND hwnd =
-        CreateWindowExW(
-            0,
-            className,
-            L"조나이 물리 실험실",
-            WS_OVERLAPPEDWINDOW,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            1280,
-            720,
-            nullptr,
-            nullptr,
-            instance,
-            nullptr
-        );
+    HWND hwnd = CreateWindowExW( 0, className, L"조나이 물리 실험실", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1280, 720, nullptr, nullptr, instance, nullptr );
 
-    if( !hwnd )
-    {
-        return 1;
-    }
+    if( !hwnd ) return 1;
 
     ShowWindow( hwnd, SW_SHOW );
 
@@ -175,43 +114,20 @@ int main()
     swapChainDesc.BufferCount = 2;
     swapChainDesc.BufferDesc.Width = 0;
     swapChainDesc.BufferDesc.Height = 0;
-    swapChainDesc.BufferDesc.Format =
-        DXGI_FORMAT_R8G8B8A8_UNORM;
-    swapChainDesc.BufferUsage =
-        DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapChainDesc.OutputWindow = hwnd;
     swapChainDesc.SampleDesc.Count = 1;
     swapChainDesc.Windowed = TRUE;
-    swapChainDesc.SwapEffect =
-        DXGI_SWAP_EFFECT_DISCARD;
+    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
 
     D3D_FEATURE_LEVEL featureLevel{};
 
-    const HRESULT result =
-        D3D11CreateDeviceAndSwapChain(
-            nullptr,
-            D3D_DRIVER_TYPE_HARDWARE,
-            nullptr,
-            0,
-            nullptr,
-            0,
-            D3D11_SDK_VERSION,
-            &swapChainDesc,
-            &gD3d.swapChain,
-            &gD3d.device,
-            &featureLevel,
-            &gD3d.deviceContext
-        );
+    const HRESULT result = D3D11CreateDeviceAndSwapChain( nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &swapChainDesc, &gD3d.swapChain, &gD3d.device, &featureLevel, &gD3d.deviceContext );
 
-    if( FAILED( result ) )
-    {
-        return 1;
-    }
+    if( FAILED( result ) ) return 1;
 
-    if( !CreateRenderTarget() )
-    {
-        return 1;
-    }
+    if( !CreateRenderTarget() ) return 1;
 
     // ---------------------------------------------------------
     // ImGui
@@ -224,6 +140,7 @@ int main()
     {
         MessageBoxW( hwnd, L"한글 폰트를 읽을 수 없습니다. 실행 파일 옆의 assets 폴더를 확인하세요.", L"조나이 물리 실험실", MB_OK | MB_ICONERROR );
         ImGui::DestroyContext();
+
         return 1;
     }
 
@@ -231,17 +148,9 @@ int main()
 
     ImGui::StyleColorsDark();
 
-    if( !ImGui_ImplWin32_Init( hwnd ) )
-    {
-        return 1;
-    }
+    if( !ImGui_ImplWin32_Init( hwnd ) ) return 1;
 
-    if( !ImGui_ImplDX11_Init(
-        gD3d.device.Get(),
-        gD3d.deviceContext.Get() ) )
-    {
-        return 1;
-    }
+    if( !ImGui_ImplDX11_Init( gD3d.device.Get(), gD3d.deviceContext.Get() ) ) return 1;
 
     // ---------------------------------------------------------
     // Physics visual test
@@ -257,7 +166,9 @@ int main()
     const auto resetCamera = [&]()
     {
         const demoEntry& entry = getDemoEntry( session.getKind() );
-        camera = {}; camera.center = entry.cameraCenter; camera.pixelsPerMeter = entry.pixelsPerMeter;
+        camera = {};
+        camera.center = entry.cameraCenter;
+        camera.pixelsPerMeter = entry.pixelsPerMeter;
     };
     resetCamera();
 
@@ -270,12 +181,7 @@ int main()
 
     while( running )
     {
-        while( PeekMessageW(
-            &message,
-            nullptr,
-            0,
-            0,
-            PM_REMOVE ) )
+        while( PeekMessageW( &message, nullptr, 0, 0, PM_REMOVE ) )
         {
             if( message.message == WM_QUIT )
             {
@@ -299,36 +205,20 @@ int main()
         bool stepRequested = false;
         bool demoChanged = false;
 
-        const ImGuiViewport* viewport =
-            ImGui::GetMainViewport();
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
 
-        ImGui::SetNextWindowPos(
-            viewport->WorkPos
-        );
-        ImGui::SetNextWindowSize(
-            viewport->WorkSize
-        );
+        ImGui::SetNextWindowPos( viewport->WorkPos );
+        ImGui::SetNextWindowSize( viewport->WorkSize );
 
-        constexpr ImGuiWindowFlags WINDOW_FLAGS =
-            ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoResize;
+        constexpr ImGuiWindowFlags WINDOW_FLAGS = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize;
 
-        ImGui::Begin(
-            "조나이 물리 실험실",
-            nullptr,
-            WINDOW_FLAGS
-        );
+        ImGui::Begin( "조나이 물리 실험실", nullptr, WINDOW_FLAGS );
 
         // -----------------------------------------------------
         // Controls
         // -----------------------------------------------------
 
-        ImGui::BeginChild(
-            "조작 안내###Controls",
-            ImVec2( 340.0f, 0.0f ),
-            true
-        );
+        ImGui::BeginChild( "조작 안내###Controls", ImVec2( 340.0f, 0.0f ), true );
 
         const demoEntry& selectedEntry = getDemoEntry( session.getKind() );
         ImGui::PushItemWidth( ImGui::GetContentRegionAvail().x * 0.45f );
@@ -339,21 +229,40 @@ int main()
                 const bool selected = entry.kind == session.getKind();
                 if( ImGui::Selectable( entry.name, selected ) )
                 {
-                    session.selectDemo( entry.kind ); resetCamera(); demoChanged = true;
+                    session.selectDemo( entry.kind );
+                    resetCamera();
+                    demoChanged = true;
                 }
-                if( selected ) { ImGui::SetItemDefaultFocus(); }
+                if( selected )
+                {
+                    ImGui::SetItemDefaultFocus();
+                }
             }
             ImGui::EndCombo();
         }
         ImGui::TextUnformatted( getDemoEntry( session.getKind() ).category );
-        if( ImGui::Button( session.isPlaying() ? "일시 정지###Pause" : "재생###Play", ImVec2( 78.0f, 0.0f ) ) ) { session.setPlaying( !session.isPlaying() ); }
+        if( ImGui::Button( session.isPlaying() ? "일시 정지###Pause" : "재생###Play", ImVec2( 78.0f, 0.0f ) ) )
+        {
+            session.setPlaying( !session.isPlaying() );
+        }
         ImGui::SameLine();
-        if( ImGui::Button( "한 단계###Step", ImVec2( 72.0f, 0.0f ) ) ) { stepRequested = true; }
+        if( ImGui::Button( "한 단계###Step", ImVec2( 72.0f, 0.0f ) ) )
+        {
+            stepRequested = true;
+        }
         ImGui::SameLine();
-        if( ImGui::Button( "초기화###Reset", ImVec2( 72.0f, 0.0f ) ) ) { session.reset(); resetCamera(); demoChanged = true; }
+        if( ImGui::Button( "초기화###Reset", ImVec2( 72.0f, 0.0f ) ) )
+        {
+            session.reset();
+            resetCamera();
+            demoChanged = true;
+        }
         ImGui::SliderInt( "하위 단계 수###Sub-steps", &subStepCount, 1, 16 );
         ImGui::Text( "고정 시간 간격: %.5f s / 진행 단계: %llu", 1.0f / 60.0f, static_cast<unsigned long long>( session.getStepCount() ) );
-        if( ImGui::Button( "카메라 초기화###Reset Camera", ImVec2( -1.0f, 0.0f ) ) ) { resetCamera(); }
+        if( ImGui::Button( "카메라 초기화###Reset Camera", ImVec2( -1.0f, 0.0f ) ) )
+        {
+            resetCamera();
+        }
         ImGui::Text( "초당 프레임: %.1f / 화면 배율: %.1f px/m", io.Framerate, camera.pixelsPerMeter );
         drawProjectCollisionSettings( session, collisionUi );
         ImGui::Separator();
@@ -372,67 +281,34 @@ int main()
         // Physics Canvas
         // -----------------------------------------------------
 
-        ImGui::BeginChild(
-            "PhysicsCanvas",
-            ImVec2( 0.0f, 0.0f ),
-            true,
-            ImGuiWindowFlags_NoScrollbar |
-            ImGuiWindowFlags_NoScrollWithMouse
-        );
+        ImGui::BeginChild( "PhysicsCanvas", ImVec2( 0.0f, 0.0f ), true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
 
-        const ImVec2 canvasMin =
-            ImGui::GetCursorScreenPos();
+        const ImVec2 canvasMin = ImGui::GetCursorScreenPos();
 
-        ImVec2 canvasSize =
-            ImGui::GetContentRegionAvail();
+        ImVec2 canvasSize = ImGui::GetContentRegionAvail();
 
-        canvasSize.x =
-            std::max( canvasSize.x, 1.0f );
-        canvasSize.y =
-            std::max( canvasSize.y, 1.0f );
+        canvasSize.x = std::max( canvasSize.x, 1.0f );
+        canvasSize.y = std::max( canvasSize.y, 1.0f );
 
-        ImGui::InvisibleButton(
-            "CanvasInput",
-            canvasSize,
-            ImGuiButtonFlags_MouseButtonMiddle
-        );
+        ImGui::InvisibleButton( "CanvasInput", canvasSize, ImGuiButtonFlags_MouseButtonMiddle );
 
-        const bool canvasHovered =
-            ImGui::IsItemHovered();
+        const bool canvasHovered = ImGui::IsItemHovered();
 
-        if( canvasHovered &&
-            io.MouseWheel != 0.0f )
+        if( canvasHovered && io.MouseWheel != 0.0f )
         {
-            const vec2 beforeZoom =
-                camera.ScreenToWorld(
-                    io.MousePos,
-                    canvasMin,
-                    canvasSize
-                );
+            const vec2 beforeZoom = camera.ScreenToWorld( io.MousePos, canvasMin, canvasSize );
 
-            camera.Zoom(
-                io.MouseWheel
-            );
+            camera.Zoom( io.MouseWheel );
 
-            const vec2 afterZoom =
-                camera.ScreenToWorld(
-                    io.MousePos,
-                    canvasMin,
-                    canvasSize
-                );
+            const vec2 afterZoom = camera.ScreenToWorld( io.MousePos, canvasMin, canvasSize );
 
             // cursor 아래 world 위치가 zoom 전후에도 고정되게 camera center를 보정함.
-            camera.center +=
-                beforeZoom - afterZoom;
+            camera.center += beforeZoom - afterZoom;
         }
 
-        if( canvasHovered &&
-            ImGui::IsMouseDragging(
-                ImGuiMouseButton_Middle ) )
+        if( canvasHovered && ImGui::IsMouseDragging( ImGuiMouseButton_Middle ) )
         {
-            camera.PanPixels(
-                io.MouseDelta
-            );
+            camera.PanPixels( io.MouseDelta );
         }
 
         // Canvas hover는 다른 active UI widget에 의해 차단됨. 입력을 먼저 처리해야
@@ -445,42 +321,30 @@ int main()
             input.mousePressed = ImGui::IsMouseClicked( ImGuiMouseButton_Left );
             input.mouseHeld = ImGui::IsMouseDown( ImGuiMouseButton_Left );
             input.impulsePressed = ImGui::IsMouseClicked( ImGuiMouseButton_Right );
-            input.left = ImGui::IsKeyDown( ImGuiKey_A ); input.right = ImGui::IsKeyDown( ImGuiKey_D );
+            input.left = ImGui::IsKeyDown( ImGuiKey_A );
+            input.right = ImGui::IsKeyDown( ImGuiKey_D );
             input.jumpPressed = ImGui::IsKeyPressed( ImGuiKey_Space, false );
             input.spinPressed = ImGui::IsKeyPressed( ImGuiKey_S, false );
         }
         session.handleInput( input, inputEnabled );
-        if( stepRequested ) { session.stepOnce( subStepCount ); }
-        else { session.advance( io.DeltaTime, subStepCount ); }
-
-        ImDrawList* drawList =
-            ImGui::GetWindowDrawList();
-
-        const ImVec2 canvasMax
+        if( stepRequested )
         {
-            canvasMin.x + canvasSize.x,
-            canvasMin.y + canvasSize.y
-        };
-
-        drawList->PushClipRect(
-            canvasMin,
-            canvasMax,
-            true
-        );
-
-        drawList->AddRectFilled(
-            canvasMin,
-            canvasMax,
-            IM_COL32( 23, 25, 31, 255 )
-        );
-
-        debugDraw debugDraw
+            session.stepOnce( subStepCount );
+        }
+        else
         {
-            drawList,
-            camera,
-            canvasMin,
-            canvasSize
-        };
+            session.advance( io.DeltaTime, subStepCount );
+        }
+
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+        const ImVec2 canvasMax{ canvasMin.x + canvasSize.x, canvasMin.y + canvasSize.y };
+
+        drawList->PushClipRect( canvasMin, canvasMax, true );
+
+        drawList->AddRectFilled( canvasMin, canvasMax, IM_COL32( 23, 25, 31, 255 ) );
+
+        debugDraw debugDraw{ drawList, camera, canvasMin, canvasSize };
 
         session.getDemo().draw( debugDraw );
 
@@ -495,33 +359,15 @@ int main()
         // Render
         // -----------------------------------------------------
 
-        const float clearColor[4]
-        {
-            0.08f,
-            0.08f,
-            0.1f,
-            1.0f
-        };
+        const float clearColor[4]{ 0.08f, 0.08f, 0.1f, 1.0f };
 
-        gD3d.deviceContext->OMSetRenderTargets(
-            1,
-            gD3d.renderTargetView.GetAddressOf(),
-            nullptr
-        );
+        gD3d.deviceContext->OMSetRenderTargets( 1, gD3d.renderTargetView.GetAddressOf(), nullptr );
 
-        gD3d.deviceContext->ClearRenderTargetView(
-            gD3d.renderTargetView.Get(),
-            clearColor
-        );
+        gD3d.deviceContext->ClearRenderTargetView( gD3d.renderTargetView.Get(), clearColor );
 
-        ImGui_ImplDX11_RenderDrawData(
-            ImGui::GetDrawData()
-        );
+        ImGui_ImplDX11_RenderDrawData( ImGui::GetDrawData() );
 
-        gD3d.swapChain->Present(
-            1,
-            0
-        );
+        gD3d.swapChain->Present( 1, 0 );
     }
 
     // ---------------------------------------------------------
@@ -538,10 +384,7 @@ int main()
     gD3d.device.Reset();
 
     DestroyWindow( hwnd );
-    UnregisterClassW(
-        className,
-        instance
-    );
+    UnregisterClassW( className, instance );
 
     return 0;
 }

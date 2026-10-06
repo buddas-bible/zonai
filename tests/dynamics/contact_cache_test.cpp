@@ -24,13 +24,17 @@ void check( bool condition, const char* message )
 
 void update( world& simulation )
 {
-    simulation.UpdateCollisions( []( const contactData& ) {} );
+    simulation.UpdateCollisions(
+        []( const contactData& )
+        {
+        } );
 }
 
 contactData getContact( world& simulation, bodyId owner )
 {
     std::array<contactData, 1> output{};
     check( simulation.GetBodyContactData( owner, output ) == 1, "active contact fixture" );
+
     return output[0];
 }
 
@@ -40,9 +44,9 @@ void checkDistanceThreshold()
 {
     world simulation{};
     const bodyId fixed = simulation.CreateBody();
-    (void)simulation.CreateShape( fixed, circle2{ {}, 1.0f } );
+    ( void )simulation.CreateShape( fixed, circle2{ {}, 1.0f } );
     const bodyId moving = simulation.CreateBody( bodyType::Dynamic, { { 2.0f, 0.0f }, {} } );
-    (void)simulation.CreateShape( moving, circle2{ {}, 1.0f } );
+    ( void )simulation.CreateShape( moving, circle2{ {}, 1.0f } );
     simulation.SetContactRecycleDistance( 0.03125f );
     update( simulation );
     const contactId id = getContact( simulation, moving ).id;
@@ -68,9 +72,9 @@ void checkEmptyTolerance()
 {
     world simulation{};
     const bodyId fixed = simulation.CreateBody();
-    (void)simulation.CreateShape( fixed, circle2{ {}, 1.0f } );
+    ( void )simulation.CreateShape( fixed, circle2{ {}, 1.0f } );
     const bodyId moving = simulation.CreateBody( bodyType::Dynamic, { { 2.0625f, 0.0f }, {} } );
-    (void)simulation.CreateShape( moving, circle2{ {}, 1.0f } );
+    ( void )simulation.CreateShape( moving, circle2{ {}, 1.0f } );
     simulation.SetContactRecycleDistance( 0.25f );
     update( simulation );
     check( simulation.GetContactCount() == 1 && simulation.GetBodyContactCapacity( moving ) == 1, "empty persistent pair fixture" );
@@ -88,17 +92,23 @@ void checkRotationGuards()
     {
         world simulation{};
         const bodyId fixed = simulation.CreateBody();
-        (void)simulation.CreateShape( fixed, circle2{ {}, 1.0f } );
+        ( void )simulation.CreateShape( fixed, circle2{ {}, 1.0f } );
         const bodyId moving = simulation.CreateBody( bodyType::Dynamic, { { 2.0f, 0.0f }, {} } );
-        (void)simulation.CreateShape( moving, circle2{ {}, 1.0f } );
+        ( void )simulation.CreateShape( moving, circle2{ {}, 1.0f } );
         update( simulation );
         const rot2 small = rot2::FromRadians( 0.01f );
-        if( rotateTogether ) { simulation.SetBodyTransform( fixed, { {}, small } ); }
+        if( rotateTogether )
+        {
+            simulation.SetBodyTransform( fixed, { {}, small } );
+        }
         simulation.SetBodyTransform( moving, { rotateTogether ? Rotate( small, { 2.0f, 0.0f } ) : vec2{ 2.0f, 0.0f }, small } );
         update( simulation );
         check( simulation.GetRecycledContactCount() == 1, "small body rotation not recycled" );
         const rot2 large = rot2::FromRadians( rotateTogether ? 0.25f : 0.06f );
-        if( rotateTogether ) { simulation.SetBodyTransform( fixed, { {}, large } ); }
+        if( rotateTogether )
+        {
+            simulation.SetBodyTransform( fixed, { {}, large } );
+        }
         simulation.SetBodyTransform( moving, { rotateTogether ? Rotate( large, { 2.0f, 0.0f } ) : vec2{ 2.0f, 0.0f }, large } );
         update( simulation );
         check( simulation.GetRecycledContactCount() == 0, "absolute or extent-scaled rotation guard missed" );
@@ -111,7 +121,7 @@ void checkCreationSettings()
     {
         world simulation{};
         const bodyId fixed = simulation.CreateBody();
-        (void)simulation.CreateShape( fixed, circle2{ {}, 1.0f } );
+        ( void )simulation.CreateShape( fixed, circle2{ {}, 1.0f } );
         const bodyId moving = simulation.CreateBody( bodyType::Dynamic, { { 2.0f, 0.0f }, {} } );
         simulation.SetBodyContactRecyclingEnabled( moving, initiallyEnabled );
         const shapeId visitor = simulation.CreateShape( moving, circle2{ {}, 1.0f } );
@@ -134,9 +144,9 @@ void checkFastExclusion()
     world simulation{};
     simulation.SetGravity( {} );
     const bodyId fixed = simulation.CreateBody();
-    (void)simulation.CreateShape( fixed, circle2{ {}, 1.0f } );
+    ( void )simulation.CreateShape( fixed, circle2{ {}, 1.0f } );
     const bodyId moving = simulation.CreateBody( bodyType::Dynamic, { { -4.0f, 0.0f }, {} } );
-    (void)simulation.CreateShape( moving, circle2{ {}, 1.0f } );
+    ( void )simulation.CreateShape( moving, circle2{ {}, 1.0f } );
     update( simulation );
     simulation.SetContactRecycleDistance( 100.0f );
     simulation.SetBodyLinearVelocity( moving, { 100.0f, 0.0f } );
@@ -147,7 +157,7 @@ void checkFastExclusion()
     check( simulation.GetRecycledContactCount() == 0, "fast body recycled contact" );
 }
 
-#pragma endregion
+#pragma endregion RecyclingEligibility
 #pragma region ImpulsePersistence
 
 void checkImpulsePersistence()
@@ -183,9 +193,9 @@ void checkFeatureReset()
     simulation.SetGravity( {} );
     simulation.SetContactRecycleDistance( 0.0f );
     const bodyId fixed = simulation.CreateBody();
-    (void)simulation.CreateShape( fixed, MakeBox( { 2.0f, 0.5f } ) );
+    ( void )simulation.CreateShape( fixed, MakeBox( { 2.0f, 0.5f } ) );
     const bodyId moving = simulation.CreateBody( bodyType::Dynamic, { { 0.0f, 1.49f }, {} } );
-    (void)simulation.CreateShape( moving, MakeBox( { 1.0f, 1.0f } ) );
+    ( void )simulation.CreateShape( moving, MakeBox( { 1.0f, 1.0f } ) );
     simulation.SetBodyLinearVelocity( moving, { 0.0f, -2.0f } );
     simulation.Step( 0.001f );
     const contactData old = getContact( simulation, moving );
@@ -212,7 +222,7 @@ void checkMassRefresh()
         simulation.SetGravity( {} );
         simulation.SetContactRecycleDistance( recycling ? 0.05f : 0.0f );
         const bodyId fixed = simulation.CreateBody();
-        (void)simulation.CreateShape( fixed, circle2{ {}, 1.0f } );
+        ( void )simulation.CreateShape( fixed, circle2{ {}, 1.0f } );
         const bodyId moving = simulation.CreateBody( bodyType::Dynamic, { { 2.0f, 0.0f }, {} } );
         const shapeId visitor = simulation.CreateShape( moving, circle2{ {}, 1.0f } );
         update( simulation );
@@ -227,7 +237,7 @@ void checkMassRefresh()
     check( std::fabs( impulses[0] - 8.0f * std::numbers::pi_v<float> ) < 1e-3f && std::fabs( impulses[1] - impulses[0] ) < 1e-3f, "recycled contact retained stale effective mass" );
 }
 
-#pragma endregion
+#pragma endregion ImpulsePersistence
 
 } // namespace
 

@@ -34,40 +34,22 @@ int main()
         world world{};
         world.SetGravity( {} );
 
-        const bodyId groundBody =
-            world.CreateBody(
-                bodyType::Static,
-                {
-                    { 0.0f, -1.0f },
-                    {}
-                }
-            );
+        const bodyId groundBody = world.CreateBody( bodyType::Static, { { 0.0f, -1.0f }, {} } );
 
-        const shapeId groundShape =
-            world.CreateShape(
-                groundBody,
-                MakeBox( { 40.0f, 1.0f } )
-            );
+        const shapeId groundShape = world.CreateShape( groundBody, MakeBox( { 40.0f, 1.0f } ) );
 
         world.SetShapeFriction( groundShape, 0.0f );
         world.SetShapeRestitution( groundShape, 0.0f );
 
         bodyDef boxDefinition{};
         boxDefinition.type = bodyType::Dynamic;
-        boxDefinition.transform.position =
-            { 0.0f, 0.25f + 0.5f * impactSpeed * timeStep };
-        boxDefinition.linearVelocity =
-            { 0.0f, -impactSpeed };
+        boxDefinition.transform.position = { 0.0f, 0.25f + 0.5f * impactSpeed * timeStep };
+        boxDefinition.linearVelocity = { 0.0f, -impactSpeed };
         boxDefinition.enableSleep = false;
 
-        const bodyId boxBody =
-            world.CreateBody( boxDefinition );
+        const bodyId boxBody = world.CreateBody( boxDefinition );
 
-        const shapeId boxShape =
-            world.CreateShape(
-                boxBody,
-                MakeBox( { 1.0f, 0.25f } )
-            );
+        const shapeId boxShape = world.CreateShape( boxBody, MakeBox( { 1.0f, 0.25f } ) );
 
         world.SetShapeFriction( boxShape, 0.0f );
         world.SetShapeRestitution( boxShape, 1.0f );
@@ -79,13 +61,9 @@ int main()
             world.Step( timeStep, 4 );
         }
 
-        const float bounceSpeed =
-            world.GetBodyLinearVelocity( boxBody ).y;
+        const float bounceSpeed = world.GetBodyLinearVelocity( boxBody ).y;
 
-        const float spin =
-            std::fabs(
-                world.GetBodyAngularVelocity( boxBody )
-            );
+        const float spin = std::fabs( world.GetBodyAngularVelocity( boxBody ) );
 
         check( bounceSpeed > 4.0f );
         check( spin < 0.5f );
@@ -98,37 +76,22 @@ int main()
 
         world world{};
 
-        const bodyId groundBody =
-            world.CreateBody( bodyType::Static );
+        const bodyId groundBody = world.CreateBody( bodyType::Static );
 
-        const shapeId groundShape =
-            world.CreateShape(
-                groundBody,
-                segment2
-                {
-                    { -20.0f, 0.0f },
-                    {  20.0f, 0.0f }
-                }
-            );
+        const shapeId groundShape = world.CreateShape( groundBody, segment2{ { -20.0f, 0.0f }, { 20.0f, 0.0f } } );
 
         world.SetShapeFriction( groundShape, 0.0f );
         world.SetShapeRestitution( groundShape, 0.0f );
 
         bodyDef boxDefinition{};
         boxDefinition.type = bodyType::Dynamic;
-        boxDefinition.transform.position =
-            { 0.0f, dropHeight };
+        boxDefinition.transform.position = { 0.0f, dropHeight };
         boxDefinition.safetyFactor = 0.01f;
         boxDefinition.enableSleep = false;
 
-        const bodyId boxBody =
-            world.CreateBody( boxDefinition );
+        const bodyId boxBody = world.CreateBody( boxDefinition );
 
-        const shapeId boxShape =
-            world.CreateShape(
-                boxBody,
-                MakeBox( { 0.5f, 0.5f } )
-            );
+        const shapeId boxShape = world.CreateShape( boxBody, MakeBox( { 0.5f, 0.5f } ) );
 
         world.SetShapeFriction( boxShape, 0.0f );
         world.SetShapeRestitution( boxShape, 1.0f );
@@ -143,26 +106,17 @@ int main()
         {
             world.Step( timeStep, 4 );
 
-            const float speed =
-                world.GetBodyLinearVelocity( boxBody ).y;
+            const float speed = world.GetBodyLinearVelocity( boxBody ).y;
 
-            if( !bounced &&
-                previousSpeed <= 0.0f &&
-                speed > 0.0f )
+            if( !bounced && previousSpeed <= 0.0f && speed > 0.0f )
             {
-                firstBounceSpin =
-                    std::fabs(
-                        world.GetBodyAngularVelocity( boxBody )
-                    );
+                firstBounceSpin = std::fabs( world.GetBodyAngularVelocity( boxBody ) );
                 bounced = true;
             }
 
-            if( bounced &&
-                previousSpeed > 0.0f &&
-                speed <= 0.0f )
+            if( bounced && previousSpeed > 0.0f && speed <= 0.0f )
             {
-                firstApex =
-                    world.GetBodyTransform( boxBody ).position.y;
+                firstApex = world.GetBodyTransform( boxBody ).position.y;
                 reachedApex = true;
             }
 
@@ -186,17 +140,9 @@ int main()
 
         world world{};
 
-        const bodyId groundBody =
-            world.CreateBody( bodyType::Static );
+        const bodyId groundBody = world.CreateBody( bodyType::Static );
 
-        (void)world.CreateShape(
-            groundBody,
-            segment2
-            {
-                { -20.0f, 0.0f },
-                {  20.0f, 0.0f }
-            }
-        );
+        ( void )world.CreateShape( groundBody, segment2{ { -20.0f, 0.0f }, { 20.0f, 0.0f } } );
 
         std::array<bodyId, boxCount> boxes{};
 
@@ -204,15 +150,11 @@ int main()
         {
             bodyDef definition{};
             definition.type = bodyType::Dynamic;
-            definition.transform.position =
-                { 0.0f, 0.5f + 1.01f * static_cast<float>( i ) };
+            definition.transform.position = { 0.0f, 0.5f + 1.01f * static_cast<float>( i ) };
 
             boxes[i] = world.CreateBody( definition );
 
-            (void)world.CreateShape(
-                boxes[i],
-                MakeBox( { 0.5f, 0.5f } )
-            );
+            ( void )world.CreateShape( boxes[i], MakeBox( { 0.5f, 0.5f } ) );
         }
 
         for( int i = 0; i < 600; ++i )
@@ -222,11 +164,9 @@ int main()
 
         for( int i = 0; i < boxCount; ++i )
         {
-            const transform2 transform =
-                world.GetBodyTransform( boxes[i] );
+            const transform2 transform = world.GetBodyTransform( boxes[i] );
 
-            const float expectedHeight =
-                0.5f + static_cast<float>( i );
+            const float expectedHeight = 0.5f + static_cast<float>( i );
 
             check( std::fabs( transform.position.x ) < 0.2f );
             check( std::fabs( transform.position.y - expectedHeight ) < 0.25f );

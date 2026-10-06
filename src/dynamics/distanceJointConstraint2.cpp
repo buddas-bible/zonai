@@ -5,7 +5,9 @@
 
 namespace zonai
 {
+
 #pragma region Prepare
+
 distanceJointConstraint2 prepareDistanceJointConstraint( const distanceJointSim2& joint, const bodySim& bodySimA, const bodySim& bodySimB, float subStepTime )
 {
     assert( subStepTime > 0.0f );
@@ -65,9 +67,11 @@ distanceJointConstraint2 prepareDistanceJointConstraint( const distanceJointSim2
 
     return constraint;
 }
+
 #pragma endregion Prepare
 
 #pragma region WarmStart
+
 void warmStartDistanceJointConstraint( const distanceJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB )
 {
     // 질량 중심에서 현재 작용점까지의 벡터. Step 중 누적한 회전을 반영함.
@@ -84,9 +88,11 @@ void warmStartDistanceJointConstraint( const distanceJointConstraint2& constrain
     bodyStateB.linearVelocity += constraint.invMassB * impulse;
     bodyStateB.angularVelocity += constraint.invInertiaB * Cross( r_b, impulse );
 }
+
 #pragma endregion WarmStart
 
 #pragma region Solve
+
 void solveDistanceJointConstraint( distanceJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB, bool useBias )
 {
     // 질량 중심에서 현재 작용점까지의 벡터. Step 중 누적한 회전을 반영함.
@@ -108,6 +114,7 @@ void solveDistanceJointConstraint( distanceJointConstraint2& constraint, bodySta
         // 작용점의 속도 v + w x r에서 축 방향 상대속도를 구함.
         const vec2 v_p2 = v_b + Cross( w_b, r_b );
         const vec2 v_r = v_p2 - v_a - Cross( w_a, r_a );
+
         return Dot( axis, v_r );
     };
 
@@ -185,5 +192,7 @@ void solveDistanceJointConstraint( distanceJointConstraint2& constraint, bodySta
         solveLimit( constraint.maxLength - currentLength, -1.0f, constraint.upperImpulse );
     }
 }
+
 #pragma endregion Solve
+
 } // namespace zonai

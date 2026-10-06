@@ -32,17 +32,9 @@ int main()
         input.proxyB = proxyB;
 
         input.sweepA = {};
-        input.sweepB =
-        {
-            {},
-            {},
-            { -2.0f, 0.0f },
-            {},
-            {}
-        };
+        input.sweepB = { {}, {}, { -2.0f, 0.0f }, {}, {} };
 
-        const toiOutput2 output =
-            TimeOfImpact( input );
+        const toiOutput2 output = TimeOfImpact( input );
 
         assert( output.state == toiState2::Hit );
         assert( std::fabs( output.fraction - 0.5f ) < epsilon );
@@ -51,28 +43,14 @@ int main()
     // 서로 멀어지는 circle은 전체 sweep 동안 separated.
     {
         toiInput2 input{};
-        input.proxyA =
-            MakeShapeProxy(
-                circle2{ {}, 1.0f }
-            );
+        input.proxyA = MakeShapeProxy( circle2{ {}, 1.0f } );
 
-        input.proxyB =
-            MakeShapeProxy(
-                circle2{ {}, 1.0f }
-            );
+        input.proxyB = MakeShapeProxy( circle2{ {}, 1.0f } );
 
         input.sweepA = {};
-        input.sweepB =
-        {
-            {},
-            { 5.0f, 0.0f },
-            { 10.0f, 0.0f },
-            {},
-            {}
-        };
+        input.sweepB = { {}, { 5.0f, 0.0f }, { 10.0f, 0.0f }, {}, {} };
 
-        const toiOutput2 output =
-            TimeOfImpact( input );
+        const toiOutput2 output = TimeOfImpact( input );
 
         assert( output.state == toiState2::Separated );
         assert( output.fraction == 1.0f );
@@ -81,28 +59,14 @@ int main()
     // 시작부터 겹친 convex shape는 Overlapped.
     {
         toiInput2 input{};
-        input.proxyA =
-            MakeShapeProxy(
-                MakeBox( { 1.0f, 1.0f } )
-            );
+        input.proxyA = MakeShapeProxy( MakeBox( { 1.0f, 1.0f } ) );
 
-        input.proxyB =
-            MakeShapeProxy(
-                MakeBox( { 1.0f, 1.0f } )
-            );
+        input.proxyB = MakeShapeProxy( MakeBox( { 1.0f, 1.0f } ) );
 
         input.sweepA = {};
-        input.sweepB =
-        {
-            {},
-            { 0.5f, 0.0f },
-            { 3.0f, 0.0f },
-            {},
-            {}
-        };
+        input.sweepB = { {}, { 0.5f, 0.0f }, { 3.0f, 0.0f }, {}, {} };
 
-        const toiOutput2 output =
-            TimeOfImpact( input );
+        const toiOutput2 output = TimeOfImpact( input );
 
         assert( output.state == toiState2::Overlapped );
         assert( output.fraction == 0.0f );
@@ -111,38 +75,15 @@ int main()
     // 이동이 없어도 회전 sweep만으로 접촉할 수 있어야 함.
     {
         toiInput2 input{};
-        input.proxyA =
-            MakeShapeProxy(
-                circle2
-                {
-                    { 0.0f, 2.5f },
-                    0.25f
-                }
-            );
+        input.proxyA = MakeShapeProxy( circle2{ { 0.0f, 2.5f }, 0.25f } );
 
-        input.proxyB =
-            MakeShapeProxy(
-                MakeBox(
-                    { 3.0f, 0.2f }
-                )
-            );
+        input.proxyB = MakeShapeProxy( MakeBox( { 3.0f, 0.2f } ) );
 
         input.sweepA = {};
 
-        input.sweepB =
-        {
-            {},
-            {},
-            {},
-            {},
-            rot2::FromRadians(
-                0.5f *
-                3.14159265358979323846f
-            )
-        };
+        input.sweepB = { {}, {}, {}, {}, rot2::FromRadians( 0.5f * 3.14159265358979323846f ) };
 
-        const toiOutput2 output =
-            TimeOfImpact( input );
+        const toiOutput2 output = TimeOfImpact( input );
 
         assert( output.state == toiState2::Hit );
         assert( output.fraction > 0.0f );
@@ -152,30 +93,16 @@ int main()
     // maxFraction 이전에 접촉하지 않으면 separated로 남음.
     {
         toiInput2 input{};
-        input.proxyA =
-            MakeShapeProxy(
-                circle2{ {}, 1.0f }
-            );
+        input.proxyA = MakeShapeProxy( circle2{ {}, 1.0f } );
 
-        input.proxyB =
-            MakeShapeProxy(
-                circle2{ {}, 1.0f }
-            );
+        input.proxyB = MakeShapeProxy( circle2{ {}, 1.0f } );
 
         input.sweepA = {};
-        input.sweepB =
-        {
-            {},
-            { 5.0f, 0.0f },
-            { -5.0f, 0.0f },
-            {},
-            {}
-        };
+        input.sweepB = { {}, { 5.0f, 0.0f }, { -5.0f, 0.0f }, {}, {} };
 
         input.maxFraction = 0.2f;
 
-        const toiOutput2 output =
-            TimeOfImpact( input );
+        const toiOutput2 output = TimeOfImpact( input );
 
         assert( output.state == toiState2::Separated );
         assert( output.fraction == 0.2f );

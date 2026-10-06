@@ -12,9 +12,7 @@ namespace zonai
 
 // shape를 body의 doubly linked list head에 연결함.
 // bodyId / shapeId는 World 내부 storage의 index이며 slot은 삭제 후 재사용될 수 있음.
-inline void LinkShape(
-    body& bodyRef, std::int32_t bodyId,
-    std::span<shape> shapes, std::int32_t shapeId )
+inline void LinkShape( body& bodyRef, std::int32_t bodyId, std::span<shape> shapes, std::int32_t shapeId )
 {
     assert( bodyId >= 0 );
     assert( shapeId >= 0 );
@@ -33,6 +31,7 @@ inline void LinkShape(
         assert( static_cast<std::size_t>( bodyRef.headShapeId ) < shapes.size() );
 
         shape& oldHead = shapes[bodyRef.headShapeId];
+
         assert( oldHead.bodyId == bodyId );
         assert( oldHead.prevShapeId == shape::NULL_INDEX );
 
@@ -48,9 +47,7 @@ inline void LinkShape(
 }
 
 // shape를 body의 doubly linked list에서 제거하고 양쪽 이웃을 다시 연결함.
-inline void UnlinkShape(
-    body& bodyRef, std::int32_t bodyId,
-    std::span<shape> shapes, std::int32_t shapeId )
+inline void UnlinkShape( body& bodyRef, std::int32_t bodyId, std::span<shape> shapes, std::int32_t shapeId )
 {
     assert( bodyId >= 0 );
     assert( shapeId >= 0 );
@@ -66,6 +63,7 @@ inline void UnlinkShape(
         assert( static_cast<std::size_t>( linkedShape.prevShapeId ) < shapes.size() );
 
         shape& previous = shapes[linkedShape.prevShapeId];
+
         assert( previous.bodyId == bodyId );
         assert( previous.nextShapeId == shapeId );
 
@@ -77,6 +75,7 @@ inline void UnlinkShape(
         assert( static_cast<std::size_t>( linkedShape.nextShapeId ) < shapes.size() );
 
         shape& next = shapes[linkedShape.nextShapeId];
+
         assert( next.bodyId == bodyId );
         assert( next.prevShapeId == shapeId );
 

@@ -10,24 +10,24 @@ namespace zonai
 
 polygon2 MakeBox( const vec2& halfExtents )
 {
-    if( !IsFinite( halfExtents ) ||
-        halfExtents.x <= 0.0f ||
-        halfExtents.y <= 0.0f )
+    if( !IsFinite( halfExtents ) || halfExtents.x <= 0.0f || halfExtents.y <= 0.0f )
     {
         assert( false );
+
         return {};
     }
 
     polygon2 box{};
     box.vertices[0] = { -halfExtents.x, -halfExtents.y };
-    box.vertices[1] = {  halfExtents.x, -halfExtents.y };
-    box.vertices[2] = {  halfExtents.x,  halfExtents.y };
-    box.vertices[3] = { -halfExtents.x,  halfExtents.y };
+    box.vertices[1] = { halfExtents.x, -halfExtents.y };
+    box.vertices[2] = { halfExtents.x, halfExtents.y };
+    box.vertices[3] = { -halfExtents.x, halfExtents.y };
     box.normals[0] = { 0.0f, -1.0f };
-    box.normals[1] = { 1.0f,  0.0f };
-    box.normals[2] = { 0.0f,  1.0f };
+    box.normals[1] = { 1.0f, 0.0f };
+    box.normals[2] = { 0.0f, 1.0f };
     box.normals[3] = { -1.0f, 0.0f };
     box.vertexCount = 4;
+
     return box;
 }
 
@@ -35,12 +35,10 @@ polygon2 MakeCapsule( const vec2& center1, const vec2& center2, float radius )
 {
     polygon2 capsule{};
 
-    if( !IsFinite( center1 ) ||
-        !IsFinite( center2 ) ||
-        !std::isfinite( radius ) ||
-        radius < 0.0f )
+    if( !IsFinite( center1 ) || !IsFinite( center2 ) || !std::isfinite( radius ) || radius < 0.0f )
     {
         assert( false );
+
         return capsule;
     }
 
@@ -51,6 +49,7 @@ polygon2 MakeCapsule( const vec2& center1, const vec2& center2, float radius )
     if( LengthSquared( direction ) <= epsilon )
     {
         assert( false );
+
         return capsule;
     }
 
@@ -75,6 +74,7 @@ polygon2 MakePolygon( std::span<const vec2> vertices )
     if( vertices.size() < 3 || vertices.size() > MAX_POLYGON_VERTICES )
     {
         assert( false );
+
         return polygon;
     }
 
@@ -85,6 +85,7 @@ polygon2 MakePolygon( std::span<const vec2> vertices )
         if( !IsFinite( vertices[i] ) )
         {
             assert( false );
+
             return {};
         }
 
@@ -107,15 +108,13 @@ polygon2 MakePolygon( std::span<const vec2> vertices )
     if( std::fabs( area2 ) <= epsilon )
     {
         assert( false );
+
         return {};
     }
 
     if( area2 < 0.0f )
     {
-        std::reverse(
-            polygon.vertices.begin(),
-            polygon.vertices.begin() + polygon.vertexCount
-        );
+        std::reverse( polygon.vertices.begin(), polygon.vertices.begin() + polygon.vertexCount );
     }
 
     for( int i = 0; i < polygon.vertexCount; ++i )
@@ -126,6 +125,7 @@ polygon2 MakePolygon( std::span<const vec2> vertices )
         if( LengthSquared( edge ) <= epsilon * epsilon )
         {
             assert( false );
+
             return {};
         }
 
@@ -143,6 +143,7 @@ polygon2 MakePolygon( std::span<const vec2> vertices )
         if( Cross( edge1, edge2 ) <= epsilon )
         {
             assert( false );
+
             return {};
         }
     }
@@ -159,14 +160,13 @@ polygon2 MakePolygon( std::span<const vec2> vertices )
         const float triangleArea = 0.5f * Cross( edge1, edge2 );
 
         area += triangleArea;
-        centroidOffset +=
-            ( edge1 + edge2 ) *
-            ( triangleArea / 3.0f );
+        centroidOffset += ( edge1 + edge2 ) * ( triangleArea / 3.0f );
     }
 
     if( area <= 0.5f * epsilon )
     {
         assert( false );
+
         return {};
     }
 
@@ -178,10 +178,7 @@ polygon2 MakePolygon( std::span<const vec2> vertices )
 
 aabb2 ComputeAABB( const polygon2& polygon )
 {
-    if( polygon.vertexCount == 0 )
-    {
-        return {};
-    }
+    if( polygon.vertexCount == 0 ) return {};
 
     vec2 min = polygon.vertices[0];
     vec2 max = polygon.vertices[0];
@@ -199,11 +196,7 @@ aabb2 ComputeAABB( const polygon2& polygon )
 
     const vec2 radius{ polygon.radius, polygon.radius };
 
-    return
-    {
-        min - radius,
-        max + radius
-    };
+    return { min - radius, max + radius };
 }
 
 } // namespace zonai

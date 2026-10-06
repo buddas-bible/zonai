@@ -22,7 +22,10 @@ void check( bool condition, const char* message )
 
 void update( world& simulation )
 {
-    simulation.UpdateCollisions( []( const contactData& ) {} );
+    simulation.UpdateCollisions(
+        []( const contactData& )
+        {
+        } );
 }
 
 #pragma region ContactQueries
@@ -37,7 +40,7 @@ void checkContactQueries()
     for( const float x : { 1.5f, 11.5f, -2.1f } )
     {
         const bodyId target = simulation.CreateBody( bodyType::Static, { { x, 0.0f }, {} } );
-        (void)simulation.CreateShape( target, circle2{ {}, 1.0f } );
+        ( void )simulation.CreateShape( target, circle2{ {}, 1.0f } );
         emptyTarget = target;
     }
     update( simulation );
@@ -56,38 +59,42 @@ void checkContactQueries()
     update( simulation );
     check( simulation.GetBodyContactData( owner, contacts ) == 3, "speculative contact query omitted" );
     bool hasSpeculative = false;
-    for( const contactData& data : contacts ) { hasSpeculative |= data.manifold.points[0].separation > 0.0f; }
+    for( const contactData& data : contacts )
+    {
+        hasSpeculative |= data.manifold.points[0].separation > 0.0f;
+    }
     check( hasSpeculative, "speculative contact fixture" );
     int callbacks = 0;
-    simulation.UpdateCollisions( [&]( const contactData& data )
-    {
-        check( simulation.IsValid( data.id ) && data.manifold.pointCount == 1, "collision callback snapshot" );
-        ++callbacks;
-    } );
+    simulation.UpdateCollisions(
+        [&]( const contactData& data )
+        {
+            check( simulation.IsValid( data.id ) && data.manifold.pointCount == 1, "collision callback snapshot" );
+            ++callbacks;
+        } );
     check( callbacks == 2, "collision callback includes speculative-only pair" );
     simulation.SetBodyTransform( owner, { { 100.0f, 0.0f }, {} } );
     update( simulation );
     check( !simulation.IsValid( snapshot.id ) && snapshot.manifold.pointCount == 1, "copied contact snapshot changed after removal" );
 }
 
-#pragma endregion
+#pragma endregion ContactQueries
 #pragma region CollisionCallbackTiming
 
 void checkCollisionCallbackTiming()
 {
     world simulation{};
     const bodyId owner = simulation.CreateBody( bodyType::Dynamic );
-    (void)simulation.CreateShape( owner, circle2{ {}, 1.0f } );
+    ( void )simulation.CreateShape( owner, circle2{ {}, 1.0f } );
     const bodyId target = simulation.CreateBody( bodyType::Static, { { 1.5f, 0.0f }, {} } );
-    (void)simulation.CreateShape( target, circle2{ {}, 1.0f } );
+    ( void )simulation.CreateShape( target, circle2{ {}, 1.0f } );
     update( simulation );
     std::array<contactData, 1> output{};
     check( simulation.GetBodyContactData( owner, output ) == 1, "callback timing fixture" );
     const contactId existing = output[0].id;
     const bodyId newOwner = simulation.CreateBody( bodyType::Dynamic, { { 10.0f, 0.0f }, {} } );
-    (void)simulation.CreateShape( newOwner, circle2{ {}, 1.0f } );
+    ( void )simulation.CreateShape( newOwner, circle2{ {}, 1.0f } );
     const bodyId newTarget = simulation.CreateBody( bodyType::Static, { { 11.5f, 0.0f }, {} } );
-    (void)simulation.CreateShape( newTarget, circle2{ {}, 1.0f } );
+    ( void )simulation.CreateShape( newTarget, circle2{ {}, 1.0f } );
 
     // 기존 Contact의 callback은 새 pair 생성 전임. move-only callable을 복사하지 않아야 함.
     int callbacks = 0;
@@ -113,27 +120,36 @@ void checkCollisionCallbackTiming()
     // fat pair를 유지한 채 speculative로 이동하면 public query에는 남고 callback에는 빠짐.
     simulation.SetBodyTransform( target, { { 2.005f, 0.0f }, {} } );
     int freshCalls = 0;
-    simulation.UpdateCollisions( [&]( const contactData& data )
-    {
-        check( data.id != existing, "speculative contact dispatched to callback" );
-        ++freshCalls;
-    } );
+    simulation.UpdateCollisions(
+        [&]( const contactData& data )
+        {
+            check( data.id != existing, "speculative contact dispatched to callback" );
+            ++freshCalls;
+        } );
     check( freshCalls == 1 && simulation.IsValid( existing ), "fresh callback count or persistent contact" );
     check( simulation.GetBodyContactData( owner, output ) == 1 && output[0].manifold.points[0].separation > 0.0f, "speculative query after callback refresh" );
     simulation.SetBodyTransform( target, { { 1.6f, 0.0f }, {} } );
     int touchingCalls = 0;
-    simulation.UpdateCollisions( [&]( const contactData& data )
-    {
-        if( data.id == existing ) { check( data.manifold.points[0].separation < 0.0f, "fresh touching manifold" ); }
-        ++touchingCalls;
-    } );
+    simulation.UpdateCollisions(
+        [&]( const contactData& data )
+        {
+            if( data.id == existing )
+            {
+                check( data.manifold.points[0].separation < 0.0f, "fresh touching manifold" );
+            }
+            ++touchingCalls;
+        } );
     check( touchingCalls == 2, "fresh touching callback omitted" );
     simulation.SetBodyTransform( target, { { 100.0f, 0.0f }, {} } );
-    simulation.UpdateCollisions( [&]( const contactData& data ) { check( data.id != existing, "destroyed contact callback" ); } );
+    simulation.UpdateCollisions(
+        [&]( const contactData& data )
+        {
+            check( data.id != existing, "destroyed contact callback" );
+        } );
     check( !simulation.IsValid( existing ) && simulation.GetContactCount() == 1, "separated contact not removed" );
 }
 
-#pragma endregion
+#pragma endregion CollisionCallbackTiming
 #pragma region SensorFiltersAndLimits
 
 void checkSensorQueries()
@@ -179,7 +195,13 @@ void checkSensorQueries()
 void checkSensorFilters()
 {
     // Removing either mask check or group precedence must change these independently specified results.
-    struct filterCase { collisionFilter sensor; collisionFilter visitor; bool overlaps; };
+    struct filterCase
+    {
+        collisionFilter sensor;
+        collisionFilter visitor;
+        bool overlaps;
+    };
+
     constexpr std::uint64_t highBit = 1ull << 63;
     const std::array cases
     {
@@ -211,7 +233,7 @@ void checkSensorFilters()
     }
 }
 
-#pragma endregion
+#pragma endregion SensorFiltersAndLimits
 #pragma region SensorLifetime
 
 void checkVisitorReuse()
@@ -270,7 +292,7 @@ void checkSensorSwap()
     check( simulation.GetSensorEndEvents().size() == 1 && simulation.GetSensorEndEvents()[0].sensorShapeId == second, "visitor opt-out after sensor swap" );
 }
 
-#pragma endregion
+#pragma endregion SensorLifetime
 #pragma region TreeQueryCallback
 
 void checkTreeCallback()
@@ -278,29 +300,48 @@ void checkTreeCallback()
     dynamicTree tree{};
     const aabb2 bounds{ { -1.0f, -1.0f }, { 1.0f, 1.0f } };
     int calls = 0;
-    const auto stop = [&]( std::int32_t ) { ++calls; return false; };
+    const auto stop = [&]( std::int32_t )
+    {
+        ++calls;
+
+        return false;
+    };
     tree.Query( bounds, stop );
     check( calls == 0, "empty tree callback" );
-    for( int i = 0; i < 8; ++i ) { (void)tree.CreateProxy( bounds, i ); }
+    for( int i = 0; i < 8; ++i )
+    {
+        ( void )tree.CreateProxy( bounds, i );
+    }
     for( const bool rebuild : { false, true } )
     {
-        if( rebuild ) { (void)tree.Rebuild( true ); }
+        if( rebuild )
+        {
+            ( void )tree.Rebuild( true );
+        }
         calls = 0;
         tree.Query( bounds, stop );
         check( calls == 1, "tree callback false did not stop query" );
         int seen = 0;
-        tree.Query( bounds, [&]( std::int32_t proxy ) { seen |= 1 << tree.GetProxyShapeIndex( proxy ); ++calls; return true; } );
+        tree.Query( bounds,
+            [&]( std::int32_t proxy )
+            {
+                seen |= 1 << tree.GetProxyShapeIndex( proxy );
+                ++calls;
+
+                return true;
+            } );
         check( calls == 9 && seen == 255, "tree query missed or repeated leaf" );
     }
 }
 
-#pragma endregion
+#pragma endregion TreeQueryCallback
 
 } // namespace
 
 int main()
 {
-    world matrixWorld; matrixWorld.SetGravity( {} );
+    world matrixWorld;
+    matrixWorld.SetGravity( {} );
     const auto ground = matrixWorld.CreateBody();
     const auto moving = matrixWorld.CreateBody( bodyType::Dynamic );
     const auto solid = matrixWorld.CreateShape( ground, circle2{ {}, 1.0f }, { 1, ~std::uint64_t{ 0 }, 0 } );
@@ -310,36 +351,58 @@ int main()
     matrixWorld.SetShapeSensorEventsEnabled( sensor, true );
     matrixWorld.Step( 0.0f );
     check( matrixWorld.GetContactCount() == 1 && matrixWorld.GetShapeSensorCapacity( sensor ) == 1, "default project matrix preserves filters" );
-    collisionMatrix matrix; matrix.setPair( 0, 63, false );
+    collisionMatrix matrix;
+    matrix.setPair( 0, 63, false );
     matrixWorld.setCollisionMatrix( matrix );
     check( matrixWorld.GetContactCount() == 0, "matrix edit removes existing contacts immediately" );
     matrixWorld.Step( 0.0f );
     check( matrixWorld.GetContactCount() == 0 && matrixWorld.GetShapeSensorCapacity( sensor ) == 0, "matrix blocks stationary solid and sensor pairs" );
-    matrixWorld.SetShapeFilter( solid, { 1, 0, 7 } ); matrixWorld.SetShapeFilter( visitor, { std::uint64_t{ 1 } << 63, 0, 7 } );
+    matrixWorld.SetShapeFilter( solid, { 1, 0, 7 } );
+    matrixWorld.SetShapeFilter( visitor, { std::uint64_t{ 1 } << 63, 0, 7 } );
     matrixWorld.Step( 0.0f );
     check( matrixWorld.GetContactCount() == 0, "positive group cannot bypass project matrix" );
-    matrix.setPair( 63, 0, true ); matrixWorld.setCollisionMatrix( matrix ); matrixWorld.Step( 0.0f );
+    matrix.setPair( 63, 0, true );
+    matrixWorld.setCollisionMatrix( matrix );
+    matrixWorld.Step( 0.0f );
     check( matrixWorld.GetContactCount() == 1, "symmetric matrix edit discovers stationary pair again" );
-    matrixWorld.SetShapeFilter( solid, { 1, ~std::uint64_t{ 0 }, 0 } ); matrixWorld.SetShapeFilter( visitor, { std::uint64_t{ 1 } << 63, 0, 0 } );
-    matrixWorld.Step( 0.0f ); check( matrixWorld.GetContactCount() == 0, "object mask excludes project-allowed collision" );
-    matrixWorld.SetBodyAwake( moving, false ); matrixWorld.setCollisionMatrix( matrix );
+    matrixWorld.SetShapeFilter( solid, { 1, ~std::uint64_t{ 0 }, 0 } );
+    matrixWorld.SetShapeFilter( visitor, { std::uint64_t{ 1 } << 63, 0, 0 } );
+    matrixWorld.Step( 0.0f );
+    check( matrixWorld.GetContactCount() == 0, "object mask excludes project-allowed collision" );
+    matrixWorld.SetBodyAwake( moving, false );
+    matrixWorld.setCollisionMatrix( matrix );
     check( !matrixWorld.IsBodyAwake( moving ), "unchanged project matrix preserves sleep" );
     check( matrix.allows( 1 | 2, std::uint64_t{ 1 } << 63 ), "multiple categories use any project-allowed pair" );
-    for( const bool sensorTarget : { false, true } ) for( const bool allowed : { false, true } )
-    {
-        world continuous; continuous.SetGravity( {} );
-        const auto target = continuous.CreateBody();
-        const auto targetShape = sensorTarget ? continuous.CreateSensorShape( target, circle2{ {}, 0.25f } ) : continuous.CreateShape( target, circle2{ {}, 0.25f } );
-        const auto fast = continuous.CreateBody( bodyType::Dynamic, { { -2.0f, 0.0f }, {} } );
-        const auto fastShape = continuous.CreateShape( fast, circle2{ {}, 0.25f }, { std::uint64_t{ 1 } << 63, ~std::uint64_t{ 0 }, 0 } );
-        continuous.SetShapeSensorEventsEnabled( targetShape, true ); continuous.SetShapeSensorEventsEnabled( fastShape, true );
-        continuous.SetBodyBullet( fast, true ); continuous.SetBodyLinearVelocity( fast, { 120.0f, 0.0f } );
-        collisionMatrix rules; rules.setPair( 0, 63, allowed ); continuous.setCollisionMatrix( rules );
-        continuous.Step( 1.0f / 30.0f );
-        if( sensorTarget ) { check( continuous.GetShapeSensorCapacity( targetShape ) == ( allowed ? 1u : 0u ), "continuous sensor respects project matrix" ); }
-        else { check( continuous.HadBodyTimeOfImpact( fast ) == allowed, "solid CCD respects project matrix" ); }
-        if( !allowed ) { check( continuous.GetBodyTransform( fast ).position.x > 1.0f, "excluded CCD pair does not clip motion" ); }
-    }
+    for( const bool sensorTarget : { false, true } )
+        for( const bool allowed : { false, true } )
+        {
+            world continuous;
+            continuous.SetGravity( {} );
+            const auto target = continuous.CreateBody();
+            const auto targetShape = sensorTarget ? continuous.CreateSensorShape( target, circle2{ {}, 0.25f } ) : continuous.CreateShape( target, circle2{ {}, 0.25f } );
+            const auto fast = continuous.CreateBody( bodyType::Dynamic, { { -2.0f, 0.0f }, {} } );
+            const auto fastShape = continuous.CreateShape( fast, circle2{ {}, 0.25f }, { std::uint64_t{ 1 } << 63, ~std::uint64_t{ 0 }, 0 } );
+            continuous.SetShapeSensorEventsEnabled( targetShape, true );
+            continuous.SetShapeSensorEventsEnabled( fastShape, true );
+            continuous.SetBodyBullet( fast, true );
+            continuous.SetBodyLinearVelocity( fast, { 120.0f, 0.0f } );
+            collisionMatrix rules;
+            rules.setPair( 0, 63, allowed );
+            continuous.setCollisionMatrix( rules );
+            continuous.Step( 1.0f / 30.0f );
+            if( sensorTarget )
+            {
+                check( continuous.GetShapeSensorCapacity( targetShape ) == ( allowed ? 1u : 0u ), "continuous sensor respects project matrix" );
+            }
+            else
+            {
+                check( continuous.HadBodyTimeOfImpact( fast ) == allowed, "solid CCD respects project matrix" );
+            }
+            if( !allowed )
+            {
+                check( continuous.GetBodyTransform( fast ).position.x > 1.0f, "excluded CCD pair does not clip motion" );
+            }
+        }
     checkContactQueries();
     checkCollisionCallbackTiming();
     checkSensorQueries();

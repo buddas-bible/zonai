@@ -33,49 +33,26 @@ struct simplex2
     int count = 0;
 };
 
-vec2 Weight(
-    float a1,
-    const vec2& w1,
-    float a2,
-    const vec2& w2 )
+vec2 Weight( float a1, const vec2& w1, float a2, const vec2& w2 )
 {
     return w1 * a1 + w2 * a2;
 }
 
-vec2 Weight(
-    float a1,
-    const vec2& w1,
-    float a2,
-    const vec2& w2,
-    float a3,
-    const vec2& w3 )
+vec2 Weight( float a1, const vec2& w1, float a2, const vec2& w2, float a3, const vec2& w3 )
 {
-    return
-        w1 * a1 +
-        w2 * a2 +
-        w3 * a3;
+    return w1 * a1 + w2 * a2 + w3 * a3;
 }
 
-int FindSupport(
-    const shapeProxy2& proxy,
-    const vec2& direction )
+int FindSupport( const shapeProxy2& proxy, const vec2& direction )
 {
     assert( proxy.count > 0 );
 
     int bestIndex = 0;
-    float bestValue =
-        Dot(
-            proxy.points[0],
-            direction
-        );
+    float bestValue = Dot( proxy.points[0], direction );
 
     for( int i = 1; i < proxy.count; ++i )
     {
-        const float value =
-            Dot(
-                proxy.points[i],
-                direction
-            );
+        const float value = Dot( proxy.points[i], direction );
 
         if( value > bestValue )
         {
@@ -87,27 +64,18 @@ int FindSupport(
     return bestIndex;
 }
 
-simplex2 MakeSimplexFromCache(
-    const simplexCache2& cache,
-    const shapeProxy2& proxyA,
-    const shapeProxy2& proxyB )
+simplex2 MakeSimplexFromCache( const simplexCache2& cache, const shapeProxy2& proxyA, const shapeProxy2& proxyB )
 {
     assert( cache.count <= 3 );
 
     simplex2 simplex{};
     simplex.count = cache.count;
 
-    std::array<simplexVertex2*, 3> vertices
-    {
-        &simplex.v1,
-        &simplex.v2,
-        &simplex.v3
-    };
+    std::array<simplexVertex2*, 3> vertices{ &simplex.v1, &simplex.v2, &simplex.v3 };
 
     for( int i = 0; i < simplex.count; ++i )
     {
-        simplexVertex2& vertex =
-            *vertices[i];
+        simplexVertex2& vertex = *vertices[i];
 
         vertex.indexA = cache.indexA[i];
         vertex.indexB = cache.indexB[i];
@@ -117,22 +85,18 @@ simplex2 MakeSimplexFromCache(
         assert( vertex.indexB >= 0 );
         assert( vertex.indexB < proxyB.count );
 
-        vertex.wA =
-            proxyA.points[vertex.indexA];
+        vertex.wA = proxyA.points[vertex.indexA];
 
-        vertex.wB =
-            proxyB.points[vertex.indexB];
+        vertex.wB = proxyB.points[vertex.indexB];
 
-        vertex.w =
-            vertex.wA - vertex.wB;
+        vertex.w = vertex.wA - vertex.wB;
 
         vertex.a = -1.0f;
     }
 
     if( simplex.count == 0 )
     {
-        simplexVertex2& vertex =
-            *vertices[0];
+        simplexVertex2& vertex = *vertices[0];
 
         vertex.indexA = 0;
         vertex.indexB = 0;
@@ -148,14 +112,10 @@ simplex2 MakeSimplexFromCache(
     return simplex;
 }
 
-simplexCache2 MakeSimplexCache(
-    const simplex2& simplex )
+simplexCache2 MakeSimplexCache( const simplex2& simplex )
 {
     simplexCache2 cache{};
-    cache.count =
-        static_cast<std::uint16_t>(
-            simplex.count
-        );
+    cache.count = static_cast<std::uint16_t>( simplex.count );
 
     const std::array<const simplexVertex2*, 3> vertices
     {
@@ -166,24 +126,15 @@ simplexCache2 MakeSimplexCache(
 
     for( int i = 0; i < simplex.count; ++i )
     {
-        cache.indexA[i] =
-            static_cast<std::uint8_t>(
-                vertices[i]->indexA
-            );
+        cache.indexA[i] = static_cast<std::uint8_t>( vertices[i]->indexA );
 
-        cache.indexB[i] =
-            static_cast<std::uint8_t>(
-                vertices[i]->indexB
-            );
+        cache.indexB[i] = static_cast<std::uint8_t>( vertices[i]->indexB );
     }
 
     return cache;
 }
 
-void ComputeWitnessPoints(
-    const simplex2& simplex,
-    vec2& pointA,
-    vec2& pointB )
+void ComputeWitnessPoints( const simplex2& simplex, vec2& pointA, vec2& pointB )
 {
     switch( simplex.count )
     {
@@ -193,33 +144,13 @@ void ComputeWitnessPoints(
         break;
 
     case 2:
-        pointA =
-            Weight(
-                simplex.v1.a,
-                simplex.v1.wA,
-                simplex.v2.a,
-                simplex.v2.wA
-            );
+        pointA = Weight( simplex.v1.a, simplex.v1.wA, simplex.v2.a, simplex.v2.wA );
 
-        pointB =
-            Weight(
-                simplex.v1.a,
-                simplex.v1.wB,
-                simplex.v2.a,
-                simplex.v2.wB
-            );
+        pointB = Weight( simplex.v1.a, simplex.v1.wB, simplex.v2.a, simplex.v2.wB );
         break;
 
     case 3:
-        pointA =
-            Weight(
-                simplex.v1.a,
-                simplex.v1.wA,
-                simplex.v2.a,
-                simplex.v2.wA,
-                simplex.v3.a,
-                simplex.v3.wA
-            );
+        pointA = Weight( simplex.v1.a, simplex.v1.wA, simplex.v2.a, simplex.v2.wA, simplex.v3.a, simplex.v3.wA );
 
         // origin이 Minkowski triangle 안에 있으므로 두 witness point는 동일함.
         pointB = pointA;
@@ -227,6 +158,7 @@ void ComputeWitnessPoints(
 
     default:
         assert( false );
+
         pointA = {};
         pointB = {};
         break;
@@ -235,15 +167,13 @@ void ComputeWitnessPoints(
 
 // 현재 2-point simplex에서 origin에 가장 가까운 Voronoi region을 선택하고
 // 다음 support point를 찾을 방향을 반환함.
-vec2 SolveSimplex2(
-    simplex2& simplex )
+vec2 SolveSimplex2( simplex2& simplex )
 {
     const vec2 w1 = simplex.v1.w;
     const vec2 w2 = simplex.v2.w;
     const vec2 e12 = w2 - w1;
 
-    const float d12_2 =
-        -Dot( w1, e12 );
+    const float d12_2 = -Dot( w1, e12 );
 
     if( d12_2 <= 0.0f )
     {
@@ -253,8 +183,7 @@ vec2 SolveSimplex2(
         return -w1;
     }
 
-    const float d12_1 =
-        Dot( w2, e12 );
+    const float d12_1 = Dot( w2, e12 );
 
     if( d12_1 <= 0.0f )
     {
@@ -265,30 +194,18 @@ vec2 SolveSimplex2(
         return -w2;
     }
 
-    const float inverseD12 =
-        1.0f /
-        ( d12_1 + d12_2 );
+    const float inverseD12 = 1.0f / ( d12_1 + d12_2 );
 
-    simplex.v1.a =
-        d12_1 * inverseD12;
+    simplex.v1.a = d12_1 * inverseD12;
 
-    simplex.v2.a =
-        d12_2 * inverseD12;
+    simplex.v2.a = d12_2 * inverseD12;
 
     simplex.count = 2;
 
-    return
-        Cross(
-            Cross(
-                w1 + w2,
-                e12
-            ),
-            e12
-        );
+    return Cross( Cross( w1 + w2, e12 ), e12 );
 }
 
-vec2 SolveSimplex3(
-    simplex2& simplex )
+vec2 SolveSimplex3( simplex2& simplex )
 {
     const vec2 w1 = simplex.v1.w;
     const vec2 w2 = simplex.v2.w;
@@ -312,35 +229,15 @@ vec2 SolveSimplex3(
     const float d23_1 = w3e23;
     const float d23_2 = -w2e23;
 
-    const float n123 =
-        Cross(
-            e12,
-            e13
-        );
+    const float n123 = Cross( e12, e13 );
 
-    const float d123_1 =
-        n123 *
-        Cross(
-            w2,
-            w3
-        );
+    const float d123_1 = n123 * Cross( w2, w3 );
 
-    const float d123_2 =
-        n123 *
-        Cross(
-            w3,
-            w1
-        );
+    const float d123_2 = n123 * Cross( w3, w1 );
 
-    const float d123_3 =
-        n123 *
-        Cross(
-            w1,
-            w2
-        );
+    const float d123_3 = n123 * Cross( w1, w2 );
 
-    if( d12_2 <= 0.0f &&
-        d13_2 <= 0.0f )
+    if( d12_2 <= 0.0f && d13_2 <= 0.0f )
     {
         simplex.v1.a = 1.0f;
         simplex.count = 1;
@@ -348,61 +245,34 @@ vec2 SolveSimplex3(
         return -w1;
     }
 
-    if( d12_1 > 0.0f &&
-        d12_2 > 0.0f &&
-        d123_3 <= 0.0f )
+    if( d12_1 > 0.0f && d12_2 > 0.0f && d123_3 <= 0.0f )
     {
-        const float inverseD12 =
-            1.0f /
-            ( d12_1 + d12_2 );
+        const float inverseD12 = 1.0f / ( d12_1 + d12_2 );
 
-        simplex.v1.a =
-            d12_1 * inverseD12;
+        simplex.v1.a = d12_1 * inverseD12;
 
-        simplex.v2.a =
-            d12_2 * inverseD12;
+        simplex.v2.a = d12_2 * inverseD12;
 
         simplex.count = 2;
 
-        return
-            Cross(
-                Cross(
-                    w1 + w2,
-                    e12
-                ),
-                e12
-            );
+        return Cross( Cross( w1 + w2, e12 ), e12 );
     }
 
-    if( d13_1 > 0.0f &&
-        d13_2 > 0.0f &&
-        d123_2 <= 0.0f )
+    if( d13_1 > 0.0f && d13_2 > 0.0f && d123_2 <= 0.0f )
     {
-        const float inverseD13 =
-            1.0f /
-            ( d13_1 + d13_2 );
+        const float inverseD13 = 1.0f / ( d13_1 + d13_2 );
 
-        simplex.v1.a =
-            d13_1 * inverseD13;
+        simplex.v1.a = d13_1 * inverseD13;
 
-        simplex.v3.a =
-            d13_2 * inverseD13;
+        simplex.v3.a = d13_2 * inverseD13;
 
         simplex.v2 = simplex.v3;
         simplex.count = 2;
 
-        return
-            Cross(
-                Cross(
-                    w1 + w3,
-                    e13
-                ),
-                e13
-            );
+        return Cross( Cross( w1 + w3, e13 ), e13 );
     }
 
-    if( d12_1 <= 0.0f &&
-        d23_2 <= 0.0f )
+    if( d12_1 <= 0.0f && d23_2 <= 0.0f )
     {
         simplex.v2.a = 1.0f;
         simplex.v1 = simplex.v2;
@@ -411,8 +281,7 @@ vec2 SolveSimplex3(
         return -w2;
     }
 
-    if( d13_1 <= 0.0f &&
-        d23_1 <= 0.0f )
+    if( d13_1 <= 0.0f && d23_1 <= 0.0f )
     {
         simplex.v3.a = 1.0f;
         simplex.v1 = simplex.v3;
@@ -421,49 +290,27 @@ vec2 SolveSimplex3(
         return -w3;
     }
 
-    if( d23_1 > 0.0f &&
-        d23_2 > 0.0f &&
-        d123_1 <= 0.0f )
+    if( d23_1 > 0.0f && d23_2 > 0.0f && d123_1 <= 0.0f )
     {
-        const float inverseD23 =
-            1.0f /
-            ( d23_1 + d23_2 );
+        const float inverseD23 = 1.0f / ( d23_1 + d23_2 );
 
-        simplex.v2.a =
-            d23_1 * inverseD23;
+        simplex.v2.a = d23_1 * inverseD23;
 
-        simplex.v3.a =
-            d23_2 * inverseD23;
+        simplex.v3.a = d23_2 * inverseD23;
 
         simplex.v1 = simplex.v3;
         simplex.count = 2;
 
-        return
-            Cross(
-                Cross(
-                    w2 + w3,
-                    e23
-                ),
-                e23
-            );
+        return Cross( Cross( w2 + w3, e23 ), e23 );
     }
 
-    const float inverseD123 =
-        1.0f /
-        (
-            d123_1 +
-            d123_2 +
-            d123_3
-        );
+    const float inverseD123 = 1.0f / ( d123_1 + d123_2 + d123_3 );
 
-    simplex.v1.a =
-        d123_1 * inverseD123;
+    simplex.v1.a = d123_1 * inverseD123;
 
-    simplex.v2.a =
-        d123_2 * inverseD123;
+    simplex.v2.a = d123_2 * inverseD123;
 
-    simplex.v3.a =
-        d123_3 * inverseD123;
+    simplex.v3.a = d123_3 * inverseD123;
 
     simplex.count = 3;
 
@@ -472,9 +319,7 @@ vec2 SolveSimplex3(
 
 } // namespace
 
-distanceOutput2 ShapeDistance(
-    const distanceInput2& input,
-    simplexCache2& cache )
+distanceOutput2 ShapeDistance( const distanceInput2& input, simplexCache2& cache )
 {
     assert( input.proxyA.count > 0 );
     assert( input.proxyB.count > 0 );
@@ -485,30 +330,14 @@ distanceOutput2 ShapeDistance(
     localProxyB.count = input.proxyB.count;
     localProxyB.radius = input.proxyB.radius;
 
-    for( int i = 0;
-         i < localProxyB.count;
-         ++i )
+    for( int i = 0; i < localProxyB.count; ++i )
     {
-        localProxyB.points[i] =
-            TransformPoint(
-                input.transform,
-                input.proxyB.points[i]
-            );
+        localProxyB.points[i] = TransformPoint( input.transform, input.proxyB.points[i] );
     }
 
-    simplex2 simplex =
-        MakeSimplexFromCache(
-            cache,
-            input.proxyA,
-            localProxyB
-        );
+    simplex2 simplex = MakeSimplexFromCache( cache, input.proxyA, localProxyB );
 
-    std::array<simplexVertex2*, 3> vertices
-    {
-        &simplex.v1,
-        &simplex.v2,
-        &simplex.v3
-    };
+    std::array<simplexVertex2*, 3> vertices{ &simplex.v1, &simplex.v2, &simplex.v3 };
 
     std::array<int, 3> savedA{};
     std::array<int, 3> savedB{};
@@ -520,18 +349,13 @@ distanceOutput2 ShapeDistance(
 
     while( iteration < MAX_ITERATIONS )
     {
-        const int savedCount =
-            simplex.count;
+        const int savedCount = simplex.count;
 
-        for( int i = 0;
-             i < savedCount;
-             ++i )
+        for( int i = 0; i < savedCount; ++i )
         {
-            savedA[i] =
-                vertices[i]->indexA;
+            savedA[i] = vertices[i]->indexA;
 
-            savedB[i] =
-                vertices[i]->indexB;
+            savedB[i] = vertices[i]->indexB;
         }
 
         vec2 direction{};
@@ -539,42 +363,29 @@ distanceOutput2 ShapeDistance(
         switch( simplex.count )
         {
         case 1:
-            direction =
-                -simplex.v1.w;
+            direction = -simplex.v1.w;
             break;
 
         case 2:
-            direction =
-                SolveSimplex2(
-                    simplex
-                );
+            direction = SolveSimplex2( simplex );
             break;
 
         case 3:
-            direction =
-                SolveSimplex3(
-                    simplex
-                );
+            direction = SolveSimplex3( simplex );
             break;
 
         default:
             assert( false );
+
             break;
         }
 
         if( simplex.count == 3 )
         {
-            cache =
-                MakeSimplexCache(
-                    simplex
-                );
+            cache = MakeSimplexCache( simplex );
 
             distanceOutput2 output{};
-            ComputeWitnessPoints(
-                simplex,
-                output.pointA,
-                output.pointB
-            );
+            ComputeWitnessPoints( simplex, output.pointA, output.pointB );
 
             output.distance = 0.0f;
             output.iterations = iteration;
@@ -582,20 +393,12 @@ distanceOutput2 ShapeDistance(
             return output;
         }
 
-        if( LengthSquared( direction ) <
-            1000.0f * FLT_MIN )
+        if( LengthSquared( direction ) < 1000.0f * FLT_MIN )
         {
-            cache =
-                MakeSimplexCache(
-                    simplex
-                );
+            cache = MakeSimplexCache( simplex );
 
             distanceOutput2 output{};
-            ComputeWitnessPoints(
-                simplex,
-                output.pointA,
-                output.pointB
-            );
+            ComputeWitnessPoints( simplex, output.pointA, output.pointB );
 
             output.distance = 0.0f;
             output.iterations = iteration;
@@ -605,45 +408,25 @@ distanceOutput2 ShapeDistance(
 
         nonUnitNormal = direction;
 
-        simplexVertex2& vertex =
-            *vertices[simplex.count];
+        simplexVertex2& vertex = *vertices[simplex.count];
 
-        vertex.indexA =
-            FindSupport(
-                input.proxyA,
-                direction
-            );
+        vertex.indexA = FindSupport( input.proxyA, direction );
 
-        vertex.wA =
-            input.proxyA.points[
-                vertex.indexA
-            ];
+        vertex.wA = input.proxyA.points[vertex.indexA];
 
-        vertex.indexB =
-            FindSupport(
-                localProxyB,
-                -direction
-            );
+        vertex.indexB = FindSupport( localProxyB, -direction );
 
-        vertex.wB =
-            localProxyB.points[
-                vertex.indexB
-            ];
+        vertex.wB = localProxyB.points[vertex.indexB];
 
-        vertex.w =
-            vertex.wA -
-            vertex.wB;
+        vertex.w = vertex.wA - vertex.wB;
 
         ++iteration;
 
         bool duplicate = false;
 
-        for( int i = 0;
-             i < savedCount;
-             ++i )
+        for( int i = 0; i < savedCount; ++i )
         {
-            if( vertex.indexA == savedA[i] &&
-                vertex.indexB == savedB[i] )
+            if( vertex.indexA == savedA[i] && vertex.indexB == savedB[i] )
             {
                 duplicate = true;
                 break;
@@ -660,53 +443,27 @@ distanceOutput2 ShapeDistance(
 
     distanceOutput2 output{};
 
-    output.normal =
-        Normalize(
-            nonUnitNormal
-        );
+    output.normal = Normalize( nonUnitNormal );
 
-    ComputeWitnessPoints(
-        simplex,
-        output.pointA,
-        output.pointB
-    );
+    ComputeWitnessPoints( simplex, output.pointA, output.pointB );
 
-    output.distance =
-        Length(
-            output.pointA -
-            output.pointB
-        );
+    output.distance = Length( output.pointA - output.pointB );
 
     output.iterations = iteration;
 
-    cache =
-        MakeSimplexCache(
-            simplex
-        );
+    cache = MakeSimplexCache( simplex );
 
     if( input.useRadii )
     {
-        const float radiusA =
-            input.proxyA.radius;
+        const float radiusA = input.proxyA.radius;
 
-        const float radiusB =
-            input.proxyB.radius;
+        const float radiusB = input.proxyB.radius;
 
-        output.distance =
-            std::max(
-                0.0f,
-                output.distance -
-                radiusA -
-                radiusB
-            );
+        output.distance = std::max( 0.0f, output.distance - radiusA - radiusB );
 
-        output.pointA +=
-            output.normal *
-            radiusA;
+        output.pointA += output.normal * radiusA;
 
-        output.pointB -=
-            output.normal *
-            radiusB;
+        output.pointB -= output.normal * radiusB;
     }
 
     return output;

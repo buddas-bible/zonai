@@ -8,9 +8,7 @@
 namespace zonai
 {
 
-localManifold2 CollideCircles(
-    const circle2& a,
-    const circle2& b, const transform2& transformB )
+localManifold2 CollideCircles( const circle2& a, const circle2& b, const transform2& transformB )
 {
     localManifold2 manifold{};
 
@@ -22,14 +20,9 @@ localManifold2 CollideCircles(
 
     const float radiusSum = a.radius + b.radius;
 
-    const float speculativeRadius =
-        radiusSum + SPECULATIVE_DISTANCE;
+    const float speculativeRadius = radiusSum + SPECULATIVE_DISTANCE;
 
-    if( distanceSquared >
-        speculativeRadius * speculativeRadius )
-    {
-        return manifold;
-    }
+    if( distanceSquared > speculativeRadius * speculativeRadius ) return manifold;
 
     const float distance = std::sqrt( distanceSquared );
 
@@ -51,23 +44,14 @@ localManifold2 CollideCircles(
     return manifold;
 }
 
-localManifold2 CollideSegmentCircle(
-    const segment2& segment,
-    const circle2& circle, const transform2& circleTransform )
+localManifold2 CollideSegmentCircle( const segment2& segment, const circle2& circle, const transform2& circleTransform )
 {
-    const capsule2 capsule =
-    {
-        segment.a,
-        segment.b,
-        0.0f
-    };
+    const capsule2 capsule = { segment.a, segment.b, 0.0f };
 
     return CollideCapsuleCircle( capsule, circle, circleTransform );
 }
 
-localManifold2 CollideCapsuleCircle(
-    const capsule2& capsule,
-    const circle2& circle, const transform2& circleTransform )
+localManifold2 CollideCapsuleCircle( const capsule2& capsule, const circle2& circle, const transform2& circleTransform )
 {
     localManifold2 manifold{};
 
@@ -106,14 +90,9 @@ localManifold2 CollideCapsuleCircle(
 
     const float radiusSum = capsule.radius + circle.radius;
 
-    const float speculativeRadius =
-        radiusSum + SPECULATIVE_DISTANCE;
+    const float speculativeRadius = radiusSum + SPECULATIVE_DISTANCE;
 
-    if( distanceSquared >
-        speculativeRadius * speculativeRadius )
-    {
-        return manifold;
-    }
+    if( distanceSquared > speculativeRadius * speculativeRadius ) return manifold;
 
     const float distance = std::sqrt( distanceSquared );
 
@@ -135,16 +114,11 @@ localManifold2 CollideCapsuleCircle(
     return manifold;
 }
 
-localManifold2 CollidePolygonCircle(
-    const polygon2& polygon,
-    const circle2& circle, const transform2& circleTransform )
+localManifold2 CollidePolygonCircle( const polygon2& polygon, const circle2& circle, const transform2& circleTransform )
 {
     localManifold2 manifold{};
 
-    if( polygon.vertexCount == 0 )
-    {
-        return manifold;
-    }
+    if( polygon.vertexCount == 0 ) return manifold;
 
     // 모든 계산을 polygon A의 local space에서 수행함.
     const vec2 center = TransformPoint( circleTransform, circle.center );
@@ -159,10 +133,7 @@ localManifold2 CollidePolygonCircle(
 
     for( std::size_t i = 0; i < polygon.vertexCount; ++i )
     {
-        const float currentSeparation = Dot(
-            polygon.normals[i],
-            center - polygon.vertices[i]
-        );
+        const float currentSeparation = Dot( polygon.normals[i], center - polygon.vertices[i] );
 
         if( currentSeparation > separation )
         {
@@ -171,42 +142,26 @@ localManifold2 CollidePolygonCircle(
         }
     }
 
-    if( separation >
-        radiusSum + SPECULATIVE_DISTANCE )
-    {
-        return manifold;
-    }
+    if( separation > radiusSum + SPECULATIVE_DISTANCE ) return manifold;
 
     const std::size_t vertexIndex1 = normalIndex;
-    const std::size_t vertexIndex2 =
-        ( vertexIndex1 + 1 ) % polygon.vertexCount;
+    const std::size_t vertexIndex2 = ( vertexIndex1 + 1 ) % polygon.vertexCount;
 
     const vec2 vertex1 = polygon.vertices[vertexIndex1];
     const vec2 vertex2 = polygon.vertices[vertexIndex2];
 
-    const float u1 = Dot(
-        center - vertex1,
-        vertex2 - vertex1
-    );
+    const float u1 = Dot( center - vertex1, vertex2 - vertex1 );
 
-    const float u2 = Dot(
-        center - vertex2,
-        vertex1 - vertex2
-    );
+    const float u2 = Dot( center - vertex2, vertex1 - vertex2 );
 
     if( u1 < 0.0f && separation > FLT_EPSILON )
     {
         const vec2 delta = center - vertex1;
         const float distanceSquared = LengthSquared( delta );
 
-        const float speculativeRadius =
-            radiusSum + SPECULATIVE_DISTANCE;
+        const float speculativeRadius = radiusSum + SPECULATIVE_DISTANCE;
 
-        if( distanceSquared >
-            speculativeRadius * speculativeRadius )
-        {
-            return manifold;
-        }
+        if( distanceSquared > speculativeRadius * speculativeRadius ) return manifold;
 
         const float distance = std::sqrt( distanceSquared );
         const vec2 normal = delta / distance;
@@ -224,14 +179,9 @@ localManifold2 CollidePolygonCircle(
         const vec2 delta = center - vertex2;
         const float distanceSquared = LengthSquared( delta );
 
-        const float speculativeRadius =
-            radiusSum + SPECULATIVE_DISTANCE;
+        const float speculativeRadius = radiusSum + SPECULATIVE_DISTANCE;
 
-        if( distanceSquared >
-            speculativeRadius * speculativeRadius )
-        {
-            return manifold;
-        }
+        if( distanceSquared > speculativeRadius * speculativeRadius ) return manifold;
 
         const float distance = std::sqrt( distanceSquared );
         const vec2 normal = delta / distance;
@@ -249,16 +199,11 @@ localManifold2 CollidePolygonCircle(
         // face 영역에는 circle center가 polygon 내부인 경우도 포함됨.
         const vec2 normal = polygon.normals[normalIndex];
 
-        const float centerSeparation = Dot(
-            center - vertex1,
-            normal
-        );
+        const float centerSeparation = Dot( center - vertex1, normal );
 
-        const vec2 surfaceA =
-            center + normal * ( radiusA - centerSeparation );
+        const vec2 surfaceA = center + normal * ( radiusA - centerSeparation );
 
-        const vec2 surfaceB =
-            center - normal * radiusB;
+        const vec2 surfaceB = center - normal * radiusB;
 
         manifold.normal = normal;
         manifold.points[0].point = ( surfaceA + surfaceB ) * 0.5f;

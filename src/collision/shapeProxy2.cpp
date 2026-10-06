@@ -6,14 +6,12 @@
 namespace zonai
 {
 
-shapeProxy2 MakeShapeProxy(
-    const shapeGeometry& geometry )
+shapeProxy2 MakeShapeProxy( const shapeGeometry& geometry )
 {
     return std::visit(
         []( const auto& localGeometry ) -> shapeProxy2
         {
-            using Geometry =
-                std::remove_cvref_t<decltype( localGeometry )>;
+            using Geometry = std::remove_cvref_t<decltype( localGeometry )>;
 
             shapeProxy2 proxy{};
 
@@ -43,17 +41,11 @@ shapeProxy2 MakeShapeProxy(
             else
             {
                 assert( localGeometry.vertexCount > 0 );
-                assert(
-                    localGeometry.vertexCount <=
-                    static_cast<int>( proxy.points.size() )
-                );
+                assert( localGeometry.vertexCount <= static_cast<int>( proxy.points.size() ) );
 
-                for( int i = 0;
-                     i < localGeometry.vertexCount;
-                     ++i )
+                for( int i = 0; i < localGeometry.vertexCount; ++i )
                 {
-                    proxy.points[i] =
-                        localGeometry.vertices[i];
+                    proxy.points[i] = localGeometry.vertices[i];
                 }
 
                 proxy.count = localGeometry.vertexCount;
@@ -62,8 +54,7 @@ shapeProxy2 MakeShapeProxy(
 
             return proxy;
         },
-        geometry
-    );
+        geometry );
 }
 
 } // namespace zonai

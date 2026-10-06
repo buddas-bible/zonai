@@ -17,10 +17,7 @@ namespace zonai
 using contactSoftness2 = constraintSoftness2;
 
 // Hertz / damping ratio를 한 step에서 사용할 softness 계수로 변환함.
-[[nodiscard]] contactSoftness2 MakeContactSoftness(
-    float hertz,
-    float dampingRatio,
-    float timeStep );
+[[nodiscard]] contactSoftness2 MakeContactSoftness( float hertz, float dampingRatio, float timeStep );
 
 // Contact solver가 한 접촉점에 대해 반복해서 사용하는 계산 결과.
 struct contactConstraintPoint2
@@ -99,37 +96,30 @@ struct contactConstraint2
 // normal solver가 바로 사용할 world-space constraint를 준비함.
 [[nodiscard]] contactConstraint2 PrepareContactConstraint(
     const contactSim2& contactSim,
-    const bodySim& bodySimA,
-    const bodyState& bodyStateA,
-    const bodySim& bodySimB,
-    const bodyState& bodyStateB );
+    const bodySim& bodySimA, const bodyState& bodyStateA,
+    const bodySim& bodySimB, const bodyState& bodyStateB );
 
 // 이전 step에서 캐싱한 누적 normal impulse를 solver 시작 전에 먼저 적용함.
 void WarmStartContactConstraint(
     contactConstraint2& constraint,
-    bodyState& bodyStateA,
-    bodyState& bodyStateB );
+    bodyState& bodyStateA, bodyState& bodyStateB );
 
 // 한 Contact의 constraint를 한 번 풀어 body velocity에 impulse를 적용함.
 // useBias=true면 penetration을 줄이는 normal soft push만 수행하고,
 // false면 normal relax 뒤 tangent Coulomb friction까지 풂.
 void SolveContactConstraint(
     contactConstraint2& constraint,
-    bodyState& bodyStateA,
-    bodyState& bodyStateB,
+    bodyState& bodyStateA, bodyState& bodyStateB,
     bool useBias );
 
 // 충돌 전 접근 속도가 threshold보다 충분히 클 때
 // relax가 제거한 normal 속도에 restitution 목표 속도를 다시 적용함.
 void ApplyRestitutionContactConstraint(
     contactConstraint2& constraint,
-    bodyState& bodyStateA,
-    bodyState& bodyStateB,
+    bodyState& bodyStateA, bodyState& bodyStateB,
     float threshold );
 
 // 이번 step에서 수렴한 누적 impulse를 persistent ContactSim에 저장함.
-void StoreContactImpulses(
-    const contactConstraint2& constraint,
-    contactSim2& contactSim );
+void StoreContactImpulses( const contactConstraint2& constraint, contactSim2& contactSim );
 
 } // namespace zonai

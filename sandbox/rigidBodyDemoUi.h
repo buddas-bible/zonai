@@ -4,6 +4,7 @@
 
 namespace zonai::sandbox
 {
+
 // Physics/입력 model과 ImGui 표시를 분리해 GUI 없이 같은 데모를 검증함.
 class rigidBodyDemoUi final : public rigidBodyDemo
 {
@@ -19,7 +20,7 @@ private:
     void drawExperimentControls();
     void drawMouseControls();
     void drawDebugSettings();
-#pragma endregion
+#pragma endregion Controls
     int selectedShapeIndex_ = 0;
     bool showGrid_ = true;
     bool showShapeAABBs_ = false;
@@ -39,7 +40,13 @@ private:
 
 [[nodiscard]] bool initializeDemoUi();
 [[nodiscard]] std::unique_ptr<demo> createDemoView( demoKind kind );
+
 // 편집 화면에 표시할 레이어만 보관함. 숨기는 것은 충돌 규칙을 바꾸지 않음.
-struct collisionSettingsUi { std::uint64_t visibleLayers = 1; };
+struct collisionSettingsUi
+{
+    std::uint64_t visibleLayers = 1;
+};
+
 void drawProjectCollisionSettings( demoSession& session, collisionSettingsUi& state );
+
 } // namespace zonai::sandbox

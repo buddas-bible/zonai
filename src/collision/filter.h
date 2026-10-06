@@ -13,21 +13,30 @@ class collisionMatrix
 {
 public:
     constexpr collisionMatrix() { rows_.fill( ~std::uint64_t{ 0 } ); }
+
     constexpr void setPair( int a, int b, bool allowed )
     {
         assert( a >= 0 && a < 64 && b >= 0 && b < 64 );
+
         const auto bitA = std::uint64_t{ 1 } << a, bitB = std::uint64_t{ 1 } << b;
         rows_[a] = allowed ? rows_[a] | bitB : rows_[a] & ~bitB;
         rows_[b] = allowed ? rows_[b] | bitA : rows_[b] & ~bitA;
     }
+
     [[nodiscard]] constexpr bool allows( std::uint64_t a, std::uint64_t b ) const
     {
         // Category가 없는 shape는 공통 쌍 규칙의 대상이 아님. 기존 group/mask 판정은 유지함.
-        if( a == 0 || b == 0 ) { return true; }
-        for( int bit = 0; a != 0; ++bit, a >>= 1 ) { if( ( a & 1 ) != 0 && ( rows_[bit] & b ) != 0 ) { return true; } }
+        if( a == 0 || b == 0 ) return true;
+
+        for( int bit = 0; a != 0; ++bit, a >>= 1 )
+        {
+            if( ( a & 1 ) != 0 && ( rows_[bit] & b ) != 0 ) return true;
+        }
         return false;
     }
+
     friend bool operator==( const collisionMatrix&, const collisionMatrix& ) = default;
+
 private:
     std::array<std::uint64_t, 64> rows_{};
 };
@@ -48,15 +57,10 @@ struct collisionFilter
 constexpr bool ShouldShapesCollide( const collisionFilter& filterA, const collisionFilter& filterB )
 {
     // 같은 non-zero group은 category / mask보다 우선함.
-    if( filterA.groupIndex == filterB.groupIndex && filterA.groupIndex != 0 )
-    {
-        return filterA.groupIndex > 0;
-    }
+    if( filterA.groupIndex == filterB.groupIndex && filterA.groupIndex != 0 ) return filterA.groupIndex > 0;
 
     // 양쪽 mask가 서로의 category를 모두 허용해야 충돌함.
-    return
-        ( filterA.maskBits & filterB.categoryBits ) != 0 &&
-        ( filterA.categoryBits & filterB.maskBits ) != 0;
+    return ( filterA.maskBits & filterB.categoryBits ) != 0 && ( filterA.categoryBits & filterB.maskBits ) != 0;
 }
 
 } // namespace zonai

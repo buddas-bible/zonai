@@ -15,21 +15,17 @@ struct contactEdge2
 
 // contactId와 어느 Body 쪽 edge인지를 하나의 정수 key로 묶음.
 // 하위 1bit가 edgeIndex, 나머지 상위 bit가 contactId임.
-constexpr std::int32_t MakeContactKey(
-    std::int32_t contactId,
-    std::int32_t edgeIndex )
+constexpr std::int32_t MakeContactKey( std::int32_t contactId, std::int32_t edgeIndex )
 {
     return ( contactId << 1 ) | edgeIndex;
 }
 
-constexpr std::int32_t GetContactId(
-    std::int32_t contactKey )
+constexpr std::int32_t GetContactId( std::int32_t contactKey )
 {
     return contactKey >> 1;
 }
 
-constexpr std::int32_t GetContactEdgeIndex(
-    std::int32_t contactKey )
+constexpr std::int32_t GetContactEdgeIndex( std::int32_t contactKey )
 {
     return contactKey & 1;
 }

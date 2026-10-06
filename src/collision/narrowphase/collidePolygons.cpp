@@ -12,10 +12,7 @@ namespace zonai
 namespace
 {
 
-float FindMaxSeparation(
-    std::size_t& edgeIndex,
-    const polygon2& polygonA,
-    const polygon2& polygonB )
+float FindMaxSeparation( std::size_t& edgeIndex, const polygon2& polygonA, const polygon2& polygonB )
 {
     edgeIndex = 0;
     float maxSeparation = -FLT_MAX;
@@ -29,15 +26,9 @@ float FindMaxSeparation(
 
         for( std::size_t j = 0; j < polygonB.vertexCount; ++j )
         {
-            const float currentSeparation = Dot(
-                normal,
-                polygonB.vertices[j] - vertexA
-            );
+            const float currentSeparation = Dot( normal, polygonB.vertices[j] - vertexA );
 
-            separation = std::min(
-                separation,
-                currentSeparation
-            );
+            separation = std::min( separation, currentSeparation );
         }
 
         if( separation > maxSeparation )
@@ -50,16 +41,9 @@ float FindMaxSeparation(
     return maxSeparation;
 }
 
-void AddContactPoint(
-    localManifold2& manifold,
-    const vec2& point,
-    float separation,
-    std::uint16_t id )
+void AddContactPoint( localManifold2& manifold, const vec2& point, float separation, std::uint16_t id )
 {
-    if( manifold.pointCount >= MAX_MANIFOLD_POINTS )
-    {
-        return;
-    }
+    if( manifold.pointCount >= MAX_MANIFOLD_POINTS ) return;
 
     manifold.points[manifold.pointCount].point = point;
     manifold.points[manifold.pointCount].separation = separation;
@@ -67,12 +51,7 @@ void AddContactPoint(
     ++manifold.pointCount;
 }
 
-localManifold2 ClipPolygons(
-    const polygon2& polygonA,
-    const polygon2& polygonB,
-    std::size_t edgeA,
-    std::size_t edgeB,
-    bool flip )
+localManifold2 ClipPolygons( const polygon2& polygonA, const polygon2& polygonB, std::size_t edgeA, std::size_t edgeB, bool flip )
 {
     localManifold2 manifold{};
 
@@ -82,10 +61,8 @@ localManifold2 ClipPolygons(
     const std::size_t referenceEdge = flip ? edgeB : edgeA;
     const std::size_t incidentEdge = flip ? edgeA : edgeB;
 
-    const std::size_t referenceNext =
-        ( referenceEdge + 1 ) % reference.vertexCount;
-    const std::size_t incidentNext =
-        ( incidentEdge + 1 ) % incident.vertexCount;
+    const std::size_t referenceNext = ( referenceEdge + 1 ) % reference.vertexCount;
+    const std::size_t incidentNext = ( incidentEdge + 1 ) % incident.vertexCount;
 
     const vec2 normal = reference.normals[referenceEdge];
 
@@ -98,122 +75,57 @@ localManifold2 ClipPolygons(
     const vec2 tangent{ -normal.y, normal.x };
 
     const float lowerReference = 0.0f;
-    const float upperReference = Dot(
-        reference2 - reference1,
-        tangent
-    );
+    const float upperReference = Dot( reference2 - reference1, tangent );
 
     // CCW winding 때문에 incident edge는 tangent의 반대 방향이다.
-    const float upperIncident = Dot(
-        incident1 - reference1,
-        tangent
-    );
-    const float lowerIncident = Dot(
-        incident2 - reference1,
-        tangent
-    );
+    const float upperIncident = Dot( incident1 - reference1, tangent );
+    const float lowerIncident = Dot( incident2 - reference1, tangent );
 
-    if( upperIncident < lowerReference ||
-        upperReference < lowerIncident )
-    {
-        return manifold;
-    }
+    if( upperIncident < lowerReference || upperReference < lowerIncident ) return manifold;
 
     vec2 lowerPoint = incident2;
 
-    if( lowerIncident < lowerReference &&
-        upperIncident - lowerIncident > FLT_EPSILON )
+    if( lowerIncident < lowerReference && upperIncident - lowerIncident > FLT_EPSILON )
     {
-        const float fraction =
-            ( lowerReference - lowerIncident ) /
-            ( upperIncident - lowerIncident );
+        const float fraction = ( lowerReference - lowerIncident ) / ( upperIncident - lowerIncident );
 
-        lowerPoint = incident2 +
-            ( incident1 - incident2 ) * fraction;
+        lowerPoint = incident2 + ( incident1 - incident2 ) * fraction;
     }
 
     vec2 upperPoint = incident1;
 
-    if( upperIncident > upperReference &&
-        upperIncident - lowerIncident > FLT_EPSILON )
+    if( upperIncident > upperReference && upperIncident - lowerIncident > FLT_EPSILON )
     {
-        const float fraction =
-            ( upperReference - lowerIncident ) /
-            ( upperIncident - lowerIncident );
+        const float fraction = ( upperReference - lowerIncident ) / ( upperIncident - lowerIncident );
 
-        upperPoint = incident2 +
-            ( incident1 - incident2 ) * fraction;
+        upperPoint = incident2 + ( incident1 - incident2 ) * fraction;
     }
 
-    const float lowerSeparation = Dot(
-        lowerPoint - reference1,
-        normal
-    );
-    const float upperSeparation = Dot(
-        upperPoint - reference1,
-        normal
-    );
+    const float lowerSeparation = Dot( lowerPoint - reference1, normal );
+    const float upperSeparation = Dot( upperPoint - reference1, normal );
 
     const float radiusReference = reference.radius;
     const float radiusIncident = incident.radius;
     const float radiusSum = radiusReference + radiusIncident;
 
-    lowerPoint += normal *
-        ( 0.5f *
-          ( radiusReference - radiusIncident - lowerSeparation ) );
+    lowerPoint += normal * ( 0.5f * ( radiusReference - radiusIncident - lowerSeparation ) );
 
-    upperPoint += normal *
-        ( 0.5f *
-          ( radiusReference - radiusIncident - upperSeparation ) );
+    upperPoint += normal * ( 0.5f * ( radiusReference - radiusIncident - upperSeparation ) );
 
-    const float lowerContactSeparation =
-        lowerSeparation - radiusSum;
-    const float upperContactSeparation =
-        upperSeparation - radiusSum;
+    const float lowerContactSeparation = lowerSeparation - radiusSum;
+    const float upperContactSeparation = upperSeparation - radiusSum;
 
     manifold.normal = flip ? -normal : normal;
 
     if( !flip )
     {
-        AddContactPoint(
-            manifold,
-            lowerPoint,
-            lowerContactSeparation,
-            MakeContactPointId(
-                referenceEdge,
-                incidentNext
-            )
-        );
-        AddContactPoint(
-            manifold,
-            upperPoint,
-            upperContactSeparation,
-            MakeContactPointId(
-                referenceNext,
-                incidentEdge
-            )
-        );
+        AddContactPoint( manifold, lowerPoint, lowerContactSeparation, MakeContactPointId( referenceEdge, incidentNext ) );
+        AddContactPoint( manifold, upperPoint, upperContactSeparation, MakeContactPointId( referenceNext, incidentEdge ) );
     }
     else
     {
-        AddContactPoint(
-            manifold,
-            upperPoint,
-            upperContactSeparation,
-            MakeContactPointId(
-                incidentEdge,
-                referenceNext
-            )
-        );
-        AddContactPoint(
-            manifold,
-            lowerPoint,
-            lowerContactSeparation,
-            MakeContactPointId(
-                incidentNext,
-                referenceEdge
-            )
-        );
+        AddContactPoint( manifold, upperPoint, upperContactSeparation, MakeContactPointId( incidentEdge, referenceNext ) );
+        AddContactPoint( manifold, lowerPoint, lowerContactSeparation, MakeContactPointId( incidentNext, referenceEdge ) );
     }
 
     return manifold;
@@ -224,24 +136,14 @@ bool IsEndpoint( float fraction )
     return fraction == 0.0f || fraction == 1.0f;
 }
 
-localManifold2 MakeClosestPointManifold(
-    const segmentDistanceResult2& result,
-    std::size_t indexA1,
-    std::size_t indexA2,
-    std::size_t indexB1,
-    std::size_t indexB2,
-    float radiusA,
-    float radiusB )
+localManifold2 MakeClosestPointManifold( const segmentDistanceResult2& result, std::size_t indexA1, std::size_t indexA2, std::size_t indexB1, std::size_t indexB2, float radiusA, float radiusB )
 {
     localManifold2 manifold{};
 
     const vec2 delta = result.closest2 - result.closest1;
     const float distanceSquared = LengthSquared( delta );
 
-    if( distanceSquared <= FLT_EPSILON * FLT_EPSILON )
-    {
-        return manifold;
-    }
+    if( distanceSquared <= FLT_EPSILON * FLT_EPSILON ) return manifold;
 
     const float distance = std::sqrt( distanceSquared );
     const vec2 normal = delta / distance;
@@ -250,26 +152,14 @@ localManifold2 MakeClosestPointManifold(
     const vec2 surfaceB = result.closest2 - normal * radiusB;
 
     manifold.normal = normal;
-    manifold.points[0].point =
-        ( surfaceA + surfaceB ) * 0.5f;
-    manifold.points[0].separation =
-        distance - radiusA - radiusB;
+    manifold.points[0].point = ( surfaceA + surfaceB ) * 0.5f;
+    manifold.points[0].separation = distance - radiusA - radiusB;
 
-    const std::size_t featureA =
-        result.fraction1 == 0.0f ?
-            indexA1 :
-            indexA2;
+    const std::size_t featureA = result.fraction1 == 0.0f ? indexA1 : indexA2;
 
-    const std::size_t featureB =
-        result.fraction2 == 0.0f ?
-            indexB1 :
-            indexB2;
+    const std::size_t featureB = result.fraction2 == 0.0f ? indexB1 : indexB2;
 
-    manifold.points[0].id =
-        MakeContactPointId(
-            featureA,
-            featureB
-        );
+    manifold.points[0].id = MakeContactPointId( featureA, featureB );
 
     manifold.pointCount = 1;
 
@@ -278,16 +168,11 @@ localManifold2 MakeClosestPointManifold(
 
 } // namespace
 
-localManifold2 CollidePolygons(
-    const polygon2& a,
-    const polygon2& b, const transform2& transformB )
+localManifold2 CollidePolygons( const polygon2& a, const polygon2& b, const transform2& transformB )
 {
     localManifold2 manifold{};
 
-    if( a.vertexCount == 0 || b.vertexCount == 0 )
-    {
-        return manifold;
-    }
+    if( a.vertexCount == 0 || b.vertexCount == 0 ) return manifold;
 
     // 계산 오차를 줄이기 위해 polygon A의 첫 정점을 원점으로 이동한다.
     const vec2 origin = a.vertices[0];
@@ -302,27 +187,19 @@ localManifold2 CollidePolygons(
 
     for( std::size_t i = 0; i < localB.vertexCount; ++i )
     {
-        localB.vertices[i] =
-            TransformPoint( transformB, b.vertices[i] ) - origin;
-        localB.normals[i] =
-            TransformVector( transformB, b.normals[i] );
+        localB.vertices[i] = TransformPoint( transformB, b.vertices[i] ) - origin;
+        localB.normals[i] = TransformVector( transformB, b.normals[i] );
     }
 
     std::size_t edgeA = 0;
-    const float separationA =
-        FindMaxSeparation( edgeA, localA, localB );
+    const float separationA = FindMaxSeparation( edgeA, localA, localB );
 
     std::size_t edgeB = 0;
-    const float separationB =
-        FindMaxSeparation( edgeB, localB, localA );
+    const float separationB = FindMaxSeparation( edgeB, localB, localA );
 
     const float radiusSum = localA.radius + localB.radius;
 
-    if( separationA > radiusSum + SPECULATIVE_DISTANCE ||
-        separationB > radiusSum + SPECULATIVE_DISTANCE )
-    {
-        return manifold;
-    }
+    if( separationA > radiusSum + SPECULATIVE_DISTANCE || separationB > radiusSum + SPECULATIVE_DISTANCE ) return manifold;
 
     bool flip = false;
 
@@ -335,10 +212,7 @@ localManifold2 CollidePolygons(
 
         for( std::size_t i = 0; i < localB.vertexCount; ++i )
         {
-            const float dot = Dot(
-                searchDirection,
-                localB.normals[i]
-            );
+            const float dot = Dot( searchDirection, localB.normals[i] );
 
             if( dot < minDot )
             {
@@ -357,10 +231,7 @@ localManifold2 CollidePolygons(
 
         for( std::size_t i = 0; i < localA.vertexCount; ++i )
         {
-            const float dot = Dot(
-                searchDirection,
-                localA.normals[i]
-            );
+            const float dot = Dot( searchDirection, localA.normals[i] );
 
             if( dot < minDot )
             {
@@ -374,77 +245,39 @@ localManifold2 CollidePolygons(
 
     // Core polygon들이 떨어져 있지만 radius 때문에 접촉하는 경우에는
     // reference/incident edge의 실제 최근접 feature를 확인한다.
-    if( separationA > 0.1f * linearSlop ||
-        separationB > 0.1f * linearSlop )
+    if( separationA > 0.1f * linearSlop || separationB > 0.1f * linearSlop )
     {
         const std::size_t a1 = edgeA;
-        const std::size_t a2 =
-            ( edgeA + 1 ) % localA.vertexCount;
+        const std::size_t a2 = ( edgeA + 1 ) % localA.vertexCount;
         const std::size_t b1 = edgeB;
-        const std::size_t b2 =
-            ( edgeB + 1 ) % localB.vertexCount;
+        const std::size_t b2 = ( edgeB + 1 ) % localB.vertexCount;
 
-        const segmentDistanceResult2 result = SegmentDistance(
-            localA.vertices[a1],
-            localA.vertices[a2],
-            localB.vertices[b1],
-            localB.vertices[b2]
-        );
+        const segmentDistanceResult2 result = SegmentDistance( localA.vertices[a1], localA.vertices[a2], localB.vertices[b1], localB.vertices[b2] );
 
         const float distance = std::sqrt( result.distanceSquared );
         const float closestSeparation = distance - radiusSum;
 
-        if( closestSeparation > SPECULATIVE_DISTANCE )
-        {
-            return manifold;
-        }
+        if( closestSeparation > SPECULATIVE_DISTANCE ) return manifold;
 
-        manifold = ClipPolygons(
-            localA,
-            localB,
-            edgeA,
-            edgeB,
-            flip
-        );
+        manifold = ClipPolygons( localA, localB, edgeA, edgeB, flip );
 
         float minSeparation = FLT_MAX;
 
         for( std::size_t i = 0; i < manifold.pointCount; ++i )
         {
-            minSeparation = std::min(
-                minSeparation,
-                manifold.points[i].separation
-            );
+            minSeparation = std::min( minSeparation, manifold.points[i].separation );
         }
 
-        const bool vertexVertex =
-            IsEndpoint( result.fraction1 ) &&
-            IsEndpoint( result.fraction2 );
+        const bool vertexVertex = IsEndpoint( result.fraction1 ) && IsEndpoint( result.fraction2 );
 
-        if( manifold.pointCount == 0 ||
-            ( vertexVertex &&
-              closestSeparation + 0.1f * linearSlop < minSeparation ) )
+        if( manifold.pointCount == 0 || ( vertexVertex && closestSeparation + 0.1f * linearSlop < minSeparation ) )
         {
-            manifold = MakeClosestPointManifold(
-                result,
-                a1,
-                a2,
-                b1,
-                b2,
-                localA.radius,
-                localB.radius
-            );
+            manifold = MakeClosestPointManifold( result, a1, a2, b1, b2, localA.radius, localB.radius );
         }
     }
     else
     {
-        manifold = ClipPolygons(
-            localA,
-            localB,
-            edgeA,
-            edgeB,
-            flip
-        );
+        manifold = ClipPolygons( localA, localB, edgeA, edgeB, flip );
     }
 
     for( std::size_t i = 0; i < manifold.pointCount; ++i )
@@ -455,38 +288,18 @@ localManifold2 CollidePolygons(
     return manifold;
 }
 
-localManifold2 CollidePolygonCapsule(
-    const polygon2& polygon,
-    const capsule2& capsule, const transform2& capsuleTransform )
+localManifold2 CollidePolygonCapsule( const polygon2& polygon, const capsule2& capsule, const transform2& capsuleTransform )
 {
-    const polygon2 capsulePolygon = MakeCapsule(
-        capsule.center1,
-        capsule.center2,
-        capsule.radius
-    );
+    const polygon2 capsulePolygon = MakeCapsule( capsule.center1, capsule.center2, capsule.radius );
 
-    return CollidePolygons(
-        polygon,
-        capsulePolygon,
-        capsuleTransform
-    );
+    return CollidePolygons( polygon, capsulePolygon, capsuleTransform );
 }
 
-localManifold2 CollidePolygonSegment(
-    const polygon2& polygon,
-    const segment2& segment, const transform2& segmentTransform )
+localManifold2 CollidePolygonSegment( const polygon2& polygon, const segment2& segment, const transform2& segmentTransform )
 {
-    const polygon2 segmentPolygon = MakeCapsule(
-        segment.a,
-        segment.b,
-        0.0f
-    );
+    const polygon2 segmentPolygon = MakeCapsule( segment.a, segment.b, 0.0f );
 
-    return CollidePolygons(
-        polygon,
-        segmentPolygon,
-        segmentTransform
-    );
+    return CollidePolygons( polygon, segmentPolygon, segmentTransform );
 }
 
 } // namespace zonai

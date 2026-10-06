@@ -7,8 +7,7 @@
 namespace zonai
 {
 
-hashSet::hashSet( std::size_t capacity )
-    : items_( NormalizeCapacity( capacity ), 0 )
+hashSet::hashSet( std::size_t capacity ) : items_( NormalizeCapacity( capacity ), 0 )
 {
 }
 
@@ -27,6 +26,7 @@ bool hashSet::Add( std::uint64_t key )
     if( items_[index] != 0 )
     {
         assert( items_[index] == key );
+
         return true;
     }
 
@@ -37,6 +37,7 @@ bool hashSet::Add( std::uint64_t key )
     }
 
     AddHaveCapacity( key, hash );
+
     return false;
 }
 
@@ -47,15 +48,13 @@ bool hashSet::Remove( std::uint64_t key )
     const std::uint64_t hash = KeyHash( key );
     std::size_t emptyIndex = FindSlot( key, hash );
 
-    if( items_[emptyIndex] == 0 )
-    {
-        return false;
-    }
+    if( items_[emptyIndex] == 0 ) return false;
 
     // 삭제한 slot을 비우고 뒤쪽 probe chain에서 필요한 항목을 앞으로 당김.
     items_[emptyIndex] = 0;
 
     assert( count_ > 0 );
+
     --count_;
 
     const std::size_t mask = items_.size() - 1;
@@ -76,18 +75,12 @@ bool hashSet::Remove( std::uint64_t key )
         // homeIndex가 현재 빈 slot을 건너뛰지 않는 위치라면 그대로 둠.
         if( emptyIndex <= scanIndex )
         {
-            if( emptyIndex < homeIndex && homeIndex <= scanIndex )
-            {
-                continue;
-            }
+            if( emptyIndex < homeIndex && homeIndex <= scanIndex ) continue;
         }
         else
         {
             // probe chain이 배열 끝에서 처음으로 wrap된 경우의 순환 구간을 처리함.
-            if( emptyIndex < homeIndex || homeIndex <= scanIndex )
-            {
-                continue;
-            }
+            if( emptyIndex < homeIndex || homeIndex <= scanIndex ) continue;
         }
 
         // 빈 slot 때문에 탐색이 끊길 key를 앞으로 옮겨 probe chain을 복구함.
@@ -121,10 +114,7 @@ std::size_t hashSet::GetCapacity() const
 
 std::size_t hashSet::NormalizeCapacity( std::size_t capacity )
 {
-    if( capacity <= MIN_CAPACITY )
-    {
-        return MIN_CAPACITY;
-    }
+    if( capacity <= MIN_CAPACITY ) return MIN_CAPACITY;
 
     return std::bit_ceil( capacity );
 }
@@ -138,6 +128,7 @@ std::uint64_t hashSet::KeyHash( std::uint64_t key )
     hash ^= hash >> 33;
     hash *= 0xc4ceb9fe1a85ec53ULL;
     hash ^= hash >> 33;
+
     return hash;
 }
 
@@ -176,10 +167,7 @@ void hashSet::Grow()
     // capacity가 바뀌면 mask도 달라지므로 기존 key를 모두 다시 배치함.
     for( const std::uint64_t key : oldItems )
     {
-        if( key == 0 )
-        {
-            continue;
-        }
+        if( key == 0 ) continue;
 
         AddHaveCapacity( key, KeyHash( key ) );
     }

@@ -18,8 +18,6 @@ struct sweep2
 };
 
 // sweep의 time 지점에 해당하는 body origin transform을 계산함.
-transform2 GetSweepTransform(
-    const sweep2& sweep,
-    float time );
+transform2 GetSweepTransform( const sweep2& sweep, float time );
 
 } // namespace zonai

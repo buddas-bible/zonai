@@ -34,7 +34,6 @@ struct shapeCastInput2
 };
 
 // GJK distance를 반복 사용해 B가 A에 처음 닿는 translation fraction을 계산함.
-castOutput2 ShapeCast(
-    const shapeCastInput2& input );
+castOutput2 ShapeCast( const shapeCastInput2& input );
 
 } // namespace zonai

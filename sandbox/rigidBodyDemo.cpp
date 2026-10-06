@@ -5,7 +5,9 @@
 
 namespace zonai::sandbox
 {
+
 #pragma region LifetimeAndSimulation
+
 rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 8 );
@@ -17,6 +19,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     else
     {
         assert( kind == demoKind::distancePendulum );
+
         createPendulum();
     }
     refreshContacts();
@@ -40,9 +43,11 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
 #pragma endregion LifetimeAndSimulation
 
 #pragma region Input
+
 void rigidBodyDemo::handleInput( const demoInput& input )
 {
     assert( IsFinite( input.mousePosition ) );
+
     leftHeld_ = input.left;
     rightHeld_ = input.right;
     if( !world_.IsValid( mouseJoint_ ) )
@@ -104,6 +109,7 @@ void rigidBodyDemo::cancelInput()
 #pragma endregion Input
 
 #pragma region Settings
+
 void rigidBodyDemo::setCollisionMatrix( const collisionMatrix& matrix )
 {
     world_.setCollisionMatrix( matrix );
@@ -114,6 +120,7 @@ void rigidBodyDemo::setMouseSettings( float hertz, float dampingRatio, float max
 {
     assert( std::isfinite( hertz ) && hertz >= 0.0f && std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );
     assert( std::isfinite( maxForce ) && maxForce >= 0.0f );
+
     mouseSettings_.hertz = hertz;
     mouseSettings_.dampingRatio = dampingRatio;
     mouseSettings_.maxForce = maxForce;
@@ -126,17 +133,21 @@ void rigidBodyDemo::setMouseSettings( float hertz, float dampingRatio, float max
 #pragma endregion Settings
 
 #pragma region Contacts
+
 void rigidBodyDemo::refreshContacts()
 {
     contacts_.clear();
-    world_.UpdateCollisions( [this]( const contactData& contact )
-    {
-        contacts_.push_back( contact );
-    } );
+    world_.UpdateCollisions(
+        [this]( const contactData& contact )
+        {
+            contacts_.push_back( contact );
+        } );
 }
+
 #pragma endregion Contacts
 
 #pragma region SceneSetup
+
 void rigidBodyDemo::createPlayground()
 {
 
@@ -150,7 +161,7 @@ void rigidBodyDemo::createPlayground()
     // 기울어진 정적 경사면.
     const bodyId ramp = world_.CreateBody( bodyType::Static, { { 4.0f, -1.6f }, rot2::FromRadians( 0.22f ) } );
 
-    const shapeId rampShape = world_.CreateShape( ramp, segment2 { { -2.0f, 0.0f }, { 2.0f, 0.0f } } );
+    const shapeId rampShape = world_.CreateShape( ramp, segment2{ { -2.0f, 0.0f }, { 2.0f, 0.0f } } );
 
     shapes_.push_back( { ramp, rampShape, "경사면 [정적]" } );
 
@@ -171,7 +182,7 @@ void rigidBodyDemo::createPlayground()
     // 길쭉한 동적 캡슐.
     const bodyId capsuleBody = world_.CreateBody( bodyType::Dynamic, { { 3.0f, 4.0f }, rot2::FromRadians( -0.25f ) } );
 
-    const shapeId capsuleShape = world_.CreateShape( capsuleBody, capsule2 { { -0.8f, 0.0f }, { 0.8f, 0.0f }, 0.35f } );
+    const shapeId capsuleShape = world_.CreateShape( capsuleBody, capsule2{ { -0.8f, 0.0f }, { 0.8f, 0.0f }, 0.35f } );
 
     shapes_.push_back( { capsuleBody, capsuleShape, "캡슐 [동적]" } );
 
@@ -183,7 +194,6 @@ void rigidBodyDemo::createPlayground()
     world_.SetBodyLinearVelocity( kinematicBody, { 1.25f, 0.0f } );
 
     shapes_.push_back( { kinematicBody, kinematicShape, "발판 [운동학적]" } );
-
 }
 
 void rigidBodyDemo::createPendulum()
@@ -212,6 +222,7 @@ void rigidBodyDemo::createPendulum()
 #pragma endregion SceneSetup
 
 #pragma region MouseDrag
+
 void rigidBodyDemo::startMouseDrag( vec2 point )
 {
     bodyId ground{};
@@ -223,27 +234,17 @@ void rigidBodyDemo::startMouseDrag( vec2 point )
             break;
         }
     }
-    if( !world_.IsValid( ground ) )
-    {
-        return;
-    }
+    if( !world_.IsValid( ground ) ) return;
 
     // ponytail: 작은 데모의 shape 목록을 O(n)으로 pick함. 많은 물체의 데모가 필요하면 World overlap query로 후보를 줄임.
     // 역순으로 검사해 같은 위치에서는 나중에 그린 동적 도형을 우선함. 센서는 잡지 않음.
     for( auto visual = shapes_.rbegin(); visual != shapes_.rend(); ++visual )
     {
-        if( !world_.IsValid( visual->bodyHandle ) || !world_.IsValid( visual->shapeHandle ) )
-        {
-            continue;
-        }
-        if( world_.GetBody( visual->bodyHandle ).type != bodyType::Dynamic || world_.IsShapeSensor( visual->shapeHandle ) )
-        {
-            continue;
-        }
-        if( !world_.testShapePoint( visual->shapeHandle, point ) )
-        {
-            continue;
-        }
+        if( !world_.IsValid( visual->bodyHandle ) || !world_.IsValid( visual->shapeHandle ) ) continue;
+
+        if( world_.GetBody( visual->bodyHandle ).type != bodyType::Dynamic || world_.IsShapeSensor( visual->shapeHandle ) ) continue;
+
+        if( !world_.testShapePoint( visual->shapeHandle, point ) ) continue;
 
         // 클릭한 월드 위치를 목표점으로 지정하면 World가 로컬 작용점을 저장함.
         auto definition = mouseSettings_;
@@ -254,10 +255,12 @@ void rigidBodyDemo::startMouseDrag( vec2 point )
         break;
     }
 }
+
 #pragma endregion MouseDrag
 
 std::unique_ptr<demo> createRigidBodyDemo( demoKind kind )
 {
     return std::make_unique<rigidBodyDemo>( kind );
 }
+
 } // namespace zonai::sandbox
