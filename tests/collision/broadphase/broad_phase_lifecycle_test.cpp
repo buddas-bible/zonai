@@ -28,6 +28,7 @@ void check( bool condition, const char* message )
 std::uint32_t nextRandom()
 {
     randomState = 1664525u * randomState + 1013904223u;
+
     return randomState;
 }
 
@@ -36,6 +37,7 @@ aabb2 randomBox()
     const float x = static_cast<float>( nextRandom() % 81 ) - 40.0f;
     const float y = static_cast<float>( nextRandom() % 81 ) - 40.0f;
     const float halfExtent = 0.25f + static_cast<float>( nextRandom() % 16 );
+
     return { { x - halfExtent, y - halfExtent }, { x + halfExtent, y + halfExtent } };
 }
 
@@ -57,19 +59,18 @@ void checkQueries( const broadPhase& phase, const std::vector<proxyRecord>& reco
         std::vector<std::int32_t> actual, expected;
         std::size_t liveCount = 0;
 
-        tree.Query( query, [&]( std::int32_t proxyId )
-        {
-            actual.push_back( tree.GetProxyShapeIndex( proxyId ) );
-            return true;
-        } );
+        tree.Query( query,
+            [&]( std::int32_t proxyId )
+            {
+                actual.push_back( tree.GetProxyShapeIndex( proxyId ) );
+
+                return true;
+            } );
 
         for( std::size_t i = 0; i < records.size(); ++i )
         {
             const proxyRecord& record = records[i];
-            if( record.key == -1 || record.type != type )
-            {
-                continue;
-            }
+            if( record.key == -1 || record.type != type ) continue;
 
             ++liveCount;
             const aabb2& stored = tree.GetProxyAABB( GetProxyId( record.key ) );
@@ -86,7 +87,13 @@ void checkQueries( const broadPhase& phase, const std::vector<proxyRecord>& reco
         check( tree.GetProxyCount() == liveCount, "live proxy count" );
 
         int callbackCount = 0;
-        tree.Query( query, [&]( std::int32_t ) { ++callbackCount; return false; } );
+        tree.Query( query,
+            [&]( std::int32_t )
+            {
+                ++callbackCount;
+
+                return false;
+            } );
         check( callbackCount == ( expected.empty() ? 0 : 1 ), "query early termination" );
     }
 }
@@ -100,30 +107,21 @@ void checkPairs( broadPhase& phase, const std::vector<proxyRecord>& records, std
         {
             const proxyRecord& a = records[i];
             const proxyRecord& b = records[j];
-            if( a.key == -1 || b.key == -1 || !( a.moved || b.moved ) ||
-                ( a.type != bodyType::Dynamic && b.type != bodyType::Dynamic ) || !Overlaps( a.box, b.box ) )
-            {
-                continue;
-            }
+            if( a.key == -1 || b.key == -1 || !( a.moved || b.moved ) || ( a.type != bodyType::Dynamic && b.type != bodyType::Dynamic ) || !Overlaps( a.box, b.box ) ) continue;
 
             const shapePairKey key = MakeShapePairKey( static_cast<std::int32_t>( i ), static_cast<std::int32_t>( j ) );
-            if( phase.HasPair( key ) )
-            {
-                continue;
-            }
+            if( phase.HasPair( key ) ) continue;
 
-            if( !shapes.empty() && ( shapes[i].bodyId == shapes[j].bodyId ||
-                shapes[i].sensorIndex != shape::NULL_INDEX || shapes[j].sensorIndex != shape::NULL_INDEX ||
-                !ShouldShapesCollide( shapes[i].filter, shapes[j].filter ) ) )
-            {
-                continue;
-            }
+            if( !shapes.empty() && ( shapes[i].bodyId == shapes[j].bodyId || shapes[i].sensorIndex != shape::NULL_INDEX || shapes[j].sensorIndex != shape::NULL_INDEX || !ShouldShapesCollide( shapes[i].filter, shapes[j].filter ) ) ) continue;
 
             expected.push_back( key );
         }
     }
 
-    auto collect = [&]( std::int32_t a, std::int32_t b ) { actual.push_back( MakeShapePairKey( a, b ) ); };
+    auto collect = [&]( std::int32_t a, std::int32_t b )
+    {
+        actual.push_back( MakeShapePairKey( a, b ) );
+    };
     // maintenance 전 두 overload가 같은 moved 상태를 읽게 함.
     phase.FindPairs( shapes, collect );
     std::sort( actual.begin(), actual.end() );
@@ -148,7 +146,7 @@ void checkPairs( broadPhase& phase, const std::vector<proxyRecord>& records, std
     }
 }
 
-#pragma endregion
+#pragma endregion ReferenceChecks
 
 } // namespace
 
@@ -257,6 +255,7 @@ int main()
         checkPairs( phase, records, {} );
     }
 
-#pragma endregion
+#pragma endregion MixedProxyLifecycle
+
     return 0;
 }

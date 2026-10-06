@@ -9,9 +9,7 @@
 namespace zonai
 {
 
-localManifold2 CollideCapsules(
-    const capsule2& a,
-    const capsule2& b, const transform2& transformB )
+localManifold2 CollideCapsules( const capsule2& a, const capsule2& b, const transform2& transformB )
 {
     localManifold2 manifold = {};
 
@@ -21,10 +19,8 @@ localManifold2 CollideCapsules(
     const vec2 point1A{};
     const vec2 point2A = a.center2 - origin;
 
-    const vec2 point1B =
-        zonai::TransformPoint( transformB, b.center1 ) - origin;
-    const vec2 point2B =
-        zonai::TransformPoint( transformB, b.center2 ) - origin;
+    const vec2 point1B = zonai::TransformPoint( transformB, b.center1 ) - origin;
+    const vec2 point2B = zonai::TransformPoint( transformB, b.center2 ) - origin;
 
     const vec2 directionA = point2A - point1A;
     const vec2 directionB = point2B - point1B;
@@ -34,11 +30,7 @@ localManifold2 CollideCapsules(
 
     constexpr float epsilonSquared = FLT_EPSILON * FLT_EPSILON;
 
-    if( lengthSquaredA <= epsilonSquared ||
-        lengthSquaredB <= epsilonSquared )
-    {
-        return manifold;
-    }
+    if( lengthSquaredA <= epsilonSquared || lengthSquaredB <= epsilonSquared ) return manifold;
 
     // Ericson 5.1.9: 두 선분 위의 최근접점 계산
     const vec2 offset = point1A - point1B;
@@ -46,64 +38,39 @@ localManifold2 CollideCapsules(
     const float offsetB = zonai::Dot( offset, directionB );
     const float directionsDot = zonai::Dot( directionA, directionB );
 
-    const float denominator =
-        lengthSquaredA * lengthSquaredB -
-        directionsDot * directionsDot;
+    const float denominator = lengthSquaredA * lengthSquaredB - directionsDot * directionsDot;
 
     float fractionA = 0.0f;
 
     if( denominator != 0.0f )
     {
-        fractionA = std::clamp(
-            ( directionsDot * offsetB -
-              offsetA * lengthSquaredB ) / denominator,
-            0.0f,
-            1.0f
-        );
+        fractionA = std::clamp( ( directionsDot * offsetB - offsetA * lengthSquaredB ) / denominator, 0.0f, 1.0f );
     }
 
-    float fractionB =
-        ( directionsDot * fractionA + offsetB ) /
-        lengthSquaredB;
+    float fractionB = ( directionsDot * fractionA + offsetB ) / lengthSquaredB;
 
     if( fractionB < 0.0f )
     {
         fractionB = 0.0f;
-        fractionA = std::clamp(
-            -offsetA / lengthSquaredA,
-            0.0f,
-            1.0f
-        );
+        fractionA = std::clamp( -offsetA / lengthSquaredA, 0.0f, 1.0f );
     }
     else if( fractionB > 1.0f )
     {
         fractionB = 1.0f;
-        fractionA = std::clamp(
-            ( directionsDot - offsetA ) / lengthSquaredA,
-            0.0f,
-            1.0f
-        );
+        fractionA = std::clamp( ( directionsDot - offsetA ) / lengthSquaredA, 0.0f, 1.0f );
     }
 
-    const vec2 closestA =
-        point1A + directionA * fractionA;
-    const vec2 closestB =
-        point1B + directionB * fractionB;
+    const vec2 closestA = point1A + directionA * fractionA;
+    const vec2 closestB = point1B + directionB * fractionB;
 
     const vec2 closestDelta = closestB - closestA;
-    const float distanceSquared =
-        zonai::LengthSquared( closestDelta );
+    const float distanceSquared = zonai::LengthSquared( closestDelta );
 
     const float radiusSum = a.radius + b.radius;
 
-    const float speculativeRadius =
-        radiusSum + SPECULATIVE_DISTANCE;
+    const float speculativeRadius = radiusSum + SPECULATIVE_DISTANCE;
 
-    if( distanceSquared >
-        speculativeRadius * speculativeRadius )
-    {
-        return manifold;
-    }
+    if( distanceSquared > speculativeRadius * speculativeRadius ) return manifold;
 
     const float distance = std::sqrt( distanceSquared );
 
@@ -113,32 +80,22 @@ localManifold2 CollideCapsules(
     const vec2 axisB = directionB / lengthB;
 
     // 두 선분의 투영이 겹치는 경우에는 2점 manifold를 시도한다.
-    const float projectionB1 =
-        zonai::Dot( point1B - point1A, axisA );
-    const float projectionB2 =
-        zonai::Dot( point2B - point1A, axisA );
+    const float projectionB1 = zonai::Dot( point1B - point1A, axisA );
+    const float projectionB2 = zonai::Dot( point2B - point1A, axisA );
 
-    const bool outsideA =
-        ( projectionB1 <= 0.0f && projectionB2 <= 0.0f ) ||
-        ( projectionB1 >= lengthA && projectionB2 >= lengthA );
+    const bool outsideA = ( projectionB1 <= 0.0f && projectionB2 <= 0.0f ) || ( projectionB1 >= lengthA && projectionB2 >= lengthA );
 
-    const float projectionA1 =
-        zonai::Dot( point1A - point1B, axisB );
-    const float projectionA2 =
-        zonai::Dot( point2A - point1B, axisB );
+    const float projectionA1 = zonai::Dot( point1A - point1B, axisB );
+    const float projectionA2 = zonai::Dot( point2A - point1B, axisB );
 
-    const bool outsideB =
-        ( projectionA1 <= 0.0f && projectionA2 <= 0.0f ) ||
-        ( projectionA1 >= lengthB && projectionA2 >= lengthB );
+    const bool outsideB = ( projectionA1 <= 0.0f && projectionA2 <= 0.0f ) || ( projectionA1 >= lengthB && projectionA2 >= lengthB );
 
     if( !outsideA && !outsideB )
     {
         vec2 normalA{ -axisA.y, axisA.x };
 
-        const float sideA1 =
-            zonai::Dot( point1B - point1A, normalA );
-        const float sideA2 =
-            zonai::Dot( point2B - point1A, normalA );
+        const float sideA1 = zonai::Dot( point1B - point1A, normalA );
+        const float sideA2 = zonai::Dot( point2B - point1A, normalA );
 
         const float positiveA = std::min( sideA1, sideA2 );
         const float negativeA = std::min( -sideA1, -sideA2 );
@@ -153,10 +110,8 @@ localManifold2 CollideCapsules(
 
         vec2 normalB{ -axisB.y, axisB.x };
 
-        const float sideB1 =
-            zonai::Dot( point1A - point1B, normalB );
-        const float sideB2 =
-            zonai::Dot( point2A - point1B, normalB );
+        const float sideB1 = zonai::Dot( point1A - point1B, normalB );
+        const float sideB2 = zonai::Dot( point2A - point1B, normalB );
 
         const float positiveB = std::min( sideB1, sideB2 );
         const float negativeB = std::min( -sideB1, -sideB2 );
@@ -180,59 +135,34 @@ localManifold2 CollideCapsules(
 
             if( projectionB1 < 0.0f && projectionB2 > 0.0f )
             {
-                contact1 = point1B +
-                    ( point2B - point1B ) *
-                    ( -projectionB1 /
-                      ( projectionB2 - projectionB1 ) );
+                contact1 = point1B + ( point2B - point1B ) * ( -projectionB1 / ( projectionB2 - projectionB1 ) );
             }
             else if( projectionB2 < 0.0f && projectionB1 > 0.0f )
             {
-                contact2 = point2B +
-                    ( point1B - point2B ) *
-                    ( -projectionB2 /
-                      ( projectionB1 - projectionB2 ) );
+                contact2 = point2B + ( point1B - point2B ) * ( -projectionB2 / ( projectionB1 - projectionB2 ) );
             }
 
             if( projectionB1 > lengthA && projectionB2 < lengthA )
             {
-                contact1 = point1B +
-                    ( point2B - point1B ) *
-                    ( ( projectionB1 - lengthA ) /
-                      ( projectionB1 - projectionB2 ) );
+                contact1 = point1B + ( point2B - point1B ) * ( ( projectionB1 - lengthA ) / ( projectionB1 - projectionB2 ) );
             }
             else if( projectionB2 > lengthA && projectionB1 < lengthA )
             {
-                contact2 = point2B +
-                    ( point1B - point2B ) *
-                    ( ( projectionB2 - lengthA ) /
-                      ( projectionB2 - projectionB1 ) );
+                contact2 = point2B + ( point1B - point2B ) * ( ( projectionB2 - lengthA ) / ( projectionB2 - projectionB1 ) );
             }
 
-            const float separation1 =
-                zonai::Dot( contact1 - point1A, normalA );
-            const float separation2 =
-                zonai::Dot( contact2 - point1A, normalA );
+            const float separation1 = zonai::Dot( contact1 - point1A, normalA );
+            const float separation2 = zonai::Dot( contact2 - point1A, normalA );
 
-            if( separation1 <= distance + linearSlop ||
-                separation2 <= distance + linearSlop )
+            if( separation1 <= distance + linearSlop || separation2 <= distance + linearSlop )
             {
-                manifold.points[0].point =
-                    contact1 + normalA *
-                    ( 0.5f *
-                      ( a.radius - b.radius - separation1 ) );
-                manifold.points[0].separation =
-                    separation1 - radiusSum;
-                manifold.points[0].id =
-                    MakeContactPointId( 0, 0 );
+                manifold.points[0].point = contact1 + normalA * ( 0.5f * ( a.radius - b.radius - separation1 ) );
+                manifold.points[0].separation = separation1 - radiusSum;
+                manifold.points[0].id = MakeContactPointId( 0, 0 );
 
-                manifold.points[1].point =
-                    contact2 + normalA *
-                    ( 0.5f *
-                      ( a.radius - b.radius - separation2 ) );
-                manifold.points[1].separation =
-                    separation2 - radiusSum;
-                manifold.points[1].id =
-                    MakeContactPointId( 0, 1 );
+                manifold.points[1].point = contact2 + normalA * ( 0.5f * ( a.radius - b.radius - separation2 ) );
+                manifold.points[1].separation = separation2 - radiusSum;
+                manifold.points[1].id = MakeContactPointId( 0, 1 );
 
                 manifold.pointCount = 2;
             }
@@ -247,59 +177,34 @@ localManifold2 CollideCapsules(
 
             if( projectionA1 < 0.0f && projectionA2 > 0.0f )
             {
-                contact1 = point1A +
-                    ( point2A - point1A ) *
-                    ( -projectionA1 /
-                      ( projectionA2 - projectionA1 ) );
+                contact1 = point1A + ( point2A - point1A ) * ( -projectionA1 / ( projectionA2 - projectionA1 ) );
             }
             else if( projectionA2 < 0.0f && projectionA1 > 0.0f )
             {
-                contact2 = point2A +
-                    ( point1A - point2A ) *
-                    ( -projectionA2 /
-                      ( projectionA1 - projectionA2 ) );
+                contact2 = point2A + ( point1A - point2A ) * ( -projectionA2 / ( projectionA1 - projectionA2 ) );
             }
 
             if( projectionA1 > lengthB && projectionA2 < lengthB )
             {
-                contact1 = point1A +
-                    ( point2A - point1A ) *
-                    ( ( projectionA1 - lengthB ) /
-                      ( projectionA1 - projectionA2 ) );
+                contact1 = point1A + ( point2A - point1A ) * ( ( projectionA1 - lengthB ) / ( projectionA1 - projectionA2 ) );
             }
             else if( projectionA2 > lengthB && projectionA1 < lengthB )
             {
-                contact2 = point2A +
-                    ( point1A - point2A ) *
-                    ( ( projectionA2 - lengthB ) /
-                      ( projectionA2 - projectionA1 ) );
+                contact2 = point2A + ( point1A - point2A ) * ( ( projectionA2 - lengthB ) / ( projectionA2 - projectionA1 ) );
             }
 
-            const float separation1 =
-                zonai::Dot( contact1 - point1B, normalB );
-            const float separation2 =
-                zonai::Dot( contact2 - point1B, normalB );
+            const float separation1 = zonai::Dot( contact1 - point1B, normalB );
+            const float separation2 = zonai::Dot( contact2 - point1B, normalB );
 
-            if( separation1 <= distance + linearSlop ||
-                separation2 <= distance + linearSlop )
+            if( separation1 <= distance + linearSlop || separation2 <= distance + linearSlop )
             {
-                manifold.points[0].point =
-                    contact1 + normalB *
-                    ( 0.5f *
-                      ( b.radius - a.radius - separation1 ) );
-                manifold.points[0].separation =
-                    separation1 - radiusSum;
-                manifold.points[0].id =
-                    MakeContactPointId( 0, 0 );
+                manifold.points[0].point = contact1 + normalB * ( 0.5f * ( b.radius - a.radius - separation1 ) );
+                manifold.points[0].separation = separation1 - radiusSum;
+                manifold.points[0].id = MakeContactPointId( 0, 0 );
 
-                manifold.points[1].point =
-                    contact2 + normalB *
-                    ( 0.5f *
-                      ( b.radius - a.radius - separation2 ) );
-                manifold.points[1].separation =
-                    separation2 - radiusSum;
-                manifold.points[1].id =
-                    MakeContactPointId( 1, 0 );
+                manifold.points[1].point = contact2 + normalB * ( 0.5f * ( b.radius - a.radius - separation2 ) );
+                manifold.points[1].separation = separation2 - radiusSum;
+                manifold.points[1].id = MakeContactPointId( 1, 0 );
 
                 manifold.pointCount = 2;
             }
@@ -319,27 +224,17 @@ localManifold2 CollideCapsules(
             normal = { -axisA.y, axisA.x };
         }
 
-        const vec2 surfaceA =
-            closestA + normal * a.radius;
-        const vec2 surfaceB =
-            closestB - normal * b.radius;
+        const vec2 surfaceA = closestA + normal * a.radius;
+        const vec2 surfaceB = closestB - normal * b.radius;
 
         manifold.normal = normal;
-        manifold.points[0].point =
-            ( surfaceA + surfaceB ) * 0.5f;
-        manifold.points[0].separation =
-            distance - radiusSum;
+        manifold.points[0].point = ( surfaceA + surfaceB ) * 0.5f;
+        manifold.points[0].separation = distance - radiusSum;
 
-        const std::size_t featureA =
-            fractionA == 0.0f ? 0u : 1u;
-        const std::size_t featureB =
-            fractionB == 0.0f ? 0u : 1u;
+        const std::size_t featureA = fractionA == 0.0f ? 0u : 1u;
+        const std::size_t featureB = fractionB == 0.0f ? 0u : 1u;
 
-        manifold.points[0].id =
-            MakeContactPointId(
-                featureA,
-                featureB
-            );
+        manifold.points[0].id = MakeContactPointId( featureA, featureB );
 
         manifold.pointCount = 1;
     }
@@ -352,22 +247,11 @@ localManifold2 CollideCapsules(
     return manifold;
 }
 
-localManifold2 CollideSegmentCapsule(
-    const segment2& segment,
-    const capsule2& capsuleB, const transform2& capsuleBTransform )
+localManifold2 CollideSegmentCapsule( const segment2& segment, const capsule2& capsuleB, const transform2& capsuleBTransform )
 {
-    const capsule2 capsuleA =
-    {
-        segment.a,
-        segment.b,
-        0.0f
-    };
+    const capsule2 capsuleA = { segment.a, segment.b, 0.0f };
 
-    return CollideCapsules(
-        capsuleA,
-        capsuleB,
-        capsuleBTransform
-    );
+    return CollideCapsules( capsuleA, capsuleB, capsuleBTransform );
 }
 
 } // namespace zonai

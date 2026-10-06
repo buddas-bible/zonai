@@ -9,24 +9,14 @@
 
 using namespace zonai;
 
-bool NearlyEqual(
-    float a,
-    float b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( float a, float b, float epsilon = 1e-5f )
 {
     return std::fabs( a - b ) <= epsilon;
 }
 
-bool NearlyEqual(
-    const aabb2& a,
-    const aabb2& b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( const aabb2& a, const aabb2& b, float epsilon = 1e-5f )
 {
-    return
-        NearlyEqual( a.min.x, b.min.x, epsilon ) &&
-        NearlyEqual( a.min.y, b.min.y, epsilon ) &&
-        NearlyEqual( a.max.x, b.max.x, epsilon ) &&
-        NearlyEqual( a.max.y, b.max.y, epsilon );
+    return NearlyEqual( a.min.x, b.min.x, epsilon ) && NearlyEqual( a.min.y, b.min.y, epsilon ) && NearlyEqual( a.max.x, b.max.x, epsilon ) && NearlyEqual( a.max.y, b.max.y, epsilon );
 }
 
 std::uint32_t g_randomState = 12345u;
@@ -35,9 +25,7 @@ float RandomFloat( float lower, float upper )
 {
     g_randomState = 1664525u * g_randomState + 1013904223u;
 
-    const float unit =
-        static_cast<float>( g_randomState >> 8 ) *
-        ( 1.0f / 16777216.0f );
+    const float unit = static_cast<float>( g_randomState >> 8 ) * ( 1.0f / 16777216.0f );
 
     return lower + ( upper - lower ) * unit;
 }
@@ -49,28 +37,20 @@ aabb2 RandomBox( float maxHalfExtent )
     const float hx = RandomFloat( 0.25f, maxHalfExtent );
     const float hy = RandomFloat( 0.25f, maxHalfExtent );
 
-    return {
-        { x - hx, y - hy },
-        { x + hx, y + hy }
-    };
+    return { { x - hx, y - hy }, { x + hx, y + hy } };
 }
 
-void CheckQueryAgainstBruteForce(
-    const dynamicTree& tree,
-    const std::vector<std::int32_t>& proxyIds,
-    const std::vector<aabb2>& boxes,
-    const aabb2& query )
+void CheckQueryAgainstBruteForce( const dynamicTree& tree, const std::vector<std::int32_t>& proxyIds, const std::vector<aabb2>& boxes, const aabb2& query )
 {
     std::vector<std::int32_t> actual;
 
-    tree.Query(
-        query,
+    tree.Query( query,
         [&]( std::int32_t proxyId )
         {
             actual.push_back( proxyId );
+
             return true;
-        }
-    );
+        } );
 
     std::sort( actual.begin(), actual.end() );
 
@@ -94,8 +74,7 @@ int main()
         // Box2D는 tree node 배열을 64-byte 정렬해 sibling pair가 cache-line 단위로 놓이게 함.
         treeNodeStorage storage( 4 );
 
-        const std::uintptr_t address =
-            reinterpret_cast<std::uintptr_t>( storage.data() );
+        const std::uintptr_t address = reinterpret_cast<std::uintptr_t>( storage.data() );
 
         assert( address % 64u == 0u );
         assert( sizeof( treeNode ) == 32 );
@@ -105,10 +84,7 @@ int main()
 
     assert( tree.GetProxyCount() == 0 );
 
-    const aabb2 box{
-        { -1.0f, -2.0f },
-        {  3.0f,  4.0f }
-    };
+    const aabb2 box{ { -1.0f, -2.0f }, { 3.0f, 4.0f } };
 
     const int proxyId = tree.CreateProxy( box, 7 );
 
@@ -117,29 +93,19 @@ int main()
     assert( tree.GetHeight() == 0 );
     assert( NearlyEqual( tree.GetProxyAABB( proxyId ), box ) );
 
-
     {
         dynamicTree pairTree{};
 
-        const aabb2 boxA{
-            { -2.0f, -1.0f },
-            {  0.0f,  1.0f }
-        };
+        const aabb2 boxA{ { -2.0f, -1.0f }, { 0.0f, 1.0f } };
 
-        const aabb2 boxB{
-            {  1.0f, -2.0f },
-            {  3.0f,  2.0f }
-        };
+        const aabb2 boxB{ { 1.0f, -2.0f }, { 3.0f, 2.0f } };
 
         const int proxyA = pairTree.CreateProxy( boxA, 10 );
         const int proxyB = pairTree.CreateProxy( boxB, 20 );
 
         assert( proxyA >= 0 );
 
-        if( proxyB < 0 )
-        {
-            return 1;
-        }
+        if( proxyB < 0 ) return 1;
 
         assert( proxyA != proxyB );
 
@@ -155,20 +121,15 @@ int main()
             [&]( const treeNodeDebugInfo& info )
             {
                 debugNodes.push_back( info );
-            }
-        );
+            } );
 
         assert( debugNodes.size() == 3 );
 
-        const auto rootIt =
-            std::find_if(
-                debugNodes.begin(),
-                debugNodes.end(),
-                []( const treeNodeDebugInfo& info )
-                {
-                    return info.isRoot;
-                }
-            );
+        const auto rootIt = std::find_if( debugNodes.begin(), debugNodes.end(),
+            []( const treeNodeDebugInfo& info )
+            {
+                return info.isRoot;
+            } );
 
         assert( rootIt != debugNodes.end() );
         assert( rootIt->isLeaf == false );
@@ -184,6 +145,7 @@ int main()
             {
                 assert( info.proxyId >= 0 );
                 assert( info.parentIndex == rootIt->nodeIndex );
+
                 debugShapeIndices.push_back( info.shapeIndex );
             }
         }
@@ -194,24 +156,14 @@ int main()
         assert( debugShapeIndices == expectedDebugShapeIndices );
     }
 
-
     {
         dynamicTree sahTree{};
 
-        const aabb2 boxA{
-            { 0.0f, 0.0f },
-            { 1.0f, 1.0f }
-        };
+        const aabb2 boxA{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
 
-        const aabb2 boxB{
-            { 10.0f, 0.0f },
-            { 11.0f, 1.0f }
-        };
+        const aabb2 boxB{ { 10.0f, 0.0f }, { 11.0f, 1.0f } };
 
-        const aabb2 boxC{
-            { 1.0f, 0.0f },
-            { 2.0f, 1.0f }
-        };
+        const aabb2 boxC{ { 1.0f, 0.0f }, { 2.0f, 1.0f } };
 
         const int proxyA = sahTree.CreateProxy( boxA, 1 );
         const int proxyB = sahTree.CreateProxy( boxB, 2 );
@@ -220,10 +172,7 @@ int main()
         assert( proxyA >= 0 );
         assert( proxyB >= 0 );
 
-        if( proxyC < 0 )
-        {
-            return 2;
-        }
+        if( proxyC < 0 ) return 2;
 
         assert( sahTree.GetProxyCount() == 3 );
         assert( sahTree.GetHeight() == 2 );
@@ -233,24 +182,14 @@ int main()
         assert( NearlyEqual( sahTree.GetAreaRatio(), 0.25f ) );
     }
 
-
     {
         dynamicTree removalTree{};
 
-        const aabb2 boxA{
-            { 0.0f, 0.0f },
-            { 1.0f, 1.0f }
-        };
+        const aabb2 boxA{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
 
-        const aabb2 boxB{
-            { 10.0f, 0.0f },
-            { 11.0f, 1.0f }
-        };
+        const aabb2 boxB{ { 10.0f, 0.0f }, { 11.0f, 1.0f } };
 
-        const aabb2 boxC{
-            { 1.0f, 0.0f },
-            { 2.0f, 1.0f }
-        };
+        const aabb2 boxC{ { 1.0f, 0.0f }, { 2.0f, 1.0f } };
 
         const int proxyA = removalTree.CreateProxy( boxA, 1 );
         const int proxyB = removalTree.CreateProxy( boxB, 2 );
@@ -276,29 +215,16 @@ int main()
         assert( NearlyEqual( removalTree.GetAreaRatio(), 0.0f ) );
     }
 
-
     {
         dynamicTree moveTree{};
 
-        const aabb2 boxA{
-            { 0.0f, 0.0f },
-            { 1.0f, 1.0f }
-        };
+        const aabb2 boxA{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
 
-        const aabb2 boxB{
-            { 10.0f, 0.0f },
-            { 11.0f, 1.0f }
-        };
+        const aabb2 boxB{ { 10.0f, 0.0f }, { 11.0f, 1.0f } };
 
-        const aabb2 boxC{
-            { 1.0f, 0.0f },
-            { 2.0f, 1.0f }
-        };
+        const aabb2 boxC{ { 1.0f, 0.0f }, { 2.0f, 1.0f } };
 
-        const aabb2 movedC{
-            { 11.0f, 0.0f },
-            { 12.0f, 1.0f }
-        };
+        const aabb2 movedC{ { 11.0f, 0.0f }, { 12.0f, 1.0f } };
 
         const int proxyA = moveTree.CreateProxy( boxA, 1 );
         const int proxyB = moveTree.CreateProxy( boxB, 2 );
@@ -315,58 +241,37 @@ int main()
 
         // C를 옮긴 뒤에는 B랑 묶이는게 제일 쌈.
         // root=26, (B+C)=6 -> 6 / 26
-        assert(
-            NearlyEqual(
-                moveTree.GetAreaRatio(),
-                6.0f / 26.0f
-            )
-        );
+        assert( NearlyEqual( moveTree.GetAreaRatio(), 6.0f / 26.0f ) );
     }
 
     {
         dynamicTree queryTree{};
 
-        const aabb2 boxA{
-            { 0.0f, 0.0f },
-            { 1.0f, 1.0f }
-        };
+        const aabb2 boxA{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
 
-        const aabb2 boxB{
-            { 5.0f, 0.0f },
-            { 6.0f, 1.0f }
-        };
+        const aabb2 boxB{ { 5.0f, 0.0f }, { 6.0f, 1.0f } };
 
-        const aabb2 boxC{
-            { 10.0f, 0.0f },
-            { 11.0f, 1.0f }
-        };
+        const aabb2 boxC{ { 10.0f, 0.0f }, { 11.0f, 1.0f } };
 
         const std::int32_t proxyA = queryTree.CreateProxy( boxA, 1 );
         const std::int32_t proxyB = queryTree.CreateProxy( boxB, 2 );
         queryTree.CreateProxy( boxC, 3 );
 
-        const aabb2 queryBox{
-            { -1.0f, -1.0f },
-            {  7.0f,  2.0f }
-        };
+        const aabb2 queryBox{ { -1.0f, -1.0f }, { 7.0f, 2.0f } };
 
         std::vector<std::int32_t> hits;
 
-        queryTree.Query(
-            queryBox,
+        queryTree.Query( queryBox,
             [&]( std::int32_t proxyId )
             {
                 hits.push_back( proxyId );
+
                 return true;
-            }
-        );
+            } );
 
         std::sort( hits.begin(), hits.end() );
 
-        std::vector<std::int32_t> expected{
-            proxyA,
-            proxyB
-        };
+        std::vector<std::int32_t> expected{ proxyA, proxyB };
         std::sort( expected.begin(), expected.end() );
 
         assert( hits == expected );
@@ -377,20 +282,11 @@ int main()
 
         assert( movedTree.HasMoved() == false );
 
-        const aabb2 boxA{
-            { 0.0f, 0.0f },
-            { 1.0f, 1.0f }
-        };
+        const aabb2 boxA{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
 
-        const aabb2 boxB{
-            { 2.0f, 0.0f },
-            { 3.0f, 1.0f }
-        };
+        const aabb2 boxB{ { 2.0f, 0.0f }, { 3.0f, 1.0f } };
 
-        const aabb2 movedA{
-            { 4.0f, 0.0f },
-            { 5.0f, 1.0f }
-        };
+        const aabb2 movedA{ { 4.0f, 0.0f }, { 5.0f, 1.0f } };
 
         const std::int32_t proxyA = movedTree.CreateProxy( boxA, 1 );
         movedTree.CreateProxy( boxB, 2 );
@@ -416,45 +312,19 @@ int main()
     {
         dynamicTree updateTree{};
 
-        const aabb2 boxA{
-            { 0.0f, 0.0f },
-            { 1.0f, 1.0f }
-        };
+        const aabb2 boxA{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
 
-        const aabb2 boxB{
-            { 2.0f, 0.0f },
-            { 3.0f, 1.0f }
-        };
+        const aabb2 boxB{ { 2.0f, 0.0f }, { 3.0f, 1.0f } };
 
-        const aabb2 movedA{
-            { 8.0f, -1.0f },
-            { 9.0f,  0.0f }
-        };
+        const aabb2 movedA{ { 8.0f, -1.0f }, { 9.0f, 0.0f } };
 
-        const std::int32_t proxyA =
-            updateTree.CreateProxy(
-                boxA,
-                1
-            );
+        const std::int32_t proxyA = updateTree.CreateProxy( boxA, 1 );
 
-        updateTree.CreateProxy(
-            boxB,
-            2
-        );
+        updateTree.CreateProxy( boxB, 2 );
 
-        updateTree.UpdateProxy(
-            proxyA,
-            movedA
-        );
+        updateTree.UpdateProxy( proxyA, movedA );
 
-        assert(
-            NearlyEqual(
-                updateTree.GetProxyAABB(
-                    proxyA
-                ),
-                movedA
-            )
-        );
+        assert( NearlyEqual( updateTree.GetProxyAABB( proxyA ), movedA ) );
 
         // topology는 그대로지만 ancestor bounds는 즉시 정확히 refit되어
         // pair query가 안전하고 다음 partial rebuild 대상이 됨.
@@ -472,45 +342,19 @@ int main()
     {
         dynamicTree enlargeTree{};
 
-        const aabb2 boxA{
-            { 0.0f, 0.0f },
-            { 1.0f, 1.0f }
-        };
+        const aabb2 boxA{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
 
-        const aabb2 boxB{
-            { 3.0f, 0.0f },
-            { 4.0f, 1.0f }
-        };
+        const aabb2 boxB{ { 3.0f, 0.0f }, { 4.0f, 1.0f } };
 
-        const std::int32_t proxyA =
-            enlargeTree.CreateProxy(
-                boxA,
-                1
-            );
+        const std::int32_t proxyA = enlargeTree.CreateProxy( boxA, 1 );
 
-        enlargeTree.CreateProxy(
-            boxB,
-            2
-        );
+        enlargeTree.CreateProxy( boxB, 2 );
 
-        const aabb2 enlargedA{
-            { -0.5f, -0.5f },
-            {  1.5f,  1.5f }
-        };
+        const aabb2 enlargedA{ { -0.5f, -0.5f }, { 1.5f, 1.5f } };
 
-        enlargeTree.EnlargeProxy(
-            proxyA,
-            enlargedA
-        );
+        enlargeTree.EnlargeProxy( proxyA, enlargedA );
 
-        assert(
-            NearlyEqual(
-                enlargeTree.GetProxyAABB(
-                    proxyA
-                ),
-                enlargedA
-            )
-        );
+        assert( NearlyEqual( enlargeTree.GetProxyAABB( proxyA ), enlargedA ) );
 
         assert( enlargeTree.HasMoved() );
         assert( enlargeTree.NeedsRebuild() );
@@ -528,22 +372,13 @@ int main()
 
         assert( rebuildStateTree.NeedsRebuild() == false );
 
-        const aabb2 boxA{
-            { 0.0f, 0.0f },
-            { 1.0f, 1.0f }
-        };
+        const aabb2 boxA{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
 
-        const aabb2 boxB{
-            { 3.0f, 0.0f },
-            { 4.0f, 1.0f }
-        };
+        const aabb2 boxB{ { 3.0f, 0.0f }, { 4.0f, 1.0f } };
 
         // 기존 tree 전체를 감싸는 큰 leaf를 넣으면 internal root가 새 pair 아래로 내려가
         // DFS 배열 순서가 깨지므로 moved가 없어도 rebuild가 필요해짐.
-        const aabb2 enclosingBox{
-            { -10.0f, -10.0f },
-            {  10.0f,  10.0f }
-        };
+        const aabb2 enclosingBox{ { -10.0f, -10.0f }, { 10.0f, 10.0f } };
 
         rebuildStateTree.CreateProxy( boxA, 1 );
         rebuildStateTree.CreateProxy( boxB, 2 );
@@ -561,20 +396,11 @@ int main()
     {
         dynamicTree movedRebuildTree{};
 
-        const aabb2 boxA{
-            { 0.0f, 0.0f },
-            { 1.0f, 1.0f }
-        };
+        const aabb2 boxA{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
 
-        const aabb2 boxB{
-            { 2.0f, 0.0f },
-            { 3.0f, 1.0f }
-        };
+        const aabb2 boxB{ { 2.0f, 0.0f }, { 3.0f, 1.0f } };
 
-        const aabb2 movedA{
-            { 4.0f, 0.0f },
-            { 5.0f, 1.0f }
-        };
+        const aabb2 movedA{ { 4.0f, 0.0f }, { 5.0f, 1.0f } };
 
         const std::int32_t proxyA = movedRebuildTree.CreateProxy( boxA, 1 );
         movedRebuildTree.CreateProxy( boxB, 2 );
@@ -596,30 +422,15 @@ int main()
     {
         dynamicTree rebuildTree{};
 
-        const aabb2 boxA{
-            { 0.0f, 0.0f },
-            { 1.0f, 1.0f }
-        };
+        const aabb2 boxA{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
 
-        const aabb2 boxB{
-            { 2.0f, 0.0f },
-            { 3.0f, 1.0f }
-        };
+        const aabb2 boxB{ { 2.0f, 0.0f }, { 3.0f, 1.0f } };
 
-        const aabb2 boxC{
-            { 10.0f, 0.0f },
-            { 11.0f, 1.0f }
-        };
+        const aabb2 boxC{ { 10.0f, 0.0f }, { 11.0f, 1.0f } };
 
-        const aabb2 boxD{
-            { 12.0f, 0.0f },
-            { 13.0f, 1.0f }
-        };
+        const aabb2 boxD{ { 12.0f, 0.0f }, { 13.0f, 1.0f } };
 
-        const aabb2 movedA{
-            { 0.25f, 0.0f },
-            { 1.25f, 1.0f }
-        };
+        const aabb2 movedA{ { 0.25f, 0.0f }, { 1.25f, 1.0f } };
 
         const std::int32_t proxyA = rebuildTree.CreateProxy( boxA, 1 );
         const std::int32_t proxyB = rebuildTree.CreateProxy( boxB, 2 );
@@ -663,13 +474,7 @@ int main()
         {
             const float x = static_cast<float>( i );
 
-            balancedTree.CreateProxy(
-                {
-                    { x, 0.0f },
-                    { x + 1.0f, 1.0f }
-                },
-                i
-            );
+            balancedTree.CreateProxy( { { x, 0.0f }, { x + 1.0f, 1.0f } }, i );
         }
 
         // 한쪽으로 계속 쌓이는걸 local rotation으로 줄여줌.
@@ -699,12 +504,7 @@ int main()
 
         for( int i = 0; i < 64; ++i )
         {
-            CheckQueryAgainstBruteForce(
-                stressTree,
-                proxyIds,
-                boxes,
-                RandomBox( 8.0f )
-            );
+            CheckQueryAgainstBruteForce( stressTree, proxyIds, boxes, RandomBox( 8.0f ) );
         }
 
         // 이동 뒤에도 stable proxy id와 query 결과가 유지되어야 함.
@@ -718,12 +518,7 @@ int main()
 
         for( int i = 0; i < 64; ++i )
         {
-            CheckQueryAgainstBruteForce(
-                stressTree,
-                proxyIds,
-                boxes,
-                RandomBox( 8.0f )
-            );
+            CheckQueryAgainstBruteForce( stressTree, proxyIds, boxes, RandomBox( 8.0f ) );
         }
 
         assert( stressTree.Rebuild( true ) == PROXY_COUNT );
@@ -734,18 +529,12 @@ int main()
             [&]( const treeNodeDebugInfo& info )
             {
                 hasMovedNode = hasMovedNode || info.isMoved;
-            }
-        );
+            } );
         assert( hasMovedNode == false );
 
         for( int i = 0; i < 64; ++i )
         {
-            CheckQueryAgainstBruteForce(
-                stressTree,
-                proxyIds,
-                boxes,
-                RandomBox( 8.0f )
-            );
+            CheckQueryAgainstBruteForce( stressTree, proxyIds, boxes, RandomBox( 8.0f ) );
         }
 
         // 삭제로 free pair/proxy list에 hole을 만들고 매 단계 불변조건을 검사함.
@@ -774,44 +563,22 @@ int main()
     {
         dynamicTree touchTree{};
 
-        const aabb2 boxA{
-            { 0.0f, 0.0f },
-            { 1.0f, 1.0f }
-        };
+        const aabb2 boxA{ { 0.0f, 0.0f }, { 1.0f, 1.0f } };
 
-        const aabb2 boxB{
-            { 3.0f, 0.0f },
-            { 4.0f, 1.0f }
-        };
+        const aabb2 boxB{ { 3.0f, 0.0f }, { 4.0f, 1.0f } };
 
-        const std::int32_t proxyA =
-            touchTree.CreateProxy(
-                boxA,
-                1
-            );
+        const std::int32_t proxyA = touchTree.CreateProxy( boxA, 1 );
 
-        touchTree.CreateProxy(
-            boxB,
-            2
-        );
+        touchTree.CreateProxy( boxB, 2 );
 
         assert( !touchTree.HasMoved() );
         assert( !touchTree.NeedsRebuild() );
 
-        touchTree.MarkProxyMoved(
-            proxyA
-        );
+        touchTree.MarkProxyMoved( proxyA );
 
         // filter 같은 runtime 상태 변화는 AABB를 바꾸지 않고
         // leaf -> root 경로만 pair 재탐색 대상으로 표시함.
-        assert(
-            NearlyEqual(
-                touchTree.GetProxyAABB(
-                    proxyA
-                ),
-                boxA
-            )
-        );
+        assert( NearlyEqual( touchTree.GetProxyAABB( proxyA ), boxA ) );
 
         assert( touchTree.HasMoved() );
         assert( touchTree.NeedsRebuild() );

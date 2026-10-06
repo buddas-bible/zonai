@@ -18,61 +18,37 @@ namespace zonai
 * capsule-circle
 * polygon-circle
 */
-localManifold2 CollideCircles(
-    const circle2& a,
-    const circle2& b, const transform2& transformB );
+localManifold2 CollideCircles( const circle2& a, const circle2& b, const transform2& transformB );
 
-localManifold2 CollideSegmentCircle(
-    const segment2& segment,
-    const circle2& circle, const transform2& circleTransform );
+localManifold2 CollideSegmentCircle( const segment2& segment, const circle2& circle, const transform2& circleTransform );
 
-localManifold2 CollideCapsuleCircle(
-    const capsule2& capsule,
-    const circle2& circle, const transform2& circleTransform );
+localManifold2 CollideCapsuleCircle( const capsule2& capsule, const circle2& circle, const transform2& circleTransform );
 
-localManifold2 CollidePolygonCircle(
-    const polygon2& polygon,
-    const circle2& circle, const transform2& circleTransform );
+localManifold2 CollidePolygonCircle( const polygon2& polygon, const circle2& circle, const transform2& circleTransform );
 
 /*
 * capsule-capsule
 * segment-capsule
 * polygon-capsule
 */
-localManifold2 CollideCapsules(
-    const capsule2& a,
-    const capsule2& b, const transform2& transformB );
+localManifold2 CollideCapsules( const capsule2& a, const capsule2& b, const transform2& transformB );
 
-localManifold2 CollideSegmentCapsule(
-    const segment2& segment,
-    const capsule2& capsuleB, const transform2& capsuleBTransform );
+localManifold2 CollideSegmentCapsule( const segment2& segment, const capsule2& capsuleB, const transform2& capsuleBTransform );
 
-localManifold2 CollidePolygonCapsule(
-    const polygon2& polygon,
-    const capsule2& capsule, const transform2& capsuleTransform );
+localManifold2 CollidePolygonCapsule( const polygon2& polygon, const capsule2& capsule, const transform2& capsuleTransform );
 
 /*
 * polygon-polygon
 * polygon-segment
 */
-localManifold2 CollidePolygons(
-    const polygon2& a,
-    const polygon2& b, const transform2& transformB );
+localManifold2 CollidePolygons( const polygon2& a, const polygon2& b, const transform2& transformB );
 
-localManifold2 CollidePolygonSegment(
-    const polygon2& polygon,
-    const segment2& segment, const transform2& segmentTransform );
+localManifold2 CollidePolygonSegment( const polygon2& polygon, const segment2& segment, const transform2& segmentTransform );
 
 // 현재 NarrowPhase가 지원하는 geometry 조합인지 확인함.
-bool CanCollideShapes(
-    const shapeGeometry& geometryA,
-    const shapeGeometry& geometryB );
+bool CanCollideShapes( const shapeGeometry& geometryA, const shapeGeometry& geometryB );
 
 // geometry 타입에 맞는 collider를 선택하며 반환 manifold는 항상 shape A local space 기준임.
-localManifold2 CollideShapes(
-    const shapeGeometry& geometryA,
-    const transform2& transformA,
-    const shapeGeometry& geometryB,
-    const transform2& transformB );
+localManifold2 CollideShapes( const shapeGeometry& geometryA, const transform2& transformA, const shapeGeometry& geometryB, const transform2& transformB );
 
 } // namespace zonai

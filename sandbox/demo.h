@@ -9,9 +9,14 @@
 
 namespace zonai::sandbox
 {
+
 class debugDraw;
 
-enum class demoKind { playground, distancePendulum };
+enum class demoKind
+{
+    playground,
+    distancePendulum
+};
 
 struct demoEntry
 {
@@ -44,13 +49,16 @@ public:
     virtual void step( float timeStep, int subStepCount ) = 0;
     virtual void handleInput( const demoInput& input ) = 0;
     virtual void cancelInput() = 0;
+
     virtual void setCollisionMatrix( const collisionMatrix& ) {}
+
     // Headless model은 화면 callback을 쓰지 않음. World 소유를 공통 interface에 강제하지 않음.
     virtual void drawControls() {}
+
     virtual void draw( debugDraw& ) const {}
 };
 
-using demoFactory = std::unique_ptr<demo>( * )( demoKind );
+using demoFactory = std::unique_ptr<demo> ( * )( demoKind );
 [[nodiscard]] std::span<const demoEntry> getDemoEntries() noexcept;
 [[nodiscard]] const demoEntry& getDemoEntry( demoKind kind );
 
@@ -62,22 +70,28 @@ public:
     void selectDemo( demoKind kind );
     void reset();
     void setCollisionMatrix( const collisionMatrix& matrix );
-#pragma endregion
+#pragma endregion Lifetime
 
 #pragma region PlaybackAndInput
     void setPlaying( bool playing );
     void advance( float frameTime, int subStepCount );
     void stepOnce( int subStepCount );
     void handleInput( const demoInput& input, bool enabled );
-#pragma endregion
+#pragma endregion PlaybackAndInput
 
 #pragma region Queries
+
     [[nodiscard]] demo& getDemo() noexcept { return *demo_; }
+
     [[nodiscard]] demoKind getKind() const noexcept { return kind_; }
+
     [[nodiscard]] bool isPlaying() const noexcept { return playing_; }
+
     [[nodiscard]] std::uint64_t getStepCount() const noexcept { return stepCount_; }
+
     [[nodiscard]] const collisionMatrix& getCollisionMatrix() const noexcept { return collisionMatrix_; }
-#pragma endregion
+
+#pragma endregion Queries
 
 private:
     demoFactory factory_;
@@ -88,4 +102,5 @@ private:
     float accumulator_ = 0.0f;
     std::uint64_t stepCount_ = 0;
 };
+
 } // namespace zonai::sandbox

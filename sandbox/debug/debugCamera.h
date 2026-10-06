@@ -13,15 +13,9 @@ struct debugCamera
     vec2 center{};
     float pixelsPerMeter = 60.0f;
 
-    ImVec2 WorldToScreen(
-        const vec2& world,
-        const ImVec2& viewportMin,
-        const ImVec2& viewportSize ) const;
+    ImVec2 WorldToScreen( const vec2& world, const ImVec2& viewportMin, const ImVec2& viewportSize ) const;
 
-    vec2 ScreenToWorld(
-        const ImVec2& screen,
-        const ImVec2& viewportMin,
-        const ImVec2& viewportSize ) const;
+    vec2 ScreenToWorld( const ImVec2& screen, const ImVec2& viewportMin, const ImVec2& viewportSize ) const;
 
     // mouse wheel 입력을 받아 world 확대 / 축소 비율을 조절함.
     void Zoom( float wheelDelta );

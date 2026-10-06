@@ -7,7 +7,6 @@
 
 namespace zonai
 {
-#pragma region Constraint
 
 struct distanceJointConstraint2
 {
@@ -23,9 +22,9 @@ struct distanceJointConstraint2
     float invMassB = 0.0f;
     float invInertiaA = 0.0f;
     float invInertiaB = 0.0f;
-    float length = 1.0f; // 고정 거리 또는 스프링의 목표 거리
+    float length = 1.0f;    // 고정 거리 또는 스프링의 목표 거리
     float axialMass = 0.0f; // 축 방향의 유효 질량
-    float impulse = 0.0f; // 스프링 또는 고정 거리의 누적 임펄스
+    float impulse = 0.0f;   // 스프링 또는 고정 거리의 누적 임펄스
     constraintSoftness2 softness{};
 
     // 물리 스프링 설정. 고정 거리 제약의 수치 안정화 계수와 구분함.
@@ -43,14 +42,10 @@ struct distanceJointConstraint2
 
     // 축 방향 속도 모터. 스프링 모드에서만 작동하며 0 Hz에서도 사용할 수 있음.
     bool enableMotor = false;
-    float motorSpeed = 0.0f; // 목표 상대속도 (m/s). 양수는 늘이고 음수는 줄임
+    float motorSpeed = 0.0f;   // 목표 상대속도 (m/s). 양수는 늘이고 음수는 줄임
     float motorImpulse = 0.0f; // 양방향 누적 임펄스. 절댓값을 F * h로 제한함
     float maxMotorImpulse = 0.0f;
 };
-
-#pragma endregion Constraint
-
-#pragma region Solver
 
 // 저장된 조인트를 이번 step의 작용점, 유효 질량, softness 계수로 변환함.
 [[nodiscard]] distanceJointConstraint2 prepareDistanceJointConstraint( const distanceJointSim2& joint, const bodySim& bodySimA, const bodySim& bodySimB, float subStepTime );
@@ -60,7 +55,5 @@ void warmStartDistanceJointConstraint( const distanceJointConstraint2& constrain
 
 // 물리 스프링은 두 pass에서 bias를 유지하며, 고정 거리와 거리 제한은 useBias에 따라 보정함.
 void solveDistanceJointConstraint( distanceJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB, bool useBias );
-
-#pragma endregion Solver
 
 } // namespace zonai

@@ -22,26 +22,14 @@ void check( bool condition, const std::source_location& location = std::source_l
     }
 }
 
-std::span<const std::int32_t> GetBodyIds(
-    const islandGraph2& graph,
-    const island2& island )
+std::span<const std::int32_t> GetBodyIds( const islandGraph2& graph, const island2& island )
 {
-    return
-    {
-        graph.bodyIds.data() + island.bodyStart,
-        island.bodyCount
-    };
+    return { graph.bodyIds.data() + island.bodyStart, island.bodyCount };
 }
 
-std::span<const std::int32_t> GetContactIds(
-    const islandGraph2& graph,
-    const island2& island )
+std::span<const std::int32_t> GetContactIds( const islandGraph2& graph, const island2& island )
 {
-    return
-    {
-        graph.contactIds.data() + island.contactStart,
-        island.contactCount
-    };
+    return { graph.contactIds.data() + island.contactStart, island.contactCount };
 }
 
 } // namespace
@@ -61,21 +49,15 @@ int main()
         bodies[2].bodyId = 2;
         bodies[2].type = bodyType::Static;
 
-        const islandGraph2 graph =
-            BuildIslands(
-                bodies,
-                std::span<const contactSim2>{}
-            );
+        const islandGraph2 graph = BuildIslands( bodies, std::span<const contactSim2>{} );
 
         check( graph.islands.size() == 2 );
         check( graph.bodyIds.size() == 2 );
         check( graph.contactIds.empty() );
 
-        const std::span<const std::int32_t> bodies0 =
-            GetBodyIds( graph, graph.islands[0] );
+        const std::span<const std::int32_t> bodies0 = GetBodyIds( graph, graph.islands[0] );
 
-        const std::span<const std::int32_t> bodies1 =
-            GetBodyIds( graph, graph.islands[1] );
+        const std::span<const std::int32_t> bodies1 = GetBodyIds( graph, graph.islands[1] );
 
         check( bodies0.size() == 1 );
         check( bodies0[0] == 0 );
@@ -101,19 +83,13 @@ int main()
         contacts[0].bodyIdB = 1;
         contacts[0].manifold.pointCount = 1;
 
-        const islandGraph2 graph =
-            BuildIslands(
-                bodies,
-                contacts
-            );
+        const islandGraph2 graph = BuildIslands( bodies, contacts );
 
         check( graph.islands.size() == 1 );
 
-        const std::span<const std::int32_t> bodyIds =
-            GetBodyIds( graph, graph.islands[0] );
+        const std::span<const std::int32_t> bodyIds = GetBodyIds( graph, graph.islands[0] );
 
-        const std::span<const std::int32_t> contactIds =
-            GetContactIds( graph, graph.islands[0] );
+        const std::span<const std::int32_t> contactIds = GetContactIds( graph, graph.islands[0] );
 
         check( bodyIds.size() == 2 );
         check( bodyIds[0] == 0 );
@@ -140,19 +116,13 @@ int main()
         contacts[0].bodyIdB = 1;
         contacts[0].manifold.pointCount = 1;
 
-        const islandGraph2 graph =
-            BuildIslands(
-                bodies,
-                contacts
-            );
+        const islandGraph2 graph = BuildIslands( bodies, contacts );
 
         check( graph.islands.size() == 1 );
 
-        const std::span<const std::int32_t> bodyIds =
-            GetBodyIds( graph, graph.islands[0] );
+        const std::span<const std::int32_t> bodyIds = GetBodyIds( graph, graph.islands[0] );
 
-        const std::span<const std::int32_t> contactIds =
-            GetContactIds( graph, graph.islands[0] );
+        const std::span<const std::int32_t> contactIds = GetContactIds( graph, graph.islands[0] );
 
         check( bodyIds.size() == 1 );
         check( bodyIds[0] == 1 );
@@ -178,11 +148,7 @@ int main()
         contacts[0].bodyIdB = 1;
         contacts[0].manifold.pointCount = 0;
 
-        const islandGraph2 graph =
-            BuildIslands(
-                bodies,
-                contacts
-            );
+        const islandGraph2 graph = BuildIslands( bodies, contacts );
 
         check( graph.islands.size() == 2 );
         check( graph.contactIds.empty() );
@@ -200,11 +166,7 @@ int main()
         bodies[1].type = bodyType::Dynamic;
         bodies[1].awake = true;
 
-        const islandGraph2 graph =
-            BuildIslands(
-                bodies,
-                std::span<const contactSim2>{}
-            );
+        const islandGraph2 graph = BuildIslands( bodies, std::span<const contactSim2>{} );
 
         check( graph.islands.size() == 1 );
         check( graph.bodyIds.size() == 1 );
@@ -229,19 +191,13 @@ int main()
         contacts[0].manifold.pointCount = 1;
         contacts[0].manifold.points[0].separation = 0.01f;
 
-        const islandGraph2 graph =
-            BuildIslands(
-                bodies,
-                contacts
-            );
+        const islandGraph2 graph = BuildIslands( bodies, contacts );
 
         check( graph.islands.size() == 1 );
 
-        const std::span<const std::int32_t> bodyIds =
-            GetBodyIds( graph, graph.islands[0] );
+        const std::span<const std::int32_t> bodyIds = GetBodyIds( graph, graph.islands[0] );
 
-        const std::span<const std::int32_t> contactIds =
-            GetContactIds( graph, graph.islands[0] );
+        const std::span<const std::int32_t> contactIds = GetContactIds( graph, graph.islands[0] );
 
         check( bodyIds.size() == 2 );
         check( contactIds.size() == 1 );

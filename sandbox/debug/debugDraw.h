@@ -19,71 +19,31 @@ namespace zonai::sandbox
 class debugDraw
 {
 public:
-    debugDraw(
-        ImDrawList* drawList,
-        const debugCamera& camera,
-        const ImVec2& viewportMin,
-        const ImVec2& viewportSize );
+    debugDraw( ImDrawList* drawList, const debugCamera& camera, const ImVec2& viewportMin, const ImVec2& viewportSize );
 
     void DrawGrid( float spacing = 1.0f ) const;
 
     // Body local-space shape geometry를 transform으로 world space에 옮겨 그림.
-    void DrawShape(
-        const shapeGeometry& geometry,
-        const transform2& transform,
-        ImU32 outlineColor,
-        ImU32 fillColor ) const;
+    void DrawShape( const shapeGeometry& geometry, const transform2& transform, ImU32 outlineColor, ImU32 fillColor ) const;
 
-    void DrawAABB(
-        const aabb2& box,
-        ImU32 color,
-        float thickness = 1.0f ) const;
+    void DrawAABB( const aabb2& box, ImU32 color, float thickness = 1.0f ) const;
 
     // dynamicTree의 live node AABB와 debug metadata를 world 위에 표시함.
-    void DrawTree(
-        const dynamicTree& tree,
-        const char* treeName,
-        bool showLeaves,
-        bool showInternal,
-        bool showLabels,
-        ImU32 leafColor,
-        ImU32 internalColor ) const;
+    void DrawTree( const dynamicTree& tree, const char* treeName, bool showLeaves, bool showInternal, bool showLabels, ImU32 leafColor, ImU32 internalColor ) const;
 
-    void DrawSegment(
-        const segment2& segment,
-        ImU32 color,
-        float thickness = 2.0f ) const;
+    void DrawSegment( const segment2& segment, ImU32 color, float thickness = 2.0f ) const;
 
-    void DrawPoint(
-        const vec2& point,
-        ImU32 color,
-        float radiusPixels = 4.0f ) const;
+    void DrawPoint( const vec2& point, ImU32 color, float radiusPixels = 4.0f ) const;
 
-    void DrawArrow(
-        const vec2& start,
-        const vec2& direction,
-        ImU32 color,
-        float length = 1.0f ) const;
+    void DrawArrow( const vec2& start, const vec2& direction, ImU32 color, float length = 1.0f ) const;
 
-    void DrawCircle(
-        const circle2& circle,
-        ImU32 outlineColor,
-        ImU32 fillColor ) const;
+    void DrawCircle( const circle2& circle, ImU32 outlineColor, ImU32 fillColor ) const;
 
-    void DrawCapsule(
-        const capsule2& capsule,
-        ImU32 outlineColor,
-        ImU32 fillColor ) const;
+    void DrawCapsule( const capsule2& capsule, ImU32 outlineColor, ImU32 fillColor ) const;
 
-    void DrawPolygon(
-        const polygon2& polygon,
-        ImU32 outlineColor,
-        ImU32 fillColor ) const;
+    void DrawPolygon( const polygon2& polygon, ImU32 outlineColor, ImU32 fillColor ) const;
 
-    void DrawLabel(
-        const vec2& worldPosition,
-        const char* text,
-        ImU32 color ) const;
+    void DrawLabel( const vec2& worldPosition, const char* text, ImU32 color ) const;
 
 private:
     ImVec2 ToScreen( const vec2& world ) const;

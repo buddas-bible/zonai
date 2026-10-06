@@ -5,21 +5,14 @@
 
 using namespace zonai;
 
-bool NearlyEqual(
-    float a,
-    float b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( float a, float b, float epsilon = 1e-5f )
 {
     return std::fabs( a - b ) <= epsilon;
 }
 
-bool NearlyEqual(
-    const vec2& a,
-    const vec2& b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( const vec2& a, const vec2& b, float epsilon = 1e-5f )
 {
-    return NearlyEqual( a.x, b.x, epsilon ) &&
-        NearlyEqual( a.y, b.y, epsilon );
+    return NearlyEqual( a.x, b.x, epsilon ) && NearlyEqual( a.y, b.y, epsilon );
 }
 
 int main()
@@ -32,8 +25,7 @@ int main()
         transform2 segmentTransform{};
         segmentTransform.position = { 0.0f, 1.1f };
 
-        const localManifold2 manifold =
-            CollidePolygonSegment( polygon, segment, segmentTransform );
+        const localManifold2 manifold = CollidePolygonSegment( polygon, segment, segmentTransform );
 
         assert( manifold.pointCount == 0 );
     }
@@ -46,8 +38,7 @@ int main()
         transform2 segmentTransform{};
         segmentTransform.position = { 0.0f, 1.0f };
 
-        const localManifold2 manifold =
-            CollidePolygonSegment( polygon, segment, segmentTransform );
+        const localManifold2 manifold = CollidePolygonSegment( polygon, segment, segmentTransform );
 
         assert( manifold.pointCount == 2 );
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
@@ -62,11 +53,9 @@ int main()
 
         transform2 segmentTransform{};
         segmentTransform.position = { 1.0f, 0.0f };
-        segmentTransform.rotation =
-            rot2::FromRadians( 3.1415926535f * 0.5f );
+        segmentTransform.rotation = rot2::FromRadians( 3.1415926535f * 0.5f );
 
-        const localManifold2 manifold =
-            CollidePolygonSegment( polygon, segment, segmentTransform );
+        const localManifold2 manifold = CollidePolygonSegment( polygon, segment, segmentTransform );
 
         assert( manifold.pointCount == 2 );
         assert( NearlyEqual( manifold.normal, { 1.0f, 0.0f } ) );

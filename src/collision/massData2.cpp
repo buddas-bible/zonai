@@ -47,12 +47,7 @@ massData2 ComputeMass( const circle2& circle, float density )
 
     // 균일한 원판의 중심 기준 회전 관성
     // I = (1 / 2) * M * r^2
-    return
-    {
-        mass,
-        circle.center,
-        mass * 0.5f * rr
-    };
+    return { mass, circle.center, mass * 0.5f * rr };
 }
 
 massData2 ComputeMass( const capsule2& capsule, float density )
@@ -85,8 +80,7 @@ massData2 ComputeMass( const capsule2& capsule, float density )
     const float mass = circleMass + boxMass;
 
     // Capsule은 양 끝의 형상이 대칭이므로 질량 중심은 axis의 정확한 중점임.
-    const vec2 center =
-        ( capsule.center1 + capsule.center2 ) * 0.5f;
+    const vec2 center = ( capsule.center1 + capsule.center2 ) * 0.5f;
 
     /*
     * 반원 두 개의 회전 관성
@@ -116,18 +110,11 @@ massData2 ComputeMass( const capsule2& capsule, float density )
     *     I_circle =
     *         circleMass * ( r^2 / 2 + h^2 + 2h * lc )
     */
-    const float halfCircleCentroid =
-        4.0f * radius / ( 3.0f * PI );
+    const float halfCircleCentroid = 4.0f * radius / ( 3.0f * PI );
 
     const float halfLength = 0.5f * length;
 
-    const float circleInertia =
-        circleMass *
-        (
-            0.5f * rr +
-            halfLength * halfLength +
-            2.0f * halfLength * halfCircleCentroid
-        );
+    const float circleInertia = circleMass * ( 0.5f * rr + halfLength * halfLength + 2.0f * halfLength * halfCircleCentroid );
 
     /*
     * 가운데 직사각형의 중심 기준 회전 관성
@@ -138,16 +125,10 @@ massData2 ComputeMass( const capsule2& capsule, float density )
     *     I_box = M * ( width^2 + height^2 ) / 12
     *           = boxMass * ( length^2 + 4r^2 ) / 12
     */
-    const float boxInertia =
-        boxMass * ( 4.0f * rr + ll ) / 12.0f;
+    const float boxInertia = boxMass * ( 4.0f * rr + ll ) / 12.0f;
 
     // 두 부분 모두 같은 Capsule center를 기준으로 계산했으므로 단순 합산 가능함.
-    return
-    {
-        mass,
-        center,
-        circleInertia + boxInertia
-    };
+    return { mass, center, circleInertia + boxInertia };
 }
 
 massData2 ComputeMass( const polygon2& polygon, float density )
@@ -157,26 +138,9 @@ massData2 ComputeMass( const polygon2& polygon, float density )
     assert( polygon.vertexCount > 0 );
 
     // rounded polygon의 vertex가 하나면 원, 두 개면 capsule과 같은 형상임.
-    if( polygon.vertexCount == 1 )
-    {
-        return ComputeMass(
-            circle2{ polygon.vertices[0], polygon.radius },
-            density
-        );
-    }
+    if( polygon.vertexCount == 1 ) return ComputeMass( circle2{ polygon.vertices[0], polygon.radius }, density );
 
-    if( polygon.vertexCount == 2 )
-    {
-        return ComputeMass(
-            capsule2
-            {
-                polygon.vertices[0],
-                polygon.vertices[1],
-                polygon.radius
-            },
-            density
-        );
-    }
+    if( polygon.vertexCount == 2 ) return ComputeMass( capsule2{ polygon.vertices[0], polygon.vertices[1], polygon.radius }, density );
 
     /*
     * 일반 convex polygon은 첫 vertex를 기준점(reference)으로 잡고
@@ -215,18 +179,11 @@ massData2 ComputeMass( const polygon2& polygon, float density )
 
         for( int i = 0; i < polygon.vertexCount; ++i )
         {
-            const int previous =
-                i == 0 ? polygon.vertexCount - 1 : i - 1;
+            const int previous = i == 0 ? polygon.vertexCount - 1 : i - 1;
 
-            const vec2 mid =
-                Normalize(
-                    polygon.normals[previous] +
-                    polygon.normals[i]
-                );
+            const vec2 mid = Normalize( polygon.normals[previous] + polygon.normals[i] );
 
-            vertices[i] =
-                polygon.vertices[i] +
-                mid * ( sqrt2 * polygon.radius );
+            vertices[i] = polygon.vertices[i] + mid * ( sqrt2 * polygon.radius );
         }
     }
     else
@@ -279,9 +236,7 @@ massData2 ComputeMass( const polygon2& polygon, float density )
         *
         *     centerNumerator += A_triangle * C_triangle
         */
-        center +=
-            ( e1 + e2 ) *
-            ( triangleArea * inv3 );
+        center += ( e1 + e2 ) * ( triangleArea * inv3 );
 
         /*
         * Triangle 내부에 대해 x^2, y^2를 적분한 결과.
@@ -300,20 +255,12 @@ massData2 ComputeMass( const polygon2& polygon, float density )
         *
         * 이므로 두 값을 더해서 누적함.
         */
-        const float intx2 =
-            e1.x * e1.x +
-            e2.x * e1.x +
-            e2.x * e2.x;
+        const float intx2 = e1.x * e1.x + e2.x * e1.x + e2.x * e2.x;
 
-        const float inty2 =
-            e1.y * e1.y +
-            e2.y * e1.y +
-            e2.y * e2.y;
+        const float inty2 = e1.y * e1.y + e2.y * e1.y + e2.y * e2.y;
 
         // 0.25 * (1 / 3) = 1 / 12
-        rotationalInertia +=
-            ( 0.25f * inv3 * D ) *
-            ( intx2 + inty2 );
+        rotationalInertia += ( 0.25f * inv3 * D ) * ( intx2 + inty2 );
     }
 
     assert( area > FLT_EPSILON );
@@ -354,9 +301,7 @@ massData2 ComputeMass( const polygon2& polygon, float density )
     *
     * 여기서 d = |center|이며 center는 reference 기준 centroid임.
     */
-    massData.rotationalInertia =
-        density * rotationalInertia -
-        massData.mass * Dot( center, center );
+    massData.rotationalInertia = density * rotationalInertia - massData.mass * Dot( center, center );
 
     assert( massData.rotationalInertia >= 0.0f );
 

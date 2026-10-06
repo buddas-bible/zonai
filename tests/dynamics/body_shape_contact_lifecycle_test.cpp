@@ -25,7 +25,10 @@ void check( bool condition, const char* message )
 
 void update( world& simulation )
 {
-    simulation.UpdateCollisions( []( const contactData& ) {} );
+    simulation.UpdateCollisions(
+        []( const contactData& )
+        {
+        } );
 }
 
 #pragma region HandleLifetime
@@ -43,8 +46,8 @@ void checkOwnership()
     check( !first.IsValid( secondShape ) && !second.IsValid( firstShape ), "foreign shape accepted" );
     const bodyId firstStatic = first.CreateBody();
     const bodyId secondStatic = second.CreateBody();
-    (void)first.CreateShape( firstStatic, circle2{ {}, 1.0f } );
-    (void)second.CreateShape( secondStatic, circle2{ {}, 1.0f } );
+    ( void )first.CreateShape( firstStatic, circle2{ {}, 1.0f } );
+    ( void )second.CreateShape( secondStatic, circle2{ {}, 1.0f } );
     update( first );
     update( second );
     std::array<contactData, 1> firstContacts{}, secondContacts{};
@@ -59,7 +62,7 @@ void checkWorldReuse()
     const bodyId oldBody = first->CreateBody( bodyType::Dynamic );
     const shapeId oldShape = first->CreateShape( oldBody, circle2{ {}, 1.0f } );
     const bodyId staticBody = first->CreateBody();
-    (void)first->CreateShape( staticBody, circle2{ {}, 1.0f } );
+    ( void )first->CreateShape( staticBody, circle2{ {}, 1.0f } );
     update( *first );
     std::array<contactData, 1> contacts{};
     check( first->GetBodyContactData( oldBody, contacts ) == 1, "world reuse contact fixture" );
@@ -67,9 +70,9 @@ void checkWorldReuse()
     std::destroy_at( first );
     world* second = std::construct_at( reinterpret_cast<world*>( storage ) );
     const bodyId newBody = second->CreateBody( bodyType::Dynamic );
-    (void)second->CreateShape( newBody, circle2{ {}, 1.0f } );
+    ( void )second->CreateShape( newBody, circle2{ {}, 1.0f } );
     const bodyId newStatic = second->CreateBody();
-    (void)second->CreateShape( newStatic, circle2{ {}, 1.0f } );
+    ( void )second->CreateShape( newStatic, circle2{ {}, 1.0f } );
     update( *second );
     check( second->GetBodyContactData( newBody, contacts ) == 1, "new world contact fixture" );
     check( oldBody.index1 == newBody.index1 && oldContact.index1 == contacts[0].id.index1, "world reuse slots" );
@@ -77,7 +80,7 @@ void checkWorldReuse()
     std::destroy_at( second );
 }
 
-#pragma endregion
+#pragma endregion HandleLifetime
 
 #pragma region ShapeAndContactLifecycle
 
@@ -87,9 +90,10 @@ void checkLists()
     world simulation{};
     const bodyId dynamicBody = simulation.CreateBody( bodyType::Dynamic );
     const bodyId staticBody = simulation.CreateBody();
-    (void)simulation.CreateShape( staticBody, circle2{ {}, 1.0f } );
+    ( void )simulation.CreateShape( staticBody, circle2{ {}, 1.0f } );
     std::array<shapeId, 3> shapes{};
-    for( shapeId& id : shapes ) id = simulation.CreateShape( dynamicBody, circle2{ {}, 1.0f } );
+    for( shapeId& id : shapes )
+        id = simulation.CreateShape( dynamicBody, circle2{ {}, 1.0f } );
     update( simulation );
     std::array<contactData, 3> contacts{};
     check( simulation.GetBodyContactData( dynamicBody, contacts ) == 3, "three contacts" );
@@ -106,13 +110,15 @@ void checkLists()
     check( simulation.GetBody( dynamicBody ).headShapeId == body::NULL_INDEX, "empty shape head" );
     check( simulation.GetBody( dynamicBody ).headContactKey == body::NULL_INDEX && simulation.GetBody( staticBody ).headContactKey == body::NULL_INDEX, "empty contact heads" );
     check( simulation.GetContactCount() == 0, "contacts after all shapes removed" );
-    for( const auto& data : oldContacts ) check( !simulation.IsValid( data.id ), "destroyed contact valid" );
+    for( const auto& data : oldContacts )
+        check( !simulation.IsValid( data.id ), "destroyed contact valid" );
     const shapeId reusedShape = simulation.CreateShape( dynamicBody, circle2{ {}, 1.0f } );
     check( reusedShape.index1 == shapes[0].index1 && reusedShape.generation != shapes[0].generation, "shape generation reuse" );
     update( simulation );
     check( simulation.GetBodyContactData( dynamicBody, contacts ) == 1, "pair can be recreated" );
     const contactId reusedContact = contacts[0].id;
-    for( const auto& data : oldContacts ) check( !simulation.IsValid( data.id ), "old contact resurrected" );
+    for( const auto& data : oldContacts )
+        check( !simulation.IsValid( data.id ), "old contact resurrected" );
     check( contacts[0].manifold.points[0].normalImpulse == 0.0f && contacts[0].manifold.points[0].tangentImpulse == 0.0f, "new contact impulse reset" );
     simulation.SetBodyLinearVelocity( dynamicBody, { 3.0f, 4.0f } );
     simulation.ApplyForceToCenter( dynamicBody, { 10.0f, 20.0f } );
@@ -133,7 +139,7 @@ void checkFilterAndQueries()
     world simulation{};
     simulation.SetContactRecycleDistance( 0.0f );
     const bodyId staticBody = simulation.CreateBody();
-    (void)simulation.CreateShape( staticBody, circle2{ {}, 1.0f } );
+    ( void )simulation.CreateShape( staticBody, circle2{ {}, 1.0f } );
     const bodyId dynamicBody = simulation.CreateBody( bodyType::Dynamic, { { 2.01f, 0.0f }, {} } );
     const shapeId dynamicShape = simulation.CreateShape( dynamicBody, circle2{ {}, 1.0f } );
     update( simulation );
@@ -175,7 +181,8 @@ void checkEdgeRemovalOrders()
         const bodyId dynamicBody = simulation.CreateBody( bodyType::Dynamic );
         const bodyId staticBody = simulation.CreateBody();
         const shapeId staticShape = simulation.CreateShape( staticBody, circle2{ {}, 1.0f } );
-        for( int i = 0; i < 3; ++i ) (void)simulation.CreateShape( dynamicBody, circle2{ {}, 1.0f } );
+        for( int i = 0; i < 3; ++i )
+            ( void )simulation.CreateShape( dynamicBody, circle2{ {}, 1.0f } );
         update( simulation );
         std::array<contactData, 3> contacts{};
         check( simulation.GetBodyContactData( dynamicBody, contacts ) == 3, "edge order fixture" );
@@ -187,7 +194,8 @@ void checkEdgeRemovalOrders()
             check( simulation.GetBody( dynamicBody ).contactCount == remaining && simulation.GetBody( staticBody ).contactCount == remaining, "both edge counts" );
             std::array<contactData, 3> survivors{};
             check( simulation.GetBodyContactData( dynamicBody, survivors ) == remaining && simulation.GetBodyContactData( staticBody, survivors ) == remaining, "both edge lists" );
-            for( int i = removed + 1; i < 3; ++i ) check( simulation.IsValid( contacts[order[i]].id ), "unrelated contact removed" );
+            for( int i = removed + 1; i < 3; ++i )
+                check( simulation.IsValid( contacts[order[i]].id ), "unrelated contact removed" );
         }
     } while( std::next_permutation( order.begin(), order.end() ) );
 }
@@ -197,7 +205,7 @@ void checkImpulseReset()
     world simulation{};
     simulation.SetGravity( {} );
     const bodyId staticBody = simulation.CreateBody();
-    (void)simulation.CreateShape( staticBody, circle2{ {}, 1.0f } );
+    ( void )simulation.CreateShape( staticBody, circle2{ {}, 1.0f } );
     const bodyId dynamicBody = simulation.CreateBody( bodyType::Dynamic, { { 1.99f, 0.0f }, {} } );
     const shapeId oldShape = simulation.CreateShape( dynamicBody, circle2{ {}, 1.0f } );
     simulation.SetBodyLinearVelocity( dynamicBody, { -2.0f, 0.0f } );
@@ -206,7 +214,7 @@ void checkImpulseReset()
     check( simulation.GetBodyContactData( dynamicBody, contacts ) == 1 && contacts[0].manifold.points[0].normalImpulse > 0.0f, "nonzero impulse fixture" );
     const contactId oldContact = contacts[0].id;
     simulation.DestroyShape( oldShape );
-    (void)simulation.CreateShape( dynamicBody, circle2{ {}, 1.0f } );
+    ( void )simulation.CreateShape( dynamicBody, circle2{ {}, 1.0f } );
     update( simulation );
     check( simulation.GetBodyContactData( dynamicBody, contacts ) == 1 && contacts[0].id.index1 == oldContact.index1, "contact slot reused" );
     check( !simulation.IsValid( oldContact ) && contacts[0].manifold.points[0].normalImpulse == 0.0f, "old impulse leaked into new contact" );
@@ -232,7 +240,7 @@ void checkSensorHandles()
     check( simulation.GetShapeSensorData( sensor, overlaps ) == 0, "destroyed visitor overlap removed" );
 }
 
-#pragma endregion
+#pragma endregion ShapeAndContactLifecycle
 
 } // namespace
 

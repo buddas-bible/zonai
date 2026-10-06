@@ -52,8 +52,7 @@ struct treeProxy
 static_assert( sizeof( treeNode ) == 32 );
 static_assert( sizeof( treeProxy ) == 16 );
 
-using treeNodeStorage =
-    std::vector<treeNode, alignedAllocator<treeNode, 64>>;
+using treeNodeStorage = std::vector<treeNode, alignedAllocator<treeNode, 64>>;
 
 // Debug Draw가 tree 내부 저장구조를 직접 노출받지 않고 node 상태를 읽기 위한 view.
 struct treeNodeDebugInfo
@@ -79,11 +78,9 @@ struct treeNodeDebugInfo
 };
 
 template <typename Callback>
-concept treeQueryCallback =
-    requires( Callback& callback, std::int32_t proxyId )
-    {
-        { callback( proxyId ) } -> std::convertible_to<bool>;
-    };
+concept treeQueryCallback = requires( Callback& callback, std::int32_t proxyId ) {
+    { callback( proxyId ) } -> std::convertible_to<bool>;
+};
 
 class dynamicTree
 {
@@ -138,17 +135,13 @@ public:
 
     // Debug / tooling에서 live node를 read-only로 순회함.
     // 내부 vector와 flag bit layout은 외부에 노출하지 않음.
-    template <typename Callback>
-    void VisitNodes( Callback&& callback ) const
+    template <typename Callback> void VisitNodes( Callback&& callback ) const
     {
         for( std::size_t i = 0; i < nodes_.size(); ++i )
         {
             const treeNode& node = nodes_[i];
 
-            if( IsEmptyNode( node ) )
-            {
-                continue;
-            }
+            if( IsEmptyNode( node ) ) continue;
 
             const bool isLeaf = IsLeaf( node );
 
@@ -171,22 +164,16 @@ public:
     // AABB가 겹치는 proxy를 찾아 callback으로 전달함.
     // callback이 false를 반환하면 즉시 순회를 끝냄.
     // Box2D처럼 callback 중 tree를 변경하지 않음. 조회 결과는 broad-phase AABB 후보임.
-    template <treeQueryCallback Callback>
-    void Query( const aabb2& aabb, Callback&& callback ) const
+    template <treeQueryCallback Callback> void Query( const aabb2& aabb, Callback&& callback ) const
     {
-        if( proxyCount_ == 0 )
-        {
-            return;
-        }
+        if( proxyCount_ == 0 ) return;
 
         // Query 중 heap allocation을 피하려고 고정 크기 stack으로 순회함.
         std::array<std::int32_t, TREE_STACK_SIZE> stack{};
         std::size_t stackCount = 0;
 
         // root가 internal이면 첫 child pair부터, leaf면 root부터 시작함.
-        stack[stackCount++] =
-            IsLeaf( nodes_[ROOT_NODE] ) ?
-                ROOT_NODE : GetChildPair( nodes_[ROOT_NODE] );
+        stack[stackCount++] = IsLeaf( nodes_[ROOT_NODE] ) ? ROOT_NODE : GetChildPair( nodes_[ROOT_NODE] );
 
         while( stackCount > 0 )
         {
@@ -198,10 +185,7 @@ public:
                 const treeNode& node = nodes_[nodeIndex];
 
                 // AABB가 겹치지 않으면 subtree 전체를 가지치기함.
-                if( IsEmptyNode( node ) || !Overlaps( aabb, node.aabb ) )
-                {
-                    continue;
-                }
+                if( IsEmptyNode( node ) || !Overlaps( aabb, node.aabb ) ) continue;
 
                 // leaf를 찾으면 stable proxy id를 callback에 넘김.
                 if( IsLeaf( node ) )
@@ -209,10 +193,7 @@ public:
                     const std::int32_t proxyId = GetProxyId( node );
 
                     const bool proceed = callback( proxyId );
-                    if( proceed == false )
-                    {
-                        return;
-                    }
+                    if( proceed == false ) return;
 
                     continue;
                 }
@@ -276,9 +257,7 @@ private:
     static treeNode MakeEmptyNode();
     static treeNode MakeLeafNode( const aabb2& aabb, std::int32_t proxyId, std::int32_t shapeIndex, bool moved );
 
-    static treeNode MakeInternalNodeFrom(
-        const treeNodeStorage& nodes,
-        std::int32_t childPair );
+    static treeNode MakeInternalNodeFrom( const treeNodeStorage& nodes, std::int32_t childPair );
 
     treeNode MakeInternalNode( std::int32_t childPair ) const;
 

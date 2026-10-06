@@ -8,36 +8,25 @@ using namespace zonai;
 namespace
 {
 
-bool NearlyEqual(
-    float a,
-    float b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( float a, float b, float epsilon = 1e-5f )
 {
     return std::fabs( a - b ) <= epsilon;
 }
 
-bool NearlyEqual(
-    const vec2& a,
-    const vec2& b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( const vec2& a, const vec2& b, float epsilon = 1e-5f )
 {
-    return
-        NearlyEqual( a.x, b.x, epsilon ) &&
-        NearlyEqual( a.y, b.y, epsilon );
+    return NearlyEqual( a.x, b.x, epsilon ) && NearlyEqual( a.y, b.y, epsilon );
 }
 
 } // namespace
 
 int main()
 {
-    const shapeGeometry circle =
-        circle2{ {}, 0.5f };
+    const shapeGeometry circle = circle2{ {}, 0.5f };
 
-    const shapeGeometry polygon =
-        MakeBox( { 1.0f, 1.0f } );
+    const shapeGeometry polygon = MakeBox( { 1.0f, 1.0f } );
 
-    const shapeGeometry segment =
-        segment2{ { -1.0f, 0.0f }, { 1.0f, 0.0f } };
+    const shapeGeometry segment = segment2{ { -1.0f, 0.0f }, { 1.0f, 0.0f } };
 
     assert( CanCollideShapes( circle, polygon ) );
     assert( CanCollideShapes( polygon, circle ) );
@@ -49,13 +38,7 @@ int main()
         transform2 transformB{};
         transformB.position = { 0.0f, 1.5f };
 
-        const localManifold2 manifold =
-            CollideShapes(
-                polygon,
-                transformA,
-                circle,
-                transformB
-            );
+        const localManifold2 manifold = CollideShapes( polygon, transformA, circle, transformB );
 
         assert( manifold.pointCount == 1 );
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
@@ -70,13 +53,7 @@ int main()
 
         const transform2 transformB{};
 
-        const localManifold2 manifold =
-            CollideShapes(
-                circle,
-                transformA,
-                polygon,
-                transformB
-            );
+        const localManifold2 manifold = CollideShapes( circle, transformA, polygon, transformB );
 
         assert( manifold.pointCount == 1 );
 
@@ -92,19 +69,12 @@ int main()
         // A 자체가 회전/이동되어 있어도 relative transform으로 B를 A local에 맞춰야 함.
         transform2 transformA{};
         transformA.position = { 2.0f, 3.0f };
-        transformA.rotation =
-            rot2::FromRadians( 3.1415926535f * 0.5f );
+        transformA.rotation = rot2::FromRadians( 3.1415926535f * 0.5f );
 
         transform2 transformB{};
         transformB.position = { 0.5f, 3.0f };
 
-        const localManifold2 manifold =
-            CollideShapes(
-                polygon,
-                transformA,
-                circle,
-                transformB
-            );
+        const localManifold2 manifold = CollideShapes( polygon, transformA, circle, transformB );
 
         assert( manifold.pointCount == 1 );
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f }, 1e-4f ) );
@@ -113,13 +83,7 @@ int main()
     }
 
     {
-        const localManifold2 manifold =
-            CollideShapes(
-                segment,
-                {},
-                segment,
-                {}
-            );
+        const localManifold2 manifold = CollideShapes( segment, {}, segment, {} );
 
         assert( manifold.pointCount == 0 );
     }

@@ -34,26 +34,16 @@ struct separationFunction2
     separationType2 type = separationType2::Points;
 };
 
-int FindSupport(
-    const shapeProxy2& proxy,
-    const vec2& direction )
+int FindSupport( const shapeProxy2& proxy, const vec2& direction )
 {
     assert( proxy.count > 0 );
 
     int bestIndex = 0;
-    float bestValue =
-        Dot(
-            proxy.points[0],
-            direction
-        );
+    float bestValue = Dot( proxy.points[0], direction );
 
     for( int i = 1; i < proxy.count; ++i )
     {
-        const float value =
-            Dot(
-                proxy.points[i],
-                direction
-            );
+        const float value = Dot( proxy.points[i], direction );
 
         if( value > bestValue )
         {
@@ -65,13 +55,7 @@ int FindSupport(
     return bestIndex;
 }
 
-separationFunction2 MakeSeparationFunction(
-    const simplexCache2& cache,
-    const shapeProxy2& proxyA,
-    const sweep2& sweepA,
-    const shapeProxy2& proxyB,
-    const sweep2& sweepB,
-    float time )
+separationFunction2 MakeSeparationFunction( const simplexCache2& cache, const shapeProxy2& proxyA, const sweep2& sweepA, const shapeProxy2& proxyB, const sweep2& sweepB, float time )
 {
     assert( cache.count > 0 );
     assert( cache.count < 3 );
@@ -82,441 +66,188 @@ separationFunction2 MakeSeparationFunction(
     function.sweepA = sweepA;
     function.sweepB = sweepB;
 
-    const transform2 transformA =
-        GetSweepTransform(
-            sweepA,
-            time
-        );
+    const transform2 transformA = GetSweepTransform( sweepA, time );
 
-    const transform2 transformB =
-        GetSweepTransform(
-            sweepB,
-            time
-        );
+    const transform2 transformB = GetSweepTransform( sweepB, time );
 
     if( cache.count == 1 )
     {
-        function.type =
-            separationType2::Points;
+        function.type = separationType2::Points;
 
-        const vec2 pointA =
-            TransformPoint(
-                transformA,
-                proxyA.points[
-                    cache.indexA[0]
-                ]
-            );
+        const vec2 pointA = TransformPoint( transformA, proxyA.points[cache.indexA[0]] );
 
-        const vec2 pointB =
-            TransformPoint(
-                transformB,
-                proxyB.points[
-                    cache.indexB[0]
-                ]
-            );
+        const vec2 pointB = TransformPoint( transformB, proxyB.points[cache.indexB[0]] );
 
-        function.axis =
-            Normalize(
-                pointB -
-                pointA
-            );
+        function.axis = Normalize( pointB - pointA );
 
         return function;
     }
 
     if( cache.indexA[0] == cache.indexA[1] )
     {
-        function.type =
-            separationType2::FaceB;
+        function.type = separationType2::FaceB;
 
-        const vec2 localPointB1 =
-            proxyB.points[
-                cache.indexB[0]
-            ];
+        const vec2 localPointB1 = proxyB.points[cache.indexB[0]];
 
-        const vec2 localPointB2 =
-            proxyB.points[
-                cache.indexB[1]
-            ];
+        const vec2 localPointB2 = proxyB.points[cache.indexB[1]];
 
-        function.axis =
-            Normalize(
-                Cross(
-                    localPointB2 -
-                    localPointB1,
-                    1.0f
-                )
-            );
+        function.axis = Normalize( Cross( localPointB2 - localPointB1, 1.0f ) );
 
-        const vec2 normal =
-            Rotate(
-                transformB.rotation,
-                function.axis
-            );
+        const vec2 normal = Rotate( transformB.rotation, function.axis );
 
-        function.localPoint =
-            (
-                localPointB1 +
-                localPointB2
-            ) * 0.5f;
+        function.localPoint = ( localPointB1 + localPointB2 ) * 0.5f;
 
-        const vec2 pointB =
-            TransformPoint(
-                transformB,
-                function.localPoint
-            );
+        const vec2 pointB = TransformPoint( transformB, function.localPoint );
 
-        const vec2 pointA =
-            TransformPoint(
-                transformA,
-                proxyA.points[
-                    cache.indexA[0]
-                ]
-            );
+        const vec2 pointA = TransformPoint( transformA, proxyA.points[cache.indexA[0]] );
 
-        if( Dot(
-                pointA - pointB,
-                normal ) < 0.0f )
+        if( Dot( pointA - pointB, normal ) < 0.0f )
         {
-            function.axis =
-                -function.axis;
+            function.axis = -function.axis;
         }
 
         return function;
     }
 
-    function.type =
-        separationType2::FaceA;
+    function.type = separationType2::FaceA;
 
-    const vec2 localPointA1 =
-        proxyA.points[
-            cache.indexA[0]
-        ];
+    const vec2 localPointA1 = proxyA.points[cache.indexA[0]];
 
-    const vec2 localPointA2 =
-        proxyA.points[
-            cache.indexA[1]
-        ];
+    const vec2 localPointA2 = proxyA.points[cache.indexA[1]];
 
-    function.axis =
-        Normalize(
-            Cross(
-                localPointA2 -
-                localPointA1,
-                1.0f
-            )
-        );
+    function.axis = Normalize( Cross( localPointA2 - localPointA1, 1.0f ) );
 
-    const vec2 normal =
-        Rotate(
-            transformA.rotation,
-            function.axis
-        );
+    const vec2 normal = Rotate( transformA.rotation, function.axis );
 
-    function.localPoint =
-        (
-            localPointA1 +
-            localPointA2
-        ) * 0.5f;
+    function.localPoint = ( localPointA1 + localPointA2 ) * 0.5f;
 
-    const vec2 pointA =
-        TransformPoint(
-            transformA,
-            function.localPoint
-        );
+    const vec2 pointA = TransformPoint( transformA, function.localPoint );
 
-    const vec2 pointB =
-        TransformPoint(
-            transformB,
-            proxyB.points[
-                cache.indexB[0]
-            ]
-        );
+    const vec2 pointB = TransformPoint( transformB, proxyB.points[cache.indexB[0]] );
 
-    if( Dot(
-        pointB - pointA,
-        normal ) < 0.0f )
+    if( Dot( pointB - pointA, normal ) < 0.0f )
     {
-        function.axis =
-            -function.axis;
+        function.axis = -function.axis;
     }
 
     return function;
 }
 
-float FindMinSeparation(
-    const separationFunction2& function,
-    int& indexA,
-    int& indexB,
-    float time )
+float FindMinSeparation( const separationFunction2& function, int& indexA, int& indexB, float time )
 {
-    const transform2 transformA =
-        GetSweepTransform(
-            function.sweepA,
-            time
-        );
+    const transform2 transformA = GetSweepTransform( function.sweepA, time );
 
-    const transform2 transformB =
-        GetSweepTransform(
-            function.sweepB,
-            time
-        );
+    const transform2 transformB = GetSweepTransform( function.sweepB, time );
 
     switch( function.type )
     {
     case separationType2::Points:
     {
-        const vec2 axisA =
-            InverseRotate(
-                transformA.rotation,
-                function.axis
-            );
+        const vec2 axisA = InverseRotate( transformA.rotation, function.axis );
 
-        const vec2 axisB =
-            InverseRotate(
-                transformB.rotation,
-                -function.axis
-            );
+        const vec2 axisB = InverseRotate( transformB.rotation, -function.axis );
 
-        indexA =
-            FindSupport(
-                *function.proxyA,
-                axisA
-            );
+        indexA = FindSupport( *function.proxyA, axisA );
 
-        indexB =
-            FindSupport(
-                *function.proxyB,
-                axisB
-            );
+        indexB = FindSupport( *function.proxyB, axisB );
 
-        const vec2 pointA =
-            TransformPoint(
-                transformA,
-                function.proxyA->points[
-                    indexA
-                ]
-            );
+        const vec2 pointA = TransformPoint( transformA, function.proxyA->points[indexA] );
 
-        const vec2 pointB =
-            TransformPoint(
-                transformB,
-                function.proxyB->points[
-                    indexB
-                ]
-            );
+        const vec2 pointB = TransformPoint( transformB, function.proxyB->points[indexB] );
 
-        return
-            Dot(
-                pointB - pointA,
-                function.axis
-            );
+        return Dot( pointB - pointA, function.axis );
     }
 
     case separationType2::FaceA:
     {
-        const vec2 normal =
-            Rotate(
-                transformA.rotation,
-                function.axis
-            );
+        const vec2 normal = Rotate( transformA.rotation, function.axis );
 
-        const vec2 pointA =
-            TransformPoint(
-                transformA,
-                function.localPoint
-            );
+        const vec2 pointA = TransformPoint( transformA, function.localPoint );
 
-        const vec2 axisB =
-            InverseRotate(
-                transformB.rotation,
-                -normal
-            );
+        const vec2 axisB = InverseRotate( transformB.rotation, -normal );
 
         indexA = -1;
-        indexB =
-            FindSupport(
-                *function.proxyB,
-                axisB
-            );
+        indexB = FindSupport( *function.proxyB, axisB );
 
-        const vec2 pointB =
-            TransformPoint(
-                transformB,
-                function.proxyB->points[
-                    indexB
-                ]
-            );
+        const vec2 pointB = TransformPoint( transformB, function.proxyB->points[indexB] );
 
-        return
-            Dot(
-                pointB - pointA,
-                normal
-            );
+        return Dot( pointB - pointA, normal );
     }
 
     case separationType2::FaceB:
     {
-        const vec2 normal =
-            Rotate(
-                transformB.rotation,
-                function.axis
-            );
+        const vec2 normal = Rotate( transformB.rotation, function.axis );
 
-        const vec2 pointB =
-            TransformPoint(
-                transformB,
-                function.localPoint
-            );
+        const vec2 pointB = TransformPoint( transformB, function.localPoint );
 
-        const vec2 axisA =
-            InverseRotate(
-                transformA.rotation,
-                -normal
-            );
+        const vec2 axisA = InverseRotate( transformA.rotation, -normal );
 
-        indexA =
-            FindSupport(
-                *function.proxyA,
-                axisA
-            );
+        indexA = FindSupport( *function.proxyA, axisA );
 
         indexB = -1;
 
-        const vec2 pointA =
-            TransformPoint(
-                transformA,
-                function.proxyA->points[
-                    indexA
-                ]
-            );
+        const vec2 pointA = TransformPoint( transformA, function.proxyA->points[indexA] );
 
-        return
-            Dot(
-                pointA - pointB,
-                normal
-            );
+        return Dot( pointA - pointB, normal );
     }
     }
 
     assert( false );
+
     indexA = -1;
     indexB = -1;
+
     return 0.0f;
 }
 
-float EvaluateSeparation(
-    const separationFunction2& function,
-    int indexA,
-    int indexB,
-    float time )
+float EvaluateSeparation( const separationFunction2& function, int indexA, int indexB, float time )
 {
-    const transform2 transformA =
-        GetSweepTransform(
-            function.sweepA,
-            time
-        );
+    const transform2 transformA = GetSweepTransform( function.sweepA, time );
 
-    const transform2 transformB =
-        GetSweepTransform(
-            function.sweepB,
-            time
-        );
+    const transform2 transformB = GetSweepTransform( function.sweepB, time );
 
     switch( function.type )
     {
     case separationType2::Points:
     {
-        const vec2 pointA =
-            TransformPoint(
-                transformA,
-                function.proxyA->points[
-                    indexA
-                ]
-            );
+        const vec2 pointA = TransformPoint( transformA, function.proxyA->points[indexA] );
 
-        const vec2 pointB =
-            TransformPoint(
-                transformB,
-                function.proxyB->points[
-                    indexB
-                ]
-            );
+        const vec2 pointB = TransformPoint( transformB, function.proxyB->points[indexB] );
 
-        return
-            Dot(
-                pointB - pointA,
-                function.axis
-            );
+        return Dot( pointB - pointA, function.axis );
     }
 
     case separationType2::FaceA:
     {
-        const vec2 normal =
-            Rotate(
-                transformA.rotation,
-                function.axis
-            );
+        const vec2 normal = Rotate( transformA.rotation, function.axis );
 
-        const vec2 pointA =
-            TransformPoint(
-                transformA,
-                function.localPoint
-            );
+        const vec2 pointA = TransformPoint( transformA, function.localPoint );
 
-        const vec2 pointB =
-            TransformPoint(
-                transformB,
-                function.proxyB->points[
-                    indexB
-                ]
-            );
+        const vec2 pointB = TransformPoint( transformB, function.proxyB->points[indexB] );
 
-        return
-            Dot(
-                pointB - pointA,
-                normal
-            );
+        return Dot( pointB - pointA, normal );
     }
 
     case separationType2::FaceB:
     {
-        const vec2 normal =
-            Rotate(
-                transformB.rotation,
-                function.axis
-            );
+        const vec2 normal = Rotate( transformB.rotation, function.axis );
 
-        const vec2 pointB =
-            TransformPoint(
-                transformB,
-                function.localPoint
-            );
+        const vec2 pointB = TransformPoint( transformB, function.localPoint );
 
-        const vec2 pointA =
-            TransformPoint(
-                transformA,
-                function.proxyA->points[
-                    indexA
-                ]
-            );
+        const vec2 pointA = TransformPoint( transformA, function.proxyA->points[indexA] );
 
-        return
-            Dot(
-                pointA - pointB,
-                normal
-            );
+        return Dot( pointA - pointB, normal );
     }
     }
 
     assert( false );
+
     return 0.0f;
 }
 
 } // namespace
 
-toiOutput2 TimeOfImpact(
-    const toiInput2& input )
+toiOutput2 TimeOfImpact( const toiInput2& input )
 {
     assert( input.proxyA.count > 0 );
     assert( input.proxyB.count > 0 );
@@ -527,23 +258,13 @@ toiOutput2 TimeOfImpact(
     assert( input.maxFraction <= 1.0f );
 
     toiOutput2 output{};
-    output.fraction =
-        input.maxFraction;
+    output.fraction = input.maxFraction;
 
-    const float totalRadius =
-        input.proxyA.radius +
-        input.proxyB.radius;
+    const float totalRadius = input.proxyA.radius + input.proxyB.radius;
 
-    const float target =
-        std::max(
-            LINEAR_SLOP,
-            totalRadius -
-            LINEAR_SLOP
-        );
+    const float target = std::max( LINEAR_SLOP, totalRadius - LINEAR_SLOP );
 
-    const float tolerance =
-        0.25f *
-        LINEAR_SLOP;
+    const float tolerance = 0.25f * LINEAR_SLOP;
 
     assert( target > tolerance );
 
@@ -562,103 +283,51 @@ toiOutput2 TimeOfImpact(
 
     for( ;; )
     {
-        const transform2 transformA =
-            GetSweepTransform(
-                input.sweepA,
-                time1
-            );
+        const transform2 transformA = GetSweepTransform( input.sweepA, time1 );
 
-        const transform2 transformB =
-            GetSweepTransform(
-                input.sweepB,
-                time1
-            );
+        const transform2 transformB = GetSweepTransform( input.sweepB, time1 );
 
-        distanceInput.transform =
-            InverseMul(
-                transformA,
-                transformB
-            );
+        distanceInput.transform = InverseMul( transformA, transformB );
 
-        const distanceOutput2 distanceOutput =
-            ShapeDistance(
-                distanceInput,
-                cache
-            );
+        const distanceOutput2 distanceOutput = ShapeDistance( distanceInput, cache );
 
-        const vec2 worldNormal =
-            Rotate(
-                transformA.rotation,
-                distanceOutput.normal
-            );
+        const vec2 worldNormal = Rotate( transformA.rotation, distanceOutput.normal );
 
-        const vec2 worldPointA =
-            TransformPoint(
-                transformA,
-                distanceOutput.pointA
-            );
+        const vec2 worldPointA = TransformPoint( transformA, distanceOutput.pointA );
 
-        const vec2 worldPointB =
-            TransformPoint(
-                transformA,
-                distanceOutput.pointB
-            );
+        const vec2 worldPointB = TransformPoint( transformA, distanceOutput.pointB );
 
         ++distanceIterations;
 
         if( distanceOutput.distance <= 0.0f )
         {
-            output.state =
-                toiState2::Overlapped;
+            output.state = toiState2::Overlapped;
 
             output.fraction = 0.0f;
             break;
         }
 
-        if( distanceOutput.distance <=
-            target + tolerance )
+        if( distanceOutput.distance <= target + tolerance )
         {
-            output.state =
-                toiState2::Hit;
+            output.state = toiState2::Hit;
 
-            const vec2 pointA =
-                worldPointA +
-                worldNormal *
-                input.proxyA.radius;
+            const vec2 pointA = worldPointA + worldNormal * input.proxyA.radius;
 
-            const vec2 pointB =
-                worldPointB -
-                worldNormal *
-                input.proxyB.radius;
+            const vec2 pointB = worldPointB - worldNormal * input.proxyB.radius;
 
-            output.point =
-                (
-                    pointA +
-                    pointB
-                ) * 0.5f;
+            output.point = ( pointA + pointB ) * 0.5f;
 
-            output.normal =
-                worldNormal;
+            output.normal = worldNormal;
 
-            output.fraction =
-                time1;
+            output.fraction = time1;
 
             break;
         }
 
-        const separationFunction2 function =
-            MakeSeparationFunction(
-                cache,
-                input.proxyA,
-                input.sweepA,
-                input.proxyB,
-                input.sweepB,
-                time1
-            );
+        const separationFunction2 function = MakeSeparationFunction( cache, input.proxyA, input.sweepA, input.proxyB, input.sweepB, time1 );
 
         bool done = false;
-        float time2 =
-            input.maxFraction;
+        float time2 = input.maxFraction;
 
         int pushBackIterations = 0;
 
@@ -667,137 +336,74 @@ toiOutput2 TimeOfImpact(
             int indexA = -1;
             int indexB = -1;
 
-            float separation2 =
-                FindMinSeparation(
-                    function,
-                    indexA,
-                    indexB,
-                    time2
-                );
+            float separation2 = FindMinSeparation( function, indexA, indexB, time2 );
 
-            if( separation2 >
-                target + tolerance )
+            if( separation2 > target + tolerance )
             {
-                output.state =
-                    toiState2::Separated;
+                output.state = toiState2::Separated;
 
-                output.fraction =
-                    input.maxFraction;
+                output.fraction = input.maxFraction;
 
                 done = true;
                 break;
             }
 
-            if( separation2 >
-                target - tolerance )
+            if( separation2 > target - tolerance )
             {
                 time1 = time2;
                 break;
             }
 
-            float separation1 =
-                EvaluateSeparation(
-                    function,
-                    indexA,
-                    indexB,
-                    time1
-                );
+            float separation1 = EvaluateSeparation( function, indexA, indexB, time1 );
 
-            if( separation1 <
-                target - tolerance )
+            if( separation1 < target - tolerance )
             {
-                output.state =
-                    toiState2::Failed;
+                output.state = toiState2::Failed;
 
-                output.fraction =
-                    time1;
+                output.fraction = time1;
 
                 done = true;
                 break;
             }
 
-            if( separation1 <=
-                target + tolerance )
+            if( separation1 <= target + tolerance )
             {
-                output.state =
-                    toiState2::Hit;
+                output.state = toiState2::Hit;
 
-                const vec2 pointA =
-                    worldPointA +
-                    worldNormal *
-                    input.proxyA.radius;
+                const vec2 pointA = worldPointA + worldNormal * input.proxyA.radius;
 
-                const vec2 pointB =
-                    worldPointB -
-                    worldNormal *
-                    input.proxyB.radius;
+                const vec2 pointB = worldPointB - worldNormal * input.proxyB.radius;
 
-                output.point =
-                    (
-                        pointA +
-                        pointB
-                    ) * 0.5f;
+                output.point = ( pointA + pointB ) * 0.5f;
 
-                output.normal =
-                    worldNormal;
+                output.normal = worldNormal;
 
-                output.fraction =
-                    time1;
+                output.fraction = time1;
 
                 done = true;
                 break;
             }
 
-            float lowerTime =
-                time1;
+            float lowerTime = time1;
 
-            float upperTime =
-                time2;
+            float upperTime = time2;
 
-            for( int rootIteration = 0;
-                 rootIteration < MAX_ROOT_ITERATIONS;
-                 ++rootIteration )
+            for( int rootIteration = 0; rootIteration < MAX_ROOT_ITERATIONS; ++rootIteration )
             {
                 float time = 0.0f;
 
                 if( rootIteration % 2 == 1 )
                 {
-                    time =
-                        lowerTime +
-                        (
-                            target -
-                            separation1
-                        ) *
-                        (
-                            upperTime -
-                            lowerTime
-                        ) /
-                        (
-                            separation2 -
-                            separation1
-                        );
+                    time = lowerTime + ( target - separation1 ) * ( upperTime - lowerTime ) / ( separation2 - separation1 );
                 }
                 else
                 {
-                    time =
-                        0.5f *
-                        (
-                            lowerTime +
-                            upperTime
-                        );
+                    time = 0.5f * ( lowerTime + upperTime );
                 }
 
-                const float separation =
-                    EvaluateSeparation(
-                        function,
-                        indexA,
-                        indexB,
-                        time
-                    );
+                const float separation = EvaluateSeparation( function, indexA, indexB, time );
 
-                if( std::fabs(
-                    separation -
-                    target ) < tolerance )
+                if( std::fabs( separation - target ) < tolerance )
                 {
                     time2 = time;
                     break;
@@ -817,8 +423,7 @@ toiOutput2 TimeOfImpact(
 
             ++pushBackIterations;
 
-            if( pushBackIterations ==
-                MAX_POLYGON_VERTICES )
+            if( pushBackIterations == MAX_POLYGON_VERTICES )
             {
                 break;
             }
@@ -829,33 +434,19 @@ toiOutput2 TimeOfImpact(
             break;
         }
 
-        if( distanceIterations ==
-            MAX_DISTANCE_ITERATIONS )
+        if( distanceIterations == MAX_DISTANCE_ITERATIONS )
         {
-            output.state =
-                toiState2::Failed;
+            output.state = toiState2::Failed;
 
-            const vec2 pointA =
-                worldPointA +
-                worldNormal *
-                input.proxyA.radius;
+            const vec2 pointA = worldPointA + worldNormal * input.proxyA.radius;
 
-            const vec2 pointB =
-                worldPointB -
-                worldNormal *
-                input.proxyB.radius;
+            const vec2 pointB = worldPointB - worldNormal * input.proxyB.radius;
 
-            output.point =
-                (
-                    pointA +
-                    pointB
-                ) * 0.5f;
+            output.point = ( pointA + pointB ) * 0.5f;
 
-            output.normal =
-                worldNormal;
+            output.normal = worldNormal;
 
-            output.fraction =
-                time1;
+            output.fraction = time1;
 
             break;
         }

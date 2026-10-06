@@ -4,6 +4,7 @@
 
 namespace zonai
 {
+
 mouseJointConstraint2 prepareMouseJointConstraint( const mouseJointSim2& joint, const bodySim& bodySimB, float subStepTime )
 {
     assert( subStepTime > 0.0f && joint.bodyIdB == bodySimB.bodyId );
@@ -86,4 +87,5 @@ void solveMouseJointConstraint( mouseJointConstraint2& constraint, bodyState& bo
     bodyStateB.linearVelocity += constraint.invMass * impulse;
     bodyStateB.angularVelocity += constraint.invInertia * Cross( r_b, impulse );
 }
+
 } // namespace zonai

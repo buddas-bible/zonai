@@ -37,9 +37,6 @@ struct islandGraph2
 
 // 현재 body / Contact 상태에서 solver island graph를 다시 구성함.
 // manifold point가 하나 이상인 Contact와 모든 살아 있는 Joint를 graph edge로 사용함.
-[[nodiscard]] islandGraph2 BuildIslands(
-    std::span<const body> bodies,
-    std::span<const contactSim2> contactSims,
-    std::span<const joint2> jointSims = {} );
+[[nodiscard]] islandGraph2 BuildIslands( std::span<const body> bodies, std::span<const contactSim2> contactSims, std::span<const joint2> jointSims = {} );
 
 } // namespace zonai

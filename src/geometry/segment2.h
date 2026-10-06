@@ -31,17 +31,7 @@ inline float Length( const segment2& segment )
 
 inline aabb2 ComputeAABB( const segment2& segment )
 {
-    return
-    {
-        {
-            std::min( segment.a.x, segment.b.x ),
-            std::min( segment.a.y, segment.b.y )
-        },
-        {
-            std::max( segment.a.x, segment.b.x ),
-            std::max( segment.a.y, segment.b.y )
-        }
-    };
+    return { { std::min( segment.a.x, segment.b.x ), std::min( segment.a.y, segment.b.y ) }, { std::max( segment.a.x, segment.b.x ), std::max( segment.a.y, segment.b.y ) } };
 }
 
 inline vec2 ClosestPoint( const segment2& segment, const vec2& point )
@@ -49,17 +39,11 @@ inline vec2 ClosestPoint( const segment2& segment, const vec2& point )
     const vec2 ab = segment.b - segment.a;
     const float lengthSquared = LengthSquared( ab );
 
-    if( lengthSquared == 0.0f )
-    {
-        return segment.a;
-    }
+    if( lengthSquared == 0.0f ) return segment.a;
 
-    const float projection =
-        Dot( point - segment.a, ab ) /
-        lengthSquared;
+    const float projection = Dot( point - segment.a, ab ) / lengthSquared;
 
-    const float t =
-        std::clamp( projection, 0.0f, 1.0f );
+    const float t = std::clamp( projection, 0.0f, 1.0f );
 
     return segment.a + ab * t;
 }

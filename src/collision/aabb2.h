@@ -17,13 +17,7 @@ struct aabb2
 // 정상 AABB는 유한한 좌표를 가지며 max가 min보다 작지 않아야 함.
 inline bool IsValidAABB( const aabb2& box )
 {
-    return
-        std::isfinite( box.min.x ) &&
-        std::isfinite( box.min.y ) &&
-        std::isfinite( box.max.x ) &&
-        std::isfinite( box.max.y ) &&
-        box.max.x >= box.min.x &&
-        box.max.y >= box.min.y;
+    return std::isfinite( box.min.x ) && std::isfinite( box.min.y ) && std::isfinite( box.max.x ) && std::isfinite( box.max.y ) && box.max.x >= box.min.x && box.max.y >= box.min.y;
 }
 
 inline vec2 Center( const aabb2& box )
@@ -38,27 +32,13 @@ inline vec2 Extents( const aabb2& box )
 
 inline aabb2 ExpandAABB( const aabb2& box, float margin )
 {
-    return
-    {
-        { box.min.x - margin, box.min.y - margin },
-        { box.max.x + margin, box.max.y + margin }
-    };
+    return { { box.min.x - margin, box.min.y - margin }, { box.max.x + margin, box.max.y + margin } };
 }
 
 // 두 aabb2의 합집합
 inline aabb2 Union( const aabb2& a, const aabb2& b )
 {
-    return
-    {
-        {
-            std::min( a.min.x, b.min.x ),
-            std::min( a.min.y, b.min.y )
-        },
-        {
-            std::max( a.max.x, b.max.x ),
-            std::max( a.max.y, b.max.y )
-        }
-    };
+    return { { std::min( a.min.x, b.min.x ), std::min( a.min.y, b.min.y ) }, { std::max( a.max.x, b.max.x ), std::max( a.max.y, b.max.y ) } };
 }
 
 // aabb2의 둘레
@@ -73,31 +53,21 @@ inline float Perimeter( const aabb2& box )
 // aabb2가 point를 포함하는가?
 inline bool Contains( const aabb2& box, const vec2& point )
 {
-    return
-        point.x >= box.min.x &&
-        point.x <= box.max.x &&
-        point.y >= box.min.y &&
-        point.y <= box.max.y;
+    return point.x >= box.min.x && point.x <= box.max.x && point.y >= box.min.y && point.y <= box.max.y;
 }
 
 // outer가 inner를 포함하는가?
 inline bool ContainsAABB( const aabb2& outer, const aabb2& inner )
 {
-    return
-        inner.min.x >= outer.min.x &&
-        inner.min.y >= outer.min.y &&
-        inner.max.x <= outer.max.x &&
-        inner.max.y <= outer.max.y;
+    return inner.min.x >= outer.min.x && inner.min.y >= outer.min.y && inner.max.x <= outer.max.x && inner.max.y <= outer.max.y;
 }
 
 // 두 aabb2가 겹치는가?
 inline bool Overlaps( const aabb2& a, const aabb2& b )
 {
-    if( a.max.x < b.min.x || a.min.x > b.max.x )
-        return false;
+    if( a.max.x < b.min.x || a.min.x > b.max.x ) return false;
 
-    if( a.max.y < b.min.y || a.min.y > b.max.y )
-        return false;
+    if( a.max.y < b.min.y || a.min.y > b.max.y ) return false;
 
     return true;
 }

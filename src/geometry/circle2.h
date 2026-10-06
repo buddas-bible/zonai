@@ -16,19 +16,14 @@ inline aabb2 ComputeAABB( const circle2& circle )
 {
     const vec2 radius{ circle.radius, circle.radius };
 
-    return
-    {
-        circle.center - radius,
-        circle.center + radius
-    };
+    return { circle.center - radius, circle.center + radius };
 }
 
 inline bool Contains( const circle2& circle, const vec2& point )
 {
     const vec2 difference = point - circle.center;
 
-    return LengthSquared( difference ) <=
-        circle.radius * circle.radius;
+    return LengthSquared( difference ) <= circle.radius * circle.radius;
 }
 
 } // namespace zonai

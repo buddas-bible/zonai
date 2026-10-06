@@ -5,34 +5,21 @@
 
 using namespace zonai;
 
-bool NearlyEqual(
-    float a,
-    float b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( float a, float b, float epsilon = 1e-5f )
 {
     return std::fabs( a - b ) <= epsilon;
 }
 
-bool NearlyEqual(
-    const vec2& a,
-    const vec2& b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( const vec2& a, const vec2& b, float epsilon = 1e-5f )
 {
-    return NearlyEqual( a.x, b.x, epsilon ) &&
-        NearlyEqual( a.y, b.y, epsilon );
+    return NearlyEqual( a.x, b.x, epsilon ) && NearlyEqual( a.y, b.y, epsilon );
 }
 
-bool HasPoint(
-    const localManifold2& manifold,
-    const vec2& point,
-    float epsilon = 1e-5f )
+bool HasPoint( const localManifold2& manifold, const vec2& point, float epsilon = 1e-5f )
 {
     for( std::size_t i = 0; i < manifold.pointCount; ++i )
     {
-        if( NearlyEqual( manifold.points[i].point, point, epsilon ) )
-        {
-            return true;
-        }
+        if( NearlyEqual( manifold.points[i].point, point, epsilon ) ) return true;
     }
 
     return false;
@@ -48,8 +35,7 @@ int main()
         transform2 transformB{};
         transformB.position = { 0.0f, 2.1f };
 
-        const localManifold2 manifold =
-            CollidePolygons( a, b, transformB );
+        const localManifold2 manifold = CollidePolygons( a, b, transformB );
 
         assert( manifold.pointCount == 0 );
     }
@@ -62,8 +48,7 @@ int main()
         transform2 transformB{};
         transformB.position = { 0.0f, 2.0f };
 
-        const localManifold2 manifold =
-            CollidePolygons( a, b, transformB );
+        const localManifold2 manifold = CollidePolygons( a, b, transformB );
 
         assert( manifold.pointCount == 2 );
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
@@ -82,8 +67,7 @@ int main()
         transform2 transformB{};
         transformB.position = { 0.0f, 1.5f };
 
-        const localManifold2 manifold =
-            CollidePolygons( a, b, transformB );
+        const localManifold2 manifold = CollidePolygons( a, b, transformB );
 
         assert( manifold.pointCount == 2 );
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
@@ -101,8 +85,7 @@ int main()
         transformB.position = { 1.5f, 0.0f };
         transformB.rotation = rot2::FromRadians( 3.1415926535f * 0.5f );
 
-        const localManifold2 manifold =
-            CollidePolygons( a, b, transformB );
+        const localManifold2 manifold = CollidePolygons( a, b, transformB );
 
         assert( manifold.pointCount == 2 );
         assert( NearlyEqual( manifold.normal, { 1.0f, 0.0f } ) );
@@ -123,8 +106,7 @@ int main()
         transform2 transformB{};
         transformB.position = { 0.0f, 2.5f };
 
-        const localManifold2 manifold =
-            CollidePolygons( a, b, transformB );
+        const localManifold2 manifold = CollidePolygons( a, b, transformB );
 
         assert( manifold.pointCount == 2 );
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
@@ -144,8 +126,7 @@ int main()
         transformB.position = { 0.0f, 1.6f };
         transformB.rotation = rot2::FromRadians( 3.1415926535f * 0.25f );
 
-        const localManifold2 manifold =
-            CollidePolygons( a, b, transformB );
+        const localManifold2 manifold = CollidePolygons( a, b, transformB );
 
         assert( manifold.pointCount == 2 );
         assert( NearlyEqual( Length( manifold.normal ), 1.0f, 1e-4f ) );
@@ -162,11 +143,9 @@ int main()
 
         transform2 transformB{};
         transformB.position = { 1.1f, 1.1f };
-        transformB.rotation =
-            rot2::FromRadians( 0.25f * 3.14159265358979323846f );
+        transformB.rotation = rot2::FromRadians( 0.25f * 3.14159265358979323846f );
 
-        const localManifold2 manifold =
-            CollidePolygons( a, b, transformB );
+        const localManifold2 manifold = CollidePolygons( a, b, transformB );
 
         assert( manifold.pointCount == 2 );
         assert( manifold.points[0].id != manifold.points[1].id );

@@ -37,7 +37,6 @@ struct toiOutput2
 };
 
 // 두 moving convex shape가 처음 접촉하기 전까지의 최대 sweep fraction을 계산함.
-toiOutput2 TimeOfImpact(
-    const toiInput2& input );
+toiOutput2 TimeOfImpact( const toiInput2& input );
 
 } // namespace zonai

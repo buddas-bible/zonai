@@ -5,21 +5,14 @@
 
 using namespace zonai;
 
-bool NearlyEqual(
-    float a,
-    float b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( float a, float b, float epsilon = 1e-5f )
 {
     return std::fabs( a - b ) <= epsilon;
 }
 
-bool NearlyEqual(
-    const vec2& a,
-    const vec2& b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( const vec2& a, const vec2& b, float epsilon = 1e-5f )
 {
-    return NearlyEqual( a.x, b.x, epsilon ) &&
-        NearlyEqual( a.y, b.y, epsilon );
+    return NearlyEqual( a.x, b.x, epsilon ) && NearlyEqual( a.y, b.y, epsilon );
 }
 
 float SignedArea2( const polygon2& polygon )
@@ -52,11 +45,7 @@ int main()
 
     {
         // capsule은 2개의 core vertex와 서로 반대인 normal을 가져야 한다.
-        const polygon2 capsule = MakeCapsule(
-            { -1.0f, 0.0f },
-            { 1.0f, 0.0f },
-            0.5f
-        );
+        const polygon2 capsule = MakeCapsule( { -1.0f, 0.0f }, { 1.0f, 0.0f }, 0.5f );
 
         assert( capsule.vertexCount == 2 );
         assert( NearlyEqual( capsule.vertices[0], { -1.0f, 0.0f } ) );
@@ -69,11 +58,7 @@ int main()
 
     {
         // Box2D의 core-length invariant를 만족하는 작은 capsule도 정상 처리해야 함.
-        const polygon2 capsule = MakeCapsule(
-            { 0.0f, 0.0f },
-            { 1.0e-3f, 0.0f },
-            0.1f
-        );
+        const polygon2 capsule = MakeCapsule( { 0.0f, 0.0f }, { 1.0e-3f, 0.0f }, 0.1f );
 
         assert( capsule.vertexCount == 2 );
         assert( NearlyEqual( capsule.normals[0], { 0.0f, -1.0f } ) );
@@ -82,12 +67,7 @@ int main()
 
     {
         // CCW triangle의 centroid와 outward normal을 계산해야 한다.
-        const vec2 vertices[] =
-        {
-            { 0.0f, 0.0f },
-            { 2.0f, 0.0f },
-            { 0.0f, 2.0f }
-        };
+        const vec2 vertices[] = { { 0.0f, 0.0f }, { 2.0f, 0.0f }, { 0.0f, 2.0f } };
 
         const polygon2 polygon = MakePolygon( vertices );
 
@@ -101,12 +81,7 @@ int main()
 
     {
         // CW 입력은 CCW winding으로 교정해야 한다.
-        const vec2 vertices[] =
-        {
-            { 0.0f, 0.0f },
-            { 0.0f, 2.0f },
-            { 2.0f, 0.0f }
-        };
+        const vec2 vertices[] = { { 0.0f, 0.0f }, { 0.0f, 2.0f }, { 2.0f, 0.0f } };
 
         const polygon2 polygon = MakePolygon( vertices );
 
@@ -117,13 +92,7 @@ int main()
 
     {
         // 큰 world 좌표에서도 local 형상 면적과 centroid 정밀도를 잃지 않아야 함.
-        const vec2 vertices[] =
-        {
-            { 9999.0f,  9999.0f },
-            { 10001.0f, 9999.0f },
-            { 10001.0f, 10001.0f },
-            { 9999.0f,  10001.0f }
-        };
+        const vec2 vertices[] = { { 9999.0f, 9999.0f }, { 10001.0f, 9999.0f }, { 10001.0f, 10001.0f }, { 9999.0f, 10001.0f } };
 
         const polygon2 polygon = MakePolygon( vertices );
 

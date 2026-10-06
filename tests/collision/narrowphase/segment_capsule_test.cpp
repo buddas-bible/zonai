@@ -5,21 +5,14 @@
 
 using namespace zonai;
 
-bool NearlyEqual(
-    float a,
-    float b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( float a, float b, float epsilon = 1e-5f )
 {
     return std::fabs( a - b ) <= epsilon;
 }
 
-bool NearlyEqual(
-    const vec2& a,
-    const vec2& b,
-    float epsilon = 1e-5f )
+bool NearlyEqual( const vec2& a, const vec2& b, float epsilon = 1e-5f )
 {
-    return NearlyEqual( a.x, b.x, epsilon ) &&
-        NearlyEqual( a.y, b.y, epsilon );
+    return NearlyEqual( a.x, b.x, epsilon ) && NearlyEqual( a.y, b.y, epsilon );
 }
 
 int main()
@@ -36,8 +29,7 @@ int main()
         transform2 capsuleTransform{};
         capsuleTransform.position = { 0.0f, 0.6f };
 
-        const localManifold2 manifold =
-            CollideSegmentCapsule( segment, capsule, capsuleTransform );
+        const localManifold2 manifold = CollideSegmentCapsule( segment, capsule, capsuleTransform );
 
         assert( manifold.pointCount == 0 );
     }
@@ -54,8 +46,7 @@ int main()
         transform2 capsuleTransform{};
         capsuleTransform.position = { 0.0f, 0.5f };
 
-        const localManifold2 manifold =
-            CollideSegmentCapsule( segment, capsule, capsuleTransform );
+        const localManifold2 manifold = CollideSegmentCapsule( segment, capsule, capsuleTransform );
 
         assert( manifold.pointCount == 2 );
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
@@ -72,8 +63,7 @@ int main()
         capsule.center2 = { 2.5f, 0.0f };
         capsule.radius = 0.5f;
 
-        const localManifold2 manifold =
-            CollideSegmentCapsule( segment, capsule, {} );
+        const localManifold2 manifold = CollideSegmentCapsule( segment, capsule, {} );
 
         assert( manifold.pointCount == 1 );
         assert( NearlyEqual( manifold.normal, { 1.0f, 0.0f } ) );

@@ -14,7 +14,11 @@ using namespace zonai::sandbox;
 void checkDemoUi()
 {
     ImGui::CreateContext();
-    if( !initializeDemoUi() ) { std::fprintf( stderr, "Korean font initialization failed\n" ); std::exit( EXIT_FAILURE ); }
+    if( !initializeDemoUi() )
+    {
+        std::fprintf( stderr, "Korean font initialization failed\n" );
+        std::exit( EXIT_FAILURE );
+    }
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
     io.DisplaySize = { 1280.0f, 720.0f };
@@ -24,20 +28,35 @@ void checkDemoUi()
     io.Fonts->GetTexDataAsRGBA32( &pixels, &width, &height );
     io.Fonts->SetTexID( static_cast<ImTextureID>( 1 ) );
     for( const ImWchar codepoint : { 0xAC00, 0xD55C, 0xD7A3 } )
-    { if( !io.Fonts->Fonts[0]->IsGlyphInFont( codepoint ) ) { std::fprintf( stderr, "Korean glyph missing\n" ); std::exit( EXIT_FAILURE ); } }
+    {
+        if( !io.Fonts->Fonts[0]->IsGlyphInFont( codepoint ) )
+        {
+            std::fprintf( stderr, "Korean glyph missing\n" );
+            std::exit( EXIT_FAILURE );
+        }
+    }
     if( std::strcmp( ImGui::LocalizeGetMsg( ImGuiLocKey_TableReset ), "초기화" ) != 0 )
-    { std::fprintf( stderr, "ImGui common menu not localized\n" ); std::exit( EXIT_FAILURE ); }
+    {
+        std::fprintf( stderr, "ImGui common menu not localized\n" );
+        std::exit( EXIT_FAILURE );
+    }
     demoSession session{ createDemoView };
     for( int frame = 0; frame < 6; ++frame )
     {
         session.selectDemo( frame % 2 == 0 ? demoKind::playground : demoKind::distancePendulum );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
-        demoInput input{}; input.mousePressed = true; input.mouseHeld = true;
+        demoInput input{};
+        input.mousePressed = true;
+        input.mouseHeld = true;
         const auto body = model.getKind() == demoKind::playground ? model.getImpulseBody() : model.getPendulumBody();
         input.mousePosition = model.getWorld().GetBodyTransform( body ).position;
         session.handleInput( input, true );
-        if( !model.getWorld().IsValid( model.getMouseJoint() ) ) { std::fprintf( stderr, "smoke drag did not start\n" ); std::exit( EXIT_FAILURE ); }
+        if( !model.getWorld().IsValid( model.getMouseJoint() ) )
+        {
+            std::fprintf( stderr, "smoke drag did not start\n" );
+            std::exit( EXIT_FAILURE );
+        }
         ImGui::NewFrame();
         ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
         ImGui::SetNextWindowSize( { 1280.0f, 720.0f } );
@@ -54,8 +73,13 @@ void checkDemoUi()
         const int before = list->VtxBuffer.Size;
         debugDraw draw{ list, camera, ImGui::GetCursorScreenPos(), { 850.0f, 650.0f } };
         session.getDemo().draw( draw );
-        if( list->VtxBuffer.Size <= before ) { std::fprintf( stderr, "demo canvas drew no geometry\n" ); std::exit( EXIT_FAILURE ); }
-        ImGui::EndChild(); ImGui::End();
+        if( list->VtxBuffer.Size <= before )
+        {
+            std::fprintf( stderr, "demo canvas drew no geometry\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        ImGui::EndChild();
+        ImGui::End();
         ImGui::Render();
         session.reset();
     }
@@ -70,10 +94,17 @@ void checkDemoUi()
             auto view = createDemoView( setting < 3 ? demoKind::playground : demoKind::distancePendulum );
             for( int phase = 0; phase < 3; ++phase )
             {
-                if( phase == 1 ) { io.AddInputCharactersUTF8( upper ? "9000" : "-9000" ); }
-                if( phase == 2 ) { io.AddKeyEvent( ImGuiKey_Enter, true ); }
+                if( phase == 1 )
+                {
+                    io.AddInputCharactersUTF8( upper ? "9000" : "-9000" );
+                }
+                if( phase == 2 )
+                {
+                    io.AddKeyEvent( ImGuiKey_Enter, true );
+                }
                 ImGui::NewFrame();
-                ImGui::SetNextWindowPos( { 0.0f, 0.0f } ); ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+                ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
+                ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
                 ImGui::Begin( "Joint tuning input" );
                 ImGui::GetStateStorage()->SetInt( ImGui::GetID( "MouseControls" ), 1 );
                 ImGui::GetStateStorage()->SetInt( ImGui::GetID( "DistanceMotorSettings" ), 1 );
@@ -83,8 +114,12 @@ void checkDemoUi()
                     GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
                 }
                 view->drawControls();
-                ImGui::End(); ImGui::Render();
-                if( phase == 2 ) { io.AddKeyEvent( ImGuiKey_Enter, false ); }
+                ImGui::End();
+                ImGui::Render();
+                if( phase == 2 )
+                {
+                    io.AddKeyEvent( ImGuiKey_Enter, false );
+                }
             }
             const auto& tuning = static_cast<rigidBodyDemo&>( *view ).getMouseSettings();
             auto& model = static_cast<rigidBodyDemo&>( *view );
@@ -93,7 +128,10 @@ void checkDemoUi()
             const float limit = setting == 0 || setting == 3 ? 30.0f : setting == 2 ? 5000.0f : setting == 5 ? 2.5f : setting == 6 ? 4.0f : setting == 7 ? 5.0f : setting == 8 ? 50.0f : 2.0f;
             const float minimum = setting == 5 ? zonai::LINEAR_SLOP : setting == 6 ? 1.5f : setting == 7 ? -5.0f : 0.0f;
             if( value != ( upper ? limit : minimum ) || ( setting >= 5 && spring.minLength > spring.maxLength ) )
-            { std::fprintf( stderr, "manual tuning %s not clamped: %f\n", labels[setting], value ); std::exit( EXIT_FAILURE ); }
+            {
+                std::fprintf( stderr, "manual tuning %s not clamped: %f\n", labels[setting], value );
+                std::exit( EXIT_FAILURE );
+            }
         }
     }
     auto view = createDemoView( demoKind::distancePendulum );
@@ -101,26 +139,52 @@ void checkDemoUi()
     for( int frame = 0; frame < 4; ++frame )
     {
         ImGui::NewFrame();
-        ImGui::SetNextWindowPos( { 0.0f, 0.0f } ); ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+        ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
+        ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
         ImGui::Begin( "Spring actions" );
         // Checkbox/Button의 keyboard press는 ActivateId와 DownId가 함께 전달됨.
-        if( frame == 0 || frame == 2 ) { GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Distance spring" ); }
-        if( frame == 1 ) { GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Radial kick" ); }
-        view->drawControls(); ImGui::End(); ImGui::Render();
+        if( frame == 0 || frame == 2 )
+        {
+            GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Distance spring" );
+        }
+        if( frame == 1 )
+        {
+            GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Radial kick" );
+        }
+        view->drawControls();
+        ImGui::End();
+        ImGui::Render();
         const auto data = model.getWorld().getDistanceJointData( model.getPendulumJoint() );
-        if( data.enableSpring != ( frame < 2 ) ) { std::fprintf( stderr, "spring checkbox did not switch mode\n" ); std::exit( EXIT_FAILURE ); }
+        if( data.enableSpring != ( frame < 2 ) )
+        {
+            std::fprintf( stderr, "spring checkbox did not switch mode\n" );
+            std::exit( EXIT_FAILURE );
+        }
         if( frame == 1 && model.getWorld().GetBodyLinearVelocity( model.getPendulumBody() ).y != -2.0f )
-        { std::fprintf( stderr, "radial kick did not excite the distance axis\n" ); std::exit( EXIT_FAILURE ); }
+        {
+            std::fprintf( stderr, "radial kick did not excite the distance axis\n" );
+            std::exit( EXIT_FAILURE );
+        }
     }
     for( int frame = 0; frame < 4; ++frame )
     {
         ImGui::NewFrame();
-        ImGui::SetNextWindowPos( { 0.0f, 0.0f } ); ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+        ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
+        ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
         ImGui::Begin( "Limit actions" );
-        if( frame == 0 || frame == 2 ) { GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Distance limit" ); }
-        view->drawControls(); ImGui::End(); ImGui::Render();
+        if( frame == 0 || frame == 2 )
+        {
+            GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Distance limit" );
+        }
+        view->drawControls();
+        ImGui::End();
+        ImGui::Render();
         const auto data = model.getWorld().getDistanceJointData( model.getPendulumJoint() );
-        if( data.enableLimit != ( frame < 2 ) ) { std::fprintf( stderr, "limit checkbox did not switch mode\n" ); std::exit( EXIT_FAILURE ); }
+        if( data.enableLimit != ( frame < 2 ) )
+        {
+            std::fprintf( stderr, "limit checkbox did not switch mode\n" );
+            std::exit( EXIT_FAILURE );
+        }
     }
     for( int frame = 0; frame < 4; ++frame )
     {
@@ -153,22 +217,31 @@ void checkDemoUi()
         for( int frame = 0; frame < 3; ++frame )
         {
             ImGui::NewFrame();
-            ImGui::SetNextWindowPos( { 0.0f, 0.0f } ); ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+            ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
+            ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
             ImGui::Begin( "Inspector filter" );
             ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Collision mask" ), 1 );
             ImGui::GetStateStorage()->SetInt( ImGui::GetID( "ObjectCollisionOverrides" ), 1 );
-            if( frame == 0 ) { GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( label ); }
+            if( frame == 0 )
+            {
+                GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( label );
+            }
             if( frame == 1 && !GImGui->OpenPopupStack.empty() )
             {
                 auto* popup = GImGui->OpenPopupStack.back().Window;
                 GImGui->NavActivateId = GImGui->NavActivateDownId = popup->GetID( bitLabel );
             }
-            inspector->drawControls(); ImGui::End(); ImGui::Render();
+            inspector->drawControls();
+            ImGui::End();
+            ImGui::Render();
         }
         const auto filter = inspected.getWorld().GetShapeFilter( shape );
         const auto highBit = std::uint64_t{ 1 } << 63;
         if( field == 0 ? filter.categoryBits != ( highBit | 1 ) : filter.maskBits != ( ~highBit ) )
-        { std::fprintf( stderr, "inspector bit toggle failed: %s\n", label ); std::exit( EXIT_FAILURE ); }
+        {
+            std::fprintf( stderr, "inspector bit toggle failed: %s\n", label );
+            std::exit( EXIT_FAILURE );
+        }
         ImGui::ClosePopupToLevel( 0, true );
     }
     demoSession project{ createDemoView };
@@ -177,7 +250,10 @@ void checkDemoUi()
     {
         ImGui::NewFrame();
         ImGui::Begin( "Project controls" );
-        if( frame == 0 ) { GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Project collision matrix" ); }
+        if( frame == 0 )
+        {
+            GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Project collision matrix" );
+        }
         if( frame == 1 )
         {
             auto* modal = GImGui->OpenPopupStack.back().Window;
@@ -193,29 +269,46 @@ void checkDemoUi()
             for( auto* window : GImGui->Windows )
             {
                 if( std::strstr( window->Name, "MatrixGrid" ) != nullptr )
-                { GImGui->NavActivateId = GImGui->NavActivateDownId = ImHashStr( "##Pair0_63", 0, window->GetID( "CollisionPairs" ) ); }
+                {
+                    GImGui->NavActivateId = GImGui->NavActivateDownId = ImHashStr( "##Pair0_63", 0, window->GetID( "CollisionPairs" ) );
+                }
             }
         }
-        if( frame == 4 ) { collisionUi.visibleLayers = 1; }
-        drawProjectCollisionSettings( project, collisionUi ); ImGui::End(); ImGui::Render();
+        if( frame == 4 )
+        {
+            collisionUi.visibleLayers = 1;
+        }
+        drawProjectCollisionSettings( project, collisionUi );
+        ImGui::End();
+        ImGui::Render();
         for( auto* window : GImGui->Windows )
         {
             if( std::strstr( window->Name, "MatrixGrid" ) != nullptr && window->ContentSize.x > 640.0f )
-            { std::fprintf( stderr, "collision editor expands all 64 layers\n" ); std::exit( EXIT_FAILURE ); }
+            {
+                std::fprintf( stderr, "collision editor expands all 64 layers\n" );
+                std::exit( EXIT_FAILURE );
+            }
         }
         if( frame == 2 )
         {
             if( collisionUi.visibleLayers != ( 1 | ( std::uint64_t{ 1 } << 63 ) ) )
-            { std::fprintf( stderr, "matrix layer selection failed\n" ); std::exit( EXIT_FAILURE ); }
+            {
+                std::fprintf( stderr, "matrix layer selection failed\n" );
+                std::exit( EXIT_FAILURE );
+            }
             ImGui::ClosePopupToLevel( 1, true );
         }
     }
     if( project.getCollisionMatrix().allows( 1, std::uint64_t{ 1 } << 63 ) || project.getCollisionMatrix().allows( std::uint64_t{ 1 } << 63, 1 ) )
-    { std::fprintf( stderr, "project matrix UI did not edit/preserve symmetric pair\n" ); std::exit( EXIT_FAILURE ); }
+    {
+        std::fprintf( stderr, "project matrix UI did not edit/preserve symmetric pair\n" );
+        std::exit( EXIT_FAILURE );
+    }
     collisionUi.visibleLayers = 0xFF;
     for( int frame = 0; frame < 3; ++frame )
     {
-        ImGui::NewFrame(); ImGui::Begin( "Project controls" );
+        ImGui::NewFrame();
+        ImGui::Begin( "Project controls" );
         if( frame == 0 )
         {
             auto* modal = GImGui->OpenPopupStack.back().Window;
@@ -226,23 +319,37 @@ void checkDemoUi()
             auto* popup = GImGui->OpenPopupStack.back().Window;
             GImGui->NavActivateId = GImGui->NavActivateDownId = popup->GetID( "레이어 64##VisibleLayers" );
         }
-        drawProjectCollisionSettings( project, collisionUi ); ImGui::End(); ImGui::Render();
+        drawProjectCollisionSettings( project, collisionUi );
+        ImGui::End();
+        ImGui::Render();
     }
     bool checkedEightLayers = false;
     for( auto* window : GImGui->Windows )
     {
-        if( std::strstr( window->Name, "MatrixGrid" ) == nullptr ) { continue; }
+        if( std::strstr( window->Name, "MatrixGrid" ) == nullptr ) continue;
+
         const auto* table = GImGui->Tables.GetByKey( window->GetID( "CollisionPairs" ) );
-        if( table == nullptr || table->ColumnsCount != 9 ) { continue; }
+        if( table == nullptr || table->ColumnsCount != 9 ) continue;
+
         checkedEightLayers = true;
         for( int column = 1; column < 9; ++column )
         {
             if( table->Columns[column].WorkMinX + ImGui::GetFrameHeight() > table->Columns[column].ClipRect.Max.x )
-            { std::fprintf( stderr, "eight-layer cell clipped: %d / %.1f / %.1f\n", column, table->Columns[column].WidthGiven, table->Columns[column].ClipRect.GetWidth() ); std::exit( EXIT_FAILURE ); }
+            {
+                std::fprintf( stderr, "eight-layer cell clipped: %d / %.1f / %.1f\n", column, table->Columns[column].WidthGiven, table->Columns[column].ClipRect.GetWidth() );
+                std::exit( EXIT_FAILURE );
+            }
         }
     }
-    if( !checkedEightLayers ) { std::fprintf( stderr, "eight-layer table not drawn\n" ); std::exit( EXIT_FAILURE ); }
+    if( !checkedEightLayers )
+    {
+        std::fprintf( stderr, "eight-layer table not drawn\n" );
+        std::exit( EXIT_FAILURE );
+    }
     if( collisionUi.visibleLayers != 0xFF )
-    { std::fprintf( stderr, "collision editor exceeded eight visible layers\n" ); std::exit( EXIT_FAILURE ); }
+    {
+        std::fprintf( stderr, "collision editor exceeded eight visible layers\n" );
+        std::exit( EXIT_FAILURE );
+    }
     ImGui::DestroyContext();
 }

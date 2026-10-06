@@ -16,6 +16,7 @@ struct vec2
     {
         x += rhs.x;
         y += rhs.y;
+
         return *this;
     }
 
@@ -23,6 +24,7 @@ struct vec2
     {
         x -= rhs.x;
         y -= rhs.y;
+
         return *this;
     }
 
@@ -30,6 +32,7 @@ struct vec2
     {
         x *= scalar;
         y *= scalar;
+
         return *this;
     }
 
@@ -41,6 +44,7 @@ struct vec2
 
         x *= inverseScalar;
         y *= inverseScalar;
+
         return *this;
     }
 };
@@ -48,12 +52,14 @@ struct vec2
 inline vec2 operator+( vec2 lhs, const vec2& rhs )
 {
     lhs += rhs;
+
     return lhs;
 }
 
 inline vec2 operator-( vec2 lhs, const vec2& rhs )
 {
     lhs -= rhs;
+
     return lhs;
 }
 
@@ -65,26 +71,27 @@ inline vec2 operator-( const vec2& value )
 inline vec2 operator*( vec2 value, float scalar )
 {
     value *= scalar;
+
     return value;
 }
 
 inline vec2 operator*( float scalar, vec2 value )
 {
     value *= scalar;
+
     return value;
 }
 
 inline vec2 operator/( vec2 value, float scalar )
 {
     value /= scalar;
+
     return value;
 }
 
 inline bool IsFinite( const vec2& value )
 {
-    return
-        std::isfinite( value.x ) &&
-        std::isfinite( value.y );
+    return std::isfinite( value.x ) && std::isfinite( value.y );
 }
 
 inline float Dot( const vec2& a, const vec2& b )
@@ -100,21 +107,13 @@ inline float Cross( const vec2& a, const vec2& b )
 // z scalar x XY vector.
 inline vec2 Cross( float scalar, const vec2& vector )
 {
-    return
-    {
-        -scalar * vector.y,
-         scalar * vector.x
-    };
+    return { -scalar * vector.y, scalar * vector.x };
 }
 
 // XY vector x z scalar.
 inline vec2 Cross( const vec2& vector, float scalar )
 {
-    return
-    {
-         scalar * vector.y,
-        -scalar * vector.x
-    };
+    return { scalar * vector.y, -scalar * vector.x };
 }
 
 inline float LengthSquared( const vec2& value )
@@ -129,17 +128,11 @@ inline float Length( const vec2& value )
 
 inline vec2 Normalize( const vec2& value )
 {
-    const float lengthSquared =
-        LengthSquared( value );
+    const float lengthSquared = LengthSquared( value );
 
-    if( lengthSquared <=
-        1000.0f * std::numeric_limits<float>::min() )
-    {
-        return {};
-    }
+    if( lengthSquared <= 1000.0f * std::numeric_limits<float>::min() ) return {};
 
-    const float inverseLength =
-        1.0f / std::sqrt( lengthSquared );
+    const float inverseLength = 1.0f / std::sqrt( lengthSquared );
 
     return value * inverseLength;
 }

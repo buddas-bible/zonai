@@ -72,8 +72,7 @@ int main()
 
         for( std::size_t i = 0; i < TEST_SIZE; ++i )
         {
-            const std::uint64_t key =
-                static_cast<std::uint64_t>( i * 7 + 13 );
+            const std::uint64_t key = static_cast<std::uint64_t>( i * 7 + 13 );
 
             keys.push_back( key );
             assert( stressSet.Add( key ) == false );
@@ -115,8 +114,7 @@ int main()
             state = state * 1664525u + 1013904223u;
 
             // 작은 key pool을 반복 사용해서 add/remove/contains가 실제로 같은 key에 교차 적용되게 함.
-            const std::uint64_t key =
-                1ull + static_cast<std::uint64_t>( state % 2048u );
+            const std::uint64_t key = 1ull + static_cast<std::uint64_t>( state % 2048u );
 
             // key 0은 sentinel이므로 생성식 자체가 항상 non-zero여야 함.
             assert( key != 0 );
@@ -128,28 +126,26 @@ int main()
             case 0:
             {
                 const bool customFound = customSet.Add( key );
-                const bool referenceFound =
-                    !referenceSet.insert( key ).second;
+                const bool referenceFound = !referenceSet.insert( key ).second;
 
                 assert( customFound == referenceFound );
+
                 break;
             }
 
             case 1:
             {
                 const bool customRemoved = customSet.Remove( key );
-                const bool referenceRemoved =
-                    referenceSet.erase( key ) != 0;
+                const bool referenceRemoved = referenceSet.erase( key ) != 0;
 
                 assert( customRemoved == referenceRemoved );
+
                 break;
             }
 
             default:
-                assert(
-                    customSet.Contains( key ) ==
-                    referenceSet.contains( key )
-                );
+                assert( customSet.Contains( key ) == referenceSet.contains( key ) );
+
                 break;
             }
         }
@@ -173,12 +169,11 @@ int main()
         {
             for( std::int32_t j = i + 1; j < N; ++j )
             {
-                const std::uint64_t key =
-                    ( static_cast<std::uint64_t>( i ) << 32 ) |
-                    static_cast<std::uint32_t>( j );
+                const std::uint64_t key = ( static_cast<std::uint64_t>( i ) << 32 ) | static_cast<std::uint32_t>( j );
 
                 assert( key != 0 );
                 assert( pairSet.Add( key ) == false );
+
                 ++expectedCount;
             }
         }
@@ -189,9 +184,7 @@ int main()
         {
             for( std::int32_t j = i + 1; j < N; ++j )
             {
-                const std::uint64_t key =
-                    ( static_cast<std::uint64_t>( i ) << 32 ) |
-                    static_cast<std::uint32_t>( j );
+                const std::uint64_t key = ( static_cast<std::uint64_t>( i ) << 32 ) | static_cast<std::uint32_t>( j );
 
                 assert( pairSet.Contains( key ) );
             }
