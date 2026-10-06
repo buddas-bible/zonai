@@ -500,3 +500,15 @@ add_test(NAME distanceJointTests COMMAND distanceJointTests)
 add_executable(distanceJointWorldTests dynamics/distance_joint_world_test.cpp)
 target_link_libraries(distanceJointWorldTests PRIVATE zonai::zonai)
 add_test(NAME distanceJointWorldTests COMMAND distanceJointWorldTests)
+
+add_executable(sandboxDemoTests sandbox/demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp")
+target_include_directories(sandboxDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+target_link_libraries(sandboxDemoTests PRIVATE zonai::zonai)
+add_test(NAME sandboxDemoTests COMMAND sandboxDemoTests)
+
+# Windows Sandbox 구성에서는 실제 ImGui view도 headless frame으로 검사함.
+if(TARGET imgui)
+    target_sources(sandboxDemoTests PRIVATE sandbox/demo_ui_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemoUi.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugCamera.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugDraw.cpp")
+    target_link_libraries(sandboxDemoTests PRIVATE imgui)
+    target_compile_definitions(sandboxDemoTests PRIVATE ZONAI_TEST_SANDBOX_UI)
+endif()
