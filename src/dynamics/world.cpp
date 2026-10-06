@@ -1168,7 +1168,8 @@ void world::SetSleepingEnabled( bool enabled )
     // World sleep을 끄는 순간 모든 non-static body를 다시 solver에 참여시킴.
     for( body& body : bodies_ )
     {
-        if( body.bodyId == body::NULL_INDEX || body.type == bodyType::Static ) continue;
+        if( body.bodyId == body::NULL_INDEX || body.type == bodyType::Static )
+            continue;
 
         body.awake = true;
         body.sleepTime = 0.0f;
