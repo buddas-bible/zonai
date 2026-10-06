@@ -7,6 +7,8 @@ namespace zonai
 {
 // A는 수명/graph 연결을 위한 Static Body, target은 world 좌표임.
 // B의 클릭 위치를 origin 기준 local anchor로 저장하고 COM 기준으로 풀어냄.
+#pragma region Definition
+
 struct mouseJointDef
 {
     bodyId bodyA{};
@@ -16,6 +18,10 @@ struct mouseJointDef
     float dampingRatio = 0.7f;
     float maxForce = 1000.0f;
 };
+
+#pragma endregion
+
+#pragma region Data
 
 struct mouseJointData
 {
@@ -28,4 +34,6 @@ struct mouseJointData
     float dampingRatio = 0.0f;
     float maxForce = 0.0f;
 };
+
+#pragma endregion
 } // namespace zonai
