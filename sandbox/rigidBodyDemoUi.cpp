@@ -133,7 +133,7 @@ bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, 
 
 rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 {
-    selectedShapeIndex_ = kind == demoKind::playground ? 2 : 1;
+    selectedShapeIndex_ = kind == demoKind::playground || kind == demoKind::motorCar ? 2 : 1;
 }
 
 void rigidBodyDemoUi::drawControls()
@@ -309,9 +309,11 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         }
     }
 
-    if( getWorld().IsValid( getWheelJoint() ) )
+    for( const jointId id : { getWheelJoint(), getCarJoints()[0], getCarJoints()[1] } )
     {
-        const wheelJointData joint = getWorld().getWheelJointData( getWheelJoint() );
+        if( !getWorld().IsValid( id ) ) continue;
+
+        const wheelJointData joint = getWorld().getWheelJointData( id );
         constexpr ImU32 AXIS_COLOR = IM_COL32( 100, 235, 220, 255 );
         constexpr ImU32 WHEEL_COLOR = IM_COL32( 230, 170, 255, 255 );
         draw.DrawSegment( { joint.anchorA - joint.axis, joint.anchorA + joint.axis }, IM_COL32( 160, 160, 160, 255 ) );
@@ -627,6 +629,8 @@ void rigidBodyDemoUi::drawExperimentControls()
 
     if( getKind() == demoKind::wheelSuspension && ( !getWorld().IsValid( getWheelJoint() ) || !getWorld().IsValid( getImpulseBody() ) ) ) return;
 
+    if( getKind() == demoKind::motorCar && ( !getWorld().IsValid( getImpulseBody() ) || !getWorld().IsValid( getCarJoints()[0] ) ) ) return;
+
     if( getKind() == demoKind::playground && ( !getWorld().IsValid( getImpulseBody() ) || !getWorld().IsValid( getTorqueBody() ) ) ) return;
 
     if( getKind() == demoKind::distancePendulum )
@@ -889,6 +893,85 @@ void rigidBodyDemoUi::drawExperimentControls()
         if( ImGui::Button( "바퀴 회전시키기###Spin wheel", ImVec2( -1.0f, 0.0f ) ) )
         {
             getWorld().ApplyAngularImpulse( getImpulseBody(), getWorld().GetBodyRotationalInertia( getImpulseBody() ) * 3.0f );
+        }
+        ImGui::Spacing();
+    }
+    else if( getKind() == demoKind::motorCar )
+    {
+        ImGui::TextUnformatted( "자동차 주행 관찰" );
+        ImGui::Text( "차체 수평 속도: %.2f m/s", getWorld().GetBodyLinearVelocity( getImpulseBody() ).x );
+        ImGui::TextWrapped( "캔버스 위 A/D로 주행하고 스페이스를 유지하면 제동합니다. 키를 놓으면 모터를 끄고 관성으로 구릅니다. 양쪽 키를 함께 누르면 자유 주행하며 제동이 주행보다 우선합니다." );
+        if( ImGui::TreeNode( "구동 모터 설정###CarMotorSettings" ) )
+        {
+            float speed = getCarMotorSpeed(), torque = getCarMaxMotorTorque();
+            bool changed = false;
+            if( ImGui::SliderFloat( "목표 속도 크기###Car motor speed", &speed, 0.0f, 20.0f, "%.2f rad/s", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                speed = std::clamp( speed, 0.0f, 20.0f );
+                changed = true;
+            }
+            if( ImGui::SliderFloat( "최대 구동·제동 토크###Car motor torque", &torque, 0.0f, 20.0f, "%.2f N·m", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                torque = std::clamp( torque, 0.0f, 20.0f );
+                changed = true;
+            }
+            if( changed ) setCarMotorSettings( speed, torque );
+
+            ImGui::TextWrapped( "값은 양쪽 바퀴에 같은 한도로 적용합니다. 오른쪽 주행은 시계 방향 회전입니다. 토크 0은 구동과 제동을 끕니다. 바퀴가 미끄러지면 회전 속도만으로 차체 속도를 예측할 수 없습니다. 인스펙터에서 타이어·바닥의 마찰을 비교해 보세요." );
+            ImGui::TreePop();
+        }
+        if( ImGui::TreeNode( "서스펜션 설정###CarSuspensionSettings" ) )
+        {
+            const auto joint = getWorld().getWheelJointData( getCarJoints()[0] );
+            bool spring = joint.enableSpring, limit = joint.enableLimit;
+            float hertz = joint.hertz, damping = joint.dampingRatio;
+            float lower = joint.lowerTranslation, upper = joint.upperTranslation;
+            bool springChanged = ImGui::Checkbox( "스프링 사용###Car spring", &spring );
+            if( ImGui::SliderFloat( "스프링 주파수###Car hertz", &hertz, 0.0f, 10.0f, "%.2f Hz", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                hertz = std::clamp( hertz, 0.0f, 10.0f );
+                springChanged = true;
+            }
+            if( ImGui::SliderFloat( "감쇠 비율###Car damping", &damping, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                damping = std::clamp( damping, 0.0f, 2.0f );
+                springChanged = true;
+            }
+            bool limitChanged = ImGui::Checkbox( "이동 제한 사용###Car limit", &limit );
+            if( ImGui::SliderFloat( "최소 변위###Car lower", &lower, -0.5f, upper, "%.2f m", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                lower = std::clamp( lower, -0.5f, upper );
+                limitChanged = true;
+            }
+            if( ImGui::SliderFloat( "최대 변위###Car upper", &upper, lower, 0.5f, "%.2f m", ImGuiSliderFlags_AlwaysClamp ) )
+            {
+                upper = std::clamp( upper, lower, 0.5f );
+                limitChanged = true;
+            }
+            for( const jointId id : getCarJoints() )
+            {
+                if( !getWorld().IsValid( id ) ) continue;
+
+                if( springChanged ) getWorld().setWheelJointSpring( id, spring, hertz, damping );
+
+                if( limitChanged ) getWorld().setWheelJointLimit( id, limit, lower, upper );
+            }
+            ImGui::TextWrapped( "양쪽 바퀴를 함께 조절합니다. 축과 이동 경계는 차체와 함께 회전합니다. 스프링과 제한을 모두 끄면 차체 하중을 지지하지 못합니다. 낮은 경사면에서 변위와 반력이 어떻게 달라지는지 비교하세요." );
+            ImGui::TreePop();
+        }
+        if( ImGui::TreeNode( "바퀴 반력 관찰###CarWheelObservations" ) )
+        {
+            int wheel = 0;
+            for( const jointId id : getCarJoints() )
+            {
+                if( !getWorld().IsValid( id ) ) continue;
+
+                const auto joint = getWorld().getWheelJointData( id );
+                const float speed = getWorld().GetBodyAngularVelocity( joint.bodyB ) - getWorld().GetBodyAngularVelocity( joint.bodyA );
+                ImGui::Text( "%s 바퀴: %.2f rad/s / %.2f N·m", wheel++ == 0 ? "왼쪽" : "오른쪽", speed, joint.motorTorque );
+                ImGui::Text( "변위 %.3f m / 스프링 %.2f N / 제한 %.2f N", joint.currentTranslation, joint.springForce, joint.limitForce );
+            }
+            ImGui::TreePop();
         }
         ImGui::Spacing();
     }

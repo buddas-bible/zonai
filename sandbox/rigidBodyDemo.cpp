@@ -25,11 +25,15 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createRevoluteHinge();
     }
+    else if( kind == demoKind::wheelSuspension )
+    {
+        createWheelSuspension();
+    }
     else
     {
-        assert( kind == demoKind::wheelSuspension );
+        assert( kind == demoKind::motorCar );
 
-        createWheelSuspension();
+        createMotorCar();
     }
     refreshContacts();
 }
@@ -40,7 +44,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
     const float direction = static_cast<float>( rightHeld_ ) - static_cast<float>( leftHeld_ );
 
     // 누르고 있는 이동 입력은 매 physics step에 힘으로 적용함. 입력을 취소해도 현재 물리 속도는 유지함.
-    if( direction != 0.0f && world_.IsValid( target ) )
+    if( kind_ != demoKind::motorCar && direction != 0.0f && world_.IsValid( target ) )
     {
         world_.ApplyForceToCenter( target, { direction * world_.GetBodyMass( target ) * 5.0f, 0.0f } );
     }
@@ -59,6 +63,8 @@ void rigidBodyDemo::handleInput( const demoInput& input )
 
     leftHeld_ = input.left;
     rightHeld_ = input.right;
+    brakeHeld_ = input.brake;
+    updateCarMotors();
     if( !world_.IsValid( mouseJoint_ ) )
     {
         mouseJoint_ = {};
@@ -88,11 +94,11 @@ void rigidBodyDemo::handleInput( const demoInput& input )
     const float mass = world_.IsValid( target ) ? world_.GetBodyMass( target ) : 0.0f;
 
     // 한 번 누른 입력은 임펄스로 적용함. 누르고 있는 입력의 힘과 구분함.
-    if( input.jumpPressed && world_.IsValid( target ) )
+    if( kind_ != demoKind::motorCar && input.jumpPressed && world_.IsValid( target ) )
     {
         world_.ApplyLinearImpulseToCenter( target, kind_ == demoKind::distancePendulum ? vec2{ mass * 2.0f, 0.0f } : vec2{ 0.0f, mass * 5.0f } );
     }
-    if( input.spinPressed && world_.IsValid( torqueBody_ ) )
+    if( kind_ != demoKind::motorCar && input.spinPressed && world_.IsValid( torqueBody_ ) )
     {
         world_.ApplyAngularImpulse( torqueBody_, world_.GetBodyRotationalInertia( torqueBody_ ) * 3.0f );
     }
@@ -107,6 +113,8 @@ void rigidBodyDemo::cancelInput()
 {
     leftHeld_ = false;
     rightHeld_ = false;
+    brakeHeld_ = false;
+    updateCarMotors();
     // UI 조작, 포커스 상실, 데모 교체에서 마우스 제약을 제거함. 물체 삭제로 이미 사라졌을 수도 있음.
     if( world_.IsValid( mouseJoint_ ) )
     {
@@ -137,6 +145,17 @@ void rigidBodyDemo::setMouseSettings( float hertz, float dampingRatio, float max
     {
         world_.setMouseJointTuning( mouseJoint_, hertz, dampingRatio, maxForce );
     }
+}
+
+void rigidBodyDemo::setCarMotorSettings( float speed, float maxTorque )
+{
+    assert( std::isfinite( speed ) && speed >= 0.0f && std::isfinite( maxTorque ) && maxTorque >= 0.0f );
+
+    if( carMotorSpeed_ == speed && carMaxMotorTorque_ == maxTorque ) return;
+
+    carMotorSpeed_ = speed;
+    carMaxMotorTorque_ = maxTorque;
+    updateCarMotors();
 }
 
 #pragma endregion Settings
@@ -275,7 +294,63 @@ void rigidBodyDemo::createWheelSuspension()
     wheelJoint_ = world_.createWheelJoint( joint );
 }
 
+void rigidBodyDemo::createMotorCar()
+{
+    const bodyId ground = world_.CreateBody( bodyType::Static, { { 0.0f, -0.5f }, {} } );
+    const shapeId groundShape = world_.CreateShape( ground, MakeBox( { 25.0f, 0.5f } ) );
+    world_.SetShapeFriction( groundShape, 0.9f );
+    shapes_.push_back( { ground, groundShape, "주행 바닥 [정적]" } );
+    const bodyId ramp = world_.CreateBody( bodyType::Static, { { 10.0f, 0.24f }, rot2::FromRadians( 0.12f ) } );
+    const shapeId rampShape = world_.CreateShape( ramp, MakeBox( { 3.0f, 0.12f } ) );
+    world_.SetShapeFriction( rampShape, 0.9f );
+    shapes_.push_back( { ramp, rampShape, "낮은 경사면 [정적]" } );
+
+    impulseBody_ = world_.CreateBody( bodyType::Dynamic, { { 0.0f, 1.1f }, {} } );
+    const shapeId chassisShape = world_.CreateShape( impulseBody_, MakeBox( { 1.3f, 0.22f } ), {}, 2.0f );
+    shapes_.push_back( { impulseBody_, chassisShape, "차체 [동적]" } );
+    for( std::size_t i = 0; i < carJoints_.size(); ++i )
+    {
+        const float x = i == 0 ? -0.9f : 0.9f;
+        const bodyId wheel = world_.CreateBody( bodyType::Dynamic, { { x, 0.45f }, {} } );
+        const shapeId wheelShape = world_.CreateShape( wheel, circle2{ {}, 0.35f } );
+        world_.SetShapeFriction( wheelShape, 0.9f );
+        shapes_.push_back( { wheel, wheelShape, i == 0 ? "왼쪽 바퀴 [구동]" : "오른쪽 바퀴 [구동]" } );
+
+        // A의 로컬 위쪽 축을 따라 서스펜션이 움직임. 연결된 차체-바퀴 충돌은 Joint가 제외함.
+        wheelJointDef joint{};
+        joint.bodyA = impulseBody_;
+        joint.bodyB = wheel;
+        joint.localAnchorA = { x, -0.45f };
+        joint.hertz = 4.0f;
+        joint.enableLimit = true;
+        joint.lowerTranslation = -0.25f;
+        joint.upperTranslation = 0.25f;
+        carJoints_[i] = world_.createWheelJoint( joint );
+    }
+    updateCarMotors();
+}
+
 #pragma endregion SceneSetup
+
+#pragma region CarDrive
+
+void rigidBodyDemo::updateCarMotors()
+{
+    if( kind_ != demoKind::motorCar ) return;
+
+    const float direction = static_cast<float>( rightHeld_ ) - static_cast<float>( leftHeld_ );
+    // 바닥에서 오른쪽으로 구르려면 시계 방향(-w)이 필요함. 제동은 목표 상대속도 0임.
+    const float speed = brakeHeld_ ? 0.0f : -direction * carMotorSpeed_;
+    for( const jointId id : carJoints_ )
+    {
+        if( world_.IsValid( id ) )
+        {
+            world_.setWheelJointMotor( id, brakeHeld_ || direction != 0.0f, speed, carMaxMotorTorque_ );
+        }
+    }
+}
+
+#pragma endregion CarDrive
 
 #pragma region MouseDrag
 

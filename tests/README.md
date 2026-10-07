@@ -24,3 +24,5 @@ Distance spring 회귀는 기존 두 Distance target과 Sandbox target에 포함
 Distance limit도 같은 세 target에 포함한다. Speculative boundary crossing, unilateral 부호/clamp, warm sum, rigid/equal-range 우선순위, 두 limit의 중력·spring 평형, cache/wake/no-op와 substep 1/4를 검사한다. UI text 입력은 min/max 순서를 유지하며 Reset과 limit checkbox를 확인한다. [Limit 검증 범위](../docs/distance-limit.md)를 따른다.
 
 Wheel 두 target은 회전하는 축의 d+r_a Jacobian·현재 A/B 회전·warm 반작용, 축의 자유 이동/회전·물리 스프링·중력 반력과 World 수명/cache를 검사한다. 이동 제한은 양쪽 부호·예측 경계·안쪽 복귀·같은 경계·스프링/수직 제약의 최신 속도·별도 반력·warm/store/cache/no-op/wake와 substep 1/4를 검사한다. 모터는 상대 속도·각운동량/반작용·토크×h·누적 clamp·제동·중심 밖 최신 속도·warm/cache·Kinematic·substep 1/4를 검사한다. Sandbox는 키/Mouse/Reset과 실제 ImGui 접기·toggle·버튼·Hz/감쇠·최소/최대 변위·모터 속도/토크 숫자 clamp를 확인한다. [기본 Wheel](../docs/wheel-joint.md) [이동 제한](../docs/wheel-limit.md) 및 [모터 검증 범위](../docs/wheel-motor.md)를 따른다.
+
+자동차 회귀는 같은 `sandboxDemoTests`에 포함한다. 두 Wheel의 초기 설정·실제 접촉 주행/역회전/제동·토크 0·취소/Pause/Mouse/Reset·활성 설정 변경·낮은 경사면/착지를 검사한다. ImGui headless는 자동차 전환/drawing·접힌 설정·양쪽 spring/limit toggle과 속도/토크/Hz/감쇠/변위 직접 입력 clamp를 실행한다. [자동차 검증 범위](../docs/motor-car.md)를 따른다.

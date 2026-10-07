@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <vector>
 
 #include "demo.h"
@@ -31,6 +32,7 @@ public:
 #pragma region Settings
     void setCollisionMatrix( const collisionMatrix& matrix ) override;
     void setMouseSettings( float hertz, float dampingRatio, float maxForce );
+    void setCarMotorSettings( float speed, float maxTorque );
 #pragma endregion Settings
 
 #pragma region Contacts
@@ -61,6 +63,12 @@ public:
 
     [[nodiscard]] jointId getWheelJoint() const noexcept { return wheelJoint_; }
 
+    [[nodiscard]] std::span<const jointId> getCarJoints() const noexcept { return carJoints_; }
+
+    [[nodiscard]] float getCarMotorSpeed() const noexcept { return carMotorSpeed_; }
+
+    [[nodiscard]] float getCarMaxMotorTorque() const noexcept { return carMaxMotorTorque_; }
+
     [[nodiscard]] jointId getMouseJoint() const noexcept { return mouseJoint_; }
 
     [[nodiscard]] const mouseJointDef& getMouseSettings() const noexcept { return mouseSettings_; }
@@ -73,7 +81,12 @@ private:
     void createPendulum();
     void createRevoluteHinge();
     void createWheelSuspension();
+    void createMotorCar();
 #pragma endregion SceneSetup
+
+#pragma region CarDrive
+    void updateCarMotors();
+#pragma endregion CarDrive
 
 #pragma region MouseDrag
     void startMouseDrag( vec2 point );
@@ -91,12 +104,16 @@ private:
     jointId pendulumJoint_{};
     jointId revoluteJoint_{};
     jointId wheelJoint_{};
+    std::array<jointId, 2> carJoints_{};
+    float carMotorSpeed_ = 8.0f; // 주행 목표의 크기 (rad/s). 방향은 A/D 입력이 결정함.
+    float carMaxMotorTorque_ = 5.0f; // 주행과 제동의 토크 한도 (N*m).
 
     jointId mouseJoint_{}; // 드래그 중인 마우스 조인트
     mouseJointDef mouseSettings_{};
 
     bool leftHeld_ = false; // 누르고 있는 이동 입력
     bool rightHeld_ = false;
+    bool brakeHeld_ = false;
 #pragma endregion Data
 };
 

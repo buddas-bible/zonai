@@ -325,6 +325,7 @@ int main()
             input.right = ImGui::IsKeyDown( ImGuiKey_D );
             input.jumpPressed = ImGui::IsKeyPressed( ImGuiKey_Space, false );
             input.spinPressed = ImGui::IsKeyPressed( ImGuiKey_S, false );
+            input.brake = ImGui::IsKeyDown( ImGuiKey_Space );
         }
         session.handleInput( input, inputEnabled );
         if( stepRequested )

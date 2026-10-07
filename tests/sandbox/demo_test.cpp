@@ -50,7 +50,7 @@ std::unique_ptr<demo> createCounter( demoKind )
 
 int main()
 {
-    check( getDemoEntries().size() == 4, "four demo entries" );
+    check( getDemoEntries().size() == 5, "five independently selectable demo entries" );
     demoSession session{ createRigidBodyDemo };
     auto& playground = static_cast<rigidBodyDemo&>( session.getDemo() );
     check( playground.getWorld().GetBodyCount() == 6 && playground.getWorld().getJointCount() == 0, "playground separated from pendulum" );
@@ -333,6 +333,119 @@ int main()
     auto& resetMotor = static_cast<rigidBodyDemo&>( session.getDemo() );
     const auto restoredMotor = resetMotor.getWorld().getWheelJointData( resetMotor.getWheelJoint() );
     check( !restoredMotor.enableMotor && restoredMotor.motorSpeed == 3.0f && restoredMotor.maxMotorTorque == 1.0f && restoredMotor.motorTorque == 0.0f, "reset restores disabled motor and clears torque" );
+
+    session.selectDemo( demoKind::motorCar );
+    auto& car = static_cast<rigidBodyDemo&>( session.getDemo() );
+    const auto chassis = car.getImpulseBody();
+    check( car.getWorld().GetBodyCount() == 5 && car.getWorld().getJointCount() == 2 && car.getShapes().size() == 5, "car composes chassis, two wheels, ground and ramp" );
+    check( car.getCarMotorSpeed() == 8.0f && car.getCarMaxMotorTorque() == 5.0f, "car has reproducible motor settings" );
+    for( const auto id : car.getCarJoints() )
+    {
+        const auto data = car.getWorld().getWheelJointData( id );
+        check( data.bodyA == chassis && data.enableSpring && data.hertz == 4.0f && data.dampingRatio == 0.7f && data.enableLimit && data.lowerTranslation == -0.25f && data.upperTranslation == 0.25f && !data.enableMotor && data.maxMotorTorque == 5.0f, "both wheels share sprung, limited, initially coasting chassis" );
+    }
+    for( int i = 0; i < 120; ++i ) session.stepOnce( 4 );
+    const float startX = car.getWorld().GetBodyTransform( chassis ).position.x;
+    input = {};
+    input.right = true;
+    session.handleInput( input, true );
+    for( int i = 0; i < 120; ++i )
+    {
+        session.stepOnce( 4 );
+        for( const auto id : car.getCarJoints() )
+        {
+            const auto data = car.getWorld().getWheelJointData( id );
+            check( data.enableMotor && data.motorSpeed == -8.0f && std::abs( data.motorTorque ) <= 5.0001f && std::abs( data.lateralError ) < 0.04f && std::abs( data.currentTranslation ) < 0.3f, "clockwise wheels propel right while torque and suspension stay bounded" );
+        }
+    }
+    const float forwardX = car.getWorld().GetBodyTransform( chassis ).position.x;
+    check( forwardX > startX + 2.0f && car.getWorld().GetBodyLinearVelocity( chassis ).x > 1.0f, "car actually drives right through tire contact" );
+    input = {};
+    input.left = true;
+    session.handleInput( input, true );
+    for( int i = 0; i < 120; ++i ) session.stepOnce( 4 );
+    check( car.getWorld().GetBodyTransform( chassis ).position.x < forwardX - 2.0f && car.getWorld().GetBodyLinearVelocity( chassis ).x < -1.0f, "car reverses through motor torque rather than direct chassis force" );
+    input.brake = true;
+    input.jumpPressed = true;
+    const float beforeBrakeY = car.getWorld().GetBodyLinearVelocity( chassis ).y;
+    session.handleInput( input, true );
+    check( car.getWorld().GetBodyLinearVelocity( chassis ).y == beforeBrakeY, "car space input brakes without applying old jump impulse" );
+    for( int i = 0; i < 120; ++i ) session.stepOnce( 4 );
+    check( std::abs( car.getWorld().GetBodyLinearVelocity( chassis ).x ) < 0.1f, "held brake stops car on level ground" );
+    for( const auto id : car.getCarJoints() ) check( car.getWorld().getWheelJointData( id ).motorSpeed == 0.0f, "brake overrides drive direction" );
+    input = {};
+    input.left = input.right = true;
+    session.handleInput( input, true );
+    for( const auto id : car.getCarJoints() ) check( !car.getWorld().getWheelJointData( id ).enableMotor, "opposing drive keys coast" );
+    rigidBodyDemo noTorqueCar{ demoKind::motorCar };
+    rigidBodyDemo coastCar{ demoKind::motorCar };
+    for( int i = 0; i < 120; ++i )
+    {
+        noTorqueCar.step( 1.0f / 60.0f, 4 );
+        coastCar.step( 1.0f / 60.0f, 4 );
+    }
+    noTorqueCar.setCarMotorSettings( 8.0f, 0.0f );
+    input = {};
+    input.right = true;
+    noTorqueCar.handleInput( input );
+    for( int i = 0; i < 60; ++i )
+    {
+        noTorqueCar.step( 1.0f / 60.0f, 4 );
+        coastCar.step( 1.0f / 60.0f, 4 );
+    }
+    check( std::abs( noTorqueCar.getWorld().GetBodyTransform( noTorqueCar.getImpulseBody() ).position.x - coastCar.getWorld().GetBodyTransform( coastCar.getImpulseBody() ).position.x ) < 0.01f && std::abs( noTorqueCar.getWorld().GetBodyLinearVelocity( noTorqueCar.getImpulseBody() ).x ) < 0.01f, "zero torque drive matches coasting rather than applying chassis force" );
+    session.handleInput( input, true );
+    const auto beforeCancel = car.getWorld().GetBodyLinearVelocity( chassis );
+    car.setCarMotorSettings( 4.0f, 2.0f );
+    for( const auto id : car.getCarJoints() )
+    {
+        const auto data = car.getWorld().getWheelJointData( id );
+        check( data.enableMotor && data.motorSpeed == -4.0f && data.maxMotorTorque == 2.0f, "live motor settings update both active wheels" );
+    }
+    session.handleInput( {}, false );
+    check( LengthSquared( car.getWorld().GetBodyLinearVelocity( chassis ) - beforeCancel ) == 0.0f, "input cancellation preserves physical velocity" );
+    for( const auto id : car.getCarJoints() ) check( !car.getWorld().getWheelJointData( id ).enableMotor, "UI capture cancels both wheel motors" );
+    input = {};
+    input.mousePressed = input.mouseHeld = true;
+    input.mousePosition = car.getWorld().GetBodyTransform( chassis ).position;
+    session.handleInput( input, true );
+    check( car.getWorld().getJointCount() == 3 && car.getWorld().IsValid( car.getMouseJoint() ), "mouse can drag chassis with both wheel joints intact" );
+    session.handleInput( {}, false );
+    check( car.getWorld().getJointCount() == 2, "capture removes mouse joint and preserves car suspension" );
+    session.setPlaying( true );
+    input = {};
+    input.right = true;
+    session.handleInput( input, true );
+    session.setPlaying( false );
+    for( const auto id : car.getCarJoints() ) check( !car.getWorld().getWheelJointData( id ).enableMotor, "pause cancels active car drive" );
+    car.setCarMotorSettings( 2.0f, 1.0f );
+    const auto oldCarJoint = car.getCarJoints()[0];
+    session.reset();
+    auto& restartedCar = static_cast<rigidBodyDemo&>( session.getDemo() );
+    check( !restartedCar.getWorld().IsValid( chassis ) && !restartedCar.getWorld().IsValid( oldCarJoint ) && restartedCar.getCarMotorSpeed() == 8.0f && restartedCar.getCarMaxMotorTorque() == 5.0f && !session.isPlaying() && session.getStepCount() == 0, "car reset restores fresh handles, settings and playback" );
+
+    for( const int subSteps : { 1, 4 } )
+    {
+        rigidBodyDemo rampCar{ demoKind::motorCar };
+        for( int i = 0; i < 120; ++i ) rampCar.step( 1.0f / 60.0f, subSteps );
+        input = {};
+        input.right = true;
+        rampCar.handleInput( input );
+        float peakHeight = 0.0f;
+        for( int i = 0; i < 360; ++i )
+        {
+            rampCar.step( 1.0f / 60.0f, subSteps );
+            const auto pose = rampCar.getWorld().GetBodyTransform( rampCar.getImpulseBody() );
+            peakHeight = std::max( peakHeight, pose.position.y );
+            check( IsFinite( pose.position ) && std::abs( std::atan2( pose.rotation.s, pose.rotation.c ) ) < 0.7f, "car stays upright through low ramp and landing" );
+            for( const auto id : rampCar.getCarJoints() )
+            {
+                const auto data = rampCar.getWorld().getWheelJointData( id );
+                check( std::abs( data.lateralError ) < 0.05f && std::abs( data.currentTranslation ) < 0.4f && std::abs( data.motorTorque ) <= 5.0001f, "ramp keeps coupled suspension and motor within expected soft-error bounds" );
+            }
+        }
+        check( peakHeight > 1.2f && rampCar.getWorld().GetBodyTransform( rampCar.getImpulseBody() ).position.x > 14.0f, "car climbs ramp and continues onto level ground" );
+    }
 
     return EXIT_SUCCESS;
 }

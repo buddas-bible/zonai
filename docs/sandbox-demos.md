@@ -10,10 +10,11 @@
 | Joints / Distance Pendulum | 독립 Static anchor와 Dynamic bob, rigid Distance Joint | A/D 유지: 수평 힘, Space: kick, 왼쪽 drag: 진자 잡기, 오른쪽 클릭: cursor 방향으로 밀기, 보라색 선·목표/현재 길이로 제약 관찰 |
 | 조인트 / 회전축과 막대 | Static 축과 Dynamic 막대, Revolute Joint | A/D 유지: 수평 힘, Space: 위쪽 impulse, S: 회전 impulse, 왼쪽 drag·오른쪽 클릭, 연결점 오차·기준 대비 각도·반력, 접힌 각도 제한·모터 설정, 경계/속도/토크·역회전·제동 관찰 |
 | 조인트 / 서스펜션과 바퀴 | Static 지지대와 Dynamic 원, Wheel Joint | A/D: 축 옆 힘, Space: 위로 impulse, S: 회전, 왼쪽 drag·오른쪽 클릭, 접힌 Hertz/감쇠·이동 제한·회전 모터 설정, 역회전·제동, 중립점/경계·변위·스프링/제한 힘·모터 토크 관찰 |
+| 연결 장치 / 모터 자동차 | Dynamic 차체와 두 바퀴, Wheel Joint 2개, 평지·낮은 경사면 | A/D 유지: 모터 주행, Space 유지: 제동, 키 해제: 자유 주행. Mouse drag·차체 impulse, 접힌 모터/서스펜션·바퀴 반력 설정 |
 
 `Demo` 목록으로 장면을 고르고 Play/Pause, Step, Reset을 사용한다. 전환/reset은 paused 상태의 새 장면을 만들고 선택/contact/입력·시간·카메라를 초기화한다. Sub-steps는 공통 설정으로 유지한다. Wheel zoom/middle pan과 기존 pose/material/filter/sleep/CCD/force/Contact/Tree Inspector는 유지한다.
 
-키 조작은 pointer가 Canvas 위에 있을 때 전달한다. UI 편집이나 focus 상실, Canvas 밖, middle pan, 전환 frame에는 held 입력을 취소한다. A/D는 매 physics step에 힘으로 적용하고 Space/S/오른쪽 클릭은 한 번의 impulse로 적용한다. Paused 상태의 impulse는 속도를 바꾸지만 pose는 다음 step에서 진행한다. 왼쪽 drag의 picking/Mouse Joint는 [후속 구현](mouse-joint.md)에 기록한다. 입력 취소는 held force와 drag Joint를 함께 비우며 새 press 없이 다시 잡지 않는다.
+키 조작은 pointer가 Canvas 위에 있을 때 전달한다. UI 편집이나 focus 상실, Canvas 밖, middle pan, 전환 frame에는 held 입력을 취소한다. 기본 강체/개별 Joint 데모의 A/D는 매 physics step에 힘으로 적용하고 Space/S/오른쪽 클릭은 한 번의 impulse로 적용한다. 자동차는 A/D와 유지된 Space를 Wheel 모터 주행/제동으로 전달하며 입력 취소 시 두 모터를 끈다. Paused 상태의 impulse는 속도를 바꾸지만 pose는 다음 step에서 진행한다. 왼쪽 drag의 picking/Mouse Joint는 [후속 구현](mouse-joint.md)에 기록한다. 입력 취소는 held force와 drag Joint를 함께 비우며 새 press 없이 다시 잡지 않는다.
 
 ## 파일 책임과 학습 이유
 
@@ -34,6 +35,6 @@
 
 ## 사용자 목표와 다음 단계
 
-한 프로그램에 데모별 조작·설정·관찰값을 추가하는 물리 학습 공간이 장기 목표다. Mouse Joint와 필요한 picking, [Distance spring](distance-spring.md)/[limit](distance-limit.md)/[motor](distance-motor.md), [기본 회전축](revolute-joint.md)/[각도 제한](revolute-limit.md)/[회전 모터](revolute-motor.md), [기본 Wheel 서스펜션](wheel-joint.md)/[이동 제한](wheel-limit.md)/[회전 모터](wheel-motor.md)를 추가했다. 진자는 거리 축, 막대는 회전축/모터, ‘서스펜션과 바퀴’는 축 이동·주파수/감쇠·경계 반력·구동/역회전/제동을 비교한다. 다음은 모터 자동차 데모이며, 필요한 Joint와 함께 ragdoll·motor 자동차·조나이 선풍기/연결 장치로 조합한다.
+한 프로그램에 데모별 조작·설정·관찰값을 추가하는 물리 학습 공간이 장기 목표다. Mouse Joint와 필요한 picking, [Distance spring](distance-spring.md)/[limit](distance-limit.md)/[motor](distance-motor.md), [기본 회전축](revolute-joint.md)/[각도 제한](revolute-limit.md)/[회전 모터](revolute-motor.md), [기본 Wheel 서스펜션](wheel-joint.md)/[이동 제한](wheel-limit.md)/[회전 모터](wheel-motor.md)를 추가했다. 진자는 거리 축, 막대는 회전축/모터, ‘서스펜션과 바퀴’는 축 이동·주파수/감쇠·경계 반력·구동/역회전/제동을 비교한다. [자동차](motor-car.md)는 두 바퀴의 제약과 바닥 마찰을 조합했다. 다음은 관절 제한 렉돌이며, 필요한 Joint와 함께 ragdoll·motor 자동차·조나이 선풍기/연결 장치로 조합한다.
 
 천·유체·soft body·voxel physics/destruction/terrain·다양한 terrain collision·오목한 object/terrain·파괴 조각의 rigid body simulation도 같은 프로그램의 데모로 학습하고 싶다는 사용자 목표를 보존한다. 각 기능의 solver/data와 2D/3D 범위는 해당 구현 단계에서 정한다. Voxel은 파괴 → 조각 분리 → collision/mass 생성 → rigid body simulation을 단계별로 확인한다. 이 목록은 해당 기능의 현재 구현 완료를 의미하지 않는다.
