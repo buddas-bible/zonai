@@ -3,7 +3,7 @@
 #include <cstdlib>
 #include <initializer_list>
 #include <numbers>
-#include "dynamics/wheelJointConstraint2.h"
+#include "dynamics/joints/wheelJointConstraint2.h"
 
 using namespace zonai;
 

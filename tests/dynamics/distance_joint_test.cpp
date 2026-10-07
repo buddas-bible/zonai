@@ -3,7 +3,7 @@
 #include <iostream>
 #include <numbers>
 
-#include "dynamics/distanceJointConstraint2.h"
+#include "dynamics/joints/distanceJointConstraint2.h"
 
 using namespace zonai;
 

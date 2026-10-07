@@ -3,7 +3,7 @@
 #include "dynamics/bodySim.h"
 #include "dynamics/bodyState.h"
 #include "dynamics/constraintSoftness2.h"
-#include "dynamics/distanceJointSim2.h"
+#include "dynamics/joints/distanceJointSim2.h"
 
 namespace zonai
 {

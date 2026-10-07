@@ -1,4 +1,4 @@
-#include "dynamics/mouseJointConstraint2.h"
+#include "dynamics/joints/mouseJointConstraint2.h"
 
 #include <cassert>
 
