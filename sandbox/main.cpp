@@ -12,6 +12,7 @@
 #include "debug/debugDraw.h"
 
 #include "demo.h"
+#include "jointDemoView.h"
 #include "rigidBodyDemoUi.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler( HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam );
@@ -160,7 +161,7 @@ int main()
     camera.center = { 0.0f, 0.5f };
     camera.pixelsPerMeter = 55.0f;
 
-    demoSession session{ createDemoView };
+    demoSession session{ createJointDemoView };
     collisionSettingsUi collisionUi;
     int subStepCount = 1;
     const auto resetCamera = [&]()
