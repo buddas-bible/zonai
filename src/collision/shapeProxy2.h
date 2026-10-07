@@ -2,7 +2,7 @@
 
 #include <array>
 
-#include "collision/shape.h"
+#include "collision/shapeGeometry.h"
 
 namespace zonai
 {
