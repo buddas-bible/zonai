@@ -16,6 +16,30 @@ struct visualShape
     const char* label = "";
 };
 
+enum class distanceDemoPreset
+{
+    rigid,
+    spring,
+    limit,
+    motor
+};
+
+enum class revoluteDemoPreset
+{
+    free,
+    limit,
+    motor,
+    motorLimit
+};
+
+enum class wheelDemoPreset
+{
+    spring,
+    limit,
+    motor,
+    combined
+};
+
 class rigidBodyDemo : public demo
 {
 public:
@@ -33,6 +57,9 @@ public:
     void setCollisionMatrix( const collisionMatrix& matrix ) override;
     void setMouseSettings( float hertz, float dampingRatio, float maxForce );
     void setCarMotorSettings( float speed, float maxTorque );
+    void applyDistancePreset( distanceDemoPreset preset );
+    void applyRevolutePreset( revoluteDemoPreset preset );
+    void applyWheelPreset( wheelDemoPreset preset );
 #pragma endregion Settings
 
 #pragma region Contacts
@@ -81,6 +108,7 @@ private:
     void createPendulum();
     void createRevoluteHinge();
     void createWheelSuspension();
+    void createMouseJointPlayground();
     void createMotorCar();
 #pragma endregion SceneSetup
 

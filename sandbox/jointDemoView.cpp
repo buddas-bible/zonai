@@ -1,0 +1,94 @@
+#include "jointDemoView.h"
+
+#include <imgui.h>
+
+namespace zonai::sandbox
+{
+namespace
+{
+
+class jointDemoView final : public demo
+{
+public:
+    explicit jointDemoView( demoKind kind ) : view_( kind ) {}
+
+    void step( float timeStep, int subStepCount ) override { view_.step( timeStep, subStepCount ); }
+
+    void handleInput( const demoInput& input ) override { view_.handleInput( input ); }
+
+    void cancelInput() override { view_.cancelInput(); }
+
+    void setCollisionMatrix( const collisionMatrix& matrix ) override { view_.setCollisionMatrix( matrix ); }
+
+    void drawControls() override
+    {
+        view_.drawControls();
+
+        const demoKind kind = view_.getKind();
+        if( kind != demoKind::distancePendulum && kind != demoKind::revoluteHinge && kind != demoKind::wheelSuspension && kind != demoKind::mouseJointPlayground ) return;
+
+        if( ImGui::CollapsingHeader( "조인트 빠른 설정###JointQuickSettings", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            if( kind == demoKind::distancePendulum )
+            {
+                if( ImGui::Button( "고정###DistancePresetRigid" ) ) view_.applyDistancePreset( distanceDemoPreset::rigid );
+                ImGui::SameLine();
+                if( ImGui::Button( "스프링###DistancePresetSpring" ) ) view_.applyDistancePreset( distanceDemoPreset::spring );
+                ImGui::SameLine();
+                if( ImGui::Button( "제한###DistancePresetLimit" ) ) view_.applyDistancePreset( distanceDemoPreset::limit );
+                ImGui::SameLine();
+                if( ImGui::Button( "모터###DistancePresetMotor" ) ) view_.applyDistancePreset( distanceDemoPreset::motor );
+                ImGui::TextWrapped( "대표 상태를 바로 적용한 뒤 위의 세부 설정에서 값을 조절할 수 있습니다." );
+            }
+            else if( kind == demoKind::revoluteHinge )
+            {
+                if( ImGui::Button( "자유###RevolutePresetFree" ) ) view_.applyRevolutePreset( revoluteDemoPreset::free );
+                ImGui::SameLine();
+                if( ImGui::Button( "제한###RevolutePresetLimit" ) ) view_.applyRevolutePreset( revoluteDemoPreset::limit );
+                ImGui::SameLine();
+                if( ImGui::Button( "모터###RevolutePresetMotor" ) ) view_.applyRevolutePreset( revoluteDemoPreset::motor );
+                ImGui::SameLine();
+                if( ImGui::Button( "모터+제한###RevolutePresetCombined" ) ) view_.applyRevolutePreset( revoluteDemoPreset::motorLimit );
+                ImGui::TextWrapped( "자유 회전, 각도 제한, 모터, 두 기능의 결합을 같은 막대에서 빠르게 비교합니다." );
+            }
+            else if( kind == demoKind::wheelSuspension )
+            {
+                if( ImGui::Button( "스프링###WheelPresetSpring" ) ) view_.applyWheelPreset( wheelDemoPreset::spring );
+                ImGui::SameLine();
+                if( ImGui::Button( "제한###WheelPresetLimit" ) ) view_.applyWheelPreset( wheelDemoPreset::limit );
+                ImGui::SameLine();
+                if( ImGui::Button( "모터###WheelPresetMotor" ) ) view_.applyWheelPreset( wheelDemoPreset::motor );
+                ImGui::SameLine();
+                if( ImGui::Button( "전체###WheelPresetCombined" ) ) view_.applyWheelPreset( wheelDemoPreset::combined );
+                ImGui::TextWrapped( "서스펜션 스프링, 이동 제한, 회전 모터와 결합 상태를 빠르게 전환합니다." );
+            }
+            else
+            {
+                ImGui::TextWrapped( "질량이 다른 세 상자를 같은 Mouse Joint 설정으로 드래그해 추종 차이를 비교합니다." );
+                if( view_.getWorld().IsValid( view_.getMouseJoint() ) )
+                {
+                    const auto joint = view_.getWorld().getMouseJointData( view_.getMouseJoint() );
+                    ImGui::Text( "목표 오차: %.3f m / 힘: %.2f N", Length( joint.target - joint.anchorB ), Length( joint.force ) );
+                }
+                else
+                {
+                    ImGui::TextUnformatted( "상자를 왼쪽 드래그하면 Mouse Joint가 생성됩니다." );
+                }
+            }
+        }
+    }
+
+    void draw( debugDraw& draw ) const override { view_.draw( draw ); }
+
+private:
+    rigidBodyDemoUi view_;
+};
+
+} // namespace
+
+std::unique_ptr<demo> createJointDemoView( demoKind kind )
+{
+    return std::make_unique<jointDemoView>( kind );
+}
+
+} // namespace zonai::sandbox

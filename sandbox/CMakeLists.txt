@@ -28,7 +28,9 @@ add_executable(zonaiSandbox
     main.cpp
     demo.cpp
     rigidBodyDemo.cpp
+    rigidBodyJointDemo.cpp
     rigidBodyDemoUi.cpp
+    jointDemoView.cpp
     debug/debugCamera.cpp
     debug/debugDraw.cpp
 )

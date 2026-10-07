@@ -18,6 +18,7 @@ enum class demoKind
     distancePendulum,
     revoluteHinge,
     wheelSuspension,
+    mouseJointPlayground,
     motorCar
 };
 
