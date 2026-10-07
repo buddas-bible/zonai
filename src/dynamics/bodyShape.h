@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <span>
 
-#include "collision/shape.h"
 #include "dynamics/body.h"
+#include "dynamics/shape.h"
 
 namespace zonai
 {
