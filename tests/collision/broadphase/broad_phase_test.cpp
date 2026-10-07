@@ -5,8 +5,8 @@
 #include <vector>
 
 #include "collision/broadphase/broadPhase.h"
-#include "collision/shape.h"
 #include "dynamics/bodyType.h"
+#include "dynamics/shape.h"
 
 using namespace zonai;
 
@@ -247,7 +247,6 @@ int main()
     const aabb2 kinematicBoxB{ { 10.0f, 0.0f }, { 12.0f, 2.0f } };
 
     const aabb2 kinematicDynamicBoxA{ { 1.0f, 0.0f }, { 3.0f, 2.0f } };
-
     const aabb2 kinematicDynamicBoxB{ { 20.0f, 0.0f }, { 21.0f, 1.0f } };
 
     kinematicCrossBroadPhase.CreateProxy( bodyType::Kinematic, kinematicBoxA, 61 );
