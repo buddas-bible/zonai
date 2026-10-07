@@ -39,4 +39,4 @@ NDEBUG에서도 실행되는 단위 검사는 양쪽 각반작용·각운동량�
 
 다섯 오류 변형 검사를 검출했다: 토크 예산의 h 누락, 누적 clamp 누락, A 반작용 부호 반전, motor warm start 누락, 모터를 제한 뒤로 이동. 원본 byte를 복구했다. 전체 CTest 47개와 Windows Release runtime 17개를 유지하며 최종 빌드·CI 결과는 작업 PR에 기록한다. 실제 OS/GPU/창의 시각 확인과 기존 assert 기반 Release 공백은 별도다.
 
-다음은 **모터 자동차 데모**다. 바퀴의 스프링·이동 제한·모터를 차체에 연결하여 하중·주행·제동을 비교한다. Ragdoll·조나이 선풍기/연결 장치, 같은 Sandbox의 천·유체·soft body·voxel·파괴·terrain 학습 방향도 유지한다.
+후속 [모터 자동차](motor-car.md)에서 두 바퀴를 차체에 연결하여 하중·주행·제동과 마찰/경사면을 비교한다. 이 문서의 개별 모터 수학과 검증 기록은 유지한다. 다음은 관절 제한 렉돌이다. Ragdoll·조나이 선풍기/연결 장치, 같은 Sandbox의 천·유체·soft body·voxel·파괴·terrain 학습 방향도 유지한다.

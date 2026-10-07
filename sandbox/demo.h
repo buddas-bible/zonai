@@ -17,7 +17,8 @@ enum class demoKind
     playground,
     distancePendulum,
     revoluteHinge,
-    wheelSuspension
+    wheelSuspension,
+    motorCar
 };
 
 struct demoEntry
@@ -42,6 +43,7 @@ struct demoInput
     bool right = false;
     bool jumpPressed = false;
     bool spinPressed = false;
+    bool brake = false; // 자동차의 유지 입력. 다른 데모의 jumpPressed와 구분함.
 };
 
 class demo

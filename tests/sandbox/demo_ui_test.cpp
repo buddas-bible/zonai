@@ -687,5 +687,103 @@ void checkDemoUi()
             }
         }
     }
+    for( int setting = 0; setting < 2; ++setting )
+    {
+        for( int upper = 0; upper < 2; ++upper )
+        {
+            auto tuningView = createDemoView( demoKind::motorCar );
+            auto& tuningModel = static_cast<rigidBodyDemo&>( *tuningView );
+            for( int phase = 0; phase < 3; ++phase )
+            {
+                if( phase == 1 ) io.AddInputCharactersUTF8( upper ? "9000" : "-9000" );
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+                ImGui::NewFrame();
+                ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+                ImGui::Begin( "Car motor input" );
+                ImGui::GetStateStorage()->SetInt( ImGui::GetID( "CarMotorSettings" ), 1 );
+                if( phase == 0 )
+                {
+                    ImGui::PushID( "CarMotorSettings" );
+                    GImGui->NavActivateId = ImGui::GetID( setting == 0 ? "Car motor speed" : "Car motor torque" );
+                    GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+                    ImGui::PopID();
+                }
+                tuningView->drawControls();
+                ImGui::End();
+                ImGui::Render();
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            }
+            const float value = setting == 0 ? tuningModel.getCarMotorSpeed() : tuningModel.getCarMaxMotorTorque();
+            const float expected = upper ? 20.0f : 0.0f;
+            if( value != expected )
+            {
+                std::fprintf( stderr, "manual car motor input escaped valid range\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+    }
+    auto carView = createDemoView( demoKind::motorCar );
+    auto& carModel = static_cast<rigidBodyDemo&>( *carView );
+    for( int frame = 0; frame < 5; ++frame )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+        ImGui::Begin( "Car suspension actions" );
+        if( frame > 0 ) ImGui::GetStateStorage()->SetInt( ImGui::GetID( "CarSuspensionSettings" ), 1 );
+        ImGui::PushID( "CarSuspensionSettings" );
+        GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( frame == 2 || frame == 4 ? "Car limit" : "Car spring" );
+        ImGui::PopID();
+        carView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        for( const auto id : carModel.getCarJoints() )
+        {
+            const auto data = carModel.getWorld().getWheelJointData( id );
+            if( data.enableSpring != ( frame == 0 || frame >= 3 ) || data.enableLimit != ( frame < 2 || frame == 4 ) )
+            {
+                std::fprintf( stderr, "folded car suspension toggle failed to update both wheels\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+    }
+    for( int setting = 0; setting < 4; ++setting )
+    {
+        for( int upper = 0; upper < 2; ++upper )
+        {
+            auto tuningView = createDemoView( demoKind::motorCar );
+            auto& tuningModel = static_cast<rigidBodyDemo&>( *tuningView );
+            for( int phase = 0; phase < 3; ++phase )
+            {
+                if( phase == 1 ) io.AddInputCharactersUTF8( upper ? "9000" : "-9000" );
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+                ImGui::NewFrame();
+                ImGui::SetNextWindowSize( { 340.0f, 4000.0f } );
+                ImGui::Begin( "Car suspension input" );
+                ImGui::GetStateStorage()->SetInt( ImGui::GetID( "CarSuspensionSettings" ), 1 );
+                if( phase == 0 )
+                {
+                    ImGui::PushID( "CarSuspensionSettings" );
+                    GImGui->NavActivateId = ImGui::GetID( setting == 0 ? "Car hertz" : setting == 1 ? "Car damping" : setting == 2 ? "Car lower" : "Car upper" );
+                    GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+                    ImGui::PopID();
+                }
+                tuningView->drawControls();
+                ImGui::End();
+                ImGui::Render();
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            }
+            for( const auto id : tuningModel.getCarJoints() )
+            {
+                const auto data = tuningModel.getWorld().getWheelJointData( id );
+                const float value = setting == 0 ? data.hertz : setting == 1 ? data.dampingRatio : setting == 2 ? data.lowerTranslation : data.upperTranslation;
+                const float expected = setting == 0 ? ( upper ? 10.0f : 0.0f ) : setting == 1 ? ( upper ? 2.0f : 0.0f ) : setting == 2 ? ( upper ? 0.25f : -0.5f ) : ( upper ? 0.5f : -0.25f );
+                if( value != expected || data.lowerTranslation > data.upperTranslation )
+                {
+                    std::fprintf( stderr, "car suspension input failed to clamp or update both wheels\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+        }
+    }
     ImGui::DestroyContext();
 }
