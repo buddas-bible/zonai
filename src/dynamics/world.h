@@ -9,7 +9,6 @@
 
 #include "collision/broadphase/broadPhase.h"
 #include "collision/constants.h"
-#include "collision/shape.h"
 #include "dynamics/body.h"
 #include "dynamics/bodyDef.h"
 #include "dynamics/bodySim.h"
@@ -31,6 +30,7 @@
 #include "dynamics/id.h"
 #include "dynamics/island2.h"
 #include "dynamics/sensor2.h"
+#include "dynamics/shape.h"
 
 namespace zonai
 {

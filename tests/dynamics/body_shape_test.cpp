@@ -1,15 +1,86 @@
 #include <array>
 #include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <limits>
 #include <span>
 
-#include "collision/shape.h"
 #include "dynamics/body.h"
 #include "dynamics/bodyShape.h"
+#include "dynamics/shape.h"
 
 using namespace zonai;
 
 int main()
 {
+    constexpr float epsilon = 1e-4f;
+    constexpr float pi = 3.14159265358979323846f;
+
+    // 아직 body / sensor에 연결되지 않은 runtime shape의 기본 상태를 확인함.
+    {
+        shape defaultShape{};
+
+        assert( defaultShape.bodyId == shape::NULL_INDEX );
+        assert( defaultShape.prevShapeId == shape::NULL_INDEX );
+        assert( defaultShape.nextShapeId == shape::NULL_INDEX );
+        assert( defaultShape.generation == 0 );
+        assert( defaultShape.sensorIndex == shape::NULL_INDEX );
+        assert( defaultShape.nextFreeId == shape::NULL_INDEX );
+        assert( defaultShape.proxyKey == shape::NULL_INDEX );
+        assert( defaultShape.density == 1.0f );
+
+        // 기본 filter는 Box2D처럼 category 1이 모든 category와 충돌하도록 설정됨.
+        assert( defaultShape.filter.categoryBits == 1 );
+        assert( defaultShape.filter.maskBits == std::numeric_limits<std::uint64_t>::max() );
+        assert( defaultShape.filter.groupIndex == 0 );
+
+        defaultShape.bodyId = 7;
+        defaultShape.sensorIndex = 3;
+        defaultShape.filter.categoryBits = 0x00000004;
+        defaultShape.filter.maskBits = 0x00000002;
+        defaultShape.filter.groupIndex = -5;
+
+        assert( defaultShape.bodyId == 7 );
+        assert( defaultShape.sensorIndex == 3 );
+        assert( defaultShape.filter.categoryBits == 0x00000004 );
+        assert( defaultShape.filter.maskBits == 0x00000002 );
+        assert( defaultShape.filter.groupIndex == -5 );
+    }
+
+    // runtime shape의 geometry와 density로 질량 특성을 계산함.
+    {
+        shape circleShape{};
+        circleShape.geometry = circle2{ { 3.0f, -1.0f }, 2.0f };
+        circleShape.density = 3.0f;
+
+        const massData2 circleMass = ComputeShapeMass( circleShape );
+
+        assert( std::fabs( circleMass.mass - 12.0f * pi ) < epsilon );
+        assert( std::fabs( circleMass.center.x - 3.0f ) < epsilon );
+        assert( std::fabs( circleMass.center.y + 1.0f ) < epsilon );
+        assert( std::fabs( circleMass.rotationalInertia - 24.0f * pi ) < epsilon );
+
+        shape boxShape{};
+        boxShape.geometry = MakeBox( { 2.0f, 1.0f } );
+        boxShape.density = 3.0f;
+
+        const massData2 boxMass = ComputeShapeMass( boxShape );
+
+        assert( std::fabs( boxMass.mass - 24.0f ) < epsilon );
+        assert( std::fabs( boxMass.center.x ) < epsilon );
+        assert( std::fabs( boxMass.center.y ) < epsilon );
+        assert( std::fabs( boxMass.rotationalInertia - 40.0f ) < epsilon );
+
+        shape segmentShape{};
+        segmentShape.geometry = segment2{ { -2.0f, 0.0f }, { 2.0f, 0.0f } };
+        segmentShape.density = 10.0f;
+
+        const massData2 segmentMass = ComputeShapeMass( segmentShape );
+
+        assert( segmentMass.mass == 0.0f );
+        assert( segmentMass.rotationalInertia == 0.0f );
+    }
+
     body body{};
     constexpr std::int32_t bodyId = 3;
 

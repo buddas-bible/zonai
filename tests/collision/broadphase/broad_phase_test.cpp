@@ -5,8 +5,8 @@
 #include <vector>
 
 #include "collision/broadphase/broadPhase.h"
-#include "collision/shape.h"
 #include "dynamics/bodyType.h"
+#include "dynamics/shape.h"
 
 using namespace zonai;
 
