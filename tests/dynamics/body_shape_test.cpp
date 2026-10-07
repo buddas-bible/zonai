@@ -2,9 +2,9 @@
 #include <cassert>
 #include <span>
 
-#include "collision/shape.h"
 #include "dynamics/body.h"
 #include "dynamics/bodyShape.h"
+#include "dynamics/shape.h"
 
 using namespace zonai;
 
