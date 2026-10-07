@@ -244,7 +244,7 @@ public:
         // Box2D처럼 필요한 scratch 크기를 broadPhase 내부에서 보장함.
         const std::span<std::int32_t> movedSiblings = PrepareMovedSiblingScratch();
 
-        // moved node가 포함된 sibling pair만 모아 self collision의 시작점으로 사용함.
+        // moved node가 포함된 sibling pair의 시작 index를 모아 self collision의 시작점으로 사용함.
         const std::size_t movedCount = GatherMovedSiblings( tree, movedSiblings );
 
         for( std::size_t i = 0; i < movedCount; ++i )
