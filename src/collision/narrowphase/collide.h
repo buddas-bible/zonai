@@ -7,7 +7,7 @@
 
 #include "math/transform2.h"
 #include "collision/narrowphase/manifold2.h"
-#include "collision/shape.h"
+#include "collision/shapeGeometry.h"
 
 namespace zonai
 {
