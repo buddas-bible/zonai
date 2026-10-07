@@ -1,0 +1,69 @@
+#pragma once
+
+#include <cstdint>
+
+#include "collision/aabb2.h"
+#include "collision/filter.h"
+#include "collision/massData2.h"
+#include "collision/shapeGeometry.h"
+
+namespace zonai
+{
+
+// World가 소유하는 runtime shape 상태.
+// geometry 계산 자체와 달리 body 연결, broadPhase proxy, material, lifetime을 관리함.
+struct shape
+{
+    static constexpr std::int32_t NULL_INDEX = -1;
+
+    // 이 shape를 소유하는 body index. 아직 연결되지 않았으면 NULL_INDEX임.
+    std::int32_t bodyId = NULL_INDEX;
+
+    // 같은 body에 연결된 이전 / 다음 shape index.
+    // body의 head부터 index 기반 doubly linked list로 순회함.
+    std::int32_t prevShapeId = NULL_INDEX;
+    std::int32_t nextShapeId = NULL_INDEX;
+
+    // slot이 재사용될 때 증가해 오래된 shapeId를 검출함.
+    std::uint16_t generation = 0;
+
+    // sensor overlap 저장소 index. NULL_INDEX면 일반 collision shape임.
+    std::int32_t sensorIndex = NULL_INDEX;
+
+    // free slot일 때 다음 재사용 가능한 shape index.
+    std::int32_t nextFreeId = NULL_INDEX;
+
+    // broadPhase에 등록된 proxy key. 아직 proxy가 없으면 NULL_INDEX임.
+    std::int32_t proxyKey = NULL_INDEX;
+
+    // 현재 transform에서 geometry bounds에 speculative distance를 더한 AABB.
+    // narrowphase 후보 유지에 쓰이며 Dynamic Tree의 fat AABB와는 구분됨.
+    aabb2 aabb{};
+
+    // Dynamic Tree fat AABB에 추가하는 shape 크기 기반 margin.
+    float aabbMargin = 0.0f;
+
+    // body local space에 저장되는 실제 collision geometry.
+    shapeGeometry geometry{};
+
+    // 면적당 질량. Box2D 기본값과 같이 1로 시작함.
+    float density = 1.0f;
+
+    // 접촉면의 Coulomb friction coefficient.
+    float friction = 0.6f;
+
+    // 충돌 전 normal 상대속도 중 얼마를 반대 방향으로 되돌릴지 결정함.
+    float restitution = 0.0f;
+
+    // category / mask / group 기반 collision filter.
+    collisionFilter filter{};
+
+    // Sensor overlap event 참여 여부. 최신 Box2D처럼 기본값은 false이며
+    // sensor와 visitor 양쪽 shape가 모두 true여야 begin/end 및 CCD sensor hit을 생성함.
+    bool enableSensorEvents = false;
+};
+
+// runtime shape의 geometry와 density로 local-space 질량 특성을 계산함.
+massData2 ComputeShapeMass( const shape& shape );
+
+} // namespace zonai

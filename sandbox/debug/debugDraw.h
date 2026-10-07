@@ -6,7 +6,7 @@
 
 #include "collision/aabb2.h"
 #include "collision/broadphase/dynamicTree.h"
-#include "collision/shape.h"
+#include "collision/shapeGeometry.h"
 #include "geometry/capsule2.h"
 #include "geometry/circle2.h"
 #include "geometry/polygon2.h"
