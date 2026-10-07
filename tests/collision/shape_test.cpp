@@ -5,8 +5,13 @@
 #include <variant>
 
 #include "collision/constants.h"
-#include "collision/shape.h"
+#include "collision/shapeGeometry.h"
 #include "collision/shapeProxy2.h"
+#include "dynamics/shape.h"
+
+#if __has_include("collision/shape.h")
+#error "collision/shape.h compatibility header must be removed"
+#endif
 
 using namespace zonai;
 
