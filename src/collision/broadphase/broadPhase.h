@@ -11,8 +11,8 @@
 
 #include "collision/broadphase/dynamicTree.h"
 #include "collision/broadphase/hashSet.h"
-#include "collision/shape.h"
 #include "dynamics/bodyType.h"
+#include "dynamics/shape.h"
 
 namespace zonai
 {
