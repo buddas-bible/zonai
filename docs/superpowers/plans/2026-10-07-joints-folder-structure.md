@@ -49,15 +49,26 @@
 - Move: `src/dynamics/wheelJointSim2.h` → `src/dynamics/joints/wheelJointSim2.h`
 - Move: `src/dynamics/wheelJointConstraint2.h` → `src/dynamics/joints/wheelJointConstraint2.h`
 - Move: `src/dynamics/wheelJointConstraint2.cpp` → `src/dynamics/joints/wheelJointConstraint2.cpp`
+- Modify: `src/dynamics/world.h`
+- Modify: `src/dynamics/island2.h`
+- Modify: `tests/dynamics/distance_joint_test.cpp`
 - Modify: all moved Joint `.h/.cpp` files whose sibling include still uses `dynamics/<joint-file>`.
 
 **Interfaces:**
 - Consumes: existing Joint type/function signatures unchanged.
 - Produces: identical Joint interfaces under `dynamics/joints/...` include paths.
 
-- [ ] **Step 1: Establish the structural RED condition**
+- [ ] **Step 1: Establish the structural RED condition in the Distance Joint unit test**
 
-Change one existing direct consumer include from `dynamics/distanceJointConstraint2.h` to `dynamics/joints/distanceJointConstraint2.h` before moving the file.
+Change only `tests/dynamics/distance_joint_test.cpp` from:
+```cpp
+#include "dynamics/distanceJointConstraint2.h"
+```
+to:
+```cpp
+#include "dynamics/joints/distanceJointConstraint2.h"
+```
+while the new file does not yet exist.
 
 - [ ] **Step 2: Run the focused build and verify it fails because the new path does not yet exist**
 
@@ -85,25 +96,25 @@ Modify:
 
 Replace old Joint include paths with `dynamics/joints/...`. Do not reorder unrelated includes or declarations.
 
-- [ ] **Step 5: Run focused Joint builds**
+- [ ] **Step 5: Run the Distance Joint focused build/test and verify GREEN**
 
 Run:
 ```bash
-cmake --build --preset debug --target distanceJointTests mouseJointTests revoluteJointTests wheelJointTests
+cmake --build --preset debug --target distanceJointTests
+ctest --test-dir build -C Debug -R "^distanceJointTests$" --output-on-failure
 ```
-Expected: all four targets build successfully.
+Expected: target builds and the focused test passes.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/dynamics src/dynamics/joints
+git add src/dynamics tests/dynamics/distance_joint_test.cpp
 git commit -m "refactor: group joint implementation files"
 ```
 
-### Task 2: Update test consumers and prove the old paths are gone
+### Task 2: Update remaining test consumers and prove the old paths are gone
 
 **Files:**
-- Modify: `tests/dynamics/distance_joint_test.cpp`
 - Modify: `tests/dynamics/mouse_joint_test.cpp`
 - Modify: `tests/dynamics/revolute_joint_test.cpp`
 - Modify: `tests/dynamics/wheel_joint_test.cpp`
@@ -113,11 +124,10 @@ git commit -m "refactor: group joint implementation files"
 - Consumes: Joint headers now located under `dynamics/joints/` from Task 1.
 - Produces: repository-wide direct consumers use only the new include paths.
 
-- [ ] **Step 1: Update the four direct Joint unit-test includes**
+- [ ] **Step 1: Update the remaining three direct Joint unit-test includes**
 
 Use:
 ```cpp
-#include "dynamics/joints/distanceJointConstraint2.h"
 #include "dynamics/joints/mouseJointConstraint2.h"
 #include "dynamics/joints/revoluteJointConstraint2.h"
 #include "dynamics/joints/wheelJointConstraint2.h"
@@ -136,10 +146,11 @@ dynamics/wheelJoint
 ```
 Expected: no source/test/sandbox include uses the old paths. Historical docs may retain old paths when they describe past repository state; do not rewrite historical audit/spec documents solely for this move.
 
-- [ ] **Step 3: Run focused tests**
+- [ ] **Step 3: Run focused Joint tests**
 
 Run:
 ```bash
+cmake --build --preset debug --target distanceJointTests mouseJointTests revoluteJointTests wheelJointTests
 ctest --test-dir build -C Debug -R "^(distanceJointTests|distanceJointWorldTests|mouseJointTests|mouseJointWorldTests|revoluteJointTests|revoluteJointWorldTests|wheelJointTests|wheelJointWorldTests)$" --output-on-failure
 ```
 Expected: all selected tests pass.
