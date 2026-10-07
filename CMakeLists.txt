@@ -32,4 +32,10 @@ endif()
 if(ZONAI_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+
+    add_executable(jointIncludePathTests
+        tests/dynamics/joint_include_path_test.cpp
+    )
+    target_link_libraries(jointIncludePathTests PRIVATE zonai::zonai)
+    add_test(NAME jointIncludePathTests COMMAND jointIncludePathTests)
 endif()
