@@ -1,7 +1,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include "dynamics/mouseJointConstraint2.h"
+#include "dynamics/joints/mouseJointConstraint2.h"
 
 using namespace zonai;
 

@@ -1,4 +1,4 @@
-#include "dynamics/revoluteJointConstraint2.h"
+#include "dynamics/joints/revoluteJointConstraint2.h"
 
 #include <algorithm>
 #include <cassert>

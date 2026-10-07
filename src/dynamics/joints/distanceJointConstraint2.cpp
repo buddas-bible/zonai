@@ -1,4 +1,4 @@
-#include "dynamics/distanceJointConstraint2.h"
+#include "dynamics/joints/distanceJointConstraint2.h"
 
 #include <algorithm>
 #include <cassert>

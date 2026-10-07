@@ -7,7 +7,7 @@
 
 #include "dynamics/body.h"
 #include "dynamics/contactSim2.h"
-#include "dynamics/joint2.h"
+#include "dynamics/joints/joint2.h"
 
 namespace zonai
 {

@@ -3,7 +3,7 @@
 #include <cstdlib>
 #include <initializer_list>
 #include <numbers>
-#include "dynamics/revoluteJointConstraint2.h"
+#include "dynamics/joints/revoluteJointConstraint2.h"
 
 using namespace zonai;
 
