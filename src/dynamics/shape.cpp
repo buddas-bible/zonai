@@ -18,6 +18,7 @@ massData2 ComputeShapeMass( const shape& shape )
             if constexpr( std::is_same_v<Geometry, std::monostate> )
             {
                 assert( false );
+
                 return {};
             }
             else
