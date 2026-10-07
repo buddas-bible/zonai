@@ -113,7 +113,7 @@ void checkMotor()
     bodyStateA = {};
     bodyStateB = {};
     warmStartDistanceJointConstraint( constraint, bodyStateA, bodyStateB );
-    solveDistanceJointConstraint( constraint, bodyStateA, bodySimB, false );
+    solveDistanceJointConstraint( constraint, bodyStateA, bodyStateB, false );
     check( constraint.motorImpulse == 0.0f && LengthSquared( bodyStateB.linearVelocity ) == 0.0f, "zero force discards cache and applies no motor impulse" );
     joint.maxMotorForce = 12.0f;
     joint.enableMotor = false;
