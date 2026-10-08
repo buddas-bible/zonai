@@ -536,6 +536,10 @@ add_executable(weldJointTests dynamics/weld_joint_test.cpp)
 target_link_libraries(weldJointTests PRIVATE zonai::zonai)
 add_test(NAME weldJointTests COMMAND weldJointTests)
 
+add_executable(weldJointWorldTests dynamics/weld_joint_world_test.cpp)
+target_link_libraries(weldJointWorldTests PRIVATE zonai::zonai)
+add_test(NAME weldJointWorldTests COMMAND weldJointWorldTests)
+
 add_executable(sandboxDemoTests sandbox/demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
 target_include_directories(sandboxDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxDemoTests PRIVATE zonai::zonai)

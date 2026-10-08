@@ -2,7 +2,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include "dynamics/joints/weldJointConstraint2.h"
-#include "dynamics/world.h"
 
 using namespace zonai;
 
@@ -116,17 +115,5 @@ int main()
 
     constraint = prepareWeldJointConstraint( joint, bodySimA, bodySimB, h / 2.0f );
     check( LengthSquared( constraint.impulse ) == 0.0f && constraint.angularImpulse == 0.0f, "timestep change clears Weld cache" );
-
-    world simulation;
-    simulation.SetGravity( {} );
-    const bodyId ground = simulation.CreateBody();
-    const bodyId body = simulation.CreateBody( bodyType::Dynamic );
-    weldJointDef definition{};
-    definition.bodyA = ground;
-    definition.bodyB = body;
-    const jointId id = simulation.createWeldJoint( definition );
-    const weldJointData data = simulation.getWeldJointData( id );
-    check( simulation.IsValid( id ) && data.bodyA == ground && data.bodyB == body, "Weld World API creates and queries the joint" );
-
     return EXIT_SUCCESS;
 }
