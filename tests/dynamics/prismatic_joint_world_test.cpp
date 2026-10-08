@@ -104,7 +104,13 @@ int main()
     limited.Step( h, 4 );
     limitData = limited.getPrismaticJointData( limitJoint );
     check( limitData.currentTranslation <= 1.002f, "Prismatic World predictive limit prevents upper boundary crossing" );
-    check( Dot( limitData.force, limitData.axis ) < 0.0f, "Prismatic upper limit reports negative axial reaction" );
+
+    limited.SetBodyTransform( limitSlider, { { 1.0f, 0.0f }, {} } );
+    limited.SetBodyLinearVelocity( limitSlider, {} );
+    limited.ApplyForceToCenter( limitSlider, { 100.0f, 0.0f } );
+    limited.Step( h, 4 );
+    limitData = limited.getPrismaticJointData( limitJoint );
+    check( Dot( limitData.force, limitData.axis ) < 0.0f, "Prismatic upper limit reports negative axial reaction under sustained load" );
 
     limited.setPrismaticJointLimit( limitJoint, false, -1.0f, 1.0f );
     limitData = limited.getPrismaticJointData( limitJoint );
