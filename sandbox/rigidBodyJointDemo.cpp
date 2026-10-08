@@ -87,11 +87,17 @@ void rigidBodyDemo::applyPrismaticPreset( prismaticDemoPreset preset )
 {
     if( kind_ != demoKind::prismaticRail || !world_.IsValid( prismaticJoint_ ) ) return;
 
+    constexpr float hertz = 2.0f;
+    constexpr float dampingRatio = 0.7f;
+    constexpr float springTarget = 1.0f;
+    constexpr float constrainedSpringTarget = 3.0f;
     constexpr float lowerTranslation = -2.0f;
     constexpr float upperTranslation = 2.0f;
     constexpr float motorSpeed = 2.0f;
     constexpr float maxMotorForce = 20.0f;
 
+    bool enableSpring = false;
+    float targetTranslation = springTarget;
     bool enableLimit = false;
     float lower = lowerTranslation;
     float upper = upperTranslation;
@@ -131,10 +137,29 @@ void rigidBodyDemo::applyPrismaticPreset( prismaticDemoPreset preset )
         enableLimit = true;
         enableMotor = true;
         break;
+
+    case prismaticDemoPreset::spring:
+        enableSpring = true;
+        break;
+
+    case prismaticDemoPreset::springLimit:
+        enableSpring = true;
+        targetTranslation = constrainedSpringTarget;
+        enableLimit = true;
+        break;
+
+    case prismaticDemoPreset::combined:
+        enableSpring = true;
+        targetTranslation = constrainedSpringTarget;
+        enableLimit = true;
+        enableMotor = true;
+        break;
     }
 
-    world_.setPrismaticJointLimit( prismaticJoint_, enableLimit, lower, upper );
+    // Box2D Prismatic solve 순서와 같은 개념 순서로 설정해 각 preset의 축 제약을 한눈에 비교함.
+    world_.setPrismaticJointSpring( prismaticJoint_, enableSpring, hertz, dampingRatio, targetTranslation );
     world_.setPrismaticJointMotor( prismaticJoint_, enableMotor, speed, maxMotorForce );
+    world_.setPrismaticJointLimit( prismaticJoint_, enableLimit, lower, upper );
 }
 
 #pragma endregion Presets
