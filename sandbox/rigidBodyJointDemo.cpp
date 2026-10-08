@@ -35,6 +35,24 @@ void rigidBodyDemo::setPrismaticSpringTargetToCurrent()
 
 #pragma endregion Settings
 
+#pragma region Queries
+
+float rigidBodyDemo::getPrismaticCurrentSpeed() const
+{
+    if( kind_ != demoKind::prismaticRail || !world_.IsValid( prismaticJoint_ ) ) return 0.0f;
+
+    const prismaticJointData joint = world_.getPrismaticJointData( prismaticJoint_ );
+    const vec2 centerA = TransformPoint( world_.GetBodyTransform( joint.bodyA ), world_.GetBodyLocalCenter( joint.bodyA ) );
+    const vec2 centerB = TransformPoint( world_.GetBodyTransform( joint.bodyB ), world_.GetBodyLocalCenter( joint.bodyB ) );
+    const vec2 r_a = joint.anchorA - centerA;
+    const vec2 r_b = joint.anchorB - centerB;
+    const vec2 velocityA = world_.GetBodyLinearVelocity( joint.bodyA ) + Cross( world_.GetBodyAngularVelocity( joint.bodyA ), r_a );
+    const vec2 velocityB = world_.GetBodyLinearVelocity( joint.bodyB ) + Cross( world_.GetBodyAngularVelocity( joint.bodyB ), r_b );
+    return Dot( joint.axis, velocityB - velocityA );
+}
+
+#pragma endregion Queries
+
 #pragma region Presets
 
 void rigidBodyDemo::applyDistancePreset( distanceDemoPreset preset )
