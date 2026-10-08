@@ -36,7 +36,7 @@ weldJointConstraint2 prepareWeldJointConstraint( const weldJointSim2& joint, con
     constraint.softness = makeConstraintSoftness( std::min( 60.0f, 0.25f / subStepTime ), 2.0f, subStepTime );
 
     const bool keepCache = joint.subStepTime == subStepTime;
-    constraint.linearImpulse = keepCache ? joint.linearImpulse : vec2{};
+    constraint.impulse = keepCache ? joint.impulse : vec2{};
     constraint.angularImpulse = keepCache && angularK > 0.0f ? joint.angularImpulse : 0.0f;
 
     return constraint;
@@ -51,10 +51,10 @@ void warmStartWeldJointConstraint( const weldJointConstraint2& constraint, bodyS
     const vec2 rA = Rotate( bodyStateA.deltaRotation, constraint.anchorA );
     const vec2 rB = Rotate( bodyStateB.deltaRotation, constraint.anchorB );
 
-    bodyStateA.linearVelocity -= constraint.invMassA * constraint.linearImpulse;
-    bodyStateA.angularVelocity -= constraint.invInertiaA * ( Cross( rA, constraint.linearImpulse ) + constraint.angularImpulse );
-    bodyStateB.linearVelocity += constraint.invMassB * constraint.linearImpulse;
-    bodyStateB.angularVelocity += constraint.invInertiaB * ( Cross( rB, constraint.linearImpulse ) + constraint.angularImpulse );
+    bodyStateA.linearVelocity -= constraint.invMassA * constraint.impulse;
+    bodyStateA.angularVelocity -= constraint.invInertiaA * ( Cross( rA, constraint.impulse ) + constraint.angularImpulse );
+    bodyStateB.linearVelocity += constraint.invMassB * constraint.impulse;
+    bodyStateB.angularVelocity += constraint.invInertiaB * ( Cross( rB, constraint.impulse ) + constraint.angularImpulse );
 }
 
 #pragma endregion WarmStart
@@ -98,9 +98,9 @@ void solveWeldJointConstraint( weldJointConstraint2& constraint, bodyState& body
     const float invDet = determinant > 0.0f ? 1.0f / determinant : 0.0f;
     const vec2 rhs = relativeVelocity + bias;
     const vec2 correction{ invDet * ( k22 * rhs.x - k12 * rhs.y ), invDet * ( k11 * rhs.y - k12 * rhs.x ) };
-    const vec2 impulse = -massScale * correction - impulseScale * constraint.linearImpulse;
+    const vec2 impulse = -massScale * correction - impulseScale * constraint.impulse;
 
-    constraint.linearImpulse += impulse;
+    constraint.impulse += impulse;
     bodyStateA.linearVelocity -= constraint.invMassA * impulse;
     bodyStateA.angularVelocity -= constraint.invInertiaA * Cross( rA, impulse );
     bodyStateB.linearVelocity += constraint.invMassB * impulse;
