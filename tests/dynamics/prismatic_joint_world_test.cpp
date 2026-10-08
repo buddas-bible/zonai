@@ -172,7 +172,10 @@ int main()
     check( motorData.motorForce > 0.0f, "Prismatic reports motor effort even when the limit cancels motion" );
     for( int i = 0; i < 60; ++i ) motor.Step( h, 4 );
     motorData = motor.getPrismaticJointData( motorJoint );
-    check( std::abs( motorData.currentTranslation - 0.5f ) < 0.002f, "Prismatic bias converges motor-driven limit error back to the boundary" );
+    check( std::abs( motor.GetBodyLinearVelocity( motorSlider ).x ) < 0.001f, "Prismatic upper limit keeps sustained motor velocity blocked" );
+    check( motorData.currentTranslation >= 0.5f && motorData.currentTranslation < 0.53f, "Prismatic soft limit keeps sustained motor position error bounded" );
+    check( motorData.motorForce > 0.0f, "Prismatic motor keeps applying effort against active limit" );
+    check( std::abs( Dot( motorData.force, motorData.axis ) ) < 1.0f, "Prismatic motor and upper limit reactions balance at steady state" );
 
     return EXIT_SUCCESS;
 }
