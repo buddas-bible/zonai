@@ -39,7 +39,12 @@ int main()
     {
         simulation.Step( 1.0f / 60.0f, 4 );
         const auto data = simulation.getWeldJointData( joint );
-        check( Length( data.anchorB - data.anchorA ) < 0.015f, "Weld keeps off-center anchors together" );
+        const float anchorError = Length( data.anchorB - data.anchorA );
+        if( anchorError >= 0.015f )
+        {
+            std::fprintf( stderr, "Weld diagnostic step=%d anchorError=%.9f angleError=%.9f\n", i, anchorError, data.currentAngle );
+        }
+        check( anchorError < 0.015f, "Weld keeps off-center anchors together" );
         check( std::abs( data.currentAngle ) < 0.015f, "Weld keeps relative angle fixed" );
         check( IsFinite( data.force ) && std::isfinite( data.torque ), "Weld reaction remains finite" );
     }
