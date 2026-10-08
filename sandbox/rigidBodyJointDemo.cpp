@@ -89,21 +89,52 @@ void rigidBodyDemo::applyPrismaticPreset( prismaticDemoPreset preset )
 
     constexpr float lowerTranslation = -2.0f;
     constexpr float upperTranslation = 2.0f;
+    constexpr float motorSpeed = 2.0f;
+    constexpr float maxMotorForce = 20.0f;
+
+    bool enableLimit = false;
+    float lower = lowerTranslation;
+    float upper = upperTranslation;
+    bool enableMotor = false;
+    float speed = motorSpeed;
 
     switch( preset )
     {
     case prismaticDemoPreset::free:
-        world_.setPrismaticJointLimit( prismaticJoint_, false, lowerTranslation, upperTranslation );
         break;
 
     case prismaticDemoPreset::limited:
-        world_.setPrismaticJointLimit( prismaticJoint_, true, lowerTranslation, upperTranslation );
+        enableLimit = true;
         break;
 
     case prismaticDemoPreset::locked:
-        world_.setPrismaticJointLimit( prismaticJoint_, true, 0.0f, 0.0f );
+        enableLimit = true;
+        lower = 0.0f;
+        upper = 0.0f;
+        break;
+
+    case prismaticDemoPreset::motorForward:
+        enableMotor = true;
+        break;
+
+    case prismaticDemoPreset::motorReverse:
+        enableMotor = true;
+        speed = -motorSpeed;
+        break;
+
+    case prismaticDemoPreset::brake:
+        enableMotor = true;
+        speed = 0.0f;
+        break;
+
+    case prismaticDemoPreset::motorLimit:
+        enableLimit = true;
+        enableMotor = true;
         break;
     }
+
+    world_.setPrismaticJointLimit( prismaticJoint_, enableLimit, lower, upper );
+    world_.setPrismaticJointMotor( prismaticJoint_, enableMotor, speed, maxMotorForce );
 }
 
 #pragma endregion Presets
