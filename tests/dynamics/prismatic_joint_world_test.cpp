@@ -167,7 +167,9 @@ int main()
     motor.setPrismaticJointMotor( motorJoint, true, 5.0f, 1000.0f );
     motor.Step( h, 4 );
     motorData = motor.getPrismaticJointData( motorJoint );
-    check( motorData.currentTranslation <= 0.502f && std::abs( motor.GetBodyLinearVelocity( motorSlider ).x ) < 0.001f, "Prismatic limit stops a motor at the upper boundary" );
+    const float boundarySpeed = motor.GetBodyLinearVelocity( motorSlider ).x;
+    std::fprintf( stderr, "Prismatic motor limit diagnostic: translation=%.9f speed=%.9f motorForce=%.9f totalAxialForce=%.9f\n", motorData.currentTranslation, boundarySpeed, motorData.motorForce, Dot( motorData.force, motorData.axis ) );
+    check( motorData.currentTranslation <= 0.502f && std::abs( boundarySpeed ) < 0.001f, "Prismatic limit stops a motor at the upper boundary" );
     check( motorData.motorForce > 0.0f, "Prismatic reports motor effort even when the limit cancels motion" );
 
     return EXIT_SUCCESS;
