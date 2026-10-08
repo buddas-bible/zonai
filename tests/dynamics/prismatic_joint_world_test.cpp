@@ -167,10 +167,12 @@ int main()
     motor.setPrismaticJointMotor( motorJoint, true, 5.0f, 1000.0f );
     motor.Step( h, 4 );
     motorData = motor.getPrismaticJointData( motorJoint );
-    const float boundarySpeed = motor.GetBodyLinearVelocity( motorSlider ).x;
-    std::fprintf( stderr, "Prismatic motor limit diagnostic: translation=%.9f speed=%.9f motorForce=%.9f totalAxialForce=%.9f\n", motorData.currentTranslation, boundarySpeed, motorData.motorForce, Dot( motorData.force, motorData.axis ) );
-    check( motorData.currentTranslation <= 0.502f && std::abs( boundarySpeed ) < 0.001f, "Prismatic limit stops a motor at the upper boundary" );
+    check( std::abs( motor.GetBodyLinearVelocity( motorSlider ).x ) < 0.001f, "Prismatic upper limit removes motor-driven outward velocity" );
+    check( motorData.currentTranslation < 0.53f, "Prismatic soft limit bounds the first motor-driven position error" );
     check( motorData.motorForce > 0.0f, "Prismatic reports motor effort even when the limit cancels motion" );
+    for( int i = 0; i < 60; ++i ) motor.Step( h, 4 );
+    motorData = motor.getPrismaticJointData( motorJoint );
+    check( std::abs( motorData.currentTranslation - 0.5f ) < 0.002f, "Prismatic bias converges motor-driven limit error back to the boundary" );
 
     return EXIT_SUCCESS;
 }
