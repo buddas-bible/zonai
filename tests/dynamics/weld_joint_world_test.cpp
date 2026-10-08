@@ -33,7 +33,7 @@ int main()
     definition.localAnchorB = { -1.0f, 0.0f };
     const auto joint = simulation.createWeldJoint( definition );
 
-    simulation.ApplyLinearImpulse( body, { 1.0f, 2.0f } );
+    simulation.ApplyLinearImpulseToCenter( body, { 1.0f, 2.0f } );
     simulation.ApplyAngularImpulse( body, 0.5f );
     for( int i = 0; i < 180; ++i )
     {
