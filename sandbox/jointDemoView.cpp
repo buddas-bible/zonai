@@ -64,11 +64,26 @@ public:
             }
             else if( kind == demoKind::prismaticRail )
             {
+                if( ImGui::Button( "자유###PrismaticPresetFree" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::free );
+                ImGui::SameLine();
+                if( ImGui::Button( "제한###PrismaticPresetLimited" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::limited );
+                ImGui::SameLine();
+                if( ImGui::Button( "위치 고정###PrismaticPresetLocked" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::locked );
+
                 const auto joint = view_.getWorld().getPrismaticJointData( view_.getPrismaticJoint() );
-                ImGui::TextWrapped( "1단계 Prismatic은 레일 축 이동만 자유롭고 축 수직 이동과 상대 회전을 잠급니다." );
+                const float axialForce = Dot( joint.force, joint.axis );
+                ImGui::TextWrapped( "2단계 Prismatic은 레일 축 이동에 하한·상한을 추가합니다. 수직 이동과 상대 회전 잠금은 그대로 유지됩니다." );
                 ImGui::Text( "축 이동: %.3f m", joint.currentTranslation );
-                ImGui::Text( "수직 오차: %.4f m / 상대 각도: %.4f rad", joint.lateralError, joint.currentAngle );
-                ImGui::Text( "수직 반력: %.2f N / 회전 반력: %.2f N*m", Length( joint.force ), joint.torque );
+                if( joint.enableLimit )
+                {
+                    ImGui::Text( "이동 범위: %.2f ~ %.2f m", joint.lowerTranslation, joint.upperTranslation );
+                }
+                else
+                {
+                    ImGui::TextUnformatted( "이동 범위: 자유" );
+                }
+                ImGui::Text( "축 제한 반력: %.2f N / 수직 오차: %.4f m", axialForce, joint.lateralError );
+                ImGui::Text( "상대 각도: %.4f rad / 회전 반력: %.2f N*m", joint.currentAngle, joint.torque );
             }
             else
             {
