@@ -28,7 +28,7 @@ prismaticJointConstraint2 preparePrismaticJointConstraint( const prismaticJointS
     constraint.invInertiaA = bodySimA.invInertia;
     constraint.invInertiaB = bodySimB.invInertia;
 
-    // Contact/기존 Joint와 같은 수치 안정화. Prismatic 자체의 물리 스프링은 아직 추가하지 않음.
+    // Contact/기존 Joint와 같은 수치 안정화. 축 방향 물리 스프링은 별도 softness를 사용함.
     constraint.softness = makeConstraintSoftness( std::min( 60.0f, 0.25f / subStepTime ), 2.0f, subStepTime );
     const bool sameStep = joint.subStepTime == subStepTime;
     const bool hasResponse = constraint.invMassA + constraint.invMassB + constraint.invInertiaA + constraint.invInertiaB > 0.0f;
@@ -47,6 +47,15 @@ prismaticJointConstraint2 preparePrismaticJointConstraint( const prismaticJointS
     constraint.motorImpulse = sameStep && constraint.enableMotor && hasResponse
         ? std::clamp( joint.motorImpulse, -constraint.maxMotorImpulse, constraint.maxMotorImpulse )
         : 0.0f;
+
+    constraint.enableSpring = joint.enableSpring;
+    constraint.hertz = joint.hertz;
+    constraint.targetTranslation = joint.targetTranslation;
+    // Box2D의 0 Hz softness는 massScale도 0임. Zonai 공용 softness의 0 Hz 기본값은 다른 용도가 있으므로 여기서 spring off 의미를 명시함.
+    constraint.springSoftness = constraint.enableSpring && joint.hertz > 0.0f
+        ? makeConstraintSoftness( joint.hertz, joint.dampingRatio, subStepTime )
+        : constraintSoftness2{ 0.0f, 0.0f, 0.0f };
+    constraint.springImpulse = sameStep && constraint.enableSpring && joint.hertz > 0.0f && hasResponse ? joint.springImpulse : 0.0f;
 
     return constraint;
 }
@@ -67,7 +76,7 @@ void warmStartPrismaticJointConstraint( const prismaticJointConstraint2& constra
     const float s1 = Cross( d + r_a, perpendicular );
     const float s2 = Cross( r_b, perpendicular );
 
-    const float axialImpulse = constraint.motorImpulse + constraint.lowerImpulse - constraint.upperImpulse;
+    const float axialImpulse = constraint.springImpulse + constraint.motorImpulse + constraint.lowerImpulse - constraint.upperImpulse;
     const vec2 linearImpulse = axialImpulse * axis + constraint.impulse.x * perpendicular;
     const float angularImpulseA = axialImpulse * a1 + constraint.impulse.x * s1 + constraint.impulse.y;
     const float angularImpulseB = axialImpulse * a2 + constraint.impulse.x * s2 + constraint.impulse.y;
@@ -89,33 +98,48 @@ void solvePrismaticJointConstraint( prismaticJointConstraint2& constraint, bodyS
     const vec2 d = constraint.deltaCenter + bodyStateB.deltaPosition - bodyStateA.deltaPosition + r_b - r_a;
     const vec2 axis = Rotate( bodyStateA.deltaRotation, constraint.axisA );
 
-    if( constraint.enableMotor )
-    {
-        const float a1 = Cross( d + r_a, axis );
-        const float a2 = Cross( r_b, axis );
-        const float k = constraint.invMassA + constraint.invMassB + constraint.invInertiaA * a1 * a1 + constraint.invInertiaB * a2 * a2;
-        const float axialMass = k > 0.0f ? 1.0f / k : 0.0f;
-        const float velocity = Dot( axis, bodyStateB.linearVelocity - bodyStateA.linearVelocity ) + a2 * bodyStateB.angularVelocity - a1 * bodyStateA.angularVelocity;
-        const float deltaImpulse = axialMass * ( constraint.motorSpeed - velocity );
-        const float oldImpulse = constraint.motorImpulse;
-        constraint.motorImpulse = std::clamp( oldImpulse + deltaImpulse, -constraint.maxMotorImpulse, constraint.maxMotorImpulse );
-        const float impulse = constraint.motorImpulse - oldImpulse;
-        const vec2 linearImpulse = impulse * axis;
+    // Spring / Motor / Limit은 모두 같은 축 Jacobian과 effective mass를 사용함.
+    const float a1 = Cross( d + r_a, axis );
+    const float a2 = Cross( r_b, axis );
+    const float axialK = constraint.invMassA + constraint.invMassB + constraint.invInertiaA * a1 * a1 + constraint.invInertiaB * a2 * a2;
+    const float axialMass = axialK > 0.0f ? 1.0f / axialK : 0.0f;
+    const float translation = Dot( axis, d );
 
+    auto computeAxialVelocity = [&]()
+    {
+        return Dot( axis, bodyStateB.linearVelocity - bodyStateA.linearVelocity ) + a2 * bodyStateB.angularVelocity - a1 * bodyStateA.angularVelocity;
+    };
+
+    auto applyAxialImpulse = [&]( float impulse )
+    {
+        const vec2 linearImpulse = impulse * axis;
         bodyStateA.linearVelocity -= constraint.invMassA * linearImpulse;
         bodyStateA.angularVelocity -= constraint.invInertiaA * impulse * a1;
         bodyStateB.linearVelocity += constraint.invMassB * linearImpulse;
         bodyStateB.angularVelocity += constraint.invInertiaB * impulse * a2;
+    };
+
+    if( constraint.enableSpring && constraint.hertz > 0.0f )
+    {
+        // 실제 물리 스프링이므로 Contact의 임시 penetration bias와 달리 relax pass에서도 같은 복원력을 유지함.
+        const float positionError = translation - constraint.targetTranslation;
+        const float bias = constraint.springSoftness.biasRate * positionError;
+        const float deltaImpulse = -constraint.springSoftness.massScale * axialMass * ( computeAxialVelocity() + bias )
+            - constraint.springSoftness.impulseScale * constraint.springImpulse;
+        constraint.springImpulse += deltaImpulse;
+        applyAxialImpulse( deltaImpulse );
+    }
+
+    if( constraint.enableMotor )
+    {
+        const float deltaImpulse = axialMass * ( constraint.motorSpeed - computeAxialVelocity() );
+        const float oldImpulse = constraint.motorImpulse;
+        constraint.motorImpulse = std::clamp( oldImpulse + deltaImpulse, -constraint.maxMotorImpulse, constraint.maxMotorImpulse );
+        applyAxialImpulse( constraint.motorImpulse - oldImpulse );
     }
 
     if( constraint.enableLimit )
     {
-        const float a1 = Cross( d + r_a, axis );
-        const float a2 = Cross( r_b, axis );
-        const float k = constraint.invMassA + constraint.invMassB + constraint.invInertiaA * a1 * a1 + constraint.invInertiaB * a2 * a2;
-        const float axialMass = k > 0.0f ? 1.0f / k : 0.0f;
-        const float translation = Dot( axis, d );
-
         auto solveLimit = [&]( float separation, float direction, float& accumulatedImpulse )
         {
             float bias = 0.0f;
@@ -134,20 +158,14 @@ void solvePrismaticJointConstraint( prismaticJointConstraint2& constraint, bodyS
                 impulseScale = constraint.softness.impulseScale;
             }
 
-            const float velocity = direction * ( Dot( axis, bodyStateB.linearVelocity - bodyStateA.linearVelocity ) + a2 * bodyStateB.angularVelocity - a1 * bodyStateA.angularVelocity );
+            const float velocity = direction * computeAxialVelocity();
             const float deltaImpulse = -massScale * axialMass * ( velocity + bias ) - impulseScale * accumulatedImpulse;
             const float oldImpulse = accumulatedImpulse;
             accumulatedImpulse = std::max( 0.0f, oldImpulse + deltaImpulse );
-            const float impulse = direction * ( accumulatedImpulse - oldImpulse );
-            const vec2 linearImpulse = impulse * axis;
-
-            bodyStateA.linearVelocity -= constraint.invMassA * linearImpulse;
-            bodyStateA.angularVelocity -= constraint.invInertiaA * impulse * a1;
-            bodyStateB.linearVelocity += constraint.invMassB * linearImpulse;
-            bodyStateB.angularVelocity += constraint.invInertiaB * impulse * a2;
+            applyAxialImpulse( direction * ( accumulatedImpulse - oldImpulse ) );
         };
 
-        // 모터가 만든 축속도도 경계를 통과하지 못하도록 그 다음에 limit을 적용함.
+        // Spring/Motor가 만든 축속도도 경계를 통과하지 못하도록 그 다음에 limit을 적용함.
         solveLimit( translation - constraint.lowerTranslation, 1.0f, constraint.lowerImpulse );
         solveLimit( constraint.upperTranslation - translation, -1.0f, constraint.upperImpulse );
     }
