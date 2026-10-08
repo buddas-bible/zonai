@@ -25,7 +25,7 @@ public:
         view_.drawControls();
 
         const demoKind kind = view_.getKind();
-        if( kind != demoKind::distancePendulum && kind != demoKind::revoluteHinge && kind != demoKind::wheelSuspension && kind != demoKind::mouseJointPlayground ) return;
+        if( kind != demoKind::distancePendulum && kind != demoKind::revoluteHinge && kind != demoKind::wheelSuspension && kind != demoKind::prismaticRail && kind != demoKind::mouseJointPlayground ) return;
 
         if( ImGui::CollapsingHeader( "조인트 빠른 설정###JointQuickSettings", ImGuiTreeNodeFlags_DefaultOpen ) )
         {
@@ -61,6 +61,14 @@ public:
                 ImGui::SameLine();
                 if( ImGui::Button( "전체###WheelPresetCombined" ) ) view_.applyWheelPreset( wheelDemoPreset::combined );
                 ImGui::TextWrapped( "서스펜션 스프링, 이동 제한, 회전 모터와 결합 상태를 빠르게 전환합니다." );
+            }
+            else if( kind == demoKind::prismaticRail )
+            {
+                const auto joint = view_.getWorld().getPrismaticJointData( view_.getPrismaticJoint() );
+                ImGui::TextWrapped( "1단계 Prismatic은 레일 축 이동만 자유롭고 축 수직 이동과 상대 회전을 잠급니다." );
+                ImGui::Text( "축 이동: %.3f m", joint.currentTranslation );
+                ImGui::Text( "수직 오차: %.4f m / 상대 각도: %.4f rad", joint.lateralError, joint.currentAngle );
+                ImGui::Text( "수직 반력: %.2f N / 회전 반력: %.2f N*m", Length( joint.force ), joint.torque );
             }
             else
             {
