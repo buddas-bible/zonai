@@ -452,30 +452,14 @@ add_test(
 add_executable(restitutionTests
     dynamics/restitution_test.cpp
 )
-
-target_link_libraries(restitutionTests
-    PRIVATE
-        zonai::zonai
-)
-
-add_test(
-    NAME restitutionTests
-    COMMAND restitutionTests
-)
+target_link_libraries(restitutionTests PRIVATE zonai::zonai)
+add_test(NAME restitutionTests COMMAND restitutionTests)
 
 add_executable(islandTests
     dynamics/island_test.cpp
 )
-
-target_link_libraries(islandTests
-    PRIVATE
-        zonai::zonai
-)
-
-add_test(
-    NAME islandTests
-    COMMAND islandTests
-)
+target_link_libraries(islandTests PRIVATE zonai::zonai)
+add_test(NAME islandTests COMMAND islandTests)
 
 add_executable(bodyShapeContactLifecycleTests dynamics/body_shape_contact_lifecycle_test.cpp)
 target_link_libraries(bodyShapeContactLifecycleTests PRIVATE zonai::zonai)
@@ -523,6 +507,10 @@ add_test(NAME wheelJointTests COMMAND wheelJointTests)
 add_executable(wheelJointWorldTests dynamics/wheel_joint_world_test.cpp)
 target_link_libraries(wheelJointWorldTests PRIVATE zonai::zonai)
 add_test(NAME wheelJointWorldTests COMMAND wheelJointWorldTests)
+
+add_executable(prismaticJointTests dynamics/prismatic_joint_test.cpp)
+target_link_libraries(prismaticJointTests PRIVATE zonai::zonai)
+add_test(NAME prismaticJointTests COMMAND prismaticJointTests)
 
 add_executable(sandboxDemoTests sandbox/demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
 target_include_directories(sandboxDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
