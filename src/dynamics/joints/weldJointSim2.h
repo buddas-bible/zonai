@@ -17,7 +17,8 @@ struct weldJointSim2
     vec2 localAnchorB{};
     float referenceAngle = 0.0f;
 
-    vec2 linearImpulse{};
+    // 공용 Joint store/reset 경로와 같은 이름을 쓰며 의미는 2D 선형 Weld 임펄스임.
+    vec2 impulse{};
     float angularImpulse = 0.0f;
     float subStepTime = 0.0f;
 };
