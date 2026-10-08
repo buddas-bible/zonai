@@ -516,6 +516,8 @@ jointId world::createPrismaticJoint( const prismaticJointDef& definition )
     assert( IsFinite( definition.localAxisA ) && std::abs( LengthSquared( definition.localAxisA ) - 1.0f ) < 0.0001f );
     assert( std::isfinite( definition.referenceAngle ) );
     assert( std::isfinite( definition.lowerTranslation ) && std::isfinite( definition.upperTranslation ) && definition.lowerTranslation <= definition.upperTranslation );
+    assert( std::isfinite( definition.motorSpeed ) );
+    assert( std::isfinite( definition.maxMotorForce ) && definition.maxMotorForce >= 0.0f );
 
     const std::int32_t index = allocateJoint( bodyIndexA, bodyIndexB, definition.collideConnected );
     prismaticJointSim2 sim{};
@@ -529,6 +531,9 @@ jointId world::createPrismaticJoint( const prismaticJointDef& definition )
     sim.enableLimit = definition.enableLimit;
     sim.lowerTranslation = definition.lowerTranslation;
     sim.upperTranslation = definition.upperTranslation;
+    sim.enableMotor = definition.enableMotor;
+    sim.motorSpeed = definition.motorSpeed;
+    sim.maxMotorForce = definition.maxMotorForce;
     jointSims_[index] = sim;
 
     return makeJointId( index );
@@ -558,6 +563,32 @@ void world::setPrismaticJointLimit( jointId id, bool enableLimit, float lowerTra
     }
 }
 
+void world::setPrismaticJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorForce )
+{
+    assert( std::isfinite( motorSpeed ) );
+    assert( std::isfinite( maxMotorForce ) && maxMotorForce >= 0.0f );
+
+    auto& joint = std::get<prismaticJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.enableMotor == enableMotor && joint.motorSpeed == motorSpeed && joint.maxMotorForce == maxMotorForce ) return;
+
+    joint.enableMotor = enableMotor;
+    joint.motorSpeed = motorSpeed;
+    joint.maxMotorForce = maxMotorForce;
+    joint.impulse = {};
+    joint.lowerImpulse = 0.0f;
+    joint.upperImpulse = 0.0f;
+    joint.motorImpulse = 0.0f;
+
+    if( bodies_[joint.bodyIdA].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdA );
+    }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdB );
+    }
+}
+
 prismaticJointData world::getPrismaticJointData( jointId id ) const
 {
     const std::int32_t index = getJointIndex( id );
@@ -574,12 +605,16 @@ prismaticJointData world::getPrismaticJointData( jointId id ) const
     data.lateralError = Dot( perpendicular, d );
     const rot2 relativeRotation = Inverse( bodySims_[sim.bodyIdA].transform.rotation * rot2::FromRadians( sim.referenceAngle ) ) * bodySims_[sim.bodyIdB].transform.rotation;
     data.currentAngle = std::atan2( relativeRotation.s, relativeRotation.c );
-    const float axialImpulse = sim.lowerImpulse - sim.upperImpulse;
+    const float axialImpulse = sim.motorImpulse + sim.lowerImpulse - sim.upperImpulse;
     data.force = sim.subStepTime > 0.0f ? ( sim.impulse.x * perpendicular + axialImpulse * data.axis ) / sim.subStepTime : vec2{};
     data.torque = sim.subStepTime > 0.0f ? sim.impulse.y / sim.subStepTime : 0.0f;
     data.enableLimit = sim.enableLimit;
     data.lowerTranslation = sim.lowerTranslation;
     data.upperTranslation = sim.upperTranslation;
+    data.enableMotor = sim.enableMotor;
+    data.motorSpeed = sim.motorSpeed;
+    data.maxMotorForce = sim.maxMotorForce;
+    data.motorForce = sim.subStepTime > 0.0f ? sim.motorImpulse / sim.subStepTime : 0.0f;
     data.collideConnected = joints_[index].collideConnected;
 
     return data;
@@ -2101,6 +2136,7 @@ void world::Step( float timeStep, int subStepCount )
                     {
                         joint.lowerImpulse = constraint.lowerImpulse;
                         joint.upperImpulse = constraint.upperImpulse;
+                        joint.motorImpulse = constraint.motorImpulse;
                     }
                     if constexpr( std::is_same_v<simType, wheelJointSim2> )
                     {
@@ -2624,6 +2660,7 @@ void world::resetJointImpulses( std::int32_t bodyIndex )
                 {
                     joint.lowerImpulse = 0.0f;
                     joint.upperImpulse = 0.0f;
+                    joint.motorImpulse = 0.0f;
                 }
                 if constexpr( std::is_same_v<simType, wheelJointSim2> )
                 {
