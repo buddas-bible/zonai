@@ -42,7 +42,6 @@ struct prismaticJointData
     vec2 anchorB{};
     vec2 axis{};
     float currentTranslation = 0.0f;
-    float currentSpeed = 0.0f; // 두 anchor의 실제 점속도를 축에 투영한 상대속도 (m/s).
     float lateralError = 0.0f;
     float currentAngle = 0.0f;
     vec2 force{}; // 마지막 substep의 축 수직 + spring + motor + translation limit 누적 선형 임펄스 / h.
