@@ -111,6 +111,8 @@ public:
 
     [[nodiscard]] jointId getPrismaticJoint() const noexcept { return prismaticJoint_; }
 
+    [[nodiscard]] float getPrismaticCurrentSpeed() const;
+
     [[nodiscard]] std::span<const jointId> getCarJoints() const noexcept { return carJoints_; }
 
     [[nodiscard]] float getCarMotorSpeed() const noexcept { return carMotorSpeed_; }
