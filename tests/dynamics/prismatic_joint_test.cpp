@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 #include "dynamics/joints/prismaticJointConstraint2.h"
 
 using namespace zonai;
