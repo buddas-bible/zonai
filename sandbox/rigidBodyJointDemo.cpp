@@ -83,6 +83,29 @@ void rigidBodyDemo::applyWheelPreset( wheelDemoPreset preset )
     world_.setWheelJointMotor( wheelJoint_, enableMotor, motorSpeed, maxMotorTorque );
 }
 
+void rigidBodyDemo::applyPrismaticPreset( prismaticDemoPreset preset )
+{
+    if( kind_ != demoKind::prismaticRail || !world_.IsValid( prismaticJoint_ ) ) return;
+
+    constexpr float lowerTranslation = -2.0f;
+    constexpr float upperTranslation = 2.0f;
+
+    switch( preset )
+    {
+    case prismaticDemoPreset::free:
+        world_.setPrismaticJointLimit( prismaticJoint_, false, lowerTranslation, upperTranslation );
+        break;
+
+    case prismaticDemoPreset::limited:
+        world_.setPrismaticJointLimit( prismaticJoint_, true, lowerTranslation, upperTranslation );
+        break;
+
+    case prismaticDemoPreset::locked:
+        world_.setPrismaticJointLimit( prismaticJoint_, true, 0.0f, 0.0f );
+        break;
+    }
+}
+
 #pragma endregion Presets
 
 #pragma region SceneSetup
