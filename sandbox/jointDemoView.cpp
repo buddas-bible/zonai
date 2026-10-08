@@ -76,11 +76,25 @@ public:
                 if( ImGui::Button( "제동###PrismaticPresetBrake" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::brake );
                 ImGui::SameLine();
                 if( ImGui::Button( "모터+제한###PrismaticPresetMotorLimit" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::motorLimit );
+                if( ImGui::Button( "스프링###PrismaticPresetSpring" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::spring );
+                ImGui::SameLine();
+                if( ImGui::Button( "스프링+제한###PrismaticPresetSpringLimit" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::springLimit );
+                ImGui::SameLine();
+                if( ImGui::Button( "전체###PrismaticPresetCombined" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::combined );
 
                 const auto joint = view_.getWorld().getPrismaticJointData( view_.getPrismaticJoint() );
                 const float axialForce = Dot( joint.force, joint.axis );
-                ImGui::TextWrapped( "3단계 Prismatic Motor는 위치가 아니라 레일 축 상대속도를 목표값으로 만듭니다. 0 m/s는 같은 제약으로 축 움직임을 제동합니다." );
+                ImGui::TextWrapped( "4단계 Prismatic은 축 위치를 목표로 하는 물리 스프링을 추가합니다. Spring은 위치 오차를 줄이고 Motor는 목표 속도를 만들며 Limit은 허용 범위를 넘는 이동을 막습니다." );
                 ImGui::Text( "축 이동: %.3f m", joint.currentTranslation );
+                if( joint.enableSpring )
+                {
+                    ImGui::Text( "스프링 목표: %.2f m / %.2f Hz / 감쇠 %.2f", joint.targetTranslation, joint.hertz, joint.dampingRatio );
+                    ImGui::Text( "스프링 힘: %.2f N", joint.springForce );
+                }
+                else
+                {
+                    ImGui::TextUnformatted( "스프링: 꺼짐" );
+                }
                 if( joint.enableLimit )
                 {
                     ImGui::Text( "이동 범위: %.2f ~ %.2f m", joint.lowerTranslation, joint.upperTranslation );
