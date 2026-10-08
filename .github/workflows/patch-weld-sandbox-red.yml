@@ -1,0 +1,74 @@
+name: Patch Weld Sandbox RED
+
+on:
+  push:
+    branches:
+      - feature/weld-joint
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/weld-joint
+          fetch-depth: 0
+
+      - name: Add Weld sandbox RED tests
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("tests/sandbox/joint_demo_test.cpp")
+          text = path.read_text(encoding="utf-8")
+
+          old = '    check( getDemoEntries().size() == 7, "Prismatic demo is independently selectable" );\n'
+          new = '    check( getDemoEntries().size() == 8, "Weld demo is independently selectable" );\n'
+          if text.count(old) != 1:
+              raise RuntimeError("demo count anchor mismatch")
+          text = text.replace(old, new)
+
+          old = '    check( std::string_view{ getDemoEntry( demoKind::prismaticRail ).category } == "조인트", "Prismatic rail stays in joint category" );\n'
+          new = old + '    check( std::string_view{ getDemoEntry( demoKind::weldPair ).category } == "조인트", "Weld pair stays in joint category" );\n'
+          if text.count(old) != 1:
+              raise RuntimeError("category anchor mismatch")
+          text = text.replace(old, new)
+
+          marker = '    rigidBodyDemo prismatic{ demoKind::prismaticRail };\n'
+          weld = r'''    rigidBodyDemo weld{ demoKind::weldPair };
+              check( weld.getWorld().GetBodyCount() == 2 && weld.getWorld().getJointCount() == 1 && weld.getShapes().size() == 2, "Weld scene has two connected dynamic bodies" );
+              const jointId weldId = weld.getWeldJoint();
+              check( weld.getWorld().IsValid( weldId ), "Weld scene owns a valid joint" );
+              auto weldData = weld.getWorld().getWeldJointData( weldId );
+              check( Length( weldData.anchorB - weldData.anchorA ) < 0.00001f && std::abs( weldData.currentAngle ) < 0.00001f, "Weld pair starts at its reference transform" );
+
+              const transform2 initialA = weld.getWorld().GetBodyTransform( weldData.bodyA );
+              const transform2 initialB = weld.getWorld().GetBodyTransform( weldData.bodyB );
+              const vec2 initialDelta = initialB.position - initialA.position;
+              weld.getWorld().ApplyLinearImpulseToCenter( weldData.bodyB, { 2.0f, 1.0f } );
+              weld.getWorld().ApplyAngularImpulse( weldData.bodyB, 0.3f );
+              for( int i = 0; i < 180; ++i ) weld.step( 1.0f / 60.0f, 4 );
+              weldData = weld.getWorld().getWeldJointData( weldId );
+              check( Length( weldData.anchorB - weldData.anchorA ) < 0.01f && std::abs( weldData.currentAngle ) < 0.01f, "Weld demo restores anchor and relative angle after impulses" );
+              const transform2 finalA = weld.getWorld().GetBodyTransform( weldData.bodyA );
+              const transform2 finalB = weld.getWorld().GetBodyTransform( weldData.bodyB );
+              check( Length( ( finalB.position - finalA.position ) - initialDelta ) < 0.05f, "Weld demo keeps the pair as one relative frame" );
+
+          '''
+          if text.count(marker) != 1:
+              raise RuntimeError("Prismatic test marker mismatch")
+          text = text.replace(marker, weld + marker)
+          path.write_text(text, encoding="utf-8")
+
+      - name: Commit RED tests
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/sandbox/joint_demo_test.cpp
+          git commit -m "Add failing Weld sandbox tests"
+          git push origin HEAD:feature/weld-joint
