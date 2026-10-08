@@ -71,6 +71,10 @@ public:
     void setCollisionMatrix( const collisionMatrix& matrix ) override;
     void setMouseSettings( float hertz, float dampingRatio, float maxForce );
     void setCarMotorSettings( float speed, float maxTorque );
+    void setPrismaticSpringSettings( bool enableSpring, float hertz, float dampingRatio, float targetTranslation );
+    void setPrismaticLimitSettings( bool enableLimit, float lowerTranslation, float upperTranslation );
+    void setPrismaticMotorSettings( bool enableMotor, float motorSpeed, float maxMotorForce );
+    void setPrismaticSpringTargetToCurrent();
     void applyDistancePreset( distanceDemoPreset preset );
     void applyRevolutePreset( revoluteDemoPreset preset );
     void applyWheelPreset( wheelDemoPreset preset );
@@ -106,6 +110,8 @@ public:
     [[nodiscard]] jointId getWheelJoint() const noexcept { return wheelJoint_; }
 
     [[nodiscard]] jointId getPrismaticJoint() const noexcept { return prismaticJoint_; }
+
+    [[nodiscard]] float getPrismaticCurrentSpeed() const;
 
     [[nodiscard]] std::span<const jointId> getCarJoints() const noexcept { return carJoints_; }
 

@@ -100,6 +100,26 @@ int main()
     auto prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
     check( std::abs( prismaticData.lateralError ) < 0.00001f && std::abs( prismaticData.currentAngle ) < 0.00001f, "Prismatic slider starts on its rail" );
 
+    // Inspector는 preset이 아닌 임의 값을 실시간으로 적용할 수 있어야 함.
+    prismatic.setPrismaticSpringSettings( true, 5.0f, 1.2f, 1.25f );
+    prismatic.setPrismaticLimitSettings( true, -1.25f, 1.75f );
+    prismatic.setPrismaticMotorSettings( true, -3.0f, 40.0f );
+    prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
+    check( prismaticData.enableSpring && prismaticData.hertz == 5.0f && prismaticData.dampingRatio == 1.2f && prismaticData.targetTranslation == 1.25f, "Prismatic inspector applies spring values" );
+    check( prismaticData.enableLimit && prismaticData.lowerTranslation == -1.25f && prismaticData.upperTranslation == 1.75f, "Prismatic inspector applies limit values" );
+    check( prismaticData.enableMotor && prismaticData.motorSpeed == -3.0f && prismaticData.maxMotorForce == 40.0f, "Prismatic inspector applies motor values" );
+
+    const bodyId inspectorSlider = prismaticData.bodyB;
+    prismatic.getWorld().SetBodyLinearVelocity( inspectorSlider, { 2.5f, 0.0f } );
+    check( std::abs( prismatic.getPrismaticCurrentSpeed() - 2.5f ) < 0.0001f, "Prismatic inspector reports axial relative speed" );
+
+    transform2 inspectorTransform = prismatic.getWorld().GetBodyTransform( inspectorSlider );
+    inspectorTransform.position = { 0.8f, 0.0f };
+    prismatic.getWorld().SetBodyTransform( inspectorSlider, inspectorTransform );
+    prismatic.setPrismaticSpringTargetToCurrent();
+    prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
+    check( std::abs( prismaticData.targetTranslation - prismaticData.currentTranslation ) < 0.0001f, "Prismatic inspector can copy current translation to spring target" );
+
     prismatic.applyPrismaticPreset( prismaticDemoPreset::limited );
     prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
     check( !prismaticData.enableSpring && prismaticData.enableLimit && prismaticData.lowerTranslation == -2.0f && prismaticData.upperTranslation == 2.0f && !prismaticData.enableMotor, "Prismatic limited preset isolates the translation range" );

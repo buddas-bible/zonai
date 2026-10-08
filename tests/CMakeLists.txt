@@ -550,4 +550,21 @@ if(TARGET imgui)
     add_custom_command(TARGET sandboxDemoTests POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/sandbox/assets" "$<TARGET_FILE_DIR:sandboxDemoTests>/assets"
     )
+
+    add_executable(sandboxJointViewTests
+        sandbox/joint_demo_ui_test.cpp
+        "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp"
+        "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp"
+        "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp"
+        "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemoUi.cpp"
+        "${PROJECT_SOURCE_DIR}/sandbox/jointDemoView.cpp"
+        "${PROJECT_SOURCE_DIR}/sandbox/debug/debugCamera.cpp"
+        "${PROJECT_SOURCE_DIR}/sandbox/debug/debugDraw.cpp"
+    )
+    target_include_directories(sandboxJointViewTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+    target_link_libraries(sandboxJointViewTests PRIVATE zonai::zonai imgui)
+    add_test(NAME sandboxJointViewTests COMMAND sandboxJointViewTests)
+    add_custom_command(TARGET sandboxJointViewTests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/sandbox/assets" "$<TARGET_FILE_DIR:sandboxJointViewTests>/assets"
+    )
 endif()

@@ -6,6 +6,35 @@
 namespace zonai::sandbox
 {
 
+#pragma region Settings
+
+void rigidBodyDemo::setPrismaticSpringSettings( bool enableSpring, float hertz, float dampingRatio, float targetTranslation )
+{
+    if( kind_ != demoKind::prismaticRail || !world_.IsValid( prismaticJoint_ ) ) return;
+    world_.setPrismaticJointSpring( prismaticJoint_, enableSpring, hertz, dampingRatio, targetTranslation );
+}
+
+void rigidBodyDemo::setPrismaticLimitSettings( bool enableLimit, float lowerTranslation, float upperTranslation )
+{
+    if( kind_ != demoKind::prismaticRail || !world_.IsValid( prismaticJoint_ ) ) return;
+    world_.setPrismaticJointLimit( prismaticJoint_, enableLimit, lowerTranslation, upperTranslation );
+}
+
+void rigidBodyDemo::setPrismaticMotorSettings( bool enableMotor, float motorSpeed, float maxMotorForce )
+{
+    if( kind_ != demoKind::prismaticRail || !world_.IsValid( prismaticJoint_ ) ) return;
+    world_.setPrismaticJointMotor( prismaticJoint_, enableMotor, motorSpeed, maxMotorForce );
+}
+
+void rigidBodyDemo::setPrismaticSpringTargetToCurrent()
+{
+    if( kind_ != demoKind::prismaticRail || !world_.IsValid( prismaticJoint_ ) ) return;
+    const prismaticJointData joint = world_.getPrismaticJointData( prismaticJoint_ );
+    world_.setPrismaticJointSpring( prismaticJoint_, joint.enableSpring, joint.hertz, joint.dampingRatio, joint.currentTranslation );
+}
+
+#pragma endregion Settings
+
 #pragma region Presets
 
 void rigidBodyDemo::applyDistancePreset( distanceDemoPreset preset )
@@ -163,6 +192,24 @@ void rigidBodyDemo::applyPrismaticPreset( prismaticDemoPreset preset )
 }
 
 #pragma endregion Presets
+
+#pragma region Queries
+
+float rigidBodyDemo::getPrismaticCurrentSpeed() const
+{
+    if( kind_ != demoKind::prismaticRail || !world_.IsValid( prismaticJoint_ ) ) return 0.0f;
+
+    const prismaticJointData joint = world_.getPrismaticJointData( prismaticJoint_ );
+    const vec2 centerA = TransformPoint( world_.GetBodyTransform( joint.bodyA ), world_.GetBodyLocalCenter( joint.bodyA ) );
+    const vec2 centerB = TransformPoint( world_.GetBodyTransform( joint.bodyB ), world_.GetBodyLocalCenter( joint.bodyB ) );
+    const vec2 rA = joint.anchorA - centerA;
+    const vec2 rB = joint.anchorB - centerB;
+    const vec2 velocityA = world_.GetBodyLinearVelocity( joint.bodyA ) + Cross( world_.GetBodyAngularVelocity( joint.bodyA ), rA );
+    const vec2 velocityB = world_.GetBodyLinearVelocity( joint.bodyB ) + Cross( world_.GetBodyAngularVelocity( joint.bodyB ), rB );
+    return Dot( joint.axis, velocityB - velocityA );
+}
+
+#pragma endregion Queries
 
 #pragma region SceneSetup
 
