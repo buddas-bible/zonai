@@ -48,7 +48,10 @@ enum class prismaticDemoPreset
     motorForward,
     motorReverse,
     brake,
-    motorLimit
+    motorLimit,
+    spring,
+    springLimit,
+    combined
 };
 
 class rigidBodyDemo : public demo
