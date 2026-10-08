@@ -33,26 +33,17 @@ int main()
     definition.localAnchorB = { -1.0f, 0.0f };
     const auto joint = simulation.createWeldJoint( definition );
 
+    // 강한 선형/회전 충격은 hard constraint에도 짧은 위치 오차를 만들 수 있으므로,
+    // 매 Step의 절대 오차보다 반력이 유한하고 기준 관계로 안정적으로 수렴하는지를 검증함.
     simulation.ApplyLinearImpulseToCenter( body, { 1.0f, 2.0f } );
     simulation.ApplyAngularImpulse( body, 0.5f );
-    float maximumAnchorError = 0.0f;
-    float maximumAngleError = 0.0f;
     for( int i = 0; i < 180; ++i )
     {
         simulation.Step( 1.0f / 60.0f, 4 );
         const auto state = simulation.getWeldJointData( joint );
-        const float anchorError = Length( state.anchorB - state.anchorA );
-        const float angleError = std::abs( state.currentAngle );
-        maximumAnchorError = std::max( maximumAnchorError, anchorError );
-        maximumAngleError = std::max( maximumAngleError, angleError );
-        if( i < 5 || i == 9 || i == 29 || i == 179 )
-        {
-            std::fprintf( stderr, "Weld diagnostic step=%d anchorError=%.9f angleError=%.9f\n", i, anchorError, state.currentAngle );
-        }
         check( IsFinite( state.force ) && std::isfinite( state.torque ), "Weld reaction remains finite" );
     }
     auto data = simulation.getWeldJointData( joint );
-    std::fprintf( stderr, "Weld diagnostic maxAnchor=%.9f maxAngle=%.9f finalAnchor=%.9f finalAngle=%.9f\n", maximumAnchorError, maximumAngleError, Length( data.anchorB - data.anchorA ), data.currentAngle );
     check( Length( data.anchorB - data.anchorA ) < 0.001f && std::abs( data.currentAngle ) < 0.001f, "Weld errors converge after the stress impulse" );
     check( simulation.getJointCount() == 1 && simulation.GetBody( body ).jointCount == 1, "Weld shares common joint graph" );
 
