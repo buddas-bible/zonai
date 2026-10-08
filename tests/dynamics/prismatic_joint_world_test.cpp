@@ -180,5 +180,53 @@ int main()
     check( motorData.motorForce > 0.0f, "Prismatic motor keeps applying effort against active limit" );
     check( std::abs( Dot( motorData.force, motorData.axis ) ) < 1.0f, "Prismatic motor and upper limit reactions balance at steady state" );
 
+    world spring;
+    spring.SetGravity( {} );
+    const bodyId springRail = spring.CreateBody();
+    const bodyId springSlider = spring.CreateBody( bodyType::Dynamic, { { 1.0f, 0.0f }, {} } );
+    ( void )spring.CreateShape( springSlider, circle2{ {}, 0.25f } );
+    prismaticJointDef springDefinition{};
+    springDefinition.bodyA = springRail;
+    springDefinition.bodyB = springSlider;
+    springDefinition.enableSpring = true;
+    springDefinition.hertz = 4.0f;
+    springDefinition.dampingRatio = 0.7f;
+    springDefinition.targetTranslation = 0.0f;
+    const jointId springJoint = spring.createPrismaticJoint( springDefinition );
+    auto springData = spring.getPrismaticJointData( springJoint );
+    check( springData.enableSpring && near( springData.hertz, 4.0f ) && near( springData.dampingRatio, 0.7f ) && near( springData.targetTranslation, 0.0f ) && springData.springForce == 0.0f, "Prismatic create/query preserves spring settings" );
+
+    spring.Step( h, 4 );
+    springData = spring.getPrismaticJointData( springJoint );
+    check( spring.GetBodyLinearVelocity( springSlider ).x < 0.0f && springData.springForce < 0.0f, "Prismatic World spring pulls toward lower target translation" );
+
+    spring.SetBodyAwake( springSlider, false );
+    spring.setPrismaticJointSpring( springJoint, true, 4.0f, 0.7f, 2.0f );
+    springData = spring.getPrismaticJointData( springJoint );
+    check( spring.IsBodyAwake( springSlider ) && springData.springForce == 0.0f, "changing Prismatic spring wakes and clears cached spring reaction" );
+    spring.SetBodyLinearVelocity( springSlider, {} );
+    spring.Step( h, 4 );
+    check( spring.GetBodyLinearVelocity( springSlider ).x > 0.0f, "Prismatic World spring pulls toward higher target translation" );
+
+    spring.setPrismaticJointSpring( springJoint, true, 0.0f, 0.7f, 0.0f );
+    spring.SetBodyLinearVelocity( springSlider, { 1.0f, 0.0f } );
+    spring.Step( h, 4 );
+    springData = spring.getPrismaticJointData( springJoint );
+    check( std::abs( spring.GetBodyLinearVelocity( springSlider ).x - 1.0f ) < 0.0001f && springData.springForce == 0.0f, "zero-hertz Prismatic World spring leaves axial motion free" );
+
+    spring.SetBodyTransform( springSlider, {} );
+    spring.SetBodyLinearVelocity( springSlider, {} );
+    spring.setPrismaticJointSpring( springJoint, true, 3.0f, 0.7f, 2.0f );
+    spring.setPrismaticJointMotor( springJoint, true, 1.0f, 20.0f );
+    spring.setPrismaticJointLimit( springJoint, true, -0.5f, 0.5f );
+    for( int i = 0; i < 120; ++i ) spring.Step( h, 4 );
+    springData = spring.getPrismaticJointData( springJoint );
+    check( IsFinite( springData.force ) && std::isfinite( springData.springForce ) && std::isfinite( springData.motorForce ), "combined Prismatic spring motor limit reactions stay finite" );
+    check( springData.currentTranslation < 0.75f && springData.springForce > 0.0f && springData.motorForce > 0.0f, "Prismatic limit bounds combined spring and motor drive" );
+
+    spring.SetBodyTransform( springSlider, { { 0.25f, 0.0f }, {} } );
+    springData = spring.getPrismaticJointData( springJoint );
+    check( springData.springForce == 0.0f && springData.motorForce == 0.0f && LengthSquared( springData.force ) == 0.0f, "Prismatic pose change clears combined axial caches" );
+
     return EXIT_SUCCESS;
 }
