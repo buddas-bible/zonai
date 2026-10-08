@@ -23,6 +23,8 @@
 #include "dynamics/joints/joint2.h"
 #include "dynamics/joints/mouseJoint2.h"
 #include "dynamics/joints/mouseJointConstraint2.h"
+#include "dynamics/joints/prismaticJoint2.h"
+#include "dynamics/joints/prismaticJointConstraint2.h"
 #include "dynamics/joints/revoluteJoint2.h"
 #include "dynamics/joints/revoluteJointConstraint2.h"
 #include "dynamics/joints/wheelJoint2.h"
@@ -105,6 +107,10 @@ public:
     // B의 A에 대한 목표 각속도 (rad/s)와 최대 토크 (N*m). 속도 0은 제동함.
     void setRevoluteJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorTorque );
     [[nodiscard]] revoluteJointData getRevoluteJointData( jointId id ) const;
+
+    // A의 단위 로컬 축을 따라 B의 이동만 허용하고 축 수직 이동과 상대 회전을 막음.
+    [[nodiscard]] jointId createPrismaticJoint( const prismaticJointDef& definition );
+    [[nodiscard]] prismaticJointData getPrismaticJointData( jointId id ) const;
 
     // A의 단위 로컬 축을 따라 B를 이동시키며 상대 회전은 허용함. 하나 이상은 Dynamic이어야 함.
     [[nodiscard]] jointId createWheelJoint( const wheelJointDef& definition );
@@ -478,7 +484,7 @@ private:
 
 #pragma region JointSolver
 
-    using jointConstraint = std::variant<distanceJointConstraint2, mouseJointConstraint2, revoluteJointConstraint2, wheelJointConstraint2>;
+    using jointConstraint = std::variant<distanceJointConstraint2, mouseJointConstraint2, prismaticJointConstraint2, revoluteJointConstraint2, wheelJointConstraint2>;
     void warmStartJoints( std::span<jointConstraint> constraints );
     void solveJoints( std::span<jointConstraint> constraints, bool useBias );
 
@@ -567,7 +573,7 @@ private:
 
     // Joint cold / hot 데이터는 동일한 stable slot과 free-list를 공유함.
     std::vector<joint2> joints_;
-    std::vector<std::variant<distanceJointSim2, mouseJointSim2, revoluteJointSim2, wheelJointSim2>> jointSims_;
+    std::vector<std::variant<distanceJointSim2, mouseJointSim2, prismaticJointSim2, revoluteJointSim2, wheelJointSim2>> jointSims_;
     std::int32_t jointFreeList_ = -1;
     std::size_t jointCount_ = 0;
 
