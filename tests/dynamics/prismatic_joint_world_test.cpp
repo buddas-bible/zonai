@@ -85,5 +85,42 @@ int main()
     pair.Step( h, 4 );
     check( pair.GetContactCount() == 1, "Prismatic deletion restores stationary connected contact" );
 
+    world limited;
+    limited.SetGravity( {} );
+    const bodyId limitRail = limited.CreateBody();
+    const bodyId limitSlider = limited.CreateBody( bodyType::Dynamic, { { 0.9f, 0.0f }, {} } );
+    ( void )limited.CreateShape( limitSlider, circle2{ {}, 0.25f } );
+    prismaticJointDef limitDefinition{};
+    limitDefinition.bodyA = limitRail;
+    limitDefinition.bodyB = limitSlider;
+    limitDefinition.enableLimit = true;
+    limitDefinition.lowerTranslation = -1.0f;
+    limitDefinition.upperTranslation = 1.0f;
+    const jointId limitJoint = limited.createPrismaticJoint( limitDefinition );
+    auto limitData = limited.getPrismaticJointData( limitJoint );
+    check( limitData.enableLimit && near( limitData.lowerTranslation, -1.0f ) && near( limitData.upperTranslation, 1.0f ), "Prismatic create/query preserves translation limits" );
+
+    limited.SetBodyLinearVelocity( limitSlider, { 20.0f, 0.0f } );
+    limited.Step( h, 4 );
+    limitData = limited.getPrismaticJointData( limitJoint );
+    check( limitData.currentTranslation <= 1.002f, "Prismatic World predictive limit prevents upper boundary crossing" );
+    check( Dot( limitData.force, limitData.axis ) < 0.0f, "Prismatic upper limit reports negative axial reaction" );
+
+    limited.setPrismaticJointLimit( limitJoint, false, -1.0f, 1.0f );
+    limitData = limited.getPrismaticJointData( limitJoint );
+    check( !limitData.enableLimit && LengthSquared( limitData.force ) == 0.0f, "disabling Prismatic limit clears cached reaction" );
+    limited.SetBodyLinearVelocity( limitSlider, { 20.0f, 0.0f } );
+    limited.Step( h, 4 );
+    check( limited.getPrismaticJointData( limitJoint ).currentTranslation > 1.05f, "disabled Prismatic limit restores free axial motion" );
+
+    limited.SetBodyTransform( limitSlider, { { 0.4f, 0.0f }, {} } );
+    limited.SetBodyAwake( limitSlider, false );
+    limited.setPrismaticJointLimit( limitJoint, true, 0.0f, 0.0f );
+    check( limited.IsBodyAwake( limitSlider ), "changing Prismatic limit wakes the connected component" );
+    for( int i = 0; i < 60; ++i ) limited.Step( h, 4 );
+    limitData = limited.getPrismaticJointData( limitJoint );
+    check( std::abs( limitData.currentTranslation ) < 0.01f, "equal Prismatic limits hold the requested translation" );
+    check( limitData.enableLimit && limitData.lowerTranslation == 0.0f && limitData.upperTranslation == 0.0f, "Prismatic setter updates queried limit range" );
+
     return EXIT_SUCCESS;
 }
