@@ -100,6 +100,16 @@ int main()
     auto prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
     check( std::abs( prismaticData.lateralError ) < 0.00001f && std::abs( prismaticData.currentAngle ) < 0.00001f, "Prismatic slider starts on its rail" );
 
+    prismatic.applyPrismaticPreset( prismaticDemoPreset::limited );
+    prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
+    check( prismaticData.enableLimit && prismaticData.lowerTranslation == -2.0f && prismaticData.upperTranslation == 2.0f, "Prismatic limited preset enables a visible rail range" );
+    prismatic.applyPrismaticPreset( prismaticDemoPreset::locked );
+    prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
+    check( prismaticData.enableLimit && prismaticData.lowerTranslation == 0.0f && prismaticData.upperTranslation == 0.0f, "Prismatic locked preset uses equal translation limits" );
+    prismatic.applyPrismaticPreset( prismaticDemoPreset::free );
+    prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
+    check( !prismaticData.enableLimit, "Prismatic free preset disables translation limits" );
+
     const bodyId slider = prismaticData.bodyB;
     const float initialTranslation = prismaticData.currentTranslation;
     prismatic.getWorld().ApplyLinearImpulseToCenter( slider, { 2.0f, 0.0f } );
