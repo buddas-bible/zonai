@@ -41,6 +41,13 @@ prismaticJointConstraint2 preparePrismaticJointConstraint( const prismaticJointS
     constraint.lowerImpulse = sameStep && constraint.enableLimit && hasResponse ? joint.lowerImpulse : 0.0f;
     constraint.upperImpulse = sameStep && constraint.enableLimit && hasResponse ? joint.upperImpulse : 0.0f;
 
+    constraint.enableMotor = joint.enableMotor;
+    constraint.motorSpeed = joint.motorSpeed;
+    constraint.maxMotorImpulse = joint.maxMotorForce * subStepTime;
+    constraint.motorImpulse = sameStep && constraint.enableMotor && hasResponse
+        ? std::clamp( joint.motorImpulse, -constraint.maxMotorImpulse, constraint.maxMotorImpulse )
+        : 0.0f;
+
     return constraint;
 }
 
@@ -60,7 +67,7 @@ void warmStartPrismaticJointConstraint( const prismaticJointConstraint2& constra
     const float s1 = Cross( d + r_a, perpendicular );
     const float s2 = Cross( r_b, perpendicular );
 
-    const float axialImpulse = constraint.lowerImpulse - constraint.upperImpulse;
+    const float axialImpulse = constraint.motorImpulse + constraint.lowerImpulse - constraint.upperImpulse;
     const vec2 linearImpulse = axialImpulse * axis + constraint.impulse.x * perpendicular;
     const float angularImpulseA = axialImpulse * a1 + constraint.impulse.x * s1 + constraint.impulse.y;
     const float angularImpulseB = axialImpulse * a2 + constraint.impulse.x * s2 + constraint.impulse.y;
@@ -81,6 +88,25 @@ void solvePrismaticJointConstraint( prismaticJointConstraint2& constraint, bodyS
     const vec2 r_b = Rotate( bodyStateB.deltaRotation, constraint.anchorB );
     const vec2 d = constraint.deltaCenter + bodyStateB.deltaPosition - bodyStateA.deltaPosition + r_b - r_a;
     const vec2 axis = Rotate( bodyStateA.deltaRotation, constraint.axisA );
+
+    if( constraint.enableMotor )
+    {
+        const float a1 = Cross( d + r_a, axis );
+        const float a2 = Cross( r_b, axis );
+        const float k = constraint.invMassA + constraint.invMassB + constraint.invInertiaA * a1 * a1 + constraint.invInertiaB * a2 * a2;
+        const float axialMass = k > 0.0f ? 1.0f / k : 0.0f;
+        const float velocity = Dot( axis, bodyStateB.linearVelocity - bodyStateA.linearVelocity ) + a2 * bodyStateB.angularVelocity - a1 * bodyStateA.angularVelocity;
+        const float deltaImpulse = axialMass * ( constraint.motorSpeed - velocity );
+        const float oldImpulse = constraint.motorImpulse;
+        constraint.motorImpulse = std::clamp( oldImpulse + deltaImpulse, -constraint.maxMotorImpulse, constraint.maxMotorImpulse );
+        const float impulse = constraint.motorImpulse - oldImpulse;
+        const vec2 linearImpulse = impulse * axis;
+
+        bodyStateA.linearVelocity -= constraint.invMassA * linearImpulse;
+        bodyStateA.angularVelocity -= constraint.invInertiaA * impulse * a1;
+        bodyStateB.linearVelocity += constraint.invMassB * linearImpulse;
+        bodyStateB.angularVelocity += constraint.invInertiaB * impulse * a2;
+    }
 
     if( constraint.enableLimit )
     {
@@ -121,7 +147,7 @@ void solvePrismaticJointConstraint( prismaticJointConstraint2& constraint, bodyS
             bodyStateB.angularVelocity += constraint.invInertiaB * impulse * a2;
         };
 
-        // 하한은 +axis, 상한은 -axis 방향으로만 밀 수 있는 unilateral constraint임.
+        // 모터가 만든 축속도도 경계를 통과하지 못하도록 그 다음에 limit을 적용함.
         solveLimit( translation - constraint.lowerTranslation, 1.0f, constraint.lowerImpulse );
         solveLimit( constraint.upperTranslation - translation, -1.0f, constraint.upperImpulse );
     }
