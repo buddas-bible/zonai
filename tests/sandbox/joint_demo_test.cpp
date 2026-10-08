@@ -111,8 +111,7 @@ int main()
 
     const bodyId inspectorSlider = prismaticData.bodyB;
     prismatic.getWorld().SetBodyLinearVelocity( inspectorSlider, { 2.5f, 0.0f } );
-    prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
-    check( std::abs( prismaticData.currentSpeed - 2.5f ) < 0.0001f, "Prismatic inspector reports axial relative speed" );
+    check( std::abs( prismatic.getPrismaticCurrentSpeed() - 2.5f ) < 0.0001f, "Prismatic inspector reports axial relative speed" );
 
     transform2 inspectorTransform = prismatic.getWorld().GetBodyTransform( inspectorSlider );
     inspectorTransform.position = { 0.8f, 0.0f };
