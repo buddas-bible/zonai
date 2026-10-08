@@ -69,10 +69,17 @@ public:
                 if( ImGui::Button( "제한###PrismaticPresetLimited" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::limited );
                 ImGui::SameLine();
                 if( ImGui::Button( "위치 고정###PrismaticPresetLocked" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::locked );
+                if( ImGui::Button( "모터 +###PrismaticPresetMotorForward" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::motorForward );
+                ImGui::SameLine();
+                if( ImGui::Button( "모터 -###PrismaticPresetMotorReverse" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::motorReverse );
+                ImGui::SameLine();
+                if( ImGui::Button( "제동###PrismaticPresetBrake" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::brake );
+                ImGui::SameLine();
+                if( ImGui::Button( "모터+제한###PrismaticPresetMotorLimit" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::motorLimit );
 
                 const auto joint = view_.getWorld().getPrismaticJointData( view_.getPrismaticJoint() );
                 const float axialForce = Dot( joint.force, joint.axis );
-                ImGui::TextWrapped( "2단계 Prismatic은 레일 축 이동에 하한·상한을 추가합니다. 수직 이동과 상대 회전 잠금은 그대로 유지됩니다." );
+                ImGui::TextWrapped( "3단계 Prismatic Motor는 위치가 아니라 레일 축 상대속도를 목표값으로 만듭니다. 0 m/s는 같은 제약으로 축 움직임을 제동합니다." );
                 ImGui::Text( "축 이동: %.3f m", joint.currentTranslation );
                 if( joint.enableLimit )
                 {
@@ -82,7 +89,15 @@ public:
                 {
                     ImGui::TextUnformatted( "이동 범위: 자유" );
                 }
-                ImGui::Text( "축 제한 반력: %.2f N / 수직 오차: %.4f m", axialForce, joint.lateralError );
+                if( joint.enableMotor )
+                {
+                    ImGui::Text( "모터 목표 속도: %.2f m/s / 모터 힘: %.2f N", joint.motorSpeed, joint.motorForce );
+                }
+                else
+                {
+                    ImGui::TextUnformatted( "모터: 꺼짐" );
+                }
+                ImGui::Text( "총 축 반력: %.2f N / 수직 오차: %.4f m", axialForce, joint.lateralError );
                 ImGui::Text( "상대 각도: %.4f rad / 회전 반력: %.2f N*m", joint.currentAngle, joint.torque );
             }
             else
