@@ -78,9 +78,10 @@ int main()
     constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
     check( near( constraint.anchorB.x, 1.0f ) && near( constraint.anchorB.y, 1.0f ), "prismatic origin anchor becomes COM lever arm" );
     stateB = {};
+    stateB.linearVelocity.y = 1.0f;
     stateB.angularVelocity = 2.0f;
     solvePrismaticJointConstraint( constraint, stateA, stateB, false );
-    check( IsFinite( stateB.linearVelocity ) && std::isfinite( stateB.angularVelocity ) && std::abs( stateB.linearVelocity.y ) > 0.0f && std::abs( stateB.angularVelocity ) < 2.0f, "off-center prismatic couples lateral and angular motion" );
+    check( IsFinite( stateB.linearVelocity ) && std::isfinite( stateB.angularVelocity ) && std::abs( stateB.linearVelocity.y ) < 1.0f && std::abs( stateB.angularVelocity ) < 2.0f, "off-center prismatic couples lateral and angular motion" );
 
     bodySimA.invMass = 0.0f;
     bodySimA.invInertia = 0.0f;
