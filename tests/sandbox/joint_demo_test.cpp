@@ -102,29 +102,40 @@ int main()
 
     prismatic.applyPrismaticPreset( prismaticDemoPreset::limited );
     prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
-    check( prismaticData.enableLimit && prismaticData.lowerTranslation == -2.0f && prismaticData.upperTranslation == 2.0f && !prismaticData.enableMotor, "Prismatic limited preset isolates the translation range" );
+    check( !prismaticData.enableSpring && prismaticData.enableLimit && prismaticData.lowerTranslation == -2.0f && prismaticData.upperTranslation == 2.0f && !prismaticData.enableMotor, "Prismatic limited preset isolates the translation range" );
     prismatic.applyPrismaticPreset( prismaticDemoPreset::locked );
     prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
-    check( prismaticData.enableLimit && prismaticData.lowerTranslation == 0.0f && prismaticData.upperTranslation == 0.0f && !prismaticData.enableMotor, "Prismatic locked preset uses equal limits without motor" );
+    check( !prismaticData.enableSpring && prismaticData.enableLimit && prismaticData.lowerTranslation == 0.0f && prismaticData.upperTranslation == 0.0f && !prismaticData.enableMotor, "Prismatic locked preset uses equal limits without motor" );
     prismatic.applyPrismaticPreset( prismaticDemoPreset::free );
     prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
-    check( !prismaticData.enableLimit && !prismaticData.enableMotor, "Prismatic free preset disables active axial controls" );
+    check( !prismaticData.enableSpring && !prismaticData.enableLimit && !prismaticData.enableMotor, "Prismatic free preset disables active axial controls" );
 
     prismatic.applyPrismaticPreset( prismaticDemoPreset::motorForward );
     prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
-    check( !prismaticData.enableLimit && prismaticData.enableMotor && prismaticData.motorSpeed == 2.0f && prismaticData.maxMotorForce == 20.0f, "Prismatic forward motor preset" );
+    check( !prismaticData.enableSpring && !prismaticData.enableLimit && prismaticData.enableMotor && prismaticData.motorSpeed == 2.0f && prismaticData.maxMotorForce == 20.0f, "Prismatic forward motor preset" );
     prismatic.applyPrismaticPreset( prismaticDemoPreset::motorReverse );
     prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
-    check( !prismaticData.enableLimit && prismaticData.enableMotor && prismaticData.motorSpeed == -2.0f && prismaticData.maxMotorForce == 20.0f, "Prismatic reverse motor preset" );
+    check( !prismaticData.enableSpring && !prismaticData.enableLimit && prismaticData.enableMotor && prismaticData.motorSpeed == -2.0f && prismaticData.maxMotorForce == 20.0f, "Prismatic reverse motor preset" );
     prismatic.applyPrismaticPreset( prismaticDemoPreset::brake );
     prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
-    check( !prismaticData.enableLimit && prismaticData.enableMotor && prismaticData.motorSpeed == 0.0f && prismaticData.maxMotorForce == 20.0f, "Prismatic brake preset uses zero target speed" );
+    check( !prismaticData.enableSpring && !prismaticData.enableLimit && prismaticData.enableMotor && prismaticData.motorSpeed == 0.0f && prismaticData.maxMotorForce == 20.0f, "Prismatic brake preset uses zero target speed" );
     prismatic.applyPrismaticPreset( prismaticDemoPreset::motorLimit );
     prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
-    check( prismaticData.enableLimit && prismaticData.lowerTranslation == -2.0f && prismaticData.upperTranslation == 2.0f && prismaticData.enableMotor && prismaticData.motorSpeed == 2.0f, "Prismatic motor and limit preset combines axial constraints" );
+    check( !prismaticData.enableSpring && prismaticData.enableLimit && prismaticData.lowerTranslation == -2.0f && prismaticData.upperTranslation == 2.0f && prismaticData.enableMotor && prismaticData.motorSpeed == 2.0f, "Prismatic motor and limit preset combines axial constraints" );
+
+    prismatic.applyPrismaticPreset( prismaticDemoPreset::spring );
+    prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
+    check( prismaticData.enableSpring && prismaticData.hertz == 2.0f && prismaticData.dampingRatio == 0.7f && prismaticData.targetTranslation == 1.0f && !prismaticData.enableLimit && !prismaticData.enableMotor, "Prismatic spring preset isolates target translation" );
+    prismatic.applyPrismaticPreset( prismaticDemoPreset::springLimit );
+    prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
+    check( prismaticData.enableSpring && prismaticData.targetTranslation == 3.0f && prismaticData.enableLimit && prismaticData.lowerTranslation == -2.0f && prismaticData.upperTranslation == 2.0f && !prismaticData.enableMotor, "Prismatic spring and limit preset lets the limit oppose an outside target" );
+    prismatic.applyPrismaticPreset( prismaticDemoPreset::combined );
+    prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
+    check( prismaticData.enableSpring && prismaticData.targetTranslation == 3.0f && prismaticData.enableLimit && prismaticData.enableMotor && prismaticData.motorSpeed == 2.0f, "Prismatic combined preset enables spring motor and limit" );
 
     prismatic.applyPrismaticPreset( prismaticDemoPreset::free );
     prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
+    check( !prismaticData.enableSpring && !prismaticData.enableLimit && !prismaticData.enableMotor, "Prismatic free preset clears every axial mode after combined preset" );
     const bodyId slider = prismaticData.bodyB;
     const float initialTranslation = prismaticData.currentTranslation;
     prismatic.getWorld().ApplyLinearImpulseToCenter( slider, { 2.0f, 0.0f } );

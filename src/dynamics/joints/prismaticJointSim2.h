@@ -29,6 +29,12 @@ struct prismaticJointSim2
     float motorSpeed = 0.0f;
     float maxMotorForce = 0.0f;
     float motorImpulse = 0.0f;
+
+    bool enableSpring = false;
+    float hertz = 0.0f;
+    float dampingRatio = 0.7f;
+    float targetTranslation = 0.0f;
+    float springImpulse = 0.0f;
 };
 
 } // namespace zonai

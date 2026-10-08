@@ -110,6 +110,8 @@ public:
 
     // A의 단위 로컬 축을 따라 B의 이동만 허용하고 축 수직 이동과 상대 회전을 막음.
     [[nodiscard]] jointId createPrismaticJoint( const prismaticJointDef& definition );
+    // 축 방향 목표 위치를 향한 실제 물리 스프링. 0 Hz는 스프링 힘을 끄며 변경 시 coupled cache와 wake를 갱신함.
+    void setPrismaticJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio, float targetTranslation );
     // 유한한 lower <= upper 변위 (m). 변경 시 coupled cache를 비우고 연결된 component를 깨움.
     void setPrismaticJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation );
     // B의 A에 대한 목표 축속도 (m/s)와 비음수 최대 힘 (N). 속도 0은 제동함.
