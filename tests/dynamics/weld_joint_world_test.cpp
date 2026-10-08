@@ -40,18 +40,18 @@ int main()
     for( int i = 0; i < 180; ++i )
     {
         simulation.Step( 1.0f / 60.0f, 4 );
-        const auto data = simulation.getWeldJointData( joint );
-        const float anchorError = Length( data.anchorB - data.anchorA );
-        const float angleError = std::abs( data.currentAngle );
+        const auto state = simulation.getWeldJointData( joint );
+        const float anchorError = Length( state.anchorB - state.anchorA );
+        const float angleError = std::abs( state.currentAngle );
         maximumAnchorError = std::max( maximumAnchorError, anchorError );
         maximumAngleError = std::max( maximumAngleError, angleError );
         if( i < 5 || i == 9 || i == 29 || i == 179 )
         {
-            std::fprintf( stderr, "Weld diagnostic step=%d anchorError=%.9f angleError=%.9f\n", i, anchorError, data.currentAngle );
+            std::fprintf( stderr, "Weld diagnostic step=%d anchorError=%.9f angleError=%.9f\n", i, anchorError, state.currentAngle );
         }
-        check( IsFinite( data.force ) && std::isfinite( data.torque ), "Weld reaction remains finite" );
+        check( IsFinite( state.force ) && std::isfinite( state.torque ), "Weld reaction remains finite" );
     }
-    data = simulation.getWeldJointData( joint );
+    auto data = simulation.getWeldJointData( joint );
     std::fprintf( stderr, "Weld diagnostic maxAnchor=%.9f maxAngle=%.9f finalAnchor=%.9f finalAngle=%.9f\n", maximumAnchorError, maximumAngleError, Length( data.anchorB - data.anchorA ), data.currentAngle );
     check( Length( data.anchorB - data.anchorA ) < 0.001f && std::abs( data.currentAngle ) < 0.001f, "Weld errors converge after the stress impulse" );
     check( simulation.getJointCount() == 1 && simulation.GetBody( body ).jointCount == 1, "Weld shares common joint graph" );
