@@ -663,6 +663,48 @@ prismaticJointData world::getPrismaticJointData( jointId id ) const
     return data;
 }
 
+jointId world::createWeldJoint( const weldJointDef& definition )
+{
+    const std::int32_t bodyIndexA = GetBodyIndex( definition.bodyA );
+    const std::int32_t bodyIndexB = GetBodyIndex( definition.bodyB );
+    assert( bodyIndexA != bodyIndexB );
+    assert( bodies_[bodyIndexA].type == bodyType::Dynamic || bodies_[bodyIndexB].type == bodyType::Dynamic );
+    assert( IsFinite( definition.localAnchorA ) && IsFinite( definition.localAnchorB ) );
+    assert( std::isfinite( definition.referenceAngle ) );
+
+    const std::int32_t index = allocateJoint( bodyIndexA, bodyIndexB, definition.collideConnected );
+    jointSims_[index] = weldJointSim2{};
+    weldJointSim2& sim = std::get<weldJointSim2>( jointSims_[index] );
+    sim = {};
+    sim.jointId = index;
+    sim.bodyIdA = bodyIndexA;
+    sim.bodyIdB = bodyIndexB;
+    sim.localAnchorA = definition.localAnchorA;
+    sim.localAnchorB = definition.localAnchorB;
+    sim.referenceAngle = definition.referenceAngle;
+
+    return makeJointId( index );
+}
+
+weldJointData world::getWeldJointData( jointId id ) const
+{
+    const std::int32_t index = getJointIndex( id );
+    const weldJointSim2& sim = std::get<weldJointSim2>( jointSims_[index] );
+    weldJointData data{};
+    data.bodyA = MakeBodyId( sim.bodyIdA );
+    data.bodyB = MakeBodyId( sim.bodyIdB );
+    data.anchorA = TransformPoint( bodySims_[sim.bodyIdA].transform, sim.localAnchorA );
+    data.anchorB = TransformPoint( bodySims_[sim.bodyIdB].transform, sim.localAnchorB );
+    const rot2 relativeRotation = Inverse( bodySims_[sim.bodyIdA].transform.rotation * rot2::FromRadians( sim.referenceAngle ) ) * bodySims_[sim.bodyIdB].transform.rotation;
+    data.currentAngle = std::atan2( relativeRotation.s, relativeRotation.c );
+    data.referenceAngle = sim.referenceAngle;
+    data.force = sim.subStepTime > 0.0f ? sim.impulse / sim.subStepTime : vec2{};
+    data.torque = sim.subStepTime > 0.0f ? sim.angularImpulse / sim.subStepTime : 0.0f;
+    data.collideConnected = joints_[index].collideConnected;
+
+    return data;
+}
+
 jointId world::createWheelJoint( const wheelJointDef& definition )
 {
     const std::int32_t bodyIndexA = GetBodyIndex( definition.bodyA );
@@ -1924,6 +1966,10 @@ void world::Step( float timeStep, int subStepCount )
                     {
                         return prepareRevoluteJointConstraint( joint, bodySims_[joint.bodyIdA], bodySims_[joint.bodyIdB], subStepTime );
                     }
+                    else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, weldJointSim2> )
+                    {
+                        return prepareWeldJointConstraint( joint, bodySims_[joint.bodyIdA], bodySims_[joint.bodyIdB], subStepTime );
+                    }
                     else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, wheelJointSim2> )
                     {
                         return prepareWheelJointConstraint( joint, bodySims_[joint.bodyIdA], bodySims_[joint.bodyIdB], subStepTime );
@@ -2165,7 +2211,7 @@ void world::Step( float timeStep, int subStepCount )
                 [&]( const auto& constraint )
                 {
                     using constraintType = std::remove_cvref_t<decltype( constraint )>;
-                    using simType = std::conditional_t<std::is_same_v<constraintType, distanceJointConstraint2>, distanceJointSim2, std::conditional_t<std::is_same_v<constraintType, prismaticJointConstraint2>, prismaticJointSim2, std::conditional_t<std::is_same_v<constraintType, revoluteJointConstraint2>, revoluteJointSim2, std::conditional_t<std::is_same_v<constraintType, wheelJointConstraint2>, wheelJointSim2, mouseJointSim2>>>>;
+                    using simType = std::conditional_t<std::is_same_v<constraintType, distanceJointConstraint2>, distanceJointSim2, std::conditional_t<std::is_same_v<constraintType, prismaticJointConstraint2>, prismaticJointSim2, std::conditional_t<std::is_same_v<constraintType, revoluteJointConstraint2>, revoluteJointSim2, std::conditional_t<std::is_same_v<constraintType, weldJointConstraint2>, weldJointSim2, std::conditional_t<std::is_same_v<constraintType, wheelJointConstraint2>, wheelJointSim2, mouseJointSim2>>>>>;
                     auto& joint = std::get<simType>( jointSims_[constraint.jointId] );
                     joint.impulse = constraint.impulse;
                     joint.subStepTime = subStepTime;
@@ -2181,6 +2227,10 @@ void world::Step( float timeStep, int subStepCount )
                         joint.lowerImpulse = constraint.lowerImpulse;
                         joint.upperImpulse = constraint.upperImpulse;
                         joint.motorImpulse = constraint.motorImpulse;
+                    }
+                    if constexpr( std::is_same_v<simType, weldJointSim2> )
+                    {
+                        joint.angularImpulse = constraint.angularImpulse;
                     }
                     if constexpr( std::is_same_v<simType, wheelJointSim2> )
                     {
@@ -2699,6 +2749,10 @@ void world::resetJointImpulses( std::int32_t bodyIndex )
                     joint.lowerImpulse = 0.0f;
                     joint.upperImpulse = 0.0f;
                     joint.motorImpulse = 0.0f;
+                }
+                if constexpr( std::is_same_v<simType, weldJointSim2> )
+                {
+                    joint.angularImpulse = 0.0f;
                 }
                 if constexpr( std::is_same_v<simType, prismaticJointSim2> )
                 {
@@ -4280,6 +4334,10 @@ void world::warmStartJoints( std::span<jointConstraint> constraints )
                 {
                     warmStartRevoluteJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
                 }
+                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, weldJointConstraint2> )
+                {
+                    warmStartWeldJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
+                }
                 else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, wheelJointConstraint2> )
                 {
                     warmStartWheelJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
@@ -4311,6 +4369,10 @@ void world::solveJoints( std::span<jointConstraint> constraints, bool useBias )
                 else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, revoluteJointConstraint2> )
                 {
                     solveRevoluteJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB], useBias );
+                }
+                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, weldJointConstraint2> )
+                {
+                    solveWeldJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB], useBias );
                 }
                 else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, wheelJointConstraint2> )
                 {

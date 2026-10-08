@@ -27,6 +27,8 @@
 #include "dynamics/joints/prismaticJointConstraint2.h"
 #include "dynamics/joints/revoluteJoint2.h"
 #include "dynamics/joints/revoluteJointConstraint2.h"
+#include "dynamics/joints/weldJoint2.h"
+#include "dynamics/joints/weldJointConstraint2.h"
 #include "dynamics/joints/wheelJoint2.h"
 #include "dynamics/joints/wheelJointConstraint2.h"
 #include "dynamics/id.h"
@@ -117,6 +119,10 @@ public:
     // B의 A에 대한 목표 축속도 (m/s)와 비음수 최대 힘 (N). 속도 0은 제동함.
     void setPrismaticJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorForce );
     [[nodiscard]] prismaticJointData getPrismaticJointData( jointId id ) const;
+
+    // 두 작용점과 기준 상대각도를 함께 유지해 두 Body의 상대 transform을 고정함.
+    [[nodiscard]] jointId createWeldJoint( const weldJointDef& definition );
+    [[nodiscard]] weldJointData getWeldJointData( jointId id ) const;
 
     // A의 단위 로컬 축을 따라 B를 이동시키며 상대 회전은 허용함. 하나 이상은 Dynamic이어야 함.
     [[nodiscard]] jointId createWheelJoint( const wheelJointDef& definition );
@@ -490,7 +496,7 @@ private:
 
 #pragma region JointSolver
 
-    using jointConstraint = std::variant<distanceJointConstraint2, mouseJointConstraint2, prismaticJointConstraint2, revoluteJointConstraint2, wheelJointConstraint2>;
+    using jointConstraint = std::variant<distanceJointConstraint2, mouseJointConstraint2, prismaticJointConstraint2, revoluteJointConstraint2, weldJointConstraint2, wheelJointConstraint2>;
     void warmStartJoints( std::span<jointConstraint> constraints );
     void solveJoints( std::span<jointConstraint> constraints, bool useBias );
 
@@ -579,7 +585,7 @@ private:
 
     // Joint cold / hot 데이터는 동일한 stable slot과 free-list를 공유함.
     std::vector<joint2> joints_;
-    std::vector<std::variant<distanceJointSim2, mouseJointSim2, prismaticJointSim2, revoluteJointSim2, wheelJointSim2>> jointSims_;
+    std::vector<std::variant<distanceJointSim2, mouseJointSim2, prismaticJointSim2, revoluteJointSim2, weldJointSim2, wheelJointSim2>> jointSims_;
     std::int32_t jointFreeList_ = -1;
     std::size_t jointCount_ = 0;
 
