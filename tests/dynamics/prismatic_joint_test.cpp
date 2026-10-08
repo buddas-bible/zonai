@@ -172,5 +172,63 @@ int main()
     constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h / 2.0f );
     check( constraint.lowerImpulse == 0.0f && constraint.upperImpulse == 0.0f, "timestep change clears Prismatic limit cache" );
 
+    joint = {};
+    joint.bodyIdA = 0;
+    joint.bodyIdB = 1;
+    joint.enableMotor = true;
+    joint.motorSpeed = 3.0f;
+    joint.maxMotorForce = 6.0f;
+    bodySimA.invMass = 0.0f;
+    bodySimA.invInertia = 0.0f;
+    bodySimA.center = {};
+    bodySimA.transform = {};
+    bodySimB.invMass = 1.0f;
+    bodySimB.invInertia = 1.0f;
+    bodySimB.center = {};
+    bodySimB.transform = {};
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    solvePrismaticJointConstraint( constraint, stateA, stateB, false );
+    check( near( constraint.motorImpulse, 0.1f ) && near( stateB.linearVelocity.x, 0.1f ), "Prismatic motor clamps accumulated impulse by max force times h" );
+
+    joint.motorSpeed = -3.0f;
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    solvePrismaticJointConstraint( constraint, stateA, stateB, false );
+    check( constraint.motorImpulse < 0.0f && stateB.linearVelocity.x < 0.0f, "Prismatic motor reverses along the joint axis" );
+
+    joint.motorSpeed = 0.0f;
+    joint.maxMotorForce = 120.0f;
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    stateB.linearVelocity.x = 1.0f;
+    solvePrismaticJointConstraint( constraint, stateA, stateB, false );
+    check( near( stateB.linearVelocity.x, 0.0f ), "zero-speed Prismatic motor brakes axial motion" );
+
+    joint.subStepTime = h;
+    joint.motorImpulse = 0.05f;
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    warmStartPrismaticJointConstraint( constraint, stateA, stateB );
+    check( near( stateB.linearVelocity.x, 0.05f ), "Prismatic warm start applies cached motor impulse" );
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h / 2.0f );
+    check( constraint.motorImpulse == 0.0f, "timestep change clears Prismatic motor cache" );
+
+    joint.subStepTime = 0.0f;
+    joint.motorImpulse = 0.0f;
+    joint.motorSpeed = 10.0f;
+    joint.maxMotorForce = 1000.0f;
+    joint.enableLimit = true;
+    joint.lowerTranslation = -0.5f;
+    joint.upperTranslation = 0.5f;
+    bodySimB.center = { 0.5f, 0.0f };
+    bodySimB.transform.position = bodySimB.center;
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    solvePrismaticJointConstraint( constraint, stateA, stateB, false );
+    check( constraint.motorImpulse > 0.0f && constraint.upperImpulse > 0.0f && near( stateB.linearVelocity.x, 0.0f ), "Prismatic upper limit stops motor-driven boundary motion" );
+
     return EXIT_SUCCESS;
 }

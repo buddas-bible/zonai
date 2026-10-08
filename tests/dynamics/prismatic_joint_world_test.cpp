@@ -128,5 +128,57 @@ int main()
     check( std::abs( limitData.currentTranslation ) < 0.01f, "equal Prismatic limits hold the requested translation" );
     check( limitData.enableLimit && limitData.lowerTranslation == 0.0f && limitData.upperTranslation == 0.0f, "Prismatic setter updates queried limit range" );
 
+    world motor;
+    motor.SetGravity( {} );
+    const bodyId motorRail = motor.CreateBody();
+    const bodyId motorSlider = motor.CreateBody( bodyType::Dynamic );
+    ( void )motor.CreateShape( motorSlider, circle2{ {}, 0.25f } );
+    prismaticJointDef motorDefinition{};
+    motorDefinition.bodyA = motorRail;
+    motorDefinition.bodyB = motorSlider;
+    motorDefinition.enableMotor = true;
+    motorDefinition.motorSpeed = 2.0f;
+    motorDefinition.maxMotorForce = 1000.0f;
+    const jointId motorJoint = motor.createPrismaticJoint( motorDefinition );
+    auto motorData = motor.getPrismaticJointData( motorJoint );
+    check( motorData.enableMotor && near( motorData.motorSpeed, 2.0f ) && near( motorData.maxMotorForce, 1000.0f ) && motorData.motorForce == 0.0f, "Prismatic create/query preserves motor settings" );
+
+    motor.Step( h, 4 );
+    motorData = motor.getPrismaticJointData( motorJoint );
+    check( std::abs( motor.GetBodyLinearVelocity( motorSlider ).x - 2.0f ) < 0.0001f, "Prismatic motor drives the requested positive axial speed" );
+
+    motor.setPrismaticJointMotor( motorJoint, true, -1.0f, 1000.0f );
+    motorData = motor.getPrismaticJointData( motorJoint );
+    check( motorData.motorForce == 0.0f, "changing Prismatic motor clears cached motor reaction" );
+    motor.Step( h, 4 );
+    check( std::abs( motor.GetBodyLinearVelocity( motorSlider ).x + 1.0f ) < 0.0001f, "Prismatic motor reverses live" );
+
+    motor.setPrismaticJointMotor( motorJoint, true, 0.0f, 1000.0f );
+    motor.Step( h, 4 );
+    check( std::abs( motor.GetBodyLinearVelocity( motorSlider ).x ) < 0.0001f, "zero-speed Prismatic motor brakes live axial motion" );
+
+    motor.SetBodyAwake( motorSlider, false );
+    motor.setPrismaticJointMotor( motorJoint, true, 1.0f, 1000.0f );
+    check( motor.IsBodyAwake( motorSlider ), "changing Prismatic motor wakes the connected component" );
+
+    motor.setPrismaticJointLimit( motorJoint, true, -0.5f, 0.5f );
+    motor.SetBodyTransform( motorSlider, { { 0.5f, 0.0f }, {} } );
+    motor.SetBodyLinearVelocity( motorSlider, {} );
+    motor.setPrismaticJointMotor( motorJoint, true, 5.0f, 1000.0f );
+    motor.Step( h, 4 );
+    motorData = motor.getPrismaticJointData( motorJoint );
+    check( std::abs( motor.GetBodyLinearVelocity( motorSlider ).x ) < 0.001f, "Prismatic upper limit removes motor-driven outward velocity" );
+    check( motorData.currentTranslation < 0.53f, "Prismatic soft limit bounds the first motor-driven position error" );
+    check( motorData.motorForce > 0.0f, "Prismatic reports motor effort even when the limit cancels motion" );
+
+    for( int i = 0; i < 60; ++i ) motor.Step( h, 4 );
+    const float settledTranslation = motor.getPrismaticJointData( motorJoint ).currentTranslation;
+    for( int i = 0; i < 60; ++i ) motor.Step( h, 4 );
+    motorData = motor.getPrismaticJointData( motorJoint );
+    check( std::abs( motor.GetBodyLinearVelocity( motorSlider ).x ) < 0.001f, "Prismatic upper limit keeps sustained motor velocity blocked" );
+    check( motorData.currentTranslation >= 0.5f && std::abs( motorData.currentTranslation - settledTranslation ) < 0.001f, "Prismatic soft limit reaches a stable motor-load equilibrium" );
+    check( motorData.motorForce > 0.0f, "Prismatic motor keeps applying effort against active limit" );
+    check( std::abs( Dot( motorData.force, motorData.axis ) ) < 1.0f, "Prismatic motor and upper limit reactions balance at steady state" );
+
     return EXIT_SUCCESS;
 }

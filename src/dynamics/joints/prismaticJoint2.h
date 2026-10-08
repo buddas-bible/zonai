@@ -21,6 +21,10 @@ struct prismaticJointDef
     bool enableLimit = false;
     float lowerTranslation = 0.0f;
     float upperTranslation = 0.0f;
+
+    bool enableMotor = false;
+    float motorSpeed = 0.0f;
+    float maxMotorForce = 0.0f;
     bool collideConnected = false;
 };
 
@@ -35,11 +39,15 @@ struct prismaticJointData
     float currentTranslation = 0.0f;
     float lateralError = 0.0f;
     float currentAngle = 0.0f;
-    vec2 force{}; // 마지막 substep의 축 수직 + translation limit 누적 선형 임펄스 / h.
+    vec2 force{}; // 마지막 substep의 축 수직 + motor + translation limit 누적 선형 임펄스 / h.
     float torque = 0.0f; // 마지막 substep의 상대 회전 임펄스 / h.
     bool enableLimit = false;
     float lowerTranslation = 0.0f;
     float upperTranslation = 0.0f;
+    bool enableMotor = false;
+    float motorSpeed = 0.0f;
+    float maxMotorForce = 0.0f;
+    float motorForce = 0.0f;
     bool collideConnected = false;
 };
 

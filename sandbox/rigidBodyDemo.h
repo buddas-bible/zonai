@@ -44,7 +44,11 @@ enum class prismaticDemoPreset
 {
     free,
     limited,
-    locked
+    locked,
+    motorForward,
+    motorReverse,
+    brake,
+    motorLimit
 };
 
 class rigidBodyDemo : public demo
