@@ -524,6 +524,14 @@ add_executable(wheelJointWorldTests dynamics/wheel_joint_world_test.cpp)
 target_link_libraries(wheelJointWorldTests PRIVATE zonai::zonai)
 add_test(NAME wheelJointWorldTests COMMAND wheelJointWorldTests)
 
+add_executable(prismaticJointTests dynamics/prismatic_joint_test.cpp)
+target_link_libraries(prismaticJointTests PRIVATE zonai::zonai)
+add_test(NAME prismaticJointTests COMMAND prismaticJointTests)
+
+add_executable(prismaticJointWorldTests dynamics/prismatic_joint_world_test.cpp)
+target_link_libraries(prismaticJointWorldTests PRIVATE zonai::zonai)
+add_test(NAME prismaticJointWorldTests COMMAND prismaticJointWorldTests)
+
 add_executable(sandboxDemoTests sandbox/demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
 target_include_directories(sandboxDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxDemoTests PRIVATE zonai::zonai)

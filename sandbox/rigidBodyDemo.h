@@ -90,6 +90,8 @@ public:
 
     [[nodiscard]] jointId getWheelJoint() const noexcept { return wheelJoint_; }
 
+    [[nodiscard]] jointId getPrismaticJoint() const noexcept { return prismaticJoint_; }
+
     [[nodiscard]] std::span<const jointId> getCarJoints() const noexcept { return carJoints_; }
 
     [[nodiscard]] float getCarMotorSpeed() const noexcept { return carMotorSpeed_; }
@@ -108,6 +110,7 @@ private:
     void createPendulum();
     void createRevoluteHinge();
     void createWheelSuspension();
+    void createPrismaticRail();
     void createMouseJointPlayground();
     void createMotorCar();
 #pragma endregion SceneSetup
@@ -132,6 +135,7 @@ private:
     jointId pendulumJoint_{};
     jointId revoluteJoint_{};
     jointId wheelJoint_{};
+    jointId prismaticJoint_{};
     std::array<jointId, 2> carJoints_{};
     float carMotorSpeed_ = 8.0f; // 주행 목표의 크기 (rad/s). 방향은 A/D 입력이 결정함.
     float carMaxMotorTorque_ = 5.0f; // 주행과 제동의 토크 한도 (N*m).

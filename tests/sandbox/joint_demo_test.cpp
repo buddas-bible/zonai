@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string_view>
@@ -24,8 +25,9 @@ void check( bool condition, const char* message )
 
 int main()
 {
-    check( getDemoEntries().size() == 6, "mouse joint demo is independently selectable" );
+    check( getDemoEntries().size() == 7, "Prismatic demo is independently selectable" );
     check( std::string_view{ getDemoEntry( demoKind::mouseJointPlayground ).category } == "조인트", "mouse joint demo stays in joint category" );
+    check( std::string_view{ getDemoEntry( demoKind::prismaticRail ).category } == "조인트", "Prismatic rail stays in joint category" );
 
     rigidBodyDemo mouse{ demoKind::mouseJointPlayground };
     check( mouse.getWorld().GetBodyCount() == 4 && mouse.getWorld().getJointCount() == 0 && mouse.getShapes().size() == 4, "mouse scene has ground and three draggable bodies" );
@@ -90,6 +92,26 @@ int main()
     wheel.applyWheelPreset( wheelDemoPreset::spring );
     wheelData = wheel.getWorld().getWheelJointData( wheel.getWheelJoint() );
     check( wheelData.enableSpring && !wheelData.enableLimit && !wheelData.enableMotor, "wheel spring preset" );
+
+    rigidBodyDemo prismatic{ demoKind::prismaticRail };
+    check( prismatic.getWorld().GetBodyCount() == 2 && prismatic.getWorld().getJointCount() == 1 && prismatic.getShapes().size() == 2, "Prismatic scene has rail reference and one slider" );
+    const jointId prismaticId = prismatic.getPrismaticJoint();
+    check( prismatic.getWorld().IsValid( prismaticId ), "Prismatic scene owns a valid rail joint" );
+    auto prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
+    check( std::abs( prismaticData.lateralError ) < 0.00001f && std::abs( prismaticData.currentAngle ) < 0.00001f, "Prismatic slider starts on its rail" );
+
+    const bodyId slider = prismaticData.bodyB;
+    const float initialTranslation = prismaticData.currentTranslation;
+    prismatic.getWorld().ApplyLinearImpulseToCenter( slider, { 2.0f, 0.0f } );
+    for( int i = 0; i < 30; ++i ) prismatic.step( 1.0f / 60.0f, 4 );
+    prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
+    check( prismaticData.currentTranslation > initialTranslation + 0.2f, "Prismatic demo visibly leaves axial translation free" );
+
+    prismatic.getWorld().ApplyLinearImpulseToCenter( slider, { 0.0f, 4.0f } );
+    prismatic.getWorld().ApplyAngularImpulse( slider, 2.0f );
+    for( int i = 0; i < 60; ++i ) prismatic.step( 1.0f / 60.0f, 4 );
+    prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
+    check( std::abs( prismaticData.lateralError ) < 0.01f && std::abs( prismaticData.currentAngle ) < 0.01f, "Prismatic demo blocks lateral translation and relative rotation" );
 
     return EXIT_SUCCESS;
 }

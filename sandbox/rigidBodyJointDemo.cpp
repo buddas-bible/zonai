@@ -87,6 +87,25 @@ void rigidBodyDemo::applyWheelPreset( wheelDemoPreset preset )
 
 #pragma region SceneSetup
 
+void rigidBodyDemo::createPrismaticRail()
+{
+    world_.SetGravity( {} );
+
+    const bodyId rail = world_.CreateBody();
+    const shapeId railShape = world_.CreateShape( rail, MakeBox( { 3.0f, 0.06f } ) );
+    shapes_.push_back( { rail, railShape, "레일 [정적]" } );
+
+    impulseBody_ = world_.CreateBody( bodyType::Dynamic, { { -1.5f, 0.0f }, {} } );
+    torqueBody_ = impulseBody_;
+    const shapeId sliderShape = world_.CreateShape( impulseBody_, MakeBox( { 0.35f, 0.35f } ) );
+    shapes_.push_back( { impulseBody_, sliderShape, "슬라이더 [프리즈매틱]" } );
+
+    prismaticJointDef joint{};
+    joint.bodyA = rail;
+    joint.bodyB = impulseBody_;
+    prismaticJoint_ = world_.createPrismaticJoint( joint );
+}
+
 void rigidBodyDemo::createMouseJointPlayground()
 {
     const bodyId ground = world_.CreateBody( bodyType::Static, { { 0.0f, -2.5f }, {} } );
