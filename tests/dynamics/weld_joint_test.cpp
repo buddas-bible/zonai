@@ -104,7 +104,7 @@ int main()
     bodySimB.invMass = 1.0f;
     bodySimB.invInertia = 1.0f;
     joint.subStepTime = h;
-    joint.linearImpulse = { 2.0f, -3.0f };
+    joint.impulse = { 2.0f, -3.0f };
     joint.angularImpulse = 4.0f;
     constraint = prepareWeldJointConstraint( joint, bodySimA, bodySimB, h );
     stateA = {};
@@ -115,7 +115,7 @@ int main()
     check( near( stateA.angularVelocity, -4.0f ) && near( stateB.angularVelocity, 4.0f ), "Weld warm start applies cached angular impulse" );
 
     constraint = prepareWeldJointConstraint( joint, bodySimA, bodySimB, h / 2.0f );
-    check( LengthSquared( constraint.linearImpulse ) == 0.0f && constraint.angularImpulse == 0.0f, "timestep change clears Weld cache" );
+    check( LengthSquared( constraint.impulse ) == 0.0f && constraint.angularImpulse == 0.0f, "timestep change clears Weld cache" );
 
     world simulation;
     simulation.SetGravity( {} );
