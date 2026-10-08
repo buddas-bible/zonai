@@ -515,6 +515,9 @@ jointId world::createPrismaticJoint( const prismaticJointDef& definition )
     assert( IsFinite( definition.localAnchorA ) && IsFinite( definition.localAnchorB ) );
     assert( IsFinite( definition.localAxisA ) && std::abs( LengthSquared( definition.localAxisA ) - 1.0f ) < 0.0001f );
     assert( std::isfinite( definition.referenceAngle ) );
+    assert( std::isfinite( definition.hertz ) && definition.hertz >= 0.0f );
+    assert( std::isfinite( definition.dampingRatio ) && definition.dampingRatio >= 0.0f );
+    assert( std::isfinite( definition.targetTranslation ) );
     assert( std::isfinite( definition.lowerTranslation ) && std::isfinite( definition.upperTranslation ) && definition.lowerTranslation <= definition.upperTranslation );
     assert( std::isfinite( definition.motorSpeed ) );
     assert( std::isfinite( definition.maxMotorForce ) && definition.maxMotorForce >= 0.0f );
@@ -528,6 +531,10 @@ jointId world::createPrismaticJoint( const prismaticJointDef& definition )
     sim.localAnchorB = definition.localAnchorB;
     sim.localAxisA = definition.localAxisA;
     sim.referenceAngle = definition.referenceAngle;
+    sim.enableSpring = definition.enableSpring;
+    sim.hertz = definition.hertz;
+    sim.dampingRatio = definition.dampingRatio;
+    sim.targetTranslation = definition.targetTranslation;
     sim.enableLimit = definition.enableLimit;
     sim.lowerTranslation = definition.lowerTranslation;
     sim.upperTranslation = definition.upperTranslation;
@@ -537,6 +544,35 @@ jointId world::createPrismaticJoint( const prismaticJointDef& definition )
     jointSims_[index] = sim;
 
     return makeJointId( index );
+}
+
+void world::setPrismaticJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio, float targetTranslation )
+{
+    assert( std::isfinite( hertz ) && hertz >= 0.0f );
+    assert( std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );
+    assert( std::isfinite( targetTranslation ) );
+
+    auto& joint = std::get<prismaticJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.enableSpring == enableSpring && joint.hertz == hertz && joint.dampingRatio == dampingRatio && joint.targetTranslation == targetTranslation ) return;
+
+    joint.enableSpring = enableSpring;
+    joint.hertz = hertz;
+    joint.dampingRatio = dampingRatio;
+    joint.targetTranslation = targetTranslation;
+    joint.impulse = {};
+    joint.springImpulse = 0.0f;
+    joint.lowerImpulse = 0.0f;
+    joint.upperImpulse = 0.0f;
+    joint.motorImpulse = 0.0f;
+
+    if( bodies_[joint.bodyIdA].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdA );
+    }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdB );
+    }
 }
 
 void world::setPrismaticJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation )
@@ -550,6 +586,7 @@ void world::setPrismaticJointLimit( jointId id, bool enableLimit, float lowerTra
     joint.lowerTranslation = lowerTranslation;
     joint.upperTranslation = upperTranslation;
     joint.impulse = {};
+    joint.springImpulse = 0.0f;
     joint.lowerImpulse = 0.0f;
     joint.upperImpulse = 0.0f;
 
@@ -575,6 +612,7 @@ void world::setPrismaticJointMotor( jointId id, bool enableMotor, float motorSpe
     joint.motorSpeed = motorSpeed;
     joint.maxMotorForce = maxMotorForce;
     joint.impulse = {};
+    joint.springImpulse = 0.0f;
     joint.lowerImpulse = 0.0f;
     joint.upperImpulse = 0.0f;
     joint.motorImpulse = 0.0f;
@@ -605,9 +643,14 @@ prismaticJointData world::getPrismaticJointData( jointId id ) const
     data.lateralError = Dot( perpendicular, d );
     const rot2 relativeRotation = Inverse( bodySims_[sim.bodyIdA].transform.rotation * rot2::FromRadians( sim.referenceAngle ) ) * bodySims_[sim.bodyIdB].transform.rotation;
     data.currentAngle = std::atan2( relativeRotation.s, relativeRotation.c );
-    const float axialImpulse = sim.motorImpulse + sim.lowerImpulse - sim.upperImpulse;
+    const float axialImpulse = sim.springImpulse + sim.motorImpulse + sim.lowerImpulse - sim.upperImpulse;
     data.force = sim.subStepTime > 0.0f ? ( sim.impulse.x * perpendicular + axialImpulse * data.axis ) / sim.subStepTime : vec2{};
     data.torque = sim.subStepTime > 0.0f ? sim.impulse.y / sim.subStepTime : 0.0f;
+    data.enableSpring = sim.enableSpring;
+    data.hertz = sim.hertz;
+    data.dampingRatio = sim.dampingRatio;
+    data.targetTranslation = sim.targetTranslation;
+    data.springForce = sim.subStepTime > 0.0f ? sim.springImpulse / sim.subStepTime : 0.0f;
     data.enableLimit = sim.enableLimit;
     data.lowerTranslation = sim.lowerTranslation;
     data.upperTranslation = sim.upperTranslation;
@@ -2134,6 +2177,7 @@ void world::Step( float timeStep, int subStepCount )
                     }
                     if constexpr( std::is_same_v<simType, prismaticJointSim2> )
                     {
+                        joint.springImpulse = constraint.springImpulse;
                         joint.lowerImpulse = constraint.lowerImpulse;
                         joint.upperImpulse = constraint.upperImpulse;
                         joint.motorImpulse = constraint.motorImpulse;
@@ -2658,6 +2702,7 @@ void world::resetJointImpulses( std::int32_t bodyIndex )
                 }
                 if constexpr( std::is_same_v<simType, prismaticJointSim2> )
                 {
+                    joint.springImpulse = 0.0f;
                     joint.lowerImpulse = 0.0f;
                     joint.upperImpulse = 0.0f;
                     joint.motorImpulse = 0.0f;
