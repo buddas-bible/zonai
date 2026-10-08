@@ -31,6 +31,22 @@ jobs:
                   raise SystemExit(f'{path}: expected 1 match, found {count}')
               p.write_text(text.replace(old, new, 1), encoding='utf-8')
 
+          def replace_in_function(path, start_marker, end_marker, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              start = text.find(start_marker)
+              if start < 0:
+                  raise SystemExit(f'{path}: missing function start {start_marker}')
+              end = text.find(end_marker, start + len(start_marker))
+              if end < 0:
+                  raise SystemExit(f'{path}: missing function end {end_marker}')
+              section = text[start:end]
+              count = section.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected 1 scoped match, found {count}')
+              section = section.replace(old, new, 1)
+              p.write_text(text[:start] + section + text[end:], encoding='utf-8')
+
           replace_once(
               'src/dynamics/world.h',
               '''    // A의 단위 로컬 축을 따라 B의 이동만 허용하고 축 수직 이동과 상대 회전을 막음.\n    [[nodiscard]] jointId createPrismaticJoint( const prismaticJointDef& definition );\n    // 유한한 lower <= upper 변위 (m). 변경 시 coupled cache를 비우고 연결된 component를 깨움.\n    void setPrismaticJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation );\n''',
@@ -51,15 +67,19 @@ jobs:
               '''    return makeJointId( index );\n}\n\nvoid world::setPrismaticJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation )\n''',
               '''    return makeJointId( index );\n}\n\nvoid world::setPrismaticJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio, float targetTranslation )\n{\n    assert( std::isfinite( hertz ) && hertz >= 0.0f );\n    assert( std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );\n    assert( std::isfinite( targetTranslation ) );\n\n    auto& joint = std::get<prismaticJointSim2>( jointSims_[getJointIndex( id )] );\n    if( joint.enableSpring == enableSpring && joint.hertz == hertz && joint.dampingRatio == dampingRatio && joint.targetTranslation == targetTranslation ) return;\n\n    joint.enableSpring = enableSpring;\n    joint.hertz = hertz;\n    joint.dampingRatio = dampingRatio;\n    joint.targetTranslation = targetTranslation;\n    joint.impulse = {};\n    joint.springImpulse = 0.0f;\n    joint.lowerImpulse = 0.0f;\n    joint.upperImpulse = 0.0f;\n    joint.motorImpulse = 0.0f;\n\n    if( bodies_[joint.bodyIdA].type != bodyType::Static )\n    {\n        WakeBodyByIndex( joint.bodyIdA );\n    }\n    if( bodies_[joint.bodyIdB].type != bodyType::Static )\n    {\n        WakeBodyByIndex( joint.bodyIdB );\n    }\n}\n\nvoid world::setPrismaticJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation )\n''')
 
-          replace_once(
+          replace_in_function(
               'src/dynamics/world.cpp',
-              '''    joint.impulse = {};\n    joint.lowerImpulse = 0.0f;\n    joint.upperImpulse = 0.0f;\n\n    if( bodies_[joint.bodyIdA].type != bodyType::Static )\n''',
-              '''    joint.impulse = {};\n    joint.springImpulse = 0.0f;\n    joint.lowerImpulse = 0.0f;\n    joint.upperImpulse = 0.0f;\n\n    if( bodies_[joint.bodyIdA].type != bodyType::Static )\n''')
+              'void world::setPrismaticJointLimit(',
+              'void world::setPrismaticJointMotor(',
+              '''    joint.impulse = {};\n    joint.lowerImpulse = 0.0f;\n    joint.upperImpulse = 0.0f;\n''',
+              '''    joint.impulse = {};\n    joint.springImpulse = 0.0f;\n    joint.lowerImpulse = 0.0f;\n    joint.upperImpulse = 0.0f;\n''')
 
-          replace_once(
+          replace_in_function(
               'src/dynamics/world.cpp',
-              '''    joint.impulse = {};\n    joint.lowerImpulse = 0.0f;\n    joint.upperImpulse = 0.0f;\n    joint.motorImpulse = 0.0f;\n\n    if( bodies_[joint.bodyIdA].type != bodyType::Static )\n''',
-              '''    joint.impulse = {};\n    joint.springImpulse = 0.0f;\n    joint.lowerImpulse = 0.0f;\n    joint.upperImpulse = 0.0f;\n    joint.motorImpulse = 0.0f;\n\n    if( bodies_[joint.bodyIdA].type != bodyType::Static )\n''')
+              'void world::setPrismaticJointMotor(',
+              'prismaticJointData world::getPrismaticJointData(',
+              '''    joint.impulse = {};\n    joint.lowerImpulse = 0.0f;\n    joint.upperImpulse = 0.0f;\n    joint.motorImpulse = 0.0f;\n''',
+              '''    joint.impulse = {};\n    joint.springImpulse = 0.0f;\n    joint.lowerImpulse = 0.0f;\n    joint.upperImpulse = 0.0f;\n    joint.motorImpulse = 0.0f;\n''')
 
           replace_once(
               'src/dynamics/world.cpp',
