@@ -532,6 +532,10 @@ add_executable(prismaticJointWorldTests dynamics/prismatic_joint_world_test.cpp)
 target_link_libraries(prismaticJointWorldTests PRIVATE zonai::zonai)
 add_test(NAME prismaticJointWorldTests COMMAND prismaticJointWorldTests)
 
+add_executable(weldJointTests dynamics/weld_joint_test.cpp)
+target_link_libraries(weldJointTests PRIVATE zonai::zonai)
+add_test(NAME weldJointTests COMMAND weldJointTests)
+
 add_executable(sandboxDemoTests sandbox/demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
 target_include_directories(sandboxDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxDemoTests PRIVATE zonai::zonai)
