@@ -29,6 +29,10 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createWheelSuspension();
     }
+    else if( kind == demoKind::prismaticRail )
+    {
+        createPrismaticRail();
+    }
     else if( kind == demoKind::mouseJointPlayground )
     {
         createMouseJointPlayground();
