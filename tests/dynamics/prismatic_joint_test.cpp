@@ -230,5 +230,59 @@ int main()
     solvePrismaticJointConstraint( constraint, stateA, stateB, false );
     check( constraint.motorImpulse > 0.0f && constraint.upperImpulse > 0.0f && near( stateB.linearVelocity.x, 0.0f ), "Prismatic upper limit stops motor-driven boundary motion" );
 
+    joint = {};
+    joint.bodyIdA = 0;
+    joint.bodyIdB = 1;
+    joint.enableSpring = true;
+    joint.hertz = 4.0f;
+    joint.dampingRatio = 0.7f;
+    joint.targetTranslation = 0.0f;
+    bodySimA.invMass = 0.0f;
+    bodySimA.invInertia = 0.0f;
+    bodySimA.center = {};
+    bodySimA.transform = {};
+    bodySimB.invMass = 1.0f;
+    bodySimB.invInertia = 1.0f;
+    bodySimB.center = { 1.0f, 0.0f };
+    bodySimB.transform = { { 1.0f, 0.0f }, {} };
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    solvePrismaticJointConstraint( constraint, stateA, stateB, false );
+    check( constraint.springImpulse < 0.0f && stateB.linearVelocity.x < 0.0f, "Prismatic spring remains active during relaxation" );
+
+    joint.targetTranslation = 2.0f;
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    solvePrismaticJointConstraint( constraint, stateA, stateB, false );
+    check( constraint.springImpulse > 0.0f && stateB.linearVelocity.x > 0.0f, "Prismatic spring restores toward positive target translation" );
+
+    for( float dampingRatio : { 0.0f, 1.0f, 2.0f } )
+    {
+        joint.dampingRatio = dampingRatio;
+        constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
+        stateB = {};
+        solvePrismaticJointConstraint( constraint, stateA, stateB, false );
+        check( std::isfinite( constraint.springImpulse ) && IsFinite( stateB.linearVelocity ), "Prismatic spring damping remains finite" );
+    }
+
+    joint.hertz = 0.0f;
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    stateB.linearVelocity.x = 1.0f;
+    solvePrismaticJointConstraint( constraint, stateA, stateB, false );
+    check( constraint.springImpulse == 0.0f && near( stateB.linearVelocity.x, 1.0f ), "zero-hertz Prismatic spring applies no spring force" );
+
+    joint.hertz = 4.0f;
+    joint.subStepTime = h;
+    joint.springImpulse = 0.25f;
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    warmStartPrismaticJointConstraint( constraint, stateA, stateB );
+    check( near( stateB.linearVelocity.x, 0.25f ), "Prismatic warm start applies cached spring impulse" );
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h / 2.0f );
+    check( constraint.springImpulse == 0.0f, "timestep change clears Prismatic spring cache" );
+
     return EXIT_SUCCESS;
 }
