@@ -112,5 +112,65 @@ int main()
     constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h / 2.0f );
     check( LengthSquared( constraint.impulse ) == 0.0f, "timestep change clears prismatic cache" );
 
+    joint = {};
+    joint.bodyIdA = 0;
+    joint.bodyIdB = 1;
+    joint.enableLimit = true;
+    joint.lowerTranslation = 0.0f;
+    joint.upperTranslation = 2.0f;
+    bodySimA.invMass = 0.0f;
+    bodySimA.invInertia = 0.0f;
+    bodySimA.center = {};
+    bodySimB.invMass = 1.0f;
+    bodySimB.invInertia = 1.0f;
+    bodySimB.center = { 0.5f, 0.0f };
+    bodySimB.transform = { { 0.5f, 0.0f }, {} };
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    stateB.linearVelocity.x = -60.0f;
+    solvePrismaticJointConstraint( constraint, stateA, stateB, false );
+    check( constraint.lowerImpulse > 0.0f && constraint.upperImpulse == 0.0f, "Prismatic lower limit predicts boundary crossing" );
+    check( stateB.linearVelocity.x > -60.0f, "Prismatic lower limit pushes along positive axis" );
+
+    bodySimB.center = { 1.5f, 0.0f };
+    bodySimB.transform.position = bodySimB.center;
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    stateB.linearVelocity.x = 60.0f;
+    solvePrismaticJointConstraint( constraint, stateA, stateB, false );
+    check( constraint.upperImpulse > 0.0f && constraint.lowerImpulse == 0.0f, "Prismatic upper limit predicts boundary crossing" );
+    check( stateB.linearVelocity.x < 60.0f, "Prismatic upper limit pushes along negative axis" );
+    stateB.linearVelocity.x = -30.0f;
+    solvePrismaticJointConstraint( constraint, stateA, stateB, false );
+    check( constraint.upperImpulse >= 0.0f, "Prismatic upper limit accumulated impulse never becomes negative" );
+
+    joint.lowerTranslation = 1.0f;
+    joint.upperTranslation = 1.0f;
+    bodySimB.center = { 1.2f, 0.0f };
+    bodySimB.transform.position = bodySimB.center;
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
+    stateB = {};
+    solvePrismaticJointConstraint( constraint, stateA, stateB, true );
+    check( constraint.upperImpulse > 0.0f && stateB.linearVelocity.x < 0.0f, "equal Prismatic limits restore the locked translation" );
+
+    joint.subStepTime = h;
+    joint.lowerImpulse = 3.0f;
+    joint.upperImpulse = 1.0f;
+    bodySimA.invMass = 1.0f;
+    bodySimA.invInertia = 1.0f;
+    bodySimB.invMass = 1.0f;
+    bodySimB.invInertia = 1.0f;
+    bodySimB.center = {};
+    bodySimB.transform = {};
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    warmStartPrismaticJointConstraint( constraint, stateA, stateB );
+    check( near( stateA.linearVelocity.x, -2.0f ) && near( stateB.linearVelocity.x, 2.0f ), "Prismatic warm start applies cached axial limit impulse" );
+
+    constraint = preparePrismaticJointConstraint( joint, bodySimA, bodySimB, h / 2.0f );
+    check( constraint.lowerImpulse == 0.0f && constraint.upperImpulse == 0.0f, "timestep change clears Prismatic limit cache" );
+
     return EXIT_SUCCESS;
 }
