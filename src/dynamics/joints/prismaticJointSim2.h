@@ -18,6 +18,12 @@ struct prismaticJointSim2
     float referenceAngle = 0.0f;
     vec2 impulse{}; // x: 축 수직 임펄스, y: 상대 회전 임펄스.
     float subStepTime = 0.0f;
+
+    bool enableLimit = false;
+    float lowerTranslation = 0.0f;
+    float upperTranslation = 0.0f;
+    float lowerImpulse = 0.0f;
+    float upperImpulse = 0.0f;
 };
 
 } // namespace zonai

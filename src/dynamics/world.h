@@ -110,6 +110,8 @@ public:
 
     // A의 단위 로컬 축을 따라 B의 이동만 허용하고 축 수직 이동과 상대 회전을 막음.
     [[nodiscard]] jointId createPrismaticJoint( const prismaticJointDef& definition );
+    // 유한한 lower <= upper 변위 (m). 변경 시 coupled cache를 비우고 연결된 component를 깨움.
+    void setPrismaticJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation );
     [[nodiscard]] prismaticJointData getPrismaticJointData( jointId id ) const;
 
     // A의 단위 로컬 축을 따라 B를 이동시키며 상대 회전은 허용함. 하나 이상은 Dynamic이어야 함.

@@ -40,6 +40,13 @@ enum class wheelDemoPreset
     combined
 };
 
+enum class prismaticDemoPreset
+{
+    free,
+    limited,
+    locked
+};
+
 class rigidBodyDemo : public demo
 {
 public:
@@ -60,6 +67,7 @@ public:
     void applyDistancePreset( distanceDemoPreset preset );
     void applyRevolutePreset( revoluteDemoPreset preset );
     void applyWheelPreset( wheelDemoPreset preset );
+    void applyPrismaticPreset( prismaticDemoPreset preset );
 #pragma endregion Settings
 
 #pragma region Contacts
