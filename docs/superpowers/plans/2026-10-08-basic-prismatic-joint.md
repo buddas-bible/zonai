@@ -117,7 +117,7 @@ struct prismaticJointDef
 
 `prismaticJointData` contains body handles, world anchors, world axis, `currentTranslation`, `lateralError`, `currentAngle`, total reaction `force`, reaction `torque`, and `collideConnected`. Do not add Stage 2-4 fields.
 
-`prismaticJointSim2` stores stable/body indices, local anchors, local axis, reference angle, and persistent `vec2 impulse` where `.x` is lateral impulse and `.y` is angular impulse.
+`prismaticJointSim2` stores stable/body indices, local anchors, local axis, reference angle, persistent `vec2 impulse` where `.x` is lateral impulse and `.y` is angular impulse, and `float subStepTime = 0.0f` so the last solved impulse can be reported as force/torque using the same observation convention as the existing Joint types.
 
 - [ ] **Step 4: Implement prepare/warm-start and the 2x2 block solve**
 
@@ -247,8 +247,11 @@ Keep the common `joint2` ownership unchanged.
 translation = dot(axis, anchorB - anchorA)
 lateralError = dot(LeftPerp(axis), anchorB - anchorA)
 currentAngle = wrapped/normalized relative angle according to the same convention already used by Revolute, minus referenceAngle
-force/torque = cached impulse * invSubStepTime after solver integration exists; before the first solve they are zero
+force = sim.subStepTime > 0 ? (sim.impulse.x / sim.subStepTime) * LeftPerp(axis) : vec2{}
+torque = sim.subStepTime > 0 ? sim.impulse.y / sim.subStepTime : 0
 ```
+
+Before the first solve, `subStepTime` is zero so the reported reaction is zero.
 
 - [ ] **Step 5: Run lifecycle/API tests to verify GREEN**
 
@@ -321,16 +324,16 @@ warmStartPrismaticJointConstraint( ... );
 solvePrismaticJointConstraint( ..., useBias );
 ```
 
-When storing the solved constraint back into `jointSims_`, map `prismaticJointConstraint2 -> prismaticJointSim2` and persist the two-component impulse. Preserve existing reset behavior for mass/pose/timestep changes; add only the type branch required for Prismatic to participate.
+When storing the solved constraint back into `jointSims_`, map `prismaticJointConstraint2 -> prismaticJointSim2`, persist the two-component impulse, and persist the constraint's `subStepTime` into `sim.subStepTime`. Preserve existing reset behavior for mass/pose/timestep changes; add only the type branch required for Prismatic to participate.
 
 - [ ] **Step 5: Expose reaction force/torque from the stored impulse**
 
-Track the latest inverse substep time the same way current Joint query data derives reaction force/torque. `force` is lateral only in Stage 1:
+Use the stored `sim.subStepTime` exactly like current Joint query data. Stage 1 has no axial reaction:
 
 ```text
 perp = LeftPerp(currentWorldAxis)
-force = (impulse.x * invH) * perp
-torque = impulse.y * invH
+force = sim.subStepTime > 0 ? (impulse.x / sim.subStepTime) * perp : vec2{}
+torque = sim.subStepTime > 0 ? impulse.y / sim.subStepTime : 0
 ```
 
 No axial force exists yet because limit/motor/spring are Stage 2-4.
