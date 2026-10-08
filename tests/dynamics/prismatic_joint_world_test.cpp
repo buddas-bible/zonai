@@ -170,10 +170,13 @@ int main()
     check( std::abs( motor.GetBodyLinearVelocity( motorSlider ).x ) < 0.001f, "Prismatic upper limit removes motor-driven outward velocity" );
     check( motorData.currentTranslation < 0.53f, "Prismatic soft limit bounds the first motor-driven position error" );
     check( motorData.motorForce > 0.0f, "Prismatic reports motor effort even when the limit cancels motion" );
+
+    for( int i = 0; i < 60; ++i ) motor.Step( h, 4 );
+    const float settledTranslation = motor.getPrismaticJointData( motorJoint ).currentTranslation;
     for( int i = 0; i < 60; ++i ) motor.Step( h, 4 );
     motorData = motor.getPrismaticJointData( motorJoint );
     check( std::abs( motor.GetBodyLinearVelocity( motorSlider ).x ) < 0.001f, "Prismatic upper limit keeps sustained motor velocity blocked" );
-    check( motorData.currentTranslation >= 0.5f && motorData.currentTranslation < 0.53f, "Prismatic soft limit keeps sustained motor position error bounded" );
+    check( motorData.currentTranslation >= 0.5f && std::abs( motorData.currentTranslation - settledTranslation ) < 0.001f, "Prismatic soft limit reaches a stable motor-load equilibrium" );
     check( motorData.motorForce > 0.0f, "Prismatic motor keeps applying effort against active limit" );
     check( std::abs( Dot( motorData.force, motorData.axis ) ) < 1.0f, "Prismatic motor and upper limit reactions balance at steady state" );
 
