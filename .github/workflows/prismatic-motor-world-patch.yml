@@ -30,22 +30,6 @@ jobs:
               file.write_text(text.replace(old, new, 1), encoding="utf-8")
 
           replace_once(
-              "src/dynamics/joints/prismaticJoint2.h",
-              """    bool enableLimit = false;\n    float lowerTranslation = 0.0f;\n    float upperTranslation = 0.0f;\n    bool collideConnected = false;\n""",
-              """    bool enableLimit = false;\n    float lowerTranslation = 0.0f;\n    float upperTranslation = 0.0f;\n\n    bool enableMotor = false;\n    float motorSpeed = 0.0f;\n    float maxMotorForce = 0.0f;\n    bool collideConnected = false;\n""",
-          )
-          replace_once(
-              "src/dynamics/joints/prismaticJoint2.h",
-              """    bool enableLimit = false;\n    float lowerTranslation = 0.0f;\n    float upperTranslation = 0.0f;\n    bool collideConnected = false;\n""",
-              """    bool enableLimit = false;\n    float lowerTranslation = 0.0f;\n    float upperTranslation = 0.0f;\n    bool enableMotor = false;\n    float motorSpeed = 0.0f;\n    float maxMotorForce = 0.0f;\n    float motorForce = 0.0f;\n    bool collideConnected = false;\n""",
-          )
-          replace_once(
-              "src/dynamics/joints/prismaticJoint2.h",
-              "vec2 force{}; // 마지막 substep의 축 수직 + translation limit 누적 선형 임펄스 / h.",
-              "vec2 force{}; // 마지막 substep의 축 수직 + motor + translation limit 누적 선형 임펄스 / h.",
-          )
-
-          replace_once(
               "src/dynamics/world.h",
               """    // 유한한 lower <= upper 변위 (m). 변경 시 coupled cache를 비우고 연결된 component를 깨움.\n    void setPrismaticJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation );\n    [[nodiscard]] prismaticJointData getPrismaticJointData( jointId id ) const;\n""",
               """    // 유한한 lower <= upper 변위 (m). 변경 시 coupled cache를 비우고 연결된 component를 깨움.\n    void setPrismaticJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation );\n    // B의 A에 대한 목표 축속도 (m/s)와 비음수 최대 힘 (N). 속도 0은 제동함.\n    void setPrismaticJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorForce );\n    [[nodiscard]] prismaticJointData getPrismaticJointData( jointId id ) const;\n""",
@@ -90,6 +74,6 @@ jobs:
         run: |
           git config user.name "buddas-bible"
           git config user.email "104293172+buddas-bible@users.noreply.github.com"
-          git add src/dynamics/joints/prismaticJoint2.h src/dynamics/world.h src/dynamics/world.cpp
+          git add src/dynamics/world.h src/dynamics/world.cpp
           git commit -m "feat: integrate Prismatic motor World API"
           git push origin HEAD:feature/prismatic-motor
