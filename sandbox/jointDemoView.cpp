@@ -4,6 +4,8 @@
 
 #include <imgui.h>
 
+#include "debug/debugDraw.h"
+
 namespace zonai::sandbox
 {
 namespace
