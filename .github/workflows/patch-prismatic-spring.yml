@@ -1,0 +1,86 @@
+name: Patch Prismatic Spring World
+
+on:
+  push:
+    branches:
+      - feature/prismatic-spring
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/prismatic-spring
+          fetch-depth: 0
+
+      - name: Patch World integration
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected 1 match, found {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_once(
+              'src/dynamics/world.h',
+              '''    // A의 단위 로컬 축을 따라 B의 이동만 허용하고 축 수직 이동과 상대 회전을 막음.\n    [[nodiscard]] jointId createPrismaticJoint( const prismaticJointDef& definition );\n    // 유한한 lower <= upper 변위 (m). 변경 시 coupled cache를 비우고 연결된 component를 깨움.\n    void setPrismaticJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation );\n''',
+              '''    // A의 단위 로컬 축을 따라 B의 이동만 허용하고 축 수직 이동과 상대 회전을 막음.\n    [[nodiscard]] jointId createPrismaticJoint( const prismaticJointDef& definition );\n    // 축 방향 목표 위치를 향한 실제 물리 스프링. 0 Hz는 스프링 힘을 끄며 변경 시 coupled cache와 wake를 갱신함.\n    void setPrismaticJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio, float targetTranslation );\n    // 유한한 lower <= upper 변위 (m). 변경 시 coupled cache를 비우고 연결된 component를 깨움.\n    void setPrismaticJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation );\n''')
+
+          replace_once(
+              'src/dynamics/world.cpp',
+              '''    assert( std::isfinite( definition.referenceAngle ) );\n    assert( std::isfinite( definition.lowerTranslation ) && std::isfinite( definition.upperTranslation ) && definition.lowerTranslation <= definition.upperTranslation );\n    assert( std::isfinite( definition.motorSpeed ) );\n''',
+              '''    assert( std::isfinite( definition.referenceAngle ) );\n    assert( std::isfinite( definition.hertz ) && definition.hertz >= 0.0f );\n    assert( std::isfinite( definition.dampingRatio ) && definition.dampingRatio >= 0.0f );\n    assert( std::isfinite( definition.targetTranslation ) );\n    assert( std::isfinite( definition.lowerTranslation ) && std::isfinite( definition.upperTranslation ) && definition.lowerTranslation <= definition.upperTranslation );\n    assert( std::isfinite( definition.motorSpeed ) );\n''')
+
+          replace_once(
+              'src/dynamics/world.cpp',
+              '''    sim.localAxisA = definition.localAxisA;\n    sim.referenceAngle = definition.referenceAngle;\n    sim.enableLimit = definition.enableLimit;\n''',
+              '''    sim.localAxisA = definition.localAxisA;\n    sim.referenceAngle = definition.referenceAngle;\n    sim.enableSpring = definition.enableSpring;\n    sim.hertz = definition.hertz;\n    sim.dampingRatio = definition.dampingRatio;\n    sim.targetTranslation = definition.targetTranslation;\n    sim.enableLimit = definition.enableLimit;\n''')
+
+          replace_once(
+              'src/dynamics/world.cpp',
+              '''    return makeJointId( index );\n}\n\nvoid world::setPrismaticJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation )\n''',
+              '''    return makeJointId( index );\n}\n\nvoid world::setPrismaticJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio, float targetTranslation )\n{\n    assert( std::isfinite( hertz ) && hertz >= 0.0f );\n    assert( std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );\n    assert( std::isfinite( targetTranslation ) );\n\n    auto& joint = std::get<prismaticJointSim2>( jointSims_[getJointIndex( id )] );\n    if( joint.enableSpring == enableSpring && joint.hertz == hertz && joint.dampingRatio == dampingRatio && joint.targetTranslation == targetTranslation ) return;\n\n    joint.enableSpring = enableSpring;\n    joint.hertz = hertz;\n    joint.dampingRatio = dampingRatio;\n    joint.targetTranslation = targetTranslation;\n    joint.impulse = {};\n    joint.springImpulse = 0.0f;\n    joint.lowerImpulse = 0.0f;\n    joint.upperImpulse = 0.0f;\n    joint.motorImpulse = 0.0f;\n\n    if( bodies_[joint.bodyIdA].type != bodyType::Static )\n    {\n        WakeBodyByIndex( joint.bodyIdA );\n    }\n    if( bodies_[joint.bodyIdB].type != bodyType::Static )\n    {\n        WakeBodyByIndex( joint.bodyIdB );\n    }\n}\n\nvoid world::setPrismaticJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation )\n''')
+
+          replace_once(
+              'src/dynamics/world.cpp',
+              '''    joint.impulse = {};\n    joint.lowerImpulse = 0.0f;\n    joint.upperImpulse = 0.0f;\n\n    if( bodies_[joint.bodyIdA].type != bodyType::Static )\n''',
+              '''    joint.impulse = {};\n    joint.springImpulse = 0.0f;\n    joint.lowerImpulse = 0.0f;\n    joint.upperImpulse = 0.0f;\n\n    if( bodies_[joint.bodyIdA].type != bodyType::Static )\n''')
+
+          replace_once(
+              'src/dynamics/world.cpp',
+              '''    joint.impulse = {};\n    joint.lowerImpulse = 0.0f;\n    joint.upperImpulse = 0.0f;\n    joint.motorImpulse = 0.0f;\n\n    if( bodies_[joint.bodyIdA].type != bodyType::Static )\n''',
+              '''    joint.impulse = {};\n    joint.springImpulse = 0.0f;\n    joint.lowerImpulse = 0.0f;\n    joint.upperImpulse = 0.0f;\n    joint.motorImpulse = 0.0f;\n\n    if( bodies_[joint.bodyIdA].type != bodyType::Static )\n''')
+
+          replace_once(
+              'src/dynamics/world.cpp',
+              '''    const float axialImpulse = sim.motorImpulse + sim.lowerImpulse - sim.upperImpulse;\n    data.force = sim.subStepTime > 0.0f ? ( sim.impulse.x * perpendicular + axialImpulse * data.axis ) / sim.subStepTime : vec2{};\n    data.torque = sim.subStepTime > 0.0f ? sim.impulse.y / sim.subStepTime : 0.0f;\n    data.enableLimit = sim.enableLimit;\n''',
+              '''    const float axialImpulse = sim.springImpulse + sim.motorImpulse + sim.lowerImpulse - sim.upperImpulse;\n    data.force = sim.subStepTime > 0.0f ? ( sim.impulse.x * perpendicular + axialImpulse * data.axis ) / sim.subStepTime : vec2{};\n    data.torque = sim.subStepTime > 0.0f ? sim.impulse.y / sim.subStepTime : 0.0f;\n    data.enableSpring = sim.enableSpring;\n    data.hertz = sim.hertz;\n    data.dampingRatio = sim.dampingRatio;\n    data.targetTranslation = sim.targetTranslation;\n    data.springForce = sim.subStepTime > 0.0f ? sim.springImpulse / sim.subStepTime : 0.0f;\n    data.enableLimit = sim.enableLimit;\n''')
+
+          replace_once(
+              'src/dynamics/world.cpp',
+              '''                    if constexpr( std::is_same_v<simType, prismaticJointSim2> )\n                    {\n                        joint.lowerImpulse = constraint.lowerImpulse;\n''',
+              '''                    if constexpr( std::is_same_v<simType, prismaticJointSim2> )\n                    {\n                        joint.springImpulse = constraint.springImpulse;\n                        joint.lowerImpulse = constraint.lowerImpulse;\n''')
+
+          replace_once(
+              'src/dynamics/world.cpp',
+              '''                if constexpr( std::is_same_v<simType, prismaticJointSim2> )\n                {\n                    joint.lowerImpulse = 0.0f;\n''',
+              '''                if constexpr( std::is_same_v<simType, prismaticJointSim2> )\n                {\n                    joint.springImpulse = 0.0f;\n                    joint.lowerImpulse = 0.0f;\n''')
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/dynamics/world.h src/dynamics/world.cpp
+          git diff --cached --quiet && exit 0
+          git commit -m "Integrate Prismatic spring with World"
+          git push origin HEAD:feature/prismatic-spring
