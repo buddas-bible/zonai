@@ -33,6 +33,18 @@ void rigidBodyDemo::setPrismaticSpringTargetToCurrent()
     world_.setPrismaticJointSpring( prismaticJoint_, joint.enableSpring, joint.hertz, joint.dampingRatio, joint.currentTranslation );
 }
 
+void rigidBodyDemo::setWeldLinearSettings( float hertz, float dampingRatio )
+{
+    if( kind_ != demoKind::weldPair || !world_.IsValid( weldJoint_ ) ) return;
+    world_.setWeldJointLinearTuning( weldJoint_, hertz, dampingRatio );
+}
+
+void rigidBodyDemo::setWeldAngularSettings( float hertz, float dampingRatio )
+{
+    if( kind_ != demoKind::weldPair || !world_.IsValid( weldJoint_ ) ) return;
+    world_.setWeldJointAngularTuning( weldJoint_, hertz, dampingRatio );
+}
+
 #pragma endregion Settings
 
 #pragma region Presets
@@ -189,6 +201,21 @@ void rigidBodyDemo::applyPrismaticPreset( prismaticDemoPreset preset )
     world_.setPrismaticJointSpring( prismaticJoint_, enableSpring, hertz, dampingRatio, targetTranslation );
     world_.setPrismaticJointMotor( prismaticJoint_, enableMotor, speed, maxMotorForce );
     world_.setPrismaticJointLimit( prismaticJoint_, enableLimit, lower, upper );
+}
+
+void rigidBodyDemo::applyWeldPreset( weldDemoPreset preset )
+{
+    if( kind_ != demoKind::weldPair || !world_.IsValid( weldJoint_ ) ) return;
+
+    constexpr float hertz = 3.0f;
+    constexpr float dampingRatio = 0.7f;
+
+    const bool softLinear = preset == weldDemoPreset::softLinear || preset == weldDemoPreset::softBoth;
+    const bool softAngular = preset == weldDemoPreset::softAngular || preset == weldDemoPreset::softBoth;
+
+    // Weld는 0 Hz 자체가 hard constraint 의미라 별도 enable flag 없이 두 채널을 독립적으로 비교함.
+    world_.setWeldJointLinearTuning( weldJoint_, softLinear ? hertz : 0.0f, dampingRatio );
+    world_.setWeldJointAngularTuning( weldJoint_, softAngular ? hertz : 0.0f, dampingRatio );
 }
 
 #pragma endregion Presets
