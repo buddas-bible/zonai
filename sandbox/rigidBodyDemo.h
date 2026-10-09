@@ -54,6 +54,14 @@ enum class prismaticDemoPreset
     combined
 };
 
+enum class weldDemoPreset
+{
+    rigid,
+    softLinear,
+    softAngular,
+    softBoth
+};
+
 class rigidBodyDemo : public demo
 {
 public:
@@ -75,10 +83,13 @@ public:
     void setPrismaticLimitSettings( bool enableLimit, float lowerTranslation, float upperTranslation );
     void setPrismaticMotorSettings( bool enableMotor, float motorSpeed, float maxMotorForce );
     void setPrismaticSpringTargetToCurrent();
+    void setWeldLinearSettings( float hertz, float dampingRatio );
+    void setWeldAngularSettings( float hertz, float dampingRatio );
     void applyDistancePreset( distanceDemoPreset preset );
     void applyRevolutePreset( revoluteDemoPreset preset );
     void applyWheelPreset( wheelDemoPreset preset );
     void applyPrismaticPreset( prismaticDemoPreset preset );
+    void applyWeldPreset( weldDemoPreset preset );
 #pragma endregion Settings
 
 #pragma region Contacts
