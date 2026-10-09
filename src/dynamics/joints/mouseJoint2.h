@@ -6,9 +6,8 @@
 namespace zonai
 {
 
-// A는 수명과 연결 관계를 유지하는 정적 물체이며, target은 월드 좌표임.
-// B의 클릭 위치는 물체 원점 기준으로 저장하고 질량 중심 기준으로 계산함.
-
+// Mouse Joint를 생성할 때 World에 전달하는 설정.
+// A는 수명과 연결 관계를 유지하는 정적 Body이고 target은 월드 좌표이며, B의 클릭 지점을 spring으로 target에 끌어당김.
 struct mouseJointDef
 {
     bodyId bodyA{};
@@ -19,6 +18,8 @@ struct mouseJointDef
     float maxForce = 1000.0f;  // 허용하는 힘의 최대 크기
 };
 
+// getMouseJointData()가 반환하는 현재 상태 snapshot.
+// 월드 target과 현재 Body B 작용점, 마지막 substep의 반력 및 spring 설정을 조회할 때 사용함.
 struct mouseJointData
 {
     bodyId bodyA{};

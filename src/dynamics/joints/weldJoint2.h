@@ -6,6 +6,7 @@
 namespace zonai
 {
 
+// Weld Joint를 생성할 때 World에 전달하는 설정.
 // 두 작용점과 기준 상대 각도를 함께 유지해 두 Body의 상대 transform을 고정함.
 struct weldJointDef
 {
@@ -27,6 +28,8 @@ struct weldJointDef
     float angularDampingRatio = 0.0f;
 };
 
+// getWeldJointData()가 반환하는 현재 상태 snapshot.
+// 현재 상대 transform 오차와 마지막 substep의 반력/반토크, linear/angular softness 설정을 조회할 때 사용함.
 struct weldJointData
 {
     bodyId bodyA{};
