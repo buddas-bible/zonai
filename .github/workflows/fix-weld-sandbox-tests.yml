@@ -1,0 +1,73 @@
+name: Fix Weld Sandbox Tests
+
+on:
+  push:
+    branches:
+      - feature/weld-joint
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/weld-joint
+          fetch-depth: 0
+
+      - name: Fix Weld sandbox tests
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{path}: expected one match, got {count}\n---old---\n{old}")
+              p.write_text(text.replace(old, new), encoding="utf-8")
+
+          replace_once(
+              "tests/sandbox/demo_test.cpp",
+              '    check( getDemoEntries().size() == 7, "seven independently selectable demo entries" );',
+              '    check( getDemoEntries().size() == 8, "eight independently selectable demo entries" );'
+          )
+
+          replace_once(
+              "tests/sandbox/joint_demo_test.cpp",
+              '''    const transform2 initialA = weld.getWorld().GetBodyTransform( weldData.bodyA );
+    const transform2 initialB = weld.getWorld().GetBodyTransform( weldData.bodyB );
+    const vec2 initialDelta = initialB.position - initialA.position;''',
+              '''    const transform2 initialA = weld.getWorld().GetBodyTransform( weldData.bodyA );
+    const transform2 initialB = weld.getWorld().GetBodyTransform( weldData.bodyB );
+    const vec2 initialLocalDelta = Rotate( Inverse( initialA.rotation ), initialB.position - initialA.position );'''
+          )
+
+          replace_once(
+              "tests/sandbox/joint_demo_test.cpp",
+              '''    const transform2 finalA = weld.getWorld().GetBodyTransform( weldData.bodyA );
+    const transform2 finalB = weld.getWorld().GetBodyTransform( weldData.bodyB );
+    check( Length( ( finalB.position - finalA.position ) - initialDelta ) < 0.05f, "Weld demo keeps the pair as one relative frame" );''',
+              '''    const transform2 finalA = weld.getWorld().GetBodyTransform( weldData.bodyA );
+    const transform2 finalB = weld.getWorld().GetBodyTransform( weldData.bodyB );
+    const vec2 finalLocalDelta = Rotate( Inverse( finalA.rotation ), finalB.position - finalA.position );
+    check( Length( finalLocalDelta - initialLocalDelta ) < 0.05f, "Weld demo keeps the body origins fixed in A local frame" );'''
+          )
+
+          cmake = Path("tests/CMakeLists.txt")
+          text = cmake.read_text(encoding="utf-8")
+          cmake.write_text(text.rstrip("\n") + "\n", encoding="utf-8")
+
+      - name: Commit fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/sandbox/demo_test.cpp tests/sandbox/joint_demo_test.cpp tests/CMakeLists.txt
+          git diff --cached --exit-code && exit 1 || true
+          git commit -m "Fix Weld sandbox regression tests"
+          git push origin HEAD:feature/weld-joint
