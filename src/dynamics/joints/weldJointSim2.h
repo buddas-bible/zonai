@@ -17,6 +17,12 @@ struct weldJointSim2
     vec2 localAnchorB{};
     float referenceAngle = 0.0f;
 
+    // 0 Hz는 기존 hard Weld를 유지하고, 양수 Hz는 선형/회전 오차에 각각 독립적인 softness를 적용함.
+    float linearHertz = 0.0f;
+    float linearDampingRatio = 0.0f;
+    float angularHertz = 0.0f;
+    float angularDampingRatio = 0.0f;
+
     // 공용 Joint store/reset 경로와 같은 이름을 쓰며 의미는 2D 선형 Weld 임펄스임.
     vec2 impulse{};
     float angularImpulse = 0.0f;
