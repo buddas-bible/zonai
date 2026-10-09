@@ -17,6 +17,12 @@ struct weldJointDef
     vec2 localAnchorB{};
     // B의 A에 대한 기준 각도 (rad). 현재 상대각도를 유지하려면 생성 시 그 값을 명시함.
     float referenceAngle = 0.0f;
+
+    // 0 Hz는 해당 방향을 hard Weld로 유지하고, 양수 Hz는 독립적인 spring-damper Weld로 만듦.
+    float linearHertz = 0.0f;
+    float linearDampingRatio = 0.0f;
+    float angularHertz = 0.0f;
+    float angularDampingRatio = 0.0f;
     bool collideConnected = false;
 };
 
@@ -31,6 +37,12 @@ struct weldJointData
     // 기준 각도를 뺀 B의 A에 대한 상대 각도 (rad).
     float currentAngle = 0.0f;
     float referenceAngle = 0.0f;
+
+    float linearHertz = 0.0f;
+    float linearDampingRatio = 0.0f;
+    float angularHertz = 0.0f;
+    float angularDampingRatio = 0.0f;
+
     // 마지막 substep 누적 임펄스 / 시간 간격. B에 작용하는 반력과 반토크.
     vec2 force{};
     float torque = 0.0f;
