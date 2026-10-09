@@ -19,6 +19,7 @@ enum class demoKind
     revoluteHinge,
     wheelSuspension,
     prismaticRail,
+    weldPair,
     mouseJointPlayground,
     motorCar
 };

@@ -232,6 +232,29 @@ void rigidBodyDemo::createPrismaticRail()
     prismaticJoint_ = world_.createPrismaticJoint( joint );
 }
 
+void rigidBodyDemo::createWeldPair()
+{
+    world_.SetGravity( {} );
+
+    const bodyId bodyA = world_.CreateBody( bodyType::Dynamic, { { -0.7f, 0.0f }, {} } );
+    const shapeId shapeA = world_.CreateShape( bodyA, MakeBox( { 0.55f, 0.35f } ) );
+    shapes_.push_back( { bodyA, shapeA, "왼쪽 상자 [웰드]" } );
+
+    const bodyId bodyB = world_.CreateBody( bodyType::Dynamic, { { 0.7f, 0.0f }, {} } );
+    const shapeId shapeB = world_.CreateShape( bodyB, MakeBox( { 0.55f, 0.35f } ) );
+    shapes_.push_back( { bodyB, shapeB, "오른쪽 상자 [웰드]" } );
+
+    weldJointDef joint{};
+    joint.bodyA = bodyA;
+    joint.bodyB = bodyB;
+    joint.localAnchorA = { 0.7f, 0.0f };
+    joint.localAnchorB = { -0.7f, 0.0f };
+    weldJoint_ = world_.createWeldJoint( joint );
+
+    impulseBody_ = bodyB;
+    torqueBody_ = bodyB;
+}
+
 void rigidBodyDemo::createMouseJointPlayground()
 {
     const bodyId ground = world_.CreateBody( bodyType::Static, { { 0.0f, -2.5f }, {} } );

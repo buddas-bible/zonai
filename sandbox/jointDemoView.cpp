@@ -29,7 +29,7 @@ public:
         view_.drawControls();
 
         const demoKind kind = view_.getKind();
-        if( kind != demoKind::distancePendulum && kind != demoKind::revoluteHinge && kind != demoKind::wheelSuspension && kind != demoKind::prismaticRail && kind != demoKind::mouseJointPlayground ) return;
+        if( kind != demoKind::distancePendulum && kind != demoKind::revoluteHinge && kind != demoKind::wheelSuspension && kind != demoKind::prismaticRail && kind != demoKind::weldPair && kind != demoKind::mouseJointPlayground ) return;
 
         if( ImGui::CollapsingHeader( "조인트 빠른 설정###JointQuickSettings", ImGuiTreeNodeFlags_DefaultOpen ) )
         {
@@ -87,6 +87,10 @@ public:
                 if( ImGui::Button( "전체###PrismaticPresetCombined" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::combined );
                 ImGui::TextWrapped( "프리셋은 대표 상태를 빠르게 만드는 용도입니다. 아래 인스펙터에서 각 제약을 직접 켜고 수치를 실시간으로 조절할 수 있습니다." );
             }
+            else if( kind == demoKind::weldPair )
+            {
+                ImGui::TextWrapped( "Basic Weld는 두 anchor의 위치와 두 Body의 상대 각도를 동시에 고정합니다. 한쪽 상자에만 힘이나 회전 충격을 줘도 두 Body가 하나의 상대 프레임을 유지하는지 관찰합니다." );
+            }
             else
             {
                 ImGui::TextWrapped( "질량이 다른 세 상자를 같은 Mouse Joint 설정으로 드래그해 추종 차이를 비교합니다." );
@@ -106,11 +110,35 @@ public:
         {
             drawPrismaticInspector();
         }
+        else if( kind == demoKind::weldPair && view_.getWorld().IsValid( view_.getWeldJoint() ) )
+        {
+            drawWeldInspector();
+        }
     }
 
     void draw( debugDraw& draw ) const override
     {
         view_.draw( draw );
+        if( view_.getKind() == demoKind::weldPair && view_.getWorld().IsValid( view_.getWeldJoint() ) )
+        {
+            const weldJointData joint = view_.getWorld().getWeldJointData( view_.getWeldJoint() );
+            constexpr ImU32 ANCHOR_A_COLOR = IM_COL32( 100, 235, 220, 255 );
+            constexpr ImU32 ANCHOR_B_COLOR = IM_COL32( 255, 220, 90, 255 );
+            constexpr ImU32 ERROR_COLOR = IM_COL32( 245, 100, 100, 255 );
+            constexpr ImU32 FRAME_A_COLOR = IM_COL32( 110, 180, 255, 255 );
+            constexpr ImU32 FRAME_B_COLOR = IM_COL32( 230, 120, 255, 255 );
+
+            draw.DrawPoint( joint.anchorA, ANCHOR_A_COLOR, 7.0f );
+            draw.DrawPoint( joint.anchorB, ANCHOR_B_COLOR, 7.0f );
+            draw.DrawSegment( { joint.anchorA, joint.anchorB }, ERROR_COLOR, 2.0f );
+
+            const vec2 axisA = Rotate( view_.getWorld().GetBodyTransform( joint.bodyA ).rotation, { 1.0f, 0.0f } );
+            const vec2 axisB = Rotate( view_.getWorld().GetBodyTransform( joint.bodyB ).rotation, { 1.0f, 0.0f } );
+            draw.DrawArrow( joint.anchorA, axisA, FRAME_A_COLOR, 0.55f );
+            draw.DrawArrow( joint.anchorB, axisB, FRAME_B_COLOR, 0.55f );
+            return;
+        }
+
         if( view_.getKind() != demoKind::prismaticRail || !view_.getWorld().IsValid( view_.getPrismaticJoint() ) ) return;
 
         const prismaticJointData joint = view_.getWorld().getPrismaticJointData( view_.getPrismaticJoint() );
@@ -147,6 +175,22 @@ public:
     }
 
 private:
+    void drawWeldInspector()
+    {
+        if( !ImGui::CollapsingHeader( "웰드 조인트 인스펙터###WeldJointInspector", ImGuiTreeNodeFlags_DefaultOpen ) ) return;
+
+        const weldJointData joint = view_.getWorld().getWeldJointData( view_.getWeldJoint() );
+        const vec2 anchorError = joint.anchorB - joint.anchorA;
+        ImGui::TextWrapped( "두 anchor가 같은 위치에 있고 상대 각도가 referenceAngle을 유지하도록 선형 2x2 제약과 각도 scalar 제약을 함께 풉니다." );
+        ImGui::Text( "Anchor A: (%.3f, %.3f)", joint.anchorA.x, joint.anchorA.y );
+        ImGui::Text( "Anchor B: (%.3f, %.3f)", joint.anchorB.x, joint.anchorB.y );
+        ImGui::Text( "Anchor 오차: (%.4f, %.4f) / %.4f m", anchorError.x, anchorError.y, Length( anchorError ) );
+        ImGui::Text( "기준 상대각: %.4f rad", joint.referenceAngle );
+        ImGui::Text( "상대 각도 오차: %.4f rad", joint.currentAngle );
+        ImGui::Text( "반력: (%.2f, %.2f) N / 크기 %.2f N", joint.force.x, joint.force.y, Length( joint.force ) );
+        ImGui::Text( "반토크: %.2f N*m", joint.torque );
+    }
+
     void drawPrismaticInspector()
     {
         if( !ImGui::CollapsingHeader( "프리즈매틱 조인트 인스펙터###PrismaticJointInspector", ImGuiTreeNodeFlags_DefaultOpen ) ) return;
