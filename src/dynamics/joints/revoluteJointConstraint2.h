@@ -8,36 +8,47 @@
 namespace zonai
 {
 
+// 한 substep 동안 Revolute Joint를 반복해서 풀기 위한 임시 solver 데이터.
+// 영구 설정을 현재 COM/회전 기준으로 변환하고 effective mass와 warm-start impulse를 준비함.
 struct revoluteJointConstraint2
 {
+    // 결과를 원래 Joint에 저장하고 두 Body state를 찾기 위한 index.
     std::int32_t jointId = -1;
     std::int32_t bodyIdA = -1;
     std::int32_t bodyIdB = -1;
 
-    // Step 시작 시 질량 중심에서 작용점까지의 벡터.
+    // Step 시작 시 COM에서 회전축 작용점까지의 월드 lever arm과 두 COM 사이의 거리.
     vec2 anchorA{};
     vec2 anchorB{};
     vec2 deltaCenter{};
 
+    // Solver iteration에서 반복 사용하므로 Prepare에서 Body의 역질량 / 역관성을 복사함.
     float invMassA = 0.0f;
     float invMassB = 0.0f;
     float invInertiaA = 0.0f;
     float invInertiaB = 0.0f;
+
+    // 두 작용점을 같은 위치에 두는 선형 제약의 누적 impulse와 hard correction 계수.
     vec2 impulse{};
     constraintSoftness2 softness{};
 
-    // 기준 각도를 뺀 Step 시작 시 상대 회전. 누적 회전을 곱한 뒤 atan2로 각도를 구함.
+    // referenceAngle을 제외한 Step 시작 시 상대 회전.
+    // Body의 deltaRotation과 결합해 현재 angular error를 계산함.
     rot2 relativeRotation{};
+
+    // 각도 limit은 scalar 제약이며 lower/upper를 각각 한쪽 방향 impulse로 누적함.
     bool enableLimit = false;
     float lowerAngle = 0.0f;
     float upperAngle = 0.0f;
-    float angularMass = 0.0f; // 1 / (invInertiaA + invInertiaB)
+    float angularMass = 0.0f; // 1 / (invInertiaA + invInertiaB).
     float invSubStepTime = 0.0f;
     float lowerImpulse = 0.0f;
     float upperImpulse = 0.0f;
+
+    // 모터는 상대 각속도를 motorSpeed로 만들며 maxMotorTorque * h 범위에서만 impulse를 누적함.
     bool enableMotor = false;
     float motorSpeed = 0.0f;
-    float maxMotorImpulse = 0.0f; // maxMotorTorque * subStepTime
+    float maxMotorImpulse = 0.0f;
     float motorImpulse = 0.0f;
 };
 
