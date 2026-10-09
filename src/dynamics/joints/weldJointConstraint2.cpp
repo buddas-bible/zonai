@@ -13,6 +13,10 @@ weldJointConstraint2 prepareWeldJointConstraint( const weldJointSim2& joint, con
 {
     assert( std::isfinite( subStepTime ) && subStepTime > 0.0f );
     assert( joint.bodyIdA == bodySimA.bodyId && joint.bodyIdB == bodySimB.bodyId );
+    assert( std::isfinite( joint.linearHertz ) && joint.linearHertz >= 0.0f );
+    assert( std::isfinite( joint.linearDampingRatio ) && joint.linearDampingRatio >= 0.0f );
+    assert( std::isfinite( joint.angularHertz ) && joint.angularHertz >= 0.0f );
+    assert( std::isfinite( joint.angularDampingRatio ) && joint.angularDampingRatio >= 0.0f );
 
     weldJointConstraint2 constraint{};
     constraint.jointId = joint.jointId;
@@ -32,8 +36,12 @@ weldJointConstraint2 prepareWeldJointConstraint( const weldJointSim2& joint, con
     const float angularK = constraint.invInertiaA + constraint.invInertiaB;
     constraint.angularMass = angularK > 0.0f ? 1.0f / angularK : 0.0f;
 
-    // 0 Hz hard constraint에 해당하는 기존 Joint 안정화 계수. Soft Weld는 다음 단계에서 별도 계수를 가짐.
+    // 0 Hz는 기존 hard Weld 안정화 계수를 그대로 사용하고, 양수 Hz만 실제 spring-damper softness를 사용함.
     constraint.softness = makeConstraintSoftness( std::min( 60.0f, 0.25f / subStepTime ), 2.0f, subStepTime );
+    constraint.linearHertz = joint.linearHertz;
+    constraint.angularHertz = joint.angularHertz;
+    constraint.linearSpring = joint.linearHertz > 0.0f ? makeConstraintSoftness( joint.linearHertz, joint.linearDampingRatio, subStepTime ) : constraint.softness;
+    constraint.angularSpring = joint.angularHertz > 0.0f ? makeConstraintSoftness( joint.angularHertz, joint.angularDampingRatio, subStepTime ) : constraint.softness;
 
     const bool keepCache = joint.subStepTime == subStepTime;
     constraint.impulse = keepCache ? joint.impulse : vec2{};
@@ -68,9 +76,18 @@ void solveWeldJointConstraint( weldJointConstraint2& constraint, bodyState& body
     {
         const rot2 rotation = Inverse( bodyStateA.deltaRotation ) * bodyStateB.deltaRotation * constraint.relativeRotation;
         const float angle = std::atan2( rotation.s, rotation.c );
-        const float bias = useBias ? constraint.softness.biasRate * angle : 0.0f;
-        const float massScale = useBias ? constraint.softness.massScale : 1.0f;
-        const float impulseScale = useBias ? constraint.softness.impulseScale : 0.0f;
+
+        float bias = 0.0f;
+        float massScale = 1.0f;
+        float impulseScale = 0.0f;
+        if( useBias || constraint.angularHertz > 0.0f )
+        {
+            // Soft angular Weld는 실제 복원력이므로 relax pass에서도 bias를 유지함.
+            bias = constraint.angularSpring.biasRate * angle;
+            massScale = constraint.angularSpring.massScale;
+            impulseScale = constraint.angularSpring.impulseScale;
+        }
+
         const float velocity = bodyStateB.angularVelocity - bodyStateA.angularVelocity;
         const float impulse = -massScale * constraint.angularMass * ( velocity + bias ) - impulseScale * constraint.angularImpulse;
 
@@ -86,9 +103,16 @@ void solveWeldJointConstraint( weldJointConstraint2& constraint, bodyState& body
     const vec2 relativeVelocity = velocityB - velocityA;
 
     const vec2 separation = constraint.deltaCenter + bodyStateB.deltaPosition - bodyStateA.deltaPosition + rB - rA;
-    const vec2 bias = useBias ? constraint.softness.biasRate * separation : vec2{};
-    const float massScale = useBias ? constraint.softness.massScale : 1.0f;
-    const float impulseScale = useBias ? constraint.softness.impulseScale : 0.0f;
+    vec2 bias{};
+    float massScale = 1.0f;
+    float impulseScale = 0.0f;
+    if( useBias || constraint.linearHertz > 0.0f )
+    {
+        // Soft linear Weld도 relax pass에서 spring-damper 응답을 유지함.
+        bias = constraint.linearSpring.biasRate * separation;
+        massScale = constraint.linearSpring.massScale;
+        impulseScale = constraint.linearSpring.impulseScale;
+    }
 
     // Point-to-point Jacobian의 2x2 effective mass. Off-center anchor의 회전 coupling을 함께 풂.
     const float k11 = constraint.invMassA + constraint.invMassB + constraint.invInertiaA * rA.y * rA.y + constraint.invInertiaB * rB.y * rB.y;
