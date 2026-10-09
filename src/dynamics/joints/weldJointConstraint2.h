@@ -31,10 +31,16 @@ struct weldJointConstraint2
     // 공용 Joint store/reset 경로와 같은 이름을 쓰며 의미는 2D 선형 Weld 임펄스임.
     vec2 impulse{};
     float angularImpulse = 0.0f;
+
+    // 0 Hz에서는 hard correction, 양수 Hz에서는 물리 spring-damper 계수를 사용함.
+    float linearHertz = 0.0f;
+    float angularHertz = 0.0f;
     constraintSoftness2 softness{};
+    constraintSoftness2 linearSpring{};
+    constraintSoftness2 angularSpring{};
 };
 
-// Body origin 기준 anchor를 COM 기준 lever arm으로 바꾸고 hard Weld 안정화 계수를 준비함.
+// Body origin 기준 anchor를 COM 기준 lever arm으로 바꾸고 hard/soft Weld 계수를 준비함.
 [[nodiscard]] weldJointConstraint2 prepareWeldJointConstraint( const weldJointSim2& joint, const bodySim& bodySimA, const bodySim& bodySimB, float subStepTime );
 
 // 이전 substep의 선형/각도 누적 임펄스를 두 Body에 반대로 적용함.
