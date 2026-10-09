@@ -550,6 +550,11 @@ target_include_directories(sandboxJointDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/
 target_link_libraries(sandboxJointDemoTests PRIVATE zonai::zonai)
 add_test(NAME sandboxJointDemoTests COMMAND sandboxJointDemoTests)
 
+add_executable(sandboxWeldSoftnessDemoTests sandbox/weld_softness_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
+target_include_directories(sandboxWeldSoftnessDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+target_link_libraries(sandboxWeldSoftnessDemoTests PRIVATE zonai::zonai)
+add_test(NAME sandboxWeldSoftnessDemoTests COMMAND sandboxWeldSoftnessDemoTests)
+
 # Windows Sandbox 구성에서는 실제 ImGui view도 headless frame으로 검사함.
 if(TARGET imgui)
     target_sources(sandboxDemoTests PRIVATE sandbox/demo_ui_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemoUi.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugCamera.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugDraw.cpp")
