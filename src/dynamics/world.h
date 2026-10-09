@@ -122,6 +122,10 @@ public:
 
     // 두 작용점과 기준 상대각도를 함께 유지해 두 Body의 상대 transform을 고정함.
     [[nodiscard]] jointId createWeldJoint( const weldJointDef& definition );
+    // 0 Hz는 선형 hard Weld. 변경 시 선형 cache만 비우고 연결된 non-static component를 깨움.
+    void setWeldJointLinearTuning( jointId id, float hertz, float dampingRatio );
+    // 0 Hz는 회전 hard Weld. 변경 시 회전 cache만 비우고 연결된 non-static component를 깨움.
+    void setWeldJointAngularTuning( jointId id, float hertz, float dampingRatio );
     [[nodiscard]] weldJointData getWeldJointData( jointId id ) const;
 
     // A의 단위 로컬 축을 따라 B를 이동시키며 상대 회전은 허용함. 하나 이상은 Dynamic이어야 함.
