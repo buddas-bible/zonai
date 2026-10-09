@@ -89,6 +89,7 @@ int main()
     if( springVertices <= baselineVertices ) fail( "Prismatic spring inspector toggle drew no target overlay" );
     if( limitVertices <= springVertices ) fail( "Prismatic limit inspector toggle drew no boundary overlay" );
 
+    // Basic Weld에는 아직 tuning 값이 없으므로 Inspector와 anchor/frame overlay 실행 자체를 smoke test함.
     auto weldView = createJointDemoView( demoKind::weldPair );
     ImGui::NewFrame();
     ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
