@@ -73,6 +73,36 @@ int main()
     solveWeldJointConstraint( constraint, stateA, stateB, true );
     check( stateB.angularVelocity < 0.0f, "Weld bias restores relative angle error" );
 
+    // Soft Weld의 spring bias는 일시적인 위치 보정이 아니라 실제 물리 응답이므로 relax pass에서도 남아야 함.
+    bodySimB.transform = {};
+    bodySimB.center = { 1.0f, 0.0f };
+    bodySimB.transform.position = bodySimB.center;
+    joint.linearHertz = 4.0f;
+    joint.linearDampingRatio = 0.7f;
+    joint.angularHertz = 0.0f;
+    constraint = prepareWeldJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    solveWeldJointConstraint( constraint, stateA, stateB, false );
+    check( stateB.linearVelocity.x < 0.0f, "soft linear Weld restores position during relaxation" );
+    check( near( stateB.angularVelocity, 0.0f ), "linear Weld softness does not create angular spring bias" );
+
+    bodySimB.center = {};
+    bodySimB.transform = { {}, rot2::FromRadians( 0.25f ) };
+    joint.linearHertz = 0.0f;
+    joint.angularHertz = 4.0f;
+    joint.angularDampingRatio = 0.7f;
+    constraint = prepareWeldJointConstraint( joint, bodySimA, bodySimB, h );
+    stateA = {};
+    stateB = {};
+    solveWeldJointConstraint( constraint, stateA, stateB, false );
+    check( stateB.angularVelocity < 0.0f, "soft angular Weld restores angle during relaxation" );
+    check( LengthSquared( stateB.linearVelocity ) == 0.0f, "angular Weld softness does not create linear spring bias" );
+
+    joint.linearHertz = 0.0f;
+    joint.linearDampingRatio = 0.0f;
+    joint.angularHertz = 0.0f;
+    joint.angularDampingRatio = 0.0f;
     bodySimB.transform = {};
     bodySimB.localCenter = { 1.0f, 0.0f };
     joint.localAnchorB = { 2.0f, 1.0f };
