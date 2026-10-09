@@ -89,6 +89,28 @@ int main()
     if( springVertices <= baselineVertices ) fail( "Prismatic spring inspector toggle drew no target overlay" );
     if( limitVertices <= springVertices ) fail( "Prismatic limit inspector toggle drew no boundary overlay" );
 
+    auto weldView = createJointDemoView( demoKind::weldPair );
+    ImGui::NewFrame();
+    ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
+    ImGui::SetNextWindowSize( { 420.0f, 1800.0f } );
+    ImGui::Begin( "Weld inspector" );
+    ImGui::GetStateStorage()->SetInt( ImGui::GetID( "WeldJointInspector" ), 1 );
+    weldView->drawControls();
+
+    debugCamera weldCamera{};
+    weldCamera.center = getDemoEntry( demoKind::weldPair ).cameraCenter;
+    weldCamera.pixelsPerMeter = getDemoEntry( demoKind::weldPair ).pixelsPerMeter;
+    ImDrawList* weldList = ImGui::GetWindowDrawList();
+    const int weldBefore = weldList->VtxBuffer.Size;
+    debugDraw weldDraw{ weldList, weldCamera, { 0.0f, 0.0f }, { 800.0f, 600.0f } };
+    weldView->draw( weldDraw );
+    const int weldVertices = weldList->VtxBuffer.Size - weldBefore;
+
+    ImGui::End();
+    ImGui::Render();
+
+    if( weldVertices <= 0 ) fail( "Weld joint view drew no anchor or frame overlay" );
+
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }
