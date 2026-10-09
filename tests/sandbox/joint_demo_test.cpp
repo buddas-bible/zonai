@@ -103,7 +103,7 @@ int main()
 
     const transform2 initialA = weld.getWorld().GetBodyTransform( weldData.bodyA );
     const transform2 initialB = weld.getWorld().GetBodyTransform( weldData.bodyB );
-    const vec2 initialDelta = initialB.position - initialA.position;
+    const vec2 initialLocalDelta = Rotate( Inverse( initialA.rotation ), initialB.position - initialA.position );
     weld.getWorld().ApplyLinearImpulseToCenter( weldData.bodyB, { 2.0f, 1.0f } );
     weld.getWorld().ApplyAngularImpulse( weldData.bodyB, 0.3f );
     for( int i = 0; i < 180; ++i ) weld.step( 1.0f / 60.0f, 4 );
@@ -111,7 +111,8 @@ int main()
     check( Length( weldData.anchorB - weldData.anchorA ) < 0.01f && std::abs( weldData.currentAngle ) < 0.01f, "Weld demo restores anchor and relative angle after impulses" );
     const transform2 finalA = weld.getWorld().GetBodyTransform( weldData.bodyA );
     const transform2 finalB = weld.getWorld().GetBodyTransform( weldData.bodyB );
-    check( Length( ( finalB.position - finalA.position ) - initialDelta ) < 0.05f, "Weld demo keeps the pair as one relative frame" );
+    const vec2 finalLocalDelta = Rotate( Inverse( finalA.rotation ), finalB.position - finalA.position );
+    check( Length( finalLocalDelta - initialLocalDelta ) < 0.05f, "Weld demo keeps the body origins fixed in A local frame" );
 
     rigidBodyDemo prismatic{ demoKind::prismaticRail };
     check( prismatic.getWorld().GetBodyCount() == 2 && prismatic.getWorld().getJointCount() == 1 && prismatic.getShapes().size() == 2, "Prismatic scene has rail reference and one slider" );
