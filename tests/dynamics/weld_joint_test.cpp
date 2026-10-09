@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include "dynamics/joints/weldJoint2.h"
 #include "dynamics/joints/weldJointConstraint2.h"
 
 using namespace zonai;
@@ -27,6 +28,10 @@ bool near( float a, float b )
 int main()
 {
     const float h = 1.0f / 60.0f;
+
+    // 새 public 필드는 기존 positional aggregate 초기화의 collideConnected 위치를 바꾸면 안 됨.
+    const weldJointDef aggregateCompatibility{ {}, {}, {}, {}, 0.0f, true };
+    check( aggregateCompatibility.collideConnected && aggregateCompatibility.linearHertz == 0.0f && aggregateCompatibility.angularHertz == 0.0f, "Weld aggregate initialization preserves collideConnected position" );
 
     bodySim bodySimA{};
     bodySimA.bodyId = 0;
