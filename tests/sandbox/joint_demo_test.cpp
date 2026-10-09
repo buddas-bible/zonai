@@ -25,9 +25,10 @@ void check( bool condition, const char* message )
 
 int main()
 {
-    check( getDemoEntries().size() == 7, "Prismatic demo is independently selectable" );
+    check( getDemoEntries().size() == 8, "Weld demo is independently selectable" );
     check( std::string_view{ getDemoEntry( demoKind::mouseJointPlayground ).category } == "조인트", "mouse joint demo stays in joint category" );
     check( std::string_view{ getDemoEntry( demoKind::prismaticRail ).category } == "조인트", "Prismatic rail stays in joint category" );
+    check( std::string_view{ getDemoEntry( demoKind::weldPair ).category } == "조인트", "Weld pair stays in joint category" );
 
     rigidBodyDemo mouse{ demoKind::mouseJointPlayground };
     check( mouse.getWorld().GetBodyCount() == 4 && mouse.getWorld().getJointCount() == 0 && mouse.getShapes().size() == 4, "mouse scene has ground and three draggable bodies" );
@@ -92,6 +93,26 @@ int main()
     wheel.applyWheelPreset( wheelDemoPreset::spring );
     wheelData = wheel.getWorld().getWheelJointData( wheel.getWheelJoint() );
     check( wheelData.enableSpring && !wheelData.enableLimit && !wheelData.enableMotor, "wheel spring preset" );
+
+    rigidBodyDemo weld{ demoKind::weldPair };
+    check( weld.getWorld().GetBodyCount() == 2 && weld.getWorld().getJointCount() == 1 && weld.getShapes().size() == 2, "Weld scene has two connected dynamic bodies" );
+    const jointId weldId = weld.getWeldJoint();
+    check( weld.getWorld().IsValid( weldId ), "Weld scene owns a valid joint" );
+    auto weldData = weld.getWorld().getWeldJointData( weldId );
+    check( Length( weldData.anchorB - weldData.anchorA ) < 0.00001f && std::abs( weldData.currentAngle ) < 0.00001f, "Weld pair starts at its reference transform" );
+
+    const transform2 initialA = weld.getWorld().GetBodyTransform( weldData.bodyA );
+    const transform2 initialB = weld.getWorld().GetBodyTransform( weldData.bodyB );
+    const vec2 initialLocalDelta = Rotate( Inverse( initialA.rotation ), initialB.position - initialA.position );
+    weld.getWorld().ApplyLinearImpulseToCenter( weldData.bodyB, { 2.0f, 1.0f } );
+    weld.getWorld().ApplyAngularImpulse( weldData.bodyB, 0.3f );
+    for( int i = 0; i < 180; ++i ) weld.step( 1.0f / 60.0f, 4 );
+    weldData = weld.getWorld().getWeldJointData( weldId );
+    check( Length( weldData.anchorB - weldData.anchorA ) < 0.01f && std::abs( weldData.currentAngle ) < 0.01f, "Weld demo restores anchor and relative angle after impulses" );
+    const transform2 finalA = weld.getWorld().GetBodyTransform( weldData.bodyA );
+    const transform2 finalB = weld.getWorld().GetBodyTransform( weldData.bodyB );
+    const vec2 finalLocalDelta = Rotate( Inverse( finalA.rotation ), finalB.position - finalA.position );
+    check( Length( finalLocalDelta - initialLocalDelta ) < 0.05f, "Weld demo keeps the body origins fixed in A local frame" );
 
     rigidBodyDemo prismatic{ demoKind::prismaticRail };
     check( prismatic.getWorld().GetBodyCount() == 2 && prismatic.getWorld().getJointCount() == 1 && prismatic.getShapes().size() == 2, "Prismatic scene has rail reference and one slider" );

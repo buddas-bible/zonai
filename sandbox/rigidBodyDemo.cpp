@@ -33,6 +33,10 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createPrismaticRail();
     }
+    else if( kind == demoKind::weldPair )
+    {
+        createWeldPair();
+    }
     else if( kind == demoKind::mouseJointPlayground )
     {
         createMouseJointPlayground();
