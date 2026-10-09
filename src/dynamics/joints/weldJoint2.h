@@ -17,13 +17,14 @@ struct weldJointDef
     vec2 localAnchorB{};
     // B의 A에 대한 기준 각도 (rad). 현재 상대각도를 유지하려면 생성 시 그 값을 명시함.
     float referenceAngle = 0.0f;
+    bool collideConnected = false;
 
+    // 기존 positional aggregate 초기화 호환성을 위해 새 tuning 필드는 기존 필드 뒤에 추가함.
     // 0 Hz는 해당 방향을 hard Weld로 유지하고, 양수 Hz는 독립적인 spring-damper Weld로 만듦.
     float linearHertz = 0.0f;
     float linearDampingRatio = 0.0f;
     float angularHertz = 0.0f;
     float angularDampingRatio = 0.0f;
-    bool collideConnected = false;
 };
 
 struct weldJointData
