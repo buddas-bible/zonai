@@ -83,8 +83,8 @@ jobs:
 
       - name: Build Release lifecycle tests
         if: runner.os == 'Windows'
-        run: cmake --build build --config Release --target broadPhaseLifecycleTests bodyShapeContactLifecycleTests contactConstraintTests restitutionTests islandTests islandSleepCcdTests worldQuerySensorTests contactCacheTests distanceJointTests distanceJointWorldTests mouseJointTests mouseJointWorldTests revoluteJointTests revoluteJointWorldTests wheelJointTests wheelJointWorldTests sandboxDemoTests --parallel
+        run: cmake --build build --config Release --target broadPhaseLifecycleTests bodyShapeContactLifecycleTests contactConstraintTests restitutionTests islandTests islandSleepCcdTests worldQuerySensorTests contactCacheTests distanceJointTests distanceJointWorldTests motorJointTests motorJointSpringTests motorJointSpringWorldTests moverJointTests moverJointWorldTests mouseJointTests mouseJointWorldTests revoluteJointTests revoluteJointWorldTests wheelJointTests wheelJointWorldTests sandboxDemoTests --parallel
 
       - name: Test Release lifecycle invariants
         if: runner.os == 'Windows'
-        run: ctest --test-dir build -C Release -R "^(broadPhaseLifecycleTests|bodyShapeContactLifecycleTests|contactConstraintTests|restitutionTests|islandTests|islandSleepCcdTests|worldQuerySensorTests|contactCacheTests|distanceJointTests|distanceJointWorldTests|mouseJointTests|mouseJointWorldTests|revoluteJointTests|revoluteJointWorldTests|wheelJointTests|wheelJointWorldTests|sandboxDemoTests)$" --output-on-failure
+        run: ctest --test-dir build -C Release -R "^(broadPhaseLifecycleTests|bodyShapeContactLifecycleTests|contactConstraintTests|restitutionTests|islandTests|islandSleepCcdTests|worldQuerySensorTests|contactCacheTests|distanceJointTests|distanceJointWorldTests|motorJointTests|motorJointSpringTests|motorJointSpringWorldTests|moverJointTests|moverJointWorldTests|mouseJointTests|mouseJointWorldTests|revoluteJointTests|revoluteJointWorldTests|wheelJointTests|wheelJointWorldTests|sandboxDemoTests)$" --output-on-failure
