@@ -501,6 +501,10 @@ add_executable(distanceJointWorldTests dynamics/distance_joint_world_test.cpp)
 target_link_libraries(distanceJointWorldTests PRIVATE zonai::zonai)
 add_test(NAME distanceJointWorldTests COMMAND distanceJointWorldTests)
 
+add_executable(motorJointTests dynamics/motor_joint_test.cpp)
+target_link_libraries(motorJointTests PRIVATE zonai::zonai)
+add_test(NAME motorJointTests COMMAND motorJointTests)
+
 add_executable(mouseJointTests dynamics/mouse_joint_test.cpp)
 target_link_libraries(mouseJointTests PRIVATE zonai::zonai)
 add_test(NAME mouseJointTests COMMAND mouseJointTests)
