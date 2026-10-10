@@ -1,4 +1,4 @@
-name: Apply Pogo World patch
+name: Apply Pogo targeted patch
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
           ref: feature/pogo-joint
           fetch-depth: 0
 
-      - name: Apply targeted World integration
+      - name: Apply targeted Pogo patch
         run: python3 tools/apply_pogo_world.py
 
       - name: Commit patch
@@ -31,6 +31,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/dynamics/world.h src/dynamics/world.cpp
-          git commit -m "feat: integrate Pogo into World solver lifecycle"
+          git add -A
+          git commit -m "test: register Pogo test targets"
           git push origin HEAD:feature/pogo-joint
