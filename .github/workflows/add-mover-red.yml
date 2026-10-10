@@ -28,16 +28,16 @@ jobs:
       - name: Build joint view test
         run: cmake --build build --config Debug --target sandboxJointViewTests --parallel 2
 
-      - name: Verify missing Mover controls fail the test
+      - name: Verify missing Mover joint controls fail the test
         shell: pwsh
         run: |
           & .\build\tests\Debug\sandboxJointViewTests.exe *> mover-ui-red.log
           $status = $LASTEXITCODE
           Get-Content mover-ui-red.log
           if ($status -eq 0) {
-            throw "Expected sandboxJointViewTests to fail before Mover controls integration"
+            throw "Expected sandboxJointViewTests to fail before Mover joint controls integration"
           }
-          if (-not (Select-String -Path mover-ui-red.log -Pattern "Mover joint view drew no controls" -Quiet)) {
+          if (-not (Select-String -Path mover-ui-red.log -Pattern "Mover joint view added no joint controls" -Quiet)) {
             throw "Mover UI RED failed for an unexpected reason"
           }
 
