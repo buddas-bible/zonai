@@ -29,7 +29,7 @@ public:
         view_.drawControls();
 
         const demoKind kind = view_.getKind();
-        if( kind != demoKind::distancePendulum && kind != demoKind::revoluteHinge && kind != demoKind::wheelSuspension && kind != demoKind::prismaticRail && kind != demoKind::weldPair && kind != demoKind::mouseJointPlayground ) return;
+        if( kind != demoKind::distancePendulum && kind != demoKind::revoluteHinge && kind != demoKind::wheelSuspension && kind != demoKind::prismaticRail && kind != demoKind::weldPair && kind != demoKind::mouseJointPlayground && kind != demoKind::motorJointPlayground ) return;
 
         if( ImGui::CollapsingHeader( "조인트 빠른 설정###JointQuickSettings", ImGuiTreeNodeFlags_DefaultOpen ) )
         {
@@ -87,6 +87,17 @@ public:
                 if( ImGui::Button( "전체###PrismaticPresetCombined" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::combined );
                 ImGui::TextWrapped( "프리셋은 대표 상태를 빠르게 만드는 용도입니다. 아래 인스펙터에서 각 제약을 직접 켜고 수치를 실시간으로 조절할 수 있습니다." );
             }
+            else if( kind == demoKind::motorJointPlayground )
+            {
+                if( ImGui::Button( "제동###MotorJointPresetBrake" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::brake );
+                ImGui::SameLine();
+                if( ImGui::Button( "선형###MotorJointPresetLinear" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::linear );
+                ImGui::SameLine();
+                if( ImGui::Button( "회전###MotorJointPresetAngular" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::angular );
+                ImGui::SameLine();
+                if( ImGui::Button( "둘 다###MotorJointPresetCombined" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::combined );
+                ImGui::TextWrapped( "Motor Joint는 두 Body의 상대 transform을 고정하지 않습니다. 목표 상대속도 0은 위치 고정이 아니라 힘/토크 한도 안에서 제동하는 상태입니다." );
+            }
             else if( kind == demoKind::weldPair )
             {
                 if( ImGui::Button( "고정###WeldPresetRigid" ) ) view_.applyWeldPreset( weldDemoPreset::rigid );
@@ -117,6 +128,10 @@ public:
         {
             drawPrismaticInspector();
         }
+        else if( kind == demoKind::motorJointPlayground && view_.getWorld().IsValid( view_.getMotorJoint() ) )
+        {
+            drawMotorJointInspector();
+        }
         else if( kind == demoKind::weldPair && view_.getWorld().IsValid( view_.getWeldJoint() ) )
         {
             drawWeldInspector();
@@ -126,6 +141,22 @@ public:
     void draw( debugDraw& draw ) const override
     {
         view_.draw( draw );
+        if( view_.getKind() == demoKind::motorJointPlayground && view_.getWorld().IsValid( view_.getMotorJoint() ) )
+        {
+            const motorJointData joint = view_.getWorld().getMotorJointData( view_.getMotorJoint() );
+            constexpr ImU32 ANCHOR_COLOR = IM_COL32( 100, 235, 220, 255 );
+            constexpr ImU32 TARGET_COLOR = IM_COL32( 255, 220, 90, 255 );
+
+            draw.DrawPoint( joint.anchorA, ANCHOR_COLOR, 6.0f );
+            draw.DrawPoint( joint.anchorB, TARGET_COLOR, 7.0f );
+            if( LengthSquared( joint.linearVelocity ) > 0.0f )
+            {
+                // 두 anchor를 선으로 묶지 않음: Motor는 두 점의 위치를 일치시키는 제약이 아니기 때문임.
+                draw.DrawArrow( joint.anchorB, Normalize( joint.linearVelocity ), TARGET_COLOR, std::min( 1.5f, Length( joint.linearVelocity ) * 0.5f ) );
+            }
+            return;
+        }
+
         if( view_.getKind() == demoKind::weldPair && view_.getWorld().IsValid( view_.getWeldJoint() ) )
         {
             const weldJointData joint = view_.getWorld().getWeldJointData( view_.getWeldJoint() );
@@ -182,6 +213,45 @@ public:
     }
 
 private:
+    void drawMotorJointInspector()
+    {
+        if( !ImGui::CollapsingHeader( "모터 조인트 인스펙터###MotorJointInspector", ImGuiTreeNodeFlags_DefaultOpen ) ) return;
+
+        motorJointData joint = view_.getWorld().getMotorJointData( view_.getMotorJoint() );
+        ImGui::TextWrapped( "선형과 회전 채널은 위치 오차가 아니라 Cdot = 상대속도 - 목표속도를 0으로 만듭니다. 최대 힘/토크는 한 substep의 누적 impulse 한도를 결정합니다." );
+
+        if( ImGui::TreeNodeEx( "선형 Velocity Motor###MotorJointLinearSettings", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            vec2 velocity = joint.linearVelocity;
+            float maxForce = joint.maxVelocityForce;
+            bool changed = ImGui::DragFloat( "목표 X###MotorJointLinearX", &velocity.x, 0.05f, -10.0f, 10.0f, "%.2f m/s" );
+            changed |= ImGui::DragFloat( "목표 Y###MotorJointLinearY", &velocity.y, 0.05f, -10.0f, 10.0f, "%.2f m/s" );
+            changed |= ImGui::DragFloat( "최대 힘###MotorJointMaxForce", &maxForce, 0.25f, 0.0f, 100.0f, "%.2f N" );
+            maxForce = std::max( 0.0f, maxForce );
+            if( changed ) view_.setMotorJointLinearSettings( velocity, maxForce );
+            ImGui::TreePop();
+        }
+
+        joint = view_.getWorld().getMotorJointData( view_.getMotorJoint() );
+        if( ImGui::TreeNodeEx( "회전 Velocity Motor###MotorJointAngularSettings", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            float velocity = joint.angularVelocity;
+            float maxTorque = joint.maxVelocityTorque;
+            bool changed = ImGui::DragFloat( "목표 각속도###MotorJointAngularVelocity", &velocity, 0.05f, -10.0f, 10.0f, "%.2f rad/s" );
+            changed |= ImGui::DragFloat( "최대 토크###MotorJointMaxTorque", &maxTorque, 0.25f, 0.0f, 100.0f, "%.2f N*m" );
+            maxTorque = std::max( 0.0f, maxTorque );
+            if( changed ) view_.setMotorJointAngularSettings( velocity, maxTorque );
+            ImGui::TreePop();
+        }
+
+        joint = view_.getWorld().getMotorJointData( view_.getMotorJoint() );
+        ImGui::SeparatorText( "현재 상태###MotorJointState" );
+        ImGui::Text( "Target linear: (%.2f, %.2f) m/s", joint.linearVelocity.x, joint.linearVelocity.y );
+        ImGui::Text( "Target angular: %.2f rad/s", joint.angularVelocity );
+        ImGui::Text( "Reaction force: (%.2f, %.2f) N", joint.force.x, joint.force.y );
+        ImGui::Text( "Reaction torque: %.2f N*m", joint.torque );
+    }
+
     void drawWeldInspector()
     {
         if( !ImGui::CollapsingHeader( "웰드 조인트 인스펙터###WeldJointInspector", ImGuiTreeNodeFlags_DefaultOpen ) ) return;
