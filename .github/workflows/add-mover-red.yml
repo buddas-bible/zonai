@@ -1,35 +1,39 @@
-name: Add Mover RED
+name: Verify Mover RED
 
 on:
   push:
     branches:
       - feature/mover-joint
     paths:
-      - "tools/add_mover_red.py"
       - ".github/workflows/add-mover-red.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch:
+  verify-red:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/mover-joint
 
-      - name: Apply RED test patch
-        run: python3 tools/add_mover_red.py
+      - name: Install CMake 4.2
+        run: python3 -m pip install "cmake>=4.2,<4.3"
 
-      - name: Commit RED test
+      - name: Configure
+        run: cmake -S . -B build -DZONAI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Verify missing Mover solver fails the build
+        shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/CMakeLists.txt tests/dynamics/mover_joint_test.cpp
-          if git diff --cached --quiet; then
-            echo "No patch changes"
-          else
-            git commit -m "Add Mover Joint solver RED test"
-            git push origin HEAD:feature/mover-joint
+          set +e
+          cmake --build build --target moverJointTests --parallel 2 > build.log 2>&1
+          status=$?
+          set -e
+          cat build.log
+          if [ "$status" -eq 0 ]; then
+            echo "Expected moverJointTests build to fail before implementation"
+            exit 1
           fi
+          grep -q "moverJointConstraint2.h" build.log
