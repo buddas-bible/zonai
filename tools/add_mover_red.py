@@ -8,8 +8,8 @@ marker = '''    if( weldVertices <= 0 ) fail( "Weld joint view drew no anchor or
 '''
 block = '''    if( weldVertices <= 0 ) fail( "Weld joint view drew no anchor or frame overlay" );
 
-    // Mover view는 base scene 위에 target velocity / reaction force overlay를 추가해야 함.
-    auto moverBase = createRigidBodyDemo( demoKind::moverJointPlayground );
+    // Mover view는 quick presets / inspector를 실제 ImGui controls로 노출해야 함.
+    // 현재 구현 전에는 drawControls()가 Mover kind를 early-return하므로 cursor가 전혀 진행되지 않음.
     auto moverView = createJointDemoView( demoKind::moverJointPlayground );
     ImGui::NewFrame();
     ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
@@ -17,27 +17,13 @@ block = '''    if( weldVertices <= 0 ) fail( "Weld joint view drew no anchor or 
     ImGui::Begin( "Mover inspector" );
     ImGui::GetStateStorage()->SetInt( ImGui::GetID( "JointQuickSettings" ), 1 );
     ImGui::GetStateStorage()->SetInt( ImGui::GetID( "MoverJointInspector" ), 1 );
+    const float moverCursorBefore = ImGui::GetCursorPosY();
     moverView->drawControls();
-
-    debugCamera moverCamera{};
-    moverCamera.center = getDemoEntry( demoKind::moverJointPlayground ).cameraCenter;
-    moverCamera.pixelsPerMeter = getDemoEntry( demoKind::moverJointPlayground ).pixelsPerMeter;
-    ImDrawList* moverList = ImGui::GetWindowDrawList();
-
-    const int moverBaseBefore = moverList->VtxBuffer.Size;
-    debugDraw moverBaseDraw{ moverList, moverCamera, { 0.0f, 0.0f }, { 800.0f, 600.0f } };
-    moverBase->draw( moverBaseDraw );
-    const int moverBaseVertices = moverList->VtxBuffer.Size - moverBaseBefore;
-
-    const int moverViewBefore = moverList->VtxBuffer.Size;
-    debugDraw moverViewDraw{ moverList, moverCamera, { 0.0f, 0.0f }, { 800.0f, 600.0f } };
-    moverView->draw( moverViewDraw );
-    const int moverViewVertices = moverList->VtxBuffer.Size - moverViewBefore;
-
+    const float moverCursorAfter = ImGui::GetCursorPosY();
     ImGui::End();
     ImGui::Render();
 
-    if( moverViewVertices <= moverBaseVertices ) fail( "Mover joint view drew no velocity/reaction overlay" );
+    if( moverCursorAfter <= moverCursorBefore ) fail( "Mover joint view drew no controls" );
 
     ImGui::DestroyContext();
 '''
