@@ -86,6 +86,31 @@ void rigidBodyDemo::setPogoJointSettings( float restLength, float hertz, float d
     world_.setPogoJointForceLimits( pogoJoint_, maxTensionForce, maxCompressionForce );
 }
 
+void rigidBodyDemo::setFilterJointEnabled( bool enabled )
+{
+    if( kind_ != demoKind::filterJointPlayground ) return;
+
+    if( enabled )
+    {
+        if( world_.IsValid( filterJoint_ ) ) return;
+
+        filterJointDef joint{};
+        joint.bodyA = impulseBody_;
+        joint.bodyB = torqueBody_;
+        filterJoint_ = world_.createFilterJoint( joint );
+    }
+    else
+    {
+        if( !world_.IsValid( filterJoint_ ) ) return;
+
+        world_.destroyJoint( filterJoint_ );
+        filterJoint_ = {};
+    }
+
+    // Joint 생성은 기존 Contact를 즉시 제거하고, 파괴는 proxy를 touch해 같은 pair를 다시 검사함.
+    refreshContacts();
+}
+
 #pragma endregion Settings
 
 #pragma region Presets
@@ -504,6 +529,25 @@ void rigidBodyDemo::createMoverJointPlayground()
 
     impulseBody_ = driven;
     torqueBody_ = driven;
+}
+
+void rigidBodyDemo::createFilterJointPlayground()
+{
+    world_.SetGravity( {} );
+
+    // 두 원을 겹쳐 놓아 Filter On/Off만으로 collision 차이가 즉시 보이게 함.
+    impulseBody_ = world_.CreateBody( bodyType::Dynamic, { { -0.35f, 0.0f }, {} } );
+    torqueBody_ = world_.CreateBody( bodyType::Dynamic, { { 0.35f, 0.0f }, {} } );
+
+    const shapeId shapeA = world_.CreateShape( impulseBody_, circle2{ {}, 0.6f } );
+    const shapeId shapeB = world_.CreateShape( torqueBody_, circle2{ {}, 0.6f } );
+    shapes_.push_back( { impulseBody_, shapeA, "A [Filter 대상]" } );
+    shapes_.push_back( { torqueBody_, shapeB, "B [Filter 대상]" } );
+
+    filterJointDef joint{};
+    joint.bodyA = impulseBody_;
+    joint.bodyB = torqueBody_;
+    filterJoint_ = world_.createFilterJoint( joint );
 }
 
 void rigidBodyDemo::createPogoJointPlayground()
