@@ -23,6 +23,8 @@ enum class demoKind
     mouseJointPlayground,
     motorJointPlayground,
     moverJointPlayground,
+    pogoJointPlayground,
+    filterJointPlayground,
     motorCar
 };
 

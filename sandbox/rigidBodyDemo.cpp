@@ -49,6 +49,14 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createMoverJointPlayground();
     }
+    else if( kind == demoKind::pogoJointPlayground )
+    {
+        createPogoJointPlayground();
+    }
+    else if( kind == demoKind::filterJointPlayground )
+    {
+        createFilterJointPlayground();
+    }
     else
     {
         assert( kind == demoKind::motorCar );

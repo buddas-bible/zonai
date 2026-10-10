@@ -29,7 +29,7 @@ public:
         view_.drawControls();
 
         const demoKind kind = view_.getKind();
-        if( kind != demoKind::distancePendulum && kind != demoKind::revoluteHinge && kind != demoKind::wheelSuspension && kind != demoKind::prismaticRail && kind != demoKind::weldPair && kind != demoKind::mouseJointPlayground && kind != demoKind::motorJointPlayground && kind != demoKind::moverJointPlayground ) return;
+        if( kind != demoKind::distancePendulum && kind != demoKind::revoluteHinge && kind != demoKind::wheelSuspension && kind != demoKind::prismaticRail && kind != demoKind::weldPair && kind != demoKind::mouseJointPlayground && kind != demoKind::motorJointPlayground && kind != demoKind::moverJointPlayground && kind != demoKind::pogoJointPlayground && kind != demoKind::filterJointPlayground ) return;
 
         if( ImGui::CollapsingHeader( "조인트 빠른 설정###JointQuickSettings", ImGuiTreeNodeFlags_DefaultOpen ) )
         {
@@ -116,6 +116,24 @@ public:
                 if( ImGui::Button( "축별 힘###MoverPresetAnisotropic" ) ) view_.applyMoverJointPreset( moverJointDemoPreset::anisotropic );
                 ImGui::TextWrapped( "Mover는 COM 상대 선속도만 제어합니다. x/y 최대 힘을 따로 제한할 수 있고 회전은 전혀 건드리지 않습니다." );
             }
+            else if( kind == demoKind::filterJointPlayground )
+            {
+                bool enabled = view_.getWorld().IsValid( view_.getFilterJoint() );
+                if( ImGui::Checkbox( "Filter Enabled###FilterJointEnabled", &enabled ) ) view_.setFilterJointEnabled( enabled );
+                ImGui::TextWrapped( "Filter는 solver 힘을 만들지 않고 이 두 Body 사이 Contact만 차단합니다. Off는 Joint를 파괴해 같은 pair의 collision을 다시 허용합니다." );
+                ImGui::Text( "Contacts: %zu", view_.getWorld().GetContactCount() );
+            }
+            else if( kind == demoKind::pogoJointPlayground )
+            {
+                if( ImGui::Button( "Soft###PogoPresetSoft" ) ) view_.applyPogoJointPreset( pogoJointDemoPreset::soft );
+                ImGui::SameLine();
+                if( ImGui::Button( "Stiff###PogoPresetStiff" ) ) view_.applyPogoJointPreset( pogoJointDemoPreset::stiff );
+                ImGui::SameLine();
+                if( ImGui::Button( "압축 전용###PogoPresetCompressionOnly" ) ) view_.applyPogoJointPreset( pogoJointDemoPreset::compressionOnly );
+                ImGui::SameLine();
+                if( ImGui::Button( "비대칭###PogoPresetAsymmetric" ) ) view_.applyPogoJointPreset( pogoJointDemoPreset::asymmetric );
+                ImGui::TextWrapped( "Pogo는 길이를 재는 축과 실제 반력 normal을 분리합니다. 인장/압축 힘 한도도 독립적으로 조절할 수 있습니다." );
+            }
             else if( kind == demoKind::weldPair )
             {
                 if( ImGui::Button( "고정###WeldPresetRigid" ) ) view_.applyWeldPreset( weldDemoPreset::rigid );
@@ -154,6 +172,10 @@ public:
         {
             drawMoverJointInspector();
         }
+        else if( kind == demoKind::pogoJointPlayground && view_.getWorld().IsValid( view_.getPogoJoint() ) )
+        {
+            drawPogoJointInspector();
+        }
         else if( kind == demoKind::weldPair && view_.getWorld().IsValid( view_.getWeldJoint() ) )
         {
             drawWeldInspector();
@@ -163,6 +185,22 @@ public:
     void draw( debugDraw& draw ) const override
     {
         view_.draw( draw );
+        if( view_.getKind() == demoKind::filterJointPlayground )
+        {
+            if( view_.getWorld().IsValid( view_.getFilterJoint() ) )
+            {
+                const filterJointData joint = view_.getWorld().getFilterJointData( view_.getFilterJoint() );
+                const vec2 centerA = TransformPoint( view_.getWorld().GetBodyTransform( joint.bodyA ), view_.getWorld().GetBodyLocalCenter( joint.bodyA ) );
+                const vec2 centerB = TransformPoint( view_.getWorld().GetBodyTransform( joint.bodyB ), view_.getWorld().GetBodyLocalCenter( joint.bodyB ) );
+                constexpr ImU32 BODY_COLOR = IM_COL32( 100, 235, 220, 255 );
+                constexpr ImU32 FILTER_COLOR = IM_COL32( 255, 190, 70, 255 );
+                draw.DrawPoint( centerA, BODY_COLOR, 6.0f );
+                draw.DrawPoint( centerB, BODY_COLOR, 6.0f );
+                draw.DrawSegment( { centerA, centerB }, FILTER_COLOR, 2.0f );
+            }
+            return;
+        }
+
         if( view_.getKind() == demoKind::motorJointPlayground && view_.getWorld().IsValid( view_.getMotorJoint() ) )
         {
             const motorJointData joint = view_.getWorld().getMotorJointData( view_.getMotorJoint() );
@@ -208,6 +246,28 @@ public:
             if( LengthSquared( joint.force ) > 0.0f )
             {
                 draw.DrawArrow( bodyCenter, Normalize( joint.force ), FORCE_COLOR, std::min( 1.25f, Length( joint.force ) * 0.04f ) );
+            }
+            return;
+        }
+
+        if( view_.getKind() == demoKind::pogoJointPlayground && view_.getWorld().IsValid( view_.getPogoJoint() ) )
+        {
+            const pogoJointData joint = view_.getWorld().getPogoJointData( view_.getPogoJoint() );
+            constexpr ImU32 ANCHOR_A_COLOR = IM_COL32( 100, 235, 220, 255 );
+            constexpr ImU32 ANCHOR_B_COLOR = IM_COL32( 255, 220, 90, 255 );
+            constexpr ImU32 AXIS_COLOR = IM_COL32( 110, 180, 255, 255 );
+            constexpr ImU32 NORMAL_COLOR = IM_COL32( 90, 220, 110, 255 );
+            constexpr ImU32 FORCE_COLOR = IM_COL32( 230, 120, 255, 255 );
+
+            draw.DrawPoint( joint.anchorA, ANCHOR_A_COLOR, 7.0f );
+            draw.DrawPoint( joint.anchorB, ANCHOR_B_COLOR, 7.0f );
+            // Pogo는 이 두 점 사이의 길이를 실제로 복원하므로 Mover와 달리 연결선을 표시함.
+            draw.DrawSegment( { joint.anchorA, joint.anchorB }, IM_COL32( 180, 185, 200, 255 ), 2.0f );
+            draw.DrawArrow( joint.anchorB, joint.pogoAxis, AXIS_COLOR, 0.7f );
+            draw.DrawArrow( joint.anchorA, joint.normal, NORMAL_COLOR, 0.7f );
+            if( LengthSquared( joint.force ) > 0.0f )
+            {
+                draw.DrawArrow( joint.anchorB, Normalize( joint.force ), FORCE_COLOR, std::min( 1.25f, Length( joint.force ) * 0.01f ) );
             }
             return;
         }
@@ -268,6 +328,36 @@ public:
     }
 
 private:
+    void drawPogoJointInspector()
+    {
+        if( !ImGui::CollapsingHeader( "포고 조인트 인스펙터###PogoJointInspector", ImGuiTreeNodeFlags_DefaultOpen ) ) return;
+
+        pogoJointData joint = view_.getWorld().getPogoJointData( view_.getPogoJoint() );
+        ImGui::TextWrapped( "길이 오차는 pogo axis로 측정하고 실제 impulse는 contact normal 방향으로 작용합니다. 위치 복원 속도는 integration 뒤 relaxation에서 제거됩니다." );
+
+        float restLength = joint.restLength;
+        float hertz = joint.hertz;
+        float dampingRatio = joint.dampingRatio;
+        float maxTensionForce = joint.maxTensionForce;
+        float maxCompressionForce = joint.maxCompressionForce;
+        bool changed = ImGui::DragFloat( "Rest Length###PogoRestLength", &restLength, 0.02f, 0.0f, 5.0f, "%.2f m" );
+        changed |= ImGui::DragFloat( "주파수###PogoHertz", &hertz, 0.1f, 0.0f, 30.0f, "%.2f Hz" );
+        changed |= ImGui::DragFloat( "감쇠비###PogoDamping", &dampingRatio, 0.02f, 0.0f, 2.0f, "%.2f" );
+        changed |= ImGui::DragFloat( "최대 인장 힘###PogoTensionForce", &maxTensionForce, 1.0f, 0.0f, 2000.0f, "%.1f N" );
+        changed |= ImGui::DragFloat( "최대 압축 힘###PogoCompressionForce", &maxCompressionForce, 1.0f, 0.0f, 2000.0f, "%.1f N" );
+        restLength = std::max( 0.0f, restLength );
+        hertz = std::max( 0.0f, hertz );
+        dampingRatio = std::max( 0.0f, dampingRatio );
+        maxTensionForce = std::max( 0.0f, maxTensionForce );
+        maxCompressionForce = std::max( 0.0f, maxCompressionForce );
+        if( changed ) view_.setPogoJointSettings( restLength, hertz, dampingRatio, maxTensionForce, maxCompressionForce );
+
+        joint = view_.getWorld().getPogoJointData( view_.getPogoJoint() );
+        ImGui::Text( "Current Length: %.3f m", joint.length );
+        ImGui::Text( "Spring Velocity: %.3f m/s", joint.velocity );
+        ImGui::Text( "Reaction Force: (%.2f, %.2f) N", joint.force.x, joint.force.y );
+    }
+
     void drawMoverJointInspector()
     {
         if( !ImGui::CollapsingHeader( "무버 조인트 인스펙터###MoverJointInspector", ImGuiTreeNodeFlags_DefaultOpen ) ) return;
