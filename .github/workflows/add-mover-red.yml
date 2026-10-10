@@ -1,4 +1,4 @@
-name: Verify Mover UI RED
+name: Build Mover Joint View GREEN
 
 on:
   push:
@@ -12,14 +12,14 @@ permissions:
   contents: write
 
 jobs:
-  red:
+  green:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/mover-joint
 
-      - name: Apply Mover UI RED test
+      - name: Apply Mover joint view integration
         run: python tools/add_mover_red.py
 
       - name: Configure
@@ -28,28 +28,18 @@ jobs:
       - name: Build joint view test
         run: cmake --build build --config Debug --target sandboxJointViewTests --parallel 2
 
-      - name: Verify missing Mover joint controls fail the test
-        shell: pwsh
-        run: |
-          & .\build\tests\Debug\sandboxJointViewTests.exe *> mover-ui-red.log
-          $status = $LASTEXITCODE
-          Get-Content mover-ui-red.log
-          if ($status -eq 0) {
-            throw "Expected sandboxJointViewTests to fail before Mover joint controls integration"
-          }
-          if (-not (Select-String -Path mover-ui-red.log -Pattern "Mover joint view added no joint controls" -Quiet)) {
-            throw "Mover UI RED failed for an unexpected reason"
-          }
+      - name: Run joint view regression test
+        run: .\build\tests\Debug\sandboxJointViewTests.exe
 
-      - name: Commit Mover UI RED test
+      - name: Commit Mover joint view
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/sandbox/joint_demo_ui_test.cpp
+          git add sandbox/jointDemoView.cpp
           if git diff --cached --quiet; then
-            echo "No UI test changes"
+            echo "No joint view changes"
           else
-            git commit -m "Add Mover UI RED test"
+            git commit -m "Add Mover Joint inspector and debug draw"
             git push origin HEAD:feature/mover-joint
           fi
