@@ -31,6 +31,13 @@ int main()
     check( aggregateCompatibility.collideConnected, "Motor aggregate initialization preserves collideConnected position" );
     check( aggregateCompatibility.linearHertz == 0.0f && aggregateCompatibility.angularHertz == 0.0f, "Motor appended spring fields default to disabled" );
 
+    // 조회 snapshot도 public aggregate이므로 Stage 1의 force / torque / collideConnected 위치를 보존해야 함.
+    const motorJointData dataAggregateCompatibility{ {}, {}, {}, {}, {}, 0.0f, 0.0f, 0.0f, { 1.0f, 2.0f }, 3.0f, true };
+    check( near( dataAggregateCompatibility.force.x, 1.0f ) && near( dataAggregateCompatibility.force.y, 2.0f ) && near( dataAggregateCompatibility.torque, 3.0f ) && dataAggregateCompatibility.collideConnected,
+           "Motor data aggregate preserves Stage 1 force torque collision prefix" );
+    check( dataAggregateCompatibility.linearHertz == 0.0f && dataAggregateCompatibility.angularHertz == 0.0f,
+           "Motor data aggregate appends spring fields after Stage 1 prefix" );
+
     world simulation;
     simulation.SetGravity( {} );
     const bodyId ground = simulation.CreateBody();
