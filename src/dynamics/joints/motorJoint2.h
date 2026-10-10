@@ -61,7 +61,15 @@ struct motorJointData
     float angularVelocity = 0.0f;
     float maxVelocityTorque = 0.0f;
 
-    // Transform spring의 목표 상대각도와 선형 / 회전 spring-damper 설정.
+    // 마지막 substep의 velocity + spring 누적 impulse / h.
+    // B에 작용한 Motor Joint 전체의 실제 force / torque를 반환함.
+    vec2 force{};
+    float torque = 0.0f;
+
+    bool collideConnected = false;
+
+    // motorJointData도 public aggregate이므로 Stage 1의 force / torque / collideConnected prefix를 보존함.
+    // Stage 2에서 추가한 transform spring snapshot은 기존 필드 뒤에만 추가함.
     float referenceAngle = 0.0f;
     float linearHertz = 0.0f;
     float linearDampingRatio = 0.0f;
@@ -69,13 +77,6 @@ struct motorJointData
     float angularHertz = 0.0f;
     float angularDampingRatio = 0.0f;
     float maxSpringTorque = 0.0f;
-
-    // 마지막 substep의 velocity + spring 누적 impulse / h.
-    // B에 작용한 Motor Joint 전체의 실제 force / torque를 반환함.
-    vec2 force{};
-    float torque = 0.0f;
-
-    bool collideConnected = false;
 };
 
 } // namespace zonai
