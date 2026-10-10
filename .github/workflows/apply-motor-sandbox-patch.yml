@@ -1,0 +1,31 @@
+name: Apply Motor Sandbox patch
+
+on:
+  push:
+    branches:
+      - feature/motor-joint
+    paths:
+      - tools/apply_motor_sandbox_patch.py
+      - .github/workflows/apply-motor-sandbox-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/motor-joint
+      - name: Apply patch
+        run: python3 tools/apply_motor_sandbox_patch.py
+      - name: Commit generated source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sandbox/demo.h sandbox/demo.cpp sandbox/rigidBodyDemo.h sandbox/rigidBodyDemo.cpp sandbox/rigidBodyJointDemo.cpp sandbox/jointDemoView.cpp
+          git diff --cached --check
+          git commit -m "Add Motor Joint Sandbox demo"
+          git push origin HEAD:feature/motor-joint
