@@ -6,7 +6,8 @@
 namespace zonai
 {
 
-// A의 로컬 축을 따라 B의 이동만 허용하고 축 수직 이동과 상대 회전을 막는 슬라이더 조인트.
+// Prismatic Joint를 생성할 때 World에 전달하는 설정.
+// A의 로컬 축을 따라 B의 이동만 허용하고 축 수직 이동과 상대 회전을 막으며 spring / limit / motor를 선택적으로 추가함.
 struct prismaticJointDef
 {
     bodyId bodyA{};
@@ -33,6 +34,8 @@ struct prismaticJointDef
     bool collideConnected = false;
 };
 
+// getPrismaticJointData()가 반환하는 현재 상태 snapshot.
+// 현재 축/이동량/오차와 마지막 substep에서 각 제약이 만든 반력·토크를 조회할 때 사용함.
 struct prismaticJointData
 {
     bodyId bodyA{};

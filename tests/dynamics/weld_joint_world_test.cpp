@@ -17,6 +17,11 @@ void check( bool ok, const char* message )
     }
 }
 
+bool near( float a, float b )
+{
+    return std::abs( a - b ) < 0.00001f;
+}
+
 }
 
 int main()
@@ -134,6 +139,57 @@ int main()
     const auto movingData = moving.getWeldJointData( movingJoint );
     check( Length( movingData.anchorB - movingData.anchorA ) < 0.02f && std::abs( movingData.currentAngle ) < 0.02f, "dynamic follower tracks moving kinematic Weld frame" );
     check( moving.GetBodyLinearVelocity( driver ).x == drive.linearVelocity.x && moving.GetBodyAngularVelocity( driver ) == drive.angularVelocity, "Weld does not change prescribed kinematic motion" );
+
+    world tuning;
+    tuning.SetGravity( {} );
+    const auto tuningGround = tuning.CreateBody();
+    const auto tuningBody = tuning.CreateBody( bodyType::Dynamic, { { 1.0f, 0.0f }, {} } );
+    ( void )tuning.CreateShape( tuningBody, circle2{ {}, 0.3f } );
+    definition = {};
+    definition.bodyA = tuningGround;
+    definition.bodyB = tuningBody;
+    definition.localAnchorB = { -1.0f, 0.0f };
+    definition.linearHertz = 3.0f;
+    definition.linearDampingRatio = 0.5f;
+    definition.angularHertz = 4.0f;
+    definition.angularDampingRatio = 0.7f;
+    const auto tuningJoint = tuning.createWeldJoint( definition );
+    data = tuning.getWeldJointData( tuningJoint );
+    check( near( data.linearHertz, 3.0f ) && near( data.linearDampingRatio, 0.5f ), "Weld create/query preserves linear tuning" );
+    check( near( data.angularHertz, 4.0f ) && near( data.angularDampingRatio, 0.7f ), "Weld create/query preserves angular tuning" );
+
+    tuning.ApplyLinearImpulseToCenter( tuningBody, { 1.0f, 0.0f } );
+    tuning.ApplyAngularImpulse( tuningBody, 0.5f );
+    tuning.Step( 1.0f / 60.0f, 4 );
+    const auto coupledReaction = tuning.getWeldJointData( tuningJoint );
+    check( LengthSquared( coupledReaction.force ) > 0.0f && std::abs( coupledReaction.torque ) > 0.0f, "soft Weld stores independent linear and angular reactions" );
+
+    tuning.SetBodyAwake( tuningBody, false );
+    tuning.setWeldJointLinearTuning( tuningJoint, 5.0f, 0.8f );
+    check( tuning.IsBodyAwake( tuningBody ), "changing Weld linear tuning wakes connected body" );
+    data = tuning.getWeldJointData( tuningJoint );
+    check( near( data.linearHertz, 5.0f ) && near( data.linearDampingRatio, 0.8f ), "Weld linear setter updates query state" );
+    check( LengthSquared( data.force ) == 0.0f && near( data.torque, coupledReaction.torque ), "Weld linear setter clears only linear cache" );
+
+    tuning.SetBodyAwake( tuningBody, false );
+    tuning.setWeldJointLinearTuning( tuningJoint, 5.0f, 0.8f );
+    check( !tuning.IsBodyAwake( tuningBody ), "unchanged Weld linear tuning does not wake body" );
+
+    tuning.ApplyLinearImpulseToCenter( tuningBody, { -1.0f, 0.0f } );
+    tuning.Step( 1.0f / 60.0f, 4 );
+    const auto linearReaction = tuning.getWeldJointData( tuningJoint );
+    check( LengthSquared( linearReaction.force ) > 0.0f, "soft linear Weld rebuilds reaction after tuning change" );
+
+    tuning.SetBodyAwake( tuningBody, false );
+    tuning.setWeldJointAngularTuning( tuningJoint, 6.0f, 1.0f );
+    check( tuning.IsBodyAwake( tuningBody ), "changing Weld angular tuning wakes connected body" );
+    data = tuning.getWeldJointData( tuningJoint );
+    check( near( data.angularHertz, 6.0f ) && near( data.angularDampingRatio, 1.0f ), "Weld angular setter updates query state" );
+    check( data.torque == 0.0f && near( data.force.x, linearReaction.force.x ) && near( data.force.y, linearReaction.force.y ), "Weld angular setter clears only angular cache" );
+
+    tuning.SetBodyAwake( tuningBody, false );
+    tuning.setWeldJointAngularTuning( tuningJoint, 6.0f, 1.0f );
+    check( !tuning.IsBodyAwake( tuningBody ), "unchanged Weld angular tuning does not wake body" );
 
     return EXIT_SUCCESS;
 }

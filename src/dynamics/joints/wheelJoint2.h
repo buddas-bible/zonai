@@ -6,7 +6,8 @@
 namespace zonai
 {
 
-// B를 A의 축 위에서 이동시키고 바퀴 회전은 허용하는 서스펜션 조인트.
+// Wheel Joint를 생성할 때 World에 전달하는 설정.
+// B를 A의 로컬 축 위에서 이동시키고 상대 회전은 허용하며 서스펜션 spring / 이동 limit / 회전 motor를 선택적으로 사용함.
 struct wheelJointDef
 {
     bodyId bodyA{};
@@ -30,6 +31,8 @@ struct wheelJointDef
     float maxMotorTorque = 0.0f; // 최대 모터 토크 (N*m). 유한한 비음수, 0은 힘을 끔.
 };
 
+// getWheelJointData()가 반환하는 현재 상태 snapshot.
+// 현재 서스펜션 위치/축 오차와 마지막 substep의 spring·limit 반력 및 motor torque를 조회할 때 사용함.
 struct wheelJointData
 {
     bodyId bodyA{};

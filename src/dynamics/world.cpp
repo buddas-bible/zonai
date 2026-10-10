@@ -671,6 +671,10 @@ jointId world::createWeldJoint( const weldJointDef& definition )
     assert( bodies_[bodyIndexA].type == bodyType::Dynamic || bodies_[bodyIndexB].type == bodyType::Dynamic );
     assert( IsFinite( definition.localAnchorA ) && IsFinite( definition.localAnchorB ) );
     assert( std::isfinite( definition.referenceAngle ) );
+    assert( std::isfinite( definition.linearHertz ) && definition.linearHertz >= 0.0f );
+    assert( std::isfinite( definition.linearDampingRatio ) && definition.linearDampingRatio >= 0.0f );
+    assert( std::isfinite( definition.angularHertz ) && definition.angularHertz >= 0.0f );
+    assert( std::isfinite( definition.angularDampingRatio ) && definition.angularDampingRatio >= 0.0f );
 
     const std::int32_t index = allocateJoint( bodyIndexA, bodyIndexB, definition.collideConnected );
     jointSims_[index] = weldJointSim2{};
@@ -682,8 +686,58 @@ jointId world::createWeldJoint( const weldJointDef& definition )
     sim.localAnchorA = definition.localAnchorA;
     sim.localAnchorB = definition.localAnchorB;
     sim.referenceAngle = definition.referenceAngle;
+    sim.linearHertz = definition.linearHertz;
+    sim.linearDampingRatio = definition.linearDampingRatio;
+    sim.angularHertz = definition.angularHertz;
+    sim.angularDampingRatio = definition.angularDampingRatio;
 
     return makeJointId( index );
+}
+
+void world::setWeldJointLinearTuning( jointId id, float hertz, float dampingRatio )
+{
+    assert( std::isfinite( hertz ) && hertz >= 0.0f );
+    assert( std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );
+
+    auto& joint = std::get<weldJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.linearHertz == hertz && joint.linearDampingRatio == dampingRatio ) return;
+
+    joint.linearHertz = hertz;
+    joint.linearDampingRatio = dampingRatio;
+    // Split solve의 선형/회전 cache는 독립적이므로 선형 설정 변경은 선형 impulse만 버림.
+    joint.impulse = {};
+
+    if( bodies_[joint.bodyIdA].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdA );
+    }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdB );
+    }
+}
+
+void world::setWeldJointAngularTuning( jointId id, float hertz, float dampingRatio )
+{
+    assert( std::isfinite( hertz ) && hertz >= 0.0f );
+    assert( std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );
+
+    auto& joint = std::get<weldJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.angularHertz == hertz && joint.angularDampingRatio == dampingRatio ) return;
+
+    joint.angularHertz = hertz;
+    joint.angularDampingRatio = dampingRatio;
+    // Split solve의 선형/회전 cache는 독립적이므로 회전 설정 변경은 회전 impulse만 버림.
+    joint.angularImpulse = 0.0f;
+
+    if( bodies_[joint.bodyIdA].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdA );
+    }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdB );
+    }
 }
 
 weldJointData world::getWeldJointData( jointId id ) const
@@ -698,6 +752,10 @@ weldJointData world::getWeldJointData( jointId id ) const
     const rot2 relativeRotation = Inverse( bodySims_[sim.bodyIdA].transform.rotation * rot2::FromRadians( sim.referenceAngle ) ) * bodySims_[sim.bodyIdB].transform.rotation;
     data.currentAngle = std::atan2( relativeRotation.s, relativeRotation.c );
     data.referenceAngle = sim.referenceAngle;
+    data.linearHertz = sim.linearHertz;
+    data.linearDampingRatio = sim.linearDampingRatio;
+    data.angularHertz = sim.angularHertz;
+    data.angularDampingRatio = sim.angularDampingRatio;
     data.force = sim.subStepTime > 0.0f ? sim.impulse / sim.subStepTime : vec2{};
     data.torque = sim.subStepTime > 0.0f ? sim.angularImpulse / sim.subStepTime : 0.0f;
     data.collideConnected = joints_[index].collideConnected;

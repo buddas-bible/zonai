@@ -89,7 +89,14 @@ public:
             }
             else if( kind == demoKind::weldPair )
             {
-                ImGui::TextWrapped( "Basic Weld는 두 anchor의 위치와 두 Body의 상대 각도를 동시에 고정합니다. 한쪽 상자에만 힘이나 회전 충격을 줘도 두 Body가 하나의 상대 프레임을 유지하는지 관찰합니다." );
+                if( ImGui::Button( "고정###WeldPresetRigid" ) ) view_.applyWeldPreset( weldDemoPreset::rigid );
+                ImGui::SameLine();
+                if( ImGui::Button( "선형 Soft###WeldPresetSoftLinear" ) ) view_.applyWeldPreset( weldDemoPreset::softLinear );
+                ImGui::SameLine();
+                if( ImGui::Button( "회전 Soft###WeldPresetSoftAngular" ) ) view_.applyWeldPreset( weldDemoPreset::softAngular );
+                ImGui::SameLine();
+                if( ImGui::Button( "둘 다 Soft###WeldPresetSoftBoth" ) ) view_.applyWeldPreset( weldDemoPreset::softBoth );
+                ImGui::TextWrapped( "0 Hz는 기존 hard Weld입니다. 선형과 회전 softness를 독립적으로 바꿔 두 anchor와 상대 각도의 복원 차이를 비교합니다." );
             }
             else
             {
@@ -179,9 +186,39 @@ private:
     {
         if( !ImGui::CollapsingHeader( "웰드 조인트 인스펙터###WeldJointInspector", ImGuiTreeNodeFlags_DefaultOpen ) ) return;
 
-        const weldJointData joint = view_.getWorld().getWeldJointData( view_.getWeldJoint() );
+        weldJointData joint = view_.getWorld().getWeldJointData( view_.getWeldJoint() );
+        ImGui::TextWrapped( "선형 2x2 제약과 각도 scalar 제약은 같은 Weld를 구성하지만 softness는 독립적입니다. 각 주파수가 0 Hz면 해당 채널은 hard constraint로 동작합니다." );
+
+        if( ImGui::TreeNodeEx( "선형 Softness###WeldLinearSettings", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            float hertz = joint.linearHertz;
+            float dampingRatio = joint.linearDampingRatio;
+            bool changed = ImGui::DragFloat( "주파수###WeldLinearHertz", &hertz, 0.1f, 0.0f, 30.0f, "%.2f Hz" );
+            changed |= ImGui::DragFloat( "감쇠비###WeldLinearDamping", &dampingRatio, 0.02f, 0.0f, 2.0f, "%.2f" );
+            hertz = std::clamp( hertz, 0.0f, 30.0f );
+            dampingRatio = std::clamp( dampingRatio, 0.0f, 2.0f );
+            if( changed ) view_.setWeldLinearSettings( hertz, dampingRatio );
+            ImGui::TreePop();
+        }
+
+        joint = view_.getWorld().getWeldJointData( view_.getWeldJoint() );
+        if( ImGui::TreeNodeEx( "회전 Softness###WeldAngularSettings", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            float hertz = joint.angularHertz;
+            float dampingRatio = joint.angularDampingRatio;
+            bool changed = ImGui::DragFloat( "주파수###WeldAngularHertz", &hertz, 0.1f, 0.0f, 30.0f, "%.2f Hz" );
+            changed |= ImGui::DragFloat( "감쇠비###WeldAngularDamping", &dampingRatio, 0.02f, 0.0f, 2.0f, "%.2f" );
+            hertz = std::clamp( hertz, 0.0f, 30.0f );
+            dampingRatio = std::clamp( dampingRatio, 0.0f, 2.0f );
+            if( changed ) view_.setWeldAngularSettings( hertz, dampingRatio );
+            ImGui::TreePop();
+        }
+
+        joint = view_.getWorld().getWeldJointData( view_.getWeldJoint() );
         const vec2 anchorError = joint.anchorB - joint.anchorA;
-        ImGui::TextWrapped( "두 anchor가 같은 위치에 있고 상대 각도가 referenceAngle을 유지하도록 선형 2x2 제약과 각도 scalar 제약을 함께 풉니다." );
+        ImGui::SeparatorText( "현재 상태###WeldState" );
+        ImGui::Text( "Linear: %.2f Hz / damping %.2f", joint.linearHertz, joint.linearDampingRatio );
+        ImGui::Text( "Angular: %.2f Hz / damping %.2f", joint.angularHertz, joint.angularDampingRatio );
         ImGui::Text( "Anchor A: (%.3f, %.3f)", joint.anchorA.x, joint.anchorA.y );
         ImGui::Text( "Anchor B: (%.3f, %.3f)", joint.anchorB.x, joint.anchorB.y );
         ImGui::Text( "Anchor 오차: (%.4f, %.4f) / %.4f m", anchorError.x, anchorError.y, Length( anchorError ) );

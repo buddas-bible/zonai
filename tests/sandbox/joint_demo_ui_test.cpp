@@ -89,13 +89,16 @@ int main()
     if( springVertices <= baselineVertices ) fail( "Prismatic spring inspector toggle drew no target overlay" );
     if( limitVertices <= springVertices ) fail( "Prismatic limit inspector toggle drew no boundary overlay" );
 
-    // Basic Weld에는 아직 tuning 값이 없으므로 Inspector와 anchor/frame overlay 실행 자체를 smoke test함.
+    // Weld inspector의 두 softness 편집 트리와 preset 경로를 headless frame에서 함께 실행함.
     auto weldView = createJointDemoView( demoKind::weldPair );
     ImGui::NewFrame();
     ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
     ImGui::SetNextWindowSize( { 420.0f, 1800.0f } );
     ImGui::Begin( "Weld inspector" );
     ImGui::GetStateStorage()->SetInt( ImGui::GetID( "WeldJointInspector" ), 1 );
+    ImGui::GetStateStorage()->SetInt( ImGui::GetID( "WeldLinearSettings" ), 1 );
+    ImGui::GetStateStorage()->SetInt( ImGui::GetID( "WeldAngularSettings" ), 1 );
+    GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "WeldPresetSoftBoth" );
     weldView->drawControls();
 
     debugCamera weldCamera{};

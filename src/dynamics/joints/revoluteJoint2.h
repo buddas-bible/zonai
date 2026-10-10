@@ -6,7 +6,8 @@
 namespace zonai
 {
 
-// 두 작용점을 일치시키고 상대 회전은 허용하는 기본 회전축.
+// Revolute Joint를 생성할 때 World에 전달하는 설정.
+// 두 작용점을 일치시키고 상대 회전은 허용하며, 필요하면 각도 limit과 회전 motor를 추가함.
 struct revoluteJointDef
 {
     bodyId bodyA{};
@@ -28,6 +29,8 @@ struct revoluteJointDef
     float maxMotorTorque = 0.0f; // 유한한 비음수 토크 한도 (N*m). 0이면 모터 힘이 없음.
 };
 
+// getRevoluteJointData()가 반환하는 현재 상태 snapshot.
+// 현재 축 위치/상대 각도와 마지막 substep의 반력·limit torque·motor torque를 조회할 때 사용함.
 struct revoluteJointData
 {
     bodyId bodyA{};

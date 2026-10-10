@@ -6,6 +6,8 @@
 namespace zonai
 {
 
+// Distance Joint를 생성할 때 World에 전달하는 설정.
+// 두 로컬 작용점 사이의 거리 제약에 spring / limit / motor 동작을 선택적으로 추가함.
 struct distanceJointDef
 {
     bodyId bodyA{};
@@ -35,6 +37,8 @@ struct distanceJointDef
     float maxMotorForce = 0.0f; // 양방향 최대 힘 (N). 유한한 비음수
 };
 
+// getDistanceJointData()가 반환하는 현재 상태 snapshot.
+// World 내부의 persistent simulation 상태가 아니라 설정값과 현재 기하/반력을 조회하기 위한 데이터임.
 struct distanceJointData
 {
     bodyId bodyA{};
