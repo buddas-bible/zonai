@@ -102,10 +102,10 @@ void solvePogoJointConstraint( pogoJointConstraint2& constraint, bodyState& body
     float bias = 0.0f;
     if( useBias )
     {
-        // Pogo는 길이 오차를 B와 함께 회전하는 pogo 축으로 측정하지만 실제 반력은 contact normal 방향으로 가함.
+        // Box2D처럼 Pogo 길이 측정축은 Prepare 시점의 방향을 substep 동안 고정함.
+        // anchor lever arm은 deltaRotation을 따라가지만 측정축까지 다시 돌리면 회전이 Pogo 길이 오차를 왜곡함.
         const vec2 d = constraint.deltaCenter + bodyStateB.deltaPosition - bodyStateA.deltaPosition + rB - rA;
-        const vec2 pogoAxis = Rotate( bodyStateB.deltaRotation, constraint.pogoAxisB );
-        const float positionError = Dot( pogoAxis, d ) - constraint.restLength;
+        const float positionError = Dot( constraint.pogoAxisB, d ) - constraint.restLength;
 
         // 보정 속도는 이번 위치 복원 pass에서만 사용함. relaxation pass에는 남기지 않아 mover가 계단에서 튀는 것을 줄임.
         constraint.velocity = springDamperVelocity( constraint.hertz, constraint.dampingRatio, positionError, constraint.velocity, constraint.subStepTime );
