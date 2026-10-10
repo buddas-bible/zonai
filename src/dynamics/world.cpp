@@ -2440,7 +2440,7 @@ void world::Step( float timeStep, int subStepCount )
         }
 
         // -----------------------------------------------------
-        // 6. Classify fast bodies for continuous collision
+        // 6. Limit final speed and classify fast bodies for continuous collision
         // -----------------------------------------------------
         for( const island2& island : islandGraph.islands )
         {
@@ -2450,7 +2450,14 @@ void world::Step( float timeStep, int subStepCount )
             {
                 const body& body = bodies_[bodyIndex];
                 bodySim& sim = bodySims_[bodyIndex];
-                const bodyState& state = bodyStates_[bodyIndex];
+                bodyState& state = bodyStates_[bodyIndex];
+
+                // Relaxation과 restitution도 속도를 바꾸므로 CCD 판정 전에 상한을 다시 적용함.
+                const float linearSpeedSquared = LengthSquared( state.linearVelocity );
+                if( linearSpeedSquared > maxLinearSpeedSquared )
+                {
+                    state.linearVelocity *= maximumLinearSpeed_ / std::sqrt( linearSpeedSquared );
+                }
 
                 if( body.type != bodyType::Dynamic || body.shapeCount == 0 ) continue;
 
