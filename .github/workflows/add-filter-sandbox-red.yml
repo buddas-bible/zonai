@@ -1,0 +1,32 @@
+name: Add Filter Sandbox RED
+
+on:
+  push:
+    branches:
+      - feature/filter-joint
+    paths:
+      - "tools/add_filter_sandbox_red.py"
+      - ".github/workflows/add-filter-sandbox-red.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/filter-joint
+          fetch-depth: 0
+
+      - name: Register RED target
+        run: python3 tools/add_filter_sandbox_red.py
+
+      - name: Commit RED target
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/CMakeLists.txt
+          git commit -m "test: register Filter Sandbox RED target"
+          git push origin HEAD:feature/filter-joint
