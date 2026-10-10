@@ -1,144 +1,152 @@
 from pathlib import Path
 
-Path("src/dynamics/joints/moverJointSim2.h").write_text(r'''#pragma once
+cmake_path = Path("tests/CMakeLists.txt")
+cmake = cmake_path.read_text(encoding="utf-8")
+marker = "add_executable(mouseJointTests dynamics/mouse_joint_test.cpp)\n"
+block = (
+    "add_executable(moverJointWorldTests dynamics/mover_joint_world_test.cpp)\n"
+    "target_link_libraries(moverJointWorldTests PRIVATE zonai::zonai)\n"
+    "add_test(NAME moverJointWorldTests COMMAND moverJointWorldTests)\n\n"
+)
+if block not in cmake:
+    if marker not in cmake:
+        raise RuntimeError("CMake insertion marker not found")
+    cmake = cmake.replace(marker, block + marker, 1)
+    cmake_path.write_text(cmake, encoding="utf-8")
 
-#include <cstdint>
-#include "math/vec2.h"
+Path("tests/dynamics/mover_joint_world_test.cpp").write_text(r'''#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include "dynamics/world.h"
 
-namespace zonai
+using namespace zonai;
+
+namespace
 {
 
-// World의 stable Joint slot에 계속 보관되는 Mover Joint의 simulation 상태.
-// 회전은 제어하지 않고 Body B가 A에 대해 가져야 하는 상대 선속도만 정의함.
-struct moverJointSim2
+void check( bool ok, const char* message )
 {
-    std::int32_t jointId = -1;
-    std::int32_t bodyIdA = -1;
-    std::int32_t bodyIdB = -1;
-
-    // World 좌표계의 목표 상대 선속도와 x/y 방향별 최대 구동 힘.
-    vec2 linearVelocity{};
-    vec2 maxVelocityForce{};
-
-    // 이전 substep의 누적 선형 impulse. 같은 h에서만 다음 warm start에 재사용함.
-    vec2 linearVelocityImpulse{};
-    float subStepTime = 0.0f;
-};
-
-} // namespace zonai
-''', encoding="utf-8")
-
-Path("src/dynamics/joints/moverJointConstraint2.h").write_text(r'''#pragma once
-
-#include "dynamics/bodySim.h"
-#include "dynamics/bodyState.h"
-#include "dynamics/joints/moverJointSim2.h"
-
-namespace zonai
-{
-
-// 한 substep 동안 Mover의 상대 선속도 제약을 푸는 임시 solver 데이터.
-// Mover는 COM 선속도만 사용하므로 anchor와 관성 항이 없고 회전 상태를 건드리지 않음.
-struct moverJointConstraint2
-{
-    std::int32_t jointId = -1;
-    std::int32_t bodyIdA = -1;
-    std::int32_t bodyIdB = -1;
-
-    float invMassA = 0.0f;
-    float invMassB = 0.0f;
-    float linearMass = 0.0f;
-
-    vec2 linearVelocity{};
-    vec2 maxLinearImpulse{};
-    vec2 linearVelocityImpulse{};
-};
-
-// 상대 선속도 effective mass와 force * h 형태의 축별 impulse 한도를 준비함.
-[[nodiscard]] moverJointConstraint2 prepareMoverJointConstraint( const moverJointSim2& joint, const bodySim& bodySimA, const bodySim& bodySimB, float subStepTime );
-
-// 이전 substep의 누적 선형 impulse를 다시 적용함. Mover는 각속도를 변경하지 않음.
-void warmStartMoverJointConstraint( const moverJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB );
-
-// 목표 상대 선속도에 필요한 누적 impulse를 x/y 각각의 actuator 한도로 제한해 적용함.
-void solveMoverJointConstraint( moverJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB );
-
-} // namespace zonai
-''', encoding="utf-8")
-
-Path("src/dynamics/joints/moverJointConstraint2.cpp").write_text(r'''#include "dynamics/joints/moverJointConstraint2.h"
-
-#include <algorithm>
-#include <cassert>
-#include <cmath>
-
-namespace zonai
-{
-
-#pragma region Prepare
-
-moverJointConstraint2 prepareMoverJointConstraint( const moverJointSim2& joint, const bodySim& bodySimA, const bodySim& bodySimB, float subStepTime )
-{
-    assert( std::isfinite( subStepTime ) && subStepTime > 0.0f );
-    assert( joint.bodyIdA == bodySimA.bodyId && joint.bodyIdB == bodySimB.bodyId );
-
-    moverJointConstraint2 constraint{};
-    constraint.jointId = joint.jointId;
-    constraint.bodyIdA = joint.bodyIdA;
-    constraint.bodyIdB = joint.bodyIdB;
-    constraint.invMassA = bodySimA.invMass;
-    constraint.invMassB = bodySimB.invMass;
-
-    const float inverseMass = constraint.invMassA + constraint.invMassB;
-    constraint.linearMass = inverseMass > 0.0f ? 1.0f / inverseMass : 0.0f;
-    constraint.linearVelocity = joint.linearVelocity;
-    constraint.maxLinearImpulse = subStepTime * joint.maxVelocityForce;
-
-    // impulse는 force를 h만큼 적분한 값이라 같은 substep 시간에서만 이전 해를 재사용함.
-    if( joint.subStepTime == subStepTime )
+    if( !ok )
     {
-        constraint.linearVelocityImpulse = joint.linearVelocityImpulse;
+        std::fprintf( stderr, "%s\n", message );
+        std::exit( EXIT_FAILURE );
     }
-
-    // runtime에서 힘 한도를 낮춘 경우 이전 cache도 새 축별 한도를 넘지 않게 제한함.
-    constraint.linearVelocityImpulse.x = std::clamp( constraint.linearVelocityImpulse.x, -constraint.maxLinearImpulse.x, constraint.maxLinearImpulse.x );
-    constraint.linearVelocityImpulse.y = std::clamp( constraint.linearVelocityImpulse.y, -constraint.maxLinearImpulse.y, constraint.maxLinearImpulse.y );
-
-    return constraint;
 }
 
-#pragma endregion Prepare
-
-#pragma region WarmStart
-
-void warmStartMoverJointConstraint( const moverJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB )
+bool near( float a, float b )
 {
-    bodyStateA.linearVelocity -= constraint.invMassA * constraint.linearVelocityImpulse;
-    bodyStateB.linearVelocity += constraint.invMassB * constraint.linearVelocityImpulse;
+    return std::abs( a - b ) < 0.0001f;
 }
 
-#pragma endregion WarmStart
+}
 
-#pragma region Solve
-
-void solveMoverJointConstraint( moverJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB )
+int main()
 {
-    if( constraint.linearMass == 0.0f ) return;
+    world simulation;
+    simulation.SetGravity( {} );
 
-    const vec2 velocityError = bodyStateB.linearVelocity - bodyStateA.linearVelocity - constraint.linearVelocity;
-    const vec2 deltaImpulse = -constraint.linearMass * velocityError;
-    const vec2 oldImpulse = constraint.linearVelocityImpulse;
+    const bodyId ground = simulation.CreateBody();
+    const bodyId driven = simulation.CreateBody( bodyType::Dynamic );
+    ( void )simulation.CreateShape( driven, circle2{ {}, 0.5f } );
+    simulation.SetBodyAngularVelocity( driven, 1.25f );
 
-    constraint.linearVelocityImpulse += deltaImpulse;
-    constraint.linearVelocityImpulse.x = std::clamp( constraint.linearVelocityImpulse.x, -constraint.maxLinearImpulse.x, constraint.maxLinearImpulse.x );
-    constraint.linearVelocityImpulse.y = std::clamp( constraint.linearVelocityImpulse.y, -constraint.maxLinearImpulse.y, constraint.maxLinearImpulse.y );
+    moverJointDef definition{};
+    definition.bodyA = ground;
+    definition.bodyB = driven;
+    definition.linearVelocity = { 2.0f, -1.0f };
+    definition.maxVelocityForce = { 1000.0f, 1000.0f };
 
-    const vec2 impulse = constraint.linearVelocityImpulse - oldImpulse;
-    bodyStateA.linearVelocity -= constraint.invMassA * impulse;
-    bodyStateB.linearVelocity += constraint.invMassB * impulse;
+    const jointId mover = simulation.createMoverJoint( definition );
+    auto data = simulation.getMoverJointData( mover );
+    check( near( data.linearVelocity.x, 2.0f ) && near( data.linearVelocity.y, -1.0f ), "Mover create/query preserves target velocity" );
+    check( near( data.maxVelocityForce.x, 1000.0f ) && near( data.maxVelocityForce.y, 1000.0f ), "Mover create/query preserves per-axis force limits" );
+    check( simulation.getJointCount() == 1 && simulation.GetBody( driven ).jointCount == 1, "Mover shares the common joint graph" );
+
+    simulation.Step( 1.0f / 60.0f, 1 );
+    const vec2 velocity = simulation.GetBodyLinearVelocity( driven );
+    check( near( velocity.x, 2.0f ) && near( velocity.y, -1.0f ), "World Mover reaches target relative linear velocity" );
+    check( near( simulation.GetBodyAngularVelocity( driven ), 1.25f ), "World Mover does not affect angular velocity" );
+    data = simulation.getMoverJointData( mover );
+    check( IsFinite( data.force ) && LengthSquared( data.force ) > 0.0f, "Mover stores a finite linear reaction force" );
+
+    // 목표속도 변경은 이전 velocity actuator 해를 버리고 연결된 Body를 깨움.
+    simulation.SetBodyAwake( driven, false );
+    simulation.setMoverJointLinearVelocity( mover, { -1.0f, 0.5f } );
+    check( simulation.IsBodyAwake( driven ), "changing Mover target velocity wakes connected body" );
+    data = simulation.getMoverJointData( mover );
+    check( near( data.linearVelocity.x, -1.0f ) && near( data.linearVelocity.y, 0.5f ), "Mover velocity setter updates query state" );
+    check( LengthSquared( data.force ) == 0.0f, "Mover velocity setter clears cached reaction" );
+
+    simulation.SetBodyAwake( driven, false );
+    simulation.setMoverJointLinearVelocity( mover, { -1.0f, 0.5f } );
+    check( !simulation.IsBodyAwake( driven ), "unchanged Mover target velocity does not wake body" );
+
+    simulation.SetBodyAwake( driven, true );
+    simulation.setMoverJointLinearVelocity( mover, { 20.0f, -20.0f } );
+    simulation.setMoverJointMaxVelocityForce( mover, { 6.0f, 12.0f } );
+    simulation.Step( 1.0f / 60.0f, 1 );
+    data = simulation.getMoverJointData( mover );
+    check( std::abs( data.force.x ) <= 6.0001f && std::abs( data.force.y ) <= 12.0001f, "Mover clamps reaction independently on x and y" );
+
+    simulation.SetBodyAwake( driven, false );
+    simulation.setMoverJointMaxVelocityForce( mover, { 3.0f, 9.0f } );
+    check( simulation.IsBodyAwake( driven ), "changing Mover force limits wakes connected body" );
+    data = simulation.getMoverJointData( mover );
+    check( near( data.maxVelocityForce.x, 3.0f ) && near( data.maxVelocityForce.y, 9.0f ), "Mover force setter updates query state" );
+    check( LengthSquared( data.force ) == 0.0f, "Mover force setter clears cached reaction" );
+
+    simulation.SetBodyAwake( driven, false );
+    simulation.setMoverJointMaxVelocityForce( mover, { 3.0f, 9.0f } );
+    check( !simulation.IsBodyAwake( driven ), "unchanged Mover force limits do not wake body" );
+
+    simulation.SetBodyAwake( driven, true );
+    simulation.Step( 1.0f / 60.0f, 1 );
+    check( LengthSquared( simulation.getMoverJointData( mover ).force ) > 0.0f, "Mover reaction rebuilds after setter changes" );
+
+    simulation.SetBodyTransform( driven, { { 1.0f, 0.0f }, {} } );
+    check( LengthSquared( simulation.getMoverJointData( mover ).force ) == 0.0f, "pose change clears Mover warm-start cache" );
+
+    simulation.destroyJoint( mover );
+    check( !simulation.IsValid( mover ) && simulation.getJointCount() == 0, "destroy invalidates Mover handle" );
+    const jointId reused = simulation.createMoverJoint( definition );
+    check( simulation.IsValid( reused ) && !simulation.IsValid( mover ), "Mover slot reuse preserves generation validation" );
+    simulation.DestroyBody( driven );
+    check( !simulation.IsValid( reused ) && simulation.GetBody( ground ).jointCount == 0, "body destruction removes connected Mover" );
+
+    world pair;
+    pair.SetGravity( {} );
+    const bodyId a = pair.CreateBody( bodyType::Dynamic );
+    const bodyId b = pair.CreateBody( bodyType::Dynamic );
+    ( void )pair.CreateShape( a, circle2{ {}, 0.5f } );
+    ( void )pair.CreateShape( b, circle2{ {}, 0.5f } );
+    pair.Step( 1.0f / 60.0f, 1 );
+    check( pair.GetContactCount() == 1, "overlapping bodies initially create a Contact" );
+
+    definition = {};
+    definition.bodyA = a;
+    definition.bodyB = b;
+    definition.maxVelocityForce = { 10.0f, 10.0f };
+    const jointId pairMover = pair.createMoverJoint( definition );
+    pair.Step( 1.0f / 60.0f, 1 );
+    check( pair.GetContactCount() == 0, "Mover connected collision suppression uses shared joint path" );
+
+    pair.SetBodyAwake( a, false );
+    check( !pair.IsBodyAwake( b ), "Mover connected dynamic bodies sleep together" );
+    pair.setMoverJointLinearVelocity( pairMover, { 1.0f, 0.0f } );
+    check( pair.IsBodyAwake( a ) && pair.IsBodyAwake( b ), "Mover setter wake propagates through joint graph" );
+
+    pair.destroyJoint( pairMover );
+    pair.Step( 1.0f / 60.0f, 1 );
+    check( pair.GetContactCount() == 1, "destroying Mover restores candidate contacts" );
+
+    definition.collideConnected = true;
+    const jointId colliding = pair.createMoverJoint( definition );
+    pair.Step( 1.0f / 60.0f, 1 );
+    check( pair.GetContactCount() == 1 && pair.getMoverJointData( colliding ).collideConnected, "explicit Mover connected collisions remain enabled" );
+
+    world foreign;
+    check( !foreign.IsValid( colliding ), "foreign World rejects Mover handle" );
+
+    return EXIT_SUCCESS;
 }
-
-#pragma endregion Solve
-
-} // namespace zonai
 ''', encoding="utf-8")
