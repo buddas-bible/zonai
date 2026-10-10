@@ -1,4 +1,4 @@
-name: Verify Mover Sandbox RED
+name: Build Mover Sandbox GREEN
 
 on:
   push:
@@ -12,14 +12,14 @@ permissions:
   contents: write
 
 jobs:
-  red:
+  green:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/mover-joint
 
-      - name: Apply Sandbox RED test
+      - name: Apply Mover Sandbox integration
         run: python3 tools/add_mover_red.py
 
       - name: Install CMake 4.2
@@ -28,28 +28,20 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DZONAI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
 
-      - name: Verify missing Sandbox Mover demo fails the build
-        shell: bash
-        run: |
-          set +e
-          cmake --build build --target sandboxMoverJointDemoTests --parallel 2 > build.log 2>&1
-          status=$?
-          set -e
-          cat build.log
-          if [ "$status" -eq 0 ]; then
-            echo "Expected sandboxMoverJointDemoTests build to fail before demo integration"
-            exit 1
-          fi
-          grep -Eq "moverJointPlayground|moverJointDemoPreset|getMoverJoint|applyMoverJointPreset|setMoverJointSettings" build.log
+      - name: Build Sandbox regression tests
+        run: cmake --build build --target sandboxMoverJointDemoTests sandboxMotorJointDemoTests sandboxDemoTests sandboxJointDemoTests --parallel 2
 
-      - name: Commit Sandbox RED test
+      - name: Run Sandbox regression tests
+        run: ctest --test-dir build -R "^(sandboxMoverJointDemoTests|sandboxMotorJointDemoTests|sandboxDemoTests|sandboxJointDemoTests)$" --output-on-failure
+
+      - name: Commit Sandbox integration
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/CMakeLists.txt tests/sandbox/mover_joint_demo_test.cpp
+          git add sandbox/demo.h sandbox/demo.cpp sandbox/rigidBodyDemo.h sandbox/rigidBodyDemo.cpp sandbox/rigidBodyJointDemo.cpp tests/sandbox/demo_test.cpp tests/sandbox/joint_demo_test.cpp tests/sandbox/motor_joint_demo_test.cpp
           if git diff --cached --quiet; then
-            echo "No test changes"
+            echo "No Sandbox changes"
           else
-            git commit -m "Add Mover Sandbox RED test"
+            git commit -m "Add Mover Joint Sandbox"
             git push origin HEAD:feature/mover-joint
           fi
