@@ -115,6 +115,41 @@ int main()
 
     if( weldVertices <= 0 ) fail( "Weld joint view drew no anchor or frame overlay" );
 
+    // Ragdoll은 대표 관절 하나가 아니라 모든 Revolute limit을 관찰할 수 있어야 함.
+    rigidBodyDemoUi ragdollView{ demoKind::ragdoll };
+    const auto drawRagdoll = [&ragdollView]()
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
+        ImGui::SetNextWindowSize( { 800.0f, 800.0f } );
+        ImGui::Begin( "Ragdoll joint limits" );
+
+        debugCamera camera{};
+        camera.center = getDemoEntry( demoKind::ragdoll ).cameraCenter;
+        camera.pixelsPerMeter = getDemoEntry( demoKind::ragdoll ).pixelsPerMeter;
+        ImDrawList* list = ImGui::GetWindowDrawList();
+        const int before = list->VtxBuffer.Size;
+        debugDraw draw{ list, camera, { 0.0f, 0.0f }, { 800.0f, 700.0f } };
+        ragdollView.draw( draw );
+        const int vertices = list->VtxBuffer.Size - before;
+
+        ImGui::End();
+        ImGui::Render();
+        return vertices;
+    };
+
+    const int allRagdollLimitVertices = drawRagdoll();
+    if( allRagdollLimitVertices <= 0 ) fail( "Ragdoll view drew no geometry" );
+
+    for( const jointId id : ragdollView.getRagdollJoints() )
+    {
+        const revoluteJointData data = ragdollView.getWorld().getRevoluteJointData( id );
+        ragdollView.getWorld().setRevoluteJointLimit( id, false, data.lowerAngle, data.upperAngle );
+        const int withoutOneLimit = drawRagdoll();
+        if( withoutOneLimit >= allRagdollLimitVertices ) fail( "Ragdoll view did not draw every joint limit" );
+        ragdollView.getWorld().setRevoluteJointLimit( id, true, data.lowerAngle, data.upperAngle );
+    }
+
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }
