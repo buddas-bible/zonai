@@ -29,7 +29,7 @@ public:
         view_.drawControls();
 
         const demoKind kind = view_.getKind();
-        if( kind != demoKind::distancePendulum && kind != demoKind::revoluteHinge && kind != demoKind::wheelSuspension && kind != demoKind::prismaticRail && kind != demoKind::weldPair && kind != demoKind::mouseJointPlayground && kind != demoKind::motorJointPlayground ) return;
+        if( kind != demoKind::distancePendulum && kind != demoKind::revoluteHinge && kind != demoKind::wheelSuspension && kind != demoKind::prismaticRail && kind != demoKind::weldPair && kind != demoKind::mouseJointPlayground && kind != demoKind::motorJointPlayground && kind != demoKind::moverJointPlayground ) return;
 
         if( ImGui::CollapsingHeader( "조인트 빠른 설정###JointQuickSettings", ImGuiTreeNodeFlags_DefaultOpen ) )
         {
@@ -105,6 +105,17 @@ public:
                 if( ImGui::Button( "Velocity + Spring###MotorJointPresetVelocitySpring" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::velocityAndSpring );
                 ImGui::TextWrapped( "Velocity Motor는 상대속도를 목표로 하고 transform spring은 두 anchor와 기준 상대각도를 복원합니다. 둘은 독립 actuator라 동시에 켤 수 있습니다." );
             }
+            else if( kind == demoKind::moverJointPlayground )
+            {
+                if( ImGui::Button( "수평###MoverPresetHorizontal" ) ) view_.applyMoverJointPreset( moverJointDemoPreset::horizontal );
+                ImGui::SameLine();
+                if( ImGui::Button( "수직###MoverPresetVertical" ) ) view_.applyMoverJointPreset( moverJointDemoPreset::vertical );
+                ImGui::SameLine();
+                if( ImGui::Button( "대각선###MoverPresetDiagonal" ) ) view_.applyMoverJointPreset( moverJointDemoPreset::diagonal );
+                ImGui::SameLine();
+                if( ImGui::Button( "축별 힘###MoverPresetAnisotropic" ) ) view_.applyMoverJointPreset( moverJointDemoPreset::anisotropic );
+                ImGui::TextWrapped( "Mover는 COM 상대 선속도만 제어합니다. x/y 최대 힘을 따로 제한할 수 있고 회전은 전혀 건드리지 않습니다." );
+            }
             else if( kind == demoKind::weldPair )
             {
                 if( ImGui::Button( "고정###WeldPresetRigid" ) ) view_.applyWeldPreset( weldDemoPreset::rigid );
@@ -139,6 +150,10 @@ public:
         {
             drawMotorJointInspector();
         }
+        else if( kind == demoKind::moverJointPlayground && view_.getWorld().IsValid( view_.getMoverJoint() ) )
+        {
+            drawMoverJointInspector();
+        }
         else if( kind == demoKind::weldPair && view_.getWorld().IsValid( view_.getWeldJoint() ) )
         {
             drawWeldInspector();
@@ -171,6 +186,28 @@ public:
             {
                 const rot2 targetRotation = view_.getWorld().GetBodyTransform( joint.bodyA ).rotation * rot2::FromRadians( joint.referenceAngle );
                 draw.DrawArrow( joint.anchorA, Rotate( targetRotation, { 1.0f, 0.0f } ), SPRING_COLOR, 0.65f );
+            }
+            return;
+        }
+
+        if( view_.getKind() == demoKind::moverJointPlayground && view_.getWorld().IsValid( view_.getMoverJoint() ) )
+        {
+            const moverJointData joint = view_.getWorld().getMoverJointData( view_.getMoverJoint() );
+            const transform2 bodyTransform = view_.getWorld().GetBodyTransform( joint.bodyB );
+            const vec2 bodyCenter = TransformPoint( bodyTransform, view_.getWorld().GetBodyLocalCenter( joint.bodyB ) );
+            constexpr ImU32 BODY_COLOR = IM_COL32( 100, 235, 220, 255 );
+            constexpr ImU32 TARGET_COLOR = IM_COL32( 255, 220, 90, 255 );
+            constexpr ImU32 FORCE_COLOR = IM_COL32( 230, 120, 255, 255 );
+
+            // Mover는 anchor 위치를 잠그지 않으므로 연결선 없이 COM에서 velocity/force만 시각화함.
+            draw.DrawPoint( bodyCenter, BODY_COLOR, 6.0f );
+            if( LengthSquared( joint.linearVelocity ) > 0.0f )
+            {
+                draw.DrawArrow( bodyCenter, Normalize( joint.linearVelocity ), TARGET_COLOR, std::min( 1.5f, Length( joint.linearVelocity ) * 0.5f ) );
+            }
+            if( LengthSquared( joint.force ) > 0.0f )
+            {
+                draw.DrawArrow( bodyCenter, Normalize( joint.force ), FORCE_COLOR, std::min( 1.25f, Length( joint.force ) * 0.04f ) );
             }
             return;
         }
@@ -231,6 +268,32 @@ public:
     }
 
 private:
+    void drawMoverJointInspector()
+    {
+        if( !ImGui::CollapsingHeader( "무버 조인트 인스펙터###MoverJointInspector", ImGuiTreeNodeFlags_DefaultOpen ) ) return;
+
+        moverJointData joint = view_.getWorld().getMoverJointData( view_.getMoverJoint() );
+        ImGui::TextWrapped( "Mover는 두 Body의 COM 상대 선속도만 목표로 합니다. 회전 제약이 없고 x/y actuator 힘을 독립적으로 제한합니다." );
+
+        float targetVelocity[2] = { joint.linearVelocity.x, joint.linearVelocity.y };
+        if( ImGui::DragFloat2( "목표 속도 (m/s)###MoverTargetVelocity", targetVelocity, 0.05f ) )
+        {
+            view_.setMoverJointSettings( { targetVelocity[0], targetVelocity[1] }, joint.maxVelocityForce );
+            joint.linearVelocity = { targetVelocity[0], targetVelocity[1] };
+        }
+
+        float maxForce[2] = { joint.maxVelocityForce.x, joint.maxVelocityForce.y };
+        if( ImGui::DragFloat2( "최대 힘 (N)###MoverMaxForce", maxForce, 0.25f, 0.0f, 1000.0f ) )
+        {
+            maxForce[0] = std::max( maxForce[0], 0.0f );
+            maxForce[1] = std::max( maxForce[1], 0.0f );
+            view_.setMoverJointSettings( joint.linearVelocity, { maxForce[0], maxForce[1] } );
+        }
+
+        ImGui::Text( "Reaction Force: (%.2f, %.2f) N", joint.force.x, joint.force.y );
+        ImGui::TextUnformatted( "Rotation: unaffected" );
+    }
+
     void drawMotorJointInspector()
     {
         if( !ImGui::CollapsingHeader( "모터 조인트 인스펙터###MotorJointInspector", ImGuiTreeNodeFlags_DefaultOpen ) ) return;
