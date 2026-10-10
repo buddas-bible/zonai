@@ -25,10 +25,11 @@ void check( bool condition, const char* message )
 
 int main()
 {
-    check( getDemoEntries().size() == 12, "Motor Joint demo is independently selectable" );
+    check( getDemoEntries().size() == 13, "Ragdoll demo is independently selectable" );
     check( std::string_view{ getDemoEntry( demoKind::mouseJointPlayground ).category } == "조인트", "mouse joint demo stays in joint category" );
     check( std::string_view{ getDemoEntry( demoKind::prismaticRail ).category } == "조인트", "Prismatic rail stays in joint category" );
     check( std::string_view{ getDemoEntry( demoKind::weldPair ).category } == "조인트", "Weld pair stays in joint category" );
+    check( std::string_view{ getDemoEntry( demoKind::ragdoll ).category } == "연결 장치", "Ragdoll stays in assembly category" );
 
     rigidBodyDemo mouse{ demoKind::mouseJointPlayground };
     check( mouse.getWorld().GetBodyCount() == 4 && mouse.getWorld().getJointCount() == 0 && mouse.getShapes().size() == 4, "mouse scene has ground and three draggable bodies" );
@@ -189,6 +190,34 @@ int main()
     for( int i = 0; i < 60; ++i ) prismatic.step( 1.0f / 60.0f, 4 );
     prismaticData = prismatic.getWorld().getPrismaticJointData( prismaticId );
     check( std::abs( prismaticData.lateralError ) < 0.01f && std::abs( prismaticData.currentAngle ) < 0.01f, "Prismatic demo blocks lateral translation and relative rotation" );
+
+    rigidBodyDemo ragdoll{ demoKind::ragdoll };
+    check( ragdoll.getWorld().GetBodyCount() == 12 && ragdoll.getWorld().getJointCount() == 10 && ragdoll.getShapes().size() == 12, "Ragdoll scene has ground plus eleven body parts and ten joints" );
+    check( ragdoll.getRagdollBodies().size() == 11 && ragdoll.getRagdollJoints().size() == 10, "Ragdoll exposes its body and joint assembly" );
+    for( const bodyId body : ragdoll.getRagdollBodies() )
+    {
+        check( ragdoll.getWorld().IsValid( body ), "Ragdoll body handle stays valid" );
+    }
+    for( const jointId joint : ragdoll.getRagdollJoints() )
+    {
+        check( ragdoll.getWorld().IsValid( joint ), "Ragdoll joint handle stays valid" );
+        const revoluteJointData data = ragdoll.getWorld().getRevoluteJointData( joint );
+        check( data.enableLimit && !data.enableMotor && data.lowerAngle < data.upperAngle, "Ragdoll uses bounded passive Revolute joints" );
+        check( IsFinite( data.anchorA ) && IsFinite( data.anchorB ) && std::isfinite( data.currentAngle ), "Ragdoll joint starts finite" );
+    }
+
+    ragdoll.getWorld().ApplyLinearImpulseToCenter( ragdoll.getRagdollBodies()[1], { 12.0f, 3.0f } );
+    for( int i = 0; i < 240; ++i ) ragdoll.step( 1.0f / 60.0f, 4 );
+    for( const bodyId body : ragdoll.getRagdollBodies() )
+    {
+        const transform2 transform = ragdoll.getWorld().GetBodyTransform( body );
+        check( IsFinite( transform.position ), "Ragdoll remains finite after a sustained multi-joint simulation" );
+    }
+    for( const jointId joint : ragdoll.getRagdollJoints() )
+    {
+        const revoluteJointData data = ragdoll.getWorld().getRevoluteJointData( joint );
+        check( data.currentAngle >= data.lowerAngle - 0.15f && data.currentAngle <= data.upperAngle + 0.15f, "Ragdoll settles inside each angular limit" );
+    }
 
     return EXIT_SUCCESS;
 }
