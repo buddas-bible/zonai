@@ -2265,6 +2265,10 @@ void world::Step( float timeStep, int subStepCount )
                     {
                         return prepareDistanceJointConstraint( joint, bodySims_[joint.bodyIdA], bodySims_[joint.bodyIdB], subStepTime );
                     }
+                    else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, filterJointSim2> )
+                    {
+                        return prepareFilterJointConstraint( joint );
+                    }
                     else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, motorJointSim2> )
                     {
                         return prepareMotorJointConstraint( joint, bodySims_[joint.bodyIdA], bodySims_[joint.bodyIdB], subStepTime );
@@ -2530,9 +2534,9 @@ void world::Step( float timeStep, int subStepCount )
                 [&]( const auto& constraint )
                 {
                     using constraintType = std::remove_cvref_t<decltype( constraint )>;
-                    using simType = std::conditional_t<std::is_same_v<constraintType, distanceJointConstraint2>, distanceJointSim2, std::conditional_t<std::is_same_v<constraintType, motorJointConstraint2>, motorJointSim2, std::conditional_t<std::is_same_v<constraintType, moverJointConstraint2>, moverJointSim2, std::conditional_t<std::is_same_v<constraintType, pogoJointConstraint2>, pogoJointSim2, std::conditional_t<std::is_same_v<constraintType, prismaticJointConstraint2>, prismaticJointSim2, std::conditional_t<std::is_same_v<constraintType, revoluteJointConstraint2>, revoluteJointSim2, std::conditional_t<std::is_same_v<constraintType, weldJointConstraint2>, weldJointSim2, std::conditional_t<std::is_same_v<constraintType, wheelJointConstraint2>, wheelJointSim2, mouseJointSim2>>>>>>>>;
+                    using simType = std::conditional_t<std::is_same_v<constraintType, distanceJointConstraint2>, distanceJointSim2, std::conditional_t<std::is_same_v<constraintType, filterJointConstraint2>, filterJointSim2, std::conditional_t<std::is_same_v<constraintType, motorJointConstraint2>, motorJointSim2, std::conditional_t<std::is_same_v<constraintType, moverJointConstraint2>, moverJointSim2, std::conditional_t<std::is_same_v<constraintType, pogoJointConstraint2>, pogoJointSim2, std::conditional_t<std::is_same_v<constraintType, prismaticJointConstraint2>, prismaticJointSim2, std::conditional_t<std::is_same_v<constraintType, revoluteJointConstraint2>, revoluteJointSim2, std::conditional_t<std::is_same_v<constraintType, weldJointConstraint2>, weldJointSim2, std::conditional_t<std::is_same_v<constraintType, wheelJointConstraint2>, wheelJointSim2, mouseJointSim2>>>>>>>>>;
                     auto& joint = std::get<simType>( jointSims_[constraint.jointId] );
-                    joint.subStepTime = subStepTime;
+                    if constexpr( !std::is_same_v<simType, filterJointSim2> ) joint.subStepTime = subStepTime;
 
                     if constexpr( std::is_same_v<simType, motorJointSim2> )
                     {
@@ -2549,6 +2553,10 @@ void world::Step( float timeStep, int subStepCount )
                     {
                         joint.impulse = constraint.impulse;
                         joint.velocity = constraint.velocity;
+                    }
+                    else if constexpr( std::is_same_v<simType, filterJointSim2> )
+                    {
+                        // Filter Joint는 solver state를 저장하지 않음.
                     }
                     else
                     {
@@ -3084,7 +3092,11 @@ void world::resetJointImpulses( std::int32_t bodyIndex )
             {
                 using simType = std::remove_cvref_t<decltype( joint )>;
 
-                if constexpr( std::is_same_v<simType, motorJointSim2> )
+                if constexpr( std::is_same_v<simType, filterJointSim2> )
+                {
+                    // Filter Joint는 reset할 solver cache가 없음.
+                }
+                else if constexpr( std::is_same_v<simType, motorJointSim2> )
                 {
                     joint.linearVelocityImpulse = {};
                     joint.linearSpringImpulse = {};
@@ -4687,6 +4699,10 @@ void world::warmStartJoints( std::span<jointConstraint> constraints )
                 {
                     warmStartDistanceJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
                 }
+                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, filterJointConstraint2> )
+                {
+                    warmStartFilterJointConstraint( constraint );
+                }
                 else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, motorJointConstraint2> )
                 {
                     warmStartMotorJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
@@ -4734,6 +4750,10 @@ void world::solveJoints( std::span<jointConstraint> constraints, bool useBias )
                 if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, distanceJointConstraint2> )
                 {
                     solveDistanceJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB], useBias );
+                }
+                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, filterJointConstraint2> )
+                {
+                    solveFilterJointConstraint( constraint );
                 }
                 else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, motorJointConstraint2> )
                 {
