@@ -11,7 +11,7 @@ namespace zonai::sandbox
 
 rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
-    shapes_.reserve( 8 );
+    shapes_.reserve( 16 );
     contacts_.reserve( 16 );
     if( kind == demoKind::playground )
     {
@@ -57,11 +57,15 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createFilterJointPlayground();
     }
+    else if( kind == demoKind::motorCar )
+    {
+        createMotorCar();
+    }
     else
     {
-        assert( kind == demoKind::motorCar );
+        assert( kind == demoKind::ragdoll );
 
-        createMotorCar();
+        createRagdoll();
     }
     refreshContacts();
 }
@@ -356,6 +360,100 @@ void rigidBodyDemo::createMotorCar()
         carJoints_[i] = world_.createWheelJoint( joint );
     }
     updateCarMotors();
+}
+
+void rigidBodyDemo::createRagdoll()
+{
+    const bodyId ground = world_.CreateBody( bodyType::Static, { { 0.0f, -0.5f }, {} } );
+    const shapeId groundShape = world_.CreateShape( ground, MakeBox( { 7.0f, 0.5f } ) );
+    world_.SetShapeFriction( groundShape, 0.9f );
+    shapes_.push_back( { ground, groundShape, "렉돌 바닥 [정적]" } );
+
+    // 순서: 머리, 몸통, 골반, 왼팔 위/아래, 오른팔 위/아래, 왼다리 위/아래, 오른다리 위/아래.
+    ragdollBodies_[0] = world_.CreateBody( bodyType::Dynamic, { { 0.0f, 6.8f }, {} } );
+    shapeId shape = world_.CreateShape( ragdollBodies_[0], circle2{ {}, 0.35f } );
+    world_.SetShapeFriction( shape, 0.6f );
+    shapes_.push_back( { ragdollBodies_[0], shape, "머리 [렉돌]" } );
+
+    ragdollBodies_[1] = world_.CreateBody( bodyType::Dynamic, { { 0.0f, 5.7f }, {} } );
+    shape = world_.CreateShape( ragdollBodies_[1], MakeBox( { 0.55f, 0.75f } ) );
+    world_.SetShapeFriction( shape, 0.6f );
+    shapes_.push_back( { ragdollBodies_[1], shape, "몸통 [렉돌]" } );
+
+    ragdollBodies_[2] = world_.CreateBody( bodyType::Dynamic, { { 0.0f, 4.6f }, {} } );
+    shape = world_.CreateShape( ragdollBodies_[2], MakeBox( { 0.5f, 0.35f } ) );
+    world_.SetShapeFriction( shape, 0.6f );
+    shapes_.push_back( { ragdollBodies_[2], shape, "골반 [렉돌]" } );
+
+    ragdollBodies_[3] = world_.CreateBody( bodyType::Dynamic, { { -1.1f, 5.95f }, {} } );
+    shape = world_.CreateShape( ragdollBodies_[3], MakeBox( { 0.55f, 0.16f } ) );
+    world_.SetShapeFriction( shape, 0.6f );
+    shapes_.push_back( { ragdollBodies_[3], shape, "왼쪽 위팔 [렉돌]" } );
+
+    ragdollBodies_[4] = world_.CreateBody( bodyType::Dynamic, { { -2.2f, 5.95f }, {} } );
+    shape = world_.CreateShape( ragdollBodies_[4], MakeBox( { 0.55f, 0.14f } ) );
+    world_.SetShapeFriction( shape, 0.6f );
+    shapes_.push_back( { ragdollBodies_[4], shape, "왼쪽 아래팔 [렉돌]" } );
+
+    ragdollBodies_[5] = world_.CreateBody( bodyType::Dynamic, { { 1.1f, 5.95f }, {} } );
+    shape = world_.CreateShape( ragdollBodies_[5], MakeBox( { 0.55f, 0.16f } ) );
+    world_.SetShapeFriction( shape, 0.6f );
+    shapes_.push_back( { ragdollBodies_[5], shape, "오른쪽 위팔 [렉돌]" } );
+
+    ragdollBodies_[6] = world_.CreateBody( bodyType::Dynamic, { { 2.2f, 5.95f }, {} } );
+    shape = world_.CreateShape( ragdollBodies_[6], MakeBox( { 0.55f, 0.14f } ) );
+    world_.SetShapeFriction( shape, 0.6f );
+    shapes_.push_back( { ragdollBodies_[6], shape, "오른쪽 아래팔 [렉돌]" } );
+
+    ragdollBodies_[7] = world_.CreateBody( bodyType::Dynamic, { { -0.28f, 3.5f }, {} } );
+    shape = world_.CreateShape( ragdollBodies_[7], MakeBox( { 0.18f, 0.75f } ) );
+    world_.SetShapeFriction( shape, 0.6f );
+    shapes_.push_back( { ragdollBodies_[7], shape, "왼쪽 허벅지 [렉돌]" } );
+
+    ragdollBodies_[8] = world_.CreateBody( bodyType::Dynamic, { { -0.28f, 2.0f }, {} } );
+    shape = world_.CreateShape( ragdollBodies_[8], MakeBox( { 0.16f, 0.75f } ) );
+    world_.SetShapeFriction( shape, 0.6f );
+    shapes_.push_back( { ragdollBodies_[8], shape, "왼쪽 종아리 [렉돌]" } );
+
+    ragdollBodies_[9] = world_.CreateBody( bodyType::Dynamic, { { 0.28f, 3.5f }, {} } );
+    shape = world_.CreateShape( ragdollBodies_[9], MakeBox( { 0.18f, 0.75f } ) );
+    world_.SetShapeFriction( shape, 0.6f );
+    shapes_.push_back( { ragdollBodies_[9], shape, "오른쪽 허벅지 [렉돌]" } );
+
+    ragdollBodies_[10] = world_.CreateBody( bodyType::Dynamic, { { 0.28f, 2.0f }, {} } );
+    shape = world_.CreateShape( ragdollBodies_[10], MakeBox( { 0.16f, 0.75f } ) );
+    world_.SetShapeFriction( shape, 0.6f );
+    shapes_.push_back( { ragdollBodies_[10], shape, "오른쪽 종아리 [렉돌]" } );
+
+    const auto connect = [this]( std::size_t index, bodyId bodyA, bodyId bodyB, vec2 localAnchorA, vec2 localAnchorB, float lowerAngle, float upperAngle )
+    {
+        revoluteJointDef joint{};
+        joint.bodyA = bodyA;
+        joint.bodyB = bodyB;
+        joint.localAnchorA = localAnchorA;
+        joint.localAnchorB = localAnchorB;
+        joint.enableLimit = true;
+        joint.lowerAngle = lowerAngle;
+        joint.upperAngle = upperAngle;
+        ragdollJoints_[index] = world_.createRevoluteJoint( joint );
+    };
+
+    constexpr float DEGREE = std::numbers::pi_v<float> / 180.0f;
+    connect( 0, ragdollBodies_[1], ragdollBodies_[0], { 0.0f, 0.75f }, { 0.0f, -0.35f }, -25.0f * DEGREE, 25.0f * DEGREE );
+    connect( 1, ragdollBodies_[2], ragdollBodies_[1], { 0.0f, 0.35f }, { 0.0f, -0.75f }, -20.0f * DEGREE, 20.0f * DEGREE );
+    connect( 2, ragdollBodies_[1], ragdollBodies_[3], { -0.55f, 0.25f }, { 0.55f, 0.0f }, -90.0f * DEGREE, 90.0f * DEGREE );
+    connect( 3, ragdollBodies_[3], ragdollBodies_[4], { -0.55f, 0.0f }, { 0.55f, 0.0f }, -120.0f * DEGREE, 10.0f * DEGREE );
+    connect( 4, ragdollBodies_[1], ragdollBodies_[5], { 0.55f, 0.25f }, { -0.55f, 0.0f }, -90.0f * DEGREE, 90.0f * DEGREE );
+    connect( 5, ragdollBodies_[5], ragdollBodies_[6], { 0.55f, 0.0f }, { -0.55f, 0.0f }, -10.0f * DEGREE, 120.0f * DEGREE );
+    connect( 6, ragdollBodies_[2], ragdollBodies_[7], { -0.28f, -0.35f }, { 0.0f, 0.75f }, -55.0f * DEGREE, 55.0f * DEGREE );
+    connect( 7, ragdollBodies_[7], ragdollBodies_[8], { 0.0f, -0.75f }, { 0.0f, 0.75f }, -10.0f * DEGREE, 115.0f * DEGREE );
+    connect( 8, ragdollBodies_[2], ragdollBodies_[9], { 0.28f, -0.35f }, { 0.0f, 0.75f }, -55.0f * DEGREE, 55.0f * DEGREE );
+    connect( 9, ragdollBodies_[9], ragdollBodies_[10], { 0.0f, -0.75f }, { 0.0f, 0.75f }, -115.0f * DEGREE, 10.0f * DEGREE );
+
+    // 기존 Sandbox 입력과 Revolute 시각화를 그대로 재사용함. 허리를 대표 limit으로 표시함.
+    impulseBody_ = ragdollBodies_[1];
+    torqueBody_ = ragdollBodies_[1];
+    revoluteJoint_ = ragdollJoints_[1];
 }
 
 #pragma endregion SceneSetup

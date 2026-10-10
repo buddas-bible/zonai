@@ -25,7 +25,8 @@ constexpr std::array entries
     demoEntry{ demoKind::moverJointPlayground, "조인트", "무버 조인트", "Mover Joint는 두 Body의 COM 상대 선속도만 제어하고 회전은 건드리지 않습니다. 수평·수직·대각선·축별 힘 한도 프리셋으로 character mover용 velocity actuator를 비교합니다.", { 0.0f, 0.0f }, 95.0f },
     demoEntry{ demoKind::pogoJointPlayground, "조인트", "포고 조인트", "Pogo Joint는 길이 오차를 pogo 축으로 측정하지만 지면 contact normal 방향으로 반력을 가합니다. Soft·Stiff·압축 전용·비대칭 힘 프리셋으로 character support 동작을 비교합니다.", { 0.0f, 0.7f }, 110.0f },
     demoEntry{ demoKind::filterJointPlayground, "조인트", "필터 조인트", "Filter Joint는 두 Body 사이 collision만 선택적으로 막고 위치·속도 제약은 만들지 않습니다. 빠른 설정에서 Filter를 끄고 켜며 같은 두 물체가 충돌하는 상태와 통과하는 상태를 비교합니다.", { 0.0f, 0.0f }, 110.0f },
-    demoEntry{ demoKind::motorCar, "연결 장치", "모터 자동차", "캔버스: A/D 유지로 왼쪽/오른쪽 주행, 스페이스 유지로 제동. 키를 놓으면 자유 주행합니다. 왼쪽 드래그로 차체나 바퀴 잡기, 오른쪽 클릭으로 차체 밀기. 모터·마찰·서스펜션을 비교하고 가운데 드래그로 주행 경로를 따라갑니다.", { 4.0f, 1.0f }, 50.0f }
+    demoEntry{ demoKind::motorCar, "연결 장치", "모터 자동차", "캔버스: A/D 유지로 왼쪽/오른쪽 주행, 스페이스 유지로 제동. 키를 놓으면 자유 주행합니다. 왼쪽 드래그로 차체나 바퀴 잡기, 오른쪽 클릭으로 차체 밀기. 모터·마찰·서스펜션을 비교하고 가운데 드래그로 주행 경로를 따라갑니다.", { 4.0f, 1.0f }, 50.0f },
+    demoEntry{ demoKind::ragdoll, "연결 장치", "관절 제한 렉돌", "기존 Revolute Joint의 각도 제한만 조합한 수동 렉돌입니다. A/D·Space·S·마우스 드래그로 몸통에 힘을 주고 목·허리·어깨·팔꿈치·엉덩이·무릎의 제한이 함께 작동하는 모습을 관찰합니다.", { 0.0f, 3.5f }, 72.0f }
 };
 
 }
