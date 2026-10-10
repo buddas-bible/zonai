@@ -334,7 +334,6 @@ void rigidBodyDemo::applyMotorJointPreset( motorJointDemoPreset preset )
 }
 
 #pragma endregion Presets
-#pragma endregion Presets
 
 #pragma region Queries
 

@@ -106,7 +106,6 @@ public:
                 ImGui::TextWrapped( "Velocity Motor는 상대속도를 목표로 하고 transform spring은 두 anchor와 기준 상대각도를 복원합니다. 둘은 독립 actuator라 동시에 켤 수 있습니다." );
             }
             else if( kind == demoKind::weldPair )
-            else if( kind == demoKind::weldPair )
             {
                 if( ImGui::Button( "고정###WeldPresetRigid" ) ) view_.applyWeldPreset( weldDemoPreset::rigid );
                 ImGui::SameLine();
@@ -176,7 +175,6 @@ public:
             return;
         }
 
-        if( view_.getKind() == demoKind::weldPair && view_.getWorld().IsValid( view_.getWeldJoint() ) )
         if( view_.getKind() == demoKind::weldPair && view_.getWorld().IsValid( view_.getWeldJoint() ) )
         {
             const weldJointData joint = view_.getWorld().getWeldJointData( view_.getWeldJoint() );
@@ -308,7 +306,6 @@ private:
         ImGui::Text( "Reaction torque: %.2f N*m", joint.torque );
     }
 
-    void drawWeldInspector()
     void drawWeldInspector()
     {
         if( !ImGui::CollapsingHeader( "웰드 조인트 인스펙터###WeldJointInspector", ImGuiTreeNodeFlags_DefaultOpen ) ) return;
