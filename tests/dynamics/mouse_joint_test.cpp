@@ -96,7 +96,7 @@ int main()
     solveMouseJointConstraint( constraint, state );
     check( IsFinite( state.linearVelocity ) && state.angularVelocity == 0.0f, "singular mass remains finite" );
 
-    // Motor Joint Stage 1은 위치 오차를 없애는 대신 두 Body의 상대 속도를 목표값으로 맞춤.
+    // Motor Joint Stage 1 solver는 위치 오차를 없애는 대신 두 Body의 상대 속도를 목표값으로 맞춤.
     bodySim motorBodyA{};
     motorBodyA.bodyId = 0;
     motorBodyA.invMass = 1.0f;
