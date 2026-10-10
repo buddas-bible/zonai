@@ -58,11 +58,13 @@ int main()
     check( near( data.impulse, 0.1f ) && near( data.velocity, -0.2f ), "Pogo create accepts recreation state seed" );
     check( simulation.getJointCount() == 1 && simulation.GetBody( driven ).jointCount == 1, "Pogo shares the common joint graph" );
 
+    const float beforeCorrectionY = simulation.GetBodyTransform( driven ).position.y;
     simulation.Step( h, 1 );
     data = simulation.getPogoJointData( pogo );
-    check( simulation.GetBodyLinearVelocity( driven ).y > 0.0f, "World Pogo pushes compressed mover along contact normal" );
-    check( IsFinite( data.force ) && data.force.y > 0.0f, "Pogo reports a finite reaction force" );
-    check( std::abs( data.force.y ) <= 1000.0001f, "Pogo respects compression force limit" );
+    // 순수 위치 오차가 만든 Pogo 속도는 integration에만 쓰고 relaxation에서 제거함.
+    check( simulation.GetBodyTransform( driven ).position.y > beforeCorrectionY, "World Pogo integrates compressed position upward along the contact normal" );
+    check( near( simulation.GetBodyLinearVelocity( driven ).y, 0.0f, 0.001f ), "Pogo relaxation removes pure position-correction velocity" );
+    check( IsFinite( data.force ) && std::abs( data.force.y ) <= 1000.0001f, "Pogo reports a finite reaction within the compression limit" );
 
     // Spring 설정 변경은 내부 상태를 이어가되 연결된 component를 깨워 새 설정을 즉시 반영함.
     simulation.SetBodyAwake( driven, false );
