@@ -71,6 +71,46 @@ void rigidBodyDemo::setMotorJointAngularSpringSettings( float referenceAngle, fl
     world_.setMotorJointAngularSpring( motorJoint_, referenceAngle, hertz, dampingRatio, maxSpringTorque );
 }
 
+
+void rigidBodyDemo::setMoverJointSettings( vec2 linearVelocity, vec2 maxVelocityForce )
+{
+    if( kind_ != demoKind::moverJointPlayground || !world_.IsValid( moverJoint_ ) ) return;
+    world_.setMoverJointLinearVelocity( moverJoint_, linearVelocity );
+    world_.setMoverJointMaxVelocityForce( moverJoint_, maxVelocityForce );
+}
+
+void rigidBodyDemo::setPogoJointSettings( float restLength, float hertz, float dampingRatio, float maxTensionForce, float maxCompressionForce )
+{
+    if( kind_ != demoKind::pogoJointPlayground || !world_.IsValid( pogoJoint_ ) ) return;
+    world_.setPogoJointSpring( pogoJoint_, restLength, hertz, dampingRatio );
+    world_.setPogoJointForceLimits( pogoJoint_, maxTensionForce, maxCompressionForce );
+}
+
+void rigidBodyDemo::setFilterJointEnabled( bool enabled )
+{
+    if( kind_ != demoKind::filterJointPlayground ) return;
+
+    if( enabled )
+    {
+        if( world_.IsValid( filterJoint_ ) ) return;
+
+        filterJointDef joint{};
+        joint.bodyA = impulseBody_;
+        joint.bodyB = torqueBody_;
+        filterJoint_ = world_.createFilterJoint( joint );
+    }
+    else
+    {
+        if( !world_.IsValid( filterJoint_ ) ) return;
+
+        world_.destroyJoint( filterJoint_ );
+        filterJoint_ = {};
+    }
+
+    // Joint 생성은 기존 Contact를 즉시 제거하고, 파괴는 proxy를 touch해 같은 pair를 다시 검사함.
+    refreshContacts();
+}
+
 #pragma endregion Settings
 
 #pragma region Presets
@@ -333,6 +373,75 @@ void rigidBodyDemo::applyMotorJointPreset( motorJointDemoPreset preset )
     world_.setMotorJointAngularSpring( motorJoint_, angularSpringTarget, angularSpringHertz, springDampingRatio, angularSpringTorque );
 }
 
+
+void rigidBodyDemo::applyMoverJointPreset( moverJointDemoPreset preset )
+{
+    if( kind_ != demoKind::moverJointPlayground || !world_.IsValid( moverJoint_ ) ) return;
+
+    vec2 targetVelocity{};
+    vec2 maxForce{ 20.0f, 20.0f };
+
+    switch( preset )
+    {
+    case moverJointDemoPreset::horizontal:
+        targetVelocity = { 2.0f, 0.0f };
+        break;
+
+    case moverJointDemoPreset::vertical:
+        targetVelocity = { 0.0f, 2.0f };
+        break;
+
+    case moverJointDemoPreset::diagonal:
+        targetVelocity = { 1.5f, 1.5f };
+        break;
+
+    case moverJointDemoPreset::anisotropic:
+        targetVelocity = { 2.0f, 2.0f };
+        // 같은 속도 목표라도 x/y actuator 예산을 다르게 줘 축별 clamp를 눈으로 비교함.
+        maxForce = { 20.0f, 5.0f };
+        break;
+    }
+
+    setMoverJointSettings( targetVelocity, maxForce );
+}
+
+void rigidBodyDemo::applyPogoJointPreset( pogoJointDemoPreset preset )
+{
+    if( kind_ != demoKind::pogoJointPlayground || !world_.IsValid( pogoJoint_ ) ) return;
+
+    constexpr float restLength = 0.8f;
+    constexpr float dampingRatio = 0.7f;
+    float hertz = 2.0f;
+    float maxTensionForce = 50.0f;
+    float maxCompressionForce = 200.0f;
+
+    switch( preset )
+    {
+    case pogoJointDemoPreset::soft:
+        break;
+
+    case pogoJointDemoPreset::stiff:
+        hertz = 8.0f;
+        maxTensionForce = 100.0f;
+        maxCompressionForce = 400.0f;
+        break;
+
+    case pogoJointDemoPreset::compressionOnly:
+        hertz = 4.0f;
+        maxTensionForce = 0.0f;
+        maxCompressionForce = 300.0f;
+        break;
+
+    case pogoJointDemoPreset::asymmetric:
+        hertz = 4.0f;
+        maxTensionForce = 40.0f;
+        maxCompressionForce = 350.0f;
+        break;
+    }
+
+    setPogoJointSettings( restLength, hertz, dampingRatio, maxTensionForce, maxCompressionForce );
+}
+
 #pragma endregion Presets
 
 #pragma region Queries
@@ -397,6 +506,81 @@ void rigidBodyDemo::createWeldPair()
     torqueBody_ = bodyB;
 }
 
+
+void rigidBodyDemo::createMoverJointPlayground()
+{
+    world_.SetGravity( {} );
+
+    // Mover는 Body 위치나 anchor를 제약하지 않음. A는 상대 선속도의 기준 Body로만 사용함.
+    const bodyId reference = world_.CreateBody( bodyType::Static, { { -2.0f, 0.0f }, {} } );
+    const shapeId referenceShape = world_.CreateShape( reference, MakeBox( { 0.25f, 0.25f } ) );
+    shapes_.push_back( { reference, referenceShape, "기준 Body A [Mover]" } );
+
+    const bodyId driven = world_.CreateBody( bodyType::Dynamic, { { 0.0f, 0.0f }, {} } );
+    const shapeId drivenShape = world_.CreateShape( driven, MakeBox( { 0.55f, 0.35f } ) );
+    shapes_.push_back( { driven, drivenShape, "구동 Body B [Mover]" } );
+
+    moverJointDef joint{};
+    joint.bodyA = reference;
+    joint.bodyB = driven;
+    joint.linearVelocity = { 2.0f, 0.0f };
+    joint.maxVelocityForce = { 20.0f, 20.0f };
+    moverJoint_ = world_.createMoverJoint( joint );
+
+    impulseBody_ = driven;
+    torqueBody_ = driven;
+}
+
+void rigidBodyDemo::createFilterJointPlayground()
+{
+    world_.SetGravity( {} );
+
+    // 두 원을 겹쳐 놓아 Filter On/Off만으로 collision 차이가 즉시 보이게 함.
+    impulseBody_ = world_.CreateBody( bodyType::Dynamic, { { -0.35f, 0.0f }, {} } );
+    torqueBody_ = world_.CreateBody( bodyType::Dynamic, { { 0.35f, 0.0f }, {} } );
+
+    const shapeId shapeA = world_.CreateShape( impulseBody_, circle2{ {}, 0.6f } );
+    const shapeId shapeB = world_.CreateShape( torqueBody_, circle2{ {}, 0.6f } );
+    shapes_.push_back( { impulseBody_, shapeA, "A [Filter 대상]" } );
+    shapes_.push_back( { torqueBody_, shapeB, "B [Filter 대상]" } );
+
+    filterJointDef joint{};
+    joint.bodyA = impulseBody_;
+    joint.bodyB = torqueBody_;
+    filterJoint_ = world_.createFilterJoint( joint );
+}
+
+void rigidBodyDemo::createPogoJointPlayground()
+{
+    world_.SetGravity( { 0.0f, -9.8f } );
+
+    const bodyId ground = world_.CreateBody( bodyType::Static, { { 0.0f, -0.25f }, {} } );
+    const shapeId groundShape = world_.CreateShape( ground, MakeBox( { 3.0f, 0.25f } ) );
+    shapes_.push_back( { ground, groundShape, "지면 Body A [Pogo]" } );
+
+    const bodyId character = world_.CreateBody( bodyType::Dynamic, { { 0.0f, 0.75f }, {} } );
+    const shapeId characterShape = world_.CreateShape( character, MakeBox( { 0.4f, 0.35f } ) );
+    shapes_.push_back( { character, characterShape, "캐릭터 Body B [Pogo]" } );
+
+    pogoJointDef joint{};
+    joint.bodyA = ground;
+    joint.bodyB = character;
+    joint.localAnchorA = { 0.0f, 0.25f };
+    joint.localAnchorB = { 0.0f, -0.35f };
+    joint.localPogoAxisB = { 0.0f, 1.0f };
+    joint.normal = { 0.0f, 1.0f };
+    joint.restLength = 0.8f;
+    joint.hertz = 2.0f;
+    joint.dampingRatio = 0.7f;
+    joint.maxTensionForce = 50.0f;
+    joint.maxCompressionForce = 200.0f;
+    // 실제 character mover처럼 Pogo와 별개로 ground contact도 유지할 수 있게 함.
+    joint.collideConnected = true;
+    pogoJoint_ = world_.createPogoJoint( joint );
+
+    impulseBody_ = character;
+    torqueBody_ = character;
+}
 
 void rigidBodyDemo::createMotorJointPlayground()
 {

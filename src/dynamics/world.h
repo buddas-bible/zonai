@@ -20,9 +20,15 @@
 #include "dynamics/constants.h"
 #include "dynamics/joints/distanceJoint2.h"
 #include "dynamics/joints/distanceJointConstraint2.h"
+#include "dynamics/joints/filterJoint2.h"
+#include "dynamics/joints/filterJointConstraint2.h"
 #include "dynamics/joints/joint2.h"
 #include "dynamics/joints/motorJoint2.h"
 #include "dynamics/joints/motorJointConstraint2.h"
+#include "dynamics/joints/moverJoint2.h"
+#include "dynamics/joints/moverJointConstraint2.h"
+#include "dynamics/joints/pogoJoint2.h"
+#include "dynamics/joints/pogoJointConstraint2.h"
 #include "dynamics/joints/mouseJoint2.h"
 #include "dynamics/joints/mouseJointConstraint2.h"
 #include "dynamics/joints/prismaticJoint2.h"
@@ -104,6 +110,10 @@ public:
     // 유한한 목표 축속도와 비음수 최대 힘. 변경 시 cache를 비우고 연결된 component를 깨움.
     void setDistanceJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorForce );
 
+    // 두 Body 사이 collision만 선택적으로 차단하는 solver-less Joint. Joint graph / sleep 연결은 유지함.
+    [[nodiscard]] jointId createFilterJoint( const filterJointDef& definition );
+    [[nodiscard]] filterJointData getFilterJointData( jointId id ) const;
+
     // 두 Body의 작용점 상대 선속도와 상대 각속도를 직접 제어함. 하나 이상은 Dynamic이어야 함.
     [[nodiscard]] jointId createMotorJoint( const motorJointDef& definition );
     // 선형 목표속도 / 힘 한도 변경은 선형 cache만 비우고 연결된 non-static component를 깨움.
@@ -115,6 +125,22 @@ public:
     // 기준 상대각도와 회전 spring 설정. 변경 시 회전 spring cache만 비우고 component를 깨움.
     void setMotorJointAngularSpring( jointId id, float referenceAngle, float hertz, float dampingRatio, float maxSpringTorque );
     [[nodiscard]] motorJointData getMotorJointData( jointId id ) const;
+
+    // 두 Body의 COM 상대 선속도만 제어하며 회전은 건드리지 않음. 하나 이상은 Dynamic이어야 함.
+    [[nodiscard]] jointId createMoverJoint( const moverJointDef& definition );
+    // 목표 상대 선속도 변경은 누적 impulse를 비우고 연결된 non-static component를 깨움.
+    void setMoverJointLinearVelocity( jointId id, vec2 linearVelocity );
+    // x/y 방향별 최대 힘 변경은 누적 impulse를 비우고 연결된 non-static component를 깨움.
+    void setMoverJointMaxVelocityForce( jointId id, vec2 maxVelocityForce );
+    [[nodiscard]] moverJointData getMoverJointData( jointId id ) const;
+
+    // Pogo 축으로 spring 길이를 측정하고 contact normal 방향으로 반력을 가하는 character support Joint.
+    [[nodiscard]] jointId createPogoJoint( const pogoJointDef& definition );
+    // rest length / 주파수 / 감쇠 변경. 같은 값이면 깨우지 않음.
+    void setPogoJointSpring( jointId id, float restLength, float hertz, float dampingRatio );
+    // 인장/압축 최대 힘을 각각 설정함. 다음 Prepare에서 cached impulse도 새 한도로 제한함.
+    void setPogoJointForceLimits( jointId id, float maxTensionForce, float maxCompressionForce );
+    [[nodiscard]] pogoJointData getPogoJointData( jointId id ) const;
 
     // 두 작용점을 일치시키며 상대 회전은 허용함. 서로 다른 Body 중 하나 이상은 Dynamic이어야 함.
     [[nodiscard]] jointId createRevoluteJoint( const revoluteJointDef& definition );
@@ -514,7 +540,7 @@ private:
 
 #pragma region JointSolver
 
-    using jointConstraint = std::variant<distanceJointConstraint2, motorJointConstraint2, mouseJointConstraint2, prismaticJointConstraint2, revoluteJointConstraint2, weldJointConstraint2, wheelJointConstraint2>;
+    using jointConstraint = std::variant<distanceJointConstraint2, filterJointConstraint2, motorJointConstraint2, moverJointConstraint2, pogoJointConstraint2, mouseJointConstraint2, prismaticJointConstraint2, revoluteJointConstraint2, weldJointConstraint2, wheelJointConstraint2>;
     void warmStartJoints( std::span<jointConstraint> constraints );
     void solveJoints( std::span<jointConstraint> constraints, bool useBias );
 
@@ -603,7 +629,7 @@ private:
 
     // Joint cold / hot 데이터는 동일한 stable slot과 free-list를 공유함.
     std::vector<joint2> joints_;
-    std::vector<std::variant<distanceJointSim2, motorJointSim2, mouseJointSim2, prismaticJointSim2, revoluteJointSim2, weldJointSim2, wheelJointSim2>> jointSims_;
+    std::vector<std::variant<distanceJointSim2, filterJointSim2, motorJointSim2, moverJointSim2, pogoJointSim2, mouseJointSim2, prismaticJointSim2, revoluteJointSim2, weldJointSim2, wheelJointSim2>> jointSims_;
     std::int32_t jointFreeList_ = -1;
     std::size_t jointCount_ = 0;
 
