@@ -73,9 +73,72 @@ void warmStartMotorJointConstraint( const motorJointConstraint2& constraint, bod
 
 void solveMotorJointConstraint( motorJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB )
 {
-    // 회전 motor는 Cdot = wB - wA - targetAngularVelocity를 0으로 만듦.
+    const vec2 r_a = Rotate( bodyStateA.deltaRotation, constraint.anchorA );
+    const vec2 r_b = Rotate( bodyStateB.deltaRotation, constraint.anchorB );
     const float angularK = constraint.invInertiaA + constraint.invInertiaB;
-    if( constraint.maxAngularImpulse > 0.0f && angularK > 0.0f )
+    const bool solveLinear = constraint.maxLinearImpulse > 0.0f;
+    const bool solveAngular = constraint.maxAngularImpulse > 0.0f && angularK > 0.0f;
+
+    if( solveLinear && solveAngular )
+    {
+        const vec2 pointVelocityA = bodyStateA.linearVelocity + Cross( bodyStateA.angularVelocity, r_a );
+        const vec2 pointVelocityB = bodyStateB.linearVelocity + Cross( bodyStateB.angularVelocity, r_b );
+        const vec2 linearError = pointVelocityB - pointVelocityA - constraint.linearVelocity;
+        const float angularError = bodyStateB.angularVelocity - bodyStateA.angularVelocity - constraint.angularVelocity;
+
+        /*
+        * COM 밖의 anchor에서는 linear impulse가 r x P만큼 각속도도 바꾸므로 linear / angular Motor는 독립 제약이 아님.
+        * 두 채널을 순서대로 풀면 뒤에서 적용한 linear impulse가 앞서 맞춘 angular target을 다시 깨뜨릴 수 있음.
+        * 그래서 [Px, Py, L]을 하나의 3x3 block으로 풀어 같은 순간의 세 velocity error를 함께 제거함.
+        */
+        const float k11 = constraint.invMassA + constraint.invMassB + constraint.invInertiaA * r_a.y * r_a.y + constraint.invInertiaB * r_b.y * r_b.y;
+        const float k12 = -constraint.invInertiaA * r_a.x * r_a.y - constraint.invInertiaB * r_b.x * r_b.y;
+        const float k22 = constraint.invMassA + constraint.invMassB + constraint.invInertiaA * r_a.x * r_a.x + constraint.invInertiaB * r_b.x * r_b.x;
+        const float k13 = -constraint.invInertiaA * r_a.y - constraint.invInertiaB * r_b.y;
+        const float k23 = constraint.invInertiaA * r_a.x + constraint.invInertiaB * r_b.x;
+        const float k33 = angularK;
+
+        const float cofactor11 = k22 * k33 - k23 * k23;
+        const float cofactor12 = k13 * k23 - k12 * k33;
+        const float cofactor13 = k12 * k23 - k13 * k22;
+        const float cofactor22 = k11 * k33 - k13 * k13;
+        const float cofactor23 = k12 * k13 - k11 * k23;
+        const float cofactor33 = k11 * k22 - k12 * k12;
+        const float determinant = k11 * cofactor11 + k12 * cofactor12 + k13 * cofactor13;
+
+        if( determinant > 0.0f )
+        {
+            const float invDet = 1.0f / determinant;
+            const vec2 deltaLinearImpulse{
+                -invDet * ( cofactor11 * linearError.x + cofactor12 * linearError.y + cofactor13 * angularError ),
+                -invDet * ( cofactor12 * linearError.x + cofactor22 * linearError.y + cofactor23 * angularError )
+            };
+            const float deltaAngularImpulse = -invDet * ( cofactor13 * linearError.x + cofactor23 * linearError.y + cofactor33 * angularError );
+
+            const vec2 oldLinearImpulse = constraint.linearVelocityImpulse;
+            const float oldAngularImpulse = constraint.angularVelocityImpulse;
+            constraint.linearVelocityImpulse += deltaLinearImpulse;
+            constraint.angularVelocityImpulse += deltaAngularImpulse;
+
+            // 힘과 토크 한도는 서로 다른 actuator 예산이므로 누적 impulse도 각각의 한도로 제한함.
+            if( Length( constraint.linearVelocityImpulse ) > constraint.maxLinearImpulse )
+            {
+                constraint.linearVelocityImpulse = constraint.maxLinearImpulse * Normalize( constraint.linearVelocityImpulse );
+            }
+            constraint.angularVelocityImpulse = std::clamp( constraint.angularVelocityImpulse, -constraint.maxAngularImpulse, constraint.maxAngularImpulse );
+
+            const vec2 linearImpulse = constraint.linearVelocityImpulse - oldLinearImpulse;
+            const float angularImpulse = constraint.angularVelocityImpulse - oldAngularImpulse;
+            bodyStateA.linearVelocity -= constraint.invMassA * linearImpulse;
+            bodyStateA.angularVelocity -= constraint.invInertiaA * ( Cross( r_a, linearImpulse ) + angularImpulse );
+            bodyStateB.linearVelocity += constraint.invMassB * linearImpulse;
+            bodyStateB.angularVelocity += constraint.invInertiaB * ( Cross( r_b, linearImpulse ) + angularImpulse );
+            return;
+        }
+    }
+
+    // 한 채널만 활성화됐거나 3x3 block이 singular하면 풀 수 있는 제약을 독립 경로로 처리함.
+    if( solveAngular )
     {
         const float angularMass = 1.0f / angularK;
         const float velocityError = bodyStateB.angularVelocity - bodyStateA.angularVelocity - constraint.angularVelocity;
@@ -88,19 +151,15 @@ void solveMotorJointConstraint( motorJointConstraint2& constraint, bodyState& bo
         bodyStateB.angularVelocity += constraint.invInertiaB * impulse;
     }
 
-    // 현재 누적 회전을 반영한 작용점에서 상대속도를 구함.
-    const vec2 r_a = Rotate( bodyStateA.deltaRotation, constraint.anchorA );
-    const vec2 r_b = Rotate( bodyStateB.deltaRotation, constraint.anchorB );
-    const vec2 pointVelocityA = bodyStateA.linearVelocity + Cross( bodyStateA.angularVelocity, r_a );
-    const vec2 pointVelocityB = bodyStateB.linearVelocity + Cross( bodyStateB.angularVelocity, r_b );
-    const vec2 velocityError = pointVelocityB - pointVelocityA - constraint.linearVelocity;
-
-    if( constraint.maxLinearImpulse > 0.0f )
+    if( solveLinear )
     {
+        const vec2 pointVelocityA = bodyStateA.linearVelocity + Cross( bodyStateA.angularVelocity, r_a );
+        const vec2 pointVelocityB = bodyStateB.linearVelocity + Cross( bodyStateB.angularVelocity, r_b );
+        const vec2 velocityError = pointVelocityB - pointVelocityA - constraint.linearVelocity;
+
         /*
-        * 작용점이 COM 밖에 있으면 선형 impulse가 회전도 만들기 때문에 x/y를 2x2 block으로 함께 풂.
+        * linear Motor만 풀 때도 작용점이 COM 밖에 있으면 x/y impulse가 회전과 결합되므로 2x2 block으로 함께 풂.
         * K = J M^-1 J^T, delta P = -inverse(K) * Cdot.
-        * 이 제약은 목표 속도 자체가 물리 효과이므로 position bias나 relaxation용 임시 속도를 사용하지 않음.
         */
         const float k11 = constraint.invMassA + constraint.invMassB + constraint.invInertiaA * r_a.y * r_a.y + constraint.invInertiaB * r_b.y * r_b.y;
         const float k12 = -constraint.invInertiaA * r_a.x * r_a.y - constraint.invInertiaB * r_b.x * r_b.y;
