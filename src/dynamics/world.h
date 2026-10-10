@@ -21,6 +21,8 @@
 #include "dynamics/joints/distanceJoint2.h"
 #include "dynamics/joints/distanceJointConstraint2.h"
 #include "dynamics/joints/joint2.h"
+#include "dynamics/joints/motorJoint2.h"
+#include "dynamics/joints/motorJointConstraint2.h"
 #include "dynamics/joints/mouseJoint2.h"
 #include "dynamics/joints/mouseJointConstraint2.h"
 #include "dynamics/joints/prismaticJoint2.h"
@@ -101,6 +103,14 @@ public:
 
     // 유한한 목표 축속도와 비음수 최대 힘. 변경 시 cache를 비우고 연결된 component를 깨움.
     void setDistanceJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorForce );
+
+    // 두 Body의 작용점 상대 선속도와 상대 각속도를 직접 제어함. 하나 이상은 Dynamic이어야 함.
+    [[nodiscard]] jointId createMotorJoint( const motorJointDef& definition );
+    // 선형 목표속도 / 힘 한도 변경은 선형 cache만 비우고 연결된 non-static component를 깨움.
+    void setMotorJointLinearVelocity( jointId id, vec2 linearVelocity, float maxVelocityForce );
+    // 회전 목표속도 / 토크 한도 변경은 회전 cache만 비우고 연결된 non-static component를 깨움.
+    void setMotorJointAngularVelocity( jointId id, float angularVelocity, float maxVelocityTorque );
+    [[nodiscard]] motorJointData getMotorJointData( jointId id ) const;
 
     // 두 작용점을 일치시키며 상대 회전은 허용함. 서로 다른 Body 중 하나 이상은 Dynamic이어야 함.
     [[nodiscard]] jointId createRevoluteJoint( const revoluteJointDef& definition );
@@ -500,7 +510,7 @@ private:
 
 #pragma region JointSolver
 
-    using jointConstraint = std::variant<distanceJointConstraint2, mouseJointConstraint2, prismaticJointConstraint2, revoluteJointConstraint2, weldJointConstraint2, wheelJointConstraint2>;
+    using jointConstraint = std::variant<distanceJointConstraint2, motorJointConstraint2, mouseJointConstraint2, prismaticJointConstraint2, revoluteJointConstraint2, weldJointConstraint2, wheelJointConstraint2>;
     void warmStartJoints( std::span<jointConstraint> constraints );
     void solveJoints( std::span<jointConstraint> constraints, bool useBias );
 
@@ -589,7 +599,7 @@ private:
 
     // Joint cold / hot 데이터는 동일한 stable slot과 free-list를 공유함.
     std::vector<joint2> joints_;
-    std::vector<std::variant<distanceJointSim2, mouseJointSim2, prismaticJointSim2, revoluteJointSim2, weldJointSim2, wheelJointSim2>> jointSims_;
+    std::vector<std::variant<distanceJointSim2, motorJointSim2, mouseJointSim2, prismaticJointSim2, revoluteJointSim2, weldJointSim2, wheelJointSim2>> jointSims_;
     std::int32_t jointFreeList_ = -1;
     std::size_t jointCount_ = 0;
 
