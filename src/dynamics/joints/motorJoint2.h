@@ -17,7 +17,7 @@ struct motorJointDef
     vec2 localAnchorA{};
     vec2 localAnchorB{};
 
-    // B 작용점이 A 작용점에 대해 가져야 하는 목표 상대 선속도와 최대 힘.
+    // World 좌표계에서 B 작용점이 A 작용점에 대해 가져야 하는 목표 상대 선속도와 최대 힘.
     // 목표속도 0 + 유한한 힘은 위치를 잠그는 것이 아니라 선형 brake / friction처럼 동작함.
     vec2 linearVelocity{};
     float maxVelocityForce = 0.0f;
@@ -41,6 +41,7 @@ struct motorJointData
     vec2 anchorA{};
     vec2 anchorB{};
 
+    // linearVelocity는 생성/설정 때와 같은 World 좌표계의 목표 상대속도임.
     vec2 linearVelocity{};
     float maxVelocityForce = 0.0f;
     float angularVelocity = 0.0f;
