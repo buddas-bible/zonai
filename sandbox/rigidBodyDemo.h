@@ -84,6 +84,15 @@ enum class moverJointDemoPreset
     anisotropic
 };
 
+// Pogo의 spring 응답과 인장/압축 force budget 차이를 빠르게 비교하는 설정.
+enum class pogoJointDemoPreset
+{
+    soft,
+    stiff,
+    compressionOnly,
+    asymmetric
+};
+
 class rigidBodyDemo : public demo
 {
 public:
@@ -112,6 +121,7 @@ public:
     void setMotorJointLinearSpringSettings( float hertz, float dampingRatio, float maxSpringForce );
     void setMotorJointAngularSpringSettings( float referenceAngle, float hertz, float dampingRatio, float maxSpringTorque );
     void setMoverJointSettings( vec2 linearVelocity, vec2 maxVelocityForce );
+    void setPogoJointSettings( float restLength, float hertz, float dampingRatio, float maxTensionForce, float maxCompressionForce );
     void applyDistancePreset( distanceDemoPreset preset );
     void applyRevolutePreset( revoluteDemoPreset preset );
     void applyWheelPreset( wheelDemoPreset preset );
@@ -119,6 +129,7 @@ public:
     void applyWeldPreset( weldDemoPreset preset );
     void applyMotorJointPreset( motorJointDemoPreset preset );
     void applyMoverJointPreset( moverJointDemoPreset preset );
+    void applyPogoJointPreset( pogoJointDemoPreset preset );
 #pragma endregion Settings
 
 #pragma region Contacts
@@ -157,6 +168,8 @@ public:
 
     [[nodiscard]] jointId getMoverJoint() const noexcept { return moverJoint_; }
 
+    [[nodiscard]] jointId getPogoJoint() const noexcept { return pogoJoint_; }
+
     [[nodiscard]] float getPrismaticCurrentSpeed() const;
 
     [[nodiscard]] std::span<const jointId> getCarJoints() const noexcept { return carJoints_; }
@@ -182,6 +195,7 @@ private:
     void createMouseJointPlayground();
     void createMotorJointPlayground();
     void createMoverJointPlayground();
+    void createPogoJointPlayground();
     void createMotorCar();
 #pragma endregion SceneSetup
 
@@ -209,6 +223,7 @@ private:
     jointId weldJoint_{};
     jointId motorJoint_{}; // Motor Joint 전용 학습 데모에서 사용하는 persistent handle.
     jointId moverJoint_{}; // Mover Joint 전용 학습 데모의 persistent handle.
+    jointId pogoJoint_{}; // Pogo Joint 전용 학습 데모의 persistent handle.
     std::array<jointId, 2> carJoints_{};
     float carMotorSpeed_ = 8.0f; // 주행 목표의 크기 (rad/s). 방향은 A/D 입력이 결정함.
     float carMaxMotorTorque_ = 5.0f; // 주행과 제동의 토크 한도 (N*m).

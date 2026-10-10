@@ -79,6 +79,13 @@ void rigidBodyDemo::setMoverJointSettings( vec2 linearVelocity, vec2 maxVelocity
     world_.setMoverJointMaxVelocityForce( moverJoint_, maxVelocityForce );
 }
 
+void rigidBodyDemo::setPogoJointSettings( float restLength, float hertz, float dampingRatio, float maxTensionForce, float maxCompressionForce )
+{
+    if( kind_ != demoKind::pogoJointPlayground || !world_.IsValid( pogoJoint_ ) ) return;
+    world_.setPogoJointSpring( pogoJoint_, restLength, hertz, dampingRatio );
+    world_.setPogoJointForceLimits( pogoJoint_, maxTensionForce, maxCompressionForce );
+}
+
 #pragma endregion Settings
 
 #pragma region Presets
@@ -373,6 +380,43 @@ void rigidBodyDemo::applyMoverJointPreset( moverJointDemoPreset preset )
     setMoverJointSettings( targetVelocity, maxForce );
 }
 
+void rigidBodyDemo::applyPogoJointPreset( pogoJointDemoPreset preset )
+{
+    if( kind_ != demoKind::pogoJointPlayground || !world_.IsValid( pogoJoint_ ) ) return;
+
+    constexpr float restLength = 0.8f;
+    constexpr float dampingRatio = 0.7f;
+    float hertz = 2.0f;
+    float maxTensionForce = 50.0f;
+    float maxCompressionForce = 200.0f;
+
+    switch( preset )
+    {
+    case pogoJointDemoPreset::soft:
+        break;
+
+    case pogoJointDemoPreset::stiff:
+        hertz = 8.0f;
+        maxTensionForce = 100.0f;
+        maxCompressionForce = 400.0f;
+        break;
+
+    case pogoJointDemoPreset::compressionOnly:
+        hertz = 4.0f;
+        maxTensionForce = 0.0f;
+        maxCompressionForce = 300.0f;
+        break;
+
+    case pogoJointDemoPreset::asymmetric:
+        hertz = 4.0f;
+        maxTensionForce = 40.0f;
+        maxCompressionForce = 350.0f;
+        break;
+    }
+
+    setPogoJointSettings( restLength, hertz, dampingRatio, maxTensionForce, maxCompressionForce );
+}
+
 #pragma endregion Presets
 
 #pragma region Queries
@@ -460,6 +504,38 @@ void rigidBodyDemo::createMoverJointPlayground()
 
     impulseBody_ = driven;
     torqueBody_ = driven;
+}
+
+void rigidBodyDemo::createPogoJointPlayground()
+{
+    world_.SetGravity( { 0.0f, -9.8f } );
+
+    const bodyId ground = world_.CreateBody( bodyType::Static, { { 0.0f, -0.25f }, {} } );
+    const shapeId groundShape = world_.CreateShape( ground, MakeBox( { 3.0f, 0.25f } ) );
+    shapes_.push_back( { ground, groundShape, "지면 Body A [Pogo]" } );
+
+    const bodyId character = world_.CreateBody( bodyType::Dynamic, { { 0.0f, 0.75f }, {} } );
+    const shapeId characterShape = world_.CreateShape( character, MakeBox( { 0.4f, 0.35f } ) );
+    shapes_.push_back( { character, characterShape, "캐릭터 Body B [Pogo]" } );
+
+    pogoJointDef joint{};
+    joint.bodyA = ground;
+    joint.bodyB = character;
+    joint.localAnchorA = { 0.0f, 0.25f };
+    joint.localAnchorB = { 0.0f, -0.35f };
+    joint.localPogoAxisB = { 0.0f, 1.0f };
+    joint.normal = { 0.0f, 1.0f };
+    joint.restLength = 0.8f;
+    joint.hertz = 2.0f;
+    joint.dampingRatio = 0.7f;
+    joint.maxTensionForce = 50.0f;
+    joint.maxCompressionForce = 200.0f;
+    // 실제 character mover처럼 Pogo와 별개로 ground contact도 유지할 수 있게 함.
+    joint.collideConnected = true;
+    pogoJoint_ = world_.createPogoJoint( joint );
+
+    impulseBody_ = character;
+    torqueBody_ = character;
 }
 
 void rigidBodyDemo::createMotorJointPlayground()
