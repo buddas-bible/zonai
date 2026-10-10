@@ -1,0 +1,73 @@
+name: Pogo Axis RED
+
+on:
+  push:
+    branches:
+      - feature/pogo-joint
+    paths:
+      - ".github/workflows/pogo-axis-red.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  red:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/pogo-joint
+          fetch-depth: 0
+
+      - name: Install CMake 4.2
+        run: python3 -m pip install "cmake>=4.2,<4.3"
+
+      - name: Add prepared-axis regression
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("tests/dynamics/pogo_joint_test.cpp")
+          text = path.read_text(encoding="utf-8")
+          marker = "    return EXIT_SUCCESS;\n}"
+          block = r'''    // Box2D Pogo는 한 substep 동안 Prepare 시점의 pogo 축을 고정함.
+    // Body B의 deltaRotation은 anchor lever arm에는 반영하지만 길이 측정축에는 다시 곱하지 않음.
+    {
+        pogoJointSim2 joint = makePogo();
+        joint.localAnchorB = {};
+        joint.restLength = 0.0f;
+        auto constraint = preparePogoJointConstraint( joint, bodyA, bodyB, h );
+        bodyState stateA{};
+        bodyState stateB{};
+        stateB.deltaPosition = { 0.0f, 1.0f };
+        stateB.deltaRotation = rot2::FromRadians( 0.5f * 3.14159265358979323846f );
+
+        solvePogoJointConstraint( constraint, stateA, stateB, true );
+        check( stateB.linearVelocity.y < 0.0f, "Pogo keeps the prepared measurement axis fixed within the substep" );
+    }
+
+'''
+          if text.count(marker) != 1:
+              raise RuntimeError("Pogo test insertion marker missing")
+          path.write_text(text.replace(marker, block + marker, 1), encoding="utf-8")
+          PY
+
+      - name: Confirm RED
+        shell: bash
+        run: |
+          cmake -S . -B build -DZONAI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build --target pogoJointTests --parallel 2
+          if ctest --test-dir build -R '^pogoJointTests$' --output-on-failure; then
+            echo "Expected prepared-axis regression to fail before the fix"
+            exit 1
+          fi
+          echo "RED confirmed: current solver rotates the prepared pogo axis by deltaRotation"
+
+      - name: Commit regression test
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/dynamics/pogo_joint_test.cpp
+          git commit -m "test: keep Pogo measurement axis fixed per substep"
+          git push origin HEAD:feature/pogo-joint
