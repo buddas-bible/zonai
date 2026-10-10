@@ -517,6 +517,10 @@ add_executable(moverJointTests dynamics/mover_joint_test.cpp)
 target_link_libraries(moverJointTests PRIVATE zonai::zonai)
 add_test(NAME moverJointTests COMMAND moverJointTests)
 
+add_executable(moverJointWorldTests dynamics/mover_joint_world_test.cpp)
+target_link_libraries(moverJointWorldTests PRIVATE zonai::zonai)
+add_test(NAME moverJointWorldTests COMMAND moverJointWorldTests)
+
 add_executable(mouseJointTests dynamics/mouse_joint_test.cpp)
 target_link_libraries(mouseJointTests PRIVATE zonai::zonai)
 add_test(NAME mouseJointTests COMMAND mouseJointTests)
