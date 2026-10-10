@@ -36,6 +36,7 @@ int main()
     filter.step( 1.0f / 60.0f, 1 );
     check( filter.getWorld().GetContactCount() == 0, "enabled Filter prevents the overlapping demo bodies from contacting" );
 
+    // Off/On은 setting mutation이 아니라 같은 두 Body를 잇는 Joint의 destroy/create lifecycle을 직접 보여줌.
     filter.setFilterJointEnabled( false );
     check( filter.getWorld().getJointCount() == 0 && !filter.getWorld().IsValid( filter.getFilterJoint() ), "Filter Off destroys the solver-less Joint" );
     filter.step( 1.0f / 60.0f, 1 );
