@@ -31,7 +31,7 @@ bool near( float a, float b )
 int main()
 {
     // Scene registration부터 preset/runtime response까지 하나의 학습용 Pogo playground 계약으로 확인함.
-    check( getDemoEntries().size() == 11, "Pogo Joint demo is independently selectable" );
+    check( getDemoEntries().size() == 12, "Pogo Joint demo is independently selectable" );
     check( std::string_view{ getDemoEntry( demoKind::pogoJointPlayground ).category } == "조인트", "Pogo Joint demo stays in joint category" );
 
     rigidBodyDemo pogo{ demoKind::pogoJointPlayground };

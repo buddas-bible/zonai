@@ -529,6 +529,14 @@ add_executable(pogoJointWorldTests dynamics/pogo_joint_world_test.cpp)
 target_link_libraries(pogoJointWorldTests PRIVATE zonai::zonai)
 add_test(NAME pogoJointWorldTests COMMAND pogoJointWorldTests)
 
+add_executable(filterJointTests dynamics/filter_joint_test.cpp)
+target_link_libraries(filterJointTests PRIVATE zonai::zonai)
+add_test(NAME filterJointTests COMMAND filterJointTests)
+
+add_executable(filterJointWorldTests dynamics/filter_joint_world_test.cpp)
+target_link_libraries(filterJointWorldTests PRIVATE zonai::zonai)
+add_test(NAME filterJointWorldTests COMMAND filterJointWorldTests)
+
 add_executable(mouseJointTests dynamics/mouse_joint_test.cpp)
 target_link_libraries(mouseJointTests PRIVATE zonai::zonai)
 add_test(NAME mouseJointTests COMMAND mouseJointTests)
@@ -619,6 +627,11 @@ add_executable(sandboxPogoJointDemoTests sandbox/pogo_joint_demo_test.cpp "${PRO
 target_include_directories(sandboxPogoJointDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxPogoJointDemoTests PRIVATE zonai::zonai)
 add_test(NAME sandboxPogoJointDemoTests COMMAND sandboxPogoJointDemoTests)
+
+add_executable(sandboxFilterJointDemoTests sandbox/filter_joint_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
+target_include_directories(sandboxFilterJointDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+target_link_libraries(sandboxFilterJointDemoTests PRIVATE zonai::zonai)
+add_test(NAME sandboxFilterJointDemoTests COMMAND sandboxFilterJointDemoTests)
 
 add_executable(sandboxMotorJointDemoTests sandbox/motor_joint_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
 target_include_directories(sandboxMotorJointDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")

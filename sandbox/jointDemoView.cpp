@@ -29,7 +29,7 @@ public:
         view_.drawControls();
 
         const demoKind kind = view_.getKind();
-        if( kind != demoKind::distancePendulum && kind != demoKind::revoluteHinge && kind != demoKind::wheelSuspension && kind != demoKind::prismaticRail && kind != demoKind::weldPair && kind != demoKind::mouseJointPlayground && kind != demoKind::motorJointPlayground && kind != demoKind::moverJointPlayground && kind != demoKind::pogoJointPlayground ) return;
+        if( kind != demoKind::distancePendulum && kind != demoKind::revoluteHinge && kind != demoKind::wheelSuspension && kind != demoKind::prismaticRail && kind != demoKind::weldPair && kind != demoKind::mouseJointPlayground && kind != demoKind::motorJointPlayground && kind != demoKind::moverJointPlayground && kind != demoKind::pogoJointPlayground && kind != demoKind::filterJointPlayground ) return;
 
         if( ImGui::CollapsingHeader( "조인트 빠른 설정###JointQuickSettings", ImGuiTreeNodeFlags_DefaultOpen ) )
         {
@@ -116,6 +116,13 @@ public:
                 if( ImGui::Button( "축별 힘###MoverPresetAnisotropic" ) ) view_.applyMoverJointPreset( moverJointDemoPreset::anisotropic );
                 ImGui::TextWrapped( "Mover는 COM 상대 선속도만 제어합니다. x/y 최대 힘을 따로 제한할 수 있고 회전은 전혀 건드리지 않습니다." );
             }
+            else if( kind == demoKind::filterJointPlayground )
+            {
+                bool enabled = view_.getWorld().IsValid( view_.getFilterJoint() );
+                if( ImGui::Checkbox( "Filter Enabled###FilterJointEnabled", &enabled ) ) view_.setFilterJointEnabled( enabled );
+                ImGui::TextWrapped( "Filter는 solver 힘을 만들지 않고 이 두 Body 사이 Contact만 차단합니다. Off는 Joint를 파괴해 같은 pair의 collision을 다시 허용합니다." );
+                ImGui::Text( "Contacts: %zu", view_.getWorld().GetContactCount() );
+            }
             else if( kind == demoKind::pogoJointPlayground )
             {
                 if( ImGui::Button( "Soft###PogoPresetSoft" ) ) view_.applyPogoJointPreset( pogoJointDemoPreset::soft );
@@ -178,6 +185,22 @@ public:
     void draw( debugDraw& draw ) const override
     {
         view_.draw( draw );
+        if( view_.getKind() == demoKind::filterJointPlayground )
+        {
+            if( view_.getWorld().IsValid( view_.getFilterJoint() ) )
+            {
+                const filterJointData joint = view_.getWorld().getFilterJointData( view_.getFilterJoint() );
+                const vec2 centerA = TransformPoint( view_.getWorld().GetBodyTransform( joint.bodyA ), view_.getWorld().GetBodyLocalCenter( joint.bodyA ) );
+                const vec2 centerB = TransformPoint( view_.getWorld().GetBodyTransform( joint.bodyB ), view_.getWorld().GetBodyLocalCenter( joint.bodyB ) );
+                constexpr ImU32 BODY_COLOR = IM_COL32( 100, 235, 220, 255 );
+                constexpr ImU32 FILTER_COLOR = IM_COL32( 255, 190, 70, 255 );
+                draw.DrawPoint( centerA, BODY_COLOR, 6.0f );
+                draw.DrawPoint( centerB, BODY_COLOR, 6.0f );
+                draw.DrawSegment( { centerA, centerB }, FILTER_COLOR, 2.0f );
+            }
+            return;
+        }
+
         if( view_.getKind() == demoKind::motorJointPlayground && view_.getWorld().IsValid( view_.getMotorJoint() ) )
         {
             const motorJointData joint = view_.getWorld().getMotorJointData( view_.getMotorJoint() );

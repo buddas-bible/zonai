@@ -131,5 +131,28 @@ int main()
     world foreign;
     check( !foreign.IsValid( colliding ), "foreign World rejects Mover handle" );
 
+    for( const int subStepCount : { 1, 4 } )
+    {
+        world capped;
+        capped.SetGravity( {} );
+        capped.SetMaximumLinearSpeed( 5.0f );
+        const bodyId fixed = capped.CreateBody();
+        const bodyId moving = capped.CreateBody( bodyType::Dynamic );
+        ( void )capped.CreateShape( moving, circle2{ {}, 0.5f } );
+        moverJointDef fastMover{};
+        fastMover.bodyA = fixed;
+        fastMover.bodyB = moving;
+        fastMover.linearVelocity = { 100.0f, 20.0f };
+        fastMover.maxVelocityForce = { 100000.0f, 100000.0f };
+        ( void )capped.createMoverJoint( fastMover );
+        for( int step = 0; step < 2; ++step )
+        {
+            capped.Step( 1.0f / 60.0f, subStepCount );
+            const vec2 cappedVelocity = capped.GetBodyLinearVelocity( moving );
+            check( near( Length( cappedVelocity ), 5.0f ), "Mover respects the World speed cap after relaxation and warm start" );
+            check( cappedVelocity.x > 0.0f && near( cappedVelocity.y / cappedVelocity.x, 0.2f ), "speed cap preserves the Mover target direction" );
+        }
+    }
+
     return EXIT_SUCCESS;
 }

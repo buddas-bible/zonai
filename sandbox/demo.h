@@ -24,6 +24,7 @@ enum class demoKind
     motorJointPlayground,
     moverJointPlayground,
     pogoJointPlayground,
+    filterJointPlayground,
     motorCar
 };
 
