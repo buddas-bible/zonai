@@ -34,6 +34,7 @@ struct pogoJointDef
     float impulse = 0.0f;
     float velocity = 0.0f;
 
+    // character support에서는 실제 ground contact도 함께 유지해야 하므로 필요할 때 true로 명시함.
     bool collideConnected = false;
 };
 
