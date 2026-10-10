@@ -34,7 +34,7 @@ int main()
     world simulation;
     simulation.SetGravity( {} );
     const bodyId ground = simulation.CreateBody();
-    const bodyId driven = simulation.CreateBody( bodyType::Dynamic, { { 2.0f, 0.0f }, rot2::FromRadians( 0.5f ) } } );
+    const bodyId driven = simulation.CreateBody( bodyType::Dynamic, { { 2.0f, 0.0f }, rot2::FromRadians( 0.5f ) } );
     ( void )simulation.CreateShape( driven, MakeBox( { 0.5f, 0.5f } ) );
 
     motorJointDef definition{};
