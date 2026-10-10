@@ -1,152 +1,297 @@
 from pathlib import Path
 
-cmake_path = Path("tests/CMakeLists.txt")
-cmake = cmake_path.read_text(encoding="utf-8")
-marker = "add_executable(mouseJointTests dynamics/mouse_joint_test.cpp)\n"
-block = (
-    "add_executable(moverJointWorldTests dynamics/mover_joint_world_test.cpp)\n"
-    "target_link_libraries(moverJointWorldTests PRIVATE zonai::zonai)\n"
-    "add_test(NAME moverJointWorldTests COMMAND moverJointWorldTests)\n\n"
+
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    if new in text:
+        return text
+    if old not in text:
+        raise RuntimeError(f"{label} marker not found")
+    return text.replace(old, new, 1)
+
+
+Path("src/dynamics/joints/moverJoint2.h").write_text(r'''#pragma once
+
+#include "dynamics/id.h"
+#include "math/vec2.h"
+
+namespace zonai
+{
+
+// Mover Joint 생성 시 World에 전달하는 입력 설정.
+// 두 Body의 COM 상대 선속도만 제어하며 회전에는 어떤 제약이나 torque도 만들지 않음.
+struct moverJointDef
+{
+    bodyId bodyA{};
+    bodyId bodyB{};
+
+    // World 좌표계에서 B가 A에 대해 가져야 하는 목표 상대 선속도.
+    vec2 linearVelocity{};
+
+    // x/y 방향별 최대 구동 힘. 서로 독립적으로 제한해서 축마다 다른 가속 능력을 줄 수 있음.
+    vec2 maxVelocityForce{};
+
+    bool collideConnected = false;
+};
+
+// getMoverJointData()가 반환하는 현재 Mover Joint 상태 snapshot.
+struct moverJointData
+{
+    bodyId bodyA{};
+    bodyId bodyB{};
+    vec2 linearVelocity{};
+    vec2 maxVelocityForce{};
+
+    // 마지막 substep의 누적 impulse / h. Body B에 작용한 Mover의 실제 force임.
+    vec2 force{};
+
+    bool collideConnected = false;
+};
+
+} // namespace zonai
+''', encoding="utf-8")
+
+world_h_path = Path("src/dynamics/world.h")
+world_h = world_h_path.read_text(encoding="utf-8")
+world_h = replace_once(
+    world_h,
+    '#include "dynamics/joints/motorJointConstraint2.h"\n',
+    '#include "dynamics/joints/motorJointConstraint2.h"\n#include "dynamics/joints/moverJoint2.h"\n#include "dynamics/joints/moverJointConstraint2.h"\n',
+    "world.h Mover includes",
 )
-if block not in cmake:
-    if marker not in cmake:
-        raise RuntimeError("CMake insertion marker not found")
-    cmake = cmake.replace(marker, block + marker, 1)
-    cmake_path.write_text(cmake, encoding="utf-8")
+world_h = replace_once(
+    world_h,
+    '    [[nodiscard]] motorJointData getMotorJointData( jointId id ) const;\n\n    // 두 작용점을 일치시키며 상대 회전은 허용함. 서로 다른 Body 중 하나 이상은 Dynamic이어야 함.\n',
+    '    [[nodiscard]] motorJointData getMotorJointData( jointId id ) const;\n\n'
+    '    // 두 Body의 COM 상대 선속도만 제어하며 회전은 건드리지 않음. 하나 이상은 Dynamic이어야 함.\n'
+    '    [[nodiscard]] jointId createMoverJoint( const moverJointDef& definition );\n'
+    '    // 목표 상대 선속도 변경은 누적 impulse를 비우고 연결된 non-static component를 깨움.\n'
+    '    void setMoverJointLinearVelocity( jointId id, vec2 linearVelocity );\n'
+    '    // x/y 방향별 최대 힘 변경은 누적 impulse를 비우고 연결된 non-static component를 깨움.\n'
+    '    void setMoverJointMaxVelocityForce( jointId id, vec2 maxVelocityForce );\n'
+    '    [[nodiscard]] moverJointData getMoverJointData( jointId id ) const;\n\n'
+    '    // 두 작용점을 일치시키며 상대 회전은 허용함. 서로 다른 Body 중 하나 이상은 Dynamic이어야 함.\n',
+    "world.h Mover API",
+)
+world_h = replace_once(
+    world_h,
+    '    using jointConstraint = std::variant<distanceJointConstraint2, motorJointConstraint2, mouseJointConstraint2, prismaticJointConstraint2, revoluteJointConstraint2, weldJointConstraint2, wheelJointConstraint2>;\n',
+    '    using jointConstraint = std::variant<distanceJointConstraint2, motorJointConstraint2, moverJointConstraint2, mouseJointConstraint2, prismaticJointConstraint2, revoluteJointConstraint2, weldJointConstraint2, wheelJointConstraint2>;\n',
+    "world.h constraint variant",
+)
+world_h = replace_once(
+    world_h,
+    '    std::vector<std::variant<distanceJointSim2, motorJointSim2, mouseJointSim2, prismaticJointSim2, revoluteJointSim2, weldJointSim2, wheelJointSim2>> jointSims_;\n',
+    '    std::vector<std::variant<distanceJointSim2, motorJointSim2, moverJointSim2, mouseJointSim2, prismaticJointSim2, revoluteJointSim2, weldJointSim2, wheelJointSim2>> jointSims_;\n',
+    "world.h sim variant",
+)
+world_h_path.write_text(world_h, encoding="utf-8")
 
-Path("tests/dynamics/mover_joint_world_test.cpp").write_text(r'''#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include "dynamics/world.h"
+world_cpp_path = Path("src/dynamics/world.cpp")
+world_cpp = world_cpp_path.read_text(encoding="utf-8")
 
-using namespace zonai;
-
-namespace
+mover_lifecycle = r'''jointId world::createMoverJoint( const moverJointDef& definition )
 {
+    const std::int32_t bodyIndexA = GetBodyIndex( definition.bodyA );
+    const std::int32_t bodyIndexB = GetBodyIndex( definition.bodyB );
+    assert( bodyIndexA != bodyIndexB );
+    assert( bodies_[bodyIndexA].type == bodyType::Dynamic || bodies_[bodyIndexB].type == bodyType::Dynamic );
+    assert( IsFinite( definition.linearVelocity ) );
+    assert( IsFinite( definition.maxVelocityForce ) );
+    assert( definition.maxVelocityForce.x >= 0.0f && definition.maxVelocityForce.y >= 0.0f );
 
-void check( bool ok, const char* message )
+    const std::int32_t index = allocateJoint( bodyIndexA, bodyIndexB, definition.collideConnected );
+    moverJointSim2 sim{};
+    sim.jointId = index;
+    sim.bodyIdA = bodyIndexA;
+    sim.bodyIdB = bodyIndexB;
+    sim.linearVelocity = definition.linearVelocity;
+    sim.maxVelocityForce = definition.maxVelocityForce;
+    jointSims_[index] = sim;
+
+    return makeJointId( index );
+}
+
+void world::setMoverJointLinearVelocity( jointId id, vec2 linearVelocity )
 {
-    if( !ok )
+    assert( IsFinite( linearVelocity ) );
+
+    auto& joint = std::get<moverJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.linearVelocity.x == linearVelocity.x && joint.linearVelocity.y == linearVelocity.y ) return;
+
+    joint.linearVelocity = linearVelocity;
+    joint.linearVelocityImpulse = {};
+
+    if( bodies_[joint.bodyIdA].type != bodyType::Static )
     {
-        std::fprintf( stderr, "%s\n", message );
-        std::exit( EXIT_FAILURE );
+        WakeBodyByIndex( joint.bodyIdA );
+    }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdB );
     }
 }
 
-bool near( float a, float b )
+void world::setMoverJointMaxVelocityForce( jointId id, vec2 maxVelocityForce )
 {
-    return std::abs( a - b ) < 0.0001f;
+    assert( IsFinite( maxVelocityForce ) );
+    assert( maxVelocityForce.x >= 0.0f && maxVelocityForce.y >= 0.0f );
+
+    auto& joint = std::get<moverJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.maxVelocityForce.x == maxVelocityForce.x && joint.maxVelocityForce.y == maxVelocityForce.y ) return;
+
+    joint.maxVelocityForce = maxVelocityForce;
+    joint.linearVelocityImpulse = {};
+
+    if( bodies_[joint.bodyIdA].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdA );
+    }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdB );
+    }
 }
 
-}
-
-int main()
+moverJointData world::getMoverJointData( jointId id ) const
 {
-    world simulation;
-    simulation.SetGravity( {} );
+    const std::int32_t index = getJointIndex( id );
+    const moverJointSim2& sim = std::get<moverJointSim2>( jointSims_[index] );
 
-    const bodyId ground = simulation.CreateBody();
-    const bodyId driven = simulation.CreateBody( bodyType::Dynamic );
-    ( void )simulation.CreateShape( driven, circle2{ {}, 0.5f } );
-    simulation.SetBodyAngularVelocity( driven, 1.25f );
-
-    moverJointDef definition{};
-    definition.bodyA = ground;
-    definition.bodyB = driven;
-    definition.linearVelocity = { 2.0f, -1.0f };
-    definition.maxVelocityForce = { 1000.0f, 1000.0f };
-
-    const jointId mover = simulation.createMoverJoint( definition );
-    auto data = simulation.getMoverJointData( mover );
-    check( near( data.linearVelocity.x, 2.0f ) && near( data.linearVelocity.y, -1.0f ), "Mover create/query preserves target velocity" );
-    check( near( data.maxVelocityForce.x, 1000.0f ) && near( data.maxVelocityForce.y, 1000.0f ), "Mover create/query preserves per-axis force limits" );
-    check( simulation.getJointCount() == 1 && simulation.GetBody( driven ).jointCount == 1, "Mover shares the common joint graph" );
-
-    simulation.Step( 1.0f / 60.0f, 1 );
-    const vec2 velocity = simulation.GetBodyLinearVelocity( driven );
-    check( near( velocity.x, 2.0f ) && near( velocity.y, -1.0f ), "World Mover reaches target relative linear velocity" );
-    check( near( simulation.GetBodyAngularVelocity( driven ), 1.25f ), "World Mover does not affect angular velocity" );
-    data = simulation.getMoverJointData( mover );
-    check( IsFinite( data.force ) && LengthSquared( data.force ) > 0.0f, "Mover stores a finite linear reaction force" );
-
-    // 목표속도 변경은 이전 velocity actuator 해를 버리고 연결된 Body를 깨움.
-    simulation.SetBodyAwake( driven, false );
-    simulation.setMoverJointLinearVelocity( mover, { -1.0f, 0.5f } );
-    check( simulation.IsBodyAwake( driven ), "changing Mover target velocity wakes connected body" );
-    data = simulation.getMoverJointData( mover );
-    check( near( data.linearVelocity.x, -1.0f ) && near( data.linearVelocity.y, 0.5f ), "Mover velocity setter updates query state" );
-    check( LengthSquared( data.force ) == 0.0f, "Mover velocity setter clears cached reaction" );
-
-    simulation.SetBodyAwake( driven, false );
-    simulation.setMoverJointLinearVelocity( mover, { -1.0f, 0.5f } );
-    check( !simulation.IsBodyAwake( driven ), "unchanged Mover target velocity does not wake body" );
-
-    simulation.SetBodyAwake( driven, true );
-    simulation.setMoverJointLinearVelocity( mover, { 20.0f, -20.0f } );
-    simulation.setMoverJointMaxVelocityForce( mover, { 6.0f, 12.0f } );
-    simulation.Step( 1.0f / 60.0f, 1 );
-    data = simulation.getMoverJointData( mover );
-    check( std::abs( data.force.x ) <= 6.0001f && std::abs( data.force.y ) <= 12.0001f, "Mover clamps reaction independently on x and y" );
-
-    simulation.SetBodyAwake( driven, false );
-    simulation.setMoverJointMaxVelocityForce( mover, { 3.0f, 9.0f } );
-    check( simulation.IsBodyAwake( driven ), "changing Mover force limits wakes connected body" );
-    data = simulation.getMoverJointData( mover );
-    check( near( data.maxVelocityForce.x, 3.0f ) && near( data.maxVelocityForce.y, 9.0f ), "Mover force setter updates query state" );
-    check( LengthSquared( data.force ) == 0.0f, "Mover force setter clears cached reaction" );
-
-    simulation.SetBodyAwake( driven, false );
-    simulation.setMoverJointMaxVelocityForce( mover, { 3.0f, 9.0f } );
-    check( !simulation.IsBodyAwake( driven ), "unchanged Mover force limits do not wake body" );
-
-    simulation.SetBodyAwake( driven, true );
-    simulation.Step( 1.0f / 60.0f, 1 );
-    check( LengthSquared( simulation.getMoverJointData( mover ).force ) > 0.0f, "Mover reaction rebuilds after setter changes" );
-
-    simulation.SetBodyTransform( driven, { { 1.0f, 0.0f }, {} } );
-    check( LengthSquared( simulation.getMoverJointData( mover ).force ) == 0.0f, "pose change clears Mover warm-start cache" );
-
-    simulation.destroyJoint( mover );
-    check( !simulation.IsValid( mover ) && simulation.getJointCount() == 0, "destroy invalidates Mover handle" );
-    const jointId reused = simulation.createMoverJoint( definition );
-    check( simulation.IsValid( reused ) && !simulation.IsValid( mover ), "Mover slot reuse preserves generation validation" );
-    simulation.DestroyBody( driven );
-    check( !simulation.IsValid( reused ) && simulation.GetBody( ground ).jointCount == 0, "body destruction removes connected Mover" );
-
-    world pair;
-    pair.SetGravity( {} );
-    const bodyId a = pair.CreateBody( bodyType::Dynamic );
-    const bodyId b = pair.CreateBody( bodyType::Dynamic );
-    ( void )pair.CreateShape( a, circle2{ {}, 0.5f } );
-    ( void )pair.CreateShape( b, circle2{ {}, 0.5f } );
-    pair.Step( 1.0f / 60.0f, 1 );
-    check( pair.GetContactCount() == 1, "overlapping bodies initially create a Contact" );
-
-    definition = {};
-    definition.bodyA = a;
-    definition.bodyB = b;
-    definition.maxVelocityForce = { 10.0f, 10.0f };
-    const jointId pairMover = pair.createMoverJoint( definition );
-    pair.Step( 1.0f / 60.0f, 1 );
-    check( pair.GetContactCount() == 0, "Mover connected collision suppression uses shared joint path" );
-
-    pair.SetBodyAwake( a, false );
-    check( !pair.IsBodyAwake( b ), "Mover connected dynamic bodies sleep together" );
-    pair.setMoverJointLinearVelocity( pairMover, { 1.0f, 0.0f } );
-    check( pair.IsBodyAwake( a ) && pair.IsBodyAwake( b ), "Mover setter wake propagates through joint graph" );
-
-    pair.destroyJoint( pairMover );
-    pair.Step( 1.0f / 60.0f, 1 );
-    check( pair.GetContactCount() == 1, "destroying Mover restores candidate contacts" );
-
-    definition.collideConnected = true;
-    const jointId colliding = pair.createMoverJoint( definition );
-    pair.Step( 1.0f / 60.0f, 1 );
-    check( pair.GetContactCount() == 1 && pair.getMoverJointData( colliding ).collideConnected, "explicit Mover connected collisions remain enabled" );
-
-    world foreign;
-    check( !foreign.IsValid( colliding ), "foreign World rejects Mover handle" );
-
-    return EXIT_SUCCESS;
+    moverJointData data{};
+    data.bodyA = MakeBodyId( sim.bodyIdA );
+    data.bodyB = MakeBodyId( sim.bodyIdB );
+    data.linearVelocity = sim.linearVelocity;
+    data.maxVelocityForce = sim.maxVelocityForce;
+    data.force = sim.subStepTime > 0.0f ? sim.linearVelocityImpulse / sim.subStepTime : vec2{};
+    data.collideConnected = joints_[index].collideConnected;
+    return data;
 }
-''', encoding="utf-8")
+
+'''
+world_cpp = replace_once(
+    world_cpp,
+    'jointId world::createRevoluteJoint( const revoluteJointDef& definition )\n',
+    mover_lifecycle + 'jointId world::createRevoluteJoint( const revoluteJointDef& definition )\n',
+    "world.cpp Mover lifecycle",
+)
+
+world_cpp = replace_once(
+    world_cpp,
+    '''                    else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, motorJointSim2> )
+                    {
+                        return prepareMotorJointConstraint( joint, bodySims_[joint.bodyIdA], bodySims_[joint.bodyIdB], subStepTime );
+                    }
+                    else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, prismaticJointSim2> )
+''',
+    '''                    else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, motorJointSim2> )
+                    {
+                        return prepareMotorJointConstraint( joint, bodySims_[joint.bodyIdA], bodySims_[joint.bodyIdB], subStepTime );
+                    }
+                    else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, moverJointSim2> )
+                    {
+                        return prepareMoverJointConstraint( joint, bodySims_[joint.bodyIdA], bodySims_[joint.bodyIdB], subStepTime );
+                    }
+                    else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( joint )>, prismaticJointSim2> )
+''',
+    "world.cpp prepare Mover",
+)
+world_cpp = replace_once(
+    world_cpp,
+    '''                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, motorJointConstraint2> )
+                {
+                    warmStartMotorJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
+                }
+                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, prismaticJointConstraint2> )
+''',
+    '''                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, motorJointConstraint2> )
+                {
+                    warmStartMotorJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
+                }
+                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, moverJointConstraint2> )
+                {
+                    warmStartMoverJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
+                }
+                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, prismaticJointConstraint2> )
+''',
+    "world.cpp warm Mover",
+)
+world_cpp = replace_once(
+    world_cpp,
+    '''                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, motorJointConstraint2> )
+                {
+                    // Motor target은 실제로 남겨야 하는 물리 속도라 hard position bias처럼 relaxation에서 제거하지 않음.
+                    solveMotorJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
+                }
+                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, prismaticJointConstraint2> )
+''',
+    '''                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, motorJointConstraint2> )
+                {
+                    // Motor target은 실제로 남겨야 하는 물리 속도라 hard position bias처럼 relaxation에서 제거하지 않음.
+                    solveMotorJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
+                }
+                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, moverJointConstraint2> )
+                {
+                    // Mover도 실제 상대 선속도를 만드는 actuator라 두 solve pass 모두에서 같은 목표를 유지함.
+                    solveMoverJointConstraint( constraint, bodyStates_[constraint.bodyIdA], bodyStates_[constraint.bodyIdB] );
+                }
+                else if constexpr( std::is_same_v<std::remove_cvref_t<decltype( constraint )>, prismaticJointConstraint2> )
+''',
+    "world.cpp solve Mover",
+)
+
+old_mapping = '                    using simType = std::conditional_t<std::is_same_v<constraintType, distanceJointConstraint2>, distanceJointSim2, std::conditional_t<std::is_same_v<constraintType, motorJointConstraint2>, motorJointSim2, std::conditional_t<std::is_same_v<constraintType, prismaticJointConstraint2>, prismaticJointSim2, std::conditional_t<std::is_same_v<constraintType, revoluteJointConstraint2>, revoluteJointSim2, std::conditional_t<std::is_same_v<constraintType, weldJointConstraint2>, weldJointSim2, std::conditional_t<std::is_same_v<constraintType, wheelJointConstraint2>, wheelJointSim2, mouseJointSim2>>>>>>;\n'
+new_mapping = '                    using simType = std::conditional_t<std::is_same_v<constraintType, distanceJointConstraint2>, distanceJointSim2, std::conditional_t<std::is_same_v<constraintType, motorJointConstraint2>, motorJointSim2, std::conditional_t<std::is_same_v<constraintType, moverJointConstraint2>, moverJointSim2, std::conditional_t<std::is_same_v<constraintType, prismaticJointConstraint2>, prismaticJointSim2, std::conditional_t<std::is_same_v<constraintType, revoluteJointConstraint2>, revoluteJointSim2, std::conditional_t<std::is_same_v<constraintType, weldJointConstraint2>, weldJointSim2, std::conditional_t<std::is_same_v<constraintType, wheelJointConstraint2>, wheelJointSim2, mouseJointSim2>>>>>>>;\n'
+world_cpp = replace_once( world_cpp, old_mapping, new_mapping, "world.cpp store type mapping" )
+world_cpp = replace_once(
+    world_cpp,
+    '''                    if constexpr( std::is_same_v<simType, motorJointSim2> )
+                    {
+                        joint.linearVelocityImpulse = constraint.linearVelocityImpulse;
+                        joint.linearSpringImpulse = constraint.linearSpringImpulse;
+                        joint.angularVelocityImpulse = constraint.angularVelocityImpulse;
+                        joint.angularSpringImpulse = constraint.angularSpringImpulse;
+                    }
+                    else
+''',
+    '''                    if constexpr( std::is_same_v<simType, motorJointSim2> )
+                    {
+                        joint.linearVelocityImpulse = constraint.linearVelocityImpulse;
+                        joint.linearSpringImpulse = constraint.linearSpringImpulse;
+                        joint.angularVelocityImpulse = constraint.angularVelocityImpulse;
+                        joint.angularSpringImpulse = constraint.angularSpringImpulse;
+                    }
+                    else if constexpr( std::is_same_v<simType, moverJointSim2> )
+                    {
+                        joint.linearVelocityImpulse = constraint.linearVelocityImpulse;
+                    }
+                    else
+''',
+    "world.cpp store Mover impulse",
+)
+world_cpp = replace_once(
+    world_cpp,
+    '''                if constexpr( std::is_same_v<simType, motorJointSim2> )
+                {
+                    joint.linearVelocityImpulse = {};
+                    joint.linearSpringImpulse = {};
+                    joint.angularVelocityImpulse = 0.0f;
+                    joint.angularSpringImpulse = 0.0f;
+                }
+                else
+''',
+    '''                if constexpr( std::is_same_v<simType, motorJointSim2> )
+                {
+                    joint.linearVelocityImpulse = {};
+                    joint.linearSpringImpulse = {};
+                    joint.angularVelocityImpulse = 0.0f;
+                    joint.angularSpringImpulse = 0.0f;
+                }
+                else if constexpr( std::is_same_v<simType, moverJointSim2> )
+                {
+                    joint.linearVelocityImpulse = {};
+                }
+                else
+''',
+    "world.cpp reset Mover impulse",
+)
+world_cpp_path.write_text(world_cpp, encoding="utf-8")
