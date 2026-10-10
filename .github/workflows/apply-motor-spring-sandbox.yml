@@ -1,0 +1,31 @@
+name: Apply Motor spring Sandbox integration
+
+on:
+  push:
+    branches:
+      - feature/motor-joint-spring
+    paths:
+      - tools/apply_motor_spring_sandbox.py
+      - .github/workflows/apply-motor-spring-sandbox.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/motor-joint-spring
+      - name: Apply Sandbox integration
+        run: python3 tools/apply_motor_spring_sandbox.py
+      - name: Commit integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sandbox/rigidBodyJointDemo.cpp sandbox/jointDemoView.cpp sandbox/demo.cpp
+          git diff --cached --check
+          git commit -m "Expand Motor Joint Sandbox with transform springs"
+          git push origin HEAD:feature/motor-joint-spring
