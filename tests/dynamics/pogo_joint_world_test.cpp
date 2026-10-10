@@ -134,24 +134,5 @@ int main()
     world foreign;
     check( !foreign.IsValid( colliding ), "foreign World rejects Pogo handle" );
 
-    // Filter Joint는 solver 없이 두 Body 사이 collision만 차단하고 공용 Joint lifecycle에 참여함.
-    {
-        world filterWorld;
-        filterWorld.SetGravity( {} );
-        const bodyId filterA = filterWorld.CreateBody( bodyType::Dynamic );
-        const bodyId filterB = filterWorld.CreateBody( bodyType::Dynamic );
-        ( void )filterWorld.CreateShape( filterA, circle2{ {}, 0.5f } );
-        ( void )filterWorld.CreateShape( filterB, circle2{ {}, 0.5f } );
-        filterWorld.Step( h, 1 );
-        check( filterWorld.GetContactCount() == 1, "Filter RED starts with an overlapping Contact" );
-
-        filterJointDef filterDefinition{};
-        filterDefinition.bodyA = filterA;
-        filterDefinition.bodyB = filterB;
-        const jointId filter = filterWorld.createFilterJoint( filterDefinition );
-        check( filterWorld.GetContactCount() == 0, "Filter creation removes existing contacts immediately" );
-        check( !filterWorld.getFilterJointData( filter ).collideConnected, "Filter disables connected collision by default" );
-    }
-
     return EXIT_SUCCESS;
 }

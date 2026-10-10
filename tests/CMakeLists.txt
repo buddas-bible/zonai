@@ -529,6 +529,14 @@ add_executable(pogoJointWorldTests dynamics/pogo_joint_world_test.cpp)
 target_link_libraries(pogoJointWorldTests PRIVATE zonai::zonai)
 add_test(NAME pogoJointWorldTests COMMAND pogoJointWorldTests)
 
+add_executable(filterJointTests dynamics/filter_joint_test.cpp)
+target_link_libraries(filterJointTests PRIVATE zonai::zonai)
+add_test(NAME filterJointTests COMMAND filterJointTests)
+
+add_executable(filterJointWorldTests dynamics/filter_joint_world_test.cpp)
+target_link_libraries(filterJointWorldTests PRIVATE zonai::zonai)
+add_test(NAME filterJointWorldTests COMMAND filterJointWorldTests)
+
 add_executable(mouseJointTests dynamics/mouse_joint_test.cpp)
 target_link_libraries(mouseJointTests PRIVATE zonai::zonai)
 add_test(NAME mouseJointTests COMMAND mouseJointTests)
