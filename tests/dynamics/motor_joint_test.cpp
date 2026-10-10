@@ -95,6 +95,30 @@ int main()
     check( near( coupledPointVelocity.x, coupledJoint.linearVelocity.x ) && near( coupledPointVelocity.y, coupledJoint.linearVelocity.y ), "off-center combined Motor preserves linear target" );
     check( near( coupledStateB.angularVelocity - coupledStateA.angularVelocity, coupledJoint.angularVelocity ), "off-center combined Motor preserves angular target" );
 
+    // Transform spring은 velocity target과 별개로 anchor 위치 오차를 실제 spring-damper 힘으로 줄여야 함.
+    bodySim springBodyA{};
+    springBodyA.bodyId = 4;
+    bodySim springBodyB{};
+    springBodyB.bodyId = 5;
+    springBodyB.center = { 2.0f, 0.0f };
+    springBodyB.invMass = 1.0f;
+    springBodyB.invInertia = 1.0f;
+
+    motorJointSim2 springJoint{};
+    springJoint.jointId = 2;
+    springJoint.bodyIdA = 4;
+    springJoint.bodyIdB = 5;
+    springJoint.linearHertz = 4.0f;
+    springJoint.linearDampingRatio = 0.7f;
+    springJoint.maxSpringForce = 1000.0f;
+
+    auto springConstraint = prepareMotorJointConstraint( springJoint, springBodyA, springBodyB, h );
+    bodyState springStateA{};
+    bodyState springStateB{};
+    solveMotorJointConstraint( springConstraint, springStateA, springStateB );
+    check( springStateB.linearVelocity.x < 0.0f, "linear Motor spring pulls separated anchor B toward anchor A" );
+    check( springConstraint.linearSpringImpulse.x < 0.0f, "linear Motor spring accumulates a restoring impulse" );
+
     // World가 Motor를 공용 Joint graph / solver 경로에 넣고 query까지 되돌려주는지 검증함.
     world simulation;
     simulation.SetGravity( {} );
