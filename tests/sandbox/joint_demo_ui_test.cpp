@@ -9,6 +9,7 @@
 #include "jointDemoView.h"
 #include "rigidBodyDemoUi.h"
 
+using namespace zonai;
 using namespace zonai::sandbox;
 
 namespace
