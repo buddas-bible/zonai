@@ -17,6 +17,10 @@ struct moverJointSim2
     // World 좌표계의 목표 상대 선속도와 x/y 방향별 최대 구동 힘.
     vec2 linearVelocity{};
     vec2 maxVelocityForce{};
+
+    // 이전 substep의 누적 선형 impulse. 같은 h에서만 다음 warm start에 재사용함.
+    vec2 linearVelocityImpulse{};
+    float subStepTime = 0.0f;
 };
 
 } // namespace zonai

@@ -27,6 +27,9 @@ struct moverJointConstraint2
 // 상대 선속도 effective mass와 force * h 형태의 축별 impulse 한도를 준비함.
 [[nodiscard]] moverJointConstraint2 prepareMoverJointConstraint( const moverJointSim2& joint, const bodySim& bodySimA, const bodySim& bodySimB, float subStepTime );
 
+// 이전 substep의 누적 선형 impulse를 다시 적용함. Mover는 각속도를 변경하지 않음.
+void warmStartMoverJointConstraint( const moverJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB );
+
 // 목표 상대 선속도에 필요한 누적 impulse를 x/y 각각의 actuator 한도로 제한해 적용함.
 void solveMoverJointConstraint( moverJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB );
 
