@@ -62,13 +62,17 @@ enum class weldDemoPreset
     softBoth
 };
 
-// Motor Joint 자체의 선형/회전 velocity 채널을 독립적으로 비교하는 빠른 설정.
+// Motor Joint의 velocity actuator와 transform spring을 독립 / 결합해서 비교하는 빠른 설정.
 enum class motorJointDemoPreset
 {
     brake,
     linear,
     angular,
-    combined
+    combined,
+    linearSpring,
+    angularSpring,
+    springBoth,
+    velocityAndSpring
 };
 
 class rigidBodyDemo : public demo
@@ -96,6 +100,8 @@ public:
     void setWeldAngularSettings( float hertz, float dampingRatio );
     void setMotorJointLinearSettings( vec2 linearVelocity, float maxVelocityForce );
     void setMotorJointAngularSettings( float angularVelocity, float maxVelocityTorque );
+    void setMotorJointLinearSpringSettings( float hertz, float dampingRatio, float maxSpringForce );
+    void setMotorJointAngularSpringSettings( float referenceAngle, float hertz, float dampingRatio, float maxSpringTorque );
     void applyDistancePreset( distanceDemoPreset preset );
     void applyRevolutePreset( revoluteDemoPreset preset );
     void applyWheelPreset( wheelDemoPreset preset );

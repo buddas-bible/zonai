@@ -404,6 +404,13 @@ jointId world::createMotorJoint( const motorJointDef& definition )
     assert( std::isfinite( definition.maxVelocityForce ) && definition.maxVelocityForce >= 0.0f );
     assert( std::isfinite( definition.angularVelocity ) );
     assert( std::isfinite( definition.maxVelocityTorque ) && definition.maxVelocityTorque >= 0.0f );
+    assert( std::isfinite( definition.referenceAngle ) );
+    assert( std::isfinite( definition.linearHertz ) && definition.linearHertz >= 0.0f );
+    assert( std::isfinite( definition.linearDampingRatio ) && definition.linearDampingRatio >= 0.0f );
+    assert( std::isfinite( definition.maxSpringForce ) && definition.maxSpringForce >= 0.0f );
+    assert( std::isfinite( definition.angularHertz ) && definition.angularHertz >= 0.0f );
+    assert( std::isfinite( definition.angularDampingRatio ) && definition.angularDampingRatio >= 0.0f );
+    assert( std::isfinite( definition.maxSpringTorque ) && definition.maxSpringTorque >= 0.0f );
 
     const std::int32_t index = allocateJoint( bodyIndexA, bodyIndexB, definition.collideConnected );
     motorJointSim2 sim{};
@@ -416,6 +423,13 @@ jointId world::createMotorJoint( const motorJointDef& definition )
     sim.maxVelocityForce = definition.maxVelocityForce;
     sim.angularVelocity = definition.angularVelocity;
     sim.maxVelocityTorque = definition.maxVelocityTorque;
+    sim.referenceAngle = definition.referenceAngle;
+    sim.linearHertz = definition.linearHertz;
+    sim.linearDampingRatio = definition.linearDampingRatio;
+    sim.maxSpringForce = definition.maxSpringForce;
+    sim.angularHertz = definition.angularHertz;
+    sim.angularDampingRatio = definition.angularDampingRatio;
+    sim.maxSpringTorque = definition.maxSpringTorque;
     jointSims_[index] = sim;
 
     return makeJointId( index );
@@ -469,6 +483,58 @@ void world::setMotorJointAngularVelocity( jointId id, float angularVelocity, flo
     }
 }
 
+void world::setMotorJointLinearSpring( jointId id, float hertz, float dampingRatio, float maxSpringForce )
+{
+    assert( std::isfinite( hertz ) && hertz >= 0.0f );
+    assert( std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );
+    assert( std::isfinite( maxSpringForce ) && maxSpringForce >= 0.0f );
+
+    auto& joint = std::get<motorJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.linearHertz == hertz && joint.linearDampingRatio == dampingRatio && joint.maxSpringForce == maxSpringForce ) return;
+
+    joint.linearHertz = hertz;
+    joint.linearDampingRatio = dampingRatio;
+    joint.maxSpringForce = maxSpringForce;
+    // Velocity Motor와 spring은 별도 actuator이므로 spring 설정 변경은 spring cache만 버림.
+    joint.linearSpringImpulse = {};
+
+    if( bodies_[joint.bodyIdA].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdA );
+    }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdB );
+    }
+}
+
+void world::setMotorJointAngularSpring( jointId id, float referenceAngle, float hertz, float dampingRatio, float maxSpringTorque )
+{
+    assert( std::isfinite( referenceAngle ) );
+    assert( std::isfinite( hertz ) && hertz >= 0.0f );
+    assert( std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );
+    assert( std::isfinite( maxSpringTorque ) && maxSpringTorque >= 0.0f );
+
+    auto& joint = std::get<motorJointSim2>( jointSims_[getJointIndex( id )] );
+    if( joint.referenceAngle == referenceAngle && joint.angularHertz == hertz && joint.angularDampingRatio == dampingRatio && joint.maxSpringTorque == maxSpringTorque ) return;
+
+    joint.referenceAngle = referenceAngle;
+    joint.angularHertz = hertz;
+    joint.angularDampingRatio = dampingRatio;
+    joint.maxSpringTorque = maxSpringTorque;
+    // 기준 상대각도나 회전 spring 계수가 바뀌면 이전 spring 해는 더 이상 같은 제약의 해가 아님.
+    joint.angularSpringImpulse = 0.0f;
+
+    if( bodies_[joint.bodyIdA].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdA );
+    }
+    if( bodies_[joint.bodyIdB].type != bodyType::Static )
+    {
+        WakeBodyByIndex( joint.bodyIdB );
+    }
+}
+
 motorJointData world::getMotorJointData( jointId id ) const
 {
     const std::int32_t index = getJointIndex( id );
@@ -483,8 +549,16 @@ motorJointData world::getMotorJointData( jointId id ) const
     data.maxVelocityForce = sim.maxVelocityForce;
     data.angularVelocity = sim.angularVelocity;
     data.maxVelocityTorque = sim.maxVelocityTorque;
-    data.force = sim.subStepTime > 0.0f ? sim.linearVelocityImpulse / sim.subStepTime : vec2{};
-    data.torque = sim.subStepTime > 0.0f ? sim.angularVelocityImpulse / sim.subStepTime : 0.0f;
+    data.referenceAngle = sim.referenceAngle;
+    data.linearHertz = sim.linearHertz;
+    data.linearDampingRatio = sim.linearDampingRatio;
+    data.maxSpringForce = sim.maxSpringForce;
+    data.angularHertz = sim.angularHertz;
+    data.angularDampingRatio = sim.angularDampingRatio;
+    data.maxSpringTorque = sim.maxSpringTorque;
+    // Velocity Motor와 transform spring은 별도 cache지만 둘 다 실제 물리 반력에 기여함.
+    data.force = sim.subStepTime > 0.0f ? ( sim.linearVelocityImpulse + sim.linearSpringImpulse ) / sim.subStepTime : vec2{};
+    data.torque = sim.subStepTime > 0.0f ? ( sim.angularVelocityImpulse + sim.angularSpringImpulse ) / sim.subStepTime : 0.0f;
     data.collideConnected = joints_[index].collideConnected;
 
     return data;
@@ -2377,7 +2451,9 @@ void world::Step( float timeStep, int subStepCount )
                     if constexpr( std::is_same_v<simType, motorJointSim2> )
                     {
                         joint.linearVelocityImpulse = constraint.linearVelocityImpulse;
+                        joint.linearSpringImpulse = constraint.linearSpringImpulse;
                         joint.angularVelocityImpulse = constraint.angularVelocityImpulse;
+                        joint.angularSpringImpulse = constraint.angularSpringImpulse;
                     }
                     else
                     {
@@ -2916,7 +2992,9 @@ void world::resetJointImpulses( std::int32_t bodyIndex )
                 if constexpr( std::is_same_v<simType, motorJointSim2> )
                 {
                     joint.linearVelocityImpulse = {};
+                    joint.linearSpringImpulse = {};
                     joint.angularVelocityImpulse = 0.0f;
+                    joint.angularSpringImpulse = 0.0f;
                 }
                 else
                 {

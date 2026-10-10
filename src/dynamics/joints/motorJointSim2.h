@@ -7,7 +7,7 @@ namespace zonai
 {
 
 // World의 stable Joint slot에 계속 보관되는 Motor Joint의 simulation 상태.
-// 목표 상대속도와 힘/토크 한도, 다음 substep warm start에 필요한 누적 impulse를 유지함.
+// 목표 상대속도와 transform spring 설정, 다음 substep warm start에 필요한 누적 impulse를 유지함.
 struct motorJointSim2
 {
     // 공용 Joint slot과 연결된 id, 그리고 두 Body의 simulation index.
@@ -23,14 +23,29 @@ struct motorJointSim2
     vec2 linearVelocity{};
     float maxVelocityForce = 0.0f;
 
+    // 두 anchor의 위치 오차를 줄이는 실제 spring-damper 설정.
+    // 0 Hz 또는 0 max force면 선형 spring 채널은 비활성화됨.
+    float linearHertz = 0.0f;
+    float linearDampingRatio = 0.0f;
+    float maxSpringForce = 0.0f;
+
     // B가 A에 대해 가져야 하는 목표 상대 각속도.
     float angularVelocity = 0.0f;
     float maxVelocityTorque = 0.0f;
 
-    // 이전 substep에서 구한 velocity motor의 누적 impulse.
-    // Prepare에서 Constraint로 복사하고 Solve가 끝나면 다시 저장해 다음 warm start에 사용함.
+    // B가 A에 대해 유지하려는 기준 상대각도와 회전 spring-damper 설정.
+    // 0 Hz 또는 0 max torque면 회전 spring 채널은 비활성화됨.
+    float referenceAngle = 0.0f;
+    float angularHertz = 0.0f;
+    float angularDampingRatio = 0.0f;
+    float maxSpringTorque = 0.0f;
+
+    // 이전 substep에서 구한 velocity motor / transform spring 누적 impulse.
+    // 두 응답은 독립적으로 cache하지만 Warm Start에서는 각 방향별 합을 Body에 적용함.
     vec2 linearVelocityImpulse{};
+    vec2 linearSpringImpulse{};
     float angularVelocityImpulse = 0.0f;
+    float angularSpringImpulse = 0.0f;
     float subStepTime = 0.0f;
 };
 

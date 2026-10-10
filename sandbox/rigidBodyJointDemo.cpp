@@ -58,6 +58,19 @@ void rigidBodyDemo::setMotorJointAngularSettings( float angularVelocity, float m
     world_.setMotorJointAngularVelocity( motorJoint_, angularVelocity, maxVelocityTorque );
 }
 
+
+void rigidBodyDemo::setMotorJointLinearSpringSettings( float hertz, float dampingRatio, float maxSpringForce )
+{
+    if( kind_ != demoKind::motorJointPlayground || !world_.IsValid( motorJoint_ ) ) return;
+    world_.setMotorJointLinearSpring( motorJoint_, hertz, dampingRatio, maxSpringForce );
+}
+
+void rigidBodyDemo::setMotorJointAngularSpringSettings( float referenceAngle, float hertz, float dampingRatio, float maxSpringTorque )
+{
+    if( kind_ != demoKind::motorJointPlayground || !world_.IsValid( motorJoint_ ) ) return;
+    world_.setMotorJointAngularSpring( motorJoint_, referenceAngle, hertz, dampingRatio, maxSpringTorque );
+}
+
 #pragma endregion Settings
 
 #pragma region Presets
@@ -240,11 +253,21 @@ void rigidBodyDemo::applyMotorJointPreset( motorJointDemoPreset preset )
     constexpr float maxVelocityForce = 20.0f;
     constexpr float angularVelocity = 2.0f;
     constexpr float maxVelocityTorque = 10.0f;
+    constexpr float referenceAngle = 0.75f;
+    constexpr float springHertz = 3.0f;
+    constexpr float springDampingRatio = 0.7f;
+    constexpr float maxSpringForce = 20.0f;
+    constexpr float maxSpringTorque = 10.0f;
 
     vec2 targetLinearVelocity{};
     float linearForce = 0.0f;
     float targetAngularVelocity = 0.0f;
     float angularTorque = 0.0f;
+    float linearSpringHertz = 0.0f;
+    float linearSpringForce = 0.0f;
+    float angularSpringTarget = 0.0f;
+    float angularSpringHertz = 0.0f;
+    float angularSpringTorque = 0.0f;
 
     switch( preset )
     {
@@ -270,10 +293,44 @@ void rigidBodyDemo::applyMotorJointPreset( motorJointDemoPreset preset )
         targetAngularVelocity = angularVelocity;
         angularTorque = maxVelocityTorque;
         break;
+
+    case motorJointDemoPreset::linearSpring:
+        linearSpringHertz = springHertz;
+        linearSpringForce = maxSpringForce;
+        break;
+
+    case motorJointDemoPreset::angularSpring:
+        angularSpringTarget = referenceAngle;
+        angularSpringHertz = springHertz;
+        angularSpringTorque = maxSpringTorque;
+        break;
+
+    case motorJointDemoPreset::springBoth:
+        linearSpringHertz = springHertz;
+        linearSpringForce = maxSpringForce;
+        angularSpringTarget = referenceAngle;
+        angularSpringHertz = springHertz;
+        angularSpringTorque = maxSpringTorque;
+        break;
+
+    case motorJointDemoPreset::velocityAndSpring:
+        targetLinearVelocity = linearVelocity;
+        linearForce = maxVelocityForce;
+        targetAngularVelocity = angularVelocity;
+        angularTorque = maxVelocityTorque;
+        linearSpringHertz = springHertz;
+        linearSpringForce = maxSpringForce;
+        angularSpringTarget = referenceAngle;
+        angularSpringHertz = springHertz;
+        angularSpringTorque = maxSpringTorque;
+        break;
     }
 
+    // 모든 actuator를 항상 명시적으로 설정해 이전 preset의 velocity / spring 상태가 남지 않게 함.
     world_.setMotorJointLinearVelocity( motorJoint_, targetLinearVelocity, linearForce );
     world_.setMotorJointAngularVelocity( motorJoint_, targetAngularVelocity, angularTorque );
+    world_.setMotorJointLinearSpring( motorJoint_, linearSpringHertz, springDampingRatio, linearSpringForce );
+    world_.setMotorJointAngularSpring( motorJoint_, angularSpringTarget, angularSpringHertz, springDampingRatio, angularSpringTorque );
 }
 
 #pragma endregion Presets

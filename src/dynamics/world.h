@@ -110,6 +110,10 @@ public:
     void setMotorJointLinearVelocity( jointId id, vec2 linearVelocity, float maxVelocityForce );
     // 회전 목표속도 / 토크 한도 변경은 회전 cache만 비우고 연결된 non-static component를 깨움.
     void setMotorJointAngularVelocity( jointId id, float angularVelocity, float maxVelocityTorque );
+    // 두 anchor를 복원하는 선형 spring 설정. 변경 시 선형 spring cache만 비우고 component를 깨움.
+    void setMotorJointLinearSpring( jointId id, float hertz, float dampingRatio, float maxSpringForce );
+    // 기준 상대각도와 회전 spring 설정. 변경 시 회전 spring cache만 비우고 component를 깨움.
+    void setMotorJointAngularSpring( jointId id, float referenceAngle, float hertz, float dampingRatio, float maxSpringTorque );
     [[nodiscard]] motorJointData getMotorJointData( jointId id ) const;
 
     // 두 작용점을 일치시키며 상대 회전은 허용함. 서로 다른 Body 중 하나 이상은 Dynamic이어야 함.

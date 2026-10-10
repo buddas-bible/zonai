@@ -95,6 +95,54 @@ int main()
     check( near( coupledPointVelocity.x, coupledJoint.linearVelocity.x ) && near( coupledPointVelocity.y, coupledJoint.linearVelocity.y ), "off-center combined Motor preserves linear target" );
     check( near( coupledStateB.angularVelocity - coupledStateA.angularVelocity, coupledJoint.angularVelocity ), "off-center combined Motor preserves angular target" );
 
+    // Transform spring은 velocity target과 별개로 anchor 위치 오차를 실제 spring-damper 힘으로 줄여야 함.
+    bodySim springBodyA{};
+    springBodyA.bodyId = 4;
+    bodySim springBodyB{};
+    springBodyB.bodyId = 5;
+    springBodyB.center = { 2.0f, 0.0f };
+    springBodyB.invMass = 1.0f;
+    springBodyB.invInertia = 1.0f;
+
+    motorJointSim2 springJoint{};
+    springJoint.jointId = 2;
+    springJoint.bodyIdA = 4;
+    springJoint.bodyIdB = 5;
+    springJoint.linearHertz = 4.0f;
+    springJoint.linearDampingRatio = 0.7f;
+    springJoint.maxSpringForce = 1000.0f;
+
+    auto springConstraint = prepareMotorJointConstraint( springJoint, springBodyA, springBodyB, h );
+    bodyState springStateA{};
+    bodyState springStateB{};
+    solveMotorJointConstraint( springConstraint, springStateA, springStateB );
+    check( springStateB.linearVelocity.x < 0.0f, "linear Motor spring pulls separated anchor B toward anchor A" );
+    check( springConstraint.linearSpringImpulse.x < 0.0f, "linear Motor spring accumulates a restoring impulse" );
+
+    // Angular spring은 referenceAngle에 대한 상대각도 오차를 spring-damper 토크로 줄여야 함.
+    bodySim angularBodyA{};
+    angularBodyA.bodyId = 6;
+    bodySim angularBodyB{};
+    angularBodyB.bodyId = 7;
+    angularBodyB.transform.rotation = rot2::FromRadians( 0.5f );
+    angularBodyB.invInertia = 1.0f;
+
+    motorJointSim2 angularSpringJoint{};
+    angularSpringJoint.jointId = 3;
+    angularSpringJoint.bodyIdA = 6;
+    angularSpringJoint.bodyIdB = 7;
+    angularSpringJoint.referenceAngle = 0.0f;
+    angularSpringJoint.angularHertz = 4.0f;
+    angularSpringJoint.angularDampingRatio = 0.7f;
+    angularSpringJoint.maxSpringTorque = 1000.0f;
+
+    auto angularSpringConstraint = prepareMotorJointConstraint( angularSpringJoint, angularBodyA, angularBodyB, h );
+    bodyState angularStateA{};
+    bodyState angularStateB{};
+    solveMotorJointConstraint( angularSpringConstraint, angularStateA, angularStateB );
+    check( angularStateB.angularVelocity < 0.0f, "angular Motor spring rotates B toward referenceAngle" );
+    check( angularSpringConstraint.angularSpringImpulse < 0.0f, "angular Motor spring accumulates a restoring impulse" );
+
     // World가 Motor를 공용 Joint graph / solver 경로에 넣고 query까지 되돌려주는지 검증함.
     world simulation;
     simulation.SetGravity( {} );

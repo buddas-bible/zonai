@@ -91,12 +91,19 @@ public:
             {
                 if( ImGui::Button( "제동###MotorJointPresetBrake" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::brake );
                 ImGui::SameLine();
-                if( ImGui::Button( "선형###MotorJointPresetLinear" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::linear );
+                if( ImGui::Button( "선형 속도###MotorJointPresetLinear" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::linear );
                 ImGui::SameLine();
-                if( ImGui::Button( "회전###MotorJointPresetAngular" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::angular );
+                if( ImGui::Button( "회전 속도###MotorJointPresetAngular" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::angular );
                 ImGui::SameLine();
-                if( ImGui::Button( "둘 다###MotorJointPresetCombined" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::combined );
-                ImGui::TextWrapped( "Motor Joint는 두 Body의 상대 transform을 고정하지 않습니다. 목표 상대속도 0은 위치 고정이 아니라 힘/토크 한도 안에서 제동하는 상태입니다." );
+                if( ImGui::Button( "속도 둘 다###MotorJointPresetCombined" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::combined );
+                if( ImGui::Button( "선형 Spring###MotorJointPresetLinearSpring" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::linearSpring );
+                ImGui::SameLine();
+                if( ImGui::Button( "회전 Spring###MotorJointPresetAngularSpring" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::angularSpring );
+                ImGui::SameLine();
+                if( ImGui::Button( "Spring 둘 다###MotorJointPresetSpringBoth" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::springBoth );
+                ImGui::SameLine();
+                if( ImGui::Button( "Velocity + Spring###MotorJointPresetVelocitySpring" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::velocityAndSpring );
+                ImGui::TextWrapped( "Velocity Motor는 상대속도를 목표로 하고 transform spring은 두 anchor와 기준 상대각도를 복원합니다. 둘은 독립 actuator라 동시에 켤 수 있습니다." );
             }
             else if( kind == demoKind::weldPair )
             {
@@ -146,13 +153,24 @@ public:
             const motorJointData joint = view_.getWorld().getMotorJointData( view_.getMotorJoint() );
             constexpr ImU32 ANCHOR_COLOR = IM_COL32( 100, 235, 220, 255 );
             constexpr ImU32 TARGET_COLOR = IM_COL32( 255, 220, 90, 255 );
+            constexpr ImU32 SPRING_COLOR = IM_COL32( 230, 120, 255, 255 );
 
             draw.DrawPoint( joint.anchorA, ANCHOR_COLOR, 6.0f );
             draw.DrawPoint( joint.anchorB, TARGET_COLOR, 7.0f );
             if( LengthSquared( joint.linearVelocity ) > 0.0f )
             {
-                // 두 anchor를 선으로 묶지 않음: Motor는 두 점의 위치를 일치시키는 제약이 아니기 때문임.
+                // Velocity Motor만 켜진 상태에서는 두 anchor를 선으로 묶지 않아 위치 제약으로 보이지 않게 함.
                 draw.DrawArrow( joint.anchorB, Normalize( joint.linearVelocity ), TARGET_COLOR, std::min( 1.5f, Length( joint.linearVelocity ) * 0.5f ) );
+            }
+            if( joint.linearHertz > 0.0f && joint.maxSpringForce > 0.0f )
+            {
+                // Linear transform spring이 실제로 두 anchor의 위치 오차를 복원할 때만 목표 연결을 그림.
+                draw.DrawSegment( { joint.anchorA, joint.anchorB }, SPRING_COLOR, 2.0f );
+            }
+            if( joint.angularHertz > 0.0f && joint.maxSpringTorque > 0.0f )
+            {
+                const rot2 targetRotation = view_.getWorld().GetBodyTransform( joint.bodyA ).rotation * rot2::FromRadians( joint.referenceAngle );
+                draw.DrawArrow( joint.anchorA, Rotate( targetRotation, { 1.0f, 0.0f } ), SPRING_COLOR, 0.65f );
             }
             return;
         }
@@ -218,7 +236,7 @@ private:
         if( !ImGui::CollapsingHeader( "모터 조인트 인스펙터###MotorJointInspector", ImGuiTreeNodeFlags_DefaultOpen ) ) return;
 
         motorJointData joint = view_.getWorld().getMotorJointData( view_.getMotorJoint() );
-        ImGui::TextWrapped( "선형과 회전 채널은 위치 오차가 아니라 Cdot = 상대속도 - 목표속도를 0으로 만듭니다. 최대 힘/토크는 한 substep의 누적 impulse 한도를 결정합니다." );
+        ImGui::TextWrapped( "Velocity 채널은 상대속도를 직접 목표로 하고, Transform Spring은 anchor 위치와 기준 상대각도 오차를 실제 spring-damper 힘으로 복원합니다." );
 
         if( ImGui::TreeNodeEx( "선형 Velocity Motor###MotorJointLinearSettings", ImGuiTreeNodeFlags_DefaultOpen ) )
         {
@@ -245,9 +263,45 @@ private:
         }
 
         joint = view_.getWorld().getMotorJointData( view_.getMotorJoint() );
+        if( ImGui::TreeNodeEx( "선형 Transform Spring###MotorJointLinearSpring", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            float hertz = joint.linearHertz;
+            float dampingRatio = joint.linearDampingRatio;
+            float maxForce = joint.maxSpringForce;
+            bool changed = ImGui::DragFloat( "주파수###MotorJointLinearSpringHertz", &hertz, 0.1f, 0.0f, 30.0f, "%.2f Hz" );
+            changed |= ImGui::DragFloat( "감쇠비###MotorJointLinearSpringDamping", &dampingRatio, 0.02f, 0.0f, 2.0f, "%.2f" );
+            changed |= ImGui::DragFloat( "최대 Spring 힘###MotorJointMaxSpringForce", &maxForce, 0.25f, 0.0f, 100.0f, "%.2f N" );
+            hertz = std::max( 0.0f, hertz );
+            dampingRatio = std::max( 0.0f, dampingRatio );
+            maxForce = std::max( 0.0f, maxForce );
+            if( changed ) view_.setMotorJointLinearSpringSettings( hertz, dampingRatio, maxForce );
+            ImGui::TreePop();
+        }
+
+        joint = view_.getWorld().getMotorJointData( view_.getMotorJoint() );
+        if( ImGui::TreeNodeEx( "회전 Transform Spring###MotorJointAngularSpring", ImGuiTreeNodeFlags_DefaultOpen ) )
+        {
+            float referenceAngle = joint.referenceAngle;
+            float hertz = joint.angularHertz;
+            float dampingRatio = joint.angularDampingRatio;
+            float maxTorque = joint.maxSpringTorque;
+            bool changed = ImGui::DragFloat( "기준 상대각도###MotorJointReferenceAngle", &referenceAngle, 0.02f, -3.14f, 3.14f, "%.2f rad" );
+            changed |= ImGui::DragFloat( "주파수###MotorJointAngularSpringHertz", &hertz, 0.1f, 0.0f, 30.0f, "%.2f Hz" );
+            changed |= ImGui::DragFloat( "감쇠비###MotorJointAngularSpringDamping", &dampingRatio, 0.02f, 0.0f, 2.0f, "%.2f" );
+            changed |= ImGui::DragFloat( "최대 Spring 토크###MotorJointMaxSpringTorque", &maxTorque, 0.25f, 0.0f, 100.0f, "%.2f N*m" );
+            hertz = std::max( 0.0f, hertz );
+            dampingRatio = std::max( 0.0f, dampingRatio );
+            maxTorque = std::max( 0.0f, maxTorque );
+            if( changed ) view_.setMotorJointAngularSpringSettings( referenceAngle, hertz, dampingRatio, maxTorque );
+            ImGui::TreePop();
+        }
+
+        joint = view_.getWorld().getMotorJointData( view_.getMotorJoint() );
         ImGui::SeparatorText( "현재 상태###MotorJointState" );
         ImGui::Text( "Target linear: (%.2f, %.2f) m/s", joint.linearVelocity.x, joint.linearVelocity.y );
         ImGui::Text( "Target angular: %.2f rad/s", joint.angularVelocity );
+        ImGui::Text( "Linear spring: %.2f Hz / damping %.2f / %.2f N", joint.linearHertz, joint.linearDampingRatio, joint.maxSpringForce );
+        ImGui::Text( "Angular spring: %.2f rad / %.2f Hz / damping %.2f / %.2f N*m", joint.referenceAngle, joint.angularHertz, joint.angularDampingRatio, joint.maxSpringTorque );
         ImGui::Text( "Reaction force: (%.2f, %.2f) N", joint.force.x, joint.force.y );
         ImGui::Text( "Reaction torque: %.2f N*m", joint.torque );
     }
