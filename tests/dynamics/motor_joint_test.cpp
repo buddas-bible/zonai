@@ -119,6 +119,30 @@ int main()
     check( springStateB.linearVelocity.x < 0.0f, "linear Motor spring pulls separated anchor B toward anchor A" );
     check( springConstraint.linearSpringImpulse.x < 0.0f, "linear Motor spring accumulates a restoring impulse" );
 
+    // Angular spring은 referenceAngle에 대한 상대각도 오차를 spring-damper 토크로 줄여야 함.
+    bodySim angularBodyA{};
+    angularBodyA.bodyId = 6;
+    bodySim angularBodyB{};
+    angularBodyB.bodyId = 7;
+    angularBodyB.transform.rotation = rot2::FromRadians( 0.5f );
+    angularBodyB.invInertia = 1.0f;
+
+    motorJointSim2 angularSpringJoint{};
+    angularSpringJoint.jointId = 3;
+    angularSpringJoint.bodyIdA = 6;
+    angularSpringJoint.bodyIdB = 7;
+    angularSpringJoint.referenceAngle = 0.0f;
+    angularSpringJoint.angularHertz = 4.0f;
+    angularSpringJoint.angularDampingRatio = 0.7f;
+    angularSpringJoint.maxSpringTorque = 1000.0f;
+
+    auto angularSpringConstraint = prepareMotorJointConstraint( angularSpringJoint, angularBodyA, angularBodyB, h );
+    bodyState angularStateA{};
+    bodyState angularStateB{};
+    solveMotorJointConstraint( angularSpringConstraint, angularStateA, angularStateB );
+    check( angularStateB.angularVelocity < 0.0f, "angular Motor spring rotates B toward referenceAngle" );
+    check( angularSpringConstraint.angularSpringImpulse < 0.0f, "angular Motor spring accumulates a restoring impulse" );
+
     // World가 Motor를 공용 Joint graph / solver 경로에 넣고 query까지 되돌려주는지 검증함.
     world simulation;
     simulation.SetGravity( {} );
