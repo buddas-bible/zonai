@@ -41,6 +41,10 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createMouseJointPlayground();
     }
+    else if( kind == demoKind::motorJointPlayground )
+    {
+        createMotorJointPlayground();
+    }
     else
     {
         assert( kind == demoKind::motorCar );

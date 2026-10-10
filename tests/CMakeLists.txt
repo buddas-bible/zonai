@@ -501,6 +501,10 @@ add_executable(distanceJointWorldTests dynamics/distance_joint_world_test.cpp)
 target_link_libraries(distanceJointWorldTests PRIVATE zonai::zonai)
 add_test(NAME distanceJointWorldTests COMMAND distanceJointWorldTests)
 
+add_executable(motorJointTests dynamics/motor_joint_test.cpp)
+target_link_libraries(motorJointTests PRIVATE zonai::zonai)
+add_test(NAME motorJointTests COMMAND motorJointTests)
+
 add_executable(mouseJointTests dynamics/mouse_joint_test.cpp)
 target_link_libraries(mouseJointTests PRIVATE zonai::zonai)
 add_test(NAME mouseJointTests COMMAND mouseJointTests)
@@ -581,3 +585,8 @@ if(TARGET imgui)
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/sandbox/assets" "$<TARGET_FILE_DIR:sandboxJointViewTests>/assets"
     )
 endif()
+
+add_executable(sandboxMotorJointDemoTests sandbox/motor_joint_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
+target_include_directories(sandboxMotorJointDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+target_link_libraries(sandboxMotorJointDemoTests PRIVATE zonai::zonai)
+add_test(NAME sandboxMotorJointDemoTests COMMAND sandboxMotorJointDemoTests)

@@ -45,6 +45,19 @@ void rigidBodyDemo::setWeldAngularSettings( float hertz, float dampingRatio )
     world_.setWeldJointAngularTuning( weldJoint_, hertz, dampingRatio );
 }
 
+
+void rigidBodyDemo::setMotorJointLinearSettings( vec2 linearVelocity, float maxVelocityForce )
+{
+    if( kind_ != demoKind::motorJointPlayground || !world_.IsValid( motorJoint_ ) ) return;
+    world_.setMotorJointLinearVelocity( motorJoint_, linearVelocity, maxVelocityForce );
+}
+
+void rigidBodyDemo::setMotorJointAngularSettings( float angularVelocity, float maxVelocityTorque )
+{
+    if( kind_ != demoKind::motorJointPlayground || !world_.IsValid( motorJoint_ ) ) return;
+    world_.setMotorJointAngularVelocity( motorJoint_, angularVelocity, maxVelocityTorque );
+}
+
 #pragma endregion Settings
 
 #pragma region Presets
@@ -218,6 +231,51 @@ void rigidBodyDemo::applyWeldPreset( weldDemoPreset preset )
     world_.setWeldJointAngularTuning( weldJoint_, softAngular ? hertz : 0.0f, dampingRatio );
 }
 
+
+void rigidBodyDemo::applyMotorJointPreset( motorJointDemoPreset preset )
+{
+    if( kind_ != demoKind::motorJointPlayground || !world_.IsValid( motorJoint_ ) ) return;
+
+    constexpr vec2 linearVelocity{ 2.0f, 0.5f };
+    constexpr float maxVelocityForce = 20.0f;
+    constexpr float angularVelocity = 2.0f;
+    constexpr float maxVelocityTorque = 10.0f;
+
+    vec2 targetLinearVelocity{};
+    float linearForce = 0.0f;
+    float targetAngularVelocity = 0.0f;
+    float angularTorque = 0.0f;
+
+    switch( preset )
+    {
+    case motorJointDemoPreset::brake:
+        // 목표속도 0에 유한한 힘/토크를 주면 transform lock이 아니라 속도를 죽이는 brake가 됨.
+        linearForce = maxVelocityForce;
+        angularTorque = maxVelocityTorque;
+        break;
+
+    case motorJointDemoPreset::linear:
+        targetLinearVelocity = linearVelocity;
+        linearForce = maxVelocityForce;
+        break;
+
+    case motorJointDemoPreset::angular:
+        targetAngularVelocity = angularVelocity;
+        angularTorque = maxVelocityTorque;
+        break;
+
+    case motorJointDemoPreset::combined:
+        targetLinearVelocity = linearVelocity;
+        linearForce = maxVelocityForce;
+        targetAngularVelocity = angularVelocity;
+        angularTorque = maxVelocityTorque;
+        break;
+    }
+
+    world_.setMotorJointLinearVelocity( motorJoint_, targetLinearVelocity, linearForce );
+    world_.setMotorJointAngularVelocity( motorJoint_, targetAngularVelocity, angularTorque );
+}
+
 #pragma endregion Presets
 
 #pragma region Queries
@@ -280,6 +338,31 @@ void rigidBodyDemo::createWeldPair()
 
     impulseBody_ = bodyB;
     torqueBody_ = bodyB;
+}
+
+
+void rigidBodyDemo::createMotorJointPlayground()
+{
+    world_.SetGravity( {} );
+
+    // A는 움직이지 않는 기준 frame, B는 Motor의 목표 상대속도를 따라가는 Dynamic body임.
+    const bodyId reference = world_.CreateBody( bodyType::Static, { { -2.0f, 0.0f }, {} } );
+    const shapeId referenceShape = world_.CreateShape( reference, MakeBox( { 0.25f, 0.25f } ) );
+    shapes_.push_back( { reference, referenceShape, "기준 Body A [정적]" } );
+
+    const bodyId driven = world_.CreateBody( bodyType::Dynamic, { { 0.0f, 0.0f }, {} } );
+    const shapeId drivenShape = world_.CreateShape( driven, MakeBox( { 0.55f, 0.35f } ) );
+    shapes_.push_back( { driven, drivenShape, "구동 Body B [Motor Joint]" } );
+
+    motorJointDef joint{};
+    joint.bodyA = reference;
+    joint.bodyB = driven;
+    joint.maxVelocityForce = 20.0f;
+    joint.maxVelocityTorque = 10.0f;
+    motorJoint_ = world_.createMotorJoint( joint );
+
+    impulseBody_ = driven;
+    torqueBody_ = driven;
 }
 
 void rigidBodyDemo::createMouseJointPlayground()

@@ -62,6 +62,15 @@ enum class weldDemoPreset
     softBoth
 };
 
+// Motor Joint 자체의 선형/회전 velocity 채널을 독립적으로 비교하는 빠른 설정.
+enum class motorJointDemoPreset
+{
+    brake,
+    linear,
+    angular,
+    combined
+};
+
 class rigidBodyDemo : public demo
 {
 public:
@@ -85,11 +94,14 @@ public:
     void setPrismaticSpringTargetToCurrent();
     void setWeldLinearSettings( float hertz, float dampingRatio );
     void setWeldAngularSettings( float hertz, float dampingRatio );
+    void setMotorJointLinearSettings( vec2 linearVelocity, float maxVelocityForce );
+    void setMotorJointAngularSettings( float angularVelocity, float maxVelocityTorque );
     void applyDistancePreset( distanceDemoPreset preset );
     void applyRevolutePreset( revoluteDemoPreset preset );
     void applyWheelPreset( wheelDemoPreset preset );
     void applyPrismaticPreset( prismaticDemoPreset preset );
     void applyWeldPreset( weldDemoPreset preset );
+    void applyMotorJointPreset( motorJointDemoPreset preset );
 #pragma endregion Settings
 
 #pragma region Contacts
@@ -124,6 +136,8 @@ public:
 
     [[nodiscard]] jointId getWeldJoint() const noexcept { return weldJoint_; }
 
+    [[nodiscard]] jointId getMotorJoint() const noexcept { return motorJoint_; }
+
     [[nodiscard]] float getPrismaticCurrentSpeed() const;
 
     [[nodiscard]] std::span<const jointId> getCarJoints() const noexcept { return carJoints_; }
@@ -147,6 +161,7 @@ private:
     void createPrismaticRail();
     void createWeldPair();
     void createMouseJointPlayground();
+    void createMotorJointPlayground();
     void createMotorCar();
 #pragma endregion SceneSetup
 
@@ -172,6 +187,7 @@ private:
     jointId wheelJoint_{};
     jointId prismaticJoint_{};
     jointId weldJoint_{};
+    jointId motorJoint_{}; // Motor Joint 전용 학습 데모에서 사용하는 persistent handle.
     std::array<jointId, 2> carJoints_{};
     float carMotorSpeed_ = 8.0f; // 주행 목표의 크기 (rad/s). 방향은 A/D 입력이 결정함.
     float carMaxMotorTorque_ = 5.0f; // 주행과 제동의 토크 한도 (N*m).

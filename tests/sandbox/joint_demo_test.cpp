@@ -25,7 +25,7 @@ void check( bool condition, const char* message )
 
 int main()
 {
-    check( getDemoEntries().size() == 8, "Weld demo is independently selectable" );
+    check( getDemoEntries().size() == 9, "Motor Joint demo is independently selectable" );
     check( std::string_view{ getDemoEntry( demoKind::mouseJointPlayground ).category } == "조인트", "mouse joint demo stays in joint category" );
     check( std::string_view{ getDemoEntry( demoKind::prismaticRail ).category } == "조인트", "Prismatic rail stays in joint category" );
     check( std::string_view{ getDemoEntry( demoKind::weldPair ).category } == "조인트", "Weld pair stays in joint category" );

@@ -21,6 +21,7 @@ enum class demoKind
     prismaticRail,
     weldPair,
     mouseJointPlayground,
+    motorJointPlayground,
     motorCar
 };
 
