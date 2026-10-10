@@ -1,0 +1,32 @@
+name: Apply Filter Joint Sandbox
+
+on:
+  push:
+    branches:
+      - feature/filter-joint
+    paths:
+      - "tools/apply_filter_sandbox.py"
+      - ".github/workflows/apply-filter-sandbox.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/filter-joint
+          fetch-depth: 0
+
+      - name: Apply Sandbox implementation
+        run: python3 tools/apply_filter_sandbox.py
+
+      - name: Commit Sandbox implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sandbox/rigidBodyDemo.cpp sandbox/rigidBodyJointDemo.cpp sandbox/jointDemoView.cpp tests/sandbox/demo_test.cpp tests/sandbox/joint_demo_test.cpp tests/sandbox/motor_joint_demo_test.cpp tests/sandbox/mover_joint_demo_test.cpp tests/sandbox/pogo_joint_demo_test.cpp
+          git commit -m "feat: add Filter Joint Sandbox playground"
+          git push origin HEAD:feature/filter-joint
