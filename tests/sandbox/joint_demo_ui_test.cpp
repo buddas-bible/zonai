@@ -132,6 +132,7 @@ int main()
         const int before = list->VtxBuffer.Size;
         debugDraw draw{ list, camera, { 0.0f, 0.0f }, { 800.0f, 700.0f } };
         ragdollView.draw( draw );
+        drawRagdollJointLimits( draw, ragdollView );
         const int vertices = list->VtxBuffer.Size - before;
 
         ImGui::End();
