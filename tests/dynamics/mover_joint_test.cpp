@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include "dynamics/joints/moverJointConstraint2.h"
+#include "dynamics/joints/pogoJointConstraint2.h"
 
 using namespace zonai;
 
@@ -67,6 +68,37 @@ int main()
 
     auto changedTimeConstraint = prepareMoverJointConstraint( cached, bodyA, bodyB, 0.5f * h );
     check( near( changedTimeConstraint.linearVelocityImpulse.x, 0.0f ) && near( changedTimeConstraint.linearVelocityImpulse.y, 0.0f ), "Mover discards cached impulse when substep time changes" );
+
+    // Pogo는 spring 길이 오차를 pogo axis로 측정하되 실제 impulse는 contact normal 방향으로 가함.
+    bodySim pogoBodyA{};
+    pogoBodyA.bodyId = 0;
+    bodySim pogoBodyB{};
+    pogoBodyB.bodyId = 1;
+    pogoBodyB.invMass = 1.0f;
+    pogoBodyB.invInertia = 1.0f;
+
+    pogoJointSim2 pogo{};
+    pogo.jointId = 1;
+    pogo.bodyIdA = 0;
+    pogo.bodyIdB = 1;
+    pogo.localAnchorA = {};
+    pogo.localAnchorB = { 1.0f, 0.0f };
+    pogo.localPogoAxisB = { 0.0f, 1.0f };
+    pogo.normal = { 0.0f, 1.0f };
+    pogo.restLength = 1.0f;
+    pogo.hertz = 4.0f;
+    pogo.dampingRatio = 0.7f;
+    pogo.maxCompressionForce = 1000.0f;
+    pogo.maxTensionForce = 1000.0f;
+
+    auto pogoConstraint = preparePogoJointConstraint( pogo, pogoBodyA, pogoBodyB, h );
+    bodyState pogoStateA{};
+    bodyState pogoStateB{};
+    pogoStateB.deltaPosition = { 0.0f, -0.25f };
+    solvePogoJointConstraint( pogoConstraint, pogoStateA, pogoStateB, true );
+
+    check( pogoStateB.linearVelocity.y > 0.0f, "Pogo compression pushes body B along the contact normal" );
+    check( pogoStateB.angularVelocity > 0.0f, "Off-center Pogo impulse produces physical angular response" );
 
     return EXIT_SUCCESS;
 }
