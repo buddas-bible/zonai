@@ -33,11 +33,19 @@ struct motorJointSim2
     float angularVelocity = 0.0f;
     float maxVelocityTorque = 0.0f;
 
+    // B가 A에 대해 유지하려는 기준 상대각도와 회전 spring-damper 설정.
+    // 0 Hz 또는 0 max torque면 회전 spring 채널은 비활성화됨.
+    float referenceAngle = 0.0f;
+    float angularHertz = 0.0f;
+    float angularDampingRatio = 0.0f;
+    float maxSpringTorque = 0.0f;
+
     // 이전 substep에서 구한 velocity motor / transform spring 누적 impulse.
-    // 두 채널은 독립적으로 cache하지만 Warm Start에서는 합쳐서 Body에 적용함.
+    // 두 응답은 독립적으로 cache하지만 Warm Start에서는 각 방향별 합을 Body에 적용함.
     vec2 linearVelocityImpulse{};
     vec2 linearSpringImpulse{};
     float angularVelocityImpulse = 0.0f;
+    float angularSpringImpulse = 0.0f;
     float subStepTime = 0.0f;
 };
 
