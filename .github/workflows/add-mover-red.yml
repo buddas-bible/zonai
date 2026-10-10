@@ -1,4 +1,4 @@
-name: Verify Mover World RED
+name: Build Mover World GREEN
 
 on:
   push:
@@ -12,14 +12,14 @@ permissions:
   contents: write
 
 jobs:
-  red:
+  green:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/mover-joint
 
-      - name: Apply World API RED test
+      - name: Apply Mover World integration
         run: python3 tools/add_mover_red.py
 
       - name: Install CMake 4.2
@@ -28,28 +28,20 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DZONAI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
 
-      - name: Verify missing World API fails the build
-        shell: bash
-        run: |
-          set +e
-          cmake --build build --target moverJointWorldTests --parallel 2 > build.log 2>&1
-          status=$?
-          set -e
-          cat build.log
-          if [ "$status" -eq 0 ]; then
-            echo "Expected moverJointWorldTests build to fail before World integration"
-            exit 1
-          fi
-          grep -Eq "moverJointDef|createMoverJoint|getMoverJointData|setMoverJoint" build.log
+      - name: Build focused Mover tests
+        run: cmake --build build --target moverJointTests moverJointWorldTests --parallel 2
 
-      - name: Commit World API RED test
+      - name: Run focused Mover tests
+        run: ctest --test-dir build -R "^moverJoint(Tests|WorldTests)$" --output-on-failure
+
+      - name: Commit World integration
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/CMakeLists.txt tests/dynamics/mover_joint_world_test.cpp
+          git add src/dynamics/joints/moverJoint2.h src/dynamics/world.h src/dynamics/world.cpp
           if git diff --cached --quiet; then
-            echo "No test changes"
+            echo "No World changes"
           else
-            git commit -m "Add Mover World API RED test"
+            git commit -m "Integrate Mover Joint into World"
             git push origin HEAD:feature/mover-joint
           fi
