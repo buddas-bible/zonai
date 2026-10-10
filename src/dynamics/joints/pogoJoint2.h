@@ -29,7 +29,8 @@ struct pogoJointDef
     float maxTensionForce = 0.0f;
     float maxCompressionForce = 0.0f;
 
-    // Pogo는 지면 Body가 바뀌면 매 frame 재생성될 수 있으므로 이전 내부 상태를 새 Joint에 넘길 수 있게 함.
+    // Pogo는 지면 Body가 바뀌면 매 frame 재생성될 수 있음.
+    // 직전에 파괴한 Pogo의 impulse / velocity를 여기로 넘기면 새 hit에서도 spring 상태가 끊기지 않음.
     float impulse = 0.0f;
     float velocity = 0.0f;
 
