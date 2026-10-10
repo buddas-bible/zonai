@@ -1,0 +1,49 @@
+name: Update Motor demo count tests
+
+on:
+  push:
+    branches:
+      - feature/motor-joint
+    paths:
+      - .github/workflows/update-motor-demo-count-tests.yml
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/motor-joint
+      - name: Update existing demo count expectations
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          replacements = {
+              'tests/sandbox/demo_test.cpp': (
+                  'check( getDemoEntries().size() == 8, "eight independently selectable demo entries" );',
+                  'check( getDemoEntries().size() == 9, "nine independently selectable demo entries" );',
+              ),
+              'tests/sandbox/joint_demo_test.cpp': (
+                  'check( getDemoEntries().size() == 8, "Weld demo is independently selectable" );',
+                  'check( getDemoEntries().size() == 9, "Motor Joint demo is independently selectable" );',
+              ),
+          }
+          for file_name, (old, new) in replacements.items():
+              path = Path(file_name)
+              text = path.read_text(encoding='utf-8')
+              if text.count(old) != 1:
+                  raise RuntimeError(f'{file_name}: expected one old demo count')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+      - name: Commit updated expectations
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/sandbox/demo_test.cpp tests/sandbox/joint_demo_test.cpp
+          git diff --cached --check
+          git commit -m "Update Sandbox demo count for Motor Joint"
+          git push origin HEAD:feature/motor-joint
