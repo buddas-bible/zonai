@@ -1,0 +1,40 @@
+name: Register Motor Sandbox test
+
+on:
+  push:
+    branches:
+      - feature/motor-joint
+    paths:
+      - .github/workflows/register-motor-sandbox-test.yml
+
+permissions:
+  contents: write
+
+jobs:
+  register:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/motor-joint
+      - name: Register focused test
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/CMakeLists.txt')
+          text = path.read_text(encoding='utf-8')
+          marker = 'add_executable(sandboxMotorJointDemoTests'
+          if marker in text:
+              raise SystemExit('already registered')
+          block = '''\nadd_executable(sandboxMotorJointDemoTests sandbox/motor_joint_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")\ntarget_include_directories(sandboxMotorJointDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")\ntarget_link_libraries(sandboxMotorJointDemoTests PRIVATE zonai::zonai)\nadd_test(NAME sandboxMotorJointDemoTests COMMAND sandboxMotorJointDemoTests)\n'''
+          path.write_text(text + block, encoding='utf-8')
+          PY
+      - name: Commit test registration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/CMakeLists.txt
+          git diff --cached --check
+          git commit -m "Register Motor Joint Sandbox tests"
+          git push origin HEAD:feature/motor-joint
