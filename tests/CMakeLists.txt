@@ -628,6 +628,11 @@ target_include_directories(sandboxPogoJointDemoTests PRIVATE "${PROJECT_SOURCE_D
 target_link_libraries(sandboxPogoJointDemoTests PRIVATE zonai::zonai)
 add_test(NAME sandboxPogoJointDemoTests COMMAND sandboxPogoJointDemoTests)
 
+add_executable(sandboxFilterJointDemoTests sandbox/filter_joint_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
+target_include_directories(sandboxFilterJointDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+target_link_libraries(sandboxFilterJointDemoTests PRIVATE zonai::zonai)
+add_test(NAME sandboxFilterJointDemoTests COMMAND sandboxFilterJointDemoTests)
+
 add_executable(sandboxMotorJointDemoTests sandbox/motor_joint_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
 target_include_directories(sandboxMotorJointDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxMotorJointDemoTests PRIVATE zonai::zonai)
