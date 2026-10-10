@@ -33,7 +33,7 @@ struct pogoJointDef
     float impulse = 0.0f;
     float velocity = 0.0f;
 
-    bool collideConnected = true;
+    bool collideConnected = false;
 };
 
 // getPogoJointData()가 반환하는 현재 Pogo 상태 snapshot.
@@ -59,7 +59,7 @@ struct pogoJointData
     float impulse = 0.0f;
     float velocity = 0.0f;
 
-    bool collideConnected = true;
+    bool collideConnected = false;
 };
 
 } // namespace zonai
