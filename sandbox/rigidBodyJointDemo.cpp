@@ -71,6 +71,14 @@ void rigidBodyDemo::setMotorJointAngularSpringSettings( float referenceAngle, fl
     world_.setMotorJointAngularSpring( motorJoint_, referenceAngle, hertz, dampingRatio, maxSpringTorque );
 }
 
+
+void rigidBodyDemo::setMoverJointSettings( vec2 linearVelocity, vec2 maxVelocityForce )
+{
+    if( kind_ != demoKind::moverJointPlayground || !world_.IsValid( moverJoint_ ) ) return;
+    world_.setMoverJointLinearVelocity( moverJoint_, linearVelocity );
+    world_.setMoverJointMaxVelocityForce( moverJoint_, maxVelocityForce );
+}
+
 #pragma endregion Settings
 
 #pragma region Presets
@@ -333,6 +341,38 @@ void rigidBodyDemo::applyMotorJointPreset( motorJointDemoPreset preset )
     world_.setMotorJointAngularSpring( motorJoint_, angularSpringTarget, angularSpringHertz, springDampingRatio, angularSpringTorque );
 }
 
+
+void rigidBodyDemo::applyMoverJointPreset( moverJointDemoPreset preset )
+{
+    if( kind_ != demoKind::moverJointPlayground || !world_.IsValid( moverJoint_ ) ) return;
+
+    vec2 targetVelocity{};
+    vec2 maxForce{ 20.0f, 20.0f };
+
+    switch( preset )
+    {
+    case moverJointDemoPreset::horizontal:
+        targetVelocity = { 2.0f, 0.0f };
+        break;
+
+    case moverJointDemoPreset::vertical:
+        targetVelocity = { 0.0f, 2.0f };
+        break;
+
+    case moverJointDemoPreset::diagonal:
+        targetVelocity = { 1.5f, 1.5f };
+        break;
+
+    case moverJointDemoPreset::anisotropic:
+        targetVelocity = { 2.0f, 2.0f };
+        // 같은 속도 목표라도 x/y actuator 예산을 다르게 줘 축별 clamp를 눈으로 비교함.
+        maxForce = { 20.0f, 5.0f };
+        break;
+    }
+
+    setMoverJointSettings( targetVelocity, maxForce );
+}
+
 #pragma endregion Presets
 
 #pragma region Queries
@@ -397,6 +437,30 @@ void rigidBodyDemo::createWeldPair()
     torqueBody_ = bodyB;
 }
 
+
+void rigidBodyDemo::createMoverJointPlayground()
+{
+    world_.SetGravity( {} );
+
+    // Mover는 Body 위치나 anchor를 제약하지 않음. A는 상대 선속도의 기준 Body로만 사용함.
+    const bodyId reference = world_.CreateBody( bodyType::Static, { { -2.0f, 0.0f }, {} } );
+    const shapeId referenceShape = world_.CreateShape( reference, MakeBox( { 0.25f, 0.25f } ) );
+    shapes_.push_back( { reference, referenceShape, "기준 Body A [Mover]" } );
+
+    const bodyId driven = world_.CreateBody( bodyType::Dynamic, { { 0.0f, 0.0f }, {} } );
+    const shapeId drivenShape = world_.CreateShape( driven, MakeBox( { 0.55f, 0.35f } ) );
+    shapes_.push_back( { driven, drivenShape, "구동 Body B [Mover]" } );
+
+    moverJointDef joint{};
+    joint.bodyA = reference;
+    joint.bodyB = driven;
+    joint.linearVelocity = { 2.0f, 0.0f };
+    joint.maxVelocityForce = { 20.0f, 20.0f };
+    moverJoint_ = world_.createMoverJoint( joint );
+
+    impulseBody_ = driven;
+    torqueBody_ = driven;
+}
 
 void rigidBodyDemo::createMotorJointPlayground()
 {

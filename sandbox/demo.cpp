@@ -22,6 +22,7 @@ constexpr std::array entries
     demoEntry{ demoKind::mouseJointPlayground, "조인트", "마우스 조인트", "캔버스: 질량이 다른 상자를 왼쪽 드래그로 잡아 움직입니다. 주파수·감쇠·최대 힘을 바꾸며 같은 설정에서 질량에 따른 추종 차이를 비교합니다.", { 0.0f, 0.0f }, 90.0f },
     demoEntry{ demoKind::weldPair, "조인트", "웰드 조인트", "캔버스: A/D 유지로 오른쪽 상자를 밀기, 스페이스로 위쪽 충격량, S로 회전 충격량을 가합니다. 한쪽에만 힘을 줘도 두 상자의 연결점과 상대 각도가 유지되어 하나의 강체처럼 움직이는지 관찰합니다.", { 0.0f, 0.0f }, 100.0f },
     demoEntry{ demoKind::motorJointPlayground, "조인트", "모터 조인트", "Motor Joint의 상대속도 actuator와 목표 transform spring을 비교합니다. 제동·선형·회전·스프링·결합 프리셋으로 속도 목표와 위치/각도 복원의 차이를 관찰합니다.", { 0.0f, 0.0f }, 95.0f },
+    demoEntry{ demoKind::moverJointPlayground, "조인트", "무버 조인트", "Mover Joint는 두 Body의 COM 상대 선속도만 제어하고 회전은 건드리지 않습니다. 수평·수직·대각선·축별 힘 한도 프리셋으로 character mover용 velocity actuator를 비교합니다.", { 0.0f, 0.0f }, 95.0f },
     demoEntry{ demoKind::motorCar, "연결 장치", "모터 자동차", "캔버스: A/D 유지로 왼쪽/오른쪽 주행, 스페이스 유지로 제동. 키를 놓으면 자유 주행합니다. 왼쪽 드래그로 차체나 바퀴 잡기, 오른쪽 클릭으로 차체 밀기. 모터·마찰·서스펜션을 비교하고 가운데 드래그로 주행 경로를 따라갑니다.", { 4.0f, 1.0f }, 50.0f }
 };
 

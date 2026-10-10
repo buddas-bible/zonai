@@ -22,6 +22,7 @@ enum class demoKind
     weldPair,
     mouseJointPlayground,
     motorJointPlayground,
+    moverJointPlayground,
     motorCar
 };
 
