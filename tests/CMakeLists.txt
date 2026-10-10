@@ -602,6 +602,11 @@ if(TARGET imgui)
     )
 endif()
 
+add_executable(sandboxMoverJointDemoTests sandbox/mover_joint_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
+target_include_directories(sandboxMoverJointDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+target_link_libraries(sandboxMoverJointDemoTests PRIVATE zonai::zonai)
+add_test(NAME sandboxMoverJointDemoTests COMMAND sandboxMoverJointDemoTests)
+
 add_executable(sandboxMotorJointDemoTests sandbox/motor_joint_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
 target_include_directories(sandboxMotorJointDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxMotorJointDemoTests PRIVATE zonai::zonai)
