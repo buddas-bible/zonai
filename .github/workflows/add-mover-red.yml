@@ -1,4 +1,4 @@
-name: Build Mover Sandbox GREEN
+name: Verify Mover UI RED
 
 on:
   push:
@@ -12,36 +12,44 @@ permissions:
   contents: write
 
 jobs:
-  green:
-    runs-on: ubuntu-latest
+  red:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/mover-joint
 
-      - name: Apply Mover Sandbox integration
-        run: python3 tools/add_mover_red.py
-
-      - name: Install CMake 4.2
-        run: python3 -m pip install "cmake>=4.2,<4.3"
+      - name: Apply Mover UI RED test
+        run: python tools/add_mover_red.py
 
       - name: Configure
-        run: cmake -S . -B build -DZONAI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -S . -B build -DZONAI_BUILD_TESTS=ON
 
-      - name: Build Sandbox regression tests
-        run: cmake --build build --target sandboxMoverJointDemoTests sandboxMotorJointDemoTests sandboxDemoTests sandboxJointDemoTests --parallel 2
+      - name: Build joint view test
+        run: cmake --build build --config Debug --target sandboxJointViewTests --parallel 2
 
-      - name: Run Sandbox regression tests
-        run: ctest --test-dir build -R "^(sandboxMoverJointDemoTests|sandboxMotorJointDemoTests|sandboxDemoTests|sandboxJointDemoTests)$" --output-on-failure
+      - name: Verify missing Mover overlay fails the test
+        shell: pwsh
+        run: |
+          $output = & .\build\tests\Debug\sandboxJointViewTests.exe 2>&1
+          $status = $LASTEXITCODE
+          $output | Write-Host
+          if ($status -eq 0) {
+            throw "Expected sandboxJointViewTests to fail before Mover view integration"
+          }
+          if (($output -join "`n") -notmatch "Mover joint view drew no velocity/reaction overlay") {
+            throw "Mover UI RED failed for an unexpected reason"
+          }
 
-      - name: Commit Sandbox integration
+      - name: Commit Mover UI RED test
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add sandbox/demo.h sandbox/demo.cpp sandbox/rigidBodyDemo.h sandbox/rigidBodyDemo.cpp sandbox/rigidBodyJointDemo.cpp tests/sandbox/demo_test.cpp tests/sandbox/joint_demo_test.cpp tests/sandbox/motor_joint_demo_test.cpp
+          git add tests/sandbox/joint_demo_ui_test.cpp
           if git diff --cached --quiet; then
-            echo "No Sandbox changes"
+            echo "No UI test changes"
           else
-            git commit -m "Add Mover Joint Sandbox"
+            git commit -m "Add Mover UI RED test"
             git push origin HEAD:feature/mover-joint
           fi
