@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include "dynamics/joints/motorJointConstraint2.h"
 #include "dynamics/joints/mouseJointConstraint2.h"
 
 using namespace zonai;
@@ -94,6 +95,42 @@ int main()
     constraint = prepareMouseJointConstraint( joint, body, 1.0f / 120.0f );
     solveMouseJointConstraint( constraint, state );
     check( IsFinite( state.linearVelocity ) && state.angularVelocity == 0.0f, "singular mass remains finite" );
+
+    // Motor Joint Stage 1은 위치 오차를 없애는 대신 두 Body의 상대 속도를 목표값으로 맞춤.
+    bodySim motorBodyA{};
+    motorBodyA.bodyId = 0;
+    motorBodyA.invMass = 1.0f;
+    motorBodyA.invInertia = 1.0f;
+    bodySim motorBodyB{};
+    motorBodyB.bodyId = 1;
+    motorBodyB.invMass = 1.0f;
+    motorBodyB.invInertia = 1.0f;
+    motorJointSim2 motorJoint{};
+    motorJoint.jointId = 0;
+    motorJoint.bodyIdA = 0;
+    motorJoint.bodyIdB = 1;
+    motorJoint.linearVelocity = { 2.0f, -1.0f };
+    motorJoint.maxVelocityForce = 1000.0f;
+    motorJoint.angularVelocity = 3.0f;
+    motorJoint.maxVelocityTorque = 1000.0f;
+    const float motorH = 1.0f / 60.0f;
+    auto motorConstraint = prepareMotorJointConstraint( motorJoint, motorBodyA, motorBodyB, motorH );
+    bodyState motorStateA{};
+    bodyState motorStateB{};
+    solveMotorJointConstraint( motorConstraint, motorStateA, motorStateB );
+    check( near( motorStateB.linearVelocity.x - motorStateA.linearVelocity.x, 2.0f ) && near( motorStateB.linearVelocity.y - motorStateA.linearVelocity.y, -1.0f ), "motor reaches desired relative linear velocity" );
+    check( near( motorStateB.angularVelocity - motorStateA.angularVelocity, 3.0f ), "motor reaches desired relative angular velocity" );
+
+    motorJoint.linearVelocity = { 10.0f, 0.0f };
+    motorJoint.maxVelocityForce = 6.0f;
+    motorJoint.angularVelocity = 10.0f;
+    motorJoint.maxVelocityTorque = 12.0f;
+    motorConstraint = prepareMotorJointConstraint( motorJoint, motorBodyA, motorBodyB, motorH );
+    motorStateA = {};
+    motorStateB = {};
+    solveMotorJointConstraint( motorConstraint, motorStateA, motorStateB );
+    check( near( Length( motorConstraint.linearVelocityImpulse ), motorJoint.maxVelocityForce * motorH ), "linear motor impulse is limited by max force times h" );
+    check( near( std::abs( motorConstraint.angularVelocityImpulse ), motorJoint.maxVelocityTorque * motorH ), "angular motor impulse is limited by max torque times h" );
 
     return EXIT_SUCCESS;
 }
