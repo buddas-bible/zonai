@@ -23,6 +23,8 @@
 #include "dynamics/joints/joint2.h"
 #include "dynamics/joints/motorJoint2.h"
 #include "dynamics/joints/motorJointConstraint2.h"
+#include "dynamics/joints/moverJoint2.h"
+#include "dynamics/joints/moverJointConstraint2.h"
 #include "dynamics/joints/mouseJoint2.h"
 #include "dynamics/joints/mouseJointConstraint2.h"
 #include "dynamics/joints/prismaticJoint2.h"
@@ -115,6 +117,14 @@ public:
     // 기준 상대각도와 회전 spring 설정. 변경 시 회전 spring cache만 비우고 component를 깨움.
     void setMotorJointAngularSpring( jointId id, float referenceAngle, float hertz, float dampingRatio, float maxSpringTorque );
     [[nodiscard]] motorJointData getMotorJointData( jointId id ) const;
+
+    // 두 Body의 COM 상대 선속도만 제어하며 회전은 건드리지 않음. 하나 이상은 Dynamic이어야 함.
+    [[nodiscard]] jointId createMoverJoint( const moverJointDef& definition );
+    // 목표 상대 선속도 변경은 누적 impulse를 비우고 연결된 non-static component를 깨움.
+    void setMoverJointLinearVelocity( jointId id, vec2 linearVelocity );
+    // x/y 방향별 최대 힘 변경은 누적 impulse를 비우고 연결된 non-static component를 깨움.
+    void setMoverJointMaxVelocityForce( jointId id, vec2 maxVelocityForce );
+    [[nodiscard]] moverJointData getMoverJointData( jointId id ) const;
 
     // 두 작용점을 일치시키며 상대 회전은 허용함. 서로 다른 Body 중 하나 이상은 Dynamic이어야 함.
     [[nodiscard]] jointId createRevoluteJoint( const revoluteJointDef& definition );
@@ -514,7 +524,7 @@ private:
 
 #pragma region JointSolver
 
-    using jointConstraint = std::variant<distanceJointConstraint2, motorJointConstraint2, mouseJointConstraint2, prismaticJointConstraint2, revoluteJointConstraint2, weldJointConstraint2, wheelJointConstraint2>;
+    using jointConstraint = std::variant<distanceJointConstraint2, motorJointConstraint2, moverJointConstraint2, mouseJointConstraint2, prismaticJointConstraint2, revoluteJointConstraint2, weldJointConstraint2, wheelJointConstraint2>;
     void warmStartJoints( std::span<jointConstraint> constraints );
     void solveJoints( std::span<jointConstraint> constraints, bool useBias );
 
@@ -603,7 +613,7 @@ private:
 
     // Joint cold / hot 데이터는 동일한 stable slot과 free-list를 공유함.
     std::vector<joint2> joints_;
-    std::vector<std::variant<distanceJointSim2, motorJointSim2, mouseJointSim2, prismaticJointSim2, revoluteJointSim2, weldJointSim2, wheelJointSim2>> jointSims_;
+    std::vector<std::variant<distanceJointSim2, motorJointSim2, moverJointSim2, mouseJointSim2, prismaticJointSim2, revoluteJointSim2, weldJointSim2, wheelJointSim2>> jointSims_;
     std::int32_t jointFreeList_ = -1;
     std::size_t jointCount_ = 0;
 
