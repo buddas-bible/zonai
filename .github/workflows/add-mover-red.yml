@@ -1,0 +1,35 @@
+name: Add Mover RED
+
+on:
+  push:
+    branches:
+      - feature/mover-joint
+    paths:
+      - "tools/add_mover_red.py"
+      - ".github/workflows/add-mover-red.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/mover-joint
+
+      - name: Apply RED test patch
+        run: python3 tools/add_mover_red.py
+
+      - name: Commit RED test
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/CMakeLists.txt tests/dynamics/mover_joint_test.cpp
+          if git diff --cached --quiet; then
+            echo "No patch changes"
+          else
+            git commit -m "Add Mover Joint solver RED test"
+            git push origin HEAD:feature/mover-joint
+          fi
