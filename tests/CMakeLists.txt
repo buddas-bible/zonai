@@ -513,6 +513,10 @@ add_executable(motorJointSpringWorldTests dynamics/motor_joint_spring_world_test
 target_link_libraries(motorJointSpringWorldTests PRIVATE zonai::zonai)
 add_test(NAME motorJointSpringWorldTests COMMAND motorJointSpringWorldTests)
 
+add_executable(moverJointTests dynamics/mover_joint_test.cpp)
+target_link_libraries(moverJointTests PRIVATE zonai::zonai)
+add_test(NAME moverJointTests COMMAND moverJointTests)
+
 add_executable(mouseJointTests dynamics/mouse_joint_test.cpp)
 target_link_libraries(mouseJointTests PRIVATE zonai::zonai)
 add_test(NAME mouseJointTests COMMAND mouseJointTests)
