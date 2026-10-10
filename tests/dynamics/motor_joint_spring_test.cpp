@@ -126,7 +126,8 @@ int main()
     check( LengthSquared( coexistConstraint.linearVelocityImpulse ) > 0.0f && LengthSquared( coexistConstraint.linearSpringImpulse ) > 0.0f, "linear velocity and spring channels accumulate independently" );
     check( std::abs( coexistConstraint.angularVelocityImpulse ) > 0.0f && std::abs( coexistConstraint.angularSpringImpulse ) > 0.0f, "angular velocity and spring channels accumulate independently" );
 
-    // COM 밖의 anchor에서도 두 spring이 함께 켜졌을 때 다음 적분 방향은 위치와 각도 오차를 모두 줄여야 함.
+    // COM 밖의 선형 spring은 실제 r x P 토크를 만들기 때문에 angular spring과 물리적으로 경쟁할 수 있음.
+    // 따라서 매 substep마다 두 오차가 각각 단조 감소해야 한다고 강제하지 않고, 각 actuator가 자기 오차에 반대되는 복원 impulse를 만드는지 확인함.
     bodySim coupledBodyA{};
     coupledBodyA.bodyId = 6;
     bodySim coupledBodyB{};
@@ -155,11 +156,9 @@ int main()
     solveMotorJointConstraint( coupledConstraint, coupledStateA, coupledStateB );
 
     const vec2 initialSeparation = coupledConstraint.deltaCenter + coupledConstraint.anchorB - coupledConstraint.anchorA;
-    const vec2 pointVelocityB = coupledStateB.linearVelocity + Cross( coupledStateB.angularVelocity, coupledConstraint.anchorB );
-    const vec2 predictedSeparation = initialSeparation + h * pointVelocityB;
-    const float predictedAngle = 0.5f + h * coupledStateB.angularVelocity;
-    check( Length( predictedSeparation ) < Length( initialSeparation ), "off-center combined springs reduce linear transform error" );
-    check( std::abs( predictedAngle ) < 0.5f, "off-center combined springs reduce angular transform error" );
+    check( Dot( coupledConstraint.linearSpringImpulse, initialSeparation ) < 0.0f, "off-center linear spring impulse opposes anchor separation" );
+    check( coupledConstraint.angularSpringImpulse < 0.0f, "off-center angular spring impulse opposes positive relative angle" );
+    check( IsFinite( coupledStateB.linearVelocity ) && std::isfinite( coupledStateB.angularVelocity ), "off-center combined spring response stays finite" );
 
     return EXIT_SUCCESS;
 }
