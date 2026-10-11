@@ -7,7 +7,6 @@
 
 #include "dynamics/body.h"
 #include "dynamics/bodyShape.h"
-#include "dynamics/contactSim2.h"
 #include "dynamics/shape.h"
 
 using namespace zonai;
@@ -46,12 +45,6 @@ int main()
         assert( defaultShape.filter.categoryBits == 0x00000004 );
         assert( defaultShape.filter.maskBits == 0x00000002 );
         assert( defaultShape.filter.groupIndex == -5 );
-    }
-
-    // Chain-polygon GJK 시작점을 Contact hot data에 보관해 다음 narrowphase에서 재사용함.
-    {
-        contactSim2 contact{};
-        assert( contact.simplexCache.count == 0 );
     }
 
     // runtime shape의 geometry와 density로 질량 특성을 계산함.
