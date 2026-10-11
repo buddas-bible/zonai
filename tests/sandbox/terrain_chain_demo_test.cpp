@@ -201,7 +201,11 @@ int main()
     check( contactWorld.GetShapeContactData( probeShape, contacts ) > 0, "moved chain proxy did not create contact" );
     const contactId oldContact = contacts[0].id;
 
+    contactWorld.SetBodyAwake( probeBody, false );
+    check( !contactWorld.IsBodyAwake( probeBody ), "contact edit sleep fixture" );
+
     contactWorld.SetChainPoint( contactChain, 1, { 0.0f, -2.0f } );
+    check( contactWorld.IsBodyAwake( probeBody ), "chain point edit did not wake body from destroyed contact" );
     check( !contactWorld.IsValid( oldContact ), "chain point edit kept stale contact" );
     contactWorld.UpdateCollisions( []( const contactData& ) {} );
     check( contactWorld.GetShapeContactData( probeShape, contacts ) == 0, "chain point edit recreated stale contact" );
