@@ -57,6 +57,10 @@ void world::SetChainSegment( shapeId shapeId, const chainSegment2& chainSegment 
     storedShape.geometry = chainSegment;
     storedShape.aabbMargin = ComputeShapeAABBMargin( storedShape.geometry );
 
+    // Chain은 질량/COM을 바꾸지 않지만 local center에서의 최대 반경은
+    // CCD, sleep, contact recycling 판정에 사용되므로 geometry 교체 직후 다시 합산함.
+    UpdateBodyShapeExtents( bodyIndex );
+
     const transform2 transform = bodySims_[bodyIndex].transform;
     const aabb2 tightAABB = ComputeShapeAABB( storedShape.geometry, transform );
     storedShape.aabb = ExpandAABB( tightAABB, SPECULATIVE_DISTANCE );
