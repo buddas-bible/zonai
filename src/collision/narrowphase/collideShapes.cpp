@@ -3,6 +3,8 @@
 #include <type_traits>
 #include <variant>
 
+#include "collision/distance2.h"
+
 namespace zonai
 {
 namespace
@@ -37,6 +39,18 @@ template <typename GeometryA, typename GeometryB> constexpr bool IsSupportedPair
     {
         return false;
     }
+    else if constexpr( std::is_same_v<A, chainSegment2> || std::is_same_v<B, chainSegment2> )
+    {
+        // Chain edge는 terrain용 one-sided shape라 circle/capsule/polygon하고만 contact를 만듦.
+        if constexpr( std::is_same_v<A, chainSegment2> )
+        {
+            return std::is_same_v<B, circle2> || std::is_same_v<B, capsule2> || std::is_same_v<B, polygon2>;
+        }
+        else
+        {
+            return std::is_same_v<A, circle2> || std::is_same_v<A, capsule2> || std::is_same_v<A, polygon2>;
+        }
+    }
     else if constexpr( std::is_same_v<A, segment2> && std::is_same_v<B, segment2> )
     {
         // Box2D와 동일하게 segment-segment contact는 지원하지 않음.
@@ -61,6 +75,13 @@ bool CanCollideShapes( const shapeGeometry& geometryA, const shapeGeometry& geom
 }
 
 localManifold2 CollideShapes( const shapeGeometry& geometryA, const transform2& transformA, const shapeGeometry& geometryB, const transform2& transformB )
+{
+    simplexCache2 cache{};
+
+    return CollideShapes( geometryA, transformA, geometryB, transformB, cache );
+}
+
+localManifold2 CollideShapes( const shapeGeometry& geometryA, const transform2& transformA, const shapeGeometry& geometryB, const transform2& transformB, simplexCache2& cache )
 {
     // 기존 collider들은 A local space에서 계산하므로 B를 A local space로 변환함.
     const transform2 transformBToA = InverseMul( transformA, transformB );
@@ -138,9 +159,33 @@ localManifold2 CollideShapes( const shapeGeometry& geometryA, const transform2& 
             {
                 return FlipManifoldToA( CollidePolygonSegment( b, a, transformAToB ), transformA, transformB );
             }
+            else if constexpr( std::is_same_v<A, chainSegment2> && std::is_same_v<B, circle2> )
+            {
+                return CollideChainSegmentCircle( a, b, transformBToA );
+            }
+            else if constexpr( std::is_same_v<A, circle2> && std::is_same_v<B, chainSegment2> )
+            {
+                return FlipManifoldToA( CollideChainSegmentCircle( b, a, transformAToB ), transformA, transformB );
+            }
+            else if constexpr( std::is_same_v<A, chainSegment2> && std::is_same_v<B, capsule2> )
+            {
+                return CollideChainSegmentCapsule( a, b, transformBToA, cache );
+            }
+            else if constexpr( std::is_same_v<A, capsule2> && std::is_same_v<B, chainSegment2> )
+            {
+                return FlipManifoldToA( CollideChainSegmentCapsule( b, a, transformAToB, cache ), transformA, transformB );
+            }
+            else if constexpr( std::is_same_v<A, chainSegment2> && std::is_same_v<B, polygon2> )
+            {
+                return CollideChainSegmentPolygon( a, b, transformBToA, cache );
+            }
+            else if constexpr( std::is_same_v<A, polygon2> && std::is_same_v<B, chainSegment2> )
+            {
+                return FlipManifoldToA( CollideChainSegmentPolygon( b, a, transformAToB, cache ), transformA, transformB );
+            }
             else
             {
-                // segment-segment는 Box2D와 동일하게 contact를 만들지 않음.
+                // segment-segment, segment-chain, chain-chain은 contact를 만들지 않음.
                 return {};
             }
         },
