@@ -286,6 +286,36 @@ void checkOrphanChainSegmentUpdate()
     check( contacts[0].shapeA == terrainShape || contacts[0].shapeB == terrainShape, "orphan chain moved contact lost shape identity" );
     check( !simulation.IsValid( oldContact ), "orphan chain old contact resurrected" );
 
+    // Geometry가 body local center에서 멀어지면 CCD / sleep에서 쓰는 maxExtent도 즉시 갱신되어야 함.
+    world extentSimulation{};
+    bodyDef extentBodyDefinition{};
+    extentBodyDefinition.type = bodyType::Dynamic;
+    extentBodyDefinition.gravityScale = 0.0f;
+    extentBodyDefinition.angularVelocity = 0.01f;
+    extentBodyDefinition.sleepThreshold = 0.05f;
+    const bodyId extentBody = extentSimulation.CreateBody( extentBodyDefinition );
+
+    const chainSegment2 nearCenter{
+        { 0.2f, 0.0f },
+        { { 0.1f, 0.0f }, { -0.1f, 0.0f } },
+        { -0.2f, 0.0f }
+    };
+    const shapeId extentShape = extentSimulation.CreateShape( extentBody, nearCenter, {}, 0.0f );
+
+    const chainSegment2 farFromCenter{
+        { 11.2f, 0.0f },
+        { { 11.1f, 0.0f }, { 10.9f, 0.0f } },
+        { 10.8f, 0.0f }
+    };
+    extentSimulation.SetChainSegment( extentShape, farFromCenter );
+
+    for( int i = 0; i < 40; ++i )
+    {
+        extentSimulation.Step( 1.0f / 60.0f, 1 );
+    }
+
+    check( extentSimulation.IsBodyAwake( extentBody ), "orphan chain update kept stale body extent" );
+
     const std::array<vec2, 2> points{ vec2{ 1.0f, 2.0f }, vec2{ -1.0f, 2.0f } };
     chainDef definition{};
     definition.points = points;
