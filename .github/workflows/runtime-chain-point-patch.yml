@@ -50,6 +50,9 @@ jobs:
           chain_world.write_bytes(base64.b64decode(encoded))
           PY
 
+      - name: Install CMake 4.2
+        run: python3 -m pip install "cmake>=4.2,<4.3"
+
       - name: Configure
         run: cmake -S . -B build -DZONAI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
 
