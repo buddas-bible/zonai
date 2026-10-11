@@ -4338,8 +4338,12 @@ bool world::updateExistingContact( std::int32_t contactId )
 
     if( !TryRecycleContact( contactId ) )
     {
-        const localManifold2 manifold = CollideShapes( shapeA.geometry, bodySimA.transform, shapeB.geometry, bodySimB.transform );
+        // Chain-polygon/capsule GJK는 같은 Contact의 이전 closest feature에서 다시 시작함.
+        // UpdateContactSim은 hot-data를 다시 구성하므로 계산 후 cache를 되돌려 저장함.
+        simplexCache2 simplexCache = contactSims_[contactId].simplexCache;
+        const localManifold2 manifold = CollideShapes( shapeA.geometry, bodySimA.transform, shapeB.geometry, bodySimB.transform, simplexCache );
         UpdateContactSim( contactId, manifold );
+        contactSims_[contactId].simplexCache = simplexCache;
     }
 
     // Contact query의 speculative point 포함 규칙과 실제 touching callback을 구분함.
@@ -4369,9 +4373,13 @@ std::int32_t world::createContactForPair( std::int32_t shapeIdA, std::int32_t sh
     assert( bodySimA.bodyId == shapeA.bodyId );
     assert( bodySimB.bodyId == shapeB.bodyId );
 
-    const localManifold2 manifold = CollideShapes( shapeA.geometry, bodySimA.transform, shapeB.geometry, bodySimB.transform );
+    simplexCache2 simplexCache{};
+    const localManifold2 manifold = CollideShapes( shapeA.geometry, bodySimA.transform, shapeB.geometry, bodySimB.transform, simplexCache );
 
-    return CreateContact( shapeIdA, shapeIdB, manifold );
+    const std::int32_t contactId = CreateContact( shapeIdA, shapeIdB, manifold );
+    contactSims_[contactId].simplexCache = simplexCache;
+
+    return contactId;
 }
 
 std::int32_t world::CreateContact( std::int32_t shapeIdA, std::int32_t shapeIdB, const localManifold2& manifold )
