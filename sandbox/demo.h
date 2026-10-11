@@ -15,6 +15,7 @@ class debugDraw;
 enum class demoKind
 {
     playground,
+    terrainChain,
     distancePendulum,
     revoluteHinge,
     wheelSuspension,

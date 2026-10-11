@@ -17,6 +17,10 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createPlayground();
     }
+    else if( kind == demoKind::terrainChain )
+    {
+        createTerrainChain();
+    }
     else if( kind == demoKind::distancePendulum )
     {
         createPendulum();
@@ -254,6 +258,55 @@ void rigidBodyDemo::createPlayground()
     world_.SetBodyLinearVelocity( kinematicBody, { 1.25f, 0.0f } );
 
     shapes_.push_back( { kinematicBody, kinematicShape, "발판 [키네마틱]" } );
+}
+
+void rigidBodyDemo::createTerrainChain()
+{
+    // Chain의 front side가 위쪽을 향하도록 오른쪽에서 왼쪽 순서로 terrain을 구성함.
+    // 실제 충돌 edge는 9개 point 사이의 8개이고 양 끝 ghost는 endpoint normal만 이어줌.
+    const std::array<vec2, 9> points{
+        vec2{ 8.0f, -2.0f },
+        vec2{ 6.0f, -1.2f },
+        vec2{ 4.0f, -1.0f },
+        vec2{ 2.0f, 0.0f },
+        vec2{ 0.0f, 0.8f },
+        vec2{ -2.0f, 0.1f },
+        vec2{ -4.0f, -0.8f },
+        vec2{ -6.0f, -0.4f },
+        vec2{ -8.0f, -1.2f }
+    };
+
+    const bodyId ground = world_.CreateBody( bodyType::Static );
+
+    chainDef definition{};
+    definition.points = std::span<const vec2>{ points };
+    definition.ghost1 = { 10.0f, -2.8f };
+    definition.ghost2 = { -10.0f, -2.0f };
+    definition.friction = 0.8f;
+
+    const chainId terrainChain = world_.CreateChain( ground, definition );
+
+    std::array<shapeId, 8> segments{};
+    const std::size_t segmentCount = world_.GetChainSegments( terrainChain, segments );
+    assert( segmentCount == segments.size() );
+
+    for( shapeId segment : segments )
+    {
+        shapes_.push_back( { ground, segment, "지형 edge [Chain]" } );
+    }
+
+    // 서로 다른 geometry가 내부 vertex를 지나가며 one-sided / ghost 처리를 함께 검증함.
+    impulseBody_ = world_.CreateBody( bodyType::Dynamic, { { 5.0f, 2.2f }, {} } );
+    const shapeId circleShape = world_.CreateShape( impulseBody_, circle2{ {}, 0.45f } );
+    shapes_.push_back( { impulseBody_, circleShape, "원 [Chain Probe]" } );
+
+    const bodyId capsuleBody = world_.CreateBody( bodyType::Dynamic, { { 1.0f, 3.2f }, rot2::FromRadians( -0.2f ) } );
+    const shapeId capsuleShape = world_.CreateShape( capsuleBody, capsule2{ { -0.65f, 0.0f }, { 0.65f, 0.0f }, 0.3f } );
+    shapes_.push_back( { capsuleBody, capsuleShape, "캡슐 [Chain Probe]" } );
+
+    torqueBody_ = world_.CreateBody( bodyType::Dynamic, { { -4.0f, 2.4f }, rot2::FromRadians( 0.12f ) } );
+    const shapeId boxShape = world_.CreateShape( torqueBody_, MakeBox( { 0.55f, 0.45f } ) );
+    shapes_.push_back( { torqueBody_, boxShape, "상자 [Chain Probe]" } );
 }
 
 void rigidBodyDemo::createPendulum()

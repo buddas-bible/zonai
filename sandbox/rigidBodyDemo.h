@@ -195,6 +195,7 @@ public:
 private:
 #pragma region SceneSetup
     void createPlayground();
+    void createTerrainChain();
     void createPendulum();
     void createRevoluteHinge();
     void createWheelSuspension();
