@@ -492,9 +492,13 @@ private:
 
 #pragma region BodyShapeStorage
 
+    // public CreateShape와 chain batch가 같은 slot/proxy/link 경로를 사용함.
+    // chain batch는 마지막에 한 번만 mass/extents를 다시 계산함.
+    [[nodiscard]] std::int32_t CreateShapeByIndex( std::int32_t bodyIndex, shapeGeometry geometry, collisionFilter filter, float density, bool updateBodyMassData );
+
     void DestroyBodyByIndex( std::int32_t bodyIndex );
-    void DestroyChainByIndex( std::int32_t chainIndex );
-    void DestroyShapeByIndex( std::int32_t shapeIndex );
+    void DestroyChainByIndex( std::int32_t chainIndex, bool updateBodyMassData = true );
+    void DestroyShapeByIndex( std::int32_t shapeIndex, bool updateBodyMassData = true );
 
     // bodySim transform을 기준으로 이 body의 모든 shape proxy를 broadPhase에 동기화함.
     void SyncBodyProxies( std::int32_t bodyIndex );
