@@ -12,6 +12,8 @@
 namespace zonai
 {
 
+struct simplexCache2;
+
 /*
 * circle-circle
 * segment-circle
@@ -32,21 +34,27 @@ localManifold2 CollidePolygonCircle( const polygon2& polygon, const circle2& cir
 /*
 * capsule-capsule
 * segment-capsule
+* chain segment-capsule
 * polygon-capsule
 */
 localManifold2 CollideCapsules( const capsule2& a, const capsule2& b, const transform2& transformB );
 
 localManifold2 CollideSegmentCapsule( const segment2& segment, const capsule2& capsuleB, const transform2& capsuleBTransform );
 
+localManifold2 CollideChainSegmentCapsule( const chainSegment2& chainSegment, const capsule2& capsule, const transform2& capsuleTransform, simplexCache2& cache );
+
 localManifold2 CollidePolygonCapsule( const polygon2& polygon, const capsule2& capsule, const transform2& capsuleTransform );
 
 /*
 * polygon-polygon
 * polygon-segment
+* chain segment-polygon
 */
 localManifold2 CollidePolygons( const polygon2& a, const polygon2& b, const transform2& transformB );
 
 localManifold2 CollidePolygonSegment( const polygon2& polygon, const segment2& segment, const transform2& segmentTransform );
+
+localManifold2 CollideChainSegmentPolygon( const chainSegment2& chainSegment, const polygon2& polygon, const transform2& polygonTransform, simplexCache2& cache );
 
 // 현재 NarrowPhase가 지원하는 geometry 조합인지 확인함.
 bool CanCollideShapes( const shapeGeometry& geometryA, const shapeGeometry& geometryB );

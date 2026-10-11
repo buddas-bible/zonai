@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cmath>
 
+#include "collision/distance2.h"
 #include "collision/narrowphase/collide.h"
 
 using namespace zonai;
@@ -69,6 +70,60 @@ int main()
         assert( NearlyEqual( manifold.normal, { 1.0f, 0.0f } ) );
         assert( NearlyEqual( manifold.points[0].point, { 1.0f, 0.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
+    }
+
+    const chainSegment2 chain{
+        { 2.0f, 0.0f },
+        { { 1.0f, 0.0f }, { -1.0f, 0.0f } },
+        { -2.0f, 0.0f }
+    };
+
+    {
+        // Chain 앞면과 평행한 capsule은 rounded polygon 경로를 통해 두 접촉점을 만든다.
+        capsule2 capsule{};
+        capsule.center1 = { -0.5f, 0.0f };
+        capsule.center2 = { 0.5f, 0.0f };
+        capsule.radius = 0.5f;
+        transform2 capsuleTransform{};
+        capsuleTransform.position = { 0.0f, 0.5f };
+        simplexCache2 cache{};
+
+        const localManifold2 manifold = CollideChainSegmentCapsule( chain, capsule, capsuleTransform, cache );
+
+        assert( manifold.pointCount == 2 );
+        assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
+        assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
+        assert( NearlyEqual( manifold.points[1].separation, 0.0f ) );
+    }
+
+    {
+        // Capsule도 chain 뒷면에서는 겹쳐도 충돌하지 않는다.
+        capsule2 capsule{};
+        capsule.center1 = { -0.5f, 0.0f };
+        capsule.center2 = { 0.5f, 0.0f };
+        capsule.radius = 0.5f;
+        transform2 capsuleTransform{};
+        capsuleTransform.position = { 0.0f, -0.25f };
+        simplexCache2 cache{};
+
+        const localManifold2 manifold = CollideChainSegmentCapsule( chain, capsule, capsuleTransform, cache );
+
+        assert( manifold.pointCount == 0 );
+    }
+
+    {
+        // Capsule 전체가 point1 바깥의 이전 edge 영역에 있으면 ghost1이 현재 endpoint contact를 제거한다.
+        capsule2 capsule{};
+        capsule.center1 = { 0.0f, 0.0f };
+        capsule.center2 = { 0.2f, 0.0f };
+        capsule.radius = 0.3f;
+        transform2 capsuleTransform{};
+        capsuleTransform.position = { 1.2f, 0.2f };
+        simplexCache2 cache{};
+
+        const localManifold2 manifold = CollideChainSegmentCapsule( chain, capsule, capsuleTransform, cache );
+
+        assert( manifold.pointCount == 0 );
     }
 
     return 0;
