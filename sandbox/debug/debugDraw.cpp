@@ -107,6 +107,9 @@ void debugDraw::DrawShape( const shapeGeometry& geometry, const transform2& tran
                 worldSegment.b = TransformPoint( transform, worldSegment.b );
 
                 DrawSegment( worldSegment, outlineColor, 3.0f );
+                // Chain terrain의 runtime 편집점을 edge와 같은 색으로 항상 보이게 함.
+                DrawPoint( worldSegment.a, outlineColor, 5.0f );
+                DrawPoint( worldSegment.b, outlineColor, 5.0f );
             }
             else if constexpr( std::is_same_v<Geometry, polygon2> )
             {
