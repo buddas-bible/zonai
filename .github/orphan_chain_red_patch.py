@@ -1,0 +1,83 @@
+from pathlib import Path
+
+path = Path('tests/dynamics/body_shape_contact_lifecycle_test.cpp')
+text = path.read_text(encoding='utf-8')
+
+if 'void checkOrphanChainSegmentUpdate()' in text:
+    raise SystemExit(0)
+
+marker = 'void checkChainLifecycle()\n{'
+function = '''void checkOrphanChainSegmentUpdate()
+{
+    world simulation{};
+    const bodyId terrainBody = simulation.CreateBody();
+
+    const chainSegment2 original{
+        { 2.0f, 0.0f },
+        { { 1.0f, 0.0f }, { -1.0f, 0.0f } },
+        { -2.0f, 0.0f }
+    };
+    const shapeId terrainShape = simulation.CreateShape( terrainBody, original, {}, 0.0f );
+    simulation.SetShapeFriction( terrainShape, 0.25f );
+    simulation.SetShapeRestitution( terrainShape, 0.4f );
+
+    const bodyId circleBody = simulation.CreateBody( bodyType::Dynamic, { { 0.0f, 0.5f }, {} } );
+    const shapeId circleShape = simulation.CreateShape( circleBody, circle2{ {}, 0.5f } );
+
+    update( simulation );
+    std::array<contactData, 1> contacts{};
+    check( simulation.GetShapeContactData( circleShape, contacts ) == 1, "orphan chain initial contact" );
+    const contactId oldContact = contacts[0].id;
+
+    const chainSegment2 moved{
+        { 2.0f, -2.0f },
+        { { 1.0f, -2.0f }, { -1.0f, -2.0f } },
+        { -2.0f, -2.0f }
+    };
+
+    simulation.SetChainSegment( terrainShape, moved );
+
+    check( simulation.IsValid( terrainShape ), "orphan chain handle changed" );
+    check( !simulation.IsValid( oldContact ) && simulation.GetContactCount() == 0, "orphan chain update kept stale contact" );
+    check( simulation.GetShapeFriction( terrainShape ) == 0.25f && simulation.GetShapeRestitution( terrainShape ) == 0.4f, "orphan chain update changed material" );
+
+    const chainSegment2& stored = std::get<chainSegment2>( simulation.GetShape( terrainShape ).geometry );
+    check( stored.ghost1.x == moved.ghost1.x && stored.ghost1.y == moved.ghost1.y && stored.segment.a.y == -2.0f && stored.segment.b.y == -2.0f && stored.ghost2.x == moved.ghost2.x && stored.ghost2.y == moved.ghost2.y, "orphan chain geometry not replaced" );
+
+    const aabb2& movedAABB = simulation.GetShapeAABB( terrainShape );
+    check( movedAABB.max.y < -1.9f && movedAABB.min.y < -2.0f, "orphan chain AABB not updated" );
+
+    simulation.SetBodyTransform( circleBody, { { 0.0f, -1.5f }, {} } );
+    update( simulation );
+    check( simulation.GetShapeContactData( circleShape, contacts ) == 1, "orphan chain moved contact not recreated" );
+    check( contacts[0].shapeA == terrainShape || contacts[0].shapeB == terrainShape, "orphan chain moved contact lost shape identity" );
+    check( !simulation.IsValid( oldContact ), "orphan chain old contact resurrected" );
+
+    const std::array<vec2, 2> points{ vec2{ 1.0f, 2.0f }, vec2{ -1.0f, 2.0f } };
+    chainDef definition{};
+    definition.points = points;
+    definition.ghost1 = { 2.0f, 2.0f };
+    definition.ghost2 = { -2.0f, 2.0f };
+    const chainId parent = simulation.CreateChain( terrainBody, definition );
+    std::array<shapeId, 1> children{};
+    check( simulation.GetChainSegments( parent, children ) == 1, "parent chain child fixture" );
+
+#ifdef NDEBUG
+    const chainSegment2 before = std::get<chainSegment2>( simulation.GetShape( children[0] ).geometry );
+    simulation.SetChainSegment( children[0], moved );
+    const chainSegment2 after = std::get<chainSegment2>( simulation.GetShape( children[0] ).geometry );
+    check( after.ghost1 == before.ghost1 && after.segment.a == before.segment.a && after.segment.b == before.segment.b && after.ghost2 == before.ghost2, "parent chain child geometry mutated" );
+#endif
+}
+
+'''
+if marker not in text:
+    raise SystemExit('chain lifecycle marker not found')
+text = text.replace(marker, function + marker, 1)
+
+call_marker = '    checkSensorHandles();\n    checkChainLifecycle();'
+if call_marker not in text:
+    raise SystemExit('main call marker not found')
+text = text.replace(call_marker, '    checkSensorHandles();\n    checkOrphanChainSegmentUpdate();\n    checkChainLifecycle();', 1)
+
+path.write_text(text, encoding='utf-8')
