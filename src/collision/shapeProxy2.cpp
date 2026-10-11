@@ -38,8 +38,16 @@ shapeProxy2 MakeShapeProxy( const shapeGeometry& geometry )
                 proxy.points[1] = localGeometry.b;
                 proxy.count = 2;
             }
+            else if constexpr( std::is_same_v<Geometry, chainSegment2> )
+            {
+                // GJK/TOI는 실제 충돌 edge만 사용하고 ghost vertex는 normal ownership에만 사용함.
+                proxy.points[0] = localGeometry.segment.a;
+                proxy.points[1] = localGeometry.segment.b;
+                proxy.count = 2;
+            }
             else
             {
+                static_assert( std::is_same_v<Geometry, polygon2> );
                 assert( localGeometry.vertexCount > 0 );
                 assert( localGeometry.vertexCount <= static_cast<int>( proxy.points.size() ) );
 
