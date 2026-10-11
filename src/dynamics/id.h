@@ -27,6 +27,16 @@ struct jointId
     constexpr bool operator==( const jointId& ) const = default;
 };
 
+// 여러 chainSegment2 shape를 하나의 macro object로 묶는 opaque handle.
+struct chainId
+{
+    std::int32_t index1 = 0;
+    std::uint16_t generation = 0;
+    std::uint64_t worldToken = 0;
+
+    constexpr bool operator==( const chainId& ) const = default;
+};
+
 // world 외부에서 shape를 참조하는 opaque handle.
 // slot이 재사용되더라도 generation이 달라져 오래된 handle을 검출할 수 있음.
 struct shapeId
@@ -59,6 +69,11 @@ constexpr bool IsNull( bodyId id ) noexcept
 }
 
 constexpr bool IsNull( jointId id ) noexcept
+{
+    return id.index1 == 0;
+}
+
+constexpr bool IsNull( chainId id ) noexcept
 {
     return id.index1 == 0;
 }
