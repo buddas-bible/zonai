@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 
+#include "collision/distance2.h"
 #include "collision/narrowphase/manifold2.h"
 #include "math/transform2.h"
 
@@ -39,6 +40,10 @@ struct contactSim2
 
     float invMassB = 0.0f;
     float invInertiaB = 0.0f;
+
+    // Chain-polygon/capsule GJK가 이전 closest feature에서 다시 시작하도록 Contact 수명 동안 보관함.
+    // Contact slot을 반환할 때 contactSim2 전체를 초기화하므로 다음 pair로 새지 않음.
+    simplexCache2 simplexCache{};
 
     // shape A local space에 저장되는 현재 narrow-phase manifold.
     // AABB pair만 유지되고 geometry는 떨어져 있으면 pointCount가 0일 수 있음.
