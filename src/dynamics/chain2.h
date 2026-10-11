@@ -17,6 +17,9 @@ struct chain2
 
     std::uint16_t generation = 0;
 
+    // Loop 여부만 parent가 기억하고 point 좌표는 child geometry를 source of truth로 사용함.
+    bool isLoop = false;
+
     // free slot 재사용용.
     std::int32_t nextFreeId = NULL_INDEX;
 
