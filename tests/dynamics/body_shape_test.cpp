@@ -7,6 +7,7 @@
 
 #include "dynamics/body.h"
 #include "dynamics/bodyShape.h"
+#include "dynamics/contactSim2.h"
 #include "dynamics/shape.h"
 
 using namespace zonai;
@@ -45,6 +46,12 @@ int main()
         assert( defaultShape.filter.categoryBits == 0x00000004 );
         assert( defaultShape.filter.maskBits == 0x00000002 );
         assert( defaultShape.filter.groupIndex == -5 );
+    }
+
+    // 새 Contact hot-data는 이전 pair의 GJK feature를 상속하면 안 됨.
+    {
+        contactSim2 contact{};
+        assert( contact.simplexCache.count == 0 );
     }
 
     // runtime shape의 geometry와 density로 질량 특성을 계산함.
