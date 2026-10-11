@@ -66,14 +66,26 @@ int main()
     }
     check( chainChildCount == 8, "terrain demo exposes all eight chain segments for debug drawing" );
 
-    bool sawContact = false;
-    for( int i = 0; i < 240; ++i )
+    bool sawTerrainContact = false;
+    for( int i = 0; i < 240 && !sawTerrainContact; ++i )
     {
         terrain.step( 1.0f / 60.0f, 4 );
-        sawContact = sawContact || !terrain.getContacts().empty();
+
+        for( const contactData& contact : terrain.getContacts() )
+        {
+            const chainId parentA = simulation.GetShapeParentChain( contact.shapeA );
+            const chainId parentB = simulation.GetShapeParentChain( contact.shapeB );
+            const bool shapeAIsTerrain = simulation.IsValid( parentA ) && parentA.index1 == parentChain.index1 && parentA.generation == parentChain.generation;
+            const bool shapeBIsTerrain = simulation.IsValid( parentB ) && parentB.index1 == parentChain.index1 && parentB.generation == parentChain.generation;
+            if( shapeAIsTerrain || shapeBIsTerrain )
+            {
+                sawTerrainContact = true;
+                break;
+            }
+        }
     }
 
-    check( sawContact, "dynamic probes make real contact with the chain terrain" );
+    check( sawTerrainContact, "dynamic probes make real contact with the chain terrain" );
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
