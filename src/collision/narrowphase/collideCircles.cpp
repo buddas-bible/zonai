@@ -51,6 +51,76 @@ localManifold2 CollideSegmentCircle( const segment2& segment, const circle2& cir
     return CollideCapsuleCircle( capsule, circle, circleTransform );
 }
 
+localManifold2 CollideChainSegmentCircle( const chainSegment2& chainSegment, const circle2& circle, const transform2& circleTransform )
+{
+    localManifold2 manifold{};
+
+    // Chain은 point1 -> point2를 바라볼 때 오른쪽 면만 충돌하는 terrain edge임.
+    const vec2 pointB = TransformPoint( circleTransform, circle.center );
+    const vec2 point1 = chainSegment.segment.a;
+    const vec2 point2 = chainSegment.segment.b;
+    const vec2 edge = point2 - point1;
+
+    const float offset = Dot( Cross( edge, 1.0f ), pointB - point1 );
+
+    if( offset < 0.0f ) return manifold;
+
+    // 현재 edge 끝점보다 이웃 edge의 Voronoi 영역에 가까우면 ghost vertex가 ownership을 넘김.
+    const float u = Dot( edge, point2 - pointB );
+    const float v = Dot( edge, pointB - point1 );
+
+    vec2 pointA{};
+
+    if( v <= 0.0f )
+    {
+        const vec2 previousEdge = point1 - chainSegment.ghost1;
+        const float previousU = Dot( previousEdge, pointB - point1 );
+
+        if( previousU <= 0.0f ) return manifold;
+
+        pointA = point1;
+    }
+    else if( u <= 0.0f )
+    {
+        const vec2 nextEdge = chainSegment.ghost2 - point2;
+        const float nextV = Dot( nextEdge, pointB - point2 );
+
+        if( nextV > 0.0f ) return manifold;
+
+        pointA = point2;
+    }
+    else
+    {
+        const float edgeLengthSquared = Dot( edge, edge );
+
+        pointA = edgeLengthSquared > 0.0f ? ( u * point1 + v * point2 ) / edgeLengthSquared : point1;
+    }
+
+    const vec2 delta = pointB - pointA;
+    const float distanceSquared = LengthSquared( delta );
+    const float speculativeRadius = circle.radius + SPECULATIVE_DISTANCE;
+
+    if( distanceSquared > speculativeRadius * speculativeRadius ) return manifold;
+
+    const float distance = std::sqrt( distanceSquared );
+
+    vec2 normal{};
+
+    if( distance > 0.0f )
+    {
+        normal = delta / distance;
+    }
+
+    const vec2 surfaceB = pointB - normal * circle.radius;
+
+    manifold.normal = normal;
+    manifold.points[0].point = ( pointA + surfaceB ) * 0.5f;
+    manifold.points[0].separation = distance - circle.radius;
+    manifold.pointCount = 1;
+
+    return manifold;
+}
+
 localManifold2 CollideCapsuleCircle( const capsule2& capsule, const circle2& circle, const transform2& circleTransform )
 {
     localManifold2 manifold{};
