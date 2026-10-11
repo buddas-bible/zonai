@@ -82,6 +82,7 @@ bodyId world::CreateBody( const bodyDef& definition )
 
         assert( freeBody.bodyId == body::NULL_INDEX );
         assert( freeBody.headShapeId == body::NULL_INDEX );
+        assert( freeBody.headChainId == body::NULL_INDEX && freeBody.chainCount == 0 );
         assert( freeBody.headContactKey == body::NULL_INDEX );
         assert( freeBody.headJointKey == body::NULL_INDEX && freeBody.jointCount == 0 );
         assert( bodySims_.size() == bodies_.size() );
@@ -265,10 +266,140 @@ void world::DestroyShape( shapeId shapeId )
 {
     const std::int32_t shapeIndex = GetShapeIndex( shapeId );
 
+    // parent chain이 소유한 child segment는 parent의 adjacency와 shapeIds를 깨뜨리므로 개별 파괴하지 않음.
+    assert( shapes_[shapeIndex].parentChainId == shape::NULL_INDEX );
+    if( shapes_[shapeIndex].parentChainId != shape::NULL_INDEX ) return;
+
     DestroyShapeByIndex( shapeIndex );
 }
 
 #pragma endregion ShapeLifecycle
+
+#pragma region ChainLifecycle
+
+chainId world::CreateChain( bodyId bodyId, const chainDef& definition )
+{
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( definition.points.size() >= 4 );
+    assert( std::isfinite( definition.friction ) && definition.friction >= 0.0f );
+    assert( std::isfinite( definition.restitution ) && definition.restitution >= 0.0f );
+
+    const std::span<const vec2> points = definition.points;
+    const float minimumLengthSquared = LINEAR_SLOP * LINEAR_SLOP;
+
+    for( const vec2& point : points )
+    {
+        assert( IsFinite( point ) );
+    }
+
+    for( std::size_t i = 0; i + 1 < points.size(); ++i )
+    {
+        assert( LengthSquared( points[i + 1] - points[i] ) > minimumLengthSquared );
+    }
+
+    if( definition.isLoop )
+    {
+        assert( LengthSquared( points.front() - points.back() ) > minimumLengthSquared );
+    }
+
+    std::int32_t chainIndex = chain2::NULL_INDEX;
+
+    if( chainFreeList_ != chain2::NULL_INDEX )
+    {
+        chainIndex = chainFreeList_;
+        assert( chainIndex >= 0 && static_cast<std::size_t>( chainIndex ) < chains_.size() );
+        assert( chains_[chainIndex].chainId == chain2::NULL_INDEX );
+        chainFreeList_ = chains_[chainIndex].nextFreeId;
+    }
+    else
+    {
+        assert( chains_.size() < static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() - 1 ) );
+        chainIndex = static_cast<std::int32_t>( chains_.size() );
+        chains_.push_back( {} );
+    }
+
+    chain2& chain = chains_[chainIndex];
+    const std::uint16_t generation = static_cast<std::uint16_t>( chain.generation + 1u );
+    chain = {};
+    chain.chainId = chainIndex;
+    chain.bodyId = bodyIndex;
+    chain.generation = generation;
+
+    body& body = bodies_[bodyIndex];
+    chain.nextChainId = body.headChainId;
+    body.headChainId = chainIndex;
+    ++body.chainCount;
+    ++chainCount_;
+
+    const std::size_t segmentCount = definition.isLoop ? points.size() : points.size() - 3;
+    chain.shapeIds.reserve( segmentCount );
+
+    const auto createSegment = [&]( const vec2& ghost1, const vec2& point1, const vec2& point2, const vec2& ghost2 )
+    {
+        const chainSegment2 segment{ ghost1, { point1, point2 }, ghost2 };
+        const shapeId childId = CreateShape( bodyId, segment, definition.filter, 0.0f );
+        const std::int32_t shapeIndex = GetShapeIndex( childId );
+
+        shape& child = shapes_[shapeIndex];
+        child.parentChainId = chainIndex;
+        child.friction = definition.friction;
+        child.restitution = definition.restitution;
+
+        chain.shapeIds.push_back( shapeIndex );
+    };
+
+    if( definition.isLoop )
+    {
+        const std::size_t count = points.size();
+        for( std::size_t i = 0; i < count; ++i )
+        {
+            createSegment( points[( i + count - 1 ) % count], points[i], points[( i + 1 ) % count], points[( i + 2 ) % count] );
+        }
+    }
+    else
+    {
+        for( std::size_t i = 0; i + 3 < points.size(); ++i )
+        {
+            createSegment( points[i], points[i + 1], points[i + 2], points[i + 3] );
+        }
+    }
+
+    return MakeChainId( chainIndex );
+}
+
+void world::DestroyChain( chainId chainId )
+{
+    DestroyChainByIndex( GetChainIndex( chainId ) );
+}
+
+std::size_t world::GetChainSegmentCount( chainId chainId ) const
+{
+    return chains_[GetChainIndex( chainId )].shapeIds.size();
+}
+
+std::size_t world::GetChainSegments( chainId chainId, std::span<shapeId> output ) const
+{
+    const chain2& chain = chains_[GetChainIndex( chainId )];
+    const std::size_t count = std::min( output.size(), chain.shapeIds.size() );
+
+    for( std::size_t i = 0; i < count; ++i )
+    {
+        output[i] = MakeShapeId( chain.shapeIds[i] );
+    }
+
+    return count;
+}
+
+chainId world::GetShapeParentChain( shapeId shapeId ) const
+{
+    const shape& shape = shapes_[GetShapeIndex( shapeId )];
+    if( shape.parentChainId == shape::NULL_INDEX ) return {};
+
+    return MakeChainId( shape.parentChainId );
+}
+
+#pragma endregion ChainLifecycle
 
 #pragma region JointLifecycle
 
@@ -2670,6 +2801,17 @@ bool world::IsValid( bodyId bodyId ) const noexcept
     return body.bodyId == bodyIndex && body.generation == bodyId.generation;
 }
 
+bool world::IsValid( chainId chainId ) const noexcept
+{
+    if( chainId.index1 <= 0 || chainId.worldToken != worldToken_ ) return false;
+
+    const std::int32_t chainIndex = chainId.index1 - 1;
+    if( static_cast<std::size_t>( chainIndex ) >= chains_.size() ) return false;
+
+    const chain2& chain = chains_[chainIndex];
+    return chain.chainId == chainIndex && chain.generation == chainId.generation;
+}
+
 bool world::IsValid( shapeId shapeId ) const noexcept
 {
     if( shapeId.index1 <= 0 || shapeId.worldToken != worldToken_ ) return false;
@@ -2855,6 +2997,13 @@ std::int32_t world::GetBodyIndex( bodyId bodyId ) const
     return bodyId.index1 - 1;
 }
 
+std::int32_t world::GetChainIndex( chainId chainId ) const
+{
+    assert( IsValid( chainId ) );
+
+    return chainId.index1 - 1;
+}
+
 std::int32_t world::GetShapeIndex( shapeId shapeId ) const
 {
     assert( IsValid( shapeId ) );
@@ -2886,6 +3035,17 @@ bodyId world::MakeBodyId( std::int32_t bodyIndex ) const
     assert( body.bodyId == bodyIndex );
 
     return { bodyIndex + 1, body.generation, worldToken_ };
+}
+
+chainId world::MakeChainId( std::int32_t chainIndex ) const
+{
+    assert( chainIndex >= 0 );
+    assert( static_cast<std::size_t>( chainIndex ) < chains_.size() );
+
+    const chain2& chain = chains_[chainIndex];
+    assert( chain.chainId == chainIndex );
+
+    return { chainIndex + 1, chain.generation, worldToken_ };
 }
 
 shapeId world::MakeShapeId( std::int32_t shapeIndex ) const
@@ -3181,6 +3341,49 @@ bool world::shouldShapeFiltersCollide( const collisionFilter& a, const collision
 
 #pragma region BodyShapeStorage
 
+void world::DestroyChainByIndex( std::int32_t chainIndex )
+{
+    assert( chainIndex >= 0 );
+    assert( static_cast<std::size_t>( chainIndex ) < chains_.size() );
+    assert( chainCount_ > 0 );
+
+    chain2& chain = chains_[chainIndex];
+    assert( chain.chainId == chainIndex );
+    assert( chain.bodyId >= 0 && static_cast<std::size_t>( chain.bodyId ) < bodies_.size() );
+
+    body& body = bodies_[chain.bodyId];
+
+    // body의 singly linked parent-chain list에서 현재 chain을 분리함.
+    std::int32_t* chainLink = &body.headChainId;
+    while( *chainLink != chain2::NULL_INDEX && *chainLink != chainIndex )
+    {
+        chainLink = &chains_[*chainLink].nextChainId;
+    }
+
+    assert( *chainLink == chainIndex );
+    if( *chainLink != chainIndex ) return;
+
+    *chainLink = chain.nextChainId;
+    --body.chainCount;
+
+    // child의 parent 표시를 먼저 해제해 공통 shape 파괴 경로를 안전하게 재사용함.
+    const std::vector<std::int32_t> shapeIds = chain.shapeIds;
+    for( std::int32_t shapeIndex : shapeIds )
+    {
+        assert( shapeIndex >= 0 && static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+        assert( shapes_[shapeIndex].parentChainId == chainIndex );
+        shapes_[shapeIndex].parentChainId = shape::NULL_INDEX;
+        DestroyShapeByIndex( shapeIndex );
+    }
+
+    const std::uint16_t generation = chain.generation;
+    chain = {};
+    chain.generation = generation;
+    chain.nextFreeId = chainFreeList_;
+    chainFreeList_ = chainIndex;
+    --chainCount_;
+}
+
 void world::DestroyBodyByIndex( std::int32_t bodyIndex )
 {
     assert( bodyIndex >= 0 );
@@ -3211,7 +3414,15 @@ void world::DestroyBodyByIndex( std::int32_t bodyIndex )
 
     assert( body.contactCount == 0 );
 
-    // shape를 하나씩 제거하면 각 proxy와 shape slot도 함께 정리됨.
+    // Parent chain부터 제거해야 child chainSegment2를 개별 shape처럼 파괴하지 않음.
+    while( body.headChainId != body::NULL_INDEX )
+    {
+        DestroyChainByIndex( body.headChainId );
+    }
+
+    assert( body.chainCount == 0 );
+
+    // parent가 없는 일반 shape를 하나씩 제거하면 각 proxy와 shape slot도 함께 정리됨.
     while( body.headShapeId != body::NULL_INDEX )
     {
         DestroyShapeByIndex( body.headShapeId );
@@ -3219,6 +3430,7 @@ void world::DestroyBodyByIndex( std::int32_t bodyIndex )
 
     assert( body.shapeCount == 0 );
     assert( body.headShapeId == body::NULL_INDEX );
+    assert( body.headChainId == body::NULL_INDEX );
     assert( body.headContactKey == body::NULL_INDEX );
 
     const std::uint16_t generation = body.generation;
