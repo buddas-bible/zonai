@@ -1,0 +1,172 @@
+name: Terrain chain Sandbox patch
+
+on:
+  push:
+    branches:
+      - feature/terrain-chain-sandbox
+    paths:
+      - .github/workflows/terrain-demo-green-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/terrain-chain-sandbox
+          fetch-depth: 0
+      - name: Apply implementation
+        shell: python
+        run: |
+          from pathlib import Path
+
+          demo_h = Path("sandbox/demo.h")
+          text = demo_h.read_text(encoding="utf-8")
+          old = """enum class demoKind
+          {
+              playground,
+              distancePendulum,"""
+          new = """enum class demoKind
+          {
+              playground,
+              terrainChain,
+              distancePendulum,"""
+          if text.count(old) != 1:
+              raise RuntimeError("demoKind anchor mismatch")
+          demo_h.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          demo_cpp = Path("sandbox/demo.cpp")
+          text = demo_cpp.read_text(encoding="utf-8")
+          old = """    demoEntry{ demoKind::playground, \"강체\", \"강체 실험\", \"캔버스: A/D 유지로 원 밀기, 스페이스로 점프, S로 상자 회전. 왼쪽 드래그로 동적 오브젝트 잡기. 오른쪽 클릭으로 원을 커서 방향으로 밀기.\", { 0.0f, 0.5f }, 55.0f },
+              demoEntry{ demoKind::distancePendulum,"""
+          new = """    demoEntry{ demoKind::playground, \"강체\", \"강체 실험\", \"캔버스: A/D 유지로 원 밀기, 스페이스로 점프, S로 상자 회전. 왼쪽 드래그로 동적 오브젝트 잡기. 오른쪽 클릭으로 원을 커서 방향으로 밀기.\", { 0.0f, 0.5f }, 55.0f },
+              demoEntry{ demoKind::terrainChain, \"지형\", \"체인 지형\", \"연속된 one-sided Chain 지형 위로 원·캡슐·상자를 떨어뜨립니다. 내부 꼭짓점에서 ghost vertex가 불필요한 충돌을 막는지 관찰합니다. A/D·Space·S·마우스 입력은 동적 물체에 그대로 사용할 수 있습니다.\", { 0.0f, 0.5f }, 55.0f },
+              demoEntry{ demoKind::distancePendulum,"""
+          if text.count(old) != 1:
+              raise RuntimeError("demo entry anchor mismatch")
+          demo_cpp.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          rigid_h = Path("sandbox/rigidBodyDemo.h")
+          text = rigid_h.read_text(encoding="utf-8")
+          old = """#pragma region SceneSetup
+              void createPlayground();
+              void createPendulum();"""
+          new = """#pragma region SceneSetup
+              void createPlayground();
+              void createTerrainChain();
+              void createPendulum();"""
+          if text.count(old) != 1:
+              raise RuntimeError("rigidBodyDemo.h scene anchor mismatch")
+          rigid_h.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          rigid_cpp = Path("sandbox/rigidBodyDemo.cpp")
+          text = rigid_cpp.read_text(encoding="utf-8")
+          old = """    if( kind == demoKind::playground )
+              {
+                  createPlayground();
+              }
+              else if( kind == demoKind::distancePendulum )"""
+          new = """    if( kind == demoKind::playground )
+              {
+                  createPlayground();
+              }
+              else if( kind == demoKind::terrainChain )
+              {
+                  createTerrainChain();
+              }
+              else if( kind == demoKind::distancePendulum )"""
+          if text.count(old) != 1:
+              raise RuntimeError("rigidBodyDemo constructor anchor mismatch")
+          text = text.replace(old, new, 1)
+
+          anchor = """void rigidBodyDemo::createPendulum()
+          {"""
+          terrain = """void rigidBodyDemo::createTerrainChain()
+          {
+              // Chain의 front side가 위쪽을 향하도록 오른쪽에서 왼쪽 순서로 terrain을 구성함.
+              // 실제 충돌 edge는 9개 point 사이의 8개이고 양 끝 ghost는 endpoint normal만 이어줌.
+              const std::array<vec2, 9> points{
+                  vec2{ 8.0f, -2.0f },
+                  vec2{ 6.0f, -1.2f },
+                  vec2{ 4.0f, -1.0f },
+                  vec2{ 2.0f, 0.0f },
+                  vec2{ 0.0f, 0.8f },
+                  vec2{ -2.0f, 0.1f },
+                  vec2{ -4.0f, -0.8f },
+                  vec2{ -6.0f, -0.4f },
+                  vec2{ -8.0f, -1.2f }
+              };
+
+              const bodyId ground = world_.CreateBody( bodyType::Static );
+
+              chainDef definition{};
+              definition.points = std::span<const vec2>{ points };
+              definition.ghost1 = { 10.0f, -2.8f };
+              definition.ghost2 = { -10.0f, -2.0f };
+              definition.friction = 0.8f;
+
+              const chainId terrainChain = world_.CreateChain( ground, definition );
+
+              std::array<shapeId, 8> segments{};
+              const std::size_t segmentCount = world_.GetChainSegments( terrainChain, segments );
+              assert( segmentCount == segments.size() );
+
+              for( shapeId segment : segments )
+              {
+                  shapes_.push_back( { ground, segment, \"지형 edge [Chain]\" } );
+              }
+
+              // 서로 다른 geometry가 내부 vertex를 지나가며 one-sided / ghost 처리를 함께 검증함.
+              impulseBody_ = world_.CreateBody( bodyType::Dynamic, { { 5.0f, 2.2f }, {} } );
+              const shapeId circleShape = world_.CreateShape( impulseBody_, circle2{ {}, 0.45f } );
+              shapes_.push_back( { impulseBody_, circleShape, \"원 [Chain Probe]\" } );
+
+              const bodyId capsuleBody = world_.CreateBody( bodyType::Dynamic, { { 1.0f, 3.2f }, rot2::FromRadians( -0.2f ) } );
+              const shapeId capsuleShape = world_.CreateShape( capsuleBody, capsule2{ { -0.65f, 0.0f }, { 0.65f, 0.0f }, 0.3f } );
+              shapes_.push_back( { capsuleBody, capsuleShape, \"캡슐 [Chain Probe]\" } );
+
+              torqueBody_ = world_.CreateBody( bodyType::Dynamic, { { -4.0f, 2.4f }, rot2::FromRadians( 0.12f ) } );
+              const shapeId boxShape = world_.CreateShape( torqueBody_, MakeBox( { 0.55f, 0.45f } ) );
+              shapes_.push_back( { torqueBody_, boxShape, \"상자 [Chain Probe]\" } );
+          }
+
+          """ + anchor
+          if text.count(anchor) != 1:
+              raise RuntimeError("createPendulum anchor mismatch")
+          rigid_cpp.write_text(text.replace(anchor, terrain, 1), encoding="utf-8")
+
+          count_files = [
+              "tests/sandbox/demo_test.cpp",
+              "tests/sandbox/joint_demo_test.cpp",
+              "tests/sandbox/pogo_joint_demo_test.cpp",
+              "tests/sandbox/mover_joint_demo_test.cpp",
+              "tests/sandbox/motor_joint_demo_test.cpp",
+              "tests/sandbox/filter_joint_demo_test.cpp",
+          ]
+          replaced = 0
+          for name in count_files:
+              path = Path(name)
+              value = path.read_text(encoding="utf-8")
+              occurrences = value.count("getDemoEntries().size() == 13")
+              if occurrences != 1:
+                  raise RuntimeError(f"{name}: expected one demo count, found {occurrences}")
+              value = value.replace("getDemoEntries().size() == 13", "getDemoEntries().size() == 14", 1)
+              if name.endswith("demo_test.cpp") and "thirteen independently selectable demo entries" in value:
+                  value = value.replace("thirteen independently selectable demo entries", "fourteen independently selectable demo entries", 1)
+              path.write_text(value, encoding="utf-8")
+              replaced += occurrences
+          if replaced != 6:
+              raise RuntimeError(f"expected six count replacements, got {replaced}")
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sandbox/demo.h sandbox/demo.cpp sandbox/rigidBodyDemo.h sandbox/rigidBodyDemo.cpp tests/sandbox
+          git diff --cached --check
+          git commit -m "feat(sandbox): add terrain chain demo"
+          git push origin HEAD:feature/terrain-chain-sandbox
