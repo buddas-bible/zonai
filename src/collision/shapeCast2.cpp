@@ -101,6 +101,7 @@ castOutput2 ShapeCast( const shapeCastInput2& input )
         // 현재 거리에서 target 거리까지 줄이는 데 필요한 이동 fraction.
         fraction += ( target - distanceOutput.distance ) / denominator;
 
+        // TODO: Box2D와 같은 상한 제외 정책. maxFraction과 같은 충돌 시점은 miss임을 재검토.
         if( fraction >= input.maxFraction ) return output;
 
         distanceInput.transform.position = input.transform.position + input.translationB * fraction;

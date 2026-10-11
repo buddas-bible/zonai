@@ -108,5 +108,36 @@ int main()
         assert( output.fraction == 0.2f );
     }
 
+    // 같은 월드 형상은 로컬 원점을 옮겨도 one-sided TOI 결과가 같아야 함.
+    {
+        toiInput2 input{};
+        input.proxyA.points[0] = { -5.0f, 0.0f };
+        input.proxyA.points[1] = { 5.0f, 0.0f };
+        input.proxyA.count = 2;
+        input.proxyA.oneSided = true;
+        input.proxyB.points[0] = { -1.0f, -1.0f };
+        input.proxyB.points[1] = { 1.0f, -1.0f };
+        input.proxyB.points[2] = { 0.0f, 2.0f };
+        input.proxyB.count = 3;
+        input.sweepB.c1 = { 0.0f, -5.0f };
+        input.sweepB.c2 = { 0.0f, 5.0f };
+
+        const toiOutput2 reference = TimeOfImpact( input );
+        if( reference.state != toiState2::Hit ) return 1;
+
+        for( float offset : { 4128.0f, 4162.0f, 4196.0f } )
+        {
+            toiInput2 shifted = input;
+            shifted.sweepB.localCenter = { offset, offset };
+            for( int i = 0; i < shifted.proxyB.count; ++i )
+            {
+                shifted.proxyB.points[i] += shifted.sweepB.localCenter;
+            }
+
+            const toiOutput2 output = TimeOfImpact( shifted );
+            if( output.state != toiState2::Hit || std::fabs( output.fraction - reference.fraction ) > epsilon ) return 1;
+        }
+    }
+
     return 0;
 }

@@ -66,24 +66,26 @@ vec2 ComputeProxyCentroid( const shapeProxy2& proxy )
 
     float area2 = 0.0f;
     vec2 centroid{};
+    // Box2D처럼 첫 정점을 기준으로 계산해 큰 로컬 좌표의 상쇄 오차를 줄임.
+    const vec2 origin = proxy.points[0];
 
     for( int i = 0; i < proxy.count; ++i )
     {
-        const vec2 point1 = proxy.points[i];
-        const vec2 point2 = proxy.points[( i + 1 ) % proxy.count];
+        const vec2 point1 = proxy.points[i] - origin;
+        const vec2 point2 = proxy.points[( i + 1 ) % proxy.count] - origin;
         const float cross = Cross( point1, point2 );
 
         area2 += cross;
         centroid += cross * ( point1 + point2 );
     }
 
-    if( std::fabs( area2 ) > 0.0f ) return centroid / ( 3.0f * area2 );
+    if( std::fabs( area2 ) > 0.0f ) return origin + centroid / ( 3.0f * area2 );
 
     centroid = {};
 
-    for( int i = 0; i < proxy.count; ++i ) centroid += proxy.points[i];
+    for( int i = 0; i < proxy.count; ++i ) centroid += proxy.points[i] - origin;
 
-    return centroid / static_cast<float>( proxy.count );
+    return origin + centroid / static_cast<float>( proxy.count );
 }
 
 float ComputeProxyMinExtent( const shapeProxy2& proxy, const vec2& centroid )
