@@ -43,7 +43,7 @@ localManifold2 CollideSegmentCapsule( const segment2& segment, const capsule2& c
 
 localManifold2 CollideChainSegmentCapsule( const chainSegment2& chainSegment, const capsule2& capsule, const transform2& capsuleTransform, simplexCache2& cache );
 
-localManifold2 CollidePolygonCapsule( const polygon2& polygon, const capsule2& capsule, const transform2& capsuleTransform );
+localManifold2 CollidePolygonCapsule( const polygon2& polygon, const circle2& circle, const transform2& circleTransform );
 
 /*
 * polygon-polygon
@@ -59,10 +59,10 @@ localManifold2 CollideChainSegmentPolygon( const chainSegment2& chainSegment, co
 // 현재 NarrowPhase가 지원하는 geometry 조합인지 확인함.
 bool CanCollideShapes( const shapeGeometry& geometryA, const shapeGeometry& geometryB );
 
-// standalone 호출은 임시 GJK cache를 사용함. World Contact는 아래 overload로 cache를 계속 재사용함.
+// 기본 호출은 이번 narrowphase에만 쓰는 임시 GJK cache를 사용함.
 localManifold2 CollideShapes( const shapeGeometry& geometryA, const transform2& transformA, const shapeGeometry& geometryB, const transform2& transformB );
 
-// geometry 타입에 맞는 collider를 선택하며 반환 manifold는 항상 shape A local space 기준임.
+// 호출자가 GJK cache의 수명을 관리할 때 사용하는 overload. 반환 manifold는 항상 shape A local space 기준임.
 localManifold2 CollideShapes( const shapeGeometry& geometryA, const transform2& transformA, const shapeGeometry& geometryB, const transform2& transformB, simplexCache2& cache );
 
 } // namespace zonai
