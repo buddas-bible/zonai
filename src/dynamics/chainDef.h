@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <span>
 
 #include "collision/filter.h"
@@ -14,9 +15,9 @@ struct chainDef
 {
     std::span<const vec2> points{};
 
-    // Open chain 전용. Loop에서는 points가 스스로 닫히므로 사용하지 않음.
-    vec2 ghost1{};
-    vec2 ghost2{};
+    // Open chain 전용 필수 입력. NaN 기본값은 ghost 누락을 유효한 좌표로 오인하지 않게 함.
+    vec2 ghost1{ std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::quiet_NaN() };
+    vec2 ghost2{ std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::quiet_NaN() };
 
     collisionFilter filter{};
 
