@@ -594,7 +594,8 @@ private:
 #pragma region ContactDestruction
 
     // body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함.
-    void DestroyContact( std::int32_t contactId );
+    // Chain batch처럼 연결 component를 이미 깨운 경로는 wake를 생략할 수 있음.
+    void DestroyContact( std::int32_t contactId, bool wakeBodies = true );
 
 #pragma endregion ContactDestruction
 

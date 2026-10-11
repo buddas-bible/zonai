@@ -3542,7 +3542,9 @@ void world::DestroyShapeByIndex( std::int32_t shapeIndex, bool deferBodyUpdates 
 
         if( contact.shapeIdA == shapeIndex || contact.shapeIdB == shapeIndex )
         {
-            DestroyContact( contactId );
+            // Chain batch는 시작할 때 연결 component를 이미 한 번 깨웠으므로
+            // child contact마다 같은 component wake를 반복하지 않음.
+            DestroyContact( contactId, !deferBodyUpdates );
         }
     }
 
@@ -5232,7 +5234,7 @@ void world::StoreContactConstraintImpulses( std::span<const contactConstraint2> 
 
 #pragma region ContactDestruction
 
-void world::DestroyContact( std::int32_t contactId )
+void world::DestroyContact( std::int32_t contactId, bool wakeBodies )
 {
     assert( contactId >= 0 );
     assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
@@ -5244,9 +5246,11 @@ void world::DestroyContact( std::int32_t contactId )
 
     const shapePairKey pairKey = MakeShapePairKey( contact.shapeIdA, contact.shapeIdB );
 
-    WakeBodyByIndex( contact.edges[0].bodyId );
-
-    WakeBodyByIndex( contact.edges[1].bodyId );
+    if( wakeBodies )
+    {
+        WakeBodyByIndex( contact.edges[0].bodyId );
+        WakeBodyByIndex( contact.edges[1].bodyId );
+    }
 
     for( std::int32_t edgeIndex = 0; edgeIndex < 2; ++edgeIndex )
     {
