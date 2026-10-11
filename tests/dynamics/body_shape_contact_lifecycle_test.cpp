@@ -404,8 +404,29 @@ void checkChainLifecycle()
 
 } // namespace
 
+void checkCapsuleCreationBoundary()
+{
+    world simulation{};
+    const bodyId owner = simulation.CreateBody();
+    for( float length : { 0.0f, LINEAR_SLOP * 0.5f, LINEAR_SLOP } )
+    {
+        const capsule2 capsule{ {}, { length, 0.0f }, 1.0f };
+        check( !simulation.IsValid( simulation.CreateShape( owner, capsule ) ), "degenerate capsule accepted" );
+        check( !simulation.IsValid( simulation.CreateSensorShape( owner, capsule ) ), "degenerate sensor capsule accepted" );
+        check( simulation.GetShapeCount() == 0 && simulation.GetBody( owner ).shapeCount == 0, "rejected capsule changed shape lists" );
+    }
+    const capsule2 capsule{ {}, { LINEAR_SLOP * 2.0f, 0.0f }, 1.0f };
+    const shapeId solid = simulation.CreateShape( owner, capsule );
+    const shapeId sensor = simulation.CreateSensorShape( owner, capsule );
+    check( simulation.IsValid( solid ) && simulation.IsValid( sensor ), "valid capsule rejected" );
+    check( simulation.GetShapeCount() == 2 && simulation.GetShape( sensor ).sensorIndex >= 0, "valid capsule creation state" );
+    simulation.DestroyBody( owner );
+    check( simulation.GetShapeCount() == 0, "capsule cleanup" );
+}
+
 int main()
 {
+    checkCapsuleCreationBoundary();
     checkOwnership();
     checkWorldReuse();
     checkLists();

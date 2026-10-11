@@ -167,6 +167,12 @@ void world::DestroyBody( bodyId bodyId )
 shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter, float density )
 {
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+    if( const capsule2* capsule = std::get_if<capsule2>( &geometry );
+        capsule != nullptr && LengthSquared( capsule->center2 - capsule->center1 ) <= LINEAR_SLOP * LINEAR_SLOP )
+    {
+        return {};
+    }
+
     const std::int32_t shapeIndex = CreateShapeByIndex( bodyIndex, std::move( geometry ), filter, density, false );
 
     return MakeShapeId( shapeIndex );
@@ -175,6 +181,8 @@ shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilt
 shapeId world::CreateSensorShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter, float density )
 {
     const shapeId sensorShapeId = CreateShape( bodyId, std::move( geometry ), filter, density );
+
+    if( !IsValid( sensorShapeId ) ) return {};
 
     const std::int32_t shapeIndex = GetShapeIndex( sensorShapeId );
 

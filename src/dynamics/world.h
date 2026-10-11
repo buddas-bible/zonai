@@ -87,6 +87,7 @@ public:
 #pragma region ShapeLifecycle
 
     // local geometry를 body에 연결하고 shape handle을 반환함.
+    // capsule 축 길이가 LINEAR_SLOP 이하이면 빈 handle을 반환함 (sensor 생성도 동일).
     [[nodiscard]] shapeId CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter = {}, float density = 1.0f );
 
     // Contact를 만들지 않고 overlap만 추적하는 sensor shape를 생성함.

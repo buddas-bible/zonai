@@ -189,7 +189,8 @@ void dynamicTree::MarkProxyMoved( std::int32_t proxyId )
 
 bool dynamicTree::HasMoved() const
 {
-    if( proxyCount_ == 0 ) return false;
+    if( proxyCount_ == 0 ) 
+        return false;
 
     return ( nodes_[ROOT_NODE].flagIndex & TREE_MOVED_NODE ) != 0;
 }
@@ -197,15 +198,19 @@ bool dynamicTree::HasMoved() const
 bool dynamicTree::NeedsRebuild() const
 {
     // 최신 Box2D처럼 moved branch뿐 아니라 DFS node 순서가 깨진 경우에도 rebuild가 필요함.
+    //
+    // TODO: 빈 트리의 dfsOrdered_가 false로 남으면 매 갱신에서 후보 탐색에 진입함. Box2D도 동일하며 빈 트리 제외는 최적화 후보.
     return HasMoved() || !dfsOrdered_;
 }
 
 std::size_t dynamicTree::Rebuild( bool fullBuild )
 {
-    if( proxyCount_ == 0 ) return 0;
+    if( proxyCount_ == 0 ) 
+        return 0;
 
     // DFS 순서도 정상이고 moved branch도 없으면 partial rebuild는 할 일이 없음.
-    if( !fullBuild && !NeedsRebuild() ) return 0;
+    if( !fullBuild && !NeedsRebuild() ) 
+        return 0;
 
     rebuildLeafIndices_.resize( proxyCount_ );
     rebuildLeafNodes_.resize( proxyCount_ );
@@ -296,11 +301,13 @@ void dynamicTree::ClearMoved()
         {
             treeNode& node = nodes_[pair + i];
 
-            if( ( node.flagIndex & TREE_MOVED_NODE ) == 0 ) continue;
+            if( ( node.flagIndex & TREE_MOVED_NODE ) == 0 ) 
+                continue;
 
             node.flagIndex &= ~TREE_MOVED_NODE;
 
-            if( IsLeaf( node ) ) continue;
+            if( IsLeaf( node ) ) 
+                continue;
 
             if( stackCount < stack.size() )
             {
@@ -334,7 +341,8 @@ float dynamicTree::GetAreaRatio() const
 
     const float rootPerimeter = Perimeter( nodes_[ROOT_NODE].aabb );
 
-    if( rootPerimeter <= 0.0f ) return 0.0f;
+    if( rootPerimeter <= 0.0f ) 
+        return 0.0f;
 
     // SAH가 줄일 수 있는 비용은 root와 leaf를 제외한 internal node 영역임.
     float internalPerimeter = 0.0f;
@@ -344,7 +352,8 @@ float dynamicTree::GetAreaRatio() const
         const treeNode& node = nodes_[i];
 
         // empty/free node와 leaf는 둘 다 leaf tagged이므로 internal만 합산함.
-        if( IsLeaf( node ) ) continue;
+        if( IsLeaf( node ) ) 
+            continue;
 
         internalPerimeter += Perimeter( node.aabb );
     }
@@ -374,7 +383,8 @@ bool dynamicTree::Validate() const
         ++freePairCount;
 
         // cycle가 생긴 free-list는 node 수보다 길어질 수 없음.
-        if( 2 * freePairCount >= nodes_.size() ) return false;
+        if( 2 * freePairCount >= nodes_.size() ) 
+            return false;
     }
 
     // proxy free-list의 범위, free 상태, 개수 보존을 검증함.
@@ -388,23 +398,24 @@ bool dynamicTree::Validate() const
         freeProxy = proxies_[freeProxy].next;
         ++freeProxyCount;
 
-        if( freeProxyCount > proxies_.size() ) return false;
+        if( freeProxyCount > proxies_.size() ) 
+            return false;
     }
 
-    if( proxyCount_ + freeProxyCount != proxies_.size() ) return false;
+    if( proxyCount_ + freeProxyCount != proxies_.size() ) 
+        return false;
 
     // n개의 live proxy는 2n개의 live/root slots를 사용하고 free pair마다 두 slot이 추가됨.
     const std::size_t expectedNodeCount = 2 * std::max<std::size_t>( proxyCount_, 1 ) + 2 * freePairCount;
 
-    if( nodes_.size() != expectedNodeCount ) return false;
+    if( nodes_.size() != expectedNodeCount ) 
+        return false;
 
     if( proxyCount_ == 0 )
-
         // proxy가 없으면 root도 비어있어야 함.
         return IsEmptyNode( nodes_[ROOT_NODE] );
 
     if( IsEmptyNode( nodes_[ROOT_NODE] ) )
-
         // proxy가 있는데 root가 비어있으면 잘못된 상태임.
         return false;
 
@@ -412,9 +423,11 @@ bool dynamicTree::Validate() const
     std::size_t leafCount = 0;
 
     // root부터 내려가며 parent, AABB, height, proxy 연결을 검증함.
-    if( !ValidateSubtree( ROOT_NODE, height, leafCount ) ) return false;
+    if( !ValidateSubtree( ROOT_NODE, height, leafCount ) ) 
+        return false;
 
-    if( leafCount != proxyCount_ || height != GetHeight() ) return false;
+    if( leafCount != proxyCount_ || height != GetHeight() ) 
+        return false;
 
     std::size_t liveProxyCount = 0;
 
@@ -423,13 +436,16 @@ bool dynamicTree::Validate() const
     {
         const std::int32_t nodeIndex = proxies_[proxyId].node;
 
-        if( nodeIndex == NULL_INDEX ) continue;
+        if( nodeIndex == NULL_INDEX ) 
+            continue;
 
-        if( nodeIndex < 0 || static_cast<std::size_t>( nodeIndex ) >= nodes_.size() ) return false;
+        if( nodeIndex < 0 || static_cast<std::size_t>( nodeIndex ) >= nodes_.size() ) 
+            return false;
 
         const treeNode& node = nodes_[nodeIndex];
 
-        if( IsEmptyNode( node ) || !IsLeaf( node ) || GetProxyId( node ) != static_cast<std::int32_t>( proxyId ) ) return false;
+        if( IsEmptyNode( node ) || !IsLeaf( node ) || GetProxyId( node ) != static_cast<std::int32_t>( proxyId ) ) 
+            return false;
 
         ++liveProxyCount;
     }
