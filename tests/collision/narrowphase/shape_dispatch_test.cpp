@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cmath>
 
+#include "collision/distance2.h"
 #include "collision/narrowphase/collide.h"
 
 using namespace zonai;
@@ -23,14 +24,21 @@ bool NearlyEqual( const vec2& a, const vec2& b, float epsilon = 1e-5f )
 int main()
 {
     const shapeGeometry circle = circle2{ {}, 0.5f };
-
+    const shapeGeometry capsule = capsule2{ { -0.5f, 0.0f }, { 0.5f, 0.0f }, 0.5f };
     const shapeGeometry polygon = MakeBox( { 1.0f, 1.0f } );
-
     const shapeGeometry segment = segment2{ { -1.0f, 0.0f }, { 1.0f, 0.0f } };
+    const shapeGeometry chain = chainSegment2{ { 2.0f, 0.0f }, { { 1.0f, 0.0f }, { -1.0f, 0.0f } }, { -2.0f, 0.0f } };
 
     assert( CanCollideShapes( circle, polygon ) );
     assert( CanCollideShapes( polygon, circle ) );
     assert( !CanCollideShapes( segment, segment ) );
+    assert( CanCollideShapes( chain, circle ) );
+    assert( CanCollideShapes( circle, chain ) );
+    assert( CanCollideShapes( chain, capsule ) );
+    assert( CanCollideShapes( chain, polygon ) );
+    assert( !CanCollideShapes( chain, segment ) );
+    assert( !CanCollideShapes( segment, chain ) );
+    assert( !CanCollideShapes( chain, chain ) );
 
     {
         // canonical 순서: polygon A, circle B.
@@ -56,11 +64,7 @@ int main()
         const localManifold2 manifold = CollideShapes( circle, transformA, polygon, transformB );
 
         assert( manifold.pointCount == 1 );
-
-        // Circle A에서 Polygon B를 향하므로 아래쪽이 normal 방향임.
         assert( NearlyEqual( manifold.normal, { 0.0f, -1.0f } ) );
-
-        // world contact (0, 1)은 Circle A local에서는 (0, -0.5)임.
         assert( NearlyEqual( manifold.points[0].point, { 0.0f, -0.5f } ) );
         assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
     }
@@ -84,8 +88,57 @@ int main()
 
     {
         const localManifold2 manifold = CollideShapes( segment, {}, segment, {} );
-
         assert( manifold.pointCount == 0 );
+    }
+
+    {
+        // Chain-circle은 cache를 쓰지 않아도 같은 dispatch API를 공유함.
+        transform2 circleTransform{};
+        circleTransform.position = { 0.0f, 0.5f };
+        simplexCache2 cache{};
+
+        const localManifold2 manifold = CollideShapes( chain, {}, circle, circleTransform, cache );
+
+        assert( manifold.pointCount == 1 );
+        assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
+    }
+
+    {
+        // Reverse dispatch는 원래 A(circle) local space로 normal과 point를 되돌림.
+        transform2 circleTransform{};
+        circleTransform.position = { 0.0f, 0.5f };
+        simplexCache2 cache{};
+
+        const localManifold2 manifold = CollideShapes( circle, circleTransform, chain, {}, cache );
+
+        assert( manifold.pointCount == 1 );
+        assert( NearlyEqual( manifold.normal, { 0.0f, -1.0f } ) );
+        assert( NearlyEqual( manifold.points[0].point, { 0.0f, -0.5f } ) );
+    }
+
+    {
+        // Chain-polygon은 Contact가 보관한 simplex cache를 같은 dispatch를 통해 갱신함.
+        transform2 polygonTransform{};
+        polygonTransform.position = { 0.0f, 1.0f };
+        simplexCache2 cache{};
+
+        const localManifold2 manifold = CollideShapes( chain, {}, polygon, polygonTransform, cache );
+
+        assert( manifold.pointCount == 2 );
+        assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
+        assert( cache.count > 0 );
+    }
+
+    {
+        transform2 capsuleTransform{};
+        capsuleTransform.position = { 0.0f, 0.5f };
+        simplexCache2 cache{};
+
+        const localManifold2 manifold = CollideShapes( chain, {}, capsule, capsuleTransform, cache );
+
+        assert( manifold.pointCount == 2 );
+        assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
+        assert( cache.count > 0 );
     }
 
     return 0;
