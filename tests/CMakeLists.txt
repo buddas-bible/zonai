@@ -581,6 +581,11 @@ target_include_directories(sandboxDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandb
 target_link_libraries(sandboxDemoTests PRIVATE zonai::zonai)
 add_test(NAME sandboxDemoTests COMMAND sandboxDemoTests)
 
+add_executable(sandboxTerrainChainDemoTests sandbox/terrain_chain_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
+target_include_directories(sandboxTerrainChainDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+target_link_libraries(sandboxTerrainChainDemoTests PRIVATE zonai::zonai)
+add_test(NAME sandboxTerrainChainDemoTests COMMAND sandboxTerrainChainDemoTests)
+
 add_executable(sandboxJointDemoTests sandbox/joint_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
 target_include_directories(sandboxJointDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxJointDemoTests PRIVATE zonai::zonai)
