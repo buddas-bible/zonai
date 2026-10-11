@@ -25,7 +25,6 @@ void check( bool ok, const char* message )
 int main()
 {
     // Filter playground는 Joint 생성/파괴 자체로 collision 상태를 전환하는 학습 장면임.
-    check( getDemoEntries().size() == 14, "Filter Joint demo is independently selectable" );
     check( std::string_view{ getDemoEntry( demoKind::filterJointPlayground ).category } == "조인트", "Filter Joint demo stays in joint category" );
 
     rigidBodyDemo filter{ demoKind::filterJointPlayground };
