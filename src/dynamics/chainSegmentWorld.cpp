@@ -52,8 +52,8 @@ void world::UpdateChainSegmentByIndex( std::int32_t shapeIndex, const chainSegme
 
         if( contact.shapeIdA == shapeIndex || contact.shapeIdB == shapeIndex )
         {
-            // Batch caller가 마지막에 component를 한 번만 깨움.
-            DestroyContact( contactId, false );
+            // Contact를 끊기 전에 양쪽 body를 깨워 정적 chain 편집도 잠든 visitor에 즉시 반영함.
+            DestroyContact( contactId );
         }
     }
 
