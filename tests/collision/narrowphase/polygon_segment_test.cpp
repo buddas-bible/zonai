@@ -83,6 +83,15 @@ int main()
         assert( NearlyEqual( manifold.normal, { 0.0f, 1.0f } ) );
         assert( NearlyEqual( manifold.points[0].separation, 0.0f ) );
         assert( NearlyEqual( manifold.points[1].separation, 0.0f ) );
+        assert( cache.count > 0 );
+
+        // 같은 contact가 다음 narrowphase에서 이전 GJK simplex를 시작점으로 재사용해도 결과가 같아야 함.
+        const localManifold2 cachedManifold = CollideChainSegmentPolygon( chain, polygon, polygonTransform, cache );
+
+        assert( cachedManifold.pointCount == 2 );
+        assert( NearlyEqual( cachedManifold.normal, manifold.normal ) );
+        assert( NearlyEqual( cachedManifold.points[0].separation, manifold.points[0].separation ) );
+        assert( NearlyEqual( cachedManifold.points[1].separation, manifold.points[1].separation ) );
     }
 
     {
@@ -106,6 +115,24 @@ int main()
         simplexCache2 cache{};
 
         const localManifold2 manifold = CollideChainSegmentPolygon( chain, polygon, polygonTransform, cache );
+
+        assert( manifold.pointCount == 0 );
+    }
+
+    {
+        // Convex 이전 edge 쪽을 향하는 vertex normal은 현재 edge의 normal cone 밖이므로 이전 edge가 소유함.
+        const chainSegment2 convexTail{
+            { 2.0f, -1.0f },
+            { { 1.0f, 0.0f }, { -1.0f, 0.0f } },
+            { -2.0f, 0.0f }
+        };
+        polygon2 polygon = MakeBox( { 0.01f, 0.01f } );
+        polygon.radius = 0.1f;
+        transform2 polygonTransform{};
+        polygonTransform.position = { 1.08f, 0.02f };
+        simplexCache2 cache{};
+
+        const localManifold2 manifold = CollideChainSegmentPolygon( convexTail, polygon, polygonTransform, cache );
 
         assert( manifold.pointCount == 0 );
     }
