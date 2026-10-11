@@ -19,6 +19,10 @@ struct shape
     // 이 shape를 소유하는 body index. 아직 연결되지 않았으면 NULL_INDEX임.
     std::int32_t bodyId = NULL_INDEX;
 
+    // parent chain이 만든 chainSegment2면 해당 chain index.
+    // 일반 shape나 독립 chainSegment2면 NULL_INDEX임.
+    std::int32_t parentChainId = NULL_INDEX;
+
     // 같은 body에 연결된 이전 / 다음 shape index.
     // body의 head부터 index 기반 doubly linked list로 순회함.
     std::int32_t prevShapeId = NULL_INDEX;

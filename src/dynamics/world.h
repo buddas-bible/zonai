@@ -13,6 +13,8 @@
 #include "dynamics/bodyDef.h"
 #include "dynamics/bodySim.h"
 #include "dynamics/bodyState.h"
+#include "dynamics/chain2.h"
+#include "dynamics/chainDef.h"
 #include "dynamics/contact2.h"
 #include "dynamics/contactConstraint2.h"
 #include "dynamics/contactData.h"
@@ -91,9 +93,22 @@ public:
     [[nodiscard]] shapeId CreateSensorShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter = {}, float density = 0.0f );
 
     // handle이 가리키는 shape의 Contact / proxy / body list 연결을 정리함.
+    // parent chain의 child segment는 DestroyChain으로만 제거함.
     void DestroyShape( shapeId shapeId );
 
 #pragma endregion ShapeLifecycle
+
+#pragma region ChainLifecycle
+
+    // points를 여러 one-sided chainSegment2 shape로 확장해 하나의 parent chain으로 관리함.
+    [[nodiscard]] chainId CreateChain( bodyId bodyId, const chainDef& definition );
+    void DestroyChain( chainId chainId );
+
+    [[nodiscard]] std::size_t GetChainSegmentCount( chainId chainId ) const;
+    [[nodiscard]] std::size_t GetChainSegments( chainId chainId, std::span<shapeId> output ) const;
+    [[nodiscard]] chainId GetShapeParentChain( shapeId shapeId ) const;
+
+#pragma endregion ChainLifecycle
 
 #pragma region JointLifecycle
 
@@ -369,6 +384,7 @@ public:
 
     // world lifetime / null / 범위 / generation / 활성 slot을 모두 확인함.
     [[nodiscard]] bool IsValid( bodyId bodyId ) const noexcept;
+    [[nodiscard]] bool IsValid( chainId chainId ) const noexcept;
     [[nodiscard]] bool IsValid( shapeId shapeId ) const noexcept;
     [[nodiscard]] bool IsValid( contactId contactId ) const noexcept;
     [[nodiscard]] bool IsValid( jointId id ) const noexcept;
@@ -435,6 +451,8 @@ public:
 
     [[nodiscard]] std::size_t GetBodyCount() const noexcept { return bodyCount_; }
 
+    [[nodiscard]] std::size_t GetChainCount() const noexcept { return chainCount_; }
+
     [[nodiscard]] std::size_t GetShapeCount() const noexcept { return shapeCount_; }
 
     [[nodiscard]] std::size_t GetContactCount() const noexcept { return contactCount_; }
@@ -448,11 +466,13 @@ private:
 #pragma region InternalHandles
 
     [[nodiscard]] std::int32_t GetBodyIndex( bodyId bodyId ) const;
+    [[nodiscard]] std::int32_t GetChainIndex( chainId chainId ) const;
     [[nodiscard]] std::int32_t GetShapeIndex( shapeId shapeId ) const;
     [[nodiscard]] std::int32_t GetContactIndex( contactId contactId ) const;
     [[nodiscard]] std::int32_t getJointIndex( jointId id ) const;
 
     [[nodiscard]] bodyId MakeBodyId( std::int32_t bodyIndex ) const;
+    [[nodiscard]] chainId MakeChainId( std::int32_t chainIndex ) const;
     [[nodiscard]] shapeId MakeShapeId( std::int32_t shapeIndex ) const;
     [[nodiscard]] contactId MakeContactId( std::int32_t contactIndex ) const;
     [[nodiscard]] contactData MakeContactData( std::int32_t contactIndex ) const;
@@ -472,8 +492,13 @@ private:
 
 #pragma region BodyShapeStorage
 
+    // public shape 경로와 chain batch가 같은 slot/proxy/link 로직을 사용함.
+    // chain batch는 body 전체 wake와 mass/extents 갱신을 바깥에서 한 번만 수행함.
+    [[nodiscard]] std::int32_t CreateShapeByIndex( std::int32_t bodyIndex, shapeGeometry geometry, collisionFilter filter, float density, bool deferBodyUpdates );
+
     void DestroyBodyByIndex( std::int32_t bodyIndex );
-    void DestroyShapeByIndex( std::int32_t shapeIndex );
+    void DestroyChainByIndex( std::int32_t chainIndex, bool deferBodyUpdates = false );
+    void DestroyShapeByIndex( std::int32_t shapeIndex, bool deferBodyUpdates = false, bool destroyContacts = true );
 
     // bodySim transform을 기준으로 이 body의 모든 shape proxy를 broadPhase에 동기화함.
     void SyncBodyProxies( std::int32_t bodyIndex );
@@ -569,7 +594,8 @@ private:
 #pragma region ContactDestruction
 
     // body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함.
-    void DestroyContact( std::int32_t contactId );
+    // Chain batch처럼 연결 component를 이미 깨운 경로는 wake를 생략할 수 있음.
+    void DestroyContact( std::int32_t contactId, bool wakeBodies = true );
 
 #pragma endregion ContactDestruction
 
@@ -612,6 +638,12 @@ private:
 
     // shapes_.size()와 별개인 현재 활성 shape 개수.
     std::size_t shapeCount_ = 0;
+
+    /// chain
+    // parent chain도 shape/body와 같은 stable slot + generation 규칙을 사용함.
+    std::vector<chain2> chains_;
+    std::int32_t chainFreeList_ = chain2::NULL_INDEX;
+    std::size_t chainCount_ = 0;
 
     /// contact
     // contactId가 변하지 않는 stable slot storage.

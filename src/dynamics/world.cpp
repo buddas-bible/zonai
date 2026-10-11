@@ -82,6 +82,7 @@ bodyId world::CreateBody( const bodyDef& definition )
 
         assert( freeBody.bodyId == body::NULL_INDEX );
         assert( freeBody.headShapeId == body::NULL_INDEX );
+        assert( freeBody.headChainId == body::NULL_INDEX && freeBody.chainCount == 0 );
         assert( freeBody.headContactKey == body::NULL_INDEX );
         assert( freeBody.headJointKey == body::NULL_INDEX && freeBody.jointCount == 0 );
         assert( bodySims_.size() == bodies_.size() );
@@ -166,77 +167,7 @@ void world::DestroyBody( bodyId bodyId )
 shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter, float density )
 {
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
-
-    assert( !std::holds_alternative<std::monostate>( geometry ) );
-    assert( std::isfinite( density ) );
-    assert( density >= 0.0f );
-
-    std::int32_t shapeIndex = shape::NULL_INDEX;
-
-    if( shapeFreeList_ != shape::NULL_INDEX )
-    {
-        shapeIndex = shapeFreeList_;
-
-        assert( shapeIndex >= 0 );
-        assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
-
-        shape& freeShape = shapes_[shapeIndex];
-
-        assert( freeShape.bodyId == shape::NULL_INDEX );
-        assert( std::holds_alternative<std::monostate>( freeShape.geometry ) );
-
-        shapeFreeList_ = freeShape.nextFreeId;
-    }
-    else
-    {
-        assert( shapes_.size() < static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() - 1 ) );
-
-        shapeIndex = static_cast<std::int32_t>( shapes_.size() );
-        shapes_.push_back( {} );
-        fatAABBs_.push_back( {} );
-    }
-
-    assert( fatAABBs_.size() == shapes_.size() );
-
-    shape& storedShape = shapes_[shapeIndex];
-
-    const std::uint16_t generation = static_cast<std::uint16_t>( storedShape.generation + 1u );
-
-    storedShape = {};
-    storedShape.generation = generation;
-    storedShape.geometry = std::move( geometry );
-    storedShape.density = density;
-    storedShape.filter = filter;
-    storedShape.aabbMargin = ComputeShapeAABBMargin( storedShape.geometry );
-
-    body& body = bodies_[bodyIndex];
-
-    WakeBodyByIndex( bodyIndex );
-
-    assert( bodySims_.size() == bodies_.size() );
-
-    const bodySim& bodySim = bodySims_[bodyIndex];
-
-    assert( bodySim.bodyId == bodyIndex );
-
-    const aabb2 tightAABB = ComputeShapeAABB( storedShape.geometry, bodySim.transform );
-
-    storedShape.aabb = ExpandAABB( tightAABB, SPECULATIVE_DISTANCE );
-
-    // Static은 TOI tolerance 때문에 speculative distance를 한 번 더 사용하고,
-    // moving body는 shape 크기 기반 margin으로 persistent fat bounds를 만듦.
-    const float fatMargin = body.type == bodyType::Static ? SPECULATIVE_DISTANCE : storedShape.aabbMargin;
-
-    aabb2& fatAABB = fatAABBs_[shapeIndex];
-
-    fatAABB = ExpandAABB( storedShape.aabb, fatMargin );
-
-    storedShape.proxyKey = broadPhase_.CreateProxy( body.type, fatAABB, shapeIndex, true );
-
-    LinkShape( body, bodyIndex, shapes_, shapeIndex );
-    ++shapeCount_;
-
-    UpdateBodyMassData( bodyIndex );
+    const std::int32_t shapeIndex = CreateShapeByIndex( bodyIndex, std::move( geometry ), filter, density, false );
 
     return MakeShapeId( shapeIndex );
 }
@@ -265,10 +196,154 @@ void world::DestroyShape( shapeId shapeId )
 {
     const std::int32_t shapeIndex = GetShapeIndex( shapeId );
 
+    // parent chain이 소유한 child segment는 parent의 adjacency와 shapeIds를 깨뜨리므로 개별 파괴하지 않음.
+    assert( shapes_[shapeIndex].parentChainId == shape::NULL_INDEX );
+    if( shapes_[shapeIndex].parentChainId != shape::NULL_INDEX ) return;
+
     DestroyShapeByIndex( shapeIndex );
 }
 
 #pragma endregion ShapeLifecycle
+
+#pragma region ChainLifecycle
+
+chainId world::CreateChain( bodyId bodyId, const chainDef& definition )
+{
+    const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+
+    assert( definition.isLoop ? definition.points.size() >= 3 : definition.points.size() >= 2 );
+    assert( std::isfinite( definition.friction ) && definition.friction >= 0.0f );
+    assert( std::isfinite( definition.restitution ) && definition.restitution >= 0.0f );
+
+    const std::span<const vec2> points = definition.points;
+    const float minimumLengthSquared = LINEAR_SLOP * LINEAR_SLOP;
+
+    for( const vec2& point : points )
+    {
+        assert( IsFinite( point ) );
+    }
+
+    for( std::size_t i = 0; i + 1 < points.size(); ++i )
+    {
+        assert( LengthSquared( points[i + 1] - points[i] ) > minimumLengthSquared );
+    }
+
+    if( definition.isLoop )
+    {
+        assert( LengthSquared( points.front() - points.back() ) > minimumLengthSquared );
+    }
+    else
+    {
+        assert( IsFinite( definition.ghost1 ) && IsFinite( definition.ghost2 ) );
+        assert( LengthSquared( points.front() - definition.ghost1 ) > minimumLengthSquared );
+        assert( LengthSquared( definition.ghost2 - points.back() ) > minimumLengthSquared );
+    }
+
+    std::int32_t chainIndex = chain2::NULL_INDEX;
+
+    if( chainFreeList_ != chain2::NULL_INDEX )
+    {
+        chainIndex = chainFreeList_;
+        assert( chainIndex >= 0 && static_cast<std::size_t>( chainIndex ) < chains_.size() );
+        assert( chains_[chainIndex].chainId == chain2::NULL_INDEX );
+        chainFreeList_ = chains_[chainIndex].nextFreeId;
+    }
+    else
+    {
+        assert( chains_.size() < static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() - 1 ) );
+        chainIndex = static_cast<std::int32_t>( chains_.size() );
+        chains_.push_back( {} );
+    }
+
+    chain2& chain = chains_[chainIndex];
+    const std::uint16_t generation = static_cast<std::uint16_t>( chain.generation + 1u );
+    chain = {};
+    chain.chainId = chainIndex;
+    chain.bodyId = bodyIndex;
+    chain.generation = generation;
+
+    body& body = bodies_[bodyIndex];
+    chain.nextChainId = body.headChainId;
+    body.headChainId = chainIndex;
+    ++body.chainCount;
+    ++chainCount_;
+
+    // chain child 생성 전에 연결된 body/island를 한 번만 깨움.
+    WakeBodyByIndex( bodyIndex );
+
+    const std::size_t segmentCount = definition.isLoop ? points.size() : points.size() - 1;
+    chain.shapeIds.reserve( segmentCount );
+
+    const auto createSegment = [&]( const vec2& ghost1, const vec2& point1, const vec2& point2, const vec2& ghost2 )
+    {
+        const chainSegment2 segment{ ghost1, { point1, point2 }, ghost2 };
+        const std::int32_t shapeIndex = CreateShapeByIndex( bodyIndex, segment, definition.filter, 0.0f, true );
+
+        shape& child = shapes_[shapeIndex];
+        child.parentChainId = chainIndex;
+        child.friction = definition.friction;
+        child.restitution = definition.restitution;
+
+        chain.shapeIds.push_back( shapeIndex );
+    };
+
+    if( definition.isLoop )
+    {
+        const std::size_t count = points.size();
+        for( std::size_t i = 0; i < count; ++i )
+        {
+            createSegment( points[( i + count - 1 ) % count], points[i], points[( i + 1 ) % count], points[( i + 2 ) % count] );
+        }
+    }
+    else
+    {
+        const std::size_t count = points.size();
+        for( std::size_t i = 0; i + 1 < count; ++i )
+        {
+            const vec2 ghost1 = i == 0 ? definition.ghost1 : points[i - 1];
+            const vec2 ghost2 = i + 2 == count ? definition.ghost2 : points[i + 2];
+            createSegment( ghost1, points[i], points[i + 1], ghost2 );
+        }
+    }
+
+    // child마다 body 전체 shape list를 다시 훑지 않고 batch가 완성된 뒤 한 번만 갱신함.
+    UpdateBodyMassData( bodyIndex );
+
+    return MakeChainId( chainIndex );
+}
+
+void world::DestroyChain( chainId chainId )
+{
+    DestroyChainByIndex( GetChainIndex( chainId ) );
+}
+
+std::size_t world::GetChainSegmentCount( chainId chainId ) const
+{
+    return chains_[GetChainIndex( chainId )].shapeIds.size();
+}
+
+std::size_t world::GetChainSegments( chainId chainId, std::span<shapeId> output ) const
+{
+    const chain2& chain = chains_[GetChainIndex( chainId )];
+    const std::size_t count = std::min( output.size(), chain.shapeIds.size() );
+
+    for( std::size_t i = 0; i < count; ++i )
+    {
+        output[i] = MakeShapeId( chain.shapeIds[i] );
+    }
+
+    return count;
+}
+
+chainId world::GetShapeParentChain( shapeId shapeId ) const
+{
+    const shape& shape = shapes_[GetShapeIndex( shapeId )];
+    if( shape.parentChainId == shape::NULL_INDEX ) return {};
+
+    return MakeChainId( shape.parentChainId );
+}
+
+#pragma endregion ChainLifecycle
 
 #pragma region JointLifecycle
 
@@ -2670,6 +2745,17 @@ bool world::IsValid( bodyId bodyId ) const noexcept
     return body.bodyId == bodyIndex && body.generation == bodyId.generation;
 }
 
+bool world::IsValid( chainId chainId ) const noexcept
+{
+    if( chainId.index1 <= 0 || chainId.worldToken != worldToken_ ) return false;
+
+    const std::int32_t chainIndex = chainId.index1 - 1;
+    if( static_cast<std::size_t>( chainIndex ) >= chains_.size() ) return false;
+
+    const chain2& chain = chains_[chainIndex];
+    return chain.chainId == chainIndex && chain.generation == chainId.generation;
+}
+
 bool world::IsValid( shapeId shapeId ) const noexcept
 {
     if( shapeId.index1 <= 0 || shapeId.worldToken != worldToken_ ) return false;
@@ -2855,6 +2941,13 @@ std::int32_t world::GetBodyIndex( bodyId bodyId ) const
     return bodyId.index1 - 1;
 }
 
+std::int32_t world::GetChainIndex( chainId chainId ) const
+{
+    assert( IsValid( chainId ) );
+
+    return chainId.index1 - 1;
+}
+
 std::int32_t world::GetShapeIndex( shapeId shapeId ) const
 {
     assert( IsValid( shapeId ) );
@@ -2886,6 +2979,17 @@ bodyId world::MakeBodyId( std::int32_t bodyIndex ) const
     assert( body.bodyId == bodyIndex );
 
     return { bodyIndex + 1, body.generation, worldToken_ };
+}
+
+chainId world::MakeChainId( std::int32_t chainIndex ) const
+{
+    assert( chainIndex >= 0 );
+    assert( static_cast<std::size_t>( chainIndex ) < chains_.size() );
+
+    const chain2& chain = chains_[chainIndex];
+    assert( chain.chainId == chainIndex );
+
+    return { chainIndex + 1, chain.generation, worldToken_ };
 }
 
 shapeId world::MakeShapeId( std::int32_t shapeIndex ) const
@@ -3181,6 +3285,165 @@ bool world::shouldShapeFiltersCollide( const collisionFilter& a, const collision
 
 #pragma region BodyShapeStorage
 
+std::int32_t world::CreateShapeByIndex( std::int32_t bodyIndex, shapeGeometry geometry, collisionFilter filter, float density, bool deferBodyUpdates )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+    assert( bodies_[bodyIndex].bodyId == bodyIndex );
+    assert( !std::holds_alternative<std::monostate>( geometry ) );
+    assert( std::isfinite( density ) );
+    assert( density >= 0.0f );
+
+    std::int32_t shapeIndex = shape::NULL_INDEX;
+
+    if( shapeFreeList_ != shape::NULL_INDEX )
+    {
+        shapeIndex = shapeFreeList_;
+
+        assert( shapeIndex >= 0 );
+        assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+
+        shape& freeShape = shapes_[shapeIndex];
+
+        assert( freeShape.bodyId == shape::NULL_INDEX );
+        assert( std::holds_alternative<std::monostate>( freeShape.geometry ) );
+
+        shapeFreeList_ = freeShape.nextFreeId;
+    }
+    else
+    {
+        assert( shapes_.size() < static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() - 1 ) );
+
+        shapeIndex = static_cast<std::int32_t>( shapes_.size() );
+        shapes_.push_back( {} );
+        fatAABBs_.push_back( {} );
+    }
+
+    assert( fatAABBs_.size() == shapes_.size() );
+
+    shape& storedShape = shapes_[shapeIndex];
+    const std::uint16_t generation = static_cast<std::uint16_t>( storedShape.generation + 1u );
+
+    storedShape = {};
+    storedShape.generation = generation;
+    storedShape.geometry = std::move( geometry );
+    storedShape.density = density;
+    storedShape.filter = filter;
+    storedShape.aabbMargin = ComputeShapeAABBMargin( storedShape.geometry );
+
+    body& body = bodies_[bodyIndex];
+
+    if( !deferBodyUpdates )
+    {
+        WakeBodyByIndex( bodyIndex );
+    }
+
+    assert( bodySims_.size() == bodies_.size() );
+    const bodySim& bodySim = bodySims_[bodyIndex];
+    assert( bodySim.bodyId == bodyIndex );
+
+    const aabb2 tightAABB = ComputeShapeAABB( storedShape.geometry, bodySim.transform );
+    storedShape.aabb = ExpandAABB( tightAABB, SPECULATIVE_DISTANCE );
+
+    const float fatMargin = body.type == bodyType::Static ? SPECULATIVE_DISTANCE : storedShape.aabbMargin;
+    aabb2& fatAABB = fatAABBs_[shapeIndex];
+    fatAABB = ExpandAABB( storedShape.aabb, fatMargin );
+
+    storedShape.proxyKey = broadPhase_.CreateProxy( body.type, fatAABB, shapeIndex, true );
+
+    LinkShape( body, bodyIndex, shapes_, shapeIndex );
+    ++shapeCount_;
+
+    if( !deferBodyUpdates )
+    {
+        UpdateBodyMassData( bodyIndex );
+    }
+
+    return shapeIndex;
+}
+
+void world::DestroyChainByIndex( std::int32_t chainIndex, bool deferBodyUpdates )
+{
+    assert( chainIndex >= 0 );
+    assert( static_cast<std::size_t>( chainIndex ) < chains_.size() );
+    assert( chainCount_ > 0 );
+
+    chain2& chain = chains_[chainIndex];
+    assert( chain.chainId == chainIndex );
+    assert( chain.bodyId >= 0 && static_cast<std::size_t>( chain.bodyId ) < bodies_.size() );
+
+    const std::int32_t bodyIndex = chain.bodyId;
+    body& body = bodies_[bodyIndex];
+
+    if( !deferBodyUpdates )
+    {
+        WakeBodyByIndex( bodyIndex );
+    }
+
+    // parentChainId를 이용해 body contact list를 한 번만 훑고
+    // 이 chain의 child가 관여한 Contact를 batch로 먼저 제거함.
+    std::int32_t contactKey = body.headContactKey;
+    while( contactKey != body::NULL_INDEX )
+    {
+        const std::int32_t contactId = GetContactId( contactKey );
+        const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
+
+        assert( contactId >= 0 );
+        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+        contact2& contact = contacts_[contactId];
+        assert( contact.contactId == contactId );
+
+        // DestroyContact가 intrusive list를 수정하므로 다음 key를 먼저 저장함.
+        contactKey = contact.edges[edgeIndex].nextKey;
+
+        assert( contact.shapeIdA >= 0 && static_cast<std::size_t>( contact.shapeIdA ) < shapes_.size() );
+        assert( contact.shapeIdB >= 0 && static_cast<std::size_t>( contact.shapeIdB ) < shapes_.size() );
+
+        if( shapes_[contact.shapeIdA].parentChainId == chainIndex ||
+            shapes_[contact.shapeIdB].parentChainId == chainIndex )
+        {
+            // 위에서 연결 component를 이미 깨웠으므로 Contact별 wake는 반복하지 않음.
+            DestroyContact( contactId, false );
+        }
+    }
+
+    // body의 singly linked parent-chain list에서 현재 chain을 분리함.
+    std::int32_t* chainLink = &body.headChainId;
+    while( *chainLink != chain2::NULL_INDEX && *chainLink != chainIndex )
+    {
+        chainLink = &chains_[*chainLink].nextChainId;
+    }
+
+    assert( *chainLink == chainIndex );
+    if( *chainLink != chainIndex ) return;
+
+    *chainLink = chain.nextChainId;
+    --body.chainCount;
+
+    // child의 parent 표시를 먼저 해제해 공통 shape 파괴 경로를 안전하게 재사용함.
+    const std::vector<std::int32_t> shapeIds = chain.shapeIds;
+    for( std::int32_t shapeIndex : shapeIds )
+    {
+        assert( shapeIndex >= 0 && static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+        assert( shapes_[shapeIndex].parentChainId == chainIndex );
+        shapes_[shapeIndex].parentChainId = shape::NULL_INDEX;
+        DestroyShapeByIndex( shapeIndex, true, false );
+    }
+
+    if( !deferBodyUpdates )
+    {
+        UpdateBodyMassData( bodyIndex );
+    }
+
+    const std::uint16_t generation = chain.generation;
+    chain = {};
+    chain.generation = generation;
+    chain.nextFreeId = chainFreeList_;
+    chainFreeList_ = chainIndex;
+    --chainCount_;
+}
+
 void world::DestroyBodyByIndex( std::int32_t bodyIndex )
 {
     assert( bodyIndex >= 0 );
@@ -3211,14 +3474,23 @@ void world::DestroyBodyByIndex( std::int32_t bodyIndex )
 
     assert( body.contactCount == 0 );
 
-    // shape를 하나씩 제거하면 각 proxy와 shape slot도 함께 정리됨.
+    // Parent chain부터 제거해야 child chainSegment2를 개별 shape처럼 파괴하지 않음.
+    while( body.headChainId != body::NULL_INDEX )
+    {
+        DestroyChainByIndex( body.headChainId, true );
+    }
+
+    assert( body.chainCount == 0 );
+
+    // parent가 없는 일반 shape를 하나씩 제거하면 각 proxy와 shape slot도 함께 정리됨.
     while( body.headShapeId != body::NULL_INDEX )
     {
-        DestroyShapeByIndex( body.headShapeId );
+        DestroyShapeByIndex( body.headShapeId, true );
     }
 
     assert( body.shapeCount == 0 );
     assert( body.headShapeId == body::NULL_INDEX );
+    assert( body.headChainId == body::NULL_INDEX );
     assert( body.headContactKey == body::NULL_INDEX );
 
     const std::uint16_t generation = body.generation;
@@ -3246,7 +3518,7 @@ void world::DestroyBodyByIndex( std::int32_t bodyIndex )
     --bodyCount_;
 }
 
-void world::DestroyShapeByIndex( std::int32_t shapeIndex )
+void world::DestroyShapeByIndex( std::int32_t shapeIndex, bool deferBodyUpdates, bool destroyContacts )
 {
     assert( shapeIndex >= 0 );
     assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
@@ -3266,7 +3538,10 @@ void world::DestroyShapeByIndex( std::int32_t shapeIndex )
     const std::int32_t bodyIndex = shape.bodyId;
     body& body = bodies_[bodyIndex];
 
-    WakeBodyByIndex( bodyIndex );
+    if( !deferBodyUpdates )
+    {
+        WakeBodyByIndex( bodyIndex );
+    }
 
     // Box2D처럼 먼저 body의 shape list에서 분리함.
     UnlinkShape( body, bodyIndex, shapes_, shapeIndex );
@@ -3275,8 +3550,9 @@ void world::DestroyShapeByIndex( std::int32_t shapeIndex )
     broadPhase_.DestroyProxy( shape.proxyKey );
     shape.proxyKey = shape::NULL_INDEX;
 
-    // 이 body의 Contact list에서 삭제 shape가 관여한 Contact만 제거함.
-    std::int32_t contactKey = body.headContactKey;
+    // 일반 shape 삭제는 이 shape의 Contact를 직접 찾고,
+    // chain batch는 parent 단계에서 Contact를 한 번에 제거했으므로 이 순회를 생략함.
+    std::int32_t contactKey = destroyContacts ? body.headContactKey : body::NULL_INDEX;
 
     while( contactKey != body::NULL_INDEX )
     {
@@ -3295,11 +3571,16 @@ void world::DestroyShapeByIndex( std::int32_t shapeIndex )
 
         if( contact.shapeIdA == shapeIndex || contact.shapeIdB == shapeIndex )
         {
-            DestroyContact( contactId );
+            // Chain batch는 시작할 때 연결 component를 이미 한 번 깨웠으므로
+            // child contact마다 같은 component wake를 반복하지 않음.
+            DestroyContact( contactId, !deferBodyUpdates );
         }
     }
 
-    UpdateBodyMassData( bodyIndex );
+    if( !deferBodyUpdates )
+    {
+        UpdateBodyMassData( bodyIndex );
+    }
 
     const std::uint16_t generation = shape.generation;
 
@@ -4982,7 +5263,7 @@ void world::StoreContactConstraintImpulses( std::span<const contactConstraint2> 
 
 #pragma region ContactDestruction
 
-void world::DestroyContact( std::int32_t contactId )
+void world::DestroyContact( std::int32_t contactId, bool wakeBodies )
 {
     assert( contactId >= 0 );
     assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
@@ -4994,9 +5275,11 @@ void world::DestroyContact( std::int32_t contactId )
 
     const shapePairKey pairKey = MakeShapePairKey( contact.shapeIdA, contact.shapeIdB );
 
-    WakeBodyByIndex( contact.edges[0].bodyId );
-
-    WakeBodyByIndex( contact.edges[1].bodyId );
+    if( wakeBodies )
+    {
+        WakeBodyByIndex( contact.edges[0].bodyId );
+        WakeBodyByIndex( contact.edges[1].bodyId );
+    }
 
     for( std::int32_t edgeIndex = 0; edgeIndex < 2; ++edgeIndex )
     {
