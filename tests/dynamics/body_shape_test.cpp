@@ -7,6 +7,7 @@
 
 #include "dynamics/body.h"
 #include "dynamics/bodyShape.h"
+#include "dynamics/chainDef.h"
 #include "dynamics/contactSim2.h"
 #include "dynamics/shape.h"
 
@@ -46,6 +47,14 @@ int main()
         assert( defaultShape.filter.categoryBits == 0x00000004 );
         assert( defaultShape.filter.maskBits == 0x00000002 );
         assert( defaultShape.filter.groupIndex == -5 );
+    }
+
+    // Open chain ghost는 필수 입력이므로 기본값이 유효한 좌표처럼 보이면 안 됨.
+    {
+        const chainDef definition{};
+
+        assert( !IsFinite( definition.ghost1 ) );
+        assert( !IsFinite( definition.ghost2 ) );
     }
 
     // 새 Contact hot-data는 이전 pair의 GJK feature를 상속하면 안 됨.
