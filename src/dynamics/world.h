@@ -108,6 +108,9 @@ public:
     [[nodiscard]] chainId CreateChain( bodyId bodyId, const chainDef& definition );
     void DestroyChain( chainId chainId );
 
+    // Parent chain의 point 하나를 stable child handle 안에서 바꾸고 인접 ghost adjacency도 함께 다시 연결함.
+    void SetChainPoint( chainId chainId, std::size_t pointIndex, vec2 point );
+
     [[nodiscard]] std::size_t GetChainSegmentCount( chainId chainId ) const;
     [[nodiscard]] std::size_t GetChainSegments( chainId chainId, std::span<shapeId> output ) const;
     [[nodiscard]] chainId GetShapeParentChain( shapeId shapeId ) const;
@@ -503,6 +506,9 @@ private:
     void DestroyBodyByIndex( std::int32_t bodyIndex );
     void DestroyChainByIndex( std::int32_t chainIndex, bool deferBodyUpdates = false );
     void DestroyShapeByIndex( std::int32_t shapeIndex, bool deferBodyUpdates = false, bool destroyContacts = true );
+
+    // 검증된 chain segment geometry를 같은 stable shape slot에 반영하고 contact / proxy bounds를 갱신함.
+    void UpdateChainSegmentByIndex( std::int32_t shapeIndex, const chainSegment2& chainSegment );
 
     // bodySim transform을 기준으로 이 body의 모든 shape proxy를 broadPhase에 동기화함.
     void SyncBodyProxies( std::int32_t bodyIndex );

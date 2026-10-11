@@ -261,6 +261,7 @@ chainId world::CreateChain( bodyId bodyId, const chainDef& definition )
     chain.chainId = chainIndex;
     chain.bodyId = bodyIndex;
     chain.generation = generation;
+    chain.isLoop = definition.isLoop;
 
     body& body = bodies_[bodyIndex];
     chain.nextChainId = body.headChainId;
