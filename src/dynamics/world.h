@@ -498,7 +498,7 @@ private:
 
     void DestroyBodyByIndex( std::int32_t bodyIndex );
     void DestroyChainByIndex( std::int32_t chainIndex, bool deferBodyUpdates = false );
-    void DestroyShapeByIndex( std::int32_t shapeIndex, bool deferBodyUpdates = false );
+    void DestroyShapeByIndex( std::int32_t shapeIndex, bool deferBodyUpdates = false, bool destroyContacts = true );
 
     // bodySim transform을 기준으로 이 body의 모든 shape proxy를 broadPhase에 동기화함.
     void SyncBodyProxies( std::int32_t bodyIndex );

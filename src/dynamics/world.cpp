@@ -3380,6 +3380,34 @@ void world::DestroyChainByIndex( std::int32_t chainIndex, bool deferBodyUpdates 
         WakeBodyByIndex( bodyIndex );
     }
 
+    // parentChainId를 이용해 body contact list를 한 번만 훑고
+    // 이 chain의 child가 관여한 Contact를 batch로 먼저 제거함.
+    std::int32_t contactKey = body.headContactKey;
+    while( contactKey != body::NULL_INDEX )
+    {
+        const std::int32_t contactId = GetContactId( contactKey );
+        const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
+
+        assert( contactId >= 0 );
+        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+        contact2& contact = contacts_[contactId];
+        assert( contact.contactId == contactId );
+
+        // DestroyContact가 intrusive list를 수정하므로 다음 key를 먼저 저장함.
+        contactKey = contact.edges[edgeIndex].nextKey;
+
+        assert( contact.shapeIdA >= 0 && static_cast<std::size_t>( contact.shapeIdA ) < shapes_.size() );
+        assert( contact.shapeIdB >= 0 && static_cast<std::size_t>( contact.shapeIdB ) < shapes_.size() );
+
+        if( shapes_[contact.shapeIdA].parentChainId == chainIndex ||
+            shapes_[contact.shapeIdB].parentChainId == chainIndex )
+        {
+            // 위에서 연결 component를 이미 깨웠으므로 Contact별 wake는 반복하지 않음.
+            DestroyContact( contactId, false );
+        }
+    }
+
     // body의 singly linked parent-chain list에서 현재 chain을 분리함.
     std::int32_t* chainLink = &body.headChainId;
     while( *chainLink != chain2::NULL_INDEX && *chainLink != chainIndex )
@@ -3400,7 +3428,7 @@ void world::DestroyChainByIndex( std::int32_t chainIndex, bool deferBodyUpdates 
         assert( shapeIndex >= 0 && static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
         assert( shapes_[shapeIndex].parentChainId == chainIndex );
         shapes_[shapeIndex].parentChainId = shape::NULL_INDEX;
-        DestroyShapeByIndex( shapeIndex, true );
+        DestroyShapeByIndex( shapeIndex, true, false );
     }
 
     if( !deferBodyUpdates )
@@ -3490,7 +3518,7 @@ void world::DestroyBodyByIndex( std::int32_t bodyIndex )
     --bodyCount_;
 }
 
-void world::DestroyShapeByIndex( std::int32_t shapeIndex, bool deferBodyUpdates )
+void world::DestroyShapeByIndex( std::int32_t shapeIndex, bool deferBodyUpdates, bool destroyContacts )
 {
     assert( shapeIndex >= 0 );
     assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
@@ -3522,8 +3550,9 @@ void world::DestroyShapeByIndex( std::int32_t shapeIndex, bool deferBodyUpdates 
     broadPhase_.DestroyProxy( shape.proxyKey );
     shape.proxyKey = shape::NULL_INDEX;
 
-    // 이 body의 Contact list에서 삭제 shape가 관여한 Contact만 제거함.
-    std::int32_t contactKey = body.headContactKey;
+    // 일반 shape 삭제는 이 shape의 Contact를 직접 찾고,
+    // chain batch는 parent 단계에서 Contact를 한 번에 제거했으므로 이 순회를 생략함.
+    std::int32_t contactKey = destroyContacts ? body.headContactKey : body::NULL_INDEX;
 
     while( contactKey != body::NULL_INDEX )
     {
