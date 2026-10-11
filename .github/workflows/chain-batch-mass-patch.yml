@@ -1,0 +1,223 @@
+name: Chain batch mass patch
+
+on:
+  push:
+    branches:
+      - feature/terrain-chain-lifecycle
+    paths:
+      - .github/workflows/chain-batch-mass-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/terrain-chain-lifecycle
+          fetch-depth: 0
+
+      - name: Batch chain mass updates
+        shell: python
+        run: |
+          from pathlib import Path
+
+          h = Path("src/dynamics/world.h")
+          text = h.read_text(encoding="utf-8")
+          old = '''#pragma region BodyShapeStorage
+
+              void DestroyBodyByIndex( std::int32_t bodyIndex );
+              void DestroyChainByIndex( std::int32_t chainIndex );
+              void DestroyShapeByIndex( std::int32_t shapeIndex );
+          '''
+          new = '''#pragma region BodyShapeStorage
+
+              // public CreateShape와 chain batch가 같은 slot/proxy/link 경로를 사용함.
+              // chain batch는 마지막에 한 번만 mass/extents를 다시 계산함.
+              [[nodiscard]] std::int32_t CreateShapeByIndex( std::int32_t bodyIndex, shapeGeometry geometry, collisionFilter filter, float density, bool updateBodyMassData );
+
+              void DestroyBodyByIndex( std::int32_t bodyIndex );
+              void DestroyChainByIndex( std::int32_t chainIndex, bool updateBodyMassData = true );
+              void DestroyShapeByIndex( std::int32_t shapeIndex, bool updateBodyMassData = true );
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f"world.h BodyShapeStorage match count: {text.count(old)}")
+          h.write_text(text.replace(old, new), encoding="utf-8")
+
+          c = Path("src/dynamics/world.cpp")
+          text = c.read_text(encoding="utf-8")
+
+          # Public CreateShape remains the validated handle-level API and delegates to the shared internal path.
+          start = text.index('shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter, float density )')
+          end = text.index('\nshapeId world::CreateSensorShape', start)
+          wrapper = '''shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter, float density )
+          {
+              const std::int32_t bodyIndex = GetBodyIndex( bodyId );
+              const std::int32_t shapeIndex = CreateShapeByIndex( bodyIndex, std::move( geometry ), filter, density, true );
+
+              return MakeShapeId( shapeIndex );
+          }
+          '''
+          text = text[:start] + wrapper + text[end:]
+
+          old = '''        const chainSegment2 segment{ ghost1, { point1, point2 }, ghost2 };
+                  const shapeId childId = CreateShape( bodyId, segment, definition.filter, 0.0f );
+                  const std::int32_t shapeIndex = GetShapeIndex( childId );
+          '''
+          new = '''        const chainSegment2 segment{ ghost1, { point1, point2 }, ghost2 };
+                  const std::int32_t shapeIndex = CreateShapeByIndex( bodyIndex, segment, definition.filter, 0.0f, false );
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f"chain child creation match count: {text.count(old)}")
+          text = text.replace(old, new)
+
+          old = '''    return MakeChainId( chainIndex );
+          }
+
+          void world::DestroyChain( chainId chainId )'''
+          new = '''    // child마다 body 전체 shape list를 다시 훑지 않고 batch가 완성된 뒤 한 번만 갱신함.
+              UpdateBodyMassData( bodyIndex );
+
+              return MakeChainId( chainIndex );
+          }
+
+          void world::DestroyChain( chainId chainId )'''
+          if text.count(old) != 1:
+              raise SystemExit(f"CreateChain tail match count: {text.count(old)}")
+          text = text.replace(old, new)
+
+          marker = '#pragma region BodyShapeStorage\n\n'
+          index = text.index(marker) + len(marker)
+          helper = '''std::int32_t world::CreateShapeByIndex( std::int32_t bodyIndex, shapeGeometry geometry, collisionFilter filter, float density, bool updateBodyMassData )
+          {
+              assert( bodyIndex >= 0 );
+              assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+              assert( bodies_[bodyIndex].bodyId == bodyIndex );
+              assert( !std::holds_alternative<std::monostate>( geometry ) );
+              assert( std::isfinite( density ) );
+              assert( density >= 0.0f );
+
+              std::int32_t shapeIndex = shape::NULL_INDEX;
+
+              if( shapeFreeList_ != shape::NULL_INDEX )
+              {
+                  shapeIndex = shapeFreeList_;
+
+                  assert( shapeIndex >= 0 );
+                  assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+
+                  shape& freeShape = shapes_[shapeIndex];
+
+                  assert( freeShape.bodyId == shape::NULL_INDEX );
+                  assert( std::holds_alternative<std::monostate>( freeShape.geometry ) );
+
+                  shapeFreeList_ = freeShape.nextFreeId;
+              }
+              else
+              {
+                  assert( shapes_.size() < static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() - 1 ) );
+
+                  shapeIndex = static_cast<std::int32_t>( shapes_.size() );
+                  shapes_.push_back( {} );
+                  fatAABBs_.push_back( {} );
+              }
+
+              assert( fatAABBs_.size() == shapes_.size() );
+
+              shape& storedShape = shapes_[shapeIndex];
+              const std::uint16_t generation = static_cast<std::uint16_t>( storedShape.generation + 1u );
+
+              storedShape = {};
+              storedShape.generation = generation;
+              storedShape.geometry = std::move( geometry );
+              storedShape.density = density;
+              storedShape.filter = filter;
+              storedShape.aabbMargin = ComputeShapeAABBMargin( storedShape.geometry );
+
+              body& body = bodies_[bodyIndex];
+
+              WakeBodyByIndex( bodyIndex );
+
+              assert( bodySims_.size() == bodies_.size() );
+              const bodySim& bodySim = bodySims_[bodyIndex];
+              assert( bodySim.bodyId == bodyIndex );
+
+              const aabb2 tightAABB = ComputeShapeAABB( storedShape.geometry, bodySim.transform );
+              storedShape.aabb = ExpandAABB( tightAABB, SPECULATIVE_DISTANCE );
+
+              const float fatMargin = body.type == bodyType::Static ? SPECULATIVE_DISTANCE : storedShape.aabbMargin;
+              aabb2& fatAABB = fatAABBs_[shapeIndex];
+              fatAABB = ExpandAABB( storedShape.aabb, fatMargin );
+
+              storedShape.proxyKey = broadPhase_.CreateProxy( body.type, fatAABB, shapeIndex, true );
+
+              LinkShape( body, bodyIndex, shapes_, shapeIndex );
+              ++shapeCount_;
+
+              if( updateBodyMassData )
+              {
+                  UpdateBodyMassData( bodyIndex );
+              }
+
+              return shapeIndex;
+          }
+
+          '''
+          text = text[:index] + helper + text[index:]
+
+          text = text.replace('void world::DestroyChainByIndex( std::int32_t chainIndex )', 'void world::DestroyChainByIndex( std::int32_t chainIndex, bool updateBodyMassData )', 1)
+          text = text.replace('    body& body = bodies_[chain.bodyId];\n', '    const std::int32_t bodyIndex = chain.bodyId;\n    body& body = bodies_[bodyIndex];\n', 1)
+
+          old = '''        shapes_[shapeIndex].parentChainId = shape::NULL_INDEX;
+                  DestroyShapeByIndex( shapeIndex );
+              }
+
+              const std::uint16_t generation = chain.generation;
+          '''
+          new = '''        shapes_[shapeIndex].parentChainId = shape::NULL_INDEX;
+                  DestroyShapeByIndex( shapeIndex, false );
+              }
+
+              if( updateBodyMassData )
+              {
+                  UpdateBodyMassData( bodyIndex );
+              }
+
+              const std::uint16_t generation = chain.generation;
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f"DestroyChain child loop match count: {text.count(old)}")
+          text = text.replace(old, new)
+
+          text = text.replace('        DestroyChainByIndex( body.headChainId );\n', '        DestroyChainByIndex( body.headChainId, false );\n', 1)
+          text = text.replace('        DestroyShapeByIndex( body.headShapeId );\n', '        DestroyShapeByIndex( body.headShapeId, false );\n', 1)
+
+          text = text.replace('void world::DestroyShapeByIndex( std::int32_t shapeIndex )', 'void world::DestroyShapeByIndex( std::int32_t shapeIndex, bool updateBodyMassData )', 1)
+          old = '''    UpdateBodyMassData( bodyIndex );
+
+              const std::uint16_t generation = shape.generation;
+          '''
+          new = '''    if( updateBodyMassData )
+              {
+                  UpdateBodyMassData( bodyIndex );
+              }
+
+              const std::uint16_t generation = shape.generation;
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f"DestroyShape mass update match count: {text.count(old)}")
+          text = text.replace(old, new)
+
+          c.write_text(text, encoding="utf-8")
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/dynamics/world.h src/dynamics/world.cpp
+          git commit -m "perf(dynamics): batch chain mass updates"
+          git push origin HEAD:feature/terrain-chain-lifecycle
