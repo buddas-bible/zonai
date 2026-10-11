@@ -24,37 +24,67 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           world_cpp = Path('src/dynamics/world.cpp')
           cpp = world_cpp.read_text(encoding='utf-8')
 
-          old = "        if( contact.shapeIdA == shapeIndex || contact.shapeIdB == shapeIndex )\n        {\n            DestroyContact( contactId );\n        }"
-          new = "        if( contact.shapeIdA == shapeIndex || contact.shapeIdB == shapeIndex )\n        {\n            // Chain batch는 시작할 때 연결 component를 이미 한 번 깨웠으므로\n            // child contact마다 같은 component wake를 반복하지 않음.\n            DestroyContact( contactId, !deferBodyUpdates );\n        }"
-          assert cpp.count(old) == 1, ('shape contact block', cpp.count(old))
-          cpp = cpp.replace(old, new, 1)
+          shape_start = cpp.index('void world::DestroyShapeByIndex(')
+          shape_end = cpp.index('void world::SyncBodyProxies(', shape_start)
+          shape_block = cpp[shape_start:shape_end]
+          shape_block, count = re.subn(
+              r'DestroyContact\(\s*contactId\s*\);',
+              '// Chain batch는 시작할 때 연결 component를 이미 한 번 깨웠으므로\n            // child contact마다 같은 component wake를 반복하지 않음.\n            DestroyContact( contactId, !deferBodyUpdates );',
+              shape_block,
+              count=1,
+          )
+          if count != 1:
+              raise RuntimeError(f'DestroyShape contact replacement count={count}')
+          cpp = cpp[:shape_start] + shape_block + cpp[shape_end:]
 
-          old = 'void world::DestroyContact( std::int32_t contactId )'
-          new = 'void world::DestroyContact( std::int32_t contactId, bool wakeBodies )'
-          assert cpp.count(old) == 1, ('signature', cpp.count(old))
-          cpp = cpp.replace(old, new, 1)
+          cpp, count = re.subn(
+              r'void world::DestroyContact\(\s*std::int32_t contactId\s*\)',
+              'void world::DestroyContact( std::int32_t contactId, bool wakeBodies )',
+              cpp,
+              count=1,
+          )
+          if count != 1:
+              raise RuntimeError(f'DestroyContact signature replacement count={count}')
 
-          old = "    WakeBodyByIndex( contact.edges[0].bodyId );\n\n    WakeBodyByIndex( contact.edges[1].bodyId );"
-          new = "    if( wakeBodies )\n    {\n        WakeBodyByIndex( contact.edges[0].bodyId );\n        WakeBodyByIndex( contact.edges[1].bodyId );\n    }"
-          assert cpp.count(old) == 1, ('wake block', cpp.count(old))
-          cpp = cpp.replace(old, new, 1)
+          wake_pattern = (
+              r'\s*WakeBodyByIndex\(\s*contact\.edges\[0\]\.bodyId\s*\);'
+              r'\s*WakeBodyByIndex\(\s*contact\.edges\[1\]\.bodyId\s*\);'
+          )
+          wake_replacement = (
+              '\n\n    if( wakeBodies )\n'
+              '    {\n'
+              '        WakeBodyByIndex( contact.edges[0].bodyId );\n'
+              '        WakeBodyByIndex( contact.edges[1].bodyId );\n'
+              '    }'
+          )
+          cpp, count = re.subn(wake_pattern, wake_replacement, cpp, count=1)
+          if count != 1:
+              raise RuntimeError(f'DestroyContact wake replacement count={count}')
           world_cpp.write_text(cpp, encoding='utf-8')
 
           world_h = Path('src/dynamics/world.h')
           header = world_h.read_text(encoding='utf-8')
-          old = "    // body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함.\n    void DestroyContact( std::int32_t contactId );"
-          new = "    // body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함.\n    // Chain batch처럼 연결 component를 이미 깨운 경로는 wake를 생략할 수 있음.\n    void DestroyContact( std::int32_t contactId, bool wakeBodies = true );"
-          assert header.count(old) == 1, ('header declaration', header.count(old))
-          header = header.replace(old, new, 1)
+          header, count = re.subn(
+              r'(    // body contact list / pairSet에서 해제한 뒤 slot을 free-list로 반환함\.\n)'
+              r'    void DestroyContact\(\s*std::int32_t contactId\s*\);',
+              r'\1    // Chain batch처럼 연결 component를 이미 깨운 경로는 wake를 생략할 수 있음.\n'
+              r'    void DestroyContact( std::int32_t contactId, bool wakeBodies = true );',
+              header,
+              count=1,
+          )
+          if count != 1:
+              raise RuntimeError(f'DestroyContact declaration replacement count={count}')
           world_h.write_text(header, encoding='utf-8')
           PY
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/dynamics/world.cpp src/dynamics/world.h
+          git diff --cached --check
           git commit -m "perf(dynamics): batch chain contact wake updates"
           git push origin HEAD:feature/terrain-chain-lifecycle
