@@ -96,6 +96,10 @@ public:
     // parent chain의 child segment는 DestroyChain으로만 제거함.
     void DestroyShape( shapeId shapeId );
 
+    // parent가 없는 chainSegment2의 geometry와 ghost vertex를 같은 shape handle로 교체함.
+    // parent chain child는 adjacency를 parent가 소유하므로 개별 수정하지 않음.
+    void SetChainSegment( shapeId shapeId, const chainSegment2& chainSegment );
+
 #pragma endregion ShapeLifecycle
 
 #pragma region ChainLifecycle
