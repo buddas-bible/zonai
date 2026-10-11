@@ -78,6 +78,7 @@ int main()
         assert( circleProxy.points[0].x == 2.0f );
         assert( circleProxy.points[0].y == -1.0f );
         assert( circleProxy.radius == 0.75f );
+        assert( !circleProxy.oneSided );
 
         const shapeProxy2 capsuleProxy = MakeShapeProxy( capsule2{ { -1.0f, 0.0f }, { 1.0f, 0.0f }, 0.25f } );
 
@@ -85,6 +86,7 @@ int main()
         assert( capsuleProxy.points[0].x == -1.0f );
         assert( capsuleProxy.points[1].x == 1.0f );
         assert( capsuleProxy.radius == 0.25f );
+        assert( !capsuleProxy.oneSided );
 
         const polygon2 box = MakeBox( { 2.0f, 1.0f } );
 
@@ -92,6 +94,7 @@ int main()
 
         assert( polygonProxy.count == box.vertexCount );
         assert( polygonProxy.radius == box.radius );
+        assert( !polygonProxy.oneSided );
 
         const shapeProxy2 segmentProxy = MakeShapeProxy( segment2{ { -2.0f, 0.5f }, { 3.0f, 0.5f } } );
 
@@ -99,6 +102,7 @@ int main()
         assert( segmentProxy.points[0].x == -2.0f );
         assert( segmentProxy.points[1].x == 3.0f );
         assert( segmentProxy.radius == 0.0f );
+        assert( !segmentProxy.oneSided );
 
         const shapeGeometry chain = chainSegment2{ { 100.0f, 100.0f }, { { -2.0f, 0.5f }, { 3.0f, 0.5f } }, { -100.0f, -100.0f } };
         const shapeProxy2 chainProxy = MakeShapeProxy( chain );
@@ -109,6 +113,7 @@ int main()
         assert( chainProxy.points[1].x == 3.0f );
         assert( chainProxy.points[1].y == 0.5f );
         assert( chainProxy.radius == 0.0f );
+        assert( chainProxy.oneSided );
     }
 
     return 0;
