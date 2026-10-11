@@ -40,10 +40,11 @@ shapeProxy2 MakeShapeProxy( const shapeGeometry& geometry )
             }
             else if constexpr( std::is_same_v<Geometry, chainSegment2> )
             {
-                // GJK/TOI는 실제 충돌 edge만 사용하고 ghost vertex는 normal ownership에만 사용함.
+                // distance proxy는 owned edge만 사용하되 TOI에는 one-sided 의미를 함께 전달함.
                 proxy.points[0] = localGeometry.segment.a;
                 proxy.points[1] = localGeometry.segment.b;
                 proxy.count = 2;
+                proxy.oneSided = true;
             }
             else
             {
