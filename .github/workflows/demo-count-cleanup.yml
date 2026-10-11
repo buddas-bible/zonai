@@ -1,0 +1,51 @@
+name: Demo count test cleanup
+
+on:
+  push:
+    branches:
+      - feature/terrain-chain-sandbox
+    paths:
+      - .github/workflows/demo-count-cleanup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/terrain-chain-sandbox
+          fetch-depth: 0
+      - name: Remove duplicated global count assertions
+        shell: python
+        run: |
+          from pathlib import Path
+
+          files = [
+              Path("tests/sandbox/joint_demo_test.cpp"),
+              Path("tests/sandbox/motor_joint_demo_test.cpp"),
+              Path("tests/sandbox/mover_joint_demo_test.cpp"),
+              Path("tests/sandbox/pogo_joint_demo_test.cpp"),
+              Path("tests/sandbox/filter_joint_demo_test.cpp"),
+          ]
+
+          for path in files:
+              text = path.read_text(encoding="utf-8")
+              lines = text.splitlines(keepends=True)
+              matches = [i for i, line in enumerate(lines) if "check( getDemoEntries().size() == 14," in line]
+              if len(matches) != 1:
+                  raise RuntimeError(f"{path}: expected one duplicated demo-count assertion, found {len(matches)}")
+              del lines[matches[0]]
+              path.write_text("".join(lines), encoding="utf-8")
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/sandbox/joint_demo_test.cpp tests/sandbox/motor_joint_demo_test.cpp tests/sandbox/mover_joint_demo_test.cpp tests/sandbox/pogo_joint_demo_test.cpp tests/sandbox/filter_joint_demo_test.cpp
+          git diff --cached --check
+          git commit -m "test(sandbox): centralize demo count assertion"
+          git push origin HEAD:feature/terrain-chain-sandbox
