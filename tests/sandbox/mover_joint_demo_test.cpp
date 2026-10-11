@@ -30,7 +30,7 @@ bool near( float a, float b )
 
 int main()
 {
-    check( getDemoEntries().size() == 12, "Mover Joint demo is independently selectable" );
+    check( getDemoEntries().size() == 13, "Mover Joint demo is independently selectable" );
     check( std::string_view{ getDemoEntry( demoKind::moverJointPlayground ).category } == "조인트", "Mover Joint demo stays in joint category" );
 
     rigidBodyDemo mover{ demoKind::moverJointPlayground };

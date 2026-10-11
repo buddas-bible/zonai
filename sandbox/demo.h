@@ -25,7 +25,8 @@ enum class demoKind
     moverJointPlayground,
     pogoJointPlayground,
     filterJointPlayground,
-    motorCar
+    motorCar,
+    ragdoll
 };
 
 struct demoEntry

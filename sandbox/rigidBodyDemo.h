@@ -174,6 +174,10 @@ public:
 
     [[nodiscard]] jointId getFilterJoint() const noexcept { return filterJoint_; }
 
+    [[nodiscard]] std::span<const bodyId> getRagdollBodies() const noexcept { return ragdollBodies_; }
+
+    [[nodiscard]] std::span<const jointId> getRagdollJoints() const noexcept { return ragdollJoints_; }
+
     [[nodiscard]] float getPrismaticCurrentSpeed() const;
 
     [[nodiscard]] std::span<const jointId> getCarJoints() const noexcept { return carJoints_; }
@@ -202,6 +206,7 @@ private:
     void createPogoJointPlayground();
     void createFilterJointPlayground();
     void createMotorCar();
+    void createRagdoll();
 #pragma endregion SceneSetup
 
 #pragma region CarDrive
@@ -230,6 +235,8 @@ private:
     jointId moverJoint_{}; // Mover Joint 전용 학습 데모의 persistent handle.
     jointId pogoJoint_{}; // Pogo Joint 전용 학습 데모의 persistent handle.
     jointId filterJoint_{}; // Filter Joint 데모에서 collision 차단 상태를 나타내는 handle.
+    std::array<bodyId, 11> ragdollBodies_{};
+    std::array<jointId, 10> ragdollJoints_{};
     std::array<jointId, 2> carJoints_{};
     float carMotorSpeed_ = 8.0f; // 주행 목표의 크기 (rad/s). 방향은 A/D 입력이 결정함.
     float carMaxMotorTorque_ = 5.0f; // 주행과 제동의 토크 한도 (N*m).

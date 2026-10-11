@@ -185,6 +185,12 @@ public:
     void draw( debugDraw& draw ) const override
     {
         view_.draw( draw );
+        if( view_.getKind() == demoKind::ragdoll )
+        {
+            drawRagdollJointLimits( draw, view_ );
+            return;
+        }
+
         if( view_.getKind() == demoKind::filterJointPlayground )
         {
             if( view_.getWorld().IsValid( view_.getFilterJoint() ) )
@@ -586,6 +592,41 @@ private:
 };
 
 } // namespace
+
+void drawRagdollJointLimits( debugDraw& draw, const rigidBodyDemo& model )
+{
+    constexpr ImU32 anchorColor = IM_COL32( 100, 235, 220, 255 );
+    constexpr ImU32 bodyColor = IM_COL32( 230, 170, 255, 255 );
+    constexpr ImU32 lowerColor = IM_COL32( 100, 255, 140, 255 );
+    constexpr ImU32 upperColor = IM_COL32( 255, 105, 90, 255 );
+    constexpr ImU32 arcColor = IM_COL32( 180, 185, 200, 255 );
+
+    for( const jointId id : model.getRagdollJoints() )
+    {
+        if( id == model.getRevoluteJoint() || !model.getWorld().IsValid( id ) ) continue;
+
+        const revoluteJointData joint = model.getWorld().getRevoluteJointData( id );
+        draw.DrawPoint( joint.anchorA, anchorColor, 6.0f );
+        draw.DrawPoint( joint.anchorB, bodyColor, 5.0f );
+        draw.DrawSegment( { joint.anchorA, joint.anchorB }, bodyColor );
+        if( !joint.enableLimit ) continue;
+
+        const rot2 reference = model.getWorld().GetBodyTransform( joint.bodyA ).rotation * rot2::FromRadians( joint.referenceAngle );
+        const vec2 lower = joint.anchorA + 0.5f * Rotate( reference * rot2::FromRadians( joint.lowerAngle ), { 0.0f, -1.0f } );
+        const vec2 upper = joint.anchorA + 0.5f * Rotate( reference * rot2::FromRadians( joint.upperAngle ), { 0.0f, -1.0f } );
+        draw.DrawSegment( { joint.anchorA, lower }, lowerColor );
+        draw.DrawSegment( { joint.anchorA, upper }, upperColor );
+
+        vec2 previous = joint.anchorA + 0.38f * Rotate( reference * rot2::FromRadians( joint.lowerAngle ), { 0.0f, -1.0f } );
+        for( int i = 1; i <= 12; ++i )
+        {
+            const float angle = joint.lowerAngle + ( joint.upperAngle - joint.lowerAngle ) * static_cast<float>( i ) / 12.0f;
+            const vec2 next = joint.anchorA + 0.38f * Rotate( reference * rot2::FromRadians( angle ), { 0.0f, -1.0f } );
+            draw.DrawSegment( { previous, next }, arcColor, 1.0f );
+            previous = next;
+        }
+    }
+}
 
 std::unique_ptr<demo> createJointDemoView( demoKind kind )
 {
