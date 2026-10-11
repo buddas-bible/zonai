@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <vector>
 
 #include "demo.h"
@@ -190,6 +191,12 @@ public:
 
     [[nodiscard]] const mouseJointDef& getMouseSettings() const noexcept { return mouseSettings_; }
 
+    [[nodiscard]] std::size_t getTerrainPointCount() const noexcept;
+
+    [[nodiscard]] vec2 getTerrainPoint( std::size_t pointIndex ) const;
+
+    [[nodiscard]] std::optional<std::size_t> getTerrainPointDragIndex() const noexcept { return terrainPointDragIndex_; }
+
 #pragma endregion Queries
 
 private:
@@ -213,6 +220,12 @@ private:
 #pragma region CarDrive
     void updateCarMotors();
 #pragma endregion CarDrive
+
+#pragma region TerrainEdit
+    void startTerrainPointDrag( vec2 point );
+    void updateTerrainPointDrag( vec2 point );
+    [[nodiscard]] bool canMoveTerrainPoint( std::size_t pointIndex, vec2 point ) const;
+#pragma endregion TerrainEdit
 
 #pragma region MouseDrag
     void startMouseDrag( vec2 point );
@@ -241,6 +254,10 @@ private:
     std::array<jointId, 2> carJoints_{};
     float carMotorSpeed_ = 8.0f; // 주행 목표의 크기 (rad/s). 방향은 A/D 입력이 결정함.
     float carMaxMotorTorque_ = 5.0f; // 주행과 제동의 토크 한도 (N*m).
+
+    chainId terrainChain_{};
+    std::array<shapeId, 8> terrainSegments_{};
+    std::optional<std::size_t> terrainPointDragIndex_{};
 
     jointId mouseJoint_{}; // 드래그 중인 마우스 조인트
     mouseJointDef mouseSettings_{};
