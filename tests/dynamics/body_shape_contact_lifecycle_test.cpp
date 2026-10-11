@@ -299,7 +299,7 @@ void checkOrphanChainSegmentUpdate()
     const chainSegment2 before = std::get<chainSegment2>( simulation.GetShape( children[0] ).geometry );
     simulation.SetChainSegment( children[0], moved );
     const chainSegment2 after = std::get<chainSegment2>( simulation.GetShape( children[0] ).geometry );
-    check( after.ghost1 == before.ghost1 && after.segment.a == before.segment.a && after.segment.b == before.segment.b && after.ghost2 == before.ghost2, "parent chain child geometry mutated" );
+    check( after.ghost1.x == before.ghost1.x && after.ghost1.y == before.ghost1.y && after.segment.a.x == before.segment.a.x && after.segment.a.y == before.segment.a.y && after.segment.b.x == before.segment.b.x && after.segment.b.y == before.segment.b.y && after.ghost2.x == before.ghost2.x && after.ghost2.y == before.ghost2.y, "parent chain child geometry mutated" );
 #endif
 }
 
