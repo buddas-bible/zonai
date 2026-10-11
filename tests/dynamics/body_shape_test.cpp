@@ -79,6 +79,15 @@ int main()
 
         assert( segmentMass.mass == 0.0f );
         assert( segmentMass.rotationalInertia == 0.0f );
+
+        shape chainShape{};
+        chainShape.geometry = chainSegment2{ { 3.0f, 0.0f }, { { 2.0f, 0.0f }, { -2.0f, 0.0f } }, { -3.0f, 0.0f } };
+        chainShape.density = 10.0f;
+
+        const massData2 chainMass = ComputeShapeMass( chainShape );
+
+        assert( chainMass.mass == 0.0f );
+        assert( chainMass.rotationalInertia == 0.0f );
     }
 
     body body{};

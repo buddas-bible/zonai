@@ -22,6 +22,23 @@ int main()
         assert( std::fabs( ComputeShapeAABBMargin( circle2{ {}, 0.2f } ) - 0.025f ) < epsilon );
 
         assert( std::fabs( ComputeShapeAABBMargin( segment2{ { -0.2f, 0.0f }, { 0.2f, 0.0f } } ) - 0.025f ) < epsilon );
+
+        const shapeGeometry chain = chainSegment2{ { 100.0f, 100.0f }, { { -0.2f, 0.0f }, { 0.2f, 0.0f } }, { -100.0f, -100.0f } };
+        assert( std::fabs( ComputeShapeAABBMargin( chain ) - 0.025f ) < epsilon );
+    }
+
+    // ghost vertex는 adjacency metadata라 broad-phase bounds를 넓히지 않음.
+    {
+        const shapeGeometry chain = chainSegment2{ { 100.0f, 100.0f }, { { -2.0f, 0.5f }, { 3.0f, 0.5f } }, { -100.0f, -100.0f } };
+        transform2 transform{};
+        transform.position = { 1.0f, 2.0f };
+
+        const aabb2 bounds = ComputeShapeAABB( chain, transform );
+
+        assert( std::fabs( bounds.min.x + 1.0f ) < epsilon );
+        assert( std::fabs( bounds.min.y - 2.5f ) < epsilon );
+        assert( std::fabs( bounds.max.x - 4.0f ) < epsilon );
+        assert( std::fabs( bounds.max.y - 2.5f ) < epsilon );
     }
 
     // CCD extent는 local center 기준 최소 두께와 최대 반경을 계산함.
@@ -45,6 +62,12 @@ int main()
 
         assert( segmentExtent.minExtent == 0.0f );
         assert( std::fabs( segmentExtent.maxExtent - 2.0f ) < epsilon );
+
+        const shapeGeometry chain = chainSegment2{ { 100.0f, 100.0f }, { { -2.0f, 0.0f }, { 2.0f, 0.0f } }, { -100.0f, -100.0f } };
+        const shapeExtent2 chainExtent = ComputeShapeExtent( chain, {} );
+
+        assert( chainExtent.minExtent == 0.0f );
+        assert( std::fabs( chainExtent.maxExtent - 2.0f ) < epsilon );
     }
 
     // concrete geometry는 CCD / GJK가 공통으로 사용할 convex proxy로 변환됨.
@@ -55,6 +78,7 @@ int main()
         assert( circleProxy.points[0].x == 2.0f );
         assert( circleProxy.points[0].y == -1.0f );
         assert( circleProxy.radius == 0.75f );
+        assert( !circleProxy.oneSided );
 
         const shapeProxy2 capsuleProxy = MakeShapeProxy( capsule2{ { -1.0f, 0.0f }, { 1.0f, 0.0f }, 0.25f } );
 
@@ -62,6 +86,7 @@ int main()
         assert( capsuleProxy.points[0].x == -1.0f );
         assert( capsuleProxy.points[1].x == 1.0f );
         assert( capsuleProxy.radius == 0.25f );
+        assert( !capsuleProxy.oneSided );
 
         const polygon2 box = MakeBox( { 2.0f, 1.0f } );
 
@@ -69,6 +94,7 @@ int main()
 
         assert( polygonProxy.count == box.vertexCount );
         assert( polygonProxy.radius == box.radius );
+        assert( !polygonProxy.oneSided );
 
         const shapeProxy2 segmentProxy = MakeShapeProxy( segment2{ { -2.0f, 0.5f }, { 3.0f, 0.5f } } );
 
@@ -76,6 +102,18 @@ int main()
         assert( segmentProxy.points[0].x == -2.0f );
         assert( segmentProxy.points[1].x == 3.0f );
         assert( segmentProxy.radius == 0.0f );
+        assert( !segmentProxy.oneSided );
+
+        const shapeGeometry chain = chainSegment2{ { 100.0f, 100.0f }, { { -2.0f, 0.5f }, { 3.0f, 0.5f } }, { -100.0f, -100.0f } };
+        const shapeProxy2 chainProxy = MakeShapeProxy( chain );
+
+        assert( chainProxy.count == 2 );
+        assert( chainProxy.points[0].x == -2.0f );
+        assert( chainProxy.points[0].y == 0.5f );
+        assert( chainProxy.points[1].x == 3.0f );
+        assert( chainProxy.points[1].y == 0.5f );
+        assert( chainProxy.radius == 0.0f );
+        assert( chainProxy.oneSided );
     }
 
     return 0;

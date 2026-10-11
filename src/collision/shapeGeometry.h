@@ -15,7 +15,7 @@ namespace zonai
 
 // Box2D의 shape type + union을 C++20 variant로 표현함.
 // monostate는 아직 geometry가 연결되지 않은 상태임.
-using shapeGeometry = std::variant<std::monostate, circle2, capsule2, polygon2, segment2>;
+using shapeGeometry = std::variant<std::monostate, circle2, capsule2, polygon2, segment2, chainSegment2>;
 
 struct shapeExtent2
 {

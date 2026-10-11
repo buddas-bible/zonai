@@ -99,6 +99,15 @@ void debugDraw::DrawShape( const shapeGeometry& geometry, const transform2& tran
 
                 DrawSegment( worldSegment, outlineColor, 3.0f );
             }
+            else if constexpr( std::is_same_v<Geometry, chainSegment2> )
+            {
+                // ghost vertex는 이웃 edge normal 소유권용 metadata라 실제 owned segment만 그림.
+                segment2 worldSegment = localGeometry.segment;
+                worldSegment.a = TransformPoint( transform, worldSegment.a );
+                worldSegment.b = TransformPoint( transform, worldSegment.b );
+
+                DrawSegment( worldSegment, outlineColor, 3.0f );
+            }
             else if constexpr( std::is_same_v<Geometry, polygon2> )
             {
                 polygon2 worldPolygon = localGeometry;

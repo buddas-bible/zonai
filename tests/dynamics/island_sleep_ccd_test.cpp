@@ -141,6 +141,55 @@ void checkStaticCcd()
     }
 }
 
+void checkChainCcdSidedness()
+{
+    // point1 -> point2의 오른쪽(아래쪽)만 충돌하는 chain.
+    const chainSegment2 chain{ { -4.0f, 0.0f }, { { -2.0f, 0.0f }, { 2.0f, 0.0f } }, { 4.0f, 0.0f } };
+
+    {
+        // 뒷면(위쪽)에서 아래로 통과하는 fast circle은 one-sided chain 때문에 잘리면 안 됨.
+        world simulation{};
+        simulation.SetGravity( {} );
+        const bodyId ground = simulation.CreateBody();
+        ( void )simulation.CreateShape( ground, chain );
+
+        bodyDef definition{};
+        definition.type = bodyType::Dynamic;
+        definition.transform.position = { 0.0f, 5.0f };
+        definition.linearVelocity = { 0.0f, -100.0f };
+        definition.enableSleep = false;
+        const bodyId fast = simulation.CreateBody( definition );
+        ( void )simulation.CreateShape( fast, circle2{ {}, 0.25f } );
+
+        simulation.Step( 0.1f, 1 );
+
+        check( simulation.IsBodyFast( fast ), "chain CCD back-face fixture was not fast" );
+        check( !simulation.HadBodyTimeOfImpact( fast ), "chain CCD clipped a back-face crossing" );
+        check( simulation.GetBodyTransform( fast ).position.y < -4.0f, "fast body did not pass through chain back face" );
+    }
+
+    {
+        // 앞면(아래쪽)에서 위로 들어오면 같은 chain이 CCD로 motion을 잘라야 함.
+        world simulation{};
+        simulation.SetGravity( {} );
+        const bodyId ground = simulation.CreateBody();
+        ( void )simulation.CreateShape( ground, chain );
+
+        bodyDef definition{};
+        definition.type = bodyType::Dynamic;
+        definition.transform.position = { 0.0f, -5.0f };
+        definition.linearVelocity = { 0.0f, 100.0f };
+        definition.enableSleep = false;
+        const bodyId fast = simulation.CreateBody( definition );
+        ( void )simulation.CreateShape( fast, circle2{ {}, 0.25f } );
+
+        simulation.Step( 0.1f, 1 );
+
+        check( simulation.HadBodyTimeOfImpact( fast ), "chain CCD missed a front-face crossing" );
+        check( simulation.GetBodyTransform( fast ).position.y < -0.2f, "fast body crossed chain front face" );
+    }
+}
+
 void checkMovingTarget()
 {
     // 생성 순서가 달라도 non-bullet 최종 bounds가 bullet query 전에 반영되어야 함.
@@ -211,6 +260,7 @@ int main()
     checkStaticBoundary();
     checkSubsteps();
     checkStaticCcd();
+    checkChainCcdSidedness();
     checkMovingTarget();
     checkSensorToiBoundary();
 }

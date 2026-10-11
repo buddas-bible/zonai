@@ -47,8 +47,19 @@ aabb2 ComputeShapeAABB( const shapeGeometry& geometry, const transform2& transfo
 
                 return ComputeAABB( worldGeometry );
             }
+            else if constexpr( std::is_same_v<Geometry, chainSegment2> )
+            {
+                // ghost vertex는 인접 edge의 normal ownership만 결정하므로 broad-phase bounds에는 포함하지 않음.
+                segment2 worldSegment = localGeometry.segment;
+                worldSegment.a = TransformPoint( transform, worldSegment.a );
+                worldSegment.b = TransformPoint( transform, worldSegment.b );
+
+                return ComputeAABB( worldSegment );
+            }
             else
             {
+                static_assert( std::is_same_v<Geometry, polygon2> );
+
                 polygon2 worldGeometry = localGeometry;
 
                 for( int i = 0; i < localGeometry.vertexCount; ++i )
@@ -87,8 +98,14 @@ float ComputeShapeAABBMargin( const shapeGeometry& geometry )
             {
                 return 0.5f * Length( localGeometry.b - localGeometry.a );
             }
+            else if constexpr( std::is_same_v<Geometry, chainSegment2> )
+            {
+                return 0.5f * Length( localGeometry.segment.b - localGeometry.segment.a );
+            }
             else
             {
+                static_assert( std::is_same_v<Geometry, polygon2> );
+
                 float maxExtentSquared = 0.0f;
 
                 for( int i = 0; i < localGeometry.vertexCount; ++i )
@@ -137,8 +154,16 @@ shapeExtent2 ComputeShapeExtent( const shapeGeometry& geometry, const vec2& loca
 
                 return { 0.0f, std::sqrt( std::max( distance1, distance2 ) ) };
             }
+            else if constexpr( std::is_same_v<Geometry, chainSegment2> )
+            {
+                const float distance1 = LengthSquared( localGeometry.segment.a - localCenter );
+                const float distance2 = LengthSquared( localGeometry.segment.b - localCenter );
+
+                return { 0.0f, std::sqrt( std::max( distance1, distance2 ) ) };
+            }
             else
             {
+                static_assert( std::is_same_v<Geometry, polygon2> );
                 assert( localGeometry.vertexCount > 0 );
 
                 float minExtent = std::numeric_limits<float>::max();
