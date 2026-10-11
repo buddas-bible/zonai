@@ -99,6 +99,47 @@ int main()
 
     check( sawTerrainContact, "dynamic probes make real contact with the chain terrain" );
 
+    // Terrain demo는 parent chain point를 직접 선택해서 SetChainPoint 경로로 실시간 편집함.
+    rigidBodyDemo editableTerrain{ terrainEntry->kind };
+    check( editableTerrain.getTerrainPointCount() == 9, "terrain editor exposes nine editable points" );
+
+    const vec2 editStart = editableTerrain.getTerrainPoint( 4 );
+    check( samePoint( editStart, { 0.0f, 0.8f } ), "terrain editor point query" );
+
+    demoInput press{};
+    press.mousePosition = editStart;
+    press.mousePressed = true;
+    press.mouseHeld = true;
+    editableTerrain.handleInput( press );
+
+    const auto selectedPoint = editableTerrain.getTerrainPointDragIndex();
+    check( selectedPoint.has_value() && *selectedPoint == 4, "terrain point press did not start point drag" );
+    check( !editableTerrain.getWorld().IsValid( editableTerrain.getMouseJoint() ), "terrain point drag created a mouse joint" );
+
+    const vec2 draggedPoint{ 0.5f, 1.6f };
+    demoInput drag{};
+    drag.mousePosition = draggedPoint;
+    drag.mouseHeld = true;
+    editableTerrain.handleInput( drag );
+    check( samePoint( editableTerrain.getTerrainPoint( 4 ), draggedPoint ), "terrain point drag did not update chain geometry" );
+
+    // Editor 입력은 debug assert를 일으킬 수 있는 퇴화 edge를 World에 넘기기 전에 거부함.
+    const vec2 validPoint = editableTerrain.getTerrainPoint( 4 );
+    drag.mousePosition = editableTerrain.getTerrainPoint( 3 );
+    editableTerrain.handleInput( drag );
+    check( samePoint( editableTerrain.getTerrainPoint( 4 ), validPoint ), "terrain point drag collapsed an adjacent edge" );
+
+    demoInput release{};
+    release.mousePosition = validPoint;
+    editableTerrain.handleInput( release );
+    check( !editableTerrain.getTerrainPointDragIndex().has_value(), "terrain point release kept drag state" );
+
+    press.mousePosition = editableTerrain.getTerrainPoint( 2 );
+    editableTerrain.handleInput( press );
+    check( editableTerrain.getTerrainPointDragIndex().has_value(), "terrain point second press fixture" );
+    editableTerrain.cancelInput();
+    check( !editableTerrain.getTerrainPointDragIndex().has_value(), "cancel input kept terrain point drag state" );
+
     // Open chain의 내부 point는 두 실제 edge와 양쪽 ghost adjacency까지 최대 네 child에 나타남.
     world openWorld{};
     const bodyId openBody = openWorld.CreateBody();

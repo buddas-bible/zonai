@@ -3,9 +3,16 @@
 #include <cassert>
 #include <cmath>
 #include <numbers>
+#include <variant>
 
 namespace zonai::sandbox
 {
+namespace
+{
+
+constexpr float TERRAIN_POINT_PICK_RADIUS = 0.25f;
+
+} // namespace
 
 #pragma region LifetimeAndSimulation
 
@@ -106,7 +113,23 @@ void rigidBodyDemo::handleInput( const demoInput& input )
         mouseJoint_ = {};
     }
 
-    // 마우스를 놓으면 조인트를 제거하고, 잡고 있으면 목표점만 갱신함.
+    if( !input.mouseHeld )
+    {
+        terrainPointDragIndex_.reset();
+    }
+    else if( kind_ == demoKind::terrainChain )
+    {
+        if( input.mousePressed )
+        {
+            startTerrainPointDrag( input.mousePosition );
+        }
+        if( terrainPointDragIndex_.has_value() )
+        {
+            updateTerrainPointDrag( input.mousePosition );
+        }
+    }
+
+    // Terrain point를 잡은 동안에는 같은 왼쪽 입력으로 Mouse Joint를 만들지 않음.
     if( !input.mouseHeld )
     {
         if( world_.IsValid( mouseJoint_ ) )
@@ -115,7 +138,7 @@ void rigidBodyDemo::handleInput( const demoInput& input )
             mouseJoint_ = {};
         }
     }
-    else
+    else if( !terrainPointDragIndex_.has_value() )
     {
         if( input.mousePressed && !world_.IsValid( mouseJoint_ ) )
         {
@@ -150,6 +173,7 @@ void rigidBodyDemo::cancelInput()
     leftHeld_ = false;
     rightHeld_ = false;
     brakeHeld_ = false;
+    terrainPointDragIndex_.reset();
     updateCarMotors();
     // UI 조작, 포커스 상실, 데모 교체에서 마우스 제약을 제거함. 물체 삭제로 이미 사라졌을 수도 있음.
     if( world_.IsValid( mouseJoint_ ) )
@@ -209,6 +233,29 @@ void rigidBodyDemo::refreshContacts()
 }
 
 #pragma endregion Contacts
+
+#pragma region Queries
+
+std::size_t rigidBodyDemo::getTerrainPointCount() const noexcept
+{
+    return world_.IsValid( terrainChain_ ) ? terrainSegments_.size() + 1 : 0;
+}
+
+vec2 rigidBodyDemo::getTerrainPoint( std::size_t pointIndex ) const
+{
+    const std::size_t pointCount = getTerrainPointCount();
+    assert( pointIndex < pointCount );
+    if( pointIndex >= pointCount ) return {};
+
+    const shapeId segmentId = pointIndex < terrainSegments_.size() ? terrainSegments_[pointIndex] : terrainSegments_.back();
+    assert( world_.IsValid( segmentId ) );
+    if( !world_.IsValid( segmentId ) ) return {};
+
+    const chainSegment2& segment = std::get<chainSegment2>( world_.GetShape( segmentId ).geometry );
+    return pointIndex < terrainSegments_.size() ? segment.segment.a : segment.segment.b;
+}
+
+#pragma endregion Queries
 
 #pragma region SceneSetup
 
@@ -284,13 +331,12 @@ void rigidBodyDemo::createTerrainChain()
     definition.ghost2 = { -10.0f, -2.0f };
     definition.friction = 0.8f;
 
-    const chainId terrainChain = world_.CreateChain( ground, definition );
+    terrainChain_ = world_.CreateChain( ground, definition );
 
-    std::array<shapeId, 8> segments{};
-    const std::size_t segmentCount = world_.GetChainSegments( terrainChain, segments );
-    assert( segmentCount == segments.size() );
+    const std::size_t segmentCount = world_.GetChainSegments( terrainChain_, terrainSegments_ );
+    assert( segmentCount == terrainSegments_.size() );
 
-    for( shapeId segment : segments )
+    for( shapeId segment : terrainSegments_ )
     {
         shapes_.push_back( { ground, segment, "지형 edge [Chain]" } );
     }
@@ -530,6 +576,70 @@ void rigidBodyDemo::updateCarMotors()
 }
 
 #pragma endregion CarDrive
+
+#pragma region TerrainEdit
+
+void rigidBodyDemo::startTerrainPointDrag( vec2 point )
+{
+    terrainPointDragIndex_.reset();
+    if( kind_ != demoKind::terrainChain || !world_.IsValid( terrainChain_ ) ) return;
+
+    const float pickRadiusSquared = TERRAIN_POINT_PICK_RADIUS * TERRAIN_POINT_PICK_RADIUS;
+    float bestDistanceSquared = pickRadiusSquared;
+
+    for( std::size_t i = 0; i < getTerrainPointCount(); ++i )
+    {
+        const float distanceSquared = LengthSquared( getTerrainPoint( i ) - point );
+        if( distanceSquared > bestDistanceSquared ) continue;
+
+        bestDistanceSquared = distanceSquared;
+        terrainPointDragIndex_ = i;
+    }
+}
+
+void rigidBodyDemo::updateTerrainPointDrag( vec2 point )
+{
+    if( !terrainPointDragIndex_.has_value() ) return;
+
+    const std::size_t pointIndex = *terrainPointDragIndex_;
+    const vec2 currentPoint = getTerrainPoint( pointIndex );
+    if( currentPoint.x == point.x && currentPoint.y == point.y ) return;
+
+    if( !canMoveTerrainPoint( pointIndex, point ) ) return;
+
+    world_.SetChainPoint( terrainChain_, pointIndex, point );
+    // Pause 상태에서도 contact debug 표시가 이전 geometry를 가리키지 않게 즉시 다시 수집함.
+    refreshContacts();
+}
+
+bool rigidBodyDemo::canMoveTerrainPoint( std::size_t pointIndex, vec2 point ) const
+{
+    if( !IsFinite( point ) ) return false;
+
+    const std::size_t pointCount = getTerrainPointCount();
+    if( pointIndex >= pointCount ) return false;
+
+    const float minimumLengthSquared = LINEAR_SLOP * LINEAR_SLOP;
+    if( pointIndex > 0 && LengthSquared( point - getTerrainPoint( pointIndex - 1 ) ) <= minimumLengthSquared ) return false;
+
+    if( pointIndex + 1 < pointCount && LengthSquared( getTerrainPoint( pointIndex + 1 ) - point ) <= minimumLengthSquared ) return false;
+
+    if( pointIndex == 0 )
+    {
+        const chainSegment2& first = std::get<chainSegment2>( world_.GetShape( terrainSegments_.front() ).geometry );
+        if( LengthSquared( point - first.ghost1 ) <= minimumLengthSquared ) return false;
+    }
+
+    if( pointIndex + 1 == pointCount )
+    {
+        const chainSegment2& last = std::get<chainSegment2>( world_.GetShape( terrainSegments_.back() ).geometry );
+        if( LengthSquared( last.ghost2 - point ) <= minimumLengthSquared ) return false;
+    }
+
+    return true;
+}
+
+#pragma endregion TerrainEdit
 
 #pragma region MouseDrag
 
