@@ -15,12 +15,15 @@ namespace zonai
 /*
 * circle-circle
 * segment-circle
+* chain segment-circle
 * capsule-circle
 * polygon-circle
 */
 localManifold2 CollideCircles( const circle2& a, const circle2& b, const transform2& transformB );
 
 localManifold2 CollideSegmentCircle( const segment2& segment, const circle2& circle, const transform2& circleTransform );
+
+localManifold2 CollideChainSegmentCircle( const chainSegment2& chainSegment, const circle2& circle, const transform2& circleTransform );
 
 localManifold2 CollideCapsuleCircle( const capsule2& capsule, const circle2& circle, const transform2& circleTransform );
 
