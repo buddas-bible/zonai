@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <limits>
 
 #include "collision/constants.h"
 #include "collision/distance2.h"
@@ -53,6 +54,88 @@ int FindSupport( const shapeProxy2& proxy, const vec2& direction )
     }
 
     return bestIndex;
+}
+
+vec2 ComputeProxyCentroid( const shapeProxy2& proxy )
+{
+    assert( proxy.count > 0 );
+
+    if( proxy.count == 1 ) return proxy.points[0];
+
+    if( proxy.count == 2 ) return 0.5f * ( proxy.points[0] + proxy.points[1] );
+
+    float area2 = 0.0f;
+    vec2 centroid{};
+
+    for( int i = 0; i < proxy.count; ++i )
+    {
+        const vec2 point1 = proxy.points[i];
+        const vec2 point2 = proxy.points[( i + 1 ) % proxy.count];
+        const float cross = Cross( point1, point2 );
+
+        area2 += cross;
+        centroid += cross * ( point1 + point2 );
+    }
+
+    if( std::fabs( area2 ) > 0.0f ) return centroid / ( 3.0f * area2 );
+
+    centroid = {};
+
+    for( int i = 0; i < proxy.count; ++i ) centroid += proxy.points[i];
+
+    return centroid / static_cast<float>( proxy.count );
+}
+
+float ComputeProxyMinExtent( const shapeProxy2& proxy, const vec2& centroid )
+{
+    assert( proxy.count > 0 );
+
+    if( proxy.count <= 2 ) return proxy.radius;
+
+    float minExtent = std::numeric_limits<float>::max();
+
+    for( int i = 0; i < proxy.count; ++i )
+    {
+        const vec2 point1 = proxy.points[i];
+        const vec2 point2 = proxy.points[( i + 1 ) % proxy.count];
+        const vec2 edge = point2 - point1;
+        const float edgeLength = Length( edge );
+
+        if( edgeLength <= 0.0f ) continue;
+
+        const vec2 normal = Cross( edge, 1.0f ) / edgeLength;
+        minExtent = std::min( minExtent, Dot( normal, point1 - centroid ) );
+    }
+
+    if( minExtent == std::numeric_limits<float>::max() ) return proxy.radius;
+
+    return std::max( 0.0f, minExtent + proxy.radius );
+}
+
+bool ShouldSkipOneSidedToi( const toiInput2& input )
+{
+    if( !input.proxyA.oneSided || input.proxyA.count != 2 ) return false;
+
+    // Box2D와 같이 one-sided chain은 generic convex TOI를 실행하기 전에
+    // fast shape centroid가 뒷면에서 시작하거나 앞면을 향하지 않는 경우를 버림.
+    const transform2 transformA = GetSweepTransform( input.sweepA, 0.0f );
+    const vec2 point1 = TransformPoint( transformA, input.proxyA.points[0] );
+    const vec2 point2 = TransformPoint( transformA, input.proxyA.points[1] );
+    vec2 edge = point2 - point1;
+    const float edgeLength = Length( edge );
+
+    if( edgeLength <= LINEAR_SLOP ) return false;
+
+    edge /= edgeLength;
+
+    const vec2 localCentroidB = ComputeProxyCentroid( input.proxyB );
+    const vec2 centroid1 = TransformPoint( GetSweepTransform( input.sweepB, 0.0f ), localCentroidB );
+    const vec2 centroid2 = TransformPoint( GetSweepTransform( input.sweepB, input.maxFraction ), localCentroidB );
+    const float separation1 = Cross( centroid1 - point1, edge );
+    const float separation2 = Cross( centroid2 - point1, edge );
+    const float coreDistance = 0.25f * ComputeProxyMinExtent( input.proxyB, localCentroidB );
+
+    return separation1 < 0.0f || ( separation1 - separation2 < coreDistance && separation2 > coreDistance );
 }
 
 separationFunction2 MakeSeparationFunction( const simplexCache2& cache, const shapeProxy2& proxyA, const sweep2& sweepA, const shapeProxy2& proxyB, const sweep2& sweepB, float time )
@@ -259,6 +342,12 @@ toiOutput2 TimeOfImpact( const toiInput2& input )
 
     toiOutput2 output{};
     output.fraction = input.maxFraction;
+
+    if( ShouldSkipOneSidedToi( input ) )
+    {
+        output.state = toiState2::Separated;
+        return output;
+    }
 
     const float totalRadius = input.proxyA.radius + input.proxyB.radius;
 
