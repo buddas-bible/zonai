@@ -43,7 +43,7 @@ localManifold2 CollideSegmentCapsule( const segment2& segment, const capsule2& c
 
 localManifold2 CollideChainSegmentCapsule( const chainSegment2& chainSegment, const capsule2& capsule, const transform2& capsuleTransform, simplexCache2& cache );
 
-localManifold2 CollidePolygonCapsule( const polygon2& polygon, const circle2& circle, const transform2& circleTransform );
+localManifold2 CollidePolygonCapsule( const polygon2& polygon, const capsule2& capsule, const transform2& capsuleTransform );
 
 /*
 * polygon-polygon
