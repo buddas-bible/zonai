@@ -1,0 +1,77 @@
+name: Contact cache branch patch
+
+on:
+  push:
+    branches:
+      - feature/contact-simplex-cache
+    paths:
+      - .github/workflows/contact-cache-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-world:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/contact-simplex-cache
+          fetch-depth: 0
+
+      - name: Patch Contact cache call sites
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("src/dynamics/world.cpp")
+          text = path.read_text(encoding="utf-8")
+
+          old_existing = '''    if( !TryRecycleContact( contactId ) )
+              {
+                  const localManifold2 manifold = CollideShapes( shapeA.geometry, bodySimA.transform, shapeB.geometry, bodySimB.transform );
+                  UpdateContactSim( contactId, manifold );
+              }
+          '''
+          new_existing = '''    if( !TryRecycleContact( contactId ) )
+              {
+                  // Chain-polygon/capsule GJK는 같은 Contact의 이전 closest feature에서 다시 시작함.
+                  // UpdateContactSim은 hot-data를 다시 구성하므로 계산 후 cache를 되돌려 저장함.
+                  simplexCache2 simplexCache = contactSims_[contactId].simplexCache;
+                  const localManifold2 manifold = CollideShapes( shapeA.geometry, bodySimA.transform, shapeB.geometry, bodySimB.transform, simplexCache );
+                  UpdateContactSim( contactId, manifold );
+                  contactSims_[contactId].simplexCache = simplexCache;
+              }
+          '''
+
+          old_new = '''    const localManifold2 manifold = CollideShapes( shapeA.geometry, bodySimA.transform, shapeB.geometry, bodySimB.transform );
+          
+              return CreateContact( shapeIdA, shapeIdB, manifold );
+          '''
+          new_new = '''    simplexCache2 simplexCache{};
+              const localManifold2 manifold = CollideShapes( shapeA.geometry, bodySimA.transform, shapeB.geometry, bodySimB.transform, simplexCache );
+          
+              const std::int32_t contactId = CreateContact( shapeIdA, shapeIdB, manifold );
+              contactSims_[contactId].simplexCache = simplexCache;
+          
+              return contactId;
+          '''
+
+          if text.count(old_existing) != 1:
+              raise SystemExit(f"existing Contact site count: {text.count(old_existing)}")
+          if text.count(old_new) != 1:
+              raise SystemExit(f"new Contact site count: {text.count(old_new)}")
+
+          text = text.replace(old_existing, new_existing)
+          text = text.replace(old_new, new_new)
+          path.write_text(text, encoding="utf-8")
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/dynamics/world.cpp
+          git commit -m "feat(dynamics): reuse Contact simplex cache"
+          git push origin HEAD:feature/contact-simplex-cache
