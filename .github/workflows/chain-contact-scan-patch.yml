@@ -1,0 +1,116 @@
+name: Chain contact scan patch
+
+on:
+  push:
+    branches:
+      - feature/terrain-chain-lifecycle
+    paths:
+      - .github/workflows/chain-contact-scan-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/terrain-chain-lifecycle
+          fetch-depth: 0
+      - name: Apply and commit patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          world_cpp = Path('src/dynamics/world.cpp')
+          cpp = world_cpp.read_text(encoding='utf-8')
+
+          wake_anchor = '''    if( !deferBodyUpdates )
+    {
+        WakeBodyByIndex( bodyIndex );
+    }
+
+    // body의 singly linked parent-chain list에서 현재 chain을 분리함.'''
+          batch_contacts = '''    if( !deferBodyUpdates )
+    {
+        WakeBodyByIndex( bodyIndex );
+    }
+
+    // parentChainId를 이용해 body contact list를 한 번만 훑고
+    // 이 chain의 child가 관여한 Contact를 batch로 먼저 제거함.
+    std::int32_t contactKey = body.headContactKey;
+    while( contactKey != body::NULL_INDEX )
+    {
+        const std::int32_t contactId = GetContactId( contactKey );
+        const std::int32_t edgeIndex = GetContactEdgeIndex( contactKey );
+
+        assert( contactId >= 0 );
+        assert( static_cast<std::size_t>( contactId ) < contacts_.size() );
+
+        contact2& contact = contacts_[contactId];
+        assert( contact.contactId == contactId );
+
+        // DestroyContact가 intrusive list를 수정하므로 다음 key를 먼저 저장함.
+        contactKey = contact.edges[edgeIndex].nextKey;
+
+        assert( contact.shapeIdA >= 0 && static_cast<std::size_t>( contact.shapeIdA ) < shapes_.size() );
+        assert( contact.shapeIdB >= 0 && static_cast<std::size_t>( contact.shapeIdB ) < shapes_.size() );
+
+        if( shapes_[contact.shapeIdA].parentChainId == chainIndex ||
+            shapes_[contact.shapeIdB].parentChainId == chainIndex )
+        {
+            // 위에서 연결 component를 이미 깨웠으므로 Contact별 wake는 반복하지 않음.
+            DestroyContact( contactId, false );
+        }
+    }
+
+    // body의 singly linked parent-chain list에서 현재 chain을 분리함.'''
+          if cpp.count(wake_anchor) != 1:
+              raise RuntimeError(f'DestroyChain wake anchor count={cpp.count(wake_anchor)}')
+          cpp = cpp.replace(wake_anchor, batch_contacts, 1)
+
+          old_child = '        DestroyShapeByIndex( shapeIndex, true );'
+          new_child = '        DestroyShapeByIndex( shapeIndex, true, false );'
+          if cpp.count(old_child) != 1:
+              raise RuntimeError(f'chain child destroy call count={cpp.count(old_child)}')
+          cpp = cpp.replace(old_child, new_child, 1)
+
+          old_signature = 'void world::DestroyShapeByIndex( std::int32_t shapeIndex, bool deferBodyUpdates )'
+          new_signature = 'void world::DestroyShapeByIndex( std::int32_t shapeIndex, bool deferBodyUpdates, bool destroyContacts )'
+          if cpp.count(old_signature) != 1:
+              raise RuntimeError('DestroyShapeByIndex signature mismatch')
+          cpp = cpp.replace(old_signature, new_signature, 1)
+
+          scan_start = '''    // 이 body의 Contact list에서 삭제 shape가 관여한 Contact만 제거함.
+    std::int32_t contactKey = body.headContactKey;
+
+    while( contactKey != body::NULL_INDEX )'''
+          scan_replacement = '''    // 일반 shape 삭제는 이 shape의 Contact를 직접 찾고,
+    // chain batch는 parent 단계에서 Contact를 한 번에 제거했으므로 이 순회를 생략함.
+    std::int32_t contactKey = destroyContacts ? body.headContactKey : body::NULL_INDEX;
+
+    while( contactKey != body::NULL_INDEX )'''
+          if cpp.count(scan_start) != 1:
+              raise RuntimeError(f'DestroyShape contact scan anchor count={cpp.count(scan_start)}')
+          cpp = cpp.replace(scan_start, scan_replacement, 1)
+          world_cpp.write_text(cpp, encoding='utf-8')
+
+          world_h = Path('src/dynamics/world.h')
+          header = world_h.read_text(encoding='utf-8')
+          old_decl = '    void DestroyShapeByIndex( std::int32_t shapeIndex, bool deferBodyUpdates = false );'
+          new_decl = '    void DestroyShapeByIndex( std::int32_t shapeIndex, bool deferBodyUpdates = false, bool destroyContacts = true );'
+          if header.count(old_decl) != 1:
+              raise RuntimeError('DestroyShapeByIndex declaration mismatch')
+          header = header.replace(old_decl, new_decl, 1)
+          world_h.write_text(header, encoding='utf-8')
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/dynamics/world.cpp src/dynamics/world.h
+          git diff --cached --check
+          git commit -m "perf(dynamics): batch chain contact lookup"
+          git push origin HEAD:feature/terrain-chain-lifecycle
