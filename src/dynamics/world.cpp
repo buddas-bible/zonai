@@ -167,7 +167,7 @@ void world::DestroyBody( bodyId bodyId )
 shapeId world::CreateShape( bodyId bodyId, shapeGeometry geometry, collisionFilter filter, float density )
 {
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
-    const std::int32_t shapeIndex = CreateShapeByIndex( bodyIndex, std::move( geometry ), filter, density, true );
+    const std::int32_t shapeIndex = CreateShapeByIndex( bodyIndex, std::move( geometry ), filter, density, false );
 
     return MakeShapeId( shapeIndex );
 }
@@ -268,13 +268,16 @@ chainId world::CreateChain( bodyId bodyId, const chainDef& definition )
     ++body.chainCount;
     ++chainCount_;
 
+    // chain child 생성 전에 연결된 body/island를 한 번만 깨움.
+    WakeBodyByIndex( bodyIndex );
+
     const std::size_t segmentCount = definition.isLoop ? points.size() : points.size() - 1;
     chain.shapeIds.reserve( segmentCount );
 
     const auto createSegment = [&]( const vec2& ghost1, const vec2& point1, const vec2& point2, const vec2& ghost2 )
     {
         const chainSegment2 segment{ ghost1, { point1, point2 }, ghost2 };
-        const std::int32_t shapeIndex = CreateShapeByIndex( bodyIndex, segment, definition.filter, 0.0f, false );
+        const std::int32_t shapeIndex = CreateShapeByIndex( bodyIndex, segment, definition.filter, 0.0f, true );
 
         shape& child = shapes_[shapeIndex];
         child.parentChainId = chainIndex;
@@ -3282,7 +3285,7 @@ bool world::shouldShapeFiltersCollide( const collisionFilter& a, const collision
 
 #pragma region BodyShapeStorage
 
-std::int32_t world::CreateShapeByIndex( std::int32_t bodyIndex, shapeGeometry geometry, collisionFilter filter, float density, bool updateBodyMassData )
+std::int32_t world::CreateShapeByIndex( std::int32_t bodyIndex, shapeGeometry geometry, collisionFilter filter, float density, bool deferBodyUpdates )
 {
     assert( bodyIndex >= 0 );
     assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
@@ -3330,7 +3333,10 @@ std::int32_t world::CreateShapeByIndex( std::int32_t bodyIndex, shapeGeometry ge
 
     body& body = bodies_[bodyIndex];
 
-    WakeBodyByIndex( bodyIndex );
+    if( !deferBodyUpdates )
+    {
+        WakeBodyByIndex( bodyIndex );
+    }
 
     assert( bodySims_.size() == bodies_.size() );
     const bodySim& bodySim = bodySims_[bodyIndex];
@@ -3348,7 +3354,7 @@ std::int32_t world::CreateShapeByIndex( std::int32_t bodyIndex, shapeGeometry ge
     LinkShape( body, bodyIndex, shapes_, shapeIndex );
     ++shapeCount_;
 
-    if( updateBodyMassData )
+    if( !deferBodyUpdates )
     {
         UpdateBodyMassData( bodyIndex );
     }
@@ -3356,7 +3362,7 @@ std::int32_t world::CreateShapeByIndex( std::int32_t bodyIndex, shapeGeometry ge
     return shapeIndex;
 }
 
-void world::DestroyChainByIndex( std::int32_t chainIndex, bool updateBodyMassData )
+void world::DestroyChainByIndex( std::int32_t chainIndex, bool deferBodyUpdates )
 {
     assert( chainIndex >= 0 );
     assert( static_cast<std::size_t>( chainIndex ) < chains_.size() );
@@ -3368,6 +3374,11 @@ void world::DestroyChainByIndex( std::int32_t chainIndex, bool updateBodyMassDat
 
     const std::int32_t bodyIndex = chain.bodyId;
     body& body = bodies_[bodyIndex];
+
+    if( !deferBodyUpdates )
+    {
+        WakeBodyByIndex( bodyIndex );
+    }
 
     // body의 singly linked parent-chain list에서 현재 chain을 분리함.
     std::int32_t* chainLink = &body.headChainId;
@@ -3389,10 +3400,10 @@ void world::DestroyChainByIndex( std::int32_t chainIndex, bool updateBodyMassDat
         assert( shapeIndex >= 0 && static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
         assert( shapes_[shapeIndex].parentChainId == chainIndex );
         shapes_[shapeIndex].parentChainId = shape::NULL_INDEX;
-        DestroyShapeByIndex( shapeIndex, false );
+        DestroyShapeByIndex( shapeIndex, true );
     }
 
-    if( updateBodyMassData )
+    if( !deferBodyUpdates )
     {
         UpdateBodyMassData( bodyIndex );
     }
@@ -3438,7 +3449,7 @@ void world::DestroyBodyByIndex( std::int32_t bodyIndex )
     // Parent chain부터 제거해야 child chainSegment2를 개별 shape처럼 파괴하지 않음.
     while( body.headChainId != body::NULL_INDEX )
     {
-        DestroyChainByIndex( body.headChainId, false );
+        DestroyChainByIndex( body.headChainId, true );
     }
 
     assert( body.chainCount == 0 );
@@ -3446,7 +3457,7 @@ void world::DestroyBodyByIndex( std::int32_t bodyIndex )
     // parent가 없는 일반 shape를 하나씩 제거하면 각 proxy와 shape slot도 함께 정리됨.
     while( body.headShapeId != body::NULL_INDEX )
     {
-        DestroyShapeByIndex( body.headShapeId, false );
+        DestroyShapeByIndex( body.headShapeId, true );
     }
 
     assert( body.shapeCount == 0 );
@@ -3479,7 +3490,7 @@ void world::DestroyBodyByIndex( std::int32_t bodyIndex )
     --bodyCount_;
 }
 
-void world::DestroyShapeByIndex( std::int32_t shapeIndex, bool updateBodyMassData )
+void world::DestroyShapeByIndex( std::int32_t shapeIndex, bool deferBodyUpdates )
 {
     assert( shapeIndex >= 0 );
     assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
@@ -3499,7 +3510,10 @@ void world::DestroyShapeByIndex( std::int32_t shapeIndex, bool updateBodyMassDat
     const std::int32_t bodyIndex = shape.bodyId;
     body& body = bodies_[bodyIndex];
 
-    WakeBodyByIndex( bodyIndex );
+    if( !deferBodyUpdates )
+    {
+        WakeBodyByIndex( bodyIndex );
+    }
 
     // Box2D처럼 먼저 body의 shape list에서 분리함.
     UnlinkShape( body, bodyIndex, shapes_, shapeIndex );
@@ -3532,7 +3546,7 @@ void world::DestroyShapeByIndex( std::int32_t shapeIndex, bool updateBodyMassDat
         }
     }
 
-    if( updateBodyMassData )
+    if( !deferBodyUpdates )
     {
         UpdateBodyMassData( bodyIndex );
     }
