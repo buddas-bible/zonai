@@ -14,6 +14,15 @@ struct segment2
     vec2 b{};
 };
 
+// Terrain chain의 한 edge. ghost vertex는 양 끝의 이웃 edge 방향을 보존해
+// 내부 꼭짓점에서 현재 edge가 가짜 endpoint contact를 만드는 것을 막음.
+struct chainSegment2
+{
+    vec2 ghost1{};
+    segment2 segment{};
+    vec2 ghost2{};
+};
+
 inline vec2 Direction( const segment2& segment )
 {
     return segment.b - segment.a;
