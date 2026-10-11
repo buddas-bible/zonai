@@ -240,6 +240,99 @@ void checkSensorHandles()
     check( simulation.GetShapeSensorData( sensor, overlaps ) == 0, "destroyed visitor overlap removed" );
 }
 
+void checkOrphanChainSegmentUpdate()
+{
+    world simulation{};
+    const bodyId terrainBody = simulation.CreateBody();
+
+    const chainSegment2 original{
+        { 2.0f, 0.0f },
+        { { 1.0f, 0.0f }, { -1.0f, 0.0f } },
+        { -2.0f, 0.0f }
+    };
+    const shapeId terrainShape = simulation.CreateShape( terrainBody, original, {}, 0.0f );
+    simulation.SetShapeFriction( terrainShape, 0.25f );
+    simulation.SetShapeRestitution( terrainShape, 0.4f );
+
+    const bodyId circleBody = simulation.CreateBody( bodyType::Dynamic, { { 0.0f, 0.5f }, {} } );
+    const shapeId circleShape = simulation.CreateShape( circleBody, circle2{ {}, 0.5f } );
+
+    update( simulation );
+    std::array<contactData, 1> contacts{};
+    check( simulation.GetShapeContactData( circleShape, contacts ) == 1, "orphan chain initial contact" );
+    const contactId oldContact = contacts[0].id;
+
+    const chainSegment2 moved{
+        { 2.0f, -2.0f },
+        { { 1.0f, -2.0f }, { -1.0f, -2.0f } },
+        { -2.0f, -2.0f }
+    };
+
+    simulation.SetChainSegment( terrainShape, moved );
+
+    check( simulation.IsValid( terrainShape ), "orphan chain handle changed" );
+    check( !simulation.IsValid( oldContact ) && simulation.GetContactCount() == 0, "orphan chain update kept stale contact" );
+    check( simulation.GetShapeFriction( terrainShape ) == 0.25f && simulation.GetShapeRestitution( terrainShape ) == 0.4f, "orphan chain update changed material" );
+
+    const chainSegment2& stored = std::get<chainSegment2>( simulation.GetShape( terrainShape ).geometry );
+    check( stored.ghost1.x == moved.ghost1.x && stored.ghost1.y == moved.ghost1.y && stored.segment.a.y == -2.0f && stored.segment.b.y == -2.0f && stored.ghost2.x == moved.ghost2.x && stored.ghost2.y == moved.ghost2.y, "orphan chain geometry not replaced" );
+
+    const aabb2& movedAABB = simulation.GetShapeAABB( terrainShape );
+    check( movedAABB.max.y < -1.9f && movedAABB.min.y < -2.0f, "orphan chain AABB not updated" );
+
+    simulation.SetBodyTransform( circleBody, { { 0.0f, -1.5f }, {} } );
+    update( simulation );
+    check( simulation.GetShapeContactData( circleShape, contacts ) == 1, "orphan chain moved contact not recreated" );
+    check( contacts[0].shapeA == terrainShape || contacts[0].shapeB == terrainShape, "orphan chain moved contact lost shape identity" );
+    check( !simulation.IsValid( oldContact ), "orphan chain old contact resurrected" );
+
+    // Geometry가 body local center에서 멀어지면 CCD / sleep에서 쓰는 maxExtent도 즉시 갱신되어야 함.
+    world extentSimulation{};
+    bodyDef extentBodyDefinition{};
+    extentBodyDefinition.type = bodyType::Dynamic;
+    extentBodyDefinition.gravityScale = 0.0f;
+    extentBodyDefinition.angularVelocity = 0.01f;
+    extentBodyDefinition.sleepThreshold = 0.05f;
+    const bodyId extentBody = extentSimulation.CreateBody( extentBodyDefinition );
+
+    const chainSegment2 nearCenter{
+        { 0.2f, 0.0f },
+        { { 0.1f, 0.0f }, { -0.1f, 0.0f } },
+        { -0.2f, 0.0f }
+    };
+    const shapeId extentShape = extentSimulation.CreateShape( extentBody, nearCenter, {}, 0.0f );
+
+    const chainSegment2 farFromCenter{
+        { 11.2f, 0.0f },
+        { { 11.1f, 0.0f }, { 10.9f, 0.0f } },
+        { 10.8f, 0.0f }
+    };
+    extentSimulation.SetChainSegment( extentShape, farFromCenter );
+
+    for( int i = 0; i < 40; ++i )
+    {
+        extentSimulation.Step( 1.0f / 60.0f, 1 );
+    }
+
+    check( extentSimulation.IsBodyAwake( extentBody ), "orphan chain update kept stale body extent" );
+
+    const std::array<vec2, 2> points{ vec2{ 1.0f, 2.0f }, vec2{ -1.0f, 2.0f } };
+    chainDef definition{};
+    definition.points = points;
+    definition.ghost1 = { 2.0f, 2.0f };
+    definition.ghost2 = { -2.0f, 2.0f };
+    const chainId parent = simulation.CreateChain( terrainBody, definition );
+    std::array<shapeId, 1> children{};
+    check( simulation.GetChainSegments( parent, children ) == 1, "parent chain child fixture" );
+
+#ifdef NDEBUG
+    const chainSegment2 before = std::get<chainSegment2>( simulation.GetShape( children[0] ).geometry );
+    simulation.SetChainSegment( children[0], moved );
+    const chainSegment2 after = std::get<chainSegment2>( simulation.GetShape( children[0] ).geometry );
+    check( after.ghost1.x == before.ghost1.x && after.ghost1.y == before.ghost1.y && after.segment.a.x == before.segment.a.x && after.segment.a.y == before.segment.a.y && after.segment.b.x == before.segment.b.x && after.segment.b.y == before.segment.b.y && after.ghost2.x == before.ghost2.x && after.ghost2.y == before.ghost2.y, "parent chain child geometry mutated" );
+#endif
+}
+
 void checkChainLifecycle()
 {
     world simulation{};
@@ -320,5 +413,6 @@ int main()
     checkEdgeRemovalOrders();
     checkImpulseReset();
     checkSensorHandles();
+    checkOrphanChainSegmentUpdate();
     checkChainLifecycle();
 }

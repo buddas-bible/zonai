@@ -96,6 +96,10 @@ public:
     // parent chain의 child segment는 DestroyChain으로만 제거함.
     void DestroyShape( shapeId shapeId );
 
+    // parent가 없는 chainSegment2의 geometry와 ghost vertex를 같은 shape handle로 교체함.
+    // parent chain child는 adjacency를 parent가 소유하므로 개별 수정하지 않음.
+    void SetChainSegment( shapeId shapeId, const chainSegment2& chainSegment );
+
 #pragma endregion ShapeLifecycle
 
 #pragma region ChainLifecycle
@@ -505,6 +509,10 @@ private:
 
     // 아직 commit되지 않은 transform을 기준으로 speculative / fat bounds와 tree proxy를 갱신함.
     void UpdateBodyProxyBounds( std::int32_t bodyIndex, const transform2& transform );
+
+    // 현재 local center 기준으로 모든 shape의 CCD / sleep extent만 다시 합산함.
+    // 질량과 COM은 바꾸지 않음.
+    void UpdateBodyShapeExtents( std::int32_t bodyIndex );
 
     // 연결된 shape들의 density / geometry를 합산해 Dynamic body의 mass data를 갱신함.
     void UpdateBodyMassData( std::int32_t bodyIndex );

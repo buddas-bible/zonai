@@ -3674,6 +3674,44 @@ void world::UpdateBodyProxyBounds( std::int32_t bodyIndex, const transform2& tra
     assert( visitedCount == body.shapeCount );
 }
 
+void world::UpdateBodyShapeExtents( std::int32_t bodyIndex )
+{
+    assert( bodyIndex >= 0 );
+    assert( static_cast<std::size_t>( bodyIndex ) < bodies_.size() );
+    assert( bodySims_.size() == bodies_.size() );
+
+    const body& body = bodies_[bodyIndex];
+    bodySim& bodySim = bodySims_[bodyIndex];
+
+    assert( body.bodyId == bodyIndex );
+    assert( bodySim.bodyId == bodyIndex );
+
+    bodySim.minExtent = std::numeric_limits<float>::max();
+    bodySim.maxExtent = 0.0f;
+
+    std::int32_t shapeIndex = body.headShapeId;
+    std::int32_t visitedCount = 0;
+
+    while( shapeIndex != body::NULL_INDEX )
+    {
+        assert( shapeIndex >= 0 );
+        assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+        assert( visitedCount < body.shapeCount );
+
+        const shape& shape = shapes_[shapeIndex];
+        assert( shape.bodyId == bodyIndex );
+
+        const shapeExtent2 extent = ComputeShapeExtent( shape.geometry, bodySim.localCenter );
+        bodySim.minExtent = std::min( bodySim.minExtent, extent.minExtent );
+        bodySim.maxExtent = std::max( bodySim.maxExtent, extent.maxExtent );
+
+        shapeIndex = shape.nextShapeId;
+        ++visitedCount;
+    }
+
+    assert( visitedCount == body.shapeCount );
+}
+
 void world::UpdateBodyMassData( std::int32_t bodyIndex )
 {
     assert( bodyIndex >= 0 );
@@ -3721,43 +3759,13 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
     bodySim.invMass = 0.0f;
     bodySim.invInertia = 0.0f;
     bodySim.localCenter = {};
-    bodySim.minExtent = std::numeric_limits<float>::max();
-    bodySim.maxExtent = 0.0f;
-
-    const auto updateExtents = [&]()
-    {
-        std::int32_t shapeIndex = body.headShapeId;
-        std::int32_t visitedCount = 0;
-
-        while( shapeIndex != body::NULL_INDEX )
-        {
-            assert( shapeIndex >= 0 );
-            assert( static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
-            assert( visitedCount < body.shapeCount );
-
-            const shape& shape = shapes_[shapeIndex];
-
-            assert( shape.bodyId == bodyIndex );
-
-            const shapeExtent2 extent = ComputeShapeExtent( shape.geometry, bodySim.localCenter );
-
-            bodySim.minExtent = std::min( bodySim.minExtent, extent.minExtent );
-
-            bodySim.maxExtent = std::max( bodySim.maxExtent, extent.maxExtent );
-
-            shapeIndex = shape.nextShapeId;
-            ++visitedCount;
-        }
-
-        assert( visitedCount == body.shapeCount );
-    };
 
     // Static / Kinematic body는 외력이나 impulse로 가속되지 않으므로
     // solver 관점에서 무한 질량으로 취급하고 inverse mass / inertia를 0으로 둠.
     if( body.type != bodyType::Dynamic )
     {
         bodySim.center = bodySim.transform.position;
-        updateExtents();
+        UpdateBodyShapeExtents( bodyIndex );
         return;
     }
 
@@ -3849,7 +3857,7 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
         bodySim.invInertia = 1.0f / body.inertia;
     }
 
-    updateExtents();
+    UpdateBodyShapeExtents( bodyIndex );
 
     // local center of mass C를 현재 body transform으로 world space에 옮김.
     bodySim.center = TransformPoint( bodySim.transform, bodySim.localCenter );
