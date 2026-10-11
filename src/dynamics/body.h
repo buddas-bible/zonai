@@ -55,6 +55,10 @@ struct body
     std::int32_t headJointKey = NULL_INDEX;
     std::int32_t jointCount = 0;
 
+    // 이 body에 연결된 parent chain list의 첫 chain index.
+    std::int32_t headChainId = NULL_INDEX;
+    std::int32_t chainCount = 0;
+
     // 이 body에 연결된 첫 shape index.
     std::int32_t headShapeId = NULL_INDEX;
 
