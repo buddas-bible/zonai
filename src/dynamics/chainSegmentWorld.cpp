@@ -19,15 +19,14 @@ void world::SetChainSegment( shapeId shapeId, const chainSegment2& chainSegment 
     assert( std::holds_alternative<chainSegment2>( storedShape.geometry ) );
     if( !std::holds_alternative<chainSegment2>( storedShape.geometry ) ) return;
 
-    assert( IsFinite( chainSegment.ghost1 ) );
-    assert( IsFinite( chainSegment.segment.a ) );
-    assert( IsFinite( chainSegment.segment.b ) );
-    assert( IsFinite( chainSegment.ghost2 ) );
-
     const float minimumLengthSquared = LINEAR_SLOP * LINEAR_SLOP;
-    assert( LengthSquared( chainSegment.segment.a - chainSegment.ghost1 ) > minimumLengthSquared );
-    assert( LengthSquared( chainSegment.segment.b - chainSegment.segment.a ) > minimumLengthSquared );
-    assert( LengthSquared( chainSegment.ghost2 - chainSegment.segment.b ) > minimumLengthSquared );
+    const bool isValid = IsFinite( chainSegment.ghost1 ) && IsFinite( chainSegment.segment.a ) && IsFinite( chainSegment.segment.b ) && IsFinite( chainSegment.ghost2 ) &&
+                         LengthSquared( chainSegment.segment.a - chainSegment.ghost1 ) > minimumLengthSquared &&
+                         LengthSquared( chainSegment.segment.b - chainSegment.segment.a ) > minimumLengthSquared &&
+                         LengthSquared( chainSegment.ghost2 - chainSegment.segment.b ) > minimumLengthSquared;
+
+    assert( isValid );
+    if( !isValid ) return;
 
     const std::int32_t bodyIndex = storedShape.bodyId;
     assert( bodyIndex != shape::NULL_INDEX );
