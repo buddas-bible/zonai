@@ -28,7 +28,8 @@ massData2 ComputeMass( const circle2& circle, float density );
 massData2 ComputeMass( const capsule2& capsule, float density );
 massData2 ComputeMass( const polygon2& polygon, float density );
 
-// 선분은 면적이 없으므로 질량을 만들지 않음.
+// 선분과 chain edge는 2D 면적이 없으므로 질량을 만들지 않음.
 massData2 ComputeMass( const segment2& segment, float density );
+massData2 ComputeMass( const chainSegment2& chainSegment, float density );
 
 } // namespace zonai
