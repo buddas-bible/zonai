@@ -49,8 +49,14 @@ int main()
     }
 
     // 새 Contact hot-data는 이전 pair의 GJK feature를 상속하면 안 됨.
+    // free-list 반환도 contactSim2 전체 초기화를 사용하므로 같은 규칙으로 cache가 비워짐.
     {
         contactSim2 contact{};
+        assert( contact.simplexCache.count == 0 );
+
+        contact.simplexCache.count = 2;
+        contact = {};
+
         assert( contact.simplexCache.count == 0 );
     }
 
