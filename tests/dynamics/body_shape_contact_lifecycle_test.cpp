@@ -245,42 +245,48 @@ void checkChainLifecycle()
     world simulation{};
     const bodyId terrainBody = simulation.CreateBody();
 
-    // Open chain의 양 끝 점은 ghost vertex이고 가운데 두 점 사이만 실제 collision edge가 됨.
-    const std::array<vec2, 4> openPoints{ vec2{ 2.0f, 0.0f }, vec2{ 1.0f, 0.0f }, vec2{ -1.0f, 0.0f }, vec2{ -2.0f, 0.0f } };
+    // 현재 Box2D처럼 open chain은 실제 points와 시작/끝 ghost point를 별도로 받음.
+    // 실제 point N개는 N-1개의 collision segment를 생성함.
+    const std::array<vec2, 3> openPoints{ vec2{ 1.0f, 0.0f }, vec2{ 0.0f, 0.0f }, vec2{ -1.0f, 0.0f } };
     chainDef openDef{};
     openDef.points = openPoints;
+    openDef.ghost1 = { 2.0f, 0.0f };
+    openDef.ghost2 = { -2.0f, 0.0f };
 
     const chainId openChain = simulation.CreateChain( terrainBody, openDef );
     check( simulation.IsValid( openChain ), "open chain invalid" );
     check( simulation.GetChainCount() == 1, "open chain count" );
-    check( simulation.GetChainSegmentCount( openChain ) == 1, "open chain segment count" );
+    check( simulation.GetChainSegmentCount( openChain ) == 2, "open chain segment count" );
 
-    std::array<shapeId, 1> openSegments{};
-    check( simulation.GetChainSegments( openChain, openSegments ) == 1, "open chain segment query" );
-    check( simulation.IsValid( openSegments[0] ), "open chain child invalid" );
-    check( simulation.GetShapeParentChain( openSegments[0] ) == openChain, "open chain parent link" );
-    check( simulation.GetShapeCount() == 1 && simulation.GetBody( terrainBody ).shapeCount == 1, "open chain child shape count" );
+    std::array<shapeId, 2> openSegments{};
+    check( simulation.GetChainSegments( openChain, openSegments ) == 2, "open chain segment query" );
+    for( shapeId segment : openSegments )
+    {
+        check( simulation.IsValid( segment ), "open chain child invalid" );
+        check( simulation.GetShapeParentChain( segment ) == openChain, "open chain parent link" );
+    }
+    check( simulation.GetShapeCount() == 2 && simulation.GetBody( terrainBody ).shapeCount == 2, "open chain child shape count" );
 
     // point1 -> point2의 오른쪽이 앞면이므로 이 방향에서는 위쪽 circle만 접촉함.
-    const bodyId circleBody = simulation.CreateBody( bodyType::Dynamic, { { 0.0f, 0.5f }, {} } );
+    const bodyId circleBody = simulation.CreateBody( bodyType::Dynamic, { { 0.5f, 0.5f }, {} } );
     const shapeId circleShape = simulation.CreateShape( circleBody, circle2{ {}, 0.5f } );
     update( simulation );
     std::array<contactData, 1> contacts{};
     check( simulation.GetShapeContactData( circleShape, contacts ) == 1, "open chain world contact" );
 
     simulation.DestroyChain( openChain );
-    check( !simulation.IsValid( openChain ) && !simulation.IsValid( openSegments[0] ), "destroy chain invalidation" );
+    check( !simulation.IsValid( openChain ) && !simulation.IsValid( openSegments[0] ) && !simulation.IsValid( openSegments[1] ), "destroy chain invalidation" );
     check( simulation.GetChainCount() == 0 && simulation.GetShapeCount() == 1 && simulation.GetContactCount() == 0, "destroy chain cascade counts" );
 
     const chainId reusedChain = simulation.CreateChain( terrainBody, openDef );
     check( reusedChain.index1 == openChain.index1 && reusedChain.generation != openChain.generation, "chain generation reuse" );
 
-    std::array<shapeId, 1> reusedSegments{};
-    check( simulation.GetChainSegments( reusedChain, reusedSegments ) == 1, "reused chain segment query" );
+    std::array<shapeId, 2> reusedSegments{};
+    check( simulation.GetChainSegments( reusedChain, reusedSegments ) == 2, "reused chain segment query" );
 
     // Body 파괴는 parent chain과 내부 segment shape를 함께 제거해야 함.
     simulation.DestroyBody( terrainBody );
-    check( !simulation.IsValid( reusedChain ) && !simulation.IsValid( reusedSegments[0] ), "body chain cascade invalidation" );
+    check( !simulation.IsValid( reusedChain ) && !simulation.IsValid( reusedSegments[0] ) && !simulation.IsValid( reusedSegments[1] ), "body chain cascade invalidation" );
     check( simulation.GetChainCount() == 0 && simulation.GetShapeCount() == 1, "body chain cascade counts" );
 
     // Loop chain은 모든 point 사이를 닫아 N개의 실제 segment를 생성함.

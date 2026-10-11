@@ -281,7 +281,7 @@ chainId world::CreateChain( bodyId bodyId, const chainDef& definition )
 {
     const std::int32_t bodyIndex = GetBodyIndex( bodyId );
 
-    assert( definition.points.size() >= 4 );
+    assert( definition.isLoop ? definition.points.size() >= 3 : definition.points.size() >= 2 );
     assert( std::isfinite( definition.friction ) && definition.friction >= 0.0f );
     assert( std::isfinite( definition.restitution ) && definition.restitution >= 0.0f );
 
@@ -301,6 +301,12 @@ chainId world::CreateChain( bodyId bodyId, const chainDef& definition )
     if( definition.isLoop )
     {
         assert( LengthSquared( points.front() - points.back() ) > minimumLengthSquared );
+    }
+    else
+    {
+        assert( IsFinite( definition.ghost1 ) && IsFinite( definition.ghost2 ) );
+        assert( LengthSquared( points.front() - definition.ghost1 ) > minimumLengthSquared );
+        assert( LengthSquared( definition.ghost2 - points.back() ) > minimumLengthSquared );
     }
 
     std::int32_t chainIndex = chain2::NULL_INDEX;
@@ -332,7 +338,7 @@ chainId world::CreateChain( bodyId bodyId, const chainDef& definition )
     ++body.chainCount;
     ++chainCount_;
 
-    const std::size_t segmentCount = definition.isLoop ? points.size() : points.size() - 3;
+    const std::size_t segmentCount = definition.isLoop ? points.size() : points.size() - 1;
     chain.shapeIds.reserve( segmentCount );
 
     const auto createSegment = [&]( const vec2& ghost1, const vec2& point1, const vec2& point2, const vec2& ghost2 )
@@ -359,9 +365,12 @@ chainId world::CreateChain( bodyId bodyId, const chainDef& definition )
     }
     else
     {
-        for( std::size_t i = 0; i + 3 < points.size(); ++i )
+        const std::size_t count = points.size();
+        for( std::size_t i = 0; i + 1 < count; ++i )
         {
-            createSegment( points[i], points[i + 1], points[i + 2], points[i + 3] );
+            const vec2 ghost1 = i == 0 ? definition.ghost1 : points[i - 1];
+            const vec2 ghost2 = i + 2 == count ? definition.ghost2 : points[i + 2];
+            createSegment( ghost1, points[i], points[i + 1], ghost2 );
         }
     }
 
