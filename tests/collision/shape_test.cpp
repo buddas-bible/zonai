@@ -35,10 +35,10 @@ int main()
 
         const aabb2 bounds = ComputeShapeAABB( chain, transform );
 
-        assert( std::fabs( bounds.lowerBound.x + 1.0f ) < epsilon );
-        assert( std::fabs( bounds.lowerBound.y - 2.5f ) < epsilon );
-        assert( std::fabs( bounds.upperBound.x - 4.0f ) < epsilon );
-        assert( std::fabs( bounds.upperBound.y - 2.5f ) < epsilon );
+        assert( std::fabs( bounds.min.x + 1.0f ) < epsilon );
+        assert( std::fabs( bounds.min.y - 2.5f ) < epsilon );
+        assert( std::fabs( bounds.max.x - 4.0f ) < epsilon );
+        assert( std::fabs( bounds.max.y - 2.5f ) < epsilon );
     }
 
     // CCD extent는 local center 기준 최소 두께와 최대 반경을 계산함.
