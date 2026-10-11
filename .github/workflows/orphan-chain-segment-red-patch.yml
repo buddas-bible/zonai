@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   patch:
-    if: "github.event.head_commit.message != 'test(dynamics): add orphan chain segment RED'"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,7 +71,6 @@ jobs:
     check( contacts[0].shapeA == terrainShape || contacts[0].shapeB == terrainShape, "orphan chain moved contact lost shape identity" );
     check( !simulation.IsValid( oldContact ), "orphan chain old contact resurrected" );
 
-    // parent chain child는 adjacency를 parent가 소유하므로 개별 geometry 수정이 허용되지 않음.
     const std::array<vec2, 2> points{ vec2{ 1.0f, 2.0f }, vec2{ -1.0f, 2.0f } };
     chainDef definition{};
     definition.points = points;
