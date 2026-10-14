@@ -4487,7 +4487,7 @@ void world::SolveContinuousBody( std::int32_t bodyIndex, float timeStep )
         input.sweepB = fastSweep;
         input.maxFraction = hitFraction;
 
-        const toiOutput2 output = TimeOfImpact( input );
+        toiOutput2 output = TimeOfImpact( input );
 
         if( isSensor )
         {
@@ -4501,7 +4501,17 @@ void world::SolveContinuousBody( std::int32_t bodyIndex, float timeStep )
             return;
         }
 
-        // fraction 0은 이미 존재하던 overlap / touching Contact가 처리함.
+        // 초기 접촉은 discrete solver만으로 관통을 막지 못할 수 있어 Box2D처럼 중심의 작은 원으로 재검사함.
+        if( output.fraction == 0.0f )
+        {
+            const polygon2* polygon = std::get_if<polygon2>( &fastShape.geometry );
+            const vec2 firstPoint = input.proxyB.points[0];
+            const vec2 centroid = polygon != nullptr ? polygon->centroid : firstPoint + 0.5f * ( input.proxyB.points[input.proxyB.count - 1] - firstPoint );
+            const float radius = 0.25f * ComputeShapeExtent( fastShape.geometry, centroid ).minExtent;
+            input.proxyB = MakeShapeProxy( circle2{ centroid, radius } );
+            output = TimeOfImpact( input );
+        }
+
         if( output.state == toiState2::Hit && output.fraction > 0.0f && output.fraction < hitFraction )
         {
             hitFraction = output.fraction;

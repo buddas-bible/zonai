@@ -141,6 +141,38 @@ void checkStaticCcd()
     }
 }
 
+void checkInitialToiFallback()
+{
+    for( const int substeps : { 1, 4, 8 } )
+        for( const vec2 offset : { vec2{}, vec2{ 2.0f, 1.0f } } )
+        {
+            world simulation{};
+            simulation.SetGravity( {} );
+            const bodyId wall = simulation.CreateBody();
+            const shapeId wallShape = simulation.CreateShape( wall, MakeBox( { 0.05f, 20.0f } ) );
+            simulation.SetShapeFriction( wallShape, 0.0f );
+
+            bodyDef definition{};
+            definition.type = bodyType::Dynamic;
+            definition.transform.rotation = rot2::FromRadians( 0.56f );
+            definition.transform.position = vec2{ -0.75f, 0.0f } - Rotate( definition.transform.rotation, offset );
+            definition.linearVelocity = { 80.0f, 1.5f };
+            definition.angularVelocity = 1.25f;
+            definition.enableSleep = false;
+            const bodyId fast = simulation.CreateBody( definition );
+            polygon2 box = MakeBox( { 0.8f, 0.04f } );
+            for( int i = 0; i < box.vertexCount; ++i ) box.vertices[i] += offset;
+            box.centroid += offset;
+            const shapeId boxShape = simulation.CreateShape( fast, box );
+            simulation.SetShapeFriction( boxShape, 0.0f );
+
+            simulation.Step( 0.1f, substeps );
+            check( simulation.IsBodyFast( fast ) && simulation.HadBodyTimeOfImpact( fast ), "initial TOI fallback missed thin rotating box" );
+            const vec2 center = TransformPoint( simulation.GetBodyTransform( fast ), box.centroid );
+            check( center.x < -0.05f, "initial TOI fallback let box center cross wall" );
+        }
+}
+
 void checkChainCcdSidedness()
 {
     // point1 -> point2의 오른쪽(아래쪽)만 충돌하는 chain.
@@ -260,6 +292,7 @@ int main()
     checkStaticBoundary();
     checkSubsteps();
     checkStaticCcd();
+    checkInitialToiFallback();
     checkChainCcdSidedness();
     checkMovingTarget();
     checkSensorToiBoundary();

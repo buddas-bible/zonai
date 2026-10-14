@@ -187,6 +187,37 @@ void checkImpulsePersistence()
     check( recreated.shapeA == ground || recreated.shapeB == ground, "cache pair fixture" );
 }
 
+void checkZeroFrictionRefresh()
+{
+    for( float recycleDistance : { 0.0f, CONTACT_RECYCLE_DISTANCE } )
+    {
+        world simulation{};
+        simulation.SetGravity( {} );
+        simulation.SetContactRecycleDistance( recycleDistance );
+        const bodyId fixed = simulation.CreateBody();
+        const shapeId ground = simulation.CreateShape( fixed, MakeBox( { 2.0f, 0.5f } ) );
+        const bodyId moving = simulation.CreateBody( bodyType::Dynamic, { { 0.0f, 1.49f }, {} } );
+        ( void )simulation.CreateShape( moving, circle2{ {}, 1.0f } );
+        simulation.SetBodyLinearVelocity( moving, { 0.5f, -2.0f } );
+        simulation.Step( 0.001f );
+        const contactData initial = getContact( simulation, moving );
+        check( std::fabs( initial.manifold.points[0].tangentImpulse ) > 0.0f, "cached friction fixture" );
+
+        simulation.SetShapeFriction( ground, 0.0f );
+        simulation.SetBodyLinearVelocity( moving, { 4.0f, 0.0f } );
+        simulation.SetBodyAngularVelocity( moving, 0.0f );
+        for( int step = 0; step < 3; ++step )
+        {
+            simulation.Step( 0.001f );
+            const contactData current = getContact( simulation, moving );
+            check( current.id == initial.id, "friction refresh recreated contact" );
+            check( std::fabs( current.manifold.points[0].tangentImpulse ) < 1e-6f, "zero friction retained cached impulse" );
+            check( std::fabs( simulation.GetBodyLinearVelocity( moving ).x - 4.0f ) < 1e-4f, "zero friction changed horizontal speed" );
+            check( std::fabs( simulation.GetBodyAngularVelocity( moving ) ) < 1e-4f, "zero friction changed angular speed" );
+        }
+    }
+}
+
 void checkFeatureReset()
 {
     world simulation{};
@@ -249,6 +280,7 @@ int main()
     checkCreationSettings();
     checkFastExclusion();
     checkImpulsePersistence();
+    checkZeroFrictionRefresh();
     checkFeatureReset();
     checkMassRefresh();
 }

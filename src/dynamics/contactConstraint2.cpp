@@ -334,7 +334,8 @@ void SolveContactConstraint(
     *
     *     |lambdaT| <= mu * lambdaN
     */
-    if( !useBias && constraint.friction > 0.0f )
+    // 마찰이 0이어도 warm start로 적용한 이전 tangent impulse를 취소해야 함.
+    if( !useBias )
     {
         const vec2 tangent{ constraint.normal.y, -constraint.normal.x };
 
