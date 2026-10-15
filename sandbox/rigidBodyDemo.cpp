@@ -83,13 +83,31 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 
 void rigidBodyDemo::step( float timeStep, int subStepCount )
 {
+    if( kind_ == demoKind::motorJointPlayground && motorTargetTracking_ && timeStep > 0.0f && world_.IsValid( motorJoint_ ) )
+    {
+        motorTargetTime_ += timeStep;
+        const auto joint = world_.getMotorJointData( motorJoint_ );
+        const auto current = world_.GetBodyTransform( joint.bodyA );
+        const vec2 next{ -2.0f + 1.5f * std::sin( 0.8f * motorTargetTime_ ), 0.75f * std::sin( 1.2f * motorTargetTime_ ) };
+        const float nextAngle = 0.6f * std::sin( 0.7f * motorTargetTime_ );
+        // Box2D의 목표 transform 갱신처럼, 다음 위치까지 필요한 속도로 kinematic 목표를 이동함.
+        world_.SetBodyLinearVelocity( joint.bodyA, ( next - current.position ) / timeStep );
+        world_.SetBodyAngularVelocity( joint.bodyA, ( nextAngle - std::atan2( current.rotation.s, current.rotation.c ) ) / timeStep );
+    }
+    if( kind_ == demoKind::pogoJointPlayground && timeStep > 0.0f && world_.IsValid( impulseBody_ ) )
+    {
+        updatePogoSupport();
+        const float direction = static_cast<float>( rightHeld_ ) - static_cast<float>( leftHeld_ );
+        if( world_.IsValid( moverJoint_ ) ) world_.setMoverJointLinearVelocity( moverJoint_, { direction * 3.0f, 0.0f } );
+    }
     const bodyId target = kind_ == demoKind::distancePendulum ? pendulumBody_ : impulseBody_;
     const float direction = static_cast<float>( rightHeld_ ) - static_cast<float>( leftHeld_ );
 
     // 누르고 있는 이동 입력은 매 physics step에 힘으로 적용함. 입력을 취소해도 현재 물리 속도는 유지함.
-    if( kind_ != demoKind::motorCar && direction != 0.0f && world_.IsValid( target ) )
+    if( kind_ != demoKind::motorCar && kind_ != demoKind::pogoJointPlayground && direction != 0.0f && world_.IsValid( target ) )
     {
-        world_.ApplyForceToCenter( target, { direction * world_.GetBodyMass( target ) * 5.0f, 0.0f } );
+        const vec2 axis = kind_ == demoKind::prismaticRail && world_.IsValid( prismaticJoint_ ) ? world_.getPrismaticJointData( prismaticJoint_ ).axis : vec2{ 1.0f, 0.0f };
+        world_.ApplyForceToCenter( target, direction * world_.GetBodyMass( target ) * 5.0f * axis );
     }
 
     world_.Step( timeStep, subStepCount );
@@ -110,7 +128,7 @@ void rigidBodyDemo::handleInput( const demoInput& input )
     updateCarMotors();
     if( !world_.IsValid( mouseJoint_ ) )
     {
-        mouseJoint_ = {};
+        stopMouseDrag();
     }
 
     if( !input.mouseHeld )
@@ -132,11 +150,7 @@ void rigidBodyDemo::handleInput( const demoInput& input )
     // Terrain point를 잡은 동안에는 같은 왼쪽 입력으로 Mouse Joint를 만들지 않음.
     if( !input.mouseHeld )
     {
-        if( world_.IsValid( mouseJoint_ ) )
-        {
-            world_.destroyJoint( mouseJoint_ );
-            mouseJoint_ = {};
-        }
+        stopMouseDrag();
     }
     else if( !terrainPointDragIndex_.has_value() )
     {
@@ -153,9 +167,11 @@ void rigidBodyDemo::handleInput( const demoInput& input )
     const float mass = world_.IsValid( target ) ? world_.GetBodyMass( target ) : 0.0f;
 
     // 한 번 누른 입력은 임펄스로 적용함. 누르고 있는 입력의 힘과 구분함.
-    if( kind_ != demoKind::motorCar && input.jumpPressed && world_.IsValid( target ) )
+    if( kind_ != demoKind::motorCar && input.jumpPressed && world_.IsValid( target ) &&
+        ( kind_ != demoKind::pogoJointPlayground || ( world_.IsValid( pogoJoint_ ) && !pogoJumping_ ) ) )
     {
         world_.ApplyLinearImpulseToCenter( target, kind_ == demoKind::distancePendulum ? vec2{ mass * 2.0f, 0.0f } : vec2{ 0.0f, mass * 5.0f } );
+        if( kind_ == demoKind::pogoJointPlayground ) pogoJumping_ = true;
     }
     if( kind_ != demoKind::motorCar && input.spinPressed && world_.IsValid( torqueBody_ ) )
     {
@@ -175,12 +191,7 @@ void rigidBodyDemo::cancelInput()
     brakeHeld_ = false;
     terrainPointDragIndex_.reset();
     updateCarMotors();
-    // UI 조작, 포커스 상실, 데모 교체에서 마우스 제약을 제거함. 물체 삭제로 이미 사라졌을 수도 있음.
-    if( world_.IsValid( mouseJoint_ ) )
-    {
-        world_.destroyJoint( mouseJoint_ );
-    }
-    mouseJoint_ = {};
+    stopMouseDrag();
 }
 
 #pragma endregion Input
@@ -645,17 +656,6 @@ bool rigidBodyDemo::canMoveTerrainPoint( std::size_t pointIndex, vec2 point ) co
 
 void rigidBodyDemo::startMouseDrag( vec2 point )
 {
-    bodyId ground{};
-    for( const auto& visual : shapes_ )
-    {
-        if( world_.IsValid( visual.bodyHandle ) && world_.GetBody( visual.bodyHandle ).type == bodyType::Static )
-        {
-            ground = visual.bodyHandle;
-            break;
-        }
-    }
-    if( !world_.IsValid( ground ) ) return;
-
     // ponytail: 작은 데모의 shape 목록을 O(n)으로 pick함. 많은 물체의 데모가 필요하면 World overlap query로 후보를 줄임.
     // 역순으로 검사해 같은 위치에서는 나중에 그린 동적 도형을 우선함. 센서는 잡지 않음.
     for( auto visual = shapes_.rbegin(); visual != shapes_.rend(); ++visual )
@@ -668,12 +668,21 @@ void rigidBodyDemo::startMouseDrag( vec2 point )
 
         // 클릭한 월드 위치를 목표점으로 지정하면 World가 로컬 작용점을 저장함.
         auto definition = mouseSettings_;
-        definition.bodyA = ground;
+        mouseReference_ = world_.CreateBody();
+        definition.bodyA = mouseReference_;
         definition.bodyB = visual->bodyHandle;
         definition.target = point;
         mouseJoint_ = world_.createMouseJoint( definition );
         break;
     }
+}
+
+void rigidBodyDemo::stopMouseDrag()
+{
+    // 참조 물체 삭제가 연결된 Mouse Joint도 함께 제거함. 잡힌 물체가 먼저 삭제돼도 안전함.
+    if( world_.IsValid( mouseReference_ ) ) world_.DestroyBody( mouseReference_ );
+    mouseReference_ = {};
+    mouseJoint_ = {};
 }
 
 #pragma endregion MouseDrag

@@ -51,6 +51,47 @@ int main()
     input.mouseHeld = false;
     mouse.handleInput( input );
     check( mouse.getWorld().getJointCount() == 0, "mouse release destroys transient joint" );
+    check( mouse.getWorld().GetBodyCount() == 4, "mouse release removes its temporary reference body" );
+    rigidBodyDemo freeWeld{ demoKind::weldPair };
+    demoInput emptyPick{};
+    emptyPick.mousePressed = emptyPick.mouseHeld = true;
+    emptyPick.mousePosition = { 100.0f, 100.0f };
+    freeWeld.handleInput( emptyPick );
+    check( freeWeld.getWorld().GetBodyCount() == 2, "empty pick must not allocate a mouse reference body" );
+    for( int trial = 0; trial < 3; ++trial )
+    {
+        demoInput drag{};
+        drag.mousePressed = drag.mouseHeld = true;
+        drag.mousePosition = freeWeld.getWorld().GetBodyTransform( freeWeld.getImpulseBody() ).position;
+        freeWeld.handleInput( drag );
+        check( freeWeld.getWorld().IsValid( freeWeld.getMouseJoint() ) && freeWeld.getWorld().GetBodyCount() == 3, "drag must work without scene static bodies" );
+        freeWeld.cancelInput();
+        check( freeWeld.getWorld().GetBodyCount() == 2 && freeWeld.getWorld().getJointCount() == 1, "cancel must remove only transient mouse objects" );
+    }
+    for( int index : { 1, 2, 3 } )
+    {
+        rigidBodyDemo lifting{ demoKind::mouseJointPlayground };
+        lifting.setMouseSettings( 5.0f, 0.7f, 10.0f );
+        const auto body = lifting.getShapes()[index].bodyHandle;
+        const auto start = lifting.getWorld().GetBodyTransform( body ).position;
+        demoInput drag{};
+        drag.mousePressed = drag.mouseHeld = true;
+        drag.mousePosition = start;
+        lifting.handleInput( drag );
+        drag.mousePressed = false;
+        drag.mousePosition = start + vec2{ 0.0f, 2.0f };
+        lifting.handleInput( drag );
+        for( int frame = 0; frame < 60; ++frame )
+        {
+            lifting.step( 1.0f / 60.0f, 4 );
+            check( Length( lifting.getWorld().getMouseJointData( lifting.getMouseJoint() ).force ) <= 10.01f, "lifting force must respect the 10N budget" );
+        }
+        const float height = lifting.getWorld().GetBodyTransform( body ).position.y;
+        check( index == 1 ? height > start.y + 1.0f : height < start.y, "10N must lift the light body but fail against heavier bodies' weight" );
+        lifting.getWorld().DestroyBody( body );
+        lifting.handleInput( drag );
+        check( !lifting.getWorld().IsValid( lifting.getMouseJoint() ) && lifting.getWorld().GetBodyCount() == 3, "deleting dragged body must also clean up the reference body" );
+    }
 
     rigidBodyDemo distance{ demoKind::distancePendulum };
     distance.applyDistancePreset( distanceDemoPreset::spring );
@@ -61,10 +102,26 @@ int main()
     check( distanceData.enableSpring && distanceData.hertz == 0.0f && distanceData.enableLimit && !distanceData.enableMotor, "distance limit preset" );
     distance.applyDistancePreset( distanceDemoPreset::motor );
     distanceData = distance.getWorld().getDistanceJointData( distance.getPendulumJoint() );
-    check( distanceData.enableSpring && distanceData.hertz == 0.0f && !distanceData.enableLimit && distanceData.enableMotor, "distance motor preset" );
+    check( distanceData.enableSpring && distanceData.hertz == 0.0f && distanceData.enableLimit && distanceData.enableMotor, "distance motor preset stays bounded" );
+    for( int frame = 0; frame < 600; ++frame ) distance.step( 1.0f / 60.0f, 4 );
+    distanceData = distance.getWorld().getDistanceJointData( distance.getPendulumJoint() );
+    check( std::abs( distanceData.currentLength - distanceData.maxLength ) < 0.02f, "extension stops at upper limit" );
+    distance.getWorld().setDistanceJointMotor( distance.getPendulumJoint(), true, -1.0f, 10.0f );
+    for( int frame = 0; frame < 180; ++frame ) distance.step( 1.0f / 60.0f, 4 );
+    distanceData = distance.getWorld().getDistanceJointData( distance.getPendulumJoint() );
+    check( std::abs( distanceData.currentLength - distanceData.minLength ) < 0.02f, "winding stops at lower limit" );
+    distance.getWorld().setDistanceJointMotor( distance.getPendulumJoint(), true, 1.0f, 10.0f );
+    for( int frame = 0; frame < 20; ++frame ) distance.step( 1.0f / 60.0f, 4 );
+    const float brakeLength = distance.getWorld().getDistanceJointData( distance.getPendulumJoint() ).currentLength;
+    distance.getWorld().setDistanceJointMotor( distance.getPendulumJoint(), true, 0.0f, 10.0f );
+    for( int frame = 0; frame < 120; ++frame ) distance.step( 1.0f / 60.0f, 4 );
+    check( std::abs( distance.getWorld().getDistanceJointData( distance.getPendulumJoint() ).currentLength - brakeLength ) < 0.02f, "brake holds length between the limits" );
     distance.applyDistancePreset( distanceDemoPreset::rigid );
     distanceData = distance.getWorld().getDistanceJointData( distance.getPendulumJoint() );
     check( !distanceData.enableSpring && !distanceData.enableLimit && !distanceData.enableMotor, "distance rigid preset" );
+    distance.getWorld().setDistanceJointLength( distance.getPendulumJoint(), 1.0f );
+    for( int frame = 0; frame < 120; ++frame ) distance.step( 1.0f / 60.0f, 4 );
+    check( std::abs( distance.getWorld().getDistanceJointData( distance.getPendulumJoint() ).currentLength - 1.0f ) < 0.01f, "changing target length wakes and moves the pendulum" );
 
     rigidBodyDemo revolute{ demoKind::revoluteHinge };
     revolute.applyRevolutePreset( revoluteDemoPreset::limit );
@@ -81,6 +138,24 @@ int main()
     check( !revoluteData.enableLimit && !revoluteData.enableMotor, "revolute free preset" );
 
     rigidBodyDemo wheel{ demoKind::wheelSuspension };
+    for( const int substeps : { 1, 4, 8 } )
+    {
+        rigidBodyDemo hinge{ demoKind::revoluteHinge };
+        hinge.testRevoluteLimit();
+        bool hitLimit = false;
+        bool returnedInside = false;
+        for( int frame = 0; frame < 240; ++frame )
+        {
+            hinge.step( 1.0f / 60.0f, substeps );
+            const auto joint = hinge.getWorld().getRevoluteJointData( hinge.getRevoluteJoint() );
+            hitLimit |= joint.currentAngle >= joint.upperAngle - 0.02f;
+            returnedInside |= hitLimit && joint.currentAngle < joint.upperAngle - 0.1f;
+            check( joint.enableLimit && !joint.enableMotor && joint.currentAngle <= joint.upperAngle + 0.03f && joint.currentAngle >= joint.lowerAngle - 0.03f, "limit trial must stay inside the angular bounds" );
+            check( Length( joint.anchorB - joint.anchorA ) < 0.02f, "limit trial must preserve the hinge pivot" );
+        }
+        check( hitLimit, "limit trial must reach the boundary" );
+        check( returnedInside, "limit trial must allow motion back inside" );
+    }
     wheel.applyWheelPreset( wheelDemoPreset::limit );
     auto wheelData = wheel.getWorld().getWheelJointData( wheel.getWheelJoint() );
     check( !wheelData.enableSpring && wheelData.enableLimit && !wheelData.enableMotor, "wheel limit preset" );
@@ -95,6 +170,25 @@ int main()
     check( wheelData.enableSpring && !wheelData.enableLimit && !wheelData.enableMotor, "wheel spring preset" );
 
     rigidBodyDemo weld{ demoKind::weldPair };
+    for( const int substeps : { 1, 4, 8 } )
+        for( const bool upper : { false, true } )
+        {
+            rigidBodyDemo suspension{ demoKind::wheelSuspension };
+            suspension.testWheelLimit( upper );
+            bool reached = false;
+            for( int frame = 0; frame < 240; ++frame )
+            {
+                suspension.step( 1.0f / 60.0f, substeps );
+                const auto joint = suspension.getWorld().getWheelJointData( suspension.getWheelJoint() );
+                reached |= upper ? joint.currentTranslation >= joint.upperTranslation - 0.02f : joint.currentTranslation <= joint.lowerTranslation + 0.02f;
+                check( joint.currentTranslation <= joint.upperTranslation + 0.03f && joint.currentTranslation >= joint.lowerTranslation - 0.03f, "wheel trial must remain inside travel limits" );
+                check( std::abs( joint.lateralError ) < 0.01f, "wheel trial must preserve the suspension axis" );
+            }
+            const auto joint = suspension.getWorld().getWheelJointData( suspension.getWheelJoint() );
+            check( reached, "wheel trial must reach the selected boundary" );
+            check( std::abs( joint.currentTranslation ) < 0.1f, "wheel trial must return toward spring equilibrium" );
+            check( std::abs( suspension.getWorld().GetBodyAngularVelocity( joint.bodyB ) - 3.0f ) < 0.01f, "wheel rotation must continue independently of travel limits" );
+        }
     check( weld.getWorld().GetBodyCount() == 2 && weld.getWorld().getJointCount() == 1 && weld.getShapes().size() == 2, "Weld scene has two connected dynamic bodies" );
     const jointId weldId = weld.getWeldJoint();
     check( weld.getWorld().IsValid( weldId ), "Weld scene owns a valid joint" );
@@ -115,6 +209,40 @@ int main()
     check( Length( finalLocalDelta - initialLocalDelta ) < 0.05f, "Weld demo keeps the body origins fixed in A local frame" );
 
     rigidBodyDemo prismatic{ demoKind::prismaticRail };
+    for( const int substeps : { 1, 4, 8 } )
+        for( const auto preset : { weldDemoPreset::rigid, weldDemoPreset::softLinear, weldDemoPreset::softAngular, weldDemoPreset::softBoth } )
+        {
+            rigidBodyDemo beam{ demoKind::weldPair };
+            beam.applyWeldPreset( preset );
+            beam.setWeldCantilever( true );
+            for( int frame = 0; frame < 600; ++frame ) beam.step( 1.0f / 60.0f, substeps );
+            auto data = beam.getWorld().getWeldJointData( beam.getWeldJoint() );
+            const bool linear = preset == weldDemoPreset::softLinear || preset == weldDemoPreset::softBoth;
+            const bool angular = preset == weldDemoPreset::softAngular || preset == weldDemoPreset::softBoth;
+            check( beam.getWorld().GetBody( data.bodyA ).type == bodyType::Static && beam.getWorld().GetBodyCount() == 2, "cantilever must have one fixed support without accumulating bodies" );
+            check( IsFinite( data.anchorB ) && Length( data.anchorB - data.anchorA ) < 0.2f && std::abs( data.currentAngle ) < 0.5f, "cantilever must remain supported under gravity" );
+            check( linear ? Length( data.anchorB - data.anchorA ) > 0.01f : Length( data.anchorB - data.anchorA ) < 0.01f, "linear softness must control sustained anchor deflection" );
+            check( angular ? std::abs( data.currentAngle ) > 0.01f : std::abs( data.currentAngle ) < 0.01f, "angular softness must control sustained bending" );
+            beam.resetWeldPair();
+            data = beam.getWorld().getWeldJointData( beam.getWeldJoint() );
+            check( Length( data.anchorB - data.anchorA ) < 0.001f && std::abs( data.currentAngle ) < 0.001f, "reset must restore reference pose" );
+            check( data.linearHertz == ( linear ? 3.0f : 0.0f ) && data.angularHertz == ( angular ? 3.0f : 0.0f ), "reset must preserve softness settings" );
+            demoInput drag{};
+            drag.mousePressed = drag.mouseHeld = true;
+            drag.mousePosition = beam.getWorld().GetBodyTransform( data.bodyB ).position;
+            beam.handleInput( drag );
+            check( beam.getWorld().IsValid( beam.getMouseJoint() ), "anchored Weld must allow dragging the loaded body" );
+            beam.resetWeldPair();
+            check( !beam.getWorld().IsValid( beam.getMouseJoint() ) && beam.getWorld().getJointCount() == 1, "reset must cancel dragging before rebuilding bodies" );
+            beam.setWeldCantilever( false );
+            data = beam.getWorld().getWeldJointData( beam.getWeldJoint() );
+            check( beam.getWorld().GetBody( data.bodyA ).type == bodyType::Dynamic && beam.getWorld().getJointCount() == 1 && beam.getShapes().size() == 2, "free pair must restore its original scene without leaking joints or shapes" );
+            beam.getWorld().ApplyLinearImpulseToCenter( data.bodyB, { 0.0f, 3.0f } );
+            for( int frame = 0; frame < 30; ++frame ) beam.step( 1.0f / 60.0f, substeps );
+            beam.resetWeldPair();
+            data = beam.getWorld().getWeldJointData( beam.getWeldJoint() );
+            check( Length( beam.getWorld().GetBodyTransform( data.bodyB ).position - vec2{ 0.7f, 0.0f } ) < 0.001f && Length( beam.getWorld().GetBodyLinearVelocity( data.bodyB ) ) == 0.0f, "free pair reset must restore position and stop drift" );
+        }
     check( prismatic.getWorld().GetBodyCount() == 2 && prismatic.getWorld().getJointCount() == 1 && prismatic.getShapes().size() == 2, "Prismatic scene has rail reference and one slider" );
     const jointId prismaticId = prismatic.getPrismaticJoint();
     check( prismatic.getWorld().IsValid( prismaticId ), "Prismatic scene owns a valid rail joint" );
@@ -191,6 +319,34 @@ int main()
     check( std::abs( prismaticData.lateralError ) < 0.01f && std::abs( prismaticData.currentAngle ) < 0.01f, "Prismatic demo blocks lateral translation and relative rotation" );
 
     rigidBodyDemo ragdoll{ demoKind::ragdoll };
+    for( const int substeps : { 1, 4, 8 } )
+    {
+        rigidBodyDemo incline{ demoKind::prismaticRail };
+        incline.setPrismaticIncline( true );
+        incline.setPrismaticMotorSettings( true, 2.0f, 1.0f );
+        for( int frame = 0; frame < 60; ++frame ) incline.step( 1.0f / 60.0f, substeps );
+        auto data = incline.getWorld().getPrismaticJointData( incline.getPrismaticJoint() );
+        check( data.currentTranslation < -1.8f && data.currentTranslation >= -2.03f, "weak motor must lose to downhill load and stop at the limit" );
+        incline.resetPrismaticSlider();
+        data = incline.getWorld().getPrismaticJointData( incline.getPrismaticJoint() );
+        check( std::abs( data.currentTranslation + 1.5f ) < 0.001f && data.maxMotorForce == 1.0f, "reset must restore position without changing settings" );
+        incline.setPrismaticMotorSettings( true, 2.0f, 20.0f );
+        for( int frame = 0; frame < 30; ++frame ) incline.step( 1.0f / 60.0f, substeps );
+        data = incline.getWorld().getPrismaticJointData( incline.getPrismaticJoint() );
+        check( data.currentTranslation > -0.8f && std::abs( data.lateralError ) < 0.01f && std::abs( data.currentAngle ) < 0.01f, "strong motor must climb while staying on the inclined rail" );
+        incline.setPrismaticMotorSettings( true, 0.0f, 20.0f );
+        for( int frame = 0; frame < 30; ++frame ) incline.step( 1.0f / 60.0f, substeps );
+        const float held = incline.getWorld().getPrismaticJointData( incline.getPrismaticJoint() ).currentTranslation;
+        for( int frame = 0; frame < 120; ++frame ) incline.step( 1.0f / 60.0f, substeps );
+        check( std::abs( incline.getWorld().getPrismaticJointData( incline.getPrismaticJoint() ).currentTranslation - held ) < 0.01f, "brake must hold against gravity away from the limits" );
+        incline.applyPrismaticPreset( prismaticDemoPreset::spring );
+        for( int frame = 0; frame < 240; ++frame ) incline.step( 1.0f / 60.0f, substeps );
+        data = incline.getWorld().getPrismaticJointData( incline.getPrismaticJoint() );
+        check( data.currentTranslation > 0.8f && data.currentTranslation < 1.0f, "spring must support gravity with a small displacement below its target" );
+        incline.setPrismaticIncline( false );
+        data = incline.getWorld().getPrismaticJointData( incline.getPrismaticJoint() );
+        check( std::abs( data.axis.y ) < 0.001f && data.enableLimit && data.enableMotor, "horizontal scene must restore bounded default drive" );
+    }
     check( ragdoll.getWorld().GetBodyCount() == 12 && ragdoll.getWorld().getJointCount() == 10 && ragdoll.getShapes().size() == 12, "Ragdoll scene has ground plus eleven body parts and ten joints" );
     check( ragdoll.getRagdollBodies().size() == 11 && ragdoll.getRagdollJoints().size() == 10, "Ragdoll exposes its body and joint assembly" );
     for( const bodyId body : ragdoll.getRagdollBodies() )

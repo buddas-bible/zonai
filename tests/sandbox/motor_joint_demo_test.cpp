@@ -86,6 +86,51 @@ int main()
     const bodyId driven = data.bodyB;
     motor.step( 1.0f / 60.0f, 1 );
     check( motor.getWorld().GetBodyLinearVelocity( driven ).x > 0.0f, "Motor demo visibly drives the target body" );
+    for( int frame = 0; frame < 600; ++frame ) motor.step( 1.0f / 60.0f, 4 );
+    motor.resetMotorJointDemo();
+    data = motor.getWorld().getMotorJointData( motor.getMotorJoint() );
+    check( LengthSquared( motor.getWorld().GetBodyTransform( driven ).position ) == 0.0f && LengthSquared( motor.getWorld().GetBodyLinearVelocity( driven ) ) == 0.0f, "reset must recover a velocity-driven body from offscreen" );
+    check( data.linearVelocity.x == 2.0f && data.maxVelocityForce == 20.0f, "velocity-scene reset must preserve actuator settings" );
 
+    for( const int substeps : { 1, 4, 8 } )
+    {
+        rigidBodyDemo follower{ demoKind::motorJointPlayground };
+        follower.setMotorTargetTracking( true );
+        const auto initial = follower.getWorld().getMotorJointData( follower.getMotorJoint() );
+        for( int frame = 0; frame < 600; ++frame )
+        {
+            follower.step( 1.0f / 60.0f, substeps );
+            const auto joint = follower.getWorld().getMotorJointData( follower.getMotorJoint() );
+            check( Length( joint.force ) <= joint.maxSpringForce + 0.01f && std::abs( joint.torque ) <= joint.maxSpringTorque + 0.01f, "tracking must respect spring force and torque budgets" );
+            if( frame > 120 )
+            {
+                check( Length( joint.anchorB - joint.anchorA ) < 0.2f, "moving-target spring must follow the bounded target" );
+                const auto a = follower.getWorld().GetBodyTransform( joint.bodyA ).rotation;
+                const auto b = follower.getWorld().GetBodyTransform( joint.bodyB ).rotation;
+                const auto error = Inverse( a * rot2::FromRadians( joint.referenceAngle ) ) * b;
+                check( std::abs( std::atan2( error.s, error.c ) ) < 0.1f, "angular spring must follow the rotating target" );
+            }
+        }
+        auto joint = follower.getWorld().getMotorJointData( follower.getMotorJoint() );
+        check( Length( joint.anchorA - initial.anchorA ) > 0.5f, "target must actually move" );
+        follower.setMotorJointLinearSpringSettings( 3.0f, 0.7f, 0.1f );
+        follower.setMotorJointAngularSpringSettings( 0.75f, 3.0f, 0.7f, 0.01f );
+        for( int frame = 0; frame < 120; ++frame )
+        {
+            follower.step( 1.0f / 60.0f, substeps );
+            joint = follower.getWorld().getMotorJointData( follower.getMotorJoint() );
+            check( Length( joint.force ) <= 0.101f && std::abs( joint.torque ) <= 0.011f, "weak tracking must respect reduced force and torque limits" );
+        }
+        check( Length( joint.anchorB - joint.anchorA ) > 0.3f, "insufficient force must visibly lag behind the target" );
+        follower.resetMotorJointDemo();
+        joint = follower.getWorld().getMotorJointData( follower.getMotorJoint() );
+        check( near( joint.anchorA.x, -2.0f ) && near( joint.anchorB.x, 0.0f ) && joint.linearHertz == initial.linearHertz && joint.referenceAngle == initial.referenceAngle, "reset must restore scene and preserve tuning" );
+        check( near( joint.maxSpringForce, 0.1f ) && near( joint.maxSpringTorque, 0.01f ), "reset must preserve edited force limits" );
+        check( LengthSquared( follower.getWorld().GetBodyLinearVelocity( joint.bodyB ) ) == 0.0f && follower.getWorld().GetBodyAngularVelocity( joint.bodyB ) == 0.0f, "reset must stop driven body" );
+        follower.setMotorTargetTracking( false );
+        for( int frame = 0; frame < 60; ++frame ) follower.step( 1.0f / 60.0f, substeps );
+        joint = follower.getWorld().getMotorJointData( follower.getMotorJoint() );
+        check( near( joint.anchorA.x, -2.0f ) && near( joint.anchorA.y, 0.0f ), "stationary target must stop moving" );
+    }
     return EXIT_SUCCESS;
 }

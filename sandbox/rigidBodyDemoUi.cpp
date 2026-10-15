@@ -271,6 +271,7 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         draw.DrawSegment( { joint.anchorA, joint.anchorB }, JOINT_COLOR );
         draw.DrawPoint( joint.anchorA, JOINT_COLOR );
         draw.DrawPoint( joint.anchorB, JOINT_COLOR );
+        draw.DrawCircle( { joint.anchorA, joint.length }, IM_COL32( 230, 170, 255, 100 ), 0 );
         if( joint.enableSpring && joint.enableLimit && joint.minLength < joint.maxLength )
         {
             const vec2 axis = Normalize( joint.anchorB - joint.anchorA );
@@ -637,6 +638,12 @@ void rigidBodyDemoUi::drawExperimentControls()
     {
         ImGui::TextUnformatted( "거리 조인트" );
         distanceJointData pendulum = getWorld().getDistanceJointData( getPendulumJoint() );
+        float length = pendulum.length;
+        if( ImGui::SliderFloat( "목표 길이###DistanceLength", &length, 0.5f, 3.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp ) )
+        {
+            getWorld().setDistanceJointLength( getPendulumJoint(), length );
+            pendulum = getWorld().getDistanceJointData( getPendulumJoint() );
+        }
         bool enableSpring = pendulum.enableSpring;
         float hertz = pendulum.hertz, dampingRatio = pendulum.dampingRatio;
         bool changed = ImGui::Checkbox( "거리 스프링###Distance spring", &enableSpring );
@@ -664,6 +671,11 @@ void rigidBodyDemoUi::drawExperimentControls()
             float motorSpeed = pendulum.motorSpeed;
             float maxMotorForce = pendulum.maxMotorForce;
             bool motorChanged = ImGui::Checkbox( "모터 사용###Distance motor", &enableMotor );
+            if( ImGui::Button( "늘리기###DistanceExtend" ) ) { motorSpeed = 1.0f; enableMotor = true; motorChanged = true; }
+            ImGui::SameLine();
+            if( ImGui::Button( "감기###DistanceRetract" ) ) { motorSpeed = -1.0f; enableMotor = true; motorChanged = true; }
+            ImGui::SameLine();
+            if( ImGui::Button( "제동###DistanceBrake" ) ) { motorSpeed = 0.0f; enableMotor = true; motorChanged = true; }
             motorChanged |= ImGui::SliderFloat( "목표 축속도###Distance motor speed", &motorSpeed, -5.0f, 5.0f, "%.2f m/s", ImGuiSliderFlags_AlwaysClamp );
             motorChanged |= ImGui::SliderFloat( "최대 모터 힘###Distance motor force", &maxMotorForce, 0.0f, 50.0f, "%.1f N", ImGuiSliderFlags_AlwaysClamp );
             if( motorChanged )
@@ -692,7 +704,8 @@ void rigidBodyDemoUi::drawExperimentControls()
         {
             getWorld().ApplyLinearImpulseToCenter( getPendulumBody(), { getWorld().GetBodyMass( getPendulumBody() ) * 2.0f, 0.0f } );
         }
-        if( ImGui::Button( "진자 축 방향으로 밀기###Radial kick", ImVec2( -1.0f, 0.0f ) ) )
+        ImGui::TextWrapped( "보라색 원은 목표 길이입니다. 스프링 프리셋을 선택하고 아래 버튼으로 늘려 놓아 탄성과 감쇠를 비교하세요." );
+        if( ImGui::Button( "스프링 늘였다 놓기 (축 방향 충격)###Radial kick", ImVec2( -1.0f, 0.0f ) ) )
         {
             const vec2 axis = Normalize( pendulum.anchorB - pendulum.anchorA );
             getWorld().ApplyLinearImpulseToCenter( getPendulumBody(), getWorld().GetBodyMass( getPendulumBody() ) * 2.0f * axis );
@@ -782,6 +795,11 @@ void rigidBodyDemoUi::drawExperimentControls()
         {
             getWorld().ApplyAngularImpulse( getImpulseBody(), getWorld().GetBodyRotationalInertia( getImpulseBody() ) * 3.0f );
         }
+        if( ImGui::Button( "각도 제한 시험 (±45도)###Test hinge limit", ImVec2( -1.0f, 0.0f ) ) )
+        {
+            testRevoluteLimit();
+        }
+        ImGui::TextWrapped( "제한 시험은 모터를 끄고 ±45도 제한을 적용한 뒤 막대를 강하게 밉니다. 경계에서 멈춘 뒤 안쪽으로 돌아오는지 관찰하세요." );
         if( ImGui::Button( "막대 옆으로 밀기###Kick hinge", ImVec2( -1.0f, 0.0f ) ) )
         {
             getWorld().ApplyLinearImpulseToCenter( getImpulseBody(), { getWorld().GetBodyMass( getImpulseBody() ) * 2.0f, 0.0f } );
@@ -890,6 +908,10 @@ void rigidBodyDemoUi::drawExperimentControls()
         {
             getWorld().ApplyLinearImpulseToCenter( getImpulseBody(), getWorld().GetBodyMass( getImpulseBody() ) * 2.0f * joint.axis );
         }
+        if( ImGui::Button( "상한 시험###WheelUpperTrial" ) ) testWheelLimit( true );
+        ImGui::SameLine();
+        if( ImGui::Button( "하한 시험###WheelLowerTrial" ) ) testWheelLimit( false );
+        ImGui::TextWrapped( "시험은 결합 프리셋(스프링·±0.5m 제한·모터)을 적용하고 선택한 경계로 강하게 밉니다. 경계에서 멈춘 뒤 스프링으로 복귀하며 회전은 계속되는지 관찰하세요." );
         if( ImGui::Button( "바퀴 회전시키기###Spin wheel", ImVec2( -1.0f, 0.0f ) ) )
         {
             getWorld().ApplyAngularImpulse( getImpulseBody(), getWorld().GetBodyRotationalInertia( getImpulseBody() ) * 3.0f );

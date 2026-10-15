@@ -54,7 +54,12 @@ int main()
         ImGui::GetStateStorage()->SetInt( ImGui::GetID( "PrismaticLimitSettings" ), 1 );
         ImGui::GetStateStorage()->SetInt( ImGui::GetID( "PrismaticMotorSettings" ), 1 );
 
-        if( frame == 1 )
+        if( frame == 0 )
+        {
+            // 기본값이 motor+limit이므로 개별 overlay 비교는 free에서 시작함.
+            GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "PrismaticPresetFree" );
+        }
+        else if( frame == 1 )
         {
             ImGui::PushID( "PrismaticSpringSettings" );
             GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "PrismaticSpringEnabled" );

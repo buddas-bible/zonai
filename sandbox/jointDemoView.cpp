@@ -1,6 +1,7 @@
 #include "jointDemoView.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include <imgui.h>
 
@@ -68,6 +69,15 @@ public:
             }
             else if( kind == demoKind::prismaticRail )
             {
+                if( ImGui::Button( "수평 레일###PrismaticHorizontal" ) ) view_.setPrismaticIncline( false );
+                ImGui::SameLine();
+                if( ImGui::Button( "경사·중력 부하###PrismaticIncline" ) ) view_.setPrismaticIncline( true );
+                if( ImGui::Button( "시작 위치 복귀###PrismaticReset" ) ) view_.resetPrismaticSlider();
+                if( ImGui::Button( "약한 모터 (1N)###PrismaticWeak" ) ) view_.setPrismaticMotorSettings( true, 2.0f, 1.0f );
+                ImGui::SameLine();
+                if( ImGui::Button( "오르기 (20N)###PrismaticClimb" ) ) view_.setPrismaticMotorSettings( true, 2.0f, 20.0f );
+                ImGui::SameLine();
+                if( ImGui::Button( "부하 제동 (20N)###PrismaticHold" ) ) view_.setPrismaticMotorSettings( true, 0.0f, 20.0f );
                 if( ImGui::Button( "자유###PrismaticPresetFree" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::free );
                 ImGui::SameLine();
                 if( ImGui::Button( "제한###PrismaticPresetLimited" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::limited );
@@ -85,10 +95,15 @@ public:
                 if( ImGui::Button( "스프링+제한###PrismaticPresetSpringLimit" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::springLimit );
                 ImGui::SameLine();
                 if( ImGui::Button( "전체###PrismaticPresetCombined" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::combined );
-                ImGui::TextWrapped( "프리셋은 대표 상태를 빠르게 만드는 용도입니다. 아래 인스펙터에서 각 제약을 직접 켜고 수치를 실시간으로 조절할 수 있습니다." );
+                ImGui::TextWrapped( "기본 실습은 모터+제한입니다. 경사 장면에서 약한 모터·오르기·부하 제동을 비교하세요. 모터 단독과 자유 모드는 이동 범위가 무제한이므로 화면을 벗어나면 시작 위치 복귀를 누르세요. 복귀는 설정을 유지하며, 장면 전환은 모터+제한으로 초기화합니다." );
             }
             else if( kind == demoKind::motorJointPlayground )
             {
+                if( ImGui::Button( "정지 목표###MotorStationaryTarget" ) ) view_.setMotorTargetTracking( false );
+                ImGui::SameLine();
+                if( ImGui::Button( "움직이는 목표 추종###MotorMovingTarget" ) ) view_.setMotorTargetTracking( true );
+                if( ImGui::Button( "시작 상태 복귀###MotorReset" ) ) view_.resetMotorJointDemo();
+                ImGui::TextWrapped( "움직이는 목표는 정해진 범위에서 이동·회전하며 두 스프링으로 추종합니다. 힘·토크를 낮추거나 드래그로 방해해 오차를 비교하세요. 장면 전환은 프리셋을 초기화하고, 복귀는 설정을 보존합니다. 속도 단독 모드는 무제한 이동입니다." );
                 if( ImGui::Button( "제동###MotorJointPresetBrake" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::brake );
                 ImGui::SameLine();
                 if( ImGui::Button( "선형 속도###MotorJointPresetLinear" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::linear );
@@ -107,6 +122,13 @@ public:
             }
             else if( kind == demoKind::moverJointPlayground )
             {
+                if( ImGui::Button( "무중력###MoverZeroGravity" ) ) view_.setMoverGravity( false );
+                ImGui::SameLine();
+                if( ImGui::Button( "중력·수평 제어###MoverGravity" ) ) view_.setMoverGravity( true );
+                if( ImGui::Button( "시작 상태 복귀###MoverReset" ) ) view_.resetMoverJointDemo();
+                if( ImGui::Button( "수평만 (Y힘 0)###MoverHorizontalOnly" ) ) view_.setMoverJointSettings( { 2.0f, 0.0f }, { 20.0f, 0.0f } );
+                ImGui::SameLine();
+                if( ImGui::Button( "중력 이기기###MoverLift" ) ) view_.setMoverJointSettings( { 2.0f, 2.0f }, { 20.0f, 20.0f } );
                 if( ImGui::Button( "수평###MoverPresetHorizontal" ) ) view_.applyMoverJointPreset( moverJointDemoPreset::horizontal );
                 ImGui::SameLine();
                 if( ImGui::Button( "수직###MoverPresetVertical" ) ) view_.applyMoverJointPreset( moverJointDemoPreset::vertical );
@@ -114,14 +136,25 @@ public:
                 if( ImGui::Button( "대각선###MoverPresetDiagonal" ) ) view_.applyMoverJointPreset( moverJointDemoPreset::diagonal );
                 ImGui::SameLine();
                 if( ImGui::Button( "축별 힘###MoverPresetAnisotropic" ) ) view_.applyMoverJointPreset( moverJointDemoPreset::anisotropic );
-                ImGui::TextWrapped( "Mover는 COM 상대 선속도만 제어합니다. x/y 최대 힘을 따로 제한할 수 있고 회전은 전혀 건드리지 않습니다." );
+                ImGui::TextWrapped( "중력 장면에서 수평만·축별 힘(Y 5N)·중력 이기기(Y 20N)를 비교하세요. Y힘 0은 낙하를 방해하지 않습니다. 바닥 없는 속도 실험이므로 화면 밖으로 나가면 복귀하세요. 복귀는 설정을 보존하고 장면 전환은 수평 제어로 초기화합니다. S로 회전시켜도 Mover는 회전을 제어하지 않습니다." );
             }
             else if( kind == demoKind::filterJointPlayground )
             {
                 bool enabled = view_.getWorld().IsValid( view_.getFilterJoint() );
                 if( ImGui::Checkbox( "Filter Enabled###FilterJointEnabled", &enabled ) ) view_.setFilterJointEnabled( enabled );
-                ImGui::TextWrapped( "Filter는 solver 힘을 만들지 않고 이 두 Body 사이 Contact만 차단합니다. Off는 Joint를 파괴해 같은 pair의 collision을 다시 허용합니다." );
+                if( ImGui::Button( "시작 상태 복귀###FilterReset" ) ) view_.resetFilterJointDemo();
+                if( ImGui::Button( "C 충돌 시험###FilterCollisionTrial" ) ) view_.testFilterCollision();
+                if( ImGui::Button( "수면 시험 준비###FilterSleepTrial" ) ) view_.prepareFilterSleepTest();
+                ImGui::SameLine();
+                if( ImGui::Button( "A 깨우기###FilterWakeA" ) ) view_.wakeFilterBody();
+                ImGui::TextWrapped( "Filter On은 A-B 충돌만 막습니다. 복귀 후 On/Off로 두 원의 겹침을 비교하세요. C 시험은 두 원을 떼어 배치하고 회전하지 않는 막대를 부딪혀 A-C와 B-C 접촉을 보여줍니다. 복귀와 시험 준비는 Filter On/Off를 보존합니다." );
+                ImGui::TextWrapped( "수면 시험은 접촉이 없도록 A와 B를 분리해 재웁니다. A 깨우기는 충격을 주지 않습니다. Filter On이면 B도 깨어나지만 위치·속도를 연결하는 힘은 없습니다. Off로 비교할 때도 수면 시험 준비를 다시 누르세요." );
                 ImGui::Text( "Contacts: %zu", view_.getWorld().GetContactCount() );
+                for( const auto& visual : view_.getShapes() )
+                {
+                    if( !view_.getWorld().IsValid( visual.bodyHandle ) ) continue;
+                    ImGui::Text( "%s: %s / 속력 %.3f m/s", visual.label, view_.getWorld().IsBodyAwake( visual.bodyHandle ) ? "깨어 있음" : "수면", Length( view_.getWorld().GetBodyLinearVelocity( visual.bodyHandle ) ) );
+                }
             }
             else if( kind == demoKind::pogoJointPlayground )
             {
@@ -132,10 +165,14 @@ public:
                 if( ImGui::Button( "압축 전용###PogoPresetCompressionOnly" ) ) view_.applyPogoJointPreset( pogoJointDemoPreset::compressionOnly );
                 ImGui::SameLine();
                 if( ImGui::Button( "비대칭###PogoPresetAsymmetric" ) ) view_.applyPogoJointPreset( pogoJointDemoPreset::asymmetric );
-                ImGui::TextWrapped( "Pogo는 길이를 재는 축과 실제 반력 normal을 분리합니다. 인장/압축 힘 한도도 독립적으로 조절할 수 있습니다." );
+                ImGui::TextWrapped( "A/D: 이동 · Space: 점프 · 드래그: 당기기. 평지 → 단차 → 경사 → 틈을 지나며 발밑 지지가 바뀌는 모습을 확인하세요. 파란 선은 지면 탐지, 연결선은 현재 지지, 초록 화살표는 지면 반력 방향입니다." );
             }
             else if( kind == demoKind::weldPair )
             {
+                if( ImGui::Button( "자유 상자 쌍###WeldFreePair" ) ) view_.setWeldCantilever( false );
+                ImGui::SameLine();
+                if( ImGui::Button( "고정 지지·중력 하중###WeldCantilever" ) ) view_.setWeldCantilever( true );
+                if( ImGui::Button( "시작 상태 복귀###WeldReset" ) ) view_.resetWeldPair();
                 if( ImGui::Button( "고정###WeldPresetRigid" ) ) view_.applyWeldPreset( weldDemoPreset::rigid );
                 ImGui::SameLine();
                 if( ImGui::Button( "선형 Soft###WeldPresetSoftLinear" ) ) view_.applyWeldPreset( weldDemoPreset::softLinear );
@@ -143,11 +180,20 @@ public:
                 if( ImGui::Button( "회전 Soft###WeldPresetSoftAngular" ) ) view_.applyWeldPreset( weldDemoPreset::softAngular );
                 ImGui::SameLine();
                 if( ImGui::Button( "둘 다 Soft###WeldPresetSoftBoth" ) ) view_.applyWeldPreset( weldDemoPreset::softBoth );
-                ImGui::TextWrapped( "0 Hz는 기존 hard Weld입니다. 선형과 회전 softness를 독립적으로 바꿔 두 anchor와 상대 각도의 복원 차이를 비교합니다." );
+                ImGui::TextWrapped( "고정 지지 장면에서 중력에 의한 연결점 처짐과 굽힘을 비교하세요. 선형 Soft는 연결점 탄성, 회전 Soft는 각도 탄성입니다. 0 Hz는 강체 연결입니다. 장면 전환·복귀는 탄성 설정을 유지하고 위치와 속도를 초기화합니다." );
             }
             else
             {
                 ImGui::TextWrapped( "질량이 다른 세 상자를 같은 Mouse Joint 설정으로 드래그해 추종 차이를 비교합니다." );
+                if( ImGui::Button( "기본 잡기 (1000N)###MouseStrongPreset" ) ) view_.setMouseSettings( 5.0f, 0.7f, 1000.0f );
+                if( ImGui::Button( "힘 부족 (10N)###MouseWeakPreset" ) ) view_.setMouseSettings( 5.0f, 0.7f, 10.0f );
+                for( const auto& visual : view_.getShapes() )
+                {
+                    if( !view_.getWorld().IsValid( visual.bodyHandle ) || view_.getWorld().GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
+                    const float mass = view_.getWorld().GetBodyMass( visual.bodyHandle );
+                    ImGui::Text( "%s: %.2f kg / 무게 %.2f N", visual.label, mass, mass * Length( view_.getWorld().GetGravity() ) );
+                }
+                ImGui::TextWrapped( "힘 부족 프리셋으로 각 상자를 위로 들어보세요. 10N보다 무거운 상자는 들리지 않습니다. 같은 힘 한도를 사용해 질량 차이를 비교합니다." );
                 if( view_.getWorld().IsValid( view_.getMouseJoint() ) )
                 {
                     const auto joint = view_.getWorld().getMouseJointData( view_.getMouseJoint() );
@@ -172,7 +218,7 @@ public:
         {
             drawMoverJointInspector();
         }
-        else if( kind == demoKind::pogoJointPlayground && view_.getWorld().IsValid( view_.getPogoJoint() ) )
+        else if( kind == demoKind::pogoJointPlayground )
         {
             drawPogoJointInspector();
         }
@@ -256,8 +302,11 @@ public:
             return;
         }
 
-        if( view_.getKind() == demoKind::pogoJointPlayground && view_.getWorld().IsValid( view_.getPogoJoint() ) )
+        if( view_.getKind() == demoKind::pogoJointPlayground )
         {
+            const vec2 origin = view_.getPogoProbeOrigin();
+            draw.DrawSegment( { origin, origin + view_.getPogoProbeTranslation() }, IM_COL32( 110, 180, 255, 255 ), 1.0f );
+            if( !view_.getWorld().IsValid( view_.getPogoJoint() ) ) return;
             const pogoJointData joint = view_.getWorld().getPogoJointData( view_.getPogoJoint() );
             constexpr ImU32 ANCHOR_A_COLOR = IM_COL32( 100, 235, 220, 255 );
             constexpr ImU32 ANCHOR_B_COLOR = IM_COL32( 255, 220, 90, 255 );
@@ -267,7 +316,7 @@ public:
 
             draw.DrawPoint( joint.anchorA, ANCHOR_A_COLOR, 7.0f );
             draw.DrawPoint( joint.anchorB, ANCHOR_B_COLOR, 7.0f );
-            // Pogo는 이 두 점 사이의 길이를 실제로 복원하므로 Mover와 달리 연결선을 표시함.
+            // 연결선은 현재 지지 접점을 표시하며, 전체 선 길이를 고정하는 줄은 아님.
             draw.DrawSegment( { joint.anchorA, joint.anchorB }, IM_COL32( 180, 185, 200, 255 ), 2.0f );
             draw.DrawArrow( joint.anchorB, joint.pogoAxis, AXIS_COLOR, 0.7f );
             draw.DrawArrow( joint.anchorA, joint.normal, NORMAL_COLOR, 0.7f );
@@ -338,14 +387,15 @@ private:
     {
         if( !ImGui::CollapsingHeader( "포고 조인트 인스펙터###PogoJointInspector", ImGuiTreeNodeFlags_DefaultOpen ) ) return;
 
-        pogoJointData joint = view_.getWorld().getPogoJointData( view_.getPogoJoint() );
-        ImGui::TextWrapped( "길이 오차는 pogo axis로 측정하고 실제 impulse는 contact normal 방향으로 작용합니다. 위치 복원 속도는 integration 뒤 relaxation에서 제거됩니다." );
+        const auto& settings = view_.getPogoSettings();
+        ImGui::TextWrapped( "발밑 지면과 목표 간격을 유지하는 스프링 지지대입니다. 좌우 이동을 제한하지 않으며, 발밑에 지면이 없으면 지지를 해제합니다." );
+        ImGui::TextUnformatted( view_.getWorld().IsValid( view_.getPogoJoint() ) ? "상태: 발밑 지지 활성" : "상태: 공중 — 지지 없음" );
 
-        float restLength = joint.restLength;
-        float hertz = joint.hertz;
-        float dampingRatio = joint.dampingRatio;
-        float maxTensionForce = joint.maxTensionForce;
-        float maxCompressionForce = joint.maxCompressionForce;
+        float restLength = settings.restLength;
+        float hertz = settings.hertz;
+        float dampingRatio = settings.dampingRatio;
+        float maxTensionForce = settings.maxTensionForce;
+        float maxCompressionForce = settings.maxCompressionForce;
         bool changed = ImGui::DragFloat( "Rest Length###PogoRestLength", &restLength, 0.02f, 0.0f, 5.0f, "%.2f m" );
         changed |= ImGui::DragFloat( "주파수###PogoHertz", &hertz, 0.1f, 0.0f, 30.0f, "%.2f Hz" );
         changed |= ImGui::DragFloat( "감쇠비###PogoDamping", &dampingRatio, 0.02f, 0.0f, 2.0f, "%.2f" );
@@ -358,10 +408,12 @@ private:
         maxCompressionForce = std::max( 0.0f, maxCompressionForce );
         if( changed ) view_.setPogoJointSettings( restLength, hertz, dampingRatio, maxTensionForce, maxCompressionForce );
 
-        joint = view_.getWorld().getPogoJointData( view_.getPogoJoint() );
+        if( !view_.getWorld().IsValid( view_.getPogoJoint() ) ) return;
+        const auto joint = view_.getWorld().getPogoJointData( view_.getPogoJoint() );
         ImGui::Text( "Current Length: %.3f m", joint.length );
         ImGui::Text( "Spring Velocity: %.3f m/s", joint.velocity );
         ImGui::Text( "Reaction Force: (%.2f, %.2f) N", joint.force.x, joint.force.y );
+
     }
 
     void drawMoverJointInspector()
@@ -387,6 +439,11 @@ private:
         }
 
         ImGui::Text( "Reaction Force: (%.2f, %.2f) N", joint.force.x, joint.force.y );
+        const vec2 actual = view_.getWorld().GetBodyLinearVelocity( joint.bodyB ) - view_.getWorld().GetBodyLinearVelocity( joint.bodyA );
+        ImGui::Text( "목표 속도: (%.2f, %.2f) m/s", joint.linearVelocity.x, joint.linearVelocity.y );
+        ImGui::Text( "실제 상대속도: (%.2f, %.2f) m/s", actual.x, actual.y );
+        ImGui::Text( "속도 오차: (%.2f, %.2f) m/s", actual.x - joint.linearVelocity.x, actual.y - joint.linearVelocity.y );
+        ImGui::Text( "물체 무게: %.2f N", view_.getWorld().GetBodyMass( joint.bodyB ) * Length( view_.getWorld().GetGravity() ) );
         ImGui::TextUnformatted( "Rotation: unaffected" );
     }
 
@@ -463,6 +520,10 @@ private:
         ImGui::Text( "Angular spring: %.2f rad / %.2f Hz / damping %.2f / %.2f N*m", joint.referenceAngle, joint.angularHertz, joint.angularDampingRatio, joint.maxSpringTorque );
         ImGui::Text( "Reaction force: (%.2f, %.2f) N", joint.force.x, joint.force.y );
         ImGui::Text( "Reaction torque: %.2f N*m", joint.torque );
+        ImGui::Text( "목표 위치 오차: %.3f m", Length( joint.anchorB - joint.anchorA ) );
+        const auto targetRotation = view_.getWorld().GetBodyTransform( joint.bodyA ).rotation * rot2::FromRadians( joint.referenceAngle );
+        const auto error = Inverse( targetRotation ) * view_.getWorld().GetBodyTransform( joint.bodyB ).rotation;
+        ImGui::Text( "목표 각도 오차: %.3f rad", std::atan2( error.s, error.c ) );
     }
 
     void drawWeldInspector()
@@ -470,7 +531,7 @@ private:
         if( !ImGui::CollapsingHeader( "웰드 조인트 인스펙터###WeldJointInspector", ImGuiTreeNodeFlags_DefaultOpen ) ) return;
 
         weldJointData joint = view_.getWorld().getWeldJointData( view_.getWeldJoint() );
-        ImGui::TextWrapped( "선형 2x2 제약과 각도 scalar 제약은 같은 Weld를 구성하지만 softness는 독립적입니다. 각 주파수가 0 Hz면 해당 채널은 hard constraint로 동작합니다." );
+        ImGui::TextWrapped( "두 물체의 연결점과 상대 각도를 유지합니다. 선형·회전 탄성을 따로 조절해 늘어나는 연결과 휘어지는 연결을 비교할 수 있습니다. 각 주파수가 0 Hz면 해당 방향을 단단하게 유지합니다." );
 
         if( ImGui::TreeNodeEx( "선형 Softness###WeldLinearSettings", ImGuiTreeNodeFlags_DefaultOpen ) )
         {

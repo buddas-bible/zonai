@@ -115,6 +115,8 @@ public:
     void setPrismaticLimitSettings( bool enableLimit, float lowerTranslation, float upperTranslation );
     void setPrismaticMotorSettings( bool enableMotor, float motorSpeed, float maxMotorForce );
     void setPrismaticSpringTargetToCurrent();
+    void resetPrismaticSlider();
+    void setPrismaticIncline( bool enabled );
     void setWeldLinearSettings( float hertz, float dampingRatio );
     void setWeldAngularSettings( float hertz, float dampingRatio );
     void setMotorJointLinearSettings( vec2 linearVelocity, float maxVelocityForce );
@@ -125,13 +127,25 @@ public:
     void setPogoJointSettings( float restLength, float hertz, float dampingRatio, float maxTensionForce, float maxCompressionForce );
     // Filter는 설정값이 아니라 Joint 존재 여부 자체로 collision 차단을 전환함.
     void setFilterJointEnabled( bool enabled );
+    void resetFilterJointDemo();
+    void testFilterCollision();
+    void prepareFilterSleepTest();
+    void wakeFilterBody();
     void applyDistancePreset( distanceDemoPreset preset );
     void applyRevolutePreset( revoluteDemoPreset preset );
+    void testRevoluteLimit();
     void applyWheelPreset( wheelDemoPreset preset );
+    void testWheelLimit( bool upper );
     void applyPrismaticPreset( prismaticDemoPreset preset );
     void applyWeldPreset( weldDemoPreset preset );
+    void resetWeldPair();
+    void setWeldCantilever( bool enabled );
     void applyMotorJointPreset( motorJointDemoPreset preset );
+    void resetMotorJointDemo();
+    void setMotorTargetTracking( bool enabled );
     void applyMoverJointPreset( moverJointDemoPreset preset );
+    void resetMoverJointDemo();
+    void setMoverGravity( bool enabled );
     void applyPogoJointPreset( pogoJointDemoPreset preset );
 #pragma endregion Settings
 
@@ -172,6 +186,9 @@ public:
     [[nodiscard]] jointId getMoverJoint() const noexcept { return moverJoint_; }
 
     [[nodiscard]] jointId getPogoJoint() const noexcept { return pogoJoint_; }
+    [[nodiscard]] const pogoJointDef& getPogoSettings() const noexcept { return pogoSettings_; }
+    [[nodiscard]] vec2 getPogoProbeOrigin() const noexcept { return pogoProbeOrigin_; }
+    [[nodiscard]] vec2 getPogoProbeTranslation() const noexcept { return pogoProbeTranslation_; }
 
     [[nodiscard]] jointId getFilterJoint() const noexcept { return filterJoint_; }
 
@@ -207,11 +224,12 @@ private:
     void createRevoluteHinge();
     void createWheelSuspension();
     void createPrismaticRail();
-    void createWeldPair();
+    void createWeldPair( bool anchored = false );
     void createMouseJointPlayground();
     void createMotorJointPlayground();
     void createMoverJointPlayground();
     void createPogoJointPlayground();
+    void updatePogoSupport();
     void createFilterJointPlayground();
     void createMotorCar();
     void createRagdoll();
@@ -229,6 +247,7 @@ private:
 
 #pragma region MouseDrag
     void startMouseDrag( vec2 point );
+    void stopMouseDrag();
 #pragma endregion MouseDrag
 
 #pragma region Data
@@ -246,9 +265,16 @@ private:
     jointId prismaticJoint_{};
     jointId weldJoint_{};
     jointId motorJoint_{}; // Motor Joint 전용 학습 데모에서 사용하는 persistent handle.
+    bool motorTargetTracking_ = false;
+    float motorTargetTime_ = 0.0f;
     jointId moverJoint_{}; // Mover Joint 전용 학습 데모의 persistent handle.
-    jointId pogoJoint_{}; // Pogo Joint 전용 학습 데모의 persistent handle.
+    jointId pogoJoint_{}; // 발밑 지면을 다시 탐지할 때 교체되는 지지 조인트.
+    pogoJointDef pogoSettings_{};
+    vec2 pogoProbeOrigin_{};
+    vec2 pogoProbeTranslation_{};
+    bool pogoJumping_ = false;
     jointId filterJoint_{}; // Filter Joint 데모에서 collision 차단 상태를 나타내는 handle.
+    bodyId filterTestBody_{};
     std::array<bodyId, 11> ragdollBodies_{};
     std::array<jointId, 10> ragdollJoints_{};
     std::array<jointId, 2> carJoints_{};
@@ -260,6 +286,7 @@ private:
     std::optional<std::size_t> terrainPointDragIndex_{};
 
     jointId mouseJoint_{}; // 드래그 중인 마우스 조인트
+    bodyId mouseReference_{}; // 드래그 동안만 존재하는 정적 참조 물체.
     mouseJointDef mouseSettings_{};
 
     bool leftHeld_ = false; // 누르고 있는 이동 입력

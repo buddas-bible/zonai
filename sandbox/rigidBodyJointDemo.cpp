@@ -1,7 +1,10 @@
 #include "rigidBodyDemo.h"
 
 #include <array>
+#include <cassert>
+#include <cmath>
 #include <numbers>
+#include "collision/shapeCast2.h"
 
 namespace zonai::sandbox
 {
@@ -81,9 +84,22 @@ void rigidBodyDemo::setMoverJointSettings( vec2 linearVelocity, vec2 maxVelocity
 
 void rigidBodyDemo::setPogoJointSettings( float restLength, float hertz, float dampingRatio, float maxTensionForce, float maxCompressionForce )
 {
-    if( kind_ != demoKind::pogoJointPlayground || !world_.IsValid( pogoJoint_ ) ) return;
-    world_.setPogoJointSpring( pogoJoint_, restLength, hertz, dampingRatio );
-    world_.setPogoJointForceLimits( pogoJoint_, maxTensionForce, maxCompressionForce );
+    if( kind_ != demoKind::pogoJointPlayground ) return;
+    assert( std::isfinite( restLength ) && restLength >= 0.0f );
+    assert( std::isfinite( hertz ) && hertz >= 0.0f );
+    assert( std::isfinite( dampingRatio ) && dampingRatio >= 0.0f );
+    assert( std::isfinite( maxTensionForce ) && maxTensionForce >= 0.0f );
+    assert( std::isfinite( maxCompressionForce ) && maxCompressionForce >= 0.0f );
+    pogoSettings_.restLength = restLength;
+    pogoSettings_.hertz = hertz;
+    pogoSettings_.dampingRatio = dampingRatio;
+    pogoSettings_.maxTensionForce = maxTensionForce;
+    pogoSettings_.maxCompressionForce = maxCompressionForce;
+    if( world_.IsValid( pogoJoint_ ) )
+    {
+        world_.setPogoJointSpring( pogoJoint_, restLength, hertz, dampingRatio );
+        world_.setPogoJointForceLimits( pogoJoint_, maxTensionForce, maxCompressionForce );
+    }
 }
 
 void rigidBodyDemo::setFilterJointEnabled( bool enabled )
@@ -148,9 +164,9 @@ void rigidBodyDemo::applyDistancePreset( distanceDemoPreset preset )
         break;
 
     case distanceDemoPreset::motor:
-        // 0 Hz와 limit off로 축을 자유롭게 두고 motor 효과만 관찰함.
+        // 감기/늘리기를 관찰하는 동안 물체가 화면 밖으로 나가지 않도록 범위를 유지함.
         world_.setDistanceJointSpring( pendulumJoint_, true, 0.0f, dampingRatio );
-        world_.setDistanceJointLimit( pendulumJoint_, false, minLength, maxLength );
+        world_.setDistanceJointLimit( pendulumJoint_, true, minLength, maxLength );
         world_.setDistanceJointMotor( pendulumJoint_, true, motorSpeed, maxMotorForce );
         break;
     }
@@ -171,6 +187,13 @@ void rigidBodyDemo::applyRevolutePreset( revoluteDemoPreset preset )
     world_.setRevoluteJointMotor( revoluteJoint_, enableMotor, motorSpeed, maxMotorTorque );
 }
 
+void rigidBodyDemo::testRevoluteLimit()
+{
+    if( kind_ != demoKind::revoluteHinge || !world_.IsValid( revoluteJoint_ ) ) return;
+    applyRevolutePreset( revoluteDemoPreset::limit );
+    world_.ApplyLinearImpulseToCenter( impulseBody_, { world_.GetBodyMass( impulseBody_ ) * 6.0f, 0.0f } );
+}
+
 void rigidBodyDemo::applyWheelPreset( wheelDemoPreset preset )
 {
     if( kind_ != demoKind::wheelSuspension || !world_.IsValid( wheelJoint_ ) ) return;
@@ -188,6 +211,14 @@ void rigidBodyDemo::applyWheelPreset( wheelDemoPreset preset )
     world_.setWheelJointSpring( wheelJoint_, enableSpring, hertz, dampingRatio );
     world_.setWheelJointLimit( wheelJoint_, enableLimit, lowerTranslation, upperTranslation );
     world_.setWheelJointMotor( wheelJoint_, enableMotor, motorSpeed, maxMotorTorque );
+}
+
+void rigidBodyDemo::testWheelLimit( bool upper )
+{
+    if( kind_ != demoKind::wheelSuspension || !world_.IsValid( wheelJoint_ ) ) return;
+    applyWheelPreset( wheelDemoPreset::combined );
+    const auto joint = world_.getWheelJointData( wheelJoint_ );
+    world_.ApplyLinearImpulseToCenter( impulseBody_, world_.GetBodyMass( impulseBody_ ) * ( upper ? 50.0f : -40.0f ) * joint.axis );
 }
 
 void rigidBodyDemo::applyPrismaticPreset( prismaticDemoPreset preset )
@@ -407,7 +438,7 @@ void rigidBodyDemo::applyMoverJointPreset( moverJointDemoPreset preset )
 
 void rigidBodyDemo::applyPogoJointPreset( pogoJointDemoPreset preset )
 {
-    if( kind_ != demoKind::pogoJointPlayground || !world_.IsValid( pogoJoint_ ) ) return;
+    if( kind_ != demoKind::pogoJointPlayground ) return;
 
     constexpr float restLength = 0.8f;
     constexpr float dampingRatio = 0.7f;
@@ -481,15 +512,38 @@ void rigidBodyDemo::createPrismaticRail()
     joint.bodyA = rail;
     joint.bodyB = impulseBody_;
     prismaticJoint_ = world_.createPrismaticJoint( joint );
+    applyPrismaticPreset( prismaticDemoPreset::motorLimit );
 }
 
-void rigidBodyDemo::createWeldPair()
+void rigidBodyDemo::resetPrismaticSlider()
 {
-    world_.SetGravity( {} );
+    if( kind_ != demoKind::prismaticRail || !world_.IsValid( prismaticJoint_ ) ) return;
+    cancelInput();
+    const auto joint = world_.getPrismaticJointData( prismaticJoint_ );
+    const auto rail = world_.GetBodyTransform( joint.bodyA );
+    world_.SetBodyTransform( joint.bodyB, { TransformPoint( rail, { -1.5f, 0.0f } ), rail.rotation } );
+    world_.SetBodyLinearVelocity( joint.bodyB, {} );
+    world_.SetBodyAngularVelocity( joint.bodyB, 0.0f );
+    world_.ClearForces( joint.bodyB );
+}
 
-    const bodyId bodyA = world_.CreateBody( bodyType::Dynamic, { { -0.7f, 0.0f }, {} } );
+void rigidBodyDemo::setPrismaticIncline( bool enabled )
+{
+    if( kind_ != demoKind::prismaticRail || !world_.IsValid( prismaticJoint_ ) ) return;
+    const auto joint = world_.getPrismaticJointData( prismaticJoint_ );
+    world_.SetBodyTransform( joint.bodyA, { {}, rot2::FromRadians( enabled ? 0.25f * std::numbers::pi_v<float> : 0.0f ) } );
+    world_.SetGravity( enabled ? vec2{ 0.0f, -9.8f } : vec2{} );
+    applyPrismaticPreset( prismaticDemoPreset::motorLimit );
+    resetPrismaticSlider();
+}
+
+void rigidBodyDemo::createWeldPair( bool anchored )
+{
+    world_.SetGravity( anchored ? vec2{ 0.0f, -9.8f } : vec2{} );
+
+    const bodyId bodyA = world_.CreateBody( anchored ? bodyType::Static : bodyType::Dynamic, { { -0.7f, 0.0f }, {} } );
     const shapeId shapeA = world_.CreateShape( bodyA, MakeBox( { 0.55f, 0.35f } ) );
-    shapes_.push_back( { bodyA, shapeA, "왼쪽 상자 [웰드]" } );
+    shapes_.push_back( { bodyA, shapeA, anchored ? "고정 지지대 [웰드]" : "왼쪽 상자 [웰드]" } );
 
     const bodyId bodyB = world_.CreateBody( bodyType::Dynamic, { { 0.7f, 0.0f }, {} } );
     const shapeId shapeB = world_.CreateShape( bodyB, MakeBox( { 0.55f, 0.35f } ) );
@@ -504,6 +558,27 @@ void rigidBodyDemo::createWeldPair()
 
     impulseBody_ = bodyB;
     torqueBody_ = bodyB;
+}
+
+void rigidBodyDemo::setWeldCantilever( bool enabled )
+{
+    if( kind_ != demoKind::weldPair || !world_.IsValid( weldJoint_ ) ) return;
+    cancelInput();
+    const auto previous = world_.getWeldJointData( weldJoint_ );
+    world_.DestroyBody( previous.bodyA );
+    world_.DestroyBody( previous.bodyB );
+    shapes_.clear();
+    createWeldPair( enabled );
+    setWeldLinearSettings( previous.linearHertz, previous.linearDampingRatio );
+    setWeldAngularSettings( previous.angularHertz, previous.angularDampingRatio );
+    refreshContacts();
+}
+
+void rigidBodyDemo::resetWeldPair()
+{
+    if( kind_ != demoKind::weldPair || !world_.IsValid( weldJoint_ ) ) return;
+    const auto joint = world_.getWeldJointData( weldJoint_ );
+    setWeldCantilever( world_.GetBody( joint.bodyA ).type == bodyType::Static );
 }
 
 
@@ -531,6 +606,26 @@ void rigidBodyDemo::createMoverJointPlayground()
     torqueBody_ = driven;
 }
 
+void rigidBodyDemo::resetMoverJointDemo()
+{
+    if( kind_ != demoKind::moverJointPlayground || !world_.IsValid( moverJoint_ ) ) return;
+    cancelInput();
+    const auto joint = world_.getMoverJointData( moverJoint_ );
+    world_.SetBodyTransform( joint.bodyA, { { -2.0f, 0.0f }, {} } );
+    world_.SetBodyTransform( joint.bodyB, {} );
+    world_.SetBodyLinearVelocity( joint.bodyB, {} );
+    world_.SetBodyAngularVelocity( joint.bodyB, 0.0f );
+    world_.ClearForces( joint.bodyB );
+}
+
+void rigidBodyDemo::setMoverGravity( bool enabled )
+{
+    if( kind_ != demoKind::moverJointPlayground || !world_.IsValid( moverJoint_ ) ) return;
+    world_.SetGravity( enabled ? vec2{ 0.0f, -9.8f } : vec2{} );
+    resetMoverJointDemo();
+    setMoverJointSettings( { 2.0f, 0.0f }, { 20.0f, enabled ? 0.0f : 20.0f } );
+}
+
 void rigidBodyDemo::createFilterJointPlayground()
 {
     world_.SetGravity( {} );
@@ -543,11 +638,63 @@ void rigidBodyDemo::createFilterJointPlayground()
     const shapeId shapeB = world_.CreateShape( torqueBody_, circle2{ {}, 0.6f } );
     shapes_.push_back( { impulseBody_, shapeA, "A [Filter 대상]" } );
     shapes_.push_back( { torqueBody_, shapeB, "B [Filter 대상]" } );
+    bodyDef comparison{};
+    comparison.type = bodyType::Dynamic;
+    comparison.transform.position = { 0.0f, 2.5f };
+    comparison.fixedRotation = true;
+    filterTestBody_ = world_.CreateBody( comparison );
+    const shapeId shapeC = world_.CreateShape( filterTestBody_, MakeBox( { 1.2f, 0.25f } ) );
+    shapes_.push_back( { filterTestBody_, shapeC, "C [일반 충돌 비교]" } );
 
     filterJointDef joint{};
     joint.bodyA = impulseBody_;
     joint.bodyB = torqueBody_;
     filterJoint_ = world_.createFilterJoint( joint );
+}
+
+void rigidBodyDemo::resetFilterJointDemo()
+{
+    if( kind_ != demoKind::filterJointPlayground ) return;
+    cancelInput();
+    const std::array bodies{ impulseBody_, torqueBody_, filterTestBody_ };
+    const std::array positions{ vec2{ -0.35f, 0.0f }, vec2{ 0.35f, 0.0f }, vec2{ 0.0f, 2.5f } };
+    for( std::size_t i = 0; i < bodies.size(); ++i )
+    {
+        if( !world_.IsValid( bodies[i] ) ) continue;
+        world_.SetBodyTransform( bodies[i], { positions[i], {} } );
+        world_.SetBodyLinearVelocity( bodies[i], {} );
+        world_.SetBodyAngularVelocity( bodies[i], 0.0f );
+        world_.ClearForces( bodies[i] );
+    }
+    refreshContacts();
+}
+
+void rigidBodyDemo::testFilterCollision()
+{
+    if( kind_ != demoKind::filterJointPlayground || !world_.IsValid( filterTestBody_ ) ) return;
+    resetFilterJointDemo();
+    // A-B의 초기 겹침 해소가 C 비교 시험에 섞이지 않도록 간격을 둠.
+    if( world_.IsValid( impulseBody_ ) ) world_.SetBodyTransform( impulseBody_, { { -0.65f, 0.0f }, {} } );
+    if( world_.IsValid( torqueBody_ ) ) world_.SetBodyTransform( torqueBody_, { { 0.65f, 0.0f }, {} } );
+    refreshContacts();
+    world_.SetBodyLinearVelocity( filterTestBody_, { 0.0f, -3.0f } );
+}
+
+void rigidBodyDemo::prepareFilterSleepTest()
+{
+    if( kind_ != demoKind::filterJointPlayground || !world_.IsValid( impulseBody_ ) || !world_.IsValid( torqueBody_ ) ) return;
+    resetFilterJointDemo();
+    // 접촉으로 함께 깨어나는 경우와 구별하기 위해 A와 B를 분리함.
+    world_.SetBodyTransform( impulseBody_, { { -1.5f, 0.0f }, {} } );
+    world_.SetBodyTransform( torqueBody_, { { 1.5f, 0.0f }, {} } );
+    refreshContacts();
+    for( const auto body : { impulseBody_, torqueBody_, filterTestBody_ } )
+        if( world_.IsValid( body ) ) world_.SetBodyAwake( body, false );
+}
+
+void rigidBodyDemo::wakeFilterBody()
+{
+    if( kind_ == demoKind::filterJointPlayground && world_.IsValid( impulseBody_ ) ) world_.SetBodyAwake( impulseBody_, true );
 }
 
 void rigidBodyDemo::createPogoJointPlayground()
@@ -558,7 +705,23 @@ void rigidBodyDemo::createPogoJointPlayground()
     const shapeId groundShape = world_.CreateShape( ground, MakeBox( { 3.0f, 0.25f } ) );
     shapes_.push_back( { ground, groundShape, "지면 Body A [Pogo]" } );
 
-    const bodyId character = world_.CreateBody( bodyType::Dynamic, { { 0.0f, 0.75f }, {} } );
+    const bodyId step = world_.CreateBody( bodyType::Static, { { 4.0f, -0.075f }, {} } );
+    const shapeId stepShape = world_.CreateShape( step, MakeBox( { 1.0f, 0.425f } ) );
+    shapes_.push_back( { step, stepShape, "낮은 단차 [Pogo]" } );
+    const bodyId ramp = world_.CreateBody();
+    const std::array<vec2, 4> rampPoints{ vec2{ 5.0f, -0.5f }, vec2{ 7.0f, -0.5f }, vec2{ 7.0f, 1.0f }, vec2{ 5.0f, 0.35f } };
+    const shapeId rampShape = world_.CreateShape( ramp, MakePolygon( rampPoints ) );
+    shapes_.push_back( { ramp, rampShape, "경사면 [Pogo]" } );
+    const bodyId landing = world_.CreateBody( bodyType::Static, { { 9.0f, 0.25f }, {} } );
+    const shapeId landingShape = world_.CreateShape( landing, MakeBox( { 1.0f, 0.75f } ) );
+    shapes_.push_back( { landing, landingShape, "틈 너머 착지대 [Pogo]" } );
+
+    bodyDef characterDef{};
+    characterDef.type = bodyType::Dynamic;
+    characterDef.transform.position = { 0.0f, 0.75f };
+    // Box2D dynamic mover처럼 지지축이 뒤집히지 않도록 캐릭터 회전을 잠금.
+    characterDef.fixedRotation = true;
+    const bodyId character = world_.CreateBody( characterDef );
     const shapeId characterShape = world_.CreateShape( character, MakeBox( { 0.4f, 0.35f } ) );
     shapes_.push_back( { character, characterShape, "캐릭터 Body B [Pogo]" } );
 
@@ -576,20 +739,78 @@ void rigidBodyDemo::createPogoJointPlayground()
     joint.maxCompressionForce = 200.0f;
     // 실제 character mover처럼 Pogo와 별개로 ground contact도 유지할 수 있게 함.
     joint.collideConnected = true;
-    pogoJoint_ = world_.createPogoJoint( joint );
-
+    pogoSettings_ = joint;
     impulseBody_ = character;
     torqueBody_ = character;
+    moverJointDef mover{};
+    mover.bodyA = ground;
+    mover.bodyB = character;
+    mover.maxVelocityForce = { world_.GetBodyMass( character ) * 20.0f, 0.0f };
+    mover.collideConnected = true;
+    moverJoint_ = world_.createMoverJoint( mover );
+    updatePogoSupport();
+}
+
+void rigidBodyDemo::updatePogoSupport()
+{
+    const bool wasSupported = world_.IsValid( pogoJoint_ );
+    float impulse = 0.0f;
+    float velocity = 0.0f;
+    if( wasSupported )
+    {
+        const auto previous = world_.getPogoJointData( pogoJoint_ );
+        impulse = previous.impulse;
+        velocity = previous.velocity;
+        world_.destroyJoint( pogoJoint_ );
+        pogoJoint_ = {};
+    }
+    if( world_.GetBodyLinearVelocity( impulseBody_ ).y <= 0.0f ) pogoJumping_ = false;
+    const auto characterTransform = world_.GetBodyTransform( impulseBody_ );
+    // 기존 convex cast를 점 proxy로 재사용한다. 중심에서 시작해 발이 지면에 닿아도 탐지할 수 있음.
+    pogoProbeOrigin_ = characterTransform.position;
+    const float reach = wasSupported && !pogoJumping_ ? 2.0f * pogoSettings_.restLength : pogoSettings_.restLength;
+    pogoProbeTranslation_ = { 0.0f, -( 0.35f + reach + 0.02f ) };
+    castOutput2 closest{};
+    closest.fraction = 1.0f;
+    bodyId ground{};
+    for( const auto& visual : shapes_ )
+    {
+        if( visual.bodyHandle == impulseBody_ || !world_.IsValid( visual.shapeHandle ) ) continue;
+        const auto transform = world_.GetBodyTransform( visual.bodyHandle );
+        shapeCastInput2 cast{};
+        cast.proxyA = MakeShapeProxy( world_.GetShape( visual.shapeHandle ).geometry );
+        cast.proxyB.count = 1;
+        cast.transform.position = InverseTransformPoint( transform, pogoProbeOrigin_ );
+        cast.translationB = InverseRotate( transform.rotation, pogoProbeTranslation_ );
+        cast.maxFraction = closest.fraction;
+        auto hit = ShapeCast( cast );
+        if( !hit.hit ) continue;
+        hit.normal = Rotate( transform.rotation, hit.normal );
+        if( hit.normal.y < 0.5f ) continue;
+        hit.point = TransformPoint( transform, hit.point );
+        closest = hit;
+        ground = visual.bodyHandle;
+    }
+    if( !closest.hit ) return;
+    pogoJointDef joint = pogoSettings_;
+    joint.bodyA = ground;
+    joint.localAnchorA = InverseTransformPoint( world_.GetBodyTransform( ground ), closest.point );
+    joint.normal = closest.normal;
+    joint.impulse = impulse;
+    joint.velocity = velocity;
+    // Box2D처럼 점프 상승 중에는 지면 쪽으로 잡아당기지 않음.
+    if( pogoJumping_ ) joint.maxTensionForce = 0.0f;
+    pogoJoint_ = world_.createPogoJoint( joint );
 }
 
 void rigidBodyDemo::createMotorJointPlayground()
 {
     world_.SetGravity( {} );
 
-    // A는 움직이지 않는 기준 frame, B는 Motor의 목표 상대속도를 따라가는 Dynamic body임.
-    const bodyId reference = world_.CreateBody( bodyType::Static, { { -2.0f, 0.0f }, {} } );
+    // 힘에 밀리지 않는 kinematic 목표를 정지시키거나 경로를 따라 이동시킴.
+    const bodyId reference = world_.CreateBody( bodyType::Kinematic, { { -2.0f, 0.0f }, {} } );
     const shapeId referenceShape = world_.CreateShape( reference, MakeBox( { 0.25f, 0.25f } ) );
-    shapes_.push_back( { reference, referenceShape, "기준 Body A [정적]" } );
+    shapes_.push_back( { reference, referenceShape, "목표 Body A [Motor]" } );
 
     const bodyId driven = world_.CreateBody( bodyType::Dynamic, { { 0.0f, 0.0f }, {} } );
     const shapeId drivenShape = world_.CreateShape( driven, MakeBox( { 0.55f, 0.35f } ) );
@@ -604,6 +825,30 @@ void rigidBodyDemo::createMotorJointPlayground()
 
     impulseBody_ = driven;
     torqueBody_ = driven;
+}
+
+void rigidBodyDemo::resetMotorJointDemo()
+{
+    if( kind_ != demoKind::motorJointPlayground || !world_.IsValid( motorJoint_ ) ) return;
+    cancelInput();
+    const auto joint = world_.getMotorJointData( motorJoint_ );
+    motorTargetTime_ = 0.0f;
+    world_.SetBodyTransform( joint.bodyA, { { -2.0f, 0.0f }, {} } );
+    world_.SetBodyTransform( joint.bodyB, {} );
+    for( const auto body : { joint.bodyA, joint.bodyB } )
+    {
+        world_.SetBodyLinearVelocity( body, {} );
+        world_.SetBodyAngularVelocity( body, 0.0f );
+        world_.ClearForces( body );
+    }
+}
+
+void rigidBodyDemo::setMotorTargetTracking( bool enabled )
+{
+    if( kind_ != demoKind::motorJointPlayground || !world_.IsValid( motorJoint_ ) ) return;
+    motorTargetTracking_ = enabled;
+    resetMotorJointDemo();
+    applyMotorJointPreset( enabled ? motorJointDemoPreset::springBoth : motorJointDemoPreset::brake );
 }
 
 void rigidBodyDemo::createMouseJointPlayground()
