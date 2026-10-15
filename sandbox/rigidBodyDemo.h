@@ -310,7 +310,7 @@ private:
 
     chainId terrainChain_{};
     std::array<transform2, 3> terrainInitialTransforms_{};
-    std::array<shapeId, 8> terrainSegments_{};
+    std::vector<shapeId> terrainSegments_{};
     std::optional<std::size_t> terrainPointDragIndex_{};
 
     jointId mouseJoint_{}; // 드래그 중인 마우스 조인트

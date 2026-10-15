@@ -17,6 +17,7 @@ enum class demoKind
 {
     playground,
     terrainChain,
+    splineTerrain,
     distancePendulum,
     revoluteHinge,
     wheelSuspension,

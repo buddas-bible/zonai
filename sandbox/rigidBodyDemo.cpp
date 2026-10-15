@@ -6,6 +6,8 @@
 #include <numbers>
 #include <variant>
 
+#include "geometry/catmullRomSpline2.h"
+
 namespace zonai::sandbox
 {
 namespace
@@ -25,7 +27,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createPlayground();
     }
-    else if( kind == demoKind::terrainChain )
+    else if( kind == demoKind::terrainChain || kind == demoKind::splineTerrain )
     {
         createTerrainChain();
     }
@@ -347,8 +349,8 @@ void rigidBodyDemo::resetPlayground()
 void rigidBodyDemo::createTerrainChain()
 {
     // Chain의 front side가 위쪽을 향하도록 오른쪽에서 왼쪽 순서로 terrain을 구성함.
-    // 실제 충돌 edge는 9개 point 사이의 8개이고 양 끝 ghost는 endpoint normal만 이어줌.
-    const std::array<vec2, 9> points{
+    // 양 끝 ghost는 실제 충돌 edge 바깥에서 endpoint normal만 이어줌.
+    const std::array<vec2, 9> controlPoints{
         vec2{ 8.0f, -2.0f },
         vec2{ 6.0f, -1.2f },
         vec2{ 4.0f, -1.0f },
@@ -360,16 +362,32 @@ void rigidBodyDemo::createTerrainChain()
         vec2{ -8.0f, -1.2f }
     };
 
-    const bodyId ground = world_.CreateBody( bodyType::Static );
+    // shortcut: 구간당 4분할로 근사함, 곡률에 따른 정확도가 필요할 때 adaptive sampling으로 교체할 것.
+    const std::vector<vec2> points = kind_ == demoKind::splineTerrain ? Sample( { controlPoints }, 4 ) : std::vector<vec2>{ controlPoints.begin(), controlPoints.end() };
+
+    if( points.size() < 2 ) return;
+
+    for( std::size_t i = 0; i < points.size(); ++i )
+    {
+        if( !IsFinite( points[i] ) ) return;
+
+        if( i > 0 && LengthSquared( points[i] - points[i - 1] ) <= LINEAR_SLOP * LINEAR_SLOP ) return;
+    }
 
     chainDef definition{};
-    definition.points = std::span<const vec2>{ points };
-    definition.ghost1 = { 10.0f, -2.8f };
-    definition.ghost2 = { -10.0f, -2.0f };
+    definition.points = points;
+    definition.ghost1 = points.front() + ( points.front() - points[1] );
+    definition.ghost2 = points.back() + ( points.back() - points[points.size() - 2] );
     definition.friction = 0.8f;
+
+    if( !IsFinite( definition.ghost1 ) || !IsFinite( definition.ghost2 ) ) return;
+    if( LengthSquared( definition.ghost1 - points.front() ) <= LINEAR_SLOP * LINEAR_SLOP || LengthSquared( definition.ghost2 - points.back() ) <= LINEAR_SLOP * LINEAR_SLOP ) return;
+
+    const bodyId ground = world_.CreateBody( bodyType::Static );
 
     terrainChain_ = world_.CreateChain( ground, definition );
 
+    terrainSegments_.resize( points.size() - 1 );
     const std::size_t segmentCount = world_.GetChainSegments( terrainChain_, terrainSegments_ );
     assert( segmentCount == terrainSegments_.size() );
 
@@ -395,7 +413,7 @@ void rigidBodyDemo::createTerrainChain()
 
 void rigidBodyDemo::resetTerrainProbes()
 {
-    if( kind_ != demoKind::terrainChain ) return;
+    if( kind_ != demoKind::terrainChain && kind_ != demoKind::splineTerrain ) return;
     cancelInput();
     for( std::size_t i = 0; i < terrainInitialTransforms_.size(); ++i )
     {
@@ -411,7 +429,7 @@ void rigidBodyDemo::resetTerrainProbes()
 
 void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial trial )
 {
-    if( kind_ != demoKind::terrainChain || probeIndex >= terrainInitialTransforms_.size() || !world_.IsValid( terrainChain_ ) ) return;
+    if( ( kind_ != demoKind::terrainChain && kind_ != demoKind::splineTerrain ) || probeIndex >= terrainInitialTransforms_.size() || !world_.IsValid( terrainChain_ ) ) return;
     const auto body = shapes_[terrainSegments_.size() + probeIndex].bodyHandle;
     if( !world_.IsValid( body ) ) return;
     resetTerrainProbes();
