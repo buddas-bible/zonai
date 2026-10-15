@@ -85,6 +85,20 @@ add_test(
     COMMAND segment2Tests
 )
 
+add_executable(catmullRomSpline2Tests
+    geometry/catmull_rom_spline2_test.cpp
+)
+
+target_link_libraries(catmullRomSpline2Tests
+    PRIVATE
+        zonai::zonai
+)
+
+add_test(
+    NAME catmullRomSpline2Tests
+    COMMAND catmullRomSpline2Tests
+)
+
 add_executable(capsule2Tests
     geometry/capsule2_test.cpp
 )
