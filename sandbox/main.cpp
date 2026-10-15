@@ -338,6 +338,7 @@ int main()
             session.advance( io.DeltaTime, subStepCount );
         }
 
+        if( const auto target = session.getDemo().getCameraTarget() ) camera.center.x = target->x;
         ImDrawList* drawList = ImGui::GetWindowDrawList();
 
         const ImVec2 canvasMax{ canvasMin.x + canvasSize.x, canvasMin.y + canvasSize.y };

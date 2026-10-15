@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 
 #include "math/vec2.h"
@@ -69,6 +70,7 @@ public:
     virtual void drawControls() {}
 
     virtual void draw( debugDraw& ) const {}
+    [[nodiscard]] virtual std::optional<vec2> getCameraTarget() const { return std::nullopt; }
 };
 
 using demoFactory = std::unique_ptr<demo> ( * )( demoKind );

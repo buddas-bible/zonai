@@ -26,8 +26,8 @@ constexpr std::array entries
     demoEntry{ demoKind::moverJointPlayground, "조인트", "무버 조인트", "Mover Joint는 두 Body의 COM 상대 선속도만 제어하고 회전은 건드리지 않습니다. 수평·수직·대각선·축별 힘 한도 프리셋으로 character mover용 velocity actuator를 비교합니다.", { 0.0f, 0.0f }, 95.0f },
     demoEntry{ demoKind::pogoJointPlayground, "조인트", "포고 조인트", "A/D로 평지·단차·경사를 이동하고 Space로 틈을 뛰어넘으세요. Pogo는 발밑 지면과 간격을 유지하고 Mover는 좌우 속도를 제어합니다. 공중에서는 지지가 사라지고 착지하면 다시 연결됩니다. 프리셋으로 지지대의 탄성과 힘 한도를 비교하세요.", { 3.5f, 1.0f }, 65.0f },
     demoEntry{ demoKind::filterJointPlayground, "조인트", "필터 조인트", "On/Off와 시작 상태 복귀로 A-B 충돌을 비교하세요. C 충돌 시험은 다른 물체와의 충돌이 유지됨을 보여줍니다. 수면 시험 준비 후 A를 깨워 Filter가 깨어남을 연결하지만 힘은 전달하지 않음을 관찰하세요.", { 0.0f, 1.0f }, 110.0f },
-    demoEntry{ demoKind::motorCar, "연결 장치", "모터 자동차", "캔버스: A/D 유지로 왼쪽/오른쪽 주행, 스페이스 유지로 제동. 키를 놓으면 자유 주행합니다. 왼쪽 드래그로 차체나 바퀴 잡기, 오른쪽 클릭으로 차체 밀기. 모터·마찰·서스펜션을 비교하고 가운데 드래그로 주행 경로를 따라갑니다.", { 4.0f, 1.0f }, 50.0f },
-    demoEntry{ demoKind::ragdoll, "연결 장치", "관절 제한 렉돌", "기존 Revolute Joint의 각도 제한만 조합한 수동 렉돌입니다. A/D·Space·S·마우스 드래그로 몸통에 힘을 주고 목·허리·어깨·팔꿈치·엉덩이·무릎의 제한이 함께 작동하는 모습을 관찰합니다.", { 0.0f, 3.5f }, 72.0f }
+    demoEntry{ demoKind::motorCar, "연결 장치", "모터 자동차", "A/D로 주행, Space로 제동하고 키를 놓으면 관성으로 구릅니다. 카메라 추적을 선택하고 서스펜션·저마찰 프리셋을 비교하세요. 차량 복귀는 설정을 보존합니다. 왼쪽 드래그로 물체를 잡고, 추적을 끄면 가운데 드래그로 카메라를 이동합니다.", { 4.0f, 1.0f }, 50.0f },
+    demoEntry{ demoKind::ragdoll, "연결 장치", "관절 제한 렉돌", "Revolute 관절의 각도 제한과 회전 마찰로 구성한 수동 렉돌입니다. 자유·마찰 관절과 자기 충돌을 비교하고 자세 복귀로 같은 낙하를 반복하세요. A/D·Space·S·마우스 드래그로 몸통에 힘을 주며 각 관절의 연결과 허용 각도를 관찰합니다.", { 0.0f, 3.5f }, 72.0f }
 };
 
 }

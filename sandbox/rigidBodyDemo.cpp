@@ -1,5 +1,6 @@
 #include "rigidBodyDemo.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <numbers>
@@ -564,11 +565,144 @@ void rigidBodyDemo::createRagdoll()
     impulseBody_ = ragdollBodies_[1];
     torqueBody_ = ragdollBodies_[1];
     revoluteJoint_ = ragdollJoints_[1];
+    for( std::size_t i = 0; i < ragdollBodies_.size(); ++i ) ragdollInitialTransforms_[i] = world_.GetBodyTransform( ragdollBodies_[i] );
+}
+
+void rigidBodyDemo::resetRagdoll()
+{
+    if( kind_ != demoKind::ragdoll ) return;
+    cancelInput();
+    for( std::size_t i = 0; i < ragdollBodies_.size(); ++i )
+    {
+        const auto body = ragdollBodies_[i];
+        if( !world_.IsValid( body ) ) continue;
+        world_.SetBodyTransform( body, ragdollInitialTransforms_[i] );
+        world_.SetBodyLinearVelocity( body, {} );
+        world_.SetBodyAngularVelocity( body, 0.0f );
+        world_.ClearForces( body );
+    }
+    refreshContacts();
+}
+
+void rigidBodyDemo::setRagdollJointFriction( float torque )
+{
+    assert( std::isfinite( torque ) && torque >= 0.0f );
+    if( kind_ != demoKind::ragdoll ) return;
+    for( const auto id : ragdollJoints_ )
+        if( world_.IsValid( id ) ) world_.setRevoluteJointMotor( id, torque > 0.0f, 0.0f, torque );
+}
+
+float rigidBodyDemo::getRagdollJointFriction() const
+{
+    if( kind_ == demoKind::ragdoll )
+        for( const auto id : ragdollJoints_ )
+            if( world_.IsValid( id ) )
+            {
+                const auto joint = world_.getRevoluteJointData( id );
+                return joint.enableMotor ? joint.maxMotorTorque : 0.0f;
+            }
+    return 0.0f;
+}
+
+void rigidBodyDemo::setRagdollSelfCollision( bool enabled )
+{
+    if( kind_ != demoKind::ragdoll ) return;
+    for( const auto& visual : shapes_ )
+    {
+        if( !world_.IsValid( visual.shapeHandle ) || !world_.IsValid( visual.bodyHandle ) || world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
+        auto filter = world_.GetShape( visual.shapeHandle ).filter;
+        filter.groupIndex = enabled ? 0 : -1;
+        world_.SetShapeFilter( visual.shapeHandle, filter );
+    }
+    refreshContacts();
+}
+
+bool rigidBodyDemo::getRagdollSelfCollision() const
+{
+    if( kind_ == demoKind::ragdoll )
+        for( const auto& visual : shapes_ )
+            if( world_.IsValid( visual.shapeHandle ) && world_.IsValid( visual.bodyHandle ) && world_.GetBody( visual.bodyHandle ).type == bodyType::Dynamic )
+                return world_.GetShape( visual.shapeHandle ).filter.groupIndex >= 0;
+    return false;
 }
 
 #pragma endregion SceneSetup
 
 #pragma region CarDrive
+
+void rigidBodyDemo::resetCar()
+{
+    if( kind_ != demoKind::motorCar || !world_.IsValid( impulseBody_ ) ) return;
+    cancelInput();
+    world_.SetBodyTransform( impulseBody_, { { 0.0f, 1.1f }, {} } );
+    world_.SetBodyLinearVelocity( impulseBody_, {} );
+    world_.SetBodyAngularVelocity( impulseBody_, 0.0f );
+    world_.ClearForces( impulseBody_ );
+    for( std::size_t i = 0; i < carJoints_.size(); ++i )
+    {
+        if( !world_.IsValid( carJoints_[i] ) ) continue;
+        const auto wheel = world_.getWheelJointData( carJoints_[i] ).bodyB;
+        world_.SetBodyTransform( wheel, { { i == 0 ? -0.9f : 0.9f, 0.45f }, {} } );
+        world_.SetBodyLinearVelocity( wheel, {} );
+        world_.SetBodyAngularVelocity( wheel, 0.0f );
+        world_.ClearForces( wheel );
+    }
+    refreshContacts();
+}
+
+void rigidBodyDemo::applyCarSuspensionPreset( carSuspensionPreset preset )
+{
+    if( kind_ != demoKind::motorCar ) return;
+    const float hertz = preset == carSuspensionPreset::soft ? 2.0f : preset == carSuspensionPreset::stiff ? 8.0f : 4.0f;
+    for( const auto id : carJoints_ )
+    {
+        if( !world_.IsValid( id ) ) continue;
+        world_.setWheelJointSpring( id, preset != carSuspensionPreset::noSpring, hertz, 0.7f );
+        world_.setWheelJointLimit( id, true, -0.25f, 0.25f );
+    }
+}
+
+void rigidBodyDemo::setCarLowFriction( bool enabled )
+{
+    if( kind_ != demoKind::motorCar ) return;
+    for( const auto& visual : shapes_ )
+        if( visual.bodyHandle != impulseBody_ && world_.IsValid( visual.shapeHandle ) ) world_.SetShapeFriction( visual.shapeHandle, enabled ? 0.02f : 0.9f );
+}
+
+std::optional<vec2> rigidBodyDemo::getCameraTarget() const
+{
+    if( kind_ == demoKind::motorCar && carCameraTracking_ && world_.IsValid( impulseBody_ ) ) return world_.GetBodyTransform( impulseBody_ ).position;
+    return std::nullopt;
+}
+
+carWheelObservation rigidBodyDemo::getCarWheelObservation( std::size_t wheelIndex ) const
+{
+    carWheelObservation result{};
+    if( kind_ != demoKind::motorCar || wheelIndex >= carJoints_.size() || !world_.IsValid( carJoints_[wheelIndex] ) ) return result;
+    const auto wheel = world_.getWheelJointData( carJoints_[wheelIndex] ).bodyB;
+    const vec2 center = TransformPoint( world_.GetBodyTransform( wheel ), world_.GetBodyLocalCenter( wheel ) );
+    std::array<contactData, 4> contacts{};
+    const auto count = world_.GetBodyContactData( wheel, contacts );
+    for( std::size_t index = 0; index < count; ++index )
+        for( const auto& visual : shapes_ )
+        {
+            if( !world_.IsValid( visual.bodyHandle ) || world_.GetBody( visual.bodyHandle ).type != bodyType::Static ) continue;
+            const auto& contact = contacts[index];
+            vec2 normal{};
+            if( contact.shapeA == visual.shapeHandle ) normal = contact.manifold.normal;
+            else if( contact.shapeB == visual.shapeHandle ) normal = -contact.manifold.normal;
+            if( normal.y < 0.5f ) continue;
+            for( int point = 0; point < contact.manifold.pointCount; ++point )
+            {
+                const auto& hit = contact.manifold.points[point];
+                if( hit.separation > LINEAR_SLOP ) continue;
+                result.grounded = true;
+                const vec2 velocity = world_.GetBodyLinearVelocity( wheel ) + Cross( world_.GetBodyAngularVelocity( wheel ), hit.point - center );
+                result.slipSpeed = std::max( result.slipSpeed, std::abs( Dot( velocity, Cross( 1.0f, normal ) ) ) );
+            }
+        }
+    return result;
+}
 
 void rigidBodyDemo::updateCarMotors()
 {

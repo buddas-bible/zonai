@@ -157,6 +157,26 @@ int main()
         ragdollView.getWorld().setRevoluteJointLimit( id, true, data.lowerAngle, data.upperAngle );
     }
 
+    for( int action = 0; action < 3; ++action )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
+        ImGui::SetNextWindowSize( { 420.0f, 4000.0f } );
+        ImGui::Begin( "Ragdoll controls" );
+        const char* control = action == 0 ? "RagdollStrongFriction" : action == 1 ? "RagdollSelfCollision" : "RagdollReset";
+        GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( control );
+        ragdollView.drawControls();
+        ImGui::End();
+        ImGui::Render();
+    }
+    if( ragdollView.getRagdollJointFriction() != 0.3f || ragdollView.getRagdollSelfCollision() ) fail( "Ragdoll controls must apply friction and preserve collision selection on reset" );
+    auto carView = createJointDemoView( demoKind::motorCar );
+    if( !carView->getCameraTarget() ) fail( "Car view must expose its tracking target to the host" );
+    demoInput drive{};
+    drive.right = true;
+    carView->handleInput( drive );
+    for( int frame = 0; frame < 120; ++frame ) carView->step( 1.0f / 60.0f, 4 );
+    if( carView->getCameraTarget()->x < 2.0f ) fail( "Car tracking target must move with the simulated chassis" );
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }

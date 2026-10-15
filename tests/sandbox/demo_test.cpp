@@ -377,6 +377,63 @@ int main()
     input.left = input.right = true;
     session.handleInput( input, true );
     for( const auto id : car.getCarJoints() ) check( !car.getWorld().getWheelJointData( id ).enableMotor, "opposing drive keys coast" );
+    for( const int substeps : { 1, 4, 8 } )
+    {
+        float softTravel = 0.0f, stiffTravel = 0.0f;
+        for( const auto preset : { carSuspensionPreset::soft, carSuspensionPreset::standard, carSuspensionPreset::stiff, carSuspensionPreset::noSpring } )
+        {
+            rigidBodyDemo vehicle{ demoKind::motorCar };
+            vehicle.applyCarSuspensionPreset( preset );
+            for( int frame = 0; frame < 120; ++frame ) vehicle.step( 1.0f / 60.0f, substeps );
+            demoInput drive{}; drive.right = true; vehicle.handleInput( drive );
+            float travel = 0.0f;
+            for( int frame = 0; frame < 240; ++frame )
+            {
+                vehicle.step( 1.0f / 60.0f, substeps );
+                for( const auto id : vehicle.getCarJoints() )
+                {
+                    const auto joint = vehicle.getWorld().getWheelJointData( id );
+                    travel = std::max( travel, std::abs( joint.currentTranslation ) );
+                    check( std::abs( joint.lateralError ) < 0.04f && std::abs( joint.currentTranslation ) < 0.3f, "car presets must keep suspension on axis and bounded" );
+                }
+            }
+            if( preset == carSuspensionPreset::soft ) softTravel = travel;
+            if( preset == carSuspensionPreset::stiff ) stiffTravel = travel;
+            check( vehicle.getWorld().GetBodyTransform( vehicle.getImpulseBody() ).position.x > 8.0f, "each suspension preset must reach the ramp" );
+            vehicle.setCarMotorSettings( 6.0f, 3.0f );
+            const auto tuning = vehicle.getWorld().getWheelJointData( vehicle.getCarJoints()[0] );
+            check( vehicle.getCameraTarget().has_value() && vehicle.getCameraTarget()->x == vehicle.getWorld().GetBodyTransform( vehicle.getImpulseBody() ).position.x, "camera target must follow the chassis" );
+            vehicle.setCarCameraTracking( false );
+            check( !vehicle.getCameraTarget(), "camera tracking must be optional" );
+            vehicle.resetCar();
+            const auto restored = vehicle.getWorld().getWheelJointData( vehicle.getCarJoints()[0] );
+            check( restored.hertz == tuning.hertz && restored.enableSpring == tuning.enableSpring && vehicle.getCarMotorSpeed() == 6.0f && vehicle.getCarMaxMotorTorque() == 3.0f, "car recovery must preserve tuning" );
+            check( Length( vehicle.getWorld().GetBodyTransform( vehicle.getImpulseBody() ).position - vec2{ 0.0f, 1.1f } ) < 0.001f && LengthSquared( vehicle.getWorld().GetBodyLinearVelocity( vehicle.getImpulseBody() ) ) == 0.0f && !restored.enableMotor, "car recovery must restore pose and cancel drive" );
+            check( vehicle.getWorld().GetBodyCount() == 5 && vehicle.getWorld().getJointCount() == 2, "car recovery must not accumulate objects" );
+        }
+        check( softTravel > stiffTravel + 0.1f, "soft suspension must visibly compress more than stiff suspension" );
+        for( const bool lowFriction : { false, true } )
+        {
+            rigidBodyDemo vehicle{ demoKind::motorCar };
+            vehicle.setCarLowFriction( lowFriction );
+            for( int frame = 0; frame < 120; ++frame ) vehicle.step( 1.0f / 60.0f, substeps );
+            demoInput drive{}; drive.right = true; vehicle.handleInput( drive );
+            for( int frame = 0; frame < 120; ++frame ) vehicle.step( 1.0f / 60.0f, substeps );
+            for( std::size_t wheel = 0; wheel < 2; ++wheel )
+            {
+                const auto observation = vehicle.getCarWheelObservation( wheel );
+                check( observation.grounded, "driving wheels must report road contact" );
+                check( lowFriction ? observation.slipSpeed > 1.0f : observation.slipSpeed < 0.2f, "slip display must distinguish rolling from spinning tires" );
+            }
+            const auto wheel = vehicle.getWorld().getWheelJointData( vehicle.getCarJoints()[0] ).bodyB;
+            vehicle.getWorld().SetBodyTransform( wheel, { { 0.0f, 5.0f }, {} } );
+            vehicle.refreshContacts();
+            check( !vehicle.getCarWheelObservation( 0 ).grounded, "airborne wheel must not report tire slip against a road" );
+            vehicle.resetCar();
+            check( std::abs( vehicle.getWorld().GetShape( vehicle.getShapes()[3].shapeHandle ).friction - ( lowFriction ? 0.02f : 0.9f ) ) < 0.001f, "recovery must preserve selected friction" );
+        }
+    }
+
     rigidBodyDemo noTorqueCar{ demoKind::motorCar };
     rigidBodyDemo coastCar{ demoKind::motorCar };
     for( int i = 0; i < 120; ++i )

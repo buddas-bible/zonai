@@ -63,6 +63,14 @@ enum class weldDemoPreset
     softBoth
 };
 
+enum class carSuspensionPreset { soft, standard, stiff, noSpring };
+
+struct carWheelObservation
+{
+    bool grounded = false;
+    float slipSpeed = 0.0f;
+};
+
 // Motor Joint의 velocity actuator와 transform spring을 독립 / 결합해서 비교하는 빠른 설정.
 enum class motorJointDemoPreset
 {
@@ -111,6 +119,13 @@ public:
     void setCollisionMatrix( const collisionMatrix& matrix ) override;
     void setMouseSettings( float hertz, float dampingRatio, float maxForce );
     void setCarMotorSettings( float speed, float maxTorque );
+    void resetCar();
+    void applyCarSuspensionPreset( carSuspensionPreset preset );
+    void setCarLowFriction( bool enabled );
+    void setCarCameraTracking( bool enabled ) { carCameraTracking_ = enabled; }
+    [[nodiscard]] bool getCarCameraTracking() const { return carCameraTracking_; }
+    [[nodiscard]] std::optional<vec2> getCameraTarget() const override;
+    [[nodiscard]] carWheelObservation getCarWheelObservation( std::size_t wheelIndex ) const;
     void setPrismaticSpringSettings( bool enableSpring, float hertz, float dampingRatio, float targetTranslation );
     void setPrismaticLimitSettings( bool enableLimit, float lowerTranslation, float upperTranslation );
     void setPrismaticMotorSettings( bool enableMotor, float motorSpeed, float maxMotorForce );
@@ -146,6 +161,11 @@ public:
     void applyMoverJointPreset( moverJointDemoPreset preset );
     void resetMoverJointDemo();
     void setMoverGravity( bool enabled );
+    void resetRagdoll();
+    void setRagdollJointFriction( float torque );
+    [[nodiscard]] float getRagdollJointFriction() const;
+    void setRagdollSelfCollision( bool enabled );
+    [[nodiscard]] bool getRagdollSelfCollision() const;
     void applyPogoJointPreset( pogoJointDemoPreset preset );
 #pragma endregion Settings
 
@@ -276,10 +296,12 @@ private:
     jointId filterJoint_{}; // Filter Joint 데모에서 collision 차단 상태를 나타내는 handle.
     bodyId filterTestBody_{};
     std::array<bodyId, 11> ragdollBodies_{};
+    std::array<transform2, 11> ragdollInitialTransforms_{};
     std::array<jointId, 10> ragdollJoints_{};
     std::array<jointId, 2> carJoints_{};
     float carMotorSpeed_ = 8.0f; // 주행 목표의 크기 (rad/s). 방향은 A/D 입력이 결정함.
     float carMaxMotorTorque_ = 5.0f; // 주행과 제동의 토크 한도 (N*m).
+    bool carCameraTracking_ = true;
 
     chainId terrainChain_{};
     std::array<shapeId, 8> terrainSegments_{};

@@ -24,6 +24,7 @@ public:
     void cancelInput() override { view_.cancelInput(); }
 
     void setCollisionMatrix( const collisionMatrix& matrix ) override { view_.setCollisionMatrix( matrix ); }
+    [[nodiscard]] std::optional<vec2> getCameraTarget() const override { return view_.getCameraTarget(); }
 
     void drawControls() override
     {

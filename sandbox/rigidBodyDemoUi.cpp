@@ -921,6 +921,19 @@ void rigidBodyDemoUi::drawExperimentControls()
     else if( getKind() == demoKind::motorCar )
     {
         ImGui::TextUnformatted( "자동차 주행 관찰" );
+        bool tracking = getCarCameraTracking();
+        if( ImGui::Checkbox( "카메라 수평 추적###CarCameraTracking", &tracking ) ) setCarCameraTracking( tracking );
+        if( ImGui::Button( "차량 시작 위치 복귀###CarReset" ) ) resetCar();
+        if( ImGui::Button( "부드러운###CarSoft" ) ) applyCarSuspensionPreset( carSuspensionPreset::soft );
+        ImGui::SameLine();
+        if( ImGui::Button( "기본###CarStandard" ) ) applyCarSuspensionPreset( carSuspensionPreset::standard );
+        ImGui::SameLine();
+        if( ImGui::Button( "단단한###CarStiff" ) ) applyCarSuspensionPreset( carSuspensionPreset::stiff );
+        if( ImGui::Button( "스프링 없음###CarNoSpring" ) ) applyCarSuspensionPreset( carSuspensionPreset::noSpring );
+        if( ImGui::Button( "기본 마찰 (0.9)###CarGrip" ) ) setCarLowFriction( false );
+        ImGui::SameLine();
+        if( ImGui::Button( "저마찰 (0.02)###CarLowGrip" ) ) setCarLowFriction( true );
+        ImGui::TextWrapped( "서스펜션 프리셋은 ±0.25m 이동 제한을 켭니다. 설정을 바꾼 뒤 차량 복귀로 같은 경사를 비교하세요. 복귀는 마찰·서스펜션·구동 설정을 보존합니다. 추적을 끄면 카메라를 수동 이동할 수 있습니다. 바닥 끝에서 떨어지거나 뒤집히면 복귀하세요." );
         ImGui::Text( "차체 수평 속도: %.2f m/s", getWorld().GetBodyLinearVelocity( getImpulseBody() ).x );
         ImGui::TextWrapped( "캔버스 위 A/D로 주행하고 스페이스를 유지하면 제동합니다. 키를 놓으면 모터를 끄고 관성으로 구릅니다. 양쪽 키를 함께 누르면 자유 주행하며 제동이 주행보다 우선합니다." );
         if( ImGui::TreeNode( "구동 모터 설정###CarMotorSettings" ) )
@@ -983,19 +996,42 @@ void rigidBodyDemoUi::drawExperimentControls()
         }
         if( ImGui::TreeNode( "바퀴 반력 관찰###CarWheelObservations" ) )
         {
-            int wheel = 0;
-            for( const jointId id : getCarJoints() )
+            for( std::size_t wheel = 0; wheel < getCarJoints().size(); ++wheel )
             {
+                const jointId id = getCarJoints()[wheel];
                 if( !getWorld().IsValid( id ) ) continue;
 
                 const auto joint = getWorld().getWheelJointData( id );
                 const float speed = getWorld().GetBodyAngularVelocity( joint.bodyB ) - getWorld().GetBodyAngularVelocity( joint.bodyA );
-                ImGui::Text( "%s 바퀴: %.2f rad/s / %.2f N·m", wheel++ == 0 ? "왼쪽" : "오른쪽", speed, joint.motorTorque );
+                ImGui::Text( "%s 바퀴: %.2f rad/s / %.2f N·m", wheel == 0 ? "왼쪽" : "오른쪽", speed, joint.motorTorque );
                 ImGui::Text( "변위 %.3f m / 스프링 %.2f N / 제한 %.2f N", joint.currentTranslation, joint.springForce, joint.limitForce );
+                const auto observation = getCarWheelObservation( wheel );
+                if( observation.grounded ) ImGui::Text( "접지 / 접선 미끄러짐 %.3f m/s", observation.slipSpeed );
+                else ImGui::TextUnformatted( "공중 / 미끄러짐 측정 없음" );
             }
             ImGui::TreePop();
         }
         ImGui::Spacing();
+    }
+    else if( getKind() == demoKind::ragdoll )
+    {
+        ImGui::TextUnformatted( "렉돌 낙하·관절 비교" );
+        if( ImGui::Button( "처음 자세로 복귀###RagdollReset" ) ) resetRagdoll();
+        if( ImGui::Button( "자유 관절###RagdollFree" ) ) setRagdollJointFriction( 0.0f );
+        ImGui::SameLine();
+        if( ImGui::Button( "약한 마찰###RagdollLightFriction" ) ) setRagdollJointFriction( 0.03f );
+        ImGui::SameLine();
+        if( ImGui::Button( "강한 마찰###RagdollStrongFriction" ) ) setRagdollJointFriction( 0.3f );
+        float friction = getRagdollJointFriction();
+        if( ImGui::SliderFloat( "관절 마찰 토크###RagdollFriction", &friction, 0.0f, 1.0f, "%.3f N·m", ImGuiSliderFlags_AlwaysClamp ) ) setRagdollJointFriction( friction );
+        bool selfCollision = getRagdollSelfCollision();
+        if( ImGui::Checkbox( "비연결 부위 자기 충돌###RagdollSelfCollision", &selfCollision ) ) setRagdollSelfCollision( selfCollision );
+        int internalContacts = 0;
+        const auto floor = getShapes()[0].shapeHandle;
+        for( const auto& contact : getContacts() ) if( contact.shapeA != floor && contact.shapeB != floor ) ++internalContacts;
+        ImGui::Text( "신체 내부 접촉: %d", internalContacts );
+        ImGui::TextWrapped( "설정을 바꾼 뒤 자세 복귀로 같은 낙하를 비교하세요. 복귀는 관절 제한·마찰·충돌 설정을 보존합니다. 마찰은 회전을 늦추며 특정 자세로 되돌리는 모터가 아닙니다. 자기 충돌을 끄면 Box2D처럼 같은 렉돌의 부위끼리 통과하지만 바닥 접촉은 유지합니다. 직접 연결된 부위는 항상 충돌하지 않습니다." );
+        ImGui::TextWrapped( "A/D: 몸통 밀기 · Space: 위로 충격 · S: 회전 충격 · 왼쪽 드래그: 부위 잡기. 초록·빨강 선과 회색 호는 각 관절의 허용 각도입니다." );
     }
     else
     {

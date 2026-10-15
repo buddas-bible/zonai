@@ -374,5 +374,79 @@ int main()
         check( data.currentAngle >= data.lowerAngle - 0.15f && data.currentAngle <= data.upperAngle + 0.15f, "Ragdoll settles inside each angular limit" );
     }
 
+    for( const int substeps : { 1, 4, 8 } )
+        for( const bool selfCollision : { false, true } )
+            for( const float friction : { 0.0f, 0.3f } )
+            {
+                rigidBodyDemo actor{ demoKind::ragdoll };
+                actor.setRagdollJointFriction( friction );
+                actor.setRagdollSelfCollision( selfCollision );
+                auto& simulation = actor.getWorld();
+                simulation.ApplyLinearImpulseToCenter( actor.getImpulseBody(), { 2.0f, 1.0f } );
+                bool sawSelfContact = false;
+                bool sawFloorContact = false;
+                const auto floor = actor.getShapes()[0].shapeHandle;
+                for( int frame = 0; frame < 600; ++frame )
+                {
+                    actor.step( 1.0f / 60.0f, substeps );
+                    for( const auto& contact : actor.getContacts() )
+                    {
+                        const bool internal = contact.shapeA != floor && contact.shapeB != floor;
+                        sawFloorContact |= !internal;
+                        if( !selfCollision ) check( !internal, "disabled self collision must remove internal contacts" );
+                        sawSelfContact |= internal;
+                    }
+                    for( const auto id : actor.getRagdollJoints() )
+                    {
+                        const auto joint = simulation.getRevoluteJointData( id );
+                        check( IsFinite( joint.anchorA ) && IsFinite( joint.anchorB ) && Length( joint.anchorB - joint.anchorA ) < 0.2f, "ragdoll joints must remain connected through impact" );
+                        check( joint.enableMotor == ( friction > 0.0f ) && joint.motorSpeed == 0.0f && joint.maxMotorTorque == friction, "friction setting must reach every joint without a pose target" );
+                        check( std::abs( joint.motorTorque ) <= friction + 0.0001f, "joint friction must respect its torque budget" );
+                    }
+                }
+                if( selfCollision ) check( sawSelfContact, "enabled self collision must exercise internal contact" );
+                check( sawFloorContact, "self collision selection must preserve floor contact" );
+                for( const auto id : actor.getRagdollJoints() )
+                {
+                    const auto joint = simulation.getRevoluteJointData( id );
+                    check( joint.currentAngle >= joint.lowerAngle - 0.15f && joint.currentAngle <= joint.upperAngle + 0.15f, "ragdoll must settle inside angular limits" );
+                }
+                actor.resetRagdoll();
+                check( actor.getRagdollSelfCollision() == selfCollision && actor.getRagdollJointFriction() == friction, "pose recovery must preserve comparison settings" );
+                check( Length( simulation.GetBodyTransform( actor.getImpulseBody() ).position - vec2{ 0.0f, 5.7f } ) < 0.001f, "pose recovery must restore initial torso position" );
+                for( const auto body : actor.getRagdollBodies() )
+                    check( LengthSquared( simulation.GetBodyLinearVelocity( body ) ) == 0.0f && simulation.GetBodyAngularVelocity( body ) == 0.0f, "pose recovery must stop all body parts" );
+                check( simulation.GetBodyCount() == 12 && simulation.getJointCount() == 10, "pose recovery must not accumulate simulation objects" );
+            }
+    for( const int substeps : { 1, 4, 8 } )
+    {
+        float freeMotion = 0.0f;
+        for( const float friction : { 0.0f, 0.3f } )
+        {
+            rigidBodyDemo actor{ demoKind::ragdoll };
+            auto& simulation = actor.getWorld();
+            simulation.SetGravity( {} );
+            actor.setRagdollSelfCollision( false );
+            actor.setRagdollJointFriction( friction );
+            for( const auto id : actor.getRagdollJoints() )
+            {
+                const auto joint = simulation.getRevoluteJointData( id );
+                simulation.setRevoluteJointLimit( id, false, joint.lowerAngle, joint.upperAngle );
+            }
+            const auto torso = actor.getImpulseBody();
+            simulation.ApplyAngularImpulse( torso, simulation.GetBodyRotationalInertia( torso ) * 3.0f );
+            for( int frame = 0; frame < 120; ++frame ) actor.step( 1.0f / 60.0f, substeps );
+            float relativeMotion = 0.0f;
+            for( const auto id : actor.getRagdollJoints() )
+            {
+                const auto joint = simulation.getRevoluteJointData( id );
+                relativeMotion += std::abs( simulation.GetBodyAngularVelocity( joint.bodyB ) - simulation.GetBodyAngularVelocity( joint.bodyA ) );
+            }
+            if( friction == 0.0f ) freeMotion = relativeMotion;
+            else check( relativeMotion < freeMotion * 0.2f, "joint friction must reduce relative rotation" );
+            actor.resetRagdoll();
+            for( const auto id : actor.getRagdollJoints() ) check( !simulation.getRevoluteJointData( id ).enableLimit, "recovery must preserve edited angular limits" );
+        }
+    }
     return EXIT_SUCCESS;
 }
