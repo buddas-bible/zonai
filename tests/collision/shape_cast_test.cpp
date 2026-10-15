@@ -72,6 +72,44 @@ int main()
         assert( !output.hit );
     }
 
+    // 반지름 0인 proxy가 x=1.005에서 2 이동하면 target에 닿는 fraction은 정확히 0.5임.
+    {
+        shapeCastInput2 input{};
+        input.proxyA = MakeShapeProxy( circle2{ {}, 0.0f } );
+
+        input.proxyB = MakeShapeProxy( circle2{ {}, 0.0f } );
+
+        input.transform.position = { 1.005f, 0.0f };
+
+        input.translationB = { -2.0f, 0.0f };
+
+        // fraction < maxFraction: 바로 다음 float까지 허용하면 hit.
+        input.maxFraction = std::nextafter( 0.5f, 1.0f );
+
+        const castOutput2 below = ShapeCast( input );
+
+        assert( below.hit );
+        assert( below.fraction == 0.5f );
+        assert( std::fabs( below.point.x ) < epsilon );
+        assert( std::fabs( below.normal.x - 1.0f ) < epsilon );
+
+        assert( std::fabs( below.normal.y ) < epsilon );
+
+        // fraction == maxFraction: Box2D는 상한을 제외하므로 miss.
+        input.maxFraction = 0.5f;
+
+        const castOutput2 equal = ShapeCast( input );
+
+        assert( !equal.hit );
+
+        // fraction > maxFraction: 바로 이전 float까지만 허용하면 miss.
+        input.maxFraction = std::nextafter( 0.5f, 0.0f );
+
+        const castOutput2 above = ShapeCast( input );
+
+        assert( !above.hit );
+    }
+
     // 시작부터 겹쳐 있으면 fraction 0 hit.
     {
         shapeCastInput2 input{};
