@@ -123,6 +123,7 @@ public:
     // 유효한 서로 다른 Body 두 개 중 하나 이상이 Dynamic이어야 함.
     // Local anchor는 Body origin 기준, length는 양수이며 LINEAR_SLOP 이상으로 제한함.
     [[nodiscard]] jointId createDistanceJoint( const distanceJointDef& definition );
+    void setDistanceJointLength( jointId id, float length );
 
     // 같은 설정은 유지하고, mode/계수 변경은 cached impulse를 비우고 non-static component를 깨움.
     void setDistanceJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio );

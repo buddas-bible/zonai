@@ -34,6 +34,9 @@ struct bodyDef
     // bullet은 CCD에서 static뿐 아니라 kinematic / dynamic body까지 검사함.
     bool isBullet = false;
     bool allowFastRotation = false;
+
+    // 물리적인 회전을 잠그며, 명시적인 transform 변경은 허용함.
+    bool fixedRotation = false;
 };
 
 } // namespace zonai

@@ -206,8 +206,8 @@ void solvePrismaticJointConstraint( prismaticJointConstraint2& constraint, bodyS
     const vec2 rhs = velocity + bias;
 
     vec2 correction{};
-    constexpr float determinantEpsilon = 1.0e-12f;
-    if( determinant > determinantEpsilon )
+    // 질량 스케일이 커지면 정상 행렬식도 작아지므로 절대 임계값으로 결합항을 버리지 않음.
+    if( determinant > 0.0f )
     {
         const float invDet = 1.0f / determinant;
         correction.x = invDet * ( k22 * rhs.x - k12 * rhs.y );

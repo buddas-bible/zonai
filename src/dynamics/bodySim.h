@@ -65,6 +65,7 @@ struct bodySim
     // 이 simulation 데이터가 대응하는 World 내부 body index.
     // NULL_INDEX면 현재 free slot임.
     std::int32_t bodyId = NULL_INDEX;
+    bool fixedRotation = false;
 };
 
 } // namespace zonai

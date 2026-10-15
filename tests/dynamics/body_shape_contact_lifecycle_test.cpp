@@ -424,8 +424,35 @@ void checkCapsuleCreationBoundary()
     check( simulation.GetShapeCount() == 0, "capsule cleanup" );
 }
 
+void checkFixedRotation()
+{
+    world simulation{};
+    simulation.SetGravity( {} );
+    bodyDef definition{};
+    definition.type = bodyType::Dynamic;
+    definition.fixedRotation = true;
+    definition.angularVelocity = 3.0f;
+    const bodyId fixed = simulation.CreateBody( definition );
+    const shapeId shape = simulation.CreateShape( fixed, circle2{ {}, 0.5f } );
+    simulation.SetShapeDensity( shape, 2.0f );
+    simulation.SetBodyAngularVelocity( fixed, 4.0f );
+    simulation.ApplyAngularImpulse( fixed, 5.0f );
+    simulation.ApplyTorque( fixed, 6.0f );
+    simulation.ApplyForce( fixed, { 1.0f, 0.0f }, { 0.0f, 1.0f } );
+    simulation.Step( 1.0f / 60.0f, 4 );
+    const auto rotation = simulation.GetBodyTransform( fixed ).rotation;
+    check( rotation.c == 1.0f && rotation.s == 0.0f && simulation.GetBodyAngularVelocity( fixed ) == 0.0f, "fixed rotation must survive mass updates and physical angular inputs" );
+    simulation.DestroyBody( fixed );
+    definition.fixedRotation = false;
+    const bodyId free = simulation.CreateBody( definition );
+    (void)simulation.CreateShape( free, circle2{ {}, 0.5f } );
+    simulation.Step( 1.0f / 60.0f, 4 );
+    check( simulation.GetBodyAngularVelocity( free ) > 0.0f && simulation.GetBodyTransform( free ).rotation.s > 0.0f, "reused body slot must allow default free rotation" );
+}
+
 int main()
 {
+    checkFixedRotation();
     checkCapsuleCreationBoundary();
     checkOwnership();
     checkWorldReuse();

@@ -25,8 +25,49 @@ bool near( float a, float b )
 
 }
 
+void checkCoupledMotorLimits()
+{
+    bodySim fixed{};
+    fixed.bodyId = 0;
+    bodySim moving{};
+    moving.bodyId = 1;
+    moving.invMass = 1.0f;
+    moving.invInertia = 1.0f;
+    for( const bool limitLinear : { false, true } )
+        for( const float direction : { -1.0f, 1.0f } )
+        {
+            motorJointSim2 joint{};
+            joint.jointId = 0;
+            joint.bodyIdA = 0;
+            joint.bodyIdB = 1;
+            joint.localAnchorB = { 1.0f, 0.0f };
+            joint.linearVelocity = { 0.0f, limitLinear ? direction : 0.0f };
+            joint.angularVelocity = limitLinear ? 0.0f : direction;
+            joint.maxVelocityForce = limitLinear ? 1.0f : 1000.0f;
+            joint.maxVelocityTorque = limitLinear ? 1000.0f : 1.0f;
+            auto constraint = prepareMotorJointConstraint( joint, fixed, moving, 0.1f );
+            bodyState stateA{}, stateB{};
+            for( int iteration = 0; iteration < 16; ++iteration )
+            {
+                solveMotorJointConstraint( constraint, stateA, stateB );
+                check( Length( constraint.linearVelocityImpulse ) <= constraint.maxLinearImpulse + 0.00001f, "coupled motor exceeds force budget" );
+                check( std::abs( constraint.angularVelocityImpulse ) <= constraint.maxAngularImpulse + 0.00001f, "coupled motor exceeds torque budget" );
+            }
+            const vec2 pointVelocity = stateB.linearVelocity + Cross( stateB.angularVelocity, constraint.anchorB );
+            if( limitLinear )
+            {
+                check( near( stateB.linearVelocity.y, 0.1f * direction ) && near( stateB.angularVelocity, 0.0f ), "force-limited motor must preserve angular braking" );
+            }
+            else
+            {
+                check( near( pointVelocity.y, 0.0f ) && near( stateB.angularVelocity, 0.05f * direction ), "torque-limited motor must preserve point velocity" );
+            }
+        }
+}
+
 int main()
 {
+    checkCoupledMotorLimits();
     bodySim bodyA{};
     bodyA.bodyId = 0;
     bodyA.invMass = 1.0f;
@@ -67,7 +108,7 @@ int main()
     check( near( std::abs( constraint.angularVelocityImpulse ), joint.maxVelocityTorque * h ), "angular motor impulse is limited by max torque times h" );
 
     // Linear / angular Motor를 동시에 켜고 anchor가 COM 밖에 있으면 두 제약은 서로 결합됨.
-    // 순차 angular -> linear solve만 두 번 호출해서는 linear impulse가 다시 만든 angular error가 남음.
+    // Box2D처럼 순차 계산을 반복해 linear impulse가 만든 angular error도 수렴시킴.
     bodySim coupledBodyA{};
     coupledBodyA.bodyId = 2;
     bodySim coupledBodyB{};
@@ -88,9 +129,10 @@ int main()
     auto coupledConstraint = prepareMotorJointConstraint( coupledJoint, coupledBodyA, coupledBodyB, h );
     bodyState coupledStateA{};
     bodyState coupledStateB{};
-    // World의 현재 Joint solve와 같은 두 번의 pass를 재현함.
-    solveMotorJointConstraint( coupledConstraint, coupledStateA, coupledStateB );
-    solveMotorJointConstraint( coupledConstraint, coupledStateA, coupledStateB );
+    for( int iteration = 0; iteration < 16; ++iteration )
+    {
+        solveMotorJointConstraint( coupledConstraint, coupledStateA, coupledStateB );
+    }
     const vec2 coupledPointVelocity = coupledStateB.linearVelocity + Cross( coupledStateB.angularVelocity, coupledConstraint.anchorB );
     check( near( coupledPointVelocity.x, coupledJoint.linearVelocity.x ) && near( coupledPointVelocity.y, coupledJoint.linearVelocity.y ), "off-center combined Motor preserves linear target" );
     check( near( coupledStateB.angularVelocity - coupledStateA.angularVelocity, coupledJoint.angularVelocity ), "off-center combined Motor preserves angular target" );

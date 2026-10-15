@@ -127,6 +127,7 @@ bodyId world::CreateBody( const bodyDef& definition )
     bodySim.enableContactRecycling = definition.enableContactRecycling;
     bodySim.isBullet = definition.isBullet;
     bodySim.allowFastRotation = definition.allowFastRotation;
+    bodySim.fixedRotation = definition.fixedRotation;
 
     assert( bodyStates_.size() == bodies_.size() );
 
@@ -136,7 +137,7 @@ bodyId world::CreateBody( const bodyDef& definition )
     if( definition.type != bodyType::Static )
     {
         bodyState.linearVelocity = definition.linearVelocity;
-        bodyState.angularVelocity = definition.angularVelocity;
+        bodyState.angularVelocity = definition.fixedRotation ? 0.0f : definition.angularVelocity;
     }
 
     ++bodyCount_;
@@ -392,6 +393,18 @@ jointId world::createDistanceJoint( const distanceJointDef& definition )
     sim.maxMotorForce = definition.maxMotorForce;
 
     return makeJointId( index );
+}
+
+void world::setDistanceJointLength( jointId id, float length )
+{
+    assert( std::isfinite( length ) && length >= 0.0f );
+    auto& joint = std::get<distanceJointSim2>( jointSims_[getJointIndex( id )] );
+    length = std::max( length, LINEAR_SLOP );
+    if( joint.length == length ) return;
+    joint.length = length;
+    joint.impulse = joint.lowerImpulse = joint.upperImpulse = joint.motorImpulse = 0.0f;
+    if( bodies_[joint.bodyIdA].type != bodyType::Static ) WakeBodyByIndex( joint.bodyIdA );
+    if( bodies_[joint.bodyIdB].type != bodyType::Static ) WakeBodyByIndex( joint.bodyIdB );
 }
 
 void world::setDistanceJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio )
@@ -1698,7 +1711,7 @@ void world::SetBodyAngularVelocity( bodyId bodyId, float angularVelocity )
     const body& body = bodies_[bodyIndex];
 
     // 정적 body는 움직이지 않으므로 setter를 무시함.
-    if( body.type == bodyType::Static ) return;
+    if( body.type == bodyType::Static || bodySims_[bodyIndex].fixedRotation ) return;
 
     if( angularVelocity != 0.0f )
     {
@@ -3857,7 +3870,7 @@ void world::UpdateBodyMassData( std::int32_t bodyIndex )
 
     assert( body.inertia >= 0.0f );
 
-    if( body.inertia > 0.0f )
+    if( body.inertia > 0.0f && !bodySim.fixedRotation )
     {
         // Constraint solver에서 angular impulse를 곱셈으로 적용하기 위해
         // 역관성도 미리 계산해 보관함.

@@ -24,8 +24,37 @@ bool near( float a, float b )
 
 }
 
+void checkMassScale()
+{
+    for( const float density : { 1.0f, 1.0e6f, 1.0e8f } )
+    {
+        world simulation{};
+        simulation.SetGravity( {} );
+        const bodyId rail = simulation.CreateBody();
+        bodyDef definition{};
+        definition.type = bodyType::Dynamic;
+        definition.transform.position = { -10.0f, 0.0f };
+        definition.linearVelocity = { 0.0f, 1.0f };
+        definition.enableSleep = false;
+        const bodyId slider = simulation.CreateBody( definition );
+        ( void )simulation.CreateShape( slider, circle2{ {}, 1.0f }, {}, density );
+        prismaticJointDef jointDefinition{};
+        jointDefinition.bodyA = rail;
+        jointDefinition.bodyB = slider;
+        jointDefinition.localAnchorB = { 10.0f, 0.0f };
+        const jointId joint = simulation.createPrismaticJoint( jointDefinition );
+
+        simulation.Step( 0.1f, 4 );
+        const auto data = simulation.getPrismaticJointData( joint );
+        check( std::abs( simulation.GetBodyLinearVelocity( slider ).y ) < 0.00001f, "mass scale must not weaken lateral velocity constraint" );
+        check( std::abs( simulation.GetBodyAngularVelocity( slider ) ) < 0.00001f, "mass scale must not weaken angular velocity constraint" );
+        check( std::abs( data.lateralError ) < 0.002f && std::abs( data.currentAngle ) < 0.00001f, "heavy off-center slider must stay on rail without rotating" );
+    }
+}
+
 int main()
 {
+    checkMassScale();
     const float h = 1.0f / 60.0f;
 
     for( const int subSteps : { 1, 4 } )

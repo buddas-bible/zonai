@@ -118,6 +118,20 @@ void solveMotorJointConstraint( motorJointConstraint2& constraint, bodyState& bo
         bodyStateB.angularVelocity += constraint.invInertiaB * impulse;
     }
 
+    // Box2D처럼 각 actuator의 누적 한도를 적용한 최신 속도로 다음 제약을 풂.
+    if( constraint.maxAngularImpulse > 0.0f && angularK > 0.0f )
+    {
+        const float angularMass = 1.0f / angularK;
+        const float velocityError = bodyStateB.angularVelocity - bodyStateA.angularVelocity - constraint.angularVelocity;
+        const float deltaImpulse = -angularMass * velocityError;
+        const float oldImpulse = constraint.angularVelocityImpulse;
+        constraint.angularVelocityImpulse = std::clamp( oldImpulse + deltaImpulse, -constraint.maxAngularImpulse, constraint.maxAngularImpulse );
+        const float impulse = constraint.angularVelocityImpulse - oldImpulse;
+
+        bodyStateA.angularVelocity -= constraint.invInertiaA * impulse;
+        bodyStateB.angularVelocity += constraint.invInertiaB * impulse;
+    }
+
     // Linear spring은 anchor 위치 오차 C를 spring-damper bias로 바꿔 실제 복원 impulse를 만듦.
     // Contact의 penetration bias와 달리 spring impulse는 relax pass에서도 제거하지 않고 물리 응답으로 유지함.
     if( constraint.linearHertz > 0.0f && constraint.maxLinearSpringImpulse > 0.0f )
@@ -150,82 +164,7 @@ void solveMotorJointConstraint( motorJointConstraint2& constraint, bodyState& bo
         bodyStateB.angularVelocity += constraint.invInertiaB * Cross( r_b, impulse );
     }
 
-    const bool solveLinear = constraint.maxLinearImpulse > 0.0f;
-    const bool solveAngular = constraint.maxAngularImpulse > 0.0f && angularK > 0.0f;
-
-    if( solveLinear && solveAngular )
-    {
-        const vec2 pointVelocityA = bodyStateA.linearVelocity + Cross( bodyStateA.angularVelocity, r_a );
-        const vec2 pointVelocityB = bodyStateB.linearVelocity + Cross( bodyStateB.angularVelocity, r_b );
-        const vec2 linearError = pointVelocityB - pointVelocityA - constraint.linearVelocity;
-        const float angularError = bodyStateB.angularVelocity - bodyStateA.angularVelocity - constraint.angularVelocity;
-
-        /*
-        * COM 밖의 anchor에서는 linear impulse가 r x P만큼 각속도도 바꾸므로 linear / angular Motor는 독립 제약이 아님.
-        * 두 채널을 순서대로 풀면 뒤에서 적용한 linear impulse가 앞서 맞춘 angular target을 다시 깨뜨릴 수 있음.
-        * 그래서 [Px, Py, L]을 하나의 3x3 block으로 풀어 같은 순간의 세 velocity error를 함께 제거함.
-        */
-        const float k11 = constraint.invMassA + constraint.invMassB + constraint.invInertiaA * r_a.y * r_a.y + constraint.invInertiaB * r_b.y * r_b.y;
-        const float k12 = -constraint.invInertiaA * r_a.x * r_a.y - constraint.invInertiaB * r_b.x * r_b.y;
-        const float k22 = constraint.invMassA + constraint.invMassB + constraint.invInertiaA * r_a.x * r_a.x + constraint.invInertiaB * r_b.x * r_b.x;
-        const float k13 = -constraint.invInertiaA * r_a.y - constraint.invInertiaB * r_b.y;
-        const float k23 = constraint.invInertiaA * r_a.x + constraint.invInertiaB * r_b.x;
-        const float k33 = angularK;
-
-        const float cofactor11 = k22 * k33 - k23 * k23;
-        const float cofactor12 = k13 * k23 - k12 * k33;
-        const float cofactor13 = k12 * k23 - k13 * k22;
-        const float cofactor22 = k11 * k33 - k13 * k13;
-        const float cofactor23 = k12 * k13 - k11 * k23;
-        const float cofactor33 = k11 * k22 - k12 * k12;
-        const float determinant = k11 * cofactor11 + k12 * cofactor12 + k13 * cofactor13;
-
-        if( determinant > 0.0f )
-        {
-            const float invDet = 1.0f / determinant;
-            const vec2 deltaLinearImpulse{
-                -invDet * ( cofactor11 * linearError.x + cofactor12 * linearError.y + cofactor13 * angularError ),
-                -invDet * ( cofactor12 * linearError.x + cofactor22 * linearError.y + cofactor23 * angularError )
-            };
-            const float deltaAngularImpulse = -invDet * ( cofactor13 * linearError.x + cofactor23 * linearError.y + cofactor33 * angularError );
-
-            const vec2 oldLinearImpulse = constraint.linearVelocityImpulse;
-            const float oldAngularImpulse = constraint.angularVelocityImpulse;
-            constraint.linearVelocityImpulse += deltaLinearImpulse;
-            constraint.angularVelocityImpulse += deltaAngularImpulse;
-
-            // 힘과 토크 한도는 서로 다른 actuator 예산이므로 누적 impulse도 각각의 한도로 제한함.
-            if( Length( constraint.linearVelocityImpulse ) > constraint.maxLinearImpulse )
-            {
-                constraint.linearVelocityImpulse = constraint.maxLinearImpulse * Normalize( constraint.linearVelocityImpulse );
-            }
-            constraint.angularVelocityImpulse = std::clamp( constraint.angularVelocityImpulse, -constraint.maxAngularImpulse, constraint.maxAngularImpulse );
-
-            const vec2 linearImpulse = constraint.linearVelocityImpulse - oldLinearImpulse;
-            const float angularImpulse = constraint.angularVelocityImpulse - oldAngularImpulse;
-            bodyStateA.linearVelocity -= constraint.invMassA * linearImpulse;
-            bodyStateA.angularVelocity -= constraint.invInertiaA * ( Cross( r_a, linearImpulse ) + angularImpulse );
-            bodyStateB.linearVelocity += constraint.invMassB * linearImpulse;
-            bodyStateB.angularVelocity += constraint.invInertiaB * ( Cross( r_b, linearImpulse ) + angularImpulse );
-            return;
-        }
-    }
-
-    // 한 채널만 활성화됐거나 3x3 block이 singular하면 풀 수 있는 제약을 독립 경로로 처리함.
-    if( solveAngular )
-    {
-        const float angularMass = 1.0f / angularK;
-        const float velocityError = bodyStateB.angularVelocity - bodyStateA.angularVelocity - constraint.angularVelocity;
-        const float deltaImpulse = -angularMass * velocityError;
-        const float oldImpulse = constraint.angularVelocityImpulse;
-        constraint.angularVelocityImpulse = std::clamp( oldImpulse + deltaImpulse, -constraint.maxAngularImpulse, constraint.maxAngularImpulse );
-        const float impulse = constraint.angularVelocityImpulse - oldImpulse;
-
-        bodyStateA.angularVelocity -= constraint.invInertiaA * impulse;
-        bodyStateB.angularVelocity += constraint.invInertiaB * impulse;
-    }
-
-    if( solveLinear )
+    if( constraint.maxLinearImpulse > 0.0f )
     {
         const vec2 pointVelocityA = bodyStateA.linearVelocity + Cross( bodyStateA.angularVelocity, r_a );
         const vec2 pointVelocityB = bodyStateB.linearVelocity + Cross( bodyStateB.angularVelocity, r_b );
