@@ -22,6 +22,7 @@ private:
     void drawDebugSettings();
 #pragma endregion Controls
     int selectedShapeIndex_ = 0;
+    int terrainProbeIndex_ = 0;
     bool showGrid_ = true;
     bool showShapeAABBs_ = false;
     bool showFatAABBs_ = true;

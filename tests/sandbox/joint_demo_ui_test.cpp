@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstdlib>
+#include <string_view>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -177,6 +178,32 @@ int main()
     carView->handleInput( drive );
     for( int frame = 0; frame < 120; ++frame ) carView->step( 1.0f / 60.0f, 4 );
     if( carView->getCameraTarget()->x < 2.0f ) fail( "Car tracking target must move with the simulated chassis" );
+    rigidBodyDemoUi terrainView{ demoKind::terrainChain };
+    for( const char* control : { "TerrainSeams", "TerrainFront", "TerrainBack", "TerrainReset" } )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
+        ImGui::SetNextWindowSize( { 420.0f, 4000.0f } );
+        ImGui::Begin( "Terrain controls" );
+        GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( control );
+        terrainView.drawControls();
+        const vec2 velocity = terrainView.getWorld().GetBodyLinearVelocity( terrainView.getImpulseBody() );
+        if( control == std::string_view{ "TerrainReset" } )
+        {
+            if( LengthSquared( velocity ) != 0.0f ) fail( "Terrain reset button must stop the probe" );
+        }
+        else if( LengthSquared( velocity ) < 30.0f ) fail( "Terrain trial button must launch the probe" );
+        debugCamera camera{};
+        ImDrawList* list = ImGui::GetWindowDrawList();
+        const int before = list->VtxBuffer.Size;
+        debugDraw draw{ list, camera, { 0.0f, 0.0f }, { 800.0f, 600.0f } };
+        terrainView.draw( draw );
+        bool sawNormal = false;
+        for( int i = before; i < list->VtxBuffer.Size; ++i ) sawNormal |= list->VtxBuffer[i].col == IM_COL32( 100, 255, 140, 255 );
+        if( !sawNormal ) fail( "Terrain view must draw front-face arrows" );
+        ImGui::End();
+        ImGui::Render();
+    }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }

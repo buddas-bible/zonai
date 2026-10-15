@@ -55,6 +55,34 @@ int main()
     auto& playground = static_cast<rigidBodyDemo&>( session.getDemo() );
     check( playground.getWorld().GetBodyCount() == 6 && playground.getWorld().getJointCount() == 0, "playground separated from pendulum" );
     const bodyId oldBody = playground.getImpulseBody();
+    for( const int substeps : { 1, 4, 8 } )
+    {
+        rigidBodyDemo scene{ demoKind::playground };
+        auto& physics = scene.getWorld();
+        const auto circle = scene.getImpulseBody();
+        const auto shape = scene.getShapes()[2].shapeHandle;
+        physics.SetShapeDensity( shape, 3.0f );
+        physics.SetShapeFriction( shape, 0.7f );
+        physics.SetShapeRestitution( shape, 0.6f );
+        physics.SetGravity( {} );
+        demoInput kick{}; kick.jumpPressed = true;
+        scene.handleInput( kick );
+        check( std::abs( physics.GetBodyLinearVelocity( circle ).y - 5.0f ) < 0.001f, "mass-scaled impulse must preserve velocity change" );
+        bool reversed = false;
+        for( int frame = 0; frame < 1200; ++frame )
+        {
+            scene.step( 1.0f / 60.0f, substeps );
+            const auto platform = scene.getShapes()[5].bodyHandle;
+            const float x = physics.GetBodyTransform( platform ).position.x;
+            check( x >= -5.53f && x <= -2.47f, "kinematic platform must stay within its observation range" );
+            reversed |= physics.GetBodyLinearVelocity( platform ).x < 0.0f;
+        }
+        check( reversed, "kinematic platform must reverse direction" );
+        scene.resetPlayground();
+        check( Length( physics.GetBodyTransform( circle ).position - vec2{ -3.2f, 3.5f } ) < 0.001f && LengthSquared( physics.GetBodyLinearVelocity( circle ) ) == 0.0f, "playground recovery must restore pose and stop motion" );
+        check( physics.GetShape( shape ).density == 3.0f && physics.GetShape( shape ).friction == 0.7f && physics.GetShape( shape ).restitution == 0.6f && LengthSquared( physics.GetGravity() ) == 0.0f, "playground recovery must preserve material and gravity" );
+        check( physics.GetBodyCount() == 6 && physics.getJointCount() == 0, "playground recovery must not accumulate objects" );
+    }
     session.setPlaying( true );
     session.advance( 1.0f / 60.0f, 4 );
     check( session.getStepCount() == 1, "playing advances" );

@@ -99,6 +99,50 @@ int main()
 
     check( sawTerrainContact, "dynamic probes make real contact with the chain terrain" );
 
+    for( const int substeps : { 1, 4, 8 } )
+        for( std::size_t probe = 0; probe < 3; ++probe )
+            for( const auto trial : { terrainTrial::seams, terrainTrial::front, terrainTrial::back } )
+            {
+                rigidBodyDemo scene{ demoKind::terrainChain };
+                auto& physics = scene.getWorld();
+                const auto body = scene.getShapes()[8 + probe].bodyHandle;
+                scene.launchTerrainProbe( probe, trial );
+                const vec2 a = scene.getTerrainPoint( 3 ), b = scene.getTerrainPoint( 4 );
+                const vec2 normal = Cross( Normalize( b - a ), 1.0f );
+                bool contacted = false, crossed = false;
+                for( int frame = 0; frame < 120; ++frame )
+                {
+                    scene.step( 1.0f / 60.0f, substeps );
+                    const auto position = physics.GetBodyTransform( body ).position;
+                    check( IsFinite( position ), "terrain trials must remain finite" );
+                    const float side = Dot( position - 0.5f * ( a + b ), normal );
+                    for( const auto& contact : scene.getContacts() )
+                    {
+                        const auto selected = scene.getShapes()[8 + probe].shapeHandle;
+                        if( contact.shapeA != selected && contact.shapeB != selected ) continue;
+                        const auto other = contact.shapeA == selected ? contact.shapeB : contact.shapeA;
+                        if( !physics.IsValid( physics.GetShapeParentChain( other ) ) ) continue;
+                        contacted = true;
+                        if( trial == terrainTrial::back && !crossed && side < 0.0f ) check( false, "back face must not block the approaching probe" );
+                    }
+                    if( side > 0.8f ) crossed = true;
+                }
+                if( trial == terrainTrial::back ) check( crossed, "back trial must pass through to the front side" );
+                else check( contacted, "front and seam trials must exercise terrain contact" );
+                if( trial == terrainTrial::seams ) check( physics.GetBodyTransform( body ).position.x < 6.0f, "seam trial must pass the first internal vertex" );
+                physics.SetShapeFriction( scene.getShapes()[8 + probe].shapeHandle, 0.37f );
+                physics.SetGravity( { 0.0f, -3.0f } );
+                const auto initialPoint = scene.getTerrainPoint( 4 );
+                demoInput edit{}; edit.mouseHeld = edit.mousePressed = true; edit.mousePosition = initialPoint;
+                scene.handleInput( edit );
+                edit.mousePressed = false; edit.mousePosition.y += 0.2f; scene.handleInput( edit );
+                scene.resetTerrainProbes();
+                check( samePoint( scene.getTerrainPoint( 4 ), edit.mousePosition ), "probe reset must preserve edited terrain" );
+                check( physics.GetShape( scene.getShapes()[8 + probe].shapeHandle ).friction == 0.37f && physics.GetGravity().y == -3.0f, "probe reset must preserve material and gravity" );
+                check( !scene.getTerrainPointDragIndex() && LengthSquared( physics.GetBodyLinearVelocity( body ) ) == 0.0f, "probe reset must cancel editing and stop motion" );
+                check( physics.GetBodyCount() == 4 && physics.GetShapeCount() == 11 && physics.GetChainCount() == 1 && physics.getJointCount() == 0, "repeated terrain trials must reuse existing objects" );
+            }
+
     // Terrain demo는 parent chain point를 직접 선택해서 SetChainPoint 경로로 실시간 편집함.
     rigidBodyDemo editableTerrain{ terrainEntry->kind };
     check( editableTerrain.getTerrainPointCount() == 9, "terrain editor exposes nine editable points" );

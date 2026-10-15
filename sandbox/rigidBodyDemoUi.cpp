@@ -220,6 +220,13 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         const shapeColors colors = getShapeColors( bodyRef.type, bodyRef.awake );
 
         draw.DrawShape( shapeRef.geometry, transform, colors.outline, colors.fill );
+        if( getKind() == demoKind::terrainChain )
+            if( const auto* edge = std::get_if<chainSegment2>( &shapeRef.geometry ) )
+            {
+                const vec2 a = TransformPoint( transform, edge->segment.a );
+                const vec2 b = TransformPoint( transform, edge->segment.b );
+                draw.DrawArrow( 0.5f * ( a + b ), Cross( Normalize( b - a ), 1.0f ), IM_COL32( 100, 255, 140, 255 ), 0.6f );
+            }
 
         if( showShapeAABBs_ )
         {
@@ -634,7 +641,18 @@ void rigidBodyDemoUi::drawExperimentControls()
 
     if( getKind() == demoKind::playground && ( !getWorld().IsValid( getImpulseBody() ) || !getWorld().IsValid( getTorqueBody() ) ) ) return;
 
-    if( getKind() == demoKind::distancePendulum )
+    if( getKind() == demoKind::terrainChain )
+    {
+        const char* probes[] = { "원", "캡슐", "상자" };
+        ImGui::Combo( "시험 도형###TerrainProbe", &terrainProbeIndex_, probes, 3 );
+        if( ImGui::Button( "이음새 통과###TerrainSeams" ) ) launchTerrainProbe( terrainProbeIndex_, terrainTrial::seams );
+        if( ImGui::Button( "앞면 접근###TerrainFront" ) ) launchTerrainProbe( terrainProbeIndex_, terrainTrial::front );
+        ImGui::SameLine();
+        if( ImGui::Button( "뒷면 접근###TerrainBack" ) ) launchTerrainProbe( terrainProbeIndex_, terrainTrial::back );
+        if( ImGui::Button( "시험 물체 복귀###TerrainReset" ) ) resetTerrainProbes();
+        ImGui::TextWrapped( "초록 화살표 쪽이 충돌하는 앞면입니다. 뒷면에서는 통과할 수 있습니다. 이웃 점 정보는 이음새의 불필요한 걸림을 줄이며 급경사·마찰까지 없애지는 않습니다. 같은 경로를 도형별로 비교하세요. 발사·복귀는 편집 지형과 물성·중력을 보존합니다. 지형을 접거나 교차시키면 단순한 위·아래 대신 각 선분의 화살표를 기준으로 보세요." );
+    }
+    else if( getKind() == demoKind::distancePendulum )
     {
         ImGui::TextUnformatted( "거리 조인트" );
         distanceJointData pendulum = getWorld().getDistanceJointData( getPendulumJoint() );
@@ -1038,6 +1056,12 @@ void rigidBodyDemoUi::drawExperimentControls()
         ImGui::TextUnformatted( "충격량 실험" );
 
         const float circleMass = getWorld().GetBodyMass( getImpulseBody() );
+        if( getKind() == demoKind::playground )
+        {
+            if( ImGui::Button( "설정 보존 위치 복귀###PlaygroundReset" ) ) resetPlayground();
+            ImGui::TextWrapped( "A/D는 일정한 가속도를 주는 지속적인 힘입니다. 충격량은 질량에 비례시켜 밀도를 바꿔도 같은 속도 변화를 줍니다. 복귀는 물성·중력 설정을 보존하며 발판은 좌우로 왕복합니다." );
+            ImGui::Text( "점프: J = %.3f N·s, 속도 변화 +5 m/s / 중심 밖 밀기: J = %.3f N·s, 수평 속도 변화 +4 m/s", circleMass * 5.0f, circleMass * 4.0f );
+        }
 
         if( ImGui::Button( "점프 충격량###Jump impulse", ImVec2( -1.0f, 0.0f ) ) )
         {

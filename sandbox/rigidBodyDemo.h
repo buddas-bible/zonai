@@ -64,6 +64,7 @@ enum class weldDemoPreset
 };
 
 enum class carSuspensionPreset { soft, standard, stiff, noSpring };
+enum class terrainTrial { seams, front, back };
 
 struct carWheelObservation
 {
@@ -119,6 +120,9 @@ public:
     void setCollisionMatrix( const collisionMatrix& matrix ) override;
     void setMouseSettings( float hertz, float dampingRatio, float maxForce );
     void setCarMotorSettings( float speed, float maxTorque );
+    void resetPlayground();
+    void resetTerrainProbes();
+    void launchTerrainProbe( std::size_t probeIndex, terrainTrial trial );
     void resetCar();
     void applyCarSuspensionPreset( carSuspensionPreset preset );
     void setCarLowFriction( bool enabled );
@@ -277,6 +281,7 @@ private:
     std::vector<contactData> contacts_;
 
     bodyId impulseBody_{}; // 이동과 임펄스 입력을 적용할 물체
+    std::array<transform2, 6> playgroundInitialTransforms_{};
     bodyId torqueBody_{};  // 회전 임펄스를 적용할 물체
     bodyId pendulumBody_{};
     jointId pendulumJoint_{};
@@ -304,6 +309,7 @@ private:
     bool carCameraTracking_ = true;
 
     chainId terrainChain_{};
+    std::array<transform2, 3> terrainInitialTransforms_{};
     std::array<shapeId, 8> terrainSegments_{};
     std::optional<std::size_t> terrainPointDragIndex_{};
 

@@ -84,6 +84,14 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 
 void rigidBodyDemo::step( float timeStep, int subStepCount )
 {
+    if( kind_ == demoKind::playground && timeStep > 0.0f && world_.IsValid( shapes_[5].bodyHandle ) )
+    {
+        const auto platform = shapes_[5].bodyHandle;
+        const float x = world_.GetBodyTransform( platform ).position.x;
+        const float speed = world_.GetBodyLinearVelocity( platform ).x;
+        if( x >= -2.5f && speed > 0.0f ) world_.SetBodyLinearVelocity( platform, { -1.25f, 0.0f } );
+        else if( x <= -5.5f && speed < 0.0f ) world_.SetBodyLinearVelocity( platform, { 1.25f, 0.0f } );
+    }
     if( kind_ == demoKind::motorJointPlayground && motorTargetTracking_ && timeStep > 0.0f && world_.IsValid( motorJoint_ ) )
     {
         motorTargetTime_ += timeStep;
@@ -317,6 +325,23 @@ void rigidBodyDemo::createPlayground()
     world_.SetBodyLinearVelocity( kinematicBody, { 1.25f, 0.0f } );
 
     shapes_.push_back( { kinematicBody, kinematicShape, "발판 [키네마틱]" } );
+    for( std::size_t i = 0; i < shapes_.size(); ++i ) playgroundInitialTransforms_[i] = world_.GetBodyTransform( shapes_[i].bodyHandle );
+}
+
+void rigidBodyDemo::resetPlayground()
+{
+    if( kind_ != demoKind::playground ) return;
+    cancelInput();
+    for( std::size_t i = 0; i < shapes_.size(); ++i )
+    {
+        const auto body = shapes_[i].bodyHandle;
+        if( !world_.IsValid( body ) ) continue;
+        world_.SetBodyTransform( body, playgroundInitialTransforms_[i] );
+        world_.SetBodyLinearVelocity( body, i == 5 ? vec2{ 1.25f, 0.0f } : vec2{} );
+        world_.SetBodyAngularVelocity( body, 0.0f );
+        world_.ClearForces( body );
+    }
+    refreshContacts();
 }
 
 void rigidBodyDemo::createTerrainChain()
@@ -365,6 +390,41 @@ void rigidBodyDemo::createTerrainChain()
     torqueBody_ = world_.CreateBody( bodyType::Dynamic, { { -4.0f, 2.4f }, rot2::FromRadians( 0.12f ) } );
     const shapeId boxShape = world_.CreateShape( torqueBody_, MakeBox( { 0.55f, 0.45f } ) );
     shapes_.push_back( { torqueBody_, boxShape, "상자 [Chain Probe]" } );
+    for( std::size_t i = 0; i < terrainInitialTransforms_.size(); ++i ) terrainInitialTransforms_[i] = world_.GetBodyTransform( shapes_[terrainSegments_.size() + i].bodyHandle );
+}
+
+void rigidBodyDemo::resetTerrainProbes()
+{
+    if( kind_ != demoKind::terrainChain ) return;
+    cancelInput();
+    for( std::size_t i = 0; i < terrainInitialTransforms_.size(); ++i )
+    {
+        const auto body = shapes_[terrainSegments_.size() + i].bodyHandle;
+        if( !world_.IsValid( body ) ) continue;
+        world_.SetBodyTransform( body, terrainInitialTransforms_[i] );
+        world_.SetBodyLinearVelocity( body, {} );
+        world_.SetBodyAngularVelocity( body, 0.0f );
+        world_.ClearForces( body );
+    }
+    refreshContacts();
+}
+
+void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial trial )
+{
+    if( kind_ != demoKind::terrainChain || probeIndex >= terrainInitialTransforms_.size() || !world_.IsValid( terrainChain_ ) ) return;
+    const auto body = shapes_[terrainSegments_.size() + probeIndex].bodyHandle;
+    if( !world_.IsValid( body ) ) return;
+    resetTerrainProbes();
+    const std::size_t edge = trial == terrainTrial::seams ? 0 : 3;
+    const auto ground = world_.GetBodyTransform( shapes_[edge].bodyHandle );
+    const vec2 a = TransformPoint( ground, getTerrainPoint( edge ) );
+    const vec2 b = TransformPoint( ground, getTerrainPoint( edge + 1 ) );
+    const vec2 tangent = Normalize( b - a );
+    const vec2 normal = Cross( tangent, 1.0f );
+    const float side = trial == terrainTrial::back ? -1.0f : 1.0f;
+    world_.SetBodyTransform( body, { 0.5f * ( a + b ) + side * 1.5f * normal, rot2::FromRadians( std::atan2( tangent.y, tangent.x ) ) } );
+    world_.SetBodyLinearVelocity( body, trial == terrainTrial::seams ? 6.0f * tangent : -side * 8.0f * normal );
+    refreshContacts();
 }
 
 void rigidBodyDemo::createPendulum()
