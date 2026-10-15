@@ -788,6 +788,7 @@ void rigidBodyDemo::startTerrainPointDrag( vec2 point )
 {
     terrainPointDragIndex_.reset();
     if( kind_ != demoKind::terrainChain || !world_.IsValid( terrainChain_ ) ) return;
+    point = InverseTransformPoint( world_.GetBodyTransform( shapes_[0].bodyHandle ), point );
 
     const float pickRadiusSquared = TERRAIN_POINT_PICK_RADIUS * TERRAIN_POINT_PICK_RADIUS;
     float bestDistanceSquared = pickRadiusSquared;
@@ -804,7 +805,8 @@ void rigidBodyDemo::startTerrainPointDrag( vec2 point )
 
 void rigidBodyDemo::updateTerrainPointDrag( vec2 point )
 {
-    if( !terrainPointDragIndex_.has_value() ) return;
+    if( !terrainPointDragIndex_.has_value() || !world_.IsValid( terrainChain_ ) ) return;
+    point = InverseTransformPoint( world_.GetBodyTransform( shapes_[0].bodyHandle ), point );
 
     const std::size_t pointIndex = *terrainPointDragIndex_;
     const vec2 currentPoint = getTerrainPoint( pointIndex );

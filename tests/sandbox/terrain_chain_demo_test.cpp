@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <string_view>
@@ -142,6 +143,74 @@ int main()
                 check( !scene.getTerrainPointDragIndex() && LengthSquared( physics.GetBodyLinearVelocity( body ) ) == 0.0f, "probe reset must cancel editing and stop motion" );
                 check( physics.GetBodyCount() == 4 && physics.GetShapeCount() == 11 && physics.GetChainCount() == 1 && physics.getJointCount() == 0, "repeated terrain trials must reuse existing objects" );
             }
+
+    for( const auto transform : { transform2{ { 20.0f, -3.0f }, {} }, transform2{ {}, rot2::FromRadians( 0.6f ) }, transform2{ { 20.0f, -3.0f }, rot2::FromRadians( 0.6f ) } } )
+    {
+        rigidBodyDemo scene{ demoKind::terrainChain };
+        auto& physics = scene.getWorld();
+        physics.SetBodyTransform( scene.getShapes()[0].bodyHandle, transform );
+        demoInput click{};
+        click.mousePressed = click.mouseHeld = true;
+        click.mousePosition = TransformPoint( transform, scene.getTerrainPoint( 4 ) );
+        scene.handleInput( click );
+        check( scene.getTerrainPointDragIndex() == 4, "transformed terrain must select the visible world-space point" );
+        check( !physics.IsValid( scene.getMouseJoint() ), "terrain point selection must not create a mouse joint" );
+        const vec2 destination{ 0.3f, 1.1f };
+        click.mousePressed = false;
+        click.mousePosition = TransformPoint( transform, destination );
+        scene.handleInput( click );
+        check( Length( scene.getTerrainPoint( 4 ) - destination ) < 0.0001f, "world-space drag must update the corresponding local chain point" );
+        const auto validPoint = scene.getTerrainPoint( 4 );
+        click.mousePosition = TransformPoint( transform, scene.getTerrainPoint( 3 ) );
+        scene.handleInput( click );
+        check( samePoint( scene.getTerrainPoint( 4 ), validPoint ), "transformed drag must still reject collapsed edges" );
+        scene.cancelInput();
+        check( !scene.getTerrainPointDragIndex(), "transformed terrain drag must cancel cleanly" );
+    }
+
+    // 완만한 동일 경사의 이음새를 사용해 실제 지형 굴곡·마찰과 불필요한 걸림을 구분함.
+    for( const int substeps : { 1, 4, 8 } )
+        for( std::size_t probe = 0; probe < 3; ++probe )
+        {
+            rigidBodyDemo source{ demoKind::terrainChain };
+            world simulation{};
+            const auto ground = simulation.CreateBody();
+            std::array<vec2, 9> points{};
+            for( std::size_t i = 0; i < points.size(); ++i ) points[i] = { 8.0f - 2.0f * static_cast<float>( i ), 0.03f * static_cast<float>( i ) };
+            chainDef chain{};
+            chain.points = points;
+            chain.ghost1 = { 10.0f, -0.03f };
+            chain.ghost2 = { -10.0f, 0.27f };
+            chain.friction = 0.0f;
+            const auto terrain = simulation.CreateChain( ground, chain );
+            const vec2 tangent = Normalize( points[1] - points[0] );
+            const vec2 normal = Cross( tangent, 1.0f );
+            const float supportHeight = probe == 1 ? 0.3f : 0.45f;
+            const vec2 start = 0.5f * ( points[0] + points[1] );
+            const auto body = simulation.CreateBody( bodyType::Dynamic, { start + ( supportHeight + 0.02f ) * normal, rot2::FromRadians( std::atan2( tangent.y, tangent.x ) ) } );
+            const auto shape = simulation.CreateShape( body, source.getWorld().GetShape( source.getShapes()[8 + probe].shapeHandle ).geometry );
+            simulation.SetShapeFriction( shape, 0.0f );
+            simulation.SetBodyLinearVelocity( body, 4.0f * tangent );
+            std::array<bool, 8> visited{};
+            std::array<shapeId, 8> segments{};
+            check( simulation.GetChainSegments( terrain, segments ) == segments.size(), "multi-seam fixture must expose all eight segments" );
+            for( int frame = 0; frame < 180; ++frame )
+            {
+                simulation.Step( 1.0f / 60.0f, substeps );
+                const auto position = simulation.GetBodyTransform( body ).position;
+                const auto velocity = simulation.GetBodyLinearVelocity( body );
+                check( IsFinite( position ) && IsFinite( velocity ), "multi-seam traversal must remain finite" );
+                check( Dot( velocity, tangent ) > 3.4f, "smooth seams must not stop forward motion" );
+                if( frame > 30 ) check( std::abs( Dot( position - start, normal ) - supportHeight ) < 0.08f, "smooth seams must not launch or drop the probe" );
+                std::array<contactData, 8> contacts{};
+                const auto count = simulation.GetBodyContactData( body, contacts );
+                for( std::size_t i = 0; i < count; ++i )
+                    for( std::size_t edge = 0; edge < segments.size(); ++edge )
+                        if( contacts[i].shapeA == segments[edge] || contacts[i].shapeB == segments[edge] ) visited[edge] = true;
+            }
+            check( Dot( simulation.GetBodyTransform( body ).position - start, tangent ) > 10.0f, "probe must pass multiple successive internal vertices" );
+            check( std::count( visited.begin(), visited.end(), true ) >= 6, "multi-seam test must exercise at least six chain segments" );
+        }
 
     // Terrain demo는 parent chain point를 직접 선택해서 SetChainPoint 경로로 실시간 편집함.
     rigidBodyDemo editableTerrain{ terrainEntry->kind };
