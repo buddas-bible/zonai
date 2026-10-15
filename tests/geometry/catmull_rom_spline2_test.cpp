@@ -114,6 +114,28 @@ int main()
 
     check( near( Derivative( unevenCurve, 1, 0.25f ), finiteDifference, 1.0e-3f ), "analytic derivative agrees with a central finite difference" );
 
+    const auto samples = Sample( spline, 4 );
+
+    check( samples.size() == 5, "four subdivisions of one segment produce five samples" );
+    check( near( samples.front(), { 1.0f, 2.0f } ) && near( samples.back(), { 5.0f, 4.0f } ), "sampling preserves both open endpoints" );
+    check( near( samples[1], { 2.0f, 2.5f } ) && near( samples[2], { 3.0f, 3.0f } ), "sampling uses evenly spaced local parameters" );
+
+    const auto curveSamples = Sample( curve, 4 );
+
+    check( curveSamples.size() == 13, "segment joins appear only once in sampled output" );
+    for( std::size_t i = 0; i < curve.points.size(); ++i )
+        check( near( curveSamples[4 * i], points[i] ), "sampling preserves every control point" );
+
+    check( near( curveSamples[5], { 1.046875f, 0.203125f } ), "sampling evaluates the curved segment rather than interpolating its chords" );
+
+    const auto coarseSamples = Sample( curve, 1 );
+
+    check( coarseSamples.size() == 4, "one subdivision returns only the control points" );
+    check( Sample( spline, 0 ).empty(), "zero subdivisions are rejected" );
+    check( Sample( {}, 4 ).empty(), "invalid spline sampling is rejected before evaluation" );
+    check( Sample( { repeated }, 4 ).empty(), "degenerate spline sampling is rejected" );
+    check( Sample( curve, std::numeric_limits<std::size_t>::max() ).empty(), "unrepresentable sample count is rejected before allocation" );
+
 #ifdef NDEBUG
     check( near( Evaluate( {}, 0, 0.5f ), {} ), "invalid spline evaluation returns no point in Release" );
     check( near( Evaluate( spline, 1, 0.5f ), {} ), "out-of-range segment is rejected in Release" );

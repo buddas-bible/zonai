@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <span>
+#include <vector>
 
 #include "math/vec2.h"
 
@@ -26,5 +27,8 @@ vec2 Evaluate( const catmullRomSpline2& spline, std::size_t segmentIndex, float 
 
 // 같은 입력 계약으로 구간별 t에 대한 미분을 반환함. 단위 접선이나 arc-length 미분은 아님.
 vec2 Derivative( const catmullRomSpline2& spline, std::size_t segmentIndex, float t );
+
+// 각 구간을 같은 수로 분할하며 접합점은 한 번만 넣음. 잘못된 입력 / 불가능한 점 수는 빈 배열.
+std::vector<vec2> Sample( const catmullRomSpline2& spline, std::size_t subdivisions );
 
 } // namespace zonai

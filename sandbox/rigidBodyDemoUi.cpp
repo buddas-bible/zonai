@@ -220,7 +220,7 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         const shapeColors colors = getShapeColors( bodyRef.type, bodyRef.awake );
 
         draw.DrawShape( shapeRef.geometry, transform, colors.outline, colors.fill );
-        if( getKind() == demoKind::terrainChain )
+        if( getKind() == demoKind::terrainChain || getKind() == demoKind::splineTerrain )
             if( const auto* edge = std::get_if<chainSegment2>( &shapeRef.geometry ) )
             {
                 const vec2 a = TransformPoint( transform, edge->segment.a );
@@ -641,7 +641,7 @@ void rigidBodyDemoUi::drawExperimentControls()
 
     if( getKind() == demoKind::playground && ( !getWorld().IsValid( getImpulseBody() ) || !getWorld().IsValid( getTorqueBody() ) ) ) return;
 
-    if( getKind() == demoKind::terrainChain )
+    if( getKind() == demoKind::terrainChain || getKind() == demoKind::splineTerrain )
     {
         const char* probes[] = { "원", "캡슐", "상자" };
         ImGui::Combo( "시험 도형###TerrainProbe", &terrainProbeIndex_, probes, 3 );

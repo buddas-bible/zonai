@@ -50,7 +50,7 @@ std::unique_ptr<demo> createCounter( demoKind )
 
 int main()
 {
-    check( getDemoEntries().size() == 14, "fourteen independently selectable demo entries" );
+    check( getDemoEntries().size() == 15, "fifteen independently selectable demo entries" );
     demoSession session{ createRigidBodyDemo };
     auto& playground = static_cast<rigidBodyDemo&>( session.getDemo() );
     check( playground.getWorld().GetBodyCount() == 6 && playground.getWorld().getJointCount() == 0, "playground separated from pendulum" );
