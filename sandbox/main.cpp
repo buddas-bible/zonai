@@ -219,7 +219,7 @@ int main()
         // Controls
         // -----------------------------------------------------
 
-        ImGui::BeginChild( "조작 안내###Controls", ImVec2( 340.0f, 0.0f ), true );
+        ImGui::BeginChild( "조작 안내###Controls", ImVec2( 340.0f, 0.0f ), true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse );
 
         const demoEntry& selectedEntry = getDemoEntry( session.getKind() );
         ImGui::PushItemWidth( ImGui::GetContentRegionAvail().x * 0.45f );
@@ -260,6 +260,11 @@ int main()
         }
         ImGui::SliderInt( "하위 단계 수###Sub-steps", &subStepCount, 1, 16 );
         ImGui::Text( "고정 시간 간격: %.5f s / 진행 단계: %llu", 1.0f / 60.0f, static_cast<unsigned long long>( session.getStepCount() ) );
+        ImGui::PopItemWidth();
+        ImGui::Separator();
+        ImGui::BeginChild( "ControlDetails", ImVec2( 0.0f, 0.0f ) );
+        if( demoChanged ) ImGui::SetScrollY( 0.0f );
+        ImGui::PushItemWidth( ImGui::GetContentRegionAvail().x * 0.45f );
         if( ImGui::Button( "카메라 초기화###Reset Camera", ImVec2( -1.0f, 0.0f ) ) )
         {
             resetCamera();
@@ -274,6 +279,7 @@ int main()
         session.getDemo().drawControls();
         ImGui::PopItemWidth();
 
+        ImGui::EndChild();
         ImGui::EndChild();
 
         ImGui::SameLine();

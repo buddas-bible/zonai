@@ -25,13 +25,13 @@ private:
     int terrainProbeIndex_ = 0;
     bool showGrid_ = true;
     bool showShapeAABBs_ = false;
-    bool showFatAABBs_ = true;
+    bool showFatAABBs_ = false;
     bool showContacts_ = true;
     bool showContactDetails_ = false;
     bool showCOM_ = true;
     bool showVelocities_ = true;
     bool showLabels_ = false;
-    bool showDynamicTree_ = true;
+    bool showDynamicTree_ = false;
     bool showKinematicTree_ = false;
     bool showStaticTree_ = false;
     bool showTreeLeaves_ = true;

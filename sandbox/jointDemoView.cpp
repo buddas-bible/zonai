@@ -77,7 +77,6 @@ public:
                 if( ImGui::Button( "약한 모터 (1N)###PrismaticWeak" ) ) view_.setPrismaticMotorSettings( true, 2.0f, 1.0f );
                 ImGui::SameLine();
                 if( ImGui::Button( "오르기 (20N)###PrismaticClimb" ) ) view_.setPrismaticMotorSettings( true, 2.0f, 20.0f );
-                ImGui::SameLine();
                 if( ImGui::Button( "부하 제동 (20N)###PrismaticHold" ) ) view_.setPrismaticMotorSettings( true, 0.0f, 20.0f );
                 if( ImGui::Button( "자유###PrismaticPresetFree" ) ) view_.applyPrismaticPreset( prismaticDemoPreset::free );
                 ImGui::SameLine();
@@ -192,17 +191,17 @@ public:
                 {
                     if( !view_.getWorld().IsValid( visual.bodyHandle ) || view_.getWorld().GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
                     const float mass = view_.getWorld().GetBodyMass( visual.bodyHandle );
-                    ImGui::Text( "%s: %.2f kg / 무게 %.2f N", visual.label, mass, mass * Length( view_.getWorld().GetGravity() ) );
+                    ImGui::TextWrapped( "%s\n질량 %.2f kg / 무게 %.2f N", visual.label, mass, mass * Length( view_.getWorld().GetGravity() ) );
                 }
                 ImGui::TextWrapped( "힘 부족 프리셋으로 각 상자를 위로 들어보세요. 10N보다 무거운 상자는 들리지 않습니다. 같은 힘 한도를 사용해 질량 차이를 비교합니다." );
                 if( view_.getWorld().IsValid( view_.getMouseJoint() ) )
                 {
                     const auto joint = view_.getWorld().getMouseJointData( view_.getMouseJoint() );
-                    ImGui::Text( "목표 오차: %.3f m / 힘: %.2f N", Length( joint.target - joint.anchorB ), Length( joint.force ) );
+                    ImGui::TextWrapped( "목표 오차: %.3f m / 힘: %.2f N", Length( joint.target - joint.anchorB ), Length( joint.force ) );
                 }
                 else
                 {
-                    ImGui::TextUnformatted( "상자를 왼쪽 드래그하면 Mouse Joint가 생성됩니다." );
+                    ImGui::TextWrapped( "상자를 왼쪽 드래그하면 Mouse Joint가 생성됩니다." );
                 }
             }
         }

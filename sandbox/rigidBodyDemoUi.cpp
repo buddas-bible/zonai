@@ -828,7 +828,8 @@ void rigidBodyDemoUi::drawExperimentControls()
     {
         ImGui::TextUnformatted( "서스펜션 관찰" );
         wheelJointData joint = getWorld().getWheelJointData( getWheelJoint() );
-        ImGui::Text( "축 방향 변위: %.3f m / 축 옆 오차: %.4f m", joint.currentTranslation, joint.lateralError );
+        ImGui::Text( "축 방향 변위: %.3f m", joint.currentTranslation );
+        ImGui::Text( "축 옆 오차: %.4f m", joint.lateralError );
         const float angularVelocity = getWorld().GetBodyAngularVelocity( joint.bodyB ) - getWorld().GetBodyAngularVelocity( joint.bodyA );
         ImGui::Text( "바퀴 상대 각속도: %.2f rad/s", angularVelocity );
         ImGui::Text( "스프링 힘: %.2f N / 제한 힘: %.2f N", joint.springForce, joint.limitForce );
@@ -1060,7 +1061,8 @@ void rigidBodyDemoUi::drawExperimentControls()
         {
             if( ImGui::Button( "설정 보존 위치 복귀###PlaygroundReset" ) ) resetPlayground();
             ImGui::TextWrapped( "A/D는 일정한 가속도를 주는 지속적인 힘입니다. 충격량은 질량에 비례시켜 밀도를 바꿔도 같은 속도 변화를 줍니다. 복귀는 물성·중력 설정을 보존하며 발판은 좌우로 왕복합니다." );
-            ImGui::Text( "점프: J = %.3f N·s, 속도 변화 +5 m/s / 중심 밖 밀기: J = %.3f N·s, 수평 속도 변화 +4 m/s", circleMass * 5.0f, circleMass * 4.0f );
+            ImGui::TextWrapped( "점프: J %.3f N·s, 속도 +5 m/s", circleMass * 5.0f );
+            ImGui::TextWrapped( "중심 밖: J %.3f N·s, 수평 +4 m/s", circleMass * 4.0f );
         }
 
         if( ImGui::Button( "점프 충격량###Jump impulse", ImVec2( -1.0f, 0.0f ) ) )
@@ -1079,7 +1081,7 @@ void rigidBodyDemoUi::drawExperimentControls()
 
         const float boxInertia = getWorld().GetBodyRotationalInertia( getTorqueBody() );
 
-        if( ImGui::Button( "상자 회전시키기###Spin box", ImVec2( -1.0f, 0.0f ) ) )
+        if( ImGui::Button( "회전 충격량###Spin box", ImVec2( -1.0f, 0.0f ) ) )
         {
             // DeltaW = L / I = 3 rad/s
             getWorld().ApplyAngularImpulse( getTorqueBody(), boxInertia * 3.0f );
@@ -1089,8 +1091,8 @@ void rigidBodyDemoUi::drawExperimentControls()
 
         const float circleAngularVelocity = getWorld().GetBodyAngularVelocity( getImpulseBody() );
 
-        ImGui::Text( "원의 선속도: (%.2f, %.2f)", circleVelocity.x, circleVelocity.y );
-        ImGui::Text( "원의 각속도: %.2f rad/s", circleAngularVelocity );
+        ImGui::Text( "밀기 대상 선속도: (%.2f, %.2f)", circleVelocity.x, circleVelocity.y );
+        ImGui::Text( "밀기 대상 각속도: %.2f rad/s", circleAngularVelocity );
 
         ImGui::Spacing();
         ImGui::Separator();
