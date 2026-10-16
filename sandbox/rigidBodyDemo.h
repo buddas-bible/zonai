@@ -108,6 +108,7 @@ struct terrainTrialComparison
     terrainTrialStepComparison stepSettings = terrainTrialStepComparison::unavailable;
     bool gravityChangesObserved = false;
     bool materialChangesObserved = false;
+    bool massChangesObserved = false;
 };
 
 struct carWheelObservation
