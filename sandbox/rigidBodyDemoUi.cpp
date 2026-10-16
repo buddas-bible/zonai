@@ -763,6 +763,7 @@ void rigidBodyDemoUi::drawExperimentControls()
                     ImGui::Text( "첫 접촉까지 진행 설정 비교: %s", comparison.stepSettings == terrainTrialStepComparison::changed ? "변경 포함" : comparison.stepSettings == terrainTrialStepComparison::constantMatch ? "일정·같음" : "일정·다름" );
                     ImGui::Text( "비교 중력 변경 관측: %s", comparison.gravityChangesObserved ? "포함" : "없음" );
                     ImGui::Text( "비교 물체 물성 변경 관측: %s", comparison.materialChangesObserved ? "포함" : "없음" );
+                    ImGui::Text( "비교 물체 질량 변경 관측: %s", comparison.massChangesObserved ? "포함" : "없음" );
                     ImGui::Text( "첫 접촉 관측 차이 (현재 - 기준): %+.3f s", comparison.firstContactTimeDifference );
                     break;
             }
