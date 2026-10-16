@@ -882,6 +882,52 @@ int main()
             if( after.launchFriction != before.launchFriction || after.launchRestitution != before.launchRestitution || after.elapsed != before.elapsed || reference.has_value() != afterReference.has_value() || ( reference && ( afterReference->launchFriction != reference->launchFriction || afterReference->launchRestitution != reference->launchRestitution ) ) || materialView.getWorld().GetShapeFriction( probe.shapeHandle ) != friction || materialView.getWorld().GetShapeRestitution( probe.shapeHandle ) != restitution || LengthSquared( materialView.getWorld().GetBodyTransform( probe.bodyHandle ).position - pose.position ) != 0.0f || LengthSquared( materialView.getWorld().GetBodyLinearVelocity( probe.bodyHandle ) - velocity ) != 0.0f ) fail( "Material display must preserve recorded conditions, material and physics" );
         }
     }
+    {
+        rigidBodyDemoUi massView{ demoKind::splineTerrain };
+        const auto probe = massView.getShapes()[massView.getTerrainPointCount() - 1];
+        massView.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        const float originalMass = massView.getWorld().GetBodyMass( probe.bodyHandle );
+        char recordedMass[80];
+        std::snprintf( recordedMass, sizeof( recordedMass ), "발사 물체 질량: %.3f kg", originalMass );
+        for( int frame = 0; frame < 5; ++frame )
+        {
+            if( frame == 1 )
+            {
+                massView.launchTerrainProbe( 0, terrainTrial::front );
+                massView.step( 0.0625f, 4 );
+                if( !massView.pinTerrainTrialReference() ) fail( "Mass UI fixture must pin a trial" );
+                massView.getWorld().SetShapeDensity( probe.shapeHandle, 2.0f );
+            }
+            if( frame == 2 && !massView.relaunchTerrainTrialReference() ) fail( "Mass UI fixture must relaunch" );
+            if( frame == 3 ) massView.resetTerrainProbes();
+            if( frame == 4 && !massView.insertSplineControlPoint( 1 ) ) fail( "Mass UI fixture must edit terrain" );
+            const auto before = massView.getTerrainTrialObservation();
+            const auto reference = massView.getTerrainTrialReference();
+            const auto pose = massView.getWorld().GetBodyTransform( probe.bodyHandle );
+            const vec2 velocity = massView.getWorld().GetBodyLinearVelocity( probe.bodyHandle );
+            const float mass = massView.getWorld().GetBodyMass( probe.bodyHandle );
+            const float density = massView.getWorld().GetShapeDensity( probe.shapeHandle );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline launch mass" );
+            ImGui::LogToBuffer();
+            massView.drawControls();
+            const std::string_view log{ GImGui->LogBuffer.c_str() };
+            const auto recorded = log.find( recordedMass );
+            if( frame >= 1 && frame <= 3 && recorded == std::string_view::npos ) fail( "Mass UI must show recorded reference mass" );
+            if( frame == 1 && log.find( recordedMass, recorded + 1 ) == std::string_view::npos ) fail( "Mass UI must retain current recorded mass after live density edits" );
+            char currentMass[80];
+            std::snprintf( currentMass, sizeof( currentMass ), "발사 물체 질량: %.3f kg", mass );
+            if( frame == 2 && ( log.find( currentMass ) == std::string_view::npos || log.find( "비교: 발사 조건 다름" ) == std::string_view::npos ) ) fail( "Mass UI must show current relaunch mass and condition mismatch" );
+            if( ( frame == 0 || frame == 4 ) && log.find( "발사 물체 질량:" ) != std::string_view::npos ) fail( "Cleared observations must not display stale mass" );
+            ImGui::LogFinish();
+            ImGui::End();
+            ImGui::Render();
+            const auto afterReference = massView.getTerrainTrialReference();
+            if( massView.getTerrainTrialObservation().launchMass != before.launchMass || reference.has_value() != afterReference.has_value() || ( reference && afterReference->launchMass != reference->launchMass ) || massView.getWorld().GetBodyMass( probe.bodyHandle ) != mass || massView.getWorld().GetShapeDensity( probe.shapeHandle ) != density || LengthSquared( massView.getWorld().GetBodyTransform( probe.bodyHandle ).position - pose.position ) != 0.0f || LengthSquared( massView.getWorld().GetBodyLinearVelocity( probe.bodyHandle ) - velocity ) != 0.0f ) fail( "Mass display must preserve records, mass, density and motion" );
+        }
+    }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }

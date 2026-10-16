@@ -1338,5 +1338,33 @@ int main()
         check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noReference && !scene.getTerrainTrialComparison().materialChangesObserved, "missing reference does not produce a material summary" );
     }
 
+    for( std::size_t probeIndex = 0; probeIndex < 3; ++probeIndex )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1 + probeIndex];
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        const float mass = scene.getWorld().GetBodyMass( probe.bodyHandle );
+        scene.launchTerrainProbe( probeIndex, terrainTrial::front );
+        check( mass > 0.0f && scene.getTerrainTrialObservation().launchMass == mass, "launch records the selected probe body mass" );
+        scene.step( 0.0625f, 4 );
+        check( scene.pinTerrainTrialReference(), "mass fixture pins a progressed trial" );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 2.0f );
+        const float changedMass = scene.getWorld().GetBodyMass( probe.bodyHandle );
+        check( changedMass > mass, "density fixture must change actual body mass" );
+        check( scene.getTerrainTrialObservation().launchMass == mass && scene.getTerrainTrialReference()->launchMass == mass && scene.getTerrainTrialComparison().status != terrainTrialComparisonStatus::differentConditions, "live density changes do not rewrite recorded current or reference mass" );
+        scene.launchTerrainProbe( 99, terrainTrial::front );
+        check( scene.getTerrainTrialObservation().launchMass == mass, "failed launch preserves recorded mass" );
+        check( scene.relaunchTerrainTrialReference() && scene.getTerrainTrialObservation().launchMass == changedMass && scene.getWorld().GetBodyMass( probe.bodyHandle ) == changedMass && scene.getWorld().GetShapeDensity( probe.shapeHandle ) == 2.0f, "reference relaunch keeps current mass and density and records new mass" );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions, "recorded mass participates in launch condition comparison" );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions, "restoring live density does not retroactively change recorded mass" );
+        check( scene.relaunchTerrainTrialReference() && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::waitingForContact, "equal recorded mass allows contact comparison" );
+        scene.resetTerrainProbes();
+        check( scene.getTerrainTrialObservation().launchMass == 0.0f && scene.getTerrainTrialReference()->launchMass == mass, "probe reset clears current mass and keeps reference" );
+        scene.launchTerrainProbe( probeIndex, terrainTrial::seams );
+        check( scene.getTerrainTrialObservation().launchMass == mass, "seam trial records selected probe mass" );
+        check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialObservation().active && !scene.getTerrainTrialReference(), "terrain edits clear current and pinned mass records" );
+    }
+
     return 0;
 }
