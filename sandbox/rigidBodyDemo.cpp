@@ -436,7 +436,7 @@ void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial tri
     const auto body = shapes_[terrainSegments_.size() + probeIndex].bodyHandle;
     if( !world_.IsValid( body ) ) return;
     resetTerrainProbes();
-    const std::size_t edge = trial == terrainTrial::seams ? 0 : 3;
+    const std::size_t edge = trial == terrainTrial::seams ? 0 : std::min( std::size_t{ 3 }, terrainSegments_.size() - 1 );
     const auto ground = world_.GetBodyTransform( shapes_[edge].bodyHandle );
     const vec2 a = TransformPoint( ground, getTerrainPoint( edge ) );
     const vec2 b = TransformPoint( ground, getTerrainPoint( edge + 1 ) );

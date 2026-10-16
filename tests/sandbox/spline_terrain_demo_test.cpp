@@ -508,5 +508,22 @@ int main()
         check( !polygon.resetSplineTerrain() && !polygon.canUndoSplineEdit(), "spline reset does not affect polygon terrain" );
     }
 
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        while( scene.getSplineControlPoints().size() > 2 ) check( scene.removeSplineControlPoint( scene.getSplineControlPoints().size() - 1 ), "short terrain trial fixture removes endpoints" );
+        check( scene.getTerrainPointCount() == 2, "short terrain trial fixture has one edge" );
+        const vec2 a = scene.getTerrainPoint( 0 ), b = scene.getTerrainPoint( 1 );
+        const vec2 tangent = Normalize( b - a ), normal = Cross( tangent, 1.0f );
+        for( std::size_t probe = 0; probe < 3; ++probe )
+            for( const terrainTrial trial : { terrainTrial::front, terrainTrial::back, terrainTrial::seams } )
+            {
+                scene.launchTerrainProbe( probe, trial );
+                const bodyId body = scene.getShapes()[1 + probe].bodyHandle;
+                const float side = trial == terrainTrial::back ? -1.0f : 1.0f;
+                check( near( scene.getWorld().GetBodyTransform( body ).position, 0.5f * ( a + b ) + side * 1.5f * normal ), "one-edge terrain trials launch from its valid edge" );
+                check( near( scene.getWorld().GetBodyLinearVelocity( body ), trial == terrainTrial::seams ? 6.0f * tangent : -side * 8.0f * normal ), "one-edge terrain trials retain front, back and seam directions" );
+            }
+    }
+
     return 0;
 }
