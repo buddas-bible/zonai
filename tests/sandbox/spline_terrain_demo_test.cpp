@@ -1452,5 +1452,46 @@ int main()
         check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noReference && !scene.getTerrainTrialComparison().massChangesObserved, "missing reference does not produce a mass summary" );
     }
 
+    for( std::size_t probeIndex = 0; probeIndex < 3; ++probeIndex )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1 + probeIndex];
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        const float inertia = scene.getWorld().GetBodyRotationalInertia( probe.bodyHandle );
+        scene.launchTerrainProbe( probeIndex, terrainTrial::front );
+        check( inertia > 0.0f && scene.getTerrainTrialObservation().launchInertia == inertia, "launch records selected probe body rotational inertia" );
+        scene.step( 0.0625f, 4 );
+        check( scene.pinTerrainTrialReference(), "inertia fixture pins a progressed trial" );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 2.0f );
+        const float changedInertia = scene.getWorld().GetBodyRotationalInertia( probe.bodyHandle );
+        check( changedInertia > inertia && scene.getTerrainTrialObservation().launchInertia == inertia && scene.getTerrainTrialReference()->launchInertia == inertia, "live inertia changes do not rewrite current or reference records" );
+        scene.launchTerrainProbe( 99, terrainTrial::front );
+        check( scene.getTerrainTrialObservation().launchInertia == inertia, "failed launch retains recorded inertia" );
+        check( scene.relaunchTerrainTrialReference() && scene.getTerrainTrialObservation().launchInertia == changedInertia && scene.getWorld().GetBodyRotationalInertia( probe.bodyHandle ) == changedInertia && scene.getWorld().GetShapeDensity( probe.shapeHandle ) == 2.0f, "reference relaunch keeps current physical settings and records new inertia" );
+        scene.resetTerrainProbes();
+        check( scene.getTerrainTrialObservation().launchInertia == 0.0f && scene.getTerrainTrialReference()->launchInertia == inertia, "probe reset clears current inertia and retains reference" );
+        scene.launchTerrainProbe( probeIndex, terrainTrial::seams );
+        check( scene.getTerrainTrialObservation().launchInertia == changedInertia, "seam launch records selected probe inertia" );
+        check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialObservation().active && !scene.getTerrainTrialReference(), "terrain edits clear current and pinned inertia records" );
+    }
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        scene.step( 0.0625f, 4 );
+        check( scene.pinTerrainTrialReference(), "inertia-only fixture pins a trial" );
+        const float mass = scene.getTerrainTrialReference()->launchMass;
+        const float inertia = scene.getTerrainTrialReference()->launchInertia;
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 0.5f );
+        const auto extra = scene.getWorld().CreateShape( probe.bodyHandle, circle2{ { 2.0f, 0.0f }, 0.45f }, {}, 0.5f );
+        check( scene.getWorld().GetBodyMass( probe.bodyHandle ) == mass && scene.getWorld().GetBodyRotationalInertia( probe.bodyHandle ) != inertia, "redistributed mass changes inertia without changing total mass" );
+        check( scene.relaunchTerrainTrialReference() && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions, "recorded inertia mismatch is independent of recorded mass" );
+        scene.getWorld().DestroyShape( extra );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions, "restoring live inertia cannot rewrite recorded conditions" );
+        check( scene.relaunchTerrainTrialReference() && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::waitingForContact, "equal recorded inertia allows contact comparison" );
+    }
+
     return 0;
 }

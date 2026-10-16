@@ -969,6 +969,52 @@ int main()
             if( massView.getTerrainTrialObservation().launchMass != before.launchMass || reference.has_value() != afterReference.has_value() || ( reference && afterReference->launchMass != reference->launchMass ) || massView.getWorld().GetBodyMass( probe.bodyHandle ) != mass || massView.getWorld().GetShapeDensity( probe.shapeHandle ) != density || LengthSquared( massView.getWorld().GetBodyTransform( probe.bodyHandle ).position - pose.position ) != 0.0f || LengthSquared( massView.getWorld().GetBodyLinearVelocity( probe.bodyHandle ) - velocity ) != 0.0f ) fail( "Mass display must preserve records, mass, density and motion" );
         }
     }
+    {
+        rigidBodyDemoUi inertiaView{ demoKind::splineTerrain };
+        const auto probe = inertiaView.getShapes()[inertiaView.getTerrainPointCount() - 1];
+        inertiaView.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        const float originalInertia = inertiaView.getWorld().GetBodyRotationalInertia( probe.bodyHandle );
+        char recordedInertia[96];
+        std::snprintf( recordedInertia, sizeof( recordedInertia ), "발사 물체 회전 관성: %.3f", originalInertia );
+        for( int frame = 0; frame < 5; ++frame )
+        {
+            if( frame == 1 )
+            {
+                inertiaView.launchTerrainProbe( 0, terrainTrial::front );
+                inertiaView.step( 0.0625f, 4 );
+                if( !inertiaView.pinTerrainTrialReference() ) fail( "Inertia UI fixture must pin a trial" );
+                inertiaView.getWorld().SetShapeDensity( probe.shapeHandle, 2.0f );
+            }
+            if( frame == 2 && !inertiaView.relaunchTerrainTrialReference() ) fail( "Inertia UI fixture must relaunch" );
+            if( frame == 3 ) inertiaView.resetTerrainProbes();
+            if( frame == 4 && !inertiaView.insertSplineControlPoint( 1 ) ) fail( "Inertia UI fixture must edit terrain" );
+            const auto before = inertiaView.getTerrainTrialObservation();
+            const auto reference = inertiaView.getTerrainTrialReference();
+            const auto pose = inertiaView.getWorld().GetBodyTransform( probe.bodyHandle );
+            const vec2 velocity = inertiaView.getWorld().GetBodyLinearVelocity( probe.bodyHandle );
+            const float inertia = inertiaView.getWorld().GetBodyRotationalInertia( probe.bodyHandle );
+            const float density = inertiaView.getWorld().GetShapeDensity( probe.shapeHandle );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline launch inertia" );
+            ImGui::LogToBuffer();
+            inertiaView.drawControls();
+            const std::string_view log{ GImGui->LogBuffer.c_str() };
+            const auto recorded = log.find( recordedInertia );
+            if( frame >= 1 && frame <= 3 && recorded == std::string_view::npos ) fail( "Inertia UI must show recorded reference inertia" );
+            if( frame == 1 && log.find( recordedInertia, recorded + 1 ) == std::string_view::npos ) fail( "Inertia UI must retain current recorded inertia after live edits" );
+            char currentInertia[96];
+            std::snprintf( currentInertia, sizeof( currentInertia ), "발사 물체 회전 관성: %.3f", inertia );
+            if( frame == 2 && ( log.find( currentInertia ) == std::string_view::npos || log.find( "비교: 발사 조건 다름" ) == std::string_view::npos ) ) fail( "Inertia UI must show current relaunch inertia and condition mismatch" );
+            if( ( frame == 0 || frame == 4 ) && log.find( "발사 물체 회전 관성:" ) != std::string_view::npos ) fail( "Cleared observations must not display stale inertia" );
+            ImGui::LogFinish();
+            ImGui::End();
+            ImGui::Render();
+            const auto afterReference = inertiaView.getTerrainTrialReference();
+            if( inertiaView.getTerrainTrialObservation().launchInertia != before.launchInertia || reference.has_value() != afterReference.has_value() || ( reference && afterReference->launchInertia != reference->launchInertia ) || inertiaView.getWorld().GetBodyRotationalInertia( probe.bodyHandle ) != inertia || inertiaView.getWorld().GetShapeDensity( probe.shapeHandle ) != density || LengthSquared( inertiaView.getWorld().GetBodyTransform( probe.bodyHandle ).position - pose.position ) != 0.0f || LengthSquared( inertiaView.getWorld().GetBodyLinearVelocity( probe.bodyHandle ) - velocity ) != 0.0f ) fail( "Inertia display must preserve records, physical settings and motion" );
+        }
+    }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }

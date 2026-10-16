@@ -451,7 +451,7 @@ terrainTrialComparison rigidBodyDemo::getTerrainTrialComparison() const noexcept
     if( !current.active ) return { terrainTrialComparisonStatus::noObservation };
     const auto& reference = *terrainTrialReference_;
     if( current.probeIndex != reference.probeIndex || current.trial != reference.trial || current.launchFraction != reference.launchFraction || current.launchSpeed != reference.launchSpeed || current.launchGravity.x != reference.launchGravity.x || current.launchGravity.y != reference.launchGravity.y ) return { terrainTrialComparisonStatus::differentConditions };
-    if( current.launchFriction != reference.launchFriction || current.launchRestitution != reference.launchRestitution || current.launchMass != reference.launchMass ) return { terrainTrialComparisonStatus::differentConditions };
+    if( current.launchFriction != reference.launchFriction || current.launchRestitution != reference.launchRestitution || current.launchMass != reference.launchMass || current.launchInertia != reference.launchInertia ) return { terrainTrialComparisonStatus::differentConditions };
     if( !current.firstContactTime || !reference.firstContactTime ) return { terrainTrialComparisonStatus::waitingForContact };
     const bool settingsMatch = current.firstContactTimeStep == reference.firstContactTimeStep && current.firstContactSubStepCount == reference.firstContactSubStepCount;
     const auto stepSettings = current.preContactSettingsChanged || reference.preContactSettingsChanged ? terrainTrialStepComparison::changed : settingsMatch ? terrainTrialStepComparison::constantMatch : terrainTrialStepComparison::constantDifferent;
@@ -618,6 +618,7 @@ void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial tri
         terrainTrialObservation_.launchFriction = world_.GetShapeFriction( shape );
         terrainTrialObservation_.launchRestitution = world_.GetShapeRestitution( shape );
         terrainTrialObservation_.launchMass = world_.GetBodyMass( body );
+        terrainTrialObservation_.launchInertia = world_.GetBodyRotationalInertia( body );
         if( trial != terrainTrial::seams ) terrainTrialObservation_.launchFraction = splineTrialFraction_;
     }
 }
