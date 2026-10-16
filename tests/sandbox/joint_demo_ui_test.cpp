@@ -424,6 +424,56 @@ int main()
                 if( LengthSquared( positionView.getWorld().GetBodyTransform( positionView.getImpulseBody() ).position - ( 0.5f * ( a + b ) + 1.5f * normal ) ) > 1.0e-8f ) fail( "Seam trial button must retain its original launch position" );
         }
     }
+    {
+        rigidBodyDemoUi preview{ demoKind::splineTerrain };
+        preview.getWorld().SetBodyTransform( preview.getShapes()[0].bodyHandle, { { 1.5f, 0.75f }, rot2::FromRadians( 0.25f ) } );
+        preview.getWorld().SetBodyLinearVelocity( preview.getImpulseBody(), { 2, 3 } );
+        for( int frame = 0; frame < 6; ++frame )
+        {
+            preview.setSplineTrialFraction( frame == 0 ? 0.25f : 0.75f );
+            if( frame == 2 && !preview.insertSplineControlPoint( 1 ) ) fail( "Preview edit fixture must apply" );
+            if( frame == 3 && !preview.undoSplineEdit() ) fail( "Preview undo fixture must apply" );
+            if( frame == 4 )
+            {
+                preview.setSplineSamplingError( 0.005f );
+                if( !preview.resetSplineTerrain() ) fail( "Preview reset fixture must apply" );
+            }
+            if( frame == 5 ) preview.getWorld().DestroyChain( preview.getWorld().GetShapeParentChain( preview.getShapes()[0].shapeHandle ) );
+            const auto target = preview.getTerrainTrialTarget( terrainTrial::front );
+            const transform2 probePose = preview.getWorld().GetBodyTransform( preview.getImpulseBody() );
+            const vec2 velocity = preview.getWorld().GetBodyLinearVelocity( preview.getImpulseBody() );
+            const int contacts = preview.getWorld().GetContactCount();
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 800, 600 } );
+            ImGui::Begin( "Spline trial preview" );
+            debugCamera camera{};
+            camera.center = target ? target->point : vec2{};
+            camera.pixelsPerMeter = 60.0f;
+            ImDrawList* list = ImGui::GetWindowDrawList();
+            const int before = list->VtxBuffer.Size;
+            debugDraw draw{ list, camera, { 0, 0 }, { 800, 600 } };
+            preview.draw( draw );
+            bool pointFound = false, arrowFound = false, previewFound = false;
+            const ImVec2 point = target ? camera.WorldToScreen( target->point, { 0, 0 }, { 800, 600 } ) : ImVec2{};
+            const ImVec2 tip = target ? camera.WorldToScreen( target->point + 0.8f * Cross( target->tangent, 1.0f ), { 0, 0 }, { 800, 600 } ) : ImVec2{};
+            for( int i = before; i < list->VtxBuffer.Size; ++i )
+            {
+                const auto& vertex = list->VtxBuffer[i];
+                if( vertex.col != IM_COL32( 80, 220, 255, 255 ) ) continue;
+                previewFound = true;
+                const float dx = vertex.pos.x - point.x, dy = vertex.pos.y - point.y;
+                const float tx = vertex.pos.x - tip.x, ty = vertex.pos.y - tip.y;
+                pointFound |= dx * dx + dy * dy < 64.0f;
+                arrowFound |= tx * tx + ty * ty < 16.0f;
+            }
+            if( target && ( !pointFound || !arrowFound ) ) fail( "Preview must draw the selected world point and front-normal arrow after edits" );
+            if( !target && previewFound ) fail( "Retired terrain must not draw a stale preview" );
+            if( LengthSquared( preview.getWorld().GetBodyTransform( preview.getImpulseBody() ).position - probePose.position ) != 0.0f || LengthSquared( preview.getWorld().GetBodyLinearVelocity( preview.getImpulseBody() ) - velocity ) != 0.0f || preview.getWorld().GetContactCount() != contacts ) fail( "Preview drawing must not change probe motion or contacts" );
+            ImGui::End();
+            ImGui::Render();
+        }
+    }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }
