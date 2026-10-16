@@ -710,18 +710,33 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::TextUnformatted( "속도는 다음 앞면·뒷면 발사부터 적용합니다." );
             ImGui::TextWrapped( "지형 시작부터의 길이 비율입니다. Shift+왼쪽 드래그로 가까운 지형 위 위치를 고를 수 있습니다. 하늘색 점과 화살표는 시험 위치와 충돌 앞면을 표시합니다. 이음새 통과 시험은 시작 위치를 유지합니다." );
             const auto observation = getTerrainTrialObservation();
-            if( observation.active )
+            ImGui::BeginDisabled( !observation.active || observation.elapsed <= 0.0f );
+            if( ImGui::Button( "관측 기준 고정###SplineTrialPin" ) ) pinTerrainTrialReference();
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::BeginDisabled( !getTerrainTrialReference() );
+            if( ImGui::Button( "기준 해제###SplineTrialReferenceClear" ) ) clearTerrainTrialReference();
+            ImGui::EndDisabled();
+            const auto drawObservation = [&]( const terrainTrialObservation& value, const char* title )
             {
-                const char* trial = observation.trial == terrainTrial::front ? "앞면" : observation.trial == terrainTrial::back ? "뒷면" : "이음새";
-                ImGui::Text( "최근 발사: %s / %s", probes[observation.probeIndex], trial );
-                if( observation.launchFraction ) ImGui::Text( "발사 조건: 위치 %.1f %% / 초기 속도 %.1f m/s", *observation.launchFraction * 100.0f, observation.launchSpeed );
-                else ImGui::Text( "발사 조건: 첫 선분 중앙 / 초기 속도 %.1f m/s", observation.launchSpeed );
-                ImGui::Text( "경과: %.3f s / 지형 접촉: %s", observation.elapsed, observation.touching ? "있음" : "없음" );
-                if( observation.firstContactTime ) ImGui::Text( "첫 접촉 관측: %.3f s", *observation.firstContactTime );
+                if( !value.active )
+                {
+                    ImGui::Text( "%s: 없음", title );
+                    return;
+                }
+                const char* trial = value.trial == terrainTrial::front ? "앞면" : value.trial == terrainTrial::back ? "뒷면" : "이음새";
+                ImGui::Text( "%s: %s / %s", title, probes[value.probeIndex], trial );
+                if( value.launchFraction ) ImGui::Text( "발사 조건: 위치 %.1f %% / 초기 속도 %.1f m/s", *value.launchFraction * 100.0f, value.launchSpeed );
+                else ImGui::Text( "발사 조건: 첫 선분 중앙 / 초기 속도 %.1f m/s", value.launchSpeed );
+                ImGui::Text( "경과: %.3f s / 지형 접촉: %s", value.elapsed, value.touching ? "있음" : "없음" );
+                if( value.firstContactTime ) ImGui::Text( "첫 접촉 관측: %.3f s", *value.firstContactTime );
                 else ImGui::TextUnformatted( "첫 접촉 관측: 아직 없음" );
-                ImGui::TextWrapped( "접촉 시간은 물리 진행이 끝난 뒤 처음 확인한 시각입니다." );
-            }
-            else ImGui::TextUnformatted( "최근 발사: 없음" );
+            };
+            drawObservation( observation, "최근 발사" );
+            const auto reference = getTerrainTrialReference();
+            if( reference ) drawObservation( *reference, "비교 기준" );
+            else ImGui::TextUnformatted( "비교 기준: 없음" );
+            ImGui::TextWrapped( "접촉 시간은 물리 진행이 끝난 뒤 처음 확인한 시각입니다. 물리를 진행한 관측을 기준으로 고정할 수 있으며, 지형 편집 시 기준은 지워집니다." );
         }
         ImGui::Combo( "시험 도형###TerrainProbe", &terrainProbeIndex_, probes, 3 );
         if( ImGui::Button( "이음새 통과###TerrainSeams" ) ) launchTerrainProbe( terrainProbeIndex_, terrainTrial::seams );

@@ -444,11 +444,25 @@ void rigidBodyDemo::resetTerrainProbes()
     refreshContacts();
 }
 
+bool rigidBodyDemo::pinTerrainTrialReference()
+{
+    if( !terrainTrialObservation_.active || terrainTrialObservation_.elapsed <= 0.0f || !world_.IsValid( terrainChain_ ) ) return false;
+    terrainTrialReference_ = terrainTrialObservation_;
+    return true;
+}
+
 void rigidBodyDemo::updateTerrainTrialObservation( float timeStep )
 {
+    if( !terrainTrialObservation_.active && !terrainTrialReference_ ) return;
+    if( !world_.IsValid( terrainChain_ ) )
+    {
+        terrainTrialObservation_ = {};
+        terrainTrialReference_.reset();
+        return;
+    }
     if( !terrainTrialObservation_.active ) return;
     const std::size_t probeIndex = terrainSegments_.size() + terrainTrialObservation_.probeIndex;
-    if( !world_.IsValid( terrainChain_ ) || probeIndex >= shapes_.size() || !world_.IsValid( shapes_[probeIndex].shapeHandle ) )
+    if( probeIndex >= shapes_.size() || !world_.IsValid( shapes_[probeIndex].shapeHandle ) )
     {
         terrainTrialObservation_ = {};
         return;
@@ -1096,6 +1110,7 @@ bool rigidBodyDemo::updateSplineTerrain( std::span<const vec2> points, float err
         for( const auto probe : probes ) shapes_.push_back( probe );
     }
     terrainTrialObservation_ = {};
+    terrainTrialReference_.reset();
     refreshContacts();
     return true;
 }
