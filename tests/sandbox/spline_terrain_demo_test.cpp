@@ -385,5 +385,86 @@ int main()
         for( std::size_t i = 0; i < before.size(); ++i ) check( near( scene.getTerrainPoint( i ), before[i] ), "failed deletion preserves every sampled point" );
     }
 
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        const std::vector<vec2> original{ scene.getSplineControlPoints().begin(), scene.getSplineControlPoints().end() };
+        check( !scene.canUndoSplineEdit() && !scene.canRedoSplineEdit() && !scene.undoSplineEdit() && !scene.redoSplineEdit(), "fresh spline scenes have no edit history" );
+        const auto first = scene.getShapes()[0].shapeHandle;
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        check( scene.insertSplineControlPoint( 1 ) && scene.canUndoSplineEdit(), "insertion records one undo state" );
+        scene.getWorld().SetShapeFriction( first, 0.63f );
+        scene.getWorld().SetShapeFriction( probe.shapeHandle, 0.27f );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, { 3.0f, 4.0f } );
+        const transform2 pose = scene.getWorld().GetBodyTransform( probe.bodyHandle );
+        check( scene.undoSplineEdit() && !scene.canUndoSplineEdit() && scene.canRedoSplineEdit(), "undo transfers the single state to redo" );
+        check( scene.getSplineControlPoints().size() == original.size(), "undo restores control count" );
+        for( std::size_t i = 0; i < original.size(); ++i ) check( near( scene.getSplineControlPoints()[i], original[i] ), "undo restores each control" );
+        check( scene.getShapes()[0].shapeHandle == first && scene.getWorld().GetShape( first ).friction == 0.63f, "undo preserves the surviving edge's current material" );
+        check( scene.getShapes()[scene.getTerrainPointCount() - 1].shapeHandle == probe.shapeHandle && scene.getWorld().GetShape( probe.shapeHandle ).friction == 0.27f, "undo preserves the probe handle and current material" );
+        check( near( scene.getWorld().GetBodyTransform( probe.bodyHandle ).position, pose.position ) && near( scene.getWorld().GetBodyLinearVelocity( probe.bodyHandle ), { 3.0f, 4.0f } ), "undo preserves current probe pose and velocity" );
+        check( scene.redoSplineEdit() && scene.getSplineControlPoints().size() == 10 && !scene.canRedoSplineEdit(), "redo restores insertion" );
+        check( scene.undoSplineEdit(), "redo itself remains undoable" );
+        check( !scene.insertSplineControlPoint( 99 ) && !scene.removeSplineControlPoint( 99 ), "invalid edits fail with a redo state" );
+        scene.setSplineSamplingError( 0.01f );
+        scene.setSplineSamplingError( -1.0f );
+        demoInput drag{};
+        drag.mousePosition = scene.getSplineControlPoints()[1];
+        drag.mousePressed = drag.mouseHeld = true;
+        scene.handleInput( drag );
+        drag.mousePressed = false;
+        drag.mousePosition = scene.getSplineControlPoints()[0];
+        scene.handleInput( drag );
+        scene.cancelInput();
+        check( scene.canRedoSplineEdit() && !scene.canUndoSplineEdit(), "failed and unchanged inputs do not replace history" );
+        scene.setSplineSamplingError( 0.005f );
+        check( scene.canUndoSplineEdit() && !scene.canRedoSplineEdit(), "successful new edits invalidate redo" );
+        check( scene.undoSplineEdit() && scene.getSplineSamplingError() == 0.01f, "undo restores sampling error" );
+        check( scene.redoSplineEdit() && scene.getSplineSamplingError() == 0.005f, "redo restores sampling error" );
+        scene.beginSplineSamplingEdit();
+        scene.setSplineSamplingError( 0.02f );
+        scene.setSplineSamplingError( 0.04f );
+        scene.endSplineSamplingEdit();
+        check( scene.undoSplineEdit() && scene.getSplineSamplingError() == 0.005f, "a sampling gesture undoes all intermediate changes" );
+        check( scene.redoSplineEdit() && scene.getSplineSamplingError() == 0.04f, "a sampling gesture redoes its final error" );
+        drag.mousePosition = scene.getSplineControlPoints()[1];
+        const vec2 beforeDrag = drag.mousePosition;
+        drag.mousePressed = true;
+        scene.handleInput( drag );
+        drag.mousePressed = false;
+        drag.mousePosition.y += 0.3f;
+        scene.handleInput( drag );
+        drag.mousePosition.y += 0.5f;
+        scene.handleInput( drag );
+        drag.mouseHeld = false;
+        scene.handleInput( drag );
+        check( near( scene.getSplineControlPoints()[1], drag.mousePosition ), "history drag fixture applies both updates" );
+        check( scene.undoSplineEdit() && near( scene.getSplineControlPoints()[1], beforeDrag ), "one undo restores the entire drag" );
+        check( scene.redoSplineEdit() && near( scene.getSplineControlPoints()[1], drag.mousePosition ), "redo restores the final drag position" );
+        drag.mousePressed = drag.mouseHeld = true;
+        scene.handleInput( drag );
+        drag.mousePressed = false;
+        drag.mousePosition.y += 0.2f;
+        scene.handleInput( drag );
+        scene.cancelInput();
+        check( scene.undoSplineEdit() && near( scene.getSplineControlPoints()[1], beforeDrag + vec2{ 0.0f, 0.8f } ), "input cancellation closes the drag gesture without discarding its undo" );
+        check( scene.removeSplineControlPoint( 2 ) && scene.undoSplineEdit() && scene.getSplineControlPoints().size() == 9, "deletion can be undone" );
+        scene.resetTerrainProbes();
+        check( scene.canRedoSplineEdit(), "probe reset preserves edit history" );
+        check( scene.redoSplineEdit() && scene.getSplineControlPoints().size() == 8, "deletion can be redone after probe reset" );
+        rigidBodyDemo reset{ demoKind::splineTerrain };
+        check( !reset.canUndoSplineEdit() && !reset.canRedoSplineEdit(), "fresh scene reset clears history" );
+    }
+
+    for( const bool redo : { false, true } )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        check( scene.insertSplineControlPoint( 1 ), "restore failure fixture inserts a control" );
+        if( redo ) check( scene.undoSplineEdit(), "restore failure fixture prepares redo" );
+        const std::size_t count = scene.getSplineControlPoints().size();
+        scene.getWorld().DestroyChain( scene.getWorld().GetShapeParentChain( scene.getShapes()[0].shapeHandle ) );
+        check( redo ? !scene.redoSplineEdit() : !scene.undoSplineEdit(), "restoring against a retired chain fails" );
+        check( scene.getSplineControlPoints().size() == count && ( redo ? scene.canRedoSplineEdit() : scene.canUndoSplineEdit() ), "failed restoration preserves controls and history" );
+    }
+
     return 0;
 }

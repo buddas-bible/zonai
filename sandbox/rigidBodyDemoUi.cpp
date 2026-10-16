@@ -660,8 +660,18 @@ void rigidBodyDemoUi::drawExperimentControls()
     {
         if( getKind() == demoKind::splineTerrain )
         {
+            ImGui::BeginDisabled( !canUndoSplineEdit() );
+            if( ImGui::Button( "되돌리기###SplineUndo" ) ) undoSplineEdit();
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::BeginDisabled( !canRedoSplineEdit() );
+            if( ImGui::Button( "다시하기###SplineRedo" ) ) redoSplineEdit();
+            ImGui::EndDisabled();
             float error = getSplineSamplingError() * 100.0f;
-            if( ImGui::SliderFloat( "근사 오차###SplineSamplingError", &error, 0.5f, 5.0f, "%.2f cm", ImGuiSliderFlags_AlwaysClamp ) ) setSplineSamplingError( error / 100.0f );
+            const bool errorChanged = ImGui::SliderFloat( "근사 오차###SplineSamplingError", &error, 0.5f, 5.0f, "%.2f cm", ImGuiSliderFlags_AlwaysClamp );
+            if( ImGui::IsItemActivated() ) beginSplineSamplingEdit();
+            if( errorChanged ) setSplineSamplingError( error / 100.0f );
+            if( ImGui::IsItemDeactivated() ) endSplineSamplingEdit();
             ImGui::Text( "선분 수: %zu", getTerrainPointCount() - 1 );
             ImGui::TextWrapped( "충돌 선분이 너무 짧아지는 오차 변경이나 제어점 이동은 적용하지 않습니다." );
             const auto controls = getSplineControlPoints();
