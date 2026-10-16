@@ -233,6 +233,43 @@ int main()
             ImGui::Render();
         }
     }
+    {
+        rigidBodyDemoUi adaptiveView{ demoKind::splineTerrain };
+        for( int frame = 0; frame < 4; ++frame )
+        {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Adaptive inspector" );
+            if( frame == 0 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Object" );
+            if( frame == 1 )
+            {
+                auto* popup = ImGui::FindWindowByName( "##Combo_00" );
+                if( !popup ) fail( "Adaptive inspector selection popup fixture" );
+                GImGui->NavActivateId = GImGui->NavActivateDownId = popup->GetID( "원 [Chain Probe]" );
+            }
+            ImGui::LogToBuffer();
+            adaptiveView.drawControls();
+            const bool selectedProbe = std::string_view{ GImGui->LogBuffer.c_str() }.find( "원 [Chain Probe]" ) != std::string_view::npos;
+            if( frame == 2 && !selectedProbe ) fail( "Probe selection fixture must select the circle inspector" );
+            if( frame == 3 && !selectedProbe ) fail( "Inspector must retain the selected probe after adaptive topology changes" );
+            ImGui::LogFinish();
+            ImGui::End();
+            ImGui::Render();
+            if( frame == 2 )
+            {
+                const std::size_t before = adaptiveView.getTerrainPointCount();
+                demoInput drag{};
+                drag.mousePosition = adaptiveView.getSplineControlPoints()[1];
+                drag.mousePressed = drag.mouseHeld = true;
+                adaptiveView.handleInput( drag );
+                drag.mousePosition.y += 1.0f;
+                drag.mousePressed = false;
+                adaptiveView.handleInput( drag );
+                if( adaptiveView.getTerrainPointCount() == before ) fail( "Adaptive inspector fixture must change topology" );
+            }
+        }
+    }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }

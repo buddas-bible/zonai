@@ -112,7 +112,8 @@ public:
     // Parent chain의 point 하나를 stable child handle 안에서 바꾸고 인접 ghost adjacency도 함께 다시 연결함.
     void SetChainPoint( chainId chainId, std::size_t pointIndex, vec2 point );
 
-    // 같은 점 수의 열린 chain을 검증 후 일괄 갱신함. 실패하면 geometry를 유지함.
+    // 열린 chain을 검증 후 일괄 갱신함. 공통 앞쪽 child는 유지하고 새 child는 기존 끝 edge 설정을 이어받음.
+    // 제거한 child handle은 무효화함. 검증 실패하면 geometry를 유지함.
     [[nodiscard]] bool SetChainPoints( chainId chainId, std::span<const vec2> points, vec2 ghost1, vec2 ghost2 );
 
     [[nodiscard]] std::size_t GetChainSegmentCount( chainId chainId ) const;

@@ -14,6 +14,7 @@ namespace
 {
 
 constexpr float TERRAIN_POINT_PICK_RADIUS = 0.25f;
+constexpr float TERRAIN_SPLINE_ERROR = 0.01f;
 
 } // namespace
 
@@ -363,8 +364,7 @@ void rigidBodyDemo::createTerrainChain()
     };
 
     splineControlPoints_ = controlPoints;
-    // shortcut: 구간당 4분할로 근사함, 곡률에 따른 정확도가 필요할 때 adaptive sampling으로 교체할 것.
-    const std::vector<vec2> points = kind_ == demoKind::splineTerrain ? Sample( { controlPoints }, 4 ) : std::vector<vec2>{ controlPoints.begin(), controlPoints.end() };
+    const std::vector<vec2> points = kind_ == demoKind::splineTerrain ? SampleAdaptive( { controlPoints }, TERRAIN_SPLINE_ERROR ) : std::vector<vec2>{ controlPoints.begin(), controlPoints.end() };
 
     if( points.size() < 2 ) return;
 
@@ -853,12 +853,26 @@ void rigidBodyDemo::updateSplineControlPoint( std::size_t pointIndex, vec2 point
 
     auto candidate = splineControlPoints_;
     candidate[pointIndex] = point;
-    const auto samples = Sample( { candidate }, 4 );
+    const auto samples = SampleAdaptive( { candidate }, TERRAIN_SPLINE_ERROR );
     if( samples.size() < 2 ) return;
     const vec2 ghost1 = samples.front() + ( samples.front() - samples[1] );
     const vec2 ghost2 = samples.back() + ( samples.back() - samples[samples.size() - 2] );
+    const std::size_t oldCount = terrainSegments_.size();
+    const bodyId ground = shapes_[0].bodyHandle;
+    const std::array<visualShape, 3> probes{ shapes_[oldCount], shapes_[oldCount + 1], shapes_[oldCount + 2] };
+    shapes_.reserve( samples.size() + 2 );
+    terrainSegments_.reserve( samples.size() - 1 );
     if( !world_.SetChainPoints( terrainChain_, samples, ghost1, ghost2 ) ) return;
 
+    if( samples.size() - 1 != oldCount )
+    {
+        terrainSegments_.resize( samples.size() - 1 );
+        const std::size_t count = world_.GetChainSegments( terrainChain_, terrainSegments_ );
+        assert( count == terrainSegments_.size() );
+        shapes_.clear();
+        for( const shapeId child : terrainSegments_ ) shapes_.push_back( { ground, child, "지형 edge [Chain]" } );
+        for( const auto probe : probes ) shapes_.push_back( probe );
+    }
     splineControlPoints_ = candidate;
     refreshContacts();
 }

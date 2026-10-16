@@ -134,6 +134,7 @@ bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, 
 rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 {
     selectedShapeIndex_ = kind == demoKind::playground || kind == demoKind::motorCar ? 2 : 1;
+    if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
 
 void rigidBodyDemoUi::drawControls()
@@ -439,7 +440,9 @@ void rigidBodyDemoUi::drawInspector()
 
     if( !getShapes().empty() )
     {
-        selectedShapeIndex_ = std::clamp( selectedShapeIndex_, 0, static_cast<int>( getShapes().size() ) - 1 );
+        const auto selectedVisualIt = std::find_if( getShapes().begin(), getShapes().end(),
+            [this]( const visualShape& visual ) { return visual.shapeHandle == selectedShape_; } );
+        selectedShapeIndex_ = selectedVisualIt != getShapes().end() ? static_cast<int>( selectedVisualIt - getShapes().begin() ) : 0;
 
         const visualShape& selectedVisual = getShapes()[selectedShapeIndex_];
 
@@ -464,6 +467,7 @@ void rigidBodyDemoUi::drawInspector()
         }
 
         const visualShape& visual = getShapes()[selectedShapeIndex_];
+        selectedShape_ = visual.shapeHandle;
 
         if( !getWorld().IsValid( visual.bodyHandle ) || !getWorld().IsValid( visual.shapeHandle ) )
         {
@@ -654,6 +658,7 @@ void rigidBodyDemoUi::drawExperimentControls()
 
     if( getKind() == demoKind::terrainChain || getKind() == demoKind::splineTerrain )
     {
+        if( getKind() == demoKind::splineTerrain ) ImGui::TextWrapped( "곡선 근사 오차 기준: 1 cm. 충돌 선분이 너무 짧아지는 제어점 이동은 적용하지 않습니다." );
         const char* probes[] = { "원", "캡슐", "상자" };
         ImGui::Combo( "시험 도형###TerrainProbe", &terrainProbeIndex_, probes, 3 );
         if( ImGui::Button( "이음새 통과###TerrainSeams" ) ) launchTerrainProbe( terrainProbeIndex_, terrainTrial::seams );

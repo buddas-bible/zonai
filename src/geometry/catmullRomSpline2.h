@@ -31,4 +31,7 @@ vec2 Derivative( const catmullRomSpline2& spline, std::size_t segmentIndex, floa
 // 각 구간을 같은 수로 분할하며 접합점은 한 번만 넣음. 잘못된 입력 / 불가능한 점 수는 빈 배열.
 std::vector<vec2> Sample( const catmullRomSpline2& spline, std::size_t subdivisions );
 
+// Bézier hull이 출력 chord에서 maxError 안에 들 때까지 이분할함. 유효하지 않은 입력 / 깊이 12 초과는 빈 배열.
+std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, float maxError );
+
 } // namespace zonai
