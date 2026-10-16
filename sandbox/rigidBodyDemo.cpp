@@ -444,6 +444,17 @@ void rigidBodyDemo::resetTerrainProbes()
     refreshContacts();
 }
 
+terrainTrialComparison rigidBodyDemo::getTerrainTrialComparison() const noexcept
+{
+    if( !terrainTrialReference_ ) return {};
+    const auto& current = terrainTrialObservation_;
+    if( !current.active ) return { terrainTrialComparisonStatus::noObservation };
+    const auto& reference = *terrainTrialReference_;
+    if( current.probeIndex != reference.probeIndex || current.trial != reference.trial || current.launchFraction != reference.launchFraction || current.launchSpeed != reference.launchSpeed ) return { terrainTrialComparisonStatus::differentConditions };
+    if( !current.firstContactTime || !reference.firstContactTime ) return { terrainTrialComparisonStatus::waitingForContact };
+    return { terrainTrialComparisonStatus::ready, *current.firstContactTime - *reference.firstContactTime };
+}
+
 bool rigidBodyDemo::relaunchTerrainTrialReference()
 {
     if( !terrainTrialReference_ || !getTerrainTrialTarget( terrainTrialReference_->trial ) ) return false;

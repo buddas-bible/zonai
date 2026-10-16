@@ -922,5 +922,57 @@ int main()
         check( !scene.relaunchTerrainTrialReference() && scene.getSplineTrialFraction() == 0.75f && scene.getSplineTrialSpeed() == 4.0f && scene.getTerrainTrialObservation().elapsed > 0.0f && scene.getTerrainTrialReference(), "invalid terrain or probe shape rejects relaunch without changing state" );
     }
 
+    for( bool slower : { false, true } )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noReference, "comparison requires a pinned reference" );
+        scene.getWorld().SetGravity( {} );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.step( slower ? 0.125f : 0.25f, 4 );
+        check( scene.getTerrainTrialObservation().firstContactTime && scene.pinTerrainTrialReference(), "comparison fixture pins a first contact observation" );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::ready && scene.getTerrainTrialComparison().firstContactTimeDifference == 0.0f, "pinned current observation compares with zero time difference" );
+        scene.setSplineTrialFraction( 0.75f );
+        scene.setSplineTrialSpeed( 12.5f );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::ready, "comparison uses recorded conditions rather than next-launch settings" );
+        scene.resetTerrainProbes();
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noObservation, "comparison distinguishes missing current observation" );
+        check( scene.relaunchTerrainTrialReference(), "comparison fixture relaunches recorded conditions" );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::waitingForContact, "matching conditions without both contact times do not produce a difference" );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.step( slower ? 0.25f : 0.125f, 4 );
+        const auto before = scene.getTerrainTrialObservation();
+        const auto pose = scene.getWorld().GetBodyTransform( probe.bodyHandle );
+        const vec2 velocity = scene.getWorld().GetBodyLinearVelocity( probe.bodyHandle );
+        const int contacts = scene.getWorld().GetContactCount();
+        const auto comparison = scene.getTerrainTrialComparison();
+        check( comparison.status == terrainTrialComparisonStatus::ready && comparison.firstContactTimeDifference == ( slower ? 0.125f : -0.125f ), "comparison subtracts reference from current first-contact observation time" );
+        check( scene.getTerrainTrialObservation().elapsed == before.elapsed && scene.getTerrainTrialObservation().firstContactTime == before.firstContactTime && near( scene.getWorld().GetBodyTransform( probe.bodyHandle ).position, pose.position ) && near( scene.getWorld().GetBodyLinearVelocity( probe.bodyHandle ), velocity ) && scene.getWorld().GetContactCount() == contacts, "comparison query does not change observation or physics" );
+        for( int mismatch = 0; mismatch < 4; ++mismatch )
+        {
+            scene.setSplineTrialFraction( mismatch == 2 ? 0.75f : 0.5f );
+            scene.setSplineTrialSpeed( mismatch == 3 ? 12.5f : 8.0f );
+            scene.launchTerrainProbe( mismatch == 0 ? 1 : 0, mismatch == 1 ? terrainTrial::back : terrainTrial::front );
+            check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions, "each recorded launch condition participates in comparison" );
+        }
+        check( scene.insertSplineControlPoint( 1 ) && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noReference, "geometry edits clear comparison availability" );
+    }
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.launchTerrainProbe( 0, terrainTrial::seams );
+        scene.step( 1.0f / 60.0f, 4 );
+        check( scene.pinTerrainTrialReference(), "seam comparison fixture pins a trial" );
+        scene.setSplineTrialFraction( 0.75f );
+        scene.setSplineTrialSpeed( 12.5f );
+        scene.launchTerrainProbe( 0, terrainTrial::seams );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::waitingForContact, "seam comparison ignores unused slider settings" );
+        scene.clearTerrainTrialReference();
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noReference, "clearing the reference clears comparison availability" );
+    }
+
     return 0;
 }
