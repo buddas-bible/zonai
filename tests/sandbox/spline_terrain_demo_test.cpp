@@ -466,5 +466,47 @@ int main()
         check( scene.getSplineControlPoints().size() == count && ( redo ? scene.canRedoSplineEdit() : scene.canUndoSplineEdit() ), "failed restoration preserves controls and history" );
     }
 
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        const std::vector<vec2> original{ scene.getSplineControlPoints().begin(), scene.getSplineControlPoints().end() };
+        check( !scene.resetSplineTerrain() && !scene.canUndoSplineEdit(), "resetting an original terrain is unchanged and records no edit" );
+        check( scene.insertSplineControlPoint( 1 ), "terrain reset fixture inserts a point" );
+        scene.setSplineSamplingError( 0.005f );
+        const std::vector<vec2> edited{ scene.getSplineControlPoints().begin(), scene.getSplineControlPoints().end() };
+        const auto first = scene.getShapes()[0].shapeHandle;
+        const bodyId ground = scene.getShapes()[0].bodyHandle;
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        scene.getWorld().SetBodyTransform( ground, { { 1.5f, 0.75f }, rot2::FromRadians( 0.25f ) } );
+        scene.getWorld().SetShapeFriction( first, 0.63f );
+        scene.getWorld().SetShapeFriction( probe.shapeHandle, 0.27f );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, { 3.0f, 4.0f } );
+        const transform2 pose = scene.getWorld().GetBodyTransform( probe.bodyHandle );
+        demoInput drag{};
+        drag.mousePosition = TransformPoint( scene.getWorld().GetBodyTransform( ground ), scene.getSplineControlPoints()[1] );
+        drag.mousePressed = drag.mouseHeld = true;
+        scene.handleInput( drag );
+        check( scene.resetSplineTerrain(), "edited terrain resets to its original shape" );
+        check( scene.getSplineControlPoints().size() == original.size() && scene.getSplineSamplingError() == 0.01f && !scene.getTerrainPointDragIndex(), "reset restores nine controls and one centimeter and ends dragging" );
+        for( std::size_t i = 0; i < original.size(); ++i ) check( near( scene.getSplineControlPoints()[i], original[i] ), "reset restores each original control" );
+        const auto samples = SampleAdaptive( { original }, 0.01f );
+        check( scene.getTerrainPointCount() == samples.size(), "reset rebuilds original adaptive samples" );
+        for( std::size_t i = 0; i < samples.size(); ++i ) check( near( scene.getTerrainPoint( i ), samples[i] ), "reset restores every local collision point" );
+        check( scene.getShapes()[0].bodyHandle == ground && near( scene.getWorld().GetBodyTransform( ground ).position, { 1.5f, 0.75f } ), "terrain reset preserves the existing ground body transform" );
+        check( scene.getShapes()[0].shapeHandle == first && scene.getWorld().GetShape( first ).friction == 0.63f, "terrain reset preserves surviving edge material" );
+        check( scene.getShapes()[samples.size() - 1].shapeHandle == probe.shapeHandle && scene.getWorld().GetShape( probe.shapeHandle ).friction == 0.27f, "terrain reset preserves probe identity and material" );
+        check( near( scene.getWorld().GetBodyTransform( probe.bodyHandle ).position, pose.position ) && near( scene.getWorld().GetBodyLinearVelocity( probe.bodyHandle ), { 3.0f, 4.0f } ), "terrain reset preserves current probe pose and motion" );
+        check( !scene.resetSplineTerrain() && scene.canUndoSplineEdit(), "unchanged reset retains the previous undo" );
+        check( scene.undoSplineEdit() && scene.getSplineSamplingError() == 0.005f && scene.getSplineControlPoints().size() == edited.size(), "undo restores the pre-reset controls and error" );
+        for( std::size_t i = 0; i < edited.size(); ++i ) check( near( scene.getSplineControlPoints()[i], edited[i] ), "undo restores every edited control" );
+        check( scene.redoSplineEdit() && scene.getSplineSamplingError() == 0.01f, "redo reapplies terrain reset" );
+        check( !scene.resetSplineTerrain() && scene.undoSplineEdit(), "unchanged reset after redo does not replace history" );
+        check( scene.resetSplineTerrain() && !scene.canRedoSplineEdit(), "new reset clears an existing redo" );
+        check( scene.undoSplineEdit(), "failure fixture restores edited geometry" );
+        scene.getWorld().DestroyChain( scene.getWorld().GetShapeParentChain( scene.getShapes()[0].shapeHandle ) );
+        check( !scene.resetSplineTerrain() && scene.getSplineControlPoints().size() == edited.size() && scene.getSplineSamplingError() == 0.005f && scene.canRedoSplineEdit(), "failed reset preserves controls, error and redo" );
+        rigidBodyDemo polygon{ demoKind::terrainChain };
+        check( !polygon.resetSplineTerrain() && !polygon.canUndoSplineEdit(), "spline reset does not affect polygon terrain" );
+    }
+
     return 0;
 }
