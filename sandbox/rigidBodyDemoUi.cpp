@@ -664,6 +664,26 @@ void rigidBodyDemoUi::drawExperimentControls()
             if( ImGui::SliderFloat( "근사 오차###SplineSamplingError", &error, 0.5f, 5.0f, "%.2f cm", ImGuiSliderFlags_AlwaysClamp ) ) setSplineSamplingError( error / 100.0f );
             ImGui::Text( "선분 수: %zu", getTerrainPointCount() - 1 );
             ImGui::TextWrapped( "충돌 선분이 너무 짧아지는 오차 변경이나 제어점 이동은 적용하지 않습니다." );
+            const auto controls = getSplineControlPoints();
+            splineControlIndex_ = std::min( splineControlIndex_, controls.size() - 1 );
+            char label[32];
+            std::snprintf( label, sizeof( label ), "제어점 %zu", splineControlIndex_ + 1 );
+            if( ImGui::BeginCombo( "제어점###SplineControl", label ) )
+            {
+                for( std::size_t i = 0; i < controls.size(); ++i )
+                {
+                    std::snprintf( label, sizeof( label ), "제어점 %zu", i + 1 );
+                    if( ImGui::Selectable( label, i == splineControlIndex_ ) ) splineControlIndex_ = i;
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::BeginDisabled( splineControlIndex_ + 1 >= controls.size() );
+            if( ImGui::Button( "다음 구간에 추가###SplineInsert" ) && insertSplineControlPoint( splineControlIndex_ ) ) ++splineControlIndex_;
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::BeginDisabled( getSplineControlPoints().size() <= 2 );
+            if( ImGui::Button( "제어점 삭제###SplineRemove" ) && removeSplineControlPoint( splineControlIndex_ ) ) splineControlIndex_ = std::min( splineControlIndex_, getSplineControlPoints().size() - 1 );
+            ImGui::EndDisabled();
         }
         const char* probes[] = { "원", "캡슐", "상자" };
         ImGui::Combo( "시험 도형###TerrainProbe", &terrainProbeIndex_, probes, 3 );

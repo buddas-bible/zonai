@@ -24,6 +24,7 @@ private:
     int selectedShapeIndex_ = 0;
     shapeId selectedShape_{};
     int terrainProbeIndex_ = 0;
+    std::size_t splineControlIndex_ = 0;
     bool showGrid_ = true;
     bool showShapeAABBs_ = false;
     bool showFatAABBs_ = false;
