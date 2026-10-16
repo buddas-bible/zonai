@@ -752,10 +752,11 @@ void rigidBodyDemoUi::drawExperimentControls()
                 case terrainTrialComparisonStatus::waitingForContact: ImGui::TextUnformatted( "비교: 발사 조건 같음 / 접촉 관측 부족" ); break;
                 case terrainTrialComparisonStatus::ready:
                     ImGui::TextUnformatted( "비교: 발사 조건 같음" );
+                    ImGui::Text( "첫 접촉 관측 단계 설정: %s", comparison.contactStepSettingsMatch ? "같음" : "다름" );
                     ImGui::Text( "첫 접촉 관측 차이 (현재 - 기준): %+.3f s", comparison.firstContactTimeDifference );
                     break;
             }
-            ImGui::TextWrapped( "비교는 기록된 발사 조건만 확인합니다. 중력·물성·진행 간격이 같다는 뜻은 아닙니다." );
+            ImGui::TextWrapped( "비교는 기록된 발사 조건과 첫 접촉 관측 단계 설정만 확인합니다. 전체 진행 이력이나 중력·물성이 같다는 뜻은 아닙니다." );
             ImGui::TextWrapped( "접촉 시간은 물리 진행이 끝난 뒤 처음 확인한 시각입니다. 물리를 진행한 관측을 기준으로 고정할 수 있으며, 지형 편집 시 기준은 지워집니다. 기준 조건 재발사는 현재 중력·물성을 사용합니다." );
         }
         ImGui::Combo( "시험 도형###TerrainProbe", &terrainProbeIndex_, probes, 3 );

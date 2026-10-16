@@ -93,6 +93,7 @@ struct terrainTrialComparison
 {
     terrainTrialComparisonStatus status = terrainTrialComparisonStatus::noReference;
     float firstContactTimeDifference = 0.0f;
+    bool contactStepSettingsMatch = false;
 };
 
 struct carWheelObservation

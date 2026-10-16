@@ -1005,5 +1005,30 @@ int main()
         check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialReference(), "terrain edits clear the pinned contact settings with its observation" );
     }
 
+    for( int difference = 0; difference < 4; ++difference )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.step( 0.125f, 4 );
+        check( scene.pinTerrainTrialReference(), "step comparison fixture pins first contact" );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::ready && scene.getTerrainTrialComparison().contactStepSettingsMatch, "identical recorded contact step settings match" );
+        check( scene.relaunchTerrainTrialReference() && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::waitingForContact, "step comparison waits for both contact observations" );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.step( difference & 1 ? 0.25f : 0.125f, difference & 2 ? 8 : 4 );
+        const auto comparison = scene.getTerrainTrialComparison();
+        check( comparison.status == terrainTrialComparisonStatus::ready && comparison.contactStepSettingsMatch == ( difference == 0 ), "duration and subdivision count both participate in contact step comparison" );
+        check( comparison.firstContactTimeDifference == ( difference & 1 ? 0.125f : 0.0f ), "different step settings retain the observed time difference" );
+        scene.step( 0.0625f, 2 );
+        check( scene.getTerrainTrialComparison().contactStepSettingsMatch == comparison.contactStepSettingsMatch, "step comparison reads recorded settings rather than later steps" );
+        scene.launchTerrainProbe( 1, terrainTrial::front );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions, "different launch conditions do not produce a contact step match result" );
+    }
+
     return 0;
 }
