@@ -1060,7 +1060,7 @@ int main()
         rigidBodyDemoUi scaleView{ demoKind::splineTerrain };
         const auto probe = scaleView.getShapes()[scaleView.getTerrainPointCount() - 1];
         scaleView.getWorld().SetBodyGravityScale( probe.bodyHandle, 1.0f );
-        for( int frame = 0; frame < 5; ++frame )
+        for( int frame = 0; frame < 8; ++frame )
         {
             if( frame == 1 )
             {
@@ -1072,6 +1072,26 @@ int main()
             if( frame == 2 && !scaleView.relaunchTerrainTrialReference() ) fail( "Gravity scale UI fixture must relaunch" );
             if( frame == 3 ) scaleView.resetTerrainProbes();
             if( frame == 4 && !scaleView.insertSplineControlPoint( 1 ) ) fail( "Gravity scale UI fixture must edit terrain" );
+            if( frame == 5 || frame == 6 )
+            {
+                scaleView.launchTerrainProbe( 0, terrainTrial::front );
+                if( frame == 6 )
+                {
+                    scaleView.getWorld().SetBodyGravityScale( probe.bodyHandle, 1.0f );
+                    scaleView.step( 0.0625f, 4 );
+                    scaleView.getWorld().SetBodyGravityScale( probe.bodyHandle, 2.0f );
+                }
+                const auto target = *scaleView.getTerrainTrialTarget( terrainTrial::front );
+                scaleView.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+                scaleView.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+                scaleView.step( 0.125f, 4 );
+                if( frame == 5 && !scaleView.pinTerrainTrialReference() ) fail( "Gravity scale history UI fixture must pin first contact" );
+            }
+            if( frame == 7 )
+            {
+                if( !scaleView.pinTerrainTrialReference() ) fail( "Gravity scale history UI fixture must pin changes" );
+                scaleView.resetTerrainProbes();
+            }
             const auto before = scaleView.getTerrainTrialObservation();
             const auto reference = scaleView.getTerrainTrialReference();
             const auto pose = scaleView.getWorld().GetBodyTransform( probe.bodyHandle );
@@ -1089,10 +1109,14 @@ int main()
             if( frame == 1 && log.find( "발사 물체 중력 배율: 1.000", recorded + 1 ) == std::string_view::npos ) fail( "Gravity scale UI must retain current recorded scale after live changes" );
             if( frame == 2 && ( log.find( "발사 물체 중력 배율: 2.000" ) == std::string_view::npos || log.find( "비교: 발사 조건 다름" ) == std::string_view::npos ) ) fail( "Gravity scale UI must show new relaunch scale and condition mismatch" );
             if( ( frame == 0 || frame == 4 ) && log.find( "발사 물체 중력 배율:" ) != std::string_view::npos ) fail( "Cleared observations must not display stale gravity scale" );
+            if( ( frame == 5 || frame == 6 ) && log.find( "첫 접촉까지 관측된 중력 배율 변경: 없음" ) == std::string_view::npos ) fail( "Gravity scale history UI must show unchanged current or reference history" );
+            if( ( frame == 6 || frame == 7 ) && log.find( "첫 접촉까지 관측된 중력 배율 변경: 있음" ) == std::string_view::npos ) fail( "Gravity scale history UI must show changed current and pinned history" );
+            if( ( frame == 0 || frame == 4 ) && log.find( "첫 접촉까지 관측된 중력 배율 변경:" ) != std::string_view::npos ) fail( "Gravity scale history UI must not invent a result before contact" );
             ImGui::LogFinish();
             ImGui::End();
             ImGui::Render();
             const auto afterReference = scaleView.getTerrainTrialReference();
+            if( scaleView.getTerrainTrialObservation().preContactGravityScaleChanged != before.preContactGravityScaleChanged || ( reference && afterReference && afterReference->preContactGravityScaleChanged != reference->preContactGravityScaleChanged ) ) fail( "Gravity scale history display must preserve current and pinned flags" );
             if( scaleView.getTerrainTrialObservation().launchGravityScale != before.launchGravityScale || reference.has_value() != afterReference.has_value() || ( reference && afterReference->launchGravityScale != reference->launchGravityScale ) || scaleView.getWorld().GetBodyGravityScale( probe.bodyHandle ) != scale || LengthSquared( scaleView.getWorld().GetBodyTransform( probe.bodyHandle ).position - pose.position ) != 0.0f || LengthSquared( scaleView.getWorld().GetBodyLinearVelocity( probe.bodyHandle ) - velocity ) != 0.0f ) fail( "Gravity scale display must preserve records, scale and motion" );
         }
     }

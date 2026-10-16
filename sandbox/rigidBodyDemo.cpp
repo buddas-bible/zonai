@@ -502,6 +502,7 @@ void rigidBodyDemo::updateTerrainTrialObservation( float timeStep, int subStepCo
     {
         const vec2 gravity = world_.GetGravity();
         if( gravity.x != terrainTrialObservation_.launchGravity.x || gravity.y != terrainTrialObservation_.launchGravity.y ) terrainTrialObservation_.preContactGravityChanged = true;
+        if( world_.GetBodyGravityScale( shapes_[probeIndex].bodyHandle ) != terrainTrialObservation_.launchGravityScale ) terrainTrialObservation_.preContactGravityScaleChanged = true;
         if( world_.GetShapeFriction( shapes_[probeIndex].shapeHandle ) != terrainTrialObservation_.launchFriction || world_.GetShapeRestitution( shapes_[probeIndex].shapeHandle ) != terrainTrialObservation_.launchRestitution ) terrainTrialObservation_.preContactMaterialChanged = true;
         if( world_.GetBodyMass( shapes_[probeIndex].bodyHandle ) != terrainTrialObservation_.launchMass ) terrainTrialObservation_.preContactMassChanged = true;
         if( world_.GetBodyRotationalInertia( shapes_[probeIndex].bodyHandle ) != terrainTrialObservation_.launchInertia ) terrainTrialObservation_.preContactInertiaChanged = true;

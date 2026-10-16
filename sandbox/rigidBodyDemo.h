@@ -95,6 +95,7 @@ struct terrainTrialObservation
     int initialSubStepCount = 0;
     bool preContactSettingsChanged = false;
     bool preContactGravityChanged = false;
+    bool preContactGravityScaleChanged = false;
     bool preContactMaterialChanged = false;
     bool preContactMassChanged = false;
     bool preContactInertiaChanged = false;
