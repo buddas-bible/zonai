@@ -78,6 +78,8 @@ struct terrainTrialObservation
     bool active = false;
     std::size_t probeIndex = 0;
     terrainTrial trial = terrainTrial::front;
+    float launchSpeed = 0.0f;
+    std::optional<float> launchFraction{};
     float elapsed = 0.0f;
     bool touching = false;
     std::optional<float> firstContactTime{};

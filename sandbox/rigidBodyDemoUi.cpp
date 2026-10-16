@@ -714,6 +714,8 @@ void rigidBodyDemoUi::drawExperimentControls()
             {
                 const char* trial = observation.trial == terrainTrial::front ? "앞면" : observation.trial == terrainTrial::back ? "뒷면" : "이음새";
                 ImGui::Text( "최근 발사: %s / %s", probes[observation.probeIndex], trial );
+                if( observation.launchFraction ) ImGui::Text( "발사 조건: 위치 %.1f %% / 초기 속도 %.1f m/s", *observation.launchFraction * 100.0f, observation.launchSpeed );
+                else ImGui::Text( "발사 조건: 첫 선분 중앙 / 초기 속도 %.1f m/s", observation.launchSpeed );
                 ImGui::Text( "경과: %.3f s / 지형 접촉: %s", observation.elapsed, observation.touching ? "있음" : "없음" );
                 if( observation.firstContactTime ) ImGui::Text( "첫 접촉 관측: %.3f s", *observation.firstContactTime );
                 else ImGui::TextUnformatted( "첫 접촉 관측: 아직 없음" );

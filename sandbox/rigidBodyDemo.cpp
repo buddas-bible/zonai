@@ -543,14 +543,16 @@ void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial tri
     const vec2 normal = Cross( tangent, 1.0f );
     const float side = trial == terrainTrial::back ? -1.0f : 1.0f;
     world_.SetBodyTransform( body, { target->point + side * 1.5f * normal, rot2::FromRadians( std::atan2( tangent.y, tangent.x ) ) } );
-    const float speed = kind_ == demoKind::splineTerrain ? splineTrialSpeed_ : 8.0f;
-    world_.SetBodyLinearVelocity( body, trial == terrainTrial::seams ? 6.0f * tangent : -side * speed * normal );
+    const float speed = trial == terrainTrial::seams ? 6.0f : kind_ == demoKind::splineTerrain ? splineTrialSpeed_ : 8.0f;
+    world_.SetBodyLinearVelocity( body, trial == terrainTrial::seams ? speed * tangent : -side * speed * normal );
     refreshContacts();
     if( kind_ == demoKind::splineTerrain )
     {
         terrainTrialObservation_.active = true;
         terrainTrialObservation_.probeIndex = probeIndex;
         terrainTrialObservation_.trial = trial;
+        terrainTrialObservation_.launchSpeed = speed;
+        if( trial != terrainTrial::seams ) terrainTrialObservation_.launchFraction = splineTrialFraction_;
     }
 }
 

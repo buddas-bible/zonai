@@ -199,6 +199,7 @@ int main()
                 scene.launchTerrainProbe( probe, trial );
                 const auto initialObservation = scene.getTerrainTrialObservation();
                 check( initialObservation.active && initialObservation.probeIndex == probe && initialObservation.trial == trial && initialObservation.elapsed == 0.0f && !initialObservation.firstContactTime, "launch starts a new observation for its selected probe and trial" );
+                check( initialObservation.launchSpeed == ( trial == terrainTrial::seams ? 6.0f : 8.0f ) && ( trial == terrainTrial::seams ? !initialObservation.launchFraction : initialObservation.launchFraction == 0.5f ), "observation records applied speed and front/back position instead of live settings" );
                 const vec2 velocity = simulation.GetBodyLinearVelocity( selected.bodyHandle );
                 const vec2 normal = trial == terrainTrial::seams ? Cross( Normalize( velocity ), 1.0f ) : ( trial == terrainTrial::back ? 1.0f : -1.0f ) * Normalize( velocity );
                 const vec2 target = simulation.GetBodyTransform( selected.bodyHandle ).position - ( trial == terrainTrial::back ? -1.0f : 1.0f ) * 1.5f * normal;
@@ -788,6 +789,34 @@ int main()
         rigidBodyDemo polygon{ demoKind::terrainChain };
         polygon.launchTerrainProbe( 0, terrainTrial::front );
         check( !polygon.getTerrainTrialObservation().active, "new observation UI is spline-only" );
+    }
+
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.setSplineTrialFraction( 0.25f );
+        scene.setSplineTrialSpeed( 12.5f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        scene.setSplineTrialFraction( 0.75f );
+        scene.setSplineTrialSpeed( 20.0f );
+        scene.step( 1.0f / 60.0f, 4 );
+        auto observation = scene.getTerrainTrialObservation();
+        check( observation.launchFraction == 0.25f && observation.launchSpeed == 12.5f, "next-launch settings and stepping do not overwrite recorded launch conditions" );
+        scene.launchTerrainProbe( 99, terrainTrial::back );
+        observation = scene.getTerrainTrialObservation();
+        check( observation.launchFraction == 0.25f && observation.launchSpeed == 12.5f && observation.trial == terrainTrial::front, "failed launches preserve previous conditions" );
+        scene.launchTerrainProbe( 2, terrainTrial::back );
+        observation = scene.getTerrainTrialObservation();
+        check( observation.launchFraction == 0.75f && observation.launchSpeed == 20.0f && observation.probeIndex == 2, "successful new launches replace conditions with their applied settings" );
+        scene.launchTerrainProbe( 1, terrainTrial::seams );
+        observation = scene.getTerrainTrialObservation();
+        check( !observation.launchFraction && observation.launchSpeed == 6.0f, "seam conditions record the fixed starting edge and actual six-meter-per-second speed" );
+        scene.resetTerrainProbes();
+        observation = scene.getTerrainTrialObservation();
+        check( !observation.active && !observation.launchFraction && observation.launchSpeed == 0.0f, "clearing observation also clears recorded conditions" );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        check( scene.insertSplineControlPoint( 1 ), "conditions clearing fixture edits terrain" );
+        observation = scene.getTerrainTrialObservation();
+        check( !observation.active && !observation.launchFraction && observation.launchSpeed == 0.0f, "successful geometry edits clear old launch conditions" );
     }
 
     return 0;
