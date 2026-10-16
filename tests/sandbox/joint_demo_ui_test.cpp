@@ -797,6 +797,50 @@ int main()
             if( LengthSquared( after.launchGravity - before.launchGravity ) != 0.0f || after.elapsed != before.elapsed || reference.has_value() != afterReference.has_value() || ( reference && LengthSquared( afterReference->launchGravity - reference->launchGravity ) != 0.0f ) || LengthSquared( gravityView.getWorld().GetGravity() - gravity ) != 0.0f || LengthSquared( gravityView.getWorld().GetBodyTransform( body ).position - pose.position ) != 0.0f || LengthSquared( gravityView.getWorld().GetBodyLinearVelocity( body ) - velocity ) != 0.0f ) fail( "Gravity display must preserve recorded conditions and physics" );
         }
     }
+    {
+        rigidBodyDemoUi materialView{ demoKind::splineTerrain };
+        const auto probe = materialView.getShapes()[materialView.getTerrainPointCount() - 1];
+        materialView.getWorld().SetShapeFriction( probe.shapeHandle, 0.25f );
+        materialView.getWorld().SetShapeRestitution( probe.shapeHandle, 0.5f );
+        for( int frame = 0; frame < 5; ++frame )
+        {
+            if( frame == 1 )
+            {
+                materialView.launchTerrainProbe( 0, terrainTrial::front );
+                materialView.step( 0.0625f, 4 );
+                if( !materialView.pinTerrainTrialReference() ) fail( "Material UI fixture must pin a trial" );
+                materialView.getWorld().SetShapeFriction( probe.shapeHandle, 0.75f );
+                materialView.getWorld().SetShapeRestitution( probe.shapeHandle, 0.8f );
+            }
+            if( frame == 2 && !materialView.relaunchTerrainTrialReference() ) fail( "Material UI fixture must relaunch" );
+            if( frame == 3 ) materialView.resetTerrainProbes();
+            if( frame == 4 && !materialView.insertSplineControlPoint( 1 ) ) fail( "Material UI fixture must edit terrain" );
+            const auto before = materialView.getTerrainTrialObservation();
+            const auto reference = materialView.getTerrainTrialReference();
+            const auto pose = materialView.getWorld().GetBodyTransform( probe.bodyHandle );
+            const vec2 velocity = materialView.getWorld().GetBodyLinearVelocity( probe.bodyHandle );
+            const float friction = materialView.getWorld().GetShapeFriction( probe.shapeHandle );
+            const float restitution = materialView.getWorld().GetShapeRestitution( probe.shapeHandle );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline launch material" );
+            ImGui::LogToBuffer();
+            materialView.drawControls();
+            const std::string_view log{ GImGui->LogBuffer.c_str() };
+            const auto recorded = log.find( "발사 물체 물성: 마찰 0.250 / 반발 0.500" );
+            if( frame >= 1 && frame <= 3 && recorded == std::string_view::npos ) fail( "Material UI must show recorded reference properties" );
+            if( frame == 1 && log.find( "발사 물체 물성: 마찰 0.250 / 반발 0.500", recorded + 1 ) == std::string_view::npos ) fail( "Material UI must retain recorded current properties after live edits" );
+            if( frame == 2 && ( log.find( "발사 물체 물성: 마찰 0.750 / 반발 0.800" ) == std::string_view::npos || log.find( "비교: 발사 조건 다름" ) == std::string_view::npos ) ) fail( "Material UI must show new relaunch properties and condition mismatch" );
+            if( ( frame == 0 || frame == 4 ) && log.find( "발사 물체 물성:" ) != std::string_view::npos ) fail( "Cleared observations must not display stale material" );
+            ImGui::LogFinish();
+            ImGui::End();
+            ImGui::Render();
+            const auto after = materialView.getTerrainTrialObservation();
+            const auto afterReference = materialView.getTerrainTrialReference();
+            if( after.launchFriction != before.launchFriction || after.launchRestitution != before.launchRestitution || after.elapsed != before.elapsed || reference.has_value() != afterReference.has_value() || ( reference && ( afterReference->launchFriction != reference->launchFriction || afterReference->launchRestitution != reference->launchRestitution ) ) || materialView.getWorld().GetShapeFriction( probe.shapeHandle ) != friction || materialView.getWorld().GetShapeRestitution( probe.shapeHandle ) != restitution || LengthSquared( materialView.getWorld().GetBodyTransform( probe.bodyHandle ).position - pose.position ) != 0.0f || LengthSquared( materialView.getWorld().GetBodyLinearVelocity( probe.bodyHandle ) - velocity ) != 0.0f ) fail( "Material display must preserve recorded conditions, material and physics" );
+        }
+    }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }
