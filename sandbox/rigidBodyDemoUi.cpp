@@ -273,6 +273,13 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
             const ImU32 color = getTerrainPointDragIndex() == i ? IM_COL32( 255, 170, 70, 255 ) : IM_COL32( 230, 170, 255, 255 );
             draw.DrawPoint( TransformPoint( pose, controls[i] ), color, 6.0f );
         }
+        const auto target = getTerrainTrialTarget( terrainTrial::front );
+        if( target )
+        {
+            constexpr ImU32 TRIAL_COLOR = IM_COL32( 80, 220, 255, 255 );
+            draw.DrawPoint( target->point, TRIAL_COLOR, 6.0f );
+            draw.DrawArrow( target->point, Cross( target->tangent, 1.0f ), TRIAL_COLOR, 0.8f );
+        }
     }
 
     if( getWorld().IsValid( getMouseJoint() ) )
@@ -697,7 +704,7 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::EndDisabled();
             float fraction = getSplineTrialFraction() * 100.0f;
             if( ImGui::SliderFloat( "앞·뒷면 시험 위치###SplineTrialFraction", &fraction, 0.0f, 100.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp ) ) setSplineTrialFraction( fraction / 100.0f );
-            ImGui::TextWrapped( "지형 시작부터의 길이 비율입니다. 이음새 통과 시험은 시작 위치를 유지합니다." );
+            ImGui::TextWrapped( "지형 시작부터의 길이 비율입니다. 하늘색 점과 화살표는 시험 위치와 충돌 앞면을 표시합니다. 이음새 통과 시험은 시작 위치를 유지합니다." );
         }
         const char* probes[] = { "원", "캡슐", "상자" };
         ImGui::Combo( "시험 도형###TerrainProbe", &terrainProbeIndex_, probes, 3 );

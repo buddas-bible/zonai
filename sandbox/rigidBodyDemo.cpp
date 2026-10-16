@@ -436,12 +436,9 @@ void rigidBodyDemo::setSplineTrialFraction( float fraction )
     splineTrialFraction_ = fraction;
 }
 
-void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial trial )
+std::optional<terrainTrialTarget> rigidBodyDemo::getTerrainTrialTarget( terrainTrial trial ) const
 {
-    if( ( kind_ != demoKind::terrainChain && kind_ != demoKind::splineTerrain ) || probeIndex >= terrainInitialTransforms_.size() || !world_.IsValid( terrainChain_ ) ) return;
-    const auto body = shapes_[terrainSegments_.size() + probeIndex].bodyHandle;
-    if( !world_.IsValid( body ) ) return;
-    resetTerrainProbes();
+    if( ( kind_ != demoKind::terrainChain && kind_ != demoKind::splineTerrain ) || !world_.IsValid( terrainChain_ ) || terrainSegments_.empty() || shapes_.empty() || !world_.IsValid( shapes_[0].bodyHandle ) ) return {};
     std::size_t edge = trial == terrainTrial::seams ? 0 : std::min( std::size_t{ 3 }, terrainSegments_.size() - 1 );
     float t = 0.5f;
     if( kind_ == demoKind::splineTerrain && trial != terrainTrial::seams )
@@ -464,9 +461,21 @@ void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial tri
     const vec2 a = TransformPoint( ground, getTerrainPoint( edge ) );
     const vec2 b = TransformPoint( ground, getTerrainPoint( edge + 1 ) );
     const vec2 tangent = Normalize( b - a );
+    return terrainTrialTarget{ a + t * ( b - a ), tangent };
+}
+
+void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial trial )
+{
+    if( probeIndex >= terrainInitialTransforms_.size() ) return;
+    const auto target = getTerrainTrialTarget( trial );
+    if( !target ) return;
+    const auto body = shapes_[terrainSegments_.size() + probeIndex].bodyHandle;
+    if( !world_.IsValid( body ) ) return;
+    resetTerrainProbes();
+    const vec2 tangent = target->tangent;
     const vec2 normal = Cross( tangent, 1.0f );
     const float side = trial == terrainTrial::back ? -1.0f : 1.0f;
-    world_.SetBodyTransform( body, { a + t * ( b - a ) + side * 1.5f * normal, rot2::FromRadians( std::atan2( tangent.y, tangent.x ) ) } );
+    world_.SetBodyTransform( body, { target->point + side * 1.5f * normal, rot2::FromRadians( std::atan2( tangent.y, tangent.x ) ) } );
     world_.SetBodyLinearVelocity( body, trial == terrainTrial::seams ? 6.0f * tangent : -side * 8.0f * normal );
     refreshContacts();
 }

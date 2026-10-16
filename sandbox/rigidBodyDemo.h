@@ -66,6 +66,13 @@ enum class weldDemoPreset
 enum class carSuspensionPreset { soft, standard, stiff, noSpring };
 enum class terrainTrial { seams, front, back };
 
+// 현재 충돌 지형의 world-space 기준점과 단위 접선.
+struct terrainTrialTarget
+{
+    vec2 point{};
+    vec2 tangent{};
+};
+
 struct carWheelObservation
 {
     bool grounded = false;
@@ -246,6 +253,7 @@ public:
     bool resetSplineTerrain();
     [[nodiscard]] float getSplineTrialFraction() const noexcept { return splineTrialFraction_; }
     void setSplineTrialFraction( float fraction );
+    [[nodiscard]] std::optional<terrainTrialTarget> getTerrainTrialTarget( terrainTrial trial ) const;
     [[nodiscard]] bool canUndoSplineEdit() const noexcept { return splineUndo_.has_value(); }
     [[nodiscard]] bool canRedoSplineEdit() const noexcept { return splineRedo_.has_value(); }
     bool undoSplineEdit();

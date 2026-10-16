@@ -552,9 +552,16 @@ int main()
                 for( const terrainTrial trial : { terrainTrial::front, terrainTrial::back } )
                 {
                     scene.setSplineTrialFraction( fractions[i] );
-                    scene.launchTerrainProbe( probe, trial );
                     const bodyId body = scene.getShapes()[2 + probe].bodyHandle;
                     const vec2 tangent = TransformVector( pose, i < 2 ? vec2{ 1, 0 } : vec2{ 0, 1 } );
+                    const transform2 beforePose = simulation.GetBodyTransform( body );
+                    const vec2 beforeVelocity = simulation.GetBodyLinearVelocity( body );
+                    const int beforeContacts = simulation.GetContactCount();
+                    const rigidBodyDemo& readonly = scene;
+                    const auto target = readonly.getTerrainTrialTarget( trial );
+                    check( target && near( target->point, TransformPoint( pose, targets[i] ) ) && near( target->tangent, tangent ), "read-only target query returns the selected world point and tangent" );
+                    check( near( simulation.GetBodyTransform( body ).position, beforePose.position ) && near( simulation.GetBodyLinearVelocity( body ), beforeVelocity ) && simulation.GetContactCount() == beforeContacts, "target query preserves probe pose, motion and contacts" );
+                    scene.launchTerrainProbe( probe, trial );
                     const vec2 normal = Cross( tangent, 1.0f );
                     const float side = trial == terrainTrial::back ? -1.0f : 1.0f;
                     check( near( simulation.GetBodyTransform( body ).position, TransformPoint( pose, targets[i] ) + side * 1.5f * normal ), "launch uses sampled length fraction and the selected edge in world space" );
@@ -563,6 +570,8 @@ int main()
         const std::array<vec2, 3> equalEdges{ vec2{ 0, 0 }, vec2{ 3, 0 }, vec2{ 3, 3 } };
         check( simulation.SetChainPoints( parent, equalEdges, { -3, 0 }, { 3, 6 } ), "join fixture has equal edge lengths" );
         scene.setSplineTrialFraction( 0.5f );
+        const auto join = scene.getTerrainTrialTarget( terrainTrial::front );
+        check( join && near( join->point, TransformPoint( pose, { 3, 0 } ) ) && near( join->tangent, TransformVector( pose, { 1, 0 } ) ), "join target query uses the ending edge" );
         scene.launchTerrainProbe( 0, terrainTrial::front );
         const vec2 firstNormal = Cross( TransformVector( pose, { 1, 0 } ), 1.0f );
         check( near( simulation.GetBodyTransform( scene.getImpulseBody() ).position, TransformPoint( pose, { 3, 0 } ) + 1.5f * firstNormal ), "an exact join uses the edge ending at that join" );
@@ -574,9 +583,17 @@ int main()
         scene.resetTerrainProbes();
         check( scene.resetSplineTerrain() && scene.undoSplineEdit() && scene.redoSplineEdit(), "position persistence fixture resets and restores geometry" );
         check( scene.getSplineTrialFraction() == 1.0f, "probe and geometry reset and undo/redo preserve the trial fraction" );
+        const auto restored = scene.getTerrainTrialTarget( terrainTrial::front );
+        check( restored && near( restored->point, TransformPoint( pose, { -8.0f, -1.2f } ) ), "target query follows geometry reset and undo/redo" );
         rigidBodyDemo polygon{ demoKind::terrainChain };
         polygon.setSplineTrialFraction( 0.75f );
         check( polygon.getSplineTrialFraction() == 0.5f && !polygon.canUndoSplineEdit(), "trial fraction editing is spline-only and does not record geometry history" );
+        const auto polygonTarget = polygon.getTerrainTrialTarget( terrainTrial::front );
+        check( polygonTarget && near( polygonTarget->point, 0.5f * ( polygon.getTerrainPoint( 3 ) + polygon.getTerrainPoint( 4 ) ) ), "polygon target query preserves the existing launch location" );
+        simulation.DestroyChain( simulation.GetShapeParentChain( scene.getShapes()[0].shapeHandle ) );
+        check( !scene.getTerrainTrialTarget( terrainTrial::front ), "retired terrain has no preview target" );
+        rigidBodyDemo playground{ demoKind::playground };
+        check( !playground.getTerrainTrialTarget( terrainTrial::front ), "non-terrain scenes have no preview target" );
     }
 
     return 0;
