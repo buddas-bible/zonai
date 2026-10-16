@@ -89,6 +89,7 @@ struct terrainTrialObservation
     float initialTimeStep = 0.0f;
     int initialSubStepCount = 0;
     bool preContactSettingsChanged = false;
+    bool preContactGravityChanged = false;
 };
 
 enum class terrainTrialComparisonStatus { noReference, noObservation, differentConditions, waitingForContact, ready };

@@ -498,6 +498,8 @@ void rigidBodyDemo::updateTerrainTrialObservation( float timeStep, int subStepCo
     if( timeStep <= 0.0f ) return;
     if( !terrainTrialObservation_.firstContactTime )
     {
+        const vec2 gravity = world_.GetGravity();
+        if( gravity.x != terrainTrialObservation_.launchGravity.x || gravity.y != terrainTrialObservation_.launchGravity.y ) terrainTrialObservation_.preContactGravityChanged = true;
         if( terrainTrialObservation_.initialSubStepCount == 0 )
         {
             terrainTrialObservation_.initialTimeStep = timeStep;
