@@ -495,6 +495,10 @@ add_executable(bodyShapeContactLifecycleTests dynamics/body_shape_contact_lifecy
 target_link_libraries(bodyShapeContactLifecycleTests PRIVATE zonai::zonai)
 add_test(NAME bodyShapeContactLifecycleTests COMMAND bodyShapeContactLifecycleTests)
 
+add_executable(chainPointsTests dynamics/chain_points_test.cpp)
+target_link_libraries(chainPointsTests PRIVATE zonai::zonai)
+add_test(NAME chainPointsTests COMMAND chainPointsTests)
+
 add_executable(islandSleepCcdTests dynamics/island_sleep_ccd_test.cpp)
 target_link_libraries(islandSleepCcdTests PRIVATE zonai::zonai)
 add_test(NAME islandSleepCcdTests COMMAND islandSleepCcdTests)

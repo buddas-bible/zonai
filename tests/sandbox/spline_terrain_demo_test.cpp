@@ -85,10 +85,42 @@ int main()
     input.mousePressed = true;
     input.mouseHeld = true;
     terrain.handleInput( input );
+    check( terrain.getTerrainPointDragIndex().has_value() && *terrain.getTerrainPointDragIndex() == 1, "spline press selects the control point rather than the sample index" );
+    check( !physics.IsValid( terrain.getMouseJoint() ), "control point drag takes priority over mouse joints" );
     input.mousePosition.y += 1.0f;
     input.mousePressed = false;
     terrain.handleInput( input );
-    check( !terrain.getTerrainPointDragIndex().has_value() && near( terrain.getTerrainPoint( 4 ), controlPoints[1] ), "fixed spline terrain does not edit individual sampled chain points" );
+    check( near( terrain.getTerrainPoint( 4 ), { 6.0f, -0.2f } ), "control drag resamples chain geometry while paused" );
+    check( terrain.getSplineControlPoints().size() == 9 && near( terrain.getSplineControlPoints()[1], { 6.0f, -0.2f } ), "control drag commits the stored control point" );
+    std::array<vec2, 33> validSamples{};
+    for( std::size_t i = 0; i < validSamples.size(); ++i ) validSamples[i] = terrain.getTerrainPoint( i );
+    input.mousePosition = controlPoints[0];
+    terrain.handleInput( input );
+    input.mousePosition = controlPoints[0] + vec2{ 0.0f, -0.001f };
+    terrain.handleInput( input );
+    for( std::size_t i = 0; i < validSamples.size(); ++i )
+        check( near( terrain.getTerrainPoint( i ), validSamples[i] ), "invalid control drag leaves the entire sampled chain unchanged" );
+    check( near( terrain.getSplineControlPoints()[1], { 6.0f, -0.2f } ), "invalid drag keeps the last valid control point" );
+    for( std::size_t i = 0; i < 32; ++i ) check( physics.IsValid( shapes[i].shapeHandle ), "control drag preserves every chain child handle" );
+    terrain.cancelInput();
+    check( !terrain.getTerrainPointDragIndex().has_value(), "cancel clears control drag selection" );
+
+    input.mousePosition = validSamples[1];
+    input.mousePressed = true;
+    terrain.handleInput( input );
+    check( !terrain.getTerrainPointDragIndex().has_value(), "intermediate samples are not selectable control points" );
+    terrain.cancelInput();
+
+    input.mousePosition = controlPoints[0];
+    input.mousePressed = true;
+    terrain.handleInput( input );
+    input.mousePosition = { 8.5f, -1.5f };
+    input.mousePressed = false;
+    terrain.handleInput( input );
+    const auto& updatedFirst = std::get<chainSegment2>( physics.GetShape( shapes[0].shapeHandle ).geometry );
+    check( near( updatedFirst.segment.a, { 8.5f, -1.5f } ), "endpoint control drag updates the first sample" );
+    check( near( updatedFirst.ghost1, updatedFirst.segment.a + ( updatedFirst.segment.a - updatedFirst.segment.b ) ), "endpoint control drag recomputes the external ghost" );
+    terrain.cancelInput();
 
     {
         rigidBodyDemo transformed{ entry->kind };
@@ -103,6 +135,33 @@ int main()
         check( near( simulation.GetBodyTransform( transformed.getImpulseBody() ).position, 0.5f * ( a + b ) + 1.5f * normal ), "spline terrain launch converts sampled local points to world space" );
         check( near( simulation.GetBodyLinearVelocity( transformed.getImpulseBody() ), -8.0f * normal ), "spline terrain launch rotates its front-face approach velocity" );
         check( near( transformed.getTerrainPoint( 4 ), controlPoints[1] ), "moving the terrain body preserves sampled local geometry" );
+        demoInput press{};
+        press.mousePosition = TransformPoint( pose, controlPoints[4] );
+        press.mousePressed = press.mouseHeld = true;
+        transformed.handleInput( press );
+        check( transformed.getTerrainPointDragIndex().has_value() && *transformed.getTerrainPointDragIndex() == 4, "transformed spline control is selected in local coordinates" );
+        press.mousePosition = TransformPoint( pose, { 0.5f, 1.6f } );
+        press.mousePressed = false;
+        transformed.handleInput( press );
+        check( near( transformed.getTerrainPoint( 16 ), { 0.5f, 1.6f } ), "transformed control drag stores local sampled geometry" );
+        press.mouseHeld = false;
+        transformed.handleInput( press );
+        check( !transformed.getTerrainPointDragIndex().has_value(), "release clears spline control drag" );
+    }
+
+    {
+        rigidBodyDemo touching{ entry->kind };
+        touching.getWorld().SetBodyTransform( touching.getImpulseBody(), { { 0.0f, 1.2f }, {} } );
+        touching.step( 0.001f, 4 );
+        check( !touching.getContacts().empty(), "paused contact refresh fixture" );
+        demoInput drag{};
+        drag.mousePosition = controlPoints[4];
+        drag.mousePressed = drag.mouseHeld = true;
+        touching.handleInput( drag );
+        drag.mousePosition = { 0.0f, -0.2f };
+        drag.mousePressed = false;
+        touching.handleInput( drag );
+        check( touching.getContacts().empty(), "paused control edit immediately removes obsolete contact display" );
     }
 
     for( const int substeps : { 1, 4, 8 } )

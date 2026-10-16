@@ -181,6 +181,7 @@ int main()
     for( const demoKind kind : { demoKind::terrainChain, demoKind::splineTerrain } )
     {
         rigidBodyDemoUi terrainView{ kind };
+        if( kind == demoKind::splineTerrain ) terrainView.getWorld().SetBodyTransform( terrainView.getShapes()[0].bodyHandle, { { 1.5f, 0.75f }, rot2::FromRadians( 0.25f ) } );
         for( const char* control : { "TerrainSeams", "TerrainFront", "TerrainBack", "TerrainReset" } )
         {
             ImGui::NewFrame();
@@ -199,10 +200,35 @@ int main()
             ImDrawList* list = ImGui::GetWindowDrawList();
             const int before = list->VtxBuffer.Size;
             debugDraw draw{ list, camera, { 0.0f, 0.0f }, { 800.0f, 600.0f } };
+            if( kind == demoKind::splineTerrain )
+            {
+                const auto pose = terrainView.getWorld().GetBodyTransform( terrainView.getShapes()[0].bodyHandle );
+                demoInput press{};
+                press.mousePosition = TransformPoint( pose, terrainView.getSplineControlPoints()[4] );
+                press.mousePressed = press.mouseHeld = true;
+                terrainView.handleInput( press );
+            }
             terrainView.draw( draw );
             bool sawNormal = false;
             for( int i = before; i < list->VtxBuffer.Size; ++i ) sawNormal |= list->VtxBuffer[i].col == IM_COL32( 100, 255, 140, 255 );
             if( !sawNormal ) fail( "Terrain view must draw front-face arrows" );
+            if( kind == demoKind::splineTerrain )
+            {
+                const auto pose = terrainView.getWorld().GetBodyTransform( terrainView.getShapes()[0].bodyHandle );
+                for( const std::size_t index : { std::size_t{ 0 }, std::size_t{ 4 } } )
+                {
+                    const ImVec2 expected = camera.WorldToScreen( TransformPoint( pose, terrainView.getSplineControlPoints()[index] ), { 0, 0 }, { 800, 600 } );
+                    const ImU32 color = index == 4 ? IM_COL32( 255, 170, 70, 255 ) : IM_COL32( 230, 170, 255, 255 );
+                    bool found = false;
+                    for( int i = before; i < list->VtxBuffer.Size; ++i )
+                    {
+                        const auto& vertex = list->VtxBuffer[i];
+                        const float dx = vertex.pos.x - expected.x, dy = vertex.pos.y - expected.y;
+                        found |= vertex.col == color && dx * dx + dy * dy < 64.0f;
+                    }
+                    if( !found ) fail( "Spline controls must draw transformed control handles and highlight the selected point" );
+                }
+            }
             ImGui::End();
             ImGui::Render();
         }

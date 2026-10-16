@@ -263,6 +263,17 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         }
     }
 
+    if( getKind() == demoKind::splineTerrain && !getShapes().empty() && getWorld().IsValid( getShapes()[0].bodyHandle ) )
+    {
+        const auto pose = getWorld().GetBodyTransform( getShapes()[0].bodyHandle );
+        const auto controls = getSplineControlPoints();
+        for( std::size_t i = 0; i < controls.size(); ++i )
+        {
+            const ImU32 color = getTerrainPointDragIndex() == i ? IM_COL32( 255, 170, 70, 255 ) : IM_COL32( 230, 170, 255, 255 );
+            draw.DrawPoint( TransformPoint( pose, controls[i] ), color, 6.0f );
+        }
+    }
+
     if( getWorld().IsValid( getMouseJoint() ) )
     {
         const auto joint = getWorld().getMouseJointData( getMouseJoint() );
