@@ -1,9 +1,11 @@
 #include <cmath>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
 
 #include "geometry/catmullRomSpline2.h"
+#include "geometry/segment2.h"
 
 using namespace zonai;
 
@@ -135,6 +137,32 @@ int main()
     check( Sample( {}, 4 ).empty(), "invalid spline sampling is rejected before evaluation" );
     check( Sample( { repeated }, 4 ).empty(), "degenerate spline sampling is rejected" );
     check( Sample( curve, std::numeric_limits<std::size_t>::max() ).empty(), "unrepresentable sample count is rejected before allocation" );
+
+    const auto adaptiveLine = SampleAdaptive( spline, 0.01f );
+    check( adaptiveLine.size() == 2 && near( adaptiveLine.front(), line[0] ) && near( adaptiveLine.back(), line[1] ), "adaptive straight segment needs only its endpoints" );
+    const auto adaptive = SampleAdaptive( curve, 0.01f );
+    const auto loose = SampleAdaptive( curve, 1.0f );
+    const auto tight = SampleAdaptive( curve, 0.001f );
+    check( loose.size() == 4 && adaptive.size() > loose.size() && tight.size() > adaptive.size(), "smaller adaptive error refines curved segments" );
+    for( const vec2 point : points )
+    {
+        std::size_t occurrences = 0;
+        for( const vec2 sample : adaptive ) occurrences += near( sample, point );
+        check( occurrences == 1, "adaptive samples preserve each control point once" );
+    }
+    for( std::size_t segment = 0; segment < GetSegmentCount( curve ); ++segment )
+        for( int i = 0; i <= 1000; ++i )
+        {
+            const vec2 point = Evaluate( curve, segment, static_cast<float>( i ) / 1000.0f );
+            float distanceSquared = std::numeric_limits<float>::infinity();
+            for( std::size_t j = 1; j < adaptive.size(); ++j )
+                distanceSquared = std::min( distanceSquared, DistanceSquared( segment2{ adaptive[j - 1], adaptive[j] }, point ) );
+            check( distanceSquared <= 0.01001f * 0.01001f, "adaptive polyline bounds dense curve samples including the S segment with a flat midpoint" );
+        }
+    check( SampleAdaptive( {}, 0.01f ).empty(), "adaptive sampling rejects invalid spline" );
+    check( SampleAdaptive( curve, 0.0f ).empty() && SampleAdaptive( curve, -1.0f ).empty(), "adaptive sampling requires positive error" );
+    check( SampleAdaptive( curve, nan ).empty() && SampleAdaptive( curve, infinity ).empty(), "adaptive sampling rejects nonfinite error" );
+    check( SampleAdaptive( curve, 1.0e-30f ).empty(), "unattainable adaptive error returns no partial result at the depth limit" );
 
 #ifdef NDEBUG
     check( near( Evaluate( {}, 0, 0.5f ), {} ), "invalid spline evaluation returns no point in Release" );

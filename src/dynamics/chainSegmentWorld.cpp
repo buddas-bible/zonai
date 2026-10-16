@@ -208,9 +208,11 @@ void world::SetChainPoint( chainId chainId, std::size_t pointIndex, vec2 point )
 bool world::SetChainPoints( chainId chainId, std::span<const vec2> points, vec2 ghost1, vec2 ghost2 )
 {
     if( !IsValid( chainId ) ) return false;
-    chain2& chain = chains_[GetChainIndex( chainId )];
-    const std::size_t count = chain.shapeIds.size();
-    if( chain.isLoop || count == 0 || points.size() != count + 1 ) return false;
+    const std::int32_t chainIndex = GetChainIndex( chainId );
+    chain2& chain = chains_[chainIndex];
+    const std::size_t oldCount = chain.shapeIds.size();
+    if( chain.isLoop || oldCount == 0 || points.size() < 2 || points.size() > static_cast<std::size_t>( std::numeric_limits<std::int32_t>::max() ) ) return false;
+    const std::size_t count = points.size() - 1;
 
     const auto geometryAt = [&]( std::size_t i )
     {
@@ -222,22 +224,53 @@ bool world::SetChainPoints( chainId chainId, std::span<const vec2> points, vec2 
         return samePoint( a.ghost1, b.ghost1 ) && samePoint( a.segment.a, b.segment.a ) && samePoint( a.segment.b, b.segment.b ) && samePoint( a.ghost2, b.ghost2 );
     };
 
-    bool changed = false;
+    bool changed = count != oldCount;
     // 전체 geometry를 먼저 검증해 중간 상태의 퇴화 edge나 부분 적용을 피함.
     for( std::size_t i = 0; i < count; ++i )
     {
         const chainSegment2 geometry = geometryAt( i );
         if( !IsValidChainSegmentGeometry( geometry ) || !std::isfinite( LengthSquared( geometry.segment.a - geometry.ghost1 ) ) ||
             !std::isfinite( LengthSquared( geometry.segment.b - geometry.segment.a ) ) || !std::isfinite( LengthSquared( geometry.ghost2 - geometry.segment.b ) ) ) return false;
-        changed |= !sameGeometry( std::get<chainSegment2>( shapes_[chain.shapeIds[i]].geometry ), geometry );
+        if( i < oldCount ) changed |= !sameGeometry( std::get<chainSegment2>( shapes_[chain.shapeIds[i]].geometry ), geometry );
     }
     if( !changed ) return true;
 
-    for( std::size_t i = 0; i < count; ++i )
+    const shape tail = shapes_[chain.shapeIds.back()];
+    chain.shapeIds.reserve( count );
+    for( std::size_t i = 0; i < std::min( count, oldCount ); ++i )
     {
         const chainSegment2 geometry = geometryAt( i );
         if( sameGeometry( std::get<chainSegment2>( shapes_[chain.shapeIds[i]].geometry ), geometry ) ) continue;
         UpdateChainSegmentByIndex( chain.shapeIds[i], geometry );
+    }
+    if( count < oldCount )
+    {
+        std::int32_t key = bodies_[chain.bodyId].headContactKey;
+        while( key != body::NULL_INDEX )
+        {
+            const std::int32_t id = key >> 1;
+            const contact2& contact = contacts_[id];
+            key = contact.edges[key & 1].nextKey;
+            const auto firstRetired = chain.shapeIds.begin() + count;
+            if( std::find( firstRetired, chain.shapeIds.end(), contact.shapeIdA ) != chain.shapeIds.end() ||
+                std::find( firstRetired, chain.shapeIds.end(), contact.shapeIdB ) != chain.shapeIds.end() ) DestroyContact( id );
+        }
+    }
+    for( std::size_t i = count; i < oldCount; ++i )
+    {
+        const std::int32_t index = chain.shapeIds[i];
+        shapes_[index].parentChainId = shape::NULL_INDEX;
+        DestroyShapeByIndex( index, true, false );
+    }
+    if( count < oldCount ) chain.shapeIds.resize( count );
+    for( std::size_t i = oldCount; i < count; ++i )
+    {
+        const std::int32_t index = CreateShapeByIndex( chain.bodyId, geometryAt( i ), tail.filter, tail.density, true );
+        shapes_[index].parentChainId = chainIndex;
+        shapes_[index].friction = tail.friction;
+        shapes_[index].restitution = tail.restitution;
+        shapes_[index].enableSensorEvents = tail.enableSensorEvents;
+        chain.shapeIds.push_back( index );
     }
     UpdateBodyShapeExtents( chain.bodyId );
     WakeBodyByIndex( chain.bodyId );

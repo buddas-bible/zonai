@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <string_view>
 #include <variant>
+#include <limits>
+#include "geometry/catmullRomSpline2.h"
 
 using namespace zonai;
 using namespace zonai::sandbox;
@@ -27,6 +29,13 @@ bool near( vec2 a, vec2 b )
     return LengthSquared( a - b ) < 1.0e-8f;
 }
 
+bool hasPoint( const rigidBodyDemo& scene, vec2 point )
+{
+    for( std::size_t i = 0; i < scene.getTerrainPointCount(); ++i )
+        if( near( scene.getTerrainPoint( i ), point ) ) return true;
+    return false;
+}
+
 } // namespace
 
 int main()
@@ -43,10 +52,9 @@ int main()
 
     rigidBodyDemo terrain{ entry->kind };
     world& physics = terrain.getWorld();
-    const auto shapes = terrain.getShapes();
+    const std::vector<visualShape> shapes{ terrain.getShapes().begin(), terrain.getShapes().end() };
 
     check( physics.GetChainCount() == 1 && physics.GetBodyCount() == 4, "spline terrain uses one static chain and three dynamic probes" );
-    check( terrain.getTerrainPointCount() == 33 && shapes.size() == 35, "eight spline segments at four subdivisions create thirty-two chain children" );
 
     const chainId parent = physics.GetShapeParentChain( shapes[0].shapeHandle );
     check( physics.IsValid( parent ), "sampled terrain is a real parent chain" );
@@ -57,12 +65,19 @@ int main()
         vec2{ -4.0f, -0.8f }, vec2{ -6.0f, -0.4f }, vec2{ -8.0f, -1.2f }
     };
 
+    const auto expected = SampleAdaptive( { controlPoints }, 0.01f );
+    check( expected.size() >= 2 && terrain.getTerrainPointCount() == expected.size(), "terrain uses the adaptive one-centimeter samples" );
+    const std::size_t edgeCount = expected.size() - 1;
+    check( shapes.size() == edgeCount + 3, "adaptive terrain retains its three probes" );
+    for( std::size_t i = 0; i < expected.size(); ++i )
+        check( near( terrain.getTerrainPoint( i ), expected[i] ), "collision chain uses adaptive sample positions" );
+
     for( std::size_t i = 0; i < controlPoints.size(); ++i )
-        check( near( terrain.getTerrainPoint( 4 * i ), controlPoints[i] ), "sampled chain passes through every spline control point" );
+        check( hasPoint( terrain, controlPoints[i] ), "sampled chain passes through every spline control point" );
 
     check( LengthSquared( terrain.getTerrainPoint( 1 ) - vec2{ 7.5f, -1.8f } ) > 1.0e-6f, "terrain follows the cubic curve rather than only splitting straight edges" );
 
-    for( std::size_t i = 0; i < 32; ++i )
+    for( std::size_t i = 0; i < edgeCount; ++i )
     {
         const shape& child = physics.GetShape( shapes[i].shapeHandle );
         const chainSegment2& edge = std::get<chainSegment2>( child.geometry );
@@ -74,14 +89,14 @@ int main()
         check( Cross( Normalize( edge.segment.b - edge.segment.a ), 1.0f ).y > 0.0f, "right-to-left sample order keeps terrain front faces upward" );
 
         const vec2 previous = i == 0 ? edge.segment.a + ( edge.segment.a - edge.segment.b ) : terrain.getTerrainPoint( i - 1 );
-        const vec2 next = i == 31 ? edge.segment.b + ( edge.segment.b - edge.segment.a ) : terrain.getTerrainPoint( i + 2 );
+        const vec2 next = i + 1 == edgeCount ? edge.segment.b + ( edge.segment.b - edge.segment.a ) : terrain.getTerrainPoint( i + 2 );
 
         check( near( edge.ghost1, previous ) && near( edge.ghost2, next ), "ghost points extend endpoint edges and connect adjacent samples" );
         check( child.friction == 0.8f, "sampled terrain preserves the existing terrain material" );
     }
 
     demoInput input{};
-    input.mousePosition = terrain.getTerrainPoint( 4 );
+    input.mousePosition = controlPoints[1];
     input.mousePressed = true;
     input.mouseHeld = true;
     terrain.handleInput( input );
@@ -90,9 +105,13 @@ int main()
     input.mousePosition.y += 1.0f;
     input.mousePressed = false;
     terrain.handleInput( input );
-    check( near( terrain.getTerrainPoint( 4 ), { 6.0f, -0.2f } ), "control drag resamples chain geometry while paused" );
+    check( hasPoint( terrain, { 6.0f, -0.2f } ), "control drag resamples chain geometry while paused" );
     check( terrain.getSplineControlPoints().size() == 9 && near( terrain.getSplineControlPoints()[1], { 6.0f, -0.2f } ), "control drag commits the stored control point" );
-    std::array<vec2, 33> validSamples{};
+    check( terrain.getTerrainPointCount() != expected.size(), "control drag changes adaptive topology" );
+    const std::size_t editedCount = terrain.getTerrainPointCount() - 1;
+    for( std::size_t i = 0; i < 3; ++i )
+        check( terrain.getShapes()[editedCount + i].shapeHandle == shapes[edgeCount + i].shapeHandle, "topology edit preserves probe identities" );
+    std::vector<vec2> validSamples( terrain.getTerrainPointCount() );
     for( std::size_t i = 0; i < validSamples.size(); ++i ) validSamples[i] = terrain.getTerrainPoint( i );
     input.mousePosition = controlPoints[0];
     terrain.handleInput( input );
@@ -101,11 +120,16 @@ int main()
     for( std::size_t i = 0; i < validSamples.size(); ++i )
         check( near( terrain.getTerrainPoint( i ), validSamples[i] ), "invalid control drag leaves the entire sampled chain unchanged" );
     check( near( terrain.getSplineControlPoints()[1], { 6.0f, -0.2f } ), "invalid drag keeps the last valid control point" );
-    for( std::size_t i = 0; i < 32; ++i ) check( physics.IsValid( shapes[i].shapeHandle ), "control drag preserves every chain child handle" );
+    for( std::size_t i = 0; i < std::min( edgeCount, editedCount ); ++i ) check( physics.IsValid( shapes[i].shapeHandle ), "control drag preserves common child handles" );
     terrain.cancelInput();
     check( !terrain.getTerrainPointDragIndex().has_value(), "cancel clears control drag selection" );
 
-    input.mousePosition = validSamples[1];
+    for( const vec2 sample : validSamples )
+    {
+        float nearest = std::numeric_limits<float>::infinity();
+        for( const vec2 control : terrain.getSplineControlPoints() ) nearest = std::min( nearest, LengthSquared( sample - control ) );
+        if( nearest > 0.0625f ) { input.mousePosition = sample; break; }
+    }
     input.mousePressed = true;
     terrain.handleInput( input );
     check( !terrain.getTerrainPointDragIndex().has_value(), "intermediate samples are not selectable control points" );
@@ -134,7 +158,7 @@ int main()
 
         check( near( simulation.GetBodyTransform( transformed.getImpulseBody() ).position, 0.5f * ( a + b ) + 1.5f * normal ), "spline terrain launch converts sampled local points to world space" );
         check( near( simulation.GetBodyLinearVelocity( transformed.getImpulseBody() ), -8.0f * normal ), "spline terrain launch rotates its front-face approach velocity" );
-        check( near( transformed.getTerrainPoint( 4 ), controlPoints[1] ), "moving the terrain body preserves sampled local geometry" );
+        check( hasPoint( transformed, controlPoints[1] ), "moving the terrain body preserves sampled local geometry" );
         demoInput press{};
         press.mousePosition = TransformPoint( pose, controlPoints[4] );
         press.mousePressed = press.mouseHeld = true;
@@ -143,7 +167,7 @@ int main()
         press.mousePosition = TransformPoint( pose, { 0.5f, 1.6f } );
         press.mousePressed = false;
         transformed.handleInput( press );
-        check( near( transformed.getTerrainPoint( 16 ), { 0.5f, 1.6f } ), "transformed control drag stores local sampled geometry" );
+        check( hasPoint( transformed, { 0.5f, 1.6f } ), "transformed control drag stores local sampled geometry" );
         press.mouseHeld = false;
         transformed.handleInput( press );
         check( !transformed.getTerrainPointDragIndex().has_value(), "release clears spline control drag" );
@@ -170,7 +194,7 @@ int main()
             {
                 rigidBodyDemo scene{ entry->kind };
                 auto& simulation = scene.getWorld();
-                const auto selected = scene.getShapes()[32 + probe];
+                const auto selected = scene.getShapes()[edgeCount + probe];
                 scene.launchTerrainProbe( probe, trial );
                 const vec2 a = scene.getTerrainPoint( 3 ), b = scene.getTerrainPoint( 4 );
                 const vec2 normal = Cross( Normalize( b - a ), 1.0f );
@@ -197,7 +221,7 @@ int main()
 
                     if( frameContact ) ++contactFrames;
                     if( trial == terrainTrial::seams && contacted )
-                        for( std::size_t i = 0; i < 32; ++i )
+                        for( std::size_t i = 0; i < edgeCount; ++i )
                         {
                             const vec2 edgeA = scene.getTerrainPoint( i ), edgeB = scene.getTerrainPoint( i + 1 );
                             if( position.x > edgeA.x || position.x < edgeB.x ) continue;
@@ -218,9 +242,9 @@ int main()
                 }
 
                 scene.resetTerrainProbes();
-                for( std::size_t i = 32; i < 35; ++i )
+                for( std::size_t i = edgeCount; i < edgeCount + 3; ++i )
                     check( LengthSquared( simulation.GetBodyLinearVelocity( scene.getShapes()[i].bodyHandle ) ) == 0.0f, "spline terrain probe reset stops every probe" );
-                check( simulation.GetChainCount() == 1 && simulation.GetShapeCount() == 35, "trials and reset preserve the sampled terrain chain" );
+                check( simulation.GetChainCount() == 1 && simulation.GetShapeCount() == edgeCount + 3, "trials and reset preserve the sampled terrain chain" );
             }
 
     return 0;

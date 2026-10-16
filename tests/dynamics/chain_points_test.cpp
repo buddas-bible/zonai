@@ -46,7 +46,7 @@ int main()
     const vec2 collapsed[] = { { 0, 1 }, { -2, 1 }, { -2, 1 } };
     check( !simulation.SetChainPoints( chain, collapsed, { 2, 1 }, { -6, 1 } ), "invalid final edge rejects the entire batch" );
     check( first.segment.a.y == 0 && last.segment.b.y == 0, "rejected batch leaves earlier edges unchanged" );
-    check( !simulation.SetChainPoints( chain, std::span{ shifted, 2 }, { 2, 0 }, { -6, 0 } ), "batch update rejects changed point count" );
+    check( !simulation.SetChainPoints( chain, std::span{ shifted, 1 }, { 2, 0 }, { -6, 0 } ), "batch update rejects fewer than two points" );
     check( !simulation.SetChainPoints( {}, shifted, { 2, 0 }, { -6, 0 } ), "invalid chain handle is rejected" );
     check( !simulation.SetChainPoints( chain, shifted, { std::numeric_limits<float>::infinity(), 0 }, { -6, 0 } ), "nonfinite ghost is rejected" );
     const vec2 overflowing[] = { { 1.0e30f, 0 }, { 0, 0 }, { -2, 0 } };
@@ -74,5 +74,33 @@ int main()
     check( !simulation.SetChainPoints( loop, openReplacement, { 4, 0 }, { -6, 0 } ), "open batch update rejects closed chains even when the point count matches" );
     simulation.DestroyChain( chain );
     check( !simulation.SetChainPoints( chain, shifted, { 2, 0 }, { -6, 0 } ), "stale chain handle is rejected" );
+
+    world resizing{};
+    const bodyId owner = resizing.CreateBody();
+    definition.isLoop = false;
+    const chainId resized = resizing.CreateChain( owner, definition );
+    std::array<shapeId, 2> prefix{};
+    check( resizing.GetChainSegments( resized, prefix ) == 2, "resize fixture" );
+    resizing.SetShapeFriction( prefix[1], 0.7f );
+    resizing.SetShapeRestitution( prefix[1], 0.2f );
+    const vec2 grown[] = { { 2, 0 }, { 1, 0 }, { 0, 0 }, { -1, 0 }, { -2, 0 } };
+    check( resizing.SetChainPoints( resized, grown, { 3, 0 }, { -3, 0 } ), "chain batch grows to match adaptive samples" );
+    std::array<shapeId, 4> expanded{};
+    check( resizing.GetChainSegments( resized, expanded ) == 4 && expanded[0] == prefix[0] && expanded[1] == prefix[1], "growth preserves parent and existing child slots" );
+    check( resizing.GetShapeFriction( expanded[3] ) == 0.7f && resizing.GetShapeRestitution( expanded[3] ) == 0.2f, "added children inherit the adjacent old tail material" );
+    const bodyId resting = resizing.CreateBody( bodyType::Dynamic, { { -1.5f, 0.5f }, {} } );
+    (void)resizing.CreateShape( resting, circle2{ {}, 0.5f } );
+    resizing.Step( 0.001f );
+    check( resizing.GetBodyContactData( resting, contacts ) > 0, "retired child contact fixture" );
+    const contactId retiredContact = contacts[0].id;
+    resizing.SetBodyAwake( resting, false );
+    const vec2 shrunk[] = { { 2, 0 }, { -2, 0 } };
+    check( resizing.SetChainPoints( resized, shrunk, { 4, 0 }, { -4, 0 } ), "chain batch shrinks to match adaptive samples" );
+    check( resizing.IsValid( resized ) && resizing.IsValid( prefix[0] ) && !resizing.IsValid( expanded[1] ) && !resizing.IsValid( expanded[3] ), "shrink keeps the parent and invalidates retired children" );
+    check( !resizing.IsValid( retiredContact ) && resizing.IsBodyAwake( resting ), "retired children invalidate contacts and wake visitors" );
+    check( resizing.GetChainSegmentCount( resized ) == 1 && resizing.GetShapeCount() == 2, "shrink removes retired shapes and retains the visitor" );
+    const vec2 invalidGrowth[] = { { 2, 1 }, { 1, 1 }, { 0, 1 }, { 0, 1 } };
+    check( !resizing.SetChainPoints( resized, invalidGrowth, { 3, 1 }, { -1, 1 } ) && resizing.GetChainSegmentCount( resized ) == 1, "invalid growth does not allocate or partially update children" );
+    check( resizing.SetChainPoints( resized, grown, { 3, 0 }, { -3, 0 } ) && !resizing.IsValid( expanded[3] ), "regrowth does not revive stale child handles" );
     return 0;
 }
