@@ -236,13 +236,19 @@ public:
 
     [[nodiscard]] vec2 getTerrainPoint( std::size_t pointIndex ) const;
 
-    // 추가 / 삭제 후에는 이전 span을 다시 조회해야 함.
+    // 추가 / 삭제 / 편집 복원 후에는 이전 span을 다시 조회해야 함.
     [[nodiscard]] std::span<const vec2> getSplineControlPoints() const noexcept { return kind_ == demoKind::splineTerrain ? std::span<const vec2>{ splineControlPoints_ } : std::span<const vec2>{}; }
 
     [[nodiscard]] float getSplineSamplingError() const noexcept { return splineSamplingError_; }
     void setSplineSamplingError( float error );
     bool insertSplineControlPoint( std::size_t segmentIndex );
     bool removeSplineControlPoint( std::size_t pointIndex );
+    [[nodiscard]] bool canUndoSplineEdit() const noexcept { return splineUndo_.has_value(); }
+    [[nodiscard]] bool canRedoSplineEdit() const noexcept { return splineRedo_.has_value(); }
+    bool undoSplineEdit();
+    bool redoSplineEdit();
+    void beginSplineSamplingEdit();
+    void endSplineSamplingEdit();
 
     [[nodiscard]] std::optional<std::size_t> getTerrainPointDragIndex() const noexcept { return terrainPointDragIndex_; }
 
@@ -272,6 +278,14 @@ private:
 #pragma endregion CarDrive
 
 #pragma region TerrainEdit
+    struct splineEditState
+    {
+        std::vector<vec2> points;
+        float error;
+    };
+
+    void rememberSplineEdit();
+    bool restoreSplineEdit( std::optional<splineEditState>& source, std::optional<splineEditState>& destination );
     void startTerrainPointDrag( vec2 point );
     void updateTerrainPointDrag( vec2 point );
     void updateSplineControlPoint( std::size_t pointIndex, vec2 point );
@@ -321,6 +335,11 @@ private:
     chainId terrainChain_{};
     std::vector<vec2> splineControlPoints_{};
     float splineSamplingError_ = 0.01f;
+    std::optional<splineEditState> splineUndo_{};
+    std::optional<splineEditState> splineRedo_{};
+    bool splineDragRecorded_ = false;
+    bool splineSamplingEditActive_ = false;
+    bool splineSamplingEditRecorded_ = false;
     std::array<transform2, 3> terrainInitialTransforms_{};
     std::vector<shapeId> terrainSegments_{};
     std::optional<std::size_t> terrainPointDragIndex_{};

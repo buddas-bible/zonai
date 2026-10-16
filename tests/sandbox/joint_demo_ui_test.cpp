@@ -235,7 +235,7 @@ int main()
     }
     {
         rigidBodyDemoUi adaptiveView{ demoKind::splineTerrain };
-        for( int frame = 0; frame < 10; ++frame )
+        for( int frame = 0; frame < 14; ++frame )
         {
             ImGui::NewFrame();
             ImGui::SetNextWindowPos( { 0, 0 } );
@@ -255,6 +255,7 @@ int main()
             if( frame == 3 && !selectedProbe ) fail( "Inspector must retain the selected probe after adaptive topology changes" );
             if( frame == 5 && !selectedProbe ) fail( "Inspector must retain the selected probe after sampling error changes" );
             if( ( frame == 7 || frame == 9 ) && !selectedProbe ) fail( "Inspector must retain the selected probe after control insertion and deletion" );
+            if( ( frame == 11 || frame == 13 ) && !selectedProbe ) fail( "Inspector must retain the selected probe after undo and redo" );
             ImGui::LogFinish();
             ImGui::End();
             ImGui::Render();
@@ -278,16 +279,23 @@ int main()
             }
             if( frame == 6 && !adaptiveView.insertSplineControlPoint( 1 ) ) fail( "Inspector insertion fixture must apply" );
             if( frame == 8 && !adaptiveView.removeSplineControlPoint( 2 ) ) fail( "Inspector deletion fixture must apply" );
+            if( frame == 10 && !adaptiveView.undoSplineEdit() ) fail( "Inspector undo fixture must apply" );
+            if( frame == 12 && !adaptiveView.redoSplineEdit() ) fail( "Inspector redo fixture must apply" );
         }
     }
     {
         rigidBodyDemoUi samplingView{ demoKind::splineTerrain };
         const std::size_t initialCount = samplingView.getTerrainPointCount();
-        for( int frame = 0; frame < 4; ++frame )
+        for( int frame = 0; frame < 6; ++frame )
         {
             if( frame == 1 ) io.AddInputCharactersUTF8( "5" );
-            if( frame == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
-            if( frame == 3 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            if( frame == 2 )
+            {
+                GImGui->InputTextState.SelectAll();
+                io.AddInputCharactersUTF8( "2" );
+            }
+            if( frame == 3 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+            if( frame == 4 ) io.AddKeyEvent( ImGuiKey_Enter, false );
             ImGui::NewFrame();
             ImGui::SetNextWindowPos( { 0, 0 } );
             ImGui::SetNextWindowSize( { 420, 4000 } );
@@ -297,15 +305,22 @@ int main()
                 GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "SplineSamplingError" );
                 GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
             }
+            if( frame == 4 || frame == 5 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( frame == 4 ? "SplineUndo" : "SplineRedo" );
+            // 드래그처럼 한 번의 활성화 동안 여러 값을 즉시 적용해 편집 묶음을 검증함.
+            ImGui::PushItemFlag( ImGuiItemFlags_LiveEditOnInputScalar, true );
             ImGui::LogToBuffer();
             samplingView.drawControls();
+            ImGui::PopItemFlag();
             const std::string_view log{ GImGui->LogBuffer.c_str() };
             if( log.find( "근사 오차" ) == std::string_view::npos || log.find( "선분 수:" ) == std::string_view::npos ) fail( "Spline controls must expose sampling error and edge count" );
             ImGui::LogFinish();
             ImGui::End();
             ImGui::Render();
+            if( frame == 1 && samplingView.getSplineSamplingError() != 0.05f ) fail( "Sampling gesture must apply its first value" );
+            if( frame == 2 && samplingView.getSplineSamplingError() != 0.02f ) fail( "Sampling gesture must apply its second value" );
+            if( frame == 4 && samplingView.getSplineSamplingError() != 0.01f ) fail( "Undo button must restore the entire sampling gesture" );
         }
-        if( samplingView.getSplineSamplingError() != 0.05f || samplingView.getTerrainPointCount() >= initialCount ) fail( "Sampling slider must apply centimeter input to terrain geometry" );
+        if( samplingView.getSplineSamplingError() != 0.02f || samplingView.getTerrainPointCount() >= initialCount ) fail( "Redo button must restore the final centimeter input and terrain geometry" );
     }
     {
         rigidBodyDemoUi topologyView{ demoKind::splineTerrain };

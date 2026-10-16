@@ -145,6 +145,7 @@ void rigidBodyDemo::handleInput( const demoInput& input )
     if( !input.mouseHeld )
     {
         terrainPointDragIndex_.reset();
+        splineDragRecorded_ = false;
     }
     else if( kind_ == demoKind::terrainChain || kind_ == demoKind::splineTerrain )
     {
@@ -201,6 +202,7 @@ void rigidBodyDemo::cancelInput()
     rightHeld_ = false;
     brakeHeld_ = false;
     terrainPointDragIndex_.reset();
+    splineDragRecorded_ = false;
     updateCarMotors();
     stopMouseDrag();
 }
@@ -805,6 +807,8 @@ void rigidBodyDemo::updateCarMotors()
 void rigidBodyDemo::startTerrainPointDrag( vec2 point )
 {
     terrainPointDragIndex_.reset();
+    splineDragRecorded_ = false;
+    endSplineSamplingEdit();
     if( ( kind_ != demoKind::terrainChain && kind_ != demoKind::splineTerrain ) || !world_.IsValid( terrainChain_ ) ) return;
     point = InverseTransformPoint( world_.GetBodyTransform( shapes_[0].bodyHandle ), point );
 
@@ -852,7 +856,12 @@ void rigidBodyDemo::updateSplineControlPoint( std::size_t pointIndex, vec2 point
 
     auto candidate = splineControlPoints_;
     candidate[pointIndex] = point;
-    if( updateSplineTerrain( candidate, splineSamplingError_ ) ) splineControlPoints_ = candidate;
+    if( updateSplineTerrain( candidate, splineSamplingError_ ) )
+    {
+        if( !splineDragRecorded_ ) rememberSplineEdit();
+        splineDragRecorded_ = true;
+        splineControlPoints_ = candidate;
+    }
 }
 
 bool rigidBodyDemo::insertSplineControlPoint( std::size_t segmentIndex )
@@ -862,8 +871,11 @@ bool rigidBodyDemo::insertSplineControlPoint( std::size_t segmentIndex )
     auto candidate = splineControlPoints_;
     candidate.insert( candidate.begin() + static_cast<std::ptrdiff_t>( segmentIndex + 1 ), midpoint );
     if( !updateSplineTerrain( candidate, splineSamplingError_ ) ) return false;
+    rememberSplineEdit();
     splineControlPoints_.swap( candidate );
     terrainPointDragIndex_.reset();
+    splineDragRecorded_ = false;
+    endSplineSamplingEdit();
     return true;
 }
 
@@ -873,15 +885,67 @@ bool rigidBodyDemo::removeSplineControlPoint( std::size_t pointIndex )
     auto candidate = splineControlPoints_;
     candidate.erase( candidate.begin() + static_cast<std::ptrdiff_t>( pointIndex ) );
     if( !updateSplineTerrain( candidate, splineSamplingError_ ) ) return false;
+    rememberSplineEdit();
     splineControlPoints_.swap( candidate );
     terrainPointDragIndex_.reset();
+    splineDragRecorded_ = false;
+    endSplineSamplingEdit();
     return true;
 }
 
 void rigidBodyDemo::setSplineSamplingError( float error )
 {
     if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || !std::isfinite( error ) || error < 0.005f || error > 0.05f || error == splineSamplingError_ ) return;
-    if( updateSplineTerrain( splineControlPoints_, error ) ) splineSamplingError_ = error;
+    if( updateSplineTerrain( splineControlPoints_, error ) )
+    {
+        if( !splineSamplingEditActive_ || !splineSamplingEditRecorded_ ) rememberSplineEdit();
+        splineSamplingEditRecorded_ = true;
+        splineSamplingError_ = error;
+        terrainPointDragIndex_.reset();
+        splineDragRecorded_ = false;
+    }
+}
+
+void rigidBodyDemo::beginSplineSamplingEdit()
+{
+    splineSamplingEditActive_ = true;
+    splineSamplingEditRecorded_ = false;
+}
+
+void rigidBodyDemo::endSplineSamplingEdit()
+{
+    splineSamplingEditActive_ = false;
+    splineSamplingEditRecorded_ = false;
+}
+
+void rigidBodyDemo::rememberSplineEdit()
+{
+    splineUndo_ = splineEditState{ splineControlPoints_, splineSamplingError_ };
+    splineRedo_.reset();
+}
+
+bool rigidBodyDemo::restoreSplineEdit( std::optional<splineEditState>& source, std::optional<splineEditState>& destination )
+{
+    if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || !source ) return false;
+    if( !updateSplineTerrain( source->points, source->error ) ) return false;
+    destination = splineEditState{ splineControlPoints_, splineSamplingError_ };
+    splineControlPoints_.swap( source->points );
+    splineSamplingError_ = source->error;
+    source.reset();
+    terrainPointDragIndex_.reset();
+    splineDragRecorded_ = false;
+    endSplineSamplingEdit();
+    return true;
+}
+
+bool rigidBodyDemo::undoSplineEdit()
+{
+    return restoreSplineEdit( splineUndo_, splineRedo_ );
+}
+
+bool rigidBodyDemo::redoSplineEdit()
+{
+    return restoreSplineEdit( splineRedo_, splineUndo_ );
 }
 
 bool rigidBodyDemo::updateSplineTerrain( std::span<const vec2> points, float error )
