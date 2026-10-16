@@ -1108,5 +1108,31 @@ int main()
         check( scene.getTerrainTrialComparison().stepSettings == terrainTrialStepComparison::unavailable, "different launch conditions do not produce a step summary" );
     }
 
+    for( vec2 gravity : { vec2{ 1.0f, -3.0f }, vec2{ 0.0f, -4.0f } } )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( { 0.0f, -3.0f } );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        check( near( scene.getTerrainTrialObservation().launchGravity, { 0.0f, -3.0f } ), "launch records the applied world gravity" );
+        scene.step( 0.0625f, 4 );
+        check( scene.pinTerrainTrialReference(), "gravity fixture pins a progressed launch" );
+        scene.getWorld().SetGravity( gravity );
+        scene.step( 0.0625f, 4 );
+        check( near( scene.getTerrainTrialObservation().launchGravity, { 0.0f, -3.0f } ) && near( scene.getTerrainTrialReference()->launchGravity, { 0.0f, -3.0f } ), "later gravity changes do not overwrite current or pinned launch conditions" );
+        check( scene.getTerrainTrialComparison().status != terrainTrialComparisonStatus::differentConditions, "comparison uses recorded gravity instead of current world settings" );
+        scene.launchTerrainProbe( 99, terrainTrial::front );
+        check( near( scene.getTerrainTrialObservation().launchGravity, { 0.0f, -3.0f } ), "failed launch retains recorded gravity" );
+        check( scene.relaunchTerrainTrialReference() && near( scene.getWorld().GetGravity(), gravity ) && near( scene.getTerrainTrialObservation().launchGravity, gravity ), "reference relaunch keeps current gravity and records it for the new trial" );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions, "each gravity component participates in recorded launch condition comparison" );
+        scene.getWorld().SetGravity( { 0.0f, -3.0f } );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions, "restoring world gravity does not retroactively change launch conditions" );
+        check( scene.relaunchTerrainTrialReference() && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::waitingForContact, "matching recorded gravity allows comparison to wait for contact" );
+        scene.resetTerrainProbes();
+        check( !scene.getTerrainTrialObservation().active && near( scene.getTerrainTrialObservation().launchGravity, {} ) && near( scene.getTerrainTrialReference()->launchGravity, { 0.0f, -3.0f } ), "probe reset clears current gravity metadata and retains the reference" );
+        scene.launchTerrainProbe( 1, terrainTrial::seams );
+        check( near( scene.getTerrainTrialObservation().launchGravity, { 0.0f, -3.0f } ), "seam launches record gravity too" );
+        check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialObservation().active && !scene.getTerrainTrialReference(), "terrain edits clear current and pinned gravity conditions" );
+    }
+
     return 0;
 }
