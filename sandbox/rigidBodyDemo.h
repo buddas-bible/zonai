@@ -80,6 +80,7 @@ struct terrainTrialObservation
     terrainTrial trial = terrainTrial::front;
     float launchSpeed = 0.0f;
     vec2 launchGravity{};
+    float launchGravityScale = 0.0f;
     float launchFriction = 0.0f;
     float launchRestitution = 0.0f;
     float launchMass = 0.0f;

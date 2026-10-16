@@ -1584,5 +1584,33 @@ int main()
         check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noReference && !scene.getTerrainTrialComparison().inertiaChangesObserved, "missing reference does not produce an inertia summary" );
     }
 
+    const float gravityScales[] = { 0.0f, 2.0f, -1.0f };
+    for( std::size_t probeIndex = 0; probeIndex < 3; ++probeIndex )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1 + probeIndex];
+        scene.getWorld().SetBodyGravityScale( probe.bodyHandle, 1.0f );
+        scene.launchTerrainProbe( probeIndex, terrainTrial::front );
+        check( scene.getTerrainTrialObservation().launchGravityScale == 1.0f, "launch records selected probe gravity scale" );
+        scene.step( 0.0625f, 4 );
+        check( scene.pinTerrainTrialReference(), "gravity scale fixture pins a progressed trial" );
+        const float scale = gravityScales[probeIndex];
+        scene.getWorld().SetBodyGravityScale( probe.bodyHandle, scale );
+        scene.step( 0.0625f, 4 );
+        check( scene.getTerrainTrialObservation().launchGravityScale == 1.0f && scene.getTerrainTrialReference()->launchGravityScale == 1.0f && scene.getTerrainTrialComparison().status != terrainTrialComparisonStatus::differentConditions, "live gravity scale changes do not rewrite recorded current or reference conditions" );
+        scene.launchTerrainProbe( 99, terrainTrial::front );
+        check( scene.getTerrainTrialObservation().launchGravityScale == 1.0f, "failed launch retains recorded gravity scale" );
+        check( scene.relaunchTerrainTrialReference() && scene.getTerrainTrialObservation().launchGravityScale == scale && scene.getWorld().GetBodyGravityScale( probe.bodyHandle ) == scale, "reference relaunch keeps current gravity scale and records it anew" );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions, "recorded gravity scale participates in condition comparison" );
+        scene.getWorld().SetBodyGravityScale( probe.bodyHandle, 1.0f );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions, "restoring live gravity scale does not rewrite launch records" );
+        check( scene.relaunchTerrainTrialReference() && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::waitingForContact, "equal recorded gravity scale allows contact comparison" );
+        scene.resetTerrainProbes();
+        check( scene.getTerrainTrialObservation().launchGravityScale == 0.0f && scene.getTerrainTrialReference()->launchGravityScale == 1.0f, "probe reset clears current gravity scale and retains reference" );
+        scene.launchTerrainProbe( probeIndex, terrainTrial::seams );
+        check( scene.getTerrainTrialObservation().launchGravityScale == 1.0f, "seam launch records selected probe gravity scale" );
+        check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialObservation().active && !scene.getTerrainTrialReference(), "terrain edits clear current and pinned gravity scale records" );
+    }
+
     return 0;
 }

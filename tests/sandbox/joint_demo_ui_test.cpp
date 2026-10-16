@@ -1056,6 +1056,46 @@ int main()
             if( inertiaView.getTerrainTrialObservation().launchInertia != before.launchInertia || reference.has_value() != afterReference.has_value() || ( reference && afterReference->launchInertia != reference->launchInertia ) || inertiaView.getWorld().GetBodyRotationalInertia( probe.bodyHandle ) != inertia || inertiaView.getWorld().GetShapeDensity( probe.shapeHandle ) != density || LengthSquared( inertiaView.getWorld().GetBodyTransform( probe.bodyHandle ).position - pose.position ) != 0.0f || LengthSquared( inertiaView.getWorld().GetBodyLinearVelocity( probe.bodyHandle ) - velocity ) != 0.0f ) fail( "Inertia display must preserve records, physical settings and motion" );
         }
     }
+    {
+        rigidBodyDemoUi scaleView{ demoKind::splineTerrain };
+        const auto probe = scaleView.getShapes()[scaleView.getTerrainPointCount() - 1];
+        scaleView.getWorld().SetBodyGravityScale( probe.bodyHandle, 1.0f );
+        for( int frame = 0; frame < 5; ++frame )
+        {
+            if( frame == 1 )
+            {
+                scaleView.launchTerrainProbe( 0, terrainTrial::front );
+                scaleView.step( 0.0625f, 4 );
+                if( !scaleView.pinTerrainTrialReference() ) fail( "Gravity scale UI fixture must pin a trial" );
+                scaleView.getWorld().SetBodyGravityScale( probe.bodyHandle, 2.0f );
+            }
+            if( frame == 2 && !scaleView.relaunchTerrainTrialReference() ) fail( "Gravity scale UI fixture must relaunch" );
+            if( frame == 3 ) scaleView.resetTerrainProbes();
+            if( frame == 4 && !scaleView.insertSplineControlPoint( 1 ) ) fail( "Gravity scale UI fixture must edit terrain" );
+            const auto before = scaleView.getTerrainTrialObservation();
+            const auto reference = scaleView.getTerrainTrialReference();
+            const auto pose = scaleView.getWorld().GetBodyTransform( probe.bodyHandle );
+            const vec2 velocity = scaleView.getWorld().GetBodyLinearVelocity( probe.bodyHandle );
+            const float scale = scaleView.getWorld().GetBodyGravityScale( probe.bodyHandle );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline launch gravity scale" );
+            ImGui::LogToBuffer();
+            scaleView.drawControls();
+            const std::string_view log{ GImGui->LogBuffer.c_str() };
+            const auto recorded = log.find( "발사 물체 중력 배율: 1.000" );
+            if( frame >= 1 && frame <= 3 && recorded == std::string_view::npos ) fail( "Gravity scale UI must show recorded reference scale" );
+            if( frame == 1 && log.find( "발사 물체 중력 배율: 1.000", recorded + 1 ) == std::string_view::npos ) fail( "Gravity scale UI must retain current recorded scale after live changes" );
+            if( frame == 2 && ( log.find( "발사 물체 중력 배율: 2.000" ) == std::string_view::npos || log.find( "비교: 발사 조건 다름" ) == std::string_view::npos ) ) fail( "Gravity scale UI must show new relaunch scale and condition mismatch" );
+            if( ( frame == 0 || frame == 4 ) && log.find( "발사 물체 중력 배율:" ) != std::string_view::npos ) fail( "Cleared observations must not display stale gravity scale" );
+            ImGui::LogFinish();
+            ImGui::End();
+            ImGui::Render();
+            const auto afterReference = scaleView.getTerrainTrialReference();
+            if( scaleView.getTerrainTrialObservation().launchGravityScale != before.launchGravityScale || reference.has_value() != afterReference.has_value() || ( reference && afterReference->launchGravityScale != reference->launchGravityScale ) || scaleView.getWorld().GetBodyGravityScale( probe.bodyHandle ) != scale || LengthSquared( scaleView.getWorld().GetBodyTransform( probe.bodyHandle ).position - pose.position ) != 0.0f || LengthSquared( scaleView.getWorld().GetBodyLinearVelocity( probe.bodyHandle ) - velocity ) != 0.0f ) fail( "Gravity scale display must preserve records, scale and motion" );
+        }
+    }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }
