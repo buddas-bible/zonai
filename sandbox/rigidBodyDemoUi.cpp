@@ -739,6 +739,19 @@ void rigidBodyDemoUi::drawExperimentControls()
             const auto reference = getTerrainTrialReference();
             if( reference ) drawObservation( *reference, "비교 기준" );
             else ImGui::TextUnformatted( "비교 기준: 없음" );
+            const auto comparison = getTerrainTrialComparison();
+            switch( comparison.status )
+            {
+                case terrainTrialComparisonStatus::noReference: ImGui::TextUnformatted( "비교: 기준 없음" ); break;
+                case terrainTrialComparisonStatus::noObservation: ImGui::TextUnformatted( "비교: 현재 관측 없음" ); break;
+                case terrainTrialComparisonStatus::differentConditions: ImGui::TextUnformatted( "비교: 발사 조건 다름" ); break;
+                case terrainTrialComparisonStatus::waitingForContact: ImGui::TextUnformatted( "비교: 발사 조건 같음 / 접촉 관측 부족" ); break;
+                case terrainTrialComparisonStatus::ready:
+                    ImGui::TextUnformatted( "비교: 발사 조건 같음" );
+                    ImGui::Text( "첫 접촉 관측 차이 (현재 - 기준): %+.3f s", comparison.firstContactTimeDifference );
+                    break;
+            }
+            ImGui::TextWrapped( "비교는 기록된 발사 조건만 확인합니다. 중력·물성·진행 간격이 같다는 뜻은 아닙니다." );
             ImGui::TextWrapped( "접촉 시간은 물리 진행이 끝난 뒤 처음 확인한 시각입니다. 물리를 진행한 관측을 기준으로 고정할 수 있으며, 지형 편집 시 기준은 지워집니다. 기준 조건 재발사는 현재 중력·물성을 사용합니다." );
         }
         ImGui::Combo( "시험 도형###TerrainProbe", &terrainProbeIndex_, probes, 3 );

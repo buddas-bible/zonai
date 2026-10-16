@@ -85,6 +85,14 @@ struct terrainTrialObservation
     std::optional<float> firstContactTime{};
 };
 
+enum class terrainTrialComparisonStatus { noReference, noObservation, differentConditions, waitingForContact, ready };
+
+struct terrainTrialComparison
+{
+    terrainTrialComparisonStatus status = terrainTrialComparisonStatus::noReference;
+    float firstContactTimeDifference = 0.0f;
+};
+
 struct carWheelObservation
 {
     bool grounded = false;
@@ -271,6 +279,7 @@ public:
     [[nodiscard]] std::optional<terrainTrialObservation> getTerrainTrialReference() const noexcept { return terrainTrialReference_; }
     bool pinTerrainTrialReference();
     bool relaunchTerrainTrialReference();
+    [[nodiscard]] terrainTrialComparison getTerrainTrialComparison() const noexcept;
     void clearTerrainTrialReference() noexcept { terrainTrialReference_.reset(); }
     [[nodiscard]] std::optional<terrainTrialTarget> getTerrainTrialTarget( terrainTrial trial ) const;
     [[nodiscard]] bool canUndoSplineEdit() const noexcept { return splineUndo_.has_value(); }

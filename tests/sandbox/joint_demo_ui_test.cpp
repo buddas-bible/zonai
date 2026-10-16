@@ -638,6 +638,51 @@ int main()
             ImGui::Render();
         }
     }
+    {
+        rigidBodyDemoUi comparisonView{ demoKind::splineTerrain };
+        comparisonView.getWorld().SetGravity( {} );
+        const auto probe = comparisonView.getShapes()[comparisonView.getTerrainPointCount() - 1];
+        const auto target = *comparisonView.getTerrainTrialTarget( terrainTrial::front );
+        const char* expected[] = { "비교: 기준 없음", "첫 접촉 관측 차이 (현재 - 기준): +0.000 s", "비교: 현재 관측 없음", "비교: 발사 조건 다름", "비교: 발사 조건 같음 / 접촉 관측 부족", "첫 접촉 관측 차이 (현재 - 기준): +0.125 s", "첫 접촉 관측 차이 (현재 - 기준): +0.125 s", "비교: 기준 없음" };
+        for( int frame = 0; frame < 8; ++frame )
+        {
+            if( frame == 1 ) comparisonView.launchTerrainProbe( 0, terrainTrial::front );
+            if( frame == 1 || frame == 5 )
+            {
+                comparisonView.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+                comparisonView.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+                comparisonView.step( frame == 1 ? 0.125f : 0.25f, 4 );
+            }
+            if( frame == 1 && !comparisonView.pinTerrainTrialReference() ) fail( "Comparison UI fixture must pin first contact" );
+            if( frame == 2 ) comparisonView.resetTerrainProbes();
+            if( frame == 3 ) comparisonView.launchTerrainProbe( 1, terrainTrial::front );
+            if( frame == 4 && !comparisonView.relaunchTerrainTrialReference() ) fail( "Comparison UI fixture must relaunch" );
+            if( frame == 6 )
+            {
+                comparisonView.setSplineTrialFraction( 0.75f );
+                comparisonView.setSplineTrialSpeed( 12.5f );
+            }
+            if( frame == 7 ) comparisonView.clearTerrainTrialReference();
+            const auto before = comparisonView.getTerrainTrialObservation();
+            const auto reference = comparisonView.getTerrainTrialReference();
+            const auto pose = comparisonView.getWorld().GetBodyTransform( probe.bodyHandle );
+            const vec2 velocity = comparisonView.getWorld().GetBodyLinearVelocity( probe.bodyHandle );
+            const int contacts = comparisonView.getWorld().GetContactCount();
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline trial comparison" );
+            ImGui::LogToBuffer();
+            comparisonView.drawControls();
+            if( std::string_view{ GImGui->LogBuffer.c_str() }.find( expected[frame] ) == std::string_view::npos ) fail( "Comparison UI must distinguish availability and show signed current-minus-reference time" );
+            ImGui::LogFinish();
+            ImGui::End();
+            ImGui::Render();
+            const auto after = comparisonView.getTerrainTrialObservation();
+            const auto afterReference = comparisonView.getTerrainTrialReference();
+            if( after.elapsed != before.elapsed || after.firstContactTime != before.firstContactTime || reference.has_value() != afterReference.has_value() || ( reference && reference->firstContactTime != afterReference->firstContactTime ) || LengthSquared( comparisonView.getWorld().GetBodyTransform( probe.bodyHandle ).position - pose.position ) != 0.0f || LengthSquared( comparisonView.getWorld().GetBodyLinearVelocity( probe.bodyHandle ) - velocity ) != 0.0f || comparisonView.getWorld().GetContactCount() != contacts ) fail( "Comparison display must preserve observations and physics" );
+        }
+    }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }
