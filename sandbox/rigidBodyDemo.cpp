@@ -146,7 +146,7 @@ void rigidBodyDemo::handleInput( const demoInput& input )
     {
         terrainPointDragIndex_.reset();
     }
-    else if( kind_ == demoKind::terrainChain )
+    else if( kind_ == demoKind::terrainChain || kind_ == demoKind::splineTerrain )
     {
         if( input.mousePressed )
         {
@@ -362,6 +362,7 @@ void rigidBodyDemo::createTerrainChain()
         vec2{ -8.0f, -1.2f }
     };
 
+    splineControlPoints_ = controlPoints;
     // shortcut: 구간당 4분할로 근사함, 곡률에 따른 정확도가 필요할 때 adaptive sampling으로 교체할 것.
     const std::vector<vec2> points = kind_ == demoKind::splineTerrain ? Sample( { controlPoints }, 4 ) : std::vector<vec2>{ controlPoints.begin(), controlPoints.end() };
 
@@ -805,15 +806,17 @@ void rigidBodyDemo::updateCarMotors()
 void rigidBodyDemo::startTerrainPointDrag( vec2 point )
 {
     terrainPointDragIndex_.reset();
-    if( kind_ != demoKind::terrainChain || !world_.IsValid( terrainChain_ ) ) return;
+    if( ( kind_ != demoKind::terrainChain && kind_ != demoKind::splineTerrain ) || !world_.IsValid( terrainChain_ ) ) return;
     point = InverseTransformPoint( world_.GetBodyTransform( shapes_[0].bodyHandle ), point );
 
     const float pickRadiusSquared = TERRAIN_POINT_PICK_RADIUS * TERRAIN_POINT_PICK_RADIUS;
     float bestDistanceSquared = pickRadiusSquared;
 
-    for( std::size_t i = 0; i < getTerrainPointCount(); ++i )
+    const std::size_t pointCount = kind_ == demoKind::splineTerrain ? splineControlPoints_.size() : getTerrainPointCount();
+    for( std::size_t i = 0; i < pointCount; ++i )
     {
-        const float distanceSquared = LengthSquared( getTerrainPoint( i ) - point );
+        const vec2 control = kind_ == demoKind::splineTerrain ? splineControlPoints_[i] : getTerrainPoint( i );
+        const float distanceSquared = LengthSquared( control - point );
         if( distanceSquared > bestDistanceSquared ) continue;
 
         bestDistanceSquared = distanceSquared;
@@ -827,6 +830,11 @@ void rigidBodyDemo::updateTerrainPointDrag( vec2 point )
     point = InverseTransformPoint( world_.GetBodyTransform( shapes_[0].bodyHandle ), point );
 
     const std::size_t pointIndex = *terrainPointDragIndex_;
+    if( kind_ == demoKind::splineTerrain )
+    {
+        updateSplineControlPoint( pointIndex, point );
+        return;
+    }
     const vec2 currentPoint = getTerrainPoint( pointIndex );
     if( currentPoint.x == point.x && currentPoint.y == point.y ) return;
 
@@ -834,6 +842,24 @@ void rigidBodyDemo::updateTerrainPointDrag( vec2 point )
 
     world_.SetChainPoint( terrainChain_, pointIndex, point );
     // Pause 상태에서도 contact debug 표시가 이전 geometry를 가리키지 않게 즉시 다시 수집함.
+    refreshContacts();
+}
+
+void rigidBodyDemo::updateSplineControlPoint( std::size_t pointIndex, vec2 point )
+{
+    if( pointIndex >= splineControlPoints_.size() || !IsFinite( point ) ) return;
+    const vec2 current = splineControlPoints_[pointIndex];
+    if( current.x == point.x && current.y == point.y ) return;
+
+    auto candidate = splineControlPoints_;
+    candidate[pointIndex] = point;
+    const auto samples = Sample( { candidate }, 4 );
+    if( samples.size() < 2 ) return;
+    const vec2 ghost1 = samples.front() + ( samples.front() - samples[1] );
+    const vec2 ghost2 = samples.back() + ( samples.back() - samples[samples.size() - 2] );
+    if( !world_.SetChainPoints( terrainChain_, samples, ghost1, ghost2 ) ) return;
+
+    splineControlPoints_ = candidate;
     refreshContacts();
 }
 

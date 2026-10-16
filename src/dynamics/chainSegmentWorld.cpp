@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <variant>
 
 namespace zonai
@@ -202,6 +203,45 @@ void world::SetChainPoint( chainId chainId, std::size_t pointIndex, vec2 point )
     // 여러 child geometry가 바뀌어도 body 전체 extent와 wake는 batch 끝에서 한 번만 처리함.
     UpdateBodyShapeExtents( chain.bodyId );
     WakeBodyByIndex( chain.bodyId );
+}
+
+bool world::SetChainPoints( chainId chainId, std::span<const vec2> points, vec2 ghost1, vec2 ghost2 )
+{
+    if( !IsValid( chainId ) ) return false;
+    chain2& chain = chains_[GetChainIndex( chainId )];
+    const std::size_t count = chain.shapeIds.size();
+    if( chain.isLoop || count == 0 || points.size() != count + 1 ) return false;
+
+    const auto geometryAt = [&]( std::size_t i )
+    {
+        return chainSegment2{ i == 0 ? ghost1 : points[i - 1], { points[i], points[i + 1] }, i + 2 == points.size() ? ghost2 : points[i + 2] };
+    };
+    const auto samePoint = []( vec2 a, vec2 b ) { return a.x == b.x && a.y == b.y; };
+    const auto sameGeometry = [&]( const chainSegment2& a, const chainSegment2& b )
+    {
+        return samePoint( a.ghost1, b.ghost1 ) && samePoint( a.segment.a, b.segment.a ) && samePoint( a.segment.b, b.segment.b ) && samePoint( a.ghost2, b.ghost2 );
+    };
+
+    bool changed = false;
+    // 전체 geometry를 먼저 검증해 중간 상태의 퇴화 edge나 부분 적용을 피함.
+    for( std::size_t i = 0; i < count; ++i )
+    {
+        const chainSegment2 geometry = geometryAt( i );
+        if( !IsValidChainSegmentGeometry( geometry ) || !std::isfinite( LengthSquared( geometry.segment.a - geometry.ghost1 ) ) ||
+            !std::isfinite( LengthSquared( geometry.segment.b - geometry.segment.a ) ) || !std::isfinite( LengthSquared( geometry.ghost2 - geometry.segment.b ) ) ) return false;
+        changed |= !sameGeometry( std::get<chainSegment2>( shapes_[chain.shapeIds[i]].geometry ), geometry );
+    }
+    if( !changed ) return true;
+
+    for( std::size_t i = 0; i < count; ++i )
+    {
+        const chainSegment2 geometry = geometryAt( i );
+        if( sameGeometry( std::get<chainSegment2>( shapes_[chain.shapeIds[i]].geometry ), geometry ) ) continue;
+        UpdateChainSegmentByIndex( chain.shapeIds[i], geometry );
+    }
+    UpdateBodyShapeExtents( chain.bodyId );
+    WakeBodyByIndex( chain.bodyId );
+    return true;
 }
 
 } // namespace zonai
