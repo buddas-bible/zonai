@@ -73,6 +73,16 @@ struct terrainTrialTarget
     vec2 tangent{};
 };
 
+struct terrainTrialObservation
+{
+    bool active = false;
+    std::size_t probeIndex = 0;
+    terrainTrial trial = terrainTrial::front;
+    float elapsed = 0.0f;
+    bool touching = false;
+    std::optional<float> firstContactTime{};
+};
+
 struct carWheelObservation
 {
     bool grounded = false;
@@ -255,6 +265,7 @@ public:
     void setSplineTrialFraction( float fraction );
     [[nodiscard]] float getSplineTrialSpeed() const noexcept { return splineTrialSpeed_; }
     void setSplineTrialSpeed( float speed );
+    [[nodiscard]] terrainTrialObservation getTerrainTrialObservation() const noexcept { return terrainTrialObservation_; }
     [[nodiscard]] std::optional<terrainTrialTarget> getTerrainTrialTarget( terrainTrial trial ) const;
     [[nodiscard]] bool canUndoSplineEdit() const noexcept { return splineUndo_.has_value(); }
     [[nodiscard]] bool canRedoSplineEdit() const noexcept { return splineRedo_.has_value(); }
@@ -302,6 +313,7 @@ private:
     void startTerrainPointDrag( vec2 point );
     void updateTerrainPointDrag( vec2 point );
     void updateSplineTrialPosition( vec2 point );
+    void updateTerrainTrialObservation( float timeStep );
     void updateSplineControlPoint( std::size_t pointIndex, vec2 point );
     bool updateSplineTerrain( std::span<const vec2> points, float error );
     [[nodiscard]] bool canMoveTerrainPoint( std::size_t pointIndex, vec2 point ) const;
@@ -351,6 +363,7 @@ private:
     float splineSamplingError_ = 0.01f;
     float splineTrialFraction_ = 0.5f;
     float splineTrialSpeed_ = 8.0f;
+    terrainTrialObservation terrainTrialObservation_{};
     bool splineTrialDragging_ = false;
     std::optional<splineEditState> splineUndo_{};
     std::optional<splineEditState> splineRedo_{};

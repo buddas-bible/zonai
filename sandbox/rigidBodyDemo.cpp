@@ -135,6 +135,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
 
     world_.Step( timeStep, subStepCount );
     refreshContacts();
+    updateTerrainTrialObservation( timeStep );
 }
 
 #pragma endregion LifetimeAndSimulation
@@ -429,6 +430,7 @@ void rigidBodyDemo::createTerrainChain()
 void rigidBodyDemo::resetTerrainProbes()
 {
     if( kind_ != demoKind::terrainChain && kind_ != demoKind::splineTerrain ) return;
+    terrainTrialObservation_ = {};
     cancelInput();
     for( std::size_t i = 0; i < terrainInitialTransforms_.size(); ++i )
     {
@@ -440,6 +442,30 @@ void rigidBodyDemo::resetTerrainProbes()
         world_.ClearForces( body );
     }
     refreshContacts();
+}
+
+void rigidBodyDemo::updateTerrainTrialObservation( float timeStep )
+{
+    if( !terrainTrialObservation_.active ) return;
+    const std::size_t probeIndex = terrainSegments_.size() + terrainTrialObservation_.probeIndex;
+    if( !world_.IsValid( terrainChain_ ) || probeIndex >= shapes_.size() || !world_.IsValid( shapes_[probeIndex].shapeHandle ) )
+    {
+        terrainTrialObservation_ = {};
+        return;
+    }
+    if( timeStep <= 0.0f ) return;
+    terrainTrialObservation_.elapsed += timeStep;
+    terrainTrialObservation_.touching = false;
+    const shapeId probe = shapes_[probeIndex].shapeHandle;
+    for( const auto& contact : contacts_ )
+    {
+        if( contact.manifold.pointCount == 0 || ( contact.shapeA != probe && contact.shapeB != probe ) ) continue;
+        const shapeId other = contact.shapeA == probe ? contact.shapeB : contact.shapeA;
+        if( world_.GetShapeParentChain( other ) != terrainChain_ ) continue;
+        terrainTrialObservation_.touching = true;
+        break;
+    }
+    if( terrainTrialObservation_.touching && !terrainTrialObservation_.firstContactTime ) terrainTrialObservation_.firstContactTime = terrainTrialObservation_.elapsed;
 }
 
 void rigidBodyDemo::updateSplineTrialPosition( vec2 point )
@@ -520,6 +546,12 @@ void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial tri
     const float speed = kind_ == demoKind::splineTerrain ? splineTrialSpeed_ : 8.0f;
     world_.SetBodyLinearVelocity( body, trial == terrainTrial::seams ? 6.0f * tangent : -side * speed * normal );
     refreshContacts();
+    if( kind_ == demoKind::splineTerrain )
+    {
+        terrainTrialObservation_.active = true;
+        terrainTrialObservation_.probeIndex = probeIndex;
+        terrainTrialObservation_.trial = trial;
+    }
 }
 
 void rigidBodyDemo::createPendulum()
@@ -1061,6 +1093,7 @@ bool rigidBodyDemo::updateSplineTerrain( std::span<const vec2> points, float err
         for( const shapeId child : terrainSegments_ ) shapes_.push_back( { ground, child, "지형 edge [Chain]" } );
         for( const auto probe : probes ) shapes_.push_back( probe );
     }
+    terrainTrialObservation_ = {};
     refreshContacts();
     return true;
 }

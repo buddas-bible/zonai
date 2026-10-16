@@ -197,11 +197,14 @@ int main()
                 auto& simulation = scene.getWorld();
                 const auto selected = scene.getShapes()[edgeCount + probe];
                 scene.launchTerrainProbe( probe, trial );
+                const auto initialObservation = scene.getTerrainTrialObservation();
+                check( initialObservation.active && initialObservation.probeIndex == probe && initialObservation.trial == trial && initialObservation.elapsed == 0.0f && !initialObservation.firstContactTime, "launch starts a new observation for its selected probe and trial" );
                 const vec2 velocity = simulation.GetBodyLinearVelocity( selected.bodyHandle );
                 const vec2 normal = trial == terrainTrial::seams ? Cross( Normalize( velocity ), 1.0f ) : ( trial == terrainTrial::back ? 1.0f : -1.0f ) * Normalize( velocity );
                 const vec2 target = simulation.GetBodyTransform( selected.bodyHandle ).position - ( trial == terrainTrial::back ? -1.0f : 1.0f ) * 1.5f * normal;
                 bool contacted = false, crossed = false;
                 int contactFrames = 0;
+                std::optional<float> firstContact{};
 
                 for( int frame = 0; frame < 120; ++frame )
                 {
@@ -213,6 +216,7 @@ int main()
 
                     for( const auto& contact : scene.getContacts() )
                     {
+                        if( contact.manifold.pointCount == 0 ) continue;
                         if( contact.shapeA != selected.shapeHandle && contact.shapeB != selected.shapeHandle ) continue;
                         const auto other = contact.shapeA == selected.shapeHandle ? contact.shapeB : contact.shapeA;
                         if( !simulation.IsValid( simulation.GetShapeParentChain( other ) ) ) continue;
@@ -222,6 +226,11 @@ int main()
                     }
 
                     if( frameContact ) ++contactFrames;
+                    if( frameContact && !firstContact ) firstContact = static_cast<float>( frame + 1 ) / 60.0f;
+                    const auto observation = scene.getTerrainTrialObservation();
+                    check( observation.active && observation.touching == frameContact && std::abs( observation.elapsed - static_cast<float>( frame + 1 ) / 60.0f ) < 1.0e-4f, "observation follows completed physics steps and selected terrain contacts" );
+                    check( observation.firstContactTime.has_value() == firstContact.has_value(), "first contact is reported only after an observed terrain contact" );
+                    if( firstContact ) check( std::abs( *observation.firstContactTime - *firstContact ) < 1.0e-4f, "first contact observation remains the original step-end time" );
                     if( trial == terrainTrial::seams && contacted )
                         for( std::size_t i = 0; i < edgeCount; ++i )
                         {
@@ -244,6 +253,7 @@ int main()
                 }
 
                 scene.resetTerrainProbes();
+                check( !scene.getTerrainTrialObservation().active, "probe reset clears trial observations" );
                 for( std::size_t i = edgeCount; i < edgeCount + 3; ++i )
                     check( LengthSquared( simulation.GetBodyLinearVelocity( scene.getShapes()[i].bodyHandle ) ) == 0.0f, "spline terrain probe reset stops every probe" );
                 check( simulation.GetChainCount() == 1 && simulation.GetShapeCount() == edgeCount + 3, "trials and reset preserve the sampled terrain chain" );
@@ -728,6 +738,56 @@ int main()
         polygon.setSplineTrialSpeed( 20.0f );
         polygon.launchTerrainProbe( 0, terrainTrial::front );
         check( polygon.getSplineTrialSpeed() == 8.0f && std::abs( Length( polygon.getWorld().GetBodyLinearVelocity( polygon.getImpulseBody() ) ) - 8.0f ) < 1.0e-5f, "polygon terrain keeps its existing trial speed" );
+    }
+
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        check( !scene.getTerrainTrialObservation().active, "fresh scenes have no trial observation" );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        scene.step( 0.0f, 4 );
+        check( scene.getTerrainTrialObservation().elapsed == 0.0f && !scene.getTerrainTrialObservation().firstContactTime, "zero-time steps do not advance trial observations" );
+        scene.step( 1.0f / 60.0f, 4 );
+        const auto before = scene.getTerrainTrialObservation();
+        scene.setSplineTrialFraction( 0.75f );
+        scene.setSplineTrialSpeed( 12.5f );
+        check( !scene.insertSplineControlPoint( 99 ), "invalid edit observation fixture is rejected" );
+        scene.setSplineSamplingError( scene.getSplineSamplingError() );
+        check( scene.getTerrainTrialObservation().active && scene.getTerrainTrialObservation().elapsed == before.elapsed, "next-launch settings and failed/unchanged edits retain observation" );
+        check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialObservation().active, "successful geometry edits clear observation" );
+        scene.launchTerrainProbe( 2, terrainTrial::back );
+        check( scene.getTerrainTrialObservation().active && scene.getTerrainTrialObservation().probeIndex == 2 && scene.getTerrainTrialObservation().trial == terrainTrial::back && scene.getTerrainTrialObservation().elapsed == 0.0f, "a new launch replaces the old observation" );
+        check( scene.undoSplineEdit() && !scene.getTerrainTrialObservation().active, "geometry undo clears observation" );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        check( scene.redoSplineEdit() && !scene.getTerrainTrialObservation().active, "geometry redo clears observation" );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        check( scene.resetSplineTerrain() && !scene.getTerrainTrialObservation().active, "terrain restoration clears observation" );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        check( !scene.resetSplineTerrain() && scene.getTerrainTrialObservation().active, "unchanged terrain restoration preserves observation" );
+        scene.getWorld().DestroyChain( scene.getWorld().GetShapeParentChain( scene.getShapes()[0].shapeHandle ) );
+        scene.step( 1.0f / 60.0f, 4 );
+        check( !scene.getTerrainTrialObservation().active, "retired terrain invalidates observation on the next step" );
+    }
+
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        auto& simulation = scene.getWorld();
+        simulation.SetGravity( {} );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto circle = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        const auto capsule = scene.getShapes()[scene.getTerrainPointCount()];
+        simulation.SetBodyTransform( circle.bodyHandle, { { 0, 10 }, {} } );
+        simulation.SetBodyTransform( capsule.bodyHandle, { { 0.1f, 10 }, {} } );
+        simulation.SetBodyLinearVelocity( circle.bodyHandle, {} );
+        simulation.SetBodyLinearVelocity( capsule.bodyHandle, {} );
+        scene.step( 1.0f / 60.0f, 4 );
+        bool probeContact = false;
+        for( const auto& contact : scene.getContacts() )
+            probeContact |= contact.manifold.pointCount > 0 && ( ( contact.shapeA == circle.shapeHandle && contact.shapeB == capsule.shapeHandle ) || ( contact.shapeA == capsule.shapeHandle && contact.shapeB == circle.shapeHandle ) );
+        check( probeContact, "probe-only contact fixture must touch" );
+        check( scene.getTerrainTrialObservation().active && !scene.getTerrainTrialObservation().touching && !scene.getTerrainTrialObservation().firstContactTime, "probe-probe contacts do not count as terrain observations" );
+        rigidBodyDemo polygon{ demoKind::terrainChain };
+        polygon.launchTerrainProbe( 0, terrainTrial::front );
+        check( !polygon.getTerrainTrialObservation().active, "new observation UI is spline-only" );
     }
 
     return 0;
