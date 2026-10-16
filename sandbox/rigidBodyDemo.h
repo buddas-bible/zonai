@@ -85,6 +85,9 @@ struct terrainTrialObservation
     std::optional<float> firstContactTime{};
     float firstContactTimeStep = 0.0f;
     int firstContactSubStepCount = 0;
+    float initialTimeStep = 0.0f;
+    int initialSubStepCount = 0;
+    bool preContactSettingsChanged = false;
 };
 
 enum class terrainTrialComparisonStatus { noReference, noObservation, differentConditions, waitingForContact, ready };

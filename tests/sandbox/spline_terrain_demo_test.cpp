@@ -1030,5 +1030,35 @@ int main()
         check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions, "different launch conditions do not produce a contact step match result" );
     }
 
+    for( int difference = 0; difference < 4; ++difference )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { { 0.0f, 10.0f }, {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.step( 0.0f, 32 );
+        scene.step( 0.125f, 4 );
+        check( !scene.getTerrainTrialObservation().firstContactTime && !scene.getTerrainTrialObservation().preContactSettingsChanged, "first positive step initializes settings without counting a preceding zero step" );
+        check( scene.pinTerrainTrialReference(), "step history fixture pins pre-contact observation" );
+        scene.step( difference & 1 ? 0.0625f : 0.125f, difference & 2 ? 8 : 4 );
+        scene.step( 0.125f, 4 );
+        check( scene.getTerrainTrialObservation().preContactSettingsChanged == ( difference != 0 ), "pre-contact changes remain recorded after restoring initial settings" );
+        check( !scene.getTerrainTrialReference()->preContactSettingsChanged, "pinned step history does not acquire later changes" );
+        scene.step( 0.0f, 32 );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.step( 0.125f, 4 );
+        check( scene.getTerrainTrialObservation().firstContactTime && scene.getTerrainTrialObservation().preContactSettingsChanged == ( difference != 0 ), "contact freezes the recorded pre-contact change flag" );
+        check( scene.pinTerrainTrialReference(), "completed step history can be pinned" );
+        scene.step( 0.0625f, 2 );
+        check( scene.getTerrainTrialObservation().preContactSettingsChanged == ( difference != 0 ) && scene.getTerrainTrialReference()->preContactSettingsChanged == ( difference != 0 ), "post-contact setting changes do not modify current or pinned history" );
+        check( scene.relaunchTerrainTrialReference() && !scene.getTerrainTrialObservation().preContactSettingsChanged && scene.getTerrainTrialObservation().initialSubStepCount == 0, "relaunch starts new step history while retaining reference" );
+        scene.resetTerrainProbes();
+        check( !scene.getTerrainTrialObservation().preContactSettingsChanged && scene.getTerrainTrialObservation().initialSubStepCount == 0 && scene.getTerrainTrialReference()->preContactSettingsChanged == ( difference != 0 ), "probe reset clears current history and retains reference" );
+        check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialReference(), "terrain edits invalidate pinned step history" );
+    }
+
     return 0;
 }
