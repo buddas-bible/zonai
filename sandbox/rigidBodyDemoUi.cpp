@@ -769,6 +769,7 @@ void rigidBodyDemoUi::drawExperimentControls()
                     ImGui::Text( "비교 물체 물성 변경 관측: %s", comparison.materialChangesObserved ? "포함" : "없음" );
                     ImGui::Text( "비교 물체 질량 변경 관측: %s", comparison.massChangesObserved ? "포함" : "없음" );
                     ImGui::Text( "비교 물체 관성 변경 관측: %s", comparison.inertiaChangesObserved ? "포함" : "없음" );
+                    ImGui::Text( "비교 중력 배율 변경 관측: %s", comparison.gravityScaleChangesObserved ? "포함" : "없음" );
                     ImGui::Text( "첫 접촉 관측 차이 (현재 - 기준): %+.3f s", comparison.firstContactTimeDifference );
                     break;
             }

@@ -1060,7 +1060,7 @@ int main()
         rigidBodyDemoUi scaleView{ demoKind::splineTerrain };
         const auto probe = scaleView.getShapes()[scaleView.getTerrainPointCount() - 1];
         scaleView.getWorld().SetBodyGravityScale( probe.bodyHandle, 1.0f );
-        for( int frame = 0; frame < 8; ++frame )
+        for( int frame = 0; frame < 10; ++frame )
         {
             if( frame == 1 )
             {
@@ -1092,6 +1092,20 @@ int main()
                 if( !scaleView.pinTerrainTrialReference() ) fail( "Gravity scale history UI fixture must pin changes" );
                 scaleView.resetTerrainProbes();
             }
+            if( frame == 8 || frame == 9 )
+            {
+                if( !scaleView.relaunchTerrainTrialReference() ) fail( "Gravity scale summary UI fixture must relaunch changes" );
+                if( frame == 9 )
+                {
+                    scaleView.getWorld().SetBodyGravityScale( probe.bodyHandle, 1.0f );
+                    scaleView.step( 0.0625f, 4 );
+                    scaleView.getWorld().SetBodyGravityScale( probe.bodyHandle, 2.0f );
+                }
+                const auto target = *scaleView.getTerrainTrialTarget( terrainTrial::front );
+                scaleView.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+                scaleView.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+                scaleView.step( 0.125f, 4 );
+            }
             const auto before = scaleView.getTerrainTrialObservation();
             const auto reference = scaleView.getTerrainTrialReference();
             const auto pose = scaleView.getWorld().GetBodyTransform( probe.bodyHandle );
@@ -1112,6 +1126,9 @@ int main()
             if( ( frame == 5 || frame == 6 ) && log.find( "첫 접촉까지 관측된 중력 배율 변경: 없음" ) == std::string_view::npos ) fail( "Gravity scale history UI must show unchanged current or reference history" );
             if( ( frame == 6 || frame == 7 ) && log.find( "첫 접촉까지 관측된 중력 배율 변경: 있음" ) == std::string_view::npos ) fail( "Gravity scale history UI must show changed current and pinned history" );
             if( ( frame == 0 || frame == 4 ) && log.find( "첫 접촉까지 관측된 중력 배율 변경:" ) != std::string_view::npos ) fail( "Gravity scale history UI must not invent a result before contact" );
+            if( frame == 5 && log.find( "비교 중력 배율 변경 관측: 없음" ) == std::string_view::npos ) fail( "Gravity scale summary UI must show no observed changes for either trial" );
+            if( ( frame == 6 || frame == 8 || frame == 9 ) && log.find( "비교 중력 배율 변경 관측: 포함" ) == std::string_view::npos ) fail( "Gravity scale summary UI must include current, reference or both changed histories" );
+            if( frame != 5 && frame != 6 && frame != 8 && frame != 9 && log.find( "비교 중력 배율 변경 관측:" ) != std::string_view::npos ) fail( "Gravity scale summary UI must wait for comparable observations" );
             ImGui::LogFinish();
             ImGui::End();
             ImGui::Render();

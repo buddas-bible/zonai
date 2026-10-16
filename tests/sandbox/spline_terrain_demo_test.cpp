@@ -1662,5 +1662,43 @@ int main()
         check( scene.getTerrainTrialObservation().firstContactTime && scene.getTerrainTrialObservation().preContactGravityScaleChanged && !scene.getTerrainTrialObservation().preContactGravityChanged, "first-contact-step gravity scale change is recorded independently of global gravity" );
     }
 
+    for( int changes = 0; changes < 4; ++changes )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        scene.getWorld().SetBodyGravityScale( probe.bodyHandle, 1.0f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        const auto observeContact = [&]( bool changed )
+        {
+            if( changed )
+            {
+                scene.getWorld().SetBodyTransform( probe.bodyHandle, { { 0.0f, 10.0f }, {} } );
+                scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+                scene.getWorld().SetBodyGravityScale( probe.bodyHandle, 2.0f );
+                scene.step( 0.125f, 4 );
+                scene.getWorld().SetBodyGravityScale( probe.bodyHandle, 1.0f );
+            }
+            scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+            scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+            scene.step( 0.125f, 4 );
+        };
+        observeContact( changes & 1 );
+        check( scene.pinTerrainTrialReference() && scene.relaunchTerrainTrialReference(), "gravity scale summary fixture pins and relaunches" );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::waitingForContact && !scene.getTerrainTrialComparison().gravityScaleChangesObserved, "gravity scale summary waits for comparable contact observations" );
+        observeContact( changes & 2 );
+        const auto comparison = scene.getTerrainTrialComparison();
+        check( comparison.status == terrainTrialComparisonStatus::ready && comparison.gravityScaleChangesObserved == ( changes != 0 ), "gravity scale summary includes current, reference or both observed changes" );
+        const float differences[] = { 0.0f, -0.125f, 0.125f, 0.0f };
+        check( comparison.firstContactTimeDifference == differences[changes] && comparison.stepSettings == terrainTrialStepComparison::constantMatch && !comparison.gravityChangesObserved && !comparison.materialChangesObserved && !comparison.massChangesObserved && !comparison.inertiaChangesObserved, "gravity scale summary preserves time difference and independent step/gravity/material/mass/inertia summaries" );
+        scene.launchTerrainProbe( 1, terrainTrial::front );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions && !scene.getTerrainTrialComparison().gravityScaleChangesObserved, "mismatched launches do not produce an gravity scale summary" );
+        scene.resetTerrainProbes();
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noObservation && !scene.getTerrainTrialComparison().gravityScaleChangesObserved, "missing current observation does not produce an gravity scale summary" );
+        scene.clearTerrainTrialReference();
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noReference && !scene.getTerrainTrialComparison().gravityScaleChangesObserved, "missing reference does not produce an gravity scale summary" );
+    }
+
     return 0;
 }
