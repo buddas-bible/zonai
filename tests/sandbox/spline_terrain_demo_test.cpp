@@ -1612,5 +1612,55 @@ int main()
         check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialObservation().active && !scene.getTerrainTrialReference(), "terrain edits clear current and pinned gravity scale records" );
     }
 
+    for( float scale : { 1.0f, 0.0f, 2.0f, -1.0f } )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        scene.getWorld().SetBodyGravityScale( probe.bodyHandle, 1.0f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { { 0.0f, 10.0f }, {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.getWorld().SetBodyGravityScale( probe.bodyHandle, 2.0f );
+        scene.step( 0.0f, 4 );
+        scene.getWorld().SetBodyGravityScale( probe.bodyHandle, 1.0f );
+        scene.getWorld().SetBodyGravityScale( scene.getShapes()[scene.getTerrainPointCount()].bodyHandle, 3.0f );
+        scene.getWorld().SetGravity( { 1.0f, 0.0f } );
+        scene.step( 0.0625f, 4 );
+        check( !scene.getTerrainTrialObservation().preContactGravityScaleChanged && scene.getTerrainTrialObservation().preContactGravityChanged && scene.pinTerrainTrialReference(), "zero-duration, global gravity and other-probe changes do not count as selected scale changes" );
+        scene.getWorld().SetGravity( {} );
+        scene.getWorld().SetBodyGravityScale( probe.bodyHandle, scale );
+        scene.step( 0.0625f, 4 );
+        scene.getWorld().SetBodyGravityScale( probe.bodyHandle, 1.0f );
+        scene.step( 0.0625f, 4 );
+        const bool changed = scale != 1.0f;
+        check( scene.getTerrainTrialObservation().preContactGravityScaleChanged == changed && !scene.getTerrainTrialReference()->preContactGravityScaleChanged, "observed scale changes stay latched after restoration without modifying reference" );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.step( 0.125f, 4 );
+        check( scene.getTerrainTrialObservation().firstContactTime && scene.pinTerrainTrialReference(), "gravity scale history fixture pins first contact" );
+        scene.getWorld().SetBodyGravityScale( probe.bodyHandle, 2.0f );
+        scene.step( 0.0625f, 4 );
+        check( scene.getTerrainTrialObservation().preContactGravityScaleChanged == changed && scene.getTerrainTrialReference()->preContactGravityScaleChanged == changed && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::ready, "post-contact scale changes preserve history and comparison policy" );
+        check( scene.relaunchTerrainTrialReference() && !scene.getTerrainTrialObservation().preContactGravityScaleChanged, "relaunch starts fresh gravity scale history" );
+        scene.resetTerrainProbes();
+        check( !scene.getTerrainTrialObservation().preContactGravityScaleChanged && scene.getTerrainTrialReference()->preContactGravityScaleChanged == changed, "probe reset retains pinned gravity scale history" );
+        check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialReference(), "terrain edits invalidate pinned gravity scale history" );
+    }
+
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        scene.getWorld().SetBodyGravityScale( scene.getImpulseBody(), 1.0f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        scene.getWorld().SetBodyTransform( scene.getImpulseBody(), { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( scene.getImpulseBody(), {} );
+        scene.getWorld().SetBodyGravityScale( scene.getImpulseBody(), 2.0f );
+        scene.step( 0.125f, 4 );
+        check( scene.getTerrainTrialObservation().firstContactTime && scene.getTerrainTrialObservation().preContactGravityScaleChanged && !scene.getTerrainTrialObservation().preContactGravityChanged, "first-contact-step gravity scale change is recorded independently of global gravity" );
+    }
+
     return 0;
 }
