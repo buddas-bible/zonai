@@ -101,6 +101,7 @@ struct terrainTrialComparison
     float firstContactTimeDifference = 0.0f;
     bool contactStepSettingsMatch = false;
     terrainTrialStepComparison stepSettings = terrainTrialStepComparison::unavailable;
+    bool gravityChangesObserved = false;
 };
 
 struct carWheelObservation
