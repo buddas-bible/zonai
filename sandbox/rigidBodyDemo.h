@@ -238,6 +238,9 @@ public:
 
     [[nodiscard]] std::span<const vec2> getSplineControlPoints() const noexcept { return kind_ == demoKind::splineTerrain ? std::span<const vec2>{ splineControlPoints_ } : std::span<const vec2>{}; }
 
+    [[nodiscard]] float getSplineSamplingError() const noexcept { return splineSamplingError_; }
+    void setSplineSamplingError( float error );
+
     [[nodiscard]] std::optional<std::size_t> getTerrainPointDragIndex() const noexcept { return terrainPointDragIndex_; }
 
 #pragma endregion Queries
@@ -269,6 +272,7 @@ private:
     void startTerrainPointDrag( vec2 point );
     void updateTerrainPointDrag( vec2 point );
     void updateSplineControlPoint( std::size_t pointIndex, vec2 point );
+    bool updateSplineTerrain( const std::array<vec2, 9>& points, float error );
     [[nodiscard]] bool canMoveTerrainPoint( std::size_t pointIndex, vec2 point ) const;
 #pragma endregion TerrainEdit
 
@@ -313,6 +317,7 @@ private:
 
     chainId terrainChain_{};
     std::array<vec2, 9> splineControlPoints_{};
+    float splineSamplingError_ = 0.01f;
     std::array<transform2, 3> terrainInitialTransforms_{};
     std::vector<shapeId> terrainSegments_{};
     std::optional<std::size_t> terrainPointDragIndex_{};

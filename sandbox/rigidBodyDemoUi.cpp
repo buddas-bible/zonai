@@ -658,7 +658,13 @@ void rigidBodyDemoUi::drawExperimentControls()
 
     if( getKind() == demoKind::terrainChain || getKind() == demoKind::splineTerrain )
     {
-        if( getKind() == demoKind::splineTerrain ) ImGui::TextWrapped( "곡선 근사 오차 기준: 1 cm. 충돌 선분이 너무 짧아지는 제어점 이동은 적용하지 않습니다." );
+        if( getKind() == demoKind::splineTerrain )
+        {
+            float error = getSplineSamplingError() * 100.0f;
+            if( ImGui::SliderFloat( "근사 오차###SplineSamplingError", &error, 0.5f, 5.0f, "%.2f cm", ImGuiSliderFlags_AlwaysClamp ) ) setSplineSamplingError( error / 100.0f );
+            ImGui::Text( "선분 수: %zu", getTerrainPointCount() - 1 );
+            ImGui::TextWrapped( "충돌 선분이 너무 짧아지는 오차 변경이나 제어점 이동은 적용하지 않습니다." );
+        }
         const char* probes[] = { "원", "캡슐", "상자" };
         ImGui::Combo( "시험 도형###TerrainProbe", &terrainProbeIndex_, probes, 3 );
         if( ImGui::Button( "이음새 통과###TerrainSeams" ) ) launchTerrainProbe( terrainProbeIndex_, terrainTrial::seams );

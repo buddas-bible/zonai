@@ -247,5 +247,64 @@ int main()
                 check( simulation.GetChainCount() == 1 && simulation.GetShapeCount() == edgeCount + 3, "trials and reset preserve the sampled terrain chain" );
             }
 
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        check( scene.getSplineSamplingError() == 0.01f, "spline sampling defaults to one centimeter" );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        const transform2 pose = scene.getWorld().GetBodyTransform( probe.bodyHandle );
+        scene.getWorld().SetShapeFriction( probe.shapeHandle, 0.37f );
+        const std::size_t initialCount = scene.getTerrainPointCount();
+        scene.setSplineSamplingError( 0.05f );
+        check( scene.getSplineSamplingError() == 0.05f && scene.getTerrainPointCount() < initialCount, "larger error produces fewer terrain edges" );
+        scene.setSplineSamplingError( 0.005f );
+        check( scene.getSplineSamplingError() == 0.005f && scene.getTerrainPointCount() > initialCount, "smaller error produces more terrain edges" );
+        check( scene.getShapes()[scene.getTerrainPointCount() - 1].shapeHandle == probe.shapeHandle, "resampling preserves probe handles" );
+        check( near( scene.getWorld().GetBodyTransform( probe.bodyHandle ).position, pose.position ) && scene.getWorld().GetShape( probe.shapeHandle ).friction == 0.37f, "resampling preserves probe pose and material" );
+        const std::size_t count = scene.getTerrainPointCount();
+        const auto first = scene.getShapes()[0].shapeHandle;
+        for( const float invalid : { 0.0f, -1.0f, 0.004f, 0.051f, std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity() } )
+            scene.setSplineSamplingError( invalid );
+        check( scene.getSplineSamplingError() == 0.005f && scene.getTerrainPointCount() == count && scene.getShapes()[0].shapeHandle == first, "invalid error changes preserve the setting and terrain" );
+        demoInput drag{};
+        drag.mousePosition = scene.getSplineControlPoints()[1];
+        drag.mousePressed = drag.mouseHeld = true;
+        scene.handleInput( drag );
+        drag.mousePressed = false;
+        drag.mousePosition.y += 1.0f;
+        scene.handleInput( drag );
+        check( near( scene.getSplineControlPoints()[1], drag.mousePosition ), "drag fixture must apply" );
+        const auto samples = SampleAdaptive( { scene.getSplineControlPoints() }, 0.005f );
+        check( scene.getTerrainPointCount() == samples.size(), "dragging uses the selected sampling error" );
+        for( std::size_t i = 0; i < samples.size(); ++i ) check( near( scene.getTerrainPoint( i ), samples[i] ), "dragging retains selected-error sample positions" );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        scene.resetTerrainProbes();
+        check( scene.getSplineSamplingError() == 0.005f && scene.getTerrainPointCount() == samples.size(), "probe launch and reset preserve the error setting" );
+        rigidBodyDemo reset{ demoKind::splineTerrain };
+        check( reset.getSplineSamplingError() == 0.01f, "fresh scene resets sampling to one centimeter" );
+        rigidBodyDemo polygon{ demoKind::terrainChain };
+        const std::size_t polygonCount = polygon.getTerrainPointCount();
+        polygon.setSplineSamplingError( 0.05f );
+        check( polygon.getTerrainPointCount() == polygonCount && polygon.getSplineSamplingError() == 0.01f, "sampling control does not alter polygon terrain" );
+    }
+
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.setSplineSamplingError( 0.005f );
+        demoInput drag{};
+        drag.mousePosition = scene.getSplineControlPoints()[1];
+        drag.mousePressed = drag.mouseHeld = true;
+        scene.handleInput( drag );
+        drag.mousePressed = false;
+        drag.mousePosition = scene.getSplineControlPoints()[0];
+        const vec2 control = scene.getSplineControlPoints()[1];
+        std::vector<vec2> before;
+        for( std::size_t i = 0; i < scene.getTerrainPointCount(); ++i ) before.push_back( scene.getTerrainPoint( i ) );
+        const auto first = scene.getShapes()[0].shapeHandle;
+        scene.handleInput( drag );
+        check( near( scene.getSplineControlPoints()[1], control ), "collapsed controls must reject the drag" );
+        check( scene.getSplineSamplingError() == 0.005f && scene.getTerrainPointCount() == before.size() && scene.getShapes()[0].shapeHandle == first, "failed drag preserves the selected error and handles" );
+        for( std::size_t i = 0; i < before.size(); ++i ) check( near( scene.getTerrainPoint( i ), before[i] ), "failed resampling preserves every terrain point" );
+    }
+
     return 0;
 }

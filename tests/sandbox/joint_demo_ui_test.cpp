@@ -235,7 +235,7 @@ int main()
     }
     {
         rigidBodyDemoUi adaptiveView{ demoKind::splineTerrain };
-        for( int frame = 0; frame < 4; ++frame )
+        for( int frame = 0; frame < 6; ++frame )
         {
             ImGui::NewFrame();
             ImGui::SetNextWindowPos( { 0, 0 } );
@@ -253,6 +253,7 @@ int main()
             const bool selectedProbe = std::string_view{ GImGui->LogBuffer.c_str() }.find( "원 [Chain Probe]" ) != std::string_view::npos;
             if( frame == 2 && !selectedProbe ) fail( "Probe selection fixture must select the circle inspector" );
             if( frame == 3 && !selectedProbe ) fail( "Inspector must retain the selected probe after adaptive topology changes" );
+            if( frame == 5 && !selectedProbe ) fail( "Inspector must retain the selected probe after sampling error changes" );
             ImGui::LogFinish();
             ImGui::End();
             ImGui::Render();
@@ -268,7 +269,40 @@ int main()
                 adaptiveView.handleInput( drag );
                 if( adaptiveView.getTerrainPointCount() == before ) fail( "Adaptive inspector fixture must change topology" );
             }
+            if( frame == 4 )
+            {
+                const std::size_t before = adaptiveView.getTerrainPointCount();
+                adaptiveView.setSplineSamplingError( 0.05f );
+                if( adaptiveView.getTerrainPointCount() == before ) fail( "Sampling error inspector fixture must change topology" );
+            }
         }
+    }
+    {
+        rigidBodyDemoUi samplingView{ demoKind::splineTerrain };
+        const std::size_t initialCount = samplingView.getTerrainPointCount();
+        for( int frame = 0; frame < 4; ++frame )
+        {
+            if( frame == 1 ) io.AddInputCharactersUTF8( "5" );
+            if( frame == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+            if( frame == 3 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline sampling controls" );
+            if( frame == 0 )
+            {
+                GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "SplineSamplingError" );
+                GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+            }
+            ImGui::LogToBuffer();
+            samplingView.drawControls();
+            const std::string_view log{ GImGui->LogBuffer.c_str() };
+            if( log.find( "근사 오차" ) == std::string_view::npos || log.find( "선분 수:" ) == std::string_view::npos ) fail( "Spline controls must expose sampling error and edge count" );
+            ImGui::LogFinish();
+            ImGui::End();
+            ImGui::Render();
+        }
+        if( samplingView.getSplineSamplingError() != 0.05f || samplingView.getTerrainPointCount() >= initialCount ) fail( "Sampling slider must apply centimeter input to terrain geometry" );
     }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;

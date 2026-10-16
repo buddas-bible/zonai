@@ -14,7 +14,6 @@ namespace
 {
 
 constexpr float TERRAIN_POINT_PICK_RADIUS = 0.25f;
-constexpr float TERRAIN_SPLINE_ERROR = 0.01f;
 
 } // namespace
 
@@ -364,7 +363,7 @@ void rigidBodyDemo::createTerrainChain()
     };
 
     splineControlPoints_ = controlPoints;
-    const std::vector<vec2> points = kind_ == demoKind::splineTerrain ? SampleAdaptive( { controlPoints }, TERRAIN_SPLINE_ERROR ) : std::vector<vec2>{ controlPoints.begin(), controlPoints.end() };
+    const std::vector<vec2> points = kind_ == demoKind::splineTerrain ? SampleAdaptive( { controlPoints }, splineSamplingError_ ) : std::vector<vec2>{ controlPoints.begin(), controlPoints.end() };
 
     if( points.size() < 2 ) return;
 
@@ -853,8 +852,19 @@ void rigidBodyDemo::updateSplineControlPoint( std::size_t pointIndex, vec2 point
 
     auto candidate = splineControlPoints_;
     candidate[pointIndex] = point;
-    const auto samples = SampleAdaptive( { candidate }, TERRAIN_SPLINE_ERROR );
-    if( samples.size() < 2 ) return;
+    if( updateSplineTerrain( candidate, splineSamplingError_ ) ) splineControlPoints_ = candidate;
+}
+
+void rigidBodyDemo::setSplineSamplingError( float error )
+{
+    if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || !std::isfinite( error ) || error < 0.005f || error > 0.05f || error == splineSamplingError_ ) return;
+    if( updateSplineTerrain( splineControlPoints_, error ) ) splineSamplingError_ = error;
+}
+
+bool rigidBodyDemo::updateSplineTerrain( const std::array<vec2, 9>& points, float error )
+{
+    const auto samples = SampleAdaptive( { points }, error );
+    if( samples.size() < 2 ) return false;
     const vec2 ghost1 = samples.front() + ( samples.front() - samples[1] );
     const vec2 ghost2 = samples.back() + ( samples.back() - samples[samples.size() - 2] );
     const std::size_t oldCount = terrainSegments_.size();
@@ -862,7 +872,7 @@ void rigidBodyDemo::updateSplineControlPoint( std::size_t pointIndex, vec2 point
     const std::array<visualShape, 3> probes{ shapes_[oldCount], shapes_[oldCount + 1], shapes_[oldCount + 2] };
     shapes_.reserve( samples.size() + 2 );
     terrainSegments_.reserve( samples.size() - 1 );
-    if( !world_.SetChainPoints( terrainChain_, samples, ghost1, ghost2 ) ) return;
+    if( !world_.SetChainPoints( terrainChain_, samples, ghost1, ghost2 ) ) return false;
 
     if( samples.size() - 1 != oldCount )
     {
@@ -873,8 +883,8 @@ void rigidBodyDemo::updateSplineControlPoint( std::size_t pointIndex, vec2 point
         for( const shapeId child : terrainSegments_ ) shapes_.push_back( { ground, child, "지형 edge [Chain]" } );
         for( const auto probe : probes ) shapes_.push_back( probe );
     }
-    splineControlPoints_ = candidate;
     refreshContacts();
+    return true;
 }
 
 bool rigidBodyDemo::canMoveTerrainPoint( std::size_t pointIndex, vec2 point ) const
