@@ -873,5 +873,54 @@ int main()
         check( !polygon.pinTerrainTrialReference() && !polygon.getTerrainTrialReference(), "trial references are spline-only" );
     }
 
+    for( terrainTrial trial : { terrainTrial::front, terrainTrial::back, terrainTrial::seams } )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        check( !scene.relaunchTerrainTrialReference() && !scene.getTerrainTrialObservation().active, "relaunch without reference does not launch" );
+        check( scene.insertSplineControlPoint( 1 ) && scene.undoSplineEdit(), "relaunch fixture retains redo history" );
+        scene.setSplineTrialFraction( 0.25f );
+        scene.setSplineTrialSpeed( 12.5f );
+        scene.launchTerrainProbe( 1, trial );
+        const auto body = scene.getShapes()[scene.getTerrainPointCount()].bodyHandle;
+        const transform2 launchPose = scene.getWorld().GetBodyTransform( body );
+        const vec2 launchVelocity = scene.getWorld().GetBodyLinearVelocity( body );
+        scene.step( 1.0f / 60.0f, 4 );
+        check( scene.pinTerrainTrialReference(), "relaunch fixture pins progressed trial" );
+        const auto reference = *scene.getTerrainTrialReference();
+        scene.setSplineTrialFraction( 0.75f );
+        scene.setSplineTrialSpeed( 3.0f );
+        scene.launchTerrainProbe( 2, terrainTrial::back );
+        scene.getWorld().SetShapeFriction( scene.getShapes()[0].shapeHandle, 0.37f );
+        scene.getWorld().SetGravity( { 1.0f, -3.0f } );
+        check( scene.relaunchTerrainTrialReference(), "reference conditions can relaunch through the existing launch path" );
+        const auto current = scene.getTerrainTrialObservation();
+        check( current.active && current.probeIndex == 1 && current.trial == trial && current.launchSpeed == reference.launchSpeed && current.launchFraction == reference.launchFraction, "relaunch restores recorded probe and launch conditions" );
+        check( current.elapsed == 0.0f && !current.touching && !current.firstContactTime, "relaunch starts a fresh observation" );
+        check( near( scene.getWorld().GetBodyTransform( body ).position, launchPose.position ) && near( scene.getWorld().GetBodyLinearVelocity( body ), launchVelocity ), "relaunch restores the initial pose and velocity rather than the progressed state" );
+        check( scene.getSplineTrialFraction() == ( trial == terrainTrial::seams ? 0.75f : 0.25f ) && scene.getSplineTrialSpeed() == ( trial == terrainTrial::seams ? 3.0f : 12.5f ), "relaunch synchronizes front/back settings and retains unused seam settings" );
+        check( scene.getTerrainTrialReference()->elapsed == reference.elapsed && scene.getTerrainTrialReference()->launchFraction == reference.launchFraction && scene.canRedoSplineEdit() && !scene.canUndoSplineEdit(), "relaunch preserves pinned result and edit history" );
+        check( scene.getWorld().GetShapeFriction( scene.getShapes()[0].shapeHandle ) == 0.37f, "relaunch uses current terrain material" );
+        check( near( scene.getWorld().GetGravity(), { 1.0f, -3.0f } ), "relaunch preserves current gravity" );
+        scene.getWorld().DestroyBody( body );
+        const auto before = scene.getTerrainTrialObservation();
+        scene.setSplineTrialFraction( 0.6f );
+        scene.setSplineTrialSpeed( 4.0f );
+        check( !scene.relaunchTerrainTrialReference() && scene.getSplineTrialFraction() == 0.6f && scene.getSplineTrialSpeed() == 4.0f && scene.getTerrainTrialObservation().probeIndex == before.probeIndex, "retired probe rejects relaunch before changing settings or observation" );
+    }
+
+    for( bool retireChain : { false, true } )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.setSplineTrialFraction( 0.25f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        scene.step( 1.0f / 60.0f, 4 );
+        check( scene.pinTerrainTrialReference(), "invalid relaunch fixture pins a trial" );
+        scene.setSplineTrialFraction( 0.75f );
+        scene.setSplineTrialSpeed( 4.0f );
+        if( retireChain ) scene.getWorld().DestroyChain( scene.getWorld().GetShapeParentChain( scene.getShapes()[0].shapeHandle ) );
+        else scene.getWorld().DestroyShape( scene.getShapes()[scene.getTerrainPointCount() - 1].shapeHandle );
+        check( !scene.relaunchTerrainTrialReference() && scene.getSplineTrialFraction() == 0.75f && scene.getSplineTrialSpeed() == 4.0f && scene.getTerrainTrialObservation().elapsed > 0.0f && scene.getTerrainTrialReference(), "invalid terrain or probe shape rejects relaunch without changing state" );
+    }
+
     return 0;
 }
