@@ -1247,5 +1247,57 @@ int main()
         check( scene.getTerrainTrialObservation().trial == terrainTrial::seams && scene.getTerrainTrialObservation().launchSpeed == 6.0f, "retired probe shape rejects launch before reading material or changing state" );
     }
 
+    for( int change = 0; change < 3; ++change )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        scene.getWorld().SetShapeFriction( probe.shapeHandle, 0.25f );
+        scene.getWorld().SetShapeRestitution( probe.shapeHandle, 0.5f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { { 0.0f, 10.0f }, {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.getWorld().SetShapeFriction( probe.shapeHandle, 0.75f );
+        scene.step( 0.0f, 4 );
+        scene.getWorld().SetShapeFriction( probe.shapeHandle, 0.25f );
+        scene.getWorld().SetShapeFriction( scene.getShapes()[0].shapeHandle, 0.9f );
+        scene.getWorld().SetShapeRestitution( scene.getShapes()[scene.getTerrainPointCount()].shapeHandle, 0.9f );
+        scene.step( 0.0625f, 4 );
+        check( !scene.getTerrainTrialObservation().preContactMaterialChanged && scene.pinTerrainTrialReference(), "zero-duration and other-shape material changes do not count" );
+        scene.getWorld().SetShapeFriction( probe.shapeHandle, change == 1 ? 0.75f : 0.25f );
+        scene.getWorld().SetShapeRestitution( probe.shapeHandle, change == 2 ? 0.8f : 0.5f );
+        scene.step( 0.0625f, 4 );
+        scene.getWorld().SetShapeFriction( probe.shapeHandle, 0.25f );
+        scene.getWorld().SetShapeRestitution( probe.shapeHandle, 0.5f );
+        scene.step( 0.0625f, 4 );
+        check( scene.getTerrainTrialObservation().preContactMaterialChanged == ( change != 0 ) && !scene.getTerrainTrialReference()->preContactMaterialChanged, "observed material changes stay latched after restoration without modifying reference" );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.step( 0.125f, 4 );
+        check( scene.getTerrainTrialObservation().firstContactTime && scene.pinTerrainTrialReference(), "material history fixture pins first contact" );
+        scene.getWorld().SetShapeFriction( probe.shapeHandle, 0.75f );
+        scene.getWorld().SetShapeRestitution( probe.shapeHandle, 0.8f );
+        scene.step( 0.0625f, 4 );
+        check( scene.getTerrainTrialObservation().preContactMaterialChanged == ( change != 0 ) && scene.getTerrainTrialReference()->preContactMaterialChanged == ( change != 0 ) && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::ready, "post-contact material changes preserve history and comparison policy" );
+        check( scene.relaunchTerrainTrialReference() && !scene.getTerrainTrialObservation().preContactMaterialChanged, "relaunch starts fresh material history" );
+        scene.resetTerrainProbes();
+        check( !scene.getTerrainTrialObservation().preContactMaterialChanged && scene.getTerrainTrialReference()->preContactMaterialChanged == ( change != 0 ), "probe reset retains pinned material history" );
+        check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialReference(), "terrain edits invalidate pinned material history" );
+    }
+
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.getWorld().SetShapeFriction( probe.shapeHandle, scene.getTerrainTrialObservation().launchFriction + 0.5f );
+        scene.step( 0.125f, 4 );
+        check( scene.getTerrainTrialObservation().firstContactTime && scene.getTerrainTrialObservation().preContactMaterialChanged, "material change on the first contact step is included" );
+    }
+
     return 0;
 }
