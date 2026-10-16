@@ -299,6 +299,7 @@ private:
     bool restoreSplineEdit( std::optional<splineEditState>& source, std::optional<splineEditState>& destination );
     void startTerrainPointDrag( vec2 point );
     void updateTerrainPointDrag( vec2 point );
+    void updateSplineTrialPosition( vec2 point );
     void updateSplineControlPoint( std::size_t pointIndex, vec2 point );
     bool updateSplineTerrain( std::span<const vec2> points, float error );
     [[nodiscard]] bool canMoveTerrainPoint( std::size_t pointIndex, vec2 point ) const;
@@ -347,6 +348,7 @@ private:
     std::vector<vec2> splineControlPoints_{};
     float splineSamplingError_ = 0.01f;
     float splineTrialFraction_ = 0.5f;
+    bool splineTrialDragging_ = false;
     std::optional<splineEditState> splineUndo_{};
     std::optional<splineEditState> splineRedo_{};
     bool splineDragRecorded_ = false;

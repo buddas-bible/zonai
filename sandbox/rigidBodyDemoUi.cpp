@@ -704,7 +704,7 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::EndDisabled();
             float fraction = getSplineTrialFraction() * 100.0f;
             if( ImGui::SliderFloat( "앞·뒷면 시험 위치###SplineTrialFraction", &fraction, 0.0f, 100.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp ) ) setSplineTrialFraction( fraction / 100.0f );
-            ImGui::TextWrapped( "지형 시작부터의 길이 비율입니다. 하늘색 점과 화살표는 시험 위치와 충돌 앞면을 표시합니다. 이음새 통과 시험은 시작 위치를 유지합니다." );
+            ImGui::TextWrapped( "지형 시작부터의 길이 비율입니다. Shift+왼쪽 드래그로 가까운 지형 위 위치를 고를 수 있습니다. 하늘색 점과 화살표는 시험 위치와 충돌 앞면을 표시합니다. 이음새 통과 시험은 시작 위치를 유지합니다." );
         }
         const char* probes[] = { "원", "캡슐", "상자" };
         ImGui::Combo( "시험 도형###TerrainProbe", &terrainProbeIndex_, probes, 3 );

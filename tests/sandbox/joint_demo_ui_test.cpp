@@ -431,6 +431,16 @@ int main()
         for( int frame = 0; frame < 6; ++frame )
         {
             preview.setSplineTrialFraction( frame == 0 ? 0.25f : 0.75f );
+            if( frame == 1 )
+            {
+                const vec2 a = preview.getTerrainPoint( 0 ), b = preview.getTerrainPoint( 1 );
+                demoInput pick{};
+                pick.mousePosition = TransformPoint( preview.getWorld().GetBodyTransform( preview.getShapes()[0].bodyHandle ), a + 2.0f * Normalize( a - b ) );
+                pick.mousePressed = pick.mouseHeld = pick.selectTrialPosition = true;
+                preview.handleInput( pick );
+                preview.cancelInput();
+                if( preview.getSplineTrialFraction() != 0.0f ) fail( "Shift trial selection must update the preview target before drawing" );
+            }
             if( frame == 2 && !preview.insertSplineControlPoint( 1 ) ) fail( "Preview edit fixture must apply" );
             if( frame == 3 && !preview.undoSplineEdit() ) fail( "Preview undo fixture must apply" );
             if( frame == 4 )

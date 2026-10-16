@@ -49,6 +49,7 @@ struct demoInput
     vec2 mousePosition{};
     bool mousePressed = false;
     bool mouseHeld = false;
+    bool selectTrialPosition = false;
     bool impulsePressed = false;
     bool left = false;
     bool right = false;
