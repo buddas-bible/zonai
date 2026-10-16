@@ -1493,5 +1493,55 @@ int main()
         check( scene.relaunchTerrainTrialReference() && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::waitingForContact, "equal recorded inertia allows contact comparison" );
     }
 
+    for( bool changed : { false, true } )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { { 0.0f, 10.0f }, {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 2.0f );
+        scene.step( 0.0f, 4 );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        scene.getWorld().SetShapeDensity( scene.getShapes()[scene.getTerrainPointCount()].shapeHandle, 3.0f );
+        scene.step( 0.0625f, 4 );
+        check( !scene.getTerrainTrialObservation().preContactInertiaChanged && scene.pinTerrainTrialReference(), "zero-duration and other-probe inertia changes do not count" );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, changed ? 2.0f : 1.0f );
+        scene.step( 0.0625f, 4 );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        scene.step( 0.0625f, 4 );
+        check( scene.getTerrainTrialObservation().preContactInertiaChanged == changed && !scene.getTerrainTrialReference()->preContactInertiaChanged, "observed inertia changes stay latched after restoration without modifying reference" );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.step( 0.125f, 4 );
+        check( scene.getTerrainTrialObservation().firstContactTime && scene.pinTerrainTrialReference(), "inertia history fixture pins first contact" );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 2.0f );
+        scene.step( 0.0625f, 4 );
+        check( scene.getTerrainTrialObservation().preContactInertiaChanged == changed && scene.getTerrainTrialReference()->preContactInertiaChanged == changed && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::ready, "post-contact inertia changes preserve history and comparison policy" );
+        check( scene.relaunchTerrainTrialReference() && !scene.getTerrainTrialObservation().preContactInertiaChanged, "relaunch starts fresh inertia history" );
+        scene.resetTerrainProbes();
+        check( !scene.getTerrainTrialObservation().preContactInertiaChanged && scene.getTerrainTrialReference()->preContactInertiaChanged == changed, "probe reset retains pinned inertia history" );
+        check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialReference(), "terrain edits invalidate pinned inertia history" );
+    }
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 0.5f );
+        const auto extra = scene.getWorld().CreateShape( probe.bodyHandle, circle2{ { 2.0f, 0.0f }, 0.45f }, {}, 0.5f );
+        check( scene.getWorld().GetBodyMass( probe.bodyHandle ) == scene.getTerrainTrialObservation().launchMass && scene.getWorld().GetBodyRotationalInertia( probe.bodyHandle ) != scene.getTerrainTrialObservation().launchInertia, "inertia history fixture changes inertia without changing mass" );
+        scene.step( 0.125f, 4 );
+        check( scene.getTerrainTrialObservation().firstContactTime && scene.getTerrainTrialObservation().preContactInertiaChanged && !scene.getTerrainTrialObservation().preContactMassChanged, "first-contact-step inertia change is recorded independently of mass" );
+        scene.getWorld().DestroyShape( extra );
+    }
+
     return 0;
 }
