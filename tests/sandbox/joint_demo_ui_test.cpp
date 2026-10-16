@@ -521,16 +521,19 @@ int main()
     }
     {
         rigidBodyDemoUi observationView{ demoKind::splineTerrain };
-        for( int frame = 0; frame < 4; ++frame )
+        for( int frame = 0; frame < 5; ++frame )
         {
             if( frame == 1 )
             {
                 observationView.launchTerrainProbe( 1, terrainTrial::front );
                 for( int step = 0; step < 120; ++step ) observationView.step( 1.0f / 60.0f, 4 );
                 if( !observationView.getTerrainTrialObservation().firstContactTime ) fail( "Observation UI fixture must contact terrain" );
+                observationView.setSplineTrialFraction( 0.75f );
+                observationView.setSplineTrialSpeed( 12.5f );
             }
             if( frame == 2 ) observationView.resetTerrainProbes();
             if( frame == 3 ) observationView.launchTerrainProbe( 2, terrainTrial::back );
+            if( frame == 4 ) observationView.launchTerrainProbe( 0, terrainTrial::seams );
             const auto before = observationView.getTerrainTrialObservation();
             const bodyId body = observationView.getShapes()[observationView.getTerrainPointCount()].bodyHandle;
             const transform2 pose = observationView.getWorld().GetBodyTransform( body );
@@ -546,11 +549,15 @@ int main()
             if( ( frame == 0 || frame == 2 ) && log.find( "최근 발사: 없음" ) == std::string_view::npos ) fail( "Observation UI must show cleared state" );
             if( frame == 1 && ( log.find( "최근 발사: 캡슐 / 앞면" ) == std::string_view::npos || log.find( "경과:" ) == std::string_view::npos || log.find( "첫 접촉 관측:" ) == std::string_view::npos || log.find( "아직 없음" ) != std::string_view::npos ) ) fail( "Observation UI must show the launched probe, elapsed time and first contact" );
             if( frame == 3 && ( log.find( "최근 발사: 상자 / 뒷면" ) == std::string_view::npos || log.find( "첫 접촉 관측: 아직 없음" ) == std::string_view::npos ) ) fail( "New launch must replace the prior displayed observation" );
+            if( frame == 1 && log.find( "발사 조건: 위치 50.0 % / 초기 속도 8.0 m/s" ) == std::string_view::npos ) fail( "UI must show recorded launch conditions instead of changed next-launch settings" );
+            if( frame == 3 && log.find( "발사 조건: 위치 75.0 % / 초기 속도 12.5 m/s" ) == std::string_view::npos ) fail( "UI must show the new launch's applied conditions" );
+            if( frame == 4 && log.find( "발사 조건: 첫 선분 중앙 / 초기 속도 6.0 m/s" ) == std::string_view::npos ) fail( "UI must show fixed seam conditions" );
+            if( ( frame == 0 || frame == 2 ) && log.find( "발사 조건:" ) != std::string_view::npos ) fail( "Cleared observations must not show old launch conditions" );
             ImGui::LogFinish();
             ImGui::End();
             ImGui::Render();
             const auto after = observationView.getTerrainTrialObservation();
-            if( after.elapsed != before.elapsed || after.firstContactTime != before.firstContactTime || after.touching != before.touching || LengthSquared( observationView.getWorld().GetBodyTransform( body ).position - pose.position ) != 0.0f || LengthSquared( observationView.getWorld().GetBodyLinearVelocity( body ) - velocity ) != 0.0f || observationView.getWorld().GetContactCount() != contacts ) fail( "Observation UI must not advance time, motion or contacts" );
+            if( after.launchSpeed != before.launchSpeed || after.launchFraction != before.launchFraction || after.elapsed != before.elapsed || after.firstContactTime != before.firstContactTime || after.touching != before.touching || LengthSquared( observationView.getWorld().GetBodyTransform( body ).position - pose.position ) != 0.0f || LengthSquared( observationView.getWorld().GetBodyLinearVelocity( body ) - velocity ) != 0.0f || observationView.getWorld().GetContactCount() != contacts ) fail( "Observation UI must not change recorded conditions, time, motion or contacts" );
         }
     }
     ImGui::DestroyContext();
