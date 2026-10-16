@@ -444,6 +444,21 @@ void rigidBodyDemo::resetTerrainProbes()
     refreshContacts();
 }
 
+bool rigidBodyDemo::relaunchTerrainTrialReference()
+{
+    if( !terrainTrialReference_ || !getTerrainTrialTarget( terrainTrialReference_->trial ) ) return false;
+    const auto& reference = *terrainTrialReference_;
+    const std::size_t probeIndex = terrainSegments_.size() + reference.probeIndex;
+    if( probeIndex >= shapes_.size() || !world_.IsValid( shapes_[probeIndex].shapeHandle ) || !world_.IsValid( shapes_[probeIndex].bodyHandle ) ) return false;
+    if( reference.launchFraction )
+    {
+        setSplineTrialFraction( *reference.launchFraction );
+        setSplineTrialSpeed( reference.launchSpeed );
+    }
+    launchTerrainProbe( reference.probeIndex, reference.trial );
+    return true;
+}
+
 bool rigidBodyDemo::pinTerrainTrialReference()
 {
     if( !terrainTrialObservation_.active || terrainTrialObservation_.elapsed <= 0.0f || !world_.IsValid( terrainChain_ ) ) return false;

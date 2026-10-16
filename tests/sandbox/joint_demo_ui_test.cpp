@@ -605,6 +605,39 @@ int main()
             if( after.elapsed != before.elapsed || after.firstContactTime != before.firstContactTime || after.touching != before.touching || LengthSquared( referenceView.getWorld().GetBodyTransform( referenceView.getImpulseBody() ).position - pose.position ) != 0.0f || LengthSquared( referenceView.getWorld().GetBodyLinearVelocity( referenceView.getImpulseBody() ) - velocity ) != 0.0f || referenceView.getWorld().GetContactCount() != contacts ) fail( "Reference controls must not change current observation or physics" );
         }
     }
+    {
+        rigidBodyDemoUi relaunchView{ demoKind::splineTerrain };
+        for( int frame = 0; frame < 3; ++frame )
+        {
+            if( frame == 1 )
+            {
+                relaunchView.setSplineTrialFraction( 0.25f );
+                relaunchView.setSplineTrialSpeed( 12.5f );
+                relaunchView.launchTerrainProbe( 1, terrainTrial::back );
+                relaunchView.step( 1.0f / 60.0f, 4 );
+                if( !relaunchView.pinTerrainTrialReference() ) fail( "Relaunch UI fixture must pin a trial" );
+                relaunchView.setSplineTrialFraction( 0.75f );
+                relaunchView.setSplineTrialSpeed( 3.0f );
+                relaunchView.resetTerrainProbes();
+            }
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline reference relaunch" );
+            GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( frame == 2 ? "TerrainFront" : "SplineTrialRelaunch" );
+            ImGui::LogToBuffer();
+            relaunchView.drawControls();
+            const auto current = relaunchView.getTerrainTrialObservation();
+            const std::string_view log{ GImGui->LogBuffer.c_str() };
+            if( frame == 0 && current.active ) fail( "Relaunch button without a reference must not launch" );
+            if( frame == 1 && ( !current.active || current.probeIndex != 1 || current.trial != terrainTrial::back || current.launchFraction != 0.25f || current.launchSpeed != 12.5f || current.elapsed != 0.0f ) ) fail( "Relaunch button must apply the pinned launch conditions" );
+            if( frame == 1 && ( log.find( "최근 발사: 캡슐 / 뒷면" ) == std::string_view::npos || !relaunchView.getTerrainTrialReference() ) ) fail( "Relaunch UI must show the fresh trial immediately and retain reference" );
+            if( frame == 2 && ( current.probeIndex != 1 || current.trial != terrainTrial::front || current.launchFraction != 0.25f || current.launchSpeed != 12.5f ) ) fail( "Relaunch must synchronize the probe selector and front/back settings" );
+            ImGui::LogFinish();
+            ImGui::End();
+            ImGui::Render();
+        }
+    }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }

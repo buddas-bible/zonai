@@ -709,6 +709,9 @@ void rigidBodyDemoUi::drawExperimentControls()
             if( ImGui::SliderFloat( "앞·뒷면 시험 속도###SplineTrialSpeed", &speed, 1.0f, 20.0f, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp ) ) setSplineTrialSpeed( speed );
             ImGui::TextUnformatted( "속도는 다음 앞면·뒷면 발사부터 적용합니다." );
             ImGui::TextWrapped( "지형 시작부터의 길이 비율입니다. Shift+왼쪽 드래그로 가까운 지형 위 위치를 고를 수 있습니다. 하늘색 점과 화살표는 시험 위치와 충돌 앞면을 표시합니다. 이음새 통과 시험은 시작 위치를 유지합니다." );
+            ImGui::BeginDisabled( !getTerrainTrialReference() );
+            if( ImGui::Button( "기준 조건으로 재발사###SplineTrialRelaunch" ) && relaunchTerrainTrialReference() ) terrainProbeIndex_ = static_cast<int>( getTerrainTrialObservation().probeIndex );
+            ImGui::EndDisabled();
             const auto observation = getTerrainTrialObservation();
             ImGui::BeginDisabled( !observation.active || observation.elapsed <= 0.0f );
             if( ImGui::Button( "관측 기준 고정###SplineTrialPin" ) ) pinTerrainTrialReference();
@@ -736,7 +739,7 @@ void rigidBodyDemoUi::drawExperimentControls()
             const auto reference = getTerrainTrialReference();
             if( reference ) drawObservation( *reference, "비교 기준" );
             else ImGui::TextUnformatted( "비교 기준: 없음" );
-            ImGui::TextWrapped( "접촉 시간은 물리 진행이 끝난 뒤 처음 확인한 시각입니다. 물리를 진행한 관측을 기준으로 고정할 수 있으며, 지형 편집 시 기준은 지워집니다." );
+            ImGui::TextWrapped( "접촉 시간은 물리 진행이 끝난 뒤 처음 확인한 시각입니다. 물리를 진행한 관측을 기준으로 고정할 수 있으며, 지형 편집 시 기준은 지워집니다. 기준 조건 재발사는 현재 중력·물성을 사용합니다." );
         }
         ImGui::Combo( "시험 도형###TerrainProbe", &terrainProbeIndex_, probes, 3 );
         if( ImGui::Button( "이음새 통과###TerrainSeams" ) ) launchTerrainProbe( terrainProbeIndex_, terrainTrial::seams );

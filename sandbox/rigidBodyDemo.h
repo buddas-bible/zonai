@@ -270,6 +270,7 @@ public:
     [[nodiscard]] terrainTrialObservation getTerrainTrialObservation() const noexcept { return terrainTrialObservation_; }
     [[nodiscard]] std::optional<terrainTrialObservation> getTerrainTrialReference() const noexcept { return terrainTrialReference_; }
     bool pinTerrainTrialReference();
+    bool relaunchTerrainTrialReference();
     void clearTerrainTrialReference() noexcept { terrainTrialReference_.reset(); }
     [[nodiscard]] std::optional<terrainTrialTarget> getTerrainTrialTarget( terrainTrial trial ) const;
     [[nodiscard]] bool canUndoSplineEdit() const noexcept { return splineUndo_.has_value(); }
