@@ -151,12 +151,13 @@ int main()
         auto& simulation = transformed.getWorld();
         const transform2 pose{ { 1.5f, 0.75f }, rot2::FromRadians( 0.25f ) };
         simulation.SetBodyTransform( transformed.getShapes()[0].bodyHandle, pose );
+        transformed.setSplineTrialFraction( 0.0f );
         transformed.launchTerrainProbe( 0, terrainTrial::front );
-        const vec2 a = TransformPoint( pose, transformed.getTerrainPoint( 3 ) );
-        const vec2 b = TransformPoint( pose, transformed.getTerrainPoint( 4 ) );
+        const vec2 a = TransformPoint( pose, transformed.getTerrainPoint( 0 ) );
+        const vec2 b = TransformPoint( pose, transformed.getTerrainPoint( 1 ) );
         const vec2 normal = Cross( Normalize( b - a ), 1.0f );
 
-        check( near( simulation.GetBodyTransform( transformed.getImpulseBody() ).position, 0.5f * ( a + b ) + 1.5f * normal ), "spline terrain launch converts sampled local points to world space" );
+        check( near( simulation.GetBodyTransform( transformed.getImpulseBody() ).position, a + 1.5f * normal ), "spline terrain launch converts sampled local points to world space" );
         check( near( simulation.GetBodyLinearVelocity( transformed.getImpulseBody() ), -8.0f * normal ), "spline terrain launch rotates its front-face approach velocity" );
         check( hasPoint( transformed, controlPoints[1] ), "moving the terrain body preserves sampled local geometry" );
         demoInput press{};
@@ -196,8 +197,9 @@ int main()
                 auto& simulation = scene.getWorld();
                 const auto selected = scene.getShapes()[edgeCount + probe];
                 scene.launchTerrainProbe( probe, trial );
-                const vec2 a = scene.getTerrainPoint( 3 ), b = scene.getTerrainPoint( 4 );
-                const vec2 normal = Cross( Normalize( b - a ), 1.0f );
+                const vec2 velocity = simulation.GetBodyLinearVelocity( selected.bodyHandle );
+                const vec2 normal = trial == terrainTrial::seams ? Cross( Normalize( velocity ), 1.0f ) : ( trial == terrainTrial::back ? 1.0f : -1.0f ) * Normalize( velocity );
+                const vec2 target = simulation.GetBodyTransform( selected.bodyHandle ).position - ( trial == terrainTrial::back ? -1.0f : 1.0f ) * 1.5f * normal;
                 bool contacted = false, crossed = false;
                 int contactFrames = 0;
 
@@ -206,7 +208,7 @@ int main()
                     scene.step( 1.0f / 60.0f, substeps );
                     const vec2 position = simulation.GetBodyTransform( selected.bodyHandle ).position;
                     check( IsFinite( position ), "spline terrain trials remain finite" );
-                    const float side = Dot( position - 0.5f * ( a + b ), normal );
+                    const float side = Dot( position - target, normal );
                     bool frameContact = false;
 
                     for( const auto& contact : scene.getContacts() )
@@ -514,15 +516,67 @@ int main()
         check( scene.getTerrainPointCount() == 2, "short terrain trial fixture has one edge" );
         const vec2 a = scene.getTerrainPoint( 0 ), b = scene.getTerrainPoint( 1 );
         const vec2 tangent = Normalize( b - a ), normal = Cross( tangent, 1.0f );
-        for( std::size_t probe = 0; probe < 3; ++probe )
-            for( const terrainTrial trial : { terrainTrial::front, terrainTrial::back, terrainTrial::seams } )
-            {
-                scene.launchTerrainProbe( probe, trial );
-                const bodyId body = scene.getShapes()[1 + probe].bodyHandle;
-                const float side = trial == terrainTrial::back ? -1.0f : 1.0f;
-                check( near( scene.getWorld().GetBodyTransform( body ).position, 0.5f * ( a + b ) + side * 1.5f * normal ), "one-edge terrain trials launch from its valid edge" );
-                check( near( scene.getWorld().GetBodyLinearVelocity( body ), trial == terrainTrial::seams ? 6.0f * tangent : -side * 8.0f * normal ), "one-edge terrain trials retain front, back and seam directions" );
-            }
+        for( const float fraction : { 0.0f, 0.25f, 0.5f, 1.0f } )
+        {
+            scene.setSplineTrialFraction( fraction );
+            for( std::size_t probe = 0; probe < 3; ++probe )
+                for( const terrainTrial trial : { terrainTrial::front, terrainTrial::back, terrainTrial::seams } )
+                {
+                    scene.launchTerrainProbe( probe, trial );
+                    const bodyId body = scene.getShapes()[1 + probe].bodyHandle;
+                    const float side = trial == terrainTrial::back ? -1.0f : 1.0f;
+                    const vec2 target = trial == terrainTrial::seams ? 0.5f * ( a + b ) : a + fraction * ( b - a );
+                    check( near( scene.getWorld().GetBodyTransform( body ).position, target + side * 1.5f * normal ), "one-edge terrain trials launch from its valid edge" );
+                    check( near( scene.getWorld().GetBodyLinearVelocity( body ), trial == terrainTrial::seams ? 6.0f * tangent : -side * 8.0f * normal ), "one-edge terrain trials retain front, back and seam directions" );
+                }
+        }
+    }
+
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        check( scene.getSplineTrialFraction() == 0.5f, "trial position defaults to half the sampled length" );
+        scene.setSplineTrialFraction( 0.75f );
+        check( scene.getSplineTrialFraction() == 0.75f && !scene.canUndoSplineEdit(), "trial position settings do not create geometry history" );
+        while( scene.getSplineControlPoints().size() > 2 ) check( scene.removeSplineControlPoint( scene.getSplineControlPoints().size() - 1 ), "trial position fixture reduces to two controls" );
+        check( scene.insertSplineControlPoint( 0 ) && scene.getTerrainPointCount() == 3, "trial position fixture has two child edges" );
+        auto& simulation = scene.getWorld();
+        const chainId parent = simulation.GetShapeParentChain( scene.getShapes()[0].shapeHandle );
+        const std::array<vec2, 3> points{ vec2{ 0, 0 }, vec2{ 3, 0 }, vec2{ 3, 4 } };
+        check( simulation.SetChainPoints( parent, points, { -3, 0 }, { 3, 8 } ), "trial fixture has unequal three- and four-meter edges" );
+        const transform2 pose{ { 1.5f, 0.75f }, rot2::FromRadians( 0.25f ) };
+        simulation.SetBodyTransform( scene.getShapes()[0].bodyHandle, pose );
+        const std::array<float, 4> fractions{ 0.0f, 0.25f, 0.75f, 1.0f };
+        const std::array<vec2, 4> targets{ vec2{ 0, 0 }, vec2{ 1.75f, 0 }, vec2{ 3, 2.25f }, vec2{ 3, 4 } };
+        for( std::size_t i = 0; i < fractions.size(); ++i )
+            for( std::size_t probe = 0; probe < 3; ++probe )
+                for( const terrainTrial trial : { terrainTrial::front, terrainTrial::back } )
+                {
+                    scene.setSplineTrialFraction( fractions[i] );
+                    scene.launchTerrainProbe( probe, trial );
+                    const bodyId body = scene.getShapes()[2 + probe].bodyHandle;
+                    const vec2 tangent = TransformVector( pose, i < 2 ? vec2{ 1, 0 } : vec2{ 0, 1 } );
+                    const vec2 normal = Cross( tangent, 1.0f );
+                    const float side = trial == terrainTrial::back ? -1.0f : 1.0f;
+                    check( near( simulation.GetBodyTransform( body ).position, TransformPoint( pose, targets[i] ) + side * 1.5f * normal ), "launch uses sampled length fraction and the selected edge in world space" );
+                    check( near( simulation.GetBodyLinearVelocity( body ), -side * 8.0f * normal ), "selected trial position preserves front/back launch speed and direction" );
+                }
+        const std::array<vec2, 3> equalEdges{ vec2{ 0, 0 }, vec2{ 3, 0 }, vec2{ 3, 3 } };
+        check( simulation.SetChainPoints( parent, equalEdges, { -3, 0 }, { 3, 6 } ), "join fixture has equal edge lengths" );
+        scene.setSplineTrialFraction( 0.5f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const vec2 firstNormal = Cross( TransformVector( pose, { 1, 0 } ), 1.0f );
+        check( near( simulation.GetBodyTransform( scene.getImpulseBody() ).position, TransformPoint( pose, { 3, 0 } ) + 1.5f * firstNormal ), "an exact join uses the edge ending at that join" );
+        scene.setSplineTrialFraction( 1.0f );
+        scene.launchTerrainProbe( 0, terrainTrial::seams );
+        check( near( simulation.GetBodyTransform( scene.getImpulseBody() ).position, TransformPoint( pose, { 1.5f, 0 } ) + 1.5f * firstNormal ), "seam trial keeps its first-edge midpoint regardless of fraction" );
+        for( const float invalid : { -0.1f, 1.1f, std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity() } ) scene.setSplineTrialFraction( invalid );
+        check( scene.getSplineTrialFraction() == 1.0f, "invalid trial fractions leave the setting unchanged" );
+        scene.resetTerrainProbes();
+        check( scene.resetSplineTerrain() && scene.undoSplineEdit() && scene.redoSplineEdit(), "position persistence fixture resets and restores geometry" );
+        check( scene.getSplineTrialFraction() == 1.0f, "probe and geometry reset and undo/redo preserve the trial fraction" );
+        rigidBodyDemo polygon{ demoKind::terrainChain };
+        polygon.setSplineTrialFraction( 0.75f );
+        check( polygon.getSplineTrialFraction() == 0.5f && !polygon.canUndoSplineEdit(), "trial fraction editing is spline-only and does not record geometry history" );
     }
 
     return 0;
