@@ -471,6 +471,12 @@ void rigidBodyDemo::setSplineTrialFraction( float fraction )
     splineTrialFraction_ = fraction;
 }
 
+void rigidBodyDemo::setSplineTrialSpeed( float speed )
+{
+    if( kind_ != demoKind::splineTerrain || !std::isfinite( speed ) || speed < 1.0f || speed > 20.0f ) return;
+    splineTrialSpeed_ = speed;
+}
+
 std::optional<terrainTrialTarget> rigidBodyDemo::getTerrainTrialTarget( terrainTrial trial ) const
 {
     if( ( kind_ != demoKind::terrainChain && kind_ != demoKind::splineTerrain ) || !world_.IsValid( terrainChain_ ) || terrainSegments_.empty() || shapes_.empty() || !world_.IsValid( shapes_[0].bodyHandle ) ) return {};
@@ -511,7 +517,8 @@ void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial tri
     const vec2 normal = Cross( tangent, 1.0f );
     const float side = trial == terrainTrial::back ? -1.0f : 1.0f;
     world_.SetBodyTransform( body, { target->point + side * 1.5f * normal, rot2::FromRadians( std::atan2( tangent.y, tangent.x ) ) } );
-    world_.SetBodyLinearVelocity( body, trial == terrainTrial::seams ? 6.0f * tangent : -side * 8.0f * normal );
+    const float speed = kind_ == demoKind::splineTerrain ? splineTrialSpeed_ : 8.0f;
+    world_.SetBodyLinearVelocity( body, trial == terrainTrial::seams ? 6.0f * tangent : -side * speed * normal );
     refreshContacts();
 }
 

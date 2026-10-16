@@ -484,6 +484,41 @@ int main()
             ImGui::Render();
         }
     }
+    {
+        rigidBodyDemoUi speedView{ demoKind::splineTerrain };
+        const transform2 initialPose = speedView.getWorld().GetBodyTransform( speedView.getImpulseBody() );
+        for( int frame = 0; frame < 5; ++frame )
+        {
+            if( frame == 1 ) io.AddInputCharactersUTF8( "12.5" );
+            if( frame == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+            if( frame == 3 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline trial speed" );
+            if( frame == 0 )
+            {
+                GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "SplineTrialSpeed" );
+                GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+            }
+            if( frame == 3 || frame == 4 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( frame == 3 ? "TerrainFront" : "TerrainSeams" );
+            speedView.drawControls();
+            ImGui::End();
+            ImGui::Render();
+            if( frame == 2 )
+            {
+                if( speedView.getSplineTrialSpeed() != 12.5f ) fail( "Trial speed slider must apply meters-per-second input" );
+                if( LengthSquared( speedView.getWorld().GetBodyTransform( speedView.getImpulseBody() ).position - initialPose.position ) != 0.0f || LengthSquared( speedView.getWorld().GetBodyLinearVelocity( speedView.getImpulseBody() ) ) != 0.0f ) fail( "Trial speed editing must wait for launch before changing motion" );
+            }
+            if( frame == 3 || frame == 4 )
+            {
+                const auto target = speedView.getTerrainTrialTarget( frame == 3 ? terrainTrial::front : terrainTrial::seams );
+                if( !target ) fail( "Trial speed UI fixture needs a target" );
+                const vec2 expected = frame == 3 ? -12.5f * Cross( target->tangent, 1.0f ) : 6.0f * target->tangent;
+                if( LengthSquared( speedView.getWorld().GetBodyLinearVelocity( speedView.getImpulseBody() ) - expected ) > 1.0e-8f ) fail( "Launch buttons must use selected front speed and unchanged seam speed" );
+            }
+        }
+    }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }

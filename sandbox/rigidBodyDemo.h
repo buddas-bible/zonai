@@ -253,6 +253,8 @@ public:
     bool resetSplineTerrain();
     [[nodiscard]] float getSplineTrialFraction() const noexcept { return splineTrialFraction_; }
     void setSplineTrialFraction( float fraction );
+    [[nodiscard]] float getSplineTrialSpeed() const noexcept { return splineTrialSpeed_; }
+    void setSplineTrialSpeed( float speed );
     [[nodiscard]] std::optional<terrainTrialTarget> getTerrainTrialTarget( terrainTrial trial ) const;
     [[nodiscard]] bool canUndoSplineEdit() const noexcept { return splineUndo_.has_value(); }
     [[nodiscard]] bool canRedoSplineEdit() const noexcept { return splineRedo_.has_value(); }
@@ -348,6 +350,7 @@ private:
     std::vector<vec2> splineControlPoints_{};
     float splineSamplingError_ = 0.01f;
     float splineTrialFraction_ = 0.5f;
+    float splineTrialSpeed_ = 8.0f;
     bool splineTrialDragging_ = false;
     std::optional<splineEditState> splineUndo_{};
     std::optional<splineEditState> splineRedo_{};
