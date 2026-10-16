@@ -243,6 +243,7 @@ public:
     void setSplineSamplingError( float error );
     bool insertSplineControlPoint( std::size_t segmentIndex );
     bool removeSplineControlPoint( std::size_t pointIndex );
+    bool resetSplineTerrain();
     [[nodiscard]] bool canUndoSplineEdit() const noexcept { return splineUndo_.has_value(); }
     [[nodiscard]] bool canRedoSplineEdit() const noexcept { return splineRedo_.has_value(); }
     bool undoSplineEdit();

@@ -235,7 +235,7 @@ int main()
     }
     {
         rigidBodyDemoUi adaptiveView{ demoKind::splineTerrain };
-        for( int frame = 0; frame < 14; ++frame )
+        for( int frame = 0; frame < 18; ++frame )
         {
             ImGui::NewFrame();
             ImGui::SetNextWindowPos( { 0, 0 } );
@@ -256,6 +256,7 @@ int main()
             if( frame == 5 && !selectedProbe ) fail( "Inspector must retain the selected probe after sampling error changes" );
             if( ( frame == 7 || frame == 9 ) && !selectedProbe ) fail( "Inspector must retain the selected probe after control insertion and deletion" );
             if( ( frame == 11 || frame == 13 ) && !selectedProbe ) fail( "Inspector must retain the selected probe after undo and redo" );
+            if( ( frame == 15 || frame == 17 ) && !selectedProbe ) fail( "Inspector must retain the selected probe after terrain reset and its undo" );
             ImGui::LogFinish();
             ImGui::End();
             ImGui::Render();
@@ -281,6 +282,8 @@ int main()
             if( frame == 8 && !adaptiveView.removeSplineControlPoint( 2 ) ) fail( "Inspector deletion fixture must apply" );
             if( frame == 10 && !adaptiveView.undoSplineEdit() ) fail( "Inspector undo fixture must apply" );
             if( frame == 12 && !adaptiveView.redoSplineEdit() ) fail( "Inspector redo fixture must apply" );
+            if( frame == 14 && !adaptiveView.resetSplineTerrain() ) fail( "Inspector terrain reset fixture must apply" );
+            if( frame == 16 && !adaptiveView.undoSplineEdit() ) fail( "Inspector terrain reset undo fixture must apply" );
         }
     }
     {
@@ -366,6 +369,25 @@ int main()
             ImGui::End();
             ImGui::Render();
             if( frame == 0 && topologyView.getSplineControlPoints().size() != 2 ) fail( "Delete button must preserve the two-control minimum" );
+        }
+    }
+    {
+        rigidBodyDemoUi resetView{ demoKind::splineTerrain };
+        if( !resetView.insertSplineControlPoint( 1 ) ) fail( "Terrain reset UI fixture must insert a control" );
+        resetView.setSplineSamplingError( 0.03f );
+        const char* actions[] = { "SplineTerrainReset", "SplineUndo", "SplineRedo", "SplineTerrainReset", "SplineUndo" };
+        for( int frame = 0; frame < 5; ++frame )
+        {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline terrain reset" );
+            GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( actions[frame] );
+            resetView.drawControls();
+            ImGui::End();
+            ImGui::Render();
+            const bool edited = frame == 1 || frame == 4;
+            if( resetView.getSplineControlPoints().size() != ( edited ? 10u : 9u ) || resetView.getSplineSamplingError() != ( edited ? 0.03f : 0.01f ) ) fail( "Terrain reset button and history must restore controls and error without replacing unchanged history" );
         }
     }
     ImGui::DestroyContext();

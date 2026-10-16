@@ -667,6 +667,7 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::BeginDisabled( !canRedoSplineEdit() );
             if( ImGui::Button( "다시하기###SplineRedo" ) ) redoSplineEdit();
             ImGui::EndDisabled();
+            if( ImGui::Button( "지형 원형 복원###SplineTerrainReset" ) ) resetSplineTerrain();
             float error = getSplineSamplingError() * 100.0f;
             const bool errorChanged = ImGui::SliderFloat( "근사 오차###SplineSamplingError", &error, 0.5f, 5.0f, "%.2f cm", ImGuiSliderFlags_AlwaysClamp );
             if( ImGui::IsItemActivated() ) beginSplineSamplingEdit();

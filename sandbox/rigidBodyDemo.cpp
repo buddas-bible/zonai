@@ -14,6 +14,17 @@ namespace
 {
 
 constexpr float TERRAIN_POINT_PICK_RADIUS = 0.25f;
+constexpr std::array<vec2, 9> TERRAIN_CONTROL_POINTS{
+    vec2{ 8.0f, -2.0f },
+    vec2{ 6.0f, -1.2f },
+    vec2{ 4.0f, -1.0f },
+    vec2{ 2.0f, 0.0f },
+    vec2{ 0.0f, 0.8f },
+    vec2{ -2.0f, 0.1f },
+    vec2{ -4.0f, -0.8f },
+    vec2{ -6.0f, -0.4f },
+    vec2{ -8.0f, -1.2f }
+};
 
 } // namespace
 
@@ -352,17 +363,7 @@ void rigidBodyDemo::createTerrainChain()
 {
     // Chain의 front side가 위쪽을 향하도록 오른쪽에서 왼쪽 순서로 terrain을 구성함.
     // 양 끝 ghost는 실제 충돌 edge 바깥에서 endpoint normal만 이어줌.
-    const std::array<vec2, 9> controlPoints{
-        vec2{ 8.0f, -2.0f },
-        vec2{ 6.0f, -1.2f },
-        vec2{ 4.0f, -1.0f },
-        vec2{ 2.0f, 0.0f },
-        vec2{ 0.0f, 0.8f },
-        vec2{ -2.0f, 0.1f },
-        vec2{ -4.0f, -0.8f },
-        vec2{ -6.0f, -0.4f },
-        vec2{ -8.0f, -1.2f }
-    };
+    const auto& controlPoints = TERRAIN_CONTROL_POINTS;
 
     splineControlPoints_.assign( controlPoints.begin(), controlPoints.end() );
     const std::vector<vec2> points = kind_ == demoKind::splineTerrain ? SampleAdaptive( { controlPoints }, splineSamplingError_ ) : std::vector<vec2>{ controlPoints.begin(), controlPoints.end() };
@@ -435,7 +436,7 @@ void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial tri
     const auto body = shapes_[terrainSegments_.size() + probeIndex].bodyHandle;
     if( !world_.IsValid( body ) ) return;
     resetTerrainProbes();
-    const std::size_t edge = trial == terrainTrial::seams ? 0 : 3;
+    const std::size_t edge = trial == terrainTrial::seams ? 0 : std::min( std::size_t{ 3 }, terrainSegments_.size() - 1 );
     const auto ground = world_.GetBodyTransform( shapes_[edge].bodyHandle );
     const vec2 a = TransformPoint( ground, getTerrainPoint( edge ) );
     const vec2 b = TransformPoint( ground, getTerrainPoint( edge + 1 ) );
@@ -887,6 +888,22 @@ bool rigidBodyDemo::removeSplineControlPoint( std::size_t pointIndex )
     if( !updateSplineTerrain( candidate, splineSamplingError_ ) ) return false;
     rememberSplineEdit();
     splineControlPoints_.swap( candidate );
+    terrainPointDragIndex_.reset();
+    splineDragRecorded_ = false;
+    endSplineSamplingEdit();
+    return true;
+}
+
+bool rigidBodyDemo::resetSplineTerrain()
+{
+    if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) ) return false;
+    const bool original = std::equal( splineControlPoints_.begin(), splineControlPoints_.end(), TERRAIN_CONTROL_POINTS.begin(), TERRAIN_CONTROL_POINTS.end(),
+        []( vec2 a, vec2 b ) { return a.x == b.x && a.y == b.y; } );
+    if( original && splineSamplingError_ == 0.01f ) return false;
+    if( !updateSplineTerrain( TERRAIN_CONTROL_POINTS, 0.01f ) ) return false;
+    rememberSplineEdit();
+    splineControlPoints_.assign( TERRAIN_CONTROL_POINTS.begin(), TERRAIN_CONTROL_POINTS.end() );
+    splineSamplingError_ = 0.01f;
     terrainPointDragIndex_.reset();
     splineDragRecorded_ = false;
     endSplineSamplingEdit();
