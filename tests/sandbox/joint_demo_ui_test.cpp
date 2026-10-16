@@ -715,6 +715,47 @@ int main()
             if( after.elapsed != before.elapsed || after.firstContactTime != before.firstContactTime || after.firstContactTimeStep != before.firstContactTimeStep || after.firstContactSubStepCount != before.firstContactSubStepCount || reference.has_value() != afterReference.has_value() || ( reference && ( reference->firstContactTime != afterReference->firstContactTime || reference->firstContactTimeStep != afterReference->firstContactTimeStep || reference->firstContactSubStepCount != afterReference->firstContactSubStepCount ) ) || LengthSquared( comparisonView.getWorld().GetBodyTransform( probe.bodyHandle ).position - pose.position ) != 0.0f || LengthSquared( comparisonView.getWorld().GetBodyLinearVelocity( probe.bodyHandle ) - velocity ) != 0.0f || comparisonView.getWorld().GetContactCount() != contacts ) fail( "Comparison display must preserve observations and physics" );
         }
     }
+    {
+        rigidBodyDemoUi gravityView{ demoKind::splineTerrain };
+        gravityView.getWorld().SetGravity( { 0.0f, -3.0f } );
+        for( int frame = 0; frame < 5; ++frame )
+        {
+            if( frame == 1 )
+            {
+                gravityView.launchTerrainProbe( 0, terrainTrial::front );
+                gravityView.step( 0.0625f, 4 );
+                if( !gravityView.pinTerrainTrialReference() ) fail( "Gravity UI fixture must pin a launch" );
+                gravityView.getWorld().SetGravity( { 1.0f, -4.0f } );
+            }
+            if( frame == 2 && !gravityView.relaunchTerrainTrialReference() ) fail( "Gravity UI fixture must relaunch" );
+            if( frame == 3 ) gravityView.resetTerrainProbes();
+            if( frame == 4 && !gravityView.insertSplineControlPoint( 1 ) ) fail( "Gravity UI fixture must edit terrain" );
+            const auto before = gravityView.getTerrainTrialObservation();
+            const auto reference = gravityView.getTerrainTrialReference();
+            const auto body = gravityView.getImpulseBody();
+            const auto pose = gravityView.getWorld().GetBodyTransform( body );
+            const vec2 velocity = gravityView.getWorld().GetBodyLinearVelocity( body );
+            const vec2 gravity = gravityView.getWorld().GetGravity();
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline launch gravity" );
+            ImGui::LogToBuffer();
+            gravityView.drawControls();
+            const std::string_view log{ GImGui->LogBuffer.c_str() };
+            const auto recorded = log.find( "발사 중력: (0.000, -3.000)" );
+            if( frame >= 1 && frame <= 3 && recorded == std::string_view::npos ) fail( "Gravity UI must display recorded reference gravity" );
+            if( frame == 1 && log.find( "발사 중력: (0.000, -3.000)", recorded + 1 ) == std::string_view::npos ) fail( "Gravity UI must display recorded current gravity after world settings change" );
+            if( frame == 2 && ( log.find( "발사 중력: (1.000, -4.000)" ) == std::string_view::npos || log.find( "비교: 발사 조건 다름" ) == std::string_view::npos ) ) fail( "Gravity UI must distinguish new launch gravity from the pinned reference" );
+            if( ( frame == 0 || frame == 4 ) && log.find( "발사 중력:" ) != std::string_view::npos ) fail( "Cleared observations must not display stale gravity" );
+            ImGui::LogFinish();
+            ImGui::End();
+            ImGui::Render();
+            const auto after = gravityView.getTerrainTrialObservation();
+            const auto afterReference = gravityView.getTerrainTrialReference();
+            if( LengthSquared( after.launchGravity - before.launchGravity ) != 0.0f || after.elapsed != before.elapsed || reference.has_value() != afterReference.has_value() || ( reference && LengthSquared( afterReference->launchGravity - reference->launchGravity ) != 0.0f ) || LengthSquared( gravityView.getWorld().GetGravity() - gravity ) != 0.0f || LengthSquared( gravityView.getWorld().GetBodyTransform( body ).position - pose.position ) != 0.0f || LengthSquared( gravityView.getWorld().GetBodyLinearVelocity( body ) - velocity ) != 0.0f ) fail( "Gravity display must preserve recorded conditions and physics" );
+        }
+    }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }

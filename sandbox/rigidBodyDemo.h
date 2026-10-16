@@ -79,6 +79,7 @@ struct terrainTrialObservation
     std::size_t probeIndex = 0;
     terrainTrial trial = terrainTrial::front;
     float launchSpeed = 0.0f;
+    vec2 launchGravity{};
     std::optional<float> launchFraction{};
     float elapsed = 0.0f;
     bool touching = false;

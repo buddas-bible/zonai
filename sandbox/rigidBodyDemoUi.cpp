@@ -731,6 +731,7 @@ void rigidBodyDemoUi::drawExperimentControls()
                 ImGui::Text( "%s: %s / %s", title, probes[value.probeIndex], trial );
                 if( value.launchFraction ) ImGui::Text( "발사 조건: 위치 %.1f %% / 초기 속도 %.1f m/s", *value.launchFraction * 100.0f, value.launchSpeed );
                 else ImGui::Text( "발사 조건: 첫 선분 중앙 / 초기 속도 %.1f m/s", value.launchSpeed );
+                ImGui::Text( "발사 중력: (%.3f, %.3f) m/s²", value.launchGravity.x, value.launchGravity.y );
                 ImGui::Text( "경과: %.3f s / 지형 접촉: %s", value.elapsed, value.touching ? "있음" : "없음" );
                 if( value.firstContactTime )
                 {
@@ -758,7 +759,7 @@ void rigidBodyDemoUi::drawExperimentControls()
                     ImGui::Text( "첫 접촉 관측 차이 (현재 - 기준): %+.3f s", comparison.firstContactTimeDifference );
                     break;
             }
-            ImGui::TextWrapped( "비교는 기록된 발사 조건과 첫 접촉 관측 단계 설정만 확인합니다. 전체 진행 이력이나 중력·물성이 같다는 뜻은 아닙니다." );
+            ImGui::TextWrapped( "비교는 기록된 발사 조건·중력과 첫 접촉 관측 단계 설정만 확인합니다. 전체 진행 이력이나 발사 이후의 중력·물성이 같다는 뜻은 아닙니다." );
             ImGui::TextWrapped( "접촉 시간은 물리 진행이 끝난 뒤 처음 확인한 시각입니다. 물리를 진행한 관측을 기준으로 고정할 수 있으며, 지형 편집 시 기준은 지워집니다. 기준 조건 재발사는 현재 중력·물성을 사용합니다." );
         }
         ImGui::Combo( "시험 도형###TerrainProbe", &terrainProbeIndex_, probes, 3 );
