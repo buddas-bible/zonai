@@ -327,6 +327,7 @@ int main()
             input.mousePosition = camera.ScreenToWorld( io.MousePos, canvasMin, canvasSize );
             input.mousePressed = ImGui::IsMouseClicked( ImGuiMouseButton_Left );
             input.mouseHeld = ImGui::IsMouseDown( ImGuiMouseButton_Left );
+            input.selectTrialPosition = io.KeyShift;
             input.impulsePressed = ImGui::IsMouseClicked( ImGuiMouseButton_Right );
             input.left = ImGui::IsKeyDown( ImGuiKey_A );
             input.right = ImGui::IsKeyDown( ImGuiKey_D );

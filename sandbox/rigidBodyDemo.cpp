@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <variant>
 
@@ -157,25 +158,35 @@ void rigidBodyDemo::handleInput( const demoInput& input )
     {
         terrainPointDragIndex_.reset();
         splineDragRecorded_ = false;
+        splineTrialDragging_ = false;
     }
     else if( kind_ == demoKind::terrainChain || kind_ == demoKind::splineTerrain )
     {
         if( input.mousePressed )
         {
-            startTerrainPointDrag( input.mousePosition );
+            splineTrialDragging_ = kind_ == demoKind::splineTerrain && input.selectTrialPosition;
+            if( splineTrialDragging_ )
+            {
+                terrainPointDragIndex_.reset();
+                splineDragRecorded_ = false;
+                endSplineSamplingEdit();
+                stopMouseDrag();
+            }
+            else startTerrainPointDrag( input.mousePosition );
         }
-        if( terrainPointDragIndex_.has_value() )
+        if( splineTrialDragging_ ) updateSplineTrialPosition( input.mousePosition );
+        else if( terrainPointDragIndex_.has_value() )
         {
             updateTerrainPointDrag( input.mousePosition );
         }
     }
 
-    // Terrain point를 잡은 동안에는 같은 왼쪽 입력으로 Mouse Joint를 만들지 않음.
+    // Terrain 편집 / 시험 위치 선택은 같은 왼쪽 입력으로 Mouse Joint를 만들지 않음.
     if( !input.mouseHeld )
     {
         stopMouseDrag();
     }
-    else if( !terrainPointDragIndex_.has_value() )
+    else if( !terrainPointDragIndex_.has_value() && !splineTrialDragging_ )
     {
         if( input.mousePressed && !world_.IsValid( mouseJoint_ ) )
         {
@@ -214,6 +225,7 @@ void rigidBodyDemo::cancelInput()
     brakeHeld_ = false;
     terrainPointDragIndex_.reset();
     splineDragRecorded_ = false;
+    splineTrialDragging_ = false;
     updateCarMotors();
     stopMouseDrag();
 }
@@ -428,6 +440,29 @@ void rigidBodyDemo::resetTerrainProbes()
         world_.ClearForces( body );
     }
     refreshContacts();
+}
+
+void rigidBodyDemo::updateSplineTrialPosition( vec2 point )
+{
+    if( !world_.IsValid( terrainChain_ ) || terrainSegments_.empty() ) return;
+    point = InverseTransformPoint( world_.GetBodyTransform( shapes_[0].bodyHandle ), point );
+    if( !IsFinite( point ) ) return;
+    double totalLength = 0.0, selectedLength = 0.0;
+    double bestDistance = std::numeric_limits<double>::infinity();
+    for( std::size_t i = 0; i < terrainSegments_.size(); ++i )
+    {
+        const segment2 edge{ getTerrainPoint( i ), getTerrainPoint( i + 1 ) };
+        const vec2 closest = ClosestPoint( edge, point );
+        const double dx = static_cast<double>( closest.x ) - point.x, dy = static_cast<double>( closest.y ) - point.y;
+        const double distance = dx * dx + dy * dy;
+        if( distance < bestDistance )
+        {
+            bestDistance = distance;
+            selectedLength = totalLength + Length( closest - edge.a );
+        }
+        totalLength += Length( edge );
+    }
+    if( std::isfinite( bestDistance ) ) setSplineTrialFraction( std::clamp( static_cast<float>( selectedLength / totalLength ), 0.0f, 1.0f ) );
 }
 
 void rigidBodyDemo::setSplineTrialFraction( float fraction )

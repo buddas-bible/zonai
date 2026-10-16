@@ -596,5 +596,95 @@ int main()
         check( !playground.getTerrainTrialTarget( terrainTrial::front ), "non-terrain scenes have no preview target" );
     }
 
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        while( scene.getSplineControlPoints().size() > 2 ) check( scene.removeSplineControlPoint( scene.getSplineControlPoints().size() - 1 ), "trial picking fixture reduces control count" );
+        check( scene.insertSplineControlPoint( 0 ), "trial picking fixture creates two edges" );
+        scene.setSplineSamplingError( 0.02f );
+        check( scene.undoSplineEdit() && scene.canRedoSplineEdit() && !scene.canUndoSplineEdit(), "trial picking fixture retains redo" );
+        auto& simulation = scene.getWorld();
+        const chainId parent = simulation.GetShapeParentChain( scene.getShapes()[0].shapeHandle );
+        const std::array<vec2, 3> points{ vec2{ 0, 0 }, vec2{ 3, 0 }, vec2{ 3, 4 } };
+        check( simulation.SetChainPoints( parent, points, { -3, 0 }, { 3, 8 } ), "trial picking uses unequal edge lengths" );
+        const transform2 pose{ { 1.5f, 0.75f }, rot2::FromRadians( 0.25f ) };
+        simulation.SetBodyTransform( scene.getShapes()[0].bodyHandle, pose );
+        const auto probe = scene.getShapes()[2];
+        simulation.SetBodyLinearVelocity( probe.bodyHandle, { 2, 3 } );
+        const transform2 beforePose = simulation.GetBodyTransform( probe.bodyHandle );
+        const std::vector<vec2> controls{ scene.getSplineControlPoints().begin(), scene.getSplineControlPoints().end() };
+        demoInput pick{};
+        pick.mousePressed = pick.mouseHeld = pick.selectTrialPosition = true;
+        pick.mousePosition = TransformPoint( pose, { 1.75f, -2 } );
+        scene.handleInput( pick );
+        check( std::abs( scene.getSplineTrialFraction() - 0.25f ) < 1.0e-6f, "Shift press selects the closest point by cumulative length" );
+        pick.mousePressed = pick.selectTrialPosition = false;
+        pick.mousePosition = TransformPoint( pose, { 5, 2.25f } );
+        scene.handleInput( pick );
+        check( std::abs( scene.getSplineTrialFraction() - 0.75f ) < 1.0e-6f, "trial drag remains active after releasing Shift" );
+        pick.mousePosition = TransformPoint( pose, { -10, 0 } );
+        scene.handleInput( pick );
+        check( scene.getSplineTrialFraction() == 0.0f, "trial projection clamps before the path start" );
+        pick.mousePosition = TransformPoint( pose, { 3, 10 } );
+        scene.handleInput( pick );
+        check( scene.getSplineTrialFraction() == 1.0f, "trial projection clamps after the path end" );
+        scene.cancelInput();
+        pick.mousePosition = TransformPoint( pose, { 1.75f, -2 } );
+        scene.handleInput( pick );
+        check( scene.getSplineTrialFraction() == 1.0f, "cancelled trial selection needs a fresh press" );
+        pick.mousePressed = pick.selectTrialPosition = true;
+        scene.handleInput( pick );
+        check( std::abs( scene.getSplineTrialFraction() - 0.25f ) < 1.0e-6f, "a fresh Shift press restarts trial selection" );
+        pick.mousePressed = pick.mouseHeld = false;
+        scene.handleInput( pick );
+        pick.mouseHeld = true;
+        pick.mousePosition = TransformPoint( pose, { 5, 2.25f } );
+        scene.handleInput( pick );
+        check( std::abs( scene.getSplineTrialFraction() - 0.25f ) < 1.0e-6f, "mouse release closes trial selection" );
+        simulation.SetBodyTransform( scene.getShapes()[0].bodyHandle, {} );
+        pick.mousePressed = true;
+        pick.mousePosition = { 2, 1 };
+        scene.handleInput( pick );
+        check( std::abs( scene.getSplineTrialFraction() - 2.0f / 7.0f ) < 1.0e-6f, "equal-distance projections prefer the earlier edge" );
+        pick.mousePosition = simulation.GetBodyTransform( probe.bodyHandle ).position;
+        scene.handleInput( pick );
+        check( !simulation.IsValid( scene.getMouseJoint() ) && !scene.getTerrainPointDragIndex(), "trial picking does not grab probes or controls" );
+        check( near( simulation.GetBodyTransform( probe.bodyHandle ).position, beforePose.position ) && near( simulation.GetBodyLinearVelocity( probe.bodyHandle ), { 2, 3 } ), "trial picking preserves probe pose and velocity" );
+        check( !scene.canUndoSplineEdit() && scene.canRedoSplineEdit() && scene.getSplineSamplingError() == 0.01f, "trial picking preserves geometry history and error" );
+        for( std::size_t i = 0; i < controls.size(); ++i ) check( near( scene.getSplineControlPoints()[i], controls[i] ), "trial picking does not move controls" );
+        for( std::size_t i = 0; i < points.size(); ++i ) check( near( scene.getTerrainPoint( i ), points[i] ), "trial picking does not change collision geometry" );
+        simulation.DestroyChain( parent );
+        scene.handleInput( pick );
+        scene.cancelInput();
+    }
+
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        demoInput drag{};
+        drag.mousePosition = scene.getSplineControlPoints()[1];
+        drag.mousePressed = drag.mouseHeld = true;
+        scene.handleInput( drag );
+        drag.mousePressed = false;
+        drag.selectTrialPosition = true;
+        drag.mousePosition.y += 0.5f;
+        scene.handleInput( drag );
+        check( near( scene.getSplineControlPoints()[1], drag.mousePosition ) && scene.getSplineTrialFraction() == 0.5f, "pressing Shift mid-control-drag does not switch modes" );
+        scene.cancelInput();
+        drag.mousePosition = scene.getWorld().GetBodyTransform( scene.getImpulseBody() ).position;
+        drag.mousePressed = true;
+        drag.selectTrialPosition = false;
+        scene.handleInput( drag );
+        check( scene.getWorld().IsValid( scene.getMouseJoint() ), "ordinary left drag still grabs the probe" );
+        drag.mousePressed = false;
+        drag.selectTrialPosition = true;
+        scene.handleInput( drag );
+        check( scene.getWorld().IsValid( scene.getMouseJoint() ) && scene.getSplineTrialFraction() == 0.5f, "pressing Shift mid-probe-drag does not switch modes" );
+        scene.cancelInput();
+        rigidBodyDemo polygon{ demoKind::terrainChain };
+        drag.mousePosition = polygon.getTerrainPoint( 1 );
+        drag.mousePressed = true;
+        polygon.handleInput( drag );
+        check( polygon.getTerrainPointDragIndex() == 1 && polygon.getSplineTrialFraction() == 0.5f, "Shift trial selection is spline-only" );
+    }
+
     return 0;
 }
