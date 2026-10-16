@@ -1134,5 +1134,50 @@ int main()
         check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialObservation().active && !scene.getTerrainTrialReference(), "terrain edits clear current and pinned gravity conditions" );
     }
 
+    for( vec2 gravity : { vec2{}, vec2{ 1.0f, 0.0f }, vec2{ 0.0f, -3.0f } } )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { { 0.0f, 10.0f }, {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.getWorld().SetGravity( { 2.0f, -4.0f } );
+        scene.step( 0.0f, 4 );
+        scene.getWorld().SetGravity( {} );
+        scene.step( 0.0625f, 4 );
+        check( !scene.getTerrainTrialObservation().preContactGravityChanged && scene.pinTerrainTrialReference(), "zero-duration gravity changes do not count" );
+        scene.getWorld().SetGravity( gravity );
+        scene.step( 0.0625f, 4 );
+        scene.getWorld().SetGravity( {} );
+        scene.step( 0.0625f, 4 );
+        const bool changed = LengthSquared( gravity ) > 0.0f;
+        check( scene.getTerrainTrialObservation().preContactGravityChanged == changed && !scene.getTerrainTrialReference()->preContactGravityChanged, "observed gravity changes stay latched after restoration without changing reference" );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.step( 0.125f, 4 );
+        check( scene.getTerrainTrialObservation().firstContactTime && scene.pinTerrainTrialReference(), "gravity history fixture pins first contact" );
+        scene.getWorld().SetGravity( { 2.0f, -4.0f } );
+        scene.step( 0.0625f, 4 );
+        check( scene.getTerrainTrialObservation().preContactGravityChanged == changed && scene.getTerrainTrialReference()->preContactGravityChanged == changed && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::ready, "post-contact gravity changes preserve history and existing comparison policy" );
+        check( scene.relaunchTerrainTrialReference() && !scene.getTerrainTrialObservation().preContactGravityChanged, "relaunch clears current gravity history" );
+        scene.resetTerrainProbes();
+        check( !scene.getTerrainTrialObservation().preContactGravityChanged && scene.getTerrainTrialReference()->preContactGravityChanged == changed, "probe reset retains pinned gravity history" );
+        check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialReference(), "terrain edits invalidate pinned gravity history" );
+    }
+
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        scene.getWorld().SetBodyTransform( scene.getImpulseBody(), { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( scene.getImpulseBody(), {} );
+        scene.getWorld().SetGravity( { 1.0f, 0.0f } );
+        scene.step( 0.125f, 4 );
+        check( scene.getTerrainTrialObservation().firstContactTime && scene.getTerrainTrialObservation().preContactGravityChanged, "gravity change on the first contact step is included" );
+    }
+
     return 0;
 }

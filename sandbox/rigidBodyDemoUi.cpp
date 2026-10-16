@@ -738,6 +738,7 @@ void rigidBodyDemoUi::drawExperimentControls()
                     ImGui::Text( "첫 접촉 관측: %.3f s", *value.firstContactTime );
                     ImGui::Text( "관측 단계: %.3f ms / 내부 분할 %d", value.firstContactTimeStep * 1000.0f, value.firstContactSubStepCount );
                     ImGui::Text( "첫 접촉까지 진행 설정 변경: %s", value.preContactSettingsChanged ? "있음" : "없음" );
+                    ImGui::Text( "첫 접촉까지 관측된 중력 변경: %s", value.preContactGravityChanged ? "있음" : "없음" );
                 }
                 else ImGui::TextUnformatted( "첫 접촉 관측: 아직 없음" );
             };
