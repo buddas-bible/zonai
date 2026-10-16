@@ -1543,5 +1543,46 @@ int main()
         scene.getWorld().DestroyShape( extra );
     }
 
+    for( int changes = 0; changes < 4; ++changes )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        const auto observeContact = [&]( bool changed )
+        {
+            if( changed )
+            {
+                scene.getWorld().SetBodyTransform( probe.bodyHandle, { { 0.0f, 10.0f }, {} } );
+                scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+                scene.getWorld().SetShapeDensity( probe.shapeHandle, 0.5f );
+                const auto extra = scene.getWorld().CreateShape( probe.bodyHandle, circle2{ { 2.0f, 0.0f }, 0.45f }, {}, 0.5f );
+                check( scene.getWorld().GetBodyMass( probe.bodyHandle ) == scene.getTerrainTrialObservation().launchMass && scene.getWorld().GetBodyRotationalInertia( probe.bodyHandle ) != scene.getTerrainTrialObservation().launchInertia, "inertia summary fixture changes inertia without changing mass" );
+                scene.step( 0.125f, 4 );
+                scene.getWorld().DestroyShape( extra );
+                scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+            }
+            scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+            scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+            scene.step( 0.125f, 4 );
+        };
+        observeContact( changes & 1 );
+        check( scene.pinTerrainTrialReference() && scene.relaunchTerrainTrialReference(), "inertia summary fixture pins and relaunches" );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::waitingForContact && !scene.getTerrainTrialComparison().inertiaChangesObserved, "inertia summary waits for comparable contact observations" );
+        observeContact( changes & 2 );
+        const auto comparison = scene.getTerrainTrialComparison();
+        check( comparison.status == terrainTrialComparisonStatus::ready && comparison.inertiaChangesObserved == ( changes != 0 ), "inertia summary includes current, reference or both observed changes" );
+        const float differences[] = { 0.0f, -0.125f, 0.125f, 0.0f };
+        check( comparison.firstContactTimeDifference == differences[changes] && comparison.stepSettings == terrainTrialStepComparison::constantMatch && !comparison.gravityChangesObserved && !comparison.materialChangesObserved && !comparison.massChangesObserved, "inertia summary preserves time difference and independent step/gravity/material/mass summaries" );
+        scene.launchTerrainProbe( 1, terrainTrial::front );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions && !scene.getTerrainTrialComparison().inertiaChangesObserved, "mismatched launches do not produce an inertia summary" );
+        scene.resetTerrainProbes();
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noObservation && !scene.getTerrainTrialComparison().inertiaChangesObserved, "missing current observation does not produce an inertia summary" );
+        scene.clearTerrainTrialReference();
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noReference && !scene.getTerrainTrialComparison().inertiaChangesObserved, "missing reference does not produce an inertia summary" );
+    }
+
     return 0;
 }

@@ -111,6 +111,7 @@ struct terrainTrialComparison
     bool gravityChangesObserved = false;
     bool materialChangesObserved = false;
     bool massChangesObserved = false;
+    bool inertiaChangesObserved = false;
 };
 
 struct carWheelObservation
