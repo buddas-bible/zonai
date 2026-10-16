@@ -718,7 +718,7 @@ int main()
     {
         rigidBodyDemoUi gravityView{ demoKind::splineTerrain };
         gravityView.getWorld().SetGravity( { 0.0f, -3.0f } );
-        for( int frame = 0; frame < 8; ++frame )
+        for( int frame = 0; frame < 10; ++frame )
         {
             if( frame == 1 )
             {
@@ -750,6 +750,20 @@ int main()
                 if( !gravityView.pinTerrainTrialReference() ) fail( "Gravity history UI fixture must pin changed history" );
                 gravityView.resetTerrainProbes();
             }
+            if( frame == 8 || frame == 9 )
+            {
+                if( !gravityView.relaunchTerrainTrialReference() ) fail( "Gravity summary UI fixture must relaunch reference" );
+                if( frame == 9 )
+                {
+                    gravityView.getWorld().SetGravity( {} );
+                    gravityView.step( 0.0625f, 4 );
+                    gravityView.getWorld().SetGravity( { 1.0f, -4.0f } );
+                }
+                const auto target = *gravityView.getTerrainTrialTarget( terrainTrial::front );
+                gravityView.getWorld().SetBodyTransform( gravityView.getImpulseBody(), { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+                gravityView.getWorld().SetBodyLinearVelocity( gravityView.getImpulseBody(), {} );
+                gravityView.step( 0.125f, 4 );
+            }
             const auto before = gravityView.getTerrainTrialObservation();
             const auto reference = gravityView.getTerrainTrialReference();
             const auto body = gravityView.getImpulseBody();
@@ -771,6 +785,9 @@ int main()
             if( ( frame == 5 || frame == 6 ) && log.find( "첫 접촉까지 관측된 중력 변경: 없음" ) == std::string_view::npos ) fail( "Gravity history UI must show unchanged current or reference history" );
             if( ( frame == 6 || frame == 7 ) && log.find( "첫 접촉까지 관측된 중력 변경: 있음" ) == std::string_view::npos ) fail( "Gravity history UI must show changed current and pinned history" );
             if( ( frame == 0 || frame == 4 ) && log.find( "첫 접촉까지 관측된 중력 변경:" ) != std::string_view::npos ) fail( "Gravity history UI must not invent a result before contact" );
+            if( frame == 5 && log.find( "비교 중력 변경 관측: 없음" ) == std::string_view::npos ) fail( "Gravity summary UI must show no observed changes for either trial" );
+            if( ( frame == 6 || frame == 8 || frame == 9 ) && log.find( "비교 중력 변경 관측: 포함" ) == std::string_view::npos ) fail( "Gravity summary UI must include current, reference or both changed histories" );
+            if( frame != 5 && frame != 6 && frame != 8 && frame != 9 && log.find( "비교 중력 변경 관측:" ) != std::string_view::npos ) fail( "Gravity summary UI must wait for comparable observations" );
             ImGui::LogFinish();
             ImGui::End();
             ImGui::Render();

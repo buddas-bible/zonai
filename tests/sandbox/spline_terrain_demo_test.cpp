@@ -1179,5 +1179,41 @@ int main()
         check( scene.getTerrainTrialObservation().firstContactTime && scene.getTerrainTrialObservation().preContactGravityChanged, "gravity change on the first contact step is included" );
     }
 
+    for( int changes = 0; changes < 4; ++changes )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        const auto observeContact = [&]( bool changed )
+        {
+            if( changed )
+            {
+                scene.getWorld().SetBodyTransform( scene.getImpulseBody(), { { 0.0f, 10.0f }, {} } );
+                scene.getWorld().SetBodyLinearVelocity( scene.getImpulseBody(), {} );
+                scene.getWorld().SetGravity( { 1.0f, 0.0f } );
+                scene.step( 0.125f, 4 );
+                scene.getWorld().SetGravity( {} );
+            }
+            scene.getWorld().SetBodyTransform( scene.getImpulseBody(), { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+            scene.getWorld().SetBodyLinearVelocity( scene.getImpulseBody(), {} );
+            scene.step( 0.125f, 4 );
+        };
+        observeContact( changes & 1 );
+        check( scene.pinTerrainTrialReference() && scene.relaunchTerrainTrialReference(), "gravity summary fixture pins and relaunches" );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::waitingForContact && !scene.getTerrainTrialComparison().gravityChangesObserved, "gravity summary waits for comparable contact observations" );
+        observeContact( changes & 2 );
+        const auto comparison = scene.getTerrainTrialComparison();
+        check( comparison.status == terrainTrialComparisonStatus::ready && comparison.gravityChangesObserved == ( changes != 0 ), "gravity summary includes current, reference or both observed changes" );
+        const float differences[] = { 0.0f, -0.125f, 0.125f, 0.0f };
+        check( comparison.firstContactTimeDifference == differences[changes] && comparison.stepSettings == terrainTrialStepComparison::constantMatch, "gravity summary preserves time difference and independent step summary" );
+        scene.launchTerrainProbe( 1, terrainTrial::front );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions && !scene.getTerrainTrialComparison().gravityChangesObserved, "mismatched launches do not produce a gravity summary" );
+        scene.resetTerrainProbes();
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noObservation && !scene.getTerrainTrialComparison().gravityChangesObserved, "missing current observation does not produce a gravity summary" );
+        scene.clearTerrainTrialReference();
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noReference && !scene.getTerrainTrialComparison().gravityChangesObserved, "missing reference does not produce a gravity summary" );
+    }
+
     return 0;
 }
