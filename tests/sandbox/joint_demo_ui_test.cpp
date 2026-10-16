@@ -659,6 +659,7 @@ int main()
             if( frame == 4 && !comparisonView.relaunchTerrainTrialReference() ) fail( "Comparison UI fixture must relaunch" );
             if( frame == 6 )
             {
+                comparisonView.step( 0.0625f, 8 );
                 comparisonView.setSplineTrialFraction( 0.75f );
                 comparisonView.setSplineTrialSpeed( 12.5f );
             }
@@ -675,12 +676,19 @@ int main()
             ImGui::LogToBuffer();
             comparisonView.drawControls();
             if( std::string_view{ GImGui->LogBuffer.c_str() }.find( expected[frame] ) == std::string_view::npos ) fail( "Comparison UI must distinguish availability and show signed current-minus-reference time" );
+            const std::string_view log{ GImGui->LogBuffer.c_str() };
+            const auto referenceSettings = log.find( "관측 단계: 125.000 ms / 내부 분할 4" );
+            if( frame >= 1 && frame <= 6 && referenceSettings == std::string_view::npos ) fail( "Contact UI must display recorded reference step settings" );
+            if( frame == 1 && log.find( "관측 단계: 125.000 ms / 내부 분할 4", referenceSettings + 1 ) == std::string_view::npos ) fail( "Contact UI must display current and pinned settings independently" );
+            if( ( frame == 5 || frame == 6 || frame == 7 ) && log.find( "관측 단계: 250.000 ms / 내부 분할 4" ) == std::string_view::npos ) fail( "Contact UI must retain the current contact step settings after later steps" );
+            if( frame == 0 && log.find( "관측 단계:" ) != std::string_view::npos ) fail( "Contact UI must not invent settings before contact" );
+            if( ( frame == 2 || frame == 3 || frame == 4 ) && log.find( "관측 단계: 125.000 ms / 내부 분할 4", referenceSettings + 1 ) != std::string_view::npos ) fail( "Contact UI must not show stale current settings after reset or relaunch" );
             ImGui::LogFinish();
             ImGui::End();
             ImGui::Render();
             const auto after = comparisonView.getTerrainTrialObservation();
             const auto afterReference = comparisonView.getTerrainTrialReference();
-            if( after.elapsed != before.elapsed || after.firstContactTime != before.firstContactTime || reference.has_value() != afterReference.has_value() || ( reference && reference->firstContactTime != afterReference->firstContactTime ) || LengthSquared( comparisonView.getWorld().GetBodyTransform( probe.bodyHandle ).position - pose.position ) != 0.0f || LengthSquared( comparisonView.getWorld().GetBodyLinearVelocity( probe.bodyHandle ) - velocity ) != 0.0f || comparisonView.getWorld().GetContactCount() != contacts ) fail( "Comparison display must preserve observations and physics" );
+            if( after.elapsed != before.elapsed || after.firstContactTime != before.firstContactTime || after.firstContactTimeStep != before.firstContactTimeStep || after.firstContactSubStepCount != before.firstContactSubStepCount || reference.has_value() != afterReference.has_value() || ( reference && ( reference->firstContactTime != afterReference->firstContactTime || reference->firstContactTimeStep != afterReference->firstContactTimeStep || reference->firstContactSubStepCount != afterReference->firstContactSubStepCount ) ) || LengthSquared( comparisonView.getWorld().GetBodyTransform( probe.bodyHandle ).position - pose.position ) != 0.0f || LengthSquared( comparisonView.getWorld().GetBodyLinearVelocity( probe.bodyHandle ) - velocity ) != 0.0f || comparisonView.getWorld().GetContactCount() != contacts ) fail( "Comparison display must preserve observations and physics" );
         }
     }
     ImGui::DestroyContext();

@@ -974,5 +974,36 @@ int main()
         check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noReference, "clearing the reference clears comparison availability" );
     }
 
+    for( int subStepCount : { 1, 4, 8 } )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        scene.step( 0.0625f, 2 );
+        check( !scene.getTerrainTrialObservation().firstContactTime && scene.getTerrainTrialObservation().firstContactTimeStep == 0.0f && scene.getTerrainTrialObservation().firstContactSubStepCount == 0, "pre-contact observation has no contact step settings" );
+        check( scene.pinTerrainTrialReference(), "contact settings fixture pins pre-contact observation" );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.step( 0.0f, 16 );
+        check( !scene.getTerrainTrialObservation().firstContactTime && scene.getTerrainTrialObservation().firstContactSubStepCount == 0, "zero-duration step does not record contact settings" );
+        scene.step( 0.125f, subStepCount );
+        const auto contact = scene.getTerrainTrialObservation();
+        check( contact.firstContactTime == 0.1875f && contact.firstContactTimeStep == 0.125f && contact.firstContactSubStepCount == subStepCount, "first contact records that step's duration and subdivision count" );
+        check( !scene.getTerrainTrialReference()->firstContactTime && scene.getTerrainTrialReference()->firstContactTimeStep == 0.0f && scene.getTerrainTrialReference()->firstContactSubStepCount == 0, "pre-contact reference does not acquire later contact settings" );
+        check( scene.pinTerrainTrialReference(), "contact settings can be pinned with the observation" );
+        scene.step( 0.25f, 2 );
+        check( scene.getTerrainTrialObservation().firstContactTimeStep == 0.125f && scene.getTerrainTrialObservation().firstContactSubStepCount == subStepCount && scene.getTerrainTrialReference()->firstContactTimeStep == 0.125f && scene.getTerrainTrialReference()->firstContactSubStepCount == subStepCount, "later steps preserve first contact and pinned settings" );
+        check( scene.relaunchTerrainTrialReference() && !scene.getTerrainTrialObservation().firstContactTime && scene.getTerrainTrialObservation().firstContactTimeStep == 0.0f && scene.getTerrainTrialObservation().firstContactSubStepCount == 0 && scene.getTerrainTrialReference()->firstContactSubStepCount == subStepCount, "relaunch clears current contact settings and retains the reference" );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.step( 0.0625f, 2 );
+        check( scene.getTerrainTrialObservation().firstContactTimeStep == 0.0625f && scene.getTerrainTrialObservation().firstContactSubStepCount == 2 && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::ready, "new trial records new contact settings without changing comparison policy" );
+        scene.resetTerrainProbes();
+        check( scene.getTerrainTrialObservation().firstContactTimeStep == 0.0f && scene.getTerrainTrialObservation().firstContactSubStepCount == 0 && scene.getTerrainTrialReference()->firstContactSubStepCount == subStepCount, "probe reset clears current contact settings and retains pinned settings" );
+        check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialReference(), "terrain edits clear the pinned contact settings with its observation" );
+    }
+
     return 0;
 }
