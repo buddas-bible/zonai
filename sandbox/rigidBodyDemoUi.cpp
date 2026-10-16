@@ -665,6 +665,7 @@ void rigidBodyDemoUi::drawExperimentControls()
 
     if( getKind() == demoKind::terrainChain || getKind() == demoKind::splineTerrain )
     {
+        const char* probes[] = { "원", "캡슐", "상자" };
         if( getKind() == demoKind::splineTerrain )
         {
             ImGui::BeginDisabled( !canUndoSplineEdit() );
@@ -708,8 +709,18 @@ void rigidBodyDemoUi::drawExperimentControls()
             if( ImGui::SliderFloat( "앞·뒷면 시험 속도###SplineTrialSpeed", &speed, 1.0f, 20.0f, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp ) ) setSplineTrialSpeed( speed );
             ImGui::TextUnformatted( "속도는 다음 앞면·뒷면 발사부터 적용합니다." );
             ImGui::TextWrapped( "지형 시작부터의 길이 비율입니다. Shift+왼쪽 드래그로 가까운 지형 위 위치를 고를 수 있습니다. 하늘색 점과 화살표는 시험 위치와 충돌 앞면을 표시합니다. 이음새 통과 시험은 시작 위치를 유지합니다." );
+            const auto observation = getTerrainTrialObservation();
+            if( observation.active )
+            {
+                const char* trial = observation.trial == terrainTrial::front ? "앞면" : observation.trial == terrainTrial::back ? "뒷면" : "이음새";
+                ImGui::Text( "최근 발사: %s / %s", probes[observation.probeIndex], trial );
+                ImGui::Text( "경과: %.3f s / 지형 접촉: %s", observation.elapsed, observation.touching ? "있음" : "없음" );
+                if( observation.firstContactTime ) ImGui::Text( "첫 접촉 관측: %.3f s", *observation.firstContactTime );
+                else ImGui::TextUnformatted( "첫 접촉 관측: 아직 없음" );
+                ImGui::TextWrapped( "접촉 시간은 물리 진행이 끝난 뒤 처음 확인한 시각입니다." );
+            }
+            else ImGui::TextUnformatted( "최근 발사: 없음" );
         }
-        const char* probes[] = { "원", "캡슐", "상자" };
         ImGui::Combo( "시험 도형###TerrainProbe", &terrainProbeIndex_, probes, 3 );
         if( ImGui::Button( "이음새 통과###TerrainSeams" ) ) launchTerrainProbe( terrainProbeIndex_, terrainTrial::seams );
         if( ImGui::Button( "앞면 접근###TerrainFront" ) ) launchTerrainProbe( terrainProbeIndex_, terrainTrial::front );
