@@ -451,6 +451,7 @@ terrainTrialComparison rigidBodyDemo::getTerrainTrialComparison() const noexcept
     if( !current.active ) return { terrainTrialComparisonStatus::noObservation };
     const auto& reference = *terrainTrialReference_;
     if( current.probeIndex != reference.probeIndex || current.trial != reference.trial || current.launchFraction != reference.launchFraction || current.launchSpeed != reference.launchSpeed || current.launchGravity.x != reference.launchGravity.x || current.launchGravity.y != reference.launchGravity.y ) return { terrainTrialComparisonStatus::differentConditions };
+    if( current.launchGravityScale != reference.launchGravityScale ) return { terrainTrialComparisonStatus::differentConditions };
     if( current.launchFriction != reference.launchFriction || current.launchRestitution != reference.launchRestitution || current.launchMass != reference.launchMass || current.launchInertia != reference.launchInertia ) return { terrainTrialComparisonStatus::differentConditions };
     if( !current.firstContactTime || !reference.firstContactTime ) return { terrainTrialComparisonStatus::waitingForContact };
     const bool settingsMatch = current.firstContactTimeStep == reference.firstContactTimeStep && current.firstContactSubStepCount == reference.firstContactSubStepCount;
@@ -616,6 +617,7 @@ void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial tri
         terrainTrialObservation_.trial = trial;
         terrainTrialObservation_.launchSpeed = speed;
         terrainTrialObservation_.launchGravity = world_.GetGravity();
+        terrainTrialObservation_.launchGravityScale = world_.GetBodyGravityScale( body );
         terrainTrialObservation_.launchFriction = world_.GetShapeFriction( shape );
         terrainTrialObservation_.launchRestitution = world_.GetShapeRestitution( shape );
         terrainTrialObservation_.launchMass = world_.GetBodyMass( body );
