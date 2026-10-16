@@ -686,5 +686,49 @@ int main()
         check( polygon.getTerrainPointDragIndex() == 1 && polygon.getSplineTrialFraction() == 0.5f, "Shift trial selection is spline-only" );
     }
 
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        auto& simulation = scene.getWorld();
+        check( scene.getSplineTrialSpeed() == 8.0f, "trial speed defaults to eight meters per second" );
+        const transform2 pose{ { 1.5f, 0.75f }, rot2::FromRadians( 0.25f ) };
+        simulation.SetBodyTransform( scene.getShapes()[0].bodyHandle, pose );
+        scene.setSplineTrialFraction( 0.25f );
+        const auto target = scene.getTerrainTrialTarget( terrainTrial::front );
+        check( target.has_value(), "speed fixture has a trial target" );
+        const vec2 normal = Cross( target->tangent, 1.0f );
+        const bodyId firstProbe = scene.getImpulseBody();
+        const transform2 beforePose = simulation.GetBodyTransform( firstProbe );
+        simulation.SetBodyLinearVelocity( firstProbe, { 2, 3 } );
+        scene.setSplineTrialSpeed( 12.5f );
+        check( scene.getSplineTrialSpeed() == 12.5f && near( simulation.GetBodyLinearVelocity( firstProbe ), { 2, 3 } ) && near( simulation.GetBodyTransform( firstProbe ).position, beforePose.position ), "speed settings apply only to the next launch" );
+        check( !scene.canUndoSplineEdit() && !scene.canRedoSplineEdit() && scene.getSplineTrialFraction() == 0.25f, "speed settings preserve trial position and geometry history" );
+        for( const float speed : { 1.0f, 8.0f, 12.5f, 20.0f } )
+            for( std::size_t probe = 0; probe < 3; ++probe )
+                for( const terrainTrial trial : { terrainTrial::front, terrainTrial::back } )
+                {
+                    scene.setSplineTrialSpeed( speed );
+                    scene.launchTerrainProbe( probe, trial );
+                    const bodyId body = scene.getShapes()[scene.getTerrainPointCount() - 1 + probe].bodyHandle;
+                    const float side = trial == terrainTrial::back ? -1.0f : 1.0f;
+                    check( near( simulation.GetBodyLinearVelocity( body ), -side * speed * normal ), "every probe uses selected front/back speed and direction" );
+                    check( near( simulation.GetBodyTransform( body ).position, target->point + side * 1.5f * normal ), "speed does not change launch position or distance" );
+                }
+        for( const float invalid : { 0.0f, 0.99f, 20.01f, std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity() } ) scene.setSplineTrialSpeed( invalid );
+        check( scene.getSplineTrialSpeed() == 20.0f, "invalid speeds preserve the last valid setting" );
+        const auto seam = scene.getTerrainTrialTarget( terrainTrial::seams );
+        check( seam.has_value(), "speed fixture has a seam target" );
+        scene.launchTerrainProbe( 0, terrainTrial::seams );
+        check( near( simulation.GetBodyLinearVelocity( firstProbe ), 6.0f * seam->tangent ), "seam trial retains its six-meter-per-second speed" );
+        scene.resetTerrainProbes();
+        check( scene.insertSplineControlPoint( 1 ) && scene.resetSplineTerrain() && scene.undoSplineEdit() && scene.redoSplineEdit(), "speed persistence fixture edits and restores terrain" );
+        check( scene.getSplineTrialSpeed() == 20.0f && scene.getSplineTrialFraction() == 0.25f, "probe reset and terrain editing/history preserve speed and position settings" );
+        rigidBodyDemo reset{ demoKind::splineTerrain };
+        check( reset.getSplineTrialSpeed() == 8.0f, "fresh scenes restore default trial speed" );
+        rigidBodyDemo polygon{ demoKind::terrainChain };
+        polygon.setSplineTrialSpeed( 20.0f );
+        polygon.launchTerrainProbe( 0, terrainTrial::front );
+        check( polygon.getSplineTrialSpeed() == 8.0f && std::abs( Length( polygon.getWorld().GetBodyLinearVelocity( polygon.getImpulseBody() ) ) - 8.0f ) < 1.0e-5f, "polygon terrain keeps its existing trial speed" );
+    }
+
     return 0;
 }
