@@ -268,6 +268,9 @@ public:
     [[nodiscard]] float getSplineTrialSpeed() const noexcept { return splineTrialSpeed_; }
     void setSplineTrialSpeed( float speed );
     [[nodiscard]] terrainTrialObservation getTerrainTrialObservation() const noexcept { return terrainTrialObservation_; }
+    [[nodiscard]] std::optional<terrainTrialObservation> getTerrainTrialReference() const noexcept { return terrainTrialReference_; }
+    bool pinTerrainTrialReference();
+    void clearTerrainTrialReference() noexcept { terrainTrialReference_.reset(); }
     [[nodiscard]] std::optional<terrainTrialTarget> getTerrainTrialTarget( terrainTrial trial ) const;
     [[nodiscard]] bool canUndoSplineEdit() const noexcept { return splineUndo_.has_value(); }
     [[nodiscard]] bool canRedoSplineEdit() const noexcept { return splineRedo_.has_value(); }
@@ -366,6 +369,7 @@ private:
     float splineTrialFraction_ = 0.5f;
     float splineTrialSpeed_ = 8.0f;
     terrainTrialObservation terrainTrialObservation_{};
+    std::optional<terrainTrialObservation> terrainTrialReference_{};
     bool splineTrialDragging_ = false;
     std::optional<splineEditState> splineUndo_{};
     std::optional<splineEditState> splineRedo_{};

@@ -560,6 +560,51 @@ int main()
             if( after.launchSpeed != before.launchSpeed || after.launchFraction != before.launchFraction || after.elapsed != before.elapsed || after.firstContactTime != before.firstContactTime || after.touching != before.touching || LengthSquared( observationView.getWorld().GetBodyTransform( body ).position - pose.position ) != 0.0f || LengthSquared( observationView.getWorld().GetBodyLinearVelocity( body ) - velocity ) != 0.0f || observationView.getWorld().GetContactCount() != contacts ) fail( "Observation UI must not change recorded conditions, time, motion or contacts" );
         }
     }
+    {
+        rigidBodyDemoUi referenceView{ demoKind::splineTerrain };
+        for( int frame = 0; frame < 7; ++frame )
+        {
+            if( frame == 1 )
+            {
+                referenceView.launchTerrainProbe( 1, terrainTrial::front );
+                for( int step = 0; step < 120; ++step ) referenceView.step( 1.0f / 60.0f, 4 );
+            }
+            if( frame == 2 )
+            {
+                referenceView.setSplineTrialFraction( 0.75f );
+                referenceView.setSplineTrialSpeed( 12.5f );
+                referenceView.launchTerrainProbe( 2, terrainTrial::back );
+                referenceView.step( 1.0f / 60.0f, 4 );
+            }
+            if( frame == 5 ) referenceView.resetTerrainProbes();
+            if( frame == 6 && !referenceView.insertSplineControlPoint( 1 ) ) fail( "Reference UI geometry fixture must apply" );
+            const auto before = referenceView.getTerrainTrialObservation();
+            const transform2 pose = referenceView.getWorld().GetBodyTransform( referenceView.getImpulseBody() );
+            const vec2 velocity = referenceView.getWorld().GetBodyLinearVelocity( referenceView.getImpulseBody() );
+            const int contacts = referenceView.getWorld().GetContactCount();
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline trial reference" );
+            if( frame == 0 || frame == 1 || frame == 4 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "SplineTrialPin" );
+            if( frame == 3 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "SplineTrialReferenceClear" );
+            ImGui::LogToBuffer();
+            referenceView.drawControls();
+            const std::string_view log{ GImGui->LogBuffer.c_str() };
+            if( frame == 0 || frame == 3 || frame == 6 )
+                if( referenceView.getTerrainTrialReference() || log.find( "비교 기준: 없음" ) == std::string_view::npos ) fail( "Reference UI must show unavailable or cleared reference" );
+            if( frame == 1 || frame == 2 )
+                if( !referenceView.getTerrainTrialReference() || log.find( "비교 기준: 캡슐 / 앞면" ) == std::string_view::npos || log.find( "발사 조건: 위치 50.0 % / 초기 속도 8.0 m/s" ) == std::string_view::npos ) fail( "Pin button and UI must preserve the original reference conditions" );
+            if( frame == 2 && log.find( "최근 발사: 상자 / 뒷면" ) == std::string_view::npos ) fail( "UI must show current and reference trials together" );
+            if( frame == 4 || frame == 5 )
+                if( !referenceView.getTerrainTrialReference() || log.find( "비교 기준: 상자 / 뒷면" ) == std::string_view::npos ) fail( "Reference replacement survives probe reset" );
+            ImGui::LogFinish();
+            ImGui::End();
+            ImGui::Render();
+            const auto after = referenceView.getTerrainTrialObservation();
+            if( after.elapsed != before.elapsed || after.firstContactTime != before.firstContactTime || after.touching != before.touching || LengthSquared( referenceView.getWorld().GetBodyTransform( referenceView.getImpulseBody() ).position - pose.position ) != 0.0f || LengthSquared( referenceView.getWorld().GetBodyLinearVelocity( referenceView.getImpulseBody() ) - velocity ) != 0.0f || referenceView.getWorld().GetContactCount() != contacts ) fail( "Reference controls must not change current observation or physics" );
+        }
+    }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }

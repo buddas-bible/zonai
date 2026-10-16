@@ -819,5 +819,59 @@ int main()
         check( !observation.active && !observation.launchFraction && observation.launchSpeed == 0.0f, "successful geometry edits clear old launch conditions" );
     }
 
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        check( !scene.getTerrainTrialReference() && !scene.pinTerrainTrialReference(), "fresh scene has no reference and cannot pin an absent trial" );
+        scene.launchTerrainProbe( 1, terrainTrial::front );
+        check( !scene.pinTerrainTrialReference(), "reference needs at least one completed positive-duration step" );
+        for( int i = 0; i < 120; ++i ) scene.step( 1.0f / 60.0f, 4 );
+        const auto baseline = scene.getTerrainTrialObservation();
+        check( baseline.firstContactTime.has_value() && scene.pinTerrainTrialReference(), "a progressed trial can be pinned with its contact result" );
+        scene.step( 1.0f / 60.0f, 4 );
+        scene.setSplineTrialFraction( 0.75f );
+        scene.setSplineTrialSpeed( 12.5f );
+        scene.resetTerrainProbes();
+        auto reference = scene.getTerrainTrialReference();
+        check( reference && reference->elapsed == baseline.elapsed && reference->firstContactTime == baseline.firstContactTime && reference->touching == baseline.touching && reference->launchSpeed == 8.0f && reference->launchFraction == 0.5f && reference->probeIndex == 1 && reference->trial == terrainTrial::front, "reference retains the full copied result across progress, settings and probe reset" );
+        check( !scene.pinTerrainTrialReference() && scene.getTerrainTrialReference()->elapsed == baseline.elapsed, "failed pin preserves the old reference" );
+        reference->elapsed = 99.0f;
+        check( scene.getTerrainTrialReference()->elapsed == baseline.elapsed, "reference queries return independent value snapshots" );
+        scene.launchTerrainProbe( 2, terrainTrial::back );
+        check( !scene.pinTerrainTrialReference(), "an unprogressed new launch cannot replace the reference" );
+        scene.step( 1.0f / 60.0f, 4 );
+        check( scene.getTerrainTrialReference()->probeIndex == 1, "new launches retain the pinned baseline until explicitly replaced" );
+        check( scene.pinTerrainTrialReference(), "pinning again replaces the reference" );
+        reference = scene.getTerrainTrialReference();
+        check( reference && reference->probeIndex == 2 && reference->trial == terrainTrial::back && reference->launchSpeed == 12.5f && reference->launchFraction == 0.75f && reference->elapsed == 1.0f / 60.0f, "replacement reference uses the new trial's copied conditions and timing" );
+        const auto current = scene.getTerrainTrialObservation();
+        scene.clearTerrainTrialReference();
+        check( !scene.getTerrainTrialReference() && scene.getTerrainTrialObservation().elapsed == current.elapsed && scene.getTerrainTrialObservation().active, "clearing the reference preserves current observation" );
+        check( scene.pinTerrainTrialReference(), "cleared reference can be pinned again" );
+        check( !scene.insertSplineControlPoint( 99 ), "invalid edit reference fixture is rejected" );
+        scene.setSplineSamplingError( scene.getSplineSamplingError() );
+        check( scene.getTerrainTrialReference().has_value(), "failed and unchanged edits retain reference" );
+        check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialReference(), "successful geometry edits clear reference" );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        scene.step( 1.0f / 60.0f, 4 );
+        check( scene.pinTerrainTrialReference() && scene.undoSplineEdit() && !scene.getTerrainTrialReference(), "geometry undo clears reference" );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        scene.step( 1.0f / 60.0f, 4 );
+        check( scene.pinTerrainTrialReference() && scene.redoSplineEdit() && !scene.getTerrainTrialReference(), "geometry redo clears reference" );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        scene.step( 1.0f / 60.0f, 4 );
+        check( scene.pinTerrainTrialReference() && scene.resetSplineTerrain() && !scene.getTerrainTrialReference(), "terrain restoration clears reference" );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        scene.step( 1.0f / 60.0f, 4 );
+        check( scene.pinTerrainTrialReference() && !scene.resetSplineTerrain() && scene.getTerrainTrialReference(), "unchanged restoration retains reference" );
+        scene.resetTerrainProbes();
+        scene.getWorld().DestroyChain( scene.getWorld().GetShapeParentChain( scene.getShapes()[0].shapeHandle ) );
+        scene.step( 1.0f / 60.0f, 4 );
+        check( !scene.getTerrainTrialReference(), "retired terrain clears a reference even without an active observation" );
+        rigidBodyDemo polygon{ demoKind::terrainChain };
+        polygon.launchTerrainProbe( 0, terrainTrial::front );
+        polygon.step( 1.0f / 60.0f, 4 );
+        check( !polygon.pinTerrainTrialReference() && !polygon.getTerrainTrialReference(), "trial references are spline-only" );
+    }
+
     return 0;
 }
