@@ -643,8 +643,8 @@ int main()
         comparisonView.getWorld().SetGravity( {} );
         const auto probe = comparisonView.getShapes()[comparisonView.getTerrainPointCount() - 1];
         const auto target = *comparisonView.getTerrainTrialTarget( terrainTrial::front );
-        const char* expected[] = { "비교: 기준 없음", "첫 접촉 관측 차이 (현재 - 기준): +0.000 s", "비교: 현재 관측 없음", "비교: 발사 조건 다름", "비교: 발사 조건 같음 / 접촉 관측 부족", "첫 접촉 관측 차이 (현재 - 기준): +0.125 s", "첫 접촉 관측 차이 (현재 - 기준): +0.125 s", "비교: 기준 없음", "첫 접촉 관측 차이 (현재 - 기준): +0.125 s", "첫 접촉 관측 차이 (현재 - 기준): -0.125 s" };
-        for( int frame = 0; frame < 10; ++frame )
+        const char* expected[] = { "비교: 기준 없음", "첫 접촉 관측 차이 (현재 - 기준): +0.000 s", "비교: 현재 관측 없음", "비교: 발사 조건 다름", "비교: 발사 조건 같음 / 접촉 관측 부족", "첫 접촉 관측 차이 (현재 - 기준): +0.125 s", "첫 접촉 관측 차이 (현재 - 기준): +0.125 s", "비교: 기준 없음", "첫 접촉 관측 차이 (현재 - 기준): +0.125 s", "첫 접촉 관측 차이 (현재 - 기준): -0.125 s", "첫 접촉 관측 차이 (현재 - 기준): +0.000 s" };
+        for( int frame = 0; frame < 11; ++frame )
         {
             if( frame == 1 ) comparisonView.launchTerrainProbe( 0, terrainTrial::front );
             if( frame == 1 || frame == 5 )
@@ -664,10 +664,10 @@ int main()
                 comparisonView.setSplineTrialSpeed( 12.5f );
             }
             if( frame == 7 ) comparisonView.clearTerrainTrialReference();
-            if( frame == 8 || frame == 9 )
+            if( frame >= 8 )
             {
-                if( !comparisonView.pinTerrainTrialReference() || !comparisonView.relaunchTerrainTrialReference() ) fail( "Subdivision comparison UI fixture must pin and relaunch" );
-                if( frame == 8 )
+                if( ( frame != 10 && !comparisonView.pinTerrainTrialReference() ) || !comparisonView.relaunchTerrainTrialReference() ) fail( "Subdivision comparison UI fixture must pin and relaunch" );
+                if( frame != 9 )
                 {
                     comparisonView.getWorld().SetBodyTransform( probe.bodyHandle, { { 0.0f, 10.0f }, {} } );
                     comparisonView.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
@@ -691,12 +691,16 @@ int main()
             if( std::string_view{ GImGui->LogBuffer.c_str() }.find( expected[frame] ) == std::string_view::npos ) fail( "Comparison UI must distinguish availability and show signed current-minus-reference time" );
             const std::string_view log{ GImGui->LogBuffer.c_str() };
             const auto referenceSettings = log.find( "관측 단계: 125.000 ms / 내부 분할 4" );
-            if( frame >= 1 && log.find( "첫 접촉까지 진행 설정 변경: 없음" ) == std::string_view::npos ) fail( "Step history UI must show unchanged recorded history" );
+            if( frame >= 1 && frame != 10 && log.find( "첫 접촉까지 진행 설정 변경: 없음" ) == std::string_view::npos ) fail( "Step history UI must show unchanged recorded history" );
             if( ( frame == 8 || frame == 9 ) && log.find( "첫 접촉까지 진행 설정 변경: 있음" ) == std::string_view::npos ) fail( "Step history UI must show current and pinned setting changes" );
             if( frame == 0 && log.find( "첫 접촉까지 진행 설정 변경:" ) != std::string_view::npos ) fail( "Step history UI must wait for first contact" );
             if( frame == 1 && log.find( "첫 접촉 관측 단계 설정: 같음" ) == std::string_view::npos ) fail( "Step comparison UI must show matching recorded settings" );
             if( ( frame == 5 || frame == 6 || frame == 8 ) && log.find( "첫 접촉 관측 단계 설정: 다름" ) == std::string_view::npos ) fail( "Step comparison UI must show different recorded settings while retaining time difference" );
-            if( frame != 1 && frame != 5 && frame != 6 && frame != 8 && frame != 9 && log.find( "첫 접촉 관측 단계 설정:" ) != std::string_view::npos ) fail( "Step comparison UI must not judge unavailable or mismatched launch observations" );
+            if( frame != 1 && frame != 5 && frame != 6 && frame < 8 && log.find( "첫 접촉 관측 단계 설정:" ) != std::string_view::npos ) fail( "Step comparison UI must not judge unavailable or mismatched launch observations" );
+            if( frame == 1 && log.find( "첫 접촉까지 진행 설정 비교: 일정·같음" ) == std::string_view::npos ) fail( "Step summary UI must show constant matching settings" );
+            if( ( frame == 5 || frame == 6 ) && log.find( "첫 접촉까지 진행 설정 비교: 일정·다름" ) == std::string_view::npos ) fail( "Step summary UI must show constant different settings" );
+            if( frame >= 8 && log.find( "첫 접촉까지 진행 설정 비교: 변경 포함" ) == std::string_view::npos ) fail( "Step summary UI must prioritize current, reference or both changed histories" );
+            if( frame != 1 && frame != 5 && frame != 6 && frame < 8 && log.find( "첫 접촉까지 진행 설정 비교:" ) != std::string_view::npos ) fail( "Step summary UI must wait for comparable observations" );
             if( frame >= 1 && frame <= 6 && referenceSettings == std::string_view::npos ) fail( "Contact UI must display recorded reference step settings" );
             if( frame == 1 && log.find( "관측 단계: 125.000 ms / 내부 분할 4", referenceSettings + 1 ) == std::string_view::npos ) fail( "Contact UI must display current and pinned settings independently" );
             if( ( frame == 5 || frame == 6 || frame == 7 ) && log.find( "관측 단계: 250.000 ms / 내부 분할 4" ) == std::string_view::npos ) fail( "Contact UI must retain the current contact step settings after later steps" );
