@@ -1366,5 +1366,53 @@ int main()
         check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialObservation().active && !scene.getTerrainTrialReference(), "terrain edits clear current and pinned mass records" );
     }
 
+    for( bool changed : { false, true } )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { { 0.0f, 10.0f }, {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 2.0f );
+        scene.step( 0.0f, 4 );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        scene.getWorld().SetShapeDensity( scene.getShapes()[scene.getTerrainPointCount()].shapeHandle, 3.0f );
+        scene.step( 0.0625f, 4 );
+        check( !scene.getTerrainTrialObservation().preContactMassChanged && scene.pinTerrainTrialReference(), "zero-duration and other-probe mass changes do not count" );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, changed ? 2.0f : 1.0f );
+        scene.step( 0.0625f, 4 );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        scene.step( 0.0625f, 4 );
+        check( scene.getTerrainTrialObservation().preContactMassChanged == changed && !scene.getTerrainTrialReference()->preContactMassChanged, "observed mass changes stay latched after restoration without modifying reference" );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.step( 0.125f, 4 );
+        check( scene.getTerrainTrialObservation().firstContactTime && scene.pinTerrainTrialReference(), "mass history fixture pins first contact" );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 2.0f );
+        scene.step( 0.0625f, 4 );
+        check( scene.getTerrainTrialObservation().preContactMassChanged == changed && scene.getTerrainTrialReference()->preContactMassChanged == changed && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::ready, "post-contact mass changes preserve history and comparison policy" );
+        check( scene.relaunchTerrainTrialReference() && !scene.getTerrainTrialObservation().preContactMassChanged, "relaunch starts fresh mass history" );
+        scene.resetTerrainProbes();
+        check( !scene.getTerrainTrialObservation().preContactMassChanged && scene.getTerrainTrialReference()->preContactMassChanged == changed, "probe reset retains pinned mass history" );
+        check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialReference(), "terrain edits invalidate pinned mass history" );
+    }
+
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 1.0f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+        scene.getWorld().SetShapeDensity( probe.shapeHandle, 2.0f );
+        scene.step( 0.125f, 4 );
+        check( scene.getTerrainTrialObservation().firstContactTime && scene.getTerrainTrialObservation().preContactMassChanged, "mass change on the first contact step is included" );
+    }
+
     return 0;
 }
