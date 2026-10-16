@@ -1299,5 +1299,44 @@ int main()
         check( scene.getTerrainTrialObservation().firstContactTime && scene.getTerrainTrialObservation().preContactMaterialChanged, "material change on the first contact step is included" );
     }
 
+    for( int changes = 0; changes < 4; ++changes )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        scene.getWorld().SetShapeFriction( probe.shapeHandle, 0.25f );
+        scene.getWorld().SetShapeRestitution( probe.shapeHandle, 0.5f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        const auto observeContact = [&]( bool changed )
+        {
+            if( changed )
+            {
+                scene.getWorld().SetBodyTransform( probe.bodyHandle, { { 0.0f, 10.0f }, {} } );
+                scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+                scene.getWorld().SetShapeFriction( probe.shapeHandle, 0.75f );
+                scene.step( 0.125f, 4 );
+                scene.getWorld().SetShapeFriction( probe.shapeHandle, 0.25f );
+            }
+            scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+            scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+            scene.step( 0.125f, 4 );
+        };
+        observeContact( changes & 1 );
+        check( scene.pinTerrainTrialReference() && scene.relaunchTerrainTrialReference(), "material summary fixture pins and relaunches" );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::waitingForContact && !scene.getTerrainTrialComparison().materialChangesObserved, "material summary waits for comparable contact observations" );
+        observeContact( changes & 2 );
+        const auto comparison = scene.getTerrainTrialComparison();
+        check( comparison.status == terrainTrialComparisonStatus::ready && comparison.materialChangesObserved == ( changes != 0 ), "material summary includes current, reference or both observed changes" );
+        const float differences[] = { 0.0f, -0.125f, 0.125f, 0.0f };
+        check( comparison.firstContactTimeDifference == differences[changes] && comparison.stepSettings == terrainTrialStepComparison::constantMatch && !comparison.gravityChangesObserved, "material summary preserves time difference and independent step/gravity summaries" );
+        scene.launchTerrainProbe( 1, terrainTrial::front );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions && !scene.getTerrainTrialComparison().materialChangesObserved, "mismatched launches do not produce a material summary" );
+        scene.resetTerrainProbes();
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noObservation && !scene.getTerrainTrialComparison().materialChangesObserved, "missing current observation does not produce a material summary" );
+        scene.clearTerrainTrialReference();
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noReference && !scene.getTerrainTrialComparison().materialChangesObserved, "missing reference does not produce a material summary" );
+    }
+
     return 0;
 }

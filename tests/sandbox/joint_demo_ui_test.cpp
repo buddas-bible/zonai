@@ -802,7 +802,7 @@ int main()
         const auto probe = materialView.getShapes()[materialView.getTerrainPointCount() - 1];
         materialView.getWorld().SetShapeFriction( probe.shapeHandle, 0.25f );
         materialView.getWorld().SetShapeRestitution( probe.shapeHandle, 0.5f );
-        for( int frame = 0; frame < 8; ++frame )
+        for( int frame = 0; frame < 10; ++frame )
         {
             if( frame == 1 )
             {
@@ -835,6 +835,20 @@ int main()
                 if( !materialView.pinTerrainTrialReference() ) fail( "Material history UI fixture must pin changes" );
                 materialView.resetTerrainProbes();
             }
+            if( frame == 8 || frame == 9 )
+            {
+                if( !materialView.relaunchTerrainTrialReference() ) fail( "Material summary UI fixture must relaunch reference" );
+                if( frame == 9 )
+                {
+                    materialView.getWorld().SetShapeFriction( probe.shapeHandle, 0.25f );
+                    materialView.step( 0.0625f, 4 );
+                    materialView.getWorld().SetShapeFriction( probe.shapeHandle, 0.75f );
+                }
+                const auto target = *materialView.getTerrainTrialTarget( terrainTrial::front );
+                materialView.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+                materialView.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+                materialView.step( 0.125f, 4 );
+            }
             const auto before = materialView.getTerrainTrialObservation();
             const auto reference = materialView.getTerrainTrialReference();
             const auto pose = materialView.getWorld().GetBodyTransform( probe.bodyHandle );
@@ -856,6 +870,9 @@ int main()
             if( ( frame == 5 || frame == 6 ) && log.find( "첫 접촉까지 관측된 물체 물성 변경: 없음" ) == std::string_view::npos ) fail( "Material history UI must show unchanged current or reference history" );
             if( ( frame == 6 || frame == 7 ) && log.find( "첫 접촉까지 관측된 물체 물성 변경: 있음" ) == std::string_view::npos ) fail( "Material history UI must show changed current and pinned history" );
             if( ( frame == 0 || frame == 4 ) && log.find( "첫 접촉까지 관측된 물체 물성 변경:" ) != std::string_view::npos ) fail( "Material history UI must not invent a result before contact" );
+            if( frame == 5 && log.find( "비교 물체 물성 변경 관측: 없음" ) == std::string_view::npos ) fail( "Material summary UI must show no observed changes for either trial" );
+            if( ( frame == 6 || frame == 8 || frame == 9 ) && log.find( "비교 물체 물성 변경 관측: 포함" ) == std::string_view::npos ) fail( "Material summary UI must include current, reference or both changed histories" );
+            if( frame != 5 && frame != 6 && frame != 8 && frame != 9 && log.find( "비교 물체 물성 변경 관측:" ) != std::string_view::npos ) fail( "Material summary UI must wait for comparable observations" );
             ImGui::LogFinish();
             ImGui::End();
             ImGui::Render();

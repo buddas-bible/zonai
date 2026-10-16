@@ -455,7 +455,7 @@ terrainTrialComparison rigidBodyDemo::getTerrainTrialComparison() const noexcept
     if( !current.firstContactTime || !reference.firstContactTime ) return { terrainTrialComparisonStatus::waitingForContact };
     const bool settingsMatch = current.firstContactTimeStep == reference.firstContactTimeStep && current.firstContactSubStepCount == reference.firstContactSubStepCount;
     const auto stepSettings = current.preContactSettingsChanged || reference.preContactSettingsChanged ? terrainTrialStepComparison::changed : settingsMatch ? terrainTrialStepComparison::constantMatch : terrainTrialStepComparison::constantDifferent;
-    return { terrainTrialComparisonStatus::ready, *current.firstContactTime - *reference.firstContactTime, settingsMatch, stepSettings, current.preContactGravityChanged || reference.preContactGravityChanged };
+    return { terrainTrialComparisonStatus::ready, *current.firstContactTime - *reference.firstContactTime, settingsMatch, stepSettings, current.preContactGravityChanged || reference.preContactGravityChanged, current.preContactMaterialChanged || reference.preContactMaterialChanged };
 }
 
 bool rigidBodyDemo::relaunchTerrainTrialReference()
