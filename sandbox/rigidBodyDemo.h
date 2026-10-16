@@ -83,6 +83,8 @@ struct terrainTrialObservation
     float elapsed = 0.0f;
     bool touching = false;
     std::optional<float> firstContactTime{};
+    float firstContactTimeStep = 0.0f;
+    int firstContactSubStepCount = 0;
 };
 
 enum class terrainTrialComparisonStatus { noReference, noObservation, differentConditions, waitingForContact, ready };
@@ -328,7 +330,7 @@ private:
     void startTerrainPointDrag( vec2 point );
     void updateTerrainPointDrag( vec2 point );
     void updateSplineTrialPosition( vec2 point );
-    void updateTerrainTrialObservation( float timeStep );
+    void updateTerrainTrialObservation( float timeStep, int subStepCount );
     void updateSplineControlPoint( std::size_t pointIndex, vec2 point );
     bool updateSplineTerrain( std::span<const vec2> points, float error );
     [[nodiscard]] bool canMoveTerrainPoint( std::size_t pointIndex, vec2 point ) const;

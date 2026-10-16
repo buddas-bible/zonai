@@ -732,7 +732,11 @@ void rigidBodyDemoUi::drawExperimentControls()
                 if( value.launchFraction ) ImGui::Text( "발사 조건: 위치 %.1f %% / 초기 속도 %.1f m/s", *value.launchFraction * 100.0f, value.launchSpeed );
                 else ImGui::Text( "발사 조건: 첫 선분 중앙 / 초기 속도 %.1f m/s", value.launchSpeed );
                 ImGui::Text( "경과: %.3f s / 지형 접촉: %s", value.elapsed, value.touching ? "있음" : "없음" );
-                if( value.firstContactTime ) ImGui::Text( "첫 접촉 관측: %.3f s", *value.firstContactTime );
+                if( value.firstContactTime )
+                {
+                    ImGui::Text( "첫 접촉 관측: %.3f s", *value.firstContactTime );
+                    ImGui::Text( "관측 단계: %.3f ms / 내부 분할 %d", value.firstContactTimeStep * 1000.0f, value.firstContactSubStepCount );
+                }
                 else ImGui::TextUnformatted( "첫 접촉 관측: 아직 없음" );
             };
             drawObservation( observation, "최근 발사" );

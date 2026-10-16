@@ -135,7 +135,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
 
     world_.Step( timeStep, subStepCount );
     refreshContacts();
-    updateTerrainTrialObservation( timeStep );
+    updateTerrainTrialObservation( timeStep, subStepCount );
 }
 
 #pragma endregion LifetimeAndSimulation
@@ -477,7 +477,7 @@ bool rigidBodyDemo::pinTerrainTrialReference()
     return true;
 }
 
-void rigidBodyDemo::updateTerrainTrialObservation( float timeStep )
+void rigidBodyDemo::updateTerrainTrialObservation( float timeStep, int subStepCount )
 {
     if( !terrainTrialObservation_.active && !terrainTrialReference_ ) return;
     if( !world_.IsValid( terrainChain_ ) )
@@ -505,7 +505,12 @@ void rigidBodyDemo::updateTerrainTrialObservation( float timeStep )
         terrainTrialObservation_.touching = true;
         break;
     }
-    if( terrainTrialObservation_.touching && !terrainTrialObservation_.firstContactTime ) terrainTrialObservation_.firstContactTime = terrainTrialObservation_.elapsed;
+    if( terrainTrialObservation_.touching && !terrainTrialObservation_.firstContactTime )
+    {
+        terrainTrialObservation_.firstContactTime = terrainTrialObservation_.elapsed;
+        terrainTrialObservation_.firstContactTimeStep = timeStep;
+        terrainTrialObservation_.firstContactSubStepCount = subStepCount;
+    }
 }
 
 void rigidBodyDemo::updateSplineTrialPosition( vec2 point )
