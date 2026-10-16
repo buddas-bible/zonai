@@ -362,7 +362,7 @@ void rigidBodyDemo::createTerrainChain()
         vec2{ -8.0f, -1.2f }
     };
 
-    splineControlPoints_ = controlPoints;
+    splineControlPoints_.assign( controlPoints.begin(), controlPoints.end() );
     const std::vector<vec2> points = kind_ == demoKind::splineTerrain ? SampleAdaptive( { controlPoints }, splineSamplingError_ ) : std::vector<vec2>{ controlPoints.begin(), controlPoints.end() };
 
     if( points.size() < 2 ) return;
@@ -855,13 +855,36 @@ void rigidBodyDemo::updateSplineControlPoint( std::size_t pointIndex, vec2 point
     if( updateSplineTerrain( candidate, splineSamplingError_ ) ) splineControlPoints_ = candidate;
 }
 
+bool rigidBodyDemo::insertSplineControlPoint( std::size_t segmentIndex )
+{
+    if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || segmentIndex >= splineControlPoints_.size() - 1 ) return false;
+    const vec2 midpoint = Evaluate( { splineControlPoints_ }, segmentIndex, 0.5f );
+    auto candidate = splineControlPoints_;
+    candidate.insert( candidate.begin() + static_cast<std::ptrdiff_t>( segmentIndex + 1 ), midpoint );
+    if( !updateSplineTerrain( candidate, splineSamplingError_ ) ) return false;
+    splineControlPoints_.swap( candidate );
+    terrainPointDragIndex_.reset();
+    return true;
+}
+
+bool rigidBodyDemo::removeSplineControlPoint( std::size_t pointIndex )
+{
+    if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || splineControlPoints_.size() <= 2 || pointIndex >= splineControlPoints_.size() ) return false;
+    auto candidate = splineControlPoints_;
+    candidate.erase( candidate.begin() + static_cast<std::ptrdiff_t>( pointIndex ) );
+    if( !updateSplineTerrain( candidate, splineSamplingError_ ) ) return false;
+    splineControlPoints_.swap( candidate );
+    terrainPointDragIndex_.reset();
+    return true;
+}
+
 void rigidBodyDemo::setSplineSamplingError( float error )
 {
     if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || !std::isfinite( error ) || error < 0.005f || error > 0.05f || error == splineSamplingError_ ) return;
     if( updateSplineTerrain( splineControlPoints_, error ) ) splineSamplingError_ = error;
 }
 
-bool rigidBodyDemo::updateSplineTerrain( const std::array<vec2, 9>& points, float error )
+bool rigidBodyDemo::updateSplineTerrain( std::span<const vec2> points, float error )
 {
     const auto samples = SampleAdaptive( { points }, error );
     if( samples.size() < 2 ) return false;

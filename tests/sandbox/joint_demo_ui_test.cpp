@@ -235,7 +235,7 @@ int main()
     }
     {
         rigidBodyDemoUi adaptiveView{ demoKind::splineTerrain };
-        for( int frame = 0; frame < 6; ++frame )
+        for( int frame = 0; frame < 10; ++frame )
         {
             ImGui::NewFrame();
             ImGui::SetNextWindowPos( { 0, 0 } );
@@ -254,6 +254,7 @@ int main()
             if( frame == 2 && !selectedProbe ) fail( "Probe selection fixture must select the circle inspector" );
             if( frame == 3 && !selectedProbe ) fail( "Inspector must retain the selected probe after adaptive topology changes" );
             if( frame == 5 && !selectedProbe ) fail( "Inspector must retain the selected probe after sampling error changes" );
+            if( ( frame == 7 || frame == 9 ) && !selectedProbe ) fail( "Inspector must retain the selected probe after control insertion and deletion" );
             ImGui::LogFinish();
             ImGui::End();
             ImGui::Render();
@@ -275,6 +276,8 @@ int main()
                 adaptiveView.setSplineSamplingError( 0.05f );
                 if( adaptiveView.getTerrainPointCount() == before ) fail( "Sampling error inspector fixture must change topology" );
             }
+            if( frame == 6 && !adaptiveView.insertSplineControlPoint( 1 ) ) fail( "Inspector insertion fixture must apply" );
+            if( frame == 8 && !adaptiveView.removeSplineControlPoint( 2 ) ) fail( "Inspector deletion fixture must apply" );
         }
     }
     {
@@ -303,6 +306,52 @@ int main()
             ImGui::Render();
         }
         if( samplingView.getSplineSamplingError() != 0.05f || samplingView.getTerrainPointCount() >= initialCount ) fail( "Sampling slider must apply centimeter input to terrain geometry" );
+    }
+    {
+        rigidBodyDemoUi topologyView{ demoKind::splineTerrain };
+        const std::vector<vec2> original{ topologyView.getSplineControlPoints().begin(), topologyView.getSplineControlPoints().end() };
+        for( int frame = 0; frame < 6; ++frame )
+        {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline topology controls" );
+            const char* action = frame == 2 ? "SplineControl" : ( frame == 0 || frame == 4 ? "SplineInsert" : "SplineRemove" );
+            GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( action );
+            if( frame == 3 )
+            {
+                auto* popup = ImGui::FindWindowByName( "##Combo_00" );
+                if( !popup ) fail( "Spline control selector popup fixture" );
+                GImGui->NavActivateId = GImGui->NavActivateDownId = popup->GetID( "제어점 9" );
+            }
+            ImGui::LogToBuffer();
+            topologyView.drawControls();
+            ImGui::LogFinish();
+            ImGui::End();
+            ImGui::Render();
+            const std::size_t count = topologyView.getSplineControlPoints().size();
+            if( frame == 0 && count != 10 ) fail( "Insert button must add a spline control" );
+            if( frame == 1 && count != 9 ) fail( "Delete button must remove the newly selected inserted control" );
+            if( frame == 1 )
+                for( std::size_t i = 0; i < original.size(); ++i )
+                    if( LengthSquared( topologyView.getSplineControlPoints()[i] - original[i] ) > 1.0e-8f ) fail( "Deletion must target the newly selected inserted control" );
+            if( frame == 4 && count != 9 ) fail( "Insertion must be disabled at the selected last control" );
+            if( frame == 5 && count != 8 ) fail( "Deletion must support the selected last control" );
+        }
+        while( topologyView.getSplineControlPoints().size() > 2 )
+            if( !topologyView.removeSplineControlPoint( topologyView.getSplineControlPoints().size() - 1 ) ) fail( "Two-point UI fixture must apply" );
+        for( int frame = 0; frame < 2; ++frame )
+        {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline topology minimum" );
+            GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( frame == 0 ? "SplineRemove" : "SplineInsert" );
+            topologyView.drawControls();
+            ImGui::End();
+            ImGui::Render();
+            if( frame == 0 && topologyView.getSplineControlPoints().size() != 2 ) fail( "Delete button must preserve the two-control minimum" );
+        }
     }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;

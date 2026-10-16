@@ -236,10 +236,13 @@ public:
 
     [[nodiscard]] vec2 getTerrainPoint( std::size_t pointIndex ) const;
 
+    // 추가 / 삭제 후에는 이전 span을 다시 조회해야 함.
     [[nodiscard]] std::span<const vec2> getSplineControlPoints() const noexcept { return kind_ == demoKind::splineTerrain ? std::span<const vec2>{ splineControlPoints_ } : std::span<const vec2>{}; }
 
     [[nodiscard]] float getSplineSamplingError() const noexcept { return splineSamplingError_; }
     void setSplineSamplingError( float error );
+    bool insertSplineControlPoint( std::size_t segmentIndex );
+    bool removeSplineControlPoint( std::size_t pointIndex );
 
     [[nodiscard]] std::optional<std::size_t> getTerrainPointDragIndex() const noexcept { return terrainPointDragIndex_; }
 
@@ -272,7 +275,7 @@ private:
     void startTerrainPointDrag( vec2 point );
     void updateTerrainPointDrag( vec2 point );
     void updateSplineControlPoint( std::size_t pointIndex, vec2 point );
-    bool updateSplineTerrain( const std::array<vec2, 9>& points, float error );
+    bool updateSplineTerrain( std::span<const vec2> points, float error );
     [[nodiscard]] bool canMoveTerrainPoint( std::size_t pointIndex, vec2 point ) const;
 #pragma endregion TerrainEdit
 
@@ -316,7 +319,7 @@ private:
     bool carCameraTracking_ = true;
 
     chainId terrainChain_{};
-    std::array<vec2, 9> splineControlPoints_{};
+    std::vector<vec2> splineControlPoints_{};
     float splineSamplingError_ = 0.01f;
     std::array<transform2, 3> terrainInitialTransforms_{};
     std::vector<shapeId> terrainSegments_{};

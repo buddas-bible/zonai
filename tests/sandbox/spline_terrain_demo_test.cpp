@@ -306,5 +306,84 @@ int main()
         for( std::size_t i = 0; i < before.size(); ++i ) check( near( scene.getTerrainPoint( i ), before[i] ), "failed resampling preserves every terrain point" );
     }
 
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.setSplineSamplingError( 0.005f );
+        const auto controls = scene.getSplineControlPoints();
+        const vec2 midpoint = Evaluate( { controls }, 1, 0.5f );
+        const vec2 next = controls[2];
+        const auto first = scene.getShapes()[0].shapeHandle;
+        scene.getWorld().SetShapeFriction( first, 0.42f );
+        const std::size_t oldEdges = scene.getTerrainPointCount() - 1;
+        const std::array<visualShape, 3> probes{ scene.getShapes()[oldEdges], scene.getShapes()[oldEdges + 1], scene.getShapes()[oldEdges + 2] };
+        scene.getWorld().SetBodyLinearVelocity( probes[0].bodyHandle, { 2.0f, 3.0f } );
+        demoInput drag{};
+        drag.mousePosition = controls[1];
+        drag.mousePressed = drag.mouseHeld = true;
+        scene.handleInput( drag );
+        check( scene.getTerrainPointDragIndex() == 1, "insert fixture starts with an active drag" );
+        check( scene.insertSplineControlPoint( 1 ), "insert a control at the chosen segment midpoint" );
+        check( scene.getSplineControlPoints().size() == 10 && near( scene.getSplineControlPoints()[2], midpoint ) && near( scene.getSplineControlPoints()[3], next ), "insertion preserves order and uses the cubic midpoint" );
+        check( !scene.getTerrainPointDragIndex(), "insertion ends the old index-based drag" );
+        check( scene.getSplineSamplingError() == 0.005f && scene.getShapes()[0].shapeHandle == first && scene.getWorld().GetShape( first ).friction == 0.42f, "insertion retains sampling error and surviving edge properties" );
+        const auto samples = SampleAdaptive( { scene.getSplineControlPoints() }, 0.005f );
+        check( scene.getTerrainPointCount() == samples.size(), "insertion resamples at the selected error" );
+        for( std::size_t i = 0; i < samples.size(); ++i ) check( near( scene.getTerrainPoint( i ), samples[i] ), "inserted geometry uses the selected-error samples" );
+        for( std::size_t i = 0; i < probes.size(); ++i ) check( scene.getShapes()[samples.size() - 1 + i].shapeHandle == probes[i].shapeHandle, "insertion retains every probe" );
+        check( near( scene.getWorld().GetBodyLinearVelocity( probes[0].bodyHandle ), { 2.0f, 3.0f } ), "insertion preserves probe motion" );
+        drag.mousePosition = midpoint;
+        scene.handleInput( drag );
+        check( scene.getTerrainPointDragIndex() == 2, "inserted controls remain draggable" );
+        check( scene.removeSplineControlPoint( 2 ) && scene.getSplineControlPoints().size() == 9, "remove the inserted control" );
+        check( !scene.getTerrainPointDragIndex(), "deletion ends the old drag" );
+        const std::size_t count = scene.getTerrainPointCount();
+        check( !scene.insertSplineControlPoint( 8 ) && !scene.insertSplineControlPoint( std::numeric_limits<std::size_t>::max() ) && !scene.removeSplineControlPoint( 9 ), "out-of-range topology edits are rejected" );
+        check( scene.getSplineControlPoints().size() == 9 && scene.getTerrainPointCount() == count, "invalid topology edits leave geometry intact" );
+        const vec2 second = scene.getSplineControlPoints()[1];
+        check( scene.removeSplineControlPoint( 0 ) && near( scene.getSplineControlPoints()[0], second ), "deleting the first endpoint preserves the remaining order" );
+        while( scene.getSplineControlPoints().size() > 2 ) check( scene.removeSplineControlPoint( scene.getSplineControlPoints().size() - 1 ), "endpoint deletion supports an open two-point spline" );
+        check( !scene.removeSplineControlPoint( 0 ) && !scene.removeSplineControlPoint( 1 ), "deletion preserves the two-point minimum" );
+        check( scene.insertSplineControlPoint( 0 ), "two-point splines still support insertion" );
+        scene.resetTerrainProbes();
+        check( scene.getSplineControlPoints().size() == 3 && scene.getSplineSamplingError() == 0.005f, "probe reset preserves edited controls and error" );
+        for( std::size_t i = 0; i < probes.size(); ++i ) check( scene.getShapes()[scene.getTerrainPointCount() - 1 + i].shapeHandle == probes[i].shapeHandle, "repeated endpoint edits preserve every probe" );
+        rigidBodyDemo polygon{ demoKind::terrainChain };
+        check( !polygon.insertSplineControlPoint( 0 ) && !polygon.removeSplineControlPoint( 0 ), "spline topology actions do not alter polygon terrain" );
+    }
+
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        demoInput drag{};
+        drag.mousePosition = scene.getSplineControlPoints()[0];
+        drag.mousePressed = drag.mouseHeld = true;
+        scene.handleInput( drag );
+        drag.mousePressed = false;
+        drag.mousePosition = scene.getSplineControlPoints()[1] + vec2{ 0.006f, 0.0f };
+        scene.handleInput( drag );
+        check( near( scene.getSplineControlPoints()[0], drag.mousePosition ), "short-segment insertion fixture must apply" );
+        std::vector<vec2> before;
+        for( std::size_t i = 0; i < scene.getTerrainPointCount(); ++i ) before.push_back( scene.getTerrainPoint( i ) );
+        check( !scene.insertSplineControlPoint( 0 ), "insertion that creates too-short edges is rejected" );
+        check( scene.getSplineControlPoints().size() == 9 && scene.getTerrainPointCount() == before.size() && scene.getTerrainPointDragIndex() == 0, "failed insertion preserves controls, geometry and drag selection" );
+        for( std::size_t i = 0; i < before.size(); ++i ) check( near( scene.getTerrainPoint( i ), before[i] ), "failed insertion preserves every sampled point" );
+    }
+
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        demoInput drag{};
+        drag.mousePosition = scene.getSplineControlPoints()[2];
+        drag.mousePressed = drag.mouseHeld = true;
+        scene.handleInput( drag );
+        drag.mousePressed = false;
+        drag.mousePosition = scene.getSplineControlPoints()[0];
+        scene.handleInput( drag );
+        check( near( scene.getSplineControlPoints()[2], scene.getSplineControlPoints()[0] ), "deletion rejection fixture must have repeated nonadjacent controls" );
+        std::vector<vec2> before;
+        for( std::size_t i = 0; i < scene.getTerrainPointCount(); ++i ) before.push_back( scene.getTerrainPoint( i ) );
+        check( !scene.removeSplineControlPoint( 1 ), "deletion that collapses neighboring controls is rejected" );
+        check( scene.getSplineControlPoints().size() == 9 && scene.getTerrainPointCount() == before.size() && scene.getTerrainPointDragIndex() == 2, "failed deletion preserves controls, geometry and drag selection" );
+        for( std::size_t i = 0; i < before.size(); ++i ) check( near( scene.getTerrainPoint( i ), before[i] ), "failed deletion preserves every sampled point" );
+    }
+
     return 0;
 }
