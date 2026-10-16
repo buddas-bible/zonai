@@ -82,6 +82,7 @@ struct terrainTrialObservation
     vec2 launchGravity{};
     float launchFriction = 0.0f;
     float launchRestitution = 0.0f;
+    float launchMass = 0.0f;
     std::optional<float> launchFraction{};
     float elapsed = 0.0f;
     bool touching = false;
