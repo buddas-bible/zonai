@@ -494,6 +494,15 @@ void rigidBodyDemo::updateTerrainTrialObservation( float timeStep, int subStepCo
         return;
     }
     if( timeStep <= 0.0f ) return;
+    if( !terrainTrialObservation_.firstContactTime )
+    {
+        if( terrainTrialObservation_.initialSubStepCount == 0 )
+        {
+            terrainTrialObservation_.initialTimeStep = timeStep;
+            terrainTrialObservation_.initialSubStepCount = subStepCount;
+        }
+        else if( timeStep != terrainTrialObservation_.initialTimeStep || subStepCount != terrainTrialObservation_.initialSubStepCount ) terrainTrialObservation_.preContactSettingsChanged = true;
+    }
     terrainTrialObservation_.elapsed += timeStep;
     terrainTrialObservation_.touching = false;
     const shapeId probe = shapes_[probeIndex].shapeHandle;
