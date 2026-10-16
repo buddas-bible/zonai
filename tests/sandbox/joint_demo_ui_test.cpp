@@ -390,6 +390,40 @@ int main()
             if( resetView.getSplineControlPoints().size() != ( edited ? 10u : 9u ) || resetView.getSplineSamplingError() != ( edited ? 0.03f : 0.01f ) ) fail( "Terrain reset button and history must restore controls and error without replacing unchanged history" );
         }
     }
+    {
+        rigidBodyDemoUi positionView{ demoKind::splineTerrain };
+        while( positionView.getSplineControlPoints().size() > 2 )
+            if( !positionView.removeSplineControlPoint( positionView.getSplineControlPoints().size() - 1 ) ) fail( "Trial slider fixture reduces to one edge" );
+        const vec2 a = positionView.getTerrainPoint( 0 ), b = positionView.getTerrainPoint( 1 );
+        const vec2 normal = Cross( Normalize( b - a ), 1.0f );
+        for( int frame = 0; frame < 5; ++frame )
+        {
+            if( frame == 1 ) io.AddInputCharactersUTF8( "25" );
+            if( frame == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+            if( frame == 3 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline trial position" );
+            if( frame == 0 )
+            {
+                GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "SplineTrialFraction" );
+                GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+            }
+            if( frame == 3 || frame == 4 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( frame == 3 ? "TerrainFront" : "TerrainSeams" );
+            positionView.drawControls();
+            ImGui::End();
+            ImGui::Render();
+            if( frame == 3 )
+            {
+                if( positionView.getSplineTrialFraction() != 0.25f ) fail( "Trial slider must convert percentage to length fraction" );
+                const vec2 expected = a + 0.25f * ( b - a ) + 1.5f * normal;
+                if( LengthSquared( positionView.getWorld().GetBodyTransform( positionView.getImpulseBody() ).position - expected ) > 1.0e-8f ) fail( "Front trial button must use the selected length fraction" );
+            }
+            if( frame == 4 )
+                if( LengthSquared( positionView.getWorld().GetBodyTransform( positionView.getImpulseBody() ).position - ( 0.5f * ( a + b ) + 1.5f * normal ) ) > 1.0e-8f ) fail( "Seam trial button must retain its original launch position" );
+        }
+    }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }

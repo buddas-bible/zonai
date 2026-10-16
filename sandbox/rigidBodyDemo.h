@@ -244,6 +244,8 @@ public:
     bool insertSplineControlPoint( std::size_t segmentIndex );
     bool removeSplineControlPoint( std::size_t pointIndex );
     bool resetSplineTerrain();
+    [[nodiscard]] float getSplineTrialFraction() const noexcept { return splineTrialFraction_; }
+    void setSplineTrialFraction( float fraction );
     [[nodiscard]] bool canUndoSplineEdit() const noexcept { return splineUndo_.has_value(); }
     [[nodiscard]] bool canRedoSplineEdit() const noexcept { return splineRedo_.has_value(); }
     bool undoSplineEdit();
@@ -336,6 +338,7 @@ private:
     chainId terrainChain_{};
     std::vector<vec2> splineControlPoints_{};
     float splineSamplingError_ = 0.01f;
+    float splineTrialFraction_ = 0.5f;
     std::optional<splineEditState> splineUndo_{};
     std::optional<splineEditState> splineRedo_{};
     bool splineDragRecorded_ = false;

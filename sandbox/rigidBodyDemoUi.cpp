@@ -695,6 +695,9 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::BeginDisabled( getSplineControlPoints().size() <= 2 );
             if( ImGui::Button( "제어점 삭제###SplineRemove" ) && removeSplineControlPoint( splineControlIndex_ ) ) splineControlIndex_ = std::min( splineControlIndex_, getSplineControlPoints().size() - 1 );
             ImGui::EndDisabled();
+            float fraction = getSplineTrialFraction() * 100.0f;
+            if( ImGui::SliderFloat( "앞·뒷면 시험 위치###SplineTrialFraction", &fraction, 0.0f, 100.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp ) ) setSplineTrialFraction( fraction / 100.0f );
+            ImGui::TextWrapped( "지형 시작부터의 길이 비율입니다. 이음새 통과 시험은 시작 위치를 유지합니다." );
         }
         const char* probes[] = { "원", "캡슐", "상자" };
         ImGui::Combo( "시험 도형###TerrainProbe", &terrainProbeIndex_, probes, 3 );
