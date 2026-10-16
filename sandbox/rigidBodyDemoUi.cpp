@@ -754,6 +754,7 @@ void rigidBodyDemoUi::drawExperimentControls()
                 case terrainTrialComparisonStatus::ready:
                     ImGui::TextUnformatted( "비교: 발사 조건 같음" );
                     ImGui::Text( "첫 접촉 관측 단계 설정: %s", comparison.contactStepSettingsMatch ? "같음" : "다름" );
+                    ImGui::Text( "첫 접촉까지 진행 설정 비교: %s", comparison.stepSettings == terrainTrialStepComparison::changed ? "변경 포함" : comparison.stepSettings == terrainTrialStepComparison::constantMatch ? "일정·같음" : "일정·다름" );
                     ImGui::Text( "첫 접촉 관측 차이 (현재 - 기준): %+.3f s", comparison.firstContactTimeDifference );
                     break;
             }

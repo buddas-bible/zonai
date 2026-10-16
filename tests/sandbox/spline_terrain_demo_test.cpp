@@ -1060,5 +1060,53 @@ int main()
         check( scene.insertSplineControlPoint( 1 ) && !scene.getTerrainTrialReference(), "terrain edits invalidate pinned step history" );
     }
 
+    const struct
+    {
+        bool referenceChanged;
+        bool currentChanged;
+        float timeStep;
+        terrainTrialStepComparison expected;
+        float difference;
+    } stepSummaries[] = {
+        { false, false, 0.125f, terrainTrialStepComparison::constantMatch, 0.0f },
+        { false, false, 0.25f, terrainTrialStepComparison::constantDifferent, 0.125f },
+        { false, true, 0.125f, terrainTrialStepComparison::changed, 0.0625f },
+        { false, true, 0.25f, terrainTrialStepComparison::changed, 0.1875f },
+        { true, false, 0.125f, terrainTrialStepComparison::changed, -0.0625f },
+        { true, false, 0.25f, terrainTrialStepComparison::changed, 0.0625f },
+        { true, true, 0.125f, terrainTrialStepComparison::changed, 0.0f },
+        { true, true, 0.25f, terrainTrialStepComparison::changed, 0.125f }
+    };
+    for( const auto& summary : stepSummaries )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        scene.getWorld().SetGravity( {} );
+        check( scene.getTerrainTrialComparison().stepSettings == terrainTrialStepComparison::unavailable, "step summary is unavailable without a reference" );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        const auto target = *scene.getTerrainTrialTarget( terrainTrial::front );
+        const auto observeContact = [&]( bool changed, float timeStep )
+        {
+            if( changed )
+            {
+                scene.getWorld().SetBodyTransform( probe.bodyHandle, { { 0.0f, 10.0f }, {} } );
+                scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+                scene.step( 0.0625f, 2 );
+            }
+            scene.getWorld().SetBodyTransform( probe.bodyHandle, { target.point + 0.4f * Cross( target.tangent, 1.0f ), {} } );
+            scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, {} );
+            scene.step( timeStep, 4 );
+        };
+        observeContact( summary.referenceChanged, 0.125f );
+        check( scene.pinTerrainTrialReference() && scene.relaunchTerrainTrialReference(), "step summary fixture pins and relaunches" );
+        check( scene.getTerrainTrialComparison().stepSettings == terrainTrialStepComparison::unavailable, "step summary waits for both contact observations" );
+        observeContact( summary.currentChanged, summary.timeStep );
+        const auto comparison = scene.getTerrainTrialComparison();
+        check( comparison.status == terrainTrialComparisonStatus::ready && comparison.stepSettings == summary.expected, "step summary distinguishes constant settings and prioritizes either changed history" );
+        check( comparison.firstContactTimeDifference == summary.difference, "step summary retains the signed observed time difference" );
+        scene.launchTerrainProbe( 1, terrainTrial::front );
+        check( scene.getTerrainTrialComparison().stepSettings == terrainTrialStepComparison::unavailable, "different launch conditions do not produce a step summary" );
+    }
+
     return 0;
 }

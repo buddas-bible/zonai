@@ -91,12 +91,14 @@ struct terrainTrialObservation
 };
 
 enum class terrainTrialComparisonStatus { noReference, noObservation, differentConditions, waitingForContact, ready };
+enum class terrainTrialStepComparison { unavailable, constantMatch, constantDifferent, changed };
 
 struct terrainTrialComparison
 {
     terrainTrialComparisonStatus status = terrainTrialComparisonStatus::noReference;
     float firstContactTimeDifference = 0.0f;
     bool contactStepSettingsMatch = false;
+    terrainTrialStepComparison stepSettings = terrainTrialStepComparison::unavailable;
 };
 
 struct carWheelObservation

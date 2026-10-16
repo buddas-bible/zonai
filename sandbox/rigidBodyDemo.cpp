@@ -452,7 +452,9 @@ terrainTrialComparison rigidBodyDemo::getTerrainTrialComparison() const noexcept
     const auto& reference = *terrainTrialReference_;
     if( current.probeIndex != reference.probeIndex || current.trial != reference.trial || current.launchFraction != reference.launchFraction || current.launchSpeed != reference.launchSpeed ) return { terrainTrialComparisonStatus::differentConditions };
     if( !current.firstContactTime || !reference.firstContactTime ) return { terrainTrialComparisonStatus::waitingForContact };
-    return { terrainTrialComparisonStatus::ready, *current.firstContactTime - *reference.firstContactTime, current.firstContactTimeStep == reference.firstContactTimeStep && current.firstContactSubStepCount == reference.firstContactSubStepCount };
+    const bool settingsMatch = current.firstContactTimeStep == reference.firstContactTimeStep && current.firstContactSubStepCount == reference.firstContactSubStepCount;
+    const auto stepSettings = current.preContactSettingsChanged || reference.preContactSettingsChanged ? terrainTrialStepComparison::changed : settingsMatch ? terrainTrialStepComparison::constantMatch : terrainTrialStepComparison::constantDifferent;
+    return { terrainTrialComparisonStatus::ready, *current.firstContactTime - *reference.firstContactTime, settingsMatch, stepSettings };
 }
 
 bool rigidBodyDemo::relaunchTerrainTrialReference()
