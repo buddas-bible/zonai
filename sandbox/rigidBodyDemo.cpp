@@ -451,6 +451,7 @@ terrainTrialComparison rigidBodyDemo::getTerrainTrialComparison() const noexcept
     if( !current.active ) return { terrainTrialComparisonStatus::noObservation };
     const auto& reference = *terrainTrialReference_;
     if( current.probeIndex != reference.probeIndex || current.trial != reference.trial || current.launchFraction != reference.launchFraction || current.launchSpeed != reference.launchSpeed || current.launchGravity.x != reference.launchGravity.x || current.launchGravity.y != reference.launchGravity.y ) return { terrainTrialComparisonStatus::differentConditions };
+    if( current.launchFriction != reference.launchFriction || current.launchRestitution != reference.launchRestitution ) return { terrainTrialComparisonStatus::differentConditions };
     if( !current.firstContactTime || !reference.firstContactTime ) return { terrainTrialComparisonStatus::waitingForContact };
     const bool settingsMatch = current.firstContactTimeStep == reference.firstContactTimeStep && current.firstContactSubStepCount == reference.firstContactSubStepCount;
     const auto stepSettings = current.preContactSettingsChanged || reference.preContactSettingsChanged ? terrainTrialStepComparison::changed : settingsMatch ? terrainTrialStepComparison::constantMatch : terrainTrialStepComparison::constantDifferent;
@@ -595,7 +596,8 @@ void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial tri
     const auto target = getTerrainTrialTarget( trial );
     if( !target ) return;
     const auto body = shapes_[terrainSegments_.size() + probeIndex].bodyHandle;
-    if( !world_.IsValid( body ) ) return;
+    const auto shape = shapes_[terrainSegments_.size() + probeIndex].shapeHandle;
+    if( !world_.IsValid( body ) || !world_.IsValid( shape ) ) return;
     resetTerrainProbes();
     const vec2 tangent = target->tangent;
     const vec2 normal = Cross( tangent, 1.0f );
@@ -611,6 +613,8 @@ void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial tri
         terrainTrialObservation_.trial = trial;
         terrainTrialObservation_.launchSpeed = speed;
         terrainTrialObservation_.launchGravity = world_.GetGravity();
+        terrainTrialObservation_.launchFriction = world_.GetShapeFriction( shape );
+        terrainTrialObservation_.launchRestitution = world_.GetShapeRestitution( shape );
         if( trial != terrainTrial::seams ) terrainTrialObservation_.launchFraction = splineTrialFraction_;
     }
 }

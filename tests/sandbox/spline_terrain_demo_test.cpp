@@ -1215,5 +1215,37 @@ int main()
         check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noReference && !scene.getTerrainTrialComparison().gravityChangesObserved, "missing reference does not produce a gravity summary" );
     }
 
+    for( bool frictionChanged : { false, true } )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        scene.getWorld().SetShapeFriction( probe.shapeHandle, 0.25f );
+        scene.getWorld().SetShapeRestitution( probe.shapeHandle, 0.5f );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        check( scene.getTerrainTrialObservation().launchFriction == 0.25f && scene.getTerrainTrialObservation().launchRestitution == 0.5f, "launch records the selected probe friction and restitution" );
+        scene.step( 0.0625f, 4 );
+        check( scene.pinTerrainTrialReference(), "material fixture pins a progressed launch" );
+        const float friction = frictionChanged ? 0.75f : 0.25f;
+        const float restitution = frictionChanged ? 0.5f : 0.8f;
+        scene.getWorld().SetShapeFriction( probe.shapeHandle, friction );
+        scene.getWorld().SetShapeRestitution( probe.shapeHandle, restitution );
+        check( scene.getTerrainTrialObservation().launchFriction == 0.25f && scene.getTerrainTrialObservation().launchRestitution == 0.5f && scene.getTerrainTrialReference()->launchFriction == 0.25f && scene.getTerrainTrialReference()->launchRestitution == 0.5f && scene.getTerrainTrialComparison().status != terrainTrialComparisonStatus::differentConditions, "live material edits do not rewrite recorded current or reference conditions" );
+        scene.launchTerrainProbe( 99, terrainTrial::front );
+        check( scene.getTerrainTrialObservation().launchFriction == 0.25f && scene.getTerrainTrialObservation().launchRestitution == 0.5f, "failed launch preserves recorded material" );
+        check( scene.relaunchTerrainTrialReference() && scene.getTerrainTrialObservation().launchFriction == friction && scene.getTerrainTrialObservation().launchRestitution == restitution && scene.getWorld().GetShapeFriction( probe.shapeHandle ) == friction && scene.getWorld().GetShapeRestitution( probe.shapeHandle ) == restitution, "reference relaunch uses current material and records it" );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions, "each recorded material property participates in condition comparison" );
+        scene.getWorld().SetShapeFriction( probe.shapeHandle, 0.25f );
+        scene.getWorld().SetShapeRestitution( probe.shapeHandle, 0.5f );
+        check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::differentConditions, "restoring live material does not retroactively change launch records" );
+        check( scene.relaunchTerrainTrialReference() && scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::waitingForContact, "equal recorded material allows contact comparison" );
+        scene.resetTerrainProbes();
+        check( scene.getTerrainTrialObservation().launchFriction == 0.0f && scene.getTerrainTrialObservation().launchRestitution == 0.0f && scene.getTerrainTrialReference()->launchFriction == 0.25f, "probe reset clears current material metadata and keeps reference" );
+        scene.launchTerrainProbe( 0, terrainTrial::seams );
+        check( scene.getTerrainTrialObservation().launchFriction == 0.25f && scene.getTerrainTrialObservation().launchRestitution == 0.5f, "seam launch records probe material" );
+        scene.getWorld().DestroyShape( probe.shapeHandle );
+        scene.launchTerrainProbe( 0, terrainTrial::front );
+        check( scene.getTerrainTrialObservation().trial == terrainTrial::seams && scene.getTerrainTrialObservation().launchSpeed == 6.0f, "retired probe shape rejects launch before reading material or changing state" );
+    }
+
     return 0;
 }
