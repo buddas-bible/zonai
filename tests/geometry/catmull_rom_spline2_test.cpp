@@ -752,5 +752,54 @@ int main()
         check( !GetLength( curve, 0, 0.5f, 0.5f, tolerance ), "partial length validates tolerance even for zero intervals" );
     check( !GetLength( curve, 1, 0.25f, 0.75f, 1.0e-30 ) && !GetLength( curve, 1, 0.25f, 0.75f, std::numeric_limits<double>::denorm_min() ), "partial length rejects unattainable and underflowing precision budgets" );
 
+    const auto crossSegmentLength = GetLength( catmullRomSpline2{ unevenLine }, splineParameter2{ 0, 0.5f }, splineParameter2{ 2, 0.5f }, 1.0e-6 );
+    const double straightReference = static_cast<double>( Evaluate( { unevenLine }, 2, 0.5f ).x ) - Evaluate( { unevenLine }, 0, 0.5f ).x;
+    check( crossSegmentLength && std::abs( *crossSegmentLength - straightReference ) < 2.0e-6, "multi-segment length matches a nonuniform analytic straight range" );
+    for( const auto candidate : { curve, unevenCurve, wave, loop, unevenLoop, catmullRomSpline2{ reversal } } )
+    {
+        const std::size_t last = GetSegmentCount( candidate ) - 1;
+        const auto whole = GetLength( candidate, 1.0e-6 );
+        const auto fullRange = GetLength( candidate, splineParameter2{ 0, 0.0f }, splineParameter2{ last, 1.0f }, 1.0e-6 );
+        check( whole && fullRange && *whole == *fullRange, "full parameter range preserves existing whole length including closed seams" );
+        const auto partialRange = GetLength( candidate, splineParameter2{ 0, 0.25f }, splineParameter2{ last, 0.75f }, 1.0e-6 );
+        check( partialRange.has_value(), "multi-segment partial range converges including zero tangents" );
+        double combined = 0.0;
+        for( std::size_t segment = 0; segment <= last; ++segment )
+        {
+            const float begin = segment == 0 ? 0.25f : 0.0f;
+            const float end = segment == last ? 0.75f : 1.0f;
+            const auto piece = GetLength( candidate, segment, begin, end, 1.0e-7 );
+            check( piece.has_value(), "single-segment reference pieces converge" );
+            combined += *piece;
+            const auto singleRange = GetLength( candidate, splineParameter2{ segment, 0.25f }, splineParameter2{ segment, 0.75f }, 1.0e-7 );
+            const auto single = GetLength( candidate, segment, 0.25f, 0.75f, 1.0e-7 );
+            check( singleRange && single && *singleRange == *single, "same-segment parameter range matches the existing partial length API" );
+            const auto zero = GetLength( candidate, splineParameter2{ segment, 0.5f }, splineParameter2{ segment, 0.5f }, 1.0e-30 );
+            check( zero && *zero == 0.0, "equal parameter ranges return zero after validation" );
+            if( segment == last ) continue;
+            const auto joinForward = GetLength( candidate, splineParameter2{ segment, 1.0f }, splineParameter2{ segment + 1, 0.0f }, 1.0e-30 );
+            const auto joinBackward = GetLength( candidate, splineParameter2{ segment + 1, 0.0f }, splineParameter2{ segment, 1.0f }, 1.0e-30 );
+            check( joinForward && joinBackward && *joinForward == 0.0 && *joinBackward == 0.0, "both representations of an internal join are the same zero-length range" );
+            const auto fromLeft = GetLength( candidate, splineParameter2{ segment, 1.0f }, splineParameter2{ last, 1.0f }, 1.0e-6 );
+            const auto fromRight = GetLength( candidate, splineParameter2{ segment + 1, 0.0f }, splineParameter2{ last, 1.0f }, 1.0e-6 );
+            check( fromLeft && fromRight && *fromLeft == *fromRight, "join aliases give identical remaining lengths" );
+        }
+        check( std::abs( *partialRange - combined ) < 1.0e-6, "cross-segment range equals the sum of directly integrated pieces" );
+    }
+    const auto shortRange = GetLength( catmullRomSpline2{ longPrefix }, splineParameter2{ 3, 0.5f }, splineParameter2{ 3, shortEnd }, 1.0e-20 );
+    const auto afterLongPrefix = GetLength( catmullRomSpline2{ longPrefix }, splineParameter2{ 3, 0.75f }, splineParameter2{ 4, 0.25f }, 1.0e-12 );
+    check( shortRange && *shortRange == static_cast<double>( shortEnd ) - 0.5 && afterLongPrefix && *afterLongPrefix == 0.5, "range integration ignores large prefixes when preserving short interval precision" );
+    check( !GetLength( loop, splineParameter2{ 3, 1.0f }, splineParameter2{ 0, 0.0f }, 1.0e-6 ) && !GetLength( curve, splineParameter2{ 2, 0.25f }, splineParameter2{ 0, 0.75f }, 1.0e-6 ) && !GetLength( curve, splineParameter2{ 1, 0.75f }, splineParameter2{ 1, 0.25f }, 1.0e-6 ), "range length rejects reverse traversal and implicit closed wrapping" );
+    editable[1] = { 10.0f, 0.0f };
+    const auto editedRange = GetLength( editableCurve, splineParameter2{ 0, 0.25f }, splineParameter2{ 0, 0.75f }, 1.0e-6 );
+    check( editedRange && *editedRange == 5.0, "range length observes edited borrowed controls" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ repeated }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ repeatedStart, true } } )
+        check( !GetLength( invalid, splineParameter2{ 0, 0.0f }, splineParameter2{ 0, 0.0f }, 1.0e-6 ), "range length validates paths even for equal parameters" );
+    for( splineParameter2 invalid : { splineParameter2{ GetSegmentCount( curve ), 0.0f }, splineParameter2{ std::numeric_limits<std::size_t>::max(), 1.0f }, splineParameter2{ 0, -0.1f }, splineParameter2{ 0, 1.1f }, splineParameter2{ 0, nan }, splineParameter2{ 0, infinity } } )
+        check( !GetLength( curve, invalid, splineParameter2{ 2, 1.0f }, 1.0e-6 ) && !GetLength( curve, splineParameter2{ 0, 0.0f }, invalid, 1.0e-6 ), "range length rejects invalid endpoints before join normalization" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ) } )
+        check( !GetLength( curve, splineParameter2{ 0, 1.0f }, splineParameter2{ 1, 0.0f }, tolerance ), "range length validates tolerance even for equivalent joins" );
+    check( !GetLength( curve, splineParameter2{ 0, 0.25f }, splineParameter2{ 2, 0.75f }, 1.0e-30 ) && !GetLength( curve, splineParameter2{ 0, 0.25f }, splineParameter2{ 2, 0.75f }, std::numeric_limits<double>::denorm_min() ), "range length rejects unattainable or underflowing total error budgets" );
+
     return 0;
 }

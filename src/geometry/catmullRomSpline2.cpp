@@ -359,6 +359,44 @@ std::optional<double> GetLength( const catmullRomSpline2& spline, std::size_t se
     return length;
 }
 
+std::optional<double> GetLength( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, double tolerance )
+{
+    if( !IsValid( spline ) || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
+    const std::size_t count = GetSegmentCount( spline );
+    const auto valid = [&]( splineParameter2 parameter )
+    {
+        return parameter.segmentIndex < count && std::isfinite( parameter.t ) && parameter.t >= 0.0f && parameter.t <= 1.0f;
+    };
+    if( !valid( from ) || !valid( to ) ) return {};
+    const auto normalize = [&]( splineParameter2& parameter )
+    {
+        if( parameter.t == 1.0f && parameter.segmentIndex < count - 1 )
+        {
+            ++parameter.segmentIndex;
+            parameter.t = 0.0f;
+        }
+    };
+    normalize( from );
+    normalize( to );
+    if( from.segmentIndex > to.segmentIndex || ( from.segmentIndex == to.segmentIndex && from.t > to.t ) ) return {};
+    if( from.segmentIndex == to.segmentIndex && from.t == to.t ) return 0.0;
+
+    const std::size_t intervals = to.segmentIndex - from.segmentIndex + ( to.t > 0.0f ? 1u : 0u );
+    const double error = tolerance / ( 4.0 * intervals );
+    double length = 0.0;
+    for( std::size_t i = from.segmentIndex; i <= to.segmentIndex; ++i )
+    {
+        const double begin = i == from.segmentIndex ? from.t : 0.0;
+        const double end = i == to.segmentIndex ? to.t : 1.0;
+        if( begin == end ) continue;
+        const auto segmentLength = GetSegmentLength( spline, i, begin, end, error );
+        if( !segmentLength || *segmentLength <= 0.0 ) return {};
+        length += *segmentLength;
+    }
+    if( !std::isfinite( length ) || tolerance < 32.0 * std::numeric_limits<double>::epsilon() * length ) return {};
+    return length;
+}
+
 std::optional<double> GetDistance( const catmullRomSpline2& spline, std::size_t segmentIndex, float t, double tolerance )
 {
     if( !IsValid( spline ) || segmentIndex >= GetSegmentCount( spline ) || !std::isfinite( t ) || t < 0.0f || t > 1.0f || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
