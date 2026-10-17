@@ -91,6 +91,11 @@ std::optional<double> GetLength( const catmullRomSpline2& spline, splineParamete
 // 0 접선도 허용하며 잘못된 입력 / 수렴 실패 / float t 정밀도 부족은 nullopt.
 std::optional<splineParameter2> GetParameterByDistance( const catmullRomSpline2& spline, double distance, double tolerance );
 
+// 정방향 [from, to]의 시작부터 distance in [0, 범위 길이]을 역산함. 자동 순환하지 않음.
+// 거리 0은 입력 from, 양수인 전체 길이는 입력 to. 내부 접합점은 앞 구간 t=1을 선택함.
+// 같은 오차 / 실패 정책이며 0 길이 범위는 거리 0만 허용함. 0 접선도 허용함.
+std::optional<splineParameter2> GetParameterByDistance( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, double distance, double tolerance );
+
 // distance in [0, GetLength]. 곡선 위 위치와 진행 방향 단위 접선. 0 접선 / 정밀도 부족도 nullopt.
 std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, double distance, double tolerance );
 
