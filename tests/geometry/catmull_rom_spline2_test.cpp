@@ -485,5 +485,51 @@ int main()
     check( !GetDistance( curve, GetSegmentCount( curve ), 0.5f, 1.0e-6 ) && !GetDistance( loop, std::numeric_limits<std::size_t>::max(), 0.0f, 1.0e-6 ), "parameter distance rejects out-of-range open and closed segment indices" );
     check( !GetDistance( curve, 1, 0.5f, 1.0e-30 ) && !GetDistance( curve, 1, 0.5f, std::numeric_limits<double>::denorm_min() ), "parameter distance fails explicitly when positive-distance precision is unattainable" );
 
+    const auto lineBounds = ComputeAABB( spline );
+    check( lineBounds && IsValidAABB( *lineBounds ) && Contains( *lineBounds, line[0] ) && Contains( *lineBounds, line[1] ), "spline AABB includes both line endpoints" );
+    check( near( lineBounds->min, line[0], 1.0e-4f ) && near( lineBounds->max, line[1], 1.0e-4f ), "line bounds keep a small float rounding allowance" );
+    const auto curveBounds = ComputeAABB( curve );
+    check( curveBounds && curveBounds->min.y < 0.0f && curveBounds->max.y > 1.0f, "spline AABB includes curve overshoot beyond the control polygon" );
+    const auto closedBounds = ComputeAABB( loop );
+    check( closedBounds && closedBounds->min.x < 0.0f && Contains( *closedBounds, Evaluate( loop, 3, 0.5f ) ), "closed AABB includes the wrapped final segment" );
+    for( const auto candidate : { spline, curve, unevenCurve, loop, unevenLoop, crossing, catmullRomSpline2{ reversal } } )
+    {
+        const auto bounds = ComputeAABB( candidate );
+        check( bounds && IsValidAABB( *bounds ), "valid open and closed splines including zero tangents have finite bounds" );
+        for( std::size_t segment = 0; segment < GetSegmentCount( candidate ); ++segment )
+        {
+            for( int i = 0; i <= 4096; ++i )
+                check( Contains( *bounds, Evaluate( candidate, segment, i / 4096.0f ) ), "conservative bounds contain dense float evaluations without epsilon" );
+            check( Contains( *bounds, Evaluate( candidate, segment, std::nextafter( 0.0f, 1.0f ) ) ) && Contains( *bounds, Evaluate( candidate, segment, std::nextafter( 1.0f, 0.0f ) ) ), "bounds contain float evaluations adjacent to segment endpoints" );
+        }
+    }
+    for( float scale : { 1.0e-10f, 1.0f, 1.0e10f } )
+    {
+        const vec2 scaledControls[] = { scale * points[0], scale * points[1], scale * points[2], scale * points[3] };
+        const catmullRomSpline2 scaledSpline{ scaledControls };
+        const auto bounds = ComputeAABB( scaledSpline );
+        check( bounds && IsValidAABB( *bounds ), "bounds support small and large coordinate scales" );
+        for( const vec2 point : Sample( scaledSpline, 1024 ) )
+            check( Contains( *bounds, point ), "scaled bounds contain float curve samples without epsilon" );
+    }
+    const vec2 translatedControls[] = { { 1.0e8f, -1.0e8f }, { 1.0e8f + 8.0f, -1.0e8f }, { 1.0e8f + 8.0f, -1.0e8f + 8.0f }, { 1.0e8f + 16.0f, -1.0e8f + 8.0f } };
+    const auto translatedBounds = ComputeAABB( catmullRomSpline2{ translatedControls } );
+    check( translatedBounds.has_value(), "bounds support large translations with coarse float spacing" );
+    for( const vec2 point : Sample( { translatedControls }, 1024 ) )
+        check( Contains( *translatedBounds, point ), "bounds include rounding of float positions at large translations" );
+    const vec2 subnormalAxis[] = { { 0.0f, std::numeric_limits<float>::denorm_min() }, { 1.0f, 0.0f } };
+    const auto subnormalBounds = ComputeAABB( catmullRomSpline2{ subnormalAxis } );
+    check( subnormalBounds.has_value(), "bounds allow a subnormal coordinate component on a valid edge" );
+    for( const vec2 point : Sample( { subnormalAxis }, 1024 ) )
+        check( Contains( *subnormalBounds, point ), "bounds include subnormal evaluation rounding" );
+    const auto beforeBoundsEdit = ComputeAABB( editableCurve );
+    editable[1] = { 12.0f, 3.0f };
+    const auto afterBoundsEdit = ComputeAABB( editableCurve );
+    check( beforeBoundsEdit && afterBoundsEdit && afterBoundsEdit->max.x > beforeBoundsEdit->max.x && Contains( *afterBoundsEdit, editable[1] ), "bounds observe edited borrowed controls without caching" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ single }, catmullRomSpline2{ repeated }, catmullRomSpline2{ infinite }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ tooLarge }, catmullRomSpline2{ repeatedStart, true } } )
+        check( !ComputeAABB( invalid ), "spline AABB rejects invalid paths without assertions" );
+    const vec2 unboundedAllowance[] = { { 0.0f, std::numeric_limits<float>::max() }, { 1.0f, std::numeric_limits<float>::max() } };
+    check( IsValid( { unboundedAllowance } ) && !ComputeAABB( catmullRomSpline2{ unboundedAllowance } ), "bounds fail safely when outward float rounding allowance cannot remain finite" );
+
     return 0;
 }
