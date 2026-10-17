@@ -96,4 +96,7 @@ struct splineClosestPoint2
 // 최소거리의 절대오차 목표 tolerance는 유한한 양수. 잘못된 입력 / 정밀도 부족 / 탐색 한도 초과는 nullopt.
 std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, const vec2& point, double tolerance );
 
+// 같은 오차 / 실패 정책으로 지정 구간의 양 끝을 포함해 탐색함. 잘못된 구간 번호도 nullopt.
+std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, std::size_t segmentIndex, const vec2& point, double tolerance );
+
 } // namespace zonai

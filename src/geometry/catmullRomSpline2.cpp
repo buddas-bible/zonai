@@ -442,11 +442,14 @@ std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline
     return sample( parameter->segmentIndex, parameter->t );
 }
 
-std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, const vec2& point, double tolerance )
+namespace
+{
+
+std::optional<splineClosestPoint2> ClosestPointInRange( const catmullRomSpline2& spline, std::size_t firstSegment, std::size_t endSegment, const vec2& point, double tolerance )
 {
     if( !IsValid( spline ) || !IsFinite( point ) || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
     constexpr std::size_t MAX_NODES = 4096;
-    const std::size_t count = GetSegmentCount( spline );
+    const std::size_t count = endSegment - firstSegment;
     if( count > MAX_NODES ) return {};
     double scale = std::max( std::abs( static_cast<double>( point.x ) ), std::abs( static_cast<double>( point.y ) ) );
     for( const vec2 control : spline.points ) scale = std::max( { scale, std::abs( static_cast<double>( control.x ) ), std::abs( static_cast<double>( control.y ) ) } );
@@ -506,7 +509,7 @@ std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline
             bestDistance = distance;
         }
     };
-    for( std::size_t i = 0; i < count; ++i )
+    for( std::size_t i = firstSegment; i < endSegment; ++i )
     {
         vec2 tangent1{}, tangent2{};
         GetTangents( spline, i, tangent1, tangent2 );
@@ -549,6 +552,19 @@ std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline
         if( pending.empty() ) return best;
     }
     return {};
+}
+
+} // namespace
+
+std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, const vec2& point, double tolerance )
+{
+    return ClosestPointInRange( spline, 0, GetSegmentCount( spline ), point, tolerance );
+}
+
+std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, std::size_t segmentIndex, const vec2& point, double tolerance )
+{
+    if( segmentIndex >= GetSegmentCount( spline ) ) return {};
+    return ClosestPointInRange( spline, segmentIndex, segmentIndex + 1, point, tolerance );
 }
 
 } // namespace zonai
