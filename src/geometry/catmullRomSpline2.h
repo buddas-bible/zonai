@@ -50,6 +50,11 @@ std::vector<vec2> Sample( const catmullRomSpline2& spline, std::size_t subdivisi
 // 유효하지 않은 입력 / 깊이 12 초과는 빈 배열.
 std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, float maxError );
 
+// 경로 전체를 같은 길이의 subdivisions개 구간으로 나눠 subdivisions + 1개 위치를 반환함.
+// 양 끝점을 포함하며 닫힌 결과는 끝에 첫 점을 반복함. 간격은 chord 길이가 아닌 누적 거리 기준.
+// 0 접선도 허용. 잘못된 입력 / 불가능한 점 수 / 역산 또는 위치 정밀도 부족은 빈 배열.
+std::vector<vec2> SampleByDistance( const catmullRomSpline2& spline, std::size_t subdivisions, double tolerance );
+
 struct splineSample2
 {
     vec2 point{};

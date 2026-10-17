@@ -87,6 +87,25 @@ std::optional<double> GetSegmentLength( const catmullRomSpline2& spline, std::si
     return integrate( integrate, 0.0, end, fa, fm, fb, end * ( fa + 4.0 * fm + fb ) / 6.0, tolerance, 0 );
 }
 
+std::optional<vec2> GetPositionByParameter( const catmullRomSpline2& spline, std::size_t segment, float t, double tolerance )
+{
+    const vec2 point = Evaluate( spline, segment, t );
+    if( !IsFinite( point ) ) return {};
+    if( t > 0.0f && t < 1.0f )
+    {
+        vec2 tangent1{}, tangent2{};
+        GetTangents( spline, segment, tangent1, tangent2 );
+        const vec2 a = spline.points[segment], b = GetPoint( spline, segment + 1 );
+        const double dx = static_cast<double>( b.x ) - a.x, dy = static_cast<double>( b.y ) - a.y;
+        const double qx = 3.0 * dx - 2.0 * tangent1.x - tangent2.x, qy = 3.0 * dy - 2.0 * tangent1.y - tangent2.y;
+        const double cx = tangent1.x + static_cast<double>( tangent2.x ) - 2.0 * dx, cy = tangent1.y + static_cast<double>( tangent2.y ) - 2.0 * dy;
+        const double ex = ( static_cast<double>( point.x ) - a.x ) - t * ( tangent1.x + t * ( qx + t * cx ) );
+        const double ey = ( static_cast<double>( point.y ) - a.y ) - t * ( tangent1.y + t * ( qy + t * cy ) );
+        if( std::hypot( ex, ey ) > 0.25 * tolerance ) return {};
+    }
+    return point;
+}
+
 } // namespace
 
 bool IsValid( const catmullRomSpline2& spline )
@@ -375,29 +394,37 @@ std::optional<splineParameter2> GetParameterByDistance( const catmullRomSpline2&
     return {};
 }
 
+std::vector<vec2> SampleByDistance( const catmullRomSpline2& spline, std::size_t subdivisions, double tolerance )
+{
+    std::vector<vec2> samples{};
+    if( subdivisions == 0 || subdivisions >= samples.max_size() ) return {};
+    const auto length = GetLength( spline, tolerance );
+    if( !length ) return {};
+    samples.reserve( subdivisions + 1 );
+    for( std::size_t i = 0; i <= subdivisions; ++i )
+    {
+        const double distance = i == subdivisions ? *length : *length * ( static_cast<double>( i ) / subdivisions );
+        const auto parameter = GetParameterByDistance( spline, distance, tolerance );
+        if( !parameter ) return {};
+        const auto point = GetPositionByParameter( spline, parameter->segmentIndex, parameter->t, tolerance );
+        if( !point ) return {};
+        samples.push_back( *point );
+    }
+    return samples;
+}
+
 std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, double distance, double tolerance )
 {
     const auto parameter = GetParameterByDistance( spline, distance, tolerance );
     if( !parameter ) return {};
     const auto sample = [&]( std::size_t segment, float t ) -> std::optional<splineSample2>
     {
-        const vec2 point = Evaluate( spline, segment, t );
+        const auto point = GetPositionByParameter( spline, segment, t, tolerance );
+        if( !point ) return {};
         const vec2 derivative = Derivative( spline, segment, t );
         const double speed = std::hypot( static_cast<double>( derivative.x ), static_cast<double>( derivative.y ) );
-        if( !IsFinite( point ) || !std::isfinite( speed ) || speed <= 0.0 ) return {};
-        if( t > 0.0f && t < 1.0f )
-        {
-            vec2 tangent1{}, tangent2{};
-            GetTangents( spline, segment, tangent1, tangent2 );
-            const vec2 a = spline.points[segment], b = GetPoint( spline, segment + 1 );
-            const double dx = static_cast<double>( b.x ) - a.x, dy = static_cast<double>( b.y ) - a.y;
-            const double qx = 3.0 * dx - 2.0 * tangent1.x - tangent2.x, qy = 3.0 * dy - 2.0 * tangent1.y - tangent2.y;
-            const double cx = tangent1.x + static_cast<double>( tangent2.x ) - 2.0 * dx, cy = tangent1.y + static_cast<double>( tangent2.y ) - 2.0 * dy;
-            const double ex = ( static_cast<double>( point.x ) - a.x ) - t * ( tangent1.x + t * ( qx + t * cx ) );
-            const double ey = ( static_cast<double>( point.y ) - a.y ) - t * ( tangent1.y + t * ( qy + t * cy ) );
-            if( std::hypot( ex, ey ) > 0.25 * tolerance ) return {};
-        }
-        return splineSample2{ point, { static_cast<float>( derivative.x / speed ), static_cast<float>( derivative.y / speed ) } };
+        if( !std::isfinite( speed ) || speed <= 0.0 ) return {};
+        return splineSample2{ *point, { static_cast<float>( derivative.x / speed ), static_cast<float>( derivative.y / speed ) } };
     };
     return sample( parameter->segmentIndex, parameter->t );
 }
