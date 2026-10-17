@@ -862,5 +862,62 @@ int main()
         check( !GetParameterByDistance( curve, { 0, 0.25f }, { 2, 0.75f }, 0.5, tolerance ), "range inverse rejects invalid or unattainable tolerance" );
     check( !GetParameterByDistance( { unitLine }, { 0, 0.0f }, { 0, 1.0f }, 1.0 / 3.0, 1.0e-12 ) && !GetParameterByDistance( curve, { 1, 0.75f }, { 1, 0.25f }, 0.0, 1.0e-6 ), "range inverse rejects unrepresentable float parameters and reverse ranges" );
 
+    const auto localUniformSamples = SampleByDistance( { unitLine }, { 0, 0.25f }, { 0, 0.75f }, 4, 1.0e-6 );
+    check( localUniformSamples.size() == 5, "range distance sampling returns subdivisions plus one positions" );
+    for( std::size_t i = 0; i < localUniformSamples.size(); ++i )
+        check( near( localUniformSamples[i], { 0.25f + 0.125f * static_cast<float>( i ), 0.0f } ), "local uniform samples match analytic interval positions" );
+    const auto localUnevenSamples = SampleByDistance( { unevenLine }, { 0, 0.5f }, { 2, 0.5f }, 4, 1.0e-5 );
+    check( localUnevenSamples.size() == 5, "nonuniform multi-segment range returns a whole-range subdivision count" );
+    const float localStartX = Evaluate( { unevenLine }, 0, 0.5f ).x, localEndX = Evaluate( { unevenLine }, 2, 0.5f ).x;
+    for( std::size_t i = 0; i < localUnevenSamples.size(); ++i )
+        check( near( localUnevenSamples[i], { localStartX + ( localEndX - localStartX ) * ( static_cast<float>( i ) / 4.0f ), 0.0f } ), "nonuniform control spacing still yields equal local distance intervals" );
+    for( const auto candidate : { curve, unevenCurve, loop, unevenLoop } )
+    {
+        const std::size_t last = GetSegmentCount( candidate ) - 1;
+        const splineParameter2 from{ 0, 0.25f }, to{ last, 0.75f };
+        const auto length = GetLength( candidate, from, to, 1.0e-5 );
+        const auto samples = SampleByDistance( candidate, from, to, 8, 1.0e-5 );
+        check( length && samples.size() == 9 && near( samples.front(), Evaluate( candidate, from.segmentIndex, from.t ) ) && near( samples.back(), Evaluate( candidate, to.segmentIndex, to.t ) ), "range samples preserve both requested endpoint positions on open and closed paths" );
+        for( std::size_t i = 0; i < samples.size(); ++i )
+        {
+            const double target = *length * ( static_cast<double>( i ) / 8.0 );
+            const auto parameter = GetParameterByDistance( candidate, from, to, target, 1.0e-5 );
+            check( parameter && near( samples[i], Evaluate( candidate, parameter->segmentIndex, parameter->t ) ), "range samples agree with equal local arc-length targets" );
+            const auto measured = GetLength( candidate, from, *parameter, 1.0e-6 );
+            check( measured && std::abs( *measured - target ) <= 1.0e-5, "sample parameters round trip within local distance tolerance" );
+        }
+        const auto originalSamples = SampleByDistance( candidate, 8, 1.0e-5 );
+        const auto fullRangeSamples = SampleByDistance( candidate, { 0, 0.0f }, { last, 1.0f }, 8, 1.0e-5 );
+        check( originalSamples.size() == 9 && fullRangeSamples.size() == originalSamples.size(), "full-range sampling preserves the original whole-path output count" );
+        for( std::size_t i = 0; i < originalSamples.size(); ++i )
+            check( fullRangeSamples[i].x == originalSamples[i].x && fullRangeSamples[i].y == originalSamples[i].y, "full-range sampling exactly preserves original whole-path positions" );
+    }
+    const auto oneRangeSample = SampleByDistance( curve, { 0, 1.0f }, { 2, 0.0f }, 1, 1.0e-5 );
+    check( oneRangeSample.size() == 2 && near( oneRangeSample.front(), points[1] ) && near( oneRangeSample.back(), points[2] ), "one subdivision includes requested internal join endpoints" );
+    const auto zeroRangeSamples = SampleByDistance( { unitLine }, { 0, 0.5f }, { 0, 0.5f }, 4, 1.0e-6 );
+    const auto aliasZeroSamples = SampleByDistance( curve, { 1, 0.0f }, { 0, 1.0f }, 4, 1.0e-6 );
+    check( zeroRangeSamples.size() == 5 && aliasZeroSamples.size() == 5, "zero ranges including reverse join aliases keep the requested output count" );
+    for( std::size_t i = 0; i < zeroRangeSamples.size(); ++i )
+        check( near( zeroRangeSamples[i], { 0.5f, 0.0f } ) && near( aliasZeroSamples[i], points[1] ), "zero range samples repeat the same position" );
+    const auto zeroTangentRangeSamples = SampleByDistance( { reversal }, { 0, 0.5f }, { 1, 0.5f }, 2, 1.0e-6 );
+    check( zeroTangentRangeSamples.size() == 3 && near( zeroTangentRangeSamples[0], { 0.625f, 0.0f } ) && near( zeroTangentRangeSamples[1], { 1.0f, 0.0f } ) && near( zeroTangentRangeSamples[2], zeroTangentRangeSamples[0] ), "nonzero ranges with coincident endpoint positions still sample through zero tangents" );
+    const auto shortPrefixSamples = SampleByDistance( { longPrefix }, { 3, 0.75f }, { 4, 0.25f }, 4, 1.0e-12 );
+    check( shortPrefixSamples.size() == 5, "local samples preserve short ranges after a huge prefix" );
+    for( std::size_t i = 0; i < shortPrefixSamples.size(); ++i )
+        check( near( shortPrefixSamples[i], { 1.75f + 0.125f * static_cast<float>( i ), 0.0f } ), "short local range samples avoid whole-path prefix cancellation" );
+    check( SampleByDistance( { translatedLine }, { 0, 0.0f }, { 0, 1.0f }, 2, 1.0e-6 ).empty() && SampleByDistance( { unitLine }, { 0, 0.25f }, { 0, 0.75f }, 3, 1.0e-12 ).empty(), "range samples reject unrepresentable positions or inverse parameters without partial output" );
+    check( SampleByDistance( loop, { 3, 0.5f }, { 0, 0.5f }, 4, 1.0e-5 ).empty() && SampleByDistance( curve, { 1, 0.75f }, { 1, 0.25f }, 4, 1.0e-5 ).empty(), "range sampling rejects implicit closed wrapping and reverse traversal" );
+    for( std::size_t count : { std::size_t{ 0 }, std::vector<vec2>{}.max_size(), std::numeric_limits<std::size_t>::max() } )
+        check( SampleByDistance( curve, { 0, 0.25f }, { 2, 0.75f }, count, 1.0e-5 ).empty(), "range sampling rejects zero and impossible counts before allocation" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ repeated }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ repeatedStart, true } } )
+        check( SampleByDistance( invalid, { 0, 0.0f }, { 0, 0.0f }, 4, 1.0e-5 ).empty(), "range sampling validates paths even for zero ranges" );
+    for( splineParameter2 invalid : { splineParameter2{ GetSegmentCount( curve ), 0.0f }, splineParameter2{ std::numeric_limits<std::size_t>::max(), 1.0f }, splineParameter2{ 0, -0.1f }, splineParameter2{ 0, 1.1f }, splineParameter2{ 0, nan }, splineParameter2{ 0, infinity } } )
+        check( SampleByDistance( curve, invalid, { 2, 1.0f }, 4, 1.0e-5 ).empty() && SampleByDistance( curve, { 0, 0.0f }, invalid, 4, 1.0e-5 ).empty(), "range sampling rejects invalid boundary parameters" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), 1.0e-30 } )
+        check( SampleByDistance( curve, { 0, 0.25f }, { 2, 0.75f }, 4, tolerance ).empty(), "range sampling rejects invalid or unattainable tolerance" );
+    editable[1] = { 4.0f, 0.0f };
+    const auto editedLocalSamples = SampleByDistance( editableCurve, { 0, 0.25f }, { 0, 0.75f }, 2, 1.0e-6 );
+    check( editedLocalSamples.size() == 3 && near( editedLocalSamples[1], { 2.0f, 0.0f } ), "range samples observe edited borrowed controls" );
+
     return 0;
 }

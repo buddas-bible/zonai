@@ -495,15 +495,22 @@ std::optional<splineParameter2> GetParameterByDistance( const catmullRomSpline2&
 
 std::vector<vec2> SampleByDistance( const catmullRomSpline2& spline, std::size_t subdivisions, double tolerance )
 {
+    const std::size_t count = GetSegmentCount( spline );
+    if( count == 0 ) return {};
+    return SampleByDistance( spline, { 0, 0.0f }, { count - 1, 1.0f }, subdivisions, tolerance );
+}
+
+std::vector<vec2> SampleByDistance( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, std::size_t subdivisions, double tolerance )
+{
     std::vector<vec2> samples{};
     if( subdivisions == 0 || subdivisions >= samples.max_size() ) return {};
-    const auto length = GetLength( spline, tolerance );
+    const auto length = GetLength( spline, from, to, tolerance );
     if( !length ) return {};
     samples.reserve( subdivisions + 1 );
     for( std::size_t i = 0; i <= subdivisions; ++i )
     {
         const double distance = i == subdivisions ? *length : *length * ( static_cast<double>( i ) / subdivisions );
-        const auto parameter = GetParameterByDistance( spline, distance, tolerance );
+        const auto parameter = GetParameterByDistance( spline, from, to, distance, tolerance );
         if( !parameter ) return {};
         const auto point = GetPositionByParameter( spline, parameter->segmentIndex, parameter->t, tolerance );
         if( !point ) return {};
