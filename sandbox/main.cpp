@@ -328,6 +328,7 @@ int main()
             input.mousePressed = ImGui::IsMouseClicked( ImGuiMouseButton_Left );
             input.mouseHeld = ImGui::IsMouseDown( ImGuiMouseButton_Left );
             input.selectTrialPosition = io.KeyShift;
+            input.insertControlPoint = io.KeyCtrl;
             input.impulsePressed = ImGui::IsMouseClicked( ImGuiMouseButton_Right );
             input.left = ImGui::IsKeyDown( ImGuiKey_A );
             input.right = ImGui::IsKeyDown( ImGuiKey_D );

@@ -50,6 +50,7 @@ struct demoInput
     bool mousePressed = false;
     bool mouseHeld = false;
     bool selectTrialPosition = false;
+    bool insertControlPoint = false;
     bool impulsePressed = false;
     bool left = false;
     bool right = false;

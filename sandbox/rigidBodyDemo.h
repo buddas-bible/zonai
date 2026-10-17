@@ -354,6 +354,8 @@ private:
     void updateSplineTrialPosition( vec2 point );
     void updateTerrainTrialObservation( float timeStep, int subStepCount );
     void updateSplineControlPoint( std::size_t pointIndex, vec2 point );
+    bool insertSplineControlPointAt( vec2 point );
+    bool insertSplineControlPoint( std::size_t segmentIndex, vec2 point );
     bool updateSplineTerrain( std::span<const vec2> points, float error );
     [[nodiscard]] bool canMoveTerrainPoint( std::size_t pointIndex, vec2 point ) const;
 #pragma endregion TerrainEdit
@@ -405,6 +407,7 @@ private:
     terrainTrialObservation terrainTrialObservation_{};
     std::optional<terrainTrialObservation> terrainTrialReference_{};
     bool splineTrialDragging_ = false;
+    bool splineInserting_ = false;
     std::optional<splineEditState> splineUndo_{};
     std::optional<splineEditState> splineRedo_{};
     bool splineDragRecorded_ = false;
