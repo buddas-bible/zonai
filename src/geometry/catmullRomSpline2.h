@@ -5,6 +5,7 @@
 #include <span>
 #include <vector>
 
+#include "collision/aabb2.h"
 #include "math/vec2.h"
 
 namespace zonai
@@ -36,6 +37,10 @@ vec2 SecondDerivative( const catmullRomSpline2& spline, std::size_t segmentIndex
 
 // 반시계 방향이 양수인 곡률. 잘못된 입력 / 0 접선 / 비유한 결과는 nullopt. 접합점 연속성은 보장하지 않음.
 std::optional<double> Curvature( const catmullRomSpline2& spline, std::size_t segmentIndex, float t );
+
+// Bézier hull과 float 평가 반올림 여유로 전체 경로를 감쌈. 최소 AABB는 보장하지 않음.
+// 잘못된 입력 / 유한한 float 경계 구성 실패는 nullopt.
+std::optional<aabb2> ComputeAABB( const catmullRomSpline2& spline );
 
 // 각 구간을 같은 수로 분할하며 접합점은 한 번만 넣음. 닫힌 결과는 끝에 첫 점을 반복함.
 // 잘못된 입력 / 불가능한 점 수는 빈 배열.
