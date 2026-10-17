@@ -336,11 +336,49 @@ std::optional<double> GetDistance( const catmullRomSpline2& spline, std::size_t 
     return distance;
 }
 
-std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, double distance, double tolerance )
+std::optional<splineParameter2> GetParameterByDistance( const catmullRomSpline2& spline, double distance, double tolerance )
 {
     if( !std::isfinite( distance ) || distance < 0.0 ) return {};
     const auto length = GetLength( spline, tolerance );
     if( !length || distance > *length ) return {};
+    const std::size_t count = GetSegmentCount( spline );
+    if( distance == 0.0 ) return splineParameter2{ 0, 0.0f };
+    if( distance == *length ) return splineParameter2{ count - 1, 1.0f };
+    const double error = tolerance / ( 4.0 * count );
+    double prefix = 0.0;
+    for( std::size_t i = 0; i < count; ++i )
+    {
+        const auto segmentLength = GetSegmentLength( spline, i, 1.0, error );
+        if( !segmentLength ) return {};
+        const double end = prefix + *segmentLength;
+        if( distance > end )
+        {
+            prefix = end;
+            continue;
+        }
+        if( distance == end ) return splineParameter2{ i, 1.0f };
+        const double target = distance - prefix;
+        double lower = 0.0, upper = 1.0;
+        constexpr int MAX_ITERATIONS = 64;
+        for( int iteration = 0; iteration < MAX_ITERATIONS; ++iteration )
+        {
+            const float t = static_cast<float>( 0.5 * ( lower + upper ) );
+            if( t <= lower || t >= upper ) return {};
+            const auto partial = GetSegmentLength( spline, i, t, error );
+            if( !partial ) return {};
+            if( std::abs( *partial - target ) <= 0.5 * tolerance ) return splineParameter2{ i, t };
+            if( *partial < target ) lower = t;
+            else upper = t;
+        }
+        return {};
+    }
+    return {};
+}
+
+std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, double distance, double tolerance )
+{
+    const auto parameter = GetParameterByDistance( spline, distance, tolerance );
+    if( !parameter ) return {};
     const auto sample = [&]( std::size_t segment, float t ) -> std::optional<splineSample2>
     {
         const vec2 point = Evaluate( spline, segment, t );
@@ -361,38 +399,7 @@ std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline
         }
         return splineSample2{ point, { static_cast<float>( derivative.x / speed ), static_cast<float>( derivative.y / speed ) } };
     };
-    const std::size_t count = GetSegmentCount( spline );
-    if( distance == 0.0 ) return sample( 0, 0.0f );
-    if( distance == *length ) return sample( count - 1, 1.0f );
-    const double error = tolerance / ( 4.0 * count );
-    double prefix = 0.0;
-    for( std::size_t i = 0; i < count; ++i )
-    {
-        const auto segmentLength = GetSegmentLength( spline, i, 1.0, error );
-        if( !segmentLength ) return {};
-        const double end = prefix + *segmentLength;
-        if( distance > end )
-        {
-            prefix = end;
-            continue;
-        }
-        if( distance == end ) return sample( i, 1.0f );
-        const double target = distance - prefix;
-        double lower = 0.0, upper = 1.0;
-        constexpr int MAX_ITERATIONS = 64;
-        for( int iteration = 0; iteration < MAX_ITERATIONS; ++iteration )
-        {
-            const float t = static_cast<float>( 0.5 * ( lower + upper ) );
-            if( t <= lower || t >= upper ) return {};
-            const auto partial = GetSegmentLength( spline, i, t, error );
-            if( !partial ) return {};
-            if( std::abs( *partial - target ) <= 0.5 * tolerance ) return sample( i, t );
-            if( *partial < target ) lower = t;
-            else upper = t;
-        }
-        return {};
-    }
-    return {};
+    return sample( parameter->segmentIndex, parameter->t );
 }
 
 std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, const vec2& point, double tolerance )
