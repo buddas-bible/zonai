@@ -332,5 +332,44 @@ int main()
     check( near( Evaluate( { line, true }, 0, 0.5f ), {} ) && near( Derivative( { repeatedStart, true }, 0, 0.5f ), {} ), "invalid closed evaluation fails safely in Release" );
 #endif
 
+    const auto projected = ClosestPoint( { unitLine }, { 0.25f, 2.0f }, 1.0e-5 );
+    check( projected && near( projected->point, { 0.25f, 0.0f } ) && projected->segmentIndex == 0 && projected->t == 0.25f && projected->distanceSquared == 4.0, "closest point projects onto a two-point spline" );
+    const auto beforeStart = ClosestPoint( { unitLine }, { -2.0f, 1.0f }, 1.0e-5 );
+    const auto afterEnd = ClosestPoint( { unitLine }, { 3.0f, 1.0f }, 1.0e-5 );
+    check( beforeStart && afterEnd && beforeStart->t == 0.0f && afterEnd->t == 1.0f && near( beforeStart->point, unitLine[0] ) && near( afterEnd->point, unitLine[1] ) && beforeStart->distanceSquared == 5.0 && afterEnd->distanceSquared == 5.0, "closest point includes both open endpoints" );
+    const auto unevenProjection = ClosestPoint( { unevenLine }, { 8.5f, 0.0f }, 1.0e-5 );
+    check( unevenProjection && near( unevenProjection->point, { 8.5f, 0.0f }, 1.0e-4f ) && unevenProjection->segmentIndex == 1 && std::abs( unevenProjection->t - 0.5f ) > 0.01f, "closest point inverts nonuniform straight parameterization" );
+    const vec2 wavePoints[] = { { -3.0f, 0.0f }, { -1.0f, 2.0f }, { 1.0f, -2.0f }, { 3.0f, 0.0f }, { 5.0f, 2.0f } };
+    const catmullRomSpline2 wave{ wavePoints };
+    const vec2 crossingPoints[] = { { -2.0f, -1.0f }, { 2.0f, 1.0f }, { -2.0f, 1.0f }, { 2.0f, -1.0f } };
+    const catmullRomSpline2 crossing{ crossingPoints, true };
+    for( const auto candidate : { curve, wave, loop, unevenLoop, crossing } )
+    {
+        const auto reference = Sample( candidate, 20000 );
+        for( const vec2 query : { vec2{ 0.1f, 0.2f }, vec2{ -0.5f, -0.5f }, vec2{ 1.0f, 1.5f }, vec2{ 6.0f, -2.0f } } )
+        {
+            const auto closest = ClosestPoint( candidate, query, 1.0e-4 );
+            check( closest && closest->segmentIndex < GetSegmentCount( candidate ) && closest->t >= 0.0f && closest->t <= 1.0f, "closest point searches all open or closed segments" );
+            check( near( closest->point, Evaluate( candidate, closest->segmentIndex, closest->t ) ), "closest point metadata reconstructs the returned curve point" );
+            const double measured = std::hypot( static_cast<double>( closest->point.x ) - query.x, static_cast<double>( closest->point.y ) - query.y );
+            check( std::abs( closest->distanceSquared - measured * measured ) < 1.0e-10, "closest squared distance uses the returned point in double precision" );
+            double bestReference = std::numeric_limits<double>::infinity();
+            for( const vec2 point : reference ) bestReference = std::min( bestReference, std::hypot( static_cast<double>( point.x ) - query.x, static_cast<double>( point.y ) - query.y ) );
+            check( measured <= bestReference + 1.0e-4 && measured >= bestReference - 1.0e-3, "closest distance agrees with dense global references for S curves and crossing branches" );
+        }
+    }
+    const auto seamPoint = ClosestPoint( loop, square[0], 1.0e-5 );
+    check( seamPoint && near( seamPoint->point, square[0] ) && seamPoint->distanceSquared == 0.0, "closest point includes the closed seam" );
+    const auto stationary = ClosestPoint( { reversal }, { 1.2f, 0.0f }, 1.0e-5 );
+    check( stationary && near( stationary->point, { 1.0f, 0.0f } ), "closest point succeeds at a zero tangent without requesting a direction" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), 1.0e-30 } )
+        check( !ClosestPoint( curve, { 0.2f, 0.3f }, tolerance ), "closest point rejects invalid or unattainable tolerance" );
+    check( !ClosestPoint( {}, {}, 1.0e-4 ) && !ClosestPoint( { repeatedStart, true }, {}, 1.0e-4 ) && !ClosestPoint( curve, { nan, 0.0f }, 1.0e-4 ) && !ClosestPoint( curve, { infinity, 0.0f }, 1.0e-4 ), "closest point rejects invalid curves and nonfinite query points without assertions" );
+    const vec2 coarseDiagonal[] = { { 1.0e8f, 1.0e8f }, { 1.0e8f + 8.0f, 1.0e8f + 8.0f } };
+    check( !ClosestPoint( { coarseDiagonal }, { 1.0e8f + 8.0f, 1.0e8f }, 1.0e-3 ), "closest point fails when float coordinates cannot represent a sufficiently close curve point" );
+    editable[1] = { 4.0f, 0.0f };
+    const auto editedClosest = ClosestPoint( editableCurve, { 2.0f, 1.0f }, 1.0e-5 );
+    check( editedClosest && near( editedClosest->point, { 2.0f, 0.0f } ), "closest point observes edited borrowed controls" );
+
     return 0;
 }
