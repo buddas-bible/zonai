@@ -63,6 +63,17 @@ std::optional<double> GetLength( const catmullRomSpline2& spline, double toleran
 // 닫힌 경로의 마지막 끝은 전체 길이. 0 접선도 허용하며 잘못된 입력 / 정밀도 부족은 nullopt.
 std::optional<double> GetDistance( const catmullRomSpline2& spline, std::size_t segmentIndex, float t, double tolerance );
 
+struct splineParameter2
+{
+    std::size_t segmentIndex = 0;
+    float t = 0.0f;
+};
+
+// distance in [0, GetLength]을 구간 / t로 역산함. tolerance는 양수인 절대 길이 오차 목표이며 t 오차는 아님.
+// 시작은 {0, 0}, 마지막 끝은 {마지막 구간, 1}, 정확한 내부 접합점은 앞 구간 t=1.
+// 0 접선도 허용하며 잘못된 입력 / 수렴 실패 / float t 정밀도 부족은 nullopt.
+std::optional<splineParameter2> GetParameterByDistance( const catmullRomSpline2& spline, double distance, double tolerance );
+
 // distance in [0, GetLength]. 곡선 위 위치와 진행 방향 단위 접선. 0 접선 / 정밀도 부족도 nullopt.
 std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, double distance, double tolerance );
 

@@ -531,5 +531,52 @@ int main()
     const vec2 unboundedAllowance[] = { { 0.0f, std::numeric_limits<float>::max() }, { 1.0f, std::numeric_limits<float>::max() } };
     check( IsValid( { unboundedAllowance } ) && !ComputeAABB( catmullRomSpline2{ unboundedAllowance } ), "bounds fail safely when outward float rounding allowance cannot remain finite" );
 
+    for( double distance : { 0.0, 0.25, 0.5, 0.75, 1.0 } )
+    {
+        const auto parameter = GetParameterByDistance( { unitLine }, distance, 1.0e-6 );
+        check( parameter && parameter->segmentIndex == 0 && parameter->t == distance, "distance parameter matches an analytic unit line including endpoints" );
+    }
+    for( const auto candidate : { curve, unevenCurve, catmullRomSpline2{ unevenLine }, loop, unevenLoop } )
+    {
+        const auto length = GetLength( candidate, 1.0e-5 );
+        check( length.has_value(), "parameter inverse reference length converges" );
+        const auto start = GetParameterByDistance( candidate, 0.0, 1.0e-5 );
+        const auto end = GetParameterByDistance( candidate, *length, 1.0e-5 );
+        check( start && end && start->segmentIndex == 0 && start->t == 0.0f && end->segmentIndex == GetSegmentCount( candidate ) - 1 && end->t == 1.0f, "inverse parameters distinguish start and final endpoint on open and closed paths" );
+        for( double fraction : { 0.1, 0.25, 0.5, 0.9 } )
+        {
+            const double distance = fraction * *length;
+            const auto parameter = GetParameterByDistance( candidate, distance, 1.0e-5 );
+            check( parameter && parameter->segmentIndex < GetSegmentCount( candidate ) && parameter->t >= 0.0f && parameter->t <= 1.0f, "inverse lookup returns a valid local parameter" );
+            const auto roundTrip = GetDistance( candidate, parameter->segmentIndex, parameter->t, 1.0e-5 );
+            check( roundTrip && std::abs( *roundTrip - distance ) <= 1.0e-5, "inverse parameter round trips within absolute length tolerance" );
+            const auto sample = EvaluateByDistance( candidate, distance, 1.0e-5 );
+            check( sample && near( sample->point, Evaluate( candidate, parameter->segmentIndex, parameter->t ) ) && near( sample->tangent, Normalize( Derivative( candidate, parameter->segmentIndex, parameter->t ) ) ), "distance evaluation shares the same parameter and preserves its tangent" );
+        }
+        for( std::size_t segment = 0; segment + 1 < GetSegmentCount( candidate ); ++segment )
+        {
+            const auto distance = GetDistance( candidate, segment, 1.0f, 1.0e-5 );
+            check( distance.has_value(), "internal join distance converges" );
+            const auto parameter = GetParameterByDistance( candidate, *distance, 1.0e-5 );
+            check( parameter && parameter->segmentIndex == segment && parameter->t == 1.0f, "exact internal join chooses the preceding segment endpoint" );
+        }
+    }
+    const auto nonuniformParameter = GetParameterByDistance( { unevenLine }, 8.5, 1.0e-6 );
+    check( nonuniformParameter && nonuniformParameter->segmentIndex == 1 && std::abs( nonuniformParameter->t - 0.5f ) > 0.01f && near( Evaluate( { unevenLine }, 1, nonuniformParameter->t ), { 8.5f, 0.0f } ), "distance inverse accounts for nonuniform spline parameterization" );
+    const auto zeroTangentParameter = GetParameterByDistance( { reversal }, 1.0, 1.0e-6 );
+    check( zeroTangentParameter && zeroTangentParameter->segmentIndex == 0 && zeroTangentParameter->t == 1.0f && !EvaluateByDistance( { reversal }, 1.0, 1.0e-6 ), "zero tangent permits inverse parameters while direction lookup still fails" );
+    const auto coarseParameter = GetParameterByDistance( { translatedLine }, 4.0, 1.0e-6 );
+    check( coarseParameter && coarseParameter->t == 0.5f && !EvaluateByDistance( { translatedLine }, 4.0, 1.0e-6 ), "parameter inverse is independent of float position rounding while existing position validation remains" );
+    editable[1] = { 2.0f, 0.0f };
+    const auto editedParameter = GetParameterByDistance( editableCurve, 1.0, 1.0e-6 );
+    check( editedParameter && editedParameter->segmentIndex == 0 && editedParameter->t == 0.5f, "inverse parameters observe edited borrowed controls" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ repeated }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ repeatedStart, true } } )
+        check( !GetParameterByDistance( invalid, 0.0, 1.0e-6 ), "inverse parameters reject invalid splines without assertions" );
+    for( double distance : { -1.0, std::nextafter( 1.0, 2.0 ), static_cast<double>( nan ), static_cast<double>( infinity ) } )
+        check( !GetParameterByDistance( { unitLine }, distance, 1.0e-6 ), "inverse parameters reject out-of-range or nonfinite distances without clamping" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), 1.0e-30 } )
+        check( !GetParameterByDistance( curve, 0.5, tolerance ), "inverse parameters reject invalid tolerance and unattainable integration precision" );
+    check( !GetParameterByDistance( { unitLine }, 1.0 / 3.0, 1.0e-12 ), "inverse parameters fail when float t cannot attain the length tolerance" );
+
     return 0;
 }
