@@ -87,6 +87,33 @@ std::optional<double> GetSegmentLength( const catmullRomSpline2& spline, std::si
     return integrate( integrate, begin, end, fa, fm, fb, ( end - begin ) * ( fa + 4.0 * fm + fb ) / 6.0, tolerance, 0 );
 }
 
+splineParameter2 NormalizeParameter( splineParameter2 parameter, std::size_t count )
+{
+    if( parameter.t == 1.0f && parameter.segmentIndex < count - 1 )
+    {
+        ++parameter.segmentIndex;
+        parameter.t = 0.0f;
+    }
+    return parameter;
+}
+
+std::optional<splineParameter2> GetSegmentParameterByDistance( const catmullRomSpline2& spline, std::size_t segmentIndex, double begin, double end, double target, double error, double tolerance )
+{
+    double lower = begin, upper = end;
+    constexpr int MAX_ITERATIONS = 64;
+    for( int iteration = 0; iteration < MAX_ITERATIONS; ++iteration )
+    {
+        const float t = static_cast<float>( 0.5 * ( lower + upper ) );
+        if( t <= lower || t >= upper ) return {};
+        const auto partial = GetSegmentLength( spline, segmentIndex, begin, t, error );
+        if( !partial ) return {};
+        if( std::abs( *partial - target ) <= 0.5 * tolerance ) return splineParameter2{ segmentIndex, t };
+        if( *partial < target ) lower = t;
+        else upper = t;
+    }
+    return {};
+}
+
 std::optional<vec2> GetPositionByParameter( const catmullRomSpline2& spline, std::size_t segment, float t, double tolerance )
 {
     const vec2 point = Evaluate( spline, segment, t );
@@ -368,16 +395,8 @@ std::optional<double> GetLength( const catmullRomSpline2& spline, splineParamete
         return parameter.segmentIndex < count && std::isfinite( parameter.t ) && parameter.t >= 0.0f && parameter.t <= 1.0f;
     };
     if( !valid( from ) || !valid( to ) ) return {};
-    const auto normalize = [&]( splineParameter2& parameter )
-    {
-        if( parameter.t == 1.0f && parameter.segmentIndex < count - 1 )
-        {
-            ++parameter.segmentIndex;
-            parameter.t = 0.0f;
-        }
-    };
-    normalize( from );
-    normalize( to );
+    from = NormalizeParameter( from, count );
+    to = NormalizeParameter( to, count );
     if( from.segmentIndex > to.segmentIndex || ( from.segmentIndex == to.segmentIndex && from.t > to.t ) ) return {};
     if( from.segmentIndex == to.segmentIndex && from.t == to.t ) return 0.0;
 
@@ -437,19 +456,39 @@ std::optional<splineParameter2> GetParameterByDistance( const catmullRomSpline2&
         }
         if( distance == end ) return splineParameter2{ i, 1.0f };
         const double target = distance - prefix;
-        double lower = 0.0, upper = 1.0;
-        constexpr int MAX_ITERATIONS = 64;
-        for( int iteration = 0; iteration < MAX_ITERATIONS; ++iteration )
+        return GetSegmentParameterByDistance( spline, i, 0.0, 1.0, target, error, tolerance );
+    }
+    return {};
+}
+
+std::optional<splineParameter2> GetParameterByDistance( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, double distance, double tolerance )
+{
+    if( !std::isfinite( distance ) || distance < 0.0 ) return {};
+    const auto length = GetLength( spline, from, to, tolerance );
+    if( !length || distance > *length ) return {};
+    if( distance == 0.0 ) return from;
+    if( distance == *length ) return to;
+    const std::size_t count = GetSegmentCount( spline );
+    from = NormalizeParameter( from, count );
+    to = NormalizeParameter( to, count );
+    const std::size_t intervals = to.segmentIndex - from.segmentIndex + ( to.t > 0.0f ? 1u : 0u );
+    const double error = tolerance / ( 4.0 * intervals );
+    double prefix = 0.0;
+    for( std::size_t i = from.segmentIndex; i <= to.segmentIndex; ++i )
+    {
+        const double begin = i == from.segmentIndex ? from.t : 0.0;
+        const double end = i == to.segmentIndex ? to.t : 1.0;
+        if( begin == end ) continue;
+        const auto segmentLength = GetSegmentLength( spline, i, begin, end, error );
+        if( !segmentLength ) return {};
+        const double next = prefix + *segmentLength;
+        if( distance > next )
         {
-            const float t = static_cast<float>( 0.5 * ( lower + upper ) );
-            if( t <= lower || t >= upper ) return {};
-            const auto partial = GetSegmentLength( spline, i, 0.0, t, error );
-            if( !partial ) return {};
-            if( std::abs( *partial - target ) <= 0.5 * tolerance ) return splineParameter2{ i, t };
-            if( *partial < target ) lower = t;
-            else upper = t;
+            prefix = next;
+            continue;
         }
-        return {};
+        if( distance == next ) return splineParameter2{ i, static_cast<float>( end ) };
+        return GetSegmentParameterByDistance( spline, i, begin, end, distance - prefix, error, tolerance );
     }
     return {};
 }

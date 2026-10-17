@@ -801,5 +801,66 @@ int main()
         check( !GetLength( curve, splineParameter2{ 0, 1.0f }, splineParameter2{ 1, 0.0f }, tolerance ), "range length validates tolerance even for equivalent joins" );
     check( !GetLength( curve, splineParameter2{ 0, 0.25f }, splineParameter2{ 2, 0.75f }, 1.0e-30 ) && !GetLength( curve, splineParameter2{ 0, 0.25f }, splineParameter2{ 2, 0.75f }, std::numeric_limits<double>::denorm_min() ), "range length rejects unattainable or underflowing total error budgets" );
 
+    const auto localDistanceParameter = GetParameterByDistance( { unitLine }, { 0, 0.25f }, { 0, 0.75f }, 0.125, 1.0e-6 );
+    check( localDistanceParameter && localDistanceParameter->segmentIndex == 0 && localDistanceParameter->t == 0.375f, "range inverse measures distance from the selected start on an analytic line" );
+    for( const auto candidate : { curve, unevenCurve, catmullRomSpline2{ unevenLine }, loop, unevenLoop } )
+    {
+        const std::size_t last = GetSegmentCount( candidate ) - 1;
+        const splineParameter2 from{ 0, 0.25f }, to{ last, 0.75f };
+        const auto length = GetLength( candidate, from, to, 1.0e-5 );
+        check( length.has_value(), "local inverse reference range length converges" );
+        const auto first = GetParameterByDistance( candidate, from, to, 0.0, 1.0e-5 );
+        const auto final = GetParameterByDistance( candidate, from, to, *length, 1.0e-5 );
+        check( first && final && first->segmentIndex == from.segmentIndex && first->t == from.t && final->segmentIndex == to.segmentIndex && final->t == to.t, "range inverse returns the exact input parameters at both distance endpoints" );
+        for( double fraction : { 0.1, 0.25, 0.5, 0.9 } )
+        {
+            const double distance = fraction * *length;
+            const auto parameter = GetParameterByDistance( candidate, from, to, distance, 1.0e-5 );
+            check( parameter && parameter->segmentIndex <= last && parameter->t >= 0.0f && parameter->t <= 1.0f && ( parameter->segmentIndex > from.segmentIndex || parameter->t >= from.t ) && ( parameter->segmentIndex < to.segmentIndex || parameter->t <= to.t ), "local inverse parameter stays inside the requested range" );
+            const auto measured = GetLength( candidate, from, *parameter, 1.0e-6 );
+            check( measured && std::abs( *measured - distance ) <= 1.0e-5, "range distance inverse round trips within absolute length tolerance" );
+        }
+        const auto fullLength = GetLength( candidate, 1.0e-5 );
+        check( fullLength.has_value(), "whole-path comparison length converges" );
+        const auto original = GetParameterByDistance( candidate, *fullLength * 0.4, 1.0e-5 );
+        const auto fullRangeParameter = GetParameterByDistance( candidate, { 0, 0.0f }, { last, 1.0f }, *fullLength * 0.4, 1.0e-5 );
+        check( original && fullRangeParameter && original->segmentIndex == fullRangeParameter->segmentIndex && original->t == fullRangeParameter->t, "full-range inverse preserves existing whole-path inversion" );
+        check( !GetParameterByDistance( candidate, from, to, std::nextafter( *length, std::numeric_limits<double>::infinity() ), 1.0e-5 ), "range inverse rejects distance above its length without clamping" );
+    }
+    const vec2 uniformControls[] = { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 2.0f, 0.0f }, { 3.0f, 0.0f } };
+    const auto joinParameter = GetParameterByDistance( { uniformControls }, { 0, 0.25f }, { 2, 0.75f }, 0.75, 1.0e-6 );
+    check( joinParameter && joinParameter->segmentIndex == 0 && joinParameter->t == 1.0f, "an exact internal range distance selects the preceding segment endpoint" );
+    const auto aliasStart = GetParameterByDistance( { uniformControls }, { 0, 1.0f }, { 2, 0.5f }, 0.0, 1.0e-6 );
+    const auto aliasEnd = GetParameterByDistance( { uniformControls }, { 0, 0.25f }, { 1, 0.0f }, 0.75, 1.0e-6 );
+    check( aliasStart && aliasEnd && aliasStart->segmentIndex == 0 && aliasStart->t == 1.0f && aliasEnd->segmentIndex == 1 && aliasEnd->t == 0.0f, "distance endpoints preserve input join representations" );
+    for( splineParameter2 from : { splineParameter2{ 0, 1.0f }, splineParameter2{ 1, 0.0f } } )
+    {
+        const splineParameter2 to{ from.segmentIndex == 0 ? 1u : 0u, from.segmentIndex == 0 ? 0.0f : 1.0f };
+        const auto zero = GetParameterByDistance( curve, from, to, 0.0, 1.0e-30 );
+        check( zero && zero->segmentIndex == from.segmentIndex && zero->t == from.t && !GetParameterByDistance( curve, from, to, std::numeric_limits<double>::denorm_min(), 1.0e-6 ), "zero-length join ranges accept only zero distance and return input from" );
+    }
+    const auto stationaryRangeParameter = GetParameterByDistance( { reversal }, { 0, 0.5f }, { 1, 0.5f }, 0.375, 1.0e-6 );
+    check( stationaryRangeParameter && stationaryRangeParameter->segmentIndex == 0 && stationaryRangeParameter->t == 1.0f, "range inverse accepts a zero tangent at an internal join" );
+    const auto shortLocalParameter = GetParameterByDistance( { longPrefix }, { 3, 0.5f }, { 3, std::nextafter( shortEnd, 1.0f ) }, static_cast<double>( shortEnd ) - 0.5, 1.0e-20 );
+    const auto crossLocalParameter = GetParameterByDistance( { longPrefix }, { 3, 0.75f }, { 4, 0.25f }, 0.375, 1.0e-12 );
+    check( shortLocalParameter && shortLocalParameter->segmentIndex == 3 && shortLocalParameter->t == shortEnd && crossLocalParameter && crossLocalParameter->segmentIndex == 4 && crossLocalParameter->t == 0.125f, "local inversion preserves short distances after a huge path prefix" );
+    const auto closedRangeStart = GetParameterByDistance( loop, { 0, 0.0f }, { 3, 1.0f }, 0.0, 1.0e-6 );
+    const auto closedRangeLength = GetLength( loop, 1.0e-6 );
+    check( closedRangeLength.has_value(), "closed range length exists" );
+    const auto closedRangeEnd = GetParameterByDistance( loop, { 0, 0.0f }, { 3, 1.0f }, *closedRangeLength, 1.0e-6 );
+    check( closedRangeStart && closedRangeEnd && closedRangeStart->segmentIndex == 0 && closedRangeStart->t == 0.0f && closedRangeEnd->segmentIndex == 3 && closedRangeEnd->t == 1.0f && !GetParameterByDistance( loop, { 3, 0.5f }, { 0, 0.5f }, 0.0, 1.0e-6 ), "closed range inverse distinguishes seam endpoints and rejects implicit wrap" );
+    editable[1] = { 8.0f, 0.0f };
+    const auto editedRangeParameter = GetParameterByDistance( editableCurve, { 0, 0.25f }, { 0, 0.75f }, 2.0, 1.0e-6 );
+    check( editedRangeParameter && editedRangeParameter->t == 0.5f, "range inverse observes edited borrowed controls" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ repeated }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ repeatedStart, true } } )
+        check( !GetParameterByDistance( invalid, { 0, 0.0f }, { 0, 0.0f }, 0.0, 1.0e-6 ), "range inverse validates paths even for zero distance" );
+    for( splineParameter2 invalid : { splineParameter2{ GetSegmentCount( curve ), 0.0f }, splineParameter2{ std::numeric_limits<std::size_t>::max(), 1.0f }, splineParameter2{ 0, -0.1f }, splineParameter2{ 0, 1.1f }, splineParameter2{ 0, nan }, splineParameter2{ 0, infinity } } )
+        check( !GetParameterByDistance( curve, invalid, { 2, 1.0f }, 0.0, 1.0e-6 ) && !GetParameterByDistance( curve, { 0, 0.0f }, invalid, 0.0, 1.0e-6 ), "range inverse rejects invalid boundary parameters" );
+    for( double distance : { -1.0, static_cast<double>( nan ), static_cast<double>( infinity ) } )
+        check( !GetParameterByDistance( curve, { 0, 0.0f }, { 2, 1.0f }, distance, 1.0e-6 ), "range inverse rejects invalid distances" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), 1.0e-30 } )
+        check( !GetParameterByDistance( curve, { 0, 0.25f }, { 2, 0.75f }, 0.5, tolerance ), "range inverse rejects invalid or unattainable tolerance" );
+    check( !GetParameterByDistance( { unitLine }, { 0, 0.0f }, { 0, 1.0f }, 1.0 / 3.0, 1.0e-12 ) && !GetParameterByDistance( curve, { 1, 0.75f }, { 1, 0.25f }, 0.0, 1.0e-6 ), "range inverse rejects unrepresentable float parameters and reverse ranges" );
+
     return 0;
 }
