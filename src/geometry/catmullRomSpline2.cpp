@@ -4,6 +4,7 @@
 #include <cmath>
 #include <algorithm>
 #include <array>
+#include <limits>
 
 namespace zonai
 {
@@ -41,6 +42,43 @@ void GetTangents( const catmullRomSpline2& spline, std::size_t segmentIndex, vec
 
         tangent2 = ( delta * nextInterval + next * ( interval / nextInterval ) * interval ) / ( interval + nextInterval );
     }
+}
+
+std::optional<double> GetSegmentLength( const catmullRomSpline2& spline, std::size_t segmentIndex, double end, double tolerance )
+{
+    if( !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
+    if( end == 0.0 ) return 0.0;
+    vec2 tangent1{}, tangent2{};
+    GetTangents( spline, segmentIndex, tangent1, tangent2 );
+    if( !IsFinite( tangent1 ) || !IsFinite( tangent2 ) ) return {};
+    const double dx = static_cast<double>( spline.points[segmentIndex + 1].x ) - spline.points[segmentIndex].x;
+    const double dy = static_cast<double>( spline.points[segmentIndex + 1].y ) - spline.points[segmentIndex].y;
+    const double qx = 3.0 * dx - 2.0 * tangent1.x - tangent2.x, qy = 3.0 * dy - 2.0 * tangent1.y - tangent2.y;
+    const double cx = tangent1.x + static_cast<double>( tangent2.x ) - 2.0 * dx, cy = tangent1.y + static_cast<double>( tangent2.y ) - 2.0 * dy;
+    // 미분 다항식을 double로 평가해 float t 반올림이 적분 수렴을 막지 않게 함.
+    const auto speed = [&]( double t )
+    {
+        return std::hypot( tangent1.x + t * ( 2.0 * qx + t * 3.0 * cx ), tangent1.y + t * ( 2.0 * qy + t * 3.0 * cy ) );
+    };
+    const auto integrate = [&]( auto&& self, double a, double b, double fa, double fm, double fb, double estimate, double error, int depth ) -> std::optional<double>
+    {
+        if( error < 32.0 * std::numeric_limits<double>::epsilon() * estimate ) return {};
+        const double middle = 0.5 * ( a + b );
+        const double fl = speed( 0.5 * ( a + middle ) ), fr = speed( 0.5 * ( middle + b ) );
+        const double left = ( middle - a ) * ( fa + 4.0 * fl + fm ) / 6.0;
+        const double right = ( b - middle ) * ( fm + 4.0 * fr + fb ) / 6.0;
+        const double correction = ( left + right - estimate ) / 15.0;
+        if( std::abs( correction ) <= error ) return left + right + correction;
+        constexpr int MAX_DEPTH = 20;
+        if( depth == MAX_DEPTH ) return {};
+        const auto l = self( self, a, middle, fa, fl, fm, left, error * 0.5, depth + 1 );
+        if( !l ) return {};
+        const auto r = self( self, middle, b, fm, fr, fb, right, error * 0.5, depth + 1 );
+        if( !r ) return {};
+        return *l + *r;
+    };
+    const double fa = speed( 0.0 ), fm = speed( 0.5 * end ), fb = speed( end );
+    return integrate( integrate, 0.0, end, fa, fm, fb, end * ( fa + 4.0 * fm + fb ) / 6.0, tolerance, 0 );
 }
 
 } // namespace
@@ -186,6 +224,80 @@ std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, float maxErro
         if( !subdivide( subdivide, curve, 0 ) ) return {};
     }
     return samples;
+}
+
+std::optional<double> GetLength( const catmullRomSpline2& spline, double tolerance )
+{
+    if( !IsValid( spline ) || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
+    const std::size_t count = GetSegmentCount( spline );
+    double length = 0.0;
+    for( std::size_t i = 0; i < count; ++i )
+    {
+        const auto segmentLength = GetSegmentLength( spline, i, 1.0, tolerance / ( 4.0 * count ) );
+        if( !segmentLength || *segmentLength <= 0.0 ) return {};
+        length += *segmentLength;
+    }
+    if( !std::isfinite( length ) || tolerance < 32.0 * std::numeric_limits<double>::epsilon() * length ) return {};
+    return length;
+}
+
+std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, double distance, double tolerance )
+{
+    if( !std::isfinite( distance ) || distance < 0.0 ) return {};
+    const auto length = GetLength( spline, tolerance );
+    if( !length || distance > *length ) return {};
+    const auto sample = [&]( std::size_t segment, float t ) -> std::optional<splineSample2>
+    {
+        const vec2 point = Evaluate( spline, segment, t );
+        const vec2 derivative = Derivative( spline, segment, t );
+        const double speed = std::hypot( static_cast<double>( derivative.x ), static_cast<double>( derivative.y ) );
+        if( !IsFinite( point ) || !std::isfinite( speed ) || speed <= 0.0 ) return {};
+        if( t > 0.0f && t < 1.0f )
+        {
+            vec2 tangent1{}, tangent2{};
+            GetTangents( spline, segment, tangent1, tangent2 );
+            const vec2 a = spline.points[segment], b = spline.points[segment + 1];
+            const double dx = static_cast<double>( b.x ) - a.x, dy = static_cast<double>( b.y ) - a.y;
+            const double qx = 3.0 * dx - 2.0 * tangent1.x - tangent2.x, qy = 3.0 * dy - 2.0 * tangent1.y - tangent2.y;
+            const double cx = tangent1.x + static_cast<double>( tangent2.x ) - 2.0 * dx, cy = tangent1.y + static_cast<double>( tangent2.y ) - 2.0 * dy;
+            const double ex = ( static_cast<double>( point.x ) - a.x ) - t * ( tangent1.x + t * ( qx + t * cx ) );
+            const double ey = ( static_cast<double>( point.y ) - a.y ) - t * ( tangent1.y + t * ( qy + t * cy ) );
+            if( std::hypot( ex, ey ) > 0.25 * tolerance ) return {};
+        }
+        return splineSample2{ point, { static_cast<float>( derivative.x / speed ), static_cast<float>( derivative.y / speed ) } };
+    };
+    const std::size_t count = GetSegmentCount( spline );
+    if( distance == 0.0 ) return sample( 0, 0.0f );
+    if( distance == *length ) return sample( count - 1, 1.0f );
+    const double error = tolerance / ( 4.0 * count );
+    double prefix = 0.0;
+    for( std::size_t i = 0; i < count; ++i )
+    {
+        const auto segmentLength = GetSegmentLength( spline, i, 1.0, error );
+        if( !segmentLength ) return {};
+        const double end = prefix + *segmentLength;
+        if( distance > end )
+        {
+            prefix = end;
+            continue;
+        }
+        if( distance == end ) return sample( i, 1.0f );
+        const double target = distance - prefix;
+        double lower = 0.0, upper = 1.0;
+        constexpr int MAX_ITERATIONS = 64;
+        for( int iteration = 0; iteration < MAX_ITERATIONS; ++iteration )
+        {
+            const float t = static_cast<float>( 0.5 * ( lower + upper ) );
+            if( t <= lower || t >= upper ) return {};
+            const auto partial = GetSegmentLength( spline, i, t, error );
+            if( !partial ) return {};
+            if( std::abs( *partial - target ) <= 0.5 * tolerance ) return sample( i, t );
+            if( *partial < target ) lower = t;
+            else upper = t;
+        }
+        return {};
+    }
+    return {};
 }
 
 } // namespace zonai

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -33,5 +34,17 @@ std::vector<vec2> Sample( const catmullRomSpline2& spline, std::size_t subdivisi
 
 // Bézier hull이 출력 chord에서 maxError 안에 들 때까지 이분할함. 유효하지 않은 입력 / 깊이 12 초과는 빈 배열.
 std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, float maxError );
+
+struct splineSample2
+{
+    vec2 point{};
+    vec2 tangent{};
+};
+
+// 목표 절대 길이 오차로 적분함. 잘못된 입력 / 수렴 실패는 nullopt. 지형 샘플링 오차와 별개임.
+std::optional<double> GetLength( const catmullRomSpline2& spline, double tolerance );
+
+// distance in [0, GetLength]. 곡선 위 위치와 진행 방향 단위 접선. 0 접선 / 정밀도 부족도 nullopt.
+std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, double distance, double tolerance );
 
 } // namespace zonai

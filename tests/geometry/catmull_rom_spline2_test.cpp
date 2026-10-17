@@ -181,5 +181,65 @@ int main()
     check( near( Derivative( spline, 0, infinity ), {} ), "infinite derivative parameter is rejected in Release" );
 #endif
 
+    const auto lineLength = GetLength( spline, 1.0e-6 );
+    check( lineLength && std::abs( *lineLength - std::sqrt( 20.0 ) ) < 1.0e-6, "two-point spline length equals its edge length" );
+    const auto unevenLength = GetLength( { unevenLine }, 1.0e-6 );
+    check( unevenLength && std::abs( *unevenLength - 29.0 ) < 1.0e-6, "uneven straight segments preserve the complete path length" );
+    const auto curveLength = GetLength( curve, 1.0e-6 );
+    check( curveLength.has_value(), "curved spline length converges" );
+    const auto dense = Sample( curve, 10000 );
+    double referenceLength = 0.0;
+    for( std::size_t i = 1; i < dense.size(); ++i )
+        referenceLength += std::hypot( static_cast<double>( dense[i].x ) - dense[i - 1].x, static_cast<double>( dense[i].y ) - dense[i - 1].y );
+    check( std::abs( *curveLength - referenceLength ) < 1.0e-5, "integrated length agrees with an independent dense polyline" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ) } )
+        check( !GetLength( curve, tolerance ), "length rejects nonpositive and nonfinite tolerance" );
+    check( !GetLength( {}, 1.0e-6 ) && !GetLength( { repeated }, 1.0e-6 ) && !GetLength( { notANumber }, 1.0e-6 ), "length rejects invalid splines without assertions or partial results" );
+    check( !GetLength( curve, 1.0e-30 ), "unattainable length precision fails explicitly" );
+    editable[1] = { 3.0f, 4.0f };
+    const auto editedLength = GetLength( editableCurve, 1.0e-6 );
+    check( editedLength && std::abs( *editedLength - 5.0 ) < 1.0e-6, "length observes current borrowed control points" );
+
+    for( double fraction : { 0.0, 0.25, 0.5, 0.75, 1.0 } )
+    {
+        const auto sample = EvaluateByDistance( spline, fraction * *lineLength, 1.0e-6 );
+        check( sample && near( sample->point, { 1.0f + 4.0f * static_cast<float>( fraction ), 2.0f + 2.0f * static_cast<float>( fraction ) } ), "two-point distance lookup returns points along the edge including both endpoints" );
+        check( near( sample->tangent, Normalize( line[1] - line[0] ) ), "distance lookup returns a forward unit tangent" );
+    }
+    for( double distance : { 0.0, 2.0, 4.0, 8.5, 13.0, 21.0, 29.0 } )
+    {
+        const auto sample = EvaluateByDistance( { unevenLine }, distance, 1.0e-6 );
+        check( sample && near( sample->point, { static_cast<float>( distance ), 0.0f } ) && near( sample->tangent, { 1.0f, 0.0f } ), "uneven collinear spline lookup inverts length instead of interpolating t" );
+    }
+    double prefixLength = 0.0;
+    for( std::size_t i = 0; i < dense.size(); ++i )
+    {
+        if( i > 0 ) prefixLength += std::hypot( static_cast<double>( dense[i].x ) - dense[i - 1].x, static_cast<double>( dense[i].y ) - dense[i - 1].y );
+        if( i % 2500 != 0 ) continue;
+        const auto sample = EvaluateByDistance( curve, i + 1 == dense.size() ? *curveLength : prefixLength, 1.0e-6 );
+        check( sample && near( sample->point, dense[i], 2.0e-5f ), "curve distance lookup agrees with independent dense arc lengths through segment boundaries" );
+        const std::size_t segment = std::min( i / 10000, GetSegmentCount( curve ) - 1 );
+        const float t = static_cast<float>( i - segment * 10000 ) / 10000.0f;
+        check( near( sample->tangent, Normalize( Derivative( curve, segment, t ) ), 2.0e-5f ), "curve distance tangent follows the analytic derivative" );
+    }
+    for( double distance : { -1.0, std::nextafter( *lineLength, std::numeric_limits<double>::infinity() ), static_cast<double>( nan ), static_cast<double>( infinity ) } )
+        check( !EvaluateByDistance( spline, distance, 1.0e-6 ), "distance lookup rejects nonfinite or out-of-range distance without clamping" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), 1.0e-30 } )
+        check( !EvaluateByDistance( curve, 0.5, tolerance ), "distance lookup rejects invalid or unattainable precision" );
+    check( !EvaluateByDistance( {}, 0.0, 1.0e-6 ) && !EvaluateByDistance( { repeated }, 0.0, 1.0e-6 ), "distance lookup rejects invalid splines in Debug and Release" );
+    const vec2 unitLine[] = { { 0.0f, 0.0f }, { 1.0f, 0.0f } };
+    check( !EvaluateByDistance( { unitLine }, 1.0 / 3.0, 1.0e-12 ), "distance lookup fails when float t cannot meet the requested distance precision" );
+    const vec2 translatedLine[] = { { 1.0e8f, 0.0f }, { 1.0e8f + 8.0f, 0.0f } };
+    check( !EvaluateByDistance( { translatedLine }, 4.0, 1.0e-6 ), "distance lookup fails when float coordinates cannot represent the requested point" );
+    const vec2 reversal[] = { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 0.0f, 0.0f } };
+    const auto reversalLength = GetLength( { reversal }, 1.0e-6 );
+    check( reversalLength && std::abs( *reversalLength - 2.0 ) < 1.0e-6, "zero tangent does not invalidate path length" );
+    check( !EvaluateByDistance( { reversal }, 1.0, 1.0e-6 ), "distance lookup fails at a zero tangent instead of inventing a direction" );
+    const auto backward = EvaluateByDistance( { reversal }, *reversalLength, 1.0e-6 );
+    check( backward && near( backward->point, {} ) && near( backward->tangent, { -1.0f, 0.0f } ), "last endpoint uses the last segment forward direction" );
+    editable[1] = { 0.0f, 6.0f };
+    const auto editedSample = EvaluateByDistance( editableCurve, 3.0, 1.0e-6 );
+    check( editedSample && near( editedSample->point, { 0.0f, 3.0f } ) && near( editedSample->tangent, { 0.0f, 1.0f } ), "distance lookup observes current borrowed control points without a cache" );
+
     return 0;
 }
