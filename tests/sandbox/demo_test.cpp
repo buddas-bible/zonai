@@ -5,6 +5,7 @@
 
 #include "demo.h"
 #include "rigidBodyDemo.h"
+#include "geometry/catmullRomSpline2.h"
 
 using namespace zonai;
 using namespace zonai::sandbox;
@@ -50,7 +51,7 @@ std::unique_ptr<demo> createCounter( demoKind )
 
 int main()
 {
-    check( getDemoEntries().size() == 15, "fifteen independently selectable demo entries" );
+    check( getDemoEntries().size() == 16, "sixteen independently selectable demo entries" );
     demoSession session{ createRigidBodyDemo };
     auto& playground = static_cast<rigidBodyDemo&>( session.getDemo() );
     check( playground.getWorld().GetBodyCount() == 6 && playground.getWorld().getJointCount() == 0, "playground separated from pendulum" );
@@ -530,6 +531,63 @@ int main()
             }
         }
         check( peakHeight > 1.2f && rampCar.getWorld().GetBodyTransform( rampCar.getImpulseBody() ).position.x > 14.0f, "car climbs ramp and continues onto level ground" );
+    }
+
+    for( const int substeps : { 1, 4, 8 } )
+    {
+        rigidBodyDemo path{ demoKind::splinePath };
+        auto& physics = path.getWorld();
+        check( physics.GetBodyCount() == 1 && path.getShapes().size() == 1 && physics.getJointCount() == 0, "spline path starts with one kinematic body and no joints" );
+        const auto body = path.getShapes()[0].bodyHandle;
+        const auto shape = path.getShapes()[0].shapeHandle;
+        check( physics.GetBody( body ).type == bodyType::Kinematic, "spline follower is kinematic" );
+        const catmullRomSpline2 curve{ path.getSplinePathPoints() };
+        const auto length = GetLength( curve, 1.0e-4 );
+        const auto start = EvaluateByDistance( curve, 0.0, 1.0e-4 );
+        check( length && start && path.getSplinePathLength() == *length && path.getSplinePathDistance() == 0.0, "path initializes its range using spline arc length" );
+        const auto initial = physics.GetBodyTransform( body );
+        check( Length( initial.position - start->point ) < 1.0e-4f && Length( Rotate( initial.rotation, { 1.0f, 0.0f } ) - start->tangent ) < 1.0e-4f, "path starts at the first point facing its tangent" );
+        physics.SetShapeFriction( shape, 0.42f );
+        path.step( 0.0f, substeps );
+        check( path.getSplinePathDistance() == 0.0 && LengthSquared( physics.GetBodyTransform( body ).position - initial.position ) == 0.0f, "zero-duration path step preserves pose and distance" );
+        for( int frame = 0; frame < 240; ++frame )
+        {
+            path.step( 0.0625f, substeps );
+            const double distance = std::min( ( frame + 1 ) * 0.0625, *length );
+            const auto target = EvaluateByDistance( curve, distance, 1.0e-4 );
+            check( target && path.getSplinePathDistance() == distance, "path advances one meter per second and clamps distance at the end" );
+            const auto pose = physics.GetBodyTransform( body );
+            check( Length( pose.position - target->point ) < 2.0e-4f && Length( Rotate( pose.rotation, { 1.0f, 0.0f } ) - target->tangent ) < 2.0e-4f, "kinematic step follows the distance point and forward tangent" );
+        }
+        const auto end = physics.GetBodyTransform( body );
+        check( path.getSplinePathDistance() == *length && LengthSquared( physics.GetBodyLinearVelocity( body ) ) == 0.0f && physics.GetBodyAngularVelocity( body ) == 0.0f, "path stops linear and angular motion at its last endpoint" );
+        path.step( 0.25f, substeps );
+        check( LengthSquared( physics.GetBodyTransform( body ).position - end.position ) == 0.0f, "finished path does not drift or loop" );
+        path.resetSplinePath();
+        check( path.getSplinePathDistance() == 0.0 && LengthSquared( physics.GetBodyTransform( body ).position - initial.position ) == 0.0f && Length( Rotate( physics.GetBodyTransform( body ).rotation, { 1.0f, 0.0f } ) - start->tangent ) < 1.0e-4f, "restart restores start point, tangent and distance" );
+        check( physics.GetBodyCount() == 1 && path.getShapes()[0].shapeHandle == shape && physics.GetShapeFriction( shape ) == 0.42f && LengthSquared( physics.GetBodyLinearVelocity( body ) ) == 0.0f && physics.GetBodyAngularVelocity( body ) == 0.0f, "restart reuses the body and preserves material while stopping motion" );
+        path.step( 0.125f, substeps );
+        check( path.getSplinePathDistance() == 0.125, "restarted path moves again" );
+        physics.DestroyBody( body );
+        path.step( 0.125f, substeps );
+        path.resetSplinePath();
+        check( path.getSplinePathDistance() == 0.125 && physics.GetBodyCount() == 0, "missing follower stops distance progression and reset safely" );
+    }
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::splinePath );
+        auto& path = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        playback.setPlaying( true );
+        playback.advance( 1.0f / 60.0f, 4 );
+        const double distance = path.getSplinePathDistance();
+        check( distance > 0.0, "spline path uses shared playback" );
+        playback.setPlaying( false );
+        playback.advance( 0.5f, 4 );
+        check( path.getSplinePathDistance() == distance, "paused playback preserves path distance" );
+        playback.stepOnce( 4 );
+        check( !playback.isPlaying() && path.getSplinePathDistance() > distance, "single-step advances the path while remaining paused" );
+        playback.reset();
+        check( static_cast<rigidBodyDemo&>( playback.getDemo() ).getSplinePathDistance() == 0.0 && !playback.isPlaying(), "shared demo reset restores the path start" );
     }
 
     return EXIT_SUCCESS;

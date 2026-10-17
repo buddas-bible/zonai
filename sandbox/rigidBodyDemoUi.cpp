@@ -15,6 +15,7 @@
 #include <Windows.h>
 
 #include "debug/debugDraw.h"
+#include "geometry/catmullRomSpline2.h"
 
 namespace zonai::sandbox
 {
@@ -167,6 +168,13 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
     if( showGrid_ )
     {
         draw.DrawGrid();
+    }
+
+    if( getKind() == demoKind::splinePath )
+    {
+        const auto points = SampleAdaptive( { getSplinePathPoints() }, 0.01f );
+        for( std::size_t i = 1; i < points.size(); ++i )
+            draw.DrawSegment( { points[i - 1], points[i] }, IM_COL32( 180, 150, 255, 255 ), 1.5f );
     }
 
     constexpr ImU32 DYNAMIC_TREE_LEAF = IM_COL32( 70, 200, 255, 220 );
@@ -525,15 +533,19 @@ void rigidBodyDemoUi::drawInspector()
                 {
                     getWorld().SetBodyAngularVelocity( visual.bodyHandle, angularVelocity );
                 }
-                float linearDamping = getWorld().GetBodyLinearDamping( visual.bodyHandle );
-                if( ImGui::DragFloat( "선형 감쇠###Linear damping", &linearDamping, 0.05f, 0.0f, 20.0f, "%.2f" ) )
+                // 지정한 경로의 목표 transform을 감쇠 없이 따라가야 함.
+                if( getKind() != demoKind::splinePath )
                 {
-                    getWorld().SetBodyLinearDamping( visual.bodyHandle, linearDamping );
-                }
-                float angularDamping = getWorld().GetBodyAngularDamping( visual.bodyHandle );
-                if( ImGui::DragFloat( "회전 감쇠###Angular damping", &angularDamping, 0.05f, 0.0f, 20.0f, "%.2f" ) )
-                {
-                    getWorld().SetBodyAngularDamping( visual.bodyHandle, angularDamping );
+                    float linearDamping = getWorld().GetBodyLinearDamping( visual.bodyHandle );
+                    if( ImGui::DragFloat( "선형 감쇠###Linear damping", &linearDamping, 0.05f, 0.0f, 20.0f, "%.2f" ) )
+                    {
+                        getWorld().SetBodyLinearDamping( visual.bodyHandle, linearDamping );
+                    }
+                    float angularDamping = getWorld().GetBodyAngularDamping( visual.bodyHandle );
+                    if( ImGui::DragFloat( "회전 감쇠###Angular damping", &angularDamping, 0.05f, 0.0f, 20.0f, "%.2f" ) )
+                    {
+                        getWorld().SetBodyAngularDamping( visual.bodyHandle, angularDamping );
+                    }
                 }
                 float gravityScale = getWorld().GetBodyGravityScale( visual.bodyHandle );
                 if( ImGui::DragFloat( "중력 배율###Gravity scale", &gravityScale, 0.05f, -10.0f, 10.0f, "%.2f" ) )
@@ -653,6 +665,14 @@ void rigidBodyDemoUi::drawInspector()
 
 void rigidBodyDemoUi::drawExperimentControls()
 {
+    if( getKind() == demoKind::splinePath )
+    {
+        ImGui::TextUnformatted( "스플라인 경로 이동" );
+        ImGui::TextWrapped( "1m/s로 곡선을 따라 이동하고 접선 방향으로 회전합니다. 끝점에서 정지합니다." );
+        if( ImGui::Button( "처음부터###SplinePathReset" ) ) resetSplinePath();
+        return;
+    }
+
     if( getKind() == demoKind::distancePendulum && !getWorld().IsValid( getPendulumJoint() ) ) return;
 
     if( getKind() == demoKind::revoluteHinge && ( !getWorld().IsValid( getRevoluteJoint() ) || !getWorld().IsValid( getImpulseBody() ) ) ) return;

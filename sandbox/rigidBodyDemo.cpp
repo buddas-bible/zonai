@@ -14,6 +14,10 @@ namespace zonai::sandbox
 namespace
 {
 
+constexpr double SPLINE_PATH_TOLERANCE = 1.0e-4;
+constexpr double SPLINE_PATH_SPEED = 1.0;
+constexpr std::array SPLINE_PATH_POINTS{ vec2{ -4.0f, 0.0f }, vec2{ -2.0f, 0.0f }, vec2{ 0.0f, 2.0f }, vec2{ 2.0f, 0.0f }, vec2{ 4.0f, 0.0f } };
+
 constexpr float TERRAIN_POINT_PICK_RADIUS = 0.25f;
 constexpr std::array<vec2, 9> TERRAIN_CONTROL_POINTS{
     vec2{ 8.0f, -2.0f },
@@ -42,6 +46,10 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     else if( kind == demoKind::terrainChain || kind == demoKind::splineTerrain )
     {
         createTerrainChain();
+    }
+    else if( kind == demoKind::splinePath )
+    {
+        createSplinePath();
     }
     else if( kind == demoKind::distancePendulum )
     {
@@ -133,7 +141,13 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
         world_.ApplyForceToCenter( target, direction * world_.GetBodyMass( target ) * 5.0f * axis );
     }
 
+    updateSplinePath( timeStep );
     world_.Step( timeStep, subStepCount );
+    if( kind_ == demoKind::splinePath && splinePathDistance_ == splinePathLength_ && world_.IsValid( impulseBody_ ) )
+    {
+        world_.SetBodyLinearVelocity( impulseBody_, {} );
+        world_.SetBodyAngularVelocity( impulseBody_, 0.0f );
+    }
     refreshContacts();
     updateTerrainTrialObservation( timeStep, subStepCount );
 }
@@ -307,9 +321,59 @@ vec2 rigidBodyDemo::getTerrainPoint( std::size_t pointIndex ) const
     return pointIndex < terrainSegments_.size() ? segment.segment.a : segment.segment.b;
 }
 
+std::span<const vec2> rigidBodyDemo::getSplinePathPoints() const noexcept
+{
+    return kind_ == demoKind::splinePath ? std::span<const vec2>{ SPLINE_PATH_POINTS } : std::span<const vec2>{};
+}
+
 #pragma endregion Queries
 
 #pragma region SceneSetup
+
+void rigidBodyDemo::createSplinePath()
+{
+    const catmullRomSpline2 path{ SPLINE_PATH_POINTS };
+    const auto length = GetLength( path, SPLINE_PATH_TOLERANCE );
+    const auto start = EvaluateByDistance( path, 0.0, SPLINE_PATH_TOLERANCE );
+    if( !length || !start ) return;
+    splinePathLength_ = *length;
+    impulseBody_ = world_.CreateBody( bodyType::Kinematic, { start->point, rot2::FromRadians( std::atan2( start->tangent.y, start->tangent.x ) ) } );
+    const auto shape = world_.CreateShape( impulseBody_, MakeBox( { 0.6f, 0.2f } ) );
+    shapes_.push_back( { impulseBody_, shape, "경로 이동 [키네마틱]" } );
+}
+
+void rigidBodyDemo::updateSplinePath( float timeStep )
+{
+    if( kind_ != demoKind::splinePath || timeStep <= 0.0f || !world_.IsValid( impulseBody_ ) ) return;
+    world_.SetBodyLinearVelocity( impulseBody_, {} );
+    world_.SetBodyAngularVelocity( impulseBody_, 0.0f );
+    if( splinePathDistance_ == splinePathLength_ ) return;
+    const double next = std::min( splinePathLength_, splinePathDistance_ + SPLINE_PATH_SPEED * timeStep );
+    const auto target = EvaluateByDistance( { SPLINE_PATH_POINTS }, next, SPLINE_PATH_TOLERANCE );
+    if( !target ) return;
+    const auto current = world_.GetBodyTransform( impulseBody_ );
+    const vec2 velocity = ( target->point - current.position ) / timeStep;
+    const float angle = std::remainder( std::atan2( target->tangent.y, target->tangent.x ) - std::atan2( current.rotation.s, current.rotation.c ), 2.0f * std::numbers::pi_v<float> );
+    const float angularVelocity = angle / timeStep;
+    if( !IsFinite( velocity ) || !std::isfinite( angularVelocity ) ) return;
+    // 다음 조회 위치까지 필요한 속도를 주어 기존 kinematic step으로 이동함.
+    world_.SetBodyLinearVelocity( impulseBody_, velocity );
+    world_.SetBodyAngularVelocity( impulseBody_, angularVelocity );
+    splinePathDistance_ = next;
+}
+
+void rigidBodyDemo::resetSplinePath()
+{
+    if( kind_ != demoKind::splinePath || !world_.IsValid( impulseBody_ ) ) return;
+    const auto start = EvaluateByDistance( { SPLINE_PATH_POINTS }, 0.0, SPLINE_PATH_TOLERANCE );
+    if( !start ) return;
+    cancelInput();
+    world_.SetBodyTransform( impulseBody_, { start->point, rot2::FromRadians( std::atan2( start->tangent.y, start->tangent.x ) ) } );
+    world_.SetBodyLinearVelocity( impulseBody_, {} );
+    world_.SetBodyAngularVelocity( impulseBody_, 0.0f );
+    splinePathDistance_ = 0.0;
+    refreshContacts();
+}
 
 void rigidBodyDemo::createPlayground()
 {

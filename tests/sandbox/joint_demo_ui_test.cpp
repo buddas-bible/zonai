@@ -1156,6 +1156,75 @@ int main()
             if( scaleView.getTerrainTrialObservation().launchGravityScale != before.launchGravityScale || reference.has_value() != afterReference.has_value() || ( reference && afterReference->launchGravityScale != reference->launchGravityScale ) || scaleView.getWorld().GetBodyGravityScale( probe.bodyHandle ) != scale || LengthSquared( scaleView.getWorld().GetBodyTransform( probe.bodyHandle ).position - pose.position ) != 0.0f || LengthSquared( scaleView.getWorld().GetBodyLinearVelocity( probe.bodyHandle ) - velocity ) != 0.0f ) fail( "Gravity scale display must preserve records, scale and motion" );
         }
     }
+    {
+        rigidBodyDemoUi pathView{ demoKind::splinePath };
+        const auto body = pathView.getShapes()[0].bodyHandle;
+        pathView.step( 0.25f, 4 );
+        for( int frame = 0; frame < 4; ++frame )
+        {
+            const double distance = pathView.getSplinePathDistance();
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 4000 } );
+            ImGui::Begin( "Spline path controls" );
+            if( frame == 1 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "SplinePathReset" );
+            if( frame == 2 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "DebugDrawSettings" );
+            if( frame == 3 )
+            {
+                GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Grid / Axis" );
+                pathView.getWorld().DestroyBody( body );
+            }
+            ImGui::LogToBuffer();
+            pathView.drawControls();
+            const std::string_view log{ GImGui->LogBuffer.c_str() };
+            if( log.find( "스플라인 경로 이동" ) == std::string_view::npos || log.find( "처음부터" ) == std::string_view::npos ) fail( "Spline path UI must provide movement guidance and restart" );
+            ImGui::LogFinish();
+            if( frame == 1 && pathView.getSplinePathDistance() != 0.0 ) fail( "Spline restart button must restore distance zero" );
+            if( frame != 1 && pathView.getSplinePathDistance() != distance ) fail( "Spline controls must not advance movement" );
+            debugCamera camera{};
+            camera.center = { 0.0f, 1.0f };
+            camera.pixelsPerMeter = 55.0f;
+            ImDrawList* list = ImGui::GetWindowDrawList();
+            const int before = list->VtxBuffer.Size;
+            debugDraw draw{ list, camera, { 0, 0 }, { 420, 600 } };
+            pathView.draw( draw );
+            if( list->VtxBuffer.Size <= before ) fail( "Spline path must remain visible without grid or follower body" );
+            ImGui::End();
+            ImGui::Render();
+        }
+    }
+    for( const demoKind kind : { demoKind::splinePath, demoKind::playground } )
+    {
+        rigidBodyDemoUi dampingView{ kind };
+        const auto body = dampingView.getImpulseBody();
+        for( const char* field : { "Linear damping", "Angular damping" } )
+        {
+            for( int phase = 0; phase < 3; ++phase )
+            {
+                if( phase == 1 ) io.AddInputCharactersUTF8( "10" );
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+                ImGui::NewFrame();
+                ImGui::SetNextWindowPos( { 0, 0 } );
+                ImGui::SetNextWindowSize( { 420, 4000 } );
+                ImGui::Begin( "Spline damping input" );
+                if( phase == 0 )
+                {
+                    GImGui->NavActivateId = ImGui::GetID( field );
+                    GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+                }
+                dampingView.drawControls();
+                ImGui::End();
+                ImGui::Render();
+                if( phase == 2 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            }
+        }
+        const float expected = kind == demoKind::splinePath ? 0.0f : 10.0f;
+        if( dampingView.getWorld().GetBodyLinearDamping( body ) != expected || dampingView.getWorld().GetBodyAngularDamping( body ) != expected )
+        {
+            std::fprintf( stderr, "Damping kind %d: %g / %g, expected %g\n", static_cast<int>( kind ), dampingView.getWorld().GetBodyLinearDamping( body ), dampingView.getWorld().GetBodyAngularDamping( body ), expected );
+            fail( "Prescribed spline motion must block damping edits while other demos retain damping controls" );
+        }
+    }
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }
