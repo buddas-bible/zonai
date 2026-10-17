@@ -188,7 +188,7 @@ void rigidBodyDemo::handleInput( const demoInput& input )
                 splineDragRecorded_ = false;
                 endSplineSamplingEdit();
                 stopMouseDrag();
-                if( splineInserting_ ) insertSplineControlPointAt( input.mousePosition );
+                if( splineInserting_ ) insertSplineControlPointAt( input.mousePosition, input.pixelsPerMeter );
             }
             else startTerrainPointDrag( input.mousePosition );
         }
@@ -1118,27 +1118,18 @@ bool rigidBodyDemo::insertSplineControlPoint( std::size_t segmentIndex )
     return insertSplineControlPoint( segmentIndex, Evaluate( { splineControlPoints_ }, segmentIndex, 0.5f ) );
 }
 
-bool rigidBodyDemo::insertSplineControlPointAt( vec2 point )
+bool rigidBodyDemo::insertSplineControlPointAt( vec2 point, float pixelsPerMeter )
 {
-    if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) ) return false;
+    if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || !std::isfinite( pixelsPerMeter ) || pixelsPerMeter <= 0.0f ) return false;
+    const float radius = 10.0f / pixelsPerMeter;
+    if( !std::isfinite( radius ) || radius <= 0.0f ) return false;
     point = InverseTransformPoint( world_.GetBodyTransform( shapes_[0].bodyHandle ), point );
     if( !IsFinite( point ) ) return false;
-    double bestDistance = std::numeric_limits<double>::infinity();
-    std::size_t segmentIndex = 0;
-    for( std::size_t i = 0; i + 1 < splineControlPoints_.size(); ++i )
-    {
-        const vec2 a = splineControlPoints_[i], b = splineControlPoints_[i + 1];
-        const double dx = static_cast<double>( b.x ) - a.x, dy = static_cast<double>( b.y ) - a.y;
-        const double px = static_cast<double>( point.x ) - a.x, py = static_cast<double>( point.y ) - a.y;
-        const double t = std::clamp( ( px * dx + py * dy ) / ( dx * dx + dy * dy ), 0.0, 1.0 );
-        const double ex = px - t * dx, ey = py - t * dy;
-        const double distance = ex * ex + ey * ey;
-        if( distance >= bestDistance ) continue;
-        bestDistance = distance;
-        segmentIndex = i;
-    }
-    if( !insertSplineControlPoint( segmentIndex, point ) ) return false;
-    terrainPointDragIndex_ = segmentIndex + 1;
+    // 10px 판정에 비해 충분히 작은 0.01px 거리 오차로 실제 곡선 구간을 찾음.
+    const auto closest = ClosestPoint( { splineControlPoints_ }, point, static_cast<double>( radius ) * 0.001 );
+    if( !closest || closest->distanceSquared > static_cast<double>( radius ) * radius ) return false;
+    if( !insertSplineControlPoint( closest->segmentIndex, point ) ) return false;
+    terrainPointDragIndex_ = closest->segmentIndex + 1;
     return true;
 }
 

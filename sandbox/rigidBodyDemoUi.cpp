@@ -717,7 +717,7 @@ void rigidBodyDemoUi::drawExperimentControls()
                 }
                 ImGui::EndCombo();
             }
-            ImGui::TextWrapped( "Ctrl+왼쪽 클릭으로 가까운 두 제어점 사이에 클릭한 위치의 점을 삽입합니다." );
+            ImGui::TextWrapped( "곡선에서 10px 이내를 Ctrl+왼쪽 클릭하면 클릭 위치에 제어점을 삽입합니다." );
             ImGui::BeginDisabled( getSplineControlPoints().size() <= 2 );
             if( ImGui::Button( "제어점 삭제###SplineRemove" ) && removeSplineControlPoint( splineControlIndex_ ) ) splineControlIndex_ = std::min( splineControlIndex_, getSplineControlPoints().size() - 1 );
             ImGui::EndDisabled();
