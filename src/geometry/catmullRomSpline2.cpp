@@ -18,26 +18,31 @@ struct bezierPoint2
     double y;
 };
 
+vec2 GetPoint( const catmullRomSpline2& spline, std::size_t index )
+{
+    return spline.points[index % spline.points.size()];
+}
+
 void GetTangents( const catmullRomSpline2& spline, std::size_t segmentIndex, vec2& tangent1, vec2& tangent2 )
 {
-    const vec2 delta = spline.points[segmentIndex + 1] - spline.points[segmentIndex];
+    const vec2 delta = GetPoint( spline, segmentIndex + 1 ) - spline.points[segmentIndex];
     const float interval = std::sqrt( Length( delta ) );
 
-    // 양 끝의 가상 제어점은 인접 edge를 연장하므로 끝 접선이 delta와 같음.
+    // 열린 경로 양 끝의 가상 제어점은 인접 edge를 연장하므로 끝 접선이 delta와 같음.
     tangent1 = delta;
     tangent2 = delta;
 
-    if( segmentIndex > 0 )
+    if( spline.isLoop || segmentIndex > 0 )
     {
-        const vec2 previous = spline.points[segmentIndex] - spline.points[segmentIndex - 1];
+        const vec2 previous = spline.points[segmentIndex] - spline.points[segmentIndex == 0 ? spline.points.size() - 1 : segmentIndex - 1];
         const float previousInterval = std::sqrt( Length( previous ) );
 
         tangent1 = ( previous * ( interval / previousInterval ) * interval + delta * previousInterval ) / ( previousInterval + interval );
     }
 
-    if( segmentIndex + 2 < spline.points.size() )
+    if( spline.isLoop || segmentIndex + 2 < spline.points.size() )
     {
-        const vec2 next = spline.points[segmentIndex + 2] - spline.points[segmentIndex + 1];
+        const vec2 next = GetPoint( spline, segmentIndex + 2 ) - GetPoint( spline, segmentIndex + 1 );
         const float nextInterval = std::sqrt( Length( next ) );
 
         tangent2 = ( delta * nextInterval + next * ( interval / nextInterval ) * interval ) / ( interval + nextInterval );
@@ -51,8 +56,8 @@ std::optional<double> GetSegmentLength( const catmullRomSpline2& spline, std::si
     vec2 tangent1{}, tangent2{};
     GetTangents( spline, segmentIndex, tangent1, tangent2 );
     if( !IsFinite( tangent1 ) || !IsFinite( tangent2 ) ) return {};
-    const double dx = static_cast<double>( spline.points[segmentIndex + 1].x ) - spline.points[segmentIndex].x;
-    const double dy = static_cast<double>( spline.points[segmentIndex + 1].y ) - spline.points[segmentIndex].y;
+    const double dx = static_cast<double>( GetPoint( spline, segmentIndex + 1 ).x ) - spline.points[segmentIndex].x;
+    const double dy = static_cast<double>( GetPoint( spline, segmentIndex + 1 ).y ) - spline.points[segmentIndex].y;
     const double qx = 3.0 * dx - 2.0 * tangent1.x - tangent2.x, qy = 3.0 * dy - 2.0 * tangent1.y - tangent2.y;
     const double cx = tangent1.x + static_cast<double>( tangent2.x ) - 2.0 * dx, cy = tangent1.y + static_cast<double>( tangent2.y ) - 2.0 * dy;
     // 미분 다항식을 double로 평가해 float t 반올림이 적분 수렴을 막지 않게 함.
@@ -85,15 +90,15 @@ std::optional<double> GetSegmentLength( const catmullRomSpline2& spline, std::si
 
 bool IsValid( const catmullRomSpline2& spline )
 {
-    if( spline.points.size() < 2 ) return false;
+    if( spline.points.size() < ( spline.isLoop ? 3u : 2u ) ) return false;
 
     for( std::size_t i = 0; i < spline.points.size(); ++i )
     {
         if( !IsFinite( spline.points[i] ) ) return false;
 
-        if( i == 0 ) continue;
+        if( i == 0 && !spline.isLoop ) continue;
 
-        const float lengthSquared = LengthSquared( spline.points[i] - spline.points[i - 1] );
+        const float lengthSquared = LengthSquared( spline.points[i] - spline.points[i == 0 ? spline.points.size() - 1 : i - 1] );
 
         if( !std::isfinite( lengthSquared ) || lengthSquared <= 0.0f ) return false;
     }
@@ -103,7 +108,8 @@ bool IsValid( const catmullRomSpline2& spline )
 
 std::size_t GetSegmentCount( const catmullRomSpline2& spline )
 {
-    return spline.points.size() < 2 ? 0 : spline.points.size() - 1;
+    if( spline.points.size() < ( spline.isLoop ? 3u : 2u ) ) return 0;
+    return spline.isLoop ? spline.points.size() : spline.points.size() - 1;
 }
 
 vec2 Evaluate( const catmullRomSpline2& spline, std::size_t segmentIndex, float t )
@@ -114,13 +120,13 @@ vec2 Evaluate( const catmullRomSpline2& spline, std::size_t segmentIndex, float 
     if( !valid ) return {};
 
     if( t == 0.0f ) return spline.points[segmentIndex];
-    if( t == 1.0f ) return spline.points[segmentIndex + 1];
+    if( t == 1.0f ) return GetPoint( spline, segmentIndex + 1 );
 
     vec2 tangent1{};
     vec2 tangent2{};
     GetTangents( spline, segmentIndex, tangent1, tangent2 );
 
-    const vec2 delta = spline.points[segmentIndex + 1] - spline.points[segmentIndex];
+    const vec2 delta = GetPoint( spline, segmentIndex + 1 ) - spline.points[segmentIndex];
     const vec2 quadratic = 3.0f * delta - 2.0f * tangent1 - tangent2;
     const vec2 cubic = tangent1 + tangent2 - 2.0f * delta;
 
@@ -141,7 +147,7 @@ vec2 Derivative( const catmullRomSpline2& spline, std::size_t segmentIndex, floa
     if( t == 0.0f ) return tangent1;
     if( t == 1.0f ) return tangent2;
 
-    const vec2 delta = spline.points[segmentIndex + 1] - spline.points[segmentIndex];
+    const vec2 delta = GetPoint( spline, segmentIndex + 1 ) - spline.points[segmentIndex];
     const vec2 quadratic = 3.0f * delta - 2.0f * tangent1 - tangent2;
     const vec2 cubic = tangent1 + tangent2 - 2.0f * delta;
 
@@ -214,7 +220,7 @@ std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, float maxErro
     {
         vec2 tangent1{}, tangent2{};
         GetTangents( spline, i, tangent1, tangent2 );
-        const vec2 a = spline.points[i], b = spline.points[i + 1];
+        const vec2 a = spline.points[i], b = GetPoint( spline, i + 1 );
         const std::array<bezierPoint2, 4> curve{
             bezierPoint2{ a.x, a.y },
             bezierPoint2{ a.x + static_cast<double>( tangent1.x ) / 3.0, a.y + static_cast<double>( tangent1.y ) / 3.0 },
@@ -256,7 +262,7 @@ std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline
         {
             vec2 tangent1{}, tangent2{};
             GetTangents( spline, segment, tangent1, tangent2 );
-            const vec2 a = spline.points[segment], b = spline.points[segment + 1];
+            const vec2 a = spline.points[segment], b = GetPoint( spline, segment + 1 );
             const double dx = static_cast<double>( b.x ) - a.x, dy = static_cast<double>( b.y ) - a.y;
             const double qx = 3.0 * dx - 2.0 * tangent1.x - tangent2.x, qy = 3.0 * dy - 2.0 * tangent1.y - tangent2.y;
             const double cx = tangent1.x + static_cast<double>( tangent2.x ) - 2.0 * dx, cy = tangent1.y + static_cast<double>( tangent2.y ) - 2.0 * dy;
