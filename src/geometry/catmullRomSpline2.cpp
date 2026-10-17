@@ -155,6 +155,41 @@ vec2 Derivative( const catmullRomSpline2& spline, std::size_t segmentIndex, floa
     return tangent1 + t * ( 2.0f * quadratic + 3.0f * t * cubic );
 }
 
+vec2 SecondDerivative( const catmullRomSpline2& spline, std::size_t segmentIndex, float t )
+{
+    const bool valid = IsValid( spline ) && segmentIndex < GetSegmentCount( spline ) && std::isfinite( t ) && t >= 0.0f && t <= 1.0f;
+
+    assert( valid );
+    if( !valid ) return {};
+
+    vec2 tangent1{};
+    vec2 tangent2{};
+    GetTangents( spline, segmentIndex, tangent1, tangent2 );
+
+    const vec2 delta = GetPoint( spline, segmentIndex + 1 ) - spline.points[segmentIndex];
+    const vec2 quadratic = 3.0f * delta - 2.0f * tangent1 - tangent2;
+    const vec2 cubic = tangent1 + tangent2 - 2.0f * delta;
+
+    return 2.0f * quadratic + 6.0f * t * cubic;
+}
+
+std::optional<double> Curvature( const catmullRomSpline2& spline, std::size_t segmentIndex, float t )
+{
+    if( !IsValid( spline ) || segmentIndex >= GetSegmentCount( spline ) || !std::isfinite( t ) || t < 0.0f || t > 1.0f ) return {};
+
+    const vec2 first = Derivative( spline, segmentIndex, t );
+    const vec2 second = SecondDerivative( spline, segmentIndex, t );
+    if( !IsFinite( first ) || !IsFinite( second ) ) return {};
+
+    const double speed = std::hypot( static_cast<double>( first.x ), static_cast<double>( first.y ) );
+    if( speed == 0.0 ) return {};
+
+    const double cross = static_cast<double>( first.x ) * second.y - static_cast<double>( first.y ) * second.x;
+    const double curvature = cross / ( speed * speed * speed );
+    if( !std::isfinite( curvature ) ) return {};
+    return curvature;
+}
+
 std::vector<vec2> Sample( const catmullRomSpline2& spline, std::size_t subdivisions )
 {
     if( !IsValid( spline ) || subdivisions == 0 ) return {};

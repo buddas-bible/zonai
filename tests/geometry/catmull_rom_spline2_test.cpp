@@ -371,5 +371,64 @@ int main()
     const auto editedClosest = ClosestPoint( editableCurve, { 2.0f, 1.0f }, 1.0e-5 );
     check( editedClosest && near( editedClosest->point, { 2.0f, 0.0f } ), "closest point observes edited borrowed controls" );
 
+    check( near( SecondDerivative( curve, 1, 0.25f ), { -1.5f, 1.5f } ), "second derivative matches the analytic cubic" );
+    check( near( SecondDerivative( curve, 1, 0.0f ), { -3.0f, 3.0f } ) && near( SecondDerivative( curve, 1, 1.0f ), { 3.0f, -3.0f } ), "second derivative includes one-sided segment endpoints" );
+    const double analyticCurvature = 1.5 / std::pow( 1.1328125, 1.5 );
+    const auto positiveCurvature = Curvature( curve, 1, 0.25f );
+    const auto negativeCurvature = Curvature( curve, 1, 0.75f );
+    const auto inflectionCurvature = Curvature( curve, 1, 0.5f );
+    check( positiveCurvature && negativeCurvature && inflectionCurvature && std::abs( *positiveCurvature - analyticCurvature ) < 1.0e-12 && std::abs( *negativeCurvature + analyticCurvature ) < 1.0e-12 && *inflectionCurvature == 0.0, "signed curvature matches the analytic cubic and inflection" );
+    for( float t : { 0.0f, 0.5f, 1.0f } )
+    {
+        const auto lineCurvature = Curvature( spline, 0, t );
+        check( near( SecondDerivative( spline, 0, t ), {} ) && lineCurvature && *lineCurvature == 0.0, "two-point spline has zero second derivative and curvature" );
+        const auto unevenLineCurvature = Curvature( { unevenLine }, 1, t );
+        check( unevenLineCurvature && *unevenLineCurvature == 0.0, "nonuniform straight parameterization has zero curvature" );
+    }
+    for( const auto candidate : { curve, unevenCurve, loop, unevenLoop } )
+    {
+        for( std::size_t segment = 0; segment < GetSegmentCount( candidate ); ++segment )
+        {
+            for( float t : { 0.0f, 0.25f, 0.75f, 1.0f } )
+            {
+                constexpr float h = 0.001f;
+                const float a = std::max( 0.0f, t - h ), b = std::min( 1.0f, t + h );
+                const vec2 difference = ( Derivative( candidate, segment, b ) - Derivative( candidate, segment, a ) ) / ( b - a );
+                check( near( SecondDerivative( candidate, segment, 0.5f * ( a + b ) ), difference, 0.01f ), "second derivative agrees with finite differences including open and closed boundaries" );
+                check( Curvature( candidate, segment, t ).has_value(), "regular open and closed endpoints have curvature" );
+            }
+        }
+    }
+    check( !near( SecondDerivative( unevenLoop, 0, 0.0f ), SecondDerivative( unevenLoop, 3, 1.0f ) ), "closed seam preserves separate one-sided second derivatives" );
+    const vec2 reversedPoints[] = { points[3], points[2], points[1], points[0] };
+    const auto reversedCurvature = Curvature( { reversedPoints }, 1, 0.75f );
+    check( near( SecondDerivative( { reversedPoints }, 1, 0.75f ), SecondDerivative( curve, 1, 0.25f ) ) && reversedCurvature && std::abs( *reversedCurvature + analyticCurvature ) < 1.0e-12, "reversing direction reverses curvature sign" );
+    for( float scale : { 1.0e-10f, 2.0f, 1.0e10f } )
+    {
+        const vec2 scaledPoints[] = { scale * points[0], scale * points[1], scale * points[2], scale * points[3] };
+        const auto scaledCurvature = Curvature( { scaledPoints }, 1, 0.25f );
+        check( scaledCurvature && std::abs( *scaledCurvature * scale - analyticCurvature ) < 1.0e-5, "curvature scales inversely without float overflow or underflow" );
+        check( near( SecondDerivative( { scaledPoints }, 1, 0.25f ) / scale, { -1.5f, 1.5f }, 1.0e-5f ), "second derivative scales with control coordinates" );
+    }
+    check( !Curvature( { reversal }, 0, 1.0f ), "curvature rejects a zero tangent" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ repeated }, catmullRomSpline2{ infinite }, catmullRomSpline2{ repeatedStart, true } } )
+    {
+        check( !Curvature( invalid, 0, 0.5f ), "curvature rejects invalid splines without assertions" );
+#ifdef NDEBUG
+        check( near( SecondDerivative( invalid, 0, 0.5f ), {} ), "invalid second derivative fails safely in Release" );
+#endif
+    }
+    for( float t : { -0.1f, 1.1f, nan, infinity } )
+    {
+        check( !Curvature( curve, 1, t ), "curvature rejects invalid parameters without assertions" );
+#ifdef NDEBUG
+        check( near( SecondDerivative( curve, 1, t ), {} ), "second derivative rejects invalid parameters in Release" );
+#endif
+    }
+    check( !Curvature( curve, GetSegmentCount( curve ), 0.5f ) && !Curvature( loop, std::numeric_limits<std::size_t>::max(), 0.5f ), "curvature rejects invalid open and closed segment indices" );
+#ifdef NDEBUG
+    check( near( SecondDerivative( loop, GetSegmentCount( loop ), 0.5f ), {} ), "second derivative rejects invalid closed segment indices in Release" );
+#endif
+
     return 0;
 }
