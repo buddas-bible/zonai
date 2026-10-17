@@ -660,5 +660,47 @@ int main()
     check( !ComputeAABB( curve, GetSegmentCount( curve ) ) && !ComputeAABB( loop, GetSegmentCount( loop ) ) && !ComputeAABB( curve, std::numeric_limits<std::size_t>::max() ), "segment bounds reject open and closed out-of-range indices" );
     check( !ComputeAABB( { unboundedAllowance }, 0 ), "segment bounds retain finite outward-bound construction failure" );
 
+    const auto localProjection = ClosestPoint( { unitLine }, 0, { 0.25f, 2.0f }, 1.0e-5 );
+    check( localProjection && localProjection->segmentIndex == 0 && localProjection->t == 0.25f && near( localProjection->point, { 0.25f, 0.0f } ) && localProjection->distanceSquared == 4.0, "segment closest point matches analytic line projection" );
+    const auto restricted = ClosestPoint( { unevenLine }, 0, { 25.0f, 2.0f }, 1.0e-5 );
+    const auto unrestricted = ClosestPoint( { unevenLine }, { 25.0f, 2.0f }, 1.0e-5 );
+    check( restricted && unrestricted && restricted->segmentIndex == 0 && restricted->t == 1.0f && near( restricted->point, unevenLine[1] ) && restricted->distanceSquared == 445.0 && unrestricted->segmentIndex == 2 && unrestricted->distanceSquared < restricted->distanceSquared, "segment query stays local even when another segment is closer" );
+    const auto localStart = ClosestPoint( { unitLine }, 0, { -2.0f, 1.0f }, 1.0e-5 );
+    const auto localEnd = ClosestPoint( { unitLine }, 0, { 3.0f, 1.0f }, 1.0e-5 );
+    check( localStart && localEnd && localStart->t == 0.0f && localEnd->t == 1.0f, "segment closest point includes both endpoints" );
+    for( const auto candidate : { curve, wave, unevenCurve, loop, unevenLoop, crossing } )
+    {
+        constexpr std::size_t subdivisions = 10000;
+        const auto reference = Sample( candidate, subdivisions );
+        for( std::size_t segment = 0; segment < GetSegmentCount( candidate ); ++segment )
+        {
+            for( const vec2 query : { vec2{ 0.1f, 0.2f }, vec2{ -0.5f, 1.5f }, vec2{ 6.0f, -2.0f } } )
+            {
+                const auto closest = ClosestPoint( candidate, segment, query, 1.0e-4 );
+                check( closest && closest->segmentIndex == segment && closest->t >= 0.0f && closest->t <= 1.0f && near( closest->point, Evaluate( candidate, segment, closest->t ) ), "local closest point metadata reconstructs a point on exactly the selected segment" );
+                const double distance = std::hypot( static_cast<double>( closest->point.x ) - query.x, static_cast<double>( closest->point.y ) - query.y );
+                check( std::abs( closest->distanceSquared - distance * distance ) < 1.0e-9, "segment squared distance uses the returned float point in double precision" );
+                double bestReference = std::numeric_limits<double>::infinity();
+                for( std::size_t i = segment * subdivisions; i <= ( segment + 1 ) * subdivisions; ++i )
+                    bestReference = std::min( bestReference, std::hypot( static_cast<double>( reference[i].x ) - query.x, static_cast<double>( reference[i].y ) - query.y ) );
+                check( distance <= bestReference + 1.0e-4 && distance >= bestReference - 2.0e-3, "segment closest distance agrees with independent dense references on curves and crossings" );
+            }
+        }
+    }
+    const auto closedEndpoint = ClosestPoint( loop, 3, square[0], 1.0e-5 );
+    check( closedEndpoint && closedEndpoint->segmentIndex == 3 && closedEndpoint->t == 1.0f && closedEndpoint->distanceSquared == 0.0, "closed final segment includes its wrapped endpoint" );
+    const auto localStationary = ClosestPoint( { reversal }, 0, { 1.2f, 0.0f }, 1.0e-5 );
+    check( localStationary && localStationary->t == 1.0f && near( localStationary->point, reversal[1] ), "segment closest point permits a zero tangent" );
+    editable[1] = { 4.0f, 0.0f };
+    const auto editedLocalClosest = ClosestPoint( editableCurve, 0, { 2.0f, 1.0f }, 1.0e-5 );
+    check( editedLocalClosest && near( editedLocalClosest->point, { 2.0f, 0.0f } ), "local closest point observes edited borrowed controls" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ repeated }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ repeatedStart, true } } )
+        check( !ClosestPoint( invalid, 0, {}, 1.0e-5 ), "local closest point rejects invalid paths without assertions" );
+    check( !ClosestPoint( curve, GetSegmentCount( curve ), {}, 1.0e-5 ) && !ClosestPoint( loop, GetSegmentCount( loop ), {}, 1.0e-5 ) && !ClosestPoint( curve, std::numeric_limits<std::size_t>::max(), {}, 1.0e-5 ), "local closest point rejects invalid open and closed segment indices" );
+    check( !ClosestPoint( curve, 0, { nan, 0.0f }, 1.0e-5 ) && !ClosestPoint( curve, 0, { infinity, 0.0f }, 1.0e-5 ), "local closest point rejects nonfinite query coordinates" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), 1.0e-30 } )
+        check( !ClosestPoint( curve, 0, {}, tolerance ), "local closest point rejects invalid or unattainable tolerance" );
+    check( !ClosestPoint( { coarseDiagonal }, 0, { 1.0e8f + 8.0f, 1.0e8f }, 1.0e-3 ), "local closest point preserves float position precision failure" );
+
     return 0;
 }
