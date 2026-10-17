@@ -330,11 +330,19 @@ int main()
         const std::vector<vec2> original{ topologyView.getSplineControlPoints().begin(), topologyView.getSplineControlPoints().end() };
         for( int frame = 0; frame < 6; ++frame )
         {
+            if( frame == 0 )
+            {
+                demoInput click{};
+                click.mousePosition = 0.5f * ( original[0] + original[1] ) + vec2{ 0.0f, 0.15f };
+                click.mousePressed = click.mouseHeld = click.insertControlPoint = true;
+                topologyView.handleInput( click );
+            }
+            else topologyView.cancelInput();
             ImGui::NewFrame();
             ImGui::SetNextWindowPos( { 0, 0 } );
             ImGui::SetNextWindowSize( { 420, 4000 } );
             ImGui::Begin( "Spline topology controls" );
-            const char* action = frame == 2 ? "SplineControl" : ( frame == 0 || frame == 4 ? "SplineInsert" : "SplineRemove" );
+            const char* action = frame == 2 ? "SplineControl" : ( frame == 0 ? "Unused" : frame == 4 ? "SplineInsert" : "SplineRemove" );
             GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( action );
             if( frame == 3 )
             {
@@ -344,22 +352,32 @@ int main()
             }
             ImGui::LogToBuffer();
             topologyView.drawControls();
+            const std::string_view log{ GImGui->LogBuffer.c_str() };
+            if( log.find( "Ctrl+왼쪽 클릭" ) == std::string_view::npos ) fail( "Spline controls must explain click insertion" );
+            if( log.find( "다음 구간에 추가" ) != std::string_view::npos ) fail( "Midpoint insertion button must be replaced by click input" );
             ImGui::LogFinish();
             ImGui::End();
             ImGui::Render();
             const std::size_t count = topologyView.getSplineControlPoints().size();
-            if( frame == 0 && count != 10 ) fail( "Insert button must add a spline control" );
+            if( frame == 0 && count != 10 ) fail( "Ctrl click must add one spline control before drawing" );
             if( frame == 1 && count != 9 ) fail( "Delete button must remove the newly selected inserted control" );
             if( frame == 1 )
                 for( std::size_t i = 0; i < original.size(); ++i )
                     if( LengthSquared( topologyView.getSplineControlPoints()[i] - original[i] ) > 1.0e-8f ) fail( "Deletion must target the newly selected inserted control" );
-            if( frame == 4 && count != 9 ) fail( "Insertion must be disabled at the selected last control" );
+            if( frame == 4 && count != 9 ) fail( "Removed insert button must not add a control at the selected last control" );
             if( frame == 5 && count != 8 ) fail( "Deletion must support the selected last control" );
         }
         while( topologyView.getSplineControlPoints().size() > 2 )
             if( !topologyView.removeSplineControlPoint( topologyView.getSplineControlPoints().size() - 1 ) ) fail( "Two-point UI fixture must apply" );
         for( int frame = 0; frame < 2; ++frame )
         {
+            if( frame == 1 )
+            {
+                demoInput click{};
+                click.mousePosition = 0.5f * ( topologyView.getSplineControlPoints()[0] + topologyView.getSplineControlPoints()[1] );
+                click.mousePressed = click.mouseHeld = click.insertControlPoint = true;
+                topologyView.handleInput( click );
+            }
             ImGui::NewFrame();
             ImGui::SetNextWindowPos( { 0, 0 } );
             ImGui::SetNextWindowSize( { 420, 4000 } );
@@ -369,6 +387,7 @@ int main()
             ImGui::End();
             ImGui::Render();
             if( frame == 0 && topologyView.getSplineControlPoints().size() != 2 ) fail( "Delete button must preserve the two-control minimum" );
+            if( frame == 1 && topologyView.getSplineControlPoints().size() != 3 ) fail( "Ctrl click must insert between the final two controls" );
         }
     }
     {

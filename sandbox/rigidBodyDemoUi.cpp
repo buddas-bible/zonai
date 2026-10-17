@@ -684,6 +684,7 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::Text( "선분 수: %zu", getTerrainPointCount() - 1 );
             ImGui::TextWrapped( "충돌 선분이 너무 짧아지는 오차 변경이나 제어점 이동은 적용하지 않습니다." );
             const auto controls = getSplineControlPoints();
+            if( getTerrainPointDragIndex() ) splineControlIndex_ = *getTerrainPointDragIndex();
             splineControlIndex_ = std::min( splineControlIndex_, controls.size() - 1 );
             char label[32];
             std::snprintf( label, sizeof( label ), "제어점 %zu", splineControlIndex_ + 1 );
@@ -696,10 +697,7 @@ void rigidBodyDemoUi::drawExperimentControls()
                 }
                 ImGui::EndCombo();
             }
-            ImGui::BeginDisabled( splineControlIndex_ + 1 >= controls.size() );
-            if( ImGui::Button( "다음 구간에 추가###SplineInsert" ) && insertSplineControlPoint( splineControlIndex_ ) ) ++splineControlIndex_;
-            ImGui::EndDisabled();
-            ImGui::SameLine();
+            ImGui::TextWrapped( "Ctrl+왼쪽 클릭으로 가까운 두 제어점 사이에 클릭한 위치의 점을 삽입합니다." );
             ImGui::BeginDisabled( getSplineControlPoints().size() <= 2 );
             if( ImGui::Button( "제어점 삭제###SplineRemove" ) && removeSplineControlPoint( splineControlIndex_ ) ) splineControlIndex_ = std::min( splineControlIndex_, getSplineControlPoints().size() - 1 );
             ImGui::EndDisabled();

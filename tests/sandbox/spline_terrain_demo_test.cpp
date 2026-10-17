@@ -1700,5 +1700,74 @@ int main()
         check( scene.getTerrainTrialComparison().status == terrainTrialComparisonStatus::noReference && !scene.getTerrainTrialComparison().gravityScaleChangesObserved, "missing reference does not produce an gravity scale summary" );
     }
 
+    for( const std::size_t segment : { 0u, 3u, 7u } )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        const std::vector<vec2> original{ scene.getSplineControlPoints().begin(), scene.getSplineControlPoints().end() };
+        const vec2 clicked = 0.5f * ( original[segment] + original[segment + 1] ) + vec2{ 0.0f, 0.15f };
+        const auto edge = scene.getShapes()[0];
+        const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
+        const transform2 ground{ { 2.0f, 3.0f }, rot2::FromRadians( 0.3f ) };
+        scene.getWorld().SetBodyTransform( edge.bodyHandle, ground );
+        scene.getWorld().SetShapeFriction( edge.shapeHandle, 0.42f );
+        scene.getWorld().SetBodyLinearVelocity( probe.bodyHandle, { 2.0f, 3.0f } );
+        demoInput click{};
+        click.mousePosition = TransformPoint( ground, clicked );
+        click.mousePressed = click.mouseHeld = click.insertControlPoint = click.selectTrialPosition = true;
+        scene.handleInput( click );
+        check( scene.getSplineControlPoints().size() == original.size() + 1, "Ctrl click inserts one spline control" );
+        check( near( scene.getSplineControlPoints()[segment + 1], clicked ), "inserted control uses the clicked local position instead of a curve midpoint" );
+        for( std::size_t i = 0; i < original.size(); ++i )
+            check( near( scene.getSplineControlPoints()[i <= segment ? i : i + 1], original[i] ), "nearest adjacent pair preserves A C B order and both endpoints" );
+        check( scene.getTerrainPointDragIndex() == segment + 1 && scene.getSplineTrialFraction() == 0.5f && !scene.getWorld().IsValid( scene.getMouseJoint() ), "Ctrl insertion selects C and takes precedence over Shift and probe dragging" );
+        check( scene.getShapes()[0].shapeHandle == edge.shapeHandle && scene.getWorld().GetShapeFriction( edge.shapeHandle ) == 0.42f && scene.getShapes()[scene.getTerrainPointCount() - 1].shapeHandle == probe.shapeHandle && near( scene.getWorld().GetBodyLinearVelocity( probe.bodyHandle ), { 2.0f, 3.0f } ), "click insertion preserves surviving edge properties and probe state" );
+        const auto samples = SampleAdaptive( { scene.getSplineControlPoints() }, scene.getSplineSamplingError() );
+        check( scene.getTerrainPointCount() == samples.size(), "click insertion updates adaptive chain geometry" );
+        for( std::size_t i = 0; i < samples.size(); ++i ) check( near( scene.getTerrainPoint( i ), samples[i] ), "click insertion retains the existing sampling path" );
+        click.mousePressed = click.insertControlPoint = click.selectTrialPosition = false;
+        click.mousePosition = scene.getWorld().GetBodyTransform( probe.bodyHandle ).position;
+        scene.handleInput( click );
+        check( scene.getSplineControlPoints().size() == original.size() + 1 && near( scene.getSplineControlPoints()[segment + 1], clicked ) && !scene.getWorld().IsValid( scene.getMouseJoint() ), "holding the click after releasing modifiers neither inserts again nor drags" );
+        click.mouseHeld = false;
+        scene.handleInput( click );
+        check( !scene.getTerrainPointDragIndex() && scene.undoSplineEdit(), "one Ctrl click creates one undoable edit" );
+        for( std::size_t i = 0; i < original.size(); ++i ) check( near( scene.getSplineControlPoints()[i], original[i] ), "undo restores original control order" );
+        check( !scene.canUndoSplineEdit() && scene.redoSplineEdit() && near( scene.getSplineControlPoints()[segment + 1], clicked ), "redo restores exactly the clicked control" );
+        click.mousePressed = click.mouseHeld = true;
+        click.mousePosition = TransformPoint( ground, clicked );
+        scene.handleInput( click );
+        click.mousePressed = false;
+        click.insertControlPoint = true;
+        click.mousePosition = TransformPoint( ground, clicked + vec2{ 0.0f, 0.1f } );
+        scene.handleInput( click );
+        check( scene.getSplineControlPoints().size() == original.size() + 1 && near( scene.getSplineControlPoints()[segment + 1], clicked + vec2{ 0.0f, 0.1f } ), "Ctrl pressed during an existing control drag does not insert" );
+        scene.cancelInput();
+        check( !scene.getTerrainPointDragIndex(), "cancel clears click editing input" );
+    }
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        demoInput click{};
+        click.mousePosition = scene.getSplineControlPoints()[3];
+        click.mousePressed = click.mouseHeld = click.insertControlPoint = true;
+        scene.handleInput( click );
+        check( scene.getSplineControlPoints().size() == 9 && !scene.canUndoSplineEdit() && !scene.getTerrainPointDragIndex() && !scene.getWorld().IsValid( scene.getMouseJoint() ), "duplicate-point insertion rejects the edit without history or fallback dragging" );
+        click.mousePressed = click.insertControlPoint = false;
+        click.mousePosition = scene.getWorld().GetBodyTransform( scene.getShapes()[scene.getTerrainPointCount() - 1].bodyHandle ).position;
+        scene.handleInput( click );
+        check( scene.getSplineControlPoints().size() == 9 && !scene.getWorld().IsValid( scene.getMouseJoint() ), "rejected insertion consumes the held gesture" );
+        scene.cancelInput();
+        click.mousePosition = 0.5f * ( scene.getSplineControlPoints()[1] + scene.getSplineControlPoints()[2] );
+        click.mousePressed = click.insertControlPoint = true;
+        scene.handleInput( click );
+        check( scene.getSplineControlPoints().size() == 10 && scene.undoSplineEdit(), "cancel allows a fresh insertion" );
+        click.mousePosition = scene.getSplineControlPoints()[3];
+        scene.handleInput( click );
+        check( scene.getSplineControlPoints().size() == 9 && scene.canRedoSplineEdit(), "rejected insertion preserves redo history" );
+        rigidBodyDemo polygon{ demoKind::terrainChain };
+        click.mousePosition = polygon.getTerrainPoint( 1 );
+        polygon.handleInput( click );
+        check( polygon.getTerrainPointCount() == 9 && polygon.getTerrainPointDragIndex() == 1, "Ctrl insertion leaves polygon terrain input unchanged" );
+    }
+
     return 0;
 }

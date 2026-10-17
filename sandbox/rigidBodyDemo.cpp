@@ -160,23 +160,26 @@ void rigidBodyDemo::handleInput( const demoInput& input )
         terrainPointDragIndex_.reset();
         splineDragRecorded_ = false;
         splineTrialDragging_ = false;
+        splineInserting_ = false;
     }
     else if( kind_ == demoKind::terrainChain || kind_ == demoKind::splineTerrain )
     {
         if( input.mousePressed )
         {
-            splineTrialDragging_ = kind_ == demoKind::splineTerrain && input.selectTrialPosition;
-            if( splineTrialDragging_ )
+            splineInserting_ = kind_ == demoKind::splineTerrain && input.insertControlPoint;
+            splineTrialDragging_ = kind_ == demoKind::splineTerrain && input.selectTrialPosition && !splineInserting_;
+            if( splineInserting_ || splineTrialDragging_ )
             {
                 terrainPointDragIndex_.reset();
                 splineDragRecorded_ = false;
                 endSplineSamplingEdit();
                 stopMouseDrag();
+                if( splineInserting_ ) insertSplineControlPointAt( input.mousePosition );
             }
             else startTerrainPointDrag( input.mousePosition );
         }
         if( splineTrialDragging_ ) updateSplineTrialPosition( input.mousePosition );
-        else if( terrainPointDragIndex_.has_value() )
+        else if( !splineInserting_ && terrainPointDragIndex_.has_value() )
         {
             updateTerrainPointDrag( input.mousePosition );
         }
@@ -187,7 +190,7 @@ void rigidBodyDemo::handleInput( const demoInput& input )
     {
         stopMouseDrag();
     }
-    else if( !terrainPointDragIndex_.has_value() && !splineTrialDragging_ )
+    else if( !terrainPointDragIndex_.has_value() && !splineTrialDragging_ && !splineInserting_ )
     {
         if( input.mousePressed && !world_.IsValid( mouseJoint_ ) )
         {
@@ -227,6 +230,7 @@ void rigidBodyDemo::cancelInput()
     terrainPointDragIndex_.reset();
     splineDragRecorded_ = false;
     splineTrialDragging_ = false;
+    splineInserting_ = false;
     updateCarMotors();
     stopMouseDrag();
 }
@@ -1047,9 +1051,38 @@ void rigidBodyDemo::updateSplineControlPoint( std::size_t pointIndex, vec2 point
 bool rigidBodyDemo::insertSplineControlPoint( std::size_t segmentIndex )
 {
     if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || segmentIndex >= splineControlPoints_.size() - 1 ) return false;
-    const vec2 midpoint = Evaluate( { splineControlPoints_ }, segmentIndex, 0.5f );
+    return insertSplineControlPoint( segmentIndex, Evaluate( { splineControlPoints_ }, segmentIndex, 0.5f ) );
+}
+
+bool rigidBodyDemo::insertSplineControlPointAt( vec2 point )
+{
+    if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) ) return false;
+    point = InverseTransformPoint( world_.GetBodyTransform( shapes_[0].bodyHandle ), point );
+    if( !IsFinite( point ) ) return false;
+    double bestDistance = std::numeric_limits<double>::infinity();
+    std::size_t segmentIndex = 0;
+    for( std::size_t i = 0; i + 1 < splineControlPoints_.size(); ++i )
+    {
+        const vec2 a = splineControlPoints_[i], b = splineControlPoints_[i + 1];
+        const double dx = static_cast<double>( b.x ) - a.x, dy = static_cast<double>( b.y ) - a.y;
+        const double px = static_cast<double>( point.x ) - a.x, py = static_cast<double>( point.y ) - a.y;
+        const double t = std::clamp( ( px * dx + py * dy ) / ( dx * dx + dy * dy ), 0.0, 1.0 );
+        const double ex = px - t * dx, ey = py - t * dy;
+        const double distance = ex * ex + ey * ey;
+        if( distance >= bestDistance ) continue;
+        bestDistance = distance;
+        segmentIndex = i;
+    }
+    if( !insertSplineControlPoint( segmentIndex, point ) ) return false;
+    terrainPointDragIndex_ = segmentIndex + 1;
+    return true;
+}
+
+bool rigidBodyDemo::insertSplineControlPoint( std::size_t segmentIndex, vec2 point )
+{
+    if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || segmentIndex >= splineControlPoints_.size() - 1 || !IsFinite( point ) ) return false;
     auto candidate = splineControlPoints_;
-    candidate.insert( candidate.begin() + static_cast<std::ptrdiff_t>( segmentIndex + 1 ), midpoint );
+    candidate.insert( candidate.begin() + static_cast<std::ptrdiff_t>( segmentIndex + 1 ), point );
     if( !updateSplineTerrain( candidate, splineSamplingError_ ) ) return false;
     rememberSplineEdit();
     splineControlPoints_.swap( candidate );
