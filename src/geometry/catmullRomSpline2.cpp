@@ -283,6 +283,24 @@ std::optional<double> GetLength( const catmullRomSpline2& spline, double toleran
     return length;
 }
 
+std::optional<double> GetDistance( const catmullRomSpline2& spline, std::size_t segmentIndex, float t, double tolerance )
+{
+    if( !IsValid( spline ) || segmentIndex >= GetSegmentCount( spline ) || !std::isfinite( t ) || t < 0.0f || t > 1.0f || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
+
+    const std::size_t count = GetSegmentCount( spline );
+    double distance = 0.0;
+    for( std::size_t i = 0; i <= segmentIndex; ++i )
+    {
+        const double end = i == segmentIndex ? t : 1.0;
+        if( end == 0.0 ) break;
+        const auto segmentLength = GetSegmentLength( spline, i, end, tolerance / ( 4.0 * count ) );
+        if( !segmentLength || *segmentLength <= 0.0 ) return {};
+        distance += *segmentLength;
+    }
+    if( !std::isfinite( distance ) || tolerance < 32.0 * std::numeric_limits<double>::epsilon() * distance ) return {};
+    return distance;
+}
+
 std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, double distance, double tolerance )
 {
     if( !std::isfinite( distance ) || distance < 0.0 ) return {};

@@ -430,5 +430,60 @@ int main()
     check( near( SecondDerivative( loop, GetSegmentCount( loop ), 0.5f ), {} ), "second derivative rejects invalid closed segment indices in Release" );
 #endif
 
+    for( float t : { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f } )
+    {
+        const auto distance = GetDistance( spline, 0, t, 1.0e-6 );
+        check( distance && std::abs( *distance - t * std::sqrt( 20.0 ) ) < 1.0e-6, "parameter distance matches analytic straight length including endpoints" );
+    }
+    const auto unevenDistance = GetDistance( { unevenLine }, 1, 0.5f, 1.0e-6 );
+    check( unevenDistance && std::abs( *unevenDistance - Evaluate( { unevenLine }, 1, 0.5f ).x ) < 1.0e-6 && std::abs( *unevenDistance - 8.5 ) > 0.01, "parameter distance integrates nonuniform t and includes preceding segments" );
+    for( const auto candidate : { curve, unevenCurve, loop, unevenLoop } )
+    {
+        constexpr std::size_t subdivisions = 4096;
+        const auto reference = Sample( candidate, subdivisions );
+        const auto total = GetLength( candidate, 1.0e-5 );
+        const auto startDistance = GetDistance( candidate, 0, 0.0f, 1.0e-5 );
+        const auto endDistance = GetDistance( candidate, GetSegmentCount( candidate ) - 1, 1.0f, 1.0e-5 );
+        check( total && startDistance && endDistance && *startDistance == 0.0 && *endDistance == *total, "open and closed parameter endpoints preserve zero and full length" );
+        double referenceDistance = 0.0, previousDistance = 0.0;
+        for( std::size_t i = 0; i < reference.size(); ++i )
+        {
+            if( i > 0 ) referenceDistance += std::hypot( static_cast<double>( reference[i].x ) - reference[i - 1].x, static_cast<double>( reference[i].y ) - reference[i - 1].y );
+            if( i % ( subdivisions / 4 ) != 0 ) continue;
+            const std::size_t segment = std::min( i / subdivisions, GetSegmentCount( candidate ) - 1 );
+            const float t = static_cast<float>( i - segment * subdivisions ) / subdivisions;
+            const auto distance = GetDistance( candidate, segment, t, 1.0e-5 );
+            check( distance && std::abs( *distance - referenceDistance ) < 3.0e-4 && *distance >= previousDistance, "parameter distance agrees with independent dense lengths and increases along the path" );
+            const auto roundTrip = EvaluateByDistance( candidate, *distance, 1.0e-5 );
+            check( roundTrip && near( roundTrip->point, Evaluate( candidate, segment, t ), 2.0e-4f ), "parameter distance round trips through distance lookup on open and closed paths" );
+            previousDistance = *distance;
+        }
+        for( std::size_t segment = 1; segment < GetSegmentCount( candidate ); ++segment )
+        {
+            const auto left = GetDistance( candidate, segment - 1, 1.0f, 1.0e-5 );
+            const auto right = GetDistance( candidate, segment, 0.0f, 1.0e-5 );
+            check( left && right && *left == *right, "both parameter representations of an internal join have the same distance" );
+        }
+    }
+    const auto stationaryDistance = GetDistance( { reversal }, 0, 1.0f, 1.0e-6 );
+    check( stationaryDistance && std::abs( *stationaryDistance - 1.0 ) < 1.0e-6, "parameter distance succeeds at a zero tangent without inventing a direction" );
+    const auto curveProjection = ClosestPoint( curve, { 1.2f, 0.4f }, 1.0e-5 );
+    check( curveProjection.has_value(), "closest point provides a parameter for distance conversion" );
+    const auto projectionDistance = GetDistance( curve, curveProjection->segmentIndex, curveProjection->t, 1.0e-5 );
+    check( projectionDistance.has_value(), "closest point parameter converts to path distance" );
+    const auto projectionRoundTrip = EvaluateByDistance( curve, *projectionDistance, 1.0e-5 );
+    check( projectionRoundTrip && near( projectionRoundTrip->point, curveProjection->point, 2.0e-5f ), "closest point distance round trip preserves the selected curve point" );
+    editable[1] = { 6.0f, 0.0f };
+    const auto editedDistance = GetDistance( editableCurve, 0, 0.5f, 1.0e-6 );
+    check( editedDistance && *editedDistance == 3.0, "parameter distance observes edited borrowed controls without a cache" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ single }, catmullRomSpline2{ repeated }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ repeatedStart, true } } )
+        check( !GetDistance( invalid, 0, 0.0f, 1.0e-6 ), "parameter distance validates the spline even at the zero endpoint" );
+    for( float t : { -0.1f, 1.1f, nan, infinity } )
+        check( !GetDistance( curve, 1, t, 1.0e-6 ), "parameter distance rejects invalid t without assertions or clamping" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ) } )
+        check( !GetDistance( spline, 0, 0.0f, tolerance ), "parameter distance rejects invalid tolerance even at the zero endpoint" );
+    check( !GetDistance( curve, GetSegmentCount( curve ), 0.5f, 1.0e-6 ) && !GetDistance( loop, std::numeric_limits<std::size_t>::max(), 0.0f, 1.0e-6 ), "parameter distance rejects out-of-range open and closed segment indices" );
+    check( !GetDistance( curve, 1, 0.5f, 1.0e-30 ) && !GetDistance( curve, 1, 0.5f, std::numeric_limits<double>::denorm_min() ), "parameter distance fails explicitly when positive-distance precision is unattainable" );
+
     return 0;
 }

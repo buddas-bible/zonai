@@ -54,6 +54,10 @@ struct splineSample2
 // 목표 절대 길이 오차로 적분함. 잘못된 입력 / 수렴 실패는 nullopt. 지형 샘플링 오차와 별개임.
 std::optional<double> GetLength( const catmullRomSpline2& spline, double tolerance );
 
+// 경로 시작부터 구간별 t in [0, 1]까지의 길이. tolerance는 양수인 절대 길이 오차 목표.
+// 닫힌 경로의 마지막 끝은 전체 길이. 0 접선도 허용하며 잘못된 입력 / 정밀도 부족은 nullopt.
+std::optional<double> GetDistance( const catmullRomSpline2& spline, std::size_t segmentIndex, float t, double tolerance );
+
 // distance in [0, GetLength]. 곡선 위 위치와 진행 방향 단위 접선. 0 접선 / 정밀도 부족도 nullopt.
 std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, double distance, double tolerance );
 
