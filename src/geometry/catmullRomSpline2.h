@@ -31,6 +31,12 @@ vec2 Evaluate( const catmullRomSpline2& spline, std::size_t segmentIndex, float 
 // 같은 입력 계약으로 구간별 t에 대한 미분을 반환함. 단위 접선이나 arc-length 미분은 아님.
 vec2 Derivative( const catmullRomSpline2& spline, std::size_t segmentIndex, float t );
 
+// 같은 입력 계약으로 구간별 t에 대한 2차 미분. 접합점은 지정한 구간 쪽 값을 반환함.
+vec2 SecondDerivative( const catmullRomSpline2& spline, std::size_t segmentIndex, float t );
+
+// 반시계 방향이 양수인 곡률. 잘못된 입력 / 0 접선 / 비유한 결과는 nullopt. 접합점 연속성은 보장하지 않음.
+std::optional<double> Curvature( const catmullRomSpline2& spline, std::size_t segmentIndex, float t );
+
 // 각 구간을 같은 수로 분할하며 접합점은 한 번만 넣음. 닫힌 결과는 끝에 첫 점을 반복함.
 // 잘못된 입력 / 불가능한 점 수는 빈 배열.
 std::vector<vec2> Sample( const catmullRomSpline2& spline, std::size_t subdivisions );
