@@ -81,6 +81,11 @@ struct splineParameter2
     float t = 0.0f;
 };
 
+// 정방향 범위의 부분 길이를 직접 합산함. 내부 접합점의 앞 t=1 / 다음 t=0은 같은 지점.
+// 닫힌 시작과 한 바퀴 끝은 구분하며 자동 순환하지 않음. 같은 지점은 0, 0 접선도 허용함.
+// tolerance는 전체 범위의 양수인 절대 길이 오차 목표. 잘못된 입력 / 역순 / 정밀도 또는 수렴 실패는 nullopt.
+std::optional<double> GetLength( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, double tolerance );
+
 // distance in [0, GetLength]을 구간 / t로 역산함. tolerance는 양수인 절대 길이 오차 목표이며 t 오차는 아님.
 // 시작은 {0, 0}, 마지막 끝은 {마지막 구간, 1}, 정확한 내부 접합점은 앞 구간 t=1.
 // 0 접선도 허용하며 잘못된 입력 / 수렴 실패 / float t 정밀도 부족은 nullopt.
