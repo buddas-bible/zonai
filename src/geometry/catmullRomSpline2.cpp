@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <queue>
 
 namespace zonai
 {
@@ -302,6 +303,115 @@ std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline
             else upper = t;
         }
         return {};
+    }
+    return {};
+}
+
+std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, const vec2& point, double tolerance )
+{
+    if( !IsValid( spline ) || !IsFinite( point ) || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
+    constexpr std::size_t MAX_NODES = 4096;
+    const std::size_t count = GetSegmentCount( spline );
+    if( count > MAX_NODES ) return {};
+    double scale = std::max( std::abs( static_cast<double>( point.x ) ), std::abs( static_cast<double>( point.y ) ) );
+    for( const vec2 control : spline.points ) scale = std::max( { scale, std::abs( static_cast<double>( control.x ) ), std::abs( static_cast<double>( control.y ) ) } );
+    const double roundoff = 128.0 * std::numeric_limits<double>::epsilon() * scale;
+    if( tolerance < 8.0 * roundoff ) return {};
+    struct node
+    {
+        std::array<bezierPoint2, 4> curve;
+        std::size_t segment;
+        double a, b, lower;
+        int depth;
+    };
+    const auto farther = []( const node& a, const node& b )
+    {
+        if( a.lower != b.lower ) return a.lower > b.lower;
+        if( a.segment != b.segment ) return a.segment > b.segment;
+        return a.a > b.a;
+    };
+    std::priority_queue<node, std::vector<node>, decltype( farther )> pending{ farther };
+    const auto lowerBound = [&]( const std::array<bezierPoint2, 4>& curve, int depth )
+    {
+        double minX = curve[0].x, maxX = minX, minY = curve[0].y, maxY = minY;
+        for( const auto control : curve )
+        {
+            minX = std::min( minX, control.x ); maxX = std::max( maxX, control.x );
+            minY = std::min( minY, control.y ); maxY = std::max( maxY, control.y );
+        }
+        const double dx = std::max( { minX - point.x, 0.0, point.x - maxX } );
+        const double dy = std::max( { minY - point.y, 0.0, point.y - maxY } );
+        // Hull 경계의 하한에 분할 반올림 여유를 남겨 조기 종료를 피함.
+        return std::max( 0.0, std::hypot( dx, dy ) - roundoff * ( depth + 1 ) );
+    };
+    splineClosestPoint2 best{};
+    double bestDistance = std::numeric_limits<double>::infinity();
+    const auto consider = [&]( std::size_t segment, double parameter )
+    {
+        const float t = static_cast<float>( parameter );
+        const vec2 candidate = Evaluate( spline, segment, t );
+        if( !IsFinite( candidate ) ) return;
+        if( t > 0.0f && t < 1.0f )
+        {
+            vec2 tangent1{}, tangent2{};
+            GetTangents( spline, segment, tangent1, tangent2 );
+            const vec2 a = spline.points[segment], b = GetPoint( spline, segment + 1 );
+            const double dx = static_cast<double>( b.x ) - a.x, dy = static_cast<double>( b.y ) - a.y;
+            const double qx = 3.0 * dx - 2.0 * tangent1.x - tangent2.x, qy = 3.0 * dy - 2.0 * tangent1.y - tangent2.y;
+            const double cx = tangent1.x + static_cast<double>( tangent2.x ) - 2.0 * dx, cy = tangent1.y + static_cast<double>( tangent2.y ) - 2.0 * dy;
+            const double ex = ( static_cast<double>( candidate.x ) - a.x ) - t * ( tangent1.x + t * ( qx + t * cx ) );
+            const double ey = ( static_cast<double>( candidate.y ) - a.y ) - t * ( tangent1.y + t * ( qy + t * cy ) );
+            if( std::hypot( ex, ey ) > 0.25 * tolerance ) return;
+        }
+        const double dx = static_cast<double>( candidate.x ) - point.x, dy = static_cast<double>( candidate.y ) - point.y;
+        const double distance = std::hypot( dx, dy );
+        if( distance < bestDistance || ( distance == bestDistance && ( segment < best.segmentIndex || ( segment == best.segmentIndex && t < best.t ) ) ) )
+        {
+            best = { candidate, segment, t, dx * dx + dy * dy };
+            bestDistance = distance;
+        }
+    };
+    for( std::size_t i = 0; i < count; ++i )
+    {
+        vec2 tangent1{}, tangent2{};
+        GetTangents( spline, i, tangent1, tangent2 );
+        if( !IsFinite( tangent1 ) || !IsFinite( tangent2 ) ) return {};
+        const vec2 a = spline.points[i], b = GetPoint( spline, i + 1 );
+        const std::array<bezierPoint2, 4> curve{
+            bezierPoint2{ a.x, a.y },
+            bezierPoint2{ a.x + static_cast<double>( tangent1.x ) / 3.0, a.y + static_cast<double>( tangent1.y ) / 3.0 },
+            bezierPoint2{ b.x - static_cast<double>( tangent2.x ) / 3.0, b.y - static_cast<double>( tangent2.y ) / 3.0 },
+            bezierPoint2{ b.x, b.y }
+        };
+        consider( i, 0.0 ); consider( i, 1.0 );
+        pending.push( { curve, i, 0.0, 1.0, lowerBound( curve, 0 ), 0 } );
+    }
+    const auto midpoint = []( bezierPoint2 a, bezierPoint2 b )
+    {
+        return bezierPoint2{ 0.5 * ( a.x + b.x ), 0.5 * ( a.y + b.y ) };
+    };
+    for( std::size_t visited = 0; !pending.empty() && visited < MAX_NODES; ++visited )
+    {
+        const node current = pending.top();
+        pending.pop();
+        if( bestDistance - current.lower <= 0.75 * tolerance ) return best;
+        const double middle = 0.5 * ( current.a + current.b );
+        consider( current.segment, middle );
+        const auto& curve = current.curve;
+        const double dx = curve[3].x - curve[0].x, dy = curve[3].y - curve[0].y;
+        const double lengthSquared = dx * dx + dy * dy;
+        const double projection = lengthSquared > 0.0 ? std::clamp( ( ( point.x - curve[0].x ) * dx + ( point.y - curve[0].y ) * dy ) / lengthSquared, 0.0, 1.0 ) : 0.5;
+        consider( current.segment, current.a + ( current.b - current.a ) * projection );
+        if( bestDistance - current.lower <= 0.75 * tolerance ) return best;
+        constexpr int MAX_DEPTH = 24;
+        if( current.depth == MAX_DEPTH ) return {};
+        const auto a = midpoint( curve[0], curve[1] ), b = midpoint( curve[1], curve[2] ), c = midpoint( curve[2], curve[3] );
+        const auto d = midpoint( a, b ), e = midpoint( b, c ), center = midpoint( d, e );
+        const std::array<bezierPoint2, 4> left{ curve[0], a, d, center }, right{ center, e, c, curve[3] };
+        const double leftLower = lowerBound( left, current.depth + 1 ), rightLower = lowerBound( right, current.depth + 1 );
+        if( leftLower <= bestDistance ) pending.push( { left, current.segment, current.a, middle, leftLower, current.depth + 1 } );
+        if( rightLower <= bestDistance ) pending.push( { right, current.segment, middle, current.b, rightLower, current.depth + 1 } );
+        if( pending.empty() ) return best;
     }
     return {};
 }

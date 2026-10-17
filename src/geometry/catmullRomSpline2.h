@@ -51,4 +51,15 @@ std::optional<double> GetLength( const catmullRomSpline2& spline, double toleran
 // distance in [0, GetLength]. 곡선 위 위치와 진행 방향 단위 접선. 0 접선 / 정밀도 부족도 nullopt.
 std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, double distance, double tolerance );
 
+struct splineClosestPoint2
+{
+    vec2 point{};
+    std::size_t segmentIndex = 0;
+    float t = 0.0f;
+    double distanceSquared = 0.0;
+};
+
+// 최소거리의 절대오차 목표 tolerance는 유한한 양수. 잘못된 입력 / 정밀도 부족 / 탐색 한도 초과는 nullopt.
+std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, const vec2& point, double tolerance );
+
 } // namespace zonai
