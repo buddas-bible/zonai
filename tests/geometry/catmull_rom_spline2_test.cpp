@@ -578,5 +578,46 @@ int main()
         check( !GetParameterByDistance( curve, 0.5, tolerance ), "inverse parameters reject invalid tolerance and unattainable integration precision" );
     check( !GetParameterByDistance( { unitLine }, 1.0 / 3.0, 1.0e-12 ), "inverse parameters fail when float t cannot attain the length tolerance" );
 
+    const auto uniformLine = SampleByDistance( spline, 4, 1.0e-6 );
+    check( uniformLine.size() == 5, "distance sampling returns whole-path subdivision count plus one" );
+    for( std::size_t i = 0; i < uniformLine.size(); ++i )
+        check( near( uniformLine[i], { 1.0f + static_cast<float>( i ), 2.0f + 0.5f * static_cast<float>( i ) } ), "distance samples match analytic straight positions including endpoints" );
+    const auto minimumSamples = SampleByDistance( curve, 1, 1.0e-5 );
+    check( minimumSamples.size() == 2 && near( minimumSamples.front(), points[0] ) && near( minimumSamples.back(), points[3] ), "one whole-path subdivision returns only the open endpoints" );
+    const auto unevenSamples = SampleByDistance( { unevenLine }, 4, 1.0e-5 );
+    check( unevenSamples.size() == 5, "nonuniform straight path uses a whole-path rather than per-segment count" );
+    for( std::size_t i = 0; i < unevenSamples.size(); ++i )
+        check( near( unevenSamples[i], { 7.25f * static_cast<float>( i ), 0.0f } ), "uneven collinear control spacing still produces equal distance samples" );
+    for( const auto candidate : { curve, unevenCurve, loop, unevenLoop } )
+    {
+        const auto length = GetLength( candidate, 1.0e-5 );
+        const auto samples = SampleByDistance( candidate, 16, 1.0e-5 );
+        check( length && samples.size() == 17 && near( samples.front(), candidate.points.front() ) && near( samples.back(), candidate.isLoop ? candidate.points.front() : candidate.points.back() ), "distance samples preserve open and closed endpoint conventions" );
+        double previousTarget = 0.0;
+        for( std::size_t i = 0; i < samples.size(); ++i )
+        {
+            const double target = *length * ( static_cast<double>( i ) / 16.0 );
+            const auto parameter = GetParameterByDistance( candidate, target, 1.0e-5 );
+            check( parameter && near( samples[i], Evaluate( candidate, parameter->segmentIndex, parameter->t ) ), "distance samples evaluate the target arc-length parameter" );
+            const auto measured = GetDistance( candidate, parameter->segmentIndex, parameter->t, 1.0e-5 );
+            check( measured && std::abs( *measured - target ) <= 1.0e-5, "each sample agrees with its cumulative arc-length target" );
+            if( i > 0 ) check( std::abs( target - previousTarget - *length / 16.0 ) < 1.0e-12, "sampling targets have equal arc-length intervals" );
+            previousTarget = target;
+        }
+    }
+    const auto stationarySamples = SampleByDistance( { reversal }, 2, 1.0e-6 );
+    check( stationarySamples.size() == 3 && near( stationarySamples[0], reversal[0] ) && near( stationarySamples[1], reversal[1] ) && near( stationarySamples[2], reversal[2] ) && !EvaluateByDistance( { reversal }, 1.0, 1.0e-6 ), "position sampling accepts zero tangents while unit tangent lookup retains its failure policy" );
+    check( SampleByDistance( { translatedLine }, 2, 1.0e-6 ).empty(), "distance sampling rejects unrepresentable float positions without partial output" );
+    check( SampleByDistance( { unitLine }, 3, 1.0e-12 ).empty(), "distance sampling rejects unrepresentable inverse parameters without partial output" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ repeated }, catmullRomSpline2{ infinite }, catmullRomSpline2{ repeatedStart, true } } )
+        check( SampleByDistance( invalid, 4, 1.0e-5 ).empty(), "distance sampling rejects invalid paths without assertions" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), 1.0e-30 } )
+        check( SampleByDistance( curve, 4, tolerance ).empty(), "distance sampling rejects invalid or unattainable length tolerance" );
+    for( std::size_t count : { std::size_t{ 0 }, std::vector<vec2>{}.max_size(), std::numeric_limits<std::size_t>::max() } )
+        check( SampleByDistance( spline, count, 1.0e-6 ).empty(), "distance sampling rejects zero and impossible output counts before allocation" );
+    editable[1] = { 4.0f, 0.0f };
+    const auto editedDistanceSamples = SampleByDistance( editableCurve, 2, 1.0e-6 );
+    check( editedDistanceSamples.size() == 3 && near( editedDistanceSamples[1], { 2.0f, 0.0f } ), "distance sampling observes edited borrowed controls" );
+
     return 0;
 }
