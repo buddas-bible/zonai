@@ -52,6 +52,7 @@ struct demoInput
     bool mouseHeld = false;
     bool selectTrialPosition = false;
     bool insertControlPoint = false;
+    float pixelsPerMeter = 55.0f;
     bool impulsePressed = false;
     bool left = false;
     bool right = false;

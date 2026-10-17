@@ -8,6 +8,7 @@
 #include <variant>
 #include <limits>
 #include "geometry/catmullRomSpline2.h"
+#include "geometry/segment2.h"
 
 using namespace zonai;
 using namespace zonai::sandbox;
@@ -1704,7 +1705,7 @@ int main()
     {
         rigidBodyDemo scene{ demoKind::splineTerrain };
         const std::vector<vec2> original{ scene.getSplineControlPoints().begin(), scene.getSplineControlPoints().end() };
-        const vec2 clicked = 0.5f * ( original[segment] + original[segment + 1] ) + vec2{ 0.0f, 0.15f };
+        const vec2 clicked = Evaluate( { original }, segment, 0.5f ) + vec2{ 0.0f, 0.05f };
         const auto edge = scene.getShapes()[0];
         const auto probe = scene.getShapes()[scene.getTerrainPointCount() - 1];
         const transform2 ground{ { 2.0f, 3.0f }, rot2::FromRadians( 0.3f ) };
@@ -1767,6 +1768,87 @@ int main()
         click.mousePosition = polygon.getTerrainPoint( 1 );
         polygon.handleInput( click );
         check( polygon.getTerrainPointCount() == 9 && polygon.getTerrainPointDragIndex() == 1, "Ctrl insertion leaves polygon terrain input unchanged" );
+    }
+
+    for( float pixelsPerMeter : { 10.0f, 40.0f, 160.0f } )
+    {
+        for( int boundary : { -1, 0, 1 } )
+        {
+            rigidBodyDemo scene{ demoKind::splineTerrain };
+            while( scene.getSplineControlPoints().size() > 2 ) check( scene.removeSplineControlPoint( scene.getSplineControlPoints().size() - 1 ), "straight click fixture removes controls" );
+            demoInput drag{};
+            drag.mousePosition = scene.getSplineControlPoints()[1];
+            drag.mousePressed = drag.mouseHeld = true;
+            scene.handleInput( drag );
+            drag.mousePressed = false;
+            drag.mousePosition.y = -2.0f;
+            scene.handleInput( drag );
+            scene.cancelInput();
+            check( near( scene.getSplineControlPoints()[1], { 6.0f, -2.0f } ), "straight click fixture flattens the edge" );
+            const float edge = -2.0f + 10.0f / pixelsPerMeter;
+            demoInput click{};
+            click.pixelsPerMeter = pixelsPerMeter;
+            click.mousePosition = { 7.0f, boundary == 0 ? edge : std::nextafter( edge, boundary < 0 ? -std::numeric_limits<float>::infinity() : std::numeric_limits<float>::infinity() ) };
+            click.mousePressed = click.mouseHeld = click.insertControlPoint = true;
+            scene.handleInput( click );
+            check( scene.getSplineControlPoints().size() == ( boundary <= 0 ? 3u : 2u ), "Ctrl insertion accepts inside/equal 10px and rejects outside at every zoom" );
+            check( !scene.getWorld().IsValid( scene.getMouseJoint() ), "distance-gated Ctrl clicks never fall back to physics dragging" );
+            if( boundary <= 0 ) check( near( scene.getSplineControlPoints()[1], click.mousePosition ), "accepted click preserves the clicked position rather than snapping" );
+            else
+            {
+                check( scene.undoSplineEdit() && near( scene.getSplineControlPoints()[1], { 6.0f, -1.2f } ), "a missed click preserves the previous undo entry" );
+            }
+        }
+    }
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        const auto original = scene.getSplineControlPoints();
+        vec2 curveClick{}, polygonClick{};
+        float greatestPolygonDistance = 0.0f;
+        double greatestCurveDistance = 0.0;
+        std::size_t selectedSegment = 0;
+        for( std::size_t i = 0; i + 1 < original.size(); ++i )
+        {
+            const vec2 onCurve = Evaluate( { original }, i, 0.5f );
+            float polygonDistance = std::numeric_limits<float>::infinity();
+            for( std::size_t j = 0; j + 1 < original.size(); ++j ) polygonDistance = std::min( polygonDistance, DistanceSquared( segment2{ original[j], original[j + 1] }, onCurve ) );
+            if( polygonDistance > greatestPolygonDistance ) { greatestPolygonDistance = polygonDistance; curveClick = onCurve; selectedSegment = i; }
+            const vec2 onPolygon = 0.5f * ( original[i] + original[i + 1] );
+            const auto closest = ClosestPoint( { original }, onPolygon, 1.0e-5 );
+            check( closest.has_value(), "curve distance fixture converges" );
+            if( closest->distanceSquared > greatestCurveDistance ) { greatestCurveDistance = closest->distanceSquared; polygonClick = onPolygon; }
+        }
+        const float radius = 10.0f / 240.0f;
+        check( greatestPolygonDistance > radius * radius && greatestCurveDistance > radius * radius, "curve and control polygon are distinguishable at this zoom" );
+        demoInput click{};
+        click.pixelsPerMeter = 240.0f;
+        click.mousePressed = click.mouseHeld = click.insertControlPoint = true;
+        click.mousePosition = polygonClick;
+        scene.handleInput( click );
+        check( scene.getSplineControlPoints().size() == 9 && !scene.canUndoSplineEdit(), "clicking a control polygon edge away from the actual curve is ignored" );
+        click.mousePressed = false;
+        click.mousePosition = curveClick;
+        scene.handleInput( click );
+        check( scene.getSplineControlPoints().size() == 9, "a missed Ctrl click consumes the held gesture even after moving onto the curve" );
+        scene.cancelInput();
+        click.mousePressed = true;
+        scene.handleInput( click );
+        check( scene.getSplineControlPoints().size() == 10 && near( scene.getSplineControlPoints()[selectedSegment + 1], curveClick ), "actual curve clicks insert into the curve segment even away from control polygon edges" );
+        check( scene.undoSplineEdit() && scene.canRedoSplineEdit(), "accepted curve click remains undoable" );
+        scene.cancelInput();
+        click.mousePosition = { 0.0f, 100.0f };
+        scene.handleInput( click );
+        check( scene.getSplineControlPoints().size() == 9 && scene.canRedoSplineEdit() && !scene.getWorld().IsValid( scene.getMouseJoint() ), "distant empty-space clicks preserve redo history without adding or dragging" );
+    }
+    for( float scale : { 0.0f, -1.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN() } )
+    {
+        rigidBodyDemo scene{ demoKind::splineTerrain };
+        demoInput click{};
+        click.pixelsPerMeter = scale;
+        click.mousePosition = Evaluate( { scene.getSplineControlPoints() }, 2, 0.5f );
+        click.mousePressed = click.mouseHeld = click.insertControlPoint = true;
+        scene.handleInput( click );
+        check( scene.getSplineControlPoints().size() == 9 && !scene.canUndoSplineEdit(), "invalid camera scales reject insertion without history" );
     }
 
     return 0;

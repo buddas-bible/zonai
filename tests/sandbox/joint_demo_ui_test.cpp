@@ -9,6 +9,7 @@
 #include "debug/debugDraw.h"
 #include "jointDemoView.h"
 #include "rigidBodyDemoUi.h"
+#include "geometry/catmullRomSpline2.h"
 
 using namespace zonai;
 using namespace zonai::sandbox;
@@ -333,7 +334,7 @@ int main()
             if( frame == 0 )
             {
                 demoInput click{};
-                click.mousePosition = 0.5f * ( original[0] + original[1] ) + vec2{ 0.0f, 0.15f };
+                click.mousePosition = Evaluate( { original }, 0, 0.5f );
                 click.mousePressed = click.mouseHeld = click.insertControlPoint = true;
                 topologyView.handleInput( click );
             }
@@ -353,7 +354,7 @@ int main()
             ImGui::LogToBuffer();
             topologyView.drawControls();
             const std::string_view log{ GImGui->LogBuffer.c_str() };
-            if( log.find( "Ctrl+왼쪽 클릭" ) == std::string_view::npos ) fail( "Spline controls must explain click insertion" );
+            if( log.find( "Ctrl+왼쪽 클릭" ) == std::string_view::npos || log.find( "10px" ) == std::string_view::npos ) fail( "Spline controls must explain the 10px click insertion limit" );
             if( log.find( "다음 구간에 추가" ) != std::string_view::npos ) fail( "Midpoint insertion button must be replaced by click input" );
             ImGui::LogFinish();
             ImGui::End();
@@ -1223,6 +1224,28 @@ int main()
         {
             std::fprintf( stderr, "Damping kind %d: %g / %g, expected %g\n", static_cast<int>( kind ), dampingView.getWorld().GetBodyLinearDamping( body ), dampingView.getWorld().GetBodyAngularDamping( body ), expected );
             fail( "Prescribed spline motion must block damping edits while other demos retain damping controls" );
+        }
+    }
+    for( float zoom : { 20.0f, 200.0f } )
+    {
+        for( float offset : { 9.0f, 11.0f } )
+        {
+            rigidBodyDemoUi scene{ demoKind::splineTerrain };
+            while( scene.getSplineControlPoints().size() > 2 )
+                if( !scene.removeSplineControlPoint( scene.getSplineControlPoints().size() - 1 ) ) fail( "Camera click fixture removes controls" );
+            const auto points = scene.getSplineControlPoints();
+            const vec2 delta = points[1] - points[0];
+            const vec2 normal = Normalize( vec2{ -delta.y, delta.x } );
+            debugCamera camera{};
+            camera.pixelsPerMeter = zoom;
+            const vec2 target = 0.5f * ( points[0] + points[1] ) + normal * ( offset / zoom );
+            const ImVec2 screen = camera.WorldToScreen( target, { 0, 0 }, { 1000, 800 } );
+            demoInput click{};
+            click.mousePosition = camera.ScreenToWorld( screen, { 0, 0 }, { 1000, 800 } );
+            click.pixelsPerMeter = camera.pixelsPerMeter;
+            click.mousePressed = click.mouseHeld = click.insertControlPoint = true;
+            scene.handleInput( click );
+            if( scene.getSplineControlPoints().size() != ( offset < 10.0f ? 3u : 2u ) ) fail( "Curve insertion must use a fixed pixel distance through camera conversion" );
         }
     }
     ImGui::DestroyContext();
