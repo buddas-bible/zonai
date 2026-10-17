@@ -241,5 +241,96 @@ int main()
     const auto editedSample = EvaluateByDistance( editableCurve, 3.0, 1.0e-6 );
     check( editedSample && near( editedSample->point, { 0.0f, 3.0f } ) && near( editedSample->tangent, { 0.0f, 1.0f } ), "distance lookup observes current borrowed control points without a cache" );
 
+    const vec2 square[] = { { 0.0f, 0.0f }, { 2.0f, 0.0f }, { 2.0f, 2.0f }, { 0.0f, 2.0f } };
+    const catmullRomSpline2 loop{ square, true };
+    check( !spline.isLoop && GetSegmentCount( { square } ) == 3, "loop option defaults to the existing open path" );
+    check( IsValid( loop ) && GetSegmentCount( loop ) == 4, "closed spline includes the last-to-first segment" );
+    const vec2 triangle[] = { { 0.0f, 0.0f }, { 3.0f, 0.0f }, { 0.0f, 2.0f } };
+    check( IsValid( { triangle, true } ) && GetSegmentCount( { triangle, true } ) == 3, "three controls form the minimum closed spline" );
+    check( !IsValid( { {}, true } ) && !IsValid( { single, true } ) && !IsValid( { line, true } ) && GetSegmentCount( { line, true } ) == 0, "closed spline requires at least three controls" );
+    const vec2 repeatedStart[] = { { 0.0f, 0.0f }, { 2.0f, 0.0f }, { 1.0f, 2.0f }, { 0.0f, 0.0f } };
+    check( !IsValid( { repeatedStart, true } ) && IsValid( { repeatedStart } ), "closed controls must not repeat the first point at the end" );
+    const vec2 closingOverflow[] = { { -1.0e19f, 0.0f }, { 0.0f, 0.0f }, { 1.0e19f, 0.0f } };
+    const vec2 closingUnderflow[] = { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0e-30f, 0.0f } };
+    check( IsValid( { closingOverflow } ) && !IsValid( { closingOverflow, true } ) && IsValid( { closingUnderflow } ) && !IsValid( { closingUnderflow, true } ), "closed validation includes closing edge overflow and underflow" );
+    check( !IsValid( { repeated, true } ) && !IsValid( { repeatedStart, true } ), "closed validation rejects adjacent duplicate controls" );
+    for( std::size_t segment = 0; segment < 4; ++segment )
+    {
+        check( near( Evaluate( loop, segment, 0.0f ), square[segment] ) && near( Evaluate( loop, segment, 1.0f ), square[( segment + 1 ) % 4] ), "closed segments interpolate their controls through the seam" );
+        check( near( Derivative( loop, segment, 1.0f ), Derivative( loop, ( segment + 1 ) % 4, 0.0f ) ), "equal-length closed segments share seam derivatives" );
+    }
+    check( near( Derivative( loop, 0, 0.0f ), { 1.0f, -1.0f } ) && near( Evaluate( loop, 0, 0.5f ), { 1.0f, -0.25f } ), "first closed segment uses the last control as its previous neighbor" );
+    check( near( Evaluate( loop, 3, 0.5f ), { -0.25f, 1.0f } ), "closing segment wraps both endpoint and next neighbor" );
+    const vec2 unevenLoopPoints[] = { { 0.0f, 0.0f }, { 4.0f, 0.0f }, { 4.0f, 9.0f }, { -1.0f, 3.0f } };
+    const catmullRomSpline2 unevenLoop{ unevenLoopPoints, true };
+    for( std::size_t segment = 0; segment < 4; ++segment )
+    {
+        const auto next = ( segment + 1 ) % 4;
+        const float interval = std::sqrt( Length( unevenLoopPoints[next] - unevenLoopPoints[segment] ) );
+        const float nextInterval = std::sqrt( Length( unevenLoopPoints[( next + 1 ) % 4] - unevenLoopPoints[next] ) );
+        check( near( Derivative( unevenLoop, segment, 1.0f ) / interval, Derivative( unevenLoop, next, 0.0f ) / nextInterval ), "unequal closed segments preserve knot-space seam derivatives" );
+    }
+    const auto closedFixed = Sample( loop, 4 );
+    const auto closedAdaptive = SampleAdaptive( loop, 0.01f );
+    check( closedFixed.size() == 17 && near( closedFixed.front(), square[0] ) && near( closedFixed.back(), square[0] ), "fixed closed samples append one terminal first point" );
+    check( closedAdaptive.size() > 4 && near( closedAdaptive.front(), square[0] ) && near( closedAdaptive.back(), square[0] ), "adaptive samples include the complete closing segment" );
+    for( const auto* samples : { &closedFixed, &closedAdaptive } )
+        for( std::size_t control = 0; control < 4; ++control )
+        {
+            std::size_t occurrences = 0;
+            for( const vec2 point : *samples ) occurrences += near( point, square[control] );
+            check( occurrences == ( control == 0 ? 2u : 1u ), "closed sampling preserves joins once except for the terminal closure" );
+        }
+    for( std::size_t segment = 0; segment < 4; ++segment )
+        for( int i = 0; i <= 100; ++i )
+        {
+            const vec2 point = Evaluate( loop, segment, i / 100.0f );
+            float distanceSquared = infinity;
+            for( std::size_t j = 1; j < closedAdaptive.size(); ++j )
+                distanceSquared = std::min( distanceSquared, DistanceSquared( segment2{ closedAdaptive[j - 1], closedAdaptive[j] }, point ) );
+            check( distanceSquared <= 0.01001f * 0.01001f, "adaptive closed samples bound all segments including the seam" );
+        }
+    const auto closedLength = GetLength( loop, 1.0e-6 );
+    const auto closedDense = Sample( loop, 10000 );
+    check( closedLength.has_value(), "closed length converges across every segment" );
+    double closedReferenceLength = 0.0;
+    for( std::size_t i = 0; i < closedDense.size(); ++i )
+    {
+        if( i > 0 ) closedReferenceLength += std::hypot( static_cast<double>( closedDense[i].x ) - closedDense[i - 1].x, static_cast<double>( closedDense[i].y ) - closedDense[i - 1].y );
+        if( i % 5000 != 0 ) continue;
+        const auto sample = EvaluateByDistance( loop, i + 1 == closedDense.size() ? *closedLength : closedReferenceLength, 1.0e-6 );
+        check( sample && near( sample->point, closedDense[i], 2.0e-5f ), "closed distance query follows all segments and returns to its start" );
+    }
+    check( std::abs( *closedLength - closedReferenceLength ) < 1.0e-5, "closed length includes the curved last-to-first segment" );
+    const auto loopStart = EvaluateByDistance( loop, 0.0, 1.0e-6 ), loopEnd = EvaluateByDistance( loop, *closedLength, 1.0e-6 );
+    check( loopStart && loopEnd && near( loopStart->point, loopEnd->point ) && near( loopStart->tangent, loopEnd->tangent ), "closed distance endpoints share position and forward unit tangent" );
+    check( !EvaluateByDistance( loop, -0.1, 1.0e-6 ) && !EvaluateByDistance( loop, std::nextafter( *closedLength, std::numeric_limits<double>::infinity() ), 1.0e-6 ), "closed distance query preserves range rejection instead of wrapping" );
+    check( Sample( { repeatedStart, true }, 4 ).empty() && SampleAdaptive( { repeatedStart, true }, 0.01f ).empty() && !GetLength( { repeatedStart, true }, 1.0e-6 ) && !EvaluateByDistance( { repeatedStart, true }, 0.0, 1.0e-6 ), "invalid closed controls produce no samples, length or distance result" );
+
+    const vec2 invalidLoop[] = { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { nan, 1.0f } };
+    check( !IsValid( { invalidLoop, true } ) && !GetLength( { invalidLoop, true }, 1.0e-6 ), "closed validation rejects nonfinite controls including the closing endpoint" );
+    const catmullRomSpline2 triangleLoop{ triangle, true };
+    const auto triangleSamples = SampleAdaptive( triangleLoop, 0.01f );
+    const auto triangleLength = GetLength( triangleLoop, 1.0e-5 );
+    check( !triangleSamples.empty() && near( triangleSamples.front(), triangleSamples.back() ) && triangleLength, "minimum three-point loop supports adaptive sampling and length" );
+    const auto triangleEnd = EvaluateByDistance( triangleLoop, *triangleLength, 1.0e-5 );
+    check( triangleEnd && near( triangleEnd->point, triangle[0] ), "minimum loop distance lookup wraps its final segment" );
+    const auto unevenClosedLength = GetLength( unevenLoop, 1.0e-4 );
+    const auto unevenClosedDense = Sample( unevenLoop, 10000 );
+    double unevenPrefix = 0.0;
+    check( unevenClosedLength.has_value(), "unequal closed segments support arc length integration" );
+    for( std::size_t i = 0; i < unevenClosedDense.size(); ++i )
+    {
+        if( i > 0 ) unevenPrefix += std::hypot( static_cast<double>( unevenClosedDense[i].x ) - unevenClosedDense[i - 1].x, static_cast<double>( unevenClosedDense[i].y ) - unevenClosedDense[i - 1].y );
+        if( i % 5000 != 0 ) continue;
+        const auto sample = EvaluateByDistance( unevenLoop, i + 1 == unevenClosedDense.size() ? *unevenClosedLength : unevenPrefix, 1.0e-4 );
+        check( sample && near( sample->point, unevenClosedDense[i], 2.0e-4f ), "unequal closed distance lookup includes the nonuniform closing segment" );
+    }
+    check( std::abs( *unevenClosedLength - unevenPrefix ) < 1.0e-4, "unequal closed length agrees with an independent dense reference" );
+#ifdef NDEBUG
+    check( near( Evaluate( loop, 4, 0.5f ), {} ) && near( Derivative( loop, 4, 0.5f ), {} ), "closed segment indices remain bounded in Release" );
+    check( near( Evaluate( { line, true }, 0, 0.5f ), {} ) && near( Derivative( { repeatedStart, true }, 0, 0.5f ), {} ), "invalid closed evaluation fails safely in Release" );
+#endif
+
     return 0;
 }
