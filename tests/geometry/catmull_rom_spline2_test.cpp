@@ -702,5 +702,55 @@ int main()
         check( !ClosestPoint( curve, 0, {}, tolerance ), "local closest point rejects invalid or unattainable tolerance" );
     check( !ClosestPoint( { coarseDiagonal }, 0, { 1.0e8f + 8.0f, 1.0e8f }, 1.0e-3 ), "local closest point preserves float position precision failure" );
 
+    const auto linePartialLength = GetLength( spline, 0, 0.25f, 0.75f, 1.0e-6 );
+    check( linePartialLength && std::abs( *linePartialLength - 0.5 * std::sqrt( 20.0 ) ) < 1.0e-6, "partial segment length matches the analytic line interval" );
+    for( const auto candidate : { curve, unevenCurve, wave, loop, unevenLoop } )
+    {
+        constexpr std::size_t subdivisions = 8000;
+        const auto reference = Sample( candidate, subdivisions );
+        const auto total = GetLength( candidate, 1.0e-6 );
+        check( total.has_value(), "whole length exists for partial integration references" );
+        double combined = 0.0;
+        for( std::size_t segment = 0; segment < GetSegmentCount( candidate ); ++segment )
+        {
+            const auto wholeSegment = GetLength( candidate, segment, 0.0f, 1.0f, 1.0e-7 );
+            const auto partial = GetLength( candidate, segment, 0.25f, 0.75f, 1.0e-6 );
+            const auto left = GetLength( candidate, segment, 0.25f, 0.5f, 1.0e-6 );
+            const auto right = GetLength( candidate, segment, 0.5f, 0.75f, 1.0e-6 );
+            check( wholeSegment && partial && left && right && std::abs( *partial - *left - *right ) < 1.0e-6, "partial lengths add across a split within the requested segment" );
+            combined += *wholeSegment;
+            double referenceLength = 0.0;
+            for( std::size_t i = segment * subdivisions + subdivisions / 4 + 1; i <= segment * subdivisions + 3 * subdivisions / 4; ++i )
+                referenceLength += std::hypot( static_cast<double>( reference[i].x ) - reference[i - 1].x, static_cast<double>( reference[i].y ) - reference[i - 1].y );
+            check( std::abs( *partial - referenceLength ) < 3.0e-4, "partial length agrees with an independent dense reference including closed final segments" );
+            for( float t : { 0.0f, 0.5f, 1.0f } )
+            {
+                const auto zero = GetLength( candidate, segment, t, t, 1.0e-30 );
+                check( zero && *zero == 0.0, "valid zero intervals return exact zero without integration precision requirements" );
+            }
+        }
+        check( std::abs( combined - *total ) < 1.0e-6, "full segment intervals sum to the existing whole-path length" );
+    }
+    const auto nonuniformPartial = GetLength( { unevenLine }, 1, 0.25f, 0.75f, 1.0e-6 );
+    check( nonuniformPartial && std::abs( *nonuniformPartial - ( Evaluate( { unevenLine }, 1, 0.75f ).x - Evaluate( { unevenLine }, 1, 0.25f ).x ) ) < 2.0e-6, "nonuniform partial length integrates t rather than scaling segment length" );
+    const auto stationaryPartial = GetLength( { reversal }, 0, 0.5f, 1.0f, 1.0e-6 );
+    check( stationaryPartial && std::abs( *stationaryPartial - 0.375 ) < 1.0e-6, "partial integration accepts a zero-tangent endpoint" );
+    const vec2 longPrefix[] = { { -1.0e18f, 0.0f }, { -1.0e9f, 0.0f }, { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 2.0f, 0.0f }, { 3.0f, 0.0f } };
+    const float shortEnd = std::nextafter( 0.5f, 1.0f );
+    const auto shortPartial = GetLength( { longPrefix }, 3, 0.5f, shortEnd, 1.0e-20 );
+    check( shortPartial && *shortPartial == static_cast<double>( shortEnd ) - 0.5, "short local intervals retain precision independently of a huge preceding path length" );
+    editable[1] = { 8.0f, 0.0f };
+    const auto editedPartial = GetLength( editableCurve, 0, 0.25f, 0.75f, 1.0e-6 );
+    check( editedPartial && *editedPartial == 4.0, "partial integration observes edited borrowed controls" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ repeated }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ repeatedStart, true } } )
+        check( !GetLength( invalid, 0, 0.5f, 0.5f, 1.0e-6 ), "partial length validates the path even for zero intervals" );
+    check( !GetLength( curve, GetSegmentCount( curve ), 0.0f, 1.0f, 1.0e-6 ) && !GetLength( loop, std::numeric_limits<std::size_t>::max(), 0.0f, 0.0f, 1.0e-6 ), "partial length rejects invalid open and closed segment indices" );
+    for( float t : { -0.1f, 1.1f, nan, infinity } )
+        check( !GetLength( curve, 0, t, 0.5f, 1.0e-6 ) && !GetLength( curve, 0, 0.5f, t, 1.0e-6 ), "partial length rejects invalid interval endpoints without assertions" );
+    check( !GetLength( curve, 0, 0.75f, 0.25f, 1.0e-6 ), "partial length rejects reverse intervals without swapping or clamping" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ) } )
+        check( !GetLength( curve, 0, 0.5f, 0.5f, tolerance ), "partial length validates tolerance even for zero intervals" );
+    check( !GetLength( curve, 1, 0.25f, 0.75f, 1.0e-30 ) && !GetLength( curve, 1, 0.25f, 0.75f, std::numeric_limits<double>::denorm_min() ), "partial length rejects unattainable and underflowing precision budgets" );
+
     return 0;
 }

@@ -50,10 +50,10 @@ void GetTangents( const catmullRomSpline2& spline, std::size_t segmentIndex, vec
     }
 }
 
-std::optional<double> GetSegmentLength( const catmullRomSpline2& spline, std::size_t segmentIndex, double end, double tolerance )
+std::optional<double> GetSegmentLength( const catmullRomSpline2& spline, std::size_t segmentIndex, double begin, double end, double tolerance )
 {
     if( !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
-    if( end == 0.0 ) return 0.0;
+    if( begin == end ) return 0.0;
     vec2 tangent1{}, tangent2{};
     GetTangents( spline, segmentIndex, tangent1, tangent2 );
     if( !IsFinite( tangent1 ) || !IsFinite( tangent2 ) ) return {};
@@ -83,8 +83,8 @@ std::optional<double> GetSegmentLength( const catmullRomSpline2& spline, std::si
         if( !r ) return {};
         return *l + *r;
     };
-    const double fa = speed( 0.0 ), fm = speed( 0.5 * end ), fb = speed( end );
-    return integrate( integrate, 0.0, end, fa, fm, fb, end * ( fa + 4.0 * fm + fb ) / 6.0, tolerance, 0 );
+    const double fa = speed( begin ), fm = speed( 0.5 * ( begin + end ) ), fb = speed( end );
+    return integrate( integrate, begin, end, fa, fm, fb, ( end - begin ) * ( fa + 4.0 * fm + fb ) / 6.0, tolerance, 0 );
 }
 
 std::optional<vec2> GetPositionByParameter( const catmullRomSpline2& spline, std::size_t segment, float t, double tolerance )
@@ -342,11 +342,20 @@ std::optional<double> GetLength( const catmullRomSpline2& spline, double toleran
     double length = 0.0;
     for( std::size_t i = 0; i < count; ++i )
     {
-        const auto segmentLength = GetSegmentLength( spline, i, 1.0, tolerance / ( 4.0 * count ) );
+        const auto segmentLength = GetSegmentLength( spline, i, 0.0, 1.0, tolerance / ( 4.0 * count ) );
         if( !segmentLength || *segmentLength <= 0.0 ) return {};
         length += *segmentLength;
     }
     if( !std::isfinite( length ) || tolerance < 32.0 * std::numeric_limits<double>::epsilon() * length ) return {};
+    return length;
+}
+
+std::optional<double> GetLength( const catmullRomSpline2& spline, std::size_t segmentIndex, float t0, float t1, double tolerance )
+{
+    if( !IsValid( spline ) || segmentIndex >= GetSegmentCount( spline ) || !std::isfinite( t0 ) || !std::isfinite( t1 ) || t0 < 0.0f || t1 > 1.0f || t0 > t1 || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
+    if( t0 == t1 ) return 0.0;
+    const auto length = GetSegmentLength( spline, segmentIndex, t0, t1, tolerance / 4.0 );
+    if( !length || !std::isfinite( *length ) || *length <= 0.0 || tolerance < 32.0 * std::numeric_limits<double>::epsilon() * *length ) return {};
     return length;
 }
 
@@ -360,7 +369,7 @@ std::optional<double> GetDistance( const catmullRomSpline2& spline, std::size_t 
     {
         const double end = i == segmentIndex ? t : 1.0;
         if( end == 0.0 ) break;
-        const auto segmentLength = GetSegmentLength( spline, i, end, tolerance / ( 4.0 * count ) );
+        const auto segmentLength = GetSegmentLength( spline, i, 0.0, end, tolerance / ( 4.0 * count ) );
         if( !segmentLength || *segmentLength <= 0.0 ) return {};
         distance += *segmentLength;
     }
@@ -380,7 +389,7 @@ std::optional<splineParameter2> GetParameterByDistance( const catmullRomSpline2&
     double prefix = 0.0;
     for( std::size_t i = 0; i < count; ++i )
     {
-        const auto segmentLength = GetSegmentLength( spline, i, 1.0, error );
+        const auto segmentLength = GetSegmentLength( spline, i, 0.0, 1.0, error );
         if( !segmentLength ) return {};
         const double end = prefix + *segmentLength;
         if( distance > end )
@@ -396,7 +405,7 @@ std::optional<splineParameter2> GetParameterByDistance( const catmullRomSpline2&
         {
             const float t = static_cast<float>( 0.5 * ( lower + upper ) );
             if( t <= lower || t >= upper ) return {};
-            const auto partial = GetSegmentLength( spline, i, t, error );
+            const auto partial = GetSegmentLength( spline, i, 0.0, t, error );
             if( !partial ) return {};
             if( std::abs( *partial - target ) <= 0.5 * tolerance ) return splineParameter2{ i, t };
             if( *partial < target ) lower = t;
