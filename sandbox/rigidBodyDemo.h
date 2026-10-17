@@ -172,6 +172,7 @@ public:
     void setMouseSettings( float hertz, float dampingRatio, float maxForce );
     void setCarMotorSettings( float speed, float maxTorque );
     void resetPlayground();
+    void resetSplinePath();
     void resetTerrainProbes();
     void launchTerrainProbe( std::size_t probeIndex, terrainTrial trial );
     void resetCar();
@@ -283,6 +284,10 @@ public:
 
     [[nodiscard]] const mouseJointDef& getMouseSettings() const noexcept { return mouseSettings_; }
 
+    [[nodiscard]] std::span<const vec2> getSplinePathPoints() const noexcept;
+    [[nodiscard]] double getSplinePathDistance() const noexcept { return splinePathDistance_; }
+    [[nodiscard]] double getSplinePathLength() const noexcept { return splinePathLength_; }
+
     [[nodiscard]] std::size_t getTerrainPointCount() const noexcept;
 
     [[nodiscard]] vec2 getTerrainPoint( std::size_t pointIndex ) const;
@@ -320,6 +325,8 @@ public:
 private:
 #pragma region SceneSetup
     void createPlayground();
+    void createSplinePath();
+    void updateSplinePath( float timeStep );
     void createTerrainChain();
     void createPendulum();
     void createRevoluteHinge();
@@ -373,6 +380,8 @@ private:
 
     bodyId impulseBody_{}; // 이동과 임펄스 입력을 적용할 물체
     std::array<transform2, 6> playgroundInitialTransforms_{};
+    double splinePathDistance_ = 0.0;
+    double splinePathLength_ = 0.0;
     bodyId torqueBody_{};  // 회전 임펄스를 적용할 물체
     bodyId pendulumBody_{};
     jointId pendulumJoint_{};
