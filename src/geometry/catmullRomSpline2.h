@@ -42,6 +42,9 @@ std::optional<double> Curvature( const catmullRomSpline2& spline, std::size_t se
 // 잘못된 입력 / 유한한 float 경계 구성 실패는 nullopt.
 std::optional<aabb2> ComputeAABB( const catmullRomSpline2& spline );
 
+// 같은 정책으로 지정 구간만 감쌈. 잘못된 경로 / 구간 번호 / 유한한 경계 구성 실패는 nullopt.
+std::optional<aabb2> ComputeAABB( const catmullRomSpline2& spline, std::size_t segmentIndex );
+
 // 각 구간을 같은 수로 분할하며 접합점은 한 번만 넣음. 닫힌 결과는 끝에 첫 점을 반복함.
 // 잘못된 입력 / 불가능한 점 수는 빈 배열.
 std::vector<vec2> Sample( const catmullRomSpline2& spline, std::size_t subdivisions );

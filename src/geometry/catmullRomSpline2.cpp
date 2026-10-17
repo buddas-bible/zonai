@@ -106,6 +106,35 @@ std::optional<vec2> GetPositionByParameter( const catmullRomSpline2& spline, std
     return point;
 }
 
+std::optional<aabb2> GetSegmentAABB( const catmullRomSpline2& spline, std::size_t segmentIndex )
+{
+    const auto bound = []( double start, double end, double tangent, double quadratic, double cubic, float& lower, float& upper )
+    {
+        const std::array<double, 5> hull{ start, start + tangent / 3.0, start + ( 2.0 * tangent + quadratic ) / 3.0, start + tangent + quadratic + cubic, end };
+        // Horner 평가 6회 연산과 subnormal 반올림을 감싸고 double hull 구성 오차도 포함함.
+        const double error = 8.0 * std::numeric_limits<float>::epsilon() * ( std::abs( start ) + std::abs( tangent ) + std::abs( quadratic ) + std::abs( cubic ) ) + 8.0 * std::numeric_limits<float>::denorm_min();
+        const double minimum = *std::min_element( hull.begin(), hull.end() ) - error;
+        const double maximum = *std::max_element( hull.begin(), hull.end() ) + error;
+        if( !std::isfinite( minimum ) || !std::isfinite( maximum ) || minimum < -std::numeric_limits<float>::max() || maximum > std::numeric_limits<float>::max() ) return false;
+        lower = std::nextafter( static_cast<float>( minimum ), -std::numeric_limits<float>::infinity() );
+        upper = std::nextafter( static_cast<float>( maximum ), std::numeric_limits<float>::infinity() );
+        return std::isfinite( lower ) && std::isfinite( upper );
+    };
+
+    vec2 tangent1{}, tangent2{};
+    GetTangents( spline, segmentIndex, tangent1, tangent2 );
+    const vec2 a = spline.points[segmentIndex], b = GetPoint( spline, segmentIndex + 1 );
+    const vec2 delta = b - a;
+    // Evaluate와 같은 float 계수를 Bézier로 바꾸며 별도 처리되는 끝점 b도 hull에 포함함.
+    const vec2 quadratic = 3.0f * delta - 2.0f * tangent1 - tangent2;
+    const vec2 cubic = tangent1 + tangent2 - 2.0f * delta;
+    if( !IsFinite( tangent1 ) || !IsFinite( quadratic ) || !IsFinite( cubic ) ) return {};
+    aabb2 segmentBounds{};
+    if( !bound( a.x, b.x, tangent1.x, quadratic.x, cubic.x, segmentBounds.min.x, segmentBounds.max.x ) ||
+        !bound( a.y, b.y, tangent1.y, quadratic.y, cubic.y, segmentBounds.min.y, segmentBounds.max.y ) ) return {};
+    return segmentBounds;
+}
+
 } // namespace
 
 bool IsValid( const catmullRomSpline2& spline )
@@ -212,36 +241,20 @@ std::optional<double> Curvature( const catmullRomSpline2& spline, std::size_t se
 std::optional<aabb2> ComputeAABB( const catmullRomSpline2& spline )
 {
     if( !IsValid( spline ) ) return {};
-    const auto bound = []( double start, double end, double tangent, double quadratic, double cubic, float& lower, float& upper )
-    {
-        const std::array<double, 5> hull{ start, start + tangent / 3.0, start + ( 2.0 * tangent + quadratic ) / 3.0, start + tangent + quadratic + cubic, end };
-        // Horner 평가 6회 연산과 subnormal 반올림을 감싸고 double hull 구성 오차도 포함함.
-        const double error = 8.0 * std::numeric_limits<float>::epsilon() * ( std::abs( start ) + std::abs( tangent ) + std::abs( quadratic ) + std::abs( cubic ) ) + 8.0 * std::numeric_limits<float>::denorm_min();
-        const double minimum = *std::min_element( hull.begin(), hull.end() ) - error;
-        const double maximum = *std::max_element( hull.begin(), hull.end() ) + error;
-        if( !std::isfinite( minimum ) || !std::isfinite( maximum ) || minimum < -std::numeric_limits<float>::max() || maximum > std::numeric_limits<float>::max() ) return false;
-        lower = std::nextafter( static_cast<float>( minimum ), -std::numeric_limits<float>::infinity() );
-        upper = std::nextafter( static_cast<float>( maximum ), std::numeric_limits<float>::infinity() );
-        return std::isfinite( lower ) && std::isfinite( upper );
-    };
-
     aabb2 bounds{ spline.points[0], spline.points[0] };
     for( std::size_t i = 0; i < GetSegmentCount( spline ); ++i )
     {
-        vec2 tangent1{}, tangent2{};
-        GetTangents( spline, i, tangent1, tangent2 );
-        const vec2 a = spline.points[i], b = GetPoint( spline, i + 1 );
-        const vec2 delta = b - a;
-        // Evaluate와 같은 float 계수를 Bézier로 바꾸며 별도 처리되는 끝점 b도 hull에 포함함.
-        const vec2 quadratic = 3.0f * delta - 2.0f * tangent1 - tangent2;
-        const vec2 cubic = tangent1 + tangent2 - 2.0f * delta;
-        if( !IsFinite( tangent1 ) || !IsFinite( quadratic ) || !IsFinite( cubic ) ) return {};
-        aabb2 segmentBounds{};
-        if( !bound( a.x, b.x, tangent1.x, quadratic.x, cubic.x, segmentBounds.min.x, segmentBounds.max.x ) ||
-            !bound( a.y, b.y, tangent1.y, quadratic.y, cubic.y, segmentBounds.min.y, segmentBounds.max.y ) ) return {};
-        bounds = Union( bounds, segmentBounds );
+        const auto segmentBounds = GetSegmentAABB( spline, i );
+        if( !segmentBounds ) return {};
+        bounds = Union( bounds, *segmentBounds );
     }
     return bounds;
+}
+
+std::optional<aabb2> ComputeAABB( const catmullRomSpline2& spline, std::size_t segmentIndex )
+{
+    if( !IsValid( spline ) || segmentIndex >= GetSegmentCount( spline ) ) return {};
+    return GetSegmentAABB( spline, segmentIndex );
 }
 
 std::vector<vec2> Sample( const catmullRomSpline2& spline, std::size_t subdivisions )

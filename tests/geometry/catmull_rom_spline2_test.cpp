@@ -619,5 +619,46 @@ int main()
     const auto editedDistanceSamples = SampleByDistance( editableCurve, 2, 1.0e-6 );
     check( editedDistanceSamples.size() == 3 && near( editedDistanceSamples[1], { 2.0f, 0.0f } ), "distance sampling observes edited borrowed controls" );
 
+    const auto firstSegmentBounds = ComputeAABB( curve, 0 );
+    check( firstSegmentBounds && Contains( *firstSegmentBounds, points[0] ) && Contains( *firstSegmentBounds, points[1] ), "segment AABB includes the requested segment endpoints" );
+    check( firstSegmentBounds->max.x < curveBounds->max.x, "segment AABB excludes unrelated portions of the path" );
+    for( const auto candidate : { spline, curve, unevenCurve, loop, unevenLoop, crossing, catmullRomSpline2{ reversal }, catmullRomSpline2{ translatedControls }, catmullRomSpline2{ subnormalAxis } } )
+    {
+        const auto whole = ComputeAABB( candidate );
+        check( whole.has_value(), "whole bounds exist for segment containment references" );
+        aabb2 combined{ candidate.points[0], candidate.points[0] };
+        for( std::size_t segment = 0; segment < GetSegmentCount( candidate ); ++segment )
+        {
+            const auto bounds = ComputeAABB( candidate, segment );
+            check( bounds && IsValidAABB( *bounds ) && ContainsAABB( *whole, *bounds ), "finite segment bounds stay inside the whole-path AABB" );
+            for( int i = 0; i <= 4096; ++i )
+                check( Contains( *bounds, Evaluate( candidate, segment, i / 4096.0f ) ), "segment bounds contain dense float evaluations without epsilon" );
+            check( Contains( *bounds, Evaluate( candidate, segment, std::nextafter( 0.0f, 1.0f ) ) ) && Contains( *bounds, Evaluate( candidate, segment, std::nextafter( 1.0f, 0.0f ) ) ), "segment bounds include rounding next to both endpoints" );
+            combined = Union( combined, *bounds );
+        }
+        check( combined.min.x == whole->min.x && combined.min.y == whole->min.y && combined.max.x == whole->max.x && combined.max.y == whole->max.y, "segment union exactly preserves existing whole-path bounds" );
+    }
+    const auto closingBounds = ComputeAABB( loop, GetSegmentCount( loop ) - 1 );
+    check( closingBounds && Contains( *closingBounds, square[3] ) && Contains( *closingBounds, square[0] ) && Contains( *closingBounds, Evaluate( loop, 3, 0.5f ) ), "last closed segment includes its wrapped endpoint and overshoot" );
+    for( float scale : { 1.0e-10f, 1.0e10f } )
+    {
+        const vec2 scaledControls[] = { scale * points[0], scale * points[1], scale * points[2], scale * points[3] };
+        for( std::size_t segment = 0; segment < 3; ++segment )
+        {
+            const auto bounds = ComputeAABB( { scaledControls }, segment );
+            check( bounds.has_value(), "segment bounds support small and large coordinate scales" );
+            for( int i = 0; i <= 1024; ++i )
+                check( Contains( *bounds, Evaluate( { scaledControls }, segment, i / 1024.0f ) ), "scaled segment bounds contain float evaluations" );
+        }
+    }
+    const auto beforeSegmentEdit = ComputeAABB( editableCurve, 0 );
+    editable[1] = { 8.0f, 2.0f };
+    const auto afterSegmentEdit = ComputeAABB( editableCurve, 0 );
+    check( beforeSegmentEdit && afterSegmentEdit && afterSegmentEdit->max.x > beforeSegmentEdit->max.x && Contains( *afterSegmentEdit, editable[1] ), "segment bounds observe edited borrowed controls" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ single }, catmullRomSpline2{ repeated }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ repeatedStart, true } } )
+        check( !ComputeAABB( invalid, 0 ), "segment bounds reject invalid splines without assertions" );
+    check( !ComputeAABB( curve, GetSegmentCount( curve ) ) && !ComputeAABB( loop, GetSegmentCount( loop ) ) && !ComputeAABB( curve, std::numeric_limits<std::size_t>::max() ), "segment bounds reject open and closed out-of-range indices" );
+    check( !ComputeAABB( { unboundedAllowance }, 0 ), "segment bounds retain finite outward-bound construction failure" );
+
     return 0;
 }
