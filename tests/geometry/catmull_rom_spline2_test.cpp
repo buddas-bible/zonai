@@ -1177,5 +1177,102 @@ int main()
     const auto editedAdaptiveRange = SampleAdaptive( editableCurve, { 0, 0.25f }, { 0, 0.75f }, 0.01f );
     check( editedAdaptiveRange.size() == 2 && near( editedAdaptiveRange.front(), { 2.0f, 0.0f } ) && near( editedAdaptiveRange.back(), { 6.0f, 0.0f } ), "adaptive range observes edited borrowed controls" );
 
+    const auto adaptiveLineParameters = SampleAdaptiveParameters( { unitLine }, { 0, 0.25f }, { 0, 0.75f }, 0.01f );
+    check( adaptiveLineParameters.size() == 2 && adaptiveLineParameters.front().segmentIndex == 0 && adaptiveLineParameters.front().t == 0.25f && adaptiveLineParameters.back().segmentIndex == 0 && adaptiveLineParameters.back().t == 0.75f, "adaptive parameters preserve the selected straight interval endpoints" );
+    for( const auto candidate : { curve, unevenCurve, wave, loop, unevenLoop, crossing } )
+    {
+        const std::size_t last = GetSegmentCount( candidate ) - 1;
+        for( const auto from : { splineParameter2{ 0, 0.25f }, splineParameter2{ 1, 0.125f } } )
+        {
+            const splineParameter2 to{ from.segmentIndex == 0 ? last : 1, 0.75f };
+            const auto parameters = SampleAdaptiveParameters( candidate, from, to, 0.01f );
+            check( parameters.size() >= 2 && parameters.front().segmentIndex == from.segmentIndex && parameters.front().t == from.t && parameters.back().segmentIndex == to.segmentIndex && parameters.back().t == to.t, "adaptive parameter output retains both input endpoint representations" );
+            std::vector<vec2> positions;
+            for( std::size_t i = 0; i < parameters.size(); ++i )
+            {
+                const auto parameter = parameters[i];
+                check( parameter.segmentIndex >= from.segmentIndex && parameter.segmentIndex <= to.segmentIndex && std::isfinite( parameter.t ) && parameter.t >= 0.0f && parameter.t <= 1.0f && ( parameter.segmentIndex != from.segmentIndex || parameter.t >= from.t ) && ( parameter.segmentIndex != to.segmentIndex || parameter.t <= to.t ), "adaptive parameters stay inside the original selected range" );
+                if( i > 0 )
+                {
+                    const auto previous = parameters[i - 1];
+                    check( parameter.segmentIndex > previous.segmentIndex || ( parameter.segmentIndex == previous.segmentIndex && parameter.t > previous.t ), "adaptive parameters advance strictly in original path order" );
+                    check( !( previous.t == 1.0f && parameter.segmentIndex == previous.segmentIndex + 1 && parameter.t == 0.0f ), "adaptive parameters do not repeat internal join aliases" );
+                }
+                positions.push_back( Evaluate( candidate, parameter.segmentIndex, parameter.t ) );
+                check( IsFinite( positions.back() ), "adaptive parameters evaluate to finite original curve positions" );
+            }
+            for( std::size_t segment = from.segmentIndex; segment <= to.segmentIndex; ++segment )
+            {
+                const float begin = segment == from.segmentIndex ? from.t : 0.0f, end = segment == to.segmentIndex ? to.t : 1.0f;
+                for( int i = 0; i <= 2000; ++i )
+                {
+                    const vec2 point = Evaluate( candidate, segment, begin + ( end - begin ) * ( static_cast<float>( i ) / 2000.0f ) );
+                    float distanceSquared = std::numeric_limits<float>::infinity();
+                    for( std::size_t j = 1; j < positions.size(); ++j ) distanceSquared = std::min( distanceSquared, DistanceSquared( segment2{ positions[j - 1], positions[j] }, point ) );
+                    check( distanceSquared <= 0.01001f * 0.01001f, "evaluated adaptive parameter polyline bounds dense curve samples" );
+                }
+            }
+        }
+    }
+    const auto parameterJoin = SampleAdaptiveParameters( curve, { 0, 0.5f }, { 2, 0.5f }, 0.01f );
+    for( std::size_t segment = 0; segment < 2; ++segment )
+    {
+        std::size_t occurrences = 0;
+        for( const auto parameter : parameterJoin ) occurrences += parameter.segmentIndex == segment && parameter.t == 1.0f;
+        check( occurrences == 1, "adaptive parameters retain each internal join once as preceding segment end" );
+    }
+    const auto parameterAliases = SampleAdaptiveParameters( curve, { 0, 1.0f }, { 2, 0.0f }, 0.01f );
+    check( parameterAliases.size() >= 2 && parameterAliases.front().segmentIndex == 0 && parameterAliases.front().t == 1.0f && parameterAliases.back().segmentIndex == 2 && parameterAliases.back().t == 0.0f, "adaptive parameters preserve aliased start and final join representations" );
+    for( splineParameter2 from : { splineParameter2{ 0, 1.0f }, splineParameter2{ 1, 0.0f } } )
+    {
+        const splineParameter2 to{ from.segmentIndex == 0 ? 1u : 0u, from.segmentIndex == 0 ? 0.0f : 1.0f };
+        const auto zero = SampleAdaptiveParameters( { reversal }, from, to, 0.01f );
+        check( zero.size() == 1 && zero.front().segmentIndex == from.segmentIndex && zero.front().t == from.t, "zero adaptive parameter ranges return input from and allow zero tangents" );
+    }
+    const auto sameParameter = SampleAdaptiveParameters( { unitLine }, { 0, 0.5f }, { 0, 0.5f }, 0.01f );
+    check( sameParameter.size() == 1 && sameParameter.front().t == 0.5f, "same-parameter adaptive range returns one parameter" );
+    const auto returningParameters = SampleAdaptiveParameters( { reversal }, { 0, 0.5f }, { 1, 0.5f }, 0.01f );
+    check( returningParameters.size() == 3 && returningParameters[1].segmentIndex == 0 && returningParameters[1].t == 1.0f, "coincident endpoint positions preserve a returning parameter path" );
+    const auto closedParameters = SampleAdaptiveParameters( loop, { 0, 0.0f }, { 3, 1.0f }, 0.01f );
+    check( closedParameters.size() > 4 && closedParameters.front().segmentIndex == 0 && closedParameters.front().t == 0.0f && closedParameters.back().segmentIndex == 3 && closedParameters.back().t == 1.0f, "closed adaptive parameters distinguish the start and one-lap endpoint" );
+    const auto adjacentParameters = SampleAdaptiveParameters( { unitLine }, { 0, std::nextafter( 1.0f, 0.0f ) }, { 0, 1.0f }, 0.01f );
+    check( adjacentParameters.size() == 2 && adjacentParameters.front().t < adjacentParameters.back().t, "adaptive parameters retain a one-ulp range" );
+    check( SampleAdaptiveParameters( curve, { 0, 0.25f }, { 2, 0.75f }, 1.0e-30f ).empty() && SampleAdaptiveParameters( { translatedLine }, { 0, 0.5f }, { 0, 0.75f }, 0.001f ).empty(), "adaptive parameters reject unattainable error or unrepresentable endpoints without partial output" );
+    check( SampleAdaptiveParameters( loop, { 3, 0.5f }, { 0, 0.5f }, 0.01f ).empty() && SampleAdaptiveParameters( curve, { 1, 0.75f }, { 1, 0.25f }, 0.01f ).empty(), "adaptive parameters reject implicit wrapping and reverse ranges" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ single }, catmullRomSpline2{ repeated }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ repeatedStart, true } } )
+        check( SampleAdaptiveParameters( invalid, { 0, 0.0f }, { 0, 0.0f }, 0.01f ).empty(), "adaptive parameters validate paths including zero ranges" );
+    for( splineParameter2 invalid : { splineParameter2{ GetSegmentCount( curve ), 0.0f }, splineParameter2{ std::numeric_limits<std::size_t>::max(), 1.0f }, splineParameter2{ 0, -0.1f }, splineParameter2{ 0, 1.1f }, splineParameter2{ 0, nan }, splineParameter2{ 0, infinity } } )
+        check( SampleAdaptiveParameters( curve, invalid, { 2, 1.0f }, 0.01f ).empty() && SampleAdaptiveParameters( curve, { 0, 0.0f }, invalid, 0.01f ).empty(), "adaptive parameters reject invalid boundaries" );
+    for( float error : { 0.0f, -1.0f, nan, infinity } )
+        check( SampleAdaptiveParameters( curve, { 0, 0.25f }, { 2, 0.75f }, error ).empty() && SampleAdaptiveParameters( curve, { 0, 0.5f }, { 0, 0.5f }, error ).empty(), "adaptive parameters reject invalid error including zero ranges" );
+    editable[1] = { 0.0f, 8.0f };
+    const auto editedParameters = SampleAdaptiveParameters( editableCurve, { 0, 0.25f }, { 0, 0.75f }, 0.01f );
+    check( editedParameters.size() == 2 && near( Evaluate( editableCurve, editedParameters.back().segmentIndex, editedParameters.back().t ), { 0.0f, 6.0f } ), "adaptive parameters observe edited borrowed controls" );
+
+    const vec2 coarseParameterLine[] = { { 1.0e8f, 1.0e8f }, { 1.0e8f + 8.0f, 1.0e8f + 16.0f } };
+    check( SampleAdaptiveParameters( { coarseParameterLine }, { 0, 0.0f }, { 0, 1.0f }, 0.01f ).empty(), "adaptive parameter sampling rejects float evaluation precision below coordinate resolution" );
+    for( float scale : { 1.0e-10f, 1.0e10f } )
+    {
+        const vec2 controls[] = { scale * points[0], scale * points[1], scale * points[2], scale * points[3] };
+        const float error = 0.01f * scale;
+        const auto parameters = SampleAdaptiveParameters( { controls }, { 1, 0.1234567f }, { 1, 0.8765432f }, error );
+        check( parameters.size() > 2, "scaled adaptive parameters support rounded interior float split values" );
+        for( int i = 0; i <= 2000; ++i )
+        {
+            const vec2 point = Evaluate( { controls }, 1, 0.1234567f + ( 0.8765432f - 0.1234567f ) * ( static_cast<float>( i ) / 2000.0f ) );
+            double distanceSquared = std::numeric_limits<double>::infinity();
+            for( std::size_t j = 1; j < parameters.size(); ++j )
+            {
+                const vec2 a = Evaluate( { controls }, parameters[j - 1].segmentIndex, parameters[j - 1].t ), b = Evaluate( { controls }, parameters[j].segmentIndex, parameters[j].t );
+                const double dx = static_cast<double>( b.x ) - a.x, dy = static_cast<double>( b.y ) - a.y;
+                const double px = static_cast<double>( point.x ) - a.x, py = static_cast<double>( point.y ) - a.y;
+                const double lengthSquared = dx * dx + dy * dy;
+                const double t = lengthSquared > 0.0 ? std::clamp( ( px * dx + py * dy ) / lengthSquared, 0.0, 1.0 ) : 0.0;
+                distanceSquared = std::min( distanceSquared, ( px - t * dx ) * ( px - t * dx ) + ( py - t * dy ) * ( py - t * dy ) );
+            }
+            check( distanceSquared <= static_cast<double>( error ) * error, "scaled evaluated parameter polylines stay within the spatial error budget" );
+        }
+    }
+
     return 0;
 }

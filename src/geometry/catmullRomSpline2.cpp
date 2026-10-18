@@ -50,6 +50,22 @@ void GetTangents( const catmullRomSpline2& spline, std::size_t segmentIndex, vec
     }
 }
 
+vec2 EvaluateSegment( const catmullRomSpline2& spline, std::size_t segmentIndex, float t )
+{
+    if( t == 0.0f ) return spline.points[segmentIndex];
+    if( t == 1.0f ) return GetPoint( spline, segmentIndex + 1 );
+
+    vec2 tangent1{};
+    vec2 tangent2{};
+    GetTangents( spline, segmentIndex, tangent1, tangent2 );
+
+    const vec2 delta = GetPoint( spline, segmentIndex + 1 ) - spline.points[segmentIndex];
+    const vec2 quadratic = 3.0f * delta - 2.0f * tangent1 - tangent2;
+    const vec2 cubic = tangent1 + tangent2 - 2.0f * delta;
+
+    return spline.points[segmentIndex] + t * ( tangent1 + t * ( quadratic + t * cubic ) );
+}
+
 std::optional<double> GetSegmentLength( const catmullRomSpline2& spline, std::size_t segmentIndex, double begin, double end, double tolerance )
 {
     if( !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
@@ -205,18 +221,7 @@ vec2 Evaluate( const catmullRomSpline2& spline, std::size_t segmentIndex, float 
     assert( valid );
     if( !valid ) return {};
 
-    if( t == 0.0f ) return spline.points[segmentIndex];
-    if( t == 1.0f ) return GetPoint( spline, segmentIndex + 1 );
-
-    vec2 tangent1{};
-    vec2 tangent2{};
-    GetTangents( spline, segmentIndex, tangent1, tangent2 );
-
-    const vec2 delta = GetPoint( spline, segmentIndex + 1 ) - spline.points[segmentIndex];
-    const vec2 quadratic = 3.0f * delta - 2.0f * tangent1 - tangent2;
-    const vec2 cubic = tangent1 + tangent2 - 2.0f * delta;
-
-    return spline.points[segmentIndex] + t * ( tangent1 + t * ( quadratic + t * cubic ) );
+    return EvaluateSegment( spline, segmentIndex, t );
 }
 
 vec2 Derivative( const catmullRomSpline2& spline, std::size_t segmentIndex, float t )
@@ -351,7 +356,10 @@ std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, float maxErro
     return SampleAdaptive( spline, { 0, 0.0f }, { count - 1, 1.0f }, maxError );
 }
 
-std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, float maxError )
+namespace
+{
+
+std::vector<vec2> SampleAdaptiveInRange( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, float maxError, std::vector<splineParameter2>* parameters )
 {
     if( !IsValid( spline ) || !std::isfinite( maxError ) || maxError <= 0.0f ) return {};
     const std::size_t count = GetSegmentCount( spline );
@@ -365,19 +373,23 @@ std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, splineParamet
     const auto first = GetPositionByParameter( spline, from.segmentIndex, from.t, maxError );
     if( !first ) return {};
     std::vector<vec2> samples{ *first };
+    if( parameters ) parameters->push_back( from );
     if( beginParameter.segmentIndex == endParameter.segmentIndex && beginParameter.t == endParameter.t ) return samples;
+    double evaluationError = 0.0;
     const double errorSquared = static_cast<double>( maxError ) * maxError;
     const auto midpoint = []( bezierPoint2 a, bezierPoint2 b )
     {
         return bezierPoint2{ 0.5 * ( a.x + b.x ), 0.5 * ( a.y + b.y ) };
     };
-    const auto subdivide = [&]( auto&& self, const std::array<bezierPoint2, 4>& curve, int depth, const vec2& end ) -> bool
+    const auto subdivide = [&]( auto&& self, const std::array<bezierPoint2, 4>& curve, int depth, const vec2& end, std::size_t segment, float begin, float finish ) -> bool
     {
         if( !IsFinite( end ) ) return false;
         const vec2 start = samples.back();
         const double dx = static_cast<double>( end.x ) - start.x;
         const double dy = static_cast<double>( end.y ) - start.y;
         const double lengthSquared = dx * dx + dy * dy;
+        const double allowedError = static_cast<double>( maxError ) - evaluationError;
+        if( allowedError <= 0.0 ) return false;
         bool flat = true;
         // 실제 float 출력 chord에 hull 전체를 대조해 S자 구간과 끝점 반올림 오차도 포함함.
         for( const auto point : curve )
@@ -385,21 +397,31 @@ std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, splineParamet
             const double px = point.x - start.x, py = point.y - start.y;
             const double t = lengthSquared > 0.0 ? std::clamp( ( px * dx + py * dy ) / lengthSquared, 0.0, 1.0 ) : 0.0;
             const double ex = px - t * dx, ey = py - t * dy;
-            flat &= ex * ex + ey * ey <= errorSquared;
+            flat &= ex * ex + ey * ey <= ( parameters ? allowedError * allowedError : errorSquared );
         }
         if( flat )
         {
-            if( start.x == end.x && start.y == end.y ) return true;
-            if( samples.size() == samples.max_size() ) return false;
+            if( !parameters && start.x == end.x && start.y == end.y ) return true;
+            if( samples.size() == samples.max_size() || ( parameters && parameters->size() == parameters->max_size() ) ) return false;
             samples.push_back( end );
+            if( parameters ) parameters->push_back( { segment, finish } );
             return true;
         }
         constexpr int MAX_DEPTH = 12;
         if( depth == MAX_DEPTH ) return false;
-        const auto a = midpoint( curve[0], curve[1] ), b = midpoint( curve[1], curve[2] ), c = midpoint( curve[2], curve[3] );
-        const auto d = midpoint( a, b ), e = midpoint( b, c ), center = midpoint( d, e );
-        return self( self, { curve[0], a, d, center }, depth + 1, { static_cast<float>( center.x ), static_cast<float>( center.y ) } ) &&
-            self( self, { center, e, c, curve[3] }, depth + 1, end );
+        const float middle = static_cast<float>( 0.5 * ( static_cast<double>( begin ) + finish ) );
+        if( parameters && ( middle <= begin || middle >= finish ) ) return false;
+        const double fraction = parameters ? ( static_cast<double>( middle ) - begin ) / ( static_cast<double>( finish ) - begin ) : 0.5;
+        const auto mix = [&]( bezierPoint2 a, bezierPoint2 b )
+        {
+            if( fraction == 0.5 ) return midpoint( a, b );
+            return bezierPoint2{ ( 1.0 - fraction ) * a.x + fraction * b.x, ( 1.0 - fraction ) * a.y + fraction * b.y };
+        };
+        const auto a = mix( curve[0], curve[1] ), b = mix( curve[1], curve[2] ), c = mix( curve[2], curve[3] );
+        const auto d = mix( a, b ), e = mix( b, c ), center = mix( d, e );
+        const vec2 point = parameters ? EvaluateSegment( spline, segment, middle ) : vec2{ static_cast<float>( center.x ), static_cast<float>( center.y ) };
+        return self( self, { curve[0], a, d, center }, depth + 1, point, segment, begin, middle ) &&
+            self( self, { center, e, c, curve[3] }, depth + 1, end, segment, middle, finish );
     };
     const auto trim = []( std::array<bezierPoint2, 4>& curve, double t, bool keepLeft )
     {
@@ -426,11 +448,41 @@ std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, splineParamet
             bezierPoint2{ b.x - static_cast<double>( tangent2.x ) / 3.0, b.y - static_cast<double>( tangent2.y ) / 3.0 },
             bezierPoint2{ b.x, b.y }
         };
+        if( parameters )
+        {
+            const vec2 delta = b - a;
+            const vec2 quadratic = 3.0f * delta - 2.0f * tangent1 - tangent2;
+            const vec2 cubic = tangent1 + tangent2 - 2.0f * delta;
+            if( !IsFinite( tangent1 ) || !IsFinite( quadratic ) || !IsFinite( cubic ) ) return {};
+            curve = { bezierPoint2{ a.x, a.y },
+                bezierPoint2{ a.x + static_cast<double>( tangent1.x ) / 3.0, a.y + static_cast<double>( tangent1.y ) / 3.0 },
+                bezierPoint2{ a.x + ( 2.0 * tangent1.x + quadratic.x ) / 3.0, a.y + ( 2.0 * tangent1.y + quadratic.y ) / 3.0 },
+                bezierPoint2{ a.x + static_cast<double>( tangent1.x ) + quadratic.x + cubic.x, a.y + static_cast<double>( tangent1.y ) + quadratic.y + cubic.y } };
+            // Evaluate의 float 계수와 반올림 여유로 실제 평가점의 오차도 포함함.
+            const double x = std::abs( static_cast<double>( a.x ) ) + std::abs( static_cast<double>( tangent1.x ) ) + std::abs( static_cast<double>( quadratic.x ) ) + std::abs( static_cast<double>( cubic.x ) );
+            const double y = std::abs( static_cast<double>( a.y ) ) + std::abs( static_cast<double>( tangent1.y ) ) + std::abs( static_cast<double>( quadratic.y ) ) + std::abs( static_cast<double>( cubic.y ) );
+            evaluationError = 8.0 * std::numeric_limits<float>::epsilon() * std::hypot( x, y ) + 16.0 * std::numeric_limits<float>::denorm_min();
+        }
         if( end < 1.0 ) trim( curve, end, true );
         if( begin > 0.0 ) trim( curve, begin / end, false );
-        if( !subdivide( subdivide, curve, 0, *endpoint ) ) return {};
+        if( !subdivide( subdivide, curve, 0, *endpoint, i, static_cast<float>( begin ), static_cast<float>( end ) ) ) return {};
     }
+    if( parameters ) parameters->back() = to;
     return samples;
+}
+
+} // namespace
+
+std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, float maxError )
+{
+    return SampleAdaptiveInRange( spline, from, to, maxError, nullptr );
+}
+
+std::vector<splineParameter2> SampleAdaptiveParameters( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, float maxError )
+{
+    std::vector<splineParameter2> parameters;
+    if( SampleAdaptiveInRange( spline, from, to, maxError, &parameters ).empty() ) return {};
+    return parameters;
 }
 
 std::optional<double> GetLength( const catmullRomSpline2& spline, double tolerance )
