@@ -521,7 +521,14 @@ std::vector<vec2> SampleByDistance( const catmullRomSpline2& spline, splineParam
 
 std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, double distance, double tolerance )
 {
-    const auto parameter = GetParameterByDistance( spline, distance, tolerance );
+    const std::size_t count = GetSegmentCount( spline );
+    if( count == 0 ) return {};
+    return EvaluateByDistance( spline, { 0, 0.0f }, { count - 1, 1.0f }, distance, tolerance );
+}
+
+std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, double distance, double tolerance )
+{
+    const auto parameter = GetParameterByDistance( spline, from, to, distance, tolerance );
     if( !parameter ) return {};
     const auto sample = [&]( std::size_t segment, float t ) -> std::optional<splineSample2>
     {

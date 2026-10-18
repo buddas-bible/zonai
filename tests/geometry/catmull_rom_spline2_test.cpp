@@ -919,5 +919,66 @@ int main()
     const auto editedLocalSamples = SampleByDistance( editableCurve, { 0, 0.25f }, { 0, 0.75f }, 2, 1.0e-6 );
     check( editedLocalSamples.size() == 3 && near( editedLocalSamples[1], { 2.0f, 0.0f } ), "range samples observe edited borrowed controls" );
 
+    const auto localDistanceSample = EvaluateByDistance( { unitLine }, { 0, 0.25f }, { 0, 0.75f }, 0.125, 1.0e-6 );
+    check( localDistanceSample && near( localDistanceSample->point, { 0.375f, 0.0f } ), "range distance lookup measures position from the selected start" );
+    check( near( localDistanceSample->tangent, { 1.0f, 0.0f } ), "range distance lookup returns a forward unit tangent" );
+    for( const auto candidate : { curve, unevenCurve, loop, unevenLoop } )
+    {
+        const std::size_t last = GetSegmentCount( candidate ) - 1;
+        const splineParameter2 from{ 0, 0.25f }, to{ last, 0.75f };
+        const auto length = GetLength( candidate, from, to, 1.0e-5 );
+        check( length.has_value(), "range position reference length converges" );
+        const auto first = EvaluateByDistance( candidate, from, to, 0.0, 1.0e-5 );
+        const auto final = EvaluateByDistance( candidate, from, to, *length, 1.0e-5 );
+        check( first && final && near( first->point, Evaluate( candidate, 0, from.t ) ) && near( final->point, Evaluate( candidate, last, to.t ) ), "range position lookup includes both requested endpoints" );
+        check( near( first->tangent, Normalize( Derivative( candidate, 0, from.t ) ) ) && near( final->tangent, Normalize( Derivative( candidate, last, to.t ) ) ), "range endpoint tangents follow the selected segment direction" );
+        double referenceDistance = 0.0;
+        vec2 previous = Evaluate( candidate, 0, from.t );
+        for( std::size_t segment = 0; segment <= 1; ++segment )
+        {
+            const float begin = segment == 0 ? from.t : 0.0f, end = segment == 1 ? 0.5f : 1.0f;
+            for( int i = 1; i <= 2000; ++i )
+            {
+                const vec2 point = Evaluate( candidate, segment, begin + ( end - begin ) * ( static_cast<float>( i ) / 2000.0f ) );
+                referenceDistance += std::hypot( static_cast<double>( point.x ) - previous.x, static_cast<double>( point.y ) - previous.y );
+                previous = point;
+            }
+        }
+        const auto interior = EvaluateByDistance( candidate, from, to, referenceDistance, 1.0e-5 );
+        check( interior && near( interior->point, Evaluate( candidate, 1, 0.5f ), 5.0e-5f ), "range lookup agrees with independent dense arc lengths across a join" );
+        check( near( interior->tangent, Normalize( Derivative( candidate, 1, 0.5f ) ), 5.0e-5f ) && std::abs( Length( interior->tangent ) - 1.0f ) < 1.0e-6f, "curved range lookup returns the analytic forward unit tangent" );
+        const auto wholeLength = GetLength( candidate, 1.0e-5 );
+        check( wholeLength.has_value(), "whole-path position reference length converges" );
+        for( double fraction : { 0.0, 0.4, 1.0 } )
+        {
+            const auto original = EvaluateByDistance( candidate, *wholeLength * fraction, 1.0e-5 );
+            const auto full = EvaluateByDistance( candidate, { 0, 0.0f }, { last, 1.0f }, *wholeLength * fraction, 1.0e-5 );
+            check( original && full && near( original->point, full->point, 0.0f ) && near( original->tangent, full->tangent, 0.0f ), "full-range position and tangent exactly preserve whole-path lookup" );
+        }
+        check( !EvaluateByDistance( candidate, from, to, std::nextafter( *length, std::numeric_limits<double>::infinity() ), 1.0e-5 ), "range position lookup rejects distance above the range without clamping" );
+    }
+    const auto joinSample = EvaluateByDistance( { uniformControls }, { 0, 0.25f }, { 2, 0.75f }, 0.75, 1.0e-6 );
+    check( joinSample && near( joinSample->point, { 1.0f, 0.0f } ) && near( joinSample->tangent, { 1.0f, 0.0f } ), "range distance lookup handles an exact internal join" );
+    const auto zeroSample = EvaluateByDistance( { unitLine }, { 0, 0.5f }, { 0, 0.5f }, 0.0, 1.0e-6 );
+    const auto aliasSample = EvaluateByDistance( curve, { 1, 0.0f }, { 0, 1.0f }, 0.0, 1.0e-6 );
+    check( zeroSample && near( zeroSample->point, { 0.5f, 0.0f } ) && near( zeroSample->tangent, { 1.0f, 0.0f } ) && aliasSample && near( aliasSample->point, points[1] ) && near( aliasSample->tangent, Normalize( Derivative( curve, 1, 0.0f ) ) ), "zero ranges including join aliases return the start position and valid tangent" );
+    check( !EvaluateByDistance( { unitLine }, { 0, 0.5f }, { 0, 0.5f }, std::numeric_limits<double>::denorm_min(), 1.0e-6 ), "zero ranges reject every positive distance" );
+    check( !EvaluateByDistance( { reversal }, { 0, 0.5f }, { 1, 0.5f }, 0.375, 1.0e-6 ) && !EvaluateByDistance( { reversal }, { 0, 1.0f }, { 1, 0.0f }, 0.0, 1.0e-6 ), "range position lookup rejects stationary internal joins and zero ranges" );
+    const auto shortPrefixSample = EvaluateByDistance( { longPrefix }, { 3, 0.75f }, { 4, 0.25f }, 0.375, 1.0e-12 );
+    check( shortPrefixSample && near( shortPrefixSample->point, { 2.125f, 0.0f } ) && near( shortPrefixSample->tangent, { 1.0f, 0.0f } ), "range position lookup avoids cancellation after a huge prefix" );
+    check( !EvaluateByDistance( { translatedLine }, { 0, 0.0f }, { 0, 1.0f }, 4.0, 1.0e-6 ) && !EvaluateByDistance( { unitLine }, { 0, 0.25f }, { 0, 0.75f }, 1.0 / 6.0, 1.0e-12 ), "range position lookup preserves position and inverse precision failures" );
+    check( !EvaluateByDistance( loop, { 3, 0.5f }, { 0, 0.5f }, 0.0, 1.0e-5 ) && !EvaluateByDistance( curve, { 1, 0.75f }, { 1, 0.25f }, 0.0, 1.0e-5 ), "range position lookup rejects implicit closed wrapping and reversed ranges" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ repeated }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ repeatedStart, true } } )
+        check( !EvaluateByDistance( invalid, { 0, 0.0f }, { 0, 0.0f }, 0.0, 1.0e-5 ), "range position lookup validates paths even for zero ranges" );
+    for( splineParameter2 invalid : { splineParameter2{ GetSegmentCount( curve ), 0.0f }, splineParameter2{ std::numeric_limits<std::size_t>::max(), 1.0f }, splineParameter2{ 0, -0.1f }, splineParameter2{ 0, 1.1f }, splineParameter2{ 0, nan }, splineParameter2{ 0, infinity } } )
+        check( !EvaluateByDistance( curve, invalid, { 2, 1.0f }, 0.0, 1.0e-5 ) && !EvaluateByDistance( curve, { 0, 0.0f }, invalid, 0.0, 1.0e-5 ), "range position lookup rejects invalid boundary parameters" );
+    for( double distance : { -1.0, static_cast<double>( nan ), static_cast<double>( infinity ) } )
+        check( !EvaluateByDistance( curve, { 0, 0.25f }, { 2, 0.75f }, distance, 1.0e-5 ), "range position lookup rejects negative and nonfinite distances" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), 1.0e-30 } )
+        check( !EvaluateByDistance( curve, { 0, 0.25f }, { 2, 0.75f }, 0.5, tolerance ), "range position lookup rejects invalid or unattainable tolerance" );
+    editable[1] = { 0.0f, 8.0f };
+    const auto editedLocalSample = EvaluateByDistance( editableCurve, { 0, 0.25f }, { 0, 0.75f }, 2.0, 1.0e-6 );
+    check( editedLocalSample && near( editedLocalSample->point, { 0.0f, 4.0f } ) && near( editedLocalSample->tangent, { 0.0f, 1.0f } ), "range position lookup observes edited borrowed controls" );
+
     return 0;
 }
