@@ -1274,5 +1274,69 @@ int main()
         }
     }
 
+    const auto uniformParameters = SampleByDistanceParameters( { unitLine }, { 0, 0.25f }, { 0, 0.75f }, 4, 1.0e-6 );
+    check( uniformParameters.size() == 5, "distance sample parameters return subdivisions plus one entries" );
+    for( std::size_t i = 0; i < uniformParameters.size(); ++i )
+        check( uniformParameters[i].segmentIndex == 0 && uniformParameters[i].t == 0.25f + 0.125f * static_cast<float>( i ), "distance sample parameters match analytic straight interval targets" );
+    const auto unevenParameters = SampleByDistanceParameters( { unevenLine }, { 0, 0.0f }, { 2, 1.0f }, 4, 1.0e-5 );
+    check( unevenParameters.size() == 5, "uneven straight controls produce a whole-range parameter count" );
+    for( std::size_t i = 0; i < unevenParameters.size(); ++i )
+        check( near( Evaluate( { unevenLine }, unevenParameters[i].segmentIndex, unevenParameters[i].t ), { 29.0f * ( static_cast<float>( i ) / 4.0f ), 0.0f } ), "distance sample parameters invert arc length rather than interpolate t or segment index" );
+    for( const auto candidate : { curve, unevenCurve, loop, unevenLoop } )
+    {
+        const std::size_t last = GetSegmentCount( candidate ) - 1;
+        const splineParameter2 from{ 0, 0.25f }, to{ last, 0.75f };
+        const auto length = GetLength( candidate, from, to, 1.0e-5 );
+        const auto parameters = SampleByDistanceParameters( candidate, from, to, 8, 1.0e-5 );
+        const auto positions = SampleByDistance( candidate, from, to, 8, 1.0e-5 );
+        check( length && parameters.size() == 9 && positions.size() == 9, "curved open and closed distance parameter ranges return all targets" );
+        check( parameters.front().segmentIndex == from.segmentIndex && parameters.front().t == from.t && parameters.back().segmentIndex == to.segmentIndex && parameters.back().t == to.t, "distance sample parameters preserve both input endpoints" );
+        for( std::size_t i = 0; i < parameters.size(); ++i )
+        {
+            const auto parameter = parameters[i];
+            check( parameter.segmentIndex >= from.segmentIndex && parameter.segmentIndex <= to.segmentIndex && parameter.t >= 0.0f && parameter.t <= 1.0f && ( parameter.segmentIndex != from.segmentIndex || parameter.t >= from.t ) && ( parameter.segmentIndex != to.segmentIndex || parameter.t <= to.t ), "distance sample parameters stay inside the requested range" );
+            const auto measured = GetLength( candidate, from, parameter, 1.0e-6 );
+            check( measured && std::abs( *measured - *length * ( static_cast<double>( i ) / 8.0 ) ) <= 1.0e-5, "distance sample parameters round trip to equal arc-length targets" );
+            check( near( positions[i], Evaluate( candidate, parameter.segmentIndex, parameter.t ), 0.0f ), "existing distance sample positions match returned parameters exactly" );
+            if( i > 0 ) check( parameter.segmentIndex > parameters[i - 1].segmentIndex || ( parameter.segmentIndex == parameters[i - 1].segmentIndex && parameter.t >= parameters[i - 1].t ), "distance sample parameters follow forward path order" );
+        }
+    }
+    const auto joinedParameters = SampleByDistanceParameters( { uniformControls }, { 0, 0.25f }, { 2, 0.75f }, 10, 1.0e-6 );
+    check( joinedParameters.size() == 11 && joinedParameters[3].segmentIndex == 0 && joinedParameters[3].t == 1.0f && joinedParameters[7].segmentIndex == 1 && joinedParameters[7].t == 1.0f, "equal-distance targets at internal joins choose the preceding segment end" );
+    const auto aliasParameters = SampleByDistanceParameters( { uniformControls }, { 0, 1.0f }, { 2, 0.0f }, 1, 1.0e-6 );
+    check( aliasParameters.size() == 2 && aliasParameters.front().segmentIndex == 0 && aliasParameters.front().t == 1.0f && aliasParameters.back().segmentIndex == 2 && aliasParameters.back().t == 0.0f, "one subdivision preserves aliased join endpoints" );
+    const auto zeroDistanceParameters = SampleByDistanceParameters( { unitLine }, { 0, 0.5f }, { 0, 0.5f }, 4, 1.0e-6 );
+    check( zeroDistanceParameters.size() == 5, "zero distance parameter range retains requested output count" );
+    for( const auto parameter : zeroDistanceParameters ) check( parameter.segmentIndex == 0 && parameter.t == 0.5f, "zero distance parameter range repeats input from" );
+    for( splineParameter2 from : { splineParameter2{ 0, 1.0f }, splineParameter2{ 1, 0.0f } } )
+    {
+        const splineParameter2 to{ from.segmentIndex == 0 ? 1u : 0u, from.segmentIndex == 0 ? 0.0f : 1.0f };
+        const auto parameters = SampleByDistanceParameters( { reversal }, from, to, 2, 1.0e-6 );
+        check( parameters.size() == 3, "zero join aliases permit zero tangents in distance parameter sampling" );
+        for( const auto parameter : parameters ) check( parameter.segmentIndex == from.segmentIndex && parameter.t == from.t, "zero join alias parameters repeat the input representation" );
+    }
+    const auto stationaryParameters = SampleByDistanceParameters( { reversal }, { 0, 0.5f }, { 1, 0.5f }, 2, 1.0e-6 );
+    check( stationaryParameters.size() == 3 && stationaryParameters[1].segmentIndex == 0 && stationaryParameters[1].t == 1.0f, "distance sample parameters allow a zero tangent on a nonzero returning path" );
+    const auto shortParameters = SampleByDistanceParameters( { longPrefix }, { 3, 0.75f }, { 4, 0.25f }, 4, 1.0e-12 );
+    check( shortParameters.size() == 5, "distance sample parameters preserve short ranges after a huge prefix" );
+    for( std::size_t i = 0; i < shortParameters.size(); ++i ) check( near( Evaluate( { longPrefix }, shortParameters[i].segmentIndex, shortParameters[i].t ), { 1.75f + 0.125f * static_cast<float>( i ), 0.0f } ), "local distance sample parameters avoid whole-path cancellation" );
+    const auto coarsePositionParameters = SampleByDistanceParameters( { translatedLine }, { 0, 0.0f }, { 0, 1.0f }, 2, 1.0e-6 );
+    check( coarsePositionParameters.size() == 3 && coarsePositionParameters[1].t == 0.5f && SampleByDistance( { translatedLine }, 2, 1.0e-6 ).empty(), "distance parameter precision is independent of float position rounding" );
+    const auto closedDistanceParameters = SampleByDistanceParameters( loop, { 0, 0.0f }, { 3, 1.0f }, 4, 1.0e-5 );
+    check( closedDistanceParameters.size() == 5 && closedDistanceParameters.front().segmentIndex == 0 && closedDistanceParameters.front().t == 0.0f && closedDistanceParameters.back().segmentIndex == 3 && closedDistanceParameters.back().t == 1.0f, "closed distance sampling distinguishes start and one-lap endpoint parameters" );
+    check( SampleByDistanceParameters( { unitLine }, { 0, 0.25f }, { 0, 0.75f }, 3, 1.0e-12 ).empty(), "distance parameter sampling returns no partial result on inverse precision failure" );
+    check( SampleByDistanceParameters( loop, { 3, 0.5f }, { 0, 0.5f }, 4, 1.0e-5 ).empty() && SampleByDistanceParameters( curve, { 1, 0.75f }, { 1, 0.25f }, 4, 1.0e-5 ).empty(), "distance parameter sampling rejects implicit wrapping and reversed traversal" );
+    for( std::size_t count : { std::size_t{ 0 }, std::vector<splineParameter2>{}.max_size(), std::numeric_limits<std::size_t>::max() } )
+        check( SampleByDistanceParameters( curve, { 0, 0.25f }, { 2, 0.75f }, count, 1.0e-5 ).empty(), "distance parameter sampling rejects zero and impossible counts before allocation" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ single }, catmullRomSpline2{ repeated }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ repeatedStart, true } } )
+        check( SampleByDistanceParameters( invalid, { 0, 0.0f }, { 0, 0.0f }, 4, 1.0e-5 ).empty(), "distance parameter sampling validates paths even for zero ranges" );
+    for( splineParameter2 invalid : { splineParameter2{ GetSegmentCount( curve ), 0.0f }, splineParameter2{ std::numeric_limits<std::size_t>::max(), 1.0f }, splineParameter2{ 0, -0.1f }, splineParameter2{ 0, 1.1f }, splineParameter2{ 0, nan }, splineParameter2{ 0, infinity } } )
+        check( SampleByDistanceParameters( curve, invalid, { 2, 1.0f }, 4, 1.0e-5 ).empty() && SampleByDistanceParameters( curve, { 0, 0.0f }, invalid, 4, 1.0e-5 ).empty(), "distance parameter sampling rejects invalid boundaries" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), 1.0e-30 } )
+        check( SampleByDistanceParameters( curve, { 0, 0.25f }, { 2, 0.75f }, 4, tolerance ).empty(), "distance parameter sampling rejects invalid or unattainable tolerance" );
+    editable[1] = { 8.0f, 0.0f };
+    const auto editedUniformParameters = SampleByDistanceParameters( editableCurve, { 0, 0.25f }, { 0, 0.75f }, 2, 1.0e-6 );
+    check( editedUniformParameters.size() == 3 && editedUniformParameters[1].t == 0.5f && near( Evaluate( editableCurve, 0, editedUniformParameters[1].t ), { 4.0f, 0.0f } ), "distance sample parameters observe edited borrowed controls" );
+
     return 0;
 }

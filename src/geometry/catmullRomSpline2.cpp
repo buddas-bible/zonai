@@ -627,19 +627,33 @@ std::vector<vec2> SampleByDistance( const catmullRomSpline2& spline, splineParam
 {
     std::vector<vec2> samples{};
     if( subdivisions == 0 || subdivisions >= samples.max_size() ) return {};
+    const auto parameters = SampleByDistanceParameters( spline, from, to, subdivisions, tolerance );
+    if( parameters.empty() ) return {};
+    samples.reserve( parameters.size() );
+    for( const auto parameter : parameters )
+    {
+        const auto point = GetPositionByParameter( spline, parameter.segmentIndex, parameter.t, tolerance );
+        if( !point ) return {};
+        samples.push_back( *point );
+    }
+    return samples;
+}
+
+std::vector<splineParameter2> SampleByDistanceParameters( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, std::size_t subdivisions, double tolerance )
+{
+    std::vector<splineParameter2> parameters{};
+    if( subdivisions == 0 || subdivisions >= parameters.max_size() ) return {};
     const auto length = GetLength( spline, from, to, tolerance );
     if( !length ) return {};
-    samples.reserve( subdivisions + 1 );
+    parameters.reserve( subdivisions + 1 );
     for( std::size_t i = 0; i <= subdivisions; ++i )
     {
         const double distance = i == subdivisions ? *length : *length * ( static_cast<double>( i ) / subdivisions );
         const auto parameter = GetParameterByDistance( spline, from, to, distance, tolerance );
         if( !parameter ) return {};
-        const auto point = GetPositionByParameter( spline, parameter->segmentIndex, parameter->t, tolerance );
-        if( !point ) return {};
-        samples.push_back( *point );
+        parameters.push_back( *parameter );
     }
-    return samples;
+    return parameters;
 }
 
 std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, double distance, double tolerance )
