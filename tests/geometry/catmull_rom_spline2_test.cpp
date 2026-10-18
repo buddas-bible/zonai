@@ -1053,5 +1053,66 @@ int main()
     check( limitClosest && limitClosest->segmentIndex == 0 && limitClosest->t == 0.0f && limitClosest->distanceSquared == 0.0, "range closest search counts only nonempty segments at the node limit" );
     check( !ClosestPoint( { searchLimitControls }, { 0, 0.0f }, { 4096, 1.0f }, {}, 1.0e-4 ), "range closest search retains the initial node limit" );
 
+    const auto rangeLineBounds = ComputeAABB( { unitLine }, { 0, 0.25f }, { 0, 0.75f } );
+    check( rangeLineBounds && IsValidAABB( *rangeLineBounds ) && near( rangeLineBounds->min, { 0.25f, 0.0f } ) && near( rangeLineBounds->max, { 0.75f, 0.0f } ), "range AABB bounds the selected analytic line interval" );
+    check( !Contains( *rangeLineBounds, unitLine[0] ) && !Contains( *rangeLineBounds, unitLine[1] ), "range AABB excludes unrelated parts of a segment" );
+    for( const auto candidate : { spline, curve, unevenCurve, wave, loop, unevenLoop, crossing, catmullRomSpline2{ reversal }, catmullRomSpline2{ translatedControls }, catmullRomSpline2{ subnormalAxis } } )
+    {
+        const std::size_t last = GetSegmentCount( candidate ) - 1;
+        for( const auto from : { splineParameter2{ 0, 0.25f }, splineParameter2{ last, 0.375f } } )
+        {
+            const splineParameter2 to{ last, 0.75f };
+            const auto bounds = ComputeAABB( candidate, from, to );
+            check( bounds && IsValidAABB( *bounds ), "partial open and closed curves have finite conservative bounds" );
+            for( std::size_t segment = from.segmentIndex; segment <= to.segmentIndex; ++segment )
+            {
+                const float begin = segment == from.segmentIndex ? from.t : 0.0f, end = segment == to.segmentIndex ? to.t : 1.0f;
+                for( int i = 0; i <= 4096; ++i )
+                    check( Contains( *bounds, Evaluate( candidate, segment, begin + ( end - begin ) * ( static_cast<float>( i ) / 4096.0f ) ) ), "range AABB contains dense float evaluations without epsilon" );
+                check( Contains( *bounds, Evaluate( candidate, segment, std::nextafter( begin, end ) ) ) && Contains( *bounds, Evaluate( candidate, segment, std::nextafter( end, begin ) ) ), "range AABB contains evaluations adjacent to clipped endpoints" );
+            }
+        }
+        const auto whole = ComputeAABB( candidate );
+        const auto full = ComputeAABB( candidate, { 0, 0.0f }, { last, 1.0f } );
+        check( whole && full && near( whole->min, full->min, 0.0f ) && near( whole->max, full->max, 0.0f ), "full-range AABB exactly preserves existing whole bounds" );
+        const auto segment = ComputeAABB( candidate, last );
+        const auto segmentRange = ComputeAABB( candidate, { last, 0.0f }, { last, 1.0f } );
+        check( segment && segmentRange && near( segment->min, segmentRange->min, 0.0f ) && near( segment->max, segmentRange->max, 0.0f ), "complete segment range preserves existing segment bounds" );
+    }
+    const auto zeroBounds = ComputeAABB( { unitLine }, { 0, 0.5f }, { 0, 0.5f } );
+    check( zeroBounds && IsValidAABB( *zeroBounds ) && Contains( *zeroBounds, { 0.5f, 0.0f } ) && near( zeroBounds->min, { 0.5f, 0.0f } ) && near( zeroBounds->max, { 0.5f, 0.0f } ), "zero range AABB contains its sole position with rounding allowance" );
+    for( splineParameter2 from : { splineParameter2{ 0, 1.0f }, splineParameter2{ 1, 0.0f } } )
+    {
+        const splineParameter2 to{ from.segmentIndex == 0 ? 1u : 0u, from.segmentIndex == 0 ? 0.0f : 1.0f };
+        const auto alias = ComputeAABB( { reversal }, from, to );
+        check( alias && IsValidAABB( *alias ) && Contains( *alias, { 1.0f, 0.0f } ), "zero join aliases have bounds even at a stationary point" );
+    }
+    const auto seamBounds = ComputeAABB( loop, { 3, 0.5f }, { 3, 1.0f } );
+    check( seamBounds && Contains( *seamBounds, square[0] ) && Contains( *seamBounds, Evaluate( loop, 3, 0.75f ) ), "closed partial bounds include the final seam endpoint" );
+    const auto narrowBounds = ComputeAABB( { unitLine }, { 0, std::nextafter( 1.0f, 0.0f ) }, { 0, 1.0f } );
+    check( narrowBounds && Contains( *narrowBounds, { std::nextafter( 1.0f, 0.0f ), 0.0f } ) && Contains( *narrowBounds, unitLine[1] ), "range AABB supports a one-ulp interval next to the final endpoint" );
+    for( float scale : { 1.0e-10f, 1.0e10f } )
+    {
+        const vec2 controls[] = { scale * points[0], scale * points[1], scale * points[2], scale * points[3] };
+        const auto bounds = ComputeAABB( { controls }, { 0, 0.25f }, { 2, 0.75f } );
+        check( bounds.has_value(), "range bounds support small and large coordinate scales" );
+        for( std::size_t segment = 0; segment < 3; ++segment )
+        {
+            const float begin = segment == 0 ? 0.25f : 0.0f, end = segment == 2 ? 0.75f : 1.0f;
+            for( int i = 0; i <= 1024; ++i )
+                check( Contains( *bounds, Evaluate( { controls }, segment, begin + ( end - begin ) * ( static_cast<float>( i ) / 1024.0f ) ) ), "scaled range bounds contain float evaluations" );
+        }
+    }
+    check( !ComputeAABB( loop, { 3, 0.5f }, { 0, 0.5f } ) && !ComputeAABB( curve, { 1, 0.75f }, { 1, 0.25f } ), "range bounds reject implicit wrapping and reversed traversal" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ single }, catmullRomSpline2{ repeated }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ repeatedStart, true } } )
+        check( !ComputeAABB( invalid, { 0, 0.0f }, { 0, 0.0f } ), "range bounds validate paths even for zero ranges" );
+    for( splineParameter2 invalid : { splineParameter2{ GetSegmentCount( curve ), 0.0f }, splineParameter2{ std::numeric_limits<std::size_t>::max(), 1.0f }, splineParameter2{ 0, -0.1f }, splineParameter2{ 0, 1.1f }, splineParameter2{ 0, nan }, splineParameter2{ 0, infinity } } )
+        check( !ComputeAABB( curve, invalid, { 2, 1.0f } ) && !ComputeAABB( curve, { 0, 0.0f }, invalid ), "range bounds reject invalid boundary parameters" );
+    check( !ComputeAABB( { unboundedAllowance }, { 0, 0.25f }, { 0, 0.75f } ), "range bounds fail when outward rounding cannot remain finite" );
+    const auto beforeRangeEdit = ComputeAABB( editableCurve, { 0, 0.25f }, { 0, 0.75f } );
+    editable[1] = { 16.0f, 0.0f };
+    const auto afterRangeEdit = ComputeAABB( editableCurve, { 0, 0.25f }, { 0, 0.75f } );
+    check( beforeRangeEdit && afterRangeEdit && afterRangeEdit->max.x > beforeRangeEdit->max.x && Contains( *afterRangeEdit, { 12.0f, 0.0f } ), "range bounds observe edited borrowed controls" );
+
     return 0;
 }

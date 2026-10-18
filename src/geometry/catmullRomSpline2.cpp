@@ -133,15 +133,25 @@ std::optional<vec2> GetPositionByParameter( const catmullRomSpline2& spline, std
     return point;
 }
 
-std::optional<aabb2> GetSegmentAABB( const catmullRomSpline2& spline, std::size_t segmentIndex )
+std::optional<aabb2> GetSegmentAABB( const catmullRomSpline2& spline, std::size_t segmentIndex, double t0 = 0.0, double t1 = 1.0 )
 {
-    const auto bound = []( double start, double end, double tangent, double quadratic, double cubic, float& lower, float& upper )
+    const auto bound = [&]( double start, double end, double tangent, double quadratic, double cubic, float& lower, float& upper )
     {
-        const std::array<double, 5> hull{ start, start + tangent / 3.0, start + ( 2.0 * tangent + quadratic ) / 3.0, start + tangent + quadratic + cubic, end };
+        std::array<double, 4> hull{ start, start + tangent / 3.0, start + ( 2.0 * tangent + quadratic ) / 3.0, start + tangent + quadratic + cubic };
+        const auto trim = [&]( double t, bool keepLeft )
+        {
+            const auto mix = [&]( double a, double b ) { return ( 1.0 - t ) * a + t * b; };
+            const double a = mix( hull[0], hull[1] ), b = mix( hull[1], hull[2] ), c = mix( hull[2], hull[3] );
+            const double d = mix( a, b ), e = mix( b, c ), center = mix( d, e );
+            hull = keepLeft ? std::array{ hull[0], a, d, center } : std::array{ center, e, c, hull[3] };
+        };
+        if( t1 < 1.0 ) trim( t1, true );
+        if( t0 > 0.0 ) trim( t0 / t1, false );
+        const double endpoint = t1 == 1.0 ? end : hull[3];
         // Horner 평가 6회 연산과 subnormal 반올림을 감싸고 double hull 구성 오차도 포함함.
         const double error = 8.0 * std::numeric_limits<float>::epsilon() * ( std::abs( start ) + std::abs( tangent ) + std::abs( quadratic ) + std::abs( cubic ) ) + 8.0 * std::numeric_limits<float>::denorm_min();
-        const double minimum = *std::min_element( hull.begin(), hull.end() ) - error;
-        const double maximum = *std::max_element( hull.begin(), hull.end() ) + error;
+        const double minimum = std::min( *std::min_element( hull.begin(), hull.end() ), endpoint ) - error;
+        const double maximum = std::max( *std::max_element( hull.begin(), hull.end() ), endpoint ) + error;
         if( !std::isfinite( minimum ) || !std::isfinite( maximum ) || minimum < -std::numeric_limits<float>::max() || maximum > std::numeric_limits<float>::max() ) return false;
         lower = std::nextafter( static_cast<float>( minimum ), -std::numeric_limits<float>::infinity() );
         upper = std::nextafter( static_cast<float>( maximum ), std::numeric_limits<float>::infinity() );
@@ -282,6 +292,33 @@ std::optional<aabb2> ComputeAABB( const catmullRomSpline2& spline, std::size_t s
 {
     if( !IsValid( spline ) || segmentIndex >= GetSegmentCount( spline ) ) return {};
     return GetSegmentAABB( spline, segmentIndex );
+}
+
+std::optional<aabb2> ComputeAABB( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to )
+{
+    if( !IsValid( spline ) ) return {};
+    const std::size_t count = GetSegmentCount( spline );
+    const auto valid = [&]( splineParameter2 parameter )
+    {
+        return parameter.segmentIndex < count && std::isfinite( parameter.t ) && parameter.t >= 0.0f && parameter.t <= 1.0f;
+    };
+    if( !valid( from ) || !valid( to ) ) return {};
+    const auto beginParameter = NormalizeParameter( from, count ), endParameter = NormalizeParameter( to, count );
+    if( beginParameter.segmentIndex > endParameter.segmentIndex || ( beginParameter.segmentIndex == endParameter.segmentIndex && beginParameter.t > endParameter.t ) ) return {};
+    if( beginParameter.segmentIndex == endParameter.segmentIndex && beginParameter.t == endParameter.t )
+        return GetSegmentAABB( spline, from.segmentIndex, from.t, from.t );
+    const vec2 first = Evaluate( spline, from.segmentIndex, from.t );
+    if( !IsFinite( first ) ) return {};
+    aabb2 bounds{ first, first };
+    for( std::size_t i = from.segmentIndex; i <= to.segmentIndex; ++i )
+    {
+        const double begin = i == from.segmentIndex ? from.t : 0.0, end = i == to.segmentIndex ? to.t : 1.0;
+        if( begin == end ) continue;
+        const auto segmentBounds = GetSegmentAABB( spline, i, begin, end );
+        if( !segmentBounds ) return {};
+        bounds = Union( bounds, *segmentBounds );
+    }
+    return bounds;
 }
 
 std::vector<vec2> Sample( const catmullRomSpline2& spline, std::size_t subdivisions )
