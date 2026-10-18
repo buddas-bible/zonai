@@ -89,6 +89,11 @@ std::optional<aabb2> ComputeAABB( const catmullRomSpline2& spline, splineParamet
 // 같은 지점인 범위는 점 하나. 기존 adaptive 오차 / 실패 정책이며 잘못된 범위도 빈 배열.
 std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, float maxError );
 
+// Evaluate로 만든 선분열이 maxError 기준을 만족하는 원본 구간 / t를 순서대로 반환함.
+// 양 끝은 입력 표현을 유지하고 내부 접합점은 앞 구간 t=1. 같은 지점은 from 하나.
+// 자동 순환하지 않으며 잘못된 입력 / 정밀도 부족 / 분할 한도 초과는 빈 배열.
+std::vector<splineParameter2> SampleAdaptiveParameters( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, float maxError );
+
 // 정방향 범위의 부분 길이를 직접 합산함. 내부 접합점의 앞 t=1 / 다음 t=0은 같은 지점.
 // 닫힌 시작과 한 바퀴 끝은 구분하며 자동 순환하지 않음. 같은 지점은 0, 0 접선도 허용함.
 // tolerance는 전체 범위의 양수인 절대 길이 오차 목표. 잘못된 입력 / 역순 / 정밀도 또는 수렴 실패는 nullopt.
