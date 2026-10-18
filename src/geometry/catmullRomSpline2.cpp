@@ -346,16 +346,33 @@ std::vector<vec2> Sample( const catmullRomSpline2& spline, std::size_t subdivisi
 
 std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, float maxError )
 {
+    const std::size_t count = GetSegmentCount( spline );
+    if( count == 0 ) return {};
+    return SampleAdaptive( spline, { 0, 0.0f }, { count - 1, 1.0f }, maxError );
+}
+
+std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, float maxError )
+{
     if( !IsValid( spline ) || !std::isfinite( maxError ) || maxError <= 0.0f ) return {};
-    std::vector<vec2> samples{ spline.points.front() };
+    const std::size_t count = GetSegmentCount( spline );
+    const auto valid = [&]( splineParameter2 parameter )
+    {
+        return parameter.segmentIndex < count && std::isfinite( parameter.t ) && parameter.t >= 0.0f && parameter.t <= 1.0f;
+    };
+    if( !valid( from ) || !valid( to ) ) return {};
+    const auto beginParameter = NormalizeParameter( from, count ), endParameter = NormalizeParameter( to, count );
+    if( beginParameter.segmentIndex > endParameter.segmentIndex || ( beginParameter.segmentIndex == endParameter.segmentIndex && beginParameter.t > endParameter.t ) ) return {};
+    const auto first = GetPositionByParameter( spline, from.segmentIndex, from.t, maxError );
+    if( !first ) return {};
+    std::vector<vec2> samples{ *first };
+    if( beginParameter.segmentIndex == endParameter.segmentIndex && beginParameter.t == endParameter.t ) return samples;
     const double errorSquared = static_cast<double>( maxError ) * maxError;
     const auto midpoint = []( bezierPoint2 a, bezierPoint2 b )
     {
         return bezierPoint2{ 0.5 * ( a.x + b.x ), 0.5 * ( a.y + b.y ) };
     };
-    const auto subdivide = [&]( auto&& self, const std::array<bezierPoint2, 4>& curve, int depth ) -> bool
+    const auto subdivide = [&]( auto&& self, const std::array<bezierPoint2, 4>& curve, int depth, const vec2& end ) -> bool
     {
-        const vec2 end{ static_cast<float>( curve[3].x ), static_cast<float>( curve[3].y ) };
         if( !IsFinite( end ) ) return false;
         const vec2 start = samples.back();
         const double dx = static_cast<double>( end.x ) - start.x;
@@ -381,20 +398,37 @@ std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, float maxErro
         if( depth == MAX_DEPTH ) return false;
         const auto a = midpoint( curve[0], curve[1] ), b = midpoint( curve[1], curve[2] ), c = midpoint( curve[2], curve[3] );
         const auto d = midpoint( a, b ), e = midpoint( b, c ), center = midpoint( d, e );
-        return self( self, { curve[0], a, d, center }, depth + 1 ) && self( self, { center, e, c, curve[3] }, depth + 1 );
+        return self( self, { curve[0], a, d, center }, depth + 1, { static_cast<float>( center.x ), static_cast<float>( center.y ) } ) &&
+            self( self, { center, e, c, curve[3] }, depth + 1, end );
     };
-    for( std::size_t i = 0; i < GetSegmentCount( spline ); ++i )
+    const auto trim = []( std::array<bezierPoint2, 4>& curve, double t, bool keepLeft )
     {
+        const auto mix = [&]( bezierPoint2 a, bezierPoint2 b )
+        {
+            return bezierPoint2{ ( 1.0 - t ) * a.x + t * b.x, ( 1.0 - t ) * a.y + t * b.y };
+        };
+        const auto a = mix( curve[0], curve[1] ), b = mix( curve[1], curve[2] ), c = mix( curve[2], curve[3] );
+        const auto d = mix( a, b ), e = mix( b, c ), center = mix( d, e );
+        curve = keepLeft ? std::array{ curve[0], a, d, center } : std::array{ center, e, c, curve[3] };
+    };
+    for( std::size_t i = from.segmentIndex; i <= to.segmentIndex; ++i )
+    {
+        const double begin = i == from.segmentIndex ? from.t : 0.0, end = i == to.segmentIndex ? to.t : 1.0;
+        if( begin == end ) continue;
+        const auto endpoint = end == 1.0 ? std::optional<vec2>{ GetPoint( spline, i + 1 ) } : GetPositionByParameter( spline, i, static_cast<float>( end ), maxError );
+        if( !endpoint ) return {};
         vec2 tangent1{}, tangent2{};
         GetTangents( spline, i, tangent1, tangent2 );
         const vec2 a = spline.points[i], b = GetPoint( spline, i + 1 );
-        const std::array<bezierPoint2, 4> curve{
+        std::array<bezierPoint2, 4> curve{
             bezierPoint2{ a.x, a.y },
             bezierPoint2{ a.x + static_cast<double>( tangent1.x ) / 3.0, a.y + static_cast<double>( tangent1.y ) / 3.0 },
             bezierPoint2{ b.x - static_cast<double>( tangent2.x ) / 3.0, b.y - static_cast<double>( tangent2.y ) / 3.0 },
             bezierPoint2{ b.x, b.y }
         };
-        if( !subdivide( subdivide, curve, 0 ) ) return {};
+        if( end < 1.0 ) trim( curve, end, true );
+        if( begin > 0.0 ) trim( curve, begin / end, false );
+        if( !subdivide( subdivide, curve, 0, *endpoint ) ) return {};
     }
     return samples;
 }

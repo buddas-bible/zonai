@@ -1114,5 +1114,68 @@ int main()
     const auto afterRangeEdit = ComputeAABB( editableCurve, { 0, 0.25f }, { 0, 0.75f } );
     check( beforeRangeEdit && afterRangeEdit && afterRangeEdit->max.x > beforeRangeEdit->max.x && Contains( *afterRangeEdit, { 12.0f, 0.0f } ), "range bounds observe edited borrowed controls" );
 
+    const auto adaptiveRangeLine = SampleAdaptive( { unitLine }, { 0, 0.25f }, { 0, 0.75f }, 0.01f );
+    check( adaptiveRangeLine.size() == 2 && near( adaptiveRangeLine.front(), { 0.25f, 0.0f } ) && near( adaptiveRangeLine.back(), { 0.75f, 0.0f } ), "adaptive range samples include only the selected straight interval endpoints" );
+    for( const auto candidate : { curve, unevenCurve, wave, loop, unevenLoop, crossing } )
+    {
+        const std::size_t last = GetSegmentCount( candidate ) - 1;
+        for( const auto from : { splineParameter2{ 0, 0.25f }, splineParameter2{ 1, 0.125f } } )
+        {
+            const splineParameter2 to{ from.segmentIndex == 0 ? last : 1, 0.75f };
+            const auto samples = SampleAdaptive( candidate, from, to, 0.01f );
+            check( samples.size() >= 2 && near( samples.front(), Evaluate( candidate, from.segmentIndex, from.t ), 0.0f ) && near( samples.back(), Evaluate( candidate, to.segmentIndex, to.t ), 0.0f ), "adaptive range sampling preserves exact float endpoint evaluations on single and multiple segments" );
+            for( std::size_t i = 1; i < samples.size(); ++i )
+                check( IsFinite( samples[i] ) && ( samples[i].x != samples[i - 1].x || samples[i].y != samples[i - 1].y ), "adaptive range samples are finite without consecutive duplicates" );
+            for( std::size_t segment = from.segmentIndex; segment <= to.segmentIndex; ++segment )
+            {
+                const float begin = segment == from.segmentIndex ? from.t : 0.0f, end = segment == to.segmentIndex ? to.t : 1.0f;
+                for( int i = 0; i <= 2000; ++i )
+                {
+                    const vec2 point = Evaluate( candidate, segment, begin + ( end - begin ) * ( static_cast<float>( i ) / 2000.0f ) );
+                    float distanceSquared = std::numeric_limits<float>::infinity();
+                    for( std::size_t j = 1; j < samples.size(); ++j )
+                        distanceSquared = std::min( distanceSquared, DistanceSquared( segment2{ samples[j - 1], samples[j] }, point ) );
+                    check( distanceSquared <= 0.01001f * 0.01001f, "adaptive range polyline bounds dense curve evaluations through clipped segments and joins" );
+                }
+            }
+            const auto refined = SampleAdaptive( candidate, from, to, 0.001f );
+            check( refined.size() > samples.size(), "smaller adaptive range error refines curved portions" );
+        }
+        const auto whole = SampleAdaptive( candidate, 0.01f );
+        const auto full = SampleAdaptive( candidate, { 0, 0.0f }, { last, 1.0f }, 0.01f );
+        check( !whole.empty() && whole.size() == full.size(), "full-range adaptive sampling preserves whole-path sample count" );
+        for( std::size_t i = 0; i < whole.size(); ++i )
+            check( near( whole[i], full[i], 0.0f ), "full-range adaptive sampling preserves whole-path output exactly" );
+    }
+    const auto zeroAdaptive = SampleAdaptive( { unitLine }, { 0, 0.5f }, { 0, 0.5f }, 0.01f );
+    check( zeroAdaptive.size() == 1 && near( zeroAdaptive.front(), { 0.5f, 0.0f } ), "zero adaptive range returns its sole point" );
+    for( splineParameter2 from : { splineParameter2{ 0, 1.0f }, splineParameter2{ 1, 0.0f } } )
+    {
+        const splineParameter2 to{ from.segmentIndex == 0 ? 1u : 0u, from.segmentIndex == 0 ? 0.0f : 1.0f };
+        const auto alias = SampleAdaptive( { reversal }, from, to, 0.01f );
+        check( alias.size() == 1 && near( alias.front(), { 1.0f, 0.0f } ), "adaptive zero join aliases accept zero tangents and return one point" );
+    }
+    const auto returningAdaptive = SampleAdaptive( { reversal }, { 0, 0.5f }, { 1, 0.5f }, 0.01f );
+    check( returningAdaptive.size() == 3 && near( returningAdaptive.front(), { 0.625f, 0.0f } ) && near( returningAdaptive[1], { 1.0f, 0.0f } ) && near( returningAdaptive.back(), returningAdaptive.front() ), "coincident range endpoint positions retain a nonzero returning path" );
+    const auto seamAdaptive = SampleAdaptive( loop, { 3, 0.5f }, { 3, 1.0f }, 0.01f );
+    check( seamAdaptive.size() >= 2 && near( seamAdaptive.back(), square[0], 0.0f ) && !near( seamAdaptive.front(), seamAdaptive.back() ), "closed partial adaptive sampling ends at its requested seam without forcing closure" );
+    const auto joinedAdaptive = SampleAdaptive( curve, { 0, 1.0f }, { 2, 0.0f }, 0.01f );
+    check( joinedAdaptive.size() >= 2 && near( joinedAdaptive.front(), points[1], 0.0f ) && near( joinedAdaptive.back(), points[2], 0.0f ), "adaptive range accepts internal join endpoint representations" );
+    const float adjacentT = std::nextafter( 1.0f, 0.0f );
+    const auto narrowAdaptive = SampleAdaptive( { unitLine }, { 0, adjacentT }, { 0, 1.0f }, 1.0e-8f );
+    check( narrowAdaptive.size() == 2 && narrowAdaptive.front().x == adjacentT && narrowAdaptive.back().x == 1.0f, "adaptive range retains a one-ulp interval" );
+    check( SampleAdaptive( { translatedLine }, { 0, 0.5f }, { 0, 0.75f }, 1.0e-3f ).empty() && SampleAdaptive( { translatedLine }, { 0, 0.5f }, { 0, 0.5f }, 1.0e-3f ).empty(), "adaptive range rejects unrepresentable float endpoints including zero ranges" );
+    check( SampleAdaptive( curve, { 0, 0.25f }, { 2, 0.75f }, 1.0e-30f ).empty(), "adaptive range returns no partial result when error cannot be met" );
+    check( SampleAdaptive( loop, { 3, 0.5f }, { 0, 0.5f }, 0.01f ).empty() && SampleAdaptive( curve, { 1, 0.75f }, { 1, 0.25f }, 0.01f ).empty(), "adaptive range rejects implicit wrapping and reversed traversal" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ single }, catmullRomSpline2{ repeated }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ repeatedStart, true } } )
+        check( SampleAdaptive( invalid, { 0, 0.0f }, { 0, 0.0f }, 0.01f ).empty(), "adaptive range validates paths even for zero ranges" );
+    for( splineParameter2 invalid : { splineParameter2{ GetSegmentCount( curve ), 0.0f }, splineParameter2{ std::numeric_limits<std::size_t>::max(), 1.0f }, splineParameter2{ 0, -0.1f }, splineParameter2{ 0, 1.1f }, splineParameter2{ 0, nan }, splineParameter2{ 0, infinity } } )
+        check( SampleAdaptive( curve, invalid, { 2, 1.0f }, 0.01f ).empty() && SampleAdaptive( curve, { 0, 0.0f }, invalid, 0.01f ).empty(), "adaptive range rejects invalid boundary parameters" );
+    for( float error : { 0.0f, -1.0f, nan, infinity } )
+        check( SampleAdaptive( curve, { 0, 0.25f }, { 2, 0.75f }, error ).empty() && SampleAdaptive( curve, { 0, 0.5f }, { 0, 0.5f }, error ).empty(), "adaptive range rejects invalid errors including zero ranges" );
+    editable[1] = { 8.0f, 0.0f };
+    const auto editedAdaptiveRange = SampleAdaptive( editableCurve, { 0, 0.25f }, { 0, 0.75f }, 0.01f );
+    check( editedAdaptiveRange.size() == 2 && near( editedAdaptiveRange.front(), { 2.0f, 0.0f } ) && near( editedAdaptiveRange.back(), { 6.0f, 0.0f } ), "adaptive range observes edited borrowed controls" );
+
     return 0;
 }
