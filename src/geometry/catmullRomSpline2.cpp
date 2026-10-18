@@ -545,12 +545,20 @@ std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline
 namespace
 {
 
-std::optional<splineClosestPoint2> ClosestPointInRange( const catmullRomSpline2& spline, std::size_t firstSegment, std::size_t endSegment, const vec2& point, double tolerance )
+std::optional<splineClosestPoint2> ClosestPointInRange( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, const vec2& point, double tolerance )
 {
     if( !IsValid( spline ) || !IsFinite( point ) || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
+    const std::size_t count = GetSegmentCount( spline );
+    const auto valid = [&]( splineParameter2 parameter )
+    {
+        return parameter.segmentIndex < count && std::isfinite( parameter.t ) && parameter.t >= 0.0f && parameter.t <= 1.0f;
+    };
+    if( !valid( from ) || !valid( to ) ) return {};
+    const auto beginParameter = NormalizeParameter( from, count ), endParameter = NormalizeParameter( to, count );
+    if( beginParameter.segmentIndex > endParameter.segmentIndex || ( beginParameter.segmentIndex == endParameter.segmentIndex && beginParameter.t > endParameter.t ) ) return {};
     constexpr std::size_t MAX_NODES = 4096;
-    const std::size_t count = endSegment - firstSegment;
-    if( count > MAX_NODES ) return {};
+    const std::size_t intervals = endParameter.segmentIndex - beginParameter.segmentIndex + ( endParameter.t > 0.0f ? 1u : 0u );
+    if( intervals > MAX_NODES ) return {};
     double scale = std::max( std::abs( static_cast<double>( point.x ) ), std::abs( static_cast<double>( point.y ) ) );
     for( const vec2 control : spline.points ) scale = std::max( { scale, std::abs( static_cast<double>( control.x ) ), std::abs( static_cast<double>( control.y ) ) } );
     const double roundoff = 128.0 * std::numeric_limits<double>::epsilon() * scale;
@@ -609,20 +617,42 @@ std::optional<splineClosestPoint2> ClosestPointInRange( const catmullRomSpline2&
             bestDistance = distance;
         }
     };
-    for( std::size_t i = firstSegment; i < endSegment; ++i )
+    if( beginParameter.segmentIndex == endParameter.segmentIndex && beginParameter.t == endParameter.t )
     {
+        consider( from.segmentIndex, from.t );
+        if( !std::isfinite( bestDistance ) ) return {};
+        return best;
+    }
+    const auto trim = []( std::array<bezierPoint2, 4>& curve, double t, bool keepLeft )
+    {
+        const auto mix = [&]( bezierPoint2 a, bezierPoint2 b )
+        {
+            return bezierPoint2{ ( 1.0 - t ) * a.x + t * b.x, ( 1.0 - t ) * a.y + t * b.y };
+        };
+        const auto a = mix( curve[0], curve[1] ), b = mix( curve[1], curve[2] ), c = mix( curve[2], curve[3] );
+        const auto d = mix( a, b ), e = mix( b, c ), center = mix( d, e );
+        curve = keepLeft ? std::array{ curve[0], a, d, center } : std::array{ center, e, c, curve[3] };
+    };
+    for( std::size_t i = from.segmentIndex; i <= to.segmentIndex; ++i )
+    {
+        const double begin = i == from.segmentIndex ? from.t : 0.0, end = i == to.segmentIndex ? to.t : 1.0;
+        consider( i, begin ); consider( i, end );
+        if( begin == end ) continue;
         vec2 tangent1{}, tangent2{};
         GetTangents( spline, i, tangent1, tangent2 );
         if( !IsFinite( tangent1 ) || !IsFinite( tangent2 ) ) return {};
         const vec2 a = spline.points[i], b = GetPoint( spline, i + 1 );
-        const std::array<bezierPoint2, 4> curve{
+        std::array<bezierPoint2, 4> curve{
             bezierPoint2{ a.x, a.y },
             bezierPoint2{ a.x + static_cast<double>( tangent1.x ) / 3.0, a.y + static_cast<double>( tangent1.y ) / 3.0 },
             bezierPoint2{ b.x - static_cast<double>( tangent2.x ) / 3.0, b.y - static_cast<double>( tangent2.y ) / 3.0 },
             bezierPoint2{ b.x, b.y }
         };
-        consider( i, 0.0 ); consider( i, 1.0 );
-        pending.push( { curve, i, 0.0, 1.0, lowerBound( curve, 0 ), 0 } );
+        int depth = 0;
+        // 잘라낸 hull에도 분할 반올림 여유를 포함함.
+        if( end < 1.0 ) { trim( curve, end, true ); ++depth; }
+        if( begin > 0.0 ) { trim( curve, begin / end, false ); ++depth; }
+        pending.push( { curve, i, begin, end, lowerBound( curve, depth ), depth } );
     }
     const auto midpoint = []( bezierPoint2 a, bezierPoint2 b )
     {
@@ -658,13 +688,20 @@ std::optional<splineClosestPoint2> ClosestPointInRange( const catmullRomSpline2&
 
 std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, const vec2& point, double tolerance )
 {
-    return ClosestPointInRange( spline, 0, GetSegmentCount( spline ), point, tolerance );
+    const std::size_t count = GetSegmentCount( spline );
+    if( count == 0 ) return {};
+    return ClosestPointInRange( spline, { 0, 0.0f }, { count - 1, 1.0f }, point, tolerance );
 }
 
 std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, std::size_t segmentIndex, const vec2& point, double tolerance )
 {
     if( segmentIndex >= GetSegmentCount( spline ) ) return {};
-    return ClosestPointInRange( spline, segmentIndex, segmentIndex + 1, point, tolerance );
+    return ClosestPointInRange( spline, { segmentIndex, 0.0f }, { segmentIndex, 1.0f }, point, tolerance );
+}
+
+std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, const vec2& point, double tolerance )
+{
+    return ClosestPointInRange( spline, from, to, point, tolerance );
 }
 
 } // namespace zonai
