@@ -101,6 +101,10 @@ std::optional<splineParameter2> GetParameterByDistance( const catmullRomSpline2&
 // 기존 균등 샘플링과 같은 오차 / 실패 정책. 잘못된 범위도 빈 배열.
 std::vector<vec2> SampleByDistance( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, std::size_t subdivisions, double tolerance );
 
+// 정방향 [from, to]의 시작부터 잰 거리로 위치와 단위 접선을 조회함. 자동 순환하지 않음.
+// 기존 거리 조회와 같은 오차 / 실패 정책. 0 길이 범위는 거리 0에서 접선이 유효할 때만 성공함.
+std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, double distance, double tolerance );
+
 // distance in [0, GetLength]. 곡선 위 위치와 진행 방향 단위 접선. 0 접선 / 정밀도 부족도 nullopt.
 std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline, double distance, double tolerance );
 
