@@ -122,4 +122,8 @@ std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline
 // 같은 오차 / 실패 정책으로 지정 구간의 양 끝을 포함해 탐색함. 잘못된 구간 번호도 nullopt.
 std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, std::size_t segmentIndex, const vec2& point, double tolerance );
 
+// 정방향 [from, to]의 양 끝을 포함해 최근접점을 찾음. 자동 순환하지 않으며 0 접선도 허용함.
+// 같은 오차 / 실패 정책. 같은 지점인 범위는 입력 from을 조회함.
+std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, const vec2& point, double tolerance );
+
 } // namespace zonai

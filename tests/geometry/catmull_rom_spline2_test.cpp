@@ -980,5 +980,78 @@ int main()
     const auto editedLocalSample = EvaluateByDistance( editableCurve, { 0, 0.25f }, { 0, 0.75f }, 2.0, 1.0e-6 );
     check( editedLocalSample && near( editedLocalSample->point, { 0.0f, 4.0f } ) && near( editedLocalSample->tangent, { 0.0f, 1.0f } ), "range position lookup observes edited borrowed controls" );
 
+    const auto rangeProjection = ClosestPoint( { unitLine }, { 0, 0.25f }, { 0, 0.75f }, { 0.5f, 2.0f }, 1.0e-5 );
+    check( rangeProjection && rangeProjection->segmentIndex == 0 && rangeProjection->t == 0.5f && near( rangeProjection->point, { 0.5f, 0.0f } ) && rangeProjection->distanceSquared == 4.0, "range closest point projects onto the selected line interval" );
+    const auto rangeLeft = ClosestPoint( { unitLine }, { 0, 0.25f }, { 0, 0.75f }, { -2.0f, 1.0f }, 1.0e-5 );
+    const auto rangeRight = ClosestPoint( { unitLine }, { 0, 0.25f }, { 0, 0.75f }, { 3.0f, 1.0f }, 1.0e-5 );
+    check( rangeLeft && rangeRight && rangeLeft->t == 0.25f && rangeRight->t == 0.75f && rangeLeft->distanceSquared == 6.0625 && rangeRight->distanceSquared == 6.0625, "range closest point includes clipped endpoints and excludes closer points outside" );
+    for( const auto candidate : { curve, wave, unevenCurve, loop, unevenLoop, crossing } )
+    {
+        const std::size_t last = GetSegmentCount( candidate ) - 1;
+        for( const auto from : { splineParameter2{ 0, 0.25f }, splineParameter2{ 1, 0.375f } } )
+        {
+            const splineParameter2 to{ from.segmentIndex == 0 ? last : 1, 0.75f };
+            for( const vec2 query : { vec2{ 0.1f, 0.2f }, vec2{ -0.5f, 1.5f }, vec2{ 6.0f, -2.0f } } )
+            {
+                const auto closest = ClosestPoint( candidate, from, to, query, 1.0e-4 );
+                check( closest && closest->segmentIndex >= from.segmentIndex && closest->segmentIndex <= to.segmentIndex && closest->t >= 0.0f && closest->t <= 1.0f && ( closest->segmentIndex != from.segmentIndex || closest->t >= from.t ) && ( closest->segmentIndex != to.segmentIndex || closest->t <= to.t ), "range closest point stays inside clipped single and multiple segments" );
+                check( near( closest->point, Evaluate( candidate, closest->segmentIndex, closest->t ) ), "range closest point retains original curve parameter metadata" );
+                const double distance = std::hypot( static_cast<double>( closest->point.x ) - query.x, static_cast<double>( closest->point.y ) - query.y );
+                check( std::abs( closest->distanceSquared - distance * distance ) < 1.0e-9, "range closest squared distance uses the returned float point" );
+                double reference = std::numeric_limits<double>::infinity();
+                for( std::size_t segment = from.segmentIndex; segment <= to.segmentIndex; ++segment )
+                {
+                    const float begin = segment == from.segmentIndex ? from.t : 0.0f, end = segment == to.segmentIndex ? to.t : 1.0f;
+                    for( int i = 0; i <= 10000; ++i )
+                    {
+                        const vec2 point = Evaluate( candidate, segment, begin + ( end - begin ) * ( static_cast<float>( i ) / 10000.0f ) );
+                        reference = std::min( reference, std::hypot( static_cast<double>( point.x ) - query.x, static_cast<double>( point.y ) - query.y ) );
+                    }
+                }
+                check( distance <= reference + 1.0e-4 && distance >= reference - 2.0e-3, "range closest distance agrees with an independent dense reference on curves and crossings" );
+            }
+        }
+        const auto whole = ClosestPoint( candidate, { 0.1f, 0.2f }, 1.0e-4 );
+        const auto full = ClosestPoint( candidate, { 0, 0.0f }, { last, 1.0f }, { 0.1f, 0.2f }, 1.0e-4 );
+        check( whole && full && full->segmentIndex == whole->segmentIndex && full->t == whole->t && full->distanceSquared == whole->distanceSquared, "full-range closest lookup preserves whole-path results" );
+        const auto segment = ClosestPoint( candidate, 1, { 0.1f, 0.2f }, 1.0e-4 );
+        const auto segmentRange = ClosestPoint( candidate, { 1, 0.0f }, { 1, 1.0f }, { 0.1f, 0.2f }, 1.0e-4 );
+        check( segment && segmentRange && segment->segmentIndex == segmentRange->segmentIndex && segment->t == segmentRange->t && segment->distanceSquared == segmentRange->distanceSquared, "single complete range preserves existing selected-segment lookup" );
+    }
+    const auto zeroClosest = ClosestPoint( { unitLine }, { 0, 0.5f }, { 0, 0.5f }, { 0.0f, 1.0f }, 1.0e-5 );
+    check( zeroClosest && zeroClosest->t == 0.5f && near( zeroClosest->point, { 0.5f, 0.0f } ) && zeroClosest->distanceSquared == 1.25, "zero range closest lookup returns its sole point" );
+    for( splineParameter2 from : { splineParameter2{ 0, 1.0f }, splineParameter2{ 1, 0.0f } } )
+    {
+        const splineParameter2 to{ from.segmentIndex == 0 ? 1u : 0u, from.segmentIndex == 0 ? 0.0f : 1.0f };
+        const auto alias = ClosestPoint( { reversal }, from, to, { 1.2f, 0.0f }, 1.0e-5 );
+        check( alias && alias->segmentIndex == from.segmentIndex && alias->t == from.t && near( alias->point, { 1.0f, 0.0f } ), "zero join aliases retain input from and permit zero tangents" );
+    }
+    const auto stationaryClosest = ClosestPoint( { reversal }, { 0, 0.5f }, { 1, 0.5f }, { 1.2f, 0.0f }, 1.0e-5 );
+    check( stationaryClosest && stationaryClosest->segmentIndex == 0 && stationaryClosest->t == 1.0f, "range closest lookup permits a stationary internal join" );
+    const auto seamClosest = ClosestPoint( loop, { 3, 0.5f }, { 3, 1.0f }, square[0], 1.0e-5 );
+    check( seamClosest && seamClosest->segmentIndex == 3 && seamClosest->t == 1.0f && seamClosest->distanceSquared == 0.0, "closed range closest lookup includes the final seam endpoint" );
+    const float narrowBegin = std::nextafter( 1.0f, 0.0f );
+    const auto narrowClosest = ClosestPoint( { unitLine }, { 0, narrowBegin }, { 0, 1.0f }, {}, 1.0e-8 );
+    check( narrowClosest && narrowClosest->t == narrowBegin, "range clipping preserves a one-ulp interval near the segment end" );
+    check( !ClosestPoint( loop, { 3, 0.5f }, { 0, 0.5f }, {}, 1.0e-5 ) && !ClosestPoint( curve, { 1, 0.75f }, { 1, 0.25f }, {}, 1.0e-5 ), "range closest lookup rejects implicit wrapping and reversed ranges" );
+    for( const auto invalid : { catmullRomSpline2{}, catmullRomSpline2{ repeated }, catmullRomSpline2{ notANumber }, catmullRomSpline2{ repeatedStart, true } } )
+        check( !ClosestPoint( invalid, { 0, 0.0f }, { 0, 0.0f }, {}, 1.0e-5 ), "range closest lookup validates paths even for zero ranges" );
+    for( splineParameter2 invalid : { splineParameter2{ GetSegmentCount( curve ), 0.0f }, splineParameter2{ std::numeric_limits<std::size_t>::max(), 1.0f }, splineParameter2{ 0, -0.1f }, splineParameter2{ 0, 1.1f }, splineParameter2{ 0, nan }, splineParameter2{ 0, infinity } } )
+        check( !ClosestPoint( curve, invalid, { 2, 1.0f }, {}, 1.0e-5 ) && !ClosestPoint( curve, { 0, 0.0f }, invalid, {}, 1.0e-5 ), "range closest lookup rejects invalid boundary parameters" );
+    for( const vec2 invalid : { vec2{ nan, 0.0f }, vec2{ 0.0f, infinity } } )
+        check( !ClosestPoint( curve, { 0, 0.0f }, { 2, 1.0f }, invalid, 1.0e-5 ), "range closest lookup rejects nonfinite query points" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), 1.0e-30 } )
+        check( !ClosestPoint( curve, { 0, 0.25f }, { 2, 0.75f }, {}, tolerance ) && !ClosestPoint( curve, { 0, 0.5f }, { 0, 0.5f }, {}, tolerance ), "range closest lookup rejects invalid or unattainable tolerance including zero ranges" );
+    check( !ClosestPoint( { coarseDiagonal }, { 0, 0.25f }, { 0, 0.75f }, { 1.0e8f + 8.0f, 1.0e8f }, 1.0e-3 ) && !ClosestPoint( { translatedLine }, { 0, 0.5f }, { 0, 0.5f }, {}, 1.0e-6 ), "range closest lookup preserves float position precision failures" );
+    editable[1] = { 8.0f, 0.0f };
+    const auto editedRangeClosest = ClosestPoint( editableCurve, { 0, 0.25f }, { 0, 0.75f }, { 4.0f, 1.0f }, 1.0e-5 );
+    check( editedRangeClosest && near( editedRangeClosest->point, { 4.0f, 0.0f } ) && editedRangeClosest->distanceSquared == 1.0, "range closest lookup observes edited borrowed controls" );
+
+    std::vector<vec2> searchLimitControls( 4098 );
+    for( std::size_t i = 0; i < searchLimitControls.size(); ++i ) searchLimitControls[i] = { static_cast<float>( i ), 0.0f };
+    const auto limitClosest = ClosestPoint( { searchLimitControls }, { 0, 0.0f }, { 4095, 1.0f }, {}, 1.0e-4 );
+    check( limitClosest && limitClosest->segmentIndex == 0 && limitClosest->t == 0.0f && limitClosest->distanceSquared == 0.0, "range closest search counts only nonempty segments at the node limit" );
+    check( !ClosestPoint( { searchLimitControls }, { 0, 0.0f }, { 4096, 1.0f }, {}, 1.0e-4 ), "range closest search retains the initial node limit" );
+
     return 0;
 }
