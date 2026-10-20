@@ -46,6 +46,12 @@ void compare( const catmullRomSpline2& spline )
         const auto expected = GetLength( spline, tolerance );
         const auto actual = prepared->getLength( tolerance );
         check( actual == expected, "prepared total length preserves exact results and precision failures" );
+        for( std::size_t i = 0; i < prepared->getSegmentCount(); ++i )
+            for( float t : { 0.0f, std::nextafter( 0.0f, 1.0f ), 0.125f, 0.37f, 0.5f, 0.875f, std::nextafter( 1.0f, 0.0f ), 1.0f } )
+                check( prepared->getDistance( i, t, tolerance ) == GetDistance( spline, i, t, tolerance ), "prepared cumulative distance preserves exact results and precision failures" );
+        check( prepared->getDistance( prepared->getSegmentCount() - 1, 1.0f, tolerance ) == actual, "final distance equals the whole length including the closing segment" );
+        for( std::size_t i = 1; i < prepared->getSegmentCount(); ++i )
+            check( prepared->getDistance( i - 1, 1.0f, tolerance ) == prepared->getDistance( i, 0.0f, tolerance ), "both representations of an internal join have the same distance" );
     }
 
     for( std::size_t i = 0; i < GetSegmentCount( spline ); ++i )
@@ -70,6 +76,10 @@ int main()
     const vec2 line[] = { { 1, 2 }, { 5, 4 } };
     const auto preparedLength = prepareSpline( { line } )->getLength( 1.0e-6 );
     check( preparedLength && std::abs( *preparedLength - std::sqrt( 20.0 ) ) < 1.0e-14, "prepared line returns its analytic total length" );
+    const auto lineSnapshot = prepareSpline( { line } );
+    const auto halfDistance = lineSnapshot->getDistance( 0, 0.5f, 1.0e-6 );
+    check( halfDistance && std::abs( *halfDistance - 0.5 * std::sqrt( 20.0 ) ) < 1.0e-14, "prepared line returns its analytic cumulative distance" );
+    check( lineSnapshot->getDistance( 0, 0.0f, std::numeric_limits<double>::denorm_min() ) == 0.0, "start distance remains zero at any positive finite tolerance" );
     const vec2 curve[] = { { -3, 1 }, { -1.7f, -0.1f }, { 0.2f, 4.3f }, { 2.9f, -1.2f }, { 5, 2 } };
     const vec2 cusp[] = { { 0, 0 }, { 1, 0 }, { 0, 0 } };
     compare( { line } );
@@ -115,13 +125,19 @@ int main()
     const auto preparedCusp = prepareSpline( { cusp } );
     check( !preparedCusp->evaluateSample( 0, 1.0f, 1.0e-4 ), "prepared sample rejects a zero tangent" );
 
+    const vec2 unevenPrefix[] = { { 0, 0 }, { 1, 0 }, { 1.0e10f, 0 } };
+    const auto prefixSnapshot = prepareSpline( { unevenPrefix } );
+    const auto prefix = prefixSnapshot->getDistance( 0, 1.0f, 1.0e-10 );
+    check( !prefixSnapshot->getLength( 1.0e-10 ) && prefix && prefix == GetDistance( { unevenPrefix }, 0, 1.0f, 1.0e-10 ), "a computable prefix does not require the full length to converge" );
+
     std::optional<preparedCatmullRomSpline2> owned;
     vec2 expectedPoint{}, expectedFirst{}, expectedSecond{};
-    std::optional<double> expectedLength;
+    std::optional<double> expectedLength, expectedDistance;
     {
         std::vector<vec2> source{ std::begin( curve ), std::end( curve ) };
         owned = prepareSpline( { source, true } );
         expectedLength = GetLength( { source, true }, 1.0e-6 );
+        expectedDistance = GetDistance( { source, true }, 4, 0.37f, 1.0e-6 );
         expectedPoint = Evaluate( { source, true }, 4, 0.37f );
         expectedFirst = Derivative( { source, true }, 4, 0.37f );
         expectedSecond = SecondDerivative( { source, true }, 4, 0.37f );
@@ -129,17 +145,26 @@ int main()
     }
     check( owned && equal( owned->evaluate( 4, 0.37f ), expectedPoint ) && equal( owned->derivative( 4, 0.37f ), expectedFirst ) && equal( owned->secondDerivative( 4, 0.37f ), expectedSecond ), "snapshot survives source mutation reallocation and destruction" );
     check( expectedLength && owned->getLength( 1.0e-6 ) == expectedLength, "prepared total length survives source mutation and destruction" );
+    check( expectedDistance && owned->getDistance( 4, 0.37f, 1.0e-6 ) == expectedDistance, "prepared distance survives source mutation and destruction" );
     auto copied = *owned;
     auto moved = std::move( copied );
     owned.reset();
     check( moved.isLoop() && moved.getSegmentCount() == 5 && equal( moved.evaluate( 4, 0.37f ), expectedPoint ), "copied and moved snapshots own their data" );
 
     check( moved.getLength( 1.0e-6 ) == expectedLength, "copied and moved snapshots preserve total length" );
+    check( moved.getDistance( 4, 0.37f, 1.0e-6 ) == expectedDistance, "copied and moved snapshots preserve cumulative distance" );
     const preparedCatmullRomSpline2 empty{};
     check( !empty.getLength( 1.0e-6 ), "empty prepared geometry has no total length" );
+    check( !empty.getDistance( 0, 0.0f, 1.0e-6 ), "empty prepared geometry has no cumulative distance" );
     for( double tolerance : { 0.0, -1.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity() } )
         check( !moved.getLength( tolerance ), "prepared total length rejects invalid tolerance without asserting" );
     const float nan = std::numeric_limits<float>::quiet_NaN(), infinity = std::numeric_limits<float>::infinity();
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ) } )
+        check( !moved.getDistance( 0, 0.0f, tolerance ), "invalid tolerances are rejected even at the zero distance endpoint" );
+    for( float t : { -0.01f, 1.01f, nan, infinity } )
+        check( !moved.getDistance( 0, t, 1.0e-6 ), "prepared distance rejects invalid parameters without asserting" );
+    for( std::size_t i : { moved.getSegmentCount(), std::numeric_limits<std::size_t>::max() } )
+        check( !moved.getDistance( i, 0.0f, 1.0e-6 ), "invalid segments cannot masquerade as zero distance" );
     const vec2 repeated[] = { { 0, 0 }, { 1, 0 }, { 1, 0 } };
     const vec2 nonfinite[] = { { 0, 0 }, { nan, 1 } };
     const vec2 infinite[] = { { 0, 0 }, { infinity, 1 } };
