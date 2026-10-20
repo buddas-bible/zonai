@@ -297,6 +297,25 @@ std::optional<double> preparedCatmullRomSpline2::getLength( double tolerance ) c
     return length;
 }
 
+std::optional<double> preparedCatmullRomSpline2::getDistance( std::size_t segmentIndex, float t, double tolerance ) const
+{
+    if( segmentIndex >= segments_.size() || !std::isfinite( t ) || t < 0.0f || t > 1.0f || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
+
+    const std::size_t count = segments_.size();
+    double distance = 0.0;
+    for( std::size_t i = 0; i <= segmentIndex; ++i )
+    {
+        const double end = i == segmentIndex ? t : 1.0;
+        if( end == 0.0 ) break;
+        const auto& segment = segments_[i];
+        const auto segmentLength = IntegrateSegmentLength( segment.start, segment.end, segment.tangent1, segment.tangent2, 0.0, end, tolerance / ( 4.0 * count ) );
+        if( !segmentLength || *segmentLength <= 0.0 ) return {};
+        distance += *segmentLength;
+    }
+    if( !std::isfinite( distance ) || tolerance < 32.0 * std::numeric_limits<double>::epsilon() * distance ) return {};
+    return distance;
+}
+
 bool IsValid( const catmullRomSpline2& spline )
 {
     if( spline.points.size() < ( spline.isLoop ? 3u : 2u ) ) return false;
