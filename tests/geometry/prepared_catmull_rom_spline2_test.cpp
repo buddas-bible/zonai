@@ -153,11 +153,13 @@ void compare( const catmullRomSpline2& spline )
             check( equal( prepared->evaluate( i, t ), Evaluate( spline, i, t ) ), "prepared positions exactly match existing evaluation including endpoints" );
             check( equal( prepared->derivative( i, t ), Derivative( spline, i, t ) ), "prepared first derivatives exactly match existing evaluation including endpoints" );
             check( equal( prepared->secondDerivative( i, t ), SecondDerivative( spline, i, t ) ), "prepared second derivatives exactly match existing evaluation" );
+            check( prepared->curvature( i, t ) == Curvature( spline, i, t ), "prepared curvature preserves exact results and zero-tangent failures including endpoints" );
         }
     for( std::size_t i = 0; i < GetSegmentCount( spline ); ++i )
         for( float t : { std::nextafter( 0.0f, 1.0f ), 0.1f, 0.37f, 0.9f, std::nextafter( 1.0f, 0.0f ) } )
         {
             check( equal( prepared->evaluate( i, t ), Evaluate( spline, i, t ) ) && equal( prepared->derivative( i, t ), Derivative( spline, i, t ) ) && equal( prepared->secondDerivative( i, t ), SecondDerivative( spline, i, t ) ), "prepared queries preserve rounding near endpoints and at non-dyadic parameters" );
+            check( prepared->curvature( i, t ) == Curvature( spline, i, t ), "prepared curvature preserves non-dyadic and neighboring-endpoint rounding" );
         }
 }
 
@@ -167,6 +169,21 @@ int main()
 {
     const vec2 uniformLine[] = { { 0, 0 }, { 1, 0 }, { 2, 0 }, { 3, 0 } };
     const auto uniformSnapshot = prepareSpline( { uniformLine } );
+    check( uniformSnapshot->curvature( 0, 0.5f ) == 0.0, "prepared straight-path curvature is zero" );
+    const vec2 analyticCurve[] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 2, 1 } };
+    const auto curvatureSnapshot = prepareSpline( { analyticCurve } );
+    const double analyticCurvature = 1.5 / std::pow( 1.1328125, 1.5 );
+    const auto positiveCurvature = curvatureSnapshot->curvature( 1, 0.25f ), negativeCurvature = curvatureSnapshot->curvature( 1, 0.75f );
+    check( positiveCurvature && negativeCurvature && std::abs( *positiveCurvature - analyticCurvature ) < 1.0e-12 && std::abs( *negativeCurvature + analyticCurvature ) < 1.0e-12 && curvatureSnapshot->curvature( 1, 0.5f ) == 0.0, "prepared signed curvature matches the analytic cubic and inflection" );
+    const vec2 reversedCurve[] = { analyticCurve[3], analyticCurve[2], analyticCurve[1], analyticCurve[0] };
+    const auto reversedCurvature = prepareSpline( { reversedCurve } )->curvature( 1, 0.75f );
+    check( reversedCurvature && std::abs( *reversedCurvature + analyticCurvature ) < 1.0e-12, "reversing a prepared path reverses curvature sign" );
+    for( float scale : { 1.0e-10f, 2.0f, 1.0e10f } )
+    {
+        const vec2 scaledCurve[] = { scale * analyticCurve[0], scale * analyticCurve[1], scale * analyticCurve[2], scale * analyticCurve[3] };
+        const auto scaledCurvature = prepareSpline( { scaledCurve } )->curvature( 1, 0.25f );
+        check( scaledCurvature && std::abs( *scaledCurvature * scale - analyticCurvature ) < 1.0e-5, "prepared curvature scales inversely without float overflow or underflow" );
+    }
     check( equal( uniformSnapshot->sampleByDistance( 6, 1.0e-6 ), std::vector<vec2>{ { 0, 0 }, { 0.5f, 0 }, { 1, 0 }, { 1.5f, 0 }, { 2, 0 }, { 2.5f, 0 }, { 3, 0 } } ), "prepared position samples match analytic straight-path locations" );
     check( equal( uniformSnapshot->sampleByDistance( { 0, 1.0f }, { 2, 0.0f }, 2, 1.0e-6 ), std::vector<vec2>{ { 1, 0 }, { 1.5f, 0 }, { 2, 0 } } ), "prepared partial position samples include both input endpoints" );
     check( equal( uniformSnapshot->sampleByDistance( { 1, 0.0f }, { 0, 1.0f }, 3, std::numeric_limits<double>::denorm_min() ), std::vector<vec2>( 4, { 1, 0 } ) ), "zero-length position samples repeat the input location" );
@@ -236,6 +253,10 @@ int main()
     check( equal( cuspSnapshot->sampleByDistance( 2, 1.0e-6 ), std::vector<vec2>{ { 0, 0 }, { 1, 0 }, { 0, 0 } } ) && equal( cuspSnapshot->sampleByDistance( { 0, 1.0f }, { 1, 0.0f }, 2, 1.0e-6 ), std::vector<vec2>( 3, { 1, 0 } ) ), "position samples permit zero tangents including zero-length ranges" );
     check( offsetSnapshot->sampleByDistance( 8, 1.0e-4 ).empty() && offsetSnapshot->sampleByDistance( { 0, 0.0f }, { 0, 1.0f }, 8, 1.0e-4 ).empty(), "position precision failure discards all samples after a valid first endpoint" );
     check( equal( offsetSnapshot->sampleByDistance( 1, 1.0e-4 ), std::vector<vec2>{ offsetLine[0], offsetLine[1] } ), "exact endpoint positions bypass interior rounding checks" );
+    check( !cuspSnapshot->curvature( 0, 1.0f ) && !cuspSnapshot->curvature( 1, 0.0f ), "prepared curvature rejects both sides of a zero tangent join" );
+    const auto closedCurvature = prepareSpline( { curve, true } );
+    const auto seamStart = closedCurvature->curvature( 0, 0.0f ), seamEnd = closedCurvature->curvature( 4, 1.0f );
+    check( seamStart && seamEnd && *seamStart != *seamEnd && seamStart == Curvature( { curve, true }, 0, 0.0f ) && seamEnd == Curvature( { curve, true }, 4, 1.0f ), "closed seam curvature preserves the specified side" );
     const double precisionBoundary = 128.0 * std::numeric_limits<double>::epsilon() * *preparedLength;
     for( double tolerance : { std::nextafter( precisionBoundary, 0.0 ), precisionBoundary, std::nextafter( precisionBoundary, std::numeric_limits<double>::infinity() ) } )
         check( prepareSpline( { line } )->getLength( tolerance ) == GetLength( { line }, tolerance ), "prepared length preserves the representable-precision boundary policy" );
@@ -279,6 +300,7 @@ int main()
 
     std::optional<preparedCatmullRomSpline2> owned;
     vec2 expectedPoint{}, expectedFirst{}, expectedSecond{};
+    std::optional<double> expectedCurvature;
     std::optional<splineParameter2> expectedParameter, expectedRangeParameter;
     std::optional<splineSample2> expectedSample, expectedRangeSample;
     std::vector<splineParameter2> expectedParameters;
@@ -298,6 +320,7 @@ int main()
         expectedRangeLength = GetLength( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 1.0e-6 );
         expectedPartialLength = GetLength( { source, true }, 4, 0.25f, 0.75f, 1.0e-6 );
         expectedDistance = GetDistance( { source, true }, 4, 0.37f, 1.0e-6 );
+        expectedCurvature = Curvature( { source, true }, 4, 0.37f );
         expectedPoint = Evaluate( { source, true }, 4, 0.37f );
         expectedFirst = Derivative( { source, true }, 4, 0.37f );
         expectedSecond = SecondDerivative( { source, true }, 4, 0.37f );
@@ -313,6 +336,7 @@ int main()
     check( expectedSample && expectedRangeSample && equal( owned->evaluateByDistance( 3.5, 1.0e-4 ), expectedSample ) && equal( owned->evaluateByDistance( { 1, 0.25f }, { 4, 0.75f }, 3.5, 1.0e-4 ), expectedRangeSample ), "distance samples survive source mutation and destruction" );
     check( !expectedParameters.empty() && equal( owned->sampleByDistanceParameters( { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 ), expectedParameters ), "parameter samples survive source mutation and destruction" );
     check( !expectedPoints.empty() && !expectedRangePoints.empty() && equal( owned->sampleByDistance( 3, 1.0e-4 ), expectedPoints ) && equal( owned->sampleByDistance( { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 ), expectedRangePoints ), "position samples survive source mutation and destruction" );
+    check( expectedCurvature && owned->curvature( 4, 0.37f ) == expectedCurvature, "curvature survives source mutation and destruction" );
     auto copied = *owned;
     auto moved = std::move( copied );
     owned.reset();
@@ -327,6 +351,7 @@ int main()
     check( equal( moved.evaluateByDistance( 3.5, 1.0e-4 ), expectedSample ) && equal( moved.evaluateByDistance( { 1, 0.25f }, { 4, 0.75f }, 3.5, 1.0e-4 ), expectedRangeSample ), "copied and moved snapshots preserve distance samples" );
     check( equal( moved.sampleByDistanceParameters( { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 ), expectedParameters ), "copied and moved snapshots preserve parameter samples" );
     check( equal( moved.sampleByDistance( 3, 1.0e-4 ), expectedPoints ) && equal( moved.sampleByDistance( { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 ), expectedRangePoints ), "copied and moved snapshots preserve position samples" );
+    check( moved.curvature( 4, 0.37f ) == expectedCurvature, "copied and moved snapshots preserve curvature" );
     const preparedCatmullRomSpline2 empty{};
     check( !empty.getLength( 1.0e-6 ), "empty prepared geometry has no total length" );
     check( !empty.getDistance( 0, 0.0f, 1.0e-6 ), "empty prepared geometry has no cumulative distance" );
@@ -405,6 +430,11 @@ int main()
     check( moved.sampleByDistance( { 4, 1.0f }, { 0, 0.0f }, 3, 1.0e-6 ).empty() && moved.sampleByDistance( { 1, 0.75f }, { 1, 0.25f }, 3, 1.0e-6 ).empty(), "position sampling rejects reverse ranges without closed wrapping" );
     const auto tailPoints = tailSnapshot->sampleByDistance( { 2, 0.25f }, { 3, 0.75f }, 3, 1.0e-6 );
     check( tailPoints.size() == 4 && equal( tailPoints, SampleByDistance( { longPrefix }, { 2, 0.25f }, { 3, 0.75f }, 3, 1.0e-6 ) ), "partial position sampling is independent of unrelated prefix failure" );
+    check( !empty.curvature( 0, 0.5f ), "empty geometry has no curvature" );
+    for( float t : { -0.01f, 1.01f, nan, infinity, -infinity } )
+        check( !moved.curvature( 0, t ), "prepared curvature rejects invalid parameters without asserting" );
+    for( std::size_t i : { moved.getSegmentCount(), std::numeric_limits<std::size_t>::max() } )
+        check( !moved.curvature( i, 0.5f ), "prepared curvature rejects invalid segment indices without asserting" );
     const vec2 repeated[] = { { 0, 0 }, { 1, 0 }, { 1, 0 } };
     const vec2 nonfinite[] = { { 0, 0 }, { nan, 1 } };
     const vec2 infinite[] = { { 0, 0 }, { infinity, 1 } };

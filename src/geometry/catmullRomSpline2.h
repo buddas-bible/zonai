@@ -47,6 +47,10 @@ public:
     [[nodiscard]] vec2 derivative( std::size_t segmentIndex, float t ) const;
     [[nodiscard]] vec2 secondDerivative( std::size_t segmentIndex, float t ) const;
 
+    // 반시계 방향이 양수인 곡률. 기존 Curvature의 수치·실패 정책을 따르며 접합점은 지정 구간 쪽 값.
+    // 잘못된 입력·0 접선·비유한 결과는 nullopt.
+    [[nodiscard]] std::optional<double> curvature( std::size_t segmentIndex, float t ) const;
+
     // 기존 거리 조회와 같은 위치 반올림 검사와 단위 접선. 잘못된 입력·0 접선도 nullopt.
     [[nodiscard]] std::optional<splineSample2> evaluateSample( std::size_t segmentIndex, float t, double tolerance ) const;
 

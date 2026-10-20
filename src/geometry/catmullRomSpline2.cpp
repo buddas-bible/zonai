@@ -266,6 +266,23 @@ vec2 preparedCatmullRomSpline2::secondDerivative( std::size_t segmentIndex, floa
     return 2.0f * segment.quadratic + 6.0f * t * segment.cubic;
 }
 
+std::optional<double> preparedCatmullRomSpline2::curvature( std::size_t segmentIndex, float t ) const
+{
+    if( segmentIndex >= segments_.size() || !std::isfinite( t ) || t < 0.0f || t > 1.0f ) return {};
+
+    const vec2 first = derivative( segmentIndex, t );
+    const vec2 second = secondDerivative( segmentIndex, t );
+    if( !IsFinite( first ) || !IsFinite( second ) ) return {};
+
+    const double speed = std::hypot( static_cast<double>( first.x ), static_cast<double>( first.y ) );
+    if( speed == 0.0 ) return {};
+
+    const double cross = static_cast<double>( first.x ) * second.y - static_cast<double>( first.y ) * second.x;
+    const double curvature = cross / ( speed * speed * speed );
+    if( !std::isfinite( curvature ) ) return {};
+    return curvature;
+}
+
 std::optional<splineSample2> preparedCatmullRomSpline2::evaluateSample( std::size_t segmentIndex, float t, double tolerance ) const
 {
     if( segmentIndex >= segments_.size() || !std::isfinite( t ) || t < 0.0f || t > 1.0f || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
