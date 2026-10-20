@@ -73,6 +73,11 @@ public:
     // 기존 부분 경로 역조회의 오차·실패 정책. 0 길이는 거리 0만 허용하며 자동 순환하지 않음.
     [[nodiscard]] std::optional<splineParameter2> getParameterByDistance( splineParameter2 from, splineParameter2 to, double distance, double tolerance ) const;
 
+    // 거리 역조회 후 위치·단위 접선을 반환함. 기존 EvaluateByDistance의 오차·실패 정책을 따름.
+    // 0 접선·위치 정밀도 부족도 nullopt이며 닫힌 경로도 자동 순환하지 않음.
+    [[nodiscard]] std::optional<splineSample2> evaluateByDistance( double distance, double tolerance ) const;
+    [[nodiscard]] std::optional<splineSample2> evaluateByDistance( splineParameter2 from, splineParameter2 to, double distance, double tolerance ) const;
+
 private:
     std::vector<preparedSplineSegment2> segments_{};
     bool isLoop_ = false;
