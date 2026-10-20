@@ -665,3 +665,16 @@ add_executable(sandboxMotorJointDemoTests sandbox/motor_joint_demo_test.cpp "${P
 target_include_directories(sandboxMotorJointDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxMotorJointDemoTests PRIVATE zonai::zonai)
 add_test(NAME sandboxMotorJointDemoTests COMMAND sandboxMotorJointDemoTests)
+
+add_executable(splineRailJointTests dynamics/spline_rail_joint_test.cpp)
+target_link_libraries(splineRailJointTests PRIVATE zonai::zonai)
+add_test(NAME splineRailJointTests COMMAND splineRailJointTests)
+
+add_executable(splineRailJointWorldTests dynamics/spline_rail_joint_world_test.cpp)
+target_link_libraries(splineRailJointWorldTests PRIVATE zonai::zonai)
+add_test(NAME splineRailJointWorldTests COMMAND splineRailJointWorldTests)
+
+add_executable(sandboxSplineRailDemoTests sandbox/spline_rail_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
+target_include_directories(sandboxSplineRailDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+target_link_libraries(sandboxSplineRailDemoTests PRIVATE zonai::zonai)
+add_test(NAME sandboxSplineRailDemoTests COMMAND sandboxSplineRailDemoTests)

@@ -34,7 +34,9 @@
 #include "dynamics/joints/mouseJoint2.h"
 #include "dynamics/joints/mouseJointConstraint2.h"
 #include "dynamics/joints/prismaticJoint2.h"
+#include "dynamics/joints/splineRailJoint2.h"
 #include "dynamics/joints/prismaticJointConstraint2.h"
+#include "dynamics/joints/splineRailJointConstraint2.h"
 #include "dynamics/joints/revoluteJoint2.h"
 #include "dynamics/joints/revoluteJointConstraint2.h"
 #include "dynamics/joints/weldJoint2.h"
@@ -187,6 +189,15 @@ public:
     // B의 A에 대한 목표 축속도 (m/s)와 비음수 최대 힘 (N). 속도 0은 제동함.
     void setPrismaticJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorForce );
     [[nodiscard]] prismaticJointData getPrismaticJointData( jointId id ) const;
+
+    [[nodiscard]] jointId createSplineRailJoint( const splineRailJointDef& definition );
+    void setSplineRailJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio, float targetTranslation );
+    void setSplineRailJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation );
+    void setSplineRailJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorForce );
+    void setSplineRailJointRotation( jointId id, splineRailRotationMode mode, float angularHertz, float angularDampingRatio );
+    bool setSplineRailJointPoints( jointId id, std::span<const vec2> points );
+    [[nodiscard]] splineRailJointData getSplineRailJointData( jointId id ) const;
+    [[nodiscard]] std::span<const vec2> getSplineRailJointPoints( jointId id ) const;
 
     // 두 작용점과 기준 상대각도를 함께 유지해 두 Body의 상대 transform을 고정함.
     [[nodiscard]] jointId createWeldJoint( const weldJointDef& definition );
@@ -498,6 +509,7 @@ private:
     [[nodiscard]] std::int32_t allocateJoint( std::int32_t bodyIndexA, std::int32_t bodyIndexB, bool collideConnected );
     void destroyJointByIndex( std::int32_t jointIndex, bool touchProxies );
     void resetJointImpulses( std::int32_t bodyIndex );
+    void resetSplineRailJoint( jointId id );
     [[nodiscard]] bool shouldBodiesCollide( std::int32_t bodyIndexA, std::int32_t bodyIndexB ) const;
     [[nodiscard]] bool shouldShapeFiltersCollide( const collisionFilter& a, const collisionFilter& b ) const;
 
@@ -585,7 +597,7 @@ private:
 
 #pragma region JointSolver
 
-    using jointConstraint = std::variant<distanceJointConstraint2, filterJointConstraint2, motorJointConstraint2, moverJointConstraint2, pogoJointConstraint2, mouseJointConstraint2, prismaticJointConstraint2, revoluteJointConstraint2, weldJointConstraint2, wheelJointConstraint2>;
+    using jointConstraint = std::variant<distanceJointConstraint2, filterJointConstraint2, motorJointConstraint2, moverJointConstraint2, pogoJointConstraint2, mouseJointConstraint2, prismaticJointConstraint2, splineRailJointConstraint2, revoluteJointConstraint2, weldJointConstraint2, wheelJointConstraint2>;
     void warmStartJoints( std::span<jointConstraint> constraints );
     void solveJoints( std::span<jointConstraint> constraints, bool useBias );
 
@@ -681,7 +693,7 @@ private:
 
     // Joint cold / hot 데이터는 동일한 stable slot과 free-list를 공유함.
     std::vector<joint2> joints_;
-    std::vector<std::variant<distanceJointSim2, filterJointSim2, motorJointSim2, moverJointSim2, pogoJointSim2, mouseJointSim2, prismaticJointSim2, revoluteJointSim2, weldJointSim2, wheelJointSim2>> jointSims_;
+    std::vector<std::variant<distanceJointSim2, filterJointSim2, motorJointSim2, moverJointSim2, pogoJointSim2, mouseJointSim2, prismaticJointSim2, splineRailJointSim2, revoluteJointSim2, weldJointSim2, wheelJointSim2>> jointSims_;
     std::int32_t jointFreeList_ = -1;
     std::size_t jointCount_ = 0;
 

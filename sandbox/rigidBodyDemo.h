@@ -285,6 +285,7 @@ public:
     [[nodiscard]] const mouseJointDef& getMouseSettings() const noexcept { return mouseSettings_; }
 
     [[nodiscard]] std::span<const vec2> getSplinePathPoints() const noexcept;
+    [[nodiscard]] jointId getSplineRailJoint() const noexcept { return splineRailJoint_; }
     [[nodiscard]] double getSplinePathDistance() const noexcept { return splinePathDistance_; }
     [[nodiscard]] double getSplinePathLength() const noexcept { return splinePathLength_; }
 
@@ -293,7 +294,10 @@ public:
     [[nodiscard]] vec2 getTerrainPoint( std::size_t pointIndex ) const;
 
     // 추가 / 삭제 / 편집 복원 후에는 이전 span을 다시 조회해야 함.
-    [[nodiscard]] std::span<const vec2> getSplineControlPoints() const noexcept { return kind_ == demoKind::splineTerrain ? std::span<const vec2>{ splineControlPoints_ } : std::span<const vec2>{}; }
+    [[nodiscard]] std::span<const vec2> getSplineControlPoints() const noexcept { return kind_ == demoKind::splineTerrain || kind_ == demoKind::splinePath || kind_ == demoKind::splineRail ? std::span<const vec2>{ splineControlPoints_ } : std::span<const vec2>{}; }
+
+    [[nodiscard]] bool hasEditableSpline() const noexcept;
+    [[nodiscard]] transform2 getSplineControlTransform() const;
 
     [[nodiscard]] float getSplineSamplingError() const noexcept { return splineSamplingError_; }
     void setSplineSamplingError( float error );
@@ -326,6 +330,7 @@ private:
 #pragma region SceneSetup
     void createPlayground();
     void createSplinePath();
+    void createSplineRail();
     void updateSplinePath( float timeStep );
     void createTerrainChain();
     void createPendulum();
@@ -363,7 +368,7 @@ private:
     void updateSplineControlPoint( std::size_t pointIndex, vec2 point );
     bool insertSplineControlPointAt( vec2 point, float pixelsPerMeter );
     bool insertSplineControlPoint( std::size_t segmentIndex, vec2 point );
-    bool updateSplineTerrain( std::span<const vec2> points, float error );
+    bool updateSplineGeometry( std::span<const vec2> points, float error );
     [[nodiscard]] bool canMoveTerrainPoint( std::size_t pointIndex, vec2 point ) const;
 #pragma endregion TerrainEdit
 
@@ -382,12 +387,15 @@ private:
     std::array<transform2, 6> playgroundInitialTransforms_{};
     double splinePathDistance_ = 0.0;
     double splinePathLength_ = 0.0;
+    bool splinePathNeedsAlignment_ = false;
     bodyId torqueBody_{};  // 회전 임펄스를 적용할 물체
     bodyId pendulumBody_{};
     jointId pendulumJoint_{};
     jointId revoluteJoint_{};
     jointId wheelJoint_{};
     jointId prismaticJoint_{};
+    jointId splineRailJoint_{};
+    bodyId splineRailBody_{};
     jointId weldJoint_{};
     jointId motorJoint_{}; // Motor Joint 전용 학습 데모에서 사용하는 persistent handle.
     bool motorTargetTracking_ = false;
