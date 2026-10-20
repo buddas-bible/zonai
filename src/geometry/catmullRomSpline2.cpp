@@ -161,7 +161,7 @@ std::optional<vec2> GetPositionByParameter( const catmullRomSpline2& spline, std
     return point;
 }
 
-std::optional<aabb2> GetSegmentAABB( const catmullRomSpline2& spline, std::size_t segmentIndex, double t0 = 0.0, double t1 = 1.0 )
+std::optional<aabb2> GetSegmentAABB( const preparedSplineSegment2& segment, double t0 = 0.0, double t1 = 1.0 )
 {
     const auto bound = [&]( double start, double end, double tangent, double quadratic, double cubic, float& lower, float& upper )
     {
@@ -186,6 +186,17 @@ std::optional<aabb2> GetSegmentAABB( const catmullRomSpline2& spline, std::size_
         return std::isfinite( lower ) && std::isfinite( upper );
     };
 
+    const vec2 a = segment.start, b = segment.end, tangent1 = segment.tangent1;
+    const vec2 quadratic = segment.quadratic, cubic = segment.cubic;
+    if( !IsFinite( tangent1 ) || !IsFinite( quadratic ) || !IsFinite( cubic ) ) return {};
+    aabb2 segmentBounds{};
+    if( !bound( a.x, b.x, tangent1.x, quadratic.x, cubic.x, segmentBounds.min.x, segmentBounds.max.x ) ||
+        !bound( a.y, b.y, tangent1.y, quadratic.y, cubic.y, segmentBounds.min.y, segmentBounds.max.y ) ) return {};
+    return segmentBounds;
+}
+
+std::optional<aabb2> GetSegmentAABB( const catmullRomSpline2& spline, std::size_t segmentIndex, double t0 = 0.0, double t1 = 1.0 )
+{
     vec2 tangent1{}, tangent2{};
     GetTangents( spline, segmentIndex, tangent1, tangent2 );
     const vec2 a = spline.points[segmentIndex], b = GetPoint( spline, segmentIndex + 1 );
@@ -193,11 +204,7 @@ std::optional<aabb2> GetSegmentAABB( const catmullRomSpline2& spline, std::size_
     // Evaluate와 같은 float 계수를 Bézier로 바꾸며 별도 처리되는 끝점 b도 hull에 포함함.
     const vec2 quadratic = 3.0f * delta - 2.0f * tangent1 - tangent2;
     const vec2 cubic = tangent1 + tangent2 - 2.0f * delta;
-    if( !IsFinite( tangent1 ) || !IsFinite( quadratic ) || !IsFinite( cubic ) ) return {};
-    aabb2 segmentBounds{};
-    if( !bound( a.x, b.x, tangent1.x, quadratic.x, cubic.x, segmentBounds.min.x, segmentBounds.max.x ) ||
-        !bound( a.y, b.y, tangent1.y, quadratic.y, cubic.y, segmentBounds.min.y, segmentBounds.max.y ) ) return {};
-    return segmentBounds;
+    return GetSegmentAABB( preparedSplineSegment2{ a, b, tangent1, tangent2, quadratic, cubic }, t0, t1 );
 }
 
 } // namespace
@@ -281,6 +288,25 @@ std::optional<double> preparedCatmullRomSpline2::curvature( std::size_t segmentI
     const double curvature = cross / ( speed * speed * speed );
     if( !std::isfinite( curvature ) ) return {};
     return curvature;
+}
+
+std::optional<aabb2> preparedCatmullRomSpline2::computeAABB() const
+{
+    if( segments_.empty() ) return {};
+    aabb2 bounds{ segments_[0].start, segments_[0].start };
+    for( std::size_t i = 0; i < segments_.size(); ++i )
+    {
+        const auto segmentBounds = computeAABB( i );
+        if( !segmentBounds ) return {};
+        bounds = Union( bounds, *segmentBounds );
+    }
+    return bounds;
+}
+
+std::optional<aabb2> preparedCatmullRomSpline2::computeAABB( std::size_t segmentIndex ) const
+{
+    if( segmentIndex >= segments_.size() ) return {};
+    return GetSegmentAABB( segments_[segmentIndex] );
 }
 
 std::optional<splineSample2> preparedCatmullRomSpline2::evaluateSample( std::size_t segmentIndex, float t, double tolerance ) const

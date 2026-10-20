@@ -51,6 +51,11 @@ public:
     // 잘못된 입력·0 접선·비유한 결과는 nullopt.
     [[nodiscard]] std::optional<double> curvature( std::size_t segmentIndex, float t ) const;
 
+    // 기존 ComputeAABB와 같은 Bézier hull·반올림 여유의 보수적 경계. 최소 AABB는 보장하지 않음.
+    // 빈 스냅샷·잘못된 구간·유한한 경계 구성 실패는 nullopt.
+    [[nodiscard]] std::optional<aabb2> computeAABB() const;
+    [[nodiscard]] std::optional<aabb2> computeAABB( std::size_t segmentIndex ) const;
+
     // 기존 거리 조회와 같은 위치 반올림 검사와 단위 접선. 잘못된 입력·0 접선도 nullopt.
     [[nodiscard]] std::optional<splineSample2> evaluateSample( std::size_t segmentIndex, float t, double tolerance ) const;
 
