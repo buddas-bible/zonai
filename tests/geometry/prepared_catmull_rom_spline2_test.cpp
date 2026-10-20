@@ -36,6 +36,14 @@ bool equal( const std::optional<splineSample2>& a, const std::optional<splineSam
     return a.has_value() == b.has_value() && ( !a || ( equal( a->point, b->point ) && equal( a->tangent, b->tangent ) ) );
 }
 
+bool equal( const std::vector<splineParameter2>& a, const std::vector<splineParameter2>& b )
+{
+    if( a.size() != b.size() ) return false;
+    for( std::size_t i = 0; i < a.size(); ++i )
+        if( a[i].segmentIndex != b[i].segmentIndex || a[i].t != b[i].t ) return false;
+    return true;
+}
+
 void compare( const catmullRomSpline2& spline )
 {
     const auto prepared = prepareSpline( spline );
@@ -56,6 +64,8 @@ void compare( const catmullRomSpline2& spline )
         const auto expected = GetLength( spline, tolerance );
         const auto actual = prepared->getLength( tolerance );
         check( actual == expected, "prepared total length preserves exact results and precision failures" );
+        for( std::size_t subdivisions : { 1u, 3u, 8u } )
+            check( equal( prepared->sampleByDistanceParameters( { 0, 0.0f }, { prepared->getSegmentCount() - 1, 1.0f }, subdivisions, tolerance ), SampleByDistanceParameters( spline, { 0, 0.0f }, { prepared->getSegmentCount() - 1, 1.0f }, subdivisions, tolerance ) ), "prepared parameter samples preserve exact full-path results and failures" );
         check( equal( prepared->evaluateByDistance( 0.0, tolerance ), EvaluateByDistance( spline, 0.0, tolerance ) ), "prepared distance sample preserves start validation and failures" );
         check( equal( prepared->getParameterByDistance( 0.0, tolerance ), GetParameterByDistance( spline, 0.0, tolerance ) ), "prepared inverse validates total length before returning the start" );
         if( expected )
@@ -81,6 +91,8 @@ void compare( const catmullRomSpline2& spline )
             {
                 const splineParameter2 from{ i, 0.37f }, to{ j, 0.75f };
                 const auto rangeLength = GetLength( spline, from, to, tolerance );
+                for( std::size_t subdivisions : { 1u, 3u, 8u } )
+                    check( equal( prepared->sampleByDistanceParameters( from, to, subdivisions, tolerance ), SampleByDistanceParameters( spline, from, to, subdivisions, tolerance ) ), "prepared parameter samples preserve exact partial-path results and failures" );
                 check( equal( prepared->getParameterByDistance( from, to, 0.0, tolerance ), GetParameterByDistance( spline, from, to, 0.0, tolerance ) ), "prepared range inverse validates range length before returning the start" );
                 check( equal( prepared->evaluateByDistance( from, to, 0.0, tolerance ), EvaluateByDistance( spline, from, to, 0.0, tolerance ) ), "prepared range sample preserves start validation and failures" );
                 if( !rangeLength ) continue;
@@ -141,6 +153,14 @@ int main()
 {
     const vec2 uniformLine[] = { { 0, 0 }, { 1, 0 }, { 2, 0 }, { 3, 0 } };
     const auto uniformSnapshot = prepareSpline( { uniformLine } );
+    const auto analyticSamples = uniformSnapshot->sampleByDistanceParameters( { 0, 0.25f }, { 2, 0.75f }, 5, 1.0e-6 );
+    check( analyticSamples.size() == 6, "prepared uniform parameter sampling returns subdivisions plus one entries" );
+    for( std::size_t i = 0; i < analyticSamples.size(); ++i )
+        check( std::abs( ( static_cast<double>( analyticSamples[i].segmentIndex ) + analyticSamples[i].t ) - ( 0.25 + 0.5 * i ) ) <= 1.0e-6, "prepared uniform parameters satisfy analytic straight-path distance error" );
+    check( equal( uniformSnapshot->sampleByDistanceParameters( { 0, 1.0f }, { 2, 0.0f }, 2, 1.0e-6 ), std::vector<splineParameter2>{ { 0, 1.0f }, { 1, 0.5f }, { 2, 0.0f } } ), "parameter samples preserve both input endpoint representations" );
+    check( equal( uniformSnapshot->sampleByDistanceParameters( { 0, 0.0f }, { 2, 1.0f }, 3, 1.0e-6 ), std::vector<splineParameter2>{ { 0, 0.0f }, { 0, 1.0f }, { 1, 1.0f }, { 2, 1.0f } } ), "uniform samples select the preceding segment at internal joins" );
+    check( equal( uniformSnapshot->sampleByDistanceParameters( { 1, 0.0f }, { 0, 1.0f }, 3, std::numeric_limits<double>::denorm_min() ), std::vector<splineParameter2>( 4, { 1, 0.0f } ) ), "zero-length parameter samples repeat from at the smallest positive tolerance" );
+    check( uniformSnapshot->sampleByDistanceParameters( { 0, 0.0f }, { 2, 1.0f }, 10, 1.0e-10 ).empty(), "parameter sampling discards partial output on inverse precision failure" );
     check( equal( uniformSnapshot->evaluateByDistance( 1.5, 1.0e-6 ), splineSample2{ { 1.5f, 0 }, { 1, 0 } } ), "prepared distance sample returns analytic position and unit tangent" );
     check( equal( uniformSnapshot->evaluateByDistance( { 0, 0.25f }, { 2, 0.75f }, 1.25, 1.0e-6 ), splineSample2{ { 1.5f, 0 }, { 1, 0 } } ), "prepared range sample returns analytic position and unit tangent" );
     check( equal( uniformSnapshot->evaluateByDistance( { 1, 0.5f }, { 1, 0.5f }, 0.0, 1.0e-6 ), splineSample2{ { 1.5f, 0 }, { 1, 0 } } ) && !uniformSnapshot->evaluateByDistance( { 1, 0.5f }, { 1, 0.5f }, 0.1, 1.0e-6 ), "zero-length distance sample requires zero distance and a valid tangent" );
@@ -193,6 +213,8 @@ int main()
     const vec2 offsetLine[] = { { 1.0e8f, 0 }, { 1.0e8f + 8.0f, 0 } };
     const auto offsetSnapshot = prepareSpline( { offsetLine } );
     check( offsetSnapshot->getParameterByDistance( 1.0, 1.0e-4 ).has_value() && !offsetSnapshot->evaluateByDistance( 1.0, 1.0e-4 ) && !offsetSnapshot->evaluateByDistance( { 0, 0.0f }, { 0, 1.0f }, 1.0, 1.0e-4 ), "distance samples reject unrepresentable positions after successful inversion" );
+    check( equal( cuspSnapshot->sampleByDistanceParameters( { 0, 0.0f }, { 1, 1.0f }, 2, 1.0e-6 ), std::vector<splineParameter2>{ { 0, 0.0f }, { 0, 1.0f }, { 1, 1.0f } } ), "parameter samples permit a zero tangent at a sample" );
+    check( offsetSnapshot->sampleByDistanceParameters( { 0, 0.0f }, { 0, 1.0f }, 8, 1.0e-4 ).size() == 9, "parameter sampling does not require representable rounded positions" );
     const double precisionBoundary = 128.0 * std::numeric_limits<double>::epsilon() * *preparedLength;
     for( double tolerance : { std::nextafter( precisionBoundary, 0.0 ), precisionBoundary, std::nextafter( precisionBoundary, std::numeric_limits<double>::infinity() ) } )
         check( prepareSpline( { line } )->getLength( tolerance ) == GetLength( { line }, tolerance ), "prepared length preserves the representable-precision boundary policy" );
@@ -238,10 +260,12 @@ int main()
     vec2 expectedPoint{}, expectedFirst{}, expectedSecond{};
     std::optional<splineParameter2> expectedParameter, expectedRangeParameter;
     std::optional<splineSample2> expectedSample, expectedRangeSample;
+    std::vector<splineParameter2> expectedParameters;
     std::optional<double> expectedLength, expectedDistance, expectedPartialLength, expectedRangeLength;
     {
         std::vector<vec2> source{ std::begin( curve ), std::end( curve ) };
         owned = prepareSpline( { source, true } );
+        expectedParameters = SampleByDistanceParameters( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 );
         expectedSample = EvaluateByDistance( { source, true }, 3.5, 1.0e-4 );
         expectedRangeSample = EvaluateByDistance( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 3.5, 1.0e-4 );
         expectedRangeParameter = GetParameterByDistance( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 3.5, 1.0e-4 );
@@ -263,6 +287,7 @@ int main()
     check( expectedParameter && equal( owned->getParameterByDistance( 3.5, 1.0e-4 ), expectedParameter ), "inverse survives source mutation and destruction" );
     check( expectedRangeParameter && equal( owned->getParameterByDistance( { 1, 0.25f }, { 4, 0.75f }, 3.5, 1.0e-4 ), expectedRangeParameter ), "range inverse survives source mutation and destruction" );
     check( expectedSample && expectedRangeSample && equal( owned->evaluateByDistance( 3.5, 1.0e-4 ), expectedSample ) && equal( owned->evaluateByDistance( { 1, 0.25f }, { 4, 0.75f }, 3.5, 1.0e-4 ), expectedRangeSample ), "distance samples survive source mutation and destruction" );
+    check( !expectedParameters.empty() && equal( owned->sampleByDistanceParameters( { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 ), expectedParameters ), "parameter samples survive source mutation and destruction" );
     auto copied = *owned;
     auto moved = std::move( copied );
     owned.reset();
@@ -275,6 +300,7 @@ int main()
     check( equal( moved.getParameterByDistance( 3.5, 1.0e-4 ), expectedParameter ), "copied and moved snapshots preserve inverse queries" );
     check( equal( moved.getParameterByDistance( { 1, 0.25f }, { 4, 0.75f }, 3.5, 1.0e-4 ), expectedRangeParameter ), "copied and moved snapshots preserve range inverse queries" );
     check( equal( moved.evaluateByDistance( 3.5, 1.0e-4 ), expectedSample ) && equal( moved.evaluateByDistance( { 1, 0.25f }, { 4, 0.75f }, 3.5, 1.0e-4 ), expectedRangeSample ), "copied and moved snapshots preserve distance samples" );
+    check( equal( moved.sampleByDistanceParameters( { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 ), expectedParameters ), "copied and moved snapshots preserve parameter samples" );
     const preparedCatmullRomSpline2 empty{};
     check( !empty.getLength( 1.0e-6 ), "empty prepared geometry has no total length" );
     check( !empty.getDistance( 0, 0.0f, 1.0e-6 ), "empty prepared geometry has no cumulative distance" );
@@ -333,6 +359,16 @@ int main()
         check( !moved.evaluateByDistance( invalid, { 4, 1.0f }, 0.0, 1.0e-6 ) && !moved.evaluateByDistance( { 0, 0.0f }, invalid, 0.0, 1.0e-6 ), "distance samples reject invalid range endpoints" );
     check( !moved.evaluateByDistance( { 4, 1.0f }, { 0, 0.0f }, 0.0, 1.0e-6 ), "distance samples reject reverse ranges" );
     check( equal( tailSnapshot->evaluateByDistance( { 2, 0.25f }, { 3, 0.75f }, 0.5, 1.0e-10 ), splineSample2{ { 0.75f, 0 }, { 1, 0 } } ), "partial distance sample is independent of unrelated prefix failures" );
+    check( empty.sampleByDistanceParameters( { 0, 0.0f }, { 0, 0.0f }, 1, 1.0e-6 ).empty(), "empty geometry has no parameter samples" );
+    for( std::size_t subdivisions : { std::size_t{ 0 }, std::vector<splineParameter2>{}.max_size(), std::numeric_limits<std::size_t>::max() } )
+        check( moved.sampleByDistanceParameters( { 0, 0.0f }, { 4, 1.0f }, subdivisions, 1.0e-6 ).empty(), "parameter sampling rejects zero and impossible subdivision counts" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), -static_cast<double>( infinity ) } )
+        check( moved.sampleByDistanceParameters( { 0, 1.0f }, { 1, 0.0f }, 3, tolerance ).empty(), "parameter samples validate tolerance even for equal-position ranges" );
+    for( splineParameter2 invalid : { splineParameter2{ moved.getSegmentCount(), 0.0f }, { std::numeric_limits<std::size_t>::max(), 0.0f }, { 0, -0.01f }, { 0, 1.01f }, { 0, nan }, { 0, infinity } } )
+        check( moved.sampleByDistanceParameters( invalid, { 4, 1.0f }, 3, 1.0e-6 ).empty() && moved.sampleByDistanceParameters( { 0, 0.0f }, invalid, 3, 1.0e-6 ).empty(), "parameter samples reject invalid range endpoints" );
+    check( moved.sampleByDistanceParameters( { 4, 1.0f }, { 0, 0.0f }, 3, 1.0e-6 ).empty() && moved.sampleByDistanceParameters( { 1, 0.75f }, { 1, 0.25f }, 3, 1.0e-6 ).empty(), "parameter sampling rejects reverse ranges without closed wrapping" );
+    const auto tailParameters = tailSnapshot->sampleByDistanceParameters( { 2, 0.25f }, { 3, 0.75f }, 3, 1.0e-6 );
+    check( tailParameters.size() == 4 && equal( tailParameters, SampleByDistanceParameters( { longPrefix }, { 2, 0.25f }, { 3, 0.75f }, 3, 1.0e-6 ) ), "parameter samples do not require unrelated prefix lengths to converge" );
     const vec2 repeated[] = { { 0, 0 }, { 1, 0 }, { 1, 0 } };
     const vec2 nonfinite[] = { { 0, 0 }, { nan, 1 } };
     const vec2 infinite[] = { { 0, 0 }, { infinity, 1 } };
