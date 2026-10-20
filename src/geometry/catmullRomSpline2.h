@@ -56,6 +56,10 @@ public:
     [[nodiscard]] std::optional<aabb2> computeAABB() const;
     [[nodiscard]] std::optional<aabb2> computeAABB( std::size_t segmentIndex ) const;
 
+    // 정방향 [from, to]만 감싸며 같은 위치도 반올림 여유를 포함함. 자동 순환하지 않음.
+    // 기존 부분 경로 ComputeAABB의 수치·실패 정책. 잘못된 범위·역순도 nullopt.
+    [[nodiscard]] std::optional<aabb2> computeAABB( splineParameter2 from, splineParameter2 to ) const;
+
     // 기존 거리 조회와 같은 위치 반올림 검사와 단위 접선. 잘못된 입력·0 접선도 nullopt.
     [[nodiscard]] std::optional<splineSample2> evaluateSample( std::size_t segmentIndex, float t, double tolerance ) const;
 
