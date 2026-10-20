@@ -878,6 +878,28 @@ std::vector<vec2> SampleAdaptiveInRange( const catmullRomSpline2& spline, spline
     return SampleAdaptiveInRange( GetSegmentCount( spline ), from, to, maxError, parameters, segmentAt, evaluatePoint, positionAt );
 }
 
+std::vector<vec2> SampleAdaptiveInRange( const preparedCatmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, float maxError, std::vector<splineParameter2>* parameters )
+{
+    const auto segments = spline.getSegments();
+    const auto segmentAt = [&]( std::size_t i ) -> const preparedSplineSegment2&
+    {
+        return segments[i];
+    };
+    const auto evaluatePoint = [&]( std::size_t i, float t )
+    {
+        return spline.evaluate( i, t );
+    };
+    const auto positionAt = [&]( std::size_t i, float t, float error ) -> std::optional<vec2>
+    {
+        const vec2 point = spline.evaluate( i, t );
+        if( !IsFinite( point ) ) return {};
+        const auto& segment = segments[i];
+        if( t > 0.0f && t < 1.0f && GetPositionError( point, segment.start, segment.end, segment.tangent1, segment.tangent2, t ) > 0.25 * error ) return {};
+        return point;
+    };
+    return SampleAdaptiveInRange( segments.size(), from, to, maxError, parameters, segmentAt, evaluatePoint, positionAt );
+}
+
 } // namespace
 
 std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, float maxError )
@@ -887,25 +909,20 @@ std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, splineParamet
 
 std::vector<splineParameter2> preparedCatmullRomSpline2::sampleAdaptiveParameters( splineParameter2 from, splineParameter2 to, float maxError ) const
 {
-    const auto segmentAt = [&]( std::size_t i ) -> const preparedSplineSegment2&
-    {
-        return segments_[i];
-    };
-    const auto evaluatePoint = [&]( std::size_t i, float t )
-    {
-        return evaluate( i, t );
-    };
-    const auto positionAt = [&]( std::size_t i, float t, float error ) -> std::optional<vec2>
-    {
-        const vec2 point = evaluate( i, t );
-        if( !IsFinite( point ) ) return {};
-        const auto& segment = segments_[i];
-        if( t > 0.0f && t < 1.0f && GetPositionError( point, segment.start, segment.end, segment.tangent1, segment.tangent2, t ) > 0.25 * error ) return {};
-        return point;
-    };
     std::vector<splineParameter2> parameters;
-    if( SampleAdaptiveInRange( segments_.size(), from, to, maxError, &parameters, segmentAt, evaluatePoint, positionAt ).empty() ) return {};
+    if( SampleAdaptiveInRange( *this, from, to, maxError, &parameters ).empty() ) return {};
     return parameters;
+}
+
+std::vector<vec2> preparedCatmullRomSpline2::sampleAdaptive( float maxError ) const
+{
+    if( segments_.empty() ) return {};
+    return sampleAdaptive( { 0, 0.0f }, { segments_.size() - 1, 1.0f }, maxError );
+}
+
+std::vector<vec2> preparedCatmullRomSpline2::sampleAdaptive( splineParameter2 from, splineParameter2 to, float maxError ) const
+{
+    return SampleAdaptiveInRange( *this, from, to, maxError, nullptr );
 }
 
 std::vector<splineParameter2> SampleAdaptiveParameters( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, float maxError )

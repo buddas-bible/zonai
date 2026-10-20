@@ -106,6 +106,11 @@ public:
     // 정방향 범위의 양 끝 표현을 유지하며 같은 위치는 from 하나. 자동 순환 없음, 실패는 빈 배열.
     [[nodiscard]] std::vector<splineParameter2> sampleAdaptiveParameters( splineParameter2 from, splineParameter2 to, float maxError ) const;
 
+    // 기존 SampleAdaptive의 위치·중복점·오차·실패 정책. 같은 위치 범위는 점 하나, 자동 순환 없음.
+    // 잘못된 입력·정밀도 부족·깊이 12 초과는 빈 배열.
+    [[nodiscard]] std::vector<vec2> sampleAdaptive( float maxError ) const;
+    [[nodiscard]] std::vector<vec2> sampleAdaptive( splineParameter2 from, splineParameter2 to, float maxError ) const;
+
     // 기존 ClosestPoint와 같은 최소거리 오차·후보 선택·실패 정책. 0 접선도 허용함.
     // 잘못된 입력·정밀도 부족·탐색 한도 초과는 nullopt.
     [[nodiscard]] std::optional<splineClosestPoint2> closestPoint( const vec2& point, double tolerance ) const;
