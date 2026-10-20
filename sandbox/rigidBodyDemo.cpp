@@ -47,6 +47,10 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createTerrainChain();
     }
+    else if( kind == demoKind::splineRail )
+    {
+        createSplineRail();
+    }
     else if( kind == demoKind::splinePath )
     {
         createSplinePath();
@@ -176,11 +180,11 @@ void rigidBodyDemo::handleInput( const demoInput& input )
         splineTrialDragging_ = false;
         splineInserting_ = false;
     }
-    else if( kind_ == demoKind::terrainChain || kind_ == demoKind::splineTerrain )
+    else if( kind_ == demoKind::terrainChain || hasEditableSpline() )
     {
         if( input.mousePressed )
         {
-            splineInserting_ = kind_ == demoKind::splineTerrain && input.insertControlPoint;
+            splineInserting_ = hasEditableSpline() && input.insertControlPoint;
             splineTrialDragging_ = kind_ == demoKind::splineTerrain && input.selectTrialPosition && !splineInserting_;
             if( splineInserting_ || splineTrialDragging_ )
             {
@@ -323,7 +327,21 @@ vec2 rigidBodyDemo::getTerrainPoint( std::size_t pointIndex ) const
 
 std::span<const vec2> rigidBodyDemo::getSplinePathPoints() const noexcept
 {
-    return kind_ == demoKind::splinePath ? std::span<const vec2>{ SPLINE_PATH_POINTS } : std::span<const vec2>{};
+    return kind_ == demoKind::splinePath ? std::span<const vec2>{ splineControlPoints_ } : std::span<const vec2>{};
+}
+
+bool rigidBodyDemo::hasEditableSpline() const noexcept
+{
+    if( kind_ == demoKind::splineTerrain ) return world_.IsValid( terrainChain_ );
+    if( kind_ == demoKind::splinePath ) return world_.IsValid( impulseBody_ );
+    return kind_ == demoKind::splineRail && world_.IsValid( splineRailJoint_ );
+}
+
+transform2 rigidBodyDemo::getSplineControlTransform() const
+{
+    if( kind_ == demoKind::splineTerrain && !shapes_.empty() ) return world_.GetBodyTransform( shapes_[0].bodyHandle );
+    if( kind_ == demoKind::splineRail && world_.IsValid( splineRailBody_ ) ) return world_.GetBodyTransform( splineRailBody_ );
+    return {};
 }
 
 #pragma endregion Queries
@@ -332,7 +350,8 @@ std::span<const vec2> rigidBodyDemo::getSplinePathPoints() const noexcept
 
 void rigidBodyDemo::createSplinePath()
 {
-    const catmullRomSpline2 path{ SPLINE_PATH_POINTS };
+    splineControlPoints_.assign( SPLINE_PATH_POINTS.begin(), SPLINE_PATH_POINTS.end() );
+    const catmullRomSpline2 path{ splineControlPoints_ };
     const auto length = GetLength( path, SPLINE_PATH_TOLERANCE );
     const auto start = EvaluateByDistance( path, 0.0, SPLINE_PATH_TOLERANCE );
     if( !length || !start ) return;
@@ -342,14 +361,35 @@ void rigidBodyDemo::createSplinePath()
     shapes_.push_back( { impulseBody_, shape, "경로 이동 [키네마틱]" } );
 }
 
+void rigidBodyDemo::createSplineRail()
+{
+    splineControlPoints_.assign( SPLINE_PATH_POINTS.begin(), SPLINE_PATH_POINTS.end() );
+    splineRailBody_ = world_.CreateBody( bodyType::Static );
+    impulseBody_ = world_.CreateBody( bodyType::Dynamic, { splineControlPoints_.front(), {} } );
+    const auto shape = world_.CreateShape( impulseBody_, MakeBox( { 0.6f, 0.2f } ) );
+    shapes_.push_back( { impulseBody_, shape, "스플라인 레일 [다이나믹]" } );
+    splineRailJointDef definition{};
+    definition.bodyA = splineRailBody_;
+    definition.bodyB = impulseBody_;
+    definition.points = splineControlPoints_;
+    definition.enableSpring = true;
+    definition.hertz = 2.0f;
+    definition.dampingRatio = 0.7f;
+    const auto length = GetLength( { splineControlPoints_ }, SPLINE_PATH_TOLERANCE );
+    if( !length ) return;
+    definition.targetTranslation = static_cast<float>( *length * 0.5 );
+    splineRailJoint_ = world_.createSplineRailJoint( definition );
+    splinePathLength_ = *length;
+}
+
 void rigidBodyDemo::updateSplinePath( float timeStep )
 {
     if( kind_ != demoKind::splinePath || timeStep <= 0.0f || !world_.IsValid( impulseBody_ ) ) return;
     world_.SetBodyLinearVelocity( impulseBody_, {} );
     world_.SetBodyAngularVelocity( impulseBody_, 0.0f );
-    if( splinePathDistance_ == splinePathLength_ ) return;
+    if( splinePathDistance_ == splinePathLength_ && !splinePathNeedsAlignment_ ) return;
     const double next = std::min( splinePathLength_, splinePathDistance_ + SPLINE_PATH_SPEED * timeStep );
-    const auto target = EvaluateByDistance( { SPLINE_PATH_POINTS }, next, SPLINE_PATH_TOLERANCE );
+    const auto target = EvaluateByDistance( { splineControlPoints_ }, next, SPLINE_PATH_TOLERANCE );
     if( !target ) return;
     const auto current = world_.GetBodyTransform( impulseBody_ );
     const vec2 velocity = ( target->point - current.position ) / timeStep;
@@ -360,12 +400,13 @@ void rigidBodyDemo::updateSplinePath( float timeStep )
     world_.SetBodyLinearVelocity( impulseBody_, velocity );
     world_.SetBodyAngularVelocity( impulseBody_, angularVelocity );
     splinePathDistance_ = next;
+    splinePathNeedsAlignment_ = false;
 }
 
 void rigidBodyDemo::resetSplinePath()
 {
     if( kind_ != demoKind::splinePath || !world_.IsValid( impulseBody_ ) ) return;
-    const auto start = EvaluateByDistance( { SPLINE_PATH_POINTS }, 0.0, SPLINE_PATH_TOLERANCE );
+    const auto start = EvaluateByDistance( { splineControlPoints_ }, 0.0, SPLINE_PATH_TOLERANCE );
     if( !start ) return;
     cancelInput();
     world_.SetBodyTransform( impulseBody_, { start->point, rot2::FromRadians( std::atan2( start->tangent.y, start->tangent.x ) ) } );
@@ -1057,16 +1098,16 @@ void rigidBodyDemo::startTerrainPointDrag( vec2 point )
     terrainPointDragIndex_.reset();
     splineDragRecorded_ = false;
     endSplineSamplingEdit();
-    if( ( kind_ != demoKind::terrainChain && kind_ != demoKind::splineTerrain ) || !world_.IsValid( terrainChain_ ) ) return;
-    point = InverseTransformPoint( world_.GetBodyTransform( shapes_[0].bodyHandle ), point );
+    if( !( kind_ == demoKind::terrainChain && world_.IsValid( terrainChain_ ) ) && !hasEditableSpline() ) return;
+    point = InverseTransformPoint( kind_ == demoKind::terrainChain ? world_.GetBodyTransform( shapes_[0].bodyHandle ) : getSplineControlTransform(), point );
 
     const float pickRadiusSquared = TERRAIN_POINT_PICK_RADIUS * TERRAIN_POINT_PICK_RADIUS;
     float bestDistanceSquared = pickRadiusSquared;
 
-    const std::size_t pointCount = kind_ == demoKind::splineTerrain ? splineControlPoints_.size() : getTerrainPointCount();
+    const std::size_t pointCount = hasEditableSpline() ? splineControlPoints_.size() : getTerrainPointCount();
     for( std::size_t i = 0; i < pointCount; ++i )
     {
-        const vec2 control = kind_ == demoKind::splineTerrain ? splineControlPoints_[i] : getTerrainPoint( i );
+        const vec2 control = hasEditableSpline() ? splineControlPoints_[i] : getTerrainPoint( i );
         const float distanceSquared = LengthSquared( control - point );
         if( distanceSquared > bestDistanceSquared ) continue;
 
@@ -1077,11 +1118,11 @@ void rigidBodyDemo::startTerrainPointDrag( vec2 point )
 
 void rigidBodyDemo::updateTerrainPointDrag( vec2 point )
 {
-    if( !terrainPointDragIndex_.has_value() || !world_.IsValid( terrainChain_ ) ) return;
-    point = InverseTransformPoint( world_.GetBodyTransform( shapes_[0].bodyHandle ), point );
+    if( !terrainPointDragIndex_.has_value() || ( !world_.IsValid( terrainChain_ ) && !hasEditableSpline() ) ) return;
+    point = InverseTransformPoint( kind_ == demoKind::terrainChain ? world_.GetBodyTransform( shapes_[0].bodyHandle ) : getSplineControlTransform(), point );
 
     const std::size_t pointIndex = *terrainPointDragIndex_;
-    if( kind_ == demoKind::splineTerrain )
+    if( hasEditableSpline() )
     {
         updateSplineControlPoint( pointIndex, point );
         return;
@@ -1104,7 +1145,7 @@ void rigidBodyDemo::updateSplineControlPoint( std::size_t pointIndex, vec2 point
 
     auto candidate = splineControlPoints_;
     candidate[pointIndex] = point;
-    if( updateSplineTerrain( candidate, splineSamplingError_ ) )
+    if( updateSplineGeometry( candidate, splineSamplingError_ ) )
     {
         if( !splineDragRecorded_ ) rememberSplineEdit();
         splineDragRecorded_ = true;
@@ -1114,16 +1155,16 @@ void rigidBodyDemo::updateSplineControlPoint( std::size_t pointIndex, vec2 point
 
 bool rigidBodyDemo::insertSplineControlPoint( std::size_t segmentIndex )
 {
-    if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || segmentIndex >= splineControlPoints_.size() - 1 ) return false;
+    if( !hasEditableSpline() || segmentIndex >= splineControlPoints_.size() - 1 ) return false;
     return insertSplineControlPoint( segmentIndex, Evaluate( { splineControlPoints_ }, segmentIndex, 0.5f ) );
 }
 
 bool rigidBodyDemo::insertSplineControlPointAt( vec2 point, float pixelsPerMeter )
 {
-    if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || !std::isfinite( pixelsPerMeter ) || pixelsPerMeter <= 0.0f ) return false;
+    if( !hasEditableSpline() || !std::isfinite( pixelsPerMeter ) || pixelsPerMeter <= 0.0f ) return false;
     const float radius = 10.0f / pixelsPerMeter;
     if( !std::isfinite( radius ) || radius <= 0.0f ) return false;
-    point = InverseTransformPoint( world_.GetBodyTransform( shapes_[0].bodyHandle ), point );
+    point = InverseTransformPoint( kind_ == demoKind::terrainChain ? world_.GetBodyTransform( shapes_[0].bodyHandle ) : getSplineControlTransform(), point );
     if( !IsFinite( point ) ) return false;
     // 10px 판정에 비해 충분히 작은 0.01px 거리 오차로 실제 곡선 구간을 찾음.
     const auto closest = ClosestPoint( { splineControlPoints_ }, point, static_cast<double>( radius ) * 0.001 );
@@ -1135,10 +1176,10 @@ bool rigidBodyDemo::insertSplineControlPointAt( vec2 point, float pixelsPerMeter
 
 bool rigidBodyDemo::insertSplineControlPoint( std::size_t segmentIndex, vec2 point )
 {
-    if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || segmentIndex >= splineControlPoints_.size() - 1 || !IsFinite( point ) ) return false;
+    if( !hasEditableSpline() || segmentIndex >= splineControlPoints_.size() - 1 || !IsFinite( point ) ) return false;
     auto candidate = splineControlPoints_;
     candidate.insert( candidate.begin() + static_cast<std::ptrdiff_t>( segmentIndex + 1 ), point );
-    if( !updateSplineTerrain( candidate, splineSamplingError_ ) ) return false;
+    if( !updateSplineGeometry( candidate, splineSamplingError_ ) ) return false;
     rememberSplineEdit();
     splineControlPoints_.swap( candidate );
     terrainPointDragIndex_.reset();
@@ -1149,10 +1190,10 @@ bool rigidBodyDemo::insertSplineControlPoint( std::size_t segmentIndex, vec2 poi
 
 bool rigidBodyDemo::removeSplineControlPoint( std::size_t pointIndex )
 {
-    if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || splineControlPoints_.size() <= 2 || pointIndex >= splineControlPoints_.size() ) return false;
+    if( !hasEditableSpline() || splineControlPoints_.size() <= 2 || pointIndex >= splineControlPoints_.size() ) return false;
     auto candidate = splineControlPoints_;
     candidate.erase( candidate.begin() + static_cast<std::ptrdiff_t>( pointIndex ) );
-    if( !updateSplineTerrain( candidate, splineSamplingError_ ) ) return false;
+    if( !updateSplineGeometry( candidate, splineSamplingError_ ) ) return false;
     rememberSplineEdit();
     splineControlPoints_.swap( candidate );
     terrainPointDragIndex_.reset();
@@ -1167,7 +1208,7 @@ bool rigidBodyDemo::resetSplineTerrain()
     const bool original = std::equal( splineControlPoints_.begin(), splineControlPoints_.end(), TERRAIN_CONTROL_POINTS.begin(), TERRAIN_CONTROL_POINTS.end(),
         []( vec2 a, vec2 b ) { return a.x == b.x && a.y == b.y; } );
     if( original && splineSamplingError_ == 0.01f ) return false;
-    if( !updateSplineTerrain( TERRAIN_CONTROL_POINTS, 0.01f ) ) return false;
+    if( !updateSplineGeometry( TERRAIN_CONTROL_POINTS, 0.01f ) ) return false;
     rememberSplineEdit();
     splineControlPoints_.assign( TERRAIN_CONTROL_POINTS.begin(), TERRAIN_CONTROL_POINTS.end() );
     splineSamplingError_ = 0.01f;
@@ -1180,7 +1221,7 @@ bool rigidBodyDemo::resetSplineTerrain()
 void rigidBodyDemo::setSplineSamplingError( float error )
 {
     if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || !std::isfinite( error ) || error < 0.005f || error > 0.05f || error == splineSamplingError_ ) return;
-    if( updateSplineTerrain( splineControlPoints_, error ) )
+    if( updateSplineGeometry( splineControlPoints_, error ) )
     {
         if( !splineSamplingEditActive_ || !splineSamplingEditRecorded_ ) rememberSplineEdit();
         splineSamplingEditRecorded_ = true;
@@ -1210,8 +1251,8 @@ void rigidBodyDemo::rememberSplineEdit()
 
 bool rigidBodyDemo::restoreSplineEdit( std::optional<splineEditState>& source, std::optional<splineEditState>& destination )
 {
-    if( kind_ != demoKind::splineTerrain || !world_.IsValid( terrainChain_ ) || !source ) return false;
-    if( !updateSplineTerrain( source->points, source->error ) ) return false;
+    if( !hasEditableSpline() || !source ) return false;
+    if( !updateSplineGeometry( source->points, source->error ) ) return false;
     destination = splineEditState{ splineControlPoints_, splineSamplingError_ };
     splineControlPoints_.swap( source->points );
     splineSamplingError_ = source->error;
@@ -1232,8 +1273,22 @@ bool rigidBodyDemo::redoSplineEdit()
     return restoreSplineEdit( splineRedo_, splineUndo_ );
 }
 
-bool rigidBodyDemo::updateSplineTerrain( std::span<const vec2> points, float error )
+bool rigidBodyDemo::updateSplineGeometry( std::span<const vec2> points, float error )
 {
+    if( kind_ == demoKind::splinePath || kind_ == demoKind::splineRail )
+    {
+        if( !hasEditableSpline() ) return false;
+        if( kind_ == demoKind::splineRail ) return world_.setSplineRailJointPoints( splineRailJoint_, points );
+        splineRailJointSim2 candidate{};
+        if( !setSplineRailGeometry( candidate, points ) ) return false;
+        const auto length = GetLength( { points }, SPLINE_PATH_TOLERANCE );
+        if( !length ) return false;
+        const double fraction = splinePathLength_ > 0.0 ? splinePathDistance_ / splinePathLength_ : 0.0;
+        splinePathLength_ = *length;
+        splinePathDistance_ = fraction * *length;
+        splinePathNeedsAlignment_ = true;
+        return true;
+    }
     const auto samples = SampleAdaptive( { points }, error );
     if( samples.size() < 2 ) return false;
     const vec2 ghost1 = samples.front() + ( samples.front() - samples[1] );

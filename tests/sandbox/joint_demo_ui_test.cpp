@@ -1226,26 +1226,49 @@ int main()
             fail( "Prescribed spline motion must block damping edits while other demos retain damping controls" );
         }
     }
-    for( float zoom : { 20.0f, 200.0f } )
-    {
-        for( float offset : { 9.0f, 11.0f } )
+    for( auto kind : { demoKind::splineTerrain, demoKind::splinePath, demoKind::splineRail } )
+        for( float zoom : { 20.0f, 200.0f } )
         {
-            rigidBodyDemoUi scene{ demoKind::splineTerrain };
-            while( scene.getSplineControlPoints().size() > 2 )
-                if( !scene.removeSplineControlPoint( scene.getSplineControlPoints().size() - 1 ) ) fail( "Camera click fixture removes controls" );
-            const auto points = scene.getSplineControlPoints();
-            const vec2 delta = points[1] - points[0];
-            const vec2 normal = Normalize( vec2{ -delta.y, delta.x } );
+            for( float offset : { 9.0f, 11.0f } )
+            {
+                rigidBodyDemoUi scene{ kind };
+                while( scene.getSplineControlPoints().size() > 2 )
+                    if( !scene.removeSplineControlPoint( scene.getSplineControlPoints().size() - 1 ) ) fail( "Camera click fixture removes controls" );
+                const auto points = scene.getSplineControlPoints();
+                const vec2 delta = points[1] - points[0];
+                const vec2 normal = Normalize( vec2{ -delta.y, delta.x } );
+                debugCamera camera{};
+                camera.pixelsPerMeter = zoom;
+                const vec2 target = 0.5f * ( points[0] + points[1] ) + normal * ( offset / zoom );
+                const ImVec2 screen = camera.WorldToScreen( target, { 0, 0 }, { 1000, 800 } );
+                demoInput click{};
+                click.mousePosition = camera.ScreenToWorld( screen, { 0, 0 }, { 1000, 800 } );
+                click.pixelsPerMeter = camera.pixelsPerMeter;
+                click.mousePressed = click.mouseHeld = click.insertControlPoint = true;
+                scene.handleInput( click );
+                if( scene.getSplineControlPoints().size() != ( offset < 10.0f ? 3u : 2u ) ) fail( "Curve insertion must use a fixed pixel distance through camera conversion" );
+            }
+        }
+    for( auto kind : { demoKind::splinePath, demoKind::splineRail } )
+    {
+        rigidBodyDemoUi scene{ kind };
+        for( int frame = 0; frame < 2; ++frame )
+        {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 420, 5000 } );
+            ImGui::Begin( "Editable spline" );
+            GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( frame == 0 ? "SplineRemove" : "SplineUndo" );
+            scene.drawControls();
             debugCamera camera{};
-            camera.pixelsPerMeter = zoom;
-            const vec2 target = 0.5f * ( points[0] + points[1] ) + normal * ( offset / zoom );
-            const ImVec2 screen = camera.WorldToScreen( target, { 0, 0 }, { 1000, 800 } );
-            demoInput click{};
-            click.mousePosition = camera.ScreenToWorld( screen, { 0, 0 }, { 1000, 800 } );
-            click.pixelsPerMeter = camera.pixelsPerMeter;
-            click.mousePressed = click.mouseHeld = click.insertControlPoint = true;
-            scene.handleInput( click );
-            if( scene.getSplineControlPoints().size() != ( offset < 10.0f ? 3u : 2u ) ) fail( "Curve insertion must use a fixed pixel distance through camera conversion" );
+            ImDrawList* list = ImGui::GetWindowDrawList();
+            const int before = list->VtxBuffer.Size;
+            debugDraw draw{ list, camera, { 0, 0 }, { 800, 600 } };
+            scene.draw( draw );
+            if( list->VtxBuffer.Size <= before ) fail( "Editable spline draws curve and controls" );
+            ImGui::End();
+            ImGui::Render();
+            if( scene.getSplineControlPoints().size() != ( frame == 0 ? 4u : 5u ) ) fail( "Both spline demos expose delete and undo controls" );
         }
     }
     ImGui::DestroyContext();

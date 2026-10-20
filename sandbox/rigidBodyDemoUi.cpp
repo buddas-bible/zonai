@@ -170,11 +170,12 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         draw.DrawGrid();
     }
 
-    if( getKind() == demoKind::splinePath )
+    if( getKind() == demoKind::splinePath || getKind() == demoKind::splineRail )
     {
-        const auto points = SampleAdaptive( { getSplinePathPoints() }, 0.01f );
+        const auto points = SampleAdaptive( { getSplineControlPoints() }, 0.01f );
+        const auto pose = getSplineControlTransform();
         for( std::size_t i = 1; i < points.size(); ++i )
-            draw.DrawSegment( { points[i - 1], points[i] }, IM_COL32( 180, 150, 255, 255 ), 1.5f );
+            draw.DrawSegment( { TransformPoint( pose, points[i - 1] ), TransformPoint( pose, points[i] ) }, IM_COL32( 180, 150, 255, 255 ), 1.5f );
     }
 
     constexpr ImU32 DYNAMIC_TREE_LEAF = IM_COL32( 70, 200, 255, 220 );
@@ -272,9 +273,9 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         }
     }
 
-    if( getKind() == demoKind::splineTerrain && !getShapes().empty() && getWorld().IsValid( getShapes()[0].bodyHandle ) )
+    if( hasEditableSpline() )
     {
-        const auto pose = getWorld().GetBodyTransform( getShapes()[0].bodyHandle );
+        const auto pose = getSplineControlTransform();
         const auto controls = getSplineControlPoints();
         for( std::size_t i = 0; i < controls.size(); ++i )
         {
@@ -288,6 +289,14 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
             draw.DrawPoint( target->point, TRIAL_COLOR, 6.0f );
             draw.DrawArrow( target->point, Cross( target->tangent, 1.0f ), TRIAL_COLOR, 0.8f );
         }
+    }
+
+    if( getWorld().IsValid( getSplineRailJoint() ) )
+    {
+        const auto rail = getWorld().getSplineRailJointData( getSplineRailJoint() );
+        draw.DrawPoint( rail.anchorA, IM_COL32( 255, 170, 70, 255 ) );
+        draw.DrawArrow( rail.anchorA, rail.tangent, IM_COL32( 80, 220, 255, 255 ), 0.7f );
+        draw.DrawArrow( rail.anchorA, rail.normal, IM_COL32( 100, 255, 140, 255 ), 0.5f );
     }
 
     if( getWorld().IsValid( getMouseJoint() ) )
@@ -663,6 +672,36 @@ void rigidBodyDemoUi::drawInspector()
     ImGui::Separator();
 }
 
+void rigidBodyDemoUi::drawSplineEditorControls()
+{
+    ImGui::BeginDisabled( !canUndoSplineEdit() );
+    if( ImGui::Button( "되돌리기###SplineUndo" ) ) undoSplineEdit();
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled( !canRedoSplineEdit() );
+    if( ImGui::Button( "다시하기###SplineRedo" ) ) redoSplineEdit();
+    ImGui::EndDisabled();
+    const auto controls = getSplineControlPoints();
+    if( controls.empty() ) return;
+    if( getTerrainPointDragIndex() ) splineControlIndex_ = *getTerrainPointDragIndex();
+    splineControlIndex_ = std::min( splineControlIndex_, controls.size() - 1 );
+    char label[32];
+    std::snprintf( label, sizeof( label ), "제어점 %zu", splineControlIndex_ + 1 );
+    if( ImGui::BeginCombo( "제어점###SplineControl", label ) )
+    {
+        for( std::size_t i = 0; i < controls.size(); ++i )
+        {
+            std::snprintf( label, sizeof( label ), "제어점 %zu", i + 1 );
+            if( ImGui::Selectable( label, i == splineControlIndex_ ) ) splineControlIndex_ = i;
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::TextWrapped( "곡선에서 10px 이내를 Ctrl+왼쪽 클릭하면 클릭 위치에 제어점을 삽입합니다." );
+    ImGui::BeginDisabled( getSplineControlPoints().size() <= 2 );
+    if( ImGui::Button( "제어점 삭제###SplineRemove" ) && removeSplineControlPoint( splineControlIndex_ ) ) splineControlIndex_ = std::min( splineControlIndex_, getSplineControlPoints().size() - 1 );
+    ImGui::EndDisabled();
+}
+
 void rigidBodyDemoUi::drawExperimentControls()
 {
     if( getKind() == demoKind::splinePath )
@@ -670,6 +709,38 @@ void rigidBodyDemoUi::drawExperimentControls()
         ImGui::TextUnformatted( "스플라인 경로 이동" );
         ImGui::TextWrapped( "1m/s로 곡선을 따라 이동하고 접선 방향으로 회전합니다. 끝점에서 정지합니다." );
         if( ImGui::Button( "처음부터###SplinePathReset" ) ) resetSplinePath();
+        drawSplineEditorControls();
+        return;
+    }
+
+    if( getKind() == demoKind::splineRail )
+    {
+        if( !getWorld().IsValid( getSplineRailJoint() ) ) return;
+        const auto id = getSplineRailJoint();
+        auto rail = getWorld().getSplineRailJointData( id );
+        ImGui::TextUnformatted( "스플라인 레일" );
+        ImGui::Text( "이동 거리: %.2f / %.2f m", rail.currentTranslation, rail.length );
+        ImGui::TextWrapped( "동적 물체를 열린 곡선에 구속합니다. 양 끝점에서는 항상 정지합니다." );
+        bool follow = rail.rotationMode == splineRailRotationMode::followTangent;
+        bool rotationChanged = ImGui::Checkbox( "접선 회전###SplineRailFollow", &follow );
+        rotationChanged |= ImGui::SliderFloat( "회전 스프링###SplineRailAngularHertz", &rail.angularHertz, 0.0f, 10.0f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp );
+        rotationChanged |= ImGui::SliderFloat( "회전 감쇠###SplineRailAngularDamping", &rail.angularDampingRatio, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+        if( rotationChanged ) getWorld().setSplineRailJointRotation( id, follow ? splineRailRotationMode::followTangent : splineRailRotationMode::fixed, rail.angularHertz, rail.angularDampingRatio );
+        bool springChanged = ImGui::Checkbox( "스프링###SplineRailSpring", &rail.enableSpring );
+        springChanged |= ImGui::SliderFloat( "진동수###SplineRailHertz", &rail.hertz, 0.0f, 10.0f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp );
+        springChanged |= ImGui::SliderFloat( "감쇠비###SplineRailDamping", &rail.dampingRatio, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+        springChanged |= ImGui::SliderFloat( "목표 위치###SplineRailTarget", &rail.targetTranslation, static_cast<float>( -rail.referenceDistance ), static_cast<float>( rail.length - rail.referenceDistance ), "%.2f m", ImGuiSliderFlags_AlwaysClamp );
+        if( springChanged ) getWorld().setSplineRailJointSpring( id, rail.enableSpring, rail.hertz, rail.dampingRatio, rail.targetTranslation );
+        bool motorChanged = ImGui::Checkbox( "모터###SplineRailMotor", &rail.enableMotor );
+        motorChanged |= ImGui::SliderFloat( "모터 속도###SplineRailSpeed", &rail.motorSpeed, -10.0f, 10.0f, "%.1f m/s", ImGuiSliderFlags_AlwaysClamp );
+        motorChanged |= ImGui::SliderFloat( "최대 힘###SplineRailForce", &rail.maxMotorForce, 0.0f, 100.0f, "%.1f N", ImGuiSliderFlags_AlwaysClamp );
+        if( motorChanged ) getWorld().setSplineRailJointMotor( id, rail.enableMotor, rail.motorSpeed, rail.maxMotorForce );
+        bool limitChanged = ImGui::Checkbox( "이동 제한###SplineRailLimit", &rail.enableLimit );
+        const float start = static_cast<float>( -rail.referenceDistance ), end = static_cast<float>( rail.length - rail.referenceDistance );
+        limitChanged |= ImGui::SliderFloat( "최소 위치###SplineRailLower", &rail.lowerTranslation, start, end, "%.2f m", ImGuiSliderFlags_AlwaysClamp );
+        limitChanged |= ImGui::SliderFloat( "최대 위치###SplineRailUpper", &rail.upperTranslation, start, end, "%.2f m", ImGuiSliderFlags_AlwaysClamp );
+        if( limitChanged ) getWorld().setSplineRailJointLimit( id, rail.enableLimit, rail.lowerTranslation, rail.upperTranslation );
+        drawSplineEditorControls();
         return;
     }
 
@@ -688,13 +759,7 @@ void rigidBodyDemoUi::drawExperimentControls()
         const char* probes[] = { "원", "캡슐", "상자" };
         if( getKind() == demoKind::splineTerrain )
         {
-            ImGui::BeginDisabled( !canUndoSplineEdit() );
-            if( ImGui::Button( "되돌리기###SplineUndo" ) ) undoSplineEdit();
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            ImGui::BeginDisabled( !canRedoSplineEdit() );
-            if( ImGui::Button( "다시하기###SplineRedo" ) ) redoSplineEdit();
-            ImGui::EndDisabled();
+            drawSplineEditorControls();
             if( ImGui::Button( "지형 원형 복원###SplineTerrainReset" ) ) resetSplineTerrain();
             float error = getSplineSamplingError() * 100.0f;
             const bool errorChanged = ImGui::SliderFloat( "근사 오차###SplineSamplingError", &error, 0.5f, 5.0f, "%.2f cm", ImGuiSliderFlags_AlwaysClamp );
@@ -703,24 +768,6 @@ void rigidBodyDemoUi::drawExperimentControls()
             if( ImGui::IsItemDeactivated() ) endSplineSamplingEdit();
             ImGui::Text( "선분 수: %zu", getTerrainPointCount() - 1 );
             ImGui::TextWrapped( "충돌 선분이 너무 짧아지는 오차 변경이나 제어점 이동은 적용하지 않습니다." );
-            const auto controls = getSplineControlPoints();
-            if( getTerrainPointDragIndex() ) splineControlIndex_ = *getTerrainPointDragIndex();
-            splineControlIndex_ = std::min( splineControlIndex_, controls.size() - 1 );
-            char label[32];
-            std::snprintf( label, sizeof( label ), "제어점 %zu", splineControlIndex_ + 1 );
-            if( ImGui::BeginCombo( "제어점###SplineControl", label ) )
-            {
-                for( std::size_t i = 0; i < controls.size(); ++i )
-                {
-                    std::snprintf( label, sizeof( label ), "제어점 %zu", i + 1 );
-                    if( ImGui::Selectable( label, i == splineControlIndex_ ) ) splineControlIndex_ = i;
-                }
-                ImGui::EndCombo();
-            }
-            ImGui::TextWrapped( "곡선에서 10px 이내를 Ctrl+왼쪽 클릭하면 클릭 위치에 제어점을 삽입합니다." );
-            ImGui::BeginDisabled( getSplineControlPoints().size() <= 2 );
-            if( ImGui::Button( "제어점 삭제###SplineRemove" ) && removeSplineControlPoint( splineControlIndex_ ) ) splineControlIndex_ = std::min( splineControlIndex_, getSplineControlPoints().size() - 1 );
-            ImGui::EndDisabled();
             float fraction = getSplineTrialFraction() * 100.0f;
             if( ImGui::SliderFloat( "앞·뒷면 시험 위치###SplineTrialFraction", &fraction, 0.0f, 100.0f, "%.0f %%", ImGuiSliderFlags_AlwaysClamp ) ) setSplineTrialFraction( fraction / 100.0f );
             float speed = getSplineTrialSpeed();

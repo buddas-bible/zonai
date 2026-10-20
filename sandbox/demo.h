@@ -30,7 +30,8 @@ enum class demoKind
     filterJointPlayground,
     motorCar,
     ragdoll,
-    splinePath
+    splinePath,
+    splineRail
 };
 
 struct demoEntry

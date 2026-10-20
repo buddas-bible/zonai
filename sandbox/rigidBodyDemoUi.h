@@ -18,6 +18,7 @@ private:
     void drawWorldSettings();
     void drawInspector();
     void drawExperimentControls();
+    void drawSplineEditorControls();
     void drawMouseControls();
     void drawDebugSettings();
 #pragma endregion Controls
