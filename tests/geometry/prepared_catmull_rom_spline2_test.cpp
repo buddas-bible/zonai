@@ -52,6 +52,11 @@ bool equal( const std::vector<vec2>& a, const std::vector<vec2>& b )
     return true;
 }
 
+bool equal( const std::optional<aabb2>& a, const std::optional<aabb2>& b )
+{
+    return a.has_value() == b.has_value() && ( !a || ( equal( a->min, b->min ) && equal( a->max, b->max ) ) );
+}
+
 void compare( const catmullRomSpline2& spline )
 {
     const auto prepared = prepareSpline( spline );
@@ -59,6 +64,23 @@ void compare( const catmullRomSpline2& spline )
     check( prepared->getSegmentCount() == GetSegmentCount( spline ) && prepared->isLoop() == spline.isLoop, "prepared snapshot preserves topology" );
     static_assert( std::is_same_v<decltype( prepared->getSegments() ), std::span<const preparedSplineSegment2>> );
     check( prepared->getSegments().size() == prepared->getSegmentCount(), "prepared geometry exposes owned read-only segment coefficients" );
+    const auto bounds = prepared->computeAABB();
+    check( equal( bounds, ComputeAABB( spline ) ) && bounds && IsValidAABB( *bounds ), "prepared whole bounds exactly match legacy conservative bounds" );
+    aabb2 combined{ spline.points[0], spline.points[0] };
+    for( std::size_t i = 0; i < prepared->getSegmentCount(); ++i )
+    {
+        const auto segmentBounds = prepared->computeAABB( i );
+        check( equal( segmentBounds, ComputeAABB( spline, i ) ) && segmentBounds && IsValidAABB( *segmentBounds ), "prepared segment bounds exactly match legacy including the closing segment" );
+        combined = Union( combined, *segmentBounds );
+        for( int step = 0; step <= 1024; ++step )
+        {
+            const vec2 point = prepared->evaluate( i, step / 1024.0f );
+            check( Contains( *bounds, point ) && Contains( *segmentBounds, point ), "prepared bounds contain dense float evaluations without extra epsilon" );
+        }
+        for( float t : { std::nextafter( 0.0f, 1.0f ), std::nextafter( 1.0f, 0.0f ) } )
+            check( Contains( *segmentBounds, prepared->evaluate( i, t ) ), "prepared segment bounds contain endpoint-neighbor rounding" );
+    }
+    check( equal( bounds, combined ), "prepared full bounds are the union of all segment bounds" );
     for( std::size_t i = 0; i < prepared->getSegmentCount(); ++i )
     {
         const auto& segment = prepared->getSegments()[i];
@@ -167,8 +189,13 @@ void compare( const catmullRomSpline2& spline )
 
 int main()
 {
+
     const vec2 uniformLine[] = { { 0, 0 }, { 1, 0 }, { 2, 0 }, { 3, 0 } };
     const auto uniformSnapshot = prepareSpline( { uniformLine } );
+    const auto straightBounds = uniformSnapshot->computeAABB();
+    check( straightBounds && Contains( *straightBounds, { 0, 0 } ) && Contains( *straightBounds, { 3, 0 } ) && straightBounds->min.x < 0.0f && straightBounds->max.x > 3.0f, "prepared straight bounds include endpoints and outward rounding allowance" );
+    const auto middleBounds = uniformSnapshot->computeAABB( 1 );
+    check( middleBounds && Contains( *middleBounds, { 1, 0 } ) && Contains( *middleBounds, { 2, 0 } ) && middleBounds->min.x > 0.5f && middleBounds->max.x < 2.5f, "prepared segment bounds exclude unrelated straight segments" );
     check( uniformSnapshot->curvature( 0, 0.5f ) == 0.0, "prepared straight-path curvature is zero" );
     const vec2 analyticCurve[] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 2, 1 } };
     const auto curvatureSnapshot = prepareSpline( { analyticCurve } );
@@ -257,6 +284,8 @@ int main()
     const auto closedCurvature = prepareSpline( { curve, true } );
     const auto seamStart = closedCurvature->curvature( 0, 0.0f ), seamEnd = closedCurvature->curvature( 4, 1.0f );
     check( seamStart && seamEnd && *seamStart != *seamEnd && seamStart == Curvature( { curve, true }, 0, 0.0f ) && seamEnd == Curvature( { curve, true }, 4, 1.0f ), "closed seam curvature preserves the specified side" );
+    const auto overshootBounds = curvatureSnapshot->computeAABB();
+    check( overshootBounds && overshootBounds->min.y < 0.0f && overshootBounds->max.y > 1.0f, "prepared bounds include curve overshoot beyond its control polygon" );
     const double precisionBoundary = 128.0 * std::numeric_limits<double>::epsilon() * *preparedLength;
     for( double tolerance : { std::nextafter( precisionBoundary, 0.0 ), precisionBoundary, std::nextafter( precisionBoundary, std::numeric_limits<double>::infinity() ) } )
         check( prepareSpline( { line } )->getLength( tolerance ) == GetLength( { line }, tolerance ), "prepared length preserves the representable-precision boundary policy" );
@@ -301,6 +330,7 @@ int main()
     std::optional<preparedCatmullRomSpline2> owned;
     vec2 expectedPoint{}, expectedFirst{}, expectedSecond{};
     std::optional<double> expectedCurvature;
+    std::optional<aabb2> expectedBounds, expectedSegmentBounds;
     std::optional<splineParameter2> expectedParameter, expectedRangeParameter;
     std::optional<splineSample2> expectedSample, expectedRangeSample;
     std::vector<splineParameter2> expectedParameters;
@@ -320,6 +350,8 @@ int main()
         expectedRangeLength = GetLength( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 1.0e-6 );
         expectedPartialLength = GetLength( { source, true }, 4, 0.25f, 0.75f, 1.0e-6 );
         expectedDistance = GetDistance( { source, true }, 4, 0.37f, 1.0e-6 );
+        expectedBounds = ComputeAABB( { source, true } );
+        expectedSegmentBounds = ComputeAABB( { source, true }, 4 );
         expectedCurvature = Curvature( { source, true }, 4, 0.37f );
         expectedPoint = Evaluate( { source, true }, 4, 0.37f );
         expectedFirst = Derivative( { source, true }, 4, 0.37f );
@@ -337,6 +369,7 @@ int main()
     check( !expectedParameters.empty() && equal( owned->sampleByDistanceParameters( { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 ), expectedParameters ), "parameter samples survive source mutation and destruction" );
     check( !expectedPoints.empty() && !expectedRangePoints.empty() && equal( owned->sampleByDistance( 3, 1.0e-4 ), expectedPoints ) && equal( owned->sampleByDistance( { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 ), expectedRangePoints ), "position samples survive source mutation and destruction" );
     check( expectedCurvature && owned->curvature( 4, 0.37f ) == expectedCurvature, "curvature survives source mutation and destruction" );
+    check( expectedBounds && expectedSegmentBounds && equal( owned->computeAABB(), expectedBounds ) && equal( owned->computeAABB( 4 ), expectedSegmentBounds ), "prepared bounds survive source mutation and destruction" );
     auto copied = *owned;
     auto moved = std::move( copied );
     owned.reset();
@@ -352,6 +385,7 @@ int main()
     check( equal( moved.sampleByDistanceParameters( { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 ), expectedParameters ), "copied and moved snapshots preserve parameter samples" );
     check( equal( moved.sampleByDistance( 3, 1.0e-4 ), expectedPoints ) && equal( moved.sampleByDistance( { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 ), expectedRangePoints ), "copied and moved snapshots preserve position samples" );
     check( moved.curvature( 4, 0.37f ) == expectedCurvature, "copied and moved snapshots preserve curvature" );
+    check( equal( moved.computeAABB(), expectedBounds ) && equal( moved.computeAABB( 4 ), expectedSegmentBounds ), "copied and moved snapshots preserve conservative bounds" );
     const preparedCatmullRomSpline2 empty{};
     check( !empty.getLength( 1.0e-6 ), "empty prepared geometry has no total length" );
     check( !empty.getDistance( 0, 0.0f, 1.0e-6 ), "empty prepared geometry has no cumulative distance" );
@@ -435,6 +469,23 @@ int main()
         check( !moved.curvature( 0, t ), "prepared curvature rejects invalid parameters without asserting" );
     for( std::size_t i : { moved.getSegmentCount(), std::numeric_limits<std::size_t>::max() } )
         check( !moved.curvature( i, 0.5f ), "prepared curvature rejects invalid segment indices without asserting" );
+    check( !empty.computeAABB() && !empty.computeAABB( 0 ), "empty geometry has no conservative bounds" );
+    for( std::size_t i : { moved.getSegmentCount(), std::numeric_limits<std::size_t>::max() } )
+        check( !moved.computeAABB( i ), "prepared bounds reject invalid segment indices without asserting" );
+    const vec2 unboundedAllowance[] = { { 0, std::numeric_limits<float>::max() }, { 1, std::numeric_limits<float>::max() } };
+    const auto unboundedSnapshot = prepareSpline( { unboundedAllowance } );
+    check( unboundedSnapshot && !unboundedSnapshot->computeAABB() && !unboundedSnapshot->computeAABB( 0 ) && !ComputeAABB( { unboundedAllowance } ), "prepared bounds preserve failure when outward allowance cannot remain finite" );
+    const vec2 translatedControls[] = { { 1.0e8f, -1.0e8f }, { 1.0e8f + 8.0f, -1.0e8f }, { 1.0e8f + 8.0f, -1.0e8f + 8.0f }, { 1.0e8f + 16.0f, -1.0e8f + 8.0f } };
+    const vec2 subnormalAxis[] = { { 0, std::numeric_limits<float>::denorm_min() }, { 1, 0 } };
+    for( const auto candidate : { catmullRomSpline2{ translatedControls }, catmullRomSpline2{ subnormalAxis } } )
+    {
+        const auto prepared = prepareSpline( candidate );
+        const auto bounds = prepared->computeAABB();
+        check( bounds && equal( bounds, ComputeAABB( candidate ) ), "prepared bounds preserve large-translation and subnormal rounding" );
+        for( std::size_t i = 0; i < prepared->getSegmentCount(); ++i )
+            for( int step = 0; step <= 1024; ++step )
+                check( Contains( *bounds, prepared->evaluate( i, step / 1024.0f ) ), "prepared bounds contain translated and subnormal float samples" );
+    }
     const vec2 repeated[] = { { 0, 0 }, { 1, 0 }, { 1, 0 } };
     const vec2 nonfinite[] = { { 0, 0 }, { nan, 1 } };
     const vec2 infinite[] = { { 0, 0 }, { infinity, 1 } };
