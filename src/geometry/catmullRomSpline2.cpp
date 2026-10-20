@@ -357,6 +357,48 @@ std::optional<double> preparedCatmullRomSpline2::getDistance( std::size_t segmen
     return distance;
 }
 
+std::optional<splineParameter2> preparedCatmullRomSpline2::getParameterByDistance( double distance, double tolerance ) const
+{
+    if( !std::isfinite( distance ) || distance < 0.0 ) return {};
+    const auto length = getLength( tolerance );
+    if( !length || distance > *length ) return {};
+    const std::size_t count = segments_.size();
+    if( distance == 0.0 ) return splineParameter2{ 0, 0.0f };
+    if( distance == *length ) return splineParameter2{ count - 1, 1.0f };
+    const double error = tolerance / ( 4.0 * count );
+    double prefix = 0.0;
+    for( std::size_t i = 0; i < count; ++i )
+    {
+        const auto& segment = segments_[i];
+        const auto segmentLength = IntegrateSegmentLength( segment.start, segment.end, segment.tangent1, segment.tangent2, 0.0, 1.0, error );
+        if( !segmentLength ) return {};
+        const double end = prefix + *segmentLength;
+        if( distance > end )
+        {
+            prefix = end;
+            continue;
+        }
+        if( distance == end ) return splineParameter2{ i, 1.0f };
+        const double target = distance - prefix;
+        double lower = 0.0, upper = 1.0;
+        constexpr int MAX_ITERATIONS = 64;
+        for( int iteration = 0; iteration < MAX_ITERATIONS; ++iteration )
+        {
+            const float t = static_cast<float>( 0.5 * ( lower + upper ) );
+            if( t <= lower || t >= upper ) return {};
+            const auto partial = IntegrateSegmentLength( segment.start, segment.end, segment.tangent1, segment.tangent2, 0.0, t, error );
+            if( !partial ) return {};
+            if( std::abs( *partial - target ) <= 0.5 * tolerance ) return splineParameter2{ i, t };
+            if( *partial < target )
+                lower = t;
+            else
+                upper = t;
+        }
+        return {};
+    }
+    return {};
+}
+
 bool IsValid( const catmullRomSpline2& spline )
 {
     if( spline.points.size() < ( spline.isLoop ? 3u : 2u ) ) return false;

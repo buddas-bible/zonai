@@ -65,6 +65,10 @@ public:
     // 기존 누적 거리의 절대오차·실패 정책을 따르며 잘못된 입력은 nullopt.
     [[nodiscard]] std::optional<double> getDistance( std::size_t segmentIndex, float t, double tolerance ) const;
 
+    // distance in [0, 전체 길이]를 원본 구간 / t로 역산함. 내부 접합점은 앞 구간 t=1, 자동 순환 없음.
+    // 기존 거리 역조회와 같은 길이 오차·실패 정책. float t 정밀도 부족도 nullopt.
+    [[nodiscard]] std::optional<splineParameter2> getParameterByDistance( double distance, double tolerance ) const;
+
 private:
     std::vector<preparedSplineSegment2> segments_{};
     bool isLoop_ = false;
