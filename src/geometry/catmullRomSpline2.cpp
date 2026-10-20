@@ -297,6 +297,16 @@ std::optional<double> preparedCatmullRomSpline2::getLength( double tolerance ) c
     return length;
 }
 
+std::optional<double> preparedCatmullRomSpline2::getLength( std::size_t segmentIndex, float t0, float t1, double tolerance ) const
+{
+    if( segmentIndex >= segments_.size() || !std::isfinite( t0 ) || !std::isfinite( t1 ) || t0 < 0.0f || t1 > 1.0f || t0 > t1 || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
+    if( t0 == t1 ) return 0.0;
+    const auto& segment = segments_[segmentIndex];
+    const auto length = IntegrateSegmentLength( segment.start, segment.end, segment.tangent1, segment.tangent2, t0, t1, tolerance / 4.0 );
+    if( !length || !std::isfinite( *length ) || *length <= 0.0 || tolerance < 32.0 * std::numeric_limits<double>::epsilon() * *length ) return {};
+    return length;
+}
+
 std::optional<double> preparedCatmullRomSpline2::getDistance( std::size_t segmentIndex, float t, double tolerance ) const
 {
     if( segmentIndex >= segments_.size() || !std::isfinite( t ) || t < 0.0f || t > 1.0f || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
