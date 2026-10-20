@@ -741,10 +741,9 @@ std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, float maxErro
 namespace
 {
 
-std::vector<vec2> SampleAdaptiveInRange( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, float maxError, std::vector<splineParameter2>* parameters )
+template <typename SegmentAt, typename EvaluatePoint, typename PositionAt> std::vector<vec2> SampleAdaptiveInRange( std::size_t count, splineParameter2 from, splineParameter2 to, float maxError, std::vector<splineParameter2>* parameters, const SegmentAt& segmentAt, const EvaluatePoint& evaluatePoint, const PositionAt& positionAt )
 {
-    if( !IsValid( spline ) || !std::isfinite( maxError ) || maxError <= 0.0f ) return {};
-    const std::size_t count = GetSegmentCount( spline );
+    if( count == 0 || !std::isfinite( maxError ) || maxError <= 0.0f ) return {};
     const auto valid = [&]( splineParameter2 parameter )
     {
         return parameter.segmentIndex < count && std::isfinite( parameter.t ) && parameter.t >= 0.0f && parameter.t <= 1.0f;
@@ -752,7 +751,7 @@ std::vector<vec2> SampleAdaptiveInRange( const catmullRomSpline2& spline, spline
     if( !valid( from ) || !valid( to ) ) return {};
     const auto beginParameter = NormalizeParameter( from, count ), endParameter = NormalizeParameter( to, count );
     if( beginParameter.segmentIndex > endParameter.segmentIndex || ( beginParameter.segmentIndex == endParameter.segmentIndex && beginParameter.t > endParameter.t ) ) return {};
-    const auto first = GetPositionByParameter( spline, from.segmentIndex, from.t, maxError );
+    const auto first = positionAt( from.segmentIndex, from.t, maxError );
     if( !first ) return {};
     std::vector<vec2> samples{ *first };
     if( parameters ) parameters->push_back( from );
@@ -801,7 +800,7 @@ std::vector<vec2> SampleAdaptiveInRange( const catmullRomSpline2& spline, spline
         };
         const auto a = mix( curve[0], curve[1] ), b = mix( curve[1], curve[2] ), c = mix( curve[2], curve[3] );
         const auto d = mix( a, b ), e = mix( b, c ), center = mix( d, e );
-        const vec2 point = parameters ? EvaluateSegment( spline, segment, middle ) : vec2{ static_cast<float>( center.x ), static_cast<float>( center.y ) };
+        const vec2 point = parameters ? evaluatePoint( segment, middle ) : vec2{ static_cast<float>( center.x ), static_cast<float>( center.y ) };
         return self( self, { curve[0], a, d, center }, depth + 1, point, segment, begin, middle ) &&
             self( self, { center, e, c, curve[3] }, depth + 1, end, segment, middle, finish );
     };
@@ -819,11 +818,11 @@ std::vector<vec2> SampleAdaptiveInRange( const catmullRomSpline2& spline, spline
     {
         const double begin = i == from.segmentIndex ? from.t : 0.0, end = i == to.segmentIndex ? to.t : 1.0;
         if( begin == end ) continue;
-        const auto endpoint = end == 1.0 ? std::optional<vec2>{ GetPoint( spline, i + 1 ) } : GetPositionByParameter( spline, i, static_cast<float>( end ), maxError );
+        const auto& segment = segmentAt( i );
+        const auto endpoint = end == 1.0 ? std::optional<vec2>{ segment.end } : positionAt( i, static_cast<float>( end ), maxError );
         if( !endpoint ) return {};
-        vec2 tangent1{}, tangent2{};
-        GetTangents( spline, i, tangent1, tangent2 );
-        const vec2 a = spline.points[i], b = GetPoint( spline, i + 1 );
+        const vec2 tangent1 = segment.tangent1, tangent2 = segment.tangent2;
+        const vec2 a = segment.start, b = segment.end;
         std::array<bezierPoint2, 4> curve{
             bezierPoint2{ a.x, a.y },
             bezierPoint2{ a.x + static_cast<double>( tangent1.x ) / 3.0, a.y + static_cast<double>( tangent1.y ) / 3.0 },
@@ -832,9 +831,7 @@ std::vector<vec2> SampleAdaptiveInRange( const catmullRomSpline2& spline, spline
         };
         if( parameters )
         {
-            const vec2 delta = b - a;
-            const vec2 quadratic = 3.0f * delta - 2.0f * tangent1 - tangent2;
-            const vec2 cubic = tangent1 + tangent2 - 2.0f * delta;
+            const vec2 quadratic = segment.quadratic, cubic = segment.cubic;
             if( !IsFinite( tangent1 ) || !IsFinite( quadratic ) || !IsFinite( cubic ) ) return {};
             curve = { bezierPoint2{ a.x, a.y },
                 bezierPoint2{ a.x + static_cast<double>( tangent1.x ) / 3.0, a.y + static_cast<double>( tangent1.y ) / 3.0 },
@@ -853,11 +850,62 @@ std::vector<vec2> SampleAdaptiveInRange( const catmullRomSpline2& spline, spline
     return samples;
 }
 
+std::vector<vec2> SampleAdaptiveInRange( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, float maxError, std::vector<splineParameter2>* parameters )
+{
+    if( !IsValid( spline ) ) return {};
+    const auto segmentAt = [&]( std::size_t i )
+    {
+        preparedSplineSegment2 segment{};
+        segment.start = spline.points[i];
+        segment.end = GetPoint( spline, i + 1 );
+        GetTangents( spline, i, segment.tangent1, segment.tangent2 );
+        if( parameters )
+        {
+            const vec2 delta = segment.end - segment.start;
+            segment.quadratic = 3.0f * delta - 2.0f * segment.tangent1 - segment.tangent2;
+            segment.cubic = segment.tangent1 + segment.tangent2 - 2.0f * delta;
+        }
+        return segment;
+    };
+    const auto evaluatePoint = [&]( std::size_t i, float t )
+    {
+        return EvaluateSegment( spline, i, t );
+    };
+    const auto positionAt = [&]( std::size_t i, float t, float error )
+    {
+        return GetPositionByParameter( spline, i, t, error );
+    };
+    return SampleAdaptiveInRange( GetSegmentCount( spline ), from, to, maxError, parameters, segmentAt, evaluatePoint, positionAt );
+}
+
 } // namespace
 
 std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, float maxError )
 {
     return SampleAdaptiveInRange( spline, from, to, maxError, nullptr );
+}
+
+std::vector<splineParameter2> preparedCatmullRomSpline2::sampleAdaptiveParameters( splineParameter2 from, splineParameter2 to, float maxError ) const
+{
+    const auto segmentAt = [&]( std::size_t i ) -> const preparedSplineSegment2&
+    {
+        return segments_[i];
+    };
+    const auto evaluatePoint = [&]( std::size_t i, float t )
+    {
+        return evaluate( i, t );
+    };
+    const auto positionAt = [&]( std::size_t i, float t, float error ) -> std::optional<vec2>
+    {
+        const vec2 point = evaluate( i, t );
+        if( !IsFinite( point ) ) return {};
+        const auto& segment = segments_[i];
+        if( t > 0.0f && t < 1.0f && GetPositionError( point, segment.start, segment.end, segment.tangent1, segment.tangent2, t ) > 0.25 * error ) return {};
+        return point;
+    };
+    std::vector<splineParameter2> parameters;
+    if( SampleAdaptiveInRange( segments_.size(), from, to, maxError, &parameters, segmentAt, evaluatePoint, positionAt ).empty() ) return {};
+    return parameters;
 }
 
 std::vector<splineParameter2> SampleAdaptiveParameters( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, float maxError )
