@@ -51,6 +51,10 @@ public:
     // 전체 길이를 양수인 절대오차 목표로 적분함. 빈 스냅샷·잘못된 오차·정밀도/수렴 실패는 nullopt.
     [[nodiscard]] std::optional<double> getLength( double tolerance ) const;
 
+    // 한 구간의 0 <= t0 <= t1 <= 1을 직접 적분함. 같은 t는 0이며 0 접선도 허용함.
+    // 기존 부분 길이의 절대오차·실패 정책을 따르며 잘못된 입력은 nullopt.
+    [[nodiscard]] std::optional<double> getLength( std::size_t segmentIndex, float t0, float t1, double tolerance ) const;
+
     // 시작부터 구간별 t in [0, 1]까지의 거리. 닫힌 한 바퀴 끝은 전체 길이이며 자동 순환하지 않음.
     // 기존 누적 거리의 절대오차·실패 정책을 따르며 잘못된 입력은 nullopt.
     [[nodiscard]] std::optional<double> getDistance( std::size_t segmentIndex, float t, double tolerance ) const;
