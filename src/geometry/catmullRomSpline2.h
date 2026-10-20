@@ -78,6 +78,11 @@ public:
     [[nodiscard]] std::optional<splineSample2> evaluateByDistance( double distance, double tolerance ) const;
     [[nodiscard]] std::optional<splineSample2> evaluateByDistance( splineParameter2 from, splineParameter2 to, double distance, double tolerance ) const;
 
+    // 정방향 범위를 같은 곡선 길이로 나눈 원본 구간 / t를 subdivisions + 1개 반환함.
+    // 양수 길이의 양 끝은 from / to, 0 길이는 from 반복. 0 접선 허용, 자동 순환 없음.
+    // 기존 균등 거리 매개변수 샘플링의 오차·실패 정책을 따르며 실패 시 빈 배열.
+    [[nodiscard]] std::vector<splineParameter2> sampleByDistanceParameters( splineParameter2 from, splineParameter2 to, std::size_t subdivisions, double tolerance ) const;
+
 private:
     std::vector<preparedSplineSegment2> segments_{};
     bool isLoop_ = false;
