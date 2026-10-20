@@ -478,6 +478,31 @@ std::vector<splineParameter2> preparedCatmullRomSpline2::sampleByDistanceParamet
     return parameters;
 }
 
+std::vector<vec2> preparedCatmullRomSpline2::sampleByDistance( std::size_t subdivisions, double tolerance ) const
+{
+    const std::size_t count = segments_.size();
+    if( count == 0 ) return {};
+    return sampleByDistance( { 0, 0.0f }, { count - 1, 1.0f }, subdivisions, tolerance );
+}
+
+std::vector<vec2> preparedCatmullRomSpline2::sampleByDistance( splineParameter2 from, splineParameter2 to, std::size_t subdivisions, double tolerance ) const
+{
+    std::vector<vec2> samples{};
+    if( subdivisions == 0 || subdivisions >= samples.max_size() ) return {};
+    const auto parameters = sampleByDistanceParameters( from, to, subdivisions, tolerance );
+    if( parameters.empty() ) return {};
+    samples.reserve( parameters.size() );
+    for( const auto parameter : parameters )
+    {
+        const vec2 point = evaluate( parameter.segmentIndex, parameter.t );
+        if( !IsFinite( point ) ) return {};
+        const auto& segment = segments_[parameter.segmentIndex];
+        if( parameter.t > 0.0f && parameter.t < 1.0f && GetPositionError( point, segment.start, segment.end, segment.tangent1, segment.tangent2, parameter.t ) > 0.25 * tolerance ) return {};
+        samples.push_back( point );
+    }
+    return samples;
+}
+
 bool IsValid( const catmullRomSpline2& spline )
 {
     if( spline.points.size() < ( spline.isLoop ? 3u : 2u ) ) return false;
