@@ -6,10 +6,9 @@
 namespace zonai
 {
 
-// 편집 때 계수와 길이를 준비해 solver에서 전체 경로를 다시 검증하지 않음.
+// 구간 계수는 geometry가 소유하고 레일 고유의 누적 길이만 따로 보관함.
 struct splineRailSegment2
 {
-    vec2 start{}, end{}, tangent{}, quadratic{}, cubic{};
     double prefix = 0.0, length = 0.0;
 };
 
@@ -17,6 +16,7 @@ struct splineRailJointSim2
 {
     std::int32_t jointId = -1, bodyIdA = -1, bodyIdB = -1;
     std::vector<vec2> points{};
+    preparedCatmullRomSpline2 geometry{};
     std::vector<splineRailSegment2> segments{};
     double length = 0.0, referenceDistance = 0.0;
     vec2 localAnchorB{};

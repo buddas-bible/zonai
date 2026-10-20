@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <utility>
 #include "dynamics/constraintSoftness2.h"
 
 namespace zonai
@@ -12,19 +13,19 @@ namespace zonai
 namespace
 {
 
-vec2 pointAt( const splineRailSegment2& segment, double t )
+vec2 pointAt( const preparedSplineSegment2& segment, double t )
 {
     if( t == 0.0 ) return segment.start;
     if( t == 1.0 ) return segment.end;
-    return { static_cast<float>( segment.start.x + t * ( segment.tangent.x + t * ( segment.quadratic.x + t * segment.cubic.x ) ) ), static_cast<float>( segment.start.y + t * ( segment.tangent.y + t * ( segment.quadratic.y + t * segment.cubic.y ) ) ) };
+    return { static_cast<float>( segment.start.x + t * ( segment.tangent1.x + t * ( segment.quadratic.x + t * segment.cubic.x ) ) ), static_cast<float>( segment.start.y + t * ( segment.tangent1.y + t * ( segment.quadratic.y + t * segment.cubic.y ) ) ) };
 }
 
-double speedAt( const splineRailSegment2& segment, double t )
+double speedAt( const preparedSplineSegment2& segment, double t )
 {
-    return std::hypot( segment.tangent.x + t * ( 2.0 * segment.quadratic.x + 3.0 * t * segment.cubic.x ), segment.tangent.y + t * ( 2.0 * segment.quadratic.y + 3.0 * t * segment.cubic.y ) );
+    return std::hypot( segment.tangent1.x + t * ( 2.0 * segment.quadratic.x + 3.0 * t * segment.cubic.x ), segment.tangent1.y + t * ( 2.0 * segment.quadratic.y + 3.0 * t * segment.cubic.y ) );
 }
 
-double arcLength( const splineRailSegment2& segment, double end )
+double arcLength( const preparedSplineSegment2& segment, double end )
 {
     const auto integrate = [&]( auto&& self, double a, double b, double fa, double fm, double fb, double estimate, double error, int depth ) -> double
     {
@@ -41,9 +42,9 @@ double arcLength( const splineRailSegment2& segment, double end )
     return integrate( integrate, 0.0, end, fa, fm, fb, end * ( fa + 4.0 * fm + fb ) / 6.0, 1.0e-8 * std::max( { fa, fm, fb } ), 0 );
 }
 
-bool regular( const splineRailSegment2& segment )
+bool regular( const preparedSplineSegment2& segment )
 {
-    const double ax = segment.tangent.x, ay = segment.tangent.y, bx = 2.0 * segment.quadratic.x, by = 2.0 * segment.quadratic.y, cx = 3.0 * segment.cubic.x, cy = 3.0 * segment.cubic.y;
+    const double ax = segment.tangent1.x, ay = segment.tangent1.y, bx = 2.0 * segment.quadratic.x, by = 2.0 * segment.quadratic.y, cx = 3.0 * segment.cubic.x, cy = 3.0 * segment.cubic.y;
     const double c0 = ax * bx + ay * by, c1 = bx * bx + by * by + 2.0 * ( ax * cx + ay * cy ), c2 = 3.0 * ( bx * cx + by * cy ), c3 = 2.0 * ( cx * cx + cy * cy );
     const auto polynomial = [&]( double t )
     {
@@ -92,20 +93,20 @@ bool regular( const splineRailSegment2& segment )
 }
 
 // 이전 구간에서 연결된 투영을 추적해 교차점의 먼 분기로 바뀌지 않게 함.
-double project( const splineRailSegment2& segment, vec2 point, double seed )
+double project( const preparedSplineSegment2& segment, vec2 point, double seed )
 {
     const auto squaredDistance = [&]( double t )
     {
-        const double x = segment.start.x + t * ( segment.tangent.x + t * ( segment.quadratic.x + t * segment.cubic.x ) ) - point.x;
-        const double y = segment.start.y + t * ( segment.tangent.y + t * ( segment.quadratic.y + t * segment.cubic.y ) ) - point.y;
+        const double x = segment.start.x + t * ( segment.tangent1.x + t * ( segment.quadratic.x + t * segment.cubic.x ) ) - point.x;
+        const double y = segment.start.y + t * ( segment.tangent1.y + t * ( segment.quadratic.y + t * segment.cubic.y ) ) - point.y;
         return x * x + y * y;
     };
     double t = std::clamp( seed, 0.0, 1.0 );
     for( int iteration = 0; iteration < 64; ++iteration )
     {
-        const double x = segment.start.x + t * ( segment.tangent.x + t * ( segment.quadratic.x + t * segment.cubic.x ) ) - point.x;
-        const double y = segment.start.y + t * ( segment.tangent.y + t * ( segment.quadratic.y + t * segment.cubic.y ) ) - point.y;
-        const double dx = segment.tangent.x + t * ( 2.0 * segment.quadratic.x + 3.0 * t * segment.cubic.x ), dy = segment.tangent.y + t * ( 2.0 * segment.quadratic.y + 3.0 * t * segment.cubic.y );
+        const double x = segment.start.x + t * ( segment.tangent1.x + t * ( segment.quadratic.x + t * segment.cubic.x ) ) - point.x;
+        const double y = segment.start.y + t * ( segment.tangent1.y + t * ( segment.quadratic.y + t * segment.cubic.y ) ) - point.y;
+        const double dx = segment.tangent1.x + t * ( 2.0 * segment.quadratic.x + 3.0 * t * segment.cubic.x ), dy = segment.tangent1.y + t * ( 2.0 * segment.quadratic.y + 3.0 * t * segment.cubic.y );
         const double gradient = x * dx + y * dy;
         const double speedSquared = dx * dx + dy * dy;
         const double hessian = speedSquared + x * ( 2.0 * segment.quadratic.x + 6.0 * t * segment.cubic.x ) + y * ( 2.0 * segment.quadratic.y + 6.0 * t * segment.cubic.y );
@@ -185,8 +186,8 @@ frameRows2 getRows( splineRailJointConstraint2& c, const bodyState& a, const bod
     if( c.trackingValid && seed.segmentIndex < c.joint->segments.size() )
     {
         // 속도 적분으로 이동한 anchor를 이전 접선에 투영해 다음 parameter를 예측함.
-        const auto& segment = c.joint->segments[seed.segmentIndex];
-        const vec2 derivative = segment.tangent + seed.t * ( 2.0f * segment.quadratic + 3.0f * seed.t * segment.cubic );
+        const auto& segment = c.joint->geometry.getSegments()[seed.segmentIndex];
+        const vec2 derivative = segment.tangent1 + seed.t * ( 2.0f * segment.quadratic + 3.0f * seed.t * segment.cubic );
         const double squared = static_cast<double>( derivative.x ) * derivative.x + static_cast<double>( derivative.y ) * derivative.y;
         const vec2 displacement = point - c.trackedPoint;
         if( squared > 0.0 ) seed.t = static_cast<float>( std::clamp( seed.t + ( static_cast<double>( displacement.x ) * derivative.x + static_cast<double>( displacement.y ) * derivative.y ) / squared, 0.0, 1.0 ) );
@@ -218,28 +219,25 @@ frameRows2 getRows( splineRailJointConstraint2& c, const bodyState& a, const bod
 
 bool setSplineRailGeometry( splineRailJointSim2& joint, std::span<const vec2> points )
 {
-    const catmullRomSpline2 spline{ points };
-    if( !IsValid( spline ) ) return false;
+    auto geometry = prepareSpline( { points } );
+    if( !geometry ) return false;
+
     std::vector<splineRailSegment2> segments;
     double length = 0.0;
-    for( std::size_t i = 0; i + 1 < points.size(); ++i )
+    for( const auto& curve : geometry->getSegments() )
     {
+        if( !regular( curve ) ) return false;
         splineRailSegment2 segment{};
-        segment.start = points[i];
-        segment.end = points[i + 1];
-        segment.tangent = Derivative( spline, i, 0.0f );
-        const vec2 endTangent = Derivative( spline, i, 1.0f ), delta = segment.end - segment.start;
-        segment.quadratic = 3.0f * delta - 2.0f * segment.tangent - endTangent;
-        segment.cubic = segment.tangent + endTangent - 2.0f * delta;
-        if( !IsFinite( segment.tangent ) || !IsFinite( segment.quadratic ) || !IsFinite( segment.cubic ) || !regular( segment ) ) return false;
         segment.prefix = length;
-        segment.length = arcLength( segment, 1.0 );
+        segment.length = arcLength( curve, 1.0 );
         if( !std::isfinite( segment.length ) || segment.length <= 0.0 ) return false;
         length += segment.length;
         segments.push_back( segment );
     }
     if( !std::isfinite( length ) || ( joint.enableLimit && ( joint.upperTranslation < -joint.referenceDistance || joint.lowerTranslation > length - joint.referenceDistance ) ) ) return false;
+
     joint.points.assign( points.begin(), points.end() );
+    joint.geometry = std::move( *geometry );
     joint.segments = std::move( segments );
     joint.length = length;
     joint.impulse = {};
@@ -253,20 +251,21 @@ bool setSplineRailGeometry( splineRailJointSim2& joint, std::span<const vec2> po
 splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const transform2& bodyA, const transform2& bodyB, splineParameter2 seed, bool tracked )
 {
     splineRailFrame2 frame{};
-    if( joint.segments.empty() ) return frame;
+    const auto curves = joint.geometry.getSegments();
+    if( curves.empty() ) return frame;
     frame.anchorB = TransformPoint( bodyB, joint.localAnchorB );
     const vec2 point = InverseTransformPoint( bodyA, frame.anchorB );
     if( !IsFinite( point ) ) return frame;
-    std::size_t index = std::min( seed.segmentIndex, joint.segments.size() - 1 );
-    double t = project( joint.segments[index], point, seed.t );
+    std::size_t index = std::min( seed.segmentIndex, curves.size() - 1 );
+    double t = project( curves[index], point, seed.t );
     if( !tracked )
     {
         double best = std::numeric_limits<double>::infinity();
-        for( std::size_t i = 0; i < joint.segments.size(); ++i )
+        for( std::size_t i = 0; i < curves.size(); ++i )
             for( int sample = 0; sample <= 8; ++sample )
             {
-                const double candidate = project( joint.segments[i], point, sample / 8.0 );
-                const vec2 delta = pointAt( joint.segments[i], candidate ) - point;
+                const double candidate = project( curves[i], point, sample / 8.0 );
+                const vec2 delta = pointAt( curves[i], candidate ) - point;
                 const double squared = static_cast<double>( delta.x ) * delta.x + static_cast<double>( delta.y ) * delta.y;
                 if( squared < best )
                 {
@@ -278,26 +277,26 @@ splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const tra
     }
     else
     {
-        for( std::size_t traversed = 0; traversed < joint.segments.size(); ++traversed )
+        for( std::size_t traversed = 0; traversed < curves.size(); ++traversed )
         {
             if( t <= 1.0e-9 && index > 0 )
             {
-                const auto& segment = joint.segments[index];
-                if( Dot( point - segment.start, segment.tangent ) < 0.0f )
+                const auto& segment = curves[index];
+                if( Dot( point - segment.start, segment.tangent1 ) < 0.0f )
                 {
                     --index;
-                    t = project( joint.segments[index], point, 1.0 );
+                    t = project( curves[index], point, 1.0 );
                     continue;
                 }
             }
-            if( t >= 1.0 - 1.0e-9 && index + 1 < joint.segments.size() )
+            if( t >= 1.0 - 1.0e-9 && index + 1 < curves.size() )
             {
-                const auto& segment = joint.segments[index];
-                const vec2 derivative = segment.tangent + 2.0f * segment.quadratic + 3.0f * segment.cubic;
+                const auto& segment = curves[index];
+                const vec2 derivative = segment.tangent1 + 2.0f * segment.quadratic + 3.0f * segment.cubic;
                 if( Dot( point - segment.end, derivative ) > 0.0f )
                 {
                     ++index;
-                    t = project( joint.segments[index], point, 0.0 );
+                    t = project( curves[index], point, 0.0 );
                     continue;
                 }
             }
@@ -305,8 +304,8 @@ splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const tra
         }
     }
     if( !std::isfinite( t ) ) return frame;
-    const auto& segment = joint.segments[index];
-    const double dx = segment.tangent.x + t * ( 2.0 * segment.quadratic.x + 3.0 * t * segment.cubic.x ), dy = segment.tangent.y + t * ( 2.0 * segment.quadratic.y + 3.0 * t * segment.cubic.y );
+    const auto& segment = curves[index];
+    const double dx = segment.tangent1.x + t * ( 2.0 * segment.quadratic.x + 3.0 * t * segment.cubic.x ), dy = segment.tangent1.y + t * ( 2.0 * segment.quadratic.y + 3.0 * t * segment.cubic.y );
     const double speed = std::hypot( dx, dy );
     if( !std::isfinite( speed ) || speed <= 0.0 ) return frame;
     frame.localPoint = pointAt( segment, t );
@@ -317,13 +316,14 @@ splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const tra
     frame.curvature = ( dx * ( 2.0 * segment.quadratic.y + 6.0 * t * segment.cubic.y ) - dy * ( 2.0 * segment.quadratic.x + 6.0 * t * segment.cubic.x ) ) / ( speed * speed * speed );
     const vec2 separation = frame.anchorB - frame.anchorA;
     frame.lateralError = Dot( frame.normal, separation );
-    const bool endpoint = ( index == 0 && t == 0.0 ) || ( index + 1 == joint.segments.size() && t == 1.0 );
+    const bool endpoint = ( index == 0 && t == 0.0 ) || ( index + 1 == curves.size() && t == 1.0 );
     // 끝점 밖에서는 고정된 끝점 접선을 사용하므로 접선각의 거리 미분도 0임.
-    if( endpoint && ( ( index == 0 && Dot( frame.tangent, separation ) < 0.0f ) || ( index + 1 == joint.segments.size() && Dot( frame.tangent, separation ) > 0.0f ) ) ) frame.curvature = 0.0;
+    if( endpoint && ( ( index == 0 && Dot( frame.tangent, separation ) < 0.0f ) || ( index + 1 == curves.size() && Dot( frame.tangent, separation ) > 0.0f ) ) ) frame.curvature = 0.0;
     const double denominator = endpoint ? 1.0 : 1.0 - frame.curvature * frame.lateralError;
     if( !std::isfinite( denominator ) || denominator <= 0.05 ) return frame;
     frame.arcScale = static_cast<float>( 1.0 / denominator );
-    frame.distance = segment.prefix + ( t == 1.0 ? segment.length : arcLength( segment, t ) );
+    const auto& arc = joint.segments[index];
+    frame.distance = arc.prefix + ( t == 1.0 ? arc.length : arcLength( segment, t ) );
     if( endpoint ) frame.distance += Dot( frame.tangent, separation );
     frame.translation = frame.distance - joint.referenceDistance;
     frame.parameter = { index, static_cast<float>( t ) };
