@@ -106,6 +106,10 @@ public:
     // 내부 접합점은 한 번, 닫힌 끝은 시작점 반복. 빈 스냅샷·0 분할·불가능한 점 수는 빈 배열.
     [[nodiscard]] std::vector<vec2> sample( std::size_t subdivisions ) const;
 
+    // 부분 경로 sampleParameters를 순서대로 평가함. 같은 경로 위치는 점 하나, 중복 위치도 유지.
+    // 기존 sample의 수치 동작을 따르며 입력·범위·크기 실패는 sampleParameters와 같은 빈 배열.
+    [[nodiscard]] std::vector<vec2> sample( splineParameter2 from, splineParameter2 to, std::size_t subdivisions ) const;
+
     // sample과 같은 점 개수·순서·float t의 원본 구간 / t. 접합점은 앞 구간 t=1.
     // 시작은 {0, 0}, 닫힌 끝도 마지막 구간 t=1. 빈 스냅샷·0 분할·불가능한 점 수는 빈 배열.
     [[nodiscard]] std::vector<splineParameter2> sampleParameters( std::size_t subdivisions ) const;
