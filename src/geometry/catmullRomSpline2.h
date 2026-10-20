@@ -106,6 +106,11 @@ public:
     // 잘못된 입력·정밀도 부족·탐색 한도 초과는 nullopt.
     [[nodiscard]] std::optional<splineClosestPoint2> closestPoint( const vec2& point, double tolerance ) const;
 
+    // 지정 구간 또는 정방향 범위의 양 끝을 포함해 탐색함. 같은 위치는 입력 from을 조회함.
+    // 기존 범위 ClosestPoint의 수치·실패 정책. 0 접선 허용, 역순·자동 순환 거부.
+    [[nodiscard]] std::optional<splineClosestPoint2> closestPoint( std::size_t segmentIndex, const vec2& point, double tolerance ) const;
+    [[nodiscard]] std::optional<splineClosestPoint2> closestPoint( splineParameter2 from, splineParameter2 to, const vec2& point, double tolerance ) const;
+
 private:
     std::vector<preparedSplineSegment2> segments_{};
     bool isLoop_ = false;
