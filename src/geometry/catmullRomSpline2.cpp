@@ -728,6 +728,16 @@ std::vector<vec2> preparedCatmullRomSpline2::sample( std::size_t subdivisions ) 
     return samples;
 }
 
+std::vector<vec2> preparedCatmullRomSpline2::sample( splineParameter2 from, splineParameter2 to, std::size_t subdivisions ) const
+{
+    const auto parameters = sampleParameters( from, to, subdivisions );
+    std::vector<vec2> samples{};
+    samples.reserve( parameters.size() );
+    for( const auto parameter : parameters )
+        samples.push_back( evaluate( parameter.segmentIndex, parameter.t ) );
+    return samples;
+}
+
 std::vector<splineParameter2> preparedCatmullRomSpline2::sampleParameters( std::size_t subdivisions ) const
 {
     if( segments_.empty() || subdivisions == 0 ) return {};

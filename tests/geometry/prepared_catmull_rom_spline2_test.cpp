@@ -323,6 +323,59 @@ void rangeFixedParameters()
     check( prepared->sampleParameters( {}, { 2, 1.0f }, tooMany ).empty() && prepared->sampleParameters( { 1, 0.25f }, { 1, 0.75f }, std::numeric_limits<std::size_t>::max() ).empty(), "fixed range parameters reject impossible sizes before multiplication or allocation" );
 }
 
+void rangeFixedSamples()
+{
+    const vec2 line[] = { { 0, 0 }, { 1, 0 }, { 2, 0 }, { 3, 0 } };
+    const auto prepared = prepareSpline( { line } );
+    check( equal( prepared->sample( { 0, 0.25f }, { 2, 0.75f }, 2 ), std::vector<vec2>{ { 0.25f, 0 }, { 0.625f, 0 }, { 1, 0 }, { 1.5f, 0 }, { 2, 0 }, { 2.375f, 0 }, { 2.75f, 0 } } ), "range fixed samples preserve clipped straight positions and joins" );
+    check( equal( prepared->sample( { 0, 1.0f }, { 2, 0.0f }, 2 ), std::vector<vec2>{ { 1, 0 }, { 1.5f, 0 }, { 2, 0 } } ), "range fixed samples skip empty aliased endpoint intervals" );
+    check( equal( prepared->sample( { 1, 0.25f }, { 1, 0.75f }, 2 ), std::vector<vec2>{ { 1.25f, 0 }, { 1.5f, 0 }, { 1.75f, 0 } } ), "single segment fixed samples preserve the selected endpoints" );
+    const vec2 controls[] = { { -3, 1 }, { -1.7f, -0.1f }, { 0.2f, 4.3f }, { 2.9f, -1.2f }, { 5, 2 } };
+    for( float scale : { 1.0e-10f, 1.0f, 1.0e10f } )
+        for( bool loop : { false, true } )
+        {
+            std::vector<vec2> source;
+            for( vec2 point : controls )
+                source.push_back( scale * point );
+            const auto snapshot = prepareSpline( { source, loop } );
+            const std::size_t last = snapshot->getSegmentCount() - 1;
+            for( std::size_t subdivisions : { 1u, 2u, 3u, 7u, 16u } )
+            {
+                check( equal( snapshot->sample( {}, { last, 1.0f }, subdivisions ), snapshot->sample( subdivisions ) ) && equal( snapshot->sample( {}, { last, 1.0f }, subdivisions ), Sample( { source, loop }, subdivisions ) ), "full fixed range preserves exact existing sample and legacy Sample results" );
+                const splineParameter2 from{ 1, 0.1234567f }, to{ last, 0.8765432f };
+                const auto parameters = snapshot->sampleParameters( from, to, subdivisions );
+                const auto samples = snapshot->sample( from, to, subdivisions );
+                check( samples.size() == parameters.size() && !samples.empty(), "partial fixed sample count matches range parameters" );
+                for( std::size_t i = 0; i < samples.size(); ++i )
+                    check( equal( samples[i], Evaluate( { source, loop }, parameters[i].segmentIndex, parameters[i].t ) ), "partial fixed samples preserve parameter order and legacy float evaluation" );
+                check( equal( samples.front(), snapshot->evaluate( from.segmentIndex, from.t ) ) && equal( samples.back(), snapshot->evaluate( to.segmentIndex, to.t ) ), "partial fixed samples retain exact evaluated endpoints" );
+            }
+            const auto seam = snapshot->sample( { last, 0.25f }, { last, 1.0f }, 3 );
+            check( seam.size() == 4 && equal( seam.back(), loop ? source.front() : source.back() ) && !equal( seam.front(), seam.back() ), "partial fixed samples end at the selected seam without forced closure" );
+        }
+    const vec2 reversal[] = { { 0, 0 }, { 1, 0 }, { 0, 0 } };
+    const auto cusp = prepareSpline( { reversal } );
+    check( equal( cusp->sample( { 0, 0.5f }, { 1, 0.5f }, 1 ), std::vector<vec2>{ { 0.625f, 0 }, { 1, 0 }, { 0.625f, 0 } } ), "partial fixed samples retain a returning path with zero tangent join" );
+    for( splineParameter2 from : { splineParameter2{ 0, 1.0f }, { 1, 0.0f } } )
+        check( equal( cusp->sample( from, { 1 - from.segmentIndex, 1.0f - from.t }, 3 ), std::vector<vec2>{ { 1, 0 } } ), "equal join aliases return one position without requiring a nonzero tangent" );
+    check( equal( prepared->sample( { 1, 0.37f }, { 1, 0.37f }, std::numeric_limits<std::size_t>::max() ), std::vector<vec2>{ prepared->evaluate( 1, 0.37f ) } ), "same path location returns one position even for huge positive subdivision counts" );
+    const vec2 coarse[] = { { 1.0e8f, 0 }, { 1.0e8f + 8.0f, 0 } };
+    const auto rounded = prepareSpline( { coarse } )->sample( { 0, 0.1f }, { 0, 0.2f }, 3 );
+    check( equal( rounded, std::vector<vec2>{ coarse[0], coarse[0], coarse[0], coarse[0] } ), "partial fixed samples retain rounded duplicate positions without precision rejection" );
+    const float neighbor = std::nextafter( 1.0f, 0.0f );
+    const auto narrow = prepared->sample( { 0, neighbor }, { 0, 1.0f }, 4 );
+    check( narrow.size() == 5 && equal( narrow.front(), { neighbor, 0 } ) && equal( narrow.back(), { 1, 0 } ), "partial fixed positions retain all samples in a one-ulp interval" );
+    const preparedCatmullRomSpline2 empty;
+    check( empty.sample( {}, {}, 2 ).empty(), "empty snapshot rejects partial fixed positions" );
+    const float nan = std::numeric_limits<float>::quiet_NaN(), infinity = std::numeric_limits<float>::infinity();
+    for( splineParameter2 invalid : { splineParameter2{ 3, 0.0f }, { std::numeric_limits<std::size_t>::max(), 1.0f }, { 0, -0.1f }, { 0, 1.1f }, { 0, nan }, { 0, infinity }, { 0, -infinity } } )
+        check( prepared->sample( invalid, { 2, 1.0f }, 2 ).empty() && prepared->sample( {}, invalid, 2 ).empty() && prepared->sample( invalid, invalid, 2 ).empty(), "partial fixed positions reject invalid endpoints before evaluation" );
+    check( prepared->sample( { 2, 1.0f }, {}, 2 ).empty() && prepared->sample( { 1, 0.75f }, { 1, 0.25f }, 2 ).empty() && prepareSpline( { controls, true } )->sample( { 4, 0.5f }, {}, 2 ).empty(), "partial fixed positions reject reverse ranges and implicit closed wrapping" );
+    check( prepared->sample( {}, {}, 0 ).empty() && prepared->sample( {}, { 2, 1.0f }, 0 ).empty(), "partial fixed positions reject zero subdivisions including equal ranges" );
+    const std::size_t tooMany = std::vector<splineParameter2>{}.max_size() / 3 + 1;
+    check( prepared->sample( {}, { 2, 1.0f }, tooMany ).empty() && prepared->sample( { 1, 0.25f }, { 1, 0.75f }, std::numeric_limits<std::size_t>::max() ).empty(), "partial fixed positions preserve parameter output-size failure before allocation" );
+}
+
 void compare( const catmullRomSpline2& spline )
 {
     const auto prepared = prepareSpline( spline );
@@ -485,6 +538,7 @@ void compare( const catmullRomSpline2& spline )
 
 int main()
 {
+    rangeFixedSamples();
     rangeFixedParameters();
     fixedParameters();
     fixedSamples();
@@ -663,13 +717,15 @@ int main()
     std::optional<splineParameter2> expectedParameter, expectedRangeParameter;
     std::optional<splineSample2> expectedSample, expectedRangeSample;
     std::vector<splineParameter2> expectedParameters, expectedAdaptiveParameters, expectedFixedParameters, expectedRangeFixedParameters;
-    std::vector<vec2> expectedPoints, expectedRangePoints, expectedAdaptivePoints, expectedAdaptiveRangePoints, expectedFixedPoints;
+    std::vector<vec2> expectedPoints, expectedRangePoints, expectedAdaptivePoints, expectedAdaptiveRangePoints, expectedFixedPoints, expectedRangeFixedPoints;
     std::optional<double> expectedLength, expectedDistance, expectedPartialLength, expectedRangeLength;
     {
         std::vector<vec2> source{ std::begin( curve ), std::end( curve ) };
         owned = prepareSpline( { source, true } );
         expectedPoints = SampleByDistance( { source, true }, 3, 1.0e-4 );
         expectedRangePoints = SampleByDistance( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 );
+        for( const auto parameter : owned->sampleParameters( { 1, 0.25f }, { 4, 0.75f }, 7 ) )
+            expectedRangeFixedPoints.push_back( Evaluate( { source, true }, parameter.segmentIndex, parameter.t ) );
         expectedRangeFixedParameters = owned->sampleParameters( { 1, 0.25f }, { 4, 0.75f }, 7 );
         expectedFixedParameters = owned->sampleParameters( 7 );
         expectedFixedPoints = Sample( { source, true }, 7 );
@@ -717,9 +773,11 @@ int main()
     check( !expectedFixedPoints.empty() && equal( owned->sample( 7 ), expectedFixedPoints ), "fixed samples survive source mutation reallocation and destruction" );
     check( expectedFixedParameters.size() == 36 && equal( owned->sampleParameters( 7 ), expectedFixedParameters ), "fixed parameters survive source mutation reallocation and destruction" );
     check( expectedRangeFixedParameters.size() == 29 && equal( owned->sampleParameters( { 1, 0.25f }, { 4, 0.75f }, 7 ), expectedRangeFixedParameters ), "range fixed parameters survive source mutation reallocation and destruction" );
+    check( expectedRangeFixedPoints.size() == 29 && equal( owned->sample( { 1, 0.25f }, { 4, 0.75f }, 7 ), expectedRangeFixedPoints ), "partial fixed positions survive source mutation reallocation and destruction" );
     auto copied = *owned;
     auto moved = std::move( copied );
     owned.reset();
+    check( equal( moved.sample( { 1, 0.25f }, { 4, 0.75f }, 7 ), expectedRangeFixedPoints ), "partial fixed positions survive snapshot copy move and original destruction" );
     check( equal( moved.sampleParameters( { 1, 0.25f }, { 4, 0.75f }, 7 ), expectedRangeFixedParameters ), "range fixed parameters survive snapshot copy move and original destruction" );
     check( equal( moved.sampleParameters( 7 ), expectedFixedParameters ), "fixed parameters survive snapshot copy move and original destruction" );
     check( equal( moved.sample( 7 ), expectedFixedPoints ), "fixed samples survive snapshot copy move and original destruction" );
