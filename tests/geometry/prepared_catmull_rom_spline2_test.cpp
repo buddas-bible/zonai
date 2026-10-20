@@ -238,6 +238,47 @@ void fixedSamples()
         check( preparedLine->sample( subdivisions ).empty() && prepareSpline( { coarse } )->sample( subdivisions ).empty(), "fixed samples reject zero and impossible subdivision counts for single and multiple segments" );
 }
 
+void fixedParameters()
+{
+    const vec2 line[] = { { 0, 0 }, { 2, 0 }, { 4, 0 } };
+    const auto preparedLine = prepareSpline( { line } );
+    check( equal( preparedLine->sampleParameters( 3 ), std::vector<splineParameter2>{ { 0, 0 }, { 0, 0.33333334f }, { 0, 0.6666667f }, { 0, 1 }, { 1, 0.33333334f }, { 1, 0.6666667f }, { 1, 1 } } ), "fixed parameter samples preserve non-dyadic t values and preceding join indices" );
+    check( equal( preparedLine->sampleParameters( 1 ), std::vector<splineParameter2>{ { 0, 0 }, { 0, 1 }, { 1, 1 } } ), "one subdivision preserves the starting representation and segment endpoints" );
+    const vec2 controls[] = { { -3, 1 }, { -1.7f, -0.1f }, { 0.2f, 4.3f }, { 2.9f, -1.2f }, { 5, 2 } };
+    for( float scale : { 1.0e-10f, 1.0f, 1.0e10f } )
+        for( bool loop : { false, true } )
+        {
+            std::vector<vec2> source;
+            for( vec2 point : controls )
+                source.push_back( scale * point );
+            const auto prepared = prepareSpline( { source, loop } );
+            const std::size_t count = prepared->getSegmentCount();
+            for( std::size_t subdivisions : { 1u, 2u, 3u, 7u, 16u } )
+            {
+                const auto parameters = prepared->sampleParameters( subdivisions );
+                const auto samples = prepared->sample( subdivisions );
+                check( parameters.size() == count * subdivisions + 1 && parameters.size() == samples.size(), "fixed parameter samples match the position sample count" );
+                check( parameters.front().segmentIndex == 0 && parameters.front().t == 0.0f && parameters.back().segmentIndex == count - 1 && parameters.back().t == 1.0f, "fixed parameter samples preserve open and closed endpoint representations" );
+                for( std::size_t i = 0; i < parameters.size(); ++i )
+                    check( equal( prepared->evaluate( parameters[i].segmentIndex, parameters[i].t ), samples[i] ), "evaluated fixed parameters exactly match sample position order and rounding" );
+                for( std::size_t i = 1; i <= count; ++i )
+                    check( parameters[i * subdivisions].segmentIndex == i - 1 && parameters[i * subdivisions].t == 1.0f, "fixed parameter joins retain the preceding segment without seam normalization" );
+            }
+            const std::size_t tooMany = std::vector<splineParameter2>{}.max_size() / count + 1;
+            check( prepared->sampleParameters( tooMany ).empty(), "fixed parameters reject output size overflow before allocation or multiplication" );
+        }
+    const vec2 reversal[] = { { 0, 0 }, { 1, 0 }, { 0, 0 } };
+    check( equal( prepareSpline( { reversal } )->sampleParameters( 2 ), std::vector<splineParameter2>{ { 0, 0 }, { 0, 0.5f }, { 0, 1 }, { 1, 0.5f }, { 1, 1 } } ), "fixed parameters retain returning paths and allow zero tangent joins" );
+    const vec2 coarse[] = { { 1.0e8f, 0 }, { 1.0e8f + 8.0f, 0 } };
+    const auto coarseSnapshot = prepareSpline( { coarse } );
+    const auto coarseParameters = coarseSnapshot->sampleParameters( 16 );
+    check( coarseParameters.size() == 17 && coarseParameters[1].t == 0.0625f && equal( coarseSnapshot->evaluate( 0, coarseParameters[0].t ), coarseSnapshot->evaluate( 0, coarseParameters[1].t ) ), "fixed parameters preserve distinct t values even when float positions coincide" );
+    const preparedCatmullRomSpline2 empty;
+    check( empty.sampleParameters( 0 ).empty() && empty.sampleParameters( 3 ).empty(), "empty snapshots have no fixed parameter samples" );
+    for( std::size_t subdivisions : { std::size_t{ 0 }, std::vector<splineParameter2>{}.max_size(), std::numeric_limits<std::size_t>::max() } )
+        check( preparedLine->sampleParameters( subdivisions ).empty() && coarseSnapshot->sampleParameters( subdivisions ).empty(), "fixed parameters reject zero and impossible subdivision counts for single and multiple segments" );
+}
+
 void compare( const catmullRomSpline2& spline )
 {
     const auto prepared = prepareSpline( spline );
@@ -400,6 +441,7 @@ void compare( const catmullRomSpline2& spline )
 
 int main()
 {
+    fixedParameters();
     fixedSamples();
     adaptivePositions();
     adaptiveParameters();
@@ -575,7 +617,7 @@ int main()
     std::optional<aabb2> expectedBounds, expectedSegmentBounds, expectedRangeBounds;
     std::optional<splineParameter2> expectedParameter, expectedRangeParameter;
     std::optional<splineSample2> expectedSample, expectedRangeSample;
-    std::vector<splineParameter2> expectedParameters, expectedAdaptiveParameters;
+    std::vector<splineParameter2> expectedParameters, expectedAdaptiveParameters, expectedFixedParameters;
     std::vector<vec2> expectedPoints, expectedRangePoints, expectedAdaptivePoints, expectedAdaptiveRangePoints, expectedFixedPoints;
     std::optional<double> expectedLength, expectedDistance, expectedPartialLength, expectedRangeLength;
     {
@@ -583,6 +625,7 @@ int main()
         owned = prepareSpline( { source, true } );
         expectedPoints = SampleByDistance( { source, true }, 3, 1.0e-4 );
         expectedRangePoints = SampleByDistance( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 );
+        expectedFixedParameters = owned->sampleParameters( 7 );
         expectedFixedPoints = Sample( { source, true }, 7 );
         expectedAdaptivePoints = SampleAdaptive( { source, true }, 0.01f );
         expectedAdaptiveRangePoints = SampleAdaptive( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 0.01f );
@@ -626,9 +669,11 @@ int main()
     check( !expectedAdaptiveParameters.empty() && equal( owned->sampleAdaptiveParameters( { 1, 0.25f }, { 4, 0.75f }, 0.01f ), expectedAdaptiveParameters ), "adaptive parameters survive original source destruction" );
     check( !expectedAdaptivePoints.empty() && !expectedAdaptiveRangePoints.empty() && equal( owned->sampleAdaptive( 0.01f ), expectedAdaptivePoints ) && equal( owned->sampleAdaptive( { 1, 0.25f }, { 4, 0.75f }, 0.01f ), expectedAdaptiveRangePoints ), "adaptive positions survive source mutation reallocation and destruction" );
     check( !expectedFixedPoints.empty() && equal( owned->sample( 7 ), expectedFixedPoints ), "fixed samples survive source mutation reallocation and destruction" );
+    check( expectedFixedParameters.size() == 36 && equal( owned->sampleParameters( 7 ), expectedFixedParameters ), "fixed parameters survive source mutation reallocation and destruction" );
     auto copied = *owned;
     auto moved = std::move( copied );
     owned.reset();
+    check( equal( moved.sampleParameters( 7 ), expectedFixedParameters ), "fixed parameters survive snapshot copy move and original destruction" );
     check( equal( moved.sample( 7 ), expectedFixedPoints ), "fixed samples survive snapshot copy move and original destruction" );
     check( equal( moved.sampleAdaptive( 0.01f ), expectedAdaptivePoints ) && equal( moved.sampleAdaptive( { 1, 0.25f }, { 4, 0.75f }, 0.01f ), expectedAdaptiveRangePoints ), "adaptive positions survive snapshot copy move and original destruction" );
     check( equal( moved.sampleAdaptiveParameters( { 1, 0.25f }, { 4, 0.75f }, 0.01f ), expectedAdaptiveParameters ), "adaptive parameters survive snapshot copy move and original destruction" );
