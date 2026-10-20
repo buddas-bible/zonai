@@ -399,6 +399,54 @@ std::optional<splineParameter2> preparedCatmullRomSpline2::getParameterByDistanc
     return {};
 }
 
+std::optional<splineParameter2> preparedCatmullRomSpline2::getParameterByDistance( splineParameter2 from, splineParameter2 to, double distance, double tolerance ) const
+{
+    if( !std::isfinite( distance ) || distance < 0.0 ) return {};
+    const auto length = getLength( from, to, tolerance );
+    if( !length || distance > *length ) return {};
+    if( distance == 0.0 ) return from;
+    if( distance == *length ) return to;
+    const std::size_t count = segments_.size();
+    from = NormalizeParameter( from, count );
+    to = NormalizeParameter( to, count );
+    const std::size_t intervals = to.segmentIndex - from.segmentIndex + ( to.t > 0.0f ? 1u : 0u );
+    const double error = tolerance / ( 4.0 * intervals );
+    double prefix = 0.0;
+    for( std::size_t i = from.segmentIndex; i <= to.segmentIndex; ++i )
+    {
+        const double begin = i == from.segmentIndex ? from.t : 0.0;
+        const double end = i == to.segmentIndex ? to.t : 1.0;
+        if( begin == end ) continue;
+        const auto& segment = segments_[i];
+        const auto segmentLength = IntegrateSegmentLength( segment.start, segment.end, segment.tangent1, segment.tangent2, begin, end, error );
+        if( !segmentLength ) return {};
+        const double next = prefix + *segmentLength;
+        if( distance > next )
+        {
+            prefix = next;
+            continue;
+        }
+        if( distance == next ) return splineParameter2{ i, static_cast<float>( end ) };
+        const double target = distance - prefix;
+        double lower = begin, upper = end;
+        constexpr int MAX_ITERATIONS = 64;
+        for( int iteration = 0; iteration < MAX_ITERATIONS; ++iteration )
+        {
+            const float t = static_cast<float>( 0.5 * ( lower + upper ) );
+            if( t <= lower || t >= upper ) return {};
+            const auto partial = IntegrateSegmentLength( segment.start, segment.end, segment.tangent1, segment.tangent2, begin, t, error );
+            if( !partial ) return {};
+            if( std::abs( *partial - target ) <= 0.5 * tolerance ) return splineParameter2{ i, t };
+            if( *partial < target )
+                lower = t;
+            else
+                upper = t;
+        }
+        return {};
+    }
+    return {};
+}
+
 bool IsValid( const catmullRomSpline2& spline )
 {
     if( spline.points.size() < ( spline.isLoop ? 3u : 2u ) ) return false;
