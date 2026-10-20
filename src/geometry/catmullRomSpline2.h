@@ -18,6 +18,32 @@ struct catmullRomSpline2
     bool isLoop = false;
 };
 
+// 검증과 구간 계수 계산을 마친 독립 스냅샷. 원본 배열 변경·파괴의 영향을 받지 않음.
+class preparedCatmullRomSpline2
+{
+public:
+    [[nodiscard]] std::size_t getSegmentCount() const noexcept { return segments_.size(); }
+    [[nodiscard]] bool isLoop() const noexcept { return isLoop_; }
+
+    // 기존 구간 조회와 같은 t in [0, 1] 계약. 잘못된 조회는 assert / Release에서 {}.
+    [[nodiscard]] vec2 evaluate( std::size_t segmentIndex, float t ) const;
+    [[nodiscard]] vec2 derivative( std::size_t segmentIndex, float t ) const;
+    [[nodiscard]] vec2 secondDerivative( std::size_t segmentIndex, float t ) const;
+
+private:
+    struct segment
+    {
+        vec2 start{}, end{}, tangent1{}, tangent2{}, quadratic{}, cubic{};
+    };
+    std::vector<segment> segments_{};
+    bool isLoop_ = false;
+
+    friend std::optional<preparedCatmullRomSpline2> prepareSpline( const catmullRomSpline2& spline );
+};
+
+// 유효하지 않은 경로 또는 비유한 계수는 nullopt. 0 접선은 기존 geometry처럼 허용함.
+std::optional<preparedCatmullRomSpline2> prepareSpline( const catmullRomSpline2& spline );
+
 // 열린 경로는 2점, 닫힌 경로는 3점 이상. 닫힌 입력은 첫 점을 끝에 반복하지 않음.
 // 모든 점은 유한해야 하며 닫는 edge도 float에서 양수 / 유한한 길이 제곱이 필요함.
 bool IsValid( const catmullRomSpline2& spline );
@@ -26,7 +52,7 @@ bool IsValid( const catmullRomSpline2& spline );
 std::size_t GetSegmentCount( const catmullRomSpline2& spline );
 
 // 유효한 경로와 segmentIndex, 구간별 t in [0, 1]이 필요함. 잘못된 입력은 assert / Release에서 {}.
-// shortcut: 평가마다 전체 경로를 검증함, 대량 샘플링을 추가할 때 사전 검증된 경로를 도입할 것.
+// 평가마다 전체 경로를 검증함. 반복 조회에는 prepareSpline으로 만든 스냅샷을 사용할 수 있음.
 vec2 Evaluate( const catmullRomSpline2& spline, std::size_t segmentIndex, float t );
 
 // 같은 입력 계약으로 구간별 t에 대한 미분을 반환함. 단위 접선이나 arc-length 미분은 아님.

@@ -678,3 +678,7 @@ add_executable(sandboxSplineRailDemoTests sandbox/spline_rail_demo_test.cpp "${P
 target_include_directories(sandboxSplineRailDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxSplineRailDemoTests PRIVATE zonai::zonai)
 add_test(NAME sandboxSplineRailDemoTests COMMAND sandboxSplineRailDemoTests)
+
+add_executable(preparedCatmullRomSpline2Tests geometry/prepared_catmull_rom_spline2_test.cpp)
+target_link_libraries(preparedCatmullRomSpline2Tests PRIVATE zonai::zonai)
+add_test(NAME preparedCatmullRomSpline2Tests COMMAND preparedCatmullRomSpline2Tests)
