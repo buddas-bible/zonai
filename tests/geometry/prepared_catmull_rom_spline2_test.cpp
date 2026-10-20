@@ -7,6 +7,7 @@
 #include <type_traits>
 
 #include "geometry/catmullRomSpline2.h"
+#include "geometry/segment2.h"
 
 using namespace zonai;
 
@@ -129,6 +130,74 @@ void adaptiveParameters()
     const vec2 coarse[] = { { 1.0e8f, 1.0e8f }, { 1.0e8f + 8.0f, 1.0e8f + 16.0f } };
     const auto coarseSnapshot = prepareSpline( { coarse } );
     check( coarseSnapshot->sampleAdaptiveParameters( {}, { 0, 1.0f }, 0.01f ).empty() && coarseSnapshot->sampleAdaptiveParameters( { 0, 0.5f }, { 0, 0.75f }, 0.001f ).empty(), "adaptive parameters reject float evaluation and endpoint precision failures without partial output" );
+}
+
+void adaptivePositions()
+{
+    const vec2 line[] = { { 0, 0 }, { 1, 0 }, { 2, 0 } };
+    const auto preparedLine = prepareSpline( { line } );
+    check( equal( preparedLine->sampleAdaptive( 0.01f ), std::vector<vec2>{ { 0, 0 }, { 1, 0 }, { 2, 0 } } ), "prepared adaptive positions preserve whole straight path endpoints and joins" );
+    check( equal( preparedLine->sampleAdaptive( { 0, 0.25f }, { 1, 0.75f }, 0.01f ), std::vector<vec2>{ { 0.25f, 0 }, { 1, 0 }, { 1.75f, 0 } } ), "prepared adaptive positions preserve clipped straight endpoints" );
+    check( equal( preparedLine->sampleAdaptive( { 0, 0.5f }, { 0, 0.5f }, 0.01f ), std::vector<vec2>{ { 0.5f, 0 } } ), "equal adaptive position parameters return one point" );
+    check( equal( preparedLine->sampleAdaptive( { 0, std::nextafter( 1.0f, 0.0f ) }, { 0, 1.0f }, 1.0e-8f ), std::vector<vec2>{ { std::nextafter( 1.0f, 0.0f ), 0 }, { 1, 0 } } ), "adaptive position sampling retains one-ulp ranges" );
+    const vec2 reversal[] = { { 0, 0 }, { 1, 0 }, { 0, 0 } };
+    const auto cusp = prepareSpline( { reversal } );
+    for( splineParameter2 from : { splineParameter2{ 0, 1.0f }, { 1, 0.0f } } )
+        check( equal( cusp->sampleAdaptive( from, { 1 - from.segmentIndex, 1.0f - from.t }, 0.01f ), std::vector<vec2>{ { 1, 0 } } ), "adaptive join aliases accept zero tangents and return one position" );
+    check( equal( cusp->sampleAdaptive( { 0, 0.5f }, { 1, 0.5f }, 0.01f ), std::vector<vec2>{ { 0.625f, 0 }, { 1, 0 }, { 0.625f, 0 } } ), "coincident endpoints preserve a returning adaptive position path" );
+    const vec2 controls[] = { { -1, -4 }, { 0, 0 }, { 1, 0 }, { 2, 4 } };
+    for( float scale : { 1.0e-10f, 1.0f, 1.0e10f } )
+        for( bool loop : { false, true } )
+        {
+            std::vector<vec2> source;
+            for( vec2 point : controls )
+                source.push_back( scale * point );
+            const catmullRomSpline2 spline{ source, loop };
+            const auto prepared = prepareSpline( spline );
+            const std::size_t count = prepared->getSegmentCount();
+            for( float error : { 0.01f * scale, 0.1f * scale, std::numeric_limits<float>::denorm_min() } )
+            {
+                check( equal( prepared->sampleAdaptive( error ), SampleAdaptive( spline, error ) ), "prepared whole adaptive positions exactly match legacy samples and failures" );
+                for( std::size_t i = 0; i < count; ++i )
+                    for( std::size_t j = 0; j < count; ++j )
+                        for( float t : { 0.0f, 0.1234567f, 1.0f } )
+                            check( equal( prepared->sampleAdaptive( { i, t }, { j, 0.8765432f }, error ), SampleAdaptive( spline, { i, t }, { j, 0.8765432f }, error ) ), "prepared adaptive range positions preserve legacy float results and failures across scales and topology" );
+            }
+            const float error = 0.01f * scale;
+            const auto samples = prepared->sampleAdaptive( { 1, 0.0f }, { 1, 1.0f }, error );
+            check( samples.size() > 2, "adaptive position sampling subdivides an S curve with a flat midpoint" );
+            for( std::size_t j = 1; j < samples.size(); ++j )
+                check( IsFinite( samples[j] ) && !equal( samples[j - 1], samples[j] ), "adaptive positions are finite without consecutive duplicates" );
+            for( int i = 0; i <= 400; ++i )
+            {
+                const vec2 point = prepared->evaluate( 1, static_cast<float>( i ) / 400.0f );
+                float distanceSquared = std::numeric_limits<float>::infinity();
+                for( std::size_t j = 1; j < samples.size(); ++j )
+                    distanceSquared = std::min( distanceSquared, DistanceSquared( segment2{ samples[j - 1], samples[j] }, point ) );
+                check( distanceSquared <= ( 1.0001f * error ) * ( 1.0001f * error ), "prepared adaptive position polyline bounds dense S curve evaluations" );
+            }
+            const auto whole = prepared->sampleAdaptive( error );
+            check( !whole.empty() && equal( whole, prepared->sampleAdaptive( { 0, 0.0f }, { count - 1, 1.0f }, error ) ), "whole adaptive sampling delegates to the full range" );
+            check( equal( whole.front(), source.front() ) && equal( whole.back(), loop ? source.front() : source.back() ), "adaptive positions preserve whole path endpoints including closed closure" );
+            const auto seam = prepared->sampleAdaptive( { count - 1, 0.5f }, { count - 1, 1.0f }, error );
+            check( seam.size() >= 2 && equal( seam.back(), whole.back() ) && !equal( seam.front(), seam.back() ), "partial adaptive positions end at the requested endpoint without forced closure" );
+        }
+    const preparedCatmullRomSpline2 empty;
+    check( empty.sampleAdaptive( 0.01f ).empty() && empty.sampleAdaptive( {}, {}, 0.01f ).empty(), "empty snapshots have no adaptive positions" );
+    const float nan = std::numeric_limits<float>::quiet_NaN(), infinity = std::numeric_limits<float>::infinity();
+    for( float error : { 0.0f, -1.0f, nan, infinity, -infinity } )
+        check( preparedLine->sampleAdaptive( error ).empty() && preparedLine->sampleAdaptive( {}, { 1, 1.0f }, error ).empty() && preparedLine->sampleAdaptive( {}, {}, error ).empty(), "adaptive positions validate errors even for equal ranges" );
+    for( splineParameter2 invalid : { splineParameter2{ 2, 0.0f }, { std::numeric_limits<std::size_t>::max(), 1.0f }, { 0, -0.1f }, { 0, 1.1f }, { 0, nan }, { 0, infinity }, { 0, -infinity } } )
+        check( preparedLine->sampleAdaptive( invalid, { 1, 1.0f }, 0.01f ).empty() && preparedLine->sampleAdaptive( {}, invalid, 0.01f ).empty() && preparedLine->sampleAdaptive( invalid, invalid, 0.01f ).empty(), "adaptive positions validate both endpoints before normalization and equality" );
+    const auto closed = prepareSpline( { controls, true } );
+    check( closed->sampleAdaptive( { 3, 0.5f }, { 0, 0.5f }, 0.01f ).empty() && preparedLine->sampleAdaptive( { 1, 0.75f }, { 1, 0.25f }, 0.01f ).empty(), "adaptive positions reject reverse ranges without closed wrapping" );
+    check( closed->sampleAdaptive( 1.0e-30f ).empty() && closed->sampleAdaptive( { 0, 0.25f }, { 2, 0.75f }, 1.0e-30f ).empty(), "unattainable adaptive position errors discard all partial output" );
+    const vec2 coarse[] = { { 1.0e8f, 0 }, { 1.0e8f + 8.0f, 0 } };
+    const auto coarseSnapshot = prepareSpline( { coarse } );
+    check( equal( coarseSnapshot->sampleAdaptive( 0.01f ), std::vector<vec2>{ coarse[0], coarse[1] } ) && coarseSnapshot->sampleAdaptiveParameters( {}, { 0, 1.0f }, 0.01f ).empty(), "adaptive positions preserve Hermite hull behavior independently of parameter sampling precision" );
+    check( equal( coarseSnapshot->sampleAdaptive( {}, { 0, 0.25f }, 10.0f ), std::vector<vec2>{ coarse[0] } ), "adaptive positions remove consecutive float-rounded duplicate endpoints" );
+    check( coarseSnapshot->sampleAdaptive( { 0, 0.5f }, { 0, 0.75f }, 0.001f ).empty() && coarseSnapshot->sampleAdaptive( { 0, 0.5f }, { 0, 0.5f }, 0.001f ).empty(), "adaptive positions reject unrepresentable first endpoints including equal ranges" );
+    check( coarseSnapshot->sampleAdaptive( {}, { 0, 0.5f }, 0.001f ).empty(), "adaptive positions discard an exact start when the final endpoint lacks precision" );
 }
 
 void compare( const catmullRomSpline2& spline )
@@ -293,6 +362,7 @@ void compare( const catmullRomSpline2& spline )
 
 int main()
 {
+    adaptivePositions();
     adaptiveParameters();
 
     const vec2 uniformLine[] = { { 0, 0 }, { 1, 0 }, { 2, 0 }, { 3, 0 } };
@@ -467,13 +537,15 @@ int main()
     std::optional<splineParameter2> expectedParameter, expectedRangeParameter;
     std::optional<splineSample2> expectedSample, expectedRangeSample;
     std::vector<splineParameter2> expectedParameters, expectedAdaptiveParameters;
-    std::vector<vec2> expectedPoints, expectedRangePoints;
+    std::vector<vec2> expectedPoints, expectedRangePoints, expectedAdaptivePoints, expectedAdaptiveRangePoints;
     std::optional<double> expectedLength, expectedDistance, expectedPartialLength, expectedRangeLength;
     {
         std::vector<vec2> source{ std::begin( curve ), std::end( curve ) };
         owned = prepareSpline( { source, true } );
         expectedPoints = SampleByDistance( { source, true }, 3, 1.0e-4 );
         expectedRangePoints = SampleByDistance( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 );
+        expectedAdaptivePoints = SampleAdaptive( { source, true }, 0.01f );
+        expectedAdaptiveRangePoints = SampleAdaptive( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 0.01f );
         expectedAdaptiveParameters = SampleAdaptiveParameters( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 0.01f );
         expectedParameters = SampleByDistanceParameters( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 );
         expectedSample = EvaluateByDistance( { source, true }, 3.5, 1.0e-4 );
@@ -512,9 +584,11 @@ int main()
     check( expectedClosest && equal( owned->closestPoint( { 3.5f, 0.2f }, 1.0e-4 ), expectedClosest ), "closest point survives source mutation and destruction" );
     check( expectedSegmentClosest && expectedRangeClosest && equal( owned->closestPoint( 4, { 3.5f, 0.2f }, 1.0e-4 ), expectedSegmentClosest ) && equal( owned->closestPoint( { 1, 0.25f }, { 4, 0.75f }, { 3.5f, 0.2f }, 1.0e-4 ), expectedRangeClosest ), "restricted closest queries survive source mutation and destruction" );
     check( !expectedAdaptiveParameters.empty() && equal( owned->sampleAdaptiveParameters( { 1, 0.25f }, { 4, 0.75f }, 0.01f ), expectedAdaptiveParameters ), "adaptive parameters survive original source destruction" );
+    check( !expectedAdaptivePoints.empty() && !expectedAdaptiveRangePoints.empty() && equal( owned->sampleAdaptive( 0.01f ), expectedAdaptivePoints ) && equal( owned->sampleAdaptive( { 1, 0.25f }, { 4, 0.75f }, 0.01f ), expectedAdaptiveRangePoints ), "adaptive positions survive source mutation reallocation and destruction" );
     auto copied = *owned;
     auto moved = std::move( copied );
     owned.reset();
+    check( equal( moved.sampleAdaptive( 0.01f ), expectedAdaptivePoints ) && equal( moved.sampleAdaptive( { 1, 0.25f }, { 4, 0.75f }, 0.01f ), expectedAdaptiveRangePoints ), "adaptive positions survive snapshot copy move and original destruction" );
     check( equal( moved.sampleAdaptiveParameters( { 1, 0.25f }, { 4, 0.75f }, 0.01f ), expectedAdaptiveParameters ), "adaptive parameters survive snapshot copy move and original destruction" );
     check( moved.isLoop() && moved.getSegmentCount() == 5 && equal( moved.evaluate( 4, 0.37f ), expectedPoint ), "copied and moved snapshots own their data" );
 
