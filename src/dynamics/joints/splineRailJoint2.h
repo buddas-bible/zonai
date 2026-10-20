@@ -22,6 +22,7 @@ struct splineRailJointDef
     double referenceDistance = 0.0;
     float referenceAngle = 0.0f;
     splineRailRotationMode rotationMode = splineRailRotationMode::fixed;
+    bool enableAngularSpring = true;
     float angularHertz = 3.0f;
     float angularDampingRatio = 0.7f;
     bool enableSpring = false;
@@ -45,6 +46,7 @@ struct splineRailJointData
     bool trackingValid = false;
     float referenceAngle = 0.0f;
     splineRailRotationMode rotationMode = splineRailRotationMode::fixed;
+    bool enableAngularSpring = true;
     float angularHertz = 3.0f, angularDampingRatio = 0.7f;
     bool enableSpring = false;
     float hertz = 0.0f, dampingRatio = 0.7f, targetTranslation = 0.0f, springForce = 0.0f;

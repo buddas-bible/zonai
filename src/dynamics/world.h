@@ -194,7 +194,7 @@ public:
     void setSplineRailJointSpring( jointId id, bool enableSpring, float hertz, float dampingRatio, float targetTranslation );
     void setSplineRailJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation );
     void setSplineRailJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorForce );
-    void setSplineRailJointRotation( jointId id, splineRailRotationMode mode, float angularHertz, float angularDampingRatio );
+    void setSplineRailJointRotation( jointId id, splineRailRotationMode mode, float angularHertz, float angularDampingRatio, bool enableAngularSpring = true );
     bool setSplineRailJointPoints( jointId id, std::span<const vec2> points );
     [[nodiscard]] splineRailJointData getSplineRailJointData( jointId id ) const;
     [[nodiscard]] std::span<const vec2> getSplineRailJointPoints( jointId id ) const;
