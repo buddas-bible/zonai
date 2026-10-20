@@ -1229,6 +1229,18 @@ std::optional<splineClosestPoint2> ClosestPointInRange( const catmullRomSpline2&
 std::optional<splineClosestPoint2> preparedCatmullRomSpline2::closestPoint( const vec2& point, double tolerance ) const
 {
     if( segments_.empty() ) return {};
+    return closestPoint( { 0, 0.0f }, { segments_.size() - 1, 1.0f }, point, tolerance );
+}
+
+std::optional<splineClosestPoint2> preparedCatmullRomSpline2::closestPoint( std::size_t segmentIndex, const vec2& point, double tolerance ) const
+{
+    if( segmentIndex >= segments_.size() ) return {};
+    return closestPoint( { segmentIndex, 0.0f }, { segmentIndex, 1.0f }, point, tolerance );
+}
+
+std::optional<splineClosestPoint2> preparedCatmullRomSpline2::closestPoint( splineParameter2 from, splineParameter2 to, const vec2& point, double tolerance ) const
+{
+    if( segments_.empty() ) return {};
     const auto segmentAt = [&]( std::size_t i ) -> const preparedSplineSegment2&
     {
         return segments_[i];
@@ -1244,7 +1256,7 @@ std::optional<splineClosestPoint2> preparedCatmullRomSpline2::closestPoint( cons
         const vec2 last = segments_.back().end;
         return std::max( { scale, std::abs( static_cast<double>( last.x ) ), std::abs( static_cast<double>( last.y ) ) } );
     };
-    return ClosestPointInRange( segments_.size(), { 0, 0.0f }, { segments_.size() - 1, 1.0f }, point, tolerance, segmentAt, evaluatePoint, controlScale );
+    return ClosestPointInRange( segments_.size(), from, to, point, tolerance, segmentAt, evaluatePoint, controlScale );
 }
 
 std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, const vec2& point, double tolerance )
