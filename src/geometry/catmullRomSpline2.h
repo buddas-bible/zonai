@@ -30,6 +30,8 @@ struct preparedSplineSegment2
     vec2 start{}, end{}, tangent1{}, tangent2{}, quadratic{}, cubic{};
 };
 
+struct splineParameter2;
+
 // 검증과 구간 계수 계산을 마친 독립 스냅샷. 원본 배열 변경·파괴의 영향을 받지 않음.
 class preparedCatmullRomSpline2
 {
@@ -54,6 +56,10 @@ public:
     // 한 구간의 0 <= t0 <= t1 <= 1을 직접 적분함. 같은 t는 0이며 0 접선도 허용함.
     // 기존 부분 길이의 절대오차·실패 정책을 따르며 잘못된 입력은 nullopt.
     [[nodiscard]] std::optional<double> getLength( std::size_t segmentIndex, float t0, float t1, double tolerance ) const;
+
+    // 정방향 [from, to]를 직접 적분함. 내부 접합점의 두 표현은 같으며 자동 순환하지 않음.
+    // 기존 부분 경로 길이의 절대오차·실패 정책을 따름. 같은 위치는 0, 잘못된 범위는 nullopt.
+    [[nodiscard]] std::optional<double> getLength( splineParameter2 from, splineParameter2 to, double tolerance ) const;
 
     // 시작부터 구간별 t in [0, 1]까지의 거리. 닫힌 한 바퀴 끝은 전체 길이이며 자동 순환하지 않음.
     // 기존 누적 거리의 절대오차·실패 정책을 따르며 잘못된 입력은 nullopt.

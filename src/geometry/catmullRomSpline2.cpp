@@ -307,6 +307,37 @@ std::optional<double> preparedCatmullRomSpline2::getLength( std::size_t segmentI
     return length;
 }
 
+std::optional<double> preparedCatmullRomSpline2::getLength( splineParameter2 from, splineParameter2 to, double tolerance ) const
+{
+    if( segments_.empty() || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
+    const std::size_t count = segments_.size();
+    const auto valid = [&]( splineParameter2 parameter )
+    {
+        return parameter.segmentIndex < count && std::isfinite( parameter.t ) && parameter.t >= 0.0f && parameter.t <= 1.0f;
+    };
+    if( !valid( from ) || !valid( to ) ) return {};
+    from = NormalizeParameter( from, count );
+    to = NormalizeParameter( to, count );
+    if( from.segmentIndex > to.segmentIndex || ( from.segmentIndex == to.segmentIndex && from.t > to.t ) ) return {};
+    if( from.segmentIndex == to.segmentIndex && from.t == to.t ) return 0.0;
+
+    const std::size_t intervals = to.segmentIndex - from.segmentIndex + ( to.t > 0.0f ? 1u : 0u );
+    const double error = tolerance / ( 4.0 * intervals );
+    double length = 0.0;
+    for( std::size_t i = from.segmentIndex; i <= to.segmentIndex; ++i )
+    {
+        const double begin = i == from.segmentIndex ? from.t : 0.0;
+        const double end = i == to.segmentIndex ? to.t : 1.0;
+        if( begin == end ) continue;
+        const auto& segment = segments_[i];
+        const auto segmentLength = IntegrateSegmentLength( segment.start, segment.end, segment.tangent1, segment.tangent2, begin, end, error );
+        if( !segmentLength || *segmentLength <= 0.0 ) return {};
+        length += *segmentLength;
+    }
+    if( !std::isfinite( length ) || tolerance < 32.0 * std::numeric_limits<double>::epsilon() * length ) return {};
+    return length;
+}
+
 std::optional<double> preparedCatmullRomSpline2::getDistance( std::size_t segmentIndex, float t, double tolerance ) const
 {
     if( segmentIndex >= segments_.size() || !std::isfinite( t ) || t < 0.0f || t > 1.0f || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
