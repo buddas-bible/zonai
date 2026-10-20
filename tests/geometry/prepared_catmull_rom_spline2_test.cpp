@@ -279,6 +279,50 @@ void fixedParameters()
         check( preparedLine->sampleParameters( subdivisions ).empty() && coarseSnapshot->sampleParameters( subdivisions ).empty(), "fixed parameters reject zero and impossible subdivision counts for single and multiple segments" );
 }
 
+void rangeFixedParameters()
+{
+    const vec2 controls[] = { { 0, 0 }, { 1, 2 }, { 3, -1 }, { 4, 0 } };
+    const auto prepared = prepareSpline( { controls } );
+    check( equal( prepared->sampleParameters( { 0, 0.25f }, { 2, 0.75f }, 2 ), std::vector<splineParameter2>{ { 0, 0.25f }, { 0, 0.625f }, { 0, 1 }, { 1, 0.5f }, { 1, 1 }, { 2, 0.375f }, { 2, 0.75f } } ), "range fixed parameters uniformly split each clipped segment with original indices" );
+    check( equal( prepared->sampleParameters( { 1, 0.25f }, { 1, 0.75f }, 2 ), std::vector<splineParameter2>{ { 1, 0.25f }, { 1, 0.5f }, { 1, 0.75f } } ), "single segment fixed range preserves both endpoints" );
+    check( equal( prepared->sampleParameters( { 0, 1.0f }, { 2, 0.0f }, 2 ), std::vector<splineParameter2>{ { 0, 1 }, { 1, 0.5f }, { 2, 0 } } ), "fixed range preserves aliased input endpoints without empty segment samples" );
+    check( equal( prepared->sampleParameters( { 0, 0.25f }, { 2, 0.75f }, 1 ), std::vector<splineParameter2>{ { 0, 0.25f }, { 0, 1 }, { 1, 1 }, { 2, 0.75f } } ), "one range subdivision emits each nonempty interval endpoint" );
+    for( splineParameter2 from : { splineParameter2{ 0, 1.0f }, { 1, 0.0f } } )
+        check( equal( prepared->sampleParameters( from, { 1 - from.segmentIndex, 1.0f - from.t }, 7 ), std::vector<splineParameter2>{ from } ), "equivalent join ranges return the original from representation in either direction" );
+    const splineParameter2 same{ 1, 0.37f };
+    check( equal( prepared->sampleParameters( same, same, std::numeric_limits<std::size_t>::max() ), std::vector<splineParameter2>{ same } ), "equal ranges need only one output regardless of positive subdivision count" );
+    const float neighbor = std::nextafter( 1.0f, 0.0f );
+    const auto narrow = prepared->sampleParameters( { 1, neighbor }, { 1, 1.0f }, 4 );
+    check( narrow.size() == 5 && narrow.front().t == neighbor && narrow.back().t == 1.0f, "one-ulp fixed ranges retain all requested samples" );
+    for( const auto parameter : narrow )
+        check( parameter.segmentIndex == 1 && parameter.t >= neighbor && parameter.t <= 1.0f, "rounded fixed range t values remain inside the selected interval" );
+    for( bool loop : { false, true } )
+    {
+        const auto snapshot = prepareSpline( { controls, loop } );
+        const std::size_t last = snapshot->getSegmentCount() - 1;
+        for( std::size_t subdivisions : { 1u, 2u, 3u, 7u, 16u } )
+            check( equal( snapshot->sampleParameters( {}, { last, 1.0f }, subdivisions ), snapshot->sampleParameters( subdivisions ) ), "full fixed range exactly preserves existing sampleParameters values and order" );
+        const auto ending = snapshot->sampleParameters( { last, 0.25f }, { last, 1.0f }, 3 );
+        check( ending.size() == 4 && ending.front().segmentIndex == last && ending.front().t == 0.25f && ending.back().segmentIndex == last && ending.back().t == 1.0f, "partial fixed range keeps the final segment representation including closed seams" );
+        check( snapshot->sampleParameters( { last, 1.0f }, {}, 2 ).empty(), "fixed ranges reject reverse traversal without implicit closed wrapping" );
+    }
+    const vec2 reversal[] = { { 0, 0 }, { 1, 0 }, { 0, 0 } };
+    const auto cusp = prepareSpline( { reversal } );
+    check( equal( cusp->sampleParameters( { 0, 0.5f }, { 1, 0.5f }, 1 ), std::vector<splineParameter2>{ { 0, 0.5f }, { 0, 1 }, { 1, 0.5f } } ), "fixed parameter ranges retain returning paths and zero tangent joins" );
+    const vec2 coarse[] = { { 1.0e8f, 0 }, { 1.0e8f + 8.0f, 0 } };
+    check( prepareSpline( { coarse } )->sampleParameters( { 0, 0.1f }, { 0, 0.2f }, 3 ).size() == 4, "range parameter sampling does not require representable distinct positions" );
+    const preparedCatmullRomSpline2 empty;
+    check( empty.sampleParameters( {}, {}, 2 ).empty(), "empty snapshot rejects fixed parameter ranges" );
+    const float nan = std::numeric_limits<float>::quiet_NaN(), infinity = std::numeric_limits<float>::infinity();
+    for( splineParameter2 invalid : { splineParameter2{ 3, 0.0f }, { std::numeric_limits<std::size_t>::max(), 1.0f }, { 0, -0.1f }, { 0, 1.1f }, { 0, nan }, { 0, infinity }, { 0, -infinity } } )
+        check( prepared->sampleParameters( invalid, { 2, 1.0f }, 2 ).empty() && prepared->sampleParameters( {}, invalid, 2 ).empty() && prepared->sampleParameters( invalid, invalid, 2 ).empty(), "fixed range parameters validate both endpoints before normalization or equality" );
+    check( prepared->sampleParameters( { 1, 0.75f }, { 1, 0.25f }, 2 ).empty(), "fixed parameters reject reverse intervals within a segment" );
+    check( prepared->sampleParameters( same, same, 0 ).empty() && prepared->sampleParameters( {}, { 2, 1.0f }, 0 ).empty(), "fixed ranges reject zero subdivisions even for equal positions" );
+    check( prepared->sampleParameters( { 0, 1.0f }, { 2, 0.0f }, std::vector<splineParameter2>{}.max_size() ).empty(), "fixed range output count excludes empty aliased endpoint intervals without overflow" );
+    const std::size_t tooMany = std::vector<splineParameter2>{}.max_size() / 3 + 1;
+    check( prepared->sampleParameters( {}, { 2, 1.0f }, tooMany ).empty() && prepared->sampleParameters( { 1, 0.25f }, { 1, 0.75f }, std::numeric_limits<std::size_t>::max() ).empty(), "fixed range parameters reject impossible sizes before multiplication or allocation" );
+}
+
 void compare( const catmullRomSpline2& spline )
 {
     const auto prepared = prepareSpline( spline );
@@ -441,6 +485,7 @@ void compare( const catmullRomSpline2& spline )
 
 int main()
 {
+    rangeFixedParameters();
     fixedParameters();
     fixedSamples();
     adaptivePositions();
@@ -617,7 +662,7 @@ int main()
     std::optional<aabb2> expectedBounds, expectedSegmentBounds, expectedRangeBounds;
     std::optional<splineParameter2> expectedParameter, expectedRangeParameter;
     std::optional<splineSample2> expectedSample, expectedRangeSample;
-    std::vector<splineParameter2> expectedParameters, expectedAdaptiveParameters, expectedFixedParameters;
+    std::vector<splineParameter2> expectedParameters, expectedAdaptiveParameters, expectedFixedParameters, expectedRangeFixedParameters;
     std::vector<vec2> expectedPoints, expectedRangePoints, expectedAdaptivePoints, expectedAdaptiveRangePoints, expectedFixedPoints;
     std::optional<double> expectedLength, expectedDistance, expectedPartialLength, expectedRangeLength;
     {
@@ -625,6 +670,7 @@ int main()
         owned = prepareSpline( { source, true } );
         expectedPoints = SampleByDistance( { source, true }, 3, 1.0e-4 );
         expectedRangePoints = SampleByDistance( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 );
+        expectedRangeFixedParameters = owned->sampleParameters( { 1, 0.25f }, { 4, 0.75f }, 7 );
         expectedFixedParameters = owned->sampleParameters( 7 );
         expectedFixedPoints = Sample( { source, true }, 7 );
         expectedAdaptivePoints = SampleAdaptive( { source, true }, 0.01f );
@@ -670,9 +716,11 @@ int main()
     check( !expectedAdaptivePoints.empty() && !expectedAdaptiveRangePoints.empty() && equal( owned->sampleAdaptive( 0.01f ), expectedAdaptivePoints ) && equal( owned->sampleAdaptive( { 1, 0.25f }, { 4, 0.75f }, 0.01f ), expectedAdaptiveRangePoints ), "adaptive positions survive source mutation reallocation and destruction" );
     check( !expectedFixedPoints.empty() && equal( owned->sample( 7 ), expectedFixedPoints ), "fixed samples survive source mutation reallocation and destruction" );
     check( expectedFixedParameters.size() == 36 && equal( owned->sampleParameters( 7 ), expectedFixedParameters ), "fixed parameters survive source mutation reallocation and destruction" );
+    check( expectedRangeFixedParameters.size() == 29 && equal( owned->sampleParameters( { 1, 0.25f }, { 4, 0.75f }, 7 ), expectedRangeFixedParameters ), "range fixed parameters survive source mutation reallocation and destruction" );
     auto copied = *owned;
     auto moved = std::move( copied );
     owned.reset();
+    check( equal( moved.sampleParameters( { 1, 0.25f }, { 4, 0.75f }, 7 ), expectedRangeFixedParameters ), "range fixed parameters survive snapshot copy move and original destruction" );
     check( equal( moved.sampleParameters( 7 ), expectedFixedParameters ), "fixed parameters survive snapshot copy move and original destruction" );
     check( equal( moved.sample( 7 ), expectedFixedPoints ), "fixed samples survive snapshot copy move and original destruction" );
     check( equal( moved.sampleAdaptive( 0.01f ), expectedAdaptivePoints ) && equal( moved.sampleAdaptive( { 1, 0.25f }, { 4, 0.75f }, 0.01f ), expectedAdaptiveRangePoints ), "adaptive positions survive snapshot copy move and original destruction" );

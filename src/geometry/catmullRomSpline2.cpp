@@ -748,6 +748,39 @@ std::vector<splineParameter2> preparedCatmullRomSpline2::sampleParameters( std::
     return parameters;
 }
 
+std::vector<splineParameter2> preparedCatmullRomSpline2::sampleParameters( splineParameter2 from, splineParameter2 to, std::size_t subdivisions ) const
+{
+    if( segments_.empty() || subdivisions == 0 ) return {};
+    const std::size_t count = segments_.size();
+    const auto valid = [&]( splineParameter2 parameter )
+    {
+        return parameter.segmentIndex < count && std::isfinite( parameter.t ) && parameter.t >= 0.0f && parameter.t <= 1.0f;
+    };
+    if( !valid( from ) || !valid( to ) ) return {};
+    const auto beginParameter = NormalizeParameter( from, count ), endParameter = NormalizeParameter( to, count );
+    if( beginParameter.segmentIndex > endParameter.segmentIndex || ( beginParameter.segmentIndex == endParameter.segmentIndex && beginParameter.t > endParameter.t ) ) return {};
+    if( beginParameter.segmentIndex == endParameter.segmentIndex && beginParameter.t == endParameter.t ) return { from };
+
+    const std::size_t segmentCount = endParameter.segmentIndex - beginParameter.segmentIndex + ( endParameter.t > 0.0f ? 1 : 0 );
+    std::vector<splineParameter2> parameters{};
+    if( segmentCount > ( parameters.max_size() - 1 ) / subdivisions ) return {};
+    parameters.reserve( segmentCount * subdivisions + 1 );
+    parameters.push_back( from );
+    for( std::size_t i = from.segmentIndex; i <= to.segmentIndex; ++i )
+    {
+        const float begin = i == from.segmentIndex ? from.t : 0.0f, end = i == to.segmentIndex ? to.t : 1.0f;
+        if( begin == end ) continue;
+        for( std::size_t j = 1; j <= subdivisions; ++j )
+        {
+            const float fraction = static_cast<float>( j ) / static_cast<float>( subdivisions );
+            const float t = j == subdivisions ? end : std::clamp( begin + ( end - begin ) * fraction, begin, end );
+            parameters.push_back( { i, t } );
+        }
+    }
+    parameters.back() = to;
+    return parameters;
+}
+
 std::vector<vec2> Sample( const catmullRomSpline2& spline, std::size_t subdivisions )
 {
     if( !IsValid( spline ) || subdivisions == 0 ) return {};
