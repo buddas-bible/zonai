@@ -708,6 +708,26 @@ std::optional<aabb2> ComputeAABB( const catmullRomSpline2& spline, splineParamet
     return bounds;
 }
 
+std::vector<vec2> preparedCatmullRomSpline2::sample( std::size_t subdivisions ) const
+{
+    if( segments_.empty() || subdivisions == 0 ) return {};
+
+    const std::size_t segmentCount = segments_.size();
+    std::vector<vec2> samples{};
+    if( segmentCount > ( samples.max_size() - 1 ) / subdivisions ) return {};
+
+    samples.reserve( segmentCount * subdivisions + 1 );
+    samples.push_back( segments_.front().start );
+    for( std::size_t i = 0; i < segmentCount; ++i )
+        for( std::size_t j = 1; j <= subdivisions; ++j )
+        {
+            const float t = static_cast<float>( j ) / static_cast<float>( subdivisions );
+            samples.push_back( evaluate( i, t ) );
+        }
+
+    return samples;
+}
+
 std::vector<vec2> Sample( const catmullRomSpline2& spline, std::size_t subdivisions )
 {
     if( !IsValid( spline ) || subdivisions == 0 ) return {};

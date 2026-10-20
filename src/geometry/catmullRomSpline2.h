@@ -102,6 +102,10 @@ public:
     [[nodiscard]] std::vector<vec2> sampleByDistance( std::size_t subdivisions, double tolerance ) const;
     [[nodiscard]] std::vector<vec2> sampleByDistance( splineParameter2 from, splineParameter2 to, std::size_t subdivisions, double tolerance ) const;
 
+    // 각 구간을 같은 수로 분할함. 기존 Sample의 float t·점 순서·실패 정책을 따름.
+    // 내부 접합점은 한 번, 닫힌 끝은 시작점 반복. 빈 스냅샷·0 분할·불가능한 점 수는 빈 배열.
+    [[nodiscard]] std::vector<vec2> sample( std::size_t subdivisions ) const;
+
     // Evaluate로 만든 선분열이 maxError를 만족하는 원본 구간 / t. 기존 adaptive 수치·실패 정책.
     // 정방향 범위의 양 끝 표현을 유지하며 같은 위치는 from 하나. 자동 순환 없음, 실패는 빈 배열.
     [[nodiscard]] std::vector<splineParameter2> sampleAdaptiveParameters( splineParameter2 from, splineParameter2 to, float maxError ) const;
