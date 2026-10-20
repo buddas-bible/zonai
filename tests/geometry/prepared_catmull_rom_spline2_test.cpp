@@ -65,6 +65,23 @@ void compare( const catmullRomSpline2& spline )
             }
         }
         for( std::size_t i = 0; i < prepared->getSegmentCount(); ++i )
+            for( std::size_t j = i; j < prepared->getSegmentCount(); ++j )
+            {
+                const splineParameter2 from{ i, 0.37f }, to{ j, 0.75f };
+                const auto rangeLength = GetLength( spline, from, to, tolerance );
+                check( equal( prepared->getParameterByDistance( from, to, 0.0, tolerance ), GetParameterByDistance( spline, from, to, 0.0, tolerance ) ), "prepared range inverse validates range length before returning the start" );
+                if( !rangeLength ) continue;
+                for( double distance : { std::nextafter( 0.0, 1.0 ), 0.37 * *rangeLength, 0.5 * *rangeLength, std::nextafter( *rangeLength, 0.0 ), *rangeLength, std::nextafter( *rangeLength, std::numeric_limits<double>::infinity() ) } )
+                    check( equal( prepared->getParameterByDistance( from, to, distance, tolerance ), GetParameterByDistance( spline, from, to, distance, tolerance ) ), "prepared range inverse preserves exact parameters and precision failures" );
+                for( std::size_t k = i; k < j; ++k )
+                {
+                    const auto join = GetLength( spline, from, { k, 1.0f }, tolerance );
+                    check( join.has_value(), "range inverse join fixture has finite length" );
+                    for( double distance : { std::nextafter( *join, 0.0 ), *join, std::nextafter( *join, std::numeric_limits<double>::infinity() ) } )
+                        check( equal( prepared->getParameterByDistance( from, to, distance, tolerance ), GetParameterByDistance( spline, from, to, distance, tolerance ) ), "range inverse preserves internal join selection and both neighbors" );
+                }
+            }
+        for( std::size_t i = 0; i < prepared->getSegmentCount(); ++i )
             for( float t : { 0.0f, std::nextafter( 0.0f, 1.0f ), 0.125f, 0.37f, 0.5f, 0.875f, std::nextafter( 1.0f, 0.0f ), 1.0f } )
                 check( prepared->getDistance( i, t, tolerance ) == GetDistance( spline, i, t, tolerance ), "prepared cumulative distance preserves exact results and precision failures" );
         for( std::size_t i = 0; i < prepared->getSegmentCount(); ++i )
@@ -105,6 +122,11 @@ int main()
 {
     const vec2 uniformLine[] = { { 0, 0 }, { 1, 0 }, { 2, 0 }, { 3, 0 } };
     const auto uniformSnapshot = prepareSpline( { uniformLine } );
+    check( equal( uniformSnapshot->getParameterByDistance( { 0, 0.25f }, { 2, 0.75f }, 1.25, 1.0e-6 ), splineParameter2{ 1, 0.5f } ), "prepared range inverse returns its analytic segment and parameter" );
+    check( equal( uniformSnapshot->getParameterByDistance( { 0, 1.0f }, { 2, 0.0f }, 0.0, 1.0e-6 ), splineParameter2{ 0, 1.0f } ) && equal( uniformSnapshot->getParameterByDistance( { 0, 1.0f }, { 2, 0.0f }, 1.0, 1.0e-6 ), splineParameter2{ 2, 0.0f } ), "range inverse preserves both input endpoint representations" );
+    check( equal( uniformSnapshot->getParameterByDistance( { 1, 0.0f }, { 0, 1.0f }, 0.0, std::numeric_limits<double>::denorm_min() ), splineParameter2{ 1, 0.0f } ) && !uniformSnapshot->getParameterByDistance( { 1, 0.0f }, { 0, 1.0f }, std::numeric_limits<double>::denorm_min(), 1.0e-6 ), "zero-length join range returns from only at zero distance" );
+    check( equal( uniformSnapshot->getParameterByDistance( { 0, 0.25f }, { 2, 0.75f }, 0.75, 1.0e-6 ), splineParameter2{ 0, 1.0f } ), "range inverse chooses the preceding segment at an exact join" );
+    check( !uniformSnapshot->getParameterByDistance( { 0, 0.25f }, { 2, 0.75f }, 0.1, 1.0e-10 ) && uniformSnapshot->getParameterByDistance( { 0, 0.25f }, { 2, 0.75f }, 0.1, 1.0e-6 ).has_value(), "range inverse rejects insufficient float parameter precision" );
     check( equal( uniformSnapshot->getParameterByDistance( 1.5, 1.0e-6 ), splineParameter2{ 1, 0.5f } ), "prepared inverse returns the analytic segment and parameter on a straight path" );
     check( equal( uniformSnapshot->getParameterByDistance( 0.0, 1.0e-6 ), splineParameter2{ 0, 0.0f } ) && equal( uniformSnapshot->getParameterByDistance( 3.0, 1.0e-6 ), splineParameter2{ 2, 1.0f } ), "inverse endpoints preserve the start and final segment representations" );
     check( equal( uniformSnapshot->getParameterByDistance( 1.0, 1.0e-6 ), splineParameter2{ 0, 1.0f } ), "an exact internal join belongs to the preceding segment" );
@@ -143,6 +165,7 @@ int main()
     check( !horizontalSnapshot->getLength( 0, 0.25f, 0.75f, std::nextafter( partialBoundary, 0.0 ) ) && horizontalSnapshot->getLength( 0, 0.25f, 0.75f, partialBoundary ) == 4.0, "partial length preserves the precision threshold boundary" );
     check( prepareSpline( { cusp } )->getLength( { 0, 0.5f }, { 1, 0.5f }, 1.0e-6 ) == 0.75, "range length integrates across a zero tangent join" );
     check( equal( prepareSpline( { cusp } )->getParameterByDistance( 1.0, 1.0e-6 ), splineParameter2{ 0, 1.0f } ), "inverse permits a zero tangent at the exact join" );
+    check( equal( prepareSpline( { cusp } )->getParameterByDistance( { 0, 0.5f }, { 1, 0.5f }, 0.375, 1.0e-6 ), splineParameter2{ 0, 1.0f } ), "range inverse permits a zero tangent at an exact join" );
     const double precisionBoundary = 128.0 * std::numeric_limits<double>::epsilon() * *preparedLength;
     for( double tolerance : { std::nextafter( precisionBoundary, 0.0 ), precisionBoundary, std::nextafter( precisionBoundary, std::numeric_limits<double>::infinity() ) } )
         check( prepareSpline( { line } )->getLength( tolerance ) == GetLength( { line }, tolerance ), "prepared length preserves the representable-precision boundary policy" );
@@ -186,11 +209,12 @@ int main()
 
     std::optional<preparedCatmullRomSpline2> owned;
     vec2 expectedPoint{}, expectedFirst{}, expectedSecond{};
-    std::optional<splineParameter2> expectedParameter;
+    std::optional<splineParameter2> expectedParameter, expectedRangeParameter;
     std::optional<double> expectedLength, expectedDistance, expectedPartialLength, expectedRangeLength;
     {
         std::vector<vec2> source{ std::begin( curve ), std::end( curve ) };
         owned = prepareSpline( { source, true } );
+        expectedRangeParameter = GetParameterByDistance( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 3.5, 1.0e-4 );
         expectedParameter = GetParameterByDistance( { source, true }, 3.5, 1.0e-4 );
         expectedLength = GetLength( { source, true }, 1.0e-6 );
         expectedRangeLength = GetLength( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 1.0e-6 );
@@ -207,6 +231,7 @@ int main()
     check( expectedPartialLength && owned->getLength( 4, 0.25f, 0.75f, 1.0e-6 ) == expectedPartialLength, "partial length survives source mutation and destruction" );
     check( expectedRangeLength && owned->getLength( { 1, 0.25f }, { 4, 0.75f }, 1.0e-6 ) == expectedRangeLength, "range length survives source mutation and destruction" );
     check( expectedParameter && equal( owned->getParameterByDistance( 3.5, 1.0e-4 ), expectedParameter ), "inverse survives source mutation and destruction" );
+    check( expectedRangeParameter && equal( owned->getParameterByDistance( { 1, 0.25f }, { 4, 0.75f }, 3.5, 1.0e-4 ), expectedRangeParameter ), "range inverse survives source mutation and destruction" );
     auto copied = *owned;
     auto moved = std::move( copied );
     owned.reset();
@@ -217,6 +242,7 @@ int main()
     check( moved.getLength( 4, 0.25f, 0.75f, 1.0e-6 ) == expectedPartialLength, "copied and moved snapshots preserve partial length" );
     check( moved.getLength( { 1, 0.25f }, { 4, 0.75f }, 1.0e-6 ) == expectedRangeLength, "copied and moved snapshots preserve range length" );
     check( equal( moved.getParameterByDistance( 3.5, 1.0e-4 ), expectedParameter ), "copied and moved snapshots preserve inverse queries" );
+    check( equal( moved.getParameterByDistance( { 1, 0.25f }, { 4, 0.75f }, 3.5, 1.0e-4 ), expectedRangeParameter ), "copied and moved snapshots preserve range inverse queries" );
     const preparedCatmullRomSpline2 empty{};
     check( !empty.getLength( 1.0e-6 ), "empty prepared geometry has no total length" );
     check( !empty.getDistance( 0, 0.0f, 1.0e-6 ), "empty prepared geometry has no cumulative distance" );
@@ -256,6 +282,16 @@ int main()
     for( double distance : { -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), -static_cast<double>( infinity ) } )
         check( !moved.getParameterByDistance( distance, 1.0e-6 ), "inverse rejects invalid distances without asserting" );
     check( !moved.getParameterByDistance( 2.0 * *expectedLength, 1.0e-6 ), "closed inverse rejects distance beyond one traversal instead of wrapping" );
+    check( !empty.getParameterByDistance( { 0, 0.0f }, { 0, 0.0f }, 0.0, 1.0e-6 ), "empty geometry has no range inverse even at zero distance" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), -static_cast<double>( infinity ) } )
+        check( !moved.getParameterByDistance( { 0, 1.0f }, { 1, 0.0f }, 0.0, tolerance ), "range inverse validates tolerance before returning an equal-position endpoint" );
+    for( double distance : { -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), -static_cast<double>( infinity ) } )
+        check( !moved.getParameterByDistance( { 0, 0.0f }, { 4, 1.0f }, distance, 1.0e-6 ), "range inverse rejects invalid distances" );
+    for( splineParameter2 invalid : { splineParameter2{ moved.getSegmentCount(), 0.0f }, { std::numeric_limits<std::size_t>::max(), 0.0f }, { 0, -0.01f }, { 0, 1.01f }, { 0, nan }, { 0, infinity }, { 0, -infinity } } )
+        check( !moved.getParameterByDistance( invalid, { 4, 1.0f }, 0.0, 1.0e-6 ) && !moved.getParameterByDistance( { 0, 0.0f }, invalid, 0.0, 1.0e-6 ) && !moved.getParameterByDistance( invalid, invalid, 0.0, 1.0e-6 ), "range inverse validates both endpoints before normalization or equality" );
+    check( !moved.getParameterByDistance( { 4, 1.0f }, { 0, 0.0f }, 0.0, 1.0e-6 ) && !moved.getParameterByDistance( { 1, 0.75f }, { 1, 0.25f }, 0.0, 1.0e-6 ), "range inverse rejects reverse traversal without closed wrapping" );
+    check( !moved.getParameterByDistance( { 1, 0.25f }, { 4, 0.75f }, 2.0 * *expectedRangeLength, 1.0e-6 ), "range inverse rejects distances beyond the specified range" );
+    check( !tailSnapshot->getParameterByDistance( 0.5, 1.0e-10 ) && equal( tailSnapshot->getParameterByDistance( { 2, 0.25f }, { 3, 0.75f }, 0.5, 1.0e-10 ), splineParameter2{ 2, 0.75f } ), "range inverse does not require unrelated prefix or total lengths to converge" );
     const vec2 repeated[] = { { 0, 0 }, { 1, 0 }, { 1, 0 } };
     const vec2 nonfinite[] = { { 0, 0 }, { nan, 1 } };
     const vec2 infinite[] = { { 0, 0 }, { infinity, 1 } };

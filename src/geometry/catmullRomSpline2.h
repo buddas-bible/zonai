@@ -69,6 +69,10 @@ public:
     // 기존 거리 역조회와 같은 길이 오차·실패 정책. float t 정밀도 부족도 nullopt.
     [[nodiscard]] std::optional<splineParameter2> getParameterByDistance( double distance, double tolerance ) const;
 
+    // 정방향 [from, to]의 시작부터 잰 거리를 역산함. 거리 0은 from, 양수인 범위 전체 길이는 to.
+    // 기존 부분 경로 역조회의 오차·실패 정책. 0 길이는 거리 0만 허용하며 자동 순환하지 않음.
+    [[nodiscard]] std::optional<splineParameter2> getParameterByDistance( splineParameter2 from, splineParameter2 to, double distance, double tolerance ) const;
+
 private:
     std::vector<preparedSplineSegment2> segments_{};
     bool isLoop_ = false;
