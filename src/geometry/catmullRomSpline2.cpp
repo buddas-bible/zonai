@@ -447,6 +447,20 @@ std::optional<splineParameter2> preparedCatmullRomSpline2::getParameterByDistanc
     return {};
 }
 
+std::optional<splineSample2> preparedCatmullRomSpline2::evaluateByDistance( double distance, double tolerance ) const
+{
+    const auto parameter = getParameterByDistance( distance, tolerance );
+    if( !parameter ) return {};
+    return evaluateSample( parameter->segmentIndex, parameter->t, tolerance );
+}
+
+std::optional<splineSample2> preparedCatmullRomSpline2::evaluateByDistance( splineParameter2 from, splineParameter2 to, double distance, double tolerance ) const
+{
+    const auto parameter = getParameterByDistance( from, to, distance, tolerance );
+    if( !parameter ) return {};
+    return evaluateSample( parameter->segmentIndex, parameter->t, tolerance );
+}
+
 bool IsValid( const catmullRomSpline2& spline )
 {
     if( spline.points.size() < ( spline.isLoop ? 3u : 2u ) ) return false;
