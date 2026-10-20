@@ -190,6 +190,70 @@ std::optional<aabb2> GetSegmentAABB( const catmullRomSpline2& spline, std::size_
 
 } // namespace
 
+std::optional<preparedCatmullRomSpline2> prepareSpline( const catmullRomSpline2& spline )
+{
+    if( !IsValid( spline ) ) return {};
+
+    preparedCatmullRomSpline2 prepared{};
+    prepared.isLoop_ = spline.isLoop;
+    const std::size_t count = GetSegmentCount( spline );
+    prepared.segments_.reserve( count );
+    for( std::size_t i = 0; i < count; ++i )
+    {
+        preparedCatmullRomSpline2::segment segment{};
+        segment.start = spline.points[i];
+        segment.end = GetPoint( spline, i + 1 );
+        GetTangents( spline, i, segment.tangent1, segment.tangent2 );
+
+        const vec2 delta = segment.end - segment.start;
+        segment.quadratic = 3.0f * delta - 2.0f * segment.tangent1 - segment.tangent2;
+        segment.cubic = segment.tangent1 + segment.tangent2 - 2.0f * delta;
+        if( !IsFinite( segment.tangent1 ) || !IsFinite( segment.tangent2 ) || !IsFinite( segment.quadratic ) || !IsFinite( segment.cubic ) ) return {};
+
+        prepared.segments_.push_back( segment );
+    }
+    return prepared;
+}
+
+vec2 preparedCatmullRomSpline2::evaluate( std::size_t segmentIndex, float t ) const
+{
+    const bool valid = segmentIndex < segments_.size() && std::isfinite( t ) && t >= 0.0f && t <= 1.0f;
+
+    assert( valid );
+    if( !valid ) return {};
+
+    const auto& segment = segments_[segmentIndex];
+    if( t == 0.0f ) return segment.start;
+    if( t == 1.0f ) return segment.end;
+
+    return segment.start + t * ( segment.tangent1 + t * ( segment.quadratic + t * segment.cubic ) );
+}
+
+vec2 preparedCatmullRomSpline2::derivative( std::size_t segmentIndex, float t ) const
+{
+    const bool valid = segmentIndex < segments_.size() && std::isfinite( t ) && t >= 0.0f && t <= 1.0f;
+
+    assert( valid );
+    if( !valid ) return {};
+
+    const auto& segment = segments_[segmentIndex];
+    if( t == 0.0f ) return segment.tangent1;
+    if( t == 1.0f ) return segment.tangent2;
+
+    return segment.tangent1 + t * ( 2.0f * segment.quadratic + 3.0f * t * segment.cubic );
+}
+
+vec2 preparedCatmullRomSpline2::secondDerivative( std::size_t segmentIndex, float t ) const
+{
+    const bool valid = segmentIndex < segments_.size() && std::isfinite( t ) && t >= 0.0f && t <= 1.0f;
+
+    assert( valid );
+    if( !valid ) return {};
+
+    const auto& segment = segments_[segmentIndex];
+    return 2.0f * segment.quadratic + 6.0f * t * segment.cubic;
+}
+
 bool IsValid( const catmullRomSpline2& spline )
 {
     if( spline.points.size() < ( spline.isLoop ? 3u : 2u ) ) return false;
