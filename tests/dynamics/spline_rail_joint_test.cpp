@@ -28,6 +28,42 @@ bool near( float a, float b )
 
 int main()
 {
+    for( bool curved : { false, true } )
+        for( bool dynamicA : { false, true } )
+        {
+            splineRailJointSim2 hard{}, legacyHard{};
+            const vec2 line[] = { { -4, 0 }, { 4, 0 } };
+            const vec2 curve[] = { { -4, 0 }, { 0, 1 }, { 4, 0 } };
+            hard.rotationMode = splineRailRotationMode::followTangent;
+            hard.enableAngularSpring = false;
+            hard.angularHertz = 3.0f;
+            hard.angularDampingRatio = 0.4f;
+            hard.localAnchorB = { 0.2f, -0.1f };
+            check( setSplineRailGeometry( hard, curved ? std::span<const vec2>{ curve } : std::span<const vec2>{ line } ), "angular constraint fixture builds" );
+            legacyHard = hard;
+            legacyHard.enableAngularSpring = true;
+            legacyHard.angularHertz = 0.0f;
+            bodySim a{}, b{};
+            a.invMass = dynamicA ? 0.5f : 0.0f;
+            a.invInertia = dynamicA ? 0.25f : 0.0f;
+            b.invMass = 1.0f;
+            b.invInertia = 0.5f;
+            b.center = { -0.5f, 0.8f };
+            b.transform = { b.center, rot2::FromRadians( 0.3f ) };
+            auto actual = prepareSplineRailJointConstraint( hard, a, b, 1.0f / 60.0f );
+            auto expected = prepareSplineRailJointConstraint( legacyHard, a, b, 1.0f / 60.0f );
+            bodyState aa{}, ab{}, ea{}, eb{};
+            ab.linearVelocity = { 1.0f, 0.5f };
+            ab.angularVelocity = 2.0f;
+            eb = ab;
+            for( bool useBias : { true, true, false, false } )
+            {
+                solveSplineRailJointConstraint( actual, aa, ab, useBias );
+                solveSplineRailJointConstraint( expected, ea, eb, useBias );
+                check( Length( aa.linearVelocity - ea.linearVelocity ) < 1.0e-5f && Length( ab.linearVelocity - eb.linearVelocity ) < 1.0e-5f && near( aa.angularVelocity, ea.angularVelocity ) && near( ab.angularVelocity, eb.angularVelocity ), "explicit hard tangent constraint matches legacy zero-Hertz response without losing spring settings" );
+            }
+            check( hard.angularHertz == 3.0f && hard.angularDampingRatio == 0.4f, "hard constraint retains its stored spring tuning" );
+        }
     for( int mode = 0; mode < 8; ++mode )
         for( float inverseMass : { 1.0f, 1.0e-6f, 1.0e-8f } )
             for( bool dynamicA : { false, true } )

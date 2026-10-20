@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <utility>
 #include "dynamics/world.h"
 
 using namespace zonai;
@@ -26,6 +27,52 @@ bool near( vec2 a, vec2 b, float error = 0.002f )
 
 int main()
 {
+    {
+        world simulation{};
+        simulation.SetGravity( {} );
+        const auto a = simulation.CreateBody();
+        const auto b = simulation.CreateBody( bodyType::Dynamic, { { 0, 0.25f }, rot2::FromRadians( 0.35f ) } );
+        ( void )simulation.CreateShape( b, circle2{ {}, 0.25f } );
+        const vec2 points[] = { { -2, 0 }, { 0, 1 }, { 2, 0 } };
+        splineRailJointDef definition{};
+        definition.bodyA = a;
+        definition.bodyB = b;
+        definition.points = points;
+        definition.rotationMode = splineRailRotationMode::followTangent;
+        definition.enableAngularSpring = false;
+        definition.angularHertz = 4.0f;
+        definition.angularDampingRatio = 0.45f;
+        const auto id = simulation.createSplineRailJoint( definition );
+        auto data = simulation.getSplineRailJointData( id );
+        check( !data.enableAngularSpring && data.angularHertz == 4.0f && data.angularDampingRatio == 0.45f, "World preserves explicit hard tangent selection and spring tuning at creation" );
+        simulation.SetBodyTransform( b, { { 0, 0.25f }, rot2::FromRadians( 0.55f ) } );
+        simulation.SetBodyLinearVelocity( b, { 1.0f, 0.5f } );
+        simulation.SetBodyAngularVelocity( b, 2.0f );
+        const auto before = simulation.getSplineRailJointData( id );
+        const auto pose = simulation.GetBodyTransform( b );
+        const auto velocity = simulation.GetBodyLinearVelocity( b );
+        const auto angularVelocity = simulation.GetBodyAngularVelocity( b );
+        for( bool spring : { true, false, true } )
+        {
+            simulation.SetBodyAwake( b, false );
+            simulation.setSplineRailJointRotation( id, splineRailRotationMode::followTangent, 4.0f, 0.45f, spring );
+            data = simulation.getSplineRailJointData( id );
+            check( data.enableAngularSpring == spring && data.angularHertz == 4.0f && data.angularDampingRatio == 0.45f && std::abs( data.currentAngle - before.currentAngle ) < 1.0e-6f && data.referenceAngle == before.referenceAngle, "changing angular constraint preserves spring tuning and the original tangent reference" );
+            check( simulation.IsBodyAwake( b ) && data.torque == 0.0f, "angular constraint changes wake the body and clear old impulses" );
+            simulation.SetBodyAwake( b, false );
+            simulation.setSplineRailJointRotation( id, splineRailRotationMode::followTangent, 4.0f, 0.45f, spring );
+            check( !simulation.IsBodyAwake( b ), "unchanged angular constraint does not wake the body" );
+        }
+        simulation.SetBodyAwake( b, true );
+        simulation.SetBodyLinearVelocity( b, velocity );
+        simulation.SetBodyAngularVelocity( b, angularVelocity );
+        simulation.setSplineRailJointRotation( id, splineRailRotationMode::followTangent, 4.0f, 0.45f, false );
+        check( near( simulation.GetBodyTransform( b ).position, pose.position, 0.0f ) && simulation.GetBodyTransform( b ).rotation.s == pose.rotation.s && near( simulation.GetBodyLinearVelocity( b ), velocity, 0.0f ) && simulation.GetBodyAngularVelocity( b ) == angularVelocity, "angular constraint selection does not overwrite dynamic pose or velocity" );
+        simulation.setSplineRailJointRotation( id, splineRailRotationMode::followTangent, -1.0f, 0.45f, true );
+        check( !simulation.getSplineRailJointData( id ).enableAngularSpring, "invalid tuning cannot change angular constraint selection" );
+        simulation.setSplineRailJointRotation( id, splineRailRotationMode::followTangent, 4.0f, 0.45f );
+        check( simulation.getSplineRailJointData( id ).enableAngularSpring, "existing rotation setter calls retain the legacy spring default" );
+    }
     for( int mode = 0; mode < 7; ++mode )
     {
         world lineWorld{}, curveWorld{};
@@ -83,7 +130,7 @@ int main()
         check( !curveWorld.IsValid( curveId ), "destroying a slider destroys its spline joint" );
     }
     const vec2 curve[] = { { -4.0f, 0.0f }, { -2.0f, 0.0f }, { 0.0f, 2.0f }, { 2.0f, 0.0f }, { 4.0f, 0.0f } };
-    for( float angularHertz : { 0.0f, 6.0f } )
+    for( const auto [angularHertz, enableAngularSpring] : { std::pair{ 0.0f, true }, { 6.0f, true }, { 6.0f, false } } )
         for( auto mode : { splineRailRotationMode::fixed, splineRailRotationMode::followTangent } )
         {
             world simulation{};
@@ -97,6 +144,7 @@ int main()
             definition.points = curve;
             definition.rotationMode = mode;
             definition.angularHertz = angularHertz;
+            definition.enableAngularSpring = enableAngularSpring;
             definition.enableMotor = true;
             definition.motorSpeed = 2.0f;
             definition.maxMotorForce = 20.0f;
@@ -111,7 +159,7 @@ int main()
                 if( mode == splineRailRotationMode::fixed )
                     check( std::abs( data.currentAngle ) < 0.0001f, "curved fixed rail retains its initial relative rotation" );
                 else
-                    check( std::abs( data.currentAngle ) < 0.18f, "curved tangent spring follows orientation without pose overwrites" );
+                    check( std::abs( data.currentAngle ) < 0.18f, "curved tangent constraint follows orientation without pose overwrites" );
                 maximumDistance = std::max( maximumDistance, data.currentTranslation );
             }
             const auto stopped = simulation.getSplineRailJointData( joint );

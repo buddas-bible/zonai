@@ -723,9 +723,25 @@ void rigidBodyDemoUi::drawExperimentControls()
         ImGui::TextWrapped( "동적 물체를 열린 곡선에 구속합니다. 양 끝점에서는 항상 정지합니다." );
         bool follow = rail.rotationMode == splineRailRotationMode::followTangent;
         bool rotationChanged = ImGui::Checkbox( "접선 회전###SplineRailFollow", &follow );
+        ImGui::BeginDisabled( !follow );
+        ImGui::TextUnformatted( "접선 회전 제약" );
+        if( ImGui::RadioButton( "강한 제약###SplineRailAngularHard", !rail.enableAngularSpring ) )
+        {
+            rail.enableAngularSpring = false;
+            rotationChanged = true;
+        }
+        ImGui::SameLine();
+        if( ImGui::RadioButton( "스프링###SplineRailAngularSpring", rail.enableAngularSpring ) )
+        {
+            rail.enableAngularSpring = true;
+            rotationChanged = true;
+        }
+        ImGui::BeginDisabled( !rail.enableAngularSpring );
         rotationChanged |= ImGui::SliderFloat( "회전 스프링###SplineRailAngularHertz", &rail.angularHertz, 0.0f, 10.0f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp );
         rotationChanged |= ImGui::SliderFloat( "회전 감쇠###SplineRailAngularDamping", &rail.angularDampingRatio, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
-        if( rotationChanged ) getWorld().setSplineRailJointRotation( id, follow ? splineRailRotationMode::followTangent : splineRailRotationMode::fixed, rail.angularHertz, rail.angularDampingRatio );
+        ImGui::EndDisabled();
+        ImGui::EndDisabled();
+        if( rotationChanged ) getWorld().setSplineRailJointRotation( id, follow ? splineRailRotationMode::followTangent : splineRailRotationMode::fixed, rail.angularHertz, rail.angularDampingRatio, rail.enableAngularSpring );
         bool springChanged = ImGui::Checkbox( "스프링###SplineRailSpring", &rail.enableSpring );
         springChanged |= ImGui::SliderFloat( "진동수###SplineRailHertz", &rail.hertz, 0.0f, 10.0f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp );
         springChanged |= ImGui::SliderFloat( "감쇠비###SplineRailDamping", &rail.dampingRatio, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );

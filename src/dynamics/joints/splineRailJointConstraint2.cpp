@@ -435,12 +435,13 @@ void solveSplineRailJointConstraint( splineRailJointConstraint2& c, bodyState& s
     }
     else
     {
-        const auto angular = joint.angularHertz > 0.0f ? makeConstraintSoftness( joint.angularHertz, joint.angularDampingRatio, c.subStepTime ) : ( useBias ? softness : constraintSoftness2{} );
+        const bool angularSpring = joint.enableAngularSpring && joint.angularHertz > 0.0f;
+        const auto angular = angularSpring ? makeConstraintSoftness( joint.angularHertz, joint.angularDampingRatio, c.subStepTime ) : ( useBias ? softness : constraintSoftness2{} );
         const auto normal = useBias ? softness : constraintSoftness2{};
         const float gamma1 = normal.massScale > 0.0f ? k11 * normal.impulseScale / normal.massScale : 0.0f;
         const float gamma2 = angular.massScale > 0.0f ? k22 * angular.impulseScale / angular.massScale : 0.0f;
         rhs.x += ( useBias ? normal.biasRate * rows.frame.lateralError : 0.0f ) + gamma1 * c.impulse.x;
-        rhs.y += ( joint.angularHertz > 0.0f || useBias ? angular.biasRate * rows.frame.angleError : 0.0f ) + gamma2 * c.impulse.y;
+        rhs.y += ( angularSpring || useBias ? angular.biasRate * rows.frame.angleError : 0.0f ) + gamma2 * c.impulse.y;
         const float x = k11 + gamma1, y = k22 + gamma2, determinant = x * y - k12 * k12;
         delta = determinant > 0.0f ? vec2{ -( y * rhs.x - k12 * rhs.y ) / determinant, -( x * rhs.y - k12 * rhs.x ) / determinant } : vec2{ x > 0.0f ? -rhs.x / x : 0.0f, y > 0.0f ? -rhs.y / y : 0.0f };
     }

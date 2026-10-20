@@ -48,6 +48,12 @@ int main()
     {
         rigidBodyDemo scene{ kind };
         auto& physics = scene.getWorld();
+        if( kind == demoKind::splineRail )
+        {
+            const auto joint = scene.getSplineRailJoint();
+            physics.setSplineRailJointRotation( joint, splineRailRotationMode::followTangent, 5.0f, 0.4f, false );
+            check( !physics.getSplineRailJointData( joint ).enableAngularSpring, "rail demo accepts explicit hard tangent rotation" );
+        }
         check( scene.getSplineControlPoints().size() >= 2, "both spline path and rail expose editable control points" );
         const auto body = scene.getImpulseBody();
         const auto shape = scene.getShapes()[0].shapeHandle;
@@ -110,6 +116,7 @@ int main()
         else
         {
             const auto data = physics.getSplineRailJointData( scene.getSplineRailJoint() );
+            check( !data.enableAngularSpring && data.angularHertz == 5.0f && data.angularDampingRatio == 0.4f, "rail editing and history preserve angular constraint selection and tuning" );
             check( data.enableSpring && data.trackingValid && physics.getJointCount() == 1, "edited rail retains its spring and joint" );
             for( int i = 0; i < 120; ++i )
                 scene.step( 1.0f / 60.0f, 4 );
