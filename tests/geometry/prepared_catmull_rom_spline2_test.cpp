@@ -41,6 +41,13 @@ void compare( const catmullRomSpline2& spline )
         check( equal( segment.start, a ) && equal( segment.end, b ) && equal( segment.tangent1, first ) && equal( segment.tangent2, last ) && equal( segment.quadratic, 3.0f * ( b - a ) - 2.0f * first - last ) && equal( segment.cubic, first + last - 2.0f * ( b - a ) ), "shared coefficients exactly match the previous rail preparation" );
     }
 
+    for( double tolerance : { std::numeric_limits<double>::max(), 1.0e-2, 1.0e-6, 1.0e-10, 1.0e-15, std::numeric_limits<double>::min(), std::numeric_limits<double>::denorm_min() } )
+    {
+        const auto expected = GetLength( spline, tolerance );
+        const auto actual = prepared->getLength( tolerance );
+        check( actual == expected, "prepared total length preserves exact results and precision failures" );
+    }
+
     for( std::size_t i = 0; i < GetSegmentCount( spline ); ++i )
         for( int step = 0; step <= 128; ++step )
         {
@@ -61,12 +68,20 @@ void compare( const catmullRomSpline2& spline )
 int main()
 {
     const vec2 line[] = { { 1, 2 }, { 5, 4 } };
+    const auto preparedLength = prepareSpline( { line } )->getLength( 1.0e-6 );
+    check( preparedLength && std::abs( *preparedLength - std::sqrt( 20.0 ) ) < 1.0e-14, "prepared line returns its analytic total length" );
     const vec2 curve[] = { { -3, 1 }, { -1.7f, -0.1f }, { 0.2f, 4.3f }, { 2.9f, -1.2f }, { 5, 2 } };
     const vec2 cusp[] = { { 0, 0 }, { 1, 0 }, { 0, 0 } };
     compare( { line } );
     compare( { curve } );
     compare( { curve, true } );
     compare( { cusp } );
+    const vec2 triangle[] = { { 0, 0 }, { 2, 0 }, { 0, 1 } };
+    compare( { triangle, true } );
+    check( prepareSpline( { cusp } )->getLength( 1.0e-6 ) == 2.0, "zero-tangent geometry retains its positive length" );
+    const double precisionBoundary = 128.0 * std::numeric_limits<double>::epsilon() * *preparedLength;
+    for( double tolerance : { std::nextafter( precisionBoundary, 0.0 ), precisionBoundary, std::nextafter( precisionBoundary, std::numeric_limits<double>::infinity() ) } )
+        check( prepareSpline( { line } )->getLength( tolerance ) == GetLength( { line }, tolerance ), "prepared length preserves the representable-precision boundary policy" );
     for( float scale : { 1.0e-8f, 1.0f, 1.0e8f } )
     {
         std::vector<vec2> scaled;
@@ -102,20 +117,28 @@ int main()
 
     std::optional<preparedCatmullRomSpline2> owned;
     vec2 expectedPoint{}, expectedFirst{}, expectedSecond{};
+    std::optional<double> expectedLength;
     {
         std::vector<vec2> source{ std::begin( curve ), std::end( curve ) };
         owned = prepareSpline( { source, true } );
+        expectedLength = GetLength( { source, true }, 1.0e-6 );
         expectedPoint = Evaluate( { source, true }, 4, 0.37f );
         expectedFirst = Derivative( { source, true }, 4, 0.37f );
         expectedSecond = SecondDerivative( { source, true }, 4, 0.37f );
         source.assign( 1000, { 100, 200 } );
     }
     check( owned && equal( owned->evaluate( 4, 0.37f ), expectedPoint ) && equal( owned->derivative( 4, 0.37f ), expectedFirst ) && equal( owned->secondDerivative( 4, 0.37f ), expectedSecond ), "snapshot survives source mutation reallocation and destruction" );
+    check( expectedLength && owned->getLength( 1.0e-6 ) == expectedLength, "prepared total length survives source mutation and destruction" );
     auto copied = *owned;
     auto moved = std::move( copied );
     owned.reset();
     check( moved.isLoop() && moved.getSegmentCount() == 5 && equal( moved.evaluate( 4, 0.37f ), expectedPoint ), "copied and moved snapshots own their data" );
 
+    check( moved.getLength( 1.0e-6 ) == expectedLength, "copied and moved snapshots preserve total length" );
+    const preparedCatmullRomSpline2 empty{};
+    check( !empty.getLength( 1.0e-6 ), "empty prepared geometry has no total length" );
+    for( double tolerance : { 0.0, -1.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity() } )
+        check( !moved.getLength( tolerance ), "prepared total length rejects invalid tolerance without asserting" );
     const float nan = std::numeric_limits<float>::quiet_NaN(), infinity = std::numeric_limits<float>::infinity();
     const vec2 repeated[] = { { 0, 0 }, { 1, 0 }, { 1, 0 } };
     const vec2 nonfinite[] = { { 0, 0 }, { nan, 1 } };

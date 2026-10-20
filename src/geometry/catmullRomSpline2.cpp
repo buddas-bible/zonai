@@ -66,15 +66,13 @@ vec2 EvaluateSegment( const catmullRomSpline2& spline, std::size_t segmentIndex,
     return spline.points[segmentIndex] + t * ( tangent1 + t * ( quadratic + t * cubic ) );
 }
 
-std::optional<double> GetSegmentLength( const catmullRomSpline2& spline, std::size_t segmentIndex, double begin, double end, double tolerance )
+std::optional<double> IntegrateSegmentLength( vec2 startPoint, vec2 endPoint, vec2 tangent1, vec2 tangent2, double begin, double end, double tolerance )
 {
     if( !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
     if( begin == end ) return 0.0;
-    vec2 tangent1{}, tangent2{};
-    GetTangents( spline, segmentIndex, tangent1, tangent2 );
     if( !IsFinite( tangent1 ) || !IsFinite( tangent2 ) ) return {};
-    const double dx = static_cast<double>( GetPoint( spline, segmentIndex + 1 ).x ) - spline.points[segmentIndex].x;
-    const double dy = static_cast<double>( GetPoint( spline, segmentIndex + 1 ).y ) - spline.points[segmentIndex].y;
+    const double dx = static_cast<double>( endPoint.x ) - startPoint.x;
+    const double dy = static_cast<double>( endPoint.y ) - startPoint.y;
     const double qx = 3.0 * dx - 2.0 * tangent1.x - tangent2.x, qy = 3.0 * dy - 2.0 * tangent1.y - tangent2.y;
     const double cx = tangent1.x + static_cast<double>( tangent2.x ) - 2.0 * dx, cy = tangent1.y + static_cast<double>( tangent2.y ) - 2.0 * dy;
     // 미분 다항식을 double로 평가해 float t 반올림이 적분 수렴을 막지 않게 함.
@@ -101,6 +99,15 @@ std::optional<double> GetSegmentLength( const catmullRomSpline2& spline, std::si
     };
     const double fa = speed( begin ), fm = speed( 0.5 * ( begin + end ) ), fb = speed( end );
     return integrate( integrate, begin, end, fa, fm, fb, ( end - begin ) * ( fa + 4.0 * fm + fb ) / 6.0, tolerance, 0 );
+}
+
+std::optional<double> GetSegmentLength( const catmullRomSpline2& spline, std::size_t segmentIndex, double begin, double end, double tolerance )
+{
+    if( !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
+    if( begin == end ) return 0.0;
+    vec2 tangent1{}, tangent2{};
+    GetTangents( spline, segmentIndex, tangent1, tangent2 );
+    return IntegrateSegmentLength( spline.points[segmentIndex], GetPoint( spline, segmentIndex + 1 ), tangent1, tangent2, begin, end, tolerance );
 }
 
 splineParameter2 NormalizeParameter( splineParameter2 parameter, std::size_t count )
@@ -272,6 +279,22 @@ std::optional<splineSample2> preparedCatmullRomSpline2::evaluateSample( std::siz
     const double speed = std::hypot( static_cast<double>( first.x ), static_cast<double>( first.y ) );
     if( !std::isfinite( speed ) || speed <= 0.0 ) return {};
     return splineSample2{ point, { static_cast<float>( first.x / speed ), static_cast<float>( first.y / speed ) } };
+}
+
+std::optional<double> preparedCatmullRomSpline2::getLength( double tolerance ) const
+{
+    if( segments_.empty() || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
+
+    const std::size_t count = segments_.size();
+    double length = 0.0;
+    for( const auto& segment : segments_ )
+    {
+        const auto segmentLength = IntegrateSegmentLength( segment.start, segment.end, segment.tangent1, segment.tangent2, 0.0, 1.0, tolerance / ( 4.0 * count ) );
+        if( !segmentLength || *segmentLength <= 0.0 ) return {};
+        length += *segmentLength;
+    }
+    if( !std::isfinite( length ) || tolerance < 32.0 * std::numeric_limits<double>::epsilon() * length ) return {};
+    return length;
 }
 
 bool IsValid( const catmullRomSpline2& spline )

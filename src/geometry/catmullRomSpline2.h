@@ -48,6 +48,9 @@ public:
     // 기존 거리 조회와 같은 위치 반올림 검사와 단위 접선. 잘못된 입력·0 접선도 nullopt.
     [[nodiscard]] std::optional<splineSample2> evaluateSample( std::size_t segmentIndex, float t, double tolerance ) const;
 
+    // 전체 길이를 양수인 절대오차 목표로 적분함. 빈 스냅샷·잘못된 오차·정밀도/수렴 실패는 nullopt.
+    [[nodiscard]] std::optional<double> getLength( double tolerance ) const;
+
 private:
     std::vector<preparedSplineSegment2> segments_{};
     bool isLoop_ = false;
