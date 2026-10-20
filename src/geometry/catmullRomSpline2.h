@@ -18,6 +18,18 @@ struct catmullRomSpline2
     bool isLoop = false;
 };
 
+struct splineSample2
+{
+    vec2 point{};
+    vec2 tangent{};
+};
+
+// float 평가 계수를 보관함. double t가 필요한 소비자도 같은 계수를 사용할 수 있음.
+struct preparedSplineSegment2
+{
+    vec2 start{}, end{}, tangent1{}, tangent2{}, quadratic{}, cubic{};
+};
+
 // 검증과 구간 계수 계산을 마친 독립 스냅샷. 원본 배열 변경·파괴의 영향을 받지 않음.
 class preparedCatmullRomSpline2
 {
@@ -25,17 +37,19 @@ public:
     [[nodiscard]] std::size_t getSegmentCount() const noexcept { return segments_.size(); }
     [[nodiscard]] bool isLoop() const noexcept { return isLoop_; }
 
+    // 스냅샷 교체·파괴 전까지 유효한 읽기 전용 계수임.
+    [[nodiscard]] std::span<const preparedSplineSegment2> getSegments() const noexcept { return segments_; }
+
     // 기존 구간 조회와 같은 t in [0, 1] 계약. 잘못된 조회는 assert / Release에서 {}.
     [[nodiscard]] vec2 evaluate( std::size_t segmentIndex, float t ) const;
     [[nodiscard]] vec2 derivative( std::size_t segmentIndex, float t ) const;
     [[nodiscard]] vec2 secondDerivative( std::size_t segmentIndex, float t ) const;
 
+    // 기존 거리 조회와 같은 위치 반올림 검사와 단위 접선. 잘못된 입력·0 접선도 nullopt.
+    [[nodiscard]] std::optional<splineSample2> evaluateSample( std::size_t segmentIndex, float t, double tolerance ) const;
+
 private:
-    struct segment
-    {
-        vec2 start{}, end{}, tangent1{}, tangent2{}, quadratic{}, cubic{};
-    };
-    std::vector<segment> segments_{};
+    std::vector<preparedSplineSegment2> segments_{};
     bool isLoop_ = false;
 
     friend std::optional<preparedCatmullRomSpline2> prepareSpline( const catmullRomSpline2& spline );
@@ -83,12 +97,6 @@ std::vector<vec2> SampleAdaptive( const catmullRomSpline2& spline, float maxErro
 // 양 끝점을 포함하며 닫힌 결과는 끝에 첫 점을 반복함. 간격은 chord 길이가 아닌 누적 거리 기준.
 // 0 접선도 허용. 잘못된 입력 / 불가능한 점 수 / 역산 또는 위치 정밀도 부족은 빈 배열.
 std::vector<vec2> SampleByDistance( const catmullRomSpline2& spline, std::size_t subdivisions, double tolerance );
-
-struct splineSample2
-{
-    vec2 point{};
-    vec2 tangent{};
-};
 
 // 목표 절대 길이 오차로 적분함. 잘못된 입력 / 수렴 실패는 nullopt. 지형 샘플링 오차와 별개임.
 std::optional<double> GetLength( const catmullRomSpline2& spline, double tolerance );

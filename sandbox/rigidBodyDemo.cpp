@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <utility>
 #include <variant>
 
 #include "geometry/catmullRomSpline2.h"
@@ -352,9 +353,12 @@ void rigidBodyDemo::createSplinePath()
 {
     splineControlPoints_.assign( SPLINE_PATH_POINTS.begin(), SPLINE_PATH_POINTS.end() );
     const catmullRomSpline2 path{ splineControlPoints_ };
+    auto geometry = prepareSpline( path );
     const auto length = GetLength( path, SPLINE_PATH_TOLERANCE );
-    const auto start = EvaluateByDistance( path, 0.0, SPLINE_PATH_TOLERANCE );
-    if( !length || !start ) return;
+    if( !geometry || !length ) return;
+    splinePathGeometry_ = std::move( *geometry );
+    const auto start = getSplinePathSample( 0.0 );
+    if( !start ) return;
     splinePathLength_ = *length;
     impulseBody_ = world_.CreateBody( bodyType::Kinematic, { start->point, rot2::FromRadians( std::atan2( start->tangent.y, start->tangent.x ) ) } );
     const auto shape = world_.CreateShape( impulseBody_, MakeBox( { 0.6f, 0.2f } ) );
@@ -382,6 +386,17 @@ void rigidBodyDemo::createSplineRail()
     splinePathLength_ = *length;
 }
 
+std::optional<splineSample2> rigidBodyDemo::getSplinePathSample( double distance ) const
+{
+    const std::size_t count = splinePathGeometry_.getSegmentCount();
+    if( count == 0 ) return {};
+
+    // 거리 역조회와 오차 예산은 기존 EvaluateByDistance의 전체 범위 경로를 유지함.
+    const auto parameter = GetParameterByDistance( { splineControlPoints_ }, { 0, 0.0f }, { count - 1, 1.0f }, distance, SPLINE_PATH_TOLERANCE );
+    if( !parameter ) return {};
+    return splinePathGeometry_.evaluateSample( parameter->segmentIndex, parameter->t, SPLINE_PATH_TOLERANCE );
+}
+
 void rigidBodyDemo::updateSplinePath( float timeStep )
 {
     if( kind_ != demoKind::splinePath || timeStep <= 0.0f || !world_.IsValid( impulseBody_ ) ) return;
@@ -389,7 +404,7 @@ void rigidBodyDemo::updateSplinePath( float timeStep )
     world_.SetBodyAngularVelocity( impulseBody_, 0.0f );
     if( splinePathDistance_ == splinePathLength_ && !splinePathNeedsAlignment_ ) return;
     const double next = std::min( splinePathLength_, splinePathDistance_ + SPLINE_PATH_SPEED * timeStep );
-    const auto target = EvaluateByDistance( { splineControlPoints_ }, next, SPLINE_PATH_TOLERANCE );
+    const auto target = getSplinePathSample( next );
     if( !target ) return;
     const auto current = world_.GetBodyTransform( impulseBody_ );
     const vec2 velocity = ( target->point - current.position ) / timeStep;
@@ -406,7 +421,7 @@ void rigidBodyDemo::updateSplinePath( float timeStep )
 void rigidBodyDemo::resetSplinePath()
 {
     if( kind_ != demoKind::splinePath || !world_.IsValid( impulseBody_ ) ) return;
-    const auto start = EvaluateByDistance( { splineControlPoints_ }, 0.0, SPLINE_PATH_TOLERANCE );
+    const auto start = getSplinePathSample( 0.0 );
     if( !start ) return;
     cancelInput();
     world_.SetBodyTransform( impulseBody_, { start->point, rot2::FromRadians( std::atan2( start->tangent.y, start->tangent.x ) ) } );
@@ -1284,6 +1299,7 @@ bool rigidBodyDemo::updateSplineGeometry( std::span<const vec2> points, float er
         const auto length = GetLength( { points }, SPLINE_PATH_TOLERANCE );
         if( !length ) return false;
         const double fraction = splinePathLength_ > 0.0 ? splinePathDistance_ / splinePathLength_ : 0.0;
+        splinePathGeometry_ = std::move( candidate.geometry );
         splinePathLength_ = *length;
         splinePathDistance_ = fraction * *length;
         splinePathNeedsAlignment_ = true;

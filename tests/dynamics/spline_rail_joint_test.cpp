@@ -70,6 +70,7 @@ int main()
                 const vec2 points[] = { { -100.0f, 0.0f }, { 100.0f, 0.0f } };
                 rail.referenceDistance = 100.0;
                 check( setSplineRailGeometry( rail, points ), "straight rail geometry builds" );
+                check( rail.geometry.getSegmentCount() == 1 && rail.geometry.getSegments()[0].start.x == -100.0f, "rail preparation commits its owned prepared snapshot" );
                 auto expected = preparePrismaticJointConstraint( line, a, b, 1.0f / 60.0f );
                 auto actual = prepareSplineRailJointConstraint( rail, a, b, 1.0f / 60.0f );
                 bodyState ea{}, eb{}, aa{}, ab{};
@@ -167,6 +168,20 @@ int main()
         check( !constraint.trackingValid && sb.linearVelocity.x == 1.0f && sb.linearVelocity.y == 2.0f && constraint.springImpulse == 0.0f, "singular projection clears caches and skips the entire physical impulse" );
         const vec2 cusp[] = { { 0, 0 }, { 1, 0 }, { 0, 0 } };
         check( !setSplineRailGeometry( rail, cusp ) && rail.points.size() == 3 && rail.points[0].x == -2.0f, "zero-tangent candidate is rejected before replacing geometry" );
+    }
+    {
+        const vec2 points[] = { { -2, 0 }, { 0, 1 }, { 2, 0 } };
+        const vec2 edited[] = { { -2, 0 }, { 0, 1.5f }, { 2, 0 } };
+        const vec2 invalid[] = { { 0, 0 }, { 1, 0 }, { 0, 0 } };
+        splineRailJointSim2 rail{};
+        check( setSplineRailGeometry( rail, points ) && setSplineRailGeometry( rail, edited ), "rail snapshot accepts a regular geometry edit" );
+        const vec2 before = rail.geometry.evaluate( 0, 0.5f );
+        const double length = rail.length;
+        const auto* address = rail.geometry.getSegments().data();
+        check( !setSplineRailGeometry( rail, invalid ) && rail.geometry.getSegments().data() == address && rail.geometry.evaluate( 0, 0.5f ).y == before.y && rail.length == length, "failed rail edit preserves snapshot and arc metadata atomically" );
+        auto copy = rail;
+        rail = {};
+        check( copy.geometry.getSegments().size() == copy.segments.size() && copy.geometry.evaluate( 0, 0.5f ).y == before.y, "copied rail geometry has no borrowed segment pointers" );
     }
     return 0;
 }

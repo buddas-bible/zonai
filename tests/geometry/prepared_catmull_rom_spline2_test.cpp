@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <limits>
 #include <utility>
+#include <type_traits>
 
 #include "geometry/catmullRomSpline2.h"
 
@@ -30,6 +31,16 @@ void compare( const catmullRomSpline2& spline )
     const auto prepared = prepareSpline( spline );
     check( prepared.has_value(), "valid geometry creates a prepared snapshot" );
     check( prepared->getSegmentCount() == GetSegmentCount( spline ) && prepared->isLoop() == spline.isLoop, "prepared snapshot preserves topology" );
+    static_assert( std::is_same_v<decltype( prepared->getSegments() ), std::span<const preparedSplineSegment2>> );
+    check( prepared->getSegments().size() == prepared->getSegmentCount(), "prepared geometry exposes owned read-only segment coefficients" );
+    for( std::size_t i = 0; i < prepared->getSegmentCount(); ++i )
+    {
+        const auto& segment = prepared->getSegments()[i];
+        const vec2 a = Evaluate( spline, i, 0.0f ), b = Evaluate( spline, i, 1.0f );
+        const vec2 first = Derivative( spline, i, 0.0f ), last = Derivative( spline, i, 1.0f );
+        check( equal( segment.start, a ) && equal( segment.end, b ) && equal( segment.tangent1, first ) && equal( segment.tangent2, last ) && equal( segment.quadratic, 3.0f * ( b - a ) - 2.0f * first - last ) && equal( segment.cubic, first + last - 2.0f * ( b - a ) ), "shared coefficients exactly match the previous rail preparation" );
+    }
+
     for( std::size_t i = 0; i < GetSegmentCount( spline ); ++i )
         for( int step = 0; step <= 128; ++step )
         {
@@ -65,6 +76,30 @@ int main()
         compare( { scaled, true } );
     }
 
+    for( bool loop : { false, true } )
+    {
+        const catmullRomSpline2 spline{ curve, loop };
+        const auto prepared = prepareSpline( spline );
+        for( double tolerance : { 1.0e-4, 1.0e-10 } )
+        {
+            const auto length = GetLength( spline, tolerance );
+            check( length.has_value(), "distance equivalence fixture has finite length" );
+            const splineParameter2 from{ 0, 0.0f }, to{ GetSegmentCount( spline ) - 1, 1.0f };
+            for( int step = 0; step <= 16; ++step )
+            {
+                const double distance = *length * step / 16;
+                const auto expected = EvaluateByDistance( spline, distance, tolerance );
+                const auto parameter = GetParameterByDistance( spline, from, to, distance, tolerance );
+                const auto actual = parameter ? prepared->evaluateSample( parameter->segmentIndex, parameter->t, tolerance ) : std::nullopt;
+                check( expected.has_value() == actual.has_value() && ( !expected || ( equal( expected->point, actual->point ) && equal( expected->tangent, actual->tangent ) ) ), "cached final sampling preserves distance-query results and precision failures" );
+            }
+        }
+    }
+    const auto preparedLine = prepareSpline( { line } );
+    check( preparedLine->evaluateSample( 0, 0.5f, 1.0e-4 ).has_value(), "prepared sample returns a finite point and unit tangent" );
+    const auto preparedCusp = prepareSpline( { cusp } );
+    check( !preparedCusp->evaluateSample( 0, 1.0f, 1.0e-4 ), "prepared sample rejects a zero tangent" );
+
     std::optional<preparedCatmullRomSpline2> owned;
     vec2 expectedPoint{}, expectedFirst{}, expectedSecond{};
     {
@@ -88,6 +123,11 @@ int main()
     const vec2 closedDuplicate[] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 0 } };
     check( !prepareSpline( {} ) && !prepareSpline( { std::span{ line, 1 } } ) && !prepareSpline( { line, true } ), "preparation rejects empty and undersized paths" );
     check( !prepareSpline( { repeated } ) && !prepareSpline( { nonfinite } ) && !prepareSpline( { infinite } ) && !prepareSpline( { closedDuplicate, true } ), "preparation rejects duplicate and nonfinite geometry" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ) } )
+        check( !moved.evaluateSample( 0, 0.5f, tolerance ), "prepared sampling rejects invalid precision tolerances" );
+    for( float t : { -0.01f, 1.01f, nan, infinity } )
+        check( !moved.evaluateSample( 0, t, 1.0e-4 ), "prepared sampling rejects invalid parameters without asserting" );
+    check( !moved.evaluateSample( moved.getSegmentCount(), 0.5f, 1.0e-4 ), "prepared sampling rejects an invalid segment" );
 #ifdef NDEBUG
     for( float t : { -0.01f, 1.01f, nan, infinity } )
         check( equal( moved.evaluate( 0, t ), {} ) && equal( moved.derivative( 0, t ), {} ) && equal( moved.secondDerivative( 0, t ), {} ), "Release invalid parameters return zero vectors" );

@@ -331,6 +331,7 @@ private:
     void createPlayground();
     void createSplinePath();
     void createSplineRail();
+    [[nodiscard]] std::optional<splineSample2> getSplinePathSample( double distance ) const;
     void updateSplinePath( float timeStep );
     void createTerrainChain();
     void createPendulum();
@@ -385,6 +386,7 @@ private:
 
     bodyId impulseBody_{}; // 이동과 임펄스 입력을 적용할 물체
     std::array<transform2, 6> playgroundInitialTransforms_{};
+    preparedCatmullRomSpline2 splinePathGeometry_{};
     double splinePathDistance_ = 0.0;
     double splinePathLength_ = 0.0;
     bool splinePathNeedsAlignment_ = false;

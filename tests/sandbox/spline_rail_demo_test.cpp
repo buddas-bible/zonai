@@ -23,6 +23,23 @@ bool near( vec2 a, vec2 b )
     return Length( a - b ) < 1.0e-5f;
 }
 
+void checkEditedGeometry( rigidBodyDemo& scene )
+{
+    if( scene.getKind() == demoKind::splinePath )
+    {
+        scene.step( 0.03125f, 4 );
+        const auto expected = EvaluateByDistance( { scene.getSplinePathPoints() }, scene.getSplinePathDistance(), 1.0e-4 );
+        const auto pose = scene.getWorld().GetBodyTransform( scene.getImpulseBody() );
+        check( expected && near( pose.position, expected->point ) && Length( vec2{ pose.rotation.c, pose.rotation.s } - expected->tangent ) < 1.0e-4f, "every path edit and history restore uses the matching snapshot" );
+    }
+    else
+    {
+        const auto data = scene.getWorld().getSplineRailJointData( scene.getSplineRailJoint() );
+        const auto expected = Evaluate( { scene.getSplineControlPoints() }, data.parameter.segmentIndex, data.parameter.t );
+        check( data.trackingValid && Length( data.anchorA - expected ) < 1.0e-4f, "every rail edit and history restore uses the matching snapshot" );
+    }
+}
+
 }
 
 int main()
@@ -36,6 +53,11 @@ int main()
         const auto shape = scene.getShapes()[0].shapeHandle;
         if( kind == demoKind::splineRail ) check( physics.IsValid( scene.getSplineRailJoint() ) && physics.GetBody( body ).type == bodyType::Dynamic, "spline rail demo uses a dynamic slider and persistent joint" );
         scene.step( 0.5f, 4 );
+        if( kind == demoKind::splinePath )
+        {
+            const auto expected = EvaluateByDistance( { scene.getSplinePathPoints() }, 0.5, 1.0e-4 );
+            check( expected && scene.getSplinePathDistance() == 0.5 && near( physics.GetBodyTransform( body ).position, expected->point ), "cached path sampling advances at one metre per second" );
+        }
         const auto pose = physics.GetBodyTransform( body );
         const auto velocity = physics.GetBodyLinearVelocity( body );
         const float spin = physics.GetBodyAngularVelocity( body );
@@ -54,7 +76,11 @@ int main()
         check( !physics.IsValid( scene.getMouseJoint() ), "spline control editing does not create a mouse joint" );
         scene.cancelInput();
         if( kind == demoKind::splinePath ) check( std::abs( scene.getSplinePathDistance() / scene.getSplinePathLength() - fraction ) < 1.0e-10, "edited path preserves its progress ratio" );
-        check( scene.undoSplineEdit() && near( scene.getSplineControlPoints()[1], original ) && scene.redoSplineEdit(), "both spline demos undo and redo control edits" );
+        checkEditedGeometry( scene );
+        check( scene.undoSplineEdit() && near( scene.getSplineControlPoints()[1], original ), "both spline demos undo control edits" );
+        checkEditedGeometry( scene );
+        check( scene.redoSplineEdit(), "both spline demos redo control edits" );
+        checkEditedGeometry( scene );
         const auto count = scene.getSplineControlPoints().size();
         const vec2 midpoint = Evaluate( { scene.getSplineControlPoints() }, 1, 0.5f );
         input = {};
@@ -66,7 +92,9 @@ int main()
         scene.handleInput( input );
         scene.cancelInput();
         check( scene.getSplineControlPoints().size() == count + 1 && near( scene.getSplineControlPoints()[2], input.mousePosition ), "both spline demos insert clicked positions near the actual curve" );
+        checkEditedGeometry( scene );
         check( scene.removeSplineControlPoint( 2 ) && scene.getSplineControlPoints().size() == count, "both spline demos delete a selected control" );
+        checkEditedGeometry( scene );
         input.mousePosition = { 0.0f, 100.0f };
         scene.handleInput( input );
         scene.cancelInput();
@@ -100,6 +128,27 @@ int main()
         scene.handleInput( input );
         scene.cancelInput();
         check( near( scene.getSplineControlPoints()[0], first ) && scene.undoSplineEdit() && scene.getSplineControlPoints().size() == 3, "rejected duplicate-control drag preserves geometry and the previous undo record" );
+        checkEditedGeometry( scene );
+    }
+    {
+        rigidBodyDemo scene{ demoKind::splinePath };
+        scene.step( 20.0f, 4 );
+        check( scene.getSplinePathDistance() == scene.getSplinePathLength(), "path endpoint fixture reaches the finite end" );
+        const double distance = scene.getSplinePathDistance();
+        const auto pose = scene.getWorld().GetBodyTransform( scene.getImpulseBody() );
+        demoInput input{};
+        input.mousePressed = input.mouseHeld = true;
+        input.mousePosition = scene.getSplineControlPoints().back();
+        scene.handleInput( input );
+        input.mousePressed = false;
+        input.mousePosition.y += 0.05f;
+        scene.handleInput( input );
+        scene.cancelInput();
+        scene.step( 0.0f, 4 );
+        check( scene.getSplinePathDistance() == scene.getSplinePathLength() && near( scene.getWorld().GetBodyTransform( scene.getImpulseBody() ).position, pose.position ), "editing a stopped path preserves its complete progress and paused pose" );
+        checkEditedGeometry( scene );
+        check( scene.undoSplineEdit() && scene.getSplinePathDistance() == distance, "endpoint edit undo restores the original length and progress" );
+        checkEditedGeometry( scene );
     }
     return 0;
 }
