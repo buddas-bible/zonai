@@ -81,6 +81,24 @@ void compare( const catmullRomSpline2& spline )
             check( Contains( *segmentBounds, prepared->evaluate( i, t ) ), "prepared segment bounds contain endpoint-neighbor rounding" );
     }
     check( equal( bounds, combined ), "prepared full bounds are the union of all segment bounds" );
+    check( equal( prepared->computeAABB( { 0, 0.0f }, { prepared->getSegmentCount() - 1, 1.0f } ), bounds ), "prepared full range includes the closing endpoint and all segment bounds" );
+    for( std::size_t i = 0; i < prepared->getSegmentCount(); ++i )
+        for( std::size_t j = 0; j < prepared->getSegmentCount(); ++j )
+            for( float t0 : { 0.0f, std::nextafter( 0.0f, 1.0f ), 0.37f, std::nextafter( 1.0f, 0.0f ), 1.0f } )
+                for( float t1 : { 0.0f, std::nextafter( 0.0f, 1.0f ), 0.75f, std::nextafter( 1.0f, 0.0f ), 1.0f } )
+                    check( equal( prepared->computeAABB( { i, t0 }, { j, t1 } ), ComputeAABB( spline, { i, t0 }, { j, t1 } ) ), "prepared range bounds preserve exact legacy values and failures including joins and reverse ranges" );
+    for( std::size_t i = 0; i < prepared->getSegmentCount(); ++i )
+        for( std::size_t j = i; j < prepared->getSegmentCount(); ++j )
+        {
+            const auto rangeBounds = prepared->computeAABB( { i, 0.25f }, { j, 0.75f } );
+            check( rangeBounds && IsValidAABB( *rangeBounds ), "prepared forward ranges have finite conservative bounds" );
+            for( std::size_t segment = i; segment <= j; ++segment )
+            {
+                const float begin = segment == i ? 0.25f : 0.0f, end = segment == j ? 0.75f : 1.0f;
+                for( int step = 0; step <= 256; ++step )
+                    check( Contains( *rangeBounds, prepared->evaluate( segment, begin + ( end - begin ) * ( step / 256.0f ) ) ), "prepared range bounds contain dense float evaluations without extra epsilon" );
+            }
+        }
     for( std::size_t i = 0; i < prepared->getSegmentCount(); ++i )
     {
         const auto& segment = prepared->getSegments()[i];
@@ -192,6 +210,11 @@ int main()
 
     const vec2 uniformLine[] = { { 0, 0 }, { 1, 0 }, { 2, 0 }, { 3, 0 } };
     const auto uniformSnapshot = prepareSpline( { uniformLine } );
+    const auto straightRange = uniformSnapshot->computeAABB( { 0, 0.25f }, { 2, 0.75f } );
+    check( straightRange && Contains( *straightRange, { 0.25f, 0 } ) && Contains( *straightRange, { 2.75f, 0 } ) && straightRange->min.x > 0.2f && straightRange->max.x < 2.8f, "prepared range bounds include analytic endpoints and exclude unrelated path portions" );
+    const auto singlePointBounds = uniformSnapshot->computeAABB( { 1, 0.5f }, { 1, 0.5f } );
+    check( singlePointBounds && Contains( *singlePointBounds, { 1.5f, 0 } ) && singlePointBounds->min.x < 1.5f && singlePointBounds->max.x > 1.5f, "equal-position range bounds retain outward rounding allowance" );
+    check( equal( uniformSnapshot->computeAABB( { 1, 0.0f }, { 0, 1.0f } ), ComputeAABB( { uniformLine }, { 1, 0.0f }, { 0, 1.0f } ) ), "equivalent join endpoints retain the original from-side rounding policy" );
     const auto straightBounds = uniformSnapshot->computeAABB();
     check( straightBounds && Contains( *straightBounds, { 0, 0 } ) && Contains( *straightBounds, { 3, 0 } ) && straightBounds->min.x < 0.0f && straightBounds->max.x > 3.0f, "prepared straight bounds include endpoints and outward rounding allowance" );
     const auto middleBounds = uniformSnapshot->computeAABB( 1 );
@@ -330,7 +353,7 @@ int main()
     std::optional<preparedCatmullRomSpline2> owned;
     vec2 expectedPoint{}, expectedFirst{}, expectedSecond{};
     std::optional<double> expectedCurvature;
-    std::optional<aabb2> expectedBounds, expectedSegmentBounds;
+    std::optional<aabb2> expectedBounds, expectedSegmentBounds, expectedRangeBounds;
     std::optional<splineParameter2> expectedParameter, expectedRangeParameter;
     std::optional<splineSample2> expectedSample, expectedRangeSample;
     std::vector<splineParameter2> expectedParameters;
@@ -350,6 +373,7 @@ int main()
         expectedRangeLength = GetLength( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 1.0e-6 );
         expectedPartialLength = GetLength( { source, true }, 4, 0.25f, 0.75f, 1.0e-6 );
         expectedDistance = GetDistance( { source, true }, 4, 0.37f, 1.0e-6 );
+        expectedRangeBounds = ComputeAABB( { source, true }, { 1, 0.25f }, { 4, 0.75f } );
         expectedBounds = ComputeAABB( { source, true } );
         expectedSegmentBounds = ComputeAABB( { source, true }, 4 );
         expectedCurvature = Curvature( { source, true }, 4, 0.37f );
@@ -370,6 +394,7 @@ int main()
     check( !expectedPoints.empty() && !expectedRangePoints.empty() && equal( owned->sampleByDistance( 3, 1.0e-4 ), expectedPoints ) && equal( owned->sampleByDistance( { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 ), expectedRangePoints ), "position samples survive source mutation and destruction" );
     check( expectedCurvature && owned->curvature( 4, 0.37f ) == expectedCurvature, "curvature survives source mutation and destruction" );
     check( expectedBounds && expectedSegmentBounds && equal( owned->computeAABB(), expectedBounds ) && equal( owned->computeAABB( 4 ), expectedSegmentBounds ), "prepared bounds survive source mutation and destruction" );
+    check( expectedRangeBounds && equal( owned->computeAABB( { 1, 0.25f }, { 4, 0.75f } ), expectedRangeBounds ), "range bounds survive source mutation and destruction" );
     auto copied = *owned;
     auto moved = std::move( copied );
     owned.reset();
@@ -386,6 +411,7 @@ int main()
     check( equal( moved.sampleByDistance( 3, 1.0e-4 ), expectedPoints ) && equal( moved.sampleByDistance( { 1, 0.25f }, { 4, 0.75f }, 3, 1.0e-4 ), expectedRangePoints ), "copied and moved snapshots preserve position samples" );
     check( moved.curvature( 4, 0.37f ) == expectedCurvature, "copied and moved snapshots preserve curvature" );
     check( equal( moved.computeAABB(), expectedBounds ) && equal( moved.computeAABB( 4 ), expectedSegmentBounds ), "copied and moved snapshots preserve conservative bounds" );
+    check( equal( moved.computeAABB( { 1, 0.25f }, { 4, 0.75f } ), expectedRangeBounds ), "copied and moved snapshots preserve range bounds" );
     const preparedCatmullRomSpline2 empty{};
     check( !empty.getLength( 1.0e-6 ), "empty prepared geometry has no total length" );
     check( !empty.getDistance( 0, 0.0f, 1.0e-6 ), "empty prepared geometry has no cumulative distance" );
@@ -485,6 +511,24 @@ int main()
         for( std::size_t i = 0; i < prepared->getSegmentCount(); ++i )
             for( int step = 0; step <= 1024; ++step )
                 check( Contains( *bounds, prepared->evaluate( i, step / 1024.0f ) ), "prepared bounds contain translated and subnormal float samples" );
+    }
+    check( !empty.computeAABB( { 0, 0.0f }, { 0, 0.0f } ), "empty geometry cannot return equal-position range bounds" );
+    for( splineParameter2 invalid : { splineParameter2{ moved.getSegmentCount(), 0.0f }, { std::numeric_limits<std::size_t>::max(), 0.0f }, { 0, -0.01f }, { 0, 1.01f }, { 0, nan }, { 0, infinity }, { 0, -infinity } } )
+        check( !moved.computeAABB( invalid, { 4, 1.0f } ) && !moved.computeAABB( { 0, 0.0f }, invalid ) && !moved.computeAABB( invalid, invalid ), "range bounds validate both inputs before normalization or equality" );
+    check( !moved.computeAABB( { 4, 1.0f }, { 0, 0.0f } ) && !moved.computeAABB( { 1, 0.75f }, { 1, 0.25f } ), "prepared range bounds reject reverse traversal without closed wrapping" );
+    check( !unboundedSnapshot->computeAABB( { 0, 0.25f }, { 0, 0.75f } ) && !unboundedSnapshot->computeAABB( { 0, 0.5f }, { 0, 0.5f } ), "range bounds preserve finite-boundary failure including equal-position ranges" );
+    for( const auto candidate : { catmullRomSpline2{ translatedControls }, catmullRomSpline2{ subnormalAxis } } )
+    {
+        const auto prepared = prepareSpline( candidate );
+        const splineParameter2 from{ 0, 0.25f }, to{ prepared->getSegmentCount() - 1, 0.75f };
+        const auto bounds = prepared->computeAABB( from, to );
+        check( bounds && equal( bounds, ComputeAABB( candidate, from, to ) ), "range bounds preserve translated and subnormal rounding" );
+        for( std::size_t segment = from.segmentIndex; segment <= to.segmentIndex; ++segment )
+        {
+            const float begin = segment == from.segmentIndex ? from.t : 0.0f, end = segment == to.segmentIndex ? to.t : 1.0f;
+            for( int step = 0; step <= 256; ++step )
+                check( Contains( *bounds, prepared->evaluate( segment, begin + ( end - begin ) * ( step / 256.0f ) ) ), "range bounds contain translated and subnormal float evaluations" );
+        }
     }
     const vec2 repeated[] = { { 0, 0 }, { 1, 0 }, { 1, 0 } };
     const vec2 nonfinite[] = { { 0, 0 }, { nan, 1 } };

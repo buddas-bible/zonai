@@ -309,6 +309,32 @@ std::optional<aabb2> preparedCatmullRomSpline2::computeAABB( std::size_t segment
     return GetSegmentAABB( segments_[segmentIndex] );
 }
 
+std::optional<aabb2> preparedCatmullRomSpline2::computeAABB( splineParameter2 from, splineParameter2 to ) const
+{
+    if( segments_.empty() ) return {};
+    const std::size_t count = segments_.size();
+    const auto valid = [&]( splineParameter2 parameter )
+    {
+        return parameter.segmentIndex < count && std::isfinite( parameter.t ) && parameter.t >= 0.0f && parameter.t <= 1.0f;
+    };
+    if( !valid( from ) || !valid( to ) ) return {};
+    const auto beginParameter = NormalizeParameter( from, count ), endParameter = NormalizeParameter( to, count );
+    if( beginParameter.segmentIndex > endParameter.segmentIndex || ( beginParameter.segmentIndex == endParameter.segmentIndex && beginParameter.t > endParameter.t ) ) return {};
+    if( beginParameter.segmentIndex == endParameter.segmentIndex && beginParameter.t == endParameter.t ) return GetSegmentAABB( segments_[from.segmentIndex], from.t, from.t );
+    const vec2 first = evaluate( from.segmentIndex, from.t );
+    if( !IsFinite( first ) ) return {};
+    aabb2 bounds{ first, first };
+    for( std::size_t i = from.segmentIndex; i <= to.segmentIndex; ++i )
+    {
+        const double begin = i == from.segmentIndex ? from.t : 0.0, end = i == to.segmentIndex ? to.t : 1.0;
+        if( begin == end ) continue;
+        const auto segmentBounds = GetSegmentAABB( segments_[i], begin, end );
+        if( !segmentBounds ) return {};
+        bounds = Union( bounds, *segmentBounds );
+    }
+    return bounds;
+}
+
 std::optional<splineSample2> preparedCatmullRomSpline2::evaluateSample( std::size_t segmentIndex, float t, double tolerance ) const
 {
     if( segmentIndex >= segments_.size() || !std::isfinite( t ) || t < 0.0f || t > 1.0f || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
