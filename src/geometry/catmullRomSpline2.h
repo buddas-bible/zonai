@@ -31,6 +31,7 @@ struct preparedSplineSegment2
 };
 
 struct splineParameter2;
+struct splineClosestPoint2;
 
 // 검증과 구간 계수 계산을 마친 독립 스냅샷. 원본 배열 변경·파괴의 영향을 받지 않음.
 class preparedCatmullRomSpline2
@@ -100,6 +101,10 @@ public:
     // 기존 SampleByDistance의 위치 반올림·실패 정책. 0 길이는 같은 위치 반복, 실패는 빈 배열.
     [[nodiscard]] std::vector<vec2> sampleByDistance( std::size_t subdivisions, double tolerance ) const;
     [[nodiscard]] std::vector<vec2> sampleByDistance( splineParameter2 from, splineParameter2 to, std::size_t subdivisions, double tolerance ) const;
+
+    // 기존 ClosestPoint와 같은 최소거리 오차·후보 선택·실패 정책. 0 접선도 허용함.
+    // 잘못된 입력·정밀도 부족·탐색 한도 초과는 nullopt.
+    [[nodiscard]] std::optional<splineClosestPoint2> closestPoint( const vec2& point, double tolerance ) const;
 
 private:
     std::vector<preparedSplineSegment2> segments_{};

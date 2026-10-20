@@ -1064,10 +1064,9 @@ std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline
 namespace
 {
 
-std::optional<splineClosestPoint2> ClosestPointInRange( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, const vec2& point, double tolerance )
+template <typename SegmentAt, typename EvaluatePoint, typename ControlScale> std::optional<splineClosestPoint2> ClosestPointInRange( std::size_t count, splineParameter2 from, splineParameter2 to, const vec2& point, double tolerance, const SegmentAt& segmentAt, const EvaluatePoint& evaluatePoint, const ControlScale& controlScale )
 {
-    if( !IsValid( spline ) || !IsFinite( point ) || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
-    const std::size_t count = GetSegmentCount( spline );
+    if( count == 0 || !IsFinite( point ) || !std::isfinite( tolerance ) || tolerance <= 0.0 ) return {};
     const auto valid = [&]( splineParameter2 parameter )
     {
         return parameter.segmentIndex < count && std::isfinite( parameter.t ) && parameter.t >= 0.0f && parameter.t <= 1.0f;
@@ -1079,7 +1078,7 @@ std::optional<splineClosestPoint2> ClosestPointInRange( const catmullRomSpline2&
     const std::size_t intervals = endParameter.segmentIndex - beginParameter.segmentIndex + ( endParameter.t > 0.0f ? 1u : 0u );
     if( intervals > MAX_NODES ) return {};
     double scale = std::max( std::abs( static_cast<double>( point.x ) ), std::abs( static_cast<double>( point.y ) ) );
-    for( const vec2 control : spline.points ) scale = std::max( { scale, std::abs( static_cast<double>( control.x ) ), std::abs( static_cast<double>( control.y ) ) } );
+    scale = controlScale( scale );
     const double roundoff = 128.0 * std::numeric_limits<double>::epsilon() * scale;
     if( tolerance < 8.0 * roundoff ) return {};
     struct node
@@ -1114,13 +1113,13 @@ std::optional<splineClosestPoint2> ClosestPointInRange( const catmullRomSpline2&
     const auto consider = [&]( std::size_t segment, double parameter )
     {
         const float t = static_cast<float>( parameter );
-        const vec2 candidate = Evaluate( spline, segment, t );
+        const vec2 candidate = evaluatePoint( segment, t );
         if( !IsFinite( candidate ) ) return;
         if( t > 0.0f && t < 1.0f )
         {
-            vec2 tangent1{}, tangent2{};
-            GetTangents( spline, segment, tangent1, tangent2 );
-            const vec2 a = spline.points[segment], b = GetPoint( spline, segment + 1 );
+            const auto coefficients = segmentAt( segment );
+            const vec2 a = coefficients.start, b = coefficients.end;
+            const vec2 tangent1 = coefficients.tangent1, tangent2 = coefficients.tangent2;
             const double dx = static_cast<double>( b.x ) - a.x, dy = static_cast<double>( b.y ) - a.y;
             const double qx = 3.0 * dx - 2.0 * tangent1.x - tangent2.x, qy = 3.0 * dy - 2.0 * tangent1.y - tangent2.y;
             const double cx = tangent1.x + static_cast<double>( tangent2.x ) - 2.0 * dx, cy = tangent1.y + static_cast<double>( tangent2.y ) - 2.0 * dy;
@@ -1157,10 +1156,10 @@ std::optional<splineClosestPoint2> ClosestPointInRange( const catmullRomSpline2&
         const double begin = i == from.segmentIndex ? from.t : 0.0, end = i == to.segmentIndex ? to.t : 1.0;
         consider( i, begin ); consider( i, end );
         if( begin == end ) continue;
-        vec2 tangent1{}, tangent2{};
-        GetTangents( spline, i, tangent1, tangent2 );
+        const auto coefficients = segmentAt( i );
+        const vec2 tangent1 = coefficients.tangent1, tangent2 = coefficients.tangent2;
         if( !IsFinite( tangent1 ) || !IsFinite( tangent2 ) ) return {};
-        const vec2 a = spline.points[i], b = GetPoint( spline, i + 1 );
+        const vec2 a = coefficients.start, b = coefficients.end;
         std::array<bezierPoint2, 4> curve{
             bezierPoint2{ a.x, a.y },
             bezierPoint2{ a.x + static_cast<double>( tangent1.x ) / 3.0, a.y + static_cast<double>( tangent1.y ) / 3.0 },
@@ -1203,7 +1202,50 @@ std::optional<splineClosestPoint2> ClosestPointInRange( const catmullRomSpline2&
     return {};
 }
 
+std::optional<splineClosestPoint2> ClosestPointInRange( const catmullRomSpline2& spline, splineParameter2 from, splineParameter2 to, const vec2& point, double tolerance )
+{
+    if( !IsValid( spline ) ) return {};
+    const auto segmentAt = [&]( std::size_t i )
+    {
+        vec2 tangent1{}, tangent2{};
+        GetTangents( spline, i, tangent1, tangent2 );
+        return preparedSplineSegment2{ spline.points[i], GetPoint( spline, i + 1 ), tangent1, tangent2 };
+    };
+    const auto evaluatePoint = [&]( std::size_t i, float t )
+    {
+        return Evaluate( spline, i, t );
+    };
+    const auto controlScale = [&]( double scale )
+    {
+        for( const vec2 control : spline.points )
+            scale = std::max( { scale, std::abs( static_cast<double>( control.x ) ), std::abs( static_cast<double>( control.y ) ) } );
+        return scale;
+    };
+    return ClosestPointInRange( GetSegmentCount( spline ), from, to, point, tolerance, segmentAt, evaluatePoint, controlScale );
+}
+
 } // namespace
+
+std::optional<splineClosestPoint2> preparedCatmullRomSpline2::closestPoint( const vec2& point, double tolerance ) const
+{
+    if( segments_.empty() ) return {};
+    const auto segmentAt = [&]( std::size_t i ) -> const preparedSplineSegment2&
+    {
+        return segments_[i];
+    };
+    const auto evaluatePoint = [&]( std::size_t i, float t )
+    {
+        return evaluate( i, t );
+    };
+    const auto controlScale = [&]( double scale )
+    {
+        for( const auto& segment : segments_ )
+            scale = std::max( { scale, std::abs( static_cast<double>( segment.start.x ) ), std::abs( static_cast<double>( segment.start.y ) ) } );
+        const vec2 last = segments_.back().end;
+        return std::max( { scale, std::abs( static_cast<double>( last.x ) ), std::abs( static_cast<double>( last.y ) ) } );
+    };
+    return ClosestPointInRange( segments_.size(), { 0, 0.0f }, { segments_.size() - 1, 1.0f }, point, tolerance, segmentAt, evaluatePoint, controlScale );
+}
 
 std::optional<splineClosestPoint2> ClosestPoint( const catmullRomSpline2& spline, const vec2& point, double tolerance )
 {

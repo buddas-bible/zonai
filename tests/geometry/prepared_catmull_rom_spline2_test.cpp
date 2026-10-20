@@ -57,6 +57,11 @@ bool equal( const std::optional<aabb2>& a, const std::optional<aabb2>& b )
     return a.has_value() == b.has_value() && ( !a || ( equal( a->min, b->min ) && equal( a->max, b->max ) ) );
 }
 
+bool equal( const std::optional<splineClosestPoint2>& a, const std::optional<splineClosestPoint2>& b )
+{
+    return a.has_value() == b.has_value() && ( !a || ( equal( a->point, b->point ) && a->segmentIndex == b->segmentIndex && a->t == b->t && a->distanceSquared == b->distanceSquared ) );
+}
+
 void compare( const catmullRomSpline2& spline )
 {
     const auto prepared = prepareSpline( spline );
@@ -64,6 +69,9 @@ void compare( const catmullRomSpline2& spline )
     check( prepared->getSegmentCount() == GetSegmentCount( spline ) && prepared->isLoop() == spline.isLoop, "prepared snapshot preserves topology" );
     static_assert( std::is_same_v<decltype( prepared->getSegments() ), std::span<const preparedSplineSegment2>> );
     check( prepared->getSegments().size() == prepared->getSegmentCount(), "prepared geometry exposes owned read-only segment coefficients" );
+    for( const vec2 query : { vec2{ 0, 0 }, { 0.2f, 0.3f }, { 3, -2 }, { 100, 100 }, spline.points[0] } )
+        for( double tolerance : { 1.0e-2, 1.0e-4, 1.0e-10, std::numeric_limits<double>::denorm_min() } )
+            check( equal( prepared->closestPoint( query, tolerance ), ClosestPoint( spline, query, tolerance ) ), "prepared closest points preserve exact positions parameters squared distances and failures" );
     const auto bounds = prepared->computeAABB();
     check( equal( bounds, ComputeAABB( spline ) ) && bounds && IsValidAABB( *bounds ), "prepared whole bounds exactly match legacy conservative bounds" );
     aabb2 combined{ spline.points[0], spline.points[0] };
@@ -210,6 +218,9 @@ int main()
 
     const vec2 uniformLine[] = { { 0, 0 }, { 1, 0 }, { 2, 0 }, { 3, 0 } };
     const auto uniformSnapshot = prepareSpline( { uniformLine } );
+    check( equal( uniformSnapshot->closestPoint( { 1.5f, 2 }, 1.0e-6 ), splineClosestPoint2{ { 1.5f, 0 }, 1, 0.5f, 4.0 } ), "prepared closest point matches an analytic straight-path projection" );
+    check( equal( uniformSnapshot->closestPoint( { -1, 0 }, 1.0e-6 ), splineClosestPoint2{ { 0, 0 }, 0, 0.0f, 1.0 } ) && equal( uniformSnapshot->closestPoint( { 4, 0 }, 1.0e-6 ), splineClosestPoint2{ { 3, 0 }, 2, 1.0f, 1.0 } ), "prepared closest point includes both open endpoints" );
+    check( equal( uniformSnapshot->closestPoint( { 1, 0 }, 1.0e-6 ), splineClosestPoint2{ { 1, 0 }, 0, 1.0f, 0.0 } ), "equal-distance join candidates choose the preceding segment" );
     const auto straightRange = uniformSnapshot->computeAABB( { 0, 0.25f }, { 2, 0.75f } );
     check( straightRange && Contains( *straightRange, { 0.25f, 0 } ) && Contains( *straightRange, { 2.75f, 0 } ) && straightRange->min.x > 0.2f && straightRange->max.x < 2.8f, "prepared range bounds include analytic endpoints and exclude unrelated path portions" );
     const auto singlePointBounds = uniformSnapshot->computeAABB( { 1, 0.5f }, { 1, 0.5f } );
@@ -309,6 +320,15 @@ int main()
     check( seamStart && seamEnd && *seamStart != *seamEnd && seamStart == Curvature( { curve, true }, 0, 0.0f ) && seamEnd == Curvature( { curve, true }, 4, 1.0f ), "closed seam curvature preserves the specified side" );
     const auto overshootBounds = curvatureSnapshot->computeAABB();
     check( overshootBounds && overshootBounds->min.y < 0.0f && overshootBounds->max.y > 1.0f, "prepared bounds include curve overshoot beyond its control polygon" );
+    const auto stationaryClosest = cuspSnapshot->closestPoint( { 1.2f, 0 }, 1.0e-6 );
+    check( stationaryClosest && equal( stationaryClosest->point, { 1, 0 } ) && stationaryClosest->segmentIndex == 0 && stationaryClosest->t == 1.0f, "prepared closest point allows a zero tangent without requesting a direction" );
+    const auto seamClosest = closedCurvature->closestPoint( curve[0], 1.0e-6 );
+    check( seamClosest && equal( seamClosest->point, curve[0] ) && seamClosest->segmentIndex == 0 && seamClosest->t == 0.0f && seamClosest->distanceSquared == 0.0, "closed closest point preserves deterministic seam selection" );
+    const vec2 crossingCurve[] = { { -2, 0 }, { 0, 0 }, { 2, 2 }, { 2, -2 }, { 0, 0 }, { -2, 2 } };
+    compare( { crossingCurve } );
+    check( equal( prepareSpline( { crossingCurve } )->closestPoint( {}, 1.0e-6 ), splineClosestPoint2{ {}, 0, 1.0f, 0.0 } ), "crossing branches preserve the first equal-distance candidate" );
+    const vec2 coarseDiagonal[] = { { 1.0e8f, 1.0e8f }, { 1.0e8f + 8.0f, 1.0e8f + 8.0f } };
+    check( !prepareSpline( { coarseDiagonal } )->closestPoint( { 1.0e8f + 8.0f, 1.0e8f }, 1.0e-3 ), "prepared closest point rejects an unrepresentable sufficiently close position" );
     const double precisionBoundary = 128.0 * std::numeric_limits<double>::epsilon() * *preparedLength;
     for( double tolerance : { std::nextafter( precisionBoundary, 0.0 ), precisionBoundary, std::nextafter( precisionBoundary, std::numeric_limits<double>::infinity() ) } )
         check( prepareSpline( { line } )->getLength( tolerance ) == GetLength( { line }, tolerance ), "prepared length preserves the representable-precision boundary policy" );
@@ -353,6 +373,7 @@ int main()
     std::optional<preparedCatmullRomSpline2> owned;
     vec2 expectedPoint{}, expectedFirst{}, expectedSecond{};
     std::optional<double> expectedCurvature;
+    std::optional<splineClosestPoint2> expectedClosest;
     std::optional<aabb2> expectedBounds, expectedSegmentBounds, expectedRangeBounds;
     std::optional<splineParameter2> expectedParameter, expectedRangeParameter;
     std::optional<splineSample2> expectedSample, expectedRangeSample;
@@ -373,6 +394,7 @@ int main()
         expectedRangeLength = GetLength( { source, true }, { 1, 0.25f }, { 4, 0.75f }, 1.0e-6 );
         expectedPartialLength = GetLength( { source, true }, 4, 0.25f, 0.75f, 1.0e-6 );
         expectedDistance = GetDistance( { source, true }, 4, 0.37f, 1.0e-6 );
+        expectedClosest = ClosestPoint( { source, true }, { 3.5f, 0.2f }, 1.0e-4 );
         expectedRangeBounds = ComputeAABB( { source, true }, { 1, 0.25f }, { 4, 0.75f } );
         expectedBounds = ComputeAABB( { source, true } );
         expectedSegmentBounds = ComputeAABB( { source, true }, 4 );
@@ -395,6 +417,7 @@ int main()
     check( expectedCurvature && owned->curvature( 4, 0.37f ) == expectedCurvature, "curvature survives source mutation and destruction" );
     check( expectedBounds && expectedSegmentBounds && equal( owned->computeAABB(), expectedBounds ) && equal( owned->computeAABB( 4 ), expectedSegmentBounds ), "prepared bounds survive source mutation and destruction" );
     check( expectedRangeBounds && equal( owned->computeAABB( { 1, 0.25f }, { 4, 0.75f } ), expectedRangeBounds ), "range bounds survive source mutation and destruction" );
+    check( expectedClosest && equal( owned->closestPoint( { 3.5f, 0.2f }, 1.0e-4 ), expectedClosest ), "closest point survives source mutation and destruction" );
     auto copied = *owned;
     auto moved = std::move( copied );
     owned.reset();
@@ -412,6 +435,7 @@ int main()
     check( moved.curvature( 4, 0.37f ) == expectedCurvature, "copied and moved snapshots preserve curvature" );
     check( equal( moved.computeAABB(), expectedBounds ) && equal( moved.computeAABB( 4 ), expectedSegmentBounds ), "copied and moved snapshots preserve conservative bounds" );
     check( equal( moved.computeAABB( { 1, 0.25f }, { 4, 0.75f } ), expectedRangeBounds ), "copied and moved snapshots preserve range bounds" );
+    check( equal( moved.closestPoint( { 3.5f, 0.2f }, 1.0e-4 ), expectedClosest ), "copied and moved snapshots preserve closest points" );
     const preparedCatmullRomSpline2 empty{};
     check( !empty.getLength( 1.0e-6 ), "empty prepared geometry has no total length" );
     check( !empty.getDistance( 0, 0.0f, 1.0e-6 ), "empty prepared geometry has no cumulative distance" );
@@ -530,6 +554,17 @@ int main()
                 check( Contains( *bounds, prepared->evaluate( segment, begin + ( end - begin ) * ( step / 256.0f ) ) ), "range bounds contain translated and subnormal float evaluations" );
         }
     }
+    check( !empty.closestPoint( {}, 1.0e-4 ), "empty prepared geometry has no closest point" );
+    for( double tolerance : { 0.0, -1.0, static_cast<double>( nan ), static_cast<double>( infinity ), -static_cast<double>( infinity ), 1.0e-30 } )
+        check( !moved.closestPoint( {}, tolerance ), "prepared closest point rejects invalid or unattainable tolerance" );
+    for( const vec2 query : { vec2{ nan, 0 }, { 0, nan }, { infinity, 0 }, { 0, -infinity } } )
+        check( !moved.closestPoint( query, 1.0e-4 ), "prepared closest point rejects nonfinite queries without asserting" );
+    std::vector<vec2> nodeLimitPoints;
+    for( int i = 0; i <= 4096; ++i )
+        nodeLimitPoints.push_back( { static_cast<float>( i ), 0 } );
+    check( prepareSpline( { nodeLimitPoints } )->closestPoint( {}, 1.0e-4 ).has_value(), "prepared closest point accepts the existing maximum interval count" );
+    nodeLimitPoints.push_back( { 4097, 0 } );
+    check( !prepareSpline( { nodeLimitPoints } )->closestPoint( {}, 1.0e-4 ) && !ClosestPoint( { nodeLimitPoints }, {}, 1.0e-4 ), "prepared closest point preserves the interval limit failure policy" );
     const vec2 repeated[] = { { 0, 0 }, { 1, 0 }, { 1, 0 } };
     const vec2 nonfinite[] = { { 0, 0 }, { nan, 1 } };
     const vec2 infinite[] = { { 0, 0 }, { infinity, 1 } };
