@@ -1,6 +1,7 @@
 #include "rigidBodyDemo.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <numbers>
@@ -1000,8 +1001,71 @@ void checkFrictionMixingDemo()
     }
 }
 
+void checkRestitutionMixingDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::restitutionMixingComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 6 && physics.GetBodyCount() == 6 && same( physics.GetGravity(), { 0, -10 } ), "restitution mixing creates three independent floor and circle pairs" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        for( std::size_t i = 0; i < 3; ++i )
+        {
+            const auto circle = visuals[2 * i + 1].bodyHandle;
+            check( physics.GetBody( visuals[2 * i].bodyHandle ).type == bodyType::Static && physics.GetBody( circle ).type == bodyType::Dynamic && physics.GetBodyTransform( circle ).position.y == 3.0f && same( physics.GetBodyLinearVelocity( circle ), {} ) && !physics.IsBodySleepEnabled( circle ) && physics.GetBodyLinearDamping( circle ) == 0.0f && physics.GetBodyAngularDamping( circle ) == 0.0f, "mixing circles start at equal height and rest without damping or automatic sleep" );
+        }
+        const auto observeBouncePeaks = [&]
+        {
+            std::array<float, 3> peaks{};
+            for( int frame = 0; frame < 120; ++frame )
+            {
+                playback.stepOnce( substeps );
+                for( std::size_t i = 0; i < peaks.size(); ++i )
+                {
+                    const auto body = visuals[2 * i + 1].bodyHandle;
+                    if( physics.GetBodyLinearVelocity( body ).y > 0.1f ) peaks[i] = std::max( peaks[i], physics.GetBodyTransform( body ).position.y );
+                }
+            }
+            return peaks;
+        };
+        const auto original = observeBouncePeaks();
+        check( original[0] > 1.5f && original[0] < 2.5f && std::abs( original[0] - original[1] ) < 0.02f, "swapping the nonzero restitution between floor and circle gives the same rebound height" );
+        check( original[2] == 0.0f && std::abs( physics.GetBodyTransform( visuals[5].bodyHandle ).position.y - 0.4f ) < 0.05f && std::abs( physics.GetBodyLinearVelocity( visuals[5].bodyHandle ).y ) < 0.05f, "both coefficients zero suppress rebound while one zero still allows the larger coefficient" );
+        const float floorRestitution[] = { 0.0f, 0.8f, 0.0f };
+        const float circleRestitution[] = { 0.8f, 0.0f, 0.0f };
+        for( std::size_t i = 0; i < 3; ++i )
+            check( physics.GetShapeRestitution( visuals[2 * i].shapeHandle ) == floorRestitution[i] && physics.GetShapeRestitution( visuals[2 * i + 1].shapeHandle ) == circleRestitution[i] && physics.GetShapeFriction( visuals[2 * i].shapeHandle ) == 0.0f && physics.GetShapeFriction( visuals[2 * i + 1].shapeHandle ) == 0.0f, "restitution mixing exposes intended coefficient pairs without friction" );
+        physics.SetShapeRestitution( visuals[1].shapeHandle, 0.4f );
+        physics.SetShapeRestitution( visuals[2].shapeHandle, 0.4f );
+        for( int repeat = 0; repeat < 2; ++repeat )
+        {
+            scene.resetCollisionTrial();
+            check( physics.GetShapeRestitution( visuals[1].shapeHandle ) == 0.4f && physics.GetShapeRestitution( visuals[2].shapeHandle ) == 0.4f, "mixing reset preserves independently edited circle and floor restitution" );
+            for( std::size_t i = 0; i < visuals.size(); ++i )
+            {
+                const auto body = visuals[i].bodyHandle;
+                check( physics.IsValid( visuals[i].shapeHandle ) && same( physics.GetBodyTransform( body ).position, { -3.0f + 3.0f * static_cast<float>( i / 2 ), i % 2 == 0 ? -0.15f : 3.0f } ) && physics.GetBodyTransform( body ).rotation.s == 0.0f && same( physics.GetBodyLinearVelocity( body ), {} ) && physics.GetBodyAngularVelocity( body ) == 0.0f, "restitution mixing reset restores initial floor and circle poses and rest with stable handles" );
+            }
+            const auto edited = observeBouncePeaks();
+            check( edited[0] > 0.55f && edited[0] < 1.2f && std::abs( edited[0] - edited[1] ) < 0.02f && original[0] > edited[0] + 0.7f && edited[2] == 0.0f, "lowering either nonzero material coefficient reduces the repeated rebound equally" );
+        }
+        physics.SetShapeRestitution( visuals[1].shapeHandle, 0.0f );
+        physics.SetShapeRestitution( visuals[2].shapeHandle, 0.0f );
+        physics.SetShapeRestitution( visuals[5].shapeHandle, 0.8f );
+        scene.resetCollisionTrial();
+        const auto reversed = observeBouncePeaks();
+        check( reversed[0] == 0.0f && reversed[1] == 0.0f && reversed[2] > 1.5f, "removing the larger coefficient stops rebound and adding one nonzero coefficient enables it" );
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        check( !defaults.getWorld().IsValid( visuals[1].bodyHandle ) && defaults.getWorld().GetShapeRestitution( defaults.getShapes()[1].shapeHandle ) == 0.8f && defaults.getWorld().GetShapeRestitution( defaults.getShapes()[2].shapeHandle ) == 0.8f && defaults.getWorld().GetShapeRestitution( defaults.getShapes()[5].shapeHandle ) == 0.0f && !playback.isPlaying(), "full restitution mixing reset restores original coefficient pairs and pauses" );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkRestitutionMixingDemo();
     checkFrictionMixingDemo();
     checkMaximumLinearSpeedDemo();
     checkFastRotationDemo();
@@ -1115,7 +1179,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };
