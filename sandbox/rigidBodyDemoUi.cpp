@@ -135,7 +135,7 @@ bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, 
 
 rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 {
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison ) showLabels_ = true;
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison ) showLabels_ = true;
     selectedShapeIndex_ = kind == demoKind::playground || kind == demoKind::motorCar ? 2 : 1;
     if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
@@ -729,7 +729,7 @@ void rigidBodyDemoUi::drawSplineEditorControls()
 
 void rigidBodyDemoUi::drawExperimentControls()
 {
-    if( getKind() == demoKind::collisionComparison || getKind() == demoKind::frictionComparison || getKind() == demoKind::restitutionComparison || getKind() == demoKind::boxStack || getKind() == demoKind::ccdComparison || getKind() == demoKind::collisionFilterComparison || getKind() == demoKind::sensorWallComparison || getKind() == demoKind::sleepWakeComparison || getKind() == demoKind::dampingComparison || getKind() == demoKind::gravityScaleComparison || getKind() == demoKind::massImpulseComparison || getKind() == demoKind::impulsePointComparison || getKind() == demoKind::rotationalInertiaComparison || getKind() == demoKind::forceImpulseComparison || getKind() == demoKind::torqueImpulseComparison || getKind() == demoKind::dynamicKinematicComparison || getKind() == demoKind::compoundCenterComparison || getKind() == demoKind::fastRotationComparison )
+    if( getKind() == demoKind::collisionComparison || getKind() == demoKind::frictionComparison || getKind() == demoKind::restitutionComparison || getKind() == demoKind::boxStack || getKind() == demoKind::ccdComparison || getKind() == demoKind::collisionFilterComparison || getKind() == demoKind::sensorWallComparison || getKind() == demoKind::sleepWakeComparison || getKind() == demoKind::dampingComparison || getKind() == demoKind::gravityScaleComparison || getKind() == demoKind::massImpulseComparison || getKind() == demoKind::impulsePointComparison || getKind() == demoKind::rotationalInertiaComparison || getKind() == demoKind::forceImpulseComparison || getKind() == demoKind::torqueImpulseComparison || getKind() == demoKind::dynamicKinematicComparison || getKind() == demoKind::compoundCenterComparison || getKind() == demoKind::fastRotationComparison || getKind() == demoKind::maximumLinearSpeedComparison )
     {
         ImGui::TextUnformatted( "반복 시험" );
         if( getKind() == demoKind::ccdComparison )
@@ -851,6 +851,17 @@ void rigidBodyDemoUi::drawExperimentControls()
             {
                 ImGui::TextWrapped( "%s: 빠른 회전 %s", visual.label, getWorld().IsBodyFastRotationAllowed( visual.bodyHandle ) ? "허용" : "비허용" );
                 ImGui::TextWrapped( "각속도 %.2f rad/s / 속력 %.2f m/s", getWorld().GetBodyAngularVelocity( visual.bodyHandle ), Length( getWorld().GetBodyLinearVelocity( visual.bodyHandle ) ) );
+            }
+        }
+        if( getKind() == demoKind::maximumLinearSpeedComparison )
+        {
+            ImGui::TextWrapped( "같은 대각선 방향의 상자가 2·8m/s로 출발하며 초기 월드 최대 선속도는 4m/s입니다. 제한은 진행 단계에서 속력만 줄이고 방향과 각속도는 유지합니다. 월드 설정의 최대 선속도를 편집하고 시험 복귀 → 1프레임으로 비교하세요. 제한을 높여도 이미 줄어든 속도가 자동 복원되지는 않습니다." );
+            ImGui::Text( "현재 월드 최대 선속도: %.2f m/s", getWorld().GetMaximumLinearSpeed() );
+            for( const auto& visual : getShapes() )
+            {
+                const vec2 velocity = getWorld().GetBodyLinearVelocity( visual.bodyHandle );
+                ImGui::TextWrapped( "%s: 선속도 (%.2f, %.2f) m/s", visual.label, velocity.x, velocity.y );
+                ImGui::TextWrapped( "속력 %.2f m/s / 각속도 %.2f rad/s", Length( velocity ), getWorld().GetBodyAngularVelocity( visual.bodyHandle ) );
             }
         }
         if( getKind() == demoKind::frictionComparison ) ImGui::TextWrapped( "마찰은 물체와 경사면 계수의 기하평균으로 정해집니다. 현재 계수는 인스펙터에서 확인·편집하세요." );

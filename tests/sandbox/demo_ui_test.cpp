@@ -43,9 +43,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 18; ++frame )
+    for( int frame = 0; frame < 19; ++frame )
     {
-        session.selectDemo( frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -886,6 +886,66 @@ void checkDemoUi()
             }
         }
     }
+    auto speedView = createDemoView( demoKind::maximumLinearSpeedComparison );
+    auto& speedTrial = static_cast<rigidBodyDemo&>( *speedView );
+    speedTrial.step( 1.0f / 60.0f, 4 );
+    for( int frame = 0; frame < 10; ++frame )
+    {
+        if( frame == 1 ) io.AddInputCharactersUTF8( "8" );
+        if( frame == 6 ) io.AddInputCharactersUTF8( "1" );
+        if( frame == 2 || frame == 7 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+        if( frame == 3 || frame == 8 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0, 0 } );
+        ImGui::SetNextWindowSize( { 340, 4000 } );
+        ImGui::Begin( "Maximum linear speed inspector" );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "WorldSettings" ), 1 );
+        if( frame == 0 || frame == 5 )
+        {
+            GImGui->NavActivateId = ImGui::GetID( "Max linear speed" );
+            GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+        }
+        if( frame == 3 || frame == 4 || frame == 8 || frame == 9 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+        speedView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        const float maximumSpeed = frame >= 7 ? 1.0f : frame >= 2 ? 8.0f : 4.0f;
+        if( speedTrial.getWorld().GetMaximumLinearSpeed() != maximumSpeed )
+        {
+            std::fprintf( stderr, "maximum linear speed inspector edit was lost across repeated resets\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( frame == 2 && std::abs( zonai::Length( speedTrial.getWorld().GetBodyLinearVelocity( speedTrial.getShapes()[1].bodyHandle ) ) - 4.0f ) > 1.0e-5f )
+        {
+            std::fprintf( stderr, "raising the world limit must not automatically restore a previously capped velocity\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( frame == 3 || frame == 4 || frame == 8 || frame == 9 )
+        {
+            for( std::size_t i = 0; i < speedTrial.getShapes().size(); ++i )
+            {
+                const auto body = speedTrial.getShapes()[i].bodyHandle;
+                const auto pose = speedTrial.getWorld().GetBodyTransform( body );
+                const auto velocity = speedTrial.getWorld().GetBodyLinearVelocity( body );
+                if( pose.position.x != ( i == 0 ? -2.5f : 2.5f ) || pose.position.y != 0.0f || pose.rotation.s != 0.0f || zonai::Length( velocity - zonai::vec2{ 0.6f, 0.8f } * ( i == 0 ? 2.0f : 8.0f ) ) > 1.0e-6f )
+                {
+                    std::fprintf( stderr, "linear speed UI reset must restore initial poses and launch velocities\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+            speedTrial.step( 1.0f / 60.0f, 4 );
+            for( std::size_t i = 0; i < speedTrial.getShapes().size(); ++i )
+            {
+                const auto body = speedTrial.getShapes()[i].bodyHandle;
+                const float expected = std::min( maximumSpeed, i == 0 ? 2.0f : 8.0f );
+                if( zonai::Length( speedTrial.getWorld().GetBodyLinearVelocity( body ) - zonai::vec2{ 0.6f, 0.8f } * expected ) > 1.0e-5f || speedTrial.getWorld().GetBodyAngularVelocity( body ) != 0.0f )
+                {
+                    std::fprintf( stderr, "world speed edit must change repeated trial results while preserving direction and spin\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+        }
+    }
     auto rotationView = createDemoView( demoKind::fastRotationComparison );
     auto& rotationTrial = static_cast<rigidBodyDemo&>( *rotationView );
     const auto rotationLeft = rotationTrial.getShapes()[0].bodyHandle;
@@ -1307,7 +1367,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );

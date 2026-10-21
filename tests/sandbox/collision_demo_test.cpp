@@ -894,8 +894,64 @@ void checkFastRotationDemo()
     }
 }
 
+void checkMaximumLinearSpeedDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::maximumLinearSpeedComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 2 && physics.GetBodyCount() == 2 && same( physics.GetGravity(), {} ), "linear speed comparison creates two identical boxes without gravity" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        const vec2 direction{ 0.6f, 0.8f };
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+        {
+            const auto body = visuals[i].bodyHandle;
+            check( Length( physics.GetBodyLinearVelocity( body ) - direction * ( i == 0 ? 2.0f : 8.0f ) ) < 1.0e-6f && physics.GetBodyAngularVelocity( body ) == 0.0f && !physics.IsBodySleepEnabled( body ), "boxes start with matching direction different speeds zero spin and sleep disabled" );
+            physics.SetBodyAngularVelocity( body, i == 0 ? 2.0f : -3.0f );
+        }
+        playback.stepOnce( substeps );
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+        {
+            const auto body = visuals[i].bodyHandle;
+            const vec2 expected = direction * ( i == 0 ? 2.0f : 4.0f );
+            check( Length( physics.GetBodyLinearVelocity( body ) - expected ) < 1.0e-5f, "speed below limit is unchanged while speed above limit is capped without changing direction" );
+            check( std::abs( Cross( physics.GetBodyLinearVelocity( body ), direction ) ) < 1.0e-6f && physics.GetBodyAngularVelocity( body ) == ( i == 0 ? 2.0f : -3.0f ), "linear cap preserves direction and nonzero angular velocities" );
+            check( Length( physics.GetBodyTransform( body ).position - ( vec2{ i == 0 ? -2.5f : 2.5f, 0 } + expected / 60.0f ) ) < 1.0e-5f, "position integrates the capped velocity from the first step" );
+        }
+        check( physics.GetMaximumLinearSpeed() == 4.0f && !playback.isPlaying(), "linear speed trial uses a world limit and retains pause state" );
+        for( int frame = 0; frame < 30; ++frame )
+            playback.stepOnce( substeps );
+        check( Length( physics.GetBodyLinearVelocity( visuals[0].bodyHandle ) - direction * 2.0f ) < 1.0e-5f && Length( physics.GetBodyLinearVelocity( visuals[1].bodyHandle ) - direction * 4.0f ) < 1.0e-5f, "capped and uncapped motion persists without damping or contacts" );
+        physics.SetMaximumLinearSpeed( 8.0f );
+        scene.resetCollisionTrial();
+        check( physics.GetMaximumLinearSpeed() == 8.0f && physics.GetBodyAngularVelocity( visuals[0].bodyHandle ) == 0.0f && physics.GetBodyAngularVelocity( visuals[1].bodyHandle ) == 0.0f, "trial reset preserves edited world limit while restoring initial spin" );
+        playback.stepOnce( substeps );
+        check( Length( physics.GetBodyLinearVelocity( visuals[0].bodyHandle ) - direction * 2.0f ) < 1.0e-5f && Length( physics.GetBodyLinearVelocity( visuals[1].bodyHandle ) - direction * 8.0f ) < 1.0e-5f, "raising world limit and resetting changes the fast box result" );
+        physics.SetMaximumLinearSpeed( 1.0f );
+        for( float timeStep : { 1.0f / 60.0f, 0.01f } )
+        {
+            scene.resetCollisionTrial();
+            check( physics.GetMaximumLinearSpeed() == 1.0f, "repeated reset retains edited maximum linear speed" );
+            for( std::size_t i = 0; i < visuals.size(); ++i )
+            {
+                const auto body = visuals[i].bodyHandle;
+                check( physics.IsValid( visuals[i].shapeHandle ) && same( physics.GetBodyTransform( body ).position, { i == 0 ? -2.5f : 2.5f, 0 } ) && physics.GetBodyTransform( body ).rotation.s == 0.0f && Length( physics.GetBodyLinearVelocity( body ) - direction * ( i == 0 ? 2.0f : 8.0f ) ) < 1.0e-6f, "linear speed reset restores initial poses and velocities with stable handles" );
+            }
+            scene.step( timeStep, substeps );
+            for( const auto& visual : visuals )
+                check( Length( physics.GetBodyLinearVelocity( visual.bodyHandle ) - direction ) < 1.0e-5f, "lowered world limit caps both boxes independent of positive step duration" );
+        }
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        check( defaults.getWorld().GetMaximumLinearSpeed() == 4.0f && Length( defaults.getWorld().GetBodyLinearVelocity( defaults.getShapes()[1].bodyHandle ) - direction * 8.0f ) < 1.0e-6f && !playback.isPlaying(), "full linear speed reset restores default world limit and launch velocities" );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkMaximumLinearSpeedDemo();
     checkFastRotationDemo();
     checkCompoundCenterDemo();
     checkDynamicKinematicDemo();
@@ -1007,7 +1063,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };
