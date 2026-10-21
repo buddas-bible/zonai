@@ -51,7 +51,8 @@ constexpr std::array entries
     demoEntry{ demoKind::fastRotationComparison, "강체", "고속 회전 제한 비교", "같은 막대 두 개가 120rad/s로 출발하며 빠른 회전 허용만 다릅니다. 인스펙터에서 설정을 바꾸고 시험 복귀로 단계당 회전 제한의 차이를 비교하세요.", { 0.0f, 0.0f }, 95.0f },
     demoEntry{ demoKind::maximumLinearSpeedComparison, "강체", "최대 선속도 비교", "같은 대각선 방향으로 2·8m/s로 출발하는 상자를 월드 최대 선속도 4m/s에서 비교합니다. 기존 월드 설정을 편집하고 시험 복귀로 제한과 방향 보존을 확인하세요.", { 0.0f, 1.5f }, 75.0f },
     demoEntry{ demoKind::frictionMixingComparison, "강체", "마찰 혼합 규칙 비교", "수평 바닥과 상자의 마찰을 0.25·1, 1·0.25, 1·0으로 배분하고 같은 속도로 출발합니다. 두 계수의 혼합과 편집 후 감속 차이를 시험 복귀로 비교하세요.", { 0.0f, 0.5f }, 65.0f },
-    demoEntry{ demoKind::restitutionMixingComparison, "강체", "반발 혼합 규칙 비교", "바닥·원 반발을 0·0.8, 0.8·0, 0·0으로 배분하고 같은 높이에서 낙하합니다. 두 계수 중 큰 값이 적용되는 반발과 편집 후 변화를 시험 복귀로 비교하세요.", { 0.0f, 1.5f }, 85.0f }
+    demoEntry{ demoKind::restitutionMixingComparison, "강체", "반발 혼합 규칙 비교", "바닥·원 반발을 0·0.8, 0.8·0, 0·0으로 배분하고 같은 높이에서 낙하합니다. 두 계수 중 큰 값이 적용되는 반발과 편집 후 변화를 시험 복귀로 비교하세요.", { 0.0f, 1.5f }, 85.0f },
+    demoEntry{ demoKind::lowSpeedRestitutionComparison, "강체", "저속 반발 억제 비교", "같은 반발계수의 원이 0.5·2m/s로 바닥에 충돌합니다. 중력 없는 상태에서 저속 반발 억제를 비교하고 반발계수를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.8f }, 100.0f }
 };
 
 }

@@ -1063,8 +1063,51 @@ void checkRestitutionMixingDemo()
     }
 }
 
+void checkLowSpeedRestitutionDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        rigidBodyDemo scene{ demoKind::lowSpeedRestitutionComparison };
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 4 && physics.GetBodyCount() == 4, "low speed restitution creates two separate editable floor and circle pairs" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        check( same( physics.GetGravity(), {} ), "impact speed comparison isolates restitution without gravity" );
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const auto body = visuals[2 * i + 1].bodyHandle;
+            check( physics.GetBody( visuals[2 * i].bodyHandle ).type == bodyType::Static && physics.GetBody( body ).type == bodyType::Dynamic && physics.GetBodyTransform( body ).position.y == 0.4f && same( physics.GetBodyLinearVelocity( body ), { 0, i == 0 ? -0.5f : -2.0f } ) && !physics.IsBodySleepEnabled( body ) && physics.GetBodyLinearDamping( body ) == 0.0f && physics.GetBodyAngularDamping( body ) == 0.0f, "circles start touching the floors at distinct impact speeds without damping or automatic sleep" );
+        }
+        const auto observe = [&]
+        {
+            for( int frame = 0; frame < 30; ++frame ) scene.step( 1.0f / 60.0f, substeps );
+            return std::array{ physics.GetBodyLinearVelocity( visuals[1].bodyHandle ).y, physics.GetBodyLinearVelocity( visuals[3].bodyHandle ).y };
+        };
+        const auto original = observe();
+        check( std::abs( original[0] ) < 0.02f && std::abs( original[1] - 2.0f ) < 0.02f, "same restitution stops the slow impact but reverses the fast impact" );
+        physics.SetShapeRestitution( visuals[1].shapeHandle, 0.5f );
+        physics.SetShapeRestitution( visuals[3].shapeHandle, 0.5f );
+        for( int repeat = 0; repeat < 2; ++repeat )
+        {
+            scene.resetCollisionTrial();
+            for( std::size_t i = 0; i < visuals.size(); ++i )
+            {
+                const auto body = visuals[i].bodyHandle;
+                check( scene.getShapes()[i].shapeHandle == visuals[i].shapeHandle && physics.IsValid( visuals[i].shapeHandle ) && same( physics.GetBodyTransform( body ).position, { i < 2 ? -2.0f : 2.0f, i % 2 == 0 ? -0.15f : 0.4f } ) && physics.GetBodyTransform( body ).rotation.s == 0.0f && same( physics.GetBodyLinearVelocity( body ), { 0, i % 2 == 0 ? 0.0f : i == 1 ? -0.5f : -2.0f } ) && physics.GetBodyAngularVelocity( body ) == 0.0f, "impact reset restores initial touching poses and impact speeds with stable handles" );
+            }
+            check( physics.GetShapeRestitution( visuals[1].shapeHandle ) == 0.5f && physics.GetShapeRestitution( visuals[3].shapeHandle ) == 0.5f, "impact reset preserves edited circle restitution" );
+            const auto edited = observe();
+            check( std::abs( edited[0] ) < 0.02f && std::abs( edited[1] - 1.0f ) < 0.02f, "lower restitution changes the fast rebound while the slow impact remains suppressed" );
+        }
+        physics.SetShapeRestitution( visuals[3].shapeHandle, 0.0f );
+        scene.resetCollisionTrial();
+        const auto zero = observe();
+        check( std::abs( zero[0] ) < 0.02f && std::abs( zero[1] ) < 0.02f, "zero restitution suppresses the fast rebound too" );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkLowSpeedRestitutionDemo();
     checkRestitutionMixingDemo();
     checkFrictionMixingDemo();
     checkMaximumLinearSpeedDemo();
@@ -1179,7 +1222,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };

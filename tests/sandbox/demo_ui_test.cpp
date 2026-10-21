@@ -44,9 +44,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 21; ++frame )
+    for( int frame = 0; frame < 22; ++frame )
     {
-        session.selectDemo( frame == 20 ? demoKind::restitutionMixingComparison : frame == 19 ? demoKind::frictionMixingComparison : frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 21 ? demoKind::lowSpeedRestitutionComparison : frame == 20 ? demoKind::restitutionMixingComparison : frame == 19 ? demoKind::frictionMixingComparison : frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -887,6 +887,65 @@ void checkDemoUi()
             }
         }
     }
+    for( std::size_t component : { 1u, 3u } )
+    {
+        auto impactView = createDemoView( demoKind::lowSpeedRestitutionComparison );
+        auto& impactTrial = static_cast<rigidBodyDemo&>( *impactView );
+        const auto edited = impactTrial.getShapes()[component];
+        for( int step = 0; step < 30; ++step ) impactTrial.step( 1.0f / 60.0f, 4 );
+        for( int frame = 0; frame < 8; ++frame )
+        {
+            if( frame == 3 ) io.AddInputCharactersUTF8( "0.5" );
+            if( frame == 4 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+            if( frame == 5 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 340, 4000 } );
+            ImGui::Begin( "Low speed restitution inspector" );
+            ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Collision material" ), 1 );
+            if( frame == 0 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Object" );
+            if( frame == 1 && !GImGui->OpenPopupStack.empty() ) GImGui->NavActivateId = GImGui->NavActivateDownId = GImGui->OpenPopupStack.back().Window->GetID( edited.label );
+            if( frame == 2 )
+            {
+                GImGui->NavActivateId = ImGui::GetID( "Restitution" );
+                GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+            }
+            if( frame >= 5 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+            impactView->drawControls();
+            ImGui::End();
+            ImGui::Render();
+            if( frame >= 4 && impactTrial.getWorld().GetShapeRestitution( edited.shapeHandle ) != 0.5f )
+            {
+                std::fprintf( stderr, "impact inspector must preserve the selected restitution edit\n" );
+                std::exit( EXIT_FAILURE );
+            }
+            if( frame >= 5 )
+            {
+                for( std::size_t i = 0; i < impactTrial.getShapes().size(); ++i )
+                {
+                    const auto body = impactTrial.getShapes()[i].bodyHandle;
+                    const auto pose = impactTrial.getWorld().GetBodyTransform( body );
+                    const auto velocity = impactTrial.getWorld().GetBodyLinearVelocity( body );
+                    if( pose.position.x != ( i < 2 ? -2.0f : 2.0f ) || pose.position.y != ( i % 2 == 0 ? -0.15f : 0.4f ) || pose.rotation.s != 0.0f || velocity.x != 0.0f || velocity.y != ( i % 2 == 0 ? 0.0f : i == 1 ? -0.5f : -2.0f ) )
+                    {
+                        std::fprintf( stderr, "impact UI reset must restore touching poses and original impact velocities\n" );
+                        std::exit( EXIT_FAILURE );
+                    }
+                }
+                if( frame != 7 )
+                {
+                    for( int step = 0; step < 30; ++step ) impactTrial.step( 1.0f / 60.0f, 4 );
+                    const float slow = impactTrial.getWorld().GetBodyLinearVelocity( impactTrial.getShapes()[1].bodyHandle ).y;
+                    const float fast = impactTrial.getWorld().GetBodyLinearVelocity( impactTrial.getShapes()[3].bodyHandle ).y;
+                    if( std::abs( slow ) > 0.02f || std::abs( fast - ( component == 1 ? 2.0f : 1.0f ) ) > 0.02f )
+                    {
+                        std::fprintf( stderr, "inspector restitution editing must change the repeated fast rebound while preserving slow impact suppression\n" );
+                        std::exit( EXIT_FAILURE );
+                    }
+                }
+            }
+        }
+    }
     for( std::size_t component : { 0u, 1u } )
     {
         auto bounceView = createDemoView( demoKind::restitutionMixingComparison );
@@ -1499,7 +1558,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );
