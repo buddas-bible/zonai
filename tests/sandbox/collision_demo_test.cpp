@@ -27,8 +27,62 @@ bool same( vec2 a, vec2 b )
 
 }
 
+void checkCcdDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::ccdComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& simulation = scene.getWorld();
+        playback.stepOnce( substeps );
+        const auto projectile = scene.getImpulseBody();
+        check( simulation.IsValid( projectile ) && simulation.HadBodyTimeOfImpact( projectile ) && simulation.GetBodyTransform( projectile ).position.x < -0.1f, "CCD enabled trial stops the fast projectile in front of the thin wall after one fixed frame" );
+        check( scene.getShapes().size() == 2 && simulation.GetBodyCount() == 2 && std::string_view{ getDemoEntry( scene.getKind() ).category } == "강체", "CCD trial uses the existing category with one editable wall and projectile" );
+        check( !simulation.IsBodyBullet( projectile ), "static wall CCD works without enabling Bullet" );
+        const auto wall = scene.getShapes()[0];
+        const auto probe = scene.getShapes()[1];
+        simulation.SetContinuousEnabled( false );
+        scene.resetCollisionTrial();
+        check( !simulation.IsContinuousEnabled() && same( simulation.GetBodyLinearVelocity( projectile ), { 100, 0 } ) && same( simulation.GetBodyTransform( projectile ).position, { -0.8f, 0 } ), "CCD-off reset preserves the setting and restores the same launch conditions" );
+        playback.stepOnce( substeps );
+        check( simulation.GetBodyTransform( projectile ).position.x > 0.15f && !simulation.HadBodyTimeOfImpact( projectile ), "CCD disabled trial tunnels through the same thin wall in one fixed frame" );
+        simulation.SetShapeFriction( wall.shapeHandle, 0.4f );
+        simulation.SetShapeRestitution( probe.shapeHandle, 0.6f );
+        simulation.SetShapeDensity( probe.shapeHandle, 2.0f );
+        simulation.SetBodyLinearDamping( projectile, 0.1f );
+        simulation.SetBodyGravityScale( projectile, 0.3f );
+        simulation.SetBodySafetyFactor( projectile, 0.2f );
+        simulation.SetBodyBullet( projectile, true );
+        simulation.SetGravity( { 0, -1 } );
+        const float mass = simulation.GetBodyMass( projectile );
+        demoInput drag{};
+        drag.mousePosition = simulation.GetBodyTransform( projectile ).position;
+        drag.mousePressed = drag.mouseHeld = drag.left = true;
+        scene.handleInput( drag );
+        check( simulation.IsValid( scene.getMouseJoint() ), "CCD projectile retains existing drag interaction" );
+        scene.resetCollisionTrial();
+        check( !simulation.IsValid( scene.getMouseJoint() ) && simulation.IsValid( probe.bodyHandle ) && simulation.IsValid( wall.shapeHandle ) && simulation.IsBodyAwake( projectile ), "CCD trial reset cancels input and retains handles while waking the projectile" );
+        check( !simulation.IsContinuousEnabled() && simulation.GetShapeFriction( wall.shapeHandle ) == 0.4f && simulation.GetShapeRestitution( probe.shapeHandle ) == 0.6f && simulation.GetShapeDensity( probe.shapeHandle ) == 2.0f && simulation.GetBodyMass( projectile ) == mass && simulation.GetBodyLinearDamping( projectile ) == 0.1f && simulation.GetBodyGravityScale( projectile ) == 0.3f && simulation.GetBodySafetyFactor( projectile ) == 0.2f && simulation.IsBodyBullet( projectile ) && same( simulation.GetGravity(), { 0, -1 } ), "CCD trial reset preserves inspector material body world and CCD edits" );
+        playback.stepOnce( substeps );
+        check( simulation.GetBodyTransform( projectile ).position.x > 0.15f && !simulation.HadBodyTimeOfImpact( projectile ), "Bullet cannot override disabled world CCD during repeated trials" );
+        simulation.SetContinuousEnabled( true );
+        scene.resetCollisionTrial();
+        playback.stepOnce( substeps );
+        check( simulation.HadBodyTimeOfImpact( projectile ) && simulation.GetBodyTransform( projectile ).position.x < -0.1f, "edited repeated trial still catches the wall when CCD is reenabled" );
+        check( !playback.isPlaying(), "CCD single-step comparisons remain paused" );
+        playback.setPlaying( true );
+        scene.resetCollisionTrial();
+        check( playback.isPlaying(), "CCD trial reset retains play state" );
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        check( !playback.isPlaying() && defaults.getWorld().IsContinuousEnabled() && !defaults.getWorld().IsValid( projectile ), "full CCD scene reset restores default settings with fresh handles" );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkCcdDemo();
     rigidBodyDemo scene{ demoKind::collisionComparison };
     auto& simulation = scene.getWorld();
     check( scene.getShapes().size() == 6 && simulation.GetBodyCount() == 6, "collision comparison creates three independently editable dynamic pairs" );
@@ -126,7 +180,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };
