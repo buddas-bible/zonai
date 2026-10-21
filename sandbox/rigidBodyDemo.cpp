@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison )
     {
         createCollisionTrial();
     }
@@ -617,6 +617,18 @@ void rigidBodyDemo::createCollisionTrial()
             shapes_.push_back( { box, shape, labels[i] } );
         }
     }
+    else if( kind_ == demoKind::impulsePointComparison )
+    {
+        world_.SetGravity( {} );
+        const char* labels[] = { "상자 A (중심)", "상자 B (로컬 왼쪽)", "상자 C (로컬 오른쪽)" };
+        for( std::size_t i = 0; i < 3; ++i )
+        {
+            const auto box = world_.CreateBody( bodyType::Dynamic, { { -3.0f + 3.0f * static_cast<float>( i ), 0 }, {} } );
+            const auto shape = world_.CreateShape( box, MakeBox( { 0.5f, 0.5f } ) );
+            world_.SetBodySleepEnabled( box, false );
+            shapes_.push_back( { box, shape, labels[i] } );
+        }
+    }
     for( const auto& visual : shapes_ )
     {
         collisionTrialInitialStates_.push_back( { world_.GetBodyTransform( visual.bodyHandle ), world_.GetBodyLinearVelocity( visual.bodyHandle ), world_.GetBodyAngularVelocity( visual.bodyHandle ) } );
@@ -629,6 +641,22 @@ void rigidBodyDemo::applyMassTrialImpulse()
     if( kind_ != demoKind::massImpulseComparison ) return;
     for( const auto& visual : shapes_ )
         if( world_.IsValid( visual.bodyHandle ) ) world_.ApplyLinearImpulseToCenter( visual.bodyHandle, { 0, 2.0f } );
+}
+
+std::optional<vec2> rigidBodyDemo::getImpulseTrialPoint( std::size_t shapeIndex ) const
+{
+    if( kind_ != demoKind::impulsePointComparison || shapeIndex >= shapes_.size() ) return std::nullopt;
+    const auto body = shapes_[shapeIndex].bodyHandle;
+    if( !world_.IsValid( body ) ) return std::nullopt;
+    const float offset = shapeIndex == 1 ? -0.5f : shapeIndex == 2 ? 0.5f : 0.0f;
+    return TransformPoint( world_.GetBodyTransform( body ), world_.GetBodyLocalCenter( body ) + vec2{ offset, 0 } );
+}
+
+void rigidBodyDemo::applyPointTrialImpulse()
+{
+    if( kind_ != demoKind::impulsePointComparison ) return;
+    for( std::size_t i = 0; i < shapes_.size(); ++i )
+        if( const auto point = getImpulseTrialPoint( i ) ) world_.ApplyLinearImpulse( shapes_[i].bodyHandle, { 0, 2.0f }, *point );
 }
 
 void rigidBodyDemo::resetCollisionTrial()

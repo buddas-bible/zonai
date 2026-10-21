@@ -43,9 +43,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 11; ++frame )
+    for( int frame = 0; frame < 12; ++frame )
     {
-        session.selectDemo( frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -785,6 +785,106 @@ void checkDemoUi()
             }
         }
     }
+    auto pointView = createDemoView( demoKind::impulsePointComparison );
+    auto& pointTrial = static_cast<rigidBodyDemo&>( *pointView );
+    const auto pointMiddle = pointTrial.getShapes()[1];
+    pointTrial.getWorld().SetBodyTransform( pointMiddle.bodyHandle, { { 1, 2 }, zonai::rot2::FromRadians( 0.5f * std::numbers::pi_v<float> ) } );
+    pointTrial.getWorld().SetBodyTransform( pointTrial.getShapes()[2].bodyHandle, { { 4, 2 }, zonai::rot2::FromRadians( std::numbers::pi_v<float> ) } );
+    ImGui::NewFrame();
+    ImGui::SetNextWindowPos( { 0, 0 } );
+    ImGui::SetNextWindowSize( { 900, 700 } );
+    ImGui::Begin( "Point trial markers" );
+    debugCamera pointCamera{};
+    pointCamera.center = { 0, 1 };
+    pointCamera.pixelsPerMeter = 75.0f;
+    const auto viewport = ImGui::GetCursorScreenPos();
+    ImDrawList* pointList = ImGui::GetWindowDrawList();
+    const int pointStart = pointList->VtxBuffer.Size;
+    debugDraw pointDraw{ pointList, pointCamera, viewport, { 850, 650 } };
+    pointView->draw( pointDraw );
+    for( const zonai::vec2 expected : { zonai::vec2{ -3, 0 }, zonai::vec2{ 1, 1.5f }, zonai::vec2{ 3.5f, 2 } } )
+    {
+        const auto center = pointCamera.WorldToScreen( expected, viewport, { 850, 650 } );
+        const auto tip = pointCamera.WorldToScreen( expected + zonai::vec2{ 0, 0.75f }, viewport, { 850, 650 } );
+        bool markerFound = false, arrowFound = false;
+        for( int i = pointStart; i < pointList->VtxBuffer.Size; ++i )
+        {
+            const auto& vertex = pointList->VtxBuffer[i];
+            if( vertex.col != IM_COL32( 255, 185, 80, 255 ) ) continue;
+            const float dx = std::abs( vertex.pos.x - center.x );
+            markerFound |= dx >= 3.0f && dx <= 6.0f && std::abs( vertex.pos.y - center.y ) <= 6.0f;
+            arrowFound |= std::abs( vertex.pos.x - tip.x ) < 2.0f && std::abs( vertex.pos.y - tip.y ) < 2.0f;
+        }
+        if( !markerFound || !arrowFound )
+        {
+            std::fprintf( stderr, "point markers or world-up arrows did not follow edited body transforms\n" );
+            std::exit( EXIT_FAILURE );
+        }
+    }
+    ImGui::End();
+    ImGui::Render();
+    pointTrial.resetCollisionTrial();
+    for( int frame = 0; frame < 14; ++frame )
+    {
+        if( frame == 4 ) io.AddInputCharactersUTF8( "1.570796" );
+        if( frame == 8 ) io.AddInputCharactersUTF8( "2" );
+        if( frame == 5 || frame == 9 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+        if( frame == 6 || frame == 10 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0, 0 } );
+        ImGui::SetNextWindowSize( { 340, 4000 } );
+        ImGui::Begin( "Point trial inspector" );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Transform" ), 1 );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Physics quantities" ), 1 );
+        if( frame == 0 || frame == 1 || frame == 6 || frame == 11 || frame == 12 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "PointTrialImpulse" );
+        if( frame == 2 || frame == 10 || frame == 13 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+        if( frame == 3 || frame == 7 )
+        {
+            GImGui->NavActivateId = ImGui::GetID( frame == 3 ? "Rotation" : "Density" );
+            GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+        }
+        pointView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        if( frame == 0 || frame == 1 || frame == 6 || frame == 11 || frame == 12 )
+        {
+            const float multiplier = frame == 1 || frame == 12 ? 2.0f : 1.0f;
+            for( std::size_t i = 0; i < pointTrial.getShapes().size(); ++i )
+            {
+                const auto body = pointTrial.getShapes()[i].bodyHandle;
+                const float speed = multiplier * ( i == 1 && frame >= 11 ? 1.0f : 2.0f );
+                const float spin = multiplier * ( i == 0 || ( i == 1 && frame == 6 ) ? 0.0f : i == 1 ? ( frame >= 11 ? -3.0f : -6.0f ) : 6.0f );
+                if( pointTrial.getWorld().GetBodyLinearVelocity( body ).y != speed || std::abs( pointTrial.getWorld().GetBodyAngularVelocity( body ) - spin ) > 1.0e-4f || pointTrial.getWorld().GetBodyTransform( body ).position.y != 0.0f )
+                {
+                    std::fprintf( stderr, "point UI action did not use current rotation density or accumulated velocities\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+        }
+        if( frame == 2 || frame == 10 || frame == 13 )
+        {
+            for( const auto& visual : pointTrial.getShapes() )
+                if( zonai::LengthSquared( pointTrial.getWorld().GetBodyLinearVelocity( visual.bodyHandle ) ) != 0.0f || pointTrial.getWorld().GetBodyAngularVelocity( visual.bodyHandle ) != 0.0f || pointTrial.getWorld().GetBodyTransform( visual.bodyHandle ).rotation.s != 0.0f )
+                {
+                    std::fprintf( stderr, "point UI reset did not clear rotation and velocities\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+        }
+        if( frame >= 9 && pointTrial.getWorld().GetShapeDensity( pointMiddle.shapeHandle ) != 2.0f )
+        {
+            std::fprintf( stderr, "point inspector density edit or selection was lost by reset\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( frame == 6 )
+        {
+            const auto point = pointTrial.getImpulseTrialPoint( 1 );
+            if( !point || zonai::Length( *point - zonai::vec2{ 0, -0.5f } ) > 1.0e-5f )
+            {
+                std::fprintf( stderr, "point query did not follow inspector rotation editing\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+    }
     auto massView = createDemoView( demoKind::massImpulseComparison );
     auto& massTrial = static_cast<rigidBodyDemo&>( *massView );
     const auto massMiddle = massTrial.getShapes()[1];
@@ -841,7 +941,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );
