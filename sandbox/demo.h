@@ -53,7 +53,8 @@ enum class demoKind
     maximumLinearSpeedComparison,
     frictionMixingComparison,
     restitutionMixingComparison,
-    lowSpeedRestitutionComparison
+    lowSpeedRestitutionComparison,
+    collisionGroupComparison
 };
 
 struct demoEntry

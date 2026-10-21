@@ -1105,8 +1105,75 @@ void checkLowSpeedRestitutionDemo()
     }
 }
 
+void checkCollisionGroupDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        rigidBodyDemo scene{ demoKind::collisionGroupComparison };
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 6 && physics.GetBodyCount() == 6 && same( physics.GetGravity(), {} ), "group comparison creates three separate editable head-on pairs without gravity" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        const auto observe = [&]( std::array<bool, 3> collisions )
+        {
+            for( int frame = 0; frame < 90; ++frame ) scene.step( 1.0f / 60.0f, substeps );
+            for( std::size_t row = 0; row < 3; ++row )
+            {
+                const auto left = visuals[2 * row].bodyHandle;
+                const auto right = visuals[2 * row + 1].bodyHandle;
+                check( collisions[row] ? physics.GetBodyTransform( left ).position.x < 0 && physics.GetBodyTransform( right ).position.x > 0 && physics.GetBodyLinearVelocity( left ).x < 0 && physics.GetBodyLinearVelocity( right ).x > 0 : physics.GetBodyTransform( left ).position.x > 0 && physics.GetBodyTransform( right ).position.x < 0 && physics.GetBodyLinearVelocity( left ).x > 0 && physics.GetBodyLinearVelocity( right ).x < 0, "group and mask rules must produce the expected collision or passage for both bodies" );
+            }
+        };
+        observe( { false, true, false } );
+        auto filter = physics.GetShapeFilter( visuals[2].shapeHandle );
+        filter.groupIndex = 0;
+        physics.SetShapeFilter( visuals[2].shapeHandle, filter );
+        filter = physics.GetShapeFilter( visuals[4].shapeHandle );
+        filter.groupIndex = 0;
+        physics.SetShapeFilter( visuals[4].shapeHandle, filter );
+        for( std::size_t i : { 0u, 1u } )
+        {
+            filter = physics.GetShapeFilter( visuals[i].shapeHandle );
+            filter.maskBits = ~std::uint64_t{ 0 };
+            physics.SetShapeFilter( visuals[i].shapeHandle, filter );
+        }
+        for( int repeat = 0; repeat < 2; ++repeat )
+        {
+            scene.resetCollisionTrial();
+            for( std::size_t i = 0; i < visuals.size(); ++i )
+            {
+                const auto body = visuals[i].bodyHandle;
+                check( scene.getShapes()[i].shapeHandle == visuals[i].shapeHandle && physics.IsValid( visuals[i].shapeHandle ) && same( physics.GetBodyTransform( body ).position, { i % 2 == 0 ? -2.0f : 2.0f, 2.0f - 2.0f * static_cast<float>( i / 2 ) } ) && same( physics.GetBodyLinearVelocity( body ), { i % 2 == 0 ? 2.0f : -2.0f, 0 } ) && physics.GetBodyAngularVelocity( body ) == 0.0f, "group trial reset restores original conditions and stable handles" );
+            }
+            check( physics.GetShapeFilter( visuals[0].shapeHandle ).maskBits == ~std::uint64_t{ 0 } && physics.GetShapeFilter( visuals[2].shapeHandle ).groupIndex == 0 && physics.GetShapeFilter( visuals[4].shapeHandle ).groupIndex == 0, "group trial reset preserves edited masks and groups" );
+            observe( { true, false, true } );
+        }
+        filter = physics.GetShapeFilter( visuals[1].shapeHandle );
+        filter.maskBits = 0;
+        physics.SetShapeFilter( visuals[1].shapeHandle, filter );
+        filter = physics.GetShapeFilter( visuals[2].shapeHandle );
+        filter.groupIndex = 1;
+        physics.SetShapeFilter( visuals[2].shapeHandle, filter );
+        filter = physics.GetShapeFilter( visuals[4].shapeHandle );
+        filter.groupIndex = -1;
+        physics.SetShapeFilter( visuals[4].shapeHandle, filter );
+        scene.resetCollisionTrial();
+        observe( { false, true, false } );
+        collisionMatrix matrix;
+        matrix.setPair( 0, 1, false );
+        scene.setCollisionMatrix( matrix );
+        scene.resetCollisionTrial();
+        observe( { false, false, false } );
+        check( physics.GetShapeFilter( visuals[2].shapeHandle ).groupIndex == 1, "common exclusion blocks even the matching positive group without changing its filter" );
+        matrix.setPair( 0, 1, true );
+        scene.setCollisionMatrix( matrix );
+        scene.resetCollisionTrial();
+        observe( { false, true, false } );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkCollisionGroupDemo();
     checkLowSpeedRestitutionDemo();
     checkRestitutionMixingDemo();
     checkFrictionMixingDemo();
@@ -1222,7 +1289,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };
