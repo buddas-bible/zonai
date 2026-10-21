@@ -216,8 +216,74 @@ void checkSensorWallDemo()
     }
 }
 
+void checkSleepWakeDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::sleepWakeComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& simulation = scene.getWorld();
+        check( scene.getShapes().size() == 3 && simulation.GetBodyCount() == 3, "sleep comparison creates one floor and two editable boxes" );
+        const auto left = scene.getShapes()[1];
+        const auto right = scene.getShapes()[2];
+        const float threshold = simulation.GetBodySleepThreshold( left.bodyHandle );
+        for( int frame = 0; frame < 240; ++frame )
+            playback.stepOnce( substeps );
+        check( !simulation.IsBodyAwake( left.bodyHandle ) && simulation.IsBodyAwake( right.bodyHandle ), "only the sleep-enabled left box sleeps after the identical drops settle" );
+        check( std::abs( simulation.GetBodyTransform( left.bodyHandle ).position.y - 0.5f ) < 0.1f && std::abs( simulation.GetBodyTransform( right.bodyHandle ).position.y - 0.5f ) < 0.1f && std::abs( simulation.GetBodyTransform( left.bodyHandle ).position.x + 2.0f ) < 0.1f && std::abs( simulation.GetBodyTransform( right.bodyHandle ).position.x - 2.0f ) < 0.1f, "both sleep trials remain supported at rest on the same floor" );
+        simulation.SetBodySleepEnabled( left.bodyHandle, false );
+        simulation.SetBodySleepEnabled( right.bodyHandle, true );
+        scene.resetCollisionTrial();
+        check( !simulation.IsBodySleepEnabled( left.bodyHandle ) && simulation.IsBodySleepEnabled( right.bodyHandle ) && simulation.IsBodyAwake( left.bodyHandle ) && simulation.IsBodyAwake( right.bodyHandle ), "sleep reset wakes both boxes and retains swapped sleep settings" );
+        for( int frame = 0; frame < 240; ++frame )
+            playback.stepOnce( substeps );
+        check( simulation.IsBodyAwake( left.bodyHandle ) && !simulation.IsBodyAwake( right.bodyHandle ), "swapping sleep permission swaps which box sleeps in the repeated trial" );
+        demoInput drag{};
+        drag.mousePosition = simulation.GetBodyTransform( right.bodyHandle ).position;
+        drag.mousePressed = drag.mouseHeld = true;
+        scene.handleInput( drag );
+        check( simulation.IsValid( scene.getMouseJoint() ) && simulation.IsBodyAwake( right.bodyHandle ), "dragging the sleeping box creates the existing mouse joint and wakes it" );
+        drag.mousePressed = false;
+        drag.mousePosition.y += 0.75f;
+        scene.handleInput( drag );
+        for( int frame = 0; frame < 30; ++frame )
+            playback.stepOnce( substeps );
+        check( simulation.IsBodyAwake( right.bodyHandle ) && simulation.GetBodyTransform( right.bodyHandle ).position.y > 0.6f, "held drag moves the awake box away from its resting pose" );
+        scene.handleInput( {} );
+        check( !simulation.IsValid( scene.getMouseJoint() ), "releasing the sleep demo drag removes the temporary joint" );
+        for( int frame = 0; frame < 240; ++frame )
+            playback.stepOnce( substeps );
+        check( !simulation.IsBodyAwake( right.bodyHandle ), "released sleep-enabled box returns to sleep after settling again" );
+        drag.mousePressed = drag.mouseHeld = true;
+        drag.mousePosition = simulation.GetBodyTransform( right.bodyHandle ).position;
+        scene.handleInput( drag );
+        simulation.SetBodySleepThreshold( left.bodyHandle, 0.12f );
+        simulation.SetBodySleepThreshold( right.bodyHandle, 0.08f );
+        collisionMatrix matrix;
+        matrix.setPair( 2, 3, false );
+        playback.setCollisionMatrix( matrix );
+        playback.setPlaying( true );
+        scene.resetCollisionTrial();
+        check( playback.isPlaying() && playback.getCollisionMatrix() == matrix && !simulation.IsValid( scene.getMouseJoint() ) && simulation.IsValid( left.shapeHandle ) && simulation.IsValid( right.shapeHandle ), "sleep reset cancels dragging and preserves handles common settings and play state" );
+        check( simulation.IsBodyAwake( left.bodyHandle ) && simulation.IsBodyAwake( right.bodyHandle ) && same( simulation.GetBodyTransform( left.bodyHandle ).position, { -2, 1.5f } ) && same( simulation.GetBodyTransform( right.bodyHandle ).position, { 2, 1.5f } ) && same( simulation.GetBodyLinearVelocity( left.bodyHandle ), {} ) && same( simulation.GetBodyLinearVelocity( right.bodyHandle ), {} ) && simulation.GetBodySleepThreshold( left.bodyHandle ) == 0.12f && simulation.GetBodySleepThreshold( right.bodyHandle ) == 0.08f, "sleep reset restores initial awake poses and velocities while preserving edited thresholds" );
+        playback.setPlaying( false );
+        simulation.SetSleepingEnabled( false );
+        scene.resetCollisionTrial();
+        for( int frame = 0; frame < 240; ++frame )
+            playback.stepOnce( substeps );
+        check( !simulation.IsSleepingEnabled() && simulation.IsBodyAwake( left.bodyHandle ) && simulation.IsBodyAwake( right.bodyHandle ), "trial reset retains disabled world sleep so neither box sleeps" );
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        const auto defaultLeft = defaults.getShapes()[1].bodyHandle;
+        const auto defaultRight = defaults.getShapes()[2].bodyHandle;
+        check( !playback.isPlaying() && playback.getCollisionMatrix() == matrix && !defaults.getWorld().IsValid( left.bodyHandle ) && defaults.getWorld().IsSleepingEnabled() && defaults.getWorld().IsBodySleepEnabled( defaultLeft ) && !defaults.getWorld().IsBodySleepEnabled( defaultRight ) && defaults.getWorld().GetBodySleepThreshold( defaultLeft ) == threshold, "full sleep reset restores scene defaults with fresh handles while retaining common settings" );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkSleepWakeDemo();
     checkSensorWallDemo();
     checkFilterComparisonDemo();
     checkCcdDemo();
@@ -318,7 +384,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };
