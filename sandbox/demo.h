@@ -37,7 +37,8 @@ enum class demoKind
     restitutionComparison,
     boxStack,
     ccdComparison,
-    collisionFilterComparison
+    collisionFilterComparison,
+    sensorWallComparison
 };
 
 struct demoEntry
