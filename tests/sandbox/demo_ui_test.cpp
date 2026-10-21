@@ -3,6 +3,7 @@
 #include <cstring>
 #include <cmath>
 #include <numbers>
+#include <array>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -43,9 +44,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 20; ++frame )
+    for( int frame = 0; frame < 21; ++frame )
     {
-        session.selectDemo( frame == 19 ? demoKind::frictionMixingComparison : frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 20 ? demoKind::restitutionMixingComparison : frame == 19 ? demoKind::frictionMixingComparison : frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -888,6 +889,74 @@ void checkDemoUi()
     }
     for( std::size_t component : { 0u, 1u } )
     {
+        auto bounceView = createDemoView( demoKind::restitutionMixingComparison );
+        auto& bounceTrial = static_cast<rigidBodyDemo&>( *bounceView );
+        const auto edited = bounceTrial.getShapes()[component];
+        const float coefficient = component == 0 ? 1.0f : 0.4f;
+        for( int step = 0; step < 60; ++step )
+            bounceTrial.step( 1.0f / 60.0f, 4 );
+        for( int frame = 0; frame < 8; ++frame )
+        {
+            if( frame == 3 ) io.AddInputCharactersUTF8( component == 0 ? "1" : "0.4" );
+            if( frame == 4 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+            if( frame == 5 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 340, 4000 } );
+            ImGui::Begin( "Restitution mixing inspector" );
+            ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Collision material" ), 1 );
+            if( frame == 0 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Object" );
+            if( frame == 1 && !GImGui->OpenPopupStack.empty() ) GImGui->NavActivateId = GImGui->NavActivateDownId = GImGui->OpenPopupStack.back().Window->GetID( edited.label );
+            if( frame == 2 )
+            {
+                GImGui->NavActivateId = ImGui::GetID( "Restitution" );
+                GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+            }
+            if( frame >= 5 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+            bounceView->drawControls();
+            ImGui::End();
+            ImGui::Render();
+            if( frame >= 4 && bounceTrial.getWorld().GetShapeRestitution( edited.shapeHandle ) != coefficient )
+            {
+                std::fprintf( stderr, "restitution inspector must preserve the selected floor or circle coefficient edit\n" );
+                std::exit( EXIT_FAILURE );
+            }
+            if( frame >= 5 )
+            {
+                for( std::size_t i = 0; i < bounceTrial.getShapes().size(); ++i )
+                {
+                    const auto body = bounceTrial.getShapes()[i].bodyHandle;
+                    const auto pose = bounceTrial.getWorld().GetBodyTransform( body );
+                    if( pose.position.x != -3.0f + 3.0f * static_cast<float>( i / 2 ) || pose.position.y != ( i % 2 == 0 ? -0.15f : 3.0f ) || pose.rotation.s != 0.0f || zonai::LengthSquared( bounceTrial.getWorld().GetBodyLinearVelocity( body ) ) != 0.0f )
+                    {
+                        std::fprintf( stderr, "restitution mixing UI reset must restore initial drop poses and rest\n" );
+                        std::exit( EXIT_FAILURE );
+                    }
+                }
+                if( frame != 7 )
+                {
+                    std::array<float, 3> peaks{};
+                    for( int step = 0; step < 90; ++step )
+                    {
+                        bounceTrial.step( 1.0f / 60.0f, 4 );
+                        for( std::size_t i = 0; i < peaks.size(); ++i )
+                        {
+                            const auto body = bounceTrial.getShapes()[2 * i + 1].bodyHandle;
+                            if( bounceTrial.getWorld().GetBodyLinearVelocity( body ).y > 0.1f ) peaks[i] = std::max( peaks[i], bounceTrial.getWorld().GetBodyTransform( body ).position.y );
+                        }
+                    }
+                    const bool editedResponse = component == 0 ? peaks[0] > 2.5f : peaks[0] > 0.55f && peaks[0] < 1.2f;
+                    if( !editedResponse || peaks[1] <= 1.5f || peaks[1] >= 2.5f || peaks[2] != 0.0f )
+                    {
+                        std::fprintf( stderr, "editing either material in the inspector must change the repeated restitution mixing response\n" );
+                        std::exit( EXIT_FAILURE );
+                    }
+                }
+            }
+        }
+    }
+    for( std::size_t component : { 0u, 1u } )
+    {
         auto mixingView = createDemoView( demoKind::frictionMixingComparison );
         auto& mixingTrial = static_cast<rigidBodyDemo&>( *mixingView );
         const auto edited = mixingTrial.getShapes()[component];
@@ -1430,7 +1499,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );

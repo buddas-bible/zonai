@@ -51,7 +51,8 @@ enum class demoKind
     compoundCenterComparison,
     fastRotationComparison,
     maximumLinearSpeedComparison,
-    frictionMixingComparison
+    frictionMixingComparison,
+    restitutionMixingComparison
 };
 
 struct demoEntry
