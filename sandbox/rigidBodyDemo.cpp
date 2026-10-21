@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison )
     {
         createCollisionTrial();
     }
@@ -514,6 +514,25 @@ void rigidBodyDemo::createCollisionTrial()
         world_.SetShapeFriction( shape, 0.0f );
         world_.SetBodyLinearVelocity( projectile, { 100.0f, 0 } );
         shapes_.push_back( { projectile, shape, "원" } );
+    }
+    else if( kind_ == demoKind::collisionFilterComparison )
+    {
+        world_.SetGravity( {} );
+        const char* labels[][2] = { { "위 A (초기 레이어 01)", "위 B (초기 레이어 02)" }, { "아래 A (초기 레이어 01)", "아래 B (초기 레이어 02)" } };
+        for( std::size_t i = 0; i < 2; ++i )
+            for( std::size_t j = 0; j < 2; ++j )
+            {
+                const auto body = world_.CreateBody( bodyType::Dynamic, { { j == 0 ? -2.0f : 2.0f, i == 0 ? 1.5f : -1.5f }, {} } );
+                const auto shape = world_.CreateShape( body, circle2{ {}, 0.35f } );
+                world_.SetShapeFriction( shape, 0.0f );
+                world_.SetShapeRestitution( shape, 1.0f );
+                collisionFilter filter;
+                filter.categoryBits = std::uint64_t{ 1 } << j;
+                if( i == 1 && j == 0 ) filter.maskBits &= ~std::uint64_t{ 2 };
+                world_.SetShapeFilter( shape, filter );
+                world_.SetBodyLinearVelocity( body, { j == 0 ? 2.0f : -2.0f, 0 } );
+                shapes_.push_back( { body, shape, labels[i][j] } );
+            }
     }
     for( const auto& visual : shapes_ )
     {
