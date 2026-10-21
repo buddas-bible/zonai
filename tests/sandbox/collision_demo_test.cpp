@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <numbers>
 #include <cstdlib>
 #include <string_view>
 #include <vector>
@@ -477,8 +478,85 @@ void checkMassImpulseDemo()
     check( same( other.getWorld().GetBodyLinearVelocity( body ), velocity ), "mass trial action does not alter other scenes" );
 }
 
+void checkImpulsePointDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::impulsePointComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& simulation = scene.getWorld();
+        check( scene.getShapes().size() == 3 && simulation.GetBodyCount() == 3 && same( simulation.GetGravity(), {} ), "point comparison creates three identical editable boxes without gravity" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        const float spins[] = { 0.0f, -6.0f, 6.0f };
+        const vec2 points[] = { { -3, 0 }, { -0.5f, 0 }, { 3.5f, 0 } };
+        scene.applyPointTrialImpulse();
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+        {
+            const auto body = visuals[i].bodyHandle;
+            check( same( simulation.GetBodyLinearVelocity( body ), { 0, 2 } ) && std::abs( simulation.GetBodyAngularVelocity( body ) - spins[i] ) < 1.0e-5f, "equal impulse gives equal translation with zero center spin and opposite side spins" );
+            const auto point = scene.getImpulseTrialPoint( i );
+            check( point && same( *point, points[i] ) && simulation.GetBodyTransform( body ).position.y == 0.0f && !simulation.IsBodySleepEnabled( body ), "point query exposes the initial center and local side offsets without advancing motion" );
+        }
+        check( !playback.isPlaying() && !scene.getImpulseTrialPoint( 3 ), "point action preserves pause state and invalid point queries fail" );
+        scene.applyPointTrialImpulse();
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+            check( same( simulation.GetBodyLinearVelocity( visuals[i].bodyHandle ), { 0, 4 } ) && std::abs( simulation.GetBodyAngularVelocity( visuals[i].bodyHandle ) - 2.0f * spins[i] ) < 1.0e-5f, "repeated point impulses accumulate both linear and angular changes" );
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+            check( std::abs( simulation.GetBodyTransform( visuals[i].bodyHandle ).position.y - 4.0f ) < 2.0e-4f && std::abs( simulation.GetBodyAngularVelocity( visuals[i].bodyHandle ) - 2.0f * spins[i] ) < 1.0e-5f, "point trial steps preserve undamped motion without contacts" );
+        scene.resetCollisionTrial();
+        const auto left = visuals[1];
+        const auto right = visuals[2];
+        simulation.SetBodyTransform( left.bodyHandle, { { 1, 2 }, rot2::FromRadians( 0.5f * std::numbers::pi_v<float> ) } );
+        simulation.SetBodyTransform( right.bodyHandle, { { 4, 2 }, rot2::FromRadians( std::numbers::pi_v<float> ) } );
+        const auto leftPoint = scene.getImpulseTrialPoint( 1 );
+        const auto rightPoint = scene.getImpulseTrialPoint( 2 );
+        check( leftPoint && rightPoint && Length( *leftPoint - vec2{ 1, 1.5f } ) < 1.0e-6f && Length( *rightPoint - vec2{ 3.5f, 2 } ) < 1.0e-6f, "point query follows edited body translation and rotation" );
+        scene.applyPointTrialImpulse();
+        check( same( simulation.GetBodyLinearVelocity( left.bodyHandle ), { 0, 2 } ) && same( simulation.GetBodyLinearVelocity( right.bodyHandle ), { 0, 2 } ) && std::abs( simulation.GetBodyAngularVelocity( left.bodyHandle ) ) < 1.0e-5f && std::abs( simulation.GetBodyAngularVelocity( right.bodyHandle ) + 6.0f ) < 1.0e-5f, "rotated local points change torque while the impulse remains world-up" );
+        simulation.SetShapeDensity( right.shapeHandle, 2.0f );
+        scene.resetCollisionTrial();
+        scene.applyPointTrialImpulse();
+        check( simulation.GetBodyMass( right.bodyHandle ) == 2.0f && same( simulation.GetBodyLinearVelocity( right.bodyHandle ), { 0, 1 } ) && std::abs( simulation.GetBodyAngularVelocity( right.bodyHandle ) - 3.0f ) < 1.0e-5f, "point impulse uses the edited mass and rotational inertia after reset" );
+        demoInput drag{};
+        drag.mousePosition = simulation.GetBodyTransform( left.bodyHandle ).position;
+        drag.mousePressed = drag.mouseHeld = true;
+        scene.handleInput( drag );
+        check( simulation.IsValid( scene.getMouseJoint() ), "point comparison retains existing drag interaction" );
+        simulation.SetGravity( { 0, -1 } );
+        simulation.SetBodyLinearDamping( right.bodyHandle, 0.2f );
+        simulation.SetBodyAngularDamping( right.bodyHandle, 0.3f );
+        simulation.SetBodySleepEnabled( right.bodyHandle, true );
+        collisionMatrix matrix;
+        matrix.setPair( 2, 3, false );
+        playback.setCollisionMatrix( matrix );
+        playback.setPlaying( true );
+        scene.resetCollisionTrial();
+        check( playback.isPlaying() && playback.getCollisionMatrix() == matrix && !simulation.IsValid( scene.getMouseJoint() ) && same( simulation.GetGravity(), { 0, -1 } ) && simulation.GetBodyLinearDamping( right.bodyHandle ) == 0.2f && simulation.GetBodyAngularDamping( right.bodyHandle ) == 0.3f && simulation.IsBodySleepEnabled( right.bodyHandle ) && simulation.GetBodyMass( right.bodyHandle ) == 2.0f, "point reset cancels drag and preserves density body world common settings and play state" );
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+        {
+            const auto body = visuals[i].bodyHandle;
+            const auto pose = simulation.GetBodyTransform( body );
+            const auto point = scene.getImpulseTrialPoint( i );
+            check( simulation.IsValid( visuals[i].shapeHandle ) && same( pose.position, { -3.0f + 3.0f * static_cast<float>( i ), 0 } ) && pose.rotation.c == 1.0f && pose.rotation.s == 0.0f && same( simulation.GetBodyLinearVelocity( body ), {} ) && simulation.GetBodyAngularVelocity( body ) == 0.0f && point && same( *point, points[i] ), "point reset restores initial transforms zero velocities and point locations without relaunching" );
+        }
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        const auto defaultRight = defaults.getShapes()[2].bodyHandle;
+        check( !playback.isPlaying() && playback.getCollisionMatrix() == matrix && !defaults.getWorld().IsValid( right.bodyHandle ) && same( defaults.getWorld().GetGravity(), {} ) && !defaults.getWorld().IsBodySleepEnabled( defaultRight ) && defaults.getWorld().GetBodyMass( defaultRight ) == 1.0f && same( defaults.getWorld().GetBodyLinearVelocity( defaultRight ), {} ), "full point reset restores resting scene defaults while retaining common settings" );
+    }
+    rigidBodyDemo other{ demoKind::collisionComparison };
+    const auto body = other.getShapes()[0].bodyHandle;
+    const auto velocity = other.getWorld().GetBodyLinearVelocity( body );
+    other.applyPointTrialImpulse();
+    check( !other.getImpulseTrialPoint( 0 ) && same( other.getWorld().GetBodyLinearVelocity( body ), velocity ), "point trial queries and actions do not alter other scenes" );
+}
+
 void checkCollisionDemos()
 {
+    checkImpulsePointDemo();
     checkMassImpulseDemo();
     checkGravityScaleDemo();
     checkDampingDemo();
@@ -583,7 +661,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };

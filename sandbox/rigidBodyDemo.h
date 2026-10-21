@@ -174,6 +174,7 @@ public:
     void resetPlayground();
     void resetCollisionTrial();
     void applyMassTrialImpulse();
+    void applyPointTrialImpulse();
     void resetSplinePath();
     void resetTerrainProbes();
     void launchTerrainProbe( std::size_t probeIndex, terrainTrial trial );
@@ -242,6 +243,8 @@ public:
     [[nodiscard]] std::span<const visualShape> getShapes() const noexcept { return shapes_; }
 
     [[nodiscard]] std::span<const contactData> getContacts() const noexcept { return contacts_; }
+
+    [[nodiscard]] std::optional<vec2> getImpulseTrialPoint( std::size_t shapeIndex ) const;
 
     [[nodiscard]] bodyId getImpulseBody() const noexcept { return impulseBody_; }
 

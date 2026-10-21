@@ -134,7 +134,7 @@ bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, 
 
 rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 {
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison ) showLabels_ = true;
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison ) showLabels_ = true;
     selectedShapeIndex_ = kind == demoKind::playground || kind == demoKind::motorCar ? 2 : 1;
     if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
@@ -272,6 +272,17 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         {
             draw.DrawLabel( transform.position, visual.label, LABEL_COLOR );
         }
+    }
+
+    if( getKind() == demoKind::impulsePointComparison )
+    {
+        constexpr ImU32 POINT_COLOR = IM_COL32( 255, 185, 80, 255 );
+        for( std::size_t i = 0; i < getShapes().size(); ++i )
+            if( const auto point = getImpulseTrialPoint( i ) )
+            {
+                draw.DrawPoint( *point, POINT_COLOR, 5.0f );
+                draw.DrawArrow( *point, { 0, 1 }, POINT_COLOR, 0.75f );
+            }
     }
 
     if( hasEditableSpline() )
@@ -705,7 +716,7 @@ void rigidBodyDemoUi::drawSplineEditorControls()
 
 void rigidBodyDemoUi::drawExperimentControls()
 {
-    if( getKind() == demoKind::collisionComparison || getKind() == demoKind::frictionComparison || getKind() == demoKind::restitutionComparison || getKind() == demoKind::boxStack || getKind() == demoKind::ccdComparison || getKind() == demoKind::collisionFilterComparison || getKind() == demoKind::sensorWallComparison || getKind() == demoKind::sleepWakeComparison || getKind() == demoKind::dampingComparison || getKind() == demoKind::gravityScaleComparison || getKind() == demoKind::massImpulseComparison )
+    if( getKind() == demoKind::collisionComparison || getKind() == demoKind::frictionComparison || getKind() == demoKind::restitutionComparison || getKind() == demoKind::boxStack || getKind() == demoKind::ccdComparison || getKind() == demoKind::collisionFilterComparison || getKind() == demoKind::sensorWallComparison || getKind() == demoKind::sleepWakeComparison || getKind() == demoKind::dampingComparison || getKind() == demoKind::gravityScaleComparison || getKind() == demoKind::massImpulseComparison || getKind() == demoKind::impulsePointComparison )
     {
         ImGui::TextUnformatted( "반복 시험" );
         if( getKind() == demoKind::ccdComparison )
@@ -746,6 +757,13 @@ void rigidBodyDemoUi::drawExperimentControls()
             if( ImGui::Button( "같은 충격량 적용###MassTrialImpulse" ) ) applyMassTrialImpulse();
             for( const auto& visual : getShapes() )
                 ImGui::TextWrapped( "%s: 질량 %.2f kg / 속력 %.2f m/s", visual.label, getWorld().GetBodyMass( visual.bodyHandle ), Length( getWorld().GetBodyLinearVelocity( visual.bodyHandle ) ) );
+        }
+        if( getKind() == demoKind::impulsePointComparison )
+        {
+            ImGui::TextWrapped( "주황색 점에 월드 위쪽 2N·s를 추가합니다. 기본 조건에서는 선속도 증가가 같고 좌우 작용점은 반대로 회전합니다. 점은 물체와 함께 회전합니다. 회전을 편집한 뒤 그대로 적용해 비교하세요. 반복 적용은 누적되며 시험 복귀는 초기 회전·정지 속도로 돌아가고 밀도 등 설정은 유지합니다. 처음에는 중력·감쇠·자동 수면을 끕니다." );
+            if( ImGui::Button( "같은 충격량 적용###PointTrialImpulse" ) ) applyPointTrialImpulse();
+            for( const auto& visual : getShapes() )
+                ImGui::TextWrapped( "%s: 속력 %.2f m/s / 각속도 %.2f rad/s", visual.label, Length( getWorld().GetBodyLinearVelocity( visual.bodyHandle ) ), getWorld().GetBodyAngularVelocity( visual.bodyHandle ) );
         }
         if( getKind() == demoKind::frictionComparison ) ImGui::TextWrapped( "마찰은 물체와 경사면 계수의 기하평균으로 정해집니다. 현재 계수는 인스펙터에서 확인·편집하세요." );
         if( getKind() == demoKind::restitutionComparison ) ImGui::TextWrapped( "반발은 두 물체 중 큰 계수를 사용합니다. 바닥의 기본 반발은 0입니다. 인스펙터에서 원과 바닥을 비교하세요." );
