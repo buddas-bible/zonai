@@ -43,9 +43,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 10; ++frame )
+    for( int frame = 0; frame < 11; ++frame )
     {
-        session.selectDemo( frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -785,7 +785,63 @@ void checkDemoUi()
             }
         }
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison } )
+    auto massView = createDemoView( demoKind::massImpulseComparison );
+    auto& massTrial = static_cast<rigidBodyDemo&>( *massView );
+    const auto massMiddle = massTrial.getShapes()[1];
+    for( int frame = 0; frame < 9; ++frame )
+    {
+        if( frame == 3 ) io.AddInputCharactersUTF8( "4" );
+        if( frame == 4 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+        if( frame == 5 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0, 0 } );
+        ImGui::SetNextWindowSize( { 340, 4000 } );
+        ImGui::Begin( "Mass trial inspector" );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Physics quantities" ), 1 );
+        if( frame == 0 || frame == 1 || frame == 6 || frame == 7 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "MassTrialImpulse" );
+        if( frame == 5 || frame == 8 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+        if( frame == 2 )
+        {
+            GImGui->NavActivateId = ImGui::GetID( "Density" );
+            GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+        }
+        massView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        if( frame == 0 || frame == 1 || frame == 6 || frame == 7 )
+        {
+            const float multiplier = frame == 1 || frame == 7 ? 2.0f : 1.0f;
+            for( std::size_t i = 0; i < massTrial.getShapes().size(); ++i )
+            {
+                const auto body = massTrial.getShapes()[i].bodyHandle;
+                const float expected = multiplier * ( i == 0 ? 2.0f : i == 1 && frame < 6 ? 1.0f : 0.5f );
+                if( massTrial.getWorld().GetBodyLinearVelocity( body ).y != expected || massTrial.getWorld().GetBodyTransform( body ).position.y != 0.0f || massTrial.getWorld().GetBodyAngularVelocity( body ) != 0.0f )
+                {
+                    std::fprintf( stderr, "mass UI button failed to apply or accumulate a center impulse without advancing motion\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+        }
+        if( frame >= 4 && ( massTrial.getWorld().GetShapeDensity( massMiddle.shapeHandle ) != 4.0f || massTrial.getWorld().GetBodyMass( massMiddle.bodyHandle ) != 4.0f ) )
+        {
+            std::fprintf( stderr, "mass inspector density edit was lost or changed the wrong body\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( frame == 5 || frame == 8 )
+        {
+            for( std::size_t i = 0; i < massTrial.getShapes().size(); ++i )
+            {
+                const auto body = massTrial.getShapes()[i].bodyHandle;
+                if( massTrial.getWorld().GetBodyTransform( body ).position.x != -3.0f + 3.0f * static_cast<float>( i ) || massTrial.getWorld().GetBodyTransform( body ).position.y != 0.0f || zonai::LengthSquared( massTrial.getWorld().GetBodyLinearVelocity( body ) ) != 0.0f )
+                {
+                    std::fprintf( stderr, "mass UI reset did not restore initial pose and zero velocity\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+        }
+        if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
+    }
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );
