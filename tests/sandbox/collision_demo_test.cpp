@@ -554,8 +554,62 @@ void checkImpulsePointDemo()
     check( !other.getImpulseTrialPoint( 0 ) && same( other.getWorld().GetBodyLinearVelocity( body ), velocity ), "point trial queries and actions do not alter other scenes" );
 }
 
+void checkRotationalInertiaDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::rotationalInertiaComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& simulation = scene.getWorld();
+        check( scene.getShapes().size() == 2 && simulation.GetBodyCount() == 2 && same( simulation.GetGravity(), {} ), "inertia comparison creates two bodies without gravity" );
+        const auto square = scene.getShapes()[0];
+        const auto bar = scene.getShapes()[1];
+        const float inertias[] = { 1.0f / 6.0f, 17.0f / 48.0f };
+        const float spins[] = { 6.0f, 48.0f / 17.0f };
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const auto body = scene.getShapes()[i].bodyHandle;
+            check( simulation.GetBodyMass( body ) == 1.0f && std::abs( simulation.GetBodyRotationalInertia( body ) - inertias[i] ) < 1.0e-6f && !simulation.IsBodySleepEnabled( body ), "equal mass shapes have different analytic inertias and no automatic sleep" );
+        }
+        scene.applyInertiaTrialImpulse();
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const auto body = scene.getShapes()[i].bodyHandle;
+            check( std::abs( simulation.GetBodyAngularVelocity( body ) - spins[i] ) < 1.0e-5f && same( simulation.GetBodyLinearVelocity( body ), {} ), "equal angular impulse changes spin according to inertia without translation" );
+            check( same( simulation.GetBodyTransform( body ).position, { i == 0 ? -2.5f : 2.5f, 0 } ) && simulation.GetBodyTransform( body ).rotation.s == 0.0f, "paused angular impulse leaves poses unchanged" );
+        }
+        check( !playback.isPlaying(), "inertia action preserves pause state" );
+        scene.applyInertiaTrialImpulse();
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const auto body = scene.getShapes()[i].bodyHandle;
+            check( std::abs( simulation.GetBodyAngularVelocity( body ) - 2.0f * spins[i] ) < 1.0e-5f && same( simulation.GetBodyTransform( body ).position, { i == 0 ? -2.5f : 2.5f, 0 } ) && std::abs( simulation.GetBodyTransform( body ).rotation.s ) > 0.1f, "repeated angular impulses accumulate and rotate bodies in place without damping" );
+        }
+        simulation.SetBodyLinearVelocity( bar.bodyHandle, { 2, -3 } );
+        scene.applyInertiaTrialImpulse();
+        check( same( simulation.GetBodyLinearVelocity( bar.bodyHandle ), { 2, -3 } ), "angular impulse preserves an edited nonzero linear velocity" );
+        simulation.SetShapeDensity( bar.shapeHandle, 2.0f );
+        scene.resetCollisionTrial();
+        check( simulation.GetBodyMass( bar.bodyHandle ) == 2.0f && std::abs( simulation.GetBodyRotationalInertia( bar.bodyHandle ) - 17.0f / 24.0f ) < 1.0e-6f && simulation.GetBodyAngularVelocity( bar.bodyHandle ) == 0.0f && same( simulation.GetBodyLinearVelocity( bar.bodyHandle ), {} ) && simulation.GetBodyTransform( bar.bodyHandle ).rotation.s == 0.0f, "trial reset restores pose and rest while preserving edited density and handles" );
+        scene.applyInertiaTrialImpulse();
+        check( std::abs( simulation.GetBodyAngularVelocity( square.bodyHandle ) - 6.0f ) < 1.0e-5f && std::abs( simulation.GetBodyAngularVelocity( bar.bodyHandle ) - 24.0f / 17.0f ) < 1.0e-5f, "angular impulse uses current inertia after density editing and reset" );
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        const auto body = defaults.getShapes()[1].bodyHandle;
+        check( !defaults.getWorld().IsValid( bar.bodyHandle ) && defaults.getWorld().GetBodyMass( body ) == 1.0f && defaults.getWorld().GetBodyAngularVelocity( body ) == 0.0f && !playback.isPlaying(), "full inertia reset restores default density and resting state" );
+    }
+    rigidBodyDemo other{ demoKind::collisionComparison };
+    const auto body = other.getShapes()[0].bodyHandle;
+    other.applyInertiaTrialImpulse();
+    check( other.getWorld().GetBodyAngularVelocity( body ) == 0.0f, "inertia action does not alter other scenes" );
+}
+
 void checkCollisionDemos()
 {
+    checkRotationalInertiaDemo();
     checkImpulsePointDemo();
     checkMassImpulseDemo();
     checkGravityScaleDemo();
@@ -661,7 +715,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };

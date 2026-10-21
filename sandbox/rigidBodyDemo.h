@@ -175,6 +175,7 @@ public:
     void resetCollisionTrial();
     void applyMassTrialImpulse();
     void applyPointTrialImpulse();
+    void applyInertiaTrialImpulse();
     void resetSplinePath();
     void resetTerrainProbes();
     void launchTerrainProbe( std::size_t probeIndex, terrainTrial trial );

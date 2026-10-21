@@ -54,7 +54,7 @@ void checkCollisionDemos();
 int main()
 {
     checkCollisionDemos();
-    check( getDemoEntries().size() == 29, "twenty-nine independently selectable demo entries" );
+    check( getDemoEntries().size() == 30, "thirty independently selectable demo entries" );
     demoSession session{ createRigidBodyDemo };
     auto& playground = static_cast<rigidBodyDemo&>( session.getDemo() );
     check( playground.getWorld().GetBodyCount() == 6 && playground.getWorld().getJointCount() == 0, "playground separated from pendulum" );

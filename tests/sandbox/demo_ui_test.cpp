@@ -43,9 +43,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 12; ++frame )
+    for( int frame = 0; frame < 13; ++frame )
     {
-        session.selectDemo( frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -885,6 +885,62 @@ void checkDemoUi()
             }
         }
     }
+    auto inertiaView = createDemoView( demoKind::rotationalInertiaComparison );
+    auto& inertiaTrial = static_cast<rigidBodyDemo&>( *inertiaView );
+    const auto inertiaMiddle = inertiaTrial.getShapes()[1];
+    for( int frame = 0; frame < 9; ++frame )
+    {
+        if( frame == 3 ) io.AddInputCharactersUTF8( "2" );
+        if( frame == 4 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+        if( frame == 5 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0, 0 } );
+        ImGui::SetNextWindowSize( { 340, 4000 } );
+        ImGui::Begin( "Inertia trial inspector" );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Physics quantities" ), 1 );
+        if( frame == 0 || frame == 1 || frame == 6 || frame == 7 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "InertiaTrialImpulse" );
+        if( frame == 5 || frame == 8 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+        if( frame == 2 )
+        {
+            GImGui->NavActivateId = ImGui::GetID( "Density" );
+            GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+        }
+        inertiaView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        if( frame == 0 || frame == 1 || frame == 6 || frame == 7 )
+        {
+            const float multiplier = frame == 1 || frame == 7 ? 2.0f : 1.0f;
+            for( std::size_t i = 0; i < inertiaTrial.getShapes().size(); ++i )
+            {
+                const auto body = inertiaTrial.getShapes()[i].bodyHandle;
+                const float expected = multiplier * ( i == 0 ? 6.0f : frame < 6 ? 48.0f / 17.0f : 24.0f / 17.0f );
+                if( std::abs( inertiaTrial.getWorld().GetBodyAngularVelocity( body ) - expected ) > 1.0e-5f || inertiaTrial.getWorld().GetBodyTransform( body ).position.y != 0.0f || zonai::LengthSquared( inertiaTrial.getWorld().GetBodyLinearVelocity( body ) ) != 0.0f )
+                {
+                    std::fprintf( stderr, "inertia UI button failed to apply or accumulate an angular impulse without advancing motion\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+        }
+        if( frame >= 4 && ( inertiaTrial.getWorld().GetShapeDensity( inertiaMiddle.shapeHandle ) != 2.0f || inertiaTrial.getWorld().GetBodyMass( inertiaMiddle.bodyHandle ) != 2.0f ) )
+        {
+            std::fprintf( stderr, "inertia inspector density edit was lost or changed the wrong body\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( frame == 5 || frame == 8 )
+        {
+            for( std::size_t i = 0; i < inertiaTrial.getShapes().size(); ++i )
+            {
+                const auto body = inertiaTrial.getShapes()[i].bodyHandle;
+                if( inertiaTrial.getWorld().GetBodyTransform( body ).position.x != ( i == 0 ? -2.5f : 2.5f ) || inertiaTrial.getWorld().GetBodyTransform( body ).position.y != 0.0f || zonai::LengthSquared( inertiaTrial.getWorld().GetBodyLinearVelocity( body ) ) != 0.0f || inertiaTrial.getWorld().GetBodyAngularVelocity( body ) != 0.0f || inertiaTrial.getWorld().GetBodyTransform( body ).rotation.s != 0.0f )
+                {
+                    std::fprintf( stderr, "inertia UI reset did not restore initial pose and zero velocity\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+        }
+        if( frame == 7 ) inertiaTrial.step( 1.0f / 60.0f, 4 );
+    }
     auto massView = createDemoView( demoKind::massImpulseComparison );
     auto& massTrial = static_cast<rigidBodyDemo&>( *massView );
     const auto massMiddle = massTrial.getShapes()[1];
@@ -941,7 +997,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );
