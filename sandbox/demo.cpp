@@ -49,7 +49,8 @@ constexpr std::array entries
     demoEntry{ demoKind::dynamicKinematicComparison, "강체", "동적·키네마틱 충돌 비교", "동적·키네마틱 상자가 같은 속도로 정지한 동적 표적을 밉니다. 밀도·반발을 편집하고 시험 복귀로 충돌 반작용과 지정 속도 유지의 차이를 비교하세요.", { 0.0f, 0.0f }, 95.0f },
     demoEntry{ demoKind::compoundCenterComparison, "강체", "복합 물체·질량중심 비교", "원 두 개를 묶은 같은 질량의 강체에 밀도를 대칭·비대칭으로 배분합니다. 물체 원점에 같은 충격량을 주고 질량중심과 회전 반응을 비교하세요.", { 0.0f, 1.0f }, 75.0f },
     demoEntry{ demoKind::fastRotationComparison, "강체", "고속 회전 제한 비교", "같은 막대 두 개가 120rad/s로 출발하며 빠른 회전 허용만 다릅니다. 인스펙터에서 설정을 바꾸고 시험 복귀로 단계당 회전 제한의 차이를 비교하세요.", { 0.0f, 0.0f }, 95.0f },
-    demoEntry{ demoKind::maximumLinearSpeedComparison, "강체", "최대 선속도 비교", "같은 대각선 방향으로 2·8m/s로 출발하는 상자를 월드 최대 선속도 4m/s에서 비교합니다. 기존 월드 설정을 편집하고 시험 복귀로 제한과 방향 보존을 확인하세요.", { 0.0f, 1.5f }, 75.0f }
+    demoEntry{ demoKind::maximumLinearSpeedComparison, "강체", "최대 선속도 비교", "같은 대각선 방향으로 2·8m/s로 출발하는 상자를 월드 최대 선속도 4m/s에서 비교합니다. 기존 월드 설정을 편집하고 시험 복귀로 제한과 방향 보존을 확인하세요.", { 0.0f, 1.5f }, 75.0f },
+    demoEntry{ demoKind::frictionMixingComparison, "강체", "마찰 혼합 규칙 비교", "수평 바닥과 상자의 마찰을 0.25·1, 1·0.25, 1·0으로 배분하고 같은 속도로 출발합니다. 두 계수의 혼합과 편집 후 감속 차이를 시험 복귀로 비교하세요.", { 0.0f, 0.5f }, 65.0f }
 };
 
 }

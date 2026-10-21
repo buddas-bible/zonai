@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison )
     {
         createCollisionTrial();
     }
@@ -726,6 +726,30 @@ void rigidBodyDemo::createCollisionTrial()
             world_.SetBodySleepEnabled( box, false );
             world_.SetBodyLinearVelocity( box, vec2{ 0.6f, 0.8f } * ( i == 0 ? 2.0f : 8.0f ) );
             shapes_.push_back( { box, shape, labels[i] } );
+        }
+    }
+    else if( kind_ == demoKind::frictionMixingComparison )
+    {
+        world_.SetGravity( { 0, -10 } );
+        const float floorFriction[] = { 0.25f, 1.0f, 1.0f };
+        const float boxFriction[] = { 1.0f, 0.25f, 0.0f };
+        const char* floors[] = { "바닥 A", "바닥 B", "바닥 C" };
+        const char* boxes[] = { "상자 A", "상자 B", "상자 C" };
+        for( std::size_t i = 0; i < 3; ++i )
+        {
+            const float lane = 2.0f - 2.0f * static_cast<float>( i );
+            const auto floor = world_.CreateBody( bodyType::Static, { { 0, lane }, {} } );
+            const auto surface = world_.CreateShape( floor, MakeBox( { 6.0f, 0.15f } ) );
+            world_.SetShapeFriction( surface, floorFriction[i] );
+            world_.SetShapeRestitution( surface, 0.0f );
+            shapes_.push_back( { floor, surface, floors[i] } );
+            const auto box = world_.CreateBody( bodyType::Dynamic, { { -3.0f, lane + 0.55f }, {} } );
+            const auto shape = world_.CreateShape( box, MakeBox( { 0.4f, 0.4f } ) );
+            world_.SetShapeFriction( shape, boxFriction[i] );
+            world_.SetShapeRestitution( shape, 0.0f );
+            world_.SetBodySleepEnabled( box, false );
+            world_.SetBodyLinearVelocity( box, { 4, 0 } );
+            shapes_.push_back( { box, shape, boxes[i] } );
         }
     }
     for( const auto& visual : shapes_ )
