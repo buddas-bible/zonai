@@ -343,8 +343,74 @@ void checkDampingDemo()
     }
 }
 
+void checkGravityScaleDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::gravityScaleComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& simulation = scene.getWorld();
+        check( scene.getShapes().size() == 3 && simulation.GetBodyCount() == 3, "gravity comparison creates three editable boxes without a floor" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        const auto first = visuals[0].bodyHandle;
+        const auto middle = visuals[1].bodyHandle;
+        const auto last = visuals[2].bodyHandle;
+        const float middleY = simulation.GetBodyTransform( middle ).position.y;
+        const float lastY = simulation.GetBodyTransform( last ).position.y;
+        check( same( simulation.GetBodyTransform( first ).position, { -3, 3 } ) && same( simulation.GetBodyLinearVelocity( first ), {} ) && middleY < 3.0f && lastY < middleY && std::abs( ( 3.0f - middleY ) - 0.5f * ( 3.0f - lastY ) ) < 2.0e-4f, "zero gravity scale stays still while half scale falls half as far as full scale" );
+        check( std::abs( simulation.GetBodyLinearVelocity( middle ).y + 5.0f ) < 2.0e-4f && std::abs( simulation.GetBodyLinearVelocity( last ).y + 10.0f ) < 2.0e-4f && simulation.GetContactCount() == 0, "gravity scales independently control falling velocity without contacts" );
+        for( const auto& visual : visuals )
+            check( !simulation.IsBodySleepEnabled( visual.bodyHandle ) && simulation.IsBodyAwake( visual.bodyHandle ) && simulation.GetBodyAngularVelocity( visual.bodyHandle ) == 0.0f, "sleep and rotation do not interfere with the gravity comparison" );
+        simulation.SetBodyGravityScale( middle, -1.0f );
+        scene.resetCollisionTrial();
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        check( simulation.GetBodyTransform( middle ).position.y > 3.0f && std::abs( simulation.GetBodyLinearVelocity( middle ).y - 10.0f ) < 2.0e-4f && simulation.GetBodyTransform( last ).position.y < 3.0f, "edited negative gravity scale moves opposite to the positive-scale box" );
+        simulation.SetGravity( { 0, 4 } );
+        scene.resetCollisionTrial();
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        check( same( simulation.GetGravity(), { 0, 4 } ) && simulation.GetBodyTransform( middle ).position.y < 3.0f && simulation.GetBodyTransform( last ).position.y > 3.0f && std::abs( simulation.GetBodyLinearVelocity( middle ).y + 4.0f ) < 2.0e-4f && std::abs( simulation.GetBodyLinearVelocity( last ).y - 4.0f ) < 2.0e-4f && simulation.GetBodyTransform( first ).position.y == 3.0f, "edited world gravity is retained by reset and reverses both nonzero scales" );
+        simulation.SetGravity( {} );
+        scene.resetCollisionTrial();
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        for( const auto& visual : visuals )
+            check( simulation.GetBodyTransform( visual.bodyHandle ).position.y == 3.0f && same( simulation.GetBodyLinearVelocity( visual.bodyHandle ), {} ), "zero world gravity keeps every scale at rest after reset" );
+        demoInput drag{};
+        drag.mousePosition = simulation.GetBodyTransform( middle ).position;
+        drag.mousePressed = drag.mouseHeld = drag.left = true;
+        scene.handleInput( drag );
+        check( simulation.IsValid( scene.getMouseJoint() ), "gravity comparison retains existing drag interaction" );
+        simulation.ApplyForceToCenter( first, { 300, 0 } );
+        collisionMatrix matrix;
+        matrix.setPair( 2, 3, false );
+        playback.setCollisionMatrix( matrix );
+        playback.setPlaying( true );
+        scene.resetCollisionTrial();
+        check( playback.isPlaying() && playback.getCollisionMatrix() == matrix && !simulation.IsValid( scene.getMouseJoint() ) && same( simulation.GetGravity(), {} ) && simulation.GetBodyGravityScale( middle ) == -1.0f, "gravity reset cancels drag and preserves edited scale world gravity common settings and play state" );
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+        {
+            const auto body = visuals[i].bodyHandle;
+            const auto pose = simulation.GetBodyTransform( body );
+            check( simulation.IsValid( visuals[i].shapeHandle ) && same( pose.position, { -3.0f + 3.0f * static_cast<float>( i ), 3 } ) && pose.rotation.c == 1.0f && pose.rotation.s == 0.0f && same( simulation.GetBodyLinearVelocity( body ), {} ) && simulation.GetBodyAngularVelocity( body ) == 0.0f, "gravity reset retains handles and restores initial transforms and zero velocities" );
+        }
+        playback.setPlaying( false );
+        playback.stepOnce( substeps );
+        check( same( simulation.GetBodyLinearVelocity( first ), {} ), "gravity reset clears pending force and held input before the next step" );
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        const auto defaultMiddle = defaults.getShapes()[1].bodyHandle;
+        check( !playback.isPlaying() && playback.getCollisionMatrix() == matrix && !defaults.getWorld().IsValid( middle ) && same( defaults.getWorld().GetGravity(), { 0, -10 } ) && !defaults.getWorld().IsBodySleepEnabled( defaultMiddle ) && defaults.getWorld().GetBodyGravityScale( defaultMiddle ) == 0.5f, "full gravity reset restores default world gravity scale and sleep settings while retaining common settings" );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkGravityScaleDemo();
     checkDampingDemo();
     checkSleepWakeDemo();
     checkSensorWallDemo();
@@ -447,7 +513,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };

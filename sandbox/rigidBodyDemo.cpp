@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison )
     {
         createCollisionTrial();
     }
@@ -587,6 +587,20 @@ void rigidBodyDemo::createCollisionTrial()
             world_.SetBodySleepEnabled( box, false );
             world_.SetBodyLinearVelocity( box, { 0, 2.0f } );
             world_.SetBodyAngularVelocity( box, 2.0f );
+            shapes_.push_back( { box, shape, labels[i] } );
+        }
+    }
+    else if( kind_ == demoKind::gravityScaleComparison )
+    {
+        world_.SetGravity( { 0, -10.0f } );
+        const float gravityScale[] = { 0.0f, 0.5f, 1.0f };
+        const char* labels[] = { "상자 A (초기 배율 0)", "상자 B (초기 배율 0.5)", "상자 C (초기 배율 1)" };
+        for( std::size_t i = 0; i < 3; ++i )
+        {
+            const auto box = world_.CreateBody( bodyType::Dynamic, { { -3.0f + 3.0f * static_cast<float>( i ), 3.0f }, {} } );
+            world_.SetBodyGravityScale( box, gravityScale[i] );
+            const auto shape = world_.CreateShape( box, MakeBox( { 0.5f, 0.5f } ) );
+            world_.SetBodySleepEnabled( box, false );
             shapes_.push_back( { box, shape, labels[i] } );
         }
     }

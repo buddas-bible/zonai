@@ -43,9 +43,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 9; ++frame )
+    for( int frame = 0; frame < 10; ++frame )
     {
-        session.selectDemo( frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -785,7 +785,7 @@ void checkDemoUi()
             }
         }
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );
@@ -1034,6 +1034,64 @@ void checkDemoUi()
         if( field == 0 ? !( editedSpeed < speed - 0.4f && std::abs( editedSpin - spin ) < 1.0e-6f ) : !( std::abs( editedSpeed - speed ) < 1.0e-6f && editedSpin < spin - 0.4f ) )
         {
             std::fprintf( stderr, "damping inspector edit failed to change only the corresponding motion on the repeated trial\n" );
+            std::exit( EXIT_FAILURE );
+        }
+    }
+    auto gravityView = createDemoView( demoKind::gravityScaleComparison );
+    auto& gravityTrial = static_cast<rigidBodyDemo&>( *gravityView );
+    const auto gravityMiddle = gravityTrial.getShapes()[1].bodyHandle;
+    const auto gravityLast = gravityTrial.getShapes()[2].bodyHandle;
+    for( int step = 0; step < 60; ++step )
+        gravityTrial.step( 1.0f / 60.0f, 4 );
+    for( int field = 0; field < 2; ++field )
+    {
+        for( int frame = 0; frame < 4; ++frame )
+        {
+            if( frame == 1 ) io.AddInputCharactersUTF8( field == 0 ? "-1" : "4" );
+            if( frame == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+            if( frame == 3 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 340, 4000 } );
+            ImGui::Begin( "Gravity trial inspector" );
+            ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Physics quantities" ), 1 );
+            ImGui::GetStateStorage()->SetInt( ImGui::GetID( "WorldSettings" ), 1 );
+            if( frame == 0 )
+            {
+                if( field == 1 )
+                {
+                    ImGui::PushID( "중력###Gravity" );
+                    ImGui::PushID( 1 );
+                }
+                GImGui->NavActivateId = ImGui::GetID( field == 0 ? "Gravity scale" : "" );
+                GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+                if( field == 1 )
+                {
+                    ImGui::PopID();
+                    ImGui::PopID();
+                }
+            }
+            if( frame == 3 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+            gravityView->drawControls();
+            ImGui::End();
+            ImGui::Render();
+            if( frame >= 2 && ( gravityTrial.getWorld().GetBodyGravityScale( gravityMiddle ) != -1.0f || gravityTrial.getWorld().GetGravity().x != 0.0f || gravityTrial.getWorld().GetGravity().y != ( field == 0 ? -10.0f : 4.0f ) ) )
+            {
+                std::fprintf( stderr, "gravity inspector or reset lost edited scale world gravity or selection\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+        if( gravityTrial.getWorld().GetBodyTransform( gravityMiddle ).position.y != 3.0f || zonai::LengthSquared( gravityTrial.getWorld().GetBodyLinearVelocity( gravityMiddle ) ) != 0.0f )
+        {
+            std::fprintf( stderr, "gravity UI reset did not restore initial height and zero velocity\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        for( int step = 0; step < 60; ++step )
+            gravityTrial.step( 1.0f / 60.0f, 4 );
+        const float expected = field == 0 ? 10.0f : -4.0f;
+        if( std::abs( gravityTrial.getWorld().GetBodyLinearVelocity( gravityMiddle ).y - expected ) > 2.0e-4f || std::abs( gravityTrial.getWorld().GetBodyLinearVelocity( gravityLast ).y + expected ) > 2.0e-4f || gravityTrial.getWorld().GetBodyTransform( gravityTrial.getShapes()[0].bodyHandle ).position.y != 3.0f )
+        {
+            std::fprintf( stderr, "gravity inspector edits failed to reverse the repeated motion while preserving the zero-scale box\n" );
             std::exit( EXIT_FAILURE );
         }
     }
