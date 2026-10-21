@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison )
     {
         createCollisionTrial();
     }
@@ -604,11 +604,31 @@ void rigidBodyDemo::createCollisionTrial()
             shapes_.push_back( { box, shape, labels[i] } );
         }
     }
+    else if( kind_ == demoKind::massImpulseComparison )
+    {
+        world_.SetGravity( {} );
+        const float density[] = { 1.0f, 2.0f, 4.0f };
+        const char* labels[] = { "상자 A (초기 밀도 1)", "상자 B (초기 밀도 2)", "상자 C (초기 밀도 4)" };
+        for( std::size_t i = 0; i < 3; ++i )
+        {
+            const auto box = world_.CreateBody( bodyType::Dynamic, { { -3.0f + 3.0f * static_cast<float>( i ), 0 }, {} } );
+            const auto shape = world_.CreateShape( box, MakeBox( { 0.5f, 0.5f } ), {}, density[i] );
+            world_.SetBodySleepEnabled( box, false );
+            shapes_.push_back( { box, shape, labels[i] } );
+        }
+    }
     for( const auto& visual : shapes_ )
     {
         collisionTrialInitialStates_.push_back( { world_.GetBodyTransform( visual.bodyHandle ), world_.GetBodyLinearVelocity( visual.bodyHandle ), world_.GetBodyAngularVelocity( visual.bodyHandle ) } );
         if( world_.GetBody( visual.bodyHandle ).type == bodyType::Dynamic && !world_.IsValid( impulseBody_ ) ) impulseBody_ = torqueBody_ = visual.bodyHandle;
     }
+}
+
+void rigidBodyDemo::applyMassTrialImpulse()
+{
+    if( kind_ != demoKind::massImpulseComparison ) return;
+    for( const auto& visual : shapes_ )
+        if( world_.IsValid( visual.bodyHandle ) ) world_.ApplyLinearImpulseToCenter( visual.bodyHandle, { 0, 2.0f } );
 }
 
 void rigidBodyDemo::resetCollisionTrial()

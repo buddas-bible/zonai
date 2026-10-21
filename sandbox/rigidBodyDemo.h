@@ -173,6 +173,7 @@ public:
     void setCarMotorSettings( float speed, float maxTorque );
     void resetPlayground();
     void resetCollisionTrial();
+    void applyMassTrialImpulse();
     void resetSplinePath();
     void resetTerrainProbes();
     void launchTerrainProbe( std::size_t probeIndex, terrainTrial trial );

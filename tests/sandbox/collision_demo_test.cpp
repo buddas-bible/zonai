@@ -408,8 +408,78 @@ void checkGravityScaleDemo()
     }
 }
 
+void checkMassImpulseDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::massImpulseComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& simulation = scene.getWorld();
+        check( scene.getShapes().size() == 3 && simulation.GetBodyCount() == 3 && same( simulation.GetGravity(), {} ), "mass comparison creates three editable boxes without gravity" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        const float masses[] = { 1.0f, 2.0f, 4.0f };
+        const float speeds[] = { 2.0f, 1.0f, 0.5f };
+        scene.applyMassTrialImpulse();
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+        {
+            const auto body = visuals[i].bodyHandle;
+            check( simulation.GetBodyMass( body ) == masses[i] && same( simulation.GetBodyLinearVelocity( body ), { 0, speeds[i] } ), "equal center impulse immediately produces inverse-mass velocity changes" );
+            check( same( simulation.GetBodyTransform( body ).position, { -3.0f + 3.0f * static_cast<float>( i ), 0 } ) && simulation.GetBodyAngularVelocity( body ) == 0.0f && !simulation.IsBodySleepEnabled( body ), "paused impulse does not move rotate or enable sleep for the comparison boxes" );
+        }
+        check( !playback.isPlaying(), "applying a mass trial impulse preserves pause state" );
+        scene.applyMassTrialImpulse();
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+            check( same( simulation.GetBodyLinearVelocity( visuals[i].bodyHandle ), { 0, 2.0f * speeds[i] } ), "repeated equal impulses accumulate without resetting velocity" );
+        const auto middle = visuals[1];
+        simulation.SetShapeDensity( middle.shapeHandle, 4.0f );
+        scene.resetCollisionTrial();
+        scene.applyMassTrialImpulse();
+        check( simulation.GetShapeDensity( middle.shapeHandle ) == 4.0f && simulation.GetBodyMass( middle.bodyHandle ) == 4.0f && same( simulation.GetBodyLinearVelocity( middle.bodyHandle ), { 0, 0.5f } ), "edited density survives reset and the next impulse uses the current mass" );
+        simulation.SetBodyAngularVelocity( middle.bodyHandle, 1.0f );
+        scene.applyMassTrialImpulse();
+        check( same( simulation.GetBodyLinearVelocity( middle.bodyHandle ), { 0, 1 } ) && simulation.GetBodyAngularVelocity( middle.bodyHandle ) == 1.0f, "center impulse accumulates translation without changing an edited spin" );
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        check( std::abs( simulation.GetBodyTransform( visuals[0].bodyHandle ).position.y - 4.0f ) < 2.0e-4f && std::abs( simulation.GetBodyTransform( middle.bodyHandle ).position.y - 1.0f ) < 2.0e-4f && std::abs( simulation.GetBodyTransform( visuals[2].bodyHandle ).position.y - 1.0f ) < 2.0e-4f && simulation.GetContactCount() == 0, "subsequent steps move the impulse trial without gravity damping or contacts" );
+        demoInput drag{};
+        drag.mousePosition = simulation.GetBodyTransform( middle.bodyHandle ).position;
+        drag.mousePressed = drag.mouseHeld = true;
+        scene.handleInput( drag );
+        check( simulation.IsValid( scene.getMouseJoint() ), "mass comparison retains existing drag interaction" );
+        simulation.SetGravity( { 0, -1 } );
+        simulation.SetBodyLinearDamping( middle.bodyHandle, 0.2f );
+        simulation.SetBodyAngularDamping( middle.bodyHandle, 0.3f );
+        simulation.SetBodySleepEnabled( middle.bodyHandle, true );
+        collisionMatrix matrix;
+        matrix.setPair( 2, 3, false );
+        playback.setCollisionMatrix( matrix );
+        playback.setPlaying( true );
+        scene.resetCollisionTrial();
+        check( playback.isPlaying() && playback.getCollisionMatrix() == matrix && !simulation.IsValid( scene.getMouseJoint() ) && same( simulation.GetGravity(), { 0, -1 } ) && simulation.GetBodyLinearDamping( middle.bodyHandle ) == 0.2f && simulation.GetBodyAngularDamping( middle.bodyHandle ) == 0.3f && simulation.IsBodySleepEnabled( middle.bodyHandle ) && simulation.GetBodyMass( middle.bodyHandle ) == 4.0f, "mass reset cancels drag while preserving edited density damping sleep gravity common settings and play state" );
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+        {
+            const auto body = visuals[i].bodyHandle;
+            const auto pose = simulation.GetBodyTransform( body );
+            check( simulation.IsValid( visuals[i].shapeHandle ) && same( pose.position, { -3.0f + 3.0f * static_cast<float>( i ), 0 } ) && pose.rotation.c == 1.0f && pose.rotation.s == 0.0f && same( simulation.GetBodyLinearVelocity( body ), {} ) && simulation.GetBodyAngularVelocity( body ) == 0.0f, "mass reset retains handles and restores initial transforms and zero velocities without relaunching" );
+        }
+        scene.applyMassTrialImpulse();
+        check( same( simulation.GetBodyLinearVelocity( middle.bodyHandle ), { 0, 0.5f } ) && simulation.GetBodyTransform( middle.bodyHandle ).position.y == 0.0f, "impulse remains instantaneous after world and body settings are edited" );
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        const auto defaultMiddle = defaults.getShapes()[1].bodyHandle;
+        check( !playback.isPlaying() && playback.getCollisionMatrix() == matrix && !defaults.getWorld().IsValid( middle.bodyHandle ) && same( defaults.getWorld().GetGravity(), {} ) && !defaults.getWorld().IsBodySleepEnabled( defaultMiddle ) && defaults.getWorld().GetBodyMass( defaultMiddle ) == 2.0f && same( defaults.getWorld().GetBodyLinearVelocity( defaultMiddle ), {} ), "full mass reset restores default density and resting state while retaining common settings" );
+    }
+    rigidBodyDemo other{ demoKind::collisionComparison };
+    const auto body = other.getShapes()[0].bodyHandle;
+    const auto velocity = other.getWorld().GetBodyLinearVelocity( body );
+    other.applyMassTrialImpulse();
+    check( same( other.getWorld().GetBodyLinearVelocity( body ), velocity ), "mass trial action does not alter other scenes" );
+}
+
 void checkCollisionDemos()
 {
+    checkMassImpulseDemo();
     checkGravityScaleDemo();
     checkDampingDemo();
     checkSleepWakeDemo();
@@ -513,7 +583,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };

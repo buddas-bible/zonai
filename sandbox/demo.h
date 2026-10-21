@@ -41,7 +41,8 @@ enum class demoKind
     sensorWallComparison,
     sleepWakeComparison,
     dampingComparison,
-    gravityScaleComparison
+    gravityScaleComparison,
+    massImpulseComparison
 };
 
 struct demoEntry
