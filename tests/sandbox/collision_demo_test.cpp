@@ -742,8 +742,61 @@ void checkTorqueImpulseDemo()
     check( same( other.getWorld().GetBodyLinearVelocity( body ), velocity ) && other.getWorld().GetBodyAngularVelocity( body ) == 0.0f, "torque trial start does not alter other scenes" );
 }
 
+void checkDynamicKinematicDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::dynamicKinematicComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 4 && physics.GetBodyCount() == 4 && same( physics.GetGravity(), {} ), "body type comparison creates two independent collision pairs without gravity" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+        {
+            const auto body = visuals[i].bodyHandle;
+            check( same( physics.GetBodyTransform( body ).position, { i % 2 == 0 ? -2.0f : 0.0f, i < 2 ? 1.5f : -1.5f } ) && same( physics.GetBodyLinearVelocity( body ), { i % 2 == 0 ? 2.0f : 0.0f, 0 } ) && physics.GetShapeRestitution( visuals[i].shapeHandle ) == 0.0f && physics.GetShapeFriction( visuals[i].shapeHandle ) == 0.0f, "pairs start with matching geometry material and prescribed mover speed" );
+        }
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        const float dynamicSpeed = physics.GetBodyLinearVelocity( visuals[0].bodyHandle ).x;
+        check( std::abs( dynamicSpeed - 1.0f ) < 0.1f && std::abs( physics.GetBodyLinearVelocity( visuals[1].bodyHandle ).x - 1.0f ) < 0.1f, "equal mass dynamic collision slows the mover and transfers momentum to its target" );
+        check( physics.GetBodyLinearVelocity( visuals[2].bodyHandle ).x == 2.0f && std::abs( physics.GetBodyLinearVelocity( visuals[3].bodyHandle ).x - 2.0f ) < 0.1f && physics.GetBodyTransform( visuals[3].bodyHandle ).position.x > physics.GetBodyTransform( visuals[1].bodyHandle ).position.x + 0.2f, "kinematic mover retains prescribed speed while pushing the target farther" );
+        check( physics.GetBody( visuals[0].bodyHandle ).type == bodyType::Dynamic && physics.GetBody( visuals[2].bodyHandle ).type == bodyType::Kinematic && physics.GetBodyMass( visuals[2].bodyHandle ) == 0.0f, "only the lower mover is kinematic with zero solver mass" );
+        for( const auto& visual : visuals )
+            if( physics.GetBody( visual.bodyHandle ).type == bodyType::Dynamic ) check( !physics.IsBodySleepEnabled( visual.bodyHandle ) && physics.GetBodyMass( visual.bodyHandle ) == 1.0f, "dynamic bodies start with equal mass and automatic sleep disabled" );
+        physics.SetShapeDensity( visuals[0].shapeHandle, 3.0f );
+        physics.SetShapeDensity( visuals[2].shapeHandle, 3.0f );
+        physics.SetShapeDensity( visuals[3].shapeHandle, 3.0f );
+        for( int repeat = 0; repeat < 2; ++repeat )
+        {
+            scene.resetCollisionTrial();
+            check( physics.GetBodyMass( visuals[0].bodyHandle ) == 3.0f && physics.GetBodyMass( visuals[2].bodyHandle ) == 0.0f && physics.GetBodyMass( visuals[3].bodyHandle ) == 3.0f, "reset preserves density edits while kinematic solver mass stays zero" );
+            for( std::size_t i = 0; i < visuals.size(); ++i )
+            {
+                const auto body = visuals[i].bodyHandle;
+                check( physics.IsValid( visuals[i].shapeHandle ) && same( physics.GetBodyTransform( body ).position, { i % 2 == 0 ? -2.0f : 0.0f, i < 2 ? 1.5f : -1.5f } ) && same( physics.GetBodyLinearVelocity( body ), { i % 2 == 0 ? 2.0f : 0.0f, 0 } ), "body type trial reset restores identical poses velocities and handles" );
+            }
+            for( int frame = 0; frame < 60; ++frame )
+                playback.stepOnce( substeps );
+            check( std::abs( physics.GetBodyLinearVelocity( visuals[0].bodyHandle ).x - 1.5f ) < 0.1f && std::abs( physics.GetBodyLinearVelocity( visuals[1].bodyHandle ).x - 1.5f ) < 0.1f && physics.GetBodyLinearVelocity( visuals[0].bodyHandle ).x > dynamicSpeed + 0.3f, "increased dynamic mover density changes the repeated collision momentum split" );
+            check( physics.GetBodyLinearVelocity( visuals[2].bodyHandle ).x == 2.0f && std::abs( physics.GetBodyLinearVelocity( visuals[3].bodyHandle ).x - 2.0f ) < 0.1f, "edited kinematic shape density and heavier target do not slow the prescribed mover" );
+        }
+        physics.SetShapeRestitution( visuals[1].shapeHandle, 1.0f );
+        scene.resetCollisionTrial();
+        check( physics.GetShapeRestitution( visuals[1].shapeHandle ) == 1.0f, "body type trial preserves edited restitution" );
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        check( physics.GetBodyLinearVelocity( visuals[1].bodyHandle ).x > 2.5f && physics.GetBodyLinearVelocity( visuals[0].bodyHandle ).x < 1.2f, "restitution edit changes dynamic collision response on the repeated trial" );
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        check( !defaults.getWorld().IsValid( visuals[0].bodyHandle ) && defaults.getWorld().GetBodyMass( defaults.getShapes()[0].bodyHandle ) == 1.0f && defaults.getWorld().GetShapeRestitution( defaults.getShapes()[1].shapeHandle ) == 0.0f && defaults.getWorld().GetBody( defaults.getShapes()[2].bodyHandle ).type == bodyType::Kinematic && !playback.isPlaying(), "full body type reset restores default materials density and scene types" );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkDynamicKinematicDemo();
     checkTorqueImpulseDemo();
     checkForceImpulseDemo();
     checkRotationalInertiaDemo();
@@ -852,7 +905,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };
