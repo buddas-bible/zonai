@@ -80,8 +80,70 @@ void checkCcdDemo()
     }
 }
 
+void checkFilterComparisonDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::collisionFilterComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& simulation = scene.getWorld();
+        check( scene.getShapes().size() == 4 && simulation.GetBodyCount() == 4 && same( simulation.GetGravity(), {} ), "filter comparison creates two editable head-on pairs without gravity" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        const auto upper = visuals[0].bodyHandle;
+        const auto lower = visuals[2].bodyHandle;
+        for( int frame = 0; frame < 90; ++frame )
+            playback.stepOnce( substeps );
+        check( simulation.GetBodyTransform( upper ).position.x < 0 && simulation.GetBodyLinearVelocity( upper ).x < 0, "allowed upper pair collides and rebounds" );
+        check( simulation.GetBodyTransform( lower ).position.x > 0 && simulation.GetBodyLinearVelocity( lower ).x > 0, "masked lower pair passes through without collision" );
+        auto filter = simulation.GetShapeFilter( visuals[2].shapeHandle );
+        filter.maskBits |= 2;
+        simulation.SetShapeFilter( visuals[2].shapeHandle, filter );
+        scene.resetCollisionTrial();
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+        {
+            const auto body = visuals[i].bodyHandle;
+            check( scene.getShapes()[i].shapeHandle == visuals[i].shapeHandle && same( simulation.GetBodyTransform( body ).position, { i % 2 == 0 ? -2.0f : 2.0f, i < 2 ? 1.5f : -1.5f } ) && same( simulation.GetBodyLinearVelocity( body ), { i % 2 == 0 ? 2.0f : -2.0f, 0 } ), "filter reset retains handles and restores identical starting conditions" );
+        }
+        check( simulation.GetShapeFilter( visuals[2].shapeHandle ).maskBits == filter.maskBits, "filter reset preserves the edited lower mask" );
+        for( int frame = 0; frame < 90; ++frame )
+            playback.stepOnce( substeps );
+        check( simulation.GetBodyLinearVelocity( upper ).x < 0 && simulation.GetBodyLinearVelocity( lower ).x < 0, "allowing the lower mask makes both pairs collide on the repeated trial" );
+        filter = simulation.GetShapeFilter( visuals[0].shapeHandle );
+        filter.maskBits &= ~std::uint64_t{ 2 };
+        simulation.SetShapeFilter( visuals[0].shapeHandle, filter );
+        filter = simulation.GetShapeFilter( visuals[3].shapeHandle );
+        filter.maskBits &= ~std::uint64_t{ 1 };
+        simulation.SetShapeFilter( visuals[3].shapeHandle, filter );
+        scene.resetCollisionTrial();
+        for( int frame = 0; frame < 90; ++frame )
+            playback.stepOnce( substeps );
+        check( simulation.GetBodyTransform( upper ).position.x > 0 && simulation.GetBodyTransform( lower ).position.x > 0 && simulation.GetBodyLinearVelocity( upper ).x > 0 && simulation.GetBodyLinearVelocity( lower ).x > 0, "excluding the counterpart in either side mask makes the pair pass through" );
+        for( const auto& visual : visuals )
+        {
+            filter = simulation.GetShapeFilter( visual.shapeHandle );
+            filter.maskBits = ~std::uint64_t{ 0 };
+            filter.groupIndex = 7;
+            simulation.SetShapeFilter( visual.shapeHandle, filter );
+        }
+        collisionMatrix matrix;
+        matrix.setPair( 0, 1, false );
+        playback.setCollisionMatrix( matrix );
+        scene.resetCollisionTrial();
+        check( playback.getCollisionMatrix() == matrix && simulation.GetShapeFilter( visuals[0].shapeHandle ).groupIndex == 7, "filter reset preserves common collision settings and edited groups" );
+        for( int frame = 0; frame < 90; ++frame )
+            playback.stepOnce( substeps );
+        check( simulation.GetBodyTransform( upper ).position.x > 0 && simulation.GetBodyTransform( lower ).position.x > 0, "common collision exclusion still blocks pairs with permissive masks and positive groups" );
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        check( !playback.isPlaying() && playback.getCollisionMatrix() == matrix && !defaults.getWorld().IsValid( upper ), "full filter reset retains common settings and replaces handles while pausing" );
+        check( defaults.getWorld().GetShapeFilter( defaults.getShapes()[0].shapeHandle ).maskBits == ~std::uint64_t{ 0 } && defaults.getWorld().GetShapeFilter( defaults.getShapes()[2].shapeHandle ).maskBits == ~std::uint64_t{ 2 } && defaults.getWorld().GetShapeFilter( defaults.getShapes()[0].shapeHandle ).groupIndex == 0, "full filter reset restores initial masks and groups" );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkFilterComparisonDemo();
     checkCcdDemo();
     rigidBodyDemo scene{ demoKind::collisionComparison };
     auto& simulation = scene.getWorld();
@@ -180,7 +242,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };

@@ -36,7 +36,8 @@ enum class demoKind
     frictionComparison,
     restitutionComparison,
     boxStack,
-    ccdComparison
+    ccdComparison,
+    collisionFilterComparison
 };
 
 struct demoEntry

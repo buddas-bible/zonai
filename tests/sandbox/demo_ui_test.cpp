@@ -785,7 +785,7 @@ void checkDemoUi()
             }
         }
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );
@@ -833,6 +833,45 @@ void checkDemoUi()
             }
         }
         io.AddKeyEvent( ImGuiKey_Enter, false );
+    }
+    auto filterView = createDemoView( demoKind::collisionFilterComparison );
+    auto& filterTrial = static_cast<rigidBodyDemo&>( *filterView );
+    const auto upperRight = filterTrial.getShapes()[1];
+    const auto lowerLeft = filterTrial.getShapes()[2].bodyHandle;
+    for( int frame = 0; frame < 90; ++frame )
+        filterTrial.step( 1.0f / 60.0f, 4 );
+    for( int phase = 0; phase < 2; ++phase )
+    {
+        for( int frame = 0; frame < 4; ++frame )
+        {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 340, 4000 } );
+            ImGui::Begin( "Filter trial inspector" );
+            ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Collision mask" ), 1 );
+            ImGui::GetStateStorage()->SetInt( ImGui::GetID( "ObjectCollisionOverrides" ), 1 );
+            if( frame == 0 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Collision partners" );
+            if( frame == 1 && !GImGui->OpenPopupStack.empty() ) GImGui->NavActivateId = GImGui->NavActivateDownId = GImGui->OpenPopupStack.back().Window->GetID( "레이어 01##Mask" );
+            if( frame == 3 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+            filterView->drawControls();
+            ImGui::End();
+            ImGui::Render();
+            if( frame == 2 ) ImGui::ClosePopupToLevel( 0, true );
+        }
+        const auto mask = filterTrial.getWorld().GetShapeFilter( upperRight.shapeHandle ).maskBits;
+        if( mask != ( phase == 0 ? ~std::uint64_t{ 1 } : ~std::uint64_t{ 0 } ) || filterTrial.getWorld().GetBodyTransform( upperRight.bodyHandle ).position.x != 2.0f || filterTrial.getWorld().GetBodyLinearVelocity( upperRight.bodyHandle ).x != -2.0f )
+        {
+            std::fprintf( stderr, "filter inspector or reset lost edited mask selection or initial conditions\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        for( int frame = 0; frame < 90; ++frame )
+            filterTrial.step( 1.0f / 60.0f, 4 );
+        const float velocity = filterTrial.getWorld().GetBodyLinearVelocity( upperRight.bodyHandle ).x;
+        if( ( phase == 0 ? velocity >= 0 : velocity <= 0 ) || filterTrial.getWorld().GetBodyTransform( lowerLeft ).position.x <= 0 )
+        {
+            std::fprintf( stderr, "inspector mask edits did not switch repeated upper collision behavior while preserving lower exclusion\n" );
+            std::exit( EXIT_FAILURE );
+        }
     }
     auto ccdView = createDemoView( demoKind::ccdComparison );
     auto& ccd = static_cast<rigidBodyDemo&>( *ccdView );
