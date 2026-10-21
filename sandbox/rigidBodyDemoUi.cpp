@@ -134,7 +134,7 @@ bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, 
 
 rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 {
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison ) showLabels_ = true;
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison ) showLabels_ = true;
     selectedShapeIndex_ = kind == demoKind::playground || kind == demoKind::motorCar ? 2 : 1;
     if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
@@ -716,7 +716,7 @@ void rigidBodyDemoUi::drawSplineEditorControls()
 
 void rigidBodyDemoUi::drawExperimentControls()
 {
-    if( getKind() == demoKind::collisionComparison || getKind() == demoKind::frictionComparison || getKind() == demoKind::restitutionComparison || getKind() == demoKind::boxStack || getKind() == demoKind::ccdComparison || getKind() == demoKind::collisionFilterComparison || getKind() == demoKind::sensorWallComparison || getKind() == demoKind::sleepWakeComparison || getKind() == demoKind::dampingComparison || getKind() == demoKind::gravityScaleComparison || getKind() == demoKind::massImpulseComparison || getKind() == demoKind::impulsePointComparison || getKind() == demoKind::rotationalInertiaComparison )
+    if( getKind() == demoKind::collisionComparison || getKind() == demoKind::frictionComparison || getKind() == demoKind::restitutionComparison || getKind() == demoKind::boxStack || getKind() == demoKind::ccdComparison || getKind() == demoKind::collisionFilterComparison || getKind() == demoKind::sensorWallComparison || getKind() == demoKind::sleepWakeComparison || getKind() == demoKind::dampingComparison || getKind() == demoKind::gravityScaleComparison || getKind() == demoKind::massImpulseComparison || getKind() == demoKind::impulsePointComparison || getKind() == demoKind::rotationalInertiaComparison || getKind() == demoKind::forceImpulseComparison )
     {
         ImGui::TextUnformatted( "반복 시험" );
         if( getKind() == demoKind::ccdComparison )
@@ -773,6 +773,19 @@ void rigidBodyDemoUi::drawExperimentControls()
             {
                 ImGui::TextWrapped( "%s: 질량 %.2f kg / 회전 관성 %.3f kg·m²", visual.label, getWorld().GetBodyMass( visual.bodyHandle ), getWorld().GetBodyRotationalInertia( visual.bodyHandle ) );
                 ImGui::Text( "각속도 %.2f rad/s", getWorld().GetBodyAngularVelocity( visual.bodyHandle ) );
+            }
+        }
+        if( getKind() == demoKind::forceImpulseComparison )
+        {
+            ImGui::TextWrapped( "같은 조건 시험 시작은 편집값을 유지하며 위치·회전·속도를 복원합니다. A에는 위쪽 2N을 1초간, B에는 위쪽 2N·s를 한 번 적용합니다. 정지 중에는 충격량만 즉시 반영되며 재생·1프레임 진행 때 힘과 시간이 누적됩니다. 같은 질량에서 중력·감쇠가 없으면 1초 후 속도가 같습니다." );
+            if( ImGui::Button( "같은 조건 시험 시작###ForceTrialStart" ) ) startForceImpulseTrial();
+            ImGui::Text( "시험 경과: %.2f s / 힘 적용: %.2f / 1.00 s", getForceTrialTime(), std::min( getForceTrialTime(), 1.0 ) );
+            for( std::size_t i = 0; i < getShapes().size(); ++i )
+            {
+                const auto& visual = getShapes()[i];
+                const vec2 start{ i == 0 ? -2.5f : 2.5f, 0 };
+                ImGui::TextWrapped( "%s: 질량 %.2f kg / 속력 %.2f m/s", visual.label, getWorld().GetBodyMass( visual.bodyHandle ), Length( getWorld().GetBodyLinearVelocity( visual.bodyHandle ) ) );
+                ImGui::Text( "출발점에서 거리 %.2f m", Length( getWorld().GetBodyTransform( visual.bodyHandle ).position - start ) );
             }
         }
         if( getKind() == demoKind::frictionComparison ) ImGui::TextWrapped( "마찰은 물체와 경사면 계수의 기하평균으로 정해집니다. 현재 계수는 인스펙터에서 확인·편집하세요." );

@@ -43,9 +43,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 13; ++frame )
+    for( int frame = 0; frame < 14; ++frame )
     {
-        session.selectDemo( frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -885,6 +885,59 @@ void checkDemoUi()
             }
         }
     }
+    auto forceView = createDemoView( demoKind::forceImpulseComparison );
+    auto& forceTrial = static_cast<rigidBodyDemo&>( *forceView );
+    const auto forceBox = forceTrial.getShapes()[0];
+    const auto impulseBox = forceTrial.getShapes()[1];
+    for( int frame = 0; frame < 9; ++frame )
+    {
+        if( frame == 3 ) io.AddInputCharactersUTF8( "2" );
+        if( frame == 4 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+        if( frame == 5 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0, 0 } );
+        ImGui::SetNextWindowSize( { 340, 4000 } );
+        ImGui::Begin( "Force trial inspector" );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Physics quantities" ), 1 );
+        if( frame == 0 || frame == 1 || frame == 6 || frame == 7 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "ForceTrialStart" );
+        if( frame == 5 || frame == 8 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+        if( frame == 2 )
+        {
+            GImGui->NavActivateId = ImGui::GetID( "Density" );
+            GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+        }
+        forceView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        if( frame == 0 || frame == 1 || frame == 6 || frame == 7 )
+        {
+            const float expected = frame < 6 ? 2.0f : 1.0f;
+            if( forceTrial.getForceTrialTime() != 0.0 || zonai::LengthSquared( forceTrial.getWorld().GetBodyLinearVelocity( forceBox.bodyHandle ) ) != 0.0f || forceTrial.getWorld().GetBodyLinearVelocity( impulseBox.bodyHandle ).y != expected || forceTrial.getWorld().GetBodyTransform( impulseBox.bodyHandle ).position.y != 0.0f )
+            {
+                std::fprintf( stderr, "force UI start must reset poses time and velocities before applying one current-mass impulse\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+        if( frame >= 4 && forceTrial.getWorld().GetShapeDensity( impulseBox.shapeHandle ) != 2.0f )
+        {
+            std::fprintf( stderr, "force UI lost density edit or selection across restart and reset\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( frame == 5 || frame == 8 )
+        {
+            forceTrial.step( 0.25f, 4 );
+            for( std::size_t i = 0; i < forceTrial.getShapes().size(); ++i )
+            {
+                const auto body = forceTrial.getShapes()[i].bodyHandle;
+                if( forceTrial.getForceTrialTime() != 0.0 || forceTrial.getWorld().GetBodyTransform( body ).position.x != ( i == 0 ? -2.5f : 2.5f ) || forceTrial.getWorld().GetBodyTransform( body ).position.y != 0.0f || zonai::LengthSquared( forceTrial.getWorld().GetBodyLinearVelocity( body ) ) != 0.0f )
+                {
+                    std::fprintf( stderr, "force UI reset must cancel the active trial without relaunching\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+        }
+        if( frame == 0 || frame == 7 ) forceTrial.step( 0.25f, 4 );
+    }
     auto inertiaView = createDemoView( demoKind::rotationalInertiaComparison );
     auto& inertiaTrial = static_cast<rigidBodyDemo&>( *inertiaView );
     const auto inertiaMiddle = inertiaTrial.getShapes()[1];
@@ -997,7 +1050,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );

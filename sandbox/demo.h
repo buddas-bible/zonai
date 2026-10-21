@@ -44,7 +44,8 @@ enum class demoKind
     gravityScaleComparison,
     massImpulseComparison,
     impulsePointComparison,
-    rotationalInertiaComparison
+    rotationalInertiaComparison,
+    forceImpulseComparison
 };
 
 struct demoEntry
