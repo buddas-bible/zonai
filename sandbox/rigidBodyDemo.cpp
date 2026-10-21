@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison )
     {
         createCollisionTrial();
     }
@@ -501,6 +501,19 @@ void rigidBodyDemo::createCollisionTrial()
             world_.SetShapeFriction( shape, 0.6f );
             shapes_.push_back( { box, shape, labels[i] } );
         }
+    }
+    else if( kind_ == demoKind::ccdComparison )
+    {
+        world_.SetGravity( {} );
+        const auto wall = world_.CreateBody( bodyType::Static );
+        const auto surface = world_.CreateShape( wall, MakeBox( { 0.05f, 2.0f } ) );
+        world_.SetShapeFriction( surface, 0.0f );
+        shapes_.push_back( { wall, surface, "벽" } );
+        const auto projectile = world_.CreateBody( bodyType::Dynamic, { { -0.8f, 0 }, {} } );
+        const auto shape = world_.CreateShape( projectile, circle2{ {}, 0.1f } );
+        world_.SetShapeFriction( shape, 0.0f );
+        world_.SetBodyLinearVelocity( projectile, { 100.0f, 0 } );
+        shapes_.push_back( { projectile, shape, "원" } );
     }
     for( const auto& visual : shapes_ )
     {

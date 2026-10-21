@@ -785,7 +785,7 @@ void checkDemoUi()
             }
         }
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );
@@ -833,6 +833,47 @@ void checkDemoUi()
             }
         }
         io.AddKeyEvent( ImGuiKey_Enter, false );
+    }
+    auto ccdView = createDemoView( demoKind::ccdComparison );
+    auto& ccd = static_cast<rigidBodyDemo&>( *ccdView );
+    const auto projectile = ccd.getImpulseBody();
+    const auto ccdShape = ccd.getShapes()[1].shapeHandle;
+    ccd.getWorld().SetShapeRestitution( ccdShape, 0.6f );
+    for( int frame = 0; frame < 6; ++frame )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0, 0 } );
+        ImGui::SetNextWindowSize( { 340, 4000 } );
+        ImGui::Begin( "CCD trial actions" );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "WorldSettings" ), 1 );
+        if( frame == 0 || frame == 3 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Continuous collision" );
+        if( frame == 1 || frame == 4 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+        ccdView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        if( ccd.getWorld().IsContinuousEnabled() != ( frame >= 3 ) || ccd.getWorld().GetShapeRestitution( ccdShape ) != 0.6f )
+        {
+            std::fprintf( stderr, "CCD UI toggle or reset lost edited settings\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( frame == 1 || frame == 4 )
+        {
+            if( ccd.getWorld().GetBodyTransform( projectile ).position.x != -0.8f || ccd.getWorld().GetBodyLinearVelocity( projectile ).x != 100.0f )
+            {
+                std::fprintf( stderr, "CCD UI reset did not restore launch conditions\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+        if( frame == 0 || frame == 2 || frame == 5 )
+        {
+            ccd.step( 1.0f / 60.0f, 4 );
+            const bool enabled = frame == 5;
+            if( ccd.getWorld().HadBodyTimeOfImpact( projectile ) != enabled || ( enabled ? ccd.getWorld().GetBodyTransform( projectile ).position.x >= -0.1f : ccd.getWorld().GetBodyTransform( projectile ).position.x <= 0.15f ) )
+            {
+                std::fprintf( stderr, "CCD UI settings did not change repeated collision behavior\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
     }
     ImGui::DestroyContext();
 }
