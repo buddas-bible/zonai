@@ -31,7 +31,11 @@ enum class demoKind
     motorCar,
     ragdoll,
     splinePath,
-    splineRail
+    splineRail,
+    collisionComparison,
+    frictionComparison,
+    restitutionComparison,
+    boxStack
 };
 
 struct demoEntry

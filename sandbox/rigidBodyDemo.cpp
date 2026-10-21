@@ -40,7 +40,11 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::playground )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack )
+    {
+        createCollisionTrial();
+    }
+    else if( kind == demoKind::playground )
     {
         createPlayground();
     }
@@ -428,6 +432,97 @@ void rigidBodyDemo::resetSplinePath()
     world_.SetBodyLinearVelocity( impulseBody_, {} );
     world_.SetBodyAngularVelocity( impulseBody_, 0.0f );
     splinePathDistance_ = 0.0;
+    refreshContacts();
+}
+
+void rigidBodyDemo::createCollisionTrial()
+{
+    if( kind_ == demoKind::collisionComparison )
+    {
+        world_.SetGravity( {} );
+        const shapeGeometry geometries[] = { circle2{ {}, 0.5f }, MakeBox( { 0.5f, 0.5f } ), capsule2{ { -0.3f, 0 }, { 0.3f, 0 }, 0.3f } };
+        const char* labels[][2] = { { "원 A", "원 B" }, { "상자 A", "상자 B" }, { "캡슐 A", "캡슐 B" } };
+        for( std::size_t i = 0; i < 3; ++i )
+            for( std::size_t j = 0; j < 2; ++j )
+            {
+                const auto body = world_.CreateBody( bodyType::Dynamic, { { j == 0 ? -3.0f : 3.0f, 2.0f - 2.0f * static_cast<float>( i ) }, {} } );
+                const auto shape = world_.CreateShape( body, geometries[i] );
+                world_.SetShapeFriction( shape, 0.0f );
+                world_.SetShapeRestitution( shape, 0.5f );
+                world_.SetBodyLinearVelocity( body, { j == 0 ? 3.0f : -3.0f, 0 } );
+                shapes_.push_back( { body, shape, labels[i][j] } );
+            }
+    }
+    else if( kind_ == demoKind::frictionComparison )
+    {
+        const float friction[] = { 0.0f, 0.1f, 0.8f };
+        const char* ramps[] = { "경사면 A", "경사면 B", "경사면 C" };
+        const char* boxes[] = { "상자 A (초기 마찰 0)", "상자 B (초기 마찰 0.1)", "상자 C (초기 마찰 0.8)" };
+        for( std::size_t i = 0; i < 3; ++i )
+        {
+            const transform2 rampPose{ { 0, 3.0f - 3.0f * static_cast<float>( i ) }, rot2::FromRadians( -0.35f ) };
+            const auto ramp = world_.CreateBody( bodyType::Static, rampPose );
+            const auto surface = world_.CreateShape( ramp, MakeBox( { 3.5f, 0.15f } ) );
+            world_.SetShapeFriction( surface, 1.0f );
+            shapes_.push_back( { ramp, surface, ramps[i] } );
+            const auto box = world_.CreateBody( bodyType::Dynamic, { TransformPoint( rampPose, { -2.0f, 0.65f } ), rampPose.rotation } );
+            const auto shape = world_.CreateShape( box, MakeBox( { 0.4f, 0.4f } ) );
+            world_.SetShapeFriction( shape, friction[i] );
+            shapes_.push_back( { box, shape, boxes[i] } );
+        }
+    }
+    else if( kind_ == demoKind::restitutionComparison )
+    {
+        const auto floor = world_.CreateBody( bodyType::Static, { { 0, -0.5f }, {} } );
+        const auto surface = world_.CreateShape( floor, MakeBox( { 5.0f, 0.5f } ) );
+        world_.SetShapeRestitution( surface, 0.0f );
+        shapes_.push_back( { floor, surface, "바닥" } );
+        const float restitution[] = { 0.0f, 0.5f, 1.0f };
+        const char* labels[] = { "원 A (초기 반발 0)", "원 B (초기 반발 0.5)", "원 C (초기 반발 1)" };
+        for( std::size_t i = 0; i < 3; ++i )
+        {
+            const auto circle = world_.CreateBody( bodyType::Dynamic, { { -3.0f + 3.0f * static_cast<float>( i ), 3.0f }, {} } );
+            const auto shape = world_.CreateShape( circle, circle2{ {}, 0.5f } );
+            world_.SetShapeRestitution( shape, restitution[i] );
+            shapes_.push_back( { circle, shape, labels[i] } );
+        }
+    }
+    else if( kind_ == demoKind::boxStack )
+    {
+        const auto floor = world_.CreateBody( bodyType::Static, { { 0, -0.5f }, {} } );
+        const auto surface = world_.CreateShape( floor, MakeBox( { 5.0f, 0.5f } ) );
+        world_.SetShapeFriction( surface, 0.6f );
+        shapes_.push_back( { floor, surface, "바닥" } );
+        const char* labels[] = { "상자 1", "상자 2", "상자 3", "상자 4", "상자 5", "상자 6", "상자 7", "상자 8" };
+        for( std::size_t i = 0; i < 8; ++i )
+        {
+            const auto box = world_.CreateBody( bodyType::Dynamic, { { 0, 0.6f + 1.1f * static_cast<float>( i ) }, {} } );
+            const auto shape = world_.CreateShape( box, MakeBox( { 0.5f, 0.5f } ) );
+            world_.SetShapeFriction( shape, 0.6f );
+            shapes_.push_back( { box, shape, labels[i] } );
+        }
+    }
+    for( const auto& visual : shapes_ )
+    {
+        collisionTrialInitialStates_.push_back( { world_.GetBodyTransform( visual.bodyHandle ), world_.GetBodyLinearVelocity( visual.bodyHandle ), world_.GetBodyAngularVelocity( visual.bodyHandle ) } );
+        if( world_.GetBody( visual.bodyHandle ).type == bodyType::Dynamic && !world_.IsValid( impulseBody_ ) ) impulseBody_ = torqueBody_ = visual.bodyHandle;
+    }
+}
+
+void rigidBodyDemo::resetCollisionTrial()
+{
+    if( collisionTrialInitialStates_.empty() ) return;
+    cancelInput();
+    for( std::size_t i = 0; i < shapes_.size(); ++i )
+    {
+        const auto body = shapes_[i].bodyHandle;
+        if( !world_.IsValid( body ) ) continue;
+        const auto& initial = collisionTrialInitialStates_[i];
+        world_.SetBodyTransform( body, initial.transform );
+        world_.SetBodyLinearVelocity( body, initial.velocity );
+        world_.SetBodyAngularVelocity( body, initial.angularVelocity );
+        world_.ClearForces( body );
+    }
     refreshContacts();
 }
 
