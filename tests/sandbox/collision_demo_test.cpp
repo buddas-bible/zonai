@@ -141,8 +141,84 @@ void checkFilterComparisonDemo()
     }
 }
 
+void checkSensorWallDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::sensorWallComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& simulation = scene.getWorld();
+        check( scene.getShapes().size() == 4 && simulation.GetBodyCount() == 4 && same( simulation.GetGravity(), {} ), "sensor comparison creates identical wall and sensor lanes without gravity" );
+        const auto wall = scene.getShapes()[0];
+        const auto stopped = scene.getShapes()[1];
+        const auto sensor = scene.getShapes()[2];
+        const auto visitor = scene.getShapes()[3];
+        int begins = 0, ends = 0;
+        for( int frame = 0; frame < 180; ++frame )
+        {
+            playback.stepOnce( substeps );
+            for( const auto& event : simulation.GetSensorBeginEvents() )
+            {
+                check( event.sensorShapeId == sensor.shapeHandle && event.visitorShapeId == visitor.shapeHandle, "sensor entry identifies the lower sensor and visitor" );
+                ++begins;
+            }
+            for( const auto& event : simulation.GetSensorEndEvents() )
+            {
+                check( event.sensorShapeId == sensor.shapeHandle && event.visitorShapeId == visitor.shapeHandle, "sensor exit identifies the lower sensor and visitor" );
+                ++ends;
+            }
+            if( frame == 89 )
+            {
+                check( simulation.GetBodyTransform( stopped.bodyHandle ).position.x < -1.0f && std::abs( simulation.GetBodyLinearVelocity( stopped.bodyHandle ).x ) < 0.01f, "solid wall stops the upper circle" );
+                check( std::abs( simulation.GetBodyTransform( visitor.bodyHandle ).position.x ) < 0.01f && same( simulation.GetBodyLinearVelocity( visitor.bodyHandle ), { 2, 0 } ), "sensor lets the lower circle pass without changing its velocity" );
+                check( simulation.GetShapeSensorCapacity( sensor.shapeHandle ) == 1 && begins == 1 && ends == 0 && simulation.GetShapeContactCapacity( sensor.shapeHandle ) == 0, "sensor entry tracks one overlap without creating a solid contact" );
+            }
+        }
+        check( simulation.GetShapeSensorCapacity( sensor.shapeHandle ) == 0 && begins == 1 && ends == 1 && simulation.GetBodyTransform( visitor.bodyHandle ).position.x > 2.5f, "sensor exit clears the overlap after one entry and exit" );
+        for( const auto eventsShape : { sensor.shapeHandle, visitor.shapeHandle } )
+        {
+            scene.resetCollisionTrial();
+            for( int frame = 0; frame < 90; ++frame )
+                playback.stepOnce( substeps );
+            check( simulation.GetShapeSensorCapacity( sensor.shapeHandle ) == 1, "repeated sensor trial detects entry again" );
+            simulation.SetShapeSensorEventsEnabled( eventsShape, false );
+            playback.stepOnce( substeps );
+            check( simulation.GetShapeSensorCapacity( sensor.shapeHandle ) == 0 && simulation.GetSensorBeginEvents().empty() && simulation.GetSensorEndEvents().size() == 1 && same( simulation.GetBodyLinearVelocity( visitor.bodyHandle ), { 2, 0 } ), "disabling either sensor or visitor events stops detection on the next step without blocking motion" );
+            scene.resetCollisionTrial();
+            check( !simulation.AreShapeSensorEventsEnabled( eventsShape ), "sensor trial reset preserves disabled event settings" );
+            for( int frame = 0; frame < 90; ++frame )
+            {
+                playback.stepOnce( substeps );
+                check( simulation.GetShapeSensorCapacity( sensor.shapeHandle ) == 0 && simulation.GetSensorBeginEvents().empty(), "disabled sensor trial never records entry" );
+            }
+            simulation.SetShapeSensorEventsEnabled( eventsShape, true );
+            playback.stepOnce( substeps );
+            check( simulation.GetShapeSensorCapacity( sensor.shapeHandle ) == 1 && simulation.GetSensorBeginEvents().size() == 1, "reenabling events detects the visitor already inside" );
+            scene.resetCollisionTrial();
+            check( simulation.GetShapeSensorCapacity( sensor.shapeHandle ) == 0 && simulation.GetSensorBeginEvents().empty() && same( simulation.GetBodyTransform( visitor.bodyHandle ).position, { -3, -1.5f } ) && same( simulation.GetBodyLinearVelocity( visitor.bodyHandle ), { 2, 0 } ), "sensor trial reset clears the previous overlap without advancing launch conditions" );
+        }
+        auto filter = simulation.GetShapeFilter( visitor.shapeHandle );
+        filter.maskBits = 0;
+        simulation.SetShapeFilter( visitor.shapeHandle, filter );
+        scene.resetCollisionTrial();
+        for( int frame = 0; frame < 90; ++frame )
+            playback.stepOnce( substeps );
+        check( simulation.GetShapeSensorCapacity( sensor.shapeHandle ) == 0 && simulation.GetShapeFilter( visitor.shapeHandle ).maskBits == 0 && same( simulation.GetBodyLinearVelocity( visitor.bodyHandle ), { 2, 0 } ), "sensor trial preserves an edited mask and excludes detection without blocking motion" );
+        collisionMatrix matrix;
+        matrix.setPair( 0, 0, false );
+        playback.setCollisionMatrix( matrix );
+        scene.resetCollisionTrial();
+        check( playback.getCollisionMatrix() == matrix && simulation.IsValid( sensor.shapeHandle ) && simulation.IsValid( wall.shapeHandle ), "sensor trial reset retains common settings and existing sensor and wall handles" );
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        check( !playback.isPlaying() && playback.getCollisionMatrix() == matrix && !defaults.getWorld().IsValid( visitor.bodyHandle ) && defaults.getWorld().AreShapeSensorEventsEnabled( defaults.getShapes()[2].shapeHandle ) && defaults.getWorld().AreShapeSensorEventsEnabled( defaults.getShapes()[3].shapeHandle ) && defaults.getWorld().GetShapeFilter( defaults.getShapes()[3].shapeHandle ).maskBits == ~std::uint64_t{ 0 }, "full sensor reset restores default event and mask settings while preserving common settings" );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkSensorWallDemo();
     checkFilterComparisonDemo();
     checkCcdDemo();
     rigidBodyDemo scene{ demoKind::collisionComparison };
@@ -242,7 +318,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };

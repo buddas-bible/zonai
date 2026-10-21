@@ -43,9 +43,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 6; ++frame )
+    for( int frame = 0; frame < 7; ++frame )
     {
-        session.selectDemo( getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -785,7 +785,7 @@ void checkDemoUi()
             }
         }
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );
@@ -871,6 +871,59 @@ void checkDemoUi()
         {
             std::fprintf( stderr, "inspector mask edits did not switch repeated upper collision behavior while preserving lower exclusion\n" );
             std::exit( EXIT_FAILURE );
+        }
+    }
+    auto sensorView = createDemoView( demoKind::sensorWallComparison );
+    auto& sensorTrial = static_cast<rigidBodyDemo&>( *sensorView );
+    const auto sensorVisual = sensorTrial.getShapes()[2];
+    const auto sensorVisitor = sensorTrial.getShapes()[3];
+    for( int frame = 0; frame < 90; ++frame )
+        sensorTrial.step( 1.0f / 60.0f, 4 );
+    for( int frame = 0; frame < 7; ++frame )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0, 0 } );
+        ImGui::SetNextWindowSize( { 340, 4000 } );
+        ImGui::Begin( "Sensor trial inspector" );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Sensors" ), 1 );
+        if( frame == 0 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Object" );
+        if( frame == 1 && !GImGui->OpenPopupStack.empty() ) GImGui->NavActivateId = GImGui->NavActivateDownId = GImGui->OpenPopupStack.back().Window->GetID( sensorVisual.label );
+        if( frame == 2 || frame == 4 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Sensor events" );
+        if( frame == 3 || frame == 6 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+        sensorView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        if( frame >= 2 && sensorTrial.getWorld().AreShapeSensorEventsEnabled( sensorVisual.shapeHandle ) != ( frame >= 4 ) )
+        {
+            std::fprintf( stderr, "sensor inspector toggle or trial reset lost event settings or selection\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( frame == 2 )
+        {
+            sensorTrial.step( 1.0f / 60.0f, 4 );
+            if( sensorTrial.getWorld().GetShapeSensorCapacity( sensorVisual.shapeHandle ) != 0 || sensorTrial.getWorld().GetBodyLinearVelocity( sensorVisitor.bodyHandle ).x != 2.0f )
+            {
+                std::fprintf( stderr, "sensor UI event opt-out failed to stop detection without blocking motion\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+        if( frame == 3 || frame == 6 )
+        {
+            if( sensorTrial.getWorld().GetShapeSensorCapacity( sensorVisual.shapeHandle ) != 0 || sensorTrial.getWorld().GetBodyTransform( sensorVisitor.bodyHandle ).position.x != -3.0f || sensorTrial.getWorld().GetBodyLinearVelocity( sensorVisitor.bodyHandle ).x != 2.0f )
+            {
+                std::fprintf( stderr, "sensor UI trial reset retained stale overlap or failed to restore launch conditions\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+        if( frame == 5 )
+        {
+            for( int step = 0; step < 90; ++step )
+                sensorTrial.step( 1.0f / 60.0f, 4 );
+            if( sensorTrial.getWorld().GetShapeSensorCapacity( sensorVisual.shapeHandle ) != 1 )
+            {
+                std::fprintf( stderr, "sensor UI event opt-in failed to detect repeated entry\n" );
+                std::exit( EXIT_FAILURE );
+            }
         }
     }
     auto ccdView = createDemoView( demoKind::ccdComparison );

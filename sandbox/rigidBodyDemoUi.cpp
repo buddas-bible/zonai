@@ -134,7 +134,7 @@ bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, 
 
 rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 {
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison ) showLabels_ = true;
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison ) showLabels_ = true;
     selectedShapeIndex_ = kind == demoKind::playground || kind == demoKind::motorCar ? 2 : 1;
     if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
@@ -228,7 +228,7 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
 
         const transform2 transform = getWorld().GetBodyTransform( visual.bodyHandle );
 
-        const shapeColors colors = getShapeColors( bodyRef.type, bodyRef.awake );
+        const shapeColors colors = getWorld().IsShapeSensor( visual.shapeHandle ) ? shapeColors{ IM_COL32( 230, 170, 255, 255 ), IM_COL32( 230, 170, 255, 25 ) } : getShapeColors( bodyRef.type, bodyRef.awake );
 
         draw.DrawShape( shapeRef.geometry, transform, colors.outline, colors.fill );
         if( getKind() == demoKind::terrainChain || getKind() == demoKind::splineTerrain )
@@ -705,7 +705,7 @@ void rigidBodyDemoUi::drawSplineEditorControls()
 
 void rigidBodyDemoUi::drawExperimentControls()
 {
-    if( getKind() == demoKind::collisionComparison || getKind() == demoKind::frictionComparison || getKind() == demoKind::restitutionComparison || getKind() == demoKind::boxStack || getKind() == demoKind::ccdComparison || getKind() == demoKind::collisionFilterComparison )
+    if( getKind() == demoKind::collisionComparison || getKind() == demoKind::frictionComparison || getKind() == demoKind::restitutionComparison || getKind() == demoKind::boxStack || getKind() == demoKind::ccdComparison || getKind() == demoKind::collisionFilterComparison || getKind() == demoKind::sensorWallComparison )
     {
         ImGui::TextUnformatted( "반복 시험" );
         if( getKind() == demoKind::ccdComparison )
@@ -714,6 +714,12 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::TextWrapped( "정지 → 시험 복귀 → 1프레임 순서로 비교하세요. 월드 설정의 CCD 검사를 바꿉니다. 시작 속도는 100m/s이며 복귀하면 같은 조건으로 돌아갑니다. Bullet 해제만으로 정적 벽 CCD가 꺼지지는 않습니다." );
         }
         if( getKind() == demoKind::collisionFilterComparison ) ImGui::TextWrapped( "처음에는 위쪽이 충돌하고 아래쪽은 통과합니다. 아래 A의 충돌 마스크 → 개별 추가 제한에서 충돌 대상 레이어 02를 켜고 시험 복귀로 비교하세요. 양쪽 마스크가 서로를 허용해야 하며 공통 충돌 설정도 함께 적용됩니다. 이름의 레이어는 초기값입니다." );
+        if( getKind() == demoKind::sensorWallComparison )
+        {
+            ImGui::TextWrapped( "위쪽 일반 벽은 원을 막고 보라색 센서 영역은 통과시킵니다. 센서와 아래 원의 센서 이벤트가 모두 켜져야 감지합니다. 이벤트·마스크 변경은 다음 진행 단계부터 반영됩니다. 시험 복귀는 편집값을 유지하고 이전 겹침을 정리합니다." );
+            for( const auto& visual : getShapes() )
+                if( getWorld().IsShapeSensor( visual.shapeHandle ) ) ImGui::Text( "센서 겹침 수: %zu", getWorld().GetShapeSensorCapacity( visual.shapeHandle ) );
+        }
         if( getKind() == demoKind::frictionComparison ) ImGui::TextWrapped( "마찰은 물체와 경사면 계수의 기하평균으로 정해집니다. 현재 계수는 인스펙터에서 확인·편집하세요." );
         if( getKind() == demoKind::restitutionComparison ) ImGui::TextWrapped( "반발은 두 물체 중 큰 계수를 사용합니다. 바닥의 기본 반발은 0입니다. 인스펙터에서 원과 바닥을 비교하세요." );
         if( ImGui::Button( "시험 복귀 (편집값 유지)###CollisionTrialReset" ) ) resetCollisionTrial();

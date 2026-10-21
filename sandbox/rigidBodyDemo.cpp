@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison )
     {
         createCollisionTrial();
     }
@@ -534,6 +534,29 @@ void rigidBodyDemo::createCollisionTrial()
                 shapes_.push_back( { body, shape, labels[i][j] } );
             }
     }
+    else if( kind_ == demoKind::sensorWallComparison )
+    {
+        world_.SetGravity( {} );
+        const char* labels[][2] = { { "일반 벽", "위 원" }, { "센서", "아래 원" } };
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const float y = i == 0 ? 1.5f : -1.5f;
+            const auto wall = world_.CreateBody( bodyType::Static, { { 0, y }, {} } );
+            const auto surface = i == 0 ? world_.CreateShape( wall, MakeBox( { 0.75f, 0.6f } ) ) : world_.CreateSensorShape( wall, MakeBox( { 0.75f, 0.6f } ) );
+            world_.SetShapeFriction( surface, 0.0f );
+            shapes_.push_back( { wall, surface, labels[i][0] } );
+            const auto body = world_.CreateBody( bodyType::Dynamic, { { -3.0f, y }, {} } );
+            const auto shape = world_.CreateShape( body, circle2{ {}, 0.35f } );
+            if( i == 1 )
+            {
+                world_.SetShapeSensorEventsEnabled( surface, true );
+                world_.SetShapeSensorEventsEnabled( shape, true );
+            }
+            world_.SetShapeFriction( shape, 0.0f );
+            world_.SetBodyLinearVelocity( body, { 2.0f, 0 } );
+            shapes_.push_back( { body, shape, labels[i][1] } );
+        }
+    }
     for( const auto& visual : shapes_ )
     {
         collisionTrialInitialStates_.push_back( { world_.GetBodyTransform( visual.bodyHandle ), world_.GetBodyLinearVelocity( visual.bodyHandle ), world_.GetBodyAngularVelocity( visual.bodyHandle ) } );
@@ -555,6 +578,8 @@ void rigidBodyDemo::resetCollisionTrial()
         world_.SetBodyAngularVelocity( body, initial.angularVelocity );
         world_.ClearForces( body );
     }
+    // 시간 진행 없이 초기 위치의 sensor overlap을 다시 계산함.
+    if( kind_ == demoKind::sensorWallComparison ) world_.Step( 0.0f );
     refreshContacts();
 }
 
