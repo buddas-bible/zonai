@@ -281,8 +281,71 @@ void checkSleepWakeDemo()
     }
 }
 
+void checkDampingDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::dampingComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& simulation = scene.getWorld();
+        check( scene.getShapes().size() == 3 && simulation.GetBodyCount() == 3 && same( simulation.GetGravity(), {} ), "damping comparison creates three editable boxes without gravity" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        float speeds[3]{}, spins[3]{};
+        for( std::size_t i = 0; i < 3; ++i )
+        {
+            speeds[i] = Length( simulation.GetBodyLinearVelocity( visuals[i].bodyHandle ) );
+            spins[i] = simulation.GetBodyAngularVelocity( visuals[i].bodyHandle );
+        }
+        check( speeds[0] > speeds[1] + 0.4f && speeds[1] > speeds[2] + 0.4f && spins[0] > spins[1] + 0.4f && spins[1] > spins[2] + 0.4f, "increasing damping visibly reduces both linear and angular speed" );
+        check( speeds[0] == 2.0f && spins[0] == 2.0f && simulation.GetContactCount() == 0, "zero damping preserves both launch speeds without contacts" );
+        const auto middle = visuals[1];
+        simulation.SetBodyLinearDamping( middle.bodyHandle, 2.0f );
+        scene.resetCollisionTrial();
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        check( Length( simulation.GetBodyLinearVelocity( middle.bodyHandle ) ) < speeds[1] - 0.4f && std::abs( simulation.GetBodyAngularVelocity( middle.bodyHandle ) - spins[1] ) < 1.0e-6f, "editing only linear damping changes translation while preserving angular speed" );
+        simulation.SetBodyLinearDamping( middle.bodyHandle, 0.5f );
+        simulation.SetBodyAngularDamping( middle.bodyHandle, 2.0f );
+        scene.resetCollisionTrial();
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        check( std::abs( Length( simulation.GetBodyLinearVelocity( middle.bodyHandle ) ) - speeds[1] ) < 1.0e-6f && simulation.GetBodyAngularVelocity( middle.bodyHandle ) < spins[1] - 0.4f, "editing only angular damping changes rotation while preserving linear speed" );
+        for( int frame = 0; frame < 180; ++frame )
+            playback.stepOnce( substeps );
+        for( const auto& visual : visuals )
+            check( !simulation.IsBodySleepEnabled( visual.bodyHandle ) && simulation.IsBodyAwake( visual.bodyHandle ) && Length( simulation.GetBodyLinearVelocity( visual.bodyHandle ) ) > 0.0f && simulation.GetBodyAngularVelocity( visual.bodyHandle ) > 0.0f, "automatic sleep does not replace the damping comparison with a stopped body" );
+        demoInput drag{};
+        drag.mousePosition = simulation.GetBodyTransform( middle.bodyHandle ).position;
+        drag.mousePressed = drag.mouseHeld = true;
+        scene.handleInput( drag );
+        check( simulation.IsValid( scene.getMouseJoint() ), "damping boxes retain existing drag interaction" );
+        simulation.SetBodySleepEnabled( middle.bodyHandle, true );
+        simulation.SetGravity( { 1, -1 } );
+        collisionMatrix matrix;
+        matrix.setPair( 2, 3, false );
+        playback.setCollisionMatrix( matrix );
+        playback.setPlaying( true );
+        scene.resetCollisionTrial();
+        check( playback.isPlaying() && playback.getCollisionMatrix() == matrix && !simulation.IsValid( scene.getMouseJoint() ) && same( simulation.GetGravity(), { 1, -1 } ) && simulation.GetBodyLinearDamping( middle.bodyHandle ) == 0.5f && simulation.GetBodyAngularDamping( middle.bodyHandle ) == 2.0f && simulation.IsBodySleepEnabled( middle.bodyHandle ), "damping reset cancels drag while retaining edited coefficients sleep gravity common settings and play state" );
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+        {
+            const auto body = visuals[i].bodyHandle;
+            const auto pose = simulation.GetBodyTransform( body );
+            check( simulation.IsValid( visuals[i].shapeHandle ) && same( pose.position, { -3.0f + 3.0f * static_cast<float>( i ), 0 } ) && pose.rotation.c == 1.0f && pose.rotation.s == 0.0f && same( simulation.GetBodyLinearVelocity( body ), { 0, 2 } ) && simulation.GetBodyAngularVelocity( body ) == 2.0f, "damping reset retains handles and restores initial transforms and launch velocities" );
+        }
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        const auto defaultMiddle = defaults.getShapes()[1].bodyHandle;
+        check( !playback.isPlaying() && playback.getCollisionMatrix() == matrix && !defaults.getWorld().IsValid( middle.bodyHandle ) && same( defaults.getWorld().GetGravity(), {} ) && !defaults.getWorld().IsBodySleepEnabled( defaultMiddle ) && defaults.getWorld().GetBodyLinearDamping( defaultMiddle ) == 0.5f && defaults.getWorld().GetBodyAngularDamping( defaultMiddle ) == 0.5f, "full damping reset restores default coefficients gravity and sleep settings while retaining common settings" );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkDampingDemo();
     checkSleepWakeDemo();
     checkSensorWallDemo();
     checkFilterComparisonDemo();
@@ -384,7 +447,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };

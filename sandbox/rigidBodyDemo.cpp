@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison )
     {
         createCollisionTrial();
     }
@@ -570,6 +570,23 @@ void rigidBodyDemo::createCollisionTrial()
             world_.SetBodySleepEnabled( box, i == 0 );
             const auto shape = world_.CreateShape( box, MakeBox( { 0.5f, 0.5f } ) );
             world_.SetShapeFriction( shape, 0.6f );
+            shapes_.push_back( { box, shape, labels[i] } );
+        }
+    }
+    else if( kind_ == demoKind::dampingComparison )
+    {
+        world_.SetGravity( {} );
+        const float damping[] = { 0.0f, 0.5f, 2.0f };
+        const char* labels[] = { "상자 A (초기 감쇠 0)", "상자 B (초기 감쇠 0.5)", "상자 C (초기 감쇠 2)" };
+        for( std::size_t i = 0; i < 3; ++i )
+        {
+            const auto box = world_.CreateBody( bodyType::Dynamic, { { -3.0f + 3.0f * static_cast<float>( i ), 0 }, {} } );
+            const auto shape = world_.CreateShape( box, MakeBox( { 0.5f, 0.25f } ) );
+            world_.SetBodyLinearDamping( box, damping[i] );
+            world_.SetBodyAngularDamping( box, damping[i] );
+            world_.SetBodySleepEnabled( box, false );
+            world_.SetBodyLinearVelocity( box, { 0, 2.0f } );
+            world_.SetBodyAngularVelocity( box, 2.0f );
             shapes_.push_back( { box, shape, labels[i] } );
         }
     }
