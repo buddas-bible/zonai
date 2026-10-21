@@ -43,9 +43,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 15; ++frame )
+    for( int frame = 0; frame < 16; ++frame )
     {
-        session.selectDemo( frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -885,6 +885,60 @@ void checkDemoUi()
             }
         }
     }
+    auto typeView = createDemoView( demoKind::dynamicKinematicComparison );
+    auto& typeTrial = static_cast<rigidBodyDemo&>( *typeView );
+    const auto typeTarget = typeTrial.getShapes()[1];
+    for( int frame = 0; frame < 60; ++frame )
+        typeTrial.step( 1.0f / 60.0f, 4 );
+    for( int frame = 0; frame < 6; ++frame )
+    {
+        if( frame == 1 ) io.AddInputCharactersUTF8( "3" );
+        if( frame == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+        if( frame == 3 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0, 0 } );
+        ImGui::SetNextWindowSize( { 340, 4000 } );
+        ImGui::Begin( "Body type trial inspector" );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Physics quantities" ), 1 );
+        if( frame == 0 )
+        {
+            GImGui->NavActivateId = ImGui::GetID( "Density" );
+            GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+        }
+        if( frame >= 3 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+        typeView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        if( frame >= 2 && ( typeTrial.getWorld().GetShapeDensity( typeTarget.shapeHandle ) != 3.0f || typeTrial.getWorld().GetBodyMass( typeTarget.bodyHandle ) != 3.0f ) )
+        {
+            std::fprintf( stderr, "body type inspector lost edited target density across repeated trials\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( frame >= 3 )
+        {
+            for( std::size_t i = 0; i < typeTrial.getShapes().size(); ++i )
+            {
+                const auto body = typeTrial.getShapes()[i].bodyHandle;
+                const auto pose = typeTrial.getWorld().GetBodyTransform( body );
+                const auto velocity = typeTrial.getWorld().GetBodyLinearVelocity( body );
+                if( pose.position.x != ( i % 2 == 0 ? -2.0f : 0.0f ) || pose.position.y != ( i < 2 ? 1.5f : -1.5f ) || pose.rotation.s != 0.0f || velocity.x != ( i % 2 == 0 ? 2.0f : 0.0f ) || velocity.y != 0.0f )
+                {
+                    std::fprintf( stderr, "body type UI reset failed to restore identical initial poses and prescribed velocities\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+        }
+        if( frame == 3 || frame == 4 )
+        {
+            for( int step = 0; step < 60; ++step )
+                typeTrial.step( 1.0f / 60.0f, 4 );
+            if( std::abs( typeTrial.getWorld().GetBodyLinearVelocity( typeTarget.bodyHandle ).x - 0.5f ) > 0.1f || typeTrial.getWorld().GetBodyLinearVelocity( typeTrial.getShapes()[2].bodyHandle ).x != 2.0f )
+            {
+                std::fprintf( stderr, "body type UI density edit and reset must change dynamic response while retaining kinematic speed\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+    }
     auto torqueView = createDemoView( demoKind::torqueImpulseComparison );
     auto& torqueTrial = static_cast<rigidBodyDemo&>( *torqueView );
     const auto torqueBox = torqueTrial.getShapes()[0];
@@ -1103,7 +1157,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );

@@ -46,7 +46,8 @@ enum class demoKind
     impulsePointComparison,
     rotationalInertiaComparison,
     forceImpulseComparison,
-    torqueImpulseComparison
+    torqueImpulseComparison,
+    dynamicKinematicComparison
 };
 
 struct demoEntry

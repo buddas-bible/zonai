@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison )
     {
         createCollisionTrial();
     }
@@ -665,6 +665,21 @@ void rigidBodyDemo::createCollisionTrial()
             const auto box = world_.CreateBody( bodyType::Dynamic, { { i == 0 ? -2.5f : 2.5f, 0 }, {} } );
             const auto shape = world_.CreateShape( box, MakeBox( { 0.5f, 0.5f } ) );
             world_.SetBodySleepEnabled( box, false );
+            shapes_.push_back( { box, shape, labels[i] } );
+        }
+    }
+    else if( kind_ == demoKind::dynamicKinematicComparison )
+    {
+        world_.SetGravity( {} );
+        const char* labels[] = { "위 A (동적 이동)", "위 B (동적 표적)", "아래 A (키네마틱 이동)", "아래 B (동적 표적)" };
+        for( std::size_t i = 0; i < 4; ++i )
+        {
+            const auto box = world_.CreateBody( i == 2 ? bodyType::Kinematic : bodyType::Dynamic, { { i % 2 == 0 ? -2.0f : 0.0f, i < 2 ? 1.5f : -1.5f }, {} } );
+            const auto shape = world_.CreateShape( box, MakeBox( { 0.5f, 0.5f } ) );
+            world_.SetShapeFriction( shape, 0.0f );
+            world_.SetShapeRestitution( shape, 0.0f );
+            world_.SetBodySleepEnabled( box, false );
+            if( i % 2 == 0 ) world_.SetBodyLinearVelocity( box, { 2, 0 } );
             shapes_.push_back( { box, shape, labels[i] } );
         }
     }

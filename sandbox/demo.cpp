@@ -45,7 +45,8 @@ constexpr std::array entries
     demoEntry{ demoKind::impulsePointComparison, "강체", "충격량 작용점 비교", "같은 상자에 질량중심·중심의 왼쪽·오른쪽 0.5m 지점을 구분해 위쪽 2N·s를 추가합니다. 표시한 작용점은 물체와 함께 회전합니다. 인스펙터에서 회전·밀도를 편집하고 시험 복귀로 비교하세요.", { 0.0f, 1.0f }, 75.0f },
     demoEntry{ demoKind::rotationalInertiaComparison, "강체", "회전 관성 비교", "같은 질량의 정사각형과 막대에 같은 회전 충격량을 추가합니다. 밀도를 편집하고 시험 복귀로 회전 관성에 따른 각속도 차이를 비교하세요.", { 0.0f, 0.0f }, 95.0f },
     demoEntry{ demoKind::forceImpulseComparison, "강체", "힘·충격량 비교", "같은 상자에 2N의 힘을 1초간 적용하거나 2N·s의 충격량을 한 번 적용합니다. 밀도·감쇠를 편집하고 같은 조건 시험 시작으로 비교하세요.", { 0.0f, 1.5f }, 85.0f },
-    demoEntry{ demoKind::torqueImpulseComparison, "강체", "토크·회전 충격량 비교", "같은 상자에 1N·m 토크를 1초간 적용하거나 1N·m·s 회전 충격량을 한 번 적용합니다. 밀도·회전 감쇠를 편집하고 같은 조건 시험 시작으로 비교하세요.", { 0.0f, 0.0f }, 95.0f }
+    demoEntry{ demoKind::torqueImpulseComparison, "강체", "토크·회전 충격량 비교", "같은 상자에 1N·m 토크를 1초간 적용하거나 1N·m·s 회전 충격량을 한 번 적용합니다. 밀도·회전 감쇠를 편집하고 같은 조건 시험 시작으로 비교하세요.", { 0.0f, 0.0f }, 95.0f },
+    demoEntry{ demoKind::dynamicKinematicComparison, "강체", "동적·키네마틱 충돌 비교", "동적·키네마틱 상자가 같은 속도로 정지한 동적 표적을 밉니다. 밀도·반발을 편집하고 시험 복귀로 충돌 반작용과 지정 속도 유지의 차이를 비교하세요.", { 0.0f, 0.0f }, 95.0f }
 };
 
 }
