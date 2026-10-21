@@ -46,7 +46,8 @@ constexpr std::array entries
     demoEntry{ demoKind::rotationalInertiaComparison, "강체", "회전 관성 비교", "같은 질량의 정사각형과 막대에 같은 회전 충격량을 추가합니다. 밀도를 편집하고 시험 복귀로 회전 관성에 따른 각속도 차이를 비교하세요.", { 0.0f, 0.0f }, 95.0f },
     demoEntry{ demoKind::forceImpulseComparison, "강체", "힘·충격량 비교", "같은 상자에 2N의 힘을 1초간 적용하거나 2N·s의 충격량을 한 번 적용합니다. 밀도·감쇠를 편집하고 같은 조건 시험 시작으로 비교하세요.", { 0.0f, 1.5f }, 85.0f },
     demoEntry{ demoKind::torqueImpulseComparison, "강체", "토크·회전 충격량 비교", "같은 상자에 1N·m 토크를 1초간 적용하거나 1N·m·s 회전 충격량을 한 번 적용합니다. 밀도·회전 감쇠를 편집하고 같은 조건 시험 시작으로 비교하세요.", { 0.0f, 0.0f }, 95.0f },
-    demoEntry{ demoKind::dynamicKinematicComparison, "강체", "동적·키네마틱 충돌 비교", "동적·키네마틱 상자가 같은 속도로 정지한 동적 표적을 밉니다. 밀도·반발을 편집하고 시험 복귀로 충돌 반작용과 지정 속도 유지의 차이를 비교하세요.", { 0.0f, 0.0f }, 95.0f }
+    demoEntry{ demoKind::dynamicKinematicComparison, "강체", "동적·키네마틱 충돌 비교", "동적·키네마틱 상자가 같은 속도로 정지한 동적 표적을 밉니다. 밀도·반발을 편집하고 시험 복귀로 충돌 반작용과 지정 속도 유지의 차이를 비교하세요.", { 0.0f, 0.0f }, 95.0f },
+    demoEntry{ demoKind::compoundCenterComparison, "강체", "복합 물체·질량중심 비교", "원 두 개를 묶은 같은 질량의 강체에 밀도를 대칭·비대칭으로 배분합니다. 물체 원점에 같은 충격량을 주고 질량중심과 회전 반응을 비교하세요.", { 0.0f, 1.0f }, 75.0f }
 };
 
 }
