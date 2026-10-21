@@ -49,7 +49,8 @@ enum class demoKind
     torqueImpulseComparison,
     dynamicKinematicComparison,
     compoundCenterComparison,
-    fastRotationComparison
+    fastRotationComparison,
+    maximumLinearSpeedComparison
 };
 
 struct demoEntry

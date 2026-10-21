@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison )
     {
         createCollisionTrial();
     }
@@ -712,6 +712,20 @@ void rigidBodyDemo::createCollisionTrial()
             world_.SetBodyAngularVelocity( rod, 120.0f );
             world_.SetBodyFastRotationAllowed( rod, i == 1 );
             shapes_.push_back( { rod, shape, labels[i] } );
+        }
+    }
+    else if( kind_ == demoKind::maximumLinearSpeedComparison )
+    {
+        world_.SetGravity( {} );
+        world_.SetMaximumLinearSpeed( 4.0f );
+        const char* labels[] = { "상자 A (초기 2m/s)", "상자 B (초기 8m/s)" };
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const auto box = world_.CreateBody( bodyType::Dynamic, { { i == 0 ? -2.5f : 2.5f, 0 }, {} } );
+            const auto shape = world_.CreateShape( box, MakeBox( { 0.5f, 0.5f } ) );
+            world_.SetBodySleepEnabled( box, false );
+            world_.SetBodyLinearVelocity( box, vec2{ 0.6f, 0.8f } * ( i == 0 ? 2.0f : 8.0f ) );
+            shapes_.push_back( { box, shape, labels[i] } );
         }
     }
     for( const auto& visual : shapes_ )
