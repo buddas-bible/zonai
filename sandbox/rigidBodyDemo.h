@@ -176,6 +176,9 @@ public:
     void applyMassTrialImpulse();
     void applyPointTrialImpulse();
     void applyInertiaTrialImpulse();
+    void startForceImpulseTrial();
+
+    [[nodiscard]] double getForceTrialTime() const noexcept { return forceTrialTime_; }
     void resetSplinePath();
     void resetTerrainProbes();
     void launchTerrainProbe( std::size_t probeIndex, terrainTrial trial );
@@ -395,6 +398,8 @@ private:
     };
 
     std::vector<trialBodyState> collisionTrialInitialStates_;
+    double forceTrialTime_ = 0.0;
+    bool forceTrialRunning_ = false;
     demoKind kind_;
     world world_;
     std::vector<visualShape> shapes_;

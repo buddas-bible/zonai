@@ -607,8 +607,65 @@ void checkRotationalInertiaDemo()
     check( other.getWorld().GetBodyAngularVelocity( body ) == 0.0f, "inertia action does not alter other scenes" );
 }
 
+void checkForceImpulseDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::forceImpulseComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 2 && physics.GetBodyCount() == 2 && same( physics.GetGravity(), {} ), "force trial creates two identical resting boxes without gravity" );
+        const auto force = scene.getShapes()[0];
+        const auto impulse = scene.getShapes()[1];
+        for( const auto& visual : scene.getShapes() )
+            check( physics.GetBodyMass( visual.bodyHandle ) == 1.0f && !physics.IsBodySleepEnabled( visual.bodyHandle ) && same( physics.GetBodyLinearVelocity( visual.bodyHandle ), {} ), "force comparison starts with equal mass and sleep disabled" );
+        playback.stepOnce( substeps );
+        check( scene.getForceTrialTime() == 0.0 && same( physics.GetBodyLinearVelocity( force.bodyHandle ), {} ), "force trial waits for explicit start" );
+        scene.startForceImpulseTrial();
+        check( !playback.isPlaying() && scene.getForceTrialTime() == 0.0 && same( physics.GetBodyLinearVelocity( force.bodyHandle ), {} ) && same( physics.GetBodyLinearVelocity( impulse.bodyHandle ), { 0, 2 } ) && physics.GetBodyTransform( impulse.bodyHandle ).position.y == 0.0f, "start applies only the instantaneous impulse without advancing time or poses" );
+        playback.advance( 0.5f, substeps );
+        scene.step( 0.0f, substeps );
+        check( scene.getForceTrialTime() == 0.0 && same( physics.GetBodyLinearVelocity( force.bodyHandle ), {} ), "zero step does not consume force duration" );
+        for( int frame = 0; frame < 30; ++frame )
+            playback.stepOnce( substeps );
+        check( std::abs( scene.getForceTrialTime() - 0.5 ) < 1.0e-6 && std::abs( physics.GetBodyLinearVelocity( force.bodyHandle ).y - 1.0f ) < 3.0e-5f && physics.GetBodyLinearVelocity( impulse.bodyHandle ).y == 2.0f && physics.GetBodyTransform( force.bodyHandle ).position.y < physics.GetBodyTransform( impulse.bodyHandle ).position.y, "halfway force accelerates gradually while impulse already has full speed and travels farther" );
+        for( int frame = 0; frame < 30; ++frame )
+            playback.stepOnce( substeps );
+        check( std::abs( physics.GetBodyLinearVelocity( force.bodyHandle ).y - 2.0f ) < 3.0e-5f && physics.GetBodyLinearVelocity( impulse.bodyHandle ).y == 2.0f, "one second of equal total impulse produces matching speeds" );
+        for( int frame = 0; frame < 30; ++frame )
+            playback.stepOnce( substeps );
+        check( std::abs( scene.getForceTrialTime() - 1.5 ) < 1.0e-6 && std::abs( physics.GetBodyLinearVelocity( force.bodyHandle ).y - 2.0f ) < 3.0e-5f && physics.GetBodyAngularVelocity( force.bodyHandle ) == 0.0f && physics.GetBodyAngularVelocity( impulse.bodyHandle ) == 0.0f, "force stops after one second while elapsed time continues without torque" );
+        scene.startForceImpulseTrial();
+        scene.step( 0.75f, substeps );
+        scene.step( 0.5f, substeps );
+        check( std::abs( physics.GetBodyLinearVelocity( force.bodyHandle ).y - 2.0f ) < 3.0e-5f && std::abs( scene.getForceTrialTime() - 1.25 ) < 1.0e-6, "step crossing one second applies only remaining force duration" );
+        physics.SetShapeDensity( force.shapeHandle, 2.0f );
+        physics.SetShapeDensity( impulse.shapeHandle, 2.0f );
+        scene.startForceImpulseTrial();
+        check( physics.GetBodyMass( force.bodyHandle ) == 2.0f && physics.GetBodyLinearVelocity( impulse.bodyHandle ).y == 1.0f && same( physics.GetBodyLinearVelocity( force.bodyHandle ), {} ) && scene.getForceTrialTime() == 0.0, "restarting preserves edited density and restores initial conditions before applying impulse" );
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        check( std::abs( physics.GetBodyLinearVelocity( force.bodyHandle ).y - 1.0f ) < 3.0e-5f && physics.GetBodyLinearVelocity( impulse.bodyHandle ).y == 1.0f, "density edit changes force and impulse response equally" );
+        scene.startForceImpulseTrial();
+        scene.step( 0.25f, substeps );
+        scene.resetCollisionTrial();
+        scene.step( 0.25f, substeps );
+        check( physics.GetShapeDensity( force.shapeHandle ) == 2.0f && physics.GetShapeDensity( impulse.shapeHandle ) == 2.0f && scene.getForceTrialTime() == 0.0 && same( physics.GetBodyLinearVelocity( force.bodyHandle ), {} ) && same( physics.GetBodyLinearVelocity( impulse.bodyHandle ), {} ), "trial reset preserves edits and cancels active force without relaunching" );
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        check( defaults.getForceTrialTime() == 0.0 && defaults.getWorld().GetBodyMass( defaults.getShapes()[0].bodyHandle ) == 1.0f && !playback.isPlaying(), "full force reset restores default density and idle state" );
+    }
+    rigidBodyDemo other{ demoKind::collisionComparison };
+    const auto body = other.getShapes()[0].bodyHandle;
+    const auto velocity = other.getWorld().GetBodyLinearVelocity( body );
+    other.startForceImpulseTrial();
+    check( same( other.getWorld().GetBodyLinearVelocity( body ), velocity ), "force trial start does not alter other scenes" );
+}
+
 void checkCollisionDemos()
 {
+    checkForceImpulseDemo();
     checkRotationalInertiaDemo();
     checkImpulsePointDemo();
     checkMassImpulseDemo();
@@ -715,7 +772,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };
