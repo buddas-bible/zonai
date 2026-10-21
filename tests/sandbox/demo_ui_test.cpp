@@ -43,9 +43,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 14; ++frame )
+    for( int frame = 0; frame < 15; ++frame )
     {
-        session.selectDemo( frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -885,6 +885,59 @@ void checkDemoUi()
             }
         }
     }
+    auto torqueView = createDemoView( demoKind::torqueImpulseComparison );
+    auto& torqueTrial = static_cast<rigidBodyDemo&>( *torqueView );
+    const auto torqueBox = torqueTrial.getShapes()[0];
+    const auto angularImpulseBox = torqueTrial.getShapes()[1];
+    for( int frame = 0; frame < 9; ++frame )
+    {
+        if( frame == 3 ) io.AddInputCharactersUTF8( "2" );
+        if( frame == 4 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+        if( frame == 5 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0, 0 } );
+        ImGui::SetNextWindowSize( { 340, 4000 } );
+        ImGui::Begin( "Torque trial inspector" );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Physics quantities" ), 1 );
+        if( frame == 0 || frame == 1 || frame == 6 || frame == 7 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "TorqueTrialStart" );
+        if( frame == 5 || frame == 8 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+        if( frame == 2 )
+        {
+            GImGui->NavActivateId = ImGui::GetID( "Density" );
+            GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+        }
+        torqueView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        if( frame == 0 || frame == 1 || frame == 6 || frame == 7 )
+        {
+            const float expected = frame < 6 ? 6.0f : 3.0f;
+            if( torqueTrial.getTorqueTrialTime() != 0.0 || torqueTrial.getWorld().GetBodyAngularVelocity( torqueBox.bodyHandle ) != 0.0f || zonai::LengthSquared( torqueTrial.getWorld().GetBodyLinearVelocity( torqueBox.bodyHandle ) ) != 0.0f || std::abs( torqueTrial.getWorld().GetBodyAngularVelocity( angularImpulseBox.bodyHandle ) - expected ) > 1.0e-5f || zonai::LengthSquared( torqueTrial.getWorld().GetBodyLinearVelocity( angularImpulseBox.bodyHandle ) ) != 0.0f || torqueTrial.getWorld().GetBodyTransform( angularImpulseBox.bodyHandle ).rotation.s != 0.0f )
+            {
+                std::fprintf( stderr, "torque UI start must reset poses time and velocities before applying one current-inertia angular impulse\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+        if( frame >= 4 && torqueTrial.getWorld().GetShapeDensity( angularImpulseBox.shapeHandle ) != 2.0f )
+        {
+            std::fprintf( stderr, "torque UI lost density edit or selection across restart and reset\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( frame == 5 || frame == 8 )
+        {
+            torqueTrial.step( 0.1f, 4 );
+            for( std::size_t i = 0; i < torqueTrial.getShapes().size(); ++i )
+            {
+                const auto body = torqueTrial.getShapes()[i].bodyHandle;
+                if( torqueTrial.getTorqueTrialTime() != 0.0 || torqueTrial.getWorld().GetBodyTransform( body ).position.x != ( i == 0 ? -2.5f : 2.5f ) || torqueTrial.getWorld().GetBodyTransform( body ).position.y != 0.0f || zonai::LengthSquared( torqueTrial.getWorld().GetBodyLinearVelocity( body ) ) != 0.0f || torqueTrial.getWorld().GetBodyAngularVelocity( body ) != 0.0f || torqueTrial.getWorld().GetBodyTransform( body ).rotation.s != 0.0f )
+                {
+                    std::fprintf( stderr, "torque UI reset must cancel the active trial without relaunching\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+        }
+        if( frame == 0 || frame == 7 ) torqueTrial.step( 0.1f, 4 );
+    }
     auto forceView = createDemoView( demoKind::forceImpulseComparison );
     auto& forceTrial = static_cast<rigidBodyDemo&>( *forceView );
     const auto forceBox = forceTrial.getShapes()[0];
@@ -1050,7 +1103,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );

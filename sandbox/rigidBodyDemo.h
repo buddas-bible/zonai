@@ -177,6 +177,9 @@ public:
     void applyPointTrialImpulse();
     void applyInertiaTrialImpulse();
     void startForceImpulseTrial();
+    void startTorqueImpulseTrial();
+
+    [[nodiscard]] double getTorqueTrialTime() const noexcept { return torqueTrialTime_; }
 
     [[nodiscard]] double getForceTrialTime() const noexcept { return forceTrialTime_; }
     void resetSplinePath();
@@ -400,6 +403,8 @@ private:
     std::vector<trialBodyState> collisionTrialInitialStates_;
     double forceTrialTime_ = 0.0;
     bool forceTrialRunning_ = false;
+    double torqueTrialTime_ = 0.0;
+    bool torqueTrialRunning_ = false;
     demoKind kind_;
     world world_;
     std::vector<visualShape> shapes_;
