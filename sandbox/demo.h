@@ -38,7 +38,8 @@ enum class demoKind
     boxStack,
     ccdComparison,
     collisionFilterComparison,
-    sensorWallComparison
+    sensorWallComparison,
+    sleepWakeComparison
 };
 
 struct demoEntry

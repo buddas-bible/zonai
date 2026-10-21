@@ -43,9 +43,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 7; ++frame )
+    for( int frame = 0; frame < 8; ++frame )
     {
-        session.selectDemo( frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -785,7 +785,7 @@ void checkDemoUi()
             }
         }
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );
@@ -924,6 +924,67 @@ void checkDemoUi()
                 std::fprintf( stderr, "sensor UI event opt-in failed to detect repeated entry\n" );
                 std::exit( EXIT_FAILURE );
             }
+        }
+    }
+    auto sleepView = createDemoView( demoKind::sleepWakeComparison );
+    auto& sleepTrial = static_cast<rigidBodyDemo&>( *sleepView );
+    const auto sleepLeft = sleepTrial.getShapes()[1].bodyHandle;
+    const auto sleepRight = sleepTrial.getShapes()[2].bodyHandle;
+    for( int frame = 0; frame < 240; ++frame )
+        sleepTrial.step( 1.0f / 60.0f, 4 );
+    for( int frame = 0; frame < 9; ++frame )
+    {
+        if( frame == 6 ) io.AddInputCharactersUTF8( "0.2" );
+        if( frame == 7 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+        if( frame == 8 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0, 0 } );
+        ImGui::SetNextWindowSize( { 340, 4000 } );
+        ImGui::Begin( "Sleep trial inspector" );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Sleep and CCD" ), 1 );
+        if( frame == 0 || frame == 2 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Body sleep" );
+        if( frame == 1 || frame == 3 || frame == 8 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+        if( frame == 4 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Awake" );
+        if( frame == 5 )
+        {
+            GImGui->NavActivateId = ImGui::GetID( "Sleep threshold" );
+            GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+        }
+        sleepView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        if( sleepTrial.getWorld().IsBodySleepEnabled( sleepLeft ) != ( frame >= 2 ) || sleepTrial.getWorld().IsBodySleepEnabled( sleepRight ) )
+        {
+            std::fprintf( stderr, "sleep inspector toggle or reset lost edited permission or selection\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( frame == 1 || frame == 3 || frame == 8 )
+        {
+            if( !sleepTrial.getWorld().IsBodyAwake( sleepLeft ) || !sleepTrial.getWorld().IsBodyAwake( sleepRight ) || sleepTrial.getWorld().GetBodyTransform( sleepLeft ).position.y != 1.5f || zonai::LengthSquared( sleepTrial.getWorld().GetBodyLinearVelocity( sleepLeft ) ) != 0.0f )
+            {
+                std::fprintf( stderr, "sleep UI reset failed to wake and restore both boxes\n" );
+                std::exit( EXIT_FAILURE );
+            }
+            if( frame != 8 )
+            {
+                for( int step = 0; step < 240; ++step )
+                    sleepTrial.step( 1.0f / 60.0f, 4 );
+                if( sleepTrial.getWorld().IsBodyAwake( sleepLeft ) != ( frame == 1 ) || !sleepTrial.getWorld().IsBodyAwake( sleepRight ) )
+                {
+                    std::fprintf( stderr, "sleep inspector edits failed to change the repeated trial result\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+        }
+        if( frame == 4 && !sleepTrial.getWorld().IsBodyAwake( sleepLeft ) )
+        {
+            std::fprintf( stderr, "Awake inspector failed to wake the sleeping box\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( frame >= 7 && std::abs( sleepTrial.getWorld().GetBodySleepThreshold( sleepLeft ) - 0.2f ) > 1.0e-5f )
+        {
+            std::fprintf( stderr, "sleep threshold inspector edit was not retained by reset\n" );
+            std::exit( EXIT_FAILURE );
         }
     }
     auto ccdView = createDemoView( demoKind::ccdComparison );

@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison )
     {
         createCollisionTrial();
     }
@@ -555,6 +555,22 @@ void rigidBodyDemo::createCollisionTrial()
             world_.SetShapeFriction( shape, 0.0f );
             world_.SetBodyLinearVelocity( body, { 2.0f, 0 } );
             shapes_.push_back( { body, shape, labels[i][1] } );
+        }
+    }
+    else if( kind_ == demoKind::sleepWakeComparison )
+    {
+        const auto floor = world_.CreateBody( bodyType::Static, { { 0, -0.5f }, {} } );
+        const auto surface = world_.CreateShape( floor, MakeBox( { 5.0f, 0.5f } ) );
+        world_.SetShapeFriction( surface, 0.6f );
+        shapes_.push_back( { floor, surface, "바닥" } );
+        const char* labels[] = { "왼쪽 (초기 수면 허용)", "오른쪽 (초기 수면 금지)" };
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const auto box = world_.CreateBody( bodyType::Dynamic, { { i == 0 ? -2.0f : 2.0f, 1.5f }, {} } );
+            world_.SetBodySleepEnabled( box, i == 0 );
+            const auto shape = world_.CreateShape( box, MakeBox( { 0.5f, 0.5f } ) );
+            world_.SetShapeFriction( shape, 0.6f );
+            shapes_.push_back( { box, shape, labels[i] } );
         }
     }
     for( const auto& visual : shapes_ )
