@@ -43,9 +43,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 8; ++frame )
+    for( int frame = 0; frame < 9; ++frame )
     {
-        session.selectDemo( frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -785,7 +785,7 @@ void checkDemoUi()
             }
         }
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );
@@ -984,6 +984,56 @@ void checkDemoUi()
         if( frame >= 7 && std::abs( sleepTrial.getWorld().GetBodySleepThreshold( sleepLeft ) - 0.2f ) > 1.0e-5f )
         {
             std::fprintf( stderr, "sleep threshold inspector edit was not retained by reset\n" );
+            std::exit( EXIT_FAILURE );
+        }
+    }
+    for( int field = 0; field < 2; ++field )
+    {
+        auto dampingView = createDemoView( demoKind::dampingComparison );
+        auto& dampingTrial = static_cast<rigidBodyDemo&>( *dampingView );
+        const auto middle = dampingTrial.getShapes()[1].bodyHandle;
+        for( int step = 0; step < 60; ++step )
+            dampingTrial.step( 1.0f / 60.0f, 4 );
+        const float speed = zonai::Length( dampingTrial.getWorld().GetBodyLinearVelocity( middle ) );
+        const float spin = dampingTrial.getWorld().GetBodyAngularVelocity( middle );
+        for( int frame = 0; frame < 4; ++frame )
+        {
+            if( frame == 1 ) io.AddInputCharactersUTF8( "2.0" );
+            if( frame == 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+            if( frame == 3 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 340, 4000 } );
+            ImGui::Begin( "Damping trial inspector" );
+            ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Physics quantities" ), 1 );
+            if( frame == 0 )
+            {
+                GImGui->NavActivateId = ImGui::GetID( field == 0 ? "Linear damping" : "Angular damping" );
+                GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+            }
+            if( frame == 3 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+            dampingView->drawControls();
+            ImGui::End();
+            ImGui::Render();
+            if( frame >= 2 && ( dampingTrial.getWorld().GetBodyLinearDamping( middle ) != ( field == 0 ? 2.0f : 0.5f ) || dampingTrial.getWorld().GetBodyAngularDamping( middle ) != ( field == 1 ? 2.0f : 0.5f ) ) )
+            {
+                std::fprintf( stderr, "damping inspector edit changed the wrong coefficient or was lost by reset\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+        const auto pose = dampingTrial.getWorld().GetBodyTransform( middle );
+        if( zonai::LengthSquared( pose.position ) != 0.0f || pose.rotation.c != 1.0f || pose.rotation.s != 0.0f || dampingTrial.getWorld().GetBodyLinearVelocity( middle ).y != 2.0f || dampingTrial.getWorld().GetBodyAngularVelocity( middle ) != 2.0f )
+        {
+            std::fprintf( stderr, "damping UI reset did not restore initial transforms and velocities\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        for( int step = 0; step < 60; ++step )
+            dampingTrial.step( 1.0f / 60.0f, 4 );
+        const float editedSpeed = zonai::Length( dampingTrial.getWorld().GetBodyLinearVelocity( middle ) );
+        const float editedSpin = dampingTrial.getWorld().GetBodyAngularVelocity( middle );
+        if( field == 0 ? !( editedSpeed < speed - 0.4f && std::abs( editedSpin - spin ) < 1.0e-6f ) : !( std::abs( editedSpeed - speed ) < 1.0e-6f && editedSpin < spin - 0.4f ) )
+        {
+            std::fprintf( stderr, "damping inspector edit failed to change only the corresponding motion on the repeated trial\n" );
             std::exit( EXIT_FAILURE );
         }
     }
