@@ -949,8 +949,60 @@ void checkMaximumLinearSpeedDemo()
     }
 }
 
+void checkFrictionMixingDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::frictionMixingComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 6 && physics.GetBodyCount() == 6 && same( physics.GetGravity(), { 0, -10 } ), "friction mixing creates three separate horizontal floor and box pairs" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        for( std::size_t i = 0; i < 3; ++i )
+        {
+            const auto box = visuals[2 * i + 1].bodyHandle;
+            check( physics.GetBody( visuals[2 * i].bodyHandle ).type == bodyType::Static && physics.GetBody( box ).type == bodyType::Dynamic && same( physics.GetBodyLinearVelocity( box ), { 4, 0 } ) && !physics.IsBodySleepEnabled( box ) && physics.GetBodyLinearDamping( box ) == 0.0f && physics.GetBodyAngularDamping( box ) == 0.0f, "mixing pairs share geometry and launch speed without damping or automatic sleep" );
+        }
+        for( int frame = 0; frame < 30; ++frame )
+            playback.stepOnce( substeps );
+        const float speedA = physics.GetBodyLinearVelocity( visuals[1].bodyHandle ).x;
+        const float speedB = physics.GetBodyLinearVelocity( visuals[3].bodyHandle ).x;
+        check( speedA > 1.0f && speedA < 2.0f && std::abs( speedA - speedB ) < 0.01f, "swapped friction coefficients produce equal nonzero deceleration on horizontal floors" );
+        check( std::abs( physics.GetBodyLinearVelocity( visuals[5].bodyHandle ).x - 4.0f ) < 1.0e-4f && physics.GetBodyTransform( visuals[5].bodyHandle ).position.x > physics.GetBodyTransform( visuals[1].bodyHandle ).position.x + 0.3f, "zero box friction removes tangential deceleration and travels farther" );
+        const float floorFriction[] = { 0.25f, 1.0f, 1.0f };
+        const float boxFriction[] = { 1.0f, 0.25f, 0.0f };
+        for( std::size_t i = 0; i < 3; ++i )
+            check( physics.GetShapeFriction( visuals[2 * i].shapeHandle ) == floorFriction[i] && physics.GetShapeFriction( visuals[2 * i + 1].shapeHandle ) == boxFriction[i] && physics.GetShapeRestitution( visuals[2 * i].shapeHandle ) == 0.0f && physics.GetShapeRestitution( visuals[2 * i + 1].shapeHandle ) == 0.0f, "initial material pairs expose geometric mean mixing without restitution" );
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        check( std::abs( physics.GetBodyLinearVelocity( visuals[1].bodyHandle ).x ) < 0.05f && std::abs( physics.GetBodyLinearVelocity( visuals[3].bodyHandle ).x ) < 0.05f && std::abs( physics.GetBodyLinearVelocity( visuals[5].bodyHandle ).x - 4.0f ) < 1.0e-4f, "mixed friction stops the first pairs while zero friction maintains horizontal motion" );
+        physics.SetShapeFriction( visuals[0].shapeHandle, 0.0f );
+        physics.SetShapeFriction( visuals[4].shapeHandle, 0.0f );
+        physics.SetShapeFriction( visuals[5].shapeHandle, 1.0f );
+        for( int repeat = 0; repeat < 2; ++repeat )
+        {
+            scene.resetCollisionTrial();
+            check( physics.GetShapeFriction( visuals[0].shapeHandle ) == 0.0f && physics.GetShapeFriction( visuals[4].shapeHandle ) == 0.0f && physics.GetShapeFriction( visuals[5].shapeHandle ) == 1.0f, "mixing reset preserves independently edited floor and box friction" );
+            for( std::size_t i = 0; i < visuals.size(); ++i )
+            {
+                const auto body = visuals[i].bodyHandle;
+                const float lane = 2.0f - 2.0f * static_cast<float>( i / 2 );
+                check( physics.IsValid( visuals[i].shapeHandle ) && Length( physics.GetBodyTransform( body ).position - vec2{ i % 2 == 0 ? 0.0f : -3.0f, lane + ( i % 2 == 0 ? 0.0f : 0.55f ) } ) < 1.0e-6f && physics.GetBodyTransform( body ).rotation.s == 0.0f && same( physics.GetBodyLinearVelocity( body ), { i % 2 == 0 ? 0.0f : 4.0f, 0 } ), "mixing reset restores floor and box poses and initial velocities with stable handles" );
+            }
+            for( int frame = 0; frame < 30; ++frame )
+                playback.stepOnce( substeps );
+            check( std::abs( physics.GetBodyLinearVelocity( visuals[1].bodyHandle ).x - 4.0f ) < 1.0e-4f && physics.GetBodyLinearVelocity( visuals[3].bodyHandle ).x > 1.0f && physics.GetBodyLinearVelocity( visuals[3].bodyHandle ).x < 2.0f && std::abs( physics.GetBodyLinearVelocity( visuals[5].bodyHandle ).x - 4.0f ) < 1.0e-4f, "editing either floor or box to zero changes repeated trial response while the untouched pair decelerates" );
+        }
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        check( !defaults.getWorld().IsValid( visuals[1].bodyHandle ) && defaults.getWorld().GetShapeFriction( defaults.getShapes()[0].shapeHandle ) == 0.25f && defaults.getWorld().GetShapeFriction( defaults.getShapes()[4].shapeHandle ) == 1.0f && defaults.getWorld().GetShapeFriction( defaults.getShapes()[5].shapeHandle ) == 0.0f && !playback.isPlaying(), "full mixing reset restores the original coefficient pairs and pauses" );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkFrictionMixingDemo();
     checkMaximumLinearSpeedDemo();
     checkFastRotationDemo();
     checkCompoundCenterDemo();
@@ -1063,7 +1115,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };
