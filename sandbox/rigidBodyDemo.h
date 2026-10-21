@@ -179,6 +179,8 @@ public:
     void startForceImpulseTrial();
     void startTorqueImpulseTrial();
 
+    [[nodiscard]] float getRotationTrialTimeStep() const noexcept { return rotationTrialTimeStep_; }
+
     [[nodiscard]] double getTorqueTrialTime() const noexcept { return torqueTrialTime_; }
 
     [[nodiscard]] double getForceTrialTime() const noexcept { return forceTrialTime_; }
@@ -405,6 +407,7 @@ private:
     bool forceTrialRunning_ = false;
     double torqueTrialTime_ = 0.0;
     bool torqueTrialRunning_ = false;
+    float rotationTrialTimeStep_ = 0.0f;
     demoKind kind_;
     world world_;
     std::vector<visualShape> shapes_;

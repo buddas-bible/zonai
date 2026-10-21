@@ -48,7 +48,8 @@ enum class demoKind
     forceImpulseComparison,
     torqueImpulseComparison,
     dynamicKinematicComparison,
-    compoundCenterComparison
+    compoundCenterComparison,
+    fastRotationComparison
 };
 
 struct demoEntry

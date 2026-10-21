@@ -840,8 +840,63 @@ void checkCompoundCenterDemo()
     }
 }
 
+void checkFastRotationDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::fastRotationComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 2 && physics.GetBodyCount() == 2 && same( physics.GetGravity(), {} ), "fast rotation comparison creates two independent rods without gravity" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        for( const auto& visual : visuals )
+            check( physics.GetBodyAngularVelocity( visual.bodyHandle ) == 120.0f && same( physics.GetBodyLinearVelocity( visual.bodyHandle ), {} ) && !physics.IsBodySleepEnabled( visual.bodyHandle ), "rods start with equal angular velocity and automatic sleep disabled" );
+        playback.stepOnce( substeps );
+        const float limit = 15.0f * std::numbers::pi_v<float>;
+        check( std::abs( physics.GetBodyAngularVelocity( visuals[0].bodyHandle ) - limit ) < 1.0e-4f && physics.GetBodyAngularVelocity( visuals[1].bodyHandle ) == 120.0f, "disallowed fast rotation is capped while allowed rod keeps its initial angular velocity" );
+        check( !physics.IsBodyFastRotationAllowed( visuals[0].bodyHandle ) && physics.IsBodyFastRotationAllowed( visuals[1].bodyHandle ) && scene.getRotationTrialTimeStep() == 1.0f / 60.0f && !playback.isPlaying(), "demo reports actual positive step and preserves pause state" );
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+        {
+            const auto body = visuals[i].bodyHandle;
+            const auto pose = physics.GetBodyTransform( body );
+            check( same( physics.GetBodyLinearVelocity( body ), {} ) && same( pose.position, { i == 0 ? -2.5f : 2.5f, 0 } ) && std::abs( pose.rotation.s ) > 0.1f, "fast rotation changes orientation without changing linear velocity or position" );
+        }
+        physics.SetBodyFastRotationAllowed( visuals[0].bodyHandle, true );
+        physics.SetBodyFastRotationAllowed( visuals[1].bodyHandle, false );
+        for( int repeat = 0; repeat < 2; ++repeat )
+        {
+            scene.resetCollisionTrial();
+            check( scene.getRotationTrialTimeStep() == 0.0f && physics.IsBodyFastRotationAllowed( visuals[0].bodyHandle ) && !physics.IsBodyFastRotationAllowed( visuals[1].bodyHandle ), "rotation reset clears displayed step while preserving edited fast rotation flags" );
+            for( std::size_t i = 0; i < visuals.size(); ++i )
+            {
+                const auto body = visuals[i].bodyHandle;
+                check( physics.IsValid( visuals[i].shapeHandle ) && same( physics.GetBodyTransform( body ).position, { i == 0 ? -2.5f : 2.5f, 0 } ) && physics.GetBodyTransform( body ).rotation.s == 0.0f && physics.GetBodyAngularVelocity( body ) == 120.0f, "rotation reset restores initial poses and angular velocity with stable handles" );
+            }
+            playback.stepOnce( substeps );
+            check( physics.GetBodyAngularVelocity( visuals[0].bodyHandle ) == 120.0f && std::abs( physics.GetBodyAngularVelocity( visuals[1].bodyHandle ) - limit ) < 1.0e-4f, "swapping inspector flags reverses which rod is capped after reset" );
+        }
+        scene.step( 0.0f, substeps );
+        check( scene.getRotationTrialTimeStep() == 1.0f / 60.0f, "zero steps preserve the last positive rotation step readout" );
+        scene.resetCollisionTrial();
+        physics.SetBodyLinearVelocity( visuals[0].bodyHandle, { 1, 2 } );
+        physics.SetBodyLinearVelocity( visuals[1].bodyHandle, { 1, 2 } );
+        scene.step( 0.01f, substeps );
+        check( std::abs( physics.GetBodyAngularVelocity( visuals[1].bodyHandle ) - 25.0f * std::numbers::pi_v<float> ) < 1.0e-4f && physics.GetBodyAngularVelocity( visuals[0].bodyHandle ) == 120.0f && scene.getRotationTrialTimeStep() == 0.01f && same( physics.GetBodyLinearVelocity( visuals[0].bodyHandle ), { 1, 2 } ) && same( physics.GetBodyLinearVelocity( visuals[1].bodyHandle ), { 1, 2 } ), "rotation cap follows full step duration and leaves nonzero linear velocities unchanged" );
+        scene.resetCollisionTrial();
+        scene.step( 0.005f, substeps );
+        check( physics.GetBodyAngularVelocity( visuals[0].bodyHandle ) == 120.0f && physics.GetBodyAngularVelocity( visuals[1].bodyHandle ) == 120.0f, "below the per-step rotation threshold neither rod is capped" );
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        check( defaults.getRotationTrialTimeStep() == 0.0f && !defaults.getWorld().IsBodyFastRotationAllowed( defaults.getShapes()[0].bodyHandle ) && defaults.getWorld().IsBodyFastRotationAllowed( defaults.getShapes()[1].bodyHandle ) && !playback.isPlaying(), "full rotation reset restores default flags and clears displayed step" );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkFastRotationDemo();
     checkCompoundCenterDemo();
     checkDynamicKinematicDemo();
     checkTorqueImpulseDemo();
@@ -952,7 +1007,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };

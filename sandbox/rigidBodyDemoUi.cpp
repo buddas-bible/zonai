@@ -15,6 +15,7 @@
 #include <Windows.h>
 
 #include "debug/debugDraw.h"
+#include "dynamics/constants.h"
 #include "geometry/catmullRomSpline2.h"
 
 namespace zonai::sandbox
@@ -134,7 +135,7 @@ bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, 
 
 rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 {
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison ) showLabels_ = true;
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison ) showLabels_ = true;
     selectedShapeIndex_ = kind == demoKind::playground || kind == demoKind::motorCar ? 2 : 1;
     if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
@@ -728,7 +729,7 @@ void rigidBodyDemoUi::drawSplineEditorControls()
 
 void rigidBodyDemoUi::drawExperimentControls()
 {
-    if( getKind() == demoKind::collisionComparison || getKind() == demoKind::frictionComparison || getKind() == demoKind::restitutionComparison || getKind() == demoKind::boxStack || getKind() == demoKind::ccdComparison || getKind() == demoKind::collisionFilterComparison || getKind() == demoKind::sensorWallComparison || getKind() == demoKind::sleepWakeComparison || getKind() == demoKind::dampingComparison || getKind() == demoKind::gravityScaleComparison || getKind() == demoKind::massImpulseComparison || getKind() == demoKind::impulsePointComparison || getKind() == demoKind::rotationalInertiaComparison || getKind() == demoKind::forceImpulseComparison || getKind() == demoKind::torqueImpulseComparison || getKind() == demoKind::dynamicKinematicComparison || getKind() == demoKind::compoundCenterComparison )
+    if( getKind() == demoKind::collisionComparison || getKind() == demoKind::frictionComparison || getKind() == demoKind::restitutionComparison || getKind() == demoKind::boxStack || getKind() == demoKind::ccdComparison || getKind() == demoKind::collisionFilterComparison || getKind() == demoKind::sensorWallComparison || getKind() == demoKind::sleepWakeComparison || getKind() == demoKind::dampingComparison || getKind() == demoKind::gravityScaleComparison || getKind() == demoKind::massImpulseComparison || getKind() == demoKind::impulsePointComparison || getKind() == demoKind::rotationalInertiaComparison || getKind() == demoKind::forceImpulseComparison || getKind() == demoKind::torqueImpulseComparison || getKind() == demoKind::dynamicKinematicComparison || getKind() == demoKind::compoundCenterComparison || getKind() == demoKind::fastRotationComparison )
     {
         ImGui::TextUnformatted( "반복 시험" );
         if( getKind() == demoKind::ccdComparison )
@@ -832,6 +833,24 @@ void rigidBodyDemoUi::drawExperimentControls()
                 ImGui::TextWrapped( "%s: 질량 %.3f kg / 회전 관성 %.3f kg·m²", i == 0 ? "대칭 강체" : "비대칭 강체", getWorld().GetBodyMass( body ), getWorld().GetBodyRotationalInertia( body ) );
                 ImGui::Text( "물체 기준 질량중심: (%.3f, %.3f) m", center.x, center.y );
                 ImGui::TextWrapped( "속력 %.2f m/s / 각속도 %.2f rad/s", Length( getWorld().GetBodyLinearVelocity( body ) ), getWorld().GetBodyAngularVelocity( body ) );
+            }
+        }
+        if( getKind() == demoKind::fastRotationComparison )
+        {
+            ImGui::TextWrapped( "같은 막대가 120rad/s로 출발하며 초기 빠른 회전 허용은 A 꺼짐·B 켜짐입니다. Sleep과 CCD의 빠른 회전 허용을 바꾸고 시험 복귀 → 1프레임으로 비교하세요. 허용을 켜도 이미 줄어든 각속도가 자동 복원되지는 않습니다. 이름은 초기 설정 기준입니다." );
+            const float timeStep = getRotationTrialTimeStep();
+            if( timeStep > 0.0f )
+            {
+                ImGui::Text( "마지막 진행 간격: %.6f s", timeStep );
+                ImGui::Text( "빠른 회전 비허용 시 제한: %.2f rad/s", MAX_ROTATION / timeStep );
+            }
+            else
+                ImGui::TextUnformatted( "진행 간격·회전 제한: 아직 진행하지 않음" );
+            ImGui::TextWrapped( "제한은 전체 진행 간격당 최대 45도이며 내부 분할 수와 무관합니다. 기본 1/60초에서는 약 47.12rad/s입니다. 처음에는 중력·감쇠·자동 수면을 끕니다." );
+            for( const auto& visual : getShapes() )
+            {
+                ImGui::TextWrapped( "%s: 빠른 회전 %s", visual.label, getWorld().IsBodyFastRotationAllowed( visual.bodyHandle ) ? "허용" : "비허용" );
+                ImGui::TextWrapped( "각속도 %.2f rad/s / 속력 %.2f m/s", getWorld().GetBodyAngularVelocity( visual.bodyHandle ), Length( getWorld().GetBodyLinearVelocity( visual.bodyHandle ) ) );
             }
         }
         if( getKind() == demoKind::frictionComparison ) ImGui::TextWrapped( "마찰은 물체와 경사면 계수의 기하평균으로 정해집니다. 현재 계수는 인스펙터에서 확인·편집하세요." );

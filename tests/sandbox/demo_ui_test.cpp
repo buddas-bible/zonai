@@ -43,9 +43,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 17; ++frame )
+    for( int frame = 0; frame < 18; ++frame )
     {
-        session.selectDemo( frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -886,6 +886,48 @@ void checkDemoUi()
             }
         }
     }
+    auto rotationView = createDemoView( demoKind::fastRotationComparison );
+    auto& rotationTrial = static_cast<rigidBodyDemo&>( *rotationView );
+    const auto rotationLeft = rotationTrial.getShapes()[0].bodyHandle;
+    const auto rotationRight = rotationTrial.getShapes()[1].bodyHandle;
+    rotationTrial.step( 1.0f / 60.0f, 4 );
+    for( int frame = 0; frame < 6; ++frame )
+    {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0, 0 } );
+        ImGui::SetNextWindowSize( { 340, 4000 } );
+        ImGui::Begin( "Fast rotation trial inspector" );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Sleep and CCD" ), 1 );
+        if( frame == 0 || frame == 3 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Allow fast rotation" );
+        if( frame == 1 || frame == 2 || frame == 4 || frame == 5 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+        rotationView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        if( rotationTrial.getWorld().IsBodyFastRotationAllowed( rotationRight ) != ( frame >= 3 ) )
+        {
+            std::fprintf( stderr, "fast rotation inspector flag edit was lost across reset or changed the wrong rod\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( frame == 1 || frame == 2 || frame == 4 || frame == 5 )
+        {
+            if( rotationTrial.getRotationTrialTimeStep() != 0.0f || rotationTrial.getWorld().GetBodyAngularVelocity( rotationLeft ) != 120.0f || rotationTrial.getWorld().GetBodyAngularVelocity( rotationRight ) != 120.0f || rotationTrial.getWorld().GetBodyTransform( rotationLeft ).rotation.s != 0.0f || rotationTrial.getWorld().GetBodyTransform( rotationRight ).rotation.s != 0.0f )
+            {
+                std::fprintf( stderr, "fast rotation UI reset must restore initial spin and poses and clear the step readout\n" );
+                std::exit( EXIT_FAILURE );
+            }
+            if( frame != 5 )
+            {
+                rotationTrial.step( 1.0f / 60.0f, 4 );
+                const float limit = 15.0f * std::numbers::pi_v<float>;
+                const float rightExpected = frame >= 3 ? 120.0f : limit;
+                if( std::abs( rotationTrial.getWorld().GetBodyAngularVelocity( rotationLeft ) - limit ) > 1.0e-4f || std::abs( rotationTrial.getWorld().GetBodyAngularVelocity( rotationRight ) - rightExpected ) > 1.0e-4f || rotationTrial.getRotationTrialTimeStep() != 1.0f / 60.0f || zonai::LengthSquared( rotationTrial.getWorld().GetBodyLinearVelocity( rotationRight ) ) != 0.0f )
+                {
+                    std::fprintf( stderr, "fast rotation inspector edit must change the repeated trial cap without linear motion\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+        }
+    }
     auto compoundView = createDemoView( demoKind::compoundCenterComparison );
     auto& compoundTrial = static_cast<rigidBodyDemo&>( *compoundView );
     const auto compoundPart = compoundTrial.getShapes()[1];
@@ -1265,7 +1307,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );

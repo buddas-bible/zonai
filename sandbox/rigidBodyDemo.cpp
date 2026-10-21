@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison )
     {
         createCollisionTrial();
     }
@@ -115,6 +115,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 
 void rigidBodyDemo::step( float timeStep, int subStepCount )
 {
+    if( kind_ == demoKind::fastRotationComparison && timeStep > 0.0f ) rotationTrialTimeStep_ = timeStep;
     if( kind_ == demoKind::playground && timeStep > 0.0f && world_.IsValid( shapes_[5].bodyHandle ) )
     {
         const auto platform = shapes_[5].bodyHandle;
@@ -699,6 +700,20 @@ void rigidBodyDemo::createCollisionTrial()
             }
         }
     }
+    else if( kind_ == demoKind::fastRotationComparison )
+    {
+        world_.SetGravity( {} );
+        const char* labels[] = { "막대 A (빠른 회전 제한)", "막대 B (빠른 회전 허용)" };
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const auto rod = world_.CreateBody( bodyType::Dynamic, { { i == 0 ? -2.5f : 2.5f, 0 }, {} } );
+            const auto shape = world_.CreateShape( rod, MakeBox( { 1.0f, 0.125f } ) );
+            world_.SetBodySleepEnabled( rod, false );
+            world_.SetBodyAngularVelocity( rod, 120.0f );
+            world_.SetBodyFastRotationAllowed( rod, i == 1 );
+            shapes_.push_back( { rod, shape, labels[i] } );
+        }
+    }
     for( const auto& visual : shapes_ )
     {
         collisionTrialInitialStates_.push_back( { world_.GetBodyTransform( visual.bodyHandle ), world_.GetBodyLinearVelocity( visual.bodyHandle ), world_.GetBodyAngularVelocity( visual.bodyHandle ) } );
@@ -762,6 +777,7 @@ void rigidBodyDemo::applyPointTrialImpulse()
 void rigidBodyDemo::resetCollisionTrial()
 {
     if( collisionTrialInitialStates_.empty() ) return;
+    rotationTrialTimeStep_ = 0.0f;
     forceTrialTime_ = 0.0;
     forceTrialRunning_ = false;
     torqueTrialTime_ = 0.0;
