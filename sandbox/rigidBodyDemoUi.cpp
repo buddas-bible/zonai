@@ -134,6 +134,7 @@ bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, 
 
 rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 {
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack ) showLabels_ = true;
     selectedShapeIndex_ = kind == demoKind::playground || kind == demoKind::motorCar ? 2 : 1;
     if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
@@ -704,6 +705,15 @@ void rigidBodyDemoUi::drawSplineEditorControls()
 
 void rigidBodyDemoUi::drawExperimentControls()
 {
+    if( getKind() == demoKind::collisionComparison || getKind() == demoKind::frictionComparison || getKind() == demoKind::restitutionComparison || getKind() == demoKind::boxStack )
+    {
+        ImGui::TextUnformatted( "반복 시험" );
+        if( getKind() == demoKind::frictionComparison ) ImGui::TextWrapped( "마찰은 물체와 경사면 계수의 기하평균으로 정해집니다. 현재 계수는 인스펙터에서 확인·편집하세요." );
+        if( getKind() == demoKind::restitutionComparison ) ImGui::TextWrapped( "반발은 두 물체 중 큰 계수를 사용합니다. 바닥의 기본 반발은 0입니다. 인스펙터에서 원과 바닥을 비교하세요." );
+        if( ImGui::Button( "시험 복귀 (편집값 유지)###CollisionTrialReset" ) ) resetCollisionTrial();
+        ImGui::TextWrapped( "위치·회전·출발 속도를 복원합니다. 물성·중력·선택·재생 상태는 유지합니다. 정지 후 복귀하면 1프레임씩 비교할 수 있습니다. 상단 초기화는 장면의 편집값을 기본 상태로 되돌립니다." );
+        return;
+    }
     if( getKind() == demoKind::splinePath )
     {
         ImGui::TextUnformatted( "스플라인 경로 이동" );

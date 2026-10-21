@@ -172,6 +172,7 @@ public:
     void setMouseSettings( float hertz, float dampingRatio, float maxForce );
     void setCarMotorSettings( float speed, float maxTorque );
     void resetPlayground();
+    void resetCollisionTrial();
     void resetSplinePath();
     void resetTerrainProbes();
     void launchTerrainProbe( std::size_t probeIndex, terrainTrial trial );
@@ -329,6 +330,7 @@ public:
 private:
 #pragma region SceneSetup
     void createPlayground();
+    void createCollisionTrial();
     void createSplinePath();
     void createSplineRail();
     [[nodiscard]] std::optional<splineSample2> getSplinePathSample( double distance ) const;
@@ -379,6 +381,15 @@ private:
 #pragma endregion MouseDrag
 
 #pragma region Data
+
+    struct trialBodyState
+    {
+        transform2 transform{};
+        vec2 velocity{};
+        float angularVelocity = 0.0f;
+    };
+
+    std::vector<trialBodyState> collisionTrialInitialStates_;
     demoKind kind_;
     world world_;
     std::vector<visualShape> shapes_;

@@ -785,5 +785,54 @@ void checkDemoUi()
             }
         }
     }
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack } )
+    {
+        auto trialView = createDemoView( kind );
+        auto& trial = static_cast<rigidBodyDemo&>( *trialView );
+        const auto selected = trial.getShapes().back();
+        const auto initial = trial.getWorld().GetBodyTransform( selected.bodyHandle );
+        for( int frame = 0; frame <= 10; ++frame )
+        {
+            if( frame == 4 ) io.AddInputCharactersUTF8( "0.42" );
+            if( frame == 9 ) io.AddInputCharactersUTF8( "0.73" );
+            if( frame == 5 || frame == 10 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+            if( frame == 6 )
+            {
+                io.AddKeyEvent( ImGuiKey_Enter, false );
+                trial.getWorld().SetBodyTransform( selected.bodyHandle, { { 30, 40 }, {} } );
+            }
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 340, 4000 } );
+            ImGui::Begin( "Collision trial inspector" );
+            ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Collision material" ), 1 );
+            if( frame == 1 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Object" );
+            if( frame == 2 && !GImGui->OpenPopupStack.empty() ) GImGui->NavActivateId = GImGui->NavActivateDownId = GImGui->OpenPopupStack.back().Window->GetID( selected.label );
+            if( frame == 3 || frame == 8 )
+            {
+                GImGui->NavActivateId = ImGui::GetID( "Friction" );
+                GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+            }
+            if( frame == 7 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+            trialView->drawControls();
+            ImGui::End();
+            ImGui::Render();
+            if( frame == 5 || frame == 7 || frame == 10 )
+            {
+                const float expected = frame == 10 ? 0.73f : 0.42f;
+                if( std::abs( trial.getWorld().GetShapeFriction( selected.shapeHandle ) - expected ) > 1.0e-5f )
+                {
+                    std::fprintf( stderr, "collision trial inspector lost edited material or selection\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+            if( frame == 7 && zonai::Length( trial.getWorld().GetBodyTransform( selected.bodyHandle ).position - initial.position ) > 1.0e-5f )
+            {
+                std::fprintf( stderr, "collision trial reset button did not restore selected body\n" );
+                std::exit( EXIT_FAILURE );
+            }
+        }
+        io.AddKeyEvent( ImGuiKey_Enter, false );
+    }
     ImGui::DestroyContext();
 }
