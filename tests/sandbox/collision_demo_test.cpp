@@ -663,8 +663,88 @@ void checkForceImpulseDemo()
     check( same( other.getWorld().GetBodyLinearVelocity( body ), velocity ), "force trial start does not alter other scenes" );
 }
 
+void checkTorqueImpulseDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::torqueImpulseComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 2 && physics.GetBodyCount() == 2 && same( physics.GetGravity(), {} ), "torque trial creates two identical resting boxes without gravity" );
+        const auto torque = scene.getShapes()[0];
+        const auto impulse = scene.getShapes()[1];
+        for( const auto& visual : scene.getShapes() )
+            check( physics.GetBodyMass( visual.bodyHandle ) == 1.0f && std::abs( physics.GetBodyRotationalInertia( visual.bodyHandle ) - 1.0f / 6.0f ) < 1.0e-6f && !physics.IsBodySleepEnabled( visual.bodyHandle ), "torque comparison starts with equal analytic inertia and sleep disabled" );
+        playback.stepOnce( substeps );
+        check( scene.getTorqueTrialTime() == 0.0 && physics.GetBodyAngularVelocity( torque.bodyHandle ) == 0.0f, "torque trial waits for explicit start" );
+        scene.startTorqueImpulseTrial();
+        check( !playback.isPlaying() && scene.getTorqueTrialTime() == 0.0 && physics.GetBodyAngularVelocity( torque.bodyHandle ) == 0.0f && std::abs( physics.GetBodyAngularVelocity( impulse.bodyHandle ) - 6.0f ) < 1.0e-5f && physics.GetBodyTransform( impulse.bodyHandle ).rotation.s == 0.0f, "start applies one angular impulse without advancing time or rotation" );
+        playback.advance( 0.5f, substeps );
+        scene.step( 0.0f, substeps );
+        check( scene.getTorqueTrialTime() == 0.0 && physics.GetBodyAngularVelocity( torque.bodyHandle ) == 0.0f, "paused and zero steps do not consume torque duration" );
+        for( int frame = 0; frame < 30; ++frame )
+            playback.stepOnce( substeps );
+        check( std::abs( scene.getTorqueTrialTime() - 0.5 ) < 1.0e-6 && std::abs( physics.GetBodyAngularVelocity( torque.bodyHandle ) - 3.0f ) < 1.0e-4f && std::abs( physics.GetBodyAngularVelocity( impulse.bodyHandle ) - 6.0f ) < 1.0e-5f, "halfway torque accelerates gradually while angular impulse already has full spin" );
+        for( int frame = 0; frame < 30; ++frame )
+            playback.stepOnce( substeps );
+        check( std::abs( physics.GetBodyAngularVelocity( torque.bodyHandle ) - 6.0f ) < 1.0e-4f && std::abs( physics.GetBodyAngularVelocity( impulse.bodyHandle ) - 6.0f ) < 1.0e-5f, "one second of torque matches angular impulse spin" );
+        for( int frame = 0; frame < 30; ++frame )
+            playback.stepOnce( substeps );
+        check( std::abs( scene.getTorqueTrialTime() - 1.5 ) < 1.0e-6 && std::abs( physics.GetBodyAngularVelocity( torque.bodyHandle ) - 6.0f ) < 1.0e-4f, "torque stops after one second while elapsed time continues" );
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const auto body = scene.getShapes()[i].bodyHandle;
+            check( same( physics.GetBodyLinearVelocity( body ), {} ) && same( physics.GetBodyTransform( body ).position, { i == 0 ? -2.5f : 2.5f, 0 } ) && std::abs( physics.GetBodyTransform( body ).rotation.s ) > 0.1f, "torque and angular impulse rotate in place without changing linear motion" );
+        }
+        scene.startTorqueImpulseTrial();
+        for( int frame = 0; frame < 9; ++frame )
+            scene.step( 0.1f, substeps );
+        scene.step( 0.12f, substeps );
+        check( std::abs( physics.GetBodyAngularVelocity( torque.bodyHandle ) - 6.0f ) < 1.0e-4f && std::abs( scene.getTorqueTrialTime() - 1.02 ) < 1.0e-6, "crossing one second delivers only the remaining torque duration" );
+        physics.SetShapeDensity( torque.shapeHandle, 2.0f );
+        physics.SetShapeDensity( impulse.shapeHandle, 2.0f );
+        scene.startTorqueImpulseTrial();
+        check( physics.GetBodyMass( torque.bodyHandle ) == 2.0f && std::abs( physics.GetBodyAngularVelocity( impulse.bodyHandle ) - 3.0f ) < 1.0e-5f && physics.GetBodyAngularVelocity( torque.bodyHandle ) == 0.0f && scene.getTorqueTrialTime() == 0.0, "restart preserves edited density and resets before applying one current-inertia impulse" );
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        check( std::abs( physics.GetBodyAngularVelocity( torque.bodyHandle ) - 3.0f ) < 1.0e-4f && std::abs( physics.GetBodyAngularVelocity( impulse.bodyHandle ) - 3.0f ) < 1.0e-5f, "density editing changes torque and angular impulse response equally" );
+        scene.startTorqueImpulseTrial();
+        physics.SetBodyLinearVelocity( torque.bodyHandle, { 1, 2 } );
+        physics.SetBodyLinearVelocity( impulse.bodyHandle, { 1, 2 } );
+        scene.step( 0.25f, substeps );
+        check( same( physics.GetBodyLinearVelocity( torque.bodyHandle ), { 1, 2 } ) && same( physics.GetBodyLinearVelocity( impulse.bodyHandle ), { 1, 2 } ), "torque preserves nonzero edited linear velocities" );
+        scene.resetCollisionTrial();
+        scene.step( 0.25f, substeps );
+        check( physics.GetShapeDensity( torque.shapeHandle ) == 2.0f && physics.GetShapeDensity( impulse.shapeHandle ) == 2.0f && scene.getTorqueTrialTime() == 0.0 && physics.GetBodyAngularVelocity( torque.bodyHandle ) == 0.0f && physics.GetBodyAngularVelocity( impulse.bodyHandle ) == 0.0f && same( physics.GetBodyLinearVelocity( torque.bodyHandle ), {} ), "reset preserves density and cancels active torque while restoring rest" );
+        demoInput drag{};
+        drag.mousePosition = physics.GetBodyTransform( torque.bodyHandle ).position;
+        drag.mousePressed = drag.mouseHeld = true;
+        scene.handleInput( drag );
+        check( physics.IsValid( scene.getMouseJoint() ), "torque comparison retains existing drag interaction" );
+        physics.SetBodyLinearDamping( torque.bodyHandle, 0.2f );
+        physics.SetBodyAngularDamping( torque.bodyHandle, 0.3f );
+        physics.SetGravity( { 0, -1 } );
+        collisionMatrix matrix;
+        matrix.setPair( 2, 3, false );
+        playback.setCollisionMatrix( matrix );
+        playback.setPlaying( true );
+        scene.startTorqueImpulseTrial();
+        check( !physics.IsValid( scene.getMouseJoint() ) && playback.isPlaying() && playback.getCollisionMatrix() == matrix && same( physics.GetGravity(), { 0, -1 } ) && physics.GetBodyLinearDamping( torque.bodyHandle ) == 0.2f && physics.GetBodyAngularDamping( torque.bodyHandle ) == 0.3f && physics.GetShapeDensity( torque.shapeHandle ) == 2.0f, "torque restart cancels drag while preserving edited damping gravity density common settings and play state" );
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        check( defaults.getTorqueTrialTime() == 0.0 && defaults.getWorld().GetBodyMass( defaults.getShapes()[0].bodyHandle ) == 1.0f && !playback.isPlaying(), "full torque reset restores defaults and idle state" );
+    }
+    rigidBodyDemo other{ demoKind::collisionComparison };
+    const auto body = other.getShapes()[0].bodyHandle;
+    const auto velocity = other.getWorld().GetBodyLinearVelocity( body );
+    other.startTorqueImpulseTrial();
+    check( same( other.getWorld().GetBodyLinearVelocity( body ), velocity ) && other.getWorld().GetBodyAngularVelocity( body ) == 0.0f, "torque trial start does not alter other scenes" );
+}
+
 void checkCollisionDemos()
 {
+    checkTorqueImpulseDemo();
     checkForceImpulseDemo();
     checkRotationalInertiaDemo();
     checkImpulsePointDemo();
@@ -772,7 +852,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };

@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison )
     {
         createCollisionTrial();
     }
@@ -156,6 +156,13 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
         // 끝점을 넘는 step도 총 1초분의 힘만 전달함.
         if( duration > 0.0 && world_.IsValid( shapes_[0].bodyHandle ) ) world_.ApplyForceToCenter( shapes_[0].bodyHandle, { 0, 2.0f * static_cast<float>( duration / timeStep ) } );
         forceTrialTime_ += timeStep;
+    }
+    if( kind_ == demoKind::torqueImpulseComparison && torqueTrialRunning_ && timeStep > 0.0f )
+    {
+        const double duration = std::min( static_cast<double>( timeStep ), std::max( 0.0, 1.0 - torqueTrialTime_ ) );
+        // 끝점을 넘는 step도 총 1초분의 토크만 전달함.
+        if( duration > 0.0 && world_.IsValid( shapes_[0].bodyHandle ) ) world_.ApplyTorque( shapes_[0].bodyHandle, static_cast<float>( duration / timeStep ) );
+        torqueTrialTime_ += timeStep;
     }
     updateSplinePath( timeStep );
     world_.Step( timeStep, subStepCount );
@@ -649,10 +656,10 @@ void rigidBodyDemo::createCollisionTrial()
             shapes_.push_back( { box, shape, labels[i] } );
         }
     }
-    else if( kind_ == demoKind::forceImpulseComparison )
+    else if( kind_ == demoKind::forceImpulseComparison || kind_ == demoKind::torqueImpulseComparison )
     {
         world_.SetGravity( {} );
-        const char* labels[] = { "상자 A (힘 2N·1초)", "상자 B (충격량 2N·s)" };
+        const char* labels[] = { kind_ == demoKind::torqueImpulseComparison ? "상자 A (토크 1N·m·1초)" : "상자 A (힘 2N·1초)", kind_ == demoKind::torqueImpulseComparison ? "상자 B (회전 충격량 1N·m·s)" : "상자 B (충격량 2N·s)" };
         for( std::size_t i = 0; i < 2; ++i )
         {
             const auto box = world_.CreateBody( bodyType::Dynamic, { { i == 0 ? -2.5f : 2.5f, 0 }, {} } );
@@ -684,6 +691,14 @@ std::optional<vec2> rigidBodyDemo::getImpulseTrialPoint( std::size_t shapeIndex 
     return TransformPoint( world_.GetBodyTransform( body ), world_.GetBodyLocalCenter( body ) + vec2{ offset, 0 } );
 }
 
+void rigidBodyDemo::startTorqueImpulseTrial()
+{
+    if( kind_ != demoKind::torqueImpulseComparison ) return;
+    resetCollisionTrial();
+    torqueTrialRunning_ = true;
+    if( world_.IsValid( shapes_[1].bodyHandle ) ) world_.ApplyAngularImpulse( shapes_[1].bodyHandle, 1.0f );
+}
+
 void rigidBodyDemo::startForceImpulseTrial()
 {
     if( kind_ != demoKind::forceImpulseComparison ) return;
@@ -711,6 +726,8 @@ void rigidBodyDemo::resetCollisionTrial()
     if( collisionTrialInitialStates_.empty() ) return;
     forceTrialTime_ = 0.0;
     forceTrialRunning_ = false;
+    torqueTrialTime_ = 0.0;
+    torqueTrialRunning_ = false;
     cancelInput();
     for( std::size_t i = 0; i < shapes_.size(); ++i )
     {
