@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison )
     {
         createCollisionTrial();
     }
@@ -683,6 +683,22 @@ void rigidBodyDemo::createCollisionTrial()
             shapes_.push_back( { box, shape, labels[i] } );
         }
     }
+    else if( kind_ == demoKind::compoundCenterComparison )
+    {
+        world_.SetGravity( {} );
+        const char* labels[] = { "대칭 왼쪽", "대칭 오른쪽", "비대칭 왼쪽", "비대칭 오른쪽" };
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const auto composite = world_.CreateBody( bodyType::Dynamic, { { i == 0 ? -3.0f : 3.0f, 0 }, {} } );
+            world_.SetBodySleepEnabled( composite, false );
+            for( std::size_t part = 0; part < 2; ++part )
+            {
+                const float density = i == 0 ? 2.0f : part == 0 ? 1.0f : 3.0f;
+                const auto shape = world_.CreateShape( composite, circle2{ { part == 0 ? -0.75f : 0.75f, 0 }, 0.5f }, {}, density );
+                shapes_.push_back( { composite, shape, labels[2 * i + part] } );
+            }
+        }
+    }
     for( const auto& visual : shapes_ )
     {
         collisionTrialInitialStates_.push_back( { world_.GetBodyTransform( visual.bodyHandle ), world_.GetBodyLinearVelocity( visual.bodyHandle ), world_.GetBodyAngularVelocity( visual.bodyHandle ) } );
@@ -699,6 +715,13 @@ void rigidBodyDemo::applyMassTrialImpulse()
 
 std::optional<vec2> rigidBodyDemo::getImpulseTrialPoint( std::size_t shapeIndex ) const
 {
+    if( kind_ == demoKind::compoundCenterComparison )
+    {
+        if( shapeIndex >= shapes_.size() || shapeIndex % 2 != 0 ) return std::nullopt;
+        const auto body = shapes_[shapeIndex].bodyHandle;
+        if( !world_.IsValid( body ) ) return std::nullopt;
+        return world_.GetBodyTransform( body ).position;
+    }
     if( kind_ != demoKind::impulsePointComparison || shapeIndex >= shapes_.size() ) return std::nullopt;
     const auto body = shapes_[shapeIndex].bodyHandle;
     if( !world_.IsValid( body ) ) return std::nullopt;
@@ -731,7 +754,7 @@ void rigidBodyDemo::applyInertiaTrialImpulse()
 
 void rigidBodyDemo::applyPointTrialImpulse()
 {
-    if( kind_ != demoKind::impulsePointComparison ) return;
+    if( kind_ != demoKind::impulsePointComparison && kind_ != demoKind::compoundCenterComparison ) return;
     for( std::size_t i = 0; i < shapes_.size(); ++i )
         if( const auto point = getImpulseTrialPoint( i ) ) world_.ApplyLinearImpulse( shapes_[i].bodyHandle, { 0, 2.0f }, *point );
 }

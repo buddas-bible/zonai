@@ -43,9 +43,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 16; ++frame )
+    for( int frame = 0; frame < 17; ++frame )
     {
-        session.selectDemo( frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -53,6 +53,7 @@ void checkDemoUi()
         input.mouseHeld = true;
         const auto body = model.getKind() == demoKind::distancePendulum ? model.getPendulumBody() : model.getImpulseBody();
         input.mousePosition = model.getWorld().GetBodyTransform( body ).position;
+        if( model.getKind() == demoKind::compoundCenterComparison ) input.mousePosition = zonai::TransformPoint( model.getWorld().GetBodyTransform( body ), { -0.75f, 0 } );
         session.handleInput( input, true );
         if( !model.getWorld().IsValid( model.getMouseJoint() ) )
         {
@@ -885,6 +886,113 @@ void checkDemoUi()
             }
         }
     }
+    auto compoundView = createDemoView( demoKind::compoundCenterComparison );
+    auto& compoundTrial = static_cast<rigidBodyDemo&>( *compoundView );
+    const auto compoundPart = compoundTrial.getShapes()[1];
+    const auto compoundOffset = compoundTrial.getShapes()[2].bodyHandle;
+    compoundTrial.getWorld().SetBodyTransform( compoundOffset, { { 1, 2 }, zonai::rot2::FromRadians( 0.5f * std::numbers::pi_v<float> ) } );
+    ImGui::NewFrame();
+    ImGui::SetNextWindowPos( { 0, 0 } );
+    ImGui::SetNextWindowSize( { 900, 700 } );
+    ImGui::Begin( "Compound trial markers" );
+    debugCamera compoundCamera{};
+    compoundCamera.center = { 0, 1 };
+    compoundCamera.pixelsPerMeter = 75.0f;
+    const auto compoundViewport = ImGui::GetCursorScreenPos();
+    ImDrawList* compoundList = ImGui::GetWindowDrawList();
+    const int compoundStart = compoundList->VtxBuffer.Size;
+    debugDraw compoundDraw{ compoundList, compoundCamera, compoundViewport, { 850, 650 } };
+    compoundView->draw( compoundDraw );
+    for( const zonai::vec2 expected : { zonai::vec2{ -3, 0 }, zonai::vec2{ 1, 2 } } )
+    {
+        const auto center = compoundCamera.WorldToScreen( expected, compoundViewport, { 850, 650 } );
+        const auto tip = compoundCamera.WorldToScreen( expected + zonai::vec2{ 0, 0.75f }, compoundViewport, { 850, 650 } );
+        bool originFound = false, arrowFound = false;
+        for( int i = compoundStart; i < compoundList->VtxBuffer.Size; ++i )
+        {
+            const auto& vertex = compoundList->VtxBuffer[i];
+            if( vertex.col != IM_COL32( 255, 185, 80, 255 ) ) continue;
+            const float dx = std::abs( vertex.pos.x - center.x );
+            originFound |= dx >= 3.0f && dx <= 6.0f && std::abs( vertex.pos.y - center.y ) <= 6.0f;
+            arrowFound |= std::abs( vertex.pos.x - tip.x ) < 2.0f && std::abs( vertex.pos.y - tip.y ) < 2.0f;
+        }
+        if( !originFound || !arrowFound )
+        {
+            std::fprintf( stderr, "compound body origins and impulse arrows must follow edited transforms\n" );
+            std::exit( EXIT_FAILURE );
+        }
+    }
+    const auto compoundCenter = compoundCamera.WorldToScreen( { 1, 2.375f }, compoundViewport, { 850, 650 } );
+    bool compoundCenterFound = false;
+    for( int i = compoundStart; i < compoundList->VtxBuffer.Size; ++i )
+    {
+        const auto& vertex = compoundList->VtxBuffer[i];
+        compoundCenterFound |= vertex.col == IM_COL32( 255, 90, 180, 255 ) && std::abs( vertex.pos.x - compoundCenter.x ) < 6.0f && std::abs( vertex.pos.y - compoundCenter.y ) < 6.0f;
+    }
+    if( !compoundCenterFound )
+    {
+        std::fprintf( stderr, "compound center marker must follow the density-weighted world center\n" );
+        std::exit( EXIT_FAILURE );
+    }
+    ImGui::End();
+    ImGui::Render();
+    compoundTrial.resetCollisionTrial();
+    for( int frame = 0; frame < 9; ++frame )
+    {
+        if( frame == 3 ) io.AddInputCharactersUTF8( "1" );
+        if( frame == 4 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+        if( frame == 5 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0, 0 } );
+        ImGui::SetNextWindowSize( { 340, 4000 } );
+        ImGui::Begin( "Compound trial inspector" );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Physics quantities" ), 1 );
+        if( frame == 0 || frame == 1 || frame == 6 || frame == 7 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CompoundTrialImpulse" );
+        if( frame == 5 || frame == 8 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+        if( frame == 2 )
+        {
+            GImGui->NavActivateId = ImGui::GetID( "Density" );
+            GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+        }
+        compoundView->drawControls();
+        ImGui::End();
+        ImGui::Render();
+        if( frame == 0 || frame == 1 || frame == 6 || frame == 7 )
+        {
+            const float multiplier = frame == 1 || frame == 7 ? 2.0f : 1.0f;
+            for( std::size_t i : { 0u, 2u } )
+            {
+                const auto body = compoundTrial.getShapes()[i].bodyHandle;
+                const auto& physics = compoundTrial.getWorld();
+                const float velocity = multiplier * 2.0f / physics.GetBodyMass( body );
+                const float spin = -multiplier * 2.0f * physics.GetBodyLocalCenter( body ).x / physics.GetBodyRotationalInertia( body );
+                if( std::abs( physics.GetBodyLinearVelocity( body ).y - velocity ) > 1.0e-5f || std::abs( physics.GetBodyAngularVelocity( body ) - spin ) > 1.0e-5f || physics.GetBodyTransform( body ).position.y != 0.0f )
+                {
+                    std::fprintf( stderr, "compound UI impulse must apply once per body using current component densities\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+        }
+        if( frame >= 4 && ( compoundTrial.getWorld().GetShapeDensity( compoundPart.shapeHandle ) != 1.0f || std::abs( compoundTrial.getWorld().GetBodyLocalCenter( compoundPart.bodyHandle ).x + 0.25f ) > 1.0e-6f ) )
+        {
+            std::fprintf( stderr, "compound inspector must retain the component density edit and shifted center\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( frame == 5 || frame == 8 )
+        {
+            for( std::size_t i : { 0u, 2u } )
+            {
+                const auto body = compoundTrial.getShapes()[i].bodyHandle;
+                const auto pose = compoundTrial.getWorld().GetBodyTransform( body );
+                if( pose.position.x != ( i == 0 ? -3.0f : 3.0f ) || pose.position.y != 0.0f || pose.rotation.s != 0.0f || zonai::LengthSquared( compoundTrial.getWorld().GetBodyLinearVelocity( body ) ) != 0.0f || compoundTrial.getWorld().GetBodyAngularVelocity( body ) != 0.0f )
+                {
+                    std::fprintf( stderr, "compound UI reset must restore initial body origins and rest\n" );
+                    std::exit( EXIT_FAILURE );
+                }
+            }
+        }
+        if( frame == 7 ) compoundTrial.step( 1.0f / 60.0f, 4 );
+    }
     auto typeView = createDemoView( demoKind::dynamicKinematicComparison );
     auto& typeTrial = static_cast<rigidBodyDemo&>( *typeView );
     const auto typeTarget = typeTrial.getShapes()[1];
@@ -1157,7 +1265,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );

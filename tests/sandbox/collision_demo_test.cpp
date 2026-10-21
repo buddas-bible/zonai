@@ -794,8 +794,55 @@ void checkDynamicKinematicDemo()
     }
 }
 
+void checkCompoundCenterDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession playback{ createRigidBodyDemo };
+        playback.selectDemo( demoKind::compoundCenterComparison );
+        auto& scene = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 4 && physics.GetBodyCount() == 2 && same( physics.GetGravity(), {} ), "compound comparison creates two bodies with two shapes each without gravity" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        const auto balanced = visuals[0].bodyHandle;
+        const auto offset = visuals[2].bodyHandle;
+        const float pi = std::numbers::pi_v<float>;
+        check( balanced == visuals[1].bodyHandle && offset == visuals[3].bodyHandle && balanced != offset, "each pair of circles belongs to one rigid body" );
+        check( std::abs( physics.GetBodyMass( balanced ) - pi ) < 1.0e-6f && std::abs( physics.GetBodyMass( offset ) - pi ) < 1.0e-6f && Length( physics.GetBodyLocalCenter( balanced ) ) < 1.0e-6f && Length( physics.GetBodyLocalCenter( offset ) - vec2{ 0.375f, 0 } ) < 1.0e-6f, "equal total mass with asymmetric densities shifts only the center of mass" );
+        check( std::abs( physics.GetBodyRotationalInertia( balanced ) - 11.0f * pi / 16.0f ) < 1.0e-5f && std::abs( physics.GetBodyRotationalInertia( offset ) - 35.0f * pi / 64.0f ) < 1.0e-5f && !physics.IsBodySleepEnabled( balanced ) && !physics.IsBodySleepEnabled( offset ), "compound inertias match the parallel axis calculation with automatic sleep disabled" );
+        const auto leftPoint = scene.getImpulseTrialPoint( 0 );
+        const auto rightPoint = scene.getImpulseTrialPoint( 2 );
+        check( leftPoint && rightPoint && same( *leftPoint, { -3, 0 } ) && same( *rightPoint, { 3, 0 } ) && !scene.getImpulseTrialPoint( 1 ) && !scene.getImpulseTrialPoint( 3 ) && !scene.getImpulseTrialPoint( 4 ), "compound action exposes exactly one origin point per body" );
+        scene.applyPointTrialImpulse();
+        check( std::abs( physics.GetBodyLinearVelocity( balanced ).y - 2.0f / pi ) < 1.0e-6f && std::abs( physics.GetBodyLinearVelocity( offset ).y - 2.0f / pi ) < 1.0e-6f && physics.GetBodyAngularVelocity( balanced ) == 0.0f && std::abs( physics.GetBodyAngularVelocity( offset ) + 48.0f / ( 35.0f * pi ) ) < 1.0e-6f, "equal origin impulses increase center velocity equally but spin only the offset body" );
+        check( !playback.isPlaying() && same( physics.GetBodyTransform( balanced ).position, { -3, 0 } ) && same( physics.GetBodyTransform( offset ).position, { 3, 0 } ), "compound impulses preserve pause state and poses" );
+        scene.applyPointTrialImpulse();
+        check( std::abs( physics.GetBodyLinearVelocity( balanced ).y - 4.0f / pi ) < 1.0e-6f && std::abs( physics.GetBodyLinearVelocity( offset ).y - 4.0f / pi ) < 1.0e-6f && std::abs( physics.GetBodyAngularVelocity( offset ) + 96.0f / ( 35.0f * pi ) ) < 1.0e-6f, "repeated compound impulses accumulate exactly once per body rather than once per shape" );
+        for( int frame = 0; frame < 60; ++frame )
+            playback.stepOnce( substeps );
+        check( Length( TransformPoint( physics.GetBodyTransform( offset ), physics.GetBodyLocalCenter( offset ) ) - vec2{ 3.375f, 4.0f / pi } ) < 2.0e-4f && std::abs( physics.GetBodyAngularVelocity( offset ) + 96.0f / ( 35.0f * pi ) ) < 1.0e-6f, "compound center translates uniformly while the body rotates around it" );
+        physics.SetShapeDensity( visuals[2].shapeHandle, 3.0f );
+        physics.SetShapeDensity( visuals[3].shapeHandle, 1.0f );
+        check( Length( physics.GetBodyLocalCenter( offset ) - vec2{ -0.375f, 0 } ) < 1.0e-6f && std::abs( physics.GetBodyMass( offset ) - pi ) < 1.0e-6f, "editing component densities moves center immediately without changing total mass" );
+        scene.resetCollisionTrial();
+        check( physics.GetShapeDensity( visuals[2].shapeHandle ) == 3.0f && physics.GetShapeDensity( visuals[3].shapeHandle ) == 1.0f && same( physics.GetBodyTransform( offset ).position, { 3, 0 } ) && physics.GetBodyTransform( offset ).rotation.s == 0.0f && same( physics.GetBodyLinearVelocity( offset ), {} ) && physics.GetBodyAngularVelocity( offset ) == 0.0f, "compound reset preserves component densities and restores body origin and rest" );
+        scene.applyPointTrialImpulse();
+        check( std::abs( physics.GetBodyLinearVelocity( offset ).y - 2.0f / pi ) < 1.0e-6f && std::abs( physics.GetBodyAngularVelocity( offset ) - 48.0f / ( 35.0f * pi ) ) < 1.0e-6f, "reversing the density distribution reverses spin while preserving translation response" );
+        scene.resetCollisionTrial();
+        physics.SetBodyTransform( offset, { { 1, 2 }, rot2::FromRadians( 0.5f * pi ) } );
+        const auto rotatedPoint = scene.getImpulseTrialPoint( 2 );
+        check( rotatedPoint && same( *rotatedPoint, { 1, 2 } ), "compound impulse point follows the body origin after transform editing" );
+        scene.applyPointTrialImpulse();
+        check( std::abs( physics.GetBodyAngularVelocity( offset ) ) < 1.0e-6f && std::abs( physics.GetBodyLinearVelocity( offset ).y - 2.0f / pi ) < 1.0e-6f, "vertical origin to center offset gives no torque from a world-up impulse" );
+        playback.reset();
+        auto& defaults = static_cast<rigidBodyDemo&>( playback.getDemo() );
+        check( !defaults.getWorld().IsValid( offset ) && defaults.getWorld().GetShapeDensity( defaults.getShapes()[2].shapeHandle ) == 1.0f && defaults.getWorld().GetShapeDensity( defaults.getShapes()[3].shapeHandle ) == 3.0f && Length( defaults.getWorld().GetBodyLocalCenter( defaults.getShapes()[2].bodyHandle ) - vec2{ 0.375f, 0 } ) < 1.0e-6f && !playback.isPlaying(), "full compound reset restores default density distribution and idle state" );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkCompoundCenterDemo();
     checkDynamicKinematicDemo();
     checkTorqueImpulseDemo();
     checkForceImpulseDemo();
@@ -905,7 +952,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };
