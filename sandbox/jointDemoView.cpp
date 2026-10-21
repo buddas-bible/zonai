@@ -116,7 +116,6 @@ public:
                 if( ImGui::Button( "회전 Spring###MotorJointPresetAngularSpring" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::angularSpring );
                 ImGui::SameLine();
                 if( ImGui::Button( "Spring 둘 다###MotorJointPresetSpringBoth" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::springBoth );
-                ImGui::SameLine();
                 if( ImGui::Button( "Velocity + Spring###MotorJointPresetVelocitySpring" ) ) view_.applyMotorJointPreset( motorJointDemoPreset::velocityAndSpring );
                 ImGui::TextWrapped( "Velocity Motor는 상대속도를 목표로 하고 transform spring은 두 anchor와 기준 상대각도를 복원합니다. 둘은 독립 actuator라 동시에 켤 수 있습니다." );
             }

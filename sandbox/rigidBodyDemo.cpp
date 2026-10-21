@@ -394,7 +394,7 @@ void rigidBodyDemo::createSplineRail()
     definition.bodyA = splineRailBody_;
     definition.bodyB = impulseBody_;
     definition.points = splineControlPoints_;
-    definition.enableSpring = true;
+    definition.enableSpring = false;
     definition.hertz = 2.0f;
     definition.dampingRatio = 0.7f;
     const auto length = GetLength( { splineControlPoints_ }, SPLINE_PATH_TOLERANCE );
