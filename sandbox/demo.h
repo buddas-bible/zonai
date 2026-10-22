@@ -64,7 +64,8 @@ enum class demoKind
     springDampingComparison,
     distanceMotorForceComparison,
     distanceLimitMotorComparison,
-    revoluteMotorTorqueComparison
+    revoluteMotorTorqueComparison,
+    revoluteLimitMotorComparison
 };
 
 struct demoEntry

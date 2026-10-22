@@ -135,7 +135,7 @@ bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, 
 
 rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 {
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison || kind == demoKind::rollingSlidingFrictionComparison || kind == demoKind::frictionForceComparison || kind == demoKind::obliqueImpactFrictionComparison || kind == demoKind::collisionMassRatioComparison || kind == demoKind::centralOffsetImpactComparison || kind == demoKind::springDampingComparison || kind == demoKind::distanceMotorForceComparison || kind == demoKind::distanceLimitMotorComparison || kind == demoKind::revoluteMotorTorqueComparison ) showLabels_ = true;
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison || kind == demoKind::rollingSlidingFrictionComparison || kind == demoKind::frictionForceComparison || kind == demoKind::obliqueImpactFrictionComparison || kind == demoKind::collisionMassRatioComparison || kind == demoKind::centralOffsetImpactComparison || kind == demoKind::springDampingComparison || kind == demoKind::distanceMotorForceComparison || kind == demoKind::distanceLimitMotorComparison || kind == demoKind::revoluteMotorTorqueComparison || kind == demoKind::revoluteLimitMotorComparison ) showLabels_ = true;
     selectedShapeIndex_ = kind == demoKind::playground || kind == demoKind::motorCar ? 2 : 1;
     if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
@@ -332,6 +332,19 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         draw.DrawPoint( joint.anchorB, MOUSE_COLOR );
         draw.DrawPoint( joint.target, MOUSE_COLOR );
     }
+    for( const auto id : getAngleLimitComparisonJoints() )
+        if( getWorld().IsValid( id ) )
+        {
+            const auto joint = getWorld().getRevoluteJointData( id );
+            draw.DrawPoint( joint.anchorA, IM_COL32( 100, 200, 255, 255 ) );
+            if( joint.enableLimit )
+            {
+                const vec2 lower{ std::cos( joint.lowerAngle ), std::sin( joint.lowerAngle ) };
+                const vec2 upper{ std::cos( joint.upperAngle ), std::sin( joint.upperAngle ) };
+                draw.DrawSegment( { joint.anchorA, joint.anchorA + 0.65f * lower }, IM_COL32( 100, 230, 140, 255 ) );
+                draw.DrawSegment( { joint.anchorA, joint.anchorA + 0.65f * upper }, IM_COL32( 255, 100, 100, 255 ) );
+            }
+        }
     for( const auto id : getTorqueComparisonJoints() )
         if( getWorld().IsValid( id ) )
         {
@@ -768,6 +781,33 @@ void rigidBodyDemoUi::drawSplineEditorControls()
 
 void rigidBodyDemoUi::drawExperimentControls()
 {
+    if( getKind() == demoKind::revoluteLimitMotorComparison )
+    {
+        ImGui::TextUnformatted( "회전 각도 제한·모터 비교" );
+        ImGui::TextWrapped( "같은 막대의 초기 각도 0°·목표 각속도 2rad/s·토크 한도 0.2N·m는 같고 각도 제한만 A 꺼짐, B -45°~45° 켜짐입니다. 중력·감쇠는 끕니다. 양수 목표는 상한, 음수 목표는 하한에서 멈춥니다. 경계에서 목표 부호를 바꾸면 반대 방향으로 출발합니다. 초록 선은 하한, 빨강 선은 상한입니다. 정지 → 시험 복귀 → 재생으로 처음 1초를 비교하세요." );
+        const auto joints = getAngleLimitComparisonJoints();
+        for( std::size_t i = 0; i < joints.size(); ++i )
+        {
+            if( !getWorld().IsValid( joints[i] ) ) continue;
+            const auto joint = getWorld().getRevoluteJointData( joints[i] );
+            ImGui::PushID( static_cast<int>( i ) );
+            ImGui::TextUnformatted( getShapes()[i].label );
+            bool enableLimit = joint.enableLimit;
+            float lower = joint.lowerAngle * 180.0f / std::numbers::pi_v<float>, upper = joint.upperAngle * 180.0f / std::numbers::pi_v<float>;
+            bool limitChanged = ImGui::Checkbox( "각도 제한###Angle limit enabled", &enableLimit );
+            limitChanged |= ImGui::SliderFloat( "하한###Angle lower limit", &lower, -170.0f, upper, "%.1f deg", ImGuiSliderFlags_AlwaysClamp );
+            limitChanged |= ImGui::SliderFloat( "상한###Angle upper limit", &upper, lower, 170.0f, "%.1f deg", ImGuiSliderFlags_AlwaysClamp );
+            if( limitChanged ) getWorld().setRevoluteJointLimit( joints[i], enableLimit, lower * std::numbers::pi_v<float> / 180.0f, upper * std::numbers::pi_v<float> / 180.0f );
+            float speed = joint.motorSpeed;
+            bool changed = ImGui::SliderFloat( "목표 각속도###Motor target angular speed", &speed, -4.0f, 4.0f, "%.2f rad/s", ImGuiSliderFlags_AlwaysClamp );
+            if( changed ) getWorld().setRevoluteJointMotor( joints[i], true, speed, joint.maxMotorTorque );
+            ImGui::TextWrapped( "현재 각도 %.2f° / 각속도 %.3f rad/s", joint.currentAngle * 180.0f / std::numbers::pi_v<float>, getWorld().GetBodyAngularVelocity( joint.bodyB ) );
+            ImGui::PopID();
+        }
+        if( ImGui::Button( "시험 복귀 (편집값 유지)###CollisionTrialReset" ) ) resetCollisionTrial();
+        ImGui::TextWrapped( "현재 각도는 기준각 0°에 대한 -180°~180° 값이며 회전 횟수를 누적하지 않습니다. 하한과 상한이 같으면 해당 각도로 고정합니다. 시험 복귀는 초기 위치·회전·정지 속도를 복원하고 각도 제한·목표 각속도·물성·선택·재생 상태를 유지합니다. 상단 초기화는 기본 설정으로 돌아갑니다." );
+        return;
+    }
     if( getKind() == demoKind::distanceLimitMotorComparison )
     {
         ImGui::TextUnformatted( "거리 제한·모터 비교" );
