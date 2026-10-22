@@ -683,3 +683,7 @@ add_test(NAME sandboxSplineRailDemoTests COMMAND sandboxSplineRailDemoTests)
 add_executable(preparedCatmullRomSpline2Tests geometry/prepared_catmull_rom_spline2_test.cpp)
 target_link_libraries(preparedCatmullRomSpline2Tests PRIVATE zonai::zonai)
 add_test(NAME preparedCatmullRomSpline2Tests COMMAND preparedCatmullRomSpline2Tests)
+
+add_executable(closedSplineRailJointTests dynamics/closed_spline_rail_joint_test.cpp)
+target_link_libraries(closedSplineRailJointTests PRIVATE zonai::zonai)
+add_test(NAME closedSplineRailJointTests COMMAND closedSplineRailJointTests)

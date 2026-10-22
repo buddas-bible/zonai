@@ -2684,6 +2684,7 @@ void world::Step( float timeStep, int subStepCount )
                         joint.upperImpulse = constraint.upperImpulse;
                         joint.motorImpulse = constraint.motorImpulse;
                         joint.parameter = constraint.parameter;
+                        joint.distanceOffset = constraint.distanceOffset;
                         joint.trackingValid = constraint.trackingValid;
                         joint.force = constraint.force;
                         joint.torque = constraint.torque;
