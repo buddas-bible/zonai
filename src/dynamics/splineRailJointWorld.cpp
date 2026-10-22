@@ -182,6 +182,14 @@ splineRailJointData world::getSplineRailJointData( jointId id ) const
     data.tangent = frame.tangent;
     data.normal = frame.normal;
     data.currentTranslation = frame.translation;
+    if( data.trackingValid )
+    {
+        const auto& a = bodyStates_[sim.bodyIdA];
+        const auto& b = bodyStates_[sim.bodyIdB];
+        const vec2 rA = frame.anchorB - bodySims_[sim.bodyIdA].center, rB = frame.anchorB - bodySims_[sim.bodyIdB].center;
+        // solver의 누적 거리 row와 같은 앵커 속도·곡률 보정을 사용함.
+        data.currentSpeed = frame.arcScale * ( Dot( frame.tangent, b.linearVelocity - a.linearVelocity ) + Cross( rB, frame.tangent ) * b.angularVelocity - Cross( rA, frame.tangent ) * a.angularVelocity );
+    }
     data.lateralError = frame.lateralError;
     data.currentAngle = frame.angleError;
     data.force = sim.force;
