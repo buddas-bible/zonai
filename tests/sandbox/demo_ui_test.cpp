@@ -44,9 +44,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 37; ++frame )
+    for( int frame = 0; frame < 38; ++frame )
     {
-        session.selectDemo( frame == 36 ? demoKind::suspensionMotorComparison : frame == 35 ? demoKind::suspensionLimitComparison : frame == 34 ? demoKind::suspensionLoadComparison : frame == 33 ? demoKind::revoluteLimitMotorComparison : frame == 32 ? demoKind::revoluteMotorTorqueComparison : frame == 31 ? demoKind::distanceLimitMotorComparison : frame == 30 ? demoKind::distanceMotorForceComparison : frame == 29 ? demoKind::springDampingComparison : frame == 28 ? demoKind::centralOffsetImpactComparison : frame == 27 ? demoKind::collisionMassRatioComparison : frame == 26 ? demoKind::obliqueImpactFrictionComparison : frame == 25 ? demoKind::frictionForceComparison : frame == 24 ? demoKind::rollingSlidingFrictionComparison : frame == 23 ? demoKind::movingPlatformFrictionComparison : frame == 22 ? demoKind::collisionGroupComparison : frame == 21 ? demoKind::lowSpeedRestitutionComparison : frame == 20 ? demoKind::restitutionMixingComparison : frame == 19 ? demoKind::frictionMixingComparison : frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 37 ? demoKind::weldElasticityComparison : frame == 36 ? demoKind::suspensionMotorComparison : frame == 35 ? demoKind::suspensionLimitComparison : frame == 34 ? demoKind::suspensionLoadComparison : frame == 33 ? demoKind::revoluteLimitMotorComparison : frame == 32 ? demoKind::revoluteMotorTorqueComparison : frame == 31 ? demoKind::distanceLimitMotorComparison : frame == 30 ? demoKind::distanceMotorForceComparison : frame == 29 ? demoKind::springDampingComparison : frame == 28 ? demoKind::centralOffsetImpactComparison : frame == 27 ? demoKind::collisionMassRatioComparison : frame == 26 ? demoKind::obliqueImpactFrictionComparison : frame == 25 ? demoKind::frictionForceComparison : frame == 24 ? demoKind::rollingSlidingFrictionComparison : frame == 23 ? demoKind::movingPlatformFrictionComparison : frame == 22 ? demoKind::collisionGroupComparison : frame == 21 ? demoKind::lowSpeedRestitutionComparison : frame == 20 ? demoKind::restitutionMixingComparison : frame == 19 ? demoKind::frictionMixingComparison : frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -1128,6 +1128,67 @@ void checkDemoUi()
                     if( std::abs( result.currentLength - expected ) > ( parameter == 1 ? 0.04f : 0.015f ) )
                     {
                         std::fprintf( stderr, "limit motor UI edits must change repeated trial motion: parameter %d actual %g expected %g\n", parameter, result.currentLength, expected );
+                        std::exit( EXIT_FAILURE );
+                    }
+                }
+            }
+        }
+    }
+    for( int parameter : { 0, 1, 2 } )
+    {
+        auto motorView = createDemoView( demoKind::weldElasticityComparison );
+        auto& motorTrial = static_cast<rigidBodyDemo&>( *motorView );
+        const auto joints = motorTrial.getWeldComparisonJoints();
+        for( int step = 0; step < 60; ++step ) motorTrial.step( 1.0f / 60.0f, 4 );
+        for( int step = 0; step < 60; ++step ) motorTrial.step( 1.0f / 60.0f, 4 );
+        for( int frame = 0; frame < 8; ++frame )
+        {
+            if( frame == 3 ) io.AddInputCharactersUTF8( parameter == 0 ? "1" : "0" );
+            if( frame == 4 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+            if( frame == 5 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 340, 4000 } );
+            ImGui::Begin( "Weld comparison settings" );
+            if( frame == 2 )
+            {
+                ImGui::PushID( parameter == 0 ? 0 : parameter == 1 ? 2 : 1 );
+                GImGui->NavActivateId = ImGui::GetID( parameter == 1 ? "Weld angular frequency" : "Weld linear frequency" );
+                ImGui::PopID();
+                GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+            }
+            if( frame >= 5 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+            motorView->drawControls();
+            ImGui::End();
+            ImGui::Render();
+            const auto edited = motorTrial.getWorld().getWeldJointData( joints[parameter == 0 ? 0 : parameter == 1 ? 2 : 1] );
+            if( frame >= 4 && ( parameter == 0 ? edited.linearHertz != 1.0f : parameter == 1 ? edited.angularHertz != 0.0f : edited.linearHertz != 0.0f ) )
+            {
+                std::fprintf( stderr, "weld controls must preserve independently edited linear and angular frequencies\n" );
+                std::exit( EXIT_FAILURE );
+            }
+            if( frame >= 5 )
+            {
+                for( std::size_t i = 0; i < motorTrial.getShapes().size(); ++i )
+                {
+                    const auto body = motorTrial.getShapes()[i].bodyHandle;
+                    const auto pose = motorTrial.getWorld().GetBodyTransform( body );
+                    if( pose.position.x != -3.0f + 3.0f * static_cast<float>( i ) || pose.position.y != 1.0f || pose.rotation.s != 0.0f || motorTrial.getWorld().GetBodyAngularVelocity( body ) != 0.0f || zonai::LengthSquared( motorTrial.getWorld().GetBodyLinearVelocity( body ) ) != 0.0f )
+                    {
+                        std::fprintf( stderr, "weld comparison UI reset must restore initial positions and rest\n" );
+                        std::exit( EXIT_FAILURE );
+                    }
+                }
+                if( frame != 7 )
+                {
+                    for( int step = 0; step < 60; ++step ) motorTrial.step( 1.0f / 60.0f, 4 );
+                    const std::size_t index = parameter == 0 ? 0 : parameter == 1 ? 2 : 1;
+                    const auto result = motorTrial.getWorld().getWeldJointData( joints[index] );
+                    const auto reference = motorTrial.getWorld().getWeldJointData( joints[1] );
+                    const float error = zonai::Length( result.anchorB - result.anchorA );
+                    if( std::abs( result.currentAngle ) > 0.01f || ( parameter == 0 ? error < 0.1f || std::abs( error - zonai::Length( reference.anchorB - reference.anchorA ) ) > 1.0e-4f : error > 0.01f ) )
+                    {
+                        std::fprintf( stderr, "edited weld frequencies must change sag and bending after UI reset\n" );
                         std::exit( EXIT_FAILURE );
                     }
                 }
@@ -2525,7 +2586,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison, demoKind::frictionForceComparison, demoKind::obliqueImpactFrictionComparison, demoKind::collisionMassRatioComparison, demoKind::centralOffsetImpactComparison, demoKind::springDampingComparison, demoKind::distanceMotorForceComparison, demoKind::distanceLimitMotorComparison, demoKind::revoluteMotorTorqueComparison, demoKind::revoluteLimitMotorComparison, demoKind::suspensionLoadComparison, demoKind::suspensionLimitComparison, demoKind::suspensionMotorComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison, demoKind::frictionForceComparison, demoKind::obliqueImpactFrictionComparison, demoKind::collisionMassRatioComparison, demoKind::centralOffsetImpactComparison, demoKind::springDampingComparison, demoKind::distanceMotorForceComparison, demoKind::distanceLimitMotorComparison, demoKind::revoluteMotorTorqueComparison, demoKind::revoluteLimitMotorComparison, demoKind::suspensionLoadComparison, demoKind::suspensionLimitComparison, demoKind::suspensionMotorComparison, demoKind::weldElasticityComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );
