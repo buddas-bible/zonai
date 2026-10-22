@@ -264,6 +264,7 @@ public:
     [[nodiscard]] bodyId getPendulumBody() const noexcept { return pendulumBody_; }
 
     [[nodiscard]] jointId getPendulumJoint() const noexcept { return pendulumJoint_; }
+    [[nodiscard]] std::span<const jointId> getSpringComparisonJoints() const noexcept { return springComparisonJoints_; }
 
     [[nodiscard]] jointId getRevoluteJoint() const noexcept { return revoluteJoint_; }
 
@@ -352,6 +353,7 @@ private:
     void updateSplinePath( float timeStep );
     void createTerrainChain();
     void createPendulum();
+    void createSpringDampingComparison();
     void createRevoluteHinge();
     void createWheelSuspension();
     void createPrismaticRail();
@@ -424,6 +426,7 @@ private:
     bodyId torqueBody_{};  // 회전 임펄스를 적용할 물체
     bodyId pendulumBody_{};
     jointId pendulumJoint_{};
+    std::array<jointId, 3> springComparisonJoints_{};
     jointId revoluteJoint_{};
     jointId wheelJoint_{};
     jointId prismaticJoint_{};

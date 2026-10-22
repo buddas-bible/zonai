@@ -44,9 +44,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 29; ++frame )
+    for( int frame = 0; frame < 30; ++frame )
     {
-        session.selectDemo( frame == 28 ? demoKind::centralOffsetImpactComparison : frame == 27 ? demoKind::collisionMassRatioComparison : frame == 26 ? demoKind::obliqueImpactFrictionComparison : frame == 25 ? demoKind::frictionForceComparison : frame == 24 ? demoKind::rollingSlidingFrictionComparison : frame == 23 ? demoKind::movingPlatformFrictionComparison : frame == 22 ? demoKind::collisionGroupComparison : frame == 21 ? demoKind::lowSpeedRestitutionComparison : frame == 20 ? demoKind::restitutionMixingComparison : frame == 19 ? demoKind::frictionMixingComparison : frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 29 ? demoKind::springDampingComparison : frame == 28 ? demoKind::centralOffsetImpactComparison : frame == 27 ? demoKind::collisionMassRatioComparison : frame == 26 ? demoKind::obliqueImpactFrictionComparison : frame == 25 ? demoKind::frictionForceComparison : frame == 24 ? demoKind::rollingSlidingFrictionComparison : frame == 23 ? demoKind::movingPlatformFrictionComparison : frame == 22 ? demoKind::collisionGroupComparison : frame == 21 ? demoKind::lowSpeedRestitutionComparison : frame == 20 ? demoKind::restitutionMixingComparison : frame == 19 ? demoKind::frictionMixingComparison : frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -884,6 +884,66 @@ void checkDemoUi()
             {
                 std::fprintf( stderr, "point query did not follow inspector rotation editing\n" );
                 std::exit( EXIT_FAILURE );
+            }
+        }
+    }
+    for( int parameter : { 0, 1 } )
+    {
+        auto springView = createDemoView( demoKind::springDampingComparison );
+        auto& springTrial = static_cast<rigidBodyDemo&>( *springView );
+        const auto joints = springTrial.getSpringComparisonJoints();
+        for( int step = 0; step < 15; ++step ) springTrial.step( 1.0f / 60.0f, 4 );
+        const float originalLength = springTrial.getWorld().getDistanceJointData( joints[1] ).currentLength;
+        for( int step = 0; step < 30; ++step ) springTrial.step( 1.0f / 60.0f, 4 );
+        for( int frame = 0; frame < 8; ++frame )
+        {
+            if( frame == 3 ) io.AddInputCharactersUTF8( parameter == 0 ? "2" : "1" );
+            if( frame == 4 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+            if( frame == 5 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 340, 4000 } );
+            ImGui::Begin( "Spring comparison settings" );
+            if( frame == 2 )
+            {
+                ImGui::PushID( parameter );
+                GImGui->NavActivateId = ImGui::GetID( parameter == 0 ? "Spring damping" : "Spring Hertz" );
+                ImGui::PopID();
+                GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+            }
+            if( frame >= 5 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+            springView->drawControls();
+            ImGui::End();
+            ImGui::Render();
+            const auto edited = springTrial.getWorld().getDistanceJointData( joints[parameter] );
+            if( frame >= 4 && ( parameter == 0 ? edited.dampingRatio != 2.0f : edited.hertz != 1.0f ) )
+            {
+                std::fprintf( stderr, "spring comparison controls must preserve independently edited damping and frequency\n" );
+                std::exit( EXIT_FAILURE );
+            }
+            if( frame >= 5 )
+            {
+                for( std::size_t i = 0; i < springTrial.getShapes().size(); ++i )
+                {
+                    const auto body = springTrial.getShapes()[i].bodyHandle;
+                    const auto pose = springTrial.getWorld().GetBodyTransform( body );
+                    if( pose.position.x != -3.0f + 3.0f * static_cast<float>( i ) || pose.position.y != 0.0f || zonai::LengthSquared( springTrial.getWorld().GetBodyLinearVelocity( body ) ) != 0.0f )
+                    {
+                        std::fprintf( stderr, "spring comparison UI reset must restore all stretched poses and rest\n" );
+                        std::exit( EXIT_FAILURE );
+                    }
+                }
+                if( frame != 7 )
+                {
+                    for( int step = 0; step < 15; ++step ) springTrial.step( 1.0f / 60.0f, 4 );
+                    const float length = springTrial.getWorld().getDistanceJointData( joints[parameter] ).currentLength;
+                    const float reference = springTrial.getWorld().getDistanceJointData( joints[2] ).currentLength;
+                    if( parameter == 0 ? length <= 1.0f || std::abs( length - reference ) > 1.0e-4f : length <= originalLength + 0.05f )
+                    {
+                        std::fprintf( stderr, "edited spring controls must change the repeated trajectory after UI reset\n" );
+                        std::exit( EXIT_FAILURE );
+                    }
+                }
             }
         }
     }
@@ -2040,7 +2100,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison, demoKind::frictionForceComparison, demoKind::obliqueImpactFrictionComparison, demoKind::collisionMassRatioComparison, demoKind::centralOffsetImpactComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison, demoKind::frictionForceComparison, demoKind::obliqueImpactFrictionComparison, demoKind::collisionMassRatioComparison, demoKind::centralOffsetImpactComparison, demoKind::springDampingComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );

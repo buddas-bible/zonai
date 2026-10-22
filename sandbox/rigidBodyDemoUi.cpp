@@ -135,7 +135,7 @@ bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, 
 
 rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 {
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison || kind == demoKind::rollingSlidingFrictionComparison || kind == demoKind::frictionForceComparison || kind == demoKind::obliqueImpactFrictionComparison || kind == demoKind::collisionMassRatioComparison || kind == demoKind::centralOffsetImpactComparison ) showLabels_ = true;
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison || kind == demoKind::rollingSlidingFrictionComparison || kind == demoKind::frictionForceComparison || kind == demoKind::obliqueImpactFrictionComparison || kind == demoKind::collisionMassRatioComparison || kind == demoKind::centralOffsetImpactComparison || kind == demoKind::springDampingComparison ) showLabels_ = true;
     selectedShapeIndex_ = kind == demoKind::playground || kind == demoKind::motorCar ? 2 : 1;
     if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
@@ -332,6 +332,16 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         draw.DrawPoint( joint.anchorB, MOUSE_COLOR );
         draw.DrawPoint( joint.target, MOUSE_COLOR );
     }
+    for( const auto id : getSpringComparisonJoints() )
+        if( getWorld().IsValid( id ) )
+        {
+            const auto joint = getWorld().getDistanceJointData( id );
+            constexpr ImU32 SPRING_COLOR = IM_COL32( 230, 170, 255, 255 );
+            draw.DrawSegment( { joint.anchorA, joint.anchorB }, SPRING_COLOR );
+            draw.DrawPoint( joint.anchorA, SPRING_COLOR );
+            draw.DrawPoint( joint.anchorB, SPRING_COLOR );
+            draw.DrawCircle( { joint.anchorA, joint.length }, IM_COL32( 230, 170, 255, 100 ), 0 );
+        }
     if( getWorld().IsValid( getPendulumJoint() ) )
     {
         constexpr ImU32 JOINT_COLOR = IM_COL32( 230, 170, 255, 255 );
@@ -729,6 +739,28 @@ void rigidBodyDemoUi::drawSplineEditorControls()
 
 void rigidBodyDemoUi::drawExperimentControls()
 {
+    if( getKind() == demoKind::springDampingComparison )
+    {
+        ImGui::TextUnformatted( "거리 스프링·감쇠 비교" );
+        ImGui::TextWrapped( "초기 목표 길이 1m·초기 길이 1.5m·주파수 2Hz는 같고 감쇠비만 A 0, B 0.7, C 2입니다. 중력과 물체 감쇠는 끕니다. 주파수·감쇠비를 편집하고 정지 → 시험 복귀 → 재생으로 진동과 수렴을 비교하세요. 0Hz는 스프링 힘을 끕니다. 보라색 선은 현재 연결, 원은 목표 거리입니다." );
+        const auto joints = getSpringComparisonJoints();
+        for( std::size_t i = 0; i < joints.size(); ++i )
+        {
+            if( !getWorld().IsValid( joints[i] ) ) continue;
+            const auto joint = getWorld().getDistanceJointData( joints[i] );
+            ImGui::PushID( static_cast<int>( i ) );
+            ImGui::TextUnformatted( getShapes()[i].label );
+            float hertz = joint.hertz, dampingRatio = joint.dampingRatio;
+            bool changed = ImGui::SliderFloat( "스프링 주파수###Spring Hertz", &hertz, 0.0f, 30.0f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp );
+            changed |= ImGui::SliderFloat( "감쇠비###Spring damping", &dampingRatio, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
+            if( changed ) getWorld().setDistanceJointSpring( joints[i], true, hertz, dampingRatio );
+            ImGui::TextWrapped( "현재 길이 %.3f m / 세로 속도 %.3f m/s", joint.currentLength, getWorld().GetBodyLinearVelocity( joint.bodyB ).y );
+            ImGui::PopID();
+        }
+        if( ImGui::Button( "시험 복귀 (편집값 유지)###CollisionTrialReset" ) ) resetCollisionTrial();
+        ImGui::TextWrapped( "초기 위치·회전·정지 속도를 복원합니다. 주파수·감쇠비·물성·선택·재생 상태는 유지합니다. 상단 초기화는 장면의 기본 설정으로 돌아갑니다." );
+        return;
+    }
     if( getKind() == demoKind::collisionComparison || getKind() == demoKind::frictionComparison || getKind() == demoKind::restitutionComparison || getKind() == demoKind::boxStack || getKind() == demoKind::ccdComparison || getKind() == demoKind::collisionFilterComparison || getKind() == demoKind::sensorWallComparison || getKind() == demoKind::sleepWakeComparison || getKind() == demoKind::dampingComparison || getKind() == demoKind::gravityScaleComparison || getKind() == demoKind::massImpulseComparison || getKind() == demoKind::impulsePointComparison || getKind() == demoKind::rotationalInertiaComparison || getKind() == demoKind::forceImpulseComparison || getKind() == demoKind::torqueImpulseComparison || getKind() == demoKind::dynamicKinematicComparison || getKind() == demoKind::compoundCenterComparison || getKind() == demoKind::fastRotationComparison || getKind() == demoKind::maximumLinearSpeedComparison || getKind() == demoKind::frictionMixingComparison ||
         getKind() == demoKind::restitutionMixingComparison || getKind() == demoKind::lowSpeedRestitutionComparison || getKind() == demoKind::collisionGroupComparison || getKind() == demoKind::movingPlatformFrictionComparison || getKind() == demoKind::rollingSlidingFrictionComparison || getKind() == demoKind::frictionForceComparison || getKind() == demoKind::obliqueImpactFrictionComparison || getKind() == demoKind::collisionMassRatioComparison || getKind() == demoKind::centralOffsetImpactComparison )
     {
