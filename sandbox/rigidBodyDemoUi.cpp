@@ -135,7 +135,7 @@ bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, 
 
 rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 {
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison || kind == demoKind::rollingSlidingFrictionComparison || kind == demoKind::frictionForceComparison || kind == demoKind::obliqueImpactFrictionComparison || kind == demoKind::collisionMassRatioComparison || kind == demoKind::centralOffsetImpactComparison || kind == demoKind::springDampingComparison || kind == demoKind::distanceMotorForceComparison || kind == demoKind::distanceLimitMotorComparison || kind == demoKind::revoluteMotorTorqueComparison || kind == demoKind::revoluteLimitMotorComparison || kind == demoKind::suspensionLoadComparison || kind == demoKind::suspensionLimitComparison || kind == demoKind::suspensionMotorComparison ) showLabels_ = true;
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison || kind == demoKind::rollingSlidingFrictionComparison || kind == demoKind::frictionForceComparison || kind == demoKind::obliqueImpactFrictionComparison || kind == demoKind::collisionMassRatioComparison || kind == demoKind::centralOffsetImpactComparison || kind == demoKind::springDampingComparison || kind == demoKind::distanceMotorForceComparison || kind == demoKind::distanceLimitMotorComparison || kind == demoKind::revoluteMotorTorqueComparison || kind == demoKind::revoluteLimitMotorComparison || kind == demoKind::suspensionLoadComparison || kind == demoKind::suspensionLimitComparison || kind == demoKind::suspensionMotorComparison || kind == demoKind::weldElasticityComparison ) showLabels_ = true;
     selectedShapeIndex_ = kind == demoKind::playground || kind == demoKind::motorCar ? 2 : 1;
     if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
@@ -332,6 +332,14 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         draw.DrawPoint( joint.anchorB, MOUSE_COLOR );
         draw.DrawPoint( joint.target, MOUSE_COLOR );
     }
+    for( const auto id : getWeldComparisonJoints() )
+        if( getWorld().IsValid( id ) )
+        {
+            const auto joint = getWorld().getWeldJointData( id );
+            draw.DrawSegment( { joint.anchorA, joint.anchorB }, IM_COL32( 230, 170, 255, 255 ) );
+            draw.DrawPoint( joint.anchorA, IM_COL32( 100, 235, 220, 255 ), 7.0f );
+            draw.DrawPoint( joint.anchorB, IM_COL32( 230, 170, 255, 255 ) );
+        }
     for( const auto id : getAngleLimitComparisonJoints() )
         if( getWorld().IsValid( id ) )
         {
@@ -860,6 +868,27 @@ void rigidBodyDemoUi::drawExperimentControls()
         }
         if( ImGui::Button( "시험 복귀 (편집값 유지)###CollisionTrialReset" ) ) resetCollisionTrial();
         ImGui::TextWrapped( "하한과 상한이 같으면 기존 정책에 따라 목표 길이 1m의 고정 거리 제약으로 돌아갑니다. 초기 위치·회전·정지 속도를 복원합니다. 거리 제한·목표 속도·물성·선택·재생 상태는 유지합니다. 상단 초기화는 기본 설정으로 돌아갑니다." );
+        return;
+    }
+    if( getKind() == demoKind::weldElasticityComparison )
+    {
+        ImGui::TextUnformatted( "웰드·선형/회전 탄성 비교" );
+        ImGui::TextWrapped( "같은 막대를 한쪽 끝에서 지지하고 중력을 적용합니다. A는 강체 연결, B는 선형만 1Hz, C는 회전만 1Hz이며 감쇠비는 모두 0.7입니다. 0Hz는 해당 방향의 강한 제약이고 양수는 탄성입니다. 선형 탄성은 연결점이 처지고 회전 탄성은 막대가 기울어집니다. 주파수 편집 후 정지 → 시험 복귀 → 재생으로 같은 조건을 비교하세요." );
+        const auto joints = getWeldComparisonJoints();
+        for( std::size_t i = 0; i < joints.size(); ++i )
+        {
+            if( !getWorld().IsValid( joints[i] ) ) continue;
+            const auto joint = getWorld().getWeldJointData( joints[i] );
+            ImGui::PushID( static_cast<int>( i ) );
+            ImGui::TextUnformatted( getShapes()[i].label );
+            float linearHertz = joint.linearHertz, angularHertz = joint.angularHertz;
+            if( ImGui::SliderFloat( "선형 주파수###Weld linear frequency", &linearHertz, 0.0f, 10.0f, "%.2f Hz", ImGuiSliderFlags_AlwaysClamp ) ) getWorld().setWeldJointLinearTuning( joints[i], linearHertz, joint.linearDampingRatio );
+            if( ImGui::SliderFloat( "회전 주파수###Weld angular frequency", &angularHertz, 0.0f, 10.0f, "%.2f Hz", ImGuiSliderFlags_AlwaysClamp ) ) getWorld().setWeldJointAngularTuning( joints[i], angularHertz, joint.angularDampingRatio );
+            ImGui::TextWrapped( "연결점 오차 %.3f m / 상대 각도 %.2f°", Length( joint.anchorB - joint.anchorA ), joint.currentAngle * 180.0f / std::numbers::pi_v<float> );
+            ImGui::PopID();
+        }
+        if( ImGui::Button( "시험 복귀 (편집값 유지)###CollisionTrialReset" ) ) resetCollisionTrial();
+        ImGui::TextWrapped( "초기 위치·회전·정지 속도를 복원합니다. 선형·회전 주파수·물성·선택·재생 상태는 유지합니다. 청록 점은 고정점, 보라색 점은 막대의 연결점입니다. 상단 초기화는 기본 설정으로 돌아갑니다." );
         return;
     }
     if( getKind() == demoKind::suspensionMotorComparison )

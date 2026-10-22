@@ -60,6 +60,10 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createSplinePath();
     }
+    else if( kind == demoKind::weldElasticityComparison )
+    {
+        createWeldElasticityComparison();
+    }
     else if( kind == demoKind::suspensionMotorComparison )
     {
         createSuspensionMotorComparison();
@@ -1388,6 +1392,35 @@ void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial tri
         terrainTrialObservation_.launchInertia = world_.GetBodyRotationalInertia( body );
         if( trial != terrainTrial::seams ) terrainTrialObservation_.launchFraction = splineTrialFraction_;
     }
+}
+
+void rigidBodyDemo::createWeldElasticityComparison()
+{
+    world_.SetGravity( { 0.0f, -9.8f } );
+    const auto anchor = world_.CreateBody( bodyType::Static );
+    const char* labels[] = { "물체 A", "물체 B", "물체 C" };
+    for( std::size_t i = 0; i < 3; ++i )
+    {
+        const float x = -3.0f + 3.0f * static_cast<float>( i );
+        const auto body = world_.CreateBody( bodyType::Dynamic, { { x, 1.0f }, {} } );
+        const auto shape = world_.CreateShape( body, MakeBox( { 0.5f, 0.1f } ) );
+        world_.SetShapeFriction( shape, 0.0f );
+        world_.SetShapeRestitution( shape, 0.0f );
+        world_.SetBodySleepEnabled( body, false );
+        shapes_.push_back( { body, shape, labels[i] } );
+        collisionTrialInitialStates_.push_back( { world_.GetBodyTransform( body ), {}, 0.0f } );
+        weldJointDef joint{};
+        joint.bodyA = anchor;
+        joint.bodyB = body;
+        joint.localAnchorA = { x - 0.5f, 1.0f };
+        joint.localAnchorB = { -0.5f, 0.0f };
+        joint.linearHertz = i == 1 ? 1.0f : 0.0f;
+        joint.angularHertz = i == 2 ? 1.0f : 0.0f;
+        joint.linearDampingRatio = 0.7f;
+        joint.angularDampingRatio = 0.7f;
+        weldComparisonJoints_[i] = world_.createWeldJoint( joint );
+    }
+    impulseBody_ = torqueBody_ = shapes_[0].bodyHandle;
 }
 
 void rigidBodyDemo::createSuspensionMotorComparison()

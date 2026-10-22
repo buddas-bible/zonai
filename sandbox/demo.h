@@ -68,7 +68,8 @@ enum class demoKind
     revoluteLimitMotorComparison,
     suspensionLoadComparison,
     suspensionLimitComparison,
-    suspensionMotorComparison
+    suspensionMotorComparison,
+    weldElasticityComparison
 };
 
 struct demoEntry
