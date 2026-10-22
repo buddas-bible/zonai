@@ -1,5 +1,6 @@
 #include "dynamics/world.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -127,6 +128,36 @@ void world::setSplineRailJointRotation( jointId id, splineRailRotationMode mode,
     sim.angularHertz = angularHertz;
     sim.angularDampingRatio = angularDampingRatio;
     resetSplineRailJoint( id );
+}
+
+bool world::rebaseSplineRailJoint( jointId id )
+{
+    auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );
+    const auto frame = getSplineRailFrame( sim, bodySims_[sim.bodyIdA].transform, bodySims_[sim.bodyIdB].transform, sim.parameter, true, sim.distanceOffset );
+    if( !sim.trackingValid || !frame.valid ) return false;
+    if( frame.translation == 0.0 ) return true;
+    if( std::abs( frame.distance ) > std::numeric_limits<float>::max() * 0.25 ) return false;
+    const double target = sim.targetTranslation - frame.translation, lower = sim.lowerTranslation - frame.translation, upper = sim.upperTranslation - frame.translation;
+    for( double value : { target, lower, upper } )
+        if( !std::isfinite( value ) || std::abs( value ) > std::numeric_limits<float>::max() ) return false;
+    const float newTarget = static_cast<float>( target ), newLower = static_cast<float>( lower ), newUpper = static_cast<float>( upper );
+    if( sim.lowerTranslation < sim.upperTranslation && newLower == newUpper ) return false;
+    if( !sim.isLoop )
+    {
+        if( static_cast<float>( -frame.distance ) == static_cast<float>( sim.length - frame.distance ) ) return false;
+        if( sim.enableLimit )
+        {
+            const double oldLower = std::max( -sim.referenceDistance, static_cast<double>( sim.lowerTranslation ) ), oldUpper = std::min( sim.length - sim.referenceDistance, static_cast<double>( sim.upperTranslation ) );
+            const float lowerStop = static_cast<float>( std::max( -frame.distance, static_cast<double>( newLower ) ) ), upperStop = static_cast<float>( std::min( sim.length - frame.distance, static_cast<double>( newUpper ) ) );
+            if( oldLower < oldUpper && lowerStop >= upperStop ) return false;
+        }
+    }
+    // 좌표만 평행 이동하므로 물리 상태와 warm-start impulse는 유지함.
+    sim.referenceDistance = frame.distance;
+    sim.targetTranslation = newTarget;
+    sim.lowerTranslation = newLower;
+    sim.upperTranslation = newUpper;
+    return true;
 }
 
 bool world::setSplineRailJointPoints( jointId id, std::span<const vec2> points )
