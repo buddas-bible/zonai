@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison || kind == demoKind::rollingSlidingFrictionComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison || kind == demoKind::rollingSlidingFrictionComparison || kind == demoKind::frictionForceComparison )
     {
         createCollisionTrial();
     }
@@ -151,11 +151,19 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
         world_.ApplyForceToCenter( target, direction * world_.GetBodyMass( target ) * 5.0f * axis );
     }
 
-    if( kind_ == demoKind::forceImpulseComparison && forceTrialRunning_ && timeStep > 0.0f )
+    if( ( kind_ == demoKind::forceImpulseComparison || kind_ == demoKind::frictionForceComparison ) && forceTrialRunning_ && timeStep > 0.0f )
     {
         const double duration = std::min( static_cast<double>( timeStep ), std::max( 0.0, 1.0 - forceTrialTime_ ) );
         // 끝점을 넘는 step도 총 1초분의 힘만 전달함.
-        if( duration > 0.0 && world_.IsValid( shapes_[0].bodyHandle ) ) world_.ApplyForceToCenter( shapes_[0].bodyHandle, { 0, 2.0f * static_cast<float>( duration / timeStep ) } );
+        if( kind_ == demoKind::forceImpulseComparison )
+        {
+            if( duration > 0.0 && world_.IsValid( shapes_[0].bodyHandle ) ) world_.ApplyForceToCenter( shapes_[0].bodyHandle, { 0, 2.0f * static_cast<float>( duration / timeStep ) } );
+        }
+        else if( duration > 0.0 )
+        {
+            for( std::size_t i = 0; i < 2; ++i )
+                if( world_.IsValid( shapes_[2 * i + 1].bodyHandle ) ) world_.ApplyForceToCenter( shapes_[2 * i + 1].bodyHandle, { ( i == 0 ? 2.0f : 8.0f ) * static_cast<float>( duration / timeStep ), 0 } );
+        }
         forceTrialTime_ += timeStep;
     }
     if( kind_ == demoKind::torqueImpulseComparison && torqueTrialRunning_ && timeStep > 0.0f )
@@ -862,6 +870,27 @@ void rigidBodyDemo::createCollisionTrial()
             shapes_.push_back( { circle, shape, circles[i] } );
         }
     }
+    else if( kind_ == demoKind::frictionForceComparison )
+    {
+        world_.SetGravity( { 0, -10 } );
+        const char* floors[] = { "바닥 A", "바닥 B" };
+        const char* boxes[] = { "상자 A (2N)", "상자 B (8N)" };
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const float lane = i == 0 ? 1.5f : -1.5f;
+            const auto floor = world_.CreateBody( bodyType::Static, { { 0, lane }, {} } );
+            const auto surface = world_.CreateShape( floor, MakeBox( { 6.0f, 0.15f } ) );
+            world_.SetShapeFriction( surface, 0.5f );
+            world_.SetShapeRestitution( surface, 0.0f );
+            shapes_.push_back( { floor, surface, floors[i] } );
+            const auto box = world_.CreateBody( bodyType::Dynamic, { { -3.0f, lane + 0.65f }, {} } );
+            const auto shape = world_.CreateShape( box, MakeBox( { 0.5f, 0.5f } ) );
+            world_.SetShapeFriction( shape, 0.5f );
+            world_.SetShapeRestitution( shape, 0.0f );
+            world_.SetBodySleepEnabled( box, false );
+            shapes_.push_back( { box, shape, boxes[i] } );
+        }
+    }
     for( const auto& visual : shapes_ )
     {
         collisionTrialInitialStates_.push_back( { world_.GetBodyTransform( visual.bodyHandle ), world_.GetBodyLinearVelocity( visual.bodyHandle ), world_.GetBodyAngularVelocity( visual.bodyHandle ) } );
@@ -898,6 +927,13 @@ void rigidBodyDemo::startTorqueImpulseTrial()
     resetCollisionTrial();
     torqueTrialRunning_ = true;
     if( world_.IsValid( shapes_[1].bodyHandle ) ) world_.ApplyAngularImpulse( shapes_[1].bodyHandle, 1.0f );
+}
+
+void rigidBodyDemo::startFrictionForceTrial()
+{
+    if( kind_ != demoKind::frictionForceComparison ) return;
+    resetCollisionTrial();
+    forceTrialRunning_ = true;
 }
 
 void rigidBodyDemo::startForceImpulseTrial()
