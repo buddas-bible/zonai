@@ -1324,8 +1324,55 @@ void checkFrictionForceDemo()
     }
 }
 
+void checkObliqueImpactFrictionDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        rigidBodyDemo scene{ demoKind::obliqueImpactFrictionComparison };
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 4 && physics.GetBodyCount() == 4 && same( physics.GetGravity(), {} ), "oblique impact comparison creates two editable floor and circle pairs without gravity" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const auto circle = visuals[2 * i + 1].bodyHandle;
+            check( physics.GetBody( visuals[2 * i].bodyHandle ).type == bodyType::Static && physics.GetBody( circle ).type == bodyType::Dynamic && same( physics.GetBodyLinearVelocity( circle ), { 3, -4 } ) && physics.GetBodyAngularVelocity( circle ) == 0.0f && !physics.IsBodySleepEnabled( circle ) && physics.GetBodyLinearDamping( circle ) == 0.0f && physics.GetBodyAngularDamping( circle ) == 0.0f, "identical circles approach horizontal floors at equal oblique velocities without spin or damping" );
+        }
+        const auto observe = [&]( bool upperRough )
+        {
+            for( int frame = 0; frame < 36; ++frame ) scene.step( 1.0f / 60.0f, substeps );
+            std::array<float, 2> rebounds{};
+            for( std::size_t row = 0; row < 2; ++row )
+            {
+                const auto circle = visuals[2 * row + 1].bodyHandle;
+                const auto velocity = physics.GetBodyLinearVelocity( circle );
+                const float angularVelocity = physics.GetBodyAngularVelocity( circle );
+                const bool rough = row == 0 ? upperRough : !upperRough;
+                rebounds[row] = velocity.y;
+                check( rough ? std::abs( velocity.x - 2.0f ) < 0.15f && std::abs( angularVelocity + 5.0f ) < 0.4f : std::abs( velocity.x - 3.0f ) < 0.02f && std::abs( angularVelocity ) < 0.02f, "impact friction reduces tangent speed and produces clockwise spin while zero friction preserves both" );
+                check( std::abs( velocity.y - 4.0f ) < 0.15f, "both impacts reverse the normal velocity with equal unit restitution" );
+            }
+            check( std::abs( rebounds[0] - rebounds[1] ) < 0.15f, "tangent friction leaves the normal rebound comparison unchanged" );
+        };
+        observe( true );
+        physics.SetShapeFriction( visuals[0].shapeHandle, 0.0f );
+        physics.SetShapeFriction( visuals[3].shapeHandle, 0.8f );
+        for( int repeat = 0; repeat < 2; ++repeat )
+        {
+            scene.resetCollisionTrial();
+            check( physics.GetShapeFriction( visuals[0].shapeHandle ) == 0.0f && physics.GetShapeFriction( visuals[3].shapeHandle ) == 0.8f, "impact reset preserves independently edited floor and circle friction" );
+            for( std::size_t i = 0; i < visuals.size(); ++i )
+            {
+                const auto body = visuals[i].bodyHandle;
+                check( scene.getShapes()[i].shapeHandle == visuals[i].shapeHandle && physics.IsValid( visuals[i].shapeHandle ) && same( physics.GetBodyTransform( body ).position, { i % 2 == 0 ? 0.0f : -2.0f, ( i < 2 ? 1.5f : -1.5f ) + ( i % 2 == 0 ? 0.0f : 1.75f ) } ) && physics.GetBodyTransform( body ).rotation.s == 0.0f && same( physics.GetBodyLinearVelocity( body ), i % 2 == 0 ? vec2{} : vec2{ 3, -4 } ) && physics.GetBodyAngularVelocity( body ) == 0.0f, "impact reset restores initial poses and zero-spin oblique launch velocities with stable handles" );
+            }
+            observe( false );
+        }
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkObliqueImpactFrictionDemo();
     checkFrictionForceDemo();
     checkRollingSlidingFrictionDemo();
     checkMovingPlatformFrictionDemo();
@@ -1445,7 +1492,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison, demoKind::frictionForceComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison, demoKind::frictionForceComparison, demoKind::obliqueImpactFrictionComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };
