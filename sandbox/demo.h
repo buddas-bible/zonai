@@ -61,7 +61,8 @@ enum class demoKind
     obliqueImpactFrictionComparison,
     collisionMassRatioComparison,
     centralOffsetImpactComparison,
-    springDampingComparison
+    springDampingComparison,
+    distanceMotorForceComparison
 };
 
 struct demoEntry
