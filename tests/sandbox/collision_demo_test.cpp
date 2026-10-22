@@ -1171,8 +1171,60 @@ void checkCollisionGroupDemo()
     }
 }
 
+void checkMovingPlatformFrictionDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        rigidBodyDemo scene{ demoKind::movingPlatformFrictionComparison };
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 4 && physics.GetBodyCount() == 4 && same( physics.GetGravity(), { 0, -10 } ), "moving platform comparison creates two editable platforms and boxes under gravity" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const auto platform = visuals[2 * i].bodyHandle;
+            const auto box = visuals[2 * i + 1].bodyHandle;
+            check( physics.GetBody( platform ).type == bodyType::Kinematic && physics.GetBody( box ).type == bodyType::Dynamic && same( physics.GetBodyLinearVelocity( platform ), { 2, 0 } ) && same( physics.GetBodyLinearVelocity( box ), {} ) && !physics.IsBodySleepEnabled( box ) && physics.GetBodyLinearDamping( box ) == 0.0f && physics.GetBodyAngularDamping( box ) == 0.0f, "kinematic platforms move at equal speeds below initially stationary undamped boxes" );
+        }
+        const auto observe = [&]( bool upperCarried )
+        {
+            for( int frame = 0; frame < 60; ++frame )
+            {
+                scene.step( 1.0f / 60.0f, substeps );
+                for( std::size_t i : { 0u, 2u } )
+                    check( same( physics.GetBodyLinearVelocity( visuals[i].bodyHandle ), { 2, 0 } ) && physics.GetBodyAngularVelocity( visuals[i].bodyHandle ) == 0.0f, "box contact does not change either kinematic platform velocity" );
+            }
+            for( std::size_t row = 0; row < 2; ++row )
+            {
+                const auto platform = visuals[2 * row].bodyHandle;
+                const auto box = visuals[2 * row + 1].bodyHandle;
+                const auto pose = physics.GetBodyTransform( box );
+                const auto velocity = physics.GetBodyLinearVelocity( box );
+                const bool carried = row == 0 ? upperCarried : !upperCarried;
+                check( carried ? velocity.x > 1.8f && velocity.x < 2.1f && pose.position.x > -0.8f : std::abs( velocity.x ) < 0.02f && std::abs( pose.position.x + 2.0f ) < 0.03f, "friction carries one box while the zero-friction platform slides under the other" );
+                check( std::abs( pose.position.y - ( row == 0 ? 2.05f : -0.95f ) ) < 0.05f && std::abs( velocity.y ) < 0.05f && std::abs( physics.GetBodyTransform( platform ).position.x ) < 1.0e-4f, "both boxes remain supported during the one-second comparison as platforms advance equally" );
+            }
+        };
+        observe( true );
+        physics.SetShapeFriction( visuals[0].shapeHandle, 0.0f );
+        physics.SetShapeFriction( visuals[3].shapeHandle, 0.8f );
+        for( int repeat = 0; repeat < 2; ++repeat )
+        {
+            scene.resetCollisionTrial();
+            check( physics.GetShapeFriction( visuals[0].shapeHandle ) == 0.0f && physics.GetShapeFriction( visuals[3].shapeHandle ) == 0.8f, "platform trial reset preserves independently edited platform and box friction" );
+            for( std::size_t i = 0; i < visuals.size(); ++i )
+            {
+                const auto body = visuals[i].bodyHandle;
+                const float lane = i < 2 ? 1.5f : -1.5f;
+                check( scene.getShapes()[i].shapeHandle == visuals[i].shapeHandle && physics.IsValid( visuals[i].shapeHandle ) && same( physics.GetBodyTransform( body ).position, { -2.0f, lane + ( i % 2 == 0 ? 0.0f : 0.55f ) } ) && physics.GetBodyTransform( body ).rotation.s == 0.0f && same( physics.GetBodyLinearVelocity( body ), { i % 2 == 0 ? 2.0f : 0.0f, 0 } ) && physics.GetBodyAngularVelocity( body ) == 0.0f, "platform trial reset restores initial poses and distinct platform and box velocities with stable handles" );
+            }
+            observe( false );
+        }
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkMovingPlatformFrictionDemo();
     checkCollisionGroupDemo();
     checkLowSpeedRestitutionDemo();
     checkRestitutionMixingDemo();
@@ -1289,7 +1341,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };

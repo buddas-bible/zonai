@@ -53,7 +53,8 @@ constexpr std::array entries
     demoEntry{ demoKind::frictionMixingComparison, "강체", "마찰 혼합 규칙 비교", "수평 바닥과 상자의 마찰을 0.25·1, 1·0.25, 1·0으로 배분하고 같은 속도로 출발합니다. 두 계수의 혼합과 편집 후 감속 차이를 시험 복귀로 비교하세요.", { 0.0f, 0.5f }, 65.0f },
     demoEntry{ demoKind::restitutionMixingComparison, "강체", "반발 혼합 규칙 비교", "바닥·원 반발을 0·0.8, 0.8·0, 0·0으로 배분하고 같은 높이에서 낙하합니다. 두 계수 중 큰 값이 적용되는 반발과 편집 후 변화를 시험 복귀로 비교하세요.", { 0.0f, 1.5f }, 85.0f },
     demoEntry{ demoKind::lowSpeedRestitutionComparison, "강체", "저속 반발 억제 비교", "같은 반발계수의 원이 0.5·2m/s로 바닥에 충돌합니다. 중력 없는 상태에서 저속 반발 억제를 비교하고 반발계수를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.8f }, 100.0f },
-    demoEntry{ demoKind::collisionGroupComparison, "강체", "충돌 그룹 우선순위 비교", "원 세 쌍으로 그룹 0의 마스크 차단, 같은 양수 그룹의 충돌, 같은 음수 그룹의 통과를 비교합니다. 그룹·마스크를 편집하고 시험 복귀로 반복하세요. 공통 충돌 설정의 차단은 그룹보다 우선합니다.", { 0.0f, 0.0f }, 90.0f }
+    demoEntry{ demoKind::collisionGroupComparison, "강체", "충돌 그룹 우선순위 비교", "원 세 쌍으로 그룹 0의 마스크 차단, 같은 양수 그룹의 충돌, 같은 음수 그룹의 통과를 비교합니다. 그룹·마스크를 편집하고 시험 복귀로 반복하세요. 공통 충돌 설정의 차단은 그룹보다 우선합니다.", { 0.0f, 0.0f }, 90.0f },
+    demoEntry{ demoKind::movingPlatformFrictionComparison, "강체", "이동 발판·마찰 전달 비교", "2m/s로 움직이는 키네마틱 발판 위에서 마찰이 있는 상자와 마찰 0인 상자를 비교합니다. 처음 1초의 운반·미끄러짐을 관찰하고 마찰을 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.5f }, 70.0f }
 };
 
 }

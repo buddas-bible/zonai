@@ -44,9 +44,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 23; ++frame )
+    for( int frame = 0; frame < 24; ++frame )
     {
-        session.selectDemo( frame == 22 ? demoKind::collisionGroupComparison : frame == 21 ? demoKind::lowSpeedRestitutionComparison : frame == 20 ? demoKind::restitutionMixingComparison : frame == 19 ? demoKind::frictionMixingComparison : frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 23 ? demoKind::movingPlatformFrictionComparison : frame == 22 ? demoKind::collisionGroupComparison : frame == 21 ? demoKind::lowSpeedRestitutionComparison : frame == 20 ? demoKind::restitutionMixingComparison : frame == 19 ? demoKind::frictionMixingComparison : frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -887,6 +887,71 @@ void checkDemoUi()
             }
         }
     }
+    for( std::size_t component : { 0u, 3u } )
+    {
+        auto platformView = createDemoView( demoKind::movingPlatformFrictionComparison );
+        auto& platformTrial = static_cast<rigidBodyDemo&>( *platformView );
+        const auto selected = platformTrial.getShapes()[component];
+        const float coefficient = component == 0 ? 0.0f : 0.8f;
+        for( int step = 0; step < 60; ++step ) platformTrial.step( 1.0f / 60.0f, 4 );
+        for( int frame = 0; frame < 8; ++frame )
+        {
+            if( frame == 3 ) io.AddInputCharactersUTF8( component == 0 ? "0" : "0.8" );
+            if( frame == 4 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+            if( frame == 5 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 340, 4000 } );
+            ImGui::Begin( "Moving platform inspector" );
+            ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Collision material" ), 1 );
+            if( frame == 0 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Object" );
+            if( frame == 1 && !GImGui->OpenPopupStack.empty() ) GImGui->NavActivateId = GImGui->NavActivateDownId = GImGui->OpenPopupStack.back().Window->GetID( selected.label );
+            if( frame == 2 )
+            {
+                GImGui->NavActivateId = ImGui::GetID( "Friction" );
+                GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+            }
+            if( frame >= 5 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+            platformView->drawControls();
+            ImGui::End();
+            ImGui::Render();
+            if( frame >= 4 && platformTrial.getWorld().GetShapeFriction( selected.shapeHandle ) != coefficient )
+            {
+                std::fprintf( stderr, "platform inspector must preserve selected platform or box friction edits\n" );
+                std::exit( EXIT_FAILURE );
+            }
+            if( frame >= 5 )
+            {
+                for( std::size_t i = 0; i < platformTrial.getShapes().size(); ++i )
+                {
+                    const auto body = platformTrial.getShapes()[i].bodyHandle;
+                    const auto pose = platformTrial.getWorld().GetBodyTransform( body );
+                    const auto velocity = platformTrial.getWorld().GetBodyLinearVelocity( body );
+                    const float lane = i < 2 ? 1.5f : -1.5f;
+                    if( pose.position.x != -2.0f || pose.position.y != lane + ( i % 2 == 0 ? 0.0f : 0.55f ) || pose.rotation.s != 0.0f || velocity.x != ( i % 2 == 0 ? 2.0f : 0.0f ) || velocity.y != 0.0f )
+                    {
+                        std::fprintf( stderr, "platform UI reset must restore initial poses and distinct platform and box velocities\n" );
+                        std::exit( EXIT_FAILURE );
+                    }
+                }
+                if( frame != 7 )
+                {
+                    for( int step = 0; step < 60; ++step ) platformTrial.step( 1.0f / 60.0f, 4 );
+                    for( std::size_t row = 0; row < 2; ++row )
+                    {
+                        const auto platform = platformTrial.getShapes()[2 * row].bodyHandle;
+                        const auto box = platformTrial.getShapes()[2 * row + 1].bodyHandle;
+                        const float speed = platformTrial.getWorld().GetBodyLinearVelocity( box ).x;
+                        if( ( component == 0 ? std::abs( speed ) > 0.02f : speed < 1.8f || speed > 2.1f ) || platformTrial.getWorld().GetBodyLinearVelocity( platform ).x != 2.0f )
+                        {
+                            std::fprintf( stderr, "inspector friction edits must change repeated carrying while kinematic platforms retain their speed\n" );
+                            std::exit( EXIT_FAILURE );
+                        }
+                    }
+                }
+            }
+        }
+    }
     for( std::size_t component : { 2u, 4u } )
     {
         auto groupView = createDemoView( demoKind::collisionGroupComparison );
@@ -1644,7 +1709,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );

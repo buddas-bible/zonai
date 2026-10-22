@@ -54,7 +54,8 @@ enum class demoKind
     frictionMixingComparison,
     restitutionMixingComparison,
     lowSpeedRestitutionComparison,
-    collisionGroupComparison
+    collisionGroupComparison,
+    movingPlatformFrictionComparison
 };
 
 struct demoEntry
