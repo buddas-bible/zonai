@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison )
     {
         createCollisionTrial();
     }
@@ -817,6 +817,28 @@ void rigidBodyDemo::createCollisionTrial()
                 world_.SetBodyLinearVelocity( body, { j == 0 ? 2.0f : -2.0f, 0 } );
                 shapes_.push_back( { body, shape, labels[i][j] } );
             }
+    }
+    else if( kind_ == demoKind::movingPlatformFrictionComparison )
+    {
+        world_.SetGravity( { 0, -10 } );
+        const char* platforms[] = { "발판 A", "발판 B" };
+        const char* boxes[] = { "상자 A", "상자 B" };
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const float lane = i == 0 ? 1.5f : -1.5f;
+            const auto platform = world_.CreateBody( bodyType::Kinematic, { { -2.0f, lane }, {} } );
+            const auto surface = world_.CreateShape( platform, MakeBox( { 4.0f, 0.15f } ) );
+            world_.SetShapeFriction( surface, 0.8f );
+            world_.SetShapeRestitution( surface, 0.0f );
+            world_.SetBodyLinearVelocity( platform, { 2, 0 } );
+            shapes_.push_back( { platform, surface, platforms[i] } );
+            const auto box = world_.CreateBody( bodyType::Dynamic, { { -2.0f, lane + 0.55f }, {} } );
+            const auto shape = world_.CreateShape( box, MakeBox( { 0.6f, 0.4f } ) );
+            world_.SetShapeFriction( shape, i == 0 ? 0.8f : 0.0f );
+            world_.SetShapeRestitution( shape, 0.0f );
+            world_.SetBodySleepEnabled( box, false );
+            shapes_.push_back( { box, shape, boxes[i] } );
+        }
     }
     for( const auto& visual : shapes_ )
     {
