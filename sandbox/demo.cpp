@@ -55,7 +55,8 @@ constexpr std::array entries
     demoEntry{ demoKind::lowSpeedRestitutionComparison, "강체", "저속 반발 억제 비교", "같은 반발계수의 원이 0.5·2m/s로 바닥에 충돌합니다. 중력 없는 상태에서 저속 반발 억제를 비교하고 반발계수를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.8f }, 100.0f },
     demoEntry{ demoKind::collisionGroupComparison, "강체", "충돌 그룹 우선순위 비교", "원 세 쌍으로 그룹 0의 마스크 차단, 같은 양수 그룹의 충돌, 같은 음수 그룹의 통과를 비교합니다. 그룹·마스크를 편집하고 시험 복귀로 반복하세요. 공통 충돌 설정의 차단은 그룹보다 우선합니다.", { 0.0f, 0.0f }, 90.0f },
     demoEntry{ demoKind::movingPlatformFrictionComparison, "강체", "이동 발판·마찰 전달 비교", "2m/s로 움직이는 키네마틱 발판 위에서 마찰이 있는 상자와 마찰 0인 상자를 비교합니다. 처음 1초의 운반·미끄러짐을 관찰하고 마찰을 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.5f }, 70.0f },
-    demoEntry{ demoKind::rollingSlidingFrictionComparison, "강체", "구름·미끄럼 마찰 비교", "회전 없이 4m/s로 출발한 원 두 개를 수평 바닥에서 비교합니다. 마찰에 따른 회전 발생과 미끄러짐 차이를 관찰하고 마찰을 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.5f }, 65.0f }
+    demoEntry{ demoKind::rollingSlidingFrictionComparison, "강체", "구름·미끄럼 마찰 비교", "회전 없이 4m/s로 출발한 원 두 개를 수평 바닥에서 비교합니다. 마찰에 따른 회전 발생과 미끄러짐 차이를 관찰하고 마찰을 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.5f }, 65.0f },
+    demoEntry{ demoKind::frictionForceComparison, "강체", "외력·마찰 균형 비교", "같은 질량·마찰의 상자에 오른쪽 2N·8N을 1초간 적용합니다. 정지 유지와 미끄러짐을 비교하고 마찰을 편집한 뒤 같은 조건 시험 시작으로 반복하세요.", { 0.0f, 0.5f }, 65.0f }
 };
 
 }

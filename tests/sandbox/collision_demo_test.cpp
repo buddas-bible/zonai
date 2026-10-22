@@ -1267,8 +1267,66 @@ void checkRollingSlidingFrictionDemo()
     }
 }
 
+void checkFrictionForceDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        rigidBodyDemo scene{ demoKind::frictionForceComparison };
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 4 && physics.GetBodyCount() == 4 && same( physics.GetGravity(), { 0, -10 } ), "friction force comparison creates two editable resting floor and box pairs under gravity" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        for( std::size_t i : { 1u, 3u } )
+            check( physics.GetBodyMass( visuals[i].bodyHandle ) == 1.0f && !physics.IsBodySleepEnabled( visuals[i].bodyHandle ), "friction force boxes begin with equal unit masses and automatic sleep disabled" );
+        const auto advance = [&]( int frames )
+        {
+            for( int frame = 0; frame < frames; ++frame ) scene.step( 1.0f / 60.0f, substeps );
+        };
+        const auto speed = [&]( std::size_t i ) { return physics.GetBodyLinearVelocity( visuals[i].bodyHandle ).x; };
+        advance( 10 );
+        check( !scene.isForceTrialActive() && scene.getForceTrialTime() == 0.0 && std::abs( speed( 1 ) ) < 0.02f && std::abs( speed( 3 ) ) < 0.02f, "friction force trial stays idle until explicitly started" );
+        scene.startFrictionForceTrial();
+        scene.step( 0.0f, substeps );
+        check( scene.isForceTrialActive() && scene.getForceTrialTime() == 0.0 && speed( 1 ) == 0.0f && speed( 3 ) == 0.0f, "start resets before applying forces and zero steps do not consume duration" );
+        advance( 30 );
+        check( std::abs( speed( 1 ) ) < 0.05f && speed( 3 ) > 1.2f && speed( 3 ) < 1.8f, "friction balances the smaller force while the larger force accelerates the box" );
+        advance( 30 );
+        const float driven = speed( 3 );
+        check( driven > 2.7f && driven < 3.3f && !scene.isForceTrialActive() && std::abs( scene.getForceTrialTime() - 1.0 ) < 1.0e-6, "forces stop after one second of balanced and sliding motion" );
+        advance( 30 );
+        check( speed( 3 ) < driven - 1.0f && std::abs( speed( 1 ) ) < 0.05f, "friction slows the moving box after external force ends" );
+        physics.SetShapeFriction( visuals[0].shapeHandle, 0.0f );
+        physics.SetShapeFriction( visuals[3].shapeHandle, 2.0f );
+        for( int repeat = 0; repeat < 2; ++repeat )
+        {
+            scene.startFrictionForceTrial();
+            check( physics.GetShapeFriction( visuals[0].shapeHandle ) == 0.0f && physics.GetShapeFriction( visuals[3].shapeHandle ) == 2.0f && scene.getForceTrialTime() == 0.0, "restart preserves edited floor and box friction and restarts the timer" );
+            for( std::size_t i = 0; i < visuals.size(); ++i )
+            {
+                const auto body = visuals[i].bodyHandle;
+                check( scene.getShapes()[i].shapeHandle == visuals[i].shapeHandle && physics.IsValid( visuals[i].shapeHandle ) && same( physics.GetBodyTransform( body ).position, { i % 2 == 0 ? 0.0f : -3.0f, ( i < 2 ? 1.5f : -1.5f ) + ( i % 2 == 0 ? 0.0f : 0.65f ) } ) && same( physics.GetBodyLinearVelocity( body ), {} ) && physics.GetBodyAngularVelocity( body ) == 0.0f, "force restart restores initial floor and box poses and rest with stable handles" );
+            }
+            advance( 60 );
+            check( std::abs( speed( 1 ) - 2.0f ) < 0.03f && std::abs( speed( 3 ) ) < 0.05f, "editing friction makes the smaller force move its box and the larger force remain balanced" );
+            const float coast = speed( 1 );
+            advance( 30 );
+            check( std::abs( speed( 1 ) - coast ) < 0.02f, "zero friction exposes any force erroneously applied after one second" );
+        }
+        physics.SetShapeFriction( visuals[2].shapeHandle, 0.0f );
+        scene.startFrictionForceTrial();
+        scene.step( 0.9f, substeps );
+        scene.step( 0.12f, substeps );
+        check( std::abs( speed( 1 ) - 2.0f ) < 0.03f && std::abs( speed( 3 ) - 8.0f ) < 0.03f && !scene.isForceTrialActive(), "crossing one second applies only the remaining force duration" );
+        scene.startFrictionForceTrial();
+        advance( 10 );
+        scene.resetCollisionTrial();
+        advance( 10 );
+        check( !scene.isForceTrialActive() && scene.getForceTrialTime() == 0.0 && std::abs( speed( 1 ) ) < 0.02f && std::abs( speed( 3 ) ) < 0.02f, "trial reset cancels active forces without automatically restarting" );
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkFrictionForceDemo();
     checkRollingSlidingFrictionDemo();
     checkMovingPlatformFrictionDemo();
     checkCollisionGroupDemo();
@@ -1387,7 +1445,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison, demoKind::frictionForceComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };

@@ -177,6 +177,7 @@ public:
     void applyPointTrialImpulse();
     void applyInertiaTrialImpulse();
     void startForceImpulseTrial();
+    void startFrictionForceTrial();
     void startTorqueImpulseTrial();
 
     [[nodiscard]] float getRotationTrialTimeStep() const noexcept { return rotationTrialTimeStep_; }
@@ -184,6 +185,7 @@ public:
     [[nodiscard]] double getTorqueTrialTime() const noexcept { return torqueTrialTime_; }
 
     [[nodiscard]] double getForceTrialTime() const noexcept { return forceTrialTime_; }
+    [[nodiscard]] bool isForceTrialActive() const noexcept { return forceTrialRunning_ && forceTrialTime_ < 1.0; }
     void resetSplinePath();
     void resetTerrainProbes();
     void launchTerrainProbe( std::size_t probeIndex, terrainTrial trial );

@@ -56,7 +56,8 @@ enum class demoKind
     lowSpeedRestitutionComparison,
     collisionGroupComparison,
     movingPlatformFrictionComparison,
-    rollingSlidingFrictionComparison
+    rollingSlidingFrictionComparison,
+    frictionForceComparison
 };
 
 struct demoEntry
