@@ -58,6 +58,7 @@ struct splineRailJointData
     float motorSpeed = 0.0f, maxMotorForce = 0.0f, motorForce = 0.0f;
     bool collideConnected = false;
     bool isLoop = false;
+    float currentSpeed = 0.0f; // 누적 이동량의 변화율(m/s). trackingValid가 false이면 0임.
 };
 
 } // namespace zonai

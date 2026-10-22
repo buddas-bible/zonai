@@ -687,3 +687,7 @@ add_test(NAME preparedCatmullRomSpline2Tests COMMAND preparedCatmullRomSpline2Te
 add_executable(closedSplineRailJointTests dynamics/closed_spline_rail_joint_test.cpp)
 target_link_libraries(closedSplineRailJointTests PRIVATE zonai::zonai)
 add_test(NAME closedSplineRailJointTests COMMAND closedSplineRailJointTests)
+
+add_executable(splineRailSpeedTests dynamics/spline_rail_speed_test.cpp)
+target_link_libraries(splineRailSpeedTests PRIVATE zonai::zonai)
+add_test(NAME splineRailSpeedTests COMMAND splineRailSpeedTests)
