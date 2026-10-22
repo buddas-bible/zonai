@@ -44,9 +44,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 26; ++frame )
+    for( int frame = 0; frame < 27; ++frame )
     {
-        session.selectDemo( frame == 25 ? demoKind::frictionForceComparison : frame == 24 ? demoKind::rollingSlidingFrictionComparison : frame == 23 ? demoKind::movingPlatformFrictionComparison : frame == 22 ? demoKind::collisionGroupComparison : frame == 21 ? demoKind::lowSpeedRestitutionComparison : frame == 20 ? demoKind::restitutionMixingComparison : frame == 19 ? demoKind::frictionMixingComparison : frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 26 ? demoKind::obliqueImpactFrictionComparison : frame == 25 ? demoKind::frictionForceComparison : frame == 24 ? demoKind::rollingSlidingFrictionComparison : frame == 23 ? demoKind::movingPlatformFrictionComparison : frame == 22 ? demoKind::collisionGroupComparison : frame == 21 ? demoKind::lowSpeedRestitutionComparison : frame == 20 ? demoKind::restitutionMixingComparison : frame == 19 ? demoKind::frictionMixingComparison : frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -960,6 +960,73 @@ void checkDemoUi()
     }
     for( std::size_t component : { 0u, 3u } )
     {
+        auto impactView = createDemoView( demoKind::obliqueImpactFrictionComparison );
+        auto& impactTrial = static_cast<rigidBodyDemo&>( *impactView );
+        const auto selected = impactTrial.getShapes()[component];
+        const float coefficient = component == 0 ? 0.0f : 0.8f;
+        for( int step = 0; step < 36; ++step ) impactTrial.step( 1.0f / 60.0f, 4 );
+        for( int frame = 0; frame < 8; ++frame )
+        {
+            if( frame == 3 ) io.AddInputCharactersUTF8( component == 0 ? "0" : "0.8" );
+            if( frame == 4 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+            if( frame == 5 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 340, 4000 } );
+            ImGui::Begin( "Oblique impact inspector" );
+            ImGui::GetStateStorage()->SetInt( ImGui::GetID( "Collision material" ), 1 );
+            if( frame == 0 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "Object" );
+            if( frame == 1 && !GImGui->OpenPopupStack.empty() ) GImGui->NavActivateId = GImGui->NavActivateDownId = GImGui->OpenPopupStack.back().Window->GetID( selected.label );
+            if( frame == 2 )
+            {
+                GImGui->NavActivateId = ImGui::GetID( "Friction" );
+                GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+            }
+            if( frame >= 5 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+            impactView->drawControls();
+            ImGui::End();
+            ImGui::Render();
+            if( frame >= 4 && impactTrial.getWorld().GetShapeFriction( selected.shapeHandle ) != coefficient )
+            {
+                std::fprintf( stderr, "impact inspector must preserve selected floor or circle friction edits\n" );
+                std::exit( EXIT_FAILURE );
+            }
+            if( frame >= 5 )
+            {
+                for( std::size_t i = 0; i < impactTrial.getShapes().size(); ++i )
+                {
+                    const auto body = impactTrial.getShapes()[i].bodyHandle;
+                    const auto pose = impactTrial.getWorld().GetBodyTransform( body );
+                    const auto velocity = impactTrial.getWorld().GetBodyLinearVelocity( body );
+                    const float lane = i < 2 ? 1.5f : -1.5f;
+                    if( pose.position.x != ( i % 2 == 0 ? 0.0f : -2.0f ) || pose.position.y != lane + ( i % 2 == 0 ? 0.0f : 1.75f ) || pose.rotation.s != 0.0f || velocity.x != ( i % 2 == 0 ? 0.0f : 3.0f ) || velocity.y != ( i % 2 == 0 ? 0.0f : -4.0f ) || impactTrial.getWorld().GetBodyAngularVelocity( body ) != 0.0f )
+                    {
+                        std::fprintf( stderr, "impact UI reset must restore initial poses and zero-spin oblique velocities\n" );
+                        std::exit( EXIT_FAILURE );
+                    }
+                }
+                if( frame != 7 )
+                {
+                    for( int step = 0; step < 36; ++step ) impactTrial.step( 1.0f / 60.0f, 4 );
+                    for( std::size_t row = 0; row < 2; ++row )
+                    {
+                        const auto circle = impactTrial.getShapes()[2 * row + 1].bodyHandle;
+                        const float speed = impactTrial.getWorld().GetBodyLinearVelocity( circle ).x;
+                        const float angularVelocity = impactTrial.getWorld().GetBodyAngularVelocity( circle );
+                        const float normalSpeed = impactTrial.getWorld().GetBodyLinearVelocity( circle ).y;
+                        const bool response = component == 0 ? std::abs( speed - 3.0f ) < 0.02f && std::abs( angularVelocity ) < 0.02f : std::abs( speed - 2.0f ) < 0.15f && std::abs( angularVelocity + 5.0f ) < 0.4f;
+                        if( !response || std::abs( normalSpeed - 4.0f ) > 0.15f )
+                        {
+                            std::fprintf( stderr, "inspector friction edits must change tangent speed and spin without changing normal rebound\n" );
+                            std::exit( EXIT_FAILURE );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for( std::size_t component : { 0u, 3u } )
+    {
         auto rollingView = createDemoView( demoKind::rollingSlidingFrictionComparison );
         auto& rollingTrial = static_cast<rigidBodyDemo&>( *rollingView );
         const auto selected = rollingTrial.getShapes()[component];
@@ -1846,7 +1913,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison, demoKind::frictionForceComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison, demoKind::frictionForceComparison, demoKind::obliqueImpactFrictionComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );
