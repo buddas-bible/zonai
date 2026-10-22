@@ -40,7 +40,7 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
 {
     shapes_.reserve( 16 );
     contacts_.reserve( 16 );
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison || kind == demoKind::rollingSlidingFrictionComparison || kind == demoKind::frictionForceComparison || kind == demoKind::obliqueImpactFrictionComparison || kind == demoKind::collisionMassRatioComparison )
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison || kind == demoKind::rollingSlidingFrictionComparison || kind == demoKind::frictionForceComparison || kind == demoKind::obliqueImpactFrictionComparison || kind == demoKind::collisionMassRatioComparison || kind == demoKind::centralOffsetImpactComparison )
     {
         createCollisionTrial();
     }
@@ -925,6 +925,23 @@ void rigidBodyDemo::createCollisionTrial()
                 world_.SetShapeFriction( shape, 0.0f );
                 world_.SetShapeRestitution( shape, 1.0f );
                 world_.SetShapeDensity( shape, ( i == 1 && j == 1 ) || ( i == 2 && j == 0 ) ? 4.0f : 1.0f );
+                world_.SetBodySleepEnabled( body, false );
+                if( j == 0 ) world_.SetBodyLinearVelocity( body, { 4, 0 } );
+                shapes_.push_back( { body, shape, labels[i][j] } );
+            }
+    }
+    else if( kind_ == demoKind::centralOffsetImpactComparison )
+    {
+        world_.SetGravity( {} );
+        const char* labels[][2] = { { "원 A", "상자 A" }, { "원 B", "상자 B" }, { "원 C", "상자 C" } };
+        for( std::size_t i = 0; i < 3; ++i )
+            for( std::size_t j = 0; j < 2; ++j )
+            {
+                const float offset = j == 0 ? ( i == 1 ? 0.25f : i == 2 ? -0.25f : 0.0f ) : 0.0f;
+                const auto body = world_.CreateBody( bodyType::Dynamic, { { j == 0 ? -2.0f : 0.0f, 2.0f - 2.0f * static_cast<float>( i ) + offset }, {} } );
+                const auto shape = j == 0 ? world_.CreateShape( body, circle2{ {}, 0.2f } ) : world_.CreateShape( body, MakeBox( { 0.5f, 0.5f } ) );
+                world_.SetShapeFriction( shape, 0.0f );
+                world_.SetShapeRestitution( shape, 1.0f );
                 world_.SetBodySleepEnabled( body, false );
                 if( j == 0 ) world_.SetBodyLinearVelocity( body, { 4, 0 } );
                 shapes_.push_back( { body, shape, labels[i][j] } );

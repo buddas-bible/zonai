@@ -58,7 +58,8 @@ constexpr std::array entries
     demoEntry{ demoKind::rollingSlidingFrictionComparison, "강체", "구름·미끄럼 마찰 비교", "회전 없이 4m/s로 출발한 원 두 개를 수평 바닥에서 비교합니다. 마찰에 따른 회전 발생과 미끄러짐 차이를 관찰하고 마찰을 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.5f }, 65.0f },
     demoEntry{ demoKind::frictionForceComparison, "강체", "외력·마찰 균형 비교", "같은 질량·마찰의 상자에 오른쪽 2N·8N을 1초간 적용합니다. 정지 유지와 미끄러짐을 비교하고 마찰을 편집한 뒤 같은 조건 시험 시작으로 반복하세요.", { 0.0f, 0.5f }, 65.0f },
     demoEntry{ demoKind::obliqueImpactFrictionComparison, "강체", "비스듬한 충돌·접선 마찰 비교", "중력 없이 같은 원이 수평 바닥에 비스듬히 충돌합니다. 같은 수직 반발과 마찰에 따른 가로 감속·회전을 비교하고 재질을 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 1.0f }, 65.0f },
-    demoEntry{ demoKind::collisionMassRatioComparison, "강체", "충돌 질량비 비교", "정지한 표적을 4m/s의 원으로 칩니다. 질량비 1:1·1:4·4:1에서 속도 전달·되튕김·전진을 비교하고 밀도를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.0f }, 80.0f }
+    demoEntry{ demoKind::collisionMassRatioComparison, "강체", "충돌 질량비 비교", "정지한 표적을 4m/s의 원으로 칩니다. 질량비 1:1·1:4·4:1에서 속도 전달·되튕김·전진을 비교하고 밀도를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.0f }, 80.0f },
+    demoEntry{ demoKind::centralOffsetImpactComparison, "강체", "정면·편심 충돌 비교", "같은 원이 상자의 중심·중심 위·중심 아래를 4m/s로 칩니다. 중심 충돌의 무회전과 편심 충돌의 반대 회전을 비교하고 밀도를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.0f }, 85.0f }
 };
 
 }
