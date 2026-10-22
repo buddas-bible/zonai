@@ -135,7 +135,7 @@ bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, 
 
 rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 {
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison ) showLabels_ = true;
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison || kind == demoKind::rollingSlidingFrictionComparison ) showLabels_ = true;
     selectedShapeIndex_ = kind == demoKind::playground || kind == demoKind::motorCar ? 2 : 1;
     if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
@@ -730,7 +730,7 @@ void rigidBodyDemoUi::drawSplineEditorControls()
 void rigidBodyDemoUi::drawExperimentControls()
 {
     if( getKind() == demoKind::collisionComparison || getKind() == demoKind::frictionComparison || getKind() == demoKind::restitutionComparison || getKind() == demoKind::boxStack || getKind() == demoKind::ccdComparison || getKind() == demoKind::collisionFilterComparison || getKind() == demoKind::sensorWallComparison || getKind() == demoKind::sleepWakeComparison || getKind() == demoKind::dampingComparison || getKind() == demoKind::gravityScaleComparison || getKind() == demoKind::massImpulseComparison || getKind() == demoKind::impulsePointComparison || getKind() == demoKind::rotationalInertiaComparison || getKind() == demoKind::forceImpulseComparison || getKind() == demoKind::torqueImpulseComparison || getKind() == demoKind::dynamicKinematicComparison || getKind() == demoKind::compoundCenterComparison || getKind() == demoKind::fastRotationComparison || getKind() == demoKind::maximumLinearSpeedComparison || getKind() == demoKind::frictionMixingComparison ||
-        getKind() == demoKind::restitutionMixingComparison || getKind() == demoKind::lowSpeedRestitutionComparison || getKind() == demoKind::collisionGroupComparison || getKind() == demoKind::movingPlatformFrictionComparison )
+        getKind() == demoKind::restitutionMixingComparison || getKind() == demoKind::lowSpeedRestitutionComparison || getKind() == demoKind::collisionGroupComparison || getKind() == demoKind::movingPlatformFrictionComparison || getKind() == demoKind::rollingSlidingFrictionComparison )
     {
         ImGui::TextUnformatted( "반복 시험" );
         if( getKind() == demoKind::ccdComparison )
@@ -739,6 +739,20 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::TextWrapped( "정지 → 시험 복귀 → 1프레임 순서로 비교하세요. 월드 설정의 CCD 검사를 바꿉니다. 시작 속도는 100m/s이며 복귀하면 같은 조건으로 돌아갑니다. Bullet 해제만으로 정적 벽 CCD가 꺼지지는 않습니다." );
         }
         if( getKind() == demoKind::collisionFilterComparison ) ImGui::TextWrapped( "처음에는 위쪽이 충돌하고 아래쪽은 통과합니다. 아래 A의 충돌 마스크 → 개별 추가 제한에서 충돌 대상 레이어 02를 켜고 시험 복귀로 비교하세요. 양쪽 마스크가 서로를 허용해야 하며 공통 충돌 설정도 함께 적용됩니다. 이름의 레이어는 초기값입니다." );
+        if( getKind() == demoKind::rollingSlidingFrictionComparison )
+        {
+            ImGui::TextWrapped( "두 원은 처음에 오른쪽 4m/s·각속도 0으로 출발합니다. A는 마찰로 감속하면서 시계 방향 회전을 얻고, B는 원 마찰 0이라 회전 없이 미끄러집니다. 정지 → 시험 복귀 → 재생으로 처음 1초를 비교하세요. 충돌 재질에서 바닥·원 마찰을 편집할 수 있습니다. 수평 바닥에서 미끄럼 속도가 0에 가까우면 미끄럼 없는 구름입니다. 감쇠가 없으므로 구름 자체를 임의로 멈추지는 않습니다." );
+            for( std::size_t i = 0; i < 2; ++i )
+            {
+                const auto& floor = getShapes()[2 * i];
+                const auto& circle = getShapes()[2 * i + 1];
+                const float speed = getWorld().GetBodyLinearVelocity( circle.bodyHandle ).x;
+                const float angularVelocity = getWorld().GetBodyAngularVelocity( circle.bodyHandle );
+                ImGui::TextWrapped( "%s / %s: 마찰 %.2f / %.2f", floor.label, circle.label, getWorld().GetShapeFriction( floor.shapeHandle ), getWorld().GetShapeFriction( circle.shapeHandle ) );
+                ImGui::TextWrapped( "가로 속도 %.2f m/s / 각속도 %.2f rad/s", speed, angularVelocity );
+                ImGui::TextWrapped( "수평 바닥 기준 미끄럼 속도: %.2f m/s", speed + 0.4f * angularVelocity );
+            }
+        }
         if( getKind() == demoKind::movingPlatformFrictionComparison )
         {
             ImGui::TextWrapped( "두 발판은 처음에 오른쪽 2m/s로 움직이고 상자는 정지해 있습니다. A는 마찰 0.8로 상자를 운반하고 B는 상자 마찰 0이라 아래로 미끄러져 지나갑니다. 정지 → 시험 복귀 → 재생으로 처음 1초를 비교하세요. 오브젝트의 충돌 재질에서 발판·상자 마찰을 편집할 수 있습니다. 키네마틱 발판은 접촉 힘으로 속도가 바뀌지 않습니다. 발판은 유한하므로 오래 진행하면 상자가 끝에서 떨어질 수 있습니다." );
