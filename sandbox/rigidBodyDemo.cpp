@@ -60,6 +60,10 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createSplinePath();
     }
+    else if( kind == demoKind::revoluteMotorTorqueComparison )
+    {
+        createRevoluteMotorTorqueComparison();
+    }
     else if( kind == demoKind::distanceLimitMotorComparison )
     {
         createDistanceLimitMotorComparison();
@@ -1368,6 +1372,34 @@ void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial tri
         terrainTrialObservation_.launchInertia = world_.GetBodyRotationalInertia( body );
         if( trial != terrainTrial::seams ) terrainTrialObservation_.launchFraction = splineTrialFraction_;
     }
+}
+
+void rigidBodyDemo::createRevoluteMotorTorqueComparison()
+{
+    world_.SetGravity( {} );
+    const auto anchor = world_.CreateBody( bodyType::Static );
+    const char* labels[] = { "물체 A", "물체 B", "물체 C" };
+    const float maxTorque[] = { 0.0f, 0.01f, 0.2f };
+    for( std::size_t i = 0; i < 3; ++i )
+    {
+        const float x = -2.0f + 2.0f * static_cast<float>( i );
+        const auto body = world_.CreateBody( bodyType::Dynamic, { { x, 0.0f }, {} } );
+        const auto shape = world_.CreateShape( body, MakeBox( { 0.5f, 0.1f } ) );
+        world_.SetShapeFriction( shape, 0.0f );
+        world_.SetShapeRestitution( shape, 0.0f );
+        world_.SetBodySleepEnabled( body, false );
+        shapes_.push_back( { body, shape, labels[i] } );
+        collisionTrialInitialStates_.push_back( { world_.GetBodyTransform( body ), {}, 0.0f } );
+        revoluteJointDef joint{};
+        joint.bodyA = anchor;
+        joint.bodyB = body;
+        joint.localAnchorA = { x, 0.0f };
+        joint.enableMotor = true;
+        joint.motorSpeed = 2.0f;
+        joint.maxMotorTorque = maxTorque[i];
+        torqueComparisonJoints_[i] = world_.createRevoluteJoint( joint );
+    }
+    impulseBody_ = torqueBody_ = shapes_[0].bodyHandle;
 }
 
 void rigidBodyDemo::createDistanceLimitMotorComparison()
