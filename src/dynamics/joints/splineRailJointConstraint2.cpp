@@ -194,13 +194,14 @@ frameRows2 getRows( splineRailJointConstraint2& c, const bodyState& a, const bod
     }
     c.trackedPoint = point;
     // 계산 실패는 impulse만 폐기하고 분기는 유지함. 전역 재투영은 생성·편집에서 수행함.
-    result.frame = getSplineRailFrame( *c.joint, poseA, poseB, seed, true );
+    result.frame = getSplineRailFrame( *c.joint, poseA, poseB, seed, true, c.distanceOffset );
     if( !result.frame.valid )
     {
         clear( c );
         return result;
     }
     c.parameter = result.frame.parameter;
+    c.distanceOffset = result.frame.distanceOffset;
     c.trackingValid = true;
     const vec2 rA = result.frame.anchorB - ( c.bodyA.center + a.deltaPosition ), rB = result.frame.anchorB - ( c.bodyB.center + b.deltaPosition );
     const auto& f = result.frame;
@@ -219,7 +220,7 @@ frameRows2 getRows( splineRailJointConstraint2& c, const bodyState& a, const bod
 
 bool setSplineRailGeometry( splineRailJointSim2& joint, std::span<const vec2> points )
 {
-    auto geometry = prepareSpline( { points } );
+    auto geometry = prepareSpline( { points, joint.isLoop } );
     if( !geometry ) return false;
 
     std::vector<splineRailSegment2> segments;
@@ -234,7 +235,7 @@ bool setSplineRailGeometry( splineRailJointSim2& joint, std::span<const vec2> po
         length += segment.length;
         segments.push_back( segment );
     }
-    if( !std::isfinite( length ) || ( joint.enableLimit && ( joint.upperTranslation < -joint.referenceDistance || joint.lowerTranslation > length - joint.referenceDistance ) ) ) return false;
+    if( !std::isfinite( length ) || ( !joint.isLoop && joint.enableLimit && ( joint.upperTranslation < -joint.referenceDistance || joint.lowerTranslation > length - joint.referenceDistance ) ) ) return false;
 
     joint.points.assign( points.begin(), points.end() );
     joint.geometry = std::move( *geometry );
@@ -248,9 +249,10 @@ bool setSplineRailGeometry( splineRailJointSim2& joint, std::span<const vec2> po
     return true;
 }
 
-splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const transform2& bodyA, const transform2& bodyB, splineParameter2 seed, bool tracked )
+splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const transform2& bodyA, const transform2& bodyB, splineParameter2 seed, bool tracked, double distanceOffset )
 {
     splineRailFrame2 frame{};
+    frame.distanceOffset = distanceOffset;
     const auto curves = joint.geometry.getSegments();
     if( curves.empty() ) return frame;
     frame.anchorB = TransformPoint( bodyB, joint.localAnchorB );
@@ -279,23 +281,35 @@ splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const tra
     {
         for( std::size_t traversed = 0; traversed < curves.size(); ++traversed )
         {
-            if( t <= 1.0e-9 && index > 0 )
+            if( t <= 1.0e-9 && ( index > 0 || joint.isLoop ) )
             {
                 const auto& segment = curves[index];
                 if( Dot( point - segment.start, segment.tangent1 ) < 0.0f )
                 {
-                    --index;
+                    if( index == 0 )
+                    {
+                        index = curves.size() - 1;
+                        frame.distanceOffset -= joint.length;
+                    }
+                    else
+                        --index;
                     t = project( curves[index], point, 1.0 );
                     continue;
                 }
             }
-            if( t >= 1.0 - 1.0e-9 && index + 1 < curves.size() )
+            if( t >= 1.0 - 1.0e-9 && ( index + 1 < curves.size() || joint.isLoop ) )
             {
                 const auto& segment = curves[index];
                 const vec2 derivative = segment.tangent1 + 2.0f * segment.quadratic + 3.0f * segment.cubic;
                 if( Dot( point - segment.end, derivative ) > 0.0f )
                 {
-                    ++index;
+                    if( index + 1 == curves.size() )
+                    {
+                        index = 0;
+                        frame.distanceOffset += joint.length;
+                    }
+                    else
+                        ++index;
                     t = project( curves[index], point, 0.0 );
                     continue;
                 }
@@ -316,7 +330,7 @@ splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const tra
     frame.curvature = ( dx * ( 2.0 * segment.quadratic.y + 6.0 * t * segment.cubic.y ) - dy * ( 2.0 * segment.quadratic.x + 6.0 * t * segment.cubic.x ) ) / ( speed * speed * speed );
     const vec2 separation = frame.anchorB - frame.anchorA;
     frame.lateralError = Dot( frame.normal, separation );
-    const bool endpoint = ( index == 0 && t == 0.0 ) || ( index + 1 == curves.size() && t == 1.0 );
+    const bool endpoint = !joint.isLoop && ( ( index == 0 && t == 0.0 ) || ( index + 1 == curves.size() && t == 1.0 ) );
     // 끝점 밖에서는 고정된 끝점 접선을 사용하므로 접선각의 거리 미분도 0임.
     if( endpoint && ( ( index == 0 && Dot( frame.tangent, separation ) < 0.0f ) || ( index + 1 == curves.size() && Dot( frame.tangent, separation ) > 0.0f ) ) ) frame.curvature = 0.0;
     const double denominator = endpoint ? 1.0 : 1.0 - frame.curvature * frame.lateralError;
@@ -325,6 +339,7 @@ splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const tra
     const auto& arc = joint.segments[index];
     frame.distance = arc.prefix + ( t == 1.0 ? arc.length : arcLength( segment, t ) );
     if( endpoint ) frame.distance += Dot( frame.tangent, separation );
+    if( joint.isLoop ) frame.distance += frame.distanceOffset;
     frame.translation = frame.distance - joint.referenceDistance;
     frame.parameter = { index, static_cast<float>( t ) };
     const rot2 rotation = Inverse( bodyA.rotation ) * bodyB.rotation;
@@ -345,6 +360,7 @@ splineRailJointConstraint2 prepareSplineRailJointConstraint( const splineRailJoi
     c.bodyB = bodySimB;
     c.subStepTime = subStepTime;
     c.parameter = joint.parameter;
+    c.distanceOffset = joint.distanceOffset;
     c.trackingValid = joint.trackingValid;
     c.trackedPoint = InverseTransformPoint( bodySimA.transform, TransformPoint( bodySimB.transform, joint.localAnchorB ) );
     if( joint.subStepTime == subStepTime && bodySimA.invMass + bodySimA.invInertia + bodySimB.invMass + bodySimB.invInertia > 0.0f )
@@ -399,8 +415,8 @@ void solveSplineRailJointConstraint( splineRailJointConstraint2& c, bodyState& s
         c.motorImpulse = std::clamp( old + impulse, -joint.maxMotorForce * c.subStepTime, joint.maxMotorForce * c.subStepTime );
         apply( rows.arc, c.motorImpulse - old, c, a, b );
     }
-    const float lower = static_cast<float>( std::max( -joint.referenceDistance, joint.enableLimit ? static_cast<double>( joint.lowerTranslation ) : -joint.referenceDistance ) );
-    const float upper = static_cast<float>( std::min( joint.length - joint.referenceDistance, joint.enableLimit ? static_cast<double>( joint.upperTranslation ) : joint.length - joint.referenceDistance ) );
+    const float lower = joint.isLoop ? joint.lowerTranslation : static_cast<float>( std::max( -joint.referenceDistance, joint.enableLimit ? static_cast<double>( joint.lowerTranslation ) : -joint.referenceDistance ) );
+    const float upper = joint.isLoop ? joint.upperTranslation : static_cast<float>( std::min( joint.length - joint.referenceDistance, joint.enableLimit ? static_cast<double>( joint.upperTranslation ) : joint.length - joint.referenceDistance ) );
     const auto limit = [&]( float separation, float direction, float& accumulated )
     {
         float bias = 0.0f, massScale = 1.0f, impulseScale = 0.0f;
@@ -416,8 +432,11 @@ void solveSplineRailJointConstraint( splineRailJointConstraint2& c, bodyState& s
         accumulated = std::max( 0.0f, old + impulse );
         apply( rows.arc, direction * ( accumulated - old ), c, a, b );
     };
-    limit( translation - lower, 1.0f, c.lowerImpulse );
-    limit( upper - translation, -1.0f, c.upperImpulse );
+    if( !joint.isLoop || joint.enableLimit )
+    {
+        limit( translation - lower, 1.0f, c.lowerImpulse );
+        limit( upper - translation, -1.0f, c.upperImpulse );
+    }
     const float k11 = mass( rows.normal, rows.normal, c ), k12 = mass( rows.normal, rows.angular, c ), k22 = mass( rows.angular, rows.angular, c );
     vec2 rhs{ velocity( rows.normal, a, b ), velocity( rows.angular, a, b ) }, delta{};
     if( joint.rotationMode == splineRailRotationMode::fixed )

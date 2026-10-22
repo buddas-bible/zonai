@@ -33,6 +33,7 @@ jointId world::createSplineRailJoint( const splineRailJointDef& definition )
     sim.bodyIdB = b;
     sim.localAnchorB = definition.localAnchorB;
     sim.referenceDistance = definition.referenceDistance;
+    sim.isLoop = definition.isLoop;
     sim.referenceAngle = definition.referenceAngle;
     sim.rotationMode = definition.rotationMode;
     sim.enableAngularSpring = definition.enableAngularSpring;
@@ -89,7 +90,7 @@ void world::setSplineRailJointLimit( jointId id, bool enableLimit, float lowerTr
 {
     if( !std::isfinite( lowerTranslation ) || !std::isfinite( upperTranslation ) || lowerTranslation > upperTranslation ) return;
     auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );
-    if( enableLimit && ( upperTranslation < -sim.referenceDistance || lowerTranslation > sim.length - sim.referenceDistance ) ) return;
+    if( enableLimit && !sim.isLoop && ( upperTranslation < -sim.referenceDistance || lowerTranslation > sim.length - sim.referenceDistance ) ) return;
     if( sim.enableLimit == enableLimit && sim.lowerTranslation == lowerTranslation && sim.upperTranslation == upperTranslation ) return;
     sim.enableLimit = enableLimit;
     sim.lowerTranslation = lowerTranslation;
@@ -115,7 +116,7 @@ void world::setSplineRailJointRotation( jointId id, splineRailRotationMode mode,
     if( sim.rotationMode == mode && sim.angularHertz == angularHertz && sim.angularDampingRatio == angularDampingRatio && sim.enableAngularSpring == enableAngularSpring ) return;
     if( sim.rotationMode != mode && mode == splineRailRotationMode::followTangent )
     {
-        const auto frame = getSplineRailFrame( sim, bodySims_[sim.bodyIdA].transform, bodySims_[sim.bodyIdB].transform, sim.parameter, true );
+        const auto frame = getSplineRailFrame( sim, bodySims_[sim.bodyIdA].transform, bodySims_[sim.bodyIdB].transform, sim.parameter, true, sim.distanceOffset );
         if( !frame.valid ) return;
         const rot2 relative = Inverse( bodySims_[sim.bodyIdA].transform.rotation ) * bodySims_[sim.bodyIdB].transform.rotation;
         const vec2 tangent = InverseRotate( bodySims_[sim.bodyIdA].transform.rotation, frame.tangent );
@@ -138,10 +139,20 @@ bool world::setSplineRailJointPoints( jointId id, std::span<const vec2> points )
                 return a.x == b.x && a.y == b.y;
             } ) )
         return true;
+    // 닫힌 경로 편집은 누적 거리를 보존하고 새 투영과의 위상만 맞춤.
+    double distance = 0.0;
+    if( sim.isLoop )
+    {
+        const auto before = getSplineRailFrame( sim, bodySims_[sim.bodyIdA].transform, bodySims_[sim.bodyIdB].transform, sim.parameter, true, sim.distanceOffset );
+        if( !before.valid ) return false;
+        distance = before.distance;
+    }
     auto candidate = sim;
     if( !setSplineRailGeometry( candidate, points ) ) return false;
     const auto frame = getSplineRailFrame( candidate, bodySims_[sim.bodyIdA].transform, bodySims_[sim.bodyIdB].transform, {}, false );
     if( !frame.valid ) return false;
+    candidate.distanceOffset = sim.isLoop ? distance - frame.distance : 0.0;
+    if( !std::isfinite( candidate.distanceOffset ) ) return false;
     candidate.parameter = frame.parameter;
     candidate.trackingValid = true;
     sim = std::move( candidate );
@@ -158,7 +169,7 @@ splineRailJointData world::getSplineRailJointData( jointId id ) const
 {
     const auto index = getJointIndex( id );
     const auto& sim = std::get<splineRailJointSim2>( jointSims_[index] );
-    const auto frame = getSplineRailFrame( sim, bodySims_[sim.bodyIdA].transform, bodySims_[sim.bodyIdB].transform, sim.parameter, true );
+    const auto frame = getSplineRailFrame( sim, bodySims_[sim.bodyIdA].transform, bodySims_[sim.bodyIdB].transform, sim.parameter, true, sim.distanceOffset );
     splineRailJointData data{};
     data.bodyA = MakeBodyId( sim.bodyIdA );
     data.bodyB = MakeBodyId( sim.bodyIdB );
@@ -191,6 +202,7 @@ splineRailJointData world::getSplineRailJointData( jointId id ) const
     data.motorSpeed = sim.motorSpeed;
     data.maxMotorForce = sim.maxMotorForce;
     data.collideConnected = joints_[index].collideConnected;
+    data.isLoop = sim.isLoop;
     data.springForce = sim.subStepTime > 0.0f ? sim.springImpulse / sim.subStepTime : 0.0f;
     data.motorForce = sim.subStepTime > 0.0f ? sim.motorImpulse / sim.subStepTime : 0.0f;
     return data;

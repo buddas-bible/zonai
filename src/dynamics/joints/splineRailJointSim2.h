@@ -19,6 +19,8 @@ struct splineRailJointSim2
     preparedCatmullRomSpline2 geometry{};
     std::vector<splineRailSegment2> segments{};
     double length = 0.0, referenceDistance = 0.0;
+    bool isLoop = false;
+    double distanceOffset = 0.0; // 주회와 편집 전 누적 거리를 새 구간 거리와 연결함.
     vec2 localAnchorB{};
     float referenceAngle = 0.0f, tangentOffset = 0.0f;
     splineRailRotationMode rotationMode = splineRailRotationMode::fixed;
