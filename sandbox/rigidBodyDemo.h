@@ -266,6 +266,7 @@ public:
     [[nodiscard]] jointId getPendulumJoint() const noexcept { return pendulumJoint_; }
     [[nodiscard]] std::span<const jointId> getSpringComparisonJoints() const noexcept { return springComparisonJoints_; }
     [[nodiscard]] std::span<const jointId> getMotorComparisonJoints() const noexcept { return motorComparisonJoints_; }
+    [[nodiscard]] std::span<const jointId> getLimitComparisonJoints() const noexcept { return limitComparisonJoints_; }
 
     [[nodiscard]] jointId getRevoluteJoint() const noexcept { return revoluteJoint_; }
 
@@ -356,6 +357,7 @@ private:
     void createPendulum();
     void createSpringDampingComparison();
     void createDistanceMotorForceComparison();
+    void createDistanceLimitMotorComparison();
     void createRevoluteHinge();
     void createWheelSuspension();
     void createPrismaticRail();
@@ -430,6 +432,7 @@ private:
     jointId pendulumJoint_{};
     std::array<jointId, 3> springComparisonJoints_{};
     std::array<jointId, 3> motorComparisonJoints_{};
+    std::array<jointId, 2> limitComparisonJoints_{};
     jointId revoluteJoint_{};
     jointId wheelJoint_{};
     jointId prismaticJoint_{};
