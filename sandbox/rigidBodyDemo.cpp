@@ -60,6 +60,10 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createSplinePath();
     }
+    else if( kind == demoKind::suspensionLoadComparison )
+    {
+        createSuspensionLoadComparison();
+    }
     else if( kind == demoKind::revoluteLimitMotorComparison )
     {
         createRevoluteLimitMotorComparison();
@@ -1376,6 +1380,36 @@ void rigidBodyDemo::launchTerrainProbe( std::size_t probeIndex, terrainTrial tri
         terrainTrialObservation_.launchInertia = world_.GetBodyRotationalInertia( body );
         if( trial != terrainTrial::seams ) terrainTrialObservation_.launchFraction = splineTrialFraction_;
     }
+}
+
+void rigidBodyDemo::createSuspensionLoadComparison()
+{
+    world_.SetGravity( { 0.0f, -9.8f } );
+    const auto anchor = world_.CreateBody( bodyType::Static );
+    const char* labels[] = { "물체 A", "물체 B", "물체 C" };
+    const float frequency[] = { 0.5f, 1.0f, 2.0f };
+    for( std::size_t i = 0; i < 3; ++i )
+    {
+        const float x = -3.0f + 3.0f * static_cast<float>( i );
+        const auto body = world_.CreateBody( bodyType::Dynamic, { { x, 1.0f }, {} } );
+        const auto shape = world_.CreateShape( body, circle2{ {}, 0.2f } );
+        world_.SetShapeFriction( shape, 0.0f );
+        world_.SetShapeRestitution( shape, 0.0f );
+        world_.SetBodySleepEnabled( body, false );
+        shapes_.push_back( { body, shape, labels[i] } );
+        world_.SetBodyAngularVelocity( body, 2.0f );
+        collisionTrialInitialStates_.push_back( { world_.GetBodyTransform( body ), {}, 2.0f } );
+        wheelJointDef joint{};
+        joint.bodyA = anchor;
+        joint.bodyB = body;
+        joint.localAnchorA = { x, 1.0f };
+        joint.localAxisA = { 0.0f, 1.0f };
+        joint.enableSpring = true;
+        joint.hertz = frequency[i];
+        joint.dampingRatio = 0.7f;
+        suspensionComparisonJoints_[i] = world_.createWheelJoint( joint );
+    }
+    impulseBody_ = torqueBody_ = shapes_[0].bodyHandle;
 }
 
 void rigidBodyDemo::createRevoluteLimitMotorComparison()
