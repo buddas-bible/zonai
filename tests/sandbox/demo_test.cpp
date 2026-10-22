@@ -57,9 +57,11 @@ void checkRevoluteMotorTorqueDemo();
 void checkRevoluteLimitMotorDemo();
 void checkSuspensionLoadDemo();
 void checkSuspensionLimitDemo();
+void checkSuspensionMotorDemo();
 
 int main()
 {
+    checkSuspensionMotorDemo();
     checkSuspensionLimitDemo();
     checkSuspensionLoadDemo();
     checkRevoluteLimitMotorDemo();
@@ -68,7 +70,7 @@ int main()
     checkDistanceMotorForceDemo();
     checkSpringDampingDemo();
     checkCollisionDemos();
-    check( getDemoEntries().size() == 53, "fifty-three independently selectable demo entries" );
+    check( getDemoEntries().size() == 54, "fifty-four independently selectable demo entries" );
     demoSession session{ createRigidBodyDemo };
     auto& playground = static_cast<rigidBodyDemo&>( session.getDemo() );
     check( playground.getWorld().GetBodyCount() == 6 && playground.getWorld().getJointCount() == 0, "playground separated from pendulum" );
