@@ -52,13 +52,15 @@ std::unique_ptr<demo> createCounter( demoKind )
 void checkCollisionDemos();
 void checkSpringDampingDemo();
 void checkDistanceMotorForceDemo();
+void checkDistanceLimitMotorDemo();
 
 int main()
 {
+    checkDistanceLimitMotorDemo();
     checkDistanceMotorForceDemo();
     checkSpringDampingDemo();
     checkCollisionDemos();
-    check( getDemoEntries().size() == 48, "forty-eight independently selectable demo entries" );
+    check( getDemoEntries().size() == 49, "forty-nine independently selectable demo entries" );
     demoSession session{ createRigidBodyDemo };
     auto& playground = static_cast<rigidBodyDemo&>( session.getDemo() );
     check( playground.getWorld().GetBodyCount() == 6 && playground.getWorld().getJointCount() == 0, "playground separated from pendulum" );
