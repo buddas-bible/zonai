@@ -44,9 +44,9 @@ void checkDemoUi()
         std::exit( EXIT_FAILURE );
     }
     demoSession session{ createDemoView };
-    for( int frame = 0; frame < 33; ++frame )
+    for( int frame = 0; frame < 34; ++frame )
     {
-        session.selectDemo( frame == 32 ? demoKind::revoluteMotorTorqueComparison : frame == 31 ? demoKind::distanceLimitMotorComparison : frame == 30 ? demoKind::distanceMotorForceComparison : frame == 29 ? demoKind::springDampingComparison : frame == 28 ? demoKind::centralOffsetImpactComparison : frame == 27 ? demoKind::collisionMassRatioComparison : frame == 26 ? demoKind::obliqueImpactFrictionComparison : frame == 25 ? demoKind::frictionForceComparison : frame == 24 ? demoKind::rollingSlidingFrictionComparison : frame == 23 ? demoKind::movingPlatformFrictionComparison : frame == 22 ? demoKind::collisionGroupComparison : frame == 21 ? demoKind::lowSpeedRestitutionComparison : frame == 20 ? demoKind::restitutionMixingComparison : frame == 19 ? demoKind::frictionMixingComparison : frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
+        session.selectDemo( frame == 33 ? demoKind::revoluteLimitMotorComparison : frame == 32 ? demoKind::revoluteMotorTorqueComparison : frame == 31 ? demoKind::distanceLimitMotorComparison : frame == 30 ? demoKind::distanceMotorForceComparison : frame == 29 ? demoKind::springDampingComparison : frame == 28 ? demoKind::centralOffsetImpactComparison : frame == 27 ? demoKind::collisionMassRatioComparison : frame == 26 ? demoKind::obliqueImpactFrictionComparison : frame == 25 ? demoKind::frictionForceComparison : frame == 24 ? demoKind::rollingSlidingFrictionComparison : frame == 23 ? demoKind::movingPlatformFrictionComparison : frame == 22 ? demoKind::collisionGroupComparison : frame == 21 ? demoKind::lowSpeedRestitutionComparison : frame == 20 ? demoKind::restitutionMixingComparison : frame == 19 ? demoKind::frictionMixingComparison : frame == 18 ? demoKind::maximumLinearSpeedComparison : frame == 17 ? demoKind::fastRotationComparison : frame == 16 ? demoKind::compoundCenterComparison : frame == 15 ? demoKind::dynamicKinematicComparison : frame == 14 ? demoKind::torqueImpulseComparison : frame == 13 ? demoKind::forceImpulseComparison : frame == 12 ? demoKind::rotationalInertiaComparison : frame == 11 ? demoKind::impulsePointComparison : frame == 10 ? demoKind::massImpulseComparison : frame == 9 ? demoKind::gravityScaleComparison : frame == 8 ? demoKind::dampingComparison : frame == 7 ? demoKind::sleepWakeComparison : frame == 6 ? demoKind::sensorWallComparison : getDemoEntries()[static_cast<std::size_t>( frame ) % getDemoEntries().size()].kind );
         session.stepOnce( 4 );
         auto& model = static_cast<rigidBodyDemo&>( session.getDemo() );
         demoInput input{};
@@ -884,6 +884,68 @@ void checkDemoUi()
             {
                 std::fprintf( stderr, "point query did not follow inspector rotation editing\n" );
                 std::exit( EXIT_FAILURE );
+            }
+        }
+    }
+    for( int parameter : { 0, 1, 2, 3, 4 } )
+    {
+        auto limitView = createDemoView( demoKind::revoluteLimitMotorComparison );
+        auto& limitTrial = static_cast<rigidBodyDemo&>( *limitView );
+        const auto joints = limitTrial.getAngleLimitComparisonJoints();
+        const int row = parameter == 0 ? 0 : 1;
+        const char* controls[] = { "Angle limit enabled", "Angle limit enabled", "Angle lower limit", "Angle upper limit", "Motor target angular speed" };
+        if( parameter == 2 ) limitTrial.getWorld().setRevoluteJointMotor( joints[1], true, -2.0f, 0.2f );
+        for( int step = 0; step < 30; ++step ) limitTrial.step( 1.0f / 60.0f, 4 );
+        for( int frame = 0; frame < 8; ++frame )
+        {
+            if( frame == 3 && parameter >= 2 ) io.AddInputCharactersUTF8( parameter == 2 ? "-30" : parameter == 3 ? "30" : "0.5" );
+            if( frame == 4 && parameter >= 2 ) io.AddKeyEvent( ImGuiKey_Enter, true );
+            if( frame == 5 ) io.AddKeyEvent( ImGuiKey_Enter, false );
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0, 0 } );
+            ImGui::SetNextWindowSize( { 340, 4000 } );
+            ImGui::Begin( "Angle motor comparison settings" );
+            if( frame == 2 )
+            {
+                ImGui::PushID( row );
+                GImGui->NavActivateId = ImGui::GetID( controls[parameter] );
+                if( parameter < 2 ) GImGui->NavActivateDownId = GImGui->NavActivateId;
+                else GImGui->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+                ImGui::PopID();
+            }
+            if( frame >= 5 ) GImGui->NavActivateId = GImGui->NavActivateDownId = ImGui::GetID( "CollisionTrialReset" );
+            limitView->drawControls();
+            ImGui::End();
+            ImGui::Render();
+            const auto edited = limitTrial.getWorld().getRevoluteJointData( joints[row] );
+            if( frame >= 4 && ( parameter == 0 ? !edited.enableLimit : parameter == 1 ? edited.enableLimit : parameter == 2 ? std::abs( edited.lowerAngle + std::numbers::pi_v<float> / 6.0f ) > 1.0e-6f : parameter == 3 ? std::abs( edited.upperAngle - std::numbers::pi_v<float> / 6.0f ) > 1.0e-6f : edited.motorSpeed != 0.5f ) )
+            {
+                std::fprintf( stderr, "angle motor controls must preserve independent enable bounds and speed edits\n" );
+                std::exit( EXIT_FAILURE );
+            }
+            if( frame >= 5 )
+            {
+                for( std::size_t i = 0; i < limitTrial.getShapes().size(); ++i )
+                {
+                    const auto body = limitTrial.getShapes()[i].bodyHandle;
+                    const auto pose = limitTrial.getWorld().GetBodyTransform( body );
+                    if( pose.position.x != -2.0f + 4.0f * static_cast<float>( i ) || pose.position.y != 0.0f || pose.rotation.s != 0.0f || limitTrial.getWorld().GetBodyAngularVelocity( body ) != 0.0f || zonai::LengthSquared( limitTrial.getWorld().GetBodyLinearVelocity( body ) ) != 0.0f )
+                    {
+                        std::fprintf( stderr, "angle motor UI reset must restore initial positions and rest\n" );
+                        std::exit( EXIT_FAILURE );
+                    }
+                }
+                if( frame != 7 )
+                {
+                    for( int step = 0; step < 45; ++step ) limitTrial.step( 1.0f / 60.0f, 4 );
+                    const auto result = limitTrial.getWorld().getRevoluteJointData( joints[row] );
+                    const float expected = parameter == 0 ? std::numbers::pi_v<float> / 4.0f : parameter == 1 ? 1.5f : parameter == 2 ? -std::numbers::pi_v<float> / 6.0f : parameter == 3 ? std::numbers::pi_v<float> / 6.0f : 0.375f;
+                    if( std::abs( result.currentAngle - expected ) > ( parameter == 1 ? 0.2f : 0.02f ) )
+                    {
+                        std::fprintf( stderr, "angle motor UI edits must change repeated trial motion: parameter %d actual %g expected %g\n", parameter, result.currentAngle, expected );
+                        std::exit( EXIT_FAILURE );
+                    }
+                }
             }
         }
     }
@@ -2280,7 +2342,7 @@ void checkDemoUi()
         }
         if( frame == 7 ) massTrial.step( 1.0f / 60.0f, 4 );
     }
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison, demoKind::frictionForceComparison, demoKind::obliqueImpactFrictionComparison, demoKind::collisionMassRatioComparison, demoKind::centralOffsetImpactComparison, demoKind::springDampingComparison, demoKind::distanceMotorForceComparison, demoKind::distanceLimitMotorComparison, demoKind::revoluteMotorTorqueComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison, demoKind::frictionForceComparison, demoKind::obliqueImpactFrictionComparison, demoKind::collisionMassRatioComparison, demoKind::centralOffsetImpactComparison, demoKind::springDampingComparison, demoKind::distanceMotorForceComparison, demoKind::distanceLimitMotorComparison, demoKind::revoluteMotorTorqueComparison, demoKind::revoluteLimitMotorComparison } )
     {
         auto trialView = createDemoView( kind );
         auto& trial = static_cast<rigidBodyDemo&>( *trialView );

@@ -63,7 +63,8 @@ constexpr std::array entries
     demoEntry{ demoKind::springDampingComparison, "조인트", "거리 스프링·감쇠 비교", "같은 질량·주파수의 거리 스프링을 같은 길이만큼 늘려 놓고 감쇠비 0·0.7·2의 진동과 수렴을 비교합니다. 주파수·감쇠비를 편집하고 시험 복귀로 반복하세요.", { 0.0f, 0.6f }, 85.0f },
     demoEntry{ demoKind::distanceMotorForceComparison, "조인트", "거리 모터·힘 한도 비교", "같은 목표 속도 1m/s에서 모터 힘 한도 0·0.05·2N의 정지·가속·속도 추종을 비교합니다. 목표 속도와 힘 한도를 편집하고 시험 복귀로 반복하세요.", { 0.0f, 0.2f }, 85.0f },
     demoEntry{ demoKind::distanceLimitMotorComparison, "조인트", "거리 제한·모터 비교", "같은 모터 속도에서 거리 제한 꺼짐·켜짐을 비교합니다. 양수 속도로 상한 정지, 음수 속도로 하한 정지를 확인하고 제한과 목표 속도를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.2f }, 85.0f },
-    demoEntry{ demoKind::revoluteMotorTorqueComparison, "조인트", "회전 모터·토크 한도 비교", "같은 목표 각속도 2rad/s에서 토크 한도 0·0.01·0.2N·m의 정지·가속·속도 추종을 비교합니다. 목표 각속도와 토크 한도를 편집하고 음수 목표로 방향 반전, 0으로 제동을 확인하세요.", { 0.0f, 0.0f }, 110.0f }
+    demoEntry{ demoKind::revoluteMotorTorqueComparison, "조인트", "회전 모터·토크 한도 비교", "같은 목표 각속도 2rad/s에서 토크 한도 0·0.01·0.2N·m의 정지·가속·속도 추종을 비교합니다. 목표 각속도와 토크 한도를 편집하고 음수 목표로 방향 반전, 0으로 제동을 확인하세요.", { 0.0f, 0.0f }, 110.0f },
+    demoEntry{ demoKind::revoluteLimitMotorComparison, "조인트", "회전 각도 제한·모터 비교", "같은 회전 모터에서 각도 제한 꺼짐·켜짐을 비교합니다. 양수·음수 목표로 상한·하한 정지와 방향 반전을 확인하고 제한·목표 각속도를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.0f }, 110.0f }
 };
 
 }
