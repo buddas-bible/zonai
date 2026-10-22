@@ -65,7 +65,8 @@ constexpr std::array entries
     demoEntry{ demoKind::distanceLimitMotorComparison, "조인트", "거리 제한·모터 비교", "같은 모터 속도에서 거리 제한 꺼짐·켜짐을 비교합니다. 양수 속도로 상한 정지, 음수 속도로 하한 정지를 확인하고 제한과 목표 속도를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.2f }, 85.0f },
     demoEntry{ demoKind::revoluteMotorTorqueComparison, "조인트", "회전 모터·토크 한도 비교", "같은 목표 각속도 2rad/s에서 토크 한도 0·0.01·0.2N·m의 정지·가속·속도 추종을 비교합니다. 목표 각속도와 토크 한도를 편집하고 음수 목표로 방향 반전, 0으로 제동을 확인하세요.", { 0.0f, 0.0f }, 110.0f },
     demoEntry{ demoKind::revoluteLimitMotorComparison, "조인트", "회전 각도 제한·모터 비교", "같은 회전 모터에서 각도 제한 꺼짐·켜짐을 비교합니다. 양수·음수 목표로 상한·하한 정지와 방향 반전을 확인하고 제한·목표 각속도를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.0f }, 110.0f },
-    demoEntry{ demoKind::suspensionLoadComparison, "조인트", "서스펜션·하중 비교", "같은 바퀴를 주파수 0.5·1·2Hz의 수직 서스펜션에 연결해 중력에 의한 처짐과 수렴을 비교합니다. 주파수·감쇠비를 편집하고 시험 복귀로 반복하며 축 이동과 자유 회전도 확인하세요.", { 0.0f, 0.5f }, 85.0f }
+    demoEntry{ demoKind::suspensionLoadComparison, "조인트", "서스펜션·하중 비교", "같은 바퀴를 주파수 0.5·1·2Hz의 수직 서스펜션에 연결해 중력에 의한 처짐과 수렴을 비교합니다. 주파수·감쇠비를 편집하고 시험 복귀로 반복하며 축 이동과 자유 회전도 확인하세요.", { 0.0f, 0.5f }, 85.0f },
+    demoEntry{ demoKind::suspensionLimitComparison, "조인트", "서스펜션·이동 제한 비교", "같은 스프링에서 이동 제한 꺼짐·켜짐의 처짐과 반력을 비교합니다. 중력 방향을 바꿔 상한·하한 정지를 확인하고 제한 범위를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.5f }, 100.0f }
 };
 
 }
