@@ -269,6 +269,7 @@ public:
     [[nodiscard]] std::span<const jointId> getLimitComparisonJoints() const noexcept { return limitComparisonJoints_; }
     [[nodiscard]] std::span<const jointId> getTorqueComparisonJoints() const noexcept { return torqueComparisonJoints_; }
     [[nodiscard]] std::span<const jointId> getAngleLimitComparisonJoints() const noexcept { return angleLimitComparisonJoints_; }
+    [[nodiscard]] std::span<const jointId> getSuspensionComparisonJoints() const noexcept { return suspensionComparisonJoints_; }
 
     [[nodiscard]] jointId getRevoluteJoint() const noexcept { return revoluteJoint_; }
 
@@ -362,6 +363,7 @@ private:
     void createDistanceLimitMotorComparison();
     void createRevoluteMotorTorqueComparison();
     void createRevoluteLimitMotorComparison();
+    void createSuspensionLoadComparison();
     void createRevoluteHinge();
     void createWheelSuspension();
     void createPrismaticRail();
@@ -439,6 +441,7 @@ private:
     std::array<jointId, 2> limitComparisonJoints_{};
     std::array<jointId, 3> torqueComparisonJoints_{};
     std::array<jointId, 2> angleLimitComparisonJoints_{};
+    std::array<jointId, 3> suspensionComparisonJoints_{};
     jointId revoluteJoint_{};
     jointId wheelJoint_{};
     jointId prismaticJoint_{};
