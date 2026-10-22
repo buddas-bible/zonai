@@ -1222,8 +1222,54 @@ void checkMovingPlatformFrictionDemo()
     }
 }
 
+void checkRollingSlidingFrictionDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        rigidBodyDemo scene{ demoKind::rollingSlidingFrictionComparison };
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 4 && physics.GetBodyCount() == 4 && same( physics.GetGravity(), { 0, -10 } ), "rolling comparison creates two editable floor and circle pairs under gravity" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        for( std::size_t i = 0; i < 2; ++i )
+        {
+            const auto floor = visuals[2 * i].bodyHandle;
+            const auto circle = visuals[2 * i + 1].bodyHandle;
+            check( physics.GetBody( floor ).type == bodyType::Static && physics.GetBody( circle ).type == bodyType::Dynamic && same( physics.GetBodyLinearVelocity( circle ), { 4, 0 } ) && physics.GetBodyAngularVelocity( circle ) == 0.0f && !physics.IsBodySleepEnabled( circle ) && physics.GetBodyLinearDamping( circle ) == 0.0f && physics.GetBodyAngularDamping( circle ) == 0.0f, "identical dynamic circles start sliding without spin damping or automatic sleep" );
+        }
+        const auto observe = [&]( bool upperRolls )
+        {
+            for( int frame = 0; frame < 60; ++frame ) scene.step( 1.0f / 60.0f, substeps );
+            for( std::size_t row = 0; row < 2; ++row )
+            {
+                const auto circle = visuals[2 * row + 1].bodyHandle;
+                const auto velocity = physics.GetBodyLinearVelocity( circle );
+                const float angularVelocity = physics.GetBodyAngularVelocity( circle );
+                const bool rolls = row == 0 ? upperRolls : !upperRolls;
+                check( rolls ? std::abs( velocity.x - 8.0f / 3.0f ) < 0.12f && std::abs( angularVelocity + 20.0f / 3.0f ) < 0.3f && std::abs( velocity.x + 0.4f * angularVelocity ) < 0.03f : std::abs( velocity.x - 4.0f ) < 0.02f && std::abs( angularVelocity ) < 0.02f, "friction converts sliding into clockwise rolling while zero friction preserves translation without spin" );
+                check( std::abs( physics.GetBodyTransform( circle ).position.y - ( row == 0 ? 2.05f : -0.95f ) ) < 0.05f, "both circles remain supported during the one-second comparison" );
+            }
+        };
+        observe( true );
+        physics.SetShapeFriction( visuals[0].shapeHandle, 0.0f );
+        physics.SetShapeFriction( visuals[3].shapeHandle, 0.8f );
+        for( int repeat = 0; repeat < 2; ++repeat )
+        {
+            scene.resetCollisionTrial();
+            check( physics.GetShapeFriction( visuals[0].shapeHandle ) == 0.0f && physics.GetShapeFriction( visuals[3].shapeHandle ) == 0.8f, "rolling trial reset preserves independently edited floor and circle friction" );
+            for( std::size_t i = 0; i < visuals.size(); ++i )
+            {
+                const auto body = visuals[i].bodyHandle;
+                const float lane = i < 2 ? 1.5f : -1.5f;
+                check( scene.getShapes()[i].shapeHandle == visuals[i].shapeHandle && physics.IsValid( visuals[i].shapeHandle ) && same( physics.GetBodyTransform( body ).position, { i % 2 == 0 ? 0.0f : -3.0f, lane + ( i % 2 == 0 ? 0.0f : 0.55f ) } ) && physics.GetBodyTransform( body ).rotation.s == 0.0f && same( physics.GetBodyLinearVelocity( body ), { i % 2 == 0 ? 0.0f : 4.0f, 0 } ) && physics.GetBodyAngularVelocity( body ) == 0.0f, "rolling trial reset restores initial floor and circle poses and sliding velocities with stable handles" );
+            }
+            observe( false );
+        }
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkRollingSlidingFrictionDemo();
     checkMovingPlatformFrictionDemo();
     checkCollisionGroupDemo();
     checkLowSpeedRestitutionDemo();
@@ -1341,7 +1387,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };
