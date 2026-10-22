@@ -58,7 +58,8 @@ enum class demoKind
     movingPlatformFrictionComparison,
     rollingSlidingFrictionComparison,
     frictionForceComparison,
-    obliqueImpactFrictionComparison
+    obliqueImpactFrictionComparison,
+    collisionMassRatioComparison
 };
 
 struct demoEntry

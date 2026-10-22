@@ -1370,8 +1370,50 @@ void checkObliqueImpactFrictionDemo()
     }
 }
 
+void checkCollisionMassRatioDemo()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        rigidBodyDemo scene{ demoKind::collisionMassRatioComparison };
+        auto& physics = scene.getWorld();
+        check( scene.getShapes().size() == 6 && physics.GetBodyCount() == 6 && same( physics.GetGravity(), {} ), "mass ratio comparison creates three independent dynamic impact pairs without gravity" );
+        const auto visuals = std::vector<visualShape>{ scene.getShapes().begin(), scene.getShapes().end() };
+        for( std::size_t i = 0; i < visuals.size(); ++i )
+        {
+            const auto body = visuals[i].bodyHandle;
+            check( physics.GetBody( body ).type == bodyType::Dynamic && same( physics.GetBodyLinearVelocity( body ), { i % 2 == 0 ? 4.0f : 0.0f, 0 } ) && physics.GetBodyAngularVelocity( body ) == 0.0f && physics.GetShapeFriction( visuals[i].shapeHandle ) == 0.0f && !physics.IsBodySleepEnabled( body ) && physics.GetBodyLinearDamping( body ) == 0.0f && physics.GetBodyAngularDamping( body ) == 0.0f, "moving and resting circles isolate mass ratio without friction spin damping or automatic sleep" );
+        }
+        const auto observe = [&]( const std::array<float, 6>& expected )
+        {
+            for( int frame = 0; frame < 45; ++frame ) scene.step( 1.0f / 60.0f, substeps );
+            for( std::size_t i = 0; i < visuals.size(); ++i )
+            {
+                const auto body = visuals[i].bodyHandle;
+                const auto velocity = physics.GetBodyLinearVelocity( body );
+                check( std::abs( velocity.x - expected[i] ) < 0.03f, "elastic mass ratios produce velocity transfer rebound and forward motion at the analytic speeds" );
+                check( std::abs( velocity.y ) < 1.0e-5f && std::abs( physics.GetBodyAngularVelocity( body ) ) < 1.0e-5f && physics.GetBodyTransform( body ).position.y == 2.0f - 2.0f * static_cast<float>( i / 2 ), "central impacts preserve the lane and produce no transverse motion or spin" );
+            }
+        };
+        observe( { 0.0f, 4.0f, -2.4f, 1.6f, 2.4f, 6.4f } );
+        physics.SetShapeDensity( visuals[3].shapeHandle, 1.0f );
+        physics.SetShapeDensity( visuals[4].shapeHandle, 1.0f );
+        for( int repeat = 0; repeat < 2; ++repeat )
+        {
+            scene.resetCollisionTrial();
+            check( physics.GetShapeDensity( visuals[3].shapeHandle ) == 1.0f && physics.GetShapeDensity( visuals[4].shapeHandle ) == 1.0f && physics.GetBodyMass( visuals[3].bodyHandle ) == physics.GetBodyMass( visuals[2].bodyHandle ) && physics.GetBodyMass( visuals[4].bodyHandle ) == physics.GetBodyMass( visuals[5].bodyHandle ), "mass ratio reset preserves edited target and moving circle densities and recomputed masses" );
+            for( std::size_t i = 0; i < visuals.size(); ++i )
+            {
+                const auto body = visuals[i].bodyHandle;
+                check( scene.getShapes()[i].shapeHandle == visuals[i].shapeHandle && physics.IsValid( visuals[i].shapeHandle ) && same( physics.GetBodyTransform( body ).position, { i % 2 == 0 ? -2.0f : 0.0f, 2.0f - 2.0f * static_cast<float>( i / 2 ) } ) && physics.GetBodyTransform( body ).rotation.s == 0.0f && same( physics.GetBodyLinearVelocity( body ), { i % 2 == 0 ? 4.0f : 0.0f, 0 } ) && physics.GetBodyAngularVelocity( body ) == 0.0f, "mass ratio reset restores initial poses and launch velocities with stable handles" );
+            }
+            observe( { 0.0f, 4.0f, 0.0f, 4.0f, 0.0f, 4.0f } );
+        }
+    }
+}
+
 void checkCollisionDemos()
 {
+    checkCollisionMassRatioDemo();
     checkObliqueImpactFrictionDemo();
     checkFrictionForceDemo();
     checkRollingSlidingFrictionDemo();
@@ -1492,7 +1534,7 @@ void checkCollisionDemos()
     for( std::size_t i = 1; i < stack.getShapes().size(); ++i )
         check( Length( stack.getWorld().GetBodyTransform( stack.getShapes()[i].bodyHandle ).position - freshStack.getWorld().GetBodyTransform( freshStack.getShapes()[i].bodyHandle ).position ) < 1.0e-4f, "reset stack starts without previous contact or force history affecting the repeated trial" );
 
-    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison, demoKind::frictionForceComparison, demoKind::obliqueImpactFrictionComparison } )
+    for( demoKind kind : { demoKind::collisionComparison, demoKind::frictionComparison, demoKind::restitutionComparison, demoKind::boxStack, demoKind::ccdComparison, demoKind::collisionFilterComparison, demoKind::sensorWallComparison, demoKind::sleepWakeComparison, demoKind::dampingComparison, demoKind::gravityScaleComparison, demoKind::massImpulseComparison, demoKind::impulsePointComparison, demoKind::rotationalInertiaComparison, demoKind::forceImpulseComparison, demoKind::torqueImpulseComparison, demoKind::dynamicKinematicComparison, demoKind::compoundCenterComparison, demoKind::fastRotationComparison, demoKind::maximumLinearSpeedComparison, demoKind::frictionMixingComparison, demoKind::restitutionMixingComparison, demoKind::lowSpeedRestitutionComparison, demoKind::collisionGroupComparison, demoKind::movingPlatformFrictionComparison, demoKind::rollingSlidingFrictionComparison, demoKind::frictionForceComparison, demoKind::obliqueImpactFrictionComparison, demoKind::collisionMassRatioComparison } )
     {
         check( std::string_view{ getDemoEntry( kind ).category } == "강체", "trial demos retain the existing rigid body category" );
         demoSession playback{ createRigidBodyDemo };

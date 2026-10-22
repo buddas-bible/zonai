@@ -135,7 +135,7 @@ bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, 
 
 rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 {
-    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison || kind == demoKind::rollingSlidingFrictionComparison || kind == demoKind::frictionForceComparison || kind == demoKind::obliqueImpactFrictionComparison ) showLabels_ = true;
+    if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison || kind == demoKind::rollingSlidingFrictionComparison || kind == demoKind::frictionForceComparison || kind == demoKind::obliqueImpactFrictionComparison || kind == demoKind::collisionMassRatioComparison ) showLabels_ = true;
     selectedShapeIndex_ = kind == demoKind::playground || kind == demoKind::motorCar ? 2 : 1;
     if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
@@ -730,7 +730,7 @@ void rigidBodyDemoUi::drawSplineEditorControls()
 void rigidBodyDemoUi::drawExperimentControls()
 {
     if( getKind() == demoKind::collisionComparison || getKind() == demoKind::frictionComparison || getKind() == demoKind::restitutionComparison || getKind() == demoKind::boxStack || getKind() == demoKind::ccdComparison || getKind() == demoKind::collisionFilterComparison || getKind() == demoKind::sensorWallComparison || getKind() == demoKind::sleepWakeComparison || getKind() == demoKind::dampingComparison || getKind() == demoKind::gravityScaleComparison || getKind() == demoKind::massImpulseComparison || getKind() == demoKind::impulsePointComparison || getKind() == demoKind::rotationalInertiaComparison || getKind() == demoKind::forceImpulseComparison || getKind() == demoKind::torqueImpulseComparison || getKind() == demoKind::dynamicKinematicComparison || getKind() == demoKind::compoundCenterComparison || getKind() == demoKind::fastRotationComparison || getKind() == demoKind::maximumLinearSpeedComparison || getKind() == demoKind::frictionMixingComparison ||
-        getKind() == demoKind::restitutionMixingComparison || getKind() == demoKind::lowSpeedRestitutionComparison || getKind() == demoKind::collisionGroupComparison || getKind() == demoKind::movingPlatformFrictionComparison || getKind() == demoKind::rollingSlidingFrictionComparison || getKind() == demoKind::frictionForceComparison || getKind() == demoKind::obliqueImpactFrictionComparison )
+        getKind() == demoKind::restitutionMixingComparison || getKind() == demoKind::lowSpeedRestitutionComparison || getKind() == demoKind::collisionGroupComparison || getKind() == demoKind::movingPlatformFrictionComparison || getKind() == demoKind::rollingSlidingFrictionComparison || getKind() == demoKind::frictionForceComparison || getKind() == demoKind::obliqueImpactFrictionComparison || getKind() == demoKind::collisionMassRatioComparison )
     {
         ImGui::TextUnformatted( "반복 시험" );
         if( getKind() == demoKind::ccdComparison )
@@ -829,6 +829,17 @@ void rigidBodyDemoUi::drawExperimentControls()
             {
                 ImGui::TextWrapped( "%s: 질량 %.2f kg / 회전 관성 %.3f kg·m²", visual.label, getWorld().GetBodyMass( visual.bodyHandle ), getWorld().GetBodyRotationalInertia( visual.bodyHandle ) );
                 ImGui::Text( "각속도 %.2f rad/s", getWorld().GetBodyAngularVelocity( visual.bodyHandle ) );
+            }
+        }
+        if( getKind() == demoKind::collisionMassRatioComparison )
+        {
+            ImGui::TextWrapped( "초기 이동 원:표적의 질량비는 A 1:1, B 1:4, C 4:1입니다. 같은 크기의 원이 4m/s로 정지한 표적을 칩니다. 반발 1·중력·마찰·감쇠 0에서 A는 속도를 전달하고 B는 되튕기며 C는 계속 전진합니다. 물리량에서 이동 원이나 표적의 밀도를 편집하고 정지 → 시험 복귀 → 재생으로 처음 0.75초를 비교하세요. 이름의 A·B·C는 행 구분이며 현재 질량은 아래에 표시합니다." );
+            for( std::size_t i = 0; i < 3; ++i )
+            {
+                const auto& moving = getShapes()[2 * i];
+                const auto& target = getShapes()[2 * i + 1];
+                ImGui::TextWrapped( "%s / %s: 질량 %.3f / %.3f kg", moving.label, target.label, getWorld().GetBodyMass( moving.bodyHandle ), getWorld().GetBodyMass( target.bodyHandle ) );
+                ImGui::TextWrapped( "가로 속도: %.2f / %.2f m/s", getWorld().GetBodyLinearVelocity( moving.bodyHandle ).x, getWorld().GetBodyLinearVelocity( target.bodyHandle ).x );
             }
         }
         if( getKind() == demoKind::obliqueImpactFrictionComparison )
