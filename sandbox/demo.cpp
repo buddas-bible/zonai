@@ -60,7 +60,8 @@ constexpr std::array entries
     demoEntry{ demoKind::obliqueImpactFrictionComparison, "강체", "비스듬한 충돌·접선 마찰 비교", "중력 없이 같은 원이 수평 바닥에 비스듬히 충돌합니다. 같은 수직 반발과 마찰에 따른 가로 감속·회전을 비교하고 재질을 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 1.0f }, 65.0f },
     demoEntry{ demoKind::collisionMassRatioComparison, "강체", "충돌 질량비 비교", "정지한 표적을 4m/s의 원으로 칩니다. 질량비 1:1·1:4·4:1에서 속도 전달·되튕김·전진을 비교하고 밀도를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.0f }, 80.0f },
     demoEntry{ demoKind::centralOffsetImpactComparison, "강체", "정면·편심 충돌 비교", "같은 원이 상자의 중심·중심 위·중심 아래를 4m/s로 칩니다. 중심 충돌의 무회전과 편심 충돌의 반대 회전을 비교하고 밀도를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.0f }, 85.0f },
-    demoEntry{ demoKind::springDampingComparison, "조인트", "거리 스프링·감쇠 비교", "같은 질량·주파수의 거리 스프링을 같은 길이만큼 늘려 놓고 감쇠비 0·0.7·2의 진동과 수렴을 비교합니다. 주파수·감쇠비를 편집하고 시험 복귀로 반복하세요.", { 0.0f, 0.6f }, 85.0f }
+    demoEntry{ demoKind::springDampingComparison, "조인트", "거리 스프링·감쇠 비교", "같은 질량·주파수의 거리 스프링을 같은 길이만큼 늘려 놓고 감쇠비 0·0.7·2의 진동과 수렴을 비교합니다. 주파수·감쇠비를 편집하고 시험 복귀로 반복하세요.", { 0.0f, 0.6f }, 85.0f },
+    demoEntry{ demoKind::distanceMotorForceComparison, "조인트", "거리 모터·힘 한도 비교", "같은 목표 속도 1m/s에서 모터 힘 한도 0·0.05·2N의 정지·가속·속도 추종을 비교합니다. 목표 속도와 힘 한도를 편집하고 시험 복귀로 반복하세요.", { 0.0f, 0.2f }, 85.0f }
 };
 
 }
