@@ -199,6 +199,8 @@ public:
     // 현재 이동량을 0으로 바꾸고 목표·리미트를 함께 옮김. 물리 상태·캐시·수면은 유지함.
     // 추적·float 범위 검증 실패나 리미트 폭 손실은 false이며 변경하지 않음.
     bool rebaseSplineRailJoint( jointId id );
+    // 명시적으로 전체 곡선에 재투영함. 실패 시 기존 추적 상태를 유지함.
+    bool reprojectSplineRailJoint( jointId id );
     [[nodiscard]] splineRailJointData getSplineRailJointData( jointId id ) const;
     [[nodiscard]] std::span<const vec2> getSplineRailJointPoints( jointId id ) const;
 
