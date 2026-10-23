@@ -1294,6 +1294,10 @@ void rigidBodyDemoUi::drawExperimentControls()
         const auto id = getSplineRailJoint();
         auto rail = getWorld().getSplineRailJointData( id );
         ImGui::TextUnformatted( "스플라인 레일" );
+        ImGui::DragFloat( "재투영 허용 거리###SplineRailReprojectDistance", &splineRailReprojectDistance_, 0.01f, 0.0f, 0.0f, "%.3f m" );
+        if( ImGui::Button( "레일에 재투영###SplineRailReproject" ) ) splineRailReprojectResult_ = getWorld().reprojectSplineRailJointWithinDistance( id, splineRailReprojectDistance_ );
+        if( splineRailReprojectResult_ ) ImGui::TextUnformatted( *splineRailReprojectResult_ ? "최근 재투영: 성공" : "최근 재투영: 거절" );
+        rail = getWorld().getSplineRailJointData( id );
         ImGui::BeginDisabled( !rail.trackingValid );
         if( ImGui::Button( "현재 위치를 0점으로###SplineRailRebase" ) ) getWorld().rebaseSplineRailJoint( id );
         ImGui::EndDisabled();

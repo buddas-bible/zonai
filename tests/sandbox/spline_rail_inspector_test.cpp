@@ -380,6 +380,258 @@ void checkTranslationFailures()
     }
 }
 
+
+void checkReprojectionButton()
+{
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    auto& physics = scene.getWorld();
+    const auto id = scene.getSplineRailJoint();
+    const auto body = scene.getImpulseBody();
+    const vec2 points[] = { { -4, 0 }, { 4, 0 } };
+    check( physics.setSplineRailJointPoints( id, points ), "button fixture accepts a straight rail" );
+    physics.SetBodyTransform( body, { { 1, 0.25f }, {} } );
+    physics.SetBodyAwake( body, false );
+    frame( session );
+    const auto text = frame( session, "###SplineRailReproject" );
+    check( physics.IsBodyAwake( body ), "actual reprojection button commits a changed projection within the default 0.5m limit" );
+    check( text.find( "최근 재투영: 성공" ) != std::string::npos, "accepted reprojection is reported in the same frame" );
+    check( physics.GetBodyTransform( body ).position.x == 1.0f && physics.GetBodyTransform( body ).position.y == 0.25f, "reprojection button does not teleport the body to the rail" );
+}
+
+
+void checkReprojectionSettings( const splineRailJointData& before, const splineRailJointData& after )
+{
+    check( after.referenceDistance == before.referenceDistance && after.length == before.length && after.isLoop == before.isLoop && after.collideConnected == before.collideConnected && after.targetTranslation == before.targetTranslation && after.lowerTranslation == before.lowerTranslation && after.upperTranslation == before.upperTranslation, "UI reprojection preserves geometry, origin and axial target/limits" );
+    check( after.enableRotation == before.enableRotation && after.rotationMode == before.rotationMode && after.referenceAngle == before.referenceAngle && after.tangentOffset == before.tangentOffset && after.enableAngularSpring == before.enableAngularSpring && after.angularHertz == before.angularHertz && after.angularDampingRatio == before.angularDampingRatio && after.enableSpring == before.enableSpring && after.hertz == before.hertz && after.dampingRatio == before.dampingRatio && after.enableLimit == before.enableLimit && after.enableMotor == before.enableMotor && after.motorSpeed == before.motorSpeed && after.maxMotorForce == before.maxMotorForce, "UI reprojection preserves rotation and movement control settings" );
+}
+
+void checkReprojectionUnchanged( const splineRailJointData& before, const splineRailJointData& after )
+{
+    checkReprojectionSettings( before, after );
+    check( after.trackingValid == before.trackingValid && after.parameter.segmentIndex == before.parameter.segmentIndex && after.parameter.t == before.parameter.t && after.currentTranslation == before.currentTranslation && after.currentSpeed == before.currentSpeed && after.currentAngle == before.currentAngle && after.currentAngularSpeed == before.currentAngularSpeed && after.force.x == before.force.x && after.force.y == before.force.y && after.torque == before.torque && after.springForce == before.springForce && after.motorForce == before.motorForce, "rejected, unchanged or idle UI reprojection preserves tracking, coordinates, speed and cached reactions" );
+}
+
+void prepareStraightReprojection( demoSession& session )
+{
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    auto& physics = scene.getWorld();
+    physics.SetBodyTransform( scene.getImpulseBody(), {} );
+    const vec2 points[] = { { -4, 0 }, { 4, 0 } };
+    check( physics.setSplineRailJointPoints( scene.getSplineRailJoint(), points ), "bounded UI fixture accepts a straight rail" );
+    for( int step = 0; step < 10; ++step ) session.stepOnce( 4 );
+    check( LengthSquared( physics.getSplineRailJointData( scene.getSplineRailJoint() ).force ) > 0.0f, "straight fixture has a load reaction before teleport clears its cache" );
+}
+
+void checkReprojectionBoundaries()
+{
+    for( float distance : { std::nextafter( 0.5f, 0.0f ), 0.5f, std::nextafter( 0.5f, 1.0f ) } )
+    {
+        demoSession session{ createDemoView };
+        prepareStraightReprojection( session );
+        auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+        auto& physics = scene.getWorld();
+        const auto id = scene.getSplineRailJoint();
+        const auto body = scene.getImpulseBody();
+        physics.SetBodyTransform( body, { { 1, distance }, {} } );
+        physics.SetBodyAwake( body, false );
+        const auto before = physics.getSplineRailJointData( id );
+        frame( session );
+        checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+        check( !physics.IsBodyAwake( body ), "drawing controls alone does not reproject or wake a displaced body" );
+        const auto text = frame( session, "###SplineRailReproject" );
+        const auto after = physics.getSplineRailJointData( id );
+        const bool accepted = distance <= 0.5f;
+        check( text.find( accepted ? "최근 재투영: 성공" : "최근 재투영: 거절" ) != std::string::npos && physics.IsBodyAwake( body ) == accepted, "default 0.5m button accepts below/equal and rejects the next representable distance above the boundary" );
+        checkReprojectionSettings( before, after );
+        if( accepted ) check( LengthSquared( after.force ) == 0.0f && after.torque == 0.0f, "changed successful projection clears old reactions through the existing API" );
+        else checkReprojectionUnchanged( before, after );
+        check( physics.GetBodyTransform( body ).position.x == 1.0f && physics.GetBodyTransform( body ).position.y == distance, "distance acceptance and rejection preserve body position" );
+        checkTranslationDisplay( text, after );
+        checkDisplay( text, after );
+    }
+}
+
+void checkReprojectionInput()
+{
+    for( const char* value : { "0", "0.25", "0.75", "-1", "nan", "inf" } )
+    {
+        demoSession session{ createDemoView };
+        prepareStraightReprojection( session );
+        auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+        auto& physics = scene.getWorld();
+        const auto id = scene.getSplineRailJoint();
+        const auto body = scene.getImpulseBody();
+        physics.SetBodyTransform( body, { { 1, 0.25f }, {} } );
+        physics.SetBodyAwake( body, false );
+        const auto before = physics.getSplineRailJointData( id );
+        frame( session );
+        edit( session, "###SplineRailReprojectDistance", value );
+        checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+        check( !physics.IsBodyAwake( body ), "editing the allowance never performs reprojection" );
+        const bool accepted = std::string( value ) == "0.25" || std::string( value ) == "0.75";
+        const auto text = frame( session, "###SplineRailReproject" );
+        const auto after = physics.getSplineRailJointData( id );
+        check( text.find( accepted ? "최근 재투영: 성공" : "최근 재투영: 거절" ) != std::string::npos && physics.IsBodyAwake( body ) == accepted, "actual distance input reaches the bounded API, including zero, negative and nonfinite rejection" );
+        if( !accepted ) checkReprojectionUnchanged( before, after );
+    }
+    demoSession session{ createDemoView };
+    prepareStraightReprojection( session );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    auto& physics = scene.getWorld();
+    const auto id = scene.getSplineRailJoint();
+    const auto body = scene.getImpulseBody();
+    physics.SetBodyTransform( body, { { 1, 0 }, {} } );
+    physics.SetBodyAwake( body, false );
+    frame( session );
+    edit( session, "###SplineRailReprojectDistance", "0" );
+    check( frame( session, "###SplineRailReproject" ).find( "최근 재투영: 성공" ) != std::string::npos && physics.IsBodyAwake( body ), "zero allowance accepts an exact point on the rail" );
+    for( int step = 0; step < 10; ++step ) session.stepOnce( 4 );
+    physics.SetBodyAwake( body, false );
+    const auto before = physics.getSplineRailJointData( id );
+    check( LengthSquared( before.force ) > 0.0f, "repeated projection fixture has a loaded reaction cache" );
+    frame( session, "###SplineRailReproject" );
+    checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+    check( !physics.IsBodyAwake( body ), "identical successful button activation preserves loaded cache and sleep" );
+    edit( session, "###SplineRailReprojectDistance", "1" );
+    physics.SetBodyTransform( body, { { 2, 0.75f }, {} } );
+    check( frame( session, "###SplineRailReproject" ).find( "최근 재투영: 성공" ) != std::string::npos, "allowance edit permits a farther point" );
+    session.selectDemo( demoKind::playground );
+    prepareStraightReprojection( session );
+    auto& fresh = static_cast<rigidBodyDemo&>( session.getDemo() );
+    fresh.getWorld().SetBodyTransform( fresh.getImpulseBody(), { { 1, 0.75f }, {} } );
+    check( frame( session ).find( "최근 재투영:" ) == std::string::npos, "a new view starts without a previous request result" );
+    check( frame( session, "###SplineRailReproject" ).find( "최근 재투영: 거절" ) != std::string::npos, "a new view restores the default 0.5m allowance" );
+}
+
+void checkReprojectionRecovery()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession session{ createDemoView };
+        prepareStraightReprojection( session );
+        auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+        auto& physics = scene.getWorld();
+        const auto id = scene.getSplineRailJoint();
+        const auto body = scene.getImpulseBody();
+        physics.setSplineRailJointSpring( id, true, std::numeric_limits<float>::max(), 0.7f, 1.0f );
+        session.stepOnce( substeps );
+        physics.setSplineRailJointSpring( id, false, 2.0f, 0.7f, 1.0f );
+        physics.SetBodyAwake( body, false );
+        const auto before = physics.getSplineRailJointData( id );
+        check( !before.trackingValid, "recovery fixture has a stored tracking failure" );
+        frame( session );
+        edit( session, "###SplineRailReprojectDistance", "-1" );
+        auto text = frame( session, "###SplineRailReproject" );
+        check( text.find( "최근 재투영: 거절" ) != std::string::npos && !physics.IsBodyAwake( body ), "invalid allowance reports rejection even when tracking is unavailable" );
+        checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+        edit( session, "###SplineRailReprojectDistance", "0.5" );
+        text = frame( session );
+        check( text.find( "최근 재투영: 거절" ) != std::string::npos && !physics.getSplineRailJointData( id ).trackingValid && !physics.IsBodyAwake( body ), "last result persists and editing a valid allowance does not automatically retry recovery" );
+        physics.SetBodyLinearVelocity( body, { -0.75f, 0.0f } );
+        physics.SetBodyAngularVelocity( body, 0.6f );
+        check( physics.getSplineRailJointData( id ).currentSpeed == 0.0f, "failed tracking hides speed before recovery" );
+        text = frame( session, "###SplineRailReproject" );
+        const auto after = physics.getSplineRailJointData( id );
+        check( after.trackingValid && physics.IsBodyAwake( body ) && text.find( "최근 재투영: 성공" ) != std::string::npos, "explicit UI recovery remains available while tracking is invalid" );
+        check( after.currentSpeed == -0.75f && after.currentAngularSpeed == 0.6f, "recovery immediately exposes preserved physical velocities in the same frame" );
+        checkReprojectionSettings( before, after );
+        checkTranslationDisplay( text, after );
+        physics.SetGravity( {} );
+        physics.setSplineRailJointMotor( id, true, 1.0f, 100.0f );
+        for( int step = 0; step < 30; ++step ) session.stepOnce( substeps );
+        const auto resumed = physics.getSplineRailJointData( id );
+        check( resumed.trackingValid && resumed.currentTranslation > after.currentTranslation + 0.3 && std::abs( resumed.currentSpeed - 1.0f ) < 0.001f, "normal motor motion resumes after inspector recovery" );
+    }
+}
+
+void checkReprojectionCrossing()
+{
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    auto& physics = scene.getWorld();
+    const auto id = scene.getSplineRailJoint();
+    const auto body = scene.getImpulseBody();
+    const vec2 points[] = { { -2, 0 }, { 0, 0 }, { 2, 2 }, { 2, -2 }, { 0, 0 }, { -2, 2 } };
+    physics.SetBodyTransform( body, { Evaluate( { points }, 3, 0.9f ), {} } );
+    check( physics.setSplineRailJointPoints( id, points ), "UI crossing fixture accepts an intersecting curve" );
+    physics.SetBodyTransform( body, { { 0, 0 }, rot2::FromRadians( 0.3f ) } );
+    physics.SetBodyLinearVelocity( body, { 1, -2 } );
+    physics.SetBodyAngularVelocity( body, 0.7f );
+    const auto before = physics.getSplineRailJointData( id );
+    check( before.trackingValid && before.parameter.segmentIndex >= 3, "local tracking starts on the later crossing branch" );
+    for( int draw = 0; draw < 3; ++draw ) frame( session );
+    checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+    const auto text = frame( session, "###SplineRailReproject" );
+    const auto after = physics.getSplineRailJointData( id );
+    check( after.trackingValid && after.parameter.segmentIndex < 2 && after.currentTranslation < before.currentTranslation - 1.0 && text.find( "최근 재투영: 성공" ) != std::string::npos, "explicit button selects the earlier global nearest crossing branch" );
+    checkReprojectionSettings( before, after );
+    check( physics.GetBodyTransform( body ).position.x == 0.0f && physics.GetBodyTransform( body ).position.y == 0.0f && physics.GetBodyTransform( body ).rotation.s == rot2::FromRadians( 0.3f ).s && physics.GetBodyLinearVelocity( body ).x == 1.0f && physics.GetBodyLinearVelocity( body ).y == -2.0f && physics.GetBodyAngularVelocity( body ) == 0.7f, "crossing branch changes never teleport or change body velocity" );
+    checkTranslationDisplay( text, after );
+    checkDisplay( text, after );
+}
+
+
+void checkReprojectionSessionState()
+{
+    for( bool playing : { false, true } )
+        for( bool accepted : { false, true } )
+        {
+            demoSession session{ createDemoView };
+            session.selectDemo( demoKind::splineRail );
+            session.setPlaying( playing );
+            auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+            auto& physics = scene.getWorld();
+            const auto id = scene.getSplineRailJoint();
+            const auto body = scene.getImpulseBody();
+            const auto visual = scene.getShapes()[0];
+            const auto count = scene.getSplineControlPoints().size();
+            check( scene.insertSplineControlPoint( 1 ), "reprojection preservation fixture has a pending geometry edit" );
+            if( playing ) check( scene.undoSplineEdit(), "playing reprojection fixture has a pending redo" );
+            physics.setSplineRailJointRotation( id, splineRailRotationMode::followTangent, 4.5f, 0.8f, playing );
+            physics.setSplineRailJointRotationEnabled( id, !playing );
+            physics.setSplineRailJointRotationReference( id, -0.35f );
+            physics.setSplineRailJointSpring( id, true, 0.5f, 0.7f, 0.8f );
+            physics.setSplineRailJointLimit( id, true, 0.0f, 5.0f );
+            physics.setSplineRailJointMotor( id, true, 1.2f, 0.2f );
+            for( int step = 0; step < 10; ++step ) session.stepOnce( 4 );
+            check( physics.rebaseSplineRailJoint( id ), "reprojection fixture starts with a rebased translation origin" );
+            frame( session );
+            frame( session, "###Object" );
+            frame( session, visual.label, false, true );
+            frame( session, "###SplineControl" );
+            frame( session, "제어점 3", false, true );
+            if( accepted ) physics.SetBodyTransform( body, { Evaluate( { scene.getSplineControlPoints() }, 2, 0.6f ), rot2::FromRadians( 0.3f ) } );
+            else edit( session, "###SplineRailReprojectDistance", "-1" );
+            physics.SetBodyAwake( body, false );
+            const auto before = physics.getSplineRailJointData( id );
+            const auto pose = physics.GetBodyTransform( body );
+            const auto velocity = physics.GetBodyLinearVelocity( body );
+            const float spin = physics.GetBodyAngularVelocity( body ), mass = physics.GetBodyMass( body );
+            const bool undo = scene.canUndoSplineEdit(), redo = scene.canRedoSplineEdit();
+            const auto steps = session.getStepCount();
+            const std::vector<vec2> points( scene.getSplineControlPoints().begin(), scene.getSplineControlPoints().end() );
+            if( !accepted ) check( LengthSquared( before.force ) > 0.0f, "rejected UI request has a nonzero reaction cache to preserve" );
+            const auto text = frame( session, "###SplineRailReproject" );
+            const auto after = physics.getSplineRailJointData( id );
+            checkReprojectionSettings( before, after );
+            if( !accepted ) checkReprojectionUnchanged( before, after );
+            check( physics.IsBodyAwake( body ) == accepted && physics.IsValid( id ) && physics.IsValid( body ) && physics.IsValid( visual.shapeHandle ) && physics.GetBodyMass( body ) == mass && LengthSquared( physics.GetBodyTransform( body ).position - pose.position ) == 0.0f && physics.GetBodyTransform( body ).rotation.s == pose.rotation.s && physics.GetBodyTransform( body ).rotation.c == pose.rotation.c && LengthSquared( physics.GetBodyLinearVelocity( body ) - velocity ) == 0.0f && physics.GetBodyAngularVelocity( body ) == spin, "UI request preserves handles, mass, pose and velocity and uses the existing wake policy" );
+            check( text.find( accepted ? "최근 재투영: 성공" : "최근 재투영: 거절" ) != std::string::npos && text.find( "제어점 3" ) != std::string::npos && session.isPlaying() == playing && session.getStepCount() == steps && scene.canUndoSplineEdit() == undo && scene.canRedoSplineEdit() == redo && scene.getSplineControlPoints().size() == points.size(), "success and rejection preserve selected point, playback and pending undo/redo" );
+            for( std::size_t point = 0; point < points.size(); ++point ) check( LengthSquared( points[point] - scene.getSplineControlPoints()[point] ) == 0.0f, "reprojection never edits the spline control points" );
+            checkTranslationDisplay( text, after );
+            checkDisplay( text, after );
+            edit( session, "###Friction", "0.42" );
+            check( physics.GetShapeFriction( visual.shapeHandle ) == 0.42f, "object inspector still edits the originally selected shape after reprojection" );
+            frame( session, playing ? "###SplineRedo" : "###SplineUndo" );
+            const auto restored = physics.getSplineRailJointData( id );
+            check( scene.getSplineControlPoints().size() == count + ( playing ? 1 : 0 ) && restored.referenceDistance == after.referenceDistance && restored.enableRotation == after.enableRotation && restored.rotationMode == after.rotationMode && restored.tangentOffset == after.tangentOffset && restored.targetTranslation == after.targetTranslation && restored.lowerTranslation == after.lowerTranslation && restored.upperTranslation == after.upperTranslation, "real undo/redo restores the pending geometry edit and retains rail control settings and origin" );
+        }
+}
+
 }
 
 void checkSplineRailInspector()
@@ -407,4 +659,10 @@ void checkSplineRailInspector()
     checkTranslationSessionState();
     checkTranslationMotion();
     checkTranslationFailures();
+    checkReprojectionButton();
+    checkReprojectionBoundaries();
+    checkReprojectionInput();
+    checkReprojectionRecovery();
+    checkReprojectionCrossing();
+    checkReprojectionSessionState();
 }
