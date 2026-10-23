@@ -191,6 +191,28 @@ bool world::applySplineRailProjection( jointId id, const splineRailFrame2& frame
     return true;
 }
 
+bool world::rebaseSplineRailJointRotation( jointId id )
+{
+    auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );
+    const auto& a = bodySims_[sim.bodyIdA].transform;
+    const auto& b = bodySims_[sim.bodyIdB].transform;
+    const auto frame = getSplineRailFrame( sim, a, b, sim.parameter, true, sim.distanceOffset );
+    if( !sim.trackingValid || !frame.valid ) return false;
+    const rot2 relative = Inverse( a.rotation ) * b.rotation;
+    float angle = std::atan2( relative.s, relative.c );
+    if( sim.rotationMode == splineRailRotationMode::followTangent )
+    {
+        const vec2 tangent = InverseRotate( a.rotation, frame.tangent );
+        angle -= std::atan2( tangent.y, tangent.x );
+    }
+    if( !std::isfinite( angle ) ) return false;
+    float& reference = sim.rotationMode == splineRailRotationMode::fixed ? sim.referenceAngle : sim.tangentOffset;
+    if( reference == angle ) return true;
+    reference = angle;
+    resetSplineRailJoint( id );
+    return true;
+}
+
 bool world::rebaseSplineRailJoint( jointId id )
 {
     auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );

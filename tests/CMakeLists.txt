@@ -707,3 +707,7 @@ add_test(NAME splineRailSegmentReprojectTests COMMAND splineRailSegmentReproject
 add_executable(splineRailReprojectDistanceTests dynamics/spline_rail_reproject_distance_test.cpp)
 target_link_libraries(splineRailReprojectDistanceTests PRIVATE zonai::zonai)
 add_test(NAME splineRailReprojectDistanceTests COMMAND splineRailReprojectDistanceTests)
+
+add_executable(splineRailRotationRebaseTests dynamics/spline_rail_rotation_rebase_test.cpp)
+target_link_libraries(splineRailRotationRebaseTests PRIVATE zonai::zonai)
+add_test(NAME splineRailRotationRebaseTests COMMAND splineRailRotationRebaseTests)
