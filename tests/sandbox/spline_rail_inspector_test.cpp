@@ -1088,6 +1088,344 @@ void checkHighlightSamplingFailure()
     checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
 }
 
+
+std::string mouseFrame( demoSession& session, vec2 point, bool held, bool alt, bool ctrl = false, float scale = 60.0f, bool enabled = true, bool jump = false )
+{
+    debugCamera camera{};
+    camera.pixelsPerMeter = scale;
+    const auto screen = camera.WorldToScreen( point, { 0, 0 }, { 1000, 800 } );
+    auto& io = ImGui::GetIO();
+    io.AddMousePosEvent( screen.x, screen.y );
+    io.AddKeyEvent( ImGuiMod_Alt, alt );
+    io.AddKeyEvent( ImGuiMod_Ctrl, ctrl );
+    io.AddMouseButtonEvent( ImGuiMouseButton_Left, held );
+    ImGui::NewFrame();
+    ImGui::SetNextWindowPos( { 0, 0 } );
+    ImGui::SetNextWindowSize( { 340, 4000 } );
+    ImGui::Begin( "Spline rail rotation inspector" );
+    demoInput input{};
+    input.mousePosition = camera.ScreenToWorld( io.MousePos, { 0, 0 }, { 1000, 800 } );
+    input.mousePressed = ImGui::IsMouseClicked( ImGuiMouseButton_Left );
+    input.mouseHeld = ImGui::IsMouseDown( ImGuiMouseButton_Left );
+    input.selectReprojectionSegment = io.KeyAlt;
+    input.insertControlPoint = io.KeyCtrl;
+    input.pixelsPerMeter = scale;
+    input.jumpPressed = jump;
+    session.handleInput( input, enabled );
+    ImGui::LogToBuffer();
+    session.getDemo().drawControls();
+    const std::string text = GImGui->LogBuffer.c_str();
+    ImGui::LogFinish();
+    ImGui::End();
+    ImGui::Render();
+    return text;
+}
+
+std::string altClick( demoSession& session, vec2 point, float scale = 60.0f )
+{
+    mouseFrame( session, point, false, false, false, scale );
+    const auto text = mouseFrame( session, point, true, true, false, scale );
+    mouseFrame( session, point, false, false, false, scale );
+    return text;
+}
+
+void checkAltSelection()
+{
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    const vec2 points[] = { { -4, 0 }, { -2, 0 }, { 0, 0 }, { 2, 0 }, { 4, 0 } };
+    check( scene.getWorld().setSplineRailJointPoints( scene.getSplineRailJoint(), points ), "Alt-click fixture uses a straight world curve" );
+    frame( session );
+    const auto text = altClick( session, { 1, 0 } );
+    check( text.find( "지정 구간" ) != std::string::npos && text.find( "구간 3" ) != std::string::npos, "actual Alt and mouse events select the clicked segment in the existing inspector list" );
+    const auto vertices = highlightFrame( session );
+    check( highlightNear( vertices, { 0, 0 } ) && highlightNear( vertices, { 2, 0 } ) && !highlightNear( vertices, { -4, 0 } ), "Alt selection updates the existing highlight without a separate apply action" );
+    auto& physics = scene.getWorld();
+    const auto id = scene.getSplineRailJoint();
+    const auto before = physics.getSplineRailJointData( id );
+    check( frame( session, "###SplineRailReproject" ).find( "최근 재투영: 거절" ) != std::string::npos, "explicit button uses the Alt-selected distant segment instead of a closer global candidate" );
+    checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+    physics.SetBodyTransform( scene.getImpulseBody(), { { 1, 0.25f }, {} } );
+    physics.SetBodyAwake( scene.getImpulseBody(), false );
+    altClick( session, { 1, 0 } );
+    check( !physics.IsBodyAwake( scene.getImpulseBody() ), "another Alt selection does not apply the pending projection" );
+    check( frame( session, "###SplineRailReproject" ).find( "최근 재투영: 성공" ) != std::string::npos && physics.IsBodyAwake( scene.getImpulseBody() ), "explicit button applies a valid projection using the clicked segment and existing allowance" );
+}
+
+
+void checkAltBoundaries()
+{
+    for( float scale : { 10.0f, 20.0f, 55.0f, 60.0f, 80.0f, 160.0f, 240.0f } )
+        for( int pixels : { 9, 10, 11 } )
+            for( bool selected : { false, true } )
+            {
+                demoSession session{ createDemoView };
+                session.selectDemo( demoKind::splineRail );
+                auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+                auto& physics = scene.getWorld();
+                const auto id = scene.getSplineRailJoint();
+                const vec2 points[] = { { -4, 0 }, { -2, 0 }, { 0, 0 }, { 2, 0 }, { 4, 0 } };
+                check( physics.setSplineRailJointPoints( id, points ), "pixel boundary fixture accepts a straight world rail" );
+                frame( session );
+                if( selected ) selectReprojectionTarget( session, "지정 구간", "구간 1" );
+                physics.SetBodyAwake( scene.getImpulseBody(), false );
+                const auto before = physics.getSplineRailJointData( id );
+                const auto text = altClick( session, { 1, static_cast<float>( pixels ) / scale }, scale );
+                const bool hit = pixels <= 10;
+                check( text.find( hit ? "구간 3" : selected ? "구간 1" : "전체 곡선" ) != std::string::npos, "actual 9/10/11 pixel clicks accept an inclusive 10px radius at different zooms without replacing a missed selection" );
+                const auto vertices = highlightFrame( session );
+                if( hit ) check( highlightNear( vertices, { 0, 0 } ) && highlightNear( vertices, { 2, 0 } ), "accepted pixel hit immediately highlights the clicked segment" );
+                else if( selected ) check( highlightNear( vertices, { -4, 0 } ) && !highlightNear( vertices, { 2, 0 } ), "missed click retains the existing segment highlight" );
+                else check( vertices.empty(), "missed global-mode click does not introduce a selection" );
+                checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+                check( !physics.IsBodyAwake( scene.getImpulseBody() ) && !physics.IsValid( scene.getMouseJoint() ) && !scene.getTerrainPointDragIndex() && !scene.canUndoSplineEdit(), "pixel hit and miss never wake, drag or edit geometry" );
+            }
+}
+
+void checkAltGeometry()
+{
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    auto& physics = scene.getWorld();
+    const auto id = scene.getSplineRailJoint();
+    const vec2 curve[] = { { -2, 0 }, { 0, 2 }, { 2, 0 }, { 4, 2 } };
+    check( physics.setSplineRailJointPoints( id, curve ), "Alt curve fixture accepts curved world geometry" );
+    frame( session );
+    auto text = altClick( session, { 0.5f, 1.6875f } );
+    check( text.find( "구간 2" ) != std::string::npos && highlightNear( highlightFrame( session ), { 0.5f, 1.6875f }, 4.0f ), "click hits the true cubic more than 10px away from its control chord" );
+    const auto rail = physics.getSplineRailJointData( id );
+    physics.SetBodyTransform( rail.bodyA, { { 2, 1 }, { 0, 1 } } );
+    text = altClick( session, { 0.3125f, 1.5f } );
+    check( text.find( "구간 2" ) != std::string::npos, "curve hit testing applies the inverse translation and ninety-degree rail rotation" );
+    const auto vertices = highlightFrame( session );
+    check( highlightNear( vertices, { 0, 1 } ) && highlightNear( vertices, { 2, 3 } ), "transformed click and highlight agree on the selected world-space endpoints" );
+
+    demoSession crossing{ createDemoView };
+    crossing.selectDemo( demoKind::splineRail );
+    auto& crossed = static_cast<rigidBodyDemo&>( crossing.getDemo() );
+    const vec2 points[] = { { -2, 0 }, { 0, 0 }, { 2, 2 }, { 2, -2 }, { 0, 0 }, { -2, 2 } };
+    check( crossed.getWorld().setSplineRailJointPoints( crossed.getSplineRailJoint(), points ), "Alt crossing fixture accepts five world segments" );
+    frame( crossing );
+    text = altClick( crossing, Evaluate( { points }, 3, 0.5f ) );
+    check( text.find( "구간 4" ) != std::string::npos && highlightNear( highlightFrame( crossing ), { 2, -2 } ), "click beside the crossing selects its later branch" );
+    text = altClick( crossing, { 0, 0 } );
+    check( text.find( "구간 1" ) != std::string::npos && highlightNear( highlightFrame( crossing ), { -2, 0 } ), "exact crossing tie uses the existing earliest nearest-point branch policy" );
+    text = altClick( crossing, Evaluate( { points }, 4, 0.5f ) );
+    check( text.find( "구간 5" ) != std::string::npos && highlightNear( highlightFrame( crossing ), { -2, 2 } ), "direct selection uses the fifth current world segment rather than the editor model count" );
+}
+
+void checkAltGestureConflicts()
+{
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    const auto count = scene.getSplineControlPoints().size();
+    const vec2 point = Evaluate( { scene.getSplineControlPoints() }, 1, 0.5f );
+    mouseFrame( session, point, false, false );
+    auto text = mouseFrame( session, point, true, true, true );
+    check( scene.getSplineControlPoints().size() == count + 1 && scene.canUndoSplineEdit() && text.find( "전체 곡선" ) != std::string::npos && highlightFrame( session ).empty(), "Ctrl+Alt click preserves Ctrl insertion priority instead of selecting a rail segment" );
+    mouseFrame( session, point, true, true, false );
+    check( scene.getSplineControlPoints().size() == count + 1 && highlightFrame( session ).empty(), "releasing Ctrl during an insertion hold does not turn it into Alt selection" );
+    mouseFrame( session, point, false, false );
+    frame( session, "###SplineUndo" );
+    check( scene.getSplineControlPoints().size() == count, "existing insertion undo remains usable after the modifier conflict" );
+
+    mouseFrame( session, { -2, 0 }, true, false );
+    check( scene.getTerrainPointDragIndex() == 1, "ordinary click still starts control-point dragging" );
+    mouseFrame( session, { -2, 1 }, true, true );
+    check( scene.getSplineControlPoints()[1].y == 1.0f && highlightFrame( session ).empty(), "pressing Alt during an ordinary drag does not change its purpose" );
+    mouseFrame( session, { -2, 1 }, false, false );
+    frame( session, "###SplineUndo" );
+    const std::vector<vec2> points( scene.getSplineControlPoints().begin(), scene.getSplineControlPoints().end() );
+    text = mouseFrame( session, { 0, 2 }, true, true );
+    check( text.find( "지정 구간" ) != std::string::npos && !scene.getTerrainPointDragIndex(), "Alt over a control point selects the curve without starting an editor drag" );
+    const auto selected = highlightFrame( session );
+    mouseFrame( session, { 0, 3 }, true, false, true );
+    checkSameHighlight( selected, highlightFrame( session ) );
+    check( scene.getSplineControlPoints().size() == points.size() && !scene.getTerrainPointDragIndex() && !scene.getWorld().IsValid( scene.getMouseJoint() ), "releasing Alt or pressing Ctrl during a selection hold cannot start a drag or insertion" );
+    for( std::size_t i = 0; i < points.size(); ++i ) check( LengthSquared( points[i] - scene.getSplineControlPoints()[i] ) == 0.0f, "selection gesture leaves every control point unchanged" );
+    mouseFrame( session, { 0, 3 }, false, false );
+
+    auto& physics = scene.getWorld();
+    const auto body = scene.getImpulseBody();
+    physics.SetBodyTransform( body, { { 0, -3 }, {} } );
+    physics.SetBodyAwake( body, false );
+    mouseFrame( session, { 0, -3 }, true, true );
+    mouseFrame( session, { 1, -3 }, true, false );
+    check( !physics.IsValid( scene.getMouseJoint() ) && !physics.IsBodyAwake( body ) && physics.GetBodyTransform( body ).position.y == -3.0f, "an Alt miss over the body consumes the whole left gesture without creating a mouse joint" );
+    mouseFrame( session, { 1, -3 }, false, false );
+    mouseFrame( session, { 0, -3 }, true, false );
+    check( physics.IsValid( scene.getMouseJoint() ), "a fresh ordinary body click still starts the existing mouse joint" );
+    mouseFrame( session, { 0, -3 }, false, false );
+}
+
+
+void checkAltCancellationAndOtherInputs()
+{
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    mouseFrame( session, { -2, 0 }, false, false );
+    auto text = mouseFrame( session, { -2, 0 }, true, true, false, 60.0f, false );
+    check( text.find( "전체 곡선" ) != std::string::npos && !scene.getTerrainPointDragIndex(), "disabled canvas input ignores a real Alt press and cancels pending input" );
+    text = mouseFrame( session, { -2, 0 }, true, true );
+    check( text.find( "전체 곡선" ) != std::string::npos, "regaining canvas focus while held does not synthesize another click" );
+    mouseFrame( session, { -2, 0 }, false, false );
+    text = mouseFrame( session, { -2, 0 }, true, true );
+    check( text.find( "지정 구간" ) != std::string::npos, "fresh click after focus cancellation can select normally" );
+    session.setPlaying( true );
+    session.setPlaying( false );
+    mouseFrame( session, { -2, 0 }, false, false );
+    mouseFrame( session, { -2, 0 }, true, false );
+    check( scene.getTerrainPointDragIndex() == 1 && !session.isPlaying(), "pause cancellation preserves ordinary point dragging on the next fresh click" );
+    mouseFrame( session, { -2, 0 }, false, false );
+
+    demoSession baseline{ createDemoView };
+    baseline.selectDemo( demoKind::splineRail );
+    auto& reference = static_cast<rigidBodyDemo&>( baseline.getDemo() );
+    mouseFrame( baseline, { 0, 2 }, false, false, false, 60.0f, true, true );
+    demoSession simultaneous{ createDemoView };
+    simultaneous.selectDemo( demoKind::splineRail );
+    auto& combined = static_cast<rigidBodyDemo&>( simultaneous.getDemo() );
+    mouseFrame( simultaneous, { 0, 2 }, false, false );
+    mouseFrame( simultaneous, { 0, 2 }, true, true, false, 60.0f, true, true );
+    check( combined.getWorld().GetBodyLinearVelocity( combined.getImpulseBody() ).y == reference.getWorld().GetBodyLinearVelocity( reference.getImpulseBody() ).y && reference.getWorld().GetBodyLinearVelocity( reference.getImpulseBody() ).y > 0.0f, "selection consumes only the left gesture and forwards an independent simultaneous jump impulse" );
+    mouseFrame( simultaneous, { 0, 2 }, false, false );
+
+    demoSession path{ createDemoView };
+    path.selectDemo( demoKind::splinePath );
+    auto& pathScene = static_cast<rigidBodyDemo&>( path.getDemo() );
+    mouseFrame( path, { -2, 0 }, false, false );
+    mouseFrame( path, { -2, 0 }, true, true );
+    check( pathScene.getTerrainPointDragIndex() == 1, "Alt leaves the existing spline path point drag behavior intact" );
+    mouseFrame( path, { -2, 1 }, true, false );
+    mouseFrame( path, { -2, 1 }, false, false );
+    check( pathScene.getSplineControlPoints()[1].y == 1.0f && pathScene.canUndoSplineEdit(), "other demo dragging and edit history retain their existing behavior" );
+}
+
+void checkAltState()
+{
+    for( bool playing : { false, true } )
+        for( bool failed : { false, true } )
+        {
+            demoSession session{ createDemoView };
+            session.selectDemo( demoKind::splineRail );
+            session.setPlaying( playing );
+            auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+            auto& physics = scene.getWorld();
+            const auto id = scene.getSplineRailJoint();
+            const auto body = scene.getImpulseBody();
+            const auto visual = scene.getShapes()[0];
+            check( scene.insertSplineControlPoint( 1 ), "Alt state fixture has a pending geometry edit" );
+            if( playing ) check( scene.undoSplineEdit(), "Alt state fixture retains a pending redo" );
+            physics.SetBodyTransform( body, { Evaluate( { scene.getSplineControlPoints() }, 2, 0.4f ), rot2::FromRadians( 0.3f ) } );
+            physics.setSplineRailJointRotation( id, splineRailRotationMode::followTangent, 4.5f, 0.8f, playing );
+            physics.setSplineRailJointRotationEnabled( id, !playing );
+            physics.setSplineRailJointRotationReference( id, 7.123456f );
+            physics.setSplineRailJointSpring( id, true, 0.5f, 0.7f, 1.0f );
+            physics.setSplineRailJointLimit( id, true, 0.0f, 8.0f );
+            physics.setSplineRailJointMotor( id, true, 1.2f, 0.2f );
+            for( int step = 0; step < 5; ++step ) session.stepOnce( 4 );
+            check( physics.rebaseSplineRailJoint( id ), "Alt fixture starts with a rebased translation origin" );
+            if( failed )
+            {
+                physics.setSplineRailJointSpring( id, true, std::numeric_limits<float>::max(), 0.7f, 1.0f );
+                session.stepOnce( 4 );
+                physics.setSplineRailJointSpring( id, true, 0.5f, 0.7f, 1.0f );
+            }
+            frame( session );
+            frame( session, "###Object" );
+            frame( session, visual.label, false, true );
+            frame( session, "###SplineControl" );
+            frame( session, "제어점 3", false, true );
+            edit( session, "###SplineRailReprojectDistance", "-1" );
+            check( frame( session, "###SplineRailReproject" ).find( "최근 재투영: 거절" ) != std::string::npos, "Alt fixture has a last explicit request result to preserve" );
+            edit( session, "###SplineRailReprojectDistance", "0.5" );
+            physics.SetBodyAwake( body, false );
+            const auto before = physics.getSplineRailJointData( id );
+            const auto pose = physics.GetBodyTransform( body );
+            const auto velocity = physics.GetBodyLinearVelocity( body );
+            const float spin = physics.GetBodyAngularVelocity( body ), mass = physics.GetBodyMass( body );
+            const auto steps = session.getStepCount();
+            const bool undo = scene.canUndoSplineEdit(), redo = scene.canRedoSplineEdit();
+            const std::vector<vec2> points( scene.getSplineControlPoints().begin(), scene.getSplineControlPoints().end() );
+            check( before.trackingValid != failed, "Alt fixture covers valid and failed tracking without implicit recovery" );
+            if( !failed ) check( LengthSquared( before.force ) > 0.0f, "Alt fixture has a loaded reaction cache" );
+            auto text = altClick( session, Evaluate( { points }, 2, 0.5f ) );
+            check( text.find( "구간 3" ) != std::string::npos && text.find( "최근 재투영: 거절" ) != std::string::npos && text.find( "제어점 3" ) != std::string::npos, "hit updates only the target list and retains the explicit request result and editor selection" );
+            checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+            text = altClick( session, { 0, -5 } );
+            check( text.find( "구간 3" ) != std::string::npos && text.find( "최근 재투영: 거절" ) != std::string::npos, "miss retains selection and last request result" );
+            checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+            check( !physics.IsBodyAwake( body ) && !physics.IsValid( scene.getMouseJoint() ) && !scene.getTerrainPointDragIndex() && physics.IsValid( id ) && physics.IsValid( visual.shapeHandle ) && physics.GetBodyMass( body ) == mass && LengthSquared( physics.GetBodyTransform( body ).position - pose.position ) == 0.0f && physics.GetBodyTransform( body ).rotation.s == pose.rotation.s && physics.GetBodyTransform( body ).rotation.c == pose.rotation.c && LengthSquared( physics.GetBodyLinearVelocity( body ) - velocity ) == 0.0f && physics.GetBodyAngularVelocity( body ) == spin, "Alt hit/miss preserve sleep, handles, mass, pose and velocities without dragging or reprojection" );
+            check( session.isPlaying() == playing && session.getStepCount() == steps && scene.canUndoSplineEdit() == undo && scene.canRedoSplineEdit() == redo && scene.getSplineControlPoints().size() == points.size(), "Alt hit/miss preserve playback, steps and pending undo/redo" );
+            for( std::size_t i = 0; i < points.size(); ++i ) check( LengthSquared( points[i] - scene.getSplineControlPoints()[i] ) == 0.0f, "Alt click never changes the geometry" );
+            edit( session, "###Friction", "0.42" );
+            check( physics.GetShapeFriction( visual.shapeHandle ) == 0.42f, "Alt selection retains the selected object inspector target" );
+            frame( session, playing ? "###SplineRedo" : "###SplineUndo" );
+            check( scene.getSplineControlPoints().size() == ( playing ? 6 : 5 ) && physics.getSplineRailJointData( id ).referenceDistance == before.referenceDistance, "Alt click does not replace the original undo/redo entry or change its stored rail origin" );
+        }
+}
+
+void checkAltInvalidInput()
+{
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    auto& physics = scene.getWorld();
+    const auto id = scene.getSplineRailJoint();
+    frame( session );
+    selectReprojectionTarget( session, "지정 구간", "구간 2" );
+    physics.SetBodyAwake( scene.getImpulseBody(), false );
+    const auto before = physics.getSplineRailJointData( id );
+    for( float scale : { 0.0f, -1.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::denorm_min() } )
+    {
+        demoInput input{};
+        input.mousePosition = { -4, 0 };
+        input.mousePressed = input.mouseHeld = input.selectReprojectionSegment = true;
+        input.pixelsPerMeter = scale;
+        session.handleInput( input, true );
+        session.handleInput( {}, true );
+        check( frame( session ).find( "구간 2" ) != std::string::npos && !physics.IsBodyAwake( scene.getImpulseBody() ) && !physics.IsValid( scene.getMouseJoint() ) && !scene.getTerrainPointDragIndex(), "invalid zoom/radius rejects without changing selection or leaking into dragging" );
+        checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+    }
+    physics.SetBodyTransform( before.bodyA, { { std::numeric_limits<float>::max(), 0 }, {} } );
+    physics.SetBodyAwake( scene.getImpulseBody(), false );
+    const auto transformed = physics.getSplineRailJointData( id );
+    demoInput input{};
+    input.mousePosition = { -std::numeric_limits<float>::max(), 0 };
+    input.mousePressed = input.mouseHeld = input.selectReprojectionSegment = true;
+    check( !IsFinite( InverseTransformPoint( physics.GetBodyTransform( before.bodyA ), input.mousePosition ) ), "failed closest-point fixture overflows only its local query coordinate" );
+    session.handleInput( input, true );
+    session.handleInput( {}, true );
+    check( frame( session ).find( "구간 2" ) != std::string::npos && !physics.IsBodyAwake( scene.getImpulseBody() ), "failed local-space nearest query preserves selection and sleep" );
+    checkReprojectionUnchanged( transformed, physics.getSplineRailJointData( id ) );
+}
+
+
+void checkAltEditing()
+{
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    frame( session );
+    check( altClick( session, Evaluate( { scene.getSplineControlPoints() }, 3, 0.5f ) ).find( "구간 4" ) != std::string::npos, "click initially selects the last editable segment" );
+    frame( session, "###SplineControl" );
+    frame( session, "제어점 5", false, true );
+    frame( session, "###SplineRemove" );
+    check( scene.getSplineControlPoints().size() == 4 && highlightFrame( session ).empty(), "deleting the clicked segment retains its invalid selection until another choice" );
+    check( altClick( session, Evaluate( { scene.getSplineControlPoints() }, 0, 0.5f ) ).find( "구간 1" ) != std::string::npos, "click uses current edited geometry and repairs the invalid target selection" );
+    const auto selected = highlightFrame( session );
+    check( highlightNear( selected, { -4, 0 } ) && highlightNear( selected, { -2, 0 } ) && scene.canUndoSplineEdit() && !scene.canRedoSplineEdit(), "click replaces only the target selection while retaining the deletion history" );
+    frame( session, "###SplineUndo" );
+    check( scene.getSplineControlPoints().size() == 5 && frame( session ).find( "구간 1" ) != std::string::npos && scene.canRedoSplineEdit(), "undo restores the geometry without reverting the later clicked target" );
+    frame( session, "###SplineRedo" );
+    checkSameHighlight( selected, highlightFrame( session ) );
+    check( scene.getSplineControlPoints().size() == 4 && scene.canUndoSplineEdit() && !scene.canRedoSplineEdit(), "redo restores edited geometry and its clicked highlight without a new history record" );
+}
+
 }
 
 void checkSplineRailInspector()
@@ -1132,4 +1470,12 @@ void checkSplineRailInspector()
     checkHighlightEditing();
     checkHighlightState();
     checkHighlightSamplingFailure();
+    checkAltSelection();
+    checkAltBoundaries();
+    checkAltGeometry();
+    checkAltGestureConflicts();
+    checkAltCancellationAndOtherInputs();
+    checkAltState();
+    checkAltInvalidInput();
+    checkAltEditing();
 }
