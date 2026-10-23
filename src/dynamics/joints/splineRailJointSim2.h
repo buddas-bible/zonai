@@ -24,6 +24,7 @@ struct splineRailJointSim2
     vec2 localAnchorB{};
     float referenceAngle = 0.0f, tangentOffset = 0.0f;
     splineRailRotationMode rotationMode = splineRailRotationMode::fixed;
+    bool enableRotation = true;
     bool enableAngularSpring = true;
     float angularHertz = 3.0f, angularDampingRatio = 0.7f;
     bool enableSpring = false;
