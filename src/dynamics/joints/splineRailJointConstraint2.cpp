@@ -249,6 +249,12 @@ bool setSplineRailGeometry( splineRailJointSim2& joint, std::span<const vec2> po
     return true;
 }
 
+double getSplineRailDistance( const splineRailJointSim2& joint, std::size_t segmentIndex, double t )
+{
+    const auto& arc = joint.segments[segmentIndex];
+    return arc.prefix + ( t == 1.0 ? arc.length : arcLength( joint.geometry.getSegments()[segmentIndex], t ) );
+}
+
 splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const transform2& bodyA, const transform2& bodyB, splineParameter2 seed, bool tracked, double distanceOffset )
 {
     splineRailFrame2 frame{};
@@ -336,8 +342,7 @@ splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const tra
     const double denominator = endpoint ? 1.0 : 1.0 - frame.curvature * frame.lateralError;
     if( !std::isfinite( denominator ) || denominator <= 0.05 ) return frame;
     frame.arcScale = static_cast<float>( 1.0 / denominator );
-    const auto& arc = joint.segments[index];
-    frame.distance = arc.prefix + ( t == 1.0 ? arc.length : arcLength( segment, t ) );
+    frame.distance = getSplineRailDistance( joint, index, t );
     if( endpoint ) frame.distance += Dot( frame.tangent, separation );
     if( joint.isLoop ) frame.distance += frame.distanceOffset;
     frame.translation = frame.distance - joint.referenceDistance;

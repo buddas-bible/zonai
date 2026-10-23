@@ -130,6 +130,33 @@ void world::setSplineRailJointRotation( jointId id, splineRailRotationMode mode,
     resetSplineRailJoint( id );
 }
 
+bool world::reprojectSplineRailJoint( jointId id )
+{
+    auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );
+    const auto& a = bodySims_[sim.bodyIdA].transform;
+    const auto& b = bodySims_[sim.bodyIdB].transform;
+    const auto frame = getSplineRailFrame( sim, a, b, {}, false );
+    if( !frame.valid ) return false;
+    double offset = sim.isLoop ? sim.distanceOffset : 0.0;
+    if( sim.isLoop )
+    {
+        const double previous = getSplineRailDistance( sim, sim.parameter.segmentIndex, sim.parameter.t );
+        if( !std::isfinite( previous ) ) return false;
+        // 편집으로 생긴 위상 보정을 유지하며 마지막 구간 좌표에 가장 가까운 주회를 고름. 동률은 작은 값임.
+        const double delta = previous - frame.distance;
+        if( delta > sim.length * 0.5 ) offset += sim.length;
+        else if( delta <= -sim.length * 0.5 ) offset -= sim.length;
+    }
+    const double translation = frame.distance + offset - sim.referenceDistance;
+    if( !std::isfinite( offset ) || !std::isfinite( translation ) || std::abs( translation ) > std::numeric_limits<float>::max() ) return false;
+    if( sim.trackingValid && sim.parameter.segmentIndex == frame.parameter.segmentIndex && sim.parameter.t == frame.parameter.t && sim.distanceOffset == offset ) return true;
+    sim.parameter = frame.parameter;
+    sim.distanceOffset = offset;
+    sim.trackingValid = true;
+    resetSplineRailJoint( id );
+    return true;
+}
+
 bool world::rebaseSplineRailJoint( jointId id )
 {
     auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );

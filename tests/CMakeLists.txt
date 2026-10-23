@@ -695,3 +695,7 @@ add_test(NAME splineRailSpeedTests COMMAND splineRailSpeedTests)
 add_executable(splineRailRebaseTests dynamics/spline_rail_rebase_test.cpp)
 target_link_libraries(splineRailRebaseTests PRIVATE zonai::zonai)
 add_test(NAME splineRailRebaseTests COMMAND splineRailRebaseTests)
+
+add_executable(splineRailReprojectTests dynamics/spline_rail_reproject_test.cpp)
+target_link_libraries(splineRailReprojectTests PRIVATE zonai::zonai)
+add_test(NAME splineRailReprojectTests COMMAND splineRailReprojectTests)
