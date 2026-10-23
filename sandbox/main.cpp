@@ -329,6 +329,7 @@ int main()
             input.mouseHeld = ImGui::IsMouseDown( ImGuiMouseButton_Left );
             input.selectTrialPosition = io.KeyShift;
             input.insertControlPoint = io.KeyCtrl;
+            input.selectReprojectionSegment = io.KeyAlt;
             input.pixelsPerMeter = camera.pixelsPerMeter;
             input.impulsePressed = ImGui::IsMouseClicked( ImGuiMouseButton_Right );
             input.left = ImGui::IsKeyDown( ImGuiKey_A );

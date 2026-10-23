@@ -140,6 +140,46 @@ rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
     if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
 
+void rigidBodyDemoUi::handleInput( const demoInput& input )
+{
+    if( getKind() == demoKind::splineRail )
+    {
+        if( input.mousePressed ) splineRailSelecting_ = input.mouseHeld && input.selectReprojectionSegment && !input.insertControlPoint;
+        if( !input.mouseHeld ) splineRailSelecting_ = false;
+        if( splineRailSelecting_ )
+        {
+            if( input.mousePressed && getWorld().IsValid( getSplineRailJoint() ) && std::isfinite( input.pixelsPerMeter ) && input.pixelsPerMeter > 0.0f )
+            {
+                const float radius = 10.0f / input.pixelsPerMeter;
+                if( std::isfinite( radius ) && radius > 0.0f )
+                {
+                    const auto rail = getWorld().getSplineRailJointData( getSplineRailJoint() );
+                    const vec2 point = InverseTransformPoint( getWorld().GetBodyTransform( rail.bodyA ), input.mousePosition );
+                    // Ctrl 삽입과 같은 0.01px 거리 오차를 사용함.
+                    const auto closest = ClosestPoint( { getWorld().getSplineRailJointPoints( getSplineRailJoint() ), rail.isLoop }, point, static_cast<double>( radius ) * 0.001 );
+                    if( closest && closest->distanceSquared <= static_cast<double>( radius ) * radius )
+                    {
+                        splineRailReprojectSelected_ = true;
+                        splineRailReprojectSegment_ = closest->segmentIndex;
+                    }
+                }
+            }
+            auto forwarded = input;
+            forwarded.mousePressed = false;
+            forwarded.mouseHeld = false;
+            rigidBodyDemo::handleInput( forwarded );
+            return;
+        }
+    }
+    rigidBodyDemo::handleInput( input );
+}
+
+void rigidBodyDemoUi::cancelInput()
+{
+    splineRailSelecting_ = false;
+    rigidBodyDemo::cancelInput();
+}
+
 void rigidBodyDemoUi::drawControls()
 {
     // 한글 이름이 고정 폭 패널에서 잘리지 않도록 입력 영역과 이름의 폭을 나눔.
@@ -1315,6 +1355,7 @@ void rigidBodyDemoUi::drawExperimentControls()
         const auto id = getSplineRailJoint();
         auto rail = getWorld().getSplineRailJointData( id );
         ImGui::TextUnformatted( "스플라인 레일" );
+        ImGui::TextWrapped( "Alt+왼쪽 클릭으로 곡선에서 10px 이내의 구간을 선택합니다." );
         if( ImGui::BeginCombo( "재투영 대상###SplineRailReprojectTarget", splineRailReprojectSelected_ ? "지정 구간" : "전체 곡선" ) )
         {
             if( ImGui::Selectable( "전체 곡선", !splineRailReprojectSelected_ ) ) splineRailReprojectSelected_ = false;

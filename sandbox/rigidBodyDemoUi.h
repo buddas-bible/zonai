@@ -10,6 +10,8 @@ class rigidBodyDemoUi final : public rigidBodyDemo
 {
 public:
     explicit rigidBodyDemoUi( demoKind kind );
+    void handleInput( const demoInput& input ) override;
+    void cancelInput() override;
     void drawControls() override;
     void draw( debugDraw& draw ) const override;
 
@@ -26,6 +28,7 @@ private:
     shapeId selectedShape_{};
     int terrainProbeIndex_ = 0;
     std::size_t splineControlIndex_ = 0;
+    bool splineRailSelecting_ = false;
     bool splineRailReprojectSelected_ = false;
     std::size_t splineRailReprojectSegment_ = 0;
     float splineRailReprojectDistance_ = 0.5f;
