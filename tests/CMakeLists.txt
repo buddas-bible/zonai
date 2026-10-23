@@ -622,7 +622,7 @@ add_test(NAME sandboxWeldSoftnessDemoTests COMMAND sandboxWeldSoftnessDemoTests)
 
 # Windows Sandbox 구성에서는 실제 ImGui view도 headless frame으로 검사함.
 if(TARGET imgui)
-    target_sources(sandboxDemoTests PRIVATE sandbox/demo_ui_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemoUi.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugCamera.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugDraw.cpp")
+    target_sources(sandboxDemoTests PRIVATE sandbox/spline_rail_inspector_test.cpp sandbox/demo_ui_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemoUi.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugCamera.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugDraw.cpp")
     target_link_libraries(sandboxDemoTests PRIVATE imgui)
     target_compile_definitions(sandboxDemoTests PRIVATE ZONAI_TEST_SANDBOX_UI)
     add_custom_command(TARGET sandboxDemoTests POST_BUILD
