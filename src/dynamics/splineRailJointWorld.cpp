@@ -314,6 +314,16 @@ splineRailJointData world::getSplineRailJointData( jointId id ) const
         const vec2 rA = frame.anchorB - bodySims_[sim.bodyIdA].center, rB = frame.anchorB - bodySims_[sim.bodyIdB].center;
         // solver의 누적 거리 row와 같은 앵커 속도·곡률 보정을 사용함.
         data.currentSpeed = frame.arcScale * ( Dot( frame.tangent, b.linearVelocity - a.linearVelocity ) + Cross( rB, frame.tangent ) * b.angularVelocity - Cross( rA, frame.tangent ) * a.angularVelocity );
+        data.currentAngularSpeed = b.angularVelocity - a.angularVelocity;
+        if( sim.rotationMode == splineRailRotationMode::followTangent )
+        {
+            // solver의 회전 row와 같은 곡률·앵커 보정으로 오차 변화율을 구함.
+            const float curvature = static_cast<float>( frame.curvature );
+            const vec2 axis = -curvature * ( frame.arcScale * frame.tangent );
+            const float angularA = 1.0f - curvature * ( frame.arcScale * Cross( rA, frame.tangent ) );
+            const float angularB = 1.0f - curvature * ( frame.arcScale * Cross( rB, frame.tangent ) );
+            data.currentAngularSpeed = Dot( axis, b.linearVelocity - a.linearVelocity ) + angularB * b.angularVelocity - angularA * a.angularVelocity;
+        }
     }
     data.lateralError = frame.lateralError;
     data.currentAngle = frame.angleError;
