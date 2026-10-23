@@ -12,6 +12,8 @@
 
 using namespace zonai::sandbox;
 
+void checkSplineRailInspector();
+
 // ImGui frame을 GPU/window 없이 만들어 실제 view의 control/draw 수명을 검사함.
 // 실제 OS focus/클릭 routing이나 최종 화면의 시각 검증을 대신하지 않음.
 void checkDemoUi()
@@ -2937,5 +2939,6 @@ void checkDemoUi()
             }
         }
     }
+    checkSplineRailInspector();
     ImGui::DestroyContext();
 }

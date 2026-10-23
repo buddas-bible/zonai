@@ -1296,6 +1296,8 @@ void rigidBodyDemoUi::drawExperimentControls()
         ImGui::TextUnformatted( "스플라인 레일" );
         ImGui::Text( "이동 거리: %.2f / %.2f m", rail.currentTranslation, rail.length );
         ImGui::TextWrapped( "동적 물체를 열린 곡선에 구속합니다. 양 끝점에서는 항상 정지합니다." );
+        if( ImGui::Checkbox( "회전 구속###SplineRailRotationEnabled", &rail.enableRotation ) ) getWorld().setSplineRailJointRotationEnabled( id, rail.enableRotation );
+        if( !rail.enableRotation ) ImGui::TextWrapped( "회전은 자유롭습니다. 아래 회전 설정은 다시 켤 때 적용됩니다." );
         bool follow = rail.rotationMode == splineRailRotationMode::followTangent;
         bool rotationChanged = ImGui::Checkbox( "접선 회전###SplineRailFollow", &follow );
         ImGui::BeginDisabled( !follow );
@@ -1317,6 +1319,16 @@ void rigidBodyDemoUi::drawExperimentControls()
         ImGui::EndDisabled();
         ImGui::EndDisabled();
         if( rotationChanged ) getWorld().setSplineRailJointRotation( id, follow ? splineRailRotationMode::followTangent : splineRailRotationMode::fixed, rail.angularHertz, rail.angularDampingRatio, rail.enableAngularSpring );
+        rail = getWorld().getSplineRailJointData( id );
+        float reference = rail.rotationMode == splineRailRotationMode::fixed ? rail.referenceAngle : rail.tangentOffset;
+        const char* referenceLabel = rail.rotationMode == splineRailRotationMode::fixed ? "기준 상대각도###SplineRailRotationReference" : "접선 기준각도###SplineRailRotationReference";
+        if( ImGui::DragFloat( referenceLabel, &reference, 0.01f, 0.0f, 0.0f, "%.3f rad" ) ) getWorld().setSplineRailJointRotationReference( id, reference );
+        ImGui::BeginDisabled( !rail.trackingValid );
+        if( ImGui::Button( "현재 자세를 기준으로###SplineRailRotationRebase" ) ) getWorld().rebaseSplineRailJointRotation( id );
+        ImGui::EndDisabled();
+        rail = getWorld().getSplineRailJointData( id );
+        ImGui::Text( "회전 오차: %.3f rad", rail.currentAngle );
+        ImGui::Text( "오차 변화 속도: %.3f rad/s", rail.currentAngularSpeed );
         bool springChanged = ImGui::Checkbox( "스프링###SplineRailSpring", &rail.enableSpring );
         springChanged |= ImGui::SliderFloat( "진동수###SplineRailHertz", &rail.hertz, 0.0f, 10.0f, "%.1f Hz", ImGuiSliderFlags_AlwaysClamp );
         springChanged |= ImGui::SliderFloat( "감쇠비###SplineRailDamping", &rail.dampingRatio, 0.0f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp );
