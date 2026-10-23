@@ -191,6 +191,17 @@ bool world::applySplineRailProjection( jointId id, const splineRailFrame2& frame
     return true;
 }
 
+bool world::setSplineRailJointRotationReference( jointId id, float angle )
+{
+    if( !std::isfinite( angle ) ) return false;
+    auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );
+    float& reference = sim.rotationMode == splineRailRotationMode::fixed ? sim.referenceAngle : sim.tangentOffset;
+    if( reference == angle ) return true;
+    reference = angle;
+    resetSplineRailJoint( id );
+    return true;
+}
+
 bool world::rebaseSplineRailJointRotation( jointId id )
 {
     auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );
@@ -309,6 +320,7 @@ splineRailJointData world::getSplineRailJointData( jointId id ) const
     data.force = sim.force;
     data.torque = sim.torque;
     data.referenceAngle = sim.referenceAngle;
+    data.tangentOffset = sim.tangentOffset;
     data.rotationMode = sim.rotationMode;
     data.enableAngularSpring = sim.enableAngularSpring;
     data.angularHertz = sim.angularHertz;
