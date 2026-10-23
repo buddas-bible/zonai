@@ -1294,7 +1294,12 @@ void rigidBodyDemoUi::drawExperimentControls()
         const auto id = getSplineRailJoint();
         auto rail = getWorld().getSplineRailJointData( id );
         ImGui::TextUnformatted( "스플라인 레일" );
+        ImGui::BeginDisabled( !rail.trackingValid );
+        if( ImGui::Button( "현재 위치를 0점으로###SplineRailRebase" ) ) getWorld().rebaseSplineRailJoint( id );
+        ImGui::EndDisabled();
+        rail = getWorld().getSplineRailJointData( id );
         ImGui::Text( "이동 거리: %.2f / %.2f m", rail.currentTranslation, rail.length );
+        ImGui::Text( "실제 이동 속도: %.3f m/s", rail.currentSpeed );
         ImGui::TextWrapped( "동적 물체를 열린 곡선에 구속합니다. 양 끝점에서는 항상 정지합니다." );
         if( ImGui::Checkbox( "회전 구속###SplineRailRotationEnabled", &rail.enableRotation ) ) getWorld().setSplineRailJointRotationEnabled( id, rail.enableRotation );
         if( !rail.enableRotation ) ImGui::TextWrapped( "회전은 자유롭습니다. 아래 회전 설정은 다시 켤 때 적용됩니다." );
