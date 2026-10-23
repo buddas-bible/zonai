@@ -8,6 +8,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include "rigidBodyDemoUi.h"
+#include "debug/debugDraw.h"
 
 using namespace zonai;
 using namespace zonai::sandbox;
@@ -825,6 +826,268 @@ void checkSegmentReprojectionEditing()
     }
 }
 
+
+std::vector<ImDrawVert> highlightFrame( demoSession& session )
+{
+    ImGui::NewFrame();
+    ImGui::SetNextWindowPos( { 0, 0 } );
+    ImGui::SetNextWindowSize( { 1000, 800 } );
+    ImGui::Begin( "Spline rail segment highlight" );
+    auto* list = ImGui::GetWindowDrawList();
+    const int start = list->VtxBuffer.Size;
+    debugCamera camera{};
+    debugDraw draw{ list, camera, { 0, 0 }, { 1000, 800 } };
+    session.getDemo().draw( draw );
+    std::vector<ImDrawVert> vertices;
+    for( int i = start; i < list->VtxBuffer.Size; ++i )
+        if( list->VtxBuffer[i].col == IM_COL32( 255, 220, 80, 255 ) ) vertices.push_back( list->VtxBuffer[i] );
+    ImGui::End();
+    ImGui::Render();
+    return vertices;
+}
+
+bool highlightNear( const std::vector<ImDrawVert>& vertices, vec2 point, float pixels = 7.0f )
+{
+    const vec2 screen{ 500.0f + 60.0f * point.x, 400.0f - 60.0f * point.y };
+    for( const auto& vertex : vertices )
+        if( LengthSquared( vec2{ vertex.pos.x, vertex.pos.y } - screen ) <= pixels * pixels ) return true;
+    return false;
+}
+
+void checkSegmentHighlight()
+{
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    auto& physics = scene.getWorld();
+    const auto id = scene.getSplineRailJoint();
+    const vec2 points[] = { { -4, 0 }, { -2, 0 }, { 0, 0 }, { 2, 0 }, { 4, 0 } };
+    check( physics.setSplineRailJointPoints( id, points ), "highlight fixture uses straight world geometry" );
+    frame( session );
+    check( highlightFrame( session ).empty(), "global reprojection mode does not draw a selected segment highlight" );
+    selectReprojectionTarget( session, "지정 구간", "구간 2" );
+    const auto vertices = highlightFrame( session );
+    check( !vertices.empty() && highlightNear( vertices, { -2, 0 } ) && highlightNear( vertices, { 0, 0 } ), "actual segment list draws the selected curve and both endpoint markers" );
+    check( !highlightNear( vertices, { -4, 0 } ) && !highlightNear( vertices, { 2, 0 } ), "highlight excludes neighboring segment endpoints" );
+}
+
+
+void checkHighlightCurveAndTransform()
+{
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    auto& physics = scene.getWorld();
+    const auto id = scene.getSplineRailJoint();
+    const vec2 points[] = { { -2, 0 }, { 0, 2 }, { 2, 0 }, { 4, 2 } };
+    check( physics.setSplineRailJointPoints( id, points ), "curved highlight fixture accepts its world geometry" );
+    frame( session );
+    selectReprojectionTarget( session, "지정 구간", "구간 2" );
+    auto vertices = highlightFrame( session );
+    check( highlightNear( vertices, { 0.5f, 1.6875f }, 4.0f ) && highlightNear( vertices, { 1.5f, 0.3125f }, 4.0f ), "highlight follows the cubic interior rather than a chord between control points" );
+    check( highlightNear( vertices, { 0, 2 } ) && highlightNear( vertices, { 2, 0 } ) && !highlightNear( vertices, { -2, 0 } ) && !highlightNear( vertices, { 4, 2 } ), "curved highlight contains only its selected endpoints" );
+    const auto rail = physics.getSplineRailJointData( id );
+    physics.SetBodyTransform( rail.bodyA, { { 1, -1 }, { 0, 1 } } );
+    vertices = highlightFrame( session );
+    check( highlightNear( vertices, { -1, -1 } ) && highlightNear( vertices, { 1, 1 } ) && highlightNear( vertices, { -0.6875f, -0.5f }, 4.0f ) && highlightNear( vertices, { 0.6875f, 0.5f }, 4.0f ), "highlight endpoints and cubic interior apply the current rail translation and ninety-degree rotation exactly once" );
+    check( !highlightNear( vertices, { 0, 2 } ) && !highlightNear( vertices, { 2, 0 } ), "transformed overlay does not retain stale local-space endpoints" );
+}
+
+void checkHighlightCrossing()
+{
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    auto& physics = scene.getWorld();
+    const auto id = scene.getSplineRailJoint();
+    const vec2 points[] = { { -2, 0 }, { 0, 0 }, { 2, 2 }, { 2, -2 }, { 0, 0 }, { -2, 2 } };
+    check( physics.setSplineRailJointPoints( id, points ), "highlight crossing fixture has five world segments" );
+    frame( session );
+    selectReprojectionTarget( session, "지정 구간", "구간 1" );
+    auto vertices = highlightFrame( session );
+    check( highlightNear( vertices, { -2, 0 } ) && highlightNear( vertices, { 0, 0 } ) && !highlightNear( vertices, { 2, -2 } ), "first crossing segment highlights its own branch and shared crossing" );
+    const auto before = physics.getSplineRailJointData( id );
+    selectReprojectionTarget( session, "지정 구간", "구간 4" );
+    vertices = highlightFrame( session );
+    check( highlightNear( vertices, { 2, -2 } ) && highlightNear( vertices, { 0, 0 } ) && !highlightNear( vertices, { -2, 0 } ), "later crossing segment replaces the first branch highlight" );
+    checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+    selectReprojectionTarget( session, "지정 구간", "구간 5" );
+    vertices = highlightFrame( session );
+    check( highlightNear( vertices, { 0, 0 } ) && highlightNear( vertices, { -2, 2 } ) && !highlightNear( vertices, { 2, -2 } ), "highlight uses the actual fifth world segment rather than the four-segment editor model" );
+    selectReprojectionTarget( session, "전체 곡선" );
+    check( highlightFrame( session ).empty(), "switching to global mode removes the selected overlay immediately" );
+}
+
+void checkHighlightMarkersAndLabel()
+{
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    const vec2 points[] = { { -4, 0 }, { -2, 0 }, { 0, 0 }, { 2, 0 }, { 4, 0 } };
+    check( scene.getWorld().setSplineRailJointPoints( scene.getSplineRailJoint(), points ), "label fixture uses a horizontal segment" );
+    frame( session );
+    selectReprojectionTarget( session, "지정 구간", "구간 2" );
+    const auto vertices = highlightFrame( session );
+    for( float x : { 380.0f, 500.0f } )
+    {
+        bool marker = false;
+        for( const auto& vertex : vertices )
+        {
+            const float r2 = LengthSquared( vec2{ vertex.pos.x - x, vertex.pos.y - 400.0f } );
+            marker |= r2 >= 25.0f && r2 <= 49.0f;
+        }
+        check( marker, "both endpoints draw a visible marker larger than the curve stroke" );
+    }
+    bool label = false, thickLine = false;
+    for( const auto& vertex : vertices )
+    {
+        label |= vertex.pos.x >= 448.0f && vertex.pos.x < 490.0f && vertex.pos.y >= 380.0f && vertex.pos.y < 394.0f;
+        thickLine |= std::abs( vertex.pos.x - 380.0f ) < 0.75f && vertex.pos.y - 400.0f > 1.0f && vertex.pos.y - 400.0f < 4.0f;
+    }
+    check( label && thickLine, "selected segment draws its number near the curve midpoint and a stroke thicker than the base rail" );
+}
+
+
+void checkSameHighlight( const std::vector<ImDrawVert>& first, const std::vector<ImDrawVert>& second )
+{
+    check( !first.empty() && first.size() == second.size(), "restored geometry reproduces the selected overlay" );
+    for( std::size_t i = 0; i < first.size(); ++i )
+        check( first[i].pos.x == second[i].pos.x && first[i].pos.y == second[i].pos.y && first[i].uv.x == second[i].uv.x && first[i].uv.y == second[i].uv.y, "undo/redo restores curve, markers and label geometry exactly" );
+}
+
+void checkHighlightEditing()
+{
+    for( bool playing : { false, true } )
+    {
+        demoSession session{ createDemoView };
+        session.selectDemo( demoKind::splineRail );
+        session.setPlaying( playing );
+        auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+        auto& physics = scene.getWorld();
+        const auto id = scene.getSplineRailJoint();
+        frame( session );
+        selectReprojectionTarget( session, "지정 구간", "구간 4" );
+        const auto original = highlightFrame( session );
+        check( highlightNear( original, { 2, 0 } ) && highlightNear( original, { 4, 0 } ), "editable highlight starts on the selected last segment" );
+        frame( session, "###SplineControl" );
+        frame( session, "제어점 5", false, true );
+        frame( session, "###SplineRemove" );
+        check( scene.getSplineControlPoints().size() == 4 && scene.canUndoSplineEdit() && highlightFrame( session ).empty(), "real deletion hides the invalid selection rather than clamping it to a remaining segment" );
+        const auto steps = session.getStepCount();
+        frame( session, "###SplineUndo" );
+        checkSameHighlight( original, highlightFrame( session ) );
+        check( scene.getSplineControlPoints().size() == 5 && !scene.canUndoSplineEdit() && scene.canRedoSplineEdit(), "drawing after undo preserves the pending redo" );
+        frame( session, "###SplineRedo" );
+        check( highlightFrame( session ).empty() && scene.canUndoSplineEdit() && !scene.canRedoSplineEdit(), "drawing after redo keeps the original invalid number and geometry history" );
+        selectReprojectionTarget( session, "지정 구간", "구간 1" );
+        const auto reselected = highlightFrame( session );
+        check( highlightNear( reselected, { -4, 0 } ) && highlightNear( reselected, { -2, 0 } ) && session.isPlaying() == playing && session.getStepCount() == steps && physics.IsValid( id ), "actual reselection restores only the new segment highlight and preserves playback, steps and joint handle" );
+    }
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    frame( session );
+    selectReprojectionTarget( session, "지정 구간", "구간 2" );
+    const auto original = highlightFrame( session );
+    demoInput drag{};
+    drag.mousePosition = { -2, 0 };
+    drag.mousePressed = true;
+    drag.mouseHeld = true;
+    session.handleInput( drag, true );
+    check( scene.getTerrainPointDragIndex() == 1, "real editor input starts dragging the selected segment endpoint" );
+    drag.mousePosition = { -2, 1 };
+    drag.mousePressed = false;
+    session.handleInput( drag, true );
+    drag.mouseHeld = false;
+    session.handleInput( drag, true );
+    const auto moved = highlightFrame( session );
+    check( highlightNear( moved, { -2, 1 } ) && !highlightNear( moved, { -2, 0 } ) && scene.canUndoSplineEdit(), "dragging a control point immediately moves the highlighted endpoint" );
+    frame( session, "###SplineUndo" );
+    checkSameHighlight( original, highlightFrame( session ) );
+    frame( session, "###SplineRedo" );
+    checkSameHighlight( moved, highlightFrame( session ) );
+}
+
+void checkHighlightState()
+{
+    for( bool playing : { false, true } )
+        for( bool failed : { false, true } )
+        {
+            demoSession session{ createDemoView };
+            session.selectDemo( demoKind::splineRail );
+            session.setPlaying( playing );
+            auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+            auto& physics = scene.getWorld();
+            const auto id = scene.getSplineRailJoint();
+            const auto body = scene.getImpulseBody();
+            const auto visual = scene.getShapes()[0];
+            check( scene.insertSplineControlPoint( 1 ), "read-only drawing fixture has a pending spline edit" );
+            if( playing ) check( scene.undoSplineEdit(), "playing drawing fixture has a pending redo" );
+            physics.SetBodyTransform( body, { Evaluate( { scene.getSplineControlPoints() }, 2, 0.4f ), rot2::FromRadians( 0.3f ) } );
+            physics.setSplineRailJointRotation( id, splineRailRotationMode::followTangent, 4.5f, 0.8f, playing );
+            physics.setSplineRailJointRotationEnabled( id, !playing );
+            physics.setSplineRailJointRotationReference( id, 7.123456f );
+            physics.setSplineRailJointSpring( id, true, 0.5f, 0.7f, 1.0f );
+            physics.setSplineRailJointLimit( id, true, 0.0f, 8.0f );
+            physics.setSplineRailJointMotor( id, true, 1.2f, 0.2f );
+            for( int step = 0; step < 5; ++step ) session.stepOnce( 4 );
+            check( physics.rebaseSplineRailJoint( id ), "read-only drawing fixture has a nondefault origin" );
+            if( failed )
+            {
+                physics.setSplineRailJointSpring( id, true, std::numeric_limits<float>::max(), 0.7f, 1.0f );
+                session.stepOnce( 4 );
+                physics.setSplineRailJointSpring( id, true, 0.5f, 0.7f, 1.0f );
+            }
+            frame( session );
+            frame( session, "###Object" );
+            frame( session, visual.label, false, true );
+            frame( session, "###SplineControl" );
+            frame( session, "제어점 3", false, true );
+            selectReprojectionTarget( session, "지정 구간", "구간 3" );
+            if( !playing || failed ) physics.SetBodyAwake( body, false );
+            const auto before = physics.getSplineRailJointData( id );
+            const auto pose = physics.GetBodyTransform( body );
+            const auto velocity = physics.GetBodyLinearVelocity( body );
+            const float spin = physics.GetBodyAngularVelocity( body ), mass = physics.GetBodyMass( body ), friction = physics.GetShapeFriction( visual.shapeHandle );
+            const bool awake = physics.IsBodyAwake( body ), undo = scene.canUndoSplineEdit(), redo = scene.canRedoSplineEdit();
+            const auto steps = session.getStepCount();
+            const std::vector<vec2> points( scene.getSplineControlPoints().begin(), scene.getSplineControlPoints().end() );
+            check( before.trackingValid != failed, "drawing fixture covers valid and failed stored tracking" );
+            if( !failed ) check( LengthSquared( before.force ) > 0.0f, "valid drawing fixture has cached reactions" );
+            for( int draw = 0; draw < 3; ++draw )
+            {
+                check( !highlightFrame( session ).empty(), "selected geometry remains visible even when tracking has failed" );
+                checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+            }
+            check( physics.IsBodyAwake( body ) == awake && physics.IsValid( id ) && physics.IsValid( visual.shapeHandle ) && physics.GetBodyMass( body ) == mass && physics.GetShapeFriction( visual.shapeHandle ) == friction && LengthSquared( physics.GetBodyTransform( body ).position - pose.position ) == 0.0f && physics.GetBodyTransform( body ).rotation.s == pose.rotation.s && physics.GetBodyTransform( body ).rotation.c == pose.rotation.c && LengthSquared( physics.GetBodyLinearVelocity( body ) - velocity ) == 0.0f && physics.GetBodyAngularVelocity( body ) == spin, "repeated highlighting preserves sleep, handles, mass, material, pose and velocities" );
+            check( session.isPlaying() == playing && session.getStepCount() == steps && scene.canUndoSplineEdit() == undo && scene.canRedoSplineEdit() == redo && scene.getSplineControlPoints().size() == points.size(), "highlighting preserves playback, steps and pending geometry history" );
+            for( std::size_t point = 0; point < points.size(); ++point ) check( LengthSquared( points[point] - scene.getSplineControlPoints()[point] ) == 0.0f, "drawing never edits control points" );
+            check( frame( session ).find( "제어점 3" ) != std::string::npos, "drawing preserves inspector control-point selection" );
+            edit( session, "###Friction", "0.42" );
+            check( physics.GetShapeFriction( visual.shapeHandle ) == 0.42f, "drawing preserves inspector object selection" );
+        }
+}
+
+void checkHighlightSamplingFailure()
+{
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    auto& physics = scene.getWorld();
+    const auto id = scene.getSplineRailJoint();
+    frame( session );
+    selectReprojectionTarget( session, "지정 구간", "구간 2" );
+    check( !highlightFrame( session ).empty(), "sampling failure fixture starts with a visible selection" );
+    const vec2 points[] = { { -2000000, 0 }, { 0, 2000000 }, { 2000000, 0 }, { 4000000, 2000000 } };
+    physics.SetBodyTransform( scene.getImpulseBody(), { points[0], {} } );
+    check( physics.setSplineRailJointPoints( id, points ), "large regular geometry remains valid for rail tracking" );
+    check( SampleAdaptive( { points }, { 1, 0.0f }, { 1, 1.0f }, 0.01f ).empty(), "large curve cannot satisfy the existing 1cm adaptive sampling budget" );
+    physics.SetBodyAwake( scene.getImpulseBody(), false );
+    const auto before = physics.getSplineRailJointData( id );
+    check( highlightFrame( session ).empty() && !physics.IsBodyAwake( scene.getImpulseBody() ), "failed sampling hides the entire overlay without stale endpoints, label or wakeup" );
+    checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+}
+
 }
 
 void checkSplineRailInspector()
@@ -862,4 +1125,11 @@ void checkSplineRailInspector()
     checkSegmentReprojectionBoundaries();
     checkSegmentReprojectionFailureAndTravel();
     checkSegmentReprojectionEditing();
+    checkSegmentHighlight();
+    checkHighlightCurveAndTransform();
+    checkHighlightCrossing();
+    checkHighlightMarkersAndLabel();
+    checkHighlightEditing();
+    checkHighlightState();
+    checkHighlightSamplingFailure();
 }
