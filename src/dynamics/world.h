@@ -3,6 +3,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 #include <variant>
@@ -203,6 +204,9 @@ public:
     bool reprojectSplineRailJoint( jointId id );
     // 지정 구간 안에서만 재투영 후보를 선택함. 이후에는 기존 연결 구간 추적을 사용함.
     bool reprojectSplineRailJoint( jointId id, std::size_t segmentIndex );
+    // 앵커와 곡선 투영점의 거리가 유한한 비음수 maxDistance(m) 이내일 때만 재투영함.
+    bool reprojectSplineRailJointWithinDistance( jointId id, float maxDistance );
+    bool reprojectSplineRailJointWithinDistance( jointId id, std::size_t segmentIndex, float maxDistance );
     [[nodiscard]] splineRailJointData getSplineRailJointData( jointId id ) const;
     [[nodiscard]] std::span<const vec2> getSplineRailJointPoints( jointId id ) const;
 
@@ -517,7 +521,7 @@ private:
     void destroyJointByIndex( std::int32_t jointIndex, bool touchProxies );
     void resetJointImpulses( std::int32_t bodyIndex );
     void resetSplineRailJoint( jointId id );
-    bool applySplineRailProjection( jointId id, const splineRailFrame2& frame );
+    bool applySplineRailProjection( jointId id, const splineRailFrame2& frame, std::optional<float> maxDistance = std::nullopt );
     [[nodiscard]] bool shouldBodiesCollide( std::int32_t bodyIndexA, std::int32_t bodyIndexB ) const;
     [[nodiscard]] bool shouldShapeFiltersCollide( const collisionFilter& a, const collisionFilter& b ) const;
 
