@@ -26,6 +26,8 @@ private:
     shapeId selectedShape_{};
     int terrainProbeIndex_ = 0;
     std::size_t splineControlIndex_ = 0;
+    bool splineRailReprojectSelected_ = false;
+    std::size_t splineRailReprojectSegment_ = 0;
     float splineRailReprojectDistance_ = 0.5f;
     std::optional<bool> splineRailReprojectResult_{};
     bool showGrid_ = true;
