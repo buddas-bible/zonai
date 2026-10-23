@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include "dynamics/bodySim.h"
 #include "dynamics/bodyState.h"
 #include "dynamics/joints/splineRailJointSim2.h"
@@ -35,7 +37,7 @@ struct splineRailJointConstraint2
 bool setSplineRailGeometry( splineRailJointSim2& joint, std::span<const vec2> points );
 double getSplineRailDistance( const splineRailJointSim2& joint, std::size_t segmentIndex, double t );
 // 추적 호출은 같은 seed 분기에 대응하는 거리 보정값을 전달함. 조회 자체는 상태를 바꾸지 않음.
-splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const transform2& bodyA, const transform2& bodyB, splineParameter2 seed, bool tracked, double distanceOffset = 0.0 );
+splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const transform2& bodyA, const transform2& bodyB, splineParameter2 seed, bool tracked, double distanceOffset = 0.0, std::optional<std::size_t> segmentIndex = std::nullopt );
 [[nodiscard]] splineRailJointConstraint2 prepareSplineRailJointConstraint( const splineRailJointSim2& joint, const bodySim& bodySimA, const bodySim& bodySimB, float subStepTime );
 void warmStartSplineRailJointConstraint( splineRailJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB );
 void solveSplineRailJointConstraint( splineRailJointConstraint2& constraint, bodyState& bodyStateA, bodyState& bodyStateB, bool useBias );
