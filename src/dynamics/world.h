@@ -202,6 +202,8 @@ public:
     bool rebaseSplineRailJoint( jointId id );
     // 현재 자세를 선택한 회전 모드의 기준으로 삼음. 추적 실패 시 변경 없이 거절함.
     bool rebaseSplineRailJointRotation( jointId id );
+    // Fixed는 상대 각도, 접선 추종은 접선 기준 각도(rad)를 지정함. 비유한 값은 변경 없이 거절함.
+    bool setSplineRailJointRotationReference( jointId id, float angle );
     // 명시적으로 전체 곡선에 재투영함. 실패 시 기존 추적 상태를 유지함.
     bool reprojectSplineRailJoint( jointId id );
     // 지정 구간 안에서만 재투영 후보를 선택함. 이후에는 기존 연결 구간 추적을 사용함.
