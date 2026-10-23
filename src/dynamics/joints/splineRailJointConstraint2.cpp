@@ -255,21 +255,22 @@ double getSplineRailDistance( const splineRailJointSim2& joint, std::size_t segm
     return arc.prefix + ( t == 1.0 ? arc.length : arcLength( joint.geometry.getSegments()[segmentIndex], t ) );
 }
 
-splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const transform2& bodyA, const transform2& bodyB, splineParameter2 seed, bool tracked, double distanceOffset )
+splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const transform2& bodyA, const transform2& bodyB, splineParameter2 seed, bool tracked, double distanceOffset, std::optional<std::size_t> segmentIndex )
 {
     splineRailFrame2 frame{};
     frame.distanceOffset = distanceOffset;
     const auto curves = joint.geometry.getSegments();
-    if( curves.empty() ) return frame;
+    if( curves.empty() || ( segmentIndex && *segmentIndex >= curves.size() ) ) return frame;
     frame.anchorB = TransformPoint( bodyB, joint.localAnchorB );
     const vec2 point = InverseTransformPoint( bodyA, frame.anchorB );
     if( !IsFinite( point ) ) return frame;
-    std::size_t index = std::min( seed.segmentIndex, curves.size() - 1 );
+    std::size_t index = segmentIndex.value_or( std::min( seed.segmentIndex, curves.size() - 1 ) );
     double t = project( curves[index], point, seed.t );
-    if( !tracked )
+    if( !tracked || segmentIndex )
     {
         double best = std::numeric_limits<double>::infinity();
-        for( std::size_t i = 0; i < curves.size(); ++i )
+        const std::size_t first = segmentIndex.value_or( 0 ), end = segmentIndex ? *segmentIndex + 1 : curves.size();
+        for( std::size_t i = first; i < end; ++i )
             for( int sample = 0; sample <= 8; ++sample )
             {
                 const double candidate = project( curves[i], point, sample / 8.0 );

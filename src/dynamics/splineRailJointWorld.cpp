@@ -130,12 +130,25 @@ void world::setSplineRailJointRotation( jointId id, splineRailRotationMode mode,
     resetSplineRailJoint( id );
 }
 
+bool world::reprojectSplineRailJoint( jointId id, std::size_t segmentIndex )
+{
+    const auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );
+    const auto frame = getSplineRailFrame( sim, bodySims_[sim.bodyIdA].transform, bodySims_[sim.bodyIdB].transform, {}, false, 0.0, segmentIndex );
+    return applySplineRailProjection( id, frame );
+}
+
 bool world::reprojectSplineRailJoint( jointId id )
 {
     auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );
     const auto& a = bodySims_[sim.bodyIdA].transform;
     const auto& b = bodySims_[sim.bodyIdB].transform;
     const auto frame = getSplineRailFrame( sim, a, b, {}, false );
+    return applySplineRailProjection( id, frame );
+}
+
+bool world::applySplineRailProjection( jointId id, const splineRailFrame2& frame )
+{
+    auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );
     if( !frame.valid ) return false;
     double offset = sim.isLoop ? sim.distanceOffset : 0.0;
     if( sim.isLoop )
