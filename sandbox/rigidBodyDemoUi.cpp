@@ -1294,8 +1294,34 @@ void rigidBodyDemoUi::drawExperimentControls()
         const auto id = getSplineRailJoint();
         auto rail = getWorld().getSplineRailJointData( id );
         ImGui::TextUnformatted( "스플라인 레일" );
+        if( ImGui::BeginCombo( "재투영 대상###SplineRailReprojectTarget", splineRailReprojectSelected_ ? "지정 구간" : "전체 곡선" ) )
+        {
+            if( ImGui::Selectable( "전체 곡선", !splineRailReprojectSelected_ ) ) splineRailReprojectSelected_ = false;
+            if( ImGui::Selectable( "지정 구간", splineRailReprojectSelected_ ) ) splineRailReprojectSelected_ = true;
+            ImGui::EndCombo();
+        }
+        const auto points = getWorld().getSplineRailJointPoints( id );
+        const std::size_t segmentCount = rail.isLoop ? points.size() : points.size() - 1;
+        const bool segmentValid = splineRailReprojectSegment_ < segmentCount;
+        if( splineRailReprojectSelected_ )
+        {
+            char label[32];
+            if( segmentValid ) std::snprintf( label, sizeof( label ), "구간 %zu", splineRailReprojectSegment_ + 1 );
+            else std::snprintf( label, sizeof( label ), "구간 재선택" );
+            if( ImGui::BeginCombo( "재투영 구간###SplineRailReprojectSegment", label ) )
+            {
+                for( std::size_t i = 0; i < segmentCount; ++i )
+                {
+                    std::snprintf( label, sizeof( label ), "구간 %zu", i + 1 );
+                    if( ImGui::Selectable( label, i == splineRailReprojectSegment_ ) ) splineRailReprojectSegment_ = i;
+                }
+                ImGui::EndCombo();
+            }
+        }
         ImGui::DragFloat( "재투영 허용 거리###SplineRailReprojectDistance", &splineRailReprojectDistance_, 0.01f, 0.0f, 0.0f, "%.3f m" );
-        if( ImGui::Button( "레일에 재투영###SplineRailReproject" ) ) splineRailReprojectResult_ = getWorld().reprojectSplineRailJointWithinDistance( id, splineRailReprojectDistance_ );
+        ImGui::BeginDisabled( splineRailReprojectSelected_ && splineRailReprojectSegment_ >= segmentCount );
+        if( ImGui::Button( "레일에 재투영###SplineRailReproject" ) ) splineRailReprojectResult_ = splineRailReprojectSelected_ ? getWorld().reprojectSplineRailJointWithinDistance( id, splineRailReprojectSegment_, splineRailReprojectDistance_ ) : getWorld().reprojectSplineRailJointWithinDistance( id, splineRailReprojectDistance_ );
+        ImGui::EndDisabled();
         if( splineRailReprojectResult_ ) ImGui::TextUnformatted( *splineRailReprojectResult_ ? "최근 재투영: 성공" : "최근 재투영: 거절" );
         rail = getWorld().getSplineRailJointData( id );
         ImGui::BeginDisabled( !rail.trackingValid );

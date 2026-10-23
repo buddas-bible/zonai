@@ -381,6 +381,18 @@ void checkTranslationFailures()
 }
 
 
+void selectReprojectionTarget( demoSession& session, const char* target, const char* segment = nullptr )
+{
+    frame( session, "###SplineRailReprojectTarget" );
+    check( !GImGui->OpenPopupStack.empty(), "actual reprojection target list opens for user selection" );
+    frame( session, target, false, true );
+    if( segment )
+    {
+        frame( session, "###SplineRailReprojectSegment" );
+        frame( session, segment, false, true );
+    }
+}
+
 void checkReprojectionButton()
 {
     demoSession session{ createDemoView };
@@ -456,6 +468,7 @@ void checkReprojectionBoundaries()
 
 void checkReprojectionInput()
 {
+    for( bool selected : { false, true } )
     for( const char* value : { "0", "0.25", "0.75", "-1", "nan", "inf" } )
     {
         demoSession session{ createDemoView };
@@ -468,6 +481,7 @@ void checkReprojectionInput()
         physics.SetBodyAwake( body, false );
         const auto before = physics.getSplineRailJointData( id );
         frame( session );
+        if( selected ) selectReprojectionTarget( session, "지정 구간", "구간 1" );
         edit( session, "###SplineRailReprojectDistance", value );
         checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
         check( !physics.IsBodyAwake( body ), "editing the allowance never performs reprojection" );
@@ -508,6 +522,7 @@ void checkReprojectionInput()
 
 void checkReprojectionRecovery()
 {
+    for( bool selected : { false, true } )
     for( int substeps : { 1, 4, 8 } )
     {
         demoSession session{ createDemoView };
@@ -523,6 +538,7 @@ void checkReprojectionRecovery()
         const auto before = physics.getSplineRailJointData( id );
         check( !before.trackingValid, "recovery fixture has a stored tracking failure" );
         frame( session );
+        if( selected ) selectReprojectionTarget( session, "지정 구간", "구간 1" );
         edit( session, "###SplineRailReprojectDistance", "-1" );
         auto text = frame( session, "###SplineRailReproject" );
         check( text.find( "최근 재투영: 거절" ) != std::string::npos && !physics.IsBodyAwake( body ), "invalid allowance reports rejection even when tracking is unavailable" );
@@ -577,6 +593,7 @@ void checkReprojectionCrossing()
 
 void checkReprojectionSessionState()
 {
+    for( bool selected : { false, true } )
     for( bool playing : { false, true } )
         for( bool accepted : { false, true } )
         {
@@ -606,6 +623,7 @@ void checkReprojectionSessionState()
             frame( session, "제어점 3", false, true );
             if( accepted ) physics.SetBodyTransform( body, { Evaluate( { scene.getSplineControlPoints() }, 2, 0.6f ), rot2::FromRadians( 0.3f ) } );
             else edit( session, "###SplineRailReprojectDistance", "-1" );
+            if( selected ) selectReprojectionTarget( session, "지정 구간", accepted ? "구간 3" : "구간 1" );
             physics.SetBodyAwake( body, false );
             const auto before = physics.getSplineRailJointData( id );
             const auto pose = physics.GetBodyTransform( body );
@@ -630,6 +648,181 @@ void checkReprojectionSessionState()
             const auto restored = physics.getSplineRailJointData( id );
             check( scene.getSplineControlPoints().size() == count + ( playing ? 1 : 0 ) && restored.referenceDistance == after.referenceDistance && restored.enableRotation == after.enableRotation && restored.rotationMode == after.rotationMode && restored.tangentOffset == after.tangentOffset && restored.targetTranslation == after.targetTranslation && restored.lowerTranslation == after.lowerTranslation && restored.upperTranslation == after.upperTranslation, "real undo/redo restores the pending geometry edit and retains rail control settings and origin" );
         }
+}
+
+
+void checkSegmentReprojectionCrossing()
+{
+    demoSession session{ createDemoView };
+    session.selectDemo( demoKind::splineRail );
+    auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+    auto& physics = scene.getWorld();
+    const auto id = scene.getSplineRailJoint();
+    const auto body = scene.getImpulseBody();
+    const vec2 points[] = { { -2, 0 }, { 0, 0 }, { 2, 2 }, { 2, -2 }, { 0, 0 }, { -2, 2 } };
+    physics.SetBodyTransform( body, { { 0, 0 }, {} } );
+    check( physics.setSplineRailJointPoints( id, points ), "segment UI crossing fixture accepts its geometry" );
+    frame( session );
+    selectReprojectionTarget( session, "지정 구간", "구간 4" );
+    const auto before = physics.getSplineRailJointData( id );
+    check( before.parameter.segmentIndex < 2, "list selection alone retains the earlier crossing branch" );
+    const auto text = frame( session, "###SplineRailReproject" );
+    const auto data = physics.getSplineRailJointData( id );
+    check( data.trackingValid && data.parameter.segmentIndex >= 3 && text.find( "최근 재투영: 성공" ) != std::string::npos, "actual target and segment lists route the button to the requested later crossing branch" );
+    checkReprojectionSettings( before, data );
+    checkTranslationDisplay( text, data );
+    checkDisplay( text, data );
+    selectReprojectionTarget( session, "지정 구간", "구간 5" );
+    const auto last = frame( session, "###SplineRailReproject" );
+    check( last.find( "구간 5" ) != std::string::npos && last.find( "최근 재투영: 성공" ) != std::string::npos && physics.getSplineRailJointData( id ).parameter.segmentIndex >= 3, "segment list uses all five world geometry segments rather than four model editor segments" );
+    const auto lastData = physics.getSplineRailJointData( id );
+    selectReprojectionTarget( session, "지정 구간", "구간 1" );
+    checkReprojectionUnchanged( lastData, physics.getSplineRailJointData( id ) );
+    frame( session, "###SplineRailReproject" );
+    check( physics.getSplineRailJointData( id ).parameter.segmentIndex < 2, "first listed segment selects the earlier crossing branch" );
+    selectReprojectionTarget( session, "지정 구간", "구간 4" );
+    frame( session, "###SplineRailReproject" );
+    check( physics.getSplineRailJointData( id ).parameter.segmentIndex >= 3, "repeated selection can restore the later crossing branch" );
+    selectReprojectionTarget( session, "전체 곡선" );
+    check( physics.getSplineRailJointData( id ).parameter.segmentIndex >= 3, "returning to global mode does not automatically change the branch" );
+    frame( session, "###SplineRailReproject" );
+    check( physics.getSplineRailJointData( id ).parameter.segmentIndex < 2, "global button explicitly restores the existing nearest-branch policy" );
+}
+
+
+void checkSegmentReprojectionBoundaries()
+{
+    for( float distance : { std::nextafter( 0.5f, 0.0f ), 0.5f, std::nextafter( 0.5f, 1.0f ) } )
+    {
+        demoSession session{ createDemoView };
+        session.selectDemo( demoKind::splineRail );
+        auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+        auto& physics = scene.getWorld();
+        const auto id = scene.getSplineRailJoint();
+        const auto body = scene.getImpulseBody();
+        const vec2 points[] = { { -4, 0 }, { 0, 0 }, { 4, 0 } };
+        physics.SetBodyTransform( body, { { -2, 0 }, {} } );
+        check( physics.setSplineRailJointPoints( id, points ), "selected distance fixture has two straight segments" );
+        physics.SetBodyTransform( body, { { distance, 0 }, {} } );
+        physics.SetBodyAwake( body, false );
+        const auto before = physics.getSplineRailJointData( id );
+        frame( session );
+        selectReprojectionTarget( session, "지정 구간", "구간 1" );
+        checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+        check( !physics.IsBodyAwake( body ), "actual segment selection does not wake or reproject the body" );
+        const auto text = frame( session, "###SplineRailReproject" );
+        const bool accepted = distance <= 0.5f;
+        check( text.find( accepted ? "최근 재투영: 성공" : "최근 재투영: 거절" ) != std::string::npos && physics.IsBodyAwake( body ) == accepted, "bounded segment button accepts below/equal and rejects above 0.5m despite a closer neighboring segment" );
+        const auto after = physics.getSplineRailJointData( id );
+        checkReprojectionSettings( before, after );
+        if( !accepted ) checkReprojectionUnchanged( before, after );
+        check( physics.GetBodyTransform( body ).position.x == distance && physics.GetBodyTransform( body ).position.y == 0.0f, "segment endpoint distance decisions never move the body" );
+        checkTranslationDisplay( text, after );
+        selectReprojectionTarget( session, "전체 곡선" );
+        physics.SetBodyAwake( body, false );
+        check( frame( session, "###SplineRailReproject" ).find( "최근 재투영: 성공" ) != std::string::npos, "the explicitly selected global mode can use the closer neighboring segment" );
+    }
+}
+
+void checkSegmentReprojectionFailureAndTravel()
+{
+    for( int substeps : { 1, 4, 8 } )
+    {
+        demoSession session{ createDemoView };
+        session.selectDemo( demoKind::splineRail );
+        auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+        auto& physics = scene.getWorld();
+        const auto id = scene.getSplineRailJoint();
+        const auto body = scene.getImpulseBody();
+        const vec2 points[] = { { -4, 0 }, { 0, 0 }, { 4, 0 } };
+        physics.SetBodyTransform( body, { { 1, 0 }, {} } );
+        check( physics.setSplineRailJointPoints( id, points ), "loaded segment failure fixture accepts geometry" );
+        for( int step = 0; step < 10; ++step ) session.stepOnce( substeps );
+        physics.SetBodyAwake( body, false );
+        const auto before = physics.getSplineRailJointData( id );
+        check( LengthSquared( before.force ) > 0.0f, "segment failure fixture has a loaded reaction cache" );
+        frame( session );
+        selectReprojectionTarget( session, "지정 구간", "구간 1" );
+        checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+        const auto text = frame( session, "###SplineRailReproject" );
+        check( text.find( "최근 재투영: 거절" ) != std::string::npos && !physics.IsBodyAwake( body ), "distant selected segment rejects without falling back or waking the body" );
+        checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+        selectReprojectionTarget( session, "지정 구간", "구간 2" );
+        check( frame( session, "###SplineRailReproject" ).find( "최근 재투영: 성공" ) != std::string::npos && !physics.IsBodyAwake( body ), "identical selected projection succeeds without clearing cache or waking" );
+        checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+        physics.SetGravity( {} );
+        physics.SetBodyTransform( body, { { -0.25f, 0 }, {} } );
+        selectReprojectionTarget( session, "지정 구간", "구간 1" );
+        check( frame( session, "###SplineRailReproject" ).find( "최근 재투영: 성공" ) != std::string::npos, "travel fixture explicitly starts on the first segment" );
+        physics.setSplineRailJointMotor( id, true, 1.0f, 100.0f );
+        for( int step = 0; step < 60; ++step ) session.stepOnce( substeps );
+        const auto traveled = physics.getSplineRailJointData( id );
+        check( traveled.trackingValid && traveled.parameter.segmentIndex == 1 && std::abs( traveled.currentSpeed - 1.0f ) < 0.001f && physics.GetBodyTransform( body ).position.x > 0.6f, "selected segment limits only reprojection and ordinary motor tracking crosses into the next segment" );
+    }
+}
+
+
+void checkSegmentReprojectionEditing()
+{
+    for( bool playing : { false, true } )
+    {
+        demoSession session{ createDemoView };
+        session.selectDemo( demoKind::splineRail );
+        session.setPlaying( playing );
+        auto& scene = static_cast<rigidBodyDemo&>( session.getDemo() );
+        auto& physics = scene.getWorld();
+        const auto id = scene.getSplineRailJoint();
+        const auto body = scene.getImpulseBody();
+        const auto visual = scene.getShapes()[0];
+        physics.SetBodyTransform( body, { Evaluate( { scene.getSplineControlPoints() }, 3, 0.4f ), {} } );
+        frame( session );
+        frame( session, "###Object" );
+        frame( session, visual.label, false, true );
+        selectReprojectionTarget( session, "지정 구간", "구간 4" );
+        check( frame( session, "###SplineRailReproject" ).find( "최근 재투영: 성공" ) != std::string::npos, "editable fixture starts with a valid last-segment selection" );
+        edit( session, "###SplineRailReprojectDistance", "-1" );
+        check( frame( session, "###SplineRailReproject" ).find( "최근 재투영: 거절" ) != std::string::npos, "editable fixture records a rejected request" );
+        edit( session, "###SplineRailReprojectDistance", "0.5" );
+        frame( session, "###SplineControl" );
+        frame( session, "제어점 5", false, true );
+        const auto pose = physics.GetBodyTransform( body );
+        const auto beforeEdit = physics.getSplineRailJointData( id );
+        frame( session, "###SplineRemove" );
+        check( scene.getSplineControlPoints().size() == 4 && scene.canUndoSplineEdit() && !scene.canRedoSplineEdit(), "real control-point delete removes the selected last segment and records its edit" );
+        const auto edited = physics.getSplineRailJointData( id );
+        check( physics.IsValid( id ) && physics.IsValid( visual.shapeHandle ) && LengthSquared( physics.GetBodyTransform( body ).position - pose.position ) == 0.0f && edited.referenceDistance == beforeEdit.referenceDistance && edited.targetTranslation == beforeEdit.targetTranslation && edited.lowerTranslation == beforeEdit.lowerTranslation && edited.upperTranslation == beforeEdit.upperTranslation && edited.rotationMode == beforeEdit.rotationMode && edited.referenceAngle == beforeEdit.referenceAngle, "segment invalidation preserves handles, physical pose and existing control coordinates" );
+        for( int step = 0; step < 10; ++step ) session.stepOnce( 4 );
+        physics.SetBodyAwake( body, false );
+        const auto before = physics.getSplineRailJointData( id );
+        const auto steps = session.getStepCount();
+        check( LengthSquared( before.force ) > 0.0f, "invalid segment selection has a loaded cache to preserve" );
+        auto text = frame( session, "###SplineRailReproject" );
+        check( text.find( "구간 재선택" ) != std::string::npos && text.find( "최근 재투영: 거절" ) != std::string::npos && text.find( "제어점 4" ) != std::string::npos, "removed segment requires explicit reselection while retaining the last request and editor selection" );
+        checkReprojectionUnchanged( before, physics.getSplineRailJointData( id ) );
+        check( !physics.IsBodyAwake( body ) && session.isPlaying() == playing && session.getStepCount() == steps && scene.canUndoSplineEdit() && !scene.canRedoSplineEdit(), "disabled invalid selection preserves sleep, playback and pending geometry undo" );
+        frame( session, "###SplineUndo" );
+        text = frame( session );
+        check( scene.getSplineControlPoints().size() == 5 && !scene.canUndoSplineEdit() && scene.canRedoSplineEdit() && text.find( "구간 재선택" ) == std::string::npos && text.find( "구간 4" ) != std::string::npos && text.find( "최근 재투영: 거절" ) != std::string::npos, "undo restores the same selected segment number without silently replacing it or reprojecting" );
+        frame( session, "###SplineRedo" );
+        check( frame( session ).find( "구간 재선택" ) != std::string::npos && scene.getSplineControlPoints().size() == 4, "redo invalidates the retained segment number again" );
+        selectReprojectionTarget( session, "전체 곡선" );
+        text = frame( session, "###SplineRailReproject" );
+        check( text.find( "최근 재투영: 성공" ) != std::string::npos, "explicit global mode ignores the old invalid segment selection" );
+        selectReprojectionTarget( session, "지정 구간" );
+        check( frame( session ).find( "구간 재선택" ) != std::string::npos, "returning to selected mode retains its invalid number until reselection" );
+        selectReprojectionTarget( session, "지정 구간", "구간 1" );
+        physics.SetBodyTransform( body, { Evaluate( { scene.getSplineControlPoints() }, 0, 0.4f ), {} } );
+        physics.SetBodyAwake( body, false );
+        text = frame( session, "###SplineRailReproject" );
+        check( text.find( "최근 재투영: 성공" ) != std::string::npos && physics.IsBodyAwake( body ), "actual segment list reselection re-enables the explicit action with the new index" );
+        check( scene.canUndoSplineEdit() && !scene.canRedoSplineEdit() && session.isPlaying() == playing && session.getStepCount() == steps, "scope changes and reprojecting do not add or replace geometry history or simulation steps" );
+        edit( session, "###Friction", "0.42" );
+        check( physics.GetShapeFriction( visual.shapeHandle ) == 0.42f && frame( session ).find( "제어점 4" ) != std::string::npos, "segment selection remains independent of object and control-point inspector selections" );
+        session.selectDemo( demoKind::playground );
+        session.selectDemo( demoKind::splineRail );
+        text = frame( session );
+        check( text.find( "전체 곡선" ) != std::string::npos && text.find( "재투영 구간" ) == std::string::npos && text.find( "최근 재투영:" ) == std::string::npos, "new views reset segment targeting to global and discard the old request result" );
+    }
 }
 
 }
@@ -665,4 +858,8 @@ void checkSplineRailInspector()
     checkReprojectionRecovery();
     checkReprojectionCrossing();
     checkReprojectionSessionState();
+    checkSegmentReprojectionCrossing();
+    checkSegmentReprojectionBoundaries();
+    checkSegmentReprojectionFailureAndTravel();
+    checkSegmentReprojectionEditing();
 }
