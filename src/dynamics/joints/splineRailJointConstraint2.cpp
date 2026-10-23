@@ -208,7 +208,7 @@ frameRows2 getRows( splineRailJointConstraint2& c, const bodyState& a, const bod
     result.normal = { f.normal, Cross( rA, f.normal ), Cross( rB, f.normal ) };
     result.arc = { f.arcScale * f.tangent, f.arcScale * Cross( rA, f.tangent ), f.arcScale * Cross( rB, f.tangent ) };
     result.angular = { {}, 1.0f, 1.0f };
-    if( c.joint->rotationMode == splineRailRotationMode::followTangent )
+    if( c.joint->enableRotation && c.joint->rotationMode == splineRailRotationMode::followTangent )
     {
         const float curvature = static_cast<float>( f.curvature );
         result.angular = { -curvature * result.arc.axis, 1.0f - curvature * result.arc.a, 1.0f - curvature * result.arc.b };
@@ -372,6 +372,7 @@ splineRailJointConstraint2 prepareSplineRailJointConstraint( const splineRailJoi
     if( joint.subStepTime == subStepTime && bodySimA.invMass + bodySimA.invInertia + bodySimB.invMass + bodySimB.invInertia > 0.0f )
     {
         c.impulse = joint.impulse;
+        if( !joint.enableRotation ) c.impulse.y = 0.0f;
         c.springImpulse = joint.enableSpring && joint.hertz > 0.0f ? joint.springImpulse : 0.0f;
         c.lowerImpulse = joint.lowerImpulse;
         c.upperImpulse = joint.upperImpulse;
@@ -445,7 +446,13 @@ void solveSplineRailJointConstraint( splineRailJointConstraint2& c, bodyState& s
     }
     const float k11 = mass( rows.normal, rows.normal, c ), k12 = mass( rows.normal, rows.angular, c ), k22 = mass( rows.angular, rows.angular, c );
     vec2 rhs{ velocity( rows.normal, a, b ), velocity( rows.angular, a, b ) }, delta{};
-    if( joint.rotationMode == splineRailRotationMode::fixed )
+    if( !joint.enableRotation )
+    {
+        const auto normal = useBias ? softness : constraintSoftness2{};
+        const float bias = useBias ? normal.biasRate * rows.frame.lateralError : 0.0f;
+        delta.x = -normal.massScale * ( k11 > 0.0f ? ( rhs.x + bias ) / k11 : 0.0f ) - normal.impulseScale * c.impulse.x;
+    }
+    else if( joint.rotationMode == splineRailRotationMode::fixed )
     {
         float massScale = 1.0f, impulseScale = 0.0f;
         if( useBias )

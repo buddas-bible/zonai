@@ -37,6 +37,7 @@ jointId world::createSplineRailJoint( const splineRailJointDef& definition )
     sim.isLoop = definition.isLoop;
     sim.referenceAngle = definition.referenceAngle;
     sim.rotationMode = definition.rotationMode;
+    sim.enableRotation = definition.enableRotation;
     sim.enableAngularSpring = definition.enableAngularSpring;
     sim.angularHertz = definition.angularHertz;
     sim.angularDampingRatio = definition.angularDampingRatio;
@@ -107,6 +108,14 @@ void world::setSplineRailJointMotor( jointId id, bool enableMotor, float motorSp
     sim.enableMotor = enableMotor;
     sim.motorSpeed = motorSpeed;
     sim.maxMotorForce = maxMotorForce;
+    resetSplineRailJoint( id );
+}
+
+void world::setSplineRailJointRotationEnabled( jointId id, bool enabled )
+{
+    auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );
+    if( sim.enableRotation == enabled ) return;
+    sim.enableRotation = enabled;
     resetSplineRailJoint( id );
 }
 
@@ -332,6 +341,7 @@ splineRailJointData world::getSplineRailJointData( jointId id ) const
     data.referenceAngle = sim.referenceAngle;
     data.tangentOffset = sim.tangentOffset;
     data.rotationMode = sim.rotationMode;
+    data.enableRotation = sim.enableRotation;
     data.enableAngularSpring = sim.enableAngularSpring;
     data.angularHertz = sim.angularHertz;
     data.angularDampingRatio = sim.angularDampingRatio;

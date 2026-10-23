@@ -196,6 +196,8 @@ public:
     void setSplineRailJointLimit( jointId id, bool enableLimit, float lowerTranslation, float upperTranslation );
     void setSplineRailJointMotor( jointId id, bool enableMotor, float motorSpeed, float maxMotorForce );
     void setSplineRailJointRotation( jointId id, splineRailRotationMode mode, float angularHertz, float angularDampingRatio, bool enableAngularSpring = true );
+    // 회전 구속만 켜고 끔. 모드·기준·튜닝을 유지하고 변경 시 캐시를 비우고 깨움.
+    void setSplineRailJointRotationEnabled( jointId id, bool enabled );
     bool setSplineRailJointPoints( jointId id, std::span<const vec2> points );
     // 현재 이동량을 0으로 바꾸고 목표·리미트를 함께 옮김. 물리 상태·캐시·수면은 유지함.
     // 추적·float 범위 검증 실패나 리미트 폭 손실은 false이며 변경하지 않음.
