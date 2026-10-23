@@ -322,6 +322,27 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         draw.DrawPoint( rail.anchorA, IM_COL32( 255, 170, 70, 255 ) );
         draw.DrawArrow( rail.anchorA, rail.tangent, IM_COL32( 80, 220, 255, 255 ), 0.7f );
         draw.DrawArrow( rail.anchorA, rail.normal, IM_COL32( 100, 255, 140, 255 ), 0.5f );
+        if( splineRailReprojectSelected_ )
+        {
+            const catmullRomSpline2 spline{ getWorld().getSplineRailJointPoints( getSplineRailJoint() ), rail.isLoop };
+            const std::size_t count = spline.isLoop ? spline.points.size() : spline.points.size() - 1;
+            if( splineRailReprojectSegment_ < count )
+            {
+                const auto points = SampleAdaptive( spline, { splineRailReprojectSegment_, 0.0f }, { splineRailReprojectSegment_, 1.0f }, 0.01f );
+                if( points.size() >= 2 )
+                {
+                    constexpr ImU32 COLOR = IM_COL32( 255, 220, 80, 255 );
+                    const auto pose = getWorld().GetBodyTransform( rail.bodyA );
+                    for( std::size_t i = 1; i < points.size(); ++i )
+                        draw.DrawSegment( { TransformPoint( pose, points[i - 1] ), TransformPoint( pose, points[i] ) }, COLOR, 3.0f );
+                    draw.DrawPoint( TransformPoint( pose, points.front() ), COLOR, 6.0f );
+                    draw.DrawPoint( TransformPoint( pose, points.back() ), COLOR, 6.0f );
+                    char label[32];
+                    std::snprintf( label, sizeof( label ), "구간 %zu", splineRailReprojectSegment_ + 1 );
+                    draw.DrawLabel( TransformPoint( pose, Evaluate( spline, splineRailReprojectSegment_, 0.5f ) ), label, COLOR );
+                }
+            }
+        }
     }
 
     if( getWorld().IsValid( getMouseJoint() ) )
