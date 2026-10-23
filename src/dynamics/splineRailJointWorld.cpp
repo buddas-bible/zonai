@@ -130,6 +130,20 @@ void world::setSplineRailJointRotation( jointId id, splineRailRotationMode mode,
     resetSplineRailJoint( id );
 }
 
+bool world::reprojectSplineRailJointWithinDistance( jointId id, float maxDistance )
+{
+    const auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );
+    const auto frame = getSplineRailFrame( sim, bodySims_[sim.bodyIdA].transform, bodySims_[sim.bodyIdB].transform, {}, false );
+    return applySplineRailProjection( id, frame, maxDistance );
+}
+
+bool world::reprojectSplineRailJointWithinDistance( jointId id, std::size_t segmentIndex, float maxDistance )
+{
+    const auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );
+    const auto frame = getSplineRailFrame( sim, bodySims_[sim.bodyIdA].transform, bodySims_[sim.bodyIdB].transform, {}, false, 0.0, segmentIndex );
+    return applySplineRailProjection( id, frame, maxDistance );
+}
+
 bool world::reprojectSplineRailJoint( jointId id, std::size_t segmentIndex )
 {
     const auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );
@@ -146,10 +160,17 @@ bool world::reprojectSplineRailJoint( jointId id )
     return applySplineRailProjection( id, frame );
 }
 
-bool world::applySplineRailProjection( jointId id, const splineRailFrame2& frame )
+bool world::applySplineRailProjection( jointId id, const splineRailFrame2& frame, std::optional<float> maxDistance )
 {
     auto& sim = std::get<splineRailJointSim2>( jointSims_[getJointIndex( id )] );
     if( !frame.valid ) return false;
+    if( maxDistance )
+    {
+        if( !nonnegative( *maxDistance ) ) return false;
+        const double dx = static_cast<double>( frame.anchorB.x ) - frame.anchorA.x, dy = static_cast<double>( frame.anchorB.y ) - frame.anchorA.y;
+        const double limit = *maxDistance;
+        if( dx * dx + dy * dy > limit * limit ) return false;
+    }
     double offset = sim.isLoop ? sim.distanceOffset : 0.0;
     if( sim.isLoop )
     {
