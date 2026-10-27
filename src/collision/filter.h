@@ -53,6 +53,19 @@ struct collisionFilter
     std::int32_t groupIndex = 0;
 };
 
+// World 공간 조회만을 위한 category / mask. groupIndex와 충돌 매트릭스는 적용하지 않음.
+struct queryFilter
+{
+    std::uint64_t categoryBits = 1;
+    std::uint64_t maskBits = std::numeric_limits<std::uint64_t>::max();
+};
+
+// Query도 shape의 mask를 존중함. 단순 공간 탐색이므로 groupIndex는 관여하지 않음.
+constexpr bool ShouldQueryShape( const queryFilter& query, const collisionFilter& shapeFilter )
+{
+    return ( query.maskBits & shapeFilter.categoryBits ) != 0 && ( query.categoryBits & shapeFilter.maskBits ) != 0;
+}
+
 // 두 shape filter가 실제 충돌을 허용하는지 확인함.
 constexpr bool ShouldShapesCollide( const collisionFilter& filterA, const collisionFilter& filterB )
 {
