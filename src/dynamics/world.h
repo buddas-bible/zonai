@@ -1,6 +1,7 @@
 #pragma once
 
 #include <concepts>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -11,6 +12,7 @@
 
 #include "collision/broadphase/broadPhase.h"
 #include "collision/constants.h"
+#include "collision/rayCast2.h"
 #include "dynamics/body.h"
 #include "dynamics/bodyDef.h"
 #include "dynamics/bodySim.h"
@@ -52,6 +54,21 @@
 
 namespace zonai
 {
+
+// Callback: shapeId, world hit point, outward world normal, fraction of input translation.
+template <typename Callback>
+concept worldRayCastCallback = requires( Callback& callback, shapeId id, vec2 point, vec2 normal, float fraction ) {
+    { callback( id, point, normal, fraction ) } -> std::convertible_to<float>;
+};
+
+struct worldRayCastResult2
+{
+    shapeId shape{};
+    vec2 point{};
+    vec2 normal{};
+    float fraction = 0.0f;
+    bool hit = false;
+};
 
 template <typename Callback>
 concept worldOverlapCallback = requires( Callback& callback, shapeId id ) {
@@ -338,6 +355,63 @@ public:
     template <worldOverlapCallback Callback> void overlapAABB( const aabb2& bounds, Callback&& callback ) const
     {
         overlapAABB( bounds, queryFilter{}, std::forward<Callback>( callback ) );
+    }
+
+    // World 좌표 origin + translation * fraction 경로에서 실제 Shape geometry를 조회함.
+    // callback: -1 무시, 0 중단, hit fraction으로 clip, 1 계속. 호출 순서는 거리순이 아님.
+    // Sensor도 포함하며 시작점이 solid 내부면 fraction/normal 0으로 전달함. 조회 도중 World 변경 금지.
+    template <worldRayCastCallback Callback> void castRay( vec2 origin, vec2 translation, queryFilter filter, Callback&& callback ) const
+    {
+        if( !IsFinite( origin ) || !IsFinite( translation ) || !( LengthSquared( translation ) > 0.0f ) ) return;
+
+        float maxFraction = 1.0f;
+
+        for( int i = 0; i < static_cast<int>( bodyType::Count ); ++i )
+        {
+            const dynamicTree& tree = broadPhase_.GetTree( static_cast<bodyType>( i ) );
+
+            tree.RayCast( origin, translation, maxFraction,
+                [&]( std::int32_t proxyId, float limit )
+                {
+                    const std::int32_t shapeIndex = tree.GetProxyShapeIndex( proxyId );
+                    assert( shapeIndex >= 0 && static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+
+                    const shape& candidate = shapes_[shapeIndex];
+                    if( !ShouldQueryShape( filter, candidate.filter ) ) return -1.0f;
+
+                    const transform2& transform = bodySims_[candidate.bodyId].transform;
+                    const rayCastHit2 result = RayCastShapeGeometry( candidate.geometry, transform, origin, translation, limit );
+                    if( !result.hit ) return -1.0f;
+
+                    const float fraction = static_cast<float>( callback( MakeShapeId( shapeIndex ), result.point, result.normal, result.fraction ) );
+                    return std::isfinite( fraction ) ? fraction : -1.0f;
+                } );
+
+            if( maxFraction == 0.0f ) return;
+        }
+    }
+
+    template <worldRayCastCallback Callback> void castRay( vec2 origin, vec2 translation, Callback&& callback ) const
+    {
+        castRay( origin, translation, queryFilter{}, std::forward<Callback>( callback ) );
+    }
+
+    // 범용 콜백과 같은 필터를 사용하며 첫 번째가 아닌 가장 가까운 hit을 선택함.
+    [[nodiscard]] worldRayCastResult2 castRayClosest( vec2 origin, vec2 translation, queryFilter filter = {} ) const
+    {
+        worldRayCastResult2 closest{};
+
+        castRay( origin, translation, filter,
+            [&]( shapeId id, vec2 point, vec2 normal, float fraction )
+            {
+                // Box2D의 closest 편의 조회는 최초 overlap을 무시함.
+                if( fraction == 0.0f ) return -1.0f;
+
+                if( !closest.hit || fraction < closest.fraction ) closest = { id, point, normal, fraction, true };
+                return closest.fraction;
+            } );
+
+        return closest;
     }
 
 #pragma endregion SpatialQueries
