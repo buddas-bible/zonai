@@ -1,6 +1,8 @@
 #pragma once
 
 #include <array>
+#include <algorithm>
+#include <cmath>
 #include <cassert>
 #include <concepts>
 #include <cstddef>
@@ -75,6 +77,11 @@ struct treeNodeDebugInfo
     bool isLeaf = false;
     bool isMoved = false;
     bool isRoot = false;
+};
+
+template <typename Callback>
+concept treeRayCastCallback = requires( Callback& callback, std::int32_t proxyId, float maxFraction ) {
+    { callback( proxyId, maxFraction ) } -> std::convertible_to<float>;
 };
 
 template <typename Callback>
@@ -207,6 +214,75 @@ public:
                 {
                     assert( stackCount < stack.size() );
                 }
+            }
+        }
+    }
+
+    // Ray와 각 node AABB의 진입 구간을 검사하며 clip된 길이 안에서만 leaf를 방문함.
+    // callback은 -1(무시), 0(종료), 양수 fraction(더 가까운 곳으로 clip)을 반환함.
+    template <treeRayCastCallback Callback> void RayCast( vec2 origin, vec2 translation, float& maxFraction, Callback&& callback ) const
+    {
+        if( proxyCount_ == 0 || maxFraction <= 0.0f ) return;
+
+        std::array<std::int32_t, TREE_STACK_SIZE> stack{};
+        std::size_t stackCount = 0;
+        stack[stackCount++] = IsLeaf( nodes_[ROOT_NODE] ) ? ROOT_NODE : GetChildPair( nodes_[ROOT_NODE] );
+
+        while( stackCount > 0 )
+        {
+            const std::int32_t pair = stack[--stackCount];
+
+            for( std::int32_t i = 0; i < 2; ++i )
+            {
+                const treeNode& node = nodes_[pair + i];
+                if( IsEmptyNode( node ) ) continue;
+
+                // Slab 교차: 길이를 줄일 때마다 아직 방문하지 않은 AABB도 새 fraction으로 다시 검사함.
+                float entry = 0.0f;
+                float exit = maxFraction;
+                bool overlaps = true;
+
+                for( int axis = 0; axis < 2; ++axis )
+                {
+                    const float position = axis == 0 ? origin.x : origin.y;
+                    const float direction = axis == 0 ? translation.x : translation.y;
+                    const float lower = axis == 0 ? node.aabb.min.x : node.aabb.min.y;
+                    const float upper = axis == 0 ? node.aabb.max.x : node.aabb.max.y;
+
+                    if( direction == 0.0f )
+                    {
+                        if( position < lower || position > upper ) overlaps = false;
+                    }
+                    else
+                    {
+                        const float first = ( lower - position ) / direction;
+                        const float second = ( upper - position ) / direction;
+                        entry = std::max( entry, std::min( first, second ) );
+                        exit = std::min( exit, std::max( first, second ) );
+                        if( entry > exit ) overlaps = false;
+                    }
+
+                    if( !overlaps ) break;
+                }
+
+                if( !overlaps ) continue;
+
+                if( IsLeaf( node ) )
+                {
+                    const float fraction = static_cast<float>( callback( GetProxyId( node ), maxFraction ) );
+
+                    if( fraction == 0.0f )
+                    {
+                        maxFraction = 0.0f;
+                        return;
+                    }
+
+                    if( std::isfinite( fraction ) && fraction > 0.0f && fraction < maxFraction ) maxFraction = fraction;
+                    continue;
+                }
+
+                if( stackCount < stack.size() ) stack[stackCount++] = GetChildPair( node );
+                else assert( stackCount < stack.size() );
             }
         }
     }
