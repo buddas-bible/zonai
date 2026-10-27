@@ -36,7 +36,9 @@ void checkGeometry()
     near( circle.fraction, 1.0f / 3.0f, "circle fraction" );
     near( circle.point.x, -1.0f, "circle hit point" );
     near( circle.normal.x, -1.0f, "circle outward normal" );
-    check( !RayCastShapeGeometry( circle2{ {}, 1.0f }, identity, {}, { 3.0f, 0.0f } ).hit, "inside solid circle must miss" );
+    const auto insideCircle = RayCastShapeGeometry( circle2{ {}, 1.0f }, identity, {}, { 3.0f, 0.0f } );
+    check( insideCircle.hit && insideCircle.fraction == 0.0f && LengthSquared( insideCircle.normal ) == 0.0f,
+        "inside circle returns initial overlap with zero normal and fraction" );
     check( !RayCastShapeGeometry( circle2{ {}, 1.0f }, identity, { -3.0f, 2.0f }, { 6.0f, 0.0f } ).hit, "circle ray must miss off axis" );
     check( !RayCastShapeGeometry( circle2{ {}, 1.0f }, identity, { -3.0f, 0.0f }, { 6.0f, 0.0f }, 0.2f ).hit, "circle clipping limit" );
 
@@ -60,14 +62,18 @@ void checkGeometry()
     near( side.point.y, 0.5f, "capsule side point" );
     near( side.normal.y, 1.0f, "capsule side normal" );
     near( cap.point.x, -1.5f, "capsule rounded cap point" );
-    check( !RayCastShapeGeometry( capsule, identity, {}, { 3.0f, 0.0f } ).hit, "inside capsule must miss" );
+    const auto insideCapsule = RayCastShapeGeometry( capsule, identity, {}, { 3.0f, 0.0f } );
+    check( insideCapsule.hit && insideCapsule.fraction == 0.0f && LengthSquared( insideCapsule.normal ) == 0.0f,
+        "inside capsule returns initial overlap" );
 
     const polygon2 box = MakeBox( { 1.0f, 1.0f } );
     const auto polygon = RayCastShapeGeometry( box, identity, { -3.0f, 0.0f }, { 6.0f, 0.0f } );
     check( polygon.hit, "polygon face ray should hit" );
     near( polygon.fraction, 1.0f / 3.0f, "polygon fraction" );
     near( polygon.normal.x, -1.0f, "polygon normal" );
-    check( !RayCastShapeGeometry( box, identity, {}, { 5.0f, 0.0f } ).hit, "inside polygon must miss" );
+    const auto insidePolygon = RayCastShapeGeometry( box, identity, {}, { 5.0f, 0.0f } );
+    check( insidePolygon.hit && insidePolygon.fraction == 0.0f && LengthSquared( insidePolygon.normal ) == 0.0f,
+        "inside polygon returns initial overlap" );
     check( !RayCastShapeGeometry( box, identity, { 2.0f, 2.0f }, { 4.0f, 0.0f } ).hit, "polygon ray should miss" );
 
     polygon2 rounded = box;
@@ -116,6 +122,26 @@ void checkWorldQueries()
     check( closest.hit && closest.shape == first, "closest ray hit should find first intersection" );
     near( closest.fraction, 0.15f, "closest hit fraction" );
     near( closest.normal.x, -1.0f, "closest hit normal" );
+
+    // 범용 CastRay는 시작점이 내부인 Shape를 보고하지만, closest는 이를 건너뜀.
+    const bodyId overlappingBody = simulation.CreateBody();
+    const shapeId initial = simulation.CreateShape( overlappingBody, circle2{ {}, 0.5f } );
+    int initialHits = 0;
+
+    simulation.castRay( origin, translation, [&]( shapeId id, vec2 point, vec2 normal, float fraction )
+    {
+        if( id == initial )
+        {
+            ++initialHits;
+            check( fraction == 0.0f && LengthSquared( normal ) == 0.0f && LengthSquared( point ) == 0.0f,
+                "world initial overlap must report zero fraction and normal" );
+        }
+        return 1.0f;
+    } );
+    check( initialHits == 1 && simulation.castRayClosest( origin, translation ).shape == first,
+        "closest ray ignores an initial overlap" );
+
+    simulation.DestroyBody( overlappingBody );
 
     int count = 0;
     simulation.castRay( origin, translation, [&]( shapeId, vec2, vec2, float )

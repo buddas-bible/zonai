@@ -17,7 +17,8 @@ const worldRayCastResult2 closest = simulation.castRayClosest( { 0.0f, 0.0f }, {
   `1`은 기존 길이를 유지한다. 방문 순서에는 의미가 없다.
 - Tree의 fat AABB는 후보 필터일 뿐이다. 최종 hit은 Body local의 정확한 Circle,
   Capsule, Convex Polygon(rounded 포함), 양면 Segment, 앞면 ChainSegment와 계산한다.
-- 시작점이 solid 내부이면 hit을 반환하지 않는다. 한쪽 방향 Chain의 앞면은 edge 오른쪽이다.
+- 일반 castRay는 시작점이 solid 내부이면 fraction 0, normal 0으로 보고한다.
+  castRayClosest 편의 조회는 초기 overlap을 무시한다. 한쪽 방향 Chain의 앞면은 edge 오른쪽이다.
 - Query Filter는 AABB 조회와 같은 양방향 category/mask를 사용하고
   groupIndex와 collisionMatrix는 사용하지 않는다. Sensor를 포함한다.
 - 월드/트리/도형을 조회 callback 중 변경하지 않는다. 반환 handle의 수명은 IsValid로 검증한다.

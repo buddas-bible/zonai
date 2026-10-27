@@ -17,8 +17,8 @@ rayCastHit2 CastCircle( const circle2& circle, vec2 origin, vec2 translation, fl
     const float distanceSquared = LengthSquared( offset );
     const float radiusSquared = circle.radius * circle.radius;
 
-    // Box2D의 solid ray 의미: 내부 또는 표면에서 출발하면 출구를 보고하지 않음.
-    if( distanceSquared <= radiusSquared ) return {};
+    // 시작점이 solid 내부면 가장 가까운 교차는 현재 위치임. 별도 법선은 정의되지 않음.
+    if( distanceSquared <= radiusSquared ) return { origin, {}, 0.0f, true };
 
     const float a = LengthSquared( translation );
     const float b = Dot( offset, translation );
@@ -75,7 +75,7 @@ rayCastHit2 CastCapsule( const capsule2& capsule, vec2 origin, vec2 translation,
     if( axisLength == 0.0f ) return CastCircle( { capsule.center1, capsule.radius }, origin, translation, maxFraction );
     if( capsule.radius == 0.0f ) return CastSegment( { capsule.center1, capsule.center2 }, origin, translation, maxFraction, false );
 
-    if( Contains( capsule, origin ) ) return {};
+    if( Contains( capsule, origin ) ) return { origin, {}, 0.0f, true };
 
     const vec2 tangent = axis / axisLength;
     const vec2 side{ tangent.y, -tangent.x };
@@ -134,7 +134,8 @@ rayCastHit2 CastPolygon( const polygon2& polygon, vec2 origin, vec2 translation,
 {
     if( polygon.vertexCount == 1 ) return CastCircle( { polygon.vertices[0], polygon.radius }, origin, translation, maxFraction );
     if( polygon.vertexCount == 2 ) return CastCapsule( { polygon.vertices[0], polygon.vertices[1], polygon.radius }, origin, translation, maxFraction );
-    if( polygon.vertexCount < 3 || StartsInsidePolygon( polygon, origin ) ) return {};
+    if( polygon.vertexCount < 3 ) return {};
+    if( StartsInsidePolygon( polygon, origin ) ) return { origin, {}, 0.0f, true };
 
     if( polygon.radius == 0.0f )
     {

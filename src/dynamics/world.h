@@ -359,7 +359,7 @@ public:
 
     // World 좌표 origin + translation * fraction 경로에서 실제 Shape geometry를 조회함.
     // callback: -1 무시, 0 중단, hit fraction으로 clip, 1 계속. 호출 순서는 거리순이 아님.
-    // Sensor도 포함하며 시작점이 solid 내부이면 hit하지 않음. 조회 도중 World 변경 금지.
+    // Sensor도 포함하며 시작점이 solid 내부면 fraction/normal 0으로 전달함. 조회 도중 World 변경 금지.
     template <worldRayCastCallback Callback> void castRay( vec2 origin, vec2 translation, queryFilter filter, Callback&& callback ) const
     {
         if( !IsFinite( origin ) || !IsFinite( translation ) || !( LengthSquared( translation ) > 0.0f ) ) return;
@@ -404,6 +404,9 @@ public:
         castRay( origin, translation, filter,
             [&]( shapeId id, vec2 point, vec2 normal, float fraction )
             {
+                // Box2D의 closest 편의 조회는 최초 overlap을 무시함.
+                if( fraction == 0.0f ) return -1.0f;
+
                 if( !closest.hit || fraction < closest.fraction ) closest = { id, point, normal, fraction, true };
                 return closest.fraction;
             } );
