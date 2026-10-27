@@ -13,6 +13,7 @@
 #include "collision/broadphase/broadPhase.h"
 #include "collision/constants.h"
 #include "collision/rayCast2.h"
+#include "collision/shapeCast2.h"
 #include "dynamics/body.h"
 #include "dynamics/bodyDef.h"
 #include "dynamics/bodySim.h"
@@ -62,6 +63,24 @@ concept worldRayCastCallback = requires( Callback& callback, shapeId id, vec2 po
 };
 
 struct worldRayCastResult2
+{
+    shapeId shape{};
+    vec2 point{};
+    vec2 normal{};
+    float fraction = 0.0f;
+    bool hit = false;
+};
+
+// B 도형을 현재 자세 그대로 world translation 방향으로 선형 sweep함.
+struct worldShapeCastInput2
+{
+    shapeGeometry geometry{};
+    transform2 transform{};
+    vec2 translation{};
+    bool canEncroach = false;
+};
+
+struct worldShapeCastResult2
 {
     shapeId shape{};
     vec2 point{};
@@ -405,6 +424,129 @@ public:
             [&]( shapeId id, vec2 point, vec2 normal, float fraction )
             {
                 // Box2D의 closest 편의 조회는 최초 overlap을 무시함.
+                if( fraction == 0.0f ) return -1.0f;
+
+                if( !closest.hit || fraction < closest.fraction ) closest = { id, point, normal, fraction, true };
+                return closest.fraction;
+            } );
+
+        return closest;
+    }
+
+    // 이동 도형의 sweep AABB로 기존 Tree를 조회한 뒤 GJK ShapeCast로 실제 충돌을 확인함.
+    // callback은 -1 무시, 0 종료, (0, fraction]으로 clip, 1 계속. 방문 순서는 거리순이 아님.
+    // Sensor를 포함하며 시작 겹침은 fraction=0을 보고함. Query 중 World 변경 금지.
+    template <worldRayCastCallback Callback> void castShape( const worldShapeCastInput2& input, queryFilter filter, Callback&& callback ) const
+    {
+        if( std::holds_alternative<std::monostate>( input.geometry ) ||
+            std::holds_alternative<chainSegment2>( input.geometry ) ||
+            !IsFinite( input.transform.position ) ||
+            !std::isfinite( input.transform.rotation.c ) || !std::isfinite( input.transform.rotation.s ) ||
+            !IsFinite( input.translation ) || !( LengthSquared( input.translation ) > 0.0f ) ||
+            !std::isfinite( LengthSquared( input.translation ) ) ) return;
+
+        const shapeProxy2 movingProxy = MakeShapeProxy( input.geometry );
+        if( movingProxy.count < 1 || movingProxy.count > static_cast<int>( movingProxy.points.size() ) ||
+            !std::isfinite( movingProxy.radius ) || movingProxy.radius < 0.0f ) return;
+
+        for( int i = 0; i < movingProxy.count; ++i )
+        {
+            if( !IsFinite( movingProxy.points[i] ) ) return;
+        }
+
+        const aabb2 startBounds = ComputeShapeAABB( input.geometry, input.transform );
+        const aabb2 endBounds{ startBounds.min + input.translation, startBounds.max + input.translation };
+
+        if( !IsValidAABB( startBounds ) || !IsValidAABB( endBounds ) ) return;
+
+        const aabb2 sweepBounds = Union( startBounds, endBounds );
+        float maxFraction = 1.0f;
+
+        for( int i = 0; i < static_cast<int>( bodyType::Count ); ++i )
+        {
+            const dynamicTree& tree = broadPhase_.GetTree( static_cast<bodyType>( i ) );
+            bool keepQuerying = true;
+
+            tree.Query( sweepBounds,
+                [&]( std::int32_t proxyId )
+                {
+                    const std::int32_t shapeIndex = tree.GetProxyShapeIndex( proxyId );
+                    assert( shapeIndex >= 0 && static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+
+                    const shape& candidate = shapes_[shapeIndex];
+                    if( !ShouldQueryShape( filter, candidate.filter ) ) return true;
+
+                    const aabb2 clippedEnd{ startBounds.min + input.translation * maxFraction,
+                        startBounds.max + input.translation * maxFraction };
+                    if( !Overlaps( Union( startBounds, clippedEnd ), candidate.aabb ) ) return true;
+
+                    const transform2& targetTransform = bodySims_[candidate.bodyId].transform;
+
+                    shapeCastInput2 cast{};
+                    cast.proxyA = MakeShapeProxy( candidate.geometry );
+                    cast.proxyB = movingProxy;
+                    cast.transform = InverseMul( targetTransform, input.transform );
+                    cast.translationB = InverseTransformVector( targetTransform, input.translation );
+                    cast.maxFraction = maxFraction;
+                    cast.canEncroach = input.canEncroach;
+
+                    const castOutput2 hit = ShapeCast( cast );
+                    if( !hit.hit ) return true;
+
+                    if( const chainSegment2* chain = std::get_if<chainSegment2>( &candidate.geometry ) )
+                    {
+                        // Chain은 edge의 오른쪽만 앞면. 겹침의 zero normal에는 중심의 초기 측면을 사용함.
+                        const vec2 edge = chain->segment.b - chain->segment.a;
+                        const vec2 front = Normalize( vec2{ edge.y, -edge.x } );
+
+                        if( hit.fraction == 0.0f )
+                        {
+                            vec2 center{};
+
+                            for( int point = 0; point < movingProxy.count; ++point )
+                                center += TransformPoint( cast.transform, movingProxy.points[point] );
+
+                            center /= static_cast<float>( movingProxy.count );
+
+                            if( Dot( center - chain->segment.a, front ) <= 0.0f ) return true;
+                        }
+                        else if( Dot( hit.normal, front ) <= 0.0f ) return true;
+                    }
+
+                    const vec2 point = TransformPoint( targetTransform, hit.point );
+                    const vec2 normal = TransformVector( targetTransform, hit.normal );
+
+                    if( !IsFinite( point ) || !IsFinite( normal ) ) return true;
+
+                    const float fraction = static_cast<float>( callback( MakeShapeId( shapeIndex ), point, normal, hit.fraction ) );
+
+                    if( fraction == 0.0f )
+                    {
+                        keepQuerying = false;
+                        return false;
+                    }
+
+                    if( std::isfinite( fraction ) && fraction > 0.0f && fraction < maxFraction ) maxFraction = fraction;
+                    return true;
+                } );
+
+            if( !keepQuerying ) return;
+        }
+    }
+
+    template <worldRayCastCallback Callback> void castShape( const worldShapeCastInput2& input, Callback&& callback ) const
+    {
+        castShape( input, queryFilter{}, std::forward<Callback>( callback ) );
+    }
+
+    // RayCastClosest와 같이 최초 겹침은 무시하고 가장 가까운 양수 이동 충돌만 반환함.
+    [[nodiscard]] worldShapeCastResult2 castShapeClosest( const worldShapeCastInput2& input, queryFilter filter = {} ) const
+    {
+        worldShapeCastResult2 closest{};
+
+        castShape( input, filter,
+            [&]( shapeId id, vec2 point, vec2 normal, float fraction )
+            {
                 if( fraction == 0.0f ) return -1.0f;
 
                 if( !closest.hit || fraction < closest.fraction ) closest = { id, point, normal, fraction, true };

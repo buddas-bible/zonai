@@ -515,6 +515,10 @@ add_executable(worldRayCastTests dynamics/world_ray_cast_test.cpp)
 target_link_libraries(worldRayCastTests PRIVATE zonai::zonai)
 add_test(NAME worldRayCastTests COMMAND worldRayCastTests)
 
+add_executable(worldShapeCastTests dynamics/world_shape_cast_test.cpp)
+target_link_libraries(worldShapeCastTests PRIVATE zonai::zonai)
+add_test(NAME worldShapeCastTests COMMAND worldShapeCastTests)
+
 add_executable(contactCacheTests dynamics/contact_cache_test.cpp)
 target_link_libraries(contactCacheTests PRIVATE zonai::zonai)
 add_test(NAME contactCacheTests COMMAND contactCacheTests)
