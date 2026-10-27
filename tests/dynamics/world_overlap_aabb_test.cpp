@@ -68,12 +68,17 @@ void checkWorldCandidates()
     check( !contains( result, farShape ), "query reported a distant shape" );
     check( collect( simulation, { { 40.0f, 40.0f }, { 41.0f, 41.0f } } ).empty(), "empty region should have no candidates" );
 
-    const aabb2 actual = simulation.GetShapeAABB( staticShape );
-    const aabb2 fat = simulation.GetShapeFatAABB( staticShape );
+    // 다른 물체의 speculative bounds와 겹치지 않는 별도 World에서 fat 오탐만 검사함.
+    world isolated{};
+    const bodyId owner = isolated.CreateBody();
+    const shapeId onlyShape = isolated.CreateShape( owner, circle2{ {}, 0.4f } );
+
+    const aabb2 actual = isolated.GetShapeAABB( onlyShape );
+    const aabb2 fat = isolated.GetShapeFatAABB( onlyShape );
     check( fat.max.x > actual.max.x, "fat AABB must extend beyond speculative AABB" );
 
     const float x = ( actual.max.x + fat.max.x ) * 0.5f;
-    check( collect( simulation, { { x, -0.001f }, { x + 0.0001f, 0.001f } } ).empty(),
+    check( collect( isolated, { { x, -0.001f }, { x + 0.0001f, 0.001f } } ).empty(),
            "fat proxy overlap alone must not be reported" );
 }
 
