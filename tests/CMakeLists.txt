@@ -507,6 +507,10 @@ add_executable(worldQuerySensorTests dynamics/world_query_sensor_test.cpp)
 target_link_libraries(worldQuerySensorTests PRIVATE zonai::zonai)
 add_test(NAME worldQuerySensorTests COMMAND worldQuerySensorTests)
 
+add_executable(worldOverlapAABBTests dynamics/world_overlap_aabb_test.cpp)
+target_link_libraries(worldOverlapAABBTests PRIVATE zonai::zonai)
+add_test(NAME worldOverlapAABBTests COMMAND worldOverlapAABBTests)
+
 add_executable(contactCacheTests dynamics/contact_cache_test.cpp)
 target_link_libraries(contactCacheTests PRIVATE zonai::zonai)
 add_test(NAME contactCacheTests COMMAND contactCacheTests)

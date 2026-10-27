@@ -7,6 +7,7 @@
 #include <span>
 #include <vector>
 #include <variant>
+#include <utility>
 
 #include "collision/broadphase/broadPhase.h"
 #include "collision/constants.h"
@@ -51,6 +52,11 @@
 
 namespace zonai
 {
+
+template <typename Callback>
+concept worldOverlapCallback = requires( Callback& callback, shapeId id ) {
+    { callback( id ) } -> std::convertible_to<bool>;
+};
 
 template <typename Callback>
 concept worldCollisionCallback = requires( Callback& callback, const contactData& contactData ) {
@@ -294,6 +300,47 @@ public:
     [[nodiscard]] std::span<const sensorEndEvent2> GetSensorEndEvents() const noexcept { return sensorEndEvents_; }
 
 #pragma endregion SensorQueries
+
+#pragma region SpatialQueries
+
+    // World 좌표 AABB와 겹치는 활성 Shape 후보를 세 종류의 Tree에서 찾음.
+    // 현재 speculative AABB로 fat proxy의 거짓 양성을 걸러내지만 정확한 geometry overlap은 아님.
+    // Sensor도 포함함. 호출 순서는 보장하지 않으며 callback이 false면 나머지 Tree도 중단함.
+    // Query 중 World/Tree/Shape를 수정하거나 Step으로 재진입하지 않음.
+    template <worldOverlapCallback Callback> void overlapAABB( const aabb2& bounds, queryFilter filter, Callback&& callback ) const
+    {
+        if( !IsValidAABB( bounds ) ) return;
+
+        for( int i = 0; i < static_cast<int>( bodyType::Count ); ++i )
+        {
+            const dynamicTree& tree = broadPhase_.GetTree( static_cast<bodyType>( i ) );
+            bool keepQuerying = true;
+
+            tree.Query( bounds,
+                [&]( std::int32_t proxyId )
+                {
+                    const std::int32_t shapeIndex = tree.GetProxyShapeIndex( proxyId );
+                    assert( shapeIndex >= 0 && static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+
+                    const shape& candidate = shapes_[shapeIndex];
+
+                    if( !Overlaps( bounds, candidate.aabb ) || !ShouldQueryShape( filter, candidate.filter ) ) return true;
+
+                    keepQuerying = static_cast<bool>( callback( MakeShapeId( shapeIndex ) ) );
+                    return keepQuerying;
+                } );
+
+            if( !keepQuerying ) return;
+        }
+    }
+
+    // 기본 Query Filter는 category 1, mask 전체를 사용함.
+    template <worldOverlapCallback Callback> void overlapAABB( const aabb2& bounds, Callback&& callback ) const
+    {
+        overlapAABB( bounds, queryFilter{}, std::forward<Callback>( callback ) );
+    }
+
+#pragma endregion SpatialQueries
 
 #pragma region ShapeBounds
 
