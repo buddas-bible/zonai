@@ -332,3 +332,32 @@ TOI 이전에 배제하면서, 반대로 이후 Tree에 놓인 **더 앞선** �
 324개 다중 도형 `worldRotatingSceneBenchmark`도 함께 확인한다.
 Release 결과는 이전 PR #224와 **동일한 seed/scenario의 NarrowPhase·TOI 호출 수 및
 후보 제외 수**를 우선 비교하고, 시간은 CI runner 편차를 감안하여 해석한다.
+
+
+## 회전 조회의 원점 간 거리 상한 필터 (실험)
+
+순수 회전 또는 짧은 병진 이동의 경우 이미 축별 AABB 후보 검사를 통과했어도
+실제로는 **회전 궤적의 외접 원에 닿을 수 없는** 후보가 있다.
+World의 회전 ShapeCast는 각 도형의 proxy support 점과 radius가 모두
+들어가는 **로컬 원점 중심의 원**을 계산하고, 움직이는 원점의
+`[0,maxFraction]` 선형 이동 구간과 정지한 target 원점 사이의 최소 거리가
+두 반경 합보다 **확실히 클 때만** TOI 이전에 후보를 제외한다.
+
+- 움직이는 origin은 sweep의 `c1`에서 `c2`까지 선형 보간된다. 회전 중인
+  모든 support 점은 그 원점으로부터 최대 proxy 반경 안에 있다.
+  target의 모든 support 점도 해당 원점 중심의 최대 반경 안에 있으므로
+  원점 간 최소 거리로 **충돌 불가능함을 증명한 후보만** 버릴 수 있다.
+- 보수적 계산에는 double과 float 반올림 여유를 사용하고
+  target Body 회전값의 길이까지 반영한다. 계산이 유효하지 않으면
+  해당 후보를 기존 TOI로 전달한다.
+- 축별 AABB와 fraction clipping은 그대로 두고, 후보별 support radius
+  계산 뒤 `TimeOfImpact` 호출만 줄인다. 추가된
+  `worldShapeSweepStats2::distancePrunedCandidates`는 제외된 후보 수를 나타낸다.
+- 중심 원의 상한은 정확한 회전 도형 외형보다 커질 수 있다.
+  특히 로컬 원점에서 멀리 떨어진 Polygon은 필터 이점이 제한적이다.
+  모든 장면에서 성능이 좋아진다고 가정하지 않으며,
+  실제 통계 및 Release 시간을 기준으로 적용 여부를 결정한다.
+
+`worldShapeCastTests`는 AABB 모서리에서 순수 회전/짧은 병진의
+허위 후보를 버리는지와 실제 충돌을 남기는지 확인한다. 기존 1,800개
+회전 TOI oracle 및 Sandbox/World 벤치마크도 회귀 조건으로 유지한다.
