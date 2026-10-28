@@ -480,6 +480,73 @@ void checkRotatingCandidateClipping()
     // 제자리 회전에서의 clipped candidate bounds 및 chain 센서 등은 기존 테스트가 검증함.
 }
 
+void checkRotatingDistanceBoundPruning()
+{
+    // 쿼리 AABB의 우상단에는 들어오지만 회전하는 원점 궤적의
+    // circumscribed disk 밖인 타깃은 GJK/TOI 이전에 제거할 수 있음.
+    world rotation{};
+    const bodyId cornerBody = rotation.CreateBody( bodyType::Static,
+        { { 0.96f, 0.96f }, {} } );
+    ( void )rotation.CreateShape( cornerBody, circle2{ {}, 0.1f } );
+
+    worldShapeSweepInput2 input{};
+    input.geometry = circle2{ { 1.0f, 0.0f }, 0.1f };
+    input.rotationRadians = 1.5707963267948966f;
+
+    worldShapeSweepStats2 stats{};
+    const auto miss = rotation.castShapeSweepClosest( input, {}, &stats );
+    check( !miss.hit && stats.treeCandidates == 1 &&
+        stats.distancePrunedCandidates == 1 && stats.toiCalls == 0,
+        "Pure rotation must discard geometrically unreachable AABB-corner candidate" );
+
+    const bodyId touchingBody = rotation.CreateBody( bodyType::Kinematic,
+        { { 0.7071f, 0.7071f }, {} } );
+    const shapeId touchingShape = rotation.CreateShape( touchingBody, circle2{ {}, 0.15f } );
+    const auto hit = rotation.castShapeSweepClosest( input );
+    check( hit.hit && hit.shape == touchingShape && hit.fraction > 0.0f &&
+        hit.fraction < 1.0f, "Pure rotation must retain valid contacts while pruning corners" );
+
+    // 짧은 병진과 회전의 합성 경로에서 capsule 형상의 원점 이동 경계 또한 보수적임.
+    world translation{};
+    const bodyId shortBody = translation.CreateBody( bodyType::Dynamic,
+        { { 0.35f, 0.20f }, {} } );
+    ( void )translation.CreateShape( shortBody, circle2{ {}, 0.05f } );
+    input = {};
+    input.geometry = circle2{ {}, 0.16f };
+    input.translation = { 0.2f, 0.0f };
+    input.rotationRadians = 0.5f;
+    stats = {};
+    const auto shortMiss = translation.castShapeSweepClosest( input, {}, &stats );
+    check( !shortMiss.hit && stats.treeCandidates == 1 &&
+        stats.distancePrunedCandidates == 1 && stats.toiCalls == 0,
+        "Short rotating translation must discard an AABB-corner candidate" );
+
+    const bodyId shortTouchBody = translation.CreateBody( bodyType::Static,
+        { { 0.30f, 0.0f }, {} } );
+    const shapeId shortTouchShape = translation.CreateShape(
+        shortTouchBody, circle2{ {}, 0.05f } );
+    const auto shortHit = translation.castShapeSweepClosest( input );
+    check( shortHit.hit && shortHit.shape == shortTouchShape,
+        "Short rotating translation must retain centerline collisions" );
+
+    // 도형 반경은 0.002이지만 TOI는 LINEAR_SLOP까지 core contact를 허용함.
+    // 물리적 bounding disk 사이의 빈 간격만 검사하면 기존 hit을 잃게 됨.
+    world tolerant{};
+    const bodyId toleranceBody = tolerant.CreateBody( bodyType::Static,
+        { { 0.7099352f, 0.7099352f }, {} } );
+    const shapeId toleranceTarget = tolerant.CreateShape(
+        toleranceBody, circle2{ {}, 0.001f } );
+    input = {};
+    input.geometry = circle2{ { 1.0f, 0.0f }, 0.001f };
+    input.rotationRadians = 1.5707963267948966f;
+    stats = {};
+    const auto toleranceHit = tolerant.castShapeSweepClosest( input, {}, &stats );
+    check( toleranceHit.hit && toleranceHit.shape == toleranceTarget &&
+        toleranceHit.fraction > 0.0f && toleranceHit.fraction < 1.0f &&
+        stats.distancePrunedCandidates == 0 && stats.toiCalls == 1,
+        "Conservative pruning must preserve TOI contact-slop tolerance" );
+}
+
 } // namespace
 
 int main()
@@ -490,4 +557,5 @@ int main()
     checkClippingAndEncroachment();
     checkRotatingSweep();
     checkRotatingCandidateClipping();
+    checkRotatingDistanceBoundPruning();
 }
