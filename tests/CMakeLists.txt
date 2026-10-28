@@ -610,6 +610,11 @@ add_executable(weldJointWorldTests dynamics/weld_joint_world_test.cpp)
 target_link_libraries(weldJointWorldTests PRIVATE zonai::zonai)
 add_test(NAME weldJointWorldTests COMMAND weldJointWorldTests)
 
+add_executable(sandboxOverlapShapeDemoTests sandbox/overlap_shape_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/overlapShapeDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp")
+target_include_directories(sandboxOverlapShapeDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+target_link_libraries(sandboxOverlapShapeDemoTests PRIVATE zonai::zonai)
+add_test(NAME sandboxOverlapShapeDemoTests COMMAND sandboxOverlapShapeDemoTests)
+
 add_executable(sandboxShapeCastDemoTests sandbox/shape_cast_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/shapeCastDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp")
 target_include_directories(sandboxShapeCastDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxShapeCastDemoTests PRIVATE zonai::zonai)
@@ -650,6 +655,11 @@ if(TARGET imgui)
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/sandbox/assets" "$<TARGET_FILE_DIR:sandboxDemoTests>/assets"
     )
 
+    add_executable(sandboxOverlapShapeViewTests sandbox/overlap_shape_view_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/overlapShapeDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/overlapShapeDemoView.cpp" "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugCamera.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugDraw.cpp")
+    target_include_directories(sandboxOverlapShapeViewTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+    target_link_libraries(sandboxOverlapShapeViewTests PRIVATE zonai::zonai imgui)
+    add_test(NAME sandboxOverlapShapeViewTests COMMAND sandboxOverlapShapeViewTests)
+
     add_executable(sandboxShapeCastViewTests sandbox/shape_cast_view_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/shapeCastDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/shapeCastDemoView.cpp" "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugCamera.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugDraw.cpp")
     target_include_directories(sandboxShapeCastViewTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
     target_link_libraries(sandboxShapeCastViewTests PRIVATE zonai::zonai imgui)
@@ -663,6 +673,8 @@ if(TARGET imgui)
         "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemoUi.cpp"
         "${PROJECT_SOURCE_DIR}/sandbox/shapeCastDemo.cpp"
         "${PROJECT_SOURCE_DIR}/sandbox/shapeCastDemoView.cpp"
+        "${PROJECT_SOURCE_DIR}/sandbox/overlapShapeDemo.cpp"
+        "${PROJECT_SOURCE_DIR}/sandbox/overlapShapeDemoView.cpp"
         "${PROJECT_SOURCE_DIR}/sandbox/jointDemoView.cpp"
         "${PROJECT_SOURCE_DIR}/sandbox/debug/debugCamera.cpp"
         "${PROJECT_SOURCE_DIR}/sandbox/debug/debugDraw.cpp"

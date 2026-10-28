@@ -70,7 +70,8 @@ enum class demoKind
     suspensionLimitComparison,
     suspensionMotorComparison,
     weldElasticityComparison,
-    shapeCastVisualization
+    shapeCastVisualization,
+    overlapShapeVisualization
 };
 
 struct demoEntry
