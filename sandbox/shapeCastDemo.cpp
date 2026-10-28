@@ -254,8 +254,9 @@ void shapeCastDemo::updateHit()
             { input_.geometry, input_.transform, input_.translation, rotationRadians_ },
             filter, &sweepStats_ );
 
-    // 중심 RayCast는 회전을 반영하지 않는 비교용 직선 조회임.
-    rayHit_ = world_.castRayClosest( input_.transform.position, input_.translation, filter );
+    // 초기 도형 중심의 병진 경로만 비교함. 상대 회전으로 생기는 원호는 RayCast에 반영하지 않음.
+    const vec2 rayStart = TransformPoint( input_.transform, localOffset_ );
+    rayHit_ = world_.castRayClosest( rayStart, input_.translation, filter );
 
     aabbCandidateCount_ = 0;
     const aabb2 swept = getSweepAABB();
