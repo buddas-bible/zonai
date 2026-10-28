@@ -515,6 +515,10 @@ add_executable(worldOverlapShapeTests dynamics/world_overlap_shape_test.cpp)
 target_link_libraries(worldOverlapShapeTests PRIVATE zonai::zonai)
 add_test(NAME worldOverlapShapeTests COMMAND worldOverlapShapeTests)
 
+add_executable(worldSpatialQueryStressTests dynamics/world_spatial_query_stress_test.cpp)
+target_link_libraries(worldSpatialQueryStressTests PRIVATE zonai::zonai)
+add_test(NAME worldSpatialQueryStressTests COMMAND worldSpatialQueryStressTests)
+
 add_executable(worldRayCastTests dynamics/world_ray_cast_test.cpp)
 target_link_libraries(worldRayCastTests PRIVATE zonai::zonai)
 add_test(NAME worldRayCastTests COMMAND worldRayCastTests)
