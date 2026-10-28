@@ -231,6 +231,46 @@ void verifyRootBoundaryPrecision()
     check( calls == 1 && fraction == 0.8f, "Root early-out lost near-boundary swept hit" );
 }
 
+void verifyNodeDirectionPruning()
+{
+    dynamicTree tree{};
+    const std::int32_t right = tree.CreateProxy( { { 8.0f, -0.5f }, { 9.0f, 0.5f } }, 0 );
+    const std::int32_t left = tree.CreateProxy( { { -9.0f, -0.5f }, { -8.0f, 0.5f } }, 1 );
+    ( void )tree.CreateProxy( { { -0.5f, 8.0f }, { 0.5f, 9.0f } }, 2 );
+    ( void )tree.CreateProxy( { { -0.5f, -9.0f }, { 0.5f, -8.0f } }, 3 );
+
+    const aabb2 start{ { -0.25f, -0.25f }, { 0.25f, 0.25f } };
+
+    // Root는 전체를 감싸지만, 오른쪽으로 진행하면 왼쪽 subtree의 후보는 제외해야 함.
+    float limit = 1.0f;
+    std::vector<std::int32_t> visited;
+    tree.BoxCast( start, { 12.0f, 0.0f }, limit, [&]( std::int32_t id, float )
+    {
+        visited.push_back( id );
+        return -1.0f;
+    } );
+    check( visited.size() == 1 && visited[0] == right, "Positive sweep must ignore opposite subtrees" );
+
+    // 음의 방향에서도 같은 규칙이 적용되어야 함.
+    visited.clear();
+    tree.BoxCast( start, { -12.0f, 0.0f }, limit, [&]( std::int32_t id, float )
+    {
+        visited.push_back( id );
+        return -1.0f;
+    } );
+    check( visited.size() == 1 && visited[0] == left, "Negative sweep must ignore opposite subtrees" );
+
+    // Root의 한쪽 경계에서 닿는 경우는 반드시 남겨야 함.
+    visited.clear();
+    const aabb2 touching{ { 9.0f, -0.25f }, { 9.5f, 0.25f } };
+    tree.BoxCast( touching, { 3.0f, 0.0f }, limit, [&]( std::int32_t id, float )
+    {
+        visited.push_back( id );
+        return -1.0f;
+    } );
+    check( visited.size() == 1 && visited[0] == right, "Touching boundary must not be pruned" );
+}
+
 void verifyDiagonalPruning()
 {
     dynamicTree tree{};
@@ -274,6 +314,7 @@ int main()
     verifyDiagonalPruning();
     verifyRootSweepRejection();
     verifyRootBoundaryPrecision();
+    verifyNodeDirectionPruning();
 
     dynamicTree emptyTree{};
     const aabb2 box{ { -1.0f, -1.0f }, { 1.0f, 1.0f } };

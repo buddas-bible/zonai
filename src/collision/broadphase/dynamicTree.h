@@ -320,6 +320,13 @@ public:
                 const treeNode& node = nodes_[pair + i];
                 if( IsEmptyNode( node ) ) continue;
 
+                // 이 node의 경계 바깥에서 해당 축의 반대 방향으로 움직이면 교차할 수 없음.
+                // 끝점의 float 곱/합 없이 검사해 아주 가까운 경계의 실제 hit도 보존함.
+                if( ( translation.x >= 0.0f && startBounds.min.x > node.aabb.max.x ) ||
+                    ( translation.x <= 0.0f && startBounds.max.x < node.aabb.min.x ) ||
+                    ( translation.y >= 0.0f && startBounds.min.y > node.aabb.max.y ) ||
+                    ( translation.y <= 0.0f && startBounds.max.y < node.aabb.min.y ) ) continue;
+
                 float entry = 0.0f;
                 float exit = maxFraction;
                 bool overlaps = true;
