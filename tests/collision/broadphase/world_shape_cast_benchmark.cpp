@@ -89,18 +89,18 @@ struct castMetrics
 {
     std::uint64_t treeCandidates = 0;
     std::uint64_t acceptedCandidates = 0;
-    std::uint64_t gjkCalls = 0;
-    std::uint64_t gjkIterations = 0;
-    std::uint64_t gjkHits = 0;
+    std::uint64_t shapeCastCalls = 0;
+    std::uint64_t distanceCalls = 0;
+    std::uint64_t shapeCastHits = 0;
     std::uint64_t closestHits = 0;
 
     castMetrics& operator+=( const castMetrics& other )
     {
         treeCandidates += other.treeCandidates;
         acceptedCandidates += other.acceptedCandidates;
-        gjkCalls += other.gjkCalls;
-        gjkIterations += other.gjkIterations;
-        gjkHits += other.gjkHits;
+        shapeCastCalls += other.shapeCastCalls;
+        distanceCalls += other.distanceCalls;
+        shapeCastHits += other.shapeCastHits;
         closestHits += other.closestHits;
         return *this;
     }
@@ -252,12 +252,12 @@ closestHit castComparison( const fixture& data, const castTrial& trial, castMeth
             cast.maxFraction = limit;
             cast.canEncroach = input.canEncroach;
 
-            ++metrics.gjkCalls;
+            ++metrics.shapeCastCalls;
             const castOutput2 hit = ShapeCast( cast );
-            metrics.gjkIterations += static_cast<std::uint64_t>( hit.iterations );
+            metrics.distanceCalls += static_cast<std::uint64_t>( hit.iterations );
 
             if( !hit.hit ) return -1.0f;
-            ++metrics.gjkHits;
+            ++metrics.shapeCastHits;
 
             const vec2 point = TransformPoint( object.transform, hit.point );
             const vec2 normal = TransformVector( object.transform, hit.normal );
@@ -322,10 +322,7 @@ void compareHits( const fixture& data, const closestHit& query, const closestHit
 
     check( data.simulation.IsValid( actual.shape ), "World returned stale shapeId" );
 
-    // 동일한 fraction이어도 동률 상대방이 있을 수 있으므로 index 강제 일치 대신
-    // 보고된 shape에 실제 동일 거리의 hit이 있었는지를 별도 검사함.
-    const int targetIndex = static_cast<int>( actual.shape.index1 ) - 1;
-    ( void )targetIndex;
+    // 근접 동률에서는 Tree 순회 순서에 따라 다른 Shape가 같은 fraction으로 보고될 수 있음.
 }
 
 struct sceneStats
@@ -378,7 +375,7 @@ std::uint64_t runBatch( const fixture& data, const scenario& scene, castMethod m
 
             castMetrics metrics{};
             const closestHit hit = castComparison( data, trial, method, metrics );
-            sum += metrics.treeCandidates + metrics.gjkCalls + metrics.gjkIterations;
+            sum += metrics.treeCandidates + metrics.shapeCastCalls + metrics.distanceCalls;
             if( hit.hit ) sum += static_cast<std::uint64_t>( hit.targetIndex + 1 ) +
                 static_cast<std::uint64_t>( hit.fraction * 100000.0f );
         }
@@ -408,12 +405,12 @@ void printMeasurement( const fixture& data, const std::array<scenario, 6>& scene
     const std::array<sceneStats, 6>& totals, bool csv )
 {
     if( csv )
-        std::printf( "scenario,casts,closest_hits,query_leaves,box_leaves,query_gjk,box_gjk,query_gjk_iterations,box_gjk_iterations,query_ns,box_ns,world_ns,box_over_query_ratio\n" );
+        std::printf( "scenario,casts,closest_hits,query_leaves,box_leaves,query_shape_cast_calls,box_shape_cast_calls,query_distance_calls,box_distance_calls,query_ns,box_ns,world_ns,box_over_query_ratio\n" );
     else
     {
         std::printf( "World-like ShapeCast comparison: %zu shapes, %d casts/scenario, %d rounds x %d repeats\n",
             data.targets.size(), queriesPerScene, measuredRounds, repeatsPerRound );
-        std::printf( "Scene         Q leaves B leaves    Q GJK  B GJK Q iterations B iterations   Query ns    Box ns  World ns  Box/Query\n" );
+        std::printf( "Scene         Q leaves B leaves    Q casts B casts Q distance B distance   Query ns    Box ns  World ns  Box/Query\n" );
     }
 
     for( std::size_t i = 0; i < scenes.size(); ++i )
@@ -452,10 +449,10 @@ void printMeasurement( const fixture& data, const std::array<scenario, 6>& scene
                 scene.name, queriesPerScene, static_cast<unsigned long long>( stats.actualHits ),
                 static_cast<unsigned long long>( stats.query.treeCandidates ),
                 static_cast<unsigned long long>( stats.box.treeCandidates ),
-                static_cast<unsigned long long>( stats.query.gjkCalls ),
-                static_cast<unsigned long long>( stats.box.gjkCalls ),
-                static_cast<unsigned long long>( stats.query.gjkIterations ),
-                static_cast<unsigned long long>( stats.box.gjkIterations ),
+                static_cast<unsigned long long>( stats.query.shapeCastCalls ),
+                static_cast<unsigned long long>( stats.box.shapeCastCalls ),
+                static_cast<unsigned long long>( stats.query.distanceCalls ),
+                static_cast<unsigned long long>( stats.box.distanceCalls ),
                 q, b, w, q == 0.0 ? 0.0 : b / q );
         }
         else
@@ -464,10 +461,10 @@ void printMeasurement( const fixture& data, const std::array<scenario, 6>& scene
                 scene.name,
                 static_cast<unsigned long long>( stats.query.treeCandidates ),
                 static_cast<unsigned long long>( stats.box.treeCandidates ),
-                static_cast<unsigned long long>( stats.query.gjkCalls ),
-                static_cast<unsigned long long>( stats.box.gjkCalls ),
-                static_cast<unsigned long long>( stats.query.gjkIterations ),
-                static_cast<unsigned long long>( stats.box.gjkIterations ),
+                static_cast<unsigned long long>( stats.query.shapeCastCalls ),
+                static_cast<unsigned long long>( stats.box.shapeCastCalls ),
+                static_cast<unsigned long long>( stats.query.distanceCalls ),
+                static_cast<unsigned long long>( stats.box.distanceCalls ),
                 q, b, w, q == 0.0 ? 0.0 : b / q );
         }
     }

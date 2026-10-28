@@ -41,8 +41,8 @@ CI의 Debug/Release CTest는 이 경로를 사용한다.
 - 장면: diagonal, horizontal, short, wide-box, capsule, miss.
   각 장면의 입력 일부에는 마스크 제한이 있고 capsule은 canEncroach도 사용한다.
 - `query_leaves` / `box_leaves`: Tree 후보 callback 호출 횟수.
-  `query_gjk` / `box_gjk`: 실제 narrowphase ShapeCast 호출 수.
-  `query_gjk_iterations` / `box_gjk_iterations`: 내부 GJK 거리 단계 반복 합계.
+  `query_shape_cast_calls` / `box_shape_cast_calls`: 실제 narrowphase ShapeCast 호출 수.
+  `query_distance_calls` / `box_distance_calls`: `castOutput2::iterations`의 합계인 내부 `ShapeDistance` 평가 횟수(ShapeCast의 conservative advancement 단계 수)다. **GJK의 내부 simplex 반복 횟수와 다르다.**
   세 수치는 각 장면 **64회 조회의 합계**다.
 - `query_ns` / `box_ns`: Tree 조회 + 동일한 GJK 후보 판정까지 포함한
   복제된 closest 파이프라인의 1회 조회당 ns 중앙값.
