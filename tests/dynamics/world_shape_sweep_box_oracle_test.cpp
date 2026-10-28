@@ -235,8 +235,22 @@ void runAudit( bool csv, bool strict )
         // #221: 고정 시드 index 664는 얇은 Box가 회전 도중 작은 원과 겹쳤지만
         // 기존 TOI가 끝 시점의 분리축만 보고 Separated를 반환하던 반례임.
         if( i == 664 )
+        {
             check( robust && hit.hit && hit.fraction > 0.0f && hit.fraction < 1.0f,
                 "Regression #221: brief rotating thin-box contact must be detected" );
+
+            // World에서는 정규화 오차 0.001까지 허용하므로, angular speed 상한도
+            // q1/q2가 정확히 단위 길이라는 가정 없이 안전해야 함.
+            orbitCase scaled = sample;
+            scaled.input.transform.rotation.c *= 1.0002f;
+            scaled.input.transform.rotation.s *= 1.0002f;
+            const sampleResult scaledOracle = sampleOracle( scaled );
+            const worldShapeCastResult2 scaledHit = selected.castShapeSweepClosest( scaled.input );
+            check( scaledOracle.startGap > 0.04 && scaledOracle.endGap > 0.04 &&
+                scaledOracle.minimumGap < -0.01 && scaledHit.hit &&
+                scaledHit.fraction > 0.0f && scaledHit.fraction < 1.0f,
+                "Regression #221: accepted nonunit start rotation must preserve transient contact" );
+        }
 
         if( robust && !hit.hit )
         {
