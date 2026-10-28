@@ -169,16 +169,16 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
 - TOI가 보고한 hit의 handle, fraction, finite hit 데이터와 수치적으로
   불가능한 양성 보고(보고 시점의 간격이 0.06m 이상)를 **CI에서 실패**로 검사한다.
   모든 시점의 간격이 0.08m보다 큰 확실한 miss도 반드시 miss로 보고해야 한다.
-- **robust middle hit을 놓친 수는 현 TOI의 알려진 제한을 파악하는 계측값**이다.
-  일반 CI에서는 이를 기록하지만 테스트 실패 조건으로 삼지 않는다.
+- **robust middle hit 누락은 CI에서 실패**로 검사한다.
+  문제 #221을 수정한 뒤 두 독립 oracle에서 검증된 접촉을 필수 회귀 조건으로 유지한다.
   누락 개수와 재현 가능한 첫 사례(시작 좌표/회전/이동/타깃)를 로그로 남긴다.
   CI에서는 Ubuntu/Windows Debug 테스트 완료 후 진단 실행 파일을 직접 호출하여
   `cases/robust_middle/toi_missed` 통계를 성공 로그에도 노출한다.
   Windows Release 대상에도 동일 테스트를 포함한다.
   예상 값이나 개선 비율을 CI 환경·테스트 수정 전후 결과 없이 단정하지 않는다.
-- `--csv`는 case별 간격과 TOI 결과를 출력해 비교할 수 있고,
-  `--strict`는 robust middle hit 누락이 하나라도 있으면 실패한다.
-  `--strict`는 기존 알고리즘의 회전 한계를 분석할 때만 사용하며 CI 기본값은 아니다.
+- `--csv`는 case별 간격과 TOI 결과를 출력하며, `--strict`는
+  robust middle hit 누락이 하나라도 있으면 실패한다.
+  현재 CI의 두 oracle CTest는 모두 `--strict`로 실행한다.
 
 추가로 `worldRotatingBoxSweepOracleTests`는 1,200개 고정 seed
 (0x57B0A923) 사례에서 오프셋된 상자가 회전하는 경로와 정적 원의
@@ -190,8 +190,9 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
 **point-to-oriented-box 거리**와 원 반지름 차이를 계산하는 독립 기하
 oracle을 사용한다. 결과는 broad와 thin의 누락 건수로 구분해 기록한다.
 
-두 테스트 모두 512구간 샘플과 동일한 `0.04m` robust 분리/침투
-판정 기준, `--csv` 및 `--strict` 옵션을 사용한다.
+두 테스트 모두 512구간 샘플과 `--csv` 및 `--strict` 옵션을 사용한다.
+시작/종료 분리 기준은 +0.04m이고 중간 침투 기준은 원-원 및
+일반 상자에서 -0.04m, 얇은 상자에서 -0.01m이다.
 CI 성공 로그에서 원-원과 상자-원 누락 건수를 각각 출력하며,
 Windows Release에도 두 테스트를 포함한다.
 
