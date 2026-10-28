@@ -169,16 +169,16 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
 - TOI가 보고한 hit의 handle, fraction, finite hit 데이터와 수치적으로
   불가능한 양성 보고(보고 시점의 간격이 0.06m 이상)를 **CI에서 실패**로 검사한다.
   모든 시점의 간격이 0.08m보다 큰 확실한 miss도 반드시 miss로 보고해야 한다.
-- **robust middle hit을 놓친 수는 현 TOI의 알려진 제한을 파악하는 계측값**이다.
-  일반 CI에서는 이를 기록하지만 테스트 실패 조건으로 삼지 않는다.
+- **robust middle hit 누락은 CI에서 실패**로 검사한다.
+  문제 #221을 수정한 뒤 두 독립 oracle에서 검증된 접촉을 필수 회귀 조건으로 유지한다.
   누락 개수와 재현 가능한 첫 사례(시작 좌표/회전/이동/타깃)를 로그로 남긴다.
   CI에서는 Ubuntu/Windows Debug 테스트 완료 후 진단 실행 파일을 직접 호출하여
   `cases/robust_middle/toi_missed` 통계를 성공 로그에도 노출한다.
   Windows Release 대상에도 동일 테스트를 포함한다.
   예상 값이나 개선 비율을 CI 환경·테스트 수정 전후 결과 없이 단정하지 않는다.
-- `--csv`는 case별 간격과 TOI 결과를 출력해 비교할 수 있고,
-  `--strict`는 robust middle hit 누락이 하나라도 있으면 실패한다.
-  `--strict`는 기존 알고리즘의 회전 한계를 분석할 때만 사용하며 CI 기본값은 아니다.
+- `--csv`는 case별 간격과 TOI 결과를 출력하며, `--strict`는
+  robust middle hit 누락이 하나라도 있으면 실패한다.
+  현재 CI의 두 oracle CTest는 모두 `--strict`로 실행한다.
 
 추가로 `worldRotatingBoxSweepOracleTests`는 1,200개 고정 seed
 (0x57B0A923) 사례에서 오프셋된 상자가 회전하는 경로와 정적 원의
@@ -190,8 +190,9 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
 **point-to-oriented-box 거리**와 원 반지름 차이를 계산하는 독립 기하
 oracle을 사용한다. 결과는 broad와 thin의 누락 건수로 구분해 기록한다.
 
-두 테스트 모두 512구간 샘플과 동일한 `0.04m` robust 분리/침투
-판정 기준, `--csv` 및 `--strict` 옵션을 사용한다.
+두 테스트 모두 512구간 샘플과 `--csv` 및 `--strict` 옵션을 사용한다.
+시작/종료 분리 기준은 +0.04m이고 중간 침투 기준은 원-원 및
+일반 상자에서 -0.04m, 얇은 상자에서 -0.01m이다.
 CI 성공 로그에서 원-원과 상자-원 누락 건수를 각각 출력하며,
 Windows Release에도 두 테스트를 포함한다.
 
@@ -199,3 +200,35 @@ Windows Release에도 두 테스트를 포함한다.
 ghost vertex ownership이나 높은 각속도, 변화하는 양쪽 Body의 전역 연속
 충돌 판정까지 검증하는 것은 아니다. 향후 개선은 같은 입력·seed의
 기준 로그 및 성능을 비교한 뒤 별도 PR로 도입한다.
+
+
+## 회전 중간 접촉 누락 #221 수정
+
+기존 TOI는 분리축이 **끝 시점**에서도 충분히 떨어져 있으면 `Separated`로
+종료할 수 있다. 하지만 회전하는 물체에서는 처음/끝이 분리돼도 중간
+접촉이 가능하다. 진단 PR #220의 얇은 상자/작은 원 index 664에서
+이 문제가 재현되었다.
+
+World의 회전 `castShapeSweep`는 이제 `toiInput2::detectTransientContacts`를
+켜고, 기존 TOI가 `Separated` 또는 `Failed`일 때만
+**거리 변화 상한 기반의 보수적 전진**으로 재확인한다.
+
+- 평행이동의 최대 속도는 `|c2-c1|`이다. nlerp의 각속도
+  `|cross(q1,q2)| / |(1-t)q1+t*q2|²`는 분모의 구간 최솟값으로
+  상한을 계산한다. (정확히 단위 길이인 회전끼리는 `2*tan(|Δθ|/2)`와 같다.)
+  작은 회전 정규화 오차도 고려하며, 각 support 점에서 localCenter까지의
+  최대 거리를 곱해 이동 가능한 core 거리의 상한을 만든다.
+- 현재 GJK core 분리 거리 `d`와 접촉 목표 `target + tolerance`에 대해
+  `(d-target-tolerance)/maxRelativeSpeed`보다 더 멀리 진행하지 않는다.
+  이는 **고정 간격 시간 샘플링이 아니라**, 어떤 점도 건너뛰지 않도록
+  이동 거리의 상한으로 전진폭을 정하는 방법이다.
+- 충돌을 찾으면 그 시점의 witness points/normal로 World hit을 보고한다.
+  256회 내에 float 분율 진전이 불가능하거나 판정이 끝나지 않으면
+  기존 TOI 결과를 유지하며, 모든 물리적 sweep의 완전한 검출을 약속하지 않는다.
+- 기존 CCD의 `TimeOfImpact` 호출은 이 기능을 켜지 않아 기본 알고리즘,
+  반복 한도, Solver 경로 및 성능 의미를 바꾸지 않는다.
+  World에서 회전량이 0인 기존 GJK 선형 ShapeCast에도 영향이 없다.
+
+`worldRotatingBoxSweepOracleTests`는 고정 seed 0x57B0A923의 index 664를
+**필수 충돌 회귀 테스트**로 확인하며, 전체 1,800개 샘플의 diagnostic
+미검출 건수도 기존과 같은 CI 출력에서 확인한다.

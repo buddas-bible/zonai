@@ -545,11 +545,11 @@ add_test(NAME worldShapeCastTests COMMAND worldShapeCastTests)
 # Expected TOI false negatives are reported for diagnosis, not treated as a contract violation.
 add_executable(worldRotatingShapeSweepOracleTests dynamics/world_shape_sweep_oracle_test.cpp)
 target_link_libraries(worldRotatingShapeSweepOracleTests PRIVATE zonai::zonai)
-add_test(NAME worldRotatingShapeSweepOracleTests COMMAND worldRotatingShapeSweepOracleTests)
+add_test(NAME worldRotatingShapeSweepOracleTests COMMAND worldRotatingShapeSweepOracleTests --strict)
 
 add_executable(worldRotatingBoxSweepOracleTests dynamics/world_shape_sweep_box_oracle_test.cpp)
 target_link_libraries(worldRotatingBoxSweepOracleTests PRIVATE zonai::zonai)
-add_test(NAME worldRotatingBoxSweepOracleTests COMMAND worldRotatingBoxSweepOracleTests)
+add_test(NAME worldRotatingBoxSweepOracleTests COMMAND worldRotatingBoxSweepOracleTests --strict)
 
 add_executable(contactCacheTests dynamics/contact_cache_test.cpp)
 target_link_libraries(contactCacheTests PRIVATE zonai::zonai)

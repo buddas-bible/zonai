@@ -725,6 +725,7 @@ public:
                     targetTransform.rotation, targetTransform.rotation };
                 toi.sweepB = movingSweep;
                 toi.maxFraction = maxFraction;
+                toi.detectTransientContacts = true;
 
                 // CCD의 one-sided 조기 종료보다 앞서 시작 시점의 앞면 겹침을 확인함.
                 // 처음부터 맞닿아 멀어지는 회전 sweep도 기존 castShape처럼 fraction 0을 보고해야 함.
