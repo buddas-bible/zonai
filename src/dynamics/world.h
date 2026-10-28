@@ -726,7 +726,41 @@ public:
                 toi.sweepB = movingSweep;
                 toi.maxFraction = maxFraction;
 
-                const toiOutput2 hit = TimeOfImpact( toi );
+                // CCD의 one-sided 조기 종료보다 앞서 시작 시점의 앞면 겹침을 확인함.
+                // 처음부터 맞닿아 멀어지는 회전 sweep도 기존 castShape처럼 fraction 0을 보고해야 함.
+                toiOutput2 hit{};
+                bool initialChainOverlap = false;
+                if( const chainSegment2* chain = std::get_if<chainSegment2>( &candidate.geometry ) )
+                {
+                    const vec2 edge = chain->segment.b - chain->segment.a;
+                    const vec2 front = Rotate( targetTransform.rotation, Normalize( vec2{ edge.y, -edge.x } ) );
+                    vec2 centroid{};
+                    for( int p = 0; p < movingProxy.count; ++p )
+                        centroid += TransformPoint( input.transform, movingProxy.points[p] );
+                    centroid /= static_cast<float>( movingProxy.count );
+
+                    if( Dot( centroid - TransformPoint( targetTransform, chain->segment.a ), front ) > 0.0f )
+                    {
+                        distanceInput2 distance{};
+                        distance.proxyA = toi.proxyA;
+                        distance.proxyB = movingProxy;
+                        distance.transform = InverseMul( targetTransform, input.transform );
+                        distance.useRadii = true;
+                        simplexCache2 cache{};
+                        const distanceOutput2 nearest = ShapeDistance( distance, cache );
+                        constexpr float OVERLAP_EPSILON = 10.0f * std::numeric_limits<float>::epsilon();
+
+                        if( std::isfinite( nearest.distance ) && nearest.distance <= OVERLAP_EPSILON )
+                        {
+                            initialChainOverlap = true;
+                            hit.state = toiState2::Overlapped;
+                            hit.fraction = 0.0f;
+                            hit.point = TransformPoint( targetTransform, 0.5f * ( nearest.pointA + nearest.pointB ) );
+                        }
+                    }
+                }
+
+                if( !initialChainOverlap ) hit = TimeOfImpact( toi );
                 if( hit.state != toiState2::Hit && hit.state != toiState2::Overlapped ) return true;
                 if( !std::isfinite( hit.fraction ) ||
                     hit.fraction < 0.0f || hit.fraction >= maxFraction ) return true;
@@ -736,15 +770,17 @@ public:
 
                 if( hit.fraction == 0.0f )
                 {
-                    // 기존 World ShapeCast처럼 시작 겹침의 법선은 0으로 보고함.
-                    distanceInput2 distance{};
-                    distance.proxyA = toi.proxyA;
-                    distance.proxyB = movingProxy;
-                    distance.transform = InverseMul( targetTransform, input.transform );
-                    distance.useRadii = true;
-                    simplexCache2 cache{};
-                    const distanceOutput2 nearest = ShapeDistance( distance, cache );
-                    point = TransformPoint( targetTransform, 0.5f * ( nearest.pointA + nearest.pointB ) );
+                    if( !initialChainOverlap )
+                    {
+                        distanceInput2 distance{};
+                        distance.proxyA = toi.proxyA;
+                        distance.proxyB = movingProxy;
+                        distance.transform = InverseMul( targetTransform, input.transform );
+                        distance.useRadii = true;
+                        simplexCache2 cache{};
+                        const distanceOutput2 nearest = ShapeDistance( distance, cache );
+                        point = TransformPoint( targetTransform, 0.5f * ( nearest.pointA + nearest.pointB ) );
+                    }
                     normal = {};
                 }
 
