@@ -213,8 +213,10 @@ World의 회전 `castShapeSweep`는 이제 `toiInput2::detectTransientContacts`�
 켜고, 기존 TOI가 `Separated` 또는 `Failed`일 때만
 **거리 변화 상한 기반의 보수적 전진**으로 재확인한다.
 
-- 평행이동의 최대 속도는 `|c2-c1|`, nlerp 회전의 최대 각속도는
-  `2*tan(|Δθ|/2)` rad/fraction이다. 각 support 점에서 localCenter까지의
+- 평행이동의 최대 속도는 `|c2-c1|`이다. nlerp의 각속도
+  `|cross(q1,q2)| / |(1-t)q1+t*q2|²`는 분모의 구간 최솟값으로
+  상한을 계산한다. (정확히 단위 길이인 회전끼리는 `2*tan(|Δθ|/2)`와 같다.)
+  작은 회전 정규화 오차도 고려하며, 각 support 점에서 localCenter까지의
   최대 거리를 곱해 이동 가능한 core 거리의 상한을 만든다.
 - 현재 GJK core 분리 거리 `d`와 접촉 목표 `target + tolerance`에 대해
   `(d-target-tolerance)/maxRelativeSpeed`보다 더 멀리 진행하지 않는다.
