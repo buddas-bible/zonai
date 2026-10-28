@@ -250,6 +250,189 @@ void checkClippingAndEncroachment()
         "canEncroach advances an initially close but separated pair" );
 }
 
+void checkRotatingSweep()
+{
+    constexpr float quarterTurn = 1.5707963267948966f;
+    world simulation{};
+    const bodyId fixed = simulation.CreateBody( bodyType::Static, { { 1.4f, 1.4f }, {} } );
+    const shapeId target = simulation.CreateShape( fixed, circle2{ {}, 0.45f } );
+
+    // 양 끝에서는 겹치지 않지만 중간 자세에서 로컬 오프셋 원이 목표를 통과함.
+    worldShapeSweepInput2 input{};
+    input.geometry = circle2{ { 2.0f, 0.0f }, 0.3f };
+    input.rotationRadians = quarterTurn;
+
+    const auto hit = simulation.castShapeSweepClosest( input );
+    check( hit.hit && hit.shape == target, "Rotation-only World sweep must detect an intermediate collision" );
+    check( hit.fraction > 0.05f && hit.fraction < 0.95f &&
+        IsFinite( hit.point ) && IsFinite( hit.normal ) && LengthSquared( hit.normal ) > 0.5f,
+        "Rotating sweep must provide finite world hit information" );
+
+    int callbackCount = 0;
+    simulation.castShapeSweep( input, [&]( shapeId id, vec2, vec2, float fraction )
+    {
+        check( id == target && fraction > 0.0f, "Rotational callback reports a live target" );
+        ++callbackCount;
+        return 0.0f;
+    } );
+    check( callbackCount == 1, "Rotational callback returning zero stops the query" );
+
+    // TOI 입력의 반대 회전 방향과 translation 동시 적용.
+    world negative{};
+    const bodyId negativeBody = negative.CreateBody( bodyType::Static, { { 1.4f, -1.4f }, {} } );
+    const shapeId negativeShape = negative.CreateShape( negativeBody, circle2{ {}, 0.45f } );
+    input.rotationRadians = -quarterTurn;
+    check( negative.castShapeSweepClosest( input ).shape == negativeShape,
+        "Negative rotation must trace the opposite arc" );
+
+    world translated{};
+    const bodyId translatedBody = translated.CreateBody( bodyType::Static, { { 2.0f, 0.0f }, {} } );
+    const shapeId translatedShape = translated.CreateShape( translatedBody, circle2{ {}, 0.5f } );
+    input.geometry = circle2{ { 0.8f, 0.0f }, 0.25f };
+    input.transform.position = { -3.0f, 0.0f };
+    input.translation = { 5.0f, 0.0f };
+    input.rotationRadians = 0.5f;
+    const auto mixed = translated.castShapeSweepClosest( input );
+    check( mixed.hit && mixed.shape == translatedShape && mixed.fraction > 0.0f && mixed.fraction < 1.0f,
+        "Mixed translation and rotation must use TOI" );
+
+    // 회전 0은 기존 선형 ShapeCast를 사용하며 결과 계약이 같음.
+    input.rotationRadians = 0.0f;
+    input.geometry = circle2{ {}, 0.5f };
+    const auto linear = translated.castShapeSweepClosest( input );
+    const auto original = translated.castShapeClosest( { input.geometry, input.transform, input.translation, false } );
+    check( linear.hit && linear.shape == original.shape && linear.fraction == original.fraction,
+        "Zero angular sweep must preserve the existing linear API" );
+
+    // 초기 겹침은 일반 query만 fraction 0으로 보고하며 closest에서 무시함.
+    world overlapped{};
+    const bodyId overlappingBody = overlapped.CreateBody( bodyType::Static, { { 2.0f, 0.0f }, {} } );
+    const shapeId overlapShape = overlapped.CreateShape( overlappingBody, circle2{ {}, 0.4f } );
+    input = {};
+    input.geometry = circle2{ { 2.0f, 0.0f }, 0.4f };
+    input.rotationRadians = quarterTurn;
+    int startCount = 0;
+    overlapped.castShapeSweep( input, [&]( shapeId id, vec2 point, vec2 normal, float fraction )
+    {
+        check( id == overlapShape && fraction == 0.0f && LengthSquared( normal ) == 0.0f &&
+            IsFinite( point ), "Initial rotating overlap must report zero normal and fraction" );
+        ++startCount;
+        return -1.0f;
+    } );
+    check( startCount == 1 && !overlapped.castShapeSweepClosest( input ).hit,
+        "Rotating closest sweep ignores initial overlap" );
+
+    // Query Filter, Sensor 및 move-only callback을 그대로 지원함.
+    world filtered{};
+    const bodyId filteredBody = filtered.CreateBody( bodyType::Kinematic, { { 1.4f, 1.4f }, {} } );
+    const shapeId included = filtered.CreateSensorShape( filteredBody, circle2{ {}, 0.45f },
+        collisionFilter{ 2, 4, 0 } );
+    input = {};
+    input.geometry = circle2{ { 2.0f, 0.0f }, 0.3f };
+    input.rotationRadians = quarterTurn;
+    int filteredCount = 0;
+    filtered.castShapeSweep( input, queryFilter{ 4, 2 },
+        [owned = std::make_unique<int>( 0 ), &filteredCount]( shapeId id, vec2, vec2, float ) mutable
+        {
+            ++*owned;
+            ++filteredCount;
+            check( id.index1 != 0, "Rotating query handle must be valid" );
+            return 1.0f;
+        } );
+    check( filteredCount == 1 && filtered.castShapeSweepClosest( input, queryFilter{ 4, 2 } ).shape == included,
+        "Rotating query includes sensor and honors query filter" );
+    check( !filtered.castShapeSweepClosest( input ).hit, "Default filter excludes masked rotating query target" );
+    filtered.DestroyBody( filteredBody );
+    check( !filtered.castShapeSweepClosest( input, queryFilter{ 4, 2 } ).hit,
+        "Destroyed rotating query target must disappear" );
+
+    // CCD one-sided 조기 종료 전에 시작 겹침을 보고해야 함 (앞면에서 멀어지는 회전).
+    world chainWorld{};
+    const bodyId chainBody = chainWorld.CreateBody();
+    const shapeId edge = chainWorld.CreateShape( chainBody, chainSegment2{
+        { -4.0f, 0.0f }, { { -2.0f, 0.0f }, { 2.0f, 0.0f } }, { 4.0f, 0.0f } } );
+    worldShapeSweepInput2 chainInput{};
+    chainInput.geometry = circle2{ {}, 0.4f };
+    chainInput.transform.position = { 0.0f, -0.2f };
+    chainInput.translation = { 0.0f, -1.0f };
+    chainInput.rotationRadians = 0.5f;
+    int chainCallbacks = 0;
+    chainWorld.castShapeSweep( chainInput, [&]( shapeId id, vec2 point, vec2 normal, float fraction )
+    {
+        check( id == edge && fraction == 0.0f && LengthSquared( normal ) == 0.0f &&
+            IsFinite( point ), "Moving-away initial front-chain overlap must remain reported" );
+        ++chainCallbacks;
+        return 1.0f;
+    } );
+    check( chainCallbacks == 1 && !chainWorld.castShapeSweepClosest( chainInput ).hit,
+        "Front-chain overlap must be ignored only by closest sweep" );
+    chainInput.transform.position.y = 0.2f;
+    chainInput.translation.y = 1.0f;
+    check( !chainWorld.castShapeSweepClosest( chainInput ).hit,
+        "Rotating chain sweep must reject an initial back-face overlap" );
+    int backCallbacks = 0;
+    chainWorld.castShapeSweep( chainInput, [&]( shapeId, vec2, vec2, float )
+    {
+        ++backCallbacks;
+        return 1.0f;
+    } );
+    check( backCallbacks == 0, "Rotating query must not report chain back faces" );
+
+    // 짧은 접근은 CCD의 minimum-motion heuristic 대상이지만 공간 조회는 hit을 반환해야 함.
+    // 중심에 있는 원은 회전해도 같은 geometry이므로 선형과 회전 결과가 일치해야 함.
+    chainInput.transform.position.y = -0.42f;
+    chainInput.translation.y = 0.05f;
+    chainInput.rotationRadians = 0.5f;
+    const auto shortRotation = chainWorld.castShapeSweepClosest( chainInput );
+    const auto shortLinear = chainWorld.castShapeClosest(
+        { chainInput.geometry, chainInput.transform, chainInput.translation, false } );
+    check( shortRotation.hit && shortRotation.shape == edge &&
+        shortLinear.hit && shortLinear.shape == edge,
+        "Short front-chain approach must hit regardless of centered circle rotation" );
+    check( shortRotation.fraction > 0.0f && shortRotation.fraction < 1.0f &&
+        std::fabs( shortRotation.fraction - shortLinear.fraction ) < 0.05f &&
+        Dot( shortRotation.normal, vec2{ 0.0f, -1.0f } ) > 0.9f,
+        "Short rotating chain hit must preserve a valid fraction and front normal" );
+
+    chainInput.transform.position.y = 0.42f;
+    chainInput.translation.y = -0.05f;
+    check( !chainWorld.castShapeSweepClosest( chainInput ).hit,
+        "Short back-chain approach must remain one-sided after bypassing CCD heuristic" );
+
+    const auto invalidCallback = []( shapeId, vec2, vec2, float )
+    {
+        check( false, "Invalid rotating ShapeCast must not invoke callback" );
+        return 1.0f;
+    };
+
+    input = {};
+    input.geometry = circle2{ { 2.0f, 0.0f }, 0.3f };
+    input.rotationRadians = 2.0f;
+    simulation.castShapeSweep( input, invalidCallback );
+    input.rotationRadians = std::numeric_limits<float>::quiet_NaN();
+    simulation.castShapeSweep( input, invalidCallback );
+    input.rotationRadians = 0.0f;
+    simulation.castShapeSweep( input, invalidCallback );
+    input.rotationRadians = quarterTurn;
+    input.transform.rotation = { 0.0f, 0.0f };
+    simulation.castShapeSweep( input, invalidCallback );
+    input.transform.rotation = {};
+    input.geometry = circle2{ {}, -1.0f };
+    simulation.castShapeSweep( input, invalidCallback );
+
+    // MakeShapeProxy는 polygon vertexCount를 assert하므로 반드시 그 전에 거절해야 함.
+    input.geometry = polygon2{};
+    simulation.castShapeSweep( input, invalidCallback );
+    input.rotationRadians = 0.0f;
+    input.translation = { 1.0f, 0.0f };
+    simulation.castShapeSweep( input, invalidCallback );
+    polygon2 malformed{};
+    malformed.vertexCount = MAX_POLYGON_VERTICES + 1;
+    input.geometry = malformed;
+    input.rotationRadians = quarterTurn;
+    simulation.castShapeSweep( input, invalidCallback );
+}
+
 } // namespace
 
 int main()
@@ -258,4 +441,5 @@ int main()
     checkFilteringAndCallbacks();
     checkSweepGeometryAndNormals();
     checkClippingAndEncroachment();
+    checkRotatingSweep();
 }

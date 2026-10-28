@@ -76,3 +76,51 @@ root 쪽으로 이동하지만 clip 분율 안에는 도달하지 못하는 경�
 성능 효과는 World ShapeCast 및 Tree 벤치마크로 확인하며, 특히 root
 바깥의 횡방향/멀어지는 miss가 직접 대상이다. 이동 중인 도형의 실제
 geometry와 GJK/Solver 수학은 변경하지 않는다.
+
+
+## 회전과 이동을 함께 사용하는 TOI 기반 sweep
+
+기존 `world::castShape`는 도형 자세가 고정된 **선형** 조회로 유지한다.
+새 `world::castShapeSweep` / `castShapeSweepClosest`는 상대 회전이 필요한
+경우에만 별도로 사용한다.
+
+```cpp
+worldShapeSweepInput2 input{};
+input.geometry = circle2{ { 2.0f, 0.0f }, 0.3f };
+input.transform = {};
+input.translation = {};
+input.rotationRadians = 1.0f; // 로컬 원점 기준 양의 라디안 회전
+
+const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
+```
+
+- 시작 자세는 `transform`, 마지막 자세의 위치는 `transform.position + translation`,
+  회전은 `transform.rotation * rot2::FromRadians(rotationRadians)`로 정한다.
+  기존 `GetSweepTransform`처럼 sin/cos 보간 뒤 정규화하므로 일반적인
+  고정 각속도 보간과 정확히 같지는 않다. fraction은 이 보간 구간의 비율이다.
+- 지원 범위는 **회전량 -π/2 ~ +π/2**이며 0 이동/0이 아닌 회전도 허용한다.
+  더 큰 각도, 비정상적인 회전값, 음수 radius 등 잘못된 입력은 조회하지 않는다.
+  회전량이 정확히 0이면 기존 선형 ShapeCast로 위임한다.
+- 회전 도중 AABB는 시작/종료 AABB의 합집합만으로는 충분하지 않다.
+  로컬 점과 radius의 최대 원점 거리를 계산하고 시작·끝 위치를 포함하는
+  반경 확장 AABB로 세 유형의 Tree에 **Query**한다. 이 범위는 보수적인
+  후보 집합일 뿐 실제 충돌 여부를 뜻하지 않는다.
+- 좁은 단계는 기존 `TimeOfImpact`의 static A와 이동/회전하는 B sweep을
+  사용한다. Sensor, QueryFilter, Chain 타깃의 앞면 정책은 유지하고,
+  callback은 -1 무시 / 0 종료 / 양수 fraction clip을 지원한다.
+  Chain의 시작점 앞면 판정과 hit normal을 직접 확인하며, CCD 전용
+  최소 이동량 heuristic은 World 조회에서 사용하지 않는다.
+  따라서 짧은 이동으로 처음 접촉하는 경우도 조회 대상으로 남긴다.
+  순서 보장은 없으며 최초 fraction 0 hit은 일반 조회에만 보고하고
+  closest에서는 건너뛴다.
+- `TimeOfImpact`는 swept separating-axis 기반 **보수적 진행 추정**이다.
+  회전 중 발생하는 일부 glancing contact를 놓칠 수 있으며
+  `Failed` 상태는 hit으로 보고하지 않는다. 이 API는 모든 회전 충돌을
+  빠짐없이 열거하는 완전한 sweep oracle이 아니다. Chain 고스트 정점
+  ownership의 완전한 처리도 범위 밖이다.
+- `worldShapeCastTests`에는 중간 회전 충돌, 음의 회전, 회전·이동,
+  0 회전 위임, 시작 겹침, 필터/센서, handle 수명, 입력 검증이 포함된다.
+
+공식 Box2D에서 TOI와 선형 ShapeCast를 별도 알고리즘으로 구분하는 것과
+같이 구현하며, 기존 GJK 선형 ShapeCast의 공개 의미를 변경하지 않는다.
+참고: https://box2d.org/documentation/group__distance.html

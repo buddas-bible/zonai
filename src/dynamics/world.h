@@ -16,6 +16,7 @@
 #include "collision/distance2.h"
 #include "collision/rayCast2.h"
 #include "collision/shapeCast2.h"
+#include "collision/timeOfImpact2.h"
 #include "dynamics/body.h"
 #include "dynamics/bodyDef.h"
 #include "dynamics/bodySim.h"
@@ -89,6 +90,16 @@ struct worldShapeCastResult2
     vec2 normal{};
     float fraction = 0.0f;
     bool hit = false;
+};
+
+// 선형 이동과 제한된 각도 회전을 함께 보간하는 TOI 기반 World 조회.
+// rotationRadians는 시작 자세에 적용되는 상대 회전량이며 [-pi/2, pi/2] 범위만 허용함.
+struct worldShapeSweepInput2
+{
+    shapeGeometry geometry{};
+    transform2 transform{};
+    vec2 translation{};
+    float rotationRadians = 0.0f;
 };
 
 template <typename Callback>
@@ -617,6 +628,218 @@ public:
                 return closest.fraction;
             } );
 
+        return closest;
+    }
+
+    // 기존 linear ShapeCast는 변경하지 않고 회전이 있는 sweep만 TOI를 사용함.
+    // 회전 중의 도형을 전부 포함하는 origin-중심 보수적 AABB로 Tree를 조회함.
+    // TOI는 swept separating axis 방식이므로 회전 도중의 일부 접촉을 놓칠 수 있음.
+    template <worldRayCastCallback Callback>
+    void castShapeSweep( const worldShapeSweepInput2& input, queryFilter filter, Callback&& callback ) const
+    {
+        if( std::holds_alternative<std::monostate>( input.geometry ) ||
+            std::holds_alternative<chainSegment2>( input.geometry ) ||
+            !IsFinite( input.transform.position ) || !IsFinite( input.translation ) ||
+            !std::isfinite( input.transform.rotation.c ) || !std::isfinite( input.transform.rotation.s ) ||
+            !std::isfinite( input.rotationRadians ) ||
+            std::fabs( input.rotationRadians ) > 1.5707963267948966f ) return;
+
+        if( const polygon2* polygon = std::get_if<polygon2>( &input.geometry ) )
+        {
+            if( polygon->vertexCount < 1 ||
+                polygon->vertexCount > static_cast<int>( polygon->vertices.size() ) ) return;
+        }
+
+        const float rotationLengthSquared = input.transform.rotation.c * input.transform.rotation.c +
+            input.transform.rotation.s * input.transform.rotation.s;
+        if( !std::isfinite( rotationLengthSquared ) ||
+            std::fabs( rotationLengthSquared - 1.0f ) > 0.001f ) return;
+
+        const vec2 endPosition = input.transform.position + input.translation;
+        if( !IsFinite( endPosition ) ) return;
+
+        if( input.rotationRadians == 0.0f )
+        {
+            castShape( { input.geometry, input.transform, input.translation, false },
+                filter, std::forward<Callback>( callback ) );
+            return;
+        }
+
+        const shapeProxy2 movingProxy = MakeShapeProxy( input.geometry );
+        if( movingProxy.count < 1 || movingProxy.count > static_cast<int>( movingProxy.points.size() ) ||
+            !std::isfinite( movingProxy.radius ) || movingProxy.radius < 0.0f ) return;
+
+        // 로컬 원점에서 가장 먼 support 점과 도형 radius를 이용하면 회전 도중의
+        // 모든 자세에서 moving shape가 이 반경의 원 안에 들어감.
+        double maxRadius = static_cast<double>( movingProxy.radius );
+        for( int i = 0; i < movingProxy.count; ++i )
+        {
+            const vec2 point = movingProxy.points[i];
+            if( !IsFinite( point ) ) return;
+            const double radius = std::hypot( static_cast<double>( point.x ),
+                static_cast<double>( point.y ) ) + movingProxy.radius;
+            maxRadius = std::max( maxRadius, radius );
+        }
+        if( !std::isfinite( maxRadius ) ||
+            maxRadius >= static_cast<double>( std::numeric_limits<float>::max() ) ) return;
+
+        // 부동소수점 경계 접촉이 후보 AABB에서 누락되지 않도록 바깥 방향으로 확장함.
+        const float boundRadius = std::nextafter( static_cast<float>( maxRadius ),
+            std::numeric_limits<float>::infinity() );
+        const float negativeInfinity = -std::numeric_limits<float>::infinity();
+        const float positiveInfinity = std::numeric_limits<float>::infinity();
+        const aabb2 sweptBounds{
+            { std::nextafter( std::min( input.transform.position.x, endPosition.x ) - boundRadius, negativeInfinity ),
+              std::nextafter( std::min( input.transform.position.y, endPosition.y ) - boundRadius, negativeInfinity ) },
+            { std::nextafter( std::max( input.transform.position.x, endPosition.x ) + boundRadius, positiveInfinity ),
+              std::nextafter( std::max( input.transform.position.y, endPosition.y ) + boundRadius, positiveInfinity ) }
+        };
+        if( !IsValidAABB( sweptBounds ) ) return;
+
+        const rot2 endRotation = input.transform.rotation * rot2::FromRadians( input.rotationRadians );
+        const sweep2 movingSweep{
+            {}, input.transform.position, endPosition, input.transform.rotation, endRotation
+        };
+
+        float maxFraction = 1.0f;
+
+        for( int i = 0; i < static_cast<int>( bodyType::Count ); ++i )
+        {
+            const dynamicTree& tree = broadPhase_.GetTree( static_cast<bodyType>( i ) );
+
+            // 회전 도형의 AABB는 직선으로 평행이동하지 않으므로 BoxCast가 아닌 Query를 사용함.
+            tree.Query( sweptBounds, [&]( std::int32_t proxyId )
+            {
+                const std::int32_t shapeIndex = tree.GetProxyShapeIndex( proxyId );
+                assert( shapeIndex >= 0 && static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+
+                const shape& candidate = shapes_[shapeIndex];
+                if( !ShouldQueryShape( filter, candidate.filter ) ||
+                    !Overlaps( sweptBounds, candidate.aabb ) ) return true;
+
+                const transform2& targetTransform = bodySims_[candidate.bodyId].transform;
+                toiInput2 toi{};
+                toi.proxyA = MakeShapeProxy( candidate.geometry );
+                toi.proxyB = movingProxy;
+                toi.sweepA = { {}, targetTransform.position, targetTransform.position,
+                    targetTransform.rotation, targetTransform.rotation };
+                toi.sweepB = movingSweep;
+                toi.maxFraction = maxFraction;
+
+                // CCD의 one-sided 조기 종료보다 앞서 시작 시점의 앞면 겹침을 확인함.
+                // 처음부터 맞닿아 멀어지는 회전 sweep도 기존 castShape처럼 fraction 0을 보고해야 함.
+                toiOutput2 hit{};
+                bool initialChainOverlap = false;
+                if( const chainSegment2* chain = std::get_if<chainSegment2>( &candidate.geometry ) )
+                {
+                    const vec2 edge = chain->segment.b - chain->segment.a;
+                    const vec2 front = Rotate( targetTransform.rotation, Normalize( vec2{ edge.y, -edge.x } ) );
+                    vec2 centroid{};
+                    for( int p = 0; p < movingProxy.count; ++p )
+                        centroid += TransformPoint( input.transform, movingProxy.points[p] );
+                    centroid /= static_cast<float>( movingProxy.count );
+
+                    // World 공간 조회에서는 CCD의 작은 접근 속도 생략 조건을 적용하지 않음.
+                    // 시작점의 앞면 여부와 최종 normal로 단면 충돌을 직접 제한함.
+                    if( Dot( centroid - TransformPoint( targetTransform, chain->segment.a ), front ) <= 0.0f )
+                        return true;
+                    toi.proxyA.oneSided = false;
+
+                    distanceInput2 distance{};
+                    distance.proxyA = toi.proxyA;
+                    distance.proxyB = movingProxy;
+                    distance.transform = InverseMul( targetTransform, input.transform );
+                    distance.useRadii = true;
+                    simplexCache2 cache{};
+                    const distanceOutput2 nearest = ShapeDistance( distance, cache );
+                    constexpr float OVERLAP_EPSILON = 10.0f * std::numeric_limits<float>::epsilon();
+
+                    if( std::isfinite( nearest.distance ) && nearest.distance <= OVERLAP_EPSILON )
+                    {
+                        initialChainOverlap = true;
+                        hit.state = toiState2::Overlapped;
+                        hit.fraction = 0.0f;
+                        hit.point = TransformPoint( targetTransform, 0.5f * ( nearest.pointA + nearest.pointB ) );
+                    }
+                }
+
+                if( !initialChainOverlap ) hit = TimeOfImpact( toi );
+                if( hit.state != toiState2::Hit && hit.state != toiState2::Overlapped ) return true;
+                if( !std::isfinite( hit.fraction ) ||
+                    hit.fraction < 0.0f || hit.fraction >= maxFraction ) return true;
+
+                vec2 point = hit.point;
+                vec2 normal = hit.normal;
+
+                if( hit.fraction == 0.0f )
+                {
+                    if( !initialChainOverlap )
+                    {
+                        distanceInput2 distance{};
+                        distance.proxyA = toi.proxyA;
+                        distance.proxyB = movingProxy;
+                        distance.transform = InverseMul( targetTransform, input.transform );
+                        distance.useRadii = true;
+                        simplexCache2 cache{};
+                        const distanceOutput2 nearest = ShapeDistance( distance, cache );
+                        point = TransformPoint( targetTransform, 0.5f * ( nearest.pointA + nearest.pointB ) );
+                    }
+                    normal = {};
+                }
+
+                if( const chainSegment2* chain = std::get_if<chainSegment2>( &candidate.geometry ) )
+                {
+                    const vec2 edge = chain->segment.b - chain->segment.a;
+                    const vec2 front = Rotate( targetTransform.rotation, Normalize( vec2{ edge.y, -edge.x } ) );
+
+                    if( hit.fraction == 0.0f )
+                    {
+                        vec2 centroid{};
+                        for( int p = 0; p < movingProxy.count; ++p )
+                            centroid += TransformPoint( input.transform, movingProxy.points[p] );
+                        centroid /= static_cast<float>( movingProxy.count );
+                        if( Dot( centroid - TransformPoint( targetTransform, chain->segment.a ), front ) <= 0.0f )
+                            return true;
+                    }
+                    else if( Dot( normal, front ) <= 0.0f ) return true;
+                }
+
+                if( !IsFinite( point ) || !IsFinite( normal ) ) return true;
+                const float fraction = static_cast<float>(
+                    callback( MakeShapeId( shapeIndex ), point, normal, hit.fraction ) );
+
+                if( fraction == 0.0f )
+                {
+                    maxFraction = 0.0f;
+                    return false;
+                }
+
+                if( std::isfinite( fraction ) && fraction > 0.0f && fraction < maxFraction )
+                    maxFraction = fraction;
+                return true;
+            } );
+
+            if( maxFraction == 0.0f ) return;
+        }
+    }
+
+    template <worldRayCastCallback Callback>
+    void castShapeSweep( const worldShapeSweepInput2& input, Callback&& callback ) const
+    {
+        castShapeSweep( input, queryFilter{}, std::forward<Callback>( callback ) );
+    }
+
+    [[nodiscard]] worldShapeCastResult2 castShapeSweepClosest(
+        const worldShapeSweepInput2& input, queryFilter filter = {} ) const
+    {
+        worldShapeCastResult2 closest{};
+        castShapeSweep( input, filter, [&]( shapeId id, vec2 point, vec2 normal, float fraction )
+        {
+            if( fraction == 0.0f ) return -1.0f;
+            if( !closest.hit || fraction < closest.fraction )
+                closest = { id, point, normal, fraction, true };
+            return closest.fraction;
+        } );
         return closest;
     }
 
