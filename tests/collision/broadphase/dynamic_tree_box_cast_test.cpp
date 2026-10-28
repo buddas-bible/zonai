@@ -209,6 +209,28 @@ void verifyRootSweepRejection()
     check( tree.Validate(), "Rebuilt tree must retain valid bounds" );
 }
 
+void verifyRootBoundaryPrecision()
+{
+    dynamicTree tree{};
+
+    // (10.0f * 0.8f - 8.0f)는 float 중간 연산에서 0으로 반올림될 수 있음.
+    // 곱과 합을 더 높은 정밀도로 평가하면 작은 양수 끝점이 Root 경계에 닿음.
+    const std::int32_t proxy = tree.CreateProxy( { { 1.0e-8f, -1.0f }, { 1.0f, 1.0f } }, 0 );
+    const aabb2 start{ { -9.0f, -0.25f }, { -8.0f, 0.25f } };
+
+    float fraction = 0.8f;
+    int calls = 0;
+
+    tree.BoxCast( start, { 10.0f, 0.0f }, fraction, [&]( std::int32_t id, float )
+    {
+        check( id == proxy, "Precision boundary must report the original proxy" );
+        ++calls;
+        return 1.0f;
+    } );
+
+    check( calls == 1 && fraction == 0.8f, "Root early-out lost near-boundary swept hit" );
+}
+
 void verifyDiagonalPruning()
 {
     dynamicTree tree{};
@@ -251,6 +273,7 @@ int main()
     verifyClipping();
     verifyDiagonalPruning();
     verifyRootSweepRejection();
+    verifyRootBoundaryPrecision();
 
     dynamicTree emptyTree{};
     const aabb2 box{ { -1.0f, -1.0f }, { 1.0f, 1.0f } };

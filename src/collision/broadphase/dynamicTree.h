@@ -7,6 +7,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "collision/aabb2.h"
@@ -296,13 +297,24 @@ public:
         if( proxyCount_ == 0 || maxFraction <= 0.0f || !std::isfinite( maxFraction ) ||
             !IsValidAABB( startBounds ) || !IsFinite( translation ) ) return;
 
-        // Root가 전체 sweep 영역 밖이면 각 node의 slab 교차 계산 자체가 필요 없음.
-        // 범위 산술이 overflow한 입력에서는 최적화를 생략해 기존 traversal 의미를 유지함.
-        const vec2 shift = translation * maxFraction;
-        const aabb2 endBounds{ startBounds.min + shift, startBounds.max + shift };
+        // Root 밖에서 시작한 경우에만 전체 sweep이 Root와 만나는지 먼저 확인함.
+        // float 끝점을 만든 뒤 비교하면 cancellation 때문에 실제 교차를 버릴 수 있음.
+        // float 입력의 곱/합을 double로 계산하고 경계는 double 1 ULP만큼 바깥쪽으로 확장함.
+        const aabb2& rootBounds = nodes_[ROOT_NODE].aabb;
+        if( !Overlaps( startBounds, rootBounds ) )
+        {
+            const double dx = static_cast<double>( translation.x ) * static_cast<double>( maxFraction );
+            const double dy = static_cast<double>( translation.y ) * static_cast<double>( maxFraction );
+            const double infinity = std::numeric_limits<double>::infinity();
 
-        if( IsValidAABB( endBounds ) &&
-            !Overlaps( Union( startBounds, endBounds ), nodes_[ROOT_NODE].aabb ) ) return;
+            const double minX = std::nextafter( static_cast<double>( startBounds.min.x ) + std::min( 0.0, dx ), -infinity );
+            const double minY = std::nextafter( static_cast<double>( startBounds.min.y ) + std::min( 0.0, dy ), -infinity );
+            const double maxX = std::nextafter( static_cast<double>( startBounds.max.x ) + std::max( 0.0, dx ), infinity );
+            const double maxY = std::nextafter( static_cast<double>( startBounds.max.y ) + std::max( 0.0, dy ), infinity );
+
+            if( maxX < rootBounds.min.x || minX > rootBounds.max.x ||
+                maxY < rootBounds.min.y || minY > rootBounds.max.y ) return;
+        }
 
         const vec2 halfExtent = ( startBounds.max - startBounds.min ) * 0.5f;
         const vec2 origin = startBounds.min + halfExtent;
