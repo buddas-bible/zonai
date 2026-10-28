@@ -24,6 +24,10 @@ struct toiInput2
     sweep2 sweepB{};
 
     float maxFraction = 1.0f;
+
+    // World 공간 회전 조회 전용: 끝 시점에 분리된 후에도 중간 접촉을 확인함.
+    // CCD 기본 경로에서는 사용하지 않음.
+    bool detectTransientContacts = false;
 };
 
 struct toiOutput2
