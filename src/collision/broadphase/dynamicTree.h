@@ -7,7 +7,6 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <vector>
 
 #include "collision/aabb2.h"
@@ -297,24 +296,13 @@ public:
         if( proxyCount_ == 0 || maxFraction <= 0.0f || !std::isfinite( maxFraction ) ||
             !IsValidAABB( startBounds ) || !IsFinite( translation ) ) return;
 
-        // Root 밖에서 시작한 경우에만 전체 sweep이 Root와 만나는지 먼저 확인함.
-        // float 끝점을 만든 뒤 비교하면 cancellation 때문에 실제 교차를 버릴 수 있음.
-        // float 입력의 곱/합을 double로 계산하고 경계는 double 1 ULP만큼 바깥쪽으로 확장함.
+        // Root 밖에서 시작해 그 축에서 더 멀어지는 경우에는 수치 계산 없이 충돌 불가.
+        // 방향/기존 AABB 끝점만 확인하므로 float sweep 끝점 반올림 위험이 없음.
         const aabb2& rootBounds = nodes_[ROOT_NODE].aabb;
-        if( !Overlaps( startBounds, rootBounds ) )
-        {
-            const double dx = static_cast<double>( translation.x ) * static_cast<double>( maxFraction );
-            const double dy = static_cast<double>( translation.y ) * static_cast<double>( maxFraction );
-            const double infinity = std::numeric_limits<double>::infinity();
-
-            const double minX = std::nextafter( static_cast<double>( startBounds.min.x ) + std::min( 0.0, dx ), -infinity );
-            const double minY = std::nextafter( static_cast<double>( startBounds.min.y ) + std::min( 0.0, dy ), -infinity );
-            const double maxX = std::nextafter( static_cast<double>( startBounds.max.x ) + std::max( 0.0, dx ), infinity );
-            const double maxY = std::nextafter( static_cast<double>( startBounds.max.y ) + std::max( 0.0, dy ), infinity );
-
-            if( maxX < rootBounds.min.x || minX > rootBounds.max.x ||
-                maxY < rootBounds.min.y || minY > rootBounds.max.y ) return;
-        }
+        if( ( translation.x >= 0.0f && startBounds.min.x > rootBounds.max.x ) ||
+            ( translation.x <= 0.0f && startBounds.max.x < rootBounds.min.x ) ||
+            ( translation.y >= 0.0f && startBounds.min.y > rootBounds.max.y ) ||
+            ( translation.y <= 0.0f && startBounds.max.y < rootBounds.min.y ) ) return;
 
         const vec2 halfExtent = ( startBounds.max - startBounds.min ) * 0.5f;
         const vec2 origin = startBounds.min + halfExtent;
