@@ -90,8 +90,10 @@ public:
         if( rotating )
         {
             const auto& stats = getSweepStats();
-            ImGui::Text( "World Tree 후보: %d / 좁은 단계 후보: %d / TOI 호출: %d",
-                stats.treeCandidates, stats.narrowphaseCandidates, stats.toiCalls );
+            ImGui::Text( "World Tree 후보: %d / fraction 제외: %d",
+                stats.treeCandidates, stats.clippedCandidates );
+            ImGui::Text( "좁은 단계 후보: %d / TOI 호출: %d",
+                stats.narrowphaseCandidates, stats.toiCalls );
             ImGui::Text( "TOI 기본 GJK: %d / 보수적 재검사: %d회, GJK %d회",
                 stats.toi.distanceCalls, stats.toi.transientAttempts,
                 stats.toi.transientDistanceCalls );
