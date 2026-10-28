@@ -522,7 +522,7 @@ void checkRotatingDistanceBoundPruning()
         "Short rotating translation must discard an AABB-corner candidate" );
 
     const bodyId shortTouchBody = translation.CreateBody( bodyType::Static,
-        { { 0.1f, 0.0f }, {} } );
+        { { 0.30f, 0.0f }, {} } );
     const shapeId shortTouchShape = translation.CreateShape(
         shortTouchBody, circle2{ {}, 0.05f } );
     const auto shortHit = translation.castShapeSweepClosest( input );
