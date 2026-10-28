@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+
+#include "collision/sweep2.h"
 
 namespace zonai::sandbox
 {
@@ -95,15 +98,64 @@ void shapeCastDemo::setCanEncroach( bool enabled )
     updateHit();
 }
 
+void shapeCastDemo::setRotationRadians( float radians )
+{
+    constexpr float HALF_PI = 1.5707963267948966f;
+    if( !std::isfinite( radians ) || std::fabs( radians ) > HALF_PI ||
+        radians == rotationRadians_ ) return;
+
+    rotationRadians_ = radians;
+    updateHit();
+}
+
 void shapeCastDemo::resetPreview()
 {
     previewFraction_ = 0.0f;
 }
 
+transform2 shapeCastDemo::getPoseAtFraction( float fraction ) const noexcept
+{
+    const float time = std::clamp( fraction, 0.0f, 1.0f );
+    const vec2 start = input_.transform.position;
+    if( rotationRadians_ == 0.0f )
+        return { start + input_.translation * time, input_.transform.rotation };
+
+    const sweep2 sweep{ {}, start, start + input_.translation, input_.transform.rotation,
+        input_.transform.rotation * rot2::FromRadians( rotationRadians_ ) };
+    return GetSweepTransform( sweep, time );
+}
+
 aabb2 shapeCastDemo::getSweepAABB() const noexcept
 {
     const aabb2 start = ComputeShapeAABB( input_.geometry, input_.transform );
-    return Union( start, { start.min + input_.translation, start.max + input_.translation } );
+    if( rotationRadians_ == 0.0f )
+        return Union( start, { start.min + input_.translation, start.max + input_.translation } );
+
+    // World의 회전 후보 조회와 같이 이동 중심을 최대 로컬 원점 반경으로 확장함.
+    const shapeProxy2 proxy = MakeShapeProxy( input_.geometry );
+    double maxRadius = proxy.radius;
+    for( int i = 0; i < proxy.count; ++i )
+    {
+        const vec2 point = proxy.points[i];
+        maxRadius = std::max( maxRadius,
+            std::hypot( static_cast<double>( point.x ), static_cast<double>( point.y ) ) + proxy.radius );
+    }
+
+    if( !std::isfinite( maxRadius ) ||
+        maxRadius >= static_cast<double>( std::numeric_limits<float>::max() ) ) return {};
+
+    const float radius = std::nextafter( static_cast<float>( maxRadius ),
+        std::numeric_limits<float>::infinity() );
+    const float negativeInfinity = -std::numeric_limits<float>::infinity();
+    const float positiveInfinity = std::numeric_limits<float>::infinity();
+    const vec2 end = input_.transform.position + input_.translation;
+
+    return {
+        { std::nextafter( std::min( input_.transform.position.x, end.x ) - radius, negativeInfinity ),
+          std::nextafter( std::min( input_.transform.position.y, end.y ) - radius, negativeInfinity ) },
+        { std::nextafter( std::max( input_.transform.position.x, end.x ) + radius, positiveInfinity ),
+          std::nextafter( std::max( input_.transform.position.y, end.y ) + radius, positiveInfinity ) }
+    };
 }
 
 queryFilter shapeCastDemo::makeFilter() const noexcept
@@ -118,7 +170,13 @@ void shapeCastDemo::updateHit()
     const queryFilter filter = makeFilter();
 
     // 동일한 경로와 Query Filter로 세 API를 비교함. AABB는 geometry 확정이 아닌 후보 조회임.
-    hit_ = world_.castShapeClosest( input_, filter );
+    if( rotationRadians_ == 0.0f )
+        hit_ = world_.castShapeClosest( input_, filter );
+    else
+        hit_ = world_.castShapeSweepClosest(
+            { input_.geometry, input_.transform, input_.translation, rotationRadians_ }, filter );
+
+    // 중심 RayCast는 회전을 반영하지 않는 비교용 직선 조회임.
     rayHit_ = world_.castRayClosest( input_.transform.position, input_.translation, filter );
 
     aabbCandidateCount_ = 0;

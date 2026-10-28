@@ -33,6 +33,7 @@ public:
     void setTarget( vec2 target );
     void setSensorIncluded( bool included );
     void setCanEncroach( bool enabled );
+    void setRotationRadians( float radians );
     void setRayVisible( bool visible ) noexcept { rayVisible_ = visible; }
     void setSweepAABBVisible( bool visible ) noexcept { sweepAABBVisible_ = visible; }
     void resetPreview();
@@ -42,6 +43,8 @@ public:
     [[nodiscard]] const std::array<shapeCastTarget, 4>& getTargets() const noexcept { return targets_; }
     [[nodiscard]] const worldShapeCastInput2& getInput() const noexcept { return input_; }
     [[nodiscard]] worldShapeCastResult2 getHit() const noexcept { return hit_; }
+    [[nodiscard]] float getRotationRadians() const noexcept { return rotationRadians_; }
+    [[nodiscard]] transform2 getPoseAtFraction( float fraction ) const noexcept;
     [[nodiscard]] worldRayCastResult2 getRayHit() const noexcept { return rayHit_; }
     [[nodiscard]] aabb2 getSweepAABB() const noexcept;
     [[nodiscard]] std::size_t getAABBCandidateCount() const noexcept { return aabbCandidateCount_; }
@@ -58,6 +61,7 @@ private:
     std::array<shapeCastTarget, 4> targets_{};
     worldShapeCastInput2 input_{};
     shapeCastProbe probe_ = shapeCastProbe::circle;
+    float rotationRadians_ = 0.0f;
     worldShapeCastResult2 hit_{};
     worldRayCastResult2 rayHit_{};
     std::size_t aabbCandidateCount_ = 0;

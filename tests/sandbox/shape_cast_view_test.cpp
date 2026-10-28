@@ -28,8 +28,9 @@ int main()
     auto& model = static_cast<shapeCastDemo&>( *scene );
     int overlayVertices = 0;
     int hiddenVertices = 0;
+    int rotatingVertices = 0;
 
-    for( int frame = 0; frame < 3; ++frame )
+    for( int frame = 0; frame < 4; ++frame )
     {
         if( frame == 1 )
         {
@@ -46,6 +47,15 @@ int main()
             click.mousePosition = { -6.0f, 0.0f };
             click.selectTrialPosition = true;
             scene->handleInput( click );
+        }
+
+        if( frame == 3 )
+        {
+            model.setProbe( shapeCastProbe::box );
+            model.setStart( { -1.0f, 1.25f } );
+            model.setTarget( { -1.0f, 1.25f } );
+            model.setRotationRadians( 1.5707963267948966f );
+            model.step( 0.25f, 1 );
         }
 
         ImGui::NewFrame();
@@ -75,6 +85,7 @@ int main()
 
         if( frame == 0 ) overlayVertices = geometryVertices;
         if( frame == 1 ) hiddenVertices = geometryVertices;
+        if( frame == 3 ) rotatingVertices = geometryVertices;
 
         ImGui::EndChild();
         ImGui::End();
@@ -83,6 +94,11 @@ int main()
     if( overlayVertices <= hiddenVertices )
     {
         std::fprintf( stderr, "RayCast and swept AABB overlay toggles did not affect the rendered geometry\n" );
+        std::exit( EXIT_FAILURE );
+    }
+    if( rotatingVertices <= 0 || model.getRotationRadians() == 0.0f )
+    {
+        std::fprintf( stderr, "Rotating ShapeCast view failed to render the TOI pose\n" );
         std::exit( EXIT_FAILURE );
     }
     ImGui::DestroyContext();

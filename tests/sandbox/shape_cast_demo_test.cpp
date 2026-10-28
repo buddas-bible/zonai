@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 
 #include "demo.h"
@@ -123,6 +124,58 @@ int main()
     scene.cancelInput();
     scene.step( 0.0f, 1 );
     check( scene.getPreviewFraction() == 0.0f, "Paused preview remains stable after input cancellation" );
+
+    // 회전 0에서는 기존 선형 World ShapeCast를 그대로 사용함.
+    shapeCastDemo rotating{};
+    rotating.setProbe( shapeCastProbe::box );
+    rotating.setStart( { -1.0f, 1.25f } );
+    rotating.setTarget( { -1.0f, 1.25f } );
+    check( rotating.getRotationRadians() == 0.0f && !rotating.getHit().hit,
+        "Default Sandbox query remains the original linear ShapeCast" );
+
+    constexpr float HALF_PI = 1.5707963267948966f;
+    rotating.setRotationRadians( HALF_PI );
+    check( rotating.getRotationRadians() == HALF_PI,
+        "Angle control must accept a quarter turn" );
+    const transform2 rotatedEnd = rotating.getPoseAtFraction( 1.0f );
+    near( rotatedEnd.rotation.c, 0.0f, "Rotating preview reaches final cosine" );
+    near( rotatedEnd.rotation.s, 1.0f, "Rotating preview reaches final sine" );
+    near( rotatedEnd.position.x, -1.0f, "Pure rotation preserves the origin X" );
+    near( rotatedEnd.position.y, 1.25f, "Pure rotation preserves the origin Y" );
+
+    const transform2 middlePose = rotating.getPoseAtFraction( 0.5f );
+    check( middlePose.rotation.c > 0.5f && middlePose.rotation.s > 0.5f,
+        "Preview must interpolate the TOI rotation through the middle pose" );
+
+    const aabb2 sweepBounds = rotating.getSweepAABB();
+    const aabb2 middleBounds = ComputeShapeAABB( rotating.getInput().geometry, middlePose );
+    check( sweepBounds.min.x <= middleBounds.min.x && sweepBounds.max.x >= middleBounds.max.x &&
+        sweepBounds.min.y <= middleBounds.min.y && sweepBounds.max.y >= middleBounds.max.y,
+        "Rotational sweep bounds must contain an intermediate rotated shape" );
+    const worldShapeCastResult2 rotatingHit = rotating.getHit();
+    const worldShapeCastResult2 directHit = rotating.getWorld().castShapeSweepClosest(
+        { rotating.getInput().geometry, rotating.getInput().transform,
+          rotating.getInput().translation, rotating.getRotationRadians() } );
+    check( rotatingHit.hit == directHit.hit && rotatingHit.shape == directHit.shape &&
+        rotatingHit.fraction == directHit.fraction && rotatingHit.hit,
+        "Sandbox rotation must present the actual World TOI hit" );
+    check( rotating.getAABBCandidateCount() >= 1,
+        "Rotating broadphase overlay must include the nearby target" );
+    rotating.step( 0.25f, 1 );
+    check( rotating.getPreviewFraction() > 0.0f &&
+        rotating.getPreviewFraction() <= rotating.getHit().fraction,
+        "Rotating preview advances only to the first TOI hit" );
+
+    rotating.setRotationRadians( 2.0f );
+    check( rotating.getRotationRadians() == HALF_PI,
+        "Angles beyond World sweep limits must not change the demo" );
+    rotating.setRotationRadians( std::numeric_limits<float>::quiet_NaN() );
+    check( rotating.getRotationRadians() == HALF_PI,
+        "NaN angle must not corrupt the sweep" );
+    rotating.setRotationRadians( 0.0f );
+    check( rotating.getRotationRadians() == 0.0f && !rotating.getHit().hit &&
+        rotating.getPreviewFraction() == 0.0f,
+        "Resetting rotation must restore the previous linear query" );
 
     demoSession session{ createVisualization };
     session.selectDemo( demoKind::shapeCastVisualization );

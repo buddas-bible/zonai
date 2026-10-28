@@ -124,3 +124,29 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
 공식 Box2D에서 TOI와 선형 ShapeCast를 별도 알고리즘으로 구분하는 것과
 같이 구현하며, 기존 GJK 선형 ShapeCast의 공개 의미를 변경하지 않는다.
 참고: https://box2d.org/documentation/group__distance.html
+
+
+## Sandbox 회전 조회 시각화
+
+공간 조회 > ShapeCast Sandbox에서 기존 선형 조회를 유지하면서
+상대 회전 각도(-90~90도)를 조절할 수 있다.
+
+- 각도 0도: 기존 `world::castShapeClosest` 및 `canEncroach` 제어
+- 각도 0도가 아님: `world::castShapeSweepClosest` (TOI). `canEncroach`는 회전 모드에서 비활성화
+- 시작점과 도착점을 같게 설정하면 순수 회전 조회를 시험할 수 있다.
+  원은 회전해도 외형이 같으므로 노란 방향선으로 미리보기 자세를 표시한다.
+- 흰색은 시작, 회색은 종료, 노란색은 현재, 파란색은 첫 충돌 자세이며
+  충돌 지점과 법선은 주황색으로 표시한다. 자세는 엔진의
+  `GetSweepTransform`과 동일한 보간을 사용한다. 회전 중 로컬 support 점들의
+  곡선 궤적은 연파랑 선으로 16구간 샘플링해 표시한다(충돌 계산용 경로가 아닌
+  순수 디버그 시각화).
+- 청록색 AABB는 회전 도중 모든 자세를 포함하도록 로컬 원점 반경으로
+  확장한 보수적 후보 범위이다. 회전이 없으면 기존 선형 swept AABB를 표시한다.
+- 분홍색 중심 RayCast는 **회전을 반영하지 않는 비교용 조회**이며
+  회전 ShapeCast 결과로 오인하면 안 된다.
+- 미리보기는 실제 Body 물리를 변경하지 않으며 기존 demoSession 재생/일시정지/
+  한 프레임 실행, Canvas 클릭과 Shift+클릭 입력을 재사용한다.
+
+`sandboxShapeCastDemoTests`는 회전 World TOI 결과, 중간 자세와 보수적 후보 범위를
+확인하고 `sandboxShapeCastViewTests`는 Headless ImGui 회전 UI/렌더링을 검사한다.
+실제 Win32/DX11 화면의 DPI·입력 조작은 별도 수동 확인 대상이다.
