@@ -221,6 +221,240 @@ candidateTotals verifyScenario( const dynamicTree& tree, const std::vector<aabb2
     return totals;
 }
 
+// Production Tree를 변경하지 않고 VisitNodes의 topology를 복사해 검사 횟수를 추정함.
+struct treeSnapshot
+{
+    std::vector<treeNodeDebugInfo> nodes;
+    std::vector<std::uint8_t> live;
+
+    explicit treeSnapshot( const dynamicTree& tree )
+    {
+        tree.VisitNodes( [&]( const treeNodeDebugInfo& node )
+        {
+            const std::size_t i = static_cast<std::size_t>( node.nodeIndex );
+            if( nodes.size() <= i )
+            {
+                nodes.resize( i + 1 );
+                live.resize( i + 1 );
+            }
+            nodes[i] = node;
+            live[i] = 1;
+        } );
+        check( !live.empty() && live[0] && nodes[0].isRoot, "Missing snapshot root" );
+    }
+
+    const treeNodeDebugInfo* get( std::int32_t index ) const
+    {
+        check( index >= 0, "Invalid snapshot index" );
+        const std::size_t i = static_cast<std::size_t>( index );
+        return i < live.size() && live[i] ? &nodes[i] : nullptr;
+    }
+};
+
+struct profileCounts
+{
+    std::uint64_t nodes = 0, leaves = 0, rejected = 0;
+    std::uint64_t xTests = 0, yTests = 0, xRejected = 0, yRejected = 0;
+    std::uint64_t stationaryAxes = 0, divisions = 0, startingOverlaps = 0, rootExits = 0;
+
+    profileCounts& operator+=( const profileCounts& other )
+    {
+        nodes += other.nodes; leaves += other.leaves; rejected += other.rejected;
+        xTests += other.xTests; yTests += other.yTests;
+        xRejected += other.xRejected; yRejected += other.yRejected;
+        stationaryAxes += other.stationaryAxes; divisions += other.divisions;
+        startingOverlaps += other.startingOverlaps; rootExits += other.rootExits;
+        return *this;
+    }
+};
+
+void profileSweep( const treeSnapshot& snapshot, const sweep& input, castMode mode,
+    std::vector<std::uint8_t>& seen, profileCounts& counts )
+{
+    std::fill( seen.begin(), seen.end(), 0 );
+    const treeNodeDebugInfo& root = *snapshot.get( 0 );
+    const aabb2 query = sweptBounds( input );
+
+    if( mode == castMode::boxCast )
+    {
+        const aabb2& a = input.start;
+        const aabb2& b = root.aabb;
+        const vec2 t = input.translation;
+        if( ( t.x >= 0.0f && a.min.x > b.max.x ) ||
+            ( t.x <= 0.0f && a.max.x < b.min.x ) ||
+            ( t.y >= 0.0f && a.min.y > b.max.y ) ||
+            ( t.y <= 0.0f && a.max.y < b.min.y ) )
+        {
+            ++counts.rootExits;
+            return;
+        }
+    }
+
+    const vec2 half = ( input.start.max - input.start.min ) * 0.5f;
+    const vec2 origin = input.start.min + half;
+    std::vector<std::int32_t> stack{ root.isLeaf ? 0 : root.childPair };
+
+    while( !stack.empty() )
+    {
+        const std::int32_t pair = stack.back();
+        stack.pop_back();
+
+        for( int child = 0; child < 2; ++child )
+        {
+            const treeNodeDebugInfo* node = snapshot.get( pair + child );
+            if( node == nullptr ) continue;
+            ++counts.nodes;
+
+            if( mode == castMode::sweptQuery )
+            {
+                if( !Overlaps( query, node->aabb ) )
+                {
+                    ++counts.rejected;
+                    continue;
+                }
+            }
+            else
+            {
+                if( Overlaps( input.start, node->aabb ) ) ++counts.startingOverlaps;
+
+                float entry = 0.0f, exit = input.fraction;
+                bool overlaps = true;
+                for( int axis = 0; axis < 2; ++axis )
+                {
+                    if( axis == 0 ) ++counts.xTests;
+                    else ++counts.yTests;
+
+                    const float position = axis == 0 ? origin.x : origin.y;
+                    const float direction = axis == 0 ? input.translation.x : input.translation.y;
+                    const float extent = axis == 0 ? half.x : half.y;
+                    const float lower = ( axis == 0 ? node->aabb.min.x : node->aabb.min.y ) - extent;
+                    const float upper = ( axis == 0 ? node->aabb.max.x : node->aabb.max.y ) + extent;
+
+                    if( direction == 0.0f )
+                    {
+                        ++counts.stationaryAxes;
+                        if( position < lower || position > upper ) overlaps = false;
+                    }
+                    else
+                    {
+                        counts.divisions += 2;
+                        const float first = ( lower - position ) / direction;
+                        const float second = ( upper - position ) / direction;
+                        entry = std::max( entry, std::min( first, second ) );
+                        exit = std::min( exit, std::max( first, second ) );
+                        if( entry > exit ) overlaps = false;
+                    }
+
+                    if( !overlaps )
+                    {
+                        if( axis == 0 ) ++counts.xRejected;
+                        else ++counts.yRejected;
+                        break;
+                    }
+                }
+
+                if( !overlaps )
+                {
+                    ++counts.rejected;
+                    continue;
+                }
+            }
+
+            if( node->isLeaf )
+            {
+                ++counts.leaves;
+                check( node->shapeIndex >= 0, "Negative shape index in snapshot" );
+                const std::size_t index = static_cast<std::size_t>( node->shapeIndex );
+                check( index < seen.size() && seen[index] == 0, "Invalid or duplicated snapshot candidate" );
+                seen[index] = 1;
+            }
+            else
+            {
+                stack.push_back( node->childPair );
+            }
+        }
+    }
+}
+
+struct scenarioProfile
+{
+    profileCounts query;
+    profileCounts box;
+};
+
+scenarioProfile checkTraversalProfile( const dynamicTree& tree, const treeSnapshot& snapshot,
+    const scenario& scene, std::size_t shapeCount )
+{
+    scenarioProfile totals{};
+    std::vector<std::uint8_t> original( shapeCount ), measured( shapeCount );
+
+    for( const sweep& input : scene.queries )
+    {
+        for( castMode mode : { castMode::sweptQuery, castMode::boxCast } )
+        {
+            profileCounts sample{};
+            profileSweep( snapshot, input, mode, measured, sample );
+
+            std::uint64_t candidates = 0;
+            collectCandidates( tree, input, mode, original, candidates );
+            if( measured != original )
+            {
+                std::fprintf( stderr, "Traversal profile mismatch in %s\n", scene.name );
+                check( false, "Snapshot traversal differs from production candidates" );
+            }
+            check( candidates == sample.leaves, "Snapshot leaf count differs" );
+
+            if( mode == castMode::boxCast )
+            {
+                check( sample.xTests == sample.nodes && sample.yTests <= sample.xTests,
+                    "BoxCast axes visited out of order" );
+                check( sample.rejected == sample.xRejected + sample.yRejected,
+                    "BoxCast rejection counters inconsistent" );
+                check( sample.divisions / 2 + sample.stationaryAxes == sample.xTests + sample.yTests,
+                    "BoxCast axis arithmetic counters inconsistent" );
+                totals.box += sample;
+            }
+            else totals.query += sample;
+        }
+    }
+
+    return totals;
+}
+
+void printTraversalProfile( const std::array<scenario, 5>& scenes,
+    const std::array<scenarioProfile, 5>& profiles, bool csv )
+{
+    if( csv )
+        std::printf( "scenario,queries,query_nodes,query_leaves,query_rejected,box_nodes,box_leaves,"
+            "box_rejected,x_tests,y_tests,x_rejected,y_rejected,stationary_axes,slab_divisions,"
+            "start_overlap_nodes,root_exits\n" );
+    else
+        std::printf( "Scenario        Query nodes    Box nodes    X rejects    Y rejects    Slab divisions   Start overlaps   Root exits\n" );
+
+    for( std::size_t i = 0; i < profiles.size(); ++i )
+    {
+        const profileCounts& q = profiles[i].query;
+        const profileCounts& b = profiles[i].box;
+        if( csv )
+            std::printf( "%s,%d,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
+                scenes[i].name, QUERY_COUNT,
+                static_cast<unsigned long long>( q.nodes ), static_cast<unsigned long long>( q.leaves ),
+                static_cast<unsigned long long>( q.rejected ), static_cast<unsigned long long>( b.nodes ),
+                static_cast<unsigned long long>( b.leaves ), static_cast<unsigned long long>( b.rejected ),
+                static_cast<unsigned long long>( b.xTests ), static_cast<unsigned long long>( b.yTests ),
+                static_cast<unsigned long long>( b.xRejected ), static_cast<unsigned long long>( b.yRejected ),
+                static_cast<unsigned long long>( b.stationaryAxes ), static_cast<unsigned long long>( b.divisions ),
+                static_cast<unsigned long long>( b.startingOverlaps ), static_cast<unsigned long long>( b.rootExits ) );
+        else
+            std::printf( "%-12s %12llu %12llu %12llu %12llu %17llu %16llu %12llu\n",
+                scenes[i].name, static_cast<unsigned long long>( q.nodes ),
+                static_cast<unsigned long long>( b.nodes ), static_cast<unsigned long long>( b.xRejected ),
+                static_cast<unsigned long long>( b.yRejected ), static_cast<unsigned long long>( b.divisions ),
+                static_cast<unsigned long long>( b.startingOverlaps ),
+                static_cast<unsigned long long>( b.rootExits ) );
+    }
+}
+
 std::uint64_t runBatch( const dynamicTree& tree, const scenario& scene, castMode mode )
 {
     std::uint64_t sum = 0;
@@ -335,14 +569,16 @@ int main( int argc, char** argv )
 {
     bool verifyOnly = false;
     bool csv = false;
+    bool profile = false;
 
     for( int i = 1; i < argc; ++i )
     {
         if( std::strcmp( argv[i], "--verify" ) == 0 ) verifyOnly = true;
         else if( std::strcmp( argv[i], "--csv" ) == 0 ) csv = true;
+        else if( std::strcmp( argv[i], "--profile" ) == 0 ) profile = true;
         else
         {
-            std::fprintf( stderr, "Usage: dynamicTreeBoxCastBenchmark [--verify] [--csv]\n" );
+            std::fprintf( stderr, "Usage: dynamicTreeBoxCastBenchmark [--verify] [--csv] [--profile]\n" );
             return EXIT_FAILURE;
         }
     }
@@ -379,6 +615,13 @@ int main( int argc, char** argv )
 
     check( totals[0].box < totals[0].query, "Diagonal path should eliminate bounding-rectangle false positives" );
 
+    // Profile 경로는 실제 leaf 집합과 항상 대조한다. 측정 타이밍에는 포함하지 않음.
+    const treeSnapshot snapshot( tree );
+    std::array<scenarioProfile, 5> profiles{};
+    for( std::size_t i = 0; i < scenarios.size(); ++i )
+        profiles[i] = checkTraversalProfile( tree, snapshot, scenarios[i], targets.size() );
+
+
     if( verifyOnly )
     {
         std::printf( "BoxCast benchmark oracle verified: %zu targets, %zu sweeps\n",
@@ -386,6 +629,7 @@ int main( int argc, char** argv )
         return EXIT_SUCCESS;
     }
 
-    printResults( tree, scenarios, totals, csv );
+    if( profile ) printTraversalProfile( scenarios, profiles, csv );
+    else printResults( tree, scenarios, totals, csv );
     return EXIT_SUCCESS;
 }
