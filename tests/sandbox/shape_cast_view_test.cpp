@@ -29,8 +29,9 @@ int main()
     int overlayVertices = 0;
     int hiddenVertices = 0;
     int rotatingVertices = 0;
+    int denseVertices = 0;
 
-    for( int frame = 0; frame < 4; ++frame )
+    for( int frame = 0; frame < 5; ++frame )
     {
         if( frame == 1 )
         {
@@ -57,6 +58,9 @@ int main()
             model.setRotationRadians( 1.5707963267948966f );
             model.step( 0.25f, 1 );
         }
+
+        if( frame == 4 )
+            model.setDenseTargets( true );
 
         ImGui::NewFrame();
         ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
@@ -86,6 +90,7 @@ int main()
         if( frame == 0 ) overlayVertices = geometryVertices;
         if( frame == 1 ) hiddenVertices = geometryVertices;
         if( frame == 3 ) rotatingVertices = geometryVertices;
+        if( frame == 4 ) denseVertices = geometryVertices;
 
         ImGui::EndChild();
         ImGui::End();
@@ -99,6 +104,11 @@ int main()
     if( rotatingVertices <= 0 || model.getRotationRadians() == 0.0f )
     {
         std::fprintf( stderr, "Rotating ShapeCast view failed to render the TOI pose\n" );
+        std::exit( EXIT_FAILURE );
+    }
+    if( denseVertices <= rotatingVertices || model.getDenseTargets().size() != 40 )
+    {
+        std::fprintf( stderr, "Dense ShapeCast view failed to render additional bodies\n" );
         std::exit( EXIT_FAILURE );
     }
     ImGui::DestroyContext();
