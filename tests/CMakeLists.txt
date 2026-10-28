@@ -229,6 +229,11 @@ add_executable(dynamicTreeBoxCastTests collision/broadphase/dynamic_tree_box_cas
 target_link_libraries(dynamicTreeBoxCastTests PRIVATE zonai::zonai)
 add_test(NAME dynamicTreeBoxCastTests COMMAND dynamicTreeBoxCastTests)
 
+# Tree 후보 탐색 벤치마크. CI는 정확성만 확인하고 성능값은 로컬에서 --csv로 수집함.
+add_executable(dynamicTreeBoxCastBenchmark collision/broadphase/dynamic_tree_box_cast_benchmark.cpp)
+target_link_libraries(dynamicTreeBoxCastBenchmark PRIVATE zonai::zonai)
+add_test(NAME dynamicTreeBoxCastBenchmarkOracle COMMAND dynamicTreeBoxCastBenchmark --verify)
+
 add_executable(dynamicTreeTests
     collision/broadphase/dynamic_tree_test.cpp
 )
