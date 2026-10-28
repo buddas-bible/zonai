@@ -26,6 +26,11 @@ public:
         if( ImGui::Combo( "이동 도형###ShapeCastProbe", &probe, "원\0캡슐\0상자\0" ) )
             setProbe( static_cast<shapeCastProbe>( probe ) );
 
+        vec2 localOffset = getLocalOffset();
+        if( ImGui::DragFloat2( "도형 로컬 오프셋 (m)###ShapeCastLocalOffset",
+            &localOffset.x, 0.025f, -3.0f, 3.0f ) )
+            setLocalOffset( localOffset );
+
         vec2 start = getInput().transform.position;
         if( ImGui::DragFloat2( "시작점 (m)###ShapeCastStart", &start.x, 0.05f, -10.0f, 10.0f ) ) setStart( start );
 
@@ -69,7 +74,8 @@ public:
         if( ImGui::Checkbox( "이동 AABB 후보 표시###ShapeCastAABBVisible", &showSweep ) ) setSweepAABBVisible( showSweep );
 
         if( ImGui::Button( "미리보기 처음부터###ShapeCastResetPreview" ) ) resetPreview();
-        ImGui::TextWrapped( "캔버스 왼쪽 클릭: 이동 목표점 / Shift+왼쪽 클릭: 시작점. 도착점을 시작점과 같게 하면 순수 회전도 시험할 수 있습니다. 재생/1프레임: 자세 미리보기." );
+        ImGui::TextWrapped( "로컬 오프셋은 회전축에서 도형 중심까지의 거리입니다. 도착점과 시작점을 같게 하고 오프셋된 도형을 회전시키면 원호 충돌을 시험할 수 있습니다." );
+        ImGui::TextWrapped( "캔버스 왼쪽 클릭: 이동 목표점 / Shift+왼쪽 클릭: 시작점. 재생/1프레임: 자세 미리보기." );
 
         const auto hit = getHit();
         if( hit.hit )
@@ -207,6 +213,14 @@ public:
 
         const transform2 current = getPoseAtFraction( getPreviewFraction() );
         draw.DrawShape( input.geometry, current, progressColor, IM_COL32( 250, 215, 75, 30 ) );
+
+        if( LengthSquared( getLocalOffset() ) > 0.0f )
+        {
+            const vec2 geometryCenter = current.position + Rotate( current.rotation, getLocalOffset() );
+            draw.DrawSegment( { current.position, geometryCenter }, progressColor, 1.5f );
+            draw.DrawPoint( current.position, hitColor, 4.0f );
+            draw.DrawPoint( geometryCenter, progressColor, 3.0f );
+        }
 
         // 원은 회전해도 외형이 동일하므로 시작 회전만 있어도 로컬 축을 표시함.
         if( getStartRotationRadians() != 0.0f || getRotationRadians() != 0.0f )
