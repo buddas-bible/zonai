@@ -102,6 +102,16 @@ struct worldShapeSweepInput2
     float rotationRadians = 0.0f;
 };
 
+// 선택적 호출 단위 World 회전 조회 계측. 비회전 선형 조회에는 수치를 기록하지 않음.
+struct worldShapeSweepStats2
+{
+    int treeCandidates = 0;
+    int narrowphaseCandidates = 0;
+    int toiCalls = 0;
+    int hits = 0;
+    toiDiagnostics2 toi{};
+};
+
 template <typename Callback>
 concept worldOverlapCallback = requires( Callback& callback, shapeId id ) {
     { callback( id ) } -> std::convertible_to<bool>;
@@ -635,8 +645,10 @@ public:
     // 회전 중의 도형을 전부 포함하는 origin-중심 보수적 AABB로 Tree를 조회함.
     // TOI는 swept separating axis 방식이므로 회전 도중의 일부 접촉을 놓칠 수 있음.
     template <worldRayCastCallback Callback>
-    void castShapeSweep( const worldShapeSweepInput2& input, queryFilter filter, Callback&& callback ) const
+    void castShapeSweep( const worldShapeSweepInput2& input, queryFilter filter, Callback&& callback,
+        worldShapeSweepStats2* stats = nullptr ) const
     {
+        if( stats ) *stats = {};
         if( std::holds_alternative<std::monostate>( input.geometry ) ||
             std::holds_alternative<chainSegment2>( input.geometry ) ||
             !IsFinite( input.transform.position ) || !IsFinite( input.translation ) ||
@@ -710,12 +722,14 @@ public:
             // 회전 도형의 AABB는 직선으로 평행이동하지 않으므로 BoxCast가 아닌 Query를 사용함.
             tree.Query( sweptBounds, [&]( std::int32_t proxyId )
             {
+                if( stats ) ++stats->treeCandidates;
                 const std::int32_t shapeIndex = tree.GetProxyShapeIndex( proxyId );
                 assert( shapeIndex >= 0 && static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
 
                 const shape& candidate = shapes_[shapeIndex];
                 if( !ShouldQueryShape( filter, candidate.filter ) ||
                     !Overlaps( sweptBounds, candidate.aabb ) ) return true;
+                if( stats ) ++stats->narrowphaseCandidates;
 
                 const transform2& targetTransform = bodySims_[candidate.bodyId].transform;
                 toiInput2 toi{};
@@ -764,7 +778,21 @@ public:
                     }
                 }
 
-                if( !initialChainOverlap ) hit = TimeOfImpact( toi );
+                if( !initialChainOverlap )
+                {
+                    if( stats )
+                    {
+                        ++stats->toiCalls;
+                        toiDiagnostics2 detail{};
+                        hit = TimeOfImpact( toi, &detail );
+                        stats->toi.distanceCalls += detail.distanceCalls;
+                        stats->toi.transientAttempts += detail.transientAttempts;
+                        stats->toi.transientDistanceCalls += detail.transientDistanceCalls;
+                        stats->toi.transientHits += detail.transientHits;
+                        stats->toi.transientStepLimit += detail.transientStepLimit;
+                    }
+                    else hit = TimeOfImpact( toi );
+                }
                 if( hit.state != toiState2::Hit && hit.state != toiState2::Overlapped ) return true;
                 if( !std::isfinite( hit.fraction ) ||
                     hit.fraction < 0.0f || hit.fraction >= maxFraction ) return true;
@@ -806,6 +834,7 @@ public:
                 }
 
                 if( !IsFinite( point ) || !IsFinite( normal ) ) return true;
+                if( stats ) ++stats->hits;
                 const float fraction = static_cast<float>(
                     callback( MakeShapeId( shapeIndex ), point, normal, hit.fraction ) );
 
@@ -831,7 +860,8 @@ public:
     }
 
     [[nodiscard]] worldShapeCastResult2 castShapeSweepClosest(
-        const worldShapeSweepInput2& input, queryFilter filter = {} ) const
+        const worldShapeSweepInput2& input, queryFilter filter = {},
+        worldShapeSweepStats2* stats = nullptr ) const
     {
         worldShapeCastResult2 closest{};
         castShapeSweep( input, filter, [&]( shapeId id, vec2 point, vec2 normal, float fraction )
@@ -840,7 +870,7 @@ public:
             if( !closest.hit || fraction < closest.fraction )
                 closest = { id, point, normal, fraction, true };
             return closest.fraction;
-        } );
+        }, stats );
         return closest;
     }
 
