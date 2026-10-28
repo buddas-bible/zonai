@@ -306,6 +306,12 @@ public:
 
         const vec2 halfExtent = ( startBounds.max - startBounds.min ) * 0.5f;
         const vec2 origin = startBounds.min + halfExtent;
+        // Slab 경계 차이는 float에서 계산하고, 역수 곱은 double로 평가해 반올림 오차를 줄임.
+        // 0인 이동 축은 기존의 포함 검사만 수행함.
+        const std::array<double, 2> inverseTranslation{
+            translation.x == 0.0f ? 0.0 : 1.0 / static_cast<double>( translation.x ),
+            translation.y == 0.0f ? 0.0 : 1.0 / static_cast<double>( translation.y )
+        };
 
         std::array<std::int32_t, TREE_STACK_SIZE> stack{};
         std::size_t stackCount = 0;
@@ -340,8 +346,8 @@ public:
                     }
                     else
                     {
-                        const float first = ( lower - position ) / direction;
-                        const float second = ( upper - position ) / direction;
+                        const float first = static_cast<float>( static_cast<double>( lower - position ) * inverseTranslation[axis] );
+                        const float second = static_cast<float>( static_cast<double>( upper - position ) * inverseTranslation[axis] );
                         entry = std::max( entry, std::min( first, second ) );
                         exit = std::min( exit, std::max( first, second ) );
                         if( entry > exit ) overlaps = false;
