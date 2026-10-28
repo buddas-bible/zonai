@@ -54,7 +54,7 @@ public:
                 ImGui::Text( "%s: 범위 밖", target.name );
         }
 
-        ImGui::TextWrapped( "초록: 실제 겹침 / 주황: AABB 후보만 / 회색: 후보 아님 / 청록: 조회 AABB / 흰색: 조회 도형" );
+        ImGui::TextWrapped( "초록: 실제 겹침 / 주황: AABB 후보만 / 회색: 후보 아님 / 청록: 조회 AABB / 흰색: 조회 도형. 대상의 후보 AABB는 speculative margin이 포함된 저장 AABB입니다." );
     }
 
     void draw( debugDraw& draw ) const override
@@ -81,7 +81,7 @@ public:
 
             draw.DrawShape( geometry, pose, color, exact ? IM_COL32( 90, 240, 155, 55 ) : 0 );
             if( areCandidateAABBsVisible() && candidate )
-                draw.DrawAABB( ComputeShapeAABB( geometry, pose ), color, 1.5f );
+                draw.DrawAABB( simulation.GetShape( target.shape ).aabb, color, 1.5f );
 
             draw.DrawLabel( pose.position + vec2{ 0.0f, 1.1f }, target.name, color );
         }

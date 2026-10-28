@@ -46,6 +46,14 @@ void checkFixturesAndQueries()
     check( initialBounds.min.x < 1.0f && initialBounds.min.y < 1.0f,
         "Circle query AABB must overlap the upper right box corner" );
 
+    // 저장된 target AABB에는 speculative margin이 있으므로, tight AABB가 떨어져도 후보가 될 수 있음.
+    demo.setQueryPosition( { 1.51f, 0.0f } );
+    check( demo.getQueryAABB().min.x > 1.0f &&
+        !Overlaps( demo.getQueryAABB(), ComputeShapeAABB( MakeBox( { 1.0f, 1.0f } ), {} ) ) &&
+        Overlaps( demo.getQueryAABB(), demo.getWorld().GetShape( box ).aabb ) &&
+        demo.isCandidate( box ) && !demo.isExactOverlap( box ),
+        "Speculative target AABB is the actual World query candidate boundary" );
+
     demo.setQueryPosition( { 1.2f, 1.2f } );
     check( demo.getCandidates().size() == 1 && demo.getExactOverlaps().size() == 1 &&
         demo.isExactOverlap( box ), "Moving the circle toward the corner enables GJK overlap" );

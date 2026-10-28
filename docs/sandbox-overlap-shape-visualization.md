@@ -3,7 +3,9 @@
 Sandbox의 **공간 조회 → AABB·실제 도형 겹침 비교** 장면에서는
 동일한 query geometry, transform, filter를 두 World API에 전달한다.
 
-- **BroadPhase 후보**: `world::overlapAABB`는 World 좌표 AABB로 후보를 찾음
+- **BroadPhase 후보**: `world::overlapAABB`는 World 좌표 AABB로 후보를 찾음.
+  후보 대상 경계는 geometry의 tight AABB가 아니라 엔진의 speculative margin이 포함된
+  `shape.aabb`다. 화면에서도 **실제로 조회에 사용된 확장 AABB**를 그린다.
 - **정확한 겹침**: `world::overlapShape`는 위 후보 중 GJK와 radius로 판정한 도형만 찾음
 - **AABB만 겹침**: 후보 수에서 실제 겹침 수를 뺀 숫자. 동일 query/filter와 한 World를
   조회하므로 정확한 겹침은 후보의 부분집합이어야 함
