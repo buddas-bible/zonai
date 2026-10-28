@@ -151,6 +151,86 @@ void verifyClipping()
     check( count == 1 && fraction == 0.0f, "BoxCast must stop on zero fraction" );
 }
 
+void verifyRootSweepRejection()
+{
+    dynamicTree tree{};
+    const std::int32_t proxyId = tree.CreateProxy( { { -1.0f, -1.0f }, { 1.0f, 1.0f } }, 0 );
+    const aabb2 probe{ { -5.0f, -0.25f }, { -4.5f, 0.25f } };
+
+    float fraction = 1.0f;
+    int calls = 0;
+    tree.BoxCast( probe, { -4.0f, 0.0f }, fraction, [&]( std::int32_t, float )
+    {
+        ++calls;
+        return 1.0f;
+    } );
+    check( calls == 0 && fraction == 1.0f, "Sweep moving away from root must miss" );
+
+    fraction = 0.1f;
+    tree.BoxCast( probe, { 8.0f, 0.0f }, fraction, [&]( std::int32_t, float )
+    {
+        ++calls;
+        return 1.0f;
+    } );
+    check( calls == 0 && fraction == 0.1f, "Clipped sweep before root must miss" );
+
+    fraction = 1.0f;
+    tree.BoxCast( probe, { 8.0f, 0.0f }, fraction, [&]( std::int32_t id, float )
+    {
+        check( id == proxyId, "Crossing sweep must report the live leaf" );
+        ++calls;
+        return 1.0f;
+    } );
+    check( calls == 1, "Crossing sweep must not be rejected by root bounds" );
+
+    // Root와 시작 AABB가 이미 겹친 경우에는 이동 방향과 무관하게 검사함.
+    fraction = 0.5f;
+    const aabb2 overlapping{ { -0.5f, -0.5f }, { 0.5f, 0.5f } };
+    tree.BoxCast( overlapping, { -9.0f, 2.0f }, fraction, [&]( std::int32_t id, float )
+    {
+        check( id == proxyId, "Initial overlap should report root proxy" );
+        ++calls;
+        return 1.0f;
+    } );
+    check( calls == 2 && fraction == 0.5f, "Initial overlap must remain visible" );
+
+    // Root가 자리를 옮겨도 parent AABB가 최신이면 같은 규칙으로 동작해야 함.
+    tree.MoveProxy( proxyId, { { 7.0f, -1.0f }, { 9.0f, 1.0f } } );
+    fraction = 1.0f;
+    calls = 0;
+    tree.BoxCast( probe, { 8.0f, 0.0f }, fraction, [&]( std::int32_t, float )
+    {
+        ++calls;
+        return 1.0f;
+    } );
+    check( calls == 0, "Moved root outside the sweep must not be visited" );
+
+    ( void )tree.Rebuild( true );
+    check( tree.Validate(), "Rebuilt tree must retain valid bounds" );
+}
+
+void verifyRootBoundaryPrecision()
+{
+    dynamicTree tree{};
+
+    // (10.0f * 0.8f - 8.0f)는 float 중간 연산에서 0으로 반올림될 수 있음.
+    // 곱과 합을 더 높은 정밀도로 평가하면 작은 양수 끝점이 Root 경계에 닿음.
+    const std::int32_t proxy = tree.CreateProxy( { { 1.0e-8f, -1.0f }, { 1.0f, 1.0f } }, 0 );
+    const aabb2 start{ { -9.0f, -0.25f }, { -8.0f, 0.25f } };
+
+    float fraction = 0.8f;
+    int calls = 0;
+
+    tree.BoxCast( start, { 10.0f, 0.0f }, fraction, [&]( std::int32_t id, float )
+    {
+        check( id == proxy, "Precision boundary must report the original proxy" );
+        ++calls;
+        return 1.0f;
+    } );
+
+    check( calls == 1 && fraction == 0.8f, "Root early-out lost near-boundary swept hit" );
+}
+
 void verifyDiagonalPruning()
 {
     dynamicTree tree{};
@@ -192,6 +272,8 @@ int main()
 {
     verifyClipping();
     verifyDiagonalPruning();
+    verifyRootSweepRejection();
+    verifyRootBoundaryPrecision();
 
     dynamicTree emptyTree{};
     const aabb2 box{ { -1.0f, -1.0f }, { 1.0f, 1.0f } };

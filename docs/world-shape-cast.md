@@ -59,3 +59,20 @@ World ShapeCast는 이제 DynamicTree의 `BoxCast`를 사용한다.
 무작위/대각선/정지 축/clip/이동/삭제/Rebuild 케이스를 대조한다.
 기존 `worldShapeCastTests` 및 `worldSpatialQueryStressTests`도
 동일한 hit 의미를 유지하는지 확인한다.
+
+
+## Root의 바깥 방향 이동 조기 제외
+
+`DynamicTree::BoxCast`는 비용이 큰 노드별 slab 교차 검사 전에
+시작 도형의 AABB가 Tree root 바깥에 있고 **그 축에서 root로부터 멀어지는**
+경우에만 즉시 종료한다. 예를 들어 root 위쪽에서 수평으로 이동하거나,
+root 오른쪽에서 더 오른쪽으로 이동하는 sweep은 충돌 후보가 될 수 없다.
+
+이 검사는 기존 AABB와 이동 벡터의 **부호만** 사용한다. 이동 끝점을
+float로 더하거나 곱해서 경계 부근의 충돌을 잘못 버리는 위험이 없다.
+root 쪽으로 이동하지만 clip 분율 안에는 도달하지 못하는 경우는 기존 slab
+검사에 맡긴다. 추가 분기 자체의 실행 비용도 실제 벤치마크로 확인한다.
+
+성능 효과는 World ShapeCast 및 Tree 벤치마크로 확인하며, 특히 root
+바깥의 횡방향/멀어지는 miss가 직접 대상이다. 이동 중인 도형의 실제
+geometry와 GJK/Solver 수학은 변경하지 않는다.

@@ -296,6 +296,14 @@ public:
         if( proxyCount_ == 0 || maxFraction <= 0.0f || !std::isfinite( maxFraction ) ||
             !IsValidAABB( startBounds ) || !IsFinite( translation ) ) return;
 
+        // Root 밖에서 시작해 그 축에서 더 멀어지는 경우에는 수치 계산 없이 충돌 불가.
+        // 방향/기존 AABB 끝점만 확인하므로 float sweep 끝점 반올림 위험이 없음.
+        const aabb2& rootBounds = nodes_[ROOT_NODE].aabb;
+        if( ( translation.x >= 0.0f && startBounds.min.x > rootBounds.max.x ) ||
+            ( translation.x <= 0.0f && startBounds.max.x < rootBounds.min.x ) ||
+            ( translation.y >= 0.0f && startBounds.min.y > rootBounds.max.y ) ||
+            ( translation.y <= 0.0f && startBounds.max.y < rootBounds.min.y ) ) return;
+
         const vec2 halfExtent = ( startBounds.max - startBounds.min ) * 0.5f;
         const vec2 origin = startBounds.min + halfExtent;
 
