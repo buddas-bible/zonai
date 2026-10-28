@@ -137,7 +137,9 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
   원은 회전해도 외형이 같으므로 노란 방향선으로 미리보기 자세를 표시한다.
 - 흰색은 시작, 회색은 종료, 노란색은 현재, 파란색은 첫 충돌 자세이며
   충돌 지점과 법선은 주황색으로 표시한다. 자세는 엔진의
-  `GetSweepTransform`과 동일한 보간을 사용한다.
+  `GetSweepTransform`과 동일한 보간을 사용한다. 회전 중 로컬 support 점들의
+  곡선 궤적은 연파랑 선으로 16구간 샘플링해 표시한다(충돌 계산용 경로가 아닌
+  순수 디버그 시각화).
 - 청록색 AABB는 회전 도중 모든 자세를 포함하도록 로컬 원점 반경으로
   확장한 보수적 후보 범위이다. 회전이 없으면 기존 선형 swept AABB를 표시한다.
 - 분홍색 중심 RayCast는 **회전을 반영하지 않는 비교용 조회**이며
