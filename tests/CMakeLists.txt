@@ -234,6 +234,11 @@ add_executable(dynamicTreeBoxCastBenchmark collision/broadphase/dynamic_tree_box
 target_link_libraries(dynamicTreeBoxCastBenchmark PRIVATE zonai::zonai)
 add_test(NAME dynamicTreeBoxCastBenchmarkOracle COMMAND dynamicTreeBoxCastBenchmark --verify)
 
+# World와 같은 좁은 단계(GJK)를 사용해 Tree 후보 탐색 효과를 계측.
+add_executable(worldShapeCastBenchmark collision/broadphase/world_shape_cast_benchmark.cpp)
+target_link_libraries(worldShapeCastBenchmark PRIVATE zonai::zonai)
+add_test(NAME worldShapeCastBenchmarkOracle COMMAND worldShapeCastBenchmark --verify)
+
 add_executable(dynamicTreeTests
     collision/broadphase/dynamic_tree_test.cpp
 )
