@@ -739,24 +739,27 @@ public:
                         centroid += TransformPoint( input.transform, movingProxy.points[p] );
                     centroid /= static_cast<float>( movingProxy.count );
 
-                    if( Dot( centroid - TransformPoint( targetTransform, chain->segment.a ), front ) > 0.0f )
-                    {
-                        distanceInput2 distance{};
-                        distance.proxyA = toi.proxyA;
-                        distance.proxyB = movingProxy;
-                        distance.transform = InverseMul( targetTransform, input.transform );
-                        distance.useRadii = true;
-                        simplexCache2 cache{};
-                        const distanceOutput2 nearest = ShapeDistance( distance, cache );
-                        constexpr float OVERLAP_EPSILON = 10.0f * std::numeric_limits<float>::epsilon();
+                    // World 공간 조회에서는 CCD의 작은 접근 속도 생략 조건을 적용하지 않음.
+                    // 시작점의 앞면 여부와 최종 normal로 단면 충돌을 직접 제한함.
+                    if( Dot( centroid - TransformPoint( targetTransform, chain->segment.a ), front ) <= 0.0f )
+                        return true;
+                    toi.proxyA.oneSided = false;
 
-                        if( std::isfinite( nearest.distance ) && nearest.distance <= OVERLAP_EPSILON )
-                        {
-                            initialChainOverlap = true;
-                            hit.state = toiState2::Overlapped;
-                            hit.fraction = 0.0f;
-                            hit.point = TransformPoint( targetTransform, 0.5f * ( nearest.pointA + nearest.pointB ) );
-                        }
+                    distanceInput2 distance{};
+                    distance.proxyA = toi.proxyA;
+                    distance.proxyB = movingProxy;
+                    distance.transform = InverseMul( targetTransform, input.transform );
+                    distance.useRadii = true;
+                    simplexCache2 cache{};
+                    const distanceOutput2 nearest = ShapeDistance( distance, cache );
+                    constexpr float OVERLAP_EPSILON = 10.0f * std::numeric_limits<float>::epsilon();
+
+                    if( std::isfinite( nearest.distance ) && nearest.distance <= OVERLAP_EPSILON )
+                    {
+                        initialChainOverlap = true;
+                        hit.state = toiState2::Overlapped;
+                        hit.fraction = 0.0f;
+                        hit.point = TransformPoint( targetTransform, 0.5f * ( nearest.pointA + nearest.pointB ) );
                     }
                 }
 
