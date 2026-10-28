@@ -209,8 +209,8 @@ totals verify( const fixture& data, const scenario& scene )
 
         check( measured.hit == original.hit && measured.shape == original.shape &&
             measured.fraction == original.fraction &&
-            ( !measured.hit || ( measured.point == original.point &&
-                measured.normal == original.normal ) ),
+            ( !measured.hit || ( LengthSquared( measured.point - original.point ) == 0.0f &&
+                LengthSquared( measured.normal - original.normal ) == 0.0f ) ),
             "Optional World sweep instrumentation changed the first hit" );
         check( stats.treeCandidates >= stats.narrowphaseCandidates &&
             stats.narrowphaseCandidates >= stats.toiCalls &&
