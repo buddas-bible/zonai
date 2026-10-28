@@ -33,6 +33,8 @@ public:
     void setTarget( vec2 target );
     void setSensorIncluded( bool included );
     void setCanEncroach( bool enabled );
+    void setRayVisible( bool visible ) noexcept { rayVisible_ = visible; }
+    void setSweepAABBVisible( bool visible ) noexcept { sweepAABBVisible_ = visible; }
     void resetPreview();
 
     [[nodiscard]] shapeCastProbe getProbe() const noexcept { return probe_; }
@@ -40,19 +42,29 @@ public:
     [[nodiscard]] const std::array<shapeCastTarget, 4>& getTargets() const noexcept { return targets_; }
     [[nodiscard]] const worldShapeCastInput2& getInput() const noexcept { return input_; }
     [[nodiscard]] worldShapeCastResult2 getHit() const noexcept { return hit_; }
+    [[nodiscard]] worldRayCastResult2 getRayHit() const noexcept { return rayHit_; }
+    [[nodiscard]] aabb2 getSweepAABB() const noexcept;
+    [[nodiscard]] std::size_t getAABBCandidateCount() const noexcept { return aabbCandidateCount_; }
     [[nodiscard]] float getPreviewFraction() const noexcept { return previewFraction_; }
     [[nodiscard]] bool isSensorIncluded() const noexcept { return sensorIncluded_; }
+    [[nodiscard]] bool isRayVisible() const noexcept { return rayVisible_; }
+    [[nodiscard]] bool isSweepAABBVisible() const noexcept { return sweepAABBVisible_; }
 
 private:
     void updateHit();
+    [[nodiscard]] queryFilter makeFilter() const noexcept;
 
     world world_{};
     std::array<shapeCastTarget, 4> targets_{};
     worldShapeCastInput2 input_{};
     shapeCastProbe probe_ = shapeCastProbe::circle;
     worldShapeCastResult2 hit_{};
+    worldRayCastResult2 rayHit_{};
+    std::size_t aabbCandidateCount_ = 0;
     float previewFraction_ = 0.0f;
     bool sensorIncluded_ = true;
+    bool rayVisible_ = true;
+    bool sweepAABBVisible_ = true;
 };
 
 } // namespace zonai::sandbox

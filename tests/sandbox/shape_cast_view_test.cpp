@@ -6,6 +6,7 @@
 #include "debug/debugCamera.h"
 #include "debug/debugDraw.h"
 #include "shapeCastDemoView.h"
+#include "shapeCastDemo.h"
 
 using namespace zonai::sandbox;
 
@@ -24,14 +25,26 @@ int main()
     io.Fonts->SetTexID( static_cast<ImTextureID>( 1 ) );
 
     auto scene = createShapeCastDemoView();
+    auto& model = static_cast<shapeCastDemo&>( *scene );
+    int overlayVertices = 0;
+    int hiddenVertices = 0;
+
     for( int frame = 0; frame < 3; ++frame )
     {
-        if( frame == 1 ) scene->step( 0.5f, 4 );
+        if( frame == 1 )
+        {
+            model.setRayVisible( false );
+            model.setSweepAABBVisible( false );
+        }
         if( frame == 2 )
         {
+            model.setRayVisible( true );
+            model.setSweepAABBVisible( true );
+
             zonai::sandbox::demoInput click{};
             click.mousePressed = true;
-            click.mousePosition = { 6.0f, 1.0f };
+            click.mousePosition = { -6.0f, 0.0f };
+            click.selectTrialPosition = true;
             scene->handleInput( click );
         }
 
@@ -53,15 +66,24 @@ int main()
         debugDraw draw{ list, camera, ImGui::GetCursorScreenPos(), { 820.0f, 720.0f } };
         scene->draw( draw );
 
-        if( list->VtxBuffer.Size <= before )
+        const int geometryVertices = list->VtxBuffer.Size - before;
+        if( geometryVertices <= 0 )
         {
             std::fprintf( stderr, "ShapeCast scene failed to render geometry at phase %d\n", frame );
             std::exit( EXIT_FAILURE );
         }
 
+        if( frame == 0 ) overlayVertices = geometryVertices;
+        if( frame == 1 ) hiddenVertices = geometryVertices;
+
         ImGui::EndChild();
         ImGui::End();
         ImGui::Render();
+    }
+    if( overlayVertices <= hiddenVertices )
+    {
+        std::fprintf( stderr, "RayCast and swept AABB overlay toggles did not affect the rendered geometry\n" );
+        std::exit( EXIT_FAILURE );
     }
     ImGui::DestroyContext();
 }
