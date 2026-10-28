@@ -20,6 +20,9 @@ constexpr int SAMPLE_COUNT = 512;
 constexpr float TARGET_RADIUS = 0.33f;
 constexpr float HALF_WIDTH = 0.52f;
 constexpr float HALF_HEIGHT = 0.12f;
+constexpr float THIN_TARGET_RADIUS = 0.04f;
+constexpr float THIN_HALF_WIDTH = 0.45f;
+constexpr float THIN_HALF_HEIGHT = 0.015f;
 
 void check( bool condition, const char* message )
 {
@@ -52,6 +55,10 @@ struct orbitCase
     worldShapeSweepInput2 input{};
     vec2 target{};
     float localOffset = 0.0f;
+    float targetRadius = TARGET_RADIUS;
+    float halfWidth = HALF_WIDTH;
+    float halfHeight = HALF_HEIGHT;
+    bool thin = false;
     const char* category = "";
 };
 
@@ -103,9 +110,9 @@ double signedGap( const orbitCase& sample, float fraction )
     const double localX = pose.c * relativeX + pose.s * relativeY - sample.localOffset;
     const double localY = -pose.s * relativeX + pose.c * relativeY;
 
-    const double outsideX = std::max( std::fabs( localX ) - HALF_WIDTH, 0.0 );
-    const double outsideY = std::max( std::fabs( localY ) - HALF_HEIGHT, 0.0 );
-    return std::hypot( outsideX, outsideY ) - TARGET_RADIUS;
+    const double outsideX = std::max( std::fabs( localX ) - sample.halfWidth, 0.0 );
+    const double outsideY = std::max( std::fabs( localY ) - sample.halfHeight, 0.0 );
+    return std::hypot( outsideX, outsideY ) - sample.targetRadius;
 }
 
 sampleResult sampleOracle( const orbitCase& sample )
@@ -133,12 +140,17 @@ sampleResult sampleOracle( const orbitCase& sample )
 orbitCase makeCase( randomSequence& random, int index )
 {
     orbitCase sample{};
-    const bool translation = index % 3 == 1;
-    const bool far = index % 3 == 2;
-    sample.category = far ? "far" : translation ? "combined" : "rotation";
+    const int localIndex = index % 600;
+    const bool translation = localIndex % 3 == 1;
+    const bool far = localIndex % 3 == 2;
+    sample.thin = index >= 600;
+    sample.category = sample.thin ? "thin" : far ? "far" : translation ? "combined" : "rotation";
+    sample.targetRadius = sample.thin ? THIN_TARGET_RADIUS : TARGET_RADIUS;
+    sample.halfWidth = sample.thin ? THIN_HALF_WIDTH : HALF_WIDTH;
+    sample.halfHeight = sample.thin ? THIN_HALF_HEIGHT : HALF_HEIGHT;
 
     sample.localOffset = random.between( 1.4f, 3.1f );
-    polygon2 box = MakeBox( { HALF_WIDTH, HALF_HEIGHT } );
+    polygon2 box = MakeBox( { sample.halfWidth, sample.halfHeight } );
     for( int vertex = 0; vertex < box.vertexCount; ++vertex )
         box.vertices[vertex] += vec2{ sample.localOffset, 0.0f };
     box.centroid = { sample.localOffset, 0.0f };
@@ -159,7 +171,8 @@ orbitCase makeCase( randomSequence& random, int index )
         sample.target = middle + vec2{ 8.0f, 8.0f };
     else
         sample.target = middle + vec2{
-            random.between( -0.10f, 0.10f ), random.between( -0.10f, 0.10f )
+            random.between( sample.thin ? -0.008f : -0.10f, sample.thin ? 0.008f : 0.10f ),
+            random.between( sample.thin ? -0.008f : -0.10f, sample.thin ? 0.008f : 0.10f )
         };
     return sample;
 }
@@ -169,10 +182,17 @@ void runAudit( bool csv, bool strict )
     world simulation{};
     const bodyId body = simulation.CreateBody( bodyType::Static );
     const shapeId target = simulation.CreateShape( body, circle2{ {}, TARGET_RADIUS } );
+    world thinSimulation{};
+    const bodyId thinBody = thinSimulation.CreateBody( bodyType::Static );
+    const shapeId thinTarget = thinSimulation.CreateShape( thinBody, circle2{ {}, THIN_TARGET_RADIUS } );
     randomSequence random{};
 
     int robustMiddle = 0;
     int misses = 0;
+    int robustThin = 0;
+    int missedThin = 0;
+    int robustBroad = 0;
+    int missedBroad = 0;
     int definiteMisses = 0;
     int reportedHits = 0;
     int printed = 0;
@@ -180,25 +200,31 @@ void runAudit( bool csv, bool strict )
     if( csv )
         std::printf( "case,kind,start_gap,end_gap,min_gap,sampled_first,toi_hit,toi_fraction,robust_mid\n" );
 
-    for( int i = 0; i < 600; ++i )
+    for( int i = 0; i < 1200; ++i )
     {
         const orbitCase sample = makeCase( random, i );
-        simulation.SetBodyTransform( body, { sample.target, {} } );
+        world& selected = sample.thin ? thinSimulation : simulation;
+        const bodyId selectedBody = sample.thin ? thinBody : body;
+        const shapeId selectedTarget = sample.thin ? thinTarget : target;
+        selected.SetBodyTransform( selectedBody, { sample.target, {} } );
         const sampleResult reference = sampleOracle( sample );
-        const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( sample.input );
+        const worldShapeCastResult2 hit = selected.castShapeSweepClosest( sample.input );
 
         const bool robust = reference.startGap > 0.04 && reference.endGap > 0.04 &&
-            reference.minimumGap < -0.04 && reference.firstHitFraction > 0.0f &&
+            reference.minimumGap < ( sample.thin ? -0.01 : -0.04 ) &&
+            reference.firstHitFraction > 0.0f &&
             reference.firstHitFraction < 1.0f;
         const bool separated = reference.minimumGap > 0.08;
 
         robustMiddle += static_cast<int>( robust );
+        robustThin += static_cast<int>( robust && sample.thin );
+        robustBroad += static_cast<int>( robust && !sample.thin );
         definiteMisses += static_cast<int>( separated );
         reportedHits += static_cast<int>( hit.hit );
 
         if( hit.hit )
         {
-            check( hit.shape == target && hit.fraction > 0.0f && hit.fraction < 1.0f &&
+            check( hit.shape == selectedTarget && hit.fraction > 0.0f && hit.fraction < 1.0f &&
                 IsFinite( hit.point ) && IsFinite( hit.normal ),
                 "Rotating Box TOI returned an invalid world hit" );
             check( signedGap( sample, hit.fraction ) < 0.06,
@@ -209,6 +235,8 @@ void runAudit( bool csv, bool strict )
         if( robust && !hit.hit )
         {
             ++misses;
+            missedThin += static_cast<int>( sample.thin );
+            missedBroad += static_cast<int>( !sample.thin );
             if( !csv && printed < 5 )
             {
                 ++printed;
@@ -229,13 +257,15 @@ void runAudit( bool csv, bool strict )
                 hit.hit ? hit.fraction : -1.0f, static_cast<int>( robust ) );
     }
 
-    check( robustMiddle >= 50 && definiteMisses >= 190,
-        "Box oracle corpus lacks robust transient contacts or definite misses" );
+    check( robustBroad >= 50 && robustThin >= 50 && definiteMisses >= 390,
+        "Box oracle corpus lacks robust broad/thin contacts or definite misses" );
 
     if( !csv )
-        std::printf( "Rotating Box World sweep oracle: cases=600 robust_middle=%d "
-            "toi_missed=%d definite_miss=%d reported_hit=%d\n",
-            robustMiddle, misses, definiteMisses, reportedHits );
+        std::printf( "Rotating Box World sweep oracle: cases=1200 robust_middle=%d "
+            "toi_missed=%d broad_robust=%d broad_missed=%d thin_robust=%d thin_missed=%d "
+            "definite_miss=%d reported_hit=%d\n",
+            robustMiddle, misses, robustBroad, missedBroad, robustThin, missedThin,
+            definiteMisses, reportedHits );
 
     if( strict ) check( misses == 0,
         "Strict Box oracle: TOI missed robust intermediate contacts" );
