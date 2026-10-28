@@ -792,14 +792,15 @@ public:
                 // 도형을 TOI 전에 제외함. 각 proxy의 모든 support 점은
                 // 로컬 원점을 중심으로 한 circumscribed disk 안에 들어감.
                 // 회전 궤적이 복잡해도 이 두 원의 거리보다 가까워질 수 없음.
-                double targetRadius = static_cast<double>( toi.proxyA.radius );
+                double targetRadiusSquared = 0.0;
                 for( int p = 0; p < toi.proxyA.count; ++p )
                 {
                     const vec2 point = toi.proxyA.points[p];
-                    targetRadius = std::max( targetRadius,
-                        std::hypot( static_cast<double>( point.x ),
-                            static_cast<double>( point.y ) ) + toi.proxyA.radius );
+                    const double x = point.x;
+                    const double y = point.y;
+                    targetRadiusSquared = std::max( targetRadiusSquared, x * x + y * y );
                 }
+                double targetRadius = std::sqrt( targetRadiusSquared ) + toi.proxyA.radius;
 
                 const double startX = input.transform.position.x;
                 const double startY = input.transform.position.y;
@@ -831,7 +832,7 @@ public:
                 const double diskRadius = maxRadius + targetRadius + margin;
                 if( std::isfinite( diskRadius ) && std::isfinite( deltaX ) &&
                     std::isfinite( deltaY ) &&
-                    std::hypot( deltaX, deltaY ) > diskRadius )
+                    deltaX * deltaX + deltaY * deltaY > diskRadius * diskRadius )
                 {
                     if( stats ) ++stats->distancePrunedCandidates;
                     return true;
