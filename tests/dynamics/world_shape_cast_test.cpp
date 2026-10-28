@@ -378,6 +378,27 @@ void checkRotatingSweep()
     } );
     check( backCallbacks == 0, "Rotating query must not report chain back faces" );
 
+    // 짧은 접근은 CCD의 minimum-motion heuristic 대상이지만 공간 조회는 hit을 반환해야 함.
+    // 중심에 있는 원은 회전해도 같은 geometry이므로 선형과 회전 결과가 일치해야 함.
+    chainInput.transform.position.y = -0.42f;
+    chainInput.translation.y = 0.05f;
+    chainInput.rotationRadians = 0.5f;
+    const auto shortRotation = chainWorld.castShapeSweepClosest( chainInput );
+    const auto shortLinear = chainWorld.castShapeClosest(
+        { chainInput.geometry, chainInput.transform, chainInput.translation, false } );
+    check( shortRotation.hit && shortRotation.shape == edge &&
+        shortLinear.hit && shortLinear.shape == edge,
+        "Short front-chain approach must hit regardless of centered circle rotation" );
+    check( shortRotation.fraction > 0.0f && shortRotation.fraction < 1.0f &&
+        std::fabs( shortRotation.fraction - shortLinear.fraction ) < 0.05f &&
+        Dot( shortRotation.normal, vec2{ 0.0f, -1.0f } ) > 0.9f,
+        "Short rotating chain hit must preserve a valid fraction and front normal" );
+
+    chainInput.transform.position.y = 0.42f;
+    chainInput.translation.y = -0.05f;
+    check( !chainWorld.castShapeSweepClosest( chainInput ).hit,
+        "Short back-chain approach must remain one-sided after bypassing CCD heuristic" );
+
     const auto invalidCallback = []( shapeId, vec2, vec2, float )
     {
         check( false, "Invalid rotating ShapeCast must not invoke callback" );
