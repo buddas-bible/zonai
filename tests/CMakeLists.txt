@@ -244,6 +244,11 @@ add_executable(worldRotatingToiBenchmark collision/broadphase/world_rotating_toi
 target_link_libraries(worldRotatingToiBenchmark PRIVATE zonai::zonai)
 add_test(NAME worldRotatingToiBenchmarkOracle COMMAND worldRotatingToiBenchmark --verify)
 
+# 다중 도형 실제 World 조회 시간과 BroadPhase 후보 조회 시간을 따로 계측.
+add_executable(worldRotatingSceneBenchmark collision/broadphase/world_rotating_scene_benchmark.cpp)
+target_link_libraries(worldRotatingSceneBenchmark PRIVATE zonai::zonai)
+add_test(NAME worldRotatingSceneBenchmarkOracle COMMAND worldRotatingSceneBenchmark --verify)
+
 add_executable(dynamicTreeTests
     collision/broadphase/dynamic_tree_test.cpp
 )

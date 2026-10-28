@@ -108,6 +108,46 @@ void shapeCastDemo::setRotationRadians( float radians )
     updateHit();
 }
 
+void shapeCastDemo::setDenseTargets( bool enabled )
+{
+    if( enabled == hasDenseTargets() ) return;
+
+    if( enabled )
+    {
+        denseTargets_.reserve( 40 );
+        for( int y = 0; y < 5; ++y )
+        {
+            for( int x = 0; x < 8; ++x )
+            {
+                const int index = y * 8 + x;
+                const bodyType type = static_cast<bodyType>( index % static_cast<int>( bodyType::Count ) );
+                const transform2 pose{ { -7.0f + 2.0f * x, -4.0f + 2.0f * y },
+                    rot2::FromRadians( 0.17f * ( index % 5 ) ) };
+                const bodyId body = world_.CreateBody( type, pose );
+
+                shapeGeometry geometry{};
+                if( index % 3 == 0 ) geometry = circle2{ {}, 0.3f };
+                else if( index % 3 == 1 ) geometry = MakeBox( { 0.36f, 0.28f } );
+                else geometry = capsule2{ { -0.25f, 0.0f }, { 0.25f, 0.0f }, 0.18f };
+
+                const shapeId id = index % 11 == 0
+                    ? world_.CreateSensorShape( body, geometry,
+                        collisionFilter{ 2, ~std::uint64_t{ 0 }, 0 } )
+                    : world_.CreateShape( body, geometry );
+                denseTargets_.push_back( { body, id, "" } );
+            }
+        }
+    }
+    else
+    {
+        for( const shapeCastTarget& target : denseTargets_ )
+            world_.DestroyBody( target.body );
+        denseTargets_.clear();
+    }
+
+    updateHit();
+}
+
 void shapeCastDemo::resetPreview()
 {
     previewFraction_ = 0.0f;
@@ -168,13 +208,15 @@ queryFilter shapeCastDemo::makeFilter() const noexcept
 void shapeCastDemo::updateHit()
 {
     const queryFilter filter = makeFilter();
+    sweepStats_ = {};
 
     // 동일한 경로와 Query Filter로 세 API를 비교함. AABB는 geometry 확정이 아닌 후보 조회임.
     if( rotationRadians_ == 0.0f )
         hit_ = world_.castShapeClosest( input_, filter );
     else
         hit_ = world_.castShapeSweepClosest(
-            { input_.geometry, input_.transform, input_.translation, rotationRadians_ }, filter );
+            { input_.geometry, input_.transform, input_.translation, rotationRadians_ },
+            filter, &sweepStats_ );
 
     // 중심 RayCast는 회전을 반영하지 않는 비교용 직선 조회임.
     rayHit_ = world_.castRayClosest( input_.transform.position, input_.translation, filter );

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <vector>
 
 #include "demo.h"
 #include "dynamics/world.h"
@@ -34,6 +35,7 @@ public:
     void setSensorIncluded( bool included );
     void setCanEncroach( bool enabled );
     void setRotationRadians( float radians );
+    void setDenseTargets( bool enabled );
     void setRayVisible( bool visible ) noexcept { rayVisible_ = visible; }
     void setSweepAABBVisible( bool visible ) noexcept { sweepAABBVisible_ = visible; }
     void resetPreview();
@@ -41,6 +43,9 @@ public:
     [[nodiscard]] shapeCastProbe getProbe() const noexcept { return probe_; }
     [[nodiscard]] const world& getWorld() const noexcept { return world_; }
     [[nodiscard]] const std::array<shapeCastTarget, 4>& getTargets() const noexcept { return targets_; }
+    [[nodiscard]] const std::vector<shapeCastTarget>& getDenseTargets() const noexcept { return denseTargets_; }
+    [[nodiscard]] bool hasDenseTargets() const noexcept { return !denseTargets_.empty(); }
+    [[nodiscard]] const worldShapeSweepStats2& getSweepStats() const noexcept { return sweepStats_; }
     [[nodiscard]] const worldShapeCastInput2& getInput() const noexcept { return input_; }
     [[nodiscard]] worldShapeCastResult2 getHit() const noexcept { return hit_; }
     [[nodiscard]] float getRotationRadians() const noexcept { return rotationRadians_; }
@@ -59,10 +64,12 @@ private:
 
     world world_{};
     std::array<shapeCastTarget, 4> targets_{};
+    std::vector<shapeCastTarget> denseTargets_{};
     worldShapeCastInput2 input_{};
     shapeCastProbe probe_ = shapeCastProbe::circle;
     float rotationRadians_ = 0.0f;
     worldShapeCastResult2 hit_{};
+    worldShapeSweepStats2 sweepStats_{};
     worldRayCastResult2 rayHit_{};
     std::size_t aabbCandidateCount_ = 0;
     float previewFraction_ = 0.0f;

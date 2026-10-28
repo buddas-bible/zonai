@@ -39,6 +39,10 @@ public:
         const bool rotating = getRotationRadians() != 0.0f;
         ImGui::TextUnformatted( rotating ? "회전 조회: TOI / 회전량 제한 ±90도" : "선형 조회: GJK ShapeCast" );
 
+        bool dense = hasDenseTargets();
+        if( ImGui::Checkbox( "다중 도형 장면 (40개 추가)###ShapeCastDense", &dense ) )
+            setDenseTargets( dense );
+
         bool sensor = isSensorIncluded();
         if( ImGui::Checkbox( "센서 포함###ShapeCastSensor", &sensor ) ) setSensorIncluded( sensor );
 
@@ -64,6 +68,8 @@ public:
             const char* label = "알 수 없음";
             for( const auto& target : getTargets() )
                 if( target.shape == hit.shape ) label = target.name;
+            for( const auto& target : getDenseTargets() )
+                if( target.shape == hit.shape ) label = "다중 도형";
 
             ImGui::Text( "첫 충돌: %s / 이동 비율 %.4f", label, hit.fraction );
             ImGui::Text( "충돌 지점: (%.3f, %.3f) m", hit.point.x, hit.point.y );
@@ -79,7 +85,20 @@ public:
         else
             ImGui::TextUnformatted( "RayCast: 중심 광선과 교차하지 않음" );
 
-        ImGui::Text( "Swept AABB 후보: %zu개 (정확한 충돌 수가 아님)", getAABBCandidateCount() );
+        ImGui::Text( "조회 대상: %zu개 / Swept AABB 후보: %zu개",
+            getTargets().size() + getDenseTargets().size(), getAABBCandidateCount() );
+        if( rotating )
+        {
+            const auto& stats = getSweepStats();
+            ImGui::Text( "World Tree 후보: %d / 좁은 단계 후보: %d / TOI 호출: %d",
+                stats.treeCandidates, stats.narrowphaseCandidates, stats.toiCalls );
+            ImGui::Text( "TOI 기본 GJK: %d / 보수적 재검사: %d회, GJK %d회",
+                stats.toi.distanceCalls, stats.toi.transientAttempts,
+                stats.toi.transientDistanceCalls );
+            ImGui::Text( "보수적 재검사 복구: %d / 반복 상한: %d",
+                stats.toi.transientHits, stats.toi.transientStepLimit );
+            ImGui::TextWrapped( "카운터는 마지막 조회 1회 기준입니다. 시간 측정은 Release 벤치마크에서 수행합니다." );
+        }
         ImGui::Text( "미리보기 진행: %.1f%%", 100.0f * getPreviewFraction() );
         ImGui::TextWrapped( "초록: 정적 대상 / 보라: 센서 / 흰색: 시작 / 회색: 종료 / 노랑: 현재 자세 / 파랑: 첫 충돌 / 연파랑: 회전 정점 궤적 / 주황: 법선 / 분홍: 중심 RayCast / 청록: swept AABB" );
         if( rotating ) ImGui::TextWrapped( "중심 RayCast는 회전을 반영하지 않습니다. 회전된 도형의 충돌은 파란색 TOI 결과를 확인하세요." );
@@ -100,16 +119,21 @@ public:
         draw.DrawGrid();
 
         const world& simulation = getWorld();
-        for( const auto& target : getTargets() )
+        const auto drawTarget = [&]( const shapeCastTarget& target )
         {
-            if( !simulation.IsValid( target.shape ) ) continue;
+            if( !simulation.IsValid( target.shape ) ) return;
 
             const auto& stored = simulation.GetShape( target.shape );
             const auto pose = simulation.GetBodyTransform( target.body );
             const bool sensor = simulation.IsShapeSensor( target.shape );
-            draw.DrawShape( stored.geometry, pose, sensor ? sensorColor : staticColor, sensor ? IM_COL32( 205, 145, 255, 40 ) : IM_COL32( 105, 225, 155, 50 ) );
-            draw.DrawLabel( pose.position + vec2{ 0.0f, 1.05f }, target.name, sensor ? sensorColor : staticColor );
-        }
+            draw.DrawShape( stored.geometry, pose, sensor ? sensorColor : staticColor,
+                sensor ? IM_COL32( 205, 145, 255, 40 ) : IM_COL32( 105, 225, 155, 50 ) );
+            if( target.name[0] != '\0' )
+                draw.DrawLabel( pose.position + vec2{ 0.0f, 1.05f }, target.name,
+                    sensor ? sensorColor : staticColor );
+        };
+        for( const auto& target : getTargets() ) drawTarget( target );
+        for( const auto& target : getDenseTargets() ) drawTarget( target );
 
         const worldShapeCastInput2& input = getInput();
         const vec2 start = input.transform.position;
