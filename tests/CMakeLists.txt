@@ -225,6 +225,10 @@ add_test(
     COMMAND polygonSegmentTests
 )
 
+add_executable(dynamicTreeBoxCastTests collision/broadphase/dynamic_tree_box_cast_test.cpp)
+target_link_libraries(dynamicTreeBoxCastTests PRIVATE zonai::zonai)
+add_test(NAME dynamicTreeBoxCastTests COMMAND dynamicTreeBoxCastTests)
+
 add_executable(dynamicTreeTests
     collision/broadphase/dynamic_tree_test.cpp
 )

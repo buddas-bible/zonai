@@ -39,3 +39,23 @@ simulation.castShape( input, queryFilter{},
 `worldShapeCastTests`: 세 Body Tree, Sensor, 필터, hit 위치·normal·fraction,
 초기 겹침·encroachment, callback, world handle 수명, transform 변경/파괴,
 Circle/Capsule/Polygon/Chain, 유효하지 않은 입력을 Release에서도 검사한다.
+
+
+## BoxCast를 사용하는 BroadPhase 후보 탐색
+
+World ShapeCast는 이제 DynamicTree의 `BoxCast`를 사용한다.
+시작 도형의 tight AABB 중심을 광선으로 이동시키고, Tree node의 AABB를
+시작 도형의 half extent만큼 확장해 swept AABB가 실제 통과하는 공간만 조회한다.
+대각선 경로에서는 시작과 끝 AABB의 합집합에 들어오지만 이동 경로에서는
+벗어난 노드들을 좁은 단계(GJK) 전에 건너뛸 수 있다.
+
+- Tree 자체는 AABB 후보만 판정한다. 최종 hit은 기존 ShapeCast(GJK)와
+  QueryFilter/Chain 앞면 검사로 확정하므로 공개 결과 규약은 동일하다.
+- callback이 반환한 현재 fraction을 세 Tree 사이에 공유하여 뒤쪽 후보를 줄인다.
+- BoxCast에서도 Tree 중간에 수정하거나 Step을 재진입할 수 없다.
+- 정량적인 성능 향상은 장면과 트리 형상에 따라 다르며 벤치마크 결과로 주장하지 않는다.
+
+`dynamicTreeBoxCastTests`는 독립적인 swept-AABB 시간 구간 oracle과
+무작위/대각선/정지 축/clip/이동/삭제/Rebuild 케이스를 대조한다.
+기존 `worldShapeCastTests` 및 `worldSpatialQueryStressTests`도
+동일한 hit 의미를 유지하는지 확인한다.

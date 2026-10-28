@@ -532,26 +532,25 @@ public:
 
         if( !IsValidAABB( startBounds ) || !IsValidAABB( endBounds ) ) return;
 
-        const aabb2 sweepBounds = Union( startBounds, endBounds );
         float maxFraction = 1.0f;
 
         for( int i = 0; i < static_cast<int>( bodyType::Count ); ++i )
         {
             const dynamicTree& tree = broadPhase_.GetTree( static_cast<bodyType>( i ) );
-            bool keepQuerying = true;
 
-            tree.Query( sweepBounds,
-                [&]( std::int32_t proxyId )
+            // 넓은 swept AABB Query 대신 Tree가 이동 방향과 현재 clip fraction을 반영하도록 함.
+            tree.BoxCast( startBounds, input.translation, maxFraction,
+                [&]( std::int32_t proxyId, float limit )
                 {
                     const std::int32_t shapeIndex = tree.GetProxyShapeIndex( proxyId );
                     assert( shapeIndex >= 0 && static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
 
                     const shape& candidate = shapes_[shapeIndex];
-                    if( !ShouldQueryShape( filter, candidate.filter ) ) return true;
+                    if( !ShouldQueryShape( filter, candidate.filter ) ) return -1.0f;
 
-                    const aabb2 clippedEnd{ startBounds.min + input.translation * maxFraction,
-                        startBounds.max + input.translation * maxFraction };
-                    if( !Overlaps( Union( startBounds, clippedEnd ), candidate.aabb ) ) return true;
+                    const aabb2 clippedEnd{ startBounds.min + input.translation * limit,
+                        startBounds.max + input.translation * limit };
+                    if( !Overlaps( Union( startBounds, clippedEnd ), candidate.aabb ) ) return -1.0f;
 
                     const transform2& targetTransform = bodySims_[candidate.bodyId].transform;
 
@@ -560,11 +559,11 @@ public:
                     cast.proxyB = movingProxy;
                     cast.transform = InverseMul( targetTransform, input.transform );
                     cast.translationB = InverseTransformVector( targetTransform, input.translation );
-                    cast.maxFraction = maxFraction;
+                    cast.maxFraction = limit;
                     cast.canEncroach = input.canEncroach;
 
                     const castOutput2 hit = ShapeCast( cast );
-                    if( !hit.hit ) return true;
+                    if( !hit.hit ) return -1.0f;
 
                     if( const chainSegment2* chain = std::get_if<chainSegment2>( &candidate.geometry ) )
                     {
@@ -581,29 +580,21 @@ public:
 
                             center /= static_cast<float>( movingProxy.count );
 
-                            if( Dot( center - chain->segment.a, front ) <= 0.0f ) return true;
+                            if( Dot( center - chain->segment.a, front ) <= 0.0f ) return -1.0f;
                         }
-                        else if( Dot( hit.normal, front ) <= 0.0f ) return true;
+                        else if( Dot( hit.normal, front ) <= 0.0f ) return -1.0f;
                     }
 
                     const vec2 point = TransformPoint( targetTransform, hit.point );
                     const vec2 normal = TransformVector( targetTransform, hit.normal );
 
-                    if( !IsFinite( point ) || !IsFinite( normal ) ) return true;
+                    if( !IsFinite( point ) || !IsFinite( normal ) ) return -1.0f;
 
                     const float fraction = static_cast<float>( callback( MakeShapeId( shapeIndex ), point, normal, hit.fraction ) );
-
-                    if( fraction == 0.0f )
-                    {
-                        keepQuerying = false;
-                        return false;
-                    }
-
-                    if( std::isfinite( fraction ) && fraction > 0.0f && fraction < maxFraction ) maxFraction = fraction;
-                    return true;
+                    return std::isfinite( fraction ) ? fraction : -1.0f;
                 } );
 
-            if( !keepQuerying ) return;
+            if( maxFraction == 0.0f ) return;
         }
     }
 
