@@ -172,6 +172,9 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
 - **robust middle hit을 놓친 수는 현 TOI의 알려진 제한을 파악하는 계측값**이다.
   일반 CI에서는 이를 기록하지만 테스트 실패 조건으로 삼지 않는다.
   누락 개수와 재현 가능한 첫 사례(시작 좌표/회전/이동/타깃)를 로그로 남긴다.
+  CI에서는 Ubuntu/Windows Debug 테스트 완료 후 진단 실행 파일을 직접 호출하여
+  `cases/robust_middle/toi_missed` 통계를 성공 로그에도 노출한다.
+  Windows Release 대상에도 동일 테스트를 포함한다.
   예상 값이나 개선 비율을 CI 환경·테스트 수정 전후 결과 없이 단정하지 않는다.
 - `--csv`는 case별 간격과 TOI 결과를 출력해 비교할 수 있고,
   `--strict`는 robust middle hit 누락이 하나라도 있으면 실패한다.
