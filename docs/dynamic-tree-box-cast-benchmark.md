@@ -68,8 +68,10 @@ Windows Release CI는 `--csv` 표본 측정을 추가로 출력하지만, 이 �
 - `x_tests` / `y_tests`: BoxCast의 X/Y slab 검사 횟수.
 - `x_rejected` / `y_rejected`: 처음으로 제외 판정이 난 축의 횟수.
 - `stationary_axes`: 이동 성분이 0이어서 나눗셈 없이 비교한 축 검사 횟수.
-- `slab_divisions`: 축 이동이 0이 아닐 때 실행하는 나눗셈의 **코드상 횟수**
-  (축마다 2회). CPU 명령어 수나 CPU cycle을 측정한 값은 아니다.
+- `reciprocal_divisions`: 0이 아닌 이동 축의 역수를 query 시작 시 계산하는
+  **소스상 나눗셈 횟수**(축당 최대 1회).
+- `slab_multiplications`: node별 교차 시간 계산에 double 역수를 곱하는
+  **소스상 곱셈 횟수**(이동 축당 최대 2회). 실제 CPU 명령어나 cycle 수는 아니다.
 - `start_overlap_nodes`: 방문 시 시작 AABB와 node AABB가 이미 겹쳤던 수.
 - `root_exits`: Tree 전체 범위에서 멀어지는 경로에 대한 조기 종료 횟수.
 
@@ -81,3 +83,15 @@ node 구조로 실제 순회 수식을 복제하며, 매 입력에 대해 **prod
 
 계측 수치는 정량적인 분포 설명이지 CPU 병목의 직접적인 증거가 아니다.
 성능은 `--csv`(기존 실행 시간 모드)와 함께 분석해야 한다.
+
+### 역수 사전 계산 실험
+
+BoxCast의 노드마다 하던 float 나눗셈 대신, 이동 축별 double 역수를
+조회 시작 시 한 번 계산하고 float 경계 차이에 곱한 뒤 float 시간으로
+변환한다. 0인 이동 축은 기존 정지 축 판정을 그대로 사용한다.
+일반 무작위 후보 검증 외에 경계 접촉, callback fraction, 음수 이동,
+아주 작은 subnormal 이동을 비교한다.
+
+최적화의 실제 성능과 후보 집합 보존 여부는 Windows/Ubuntu CI와
+Release Tree/World 벤치마크로 판단한다. 나눗셈 경로 감소만으로
+빠르다고 단정하거나 CI가 통과했다는 이유만으로 병합하지 않는다.
