@@ -285,6 +285,8 @@ Sandbox ShapeCast에는 서로 독립적인 **시작 회전(-180° ~ +180°)**�
   원은 `circle.center`, 캡슐은 두 끝점, 상자는 정점과 centroid를 함께 이동한다.
   따라서 시작점/도착점을 같게 두어도 오프셋된 도형은 회전 중 원호를 따라 움직인다.
   자세·AABB·World TOI 조회는 모두 같은 offset geometry를 사용한다.
+  비교용 RayCast는 회전축이 아닌 **초기 도형 중심**에서 병진 방향으로 쏘며
+  원호 회전은 반영하지 않는다.
   로컬 오프셋은 Body의 `sweep.localCenter`를 변경하는 기능이 아니다.
   Sandbox 값의 범위 제한은 World API의 제약이 아니다.
 - 시작 각도의 범위 제한은 Sandbox 조작을 위한 것이며 World API에는
