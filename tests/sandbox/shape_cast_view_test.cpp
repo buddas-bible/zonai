@@ -29,6 +29,7 @@ int main()
     int overlayVertices = 0;
     int hiddenVertices = 0;
     int rotatingVertices = 0;
+    bool rotatingStartObserved = false;
     int denseVertices = 0;
     int tiltedLinearVertices = 0;
     int offsetRotatingVertices = 0;
@@ -109,7 +110,12 @@ int main()
 
         if( frame == 0 ) overlayVertices = geometryVertices;
         if( frame == 1 ) hiddenVertices = geometryVertices;
-        if( frame == 3 ) rotatingVertices = geometryVertices;
+        if( frame == 3 )
+        {
+            rotatingVertices = geometryVertices;
+            rotatingStartObserved = model.getStartRotationRadians() != 0.0f &&
+                model.getRotationRadians() != 0.0f;
+        }
         if( frame == 4 ) denseVertices = geometryVertices;
         if( frame == 5 ) tiltedLinearVertices = geometryVertices;
         if( frame == 6 ) offsetRotatingVertices = geometryVertices;
@@ -123,7 +129,7 @@ int main()
         std::fprintf( stderr, "RayCast and swept AABB overlay toggles did not affect the rendered geometry\n" );
         std::exit( EXIT_FAILURE );
     }
-    if( rotatingVertices <= 0 || model.getStartRotationRadians() == 0.0f )
+    if( rotatingVertices <= 0 || !rotatingStartObserved )
     {
         std::fprintf( stderr, "Rotating ShapeCast view failed to render the TOI pose\n" );
         std::exit( EXIT_FAILURE );
