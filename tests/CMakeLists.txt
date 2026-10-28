@@ -239,6 +239,11 @@ add_executable(worldShapeCastBenchmark collision/broadphase/world_shape_cast_ben
 target_link_libraries(worldShapeCastBenchmark PRIVATE zonai::zonai)
 add_test(NAME worldShapeCastBenchmarkOracle COMMAND worldShapeCastBenchmark --verify)
 
+# 회전 보수적 TOI 재검사 on/off 간 동일 입력별 비용과 추가 GJK 횟수를 비교함.
+add_executable(worldRotatingToiBenchmark collision/broadphase/world_rotating_toi_benchmark.cpp)
+target_link_libraries(worldRotatingToiBenchmark PRIVATE zonai::zonai)
+add_test(NAME worldRotatingToiBenchmarkOracle COMMAND worldRotatingToiBenchmark --verify)
+
 add_executable(dynamicTreeTests
     collision/broadphase/dynamic_tree_test.cpp
 )
