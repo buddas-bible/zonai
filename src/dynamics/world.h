@@ -829,7 +829,18 @@ public:
                       std::fabs( endPosition.x ) + std::fabs( endPosition.y ) +
                       std::fabs( targetX ) + std::fabs( targetY ) +
                       maxRadius + targetRadius + 1.0 );
-                const double diskRadius = maxRadius + targetRadius + margin;
+                // TOI는 core 거리 target+tolerance까지 Hit으로 받아들이므로
+                // 실제 도형 radius보다 큰 접촉 허용치를 반경에 더해야 함.
+                // 그렇지 않으면 작은 Circle의 정상적인 TOI hit을 조기에 버릴 수 있음.
+                const double combinedRadius =
+                    static_cast<double>( movingProxy.radius ) + toi.proxyA.radius;
+                const double contactDistance =
+                    std::max( static_cast<double>( LINEAR_SLOP ),
+                        combinedRadius - LINEAR_SLOP ) + 0.25 * LINEAR_SLOP;
+                const double contactAllowance =
+                    std::max( 0.0, contactDistance - combinedRadius );
+                const double diskRadius = maxRadius + targetRadius +
+                    contactAllowance + margin;
                 if( std::isfinite( diskRadius ) && std::isfinite( deltaX ) &&
                     std::isfinite( deltaY ) &&
                     deltaX * deltaX + deltaY * deltaY > diskRadius * diskRadius )
