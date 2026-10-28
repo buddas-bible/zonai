@@ -251,6 +251,11 @@ World의 회전 `castShapeSweep`는 이제 `toiInput2::detectTransientContacts`�
   7회 측정 중 중앙값 `ns/call` 및 guarded/legacy 비용 비율을 출력한다.
   매 측정 전 3번의 반복 실행을 한 묶음으로 사용하고 warm-up을 수행한다.
   **벤치마크 시간이나 속도 비율로 CI 통과 여부를 결정하지 않는다.**
+- 출력은 동일한 입력을 `all_direct_candidates` 1,200개,
+  `nearby_inputs` 800개, `far_inputs` 400개로 나눈다. 먼 입력은
+  실제 World의 BroadPhase가 대부분 거르는 경로이므로 직접 TOI 호출의
+  전체 비용을 실제 프레임 저하로 해석하면 안 된다. 가까운 입력도 BroadPhase
+  통과를 시뮬레이션한 결과가 아니라 생성 단계에서 지정한 그룹이다.
 - 수치는 **개별 TOI narrowphase 호출당 비용**이지 전체 World broadphase의
   프레임 시간이나 실게임 성능을 뜻하지 않는다. CPU·Windows runner·scene 구성이
   달라지면 재측정해야 한다. 거리 계산 수와 실제 Wall-clock 비용도 구분한다.
