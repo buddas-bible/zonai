@@ -40,7 +40,18 @@ struct toiOutput2
     float fraction = 1.0f;
 };
 
+// 선택적 호출 단위 계측. Solver·World API에 영향을 주지 않고 벤치마크에서만 사용함.
+struct toiDiagnostics2
+{
+    int distanceCalls = 0;
+    int transientAttempts = 0;
+    int transientDistanceCalls = 0;
+    int transientHits = 0;
+    int transientStepLimit = 0;
+};
+
 // 두 moving convex shape가 처음 접촉하기 전까지의 최대 sweep fraction을 계산함.
-toiOutput2 TimeOfImpact( const toiInput2& input );
+// diagnostics가 null이면 기존 계산 경로와 비용을 유지함.
+toiOutput2 TimeOfImpact( const toiInput2& input, toiDiagnostics2* diagnostics = nullptr );
 
 } // namespace zonai

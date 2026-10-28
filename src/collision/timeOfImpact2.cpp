@@ -374,7 +374,7 @@ double ComputeSweepSpeedBound( const shapeProxy2& proxy, const sweep2& sweep )
 // 기존 separating-axis TOI는 끝 자세에서 분리되어 있으면 중간의 짧은 회전 접촉을
 // 놓칠 수 있음. World 조회에서만 거리 변화 상한으로 안전한 진행폭을 택해 재확인함.
 // 일정한 시간 샘플 간격이 아니라 (현재 core 거리 - target) / 최대 상대 속도로 전진.
-bool FindTransientRotationContact( const toiInput2& input, toiOutput2& output )
+bool FindTransientRotationContact( const toiInput2& input, toiOutput2& output, toiDiagnostics2* diagnostics )
 {
     const double speedBound = ComputeSweepSpeedBound( input.proxyA, input.sweepA ) +
         ComputeSweepSpeedBound( input.proxyB, input.sweepB );
@@ -401,6 +401,7 @@ bool FindTransientRotationContact( const toiInput2& input, toiOutput2& output )
 
         simplexCache2 cache{};
         const distanceOutput2 distance = ShapeDistance( distanceInput, cache );
+        if( diagnostics ) ++diagnostics->transientDistanceCalls;
         if( !std::isfinite( distance.distance ) ) return false;
 
         if( distance.distance <= target + tolerance )
@@ -416,6 +417,7 @@ bool FindTransientRotationContact( const toiInput2& input, toiOutput2& output )
             output.fraction = time;
             output.point = 0.5f * ( pointA + pointB );
             output.normal = worldNormal;
+            if( diagnostics ) ++diagnostics->transientHits;
             return true;
         }
 
@@ -437,12 +439,13 @@ bool FindTransientRotationContact( const toiInput2& input, toiOutput2& output )
         time = next;
     }
 
+    if( diagnostics ) ++diagnostics->transientStepLimit;
     return false;
 }
 
 } // namespace
 
-toiOutput2 TimeOfImpact( const toiInput2& input )
+toiOutput2 TimeOfImpact( const toiInput2& input, toiDiagnostics2* diagnostics )
 {
     assert( input.proxyA.count > 0 );
     assert( input.proxyB.count > 0 );
@@ -491,6 +494,7 @@ toiOutput2 TimeOfImpact( const toiInput2& input )
         distanceInput.transform = InverseMul( transformA, transformB );
 
         const distanceOutput2 distanceOutput = ShapeDistance( distanceInput, cache );
+        if( diagnostics ) ++diagnostics->distanceCalls;
 
         const vec2 worldNormal = Rotate( transformA.rotation, distanceOutput.normal );
 
@@ -656,8 +660,9 @@ toiOutput2 TimeOfImpact( const toiInput2& input )
     if( input.detectTransientContacts &&
         ( output.state == toiState2::Separated || output.state == toiState2::Failed ) )
     {
+        if( diagnostics ) ++diagnostics->transientAttempts;
         toiOutput2 transient{};
-        if( FindTransientRotationContact( input, transient ) )
+        if( FindTransientRotationContact( input, transient, diagnostics ) )
             return transient;
     }
 

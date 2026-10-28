@@ -232,3 +232,32 @@ World의 회전 `castShapeSweep`는 이제 `toiInput2::detectTransientContacts`�
 `worldRotatingBoxSweepOracleTests`는 고정 seed 0x57B0A923의 index 664를
 **필수 충돌 회귀 테스트**로 확인하며, 전체 1,800개 샘플의 diagnostic
 미검출 건수도 기존과 같은 CI 출력에서 확인한다.
+
+
+## 보수적 재검사 프로파일 (Release)
+
+`worldRotatingToiBenchmark`는 회전 상자 1,200개 고정 seed 입력
+(원본 `worldRotatingBoxSweepOracleTests`와 동일한 입력·생성 순서)을 사용한다.
+반드시 똑같은 TOI에 대해 `detectTransientContacts=false`와 `true`를 비교한다.
+
+- `toiDiagnostics2`는 선택적 출력 포인터이며 일반 `TimeOfImpact(input)`/CCD 경로는
+  null을 사용한다. 기본 분리 거리 GJK 호출 수, 보수적 재검사 시도 수,
+  재검사 GJK 호출 수, 복구된 hit 수, 최대 반복 도달 수를 각각 기록한다.
+  스레드 전역 카운터나 모든 프레임 누적 상태를 추가하지 않는다.
+- `--verify`는 프로파일 on/off가 같은 결과를 내는지, 기존 TOI가 찾은 hit이
+  보존되는지, 664번 반례를 복구하는지, World API 결과와 직접 TOI 결과가
+  일치하는지를 검증한다. 일반 CTest와 Windows Release 검증 대상이다.
+- `--csv`는 총 호출 수·보수적 재검사 빈도·추가 GJK 횟수,
+  7회 측정 중 중앙값 `ns/call` 및 guarded/legacy 비용 비율을 출력한다.
+  매 측정 전 3번의 반복 실행을 한 묶음으로 사용하고 warm-up을 수행한다.
+  **벤치마크 시간이나 속도 비율로 CI 통과 여부를 결정하지 않는다.**
+- 출력은 동일한 입력을 `all_direct_candidates` 1,200개,
+  `nearby_inputs` 800개, `far_inputs` 400개로 나눈다. 먼 입력은
+  실제 World의 BroadPhase가 대부분 거르는 경로이므로 직접 TOI 호출의
+  전체 비용을 실제 프레임 저하로 해석하면 안 된다. 가까운 입력도 BroadPhase
+  통과를 시뮬레이션한 결과가 아니라 생성 단계에서 지정한 그룹이다.
+- 수치는 **개별 TOI narrowphase 호출당 비용**이지 전체 World broadphase의
+  프레임 시간이나 실게임 성능을 뜻하지 않는다. CPU·Windows runner·scene 구성이
+  달라지면 재측정해야 한다. 거리 계산 수와 실제 Wall-clock 비용도 구분한다.
+
+기존 GJK 선형 ShapeCast와 엔진의 CCD·Solver 동작은 이 계측 작업 범위 밖이다.
