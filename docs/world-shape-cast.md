@@ -199,3 +199,33 @@ Windows Release에도 두 테스트를 포함한다.
 ghost vertex ownership이나 높은 각속도, 변화하는 양쪽 Body의 전역 연속
 충돌 판정까지 검증하는 것은 아니다. 향후 개선은 같은 입력·seed의
 기준 로그 및 성능을 비교한 뒤 별도 PR로 도입한다.
+
+
+## 회전 중간 접촉 누락 #221 수정
+
+기존 TOI는 분리축이 **끝 시점**에서도 충분히 떨어져 있으면 `Separated`로
+종료할 수 있다. 하지만 회전하는 물체에서는 처음/끝이 분리돼도 중간
+접촉이 가능하다. 진단 PR #220의 얇은 상자/작은 원 index 664에서
+이 문제가 재현되었다.
+
+World의 회전 `castShapeSweep`는 이제 `toiInput2::detectTransientContacts`를
+켜고, 기존 TOI가 `Separated` 또는 `Failed`일 때만
+**거리 변화 상한 기반의 보수적 전진**으로 재확인한다.
+
+- 평행이동의 최대 속도는 `|c2-c1|`, nlerp 회전의 최대 각속도는
+  `2*tan(|Δθ|/2)` rad/fraction이다. 각 support 점에서 localCenter까지의
+  최대 거리를 곱해 이동 가능한 core 거리의 상한을 만든다.
+- 현재 GJK core 분리 거리 `d`와 접촉 목표 `target + tolerance`에 대해
+  `(d-target-tolerance)/maxRelativeSpeed`보다 더 멀리 진행하지 않는다.
+  이는 **고정 간격 시간 샘플링이 아니라**, 어떤 점도 건너뛰지 않도록
+  이동 거리의 상한으로 전진폭을 정하는 방법이다.
+- 충돌을 찾으면 그 시점의 witness points/normal로 World hit을 보고한다.
+  256회 내에 float 분율 진전이 불가능하거나 판정이 끝나지 않으면
+  기존 TOI 결과를 유지하며, 모든 물리적 sweep의 완전한 검출을 약속하지 않는다.
+- 기존 CCD의 `TimeOfImpact` 호출은 이 기능을 켜지 않아 기본 알고리즘,
+  반복 한도, Solver 경로 및 성능 의미를 바꾸지 않는다.
+  World에서 회전량이 0인 기존 GJK 선형 ShapeCast에도 영향이 없다.
+
+`worldRotatingBoxSweepOracleTests`는 고정 seed 0x57B0A923의 index 664를
+**필수 충돌 회귀 테스트**로 확인하며, 전체 1,800개 샘플의 diagnostic
+미검출 건수도 기존과 같은 CI 출력에서 확인한다.
