@@ -108,6 +108,7 @@ struct worldShapeSweepStats2
     int treeCandidates = 0;
     int narrowphaseCandidates = 0;
     int clippedCandidates = 0;
+    int distancePrunedCandidates = 0;
     int toiCalls = 0;
     int hits = 0;
     toiDiagnostics2 toi{};
@@ -782,11 +783,60 @@ public:
                         return true;
                     }
                 }
-                if( stats ) ++stats->narrowphaseCandidates;
-
                 const transform2& targetTransform = bodySims_[candidate.bodyId].transform;
                 toiInput2 toi{};
                 toi.proxyA = MakeShapeProxy( candidate.geometry );
+
+                // 원점 이동 경로와 타깃 원점 사이의 최소 거리로 충돌 불가능한
+                // 도형을 TOI 전에 제외함. 각 proxy의 모든 support 점은
+                // 로컬 원점을 중심으로 한 circumscribed disk 안에 들어감.
+                // 회전 궤적이 복잡해도 이 두 원의 거리보다 가까워질 수 없음.
+                double targetRadius = static_cast<double>( toi.proxyA.radius );
+                for( int p = 0; p < toi.proxyA.count; ++p )
+                {
+                    const vec2 point = toi.proxyA.points[p];
+                    targetRadius = std::max( targetRadius,
+                        std::hypot( static_cast<double>( point.x ),
+                            static_cast<double>( point.y ) ) + toi.proxyA.radius );
+                }
+
+                const double startX = input.transform.position.x;
+                const double startY = input.transform.position.y;
+                const double targetX = targetTransform.position.x;
+                const double targetY = targetTransform.position.y;
+                const double dx = static_cast<double>( endPosition.x ) - startX;
+                const double dy = static_cast<double>( endPosition.y ) - startY;
+                const double lengthSquared = dx * dx + dy * dy;
+                double nearestTime = 0.0;
+                if( lengthSquared > 0.0 )
+                    nearestTime = std::clamp(
+                        ( ( targetX - startX ) * dx + ( targetY - startY ) * dy ) /
+                        lengthSquared, 0.0, static_cast<double>( maxFraction ) );
+
+                const double deltaX = targetX - ( startX + nearestTime * dx );
+                const double deltaY = targetY - ( startY + nearestTime * dy );
+                const double targetRotationLength = std::hypot(
+                    static_cast<double>( targetTransform.rotation.c ),
+                    static_cast<double>( targetTransform.rotation.s ) );
+                // World의 local transform이 정확히 단위 회전이 아니어도
+                // 보수적이어야 하므로 타깃 반경에 최대 회전 스케일을 반영함.
+                targetRadius *= std::max( 1.0, targetRotationLength );
+                constexpr double DISTANCE_EPSILON = std::numeric_limits<float>::epsilon();
+                const double margin = 16.0 * DISTANCE_EPSILON *
+                    ( std::fabs( startX ) + std::fabs( startY ) +
+                      std::fabs( endPosition.x ) + std::fabs( endPosition.y ) +
+                      std::fabs( targetX ) + std::fabs( targetY ) +
+                      maxRadius + targetRadius + 1.0 );
+                const double diskRadius = maxRadius + targetRadius + margin;
+                if( std::isfinite( diskRadius ) && std::isfinite( deltaX ) &&
+                    std::isfinite( deltaY ) &&
+                    std::hypot( deltaX, deltaY ) > diskRadius )
+                {
+                    if( stats ) ++stats->distancePrunedCandidates;
+                    return true;
+                }
+
+                if( stats ) ++stats->narrowphaseCandidates;
                 toi.proxyB = movingProxy;
                 toi.sweepA = { {}, targetTransform.position, targetTransform.position,
                     targetTransform.rotation, targetTransform.rotation };
