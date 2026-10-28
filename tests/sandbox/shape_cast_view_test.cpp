@@ -31,8 +31,9 @@ int main()
     int rotatingVertices = 0;
     int denseVertices = 0;
     int tiltedLinearVertices = 0;
+    int offsetRotatingVertices = 0;
 
-    for( int frame = 0; frame < 6; ++frame )
+    for( int frame = 0; frame < 7; ++frame )
     {
         if( frame == 1 )
         {
@@ -70,6 +71,16 @@ int main()
             model.setStart( { -5.0f, 0.0f } );
             model.setTarget( { 6.0f, 0.0f } );
         }
+        if( frame == 6 )
+        {
+            model.setDenseTargets( false );
+            model.setSensorIncluded( false );
+            model.setStartRotationRadians( 0.0f );
+            model.setStart( { -1.0f, 1.8f } );
+            model.setTarget( { -1.0f, 1.8f } );
+            model.setLocalOffset( { 1.0f, 0.0f } );
+            model.setRotationRadians( -1.5707963267948966f );
+        }
 
         ImGui::NewFrame();
         ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
@@ -101,6 +112,7 @@ int main()
         if( frame == 3 ) rotatingVertices = geometryVertices;
         if( frame == 4 ) denseVertices = geometryVertices;
         if( frame == 5 ) tiltedLinearVertices = geometryVertices;
+        if( frame == 6 ) offsetRotatingVertices = geometryVertices;
 
         ImGui::EndChild();
         ImGui::End();
@@ -125,6 +137,12 @@ int main()
         model.getSweepStats().toiCalls != 0 )
     {
         std::fprintf( stderr, "Initial-angle-only linear ShapeCast view failed to render\n" );
+        std::exit( EXIT_FAILURE );
+    }
+    if( offsetRotatingVertices <= 0 || model.getLocalOffset().x != 1.0f ||
+        model.getRotationRadians() >= 0.0f || !model.getHit().hit )
+    {
+        std::fprintf( stderr, "Offset pure-rotation ShapeCast view failed to render\n" );
         std::exit( EXIT_FAILURE );
     }
     ImGui::DestroyContext();
