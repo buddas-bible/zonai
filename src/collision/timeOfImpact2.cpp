@@ -330,7 +330,8 @@ float EvaluateSeparation( const separationFunction2& function, int indexA, int i
     return 0.0f;
 }
 
-// 정규화된 cos/sin 선형 보간의 각속도 상한은 2*tan(theta/2) rad/fraction.
+// nlerp 회전의 각속도는 |cross(q1,q2)| / |(1-t)q1+t*q2|^2.
+// 두 rotation의 길이가 정확히 1이라는 가정 없이 분모의 최소값으로 상한을 구함.
 // sweep의 모든 support vertex에 대해 이동 거리의 Lipschitz 상한을 계산함.
 double ComputeSweepSpeedBound( const shapeProxy2& proxy, const sweep2& sweep )
 {
@@ -338,14 +339,25 @@ double ComputeSweepSpeedBound( const shapeProxy2& proxy, const sweep2& sweep )
     const double dy = static_cast<double>( sweep.c2.y ) - sweep.c1.y;
     const double linearSpeed = std::hypot( dx, dy );
 
-    const double dot = std::clamp(
-        static_cast<double>( sweep.q1.c ) * sweep.q2.c +
-        static_cast<double>( sweep.q1.s ) * sweep.q2.s, -1.0, 1.0 );
+    const double q1x = sweep.q1.c;
+    const double q1y = sweep.q1.s;
+    const double q2x = sweep.q2.c;
+    const double q2y = sweep.q2.s;
+    const double diffX = q2x - q1x;
+    const double diffY = q2y - q1y;
+    const double diffLengthSquared = diffX * diffX + diffY * diffY;
 
-    // 반대 방향의 같은 크기 quaternion-like rot2 보간은 중간에서 정의되지 않음.
-    if( dot <= -0.999999 ) return std::numeric_limits<double>::infinity();
+    double closestTime = 0.0;
+    if( diffLengthSquared > 0.0 )
+        closestTime = std::clamp(
+            -( q1x * diffX + q1y * diffY ) / diffLengthSquared, 0.0, 1.0 );
 
-    const double angularSpeed = 2.0 * std::sqrt( ( 1.0 - dot ) / ( 1.0 + dot ) );
+    const double closestX = q1x + closestTime * diffX;
+    const double closestY = q1y + closestTime * diffY;
+    const double minLengthSquared = closestX * closestX + closestY * closestY;
+    if( minLengthSquared <= 0.0 ) return std::numeric_limits<double>::infinity();
+
+    const double angularSpeed = std::fabs( q1x * q2y - q1y * q2x ) / minLengthSquared;
     double radius = 0.0;
 
     for( int i = 0; i < proxy.count; ++i )
