@@ -180,6 +180,19 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
   `--strict`는 robust middle hit 누락이 하나라도 있으면 실패한다.
   `--strict`는 기존 알고리즘의 회전 한계를 분석할 때만 사용하며 CI 기본값은 아니다.
 
+추가로 `worldRotatingBoxSweepOracleTests`는 600개 고정 seed
+(0x57B0A923) 사례에서 **오프셋된 얇은 상자(1.04×0.24m)**가 회전하는
+경로와 정적 원(반지름 0.33m)의 충돌을 비교한다.
+각 시점의 타깃 원 중심을 상자 로컬 좌표로 역회전하여
+**point-to-oriented-box 거리**와 원 반지름 차이를 계산하는 독립 기하
+oracle을 사용한다. 따라서 얇은 다각형이 중간에 잠깐 닿는 경우를
+원-원 검증과 구별해 볼 수 있다.
+
+두 테스트 모두 512구간 샘플과 동일한 `0.04m` robust 분리/침투
+판정 기준, `--csv` 및 `--strict` 옵션을 사용한다.
+CI 성공 로그에서 원-원과 상자-원 누락 건수를 각각 출력하며,
+Windows Release에도 두 테스트를 포함한다.
+
 이 테스트는 **회전 TOI 정확도 진단**에 국한한다. Polygon/Chain 타깃의
 ghost vertex ownership이나 높은 각속도, 변화하는 양쪽 Body의 전역 연속
 충돌 판정까지 검증하는 것은 아니다. 향후 개선은 같은 입력·seed의
