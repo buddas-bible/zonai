@@ -108,6 +108,9 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
 - 좁은 단계는 기존 `TimeOfImpact`의 static A와 이동/회전하는 B sweep을
   사용한다. Sensor, QueryFilter, Chain 타깃의 앞면 정책은 유지하고,
   callback은 -1 무시 / 0 종료 / 양수 fraction clip을 지원한다.
+  Chain의 시작점 앞면 판정과 hit normal을 직접 확인하며, CCD 전용
+  최소 이동량 heuristic은 World 조회에서 사용하지 않는다.
+  따라서 짧은 이동으로 처음 접촉하는 경우도 조회 대상으로 남긴다.
   순서 보장은 없으며 최초 fraction 0 hit은 일반 조회에만 보고하고
   closest에서는 건너뛴다.
 - `TimeOfImpact`는 swept separating-axis 기반 **보수적 진행 추정**이다.
