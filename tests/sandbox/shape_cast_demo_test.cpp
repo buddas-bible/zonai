@@ -50,6 +50,18 @@ int main()
         "Default sweep hits first target circle" );
     near( initial.fraction, ( 4.0f - 0.8f - 0.45f - 0.005f ) / 11.0f,
         "Initial hit fraction is computed by world ShapeCast" );
+    const auto firstRay = scene.getRayHit();
+    check( firstRay.hit && firstRay.shape == initial.shape && firstRay.fraction > initial.fraction,
+        "RayCast uses the same path but hits later than a finite-size probe" );
+    near( firstRay.fraction, ( 4.0f - 0.8f ) / 11.0f, "Center ray hits the circle surface" );
+    check( scene.getAABBCandidateCount() == 2, "Swept AABB includes circle and box broadphase candidates" );
+
+    scene.setRayVisible( false );
+    scene.setSweepAABBVisible( false );
+    check( !scene.isRayVisible() && !scene.isSweepAABBVisible() && scene.getRayHit().hit,
+        "Overlay visibility must not change the query results" );
+    scene.setRayVisible( true );
+    scene.setSweepAABBVisible( true );
     near( scene.getPreviewFraction(), 0.0f, "Initial preview is paused at start" );
 
     scene.step( 0.5f, 4 );
@@ -80,10 +92,12 @@ int main()
     check( scene.getHit().hit && scene.getHit().shape == sensor, "Sensor is hit with default query filter" );
 
     scene.setSensorIncluded( false );
-    check( !scene.getHit().hit, "Disabling the sensor's layer must omit it from cast" );
+    check( !scene.getHit().hit && !scene.getRayHit().hit && scene.getAABBCandidateCount() == 0,
+        "Sensor filter must apply equally to ShapeCast, RayCast and AABB query" );
 
     scene.setSensorIncluded( true );
-    check( scene.getHit().shape == sensor, "Re-enabling sensor restores hit" );
+    check( scene.getHit().shape == sensor && scene.getRayHit().shape == sensor &&
+        scene.getAABBCandidateCount() == 1, "Sensor is restored in all three spatial queries" );
 
     scene.setCanEncroach( true );
     check( scene.getInput().canEncroach && scene.getHit().hit, "Encroachment flag reaches World query" );
@@ -92,6 +106,19 @@ int main()
     scene.handleInput( { .mousePosition = { -8.0f, 2.0f }, .mousePressed = true } );
     check( scene.getInput().translation.x != unchanged.x && !scene.getHit().hit,
         "Click changes the sweep destination and refreshes the hit" );
+
+    // RayCast는 선만 검사하므로 원 반지름 안쪽을 스치지 않는 경로도 ShapeCast에는 충돌함.
+    scene.setStart( { -5.0f, 1.1f } );
+    scene.setTarget( { 6.0f, 1.1f } );
+    check( scene.getHit().hit && scene.getHit().shape == scene.getTargets()[0].shape &&
+        !scene.getRayHit().hit, "ShapeCast hits a near-miss path where the center ray misses" );
+    check( scene.getAABBCandidateCount() >= 1, "Swept AABB still returns broadphase candidates" );
+
+    const vec2 beforeShiftEnd = scene.getInput().transform.position + scene.getInput().translation;
+    scene.handleInput( { .mousePosition = { -6.0f, 1.1f }, .mousePressed = true, .selectTrialPosition = true } );
+    check( LengthSquared( scene.getInput().transform.position - vec2{ -6.0f, 1.1f } ) == 0.0f &&
+           LengthSquared( scene.getInput().transform.position + scene.getInput().translation - beforeShiftEnd ) < 1.0e-6f,
+           "Shift+left click changes start without moving destination" );
 
     scene.cancelInput();
     scene.step( 0.0f, 1 );

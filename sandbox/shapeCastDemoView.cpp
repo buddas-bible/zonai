@@ -36,8 +36,14 @@ public:
         bool encroach = getInput().canEncroach;
         if( ImGui::Checkbox( "초기 근접 허용###ShapeCastEncroach", &encroach ) ) setCanEncroach( encroach );
 
+        bool showRay = isRayVisible();
+        if( ImGui::Checkbox( "RayCast 비교 표시###ShapeCastRayVisible", &showRay ) ) setRayVisible( showRay );
+
+        bool showSweep = isSweepAABBVisible();
+        if( ImGui::Checkbox( "이동 AABB 후보 표시###ShapeCastAABBVisible", &showSweep ) ) setSweepAABBVisible( showSweep );
+
         if( ImGui::Button( "미리보기 처음부터###ShapeCastResetPreview" ) ) resetPreview();
-        ImGui::TextWrapped( "캔버스 왼쪽 클릭: 이동 목표점. 재생/1프레임: 도형 미리보기 이동. 상단 초기화는 경로 설정을 복원합니다." );
+        ImGui::TextWrapped( "캔버스 왼쪽 클릭: 이동 목표점 / Shift+왼쪽 클릭: 시작점. 재생/1프레임: 미리보기 이동. 상단 초기화는 경로를 복원합니다." );
 
         const auto hit = getHit();
         if( hit.hit )
@@ -54,8 +60,15 @@ public:
         {
             ImGui::TextUnformatted( "현재 경로에는 충돌이 없습니다." );
         }
+        const auto rayHit = getRayHit();
+        if( rayHit.hit )
+            ImGui::Text( "RayCast 첫 충돌: t=%.4f / 지점 (%.3f, %.3f) m", rayHit.fraction, rayHit.point.x, rayHit.point.y );
+        else
+            ImGui::TextUnformatted( "RayCast: 중심 광선과 교차하지 않음" );
+
+        ImGui::Text( "이동 AABB 후보: %zu개 (정확한 충돌 수가 아님)", getAABBCandidateCount() );
         ImGui::Text( "미리보기 진행: %.1f%%", 100.0f * getPreviewFraction() );
-        ImGui::TextWrapped( "초록: 정적 대상 / 보라: 센서 / 흰색: 시작 / 회색: 전체 끝점 / 노랑: 현재 위치 / 파랑: 최초 충돌 위치 / 주황: 충돌점·법선" );
+        ImGui::TextWrapped( "초록: 정적 대상 / 보라: 센서 / 흰색: 시작 / 회색: 전체 끝점 / 노랑: 현재 위치 / 파랑: ShapeCast 충돌 / 주황: 법선 / 분홍: RayCast / 청록: 이동 AABB" );
     }
 
     void draw( debugDraw& draw ) const override
@@ -67,6 +80,8 @@ public:
         constexpr ImU32 progressColor = IM_COL32( 250, 215, 75, 255 );
         constexpr ImU32 hitColor = IM_COL32( 75, 170, 255, 255 );
         constexpr ImU32 normalColor = IM_COL32( 255, 130, 75, 255 );
+        constexpr ImU32 rayColor = IM_COL32( 255, 110, 205, 255 );
+        constexpr ImU32 boundsColor = IM_COL32( 75, 230, 215, 180 );
 
         draw.DrawGrid();
 
@@ -86,8 +101,25 @@ public:
         const vec2 start = input.transform.position;
         const vec2 end = start + input.translation;
 
+        if( isSweepAABBVisible() ) draw.DrawAABB( getSweepAABB(), boundsColor, 1.5f );
+
         draw.DrawSegment( { start, end }, endColor, 2.0f );
         draw.DrawPoint( end, endColor, 4.0f );
+
+        if( isRayVisible() )
+        {
+            const worldRayCastResult2 ray = getRayHit();
+            if( ray.hit )
+            {
+                draw.DrawSegment( { start, ray.point }, rayColor, 2.5f );
+                draw.DrawPoint( ray.point, rayColor, 5.0f );
+                if( LengthSquared( ray.normal ) > 0.0f ) draw.DrawArrow( ray.point, ray.normal, rayColor, 0.55f );
+
+                char rayLabel[48];
+                std::snprintf( rayLabel, sizeof( rayLabel ), "Ray t = %.3f", ray.fraction );
+                draw.DrawLabel( ray.point + vec2{ 0.15f, 0.45f }, rayLabel, rayColor );
+            }
+        }
         draw.DrawShape( input.geometry, input.transform, startColor, IM_COL32( 245, 245, 245, 24 ) );
         draw.DrawShape( input.geometry, { end, input.transform.rotation }, endColor, 0 );
 

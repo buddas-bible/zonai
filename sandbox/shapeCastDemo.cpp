@@ -38,7 +38,11 @@ void shapeCastDemo::step( float timeStep, int subStepCount )
 
 void shapeCastDemo::handleInput( const demoInput& input )
 {
-    if( input.mousePressed && IsFinite( input.mousePosition ) ) setTarget( input.mousePosition );
+    if( !input.mousePressed || !IsFinite( input.mousePosition ) ) return;
+
+    // 기존 Canvas의 Shift 상태를 사용해 시작점 / 도착점 선택을 분리함.
+    if( input.selectTrialPosition ) setStart( input.mousePosition );
+    else setTarget( input.mousePosition );
 }
 
 void shapeCastDemo::setProbe( shapeCastProbe probe )
@@ -96,12 +100,40 @@ void shapeCastDemo::resetPreview()
     previewFraction_ = 0.0f;
 }
 
-void shapeCastDemo::updateHit()
+aabb2 shapeCastDemo::getSweepAABB() const noexcept
+{
+    const aabb2 start = ComputeShapeAABB( input_.geometry, input_.transform );
+    return Union( start, { start.min + input_.translation, start.max + input_.translation } );
+}
+
+queryFilter shapeCastDemo::makeFilter() const noexcept
 {
     queryFilter filter{};
     if( !sensorIncluded_ ) filter.maskBits &= ~std::uint64_t{ 2 };
+    return filter;
+}
 
+void shapeCastDemo::updateHit()
+{
+    const queryFilter filter = makeFilter();
+
+    // 동일한 경로와 Query Filter로 세 API를 비교함. AABB는 geometry 확정이 아닌 후보 조회임.
     hit_ = world_.castShapeClosest( input_, filter );
+    rayHit_ = world_.castRayClosest( input_.transform.position, input_.translation, filter );
+
+    aabbCandidateCount_ = 0;
+    const aabb2 swept = getSweepAABB();
+
+    if( IsValidAABB( swept ) )
+    {
+        world_.overlapAABB( swept, filter,
+            [&]( shapeId )
+            {
+                ++aabbCandidateCount_;
+                return true;
+            } );
+    }
+
     resetPreview();
 }
 
