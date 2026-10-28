@@ -180,13 +180,15 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
   `--strict`는 robust middle hit 누락이 하나라도 있으면 실패한다.
   `--strict`는 기존 알고리즘의 회전 한계를 분석할 때만 사용하며 CI 기본값은 아니다.
 
-추가로 `worldRotatingBoxSweepOracleTests`는 600개 고정 seed
-(0x57B0A923) 사례에서 **오프셋된 얇은 상자(1.04×0.24m)**가 회전하는
-경로와 정적 원(반지름 0.33m)의 충돌을 비교한다.
+추가로 `worldRotatingBoxSweepOracleTests`는 1,200개 고정 seed
+(0x57B0A923) 사례에서 오프셋된 상자가 회전하는 경로와 정적 원의
+충돌을 비교한다. 앞의 600개는 상자(1.04×0.24m)와 원(반지름 0.33m),
+나머지 600개는 **더 얇은 상자(0.9×0.03m)와 작은 원(반지름 0.04m)**으로
+아주 짧은 접촉 구간을 시험한다. 얇은 경우의 robust 최소 침투 기준은
+-0.01m이며 시작/종료 분리 기준은 동일한 +0.04m이다.
 각 시점의 타깃 원 중심을 상자 로컬 좌표로 역회전하여
 **point-to-oriented-box 거리**와 원 반지름 차이를 계산하는 독립 기하
-oracle을 사용한다. 따라서 얇은 다각형이 중간에 잠깐 닿는 경우를
-원-원 검증과 구별해 볼 수 있다.
+oracle을 사용한다. 결과는 broad와 thin의 누락 건수로 구분해 기록한다.
 
 두 테스트 모두 512구간 샘플과 동일한 `0.04m` robust 분리/침투
 판정 기준, `--csv` 및 `--strict` 옵션을 사용한다.
