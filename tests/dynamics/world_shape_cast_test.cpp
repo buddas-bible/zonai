@@ -528,6 +528,23 @@ void checkRotatingDistanceBoundPruning()
     const auto shortHit = translation.castShapeSweepClosest( input );
     check( shortHit.hit && shortHit.shape == shortTouchShape,
         "Short rotating translation must retain centerline collisions" );
+
+    // 도형 반경은 0.002이지만 TOI는 LINEAR_SLOP까지 core contact를 허용함.
+    // 물리적 bounding disk 사이의 빈 간격만 검사하면 기존 hit을 잃게 됨.
+    world tolerant{};
+    const bodyId toleranceBody = tolerant.CreateBody( bodyType::Static,
+        { { 0.7099352f, 0.7099352f }, {} } );
+    const shapeId toleranceTarget = tolerant.CreateShape(
+        toleranceBody, circle2{ {}, 0.001f } );
+    input = {};
+    input.geometry = circle2{ { 1.0f, 0.0f }, 0.001f };
+    input.rotationRadians = 1.5707963267948966f;
+    stats = {};
+    const auto toleranceHit = tolerant.castShapeSweepClosest( input, {}, &stats );
+    check( toleranceHit.hit && toleranceHit.shape == toleranceTarget &&
+        toleranceHit.fraction > 0.0f && toleranceHit.fraction < 1.0f &&
+        stats.distancePrunedCandidates == 0 && stats.toiCalls == 1,
+        "Conservative pruning must preserve TOI contact-slop tolerance" );
 }
 
 } // namespace
