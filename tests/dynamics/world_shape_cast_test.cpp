@@ -346,6 +346,38 @@ void checkRotatingSweep()
     check( !filtered.castShapeSweepClosest( input, queryFilter{ 4, 2 } ).hit,
         "Destroyed rotating query target must disappear" );
 
+    // CCD one-sided 조기 종료 전에 시작 겹침을 보고해야 함 (앞면에서 멀어지는 회전).
+    world chainWorld{};
+    const bodyId chainBody = chainWorld.CreateBody();
+    const shapeId edge = chainWorld.CreateShape( chainBody, chainSegment2{
+        { -4.0f, 0.0f }, { { -2.0f, 0.0f }, { 2.0f, 0.0f } }, { 4.0f, 0.0f } } );
+    worldShapeSweepInput2 chainInput{};
+    chainInput.geometry = circle2{ {}, 0.4f };
+    chainInput.transform.position = { 0.0f, -0.2f };
+    chainInput.translation = { 0.0f, -1.0f };
+    chainInput.rotationRadians = 0.5f;
+    int chainCallbacks = 0;
+    chainWorld.castShapeSweep( chainInput, [&]( shapeId id, vec2 point, vec2 normal, float fraction )
+    {
+        check( id == edge && fraction == 0.0f && LengthSquared( normal ) == 0.0f &&
+            IsFinite( point ), "Moving-away initial front-chain overlap must remain reported" );
+        ++chainCallbacks;
+        return 1.0f;
+    } );
+    check( chainCallbacks == 1 && !chainWorld.castShapeSweepClosest( chainInput ).hit,
+        "Front-chain overlap must be ignored only by closest sweep" );
+    chainInput.transform.position.y = 0.2f;
+    chainInput.translation.y = 1.0f;
+    check( !chainWorld.castShapeSweepClosest( chainInput ).hit,
+        "Rotating chain sweep must reject an initial back-face overlap" );
+    int backCallbacks = 0;
+    chainWorld.castShapeSweep( chainInput, [&]( shapeId, vec2, vec2, float )
+    {
+        ++backCallbacks;
+        return 1.0f;
+    } );
+    check( backCallbacks == 0, "Rotating query must not report chain back faces" );
+
     const auto invalidCallback = []( shapeId, vec2, vec2, float )
     {
         check( false, "Invalid rotating ShapeCast must not invoke callback" );
