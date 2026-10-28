@@ -261,3 +261,42 @@ World의 회전 `castShapeSweep`는 이제 `toiInput2::detectTransientContacts`�
   달라지면 재측정해야 한다. 거리 계산 수와 실제 Wall-clock 비용도 구분한다.
 
 기존 GJK 선형 ShapeCast와 엔진의 CCD·Solver 동작은 이 계측 작업 범위 밖이다.
+
+
+## 다중 도형 World 회전 ShapeCast 계측
+
+Sandbox의 ShapeCast 시각화에서 **다중 도형 장면(40개 추가)**을 켜면
+기존 네 대상 외에 Static / Dynamic / Kinematic Body가 교차 배치되고,
+Circle / Polygon / Capsule이 혼합된 40개 도형을 생성한다.
+체크박스를 끄면 해당 Body·proxy를 삭제해 원래 장면으로 돌아간다.
+미리보기는 Physics Step이 아닌 공간 조회이며 테스트에서는 기본 장면을 유지한다.
+
+회전 조회 UI에는 마지막 `castShapeSweepClosest` 호출의
+`worldShapeSweepStats2` 수치가 표시된다:
+- `treeCandidates`: 세 DynamicTree의 AABB 후보 중 callback에 들어온 개수
+- `narrowphaseCandidates`: QueryFilter와 tight shape AABB를 통과한 후보 수
+- `toiCalls`: 실제 `TimeOfImpact` 호출 수 (Chain의 초기 overlap 조회는 제외)
+- `toi.distanceCalls`, `toi.transientAttempts`, `toi.transientDistanceCalls`,
+  `toi.transientHits`: TOI 단계의 기본 GJK, 재검사 호출, 추가 GJK, 복구 수
+
+이 계측은 `worldShapeSweepStats2*`를 선택적으로 전달할 때만 수행한다.
+평소 호출은 null을 전달하여 기존 결과와 비용을 유지한다.
+회전이 0인 GJK 기반 선형 ShapeCast는 이 회전 전용 계측에 포함되지 않는다.
+
+`worldRotatingSceneBenchmark`는 Sandbox보다 큰 **324개 Body·Shape (18×18)**
+Fixture에서 세 Body Tree, Sensor, 여러 geometry의 실제 World 조회를 수행한다.
+긴 이동·짧은 이동·먼 경로·제자리 회전의 네 시나리오를 32회씩 조회한다.
+
+- `--verify`는 계측 활성화 전후의 결과가 일치하는지,
+  후보 수·TOI·GJK 카운터가 일관되는지 확인한다. CTest에 포함한다.
+- `--csv`는 World 전체 `castShapeSweepClosest`와 **후보 전용
+  `overlapAABB`**의 Release 중앙값을 각각 출력한다.
+  이 후보 전용 조회는 회전 도형의 원점 기준 원형 보수 경계를 사용하지만,
+  World 전체 조회의 모든 전처리·callback clipping과 동일한 알고리즘은 아니다.
+  따라서 두 시간의 차이를 정확한 TOI 시간으로 해석하지 않는다.
+- 양쪽 모두 7회 측정 중앙값, 4회 반복, warm-up을 사용한다.
+  CI의 성능 값은 정보용이고 시간 임계값으로 테스트를 실패시키지 않는다.
+  Tree 후보 개수 및 실제 TOI / 보수적 재검사 호출 횟수를 함께 비교한다.
+
+이 검사는 공개된 충돌 결과를 변경하거나 최적화하지 않고
+**BroadPhase에 의해 제외되는 도형과 실제 TOI 비용을 분리해 관찰**하는 단계다.
