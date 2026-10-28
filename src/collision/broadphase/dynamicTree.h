@@ -287,6 +287,83 @@ public:
         }
     }
 
+    // 이동하는 AABB를 node AABB에 cast함. Leaf는 실제 geometry 검사 전 BroadPhase 후보.
+    // 중심 ray와 node의 Minkowski 확장 AABB를 사용해 대각선 sweep의 거짓 후보를 제거함.
+    // RayCast와 같은 fraction callback 계약이며 callback 도중 Tree 변경은 금지함.
+    template <treeRayCastCallback Callback>
+    void BoxCast( const aabb2& startBounds, vec2 translation, float& maxFraction, Callback&& callback ) const
+    {
+        if( proxyCount_ == 0 || maxFraction <= 0.0f || !std::isfinite( maxFraction ) ||
+            !IsValidAABB( startBounds ) || !IsFinite( translation ) ) return;
+
+        const vec2 halfExtent = ( startBounds.max - startBounds.min ) * 0.5f;
+        const vec2 origin = startBounds.min + halfExtent;
+
+        std::array<std::int32_t, TREE_STACK_SIZE> stack{};
+        std::size_t stackCount = 0;
+        stack[stackCount++] = IsLeaf( nodes_[ROOT_NODE] ) ? ROOT_NODE : GetChildPair( nodes_[ROOT_NODE] );
+
+        while( stackCount > 0 )
+        {
+            const std::int32_t pair = stack[--stackCount];
+
+            for( std::int32_t i = 0; i < 2; ++i )
+            {
+                const treeNode& node = nodes_[pair + i];
+                if( IsEmptyNode( node ) ) continue;
+
+                float entry = 0.0f;
+                float exit = maxFraction;
+                bool overlaps = true;
+
+                for( int axis = 0; axis < 2; ++axis )
+                {
+                    const float position = axis == 0 ? origin.x : origin.y;
+                    const float direction = axis == 0 ? translation.x : translation.y;
+                    const float extent = axis == 0 ? halfExtent.x : halfExtent.y;
+
+                    // AABB가 이동하는 경우, 점 ray의 대상 AABB를 query half extent만큼 확장함.
+                    const float lower = ( axis == 0 ? node.aabb.min.x : node.aabb.min.y ) - extent;
+                    const float upper = ( axis == 0 ? node.aabb.max.x : node.aabb.max.y ) + extent;
+
+                    if( direction == 0.0f )
+                    {
+                        if( position < lower || position > upper ) overlaps = false;
+                    }
+                    else
+                    {
+                        const float first = ( lower - position ) / direction;
+                        const float second = ( upper - position ) / direction;
+                        entry = std::max( entry, std::min( first, second ) );
+                        exit = std::min( exit, std::max( first, second ) );
+                        if( entry > exit ) overlaps = false;
+                    }
+
+                    if( !overlaps ) break;
+                }
+
+                if( !overlaps ) continue;
+
+                if( IsLeaf( node ) )
+                {
+                    const float fraction = static_cast<float>( callback( GetProxyId( node ), maxFraction ) );
+
+                    if( fraction == 0.0f )
+                    {
+                        maxFraction = 0.0f;
+                        return;
+                    }
+
+                    if( std::isfinite( fraction ) && fraction > 0.0f && fraction < maxFraction ) maxFraction = fraction;
+                    continue;
+                }
+
+                if( stackCount < stack.size() ) stack[stackCount++] = GetChildPair( node );
+                else assert( stackCount < stack.size() );
+            }
+        }
+    }
+
 private:
     struct rebuildItem
     {
