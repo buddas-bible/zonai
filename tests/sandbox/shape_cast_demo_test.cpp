@@ -177,6 +177,50 @@ int main()
         rotating.getPreviewFraction() == 0.0f,
         "Resetting rotation must restore the previous linear query" );
 
+    shapeCastDemo dense{};
+    dense.setProbe( shapeCastProbe::box );
+    dense.setRotationRadians( 0.6f );
+    const worldShapeCastResult2 originalDenseHit = dense.getHit();
+    dense.setDenseTargets( true );
+    check( dense.hasDenseTargets() && dense.getDenseTargets().size() == 40 &&
+        dense.getWorld().GetBodyCount() == 44 && dense.getWorld().GetShapeCount() == 44,
+        "Dense visualization creates 40 additional mixed Body/Shape targets" );
+    for( const shapeCastTarget& target : dense.getDenseTargets() )
+        check( dense.getWorld().IsValid( target.shape ) &&
+            dense.getWorld().IsValid( target.body ), "Dense target handle is valid" );
+
+    const auto denseStats = dense.getSweepStats();
+    check( denseStats.treeCandidates >= denseStats.narrowphaseCandidates &&
+        denseStats.narrowphaseCandidates >= denseStats.toiCalls &&
+        denseStats.toiCalls > 0 && denseStats.toi.distanceCalls >= denseStats.toiCalls,
+        "Dense World query accounts for Tree candidates and TOI work" );
+    worldShapeSweepStats2 directStats{};
+    const auto measured = dense.getWorld().castShapeSweepClosest(
+        { dense.getInput().geometry, dense.getInput().transform,
+          dense.getInput().translation, dense.getRotationRadians() }, {}, &directStats );
+    const auto unmeasured = dense.getWorld().castShapeSweepClosest(
+        { dense.getInput().geometry, dense.getInput().transform,
+          dense.getInput().translation, dense.getRotationRadians() } );
+    check( measured.hit == unmeasured.hit && measured.fraction == unmeasured.fraction &&
+        measured.shape == unmeasured.shape &&
+        directStats.toiCalls == denseStats.toiCalls &&
+        directStats.treeCandidates == denseStats.treeCandidates &&
+        directStats.toi.distanceCalls == denseStats.toi.distanceCalls,
+        "Optional World stage instrumentation must not change query results" );
+
+    dense.setDenseTargets( true );
+    check( dense.getWorld().GetShapeCount() == 44,
+        "Repeated dense mode enable does not duplicate bodies" );
+    dense.setDenseTargets( false );
+    check( !dense.hasDenseTargets() && dense.getWorld().GetShapeCount() == 4 &&
+        dense.getWorld().GetBodyCount() == 4 &&
+        dense.getHit().hit == originalDenseHit.hit &&
+        dense.getHit().fraction == originalDenseHit.fraction,
+        "Dense mode teardown restores original four-target query" );
+    dense.setRotationRadians( 0.0f );
+    check( dense.getSweepStats().toiCalls == 0 && dense.getSweepStats().treeCandidates == 0,
+        "Linear ShapeCast keeps rotation-only counters empty" );
+
     demoSession session{ createVisualization };
     session.selectDemo( demoKind::shapeCastVisualization );
     check( !session.isPlaying(), "Switch starts paused" );
