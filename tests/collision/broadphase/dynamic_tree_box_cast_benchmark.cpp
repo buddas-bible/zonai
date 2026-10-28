@@ -255,14 +255,16 @@ struct profileCounts
 {
     std::uint64_t nodes = 0, leaves = 0, rejected = 0;
     std::uint64_t xTests = 0, yTests = 0, xRejected = 0, yRejected = 0;
-    std::uint64_t stationaryAxes = 0, divisions = 0, startingOverlaps = 0, rootExits = 0;
+    std::uint64_t stationaryAxes = 0, reciprocalDivisions = 0, slabMultiplications = 0;
+    std::uint64_t startingOverlaps = 0, rootExits = 0;
 
     profileCounts& operator+=( const profileCounts& other )
     {
         nodes += other.nodes; leaves += other.leaves; rejected += other.rejected;
         xTests += other.xTests; yTests += other.yTests;
         xRejected += other.xRejected; yRejected += other.yRejected;
-        stationaryAxes += other.stationaryAxes; divisions += other.divisions;
+        stationaryAxes += other.stationaryAxes;
+        reciprocalDivisions += other.reciprocalDivisions; slabMultiplications += other.slabMultiplications;
         startingOverlaps += other.startingOverlaps; rootExits += other.rootExits;
         return *this;
     }
@@ -292,6 +294,12 @@ void profileSweep( const treeSnapshot& snapshot, const sweep& input, castMode mo
 
     const vec2 half = ( input.start.max - input.start.min ) * 0.5f;
     const vec2 origin = input.start.min + half;
+    const std::array<double, 2> inverseTranslation{
+        input.translation.x == 0.0f ? 0.0 : 1.0 / static_cast<double>( input.translation.x ),
+        input.translation.y == 0.0f ? 0.0 : 1.0 / static_cast<double>( input.translation.y )
+    };
+    if( mode == castMode::boxCast )
+        counts.reciprocalDivisions += ( input.translation.x != 0.0f ) + ( input.translation.y != 0.0f );
     std::vector<std::int32_t> stack{ root.isLeaf ? 0 : root.childPair };
 
     while( !stack.empty() )
@@ -337,9 +345,9 @@ void profileSweep( const treeSnapshot& snapshot, const sweep& input, castMode mo
                     }
                     else
                     {
-                        counts.divisions += 2;
-                        const float first = ( lower - position ) / direction;
-                        const float second = ( upper - position ) / direction;
+                        counts.slabMultiplications += 2;
+                        const float first = static_cast<float>( static_cast<double>( lower - position ) * inverseTranslation[axis] );
+                        const float second = static_cast<float>( static_cast<double>( upper - position ) * inverseTranslation[axis] );
                         entry = std::max( entry, std::min( first, second ) );
                         exit = std::min( exit, std::max( first, second ) );
                         if( entry > exit ) overlaps = false;
@@ -410,7 +418,7 @@ scenarioProfile checkTraversalProfile( const dynamicTree& tree, const treeSnapsh
                     "BoxCast axes visited out of order" );
                 check( sample.rejected == sample.xRejected + sample.yRejected,
                     "BoxCast rejection counters inconsistent" );
-                check( sample.divisions / 2 + sample.stationaryAxes == sample.xTests + sample.yTests,
+                check( sample.slabMultiplications / 2 + sample.stationaryAxes == sample.xTests + sample.yTests,
                     "BoxCast axis arithmetic counters inconsistent" );
                 totals.box += sample;
             }
@@ -426,31 +434,31 @@ void printTraversalProfile( const std::array<scenario, 5>& scenes,
 {
     if( csv )
         std::printf( "scenario,queries,query_nodes,query_leaves,query_rejected,box_nodes,box_leaves,"
-            "box_rejected,x_tests,y_tests,x_rejected,y_rejected,stationary_axes,slab_divisions,"
-            "start_overlap_nodes,root_exits\n" );
+            "box_rejected,x_tests,y_tests,x_rejected,y_rejected,stationary_axes,reciprocal_divisions,"
+            "slab_multiplications,start_overlap_nodes,root_exits\n" );
     else
-        std::printf( "Scenario        Query nodes    Box nodes    X rejects    Y rejects    Slab divisions   Start overlaps   Root exits\n" );
+        std::printf( "Scenario        Query nodes    Box nodes    X rejects    Y rejects    Reciprocal divs   Slab multiplies   Start overlaps   Root exits\n" );
 
     for( std::size_t i = 0; i < profiles.size(); ++i )
     {
         const profileCounts& q = profiles[i].query;
         const profileCounts& b = profiles[i].box;
         if( csv )
-            std::printf( "%s,%d,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
+            std::printf( "%s,%d,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
                 scenes[i].name, QUERY_COUNT,
                 static_cast<unsigned long long>( q.nodes ), static_cast<unsigned long long>( q.leaves ),
                 static_cast<unsigned long long>( q.rejected ), static_cast<unsigned long long>( b.nodes ),
                 static_cast<unsigned long long>( b.leaves ), static_cast<unsigned long long>( b.rejected ),
                 static_cast<unsigned long long>( b.xTests ), static_cast<unsigned long long>( b.yTests ),
                 static_cast<unsigned long long>( b.xRejected ), static_cast<unsigned long long>( b.yRejected ),
-                static_cast<unsigned long long>( b.stationaryAxes ), static_cast<unsigned long long>( b.divisions ),
-                static_cast<unsigned long long>( b.startingOverlaps ), static_cast<unsigned long long>( b.rootExits ) );
+                static_cast<unsigned long long>( b.stationaryAxes ), static_cast<unsigned long long>( b.reciprocalDivisions ),
+                static_cast<unsigned long long>( b.slabMultiplications ), static_cast<unsigned long long>( b.startingOverlaps ), static_cast<unsigned long long>( b.rootExits ) );
         else
-            std::printf( "%-12s %12llu %12llu %12llu %12llu %17llu %16llu %12llu\n",
+            std::printf( "%-12s %12llu %12llu %12llu %12llu %17llu %17llu %16llu %12llu\n",
                 scenes[i].name, static_cast<unsigned long long>( q.nodes ),
                 static_cast<unsigned long long>( b.nodes ), static_cast<unsigned long long>( b.xRejected ),
-                static_cast<unsigned long long>( b.yRejected ), static_cast<unsigned long long>( b.divisions ),
-                static_cast<unsigned long long>( b.startingOverlaps ),
+                static_cast<unsigned long long>( b.yRejected ), static_cast<unsigned long long>( b.reciprocalDivisions ),
+                static_cast<unsigned long long>( b.slabMultiplications ), static_cast<unsigned long long>( b.startingOverlaps ),
                 static_cast<unsigned long long>( b.rootExits ) );
     }
 }
