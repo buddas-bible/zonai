@@ -65,9 +65,10 @@ World ShapeCast는 이제 DynamicTree의 `BoxCast`를 사용한다.
 
 `DynamicTree::BoxCast`는 비용이 큰 노드별 slab 교차 검사 전에
 현재 `maxFraction`까지의 swept-AABB 합집합과 Tree root AABB가
-겹치지 않으면 즉시 종료한다. 시작 겹침/진행 방향/클립된 경로는 모두
-합집합에 들어 있으므로 결과 후보는 변하지 않으며, overflow 등으로
-종료 bounds가 유효하지 않은 경우에는 보수적으로 기존 순회 경로를 유지한다.
+겹치지 않으면 즉시 종료한다. 시작 위치가 root와 겹치는 경우에는
+기존 순회를 바로 수행한다. root 바깥에서 시작한 경우 이동 끝점과 비교 범위는
+float 반올림으로 실제 교차를 놓치지 않도록 double 정밀도로 계산하고 경계를
+보수적으로 확장한다. 시작 겹침·진행 방향·clip된 구간의 후보는 유지된다.
 
 성능 효과는 World ShapeCast 및 Tree 벤치마크로 확인하며, 특히
 Root bounds 밖의 miss가 이른 종료의 직접 대상이다. 이동 중인
