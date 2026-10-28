@@ -69,7 +69,8 @@ constexpr std::array entries
     demoEntry{ demoKind::suspensionLimitComparison, "조인트", "서스펜션·이동 제한 비교", "같은 스프링에서 이동 제한 꺼짐·켜짐의 처짐과 반력을 비교합니다. 중력 방향을 바꿔 상한·하한 정지를 확인하고 제한 범위를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.5f }, 100.0f },
     demoEntry{ demoKind::suspensionMotorComparison, "조인트", "서스펜션·회전 모터 비교", "같은 스프링에서 회전 모터 꺼짐·켜짐을 비교합니다. 동일한 처짐과 회전 차이를 확인하고 모터·목표 각속도·토크 한도를 편집한 뒤 시험 복귀로 반복하세요.", { 0.0f, 0.5f }, 100.0f },
     demoEntry{ demoKind::weldElasticityComparison, "조인트", "웰드·선형/회전 탄성 비교", "같은 막대를 한쪽 끝에서 지지해 강체 연결·선형 탄성·회전 탄성을 비교합니다. 선형·회전 주파수를 편집하고 시험 복귀로 반복하며 0Hz는 해당 방향의 강한 제약입니다.", { 0.0f, 0.6f }, 90.0f },
-    demoEntry{ demoKind::shapeCastVisualization, "공간 조회", "ShapeCast 이동 충돌 시각화", "왼쪽 클릭으로 목표점을 바꿉니다. 원·캡슐·상자의 이동 시작·종료와 첫 충돌 위치·법선을 관찰하세요. 재생/1프레임은 미리보기만 전진하며 실제 World 물체를 움직이지 않습니다.", { 0.0f, 0.0f }, 72.0f }
+    demoEntry{ demoKind::shapeCastVisualization, "공간 조회", "ShapeCast 이동 충돌 시각화", "왼쪽 클릭으로 목표점을 바꿉니다. 원·캡슐·상자의 이동 시작·종료와 첫 충돌 위치·법선을 관찰하세요. 재생/1프레임은 미리보기만 전진하며 실제 World 물체를 움직이지 않습니다.", { 0.0f, 0.0f }, 72.0f },
+    demoEntry{ demoKind::overlapShapeVisualization, "공간 조회", "AABB·실제 도형 겹침 비교", "초기에는 상자 모서리와 원의 AABB만 겹칩니다. 왼쪽 클릭으로 조회 도형을 이동하며 BroadPhase 후보와 GJK의 실제 겹침을 비교하세요. 원·캡슐·상자, 회전, 센서 필터를 실험할 수 있습니다.", { 0.0f, 0.7f }, 76.0f }
 };
 
 }

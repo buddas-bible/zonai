@@ -31,6 +31,8 @@ add_executable(zonaiSandbox
     rigidBodyJointDemo.cpp
     shapeCastDemo.cpp
     shapeCastDemoView.cpp
+    overlapShapeDemo.cpp
+    overlapShapeDemoView.cpp
     rigidBodyDemoUi.cpp
     jointDemoView.cpp
     debug/debugCamera.cpp
