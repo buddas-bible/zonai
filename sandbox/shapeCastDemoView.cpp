@@ -81,7 +81,7 @@ public:
 
         ImGui::Text( "Swept AABB 후보: %zu개 (정확한 충돌 수가 아님)", getAABBCandidateCount() );
         ImGui::Text( "미리보기 진행: %.1f%%", 100.0f * getPreviewFraction() );
-        ImGui::TextWrapped( "초록: 정적 대상 / 보라: 센서 / 흰색: 시작 / 회색: 종료 / 노랑: 현재 자세 / 파랑: 첫 충돌 / 주황: 법선 / 분홍: 중심 RayCast / 청록: swept AABB" );
+        ImGui::TextWrapped( "초록: 정적 대상 / 보라: 센서 / 흰색: 시작 / 회색: 종료 / 노랑: 현재 자세 / 파랑: 첫 충돌 / 연파랑: 회전 정점 궤적 / 주황: 법선 / 분홍: 중심 RayCast / 청록: swept AABB" );
         if( rotating ) ImGui::TextWrapped( "중심 RayCast는 회전을 반영하지 않습니다. 회전된 도형의 충돌은 파란색 TOI 결과를 확인하세요." );
     }
 
@@ -119,6 +119,25 @@ public:
 
         draw.DrawSegment( { start, end }, endColor, 2.0f );
         draw.DrawPoint( end, endColor, 4.0f );
+
+        // 회전하면 도형 정점은 중심 직선이 아니라 곡선 궤적을 따름.
+        if( getRotationRadians() != 0.0f )
+        {
+            const shapeProxy2 proxy = MakeShapeProxy( input.geometry );
+            constexpr int TRAIL_SEGMENTS = 16;
+            constexpr ImU32 trailColor = IM_COL32( 100, 160, 245, 130 );
+            for( int vertex = 0; vertex < proxy.count; ++vertex )
+            {
+                vec2 previous = TransformPoint( getPoseAtFraction( 0.0f ), proxy.points[vertex] );
+                for( int sample = 1; sample <= TRAIL_SEGMENTS; ++sample )
+                {
+                    const float fraction = static_cast<float>( sample ) / TRAIL_SEGMENTS;
+                    const vec2 current = TransformPoint( getPoseAtFraction( fraction ), proxy.points[vertex] );
+                    draw.DrawSegment( { previous, current }, trailColor, 1.2f );
+                    previous = current;
+                }
+            }
+        }
 
         if( isRayVisible() )
         {
