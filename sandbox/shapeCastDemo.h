@@ -30,6 +30,7 @@ public:
     void setCollisionMatrix( const collisionMatrix& matrix ) override { world_.setCollisionMatrix( matrix ); }
 
     void setProbe( shapeCastProbe probe );
+    void setLocalOffset( vec2 offset );
     void setStart( vec2 start );
     void setTarget( vec2 target );
     void setSensorIncluded( bool included );
@@ -42,6 +43,7 @@ public:
     void resetPreview();
 
     [[nodiscard]] shapeCastProbe getProbe() const noexcept { return probe_; }
+    [[nodiscard]] vec2 getLocalOffset() const noexcept { return localOffset_; }
     [[nodiscard]] const world& getWorld() const noexcept { return world_; }
     [[nodiscard]] const std::array<shapeCastTarget, 4>& getTargets() const noexcept { return targets_; }
     [[nodiscard]] const std::vector<shapeCastTarget>& getDenseTargets() const noexcept { return denseTargets_; }
@@ -61,6 +63,7 @@ public:
     [[nodiscard]] bool isSweepAABBVisible() const noexcept { return sweepAABBVisible_; }
 
 private:
+    void updateProbeGeometry();
     void updateHit();
     [[nodiscard]] queryFilter makeFilter() const noexcept;
 
@@ -69,6 +72,7 @@ private:
     std::vector<shapeCastTarget> denseTargets_{};
     worldShapeCastInput2 input_{};
     shapeCastProbe probe_ = shapeCastProbe::circle;
+    vec2 localOffset_{};
     float startRotationRadians_ = 0.0f;
     float rotationRadians_ = 0.0f;
     worldShapeCastResult2 hit_{};

@@ -18,10 +18,17 @@
   표시 체크박스는 조회 계산이나 물리 World 자체를 바꾸지 않는다.
 - 재생/1프레임은 미리보기 비율만 증가시키며, 최초 충돌 위치에서 멈춘다.
   **실제 물리 Body 이동이나 `world::Step()`을 호출하지 않는다.**
+- 시작 회전(±180°)과 상대 회전(±90°)을 독립적으로 설정한다. 상대 회전이
+  0이면 처음 자세를 유지하는 선형 GJK ShapeCast, 0이 아니면 회전 TOI를 사용한다.
+- 도형 로컬 오프셋(각 축 ±3m)은 회전축을 유지하면서 원의 로컬 중심, 캡슐
+  끝점, 상자의 정점·centroid를 이동한다. 시작점과 도착점을 같게 하고
+  오프셋된 도형을 회전시키면 원호 충돌을 재현할 수 있다.
+  노란 선과 파란 점은 진행 중 도형 중심과 회전축의 관계를 표시한다.
 - 기본 원의 충돌 위치, 드래그로 바꾼 경로, Sensor 포함/제외, 원·캡슐·상자
-  전환은 `sandboxShapeCastDemoTests`에서 검증한다. Windows에서는
+  전환, 시작 회전, 로컬 오프셋과 순수 회전 충돌은
+  `sandboxShapeCastDemoTests`에서 검증한다. Windows에서는
   `sandboxShapeCastViewTests`가 GPU/창 없이 ImGui 프레임의 렌더링을 검사한다.
 
-`master`에 있는 World ShapeCast의 범위만 표시한다. 회전 sweep, ChainSegment를
-이동 도형으로 쓰는 기능, Chain ghost vertex의 상세 corner ownership은 포함하지 않는다.
+ChainSegment를 이동 도형으로 쓰는 기능과 Chain ghost vertex의 상세 corner
+ownership은 포함하지 않는다.
 헤드리스 ImGui 테스트는 실제 DX11 창/폰트·사용자 입력 시각 검증의 대체가 아니다.

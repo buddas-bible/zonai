@@ -29,10 +29,14 @@ int main()
     int overlayVertices = 0;
     int hiddenVertices = 0;
     int rotatingVertices = 0;
+    bool rotatingStartObserved = false;
     int denseVertices = 0;
+    bool denseObserved = false;
     int tiltedLinearVertices = 0;
+    bool tiltedLinearObserved = false;
+    int offsetRotatingVertices = 0;
 
-    for( int frame = 0; frame < 6; ++frame )
+    for( int frame = 0; frame < 7; ++frame )
     {
         if( frame == 1 )
         {
@@ -70,6 +74,16 @@ int main()
             model.setStart( { -5.0f, 0.0f } );
             model.setTarget( { 6.0f, 0.0f } );
         }
+        if( frame == 6 )
+        {
+            model.setDenseTargets( false );
+            model.setSensorIncluded( false );
+            model.setStartRotationRadians( 0.0f );
+            model.setStart( { -1.0f, 1.8f } );
+            model.setTarget( { -1.0f, 1.8f } );
+            model.setLocalOffset( { 1.0f, 0.0f } );
+            model.setRotationRadians( -1.5707963267948966f );
+        }
 
         ImGui::NewFrame();
         ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
@@ -98,9 +112,24 @@ int main()
 
         if( frame == 0 ) overlayVertices = geometryVertices;
         if( frame == 1 ) hiddenVertices = geometryVertices;
-        if( frame == 3 ) rotatingVertices = geometryVertices;
-        if( frame == 4 ) denseVertices = geometryVertices;
-        if( frame == 5 ) tiltedLinearVertices = geometryVertices;
+        if( frame == 3 )
+        {
+            rotatingVertices = geometryVertices;
+            rotatingStartObserved = model.getStartRotationRadians() != 0.0f &&
+                model.getRotationRadians() != 0.0f;
+        }
+        if( frame == 4 )
+        {
+            denseVertices = geometryVertices;
+            denseObserved = model.getDenseTargets().size() == 40;
+        }
+        if( frame == 5 )
+        {
+            tiltedLinearVertices = geometryVertices;
+            tiltedLinearObserved = model.getRotationRadians() == 0.0f &&
+                model.getSweepStats().toiCalls == 0;
+        }
+        if( frame == 6 ) offsetRotatingVertices = geometryVertices;
 
         ImGui::EndChild();
         ImGui::End();
@@ -111,20 +140,25 @@ int main()
         std::fprintf( stderr, "RayCast and swept AABB overlay toggles did not affect the rendered geometry\n" );
         std::exit( EXIT_FAILURE );
     }
-    if( rotatingVertices <= 0 || model.getStartRotationRadians() == 0.0f )
+    if( rotatingVertices <= 0 || !rotatingStartObserved )
     {
         std::fprintf( stderr, "Rotating ShapeCast view failed to render the TOI pose\n" );
         std::exit( EXIT_FAILURE );
     }
-    if( denseVertices <= rotatingVertices || model.getDenseTargets().size() != 40 )
+    if( denseVertices <= rotatingVertices || !denseObserved )
     {
         std::fprintf( stderr, "Dense ShapeCast view failed to render additional bodies\n" );
         std::exit( EXIT_FAILURE );
     }
-    if( tiltedLinearVertices <= 0 || model.getRotationRadians() != 0.0f ||
-        model.getSweepStats().toiCalls != 0 )
+    if( tiltedLinearVertices <= 0 || !tiltedLinearObserved )
     {
         std::fprintf( stderr, "Initial-angle-only linear ShapeCast view failed to render\n" );
+        std::exit( EXIT_FAILURE );
+    }
+    if( offsetRotatingVertices <= 0 || model.getLocalOffset().x != 1.0f ||
+        model.getRotationRadians() >= 0.0f || !model.getHit().hit )
+    {
+        std::fprintf( stderr, "Offset pure-rotation ShapeCast view failed to render\n" );
         std::exit( EXIT_FAILURE );
     }
     ImGui::DestroyContext();

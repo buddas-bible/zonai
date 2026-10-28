@@ -51,18 +51,43 @@ void shapeCastDemo::handleInput( const demoInput& input )
 void shapeCastDemo::setProbe( shapeCastProbe probe )
 {
     probe_ = probe;
+    updateProbeGeometry();
+}
 
+void shapeCastDemo::setLocalOffset( vec2 offset )
+{
+    // Sandbox의 제한된 제어 범위. 엔진 자체는 이 값으로 제한되지 않음.
+    constexpr float MAX_OFFSET = 3.0f;
+    if( !IsFinite( offset ) || std::fabs( offset.x ) > MAX_OFFSET ||
+        std::fabs( offset.y ) > MAX_OFFSET ||
+        LengthSquared( offset - localOffset_ ) == 0.0f ) return;
+
+    localOffset_ = offset;
+    updateProbeGeometry();
+}
+
+void shapeCastDemo::updateProbeGeometry()
+{
+    // 이동 transform의 position은 회전축이며, Shape 내부의 local 좌표만 이동함.
     switch( probe_ )
     {
     case shapeCastProbe::circle:
-        input_.geometry = circle2{ {}, 0.45f };
+        input_.geometry = circle2{ localOffset_, 0.45f };
         break;
     case shapeCastProbe::capsule:
-        input_.geometry = capsule2{ { 0.0f, -0.45f }, { 0.0f, 0.45f }, 0.3f };
+        input_.geometry = capsule2{
+            localOffset_ + vec2{ 0.0f, -0.45f },
+            localOffset_ + vec2{ 0.0f, 0.45f }, 0.3f };
         break;
     case shapeCastProbe::box:
-        input_.geometry = MakeBox( { 0.5f, 0.4f } );
+    {
+        polygon2 box = MakeBox( { 0.5f, 0.4f } );
+        for( int i = 0; i < box.vertexCount; ++i )
+            box.vertices[i] += localOffset_;
+        box.centroid += localOffset_;
+        input_.geometry = box;
         break;
+    }
     }
 
     updateHit();
@@ -229,8 +254,9 @@ void shapeCastDemo::updateHit()
             { input_.geometry, input_.transform, input_.translation, rotationRadians_ },
             filter, &sweepStats_ );
 
-    // 중심 RayCast는 회전을 반영하지 않는 비교용 직선 조회임.
-    rayHit_ = world_.castRayClosest( input_.transform.position, input_.translation, filter );
+    // 초기 도형 중심의 병진 경로만 비교함. 상대 회전으로 생기는 원호는 RayCast에 반영하지 않음.
+    const vec2 rayStart = TransformPoint( input_.transform, localOffset_ );
+    rayHit_ = world_.castRayClosest( rayStart, input_.translation, filter );
 
     aabbCandidateCount_ = 0;
     const aabb2 swept = getSweepAABB();

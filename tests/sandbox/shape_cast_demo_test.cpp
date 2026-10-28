@@ -279,6 +279,85 @@ int main()
         oriented.getSweepStats().toiCalls == 0,
         "Both rotation controls reset to the original linear query" );
 
+    // 로컬 형상 중심을 회전축에서 옮기면 제자리 회전만으로도 원호를 그려 충돌함.
+    shapeCastDemo offset{};
+    offset.setSensorIncluded( false );
+    offset.setStart( { -1.0f, 1.8f } );
+    offset.setTarget( { -1.0f, 1.8f } );
+    check( !offset.getHit().hit && LengthSquared( offset.getLocalOffset() ) == 0.0f,
+        "Centered probe at a stationary pivot must not hit" );
+
+    offset.setLocalOffset( { 1.0f, 0.0f } );
+    const circle2 shiftedCircle = std::get<circle2>( offset.getInput().geometry );
+    near( shiftedCircle.center.x, 1.0f, "Circle local offset changes its center" );
+    near( shiftedCircle.center.y, 0.0f, "Circle local offset preserves Y" );
+    check( !offset.getHit().hit, "Local offset alone does not move a stationary cast" );
+
+    // RayCast의 기준점은 회전축이 아니라 도형의 초기 중심이어야 함.
+    shapeCastDemo offsetRay{};
+    offsetRay.setSensorIncluded( false );
+    offsetRay.setLocalOffset( { 1.0f, 0.0f } );
+    const vec2 expectedRayStart = TransformPoint(
+        offsetRay.getInput().transform, offsetRay.getLocalOffset() );
+    const auto expectedRay = offsetRay.getWorld().castRayClosest(
+        expectedRayStart, offsetRay.getInput().translation,
+        { .maskBits = ~std::uint64_t{ 2 } } );
+    check( expectedRay.hit && offsetRay.getRayHit().hit &&
+        offsetRay.getRayHit().shape == expectedRay.shape &&
+        offsetRay.getRayHit().fraction == expectedRay.fraction,
+        "Local-offset RayCast must start at the initial geometry center, not the pivot" );
+
+    offset.setRotationRadians( -HALF_PI );
+    const auto arcHit = offset.getHit();
+    const auto directArcHit = offset.getWorld().castShapeSweepClosest(
+        { offset.getInput().geometry, offset.getInput().transform,
+          offset.getInput().translation, offset.getRotationRadians() },
+        { .maskBits = ~std::uint64_t{ 2 } } );
+    check( arcHit.hit && arcHit.shape == offset.getTargets()[0].shape &&
+        arcHit.fraction > 0.0f && arcHit.fraction < 1.0f &&
+        arcHit.shape == directArcHit.shape && arcHit.fraction == directArcHit.fraction,
+        "Off-center circle must hit by pure rotation and match direct World TOI" );
+    near( offset.getPoseAtFraction( 1.0f ).position.y, 1.8f,
+        "Pure pivot rotation must not translate the body origin" );
+    const vec2 endCircleCenter = TransformPoint(
+        offset.getPoseAtFraction( 1.0f ), shiftedCircle.center );
+    near( endCircleCenter.x, -1.0f, "Offset circle traces the quarter arc to target X" );
+    near( endCircleCenter.y, 0.8f, "Offset circle traces the quarter arc to target Y" );
+
+    offset.setRotationRadians( 0.0f );
+    offset.setProbe( shapeCastProbe::capsule );
+    const capsule2 shiftedCapsule = std::get<capsule2>( offset.getInput().geometry );
+    near( shiftedCapsule.center1.x, 1.0f, "Capsule first endpoint includes local offset" );
+    near( shiftedCapsule.center2.x, 1.0f, "Capsule second endpoint includes local offset" );
+    near( shiftedCapsule.center1.y, -0.45f, "Capsule preserves lower endpoint" );
+    near( shiftedCapsule.center2.y, 0.45f, "Capsule preserves upper endpoint" );
+
+    offset.setProbe( shapeCastProbe::box );
+    const polygon2 shiftedBox = std::get<polygon2>( offset.getInput().geometry );
+    near( shiftedBox.centroid.x, 1.0f, "Box polygon centroid includes local offset" );
+    near( shiftedBox.vertices[0].x, 0.5f, "Box vertices shift with centroid" );
+    const auto& shiftedInput = offset.getInput();
+    const auto directLinearHit = offset.getWorld().castShapeClosest(
+        shiftedInput, { .maskBits = ~std::uint64_t{ 2 } } );
+    check( directLinearHit.hit == offset.getHit().hit &&
+        directLinearHit.fraction == offset.getHit().fraction,
+        "Offset polygon linear cast must match direct World query" );
+
+    offset.step( 0.1f, 1 );
+    check( offset.getPreviewFraction() > 0.0f, "Local-offset preview can advance" );
+    offset.setLocalOffset( { 0.5f, -0.25f } );
+    check( offset.getPreviewFraction() == 0.0f,
+        "Changing local offset must restart the preview" );
+    const vec2 validOffset = offset.getLocalOffset();
+    offset.setLocalOffset( { 3.1f, 0.0f } );
+    offset.setLocalOffset( { std::numeric_limits<float>::quiet_NaN(), 0.0f } );
+    check( LengthSquared( offset.getLocalOffset() - validOffset ) == 0.0f,
+        "Out-of-range and non-finite local offsets must be rejected" );
+    offset.setLocalOffset( {} );
+    check( LengthSquared( offset.getLocalOffset() ) == 0.0f &&
+        std::get<polygon2>( offset.getInput().geometry ).centroid.x == 0.0f,
+        "Resetting the offset restores a centered Box" );
+
     shapeCastDemo dense{};
     dense.setProbe( shapeCastProbe::box );
     dense.setRotationRadians( 0.6f );
