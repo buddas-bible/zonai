@@ -68,6 +68,8 @@ public:
             const char* label = "알 수 없음";
             for( const auto& target : getTargets() )
                 if( target.shape == hit.shape ) label = target.name;
+            for( const auto& target : getDenseTargets() )
+                if( target.shape == hit.shape ) label = "다중 도형";
 
             ImGui::Text( "첫 충돌: %s / 이동 비율 %.4f", label, hit.fraction );
             ImGui::Text( "충돌 지점: (%.3f, %.3f) m", hit.point.x, hit.point.y );
@@ -83,7 +85,8 @@ public:
         else
             ImGui::TextUnformatted( "RayCast: 중심 광선과 교차하지 않음" );
 
-        ImGui::Text( "Swept AABB 후보: %zu개 (정확한 충돌 수가 아님)", getAABBCandidateCount() );
+        ImGui::Text( "조회 대상: %zu개 / Swept AABB 후보: %zu개",
+            getTargets().size() + getDenseTargets().size(), getAABBCandidateCount() );
         if( rotating )
         {
             const auto& stats = getSweepStats();
