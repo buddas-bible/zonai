@@ -330,6 +330,103 @@ float EvaluateSeparation( const separationFunction2& function, int indexA, int i
     return 0.0f;
 }
 
+// 정규화된 cos/sin 선형 보간의 각속도 상한은 2*tan(theta/2) rad/fraction.
+// sweep의 모든 support vertex에 대해 이동 거리의 Lipschitz 상한을 계산함.
+double ComputeSweepSpeedBound( const shapeProxy2& proxy, const sweep2& sweep )
+{
+    const double dx = static_cast<double>( sweep.c2.x ) - sweep.c1.x;
+    const double dy = static_cast<double>( sweep.c2.y ) - sweep.c1.y;
+    const double linearSpeed = std::hypot( dx, dy );
+
+    const double dot = std::clamp(
+        static_cast<double>( sweep.q1.c ) * sweep.q2.c +
+        static_cast<double>( sweep.q1.s ) * sweep.q2.s, -1.0, 1.0 );
+
+    // 반대 방향의 같은 크기 quaternion-like rot2 보간은 중간에서 정의되지 않음.
+    if( dot <= -0.999999 ) return std::numeric_limits<double>::infinity();
+
+    const double angularSpeed = 2.0 * std::sqrt( ( 1.0 - dot ) / ( 1.0 + dot ) );
+    double radius = 0.0;
+
+    for( int i = 0; i < proxy.count; ++i )
+    {
+        const vec2 relative = proxy.points[i] - sweep.localCenter;
+        radius = std::max( radius,
+            std::hypot( static_cast<double>( relative.x ), static_cast<double>( relative.y ) ) );
+    }
+
+    // float sin/cos 구성과 GJK 거리는 반올림되므로 상한에 소폭 여유를 둠.
+    return 1.001 * ( linearSpeed + angularSpeed * radius );
+}
+
+// 기존 separating-axis TOI는 끝 자세에서 분리되어 있으면 중간의 짧은 회전 접촉을
+// 놓칠 수 있음. World 조회에서만 거리 변화 상한으로 안전한 진행폭을 택해 재확인함.
+// 일정한 시간 샘플 간격이 아니라 (현재 core 거리 - target) / 최대 상대 속도로 전진.
+bool FindTransientRotationContact( const toiInput2& input, toiOutput2& output )
+{
+    const double speedBound = ComputeSweepSpeedBound( input.proxyA, input.sweepA ) +
+        ComputeSweepSpeedBound( input.proxyB, input.sweepB );
+
+    if( !std::isfinite( speedBound ) || speedBound <= 0.0 ) return false;
+
+    const float totalRadius = input.proxyA.radius + input.proxyB.radius;
+    const float target = std::max( LINEAR_SLOP, totalRadius - LINEAR_SLOP );
+    const float tolerance = 0.25f * LINEAR_SLOP;
+
+    distanceInput2 distanceInput{};
+    distanceInput.proxyA = input.proxyA;
+    distanceInput.proxyB = input.proxyB;
+    distanceInput.useRadii = false;
+
+    float time = 0.0f;
+    constexpr int MAX_CONSERVATIVE_STEPS = 256;
+
+    for( int step = 0; step < MAX_CONSERVATIVE_STEPS; ++step )
+    {
+        const transform2 transformA = GetSweepTransform( input.sweepA, time );
+        const transform2 transformB = GetSweepTransform( input.sweepB, time );
+        distanceInput.transform = InverseMul( transformA, transformB );
+
+        simplexCache2 cache{};
+        const distanceOutput2 distance = ShapeDistance( distanceInput, cache );
+        if( !std::isfinite( distance.distance ) ) return false;
+
+        if( distance.distance <= target + tolerance )
+        {
+            const vec2 worldNormal = Rotate( transformA.rotation, distance.normal );
+            const vec2 pointA = TransformPoint( transformA, distance.pointA ) +
+                worldNormal * input.proxyA.radius;
+            const vec2 pointB = TransformPoint( transformA, distance.pointB ) -
+                worldNormal * input.proxyB.radius;
+
+            output.state = time == 0.0f ? toiState2::Overlapped : toiState2::Hit;
+            output.fraction = time;
+            output.point = 0.5f * ( pointA + pointB );
+            output.normal = worldNormal;
+            return true;
+        }
+
+        if( time == input.maxFraction ) return false;
+
+        const double safeStep =
+            ( static_cast<double>( distance.distance ) - target - tolerance ) / speedBound;
+
+        // float fraction이 더 진행하지 못할 정도로 가까워지면 기존 TOI 상태를 유지.
+        const double nextExact = std::min( static_cast<double>( input.maxFraction ),
+            static_cast<double>( time ) + safeStep );
+        float next = static_cast<float>( nextExact );
+
+        // progress time을 정확한 bound보다 크게 반올림해 접촉을 건너뛰지 않음.
+        if( static_cast<double>( next ) > nextExact )
+            next = std::nextafter( next, 0.0f );
+
+        if( next <= time ) return false;
+        time = next;
+    }
+
+    return false;
+}
+
 } // namespace
 
 toiOutput2 TimeOfImpact( const toiInput2& input )
@@ -541,6 +638,14 @@ toiOutput2 TimeOfImpact( const toiInput2& input )
 
             break;
         }
+    }
+
+    if( input.detectTransientContacts &&
+        ( output.state == toiState2::Separated || output.state == toiState2::Failed ) )
+    {
+        toiOutput2 transient{};
+        if( FindTransientRotationContact( input, transient ) )
+            return transient;
     }
 
     return output;
