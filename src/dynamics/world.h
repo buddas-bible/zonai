@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <vector>
@@ -406,6 +407,9 @@ public:
         const aabb2 bounds = ComputeShapeAABB( geometry, transform );
         if( !IsValidAABB( bounds ) ) return;
 
+        // Sensor의 discrete overlap과 동일한 float 오차 허용: tangent geometry의 GJK 잔여 거리.
+        constexpr float OVERLAP_EPSILON = 10.0f * std::numeric_limits<float>::epsilon();
+
         for( int i = 0; i < static_cast<int>( bodyType::Count ); ++i )
         {
             const dynamicTree& tree = broadPhase_.GetTree( static_cast<bodyType>( i ) );
@@ -429,7 +433,7 @@ public:
 
                     simplexCache2 cache{};
                     const distanceOutput2 result = ShapeDistance( input, cache );
-                    if( !std::isfinite( result.distance ) || result.distance > 0.0f ) return true;
+                    if( !std::isfinite( result.distance ) || result.distance > OVERLAP_EPSILON ) return true;
 
                     keepQuerying = static_cast<bool>( callback( MakeShapeId( shapeIndex ) ) );
                     return keepQuerying;

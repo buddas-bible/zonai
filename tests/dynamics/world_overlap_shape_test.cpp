@@ -84,6 +84,22 @@ void checkExactGeometry()
     check( polygonHits.size() == 1 && polygonHits.front() == circle,
         "Convex polygon query must overlap a circular target" );
 
+    // GJK는 tangent contact를 1e-7 수준의 양수 거리로 반환할 수 있음.
+    // Sensor와 같은 10*float epsilon 안의 오차는 겹침으로 취급함.
+    {
+        world tangentWorld{};
+        const bodyId target = tangentWorld.CreateBody();
+        const shapeId rectangle = tangentWorld.CreateShape( target, MakeBox( { 1.0f, 1.0f } ) );
+
+        const auto tangent = overlapping( tangentWorld, circle2{ {}, 0.5f }, { { 1.5f, 0.45f }, {} } );
+        check( tangent.size() == 1 && tangent.front() == rectangle,
+            "Polygon/circle tangency must tolerate numerical GJK residual distance" );
+
+        check( overlapping( tangentWorld, circle2{ {}, 0.5f },
+            { { 1.5001f, 0.45f }, {} } ).empty(),
+            "Small but meaningful separation must not be reported as overlap" );
+    }
+
     simulation.SetBodyTransform( boxBody, { { 20.0f, 1.0f }, {} } );
     check( overlapping( simulation, capsule2{ { -0.3f, 0.0f }, { 0.3f, 0.0f }, 0.25f },
         { { 7.0f, 1.0f }, {} } ).empty(),

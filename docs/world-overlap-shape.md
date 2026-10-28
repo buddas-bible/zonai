@@ -18,6 +18,8 @@ simulation.overlapShape( capsule2{ { -1.0f, 0.0f }, { 1.0f, 0.0f }, 0.3f },
 - BroadPhase에서는 세 Body 유형(Static, Kinematic, Dynamic)의 기존 DynamicTree와
   실제 shape.aabb를 사용하여 후보를 걸러낸다. 이후 `ShapeDistance` GJK와
   도형 radius를 계산하여 **실제 convex geometry가 겹치거나 접촉한** 도형만 보고한다.
+  접선 접촉은 float 반올림으로 생긴 미소 분리 거리도 감지하도록 기존 Sensor와 같은
+  `10 * float epsilon` 허용 오차를 쓴다(임의의 물리적 간격 확장이 아님).
 - Query는 Circle, Capsule, Convex Polygon, Segment와 ChainSegment(owned edge)다.
   Segment/Chain은 넓이가 0이어도 표면에 정확히 접하면 겹침으로 처리한다.
   Chain ghost vertex와 앞면/뒷면 ownership은 이 **대칭 거리 조회**에는 적용하지 않는다.
