@@ -33,11 +33,20 @@ public:
         if( ImGui::DragFloat2( "도착점 (m)###ShapeCastEnd", &end.x, 0.05f, -10.0f, 10.0f ) ) setTarget( end );
 
         constexpr float RADIANS_PER_DEGREE = 0.017453292519943295f;
+        float startDegrees = getStartRotationRadians() / RADIANS_PER_DEGREE;
+        if( ImGui::SliderFloat( "시작 회전 (도)###ShapeCastStartAngle", &startDegrees,
+            -180.0f, 180.0f, "%.1f" ) )
+            setStartRotationRadians( startDegrees * RADIANS_PER_DEGREE );
+
         float angleDegrees = getRotationRadians() / RADIANS_PER_DEGREE;
         if( ImGui::SliderFloat( "상대 회전 (도)###ShapeCastAngle", &angleDegrees, -90.0f, 90.0f, "%.1f" ) )
             setRotationRadians( angleDegrees * RADIANS_PER_DEGREE );
         const bool rotating = getRotationRadians() != 0.0f;
-        ImGui::TextUnformatted( rotating ? "회전 조회: TOI / 회전량 제한 ±90도" : "선형 조회: GJK ShapeCast" );
+        ImGui::Text( "시작 %.1f / 종료 %.1f도",
+            getStartRotationRadians() / RADIANS_PER_DEGREE,
+            ( getStartRotationRadians() + getRotationRadians() ) / RADIANS_PER_DEGREE );
+        ImGui::TextUnformatted( rotating ? "회전 조회: TOI / 상대 회전량 제한 ±90도" :
+            "시작 회전 자세를 유지하는 선형 GJK ShapeCast" );
 
         bool dense = hasDenseTargets();
         if( ImGui::Checkbox( "다중 도형 장면 (40개 추가)###ShapeCastDense", &dense ) )
@@ -199,8 +208,8 @@ public:
         const transform2 current = getPoseAtFraction( getPreviewFraction() );
         draw.DrawShape( input.geometry, current, progressColor, IM_COL32( 250, 215, 75, 30 ) );
 
-        // 원은 회전해도 외형이 동일하므로 진행 중 회전축을 선으로 표시함.
-        if( getRotationRadians() != 0.0f )
+        // 원은 회전해도 외형이 동일하므로 시작 회전만 있어도 로컬 축을 표시함.
+        if( getStartRotationRadians() != 0.0f || getRotationRadians() != 0.0f )
             draw.DrawSegment( { current.position, current.position +
                 Rotate( current.rotation, vec2{ 0.65f, 0.0f } ) }, progressColor, 2.0f );
     }
