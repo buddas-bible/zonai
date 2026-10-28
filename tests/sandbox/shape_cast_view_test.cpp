@@ -30,8 +30,9 @@ int main()
     int hiddenVertices = 0;
     int rotatingVertices = 0;
     int denseVertices = 0;
+    int tiltedLinearVertices = 0;
 
-    for( int frame = 0; frame < 5; ++frame )
+    for( int frame = 0; frame < 6; ++frame )
     {
         if( frame == 1 )
         {
@@ -55,12 +56,20 @@ int main()
             model.setProbe( shapeCastProbe::box );
             model.setStart( { -1.0f, 1.25f } );
             model.setTarget( { -1.0f, 1.25f } );
+            model.setStartRotationRadians( 0.7853981633974483f );
             model.setRotationRadians( 1.5707963267948966f );
             model.step( 0.25f, 1 );
         }
 
         if( frame == 4 )
             model.setDenseTargets( true );
+        if( frame == 5 )
+        {
+            model.setProbe( shapeCastProbe::circle );
+            model.setRotationRadians( 0.0f );
+            model.setStart( { -5.0f, 0.0f } );
+            model.setTarget( { 6.0f, 0.0f } );
+        }
 
         ImGui::NewFrame();
         ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
@@ -91,6 +100,7 @@ int main()
         if( frame == 1 ) hiddenVertices = geometryVertices;
         if( frame == 3 ) rotatingVertices = geometryVertices;
         if( frame == 4 ) denseVertices = geometryVertices;
+        if( frame == 5 ) tiltedLinearVertices = geometryVertices;
 
         ImGui::EndChild();
         ImGui::End();
@@ -101,7 +111,7 @@ int main()
         std::fprintf( stderr, "RayCast and swept AABB overlay toggles did not affect the rendered geometry\n" );
         std::exit( EXIT_FAILURE );
     }
-    if( rotatingVertices <= 0 || model.getRotationRadians() == 0.0f )
+    if( rotatingVertices <= 0 || model.getStartRotationRadians() == 0.0f )
     {
         std::fprintf( stderr, "Rotating ShapeCast view failed to render the TOI pose\n" );
         std::exit( EXIT_FAILURE );
@@ -109,6 +119,12 @@ int main()
     if( denseVertices <= rotatingVertices || model.getDenseTargets().size() != 40 )
     {
         std::fprintf( stderr, "Dense ShapeCast view failed to render additional bodies\n" );
+        std::exit( EXIT_FAILURE );
+    }
+    if( tiltedLinearVertices <= 0 || model.getRotationRadians() != 0.0f ||
+        model.getSweepStats().toiCalls != 0 )
+    {
+        std::fprintf( stderr, "Initial-angle-only linear ShapeCast view failed to render\n" );
         std::exit( EXIT_FAILURE );
     }
     ImGui::DestroyContext();

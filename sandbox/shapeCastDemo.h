@@ -34,6 +34,7 @@ public:
     void setTarget( vec2 target );
     void setSensorIncluded( bool included );
     void setCanEncroach( bool enabled );
+    void setStartRotationRadians( float radians );
     void setRotationRadians( float radians );
     void setDenseTargets( bool enabled );
     void setRayVisible( bool visible ) noexcept { rayVisible_ = visible; }
@@ -48,6 +49,7 @@ public:
     [[nodiscard]] const worldShapeSweepStats2& getSweepStats() const noexcept { return sweepStats_; }
     [[nodiscard]] const worldShapeCastInput2& getInput() const noexcept { return input_; }
     [[nodiscard]] worldShapeCastResult2 getHit() const noexcept { return hit_; }
+    [[nodiscard]] float getStartRotationRadians() const noexcept { return startRotationRadians_; }
     [[nodiscard]] float getRotationRadians() const noexcept { return rotationRadians_; }
     [[nodiscard]] transform2 getPoseAtFraction( float fraction ) const noexcept;
     [[nodiscard]] worldRayCastResult2 getRayHit() const noexcept { return rayHit_; }
@@ -67,6 +69,7 @@ private:
     std::vector<shapeCastTarget> denseTargets_{};
     worldShapeCastInput2 input_{};
     shapeCastProbe probe_ = shapeCastProbe::circle;
+    float startRotationRadians_ = 0.0f;
     float rotationRadians_ = 0.0f;
     worldShapeCastResult2 hit_{};
     worldShapeSweepStats2 sweepStats_{};

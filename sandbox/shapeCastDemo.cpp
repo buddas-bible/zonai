@@ -98,6 +98,17 @@ void shapeCastDemo::setCanEncroach( bool enabled )
     updateHit();
 }
 
+void shapeCastDemo::setStartRotationRadians( float radians )
+{
+    constexpr float PI = 3.14159265358979323846f;
+    if( !std::isfinite( radians ) || std::fabs( radians ) > PI ||
+        radians == startRotationRadians_ ) return;
+
+    startRotationRadians_ = radians;
+    input_.transform.rotation = rot2::FromRadians( radians );
+    updateHit();
+}
+
 void shapeCastDemo::setRotationRadians( float radians )
 {
     constexpr float HALF_PI = 1.5707963267948966f;
