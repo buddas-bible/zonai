@@ -433,6 +433,53 @@ void checkRotatingSweep()
     simulation.castShapeSweep( input, invalidCallback );
 }
 
+void checkRotatingCandidateClipping()
+{
+    world simulation{};
+    const bodyId nearBody = simulation.CreateBody( bodyType::Static, { { -2.0f, 0.0f }, {} } );
+    const shapeId nearShape = simulation.CreateShape( nearBody, circle2{ {}, 0.35f } );
+
+    const bodyId farBody = simulation.CreateBody( bodyType::Dynamic, { { 3.5f, 0.0f }, {} } );
+    const shapeId farShape = simulation.CreateShape( farBody, circle2{ {}, 0.35f } );
+
+    worldShapeSweepInput2 input{};
+    input.geometry = circle2{ {}, 0.25f };
+    input.transform.position = { -6.0f, 0.0f };
+    input.translation = { 12.0f, 0.0f };
+    input.rotationRadians = 0.6f;
+
+    // 모든 hit을 요구하는 callback은 fraction을 줄이지 않으므로 누락시키면 안 됨.
+    int allHitCount = 0;
+    simulation.castShapeSweep( input, [&]( shapeId id, vec2, vec2, float )
+    {
+        check( id == nearShape || id == farShape, "Unclipped sweep unexpected target" );
+        ++allHitCount;
+        return 1.0f;
+    } );
+    check( allHitCount == 2, "Unclipped sweep must report both separated targets" );
+
+    worldShapeSweepStats2 stats{};
+    const auto closest = simulation.castShapeSweepClosest( input, {}, &stats );
+    check( closest.hit && closest.shape == nearShape &&
+        closest.fraction > 0.0f && closest.fraction < 0.5f,
+        "Closest rotating sweep must choose the first Static hit" );
+    check( stats.treeCandidates >= 2 && stats.clippedCandidates >= 1 &&
+        stats.narrowphaseCandidates == 1 && stats.toiCalls == 1,
+        "Fraction clipping must omit a later Dynamic candidate before TOI" );
+
+    // Query는 Static tree 이후 Dynamic tree를 방문하므로 Dynamic의 앞선 hit도 찾아야 함.
+    const bodyId earlierBody = simulation.CreateBody( bodyType::Dynamic,
+        { { -3.5f, 0.0f }, {} } );
+    const shapeId earlierShape = simulation.CreateShape( earlierBody, circle2{ {}, 0.35f } );
+    worldShapeSweepStats2 earlierStats{};
+    const auto earlierHit = simulation.castShapeSweepClosest( input, {}, &earlierStats );
+    check( earlierHit.hit && earlierHit.shape == earlierShape &&
+        earlierHit.fraction < closest.fraction && earlierStats.toiCalls >= 2,
+        "Clipped sweep must still find an earlier hit in a later Body tree" );
+
+    // 제자리 회전에서의 clipped candidate bounds 및 chain 센서 등은 기존 테스트가 검증함.
+}
+
 } // namespace
 
 int main()
@@ -442,4 +489,5 @@ int main()
     checkSweepGeometryAndNormals();
     checkClippingAndEncroachment();
     checkRotatingSweep();
+    checkRotatingCandidateClipping();
 }
