@@ -296,6 +296,14 @@ public:
         if( proxyCount_ == 0 || maxFraction <= 0.0f || !std::isfinite( maxFraction ) ||
             !IsValidAABB( startBounds ) || !IsFinite( translation ) ) return;
 
+        // Root가 전체 sweep 영역 밖이면 각 node의 slab 교차 계산 자체가 필요 없음.
+        // 범위 산술이 overflow한 입력에서는 최적화를 생략해 기존 traversal 의미를 유지함.
+        const vec2 shift = translation * maxFraction;
+        const aabb2 endBounds{ startBounds.min + shift, startBounds.max + shift };
+
+        if( IsValidAABB( endBounds ) &&
+            !Overlaps( Union( startBounds, endBounds ), nodes_[ROOT_NODE].aabb ) ) return;
+
         const vec2 halfExtent = ( startBounds.max - startBounds.min ) * 0.5f;
         const vec2 origin = startBounds.min + halfExtent;
 
