@@ -293,6 +293,20 @@ int main()
     near( shiftedCircle.center.y, 0.0f, "Circle local offset preserves Y" );
     check( !offset.getHit().hit, "Local offset alone does not move a stationary cast" );
 
+    // RayCast의 기준점은 회전축이 아니라 도형의 초기 중심이어야 함.
+    shapeCastDemo offsetRay{};
+    offsetRay.setSensorIncluded( false );
+    offsetRay.setLocalOffset( { 1.0f, 0.0f } );
+    const vec2 expectedRayStart = TransformPoint(
+        offsetRay.getInput().transform, offsetRay.getLocalOffset() );
+    const auto expectedRay = offsetRay.getWorld().castRayClosest(
+        expectedRayStart, offsetRay.getInput().translation,
+        { .maskBits = ~std::uint64_t{ 2 } } );
+    check( expectedRay.hit && offsetRay.getRayHit().hit &&
+        offsetRay.getRayHit().shape == expectedRay.shape &&
+        offsetRay.getRayHit().fraction == expectedRay.fraction,
+        "Local-offset RayCast must start at the initial geometry center, not the pivot" );
+
     offset.setRotationRadians( -HALF_PI );
     const auto arcHit = offset.getHit();
     const auto directArcHit = offset.getWorld().castShapeSweepClosest(
