@@ -231,44 +231,35 @@ void verifyRootBoundaryPrecision()
     check( calls == 1 && fraction == 0.8f, "Root early-out lost near-boundary swept hit" );
 }
 
-void verifyNodeDirectionPruning()
+void verifyInitialOverlapFastPath()
 {
     dynamicTree tree{};
-    const std::int32_t right = tree.CreateProxy( { { 8.0f, -0.5f }, { 9.0f, 0.5f } }, 0 );
-    const std::int32_t left = tree.CreateProxy( { { -9.0f, -0.5f }, { -8.0f, 0.5f } }, 1 );
-    ( void )tree.CreateProxy( { { -0.5f, 8.0f }, { 0.5f, 9.0f } }, 2 );
-    ( void )tree.CreateProxy( { { -0.5f, -9.0f }, { 0.5f, -8.0f } }, 3 );
+    const std::int32_t touched = tree.CreateProxy( { { -1.0f, -1.0f }, { 1.0f, 1.0f } }, 0 );
+    ( void )tree.CreateProxy( { { 8.0f, 8.0f }, { 9.0f, 9.0f } }, 1 );
 
-    const aabb2 start{ { -0.25f, -0.25f }, { 0.25f, 0.25f } };
+    const aabb2 start{ { -1.5f, -0.25f }, { -1.0f, 0.25f } };
+    float limit = 0.1f;
+    int callbacks = 0;
 
-    // Root는 전체를 감싸지만, 오른쪽으로 진행하면 왼쪽 subtree의 후보는 제외해야 함.
-    float limit = 1.0f;
-    std::vector<std::int32_t> visited;
-    tree.BoxCast( start, { 12.0f, 0.0f }, limit, [&]( std::int32_t id, float )
-    {
-        visited.push_back( id );
-        return -1.0f;
-    } );
-    check( visited.size() == 1 && visited[0] == right, "Positive sweep must ignore opposite subtrees" );
+    // 접촉하는 시작 AABB는 이동 방향이 멀어져도 fraction=0 후보로 보고함.
+    tree.BoxCast( start, { -30.0f, -20.0f }, limit,
+        [&]( std::int32_t id, float )
+        {
+            check( id == touched, "Initial touching candidate must not be skipped" );
+            ++callbacks;
+            return -1.0f;
+        } );
+    check( callbacks == 1 && limit == 0.1f, "Initial overlap must preserve clip limit" );
 
-    // 음의 방향에서도 같은 규칙이 적용되어야 함.
-    visited.clear();
-    tree.BoxCast( start, { -12.0f, 0.0f }, limit, [&]( std::int32_t id, float )
-    {
-        visited.push_back( id );
-        return -1.0f;
-    } );
-    check( visited.size() == 1 && visited[0] == left, "Negative sweep must ignore opposite subtrees" );
-
-    // Root의 한쪽 경계에서 닿는 경우는 반드시 남겨야 함.
-    visited.clear();
-    const aabb2 touching{ { 9.0f, -0.25f }, { 9.5f, 0.25f } };
-    tree.BoxCast( touching, { 3.0f, 0.0f }, limit, [&]( std::int32_t id, float )
-    {
-        visited.push_back( id );
-        return -1.0f;
-    } );
-    check( visited.size() == 1 && visited[0] == right, "Touching boundary must not be pruned" );
+    // fraction을 줄이는 callback도 기존과 같은 의미를 유지함.
+    limit = 1.0f;
+    tree.BoxCast( start, { -30.0f, -20.0f }, limit,
+        [&]( std::int32_t, float )
+        {
+            ++callbacks;
+            return 0.2f;
+        } );
+    check( callbacks == 2 && limit == 0.2f, "Initial overlap must preserve callback clipping" );
 }
 
 void verifyDiagonalPruning()
@@ -314,7 +305,7 @@ int main()
     verifyDiagonalPruning();
     verifyRootSweepRejection();
     verifyRootBoundaryPrecision();
-    verifyNodeDirectionPruning();
+    verifyInitialOverlapFastPath();
 
     dynamicTree emptyTree{};
     const aabb2 box{ { -1.0f, -1.0f }, { 1.0f, 1.0f } };

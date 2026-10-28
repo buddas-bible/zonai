@@ -320,44 +320,41 @@ public:
                 const treeNode& node = nodes_[pair + i];
                 if( IsEmptyNode( node ) ) continue;
 
-                // 이 node의 경계 바깥에서 해당 축의 반대 방향으로 움직이면 교차할 수 없음.
-                // 끝점의 float 곱/합 없이 검사해 아주 가까운 경계의 실제 hit도 보존함.
-                if( ( translation.x >= 0.0f && startBounds.min.x > node.aabb.max.x ) ||
-                    ( translation.x <= 0.0f && startBounds.max.x < node.aabb.min.x ) ||
-                    ( translation.y >= 0.0f && startBounds.min.y > node.aabb.max.y ) ||
-                    ( translation.y <= 0.0f && startBounds.max.y < node.aabb.min.y ) ) continue;
-
-                float entry = 0.0f;
-                float exit = maxFraction;
-                bool overlaps = true;
-
-                for( int axis = 0; axis < 2; ++axis )
+                // 시작 AABB가 node와 이미 겹치면 fraction=0의 후보이므로 slab 계산을 생략함.
+                if( !Overlaps( startBounds, node.aabb ) )
                 {
-                    const float position = axis == 0 ? origin.x : origin.y;
-                    const float direction = axis == 0 ? translation.x : translation.y;
-                    const float extent = axis == 0 ? halfExtent.x : halfExtent.y;
-
-                    // AABB가 이동하는 경우, 점 ray의 대상 AABB를 query half extent만큼 확장함.
-                    const float lower = ( axis == 0 ? node.aabb.min.x : node.aabb.min.y ) - extent;
-                    const float upper = ( axis == 0 ? node.aabb.max.x : node.aabb.max.y ) + extent;
-
-                    if( direction == 0.0f )
+                    float entry = 0.0f;
+                    float exit = maxFraction;
+                    bool overlaps = true;
+    
+                    for( int axis = 0; axis < 2; ++axis )
                     {
-                        if( position < lower || position > upper ) overlaps = false;
+                        const float position = axis == 0 ? origin.x : origin.y;
+                        const float direction = axis == 0 ? translation.x : translation.y;
+                        const float extent = axis == 0 ? halfExtent.x : halfExtent.y;
+    
+                        // AABB가 이동하는 경우, 점 ray의 대상 AABB를 query half extent만큼 확장함.
+                        const float lower = ( axis == 0 ? node.aabb.min.x : node.aabb.min.y ) - extent;
+                        const float upper = ( axis == 0 ? node.aabb.max.x : node.aabb.max.y ) + extent;
+    
+                        if( direction == 0.0f )
+                        {
+                            if( position < lower || position > upper ) overlaps = false;
+                        }
+                        else
+                        {
+                            const float first = ( lower - position ) / direction;
+                            const float second = ( upper - position ) / direction;
+                            entry = std::max( entry, std::min( first, second ) );
+                            exit = std::min( exit, std::max( first, second ) );
+                            if( entry > exit ) overlaps = false;
+                        }
+    
+                        if( !overlaps ) break;
                     }
-                    else
-                    {
-                        const float first = ( lower - position ) / direction;
-                        const float second = ( upper - position ) / direction;
-                        entry = std::max( entry, std::min( first, second ) );
-                        exit = std::min( exit, std::max( first, second ) );
-                        if( entry > exit ) overlaps = false;
-                    }
-
-                    if( !overlaps ) break;
+    
+                    if( !overlaps ) continue;
                 }
-
-                if( !overlaps ) continue;
 
                 if( IsLeaf( node ) )
                 {

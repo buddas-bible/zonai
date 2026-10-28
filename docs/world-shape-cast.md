@@ -78,14 +78,13 @@ root 쪽으로 이동하지만 clip 분율 안에는 도달하지 못하는 경�
 geometry와 GJK/Solver 수학은 변경하지 않는다.
 
 
-## Node별 역방향 후보 가지치기
 
-Tree 전체 root에 적용했던 방향 기반 안전 검사를 각 하위 node에도 적용한다.
-이동하는 AABB가 node 바깥에서 시작하고 그 node로부터 멀어지는 경우,
-division을 포함한 slab 교차 계산을 생략한다. 부호와 시작 AABB 경계만
-사용하므로 float 연산으로 이동 끝점을 만들지 않으며, 경계에서 시작하는
-접촉과 root 방향으로 진행하는 실제 sweep은 기존 검사로 전달한다.
+## 시작 AABB가 겹치는 node의 fast path
 
-추가 분기 비용이 있으므로 최적화 여부는 Tree 후보 탐색 단독과
-World-like ShapeCast 전체의 Windows Release 측정을 함께 확인한다.
-짧은 이동에서 언제나 빨라진다고 가정하지 않는다.
+`DynamicTree::BoxCast`에서 시작 AABB와 node AABB가 이미 겹치는 경우,
+fraction=0에 반드시 후보가 있으므로 slab의 진입/이탈 시간 계산을 생략한다.
+겹치지 않는 node는 기존 slab 계산으로 그대로 검사한다. 경계 접촉과
+callback의 clip 규약은 유지하며, node 후보 순서나 GJK 계산을 바꾸지 않는다.
+
+분기와 AABB 겹침 판정 자체에도 비용이 있으므로 성능 효과는
+Tree 및 World-like ShapeCast 벤치마크로 확인한다.
