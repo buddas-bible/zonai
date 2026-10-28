@@ -56,6 +56,7 @@ struct trial
     vec2 target{};
     float targetRadius = 0.33f;
     bool thin = false;
+    bool far = false;
 };
 
 vec2 centerAt( const worldShapeSweepInput2& input, float offset, float fraction )
@@ -86,6 +87,7 @@ std::vector<trial> makeTrials()
         const int localIndex = index % 600;
         const bool translation = localIndex % 3 == 1;
         const bool far = localIndex % 3 == 2;
+        item.far = far;
         item.thin = index >= 600;
         item.targetRadius = item.thin ? 0.04f : 0.33f;
         const float halfWidth = item.thin ? 0.45f : 0.52f;
@@ -160,7 +162,8 @@ struct totals
     }
 };
 
-void verify( const std::vector<trial>& trials, totals& results )
+void verify( const std::vector<trial>& trials, totals& results,
+    totals& nearResults, totals& farResults )
 {
     int recovered = 0;
     for( std::size_t index = 0; index < trials.size(); ++index )
@@ -187,6 +190,7 @@ void verify( const std::vector<trial>& trials, totals& results )
                 "Transient recheck must not change an existing TOI hit" );
         if( !isHit( legacy.state ) && isHit( checked.state ) ) ++recovered;
         results.add( stats );
+        ( item.far ? farResults : nearResults ).add( stats );
     }
 
     check( results.totalCalls == trialCount && results.transientAttempts >= 100,
@@ -270,30 +274,44 @@ int main( int argc, char** argv )
     }
 
     const std::vector<trial> trials = makeTrials();
-    totals stats{};
-    verify( trials, stats );
+    totals allStats{}, nearStats{}, farStats{};
+    verify( trials, allStats, nearStats, farStats );
 
+    check( nearStats.totalCalls == 800 && farStats.totalCalls == 400,
+        "Benchmark near/far group sizes changed" );
     if( verifyOnly ) return EXIT_SUCCESS;
 
-    // Warm up both paths. Timings are informative only, never pass/fail thresholds.
-    ( void )runBatch( trials, false );
-    ( void )runBatch( trials, true );
-    const double normalNs = medianNanoseconds( trials, false );
-    const double guardedNs = medianNanoseconds( trials, true );
+    std::vector<trial> nearby, distant;
+    nearby.reserve( 800 );
+    distant.reserve( 400 );
+    for( const trial& item : trials )
+        ( item.far ? distant : nearby ).push_back( item );
 
     if( csv )
         std::printf( "case,calls,recheck_attempts,recheck_hits,recheck_gjk,base_gjk,"
             "recheck_limit,legacy_ns_per_call,guarded_ns_per_call,guarded_over_legacy\n" );
 
-    std::printf( "%s,%llu,%llu,%llu,%llu,%llu,%llu,%.2f,%.2f,%.3f\n",
-        csv ? "rotating_box_corpus" : "rotating_box_corpus",
-        static_cast<unsigned long long>( stats.totalCalls ),
-        static_cast<unsigned long long>( stats.transientAttempts ),
-        static_cast<unsigned long long>( stats.transientHits ),
-        static_cast<unsigned long long>( stats.transientDistanceCalls ),
-        static_cast<unsigned long long>( stats.baseDistanceCalls ),
-        static_cast<unsigned long long>( stats.transientStepLimit ),
-        normalNs, guardedNs, normalNs > 0.0 ? guardedNs / normalNs : 0.0 );
+    const auto report = [&]( const char* label, const std::vector<trial>& items,
+        const totals& stats )
+    {
+        // Warm up both paths; timings are informative and never gate CI.
+        ( void )runBatch( items, false );
+        ( void )runBatch( items, true );
+        const double normalNs = medianNanoseconds( items, false );
+        const double guardedNs = medianNanoseconds( items, true );
+        std::printf( "%s,%llu,%llu,%llu,%llu,%llu,%llu,%.2f,%.2f,%.3f\n",
+            label,
+            static_cast<unsigned long long>( stats.totalCalls ),
+            static_cast<unsigned long long>( stats.transientAttempts ),
+            static_cast<unsigned long long>( stats.transientHits ),
+            static_cast<unsigned long long>( stats.transientDistanceCalls ),
+            static_cast<unsigned long long>( stats.baseDistanceCalls ),
+            static_cast<unsigned long long>( stats.transientStepLimit ),
+            normalNs, guardedNs, normalNs > 0.0 ? guardedNs / normalNs : 0.0 );
+    };
 
+    report( "all_direct_candidates", trials, allStats );
+    report( "nearby_inputs", nearby, nearStats );
+    report( "far_inputs", distant, farStats );
     return EXIT_SUCCESS;
 }
