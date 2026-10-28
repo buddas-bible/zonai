@@ -615,12 +615,14 @@ int main( int argc, char** argv )
 
     check( totals[0].box < totals[0].query, "Diagonal path should eliminate bounding-rectangle false positives" );
 
-    // Profile 경로는 실제 leaf 집합과 항상 대조한다. 측정 타이밍에는 포함하지 않음.
-    const treeSnapshot snapshot( tree );
+    // 일반 시간 측정은 profiler의 순회/메모리 접근으로 워밍업되지 않도록 분리함.
     std::array<scenarioProfile, 5> profiles{};
-    for( std::size_t i = 0; i < scenarios.size(); ++i )
-        profiles[i] = checkTraversalProfile( tree, snapshot, scenarios[i], targets.size() );
-
+    if( verifyOnly || profile )
+    {
+        const treeSnapshot snapshot( tree );
+        for( std::size_t i = 0; i < scenarios.size(); ++i )
+            profiles[i] = checkTraversalProfile( tree, snapshot, scenarios[i], targets.size() );
+    }
 
     if( verifyOnly )
     {
