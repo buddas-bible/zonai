@@ -366,6 +366,18 @@ void checkRotatingSweep()
     input.transform.rotation = {};
     input.geometry = circle2{ {}, -1.0f };
     simulation.castShapeSweep( input, invalidCallback );
+
+    // MakeShapeProxy는 polygon vertexCount를 assert하므로 반드시 그 전에 거절해야 함.
+    input.geometry = polygon2{};
+    simulation.castShapeSweep( input, invalidCallback );
+    input.rotationRadians = 0.0f;
+    input.translation = { 1.0f, 0.0f };
+    simulation.castShapeSweep( input, invalidCallback );
+    polygon2 malformed{};
+    malformed.vertexCount = MAX_POLYGON_VERTICES + 1;
+    input.geometry = malformed;
+    input.rotationRadians = quarterTurn;
+    simulation.castShapeSweep( input, invalidCallback );
 }
 
 } // namespace
