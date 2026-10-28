@@ -671,20 +671,28 @@ public:
 
         // 로컬 원점에서 가장 먼 support 점과 도형 radius를 이용하면 회전 도중의
         // 모든 자세에서 moving shape가 이 반경의 원 안에 들어감.
-        float boundRadius = movingProxy.radius;
+        double maxRadius = static_cast<double>( movingProxy.radius );
         for( int i = 0; i < movingProxy.count; ++i )
         {
-            if( !IsFinite( movingProxy.points[i] ) ) return;
-            const float radius = Length( movingProxy.points[i] ) + movingProxy.radius;
-            if( !std::isfinite( radius ) ) return;
-            boundRadius = std::max( boundRadius, radius );
+            const vec2 point = movingProxy.points[i];
+            if( !IsFinite( point ) ) return;
+            const double radius = std::hypot( static_cast<double>( point.x ),
+                static_cast<double>( point.y ) ) + movingProxy.radius;
+            maxRadius = std::max( maxRadius, radius );
         }
+        if( !std::isfinite( maxRadius ) ||
+            maxRadius >= static_cast<double>( std::numeric_limits<float>::max() ) ) return;
 
+        // 부동소수점 경계 접촉이 후보 AABB에서 누락되지 않도록 바깥 방향으로 확장함.
+        const float boundRadius = std::nextafter( static_cast<float>( maxRadius ),
+            std::numeric_limits<float>::infinity() );
+        const float negativeInfinity = -std::numeric_limits<float>::infinity();
+        const float positiveInfinity = std::numeric_limits<float>::infinity();
         const aabb2 sweptBounds{
-            { std::min( input.transform.position.x, endPosition.x ) - boundRadius,
-              std::min( input.transform.position.y, endPosition.y ) - boundRadius },
-            { std::max( input.transform.position.x, endPosition.x ) + boundRadius,
-              std::max( input.transform.position.y, endPosition.y ) + boundRadius }
+            { std::nextafter( std::min( input.transform.position.x, endPosition.x ) - boundRadius, negativeInfinity ),
+              std::nextafter( std::min( input.transform.position.y, endPosition.y ) - boundRadius, negativeInfinity ) },
+            { std::nextafter( std::max( input.transform.position.x, endPosition.x ) + boundRadius, positiveInfinity ),
+              std::nextafter( std::max( input.transform.position.y, endPosition.y ) + boundRadius, positiveInfinity ) }
         };
         if( !IsValidAABB( sweptBounds ) ) return;
 
