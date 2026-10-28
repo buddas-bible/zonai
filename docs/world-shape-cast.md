@@ -300,3 +300,35 @@ Fixture에서 세 Body Tree, Sensor, 여러 geometry의 실제 World 조회를 �
 
 이 검사는 공개된 충돌 결과를 변경하거나 최적화하지 않고
 **BroadPhase에 의해 제외되는 도형과 실제 TOI 비용을 분리해 관찰**하는 단계다.
+
+
+## 회전 ShapeCast의 현재 fraction에 따른 후보 제외 (#225)
+
+`castShapeSweepClosest`는 가장 먼저 발견한 충돌이 시간 `t`에 있다면,
+더 가까운 충돌을 찾기 위해 `[0,t)` 안에서만 TOI를 계산하면 된다.
+기존 회전 World 조회는 `maxFraction`을 TOI에 전달하면서도 **후보 AABB는
+전체 `[0,1]` 구간**으로 검사하여 불필요한 NarrowPhase 호출이 있었다.
+
+이제 기존 DynamicTree Query의 전체 AABB 순회는 그대로 유지하되,
+callback에서 `maxFraction < 1`일 때만 시작 origin에서 해당 fraction까지의
+축별 선형 보간 구간과 moving shape의 최대 로컬 원점 반경을 합친
+**보수적 clipped AABB**를 이용해 target의 tight AABB를 검사한다.
+
+- 원점의 보간은 기존 `GetSweepTransform`의 `c1*(1-t)+c2*t`를 double에서
+  재계산하며, float 연산 오차를 고려한 크기 비례 margin과 바깥 방향
+  `nextafter`를 적용한다. 극단적인 수치로 bounds가 유효하지 않을 경우
+  최적화만 생략하여 원래 후보 조회를 유지한다.
+- `maxFraction`이 갱신될 때만 clipped AABB를 재계산한다.
+  아직 충돌을 찾지 못했거나 callback이 `1`을 반환하면 기존 전체 범위로 조회한다.
+  현재의 callback fraction 반환 규약, 초기 overlap, chain 앞면 검사를 변경하지 않는다.
+- `worldShapeSweepStats2::clippedCandidates`는 필터/tight AABB를 통과한 뒤
+  clipped AABB로 제외된 후보 수다. Tree의 탐색 비용 자체를 줄이는 것은 아니므로
+  `treeCandidates`는 같은 장면에서 그대로일 수 있다.
+- 기존 GJK 선형 ShapeCast, CCD 및 Solver에는 이 추가 필터를 적용하지 않는다.
+
+`worldShapeCastTests`는 먼저 방문한 Static hit보다 뒤에 있는 Dynamic 도형을
+TOI 이전에 배제하면서, 반대로 이후 Tree에 놓인 **더 앞선** 충돌은 계속 찾는지
+검증한다. 기존 1,800개 독립 회전 TOI oracle, Sandbox 모델·View 테스트,
+324개 다중 도형 `worldRotatingSceneBenchmark`도 함께 확인한다.
+Release 결과는 이전 PR #224와 **동일한 seed/scenario의 NarrowPhase·TOI 호출 수 및
+후보 제외 수**를 우선 비교하고, 시간은 CI runner 편차를 감안하여 해석한다.

@@ -176,6 +176,7 @@ struct totals
 {
     std::uint64_t treeCandidates = 0;
     std::uint64_t narrowphaseCandidates = 0;
+    std::uint64_t clippedCandidates = 0;
     std::uint64_t toiCalls = 0;
     std::uint64_t toiBaseGjk = 0;
     std::uint64_t fallbackAttempts = 0;
@@ -188,6 +189,7 @@ struct totals
     {
         treeCandidates += stats.treeCandidates;
         narrowphaseCandidates += stats.narrowphaseCandidates;
+        clippedCandidates += stats.clippedCandidates;
         toiCalls += stats.toiCalls;
         toiBaseGjk += stats.toi.distanceCalls;
         fallbackAttempts += stats.toi.transientAttempts;
@@ -212,7 +214,7 @@ totals verify( const fixture& data, const scenario& scene )
             ( !measured.hit || ( LengthSquared( measured.point - original.point ) == 0.0f &&
                 LengthSquared( measured.normal - original.normal ) == 0.0f ) ),
             "Optional World sweep instrumentation changed the first hit" );
-        check( stats.treeCandidates >= stats.narrowphaseCandidates &&
+        check( stats.treeCandidates >= stats.narrowphaseCandidates + stats.clippedCandidates &&
             stats.narrowphaseCandidates >= stats.toiCalls &&
             stats.toi.distanceCalls >= stats.toiCalls &&
             stats.toi.transientAttempts <= stats.toiCalls &&
@@ -314,7 +316,7 @@ int main( int argc, char** argv )
 
     if( csv )
         std::printf( "scenario,shapes,queries,tree_candidates,narrowphase_candidates,"
-            "toi_calls,base_gjk,fallback_attempts,fallback_gjk,fallback_hits,"
+            "clipped_candidates,toi_calls,base_gjk,fallback_attempts,fallback_gjk,fallback_hits,"
             "candidate_only_hits,world_ns_per_query,candidate_only_ns_per_query\n" );
 
     for( int i = 0; i < static_cast<int>( data.scenarios.size() ); ++i )
@@ -325,10 +327,11 @@ int main( int argc, char** argv )
         ( void )runBatch( data, scene, method::candidateOnly );
         const double worldNs = medianNanoseconds( data, scene, method::fullWorld );
         const double candidatesNs = medianNanoseconds( data, scene, method::candidateOnly );
-        std::printf( "%s,%d,%d,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.2f,%.2f\n",
+        std::printf( "%s,%d,%d,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.2f,%.2f\n",
             scene.name, GRID_SIZE * GRID_SIZE, QUERY_COUNT,
             static_cast<unsigned long long>( stats.treeCandidates ),
             static_cast<unsigned long long>( stats.narrowphaseCandidates ),
+            static_cast<unsigned long long>( stats.clippedCandidates ),
             static_cast<unsigned long long>( stats.toiCalls ),
             static_cast<unsigned long long>( stats.toiBaseGjk ),
             static_cast<unsigned long long>( stats.fallbackAttempts ),

@@ -107,6 +107,7 @@ struct worldShapeSweepStats2
 {
     int treeCandidates = 0;
     int narrowphaseCandidates = 0;
+    int clippedCandidates = 0;
     int toiCalls = 0;
     int hits = 0;
     toiDiagnostics2 toi{};
@@ -714,6 +715,8 @@ public:
         };
 
         float maxFraction = 1.0f;
+        float clippedFraction = 1.0f;
+        aabb2 clippedBounds = sweptBounds;
 
         for( int i = 0; i < static_cast<int>( bodyType::Count ); ++i )
         {
@@ -729,6 +732,56 @@ public:
                 const shape& candidate = shapes_[shapeIndex];
                 if( !ShouldQueryShape( filter, candidate.filter ) ||
                     !Overlaps( sweptBounds, candidate.aabb ) ) return true;
+
+                // Tree.Query 자체는 기존 전체 bounds를 순회하지만, callback이 가장 가까운
+                // hit으로 fraction을 줄였으면 이후 후보는 그 이전 구간에 들어와야 함.
+                // 회전 정점은 원점 반경 안에 있으므로 짧아진 origin 구간만 검사해도 안전함.
+                if( maxFraction < 1.0f )
+                {
+                    if( clippedFraction != maxFraction )
+                    {
+                        const double time = maxFraction;
+                        const double inverseTime = 1.0 - time;
+                        const double x = inverseTime * input.transform.position.x +
+                            time * endPosition.x;
+                        const double y = inverseTime * input.transform.position.y +
+                            time * endPosition.y;
+
+                        // GetSweepTransform은 float 곱셈/덧셈을 사용하므로 원점 좌표와
+                        // 원점 반경에 따른 rounding margin을 주어 경계 접촉을 보존함.
+                        constexpr double EPSILON = std::numeric_limits<float>::epsilon();
+                        const double padX = 8.0 * EPSILON *
+                            ( std::fabs( input.transform.position.x ) +
+                              std::fabs( endPosition.x ) + maxRadius );
+                        const double padY = 8.0 * EPSILON *
+                            ( std::fabs( input.transform.position.y ) +
+                              std::fabs( endPosition.y ) + maxRadius );
+                        const double minX = std::min( static_cast<double>( input.transform.position.x ), x ) -
+                            maxRadius - padX;
+                        const double minY = std::min( static_cast<double>( input.transform.position.y ), y ) -
+                            maxRadius - padY;
+                        const double maxX = std::max( static_cast<double>( input.transform.position.x ), x ) +
+                            maxRadius + padX;
+                        const double maxY = std::max( static_cast<double>( input.transform.position.y ), y ) +
+                            maxRadius + padY;
+
+                        const aabb2 bounds{
+                            { std::nextafter( static_cast<float>( minX ), negativeInfinity ),
+                              std::nextafter( static_cast<float>( minY ), negativeInfinity ) },
+                            { std::nextafter( static_cast<float>( maxX ), positiveInfinity ),
+                              std::nextafter( static_cast<float>( maxY ), positiveInfinity ) }
+                        };
+                        // 유효하지 않은 극단 입력에서는 최적화를 생략하고 원래 조회를 유지.
+                        clippedBounds = IsValidAABB( bounds ) ? bounds : sweptBounds;
+                        clippedFraction = maxFraction;
+                    }
+
+                    if( !Overlaps( clippedBounds, candidate.aabb ) )
+                    {
+                        if( stats ) ++stats->clippedCandidates;
+                        return true;
+                    }
+                }
                 if( stats ) ++stats->narrowphaseCandidates;
 
                 const transform2& targetTransform = bodySims_[candidate.bodyId].transform;
