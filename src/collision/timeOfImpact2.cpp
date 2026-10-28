@@ -411,7 +411,8 @@ bool FindTransientRotationContact( const toiInput2& input, toiOutput2& output )
             const vec2 pointB = TransformPoint( transformA, distance.pointB ) -
                 worldNormal * input.proxyB.radius;
 
-            output.state = time == 0.0f ? toiState2::Overlapped : toiState2::Hit;
+            output.state = time == 0.0f && distance.distance <= 0.0f ?
+                toiState2::Overlapped : toiState2::Hit;
             output.fraction = time;
             output.point = 0.5f * ( pointA + pointB );
             output.normal = worldNormal;
