@@ -150,3 +150,34 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
 `sandboxShapeCastDemoTests`는 회전 World TOI 결과, 중간 자세와 보수적 후보 범위를
 확인하고 `sandboxShapeCastViewTests`는 Headless ImGui 회전 UI/렌더링을 검사한다.
 실제 Win32/DX11 화면의 DPI·입력 조작은 별도 수동 확인 대상이다.
+
+
+## 회전 ShapeCast 충돌 누락 진단 (분석용 회귀 테스트)
+
+`worldRotatingShapeSweepOracleTests`는 World에서 static Circle 타깃을 이동하며
+600개 고정 seed(0xA91F35D7)의 회전 Circle query를 실행한다.
+회전만 하는 도형, 회전·병진을 결합한 도형, 충분히 멀리 떨어진 miss를 섞는다.
+
+- 테스트의 별도 oracle은 회전 시작/끝 `sin/cos`의 **정규화 선형 보간**
+  (`GetSweepTransform`과 같은 시간 정의)으로 moving Circle의 중심을 독립적으로
+  계산한다. 두 Circle 중심 사이 거리와 radius 합을 직접 비교하며
+  `ShapeDistance` / `TimeOfImpact` / `ShapeCast`는 oracle에서 사용하지 않는다.
+- `t = 0..1`을 512구간으로 균등 샘플링한다. 시작/끝 표면 간격이
+  0.04m보다 크고, 중간 최소 간격이 -0.04m보다 작은 충돌은
+  **robust middle hit**으로 분류한다. 샘플링 사이 아주 짧게 생겼다 사라지는
+  접촉은 발견하지 못할 수 있으므로, 이 oracle도 완전한 연속 충돌 증명은 아니다.
+- TOI가 보고한 hit의 handle, fraction, finite hit 데이터와 수치적으로
+  불가능한 양성 보고(보고 시점의 간격이 0.06m 이상)를 **CI에서 실패**로 검사한다.
+  모든 시점의 간격이 0.08m보다 큰 확실한 miss도 반드시 miss로 보고해야 한다.
+- **robust middle hit을 놓친 수는 현 TOI의 알려진 제한을 파악하는 계측값**이다.
+  일반 CI에서는 이를 기록하지만 테스트 실패 조건으로 삼지 않는다.
+  누락 개수와 재현 가능한 첫 사례(시작 좌표/회전/이동/타깃)를 로그로 남긴다.
+  예상 값이나 개선 비율을 CI 환경·테스트 수정 전후 결과 없이 단정하지 않는다.
+- `--csv`는 case별 간격과 TOI 결과를 출력해 비교할 수 있고,
+  `--strict`는 robust middle hit 누락이 하나라도 있으면 실패한다.
+  `--strict`는 기존 알고리즘의 회전 한계를 분석할 때만 사용하며 CI 기본값은 아니다.
+
+이 테스트는 **회전 TOI 정확도 진단**에 국한한다. Polygon/Chain 타깃의
+ghost vertex ownership이나 높은 각속도, 변화하는 양쪽 Body의 전역 연속
+충돌 판정까지 검증하는 것은 아니다. 향후 개선은 같은 입력·seed의
+기준 로그 및 성능을 비교한 뒤 별도 PR로 도입한다.
