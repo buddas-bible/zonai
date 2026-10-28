@@ -90,6 +90,10 @@ jobs:
         if: runner.os == 'Windows'
         run: .\build\tests\Release\dynamicTreeBoxCastBenchmark.exe --csv
 
+      - name: Sample BoxCast traversal profile (Release, informational)
+        if: runner.os == 'Windows'
+        run: .\build\tests\Release\dynamicTreeBoxCastBenchmark.exe --profile --csv
+
       - name: Sample World ShapeCast performance (Release, informational)
         if: runner.os == 'Windows'
         run: .\build\tests\Release\worldShapeCastBenchmark.exe --csv

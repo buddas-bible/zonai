@@ -55,3 +55,29 @@ Windows Release CI는 `--csv` 표본 측정을 추가로 출력하지만, 이 �
 외부 스프레드시트나 비교 스크립트로 분석할 수 있다.
 전체 `World` ShapeCast 속도를 주장하려면 좁은 단계(GJK) 호출 수와
 실제 게임 장면에서의 프레임 시간도 별도로 측정해야 한다.
+
+
+## Tree 순회 연산 분포 계측
+
+`dynamicTreeBoxCastBenchmark --profile --csv`로 고정 장면의 Query/BoxCast 노드 방문,
+탈락 축, 초기 겹침 및 slab 연산 횟수를 출력한다. 기존 기본 모드의 실행 시간
+측정과 분리된 **비타이밍 진단 기능**이며, 엔진 코드는 변경하지 않는다.
+
+- `query_nodes` / `box_nodes`: 각 탐색에서 방문한 실재 node 수(leaf 포함).
+- `query_rejected` / `box_rejected`: 각 조회에서 AABB/시간 구간 검사로 제외된 node 수.
+- `x_tests` / `y_tests`: BoxCast의 X/Y slab 검사 횟수.
+- `x_rejected` / `y_rejected`: 처음으로 제외 판정이 난 축의 횟수.
+- `stationary_axes`: 이동 성분이 0이어서 나눗셈 없이 비교한 축 검사 횟수.
+- `slab_divisions`: 축 이동이 0이 아닐 때 실행하는 나눗셈의 **코드상 횟수**
+  (축마다 2회). CPU 명령어 수나 CPU cycle을 측정한 값은 아니다.
+- `start_overlap_nodes`: 방문 시 시작 AABB와 node AABB가 이미 겹쳤던 수.
+- `root_exits`: Tree 전체 범위에서 멀어지는 경로에 대한 조기 종료 횟수.
+
+각 값은 해당 장면의 128회 sweep을 합산한다. `VisitNodes`에서 얻은 읽기 전용
+node 구조로 실제 순회 수식을 복제하며, 매 입력에 대해 **production
+`Query` / `BoxCast`와 leaf ID 집합이 정확히 일치**하는지 검증한다.
+이 교차 검증은 `--verify`와 CI에도 포함되고, 실패하면 즉시 종료한다.
+계측은 callback에서 clip을 갱신하지 않는 기존 벤치마크 장면에만 적용된다.
+
+계측 수치는 정량적인 분포 설명이지 CPU 병목의 직접적인 증거가 아니다.
+성능은 `--csv`(기존 실행 시간 모드)와 함께 분석해야 한다.
