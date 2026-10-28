@@ -263,6 +263,31 @@ World의 회전 `castShapeSweep`는 이제 `toiInput2::detectTransientContacts`�
 기존 GJK 선형 ShapeCast와 엔진의 CCD·Solver 동작은 이 계측 작업 범위 밖이다.
 
 
+## Sandbox 시작 회전과 상대 회전
+
+Sandbox ShapeCast에는 서로 독립적인 **시작 회전(-180° ~ +180°)**과
+**상대 회전(-90° ~ +90°)** 조절 항목이 있다.
+
+- 시작 회전은 `worldShapeCastInput2::transform.rotation`에 지정하며,
+  원·캡슐·상자의 **처음 놓인 자세**를 정한다.
+- 상대 회전은 그 자세에서 이동하는 동안 추가로 회전할 각도다.
+  예: 시작 45°, 상대 +30° → 시작 45°, 종료 75°.
+- 상대 회전이 **0°**이면 시작 각도가 0°가 아니더라도 기존
+  `world::castShapeClosest` (GJK 선형 ShapeCast)를 이용해 도형의
+  **초기 방향을 그대로 유지하며 이동**한다.
+  상대 회전이 0°가 아니면 동일한 초기 `transform`을 사용하여
+  `world::castShapeSweepClosest` (TOI)로 조회한다.
+- 시작 자세·종료 자세·미리보기 및 AABB는 이 두 설정을 반영하며,
+  시작 각도를 바꾸면 충돌 결과와 미리보기 fraction이 갱신된다.
+  원은 회전해도 외형이 같아 로컬 축 표시로 방향을 확인할 수 있다.
+- 시작 각도의 범위 제한은 Sandbox 조작을 위한 것이며 World API에는
+  별도의 시작 회전 ±180° 제약이 없다. World 회전 sweep에서 제한되는 것은
+  **상대 회전량의 크기 ±90°**다.
+
+`shapeCastDemoTests`와 `shapeCastViewTests`는 시작 회전만 있는 선형 조회,
+시작+상대 회전 조합, 중간 AABB, 범위 밖 입력 및 ImGui 렌더링을 확인한다.
+
+
 ## 다중 도형 World 회전 ShapeCast 계측
 
 Sandbox의 ShapeCast 시각화에서 **다중 도형 장면(40개 추가)**을 켜면
