@@ -644,6 +644,12 @@ public:
             !std::isfinite( input.rotationRadians ) ||
             std::fabs( input.rotationRadians ) > 1.5707963267948966f ) return;
 
+        if( const polygon2* polygon = std::get_if<polygon2>( &input.geometry ) )
+        {
+            if( polygon->vertexCount < 1 ||
+                polygon->vertexCount > static_cast<int>( polygon->vertices.size() ) ) return;
+        }
+
         const float rotationLengthSquared = input.transform.rotation.c * input.transform.rotation.c +
             input.transform.rotation.s * input.transform.rotation.s;
         if( !std::isfinite( rotationLengthSquared ) ||
