@@ -1,4 +1,5 @@
 #include "jointDemoView.h"
+#include "shapeCastDemoView.h"
 
 #include <algorithm>
 #include <cmath>
@@ -690,6 +691,8 @@ void drawRagdollJointLimits( debugDraw& draw, const rigidBodyDemo& model )
 
 std::unique_ptr<demo> createJointDemoView( demoKind kind )
 {
+    if( kind == demoKind::shapeCastVisualization ) return createShapeCastDemoView();
+
     return std::make_unique<jointDemoView>( kind );
 }
 

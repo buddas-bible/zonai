@@ -606,6 +606,11 @@ add_executable(weldJointWorldTests dynamics/weld_joint_world_test.cpp)
 target_link_libraries(weldJointWorldTests PRIVATE zonai::zonai)
 add_test(NAME weldJointWorldTests COMMAND weldJointWorldTests)
 
+add_executable(sandboxShapeCastDemoTests sandbox/shape_cast_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/shapeCastDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp")
+target_include_directories(sandboxShapeCastDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+target_link_libraries(sandboxShapeCastDemoTests PRIVATE zonai::zonai)
+add_test(NAME sandboxShapeCastDemoTests COMMAND sandboxShapeCastDemoTests)
+
 add_executable(sandboxDemoTests sandbox/demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
 target_sources(sandboxDemoTests PRIVATE sandbox/collision_demo_test.cpp sandbox/spring_damping_demo_test.cpp sandbox/distance_motor_force_demo_test.cpp sandbox/distance_limit_motor_demo_test.cpp sandbox/revolute_motor_torque_demo_test.cpp sandbox/revolute_limit_motor_demo_test.cpp sandbox/suspension_load_demo_test.cpp sandbox/suspension_limit_demo_test.cpp sandbox/suspension_motor_demo_test.cpp sandbox/weld_elasticity_demo_test.cpp)
 target_include_directories(sandboxDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
@@ -641,12 +646,19 @@ if(TARGET imgui)
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/sandbox/assets" "$<TARGET_FILE_DIR:sandboxDemoTests>/assets"
     )
 
+    add_executable(sandboxShapeCastViewTests sandbox/shape_cast_view_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/shapeCastDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/shapeCastDemoView.cpp" "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugCamera.cpp" "${PROJECT_SOURCE_DIR}/sandbox/debug/debugDraw.cpp")
+    target_include_directories(sandboxShapeCastViewTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+    target_link_libraries(sandboxShapeCastViewTests PRIVATE zonai::zonai imgui)
+    add_test(NAME sandboxShapeCastViewTests COMMAND sandboxShapeCastViewTests)
+
     add_executable(sandboxJointViewTests
         sandbox/joint_demo_ui_test.cpp
         "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp"
         "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp"
         "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp"
         "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemoUi.cpp"
+        "${PROJECT_SOURCE_DIR}/sandbox/shapeCastDemo.cpp"
+        "${PROJECT_SOURCE_DIR}/sandbox/shapeCastDemoView.cpp"
         "${PROJECT_SOURCE_DIR}/sandbox/jointDemoView.cpp"
         "${PROJECT_SOURCE_DIR}/sandbox/debug/debugCamera.cpp"
         "${PROJECT_SOURCE_DIR}/sandbox/debug/debugDraw.cpp"
