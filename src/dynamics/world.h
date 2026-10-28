@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <vector>
@@ -12,6 +13,7 @@
 
 #include "collision/broadphase/broadPhase.h"
 #include "collision/constants.h"
+#include "collision/distance2.h"
 #include "collision/rayCast2.h"
 #include "collision/shapeCast2.h"
 #include "dynamics/body.h"
@@ -374,6 +376,77 @@ public:
     template <worldOverlapCallback Callback> void overlapAABB( const aabb2& bounds, Callback&& callback ) const
     {
         overlapAABB( bounds, queryFilter{}, std::forward<Callback>( callback ) );
+    }
+
+    // World 좌표의 convex geometry와 실제로 겹치는 Shape를 조회함.
+    // AABB 후보를 GJK 거리와 radius로 다시 판정하므로 AABB만 겹친 false positive는 제외함.
+    // callback false는 세 Tree 모두 즉시 중단. 순서 미보장, Sensor 포함, 조회 중 World 변경 금지.
+    // ChainSegment는 owned edge를 양면 거리 proxy로 검사하며 ghost vertex/앞면 소유권은 적용하지 않음.
+    template <worldOverlapCallback Callback>
+    void overlapShape( const shapeGeometry& geometry, const transform2& transform, queryFilter filter, Callback&& callback ) const
+    {
+        if( std::holds_alternative<std::monostate>( geometry ) ||
+            !IsFinite( transform.position ) ||
+            !std::isfinite( transform.rotation.c ) || !std::isfinite( transform.rotation.s ) ) return;
+
+        // MakeShapeProxy의 polygon 사전 조건은 외부 입력에 의한 assert가 일어나지 않도록 먼저 확인.
+        if( const polygon2* polygon = std::get_if<polygon2>( &geometry ) )
+        {
+            if( polygon->vertexCount < 1 || polygon->vertexCount > static_cast<int>( MAX_POLYGON_VERTICES ) ) return;
+        }
+
+        const shapeProxy2 queryProxy = MakeShapeProxy( geometry );
+        if( queryProxy.count < 1 || queryProxy.count > static_cast<int>( queryProxy.points.size() ) ||
+            !std::isfinite( queryProxy.radius ) || queryProxy.radius < 0.0f ) return;
+
+        for( int i = 0; i < queryProxy.count; ++i )
+        {
+            if( !IsFinite( queryProxy.points[i] ) ) return;
+        }
+
+        const aabb2 bounds = ComputeShapeAABB( geometry, transform );
+        if( !IsValidAABB( bounds ) ) return;
+
+        // Sensor의 discrete overlap과 동일한 float 오차 허용: tangent geometry의 GJK 잔여 거리.
+        constexpr float OVERLAP_EPSILON = 10.0f * std::numeric_limits<float>::epsilon();
+
+        for( int i = 0; i < static_cast<int>( bodyType::Count ); ++i )
+        {
+            const dynamicTree& tree = broadPhase_.GetTree( static_cast<bodyType>( i ) );
+            bool keepQuerying = true;
+
+            tree.Query( bounds,
+                [&]( std::int32_t proxyId )
+                {
+                    const std::int32_t shapeIndex = tree.GetProxyShapeIndex( proxyId );
+                    assert( shapeIndex >= 0 && static_cast<std::size_t>( shapeIndex ) < shapes_.size() );
+
+                    const shape& candidate = shapes_[shapeIndex];
+                    if( !ShouldQueryShape( filter, candidate.filter ) || !Overlaps( bounds, candidate.aabb ) ) return true;
+
+                    const transform2& targetTransform = bodySims_[candidate.bodyId].transform;
+                    distanceInput2 input{};
+                    input.proxyA = MakeShapeProxy( candidate.geometry );
+                    input.proxyB = queryProxy;
+                    input.transform = InverseMul( targetTransform, transform );
+                    input.useRadii = true;
+
+                    simplexCache2 cache{};
+                    const distanceOutput2 result = ShapeDistance( input, cache );
+                    if( !std::isfinite( result.distance ) || result.distance > OVERLAP_EPSILON ) return true;
+
+                    keepQuerying = static_cast<bool>( callback( MakeShapeId( shapeIndex ) ) );
+                    return keepQuerying;
+                } );
+
+            if( !keepQuerying ) return;
+        }
+    }
+
+    template <worldOverlapCallback Callback>
+    void overlapShape( const shapeGeometry& geometry, const transform2& transform, Callback&& callback ) const
+    {
+        overlapShape( geometry, transform, queryFilter{}, std::forward<Callback>( callback ) );
     }
 
     // World 좌표 origin + translation * fraction 경로에서 실제 Shape geometry를 조회함.
