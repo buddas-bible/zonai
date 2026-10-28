@@ -177,6 +177,104 @@ int main()
         rotating.getPreviewFraction() == 0.0f,
         "Resetting rotation must restore the previous linear query" );
 
+    // 시작 회전과 상대 회전은 독립적이며, 상대 회전 0은 기울어진 선형 ShapeCast임.
+    shapeCastDemo oriented{};
+    oriented.setProbe( shapeCastProbe::box );
+    constexpr float PI = 3.14159265358979323846f;
+    constexpr float QUARTER_PI = 0.7853981633974483f;
+    constexpr float SIXTH_PI = 0.5235987755982989f;
+    check( oriented.getStartRotationRadians() == 0.0f &&
+        oriented.getRotationRadians() == 0.0f,
+        "Default start and relative rotations must be zero" );
+
+    oriented.setStartRotationRadians( QUARTER_PI );
+    near( oriented.getStartRotationRadians(), QUARTER_PI,
+        "Start rotation is independently stored" );
+    near( oriented.getInput().transform.rotation.c, std::cos( QUARTER_PI ),
+        "Linear ShapeCast receives the rotated start cosine" );
+    near( oriented.getInput().transform.rotation.s, std::sin( QUARTER_PI ),
+        "Linear ShapeCast receives the rotated start sine" );
+    check( oriented.getRotationRadians() == 0.0f && oriented.getSweepStats().toiCalls == 0,
+        "An initial orientation alone must keep the existing linear GJK query" );
+
+    const auto linearHit = oriented.getWorld().castShapeClosest( oriented.getInput() );
+    const auto orientedHit = oriented.getHit();
+    check( orientedHit.hit && orientedHit.hit == linearHit.hit &&
+        orientedHit.shape == linearHit.shape && orientedHit.fraction == linearHit.fraction,
+        "Initially tilted Sandbox box must match the direct World linear ShapeCast" );
+
+    const transform2 tiltedStart = oriented.getPoseAtFraction( 0.0f );
+    const transform2 tiltedEnd = oriented.getPoseAtFraction( 1.0f );
+    near( tiltedStart.rotation.c, tiltedEnd.rotation.c,
+        "Linear sweep preserves the starting cosine" );
+    near( tiltedStart.rotation.s, tiltedEnd.rotation.s,
+        "Linear sweep preserves the starting sine" );
+    near( tiltedEnd.position.x,
+        oriented.getInput().transform.position.x + oriented.getInput().translation.x,
+        "Initially tilted linear sweep reaches the requested X destination" );
+    const aabb2 tiltedBounds = oriented.getSweepAABB();
+    const aabb2 expectedStartBounds = ComputeShapeAABB(
+        oriented.getInput().geometry, oriented.getInput().transform );
+    check( tiltedBounds.min.x <= expectedStartBounds.min.x &&
+        tiltedBounds.min.y <= expectedStartBounds.min.y &&
+        tiltedBounds.max.x >= expectedStartBounds.max.x &&
+        tiltedBounds.max.y >= expectedStartBounds.max.y,
+        "Initially tilted linear swept AABB contains the rotated starting shape" );
+
+    oriented.step( 0.1f, 1 );
+    check( oriented.getPreviewFraction() > 0.0f, "Initial-angle preview can advance" );
+    oriented.setRotationRadians( SIXTH_PI );
+    near( oriented.getPreviewFraction(), 0.0f,
+        "Adding relative rotation restarts the preview" );
+    const transform2 combinedStart = oriented.getPoseAtFraction( 0.0f );
+    const transform2 combinedEnd = oriented.getPoseAtFraction( 1.0f );
+    near( combinedStart.rotation.c, std::cos( QUARTER_PI ),
+        "Relative rotation does not modify the initial orientation" );
+    near( combinedEnd.rotation.c, std::cos( QUARTER_PI + SIXTH_PI ),
+        "Combined sweep ends at start angle plus relative angle cosine" );
+    near( combinedEnd.rotation.s, std::sin( QUARTER_PI + SIXTH_PI ),
+        "Combined sweep ends at start angle plus relative angle sine" );
+    const auto expectedSweepHit = oriented.getWorld().castShapeSweepClosest(
+        { oriented.getInput().geometry, oriented.getInput().transform,
+          oriented.getInput().translation, oriented.getRotationRadians() } );
+    check( oriented.getHit().hit == expectedSweepHit.hit &&
+        oriented.getHit().shape == expectedSweepHit.shape &&
+        oriented.getHit().fraction == expectedSweepHit.fraction &&
+        oriented.getSweepStats().toiCalls > 0,
+        "Initially rotated TOI Sandbox query matches the direct World sweep" );
+
+    const aabb2 combinedBounds = oriented.getSweepAABB();
+    for( int step = 0; step <= 4; ++step )
+    {
+        const transform2 pose = oriented.getPoseAtFraction( step * 0.25f );
+        const aabb2 bounds = ComputeShapeAABB( oriented.getInput().geometry, pose );
+        check( combinedBounds.min.x <= bounds.min.x &&
+            combinedBounds.min.y <= bounds.min.y &&
+            combinedBounds.max.x >= bounds.max.x &&
+            combinedBounds.max.y >= bounds.max.y,
+            "Combined rotating swept bounds contain each intermediate orientation" );
+    }
+
+    oriented.setStartRotationRadians( PI + 0.1f );
+    check( oriented.getStartRotationRadians() == QUARTER_PI,
+        "Start rotation beyond ±180 degrees is rejected" );
+    oriented.setStartRotationRadians( std::numeric_limits<float>::quiet_NaN() );
+    check( oriented.getStartRotationRadians() == QUARTER_PI,
+        "Invalid start rotation must not change the Sandbox" );
+    oriented.setStartRotationRadians( PI );
+    near( oriented.getInput().transform.rotation.c, -1.0f,
+        "Positive 180-degree start angle is accepted" );
+    oriented.setStartRotationRadians( -PI );
+    near( oriented.getInput().transform.rotation.c, -1.0f,
+        "Negative 180-degree start angle is accepted" );
+
+    oriented.setRotationRadians( 0.0f );
+    oriented.setStartRotationRadians( 0.0f );
+    check( oriented.getStartRotationRadians() == 0.0f &&
+        oriented.getRotationRadians() == 0.0f &&
+        oriented.getSweepStats().toiCalls == 0,
+        "Both rotation controls reset to the original linear query" );
+
     shapeCastDemo dense{};
     dense.setProbe( shapeCastProbe::box );
     dense.setRotationRadians( 0.6f );
