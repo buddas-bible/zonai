@@ -186,7 +186,8 @@ public:
             const worldRayCastResult2 ray = getRayHit();
             if( ray.hit )
             {
-                draw.DrawSegment( { start, ray.point }, rayColor, 2.5f );
+                const vec2 rayStart = TransformPoint( input.transform, getLocalOffset() );
+                draw.DrawSegment( { rayStart, ray.point }, rayColor, 2.5f );
                 draw.DrawPoint( ray.point, rayColor, 5.0f );
                 if( LengthSquared( ray.normal ) > 0.0f ) draw.DrawArrow( ray.point, ray.normal, rayColor, 0.55f );
 
