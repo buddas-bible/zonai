@@ -541,6 +541,12 @@ add_executable(worldShapeCastTests dynamics/world_shape_cast_test.cpp)
 target_link_libraries(worldShapeCastTests PRIVATE zonai::zonai)
 add_test(NAME worldShapeCastTests COMMAND worldShapeCastTests)
 
+# Deterministic sampled analytic circle reference for bounded World rotational sweeps.
+# Expected TOI false negatives are reported for diagnosis, not treated as a contract violation.
+add_executable(worldRotatingShapeSweepOracleTests dynamics/world_shape_sweep_oracle_test.cpp)
+target_link_libraries(worldRotatingShapeSweepOracleTests PRIVATE zonai::zonai)
+add_test(NAME worldRotatingShapeSweepOracleTests COMMAND worldRotatingShapeSweepOracleTests)
+
 add_executable(contactCacheTests dynamics/contact_cache_test.cpp)
 target_link_libraries(contactCacheTests PRIVATE zonai::zonai)
 add_test(NAME contactCacheTests COMMAND contactCacheTests)
