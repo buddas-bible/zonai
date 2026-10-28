@@ -1,0 +1,41 @@
+# World ShapeCast
+
+`world::castShape` / `world::castShapeClosest`는 기존 ShapeCast(GJK 거리 반복)와
+BroadPhase의 세 DynamicTree를 연결하는 World 공간 선형 sweep API다.
+
+```cpp
+worldShapeCastInput2 input{};
+input.geometry = circle2{ {}, 0.5f };
+input.transform.position = { 0.0f, 1.0f };
+input.translation = { 10.0f, 0.0f };
+
+const worldShapeCastResult2 hit = simulation.castShapeClosest( input );
+
+simulation.castShape( input, queryFilter{},
+    [&]( shapeId id, vec2 point, vec2 normal, float fraction )
+    {
+        return fraction; // 현재 충돌 지점까지만 이후 후보를 검사
+    } );
+```
+
+- 입력 Shape는 Circle, Capsule, Convex Polygon, Segment. 도형은 `transform`의 자세를
+  유지하며 `translation` 방향으로 움직인다. ChainSegment를 이동 도형으로 넣는 경우는
+  현재 지원하지 않는다.
+- 고정 타깃은 Circle/Capsule/Polygon/Segment/ChainSegment이며 Sensor도 탐색한다.
+  Chain 타깃에는 edge 오른쪽의 앞면 조건을 적용한다. 앞면 판정은 간단한
+  normal/초기 중심 기준이며 ghost-vertex 접합점의 상세 ownership 검사는 하지 않는다.
+- `fraction`은 전체 translation에 대한 0~1 비율이다. 기존 `ShapeCast`의
+  LINEAR_SLOP 기반 접촉 허용차 및 끝 fraction 제외 규칙을 유지한다.
+- callback: -1 무시, 0 전체 종료, 반환한 양수 fraction으로 남은 sweep 단축,
+  1 전체 길이 유지. 후보 탐색은 거리순이 아니다.
+- 처음부터 겹치면 일반 조회에는 fraction=0, zero normal로 보고하며, closest는
+  처음 겹친 후보를 건너뛴다. `canEncroach=true`는 기존 narrowphase ShapeCast의
+  가까운 초기 상태에서 조금 더 접근할 수 있는 모드를 사용한다.
+- QueryFilter의 양방향 category/mask를 사용하며 groupIndex / collisionMatrix는
+  공간 조회에 적용하지 않는다. 반환 `shapeId`의 수명은 `IsValid`로 확인한다.
+- 순수 읽기 조회이며 callback에서 World/Tree/Shape를 수정하거나 `Step`에 재진입하면 안 된다.
+  복수 객체의 다른 프레임 캐싱이나 terrain 연결 지점 처리, 회전 sweep은 이 API 범위가 아니다.
+
+`worldShapeCastTests`: 세 Body Tree, Sensor, 필터, hit 위치·normal·fraction,
+초기 겹침·encroachment, callback, world handle 수명, transform 변경/파괴,
+Circle/Capsule/Polygon/Chain, 유효하지 않은 입력을 Release에서도 검사한다.
