@@ -348,7 +348,11 @@ World의 회전 ShapeCast는 각 도형의 proxy support 점과 radius가 모두
   target의 모든 support 점도 해당 원점 중심의 최대 반경 안에 있으므로
   원점 간 최소 거리로 **충돌 불가능함을 증명한 후보만** 버릴 수 있다.
 - 보수적 계산에는 double과 float 반올림 여유를 사용하고
-  target Body 회전값의 길이까지 반영한다. 계산이 유효하지 않으면
+  target Body 회전값의 길이까지 반영한다. 특히 TOI의 core contact 임계값
+  `max(LINEAR_SLOP, radiusA + radiusB - LINEAR_SLOP) + 0.25 * LINEAR_SLOP`이
+  실제 도형의 radius 합을 초과하는 부분을 추가로 허용한다. 따라서 작은
+  원끼리 실제 표면이 약간 떨어져 있어도 TOI가 `Hit`으로 판정하는
+  근접 접촉을 기존과 동일하게 보존한다. 계산이 유효하지 않으면
   해당 후보를 기존 TOI로 전달한다.
 - 축별 AABB와 fraction clipping은 그대로 두고, 후보별 support radius
   계산 뒤 `TimeOfImpact` 호출만 줄인다. 추가된
