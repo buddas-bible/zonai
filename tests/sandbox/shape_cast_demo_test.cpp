@@ -186,6 +186,8 @@ int main()
     check( oriented.getStartRotationRadians() == 0.0f &&
         oriented.getRotationRadians() == 0.0f,
         "Default start and relative rotations must be zero" );
+    const worldShapeCastResult2 unrotatedBoxHit = oriented.getHit();
+    check( unrotatedBoxHit.hit, "Unrotated reference Box cast must hit a target" );
 
     oriented.setStartRotationRadians( QUARTER_PI );
     near( oriented.getStartRotationRadians(), QUARTER_PI,
@@ -202,6 +204,8 @@ int main()
     check( orientedHit.hit && orientedHit.hit == linearHit.hit &&
         orientedHit.shape == linearHit.shape && orientedHit.fraction == linearHit.fraction,
         "Initially tilted Sandbox box must match the direct World linear ShapeCast" );
+    check( std::fabs( orientedHit.fraction - unrotatedBoxHit.fraction ) > 0.002f,
+        "Tilting the initial Box must affect the first collision fraction" );
 
     const transform2 tiltedStart = oriented.getPoseAtFraction( 0.0f );
     const transform2 tiltedEnd = oriented.getPoseAtFraction( 1.0f );
