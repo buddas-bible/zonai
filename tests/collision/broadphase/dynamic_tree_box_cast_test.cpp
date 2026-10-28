@@ -2,6 +2,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -231,6 +232,61 @@ void verifyRootBoundaryPrecision()
     check( calls == 1 && fraction == 0.8f, "Root early-out lost near-boundary swept hit" );
 }
 
+// 역수 곱 경로에서도 경계 진입 시간과 극소 이동의 후보 의미를 보존해야 함.
+void verifyReciprocalBoundaryCases()
+{
+    struct boundaryCase
+    {
+        aabb2 target;
+        aabb2 moving;
+        vec2 translation;
+        float limit;
+        bool hit;
+    };
+
+    const float subnormal = std::numeric_limits<float>::denorm_min();
+    const std::array<boundaryCase, 9> cases{ {
+        { { { 2.0f, -1.0f }, { 3.0f, 1.0f } },
+          { { -1.0f, -0.25f }, { 0.0f, 0.25f } }, { 8.0f, 0.0f }, 0.25f, true },
+        { { { 2.0f, -1.0f }, { 3.0f, 1.0f } },
+          { { -1.0f, -0.25f }, { 0.0f, 0.25f } }, { 8.0f, 0.0f }, 0.2499f, false },
+        { { { 2.0f, -1.0f }, { 3.0f, 1.0f } },
+          { { 5.0f, -0.25f }, { 6.0f, 0.25f } }, { -8.0f, 0.0f }, 0.25f, true },
+        { { { 2.0f, -1.0f }, { 3.0f, 1.0f } },
+          { { 5.0f, -0.25f }, { 6.0f, 0.25f } }, { -8.0f, 0.0f }, 0.2499f, false },
+        { { { 1.0f, 1.0f }, { 2.0f, 2.0f } },
+          { { 0.0f, 0.0f }, { 0.5f, 0.5f } }, { 1.0f, 1.0f }, 0.5f, true },
+        { { { 1.0f, 1.0f }, { 2.0f, 2.0f } },
+          { { 0.0f, 0.0f }, { 0.5f, 0.5f } }, { 1.0f, 1.0f }, 0.4999f, false },
+        { { { 0.0f, -1.0f }, { 1.0f, 1.0f } },
+          { { -1.0f, -0.25f }, { -0.5f, 0.25f } }, { subnormal, 0.0f }, 1.0f, false },
+        { { { 0.0f, -1.0f }, { 1.0f, 1.0f } },
+          { { -1.0f, -0.25f }, { 0.5f, 0.25f } }, { subnormal, 0.0f }, 1.0f, true },
+        { { { 0.0f, -1.0f }, { 1.0f, 1.0f } },
+          { { -3.0e-30f, -0.25f }, { -2.0e-30f, 0.25f } },
+          { 4.0e-30f, 0.0f }, 1.0f, true }
+    } };
+
+    for( const boundaryCase& input : cases )
+    {
+        check( overlapsDuringSweep( input.moving, input.target, input.translation, input.limit ) == input.hit,
+            "Boundary fixture disagrees with independent sweep oracle" );
+
+        dynamicTree tree{};
+        const std::int32_t proxy = tree.CreateProxy( input.target, 0 );
+        float fraction = input.limit;
+        int callbacks = 0;
+        tree.BoxCast( input.moving, input.translation, fraction, [&]( std::int32_t id, float )
+        {
+            check( id == proxy, "Boundary sweep returned another proxy" );
+            ++callbacks;
+            return -1.0f;
+        } );
+        check( ( callbacks == 1 ) == input.hit, "Reciprocal BoxCast changed boundary candidate" );
+        check( fraction == input.limit, "Boundary sweep changed ignored clip fraction" );
+    }
+}
+
 void verifyDiagonalPruning()
 {
     dynamicTree tree{};
@@ -274,6 +330,7 @@ int main()
     verifyDiagonalPruning();
     verifyRootSweepRejection();
     verifyRootBoundaryPrecision();
+    verifyReciprocalBoundaryCases();
 
     dynamicTree emptyTree{};
     const aabb2 box{ { -1.0f, -1.0f }, { 1.0f, 1.0f } };
