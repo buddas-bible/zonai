@@ -284,7 +284,7 @@ Sandbox ShapeCast에는 서로 독립적인 **시작 회전(-180° ~ +180°)**�
   별도의 시작 회전 ±180° 제약이 없다. World 회전 sweep에서 제한되는 것은
   **상대 회전량의 크기 ±90°**다.
 
-`shapeCastDemoTests`와 `shapeCastViewTests`는 시작 회전만 있는 선형 조회,
+`sandboxShapeCastDemoTests`와 `sandboxShapeCastViewTests`는 시작 회전만 있는 선형 조회,
 시작+상대 회전 조합, 중간 AABB, 범위 밖 입력 및 ImGui 렌더링을 확인한다.
 
 
