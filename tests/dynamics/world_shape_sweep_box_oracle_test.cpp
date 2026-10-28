@@ -232,6 +232,12 @@ void runAudit( bool csv, bool strict )
         }
         if( separated ) check( !hit.hit, "Rotating Box TOI reported a definite miss as a hit" );
 
+        // #221: 고정 시드 index 664는 얇은 Box가 회전 도중 작은 원과 겹쳤지만
+        // 기존 TOI가 끝 시점의 분리축만 보고 Separated를 반환하던 반례임.
+        if( i == 664 )
+            check( robust && hit.hit && hit.fraction > 0.0f && hit.fraction < 1.0f,
+                "Regression #221: brief rotating thin-box contact must be detected" );
+
         if( robust && !hit.hit )
         {
             ++misses;
