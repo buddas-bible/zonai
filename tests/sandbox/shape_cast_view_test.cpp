@@ -31,7 +31,9 @@ int main()
     int rotatingVertices = 0;
     bool rotatingStartObserved = false;
     int denseVertices = 0;
+    bool denseObserved = false;
     int tiltedLinearVertices = 0;
+    bool tiltedLinearObserved = false;
     int offsetRotatingVertices = 0;
 
     for( int frame = 0; frame < 7; ++frame )
@@ -116,8 +118,17 @@ int main()
             rotatingStartObserved = model.getStartRotationRadians() != 0.0f &&
                 model.getRotationRadians() != 0.0f;
         }
-        if( frame == 4 ) denseVertices = geometryVertices;
-        if( frame == 5 ) tiltedLinearVertices = geometryVertices;
+        if( frame == 4 )
+        {
+            denseVertices = geometryVertices;
+            denseObserved = model.getDenseTargets().size() == 40;
+        }
+        if( frame == 5 )
+        {
+            tiltedLinearVertices = geometryVertices;
+            tiltedLinearObserved = model.getRotationRadians() == 0.0f &&
+                model.getSweepStats().toiCalls == 0;
+        }
         if( frame == 6 ) offsetRotatingVertices = geometryVertices;
 
         ImGui::EndChild();
@@ -134,13 +145,12 @@ int main()
         std::fprintf( stderr, "Rotating ShapeCast view failed to render the TOI pose\n" );
         std::exit( EXIT_FAILURE );
     }
-    if( denseVertices <= rotatingVertices || model.getDenseTargets().size() != 40 )
+    if( denseVertices <= rotatingVertices || !denseObserved )
     {
         std::fprintf( stderr, "Dense ShapeCast view failed to render additional bodies\n" );
         std::exit( EXIT_FAILURE );
     }
-    if( tiltedLinearVertices <= 0 || model.getRotationRadians() != 0.0f ||
-        model.getSweepStats().toiCalls != 0 )
+    if( tiltedLinearVertices <= 0 || !tiltedLinearObserved )
     {
         std::fprintf( stderr, "Initial-angle-only linear ShapeCast view failed to render\n" );
         std::exit( EXIT_FAILURE );
