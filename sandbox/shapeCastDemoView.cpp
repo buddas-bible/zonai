@@ -2,6 +2,8 @@
 
 #include <cstdio>
 
+#include <cmath>
+
 #include <imgui.h>
 
 #include "debug/debugDraw.h"
@@ -17,8 +19,8 @@ class shapeCastDemoView final : public shapeCastDemo
 public:
     void drawControls() override
     {
-        ImGui::TextUnformatted( "도형 이동 충돌 조회" );
-        ImGui::TextWrapped( "이동 도형은 물리적으로 배치되지 않습니다. 시작·종료 형태와 가장 가까운 충돌 지점을 미리 봅니다." );
+        ImGui::TextUnformatted( "도형 이동·회전 충돌 조회" );
+        ImGui::TextWrapped( "이동 도형은 물리적으로 배치되지 않습니다. 시작·종료 자세와 가장 가까운 충돌 지점을 미리 봅니다." );
 
         int probe = static_cast<int>( getProbe() );
         if( ImGui::Combo( "이동 도형###ShapeCastProbe", &probe, "원\0캡슐\0상자\0" ) )
@@ -30,11 +32,22 @@ public:
         vec2 end = getInput().transform.position + getInput().translation;
         if( ImGui::DragFloat2( "도착점 (m)###ShapeCastEnd", &end.x, 0.05f, -10.0f, 10.0f ) ) setTarget( end );
 
+        constexpr float RADIANS_PER_DEGREE = 0.017453292519943295f;
+        float angleDegrees = getRotationRadians() / RADIANS_PER_DEGREE;
+        if( ImGui::SliderFloat( "상대 회전 (도)###ShapeCastAngle", &angleDegrees, -90.0f, 90.0f, "%.1f" ) )
+            setRotationRadians( angleDegrees * RADIANS_PER_DEGREE );
+        const bool rotating = getRotationRadians() != 0.0f;
+        ImGui::TextUnformatted( rotating ? "회전 조회: TOI / 회전량 제한 ±90도" : "선형 조회: GJK ShapeCast" );
+
         bool sensor = isSensorIncluded();
         if( ImGui::Checkbox( "센서 포함###ShapeCastSensor", &sensor ) ) setSensorIncluded( sensor );
 
         bool encroach = getInput().canEncroach;
+        ImGui::BeginDisabled( rotating );
         if( ImGui::Checkbox( "초기 근접 허용###ShapeCastEncroach", &encroach ) ) setCanEncroach( encroach );
+        ImGui::EndDisabled();
+        if( rotating )
+            ImGui::TextWrapped( "초기 근접 허용은 기존 선형 ShapeCast 전용입니다. 회전 조회는 TOI를 사용합니다." );
 
         bool showRay = isRayVisible();
         if( ImGui::Checkbox( "RayCast 비교 표시###ShapeCastRayVisible", &showRay ) ) setRayVisible( showRay );
@@ -43,7 +56,7 @@ public:
         if( ImGui::Checkbox( "이동 AABB 후보 표시###ShapeCastAABBVisible", &showSweep ) ) setSweepAABBVisible( showSweep );
 
         if( ImGui::Button( "미리보기 처음부터###ShapeCastResetPreview" ) ) resetPreview();
-        ImGui::TextWrapped( "캔버스 왼쪽 클릭: 이동 목표점 / Shift+왼쪽 클릭: 시작점. 재생/1프레임: 미리보기 이동. 상단 초기화는 경로를 복원합니다." );
+        ImGui::TextWrapped( "캔버스 왼쪽 클릭: 이동 목표점 / Shift+왼쪽 클릭: 시작점. 도착점을 시작점과 같게 하면 순수 회전도 시험할 수 있습니다. 재생/1프레임: 자세 미리보기." );
 
         const auto hit = getHit();
         if( hit.hit )
@@ -66,9 +79,10 @@ public:
         else
             ImGui::TextUnformatted( "RayCast: 중심 광선과 교차하지 않음" );
 
-        ImGui::Text( "이동 AABB 후보: %zu개 (정확한 충돌 수가 아님)", getAABBCandidateCount() );
+        ImGui::Text( "Swept AABB 후보: %zu개 (정확한 충돌 수가 아님)", getAABBCandidateCount() );
         ImGui::Text( "미리보기 진행: %.1f%%", 100.0f * getPreviewFraction() );
-        ImGui::TextWrapped( "초록: 정적 대상 / 보라: 센서 / 흰색: 시작 / 회색: 전체 끝점 / 노랑: 현재 위치 / 파랑: ShapeCast 충돌 / 주황: 법선 / 분홍: RayCast / 청록: 이동 AABB" );
+        ImGui::TextWrapped( "초록: 정적 대상 / 보라: 센서 / 흰색: 시작 / 회색: 종료 / 노랑: 현재 자세 / 파랑: 첫 충돌 / 주황: 법선 / 분홍: 중심 RayCast / 청록: swept AABB" );
+        if( rotating ) ImGui::TextWrapped( "중심 RayCast는 회전을 반영하지 않습니다. 회전된 도형의 충돌은 파란색 TOI 결과를 확인하세요." );
     }
 
     void draw( debugDraw& draw ) const override
@@ -121,12 +135,12 @@ public:
             }
         }
         draw.DrawShape( input.geometry, input.transform, startColor, IM_COL32( 245, 245, 245, 24 ) );
-        draw.DrawShape( input.geometry, { end, input.transform.rotation }, endColor, 0 );
+        draw.DrawShape( input.geometry, getPoseAtFraction( 1.0f ), endColor, 0 );
 
         const worldShapeCastResult2 hit = getHit();
         if( hit.hit )
         {
-            const transform2 atHit{ start + input.translation * hit.fraction, input.transform.rotation };
+            const transform2 atHit = getPoseAtFraction( hit.fraction );
             draw.DrawShape( input.geometry, atHit, hitColor, IM_COL32( 75, 170, 255, 35 ) );
             draw.DrawPoint( hit.point, normalColor, 5.0f );
             if( LengthSquared( hit.normal ) > 0.0f ) draw.DrawArrow( hit.point, hit.normal, normalColor, 0.8f );
@@ -136,8 +150,13 @@ public:
             draw.DrawLabel( hit.point + vec2{ 0.2f, -0.65f }, fractionLabel, normalColor );
         }
 
-        const transform2 current{ start + input.translation * getPreviewFraction(), input.transform.rotation };
+        const transform2 current = getPoseAtFraction( getPreviewFraction() );
         draw.DrawShape( input.geometry, current, progressColor, IM_COL32( 250, 215, 75, 30 ) );
+
+        // 원은 회전해도 외형이 동일하므로 진행 중 회전축을 선으로 표시함.
+        if( getRotationRadians() != 0.0f )
+            draw.DrawSegment( { current.position, current.position +
+                Rotate( current.rotation, vec2{ 0.65f, 0.0f } ) }, progressColor, 2.0f );
     }
 };
 
