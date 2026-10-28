@@ -27,6 +27,7 @@ cmake --build build-release --target dynamicTreeBoxCastBenchmark
 
 CI에서는 `dynamicTreeBoxCastBenchmarkOracle`가 `--verify`만 사용한다.
 조회 시간은 PC의 CPU/컴파일러/빌드 설정/열 상태에 민감하므로 **CI 통과 기준에 사용하지 않는다.**
+Windows Release CI는 `--csv` 표본 측정을 추가로 출력하지만, 이 값은 runner 환경에서의 참고값이며 사용자 PC의 성능을 대표하지 않는다.
 
 ## 비교 조건
 
