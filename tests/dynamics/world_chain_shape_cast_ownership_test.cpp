@@ -158,7 +158,8 @@ int main()
             for( const bool rotating : { false, true } )
             {
                 verifyCase( scene, -0.12f, 0, rotating );
-                verifyCase( scene, 0.0f, 0, rotating );
+                // 내리막 edge에서는 두 번째 edge의 Voronoi 영역이 접점을 소유함.
+                verifyCase( scene, 0.0f, bend < 0.0f ? 1 : 0, rotating );
                 verifyCase( scene, 0.12f, 1, rotating );
                 verifyBackFace( scene, rotating );
             }
