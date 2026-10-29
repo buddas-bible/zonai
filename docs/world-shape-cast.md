@@ -141,7 +141,7 @@ Body 자체도 회전한다. Capsule·Box·Triangle은 두 edge 내부와 공유
 동일한 Chain 앞면에 **두 번 접촉하고 중간에는 떨어지는** 경로를
 평탄/회전된 정적 Body와 짧은 접촉 구간까지 검증한다.
 16,384분할의 독립 narrowphase 시간순 참조로 실제 접촉 창 두 개를 확인하고
-재탐색 반환 fraction이 **첫 창의 시작과 0.006 이내**인지 비교한다.
+재탐색 반환 fraction이 **첫 창의 시작과 0.00025 이내**인지 비교한다.
 탐색 구간 최대 1024개, manifold 호출 최대 방문 구간+24회, 한도 소진 0도 검사한다.
 
 `worldChainRetryStressTests --strict`는 회전 Box의 pivot 높이·시작 위상·
@@ -160,6 +160,22 @@ Chain narrowphase 시간순 참조로 적어도 4개 샘플에 나타나는 명�
 - 표본 판정이므로 4개 미만 샘플의 찰나 접촉은 완전성 보증 대상이 아니다.
   알고리즘과 narrowphase를 독립적으로 검증하기 위한 시간순 참조이며
   수학적으로 완전한 접촉 oracle은 아니다.
+
+`worldChainRetryBenchmark --verify`는 회전만 있는 복수 접촉,
+2,000m 고속 병진·회전의 아주 짧은 접촉, 명확한 비접촉의 세 장면을
+각 32회 검사한다. 선택적 통계 수집을 켜고 끈 결과의 hit/fraction/
+point/normal이 완전히 같은지 확인하고, GJK·manifold·방문 구간
+1024개 제한과 적응 깊이 사용 여부를 검증한다.
+`--csv`는 세 장면 각각의 방문/GJK/manifold 합계와
+Release **호출당 중간값 ns**를 출력한다. CI의 환경별 속도 변동을
+고려해 시간 값에는 합격 기준을 걸지 않는다.
+`worldChainRetryStressTests --strict`는 전체 324경로의
+최초 충돌 반환 시점과 dense narrowphase reference 차이의
+최대 양·음 오차를 별도로 기록하며, `--strict`에서
+각 방향 **0.00025 이하**와 계측 유무에 따른 결과 완전 일치를 요구한다.
+현재 324경로 중 162건의 확실한 접촉에서 최대 늦은 오차는 0,
+최대 이른 오차는 약 0.0000603이었다. 표본 간격을 기준으로
+검증한 값으로 모든 실수 시간의 접촉 시점을 증명하지는 않는다.
 
 ## BoxCast를 사용하는 BroadPhase 후보 탐색
 
