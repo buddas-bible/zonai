@@ -190,7 +190,7 @@ int main( int argc, char** argv )
         "Chain retry benchmark lacks the intended contact or adaptive-depth coverage" );
     if( verifyOnly ) return EXIT_SUCCESS;
 
-    if( csv ) std::printf( "scenario,calls,hits,intervals,gkj,manifold,max_intervals,"
+    if( csv ) std::printf( "scenario,calls,hits,intervals,gjk,manifold,max_intervals,"
         "max_depth,exhausted,median_ns_per_query\n" );
 
     for( int i = 0; i < 3; ++i )
