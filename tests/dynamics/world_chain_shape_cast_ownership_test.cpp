@@ -22,10 +22,11 @@ struct chainScene
 {
     world simulation{};
     std::array<shapeId, 2> edges{};
+    float bend = 0.0f;
     transform2 groundTransform{};
 
     chainScene( float bend, transform2 groundTransform )
-        : groundTransform( groundTransform )
+        : bend( bend ), groundTransform( groundTransform )
     {
         const bodyId ground = simulation.CreateBody( bodyType::Static, groundTransform );
         const std::array<vec2, 3> vertices{ vec2{ -2.0f, 0.0f },
@@ -115,14 +116,25 @@ void verifyCase( chainScene& scene, float x, int ownedEdge, bool rotational,
             "Linear ShapeCastClosest must select the owned chain edge" );
     }
 
-    if( hits.size() != 1 )
-        std::fprintf( stderr, "Chain seam: bend? x=%.4f rotational=%d offCenter=%d hits=%zu\n",
-            x, rotational, offCenter, hits.size() );
-    check( hits.size() == 1 && ( ownedEdge < 0 || hits[0].id == scene.edges[ownedEdge] ),
-        "Chain seam must report only the Voronoi-owned edge" );
+    // 꺾인 꼭짓점에서는 원이 두 실제 면에 동시에 닿을 수 있음.
+    // 직선 연결과 공유점 밖의 Voronoi 영역에서는 하나의 소유 edge만 허용함.
+    const bool corner = ownedEdge < 0 && scene.bend != 0.0f;
+    const bool expectedCount = corner ? !hits.empty() && hits.size() <= 2 : hits.size() == 1;
+    if( !expectedCount )
+        std::fprintf( stderr,
+            "Chain seam: bend=%.3f x=%.4f rotational=%d offCenter=%d hits=%zu\n",
+            scene.bend, x, rotational, offCenter, hits.size() );
+    check( expectedCount && ( ownedEdge < 0 || hits[0].id == scene.edges[ownedEdge] ),
+        "Chain seam must only report valid owned edge contacts" );
     const vec2 front = TransformVector( scene.groundTransform, { 0.0f, -1.0f } );
-    check( Dot( hits[0].normal, front ) > 0.65f,
-        "Chain seam must not return a ghost endpoint normal" );
+    for( const collectedHit& hit : hits )
+        check( Dot( hit.normal, front ) > 0.65f,
+            "Chain seam must not return a back-facing ghost endpoint normal" );
+    if( hits.size() == 2 )
+    {
+        check( hits[0].id != hits[1].id && Dot( hits[0].normal, hits[1].normal ) < 0.995f,
+            "Bent Chain corner contacts must represent distinct edge normals" );
+    }
 }
 
 void verifyBackFace( chainScene& scene, bool rotational )
