@@ -35,6 +35,7 @@ int main()
     int tiltedLinearVertices = 0;
     bool tiltedLinearObserved = false;
     int offsetRotatingVertices = 0;
+    bool offsetRotatingObserved = false;
     int singleRayVertices = 0;
     int allRayVertices = 0;
 
@@ -143,7 +144,12 @@ int main()
             tiltedLinearObserved = model.getRotationRadians() == 0.0f &&
                 model.getSweepStats().toiCalls == 0;
         }
-        if( frame == 6 ) offsetRotatingVertices = geometryVertices;
+        if( frame == 6 )
+        {
+            offsetRotatingVertices = geometryVertices;
+            offsetRotatingObserved = model.getLocalOffset().x == 1.0f &&
+                model.getRotationRadians() < 0.0f && model.getHit().hit;
+        }
         if( frame == 7 ) singleRayVertices = geometryVertices;
         if( frame == 8 ) allRayVertices = geometryVertices;
 
@@ -171,7 +177,7 @@ int main()
         std::fprintf( stderr, "Initial-angle-only linear ShapeCast view failed to render\n" );
         std::exit( EXIT_FAILURE );
     }
-    if( offsetRotatingVertices <= 0 )
+    if( offsetRotatingVertices <= 0 || !offsetRotatingObserved )
     {
         std::fprintf( stderr, "Offset pure-rotation ShapeCast view failed to render\n" );
         std::exit( EXIT_FAILURE );
