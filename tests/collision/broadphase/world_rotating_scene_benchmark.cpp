@@ -82,7 +82,7 @@ aabb2 makeCandidateBounds( const worldShapeSweepInput2& input )
 struct fixture
 {
     world simulation{};
-    std::array<scenario, 4> scenarios{};
+    std::array<scenario, 5> scenarios{};
 
     fixture()
     {
@@ -126,7 +126,10 @@ struct fixture
         scenarios[1].name = "short_cast";
         scenarios[2].name = "far_miss";
         scenarios[3].name = "pure_rotation";
+        scenarios[4].name = "offset_pivot";
 
+        // 기존 네 장면의 고정 난수 입력을 바꾸지 않도록 독립된 시퀀스를 사용함.
+        randomSequence pivotRandom{};
         for( int i = 0; i < QUERY_COUNT; ++i )
         {
             const float jitter = random.between( -0.5f, 0.5f );
@@ -164,6 +167,16 @@ struct fixture
                 random.between( -11.0f, 11.0f ) };
             rotating.rotationRadians = i % 2 ? -1.3f : 1.3f;
             scenarios[3].queries[i].input = rotating;
+
+            // 원점에서 떨어진 Circle이 짧은 원호를 그리며 회전하는 경우.
+            worldShapeSweepInput2 pivot{};
+            pivot.geometry = circle2{ { 3.0f, 0.0f }, 0.3f };
+            pivot.transform.position = { pivotRandom.between( -9.0f, 9.0f ),
+                pivotRandom.between( -9.0f, 9.0f ) };
+            pivot.transform.rotation = rot2::FromRadians( pivotRandom.between( -1.0f, 1.0f ) );
+            pivot.translation = { 0.1f, 0.05f };
+            pivot.rotationRadians = i % 2 ? -1.4f : 1.4f;
+            scenarios[4].queries[i].input = pivot;
         }
 
         for( scenario& scene : scenarios )
@@ -305,14 +318,14 @@ int main( int argc, char** argv )
     }
 
     const fixture data{};
-    std::array<totals, 4> results{};
+    std::array<totals, 5> results{};
 
     for( int i = 0; i < static_cast<int>( data.scenarios.size() ); ++i )
         results[i] = verify( data, data.scenarios[i] );
 
     check( results[0].toiCalls > 0 && results[1].toiCalls > 0 &&
         results[2].toiCalls == 0 && results[2].treeCandidates == 0 &&
-        results[3].toiCalls > 0,
+        results[3].toiCalls > 0 && results[4].toiCalls > 0,
         "Dense World corpus must cover moving/rotating TOI and broadphase-only misses" );
 
     if( verifyOnly ) return EXIT_SUCCESS;
