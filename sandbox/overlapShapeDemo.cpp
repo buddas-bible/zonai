@@ -34,6 +34,13 @@ void overlapShapeDemo::handleInput( const demoInput& input )
         setQueryPosition( input.mousePosition );
 }
 
+void overlapShapeDemo::setQueryMode( overlapQueryMode mode )
+{
+    if( mode_ == mode ) return;
+    mode_ = mode;
+    updateQueries();
+}
+
 void overlapShapeDemo::setProbe( overlapProbe probe )
 {
     probe_ = probe;
@@ -79,6 +86,9 @@ void overlapShapeDemo::setSensorIncluded( bool included )
 
 aabb2 overlapShapeDemo::getQueryAABB() const
 {
+    // 점 조회는 반경이 없는 AABB로 Tree를 탐색하므로 도형의 크기를 사용하지 않음.
+    if( mode_ == overlapQueryMode::point ) return { queryTransform_.position, queryTransform_.position };
+
     return ComputeShapeAABB( queryGeometry_, queryTransform_ );
 }
 
@@ -107,12 +117,17 @@ void overlapShapeDemo::updateQueries()
             return true;
         } );
 
-    world_.overlapShape( queryGeometry_, queryTransform_, filter,
-        [&]( shapeId id )
-        {
-            exactOverlaps_.push_back( id );
-            return true;
-        } );
+    const auto collectOverlap = [&]( shapeId id )
+    {
+        exactOverlaps_.push_back( id );
+        return true;
+    };
+
+    // 같은 점 또는 도형의 AABB 후보를 먼저 기록하고, 실제 포함/겹침만 다시 분류함.
+    if( mode_ == overlapQueryMode::point )
+        world_.overlapPoint( queryTransform_.position, filter, collectOverlap );
+    else
+        world_.overlapShape( queryGeometry_, queryTransform_, filter, collectOverlap );
 }
 
 } // namespace zonai::sandbox
