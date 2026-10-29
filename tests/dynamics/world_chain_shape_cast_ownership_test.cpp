@@ -167,10 +167,35 @@ void verifyBackFace( chainScene& scene, bool rotational )
     check( calls == 0, "One-sided Chain must not report back-face approaches" );
 }
 
+void verifyStandaloneGhost()
+{
+    // Orphan ChainSegment의 ghost1은 실제 World에 이전 edge가 있다는 뜻이 아님.
+    // 따라서 parent Chain에만 사용하는 접점 중복 제거를 여기에는 적용하면 안 됨.
+    world simulation{};
+    const bodyId ground = simulation.CreateBody( bodyType::Static );
+    const shapeId edge = simulation.CreateShape( ground,
+        chainSegment2{ { -2.0f, 0.0f },
+            { { 0.0f, 0.0f }, { 2.0f, 0.4f } }, { 4.0f, 0.8f } } );
+    worldShapeCastInput2 input{};
+    input.geometry = circle2{ {}, 0.32f };
+    input.transform.position = { 0.01f, -1.0f };
+    input.translation = { 0.0f, 1.16f };
+    check( simulation.castShapeClosest( input ).shape == edge,
+        "Orphan Chain ghost must not claim a non-existent previous edge" );
+    worldShapeSweepInput2 sweep{};
+    sweep.geometry = input.geometry;
+    sweep.transform = input.transform;
+    sweep.translation = input.translation;
+    sweep.rotationRadians = 0.5f;
+    check( simulation.castShapeSweepClosest( sweep ).shape == edge,
+        "Rotating orphan Chain ghost must not suppress an owned endpoint" );
+}
+
 } // namespace
 
 int main()
 {
+    verifyStandaloneGhost();
     // 양쪽 edge의 endpoint circle이 겹치는 seam 부근에서 owner 하나만 보고해야 함.
     for( const float bend : { 0.0f, -0.4f, 0.4f } )
     {
