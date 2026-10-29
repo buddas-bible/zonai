@@ -68,6 +68,9 @@ struct shape
 
     // 일반 Contact Begin/End 구독. 기본 false, 두 Shape 중 하나만 켜도 이벤트를 보고함.
     bool enableContactEvents = false;
+
+    // 고속 Contact의 Solver 충격 보고는 Begin/End 이벤트와 별도로 구독함.
+    bool enableHitEvents = false;
 };
 
 // runtime shape의 geometry와 density로 local-space 질량 특성을 계산함.
