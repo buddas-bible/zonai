@@ -29,8 +29,10 @@ int main()
     auto& model = static_cast<overlapShapeDemo&>( *scene );
     int aabbVertices = 0;
     int hiddenVertices = 0;
+    int pointWithoutLines = 0;
+    int pointWithLines = 0;
 
-    for( int phase = 0; phase < 5; ++phase )
+    for( int phase = 0; phase < 7; ++phase )
     {
         if( phase == 1 ) model.setCandidateAABBsVisible( false );
         if( phase == 2 )
@@ -53,6 +55,13 @@ int main()
             click.mousePressed = true;
             scene->handleInput( click );
         }
+        if( phase == 5 )
+        {
+            model.setLineTargetsEnabled( true );
+            model.setQueryMode( overlapQueryMode::shape );
+            model.setQueryPosition( { 3.0f, -2.5f } );
+        }
+        if( phase == 6 ) model.setQueryMode( overlapQueryMode::point );
 
         ImGui::NewFrame();
         ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
@@ -81,6 +90,8 @@ int main()
 
         if( phase == 0 ) aabbVertices = renderedVertices;
         if( phase == 1 ) hiddenVertices = renderedVertices;
+        if( phase == 4 ) pointWithoutLines = renderedVertices;
+        if( phase == 6 ) pointWithLines = renderedVertices;
         if( phase == 2 && ( !model.isExactOverlap( model.getTargets()[0].shape ) ||
             model.getExactOverlaps().size() != 1 ) )
         {
@@ -100,6 +111,19 @@ int main()
             std::exit( EXIT_FAILURE );
         }
 
+        if( phase == 5 && ( !model.hasLineTargets() ||
+            !model.isExactOverlap( model.getLineTargets()[1].shape ) ) )
+        {
+            std::fprintf( stderr, "Chain must render as an exact Shape overlap in the optional fixture scene\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( phase == 6 && ( !model.isCandidate( model.getLineTargets()[1].shape ) ||
+            model.isExactOverlap( model.getLineTargets()[1].shape ) ) )
+        {
+            std::fprintf( stderr, "Point on Chain must render as an AABB-only candidate\n" );
+            std::exit( EXIT_FAILURE );
+        }
+
         ImGui::EndChild();
         ImGui::End();
         ImGui::Render();
@@ -108,6 +132,11 @@ int main()
     if( aabbVertices <= hiddenVertices )
     {
         std::fprintf( stderr, "AABB visibility toggle did not change rendered vertices\n" );
+        std::exit( EXIT_FAILURE );
+    }
+    if( pointWithLines <= pointWithoutLines )
+    {
+        std::fprintf( stderr, "Optional Segment/Chain must add visible geometry in point mode\n" );
         std::exit( EXIT_FAILURE );
     }
 

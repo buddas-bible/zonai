@@ -84,6 +84,33 @@ void overlapShapeDemo::setSensorIncluded( bool included )
     updateQueries();
 }
 
+void overlapShapeDemo::setLineTargetsEnabled( bool enabled )
+{
+    if( enabled == hasLineTargets() ) return;
+
+    if( enabled )
+    {
+        // 같은 높이의 양면 Segment와 ghost가 있는 Chain edge를 별개 Body에 배치함.
+        const bodyId segmentBody = world_.CreateBody( bodyType::Static, { { -3.0f, -2.5f }, {} } );
+        const shapeId segment = world_.CreateShape( segmentBody, segment2{ { -0.8f, 0.0f }, { 0.8f, 0.0f } } );
+        lineTargets_.push_back( { segmentBody, segment, "양면 선분" } );
+
+        const bodyId chainBody = world_.CreateBody( bodyType::Static, { { 3.0f, -2.5f }, {} } );
+        const chainSegment2 chain{ { -1.6f, 0.0f },
+            { { -0.8f, 0.0f }, { 0.8f, 0.0f } }, { 1.6f, 0.0f } };
+        const shapeId chainShape = world_.CreateShape( chainBody, chain );
+        lineTargets_.push_back( { chainBody, chainShape, "Chain 선분" } );
+    }
+    else
+    {
+        for( const overlapTarget& target : lineTargets_ )
+            world_.DestroyBody( target.body );
+        lineTargets_.clear();
+    }
+
+    updateQueries();
+}
+
 aabb2 overlapShapeDemo::getQueryAABB() const
 {
     // 점 조회는 반경이 없는 AABB로 Tree를 탐색하므로 도형의 크기를 사용하지 않음.

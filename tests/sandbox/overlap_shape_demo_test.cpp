@@ -194,6 +194,69 @@ void checkPointQueryMode()
         "Query mode toggles must never create or move World bodies and shapes" );
 }
 
+void checkLineTargets()
+{
+    overlapShapeDemo demo{};
+    check( !demo.hasLineTargets() && demo.getLineTargets().empty(),
+        "Segment and Chain targets are optional and disabled initially" );
+
+    demo.setLineTargetsEnabled( true );
+    check( demo.hasLineTargets() && demo.getLineTargets().size() == 2 &&
+        demo.getWorld().GetBodyCount() == 6 && demo.getWorld().GetShapeCount() == 6,
+        "Optional Segment and Chain must each own a separate live Body and Shape" );
+
+    const shapeId segment = demo.getLineTargets()[0].shape;
+    const shapeId chain = demo.getLineTargets()[1].shape;
+    check( demo.getWorld().IsValid( segment ) && demo.getWorld().IsValid( chain ),
+        "Optional line target handles must be valid" );
+
+    // 표면 양쪽 모두 World OverlapShape의 대칭 GJK 거리 겹침으로 판정함.
+    for( const vec2 point : { vec2{ -3.0f, -2.35f }, vec2{ -3.0f, -2.65f } } )
+    {
+        demo.setQueryPosition( point );
+        check( demo.isCandidate( segment ) && demo.isExactOverlap( segment ) &&
+            demo.getExactOverlaps().size() == 1,
+            "Both sides of Segment must overlap the circle-shaped query" );
+    }
+    for( const vec2 point : { vec2{ 3.0f, -2.35f }, vec2{ 3.0f, -2.65f } } )
+    {
+        demo.setQueryPosition( point );
+        check( demo.isCandidate( chain ) && demo.isExactOverlap( chain ) &&
+            demo.getExactOverlaps().size() == 1,
+            "World OverlapShape treats Chain edge as two-sided distance geometry" );
+    }
+
+    demo.setQueryMode( overlapQueryMode::point );
+    for( const auto& target : demo.getLineTargets() )
+    {
+        const vec2 point = demo.getWorld().GetBodyTransform( target.body ).position;
+        demo.setQueryPosition( point );
+        check( demo.isCandidate( target.shape ) && !demo.isExactOverlap( target.shape ) &&
+            demo.getExactOverlaps().empty(),
+            "A point on zero-area Segment/Chain is an AABB candidate, never exact containment" );
+
+        demo.setQueryMode( overlapQueryMode::shape );
+        check( demo.isExactOverlap( target.shape ) && demo.getExactOverlaps().size() == 1,
+            "Switching back to shape query must restore the same line's GJK overlap" );
+        demo.setQueryMode( overlapQueryMode::point );
+    }
+
+    demo.setLineTargetsEnabled( false );
+    check( !demo.hasLineTargets() && !demo.getWorld().IsValid( segment ) &&
+        !demo.getWorld().IsValid( chain ) &&
+        demo.getWorld().GetBodyCount() == 4 && demo.getWorld().GetShapeCount() == 4 &&
+        demo.getCandidates().empty() && demo.getExactOverlaps().empty(),
+        "Removing optional lines must destroy their proxies and invalidate cached query results" );
+
+    demo.setLineTargetsEnabled( true );
+    check( !demo.getWorld().IsValid( segment ) && !demo.getWorld().IsValid( chain ) &&
+        demo.getLineTargets()[0].shape != segment && demo.getLineTargets()[1].shape != chain,
+        "Recreated Segment/Chain handles must not alias destroyed generations" );
+    demo.setLineTargetsEnabled( false );
+    check( demo.getTargets().size() == 4 && demo.getWorld().GetShapeCount() == 4,
+        "Repeating fixture toggles must leave the original four target shapes unchanged" );
+}
+
 void checkSharedSession()
 {
     demoSession session{ createViewModel };
@@ -218,5 +281,6 @@ int main()
 {
     checkFixturesAndQueries();
     checkPointQueryMode();
+    checkLineTargets();
     checkSharedSession();
 }

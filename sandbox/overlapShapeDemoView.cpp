@@ -45,6 +45,13 @@ public:
         bool sensor = isSensorIncluded();
         if( ImGui::Checkbox( "센서 포함###OverlapSensor", &sensor ) ) setSensorIncluded( sensor );
 
+        bool showLines = hasLineTargets();
+        if( ImGui::Checkbox( "선분 / Chain 대상 표시###OverlapLineTargets", &showLines ) )
+            setLineTargetsEnabled( showLines );
+
+        if( showLines )
+            ImGui::TextWrapped( "아래쪽 두 선분은 면적이 없습니다. 도형 모드는 양쪽에서 겹침을 찾지만, 점 모드는 선 위에서도 실제 포함으로 보지 않습니다." );
+
         bool showAABBs = areCandidateAABBsVisible();
         if( ImGui::Checkbox( "후보 AABB 표시###OverlapShowAABBs", &showAABBs ) )
             setCandidateAABBsVisible( showAABBs );
@@ -56,7 +63,7 @@ public:
         ImGui::Text( pointMode ? "점 포함: %zu" : "실제 도형 겹침: %zu", getExactOverlaps().size() );
         ImGui::Text( "AABB 후보만: %zu", getCandidates().size() - getExactOverlaps().size() );
 
-        for( const auto& target : getTargets() )
+        const auto drawStatus = [&]( const overlapTarget& target )
         {
             if( isExactOverlap( target.shape ) )
                 ImGui::Text( pointMode ? "%s: 점 포함" : "%s: 실제 겹침", target.name );
@@ -64,7 +71,9 @@ public:
                 ImGui::Text( "%s: AABB 후보만", target.name );
             else
                 ImGui::Text( "%s: 범위 밖", target.name );
-        }
+        };
+        for( const auto& target : getTargets() ) drawStatus( target );
+        for( const auto& target : getLineTargets() ) drawStatus( target );
 
         ImGui::TextWrapped( pointMode ?
             "초록: 점 포함 / 주황: AABB 후보만 / 회색: 후보 아님 / 흰색: 조회 점. 대상의 저장 AABB에는 speculative margin이 포함됩니다." :
@@ -83,9 +92,9 @@ public:
 
         const world& simulation = getWorld();
 
-        for( const auto& target : getTargets() )
+        const auto drawTarget = [&]( const overlapTarget& target )
         {
-            if( !simulation.IsValid( target.shape ) || !simulation.IsValid( target.body ) ) continue;
+            if( !simulation.IsValid( target.shape ) || !simulation.IsValid( target.body ) ) return;
 
             const auto& geometry = simulation.GetShape( target.shape ).geometry;
             const transform2 pose = simulation.GetBodyTransform( target.body );
@@ -98,7 +107,9 @@ public:
                 draw.DrawAABB( simulation.GetShape( target.shape ).aabb, color, 1.5f );
 
             draw.DrawLabel( pose.position + vec2{ 0.0f, 1.1f }, target.name, color );
-        }
+        };
+        for( const auto& target : getTargets() ) drawTarget( target );
+        for( const auto& target : getLineTargets() ) drawTarget( target );
 
         if( getQueryMode() == overlapQueryMode::point )
         {

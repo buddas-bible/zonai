@@ -35,10 +35,13 @@ public:
     void setQueryPosition( vec2 position );
     void setQueryRotation( float radians );
     void setSensorIncluded( bool included );
+    void setLineTargetsEnabled( bool enabled );
     void setCandidateAABBsVisible( bool visible ) noexcept { showCandidateAABBs_ = visible; }
 
     [[nodiscard]] const world& getWorld() const noexcept { return world_; }
     [[nodiscard]] const std::array<overlapTarget, 4>& getTargets() const noexcept { return targets_; }
+    [[nodiscard]] const std::vector<overlapTarget>& getLineTargets() const noexcept { return lineTargets_; }
+    [[nodiscard]] bool hasLineTargets() const noexcept { return !lineTargets_.empty(); }
     [[nodiscard]] const shapeGeometry& getQueryGeometry() const noexcept { return queryGeometry_; }
     [[nodiscard]] const transform2& getQueryTransform() const noexcept { return queryTransform_; }
     [[nodiscard]] aabb2 getQueryAABB() const;
@@ -57,6 +60,7 @@ private:
 
     world world_{};
     std::array<overlapTarget, 4> targets_{};
+    std::vector<overlapTarget> lineTargets_{};
     shapeGeometry queryGeometry_{};
     transform2 queryTransform_{};
     overlapQueryMode mode_ = overlapQueryMode::shape;
