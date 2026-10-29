@@ -73,6 +73,7 @@ struct summary
     int exhausted = 0;
     int maxIntervals = 0;
     int maxManifold = 0;
+    int maxDepth = 0;
 };
 
 void audit( bool strict )
@@ -114,7 +115,10 @@ void audit( bool strict )
             ++results.cases;
             results.maxIntervals = std::max( results.maxIntervals, stats.intervals );
             results.maxManifold = std::max( results.maxManifold, stats.manifoldCalls );
+            results.maxDepth = std::max( results.maxDepth, stats.depthLimit );
             results.exhausted += stats.exhausted ? 1 : 0;
+            check( stats.depthLimit >= ( mode == 1 ? 12 : 9 ),
+                "High-speed sweep did not receive adaptive Chain retry depth" );
             check( stats.intervals <= 1024 &&
                 stats.distanceCalls <= stats.intervals &&
                 stats.manifoldCalls <= stats.intervals + 24,
@@ -198,6 +202,7 @@ void audit( bool strict )
             ++results.cases;
             results.maxIntervals = std::max( results.maxIntervals, stats.intervals );
             results.maxManifold = std::max( results.maxManifold, stats.manifoldCalls );
+            results.maxDepth = std::max( results.maxDepth, stats.depthLimit );
             results.exhausted += stats.exhausted ? 1 : 0;
             check( stats.intervals <= 1024 &&
                 stats.distanceCalls <= stats.intervals &&
@@ -229,11 +234,12 @@ void audit( bool strict )
 
     std::printf( "Chain retry stress: cases=%d robust=%d narrow=%d fast_robust=%d "
         "fast_narrow=%d missed=%d late=%d exhausted=%d "
-        "max_intervals=%d max_manifolds=%d\n",
+        "max_intervals=%d max_manifolds=%d max_depth=%d\n",
         results.cases, results.robust, results.narrow, results.fastRobust,
         results.fastNarrow, results.missed, results.late, results.exhausted,
-        results.maxIntervals, results.maxManifold );
-    check( results.cases == 324 && results.robust >= 100 && results.narrow >= 40,
+        results.maxIntervals, results.maxManifold, results.maxDepth );
+    check( results.cases == 324 && results.robust >= 100 && results.narrow >= 40 &&
+        results.fastRobust >= 20 && results.fastNarrow >= 20,
         "Insufficient Chain retry stress contact coverage" );
     if( strict )
     {
