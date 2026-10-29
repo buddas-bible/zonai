@@ -409,6 +409,27 @@ public:
         overlapAABB( bounds, queryFilter{}, std::forward<Callback>( callback ) );
     }
 
+    // World 좌표의 점을 포함하는 활성 Shape만 조회함. AABB 후보는 실제 geometry로 다시 확인함.
+    // Segment/Chain은 면적이 없으므로 testShapePoint와 같이 제외함.
+    // Sensor 포함, queryFilter 적용, 순서 미보장. callback false면 세 Tree 모두 중단함.
+    template <worldOverlapCallback Callback>
+    void overlapPoint( vec2 point, queryFilter filter, Callback&& callback ) const
+    {
+        if( !IsFinite( point ) ) return;
+
+        overlapAABB( { point, point }, filter,
+            [&]( shapeId id )
+            {
+                return !testShapePoint( id, point ) || static_cast<bool>( callback( id ) );
+            } );
+    }
+
+    template <worldOverlapCallback Callback>
+    void overlapPoint( vec2 point, Callback&& callback ) const
+    {
+        overlapPoint( point, queryFilter{}, std::forward<Callback>( callback ) );
+    }
+
     // World 좌표의 convex geometry와 실제로 겹치는 Shape를 조회함.
     // AABB 후보를 GJK 거리와 radius로 다시 판정하므로 AABB만 겹친 false positive는 제외함.
     // callback false는 세 Tree 모두 즉시 중단. 순서 미보장, Sensor 포함, 조회 중 World 변경 금지.
