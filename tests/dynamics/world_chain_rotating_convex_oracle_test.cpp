@@ -6,6 +6,7 @@
 #include <cstring>
 #include <limits>
 
+#include "collision/narrowphase/collide.h"
 #include "dynamics/world.h"
 #include "geometry/polygon2.h"
 
@@ -87,6 +88,7 @@ localPose poseAt( const trial& sample, float fraction )
 struct frame
 {
     double gap = 0.0;
+    double backGap = 0.0;
     double centroidY = 0.0;
     double left = std::numeric_limits<double>::infinity();
     double right = -std::numeric_limits<double>::infinity();
@@ -96,6 +98,7 @@ frame evaluate( const trial& sample, float fraction )
 {
     const localPose pose = poseAt( sample, fraction );
     double highestY = -std::numeric_limits<double>::infinity();
+    double lowestY = std::numeric_limits<double>::infinity();
     frame output{};
     double localCentroidX = 0.0;
     double localCentroidY = sample.offset;
@@ -108,6 +111,7 @@ frame evaluate( const trial& sample, float fraction )
         output.left = std::min( output.left, x );
         output.right = std::max( output.right, x );
         highestY = std::max( highestY, y );
+        lowestY = std::min( lowestY, y );
     };
 
     if( const capsule2* capsule = std::get_if<capsule2>( &sample.input.geometry ) )
@@ -128,6 +132,7 @@ frame evaluate( const trial& sample, float fraction )
     }
 
     output.gap = -highestY - radius;
+    output.backGap = lowestY - radius;
     output.centroidY = pose.y + pose.s * localCentroidX + pose.c * localCentroidY;
     output.left -= radius;
     output.right += radius;
@@ -139,6 +144,7 @@ struct referenceResult
     double startGap = 0.0;
     double endGap = 0.0;
     double minimumGap = std::numeric_limits<double>::infinity();
+    double minimumBackGap = std::numeric_limits<double>::infinity();
     double highestCentroid = -std::numeric_limits<double>::infinity();
     bool withinChainSpan = true;
     float firstPenetrating = 1.0f;
@@ -156,6 +162,7 @@ referenceResult samplePath( const trial& sample )
         const float fraction = static_cast<float>( index ) / SAMPLE_COUNT;
         const frame pose = evaluate( sample, fraction );
         result.minimumGap = std::min( result.minimumGap, pose.gap );
+        result.minimumBackGap = std::min( result.minimumBackGap, pose.backGap );
         result.highestCentroid = std::max( result.highestCentroid, pose.centroidY );
         // Both chain segments together form the continuous [-2,2] front surface.
         // The support plane test is exact when the complete shape lies within that span.
@@ -233,7 +240,8 @@ void runAudit( bool csv, bool strict )
             oracle.endGap > 0.035 && oracle.minimumGap < -0.040 &&
             oracle.highestCentroid < -0.015 &&
             oracle.firstPenetrating > 0.0f && oracle.firstPenetrating < 1.0f;
-        const bool definiteMiss = oracle.minimumGap > 0.10;
+        const bool definiteMiss = ( mode == trialKind::farFront && oracle.minimumGap > 0.10 ) ||
+            ( mode == trialKind::farBack && oracle.minimumBackGap > 0.10 );
         ++cases;
 
         if( hit.hit )
@@ -258,10 +266,50 @@ void runAudit( bool csv, bool strict )
                 ++misses;
                 ++shapeMissed[static_cast<int>( kind )];
                 if( !csv && printed++ < 8 )
+                {
                     std::printf( "miss: case=%d kind=%d offset=%.4f angle=%.4f "
                         "peak=%.4f x=%.4f sign=%d start=%.5f end=%.5f min=%.5f\n",
                         cases, static_cast<int>( kind ), offset, angle, peak, x, sign,
                         oracle.startGap, oracle.endGap, oracle.minimumGap );
+                    const shapeProxy2 moving = MakeShapeProxy( sample.input.geometry );
+                    const sweep2 movingSweep{ {}, sample.input.transform.position,
+                        sample.input.transform.position + sample.input.translation,
+                        sample.input.transform.rotation,
+                        sample.input.transform.rotation * rot2::FromRadians( sample.relativeAngle ) };
+                    worldShapeSweepStats2 stats{};
+                    ( void )simulation.castShapeSweepClosest( sample.input, {}, &stats );
+                    std::printf( "  world stats: toi=%d transient=%d recovered=%d hits=%d\n",
+                        stats.toiCalls, stats.toi.transientAttempts, stats.toi.transientHits, stats.hits );
+                    for( int edge = 0; edge < 2; ++edge )
+                    {
+                        const chainSegment2 chain = edge == 0 ?
+                            chainSegment2{ { -4.0f, 0.0f }, { { -2.0f, 0.0f }, { 0.0f, 0.0f } }, { 2.0f, 0.0f } } :
+                            chainSegment2{ { -2.0f, 0.0f }, { { 0.0f, 0.0f }, { 2.0f, 0.0f } }, { 4.0f, 0.0f } };
+                        toiInput2 input{};
+                        input.proxyA = MakeShapeProxy( chain );
+                        input.proxyA.oneSided = false; // World Chain query disables CCD one-sided heuristic
+                        input.proxyB = moving;
+                        input.sweepA = { {}, ground.position, ground.position,
+                            ground.rotation, ground.rotation };
+                        input.sweepB = movingSweep;
+                        input.maxFraction = 1.0f;
+                        input.detectTransientContacts = true;
+                        const toiOutput2 raw = TimeOfImpact( input );
+                        const transform2 relative = InverseMul( ground, GetSweepTransform( movingSweep, raw.fraction ) );
+                        simplexCache2 cache{};
+                        const localManifold2 manifold = kind == probeKind::capsule ?
+                            CollideChainSegmentCapsule( chain,
+                                std::get<capsule2>( sample.input.geometry ), relative, cache ) :
+                            CollideChainSegmentPolygon( chain,
+                                std::get<polygon2>( sample.input.geometry ), relative, cache );
+                        const vec2 front = TransformVector( ground, { 0.0f, -1.0f } );
+                        std::printf( "  edge=%d toi_state=%d fraction=%.6f gap=%.6f "
+                            "normalFront=%.5f manifold=%d\n",
+                            edge, static_cast<int>( raw.state ), raw.fraction,
+                            evaluate( sample, raw.fraction ).gap,
+                            Dot( raw.normal, front ), manifold.pointCount );
+                    }
+                }
             }
         }
         if( definiteMiss )
