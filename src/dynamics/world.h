@@ -338,6 +338,10 @@ public:
     // 다음 collision update에서 이 shape의 broad-phase pair를 다시 탐색함.
     void SetShapeFilter( shapeId shapeId, collisionFilter filter );
     [[nodiscard]] collisionFilter GetShapeFilter( shapeId shapeId ) const;
+
+    // 두 일반 Shape 중 하나만 구독해도 Contact Begin/End를 보고함. 변경은 다음 Step에서 반영됨.
+    void SetShapeContactEventsEnabled( shapeId shapeId, bool enabled );
+    [[nodiscard]] bool AreShapeContactEventsEnabled( shapeId shapeId ) const;
     // 공통 category 규칙 변경은 Contact를 무효화하고 정지 proxy도 다시 검사함.
     void setCollisionMatrix( const collisionMatrix& matrix );
 
@@ -369,6 +373,16 @@ public:
     [[nodiscard]] std::span<const sensorEndEvent2> GetSensorEndEvents() const noexcept { return sensorEndEvents_; }
 
 #pragma endregion SensorQueries
+
+#pragma region ContactEvents
+
+    // 가장 최근 Step에서 처음 시작하거나 종료된 실제 Contact의 Shape 쌍.
+    // Speculative point는 제외. End의 Shape handle은 이미 파괴되었을 수 있으므로 IsValid 확인.
+    // span은 다음 Step 전까지 유효하며 변경 전에 결과를 보존하려면 복사함.
+    [[nodiscard]] std::span<const contactBeginEvent2> GetContactBeginEvents() const noexcept { return contactBeginEvents_; }
+    [[nodiscard]] std::span<const contactEndEvent2> GetContactEndEvents() const noexcept { return contactEndEvents_; }
+
+#pragma endregion ContactEvents
 
 #pragma region SpatialQueries
 
@@ -1369,6 +1383,13 @@ private:
 
 #pragma endregion SensorUpdate
 
+#pragma region ContactEventUpdate
+
+    // 두 collision update가 끝난 최종 manifold만 직전 Step의 보고 상태와 비교함.
+    void updateContactEvents();
+
+#pragma endregion ContactEventUpdate
+
 #pragma region SleepAndWake
 
     // 현재 solver-active Contact / Joint graph를 따라 연결된 body 전체를 깨움.
@@ -1500,6 +1521,11 @@ private:
 
     // solver set 도입 전까지 Contact와 같은 stable slot index로 보관하는 hot data.
     std::vector<contactSim2> contactSims_;
+
+    // 이벤트는 마지막 Step snapshot으로 공개하며, 삭제 중 발생한 End만 별도로 예약함.
+    std::vector<contactBeginEvent2> contactBeginEvents_;
+    std::vector<contactEndEvent2> contactEndEvents_;
+    std::vector<contactEndEvent2> pendingContactEndEvents_;
 
     // 제거된 Contact slot을 재사용하기 위한 free-list head.
     std::int32_t contactFreeList_ = contact2::NULL_INDEX;
