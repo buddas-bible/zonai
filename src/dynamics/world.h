@@ -704,7 +704,7 @@ public:
             std::numeric_limits<float>::infinity() );
         const float negativeInfinity = -std::numeric_limits<float>::infinity();
         const float positiveInfinity = std::numeric_limits<float>::infinity();
-        const aabb2 sweptBounds{
+        aabb2 sweptBounds{
             { std::nextafter( std::min( input.transform.position.x, endPosition.x ) - boundRadius, negativeInfinity ),
               std::nextafter( std::min( input.transform.position.y, endPosition.y ) - boundRadius, negativeInfinity ) },
             { std::nextafter( std::max( input.transform.position.x, endPosition.x ) + boundRadius, positiveInfinity ),

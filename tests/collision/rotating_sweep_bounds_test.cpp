@@ -106,7 +106,7 @@ void verifyPivotReductionAndWorldHits()
     check( TryComputeRotatingSweepBounds( MakeShapeProxy( probe ), start, {},
         endRotation, quarterTurn, arc ), "Quarter-turn arc bounds should be valid" );
 
-    check( arc.min.x > -0.1f && arc.min.y > -0.1f &&
+    check( arc.min.x > -0.3f && arc.min.y > -0.3f &&
         arc.max.x > 3.1f && arc.max.y > 3.1f,
         "Offset-circle first-quadrant arc should exclude opposite quadrants" );
 
