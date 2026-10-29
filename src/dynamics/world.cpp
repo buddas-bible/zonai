@@ -1518,6 +1518,18 @@ bool world::IsShapeSensor( shapeId shapeId ) const
     return shapes_[shapeIndex].sensorIndex != shape::NULL_INDEX;
 }
 
+void world::SetShapeContactEventsEnabled( shapeId shapeId, bool enabled )
+{
+    const std::int32_t index = GetShapeIndex( shapeId );
+    shapes_[index].enableContactEvents = enabled;
+}
+
+bool world::AreShapeContactEventsEnabled( shapeId shapeId ) const
+{
+    const std::int32_t index = GetShapeIndex( shapeId );
+    return shapes_[index].enableContactEvents;
+}
+
 void world::SetShapeSensorEventsEnabled( shapeId shapeId, bool enabled )
 {
     const std::int32_t shapeIndex = GetShapeIndex( shapeId );
@@ -2761,6 +2773,9 @@ void world::Step( float timeStep, int subStepCount )
         []( const contactData& )
         {
         } );
+
+    // Contact Begin/End는 마지막 collision update의 실제 접촉 상태만 보고함.
+    updateContactEvents();
 
     // Sensor는 Contact와 독립적으로 최종 transform 기준 overlap을 갱신함.
     UpdateSensors();
@@ -4136,6 +4151,41 @@ void world::DestroySensorByShapeIndex( std::int32_t shapeIndex )
 
 #pragma endregion SensorUpdate
 
+#pragma region ContactEventUpdate
+
+void world::updateContactEvents()
+{
+    contactBeginEvents_.clear();
+    contactEndEvents_.clear();
+
+    // Shape/Body/Joint 삭제와 filter 변경 중 제거된 Contact는 Step까지 End를 보존함.
+    contactEndEvents_.insert( contactEndEvents_.end(),
+        pendingContactEndEvents_.begin(), pendingContactEndEvents_.end() );
+    pendingContactEndEvents_.clear();
+
+    for( std::size_t index = 0; index < contacts_.size(); ++index )
+    {
+        contact2& contact = contacts_[index];
+        if( contact.contactId == contact2::NULL_INDEX ) continue;
+
+        const shape& shapeA = shapes_[contact.shapeIdA];
+        const shape& shapeB = shapes_[contact.shapeIdB];
+        const bool enabled = shapeA.enableContactEvents || shapeB.enableContactEvents;
+        const bool touching = enabled && IsTouchingManifold( contactSims_[index].manifold );
+
+        if( touching != contact.wasReportedTouching )
+        {
+            const shapeId idA = MakeShapeId( contact.shapeIdA );
+            const shapeId idB = MakeShapeId( contact.shapeIdB );
+            if( touching ) contactBeginEvents_.push_back( { idA, idB } );
+            else contactEndEvents_.push_back( { idA, idB } );
+            contact.wasReportedTouching = touching;
+        }
+    }
+}
+
+#pragma endregion ContactEventUpdate
+
 #pragma region SleepAndWake
 
 void world::WakeBodyByIndex( std::int32_t bodyIndex )
@@ -5344,6 +5394,15 @@ void world::DestroyContact( std::int32_t contactId, bool wakeBodies )
     assert( contactCount_ > 0 );
 
     const shapePairKey pairKey = MakeShapePairKey( contact.shapeIdA, contact.shapeIdB );
+
+    if( contact.wasReportedTouching )
+    {
+        // DestroyShapeByIndex는 Contact 파괴 전에 UnlinkShape를 호출하므로
+        // 아직 generation이 보존된 slot에서 old handle을 직접 구성함.
+        const shapeId idA{ contact.shapeIdA + 1, shapes_[contact.shapeIdA].generation, worldToken_ };
+        const shapeId idB{ contact.shapeIdB + 1, shapes_[contact.shapeIdB].generation, worldToken_ };
+        pendingContactEndEvents_.push_back( { idA, idB } );
+    }
 
     if( wakeBodies )
     {

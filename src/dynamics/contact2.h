@@ -50,6 +50,10 @@ struct contact2
     // 이후 body 설정이 바뀌어도 기존 Contact의 값은 유지함.
     bool enableRecycling = false;
 
+    // 마지막 Step에서 Begin/End 대상으로 보고한 실제 접촉 상태.
+    // speculative manifold만 존재하는 경우 false이며, slot 파괴 때 End를 예약함.
+    bool wasReportedTouching = false;
+
     // slot이 재사용될 때 증가해 오래된 ContactId를 검출함.
     std::uint32_t generation = 0;
 
