@@ -95,11 +95,11 @@ void audit( bool strict )
         for( int i = 0; i < ( mode == 0 ? 81 : 45 ); ++i )
         {
             const float pivotY = mode == 0 ? -1.176f - 0.0003f * i :
-                -1.145f + 0.0003f * i;
+                -0.98f - 0.003f * i;
             const vec2 start = TransformPoint( ground,
-                mode == 0 ? vec2{ -1.0f, pivotY } : vec2{ -25.0f, pivotY } );
+                mode == 0 ? vec2{ -1.0f, pivotY } : vec2{ -1000.0f, pivotY } );
             const vec2 end = TransformPoint( ground,
-                mode == 0 ? vec2{ -1.0f, pivotY } : vec2{ 25.0f, pivotY } );
+                mode == 0 ? vec2{ -1.0f, pivotY } : vec2{ 1000.0f, pivotY } );
             const sweep2 sweep{ {}, start, end,
                 ground.rotation * rot2::FromRadians( -0.74f ),
                 ground.rotation * rot2::FromRadians( 0.74f ) };
@@ -147,6 +147,69 @@ void audit( bool strict )
                 stats.distanceCalls <= stats.intervals &&
                 stats.manifoldCalls <= stats.intervals + 24,
                 "Chain retry stress exceeded its deterministic work budget" );
+        }
+    }
+
+    // 접촉이 사라지는 pivot 경계를 이분 탐색해 depth-9 leaf보다
+    // 좁은 실제 narrowphase 접촉 창을 수동 수치 선택 없이 재현함.
+    for( const float groundAngle : { 0.0f, 0.41f } )
+    {
+        const transform2 ground{ { 0.6f, -1.4f },
+            rot2::FromRadians( groundAngle ) };
+        const auto makeSweep = [&]( float pivotY )
+        {
+            const vec2 pivot = TransformPoint( ground, { -1.0f, pivotY } );
+            return sweep2{ {}, pivot, pivot,
+                ground.rotation * rot2::FromRadians( -0.74f ),
+                ground.rotation * rot2::FromRadians( 0.74f ) };
+        };
+
+        float low = -1.19f, high = -1.1828f;
+        constexpr int FINE_SAMPLES = 32768;
+        check( sample( chain, polygon, ground, makeSweep( low ), FINE_SAMPLES ).count == 0 &&
+            sample( chain, polygon, ground, makeSweep( high ), FINE_SAMPLES ).count > 0,
+            "Grazing pivot bracket did not straddle the contact boundary" );
+        for( int i = 0; i < 22; ++i )
+        {
+            const float middle = low + 0.5f * ( high - low );
+            if( middle <= low || middle >= high ) break;
+            if( sample( chain, polygon, ground, makeSweep( middle ), FINE_SAMPLES ).count > 0 )
+                high = middle;
+            else low = middle;
+        }
+        std::printf( "Grazing boundary: angle=%.2f threshold=%.8f\n",
+            groundAngle, high );
+        for( int i = 1; i <= 12; ++i )
+        {
+            const float pivotY = high + 0.0000005f * i;
+            const sweep2 moving = makeSweep( pivotY );
+            const reference expected = sample( chain, polygon, ground, moving, FINE_SAMPLES );
+            chainSweepRetryStats2 stats{};
+            const chainSweepContact2 actual = FindOwnedChainSweepContact(
+                chain, geometry, proxy, ground, moving, 0.0f, 1.0f, &stats );
+            ++results.cases;
+            results.maxIntervals = std::max( results.maxIntervals, stats.intervals );
+            results.maxManifold = std::max( results.maxManifold, stats.manifoldCalls );
+            results.exhausted += stats.exhausted ? 1 : 0;
+            if( expected.firstSamples < 4 || expected.first <= 0.0f ) continue;
+            ++results.robust;
+            if( expected.firstSamples <= FINE_SAMPLES / 512 ) ++results.narrow;
+            if( !actual.hit )
+            {
+                ++results.missed;
+                if( printed++ < 12 ) std::printf(
+                    "grazing miss: angle=%.2f pivot=%.8f width=%d first=%.7f intervals=%d exhausted=%d\n",
+                    groundAngle, pivotY, expected.firstSamples, expected.first,
+                    stats.intervals, stats.exhausted );
+            }
+            else if( actual.fraction - expected.first > 0.002f )
+            {
+                ++results.late;
+                if( printed++ < 12 ) std::printf(
+                    "grazing late: angle=%.2f pivot=%.8f width=%d first=%.7f result=%.7f intervals=%d\n",
+                    groundAngle, pivotY, expected.firstSamples, expected.first,
+                    actual.fraction, stats.intervals );
+            }
         }
     }
 
