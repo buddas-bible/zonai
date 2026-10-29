@@ -2282,15 +2282,33 @@ bool rigidBodyDemo::canMoveTerrainPoint( std::size_t pointIndex, vec2 point ) co
 
 void rigidBodyDemo::startMouseDrag( vec2 point )
 {
-    // ponytail: 작은 데모의 shape 목록을 O(n)으로 pick함. 많은 물체의 데모가 필요하면 World overlap query로 후보를 줄임.
-    // 역순으로 검사해 같은 위치에서는 나중에 그린 동적 도형을 우선함. 센서는 잡지 않음.
+    // World Tree에서 실제로 점을 포함하는 Shape 후보를 먼저 찾음.
+    // Inspector의 충돌 필터와 무관하게 선택할 수 있도록 조회에는 모든 category bit를 사용함.
+    std::vector<shapeId> candidates;
+    const std::uint64_t allBits = std::numeric_limits<std::uint64_t>::max();
+    world_.overlapPoint( point, queryFilter{ allBits, allBits },
+        [&]( shapeId id )
+        {
+            candidates.push_back( id );
+            return true;
+        } );
+
+    // 화면 그리기 순서가 곧 선택 우선순위임. Tree의 방문 순서에는 의존하지 않음.
     for( auto visual = shapes_.rbegin(); visual != shapes_.rend(); ++visual )
     {
         if( !world_.IsValid( visual->bodyHandle ) || !world_.IsValid( visual->shapeHandle ) ) continue;
-
         if( world_.GetBody( visual->bodyHandle ).type != bodyType::Dynamic || world_.IsShapeSensor( visual->shapeHandle ) ) continue;
 
-        if( !world_.testShapePoint( visual->shapeHandle, point ) ) continue;
+        const collisionFilter filter = world_.GetShapeFilter( visual->shapeHandle );
+        // category/mask가 0인 Shape는 World query filter로 조회할 수 없지만,
+        // 충돌 비활성화와 마우스 선택은 별개이므로 기존 직접 점 판정을 유지함.
+        const bool excludedFromQuery = filter.categoryBits == 0 || filter.maskBits == 0;
+        if( excludedFromQuery )
+        {
+            if( !world_.testShapePoint( visual->shapeHandle, point ) ) continue;
+        }
+        else if( std::find( candidates.begin(), candidates.end(), visual->shapeHandle ) == candidates.end() )
+            continue;
 
         // 클릭한 월드 위치를 목표점으로 지정하면 World가 로컬 작용점을 저장함.
         auto definition = mouseSettings_;
