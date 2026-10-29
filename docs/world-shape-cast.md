@@ -432,3 +432,10 @@ World의 회전 ShapeCast는 각 도형의 proxy support 점과 radius가 모두
 추가한다. 기존 `candidate_only_hits`는 외접 원을 사용한 참고용 후보
 조회이고, `tree_candidates`는 실제 World의 원호 AABB를 사용한 Tree callback 수다.
 서로 다른 필터/조회 단계의 카운터이므로 정확한 후보 제거율로 혼동하지 않는다.
+
+
+추가 원호 경계 계산은 shape local 정점들의 축별 AABB가 회전축(원점)을
+포함하지 않을 때만 수행한다. 원점 중심의 Box·Capsule·Circle처럼
+정점 경계가 원점을 포함하면 기존 외접 원 AABB를 그대로 사용해
+짧은 이동·회전에서 추가 삼각함수/원호 경계 계산 비용을 피한다.
+이는 후보 제외의 선택적 최적화일 뿐, 조회 정확성 계약은 같다.

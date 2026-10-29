@@ -688,10 +688,18 @@ public:
         // 로컬 원점에서 가장 먼 support 점과 도형 radius를 이용하면 회전 도중의
         // 모든 자세에서 moving shape가 이 반경의 원 안에 들어감.
         double maxRadius = static_cast<double>( movingProxy.radius );
+        double localMinX = std::numeric_limits<double>::infinity();
+        double localMinY = localMinX;
+        double localMaxX = -localMinX;
+        double localMaxY = -localMinX;
         for( int i = 0; i < movingProxy.count; ++i )
         {
             const vec2 point = movingProxy.points[i];
             if( !IsFinite( point ) ) return;
+            localMinX = std::min( localMinX, static_cast<double>( point.x ) );
+            localMinY = std::min( localMinY, static_cast<double>( point.y ) );
+            localMaxX = std::max( localMaxX, static_cast<double>( point.x ) );
+            localMaxY = std::max( localMaxY, static_cast<double>( point.y ) );
             const double radius = std::hypot( static_cast<double>( point.x ),
                 static_cast<double>( point.y ) ) + movingProxy.radius;
             maxRadius = std::max( maxRadius, radius );
@@ -716,8 +724,13 @@ public:
         // Local 원점에서 떨어진 도형은 원호의 실제 축별 범위가 외접 원보다 좁을 수 있음.
         // 별도 계산 실패나 경계 값 불일치 시에는 기존 보수적 전체 원 범위를 유지함.
         aabb2 arcBounds{};
-        if( TryComputeRotatingSweepBounds( movingProxy, input.transform, endPosition,
-            endRotation, input.rotationRadians, arcBounds ) )
+        // 로컬 정점 경계가 회전축을 가로지르는 도형은 원형 범위가 이미 충분히 작음.
+        // 이 경우 추가 원호 계산은 생략하여 중심 정렬 Box 등의 짧은 조회 비용을 보존함.
+        const bool pivotOutsideCoreBounds = localMinX > 0.0 || localMaxX < 0.0 ||
+            localMinY > 0.0 || localMaxY < 0.0;
+        if( pivotOutsideCoreBounds &&
+            TryComputeRotatingSweepBounds( movingProxy, input.transform, endPosition,
+                endRotation, input.rotationRadians, arcBounds ) )
         {
             // 두 보수적 경계의 교집합도 보수적임. arc의 float 여유 때문에
             // 원 경계를 조금 넘는 경우에도 더 좁은 부분만 사용할 수 있음.
