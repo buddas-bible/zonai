@@ -31,10 +31,74 @@ std::unique_ptr<demo> createVisualization( demoKind kind )
     return std::make_unique<shapeCastDemo>();
 }
 
+void checkRayCastAllHits()
+{
+    shapeCastDemo scene{};
+    const shapeId circle = scene.getTargets()[0].shape;
+    const shapeId box = scene.getTargets()[1].shape;
+    const shapeId sensor = scene.getTargets()[3].shape;
+
+    const auto& hits = scene.getRayHits();
+    check( hits.size() == 2 && hits[0].shape == circle && hits[1].shape == box,
+        "Unclipped RayCast must report both targets along the initial center line" );
+    check( hits[0].hit && hits[1].hit && hits[0].fraction < hits[1].fraction,
+        "All RayCast results must be ordered by fraction rather than Tree traversal" );
+    near( hits[0].fraction, ( 4.0f - 0.8f ) / 11.0f, "First RayCast entry fraction" );
+    near( hits[1].fraction, ( 7.0f - 0.65f ) / 11.0f, "Second RayCast entry fraction" );
+    check( scene.getRayHit().shape == hits.front().shape &&
+        scene.getRayHit().fraction == hits.front().fraction,
+        "Closest convenience query must agree with the first positive sorted hit" );
+
+    scene.setRayAllHitsVisible( true );
+    scene.setRayVisible( false );
+    check( scene.areRayAllHitsVisible() && !scene.isRayVisible() && scene.getRayHits().size() == 2,
+        "Changing RayCast overlays must not affect query results" );
+    scene.setRayVisible( true );
+
+    // 일반 castRay는 시작점 내부의 Circle을 t=0으로 보고하지만 closest는 제외함.
+    scene.setStart( { -1.0f, 0.0f } );
+    scene.setTarget( { 6.0f, 0.0f } );
+    check( scene.getRayHits().size() == 2 && scene.getRayHits()[0].shape == circle &&
+        scene.getRayHits()[0].fraction == 0.0f &&
+        LengthSquared( scene.getRayHits()[0].normal ) == 0.0f,
+        "All-hit RayCast must retain an initial overlap with zero normal" );
+    check( scene.getRayHit().hit && scene.getRayHit().shape == box &&
+        scene.getRayHit().fraction > 0.0f,
+        "RayCastClosest must skip the initial overlap while retaining later hits" );
+
+    scene.setStart( { -5.0f, 2.0f } );
+    scene.setTarget( { 5.0f, 2.0f } );
+    check( scene.getRayHits().size() == 1 && scene.getRayHits()[0].shape == sensor,
+        "Kinematic sensor must appear in all-hit RayCast" );
+    scene.setSensorIncluded( false );
+    check( scene.getRayHits().empty() && !scene.getRayHit().hit,
+        "RayCast all-hit and closest must share the sensor QueryFilter" );
+    scene.setSensorIncluded( true );
+    check( scene.getRayHits().size() == 1 && scene.getRayHits()[0].shape == sensor,
+        "Restoring sensor filter must refresh all-hit RayCast" );
+
+    scene.setStart( { -5.0f, 0.0f } );
+    scene.setTarget( { 6.0f, 0.0f } );
+    scene.setDenseTargets( true );
+    check( scene.getRayHits().size() > 2, "Dense scene must report additional RayCast intersections" );
+    for( std::size_t index = 1; index < scene.getRayHits().size(); ++index )
+        check( scene.getRayHits()[index - 1].fraction <= scene.getRayHits()[index].fraction,
+            "Dense all-hit results must remain fraction-sorted" );
+    scene.setDenseTargets( false );
+    check( scene.getRayHits().size() == 2,
+        "Removing dense bodies must invalidate their cached RayCast intersections" );
+
+    scene.setTarget( scene.getInput().transform.position );
+    check( scene.getRayHits().empty() && !scene.getRayHit().hit,
+        "A zero-length ray must clear stale all-hit and closest results" );
+}
+
 } // namespace
 
 int main()
 {
+    checkRayCastAllHits();
+
     check( getDemoEntry( demoKind::shapeCastVisualization ).kind == demoKind::shapeCastVisualization,
         "ShapeCast visualization must be in the demo selector" );
 
