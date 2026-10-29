@@ -113,9 +113,14 @@ Body 자체도 회전한다. Capsule·Box·Triangle은 두 edge 내부와 공유
   ghost 영역의 manifold가 0점이라 World가 해당 후보를 버린다.
   약 `fraction=0.3066`에서는 앞면 manifold가 2점 존재한다.
   즉 **소유권 필터 이후 TOI 재탐색**이 필요한 별개 문제다.
-- `--strict`는 공유 seam 및 다른 정상 영역의 누락을 0으로 검증하고,
-  위 열린 끝점의 알려진 예외만 최대 4건으로 한정한다.
-  이미 재현된 입력을 삭제하거나 성공 사례로 바꾸지 않는다.
+- 선행 TOI의 비소유 ghost hit을 World가 거절한 뒤에는 이동속도
+  상한으로 전체 구간의 접촉 불가능성을 먼저 확인하고, 남은 시간 구간을
+  제한된 이분 탐색으로 재검사한다. 실제 `CollideChainSegmentCapsule/Polygon`
+  manifold가 있는 자세만 인정하며, 반환 hit의 normal·point도 해당
+  manifold에서 계산한다. CCD와 Solver의 TOI 경로는 변경하지 않는다.
+- `--strict`는 열린 끝점에서 재현됐던 4건을 포함하여 robust 접촉
+  **916건 모두 누락 0**과 확실한 비충돌의 오검출 0을 요구한다.
+  기존 4건의 재현 입력을 제거하지 않는다.
 - 이 oracle은 명확한 유한 선분 접촉의 **존재**를 검증한다.
   speculative contact, 접합점의 정확한 법선, 모든 grazing contact와
   여러 hit의 순서까지 증명하지는 않는다.

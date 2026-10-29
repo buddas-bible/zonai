@@ -477,12 +477,10 @@ void run( bool strict, bool csv )
             openGhostMissed, otherMissed, definiteMiss, falseHits );
     if( strict )
     {
-        // 현재 구현의 알려진 외부 ghost 선행 TOI 거절 사례만 별도 상한으로 유지함.
-        // 공유 seam과 그 외 robust contact의 누락은 모두 회귀 실패.
-        check( seamMissed == 0 && otherMissed == 0,
-            "Bent Chain seam or interior cast omitted a confirmed front contact" );
-        check( openGhostMissed <= 4,
-            "Bent Chain cast regressed past the known open-end ghost TOI cases" );
+        // 외부 ghost의 선행 TOI가 거절되어도 후속 정상 접촉을 찾아야 함.
+        // 공유 seam, 열린 끝점, edge 내부의 robust 접촉 누락을 모두 실패 처리.
+        check( missed == 0 && seamMissed == 0 && openGhostMissed == 0 && otherMissed == 0,
+            "Bent Chain cast omitted a confirmed front contact after ghost TOI rejection" );
         check( falseHits == 0, "Bent Chain cast hit a definitely separated convex shape" );
     }
 }

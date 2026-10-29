@@ -986,7 +986,19 @@ public:
                         ( chains_[candidate.parentChainId].isLoop ||
                           chains_[candidate.parentChainId].shapeIds.front() != shapeIndex );
                     if( !IsChainConvexCastOwned( *chain, input.geometry, movingInChain, hasPrevious ) )
-                        return true;
+                    {
+                        // 일반 TOI가 ghost/끝점 접촉을 먼저 찾았을 수 있음.
+                        // 그 hit을 버리고 종료하면 뒤에 있는 실제 앞면 접촉을 놓침.
+                        // 거절된 회전 Capsule/Polygon에 대해서만 보수적인 재탐색.
+                        if( hit.fraction == 0.0f ) return true;
+                        const chainSweepContact2 recovered = FindOwnedChainSweepContact(
+                            *chain, input.geometry, movingProxy, targetTransform,
+                            movingSweep, hit.fraction, maxFraction );
+                        if( !recovered.hit ) return true;
+                        hit.fraction = recovered.fraction;
+                        point = recovered.point;
+                        normal = recovered.normal;
+                    }
 
                     const vec2 edge = chain->segment.b - chain->segment.a;
                     const vec2 front = Rotate( targetTransform.rotation, Normalize( vec2{ edge.y, -edge.x } ) );
