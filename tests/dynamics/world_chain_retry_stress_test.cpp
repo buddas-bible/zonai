@@ -153,6 +153,7 @@ void audit( bool strict )
     // 접촉이 사라지는 pivot 경계를 이분 탐색해 depth-9 leaf보다
     // 좁은 실제 narrowphase 접촉 창을 수동 수치 선택 없이 재현함.
     for( const float groundAngle : { 0.0f, 0.41f } )
+    for( const float phase : { 0.0f, 0.0027f, 0.0054f } )
     {
         const transform2 ground{ { 0.6f, -1.4f },
             rot2::FromRadians( groundAngle ) };
@@ -160,8 +161,8 @@ void audit( bool strict )
         {
             const vec2 pivot = TransformPoint( ground, { -1.0f, pivotY } );
             return sweep2{ {}, pivot, pivot,
-                ground.rotation * rot2::FromRadians( -0.74f ),
-                ground.rotation * rot2::FromRadians( 0.74f ) };
+                ground.rotation * rot2::FromRadians( -0.74f + phase ),
+                ground.rotation * rot2::FromRadians( 0.74f + phase ) };
         };
 
         float low = -1.19f, high = -1.1828f;
@@ -177,8 +178,8 @@ void audit( bool strict )
                 high = middle;
             else low = middle;
         }
-        std::printf( "Grazing boundary: angle=%.2f threshold=%.8f\n",
-            groundAngle, high );
+        std::printf( "Grazing boundary: angle=%.2f phase=%.4f threshold=%.8f\n",
+            groundAngle, phase, high );
         for( int i = 1; i <= 12; ++i )
         {
             const float pivotY = high + 0.0000005f * i;
@@ -198,16 +199,16 @@ void audit( bool strict )
             {
                 ++results.missed;
                 if( printed++ < 12 ) std::printf(
-                    "grazing miss: angle=%.2f pivot=%.8f width=%d first=%.7f intervals=%d exhausted=%d\n",
-                    groundAngle, pivotY, expected.firstSamples, expected.first,
+                    "grazing miss: angle=%.2f phase=%.4f pivot=%.8f width=%d first=%.7f intervals=%d exhausted=%d\n",
+                    groundAngle, phase, pivotY, expected.firstSamples, expected.first,
                     stats.intervals, stats.exhausted );
             }
             else if( actual.fraction - expected.first > 0.002f )
             {
                 ++results.late;
                 if( printed++ < 12 ) std::printf(
-                    "grazing late: angle=%.2f pivot=%.8f width=%d first=%.7f result=%.7f intervals=%d\n",
-                    groundAngle, pivotY, expected.firstSamples, expected.first,
+                    "grazing late: angle=%.2f phase=%.4f pivot=%.8f width=%d first=%.7f result=%.7f intervals=%d\n",
+                    groundAngle, phase, pivotY, expected.firstSamples, expected.first,
                     actual.fraction, stats.intervals );
             }
         }
