@@ -555,6 +555,10 @@ add_executable(worldChainShapeCastOwnershipTests dynamics/world_chain_shape_cast
 target_link_libraries(worldChainShapeCastOwnershipTests PRIVATE zonai::zonai)
 add_test(NAME worldChainShapeCastOwnershipTests COMMAND worldChainShapeCastOwnershipTests)
 
+add_executable(worldChainConvexCastOwnershipTests dynamics/world_chain_convex_cast_ownership_test.cpp)
+target_link_libraries(worldChainConvexCastOwnershipTests PRIVATE zonai::zonai)
+add_test(NAME worldChainConvexCastOwnershipTests COMMAND worldChainConvexCastOwnershipTests)
+
 # Deterministic sampled analytic circle reference for bounded World rotational sweeps.
 # Expected TOI false negatives are reported for diagnosis, not treated as a contract violation.
 # 회전축이 도형 중심과 다른 경우의 보수적 원호 AABB 및 World 후보 검증.
