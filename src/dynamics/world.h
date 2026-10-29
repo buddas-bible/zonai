@@ -342,6 +342,10 @@ public:
     // 두 일반 Shape 중 하나만 구독해도 Contact Begin/End를 보고함. 변경은 다음 Step에서 반영됨.
     void SetShapeContactEventsEnabled( shapeId shapeId, bool enabled );
     [[nodiscard]] bool AreShapeContactEventsEnabled( shapeId shapeId ) const;
+
+    // 충돌한 Shape 중 하나만 켜도 고속 Hit를 보고함. Begin/End와 독립적으로 설정함.
+    void setShapeHitEventsEnabled( shapeId id, bool enabled );
+    [[nodiscard]] bool areShapeHitEventsEnabled( shapeId id ) const;
     // 공통 category 규칙 변경은 Contact를 무효화하고 정지 proxy도 다시 검사함.
     void setCollisionMatrix( const collisionMatrix& matrix );
 
@@ -381,6 +385,9 @@ public:
     // span은 다음 Step 전까지 유효하며 변경 전에 결과를 보존하려면 복사함.
     [[nodiscard]] std::span<const contactBeginEvent2> GetContactBeginEvents() const noexcept { return contactBeginEvents_; }
     [[nodiscard]] std::span<const contactEndEvent2> GetContactEndEvents() const noexcept { return contactEndEvents_; }
+
+    // 마지막 Step의 실제 충격(접점, 법선, 접근 속도, normal impulse). 다음 Step 전에 복사할 것.
+    [[nodiscard]] std::span<const contactHitEvent2> getContactHitEvents() const noexcept { return contactHitEvents_; }
 
 #pragma endregion ContactEvents
 
@@ -1194,6 +1201,10 @@ public:
     void SetContactRecycleDistance( float distance );
     [[nodiscard]] float GetContactRecycleDistance() const noexcept;
 
+    // 충돌 전 normal 접근 속도(m/s)가 이 값보다 클 때만 Solver Hit 이벤트를 생성함.
+    void setContactHitSpeedThreshold( float speed );
+    [[nodiscard]] float getContactHitSpeedThreshold() const noexcept { return contactHitSpeedThreshold_; }
+
     // 가장 최근 UpdateCollisions에서 narrowphase를 건너뛰고 재활용한 Contact 수.
     [[nodiscard]] std::size_t GetRecycledContactCount() const noexcept { return recycledContactCount_; }
 
@@ -1525,6 +1536,7 @@ private:
     // 이벤트는 마지막 Step snapshot으로 공개하며, 삭제 중 발생한 End만 별도로 예약함.
     std::vector<contactBeginEvent2> contactBeginEvents_;
     std::vector<contactEndEvent2> contactEndEvents_;
+    std::vector<contactHitEvent2> contactHitEvents_;
     std::vector<contactEndEvent2> pendingContactEndEvents_;
 
     // 제거된 Contact slot을 재사용하기 위한 free-list head.
@@ -1532,6 +1544,9 @@ private:
 
     // contacts_.size()와 별개인 현재 활성 Contact 개수.
     std::size_t contactCount_ = 0;
+
+    // Hit는 restitution 여부와 무관하며, 속도 임계값만 공유하는 별도 이벤트임.
+    float contactHitSpeedThreshold_ = 1.0f;
 
     // Joint cold / hot 데이터는 동일한 stable slot과 free-list를 공유함.
     std::vector<joint2> joints_;
