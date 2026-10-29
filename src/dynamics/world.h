@@ -114,6 +114,11 @@ struct worldShapeSweepStats2
     int distancePrunedCandidates = 0;
     int toiCalls = 0;
     int hits = 0;
+    int chainRetryCalls = 0;
+    int chainRetryIntervals = 0;
+    int chainRetryDistanceCalls = 0;
+    int chainRetryManifoldCalls = 0;
+    int chainRetryLimitReached = 0;
     toiDiagnostics2 toi{};
 };
 
@@ -991,9 +996,18 @@ public:
                         // 그 hit을 버리고 종료하면 뒤에 있는 실제 앞면 접촉을 놓침.
                         // 거절된 회전 Capsule/Polygon에 대해서만 보수적인 재탐색.
                         if( hit.fraction == 0.0f ) return true;
+                        chainSweepRetryStats2 retryStats{};
                         const chainSweepContact2 recovered = FindOwnedChainSweepContact(
                             *chain, input.geometry, movingProxy, targetTransform,
-                            movingSweep, hit.fraction, maxFraction );
+                            movingSweep, hit.fraction, maxFraction, stats ? &retryStats : nullptr );
+                        if( stats )
+                        {
+                            ++stats->chainRetryCalls;
+                            stats->chainRetryIntervals += retryStats.intervals;
+                            stats->chainRetryDistanceCalls += retryStats.distanceCalls;
+                            stats->chainRetryManifoldCalls += retryStats.manifoldCalls;
+                            stats->chainRetryLimitReached += retryStats.exhausted ? 1 : 0;
+                        }
                         if( !recovered.hit ) return true;
                         hit.fraction = recovered.fraction;
                         point = recovered.point;

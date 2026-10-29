@@ -114,16 +114,32 @@ Body 자체도 회전한다. Capsule·Box·Triangle은 두 edge 내부와 공유
   약 `fraction=0.3066`에서는 앞면 manifold가 2점 존재한다.
   즉 **소유권 필터 이후 TOI 재탐색**이 필요한 별개 문제다.
 - 선행 TOI의 비소유 ghost hit을 World가 거절한 뒤에는 이동속도
-  상한으로 전체 구간의 접촉 불가능성을 먼저 확인하고, 남은 시간 구간을
-  제한된 이분 탐색으로 재검사한다. 실제 `CollideChainSegmentCapsule/Polygon`
-  manifold가 있는 자세만 인정하며, 반환 hit의 normal·point도 해당
-  manifold에서 계산한다. CCD와 Solver의 TOI 경로는 변경하지 않는다.
+  상한과 실제 유한 선분-도형 GJK 거리로 접촉 불가능한 시간 구간을
+  제거한다. 남은 구간은 **시간상 이른 왼쪽 구간부터** 깊이 우선 탐색한다.
+  먼저 발견한 샘플을 바로 확정하는 넓이 우선 방식과, 전체 시간 범위에
+  접촉 여부의 단조성을 가정하는 이분 탐색을 사용하지 않는다.
+  반환 hit의 법선·점은 실제 `CollideChainSegmentCapsule/Polygon`
+  manifold에서만 계산한다.
+- 재탐색은 최대 깊이 9, 최대 방문 구간 1024개이며, 마지막에는 선택한
+  유효 샘플 근처만 최대 24회 추가 이분 탐색한다. 한도 소진 여부와
+  방문 구간/GJK/Manifold 호출 수는 `worldShapeSweepStats2`의 선택적
+  `chainRetry*` 필드로 기록한다. 모든 임의의 짧은 접촉을 증명하는
+  무한 정밀도 탐색은 아니며 CCD 및 Solver의 TOI 경로는 변경하지 않는다.
 - `--strict`는 열린 끝점에서 재현됐던 4건을 포함하여 robust 접촉
   **916건 모두 누락 0**과 확실한 비충돌의 오검출 0을 요구한다.
-  기존 4건의 재현 입력을 제거하지 않는다.
+  기존 4건은 8192분할 narrowphase 기준과 반환 fraction의 차이가
+  0.003 이하인지 비교하고, 방문 구간과 manifold 호출의 비용 상한을
+  별도로 단언한다. 재현 입력은 제거하지 않았다.
 - 이 oracle은 명확한 유한 선분 접촉의 **존재**를 검증한다.
   speculative contact, 접합점의 정확한 법선, 모든 grazing contact와
   여러 hit의 순서까지 증명하지는 않는다.
+
+`worldChainRetryTemporalTests`는 긴 로컬 오프셋 Box가 회전하면서
+동일한 Chain 앞면에 **두 번 접촉하고 중간에는 떨어지는** 경로를
+평탄/회전된 정적 Body와 짧은 접촉 구간까지 검증한다.
+16,384분할의 독립 narrowphase 시간순 참조로 실제 접촉 창 두 개를 확인하고
+재탐색 반환 fraction이 **첫 창의 시작과 0.006 이내**인지 비교한다.
+탐색 구간 최대 1024개, manifold 호출 최대 방문 구간+24회, 한도 소진 0도 검사한다.
 
 ## BoxCast를 사용하는 BroadPhase 후보 탐색
 
