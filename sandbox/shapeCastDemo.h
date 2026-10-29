@@ -39,6 +39,7 @@ public:
     void setRotationRadians( float radians );
     void setDenseTargets( bool enabled );
     void setRayVisible( bool visible ) noexcept { rayVisible_ = visible; }
+    void setRayAllHitsVisible( bool visible ) noexcept { rayAllHitsVisible_ = visible; }
     void setSweepAABBVisible( bool visible ) noexcept { sweepAABBVisible_ = visible; }
     void resetPreview();
 
@@ -55,11 +56,13 @@ public:
     [[nodiscard]] float getRotationRadians() const noexcept { return rotationRadians_; }
     [[nodiscard]] transform2 getPoseAtFraction( float fraction ) const noexcept;
     [[nodiscard]] worldRayCastResult2 getRayHit() const noexcept { return rayHit_; }
+    [[nodiscard]] const std::vector<worldRayCastResult2>& getRayHits() const noexcept { return rayHits_; }
     [[nodiscard]] aabb2 getSweepAABB() const noexcept;
     [[nodiscard]] std::size_t getAABBCandidateCount() const noexcept { return aabbCandidateCount_; }
     [[nodiscard]] float getPreviewFraction() const noexcept { return previewFraction_; }
     [[nodiscard]] bool isSensorIncluded() const noexcept { return sensorIncluded_; }
     [[nodiscard]] bool isRayVisible() const noexcept { return rayVisible_; }
+    [[nodiscard]] bool areRayAllHitsVisible() const noexcept { return rayAllHitsVisible_; }
     [[nodiscard]] bool isSweepAABBVisible() const noexcept { return sweepAABBVisible_; }
 
 private:
@@ -78,10 +81,12 @@ private:
     worldShapeCastResult2 hit_{};
     worldShapeSweepStats2 sweepStats_{};
     worldRayCastResult2 rayHit_{};
+    std::vector<worldRayCastResult2> rayHits_{};
     std::size_t aabbCandidateCount_ = 0;
     float previewFraction_ = 0.0f;
     bool sensorIncluded_ = true;
     bool rayVisible_ = true;
+    bool rayAllHitsVisible_ = false;
     bool sweepAABBVisible_ = true;
 };
 
