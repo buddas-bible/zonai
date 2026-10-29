@@ -161,6 +161,18 @@ Chain narrowphase 시간순 참조로 적어도 4개 샘플에 나타나는 명�
   알고리즘과 narrowphase를 독립적으로 검증하기 위한 시간순 참조이며
   수학적으로 완전한 접촉 oracle은 아니다.
 
+`worldChainRetryBenchmark --verify`는 회전만 있는 복수 접촉,
+2,000m 고속 병진·회전의 아주 짧은 접촉, 명확한 비접촉의 세 장면을
+각 32회 검사한다. 선택적 통계 수집을 켜고 끈 결과의 hit/fraction/
+point/normal이 완전히 같은지 확인하고, GJK·manifold·방문 구간
+1024개 제한과 적응 깊이 사용 여부를 검증한다.
+`--csv`는 세 장면 각각의 방문/GJK/manifold 합계와
+Release **호출당 중간값 ns**를 출력한다. CI의 환경별 속도 변동을
+고려해 시간 값에는 합격 기준을 걸지 않는다.
+`worldChainRetryStressTests --strict`는 전체 324경로의
+최초 충돌 반환 시점과 dense narrowphase reference 차이의
+최대 양·음 오차를 별도로 기록한다.
+
 ## BoxCast를 사용하는 BroadPhase 후보 탐색
 
 World ShapeCast는 이제 DynamicTree의 `BoxCast`를 사용한다.
