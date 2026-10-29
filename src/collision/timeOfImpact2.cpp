@@ -426,7 +426,6 @@ bool FindTransientRotationContact( const toiInput2& input, toiOutput2& output, t
         const double safeStep =
             ( static_cast<double>( distance.distance ) - target - tolerance ) / speedBound;
 
-        // float fraction이 더 진행하지 못할 정도로 가까워지면 기존 TOI 상태를 유지.
         const double nextExact = std::min( static_cast<double>( input.maxFraction ),
             static_cast<double>( time ) + safeStep );
         float next = static_cast<float>( nextExact );
@@ -435,7 +434,16 @@ bool FindTransientRotationContact( const toiInput2& input, toiOutput2& output, t
         if( static_cast<double>( next ) > nextExact )
             next = std::nextafter( next, 0.0f );
 
-        if( next <= time ) return false;
+        if( next <= time )
+        {
+            // 접촉 임계값 직전에는 안전한 진행폭이 float fraction의 1 ULP보다
+            // 작아질 수 있다. 그대로 포기하면 명확한 중간 회전 충돌도 놓치므로
+            // 다음 표현 가능한 시간에서 GJK 거리를 반드시 다시 확인한다.
+            // 건너뛰는 폭은 float 시간 1 ULP뿐이며 판정 허용거리를 늘리지 않는다.
+            next = std::nextafter( time, input.maxFraction );
+            if( next <= time || next > input.maxFraction ) return false;
+        }
+
         time = next;
     }
 
