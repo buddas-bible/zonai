@@ -128,6 +128,8 @@ struct fixture
         scenarios[3].name = "pure_rotation";
         scenarios[4].name = "offset_pivot";
 
+        // 기존 네 장면의 고정 난수 입력을 바꾸지 않도록 독립된 시퀀스를 사용함.
+        randomSequence pivotRandom{};
         for( int i = 0; i < QUERY_COUNT; ++i )
         {
             const float jitter = random.between( -0.5f, 0.5f );
@@ -169,9 +171,9 @@ struct fixture
             // 원점에서 떨어진 Circle이 짧은 원호를 그리며 회전하는 경우.
             worldShapeSweepInput2 pivot{};
             pivot.geometry = circle2{ { 3.0f, 0.0f }, 0.3f };
-            pivot.transform.position = { random.between( -9.0f, 9.0f ),
-                random.between( -9.0f, 9.0f ) };
-            pivot.transform.rotation = rot2::FromRadians( random.between( -1.0f, 1.0f ) );
+            pivot.transform.position = { pivotRandom.between( -9.0f, 9.0f ),
+                pivotRandom.between( -9.0f, 9.0f ) };
+            pivot.transform.rotation = rot2::FromRadians( pivotRandom.between( -1.0f, 1.0f ) );
             pivot.translation = { 0.1f, 0.05f };
             pivot.rotationRadians = i % 2 ? -1.4f : 1.4f;
             scenarios[4].queries[i].input = pivot;
