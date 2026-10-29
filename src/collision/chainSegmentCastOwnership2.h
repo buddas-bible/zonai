@@ -92,6 +92,7 @@ struct chainSweepRetryStats2
     int distanceCalls = 0;
     int manifoldCalls = 0;
     int pruned = 0;
+    int depthLimit = 0;
     bool exhausted = false;
 };
 
@@ -171,8 +172,22 @@ inline chainSweepContact2 FindOwnedChainSweepContact( const chainSegment2& chain
         int depth = 0;
     };
 
-    constexpr int MAX_DEPTH = 9;
+    constexpr int BASE_DEPTH = 9;
+    constexpr int MAX_DEPTH = 16;
     constexpr int MAX_INTERVALS = 1024;
+
+    // 빠른 병진/회전 sweep은 깊이 9의 한 구간에서 접촉 구간 전체를
+    // 건너뛸 수 있음. 각 leaf에서 도형이 최대 25cm 이동하도록 필요한
+    // 경우에만 깊이를 늘리고, 기존 호출 비용과 총 방문 상한은 유지함.
+    int depthLimit = BASE_DEPTH;
+    double intervalTravel = speed * ( static_cast<double>( maxFraction ) -
+        static_cast<double>( afterFraction ) ) / ( 1 << BASE_DEPTH );
+    while( depthLimit < MAX_DEPTH && intervalTravel > 0.25 )
+    {
+        intervalTravel *= 0.5;
+        ++depthLimit;
+    }
+    if( stats ) stats->depthLimit = depthLimit;
     std::array<interval, MAX_DEPTH + 2> stack{};
     int count = 1;
     int visited = 0;
@@ -240,7 +255,7 @@ inline chainSweepContact2 FindOwnedChainSweepContact( const chainSegment2& chain
         else if( !contact.hit && middle < ( earliest.hit ? earliest.fraction : maxFraction ) )
             lowerBound = std::max( lowerBound, middle );
 
-        if( current.depth == MAX_DEPTH ) continue;
+        if( current.depth == depthLimit ) continue;
         if( !contact.hit && ( !earliest.hit || middle < earliest.fraction ) )
             stack[count++] = { middle, current.upper, current.depth + 1 };
         stack[count++] = { current.lower, middle, current.depth + 1 };
