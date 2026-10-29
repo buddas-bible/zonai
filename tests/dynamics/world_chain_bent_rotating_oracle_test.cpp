@@ -334,6 +334,9 @@ void run( bool strict, bool csv )
     int cases = 0, robust = 0, missed = 0, definiteMiss = 0, falseHits = 0;
     int convexRobust = 0, concaveRobust = 0, seamRobust = 0, seamMissed = 0;
     int openGhostMissed = 0, otherMissed = 0;
+    int retryCalls = 0, retryIntervals = 0, retryDistanceCalls = 0;
+    int retryManifoldCalls = 0, retryLimitReached = 0, preciseComparisons = 0;
+    int maxRetryIntervals = 0;
     std::array<int, 3> perShape{}, shapeMissed{};
     int printed = 0;
 
@@ -371,8 +374,60 @@ void run( bool strict, bool csv )
             const caseInput sample = makeCase( type, path, offset, peak, x,
                 direction, edgeIndex, bend, ground, terrain );
             const result oracle = classify( sample, terrain );
-            const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( sample.worldInput );
+            worldShapeSweepStats2 retryStats{};
+            const worldShapeCastResult2 hit = simulation.castShapeSweepClosest(
+                sample.worldInput, {}, &retryStats );
             ++cases;
+            retryCalls += retryStats.chainRetryCalls;
+            retryIntervals += retryStats.chainRetryIntervals;
+            retryDistanceCalls += retryStats.chainRetryDistanceCalls;
+            retryManifoldCalls += retryStats.chainRetryManifoldCalls;
+            retryLimitReached += retryStats.chainRetryLimitReached;
+            maxRetryIntervals = std::max( maxRetryIntervals, retryStats.chainRetryIntervals );
+
+            check( retryStats.chainRetryIntervals <= 1024 * retryStats.chainRetryCalls &&
+                retryStats.chainRetryDistanceCalls <= retryStats.chainRetryIntervals &&
+                retryStats.chainRetryManifoldCalls <=
+                    retryStats.chainRetryIntervals + 24 * retryStats.chainRetryCalls,
+                "Chain retry exceeded its deterministic interval/manifold budget" );
+
+            // PR #235의 4개 외부 ghost 재현 입력: World 반환 fraction은
+            // 실제 narrowphase에서 최초 인정되는 시점과 근접해야 함.
+            if( path == pathType::transient && type == shapeType::box &&
+                edgeIndex == 0 && x == 0.42 && offset == 1.0 &&
+                peak == -0.055 && direction == -1 )
+            {
+                check( hit.hit && retryStats.chainRetryCalls > 0,
+                    "Known open-end ghost case must use owned Chain retry" );
+                const chainSegment2 target{ definition.ghost1,
+                    { vertices[0], vertices[1] }, vertices[2] };
+                const sweep2 moving{ {}, sample.worldInput.transform.position,
+                    sample.worldInput.transform.position + sample.worldInput.translation,
+                    sample.worldInput.transform.rotation,
+                    sample.worldInput.transform.rotation *
+                        rot2::FromRadians( sample.worldInput.rotationRadians ) };
+                const vec2 face = Normalize( Cross( target.segment.b - target.segment.a, 1.0f ) );
+                float firstOwned = -1.0f;
+                constexpr int FINE_SAMPLES = 8192;
+                for( int index = 0; index <= FINE_SAMPLES; ++index )
+                {
+                    const float time = static_cast<float>( index ) / FINE_SAMPLES;
+                    const transform2 relative = InverseMul( ground,
+                        GetSweepTransform( moving, time ) );
+                    simplexCache2 cache{};
+                    const localManifold2 contact = CollideChainSegmentPolygon( target,
+                        std::get<polygon2>( sample.worldInput.geometry ), relative, cache );
+                    if( contact.pointCount > 0 && Dot( contact.normal, face ) > 0.0f )
+                    {
+                        firstOwned = time;
+                        break;
+                    }
+                }
+                check( firstOwned > 0.0f &&
+                    std::fabs( hit.fraction - firstOwned ) <= 0.003f,
+                    "Chain retry did not return the earliest sampled owned contact" );
+                ++preciseComparisons;
+            }
 
             if( hit.hit )
             {
@@ -470,11 +525,14 @@ void run( bool strict, bool csv )
         std::printf( "Bent Chain rotating oracle: cases=%d robust=%d missed=%d "
             "capsule=%d/%d box=%d/%d triangle=%d/%d convex=%d concave=%d "
             "near_seam=%d seam_missed=%d open_ghost_missed=%d other_missed=%d "
-            "definite_miss=%d false_hit=%d\n",
+            "definite_miss=%d false_hit=%d retries=%d intervals=%d "
+            "distance=%d manifold=%d max_retry_intervals=%d limit=%d precise=%d\n",
             cases, robust, missed, perShape[0], shapeMissed[0],
             perShape[1], shapeMissed[1], perShape[2], shapeMissed[2],
             convexRobust, concaveRobust, seamRobust, seamMissed,
-            openGhostMissed, otherMissed, definiteMiss, falseHits );
+            openGhostMissed, otherMissed, definiteMiss, falseHits,
+            retryCalls, retryIntervals, retryDistanceCalls,
+            retryManifoldCalls, maxRetryIntervals, retryLimitReached, preciseComparisons );
     if( strict )
     {
         // 외부 ghost의 선행 TOI가 거절되어도 후속 정상 접촉을 찾아야 함.
@@ -482,6 +540,8 @@ void run( bool strict, bool csv )
         check( missed == 0 && seamMissed == 0 && openGhostMissed == 0 && otherMissed == 0,
             "Bent Chain cast omitted a confirmed front contact after ghost TOI rejection" );
         check( falseHits == 0, "Bent Chain cast hit a definitely separated convex shape" );
+        check( preciseComparisons == 4 && retryLimitReached == 0,
+            "Chain retry fraction audit or interval budget was incomplete" );
     }
 }
 
