@@ -80,6 +80,12 @@ oracle의 충돌 정답 계산에 사용하지 않는다.
   `--csv`는 모든 입력에 대한 판정·fraction을 출력한다.
   일반 곡면/오목·볼록 seam 소유권이나 모든 glancing contact의 완전성을
   증명하지는 않으며, 해당 경우는 별도 oracle이 필요하다.
+- 이 oracle에서 기존 회전 TOI의 transient 보수적 진행이 접촉 직전에
+  float fraction의 1 ULP 이하로 줄어 **명백한 Box/Triangle 중간 충돌을
+  누락하는 문제**가 발견됐다. 진행폭이 float 시간으로 더 이상 표현되지
+  않을 때 다음 표현 가능한 fraction에서 실제 GJK 거리를 재검사한다.
+  판정 거리·`LINEAR_SLOP`·접촉 임계값은 변경하지 않으며,
+  기존 CCD 기본 TOI는 transient 옵션이 꺼져 있어 변경되지 않는다.
 
 
 ## BoxCast를 사용하는 BroadPhase 후보 탐색
