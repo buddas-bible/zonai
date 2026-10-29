@@ -1,5 +1,6 @@
 #pragma once
 
+#include "collision/constants.h"
 #include "collision/distance2.h"
 #include "collision/narrowphase/collide.h"
 #include "collision/sweep2.h"
