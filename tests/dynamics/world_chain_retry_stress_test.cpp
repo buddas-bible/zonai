@@ -238,13 +238,14 @@ void audit( bool strict )
                 results.maxDelay = std::max( results.maxDelay, error );
                 results.maxEarly = std::max( results.maxEarly, -error );
                 ++results.measuredPairs;
-                if( error <= 0.002f ) continue;
-
-                ++results.late;
-                if( printed++ < 12 ) std::printf(
-                    "grazing late: angle=%.2f phase=%.4f pivot=%.8f width=%d first=%.7f result=%.7f intervals=%d\n",
-                    groundAngle, phase, pivotY, expected.firstSamples, expected.first,
-                    actual.fraction, stats.intervals );
+                if( error > 0.002f )
+                {
+                    ++results.late;
+                    if( printed++ < 12 ) std::printf(
+                        "grazing late: angle=%.2f phase=%.4f pivot=%.8f width=%d first=%.7f result=%.7f intervals=%d\n",
+                        groundAngle, phase, pivotY, expected.firstSamples, expected.first,
+                        actual.fraction, stats.intervals );
+                }
             }
             if( actual.hit ) check( owns( chain, polygon, ground, moving, actual.fraction ),
                 "Grazing Chain retry returned a non-owned manifold" );
