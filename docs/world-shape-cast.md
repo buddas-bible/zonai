@@ -88,6 +88,38 @@ oracle의 충돌 정답 계산에 사용하지 않는다.
   기존 CCD 기본 TOI는 transient 옵션이 꺼져 있어 변경되지 않는다.
 
 
+## 굽은 Chain 접합부 독립 oracle
+
+`worldChainBentRotatingOracleTests`는 평탄 접합부에 한정된 이전 oracle을
+오목·볼록 Chain으로 확장한다. Static Chain은 `(-2,0)→(0,0)→(2,±0.6)`이며
+Body 자체도 회전한다. Capsule·Box·Triangle은 두 edge 내부와 공유 꼭짓점
+인접 구간을 통과하도록 배치한다.
+
+- 독립 double nlerp로 도형의 core vertex와 centroid를 계산한다.
+  움직이는 core와 **유한한** 두 segment 사이의 거리는 선분 교차와
+  선분-선분 거리로 직접 구한다. GJK/ShapeDistance/TOI/Manifold 및
+  엔진 sweep 변환은 oracle의 정답 계산에 사용하지 않는다.
+- 512개 시간 표본에서 실제 edge **내부**의 앞면을 깊게 통과하고,
+  centroid가 그 edge 앞면에 있으며, 시작과 끝에는 두 edge 모두에서
+  떨어져 있는 경우만 확실한 양성 접촉으로 분류한다.
+  무한 연장선이나 ghost vertex만 닿는 사례는 양성에서 제외한다.
+- 두 굴곡 방향과 각 edge, ±1.48rad 회전, 로컬 오프셋, 명백한
+  앞·뒷면 분리 경로를 포함한 **2,880개 입력**을 분류한다.
+  `--csv`는 사례별 결과를 출력한다.
+- 첫 검증에서 robust 접촉 **916건** 중 공유 seam 인접 **180건은 누락 0건**,
+  명백한 비충돌 **1,920건은 오검출 0건**이었다.
+  다만 열린 Chain의 첫 edge 바깥쪽에서 출발하는 Box **4건**은 누락됐다.
+  첫 TOI는 약 `fraction=0.2046`에서 Hit을 반환하지만 그 자세에서는
+  ghost 영역의 manifold가 0점이라 World가 해당 후보를 버린다.
+  약 `fraction=0.3066`에서는 앞면 manifold가 2점 존재한다.
+  즉 **소유권 필터 이후 TOI 재탐색**이 필요한 별개 문제다.
+- `--strict`는 공유 seam 및 다른 정상 영역의 누락을 0으로 검증하고,
+  위 열린 끝점의 알려진 예외만 최대 4건으로 한정한다.
+  이미 재현된 입력을 삭제하거나 성공 사례로 바꾸지 않는다.
+- 이 oracle은 명확한 유한 선분 접촉의 **존재**를 검증한다.
+  speculative contact, 접합점의 정확한 법선, 모든 grazing contact와
+  여러 hit의 순서까지 증명하지는 않는다.
+
 ## BoxCast를 사용하는 BroadPhase 후보 탐색
 
 World ShapeCast는 이제 DynamicTree의 `BoxCast`를 사용한다.

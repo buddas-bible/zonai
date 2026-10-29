@@ -582,6 +582,10 @@ add_executable(worldChainRotatingConvexOracleTests dynamics/world_chain_rotating
 target_link_libraries(worldChainRotatingConvexOracleTests PRIVATE zonai::zonai)
 add_test(NAME worldChainRotatingConvexOracleTests COMMAND worldChainRotatingConvexOracleTests --strict)
 
+add_executable(worldChainBentRotatingOracleTests dynamics/world_chain_bent_rotating_oracle_test.cpp)
+target_link_libraries(worldChainBentRotatingOracleTests PRIVATE zonai::zonai)
+add_test(NAME worldChainBentRotatingOracleTests COMMAND worldChainBentRotatingOracleTests --strict)
+
 add_executable(contactCacheTests dynamics/contact_cache_test.cpp)
 target_link_libraries(contactCacheTests PRIVATE zonai::zonai)
 add_test(NAME contactCacheTests COMMAND contactCacheTests)
