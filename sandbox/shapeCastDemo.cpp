@@ -258,6 +258,22 @@ void shapeCastDemo::updateHit()
     const vec2 rayStart = TransformPoint( input_.transform, localOffset_ );
     rayHit_ = world_.castRayClosest( rayStart, input_.translation, filter );
 
+    // callback 1은 광선을 줄이지 않으므로 모든 Shape 교차점을 수집함.
+    // Tree 방문은 거리순이 아니어서 화면 표시 전에 fraction으로 정렬함.
+    rayHits_.clear();
+    world_.castRay( rayStart, input_.translation, filter,
+        [&]( shapeId id, vec2 point, vec2 normal, float fraction )
+        {
+            rayHits_.push_back( { id, point, normal, fraction, true } );
+            return 1.0f;
+        } );
+    std::sort( rayHits_.begin(), rayHits_.end(),
+        []( const worldRayCastResult2& a, const worldRayCastResult2& b )
+        {
+            if( a.fraction != b.fraction ) return a.fraction < b.fraction;
+            return a.shape.index1 < b.shape.index1;
+        } );
+
     aabbCandidateCount_ = 0;
     const aabb2 swept = getSweepAABB();
 

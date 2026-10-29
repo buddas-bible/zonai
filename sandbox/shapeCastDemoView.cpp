@@ -70,6 +70,12 @@ public:
         bool showRay = isRayVisible();
         if( ImGui::Checkbox( "RayCast 비교 표시###ShapeCastRayVisible", &showRay ) ) setRayVisible( showRay );
 
+        bool showAllRayHits = areRayAllHitsVisible();
+        ImGui::BeginDisabled( !showRay );
+        if( ImGui::Checkbox( "RayCast 모든 교차점###ShapeCastRayAllHits", &showAllRayHits ) )
+            setRayAllHitsVisible( showAllRayHits );
+        ImGui::EndDisabled();
+
         bool showSweep = isSweepAABBVisible();
         if( ImGui::Checkbox( "이동 AABB 후보 표시###ShapeCastAABBVisible", &showSweep ) ) setSweepAABBVisible( showSweep );
 
@@ -100,6 +106,20 @@ public:
         else
             ImGui::TextUnformatted( "RayCast: 중심 광선과 교차하지 않음" );
 
+        if( areRayAllHitsVisible() )
+        {
+            ImGui::Text( "RayCast 전체 교차: %zu개", getRayHits().size() );
+            ImGui::TextWrapped( "가까운 순서로 표시합니다. 시작점 내부는 t=0으로 보고하지만 RayCast 첫 충돌 조회는 건너뜁니다." );
+            for( const worldRayCastResult2& result : getRayHits() )
+            {
+                const char* label = "다중 도형";
+                for( const auto& target : getTargets() )
+                    if( result.shape == target.shape ) label = target.name;
+
+                ImGui::Text( "%s  t=%.4f  (%.2f, %.2f)", label, result.fraction, result.point.x, result.point.y );
+            }
+        }
+
         ImGui::Text( "조회 대상: %zu개 / Swept AABB 후보: %zu개",
             getTargets().size() + getDenseTargets().size(), getAABBCandidateCount() );
         if( rotating )
@@ -119,6 +139,8 @@ public:
         }
         ImGui::Text( "미리보기 진행: %.1f%%", 100.0f * getPreviewFraction() );
         ImGui::TextWrapped( "초록: 정적 대상 / 보라: 센서 / 흰색: 시작 / 회색: 종료 / 노랑: 현재 자세 / 파랑: 첫 충돌 / 연파랑: 회전 정점 궤적 / 주황: 법선 / 분홍: 중심 RayCast / 청록: swept AABB" );
+        if( areRayAllHitsVisible() )
+            ImGui::TextWrapped( "연분홍 점과 법선: RayCast가 통과한 모든 Shape의 실제 교차점. 정렬은 거리순이며 Tree 조회 순서와 다릅니다." );
         if( rotating ) ImGui::TextWrapped( "중심 RayCast는 회전을 반영하지 않습니다. 회전된 도형의 충돌은 파란색 TOI 결과를 확인하세요." );
     }
 
@@ -183,10 +205,22 @@ public:
 
         if( isRayVisible() )
         {
+            const vec2 rayStart = TransformPoint( input.transform, getLocalOffset() );
+            if( areRayAllHitsVisible() )
+            {
+                constexpr ImU32 allHitsColor = IM_COL32( 255, 180, 225, 230 );
+                draw.DrawSegment( { rayStart, rayStart + input.translation }, allHitsColor, 1.5f );
+                for( const worldRayCastResult2& result : getRayHits() )
+                {
+                    draw.DrawPoint( result.point, allHitsColor, 4.0f );
+                    if( LengthSquared( result.normal ) > 0.0f )
+                        draw.DrawArrow( result.point, result.normal, allHitsColor, 0.35f );
+                }
+            }
+
             const worldRayCastResult2 ray = getRayHit();
             if( ray.hit )
             {
-                const vec2 rayStart = TransformPoint( input.transform, getLocalOffset() );
                 draw.DrawSegment( { rayStart, ray.point }, rayColor, 2.5f );
                 draw.DrawPoint( ray.point, rayColor, 5.0f );
                 if( LengthSquared( ray.normal ) > 0.0f ) draw.DrawArrow( ray.point, ray.normal, rayColor, 0.55f );

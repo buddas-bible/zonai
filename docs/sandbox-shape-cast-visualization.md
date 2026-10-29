@@ -12,6 +12,13 @@
 - **RayCast 비교**는 이동체 중심에서 같은 변위로 쏜 광선이다. 분홍색 교차점과
   파란색 ShapeCast 교차점을 비교해 유한 크기의 영향을 확인할 수 있다.
   선은 지나가지만 원·캡슐은 부딪히는 경로(예: y=1.1m)를 실험할 수 있다.
+- **RayCast 모든 교차점**을 켜면 `world::castRay` 콜백에서 광선을 줄이지 않고
+  모든 Shape의 교차점·법선을 수집한다. DynamicTree 방문 순서는 거리순이 아니므로
+  fraction 기준으로 정렬한 뒤 연분홍 점과 법선으로 표시한다.
+  시작점이 Shape 내부라면 `castRay`에는 `t=0`, 법선 (0,0)의 hit이 포함되지만,
+  기존 **가장 가까운 RayCast**(`castRayClosest`)는 이 초기 겹침을 제외한다.
+  모든 교차점 오버레이는 결과 목록과 화면 표시만 바꾸며 물리 반응에는 관여하지 않는다.
+  상대 회전으로 인해 도형이 그리는 곡선 궤적은 중심 RayCast에 반영하지 않는다.
 - **이동 AABB 후보**의 청록 사각형은 시작 AABB와 도착 AABB의 합집합이다.
   후보 개수는 BroadPhase 공간 조회 결과이며 실제 geometry 충돌 개수와 다르다.
   세 조회는 Sensor 포함 토글에 따라 같은 Query Filter를 사용한다.
@@ -28,6 +35,8 @@
   전환, 시작 회전, 로컬 오프셋과 순수 회전 충돌은
   `sandboxShapeCastDemoTests`에서 검증한다. Windows에서는
   `sandboxShapeCastViewTests`가 GPU/창 없이 ImGui 프레임의 렌더링을 검사한다.
+  광선의 복수 hit 거리순 정렬, 초기 겹침, Sensor 필터, dense Shape 생성/파괴,
+  광선 길이 0과 오버레이 차이도 함께 검사한다.
 
 ChainSegment를 이동 도형으로 쓰는 기능과 Chain ghost vertex의 상세 corner
 ownership은 포함하지 않는다.

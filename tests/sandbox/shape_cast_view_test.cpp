@@ -35,8 +35,11 @@ int main()
     int tiltedLinearVertices = 0;
     bool tiltedLinearObserved = false;
     int offsetRotatingVertices = 0;
+    bool offsetRotatingObserved = false;
+    int singleRayVertices = 0;
+    int allRayVertices = 0;
 
-    for( int frame = 0; frame < 7; ++frame )
+    for( int frame = 0; frame < 9; ++frame )
     {
         if( frame == 1 )
         {
@@ -84,6 +87,18 @@ int main()
             model.setLocalOffset( { 1.0f, 0.0f } );
             model.setRotationRadians( -1.5707963267948966f );
         }
+        if( frame == 7 )
+        {
+            model.setSensorIncluded( true );
+            model.setLocalOffset( {} );
+            model.setRotationRadians( 0.0f );
+            model.setProbe( shapeCastProbe::circle );
+            model.setStart( { -5.0f, 0.0f } );
+            model.setTarget( { 6.0f, 0.0f } );
+            model.setRayVisible( true );
+            model.setRayAllHitsVisible( false );
+        }
+        if( frame == 8 ) model.setRayAllHitsVisible( true );
 
         ImGui::NewFrame();
         ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
@@ -129,7 +144,14 @@ int main()
             tiltedLinearObserved = model.getRotationRadians() == 0.0f &&
                 model.getSweepStats().toiCalls == 0;
         }
-        if( frame == 6 ) offsetRotatingVertices = geometryVertices;
+        if( frame == 6 )
+        {
+            offsetRotatingVertices = geometryVertices;
+            offsetRotatingObserved = model.getLocalOffset().x == 1.0f &&
+                model.getRotationRadians() < 0.0f && model.getHit().hit;
+        }
+        if( frame == 7 ) singleRayVertices = geometryVertices;
+        if( frame == 8 ) allRayVertices = geometryVertices;
 
         ImGui::EndChild();
         ImGui::End();
@@ -155,10 +177,15 @@ int main()
         std::fprintf( stderr, "Initial-angle-only linear ShapeCast view failed to render\n" );
         std::exit( EXIT_FAILURE );
     }
-    if( offsetRotatingVertices <= 0 || model.getLocalOffset().x != 1.0f ||
-        model.getRotationRadians() >= 0.0f || !model.getHit().hit )
+    if( offsetRotatingVertices <= 0 || !offsetRotatingObserved )
     {
         std::fprintf( stderr, "Offset pure-rotation ShapeCast view failed to render\n" );
+        std::exit( EXIT_FAILURE );
+    }
+    if( allRayVertices <= singleRayVertices || !model.areRayAllHitsVisible() ||
+        model.getRayHits().size() != 2 )
+    {
+        std::fprintf( stderr, "All-hit RayCast overlay must render additional intersections and normals\n" );
         std::exit( EXIT_FAILURE );
     }
     ImGui::DestroyContext();
