@@ -323,6 +323,12 @@ add_test(
     COMMAND hashSetTests
 )
 
+# Shape pair 관리의 custom hashSet / std::unordered_set 비교.
+# CI는 동일 연산 결과만 검사하며 실제 시간 비교는 Release --csv로 실행함.
+add_executable(hashSetPairBenchmark collision/broadphase/hash_set_pair_benchmark.cpp)
+target_link_libraries(hashSetPairBenchmark PRIVATE zonai::zonai)
+add_test(NAME hashSetPairBenchmarkOracle COMMAND hashSetPairBenchmark --verify)
+
 add_executable(broadPhaseLifecycleTests collision/broadphase/broad_phase_lifecycle_test.cpp)
 target_link_libraries(broadPhaseLifecycleTests PRIVATE zonai::zonai)
 add_test(NAME broadPhaseLifecycleTests COMMAND broadPhaseLifecycleTests)
