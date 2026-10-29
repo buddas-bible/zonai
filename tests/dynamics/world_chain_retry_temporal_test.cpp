@@ -81,7 +81,7 @@ void audit( float angle, float pivotY, bool shortWindow )
         chain, shape, proxy, target, moving, 0.0f, 1.0f, &stats );
     check( recovered.hit && ownedAt( chain, geometry, target, moving, recovered.fraction ),
         "Ordered retry returned a non-owned manifold" );
-    check( std::fabs( recovered.fraction - first ) < 0.006f,
+    check( std::fabs( recovered.fraction - first ) < 0.00025f,
         "Ordered retry returned the later window instead of the earliest" );
     check( IsFinite( recovered.point ) && IsFinite( recovered.normal ),
         "Ordered retry produced nonfinite contact data" );
