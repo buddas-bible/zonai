@@ -35,6 +35,21 @@ Sandbox의 **공간 조회 → AABB·실제 도형 겹침 비교** 장면에서�
   내부는 아니고, `(1.0, 0)`은 경계에 포함된다. 반대로 `(1.3, 0)`에서
   점 자체는 상자 밖이지만 반지름 0.5m 원 도형은 상자와 겹칠 수 있다.
 
+## Segment / ChainSegment 실험
+
+**선분 / Chain 대상 표시**를 켜면 기존 네 Shape와 별개로 아래쪽에
+정적 양면 Segment (중심 -3, -2.5m)와 ChainSegment (중심 3, -2.5m)를 만든다.
+두 대상은 각각 독립된 Body/Shape로 관리하며 토글을 끄면 파괴한다.
+재활성화 시 기존 Shape handle을 재사용하더라도 generation으로 수명이 구분된다.
+
+- 도형 겹침 모드에서 반지름 0.5m 원을 선 위 또는 그 위아래에 놓으면
+  `overlapShape`가 두 선분의 실제 기하학적 겹침을 찾는다. 여기서는
+  ChainSegment의 ghost vertex 및 one-sided 충돌 소유권 조건이 아니라
+  **양면 거리 겹침**만 확인한다.
+- 점 포함 모드에서 선 위를 눌러도 `overlapPoint`는 실제 포함으로 보지 않는다.
+  선분은 면적이 없으므로 저장 AABB의 후보로는 나타나도 실제 포함 결과는 비어 있다.
+- 기본 장면은 이 옵션이 꺼져 있어 기존 네 대상과 첫 AABB 거짓 양성 사례를 보존한다.
+
 이 데모는 충돌 solver의 manifold 또는 실시간 Contact 생성 결과가 아니라,
 **World 공간 조회 API의 결과**만 시각화한다.
 
@@ -47,3 +62,6 @@ GPU/DX11 실창에서의 입력·폰트·시각 검수는 별도 수동 확인�
 
 점/도형 모드 전환, 경계 점, speculative AABB 거짓 양성, 동적·정적·센서 Shape,
 도형 설정 독립성과 클릭 갱신을 기존 Sandbox 모델/Headless UI 테스트에서 추가 검증한다.
+
+Segment/Chain 활성화·파괴·재생성, 위/아래 도형 겹침, 선 위의 점 조회 거부,
+Headless ImGui의 표시 변경을 기존 Sandbox 모델/UI 테스트에 추가했다.
