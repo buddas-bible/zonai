@@ -44,9 +44,11 @@ Circle/Capsule/Polygon/Chain, 유효하지 않은 입력을 Release에서도 검
 
 `worldChainShapeCastOwnershipTests`: 두 이웃 ChainSegment가 만나는 직선/굽은
 접합부(정방향/역방향 굴곡)와 회전한 정적 Body에서 원의 선형·회전 sweep
-결과를 비교한다. 경계의 정확한 접점과 양쪽 ±0.12m에 대해 호출 순서와
-무관하게 소유 edge만 한 번 보고하는지, local offset Circle의 회전,
-뒷면 접근 무시를 Ubuntu·Windows Debug/Windows Release에서 확인한다.
+결과를 비교한다. 직선 seam과 접점 양쪽 ±0.12m에서는 단일 소유 edge를
+확인한다. 꺾인 코너의 공유 꼭짓점에서는 서로 다른 실제 접촉 법선이라면
+인접 edge 둘 다 보고할 수 있으므로 이를 단순 중복 hit으로 간주하지 않는다.
+local offset Circle의 회전 및 뒷면 접근 무시도 Ubuntu·Windows Debug/
+Windows Release에서 확인한다.
 실제 body solver의 contact manifold 동작 자체는 변경하지 않는다.
 
 
