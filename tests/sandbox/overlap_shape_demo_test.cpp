@@ -122,6 +122,78 @@ void checkFixturesAndQueries()
         "Query-only scene must not move physics bodies when playback steps" );
 }
 
+void checkPointQueryMode()
+{
+    overlapShapeDemo demo{};
+    const shapeId box = demo.getTargets()[0].shape;
+    const shapeId circle = demo.getTargets()[1].shape;
+    const shapeId dynamic = demo.getTargets()[2].shape;
+    const shapeId sensor = demo.getTargets()[3].shape;
+
+    check( demo.getQueryMode() == overlapQueryMode::shape,
+        "Existing overlap visualization must default to the shape query" );
+
+    demo.setQueryMode( overlapQueryMode::point );
+    check( demo.getCandidates().empty() && demo.getExactOverlaps().empty(),
+        "Initial query point is outside the target box even though the initial circle AABB overlapped it" );
+
+    demo.setQueryPosition( { 1.01f, 0.0f } );
+    const aabb2 pointBounds = demo.getQueryAABB();
+    check( pointBounds.min.x == 1.01f && pointBounds.max.x == 1.01f &&
+        pointBounds.min.y == 0.0f && pointBounds.max.y == 0.0f,
+        "Point query uses a zero-extent broadphase AABB" );
+    check( demo.isCandidate( box ) && !demo.isExactOverlap( box ),
+        "Speculative box AABB can contain a point that lies outside the actual box" );
+
+    demo.setQueryPosition( { 1.0f, 0.0f } );
+    check( demo.isCandidate( box ) && demo.isExactOverlap( box ),
+        "A point on a polygon face must be included" );
+
+    demo.setQueryPosition( { 1.3f, 0.0f } );
+    check( !demo.isCandidate( box ) && !demo.isExactOverlap( box ),
+        "Separated point must not reuse the circle probe's AABB" );
+    demo.setQueryMode( overlapQueryMode::shape );
+    check( demo.isCandidate( box ) && demo.isExactOverlap( box ),
+        "Switching to shape mode restores GJK/radius overlap at the same query location" );
+
+    demo.setQueryMode( overlapQueryMode::point );
+    demo.setQueryPosition( { -3.0f, 0.0f } );
+    check( demo.isExactOverlap( circle ) && demo.getExactOverlaps().size() == 1,
+        "Point query must classify the static circle" );
+
+    demo.setQueryPosition( { 3.0f, 0.0f } );
+    check( demo.isExactOverlap( dynamic ) && demo.getExactOverlaps().size() == 1,
+        "Point query must classify the Dynamic tree" );
+
+    demo.setQueryPosition( { 0.0f, 2.8f } );
+    check( demo.isExactOverlap( sensor ) && demo.getExactOverlaps().size() == 1,
+        "Point query must include a Kinematic sensor by default" );
+
+    demo.setSensorIncluded( false );
+    check( demo.getCandidates().empty() && demo.getExactOverlaps().empty(),
+        "Sensor mask must exclude point-query candidates and exact results together" );
+    demo.setSensorIncluded( true );
+    check( demo.isExactOverlap( sensor ), "Point query must restore sensor when re-enabled" );
+
+    // 점 조회의 판정은 선택했던 도형 종류나 회전과 무관해야 함.
+    demo.setQueryPosition( { 1.01f, 0.0f } );
+    const auto previousCandidates = demo.getCandidates();
+    const auto previousOverlaps = demo.getExactOverlaps();
+    demo.setProbe( overlapProbe::capsule );
+    demo.setQueryRotation( 0.7f );
+    check( demo.getCandidates() == previousCandidates &&
+        demo.getExactOverlaps() == previousOverlaps,
+        "Changing hidden shape settings must not change the active point query" );
+
+    demo.setQueryMode( overlapQueryMode::shape );
+    check( demo.getProbe() == overlapProbe::capsule &&
+        std::abs( demo.getQueryRotation() - 0.7f ) < 1.0e-5f,
+        "Returning to shape mode must retain the previous geometry and rotation controls" );
+
+    check( demo.getWorld().GetBodyCount() == 4 && demo.getWorld().GetShapeCount() == 4,
+        "Query mode toggles must never create or move World bodies and shapes" );
+}
+
 void checkSharedSession()
 {
     demoSession session{ createViewModel };
@@ -145,5 +217,6 @@ void checkSharedSession()
 int main()
 {
     checkFixturesAndQueries();
+    checkPointQueryMode();
     checkSharedSession();
 }
