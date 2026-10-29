@@ -6,6 +6,8 @@
 #include <cstring>
 #include <limits>
 
+#include "collision/narrowphase/collide.h"
+#include "collision/timeOfImpact2.h"
 #include "dynamics/world.h"
 #include "geometry/polygon2.h"
 
@@ -320,7 +322,9 @@ result classify( const caseInput& sample, const std::array<edge, 2>& terrain )
     reference.robust = sample.path == pathType::transient &&
         reference.startGap > MIN_ENDPOINT_GAP &&
         reference.endGap > MIN_ENDPOINT_GAP && contact;
-    reference.nearSeam = sample.localX > 1.35 || sample.localX < 0.65;
+    // 첫 edge의 끝(x≈2)과 두 번째 edge의 시작(x≈0)만 실제 공유 seam.
+    reference.nearSeam = sample.edgeIndex == 0 ?
+        sample.localX > 1.35 : sample.localX < 0.65;
     reference.definiteMiss = clearlySeparated;
     return reference;
 }
@@ -389,9 +393,51 @@ void run( bool strict, bool csv )
                     ++shapeMissed[static_cast<int>( type )];
                     if( oracle.nearSeam ) ++seamMissed;
                     if( !csv && printed++ < 8 )
+                    {
                         std::printf( "bent miss: bend=%.3f type=%d edge=%d x=%.3f offset=%.3f peak=%.3f dir=%d start=%.5f end=%.5f first=%.5f\n",
                             bend, static_cast<int>( type ), edgeIndex, x, offset, peak, direction,
                             oracle.startGap, oracle.endGap, oracle.firstCrossing );
+                        const chainSegment2 candidate = edgeIndex == 0 ?
+                            chainSegment2{ { -4.0f, 0.0f },
+                                { { -2.0f, 0.0f }, { 0.0f, 0.0f } },
+                                { 2.0f, bend } } :
+                            chainSegment2{ { -2.0f, 0.0f },
+                                { { 0.0f, 0.0f }, { 2.0f, bend } },
+                                { 4.0f, 2.0f * bend } };
+                        const sweep2 moving{ {}, sample.worldInput.transform.position,
+                            sample.worldInput.transform.position + sample.worldInput.translation,
+                            sample.worldInput.transform.rotation,
+                            sample.worldInput.transform.rotation *
+                                rot2::FromRadians( sample.worldInput.rotationRadians ) };
+                        toiInput2 input{};
+                        input.proxyA = MakeShapeProxy( candidate );
+                        input.proxyA.oneSided = false;
+                        input.proxyB = MakeShapeProxy( sample.worldInput.geometry );
+                        input.sweepA = { {}, ground.position, ground.position,
+                            ground.rotation, ground.rotation };
+                        input.sweepB = moving;
+                        input.detectTransientContacts = true;
+                        const toiOutput2 raw = TimeOfImpact( input );
+                        const auto manifoldAt = [&]( float fraction )
+                        {
+                            const transform2 relative = InverseMul( ground,
+                                GetSweepTransform( moving, fraction ) );
+                            simplexCache2 cache{};
+                            const localManifold2 manifold =
+                                type == shapeType::capsule ?
+                                    CollideChainSegmentCapsule( candidate,
+                                        std::get<capsule2>( sample.worldInput.geometry ),
+                                        relative, cache ) :
+                                    CollideChainSegmentPolygon( candidate,
+                                        std::get<polygon2>( sample.worldInput.geometry ),
+                                        relative, cache );
+                            return manifold.pointCount;
+                        };
+                        std::printf( "  raw: state=%d fraction=%.6f normal=(%.4f,%.4f) "
+                            "manifold_at_raw=%d manifold_at_deep=%d\n",
+                            static_cast<int>( raw.state ), raw.fraction, raw.normal.x, raw.normal.y,
+                            manifoldAt( raw.fraction ), manifoldAt( oracle.firstCrossing ) );
+                    }
                 }
             }
             if( oracle.definiteMiss )
