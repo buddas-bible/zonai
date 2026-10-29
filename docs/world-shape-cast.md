@@ -190,6 +190,21 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
 **point-to-oriented-box 거리**와 원 반지름 차이를 계산하는 독립 기하
 oracle을 사용한다. 결과는 broad와 thin의 누락 건수로 구분해 기록한다.
 
+추가로 `worldRotatingCapsulePolygonOracleTests`는 기존 원·축 정렬 상자 테스트가
+검사하지 않은 **로컬 오프셋 Capsule과 비축정렬 삼각형 Polygon**의 회전 조회를
+고정 시드 900개 입력에서 정적 원과 비교한다. Capsule은 원 중심에서 이동한
+선분까지의 최단 거리에서 두 radius를 빼고, 삼각형은 CCW edge의 안팎 판정과
+세 선분 최단 거리로 부호 있는 간격을 계산한다. 따라서 엔진의 GJK/TOI/ShapeDistance
+또는 sweep transform 함수를 기하 판정에 사용하지 않는다.
+
+- 시작·종료와 중간 시점의 회전은 World의 nlerp 시간 규약만 독립 재현하며,
+  샘플링 간격은 1/512이다. 제자리 회전, 병진+회전, 음의 회전과 명백한 miss를 포함한다.
+- 양 끝 간격이 +0.04m 이상이고 중간에 -0.04m보다 깊은 사례를 robust contact로
+  분류한다. 양성의 hit fraction 기하 간격은 0.06m 이내인지, 명백한 miss는
+  miss인지 확인한다. `--strict`는 robust 누락 시 실패한다.
+- 첫 접촉 fraction의 정밀도나 모든 중간 접촉의 완전성은 샘플링만으로 보장할
+  수 없다. Chain ghost vertex/adjacent edge는 별도 검증 범위이다.
+
 두 테스트 모두 512구간 샘플과 `--csv` 및 `--strict` 옵션을 사용한다.
 시작/종료 분리 기준은 +0.04m이고 중간 침투 기준은 원-원 및
 일반 상자에서 -0.04m, 얇은 상자에서 -0.01m이다.
