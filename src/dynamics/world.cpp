@@ -5397,9 +5397,11 @@ void world::DestroyContact( std::int32_t contactId, bool wakeBodies )
 
     if( contact.wasReportedTouching )
     {
-        // Shape slot이 재활용되기 전에 generation이 포함된 이전 handle을 보존함.
-        pendingContactEndEvents_.push_back( {
-            MakeShapeId( contact.shapeIdA ), MakeShapeId( contact.shapeIdB ) } );
+        // DestroyShapeByIndex는 Contact 파괴 전에 UnlinkShape를 호출하므로
+        // 아직 generation이 보존된 slot에서 old handle을 직접 구성함.
+        const shapeId idA{ contact.shapeIdA + 1, shapes_[contact.shapeIdA].generation, worldToken_ };
+        const shapeId idB{ contact.shapeIdB + 1, shapes_[contact.shapeIdB].generation, worldToken_ };
+        pendingContactEndEvents_.push_back( { idA, idB } );
     }
 
     if( wakeBodies )
