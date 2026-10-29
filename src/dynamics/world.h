@@ -15,7 +15,7 @@
 #include "collision/broadphase/broadPhase.h"
 #include "collision/constants.h"
 #include "collision/distance2.h"
-#include "collision/narrowphase/collide.h"
+#include "collision/chainSegmentCastOwnership2.h"
 #include "collision/rayCast2.h"
 #include "collision/shapeCast2.h"
 #include "collision/rotatingSweepBounds2.h"
@@ -599,7 +599,11 @@ public:
                         {
                             transform2 circleInChain = cast.transform;
                             circleInChain.position += hit.fraction * cast.translationB;
-                            if( CollideChainSegmentCircle( *chain, *circle, circleInChain ).pointCount == 0 )
+                            const bool hasPrevious =
+                                candidate.parentChainId != shape::NULL_INDEX &&
+                                ( chains_[candidate.parentChainId].isLoop ||
+                                  chains_[candidate.parentChainId].shapeIds.front() != shapeIndex );
+                            if( !IsChainCircleCastOwned( *chain, *circle, circleInChain, hasPrevious ) )
                                 return -1.0f;
                         }
 
@@ -982,7 +986,11 @@ public:
                     {
                         const transform2 circleAtHit = GetSweepTransform( movingSweep, hit.fraction );
                         const transform2 circleInChain = InverseMul( targetTransform, circleAtHit );
-                        if( CollideChainSegmentCircle( *chain, *circle, circleInChain ).pointCount == 0 )
+                        const bool hasPrevious =
+                            candidate.parentChainId != shape::NULL_INDEX &&
+                            ( chains_[candidate.parentChainId].isLoop ||
+                              chains_[candidate.parentChainId].shapeIds.front() != shapeIndex );
+                        if( !IsChainCircleCastOwned( *chain, *circle, circleInChain, hasPrevious ) )
                             return true;
                     }
 
