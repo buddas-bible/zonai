@@ -62,6 +62,25 @@ Windows Release에서 확인한다.
 재확인한다. Capsule/Polygon은 하나의 물체가 두 인접 edge에 실제로 동시에
 접촉할 수 있으므로 무조건 callback을 하나로 제한하지 않는다.
 
+`worldChainRotatingConvexOracleTests`는 연속된 평탄 Chain 두 edge를
+회전한 Static Body에 배치하고, 회전축에서 떨어진 Capsule/Box/Triangle
+1080개 입력을 독립적인 앞면 평면 접촉 oracle과 비교한다. 도형 core의
+모든 vertex(캡슐은 양 끝점)를 시간에 따라 double 기반 nlerp로 변환하고
+가장 높은 y 좌표와 geometry 반경으로 지형 앞면까지의 signed gap을
+직접 계산한다. GJK/ShapeDistance/TOI/Collider/World sweep transform은
+oracle의 충돌 정답 계산에 사용하지 않는다.
+
+- 512개 시간 구간에서 시작·종료가 각각 3.5cm 이상 분리되고, 중간에는
+  4cm 넘게 통과하며, 중심이 Chain 앞면을 유지하는 경우만 robust
+  transient contact로 인정한다. 모든 정점이 chain 전체 span 안쪽에
+  있는 경우만 검사하므로 무한 평면의 접촉과 실제 연속 edge의 접촉이 같다.
+- 공유 vertex를 가로지르는 경로와 좌·우 edge 내부, 회전 방향 ±, 소량 병진,
+  멀리 떨어진 앞면/뒷면 경로를 함께 검증한다.
+- `--strict`는 이 강한 양성 사례의 World hit 누락을 실패로 처리한다.
+  `--csv`는 모든 입력에 대한 판정·fraction을 출력한다.
+  일반 곡면/오목·볼록 seam 소유권이나 모든 glancing contact의 완전성을
+  증명하지는 않으며, 해당 경우는 별도 oracle이 필요하다.
+
 
 ## BoxCast를 사용하는 BroadPhase 후보 탐색
 
