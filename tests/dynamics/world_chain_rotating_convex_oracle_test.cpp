@@ -294,8 +294,16 @@ void runAudit( bool csv, bool strict )
                         input.sweepB = movingSweep;
                         input.maxFraction = 1.0f;
                         input.detectTransientContacts = true;
-                        const toiOutput2 raw = TimeOfImpact( input );
+                        toiDiagnostics2 detail{};
+                        const toiOutput2 raw = TimeOfImpact( input, &detail );
                         const transform2 relative = InverseMul( ground, GetSweepTransform( movingSweep, raw.fraction ) );
+                        distanceInput2 reference{};
+                        reference.proxyA = input.proxyA;
+                        reference.proxyB = input.proxyB;
+                        reference.useRadii = false;
+                        reference.transform = InverseMul( ground, GetSweepTransform( movingSweep, 0.5f ) );
+                        simplexCache2 referenceCache{};
+                        const distanceOutput2 coreAtMid = ShapeDistance( reference, referenceCache );
                         simplexCache2 cache{};
                         const localManifold2 manifold = kind == probeKind::capsule ?
                             CollideChainSegmentCapsule( chain,
@@ -304,10 +312,13 @@ void runAudit( bool csv, bool strict )
                                 std::get<polygon2>( sample.input.geometry ), relative, cache );
                         const vec2 front = TransformVector( ground, { 0.0f, -1.0f } );
                         std::printf( "  edge=%d toi_state=%d fraction=%.6f gap=%.6f "
-                            "normalFront=%.5f manifold=%d\n",
+                            "normalFront=%.5f manifold=%d midCore=%.6f "
+                            "steps=%d distance_calls=%d transient_calls=%d\n",
                             edge, static_cast<int>( raw.state ), raw.fraction,
                             evaluate( sample, raw.fraction ).gap,
-                            Dot( raw.normal, front ), manifold.pointCount );
+                            Dot( raw.normal, front ), manifold.pointCount,
+                            coreAtMid.distance, detail.transientStepLimit,
+                            detail.distanceCalls, detail.transientDistanceCalls );
                     }
                 }
             }
