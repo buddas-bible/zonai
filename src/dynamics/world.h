@@ -17,6 +17,7 @@
 #include "collision/distance2.h"
 #include "collision/rayCast2.h"
 #include "collision/shapeCast2.h"
+#include "collision/rotatingSweepBounds2.h"
 #include "collision/timeOfImpact2.h"
 #include "dynamics/body.h"
 #include "dynamics/bodyDef.h"
@@ -712,6 +713,14 @@ public:
         if( !IsValidAABB( sweptBounds ) ) return;
 
         const rot2 endRotation = input.transform.rotation * rot2::FromRadians( input.rotationRadians );
+        // Local 원점에서 떨어진 도형은 원호의 실제 축별 범위가 외접 원보다 좁을 수 있음.
+        // 별도 계산 실패나 경계 값 불일치 시에는 기존 보수적 전체 원 범위를 유지함.
+        aabb2 arcBounds{};
+        if( TryComputeRotatingSweepBounds( movingProxy, input.transform, endPosition,
+            endRotation, input.rotationRadians, arcBounds ) &&
+            ContainsAABB( sweptBounds, arcBounds ) )
+            sweptBounds = arcBounds;
+
         const sweep2 movingSweep{
             {}, input.transform.position, endPosition, input.transform.rotation, endRotation
         };

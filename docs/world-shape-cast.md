@@ -400,3 +400,28 @@ World의 회전 ShapeCast는 각 도형의 proxy support 점과 radius가 모두
 `worldShapeCastTests`는 AABB 모서리에서 순수 회전/짧은 병진의
 허위 후보를 버리는지와 실제 충돌을 남기는지 확인한다. 기존 1,800개
 회전 TOI oracle 및 Sandbox/World 벤치마크도 회귀 조건으로 유지한다.
+
+
+## 회전축이 도형 중심과 다른 ShapeCast의 AABB 축소
+
+기존 World 회전 조회는 도형 local 원점으로부터 가장 먼 support 점과 radius를
+기준으로 **원점 중심 외접 원**의 AABB를 사용했다. 원점에서 떨어진 원·캡슐·상자가
+90도 이하로 회전하면 실제 원호가 지나가지 않는 반대 사분면도 후보가 될 수 있다.
+
+회전량이 ±90도 이내인 World `castShapeSweep`는 이제 각 local support point가
+시작/끝 회전 사이에 그리는 원호의 축별 최솟값·최댓값을 계산한다.
+각 원호가 ±X 또는 ±Y축 방향의 극값을 통과하는지도 검사하고,
+병진 원점 시작/끝 구간 및 geometry radius를 더해 보수적인 AABB를 만든다.
+
+- `GetSweepTransform`의 정규화된 선형 회전 보간(nlerp)은 이 제한 구간에서
+  시작·종료 방향 사이의 짧은 원호를 단조롭게 지난다.
+- 축별 범위는 서로 다른 시각의 극값을 조합한 상한이며, 실제 이동 도형의
+  경계를 넘어서 안쪽으로 잘라내지 않는다. float 연산 오차 여유와
+  `nextafter`를 추가한다.
+- 새 계산이 실패하거나 기존 외접 원 AABB 안에 완전히 포함되지 않으면
+  기존 범위를 그대로 사용한다. GJK/TOI, callback, Filter, Chain 처리는 변경하지 않는다.
+- 420개 고정 난수 원·캡슐·상자에 대해 시작 각도, 회전 방향, 병진,
+  local offset을 변경한 뒤 sweep당 257개 pose가 모두 새 AABB 안에 있는지 검증한다.
+  단일 회전의 반대 사분면 후보 제외 및 양방향 실제 World hit도 별도로 검사한다.
+- 추가 support 점 계산이므로 도형의 로컬 오프셋이 작거나 Tree 후보가 적을 때는
+  비용이 늘 수 있다. **후보 수/총 소요시간은 별도 벤치마크로 판단**해야 한다.

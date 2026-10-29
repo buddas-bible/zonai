@@ -553,6 +553,11 @@ add_test(NAME worldShapeCastTests COMMAND worldShapeCastTests)
 
 # Deterministic sampled analytic circle reference for bounded World rotational sweeps.
 # Expected TOI false negatives are reported for diagnosis, not treated as a contract violation.
+# 회전축이 도형 중심과 다른 경우의 보수적 원호 AABB 및 World 후보 검증.
+add_executable(rotatingSweepBoundsTests collision/rotating_sweep_bounds_test.cpp)
+target_link_libraries(rotatingSweepBoundsTests PRIVATE zonai::zonai)
+add_test(NAME rotatingSweepBoundsTests COMMAND rotatingSweepBoundsTests)
+
 add_executable(worldRotatingShapeSweepOracleTests dynamics/world_shape_sweep_oracle_test.cpp)
 target_link_libraries(worldRotatingShapeSweepOracleTests PRIVATE zonai::zonai)
 add_test(NAME worldRotatingShapeSweepOracleTests COMMAND worldRotatingShapeSweepOracleTests --strict)
