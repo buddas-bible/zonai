@@ -90,6 +90,11 @@ void verifyCase( chainScene& scene, float x, int ownedEdge, bool rotational,
         input.rotationRadians = offCenter ? 0.6f : 0.5f;
         scene.simulation.castShapeSweep( input, addHit );
         const auto closest = scene.simulation.castShapeSweepClosest( input );
+        if( !closest.hit || closest.shape != scene.edges[ownedEdge] )
+            std::fprintf( stderr, "Rotating owner mismatch: x=%.4f expected=%d actual=%d hit=%d fraction=%.5f offset=%d rotation=(%.3f,%.3f) callbacks=%zu\\n",
+                x, scene.edges[ownedEdge].index1, closest.shape.index1,
+                static_cast<int>( closest.hit ), closest.fraction, offCenter,
+                scene.groundTransform.rotation.c, scene.groundTransform.rotation.s, hits.size() );
         check( closest.hit && closest.shape == scene.edges[ownedEdge],
             "Rotating ShapeCastClosest must select the owned chain edge" );
     }
@@ -101,6 +106,11 @@ void verifyCase( chainScene& scene, float x, int ownedEdge, bool rotational,
         input.translation = travel;
         scene.simulation.castShape( input, addHit );
         const auto closest = scene.simulation.castShapeClosest( input );
+        if( !closest.hit || closest.shape != scene.edges[ownedEdge] )
+            std::fprintf( stderr, "Linear owner mismatch: x=%.4f expected=%d actual=%d hit=%d fraction=%.5f offset=%d rotation=(%.3f,%.3f) callbacks=%zu\\n",
+                x, scene.edges[ownedEdge].index1, closest.shape.index1,
+                static_cast<int>( closest.hit ), closest.fraction, offCenter,
+                scene.groundTransform.rotation.c, scene.groundTransform.rotation.s, hits.size() );
         check( closest.hit && closest.shape == scene.edges[ownedEdge],
             "Linear ShapeCastClosest must select the owned chain edge" );
     }
