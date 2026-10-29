@@ -50,7 +50,7 @@ void checkLifecycleAndSpeculative()
     const contactBeginEvent2 copiedBegin = simulation.GetContactBeginEvents()[0];
     simulation.Step( 0.0f );
     check( simulation.GetContactBeginEvents().empty() && simulation.GetContactEndEvents().empty() &&
-        containsPair( std::span{ &copiedBegin, 1 }, ground, moving ),
+        containsPair( std::span<const contactBeginEvent2>{ &copiedBegin, 1 }, ground, moving ),
         "Persistent touching must not repeat Begin; copied event is stable" );
 
     // Contact 자체는 유지돼도 solver가 만든 positive separation은 Begin/End의 touching이 아님.
