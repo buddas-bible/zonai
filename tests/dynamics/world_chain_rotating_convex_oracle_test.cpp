@@ -170,7 +170,7 @@ referenceResult samplePath( const trial& sample )
 }
 
 trial makeTrial( probeKind kind, trialKind mode, float offset, float angle,
-    float peak, float centerX, int sign, float groundAngle, world& simulation )
+    float peak, float centerX, int sign, const transform2& ground )
 {
     trial sample{};
     sample.probe = kind;
@@ -186,12 +186,10 @@ trial makeTrial( probeKind kind, trialKind mode, float offset, float angle,
     // Combined translation and rotation, including either sign of displacement.
     sample.localTranslation = { 0.02f * sign, 0.012f * sign };
     sample.input.geometry = makeGeometry( kind, offset );
-    const transform2 ground{ { 0.7f, -1.2f }, rot2::FromRadians( groundAngle ) };
     sample.input.transform.position = TransformPoint( ground, sample.localOrigin );
     sample.input.transform.rotation = ground.rotation * rot2::FromRadians( sample.startAngle );
     sample.input.translation = TransformVector( ground, sample.localTranslation );
     sample.input.rotationRadians = sample.relativeAngle;
-    ( void )simulation;
     return sample;
 }
 
@@ -227,7 +225,7 @@ void runAudit( bool csv, bool strict )
     for( const int sign : { -1, 1 } )
     for( const trialKind mode : { trialKind::transient, trialKind::farFront, trialKind::farBack } )
     {
-        const trial sample = makeTrial( kind, mode, offset, angle, peak, x, sign, 0.38f, simulation );
+        const trial sample = makeTrial( kind, mode, offset, angle, peak, x, sign, ground );
         const referenceResult oracle = samplePath( sample );
         const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( sample.input );
         const bool robustContact = mode == trialKind::transient &&
