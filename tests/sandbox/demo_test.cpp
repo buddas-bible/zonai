@@ -47,6 +47,62 @@ std::unique_ptr<demo> createCounter( demoKind )
     return std::make_unique<counterDemo>();
 }
 
+
+void checkSandboxPointPicking()
+{
+    rigidBodyDemo scene{ demoKind::playground };
+    world& simulation = scene.getWorld();
+    const auto visuals = scene.getShapes();
+    check( visuals.size() == 6, "Point-pick test requires the six Playground shapes" );
+
+    // Mouse Joint의 bodyB로 선택된 Shape 우선순위를 실제로 확인함.
+    const auto pick = [&]( vec2 point )
+    {
+        demoInput press{};
+        press.mousePressed = true;
+        press.mouseHeld = true;
+        press.mousePosition = point;
+        scene.handleInput( press );
+
+        const jointId drag = scene.getMouseJoint();
+        bodyId selected{};
+        if( simulation.IsValid( drag ) )
+            selected = simulation.getMouseJointData( drag ).bodyB;
+        scene.cancelInput();
+        check( !simulation.IsValid( drag ), "Cancelling point drag must destroy the Mouse Joint" );
+        return selected;
+    };
+
+    const vec2 overlappingPoint{ 0.0f, 5.0f };
+    simulation.SetBodyTransform( visuals[2].bodyHandle, { overlappingPoint, {} } );
+    check( pick( overlappingPoint ) == visuals[3].bodyHandle,
+        "Last drawn Dynamic shape must win when World point results overlap" );
+
+    // 필터를 완전히 끈 Shape도 화면에서 선택 가능해야 함.
+    const shapeId box = visuals[3].shapeHandle;
+    simulation.SetShapeFilter( box, collisionFilter{ 1, 0, 0 } );
+    check( pick( overlappingPoint ) == visuals[3].bodyHandle,
+        "Zero collision mask must not prevent Sandbox mouse picking" );
+    simulation.SetShapeFilter( box, collisionFilter{ 0, 1, 0 } );
+    check( pick( overlappingPoint ) == visuals[3].bodyHandle,
+        "Zero collision category must not prevent Sandbox mouse picking" );
+    const std::uint64_t upperBit = std::uint64_t{ 1 } << 63;
+    simulation.SetShapeFilter( box, collisionFilter{ upperBit, upperBit, 0 } );
+    check( pick( overlappingPoint ) == visuals[3].bodyHandle,
+        "Sandbox picking must cover all 64 category bits instead of default QueryFilter" );
+
+    simulation.DestroyBody( visuals[3].bodyHandle );
+    check( pick( overlappingPoint ) == visuals[2].bodyHandle,
+        "Destroyed topmost body must not block the lower valid candidate" );
+    simulation.SetBodyTransform( visuals[2].bodyHandle, { { -3.2f, 3.5f }, {} } );
+    check( IsNull( pick( overlappingPoint ) ),
+        "A former broadphase hit must disappear after moving the last Dynamic shape" );
+    check( IsNull( pick( { 0.0f, -4.0f } ) ),
+        "Static ground must never create a Sandbox Mouse Joint" );
+    check( IsNull( pick( { 4.0f, -1.6f } ) ),
+        "Picking a point without Dynamic solid geometry must not start a drag" );
+}
+
 }
 
 void checkCollisionDemos();
@@ -62,6 +118,7 @@ void checkWeldElasticityDemo();
 
 int main()
 {
+    checkSandboxPointPicking();
     checkWeldElasticityDemo();
     checkSuspensionMotorDemo();
     checkSuspensionLimitDemo();
