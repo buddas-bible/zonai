@@ -65,6 +65,9 @@ struct shape
     // Sensor overlap event 참여 여부. 최신 Box2D처럼 기본값은 false이며
     // sensor와 visitor 양쪽 shape가 모두 true여야 begin/end 및 CCD sensor hit을 생성함.
     bool enableSensorEvents = false;
+
+    // 일반 Contact Begin/End 구독. 기본 false, 두 Shape 중 하나만 켜도 이벤트를 보고함.
+    bool enableContactEvents = false;
 };
 
 // runtime shape의 geometry와 density로 local-space 질량 특성을 계산함.
