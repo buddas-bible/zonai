@@ -185,8 +185,17 @@ void checkCase( scene& target, probeKind kind, float x, float angle,
     {
         const auto earliest = std::min_element( hits.begin(), hits.end(),
             []( const result& a, const result& b ) { return a.fraction < b.fraction; } );
-        if( !closest.hit || closest.shape != earliest->shape ||
-            std::fabs( closest.fraction - earliest->fraction ) >= 0.0005f )
+        // 두 이웃 edge의 접촉 분율 차이가 sub-millimeter인 경우
+        // TOI의 clipped 재조회 순서에 따라 child handle이 달라질 수 있음.
+        // closest가 실제 callback hit 중 하나이고 첫 fraction 근처인지 검사함.
+        const bool reported = std::any_of( hits.begin(), hits.end(), [&]( const result& entry )
+        {
+            return entry.shape == closest.shape &&
+                std::fabs( entry.fraction - closest.fraction ) < 0.0005f;
+        } );
+        const bool closeEnough = closest.hit && reported &&
+            std::fabs( closest.fraction - earliest->fraction ) < 0.0005f;
+        if( !closeEnough )
         {
             std::fprintf( stderr,
                 "Closest mismatch: kind=%d x=%.4f angle=%.4f rotation=%d offset=%d "
@@ -198,9 +207,8 @@ void checkCase( scene& target, probeKind kind, float x, float angle,
                 std::fprintf( stderr, "  callback shape=%d fraction=%.7f\\n",
                     h.shape.index1, h.fraction );
         }
-        check( closest.hit && closest.shape == earliest->shape &&
-            std::fabs( closest.fraction - earliest->fraction ) < 0.0005f,
-            "Closest convex Chain cast must return the earliest non-overlap callback" );
+        check( closeEnough,
+            "Closest convex Chain cast must return a reported hit at the earliest fraction" );
         ++totals.positive[static_cast<int>( kind )][static_cast<int>( rotating )];
     }
     else check( !closest.hit, "Convex Chain closest reported a missing callback hit" );
