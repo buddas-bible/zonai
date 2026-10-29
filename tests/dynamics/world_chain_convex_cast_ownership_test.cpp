@@ -185,6 +185,19 @@ void checkCase( scene& target, probeKind kind, float x, float angle,
     {
         const auto earliest = std::min_element( hits.begin(), hits.end(),
             []( const result& a, const result& b ) { return a.fraction < b.fraction; } );
+        if( !closest.hit || closest.shape != earliest->shape ||
+            std::fabs( closest.fraction - earliest->fraction ) >= 0.0005f )
+        {
+            std::fprintf( stderr,
+                "Closest mismatch: kind=%d x=%.4f angle=%.4f rotation=%d offset=%d "
+                "hit=%d shape=%d fraction=%.7f earliest_shape=%d earliest=%.7f callbacks=%zu\\n",
+                static_cast<int>( kind ), x, angle, rotating, offset,
+                static_cast<int>( closest.hit ), closest.shape.index1, closest.fraction,
+                earliest->shape.index1, earliest->fraction, hits.size() );
+            for( const result& h : hits )
+                std::fprintf( stderr, "  callback shape=%d fraction=%.7f\\n",
+                    h.shape.index1, h.fraction );
+        }
         check( closest.hit && closest.shape == earliest->shape &&
             std::fabs( closest.fraction - earliest->fraction ) < 0.0005f,
             "Closest convex Chain cast must return the earliest non-overlap callback" );
