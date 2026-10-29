@@ -269,6 +269,9 @@ void audit( bool strict )
             "Chain retry missed a narrow or high speed front contact" );
         check( results.exhausted == 0,
             "Chain retry exhausted its search budget on a covered contact" );
+        check( results.measuredPairs == results.robust &&
+            results.maxDelay <= 0.00025f && results.maxEarly <= 0.00025f,
+            "Chain retry first-owned fraction differs too far from the sampled reference" );
     }
 }
 
