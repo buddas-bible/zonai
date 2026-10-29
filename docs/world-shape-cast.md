@@ -22,8 +22,10 @@ simulation.castShape( input, queryFilter{},
   유지하며 `translation` 방향으로 움직인다. ChainSegment를 이동 도형으로 넣는 경우는
   현재 지원하지 않는다.
 - 고정 타깃은 Circle/Capsule/Polygon/Segment/ChainSegment이며 Sensor도 탐색한다.
-  Chain 타깃에는 edge 오른쪽의 앞면 조건을 적용한다. 앞면 판정은 간단한
-  normal/초기 중심 기준이며 ghost-vertex 접합점의 상세 ownership 검사는 하지 않는다.
+  Chain 타깃에는 edge 오른쪽의 앞면 조건을 적용한다. Circle 조회에서는
+  hit 시점의 실제 원 중심으로 `CollideChainSegmentCircle`의 ghost-vertex
+  Voronoi ownership도 확인하여 접합부의 이웃 edge 중복 hit을 억제한다.
+  Capsule·Polygon·Segment 조회의 접합부 상세 ownership은 아직 구현하지 않았다.
 - `fraction`은 전체 translation에 대한 0~1 비율이다. 기존 `ShapeCast`의
   LINEAR_SLOP 기반 접촉 허용차 및 끝 fraction 제외 규칙을 유지한다.
 - callback: -1 무시, 0 전체 종료, 반환한 양수 fraction으로 남은 sweep 단축,
@@ -39,6 +41,13 @@ simulation.castShape( input, queryFilter{},
 `worldShapeCastTests`: 세 Body Tree, Sensor, 필터, hit 위치·normal·fraction,
 초기 겹침·encroachment, callback, world handle 수명, transform 변경/파괴,
 Circle/Capsule/Polygon/Chain, 유효하지 않은 입력을 Release에서도 검사한다.
+
+`worldChainShapeCastOwnershipTests`: 두 이웃 ChainSegment가 만나는 직선/굽은
+접합부(정방향/역방향 굴곡)와 회전한 정적 Body에서 원의 선형·회전 sweep
+결과를 비교한다. 경계의 정확한 접점과 양쪽 ±0.12m에 대해 호출 순서와
+무관하게 소유 edge만 한 번 보고하는지, local offset Circle의 회전,
+뒷면 접근 무시를 Ubuntu·Windows Debug/Windows Release에서 확인한다.
+실제 body solver의 contact manifold 동작 자체는 변경하지 않는다.
 
 
 ## BoxCast를 사용하는 BroadPhase 후보 탐색
@@ -108,7 +117,9 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
 - 좁은 단계는 기존 `TimeOfImpact`의 static A와 이동/회전하는 B sweep을
   사용한다. Sensor, QueryFilter, Chain 타깃의 앞면 정책은 유지하고,
   callback은 -1 무시 / 0 종료 / 양수 fraction clip을 지원한다.
-  Chain의 시작점 앞면 판정과 hit normal을 직접 확인하며, CCD 전용
+  Chain의 시작점 앞면 판정과 hit normal을 직접 확인한다. 이동 원이 Chain
+  타깃인 경우에는 해당 TOI 자세를 narrowphase의 ghost-vertex Voronoi
+  판정으로 다시 확인한다. CCD 전용
   최소 이동량 heuristic은 World 조회에서 사용하지 않는다.
   따라서 짧은 이동으로 처음 접촉하는 경우도 조회 대상으로 남긴다.
   순서 보장은 없으며 최초 fraction 0 hit은 일반 조회에만 보고하고
@@ -117,7 +128,8 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
   회전 중 발생하는 일부 glancing contact를 놓칠 수 있으며
   `Failed` 상태는 hit으로 보고하지 않는다. 이 API는 모든 회전 충돌을
   빠짐없이 열거하는 완전한 sweep oracle이 아니다. Chain 고스트 정점
-  ownership의 완전한 처리도 범위 밖이다.
+  ownership은 Circle 도형에 대해서만 검사하며 Capsule/Polygon의
+  완전한 이음새 처리까지 보장하지 않는다.
 - `worldShapeCastTests`에는 중간 회전 충돌, 음의 회전, 회전·이동,
   0 회전 위임, 시작 겹침, 필터/센서, handle 수명, 입력 검증이 포함된다.
 
