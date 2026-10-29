@@ -74,6 +74,9 @@ struct summary
     int maxIntervals = 0;
     int maxManifold = 0;
     int maxDepth = 0;
+    float maxDelay = 0.0f;
+    float maxEarly = 0.0f;
+    int measuredPairs = 0;
 };
 
 void audit( bool strict )
@@ -111,6 +114,13 @@ void audit( bool strict )
             chainSweepRetryStats2 stats{};
             const chainSweepContact2 actual = FindOwnedChainSweepContact(
                 chain, geometry, proxy, ground, sweep, 0.0f, 1.0f, &stats );
+            const chainSweepContact2 unmeasured = FindOwnedChainSweepContact(
+                chain, geometry, proxy, ground, sweep, 0.0f, 1.0f );
+            check( actual.hit == unmeasured.hit &&
+                ( !actual.hit || ( actual.fraction == unmeasured.fraction &&
+                    LengthSquared( actual.point - unmeasured.point ) == 0.0f &&
+                    LengthSquared( actual.normal - unmeasured.normal ) == 0.0f ) ),
+                "Chain retry diagnostics changed the result" );
 
             ++results.cases;
             results.maxIntervals = std::max( results.maxIntervals, stats.intervals );
@@ -146,6 +156,9 @@ void audit( bool strict )
                 continue;
             }
             const float error = actual.fraction - expected.first;
+            results.maxDelay = std::max( results.maxDelay, error );
+            results.maxEarly = std::max( results.maxEarly, -error );
+            ++results.measuredPairs;
             if( error > 0.002f )
             {
                 ++results.late;
@@ -219,8 +232,14 @@ void audit( bool strict )
                     groundAngle, phase, pivotY, expected.firstSamples, expected.first,
                     stats.intervals, stats.exhausted );
             }
-            else if( actual.fraction - expected.first > 0.002f )
+            else
             {
+                const float error = actual.fraction - expected.first;
+                results.maxDelay = std::max( results.maxDelay, error );
+                results.maxEarly = std::max( results.maxEarly, -error );
+                ++results.measuredPairs;
+                if( error <= 0.002f ) continue;
+
                 ++results.late;
                 if( printed++ < 12 ) std::printf(
                     "grazing late: angle=%.2f phase=%.4f pivot=%.8f width=%d first=%.7f result=%.7f intervals=%d\n",
@@ -234,10 +253,12 @@ void audit( bool strict )
 
     std::printf( "Chain retry stress: cases=%d robust=%d narrow=%d fast_robust=%d "
         "fast_narrow=%d missed=%d late=%d exhausted=%d "
-        "max_intervals=%d max_manifolds=%d max_depth=%d\n",
+        "max_intervals=%d max_manifolds=%d max_depth=%d "
+        "fraction_pairs=%d max_late=%.7f max_early=%.7f\n",
         results.cases, results.robust, results.narrow, results.fastRobust,
         results.fastNarrow, results.missed, results.late, results.exhausted,
-        results.maxIntervals, results.maxManifold, results.maxDepth );
+        results.maxIntervals, results.maxManifold, results.maxDepth,
+        results.measuredPairs, results.maxDelay, results.maxEarly );
     check( results.cases == 324 && results.robust >= 100 && results.narrow >= 40 &&
         results.fastRobust >= 20 && results.fastNarrow >= 20,
         "Insufficient Chain retry stress contact coverage" );
