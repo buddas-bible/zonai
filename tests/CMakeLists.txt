@@ -545,6 +545,10 @@ add_executable(worldContactEventTests dynamics/world_contact_event_test.cpp)
 target_link_libraries(worldContactEventTests PRIVATE zonai::zonai)
 add_test(NAME worldContactEventTests COMMAND worldContactEventTests)
 
+add_executable(worldContactHitEventTests dynamics/world_contact_hit_event_test.cpp)
+target_link_libraries(worldContactHitEventTests PRIVATE zonai::zonai)
+add_test(NAME worldContactHitEventTests COMMAND worldContactHitEventTests)
+
 add_executable(worldOverlapAABBTests dynamics/world_overlap_aabb_test.cpp)
 target_link_libraries(worldOverlapAABBTests PRIVATE zonai::zonai)
 add_test(NAME worldOverlapAABBTests COMMAND worldOverlapAABBTests)
