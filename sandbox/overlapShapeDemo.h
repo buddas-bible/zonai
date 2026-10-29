@@ -10,6 +10,7 @@ namespace zonai::sandbox
 {
 
 enum class overlapProbe { circle, capsule, box };
+enum class overlapQueryMode { shape, point };
 
 struct overlapTarget
 {
@@ -29,6 +30,7 @@ public:
     void cancelInput() override {}
     void setCollisionMatrix( const collisionMatrix& matrix ) override { world_.setCollisionMatrix( matrix ); }
 
+    void setQueryMode( overlapQueryMode mode );
     void setProbe( overlapProbe probe );
     void setQueryPosition( vec2 position );
     void setQueryRotation( float radians );
@@ -40,6 +42,7 @@ public:
     [[nodiscard]] const shapeGeometry& getQueryGeometry() const noexcept { return queryGeometry_; }
     [[nodiscard]] const transform2& getQueryTransform() const noexcept { return queryTransform_; }
     [[nodiscard]] aabb2 getQueryAABB() const;
+    [[nodiscard]] overlapQueryMode getQueryMode() const noexcept { return mode_; }
     [[nodiscard]] overlapProbe getProbe() const noexcept { return probe_; }
     [[nodiscard]] float getQueryRotation() const noexcept { return queryRotation_; }
     [[nodiscard]] bool isSensorIncluded() const noexcept { return sensorIncluded_; }
@@ -56,6 +59,7 @@ private:
     std::array<overlapTarget, 4> targets_{};
     shapeGeometry queryGeometry_{};
     transform2 queryTransform_{};
+    overlapQueryMode mode_ = overlapQueryMode::shape;
     overlapProbe probe_ = overlapProbe::circle;
     float queryRotation_ = 0.0f;
     bool sensorIncluded_ = true;

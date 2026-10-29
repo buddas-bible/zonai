@@ -30,7 +30,7 @@ int main()
     int aabbVertices = 0;
     int hiddenVertices = 0;
 
-    for( int phase = 0; phase < 3; ++phase )
+    for( int phase = 0; phase < 5; ++phase )
     {
         if( phase == 1 ) model.setCandidateAABBsVisible( false );
         if( phase == 2 )
@@ -38,6 +38,18 @@ int main()
             model.setCandidateAABBsVisible( true );
             demoInput click{};
             click.mousePosition = { 1.2f, 1.2f };
+            click.mousePressed = true;
+            scene->handleInput( click );
+        }
+        if( phase == 3 )
+        {
+            model.setQueryMode( overlapQueryMode::point );
+            model.setQueryPosition( { 1.01f, 0.0f } );
+        }
+        if( phase == 4 )
+        {
+            demoInput click{};
+            click.mousePosition = { 0.0f, 0.0f };
             click.mousePressed = true;
             scene->handleInput( click );
         }
@@ -73,6 +85,18 @@ int main()
             model.getExactOverlaps().size() != 1 ) )
         {
             std::fprintf( stderr, "Click must visibly change candidate-only classification to exact overlap\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( phase == 3 && ( model.getQueryMode() != overlapQueryMode::point ||
+            !model.isCandidate( model.getTargets()[0].shape ) || !model.getExactOverlaps().empty() ) )
+        {
+            std::fprintf( stderr, "Point query must render a candidate without claiming point containment\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        if( phase == 4 && ( model.getExactOverlaps().size() != 1 ||
+            !model.isExactOverlap( model.getTargets()[0].shape ) ) )
+        {
+            std::fprintf( stderr, "Point query click must refresh the displayed point containment\n" );
             std::exit( EXIT_FAILURE );
         }
 
