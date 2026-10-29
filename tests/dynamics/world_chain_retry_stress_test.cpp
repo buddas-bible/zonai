@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstring>
 #include <cstdio>
@@ -67,6 +66,8 @@ struct summary
     int cases = 0;
     int robust = 0;
     int narrow = 0;
+    int fastRobust = 0;
+    int fastNarrow = 0;
     int missed = 0;
     int late = 0;
     int exhausted = 0;
@@ -97,9 +98,9 @@ void audit( bool strict )
             const float pivotY = mode == 0 ? -1.176f - 0.0003f * i :
                 -0.98f - 0.003f * i;
             const vec2 start = TransformPoint( ground,
-                mode == 0 ? vec2{ -1.0f, pivotY } : vec2{ -1000.0f, pivotY } );
+                mode == 0 ? vec2{ -1.0f, pivotY } : vec2{ -1001.0f, pivotY } );
             const vec2 end = TransformPoint( ground,
-                mode == 0 ? vec2{ -1.0f, pivotY } : vec2{ 1000.0f, pivotY } );
+                mode == 0 ? vec2{ -1.0f, pivotY } : vec2{ 999.0f, pivotY } );
             const sweep2 sweep{ {}, start, end,
                 ground.rotation * rot2::FromRadians( -0.74f ),
                 ground.rotation * rot2::FromRadians( 0.74f ) };
@@ -114,13 +115,22 @@ void audit( bool strict )
             results.maxIntervals = std::max( results.maxIntervals, stats.intervals );
             results.maxManifold = std::max( results.maxManifold, stats.manifoldCalls );
             results.exhausted += stats.exhausted ? 1 : 0;
+            check( stats.intervals <= 1024 &&
+                stats.distanceCalls <= stats.intervals &&
+                stats.manifoldCalls <= stats.intervals + 24,
+                "Chain retry stress exceeded its deterministic work budget" );
 
             // Sampling oracle 양성은 최소 4번의 실제 narrowphase hit로 확인.
             const bool robust = expected.first > 0.0f &&
                 expected.first < 0.9f && expected.firstSamples >= 4;
             if( !robust ) continue;
             ++results.robust;
-            if( expected.firstSamples <= SAMPLES / 512 ) ++results.narrow;
+            if( mode == 1 ) ++results.fastRobust;
+            if( expected.firstSamples <= SAMPLES / 512 )
+            {
+                ++results.narrow;
+                if( mode == 1 ) ++results.fastNarrow;
+            }
             if( !actual.hit )
             {
                 ++results.missed;
@@ -143,10 +153,7 @@ void audit( bool strict )
             }
             check( owns( chain, polygon, ground, sweep, actual.fraction ),
                 "Chain retry stress returned a non-owned manifold" );
-            check( stats.intervals <= 1024 &&
-                stats.distanceCalls <= stats.intervals &&
-                stats.manifoldCalls <= stats.intervals + 24,
-                "Chain retry stress exceeded its deterministic work budget" );
+
         }
     }
 
@@ -192,6 +199,10 @@ void audit( bool strict )
             results.maxIntervals = std::max( results.maxIntervals, stats.intervals );
             results.maxManifold = std::max( results.maxManifold, stats.manifoldCalls );
             results.exhausted += stats.exhausted ? 1 : 0;
+            check( stats.intervals <= 1024 &&
+                stats.distanceCalls <= stats.intervals &&
+                stats.manifoldCalls <= stats.intervals + 24,
+                "Grazing Chain retry exceeded its deterministic work budget" );
             if( expected.firstSamples < 4 || expected.first <= 0.0f ) continue;
             ++results.robust;
             if( expected.firstSamples <= FINE_SAMPLES / 512 ) ++results.narrow;
@@ -211,17 +222,26 @@ void audit( bool strict )
                     groundAngle, phase, pivotY, expected.firstSamples, expected.first,
                     actual.fraction, stats.intervals );
             }
+            if( actual.hit ) check( owns( chain, polygon, ground, moving, actual.fraction ),
+                "Grazing Chain retry returned a non-owned manifold" );
         }
     }
 
-    std::printf( "Chain retry stress: cases=%d robust=%d narrow=%d missed=%d "
-        "late=%d exhausted=%d max_intervals=%d max_manifolds=%d\n",
-        results.cases, results.robust, results.narrow, results.missed,
-        results.late, results.exhausted, results.maxIntervals, results.maxManifold );
-    check( results.robust >= 40, "Insufficient Chain retry stress contact coverage" );
+    std::printf( "Chain retry stress: cases=%d robust=%d narrow=%d fast_robust=%d "
+        "fast_narrow=%d missed=%d late=%d exhausted=%d "
+        "max_intervals=%d max_manifolds=%d\n",
+        results.cases, results.robust, results.narrow, results.fastRobust,
+        results.fastNarrow, results.missed, results.late, results.exhausted,
+        results.maxIntervals, results.maxManifold );
+    check( results.cases == 324 && results.robust >= 100 && results.narrow >= 40,
+        "Insufficient Chain retry stress contact coverage" );
     if( strict )
+    {
         check( results.missed == 0 && results.late == 0,
             "Chain retry missed a narrow or high speed front contact" );
+        check( results.exhausted == 0,
+            "Chain retry exhausted its search budget on a covered contact" );
+    }
 }
 
 } // namespace
