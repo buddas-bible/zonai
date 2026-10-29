@@ -87,16 +87,18 @@ jobs:
         run: |
           ./build/tests/worldRotatingShapeSweepOracleTests
           ./build/tests/worldRotatingBoxSweepOracleTests
+          ./build/tests/worldRotatingCapsulePolygonOracleTests
 
       - name: Report World rotational sweep oracle (Windows Debug, informational)
         if: runner.os == 'Windows'
         run: |
           .\build\tests\Debug\worldRotatingShapeSweepOracleTests.exe
           .\build\tests\Debug\worldRotatingBoxSweepOracleTests.exe
+          .\build\tests\Debug\worldRotatingCapsulePolygonOracleTests.exe
 
       - name: Build Release lifecycle tests
         if: runner.os == 'Windows'
-        run: cmake --build build --config Release --target rotatingSweepBoundsTests worldShapeCastBenchmark worldRotatingToiBenchmark worldRotatingSceneBenchmark dynamicTreeBoxCastBenchmark dynamicTreeBoxCastTests worldRotatingShapeSweepOracleTests worldRotatingBoxSweepOracleTests broadPhaseLifecycleTests bodyShapeContactLifecycleTests contactConstraintTests restitutionTests islandTests islandSleepCcdTests worldQuerySensorTests worldOverlapAABBTests worldOverlapShapeTests worldSpatialQueryStressTests worldRayCastTests worldShapeCastTests sandboxShapeCastDemoTests sandboxShapeCastViewTests sandboxOverlapShapeDemoTests sandboxOverlapShapeViewTests contactCacheTests distanceJointTests distanceJointWorldTests moverJointTests moverJointWorldTests pogoJointTests pogoJointWorldTests filterJointTests filterJointWorldTests mouseJointTests mouseJointWorldTests revoluteJointTests revoluteJointWorldTests wheelJointTests wheelJointWorldTests sandboxDemoTests --parallel
+        run: cmake --build build --config Release --target rotatingSweepBoundsTests worldRotatingCapsulePolygonOracleTests worldShapeCastBenchmark worldRotatingToiBenchmark worldRotatingSceneBenchmark dynamicTreeBoxCastBenchmark dynamicTreeBoxCastTests worldRotatingShapeSweepOracleTests worldRotatingBoxSweepOracleTests broadPhaseLifecycleTests bodyShapeContactLifecycleTests contactConstraintTests restitutionTests islandTests islandSleepCcdTests worldQuerySensorTests worldOverlapAABBTests worldOverlapShapeTests worldSpatialQueryStressTests worldRayCastTests worldShapeCastTests sandboxShapeCastDemoTests sandboxShapeCastViewTests sandboxOverlapShapeDemoTests sandboxOverlapShapeViewTests contactCacheTests distanceJointTests distanceJointWorldTests moverJointTests moverJointWorldTests pogoJointTests pogoJointWorldTests filterJointTests filterJointWorldTests mouseJointTests mouseJointWorldTests revoluteJointTests revoluteJointWorldTests wheelJointTests wheelJointWorldTests sandboxDemoTests --parallel
 
       # Informational only: no numerical speed threshold or assertion on CI timings.
       - name: Sample BoxCast performance (Release, informational)
@@ -122,4 +124,4 @@ jobs:
 
       - name: Test Release lifecycle invariants
         if: runner.os == 'Windows'
-        run: ctest --test-dir build -C Release -R "^(rotatingSweepBoundsTests|worldRotatingSceneBenchmarkOracle|worldRotatingToiBenchmarkOracle|worldShapeCastBenchmarkOracle|dynamicTreeBoxCastBenchmarkOracle|dynamicTreeBoxCastTests|worldRotatingShapeSweepOracleTests|worldRotatingBoxSweepOracleTests|broadPhaseLifecycleTests|bodyShapeContactLifecycleTests|contactConstraintTests|restitutionTests|islandTests|islandSleepCcdTests|worldQuerySensorTests|worldOverlapAABBTests|worldOverlapShapeTests|worldSpatialQueryStressTests|worldRayCastTests|worldShapeCastTests|sandboxShapeCastDemoTests|sandboxShapeCastViewTests|sandboxOverlapShapeDemoTests|sandboxOverlapShapeViewTests|contactCacheTests|distanceJointTests|distanceJointWorldTests|moverJointTests|moverJointWorldTests|pogoJointTests|pogoJointWorldTests|filterJointTests|filterJointWorldTests|mouseJointTests|mouseJointWorldTests|revoluteJointTests|revoluteJointWorldTests|wheelJointTests|wheelJointWorldTests|sandboxDemoTests)$" --output-on-failure
+        run: ctest --test-dir build -C Release -R "^(rotatingSweepBoundsTests|worldRotatingSceneBenchmarkOracle|worldRotatingToiBenchmarkOracle|worldShapeCastBenchmarkOracle|dynamicTreeBoxCastBenchmarkOracle|dynamicTreeBoxCastTests|worldRotatingShapeSweepOracleTests|worldRotatingBoxSweepOracleTests|worldRotatingCapsulePolygonOracleTests|broadPhaseLifecycleTests|bodyShapeContactLifecycleTests|contactConstraintTests|restitutionTests|islandTests|islandSleepCcdTests|worldQuerySensorTests|worldOverlapAABBTests|worldOverlapShapeTests|worldSpatialQueryStressTests|worldRayCastTests|worldShapeCastTests|sandboxShapeCastDemoTests|sandboxShapeCastViewTests|sandboxOverlapShapeDemoTests|sandboxOverlapShapeViewTests|contactCacheTests|distanceJointTests|distanceJointWorldTests|moverJointTests|moverJointWorldTests|pogoJointTests|pogoJointWorldTests|filterJointTests|filterJointWorldTests|mouseJointTests|mouseJointWorldTests|revoluteJointTests|revoluteJointWorldTests|wheelJointTests|wheelJointWorldTests|sandboxDemoTests)$" --output-on-failure
