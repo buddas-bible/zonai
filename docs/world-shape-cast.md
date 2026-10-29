@@ -134,6 +134,13 @@ Body 자체도 회전한다. Capsule·Box·Triangle은 두 edge 내부와 공유
   speculative contact, 접합점의 정확한 법선, 모든 grazing contact와
   여러 hit의 순서까지 증명하지는 않는다.
 
+\`worldChainRetryTemporalTests\`는 긴 로컬 오프셋 Box가 회전하면서
+동일한 Chain 앞면에 **두 번 접촉하고 중간에는 떨어지는** 경로를
+평탄/회전된 정적 Body와 짧은 접촉 구간까지 검증한다.
+16,384분할의 독립 narrowphase 시간순 참조로 실제 접촉 창 두 개를 확인하고
+재탐색 반환 fraction이 **첫 창의 시작과 0.006 이내**인지 비교한다.
+탐색 구간 최대 1024개, manifold 호출 최대 방문 구간+24회, 한도 소진 0도 검사한다.
+
 ## BoxCast를 사용하는 BroadPhase 후보 탐색
 
 World ShapeCast는 이제 DynamicTree의 `BoxCast`를 사용한다.
