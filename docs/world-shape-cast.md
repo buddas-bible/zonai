@@ -425,3 +425,10 @@ World의 회전 ShapeCast는 각 도형의 proxy support 점과 radius가 모두
   단일 회전의 반대 사분면 후보 제외 및 양방향 실제 World hit도 별도로 검사한다.
 - 추가 support 점 계산이므로 도형의 로컬 오프셋이 작거나 Tree 후보가 적을 때는
   비용이 늘 수 있다. **후보 수/총 소요시간은 별도 벤치마크로 판단**해야 한다.
+
+
+`worldRotatingSceneBenchmark`에는 로컬 원점에서 3m 떨어진 Circle이
+짧은 병진과 ±1.4rad 회전을 수행하는 `offset_pivot` 시나리오(32회)를
+추가한다. 기존 `candidate_only_hits`는 외접 원을 사용한 참고용 후보
+조회이고, `tree_candidates`는 실제 World의 원호 AABB를 사용한 Tree callback 수다.
+서로 다른 필터/조회 단계의 카운터이므로 정확한 후보 제거율로 혼동하지 않는다.
