@@ -77,6 +77,7 @@ inline bool IsChainConvexCastOwned( const chainSegment2& chain, const shapeGeome
 }
 
 
+
 struct chainSweepContact2
 {
     vec2 point{};
@@ -85,15 +86,24 @@ struct chainSweepContact2
     bool hit = false;
 };
 
-// Generic TOI가 끝점의 ghost 접촉을 먼저 보고 World가 거절한 경우에만 호출.
-// 이동 속도 상한으로 접촉 가능성이 없는 시간 구간을 제거하고,
-// 남은 구간에서 Chain narrowphase의 실제 앞면 manifold를 다시 확인함.
-// 일정한 간격의 전체 sweep 샘플링이 아니라 제한된 구간 이분 탐색임.
+struct chainSweepRetryStats2
+{
+    int intervals = 0;
+    int distanceCalls = 0;
+    int manifoldCalls = 0;
+    int pruned = 0;
+    bool exhausted = false;
+};
+
+// Ghost 접촉이 먼저 나타난 회전 Capsule/Polygon에 한해서 소유한 첫 접촉을 찾음.
+// 좌측 시간 구간을 먼저 확인하여 BFS에서 발생했던 뒤늦은 hit 우선 문제를 방지함.
+// 정해진 탐색 깊이와 검사 횟수 이후에는 유효한 접촉만 반환하고, 완전성은 주장하지 않음.
 inline chainSweepContact2 FindOwnedChainSweepContact( const chainSegment2& chain,
     const shapeGeometry& geometry, const shapeProxy2& movingProxy,
     const transform2& targetTransform, const sweep2& movingSweep,
-    float afterFraction, float maxFraction )
+    float afterFraction, float maxFraction, chainSweepRetryStats2* stats = nullptr )
 {
+    if( stats ) *stats = {};
     if( !std::holds_alternative<capsule2>( geometry ) &&
         !std::holds_alternative<polygon2>( geometry ) ) return {};
     if( !( afterFraction < maxFraction ) ) return {};
@@ -106,14 +116,11 @@ inline chainSweepContact2 FindOwnedChainSweepContact( const chainSegment2& chain
 
     double radius = movingProxy.radius;
     for( int i = 0; i < movingProxy.count; ++i )
-    {
         radius = std::max( radius,
             std::hypot( static_cast<double>( movingProxy.points[i].x ),
                 static_cast<double>( movingProxy.points[i].y ) ) + movingProxy.radius );
-    }
 
-    // Nlerp 각속도는 |cross(q1,q2)| / |(1-t)q1+tq2|². 최소 분모를
-    // 전체 [0,1]에서 구하므로 각 support 점의 이동 거리 상한이 됨.
+    // Nlerp의 최소 회전 길이로 전체 sweep의 각속도 상한을 계산함.
     const double dc = movingSweep.q2.c - movingSweep.q1.c;
     const double ds = movingSweep.q2.s - movingSweep.q1.s;
     const double d2 = dc * dc + ds * ds;
@@ -132,6 +139,7 @@ inline chainSweepContact2 FindOwnedChainSweepContact( const chainSegment2& chain
 
     const auto manifoldAt = [&]( float time ) -> chainSweepContact2
     {
+        if( stats ) ++stats->manifoldCalls;
         const transform2 inChain = InverseMul( targetTransform,
             GetSweepTransform( movingSweep, time ) );
         simplexCache2 cache{};
@@ -150,25 +158,38 @@ inline chainSweepContact2 FindOwnedChainSweepContact( const chainSegment2& chain
             TransformVector( targetTransform, manifold.normal ), time, true };
     };
 
+    distanceInput2 distance{};
+    distance.proxyA = MakeShapeProxy( chain );
+    distance.proxyA.oneSided = false;
+    distance.proxyB = movingProxy;
+    distance.useRadii = false;
+
     struct interval
     {
         float lower = 0.0f;
         float upper = 1.0f;
         int depth = 0;
     };
-    std::array<interval, 256> queue{};
-    int first = 0;
-    int last = 1;
-    queue[0] = { afterFraction, maxFraction, 0 };
-    chainSweepContact2 recovered{};
 
-    // 간격 이분은 실제 도형의 support 점 경계로 선별함.
-    // 재탐색 횟수 상한은 ghost 거절을 반복하는 병적 입력의 비용을 제한함.
-    while( first < last && last < static_cast<int>( queue.size() ) )
+    constexpr int MAX_DEPTH = 9;
+    constexpr int MAX_INTERVALS = 1024;
+    std::array<interval, MAX_DEPTH + 2> stack{};
+    int count = 1;
+    int visited = 0;
+    stack[0] = { afterFraction, maxFraction, 0 };
+    chainSweepContact2 earliest{};
+    float lowerBound = afterFraction;
+
+    // 오른쪽을 먼저 push해 왼쪽(과거) 구간부터 방문한다.
+    // 이미 찾은 hit보다 뒤인 구간은 무시하므로 탐색 결과가 큐 순서에 좌우되지 않음.
+    while( count > 0 && visited < MAX_INTERVALS )
     {
-        const interval current = queue[first++];
+        const interval current = stack[--count];
+        if( earliest.hit && current.lower >= earliest.fraction ) continue;
         const float middle = current.lower + 0.5f * ( current.upper - current.lower );
         if( middle <= current.lower || middle >= current.upper ) continue;
+        ++visited;
+        if( stats ) ++stats->intervals;
 
         const transform2 inChain = InverseMul( targetTransform,
             GetSweepTransform( movingSweep, middle ) );
@@ -186,36 +207,52 @@ inline chainSweepContact2 FindOwnedChainSweepContact( const chainSegment2& chain
             minFront = std::min( minFront, outward );
             maxFront = std::max( maxFront, outward );
         }
+
         const double travel = 0.5 * speed * ( current.upper - current.lower ) +
             32.0 * std::numeric_limits<float>::epsilon() * ( radius + edgeLength + 1.0 );
         const double extension = movingProxy.radius + SPECULATIVE_DISTANCE + travel;
+        if( maxAxis + extension < 0.0 || minAxis - extension > edgeLength ||
+            minFront - extension > 0.0 || maxFront + extension < 0.0 )
+        {
+            if( stats ) ++stats->pruned;
+            continue;
+        }
 
-        // 속도 상한으로 구간 전체가 선분의 투영 범위나 앞면에서 벗어난
-        // 것이 증명될 때만 건너뜀. 끝점의 무한 연장선 hit은 사용하지 않음.
-        if( maxAxis + extension < 0.0 ||
-            minAxis - extension > edgeLength ||
-            minFront - extension > 0.0 ||
-            maxFront + extension < 0.0 ) continue;
+        // Projection이 겹치더라도 실제 유한 선분과 도형이 멀면 해당 구간
+        // 전체를 거리 변화의 Lipschitz 상한으로 안전하게 제외할 수 있음.
+        distance.transform = inChain;
+        simplexCache2 cache{};
+        const distanceOutput2 separation = ShapeDistance( distance, cache );
+        if( stats ) ++stats->distanceCalls;
+        if( std::isfinite( separation.distance ) &&
+            separation.distance > extension )
+        {
+            if( stats ) ++stats->pruned;
+            continue;
+        }
 
         const chainSweepContact2 contact = manifoldAt( middle );
-        if( contact.hit )
+        if( contact.hit && ( !earliest.hit || contact.fraction < earliest.fraction ) )
         {
-            recovered = contact;
-            break;
+            earliest = contact;
+            lowerBound = current.lower;
         }
-        if( current.depth < 7 && last + 1 < static_cast<int>( queue.size() ) )
-        {
-            queue[last++] = { current.lower, middle, current.depth + 1 };
-            queue[last++] = { middle, current.upper, current.depth + 1 };
-        }
+        else if( !contact.hit && middle < ( earliest.hit ? earliest.fraction : maxFraction ) )
+            lowerBound = std::max( lowerBound, middle );
+
+        if( current.depth == MAX_DEPTH ) continue;
+        if( !contact.hit && ( !earliest.hit || middle < earliest.fraction ) )
+            stack[count++] = { middle, current.upper, current.depth + 1 };
+        stack[count++] = { current.lower, middle, current.depth + 1 };
     }
 
-    if( !recovered.hit ) return {};
+    if( stats ) stats->exhausted = count > 0;
+    if( !earliest.hit ) return {};
 
-    // 첫 인정 접촉에 가까운 fraction으로 좁힘. 반환 normal/point는
-    // 무시된 TOI 값이 아닌 유효한 Chain manifold에서만 가져옴.
-    float lower = afterFraction;
-    float upper = recovered.fraction;
+    // 최초 유효 샘플의 왼쪽 구간 안에서만 경계를 좁힘.
+    // 전체 [afterFraction,hit]에 접촉 여부가 단조롭다고 가정하지 않음.
+    float lower = std::min( lowerBound, earliest.fraction );
+    float upper = earliest.fraction;
     for( int i = 0; i < 24; ++i )
     {
         const float middle = lower + 0.5f * ( upper - lower );
@@ -223,12 +260,13 @@ inline chainSweepContact2 FindOwnedChainSweepContact( const chainSegment2& chain
         const chainSweepContact2 contact = manifoldAt( middle );
         if( contact.hit )
         {
-            recovered = contact;
+            earliest = contact;
             upper = middle;
         }
         else lower = middle;
     }
-    return recovered;
+
+    return earliest;
 }
 
 } // namespace zonai
