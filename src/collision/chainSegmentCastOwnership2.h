@@ -1,6 +1,10 @@
 #pragma once
 
+#include "collision/distance2.h"
 #include "collision/narrowphase/collide.h"
+
+#include <limits>
+#include <variant>
 
 namespace zonai
 {
@@ -28,6 +32,42 @@ inline bool IsChainCircleCastOwned( const chainSegment2& chain, const circle2& c
             return false;
     }
 
+    return true;
+}
+
+
+ // Capsule과 Polygon에는 단일 중심의 Voronoi 판정을 적용하지 않음.
+ // 기존 Chain narrowphase의 adjacency normal 분류/clip을 그대로 사용함.
+ // 이 검사는 실제 ShapeCast/TOI hit 시점에만 수행되므로 일반 도형의
+ // broadphase 순회나 Solver의 contact 생성 경로에는 영향을 주지 않음.
+inline bool IsChainConvexCastOwned( const chainSegment2& chain, const shapeGeometry& geometry,
+    const transform2& movingInChain, bool hasPrevious )
+{
+    if( const circle2* circle = std::get_if<circle2>( &geometry ) )
+        return IsChainCircleCastOwned( chain, *circle, movingInChain, hasPrevious );
+
+    if( const capsule2* capsule = std::get_if<capsule2>( &geometry ) )
+    {
+        // ShapeCast는 매우 짧은 segment core를 거절하지 않으므로
+        // MakeCapsule의 퇴화 edge assert 대신 동등한 원으로 검증함.
+        if( LengthSquared( capsule->center2 - capsule->center1 ) <=
+            std::numeric_limits<float>::epsilon() )
+        {
+            const circle2 circle{ 0.5f * ( capsule->center1 + capsule->center2 ), capsule->radius };
+            return IsChainCircleCastOwned( chain, circle, movingInChain, hasPrevious );
+        }
+
+        simplexCache2 cache{};
+        return CollideChainSegmentCapsule( chain, *capsule, movingInChain, cache ).pointCount > 0;
+    }
+
+    if( const polygon2* polygon = std::get_if<polygon2>( &geometry ) )
+    {
+        simplexCache2 cache{};
+        return CollideChainSegmentPolygon( chain, *polygon, movingInChain, cache ).pointCount > 0;
+    }
+
+    // 일반 양면 Segment는 기존의 Chain front-normal 검사 의미를 유지함.
     return true;
 }
 

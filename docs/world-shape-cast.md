@@ -27,8 +27,9 @@ simulation.castShape( input, queryFilter{},
   Voronoi ownership도 확인하여 접합부의 이웃 edge 중복 hit을 억제한다.
   실제 parent Chain의 이전 edge가 같은 endpoint를 담당하는 경우에는
   이전 edge를 우선하여 중복 판정을 없앤다. 독립 ChainSegment의 ghost만으로
-  이전 edge의 존재를 가정하지 않는다.
-  Capsule·Polygon·Segment 조회의 접합부 상세 ownership은 아직 구현하지 않았다.
+  이전 edge의 존재를 가정하지 않는다. Capsule·Polygon 조회는 hit 자세에서
+  `CollideChainSegmentCapsule` / `CollideChainSegmentPolygon`의 인접 edge 법선
+  분류와 clipping을 확인한다. 일반 Segment의 앞면 검사는 기존 의미를 유지한다.
 - `fraction`은 전체 translation에 대한 0~1 비율이다. 기존 `ShapeCast`의
   LINEAR_SLOP 기반 접촉 허용차 및 끝 fraction 제외 규칙을 유지한다.
 - callback: -1 무시, 0 전체 종료, 반환한 양수 fraction으로 남은 sweep 단축,
@@ -53,6 +54,13 @@ Circle/Capsule/Polygon/Chain, 유효하지 않은 입력을 Release에서도 검
 local offset Circle의 회전 및 뒷면 접근 무시도 Ubuntu·Windows Debug/
 Windows Release에서 확인한다.
 실제 body solver의 contact manifold 동작 자체는 변경하지 않는다.
+
+`worldChainConvexCastOwnershipTests`: Capsule/Box/Triangle을 이동하는 도형으로
+사용해 평탄·오목·볼록 Chain seam, 회전된 정적 지형, 선형/회전 조회,
+로컬 오프셋, 뒷면 접근 및 퇴화 Capsule을 검증한다. 보고된 각 hit fraction에서
+해당 Chain edge의 narrowphase manifold가 실제 존재하는지 독립적으로
+재확인한다. Capsule/Polygon은 하나의 물체가 두 인접 edge에 실제로 동시에
+접촉할 수 있으므로 무조건 callback을 하나로 제한하지 않는다.
 
 
 ## BoxCast를 사용하는 BroadPhase 후보 탐색
@@ -133,8 +141,8 @@ const worldShapeCastResult2 hit = simulation.castShapeSweepClosest( input );
   회전 중 발생하는 일부 glancing contact를 놓칠 수 있으며
   `Failed` 상태는 hit으로 보고하지 않는다. 이 API는 모든 회전 충돌을
   빠짐없이 열거하는 완전한 sweep oracle이 아니다. Chain 고스트 정점
-  ownership은 Circle 도형에 대해서만 검사하며 Capsule/Polygon의
-  완전한 이음새 처리까지 보장하지 않는다.
+  ownership은 Circle 및 Capsule/Polygon의 narrowphase 유효 접촉으로
+  제한한다. TOI가 놓치는 중간 접촉까지 보장하지 않는다.
 - `worldShapeCastTests`에는 중간 회전 충돌, 음의 회전, 회전·이동,
   0 회전 위임, 시작 겹침, 필터/센서, handle 수명, 입력 검증이 포함된다.
 
