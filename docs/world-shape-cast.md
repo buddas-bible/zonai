@@ -25,6 +25,9 @@ simulation.castShape( input, queryFilter{},
   Chain 타깃에는 edge 오른쪽의 앞면 조건을 적용한다. Circle 조회에서는
   hit 시점의 실제 원 중심으로 `CollideChainSegmentCircle`의 ghost-vertex
   Voronoi ownership도 확인하여 접합부의 이웃 edge 중복 hit을 억제한다.
+  실제 parent Chain의 이전 edge가 같은 endpoint를 담당하는 경우에는
+  이전 edge를 우선하여 중복 판정을 없앤다. 독립 ChainSegment의 ghost만으로
+  이전 edge의 존재를 가정하지 않는다.
   Capsule·Polygon·Segment 조회의 접합부 상세 ownership은 아직 구현하지 않았다.
 - `fraction`은 전체 translation에 대한 0~1 비율이다. 기존 `ShapeCast`의
   LINEAR_SLOP 기반 접촉 허용차 및 끝 fraction 제외 규칙을 유지한다.
