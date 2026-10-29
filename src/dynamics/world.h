@@ -717,9 +717,18 @@ public:
         // 별도 계산 실패나 경계 값 불일치 시에는 기존 보수적 전체 원 범위를 유지함.
         aabb2 arcBounds{};
         if( TryComputeRotatingSweepBounds( movingProxy, input.transform, endPosition,
-            endRotation, input.rotationRadians, arcBounds ) &&
-            ContainsAABB( sweptBounds, arcBounds ) )
-            sweptBounds = arcBounds;
+            endRotation, input.rotationRadians, arcBounds ) )
+        {
+            // 두 보수적 경계의 교집합도 보수적임. arc의 float 여유 때문에
+            // 원 경계를 조금 넘는 경우에도 더 좁은 부분만 사용할 수 있음.
+            const aabb2 reduced{
+                { std::max( sweptBounds.min.x, arcBounds.min.x ),
+                  std::max( sweptBounds.min.y, arcBounds.min.y ) },
+                { std::min( sweptBounds.max.x, arcBounds.max.x ),
+                  std::min( sweptBounds.max.y, arcBounds.max.y ) }
+            };
+            if( IsValidAABB( reduced ) ) sweptBounds = reduced;
+        }
 
         const sweep2 movingSweep{
             {}, input.transform.position, endPosition, input.transform.rotation, endRotation

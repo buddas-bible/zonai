@@ -418,8 +418,8 @@ World의 회전 ShapeCast는 각 도형의 proxy support 점과 radius가 모두
 - 축별 범위는 서로 다른 시각의 극값을 조합한 상한이며, 실제 이동 도형의
   경계를 넘어서 안쪽으로 잘라내지 않는다. float 연산 오차 여유와
   `nextafter`를 추가한다.
-- 새 계산이 실패하거나 기존 외접 원 AABB 안에 완전히 포함되지 않으면
-  기존 범위를 그대로 사용한다. GJK/TOI, callback, Filter, Chain 처리는 변경하지 않는다.
+- 새 계산이 실패하면 기존 외접 원 AABB를 사용한다. 계산에 성공하면
+  두 보수적 AABB의 교집합을 사용하여 원호 경계 여유로 확대된 부분도 안전하게 줄인다. GJK/TOI, callback, Filter, Chain 처리는 변경하지 않는다.
 - 420개 고정 난수 원·캡슐·상자에 대해 시작 각도, 회전 방향, 병진,
   local offset을 변경한 뒤 sweep당 257개 pose가 모두 새 AABB 안에 있는지 검증한다.
   단일 회전의 반대 사분면 후보 제외 및 양방향 실제 World hit도 별도로 검사한다.
