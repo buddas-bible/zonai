@@ -578,6 +578,10 @@ add_executable(worldRotatingCapsulePolygonOracleTests dynamics/world_shape_sweep
 target_link_libraries(worldRotatingCapsulePolygonOracleTests PRIVATE zonai::zonai)
 add_test(NAME worldRotatingCapsulePolygonOracleTests COMMAND worldRotatingCapsulePolygonOracleTests --strict)
 
+add_executable(worldChainRotatingConvexOracleTests dynamics/world_chain_rotating_convex_oracle_test.cpp)
+target_link_libraries(worldChainRotatingConvexOracleTests PRIVATE zonai::zonai)
+add_test(NAME worldChainRotatingConvexOracleTests COMMAND worldChainRotatingConvexOracleTests --strict)
+
 add_executable(contactCacheTests dynamics/contact_cache_test.cpp)
 target_link_libraries(contactCacheTests PRIVATE zonai::zonai)
 add_test(NAME contactCacheTests COMMAND contactCacheTests)
