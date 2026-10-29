@@ -218,6 +218,119 @@ void checkSegmentsAndInvalidInputs()
     simulation.DestroyShape( coincident );
 }
 
+
+void checkPointOverlap()
+{
+    world simulation{};
+    const bodyId fixed = simulation.CreateBody( bodyType::Static );
+    const shapeId circle = simulation.CreateShape( fixed, circle2{ {}, 1.0f } );
+    // AABB 후보에 포함되더라도 면적이 없는 선분/Chain은 점 안쪽 판정이 없음.
+    ( void )simulation.CreateShape( fixed, segment2{ { -2.0f, 0.0f }, { 2.0f, 0.0f } } );
+    ( void )simulation.CreateShape( fixed, chainSegment2{
+        { -3.0f, 0.0f }, { { -2.0f, 0.0f }, { 2.0f, 0.0f } }, { 3.0f, 0.0f } } );
+
+    const bodyId moving = simulation.CreateBody( bodyType::Dynamic,
+        { { 3.0f, 0.0f }, rot2::FromRadians( 0.78539816339f ) } );
+    const shapeId polygon = simulation.CreateShape( moving, MakeBox( { 1.0f, 0.4f } ) );
+    const bodyId kinematic = simulation.CreateBody( bodyType::Kinematic, { { 6.0f, 0.0f }, {} } );
+    const shapeId sensor = simulation.CreateSensorShape( kinematic,
+        capsule2{ { -0.5f, 0.0f }, { 0.5f, 0.0f }, 0.25f } );
+
+    const auto at = [&]( vec2 point, queryFilter filter = {} )
+    {
+        std::vector<shapeId> result;
+        simulation.overlapPoint( point, filter,
+            [&]( shapeId id )
+            {
+                check( simulation.IsValid( id ), "OverlapPoint must return live shape handles" );
+                result.push_back( id );
+                return true;
+            } );
+        return result;
+    };
+
+    check( at( { 0.0f, 0.0f } ) == std::vector<shapeId>{ circle },
+        "Point inside circle must ignore coincident zero-area Segment and Chain" );
+    check( at( { 0.95f, 0.95f } ).empty(),
+        "OverlapPoint must reject a circle AABB corner outside the actual geometry" );
+
+    const vec2 insideBox = TransformPoint( simulation.GetBodyTransform( moving ), { 0.9f, 0.0f } );
+    check( at( insideBox ) == std::vector<shapeId>{ polygon },
+        "OverlapPoint must transform rotated Dynamic polygon into local space" );
+    check( at( { 3.8f, 0.0f } ).empty(),
+        "OverlapPoint must reject a point inside the rotated polygon AABB but outside its face" );
+    check( at( { 6.0f, 0.0f } ) == std::vector<shapeId>{ sensor },
+        "OverlapPoint must include Kinematic sensors" );
+    check( at( { 6.0f, 0.26f } ).empty(),
+        "OverlapPoint must reject points just outside Capsule radius" );
+
+    const bodyId second = simulation.CreateBody( bodyType::Dynamic );
+    const shapeId overlap = simulation.CreateShape( second, circle2{ {}, 0.3f } );
+    const auto both = at( { 0.0f, 0.0f } );
+    check( both.size() == 2 && std::count( both.begin(), both.end(), circle ) == 1 &&
+        std::count( both.begin(), both.end(), overlap ) == 1,
+        "Point overlap must visit overlapping shapes in different Body trees exactly once" );
+
+    int count = 0;
+    simulation.overlapPoint( { 0.0f, 0.0f }, [&]( shapeId )
+    {
+        ++count;
+        return false;
+    } );
+    check( count == 1, "OverlapPoint callback false must stop querying all Body trees" );
+
+    const world& readonly = simulation;
+    int moveOnlyCalls = 0;
+    readonly.overlapPoint( { 6.0f, 0.0f },
+        [guard = std::make_unique<int>( 0 ), &moveOnlyCalls]( shapeId ) mutable
+        {
+            ++*guard;
+            ++moveOnlyCalls;
+            return true;
+        } );
+    check( moveOnlyCalls == 1, "Const World point query accepts a move-only callback" );
+
+    const float invalid = std::numeric_limits<float>::quiet_NaN();
+    simulation.overlapPoint( { invalid, 0.0f }, []( shapeId )
+    {
+        check( false, "Nonfinite query point must not call callback" );
+        return true;
+    } );
+
+    simulation.SetBodyTransform( moving, { { 10.0f, 0.0f }, {} } );
+    check( at( insideBox ).empty(), "Moving a Body must immediately update its point query candidates" );
+    simulation.DestroyBody( kinematic );
+    check( at( { 6.0f, 0.0f } ).empty(), "Destroyed sensor Body must disappear from point overlap" );
+    simulation.DestroyShape( overlap );
+    check( at( { 0.0f, 0.0f } ) == std::vector<shapeId>{ circle },
+        "Destroyed Dynamic shape must immediately disappear from point overlap" );
+
+    world filtered{};
+    const bodyId owner = filtered.CreateBody();
+    const shapeId accepted = filtered.CreateShape( owner, circle2{ {}, 1.0f }, collisionFilter{ 2, 4, -3 } );
+    ( void )filtered.CreateShape( owner, circle2{ {}, 1.0f }, collisionFilter{ 8, 4, -3 } );
+    ( void )filtered.CreateShape( owner, circle2{ {}, 1.0f }, collisionFilter{ 2, 0, -3 } );
+    collisionMatrix matrix{};
+    matrix.setPair( 2, 4, false );
+    filtered.setCollisionMatrix( matrix );
+
+    std::vector<shapeId> filteredHits;
+    filtered.overlapPoint( {}, queryFilter{ 4, 2 }, [&]( shapeId id )
+    {
+        filteredHits.push_back( id );
+        return true;
+    } );
+    check( filteredHits == std::vector<shapeId>{ accepted },
+        "OverlapPoint applies reciprocal category/mask, not groupIndex or collisionMatrix" );
+    int defaultHits = 0;
+    filtered.overlapPoint( {}, [&]( shapeId )
+    {
+        ++defaultHits;
+        return true;
+    } );
+    check( defaultHits == 0, "Default point QueryFilter must be checked against target mask" );
+}
+
 } // namespace
 
 int main()
@@ -226,4 +339,5 @@ int main()
     checkBodyTypesAndSensors();
     checkFilters();
     checkSegmentsAndInvalidInputs();
+    checkPointOverlap();
 }

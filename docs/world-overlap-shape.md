@@ -35,3 +35,30 @@ simulation.overlapShape( capsule2{ { -1.0f, 0.0f }, { 1.0f, 0.0f }, 0.3f },
 `worldOverlapShapeTests`: AABB-only 거짓 양성, 접선 원, 회전된 Body의 원·다각형,
 캡슐 질의, 체인·세그먼트, 필터·센서, 3 Body Tree, 콜백 중단, 수명과 invalid input을
 Debug/Release에서 검사한다.
+
+## World OverlapPoint
+
+`world::overlapPoint( point, queryFilter, callback )`는 기존 DynamicTree의
+zero-extent AABB로 후보를 찾고, `world::testShapePoint`로 실제 포함 여부를
+다시 확인한다. 별도의 GJK나 신규 geometry 판정 로직을 만들지 않는다.
+
+```cpp
+simulation.overlapPoint( { 2.0f, 1.0f }, queryFilter{},
+    [&]( shapeId id )
+    {
+        // 점을 실제로 포함하는 활성 Shape만 전달된다.
+        return true;
+    } );
+```
+
+- Circle, Capsule, Polygon은 각 도형의 기존 점 포함 규칙을 따른다.
+  **면적이 없는 Segment/ChainSegment는 반환하지 않는다.**
+  선분과의 거리 접촉까지 필요한 경우에는 위 `overlapShape`를 사용한다.
+- Static/Dynamic/Kinematic, Sensor, category/mask 필터, callback 조기 종료,
+  반환 순서 미보장과 조회 도중 World 변경 금지는 기존 공간 조회와 동일하다.
+- 유한하지 않은 좌표는 결과 없이 종료한다. Destroy/Enable/Body transform 변경은
+  Tree의 현재 상태를 반영한다. 한 점에서 겹치는 Shape의 반환 순서는 정해지지
+  않으므로 Sandbox에서 화면 앞쪽 우선순위를 보존하려면 별도 정렬이 필요하다.
+
+`worldOverlapShapeTests`에 점의 실제 포함/AABB 거짓 양성, 회전 Polygon,
+세 Body Tree, Sensor, 필터, 조기 종료, 이동/파괴 및 NaN 입력 회귀를 추가했다.
