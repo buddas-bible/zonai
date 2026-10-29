@@ -1530,6 +1530,20 @@ bool world::AreShapeContactEventsEnabled( shapeId shapeId ) const
     return shapes_[index].enableContactEvents;
 }
 
+void world::setShapeHitEventsEnabled( shapeId id, bool enabled )
+{
+    const std::int32_t shapeIndex = GetShapeIndex( id );
+
+    shapes_[shapeIndex].enableHitEvents = enabled;
+}
+
+bool world::areShapeHitEventsEnabled( shapeId id ) const
+{
+    const std::int32_t shapeIndex = GetShapeIndex( id );
+
+    return shapes_[shapeIndex].enableHitEvents;
+}
+
 void world::SetShapeSensorEventsEnabled( shapeId shapeId, bool enabled )
 {
     const std::int32_t shapeIndex = GetShapeIndex( shapeId );
@@ -2081,6 +2095,14 @@ float world::GetContactRecycleDistance() const noexcept
     return contactRecycleDistance_;
 }
 
+void world::setContactHitSpeedThreshold( float speed )
+{
+    assert( std::isfinite( speed ) );
+    assert( speed >= 0.0f );
+
+    contactHitSpeedThreshold_ = speed;
+}
+
 #pragma endregion WorldSettings
 
 #pragma region ForcesAndImpulses
@@ -2301,6 +2323,9 @@ void world::Step( float timeStep, int subStepCount )
 
     assert( bodySims_.size() == bodies_.size() );
     assert( bodyStates_.size() == bodies_.size() );
+
+    // 새 Hit는 이번 Solver가 만든 임펄스에서만 추출하며 Step(0)은 보고하지 않음.
+    std::vector<contactHitEvent2> candidateHitEvents;
 
     // fast / TOI 표시는 현재 Step에서 다시 계산하는 transient 상태임.
     for( bodySim& sim : bodySims_ )
@@ -2725,6 +2750,43 @@ void world::Step( float timeStep, int subStepCount )
 
         StoreContactConstraintImpulses( contactConstraints );
 
+        // Contact별 가장 큰 실제 접근 속도를 가진 접점 하나만 보고함.
+        // normal impulse와 종전 접근 속도가 모두 있어야 하므로 resting/warm-only contact는 제외함.
+        for( const contactConstraint2& constraint : contactConstraints )
+        {
+            const contact2& contact = contacts_[constraint.contactId];
+            const shape& shapeA = shapes_[contact.shapeIdA];
+            const shape& shapeB = shapes_[contact.shapeIdB];
+
+            if( !shapeA.enableHitEvents && !shapeB.enableHitEvents ) continue;
+
+            const contactConstraintPoint2* strongest = nullptr;
+            for( int i = 0; i < constraint.pointCount; ++i )
+            {
+                const contactConstraintPoint2& point = constraint.points[i];
+                if( point.normalImpulse <= 0.0f ||
+                    -point.relativeNormalVelocity <= contactHitSpeedThreshold_ ) continue;
+
+                if( strongest == nullptr || point.relativeNormalVelocity < strongest->relativeNormalVelocity )
+                    strongest = &point;
+            }
+
+            if( strongest == nullptr ) continue;
+
+            const bodySim& simA = bodySims_[constraint.bodyIdA];
+            const bodyState& stateA = bodyStates_[constraint.bodyIdA];
+
+            // Contact 준비 시점의 COM-relative anchor를 누적 delta transform으로 이동함.
+            const vec2 worldPoint = simA.center + stateA.deltaPosition +
+                Rotate( stateA.deltaRotation, strongest->anchorA );
+            const vec2 worldNormal = Rotate( stateA.deltaRotation, constraint.normal );
+
+            candidateHitEvents.push_back( {
+                MakeContactId( constraint.contactId ), MakeShapeId( contact.shapeIdA ),
+                MakeShapeId( contact.shapeIdB ), worldPoint, worldNormal,
+                -strongest->relativeNormalVelocity, strongest->normalImpulse } );
+        }
+
         // -----------------------------------------------------
         // 9. Commit island position deltas
         // -----------------------------------------------------
@@ -2773,6 +2835,19 @@ void world::Step( float timeStep, int subStepCount )
         []( const contactData& )
         {
         } );
+
+    // Solver에서 실제 임펄스를 만든 hit라도 마지막 manifold가 speculative-only이면 보고하지 않음.
+    // CCD/최종 contact refresh 이후에도 살아 있고 실제 touching한 Contact만 공개함.
+    contactHitEvents_.clear();
+    for( const contactHitEvent2& event : candidateHitEvents )
+    {
+        if( !IsValid( event.contact ) ) continue;
+
+        const std::int32_t contactIndex = event.contact.index1 - 1;
+        if( !IsTouchingManifold( contactSims_[contactIndex].manifold ) ) continue;
+
+        contactHitEvents_.push_back( event );
+    }
 
     // Contact Begin/End는 마지막 collision update의 실제 접촉 상태만 보고함.
     updateContactEvents();

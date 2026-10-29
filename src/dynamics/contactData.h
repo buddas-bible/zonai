@@ -21,6 +21,18 @@ struct contactEndEvent2
     shapeId shapeB{};
 };
 
+// Solver가 실제 충돌을 처리한 접점 중 접근 속도가 가장 큰 지점의 snapshot.
+struct contactHitEvent2
+{
+    contactId contact{};
+    shapeId shapeA{};
+    shapeId shapeB{};
+    vec2 point{};
+    vec2 normal{};
+    float approachSpeed = 0.0f;
+    float normalImpulse = 0.0f;
+};
+
 struct contactData
 {
     contactId id{};
