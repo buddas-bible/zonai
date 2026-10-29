@@ -15,6 +15,7 @@
 #include "collision/broadphase/broadPhase.h"
 #include "collision/constants.h"
 #include "collision/distance2.h"
+#include "collision/chainSegmentCastOwnership2.h"
 #include "collision/rayCast2.h"
 #include "collision/shapeCast2.h"
 #include "collision/rotatingSweepBounds2.h"
@@ -592,6 +593,20 @@ public:
 
                     if( const chainSegment2* chain = std::get_if<chainSegment2>( &candidate.geometry ) )
                     {
+                        // 원의 seam ownership은 World 조회에서도 narrowphase의 ghost Voronoi
+                        // 규칙을 사용함. 단순 front-normal 검사만 하면 인접 edge가 중복 hit됨.
+                        if( const circle2* circle = std::get_if<circle2>( &input.geometry ) )
+                        {
+                            transform2 circleInChain = cast.transform;
+                            circleInChain.position += hit.fraction * cast.translationB;
+                            const bool hasPrevious =
+                                candidate.parentChainId != shape::NULL_INDEX &&
+                                ( chains_[candidate.parentChainId].isLoop ||
+                                  chains_[candidate.parentChainId].shapeIds.front() != shapeIndex );
+                            if( !IsChainCircleCastOwned( *chain, *circle, circleInChain, hasPrevious ) )
+                                return -1.0f;
+                        }
+
                         // Chain은 edge의 오른쪽만 앞면. 겹침의 zero normal에는 중심의 초기 측면을 사용함.
                         const vec2 edge = chain->segment.b - chain->segment.a;
                         const vec2 front = Normalize( vec2{ edge.y, -edge.x } );
@@ -965,6 +980,20 @@ public:
 
                 if( const chainSegment2* chain = std::get_if<chainSegment2>( &candidate.geometry ) )
                 {
+                    // 회전 중 local offset이 있는 원도 실제 TOI 시각의 자세로 소유권을
+                    // 검사함. normal만 검사하면 Chain joint에서 ghost endpoint가 보고됨.
+                    if( const circle2* circle = std::get_if<circle2>( &input.geometry ) )
+                    {
+                        const transform2 circleAtHit = GetSweepTransform( movingSweep, hit.fraction );
+                        const transform2 circleInChain = InverseMul( targetTransform, circleAtHit );
+                        const bool hasPrevious =
+                            candidate.parentChainId != shape::NULL_INDEX &&
+                            ( chains_[candidate.parentChainId].isLoop ||
+                              chains_[candidate.parentChainId].shapeIds.front() != shapeIndex );
+                        if( !IsChainCircleCastOwned( *chain, *circle, circleInChain, hasPrevious ) )
+                            return true;
+                    }
+
                     const vec2 edge = chain->segment.b - chain->segment.a;
                     const vec2 front = Rotate( targetTransform.rotation, Normalize( vec2{ edge.y, -edge.x } ) );
 
