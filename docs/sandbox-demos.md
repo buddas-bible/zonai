@@ -38,3 +38,21 @@
 한 프로그램에 데모별 조작·설정·관찰값을 추가하는 물리 학습 공간이 장기 목표다. Mouse Joint와 필요한 picking, [Distance spring](distance-spring.md)/[limit](distance-limit.md)/[motor](distance-motor.md), [기본 회전축](revolute-joint.md)/[각도 제한](revolute-limit.md)/[회전 모터](revolute-motor.md), [기본 Wheel 서스펜션](wheel-joint.md)/[이동 제한](wheel-limit.md)/[회전 모터](wheel-motor.md)를 추가했다. 진자는 거리 축, 막대는 회전축/모터, ‘서스펜션과 바퀴’는 축 이동·주파수/감쇠·경계 반력·구동/역회전/제동을 비교한다. [자동차](motor-car.md)는 두 바퀴의 제약과 바닥 마찰을 조합했다. 다음은 관절 제한 렉돌이며, 필요한 Joint와 함께 ragdoll·motor 자동차·조나이 선풍기/연결 장치로 조합한다.
 
 천·유체·soft body·voxel physics/destruction/terrain·다양한 terrain collision·오목한 object/terrain·파괴 조각의 rigid body simulation도 같은 프로그램의 데모로 학습하고 싶다는 사용자 목표를 보존한다. 각 기능의 solver/data와 2D/3D 범위는 해당 구현 단계에서 정한다. Voxel은 파괴 → 조각 분리 → collision/mass 생성 → rigid body simulation을 단계별로 확인한다. 이 목록은 해당 기능의 현재 구현 완료를 의미하지 않는다.
+
+## Sandbox 마우스 점 조회
+
+마우스 왼쪽 클릭의 Shape 선택은 `world::overlapPoint`로 실제 내부에 있는
+Shape 후보를 구한 뒤, 기존 `shapes_` 화면 배치 역순으로 선택한다.
+Tree 순회 순서는 화면상 앞뒤 순서가 아니므로 선택 우선순위에 사용하지 않는다.
+Static/Kinematic과 Sensor는 기존처럼 잡을 수 없다.
+
+Inspector에서 설정한 충돌 category/mask와 무관하게 선택할 수 있도록
+World 조회에는 모든 64비트 category/mask를 사용한다. 두 값 중 하나가
+0이라 일반 QueryFilter로 찾을 수 없는 Shape만 기존 `testShapePoint`
+직접 판정을 적용한다. 클릭 판정은 충돌 허용 여부와 별개다.
+이렇게 하면 도형 점 판정 호출을 대부분의 장면에서 Tree 후보로 제한하고
+기존 드래그 규칙을 보존한다.
+
+`sandboxDemoTests`는 겹친 동적 도형의 마지막 그리기 우선순위,
+category/mask 0과 최상위 비트, 삭제/이동 이후 재선택,
+Static 클릭 무시 및 Mouse Joint 취소 수명을 검사한다.
