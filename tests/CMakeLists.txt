@@ -592,7 +592,7 @@ add_test(NAME worldChainRetryTemporalTests COMMAND worldChainRetryTemporalTests)
 
 add_executable(worldChainRetryStressTests dynamics/world_chain_retry_stress_test.cpp)
 target_link_libraries(worldChainRetryStressTests PRIVATE zonai::zonai)
-add_test(NAME worldChainRetryStressTests COMMAND worldChainRetryStressTests)
+add_test(NAME worldChainRetryStressTests COMMAND worldChainRetryStressTests --strict)
 
 add_executable(contactCacheTests dynamics/contact_cache_test.cpp)
 target_link_libraries(contactCacheTests PRIVATE zonai::zonai)
