@@ -6,7 +6,7 @@ Box2D의 알고리즘과 설계 근거를 이해하며 C++20으로 구현하는 
 
 ## 바람 / 유체 속도장
 
-2D MAC 격자에 Semi-Lagrangian 이류와 압력 투영을 구현한 독립적인 `fluidField2`를 추가했다. Sandbox의 **유체 / 2D 바람·유체 속도장**에서 흐름을 시각화하고 기존 Dynamic Body에 국소 바람 힘을 전달한다. Part 2에서는 원형 강체 점유 셀과 moving no-through 경계, 압력 반력 및 drag의 근사 역방향 주입을 추가했다. 정확한 운동량 보존, 일반 강체 장애물, 자유 수면은 아직 후속 범위다. [수학·한계·검증](docs/fluid-field.md).
+2D MAC 격자에 Semi-Lagrangian 이류와 압력 투영을 구현한 독립적인 `fluidField2`를 추가했다. Sandbox의 **유체 / 2D 바람·유체 속도장**에서 흐름을 시각화하고 기존 Dynamic Body에 국소 바람 힘을 전달한다. Part 2에서는 원형 강체 점유 셀과 moving no-through 경계, 압력 반력 및 drag의 근사 역방향 주입을 추가했다. Part 3에서는 같은 solver로 캡슐과 회전된 볼록 다각형의 점유 셀과 압력 반력을 지원한다. 정확한 운동량 보존, 일반 강체 장애물, 자유 수면은 아직 후속 범위다. [수학·한계·검증](docs/fluid-field.md).
 
 ## 빌드와 테스트
 
