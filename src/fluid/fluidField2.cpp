@@ -111,6 +111,11 @@ fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
     v_.resize( static_cast<std::size_t>( width ) * ( height + 1 ) );
     nextU_.resize( u_.size() );
     nextV_.resize( v_.size() );
+    tracerMass_.assign( static_cast<std::size_t>( width ) * height, 0.0 );
+    nextTracerMass_.resize( tracerMass_.size() );
+    tracerOutgoing_.resize( tracerMass_.size() );
+    tracerUFlux_.resize( u_.size() );
+    tracerVFlux_.resize( v_.size() );
     pressure_.resize( static_cast<std::size_t>( width ) * height );
     nextPressure_.resize( pressure_.size() );
     divergence_.resize( pressure_.size() );
@@ -146,6 +151,13 @@ void fluidField2::clear() noexcept
     std::fill( v_.begin(), v_.end(), 0.0f );
     std::fill( nextU_.begin(), nextU_.end(), 0.0f );
     std::fill( nextV_.begin(), nextV_.end(), 0.0f );
+    std::fill( tracerMass_.begin(), tracerMass_.end(), 0.0 );
+    std::fill( nextTracerMass_.begin(), nextTracerMass_.end(), 0.0 );
+    std::fill( tracerOutgoing_.begin(), tracerOutgoing_.end(), 0.0 );
+    std::fill( tracerUFlux_.begin(), tracerUFlux_.end(), 0.0 );
+    std::fill( tracerVFlux_.begin(), tracerVFlux_.end(), 0.0 );
+    tracerEnabled_ = false;
+    tracerStats_ = {};
     std::fill( pressure_.begin(), pressure_.end(), 0.0f );
     std::fill( nextPressure_.begin(), nextPressure_.end(), 0.0f );
     std::fill( divergence_.begin(), divergence_.end(), 0.0f );
@@ -184,6 +196,40 @@ void fluidField2::clear() noexcept
     advectionStats_ = {};
     pressureMomentum_ = {};
     stepMomentum_ = {};
+}
+
+float fluidField2::tracerCellFraction( int x, int y ) const noexcept
+{
+    if( x < 0 || x >= width_ || y < 0 || y >= height_ ) return 0.0f;
+    return cutCellProjectionEnabled_ ? cellFluidFraction_[cellIndex( x, y )] :
+        ( isSolidCell( x, y ) ? 0.0f : 1.0f );
+}
+
+void fluidField2::setTracerConcentration( int x, int y, float concentration ) noexcept
+{
+    if( !std::isfinite( concentration ) || concentration < 0.0f ||
+        x < 0 || x >= width_ || y < 0 || y >= height_ ) return;
+    const float fraction = tracerCellFraction( x, y );
+    if( fraction <= 0.0f && concentration > 0.0f ) return;
+    const double mass = static_cast<double>( concentration ) * cellSize_ * cellSize_ * fraction;
+    if( !std::isfinite( mass ) ) return;
+    tracerMass_[cellIndex( x, y )] = mass;
+    tracerEnabled_ = true;
+}
+
+float fluidField2::getTracerConcentration( int x, int y ) const noexcept
+{
+    const float fraction = tracerCellFraction( x, y );
+    if( fraction <= 0.0f ) return 0.0f;
+    return static_cast<float>( tracerMass_[cellIndex( x, y )] /
+        ( static_cast<double>( cellSize_ ) * cellSize_ * fraction ) );
+}
+
+float fluidField2::getTracerMass() const noexcept
+{
+    double mass = 0.0;
+    for( const double value : tracerMass_ ) mass += value;
+    return static_cast<float>( mass );
 }
 
 vec2 fluidField2::getCellCenter( int x, int y ) const noexcept
@@ -791,6 +837,113 @@ void fluidField2::advectConservative( float timeStep )
     }
 }
 
+
+void fluidField2::transportTracer( float timeStep )
+{
+    tracerStats_ = {};
+    if( !tracerEnabled_ ) return;
+
+    tracerStats_.beforeMass = getTracerMass();
+    const double area = static_cast<double>( cellSize_ ) * cellSize_;
+    double maxSpeed = 0.0;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+            if( advectionUOpen( x, y ) > 0.0f )
+                maxSpeed = std::max( maxSpeed, static_cast<double>( std::abs( u_[uIndex( x, y )] ) ) );
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+            if( advectionVOpen( x, y ) > 0.0f )
+                maxSpeed = std::max( maxSpeed, static_cast<double>( std::abs( v_[vIndex( x, y )] ) ) );
+
+    const double cfl = maxSpeed * timeStep / cellSize_;
+    constexpr int maxSubsteps = 64;
+    const int substeps = static_cast<int>( std::clamp( std::ceil( cfl / 0.45 ), 1.0,
+        static_cast<double>( maxSubsteps ) ) );
+    tracerStats_.maxCfl = static_cast<float>( cfl );
+    tracerStats_.substeps = substeps;
+    tracerStats_.cflLimited = cfl > maxSubsteps * 0.45;
+    const double lengthTime = static_cast<double>( timeStep ) * cellSize_ / substeps;
+
+    // 셀 tracer 질량 = 농도 * 현재 유체 비율 * h². 각 공유 MAC 면의
+    // signed upwind 유량은 딱 한 번 계산하고, donor에서만 질량을 뺀다.
+    // 출구가 여럿일 때 동시 유출량을 donor 질량으로 제한해 음수를 방지한다.
+    for( int substep = 0; substep < substeps; ++substep )
+    {
+        std::fill( tracerOutgoing_.begin(), tracerOutgoing_.end(), 0.0 );
+        std::fill( tracerUFlux_.begin(), tracerUFlux_.end(), 0.0 );
+        std::fill( tracerVFlux_.begin(), tracerVFlux_.end(), 0.0 );
+        for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x )
+            {
+                const float open = advectionUOpen( x, y );
+                if( open <= 0.0f ) continue;
+                const int left = cellIndex( x - 1, y );
+                const int right = cellIndex( x, y );
+                const double velocity = u_[uIndex( x, y )];
+                const int donor = velocity >= 0.0 ? left : right;
+                const float fraction = tracerCellFraction( velocity >= 0.0 ? x - 1 : x, y );
+                if( fraction <= 0.0f ) continue;
+                const double concentration = tracerMass_[donor] / ( area * fraction );
+                const double flux = velocity * open * lengthTime * concentration;
+                tracerUFlux_[uIndex( x, y )] = flux;
+                tracerOutgoing_[donor] += std::abs( flux );
+            }
+        for( int y = 1; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+            {
+                const float open = advectionVOpen( x, y );
+                if( open <= 0.0f ) continue;
+                const int bottom = cellIndex( x, y - 1 );
+                const int top = cellIndex( x, y );
+                const double velocity = v_[vIndex( x, y )];
+                const int donor = velocity >= 0.0 ? bottom : top;
+                const float fraction = tracerCellFraction( x, velocity >= 0.0 ? y - 1 : y );
+                if( fraction <= 0.0f ) continue;
+                const double concentration = tracerMass_[donor] / ( area * fraction );
+                const double flux = velocity * open * lengthTime * concentration;
+                tracerVFlux_[vIndex( x, y )] = flux;
+                tracerOutgoing_[donor] += std::abs( flux );
+            }
+
+        std::copy( tracerMass_.begin(), tracerMass_.end(), nextTracerMass_.begin() );
+        const auto limitedFlux = [&]( double flux, int donor )
+        {
+            const double outgoing = tracerOutgoing_[donor];
+            return outgoing > tracerMass_[donor] && outgoing > 0.0
+                ? flux * ( tracerMass_[donor] / outgoing ) : flux;
+        };
+        for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x )
+            {
+                const int left = cellIndex( x - 1, y );
+                const int right = cellIndex( x, y );
+                const double flux = tracerUFlux_[uIndex( x, y )];
+                const double transfer = limitedFlux( flux, flux >= 0.0 ? left : right );
+                nextTracerMass_[left] -= transfer;
+                nextTracerMass_[right] += transfer;
+            }
+        for( int y = 1; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+            {
+                const int bottom = cellIndex( x, y - 1 );
+                const int top = cellIndex( x, y );
+                const double flux = tracerVFlux_[vIndex( x, y )];
+                const double transfer = limitedFlux( flux, flux >= 0.0 ? bottom : top );
+                nextTracerMass_[bottom] -= transfer;
+                nextTracerMass_[top] += transfer;
+            }
+        tracerMass_.swap( nextTracerMass_ );
+    }
+
+    double trapped = 0.0;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+            if( tracerCellFraction( x, y ) <= 0.0f )
+                trapped += tracerMass_[cellIndex( x, y )];
+    tracerStats_.trappedMass = static_cast<float>( trapped );
+    tracerStats_.afterMass = getTracerMass();
+}
+
 void fluidField2::step( float timeStep, std::span<const fluidCircleObstacle2> obstacles,
     std::span<fluidObstacleForce2> feedback, int pressureIterations )
 {
@@ -868,6 +1021,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
     }
     stepMomentum_.afterPressure = getFluidMomentum();
+    transportTracer( timeStep );
     previousObstacles_.assign( obstacles.begin(), obstacles.end() );
 }
 
