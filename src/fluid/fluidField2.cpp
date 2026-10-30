@@ -61,7 +61,8 @@ bool HasSameFluidGeometry( const shapeGeometry& a, const shapeGeometry& b )
     if( const auto* lhs = std::get_if<polygon2>( &a ) )
     {
         const auto& rhs = std::get<polygon2>( b );
-        if( lhs->vertexCount != rhs.vertexCount || lhs->radius != rhs.radius ) return false;
+        if( lhs->vertexCount != rhs.vertexCount || lhs->radius != rhs.radius ||
+            lhs->vertexCount < 2 || lhs->vertexCount > static_cast<int>( MAX_POLYGON_VERTICES ) ) return false;
         for( int i = 0; i < lhs->vertexCount; ++i )
             if( lhs->vertices[i].x != rhs.vertices[i].x || lhs->vertices[i].y != rhs.vertices[i].y ||
                 lhs->normals[i].x != rhs.normals[i].x || lhs->normals[i].y != rhs.normals[i].y )
@@ -79,6 +80,8 @@ float FluidGeometryRadius( const shapeGeometry& geometry )
         return std::max( Length( capsule->center1 ), Length( capsule->center2 ) ) + capsule->radius;
     if( const auto* polygon = std::get_if<polygon2>( &geometry ) )
     {
+        if( polygon->vertexCount < 2 || polygon->vertexCount > static_cast<int>( MAX_POLYGON_VERTICES ) )
+            return std::numeric_limits<float>::quiet_NaN();
         float radius = polygon->radius;
         for( int i = 0; i < polygon->vertexCount; ++i )
             radius = std::max( radius, Length( polygon->vertices[i] ) + polygon->radius );
