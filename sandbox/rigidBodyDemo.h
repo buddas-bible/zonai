@@ -253,11 +253,11 @@ public:
     [[nodiscard]] bool getRagdollSelfCollision() const;
     void applyPogoJointPreset( pogoJointDemoPreset preset );
     void setWindSourceStrength( float strength );
-    void setWindDragRate( float rate );
+    void setWindDragCoefficient( float rate );
     void setWindSourceEnabled( bool enabled ) noexcept { windSourceEnabled_ = enabled; }
     void resetWindFlow();
     [[nodiscard]] float getWindSourceStrength() const noexcept { return windSourceStrength_; }
-    [[nodiscard]] float getWindDragRate() const noexcept { return windDragRate_; }
+    [[nodiscard]] float getWindDragCoefficient() const noexcept { return windDragCoefficient_; }
     [[nodiscard]] bool isWindSourceEnabled() const noexcept { return windSourceEnabled_; }
 #pragma endregion Settings
 
@@ -472,7 +472,7 @@ private:
     std::vector<contactEventTrace2> contactEventTraces_;
     std::optional<fluidField2> windField_{};
     float windSourceStrength_ = 6.0f;
-    float windDragRate_ = 3.0f;
+    float windDragCoefficient_ = 3.0f;
     float windTime_ = 0.0f;
     bool windSourceEnabled_ = true;
 
