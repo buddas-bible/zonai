@@ -264,6 +264,16 @@ public:
     {
         return windField_ && windField_->isCutCellProjectionEnabled();
     }
+    void setWindConservativeAdvectionEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setConservativeAdvectionEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindConservativeAdvectionEnabled() const noexcept
+    {
+        return windField_ && windField_->isConservativeAdvectionEnabled();
+    }
+    void addWindVortex();
+    void beginWindAdvectionTrial();
     void resetWindFlow();
     [[nodiscard]] float getWindSourceStrength() const noexcept { return windSourceStrength_; }
     [[nodiscard]] float getWindDragCoefficient() const noexcept { return windDragCoefficient_; }
