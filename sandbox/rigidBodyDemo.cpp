@@ -232,7 +232,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
             if( !world_.IsValid( visual.bodyHandle ) || world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
             const vec2 center = TransformPoint( world_.GetBodyTransform( visual.bodyHandle ), world_.GetBodyLocalCenter( visual.bodyHandle ) );
             const vec2 relativeVelocity = windField_->sampleVelocity( center ) - world_.GetBodyLinearVelocity( visual.bodyHandle );
-            world_.ApplyForceToCenter( visual.bodyHandle, windDragRate_ * world_.GetBodyMass( visual.bodyHandle ) * relativeVelocity );
+            world_.ApplyForceToCenter( visual.bodyHandle, windDragRate_ * relativeVelocity );
         }
     }
     // 새로 생성된 Shape에도 구독을 적용하되 표시를 끄면 순회 비용을 내지 않음.
