@@ -3,6 +3,7 @@
 #include <span>
 #include <vector>
 
+#include "collision/shapeGeometry.h"
 #include "math/vec2.h"
 
 namespace zonai
@@ -17,6 +18,18 @@ struct fluidCircleObstacle2
     float angularVelocity = 0.0f;
 };
 
+// World shape geometry를 복사해서 넘기는 비소유(non-owning world ID) 장애물 snapshot.
+// transform은 Shape의 body-local geometry를 world-space로 변환하고 center는 실제 COM.
+// 속도는 center(COM)의 world-space velocity. 정적 obstacle도 동일한 형식으로 처리.
+struct fluidShapeObstacle2
+{
+    shapeGeometry geometry{};
+    transform2 transform{};
+    vec2 center{};
+    vec2 linearVelocity{};
+    float angularVelocity = 0.0f;
+};
+
 // 2D 단위 깊이, 유체 밀도 1kg/m³ 가정의 압력 반력. force(N), torque(N·m).
 struct fluidObstacleForce2
 {
@@ -25,7 +38,7 @@ struct fluidObstacleForce2
 };
 
 // 균일 MAC(staggered) grid: x속도는 수직 face, y속도는 수평 face에 저장.
-// 내부 원형 solid의 경계 face는 no-through로 처리하고 유체 압력 반력을 집계함.
+// 내부 Circle/Capsule/Convex Polygon solid 경계 face는 no-through로 처리함.
 class fluidField2
 {
 public:
@@ -50,6 +63,11 @@ public:
     // stationary 또는 이동하는 solid 경계의 법선 속도를 사용하며 pressure force를 돌려준다.
     void step( float timeStep, std::span<const fluidCircleObstacle2> obstacles,
         std::span<fluidObstacleForce2> feedback, int pressureIterations = 80 );
+
+    // Circle, Capsule, Convex Polygon을 body-local geometry + world transform으로 전달.
+    // unsupported geometry는 비점유로 처리. feedback은 obstacle 순서와 1:1 대응.
+    void step( float timeStep, std::span<const fluidShapeObstacle2> obstacles,
+        std::span<fluidObstacleForce2> feedback, int pressureIterations = 80 );
 #pragma endregion Simulation
 
 #pragma region Queries
@@ -71,9 +89,9 @@ private:
     [[nodiscard]] int vIndex( int x, int y ) const noexcept { return y * width_ + x; }
     [[nodiscard]] vec2 sampleFrom( const std::vector<float>& u, const std::vector<float>& v, vec2 position ) const noexcept;
     static float sampleComponent( const std::vector<float>& values, int width, int height, float x, float y ) noexcept;
-    void updateObstacles( std::span<const fluidCircleObstacle2> obstacles );
-    void applySolidBoundaries( std::span<const fluidCircleObstacle2> obstacles );
-    void project( float timeStep, int pressureIterations, std::span<const fluidCircleObstacle2> obstacles,
+    void updateObstacles( std::span<const fluidShapeObstacle2> obstacles );
+    void applySolidBoundaries( std::span<const fluidShapeObstacle2> obstacles );
+    void project( float timeStep, int pressureIterations, std::span<const fluidShapeObstacle2> obstacles,
         std::span<fluidObstacleForce2> feedback );
 #pragma endregion Helpers
 
