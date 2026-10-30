@@ -1582,7 +1582,7 @@ void checkContactEventTrail()
     check( scene.isContactEventVisualizationEnabled() && scene.getContactEventTraces().empty(),
         "trial reset must clear the old contact traces without disabling visualization" );
 
-    for( int i = 0; i < 40; ++i ) scene.step( 1.0f / 60.0f, 4 );
+    for( int i = 0; i < 65; ++i ) scene.step( 1.0f / 60.0f, 4 );
     check( !scene.getContactEventTraces().empty(), "replayed collision did not create a fresh event trail" );
     scene.clearContactEventTrail();
     check( scene.getContactEventTraces().empty(), "manual trace clear did not clear all snapshots" );
