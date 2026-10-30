@@ -224,22 +224,24 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
             windField_->addVelocity( source, velocityDelta, 1.7f );
         }
         // fluidField2는 World나 Body를 소유하지 않음. 매 Step마다 실제 pose/속도를 전달함.
-        std::array<fluidCircleObstacle2, 3> obstacles{};
+        std::array<fluidShapeObstacle2, 3> obstacles{};
         const std::size_t obstacleCount = std::min( shapes_.size(), obstacles.size() );
         for( std::size_t i = 0; i < obstacleCount; ++i )
         {
             const visualShape& visual = shapes_[i];
             if( !world_.IsValid( visual.bodyHandle ) || !world_.IsValid( visual.shapeHandle ) ) continue;
-            const auto* circle = std::get_if<circle2>( &world_.GetShape( visual.shapeHandle ).geometry );
-            if( circle == nullptr ) continue;
+            const shapeGeometry& geometry = world_.GetShape( visual.shapeHandle ).geometry;
+            if( !std::holds_alternative<circle2>( geometry ) && !std::holds_alternative<capsule2>( geometry ) &&
+                !std::holds_alternative<polygon2>( geometry ) ) continue;
             const transform2 transform = world_.GetBodyTransform( visual.bodyHandle );
-            obstacles[i] = { TransformPoint( transform, circle->center ), circle->radius,
+            const vec2 center = TransformPoint( transform, world_.GetBodyLocalCenter( visual.bodyHandle ) );
+            obstacles[i] = { geometry, transform, center,
                 world_.GetBodyLinearVelocity( visual.bodyHandle ), world_.GetBodyAngularVelocity( visual.bodyHandle ) };
         }
 
         windPressureForces_.fill( {} );
         if( windObstacleCouplingEnabled_ )
-            windField_->step( timeStep, std::span<const fluidCircleObstacle2>( obstacles ).first( obstacleCount ),
+            windField_->step( timeStep, std::span<const fluidShapeObstacle2>( obstacles ).first( obstacleCount ),
                 std::span<fluidObstacleForce2>( windPressureForces_ ).first( obstacleCount ) );
         else windField_->step( timeStep );
 
@@ -263,7 +265,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
             {
                 // 질량 밀도 1kg/m³, 단위 깊이에서 유체 주변 ring에 drag 반력 근사 주입.
                 const float size = windField_->getCellSize();
-                const float radius = std::max( obstacles[i].radius, size );
+                const float radius = std::max( Length( Extents( world_.GetShapeAABB( visual.shapeHandle ) ) ), size );
                 const vec2 upstream = center - ( radius + size ) * Normalize( relativeVelocity );
                 const float area = std::numbers::pi_v<float> * ( radius + size ) * ( radius + size );
                 windField_->addVelocity( upstream, -timeStep / area * dragForce, 1.5f * size );
@@ -1232,19 +1234,23 @@ void rigidBodyDemo::resetWindFlow()
 
 void rigidBodyDemo::createWindFlow()
 {
-    // 유체와 World는 소유권과 Solver가 독립적이며 현재 원형 장애물만 coupling함.
+    // 유체와 World는 소유권과 Solver가 독립적. 원, 캡슐, 볼록 다각형을 혼합해 비교.
     windField_.emplace( 24, 14, 0.5f, vec2{ -6.0f, -3.5f } );
     world_.SetGravity( {} );
 
     constexpr std::array<vec2, 3> POSITIONS{ vec2{ -1.8f, 0.0f }, vec2{ 0.4f, 1.0f }, vec2{ 2.5f, -1.0f } };
-    constexpr std::array<float, 3> RADII{ 0.32f, 0.5f, 0.4f };
-    constexpr std::array<const char*, 3> LABELS{ "가벼운 원", "무거운 원", "세 번째 원" };
+    const std::array<shapeGeometry, 3> GEOMETRIES{
+        circle2{ {}, 0.32f },
+        capsule2{ { -0.45f, 0.0f }, { 0.45f, 0.0f }, 0.25f },
+        MakeBox( { 0.45f, 0.35f } )
+    };
+    constexpr std::array<const char*, 3> LABELS{ "원", "캡슐", "다각형 상자" };
 
     for( std::size_t i = 0; i < POSITIONS.size(); ++i )
     {
         const bodyId body = world_.CreateBody( bodyType::Dynamic, { POSITIONS[i], {} } );
         world_.SetBodySleepEnabled( body, false );
-        const shapeId shape = world_.CreateShape( body, circle2{ {}, RADII[i] }, {}, i == 1 ? 3.0f : 1.0f );
+        const shapeId shape = world_.CreateShape( body, GEOMETRIES[i], {}, i == 1 ? 3.0f : 1.0f );
         shapes_.push_back( { body, shape, LABELS[i] } );
     }
     impulseBody_ = shapes_[0].bodyHandle;
