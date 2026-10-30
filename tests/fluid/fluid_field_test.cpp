@@ -617,6 +617,73 @@ void checkCutCellTemporalContinuity()
         "clear must invalidate temporal geometry history" );
 }
 
+void checkSweptSolidFaceFlux()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    fluidField2 field{ 16, 16, 0.5f, { -4.0f, -4.0f } };
+    field.setCutCellProjectionEnabled( true );
+    std::array<fluidObstacleForce2, 1> feedback{};
+
+    fluidShapeObstacle2 box{
+        MakeBox( { 0.8f, 0.3f } ),
+        { { -1.0f, -0.25f }, {} }, { -1.0f, -0.25f }, {}, 0.0f
+    };
+
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 200 );
+    check( !field.getSweptFaceFlux().usedSweptFlux &&
+        !field.getCutCellPressure().hasVolumeHistory,
+        "first shape snapshot must not synthesize a past swept path" );
+
+    // 한 step 동안 여러 셀을 지나가면 각 공유 face에 동일한 적분 flux가 저장된다.
+    box.transform.position.x += 1.25f;
+    box.center.x += 1.25f;
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 200 );
+    const fluidSweptFaceFlux2 moving = field.getSweptFaceFlux();
+    const fluidCutCellPressure2 projection = field.getCutCellPressure();
+    check( moving.usedSweptFlux && moving.timeSamples >= 4 &&
+        moving.totalAbsoluteFlux > 0.5f &&
+        std::isfinite( moving.geometryMismatch ) && moving.geometryMismatch >= 0.0f &&
+        projection.hasVolumeHistory && projection.divergenceBefore > 0.01f &&
+        std::abs( projection.sourceImbalance ) < 1.0e-3f &&
+        std::isfinite( projection.divergenceAfter ) && IsFinite( feedback[0].force ),
+        "translating polygon must integrate flux through crossed faces and preserve shared-face balance" );
+
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 200 );
+    check( field.getSweptFaceFlux().usedSweptFlux &&
+        field.getSweptFaceFlux().totalAbsoluteFlux == 0.0f &&
+        field.getSweptFaceFlux().timeSamples == 1,
+        "stationary shape should produce zero swept flux without extra temporal samples" );
+
+    // 회전만 한 얇은 다각형은 위치 변위가 없어도 실제 면 경계가 쓸고 지나간다.
+    box.transform.rotation = rot2::FromRadians( 0.5f * std::numbers::pi_v<float> );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 200 );
+    check( field.getSweptFaceFlux().usedSweptFlux &&
+        field.getSweptFaceFlux().timeSamples >= 4 &&
+        field.getSweptFaceFlux().totalAbsoluteFlux > 0.01f &&
+        std::isfinite( field.getCutCellPressure().pressureResidual ),
+        "rotating polygon must generate sampled swept flux without translation" );
+
+    // 기하가 변하면 강체 운동으로 착각하지 않고 snapshot ΔV 방식으로 돌아간다.
+    box.geometry = MakeBox( { 1.0f, 0.3f } );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback );
+    check( !field.getSweptFaceFlux().usedSweptFlux &&
+        field.getCutCellPressure().hasVolumeHistory,
+        "shape geometry edits must invalidate swept path and use snapshot continuity" );
+
+    // 도메인 밖을 가로지르는 shape은 wall-crossing을 내부 swept flux로 숨기면 안 된다.
+    box.transform.position = { 5.0f, -0.25f };
+    box.center = box.transform.position;
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback );
+    check( !field.getSweptFaceFlux().usedSweptFlux &&
+        field.getCutCellPressure().volumeRate > 0.0f,
+        "crossing closed outer wall must revert to observable geometric volume imbalance" );
+
+    field.clear();
+    check( !field.getSweptFaceFlux().usedSweptFlux &&
+        field.getSweptFaceFlux().totalAbsoluteFlux == 0.0f,
+        "clear must reset swept volume diagnostics and previous shape history" );
+}
+
 } // namespace
 
 int main()
@@ -631,4 +698,5 @@ int main()
     checkFractionalCutCells();
     checkWeightedCutCellPressure();
     checkCutCellTemporalContinuity();
+    checkSweptSolidFaceFlux();
 }
