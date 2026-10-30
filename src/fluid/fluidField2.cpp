@@ -73,6 +73,8 @@ fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
     previousCellFluidFraction_.assign( pressure_.size(), 1.0f );
     uOpenFraction_.assign( u_.size(), 1.0f );
     vOpenFraction_.assign( v_.size(), 1.0f );
+    uSolidVelocity_.assign( u_.size(), 0.0f );
+    vSolidVelocity_.assign( v_.size(), 0.0f );
     for( int y = 0; y < height_; ++y )
     {
         uOpenFraction_[uIndex( 0, y )] = 0.0f;
@@ -98,6 +100,8 @@ void fluidField2::clear() noexcept
     std::fill( previousSolidOwner_.begin(), previousSolidOwner_.end(), -1 );
     std::fill( cellFluidFraction_.begin(), cellFluidFraction_.end(), 1.0f );
     std::fill( previousCellFluidFraction_.begin(), previousCellFluidFraction_.end(), 1.0f );
+    std::fill( uSolidVelocity_.begin(), uSolidVelocity_.end(), 0.0f );
+    std::fill( vSolidVelocity_.begin(), vSolidVelocity_.end(), 0.0f );
     std::fill( uOpenFraction_.begin(), uOpenFraction_.end(), 1.0f );
     std::fill( vOpenFraction_.begin(), vOpenFraction_.end(), 1.0f );
     for( int y = 0; y < height_; ++y )
@@ -113,6 +117,7 @@ void fluidField2::clear() noexcept
     solidCellCount_ = 0;
     solidTransition_ = {};
     cutCellTransition_ = {};
+    cutCellPressure_ = {};
     pressureMomentum_ = {};
     stepMomentum_ = {};
 }
@@ -351,6 +356,8 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     constexpr float inverseCellSamples = 1.0f / ( sampleCount * sampleCount );
     std::copy( cellFluidFraction_.begin(), cellFluidFraction_.end(), previousCellFluidFraction_.begin() );
     cutCellTransition_ = {};
+    std::fill( uSolidVelocity_.begin(), uSolidVelocity_.end(), 0.0f );
+    std::fill( vSolidVelocity_.begin(), vSolidVelocity_.end(), 0.0f );
 
     double previousVolume = 0.0;
     for( const float fraction : previousCellFluidFraction_ ) previousVolume += fraction;
@@ -365,12 +372,14 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     }
     else
     {
-        const auto isOccupied = [&]( vec2 point )
+        const auto firstOwner = [&]( vec2 point )
         {
-            for( const fluidShapeObstacle2& obstacle : obstacles )
-                if( IsValidFluidObstacle( obstacle ) && ContainsFluidObstacle( obstacle, point ) ) return true;
-            return false;
+            for( std::size_t i = 0; i < obstacles.size(); ++i )
+                if( IsValidFluidObstacle( obstacles[i] ) && ContainsFluidObstacle( obstacles[i], point ) )
+                    return static_cast<int>( i );
+            return -1;
         };
+        const auto isOccupied = [&]( vec2 point ) { return firstOwner( point ) >= 0; };
 
         for( int y = 0; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
@@ -395,9 +404,17 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                 {
                     const vec2 point = origin_ + cellSize_ * vec2{
                         static_cast<float>( x ), static_cast<float>( y ) + ( sample + 0.5f ) * inverseCount };
-                    if( isOccupied( point ) ) ++blocked;
+                    const int owner = firstOwner( point );
+                    if( owner >= 0 )
+                    {
+                        ++blocked;
+                        const fluidShapeObstacle2& shape = obstacles[static_cast<std::size_t>( owner )];
+                        uSolidVelocity_[uIndex( x, y )] +=
+                            ( shape.linearVelocity + Cross( shape.angularVelocity, point - shape.center ) ).x;
+                    }
                 }
                 uOpenFraction_[uIndex( x, y )] = 1.0f - blocked * inverseCount;
+                if( blocked > 0 ) uSolidVelocity_[uIndex( x, y )] /= blocked;
             }
 
         for( int y = 1; y < height_; ++y )
@@ -408,9 +425,17 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                 {
                     const vec2 point = origin_ + cellSize_ * vec2{
                         static_cast<float>( x ) + ( sample + 0.5f ) * inverseCount, static_cast<float>( y ) };
-                    if( isOccupied( point ) ) ++blocked;
+                    const int owner = firstOwner( point );
+                    if( owner >= 0 )
+                    {
+                        ++blocked;
+                        const fluidShapeObstacle2& shape = obstacles[static_cast<std::size_t>( owner )];
+                        vSolidVelocity_[vIndex( x, y )] +=
+                            ( shape.linearVelocity + Cross( shape.angularVelocity, point - shape.center ) ).y;
+                    }
                 }
                 vOpenFraction_[vIndex( x, y )] = 1.0f - blocked * inverseCount;
+                if( blocked > 0 ) vSolidVelocity_[vIndex( x, y )] /= blocked;
             }
     }
 
@@ -596,7 +621,8 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     updateCutCellGeometry( obstacles );
     remapExposedFaces();
     stepMomentum_.afterObstacles = getFluidMomentum();
-    applySolidBoundaries( obstacles );
+    if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
+    else applySolidBoundaries( obstacles );
 
     // 반 라그랑주 이류: face마다 이전 속도장을 역추적해 보간함.
     // 기존 u/v는 읽기 전용으로 두고 next buffer에 기록하므로 순서 의존성이 없음.
@@ -620,9 +646,19 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
 
     u_.swap( nextU_ );
     v_.swap( nextV_ );
-    applySolidBoundaries( obstacles );
+    if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
+    else applySolidBoundaries( obstacles );
     stepMomentum_.afterAdvection = getFluidMomentum();
-    project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
+    if( cutCellProjectionEnabled_ )
+    {
+        pressureMomentum_ = {}; // 이전 이진 MAC face impulse ledger와 단위가 다르므로 혼합하지 않음.
+        projectCutCell( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
+    }
+    else
+    {
+        cutCellPressure_ = {};
+        project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
+    }
     stepMomentum_.afterPressure = getFluidMomentum();
 }
 
