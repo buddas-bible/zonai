@@ -272,6 +272,14 @@ public:
     {
         return windField_ && windField_->isConservativeAdvectionEnabled();
     }
+    void setWindSweptTracerRemapEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setSweptTracerRemapEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindSweptTracerRemapEnabled() const noexcept
+    {
+        return windField_ && windField_->isSweptTracerRemapEnabled();
+    }
     void addWindVortex();
     void seedWindTracer();
     void beginWindAdvectionTrial();
