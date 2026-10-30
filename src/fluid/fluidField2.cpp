@@ -286,6 +286,7 @@ void fluidField2::updateObstacles( std::span<const fluidShapeObstacle2> obstacle
                     ++solidCellCount_;
                 }
             }
+    }
 
     for( std::size_t cell = 0; cell < solidOwner_.size(); ++cell )
     {
