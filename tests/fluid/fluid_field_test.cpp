@@ -243,6 +243,64 @@ void checkDiscreteMomentumExchange()
         "clear must erase previously deposited momentum" );
 }
 
+void checkPressureMomentumLedger()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    const auto checkBudget = []( const fluidField2& field, const char* message )
+    {
+        const fluidPressureMomentum2& budget = field.getPressureMomentum();
+        const fluidStepMomentum2& stages = field.getStepMomentum();
+        const float magnitude = Length( budget.fluid ) + Length( budget.solid ) + Length( budget.wall );
+        check( IsFinite( budget.fluid ) && IsFinite( budget.solid ) && IsFinite( budget.wall ) &&
+            Length( budget.residual() ) < 5.0e-4f * ( 1.0f + magnitude ), message );
+        check( Length( budget.fluid - stages.pressureDelta() ) < 1.0e-5f * ( 1.0f + magnitude ),
+            "pressure stage momentum must match the independently stored pressure impulse" );
+        check( Length( stages.afterPressure - field.getFluidMomentum() ) < 1.0e-5f * ( 1.0f + magnitude ),
+            "end-of-step face momentum must match the final diagnostic snapshot" );
+        check( Length( stages.occupancyDelta() + stages.advectionDelta() + stages.pressureDelta() -
+            ( stages.afterPressure - stages.before ) ) < 1.0e-5f * ( 1.0f + magnitude ),
+            "stage deltas must telescope to the measured total momentum change" );
+    };
+
+    // 외벽에 가까운 velocity source는 pressure를 통해 벽에 운동량을 전달한다.
+    fluidField2 walls{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    walls.addVelocity( { -4.9f, -0.2f }, { 2.8f, 0.4f }, 1.7f );
+    walls.step( dt, 160 );
+    checkBudget( walls, "wall-only projection pressure impulses must close momentum budget" );
+    check( LengthSquared( walls.getPressureMomentum().solid ) == 0.0f &&
+        Length( walls.getPressureMomentum().wall ) > 1.0e-5f,
+        "pressure must report wall impulse but no solid impulse in an empty domain" );
+
+    // 정지 obstacle에 대한 flow pressure traction은 fluid / solid / wall에 분배된다.
+    fluidField2 obstacleField{ 32, 24, 0.25f, { -4.0f, -3.0f } };
+    const fluidCircleObstacle2 obstacle{ { 0.0f, 0.0f }, 0.9f, {}, 0.0f };
+    std::array<fluidObstacleForce2, 1> pressureForces{};
+    obstacleField.addVelocity( { -1.2f, 0.1f }, { 2.0f, -0.2f }, 1.4f );
+    obstacleField.step( dt, std::span<const fluidCircleObstacle2>( &obstacle, 1 ), pressureForces, 160 );
+    checkBudget( obstacleField, "stationary circle pressure impulses must close momentum budget" );
+    check( Length( obstacleField.getPressureMomentum().solid ) > 1.0e-5f,
+        "stationary solid in nonuniform flow must receive pressure impulse" );
+    check( Length( obstacleField.getPressureMomentum().solid - dt * pressureForces[0].force ) < 1.0e-4f,
+        "pressure budget solid impulse must match the force returned to World" );
+    check( obstacleField.getStepMomentum().occupancyDelta().x != 0.0f,
+        "new obstacle occupancy must be reported separately from advection and pressure" );
+
+    // Moving circle imposes no-through boundary even in initially resting fluid.
+    fluidField2 movingField{ 32, 24, 0.25f, { -4.0f, -3.0f } };
+    const fluidCircleObstacle2 moving{ { 0.0f, 0.0f }, 0.9f, { 1.0f, 0.2f }, 0.0f };
+    movingField.step( dt, std::span<const fluidCircleObstacle2>( &moving, 1 ), pressureForces, 160 );
+    checkBudget( movingField, "moving circle pressure reaction must close its discrete pressure budget" );
+    check( Length( movingField.getPressureMomentum().solid ) > 1.0e-5f &&
+        Length( movingField.getPressureMomentum().fluid ) > 1.0e-5f,
+        "moving solid pressure should affect both rigid and fluid momentum" );
+
+    // Reset invalidates the last completed step diagnostics.
+    movingField.clear();
+    check( LengthSquared( movingField.getPressureMomentum().residual() ) == 0.0f &&
+        LengthSquared( movingField.getStepMomentum().afterPressure ) == 0.0f,
+        "clear must reset pressure and stage momentum ledgers" );
+}
+
 } // namespace
 
 int main()
@@ -252,4 +310,5 @@ int main()
     checkCircleSolidBoundary();
     checkGeneralShapeObstacles();
     checkDiscreteMomentumExchange();
+    checkPressureMomentumLedger();
 }
