@@ -69,6 +69,20 @@ fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
     divergence_.resize( pressure_.size() );
     solidOwner_.assign( pressure_.size(), -1 );
     previousSolidOwner_.assign( pressure_.size(), -1 );
+    cellFluidFraction_.assign( pressure_.size(), 1.0f );
+    previousCellFluidFraction_.assign( pressure_.size(), 1.0f );
+    uOpenFraction_.assign( u_.size(), 1.0f );
+    vOpenFraction_.assign( v_.size(), 1.0f );
+    for( int y = 0; y < height_; ++y )
+    {
+        uOpenFraction_[uIndex( 0, y )] = 0.0f;
+        uOpenFraction_[uIndex( width_, y )] = 0.0f;
+    }
+    for( int x = 0; x < width_; ++x )
+    {
+        vOpenFraction_[vIndex( x, 0 )] = 0.0f;
+        vOpenFraction_[vIndex( x, height_ )] = 0.0f;
+    }
 }
 
 void fluidField2::clear() noexcept
@@ -82,8 +96,23 @@ void fluidField2::clear() noexcept
     std::fill( divergence_.begin(), divergence_.end(), 0.0f );
     std::fill( solidOwner_.begin(), solidOwner_.end(), -1 );
     std::fill( previousSolidOwner_.begin(), previousSolidOwner_.end(), -1 );
+    std::fill( cellFluidFraction_.begin(), cellFluidFraction_.end(), 1.0f );
+    std::fill( previousCellFluidFraction_.begin(), previousCellFluidFraction_.end(), 1.0f );
+    std::fill( uOpenFraction_.begin(), uOpenFraction_.end(), 1.0f );
+    std::fill( vOpenFraction_.begin(), vOpenFraction_.end(), 1.0f );
+    for( int y = 0; y < height_; ++y )
+    {
+        uOpenFraction_[uIndex( 0, y )] = 0.0f;
+        uOpenFraction_[uIndex( width_, y )] = 0.0f;
+    }
+    for( int x = 0; x < width_; ++x )
+    {
+        vOpenFraction_[vIndex( x, 0 )] = 0.0f;
+        vOpenFraction_[vIndex( x, height_ )] = 0.0f;
+    }
     solidCellCount_ = 0;
     solidTransition_ = {};
+    cutCellTransition_ = {};
     pressureMomentum_ = {};
     stepMomentum_ = {};
 }
@@ -297,6 +326,129 @@ void fluidField2::updateObstacles( std::span<const fluidShapeObstacle2> obstacle
         static_cast<float>( solidTransition_.exposedCells - solidTransition_.coveredCells ) * cellSize_ * cellSize_;
 }
 
+float fluidField2::getCellFluidFraction( int x, int y ) const noexcept
+{
+    return x >= 0 && x < width_ && y >= 0 && y < height_ ? cellFluidFraction_[cellIndex( x, y )] : 0.0f;
+}
+
+float fluidField2::getUFaceOpenFraction( int x, int y ) const noexcept
+{
+    return x > 0 && x < width_ && y >= 0 && y < height_ ? uOpenFraction_[uIndex( x, y )] : 0.0f;
+}
+
+float fluidField2::getVFaceOpenFraction( int x, int y ) const noexcept
+{
+    return x >= 0 && x < width_ && y > 0 && y < height_ ? vOpenFraction_[vIndex( x, y )] : 0.0f;
+}
+
+void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> obstacles )
+{
+    // Cell-center solid mask를 변경하지 않은 독립적인 기하 관측 레이어.
+    // 4x4 sub-cell sample과 4개 face sample로 union geometry의 부분 점유를 추정한다.
+    // 이 배열을 pressure gradient/flux에 사용하려면 cut-cell 연산자 전체를 함께 변경해야 한다.
+    constexpr int sampleCount = 4;
+    constexpr float inverseCount = 1.0f / sampleCount;
+    constexpr float inverseCellSamples = 1.0f / ( sampleCount * sampleCount );
+    std::copy( cellFluidFraction_.begin(), cellFluidFraction_.end(), previousCellFluidFraction_.begin() );
+    cutCellTransition_ = {};
+
+    double previousVolume = 0.0;
+    for( const float fraction : previousCellFluidFraction_ ) previousVolume += fraction;
+    cutCellTransition_.previousFluidVolume = static_cast<float>(
+        previousVolume * static_cast<double>( cellSize_ ) * cellSize_ );
+
+    if( obstacles.empty() )
+    {
+        std::fill( cellFluidFraction_.begin(), cellFluidFraction_.end(), 1.0f );
+        std::fill( uOpenFraction_.begin(), uOpenFraction_.end(), 1.0f );
+        std::fill( vOpenFraction_.begin(), vOpenFraction_.end(), 1.0f );
+    }
+    else
+    {
+        const auto isOccupied = [&]( vec2 point )
+        {
+            for( const fluidShapeObstacle2& obstacle : obstacles )
+                if( IsValidFluidObstacle( obstacle ) && ContainsFluidObstacle( obstacle, point ) ) return true;
+            return false;
+        };
+
+        for( int y = 0; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+            {
+                int covered = 0;
+                for( int sy = 0; sy < sampleCount; ++sy )
+                    for( int sx = 0; sx < sampleCount; ++sx )
+                    {
+                        const vec2 point = origin_ + cellSize_ * vec2{
+                            static_cast<float>( x ) + ( sx + 0.5f ) * inverseCount,
+                            static_cast<float>( y ) + ( sy + 0.5f ) * inverseCount };
+                        if( isOccupied( point ) ) ++covered;
+                    }
+                cellFluidFraction_[cellIndex( x, y )] = 1.0f - covered * inverseCellSamples;
+            }
+
+        for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x )
+            {
+                int blocked = 0;
+                for( int sample = 0; sample < sampleCount; ++sample )
+                {
+                    const vec2 point = origin_ + cellSize_ * vec2{
+                        static_cast<float>( x ), static_cast<float>( y ) + ( sample + 0.5f ) * inverseCount };
+                    if( isOccupied( point ) ) ++blocked;
+                }
+                uOpenFraction_[uIndex( x, y )] = 1.0f - blocked * inverseCount;
+            }
+
+        for( int y = 1; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+            {
+                int blocked = 0;
+                for( int sample = 0; sample < sampleCount; ++sample )
+                {
+                    const vec2 point = origin_ + cellSize_ * vec2{
+                        static_cast<float>( x ) + ( sample + 0.5f ) * inverseCount, static_cast<float>( y ) };
+                    if( isOccupied( point ) ) ++blocked;
+                }
+                vOpenFraction_[vIndex( x, y )] = 1.0f - blocked * inverseCount;
+            }
+    }
+
+    // Exterior faces always remain closed even in a geometrically empty domain.
+    for( int y = 0; y < height_; ++y )
+    {
+        uOpenFraction_[uIndex( 0, y )] = 0.0f;
+        uOpenFraction_[uIndex( width_, y )] = 0.0f;
+    }
+    for( int x = 0; x < width_; ++x )
+    {
+        vOpenFraction_[vIndex( x, 0 )] = 0.0f;
+        vOpenFraction_[vIndex( x, height_ )] = 0.0f;
+    }
+
+    double current = 0.0;
+    double covered = 0.0;
+    double released = 0.0;
+    for( std::size_t cell = 0; cell < cellFluidFraction_.size(); ++cell )
+    {
+        const float old = previousCellFluidFraction_[cell];
+        const float now = cellFluidFraction_[cell];
+        current += now;
+        covered += std::max( 0.0f, old - now );
+        released += std::max( 0.0f, now - old );
+        if( now > 0.0f && now < 1.0f ) ++cutCellTransition_.partialCells;
+    }
+    for( const float open : uOpenFraction_ )
+        if( open > 0.0f && open < 1.0f ) ++cutCellTransition_.partialUFaces;
+    for( const float open : vOpenFraction_ )
+        if( open > 0.0f && open < 1.0f ) ++cutCellTransition_.partialVFaces;
+
+    const double volumeScale = static_cast<double>( cellSize_ ) * cellSize_; // unit depth = 1m
+    cutCellTransition_.fluidVolume = static_cast<float>( current * volumeScale );
+    cutCellTransition_.coveredVolume = static_cast<float>( covered * volumeScale );
+    cutCellTransition_.releasedVolume = static_cast<float>( released * volumeScale );
+}
+
 void fluidField2::remapExposedFaces()
 {
     // 새로 열린 fluid-fluid face가 이전 rigid boundary의 속도를 그대로 상속하지 않도록
@@ -441,6 +593,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
 
     stepMomentum_.before = getFluidMomentum();
     updateObstacles( obstacles );
+    updateCutCellGeometry( obstacles );
     remapExposedFaces();
     stepMomentum_.afterObstacles = getFluidMomentum();
     applySolidBoundaries( obstacles );

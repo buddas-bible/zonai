@@ -367,6 +367,93 @@ void checkMovingSolidRemap()
         "clear must reset solid transition diagnostics" );
 }
 
+void checkFractionalCutCells()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    fluidField2 field{ 8, 8, 1.0f, { -4.0f, -4.0f } };
+    std::array<fluidObstacleForce2, 1> feedback{};
+
+    // 정확히 1.5m x 1.5m인 축 정렬 Box: 일부 cell/face는 절반만 막힌다.
+    fluidShapeObstacle2 box{
+        MakeBox( { 0.75f, 0.75f } ),
+        { { 0.25f, 0.25f }, {} }, { 0.25f, 0.25f }, {}, 0.0f
+    };
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback );
+    const fluidCutCellTransition2 original = field.getCutCellTransition();
+    check( close( field.getCellFluidFraction( 4, 4 ), 0.0f ) &&
+        close( field.getCellFluidFraction( 3, 4 ), 0.5f ) &&
+        close( field.getCellFluidFraction( 2, 4 ), 1.0f ),
+        "fractional cell geometry must distinguish fully covered, half-covered and open cells" );
+    check( close( field.getUFaceOpenFraction( 4, 3 ), 0.5f ) &&
+        close( field.getVFaceOpenFraction( 3, 4 ), 0.5f ) &&
+        close( field.getUFaceOpenFraction( 4, 4 ), 0.0f ) &&
+        close( field.getVFaceOpenFraction( 4, 4 ), 0.0f ),
+        "MAC face fractions must count sub-face openings rather than only cell-center occupancy" );
+    check( field.getUFaceOpenFraction( 0, 4 ) == 0.0f &&
+        field.getUFaceOpenFraction( 8, 4 ) == 0.0f &&
+        field.getVFaceOpenFraction( 4, 0 ) == 0.0f &&
+        field.getVFaceOpenFraction( 4, 8 ) == 0.0f &&
+        field.getCellFluidFraction( -1, 4 ) == 0.0f,
+        "closed domain wall and out-of-range fraction queries must be zero" );
+    check( close( original.previousFluidVolume, 64.0f ) &&
+        close( original.fluidVolume, 61.75f ) &&
+        close( original.coveredVolume, 2.25f ) &&
+        original.releasedVolume == 0.0f &&
+        original.partialCells > 0 && original.partialUFaces > 0 && original.partialVFaces > 0,
+        "sampled cut-cell volumes must match an axis-aligned box exactly at quarter-cell offsets" );
+
+    // 1/4 cell 이동은 covered/released 영역을 만들지만 전체 점유 체적은 그대로다.
+    box.transform.position.x += 0.25f;
+    box.center.x += 0.25f;
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback );
+    const fluidCutCellTransition2 translated = field.getCutCellTransition();
+    check( translated.coveredVolume > 0.0f && translated.releasedVolume > 0.0f &&
+        close( translated.fluidVolume, original.fluidVolume ) &&
+        std::abs( translated.volumeDelta() ) < 1.0e-5f &&
+        close( translated.coveredVolume, translated.releasedVolume ),
+        "translating box must report covered and released partial volumes independently" );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback );
+    check( field.getCutCellTransition().coveredVolume == 0.0f &&
+        field.getCutCellTransition().releasedVolume == 0.0f &&
+        close( field.getCutCellTransition().volumeDelta(), 0.0f ),
+        "stationary shape must have zero fractional volume transitions" );
+
+    // 이 원은 어떤 cell center도 덮지 않지만 sub-cell은 차지한다.
+    field.clear();
+    const fluidCircleObstacle2 smallCircle{ {}, 0.65f, {}, 0.0f };
+    field.step( dt, std::span<const fluidCircleObstacle2>( &smallCircle, 1 ), feedback );
+    const float circleArea = std::numbers::pi_v<float> * 0.65f * 0.65f;
+    const float sampledArea = 64.0f - field.getCutCellTransition().fluidVolume;
+    check( field.getSolidCellCount() == 0 && field.getCutCellTransition().partialCells >= 4 &&
+        std::abs( sampledArea - circleArea ) < 0.2f,
+        "sub-cell coverage must detect geometry missed entirely by the center-only solid mask" );
+
+    // 격자 안쪽에서 회전·이동하는 thin box의 전체 점유 면적은 거의 일정.
+    field.clear();
+    fluidShapeObstacle2 thinBox{
+        MakeBox( { 1.0f, 0.2f } ), { { 0.5f, 0.0f }, {} }, { 0.5f, 0.0f }, {}, 0.0f
+    };
+    field.step( dt, std::span<const fluidShapeObstacle2>( &thinBox, 1 ), feedback );
+    const float initialArea = 64.0f - field.getCutCellTransition().fluidVolume;
+    thinBox.transform.rotation = rot2::FromRadians( 0.5f * std::numbers::pi_v<float> );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &thinBox, 1 ), feedback );
+    const fluidCutCellTransition2 rotated = field.getCutCellTransition();
+    check( rotated.coveredVolume > 0.0f && rotated.releasedVolume > 0.0f &&
+        std::abs( 64.0f - rotated.fluidVolume - initialArea ) < 0.25f &&
+        rotated.partialCells > 0,
+        "rotated polygon must update partially blocked cells and volume transitions" );
+
+    field.step( dt );
+    check( close( field.getCutCellTransition().fluidVolume, 64.0f ) &&
+        field.getCutCellTransition().releasedVolume > 0.0f,
+        "removing solid must release its fractional occupancy" );
+    field.clear();
+    check( field.getCutCellTransition().fluidVolume == 0.0f &&
+        close( field.getCellFluidFraction( 4, 4 ), 1.0f ) &&
+        close( field.getUFaceOpenFraction( 4, 4 ), 1.0f ),
+        "clear must reset the diagnostics and restore fully open interior geometry" );
+}
+
 } // namespace
 
 int main()
@@ -378,4 +465,5 @@ int main()
     checkDiscreteMomentumExchange();
     checkPressureMomentumLedger();
     checkMovingSolidRemap();
+    checkFractionalCutCells();
 }

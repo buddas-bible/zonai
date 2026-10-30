@@ -80,6 +80,22 @@ struct fluidSolidTransition2
     float fluidVolumeDelta = 0.0f;
 };
 
+// 장애물과 격자의 교차 면적/face 개방 비율을 sub-cell 표본으로 계산한 관측량.
+// covered/released는 이전과 현재 snapshot의 국소 점유 변화량 (m³, unit depth).
+// 장애물을 통과한 swept flux 또는 실제 유체 질량 보존량이 아님.
+struct fluidCutCellTransition2
+{
+    float previousFluidVolume = 0.0f;
+    float fluidVolume = 0.0f;
+    float coveredVolume = 0.0f;
+    float releasedVolume = 0.0f;
+    int partialCells = 0;
+    int partialUFaces = 0;
+    int partialVFaces = 0;
+
+    [[nodiscard]] float volumeDelta() const noexcept { return fluidVolume - previousFluidVolume; }
+};
+
 // 균일 MAC(staggered) grid: x속도는 수직 face, y속도는 수평 face에 저장.
 // 내부 Circle/Capsule/Convex Polygon solid 경계 face는 no-through로 처리함.
 class fluidField2
@@ -129,6 +145,12 @@ public:
     [[nodiscard]] const fluidPressureMomentum2& getPressureMomentum() const noexcept { return pressureMomentum_; }
     [[nodiscard]] const fluidStepMomentum2& getStepMomentum() const noexcept { return stepMomentum_; }
     [[nodiscard]] const fluidSolidTransition2& getSolidTransition() const noexcept { return solidTransition_; }
+    [[nodiscard]] const fluidCutCellTransition2& getCutCellTransition() const noexcept { return cutCellTransition_; }
+    // 기하 표본의 유체 면적 비율 [0,1]. 범위 밖은 0.
+    // 외곽 wall face는 기하상 열려있어도 닫힌 경계이므로 0.
+    [[nodiscard]] float getCellFluidFraction( int x, int y ) const noexcept;
+    [[nodiscard]] float getUFaceOpenFraction( int x, int y ) const noexcept;
+    [[nodiscard]] float getVFaceOpenFraction( int x, int y ) const noexcept;
     [[nodiscard]] bool isSolidCell( int x, int y ) const noexcept;
     [[nodiscard]] int getSolidCellCount() const noexcept { return solidCellCount_; }
     [[nodiscard]] vec2 getCellCenter( int x, int y ) const noexcept;
@@ -146,6 +168,7 @@ private:
     [[nodiscard]] vec2 sampleFrom( const std::vector<float>& u, const std::vector<float>& v, vec2 position ) const noexcept;
     static float sampleComponent( const std::vector<float>& values, int width, int height, float x, float y ) noexcept;
     void updateObstacles( std::span<const fluidShapeObstacle2> obstacles );
+    void updateCutCellGeometry( std::span<const fluidShapeObstacle2> obstacles );
     void remapExposedFaces();
     void applySolidBoundaries( std::span<const fluidShapeObstacle2> obstacles );
     void project( float timeStep, int pressureIterations, std::span<const fluidShapeObstacle2> obstacles,
@@ -166,8 +189,13 @@ private:
     std::vector<float> divergence_;
     std::vector<int> solidOwner_;
     std::vector<int> previousSolidOwner_;
+    std::vector<float> cellFluidFraction_;
+    std::vector<float> previousCellFluidFraction_;
+    std::vector<float> uOpenFraction_;
+    std::vector<float> vOpenFraction_;
     int solidCellCount_ = 0;
     fluidSolidTransition2 solidTransition_{};
+    fluidCutCellTransition2 cutCellTransition_{};
     fluidPressureMomentum2 pressureMomentum_{};
     fluidStepMomentum2 stepMomentum_{};
 #pragma endregion Data

@@ -112,9 +112,23 @@ Step fluid ΔP     = occupancy ΔP + advection ΔP + pressure ΔP
 
 **한계:** 이 재구성은 *오래된 강체 경계 속도의 유출을 막는 안정화 조치*이지 cut-cell 체적 보존/보존형 advection이 아니다. 이산 셀 점유 변화로 인한 체적·운동량 오류는 계측될 뿐 실제 유체 질량으로 보정되지 않는다. 움직이는 경계의 면적 가중치, swept-volume flux와 유체/강체 연성 압력 투영이 그다음 단계다.
 
+## Part 7 — Sub-cell 점유율과 기하학적 체적 전이
+
+기존 `solidOwner_`는 셀 중심이 강체 안에 들어가는지로 판정하므로, 직경이 셀 크기보다 작거나 경계가 셀 중간을 지나는 장애물은 실제 점유 면적과 차이가 크다. 다음 압력/이류 연산자 교체에 앞서 **부분 점유 면적과 face 개방 길이**를 별도의 기하 레이어로 계산한다.
+
+- `getCellFluidFraction(x,y)`은 각 셀을 **4×4 균일 sub-cell 샘플**로 나눈 뒤 전체 샘플에서 강체 밖에 있는 비율(0~1)을 반환한다. Circle/Capsule/Convex Polygon의 현재 `ContainsFluidObstacle`를 재사용하므로 회전한 도형과 겹친 도형의 합집합도 동일하게 판정한다.
+- `getUFaceOpenFraction(x,y)`, `getVFaceOpenFraction(x,y)`은 각 내부 MAC face의 4개 균일 표본으로 추정한 열린 길이 비율이다. **외곽 no-through wall**은 항상 0이다.
+- `getCutCellTransition()`은 직전/현재 샘플 기반 **유체 체적**, `coveredVolume`(이전에 유체였지만 새로 가려진 체적), `releasedVolume`(이전에 가려졌다가 열린 체적), 부분 점유 셀과 부분 개방 face 수를 제공한다. 깊이 1m를 가정해 `volume = Σ(fluidFraction) × h² × 1m`로 계산한다.
+- `volumeDelta() = fluidVolume - previousFluidVolume`이며 수치적으로 `releasedVolume - coveredVolume`과 대응한다. 이전 프레임과 같은 모양이면 신규 전이는 0이고, 도형이 격자 안에서 평행 이동하면 양 방향의 국소 체적 변화가 발생할 수 있다.
+- `clear()`는 내부 셀을 완전 유체, 내부 face를 개방 상태로 되돌리고 체적 전이 **마지막 Step 진단값**을 비운다. 다음 `step()`은 전체 도메인 유체 체적을 기준으로 새로 점유한 양을 계산한다.
+
+**중요한 설계 경계:** 이번 단계는 *Cut-cell 기하 사전 단계*다. 기존 이진 `solidOwner_`와 압력 Poisson/Jacobi, no-through face 설정, Drag/Pressure 운동량 장부는 **변경하지 않는다**. 부분 점유율을 압력에 임의로 곱하면 대칭 압력 연산자, 무발산 조건, 강체 압력 반력 장부를 동시에 깨뜨릴 수 있기 때문이다. 또한 표본 기반 비율은 정확한 원–사각형 교차 면적 계산이 아니며, `covered/released`는 두 순간의 **공간별 차이**일 뿐 이동 경계가 시간 동안 쓸고 간 실제 swept-volume flux가 아니다. 따라서 *유체 질량·체적 보존이 완성됐다*고 해석하면 안 된다.
+
+이 단계의 회귀 테스트는 축 정렬 Box의 정확한 절반 셀/face와 면적, 1/4 cell 이동 후 covered/released 균형, 셀 중심 마스크가 놓친 작은 원, 회전된 다각형, 장애물 삭제와 초기화를 검증한다. 다음 단계에서 cut-cell flux 및 압력 연산자로 연결할 때 이 참조 값을 활용한다.
+
 ## 다음 구현 후보
 
-1. moving obstacle의 swept-volume flux/cut-cell 경계와 pressure–rigid 동기 결합의 정밀화.
+1. 부분 개방 face를 반영한 보존형 유체 flux·압력 연산자, 이동 장애물의 swept-volume flux와 pressure–rigid 동기 결합.
 2. 복합 Body의 다중 Shape 집계, static obstacle, Segment/Chain의 별도 표면 경계 표현.
 3. 연기/염료(tracer) 수송, 점성(확산), 회전(vorticity) 표현.
 4. 압력 solver 수렴 기준과 성능 평가, 해상도 증대.
