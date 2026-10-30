@@ -777,6 +777,107 @@ float fluidField2::cutCellFluxDivergenceRms( float inverseTimeStep ) const noexc
     return active > 0 ? static_cast<float>( std::sqrt( sum / active ) ) : 0.0f;
 }
 
+void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidShapeObstacle2> obstacles )
+{
+    sweptFaceFlux_ = {};
+    std::fill( sweptUVolume_.begin(), sweptUVolume_.end(), 0.0f );
+    std::fill( sweptVVolume_.begin(), sweptVVolume_.end(), 0.0f );
+
+    // Shape의 추가/삭제, 기하 변경, 도메인 관통은 swept 경로로 간주하지 않는다.
+    // 슬롯(index)이 지속되는 장애물만 선형 이동 + 최단 회전각 보간으로 추적한다.
+    if( !volumeSourceValid_ || obstacles.empty() || previousObstacles_.size() != obstacles.size() ) return;
+
+    const float limitX = origin_.x + width_ * cellSize_;
+    const float limitY = origin_.y + height_ * cellSize_;
+    std::vector<vec2> linearSpeeds( obstacles.size() );
+    std::vector<float> startAngles( obstacles.size() );
+    std::vector<float> angularSpeeds( obstacles.size() );
+    float maximumTravel = 0.0f;
+    for( std::size_t i = 0; i < obstacles.size(); ++i )
+    {
+        const auto& start = previousObstacles_[i];
+        const auto& end = obstacles[i];
+        if( !IsValidFluidObstacle( start ) || !IsValidFluidObstacle( end ) ||
+            !HasSameFluidGeometry( start.geometry, end.geometry ) ) return;
+        const float radius = FluidGeometryRadius( end.geometry );
+        if( !std::isfinite( radius ) || radius < 0.0f ) return;
+        for( const fluidShapeObstacle2* shape : { &start, &end } )
+        {
+            const vec2 p = shape->transform.position;
+            if( p.x - radius <= origin_.x || p.x + radius >= limitX ||
+                p.y - radius <= origin_.y || p.y + radius >= limitY ) return;
+        }
+
+        const vec2 displacement = end.transform.position - start.transform.position;
+        linearSpeeds[i] = displacement / timeStep;
+        const float startAngle = std::atan2( start.transform.rotation.s, start.transform.rotation.c );
+        const float endAngle = std::atan2( end.transform.rotation.s, end.transform.rotation.c );
+        const float deltaAngle = std::remainder( endAngle - startAngle, 2.0f * std::numbers::pi_v<float> );
+        startAngles[i] = startAngle;
+        angularSpeeds[i] = deltaAngle / timeStep;
+        maximumTravel = std::max( maximumTravel, Length( displacement ) + std::abs( deltaAngle ) * radius );
+    }
+
+    constexpr int faceSamples = 4;
+    const int timeSamples = std::clamp( static_cast<int>( std::ceil( maximumTravel / ( 0.25f * cellSize_ ) ) ), 1, 32 );
+    const float weight = timeStep * cellSize_ / ( timeSamples * faceSamples );
+    std::vector<fluidShapeObstacle2> intermediate( obstacles.begin(), obstacles.end() );
+
+    // 하나의 공유 MAC face는 시간·길이 표본에서 한 번만 적분한다.
+    // Solid 내부의 강체 속도는 v_origin + omega x (point - origin).
+    // 동일 면을 양쪽 셀이 같은 값과 반대 부호로 사용해 국소 보존성을 유지한다.
+    for( int step = 0; step < timeSamples; ++step )
+    {
+        const float alpha = ( step + 0.5f ) / timeSamples;
+        for( std::size_t i = 0; i < obstacles.size(); ++i )
+        {
+            const auto& start = previousObstacles_[i];
+            const auto& end = obstacles[i];
+            intermediate[i].transform.position =
+                start.transform.position + alpha * ( end.transform.position - start.transform.position );
+            intermediate[i].transform.rotation =
+                rot2::FromRadians( startAngles[i] + angularSpeeds[i] * timeStep * alpha );
+        }
+
+        const auto normalSpeed = [&]( vec2 point, bool horizontal )
+        {
+            for( std::size_t i = 0; i < intermediate.size(); ++i )
+            {
+                if( !ContainsFluidObstacle( intermediate[i], point ) ) continue;
+                const vec2 velocity = linearSpeeds[i] +
+                    Cross( angularSpeeds[i], point - intermediate[i].transform.position );
+                return horizontal ? velocity.x : velocity.y;
+            }
+            return 0.0f;
+        };
+
+        for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x )
+                for( int sample = 0; sample < faceSamples; ++sample )
+                {
+                    const vec2 point = origin_ + cellSize_ * vec2{
+                        static_cast<float>( x ), static_cast<float>( y ) + ( sample + 0.5f ) / faceSamples };
+                    sweptUVolume_[uIndex( x, y )] += weight * normalSpeed( point, true );
+                }
+
+        for( int y = 1; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+                for( int sample = 0; sample < faceSamples; ++sample )
+                {
+                    const vec2 point = origin_ + cellSize_ * vec2{
+                        static_cast<float>( x ) + ( sample + 0.5f ) / faceSamples, static_cast<float>( y ) };
+                    sweptVVolume_[vIndex( x, y )] += weight * normalSpeed( point, false );
+                }
+    }
+
+    double absoluteFlux = 0.0;
+    for( const float flux : sweptUVolume_ ) absoluteFlux += std::abs( flux );
+    for( const float flux : sweptVVolume_ ) absoluteFlux += std::abs( flux );
+    sweptFaceFlux_.usedSweptFlux = true;
+    sweptFaceFlux_.timeSamples = timeSamples;
+    sweptFaceFlux_.totalAbsoluteFlux = static_cast<float>( absoluteFlux );
+}
+
 void fluidField2::prepareCutCellVolumeChange( float timeStep )
 {
     std::fill( cutCellVolumeRate_.begin(), cutCellVolumeRate_.end(), 0.0f );
@@ -820,8 +921,17 @@ void fluidField2::prepareCutCellVolumeChange( float timeStep )
     const double scale = static_cast<double>( cellSize_ ) * cellSize_ / timeStep;
     for( std::size_t i = 0; i < cellFluidFraction_.size(); ++i )
     {
-        const float change = cellFluidFraction_[i] - previousCellFluidFraction_[i];
-        volumeRate += static_cast<double>( change ) * scale;
+        const float snapshotChange = cellFluidFraction_[i] - previousCellFluidFraction_[i];
+        volumeRate += static_cast<double>( snapshotChange ) * scale;
+        const int x = static_cast<int>( i ) % width_;
+        const int y = static_cast<int>( i ) / width_;
+        const float change = sweptFaceFlux_.usedSweptFlux
+            ? ( sweptUVolume_[uIndex( x + 1, y )] - sweptUVolume_[uIndex( x, y )] +
+                sweptVVolume_[vIndex( x, y + 1 )] - sweptVVolume_[vIndex( x, y )] ) /
+                ( cellSize_ * cellSize_ )
+            : snapshotChange;
+        if( sweptFaceFlux_.usedSweptFlux )
+            sweptFaceFlux_.geometryMismatch += std::abs( change - snapshotChange ) * cellSize_ * cellSize_;
         if( cellFluidFraction_[i] > 0.0f )
             cutCellVolumeRate_[i] += change;
         else if( change != 0.0f )
