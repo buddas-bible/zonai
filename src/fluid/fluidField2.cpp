@@ -43,6 +43,50 @@ bool ContainsFluidObstacle( const fluidShapeObstacle2& obstacle, vec2 point )
     return false;
 }
 
+bool HasSameFluidGeometry( const shapeGeometry& a, const shapeGeometry& b )
+{
+    if( a.index() != b.index() ) return false;
+    if( const auto* lhs = std::get_if<circle2>( &a ) )
+    {
+        const auto& rhs = std::get<circle2>( b );
+        return lhs->radius == rhs.radius && lhs->center.x == rhs.center.x && lhs->center.y == rhs.center.y;
+    }
+    if( const auto* lhs = std::get_if<capsule2>( &a ) )
+    {
+        const auto& rhs = std::get<capsule2>( b );
+        return lhs->radius == rhs.radius &&
+            lhs->center1.x == rhs.center1.x && lhs->center1.y == rhs.center1.y &&
+            lhs->center2.x == rhs.center2.x && lhs->center2.y == rhs.center2.y;
+    }
+    if( const auto* lhs = std::get_if<polygon2>( &a ) )
+    {
+        const auto& rhs = std::get<polygon2>( b );
+        if( lhs->vertexCount != rhs.vertexCount || lhs->radius != rhs.radius ) return false;
+        for( int i = 0; i < lhs->vertexCount; ++i )
+            if( lhs->vertices[i].x != rhs.vertices[i].x || lhs->vertices[i].y != rhs.vertices[i].y ||
+                lhs->normals[i].x != rhs.normals[i].x || lhs->normals[i].y != rhs.normals[i].y )
+                return false;
+        return true;
+    }
+    return false;
+}
+
+float FluidGeometryRadius( const shapeGeometry& geometry )
+{
+    if( const auto* circle = std::get_if<circle2>( &geometry ) )
+        return Length( circle->center ) + circle->radius;
+    if( const auto* capsule = std::get_if<capsule2>( &geometry ) )
+        return std::max( Length( capsule->center1 ), Length( capsule->center2 ) ) + capsule->radius;
+    if( const auto* polygon = std::get_if<polygon2>( &geometry ) )
+    {
+        float radius = polygon->radius;
+        for( int i = 0; i < polygon->vertexCount; ++i )
+            radius = std::max( radius, Length( polygon->vertices[i] ) + polygon->radius );
+        return radius;
+    }
+    return 0.0f;
+}
+
 bool IsValidFluidObstacle( const fluidShapeObstacle2& obstacle )
 {
     return IsFinite( obstacle.center ) && IsFinite( obstacle.transform.position ) &&
@@ -76,6 +120,8 @@ fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
     uSolidVelocity_.assign( u_.size(), 0.0f );
     vSolidVelocity_.assign( v_.size(), 0.0f );
     cutCellVolumeRate_.assign( pressure_.size(), 0.0f );
+    sweptUVolume_.assign( u_.size(), 0.0f );
+    sweptVVolume_.assign( v_.size(), 0.0f );
     cutCellComponent_.assign( pressure_.size(), -1 );
     cutCellNearestFluid_.assign( pressure_.size(), -1 );
     cutCellQueue_.reserve( pressure_.size() );
@@ -107,6 +153,10 @@ void fluidField2::clear() noexcept
     std::fill( uSolidVelocity_.begin(), uSolidVelocity_.end(), 0.0f );
     std::fill( vSolidVelocity_.begin(), vSolidVelocity_.end(), 0.0f );
     std::fill( cutCellVolumeRate_.begin(), cutCellVolumeRate_.end(), 0.0f );
+    std::fill( sweptUVolume_.begin(), sweptUVolume_.end(), 0.0f );
+    std::fill( sweptVVolume_.begin(), sweptVVolume_.end(), 0.0f );
+    previousObstacles_.clear();
+    sweptFaceFlux_ = {};
     std::fill( cutCellComponent_.begin(), cutCellComponent_.end(), -1 );
     std::fill( cutCellNearestFluid_.begin(), cutCellNearestFluid_.end(), -1 );
     cutCellQueue_.clear();
@@ -630,6 +680,8 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     stepMomentum_.before = getFluidMomentum();
     updateObstacles( obstacles );
     updateCutCellGeometry( obstacles );
+    if( cutCellProjectionEnabled_ ) updateSweptSolidFlux( timeStep, obstacles );
+    else sweptFaceFlux_ = {};
     remapExposedFaces();
     stepMomentum_.afterObstacles = getFluidMomentum();
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
@@ -671,6 +723,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
     }
     stepMomentum_.afterPressure = getFluidMomentum();
+    previousObstacles_.assign( obstacles.begin(), obstacles.end() );
 }
 
 float fluidField2::cutCellUOpen( int x, int y ) const noexcept
