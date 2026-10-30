@@ -170,7 +170,7 @@ void fluidField2::updateObstacles( std::span<const fluidShapeObstacle2> obstacle
             {
                 const int cell = cellIndex( x, y );
                 if( solidOwner_[cell] >= 0 ) continue;
-                if( ContainsFluidObstacle( obstacle, getCellCenter( x, y ) )
+                if( ContainsFluidObstacle( obstacle, getCellCenter( x, y ) ) )
                 {
                     solidOwner_[cell] = static_cast<int>( index );
                     ++solidCellCount_;
