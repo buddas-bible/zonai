@@ -68,6 +68,7 @@ fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
     nextPressure_.resize( pressure_.size() );
     divergence_.resize( pressure_.size() );
     solidOwner_.assign( pressure_.size(), -1 );
+    previousSolidOwner_.assign( pressure_.size(), -1 );
 }
 
 void fluidField2::clear() noexcept
@@ -80,7 +81,9 @@ void fluidField2::clear() noexcept
     std::fill( nextPressure_.begin(), nextPressure_.end(), 0.0f );
     std::fill( divergence_.begin(), divergence_.end(), 0.0f );
     std::fill( solidOwner_.begin(), solidOwner_.end(), -1 );
+    std::fill( previousSolidOwner_.begin(), previousSolidOwner_.end(), -1 );
     solidCellCount_ = 0;
+    solidTransition_ = {};
     pressureMomentum_ = {};
     stepMomentum_ = {};
 }
@@ -261,6 +264,8 @@ void fluidField2::step( float timeStep, int pressureIterations )
 
 void fluidField2::updateObstacles( std::span<const fluidShapeObstacle2> obstacles )
 {
+    std::copy( solidOwner_.begin(), solidOwner_.end(), previousSolidOwner_.begin() );
+    solidTransition_ = {};
     std::fill( solidOwner_.begin(), solidOwner_.end(), -1 );
     solidCellCount_ = 0;
     for( std::size_t index = 0; index < obstacles.size(); ++index )
@@ -281,7 +286,99 @@ void fluidField2::updateObstacles( std::span<const fluidShapeObstacle2> obstacle
                     ++solidCellCount_;
                 }
             }
+
+    for( std::size_t cell = 0; cell < solidOwner_.size(); ++cell )
+    {
+        if( previousSolidOwner_[cell] >= 0 && solidOwner_[cell] < 0 ) ++solidTransition_.exposedCells;
+        if( previousSolidOwner_[cell] < 0 && solidOwner_[cell] >= 0 ) ++solidTransition_.coveredCells;
     }
+    solidTransition_.fluidVolumeDelta =
+        static_cast<float>( solidTransition_.exposedCells - solidTransition_.coveredCells ) * cellSize_ * cellSize_;
+}
+
+void fluidField2::remapExposedFaces()
+{
+    // 새로 열린 fluid-fluid face가 이전 rigid boundary의 속도를 그대로 상속하지 않도록
+    // 직전 Step에서도 fluid이고 이번 Step에도 fluid인 face만 source로 사용한다.
+    // nextU_/nextV_는 이류 전에 비어있는 scratch이므로 원래 속도를 복사해둔다.
+    if( solidTransition_.exposedCells > 0 )
+    {
+        std::copy( u_.begin(), u_.end(), nextU_.begin() );
+        std::copy( v_.begin(), v_.end(), nextV_.begin() );
+    }
+
+    const auto oldFluid = [&]( int x, int y ) { return previousSolidOwner_[cellIndex( x, y )] < 0; };
+    const auto newFluid = [&]( int x, int y ) { return solidOwner_[cellIndex( x, y )] < 0; };
+    const auto validU = [&]( int x, int y )
+    {
+        return x > 0 && x < width_ && y >= 0 && y < height_ &&
+            oldFluid( x - 1, y ) && oldFluid( x, y ) &&
+            newFluid( x - 1, y ) && newFluid( x, y );
+    };
+    const auto validV = [&]( int x, int y )
+    {
+        return x >= 0 && x < width_ && y > 0 && y < height_ &&
+            oldFluid( x, y - 1 ) && oldFluid( x, y ) &&
+            newFluid( x, y - 1 ) && newFluid( x, y );
+    };
+
+    // 가까운 유효 유체 면의 직전 속도를 복사한다. 이전 solid 경계 속도나
+    // 이번 frame에 함께 새로 열린 면은 참조하지 않으므로 순회 순서와 무관하다.
+    const auto extrapolate = [&]( int x, int y, bool horizontal )
+    {
+        for( int distance = 1; distance <= 4; ++distance )
+        {
+            double sum = 0.0;
+            int count = 0;
+            for( int dx = -distance; dx <= distance; ++dx )
+            {
+                const int dy = distance - std::abs( dx );
+                const auto sample = [&]( int sx, int sy )
+                {
+                    if( horizontal ? validU( sx, sy ) : validV( sx, sy ) )
+                    {
+                        sum += horizontal ? nextU_[uIndex( sx, sy )] : nextV_[vIndex( sx, sy )];
+                        ++count;
+                    }
+                };
+                sample( x + dx, y + dy );
+                if( dy != 0 ) sample( x + dx, y - dy );
+            }
+            if( count > 0 )
+            {
+                ++solidTransition_.extrapolatedFaces;
+                return static_cast<float>( sum / count );
+            }
+        }
+        ++solidTransition_.fallbackFaces;
+        return 0.0f;
+    };
+
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+        {
+            const bool wasFluid = oldFluid( x - 1, y ) && oldFluid( x, y );
+            const bool nowFluid = newFluid( x - 1, y ) && newFluid( x, y );
+            if( wasFluid && !nowFluid ) ++solidTransition_.closedUFaces;
+            if( !wasFluid && nowFluid )
+            {
+                ++solidTransition_.openedUFaces;
+                u_[uIndex( x, y )] = extrapolate( x, y, true );
+            }
+        }
+
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const bool wasFluid = oldFluid( x, y - 1 ) && oldFluid( x, y );
+            const bool nowFluid = newFluid( x, y - 1 ) && newFluid( x, y );
+            if( wasFluid && !nowFluid ) ++solidTransition_.closedVFaces;
+            if( !wasFluid && nowFluid )
+            {
+                ++solidTransition_.openedVFaces;
+                v_[vIndex( x, y )] = extrapolate( x, y, false );
+            }
+        }
 }
 
 bool fluidField2::isSolidCell( int x, int y ) const noexcept
@@ -343,6 +440,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
 
     stepMomentum_.before = getFluidMomentum();
     updateObstacles( obstacles );
+    remapExposedFaces();
     stepMomentum_.afterObstacles = getFluidMomentum();
     applySolidBoundaries( obstacles );
 
