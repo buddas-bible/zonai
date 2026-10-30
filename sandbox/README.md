@@ -385,3 +385,14 @@ A는 양쪽 그룹 0·마스크 0으로 통과한다. B는 마스크 0이지만 
 ## AABB 후보와 정확한 도형 겹침 비교
 
 공간 조회의 **AABB·실제 도형 겹침 비교** 장면은 같은 원·캡슐·상자 조회 도형에 대해 `overlapAABB` 후보와 `overlapShape` 확정 결과를 비교한다. 초기 위치에서는 AABB만 겹치는 반례를 보여주며 클릭으로 조회 도형을 이동하면 구분을 확인할 수 있다. 자세한 내용은 [전용 문서](../docs/sandbox-overlap-shape-visualization.md)에 정리했다.
+
+
+## Contact Begin / End / Hit 시각화
+
+강체·조인트 데모의 **디버그 표시 → 접촉 이벤트**를 켜면 현재 장면의 일반 Shape에 Contact Begin/End 및 Hit 구독을 활성화한다. 기본값은 꺼짐이며 Sensor Shape는 구독하지 않는다. 이벤트 표시를 끄면 해당 데모 Shape의 구독도 해제된다.
+
+- 녹색 **시작**, 주황색 **종료**는 두 Shape의 현재 AABB 중심 사이에 놓은 pair 표시이다. 실제 접점 좌표가 아니며 Shape가 파괴된 경우 위치를 그리지 않고 이벤트 개수에만 반영한다.
+- 빨간색 **충격**은 Solver가 제공한 world 접점 및 A→B 법선이고 접근 속도(m/s), 법선 임펄스(N·s)를 함께 표시한다. **충격 최소 접근 속도**로 Hit 임계값을 바꿀 수 있다.
+- 이벤트는 가장 최근 물리 Step 하나만 표시한다. 일시 정지에서는 마지막 Step 결과가 남고, 재생 중 여러 물리 Step을 진행했다면 마지막 Step의 결과만 그린다. 빠른 CCD-only TOI는 Hit 기록에 포함되지 않을 수 있다.
+
+엔진 API와 이벤트 수명 규칙은 [Contact Begin/End](../docs/world-contact-events.md) 및 [Contact Hit](../docs/world-contact-hit-events.md)를 참고한다.
