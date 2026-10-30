@@ -181,6 +181,7 @@ void fluidField2::clear() noexcept
     solidTransition_ = {};
     cutCellTransition_ = {};
     cutCellPressure_ = {};
+    advectionStats_ = {};
     pressureMomentum_ = {};
     stepMomentum_ = {};
 }
@@ -823,9 +824,14 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
     else applySolidBoundaries( obstacles );
 
-    // 반 라그랑주 이류: face마다 이전 속도장을 역추적해 보간함.
-    // 기존 u/v는 읽기 전용으로 두고 next buffer에 기록하므로 순서 의존성이 없음.
-    std::fill( nextU_.begin(), nextU_.end(), 0.0f );
+    advectionStats_ = {};
+    advectionStats_.conservative = conservativeAdvectionEnabled_;
+    advectionStats_.before = getAdvectionFaceMomentum();
+    if( conservativeAdvectionEnabled_ ) advectConservative( timeStep );
+    else
+    {
+        // 기존 반 라그랑주 이류: 읽기 전용 source로부터 face별 역추적.
+        std::fill( nextU_.begin(), nextU_.end(), 0.0f );
     std::fill( nextV_.begin(), nextV_.end(), 0.0f );
     for( int y = 0; y < height_; ++y )
         for( int x = 1; x < width_; ++x )
@@ -843,10 +849,13 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
             nextV_[vIndex( x, y )] = sampleFrom( u_, v_, previous ).y;
         }
 
-    u_.swap( nextU_ );
-    v_.swap( nextV_ );
+        u_.swap( nextU_ );
+        v_.swap( nextV_ );
+        advectionStats_.substeps = 1;
+    }
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
     else applySolidBoundaries( obstacles );
+    advectionStats_.after = getAdvectionFaceMomentum();
     stepMomentum_.afterAdvection = getFluidMomentum();
     if( cutCellProjectionEnabled_ )
     {
