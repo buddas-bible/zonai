@@ -1265,6 +1265,14 @@ void rigidBodyDemo::addWindVortex()
     }
 }
 
+void rigidBodyDemo::seedWindTracer()
+{
+    if( kind_ != demoKind::windFlow || !windField_ ) return;
+    // 닫힌 도메인 왼쪽에 tracer patch를 심어 흐름과 보존량을 관찰.
+    windField_->setTracerConcentration( 6, 6, 4.0f );
+    windField_->setTracerConcentration( 7, 6, 4.0f );
+}
+
 void rigidBodyDemo::beginWindAdvectionTrial()
 {
     if( kind_ != demoKind::windFlow || !windField_ ) return;
