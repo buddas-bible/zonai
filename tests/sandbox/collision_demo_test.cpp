@@ -1521,8 +1521,79 @@ void checkContactEventVisualization()
     check( foundSensor, "sandbox sensor event overlay test has no sensor fixture" );
 }
 
+void checkContactEventTrail()
+{
+    rigidBodyDemo scene{ demoKind::collisionComparison };
+    check( scene.getContactEventTraces().empty(), "contact traces must start empty" );
+    check( scene.getContactEventTrailDuration() > 0.0f, "contact trace default lifetime must be positive" );
+
+    scene.setContactEventTrailDuration( -1.0f );
+    check( scene.getContactEventTrailDuration() == 0.05f, "contact trace lifetime lower clamp" );
+    scene.setContactEventTrailDuration( 5.0f );
+    check( scene.getContactEventTrailDuration() == 2.0f, "contact trace lifetime upper clamp" );
+    scene.setContactEventTrailDuration( 0.35f );
+    scene.setContactEventVisualizationEnabled( true );
+
+    bool recordedHit = false;
+    for( int i = 0; i < 120 && !recordedHit; ++i )
+    {
+        scene.step( 1.0f / 60.0f, 4 );
+        for( const contactEventTrace2& trace : scene.getContactEventTraces() )
+            if( trace.type == contactEventTraceType::hit )
+            {
+                recordedHit = true;
+                check( IsFinite( trace.point ) && IsFinite( trace.normal ) &&
+                    trace.approachSpeed > 0.0f && trace.normalImpulse > 0.0f &&
+                    trace.remainingTime > 0.0f && trace.duration == 0.35f,
+                    "contact hit trail must copy the solver event and its world-space snapshot" );
+            }
+    }
+    check( recordedHit, "collision demo did not record a contact Hit trace" );
+
+    const auto hitIt = std::find_if( scene.getContactEventTraces().begin(), scene.getContactEventTraces().end(),
+        []( const contactEventTrace2& trace ) { return trace.type == contactEventTraceType::hit; } );
+    const contactEventTrace2 copied = *hitIt;
+    scene.step( 1.0f / 6000.0f, 1 );
+    const auto afterStep = std::find_if( scene.getContactEventTraces().begin(), scene.getContactEventTraces().end(),
+        [&]( const contactEventTrace2& trace )
+        {
+            return trace.type == contactEventTraceType::hit &&
+                same( trace.point, copied.point ) && same( trace.normal, copied.normal ) &&
+                trace.approachSpeed == copied.approachSpeed && trace.normalImpulse == copied.normalImpulse &&
+                trace.remainingTime < copied.remainingTime && trace.remainingTime > 0.0f;
+        } );
+    check( afterStep != scene.getContactEventTraces().end(), "contact Hit snapshot was not retained across a later physics Step" );
+
+    const float remainingBeforeZeroStep = afterStep->remainingTime;
+    scene.step( 0.0f, 1 );
+    const auto afterZeroStep = std::find_if( scene.getContactEventTraces().begin(), scene.getContactEventTraces().end(),
+        [&]( const contactEventTrace2& trace )
+        {
+            return trace.type == contactEventTraceType::hit && same( trace.point, copied.point ) &&
+                trace.approachSpeed == copied.approachSpeed && trace.remainingTime == remainingBeforeZeroStep;
+        } );
+    check( afterZeroStep != scene.getContactEventTraces().end(), "Step(0) must not age contact trace snapshots" );
+
+    // 자유 공간의 head-on 장면은 충돌 후 서로 멀어지므로 흔적이 모두 만료되어야 함.
+    for( int i = 0; i < 120; ++i ) scene.step( 1.0f / 60.0f, 4 );
+    check( scene.getContactEventTraces().empty(), "expired contact event trails were not removed" );
+
+    scene.resetCollisionTrial();
+    check( scene.isContactEventVisualizationEnabled() && scene.getContactEventTraces().empty(),
+        "trial reset must clear the old contact traces without disabling visualization" );
+
+    for( int i = 0; i < 65; ++i ) scene.step( 1.0f / 60.0f, 4 );
+    check( !scene.getContactEventTraces().empty(), "replayed collision did not create a fresh event trail" );
+    scene.clearContactEventTrail();
+    check( scene.getContactEventTraces().empty(), "manual trace clear did not clear all snapshots" );
+
+    scene.setContactEventVisualizationEnabled( false );
+    check( scene.getContactEventTraces().empty(), "disabling contact event visualization must clear its trail" );
+}
+
 void checkCollisionDemos()
 {
+    checkContactEventTrail();
     checkContactEventVisualization();
     checkCentralOffsetImpactDemo();
     checkCollisionMassRatioDemo();

@@ -213,6 +213,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
     // 새로 생성된 Shape에도 구독을 적용하되 표시를 끄면 순회 비용을 내지 않음.
     if( contactEventVisualizationEnabled_ ) syncContactEventSubscriptions();
     world_.Step( timeStep, subStepCount );
+    if( contactEventVisualizationEnabled_ ) updateContactEventTrail( timeStep );
     if( kind_ == demoKind::splinePath && splinePathDistance_ == splinePathLength_ && world_.IsValid( impulseBody_ ) )
     {
         world_.SetBodyLinearVelocity( impulseBody_, {} );
@@ -363,7 +364,14 @@ void rigidBodyDemo::setContactEventVisualizationEnabled( bool enabled )
     if( contactEventVisualizationEnabled_ == enabled ) return;
 
     contactEventVisualizationEnabled_ = enabled;
+    clearContactEventTrail();
     syncContactEventSubscriptions();
+}
+
+void rigidBodyDemo::setContactEventTrailDuration( float seconds )
+{
+    if( !std::isfinite( seconds ) ) return;
+    contactEventTrailDuration_ = std::clamp( seconds, 0.05f, 2.0f );
 }
 
 void rigidBodyDemo::syncContactEventSubscriptions()
@@ -378,6 +386,38 @@ void rigidBodyDemo::syncContactEventSubscriptions()
         if( world_.areShapeHitEventsEnabled( id ) != contactEventVisualizationEnabled_ )
             world_.setShapeHitEventsEnabled( id, contactEventVisualizationEnabled_ );
     }
+}
+
+void rigidBodyDemo::updateContactEventTrail( float timeStep )
+{
+    // World event의 span은 다음 Step에서 사라지므로 표시 위치를 여기서 복사함.
+    const float elapsed = std::max( timeStep, 0.0f );
+    for( contactEventTrace2& trace : contactEventTraces_ ) trace.remainingTime -= elapsed;
+    std::erase_if( contactEventTraces_, []( const contactEventTrace2& trace ) { return trace.remainingTime <= 0.0f; } );
+
+    const auto recordPair = [&]( shapeId a, shapeId b, contactEventTraceType type )
+    {
+        // 파괴된 Shape의 End는 위치를 추정할 수 없으므로 기록하지 않음.
+        if( !world_.IsValid( a ) || !world_.IsValid( b ) ) return;
+        const vec2 point = 0.5f * ( Center( world_.GetShapeAABB( a ) ) + Center( world_.GetShapeAABB( b ) ) );
+        contactEventTraces_.push_back( { type, point, {}, 0.0f, 0.0f, contactEventTrailDuration_, contactEventTrailDuration_ } );
+    };
+
+    for( const contactBeginEvent2& event : world_.GetContactBeginEvents() )
+        recordPair( event.shapeA, event.shapeB, contactEventTraceType::begin );
+
+    for( const contactEndEvent2& event : world_.GetContactEndEvents() )
+        recordPair( event.shapeA, event.shapeB, contactEventTraceType::end );
+
+    for( const contactHitEvent2& hit : world_.getContactHitEvents() )
+        contactEventTraces_.push_back( { contactEventTraceType::hit, hit.point, hit.normal,
+            hit.approachSpeed, hit.normalImpulse, contactEventTrailDuration_, contactEventTrailDuration_ } );
+
+    // 많은 충돌이 한 Step에 발생해도 Sandbox의 디버그 기록은 상한을 지킴.
+    constexpr std::size_t MAX_TRACES = 256;
+    if( contactEventTraces_.size() > MAX_TRACES )
+        contactEventTraces_.erase( contactEventTraces_.begin(),
+            contactEventTraces_.begin() + static_cast<std::ptrdiff_t>( contactEventTraces_.size() - MAX_TRACES ) );
 }
 
 void rigidBodyDemo::refreshContacts()
@@ -1077,6 +1117,7 @@ void rigidBodyDemo::applyPointTrialImpulse()
 void rigidBodyDemo::resetCollisionTrial()
 {
     if( collisionTrialInitialStates_.empty() ) return;
+    clearContactEventTrail();
     rotationTrialTimeStep_ = 0.0f;
     forceTrialTime_ = 0.0;
     forceTrialRunning_ = false;
