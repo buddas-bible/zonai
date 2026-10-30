@@ -256,6 +256,14 @@ public:
     void setWindDragCoefficient( float rate );
     void setWindSourceEnabled( bool enabled ) noexcept { windSourceEnabled_ = enabled; }
     void setWindObstacleCouplingEnabled( bool enabled ) noexcept { windObstacleCouplingEnabled_ = enabled; }
+    void setWindCutCellProjectionEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setCutCellProjectionEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindCutCellProjectionEnabled() const noexcept
+    {
+        return windField_ && windField_->isCutCellProjectionEnabled();
+    }
     void resetWindFlow();
     [[nodiscard]] float getWindSourceStrength() const noexcept { return windSourceStrength_; }
     [[nodiscard]] float getWindDragCoefficient() const noexcept { return windDragCoefficient_; }
