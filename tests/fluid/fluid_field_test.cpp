@@ -1,5 +1,6 @@
 #include "fluid/fluidField2.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
