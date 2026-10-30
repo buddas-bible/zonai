@@ -253,6 +253,9 @@ void checkSandboxConservativeAdvectionTrial()
         "advection trial must isolate a repeatable vortex from source, drag and rigid coupling" );
 
     const fluidField2* field = scene.getWindField();
+    scene.seedWindTracer();
+    const float tracerMass = field->getTracerMass();
+    check( close( tracerMass, 2.0f ), "sandbox must seed a reproducible tracer patch" );
     const vec2 seeded = field->sampleVelocity( { 1.5f, 0.0f } );
     check( IsFinite( seeded ) && Length( seeded ) > 0.05f,
         "advection trial must seed observable fluid circulation before the first step" );
@@ -266,10 +269,15 @@ void checkSandboxConservativeAdvectionTrial()
             Length( adv.delta() ) < 3.0e-4f * ( 1.0f + Length( adv.before ) ) &&
             std::isfinite( field->getDivergenceRms() ),
             "sandbox isolated vortex must preserve transport face momentum without pressure contamination" );
+        check( close( field->getTracerMass(), tracerMass, 1.0e-4f ) &&
+            std::abs( field->getTracerStats().delta() ) < 1.0e-4f,
+            "sandbox vortex must conserve the total tracer mass on the closed grid" );
     }
 
     scene.setWindConservativeAdvectionEnabled( false );
     scene.beginWindAdvectionTrial();
+    check( close( field->getTracerMass(), 0.0f ) && field->getTracerStats().substeps == 0,
+        "sandbox advection trial reset must clear tracer state" );
     scene.step( 1.0f / 60.0f, 4 );
     check( !field->getAdvectionStats().conservative && field->getAdvectionStats().substeps == 1 &&
         IsFinite( field->getAdvectionStats().after ),
