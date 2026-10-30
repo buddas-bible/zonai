@@ -790,13 +790,16 @@ void fluidField2::prepareCutCellVolumeChange( float timeStep )
 void fluidField2::projectCutCell( float timeStep, int pressureIterations,
     std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback )
 {
-    // F = a*v_fluid + (1-a)*v_solid. 압력 correction은 열린 구간에만 적용하고
-    // 동일한 a를 Jacobi operator의 symmetric 양방향 edge weight로 사용한다.
+    // 유체 점유 면적의 시간 변화는 다음 보존형 연속 방정식에 직접 들어간다:
+    // div(a*u_fluid) + ΔfluidFraction / dt = 0.
+    // 차단된 face의 solid 속도를 여기에 다시 더하면 경계 이동을 이중 계상하므로
+    // face의 유체 개방율 a만 압력 gradient/flux에 적용한다.
     const float inverseCell = 1.0f / cellSize_;
     const float pressureScale = cellSize_ * cellSize_ / timeStep;
     const float gradientScale = timeStep * inverseCell;
     cutCellPressure_ = {};
-    cutCellPressure_.divergenceBefore = cutCellFluxDivergenceRms();
+    prepareCutCellVolumeChange( timeStep );
+    cutCellPressure_.divergenceBefore = cutCellFluxDivergenceRms( 1.0f / timeStep );
     double sumDivergence = 0.0;
 
     for( int y = 0; y < height_; ++y )
@@ -808,31 +811,66 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
                 divergence_[cell] = 0.0f;
                 continue;
             }
-            const auto fluxU = [&]( int i )
-            {
-                const int index = uIndex( i, y );
-                const float open = cutCellUOpen( i, y );
-                return open * u_[index] + ( 1.0f - open ) * uSolidVelocity_[index];
-            };
-            const auto fluxV = [&]( int j )
-            {
-                const int index = vIndex( x, j );
-                const float open = cutCellVOpen( x, j );
-                return open * v_[index] + ( 1.0f - open ) * vSolidVelocity_[index];
-            };
+            const auto fluxU = [&]( int i ) { return cutCellUOpen( i, y ) * u_[uIndex( i, y )]; };
+            const auto fluxV = [&]( int j ) { return cutCellVOpen( x, j ) * v_[vIndex( x, j )]; };
             divergence_[cell] = ( fluxU( x + 1 ) - fluxU( x ) +
-                fluxV( y + 1 ) - fluxV( y ) ) * inverseCell;
+                fluxV( y + 1 ) - fluxV( y ) ) * inverseCell +
+                cutCellVolumeRate_[cell] / timeStep;
             sumDivergence += divergence_[cell];
             ++cutCellPressure_.activeCells;
         }
 
-    // 고정 외벽에서 moving boundary 표본이 전체 순유량을 0으로 만들지 못하면
-    // Neumann pressure problem이 해를 갖지 않는다. 호환성 보정량을 명시적으로 보고한다.
-    const float mean = cutCellPressure_.activeCells > 0
-        ? static_cast<float>( sumDivergence / cutCellPressure_.activeCells ) : 0.0f;
-    cutCellPressure_.sourceImbalance = static_cast<float>( sumDivergence * cellSize_ * cellSize_ );
+    // 닫힌 외벽과 고체 사이의 압력 Poisson은 각 연결 영역마다 Neumann 문제다.
+    // 전체 평균만 빼면 서로 분리된 유체 포켓의 독립적인 질량 불일치를 풀 수 없다.
+    // 개방 face로 연결된 영역별 source 평균을 빼고 그 크기를 진단값으로 남긴다.
+    cutCellPressure_.sourceImbalance =
+        static_cast<float>( sumDivergence * cellSize_ * cellSize_ ) + cutCellPressure_.unresolvedVolumeRate;
+    std::fill( cutCellComponent_.begin(), cutCellComponent_.end(), -1 );
+    std::vector<double> regionSums;
+    std::vector<int> regionSizes;
+    cutCellQueue_.clear();
+    for( int y = 0; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const int start = cellIndex( x, y );
+            if( cellFluidFraction_[start] <= 0.0f || cutCellComponent_[start] >= 0 ) continue;
+            const int region = static_cast<int>( regionSums.size() );
+            regionSums.push_back( 0.0 );
+            regionSizes.push_back( 0 );
+            cutCellQueue_.clear();
+            cutCellQueue_.push_back( start );
+            cutCellComponent_[start] = region;
+
+            for( std::size_t read = 0; read < cutCellQueue_.size(); ++read )
+            {
+                const int index = cutCellQueue_[read];
+                const int cx = index % width_;
+                const int cy = index / width_;
+                regionSums[region] += divergence_[index];
+                ++regionSizes[region];
+                const auto visit = [&]( int neighbor, float opening )
+                {
+                    if( opening <= 0.0f || cutCellComponent_[neighbor] >= 0 ) return;
+                    cutCellComponent_[neighbor] = region;
+                    cutCellQueue_.push_back( neighbor );
+                };
+                if( cx > 0 ) visit( index - 1, cutCellUOpen( cx, cy ) );
+                if( cx + 1 < width_ ) visit( index + 1, cutCellUOpen( cx + 1, cy ) );
+                if( cy > 0 ) visit( index - width_, cutCellVOpen( cx, cy ) );
+                if( cy + 1 < height_ ) visit( index + width_, cutCellVOpen( cx, cy + 1 ) );
+            }
+        }
+    cutCellPressure_.connectedRegions = static_cast<int>( regionSums.size() );
+    double incompatible = std::abs( static_cast<double>( cutCellPressure_.unresolvedVolumeRate ) );
+    for( const double sum : regionSums ) incompatible += std::abs( sum ) * cellSize_ * cellSize_;
+    cutCellPressure_.compatibilityCorrection = static_cast<float>( incompatible );
+
     for( std::size_t i = 0; i < divergence_.size(); ++i )
-        if( cellFluidFraction_[i] > 0.0f ) divergence_[i] -= mean;
+    {
+        const int region = cutCellComponent_[i];
+        if( region >= 0 )
+            divergence_[i] -= static_cast<float>( regionSums[region] / regionSizes[region] );
+    }
 
     std::fill( pressure_.begin(), pressure_.end(), 0.0f );
     for( int iteration = 0; iteration < pressureIterations; ++iteration )
@@ -870,7 +908,7 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
                 v_[vIndex( x, y )] -= gradientScale *
                     ( pressure_[cellIndex( x, y )] - pressure_[cellIndex( x, y - 1 )] );
 
-    cutCellPressure_.divergenceAfter = cutCellFluxDivergenceRms();
+    cutCellPressure_.divergenceAfter = cutCellFluxDivergenceRms( 1.0f / timeStep );
     double squaredResidual = 0.0;
     for( int y = 0; y < height_; ++y )
         for( int x = 0; x < width_; ++x )
