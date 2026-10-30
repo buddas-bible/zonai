@@ -1213,6 +1213,7 @@ void rigidBodyDemo::resetWindFlow()
 {
     if( kind_ != demoKind::windFlow || !windField_ ) return;
     windField_->clear();
+    windPressureForces_.fill( {} );
     windTime_ = 0.0f;
     cancelInput();
     constexpr std::array<vec2, 3> POSITIONS{ vec2{ -1.8f, 0.0f }, vec2{ 0.4f, 1.0f }, vec2{ 2.5f, -1.0f } };
