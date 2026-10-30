@@ -910,9 +910,9 @@ void rigidBodyDemoUi::drawExperimentControls()
         if( ImGui::SliderFloat( "바람 세기###WindSourceStrength", &strength, 0.0f, 25.0f, "%.1f m/s²" ) )
             setWindSourceStrength( strength );
 
-        float drag = getWindDragRate();
+        float drag = getWindDragCoefficient();
         if( ImGui::SliderFloat( "강체 바람 저항 계수###WindBodyDrag", &drag, 0.0f, 15.0f, "%.1f N·s/m" ) )
-            setWindDragRate( drag );
+            setWindDragCoefficient( drag );
 
         if( const fluidField2* field = getWindField() )
         {
