@@ -882,8 +882,9 @@ void checkSweptTracerRemap()
     auto leadingBox = makeBox();
     direct.step( dt, std::span<const fluidShapeObstacle2>( &leadingBox, 1 ), feedback );
     direct.setTracerConcentration( 9, 7, 4.0f );
-    leadingBox.transform.position.x += 1.25f;
-    leadingBox.center.x += 1.25f;
+    // 이동 끝의 열린 partial face에서 마지막 시간 표본까지 swept 유량이 생기도록 설정.
+    leadingBox.transform.position.x += 1.5f;
+    leadingBox.center.x += 1.5f;
     direct.step( dt, std::span<const fluidShapeObstacle2>( &leadingBox, 1 ), feedback, 160 );
     check( direct.getTracerStats().sweptRemappedMass > 0.5f &&
         close( direct.getTracerMass(), 1.0f, 1.0e-4f ) &&
