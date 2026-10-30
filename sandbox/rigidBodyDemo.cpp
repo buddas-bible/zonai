@@ -223,16 +223,51 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
             const vec2 velocityDelta{ windSourceStrength_ * timeStep, 0.5f * windSourceStrength_ * timeStep * std::sin( 1.7f * windTime_ ) };
             windField_->addVelocity( source, velocityDelta, 1.7f );
         }
-        windField_->step( timeStep );
-
-        // 한 방향 coupling: 유체의 국소 속도와 Body COM 속도 차이에 비례한 힘.
-        // Force는 World::Step이 같은 frame에 소비함. 밀도/장애물 피드백은 아직 없음.
-        for( const visualShape& visual : shapes_ )
+        // fluidField2는 World나 Body를 소유하지 않음. 매 Step마다 실제 pose/속도를 전달함.
+        std::array<fluidCircleObstacle2, 3> obstacles{};
+        const std::size_t obstacleCount = std::min( shapes_.size(), obstacles.size() );
+        for( std::size_t i = 0; i < obstacleCount; ++i )
         {
+            const visualShape& visual = shapes_[i];
+            if( !world_.IsValid( visual.bodyHandle ) || !world_.IsValid( visual.shapeHandle ) ) continue;
+            const auto* circle = std::get_if<circle2>( &world_.GetShape( visual.shapeHandle ).geometry );
+            if( circle == nullptr ) continue;
+            const transform2 transform = world_.GetBodyTransform( visual.bodyHandle );
+            obstacles[i] = { TransformPoint( transform, circle->center ), circle->radius,
+                world_.GetBodyLinearVelocity( visual.bodyHandle ), world_.GetBodyAngularVelocity( visual.bodyHandle ) };
+        }
+
+        windPressureForces_.fill( {} );
+        if( windObstacleCouplingEnabled_ )
+            windField_->step( timeStep, std::span<const fluidCircleObstacle2>( obstacles ).first( obstacleCount ),
+                std::span<fluidObstacleForce2>( windPressureForces_ ).first( obstacleCount ) );
+        else windField_->step( timeStep );
+
+        // 압력에 의한 반력과 경험적 상대속도 drag는 World::Step 전에 힘으로 전달함.
+        // Drag 반력은 주변 격자에 국소 속도 변화로 주입하므로 총 운동량 정확 보존은 아님.
+        for( std::size_t i = 0; i < obstacleCount; ++i )
+        {
+            const visualShape& visual = shapes_[i];
             if( !world_.IsValid( visual.bodyHandle ) || world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
             const vec2 center = TransformPoint( world_.GetBodyTransform( visual.bodyHandle ), world_.GetBodyLocalCenter( visual.bodyHandle ) );
+            if( windObstacleCouplingEnabled_ )
+            {
+                world_.ApplyForceToCenter( visual.bodyHandle, windPressureForces_[i].force );
+                world_.ApplyTorque( visual.bodyHandle, windPressureForces_[i].torque );
+            }
+
             const vec2 relativeVelocity = windField_->sampleVelocity( center ) - world_.GetBodyLinearVelocity( visual.bodyHandle );
-            world_.ApplyForceToCenter( visual.bodyHandle, windDragCoefficient_ * relativeVelocity );
+            const vec2 dragForce = windDragCoefficient_ * relativeVelocity;
+            world_.ApplyForceToCenter( visual.bodyHandle, dragForce );
+            if( windObstacleCouplingEnabled_ && LengthSquared( dragForce ) > 0.0f )
+            {
+                // 질량 밀도 1kg/m³, 단위 깊이에서 유체 주변 ring에 drag 반력 근사 주입.
+                const float size = windField_->getCellSize();
+                const float radius = std::max( obstacles[i].radius, size );
+                const vec2 upstream = center - ( radius + size ) * Normalize( relativeVelocity );
+                const float area = std::numbers::pi_v<float> * ( radius + size ) * ( radius + size );
+                windField_->addVelocity( upstream, -timeStep / area * dragForce, 1.5f * size );
+            }
         }
     }
     // 새로 생성된 Shape에도 구독을 적용하되 표시를 끄면 순회 비용을 내지 않음.
@@ -1178,6 +1213,7 @@ void rigidBodyDemo::resetWindFlow()
 {
     if( kind_ != demoKind::windFlow || !windField_ ) return;
     windField_->clear();
+    windPressureForces_.fill( {} );
     windTime_ = 0.0f;
     cancelInput();
     constexpr std::array<vec2, 3> POSITIONS{ vec2{ -1.8f, 0.0f }, vec2{ 0.4f, 1.0f }, vec2{ 2.5f, -1.0f } };
@@ -1196,7 +1232,7 @@ void rigidBodyDemo::resetWindFlow()
 
 void rigidBodyDemo::createWindFlow()
 {
-    // 속도장과 Rigid Body는 독립적으로 step. 닫힌 유체 경계는 강체 충돌벽이 아님.
+    // 유체와 World는 소유권과 Solver가 독립적이며 현재 원형 장애물만 coupling함.
     windField_.emplace( 24, 14, 0.5f, vec2{ -6.0f, -3.5f } );
     world_.SetGravity( {} );
 

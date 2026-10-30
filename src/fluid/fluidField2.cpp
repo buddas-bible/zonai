@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <numbers>
 
 namespace zonai
 {
@@ -22,6 +23,7 @@ fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
     pressure_.resize( static_cast<std::size_t>( width ) * height );
     nextPressure_.resize( pressure_.size() );
     divergence_.resize( pressure_.size() );
+    solidOwner_.assign( pressure_.size(), -1 );
 }
 
 void fluidField2::clear() noexcept
@@ -33,6 +35,8 @@ void fluidField2::clear() noexcept
     std::fill( pressure_.begin(), pressure_.end(), 0.0f );
     std::fill( nextPressure_.begin(), nextPressure_.end(), 0.0f );
     std::fill( divergence_.begin(), divergence_.end(), 0.0f );
+    std::fill( solidOwner_.begin(), solidOwner_.end(), -1 );
+    solidCellCount_ = 0;
 }
 
 vec2 fluidField2::getCellCenter( int x, int y ) const noexcept
@@ -103,7 +107,81 @@ void fluidField2::addVelocity( vec2 position, vec2 velocityDelta, float radius )
 
 void fluidField2::step( float timeStep, int pressureIterations )
 {
+    step( timeStep, {}, {}, pressureIterations );
+}
+
+void fluidField2::updateObstacles( std::span<const fluidCircleObstacle2> obstacles )
+{
+    std::fill( solidOwner_.begin(), solidOwner_.end(), -1 );
+    solidCellCount_ = 0;
+    for( std::size_t index = 0; index < obstacles.size(); ++index )
+    {
+        const fluidCircleObstacle2& circle = obstacles[index];
+        if( !IsFinite( circle.center ) || !IsFinite( circle.linearVelocity ) ||
+            !std::isfinite( circle.radius ) || circle.radius <= 0.0f ||
+            !std::isfinite( circle.angularVelocity ) ) continue;
+
+        // 최초의 원이 cell을 소유함. 이 API는 겹치는 solid의 union을 처리하지만
+        // 겹친 부분의 상대 운동은 물리적으로 해결하지 않음 (World에서 충돌 해결).
+        for( int y = 0; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+            {
+                const int cell = cellIndex( x, y );
+                if( solidOwner_[cell] >= 0 ) continue;
+                const vec2 offset = getCellCenter( x, y ) - circle.center;
+                if( Dot( offset, offset ) < circle.radius * circle.radius )
+                {
+                    solidOwner_[cell] = static_cast<int>( index );
+                    ++solidCellCount_;
+                }
+            }
+    }
+}
+
+bool fluidField2::isSolidCell( int x, int y ) const noexcept
+{
+    return x >= 0 && x < width_ && y >= 0 && y < height_ && solidOwner_[cellIndex( x, y )] >= 0;
+}
+
+void fluidField2::applySolidBoundaries( std::span<const fluidCircleObstacle2> obstacles )
+{
+    // Solid와 인접한 모든 face의 normal velocity를 rigid body 표면속도로 지정.
+    // 유체-유체 face만 pressure gradient로 보정하며 가장자리 수직 flux는 0.
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+        {
+            const int left = solidOwner_[cellIndex( x - 1, y )];
+            const int right = solidOwner_[cellIndex( x, y )];
+            const int owner = left >= 0 ? left : right;
+            if( owner < 0 ) continue;
+            const fluidCircleObstacle2& solid = obstacles[static_cast<std::size_t>( owner )];
+            const vec2 point = origin_ + cellSize_ * vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
+            u_[uIndex( x, y )] = ( solid.linearVelocity + Cross( solid.angularVelocity, point - solid.center ) ).x;
+        }
+
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const int bottom = solidOwner_[cellIndex( x, y - 1 )];
+            const int top = solidOwner_[cellIndex( x, y )];
+            const int owner = bottom >= 0 ? bottom : top;
+            if( owner < 0 ) continue;
+            const fluidCircleObstacle2& solid = obstacles[static_cast<std::size_t>( owner )];
+            const vec2 point = origin_ + cellSize_ * vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
+            v_[vIndex( x, y )] = ( solid.linearVelocity + Cross( solid.angularVelocity, point - solid.center ) ).y;
+        }
+}
+
+void fluidField2::step( float timeStep, std::span<const fluidCircleObstacle2> obstacles,
+    std::span<fluidObstacleForce2> feedback, int pressureIterations )
+{
+    if( feedback.size() != obstacles.size() )
+        throw std::invalid_argument( "fluidField2: obstacle and feedback sizes must match" );
+    std::fill( feedback.begin(), feedback.end(), fluidObstacleForce2{} );
     if( !std::isfinite( timeStep ) || timeStep <= 0.0f ) return;
+
+    updateObstacles( obstacles );
+    applySolidBoundaries( obstacles );
 
     // 반 라그랑주 이류: face마다 이전 속도장을 역추적해 보간함.
     // 기존 u/v는 읽기 전용으로 두고 next buffer에 기록하므로 순서 의존성이 없음.
@@ -127,10 +205,12 @@ void fluidField2::step( float timeStep, int pressureIterations )
 
     u_.swap( nextU_ );
     v_.swap( nextV_ );
-    project( timeStep, std::clamp( pressureIterations, 1, 200 ) );
+    applySolidBoundaries( obstacles );
+    project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
 }
 
-void fluidField2::project( float timeStep, int pressureIterations )
+void fluidField2::project( float timeStep, int pressureIterations,
+    std::span<const fluidCircleObstacle2> obstacles, std::span<fluidObstacleForce2> feedback )
 {
     // div(v) / dt = Laplace(p). 벽에서는 수직 face 속도 0, Neumann 압력 경계.
     const float inverseCell = 1.0f / cellSize_;
@@ -138,9 +218,11 @@ void fluidField2::project( float timeStep, int pressureIterations )
     for( int y = 0; y < height_; ++y )
         for( int x = 0; x < width_; ++x )
         {
-            divergence_[cellIndex( x, y )] =
-                ( u_[uIndex( x + 1, y )] - u_[uIndex( x, y )] +
-                  v_[vIndex( x, y + 1 )] - v_[vIndex( x, y )] ) * inverseCell;
+            const int cell = cellIndex( x, y );
+            divergence_[cell] = solidOwner_[cell] < 0
+                ? ( u_[uIndex( x + 1, y )] - u_[uIndex( x, y )] +
+                    v_[vIndex( x, y + 1 )] - v_[vIndex( x, y )] ) * inverseCell
+                : 0.0f;
         }
 
     std::fill( pressure_.begin(), pressure_.end(), 0.0f );
@@ -149,14 +231,15 @@ void fluidField2::project( float timeStep, int pressureIterations )
         for( int y = 0; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
             {
+                const int cell = cellIndex( x, y );
+                if( solidOwner_[cell] >= 0 ) { nextPressure_[cell] = 0.0f; continue; }
                 float sum = 0.0f;
                 int neighbors = 0;
-                if( x > 0 ) { sum += pressure_[cellIndex( x - 1, y )]; ++neighbors; }
-                if( x + 1 < width_ ) { sum += pressure_[cellIndex( x + 1, y )]; ++neighbors; }
-                if( y > 0 ) { sum += pressure_[cellIndex( x, y - 1 )]; ++neighbors; }
-                if( y + 1 < height_ ) { sum += pressure_[cellIndex( x, y + 1 )]; ++neighbors; }
-                nextPressure_[cellIndex( x, y )] =
-                    ( sum - divergence_[cellIndex( x, y )] * scale ) / neighbors;
+                if( x > 0 && !isSolidCell( x - 1, y ) ) { sum += pressure_[cellIndex( x - 1, y )]; ++neighbors; }
+                if( x + 1 < width_ && !isSolidCell( x + 1, y ) ) { sum += pressure_[cellIndex( x + 1, y )]; ++neighbors; }
+                if( y > 0 && !isSolidCell( x, y - 1 ) ) { sum += pressure_[cellIndex( x, y - 1 )]; ++neighbors; }
+                if( y + 1 < height_ && !isSolidCell( x, y + 1 ) ) { sum += pressure_[cellIndex( x, y + 1 )]; ++neighbors; }
+                nextPressure_[cell] = neighbors > 0 ? ( sum - divergence_[cell] * scale ) / neighbors : 0.0f;
             }
         pressure_.swap( nextPressure_ );
     }
@@ -164,26 +247,61 @@ void fluidField2::project( float timeStep, int pressureIterations )
     const float gradientScale = timeStep * inverseCell;
     for( int y = 0; y < height_; ++y )
         for( int x = 1; x < width_; ++x )
-            u_[uIndex( x, y )] -= gradientScale * ( pressure_[cellIndex( x, y )] - pressure_[cellIndex( x - 1, y )] );
+            if( !isSolidCell( x - 1, y ) && !isSolidCell( x, y ) )
+                u_[uIndex( x, y )] -= gradientScale * ( pressure_[cellIndex( x, y )] - pressure_[cellIndex( x - 1, y )] );
 
     for( int y = 1; y < height_; ++y )
         for( int x = 0; x < width_; ++x )
-            v_[vIndex( x, y )] -= gradientScale * ( pressure_[cellIndex( x, y )] - pressure_[cellIndex( x, y - 1 )] );
+            if( !isSolidCell( x, y - 1 ) && !isSolidCell( x, y ) )
+                v_[vIndex( x, y )] -= gradientScale * ( pressure_[cellIndex( x, y )] - pressure_[cellIndex( x, y - 1 )] );
+
+    // Pressure traction: solid-fluid 경계의 fluid cell 압력을 solid 외향 법선에 적분.
+    // 2D unit-depth, rho=1 근사이므로 반력은 정밀한 cut-cell 표면 적분이 아님.
+    const auto accumulate = [&]( int owner, vec2 normal, vec2 point, float pressure )
+    {
+        fluidObstacleForce2& result = feedback[static_cast<std::size_t>( owner )];
+        const vec2 force = pressure * cellSize_ * normal;
+        result.force += force;
+        result.torque += Cross( point - obstacles[static_cast<std::size_t>( owner )].center, force );
+    };
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+        {
+            const int left = solidOwner_[cellIndex( x - 1, y )];
+            const int right = solidOwner_[cellIndex( x, y )];
+            if( left == right ) continue;
+            const vec2 point = origin_ + cellSize_ * vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
+            if( left < 0 && right >= 0 ) accumulate( right, { 1.0f, 0.0f }, point, pressure_[cellIndex( x - 1, y )] );
+            else if( right < 0 && left >= 0 ) accumulate( left, { -1.0f, 0.0f }, point, pressure_[cellIndex( x, y )] );
+        }
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const int bottom = solidOwner_[cellIndex( x, y - 1 )];
+            const int top = solidOwner_[cellIndex( x, y )];
+            if( bottom == top ) continue;
+            const vec2 point = origin_ + cellSize_ * vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
+            if( bottom < 0 && top >= 0 ) accumulate( top, { 0.0f, 1.0f }, point, pressure_[cellIndex( x, y - 1 )] );
+            else if( top < 0 && bottom >= 0 ) accumulate( bottom, { 0.0f, -1.0f }, point, pressure_[cellIndex( x, y )] );
+        }
 }
 
 float fluidField2::getDivergenceRms() const noexcept
 {
     double sum = 0.0;
+    int fluidCells = 0;
     const float inverseCell = 1.0f / cellSize_;
     for( int y = 0; y < height_; ++y )
         for( int x = 0; x < width_; ++x )
         {
+            if( isSolidCell( x, y ) ) continue;
             const float divergence =
                 ( u_[uIndex( x + 1, y )] - u_[uIndex( x, y )] +
                   v_[vIndex( x, y + 1 )] - v_[vIndex( x, y )] ) * inverseCell;
             sum += static_cast<double>( divergence ) * divergence;
+            ++fluidCells;
         }
-    return static_cast<float>( std::sqrt( sum / static_cast<double>( width_ * height_ ) ) );
+    return fluidCells > 0 ? static_cast<float>( std::sqrt( sum / fluidCells ) ) : 0.0f;
 }
 
 } // namespace zonai

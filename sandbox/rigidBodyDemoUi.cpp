@@ -221,6 +221,11 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
                 for( int x = 0; x < field->getWidth(); x += 2 )
                 {
                     const vec2 point = field->getCellCenter( x, y );
+                    if( field->isSolidCell( x, y ) )
+                    {
+                        draw.DrawPoint( point, IM_COL32( 255, 155, 85, 150 ), 3.0f );
+                        continue;
+                    }
                     const vec2 velocity = field->sampleVelocity( point );
                     const float speed = Length( velocity );
                     if( speed > 0.025f )
@@ -910,6 +915,10 @@ void rigidBodyDemoUi::drawExperimentControls()
         if( ImGui::SliderFloat( "바람 세기###WindSourceStrength", &strength, 0.0f, 25.0f, "%.1f m/s²" ) )
             setWindSourceStrength( strength );
 
+        bool couple = isWindObstacleCouplingEnabled();
+        if( ImGui::Checkbox( "원형 강체·유체 양방향###WindObstacleCoupling", &couple ) )
+            setWindObstacleCouplingEnabled( couple );
+
         float drag = getWindDragCoefficient();
         if( ImGui::SliderFloat( "강체 바람 저항 계수###WindBodyDrag", &drag, 0.0f, 15.0f, "%.1f N·s/m" ) )
             setWindDragCoefficient( drag );
@@ -918,9 +927,13 @@ void rigidBodyDemoUi::drawExperimentControls()
         {
             ImGui::Text( "MAC 격자: %d x %d / 셀 %.2f m", field->getWidth(), field->getHeight(), field->getCellSize() );
             ImGui::Text( "유체 발산 RMS: %.5f /s", field->getDivergenceRms() );
+            ImGui::Text( "강체 점유 셀: %d", field->getSolidCellCount() );
+            for( std::size_t i = 0; i < getWindPressureForces().size(); ++i )
+                ImGui::Text( "압력 반력 %zu: (%.2f, %.2f) N", i + 1,
+                    getWindPressureForces()[i].force.x, getWindPressureForces()[i].force.y );
         }
         if( ImGui::Button( "유체·물체 초기화###WindReset" ) ) resetWindFlow();
-        ImGui::TextWrapped( "파란 화살표는 국소 유체 속도, 노란 점은 바람 소스입니다. Semi-Lagrangian 이류와 MAC 압력 투영으로 유체의 발산을 줄입니다. 강체는 상대속도에 따른 외력을 받지만 아직 유체를 막거나 되밀지 않습니다." );
+        ImGui::TextWrapped( "파란 화살표는 국소 유체 속도, 주황색 점은 강체가 차지한 셀, 노란 점은 바람 소스입니다. 양방향을 켜면 원형 강체 표면의 수직 속도를 유체 경계에 적용하고 압력 반력을 강체에 돌려줍니다. Drag 반력은 주변 유체에 근사 주입하며, 격자 해상도와 압력 수렴 오차 때문에 엄밀한 운동량 보존은 아직 아닙니다." );
         return;
     }
     if( getKind() == demoKind::revoluteLimitMotorComparison )

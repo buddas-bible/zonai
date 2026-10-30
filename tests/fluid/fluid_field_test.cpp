@@ -1,5 +1,6 @@
 #include "fluid/fluidField2.h"
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -99,10 +100,45 @@ void checkPressureProjection()
     check( projected.getDivergenceRms() == 0.0f, "clear after time integration must reset divergence" );
 }
 
+void checkCircleSolidBoundary()
+{
+    fluidField2 field{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    const fluidCircleObstacle2 obstacle{ { 0.0f, 0.0f }, 0.9f, {}, 0.0f };
+    std::array<fluidObstacleForce2, 1> feedback{};
+
+    field.step( 1.0f / 60.0f, std::span<const fluidCircleObstacle2>( &obstacle, 1 ), feedback );
+    check( field.getSolidCellCount() >= 8 && field.isSolidCell( 12, 8 ),
+        "circle obstacle must occupy cells in the MAC grid" );
+    check( std::abs( feedback[0].force.x ) < 0.001f && std::abs( feedback[0].force.y ) < 0.001f,
+        "stationary circle in stationary fluid must not generate pressure force" );
+
+    const fluidCircleObstacle2 moving{ { 0.0f, 0.0f }, 0.9f, { 1.0f, 0.0f }, 0.0f };
+    field.step( 1.0f / 60.0f, std::span<const fluidCircleObstacle2>( &moving, 1 ), feedback, 160 );
+    check( std::isfinite( field.getDivergenceRms() ) && field.getDivergenceRms() < 0.5f,
+        "moving solid projection must keep fluid divergence bounded" );
+    check( std::isfinite( feedback[0].force.x ) && std::isfinite( feedback[0].torque ) &&
+        feedback[0].force.x < -0.01f, "moving solid must receive opposite pressure reaction" );
+    check( field.sampleVelocity( { 1.25f, 0.0f } ).x > 0.001f,
+        "moving solid must perturb neighboring fluid velocity" );
+
+    bool mismatched = false;
+    try { field.step( 1.0f / 60.0f, std::span<const fluidCircleObstacle2>( &obstacle, 1 ), {} ); }
+    catch( const std::invalid_argument& ) { mismatched = true; }
+    check( mismatched, "obstacle feedback buffer mismatch must be rejected" );
+
+    field.step( 1.0f / 60.0f );
+    check( field.getSolidCellCount() == 0 && !field.isSolidCell( 12, 8 ),
+        "solid occupancy must be refreshed when no obstacle is supplied" );
+    field.clear();
+    check( field.getSolidCellCount() == 0 && field.getDivergenceRms() == 0.0f,
+        "fluid clear must reset pressure, velocity and solid masks" );
+}
+
 } // namespace
 
 int main()
 {
     checkBoundsAndSampling();
     checkPressureProjection();
+    checkCircleSolidBoundary();
 }

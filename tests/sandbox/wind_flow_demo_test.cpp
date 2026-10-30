@@ -35,6 +35,7 @@ void checkFluidCoupling()
     const vec2 initial = scene.getWorld().GetBodyTransform( first ).position;
 
     // 단방향 coupling이 없으면 유체만 움직이고 Body는 정지해야 함.
+    scene.setWindObstacleCouplingEnabled( false );
     scene.setWindDragCoefficient( 0.0f );
     for( int i = 0; i < 120; ++i ) scene.step( 1.0f / 60.0f, 4 );
     check( near( scene.getWorld().GetBodyTransform( first ).position, initial ),
@@ -70,9 +71,51 @@ void checkFluidCoupling()
         "wind reset must restore motion while preserving edited parameters" );
 }
 
+void checkMovingSolidReaction()
+{
+    rigidBodyDemo disabled{ demoKind::windFlow };
+    rigidBodyDemo enabled{ demoKind::windFlow };
+    const bodyId bodyDisabled = disabled.getShapes()[0].bodyHandle;
+    const bodyId bodyEnabled = enabled.getShapes()[0].bodyHandle;
+
+    for( rigidBodyDemo* scene : { &disabled, &enabled } )
+    {
+        scene->setWindSourceEnabled( false );
+        scene->setWindDragCoefficient( 0.0f );
+        scene->getWorld().SetBodyLinearVelocity( scene->getShapes()[0].bodyHandle, { 2.0f, 0.0f } );
+    }
+    disabled.setWindObstacleCouplingEnabled( false );
+    enabled.setWindObstacleCouplingEnabled( true );
+
+    disabled.step( 1.0f / 60.0f, 4 );
+    enabled.step( 1.0f / 60.0f, 4 );
+
+    check( disabled.getWindField()->getSolidCellCount() == 0 &&
+        enabled.getWindField()->getSolidCellCount() > 0,
+        "bidirectional toggle must control solid occupancy" );
+    check( near( disabled.getWorld().GetBodyLinearVelocity( bodyDisabled ), { 2.0f, 0.0f } ),
+        "disabled feedback must preserve momentum in an empty fluid" );
+    check( enabled.getWindPressureForces()[0].force.x < -0.001f &&
+        enabled.getWorld().GetBodyLinearVelocity( bodyEnabled ).x <
+            disabled.getWorld().GetBodyLinearVelocity( bodyDisabled ).x,
+        "a moving solid must stir fluid and receive opposite pressure force" );
+
+    const vec2 wake = enabled.getWindField()->sampleVelocity( { -1.0f, 0.0f } );
+    check( IsFinite( wake ) && Length( wake ) > 0.0001f,
+        "moving solid must change the velocity field without a wind source" );
+
+    enabled.resetWindFlow();
+    check( enabled.getWindField()->getSolidCellCount() == 0 &&
+        near( enabled.getWindPressureForces()[0].force, {} ) &&
+        near( enabled.getWorld().GetBodyLinearVelocity( bodyEnabled ), {} ),
+        "wind reset must clear pressure feedback and solid mask" );
+    check( enabled.isWindObstacleCouplingEnabled(), "wind reset must preserve coupling setting" );
+}
+
 } // namespace
 
 int main()
 {
     checkFluidCoupling();
+    checkMovingSolidReaction();
 }
