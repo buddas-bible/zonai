@@ -212,6 +212,25 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         draw.DrawGrid();
     }
 
+    if( getKind() == demoKind::windFlow )
+    {
+        if( const fluidField2* field = getWindField() )
+        {
+            constexpr ImU32 WIND_COLOR = IM_COL32( 85, 205, 255, 225 );
+            for( int y = 0; y < field->getHeight(); y += 2 )
+                for( int x = 0; x < field->getWidth(); x += 2 )
+                {
+                    const vec2 point = field->getCellCenter( x, y );
+                    const vec2 velocity = field->sampleVelocity( point );
+                    const float speed = Length( velocity );
+                    if( speed > 0.025f )
+                        draw.DrawArrow( point, velocity, WIND_COLOR, std::min( 0.48f, 0.12f + 0.12f * speed ) );
+                }
+            draw.DrawPoint( { -3.5f, 0.0f }, IM_COL32( 250, 200, 90, 245 ), 6.0f );
+            draw.DrawLabel( { -3.5f, -0.45f }, "바람 소스", IM_COL32( 250, 200, 90, 245 ) );
+        }
+    }
+
     if( getKind() == demoKind::splinePath || getKind() == demoKind::splineRail )
     {
         const auto points = SampleAdaptive( { getSplineControlPoints() }, 0.01f );
@@ -880,6 +899,30 @@ void rigidBodyDemoUi::drawSplineEditorControls()
 
 void rigidBodyDemoUi::drawExperimentControls()
 {
+    if( getKind() == demoKind::windFlow )
+    {
+        ImGui::Separator();
+        ImGui::TextUnformatted( "2D 유체 속도장" );
+        bool enabled = isWindSourceEnabled();
+        if( ImGui::Checkbox( "바람 소스 활성###WindSourceEnabled", &enabled ) ) setWindSourceEnabled( enabled );
+
+        float strength = getWindSourceStrength();
+        if( ImGui::SliderFloat( "바람 세기###WindSourceStrength", &strength, 0.0f, 25.0f, "%.1f m/s²" ) )
+            setWindSourceStrength( strength );
+
+        float drag = getWindDragRate();
+        if( ImGui::SliderFloat( "강체 결합 계수###WindBodyDrag", &drag, 0.0f, 15.0f, "%.1f /s" ) )
+            setWindDragRate( drag );
+
+        if( const fluidField2* field = getWindField() )
+        {
+            ImGui::Text( "MAC 격자: %d x %d / 셀 %.2f m", field->getWidth(), field->getHeight(), field->getCellSize() );
+            ImGui::Text( "유체 발산 RMS: %.5f /s", field->getDivergenceRms() );
+        }
+        if( ImGui::Button( "유체·물체 초기화###WindReset" ) ) resetWindFlow();
+        ImGui::TextWrapped( "파란 화살표는 국소 유체 속도, 노란 점은 바람 소스입니다. Semi-Lagrangian 이류와 MAC 압력 투영으로 유체의 발산을 줄입니다. 강체는 상대속도에 따른 외력을 받지만 아직 유체를 막거나 되밀지 않습니다." );
+        return;
+    }
     if( getKind() == demoKind::revoluteLimitMotorComparison )
     {
         ImGui::TextUnformatted( "회전 각도 제한·모터 비교" );
