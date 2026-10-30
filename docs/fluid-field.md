@@ -141,9 +141,23 @@ Part 7의 셀 유체 면적 비율과 MAC face 개방율을 **실제 압력 방�
 
 실험 모드에서는 기존 `getDivergenceRms()`가 여전히 **이진 면 속도 발산**을 계산하므로 대신 `getCutCellPressure().divergenceAfter`를 사용해야 한다. 동일하게 기존 `getFluidMomentum()`, `getStepMomentum()`은 이진 fluid-fluid face 기준으로 남아 있으니 cut-cell 전체 운동량 보존의 지표가 아니다.
 
+## Part 9 — 움직이는 Cut-cell의 시간적 연속 방정식
+
+Part 8의 가중 압력 투영은 모든 MAC 면의 개방율을 공간적으로 고려했지만, **장애물이 이동하면서 각 셀의 유체 체적이 변화하는 효과**는 연속 방정식에 없었다. 실험 모드에서 두 프레임의 표본 점유율 차이를 이용한 시간적 소스를 연결한다.
+
+- 각 유체 셀의 면적 (V_i = f_i h²) (깊이 1m)에 대해 `Δf_i = f_i(t) - f_i(t-Δt)`를 계산한다. `∂f_i/∂t ≈ Δf_i/Δt`이고 유체가 차지한 개방 면의 속도만 적분해 **`div(a·u_fluid) + Δf_i/Δt = 0`**을 목표로 한다.
+- 기존 Part 8의 `a u_fluid + (1-a)u_solid`을 그대로 둔 채 `Δf_i/Δt`를 더하면, 강체가 차지한 면의 운동학 경계 이동을 **중복 계산**한다. 따라서 이 압력 모드의 유량은 **`a·u_fluid`만** 사용한다. 이미 계산한 강체 속도는 완전히 가려진 face의 운동학 경계 조건/이류 근사에만 남긴다.
+- 압력 방정식은 기존과 동일한 대칭 가중 연산자에 `div(a·u_fluid) + Δf_i/Δt`를 우변으로 넣는다. 각 유체 면에는 동일한 개방율 `a`가 양쪽 셀에서 적용된다.
+- **첫 유효 Step의 장애물 배치**는 이전 물리 위치가 없는 초기 조건이므로 압력의 `Δf_i/Δt`를 0으로 취급한다. 반면 `getCutCellTransition()`은 초기 배치의 가려진 체적을 그대로 기록한다. `clear()` 뒤에도 시간 이력은 다시 시작한다.
+- 현재 `f_i=0`인 셀에는 압력 미지수가 존재하지 않는다. 그 셀에서 소멸한 `Δf_i`는 격자 내 **가장 가까운 활성 유체 셀**에 다중 시작 BFS로 전달한다. 이는 압력계에 시간을 따라 이동한 체적원을 잃지 않기 위한 근사이며 실제 이동 경로의 swept-volume 면 플럭스가 아니다. 활성 유체 셀이 전혀 없으면 `unresolvedVolumeRate`로 별도 집계한다.
+- 닫힌 외벽 또는 서로 단절된 유체 포켓에서는 각 연결 영역의 전체 소스가 0이 아니면 Neumann 압력 문제가 성립하지 않는다. **개방된 face를 따라 연결된 영역별** 우변 평균을 빼서 정합 가능한 성분을 투영하고, 각 영역별 제거량의 절댓값 합을 `compatibilityCorrection`으로 보고한다. 전체 부호 있는 불일치는 `sourceImbalance`다.
+- `fluidCutCellPressure2`의 `divergenceBefore/After`는 이제 `div(a·u_fluid) + Δf_i/Δt`의 RMS(1/s)이고, `volumeRate`·`redistributedVolumeRate`·`unresolvedVolumeRate`는 m³/s 단위, `connectedRegions`와 `hasVolumeHistory`도 제공한다. `pressureResidual`은 정합성 보정을 적용한 가중 Poisson의 반복 잔차이므로, 실제 원래 연속 방정식의 미해결 부분은 `divergenceAfter`·`compatibilityCorrection`에서 별도로 판단한다.
+
+**한계:** 이 구현은 두 공간 표본 사이의 `ΔV/Δt`를 이용한 **시간 이산 연속 방정식 근사**이다. 강체의 실제 경로 및 회전 중 쓸고 간 체적을 따라 face별 flux를 계산하지 않는다. 부분 점유율은 4×4 표본이므로 프레임 간 aliasing으로 전체 유체 체적의 비보존이 발생할 수 있고, 닫힌 도메인의 정합 보정이 이를 물리적으로 복구하지는 않는다. 현재 이류는 여전히 Semi-Lagrangian이며, 정확한 강체 압력 반력과 에너지·운동량의 전체 보존도 해결되지 않았다. **보존형 advection, swept interface flux 및 유체-강체 반력 장부를 다음 단계에서 별도로 구현**한다. 이진 Solver가 기본이고 본 경로는 실험 기능으로 남는다.
+
 ## 다음 구현 후보
 
-1. 움직이는 cut-cell의 `dV/dt` 체적 소스와 보존형 이류, pressure–rigid 동기 결합 및 반력 수지 정밀화.
+1. swept interface를 통한 면별 체적 flux, 보존형 이류 및 pressure–rigid 동기 결합/반력 수지 정밀화.
 2. 복합 Body의 다중 Shape 집계, static obstacle, Segment/Chain의 별도 표면 경계 표현.
 3. 연기/염료(tracer) 수송, 점성(확산), 회전(vorticity) 표현.
 4. 압력 solver 수렴 기준과 성능 평가, 해상도 증대.

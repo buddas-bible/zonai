@@ -97,15 +97,24 @@ struct fluidCutCellTransition2
 };
 
 // 부분 개방 면의 유량을 사용하는 실험용 압력 투영 결과.
-// pressureResidual: 현재 weighted Poisson 방정식의 반복 잔차 (m³/s).
-// sourceImbalance: 닫힌 격자에서 moving boundary가 만든 정합되지 않은 순유량 (m³/s).
+// divergenceBefore/After는 div(a*u) + ΔfluidFraction/dt의 RMS (1/s).
+// sourceImbalance: 닫힌 도메인에서 압력으로 해소할 수 없는 전체 유량 (m³/s).
+// compatibilityCorrection: 서로 분리된 각 유체 영역의 유량 불일치 절댓값 합 (m³/s).
+// volumeRate: 직전/현재 sub-cell 기하의 부호 있는 유체 체적 변화율 (m³/s).
+// 최초 geometry snapshot은 초기 상태로 취급해 시간적 소스를 적용하지 않음.
 struct fluidCutCellPressure2
 {
     float divergenceBefore = 0.0f;
     float divergenceAfter = 0.0f;
     float pressureResidual = 0.0f;
     float sourceImbalance = 0.0f;
+    float compatibilityCorrection = 0.0f;
+    float volumeRate = 0.0f;
+    float redistributedVolumeRate = 0.0f;
+    float unresolvedVolumeRate = 0.0f;
     int activeCells = 0;
+    int connectedRegions = 0;
+    bool hasVolumeHistory = false;
 };
 
 // 균일 MAC(staggered) grid: x속도는 수직 face, y속도는 수평 face에 저장.
@@ -122,7 +131,8 @@ public:
     void clear() noexcept;
 
     // 실험 모드: sub-cell 개방 비율의 유량과 가중 압력 Poisson 사용.
-    // 기본은 기존 이진 solid 압력 solver. 아직 swept-volume 보존은 없음.
+    // 기본은 기존 이진 solid 압력 solver. 위치 snapshot의 체적 변화율만 근사하며
+    // 정확한 swept-volume 경로/보존형 이류는 아직 구현하지 않음.
     void setCutCellProjectionEnabled( bool enabled ) noexcept { cutCellProjectionEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellProjectionEnabled() const noexcept { return cutCellProjectionEnabled_; }
 
@@ -190,7 +200,8 @@ private:
     void remapExposedFaces();
     [[nodiscard]] float cutCellUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellVOpen( int x, int y ) const noexcept;
-    [[nodiscard]] float cutCellFluxDivergenceRms() const noexcept;
+    [[nodiscard]] float cutCellFluxDivergenceRms( float inverseTimeStep ) const noexcept;
+    void prepareCutCellVolumeChange( float timeStep );
     void applyCutCellBoundaries() noexcept;
     void projectCutCell( float timeStep, int pressureIterations,
         std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback );
@@ -219,11 +230,17 @@ private:
     std::vector<float> vOpenFraction_;
     std::vector<float> uSolidVelocity_;
     std::vector<float> vSolidVelocity_;
+    std::vector<float> cutCellVolumeRate_;
+    std::vector<int> cutCellComponent_;
+    std::vector<int> cutCellNearestFluid_;
+    std::vector<int> cutCellQueue_;
     int solidCellCount_ = 0;
     fluidSolidTransition2 solidTransition_{};
     fluidCutCellTransition2 cutCellTransition_{};
     fluidCutCellPressure2 cutCellPressure_{};
     bool cutCellProjectionEnabled_ = false;
+    bool hasCutCellHistory_ = false;
+    bool volumeSourceValid_ = false;
     fluidPressureMomentum2 pressureMomentum_{};
     fluidStepMomentum2 stepMomentum_{};
 #pragma endregion Data
