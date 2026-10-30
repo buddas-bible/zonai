@@ -454,6 +454,67 @@ void checkFractionalCutCells()
         "clear must reset the diagnostics and restore fully open interior geometry" );
 }
 
+void checkWeightedCutCellPressure()
+{
+    constexpr float dt = 1.0f / 60.0f;
+
+    // 빈 domain에서 a=1이므로 기존 MAC과 동일한 압력 투영을 수행한다.
+    fluidField2 empty{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    empty.setCutCellProjectionEnabled( true );
+    empty.addVelocity( { -2.0f, 0.4f }, { 3.0f, 0.0f }, 1.5f );
+    empty.step( dt, 160 );
+    const fluidCutCellPressure2 noObstacle = empty.getCutCellPressure();
+    check( noObstacle.activeCells == 24 * 16 &&
+        noObstacle.divergenceBefore > 0.01f &&
+        noObstacle.divergenceAfter < noObstacle.divergenceBefore * 0.3f &&
+        std::abs( noObstacle.sourceImbalance ) < 1.0e-4f,
+        "aperture weighted solver must project empty-domain velocity with zero net flux" );
+
+    // 작은 원은 cell-center mask에 없더라도 fractional face를 막는다.
+    fluidField2 cut{ 24, 24, 0.5f, { -6.0f, -6.0f } };
+    cut.setCutCellProjectionEnabled( true );
+    const fluidCircleObstacle2 circle{ {}, 0.65f, {}, 0.0f };
+    std::array<fluidObstacleForce2, 1> pressure{};
+    cut.addVelocity( { -1.0f, 0.0f }, { 2.0f, 0.0f }, 1.4f );
+    cut.step( dt, std::span<const fluidCircleObstacle2>( &circle, 1 ), pressure, 200 );
+    const fluidCutCellPressure2 cutStats = cut.getCutCellPressure();
+    check( cutStats.activeCells > 0 && cut.getCutCellTransition().partialCells > 0 &&
+        cutStats.divergenceBefore > 0.01f &&
+        cutStats.divergenceAfter < cutStats.divergenceBefore * 0.55f &&
+        std::isfinite( cutStats.pressureResidual ) && IsFinite( pressure[0].force ),
+        "partial circle apertures must be used by the pressure projection and return finite feedback" );
+    check( LengthSquared( cut.getPressureMomentum().residual() ) == 0.0f,
+        "binary pressure momentum ledger must not be reported for weighted cut-cell mode" );
+
+    // 정지 유체와 정지 장애물은 압력이나 운동량을 생성하지 않는다.
+    fluidField2 resting{ 24, 24, 0.5f, { -6.0f, -6.0f } };
+    resting.setCutCellProjectionEnabled( true );
+    resting.step( dt, std::span<const fluidCircleObstacle2>( &circle, 1 ), pressure );
+    check( resting.getCutCellPressure().divergenceAfter == 0.0f &&
+        resting.getCutCellPressure().pressureResidual == 0.0f &&
+        LengthSquared( pressure[0].force ) == 0.0f,
+        "stationary cut-cell boundary must not generate spurious pressure" );
+
+    // 이동하는 경계의 blocked fraction은 별도 solid velocity flux로 계산한다.
+    const fluidCircleObstacle2 moving{ {}, 0.65f, { 1.0f, 0.0f }, 0.0f };
+    resting.step( dt, std::span<const fluidCircleObstacle2>( &moving, 1 ), pressure, 200 );
+    check( resting.getCutCellPressure().divergenceBefore > 0.01f &&
+        std::isfinite( resting.getCutCellPressure().divergenceAfter ) &&
+        std::isfinite( resting.getCutCellPressure().sourceImbalance ) &&
+        IsFinite( pressure[0].force ),
+        "moving cut-cell boundary must enter fluid divergence through solid normal velocity" );
+
+    resting.setCutCellProjectionEnabled( false );
+    resting.step( dt, std::span<const fluidCircleObstacle2>( &moving, 1 ), pressure );
+    check( resting.getCutCellPressure().activeCells == 0 &&
+        IsFinite( resting.getPressureMomentum().residual() ),
+        "disabling experimental mode must return to original center-mask pressure solver" );
+    resting.clear();
+    check( resting.getCutCellPressure().activeCells == 0 &&
+        !resting.isCutCellProjectionEnabled(),
+        "clear should reset diagnostics but retain the selected pressure mode" );
+}
+
 } // namespace
 
 int main()
@@ -466,4 +527,5 @@ int main()
     checkPressureMomentumLedger();
     checkMovingSolidRemap();
     checkFractionalCutCells();
+    checkWeightedCutCellPressure();
 }
