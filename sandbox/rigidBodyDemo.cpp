@@ -48,6 +48,10 @@ rigidBodyDemo::rigidBodyDemo( demoKind kind ) : kind_( kind )
     {
         createPlayground();
     }
+    else if( kind == demoKind::windFlow )
+    {
+        createWindFlow();
+    }
     else if( kind == demoKind::terrainChain || kind == demoKind::splineTerrain )
     {
         createTerrainChain();
@@ -210,6 +214,27 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
         torqueTrialTime_ += timeStep;
     }
     updateSplinePath( timeStep );
+    if( windField_ && timeStep > 0.0f )
+    {
+        windTime_ += timeStep;
+        if( windSourceEnabled_ )
+        {
+            const vec2 source{ -3.5f, 0.0f };
+            const vec2 velocityDelta{ windSourceStrength_ * timeStep, 0.5f * windSourceStrength_ * timeStep * std::sin( 1.7f * windTime_ ) };
+            windField_->addVelocity( source, velocityDelta, 1.7f );
+        }
+        windField_->step( timeStep );
+
+        // 한 방향 coupling: 유체의 국소 속도와 Body COM 속도 차이에 비례한 힘.
+        // Force는 World::Step이 같은 frame에 소비함. 밀도/장애물 피드백은 아직 없음.
+        for( const visualShape& visual : shapes_ )
+        {
+            if( !world_.IsValid( visual.bodyHandle ) || world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
+            const vec2 center = TransformPoint( world_.GetBodyTransform( visual.bodyHandle ), world_.GetBodyLocalCenter( visual.bodyHandle ) );
+            const vec2 relativeVelocity = windField_->sampleVelocity( center ) - world_.GetBodyLinearVelocity( visual.bodyHandle );
+            world_.ApplyForceToCenter( visual.bodyHandle, windDragRate_ * world_.GetBodyMass( visual.bodyHandle ) * relativeVelocity );
+        }
+    }
     // 새로 생성된 Shape에도 구독을 적용하되 표시를 끄면 순회 비용을 내지 않음.
     if( contactEventVisualizationEnabled_ ) syncContactEventSubscriptions();
     world_.Step( timeStep, subStepCount );
@@ -1137,6 +1162,56 @@ void rigidBodyDemo::resetCollisionTrial()
     // 시간 진행 없이 초기 위치의 sensor overlap을 다시 계산함.
     if( kind_ == demoKind::sensorWallComparison ) world_.Step( 0.0f );
     refreshContacts();
+}
+
+void rigidBodyDemo::setWindSourceStrength( float strength )
+{
+    if( std::isfinite( strength ) ) windSourceStrength_ = std::clamp( strength, 0.0f, 25.0f );
+}
+
+void rigidBodyDemo::setWindDragRate( float rate )
+{
+    if( std::isfinite( rate ) ) windDragRate_ = std::clamp( rate, 0.0f, 15.0f );
+}
+
+void rigidBodyDemo::resetWindFlow()
+{
+    if( kind_ != demoKind::windFlow || !windField_ ) return;
+    windField_->clear();
+    windTime_ = 0.0f;
+    cancelInput();
+    constexpr std::array<vec2, 3> POSITIONS{ vec2{ -1.8f, 0.0f }, vec2{ 0.4f, 1.0f }, vec2{ 2.5f, -1.0f } };
+    for( std::size_t i = 0; i < shapes_.size() && i < POSITIONS.size(); ++i )
+    {
+        const bodyId body = shapes_[i].bodyHandle;
+        if( !world_.IsValid( body ) ) continue;
+        world_.SetBodyTransform( body, { POSITIONS[i], {} } );
+        world_.SetBodyLinearVelocity( body, {} );
+        world_.SetBodyAngularVelocity( body, 0.0f );
+        world_.ClearForces( body );
+    }
+    clearContactEventTrail();
+    refreshContacts();
+}
+
+void rigidBodyDemo::createWindFlow()
+{
+    // 속도장과 Rigid Body는 독립적으로 step. 닫힌 유체 경계는 강체 충돌벽이 아님.
+    windField_.emplace( 24, 14, 0.5f, vec2{ -6.0f, -3.5f } );
+    world_.SetGravity( {} );
+
+    constexpr std::array<vec2, 3> POSITIONS{ vec2{ -1.8f, 0.0f }, vec2{ 0.4f, 1.0f }, vec2{ 2.5f, -1.0f } };
+    constexpr std::array<float, 3> RADII{ 0.32f, 0.5f, 0.4f };
+    constexpr std::array<const char*, 3> LABELS{ "가벼운 원", "무거운 원", "세 번째 원" };
+
+    for( std::size_t i = 0; i < POSITIONS.size(); ++i )
+    {
+        const bodyId body = world_.CreateBody( bodyType::Dynamic, { POSITIONS[i], {} } );
+        world_.SetBodySleepEnabled( body, false );
+        const shapeId shape = world_.CreateShape( body, circle2{ {}, RADII[i] }, {}, i == 1 ? 3.0f : 1.0f );
+        shapes_.push_back( { body, shape, LABELS[i] } );
+    }
+    impulseBody_ = shapes_[0].bodyHandle;
 }
 
 void rigidBodyDemo::createPlayground()
