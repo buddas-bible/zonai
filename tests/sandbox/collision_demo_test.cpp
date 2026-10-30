@@ -1456,8 +1456,74 @@ void checkCentralOffsetImpactDemo()
     }
 }
 
+void checkContactEventVisualization()
+{
+    rigidBodyDemo scene{ demoKind::collisionComparison };
+    world& simulation = scene.getWorld();
+
+    check( !scene.isContactEventVisualizationEnabled(), "contact event overlay is disabled by default" );
+    for( const visualShape& visual : scene.getShapes() )
+        check( !simulation.AreShapeContactEventsEnabled( visual.shapeHandle ) &&
+            !simulation.areShapeHitEventsEnabled( visual.shapeHandle ), "default sandbox shapes do not subscribe to contact events" );
+
+    scene.setContactEventVisualizationEnabled( true );
+    check( scene.isContactEventVisualizationEnabled(), "contact event overlay toggle did not turn on" );
+    for( const visualShape& visual : scene.getShapes() )
+        check( simulation.AreShapeContactEventsEnabled( visual.shapeHandle ) &&
+            simulation.areShapeHitEventsEnabled( visual.shapeHandle ), "contact event overlay did not subscribe a solid shape" );
+
+    bool sawBegin = false;
+    bool sawHit = false;
+    bool sawEnd = false;
+    for( int i = 0; i < 120; ++i )
+    {
+        scene.step( 1.0f / 60.0f, 4 );
+        sawBegin |= !simulation.GetContactBeginEvents().empty();
+        sawEnd |= !simulation.GetContactEndEvents().empty();
+        for( const contactHitEvent2& hit : simulation.getContactHitEvents() )
+        {
+            check( hit.approachSpeed > simulation.getContactHitSpeedThreshold() &&
+                hit.normalImpulse > 0.0f && IsFinite( hit.point ) && IsFinite( hit.normal ),
+                "sandbox contact hit overlay received an invalid solver snapshot" );
+            sawHit = true;
+        }
+    }
+    check( sawBegin && sawEnd && sawHit, "sandbox contact event overlay missed begin/end/hit on head-on impacts" );
+
+    scene.setContactEventVisualizationEnabled( false );
+    check( !scene.isContactEventVisualizationEnabled(), "contact event overlay toggle did not turn off" );
+    for( const visualShape& visual : scene.getShapes() )
+        check( !simulation.AreShapeContactEventsEnabled( visual.shapeHandle ) &&
+            !simulation.areShapeHitEventsEnabled( visual.shapeHandle ), "contact event overlay did not unsubscribe a solid shape" );
+
+    rigidBodyDemo thresholdDemo{ demoKind::collisionComparison };
+    thresholdDemo.getWorld().setContactHitSpeedThreshold( 100.0f );
+    thresholdDemo.setContactEventVisualizationEnabled( true );
+    bool thresholdBegin = false;
+    for( int i = 0; i < 120; ++i )
+    {
+        thresholdDemo.step( 1.0f / 60.0f, 4 );
+        thresholdBegin |= !thresholdDemo.getWorld().GetContactBeginEvents().empty();
+        check( thresholdDemo.getWorld().getContactHitEvents().empty(), "sandbox hit threshold did not suppress low-speed impacts" );
+    }
+    check( thresholdBegin, "sandbox hit threshold changed contact begin reporting" );
+
+    rigidBodyDemo sensorDemo{ demoKind::sensorWallComparison };
+    sensorDemo.setContactEventVisualizationEnabled( true );
+    bool foundSensor = false;
+    for( const visualShape& visual : sensorDemo.getShapes() )
+    {
+        if( !sensorDemo.getWorld().IsShapeSensor( visual.shapeHandle ) ) continue;
+        foundSensor = true;
+        check( !sensorDemo.getWorld().AreShapeContactEventsEnabled( visual.shapeHandle ) &&
+            !sensorDemo.getWorld().areShapeHitEventsEnabled( visual.shapeHandle ), "contact event overlay subscribed a sensor shape" );
+    }
+    check( foundSensor, "sandbox sensor event overlay test has no sensor fixture" );
+}
+
 void checkCollisionDemos()
 {
+    checkContactEventVisualization();
     checkCentralOffsetImpactDemo();
     checkCollisionMassRatioDemo();
     checkObliqueImpactFrictionDemo();
