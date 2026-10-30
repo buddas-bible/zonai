@@ -1232,7 +1232,7 @@ void rigidBodyDemo::resetWindFlow()
 
 void rigidBodyDemo::createWindFlow()
 {
-    // 속도장과 Rigid Body는 독립적으로 step. 닫힌 유체 경계는 강체 충돌벽이 아님.
+    // 유체와 World는 소유권과 Solver가 독립적이며 현재 원형 장애물만 coupling함.
     windField_.emplace( 24, 14, 0.5f, vec2{ -6.0f, -3.5f } );
     world_.SetGravity( {} );
 
