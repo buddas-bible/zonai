@@ -560,32 +560,31 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
 
     if( isContactEventVisualizationEnabled() )
     {
-        const world& simulation = getWorld();
-        // Begin/End 이벤트에는 접점 좌표가 없으므로 두 Shape AABB의 중간을 표시함.
-        // 삭제된 Shape는 위치를 재구성하지 않고 아래 카운터에만 포함함.
-        const auto drawPairEvent = [&]( shapeId a, shapeId b, const char* label, ImU32 color )
+        for( const contactEventTrace2& trace : getContactEventTraces() )
         {
-            if( !simulation.IsValid( a ) || !simulation.IsValid( b ) ) return;
-            const vec2 point = 0.5f * ( Center( simulation.GetShapeAABB( a ) ) + Center( simulation.GetShapeAABB( b ) ) );
-            draw.DrawPoint( point, color, 6.0f );
-            draw.DrawLabel( point, label, color );
-        };
+            const int alpha = static_cast<int>( 255.0f * std::clamp( trace.remainingTime / trace.duration, 0.0f, 1.0f ) );
+            if( trace.type == contactEventTraceType::begin )
+            {
+                const ImU32 color = IM_COL32( 110, 240, 140, alpha );
+                draw.DrawPoint( trace.point, color, 6.0f );
+                draw.DrawLabel( trace.point, "시작", color );
+            }
+            else if( trace.type == contactEventTraceType::end )
+            {
+                const ImU32 color = IM_COL32( 255, 170, 90, alpha );
+                draw.DrawPoint( trace.point, color, 6.0f );
+                draw.DrawLabel( trace.point, "종료", color );
+            }
+            else
+            {
+                const ImU32 color = IM_COL32( 255, 90, 105, alpha );
+                draw.DrawPoint( trace.point, color, 7.0f );
+                draw.DrawArrow( trace.point, trace.normal, color, 0.75f );
 
-        for( const contactBeginEvent2& event : simulation.GetContactBeginEvents() )
-            drawPairEvent( event.shapeA, event.shapeB, "시작", IM_COL32( 110, 240, 140, 255 ) );
-
-        for( const contactEndEvent2& event : simulation.GetContactEndEvents() )
-            drawPairEvent( event.shapeA, event.shapeB, "종료", IM_COL32( 255, 170, 90, 255 ) );
-
-        constexpr ImU32 HIT_COLOR = IM_COL32( 255, 90, 105, 255 );
-        for( const contactHitEvent2& hit : simulation.getContactHitEvents() )
-        {
-            draw.DrawPoint( hit.point, HIT_COLOR, 7.0f );
-            draw.DrawArrow( hit.point, hit.normal, HIT_COLOR, 0.75f );
-
-            char label[96]{};
-            std::snprintf( label, sizeof( label ), "충격 %.2f m/s  %.2f N·s", hit.approachSpeed, hit.normalImpulse );
-            draw.DrawLabel( hit.point, label, HIT_COLOR );
+                char label[96]{};
+                std::snprintf( label, sizeof( label ), "충격 %.2f m/s  %.2f N·s", trace.approachSpeed, trace.normalImpulse );
+                draw.DrawLabel( trace.point, label, color );
+            }
         }
     }
 }
@@ -2065,10 +2064,16 @@ void rigidBodyDemoUi::drawDebugSettings()
         if( ImGui::DragFloat( "충격 최소 접근 속도###Hit speed threshold", &hitThreshold, 0.1f, 0.0f, 100.0f, "%.2f m/s" ) )
             getWorld().setContactHitSpeedThreshold( hitThreshold );
 
-        ImGui::Text( "시작 %zu / 종료 %zu / 충격 %zu",
+        float duration = getContactEventTrailDuration();
+        if( ImGui::SliderFloat( "표시 유지 시간###Contact trace lifetime", &duration, 0.05f, 2.0f, "%.2f s" ) )
+            setContactEventTrailDuration( duration );
+
+        ImGui::Text( "최근 Step: 시작 %zu / 종료 %zu / 충격 %zu",
             getWorld().GetContactBeginEvents().size(),
             getWorld().GetContactEndEvents().size(),
             getWorld().getContactHitEvents().size() );
+        ImGui::Text( "표시 중인 이벤트: %zu / 256", getContactEventTraces().size() );
+        if( ImGui::Button( "이벤트 흔적 지우기###Clear contact traces" ) ) clearContactEventTrail();
     }
     ImGui::Checkbox( "질량 중심###Center of mass", &showCOM_ );
     ImGui::Checkbox( "속도 벡터###Velocity vectors", &showVelocities_ );
@@ -2108,7 +2113,7 @@ void rigidBodyDemoUi::drawDebugSettings()
     ImGui::Spacing();
 
     ImGui::TextWrapped( "접촉 정보는 간격·수직 충격량·마찰 충격량을 표시합니다. 청록색 화살표는 속도이며 어두운 오브젝트는 수면 중입니다." );
-    ImGui::TextWrapped( "이벤트 표시: 녹색 시작·주황색 종료는 두 Shape의 AABB 중심 사이에 표시되며 실제 접점이 아닙니다. 빨간색 충격은 Solver가 보고한 접점·법선입니다. 삭제된 Shape의 종료는 숫자에만 포함됩니다." );
+    ImGui::TextWrapped( "이벤트 표시: 녹색 시작·주황색 종료는 발생 당시 두 Shape의 AABB 중심 사이에 남긴 근사 위치입니다. 빨간색 충격은 Solver 접점·법선입니다. 시간 경과에 따라 투명해지며 삭제된 Shape의 종료는 위치 없이 최근 Step 개수에만 포함됩니다." );
 }
 
 #pragma endregion Controls
