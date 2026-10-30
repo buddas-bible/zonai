@@ -301,6 +301,72 @@ void checkPressureMomentumLedger()
         "clear must reset pressure and stage momentum ledgers" );
 }
 
+void checkMovingSolidRemap()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    fluidField2 field{ 32, 24, 0.25f, { -4.0f, -3.0f } };
+    std::array<fluidObstacleForce2, 1> feedback{};
+
+    fluidCircleObstacle2 circle{ { 0.0f, 0.0f }, 0.9f, { 5.0f, 0.0f }, 0.0f };
+    field.step( dt, std::span<const fluidCircleObstacle2>( &circle, 1 ), feedback );
+    const int occupied = field.getSolidCellCount();
+    const fluidSolidTransition2 first = field.getSolidTransition();
+    check( occupied > 0 && first.coveredCells == occupied && first.exposedCells == 0 &&
+        first.openedUFaces == 0 && first.openedVFaces == 0 && first.fluidVolumeDelta < 0.0f,
+        "first solid rasterization must only cover cells and close fluid faces" );
+
+    // 크기와 각도가 같은 원을 격자 크기만큼 이동하면 유효 체적이 변하지 않는다.
+    circle.center.x += field.getCellSize();
+    circle.linearVelocity = {};
+    field.step( dt, std::span<const fluidCircleObstacle2>( &circle, 1 ), feedback, 160 );
+    const fluidSolidTransition2 moved = field.getSolidTransition();
+    check( field.getSolidCellCount() == occupied &&
+        moved.exposedCells > 0 && moved.coveredCells == moved.exposedCells &&
+        moved.fluidVolumeDelta == 0.0f &&
+        moved.openedUFaces + moved.openedVFaces > 0 &&
+        moved.extrapolatedFaces + moved.fallbackFaces == moved.openedUFaces + moved.openedVFaces,
+        "translating solid must account for each re-exposed face and conserve discrete cell count" );
+    check( std::isfinite( field.getDivergenceRms() ) && IsFinite( field.getFluidMomentum() ) &&
+        IsFinite( field.getPressureMomentum().residual() ),
+        "moving solid remap must preserve finite projected fluid state" );
+
+    // 동일 장애물을 다음 step에 그대로 제공하면 전이 통계가 전부 0.
+    field.step( dt, std::span<const fluidCircleObstacle2>( &circle, 1 ), feedback );
+    const fluidSolidTransition2 still = field.getSolidTransition();
+    check( still.exposedCells == 0 && still.coveredCells == 0 &&
+        still.openedUFaces == 0 && still.openedVFaces == 0 && still.fluidVolumeDelta == 0.0f,
+        "unchanged occupancy must not remap or report phantom fluid volume changes" );
+
+    // Solid 삭제 시 경계 속도가 남아 있던 face를 유체 속도로 복원한다.
+    field.step( dt );
+    const fluidSolidTransition2 removed = field.getSolidTransition();
+    check( removed.exposedCells == occupied && removed.coveredCells == 0 &&
+        close( removed.fluidVolumeDelta, occupied * 0.25f * 0.25f ) &&
+        removed.extrapolatedFaces + removed.fallbackFaces == removed.openedUFaces + removed.openedVFaces,
+        "removing solid must reopen all fluid cells and reconstruct exposed MAC faces" );
+    field.step( dt );
+    check( field.getSolidTransition().exposedCells == 0 && field.getSolidTransition().coveredCells == 0 &&
+        std::isfinite( field.getDivergenceRms() ),
+        "fluid-only follow-up must not keep stale solid transition state" );
+
+    // 회전한 얇은 다각형에서는 같은 부피의 cell들이 가리고 다시 열릴 수 있다.
+    field.clear();
+    fluidShapeObstacle2 rectangle{ MakeBox( { 0.85f, 0.2f } ), {}, {}, {}, 0.0f };
+    field.step( dt, std::span<const fluidShapeObstacle2>( &rectangle, 1 ), feedback );
+    rectangle.transform.rotation = rot2::FromRadians( 0.5f * std::numbers::pi_v<float> );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &rectangle, 1 ), feedback );
+    const fluidSolidTransition2 rotated = field.getSolidTransition();
+    check( rotated.exposedCells > 0 && rotated.coveredCells > 0 &&
+        rotated.openedUFaces + rotated.openedVFaces > 0 &&
+        rotated.extrapolatedFaces + rotated.fallbackFaces == rotated.openedUFaces + rotated.openedVFaces,
+        "rotating polygon must reconstruct newly opened fluid faces" );
+
+    field.clear();
+    check( field.getSolidTransition().exposedCells == 0 &&
+        field.getSolidTransition().coveredCells == 0 && field.getSolidCellCount() == 0,
+        "clear must reset solid transition diagnostics" );
+}
+
 } // namespace
 
 int main()
@@ -311,4 +377,5 @@ int main()
     checkGeneralShapeObstacles();
     checkDiscreteMomentumExchange();
     checkPressureMomentumLedger();
+    checkMovingSolidRemap();
 }
