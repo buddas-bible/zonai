@@ -875,6 +875,21 @@ void checkSweptTracerRemap()
                 moving.getTracerConcentration( x, y ) >= -1.0e-5f,
                 "swept remap and advection must keep concentrations nonnegative" );
 
+    // 선두 edge를 일부만 지난 경우 이웃의 개방 공간으로 직접 swept 방향 이송.
+    fluidField2 direct{ 16, 16, 0.5f, { -4.0f, -4.0f } };
+    direct.setCutCellProjectionEnabled( true );
+    direct.setSweptTracerRemapEnabled( true );
+    auto leadingBox = makeBox();
+    direct.step( dt, std::span<const fluidShapeObstacle2>( &leadingBox, 1 ), feedback );
+    direct.setTracerConcentration( 9, 7, 4.0f );
+    leadingBox.transform.position.x += 1.25f;
+    leadingBox.center.x += 1.25f;
+    direct.step( dt, std::span<const fluidShapeObstacle2>( &leadingBox, 1 ), feedback, 160 );
+    check( direct.getTracerStats().sweptRemappedMass > 0.5f &&
+        close( direct.getTracerMass(), 1.0f, 1.0e-4f ) &&
+        direct.getTracerStats().trappedMass < 1.0e-5f,
+        "swept face outward flux must guide direct conservative mass transfer to the open neighbor" );
+
     moving.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback );
     check( moving.getTracerStats().usedSweptRemap &&
         close( moving.getTracerStats().sweptRemappedMass, 0.0f ) &&
