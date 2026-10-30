@@ -179,6 +179,40 @@ void checkDragMomentumBudget()
         "pressure reaction must remain independent when drag coefficient is zero" );
 }
 
+void checkPressureLedgerInSandbox()
+{
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    const bodyId body = scene.getShapes()[0].bodyHandle;
+    scene.getWorld().SetBodyLinearVelocity( body, { 2.0f, 0.0f } );
+    scene.step( 1.0f / 60.0f, 4 );
+
+    const fluidPressureMomentum2& budget = scene.getWindField()->getPressureMomentum();
+    const fluidStepMomentum2& stages = scene.getWindField()->getStepMomentum();
+    const float scale = 1.0f + Length( budget.fluid ) + Length( budget.solid ) + Length( budget.wall );
+    check( Length( budget.solid ) > 1.0e-5f &&
+        Length( budget.residual() ) < 5.0e-4f * scale,
+        "wind demo moving rigid body must close the fluid/solid/wall pressure momentum budget" );
+
+    vec2 forceSum{};
+    for( const fluidObstacleForce2& pressure : scene.getWindPressureForces() )
+        forceSum += pressure.force;
+    check( Length( budget.solid - forceSum * ( 1.0f / 60.0f ) ) < 1.0e-4f * scale &&
+        Length( stages.pressureDelta() - budget.fluid ) < 1.0e-4f * scale,
+        "Sandbox applied pressure reaction must match core pressure ledger" );
+
+    scene.resetWindFlow();
+    check( LengthSquared( scene.getWindField()->getPressureMomentum().residual() ) == 0.0f &&
+        LengthSquared( scene.getWindField()->getStepMomentum().afterPressure ) == 0.0f,
+        "wind reset must clear core pressure diagnostics" );
+
+    scene.setWindObstacleCouplingEnabled( false );
+    scene.step( 1.0f / 60.0f, 4 );
+    check( LengthSquared( scene.getWindField()->getPressureMomentum().solid ) == 0.0f,
+        "one-way mode must not report rigid pressure reaction" );
+}
+
 } // namespace
 
 int main()
@@ -187,4 +221,5 @@ int main()
     checkMovingSolidReaction();
     checkRotatedSandboxObstacles();
     checkDragMomentumBudget();
+    checkPressureLedgerInSandbox();
 }

@@ -81,6 +81,8 @@ void fluidField2::clear() noexcept
     std::fill( divergence_.begin(), divergence_.end(), 0.0f );
     std::fill( solidOwner_.begin(), solidOwner_.end(), -1 );
     solidCellCount_ = 0;
+    pressureMomentum_ = {};
+    stepMomentum_ = {};
 }
 
 vec2 fluidField2::getCellCenter( int x, int y ) const noexcept
@@ -339,7 +341,9 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     std::fill( feedback.begin(), feedback.end(), fluidObstacleForce2{} );
     if( !std::isfinite( timeStep ) || timeStep <= 0.0f ) return;
 
+    stepMomentum_.before = getFluidMomentum();
     updateObstacles( obstacles );
+    stepMomentum_.afterObstacles = getFluidMomentum();
     applySolidBoundaries( obstacles );
 
     // 반 라그랑주 이류: face마다 이전 속도장을 역추적해 보간함.
@@ -365,13 +369,18 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     u_.swap( nextU_ );
     v_.swap( nextV_ );
     applySolidBoundaries( obstacles );
+    stepMomentum_.afterAdvection = getFluidMomentum();
     project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
+    stepMomentum_.afterPressure = getFluidMomentum();
 }
 
 void fluidField2::project( float timeStep, int pressureIterations,
     std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback )
 {
-    // div(v) / dt = Laplace(p). 벽에서는 수직 face 속도 0, Neumann 압력 경계.
+    // div(v) / dt = Laplace(p). 벽/solid no-through, Neumann 압력 경계.
+    // 압력 경계가 fluid-fluid face 운동량을 얼마나 변경하는지 독립 측정한다.
+    pressureMomentum_ = {};
+    const vec2 beforePressure = getFluidMomentum();
     const float inverseCell = 1.0f / cellSize_;
     const float scale = cellSize_ * cellSize_ / timeStep;
     for( int y = 0; y < height_; ++y )
@@ -443,6 +452,30 @@ void fluidField2::project( float timeStep, int pressureIterations,
             if( bottom < 0 && top >= 0 ) accumulate( top, { 0.0f, 1.0f }, point, pressure_[cellIndex( x, y - 1 )] );
             else if( top < 0 && bottom >= 0 ) accumulate( bottom, { 0.0f, -1.0f }, point, pressure_[cellIndex( x, y )] );
         }
+
+    // 닫힌 격자의 외벽도 유체 압력으로 반력을 받는다.
+    // Solid가 외곽에 걸쳐 있는 셀은 외벽에 유체 압력이 없으므로 제외한다.
+    // fluid+solid+wall = 0: 동일 pressure 미지수의 내부 face gradient가
+    // 전부 telescope된 결과 (단, float 반올림에 따른 잔차는 남음).
+    double wallX = 0.0;
+    double wallY = 0.0;
+    const double faceArea = static_cast<double>( cellSize_ ); // unit depth
+    for( int y = 0; y < height_; ++y )
+    {
+        if( !isSolidCell( 0, y ) ) wallX -= pressure_[cellIndex( 0, y )] * faceArea;
+        if( !isSolidCell( width_ - 1, y ) ) wallX += pressure_[cellIndex( width_ - 1, y )] * faceArea;
+    }
+    for( int x = 0; x < width_; ++x )
+    {
+        if( !isSolidCell( x, 0 ) ) wallY -= pressure_[cellIndex( x, 0 )] * faceArea;
+        if( !isSolidCell( x, height_ - 1 ) ) wallY += pressure_[cellIndex( x, height_ - 1 )] * faceArea;
+    }
+
+    vec2 solidForce{};
+    for( const fluidObstacleForce2& force : feedback ) solidForce += force.force;
+    pressureMomentum_.fluid = getFluidMomentum() - beforePressure;
+    pressureMomentum_.solid = timeStep * solidForce;
+    pressureMomentum_.wall = timeStep * vec2{ static_cast<float>( wallX ), static_cast<float>( wallY ) };
 }
 
 float fluidField2::getDivergenceRms() const noexcept
