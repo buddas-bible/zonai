@@ -192,6 +192,7 @@ Part 11의 가중 MAC face 운동량과는 별개로, **셀 중심 수동 tracer
 - CFL 0.45 목표, 최대 64 substep. 작은 cut-cell과 큰 CFL에서 각 donor의 합계 유출을 보유 질량으로 제한해 음수 물질량을 방지한다. 이 제한은 국소 정확도를 낮출 수 있다.
 - `getTracerConcentration()`, `getTracerMass()`, `getTracerStats()`가 현재 농도, 총 보관 질량, 이번 Step의 before/after 질량, 갇힌 질량, 최대 CFL과 substeps를 보고한다. `clear()`는 tracer를 비운다.
 - 테스트는 빈 폐쇄 격자/장시간 수송, 고 CFL, static fractional cut-cell, 비정상 입력, moving obstacle의 완전 점유와 재노출을 포함한다.
+- Sandbox **유체 / 2D 바람·유체 속도장**에서 **수동 추적 물질 주입** 버튼으로 두 셀에 초기 tracer를 배치한다. 패널의 총 질량·막힌 셀 보관 질량·수송 전후 변화·CFL/substep을 확인하며, **흐름+Body 초기화** 또는 이류 비교 프리셋은 tracer를 지운다. 현재 시각화는 숫자 진단이며 tracer 컬러 렌더링은 별도 과제다.
 
 **한계:** 움직이는 장애물이 완전히 점유한 셀에는 tracer 질량을 삭제하지 않고 남겨서 `trappedMass`로 별도 표시한다. 이 질량은 다시 열린 셀에서 나타나므로 **swept interface 물질 수송을 구현했다고 볼 수 없다**. 또한 현재 cut-cell 비율은 표본 근사이며 tracer 질량 합계가 실제 유체 총 질량·운동량을 의미하지 않는다. Moving swept-flux와 물질 수송의 결합, 정확한 dual mass, 압력/강체 운동량 장부는 후속 단계로 남긴다.
 
