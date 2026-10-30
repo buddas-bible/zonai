@@ -748,6 +748,84 @@ void checkConservativeMacAdvection()
         "clear must reset advection measurements but preserve the chosen algorithm" );
 }
 
+
+void checkConservativeTracerTransport()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    fluidField2 field{ 24, 20, 0.5f, { -6.0f, -5.0f } };
+    check( close( field.getTracerMass(), 0.0f ) && field.getTracerStats().substeps == 0,
+        "tracer must be disabled and empty by default" );
+    field.setTracerConcentration( 12, 10, 4.0f );
+    check( close( field.getTracerMass(), 1.0f ) && close( field.getTracerConcentration( 12, 10 ), 4.0f ),
+        "setting concentration must initialize mass from actual cell volume" );
+    field.setTracerConcentration( -1, 10, 9.0f );
+    field.setTracerConcentration( 12, 10, -1.0f );
+    field.setTracerConcentration( 12, 10, std::numeric_limits<float>::infinity() );
+    check( close( field.getTracerMass(), 1.0f ), "invalid tracer writes must not alter mass" );
+
+    field.addVelocity( { 0.25f, 0.25f }, { 8.0f, 5.0f }, 2.0f );
+    field.step( 0.12f, 100 );
+    check( field.getTracerStats().substeps >= 2 && !field.getTracerStats().cflLimited,
+        "tracer transport must substep for high face CFL" );
+    for( int i = 0; i < 40; ++i ) field.step( dt, 100 );
+    check( close( field.getTracerMass(), 1.0f, 1.0e-4f ) &&
+        std::abs( field.getTracerStats().delta() ) < 1.0e-4f,
+        "paired internal tracer fluxes must conserve total mass on a closed grid" );
+    float minConcentration = 0.0f;
+    int occupied = 0;
+    for( int y = 0; y < field.getHeight(); ++y )
+        for( int x = 0; x < field.getWidth(); ++x )
+        {
+            const float concentration = field.getTracerConcentration( x, y );
+            check( std::isfinite( concentration ) && concentration >= -1.0e-5f,
+                "mass-limited transport must keep finite nonnegative tracer density" );
+            minConcentration = std::min( minConcentration, concentration );
+            if( concentration > 1.0e-5f ) ++occupied;
+        }
+    check( occupied > 1 && minConcentration >= -1.0e-5f,
+        "velocity transport must move tracer from its initial cell" );
+
+    fluidField2 cut{ 32, 32, 0.5f, { -8.0f, -8.0f } };
+    cut.setCutCellProjectionEnabled( true );
+    fluidCircleObstacle2 obstacle{ { 0.0f, 0.0f }, 0.8f, {}, 0.0f };
+    std::array<fluidObstacleForce2, 1> feedback{};
+    cut.step( dt, std::span<const fluidCircleObstacle2>( &obstacle, 1 ), feedback );
+    const float fraction = cut.getCellFluidFraction( 14, 15 );
+    check( fraction > 0.0f && fraction < 1.0f, "test requires a partial cut cell" );
+    cut.setTracerConcentration( 14, 15, 3.0f );
+    check( close( cut.getTracerMass(), 3.0f * 0.25f * fraction ) &&
+        close( cut.getTracerConcentration( 14, 15 ), 3.0f ),
+        "tracer mass must respect fractional fluid volume" );
+    cut.addVelocity( { -1.0f, -0.4f }, { 3.0f, 0.6f }, 1.5f );
+    for( int i = 0; i < 15; ++i )
+        cut.step( dt, std::span<const fluidCircleObstacle2>( &obstacle, 1 ), feedback );
+    check( close( cut.getTracerMass(), 3.0f * 0.25f * fraction, 1.0e-4f ) &&
+        std::abs( cut.getTracerStats().delta() ) < 1.0e-4f,
+        "static cut-cell open faces must exchange equal tracer mass" );
+
+    // Moving cut-cell의 swept interface transport는 미구현. 질량을 조용히 버리지 않고
+    // 일시적으로 막힌 셀 안에 보관하며 trappedMass로 이 한계를 드러낸다.
+    fluidField2 moving{ 20, 20, 1.0f };
+    moving.setCutCellProjectionEnabled( true );
+    moving.setTracerConcentration( 7, 7, 2.0f );
+    moving.step( dt );
+    fluidCircleObstacle2 cover{ { 7.5f, 7.5f }, 1.0f, {}, 0.0f };
+    moving.step( dt, std::span<const fluidCircleObstacle2>( &cover, 1 ), feedback );
+    check( close( moving.getTracerMass(), 2.0f ) &&
+        close( moving.getTracerConcentration( 7, 7 ), 0.0f ) &&
+        close( moving.getTracerStats().trappedMass, 2.0f ),
+        "covered cells must report trapped tracer mass rather than silently delete it" );
+    cover.center = { 11.5f, 7.5f };
+    moving.step( dt, std::span<const fluidCircleObstacle2>( &cover, 1 ), feedback );
+    check( close( moving.getTracerMass(), 2.0f ) &&
+        close( moving.getTracerConcentration( 7, 7 ), 2.0f ) &&
+        close( moving.getTracerStats().trappedMass, 0.0f ),
+        "exposed cells must retain deferred tracer mass until swept transport is implemented" );
+    moving.clear();
+    check( close( moving.getTracerMass(), 0.0f ) && moving.getTracerStats().substeps == 0,
+        "clear must discard tracer state and diagnostics" );
+}
+
 } // namespace
 
 int main()
@@ -764,4 +842,5 @@ int main()
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkConservativeMacAdvection();
+    checkConservativeTracerTransport();
 }
