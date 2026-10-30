@@ -926,6 +926,9 @@ void rigidBodyDemoUi::drawExperimentControls()
             beginWindAdvectionTrial();
         if( ImGui::Button( "현재 흐름에 와류 추가###WindVortex" ) ) addWindVortex();
         if( ImGui::Button( "수동 추적 물질 주입###WindTracerSeed" ) ) seedWindTracer();
+        bool sweptTracer = isWindSweptTracerRemapEnabled();
+        if( ImGui::Checkbox( "이동 강체의 tracer 재배치 (실험)###WindSweptTracerRemap", &sweptTracer ) )
+            setWindSweptTracerRemapEnabled( sweptTracer );
 
         bool cutCellProjection = isWindCutCellProjectionEnabled();
         if( ImGui::Checkbox( "부분 개방 압력 투영 (실험)###WindCutCellPressure", &cutCellProjection ) )
@@ -957,7 +960,12 @@ void rigidBodyDemoUi::drawExperimentControls()
                 tracer.beforeMass, tracer.afterMass, tracer.delta() );
             ImGui::Text( "tracer CFL: %.3f / substep: %d%s",
                 tracer.maxCfl, tracer.substeps, tracer.cflLimited ? " (상한 도달)" : "" );
-            ImGui::TextDisabled( "moving solid의 swept tracer 수송은 미구현: 갇힌 질량은 별도 계측" );
+            ImGui::Text( "이동 강체 remap: %s / 직접 %.6f kg / 최근접 %.6f kg",
+                tracer.usedSweptRemap ? "적용" : "미적용",
+                tracer.sweptRemappedMass, tracer.fallbackRemappedMass );
+            ImGui::Text( "재배치하지 못한 감소 체적의 tracer: %.6f kg",
+                tracer.unresolvedDisplacementMass );
+            ImGui::TextDisabled( "Swept flux의 이동 방향만 이용한 근사, 정확한 표면 수송은 아님" );
             if( advection.cflLimited )
                 ImGui::TextColored( ImVec4{ 1.0f, 0.4f, 0.2f, 1.0f },
                     "CFL substep 상한 도달: 정확도/안정성 저하 가능" );
