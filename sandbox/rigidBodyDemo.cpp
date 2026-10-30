@@ -245,31 +245,68 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 std::span<fluidObstacleForce2>( windPressureForces_ ).first( obstacleCount ) );
         else windField_->step( timeStep );
 
-        // 압력에 의한 반력과 경험적 상대속도 drag는 World::Step 전에 힘으로 전달함.
-        // Drag 반력은 주변 격자에 국소 속도 변화로 주입하므로 총 운동량 정확 보존은 아님.
+        // Drag는 기존 유체 face를 갱신하기 전에 모든 Body의 상대속도로 계산한다.
+        // Solid 내부 샘플은 경계 속도에 오염되므로 바깥쪽 네 방향의 흐름을 사용.
+        std::array<vec2, 3> dragForces{};
+        std::array<vec2, 3> dragCenters{};
+        std::array<float, 3> dragRadii{};
+        const float spacing = windField_->getCellSize();
+        windDragBodyImpulse_ = {};
+        windDragFluidImpulse_ = {};
+
         for( std::size_t i = 0; i < obstacleCount; ++i )
         {
             const visualShape& visual = shapes_[i];
-            if( !world_.IsValid( visual.bodyHandle ) || world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
-            const vec2 center = TransformPoint( world_.GetBodyTransform( visual.bodyHandle ), world_.GetBodyLocalCenter( visual.bodyHandle ) );
+            if( !world_.IsValid( visual.bodyHandle ) ||
+                world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
+
+            const vec2 center = TransformPoint( world_.GetBodyTransform( visual.bodyHandle ),
+                world_.GetBodyLocalCenter( visual.bodyHandle ) );
+            const float radius = std::max( Length( Extents( world_.GetShapeAABB( visual.shapeHandle ) ) ), spacing );
+            const float distance = radius + spacing;
+            vec2 fluidVelocity = windField_->sampleVelocity( center );
+            if( windObstacleCouplingEnabled_ )
+            {
+                fluidVelocity = 0.25f * (
+                    windField_->sampleVelocity( center + vec2{ distance, 0.0f } ) +
+                    windField_->sampleVelocity( center - vec2{ distance, 0.0f } ) +
+                    windField_->sampleVelocity( center + vec2{ 0.0f, distance } ) +
+                    windField_->sampleVelocity( center - vec2{ 0.0f, distance } ) );
+            }
+
+            dragCenters[i] = center;
+            dragRadii[i] = radius;
+            dragForces[i] = windDragCoefficient_ * ( fluidVelocity - world_.GetBodyLinearVelocity( visual.bodyHandle ) );
+        }
+
+        // 압력 traction은 별도 근사. 여기서는 Drag에 한해 유체/Body 충격량을 쌍으로 적용.
+        // World::Step에서 Body force가 소비되기 전에, 유체가 실제로 받은 -J 만큼만 Body에 +J를 줌.
+        for( std::size_t i = 0; i < obstacleCount; ++i )
+        {
+            const visualShape& visual = shapes_[i];
+            if( !world_.IsValid( visual.bodyHandle ) ||
+                world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
+
             if( windObstacleCouplingEnabled_ )
             {
                 world_.ApplyForceToCenter( visual.bodyHandle, windPressureForces_[i].force );
                 world_.ApplyTorque( visual.bodyHandle, windPressureForces_[i].torque );
             }
 
-            const vec2 relativeVelocity = windField_->sampleVelocity( center ) - world_.GetBodyLinearVelocity( visual.bodyHandle );
-            const vec2 dragForce = windDragCoefficient_ * relativeVelocity;
-            world_.ApplyForceToCenter( visual.bodyHandle, dragForce );
-            if( windObstacleCouplingEnabled_ && LengthSquared( dragForce ) > 0.0f )
+            vec2 dragForce = dragForces[i];
+            if( windObstacleCouplingEnabled_ )
             {
-                // 질량 밀도 1kg/m³, 단위 깊이에서 유체 주변 ring에 drag 반력 근사 주입.
-                const float size = windField_->getCellSize();
-                const float radius = std::max( Length( Extents( world_.GetShapeAABB( visual.shapeHandle ) ) ), size );
-                const vec2 upstream = center - ( radius + size ) * Normalize( relativeVelocity );
-                const float area = std::numbers::pi_v<float> * ( radius + size ) * ( radius + size );
-                windField_->addVelocity( upstream, -timeStep / area * dragForce, 1.5f * size );
+                const vec2 upstream = dragCenters[i] -
+                    ( dragRadii[i] + spacing ) * Normalize( dragForce );
+                const vec2 fluidImpulse = windField_->applyMomentumImpulse(
+                    upstream, -timeStep * dragForce, 2.0f * spacing );
+                // 벽 또는 Solid에 가려 유효 face가 없으면 그 성분의 drag도 전달하지 않음.
+                dragForce = -fluidImpulse / timeStep;
+                windDragFluidImpulse_ += fluidImpulse;
             }
+
+            world_.ApplyForceToCenter( visual.bodyHandle, dragForce );
+            windDragBodyImpulse_ += timeStep * dragForce;
         }
     }
     // 새로 생성된 Shape에도 구독을 적용하되 표시를 끄면 순회 비용을 내지 않음.
@@ -1216,6 +1253,8 @@ void rigidBodyDemo::resetWindFlow()
     if( kind_ != demoKind::windFlow || !windField_ ) return;
     windField_->clear();
     windPressureForces_.fill( {} );
+    windDragBodyImpulse_ = {};
+    windDragFluidImpulse_ = {};
     windTime_ = 0.0f;
     cancelInput();
     constexpr std::array<vec2, 3> POSITIONS{ vec2{ -1.8f, 0.0f }, vec2{ 0.4f, 1.0f }, vec2{ 2.5f, -1.0f } };
