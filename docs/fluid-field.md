@@ -99,9 +99,22 @@ Step fluid ΔP     = occupancy ΔP + advection ΔP + pressure ΔP
 
 유체 코어 회귀 테스트는 외벽만 있는 영역, 장애물+바람, 움직이는 장애물에서 이 세 항의 잔차와 단계별 합을 확인한다. Sandbox 테스트는 월드에 반환되는 압력 force가 계측된 Solid 충격량과 같은지, reset/단방향 토글 동작을 확인한다.
 
+## Part 6 — 움직이는 Solid의 셀 전이와 재노출 face 속도 복원
+
+이전 구현은 장애물이 이동해 기존의 Solid 경계 face가 **fluid-fluid face로 열리면**, 예전 강체 운동학 경계 속도가 유체의 초기 속도로 그대로 남을 수 있었다. 특히 빠르게 움직이는 강체가 지나간 자리나 회전으로 드러난 격자에서 유체 속도가 부자연스럽게 튀는 원인이 된다.
+
+- `fluidField2`는 직전 `solidOwner_`를 재사용 scratch `previousSolidOwner_`에 복사하고 현재 장애물을 rasterize한다. 셀 단위 `exposedCells`(solid→fluid), `coveredCells`(fluid→solid)를 집계한다.
+- **이번과 이전 단계 모두 fluid-fluid였던 MAC face**만 유효한 재구성 샘플로 취급한다. 이번 단계에 막힌 face를 참조하지 않고, 이번에 처음 열린 face끼리 서로 참조하지 않으므로 순회 순서에 의존하지 않는다.
+- 재노출 U/V face마다 격자 Manhattan 거리 1~4 이내에서 **가장 가까운 유효 이웃 face의 직전 속도 평균**으로 복원한다. 찾지 못하면 정지 유체(0)로 시작한다. 기존에 계속 유체였던 face는 변경하지 않는다.
+- 이어서 움직이는 강체의 no-through 경계 속도를 설정하고 기존 Semi-Lagrangian advection과 Pressure projection을 수행한다.
+- `getSolidTransition()`은 열린/닫힌 셀, U/V face 수, 이웃 외삽 및 0 fallback 횟수, `fluidVolumeDelta = (exposedCells-coveredCells) * h² * unitDepth(1m)`를 제공한다. 셀 크기의 정수 배만큼 형태가 그대로 이동하면 이산 점유 체적 변동이 0일 수 있다.
+- 기존 `getStepMomentum()`의 `afterObstacles`에는 이 재노출 face 속도 복원도 포함되며, `occupancyDelta()`는 이전처럼 전체 Step의 전체 운동량 증가가 아니라 현재 유효 face 집합에서의 변화다.
+
+**한계:** 이 재구성은 *오래된 강체 경계 속도의 유출을 막는 안정화 조치*이지 cut-cell 체적 보존/보존형 advection이 아니다. 이산 셀 점유 변화로 인한 체적·운동량 오류는 계측될 뿐 실제 유체 질량으로 보정되지 않는다. 움직이는 경계의 면적 가중치, swept-volume flux와 유체/강체 연성 압력 투영이 그다음 단계다.
+
 ## 다음 구현 후보
 
-1. moving obstacle의 체적 교환 및 cut-cell boundary, pressure–rigid 동기 결합의 정밀화.
+1. moving obstacle의 swept-volume flux/cut-cell 경계와 pressure–rigid 동기 결합의 정밀화.
 2. 복합 Body의 다중 Shape 집계, static obstacle, Segment/Chain의 별도 표면 경계 표현.
 3. 연기/염료(tracer) 수송, 점성(확산), 회전(vorticity) 표현.
 4. 압력 solver 수렴 기준과 성능 평가, 해상도 증대.

@@ -64,6 +64,22 @@ struct fluidStepMomentum2
     [[nodiscard]] vec2 pressureDelta() const noexcept { return afterPressure - afterAdvection; }
 };
 
+// Moving solid의 cell-centered 마스크 전이 및 재노출 MAC face 재구성 통계.
+// fluidVolumeDelta는 2D unit-depth(1m)에서의 *이산 셀 면적* 변화이며
+// 실제 이동하는 연속 표면의 체적이나 보존된 유체 질량이 아님.
+struct fluidSolidTransition2
+{
+    int exposedCells = 0;
+    int coveredCells = 0;
+    int openedUFaces = 0;
+    int openedVFaces = 0;
+    int closedUFaces = 0;
+    int closedVFaces = 0;
+    int extrapolatedFaces = 0;
+    int fallbackFaces = 0;
+    float fluidVolumeDelta = 0.0f;
+};
+
 // 균일 MAC(staggered) grid: x속도는 수직 face, y속도는 수평 face에 저장.
 // 내부 Circle/Capsule/Convex Polygon solid 경계 face는 no-through로 처리함.
 class fluidField2
@@ -112,6 +128,7 @@ public:
     [[nodiscard]] vec2 getFluidMomentum() const noexcept;
     [[nodiscard]] const fluidPressureMomentum2& getPressureMomentum() const noexcept { return pressureMomentum_; }
     [[nodiscard]] const fluidStepMomentum2& getStepMomentum() const noexcept { return stepMomentum_; }
+    [[nodiscard]] const fluidSolidTransition2& getSolidTransition() const noexcept { return solidTransition_; }
     [[nodiscard]] bool isSolidCell( int x, int y ) const noexcept;
     [[nodiscard]] int getSolidCellCount() const noexcept { return solidCellCount_; }
     [[nodiscard]] vec2 getCellCenter( int x, int y ) const noexcept;
@@ -129,6 +146,7 @@ private:
     [[nodiscard]] vec2 sampleFrom( const std::vector<float>& u, const std::vector<float>& v, vec2 position ) const noexcept;
     static float sampleComponent( const std::vector<float>& values, int width, int height, float x, float y ) noexcept;
     void updateObstacles( std::span<const fluidShapeObstacle2> obstacles );
+    void remapExposedFaces();
     void applySolidBoundaries( std::span<const fluidShapeObstacle2> obstacles );
     void project( float timeStep, int pressureIterations, std::span<const fluidShapeObstacle2> obstacles,
         std::span<fluidObstacleForce2> feedback );
@@ -147,7 +165,9 @@ private:
     std::vector<float> nextPressure_;
     std::vector<float> divergence_;
     std::vector<int> solidOwner_;
+    std::vector<int> previousSolidOwner_;
     int solidCellCount_ = 0;
+    fluidSolidTransition2 solidTransition_{};
     fluidPressureMomentum2 pressureMomentum_{};
     fluidStepMomentum2 stepMomentum_{};
 #pragma endregion Data
