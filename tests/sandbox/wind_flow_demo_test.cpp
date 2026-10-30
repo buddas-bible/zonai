@@ -213,6 +213,34 @@ void checkPressureLedgerInSandbox()
         "one-way mode must not report rigid pressure reaction" );
 }
 
+void checkExperimentalCutCellProjection()
+{
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.setWindCutCellProjectionEnabled( true );
+    check( scene.isWindCutCellProjectionEnabled(), "wind sandbox must enable weighted cut-cell pressure" );
+
+    const bodyId body = scene.getShapes()[0].bodyHandle;
+    scene.getWorld().SetBodyLinearVelocity( body, { 1.5f, 0.0f } );
+    scene.step( 1.0f / 60.0f, 4 );
+    const fluidCutCellPressure2& stats = scene.getWindField()->getCutCellPressure();
+    check( stats.activeCells > 0 && std::isfinite( stats.divergenceBefore ) &&
+        std::isfinite( stats.divergenceAfter ) && std::isfinite( stats.sourceImbalance ) &&
+        LengthSquared( scene.getWindField()->getPressureMomentum().residual() ) == 0.0f,
+        "cut-cell sandbox must execute weighted projection without using legacy pressure ledger" );
+
+    scene.resetWindFlow();
+    check( scene.isWindCutCellProjectionEnabled() &&
+        scene.getWindField()->getCutCellPressure().activeCells == 0,
+        "reset must clear weighted pressure diagnostics without disabling experiment" );
+    scene.setWindCutCellProjectionEnabled( false );
+    scene.step( 1.0f / 60.0f, 4 );
+    check( !scene.isWindCutCellProjectionEnabled() &&
+        scene.getWindField()->getCutCellPressure().activeCells == 0,
+        "sandbox must restore binary pressure mode when experiment is disabled" );
+}
+
 } // namespace
 
 int main()
@@ -222,4 +250,5 @@ int main()
     checkRotatedSandboxObstacles();
     checkDragMomentumBudget();
     checkPressureLedgerInSandbox();
+    checkExperimentalCutCellProjection();
 }
