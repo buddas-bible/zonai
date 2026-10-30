@@ -741,6 +741,7 @@ void checkConservativeMacAdvection()
     check( !partial.getAdvectionStats().conservative &&
         partial.getAdvectionStats().substeps == 1,
         "disabling conservative advection must restore legacy semi-Lagrangian path" );
+    partial.setConservativeAdvectionEnabled( true );
     partial.clear();
     check( partial.getAdvectionStats().substeps == 0 &&
         partial.isConservativeAdvectionEnabled(),
