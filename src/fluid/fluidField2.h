@@ -117,6 +117,18 @@ struct fluidCutCellPressure2
     bool hasVolumeHistory = false;
 };
 
+// 연속한 Shape 변환 사이의 내부 MAC 면을 통과한 Solid 속도를 시간 적분한 근사.
+// 경로를 사용할 수 없으면 직전 셀 점유율 차이로 fallback 한다.
+// totalAbsoluteFlux는 면마다 |적분량|을 합한 값이며 실제 물체 체적은 아님.
+// geometryMismatch는 swept face divergence와 snapshot Δfluid volume의 셀별 L1 차이.
+struct fluidSweptFaceFlux2
+{
+    bool usedSweptFlux = false;
+    int timeSamples = 0;
+    float totalAbsoluteFlux = 0.0f;
+    float geometryMismatch = 0.0f;
+};
+
 // 균일 MAC(staggered) grid: x속도는 수직 face, y속도는 수평 face에 저장.
 // 내부 Circle/Capsule/Convex Polygon solid 경계 face는 no-through로 처리함.
 class fluidField2
@@ -174,6 +186,7 @@ public:
     [[nodiscard]] const fluidSolidTransition2& getSolidTransition() const noexcept { return solidTransition_; }
     [[nodiscard]] const fluidCutCellTransition2& getCutCellTransition() const noexcept { return cutCellTransition_; }
     [[nodiscard]] const fluidCutCellPressure2& getCutCellPressure() const noexcept { return cutCellPressure_; }
+    [[nodiscard]] const fluidSweptFaceFlux2& getSweptFaceFlux() const noexcept { return sweptFaceFlux_; }
     // 기하 표본의 유체 면적 비율 [0,1]. 범위 밖은 0.
     // 외곽 wall face는 기하상 열려있어도 닫힌 경계이므로 0.
     [[nodiscard]] float getCellFluidFraction( int x, int y ) const noexcept;
@@ -202,6 +215,7 @@ private:
     [[nodiscard]] float cutCellVOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellFluxDivergenceRms( float inverseTimeStep ) const noexcept;
     void prepareCutCellVolumeChange( float timeStep );
+    void updateSweptSolidFlux( float timeStep, std::span<const fluidShapeObstacle2> obstacles );
     void applyCutCellBoundaries() noexcept;
     void projectCutCell( float timeStep, int pressureIterations,
         std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback );
@@ -231,6 +245,9 @@ private:
     std::vector<float> uSolidVelocity_;
     std::vector<float> vSolidVelocity_;
     std::vector<float> cutCellVolumeRate_;
+    std::vector<float> sweptUVolume_;
+    std::vector<float> sweptVVolume_;
+    std::vector<fluidShapeObstacle2> previousObstacles_;
     std::vector<int> cutCellComponent_;
     std::vector<int> cutCellNearestFluid_;
     std::vector<int> cutCellQueue_;
@@ -238,6 +255,7 @@ private:
     fluidSolidTransition2 solidTransition_{};
     fluidCutCellTransition2 cutCellTransition_{};
     fluidCutCellPressure2 cutCellPressure_{};
+    fluidSweptFaceFlux2 sweptFaceFlux_{};
     bool cutCellProjectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
     bool volumeSourceValid_ = false;

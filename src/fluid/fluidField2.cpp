@@ -43,6 +43,53 @@ bool ContainsFluidObstacle( const fluidShapeObstacle2& obstacle, vec2 point )
     return false;
 }
 
+bool HasSameFluidGeometry( const shapeGeometry& a, const shapeGeometry& b )
+{
+    if( a.index() != b.index() ) return false;
+    if( const auto* lhs = std::get_if<circle2>( &a ) )
+    {
+        const auto& rhs = std::get<circle2>( b );
+        return lhs->radius == rhs.radius && lhs->center.x == rhs.center.x && lhs->center.y == rhs.center.y;
+    }
+    if( const auto* lhs = std::get_if<capsule2>( &a ) )
+    {
+        const auto& rhs = std::get<capsule2>( b );
+        return lhs->radius == rhs.radius &&
+            lhs->center1.x == rhs.center1.x && lhs->center1.y == rhs.center1.y &&
+            lhs->center2.x == rhs.center2.x && lhs->center2.y == rhs.center2.y;
+    }
+    if( const auto* lhs = std::get_if<polygon2>( &a ) )
+    {
+        const auto& rhs = std::get<polygon2>( b );
+        if( lhs->vertexCount != rhs.vertexCount || lhs->radius != rhs.radius ||
+            lhs->vertexCount < 2 || lhs->vertexCount > static_cast<int>( MAX_POLYGON_VERTICES ) ) return false;
+        for( int i = 0; i < lhs->vertexCount; ++i )
+            if( lhs->vertices[i].x != rhs.vertices[i].x || lhs->vertices[i].y != rhs.vertices[i].y ||
+                lhs->normals[i].x != rhs.normals[i].x || lhs->normals[i].y != rhs.normals[i].y )
+                return false;
+        return true;
+    }
+    return false;
+}
+
+float FluidGeometryRadius( const shapeGeometry& geometry )
+{
+    if( const auto* circle = std::get_if<circle2>( &geometry ) )
+        return Length( circle->center ) + circle->radius;
+    if( const auto* capsule = std::get_if<capsule2>( &geometry ) )
+        return std::max( Length( capsule->center1 ), Length( capsule->center2 ) ) + capsule->radius;
+    if( const auto* polygon = std::get_if<polygon2>( &geometry ) )
+    {
+        if( polygon->vertexCount < 2 || polygon->vertexCount > static_cast<int>( MAX_POLYGON_VERTICES ) )
+            return std::numeric_limits<float>::quiet_NaN();
+        float radius = polygon->radius;
+        for( int i = 0; i < polygon->vertexCount; ++i )
+            radius = std::max( radius, Length( polygon->vertices[i] ) + polygon->radius );
+        return radius;
+    }
+    return 0.0f;
+}
+
 bool IsValidFluidObstacle( const fluidShapeObstacle2& obstacle )
 {
     return IsFinite( obstacle.center ) && IsFinite( obstacle.transform.position ) &&
@@ -76,6 +123,8 @@ fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
     uSolidVelocity_.assign( u_.size(), 0.0f );
     vSolidVelocity_.assign( v_.size(), 0.0f );
     cutCellVolumeRate_.assign( pressure_.size(), 0.0f );
+    sweptUVolume_.assign( u_.size(), 0.0f );
+    sweptVVolume_.assign( v_.size(), 0.0f );
     cutCellComponent_.assign( pressure_.size(), -1 );
     cutCellNearestFluid_.assign( pressure_.size(), -1 );
     cutCellQueue_.reserve( pressure_.size() );
@@ -107,6 +156,10 @@ void fluidField2::clear() noexcept
     std::fill( uSolidVelocity_.begin(), uSolidVelocity_.end(), 0.0f );
     std::fill( vSolidVelocity_.begin(), vSolidVelocity_.end(), 0.0f );
     std::fill( cutCellVolumeRate_.begin(), cutCellVolumeRate_.end(), 0.0f );
+    std::fill( sweptUVolume_.begin(), sweptUVolume_.end(), 0.0f );
+    std::fill( sweptVVolume_.begin(), sweptVVolume_.end(), 0.0f );
+    previousObstacles_.clear();
+    sweptFaceFlux_ = {};
     std::fill( cutCellComponent_.begin(), cutCellComponent_.end(), -1 );
     std::fill( cutCellNearestFluid_.begin(), cutCellNearestFluid_.end(), -1 );
     cutCellQueue_.clear();
@@ -630,6 +683,8 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     stepMomentum_.before = getFluidMomentum();
     updateObstacles( obstacles );
     updateCutCellGeometry( obstacles );
+    if( cutCellProjectionEnabled_ ) updateSweptSolidFlux( timeStep, obstacles );
+    else sweptFaceFlux_ = {};
     remapExposedFaces();
     stepMomentum_.afterObstacles = getFluidMomentum();
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
@@ -671,6 +726,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
     }
     stepMomentum_.afterPressure = getFluidMomentum();
+    previousObstacles_.assign( obstacles.begin(), obstacles.end() );
 }
 
 float fluidField2::cutCellUOpen( int x, int y ) const noexcept
@@ -724,6 +780,107 @@ float fluidField2::cutCellFluxDivergenceRms( float inverseTimeStep ) const noexc
     return active > 0 ? static_cast<float>( std::sqrt( sum / active ) ) : 0.0f;
 }
 
+void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidShapeObstacle2> obstacles )
+{
+    sweptFaceFlux_ = {};
+    std::fill( sweptUVolume_.begin(), sweptUVolume_.end(), 0.0f );
+    std::fill( sweptVVolume_.begin(), sweptVVolume_.end(), 0.0f );
+
+    // Shape의 추가/삭제, 기하 변경, 도메인 관통은 swept 경로로 간주하지 않는다.
+    // 슬롯(index)이 지속되는 장애물만 선형 이동 + 최단 회전각 보간으로 추적한다.
+    if( !volumeSourceValid_ || obstacles.empty() || previousObstacles_.size() != obstacles.size() ) return;
+
+    const float limitX = origin_.x + width_ * cellSize_;
+    const float limitY = origin_.y + height_ * cellSize_;
+    std::vector<vec2> linearSpeeds( obstacles.size() );
+    std::vector<float> startAngles( obstacles.size() );
+    std::vector<float> angularSpeeds( obstacles.size() );
+    float maximumTravel = 0.0f;
+    for( std::size_t i = 0; i < obstacles.size(); ++i )
+    {
+        const auto& start = previousObstacles_[i];
+        const auto& end = obstacles[i];
+        if( !IsValidFluidObstacle( start ) || !IsValidFluidObstacle( end ) ||
+            !HasSameFluidGeometry( start.geometry, end.geometry ) ) return;
+        const float radius = FluidGeometryRadius( end.geometry );
+        if( !std::isfinite( radius ) || radius < 0.0f ) return;
+        for( const fluidShapeObstacle2* shape : { &start, &end } )
+        {
+            const vec2 p = shape->transform.position;
+            if( p.x - radius <= origin_.x || p.x + radius >= limitX ||
+                p.y - radius <= origin_.y || p.y + radius >= limitY ) return;
+        }
+
+        const vec2 displacement = end.transform.position - start.transform.position;
+        linearSpeeds[i] = displacement / timeStep;
+        const float startAngle = std::atan2( start.transform.rotation.s, start.transform.rotation.c );
+        const float endAngle = std::atan2( end.transform.rotation.s, end.transform.rotation.c );
+        const float deltaAngle = std::remainder( endAngle - startAngle, 2.0f * std::numbers::pi_v<float> );
+        startAngles[i] = startAngle;
+        angularSpeeds[i] = deltaAngle / timeStep;
+        maximumTravel = std::max( maximumTravel, Length( displacement ) + std::abs( deltaAngle ) * radius );
+    }
+
+    constexpr int faceSamples = 4;
+    const int timeSamples = std::clamp( static_cast<int>( std::ceil( maximumTravel / ( 0.25f * cellSize_ ) ) ), 1, 32 );
+    const float weight = timeStep * cellSize_ / ( timeSamples * faceSamples );
+    std::vector<fluidShapeObstacle2> intermediate( obstacles.begin(), obstacles.end() );
+
+    // 하나의 공유 MAC face는 시간·길이 표본에서 한 번만 적분한다.
+    // Solid 내부의 강체 속도는 v_origin + omega x (point - origin).
+    // 동일 면을 양쪽 셀이 같은 값과 반대 부호로 사용해 국소 보존성을 유지한다.
+    for( int step = 0; step < timeSamples; ++step )
+    {
+        const float alpha = ( step + 0.5f ) / timeSamples;
+        for( std::size_t i = 0; i < obstacles.size(); ++i )
+        {
+            const auto& start = previousObstacles_[i];
+            const auto& end = obstacles[i];
+            intermediate[i].transform.position =
+                start.transform.position + alpha * ( end.transform.position - start.transform.position );
+            intermediate[i].transform.rotation =
+                rot2::FromRadians( startAngles[i] + angularSpeeds[i] * timeStep * alpha );
+        }
+
+        const auto normalSpeed = [&]( vec2 point, bool horizontal )
+        {
+            for( std::size_t i = 0; i < intermediate.size(); ++i )
+            {
+                if( !ContainsFluidObstacle( intermediate[i], point ) ) continue;
+                const vec2 velocity = linearSpeeds[i] +
+                    Cross( angularSpeeds[i], point - intermediate[i].transform.position );
+                return horizontal ? velocity.x : velocity.y;
+            }
+            return 0.0f;
+        };
+
+        for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x )
+                for( int sample = 0; sample < faceSamples; ++sample )
+                {
+                    const vec2 point = origin_ + cellSize_ * vec2{
+                        static_cast<float>( x ), static_cast<float>( y ) + ( sample + 0.5f ) / faceSamples };
+                    sweptUVolume_[uIndex( x, y )] += weight * normalSpeed( point, true );
+                }
+
+        for( int y = 1; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+                for( int sample = 0; sample < faceSamples; ++sample )
+                {
+                    const vec2 point = origin_ + cellSize_ * vec2{
+                        static_cast<float>( x ) + ( sample + 0.5f ) / faceSamples, static_cast<float>( y ) };
+                    sweptVVolume_[vIndex( x, y )] += weight * normalSpeed( point, false );
+                }
+    }
+
+    double absoluteFlux = 0.0;
+    for( const float flux : sweptUVolume_ ) absoluteFlux += std::abs( flux );
+    for( const float flux : sweptVVolume_ ) absoluteFlux += std::abs( flux );
+    sweptFaceFlux_.usedSweptFlux = true;
+    sweptFaceFlux_.timeSamples = timeSamples;
+    sweptFaceFlux_.totalAbsoluteFlux = static_cast<float>( absoluteFlux );
+}
+
 void fluidField2::prepareCutCellVolumeChange( float timeStep )
 {
     std::fill( cutCellVolumeRate_.begin(), cutCellVolumeRate_.end(), 0.0f );
@@ -767,8 +924,17 @@ void fluidField2::prepareCutCellVolumeChange( float timeStep )
     const double scale = static_cast<double>( cellSize_ ) * cellSize_ / timeStep;
     for( std::size_t i = 0; i < cellFluidFraction_.size(); ++i )
     {
-        const float change = cellFluidFraction_[i] - previousCellFluidFraction_[i];
-        volumeRate += static_cast<double>( change ) * scale;
+        const float snapshotChange = cellFluidFraction_[i] - previousCellFluidFraction_[i];
+        volumeRate += static_cast<double>( snapshotChange ) * scale;
+        const int x = static_cast<int>( i ) % width_;
+        const int y = static_cast<int>( i ) / width_;
+        const float change = sweptFaceFlux_.usedSweptFlux
+            ? ( sweptUVolume_[uIndex( x + 1, y )] - sweptUVolume_[uIndex( x, y )] +
+                sweptVVolume_[vIndex( x, y + 1 )] - sweptVVolume_[vIndex( x, y )] ) /
+                ( cellSize_ * cellSize_ )
+            : snapshotChange;
+        if( sweptFaceFlux_.usedSweptFlux )
+            sweptFaceFlux_.geometryMismatch += std::abs( change - snapshotChange ) * cellSize_ * cellSize_;
         if( cellFluidFraction_[i] > 0.0f )
             cutCellVolumeRate_[i] += change;
         else if( change != 0.0f )

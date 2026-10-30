@@ -945,6 +945,11 @@ void rigidBodyDemoUi::drawExperimentControls()
                     projection.redistributedVolumeRate, projection.unresolvedVolumeRate );
                 ImGui::Text( "영역별 정합 보정: %.6f m³/s / 유체 영역: %d",
                     projection.compatibilityCorrection, projection.connectedRegions );
+                const fluidSweptFaceFlux2& swept = field->getSweptFaceFlux();
+                ImGui::Text( "Solid 시간 적분: %s / 구간 %d",
+                    swept.usedSweptFlux ? "Swept face flux" : "Snapshot 변화", swept.timeSamples );
+                ImGui::Text( "통과한 MAC 면 체적 절댓값 합: %.5f m³", swept.totalAbsoluteFlux );
+                ImGui::Text( "이동 경로/종료 점유율 L1 차이: %.5f m³", swept.geometryMismatch );
                 ImGui::Text( "부분 유체 셀: %d", projection.activeCells );
             }
             ImGui::Text( "강체 점유 셀: %d", field->getSolidCellCount() );
@@ -983,7 +988,7 @@ void rigidBodyDemoUi::drawExperimentControls()
                     getWindPressureForces()[i].force.x, getWindPressureForces()[i].force.y );
         }
         if( ImGui::Button( "유체·물체 초기화###WindReset" ) ) resetWindFlow();
-        ImGui::TextWrapped( "파란 화살표는 유체 속도, 주황색 점은 강체가 차지한 셀입니다. 원·캡슐·볼록 다각형은 실제 회전한 도형으로 셀을 점유합니다. 양방향 모드에서는 해당 경계의 수직 속도를 유체에 적용하고 압력 반력을 강체에 전달합니다. Drag는 유체 내부 face의 유효 질량 기준으로 실제 전달한 충격량만 강체에 반대로 적용합니다. Drag 교환 잔차와 압력(유체·강체·외벽) 수지 잔차를 별도로 표시합니다. 점유 변경 때 새로 열린 유체 면은 이전의 순수 유체 이웃 속도로 복원합니다. 셀 중심 마스크 외에도 4x4 표본으로 부분 점유와 면 개방율을 측정합니다. 부분 점유 체적 변동은 진단값입니다. 실험 모드에서는 개방면 유체 유량과 셀의 연속된 점유 변화량을 가중 압력 방정식에 함께 사용합니다. 첫 snapshot은 이동으로 취급하지 않고, 완전히 가려진 셀의 체적 소스는 근접 유체 셀로 이동합니다. 영역별로 풀 수 없는 체적 변동도 표시합니다. 정확한 swept trajectory·보존형 이류·표면 압력 적분·총 운동량 보존은 아직 지원하지 않습니다. 점유 변경과 Semi-Lagrangian 이류의 운동량 변화도 따로 기록합니다. 이 압력 수지의 작은 잔차는 이산화된 face 회계이며 전체 유체·강체 운동량 보존을 뜻하지 않습니다." );
+        ImGui::TextWrapped( "파란 화살표는 유체 속도, 주황색 점은 강체가 차지한 셀입니다. 원·캡슐·볼록 다각형은 실제 회전한 도형으로 셀을 점유합니다. 양방향 모드에서는 해당 경계의 수직 속도를 유체에 적용하고 압력 반력을 강체에 전달합니다. Drag는 유체 내부 face의 유효 질량 기준으로 실제 전달한 충격량만 강체에 반대로 적용합니다. Drag 교환 잔차와 압력(유체·강체·외벽) 수지 잔차를 별도로 표시합니다. 점유 변경 때 새로 열린 유체 면은 이전의 순수 유체 이웃 속도로 복원합니다. 셀 중심 마스크 외에도 4x4 표본으로 부분 점유와 면 개방율을 측정합니다. 부분 점유 체적 변동은 진단값입니다. 실험 모드에서는 개방면 유체 유량과 이전/현재 강체 이동·회전 경로의 MAC 면 통과 체적을 압력 방정식에 사용합니다. 경로가 없거나 도메인 벽을 통과하면 점유율 차이로 돌아갑니다. 첫 snapshot은 이동으로 취급하지 않고, 완전히 가려진 셀의 체적 소스는 근접 유체 셀로 이동합니다. 영역별로 풀 수 없는 체적 변동도 표시합니다. 정확한 swept trajectory·보존형 이류·표면 압력 적분·총 운동량 보존은 아직 지원하지 않습니다. 점유 변경과 Semi-Lagrangian 이류의 운동량 변화도 따로 기록합니다. 이 압력 수지의 작은 잔차는 이산화된 face 회계이며 전체 유체·강체 운동량 보존을 뜻하지 않습니다." );
         return;
     }
     if( getKind() == demoKind::revoluteLimitMotorComparison )
