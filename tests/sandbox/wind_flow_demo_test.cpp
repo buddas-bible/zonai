@@ -22,6 +22,11 @@ bool near( vec2 a, vec2 b, float tolerance = 1.0e-3f )
     return Length( a - b ) < tolerance;
 }
 
+bool close( float a, float b, float tolerance = 1.0e-4f )
+{
+    return std::abs( a - b ) <= tolerance;
+}
+
 void checkFluidCoupling()
 {
     rigidBodyDemo scene{ demoKind::windFlow };
