@@ -35,7 +35,7 @@ u_next = u* - dt * ∇p
 
 - 기본 `step(dt)`는 외곽 닫힌 경계만 고려한다. Part 2의 obstacle overload는 원형 강체의 셀 경계에 한정한다. 다른 형상, 개방 경계, 보존형 양방향 운동량 전달은 아직 없다.
 - 정밀한 표면적·압력 부력, 점성 응력, 실제 유체 밀도 편집, 열, 자유 수면, 연기/염료 수송은 구현하지 않았다. 거친 격자에서만 압력 토크를 집계한다.
-- `addVelocity`는 속도 injection이며 보존적인 inflow boundary/source는 아니다.
+- `addVelocity`는 속도 injection이며 보존적인 inflow boundary/source는 아니다. Drag 반력에는 Part 4의 별도 impulse API를 사용한다.
 - Jacobi는 수렴이 느릴 수 있다. 큰 해상도에서 다중 격자/PCG 또는 더 정확한 수송 기법을 검토한다.
 - 특히 시간이 큰 경우 격자 이류의 샘플링은 수치 확산을 낳으며, 유체와 Body가 공유하는 고정 timestep/동기화를 더 구체화해야 한다.
 
@@ -47,7 +47,7 @@ u_next = u* - dt * ∇p
 - Solid와 접하는 MAC face의 **법선 속도**는 `v_solid(face) = v_center + omega × (face-center)`로 설정한다. 유체·유체 face만 압력 구배로 수정하며 Solid 내부는 압력 미지수에서 제외한다. 유체 셀의 `div(u)` 계산에는 Solid 경계 속도를 포함한다.
 - 투영 후 각 유체·Solid 경계에서 `F ≈ p_fluid * normal_solid * cellSize * unitDepth`를 적분해 강체별 `fluidObstacleForce2{force, torque}`를 반환한다. 유체의 기준 밀도는 1kg/m³, 깊이는 1m로 고정한 학습용 단위 모델이다.
 - World는 별도로 움직이는 강체이고 `fluidField2`는 ID나 Body를 보유하지 않는다. Sandbox에서 현재 Circle Shape를 world 좌표로 변환해 전달하고, 결과 압력 force/torque를 `ApplyForceToCenter`, `ApplyTorque`로 전달한다.
-- 기존 경험적 Drag `F = dragCoefficient * (v_fluid-v_body)`는 유지하되, 양방향 모드에서 `-F * dt`의 근사치를 강체 주변 유체의 속도 source로 되돌린다. source가 보존형 격자 flux가 아니므로 **엄밀한 작용-반작용이나 운동량 보존을 보장하지 않는다.**
+- 경험적 Drag `F = dragCoefficient * (v_fluid-v_body)`는 유지한다. Part 4부터 양방향 모드의 Drag는 유체 내부 MAC face의 유효 질량을 기준으로 충격량을 분배하고, 실제 주입된 양만큼의 반대 충격량을 강체에 적용한다. 압력/외벽/이류의 전체 운동량까지 보존하는 것은 아니다.
 - Sandbox에서 양방향 모드를 끄면 원래 단방향 실험이 동작한다. 점유 셀과 물체별 압력 반력을 보고, 움직이는 원이 정지 유체에 어떤 흔적을 남기는지 비교할 수 있다.
 
 이 방식은 **원형 강체의 격자화된 no-through 경계 및 압력 feedback 첫 실험**이지 완성된 양방향 CFD-강체 solver는 아니다. 질량 중심이 빠르게 이동할 때 계단형 점유 셀이 불연속적으로 바뀌며 압력에 인공적인 힘을 더할 수 있다. 압력 gauge, 유체 점성/마찰, Solid/Fluid 체적 보존과 시간 적분의 완전 동기화, 일반 polygon/chain의 보존형 cut-cell coupling은 후속 구현 대상이다. 일반 Body collision은 원래 zonai World Solver가 해결한다.
@@ -65,9 +65,25 @@ u_next = u* - dt * ∇p
 
 다음 단계에서는 일반 강체를 위한 Shape traversal/force accumulation을 정리하고, 움직이는 장애물과 유체의 **운동량 budget 오차**를 정량화할 필요가 있다.
 
+## Part 4 — MAC face 기반 Drag 충격량 교환
+
+기존 구현은 Body에 가한 Drag와 유체에 주입한 속도 변화가 **서로 다른 운동량**을 의미하는 문제가 있었다. 이제 `fluidField2::applyMomentumImpulse(position, J, radius)`로 Drag의 한 Step 교환량을 직접 전달한다.
+
+- `getFluidMomentum()`은 **내부 fluid-fluid MAC face**의 두 속도 성분에 각기 `m_face = ρ · h² · depth`를 곱해 합산한다. 실험 모델은 `ρ = 1 kg/m³`, `depth = 1 m`이므로 face 유효 질량은 `h² kg`이다. 외곽 wall와 solid에 접한 운동학 경계 face는 제외한다.
+- `applyMomentumImpulse`는 지정 반경 내부의 유효 U/V face에 거리 기반 가중치를 매기고 **성분별로 가중치 합을 정규화**해 속도를 변경한다. 바깥 영역, 잘못된 입력, 유효 face가 없는 성분은 0 충격량을 반환한다. float 표현 오차를 포함한 *실제 face 운동량 증가량*을 반환한다.
+- Sandbox는 Pressure Solver를 수행한 다음 Body별 Drag 목표 `J = F_drag·dt`를 계산한다. 양방향 모드에서는 `applyMomentumImpulse(-J)`가 실제 유체에 가한 충격량 `J_fluid`를 보고하고 **강체에는 `J_body = -J_fluid`만 적용**한다. 주변 유효 face가 전혀 없으면 강체 Drag도 그만큼 줄어든다.
+- Body와 유체의 Drag 충격량을 합한 `J_body + J_fluid`을 Sandbox에 표시한다. 두 모드를 쉽게 비교하도록 단방향 모드는 종전처럼 유체의 Drag 피드백을 생략한다.
+- Solid 내부의 속도를 그대로 Drag 샘플로 쓰면 강체 경계 속도가 읽히므로, 양방향 Drag는 Body 바깥 4방향에서 흐름을 샘플링하고 유체를 교란하는 방향 바깥쪽에 반작용을 분배한다.
+
+### 보존 범위의 경계
+
+여기서의 **교환 잔차가 거의 0**이라는 말은 *Drag 전달 순간*에 한정된다. 유체는 다음 Step의 이류·압력 투영으로 다시 속도가 바뀌고, 벽/움직이는 Solid의 운동학 경계도 외력을 전달한다. 현재의 압력 traction 역시 face impulse budget과 쌍으로 업데이트되지 않는 근사다. 따라서 수치적/물리적인 **전체 유체+강체 운동량 보존을 아직 주장하지 않는다**. 완전한 압력-강체 연동 및 cut-cell/flux 기반 이류는 다음 단계의 별도 과제다.
+
+회귀 테스트는 정상 격자·단일 U face·Solid 인접 face·지원 범위 밖 입력에서 **실제 유체 운동량 변화 == 반환된 충격량**, 그리고 Sandbox의 **Body Drag + 유체 Drag ≈ 0**, One-way 모드와 Pressure 단독 모드를 각각 검사한다.
+
 ## 다음 구현 후보
 
-1. 보존형 fluid-solid coupling과 압력/drag 운동량 budget, 경계 셀 정확도 검증.
+1. 압력/외벽/이류까지 포함한 fluid-solid 운동량 budget, 보존형 cut-cell 경계 정확도 검증.
 2. 복합 Body의 다중 Shape 집계, static obstacle, Segment/Chain의 별도 표면 경계 표현.
 3. 연기/염료(tracer) 수송, 점성(확산), 회전(vorticity) 표현.
 4. 압력 solver 수렴 기준과 성능 평가, 해상도 증대.
