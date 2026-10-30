@@ -138,6 +138,47 @@ void checkMovingSolidReaction()
     check( enabled.isWindObstacleCouplingEnabled(), "wind reset must preserve coupling setting" );
 }
 
+void checkDragMomentumBudget()
+{
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 10.0f );
+    const bodyId body = scene.getShapes()[0].bodyHandle;
+    scene.getWorld().SetBodyLinearVelocity( body, { 2.0f, 0.0f } );
+
+    // 압력 feedback은 별도 물리 과정. 여기서는 drag와 그 국소 유체 impulse 쌍만 검증함.
+    scene.step( 1.0f / 60.0f, 4 );
+    const vec2 bodyImpulse = scene.getWindDragBodyImpulse();
+    const vec2 fluidImpulse = scene.getWindDragFluidImpulse();
+    check( Length( bodyImpulse ) > 0.0001f && Length( fluidImpulse ) > 0.0001f,
+        "moving body must exchange nonzero drag impulse with the fluid" );
+    check( Length( scene.getWindDragExchangeResidual() ) < 1.0e-5f &&
+        Length( bodyImpulse + fluidImpulse ) < 1.0e-5f,
+        "bidirectional drag must deliver equal-and-opposite impulses" );
+
+    scene.resetWindFlow();
+    check( LengthSquared( scene.getWindDragBodyImpulse() ) == 0.0f &&
+        LengthSquared( scene.getWindDragFluidImpulse() ) == 0.0f,
+        "reset must clear per-step drag exchange diagnostics" );
+
+    scene.setWindObstacleCouplingEnabled( false );
+    scene.getWorld().SetBodyLinearVelocity( body, { 2.0f, 0.0f } );
+    scene.step( 1.0f / 60.0f, 4 );
+    check( Length( scene.getWindDragBodyImpulse() ) > 0.0001f &&
+        LengthSquared( scene.getWindDragFluidImpulse() ) == 0.0f,
+        "one-way mode must not deposit the reaction impulse into fluid" );
+
+    scene.setWindObstacleCouplingEnabled( true );
+    scene.resetWindFlow();
+    scene.setWindDragCoefficient( 0.0f );
+    scene.getWorld().SetBodyLinearVelocity( body, { 2.0f, 0.0f } );
+    scene.step( 1.0f / 60.0f, 4 );
+    check( LengthSquared( scene.getWindDragBodyImpulse() ) == 0.0f &&
+        LengthSquared( scene.getWindDragFluidImpulse() ) == 0.0f &&
+        Length( scene.getWindPressureForces()[0].force ) > 0.01f,
+        "pressure reaction must remain independent when drag coefficient is zero" );
+}
+
 } // namespace
 
 int main()
@@ -145,4 +186,5 @@ int main()
     checkFluidCoupling();
     checkMovingSolidReaction();
     checkRotatedSandboxObstacles();
+    checkDragMomentumBudget();
 }
