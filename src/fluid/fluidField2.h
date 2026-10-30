@@ -37,6 +37,33 @@ struct fluidObstacleForce2
     float torque = 0.0f;
 };
 
+// Pressure projection 한 번의 운동량 수지. 모든 값은 N·s.
+// fluid: 유체-유체 MAC face 속도 보정량의 운동량 변화.
+// solid: 유체 압력으로 강체에 가해진 충격량. wall: 외곽 닫힌 벽에 가해진 충격량.
+// 압력 이외의 이류, cell 점유 변화, moving boundary, drag는 포함하지 않는다.
+struct fluidPressureMomentum2
+{
+    vec2 fluid{};
+    vec2 solid{};
+    vec2 wall{};
+
+    [[nodiscard]] vec2 residual() const noexcept { return fluid + solid + wall; }
+};
+
+// 장애물 갱신, 이류, 압력 보정 단계별로 유체-유체 face의 운동량을 측정.
+// getFluidMomentum()과 같은 불완전한 dual-face 진단량이며 전체 유체 질량 적분은 아님.
+struct fluidStepMomentum2
+{
+    vec2 before{};
+    vec2 afterObstacles{};
+    vec2 afterAdvection{};
+    vec2 afterPressure{};
+
+    [[nodiscard]] vec2 occupancyDelta() const noexcept { return afterObstacles - before; }
+    [[nodiscard]] vec2 advectionDelta() const noexcept { return afterAdvection - afterObstacles; }
+    [[nodiscard]] vec2 pressureDelta() const noexcept { return afterPressure - afterAdvection; }
+};
+
 // 균일 MAC(staggered) grid: x속도는 수직 face, y속도는 수평 face에 저장.
 // 내부 Circle/Capsule/Convex Polygon solid 경계 face는 no-through로 처리함.
 class fluidField2
@@ -83,6 +110,8 @@ public:
     // 내부 fluid-fluid MAC face 속도를 dual-cell mass로 적분한 운동량.
     // solid 경계의 지정 속도 및 외곽 wall face는 제외한다.
     [[nodiscard]] vec2 getFluidMomentum() const noexcept;
+    [[nodiscard]] const fluidPressureMomentum2& getPressureMomentum() const noexcept { return pressureMomentum_; }
+    [[nodiscard]] const fluidStepMomentum2& getStepMomentum() const noexcept { return stepMomentum_; }
     [[nodiscard]] bool isSolidCell( int x, int y ) const noexcept;
     [[nodiscard]] int getSolidCellCount() const noexcept { return solidCellCount_; }
     [[nodiscard]] vec2 getCellCenter( int x, int y ) const noexcept;
@@ -119,6 +148,8 @@ private:
     std::vector<float> divergence_;
     std::vector<int> solidOwner_;
     int solidCellCount_ = 0;
+    fluidPressureMomentum2 pressureMomentum_{};
+    fluidStepMomentum2 stepMomentum_{};
 #pragma endregion Data
 };
 
