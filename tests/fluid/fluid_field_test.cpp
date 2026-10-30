@@ -827,6 +827,99 @@ void checkConservativeTracerTransport()
         "clear must discard tracer state and diagnostics" );
 }
 
+
+void checkSweptTracerRemap()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    std::array<fluidObstacleForce2, 1> feedback{};
+    const auto makeBox = []()
+    {
+        return fluidShapeObstacle2{ MakeBox( { 0.8f, 0.3f } ),
+            { { -1.0f, -0.25f }, {} }, { -1.0f, -0.25f }, {}, 0.0f };
+    };
+
+    // 같은 이동 경로: 12a 기본값은 가려진 cell에 질량이 갇힌다.
+    fluidField2 legacy{ 16, 16, 0.5f, { -4.0f, -4.0f } };
+    legacy.setCutCellProjectionEnabled( true );
+    auto oldBox = makeBox();
+    legacy.step( dt, std::span<const fluidShapeObstacle2>( &oldBox, 1 ), feedback );
+    check( close( legacy.getCellFluidFraction( 8, 7 ), 1.0f ),
+        "baseline tracer source must be fluid before moving obstacle" );
+    legacy.setTracerConcentration( 8, 7, 4.0f );
+    oldBox.transform.position.x += 1.25f;
+    oldBox.center.x += 1.25f;
+    legacy.step( dt, std::span<const fluidShapeObstacle2>( &oldBox, 1 ), feedback, 160 );
+    check( legacy.getSweptFaceFlux().usedSweptFlux &&
+        close( legacy.getTracerStats().trappedMass, 1.0f, 1.0e-4f ) &&
+        !legacy.getTracerStats().usedSweptRemap,
+        "default mode must keep Part 12a trapped tracer behavior" );
+
+    fluidField2 moving{ 16, 16, 0.5f, { -4.0f, -4.0f } };
+    moving.setCutCellProjectionEnabled( true );
+    moving.setSweptTracerRemapEnabled( true );
+    auto box = makeBox();
+    moving.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback );
+    moving.setTracerConcentration( 8, 7, 4.0f );
+    box.transform.position.x += 1.25f;
+    box.center.x += 1.25f;
+    moving.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 160 );
+    const fluidTracerStats2 moved = moving.getTracerStats();
+    check( moved.usedSweptRemap && moved.sweptRemappedMass + moved.fallbackRemappedMass > 0.9f &&
+        moved.unresolvedDisplacementMass < 1.0e-5f &&
+        moved.trappedMass < 1.0e-5f && close( moving.getTracerMass(), 1.0f, 1.0e-4f ) &&
+        std::abs( moved.delta() ) < 1.0e-4f,
+        "swept-guided remap must evacuate covered tracer and preserve stored mass" );
+    for( int y = 0; y < moving.getHeight(); ++y )
+        for( int x = 0; x < moving.getWidth(); ++x )
+            check( std::isfinite( moving.getTracerConcentration( x, y ) ) &&
+                moving.getTracerConcentration( x, y ) >= -1.0e-5f,
+                "swept remap and advection must keep concentrations nonnegative" );
+
+    moving.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback );
+    check( moving.getTracerStats().usedSweptRemap &&
+        close( moving.getTracerStats().sweptRemappedMass, 0.0f ) &&
+        close( moving.getTracerStats().fallbackRemappedMass, 0.0f ),
+        "stationary shape with valid history must not move tracer through fake swept transport" );
+
+    // 이동 대신 순수 회전으로 새로 가려진 partial fluid cell의 질량을 보정.
+    fluidField2 rotating{ 32, 32, 0.25f, { -4.0f, -4.0f } };
+    rotating.setCutCellProjectionEnabled( true );
+    rotating.setSweptTracerRemapEnabled( true );
+    fluidShapeObstacle2 rotor{ MakeBox( { 1.0f, 0.2f } ), { {}, {} }, {}, {}, 0.0f };
+    rotating.step( dt, std::span<const fluidShapeObstacle2>( &rotor, 1 ), feedback );
+    rotating.setTracerConcentration( 15, 18, 1.0f );
+    const float initialMass = rotating.getTracerMass();
+    rotor.transform.rotation = rot2::FromRadians( 0.5f * std::numbers::pi_v<float> );
+    rotating.step( dt, std::span<const fluidShapeObstacle2>( &rotor, 1 ), feedback, 160 );
+    check( rotating.getSweptFaceFlux().usedSweptFlux &&
+        rotating.getTracerStats().usedSweptRemap &&
+        rotating.getTracerStats().sweptRemappedMass + rotating.getTracerStats().fallbackRemappedMass > 0.0f &&
+        close( rotating.getTracerMass(), initialMass, 1.0e-4f ),
+        "rotating obstacle must remap shrinking cut-cell tracer without changing total mass" );
+
+    // 최초/변경된 geometry는 실제 이동 경로가 없으므로 opt-in이라도 실행하지 않는다.
+    fluidField2 unknown{ 16, 16, 0.5f, { -4.0f, -4.0f } };
+    unknown.setCutCellProjectionEnabled( true );
+    unknown.setSweptTracerRemapEnabled( true );
+    unknown.setTracerConcentration( 8, 7, 4.0f );
+    auto createdBox = makeBox();
+    createdBox.transform.position.x += 1.25f;
+    createdBox.center.x += 1.25f;
+    unknown.step( dt, std::span<const fluidShapeObstacle2>( &createdBox, 1 ), feedback );
+    check( !unknown.getSweptFaceFlux().usedSweptFlux && !unknown.getTracerStats().usedSweptRemap &&
+        close( unknown.getTracerMass(), 1.0f ),
+        "first snapshot must not invent swept tracer remap or lose mass" );
+    createdBox.geometry = MakeBox( { 1.0f, 0.3f } );
+    unknown.step( dt, std::span<const fluidShapeObstacle2>( &createdBox, 1 ), feedback );
+    check( !unknown.getTracerStats().usedSweptRemap && close( unknown.getTracerMass(), 1.0f ),
+        "geometry edit must reject swept remap while preserving tracer mass" );
+
+    moving.clear();
+    check( moving.isSweptTracerRemapEnabled() && close( moving.getTracerMass(), 0.0f ) &&
+        !moving.getTracerStats().usedSweptRemap,
+        "clear must reset swept remap diagnostics while retaining the selected mode" );
+}
+
 } // namespace
 
 int main()
@@ -844,4 +937,5 @@ int main()
     checkSweptSolidFaceFlux();
     checkConservativeMacAdvection();
     checkConservativeTracerTransport();
+    checkSweptTracerRemap();
 }
