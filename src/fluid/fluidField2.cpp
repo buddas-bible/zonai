@@ -2,11 +2,55 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <numbers>
 
 namespace zonai
 {
+namespace
+{
+
+bool ContainsFluidObstacle( const fluidShapeObstacle2& obstacle, vec2 point )
+{
+    const vec2 local = InverseTransformPoint( obstacle.transform, point );
+    if( const auto* circle = std::get_if<circle2>( &obstacle.geometry ) )
+        return circle->radius > 0.0f && Contains( *circle, local );
+
+    if( const auto* capsule = std::get_if<capsule2>( &obstacle.geometry ) )
+        return capsule->radius > 0.0f && Contains( *capsule, local );
+
+    if( const auto* polygon = std::get_if<polygon2>( &obstacle.geometry ) )
+    {
+        if( polygon->vertexCount < 2 || polygon->vertexCount > static_cast<int>( MAX_POLYGON_VERTICES ) ||
+            !std::isfinite( polygon->radius ) || polygon->radius < 0.0f ) return false;
+        if( polygon->vertexCount == 2 )
+            return polygon->radius > 0.0f &&
+                DistanceSquared( segment2{ polygon->vertices[0], polygon->vertices[1] }, local ) <=
+                    polygon->radius * polygon->radius;
+
+        bool inside = true;
+        float closestSquared = std::numeric_limits<float>::max();
+        for( int i = 0; i < polygon->vertexCount; ++i )
+        {
+            if( Dot( polygon->normals[i], local - polygon->vertices[i] ) > 0.0f ) inside = false;
+            const int next = ( i + 1 ) % polygon->vertexCount;
+            closestSquared = std::min( closestSquared,
+                DistanceSquared( segment2{ polygon->vertices[i], polygon->vertices[next] }, local ) );
+        }
+        return inside || ( polygon->radius > 0.0f && closestSquared <= polygon->radius * polygon->radius );
+    }
+    return false;
+}
+
+bool IsValidFluidObstacle( const fluidShapeObstacle2& obstacle )
+{
+    return IsFinite( obstacle.center ) && IsFinite( obstacle.transform.position ) &&
+        std::isfinite( obstacle.transform.rotation.c ) && std::isfinite( obstacle.transform.rotation.s ) &&
+        IsFinite( obstacle.linearVelocity ) && std::isfinite( obstacle.angularVelocity );
+}
+
+} // namespace
 
 fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
     : width_( width ), height_( height ), cellSize_( cellSize ), origin_( origin )
@@ -107,19 +151,17 @@ void fluidField2::addVelocity( vec2 position, vec2 velocityDelta, float radius )
 
 void fluidField2::step( float timeStep, int pressureIterations )
 {
-    step( timeStep, {}, {}, pressureIterations );
+    step( timeStep, std::span<const fluidShapeObstacle2>{}, std::span<fluidObstacleForce2>{}, pressureIterations );
 }
 
-void fluidField2::updateObstacles( std::span<const fluidCircleObstacle2> obstacles )
+void fluidField2::updateObstacles( std::span<const fluidShapeObstacle2> obstacles )
 {
     std::fill( solidOwner_.begin(), solidOwner_.end(), -1 );
     solidCellCount_ = 0;
     for( std::size_t index = 0; index < obstacles.size(); ++index )
     {
-        const fluidCircleObstacle2& circle = obstacles[index];
-        if( !IsFinite( circle.center ) || !IsFinite( circle.linearVelocity ) ||
-            !std::isfinite( circle.radius ) || circle.radius <= 0.0f ||
-            !std::isfinite( circle.angularVelocity ) ) continue;
+        const fluidShapeObstacle2& obstacle = obstacles[index];
+        if( !IsValidFluidObstacle( obstacle ) ) continue;
 
         // 최초의 원이 cell을 소유함. 이 API는 겹치는 solid의 union을 처리하지만
         // 겹친 부분의 상대 운동은 물리적으로 해결하지 않음 (World에서 충돌 해결).
@@ -128,8 +170,7 @@ void fluidField2::updateObstacles( std::span<const fluidCircleObstacle2> obstacl
             {
                 const int cell = cellIndex( x, y );
                 if( solidOwner_[cell] >= 0 ) continue;
-                const vec2 offset = getCellCenter( x, y ) - circle.center;
-                if( Dot( offset, offset ) < circle.radius * circle.radius )
+                if( ContainsFluidObstacle( obstacle, getCellCenter( x, y ) )
                 {
                     solidOwner_[cell] = static_cast<int>( index );
                     ++solidCellCount_;
@@ -143,7 +184,7 @@ bool fluidField2::isSolidCell( int x, int y ) const noexcept
     return x >= 0 && x < width_ && y >= 0 && y < height_ && solidOwner_[cellIndex( x, y )] >= 0;
 }
 
-void fluidField2::applySolidBoundaries( std::span<const fluidCircleObstacle2> obstacles )
+void fluidField2::applySolidBoundaries( std::span<const fluidShapeObstacle2> obstacles )
 {
     // Solid와 인접한 모든 face의 normal velocity를 rigid body 표면속도로 지정.
     // 유체-유체 face만 pressure gradient로 보정하며 가장자리 수직 flux는 0.
@@ -154,7 +195,7 @@ void fluidField2::applySolidBoundaries( std::span<const fluidCircleObstacle2> ob
             const int right = solidOwner_[cellIndex( x, y )];
             const int owner = left >= 0 ? left : right;
             if( owner < 0 ) continue;
-            const fluidCircleObstacle2& solid = obstacles[static_cast<std::size_t>( owner )];
+            const fluidShapeObstacle2& solid = obstacles[static_cast<std::size_t>( owner )];
             const vec2 point = origin_ + cellSize_ * vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
             u_[uIndex( x, y )] = ( solid.linearVelocity + Cross( solid.angularVelocity, point - solid.center ) ).x;
         }
@@ -166,13 +207,28 @@ void fluidField2::applySolidBoundaries( std::span<const fluidCircleObstacle2> ob
             const int top = solidOwner_[cellIndex( x, y )];
             const int owner = bottom >= 0 ? bottom : top;
             if( owner < 0 ) continue;
-            const fluidCircleObstacle2& solid = obstacles[static_cast<std::size_t>( owner )];
+            const fluidShapeObstacle2& solid = obstacles[static_cast<std::size_t>( owner )];
             const vec2 point = origin_ + cellSize_ * vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
             v_[vIndex( x, y )] = ( solid.linearVelocity + Cross( solid.angularVelocity, point - solid.center ) ).y;
         }
 }
 
 void fluidField2::step( float timeStep, std::span<const fluidCircleObstacle2> obstacles,
+    std::span<fluidObstacleForce2> feedback, int pressureIterations )
+{
+    if( feedback.size() != obstacles.size() )
+        throw std::invalid_argument( "fluidField2: obstacle and feedback sizes must match" );
+
+    // 기존 원 전용 API는 호환 유지. 단일 solver는 공통 Shape API만 수행.
+    std::vector<fluidShapeObstacle2> shapes;
+    shapes.reserve( obstacles.size() );
+    for( const fluidCircleObstacle2& obstacle : obstacles )
+        shapes.push_back( { circle2{ {}, obstacle.radius }, { obstacle.center, {} }, obstacle.center,
+            obstacle.linearVelocity, obstacle.angularVelocity } );
+    step( timeStep, std::span<const fluidShapeObstacle2>( shapes ), feedback, pressureIterations );
+}
+
+void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obstacles,
     std::span<fluidObstacleForce2> feedback, int pressureIterations )
 {
     if( feedback.size() != obstacles.size() )
@@ -210,7 +266,7 @@ void fluidField2::step( float timeStep, std::span<const fluidCircleObstacle2> ob
 }
 
 void fluidField2::project( float timeStep, int pressureIterations,
-    std::span<const fluidCircleObstacle2> obstacles, std::span<fluidObstacleForce2> feedback )
+    std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback )
 {
     // div(v) / dt = Laplace(p). 벽에서는 수직 face 속도 0, Neumann 압력 경계.
     const float inverseCell = 1.0f / cellSize_;
