@@ -81,9 +81,27 @@ u_next = u* - dt * ∇p
 
 회귀 테스트는 정상 격자·단일 U face·Solid 인접 face·지원 범위 밖 입력에서 **실제 유체 운동량 변화 == 반환된 충격량**, 그리고 Sandbox의 **Body Drag + 유체 Drag ≈ 0**, One-way 모드와 Pressure 단독 모드를 각각 검사한다.
 
+## Part 5 — 압력·강체·외벽 운동량 수지
+
+유체에 대한 기존 `getFluidMomentum()`은 외곽 wall face와 Solid에 인접한 운동학 face를 제외한 **fluid-fluid MAC face의 dual 질량 운동량**이다. 이번 단계에서는 이 정의를 그대로 유지하면서 압력 투영 전후의 운동량 차이와 압력에 의한 강체/외벽 충격량을 분리한다.
+
+- `getPressureMomentum()`은 마지막으로 완료된 `step()`의 `fluidPressureMomentum2`를 반환한다. `fluid`는 실제 유체 내부 face의 압력 보정 전후 운동량 차이, `solid`는 각 장애물에 반환된 압력 힘의 합 × dt, `wall`은 도메인 외곽의 pressure traction × dt다. `residual() = fluid + solid + wall`.
+- **외벽을 생략하고 강체 압력 반력과 유체 운동량만 비교하면 보존 오차가 있는 것처럼 보인다.** 닫힌 압력 문제에서 외벽도 운동량을 전달하기 때문이다. 외벽의 힘은 왼쪽 `-p·h`, 오른쪽 `+p·h`, 바닥 `-p·h`, 천장 `+p·h`를 합산한다(밀도=1, 깊이=1 기준).
+- `getStepMomentum()`은 `before → afterObstacles → afterAdvection → afterPressure` 스냅샷을 제공해 셀 점유 변경으로 유효 face 집합이 달라진 효과, Semi-Lagrangian 이류 효과, 압력 효과를 분리한다. 이 단계별 기록은 디버그 관측량이며 유체 질량 전체의 물리적인 운동량 총합을 뜻하지 않는다.
+- `clear()`는 두 진단량도 초기화한다. Drag 충격량 주입은 압력 투영 **이후** 수행되므로 마지막 `step()`의 `afterPressure`에는 Drag 변화가 들어있지 않다. Sandbox의 Drag 장부는 별도로 확인해야 한다.
+
+```text
+Pressure residual = ΔP_fluid-fluid faces + J_solid + J_outer walls
+Step fluid ΔP     = occupancy ΔP + advection ΔP + pressure ΔP
+```
+
+**한계:** 위 합이 작은 것은 동일한 압력장/계단형 마스크에서 계산한 **이산 face 수지의 대수적 일관성**을 검증한다는 뜻이다. 실제 연속체의 물리적인 운동량 보존은 아니며, moving obstacle 경계가 밀어낸 유체 체적, 격자 마스크의 불연속적 전환, 비보존형 이류, 압력–강체 속도 결합의 완전 동기화까지 해결하지 않는다. 압력 게이지 상수도 일관된 닫힌 경계 계산일 때만 상쇄된다.
+
+유체 코어 회귀 테스트는 외벽만 있는 영역, 장애물+바람, 움직이는 장애물에서 이 세 항의 잔차와 단계별 합을 확인한다. Sandbox 테스트는 월드에 반환되는 압력 force가 계측된 Solid 충격량과 같은지, reset/단방향 토글 동작을 확인한다.
+
 ## 다음 구현 후보
 
-1. 압력/외벽/이류까지 포함한 fluid-solid 운동량 budget, 보존형 cut-cell 경계 정확도 검증.
+1. moving obstacle의 체적 교환 및 cut-cell boundary, pressure–rigid 동기 결합의 정밀화.
 2. 복합 Body의 다중 Shape 집계, static obstacle, Segment/Chain의 별도 표면 경계 표현.
 3. 연기/염료(tracer) 수송, 점성(확산), 회전(vorticity) 표현.
 4. 압력 solver 수렴 기준과 성능 평가, 해상도 증대.
