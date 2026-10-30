@@ -75,6 +75,10 @@ fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
     vOpenFraction_.assign( v_.size(), 1.0f );
     uSolidVelocity_.assign( u_.size(), 0.0f );
     vSolidVelocity_.assign( v_.size(), 0.0f );
+    cutCellVolumeRate_.assign( pressure_.size(), 0.0f );
+    cutCellComponent_.assign( pressure_.size(), -1 );
+    cutCellNearestFluid_.assign( pressure_.size(), -1 );
+    cutCellQueue_.reserve( pressure_.size() );
     for( int y = 0; y < height_; ++y )
     {
         uOpenFraction_[uIndex( 0, y )] = 0.0f;
@@ -102,6 +106,12 @@ void fluidField2::clear() noexcept
     std::fill( previousCellFluidFraction_.begin(), previousCellFluidFraction_.end(), 1.0f );
     std::fill( uSolidVelocity_.begin(), uSolidVelocity_.end(), 0.0f );
     std::fill( vSolidVelocity_.begin(), vSolidVelocity_.end(), 0.0f );
+    std::fill( cutCellVolumeRate_.begin(), cutCellVolumeRate_.end(), 0.0f );
+    std::fill( cutCellComponent_.begin(), cutCellComponent_.end(), -1 );
+    std::fill( cutCellNearestFluid_.begin(), cutCellNearestFluid_.end(), -1 );
+    cutCellQueue_.clear();
+    hasCutCellHistory_ = false;
+    volumeSourceValid_ = false;
     std::fill( uOpenFraction_.begin(), uOpenFraction_.end(), 1.0f );
     std::fill( vOpenFraction_.begin(), vOpenFraction_.end(), 1.0f );
     for( int y = 0; y < height_; ++y )
@@ -354,6 +364,8 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     constexpr float inverseCount = 1.0f / sampleCount;
     constexpr float inverseCellSamples = 1.0f / ( sampleCount * sampleCount );
     std::copy( cellFluidFraction_.begin(), cellFluidFraction_.end(), previousCellFluidFraction_.begin() );
+    volumeSourceValid_ = hasCutCellHistory_;
+    hasCutCellHistory_ = true;
     cutCellTransition_ = {};
     std::fill( uSolidVelocity_.begin(), uSolidVelocity_.end(), 0.0f );
     std::fill( vSolidVelocity_.begin(), vSolidVelocity_.end(), 0.0f );
@@ -689,7 +701,7 @@ void fluidField2::applyCutCellBoundaries() noexcept
             if( cutCellVOpen( x, y ) == 0.0f ) v_[vIndex( x, y )] = vSolidVelocity_[vIndex( x, y )];
 }
 
-float fluidField2::cutCellFluxDivergenceRms() const noexcept
+float fluidField2::cutCellFluxDivergenceRms( float inverseTimeStep ) const noexcept
 {
     double sum = 0.0;
     int active = 0;
@@ -697,25 +709,82 @@ float fluidField2::cutCellFluxDivergenceRms() const noexcept
     for( int y = 0; y < height_; ++y )
         for( int x = 0; x < width_; ++x )
         {
-            if( cellFluidFraction_[cellIndex( x, y )] <= 0.0f ) continue;
-            const auto fluxU = [&]( int i )
-            {
-                const float open = cutCellUOpen( i, y );
-                const int index = uIndex( i, y );
-                return open * u_[index] + ( 1.0f - open ) * uSolidVelocity_[index];
-            };
-            const auto fluxV = [&]( int j )
-            {
-                const float open = cutCellVOpen( x, j );
-                const int index = vIndex( x, j );
-                return open * v_[index] + ( 1.0f - open ) * vSolidVelocity_[index];
-            };
-            const double divergence = static_cast<double>(
-                fluxU( x + 1 ) - fluxU( x ) + fluxV( y + 1 ) - fluxV( y ) ) * inverseCell;
-            sum += divergence * divergence;
+            const int cell = cellIndex( x, y );
+            if( cellFluidFraction_[cell] <= 0.0f ) continue;
+            const float flux = (
+                cutCellUOpen( x + 1, y ) * u_[uIndex( x + 1, y )] -
+                cutCellUOpen( x, y ) * u_[uIndex( x, y )] +
+                cutCellVOpen( x, y + 1 ) * v_[vIndex( x, y + 1 )] -
+                cutCellVOpen( x, y ) * v_[vIndex( x, y )] ) * inverseCell;
+            const double residual = static_cast<double>( flux ) +
+                static_cast<double>( cutCellVolumeRate_[cell] ) * inverseTimeStep;
+            sum += residual * residual;
             ++active;
         }
     return active > 0 ? static_cast<float>( std::sqrt( sum / active ) ) : 0.0f;
+}
+
+void fluidField2::prepareCutCellVolumeChange( float timeStep )
+{
+    std::fill( cutCellVolumeRate_.begin(), cutCellVolumeRate_.end(), 0.0f );
+    cutCellPressure_.hasVolumeHistory = volumeSourceValid_;
+    if( !volumeSourceValid_ ) return;
+
+    // Δfraction = (new fluid area - old fluid area) / h². 최초 배치에는 적용하지 않는다.
+    // 현재 완전히 solid가 된 cell에는 압력 미지수가 없으므로 가장 가까운 활성
+    // fluid cell로 해당 Δfraction을 이송한다. 이는 swept 경로가 아닌 공간 근사다.
+    cutCellQueue_.clear();
+    std::fill( cutCellNearestFluid_.begin(), cutCellNearestFluid_.end(), -1 );
+    for( int y = 0; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const int index = cellIndex( x, y );
+            if( cellFluidFraction_[index] <= 0.0f ) continue;
+            cutCellNearestFluid_[index] = index;
+            cutCellQueue_.push_back( index );
+        }
+
+    for( std::size_t read = 0; read < cutCellQueue_.size(); ++read )
+    {
+        const int index = cutCellQueue_[read];
+        const int x = index % width_;
+        const int y = index / width_;
+        const auto visit = [&]( int neighbor )
+        {
+            if( cutCellNearestFluid_[neighbor] >= 0 ) return;
+            cutCellNearestFluid_[neighbor] = cutCellNearestFluid_[index];
+            cutCellQueue_.push_back( neighbor );
+        };
+        if( x > 0 ) visit( index - 1 );
+        if( x + 1 < width_ ) visit( index + 1 );
+        if( y > 0 ) visit( index - width_ );
+        if( y + 1 < height_ ) visit( index + width_ );
+    }
+
+    double volumeRate = 0.0;
+    double relocatedRate = 0.0;
+    double unresolvedRate = 0.0;
+    const double scale = static_cast<double>( cellSize_ ) * cellSize_ / timeStep;
+    for( std::size_t i = 0; i < cellFluidFraction_.size(); ++i )
+    {
+        const float change = cellFluidFraction_[i] - previousCellFluidFraction_[i];
+        volumeRate += static_cast<double>( change ) * scale;
+        if( cellFluidFraction_[i] > 0.0f )
+            cutCellVolumeRate_[i] += change;
+        else if( change != 0.0f )
+        {
+            const int destination = cutCellNearestFluid_[i];
+            if( destination >= 0 )
+            {
+                cutCellVolumeRate_[destination] += change;
+                relocatedRate += static_cast<double>( change ) * scale;
+            }
+            else unresolvedRate += static_cast<double>( change ) * scale;
+        }
+    }
+    cutCellPressure_.volumeRate = static_cast<float>( volumeRate );
+    cutCellPressure_.redistributedVolumeRate = static_cast<float>( relocatedRate );
+    cutCellPressure_.unresolvedVolumeRate = static_cast<float>( unresolvedRate );
 }
 
 void fluidField2::projectCutCell( float timeStep, int pressureIterations,
