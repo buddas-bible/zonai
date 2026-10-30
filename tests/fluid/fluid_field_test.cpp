@@ -569,6 +569,47 @@ void checkCutCellTemporalContinuity()
         departed.compatibilityCorrection >= 0.99f * departed.sourceImbalance,
         "closed domain must report unresolvable positive net fluid volume growth" );
 
+    // 완전히 새로 덮인 셀에는 압력 미지수가 없기 때문에 그 체적 소스를
+    // 가까운 활성 셀로 옮겨야 한다. 그대로 버리면 이동 강체의 ΔV가 누락된다.
+    fluidField2 covered{ 12, 12, 1.0f, { -6.0f, -6.0f } };
+    covered.setCutCellProjectionEnabled( true );
+    fluidShapeObstacle2 largeBox{
+        MakeBox( { 1.5f, 1.5f } ),
+        { { -1.5f, 0.0f }, {} }, { -1.5f, 0.0f }, {}, 0.0f
+    };
+    covered.step( dt, std::span<const fluidShapeObstacle2>( &largeBox, 1 ), feedback );
+    largeBox.transform.position.x += 1.0f;
+    largeBox.center.x += 1.0f;
+    covered.step( dt, std::span<const fluidShapeObstacle2>( &largeBox, 1 ), feedback, 200 );
+    const fluidCutCellPressure2 coveredStats = covered.getCutCellPressure();
+    check( coveredStats.redistributedVolumeRate < -1.0f &&
+        coveredStats.unresolvedVolumeRate == 0.0f &&
+        std::abs( coveredStats.volumeRate ) < 1.0e-4f &&
+        std::isfinite( coveredStats.divergenceAfter ),
+        "fully covered new solid cells must deliver missing volume source to nearby active cells" );
+
+    // 도메인을 가로지르는 장벽으로 분리된 유체 영역은 압력 Neumann
+    // 호환성을 각 영역에서 독립적으로 검사해야 한다.
+    fluidField2 pockets{ 12, 12, 1.0f, { -6.0f, -6.0f } };
+    pockets.setCutCellProjectionEnabled( true );
+    std::array<fluidShapeObstacle2, 2> split{
+        fluidShapeObstacle2{ MakeBox( { 0.5f, 6.1f } ),
+            { { 0.5f, 0.0f }, {} }, { 0.5f, 0.0f }, {}, 0.0f },
+        fluidShapeObstacle2{ circle2{ {}, 0.65f },
+            { { -2.5f, 0.0f }, {} }, { -2.5f, 0.0f }, {}, 0.0f }
+    };
+    std::array<fluidObstacleForce2, 2> splitFeedback{};
+    pockets.step( dt, split, splitFeedback );
+    split[1].transform.position.x += 0.25f;
+    split[1].center.x += 0.25f;
+    pockets.step( dt, split, splitFeedback, 200 );
+    const fluidCutCellPressure2 splitStats = pockets.getCutCellPressure();
+    check( splitStats.connectedRegions == 2 &&
+        std::isfinite( splitStats.pressureResidual ) &&
+        splitStats.compatibilityCorrection + 1.0e-4f >=
+            std::abs( splitStats.sourceImbalance ),
+        "disconnected fluid regions must each receive a separate Neumann compatibility correction" );
+
     field.clear();
     field.step( dt );
     check( !field.getCutCellPressure().hasVolumeHistory &&
