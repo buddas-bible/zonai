@@ -348,9 +348,8 @@ float fluidField2::getVFaceOpenFraction( int x, int y ) const noexcept
 
 void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> obstacles )
 {
-    // Cell-center solid mask를 변경하지 않은 독립적인 기하 관측 레이어.
-    // 4x4 sub-cell sample과 4개 face sample로 union geometry의 부분 점유를 추정한다.
-    // 이 배열을 pressure gradient/flux에 사용하려면 cut-cell 연산자 전체를 함께 변경해야 한다.
+    // 이진 cell-center mask와 별도로 4x4 sub-cell / 4개 face 표본을 계산.
+    // 선택적 가중 압력 경로에서 면 개방율과 강체 속도를 직접 사용한다.
     constexpr int sampleCount = 4;
     constexpr float inverseCount = 1.0f / sampleCount;
     constexpr float inverseCellSamples = 1.0f / ( sampleCount * sampleCount );
