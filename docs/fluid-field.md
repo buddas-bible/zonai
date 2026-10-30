@@ -169,9 +169,23 @@ Part 9에서는 두 프레임의 유체 셀 점유율 차이 `Δf`를 압력 연
 
 **주의:** 이는 공간–시간 표본 적분을 이용한 **MAC 내부 공유 면의 Swept Solid Flux 근사**이며 정확한 연속 도형의 교차 면적이나 진정한 4D swept interface reconstruction이 아니다. 시간 샘플 수 상한과 4개 face 표본에 따른 aliasing이 존재하며, 특히 완전히 한 셀 안에서 움직여 **MAC 면을 지나지 않는 작은 장애물**은 여전히 식별하기 어렵다. 도메인 벽과 Shape 추가·삭제는 경로 적분에서 제외한다. 현재 **Semi-Lagrangian 이류는 보존형으로 전환하지 않았고**, fluid/solid pressure reaction도 단순 면적 차이 근사다. 외벽/연결된 셀의 합 보존이 곧 실제 유체 질량·운동량 보존을 의미하지 않는다.
 
+## Part 11 — Flux-form MAC dual-face 이류와 Sandbox 비교
+
+Part 1~10의 속도 이류는 MAC face를 이전 위치로 역추적해 샘플링하는 Semi-Lagrangian 방식이었다. 안정적이지만, **내부 face 운동량이 인접한 face로 얼마씩 교환되었는지**에 대한 보존적인 pair flux가 없었다. 기본 이류 방식은 바꾸지 않고 `setConservativeAdvectionEnabled(true)`로 **1차 upwind flux-form MAC 이류**를 선택하도록 했다.
+
+- MAC U 내부 face마다 `h×h`의 U dual control volume, V face마다 V dual control volume을 둔다. 저장한 `u`, `v`는 각각의 수송 성분이고 MAC 속도를 보간해 **dual edge의 실제 이류 속도**를 구한다. 예를 들어 U dual의 x 방향 전송 속도는 인접 두 U 속도의 평균, y 방향은 상단 V 두 face의 평균이다. V dual도 x·y를 서로 바꾸어 대칭적으로 구성한다.
+- 인접한 두 dual control volume이 공유하는 edge에는 **동일한 부호의 upwind flux** `a_edge * transportSpeed * (speed >= 0 ? leftValue : rightValue)`를 적용한다. `a_edge = min(a_face1, a_face2)`이며 `a_face`는 실험 Cut-cell 모드의 기하 개방율, 기존 모드에서는 0/1 이진 유체 face다. **현재 형상에서 완전히 막힌 face는 계산에서 제외**한다.
+- 각 face의 유효 질량을 `rho * h² * a_face` (rho=1, unit depth)로 근사하고, `newVelocity = velocity - dt/h * (outgoingFlux - incomingFlux) / a_face`로 갱신한다. 양쪽 face에서 공통 내부 flux를 사용하므로 **고정된 현재 개방율을 가진 닫힌 dual grid에서 유효 face 운동량 합이 수치 오차 내 보존**된다. 외곽 dual domain의 flux는 0이다. 이는 물리적 원 도메인의 정확한 cut volume 질량이 아니다.
+- 각 Step 시작 시 활성 U/V 면의 최대 속도에서 `maxCfl = speedMax * dt / h`를 계산하고, 목표 `CFL <= 0.45`에 맞춰 최대 64회 균등 substep으로 나누어 수행한다. 상한을 넘어가면 `cflLimited` 진단이 true가 되며 이 경우 안정성을 보장하지 않는다.
+- `getAdvectionStats()`는 압력 투영 직전의 **이류 단계만** 평가한다. `before`, `after`는 가중 dual face 운동량(N·s), `delta()`는 이류로 인한 변화, `conservative`, `maxCfl`, `substeps`, `cflLimited`는 선택한 알고리즘의 실제 실행 정보다. 기존 Semi-Lagrangian 모드에서도 동일한 면 운동량 합을 구해 비교할 수 있다. `clear()`는 진단값을 초기화하되 모드 선택은 유지한다.
+- **Sandbox 사용법:** `유체 / 2D 바람·유체 속도장`에서 **보존형 MAC 이류 (실험)**를 토글한다. **이류 비교 프리셋 (와류 + 외력/강체 OFF)** 버튼은 유체/강체를 리셋하고 8방향 원형 접선 속도 와류를 주입하며 바람 소스·Drag·양방향 강체 연성을 끈다. 재생/일시정지하면서 속도 화살표를 보고, 전·후 운동량/CFL을 비교한다. **현재 흐름에 와류 추가** 버튼으로 실행 중 반복 주입도 가능하다. 기존 강체 연성을 다시 켜면 Circle/Capsule/Polygon과 Cut-cell 조합을 비교할 수 있다.
+- 핵심 회귀: 동일 초기 속도의 Semi-Lagrangian/보존 이류 시작 운동량 비교, 빈 격자에서 CFL 다중 substep 보존, 정적 Circle의 부분 면 가중 운동량 수지, 두 모드 토글과 초기화, Sandbox 와류 프리셋·강체 실험.
+
+**한계:** 이 단계의 보존량은 **MAC staggered dual face에 정의한 가중 운동량**이며 유체 전체의 정확한 운동량·질량 보존이 아니다. 현재 점유 면적을 이류 중 고정시키므로 강체가 움직여 생긴 swept interface의 유체 질량/운동량 수송과 같은 공간–시간 격자를 공유하지 않는다. 압력 투영, 이산 마스크 전이, drag, 실제 외벽 반력 및 Semi-Lagrangian 모드에는 이 보존 보장이 적용되지 않는다. 1차 upwind의 수치 점성, dual 격자 외곽 0-flux 근사, 작은 부분 개방 면, 매우 큰 CFL(64 substep 상한)에서의 오차가 남는다. 추후에는 **conservative volume/mass tracer, 실제 Cut-cell geometry의 dual mass, swept flux와 유체 이류 통합, 표면 pressure reaction 수지**를 진행한다.
+
 ## 다음 구현 후보
 
-1. 정확한 moving interface surface 적분과 보존형 유체 이류, pressure–rigid 반력 수지 정밀화 및 swept aliasing 성능 측정.
+1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
 2. 복합 Body의 다중 Shape 집계, static obstacle, Segment/Chain의 별도 표면 경계 표현.
 3. 연기/염료(tracer) 수송, 점성(확산), 회전(vorticity) 표현.
 4. 압력 solver 수렴 기준과 성능 평가, 해상도 증대.

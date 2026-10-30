@@ -684,6 +684,70 @@ void checkSweptSolidFaceFlux()
         "clear must reset swept volume diagnostics and previous shape history" );
 }
 
+void checkConservativeMacAdvection()
+{
+    constexpr float dt = 1.0f / 30.0f;
+    fluidField2 conservative{ 24, 20, 0.5f, { -6.0f, -5.0f } };
+    fluidField2 legacy{ 24, 20, 0.5f, { -6.0f, -5.0f } };
+    conservative.setConservativeAdvectionEnabled( true );
+
+    for( fluidField2* field : { &conservative, &legacy } )
+    {
+        field->addVelocity( { -1.0f, 0.8f }, { 4.0f, 1.5f }, 1.5f );
+        field->addVelocity( { 1.2f, -0.8f }, { -1.2f, 2.5f }, 0.8f );
+    }
+
+    conservative.step( dt, 1 );
+    legacy.step( dt, 1 );
+    const fluidAdvectionStats2& stats = conservative.getAdvectionStats();
+    const fluidAdvectionStats2& old = legacy.getAdvectionStats();
+    const float scale = 1.0f + Length( stats.before );
+    check( stats.conservative && !old.conservative &&
+        stats.substeps >= 1 && stats.maxCfl > 0.0f && !stats.cflLimited &&
+        Length( stats.before - old.before ) < 1.0e-4f * scale,
+        "conservative and semi-Lagrangian advection must start from the same momentum" );
+    check( Length( stats.delta() ) < 2.0e-4f * scale &&
+        IsFinite( stats.after ) && IsFinite( conservative.sampleVelocity( { 1.0f, 0.0f } ) ),
+        "shared MAC dual-edge fluxes must conserve weighted face momentum on an empty closed grid" );
+
+    // 큰 속도/시간 간격은 여러 CFL substep으로 분리하되, 각 단계가 같은 flux를 공유.
+    conservative.clear();
+    conservative.addVelocity( { -0.5f, 0.0f }, { 8.0f, 0.0f }, 1.0f );
+    conservative.step( 0.2f, 1 );
+    const fluidAdvectionStats2 substepped = conservative.getAdvectionStats();
+    check( substepped.conservative && substepped.substeps >= 3 &&
+        !substepped.cflLimited &&
+        Length( substepped.delta() ) < 2.0e-4f * ( 1.0f + Length( substepped.before ) ),
+        "CFL substeps must not break closed-grid advection momentum conservation" );
+
+    // 부분 개방 면을 적용하더라도 유량은 양쪽 dual cell에서 똑같이 계상되어야 한다.
+    fluidField2 partial{ 32, 32, 0.5f, { -8.0f, -8.0f } };
+    partial.setCutCellProjectionEnabled( true );
+    partial.setConservativeAdvectionEnabled( true );
+    const fluidCircleObstacle2 obstacle{ { 0.0f, 0.0f }, 0.8f, {}, 0.0f };
+    std::array<fluidObstacleForce2, 1> feedback{};
+    partial.step( dt, std::span<const fluidCircleObstacle2>( &obstacle, 1 ), feedback );
+    partial.addVelocity( { -1.7f, 0.3f }, { 2.0f, 0.4f }, 1.2f );
+    partial.step( dt, std::span<const fluidCircleObstacle2>( &obstacle, 1 ), feedback, 120 );
+    const fluidAdvectionStats2 cut = partial.getAdvectionStats();
+    check( cut.conservative && partial.getCutCellTransition().partialCells > 0 &&
+        Length( cut.delta() ) < 3.0e-4f * ( 1.0f + Length( cut.before ) ) &&
+        std::isfinite( partial.getCutCellPressure().divergenceAfter ) &&
+        IsFinite( feedback[0].force ),
+        "fractionally open faces must conserve dual-face advection momentum independently of pressure" );
+
+    partial.setConservativeAdvectionEnabled( false );
+    partial.step( dt, std::span<const fluidCircleObstacle2>( &obstacle, 1 ), feedback );
+    check( !partial.getAdvectionStats().conservative &&
+        partial.getAdvectionStats().substeps == 1,
+        "disabling conservative advection must restore legacy semi-Lagrangian path" );
+    partial.setConservativeAdvectionEnabled( true );
+    partial.clear();
+    check( partial.getAdvectionStats().substeps == 0 &&
+        partial.isConservativeAdvectionEnabled(),
+        "clear must reset advection measurements but preserve the chosen algorithm" );
+}
+
 } // namespace
 
 int main()
@@ -699,4 +763,5 @@ int main()
     checkWeightedCutCellPressure();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
+    checkConservativeMacAdvection();
 }

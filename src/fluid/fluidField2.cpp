@@ -181,6 +181,7 @@ void fluidField2::clear() noexcept
     solidTransition_ = {};
     cutCellTransition_ = {};
     cutCellPressure_ = {};
+    advectionStats_ = {};
     pressureMomentum_ = {};
     stepMomentum_ = {};
 }
@@ -657,6 +658,139 @@ void fluidField2::applySolidBoundaries( std::span<const fluidShapeObstacle2> obs
         }
 }
 
+float fluidField2::advectionUOpen( int x, int y ) const noexcept
+{
+    if( x <= 0 || x >= width_ || y < 0 || y >= height_ ) return 0.0f;
+    if( cutCellProjectionEnabled_ ) return cutCellUOpen( x, y );
+    return isSolidCell( x - 1, y ) || isSolidCell( x, y ) ? 0.0f : 1.0f;
+}
+
+float fluidField2::advectionVOpen( int x, int y ) const noexcept
+{
+    if( x < 0 || x >= width_ || y <= 0 || y >= height_ ) return 0.0f;
+    if( cutCellProjectionEnabled_ ) return cutCellVOpen( x, y );
+    return isSolidCell( x, y - 1 ) || isSolidCell( x, y ) ? 0.0f : 1.0f;
+}
+
+vec2 fluidField2::getAdvectionFaceMomentum() const noexcept
+{
+    double sumU = 0.0;
+    double sumV = 0.0;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+            sumU += static_cast<double>( advectionUOpen( x, y ) ) * u_[uIndex( x, y )];
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+            sumV += static_cast<double>( advectionVOpen( x, y ) ) * v_[vIndex( x, y )];
+    const double mass = static_cast<double>( cellSize_ ) * cellSize_; // rho=1, depth=1m
+    return { static_cast<float>( sumU * mass ), static_cast<float>( sumV * mass ) };
+}
+
+void fluidField2::advectConservative( float timeStep )
+{
+    // 고정된 현재 face 개방율에 대해 U/V dual control volume의 flux-form upwind 이류.
+    // 공유 dual edge는 양쪽 셀에서 동일한 flux를 사용하며, dual 외곽은 닫힘.
+    float speedMax = 0.0f;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+            if( advectionUOpen( x, y ) > 0.0f )
+                speedMax = std::max( speedMax, std::abs( u_[uIndex( x, y )] ) );
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+            if( advectionVOpen( x, y ) > 0.0f )
+                speedMax = std::max( speedMax, std::abs( v_[vIndex( x, y )] ) );
+
+    const double cfl = static_cast<double>( speedMax ) * timeStep / cellSize_;
+    constexpr int maxSubsteps = 64;
+    const int substeps = static_cast<int>( std::clamp( std::ceil( cfl / 0.45 ), 1.0,
+        static_cast<double>( maxSubsteps ) ) );
+    advectionStats_.maxCfl = static_cast<float>( cfl );
+    advectionStats_.substeps = substeps;
+    advectionStats_.cflLimited = cfl > maxSubsteps * 0.45;
+    const float scale = ( timeStep / substeps ) / cellSize_;
+    const auto flux = []( float speed, float lower, float upper, float open )
+    {
+        return open * speed * ( speed >= 0.0f ? lower : upper );
+    };
+
+    for( int step = 0; step < substeps; ++step )
+    {
+        std::copy( u_.begin(), u_.end(), nextU_.begin() );
+        std::copy( v_.begin(), v_.end(), nextV_.begin() );
+        for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x )
+            {
+                const float open = advectionUOpen( x, y );
+                if( open == 0.0f ) continue;
+                const int index = uIndex( x, y );
+                const float u = u_[index];
+                float east = 0.0f, west = 0.0f, north = 0.0f, south = 0.0f;
+                if( x + 1 < width_ )
+                {
+                    const float next = u_[uIndex( x + 1, y )];
+                    east = flux( 0.5f * ( u + next ), u, next,
+                        std::min( open, advectionUOpen( x + 1, y ) ) );
+                }
+                if( x > 1 )
+                {
+                    const float prev = u_[uIndex( x - 1, y )];
+                    west = flux( 0.5f * ( prev + u ), prev, u,
+                        std::min( open, advectionUOpen( x - 1, y ) ) );
+                }
+                if( y + 1 < height_ )
+                {
+                    const float next = u_[uIndex( x, y + 1 )];
+                    north = flux( 0.5f * ( v_[vIndex( x - 1, y + 1 )] + v_[vIndex( x, y + 1 )] ),
+                        u, next, std::min( open, advectionUOpen( x, y + 1 ) ) );
+                }
+                if( y > 0 )
+                {
+                    const float prev = u_[uIndex( x, y - 1 )];
+                    south = flux( 0.5f * ( v_[vIndex( x - 1, y )] + v_[vIndex( x, y )] ),
+                        prev, u, std::min( open, advectionUOpen( x, y - 1 ) ) );
+                }
+                nextU_[index] = u - scale * ( east - west + north - south ) / open;
+            }
+
+        for( int y = 1; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+            {
+                const float open = advectionVOpen( x, y );
+                if( open == 0.0f ) continue;
+                const int index = vIndex( x, y );
+                const float v = v_[index];
+                float east = 0.0f, west = 0.0f, north = 0.0f, south = 0.0f;
+                if( x + 1 < width_ )
+                {
+                    const float next = v_[vIndex( x + 1, y )];
+                    east = flux( 0.5f * ( u_[uIndex( x + 1, y - 1 )] + u_[uIndex( x + 1, y )] ),
+                        v, next, std::min( open, advectionVOpen( x + 1, y ) ) );
+                }
+                if( x > 0 )
+                {
+                    const float prev = v_[vIndex( x - 1, y )];
+                    west = flux( 0.5f * ( u_[uIndex( x, y - 1 )] + u_[uIndex( x, y )] ),
+                        prev, v, std::min( open, advectionVOpen( x - 1, y ) ) );
+                }
+                if( y + 1 < height_ )
+                {
+                    const float next = v_[vIndex( x, y + 1 )];
+                    north = flux( 0.5f * ( v + next ), v, next,
+                        std::min( open, advectionVOpen( x, y + 1 ) ) );
+                }
+                if( y > 1 )
+                {
+                    const float prev = v_[vIndex( x, y - 1 )];
+                    south = flux( 0.5f * ( prev + v ), prev, v,
+                        std::min( open, advectionVOpen( x, y - 1 ) ) );
+                }
+                nextV_[index] = v - scale * ( east - west + north - south ) / open;
+            }
+        u_.swap( nextU_ );
+        v_.swap( nextV_ );
+    }
+}
+
 void fluidField2::step( float timeStep, std::span<const fluidCircleObstacle2> obstacles,
     std::span<fluidObstacleForce2> feedback, int pressureIterations )
 {
@@ -690,9 +824,14 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
     else applySolidBoundaries( obstacles );
 
-    // 반 라그랑주 이류: face마다 이전 속도장을 역추적해 보간함.
-    // 기존 u/v는 읽기 전용으로 두고 next buffer에 기록하므로 순서 의존성이 없음.
-    std::fill( nextU_.begin(), nextU_.end(), 0.0f );
+    advectionStats_ = {};
+    advectionStats_.conservative = conservativeAdvectionEnabled_;
+    advectionStats_.before = getAdvectionFaceMomentum();
+    if( conservativeAdvectionEnabled_ ) advectConservative( timeStep );
+    else
+    {
+        // 기존 반 라그랑주 이류: 읽기 전용 source로부터 face별 역추적.
+        std::fill( nextU_.begin(), nextU_.end(), 0.0f );
     std::fill( nextV_.begin(), nextV_.end(), 0.0f );
     for( int y = 0; y < height_; ++y )
         for( int x = 1; x < width_; ++x )
@@ -710,10 +849,13 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
             nextV_[vIndex( x, y )] = sampleFrom( u_, v_, previous ).y;
         }
 
-    u_.swap( nextU_ );
-    v_.swap( nextV_ );
+        u_.swap( nextU_ );
+        v_.swap( nextV_ );
+        advectionStats_.substeps = 1;
+    }
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
     else applySolidBoundaries( obstacles );
+    advectionStats_.after = getAdvectionFaceMomentum();
     stepMomentum_.afterAdvection = getFluidMomentum();
     if( cutCellProjectionEnabled_ )
     {

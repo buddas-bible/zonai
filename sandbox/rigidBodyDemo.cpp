@@ -1248,6 +1248,34 @@ void rigidBodyDemo::setWindDragCoefficient( float rate )
     if( std::isfinite( rate ) ) windDragCoefficient_ = std::clamp( rate, 0.0f, 15.0f );
 }
 
+void rigidBodyDemo::addWindVortex()
+{
+    if( kind_ != demoKind::windFlow || !windField_ ) return;
+    // 같은 격자에 8방향 접선 속도를 넣어 두 이류 방식의 확산/운동량을 비교.
+    constexpr int samples = 8;
+    constexpr float radius = 1.5f;
+    constexpr float speed = 3.0f;
+    constexpr float tau = 2.0f * std::numbers::pi_v<float>;
+    for( int i = 0; i < samples; ++i )
+    {
+        const float angle = tau * i / samples;
+        const vec2 radial{ std::cos( angle ), std::sin( angle ) };
+        const vec2 tangent{ -radial.y, radial.x };
+        windField_->addVelocity( radius * radial, speed * tangent, 0.65f );
+    }
+}
+
+void rigidBodyDemo::beginWindAdvectionTrial()
+{
+    if( kind_ != demoKind::windFlow || !windField_ ) return;
+    resetWindFlow();
+    // 유체 이류를 분리 평가하기 위해 외부 source/Drag/강체 연성을 끈다.
+    windSourceEnabled_ = false;
+    windObstacleCouplingEnabled_ = false;
+    windDragCoefficient_ = 0.0f;
+    addWindVortex();
+}
+
 void rigidBodyDemo::resetWindFlow()
 {
     if( kind_ != demoKind::windFlow || !windField_ ) return;
