@@ -916,7 +916,7 @@ void rigidBodyDemoUi::drawExperimentControls()
             setWindSourceStrength( strength );
 
         bool couple = isWindObstacleCouplingEnabled();
-        if( ImGui::Checkbox( "원형 강체·유체 양방향###WindObstacleCoupling", &couple ) )
+        if( ImGui::Checkbox( "강체·유체 양방향###WindObstacleCoupling", &couple ) )
             setWindObstacleCouplingEnabled( couple );
 
         float drag = getWindDragCoefficient();
@@ -928,12 +928,19 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::Text( "MAC 격자: %d x %d / 셀 %.2f m", field->getWidth(), field->getHeight(), field->getCellSize() );
             ImGui::Text( "유체 발산 RMS: %.5f /s", field->getDivergenceRms() );
             ImGui::Text( "강체 점유 셀: %d", field->getSolidCellCount() );
+            const vec2 dragBody = getWindDragBodyImpulse();
+            const vec2 dragFluid = getWindDragFluidImpulse();
+            ImGui::Text( "Drag Δp 강체: (%.5f, %.5f) N·s", dragBody.x, dragBody.y );
+            ImGui::Text( "Drag Δp 유체: (%.5f, %.5f) N·s", dragFluid.x, dragFluid.y );
+            ImGui::Text( "Drag 교환 잔차: %.7f N·s", Length( getWindDragExchangeResidual() ) );
+            const vec2 momentum = field->getFluidMomentum();
+            ImGui::Text( "유체 내부 face 운동량: (%.4f, %.4f) N·s", momentum.x, momentum.y );
             for( std::size_t i = 0; i < getWindPressureForces().size(); ++i )
                 ImGui::Text( "압력 반력 %zu: (%.2f, %.2f) N", i + 1,
                     getWindPressureForces()[i].force.x, getWindPressureForces()[i].force.y );
         }
         if( ImGui::Button( "유체·물체 초기화###WindReset" ) ) resetWindFlow();
-        ImGui::TextWrapped( "파란 화살표는 유체 속도, 주황색 점은 강체가 차지한 셀입니다. 원·캡슐·볼록 다각형은 실제 회전한 도형으로 셀을 점유합니다. 양방향 모드에서는 해당 경계의 수직 속도를 유체에 적용하고 압력 반력을 강체에 전달합니다. Drag 반력의 격자 주입과 계단형 경계는 여전히 근사이며 정확한 운동량 보존을 보장하지 않습니다." );
+        ImGui::TextWrapped( "파란 화살표는 유체 속도, 주황색 점은 강체가 차지한 셀입니다. 원·캡슐·볼록 다각형은 실제 회전한 도형으로 셀을 점유합니다. 양방향 모드에서는 해당 경계의 수직 속도를 유체에 적용하고 압력 반력을 강체에 전달합니다. Drag는 유체 내부 face의 유효 질량 기준으로 실제 전달한 충격량만 강체에 반대로 적용합니다. 표시된 교환 잔차는 Drag 단계에만 해당하며, 압력·외벽·이류의 전체 운동량 보존을 뜻하지 않습니다." );
         return;
     }
     if( getKind() == demoKind::revoluteLimitMotorComparison )

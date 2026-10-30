@@ -54,6 +54,12 @@ public:
     // 소스가 격자 바깥이거나 radius가 유효하지 않으면 아무 일도 하지 않음.
     void addVelocity( vec2 position, vec2 velocityDelta, float radius );
 
+    // rho = 1kg/m³, depth = 1m, face 유효 질량 = cellSize² kg.
+    // 원형 support의 fluid-fluid 내부 face에 각 성분 충격량을 정규화해서 배분.
+    // 실제 배분한 충격량을 돌려주며, 유효 face가 없는 성분은 0 (반력 없음).
+    // 압력 투영/이류/경계 외력까지 포함한 총 운동량 보존을 뜻하지 않음.
+    [[nodiscard]] vec2 applyMomentumImpulse( vec2 position, vec2 impulse, float radius );
+
     // Semi-Lagrangian advection 후 Jacobi pressure projection.
     // no-through(경계 수직 속도 0) 조건. dt<=0 또는 비유한 값은 무시.
     void step( float timeStep, int pressureIterations = 80 );
@@ -73,6 +79,10 @@ public:
 #pragma region Queries
     [[nodiscard]] vec2 sampleVelocity( vec2 position ) const noexcept;
     [[nodiscard]] float getDivergenceRms() const noexcept;
+
+    // 내부 fluid-fluid MAC face 속도를 dual-cell mass로 적분한 운동량.
+    // solid 경계의 지정 속도 및 외곽 wall face는 제외한다.
+    [[nodiscard]] vec2 getFluidMomentum() const noexcept;
     [[nodiscard]] bool isSolidCell( int x, int y ) const noexcept;
     [[nodiscard]] int getSolidCellCount() const noexcept { return solidCellCount_; }
     [[nodiscard]] vec2 getCellCenter( int x, int y ) const noexcept;

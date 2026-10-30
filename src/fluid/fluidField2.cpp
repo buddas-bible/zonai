@@ -149,6 +149,109 @@ void fluidField2::addVelocity( vec2 position, vec2 velocityDelta, float radius )
         }
 }
 
+vec2 fluidField2::getFluidMomentum() const noexcept
+{
+    // 각 내부 fluid-fluid face의 dual volume은 h² * unitDepth.
+    // Solid 경계 속도는 지정된 운동학 경계값이므로 유체 운동량 적분에서 제외.
+    const double faceMass = static_cast<double>( cellSize_ ) * cellSize_;
+    double x = 0.0;
+    double y = 0.0;
+    for( int j = 0; j < height_; ++j )
+        for( int i = 1; i < width_; ++i )
+            if( !isSolidCell( i - 1, j ) && !isSolidCell( i, j ) )
+                x += u_[uIndex( i, j )];
+
+    for( int j = 1; j < height_; ++j )
+        for( int i = 0; i < width_; ++i )
+            if( !isSolidCell( i, j - 1 ) && !isSolidCell( i, j ) )
+                y += v_[vIndex( i, j )];
+
+    return { static_cast<float>( x * faceMass ), static_cast<float>( y * faceMass ) };
+}
+
+vec2 fluidField2::applyMomentumImpulse( vec2 position, vec2 impulse, float radius )
+{
+    if( !IsFinite( position ) || !IsFinite( impulse ) || !std::isfinite( radius ) || radius <= 0.0f )
+        return {};
+
+    const float radiusSquared = radius * radius;
+    const float faceMass = cellSize_ * cellSize_; // 1 kg/m³ * h² * 1 m
+    if( !std::isfinite( radiusSquared ) || !std::isfinite( faceMass ) || faceMass <= 0.0f )
+        return {};
+
+    // X/Y 성분은 서로 다른 위치의 MAC face에 존재하므로 독립 정규화한다.
+    // 압력 보정/벽 제약은 이 교환 다음 Step에 따로 작용한다.
+    const auto weight = [&]( vec2 face )
+    {
+        const vec2 delta = face - position;
+        return std::max( 0.0f, 1.0f - Dot( delta, delta ) / radiusSquared );
+    };
+
+    double sumU = 0.0;
+    double sumV = 0.0;
+    for( int j = 0; j < height_; ++j )
+        for( int i = 1; i < width_; ++i )
+        {
+            if( isSolidCell( i - 1, j ) || isSolidCell( i, j ) ) continue;
+            const vec2 face = origin_ + cellSize_ * vec2{ static_cast<float>( i ), static_cast<float>( j ) + 0.5f };
+            sumU += weight( face );
+        }
+
+    for( int j = 1; j < height_; ++j )
+        for( int i = 0; i < width_; ++i )
+        {
+            if( isSolidCell( i, j - 1 ) || isSolidCell( i, j ) ) continue;
+            const vec2 face = origin_ + cellSize_ * vec2{ static_cast<float>( i ) + 0.5f, static_cast<float>( j ) };
+            sumV += weight( face );
+        }
+
+    // 너무 큰 impulse/너무 작은 cell을 다룰 때 float face 속도 overflow 방지.
+    const double xScale = sumU > 0.0 ? static_cast<double>( impulse.x ) / ( faceMass * sumU ) : 0.0;
+    const double yScale = sumV > 0.0 ? static_cast<double>( impulse.y ) / ( faceMass * sumV ) : 0.0;
+    if( !std::isfinite( xScale ) || !std::isfinite( yScale ) ||
+        std::abs( xScale ) > std::numeric_limits<float>::max() ||
+        std::abs( yScale ) > std::numeric_limits<float>::max() ) return {};
+
+    double actualX = 0.0;
+    double actualY = 0.0;
+    if( impulse.x != 0.0f && sumU > 0.0 )
+    {
+        for( int j = 0; j < height_; ++j )
+            for( int i = 1; i < width_; ++i )
+            {
+                if( isSolidCell( i - 1, j ) || isSolidCell( i, j ) ) continue;
+                const vec2 face = origin_ + cellSize_ * vec2{ static_cast<float>( i ), static_cast<float>( j ) + 0.5f };
+                const float w = weight( face );
+                if( w <= 0.0f ) continue;
+                const int index = uIndex( i, j );
+                const float old = u_[index];
+                const float next = old + static_cast<float>( w * xScale );
+                if( !std::isfinite( next ) ) continue;
+                u_[index] = next;
+                actualX += static_cast<double>( next - old ) * faceMass;
+            }
+    }
+
+    if( impulse.y != 0.0f && sumV > 0.0 )
+    {
+        for( int j = 1; j < height_; ++j )
+            for( int i = 0; i < width_; ++i )
+            {
+                if( isSolidCell( i, j - 1 ) || isSolidCell( i, j ) ) continue;
+                const vec2 face = origin_ + cellSize_ * vec2{ static_cast<float>( i ) + 0.5f, static_cast<float>( j ) };
+                const float w = weight( face );
+                if( w <= 0.0f ) continue;
+                const int index = vIndex( i, j );
+                const float old = v_[index];
+                const float next = old + static_cast<float>( w * yScale );
+                if( !std::isfinite( next ) ) continue;
+                v_[index] = next;
+                actualY += static_cast<double>( next - old ) * faceMass;
+            }
+    }
+    return { static_cast<float>( actualX ), static_cast<float>( actualY ) };
+}
+
 void fluidField2::step( float timeStep, int pressureIterations )
 {
     step( timeStep, std::span<const fluidShapeObstacle2>{}, std::span<fluidObstacleForce2>{}, pressureIterations );

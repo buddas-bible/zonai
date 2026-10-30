@@ -198,6 +198,51 @@ void checkGeneralShapeObstacles()
     check( field.getSolidCellCount() == 0, "mixed obstacle masks must be cleared" );
 }
 
+void checkDiscreteMomentumExchange()
+{
+    fluidField2 field{ 12, 10, 0.5f, { -3.0f, -2.5f } };
+    const vec2 requested{ 1.25f, -0.75f };
+    const vec2 before = field.getFluidMomentum();
+    const vec2 applied = field.applyMomentumImpulse( { 0.0f, 0.0f }, requested, 1.3f );
+    const vec2 after = field.getFluidMomentum();
+
+    check( Length( applied - requested ) < 2.0e-5f,
+        "normalized MAC deposition must deliver the requested impulse when faces are available" );
+    check( Length( ( after - before ) - applied ) < 2.0e-5f,
+        "actual reported impulse must equal the measured fluid MAC momentum change" );
+
+    const vec2 unchanged = field.getFluidMomentum();
+    check( LengthSquared( field.applyMomentumImpulse( { 500.0f, 500.0f }, requested, 0.3f ) ) == 0.0f &&
+        LengthSquared( field.applyMomentumImpulse( {}, requested, -1.0f ) ) == 0.0f &&
+        LengthSquared( field.applyMomentumImpulse( {},
+            { std::numeric_limits<float>::quiet_NaN(), 1.0f }, 1.0f ) ) == 0.0f &&
+        Length( field.getFluidMomentum() - unchanged ) < 1.0e-6f,
+        "invalid or unsupported deposition must leave momentum untouched" );
+
+    // U-face에만 닿는 kernel이면 U에만 충격량을 전달하고 V는 전달하지 않아야 한다.
+    fluidField2 singleFace{ 8, 8, 1.0f, { -4.0f, -4.0f } };
+    const vec2 oneComponent = singleFace.applyMomentumImpulse( { 0.0f, -0.5f }, { 2.0f, 3.0f }, 0.2f );
+    check( close( oneComponent.x, 2.0f ) && oneComponent.y == 0.0f &&
+        Length( singleFace.getFluidMomentum() - vec2{ 2.0f, 0.0f } ) < 1.0e-6f,
+        "obstructed or absent component faces must not manufacture momentum" );
+
+    // Solid에 인접한 face는 운동학 경계이므로 유효 fluid momentum에도 impulse에도 포함하지 않음.
+    fluidField2 occupied{ 24, 24, 0.5f, { -6.0f, -6.0f } };
+    const fluidCircleObstacle2 solid{ {}, 1.1f, {}, 0.0f };
+    std::array<fluidObstacleForce2, 1> forces{};
+    occupied.step( 1.0f / 60.0f, std::span<const fluidCircleObstacle2>( &solid, 1 ), forces );
+    const vec2 solidBefore = occupied.getFluidMomentum();
+    const vec2 deposited = occupied.applyMomentumImpulse( { 1.6f, 0.0f }, { 0.9f, -0.4f }, 1.0f );
+    check( occupied.getSolidCellCount() > 0 &&
+        Length( deposited - vec2{ 0.9f, -0.4f } ) < 5.0e-5f &&
+        Length( ( occupied.getFluidMomentum() - solidBefore ) - deposited ) < 5.0e-5f,
+        "solid masks must be respected while delivering equal-and-opposite discrete momentum" );
+
+    occupied.clear();
+    check( LengthSquared( occupied.getFluidMomentum() ) == 0.0f,
+        "clear must erase previously deposited momentum" );
+}
+
 } // namespace
 
 int main()
@@ -206,4 +251,5 @@ int main()
     checkPressureProjection();
     checkCircleSolidBoundary();
     checkGeneralShapeObstacles();
+    checkDiscreteMomentumExchange();
 }
