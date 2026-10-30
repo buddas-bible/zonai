@@ -155,9 +155,23 @@ Part 8의 가중 압력 투영은 모든 MAC 면의 개방율을 공간적으로
 
 **한계:** 이 구현은 두 공간 표본 사이의 `ΔV/Δt`를 이용한 **시간 이산 연속 방정식 근사**이다. 강체의 실제 경로 및 회전 중 쓸고 간 체적을 따라 face별 flux를 계산하지 않는다. 부분 점유율은 4×4 표본이므로 프레임 간 aliasing으로 전체 유체 체적의 비보존이 발생할 수 있고, 닫힌 도메인의 정합 보정이 이를 물리적으로 복구하지는 않는다. 현재 이류는 여전히 Semi-Lagrangian이며, 정확한 강체 압력 반력과 에너지·운동량의 전체 보존도 해결되지 않았다. **보존형 advection, swept interface flux 및 유체-강체 반력 장부를 다음 단계에서 별도로 구현**한다. 이진 Solver가 기본이고 본 경로는 실험 기능으로 남는다.
 
+## Part 10 — MAC 공유 면의 Swept Solid Flux 시간 적분
+
+Part 9에서는 두 프레임의 유체 셀 점유율 차이 `Δf`를 압력 연속 방정식의 소스로 사용했다. 이 접근만으로는 강체가 **그 사이 어떤 MAC 면을 가로질러 이동하거나 회전했는지**를 알 수 없다. 실험 Cut-cell 모드에서 Shape의 직전/현재 world transform으로 그 경로를 추정해 **공유 MAC face를 통과한 강체의 부호 있는 체적**을 시간 적분한다.
+
+- `fluidField2`는 각 유효 `step()` 종료 시 Shape snapshot을 저장한다. 다음 Step에서 장애물 배열의 순서·geometry가 유지되고 시작/끝 Shape가 **모두 도메인 내부**이면, `transform.position`을 선형 보간하고 회전은 최단 각도 차이를 따라 보간한다. Center of Mass의 `linearVelocity`/ `angularVelocity`가 아니라 **실제 transform 변위**를 `Δt`로 나눈 강체 운동학 속도를 사용한다.
+- 강체의 이동 거리와 각도 × 형상 반경 중 더 큰 이동 척도로 시간 샘플 수를 정한다. 한 번에 약 `h/4` 이하를 이동하도록 구간 수를 증가시키되, 최대 32구간으로 제한한다. 각 시점에서 공유 MAC U/V face의 4개 길이 표본마다 `ContainsFluidObstacle()`로 solid 점유를 판정한다.
+- 통과 체적 근사는 **`Q^solid_face ≈ ∫_step ∫_face χ_solid(x,t) · [v_origin + ω×(x-origin)]·n dA dt`**다. 단위 깊이 1m를 가정한 `m³`이며, 모든 내부 face의 일관된 단일 부호 값을 양쪽 셀이 공유한다. 겹치는 다중 Shape는 기존과 마찬가지로 먼저 포함한 obstacle owner를 사용한다.
+- 각 셀에는 이웃 4개 공유 면의 **`(Q_right-Q_left+Q_top-Q_bottom)/h²`**를 유체 면적 비율 변화에 대응하는 적분 소스로 전달한다. 외부 wall에는 swept face 유량을 통과시키지 않으며, 부분 유체만 압력을 푼다. 완전히 가려진 셀의 소스 전달·연결 영역별 Neumann 정합 보정은 Part 9 방식을 유지한다.
+- Shape가 생성·삭제되거나 geometry가 바뀌거나 외벽에 겹치거나 넘어가거나 첫 snapshot이면 **기존 `Δf` 방법으로 fallback**한다. 외벽을 통과하는 강체를 내부 유량으로 잘못 상쇄시키지 않기 위함이다. 동일 형상의 장애물은 배열 인덱스가 Step마다 유지된다는 계약이 필요하다.
+- `getSweptFaceFlux()`는 실제 swept 경로 사용 여부, 시간 샘플 수, 모든 face의 **절댓값 통과량 합**(같은 물체가 여러 face를 지나면 여러 번 집계), **경로 적분 결과와 snapshot `Δf·h²`의 셀별 절댓값 차이 합**을 제공한다. `getCutCellPressure().volumeRate`는 여전히 snapshot 유체 체적 총량 변동을 뜻하지만, 실제 압력 우변에 쓰이는 **지역 소스**는 경로가 유효한 경우 위 공유 면 적분에서 나온다.
+- 회귀 테스트는 최초 배치, 빠른 평행 이동, 회전만 하는 얇은 Polygon, 정지 Shape, 기하 변경에 따른 fallback, 외벽 통과 fallback, `clear()`를 확인한다.
+
+**주의:** 이는 공간–시간 표본 적분을 이용한 **MAC 내부 공유 면의 Swept Solid Flux 근사**이며 정확한 연속 도형의 교차 면적이나 진정한 4D swept interface reconstruction이 아니다. 시간 샘플 수 상한과 4개 face 표본에 따른 aliasing이 존재하며, 특히 완전히 한 셀 안에서 움직여 **MAC 면을 지나지 않는 작은 장애물**은 여전히 식별하기 어렵다. 도메인 벽과 Shape 추가·삭제는 경로 적분에서 제외한다. 현재 **Semi-Lagrangian 이류는 보존형으로 전환하지 않았고**, fluid/solid pressure reaction도 단순 면적 차이 근사다. 외벽/연결된 셀의 합 보존이 곧 실제 유체 질량·운동량 보존을 의미하지 않는다.
+
 ## 다음 구현 후보
 
-1. swept interface를 통한 면별 체적 flux, 보존형 이류 및 pressure–rigid 동기 결합/반력 수지 정밀화.
+1. 정확한 moving interface surface 적분과 보존형 유체 이류, pressure–rigid 반력 수지 정밀화 및 swept aliasing 성능 측정.
 2. 복합 Body의 다중 Shape 집계, static obstacle, Segment/Chain의 별도 표면 경계 표현.
 3. 연기/염료(tracer) 수송, 점성(확산), 회전(vorticity) 표현.
 4. 압력 solver 수렴 기준과 성능 평가, 해상도 증대.
