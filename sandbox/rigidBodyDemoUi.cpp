@@ -925,6 +925,7 @@ void rigidBodyDemoUi::drawExperimentControls()
         if( ImGui::Button( "이류 비교 프리셋 (와류 + 외력/강체 OFF)###WindAdvectionTrial" ) )
             beginWindAdvectionTrial();
         if( ImGui::Button( "현재 흐름에 와류 추가###WindVortex" ) ) addWindVortex();
+        if( ImGui::Button( "수동 추적 물질 주입###WindTracerSeed" ) ) seedWindTracer();
 
         bool cutCellProjection = isWindCutCellProjectionEnabled();
         if( ImGui::Checkbox( "부분 개방 압력 투영 (실험)###WindCutCellPressure", &cutCellProjection ) )
@@ -948,6 +949,15 @@ void rigidBodyDemoUi::drawExperimentControls()
                 advection.after.x, advection.after.y );
             ImGui::Text( "이류만의 운동량 변화: (%.7f, %.7f) N·s",
                 advection.delta().x, advection.delta().y );
+            const fluidTracerStats2& tracer = field->getTracerStats();
+            ImGui::SeparatorText( "수동 추적 물질 (Part 12a)" );
+            ImGui::Text( "총 tracer 질량: %.6f kg / 막힌 셀 보관: %.6f kg",
+                field->getTracerMass(), tracer.trappedMass );
+            ImGui::Text( "마지막 수송 전/후: %.6f / %.6f kg (변화 %+.8f kg)",
+                tracer.beforeMass, tracer.afterMass, tracer.delta() );
+            ImGui::Text( "tracer CFL: %.3f / substep: %d%s",
+                tracer.maxCfl, tracer.substeps, tracer.cflLimited ? " (상한 도달)" : "" );
+            ImGui::TextDisabled( "moving solid의 swept tracer 수송은 미구현: 갇힌 질량은 별도 계측" );
             if( advection.cflLimited )
                 ImGui::TextColored( ImVec4{ 1.0f, 0.4f, 0.2f, 1.0f },
                     "CFL substep 상한 도달: 정확도/안정성 저하 가능" );
