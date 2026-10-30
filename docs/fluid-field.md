@@ -183,6 +183,19 @@ Part 1~10의 속도 이류는 MAC face를 이전 위치로 역추적해 샘플�
 
 **한계:** 이 단계의 보존량은 **MAC staggered dual face에 정의한 가중 운동량**이며 유체 전체의 정확한 운동량·질량 보존이 아니다. 현재 점유 면적을 이류 중 고정시키므로 강체가 움직여 생긴 swept interface의 유체 질량/운동량 수송과 같은 공간–시간 격자를 공유하지 않는다. 압력 투영, 이산 마스크 전이, drag, 실제 외벽 반력 및 Semi-Lagrangian 모드에는 이 보존 보장이 적용되지 않는다. 1차 upwind의 수치 점성, dual 격자 외곽 0-flux 근사, 작은 부분 개방 면, 매우 큰 CFL(64 substep 상한)에서의 오차가 남는다. 추후에는 **conservative volume/mass tracer, 실제 Cut-cell geometry의 dual mass, swept flux와 유체 이류 통합, 표면 pressure reaction 수지**를 진행한다.
 
+## Part 12a — 보존형 수동 tracer 질량 수송
+
+Part 11의 가중 MAC face 운동량과는 별개로, **셀 중심 수동 tracer 질량**을 추적한다. 이는 움직이는 강체와의 완전한 물질 수송까지 해결한 Part 12 전체가 아니다.
+
+- `setTracerConcentration(x,y,c)`는 농도 `c` (kg/m³, 단위 깊이 1m)를 현재 셀의 유체 면적 비율과 `h²`로 곱해 질량으로 저장한다. 비활성 상태에서 기존 속도·압력 경로의 계산은 변경하지 않는다.
+- 압력 투영 후의 MAC U/V 속도와 현재 면 개방율에 **1차 upwind shared-face flux**를 적용한다. 한 면에서 뺀 양을 반대편에 더하므로 닫힌 격자 전체 질량의 합이 보존된다.
+- CFL 0.45 목표, 최대 64 substep. 작은 cut-cell과 큰 CFL에서 각 donor의 합계 유출을 보유 질량으로 제한해 음수 물질량을 방지한다. 이 제한은 국소 정확도를 낮출 수 있다.
+- `getTracerConcentration()`, `getTracerMass()`, `getTracerStats()`가 현재 농도, 총 보관 질량, 이번 Step의 before/after 질량, 갇힌 질량, 최대 CFL과 substeps를 보고한다. `clear()`는 tracer를 비운다.
+- 테스트는 빈 폐쇄 격자/장시간 수송, 고 CFL, static fractional cut-cell, 비정상 입력, moving obstacle의 완전 점유와 재노출을 포함한다.
+- Sandbox **유체 / 2D 바람·유체 속도장**에서 **수동 추적 물질 주입** 버튼으로 두 셀에 초기 tracer를 배치한다. 패널의 총 질량·막힌 셀 보관 질량·수송 전후 변화·CFL/substep을 확인하며, **흐름+Body 초기화** 또는 이류 비교 프리셋은 tracer를 지운다. 현재 시각화는 숫자 진단이며 tracer 컬러 렌더링은 별도 과제다.
+
+**한계:** 움직이는 장애물이 완전히 점유한 셀에는 tracer 질량을 삭제하지 않고 남겨서 `trappedMass`로 별도 표시한다. 이 질량은 다시 열린 셀에서 나타나므로 **swept interface 물질 수송을 구현했다고 볼 수 없다**. 또한 현재 cut-cell 비율은 표본 근사이며 tracer 질량 합계가 실제 유체 총 질량·운동량을 의미하지 않는다. Moving swept-flux와 물질 수송의 결합, 정확한 dual mass, 압력/강체 운동량 장부는 후속 단계로 남긴다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.

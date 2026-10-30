@@ -145,6 +145,20 @@ struct fluidAdvectionStats2
     [[nodiscard]] vec2 delta() const noexcept { return after - before; }
 };
 
+// 양수 수동 tracer의 보존형 유량 수송. 질량은 셀에 보관하며 외곽 유량은 0.
+// trappedMass는 현재 solid가 차지한 셀에 남아 있는 질량: 물리적인 displaced-fluid remap이 아님.
+struct fluidTracerStats2
+{
+    float beforeMass = 0.0f;
+    float afterMass = 0.0f;
+    float trappedMass = 0.0f;
+    float maxCfl = 0.0f;
+    int substeps = 0;
+    bool cflLimited = false;
+
+    [[nodiscard]] float delta() const noexcept { return afterMass - beforeMass; }
+};
+
 // 균일 MAC(staggered) grid: x속도는 수직 face, y속도는 수평 face에 저장.
 // 내부 Circle/Capsule/Convex Polygon solid 경계 face는 no-through로 처리함.
 class fluidField2
@@ -168,6 +182,10 @@ public:
     // 고정된 현재 open fraction에 대한 face 운동량만 보존한다.
     void setConservativeAdvectionEnabled( bool enabled ) noexcept { conservativeAdvectionEnabled_ = enabled; }
     [[nodiscard]] bool isConservativeAdvectionEnabled() const noexcept { return conservativeAdvectionEnabled_; }
+
+    // 셀의 tracer 밀도(kg/m³, unit depth)를 지정. 음수/비유한 값과 범위 밖은 무시.
+    // 일반 이류/압력 Solver를 바꾸지 않으며, 보존형 tracer 수송은 활성화된 뒤 매 Step 동작.
+    void setTracerConcentration( int x, int y, float concentration ) noexcept;
 
     // 지정 위치 주변 face 속도에 world-space 속도 변화(m/s)를 더함.
     // 소스가 격자 바깥이거나 radius가 유효하지 않으면 아무 일도 하지 않음.
@@ -209,6 +227,9 @@ public:
     [[nodiscard]] const fluidCutCellPressure2& getCutCellPressure() const noexcept { return cutCellPressure_; }
     [[nodiscard]] const fluidSweptFaceFlux2& getSweptFaceFlux() const noexcept { return sweptFaceFlux_; }
     [[nodiscard]] const fluidAdvectionStats2& getAdvectionStats() const noexcept { return advectionStats_; }
+    [[nodiscard]] float getTracerConcentration( int x, int y ) const noexcept;
+    [[nodiscard]] float getTracerMass() const noexcept;
+    [[nodiscard]] const fluidTracerStats2& getTracerStats() const noexcept { return tracerStats_; }
     // 기하 표본의 유체 면적 비율 [0,1]. 범위 밖은 0.
     // 외곽 wall face는 기하상 열려있어도 닫힌 경계이므로 0.
     [[nodiscard]] float getCellFluidFraction( int x, int y ) const noexcept;
@@ -237,6 +258,8 @@ private:
     [[nodiscard]] float advectionVOpen( int x, int y ) const noexcept;
     [[nodiscard]] vec2 getAdvectionFaceMomentum() const noexcept;
     void advectConservative( float timeStep );
+    [[nodiscard]] float tracerCellFraction( int x, int y ) const noexcept;
+    void transportTracer( float timeStep );
     [[nodiscard]] float cutCellUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellVOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellFluxDivergenceRms( float inverseTimeStep ) const noexcept;
@@ -259,6 +282,11 @@ private:
     std::vector<float> v_;
     std::vector<float> nextU_;
     std::vector<float> nextV_;
+    std::vector<double> tracerMass_;
+    std::vector<double> nextTracerMass_;
+    std::vector<double> tracerOutgoing_;
+    std::vector<double> tracerUFlux_;
+    std::vector<double> tracerVFlux_;
     std::vector<float> pressure_;
     std::vector<float> nextPressure_;
     std::vector<float> divergence_;
@@ -283,6 +311,8 @@ private:
     fluidCutCellPressure2 cutCellPressure_{};
     fluidSweptFaceFlux2 sweptFaceFlux_{};
     fluidAdvectionStats2 advectionStats_{};
+    fluidTracerStats2 tracerStats_{};
+    bool tracerEnabled_ = false;
     bool cutCellProjectionEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
