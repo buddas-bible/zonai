@@ -933,7 +933,7 @@ void rigidBodyDemoUi::drawExperimentControls()
                     getWindPressureForces()[i].force.x, getWindPressureForces()[i].force.y );
         }
         if( ImGui::Button( "유체·물체 초기화###WindReset" ) ) resetWindFlow();
-        ImGui::TextWrapped( "파란 화살표는 국소 유체 속도, 주황색 점은 강체가 차지한 셀, 노란 점은 바람 소스입니다. 양방향을 켜면 원형 강체 표면의 수직 속도를 유체 경계에 적용하고 압력 반력을 강체에 돌려줍니다. Drag 반력은 주변 유체에 근사 주입하며, 격자 해상도와 압력 수렴 오차 때문에 엄밀한 운동량 보존은 아직 아닙니다." );
+        ImGui::TextWrapped( "파란 화살표는 유체 속도, 주황색 점은 강체가 차지한 셀입니다. 원·캡슐·볼록 다각형은 실제 회전한 도형으로 셀을 점유합니다. 양방향 모드에서는 해당 경계의 수직 속도를 유체에 적용하고 압력 반력을 강체에 전달합니다. Drag 반력의 격자 주입과 계단형 경계는 여전히 근사이며 정확한 운동량 보존을 보장하지 않습니다." );
         return;
     }
     if( getKind() == demoKind::revoluteLimitMotorComparison )

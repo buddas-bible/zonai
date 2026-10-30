@@ -29,6 +29,10 @@ void checkFluidCoupling()
     check( field != nullptr && field->getWidth() == 24 && field->getHeight() == 14,
         "wind demo must own its separate MAC grid" );
     check( scene.getShapes().size() == 3, "wind demo must show three dynamic rigid bodies" );
+    check( std::holds_alternative<circle2>( scene.getWorld().GetShape( scene.getShapes()[0].shapeHandle ).geometry ) &&
+        std::holds_alternative<capsule2>( scene.getWorld().GetShape( scene.getShapes()[1].shapeHandle ).geometry ) &&
+        std::holds_alternative<polygon2>( scene.getWorld().GetShape( scene.getShapes()[2].shapeHandle ).geometry ),
+        "wind demo must exercise circle, capsule and convex polygon together" );
     check( near( scene.getWorld().GetGravity(), {} ), "wind trial should initially be zero gravity" );
 
     const bodyId first = scene.getShapes()[0].bodyHandle;
@@ -69,6 +73,28 @@ void checkFluidCoupling()
         near( scene.getWorld().GetBodyLinearVelocity( first ), {} ) &&
         scene.getWindSourceStrength() == 25.0f && scene.getWindDragCoefficient() == 3.0f,
         "wind reset must restore motion while preserving edited parameters" );
+}
+
+void checkRotatedSandboxObstacles()
+{
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    const auto visuals = scene.getShapes();
+
+    // 회전한 Capsule과 Polygon이 World에서 유체 solver까지 전달되는지 확인.
+    for( std::size_t i : { 1u, 2u } )
+    {
+        const bodyId body = visuals[i].bodyHandle;
+        const transform2 pose = scene.getWorld().GetBodyTransform( body );
+        scene.getWorld().SetBodyTransform( body, { pose.position, rot2::FromRadians( 0.5f * 3.14159265358979323846f ) } );
+    }
+    scene.step( 1.0f / 60.0f, 4 );
+    check( scene.getWindField()->getSolidCellCount() >= 5,
+        "rotated capsule/polygon body geometry must enter the fluid solid occupancy" );
+    for( const fluidObstacleForce2& pressure : scene.getWindPressureForces() )
+        check( IsFinite( pressure.force ) && std::isfinite( pressure.torque ),
+            "mixed rotated shapes in resting fluid must have finite pressure feedback" );
 }
 
 void checkMovingSolidReaction()
@@ -118,4 +144,5 @@ int main()
 {
     checkFluidCoupling();
     checkMovingSolidReaction();
+    checkRotatedSandboxObstacles();
 }

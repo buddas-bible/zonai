@@ -52,10 +52,23 @@ u_next = u* - dt * ∇p
 
 이 방식은 **원형 강체의 격자화된 no-through 경계 및 압력 feedback 첫 실험**이지 완성된 양방향 CFD-강체 solver는 아니다. 질량 중심이 빠르게 이동할 때 계단형 점유 셀이 불연속적으로 바뀌며 압력에 인공적인 힘을 더할 수 있다. 압력 gauge, 유체 점성/마찰, Solid/Fluid 체적 보존과 시간 적분의 완전 동기화, 일반 polygon/chain의 보존형 cut-cell coupling은 후속 구현 대상이다. 일반 Body collision은 원래 zonai World Solver가 해결한다.
 
+## Part 3 — Circle / Capsule / Convex Polygon 공통 장애물
+
+`fluidShapeObstacle2`는 World handle 없이 `shapeGeometry`, `transform2`, world-space COM, 선속도와 각속도를 전달한다. 기존 `fluidCircleObstacle2` API는 호환용 overload로 남겨 두지만 동일한 일반 도형 solver로 위임한다.
+
+- 유체 격자 셀 중심을 도형의 **로컬 공간으로 역변환**한 다음 Circle/Capsule/Convex Polygon의 내부 여부를 검사한다. Capsule은 축 선분 거리, Convex Polygon은 반평면과 모서리 거리(둥근 radius 포함)로 판정한다. `polygon2`의 2-vertex rounded core도 지원한다.
+- MAC face 표면 속도는 `linearVelocity + angularVelocity × (face - centerOfMass)`를 사용한다. 압력 힘/토크는 기존 방식으로 계산하고 feedback은 obstacle 배열의 인덱스에 대응한다.
+- Sandbox 바람 장면은 Circle, Capsule, Polygon Box를 함께 배치한다. 기존의 단방향 비교 모드와 압력/drag 옵션은 유지한다.
+- Segment, ChainSegment, monostate는 점유 셀을 만들지 않는다. 정적 Polygon 등도 0속도를 제공하면 사용할 수 있다.
+- 유체 solver가 사용하는 중심점 occupancy는 실제 표면을 잇는 cut-cell이 아니다. sub-cell 크기, 이동하는 장애물의 cell flicker, 보존형 운동량 교환 문제는 남는다.
+- 복합 Body에 여러 Shape가 붙어 있을 때는 Shape 별 obstacle과 body force 합산이 필요하며 아직 Sandbox wind 장면에서는 한 Body에 한 Shape만 둔다.
+
+다음 단계에서는 일반 강체를 위한 Shape traversal/force accumulation을 정리하고, 움직이는 장애물과 유체의 **운동량 budget 오차**를 정량화할 필요가 있다.
+
 ## 다음 구현 후보
 
 1. 보존형 fluid-solid coupling과 압력/drag 운동량 budget, 경계 셀 정확도 검증.
-2. 일반 Polygon/Capsule/Chain 및 static obstacle 적용, 반응 가능한 회전 torque.
+2. 복합 Body의 다중 Shape 집계, static obstacle, Segment/Chain의 별도 표면 경계 표현.
 3. 연기/염료(tracer) 수송, 점성(확산), 회전(vorticity) 표현.
 4. 압력 solver 수렴 기준과 성능 평가, 해상도 증대.
 5. Cloth/Soft Body 입자에 속도장을 샘플링해 바람 힘 전달.
