@@ -126,9 +126,24 @@ Step fluid ΔP     = occupancy ΔP + advection ΔP + pressure ΔP
 
 이 단계의 회귀 테스트는 축 정렬 Box의 정확한 절반 셀/face와 면적, 1/4 cell 이동 후 covered/released 균형, 셀 중심 마스크가 놓친 작은 원, 회전된 다각형, 장애물 삭제와 초기화를 검증한다. 다음 단계에서 cut-cell flux 및 압력 연산자로 연결할 때 이 참조 값을 활용한다.
 
+## Part 8 — 부분 개방 면의 가중 압력 투영 (선택적 실험 모드)
+
+Part 7의 셀 유체 면적 비율과 MAC face 개방율을 **실제 압력 방정식에 사용하는 별도 Solver 경로**를 추가했다. `fluidField2::setCutCellProjectionEnabled(true)`로 선택하며 기본값은 `false`다. 기존 이진 cell-center 경로와 이전 테스트는 유지되고 Sandbox 바람 장면에서 전환할 수 있다.
+
+- 두 셀의 `cellFluidFraction > 0`이고 face의 `openFraction = a > 0`이면 유체-유체 면으로 취급한다. 그 외에는 고체 경계로 취급한다. 셀 전체를 막지 않는 작은 Circle/Polygon도 압력 계산의 일부가 된다.
+- 면 유량은 **`F = a·u_fluid + (1-a)·u_solid`**로 계산한다. 막힌 부분의 속도 `u_solid`는 실제 장애물의 각 face sub-sample에서 `v_COM + ω × r`의 법선 성분을 구해 평균한다. 완전히 막힌 면은 강체 경계 속도를 유지하고, 부분 개방 면의 유체 속도는 압력 보정을 받는다.
+- 압력 방정식은 `Σ_neighbours a·(p_neighbour-p_cell) = (h²/dt)·div(F)`다. 공유한 MAC face의 동일한 `a`를 두 셀이 사용하기 때문에 이산 Laplacian의 **대칭적인 가중 edge**를 유지한다. 기존과 동일한 Jacobi 횟수(1~200)를 사용한다.
+- 닫힌 도메인에서 강체의 부분 경계 속도를 표본화한 총 순유량이 0이 아닐 수 있다. 압력 Neumann 문제의 정합성을 위해 유효 셀에서 평균 발산을 빼고, **차감한 총 유량 `sourceImbalance`를 공개**한다. 이는 외부에서 실제 질량을 보충했다는 뜻이 아니라 미해결 체적/시간 결합 오차를 드러내는 값이다.
+- `getCutCellPressure()`는 압력 전·후 가중 flux 발산 RMS, Jacobi 잔차, sourceImbalance와 활성 유체 셀 수를 반환한다. 이진 `getPressureMomentum()`의 강체/외벽 운동량 장부는 부분 면에 대한 정의가 맞지 않으므로 **실험 모드에서는 초기화**한다.
+- 강체 압력 반력은 유체 셀 경계의 개방 면 차이로 추정한 `-p·h·(a_right-a_left, a_top-a_bottom)`을 사용한다. 여러 장애물이 있는 부분 셀의 소유자는 가장 가까운 COM으로 근사한다. 정확한 표면 위치/토크 적분은 후속 과제다.
+
+**범위/한계:** 이 단계는 부분 face의 속도와 압력 연산자를 일관되게 가중하지만 **시간에 따라 변하는 부분 점유 체적 `V(t)`의 `dV/dt` 보존형 소스는 아직 적용하지 않는다**. 현재 Semi-Lagrangian 이류도 flux conservative 방식이 아니며, 압력 반력은 근사이므로 유체+강체의 전체 운동량/질량 보존을 보장하지 않는다. 작은 `cellFluidFraction` 및 단절된 유체 포켓에 대한 수렴 개선, 압력 상수 gauge, 반력 소유자 및 이동 표면의 swept-volume flux는 후속 단계다.
+
+실험 모드에서는 기존 `getDivergenceRms()`가 여전히 **이진 면 속도 발산**을 계산하므로 대신 `getCutCellPressure().divergenceAfter`를 사용해야 한다. 동일하게 기존 `getFluidMomentum()`, `getStepMomentum()`은 이진 fluid-fluid face 기준으로 남아 있으니 cut-cell 전체 운동량 보존의 지표가 아니다.
+
 ## 다음 구현 후보
 
-1. 부분 개방 face를 반영한 보존형 유체 flux·압력 연산자, 이동 장애물의 swept-volume flux와 pressure–rigid 동기 결합.
+1. 움직이는 cut-cell의 `dV/dt` 체적 소스와 보존형 이류, pressure–rigid 동기 결합 및 반력 수지 정밀화.
 2. 복합 Body의 다중 Shape 집계, static obstacle, Segment/Chain의 별도 표면 경계 표현.
 3. 연기/염료(tracer) 수송, 점성(확산), 회전(vorticity) 표현.
 4. 압력 solver 수렴 기준과 성능 평가, 해상도 증대.

@@ -919,6 +919,10 @@ void rigidBodyDemoUi::drawExperimentControls()
         if( ImGui::Checkbox( "강체·유체 양방향###WindObstacleCoupling", &couple ) )
             setWindObstacleCouplingEnabled( couple );
 
+        bool cutCellProjection = isWindCutCellProjectionEnabled();
+        if( ImGui::Checkbox( "부분 개방 압력 투영 (실험)###WindCutCellPressure", &cutCellProjection ) )
+            setWindCutCellProjectionEnabled( cutCellProjection );
+
         float drag = getWindDragCoefficient();
         if( ImGui::SliderFloat( "강체 바람 저항 계수###WindBodyDrag", &drag, 0.0f, 15.0f, "%.1f N·s/m" ) )
             setWindDragCoefficient( drag );
@@ -926,7 +930,17 @@ void rigidBodyDemoUi::drawExperimentControls()
         if( const fluidField2* field = getWindField() )
         {
             ImGui::Text( "MAC 격자: %d x %d / 셀 %.2f m", field->getWidth(), field->getHeight(), field->getCellSize() );
-            ImGui::Text( "유체 발산 RMS: %.5f /s", field->getDivergenceRms() );
+            if( !field->isCutCellProjectionEnabled() )
+                ImGui::Text( "이진 셀 발산 RMS: %.5f /s", field->getDivergenceRms() );
+            else
+            {
+                const fluidCutCellPressure2& projection = field->getCutCellPressure();
+                ImGui::Text( "개방면 유량 발산 RMS: %.5f -> %.5f /s",
+                    projection.divergenceBefore, projection.divergenceAfter );
+                ImGui::Text( "가중 압력 잔차: %.6f / 총 경계 유량: %+.6f m³/s",
+                    projection.pressureResidual, projection.sourceImbalance );
+                ImGui::Text( "부분 유체 셀: %d", projection.activeCells );
+            }
             ImGui::Text( "강체 점유 셀: %d", field->getSolidCellCount() );
             const fluidSolidTransition2& transition = field->getSolidTransition();
             ImGui::Text( "새 유체 셀/막힌 셀: %d / %d", transition.exposedCells, transition.coveredCells );
@@ -947,11 +961,15 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::Text( "유체 내부 face 운동량: (%.4f, %.4f) N·s", momentum.x, momentum.y );
             const fluidPressureMomentum2& pressure = field->getPressureMomentum();
             const fluidStepMomentum2& stages = field->getStepMomentum();
-            ImGui::SeparatorText( "압력 투영 운동량 수지 (마지막 Step)" );
-            ImGui::Text( "유체 Δp: (%.5f, %.5f) N·s", pressure.fluid.x, pressure.fluid.y );
-            ImGui::Text( "강체 Δp: (%.5f, %.5f) N·s", pressure.solid.x, pressure.solid.y );
-            ImGui::Text( "외벽 Δp: (%.5f, %.5f) N·s", pressure.wall.x, pressure.wall.y );
-            ImGui::Text( "압력 수지 잔차: %.7f N·s", Length( pressure.residual() ) );
+            if( !field->isCutCellProjectionEnabled() )
+            {
+                ImGui::SeparatorText( "압력 투영 운동량 수지 (마지막 Step)" );
+                ImGui::Text( "유체 Δp: (%.5f, %.5f) N·s", pressure.fluid.x, pressure.fluid.y );
+                ImGui::Text( "강체 Δp: (%.5f, %.5f) N·s", pressure.solid.x, pressure.solid.y );
+                ImGui::Text( "외벽 Δp: (%.5f, %.5f) N·s", pressure.wall.x, pressure.wall.y );
+                ImGui::Text( "압력 수지 잔차: %.7f N·s", Length( pressure.residual() ) );
+            }
+            else ImGui::TextWrapped( "실험 모드는 이진 MAC 압력 운동량 장부를 지원하지 않습니다." );
             ImGui::Text( "점유 변경 Δp: (%.5f, %.5f) N·s", stages.occupancyDelta().x, stages.occupancyDelta().y );
             ImGui::Text( "이류 Δp: (%.5f, %.5f) N·s", stages.advectionDelta().x, stages.advectionDelta().y );
             for( std::size_t i = 0; i < getWindPressureForces().size(); ++i )
@@ -959,7 +977,7 @@ void rigidBodyDemoUi::drawExperimentControls()
                     getWindPressureForces()[i].force.x, getWindPressureForces()[i].force.y );
         }
         if( ImGui::Button( "유체·물체 초기화###WindReset" ) ) resetWindFlow();
-        ImGui::TextWrapped( "파란 화살표는 유체 속도, 주황색 점은 강체가 차지한 셀입니다. 원·캡슐·볼록 다각형은 실제 회전한 도형으로 셀을 점유합니다. 양방향 모드에서는 해당 경계의 수직 속도를 유체에 적용하고 압력 반력을 강체에 전달합니다. Drag는 유체 내부 face의 유효 질량 기준으로 실제 전달한 충격량만 강체에 반대로 적용합니다. Drag 교환 잔차와 압력(유체·강체·외벽) 수지 잔차를 별도로 표시합니다. 점유 변경 때 새로 열린 유체 면은 이전의 순수 유체 이웃 속도로 복원합니다. 셀 중심 마스크 외에도 4x4 표본으로 부분 점유와 면 개방율을 측정합니다. 열린/닫힌 셀과 부분 점유 체적 변동은 진단값이며 아직 Cut-cell 압력 계산이나 실제 체적 보존에 사용하지 않습니다. 점유 변경과 Semi-Lagrangian 이류의 운동량 변화도 따로 기록합니다. 이 압력 수지의 작은 잔차는 이산화된 face 회계이며 전체 유체·강체 운동량 보존을 뜻하지 않습니다." );
+        ImGui::TextWrapped( "파란 화살표는 유체 속도, 주황색 점은 강체가 차지한 셀입니다. 원·캡슐·볼록 다각형은 실제 회전한 도형으로 셀을 점유합니다. 양방향 모드에서는 해당 경계의 수직 속도를 유체에 적용하고 압력 반력을 강체에 전달합니다. Drag는 유체 내부 face의 유효 질량 기준으로 실제 전달한 충격량만 강체에 반대로 적용합니다. Drag 교환 잔차와 압력(유체·강체·외벽) 수지 잔차를 별도로 표시합니다. 점유 변경 때 새로 열린 유체 면은 이전의 순수 유체 이웃 속도로 복원합니다. 셀 중심 마스크 외에도 4x4 표본으로 부분 점유와 면 개방율을 측정합니다. 부분 점유 체적 변동은 진단값입니다. 실험 모드에서는 부분 개방 면 유량과 가중 압력 방정식에 기하 비율을 사용하지만, 시간적 swept-volume과 정확한 표면 압력 적분, 완전한 운동량·질량 보존은 아직 지원하지 않습니다. 점유 변경과 Semi-Lagrangian 이류의 운동량 변화도 따로 기록합니다. 이 압력 수지의 작은 잔차는 이산화된 face 회계이며 전체 유체·강체 운동량 보존을 뜻하지 않습니다." );
         return;
     }
     if( getKind() == demoKind::revoluteLimitMotorComparison )

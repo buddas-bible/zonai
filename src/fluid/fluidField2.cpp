@@ -73,6 +73,8 @@ fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
     previousCellFluidFraction_.assign( pressure_.size(), 1.0f );
     uOpenFraction_.assign( u_.size(), 1.0f );
     vOpenFraction_.assign( v_.size(), 1.0f );
+    uSolidVelocity_.assign( u_.size(), 0.0f );
+    vSolidVelocity_.assign( v_.size(), 0.0f );
     for( int y = 0; y < height_; ++y )
     {
         uOpenFraction_[uIndex( 0, y )] = 0.0f;
@@ -98,6 +100,8 @@ void fluidField2::clear() noexcept
     std::fill( previousSolidOwner_.begin(), previousSolidOwner_.end(), -1 );
     std::fill( cellFluidFraction_.begin(), cellFluidFraction_.end(), 1.0f );
     std::fill( previousCellFluidFraction_.begin(), previousCellFluidFraction_.end(), 1.0f );
+    std::fill( uSolidVelocity_.begin(), uSolidVelocity_.end(), 0.0f );
+    std::fill( vSolidVelocity_.begin(), vSolidVelocity_.end(), 0.0f );
     std::fill( uOpenFraction_.begin(), uOpenFraction_.end(), 1.0f );
     std::fill( vOpenFraction_.begin(), vOpenFraction_.end(), 1.0f );
     for( int y = 0; y < height_; ++y )
@@ -113,6 +117,7 @@ void fluidField2::clear() noexcept
     solidCellCount_ = 0;
     solidTransition_ = {};
     cutCellTransition_ = {};
+    cutCellPressure_ = {};
     pressureMomentum_ = {};
     stepMomentum_ = {};
 }
@@ -343,14 +348,15 @@ float fluidField2::getVFaceOpenFraction( int x, int y ) const noexcept
 
 void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> obstacles )
 {
-    // Cell-center solid mask를 변경하지 않은 독립적인 기하 관측 레이어.
-    // 4x4 sub-cell sample과 4개 face sample로 union geometry의 부분 점유를 추정한다.
-    // 이 배열을 pressure gradient/flux에 사용하려면 cut-cell 연산자 전체를 함께 변경해야 한다.
+    // 이진 cell-center mask와 별도로 4x4 sub-cell / 4개 face 표본을 계산.
+    // 선택적 가중 압력 경로에서 면 개방율과 강체 속도를 직접 사용한다.
     constexpr int sampleCount = 4;
     constexpr float inverseCount = 1.0f / sampleCount;
     constexpr float inverseCellSamples = 1.0f / ( sampleCount * sampleCount );
     std::copy( cellFluidFraction_.begin(), cellFluidFraction_.end(), previousCellFluidFraction_.begin() );
     cutCellTransition_ = {};
+    std::fill( uSolidVelocity_.begin(), uSolidVelocity_.end(), 0.0f );
+    std::fill( vSolidVelocity_.begin(), vSolidVelocity_.end(), 0.0f );
 
     double previousVolume = 0.0;
     for( const float fraction : previousCellFluidFraction_ ) previousVolume += fraction;
@@ -365,12 +371,14 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     }
     else
     {
-        const auto isOccupied = [&]( vec2 point )
+        const auto firstOwner = [&]( vec2 point )
         {
-            for( const fluidShapeObstacle2& obstacle : obstacles )
-                if( IsValidFluidObstacle( obstacle ) && ContainsFluidObstacle( obstacle, point ) ) return true;
-            return false;
+            for( std::size_t i = 0; i < obstacles.size(); ++i )
+                if( IsValidFluidObstacle( obstacles[i] ) && ContainsFluidObstacle( obstacles[i], point ) )
+                    return static_cast<int>( i );
+            return -1;
         };
+        const auto isOccupied = [&]( vec2 point ) { return firstOwner( point ) >= 0; };
 
         for( int y = 0; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
@@ -395,9 +403,17 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                 {
                     const vec2 point = origin_ + cellSize_ * vec2{
                         static_cast<float>( x ), static_cast<float>( y ) + ( sample + 0.5f ) * inverseCount };
-                    if( isOccupied( point ) ) ++blocked;
+                    const int owner = firstOwner( point );
+                    if( owner >= 0 )
+                    {
+                        ++blocked;
+                        const fluidShapeObstacle2& shape = obstacles[static_cast<std::size_t>( owner )];
+                        uSolidVelocity_[uIndex( x, y )] +=
+                            ( shape.linearVelocity + Cross( shape.angularVelocity, point - shape.center ) ).x;
+                    }
                 }
                 uOpenFraction_[uIndex( x, y )] = 1.0f - blocked * inverseCount;
+                if( blocked > 0 ) uSolidVelocity_[uIndex( x, y )] /= blocked;
             }
 
         for( int y = 1; y < height_; ++y )
@@ -408,9 +424,17 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                 {
                     const vec2 point = origin_ + cellSize_ * vec2{
                         static_cast<float>( x ) + ( sample + 0.5f ) * inverseCount, static_cast<float>( y ) };
-                    if( isOccupied( point ) ) ++blocked;
+                    const int owner = firstOwner( point );
+                    if( owner >= 0 )
+                    {
+                        ++blocked;
+                        const fluidShapeObstacle2& shape = obstacles[static_cast<std::size_t>( owner )];
+                        vSolidVelocity_[vIndex( x, y )] +=
+                            ( shape.linearVelocity + Cross( shape.angularVelocity, point - shape.center ) ).y;
+                    }
                 }
                 vOpenFraction_[vIndex( x, y )] = 1.0f - blocked * inverseCount;
+                if( blocked > 0 ) vSolidVelocity_[vIndex( x, y )] /= blocked;
             }
     }
 
@@ -596,7 +620,8 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     updateCutCellGeometry( obstacles );
     remapExposedFaces();
     stepMomentum_.afterObstacles = getFluidMomentum();
-    applySolidBoundaries( obstacles );
+    if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
+    else applySolidBoundaries( obstacles );
 
     // 반 라그랑주 이류: face마다 이전 속도장을 역추적해 보간함.
     // 기존 u/v는 읽기 전용으로 두고 next buffer에 기록하므로 순서 의존성이 없음.
@@ -620,10 +645,213 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
 
     u_.swap( nextU_ );
     v_.swap( nextV_ );
-    applySolidBoundaries( obstacles );
+    if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
+    else applySolidBoundaries( obstacles );
     stepMomentum_.afterAdvection = getFluidMomentum();
-    project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
+    if( cutCellProjectionEnabled_ )
+    {
+        pressureMomentum_ = {}; // 이전 이진 MAC face impulse ledger와 단위가 다르므로 혼합하지 않음.
+        projectCutCell( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
+    }
+    else
+    {
+        cutCellPressure_ = {};
+        project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
+    }
     stepMomentum_.afterPressure = getFluidMomentum();
+}
+
+float fluidField2::cutCellUOpen( int x, int y ) const noexcept
+{
+    if( x <= 0 || x >= width_ || y < 0 || y >= height_ ) return 0.0f;
+    if( cellFluidFraction_[cellIndex( x - 1, y )] == 0.0f ||
+        cellFluidFraction_[cellIndex( x, y )] == 0.0f ) return 0.0f;
+    return uOpenFraction_[uIndex( x, y )];
+}
+
+float fluidField2::cutCellVOpen( int x, int y ) const noexcept
+{
+    if( x < 0 || x >= width_ || y <= 0 || y >= height_ ) return 0.0f;
+    if( cellFluidFraction_[cellIndex( x, y - 1 )] == 0.0f ||
+        cellFluidFraction_[cellIndex( x, y )] == 0.0f ) return 0.0f;
+    return vOpenFraction_[vIndex( x, y )];
+}
+
+void fluidField2::applyCutCellBoundaries() noexcept
+{
+    // 완전히 막힌 face에는 강체 법선 속도를 둔다. 일부 열린 face의 u/v는
+    // 유체 성분 속도이며, 막힌 구간의 강체 속도는 별도 flux 항에만 사용한다.
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+            if( cutCellUOpen( x, y ) == 0.0f ) u_[uIndex( x, y )] = uSolidVelocity_[uIndex( x, y )];
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+            if( cutCellVOpen( x, y ) == 0.0f ) v_[vIndex( x, y )] = vSolidVelocity_[vIndex( x, y )];
+}
+
+float fluidField2::cutCellFluxDivergenceRms() const noexcept
+{
+    double sum = 0.0;
+    int active = 0;
+    const float inverseCell = 1.0f / cellSize_;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            if( cellFluidFraction_[cellIndex( x, y )] <= 0.0f ) continue;
+            const auto fluxU = [&]( int i )
+            {
+                const float open = cutCellUOpen( i, y );
+                const int index = uIndex( i, y );
+                return open * u_[index] + ( 1.0f - open ) * uSolidVelocity_[index];
+            };
+            const auto fluxV = [&]( int j )
+            {
+                const float open = cutCellVOpen( x, j );
+                const int index = vIndex( x, j );
+                return open * v_[index] + ( 1.0f - open ) * vSolidVelocity_[index];
+            };
+            const double divergence = static_cast<double>(
+                fluxU( x + 1 ) - fluxU( x ) + fluxV( y + 1 ) - fluxV( y ) ) * inverseCell;
+            sum += divergence * divergence;
+            ++active;
+        }
+    return active > 0 ? static_cast<float>( std::sqrt( sum / active ) ) : 0.0f;
+}
+
+void fluidField2::projectCutCell( float timeStep, int pressureIterations,
+    std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback )
+{
+    // F = a*v_fluid + (1-a)*v_solid. 압력 correction은 열린 구간에만 적용하고
+    // 동일한 a를 Jacobi operator의 symmetric 양방향 edge weight로 사용한다.
+    const float inverseCell = 1.0f / cellSize_;
+    const float pressureScale = cellSize_ * cellSize_ / timeStep;
+    const float gradientScale = timeStep * inverseCell;
+    cutCellPressure_ = {};
+    cutCellPressure_.divergenceBefore = cutCellFluxDivergenceRms();
+    double sumDivergence = 0.0;
+
+    for( int y = 0; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const int cell = cellIndex( x, y );
+            if( cellFluidFraction_[cell] <= 0.0f )
+            {
+                divergence_[cell] = 0.0f;
+                continue;
+            }
+            const auto fluxU = [&]( int i )
+            {
+                const int index = uIndex( i, y );
+                const float open = cutCellUOpen( i, y );
+                return open * u_[index] + ( 1.0f - open ) * uSolidVelocity_[index];
+            };
+            const auto fluxV = [&]( int j )
+            {
+                const int index = vIndex( x, j );
+                const float open = cutCellVOpen( x, j );
+                return open * v_[index] + ( 1.0f - open ) * vSolidVelocity_[index];
+            };
+            divergence_[cell] = ( fluxU( x + 1 ) - fluxU( x ) +
+                fluxV( y + 1 ) - fluxV( y ) ) * inverseCell;
+            sumDivergence += divergence_[cell];
+            ++cutCellPressure_.activeCells;
+        }
+
+    // 고정 외벽에서 moving boundary 표본이 전체 순유량을 0으로 만들지 못하면
+    // Neumann pressure problem이 해를 갖지 않는다. 호환성 보정량을 명시적으로 보고한다.
+    const float mean = cutCellPressure_.activeCells > 0
+        ? static_cast<float>( sumDivergence / cutCellPressure_.activeCells ) : 0.0f;
+    cutCellPressure_.sourceImbalance = static_cast<float>( sumDivergence * cellSize_ * cellSize_ );
+    for( std::size_t i = 0; i < divergence_.size(); ++i )
+        if( cellFluidFraction_[i] > 0.0f ) divergence_[i] -= mean;
+
+    std::fill( pressure_.begin(), pressure_.end(), 0.0f );
+    for( int iteration = 0; iteration < pressureIterations; ++iteration )
+    {
+        for( int y = 0; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+            {
+                const int cell = cellIndex( x, y );
+                if( cellFluidFraction_[cell] <= 0.0f ) { nextPressure_[cell] = 0.0f; continue; }
+                const float left = cutCellUOpen( x, y );
+                const float right = cutCellUOpen( x + 1, y );
+                const float bottom = cutCellVOpen( x, y );
+                const float top = cutCellVOpen( x, y + 1 );
+                const float diagonal = left + right + bottom + top;
+                const float sum =
+                    ( left > 0.0f ? left * pressure_[cellIndex( x - 1, y )] : 0.0f ) +
+                    ( right > 0.0f ? right * pressure_[cellIndex( x + 1, y )] : 0.0f ) +
+                    ( bottom > 0.0f ? bottom * pressure_[cellIndex( x, y - 1 )] : 0.0f ) +
+                    ( top > 0.0f ? top * pressure_[cellIndex( x, y + 1 )] : 0.0f );
+                nextPressure_[cell] = diagonal > 0.0f
+                    ? ( sum - divergence_[cell] * pressureScale ) / diagonal : 0.0f;
+            }
+        pressure_.swap( nextPressure_ );
+    }
+
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+            if( cutCellUOpen( x, y ) > 0.0f )
+                u_[uIndex( x, y )] -= gradientScale *
+                    ( pressure_[cellIndex( x, y )] - pressure_[cellIndex( x - 1, y )] );
+
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+            if( cutCellVOpen( x, y ) > 0.0f )
+                v_[vIndex( x, y )] -= gradientScale *
+                    ( pressure_[cellIndex( x, y )] - pressure_[cellIndex( x, y - 1 )] );
+
+    cutCellPressure_.divergenceAfter = cutCellFluxDivergenceRms();
+    double squaredResidual = 0.0;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const int cell = cellIndex( x, y );
+            if( cellFluidFraction_[cell] == 0.0f ) continue;
+            const float p = pressure_[cell];
+            const float sum = cutCellUOpen( x, y ) *
+                    ( x > 0 ? pressure_[cellIndex( x - 1, y )] - p : 0.0f ) +
+                cutCellUOpen( x + 1, y ) *
+                    ( x + 1 < width_ ? pressure_[cellIndex( x + 1, y )] - p : 0.0f ) +
+                cutCellVOpen( x, y ) *
+                    ( y > 0 ? pressure_[cellIndex( x, y - 1 )] - p : 0.0f ) +
+                cutCellVOpen( x, y + 1 ) *
+                    ( y + 1 < height_ ? pressure_[cellIndex( x, y + 1 )] - p : 0.0f );
+            const double residual = static_cast<double>(
+                sum - divergence_[cell] * pressureScale ) * ( timeStep / cellSize_ );
+            squaredResidual += residual * residual;
+        }
+    cutCellPressure_.pressureResidual = cutCellPressure_.activeCells > 0
+        ? static_cast<float>( std::sqrt( squaredResidual / cutCellPressure_.activeCells ) ) : 0.0f;
+
+    // Cut-cell 내부 solid 면적의 pressure traction을 cell aperture 차이로 근사.
+    // Face 중심 마스크 traction과 달리 부분 막힘에도 반응한다. 다중 shape 소유는
+    // 가장 가까운 COM으로 근사하고 면의 정확한 중심은 추후 cut boundary에서 계산한다.
+    if( obstacles.empty() ) return;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const int cell = cellIndex( x, y );
+            if( cellFluidFraction_[cell] == 0.0f ) continue;
+            const float l = x == 0 ? cellFluidFraction_[cell] : cutCellUOpen( x, y );
+            const float r = x == width_ - 1 ? cellFluidFraction_[cell] : cutCellUOpen( x + 1, y );
+            const float b = y == 0 ? cellFluidFraction_[cell] : cutCellVOpen( x, y );
+            const float t = y == height_ - 1 ? cellFluidFraction_[cell] : cutCellVOpen( x, y + 1 );
+            const vec2 force = -pressure_[cell] * cellSize_ * vec2{ r - l, t - b };
+            if( LengthSquared( force ) == 0.0f ) continue;
+            const vec2 center = getCellCenter( x, y );
+            std::size_t owner = 0;
+            float nearest = std::numeric_limits<float>::max();
+            for( std::size_t i = 0; i < obstacles.size(); ++i )
+            {
+                if( !IsValidFluidObstacle( obstacles[i] ) ) continue;
+                const float distance = LengthSquared( center - obstacles[i].center );
+                if( distance < nearest ) { nearest = distance; owner = i; }
+            }
+            if( nearest == std::numeric_limits<float>::max() ) continue;
+            feedback[owner].force += force;
+            feedback[owner].torque += Cross( center - obstacles[owner].center, force );
+        }
 }
 
 void fluidField2::project( float timeStep, int pressureIterations,
