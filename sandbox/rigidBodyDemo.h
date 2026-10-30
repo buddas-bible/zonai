@@ -241,6 +241,8 @@ public:
 
 #pragma region Contacts
     void refreshContacts();
+    void setContactEventVisualizationEnabled( bool enabled );
+    [[nodiscard]] bool isContactEventVisualizationEnabled() const noexcept { return contactEventVisualizationEnabled_; }
 #pragma endregion Contacts
 
 #pragma region Queries
@@ -413,6 +415,10 @@ private:
     void stopMouseDrag();
 #pragma endregion MouseDrag
 
+#pragma region ContactEventVisualization
+    void syncContactEventSubscriptions();
+#pragma endregion ContactEventVisualization
+
 #pragma region Data
 
     struct trialBodyState
@@ -432,6 +438,7 @@ private:
     world world_;
     std::vector<visualShape> shapes_;
     std::vector<contactData> contacts_;
+    bool contactEventVisualizationEnabled_ = false;
 
     bodyId impulseBody_{}; // 이동과 임펄스 입력을 적용할 물체
     std::array<transform2, 6> playgroundInitialTransforms_{};

@@ -557,6 +557,37 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
             }
         }
     }
+
+    if( isContactEventVisualizationEnabled() )
+    {
+        const world& simulation = getWorld();
+        // Begin/End 이벤트에는 접점 좌표가 없으므로 두 Shape AABB의 중간을 표시함.
+        // 삭제된 Shape는 위치를 재구성하지 않고 아래 카운터에만 포함함.
+        const auto drawPairEvent = [&]( shapeId a, shapeId b, const char* label, ImU32 color )
+        {
+            if( !simulation.IsValid( a ) || !simulation.IsValid( b ) ) return;
+            const vec2 point = 0.5f * ( Center( simulation.GetShapeAABB( a ) ) + Center( simulation.GetShapeAABB( b ) ) );
+            draw.DrawPoint( point, color, 6.0f );
+            draw.DrawLabel( point, label, color );
+        };
+
+        for( const contactBeginEvent2& event : simulation.GetContactBeginEvents() )
+            drawPairEvent( event.shapeA, event.shapeB, "시작", IM_COL32( 110, 240, 140, 255 ) );
+
+        for( const contactEndEvent2& event : simulation.GetContactEndEvents() )
+            drawPairEvent( event.shapeA, event.shapeB, "종료", IM_COL32( 255, 170, 90, 255 ) );
+
+        constexpr ImU32 HIT_COLOR = IM_COL32( 255, 90, 105, 255 );
+        for( const contactHitEvent2& hit : simulation.getContactHitEvents() )
+        {
+            draw.DrawPoint( hit.point, HIT_COLOR, 7.0f );
+            draw.DrawArrow( hit.point, hit.normal, HIT_COLOR, 0.75f );
+
+            char label[96]{};
+            std::snprintf( label, sizeof( label ), "충격 %.2f m/s  %.2f N·s", hit.approachSpeed, hit.normalImpulse );
+            draw.DrawLabel( hit.point, label, HIT_COLOR );
+        }
+    }
 }
 
 #pragma endregion DemoView
@@ -2024,6 +2055,21 @@ void rigidBodyDemoUi::drawDebugSettings()
     ImGui::Checkbox( "확장 경계 상자###Fat AABBs", &showFatAABBs_ );
     ImGui::Checkbox( "접촉점###Contact points", &showContacts_ );
     ImGui::Checkbox( "접촉 상세 정보###Contact details", &showContactDetails_ );
+    bool contactEvents = isContactEventVisualizationEnabled();
+    if( ImGui::Checkbox( "접촉 이벤트###Contact events", &contactEvents ) )
+        setContactEventVisualizationEnabled( contactEvents );
+
+    if( contactEvents )
+    {
+        float hitThreshold = getWorld().getContactHitSpeedThreshold();
+        if( ImGui::DragFloat( "충격 최소 접근 속도###Hit speed threshold", &hitThreshold, 0.1f, 0.0f, 100.0f, "%.2f m/s" ) )
+            getWorld().setContactHitSpeedThreshold( hitThreshold );
+
+        ImGui::Text( "시작 %zu / 종료 %zu / 충격 %zu",
+            getWorld().GetContactBeginEvents().size(),
+            getWorld().GetContactEndEvents().size(),
+            getWorld().getContactHitEvents().size() );
+    }
     ImGui::Checkbox( "질량 중심###Center of mass", &showCOM_ );
     ImGui::Checkbox( "속도 벡터###Velocity vectors", &showVelocities_ );
     ImGui::Checkbox( "이름 표시###Labels", &showLabels_ );
@@ -2062,6 +2108,7 @@ void rigidBodyDemoUi::drawDebugSettings()
     ImGui::Spacing();
 
     ImGui::TextWrapped( "접촉 정보는 간격·수직 충격량·마찰 충격량을 표시합니다. 청록색 화살표는 속도이며 어두운 오브젝트는 수면 중입니다." );
+    ImGui::TextWrapped( "이벤트 표시: 녹색 시작·주황색 종료는 두 Shape의 AABB 중심 사이에 표시되며 실제 접점이 아닙니다. 빨간색 충격은 Solver가 보고한 접점·법선입니다. 삭제된 Shape의 종료는 숫자에만 포함됩니다." );
 }
 
 #pragma endregion Controls

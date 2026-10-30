@@ -210,6 +210,8 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
         torqueTrialTime_ += timeStep;
     }
     updateSplinePath( timeStep );
+    // 새로 생성된 Shape에도 구독을 적용하되 표시를 끄면 순회 비용을 내지 않음.
+    if( contactEventVisualizationEnabled_ ) syncContactEventSubscriptions();
     world_.Step( timeStep, subStepCount );
     if( kind_ == demoKind::splinePath && splinePathDistance_ == splinePathLength_ && world_.IsValid( impulseBody_ ) )
     {
@@ -355,6 +357,28 @@ void rigidBodyDemo::setCarMotorSettings( float speed, float maxTorque )
 #pragma endregion Settings
 
 #pragma region Contacts
+
+void rigidBodyDemo::setContactEventVisualizationEnabled( bool enabled )
+{
+    if( contactEventVisualizationEnabled_ == enabled ) return;
+
+    contactEventVisualizationEnabled_ = enabled;
+    syncContactEventSubscriptions();
+}
+
+void rigidBodyDemo::syncContactEventSubscriptions()
+{
+    for( const visualShape& visual : shapes_ )
+    {
+        const shapeId id = visual.shapeHandle;
+        if( !world_.IsValid( id ) || world_.IsShapeSensor( id ) ) continue;
+
+        if( world_.AreShapeContactEventsEnabled( id ) != contactEventVisualizationEnabled_ )
+            world_.SetShapeContactEventsEnabled( id, contactEventVisualizationEnabled_ );
+        if( world_.areShapeHitEventsEnabled( id ) != contactEventVisualizationEnabled_ )
+            world_.setShapeHitEventsEnabled( id, contactEventVisualizationEnabled_ );
+    }
+}
 
 void rigidBodyDemo::refreshContacts()
 {
