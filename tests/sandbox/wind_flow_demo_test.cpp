@@ -241,6 +241,56 @@ void checkExperimentalCutCellProjection()
         "sandbox must restore binary pressure mode when experiment is disabled" );
 }
 
+void checkSandboxConservativeAdvectionTrial()
+{
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindConservativeAdvectionEnabled( true );
+    scene.setWindCutCellProjectionEnabled( false );
+    scene.beginWindAdvectionTrial();
+    check( scene.isWindConservativeAdvectionEnabled() &&
+        !scene.isWindSourceEnabled() && !scene.isWindObstacleCouplingEnabled() &&
+        scene.getWindDragCoefficient() == 0.0f,
+        "advection trial must isolate a repeatable vortex from source, drag and rigid coupling" );
+
+    const fluidField2* field = scene.getWindField();
+    const vec2 seeded = field->sampleVelocity( { 1.5f, 0.0f } );
+    check( IsFinite( seeded ) && Length( seeded ) > 0.05f,
+        "advection trial must seed observable fluid circulation before the first step" );
+
+    for( int i = 0; i < 50; ++i )
+    {
+        scene.step( 1.0f / 60.0f, 4 );
+        const fluidAdvectionStats2& adv = field->getAdvectionStats();
+        check( adv.conservative && adv.substeps >= 1 && !adv.cflLimited &&
+            IsFinite( adv.before ) && IsFinite( adv.after ) &&
+            Length( adv.delta() ) < 3.0e-4f * ( 1.0f + Length( adv.before ) ) &&
+            std::isfinite( field->getDivergenceRms() ),
+            "sandbox isolated vortex must preserve transport face momentum without pressure contamination" );
+    }
+
+    scene.setWindConservativeAdvectionEnabled( false );
+    scene.beginWindAdvectionTrial();
+    scene.step( 1.0f / 60.0f, 4 );
+    check( !field->getAdvectionStats().conservative && field->getAdvectionStats().substeps == 1 &&
+        IsFinite( field->getAdvectionStats().after ),
+        "same sandbox preset must run with the legacy semi-Lagrangian method" );
+
+    scene.setWindConservativeAdvectionEnabled( true );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindObstacleCouplingEnabled( true );
+    scene.resetWindFlow();
+    scene.step( 1.0f / 60.0f, 4 );
+    check( field->getAdvectionStats().conservative &&
+        field->getCutCellPressure().activeCells > 0 &&
+        std::isfinite( field->getCutCellPressure().pressureResidual ),
+        "conservative advection must also integrate with moving-solid cut-cell wind sandbox" );
+
+    scene.resetWindFlow();
+    check( scene.isWindConservativeAdvectionEnabled() &&
+        field->getAdvectionStats().substeps == 0,
+        "wind reset must preserve algorithm choice and clear its diagnostics" );
+}
+
 } // namespace
 
 int main()
@@ -251,4 +301,5 @@ int main()
     checkDragMomentumBudget();
     checkPressureLedgerInSandbox();
     checkExperimentalCutCellProjection();
+    checkSandboxConservativeAdvectionTrial();
 }
