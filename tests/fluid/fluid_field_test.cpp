@@ -496,7 +496,8 @@ void checkWeightedCutCellPressure()
         "stationary cut-cell boundary must not generate spurious pressure" );
 
     // 이동하는 경계의 blocked fraction은 별도 solid velocity flux로 계산한다.
-    const fluidCircleObstacle2 moving{ {}, 0.65f, { 1.0f, 0.0f }, 0.0f };
+    // 실제 이동한 snapshot만 ΔV/dt 소스를 생성한다.
+    const fluidCircleObstacle2 moving{ { 0.25f, 0.0f }, 0.65f, { 1.0f, 0.0f }, 0.0f };
     resting.step( dt, std::span<const fluidCircleObstacle2>( &moving, 1 ), pressure, 200 );
     check( resting.getCutCellPressure().divergenceBefore > 0.01f &&
         std::isfinite( resting.getCutCellPressure().divergenceAfter ) &&
@@ -515,6 +516,66 @@ void checkWeightedCutCellPressure()
         "clear should reset diagnostics but retain the selected pressure mode" );
 }
 
+void checkCutCellTemporalContinuity()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    fluidField2 field{ 12, 12, 1.0f, { -6.0f, -6.0f } };
+    field.setCutCellProjectionEnabled( true );
+    std::array<fluidObstacleForce2, 1> feedback{};
+    fluidShapeObstacle2 box{
+        MakeBox( { 0.75f, 0.75f } ),
+        { { 0.25f, 0.25f }, {} }, { 0.25f, 0.25f }, {}, 0.0f
+    };
+
+    // 최초 snapshot은 움직이기 전 형상을 알 수 없으므로 시간적 소스를 넣지 않는다.
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 200 );
+    const fluidCutCellPressure2 first = field.getCutCellPressure();
+    check( !first.hasVolumeHistory && first.volumeRate == 0.0f &&
+        first.divergenceBefore == 0.0f && first.divergenceAfter == 0.0f &&
+        field.getCutCellTransition().coveredVolume > 0.0f,
+        "initial obstacle placement must not be mistaken for a physical swept-volume step" );
+
+    // 고정 면적 강체의 1/4 셀 평행 이동: 총 ΔV는 0이지만 국소 ΔV_i는 다르다.
+    box.transform.position.x += 0.25f;
+    box.center.x += 0.25f;
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 200 );
+    const fluidCutCellPressure2 moved = field.getCutCellPressure();
+    check( moved.hasVolumeHistory && std::abs( moved.volumeRate ) < 1.0e-4f &&
+        field.getCutCellTransition().coveredVolume > 0.0f &&
+        field.getCutCellTransition().releasedVolume > 0.0f &&
+        moved.divergenceBefore > 0.01f &&
+        moved.divergenceAfter < moved.divergenceBefore * 0.6f &&
+        moved.connectedRegions == 1 &&
+        std::abs( moved.sourceImbalance ) < 1.0e-4f &&
+        std::isfinite( moved.pressureResidual ) && IsFinite( feedback[0].force ),
+        "translation must drive pressure through local dV/dt with closed-domain global balance" );
+
+    // 정지한 동일한 도형은 추가 체적 소스를 만들지 않는다.
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 200 );
+    check( field.getCutCellPressure().hasVolumeHistory &&
+        field.getCutCellPressure().volumeRate == 0.0f &&
+        field.getCutCellPressure().redistributedVolumeRate == 0.0f &&
+        std::isfinite( field.getCutCellPressure().divergenceAfter ),
+        "static occupancy must not create fictitious moving-boundary volume source" );
+
+    // 강체를 영역 밖으로 이동시키면 폐쇄 영역의 전체 유체 체적이 증가한다.
+    // 이를 압력으로 해결할 수 없으므로 compatibility correction이 드러나야 한다.
+    box.transform.position = { 50.0f, 50.0f };
+    box.center = box.transform.position;
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 200 );
+    const fluidCutCellPressure2 departed = field.getCutCellPressure();
+    check( departed.volumeRate > 0.0f &&
+        departed.sourceImbalance > 0.0f &&
+        departed.compatibilityCorrection >= 0.99f * departed.sourceImbalance,
+        "closed domain must report unresolvable positive net fluid volume growth" );
+
+    field.clear();
+    field.step( dt );
+    check( !field.getCutCellPressure().hasVolumeHistory &&
+        field.getCutCellPressure().volumeRate == 0.0f,
+        "clear must invalidate temporal geometry history" );
+}
+
 } // namespace
 
 int main()
@@ -528,4 +589,5 @@ int main()
     checkMovingSolidRemap();
     checkFractionalCutCells();
     checkWeightedCutCellPressure();
+    checkCutCellTemporalContinuity();
 }
