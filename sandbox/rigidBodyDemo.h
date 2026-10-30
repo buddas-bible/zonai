@@ -17,6 +17,20 @@ struct visualShape
     const char* label = "";
 };
 
+// World의 한 Step짜리 이벤트를 Sandbox에서 잠깐 유지하는 위치 snapshot.
+enum class contactEventTraceType { begin, end, hit };
+
+struct contactEventTrace2
+{
+    contactEventTraceType type = contactEventTraceType::begin;
+    vec2 point{};
+    vec2 normal{};
+    float approachSpeed = 0.0f;
+    float normalImpulse = 0.0f;
+    float remainingTime = 0.0f;
+    float duration = 0.0f;
+};
+
 enum class distanceDemoPreset
 {
     rigid,
@@ -243,6 +257,10 @@ public:
     void refreshContacts();
     void setContactEventVisualizationEnabled( bool enabled );
     [[nodiscard]] bool isContactEventVisualizationEnabled() const noexcept { return contactEventVisualizationEnabled_; }
+    void setContactEventTrailDuration( float seconds );
+    [[nodiscard]] float getContactEventTrailDuration() const noexcept { return contactEventTrailDuration_; }
+    [[nodiscard]] std::span<const contactEventTrace2> getContactEventTraces() const noexcept { return contactEventTraces_; }
+    void clearContactEventTrail() noexcept { contactEventTraces_.clear(); }
 #pragma endregion Contacts
 
 #pragma region Queries
@@ -417,6 +435,7 @@ private:
 
 #pragma region ContactEventVisualization
     void syncContactEventSubscriptions();
+    void updateContactEventTrail( float timeStep );
 #pragma endregion ContactEventVisualization
 
 #pragma region Data
@@ -439,6 +458,8 @@ private:
     std::vector<visualShape> shapes_;
     std::vector<contactData> contacts_;
     bool contactEventVisualizationEnabled_ = false;
+    float contactEventTrailDuration_ = 0.35f;
+    std::vector<contactEventTrace2> contactEventTraces_;
 
     bodyId impulseBody_{}; // 이동과 임펄스 입력을 적용할 물체
     std::array<transform2, 6> playgroundInitialTransforms_{};
