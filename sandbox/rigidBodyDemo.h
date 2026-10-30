@@ -273,6 +273,7 @@ public:
         return windField_ && windField_->isConservativeAdvectionEnabled();
     }
     void addWindVortex();
+    void seedWindTracer();
     void beginWindAdvectionTrial();
     void resetWindFlow();
     [[nodiscard]] float getWindSourceStrength() const noexcept { return windSourceStrength_; }
