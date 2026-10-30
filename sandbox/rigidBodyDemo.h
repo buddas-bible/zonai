@@ -262,6 +262,9 @@ public:
     [[nodiscard]] bool isWindSourceEnabled() const noexcept { return windSourceEnabled_; }
     [[nodiscard]] bool isWindObstacleCouplingEnabled() const noexcept { return windObstacleCouplingEnabled_; }
     [[nodiscard]] std::span<const fluidObstacleForce2> getWindPressureForces() const noexcept { return windPressureForces_; }
+    [[nodiscard]] vec2 getWindDragBodyImpulse() const noexcept { return windDragBodyImpulse_; }
+    [[nodiscard]] vec2 getWindDragFluidImpulse() const noexcept { return windDragFluidImpulse_; }
+    [[nodiscard]] vec2 getWindDragExchangeResidual() const noexcept { return windDragBodyImpulse_ + windDragFluidImpulse_; }
 #pragma endregion Settings
 
 #pragma region Contacts
@@ -480,6 +483,8 @@ private:
     bool windSourceEnabled_ = true;
     bool windObstacleCouplingEnabled_ = true;
     std::array<fluidObstacleForce2, 3> windPressureForces_{};
+    vec2 windDragBodyImpulse_{};
+    vec2 windDragFluidImpulse_{};
 
     bodyId impulseBody_{}; // 이동과 임펄스 입력을 적용할 물체
     std::array<transform2, 6> playgroundInitialTransforms_{};
