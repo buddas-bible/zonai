@@ -933,6 +933,11 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::Text( "재노출 U/V face: %d / %d", transition.openedUFaces, transition.openedVFaces );
             ImGui::Text( "이웃 복원/0 대체: %d / %d", transition.extrapolatedFaces, transition.fallbackFaces );
             ImGui::Text( "이산 유체 체적 변화: %+.4f m³", transition.fluidVolumeDelta );
+            const fluidCutCellTransition2& cut = field->getCutCellTransition();
+            ImGui::SeparatorText( "부분 점유 기하 (4x4 표본)" );
+            ImGui::Text( "유체 체적: %.4f m³ / 변화 %+.4f m³", cut.fluidVolume, cut.volumeDelta() );
+            ImGui::Text( "가린/다시 열린 체적: %.4f / %.4f m³", cut.coveredVolume, cut.releasedVolume );
+            ImGui::Text( "부분 셀/개방 U/V face: %d / %d / %d", cut.partialCells, cut.partialUFaces, cut.partialVFaces );
             const vec2 dragBody = getWindDragBodyImpulse();
             const vec2 dragFluid = getWindDragFluidImpulse();
             ImGui::Text( "Drag Δp 강체: (%.5f, %.5f) N·s", dragBody.x, dragBody.y );
@@ -954,7 +959,7 @@ void rigidBodyDemoUi::drawExperimentControls()
                     getWindPressureForces()[i].force.x, getWindPressureForces()[i].force.y );
         }
         if( ImGui::Button( "유체·물체 초기화###WindReset" ) ) resetWindFlow();
-        ImGui::TextWrapped( "파란 화살표는 유체 속도, 주황색 점은 강체가 차지한 셀입니다. 원·캡슐·볼록 다각형은 실제 회전한 도형으로 셀을 점유합니다. 양방향 모드에서는 해당 경계의 수직 속도를 유체에 적용하고 압력 반력을 강체에 전달합니다. Drag는 유체 내부 face의 유효 질량 기준으로 실제 전달한 충격량만 강체에 반대로 적용합니다. Drag 교환 잔차와 압력(유체·강체·외벽) 수지 잔차를 별도로 표시합니다. 점유 변경 때 새로 열린 유체 면은 이전의 순수 유체 이웃 속도로 복원합니다. 열린/닫힌 셀과 이산 체적 변동은 진단값이며 실제 체적 보존을 의미하지 않습니다. 점유 변경과 Semi-Lagrangian 이류의 운동량 변화도 따로 기록합니다. 이 압력 수지의 작은 잔차는 이산화된 face 회계이며 전체 유체·강체 운동량 보존을 뜻하지 않습니다." );
+        ImGui::TextWrapped( "파란 화살표는 유체 속도, 주황색 점은 강체가 차지한 셀입니다. 원·캡슐·볼록 다각형은 실제 회전한 도형으로 셀을 점유합니다. 양방향 모드에서는 해당 경계의 수직 속도를 유체에 적용하고 압력 반력을 강체에 전달합니다. Drag는 유체 내부 face의 유효 질량 기준으로 실제 전달한 충격량만 강체에 반대로 적용합니다. Drag 교환 잔차와 압력(유체·강체·외벽) 수지 잔차를 별도로 표시합니다. 점유 변경 때 새로 열린 유체 면은 이전의 순수 유체 이웃 속도로 복원합니다. 셀 중심 마스크 외에도 4x4 표본으로 부분 점유와 면 개방율을 측정합니다. 열린/닫힌 셀과 부분 점유 체적 변동은 진단값이며 아직 Cut-cell 압력 계산이나 실제 체적 보존에 사용하지 않습니다. 점유 변경과 Semi-Lagrangian 이류의 운동량 변화도 따로 기록합니다. 이 압력 수지의 작은 잔차는 이산화된 face 회계이며 전체 유체·강체 운동량 보존을 뜻하지 않습니다." );
         return;
     }
     if( getKind() == demoKind::revoluteLimitMotorComparison )
