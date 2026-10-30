@@ -6,6 +6,7 @@
 
 #include "demo.h"
 #include "dynamics/world.h"
+#include "fluid/fluidField2.h"
 
 namespace zonai::sandbox
 {
@@ -251,6 +252,13 @@ public:
     void setRagdollSelfCollision( bool enabled );
     [[nodiscard]] bool getRagdollSelfCollision() const;
     void applyPogoJointPreset( pogoJointDemoPreset preset );
+    void setWindSourceStrength( float strength );
+    void setWindDragRate( float rate );
+    void setWindSourceEnabled( bool enabled ) noexcept { windSourceEnabled_ = enabled; }
+    void resetWindFlow();
+    [[nodiscard]] float getWindSourceStrength() const noexcept { return windSourceStrength_; }
+    [[nodiscard]] float getWindDragRate() const noexcept { return windDragRate_; }
+    [[nodiscard]] bool isWindSourceEnabled() const noexcept { return windSourceEnabled_; }
 #pragma endregion Settings
 
 #pragma region Contacts
@@ -267,6 +275,7 @@ public:
 
     [[nodiscard]] demoKind getKind() const noexcept { return kind_; }
 
+    [[nodiscard]] const fluidField2* getWindField() const noexcept { return windField_ ? &*windField_ : nullptr; }
     [[nodiscard]] world& getWorld() noexcept { return world_; }
 
     [[nodiscard]] const world& getWorld() const noexcept { return world_; }
@@ -374,6 +383,7 @@ public:
 private:
 #pragma region SceneSetup
     void createPlayground();
+    void createWindFlow();
     void createCollisionTrial();
     void createSplinePath();
     void createSplineRail();
@@ -460,6 +470,11 @@ private:
     bool contactEventVisualizationEnabled_ = false;
     float contactEventTrailDuration_ = 0.35f;
     std::vector<contactEventTrace2> contactEventTraces_;
+    std::optional<fluidField2> windField_{};
+    float windSourceStrength_ = 6.0f;
+    float windDragRate_ = 3.0f;
+    float windTime_ = 0.0f;
+    bool windSourceEnabled_ = true;
 
     bodyId impulseBody_{}; // 이동과 임펄스 입력을 적용할 물체
     std::array<transform2, 6> playgroundInitialTransforms_{};
