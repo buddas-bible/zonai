@@ -935,12 +935,21 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::Text( "Drag 교환 잔차: %.7f N·s", Length( getWindDragExchangeResidual() ) );
             const vec2 momentum = field->getFluidMomentum();
             ImGui::Text( "유체 내부 face 운동량: (%.4f, %.4f) N·s", momentum.x, momentum.y );
+            const fluidPressureMomentum2& pressure = field->getPressureMomentum();
+            const fluidStepMomentum2& stages = field->getStepMomentum();
+            ImGui::SeparatorText( "압력 투영 운동량 수지 (마지막 Step)" );
+            ImGui::Text( "유체 Δp: (%.5f, %.5f) N·s", pressure.fluid.x, pressure.fluid.y );
+            ImGui::Text( "강체 Δp: (%.5f, %.5f) N·s", pressure.solid.x, pressure.solid.y );
+            ImGui::Text( "외벽 Δp: (%.5f, %.5f) N·s", pressure.wall.x, pressure.wall.y );
+            ImGui::Text( "압력 수지 잔차: %.7f N·s", Length( pressure.residual() ) );
+            ImGui::Text( "점유 변경 Δp: (%.5f, %.5f) N·s", stages.occupancyDelta().x, stages.occupancyDelta().y );
+            ImGui::Text( "이류 Δp: (%.5f, %.5f) N·s", stages.advectionDelta().x, stages.advectionDelta().y );
             for( std::size_t i = 0; i < getWindPressureForces().size(); ++i )
                 ImGui::Text( "압력 반력 %zu: (%.2f, %.2f) N", i + 1,
                     getWindPressureForces()[i].force.x, getWindPressureForces()[i].force.y );
         }
         if( ImGui::Button( "유체·물체 초기화###WindReset" ) ) resetWindFlow();
-        ImGui::TextWrapped( "파란 화살표는 유체 속도, 주황색 점은 강체가 차지한 셀입니다. 원·캡슐·볼록 다각형은 실제 회전한 도형으로 셀을 점유합니다. 양방향 모드에서는 해당 경계의 수직 속도를 유체에 적용하고 압력 반력을 강체에 전달합니다. Drag는 유체 내부 face의 유효 질량 기준으로 실제 전달한 충격량만 강체에 반대로 적용합니다. 표시된 교환 잔차는 Drag 단계에만 해당하며, 압력·외벽·이류의 전체 운동량 보존을 뜻하지 않습니다." );
+        ImGui::TextWrapped( "파란 화살표는 유체 속도, 주황색 점은 강체가 차지한 셀입니다. 원·캡슐·볼록 다각형은 실제 회전한 도형으로 셀을 점유합니다. 양방향 모드에서는 해당 경계의 수직 속도를 유체에 적용하고 압력 반력을 강체에 전달합니다. Drag는 유체 내부 face의 유효 질량 기준으로 실제 전달한 충격량만 강체에 반대로 적용합니다. Drag 교환 잔차와 압력(유체·강체·외벽) 수지 잔차를 별도로 표시합니다. 점유 변경과 Semi-Lagrangian 이류의 운동량 변화도 따로 기록합니다. 이 압력 수지의 작은 잔차는 이산화된 face 회계이며 전체 유체·강체 운동량 보존을 뜻하지 않습니다." );
         return;
     }
     if( getKind() == demoKind::revoluteLimitMotorComparison )
