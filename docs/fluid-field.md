@@ -25,7 +25,7 @@ u_next = u* - dt * ∇p
 
 - `demoKind::windFlow`의 24×14, 셀 0.5m 속도장을 시각화한다. 파란 화살표는 샘플링된 속도, 노란 점은 바람 source 위치다.
 - 시간에 따라 Y 방향이 진동하는 국소 wind source를 주입하고 한 물리 Step마다 격자도 진전한다.
-- 세 Dynamic Body는 국소 유체 속도 `v_fluid`와 강체 중심 속도 `v_body`의 차이에 비례하는 **단방향 힘** `F = m * dragRate * (v_fluid - v_body)`을 받는다. 따라서 강체가 속도장을 따라 가속하며, 원래 `World`의 force/velocity/Contact solver를 재사용한다.
+- 세 Dynamic Body는 국소 유체 속도 `v_fluid`와 강체 중심 속도 `v_body`의 차이에 비례하는 **단방향 힘** `F = dragCoefficient * (v_fluid - v_body)` (계수 단위 N·s/m)을 받는다. 따라서 강체가 속도장을 따라 가속하며, 원래 `World`의 force/velocity/Contact solver를 재사용한다.
 - 바람 source On/Off, source 강도, 강체 결합 계수, 흐름+Body 초기화 기능을 제공한다. 강체 결합 계수를 0으로 설정하면 유체만 움직이고 강체는 반응하지 않는다.
 - `Step(0)`은 유체를 전진시키거나 힘을 주입하지 않는다.
 
