@@ -290,11 +290,15 @@ void checkSandboxConservativeAdvectionTrial()
 
     scene.setWindConservativeAdvectionEnabled( true );
     scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindSweptTracerRemapEnabled( true );
     scene.setWindObstacleCouplingEnabled( true );
     scene.resetWindFlow();
+    check( scene.isWindSweptTracerRemapEnabled() && !field->getTracerStats().usedSweptRemap,
+        "sandbox reset must preserve swept tracer remap selection and clear last-step diagnostics" );
     scene.step( 1.0f / 60.0f, 4 );
     check( field->getAdvectionStats().conservative &&
         field->getCutCellPressure().activeCells > 0 &&
+        !field->getTracerStats().usedSweptRemap &&
         std::isfinite( field->getCutCellPressure().pressureResidual ),
         "conservative advection must also integrate with moving-solid cut-cell wind sandbox" );
 
