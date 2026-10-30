@@ -129,6 +129,22 @@ struct fluidSweptFaceFlux2
     float geometryMismatch = 0.0f;
 };
 
+// 이류 단계만의 가중 dual MAC face 운동량 계측 (rho=1, depth=1m).
+// 부분 개방 면은 open fraction을 유효 질량에 적용한다.
+// 이류 경계의 내부 flux는 양쪽에서 상쇄되지만 압력·이동 경계와
+// 전체 유체 질량/운동량의 보존까지 의미하지 않는다.
+struct fluidAdvectionStats2
+{
+    vec2 before{};
+    vec2 after{};
+    float maxCfl = 0.0f;
+    int substeps = 0;
+    bool conservative = false;
+    bool cflLimited = false;
+
+    [[nodiscard]] vec2 delta() const noexcept { return after - before; }
+};
+
 // 균일 MAC(staggered) grid: x속도는 수직 face, y속도는 수평 face에 저장.
 // 내부 Circle/Capsule/Convex Polygon solid 경계 face는 no-through로 처리함.
 class fluidField2
@@ -148,6 +164,11 @@ public:
     void setCutCellProjectionEnabled( bool enabled ) noexcept { cutCellProjectionEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellProjectionEnabled() const noexcept { return cutCellProjectionEnabled_; }
 
+    // MAC dual control volume의 upwind flux-form 이류. 선택형이며 기본 false.
+    // 고정된 현재 open fraction에 대한 face 운동량만 보존한다.
+    void setConservativeAdvectionEnabled( bool enabled ) noexcept { conservativeAdvectionEnabled_ = enabled; }
+    [[nodiscard]] bool isConservativeAdvectionEnabled() const noexcept { return conservativeAdvectionEnabled_; }
+
     // 지정 위치 주변 face 속도에 world-space 속도 변화(m/s)를 더함.
     // 소스가 격자 바깥이거나 radius가 유효하지 않으면 아무 일도 하지 않음.
     void addVelocity( vec2 position, vec2 velocityDelta, float radius );
@@ -158,7 +179,7 @@ public:
     // 압력 투영/이류/경계 외력까지 포함한 총 운동량 보존을 뜻하지 않음.
     [[nodiscard]] vec2 applyMomentumImpulse( vec2 position, vec2 impulse, float radius );
 
-    // Semi-Lagrangian advection 후 Jacobi pressure projection.
+    // 선택한 Semi-Lagrangian 또는 보존형 upwind advection 후 Jacobi pressure projection.
     // no-through(경계 수직 속도 0) 조건. dt<=0 또는 비유한 값은 무시.
     void step( float timeStep, int pressureIterations = 80 );
 
@@ -187,6 +208,7 @@ public:
     [[nodiscard]] const fluidCutCellTransition2& getCutCellTransition() const noexcept { return cutCellTransition_; }
     [[nodiscard]] const fluidCutCellPressure2& getCutCellPressure() const noexcept { return cutCellPressure_; }
     [[nodiscard]] const fluidSweptFaceFlux2& getSweptFaceFlux() const noexcept { return sweptFaceFlux_; }
+    [[nodiscard]] const fluidAdvectionStats2& getAdvectionStats() const noexcept { return advectionStats_; }
     // 기하 표본의 유체 면적 비율 [0,1]. 범위 밖은 0.
     // 외곽 wall face는 기하상 열려있어도 닫힌 경계이므로 0.
     [[nodiscard]] float getCellFluidFraction( int x, int y ) const noexcept;
@@ -211,6 +233,10 @@ private:
     void updateObstacles( std::span<const fluidShapeObstacle2> obstacles );
     void updateCutCellGeometry( std::span<const fluidShapeObstacle2> obstacles );
     void remapExposedFaces();
+    [[nodiscard]] float advectionUOpen( int x, int y ) const noexcept;
+    [[nodiscard]] float advectionVOpen( int x, int y ) const noexcept;
+    [[nodiscard]] vec2 getAdvectionFaceMomentum() const noexcept;
+    void advectConservative( float timeStep );
     [[nodiscard]] float cutCellUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellVOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellFluxDivergenceRms( float inverseTimeStep ) const noexcept;
@@ -256,7 +282,9 @@ private:
     fluidCutCellTransition2 cutCellTransition_{};
     fluidCutCellPressure2 cutCellPressure_{};
     fluidSweptFaceFlux2 sweptFaceFlux_{};
+    fluidAdvectionStats2 advectionStats_{};
     bool cutCellProjectionEnabled_ = false;
+    bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
     bool volumeSourceValid_ = false;
     fluidPressureMomentum2 pressureMomentum_{};
