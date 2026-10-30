@@ -852,3 +852,14 @@ add_test(NAME splineRailAngularSpeedTests COMMAND splineRailAngularSpeedTests)
 add_executable(splineRailRotationEnableTests dynamics/spline_rail_rotation_enable_test.cpp)
 target_link_libraries(splineRailRotationEnableTests PRIVATE zonai::zonai)
 add_test(NAME splineRailRotationEnableTests COMMAND splineRailRotationEnableTests)
+
+# MAC 속도장의 기본 정확성과 Release runtime 보장을 독립 실행 파일로 확인.
+add_executable(fluidFieldTests fluid/fluid_field_test.cpp)
+target_link_libraries(fluidFieldTests PRIVATE zonai::zonai)
+add_test(NAME fluidFieldTests COMMAND fluidFieldTests)
+
+
+add_executable(sandboxWindFlowDemoTests sandbox/wind_flow_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
+target_include_directories(sandboxWindFlowDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+target_link_libraries(sandboxWindFlowDemoTests PRIVATE zonai::zonai)
+add_test(NAME sandboxWindFlowDemoTests COMMAND sandboxWindFlowDemoTests)

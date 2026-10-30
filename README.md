@@ -4,6 +4,10 @@ Box2D의 알고리즘과 설계 근거를 이해하며 C++20으로 구현하는 
 
 학습을 위한 변경은 제약의 수학, 좌표계, 데이터 수명과 불변식을 코드·주석·작은 재현 실험으로 연결한다. Box2D 구현을 이해한 뒤 현재 C++ 구조에 필요한 부분을 적용하며, 기능 수나 생산용 기반 구조를 늘리는 것을 우선 목표로 삼지 않는다.
 
+## 바람 / 유체 속도장
+
+2D MAC 격자에 Semi-Lagrangian 이류와 압력 투영을 구현한 독립적인 `fluidField2`를 추가했다. Sandbox의 **유체 / 2D 바람·유체 속도장**에서 흐름을 시각화하고 기존 Dynamic Body에 국소 바람 힘을 전달한다. 현재는 단방향 유체→강체 결합이며 강체 장애물과 양방향 운동량 전달, 자유 수면은 후속 범위다. [수학·한계·검증](docs/fluid-field.md).
+
 ## 빌드와 테스트
 
 CMake 4.2 이상과 C++20 compiler가 필요하다. Windows preset은 Visual Studio 2026의 C++ 도구와 Windows SDK를 사용한다. Sandbox는 Windows의 Win32/Direct3D 11용이며, Dear ImGui는 저장소에 포함돼 있다.
