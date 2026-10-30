@@ -35,7 +35,7 @@ void checkFluidCoupling()
     const vec2 initial = scene.getWorld().GetBodyTransform( first ).position;
 
     // 단방향 coupling이 없으면 유체만 움직이고 Body는 정지해야 함.
-    scene.setWindDragRate( 0.0f );
+    scene.setWindDragCoefficient( 0.0f );
     for( int i = 0; i < 120; ++i ) scene.step( 1.0f / 60.0f, 4 );
     check( near( scene.getWorld().GetBodyTransform( first ).position, initial ),
         "zero drag rate must decouple the wind field from body motion" );
@@ -52,7 +52,7 @@ void checkFluidCoupling()
 
     // 소스가 꺼진 빈 유체는 강체를 가속하지 않아야 함.
     scene.setWindSourceEnabled( false );
-    scene.setWindDragRate( 3.0f );
+    scene.setWindDragCoefficient( 3.0f );
     for( int i = 0; i < 60; ++i ) scene.step( 1.0f / 60.0f, 4 );
     check( near( scene.getWorld().GetBodyTransform( first ).position, initial ),
         "empty field with source disabled must leave bodies at rest" );
@@ -66,7 +66,7 @@ void checkFluidCoupling()
     scene.resetWindFlow();
     check( near( scene.getWorld().GetBodyTransform( first ).position, initial ) &&
         near( scene.getWorld().GetBodyLinearVelocity( first ), {} ) &&
-        scene.getWindSourceStrength() == 25.0f && scene.getWindDragRate() == 3.0f,
+        scene.getWindSourceStrength() == 25.0f && scene.getWindDragCoefficient() == 3.0f,
         "wind reset must restore motion while preserving edited parameters" );
 }
 
