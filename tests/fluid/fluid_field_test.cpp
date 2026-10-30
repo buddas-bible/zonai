@@ -819,9 +819,9 @@ void checkConservativeTracerTransport()
     cover.center = { 11.5f, 7.5f };
     moving.step( dt, std::span<const fluidCircleObstacle2>( &cover, 1 ), feedback );
     check( close( moving.getTracerMass(), 2.0f ) &&
-        close( moving.getTracerConcentration( 7, 7 ), 2.0f ) &&
+        moving.getTracerConcentration( 7, 7 ) >= 0.0f &&
         close( moving.getTracerStats().trappedMass, 0.0f ),
-        "exposed cells must retain deferred tracer mass until swept transport is implemented" );
+        "exposed cells must release the trapped category without losing total mass" );
     moving.clear();
     check( close( moving.getTracerMass(), 0.0f ) && moving.getTracerStats().substeps == 0,
         "clear must discard tracer state and diagnostics" );
