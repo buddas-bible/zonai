@@ -431,7 +431,7 @@ void checkFractionalCutCells()
     // 격자 안쪽에서 회전·이동하는 thin box의 전체 점유 면적은 거의 일정.
     field.clear();
     fluidShapeObstacle2 thinBox{
-        MakeBox( { 1.0f, 0.2f } ), {}, {}, {}, 0.0f
+        MakeBox( { 1.0f, 0.2f } ), { { 0.5f, 0.0f }, {} }, { 0.5f, 0.0f }, {}, 0.0f
     };
     field.step( dt, std::span<const fluidShapeObstacle2>( &thinBox, 1 ), feedback );
     const float initialArea = 64.0f - field.getCutCellTransition().fluidVolume;
