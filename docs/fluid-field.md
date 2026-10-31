@@ -257,6 +257,13 @@ Part 12b는 `sweptU/VVolume`을 이송 **방향의 가중치**로만 사용해, 
 - 기존 `getWindPressureForces()`는 Dynamic 강체 세 개의 진단을 유지한다. 나머지 Static 경계 반력은 `fluidField2`가 내부적으로 계산하지만 현재 Sandbox UI에는 별도 배열로 제공하지 않는다.
 - **검증:** Fluid 1/2/3회와 World 8/3 substep 분리, 기존 결합 압력 사용, Field 재구축 후 옵션과 Static의 유지, 장애물의 점유 갱신 및 삭제, 단방향에서도 Static 유체 경계 유지 등을 GUI 없는 Sandbox 테스트로 검사한다.
 
+## Part 13c — 결합 PCG 수렴 판정과 실패 경로
+
+- `fluidPressureMomentum2::coupledStatus`는 `notRequested`, `converged`, `noBoundary`, `iterationLimit`, `numericalBreakdown`, `invalidPressure` 중 하나다. `coupledIterations`·`coupledIterationLimit`과 초기/최종 RHS 잔차 RMS 및 상대 잔차를 함께 제공한다. 이는 **보정된 연립방정식 `A*p=b`의 잔차**이며 실제 Fluid 발산 RMS나 World/Fluid 전체 에너지 오차가 아니다.
+- PCG의 반복 잔차만 신뢰하지 않고 종료 시 `b-A*p`를 재계산한다. 목표는 상대 제곱 잔차 `1e-10`(상대 노름 `1e-5`) 또는 절대 제곱 `1e-18`이고, 반복 횟수 한도에 도달한 경우 실제 잔차로 수렴 여부를 판정한다. `coupledStatus=converged`인 경우에만 `usedCoupledProjection=true`다.
+- 경계 면 자체가 없다면 `noBoundary`로 기록하고 기존 Jacobi 경로를 사용한다. 하지만 **실제 결합 Solver가 수렴하지 않거나 수치 실패하면** 질량을 무시하는 Jacobi 반력을 Dynamic Body에 주입하지 않도록 그 Step의 압력을 0으로 두고 반력을 생략하며 `coupledSolveFailed=true`로 기록한다. 이는 폭주 위험을 낮추기 위한 **오류 격리 정책**일 뿐, 해당 Step의 비압축성을 만족시키거나 물리적 안정성을 보장하는 해결책이 아니다.
+- Sandbox는 PCG 상태·반복 횟수·실제 잔차를 표시한다. 테스트는 1회 반복으로 강제한 미수렴이 더 이상 성공이 아님을 확인하고, 200회 이내 정상 수렴·경계 없는 Dynamic Body·진단 초기화·120프레임 연성 안정성의 실제 수렴을 검증한다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
