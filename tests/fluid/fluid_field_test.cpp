@@ -484,6 +484,80 @@ void checkCoupledPressureConvergenceDiagnostics()
         "clearing Fluid Field must clear previous PCG diagnostics" );
 }
 
+void checkCoupledPressureBoundaryFaceSynchronization()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    const fluidShapeObstacle2 moving{
+        MakeBox( { 0.8f, 0.3f } ),
+        { { -0.5f, 0.25f }, rot2::FromRadians( 0.37f ) },
+        { -0.5f, 0.25f }, { 1.25f, -0.45f }, 1.7f, 0.6f, 2.3f
+    };
+    constexpr int width = 32, height = 24;
+    constexpr float spacing = 0.25f;
+    constexpr vec2 origin{ -4.0f, -3.0f };
+    std::array<fluidObstacleForce2, 1> feedback{};
+
+    fluidField2 field{ width, height, spacing, origin };
+    field.addVelocity( { -1.75f, 0.65f }, { 1.8f, -0.7f }, 1.0f );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &moving, 1 ), feedback, 200 );
+    const fluidPressureMomentum2& pressure = field.getPressureMomentum();
+    check( pressure.usedCoupledProjection &&
+        pressure.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        !pressure.coupledSolveFailed && pressure.synchronizedBoundaryFaces > 0 &&
+        pressure.boundaryNormalChangeRms > 1.0e-5f,
+        "a moving and rotating coupled box must update its solid MAC faces from pressure impulses" );
+
+    const vec2 predictedLinear = moving.linearVelocity +
+        ( dt * moving.inverseMass ) * feedback[0].force;
+    const float predictedAngular = moving.angularVelocity +
+        dt * moving.inverseInertia * feedback[0].torque;
+    int checkedFaces = 0;
+    const auto checkNormal = [&]( vec2 point, bool horizontal )
+    {
+        const vec2 predicted = predictedLinear +
+            Cross( predictedAngular, point - moving.center );
+        const vec2 stored = field.sampleVelocity( point );
+        const float mismatch = horizontal ? stored.x - predicted.x : stored.y - predicted.y;
+        check( std::abs( mismatch ) < 1.0e-4f,
+            "every coupled fluid-solid MAC face must use pressure-predicted rigid velocity" );
+        ++checkedFaces;
+    };
+
+    for( int y = 0; y < height; ++y )
+        for( int x = 1; x < width; ++x )
+            if( field.isSolidCell( x - 1, y ) != field.isSolidCell( x, y ) )
+                checkNormal( origin + spacing *
+                    vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f }, true );
+    for( int y = 1; y < height; ++y )
+        for( int x = 0; x < width; ++x )
+            if( field.isSolidCell( x, y - 1 ) != field.isSolidCell( x, y ) )
+                checkNormal( origin + spacing *
+                    vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) }, false );
+    check( checkedFaces == pressure.synchronizedBoundaryFaces && checkedFaces > 10,
+        "coupled boundary synchronization must report the actual tested fluid-solid MAC faces" );
+
+    // Non-converged pressure must not apply a speculative correction.
+    fluidField2 limited{ width, height, spacing, origin };
+    limited.addVelocity( { -1.75f, 0.65f }, { 1.8f, -0.7f }, 1.0f );
+    limited.step( dt, std::span<const fluidShapeObstacle2>( &moving, 1 ), feedback, 1 );
+    check( limited.getPressureMomentum().coupledSolveFailed &&
+        limited.getPressureMomentum().synchronizedBoundaryFaces == 0 &&
+        limited.getPressureMomentum().boundaryNormalChangeRms == 0.0f &&
+        LengthSquared( feedback[0].force ) == 0.0f,
+        "failed coupled PCG must not synchronize boundaries with an invalid pressure impulse" );
+    for( int y = 0; y < height; ++y )
+        for( int x = 1; x < width; ++x )
+            if( limited.isSolidCell( x - 1, y ) != limited.isSolidCell( x, y ) )
+            {
+                const vec2 point = origin + spacing *
+                    vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
+                const float expected = ( moving.linearVelocity +
+                    Cross( moving.angularVelocity, point - moving.center ) ).x;
+                check( std::abs( limited.sampleVelocity( point ).x - expected ) < 1.0e-4f,
+                    "failed PCG must preserve the original kinematic no-through boundary velocity" );
+            }
+}
+
 void checkFractionalCutCells()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1134,6 +1208,7 @@ int main()
     checkMovingSolidRemap();
     checkBoundedObstacleRasterAndReusablePressure();
     checkCoupledPressureConvergenceDiagnostics();
+    checkCoupledPressureBoundaryFaceSynchronization();
     checkFractionalCutCells();
     checkWeightedCutCellPressure();
     checkCutCellTemporalContinuity();

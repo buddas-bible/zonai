@@ -264,6 +264,14 @@ Part 12b는 `sweptU/VVolume`을 이송 **방향의 가중치**로만 사용해, 
 - 경계 면 자체가 없다면 `noBoundary`로 기록하고 기존 Jacobi 경로를 사용한다. 하지만 **실제 결합 Solver가 수렴하지 않거나 수치 실패하면** 질량을 무시하는 Jacobi 반력을 Dynamic Body에 주입하지 않도록 그 Step의 압력을 0으로 두고 반력을 생략하며 `coupledSolveFailed=true`로 기록한다. 이는 폭주 위험을 낮추기 위한 **오류 격리 정책**일 뿐, 해당 Step의 비압축성을 만족시키거나 물리적 안정성을 보장하는 해결책이 아니다.
 - Sandbox는 PCG 상태·반복 횟수·실제 잔차를 표시한다. 테스트는 1회 반복으로 강제한 미수렴이 더 이상 성공이 아님을 확인하고, 200회 이내 정상 수렴·경계 없는 Dynamic Body·진단 초기화·120프레임 연성 안정성의 실제 수렴을 검증한다.
 
+## Part 13d — 결합 압력의 MAC 경계 속도 동기화
+
+- PCG 압력 Solver는 내부 fluid-fluid face를 `-dt/rho * grad(p)`로 보정하며, 강체에는 동일 압력의 face traction `F, τ`를 반환한다. 이전 구현은 이후에도 solid에 접한 MAC face에서 **압력 적용 전** 강체 법선 속도를 유지했다.
+- 이번 단계는 **수렴한** 이진 MAC 결합 압력의 traction으로 예상되는 강체 속도 변화 `Δv = dt·inverseMass·F`, `Δω = dt·inverseInertia·τ`를 적용한 `v_surface = v_initial + Δv + (ω_initial + Δω)×(point−COM)`를 solid face에 다시 기록한다. 내부 fluid-fluid face의 투영 결과와 압력 행렬은 바꾸지 않는다. 완전히 solid에 가려진 내부 face도 기존과 마찬가지로 지정되지만 진단 개수에는 fluid-solid 경계 면만 포함한다.
+- `getPressureMomentum().synchronizedBoundaryFaces`와 `boundaryNormalChangeRms`는 **마지막 Fluid Step**에서 압력 반력으로 재설정한 경계 법선 face 개수와 기존 face 속도에서 예측 face 속도로의 평균 변경량(m/s)이다. 이 값은 오류량이나 전체 World–Fluid 운동량·에너지 잔차가 아니다.
+- World에서는 이어서 `World::Step`을 실행한다. **Drag·중력·접촉·Joint·감쇠**와 강체 위치 적분으로 실제 다음 구간 속도와 형상이 달라질 수 있으므로, 그 상태는 다음 Fluid 호출에서 다시 샘플링한다. 단일 Fluid 구간(Fluid 1회/World 8 Substep) 사이에는 여전히 지연이 남는다. 정확한 전 과정 연립 통합으로 간주하지 않는다.
+- 정상 PCG에서는 이동·회전 Polygon의 모든 이진 fluid-solid face의 법선 속도를 독립적으로 검사하고, 실패 PCG에서는 적용 전 경계 속도가 유지되는지 검사한다. Sandbox에서는 Drag/중력/충돌이 없는 단일 Step의 World 속도 증분이 실제 Fluid 압력 반력 `dt·M^-1·F, dt·I^-1·τ`와 맞는지 테스트한다. Cut-cell 경로 및 PCG 실패 경로에는 이번 동기화가 적용되지 않는다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.

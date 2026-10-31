@@ -70,6 +70,10 @@ struct fluidPressureMomentum2
     float coupledInitialResidualRms = 0.0f;
     float coupledFinalResidualRms = 0.0f;
     float coupledRelativeResidual = 0.0f;
+    // 수렴한 압력이 예측한 Body Δv/Δω를 MAC solid 법선 face에 반영한 결과.
+    // 실제 World의 후속 Drag/Contact/Joint Δv는 여기에 포함하지 않는다.
+    int synchronizedBoundaryFaces = 0;
+    float boundaryNormalChangeRms = 0.0f;
 
     [[nodiscard]] vec2 residual() const noexcept { return fluid + solid + wall; }
 };
@@ -317,7 +321,8 @@ private:
     void applyCutCellBoundaries() noexcept;
     void projectCutCell( float timeStep, int pressureIterations,
         std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback );
-    void applySolidBoundaries( std::span<const fluidShapeObstacle2> obstacles );
+    void applySolidBoundaries( std::span<const fluidShapeObstacle2> obstacles,
+        std::span<const fluidObstacleForce2> pressureFeedback = {}, float timeStep = 0.0f );
     [[nodiscard]] bool solveCoupledPressure( float timeStep, int iterations,
         std::span<const fluidShapeObstacle2> obstacles );
     void project( float timeStep, int pressureIterations, std::span<const fluidShapeObstacle2> obstacles,
