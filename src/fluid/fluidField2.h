@@ -159,6 +159,12 @@ struct fluidCutCellPressure2
     int activeCells = 0;
     int connectedRegions = 0;
     bool hasVolumeHistory = false;
+    // 선택적 Body 질량 결합 PCG는 이진 MAC 장부와 별도 상태로 보고한다.
+    bool usedCoupledProjection = false;
+    bool coupledSolveFailed = false;
+    fluidCoupledPressureStatus2 coupledStatus = fluidCoupledPressureStatus2::notRequested;
+    int coupledIterations = 0;
+    float coupledRelativeResidual = 0.0f;
 };
 
 // 연속한 Shape 변환 사이의 내부 MAC 면을 통과한 Solid 속도를 시간 적분한 근사.
@@ -233,6 +239,11 @@ public:
     // 정확한 swept-volume 경로/보존형 이류는 아직 구현하지 않음.
     void setCutCellProjectionEnabled( bool enabled ) noexcept { cutCellProjectionEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellProjectionEnabled() const noexcept { return cutCellProjectionEnabled_; }
+
+    // 실험적 Cut-cell/Body 유효질량 연립 PCG. 기본 OFF로 기존 Jacobi 경로 보존.
+    // 수렴한 경우에만 Body 압력 반력을 돌려주며, 실패 시 해당 압력을 생략한다.
+    void setCutCellCoupledProjectionEnabled( bool enabled ) noexcept { cutCellCoupledProjectionEnabled_ = enabled; }
+    [[nodiscard]] bool isCutCellCoupledProjectionEnabled() const noexcept { return cutCellCoupledProjectionEnabled_; }
 
     // 이동 중인 solid의 공유 MAC 면 swept volume을 주변 cell의 기하 ΔV와
     // 국소적으로 맞추는 실험 경로. 부호가 반대인 인접 잔차만 상쇄한다.
@@ -343,7 +354,7 @@ private:
     void applySolidBoundaries( std::span<const fluidShapeObstacle2> obstacles,
         std::span<const fluidObstacleForce2> pressureFeedback = {}, float timeStep = 0.0f );
     [[nodiscard]] bool solveCoupledPressure( float timeStep, int iterations,
-        std::span<const fluidShapeObstacle2> obstacles );
+        std::span<const fluidShapeObstacle2> obstacles, bool cutCell = false );
     void project( float timeStep, int pressureIterations, std::span<const fluidShapeObstacle2> obstacles,
         std::span<fluidObstacleForce2> feedback );
 #pragma endregion Helpers
@@ -421,6 +432,7 @@ private:
     bool sweptTracerRemapEnabled_ = false;
     bool sweptGeometryCorrectionEnabled_ = false;
     bool cutCellProjectionEnabled_ = false;
+    bool cutCellCoupledProjectionEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
     bool volumeSourceValid_ = false;
