@@ -577,9 +577,11 @@ void checkExperimentalCutCellWorldCoupling()
         IsFinite( scene.getWorld().GetBodyLinearVelocity( moving ) ),
         "next cut-cell fluid interval must use the actual World geometry swept history without reapplying predicted displacement" );
 
+    scene.setWindAdaptiveSweptSamplingEnabled( true );
     scene.configureWindField( 32, 18, 0.5f );
     check( scene.isWindCutCellProjectionEnabled() &&
         scene.isWindCutCellCoupledProjectionEnabled() &&
+        scene.isWindAdaptiveSweptSamplingEnabled() &&
         scene.getWindField()->getCutCellPressure().activeCells == 0,
         "field resize must keep explicit experimental coupling while resetting old geometry history" );
 
