@@ -848,6 +848,96 @@ void checkCutCellCoupledPressure()
         "clear must retain the opted-in solver choice but reset coupled diagnostics" );
 }
 
+void checkCutCellPredictedBoundarySynchronization()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr float radius = 0.87f;
+    constexpr float h = 0.5f;
+    constexpr vec2 origin{ -6.0f, -4.0f };
+    const fluidShapeObstacle2 moving{ circle2{ {}, radius },
+        { { 0.18f, -0.12f }, {} }, { 0.18f, -0.12f },
+        { 0.9f, -0.4f }, 1.7f, 0.7f, 2.0f };
+    std::array<fluidObstacleForce2, 1> feedback{};
+    fluidField2 field{ 24, 16, h, origin };
+    field.setCutCellProjectionEnabled( true );
+    field.setCutCellCoupledProjectionEnabled( true );
+    field.addVelocity( { -1.2f, 0.05f }, { 1.2f, -0.1f }, 1.5f );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &moving, 1 ), feedback, 200 );
+    const fluidCutCellPressure2& stats = field.getCutCellPressure();
+    check( stats.usedCoupledProjection && !stats.coupledSolveFailed &&
+        LengthSquared( feedback[0].force ) > 1.0e-8f &&
+        stats.synchronizedBoundaryFaces > stats.synchronizedPartialFaces &&
+        stats.synchronizedPartialFaces > 0 && stats.boundaryNormalChangeRms > 1.0e-6f,
+        "coupled cut-cell pressure must synchronize fully blocked and partially blocked faces" );
+
+    const vec2 linear = moving.linearVelocity + ( dt * moving.inverseMass ) * feedback[0].force;
+    const float angular = moving.angularVelocity + dt * moving.inverseInertia * feedback[0].torque;
+    int checkedFaces = 0;
+    int partialFaces = 0;
+    const auto checkFace = [&]( int x, int y, bool uFace )
+    {
+        const float open = uFace ? field.getUFaceOpenFraction( x, y ) :
+            field.getVFaceOpenFraction( x, y );
+        if( open >= 1.0f ) return;
+        float sum = 0.0f;
+        int blocked = 0;
+        const vec2 facePoint = origin + h * ( uFace
+            ? vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f }
+            : vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) } );
+        for( int i = 0; i < 4; ++i )
+        {
+            const float shift = ( i + 0.5f ) * 0.25f - 0.5f;
+            const vec2 point = facePoint + h * ( uFace ? vec2{ 0.0f, shift } : vec2{ shift, 0.0f } );
+            if( LengthSquared( point - moving.center ) > radius * radius ) continue;
+            const vec2 expected = linear + Cross( angular, point - moving.center );
+            sum += uFace ? expected.x : expected.y;
+            ++blocked;
+        }
+        if( blocked == 0 ) return;
+        const float expected = sum / blocked;
+        const float recorded = uFace ? field.getUFaceSolidVelocity( x, y ) :
+            field.getVFaceSolidVelocity( x, y );
+        check( std::abs( recorded - expected ) < 1.0e-4f,
+            "cut-cell solid normal velocity must match the pressure-predicted rigid surface speed" );
+        if( open == 0.0f )
+        {
+            const vec2 storedFace = field.sampleVelocity( facePoint );
+            const float actual = uFace ? storedFace.x : storedFace.y;
+            check( std::abs( actual - expected ) < 1.0e-4f,
+                "fully blocked MAC faces must use the synchronized solid normal velocity" );
+        }
+        else ++partialFaces;
+        ++checkedFaces;
+    };
+    for( int y = 0; y < field.getHeight(); ++y )
+        for( int x = 1; x < field.getWidth(); ++x ) checkFace( x, y, true );
+    for( int y = 1; y < field.getHeight(); ++y )
+        for( int x = 0; x < field.getWidth(); ++x ) checkFace( x, y, false );
+    check( checkedFaces == stats.synchronizedBoundaryFaces &&
+        partialFaces == stats.synchronizedPartialFaces &&
+        field.getUFaceSolidVelocity( -1, 0 ) == 0.0f &&
+        field.getVFaceSolidVelocity( 0, field.getHeight() ) == 0.0f,
+        "synchronization diagnostics must report exactly the sampled blocked faces" );
+
+    field.clear();
+    check( field.getCutCellPressure().synchronizedBoundaryFaces == 0 &&
+        field.getCutCellPressure().boundaryNormalChangeRms == 0.0f &&
+        field.getUFaceSolidVelocity( field.getWidth() / 2, 3 ) == 0.0f,
+        "clearing fluid must reset cut-cell boundary synchronization state" );
+
+    // A failed coupled solve must keep the original supplied kinematic boundary.
+    fluidField2 failed{ 24, 16, h, origin };
+    failed.setCutCellProjectionEnabled( true );
+    failed.setCutCellCoupledProjectionEnabled( true );
+    failed.addVelocity( { -1.2f, 0.05f }, { 1.2f, -0.1f }, 1.5f );
+    failed.step( dt, std::span<const fluidShapeObstacle2>( &moving, 1 ), feedback, 1 );
+    check( failed.getCutCellPressure().coupledSolveFailed &&
+        failed.getCutCellPressure().synchronizedBoundaryFaces == 0 &&
+        failed.getCutCellPressure().boundaryNormalChangeRms == 0.0f &&
+        LengthSquared( feedback[0].force ) == 0.0f,
+        "failed cut-cell PCG must not apply any predicted boundary velocity" );
+}
+
 void checkCutCellTemporalContinuity()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1354,6 +1444,7 @@ int main()
     checkFractionalCutCells();
     checkWeightedCutCellPressure();
     checkCutCellCoupledPressure();
+    checkCutCellPredictedBoundarySynchronization();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkConservativeMacAdvection();
