@@ -938,6 +938,60 @@ void checkCutCellPredictedBoundarySynchronization()
         "failed cut-cell PCG must not apply any predicted boundary velocity" );
 }
 
+void checkCoupledCutCellAdjointContinuity()
+{
+    constexpr std::array<float, 2> CELL_SIZES{ 0.5f, 0.25f };
+    constexpr std::array<float, 3> MASSES{ 0.5f, 2.0f, 12.0f };
+    constexpr std::array<float, 3> INERTIAS{ 0.12f, 0.8f, 4.0f };
+    constexpr std::array<float, 2> TIME_STEPS{ 1.0f / 60.0f, 1.0f / 120.0f };
+
+    // 동일한 12x8m 영역에서 질량·관성·격자·dt를 바꿔가며,
+    // PCG Schur 잔차와 실제 pressure-predicted blocked flux의 연속성 잔차를 대조.
+    for( float h : CELL_SIZES )
+        for( std::size_t i = 0; i < MASSES.size(); ++i )
+            for( float dt : TIME_STEPS )
+            {
+                fluidField2 field{ static_cast<int>( 12.0f / h ),
+                    static_cast<int>( 8.0f / h ), h, { -6.0f, -4.0f } };
+                field.setCutCellProjectionEnabled( true );
+                field.setCutCellCoupledProjectionEnabled( true );
+                fluidShapeObstacle2 obstacle{
+                    MakeBox( { 0.73f, 0.31f } ),
+                    { { 0.13f, -0.17f }, rot2::FromRadians( 0.31f ) },
+                    { 0.13f, -0.17f }, { 1.0f, -0.5f }, 1.2f,
+                    1.0f / MASSES[i], 1.0f / INERTIAS[i]
+                };
+                std::array<fluidObstacleForce2, 1> forces{};
+                field.addVelocity( { -1.1f, 0.25f }, { 1.3f, -0.4f }, 1.4f );
+                field.step( dt, std::span<const fluidShapeObstacle2>( &obstacle, 1 ), forces, 200 );
+
+                const fluidCutCellPressure2& stats = field.getCutCellPressure();
+                check( stats.usedCoupledProjection && !stats.coupledSolveFailed &&
+                    stats.coupledStatus == fluidCoupledPressureStatus2::converged &&
+                    std::isfinite( stats.predictedContinuityRms ) &&
+                    std::isfinite( stats.predictedSolidVolumeL1 ) &&
+                    stats.synchronizedPartialFaces > 0 && stats.predictedSolidVolumeL1 > 0.0f,
+                    "weighted sub-face coupling must converge and predict nonzero boundary swept volume" );
+                // Adjoint pair의 실제 고체 velocity flux와 PCG A*p-b가 같은
+                // 보정된 연속방정식을 측정해야 한다. 반올림 오차는 허용한다.
+                const float tolerance = 2.0e-3f + 0.1f * stats.pressureResidual;
+                check( std::abs( stats.predictedContinuityRms - stats.pressureResidual ) < tolerance &&
+                    stats.predictedContinuityRms < 0.05f * stats.divergenceBefore + 2.0e-3f,
+                    "pressure reaction and blocked-face fluid volume flux must satisfy the same continuity equation" );
+            }
+
+    // 기존 고정 경계/실패 모드에는 예측 swept volume을 덧씌우지 않는다.
+    fluidField2 legacy{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    legacy.setCutCellProjectionEnabled( true );
+    fluidShapeObstacle2 fixed{ circle2{ {}, 0.8f },
+        { { 0.0f, 0.0f }, {} }, {}, { 0.9f, 0.0f }, 0.0f };
+    std::array<fluidObstacleForce2, 1> force{};
+    legacy.step( 1.0f / 60.0f, std::span<const fluidShapeObstacle2>( &fixed, 1 ), force, 100 );
+    check( legacy.getCutCellPressure().predictedContinuityRms == 0.0f &&
+        legacy.getCutCellPressure().predictedSolidVolumeL1 == 0.0f,
+        "legacy cut-cell pressure must not pretend to predict coupled volume response" );
+}
+
 void checkCutCellTemporalContinuity()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1445,6 +1499,7 @@ int main()
     checkWeightedCutCellPressure();
     checkCutCellCoupledPressure();
     checkCutCellPredictedBoundarySynchronization();
+    checkCoupledCutCellAdjointContinuity();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkConservativeMacAdvection();
