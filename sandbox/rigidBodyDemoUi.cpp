@@ -964,6 +964,10 @@ void rigidBodyDemoUi::drawExperimentControls()
         bool correction = isWindSweptGeometryCorrectionEnabled();
         if( ImGui::Checkbox( "Swept 면 기하 오차 국소 보정 (실험)###WindSweptGeometryCorrection", &correction ) )
             setWindSweptGeometryCorrectionEnabled( correction );
+        bool adaptiveSwept = isWindAdaptiveSweptSamplingEnabled();
+        if( ImGui::Checkbox( "Swept 시간 표본 자동 세분화 (실험)###WindAdaptiveSwept", &adaptiveSwept ) )
+            setWindAdaptiveSweptSamplingEnabled( adaptiveSwept );
+        ImGui::TextDisabled( "실제 점유 체적과 불일치가 감소할 때만 더 많은 시간 표본을 채택합니다." );
 
         float drag = getWindDragCoefficient();
         if( ImGui::SliderFloat( "강체 바람 저항 계수###WindBodyDrag", &drag, 0.0f, 15.0f, "%.1f N·s/m" ) )
@@ -1061,6 +1065,10 @@ void rigidBodyDemoUi::drawExperimentControls()
                 const fluidSweptFaceFlux2& swept = field->getSweptFaceFlux();
                 ImGui::Text( "Solid 시간 적분: %s / 구간 %d",
                     swept.usedSweptFlux ? "Swept face flux" : "Snapshot 변화", swept.timeSamples );
+                if( field->isAdaptiveSweptSamplingEnabled() && swept.initialTimeSamples > 0 )
+                    ImGui::Text( "Swept 시간 적응: %d -> %d 표본, 채택 %d회 / 초기 기하 오차 %.5f m³",
+                        swept.initialTimeSamples, swept.timeSamples,
+                        swept.refinements, swept.initialGeometryMismatch );
                 ImGui::Text( "통과한 MAC 면 체적 절댓값 합: %.5f m³", swept.totalAbsoluteFlux );
                 ImGui::Text( "Swept 체적 오차 L1 보정 전/후: %.5f / %.5f m³",
                     swept.rawGeometryMismatch, swept.geometryMismatch );
