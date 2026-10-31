@@ -234,9 +234,14 @@ void checkSynchronizedWindCoupling()
             std::isfinite( scene.getWindPressureForces()[0].torque ),
             "synchronized moving obstacle must keep finite velocity and pressure feedback over 120 frames" );
         maxSpeed = std::max( maxSpeed, Length( velocity ) );
+        if( maxSpeed >= 20.0f )
+        {
+            const vec2 pressure = scene.getWindPressureForces()[0].force;
+            std::fprintf( stderr, "wind coupled instability: frame=%d speed=%.5f body=(%.5f,%.5f) pressure=(%.5f,%.5f)\n",
+                i, maxSpeed, velocity.x, velocity.y, pressure.x, pressure.y );
+            check( false, "synchronized pressure feedback must not accelerate a released body without wind source or drag without bound" );
+        }
     }
-    check( maxSpeed < 20.0f,
-        "synchronized pressure feedback must not accelerate a released body without wind source or drag without bound" );
 }
 
 void checkPressureLedgerInSandbox()
