@@ -41,6 +41,17 @@ struct fluidObstacleForce2
     float torque = 0.0f;
 };
 
+// PCG 압력 해의 종료 원인. noBoundary는 결합할 Fluid-Solid 면이 없어 일반 압력 투영 사용.
+enum class fluidCoupledPressureStatus2
+{
+    notRequested,
+    converged,
+    noBoundary,
+    iterationLimit,
+    numericalBreakdown,
+    invalidPressure
+};
+
 // Pressure projection 한 번의 운동량 수지. 모든 값은 N·s.
 // fluid: 유체-유체 MAC face 속도 보정량의 운동량 변화.
 // solid: 유체 압력으로 강체에 가해진 충격량. wall: 외곽 닫힌 벽에 가해진 충격량.
@@ -52,6 +63,13 @@ struct fluidPressureMomentum2
     vec2 wall{};
     bool usedCoupledProjection = false;
     bool coupledSolveFailed = false;
+    fluidCoupledPressureStatus2 coupledStatus = fluidCoupledPressureStatus2::notRequested;
+    int coupledIterations = 0;
+    int coupledIterationLimit = 0;
+    // 압력 연립식 A*p=b의 보정된 RHS 기준 RMS, 상대 잔차. Fluid 발산 RMS와는 별개.
+    float coupledInitialResidualRms = 0.0f;
+    float coupledFinalResidualRms = 0.0f;
+    float coupledRelativeResidual = 0.0f;
 
     [[nodiscard]] vec2 residual() const noexcept { return fluid + solid + wall; }
 };
