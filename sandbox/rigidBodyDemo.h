@@ -285,7 +285,12 @@ public:
         return windField_ && windField_->isAnalyticCircleCutCellEnabled();
     }
     // 단일 Circle 분석 경로를 Sandbox에서 테스트할 때 나머지 Shape의 유체 점유만 제외.
-    void setWindCircleOnlyFluidEnabled( bool enabled ) noexcept { windCircleOnlyFluidEnabled_ = enabled; }
+    void setWindCircleOnlyFluidEnabled( bool enabled ) noexcept
+    {
+        if( windCircleOnlyFluidEnabled_ == enabled ) return;
+        windCircleOnlyFluidEnabled_ = enabled;
+        if( windField_ ) windField_->invalidateObstacleHistory();
+    }
     [[nodiscard]] bool isWindCircleOnlyFluidEnabled() const noexcept { return windCircleOnlyFluidEnabled_; }
     [[nodiscard]] int getWindCutCellSampleCount() const noexcept
     {
