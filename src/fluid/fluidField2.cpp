@@ -112,6 +112,99 @@ double FluidObstacleBoundRadius( const fluidShapeObstacle2& obstacle )
         ? radius : std::numeric_limits<double>::infinity();
 }
 
+// 단일 원형 장애물에만 사용하는 분석적 Cut-cell 경계 클리핑.
+// 다중 장애물의 겹침/우선순위는 기존 공통 공간 표본 경로로 유지한다.
+struct analyticFluidCircle
+{
+    vec2 center{};
+    double radius = 0.0;
+};
+
+bool TryGetAnalyticCircle( std::span<const fluidShapeObstacle2> obstacles, analyticFluidCircle& result )
+{
+    if( obstacles.size() != 1 || !IsValidFluidObstacle( obstacles.front() ) ) return false;
+    const auto* circle = std::get_if<circle2>( &obstacles.front().geometry );
+    if( !circle || !std::isfinite( circle->radius ) || circle->radius <= 0.0f ) return false;
+    const vec2 center = TransformPoint( obstacles.front().transform, circle->center );
+    if( !IsFinite( center ) ) return false;
+    result = { center, circle->radius };
+    return true;
+}
+
+struct analyticCircleInterval
+{
+    double length = 0.0;
+    double midpoint = 0.0;
+};
+
+// 월드 축에 평행한 MAC face와 원의 교차 구간 [min,max]를 정확히 잘라냄.
+analyticCircleInterval ClipCircleFace( const analyticFluidCircle& circle,
+    bool vertical, double coordinate, double low, double high )
+{
+    const double normal = vertical ? circle.center.x : circle.center.y;
+    const double tangent = vertical ? circle.center.y : circle.center.x;
+    const double distance = coordinate - normal;
+    if( std::abs( distance ) >= circle.radius ) return {};
+    const double extent = std::sqrt( std::max( 0.0,
+        circle.radius * circle.radius - distance * distance ) );
+    const double left = std::max( low, tangent - extent );
+    const double right = std::min( high, tangent + extent );
+    if( right <= left ) return {};
+    return { right - left, 0.5 * ( left + right ) };
+}
+
+// 원의 가로 단면 높이를 구간별로 적분한다. 셀의 상·하단이 원과 만나는
+// x 위치에서 분할하면 단면은 상수 + k*sqrt(r²-x²), k=0,1,2가 된다.
+double CircleRectangleArea( const analyticFluidCircle& circle,
+    double x0, double y0, double x1, double y1 )
+{
+    const double r = circle.radius;
+    const double left = std::max( x0, static_cast<double>( circle.center.x ) - r );
+    const double right = std::min( x1, static_cast<double>( circle.center.x ) + r );
+    if( right <= left ) return 0.0;
+
+    std::array<double, 6> cuts{};
+    int count = 0;
+    cuts[count++] = left;
+    cuts[count++] = right;
+    for( const double y : { y0, y1 } )
+    {
+        const double dy = y - circle.center.y;
+        if( std::abs( dy ) >= r ) continue;
+        const double offset = std::sqrt( r * r - dy * dy );
+        for( const double x : { static_cast<double>( circle.center.x ) - offset,
+                                static_cast<double>( circle.center.x ) + offset } )
+            if( x > left && x < right ) cuts[count++] = x;
+    }
+    std::sort( cuts.begin(), cuts.begin() + count );
+
+    const auto primitive = [&]( double x )
+    {
+        const double t = std::clamp( x - circle.center.x, -r, r );
+        return 0.5 * ( t * std::sqrt( std::max( 0.0, r * r - t * t ) ) +
+            r * r * std::asin( std::clamp( t / r, -1.0, 1.0 ) ) );
+    };
+    double area = 0.0;
+    for( int i = 1; i < count; ++i )
+    {
+        const double a = cuts[i - 1];
+        const double b = cuts[i];
+        if( b <= a ) continue;
+        const double mid = 0.5 * ( a + b ) - circle.center.x;
+        const double halfHeight = std::sqrt( std::max( 0.0, r * r - mid * mid ) );
+        const double circleTop = circle.center.y + halfHeight;
+        const double circleBottom = circle.center.y - halfHeight;
+        if( circleTop <= y0 || circleBottom >= y1 ) continue;
+        const bool freeTop = circleTop <= y1;
+        const bool freeBottom = circleBottom >= y0;
+        const double constant = ( freeTop ? circle.center.y : y1 ) -
+            ( freeBottom ? circle.center.y : y0 );
+        const double sqrtScale = static_cast<int>( freeTop ) + static_cast<int>( freeBottom );
+        area += constant * ( b - a ) + sqrtScale * ( primitive( b ) - primitive( a ) );
+    }
+    return std::clamp( area, 0.0, ( x1 - x0 ) * ( y1 - y0 ) );
+}
+
 } // namespace
 
 fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
