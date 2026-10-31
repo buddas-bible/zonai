@@ -259,6 +259,11 @@ public:
     // 표본 해상도 차이를 실제 물체 이동으로 계산하지 않는다.
     void setCutCellSampleCount( int count ) noexcept;
     [[nodiscard]] int getCutCellSampleCount() const noexcept { return cutCellSampleCount_; }
+    // 선택형 단일 Circle 전용 분석적 셀 면적/공유 MAC 면 클리핑.
+    // 다중 장애물, Capsule, Polygon은 기존 공간 표본 경로를 유지한다.
+    // 모드 변경 시 이산 점유율 차이를 swept 이동으로 오해하지 않도록 이력 초기화.
+    void setAnalyticCircleCutCellEnabled( bool enabled ) noexcept;
+    [[nodiscard]] bool isAnalyticCircleCutCellEnabled() const noexcept { return analyticCircleCutCellEnabled_; }
 
     // 실험적 Cut-cell/Body 유효질량 연립 PCG. 기본 OFF로 기존 Jacobi 경로 보존.
     // 수렴한 경우에만 Body 압력 반력을 돌려주며, 실패 시 해당 압력을 생략한다.
@@ -466,6 +471,7 @@ private:
     bool sweptGeometryCorrectionEnabled_ = false;
     bool adaptiveSweptSamplingEnabled_ = false;
     int cutCellSampleCount_ = 4;
+    bool analyticCircleCutCellEnabled_ = false;
     bool cutCellProjectionEnabled_ = false;
     bool cutCellCoupledProjectionEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
