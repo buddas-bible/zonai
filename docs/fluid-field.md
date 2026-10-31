@@ -272,6 +272,14 @@ Part 12b는 `sweptU/VVolume`을 이송 **방향의 가중치**로만 사용해, 
 - World에서는 이어서 `World::Step`을 실행한다. **Drag·중력·접촉·Joint·감쇠**와 강체 위치 적분으로 실제 다음 구간 속도와 형상이 달라질 수 있으므로, 그 상태는 다음 Fluid 호출에서 다시 샘플링한다. 단일 Fluid 구간(Fluid 1회/World 8 Substep) 사이에는 여전히 지연이 남는다. 정확한 전 과정 연립 통합으로 간주하지 않는다.
 - 정상 PCG에서는 이동·회전 Polygon의 모든 이진 fluid-solid face의 법선 속도를 독립적으로 검사하고, 실패 PCG에서는 적용 전 경계 속도가 유지되는지 검사한다. Sandbox에서는 Drag/중력/충돌이 없는 단일 Step의 World 속도 증분이 실제 Fluid 압력 반력 `dt·M^-1·F, dt·I^-1·τ`와 맞는지 테스트한다. Cut-cell 경로 및 PCG 실패 경로에는 이번 동기화가 적용되지 않는다.
 
+## Part 13e — 유체·강체 압력 단계의 운동 에너지/운동량 정량 감사
+
+- `getFluidKineticEnergy()`는 이진 MAC에서 유체 셀 두 개 사이에 있는 U/V face에 각각 유효 질량 `h² kg`을 부여해 `0.5*h²*(sum(u²)+sum(v²))`를 합한 **부분 운동 에너지(J)**다. 고체에 인접한 MAC face, 외벽, 완전한 moving cut-cell dual volume은 제외한다. 앞서 사용한 `getFluidMomentum()`과 동일한 face 선택으로 비교할 수 있다.
+- `fluidPressureMomentum2::energy`는 **압력 투영 직전과 직후**의 자유 face 에너지 및 입력 `fluidShapeObstacle2`의 역질량/역관성과 압력 반력 `F, τ`로 예측한 강체 운동 에너지를 구분한다. 압력으로 예측한 `v' = v + dt * invMass * F`, `ω' = ω + dt * invInertia * τ`를 사용한다. 정적 장애물 및 역질량 0의 운동학적 강체는 강체 운동 에너지 장부에서 제외한다. 압력 해 실패 시에는 해당 Step의 반력이 0이므로 강체 예측 에너지는 바뀌지 않는다.
+- **중요:** `energy.totalDelta()`는 *부분 장부의 압력 단계 에너지 변화*이지 **전체 유체–강체 시스템의 총 에너지 보존 증명**이 아니다. 이류·변형 경계에서 바뀐 유체 자유 face 선택, Drag, 외부 source, 벽으로 전달된 일, missing interface dual volumes를 포함하지 않는다. 양수 변화만으로 에너지가 생성됐다고 단정해서는 안 된다.
+- GUI 없이 **3개 질량(0.25/2/12kg)·3개 회전 관성(0.08/1/8kg·m²) 중 대응한 3쌍·2개 해상도(h=0.5/0.25m)**를 36회 연속 압력 교환하며 자유 MAC face 에너지, 압력 예상 강체 에너지, discrete fluid+solid+wall 운동량 잔차, 최대/마지막 에너지와 양의 압력 단계 에너지 변화 누적량을 검증·출력한다. 이 실험은 geometry를 고정한 solver-only 시나리오로 swept solid 체적 보존의 증명은 아니다.
+- Sandbox에서는 wind source/Drag/gravity 없는 World8/Fluid1의 60프레임 실제 강체 이동·회전을 반복하고 강체/Fluid 부분 운동 에너지를 검사한다. World 자체 속도에서 독립적으로 계산한 강체 운동 에너지가 Fluid의 압력 예측값과 일치하는지도 별도 검증한다. 현 단계의 폭주 안전성 회귀는 **느슨한 상한**이며, 이를 전체 에너지 보존의 성립으로 해석하지 않는다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
