@@ -304,6 +304,13 @@ void checkFluidRateAndStaticObstacles()
         scene.getWindField()->isSolidCell( 15, 5 ) &&
         near( world.GetBodyTransform( fixedBody ).position, fixedPosition ),
         "both static box and circle must block fluid and remain unmoved" );
+    scene.setWindObstacleCouplingEnabled( false );
+    scene.step( dt, 8 );
+    check( scene.getWindField()->isSolidCell( 6, 7 ) &&
+        scene.getWindField()->isSolidCell( 15, 5 ) &&
+        scene.getWindField()->getSolidCellCount() > 0,
+        "static walls must remain fluid barriers when dynamic bidirectional coupling is disabled" );
+    scene.setWindObstacleCouplingEnabled( true );
 
     scene.setWindConservativeAdvectionEnabled( true );
     scene.setWindFluidSubstepCount( 2 );
