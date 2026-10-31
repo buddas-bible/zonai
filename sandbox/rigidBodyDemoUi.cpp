@@ -1024,6 +1024,9 @@ void rigidBodyDemoUi::drawExperimentControls()
             const vec2 momentum = field->getFluidMomentum();
             ImGui::Text( "유체 내부 face 운동량: (%.4f, %.4f) N·s", momentum.x, momentum.y );
             const fluidPressureMomentum2& pressure = field->getPressureMomentum();
+            ImGui::Text( "동적 강체 결합 압력: %s",
+                pressure.usedCoupledProjection ? "PCG Schur" :
+                pressure.coupledSolveFailed ? "실패 - 기존 Jacobi fallback" : "기존 압력 경로" );
             const fluidStepMomentum2& stages = field->getStepMomentum();
             if( !field->isCutCellProjectionEnabled() )
             {
