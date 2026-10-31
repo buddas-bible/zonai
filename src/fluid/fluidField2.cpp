@@ -142,6 +142,8 @@ fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
     vOpenFraction_.assign( v_.size(), 1.0f );
     uSolidVelocity_.assign( u_.size(), 0.0f );
     vSolidVelocity_.assign( v_.size(), 0.0f );
+    pressureUSolidFlux_.assign( u_.size(), 0.0f );
+    pressureVSolidFlux_.assign( v_.size(), 0.0f );
     cutCellVolumeRate_.assign( pressure_.size(), 0.0f );
     sweptUVolume_.assign( u_.size(), 0.0f );
     sweptVVolume_.assign( v_.size(), 0.0f );
@@ -182,6 +184,8 @@ void fluidField2::clear() noexcept
     std::fill( previousCellFluidFraction_.begin(), previousCellFluidFraction_.end(), 1.0f );
     std::fill( uSolidVelocity_.begin(), uSolidVelocity_.end(), 0.0f );
     std::fill( vSolidVelocity_.begin(), vSolidVelocity_.end(), 0.0f );
+    std::fill( pressureUSolidFlux_.begin(), pressureUSolidFlux_.end(), 0.0f );
+    std::fill( pressureVSolidFlux_.begin(), pressureVSolidFlux_.end(), 0.0f );
     std::fill( cutCellVolumeRate_.begin(), cutCellVolumeRate_.end(), 0.0f );
     std::fill( sweptUVolume_.begin(), sweptUVolume_.end(), 0.0f );
     std::fill( sweptVVolume_.begin(), sweptVVolume_.end(), 0.0f );
@@ -1307,6 +1311,8 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
         vec2 linear{};
         float angular = 0.0f;
     };
+    std::fill( pressureUSolidFlux_.begin(), pressureUSolidFlux_.end(), 0.0f );
+    std::fill( pressureVSolidFlux_.begin(), pressureVSolidFlux_.end(), 0.0f );
     std::vector<predictedBody> predicted( obstacles.size() );
     std::vector<double> bounds( obstacles.size(), -1.0 );
     for( std::size_t i = 0; i < obstacles.size(); ++i )
@@ -1353,6 +1359,7 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
             const float next = sum / blocked;
             const double change = static_cast<double>( next ) - uSolidVelocity_[face];
             changedSquared += change * change;
+            pressureUSolidFlux_[face] = ( 1.0f - uOpenFraction_[face] ) * static_cast<float>( change );
             uSolidVelocity_[face] = next;
             ++boundaryFaces;
             if( uOpenFraction_[face] > 0.0f ) ++partialFaces;
@@ -1379,6 +1386,7 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
             const float next = sum / blocked;
             const double change = static_cast<double>( next ) - vSolidVelocity_[face];
             changedSquared += change * change;
+            pressureVSolidFlux_[face] = ( 1.0f - vOpenFraction_[face] ) * static_cast<float>( change );
             vSolidVelocity_[face] = next;
             ++boundaryFaces;
             if( vOpenFraction_[face] > 0.0f ) ++partialFaces;
@@ -1857,6 +1865,36 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
             force.torque += static_cast<float>( p * face.torque );
         }
         synchronizeCutCellBoundaries( timeStep, obstacles, feedback );
+
+        // 동일 sub-face 교환의 선형화된 volume source Δ(f)/dt를 추가한다.
+        // 마지막 geometry snapshot 자체를 변경하지 않으므로 다음 Step의
+        // swept volume·tracer mass와 이 예측 증분을 이중 적용하지 않는다.
+        double squaredContinuity = 0.0;
+        double volumeL1 = 0.0;
+        const double area = static_cast<double>( cellSize_ ) * cellSize_;
+        for( int y = 0; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+            {
+                const int cell = cellIndex( x, y );
+                if( cellFluidFraction_[cell] <= 0.0f ) continue;
+                const float fluidFlux =
+                    cutCellUOpen( x + 1, y ) * u_[uIndex( x + 1, y )] -
+                    cutCellUOpen( x, y ) * u_[uIndex( x, y )] +
+                    cutCellVOpen( x, y + 1 ) * v_[vIndex( x, y + 1 )] -
+                    cutCellVOpen( x, y ) * v_[vIndex( x, y )];
+                const float solidFlux =
+                    pressureUSolidFlux_[uIndex( x + 1, y )] - pressureUSolidFlux_[uIndex( x, y )] +
+                    pressureVSolidFlux_[vIndex( x, y + 1 )] - pressureVSolidFlux_[vIndex( x, y )];
+                const int region = cutCellComponent_[cell];
+                const double mean = region >= 0 ? regionSums[region] / regionSizes[region] : 0.0;
+                const double error = static_cast<double>( fluidFlux + solidFlux ) / cellSize_ +
+                    static_cast<double>( cutCellVolumeRate_[cell] ) / timeStep - mean;
+                squaredContinuity += error * error;
+                volumeL1 += std::abs( static_cast<double>( solidFlux ) ) * cellSize_ * timeStep;
+            }
+        cutCellPressure_.predictedContinuityRms = cutCellPressure_.activeCells > 0
+            ? static_cast<float>( std::sqrt( squaredContinuity / cutCellPressure_.activeCells ) ) : 0.0f;
+        cutCellPressure_.predictedSolidVolumeL1 = static_cast<float>( volumeL1 );
         return;
     }
 
