@@ -241,7 +241,7 @@ Part 12b는 `sweptU/VVolume`을 이송 **방향의 가중치**로만 사용해, 
 - 동기화 모드의 `getWindPressureForces()`는 **외부 Step 동안 적분한 압력 충격량을 원래 `dt`로 나눈 평균 힘·평균 토크**를 나타낸다. `getWindDragBodyImpulse()`와 `getWindDragFluidImpulse()`는 하위 Step 충격량의 **합**을 유지한다.
 - `fluidField2::getPressureMomentum()`과 `getCutCellPressure()`는 **마지막 Fluid 하위 Step**의 진단값이므로, 외부 Step 전체의 평균 압력 반력과 직접 대조하면 안 된다. 이전 단일 Step pressure-ledger 회귀는 동기화 옵션 OFF로 검사하며, 장시간 안정성·양방향·단방향 호환 회귀를 추가한다.
 
-- `fluidShapeObstacle2` 끝에 `inverseMass`·`inverseInertia`를 기본 0으로 추가했다. 동기화된 이진 MAC 투영에서는 Sandbox가 실제 Dynamic Body 질량·관성의 역수를 설정하고, 유체 자유 face 압력 기울기와 고체 경계 압력 반력이 같은 SPD Schur complement(`A = L + B M_body^-1 B^T`)에 들어간다. 이 압력은 preconditioned CG로 반복 계산하고 기존 pressure face force/torque 그대로 World에 전달한다. 기본 0인 독립 Fluid API 및 기존 Jacobi 경로는 유지된다.
+- `fluidShapeObstacle2` 끝에 `inverseMass`·`inverseInertia`를 기본 0으로 추가했다. 이진 MAC 투영에서 양방향 동기화 옵션이 ON이면 `subStepCount=1`에서도 Sandbox가 실제 Dynamic Body 질량·관성의 역수를 설정하고, 유체 자유 face 압력 기울기와 고체 경계 압력 반력이 같은 SPD Schur complement(`A = L + B M_body^-1 B^T`)에 들어간다. 이 압력은 preconditioned CG로 반복 계산하고 기존 pressure face force/torque 그대로 World에 전달한다. 기본 0인 독립 Fluid API 및 기존 Jacobi 경로는 유지된다.
 - **한계:** 아직 Cut-cell 가중 투영에는 강체 유효질량 연립항이 적용되지 않는다. Cut-cell 모드에서는 안정성이 검증되지 않은 명시적 다중 반력 주입을 피하기 위해 동기화 옵션이 ON이어도 기존 단일 Fluid Step + World Substep 경로를 유지한다. 단일 압력 gauge, 폐쇄된 단절 영역 정합, 정확한 다중 Shape force ownership, 점성/Drag 합동 투영도 미완성이다. 이 새로운 경로가 추가질량 불안정성 완전 해결이라는 뜻은 아니며, 장시간 압력-운동량·에너지 회귀로 증명해야 한다.
 
 **안전 게이트:** 위의 동기화 실행은 **이진 MAC 압력 모드에서만** 사용한다. Cut-cell 가중 압력 모드는 아직 암시적 Body 유효질량 항을 포함하지 않으므로, 원래 단일 호출 방식으로 남겨둔다. Cut-cell의 안정성은 별도 결합 압력 구현·검증이 필요하다.
