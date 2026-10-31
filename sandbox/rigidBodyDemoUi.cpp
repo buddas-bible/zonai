@@ -1110,6 +1110,12 @@ void rigidBodyDemoUi::drawExperimentControls()
                 ImGui::Text( "PCG 실제 잔차 RMS: %.3e -> %.3e (상대 %.3e)",
                     pressure.coupledInitialResidualRms,
                     pressure.coupledFinalResidualRms, pressure.coupledRelativeResidual );
+                if( pressure.usedCoupledProjection )
+                {
+                    ImGui::Text( "압력 예측으로 갱신한 Solid 경계: %d face", pressure.synchronizedBoundaryFaces );
+                    ImGui::Text( "경계 법선 속도 변경 RMS: %.5f m/s", pressure.boundaryNormalChangeRms );
+                    ImGui::TextDisabled( "압력으로 예측한 속도만 반영. 이후 World의 Drag·충돌·Joint는 다음 Fluid 구간에 갱신됩니다." );
+                }
                 if( pressure.coupledSolveFailed )
                     ImGui::TextWrapped( "수렴 실패: 강체 질량을 무시한 Jacobi 반력 대신 이번 Step의 압력 반력을 생략합니다. 발산이 남을 수 있습니다." );
             }
