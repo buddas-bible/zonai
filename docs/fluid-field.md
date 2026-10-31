@@ -280,6 +280,15 @@ Part 12b는 `sweptU/VVolume`을 이송 **방향의 가중치**로만 사용해, 
 - GUI 없이 **3개 질량(0.25/2/12kg)·3개 회전 관성(0.08/1/8kg·m²) 중 대응한 3쌍·2개 해상도(h=0.5/0.25m)**를 36회 연속 압력 교환하며 자유 MAC face 에너지, 압력 예상 강체 에너지, discrete fluid+solid+wall 운동량 잔차, 최대/마지막 에너지와 양의 압력 단계 에너지 변화 누적량을 검증·출력한다. 이 실험은 geometry를 고정한 solver-only 시나리오로 swept solid 체적 보존의 증명은 아니다.
 - Sandbox에서는 wind source/Drag/gravity 없는 World8/Fluid1의 60프레임 실제 강체 이동·회전을 반복하고 강체/Fluid 부분 운동 에너지를 검사한다. World 자체 속도에서 독립적으로 계산한 강체 운동 에너지가 Fluid의 압력 예측값과 일치하는지도 별도 검증한다. 현 단계의 폭주 안전성 회귀는 **느슨한 상한**이며, 이를 전체 에너지 보존의 성립으로 해석하지 않는다.
 
+## Part 13g — 선택형 Cut-cell 압력·Body 유효질량 결합 PCG
+
+- `setCutCellCoupledProjectionEnabled(true)`를 새로 제공한다. 기본 `false`여서 종전 Cut-cell Jacobi와 이진 MAC PCG 동작은 바뀌지 않는다. Cut-cell을 켜고 `fluidShapeObstacle2.inverseMass / inverseInertia`가 양수인 장애물을 전달했을 때만 결합 경로를 사용한다. 현재 Wind Sandbox는 Cut-cell Body 역질량을 주입하지 않으므로 해당 경로를 아직 자동 활성화하지 않는다.
+- 기존 PCG의 이산 Schur 연산자 `A = L + B M_body^-1 B^T`를 재사용하며, Cut-cell에서 `L`은 각 열린 face의 길이 비율을 사용한다. `B`는 **기존 Cut-cell 압력 feedback과 똑같은** 셀 개방율 차이의 힘 `-h*(r-l, t-b)`와 셀 중심 COM 레버암에 의한 토크 계수다. 연결된 유체 영역별 RHS 평균 제거는 기존 Cut-cell 단계에서 수행한 값을 그대로 사용한다.
+- `getCutCellPressure()`에 결합 PCG 사용 여부, 실패 여부, 상태, 반복 수 및 상대 잔차를 별도 표시한다. 압력 PCG 실패는 Jacobi 반력으로 대체하지 않고 해당 Step의 압력을 0으로 둔다. 결합 경로의 `pressureResidual`은 전체 Schur 연산자의 실제 잔차를 원래 표시 단위로 환산하며, `divergenceAfter`는 **강체의 예측 변형률/체적 응답을 포함하지 않은 유체측 개방 flux 진단**이므로 두 값은 같지 않을 수 있다.
+- Cut-cell의 binary momentum ledger는 계속 비워둔다. `clear()`는 진단값을 초기화하지만 선택된 실험 옵션은 유지한다.
+
+**현재 한계:** 이 변경은 Cut-cell의 **압력 계수와 Body 유효질량을 같은 이산 행렬에서 계산하는 첫 단계**다. 현재 `B`는 정확한 실제 cut surface traction이 아니라 근사 셀 압력 반력이며, 움직이는 인터페이스의 swept 체적과 Body 속도 변화를 연속 시간으로 완전 연립한 모델이 아니다. 단절된 유체 영역 간 gauge·반력 배분, 외벽 및 미분할 dual volume의 운동량, pressure-predicted cut-face 법선 속도 동기화도 완성되지 않았다. 복합 Shape의 정확한 ownership과 end-to-end 보존 검증 전에 일반 Sandbox 모드의 기본 경로를 이 Solver로 교체하면 안 된다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
