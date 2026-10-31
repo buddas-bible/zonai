@@ -269,7 +269,7 @@ void checkFluidRateAndStaticObstacles()
     rigidBodyDemo scene{ demoKind::windFlow };
     scene.setWindSourceEnabled( false );
     scene.setWindDragCoefficient( 0.0f );
-    const auto& world = scene.getWorld();
+    auto& world = scene.getWorld();
     const bodyId dynamicBody = scene.getShapes()[0].bodyHandle;
     world.SetBodyLinearVelocity( dynamicBody, { 2.0f, 0.0f } );
     scene.step( dt, 8 );
