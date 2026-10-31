@@ -289,7 +289,11 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 // Cut-cell 실험 경로는 부분 면에 대한 Schur PCG가 수렴하도록
                 // 충분한 반복 한도를 주되, 일반 이진/Jacobi 경로의 비용은 유지.
                 const int pressureIterations = experimentalCutCellCoupling && coupledPressureEnabled ? 200 : 80;
-                windField_->step( windTimeStep, windObstacleSnapshots_, windObstacleFeedback_, pressureIterations );
+                if( windCircleOnlyFluidEnabled_ )
+                    windField_->step( windTimeStep,
+                        std::span<const fluidShapeObstacle2>( windObstacleSnapshots_ ).first( 1 ),
+                        std::span<fluidObstacleForce2>( windObstacleFeedback_ ).first( 1 ), pressureIterations );
+                else windField_->step( windTimeStep, windObstacleSnapshots_, windObstacleFeedback_, pressureIterations );
                 for( std::size_t i = 0; i < windPressureForces_.size(); ++i )
                     windPressureForces_[i] = windObstacleFeedback_[i];
             }
@@ -314,6 +318,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
 
             for( std::size_t i = 0; i < windPressureForces_.size(); ++i )
             {
+                if( windCircleOnlyFluidEnabled_ && i > 0 ) continue;
                 const visualShape& visual = shapes_[i];
                 if( !world_.IsValid( visual.bodyHandle ) || !world_.IsValid( visual.shapeHandle ) ||
                     world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
@@ -350,6 +355,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
             // World::Step에서 Body force가 소비되기 전에, 유체가 실제로 받은 -J 만큼만 Body에 +J를 줌.
             for( std::size_t i = 0; i < windPressureForces_.size(); ++i )
             {
+                if( windCircleOnlyFluidEnabled_ && i > 0 ) continue;
                 const visualShape& visual = shapes_[i];
                 if( !world_.IsValid( visual.bodyHandle ) ||
                     world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
@@ -1365,6 +1371,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     height = std::clamp( height, 8, 128 );
     cellSize = std::clamp( cellSize, 0.25f, 2.0f );
     const bool cutCell = windField_->isCutCellProjectionEnabled();
+    const bool analyticCircle = windField_->isAnalyticCircleCutCellEnabled();
     const int cutCellSamples = windField_->getCutCellSampleCount();
     const bool cutCellCoupled = windField_->isCutCellCoupledProjectionEnabled();
     const bool conservative = windField_->isConservativeAdvectionEnabled();
@@ -1377,6 +1384,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
         vec2{ -0.5f * width * cellSize, -0.5f * height * cellSize } );
     windField_->setCutCellProjectionEnabled( cutCell );
     windField_->setCutCellSampleCount( cutCellSamples );
+    windField_->setAnalyticCircleCutCellEnabled( analyticCircle );
     windField_->setCutCellCoupledProjectionEnabled( cutCellCoupled );
     windField_->setConservativeAdvectionEnabled( conservative );
     windField_->setSweptGeometryCorrectionEnabled( geometryCorrection );
