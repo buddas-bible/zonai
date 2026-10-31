@@ -919,6 +919,12 @@ void rigidBodyDemoUi::drawExperimentControls()
         if( ImGui::Checkbox( "강체·유체 양방향###WindObstacleCoupling", &couple ) )
             setWindObstacleCouplingEnabled( couple );
 
+        bool synchronize = isWindSynchronizedCouplingEnabled();
+        if( ImGui::Checkbox( "양방향 동기화 Substep (실험)###WindSynchronizedCoupling", &synchronize ) )
+            setWindSynchronizedCouplingEnabled( synchronize );
+        ImGui::Text( "마지막 Fluid/World 동기화 구간: %d (World 설정 substep 기준)",
+            getWindCouplingSteps() );
+
         bool conservative = isWindConservativeAdvectionEnabled();
         if( ImGui::Checkbox( "보존형 MAC 이류 (실험)###WindConservativeAdvection", &conservative ) )
             setWindConservativeAdvectionEnabled( conservative );
@@ -1035,6 +1041,7 @@ void rigidBodyDemoUi::drawExperimentControls()
                     getWindPressureForces()[i].force.x, getWindPressureForces()[i].force.y );
         }
         if( ImGui::Button( "유체·물체 초기화###WindReset" ) ) resetWindFlow();
+        ImGui::TextDisabled( "동기화 ON: Fluid와 World를 dt/substep 간격으로 번갈아 전진. 압력 반력은 전체 Step의 평균 힘으로 표시. Added-mass 안정성을 보장하는 implicit 결합은 아님." );
         ImGui::TextWrapped( "파란 화살표는 유체 속도, 주황색 점은 강체가 차지한 셀입니다. 원·캡슐·볼록 다각형은 실제 회전한 도형으로 셀을 점유합니다. 양방향 모드에서는 해당 경계의 수직 속도를 유체에 적용하고 압력 반력을 강체에 전달합니다. Drag는 유체 내부 face의 유효 질량 기준으로 실제 전달한 충격량만 강체에 반대로 적용합니다. Drag 교환 잔차와 압력(유체·강체·외벽) 수지 잔차를 별도로 표시합니다. 점유 변경 때 새로 열린 유체 면은 이전의 순수 유체 이웃 속도로 복원합니다. 셀 중심 마스크 외에도 4x4 표본으로 부분 점유와 면 개방율을 측정합니다. 부분 점유 체적 변동은 진단값입니다. 실험 모드에서는 개방면 유체 유량과 이전/현재 강체 이동·회전 경로의 MAC 면 통과 체적을 압력 방정식에 사용합니다. 경로가 없거나 도메인 벽을 통과하면 점유율 차이로 돌아갑니다. 첫 snapshot은 이동으로 취급하지 않고, 완전히 가려진 셀의 체적 소스는 근접 유체 셀로 이동합니다. 영역별로 풀 수 없는 체적 변동도 표시합니다. 보존형 MAC 이류 실험 모드에서는 고정된 면 개방율의 dual volume upwind flux를 사용하고 이류 단계 자체의 운동량을 비교할 수 있습니다. 정확한 moving interface·보존형 전체 유체 질량·표면 압력 적분·전체 운동량 보존은 아직 지원하지 않습니다. 점유 변경과 이류 단계의 운동량 변화도 따로 기록합니다. 이 압력 수지의 작은 잔차는 이산화된 face 회계이며 전체 유체·강체 운동량 보존을 뜻하지 않습니다." );
         return;
     }
