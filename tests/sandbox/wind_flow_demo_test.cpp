@@ -187,6 +187,49 @@ void checkDragMomentumBudget()
         "pressure reaction must remain independent when drag coefficient is zero" );
 }
 
+void checkAngularDragResponse()
+{
+    // 원천 유동이 없는 곳에서 순수 회전하는 강체도 표면 상대속도 때문에 저항 토크를 받는다.
+    // 압력 feedback을 비활성화해 Drag만 독립 비교한다.
+    rigidBodyDemo noDrag{ demoKind::windFlow };
+    rigidBodyDemo withDrag{ demoKind::windFlow };
+    noDrag.setWindSourceEnabled( false );
+    withDrag.setWindSourceEnabled( false );
+    noDrag.setWindObstacleCouplingEnabled( false );
+    withDrag.setWindObstacleCouplingEnabled( false );
+    noDrag.setWindDragCoefficient( 0.0f );
+    withDrag.setWindDragCoefficient( 8.0f );
+
+    const bodyId referenceBody = noDrag.getShapes()[2].bodyHandle;
+    const bodyId dragBody = withDrag.getShapes()[2].bodyHandle;
+    noDrag.getWorld().SetBodyAngularVelocity( referenceBody, 3.0f );
+    withDrag.getWorld().SetBodyAngularVelocity( dragBody, 3.0f );
+    constexpr float dt = 1.0f / 60.0f;
+    noDrag.step( dt, 4 );
+    withDrag.step( dt, 4 );
+
+    const float referenceSpin = noDrag.getWorld().GetBodyAngularVelocity( referenceBody );
+    const float dampedSpin = withDrag.getWorld().GetBodyAngularVelocity( dragBody );
+    check( referenceSpin > 0.0f && dampedSpin > 0.0f &&
+        dampedSpin < referenceSpin - 1.0e-3f,
+        "surface-relative drag must slow pure rigid-body rotation without wind" );
+    check( near( withDrag.getWorld().GetBodyLinearVelocity( dragBody ), {}, 1.0e-4f ),
+        "symmetric surface drag on a spinning box must not create center-of-mass drift" );
+    check( LengthSquared( withDrag.getWindDragFluidImpulse() ) == 0.0f,
+        "one-way rotational drag must not modify fluid momentum" );
+
+    // 유체 반작용이 활성화되어도 각 표면점의 선형 충격량은 정확히 상쇄되어야 한다.
+    rigidBodyDemo coupled{ demoKind::windFlow };
+    coupled.setWindSourceEnabled( false );
+    coupled.setWindDragCoefficient( 8.0f );
+    coupled.getWorld().SetBodyAngularVelocity( coupled.getShapes()[2].bodyHandle, 3.0f );
+    coupled.step( dt, 4 );
+    check( Length( coupled.getWindDragExchangeResidual() ) < 1.0e-5f &&
+        IsFinite( coupled.getWindDragBodyImpulse() ) &&
+        IsFinite( coupled.getWindDragFluidImpulse() ),
+        "four-point drag must preserve equal-and-opposite linear impulse exchange" );
+}
+
 void checkSynchronizedWindCoupling()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -566,6 +609,57 @@ void checkExperimentalCutCellWorldCoupling()
         "one-way field with optional static obstacles must not silently insert dynamic-body inverse masses" );
 }
 
+void checkMovingCutCellSweptVolumeLedger()
+{
+    // World의 실제 pose 이동만 다음 Fluid 구간의 기하 ΔV를 만든다.
+    // 압력 단계에서 예측한 추가 boundary swept volume은 진단용이며,
+    // 실제 snapshot ΔV에 다시 더해져서는 안 된다.
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindCutCellCoupledProjectionEnabled( true );
+    scene.setWindSynchronizedCouplingEnabled( true );
+    scene.setWindFluidSubstepCount( 2 );
+    const bodyId circle = scene.getShapes()[0].bodyHandle;
+    const bodyId box = scene.getShapes()[2].bodyHandle;
+    scene.getWorld().SetBodyLinearVelocity( circle, { 1.25f, -0.3f } );
+    scene.getWorld().SetBodyAngularVelocity( box, 0.9f );
+    scene.addWindVortex();
+
+    int sweptFrames = 0;
+    int coupledFrames = 0;
+    float largestPredictedVolume = 0.0f;
+    for( int frame = 0; frame < 36; ++frame )
+    {
+        scene.step( dt, 4 );
+        const fluidField2* field = scene.getWindField();
+        const fluidCutCellPressure2& pressure = field->getCutCellPressure();
+        const fluidCutCellTransition2& transition = field->getCutCellTransition();
+        const fluidSweptFaceFlux2& swept = field->getSweptFaceFlux();
+        check( scene.getWindCouplingSteps() == 2 && pressure.hasVolumeHistory &&
+            std::isfinite( pressure.volumeRate ) && std::isfinite( transition.volumeDelta() ) &&
+            std::isfinite( pressure.predictedContinuityRms ) &&
+            std::isfinite( pressure.predictedSolidVolumeL1 ) &&
+            IsFinite( scene.getWorld().GetBodyLinearVelocity( circle ) ) &&
+            std::isfinite( scene.getWorld().GetBodyAngularVelocity( box ) ),
+            "successive World/Fluid intervals must have finite cut-cell occupancy and pressure diagnostics" );
+        // 두 Fluid 구간이 각각 dt/2 동안 진행되므로, 보고된 기하 변화율은
+        // 마지막 구간의 실제 snapshot 점유 변화만 포함해야 한다.
+        check( std::abs( pressure.volumeRate * ( 0.5f * dt ) - transition.volumeDelta() ) < 2.0e-4f,
+            "cut-cell geometric volume rate must match the actual snapshot delta without predicted swept-volume double counting" );
+        if( swept.usedSweptFlux ) ++sweptFrames;
+        if( pressure.usedCoupledProjection )
+        {
+            ++coupledFrames;
+            largestPredictedVolume = std::max( largestPredictedVolume, pressure.predictedSolidVolumeL1 );
+        }
+    }
+    check( sweptFrames >= 30 && coupledFrames >= 1 && largestPredictedVolume > 0.0f,
+        "long-running cut-cell World test must exercise both real swept faces and pressure-predicted boundary motion" );
+}
+
 void checkExperimentalCutCellProjection()
 {
     rigidBodyDemo scene{ demoKind::windFlow };
@@ -684,8 +778,10 @@ int main()
     checkFluidRateAndStaticObstacles();
     checkRotatedSandboxObstacles();
     checkDragMomentumBudget();
+    checkAngularDragResponse();
     checkPressureLedgerInSandbox();
     checkExperimentalCutCellProjection();
     checkExperimentalCutCellWorldCoupling();
+    checkMovingCutCellSweptVolumeLedger();
     checkSandboxConservativeAdvectionTrial();
 }

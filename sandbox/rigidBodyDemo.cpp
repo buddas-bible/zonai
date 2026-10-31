@@ -302,44 +302,50 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
             }
             else windField_->step( windTimeStep );
     
-            // Drag는 기존 유체 face를 갱신하기 전에 모든 Body의 상대속도로 계산한다.
-            // Solid 내부 샘플은 경계 속도에 오염되므로 바깥쪽 네 방향의 흐름을 사용.
-            std::array<vec2, 3> dragForces{};
-            std::array<vec2, 3> dragCenters{};
-            std::array<float, 3> dragRadii{};
+            // 표면 네 지점의 상대속도를 사용해 선형 Drag와 회전 저항을 함께 계산한다.
+            // 힘을 갱신하기 전에 모든 샘플을 수집해 Body 순회 순서에 의존하지 않는다.
+            constexpr std::array<vec2, 4> DIRECTIONS{
+                vec2{ 1.0f, 0.0f }, vec2{ -1.0f, 0.0f },
+                vec2{ 0.0f, 1.0f }, vec2{ 0.0f, -1.0f }
+            };
+            std::array<std::array<vec2, 4>, 3> dragForces{};
+            std::array<std::array<vec2, 4>, 3> dragPoints{};
             const float spacing = windField_->getCellSize();
-    
+
             for( std::size_t i = 0; i < windPressureForces_.size(); ++i )
             {
                 const visualShape& visual = shapes_[i];
-                if( !world_.IsValid( visual.bodyHandle ) ||
+                if( !world_.IsValid( visual.bodyHandle ) || !world_.IsValid( visual.shapeHandle ) ||
                     world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
-    
+
+                if( windDragCoefficient_ <= 0.0f ) continue;
+
                 const vec2 center = TransformPoint( world_.GetBodyTransform( visual.bodyHandle ),
                     world_.GetBodyLocalCenter( visual.bodyHandle ) );
-                const float radius = std::max( Length( Extents( world_.GetShapeAABB( visual.shapeHandle ) ) ), spacing );
+                const vec2 extents = Extents( world_.GetShapeAABB( visual.shapeHandle ) );
+                const float radius = std::max( Length( extents ), spacing );
                 const vec2 fieldMin = windField_->getOrigin();
                 const vec2 fieldMax = fieldMin + spacing * vec2{
                     static_cast<float>( windField_->getWidth() ), static_cast<float>( windField_->getHeight() ) };
-                // Field 바깥에는 이 모델의 유체가 없다. 샘플 경계값을 외부 물체에 투영하지 않는다.
+                // Field 바깥에는 이 모델의 유체가 없다.
                 if( center.x + radius < fieldMin.x || center.y + radius < fieldMin.y ||
                     center.x - radius > fieldMax.x || center.y - radius > fieldMax.y ) continue;
-                const float distance = radius + spacing;
-                vec2 fluidVelocity = windField_->sampleVelocity( center );
-                if( windObstacleCouplingEnabled_ )
+
+                const vec2 linearVelocity = world_.GetBodyLinearVelocity( visual.bodyHandle );
+                const float angularVelocity = world_.GetBodyAngularVelocity( visual.bodyHandle );
+                for( std::size_t sample = 0; sample < DIRECTIONS.size(); ++sample )
                 {
-                    fluidVelocity = 0.25f * (
-                        windField_->sampleVelocity( center + vec2{ distance, 0.0f } ) +
-                        windField_->sampleVelocity( center - vec2{ distance, 0.0f } ) +
-                        windField_->sampleVelocity( center + vec2{ 0.0f, distance } ) +
-                        windField_->sampleVelocity( center - vec2{ 0.0f, distance } ) );
+                    const vec2 direction = DIRECTIONS[sample];
+                    const vec2 offset{ direction.x * extents.x, direction.y * extents.y };
+                    const vec2 point = center + offset;
+                    // AABB 축방향 표면 근사. 한 셀 바깥에서 유체를 읽어 Solid 경계 속도 오염을 피한다.
+                    const vec2 fluidVelocity = windField_->sampleVelocity( point + spacing * direction );
+                    const vec2 surfaceVelocity = linearVelocity + Cross( angularVelocity, offset );
+                    dragPoints[i][sample] = point;
+                    dragForces[i][sample] = ( 0.25f * windDragCoefficient_ ) * ( fluidVelocity - surfaceVelocity );
                 }
-    
-                dragCenters[i] = center;
-                dragRadii[i] = radius;
-                dragForces[i] = windDragCoefficient_ * ( fluidVelocity - world_.GetBodyLinearVelocity( visual.bodyHandle ) );
             }
-    
+
             // 압력 traction은 별도 근사. 여기서는 Drag에 한해 유체/Body 충격량을 쌍으로 적용.
             // World::Step에서 Body force가 소비되기 전에, 유체가 실제로 받은 -J 만큼만 Body에 +J를 줌.
             for( std::size_t i = 0; i < windPressureForces_.size(); ++i )
@@ -354,20 +360,26 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                     world_.ApplyTorque( visual.bodyHandle, windPressureForces_[i].torque );
                 }
     
-                vec2 dragForce = dragForces[i];
-                if( windObstacleCouplingEnabled_ && LengthSquared( dragForce ) > 0.0f )
+                // Drag=0은 비싼 표면 샘플링·ApplyForce를 생략하지만 압력은 유지한다.
+                if( windDragCoefficient_ <= 0.0f ) continue;
+
+                for( std::size_t sample = 0; sample < DIRECTIONS.size(); ++sample )
                 {
-                    const vec2 upstream = dragCenters[i] -
-                        ( dragRadii[i] + spacing ) * Normalize( dragForce );
-                    const vec2 fluidImpulse = windField_->applyMomentumImpulse(
-                        upstream, -windTimeStep * dragForce, 2.0f * spacing );
-                    // 벽 또는 Solid에 가려 유효 face가 없으면 그 성분의 drag도 전달하지 않음.
-                    dragForce = -fluidImpulse / windTimeStep;
-                    windDragFluidImpulse_ += fluidImpulse;
+                    vec2 dragForce = dragForces[i][sample];
+                    const vec2 point = dragPoints[i][sample];
+                    if( windObstacleCouplingEnabled_ && LengthSquared( dragForce ) > 0.0f )
+                    {
+                        // 유체에 실제로 전달된 선형 충격량만 반대 방향으로 Body에 적용한다.
+                        // 동일 교환점에서의 Body 토크는 ApplyForce가 계산한다.
+                        const vec2 fluidImpulse = windField_->applyMomentumImpulse(
+                            point, -windTimeStep * dragForce, 2.0f * spacing );
+                        dragForce = -fluidImpulse / windTimeStep;
+                        windDragFluidImpulse_ += fluidImpulse;
+                    }
+
+                    world_.ApplyForce( visual.bodyHandle, dragForce, point );
+                    windDragBodyImpulse_ += windTimeStep * dragForce;
                 }
-    
-                world_.ApplyForceToCenter( visual.bodyHandle, dragForce );
-                windDragBodyImpulse_ += windTimeStep * dragForce;
             }
             windFluidMilliseconds_ += std::chrono::duration<float, std::milli>(
                 std::chrono::steady_clock::now() - fluidStart ).count();
