@@ -221,10 +221,10 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
             const vec2 upper = lower + field->getCellSize() * vec2{
                 static_cast<float>( field->getWidth() ), static_cast<float>( field->getHeight() ) };
             constexpr ImU32 FIELD_BORDER = IM_COL32( 110, 160, 220, 200 );
-            draw.DrawSegment( lower, { upper.x, lower.y }, FIELD_BORDER, 1.5f );
-            draw.DrawSegment( { upper.x, lower.y }, upper, FIELD_BORDER, 1.5f );
-            draw.DrawSegment( upper, { lower.x, upper.y }, FIELD_BORDER, 1.5f );
-            draw.DrawSegment( { lower.x, upper.y }, lower, FIELD_BORDER, 1.5f );
+            draw.DrawSegment( { lower, { upper.x, lower.y } }, FIELD_BORDER, 1.5f );
+            draw.DrawSegment( { { upper.x, lower.y }, upper }, FIELD_BORDER, 1.5f );
+            draw.DrawSegment( { upper, { lower.x, upper.y } }, FIELD_BORDER, 1.5f );
+            draw.DrawSegment( { { lower.x, upper.y }, lower }, FIELD_BORDER, 1.5f );
             // 큰 Field에서는 렌더링 자체가 프레임을 잡아먹지 않게 표시 밀도를 제한.
             const float cellsPerArrow = static_cast<float>( field->getWidth() * field->getHeight() ) / 350.0f;
             const int drawStride = std::max( 2, static_cast<int>( std::ceil( std::sqrt( cellsPerArrow ) ) ) );
