@@ -975,9 +975,18 @@ void checkCoupledCutCellAdjointContinuity()
                 // Adjoint pair의 실제 고체 velocity flux와 PCG A*p-b가 같은
                 // 보정된 연속방정식을 측정해야 한다. 반올림 오차는 허용한다.
                 const float tolerance = 2.0e-3f + 0.1f * stats.pressureResidual;
-                check( std::abs( stats.predictedContinuityRms - stats.pressureResidual ) < tolerance &&
-                    stats.predictedContinuityRms < 0.05f * stats.divergenceBefore + 2.0e-3f,
-                    "pressure reaction and blocked-face fluid volume flux must satisfy the same continuity equation" );
+                if( std::abs( stats.predictedContinuityRms - stats.pressureResidual ) >= tolerance ||
+                    stats.predictedContinuityRms >= 0.05f * stats.divergenceBefore + 2.0e-3f )
+                {
+                    std::fprintf( stderr,
+                        "cut-cell adjoint mismatch: h=%.3f mass=%.3f inertia=%.3f dt=%.6f "
+                        "PCG=%.6g predicted=%.6g before=%.6g volumeL1=%.6g\n",
+                        h, MASSES[i], INERTIAS[i], dt, stats.pressureResidual,
+                        stats.predictedContinuityRms, stats.divergenceBefore,
+                        stats.predictedSolidVolumeL1 );
+                    check( false,
+                        "pressure reaction and blocked-face fluid volume flux must satisfy the same continuity equation" );
+                }
             }
 
     // 기존 고정 경계/실패 모드에는 예측 swept volume을 덧씌우지 않는다.
