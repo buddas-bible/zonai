@@ -1848,6 +1848,8 @@ void fluidField2::project( float timeStep, int pressureIterations,
             return obstacle.inverseMass > 0.0f || obstacle.inverseInertia > 0.0f;
         } );
     const bool solvedCoupled = coupled && solveCoupledPressure( timeStep, pressureIterations, obstacles );
+    pressureMomentum_.usedCoupledProjection = solvedCoupled;
+    pressureMomentum_.coupledSolveFailed = coupled && !solvedCoupled;
     if( !solvedCoupled )
     {
         std::fill( pressure_.begin(), pressure_.end(), 0.0f );
