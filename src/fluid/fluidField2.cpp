@@ -1844,9 +1844,23 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
         ( cutCellPressure_.activeCells > 0
             ? static_cast<float>( std::sqrt( squaredResidual / cutCellPressure_.activeCells ) ) : 0.0f );
 
-    // Cut-cell 내부 solid 면적의 pressure traction을 cell aperture 차이로 근사.
-    // Face 중심 마스크 traction과 달리 부분 막힘에도 반응한다. 다중 shape 소유는
-    // 가장 가까운 COM으로 근사하고 면의 정확한 중심은 추후 cut boundary에서 계산한다.
+    // 수렴한 Schur 해에서는 행렬에 들어간 B 자체를 pressure traction으로
+    // 사용한다. 별도의 COM 근사 압력 적분은 중복하면 안 된다.
+    if( solvedCoupled )
+    {
+        for( const coupledPressureFace& face : coupledPressureScratch_.faces )
+        {
+            const double p = pressure_[face.cell];
+            fluidObstacleForce2& force = feedback[face.owner];
+            force.force += static_cast<float>( p ) *
+                vec2{ static_cast<float>( face.fx ), static_cast<float>( face.fy ) };
+            force.torque += static_cast<float>( p * face.torque );
+        }
+        synchronizeCutCellBoundaries( timeStep, obstacles, feedback );
+        return;
+    }
+
+    // 비결합 Cut-cell의 기존 셀 aperture/nearest COM 표면 반력 경로.
     if( obstacles.empty() ) return;
     for( int y = 0; y < height_; ++y )
         for( int x = 0; x < width_; ++x )
@@ -1872,7 +1886,6 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
             feedback[owner].force += force;
             feedback[owner].torque += Cross( center - obstacles[owner].center, force );
         }
-    if( solvedCoupled ) synchronizeCutCellBoundaries( timeStep, obstacles, feedback );
 }
 
 bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
@@ -1936,28 +1949,62 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     };
     if( cutCell )
     {
-        // 이 반력 stencil은 projectCutCell()의 aperture 차이와 일치해야 한다.
+        // 공유 face에서 막힌 네 sub-face를 각각 힘과 모멘트의 적분점으로 사용한다.
+        // 같은 B를 Body 압력 traction과 blocked-face 속도 변화에 사용하므로
+        // 압력 행렬의 B M^-1 B^T가 실제 경계 flux 선형화의 adjoint가 된다.
+        constexpr int sampleCount = 4;
+        constexpr float sampleScale = 1.0f / sampleCount;
+        std::vector<double> bounds( obstacles.size(), -1.0 );
+        for( std::size_t i = 0; i < obstacles.size(); ++i )
+            if( IsValidFluidObstacle( obstacles[i] ) )
+                bounds[i] = FluidObstacleBoundRadius( obstacles[i] );
+        const auto firstOwner = [&]( vec2 point )
+        {
+            for( std::size_t i = 0; i < obstacles.size(); ++i )
+            {
+                if( bounds[i] < 0.0 ) continue;
+                const vec2 center = obstacles[i].transform.position;
+                if( std::abs( static_cast<double>( point.x ) - center.x ) > bounds[i] ||
+                    std::abs( static_cast<double>( point.y ) - center.y ) > bounds[i] ) continue;
+                if( ContainsFluidObstacle( obstacles[i], point ) ) return static_cast<int>( i );
+            }
+            return -1;
+        };
+
         for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x )
+            {
+                const int left = cellIndex( x - 1, y );
+                const int right = cellIndex( x, y );
+                if( cellFluidFraction_[left] <= 0.0f && cellFluidFraction_[right] <= 0.0f ) continue;
+                const vec2 force{ cellSize_ * sampleScale, 0.0f };
+                for( int sample = 0; sample < sampleCount; ++sample )
+                {
+                    const vec2 point = origin_ + cellSize_ * vec2{
+                        static_cast<float>( x ), static_cast<float>( y ) + ( sample + 0.5f ) * sampleScale };
+                    const int owner = firstOwner( point );
+                    if( owner < 0 ) continue;
+                    if( cellFluidFraction_[left] > 0.0f ) addBoundary( left, owner, force, point );
+                    if( cellFluidFraction_[right] > 0.0f ) addBoundary( right, owner, -force, point );
+                }
+            }
+
+        for( int y = 1; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
             {
-                const int cell = cellIndex( x, y );
-                if( cellFluidFraction_[cell] <= 0.0f ) continue;
-                const float l = x == 0 ? cellFluidFraction_[cell] : cutCellUOpen( x, y );
-                const float r = x == width_ - 1 ? cellFluidFraction_[cell] : cutCellUOpen( x + 1, y );
-                const float b = y == 0 ? cellFluidFraction_[cell] : cutCellVOpen( x, y );
-                const float t = y == height_ - 1 ? cellFluidFraction_[cell] : cutCellVOpen( x, y + 1 );
-                const vec2 traction = -cellSize_ * vec2{ r - l, t - b };
-                if( LengthSquared( traction ) == 0.0f ) continue;
-                const vec2 point = getCellCenter( x, y );
-                int owner = -1;
-                float nearest = std::numeric_limits<float>::max();
-                for( std::size_t i = 0; i < obstacles.size(); ++i )
+                const int bottom = cellIndex( x, y - 1 );
+                const int top = cellIndex( x, y );
+                if( cellFluidFraction_[bottom] <= 0.0f && cellFluidFraction_[top] <= 0.0f ) continue;
+                const vec2 force{ 0.0f, cellSize_ * sampleScale };
+                for( int sample = 0; sample < sampleCount; ++sample )
                 {
-                    if( !IsValidFluidObstacle( obstacles[i] ) ) continue;
-                    const float distance = LengthSquared( point - obstacles[i].center );
-                    if( distance < nearest ) { nearest = distance; owner = static_cast<int>( i ); }
+                    const vec2 point = origin_ + cellSize_ * vec2{
+                        static_cast<float>( x ) + ( sample + 0.5f ) * sampleScale, static_cast<float>( y ) };
+                    const int owner = firstOwner( point );
+                    if( owner < 0 ) continue;
+                    if( cellFluidFraction_[bottom] > 0.0f ) addBoundary( bottom, owner, force, point );
+                    if( cellFluidFraction_[top] > 0.0f ) addBoundary( top, owner, -force, point );
                 }
-                addBoundary( cell, owner, traction, point );
             }
     }
     else
