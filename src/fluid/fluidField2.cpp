@@ -98,6 +98,20 @@ bool IsValidFluidObstacle( const fluidShapeObstacle2& obstacle )
         IsFinite( obstacle.linearVelocity ) && std::isfinite( obstacle.angularVelocity );
 }
 
+// 도형의 local 원점에서 모든 점을 감싸는 보수적인 world 반경.
+// 회전이 비정규화된 입력이어도 false-negative culling을 피하도록 확대한다.
+// 비정상 기하일 때는 성능 필터만 끄고 기존 Contains 판정을 유지한다.
+double FluidObstacleBoundRadius( const fluidShapeObstacle2& obstacle )
+{
+    const double localRadius = FluidGeometryRadius( obstacle.geometry );
+    const double scale = std::max( 1.0, std::hypot(
+        static_cast<double>( obstacle.transform.rotation.c ),
+        static_cast<double>( obstacle.transform.rotation.s ) ) );
+    const double radius = localRadius * scale;
+    return std::isfinite( radius ) && radius >= 0.0
+        ? radius : std::numeric_limits<double>::infinity();
+}
+
 } // namespace
 
 fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
@@ -418,14 +432,29 @@ void fluidField2::updateObstacles( std::span<const fluidShapeObstacle2> obstacle
         const fluidShapeObstacle2& obstacle = obstacles[index];
         if( !IsValidFluidObstacle( obstacle ) ) continue;
 
-        // 최초의 원이 cell을 소유함. 이 API는 겹치는 solid의 union을 처리하지만
-        // 겹친 부분의 상대 운동은 물리적으로 해결하지 않음 (World에서 충돌 해결).
-        for( int y = 0; y < height_; ++y )
-            for( int x = 0; x < width_; ++x )
+        // Cell-center occupancy는 도형의 보수적 AABB 범위에서만 검사한다.
+        // 멀리 떨어진 Static 장애물이 늘어도 격자 전체를 도형마다 순회하지 않는다.
+        const double radius = FluidObstacleBoundRadius( obstacle );
+        const auto boundIndex = [&]( double coordinate, float origin, int limit, bool end )
+        {
+            const double cell = ( coordinate - origin ) / cellSize_ - 0.5;
+            const double inclusive = end ? std::ceil( cell ) + 2.0 : std::floor( cell ) - 1.0;
+            return static_cast<int>( std::clamp( inclusive, 0.0, static_cast<double>( limit ) ) );
+        };
+        const double x = obstacle.transform.position.x;
+        const double y = obstacle.transform.position.y;
+        const int minX = boundIndex( x - radius, origin_.x, width_, false );
+        const int maxX = boundIndex( x + radius, origin_.x, width_, true );
+        const int minY = boundIndex( y - radius, origin_.y, height_, false );
+        const int maxY = boundIndex( y + radius, origin_.y, height_, true );
+
+        // 최초의 원이 cell을 소유함. 겹치는 도형의 우선순위는 유지한다.
+        for( int cellY = minY; cellY < maxY; ++cellY )
+            for( int cellX = minX; cellX < maxX; ++cellX )
             {
-                const int cell = cellIndex( x, y );
+                const int cell = cellIndex( cellX, cellY );
                 if( solidOwner_[cell] >= 0 ) continue;
-                if( ContainsFluidObstacle( obstacle, getCellCenter( x, y ) ) )
+                if( ContainsFluidObstacle( obstacle, getCellCenter( cellX, cellY ) ) )
                 {
                     solidOwner_[cell] = static_cast<int>( index );
                     ++solidCellCount_;
@@ -484,11 +513,23 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     }
     else
     {
+        // 서브셀 16표본과 MAC face 4표본 각각에 대해 Shape Contains를
+        // 호출하기 전에 도형의 보수적 world 반경으로 대부분을 걸러낸다.
+        std::vector<double> bounds( obstacles.size(), -1.0 );
+        for( std::size_t i = 0; i < obstacles.size(); ++i )
+            if( IsValidFluidObstacle( obstacles[i] ) )
+                bounds[i] = FluidObstacleBoundRadius( obstacles[i] );
         const auto firstOwner = [&]( vec2 point )
         {
             for( std::size_t i = 0; i < obstacles.size(); ++i )
-                if( IsValidFluidObstacle( obstacles[i] ) && ContainsFluidObstacle( obstacles[i], point ) )
-                    return static_cast<int>( i );
+            {
+                const double radius = bounds[i];
+                if( radius < 0.0 ) continue;
+                const vec2 center = obstacles[i].transform.position;
+                if( std::abs( static_cast<double>( point.x ) - center.x ) > radius ||
+                    std::abs( static_cast<double>( point.y ) - center.y ) > radius ) continue;
+                if( ContainsFluidObstacle( obstacles[i], point ) ) return static_cast<int>( i );
+            }
             return -1;
         };
         const auto isOccupied = [&]( vec2 point ) { return firstOwner( point ) >= 0; };
@@ -1645,22 +1686,16 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     // 이진 MAC face의 압력 변위와 rigid body의 유효 질량을 동시에 푼다.
     // A = D D^T + B M_body^-1 B^T (단위 깊이 rho=1).
     // B는 기존 pressure traction과 동일한 face 법선·COM 레버암을 사용한다.
-    struct pressureFace
-    {
-        int cell = 0;
-        int owner = 0;
-        double fx = 0.0, fy = 0.0, torque = 0.0;
-    };
-    struct bodyResponse
-    {
-        double fx = 0.0, fy = 0.0, torque = 0.0;
-    };
-    std::vector<pressureFace> faces;
-    std::vector<double> diagonal( pressure_.size(), 0.0 );
+    auto& scratch = coupledPressureScratch_;
+    auto& faces = scratch.faces;
+    faces.clear();
+    auto& diagonal = scratch.diagonal;
+    diagonal.assign( pressure_.size(), 0.0 );
     int active = 0;
     double rhsSum = 0.0;
     const double scale = static_cast<double>( cellSize_ ) * cellSize_ / timeStep;
-    std::vector<double> rhs( pressure_.size(), 0.0 );
+    auto& rhs = scratch.rhs;
+    rhs.assign( pressure_.size(), 0.0 );
     for( int y = 0; y < height_; ++y )
         for( int x = 0; x < width_; ++x )
         {
@@ -1724,11 +1759,12 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     for( std::size_t i = 0; i < rhs.size(); ++i )
         if( solidOwner_[i] < 0 ) rhs[i] -= mean;
 
-    std::vector<bodyResponse> response( obstacles.size() );
+    auto& response = scratch.response;
+    response.assign( obstacles.size(), {} );
     const auto multiply = [&]( const std::vector<double>& values, std::vector<double>& result )
     {
         std::fill( result.begin(), result.end(), 0.0 );
-        std::fill( response.begin(), response.end(), bodyResponse{} );
+        std::fill( response.begin(), response.end(), coupledBodyResponse{} );
         for( int y = 0; y < height_; ++y )
             for( int x = 1; x < width_; ++x )
             {
@@ -1747,26 +1783,34 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                 result[bottom] += d;
                 result[top] -= d;
             }
-        for( const pressureFace& face : faces )
+        for( const coupledPressureFace& face : faces )
         {
-            bodyResponse& body = response[face.owner];
+            coupledBodyResponse& body = response[face.owner];
             const double p = values[face.cell];
             body.fx += p * face.fx;
             body.fy += p * face.fy;
             body.torque += p * face.torque;
         }
-        for( const pressureFace& face : faces )
+        for( const coupledPressureFace& face : faces )
         {
             const fluidShapeObstacle2& obstacle = obstacles[static_cast<std::size_t>( face.owner )];
-            const bodyResponse& body = response[face.owner];
+            const coupledBodyResponse& body = response[face.owner];
             result[face.cell] += static_cast<double>( obstacle.inverseMass ) *
                 ( face.fx * body.fx + face.fy * body.fy ) +
                 static_cast<double>( obstacle.inverseInertia ) * face.torque * body.torque;
         }
     };
 
-    std::vector<double> x( rhs.size(), 0.0 ), residual = rhs;
-    std::vector<double> z( rhs.size() ), direction( rhs.size() ), product( rhs.size() );
+    auto& x = scratch.x;
+    auto& residual = scratch.residual;
+    auto& z = scratch.z;
+    auto& direction = scratch.direction;
+    auto& product = scratch.product;
+    x.assign( rhs.size(), 0.0 );
+    residual = rhs;
+    z.assign( rhs.size(), 0.0 );
+    direction.assign( rhs.size(), 0.0 );
+    product.assign( rhs.size(), 0.0 );
     double rz = 0.0, squared = 0.0;
     for( std::size_t i = 0; i < rhs.size(); ++i )
     {

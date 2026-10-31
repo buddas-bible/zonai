@@ -307,6 +307,35 @@ private:
 #pragma endregion Helpers
 
 #pragma region Data
+    // 압력 연립 반복의 작업 버퍼는 Field 크기에 묶어 재사용한다.
+    // Cell/Body 수가 일정한 시뮬레이션에서 매 투영마다 heap 할당하지 않는다.
+    struct coupledPressureFace
+    {
+        int cell = 0;
+        int owner = 0;
+        double fx = 0.0;
+        double fy = 0.0;
+        double torque = 0.0;
+    };
+    struct coupledBodyResponse
+    {
+        double fx = 0.0;
+        double fy = 0.0;
+        double torque = 0.0;
+    };
+    struct coupledPressureScratch
+    {
+        std::vector<coupledPressureFace> faces;
+        std::vector<coupledBodyResponse> response;
+        std::vector<double> diagonal;
+        std::vector<double> rhs;
+        std::vector<double> x;
+        std::vector<double> residual;
+        std::vector<double> z;
+        std::vector<double> direction;
+        std::vector<double> product;
+    };
+
     int width_ = 0;
     int height_ = 0;
     float cellSize_ = 1.0f;
@@ -321,6 +350,7 @@ private:
     std::vector<double> tracerUFlux_;
     std::vector<double> tracerVFlux_;
     std::vector<float> pressure_;
+    coupledPressureScratch coupledPressureScratch_{};
     std::vector<float> nextPressure_;
     std::vector<float> divergence_;
     std::vector<int> solidOwner_;
