@@ -300,6 +300,70 @@ void checkPressurePredictedWorldVelocity()
     check( near( world.GetBodyLinearVelocity( body ), expectedLinear, 1.0e-3f ) &&
         close( world.GetBodyAngularVelocity( body ), expectedAngular, 1.0e-3f ),
         "without drag, gravity or contacts, World velocity must match Fluid pressure-predicted body velocity" );
+    double actualRigidEnergy = 0.0;
+    for( const visualShape& visual : scene.getShapes() )
+    {
+        const double mass = world.GetBodyMass( visual.bodyHandle );
+        const double inertia = world.GetBodyRotationalInertia( visual.bodyHandle );
+        const vec2 linearVelocity = world.GetBodyLinearVelocity( visual.bodyHandle );
+        const double angularVelocity = world.GetBodyAngularVelocity( visual.bodyHandle );
+        actualRigidEnergy += 0.5 * mass * Dot( linearVelocity, linearVelocity ) +
+            0.5 * inertia * angularVelocity * angularVelocity;
+    }
+    check( std::abs( actualRigidEnergy - pressure.energy.rigidAfter ) <
+        1.0e-3 * ( 1.0 + actualRigidEnergy ) &&
+        std::abs( scene.getWindField()->getFluidKineticEnergy() - pressure.energy.fluidAfter ) <
+            1.0e-6 * ( 1.0 + pressure.energy.fluidAfter ),
+        "isolated World pressure response must match predicted body energy and measured free-fluid face energy" );
+}
+
+void checkNoSourceWindEnergyEnvelope()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.setWindFluidSubstepCount( 1 );
+    const bodyId moving = scene.getShapes()[0].bodyHandle;
+    auto& world = scene.getWorld();
+    world.SetBodyLinearVelocity( moving, { 1.8f, 0.4f } );
+    world.SetBodyAngularVelocity( moving, 0.7f );
+
+    const auto energy = [&]
+    {
+        double result = scene.getWindField()->getFluidKineticEnergy();
+        for( const visualShape& shape : scene.getShapes() )
+        {
+            const vec2 v = world.GetBodyLinearVelocity( shape.bodyHandle );
+            const double w = world.GetBodyAngularVelocity( shape.bodyHandle );
+            result += 0.5 * world.GetBodyMass( shape.bodyHandle ) * Dot( v, v ) +
+                0.5 * world.GetBodyRotationalInertia( shape.bodyHandle ) * w * w;
+        }
+        return result;
+    };
+
+    const double initial = energy();
+    double peak = initial;
+    double cumulativePositivePressure = 0.0;
+    float peakMomentumResidual = 0.0f;
+    for( int frame = 0; frame < 60; ++frame )
+    {
+        scene.step( dt, 8 );
+        const fluidPressureMomentum2& pressure = scene.getWindField()->getPressureMomentum();
+        check( pressure.usedCoupledProjection && !pressure.coupledSolveFailed,
+            "no-source World8/Fluid1 energy trial requires converged coupled pressure" );
+        const float magnitude = Length( pressure.fluid ) + Length( pressure.solid ) + Length( pressure.wall );
+        peakMomentumResidual = std::max( peakMomentumResidual,
+            Length( pressure.residual() ) / ( 1.0f + magnitude ) );
+        peak = std::max( peak, energy() );
+        cumulativePositivePressure += std::max( 0.0, pressure.energy.totalDelta() );
+        check( std::isfinite( peak ) && std::isfinite( cumulativePositivePressure ) &&
+            peak < 10.0 * ( 1.0 + initial ) &&
+            peakMomentumResidual < 5.0e-4f,
+            "source-free moving World must avoid explosive total kinetic energy and bound discrete pressure momentum error" );
+    }
+    std::printf( "Wind moving geometry energy: initial=%.6f peak=%.6f final=%.6f positivePressureDelta=%.6f maxMomentumError=%.3g\n",
+        initial, peak, energy(), cumulativePositivePressure, peakMomentumResidual );
 }
 
 void checkFluidRateAndStaticObstacles()
@@ -546,6 +610,7 @@ int main()
     checkMovingSolidReaction();
     checkSynchronizedWindCoupling();
     checkPressurePredictedWorldVelocity();
+    checkNoSourceWindEnergyEnvelope();
     checkFluidRateAndStaticObstacles();
     checkRotatedSandboxObstacles();
     checkDragMomentumBudget();
