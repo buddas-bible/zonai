@@ -283,6 +283,13 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 for( std::size_t i = 0; i < windPressureForces_.size(); ++i )
                     windPressureForces_[i] = windObstacleFeedback_[i];
             }
+            else if( getWindStaticObstacleCount() > 0 )
+            {
+                // Dynamic Body 연성만 끈다. 배치된 Static 벽은 항상 유체 경계다.
+                windField_->step( windTimeStep,
+                    std::span<const fluidShapeObstacle2>( windObstacleSnapshots_ ).subspan( 3 ),
+                    std::span<fluidObstacleForce2>( windObstacleFeedback_ ).subspan( 3 ) );
+            }
             else windField_->step( windTimeStep );
     
             // Drag는 기존 유체 face를 갱신하기 전에 모든 Body의 상대속도로 계산한다.
