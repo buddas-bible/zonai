@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -231,6 +232,8 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
     {
         windDragBodyImpulse_ = {};
         windDragFluidImpulse_ = {};
+        windFluidMilliseconds_ = 0.0f;
+        windWorldMilliseconds_ = 0.0f;
     }
     std::array<fluidObstacleForce2, 3> summedPressureImpulse{};
     if( contactEventVisualizationEnabled_ ) syncContactEventSubscriptions();
@@ -240,6 +243,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
         const float windTimeStep = worldSubstepTime * worldSubsteps;
         if( windField_ && windTimeStep > 0.0f )
         {
+            const auto fluidStart = std::chrono::steady_clock::now();
             windTime_ += windTimeStep;
             if( windSourceEnabled_ )
             {
@@ -359,6 +363,8 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 world_.ApplyForceToCenter( visual.bodyHandle, dragForce );
                 windDragBodyImpulse_ += windTimeStep * dragForce;
             }
+            windFluidMilliseconds_ += std::chrono::duration<float, std::milli>(
+                std::chrono::steady_clock::now() - fluidStart ).count();
         }
         if( synchronizedWind )
         {
@@ -369,7 +375,10 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
             }
             // Contact/Joint solver 역시 같은 substep 경계에서 전진시켜
             // 다음 Fluid Step이 최신 위치·속도로 경계조건을 다시 계산하게 한다.
+            const auto worldStart = std::chrono::steady_clock::now();
             world_.Step( windTimeStep, worldSubsteps );
+            windWorldMilliseconds_ += std::chrono::duration<float, std::milli>(
+                std::chrono::steady_clock::now() - worldStart ).count();
         }
     }
     if( synchronizedWind )
@@ -379,7 +388,17 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
             windPressureForces_[i].torque = summedPressureImpulse[i].torque / timeStep;
         }
     // 새로 생성된 Shape에도 구독을 적용하되 표시를 끄면 순회 비용을 내지 않음.
-    if( !synchronizedWind ) world_.Step( timeStep, subStepCount );
+    if( !synchronizedWind )
+    {
+        if( windField_ )
+        {
+            const auto worldStart = std::chrono::steady_clock::now();
+            world_.Step( timeStep, subStepCount );
+            windWorldMilliseconds_ = std::chrono::duration<float, std::milli>(
+                std::chrono::steady_clock::now() - worldStart ).count();
+        }
+        else world_.Step( timeStep, subStepCount );
+    }
     if( contactEventVisualizationEnabled_ ) updateContactEventTrail( timeStep );
     if( kind_ == demoKind::splinePath && splinePathDistance_ == splinePathLength_ && world_.IsValid( impulseBody_ ) )
     {
