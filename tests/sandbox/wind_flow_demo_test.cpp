@@ -247,8 +247,11 @@ void checkSynchronizedWindCoupling()
     {
         scene.step( dt, 4 );
         const vec2 velocity = scene.getWorld().GetBodyLinearVelocity( moving );
-        check( scene.getWindField()->getPressureMomentum().usedCoupledProjection &&
-            !scene.getWindField()->getPressureMomentum().coupledSolveFailed &&
+        const fluidPressureMomentum2& pressure = scene.getWindField()->getPressureMomentum();
+        check( pressure.usedCoupledProjection &&
+            pressure.coupledStatus == fluidCoupledPressureStatus2::converged &&
+            !pressure.coupledSolveFailed &&
+            pressure.coupledRelativeResidual <= 1.0001e-5f &&
             IsFinite( velocity ) && IsFinite( scene.getWindPressureForces()[0].force ) &&
             std::isfinite( scene.getWindPressureForces()[0].torque ),
             "synchronized moving obstacle must keep finite velocity and pressure feedback over 120 frames" );
@@ -280,9 +283,12 @@ void checkFluidRateAndStaticObstacles()
     {
         scene.step( dt, 8 );
         const vec2 velocity = world.GetBodyLinearVelocity( dynamicBody );
+        const fluidPressureMomentum2& pressure = scene.getWindField()->getPressureMomentum();
         check( scene.getWindCouplingSteps() == 1 &&
-            scene.getWindField()->getPressureMomentum().usedCoupledProjection &&
-            !scene.getWindField()->getPressureMomentum().coupledSolveFailed &&
+            pressure.usedCoupledProjection &&
+            pressure.coupledStatus == fluidCoupledPressureStatus2::converged &&
+            !pressure.coupledSolveFailed &&
+            pressure.coupledRelativeResidual <= 1.0001e-5f &&
             IsFinite( velocity ) && Length( velocity ) < 20.0f,
             "one Fluid step with eight World substeps must avoid added-mass speed runaway" );
     }
