@@ -254,6 +254,12 @@ public:
     void setCutCellProjectionEnabled( bool enabled ) noexcept { cutCellProjectionEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellProjectionEnabled() const noexcept { return cutCellProjectionEnabled_; }
 
+    // 셀 내부 NxN 및 공유 MAC face N개를 모두 같은 공간 표본으로 계산한다.
+    // 지원 값은 4(기본) 또는 8. 변경 시 이전 형상/체적 이력을 무효화하여
+    // 표본 해상도 차이를 실제 물체 이동으로 계산하지 않는다.
+    void setCutCellSampleCount( int count ) noexcept;
+    [[nodiscard]] int getCutCellSampleCount() const noexcept { return cutCellSampleCount_; }
+
     // 실험적 Cut-cell/Body 유효질량 연립 PCG. 기본 OFF로 기존 Jacobi 경로 보존.
     // 수렴한 경우에만 Body 압력 반력을 돌려주며, 실패 시 해당 압력을 생략한다.
     void setCutCellCoupledProjectionEnabled( bool enabled ) noexcept { cutCellCoupledProjectionEnabled_ = enabled; }
@@ -459,6 +465,7 @@ private:
     bool sweptTracerRemapEnabled_ = false;
     bool sweptGeometryCorrectionEnabled_ = false;
     bool adaptiveSweptSamplingEnabled_ = false;
+    int cutCellSampleCount_ = 4;
     bool cutCellProjectionEnabled_ = false;
     bool cutCellCoupledProjectionEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
