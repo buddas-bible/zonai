@@ -194,8 +194,9 @@ void checkSynchronizedWindCoupling()
     scene.setWindSourceEnabled( false );
     scene.setWindDragCoefficient( 0.0f );
     scene.setWindObstacleCouplingEnabled( true );
-    check( scene.isWindSynchronizedCouplingEnabled(),
-        "wind sandbox must enable synchronized pressure coupling by default" );
+    check( scene.isWindSynchronizedCouplingEnabled() && scene.getWindFluidSubstepCount() == 1,
+        "mass-aware wind coupling must default to one expensive Fluid step independent of World substeps" );
+    scene.setWindFluidSubstepCount( 4 );
 
     const bodyId moving = scene.getShapes()[0].bodyHandle;
     scene.getWorld().SetBodyLinearVelocity( moving, { 2.0f, 0.0f } );
@@ -260,6 +261,81 @@ void checkSynchronizedWindCoupling()
             check( false, "synchronized pressure feedback must not accelerate a released body without wind source or drag without bound" );
         }
     }
+}
+
+void checkFluidRateAndStaticObstacles()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    const auto& world = scene.getWorld();
+    const bodyId dynamicBody = scene.getShapes()[0].bodyHandle;
+    world.SetBodyLinearVelocity( dynamicBody, { 2.0f, 0.0f } );
+    scene.step( dt, 8 );
+    check( scene.getWindCouplingSteps() == 1 &&
+        scene.getWindField()->getPressureMomentum().usedCoupledProjection,
+        "World substeps must not force additional Fluid projection when fluid rate is one" );
+    scene.resetWindFlow();
+    scene.setWindFluidSubstepCount( 2 );
+    world.SetBodyLinearVelocity( dynamicBody, { 2.0f, 0.0f } );
+    scene.step( dt, 8 );
+    check( scene.getWindCouplingSteps() == 2 &&
+        scene.getWindField()->getPressureMomentum().usedCoupledProjection,
+        "two Fluid exchanges must group eight World substeps without disabling coupled pressure" );
+    scene.setWindFluidSubstepCount( 32 );
+    scene.step( dt, 3 );
+    check( scene.getWindCouplingSteps() == 3,
+        "Fluid exchange count must never exceed the World substeps in one external step" );
+    scene.setWindFluidSubstepCount( 1 );
+    scene.resetWindFlow();
+
+    const shapeId fixedBox = scene.addWindStaticBox( { -3.0f, 0.0f }, { 0.45f, 0.4f } );
+    const shapeId fixedCircle = scene.addWindStaticCircle( { 1.5f, -1.0f }, 0.65f );
+    check( world.IsValid( fixedBox ) && world.IsValid( fixedCircle ) &&
+        scene.getWindStaticObstacleCount() == 2 && scene.getShapes().size() == 5,
+        "Static wind objects must be created as real World shapes" );
+    const bodyId fixedBody = scene.getShapes()[3].bodyHandle;
+    check( world.GetBody( fixedBody ).type == bodyType::Static,
+        "Static wind obstacle must use World::Static for collision and mass behaviour" );
+    const vec2 fixedPosition = world.GetBodyTransform( fixedBody ).position;
+    scene.step( dt, 8 );
+    check( scene.getWindField()->isSolidCell( 6, 7 ) &&
+        scene.getWindField()->isSolidCell( 15, 5 ) &&
+        near( world.GetBodyTransform( fixedBody ).position, fixedPosition ),
+        "both static box and circle must block fluid and remain unmoved" );
+
+    scene.setWindConservativeAdvectionEnabled( true );
+    scene.setWindFluidSubstepCount( 2 );
+    scene.configureWindField( 32, 20, 0.5f );
+    check( scene.getWindField()->getWidth() == 32 &&
+        scene.getWindField()->getHeight() == 20 &&
+        close( scene.getWindField()->getCellSize(), 0.5f ) &&
+        scene.getWindField()->isConservativeAdvectionEnabled() &&
+        scene.getWindStaticObstacleCount() == 2 &&
+        near( world.GetBodyTransform( fixedBody ).position, fixedPosition ),
+        "resizing Fluid Field must retain static World geometry and mode selection" );
+    scene.step( dt, 4 );
+    check( scene.getWindCouplingSteps() == 2 &&
+        scene.getWindField()->isSolidCell( 10, 10 ),
+        "resized Fluid grid must sample existing Static obstacles in new coordinates" );
+
+    check( scene.removeWindStaticObstacle( fixedBox ) &&
+        !world.IsValid( fixedBox ) && scene.getWindStaticObstacleCount() == 1,
+        "removing Static obstacle must remove its collision shape from World" );
+    scene.step( dt, 8 );
+    check( !scene.getWindField()->isSolidCell( 10, 10 ) &&
+        world.IsValid( fixedCircle ) &&
+        !scene.removeWindStaticObstacle( scene.getShapes()[0].shapeHandle ),
+        "removed static geometry must disappear from Fluid while dynamic objects remain protected" );
+
+    scene.configureWindField( 16, 12, 0.25f );
+    scene.setWindSourceEnabled( true );
+    scene.step( dt, 8 );
+    check( scene.getWindField()->getWidth() == 16 &&
+        scene.getWindField()->getHeight() == 12 &&
+        IsFinite( scene.getWindField()->sampleVelocity( { -1.0f, 0.0f } ) ),
+        "small resized Fluid domain must accept wind sources without nonfinite results" );
 }
 
 void checkPressureLedgerInSandbox()
@@ -410,6 +486,7 @@ int main()
     checkFluidCoupling();
     checkMovingSolidReaction();
     checkSynchronizedWindCoupling();
+    checkFluidRateAndStaticObstacles();
     checkRotatedSandboxObstacles();
     checkDragMomentumBudget();
     checkPressureLedgerInSandbox();
