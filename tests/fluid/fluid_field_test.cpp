@@ -785,6 +785,69 @@ void checkWeightedCutCellPressure()
         "clear should reset diagnostics but retain the selected pressure mode" );
 }
 
+void checkCutCellCoupledPressure()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    const fluidShapeObstacle2 moving{
+        MakeBox( { 0.85f, 0.35f } ),
+        { { 0.1f, -0.15f }, rot2::FromRadians( 0.25f ) },
+        { 0.1f, -0.15f }, { 1.2f, -0.35f }, 0.8f, 0.5f, 2.0f
+    };
+    std::array<fluidObstacleForce2, 1> feedback{};
+    const auto seed = [&]( fluidField2& field )
+    {
+        field.setCutCellProjectionEnabled( true );
+        field.addVelocity( { -1.2f, 0.0f }, { 1.5f, -0.3f }, 1.25f );
+    };
+
+    fluidField2 coupled{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    seed( coupled );
+    check( !coupled.isCutCellCoupledProjectionEnabled(),
+        "cut-cell mass-aware projection must be opt-in" );
+    coupled.setCutCellCoupledProjectionEnabled( true );
+    coupled.step( dt, std::span<const fluidShapeObstacle2>( &moving, 1 ), feedback, 200 );
+    const fluidCutCellPressure2 stats = coupled.getCutCellPressure();
+    check( stats.usedCoupledProjection && !stats.coupledSolveFailed &&
+        stats.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        stats.coupledRelativeResidual < 1.1e-5f && stats.activeCells > 0 &&
+        std::isfinite( stats.pressureResidual ) &&
+        LengthSquared( feedback[0].force ) > 1.0e-6f &&
+        IsFinite( feedback[0].force ) && std::isfinite( feedback[0].torque ),
+        "weighted mass-aware pressure must converge and return finite rigid feedback" );
+    check( LengthSquared( coupled.getPressureMomentum().residual() ) == 0.0f &&
+        !coupled.getPressureMomentum().usedCoupledProjection,
+        "cut-cell coupled pressure must not populate the binary MAC momentum ledger" );
+
+    fluidField2 limited{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    seed( limited );
+    limited.setCutCellCoupledProjectionEnabled( true );
+    limited.step( dt, std::span<const fluidShapeObstacle2>( &moving, 1 ), feedback, 1 );
+    const fluidCutCellPressure2 failure = limited.getCutCellPressure();
+    check( !failure.usedCoupledProjection && failure.coupledSolveFailed &&
+        failure.coupledStatus == fluidCoupledPressureStatus2::iterationLimit &&
+        LengthSquared( feedback[0].force ) == 0.0f && feedback[0].torque == 0.0f,
+        "failed weighted PCG must not inject uncoupled pressure into a movable body" );
+
+    // 역질량을 주지 않은 기존 형상과 비결합 경로는 변경하지 않는다.
+    fluidField2 legacy{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    seed( legacy );
+    legacy.setCutCellCoupledProjectionEnabled( true );
+    fluidShapeObstacle2 fixed = moving;
+    fixed.inverseMass = 0.0f;
+    fixed.inverseInertia = 0.0f;
+    legacy.step( dt, std::span<const fluidShapeObstacle2>( &fixed, 1 ), feedback, 200 );
+    check( legacy.getCutCellPressure().coupledStatus == fluidCoupledPressureStatus2::notRequested &&
+        !legacy.getCutCellPressure().usedCoupledProjection &&
+        !legacy.getCutCellPressure().coupledSolveFailed &&
+        IsFinite( feedback[0].force ),
+        "massless cut-cell obstacles must retain the legacy weighted pressure path" );
+
+    coupled.clear();
+    check( coupled.isCutCellCoupledProjectionEnabled() &&
+        coupled.getCutCellPressure().coupledStatus == fluidCoupledPressureStatus2::notRequested,
+        "clear must retain the opted-in solver choice but reset coupled diagnostics" );
+}
+
 void checkCutCellTemporalContinuity()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1290,6 +1353,7 @@ int main()
     checkCoupledPressureEnergyAudit();
     checkFractionalCutCells();
     checkWeightedCutCellPressure();
+    checkCutCellCoupledPressure();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkConservativeMacAdvection();
