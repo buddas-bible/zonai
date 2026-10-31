@@ -215,8 +215,8 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
         torqueTrialTime_ += timeStep;
     }
     updateSplinePath( timeStep );
-    // Fluid와 강체의 외부 Step을 동일한 dt로 교대 전진시킨다. 이 옵션은
-    // Sandbox 전용의 시간 동기화 실험이며 implicit added-mass 결합은 아니다.
+    // World solver의 작은 Substep은 유지하되 Fluid는 독립된 횟수로 실행한다.
+    // 이진 MAC의 질량·관성 결합 압력 Solver는 Fluid 1회에서도 사용한다.
     // Cut-cell은 아직 Body 유효질량을 압력 행렬에 결합하지 않으므로
     // explicit 압력 반력을 더 자주 주입하는 동기화를 사용하지 않는다.
     const bool coupledPressureEnabled = windField_ && windObstacleCouplingEnabled_ &&
@@ -303,7 +303,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
             std::array<float, 3> dragRadii{};
             const float spacing = windField_->getCellSize();
     
-            for( std::size_t i = 0; i < obstacleCount; ++i )
+            for( std::size_t i = 0; i < windPressureForces_.size(); ++i )
             {
                 const visualShape& visual = shapes_[i];
                 if( !world_.IsValid( visual.bodyHandle ) ||
@@ -336,7 +336,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
     
             // 압력 traction은 별도 근사. 여기서는 Drag에 한해 유체/Body 충격량을 쌍으로 적용.
             // World::Step에서 Body force가 소비되기 전에, 유체가 실제로 받은 -J 만큼만 Body에 +J를 줌.
-            for( std::size_t i = 0; i < obstacleCount; ++i )
+            for( std::size_t i = 0; i < windPressureForces_.size(); ++i )
             {
                 const visualShape& visual = shapes_[i];
                 if( !world_.IsValid( visual.bodyHandle ) ||
