@@ -248,6 +248,10 @@ public:
 #pragma region Simulation
     void clear() noexcept;
 
+    // 장애물 수/구성이나 이산 기하 규칙이 바뀌면 첫 새 snapshot을
+    // 이전 체적과 차분하지 않는다. 유체 속도·Tracer는 초기화하지 않음.
+    void invalidateObstacleHistory() noexcept;
+
     // 실험 모드: sub-cell 개방 비율의 유량과 가중 압력 Poisson 사용.
     // 기본은 기존 이진 solid 압력 solver. 위치 snapshot의 체적 변화율만 근사하며
     // 정확한 swept-volume 경로/보존형 이류는 아직 구현하지 않음.
