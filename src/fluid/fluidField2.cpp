@@ -586,9 +586,35 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
         };
         const auto isOccupied = [&]( vec2 point ) { return firstOwner( point ) >= 0; };
 
+        // 대부분의 셀/face는 장애물 바깥이다. 보수적 원형 경계의 AABB와
+        // 대상 셀/면 구간이 만나지 않으면 공간 N×N 표본 검사를 생략한다.
+        // 반경 여유는 경계 부동소수점 오차로 인한 누락을 막는다.
+        const auto mayOverlap = [&]( vec2 center, vec2 halfSize )
+        {
+            constexpr double tolerance = 1.0e-5;
+            for( std::size_t i = 0; i < obstacles.size(); ++i )
+            {
+                if( bounds[i] < 0.0 ) continue;
+                const vec2 body = obstacles[i].transform.position;
+                if( std::abs( static_cast<double>( center.x ) - body.x ) >
+                        bounds[i] + halfSize.x + tolerance ||
+                    std::abs( static_cast<double>( center.y ) - body.y ) >
+                        bounds[i] + halfSize.y + tolerance ) continue;
+                return true;
+            }
+            return false;
+        };
+
         for( int y = 0; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
             {
+                const vec2 center = origin_ + cellSize_ * vec2{
+                    static_cast<float>( x ) + 0.5f, static_cast<float>( y ) + 0.5f };
+                if( !mayOverlap( center, { 0.5f * cellSize_, 0.5f * cellSize_ } ) )
+                {
+                    cellFluidFraction_[cellIndex( x, y )] = 1.0f;
+                    continue;
+                }
                 int covered = 0;
                 for( int sy = 0; sy < sampleCount; ++sy )
                     for( int sx = 0; sx < sampleCount; ++sx )
@@ -604,6 +630,13 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
         for( int y = 0; y < height_; ++y )
             for( int x = 1; x < width_; ++x )
             {
+                const vec2 center = origin_ + cellSize_ * vec2{
+                    static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
+                if( !mayOverlap( center, { 0.0f, 0.5f * cellSize_ } ) )
+                {
+                    uOpenFraction_[uIndex( x, y )] = 1.0f;
+                    continue;
+                }
                 int blocked = 0;
                 for( int sample = 0; sample < sampleCount; ++sample )
                 {
@@ -625,6 +658,13 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
         for( int y = 1; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
             {
+                const vec2 center = origin_ + cellSize_ * vec2{
+                    static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
+                if( !mayOverlap( center, { 0.5f * cellSize_, 0.0f } ) )
+                {
+                    vOpenFraction_[vIndex( x, y )] = 1.0f;
+                    continue;
+                }
                 int blocked = 0;
                 for( int sample = 0; sample < sampleCount; ++sample )
                 {
