@@ -1429,8 +1429,7 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
     std::fill( sweptUVolume_.begin(), sweptUVolume_.end(), 0.0f );
     std::fill( sweptVVolume_.begin(), sweptVVolume_.end(), 0.0f );
 
-    // Shape의 추가/삭제, 기하 변경, 도메인 관통은 swept 경로로 간주하지 않는다.
-    // 슬롯(index)이 지속되는 장애물만 선형 이동 + 최단 회전각 보간으로 추적한다.
+    // 인덱스가 유지되고 기하가 같으며 도메인 바깥을 가로지르지 않은 shape만 추적.
     if( !volumeSourceValid_ || obstacles.empty() || previousObstacles_.size() != obstacles.size() ) return;
 
     const float limitX = origin_.x + width_ * cellSize_;
@@ -1438,88 +1437,151 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
     std::vector<vec2> linearSpeeds( obstacles.size() );
     std::vector<float> startAngles( obstacles.size() );
     std::vector<float> angularSpeeds( obstacles.size() );
+    std::vector<double> bounds( obstacles.size() );
     float maximumTravel = 0.0f;
     for( std::size_t i = 0; i < obstacles.size(); ++i )
     {
         const auto& start = previousObstacles_[i];
-        const auto& end = obstacles[i];
-        if( !IsValidFluidObstacle( start ) || !IsValidFluidObstacle( end ) ||
-            !HasSameFluidGeometry( start.geometry, end.geometry ) ) return;
-        const float radius = FluidGeometryRadius( end.geometry );
+        const auto& finish = obstacles[i];
+        if( !IsValidFluidObstacle( start ) || !IsValidFluidObstacle( finish ) ||
+            !HasSameFluidGeometry( start.geometry, finish.geometry ) ) return;
+        const float radius = FluidGeometryRadius( finish.geometry );
         if( !std::isfinite( radius ) || radius < 0.0f ) return;
-        for( const fluidShapeObstacle2* shape : { &start, &end } )
+        for( const fluidShapeObstacle2* shape : { &start, &finish } )
         {
             const vec2 p = shape->transform.position;
             if( p.x - radius <= origin_.x || p.x + radius >= limitX ||
                 p.y - radius <= origin_.y || p.y + radius >= limitY ) return;
         }
 
-        const vec2 displacement = end.transform.position - start.transform.position;
+        const vec2 displacement = finish.transform.position - start.transform.position;
         linearSpeeds[i] = displacement / timeStep;
         const float startAngle = std::atan2( start.transform.rotation.s, start.transform.rotation.c );
-        const float endAngle = std::atan2( end.transform.rotation.s, end.transform.rotation.c );
+        const float endAngle = std::atan2( finish.transform.rotation.s, finish.transform.rotation.c );
         const float deltaAngle = std::remainder( endAngle - startAngle, 2.0f * std::numbers::pi_v<float> );
         startAngles[i] = startAngle;
         angularSpeeds[i] = deltaAngle / timeStep;
+        bounds[i] = FluidObstacleBoundRadius( finish );
         maximumTravel = std::max( maximumTravel, Length( displacement ) + std::abs( deltaAngle ) * radius );
     }
 
+    sweptFaceFlux_.usedSweptFlux = true;
+    // 정적 장애물이 많은 장면에서 매 step 전 격자·4 sub-face를 검사할 필요가 없다.
+    // 유효한 동일 geometry가 정지했다면 swept flux는 정확히 0이다.
+    if( maximumTravel == 0.0f )
+    {
+        sweptFaceFlux_.timeSamples = 1;
+        return;
+    }
+
     constexpr int faceSamples = 4;
-    const int timeSamples = std::clamp( static_cast<int>( std::ceil( maximumTravel / ( 0.25f * cellSize_ ) ) ), 1, 32 );
-    const float weight = timeStep * cellSize_ / ( timeSamples * faceSamples );
+    constexpr int maxTimeSamples = 64;
+    int timeSamples = std::clamp(
+        static_cast<int>( std::ceil( maximumTravel / ( 0.25f * cellSize_ ) ) ), 1, 32 );
     std::vector<fluidShapeObstacle2> intermediate( obstacles.begin(), obstacles.end() );
 
-    // 하나의 공유 MAC face는 시간·길이 표본에서 한 번만 적분한다.
-    // Solid 내부의 강체 속도는 v_origin + omega x (point - origin).
-    // 동일 면을 양쪽 셀이 같은 값과 반대 부호로 사용해 국소 보존성을 유지한다.
-    for( int step = 0; step < timeSamples; ++step )
+    const auto integrate = [&]( int samples, std::vector<float>& sweptU, std::vector<float>& sweptV )
     {
-        const float alpha = ( step + 0.5f ) / timeSamples;
-        for( std::size_t i = 0; i < obstacles.size(); ++i )
+        std::fill( sweptU.begin(), sweptU.end(), 0.0f );
+        std::fill( sweptV.begin(), sweptV.end(), 0.0f );
+        const float weight = timeStep * cellSize_ / ( samples * faceSamples );
+        for( int step = 0; step < samples; ++step )
         {
-            const auto& start = previousObstacles_[i];
-            const auto& end = obstacles[i];
-            intermediate[i].transform.position =
-                start.transform.position + alpha * ( end.transform.position - start.transform.position );
-            intermediate[i].transform.rotation =
-                rot2::FromRadians( startAngles[i] + angularSpeeds[i] * timeStep * alpha );
-        }
-
-        const auto normalSpeed = [&]( vec2 point, bool horizontal )
-        {
-            for( std::size_t i = 0; i < intermediate.size(); ++i )
+            const float alpha = ( step + 0.5f ) / samples;
+            for( std::size_t i = 0; i < obstacles.size(); ++i )
             {
-                if( !ContainsFluidObstacle( intermediate[i], point ) ) continue;
-                const vec2 velocity = linearSpeeds[i] +
-                    Cross( angularSpeeds[i], point - intermediate[i].transform.position );
-                return horizontal ? velocity.x : velocity.y;
+                const auto& start = previousObstacles_[i];
+                const auto& finish = obstacles[i];
+                intermediate[i].transform.position =
+                    start.transform.position + alpha * ( finish.transform.position - start.transform.position );
+                intermediate[i].transform.rotation =
+                    rot2::FromRadians( startAngles[i] + angularSpeeds[i] * timeStep * alpha );
             }
-            return 0.0f;
+
+            const auto normalSpeed = [&]( vec2 point, bool horizontal )
+            {
+                for( std::size_t i = 0; i < intermediate.size(); ++i )
+                {
+                    const vec2 center = intermediate[i].transform.position;
+                    // 미리 계산한 보수적 geometry radius: 원거리 static obstacle Contains 검사 생략.
+                    if( std::abs( static_cast<double>( point.x ) - center.x ) > bounds[i] ||
+                        std::abs( static_cast<double>( point.y ) - center.y ) > bounds[i] ) continue;
+                    if( !ContainsFluidObstacle( intermediate[i], point ) ) continue;
+                    const vec2 velocity = linearSpeeds[i] +
+                        Cross( angularSpeeds[i], point - center );
+                    return horizontal ? velocity.x : velocity.y;
+                }
+                return 0.0f;
+            };
+            for( int y = 0; y < height_; ++y )
+                for( int x = 1; x < width_; ++x )
+                    for( int sample = 0; sample < faceSamples; ++sample )
+                    {
+                        const vec2 point = origin_ + cellSize_ * vec2{
+                            static_cast<float>( x ), static_cast<float>( y ) + ( sample + 0.5f ) / faceSamples };
+                        sweptU[uIndex( x, y )] += weight * normalSpeed( point, true );
+                    }
+            for( int y = 1; y < height_; ++y )
+                for( int x = 0; x < width_; ++x )
+                    for( int sample = 0; sample < faceSamples; ++sample )
+                    {
+                        const vec2 point = origin_ + cellSize_ * vec2{
+                            static_cast<float>( x ) + ( sample + 0.5f ) / faceSamples, static_cast<float>( y ) };
+                        sweptV[vIndex( x, y )] += weight * normalSpeed( point, false );
+                    }
+        }
+    };
+
+    integrate( timeSamples, sweptUVolume_, sweptVVolume_ );
+    if( adaptiveSweptSamplingEnabled_ )
+    {
+        // 스냅샷의 sub-cell ΔV와 swept face divergence가 최대한 일치하는
+        // 표본만 채택한다. face마다 임의 보정하지 않고 공유 face 유량을 유지.
+        const double area = static_cast<double>( cellSize_ ) * cellSize_;
+        const auto mismatch = [&]( const std::vector<float>& sweptU, const std::vector<float>& sweptV )
+        {
+            double sum = 0.0;
+            for( int y = 0; y < height_; ++y )
+                for( int x = 0; x < width_; ++x )
+                {
+                    const int cell = cellIndex( x, y );
+                    const double snapshot =
+                        static_cast<double>( cellFluidFraction_[cell] - previousCellFluidFraction_[cell] ) * area;
+                    const double flux =
+                        static_cast<double>( sweptU[uIndex( x + 1, y )] ) - sweptU[uIndex( x, y )] +
+                        static_cast<double>( sweptV[vIndex( x, y + 1 )] ) - sweptV[vIndex( x, y )];
+                    sum += std::abs( snapshot - flux );
+                }
+            return sum;
         };
 
-        for( int y = 0; y < height_; ++y )
-            for( int x = 1; x < width_; ++x )
-                for( int sample = 0; sample < faceSamples; ++sample )
-                {
-                    const vec2 point = origin_ + cellSize_ * vec2{
-                        static_cast<float>( x ), static_cast<float>( y ) + ( sample + 0.5f ) / faceSamples };
-                    sweptUVolume_[uIndex( x, y )] += weight * normalSpeed( point, true );
-                }
-
-        for( int y = 1; y < height_; ++y )
-            for( int x = 0; x < width_; ++x )
-                for( int sample = 0; sample < faceSamples; ++sample )
-                {
-                    const vec2 point = origin_ + cellSize_ * vec2{
-                        static_cast<float>( x ) + ( sample + 0.5f ) / faceSamples, static_cast<float>( y ) };
-                    sweptVVolume_[vIndex( x, y )] += weight * normalSpeed( point, false );
-                }
+        double bestMismatch = mismatch( sweptUVolume_, sweptVVolume_ );
+        sweptFaceFlux_.initialTimeSamples = timeSamples;
+        sweptFaceFlux_.initialGeometryMismatch = static_cast<float>( bestMismatch );
+        if( bestMismatch > 1.0e-7 )
+        {
+            std::vector<float> trialU( sweptUVolume_.size() );
+            std::vector<float> trialV( sweptVVolume_.size() );
+            // 적응 검사는 opt-in에서만 수행. 개선이 멈추면 더 비싼 샘플을 실행하지 않는다.
+            for( int refine = 0; refine < 3 && timeSamples < maxTimeSamples; ++refine )
+            {
+                const int candidateSamples = std::min( 2 * timeSamples, maxTimeSamples );
+                integrate( candidateSamples, trialU, trialV );
+                const double candidateMismatch = mismatch( trialU, trialV );
+                const double minimumImprovement = std::max( 1.0e-7, bestMismatch * 1.0e-4 );
+                if( candidateMismatch + minimumImprovement >= bestMismatch ) break;
+                sweptUVolume_.swap( trialU );
+                sweptVVolume_.swap( trialV );
+                bestMismatch = candidateMismatch;
+                timeSamples = candidateSamples;
+                ++sweptFaceFlux_.refinements;
+            }
+        }
     }
 
     double absoluteFlux = 0.0;
     for( const float flux : sweptUVolume_ ) absoluteFlux += std::abs( flux );
     for( const float flux : sweptVVolume_ ) absoluteFlux += std::abs( flux );
-    sweptFaceFlux_.usedSweptFlux = true;
     sweptFaceFlux_.timeSamples = timeSamples;
     sweptFaceFlux_.totalAbsoluteFlux = static_cast<float>( absoluteFlux );
 }

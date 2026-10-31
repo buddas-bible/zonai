@@ -1368,6 +1368,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     const bool cutCellCoupled = windField_->isCutCellCoupledProjectionEnabled();
     const bool conservative = windField_->isConservativeAdvectionEnabled();
     const bool geometryCorrection = windField_->isSweptGeometryCorrectionEnabled();
+    const bool adaptiveSwept = windField_->isAdaptiveSweptSamplingEnabled();
     const bool sweptTracer = windField_->isSweptTracerRemapEnabled();
 
     // Field 크기 변경은 이전 유체 해를 폐기한다. World와 Static 장애물은 유지한다.
@@ -1377,6 +1378,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     windField_->setCutCellCoupledProjectionEnabled( cutCellCoupled );
     windField_->setConservativeAdvectionEnabled( conservative );
     windField_->setSweptGeometryCorrectionEnabled( geometryCorrection );
+    windField_->setAdaptiveSweptSamplingEnabled( adaptiveSwept );
     windField_->setSweptTracerRemapEnabled( sweptTracer );
     resetWindFlow();
 }

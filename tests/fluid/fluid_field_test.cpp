@@ -1169,6 +1169,74 @@ void checkSweptSolidFaceFlux()
         "clear must reset swept volume diagnostics and previous shape history" );
 }
 
+void checkAdaptiveSweptTemporalQuadrature()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    const std::array<vec2, 3> translations{
+        vec2{ 0.32f, 0.12f }, vec2{ 0.85f, -0.14f }, vec2{ -0.64f, 0.27f }
+    };
+    const std::array<float, 3> rotations{ 0.27f, 0.67f, -0.82f };
+    for( std::size_t trial = 0; trial < translations.size(); ++trial )
+    {
+        fluidField2 standard{ 20, 18, 0.5f, { -5.0f, -4.5f } };
+        fluidField2 adaptive{ 20, 18, 0.5f, { -5.0f, -4.5f } };
+        standard.setCutCellProjectionEnabled( true );
+        adaptive.setCutCellProjectionEnabled( true );
+        adaptive.setAdaptiveSweptSamplingEnabled( true );
+        fluidShapeObstacle2 polygon{
+            MakeBox( { 0.81f, 0.28f } ),
+            { { -0.93f, -0.42f }, rot2::FromRadians( 0.13f ) },
+            { -0.93f, -0.42f }, {}, 0.0f
+        };
+        std::array<fluidObstacleForce2, 1> forces{};
+        for( fluidField2* field : { &standard, &adaptive } )
+            field->step( dt, std::span<const fluidShapeObstacle2>( &polygon, 1 ), forces, 40 );
+        polygon.transform.position += translations[trial];
+        polygon.center = polygon.transform.position;
+        polygon.transform.rotation = rot2::FromRadians( 0.13f + rotations[trial] );
+        for( fluidField2* field : { &standard, &adaptive } )
+            field->step( dt, std::span<const fluidShapeObstacle2>( &polygon, 1 ), forces, 40 );
+
+        const fluidSweptFaceFlux2& basic = standard.getSweptFaceFlux();
+        const fluidSweptFaceFlux2& refined = adaptive.getSweptFaceFlux();
+        check( basic.usedSweptFlux && refined.usedSweptFlux &&
+            basic.timeSamples == refined.initialTimeSamples &&
+            refined.timeSamples >= basic.timeSamples &&
+            refined.timeSamples <= 64 && refined.refinements >= 0 &&
+            std::isfinite( refined.geometryMismatch ) &&
+            std::abs( basic.geometryMismatch - refined.initialGeometryMismatch ) < 1.0e-4f &&
+            refined.geometryMismatch <= basic.geometryMismatch + 1.0e-5f,
+            "adaptive swept temporal quadrature must never worsen measured cell geometry mismatch" );
+        if( refined.refinements > 0 )
+        {
+            check( refined.geometryMismatch < refined.initialGeometryMismatch &&
+                refined.timeSamples > refined.initialTimeSamples,
+                "adaptive swept quadrature must accept only strictly beneficial refinements" );
+        }
+    }
+
+    fluidField2 staticField{ 20, 18, 0.5f, { -5.0f, -4.5f } };
+    staticField.setCutCellProjectionEnabled( true );
+    staticField.setAdaptiveSweptSamplingEnabled( true );
+    fluidShapeObstacle2 stationary{
+        circle2{ {}, 0.8f }, { { 0.0f, 0.0f }, {} }, {}, {}, 0.0f
+    };
+    std::array<fluidObstacleForce2, 1> forces{};
+    staticField.step( dt, std::span<const fluidShapeObstacle2>( &stationary, 1 ), forces, 40 );
+    staticField.step( dt, std::span<const fluidShapeObstacle2>( &stationary, 1 ), forces, 40 );
+    check( staticField.getSweptFaceFlux().usedSweptFlux &&
+        staticField.getSweptFaceFlux().timeSamples == 1 &&
+        staticField.getSweptFaceFlux().initialTimeSamples == 0 &&
+        staticField.getSweptFaceFlux().refinements == 0 &&
+        staticField.getSweptFaceFlux().totalAbsoluteFlux == 0.0f,
+        "static solid should skip all temporal face integration even in adaptive mode" );
+    staticField.clear();
+    check( staticField.isAdaptiveSweptSamplingEnabled() &&
+        !staticField.getSweptFaceFlux().usedSweptFlux &&
+        staticField.getSweptFaceFlux().refinements == 0,
+        "clearing field must keep optional adaptive setting and reset quadrature statistics" );
+}
+
 void checkConservativeMacAdvection()
 {
     constexpr float dt = 1.0f / 30.0f;
@@ -1511,6 +1579,7 @@ int main()
     checkCoupledCutCellAdjointContinuity();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
+    checkAdaptiveSweptTemporalQuadrature();
     checkConservativeMacAdvection();
     checkConservativeTracerTransport();
     checkSweptTracerRemap();

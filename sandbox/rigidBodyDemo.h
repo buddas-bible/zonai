@@ -297,6 +297,14 @@ public:
     {
         return windField_ && windField_->isSweptGeometryCorrectionEnabled();
     }
+    void setWindAdaptiveSweptSamplingEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setAdaptiveSweptSamplingEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindAdaptiveSweptSamplingEnabled() const noexcept
+    {
+        return windField_ && windField_->isAdaptiveSweptSamplingEnabled();
+    }
     void setWindSweptTracerRemapEnabled( bool enabled ) noexcept
     {
         if( windField_ ) windField_->setSweptTracerRemapEnabled( enabled );

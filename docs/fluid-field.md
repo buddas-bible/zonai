@@ -339,6 +339,17 @@ Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들�
 
 **주의:** 이 검증은 형상 snapshot과 solver source 사이의 *중복 유량 방지* 회귀 테스트다. 장기 전체 물리 에너지 보존, swept surface의 정확한 연속 적분, 자유 수면/물의 체적 보존까지 보증하지 않는다.
 
+## Part 13l — 선택형 Swept 면 시간 적응 표본
+
+- 기존 moving-solid swept face quadrature는 총 이동량/격자 크기로 1–32개 시간 표본을 한 번 선택했다. 이 적분은 공유 MAC 면에 4개 공간 표본을 사용하므로 보존적인 내부 면 유량이지만, **셀 sub-cell 점유율의 시작·종료 snapshot 변화와 시간 적분 flux divergence 사이의 오차**가 생길 수 있다.
+- `setAdaptiveSweptSamplingEnabled(true)`를 켜면 먼저 기존 시간 표본으로 적분하고, **셀별 `|ΔV_snapshot - div(sweptFaceVolume)|`의 L1 합**을 측정한다. 오차가 충분히 크면 시간 표본을 최대 3차례 2배씩(상한 64) 늘려 다시 적분한다. 오차가 실제로 줄어든 표본만 채택한다. 개선이 중단되면 더 이상 반복하지 않는다. 기본값은 false이며 기존 결과·비용은 그대로다.
+- 같은 공유 면에 대해 하나의 swept U/V 값을 사용하는 규칙을 그대로 유지한다. 표본 재계산은 **실제 body 경로 속도의 시간 적분**일 뿐, 압력 단계의 예측 `predictedSolidVolumeL1`을 이력이나 swept flux에 다시 더하지 않는다.
+- 정지한 동일 geometry는 1개 시간 표본으로 결과를 표시하지만 실제 면 적분 그리드 순회를 생략하고 모두 0으로 유지한다. 움직이는 장면에서는 사전 보수적 bounding radius로 원거리 Shape의 `Contains` 검사도 생략한다.
+- `fluidSweptFaceFlux2.initialTimeSamples`, `refinements`, `initialGeometryMismatch` 진단을 추가했다. `geometryMismatch`는 최종 채택한 적분(그리고 기존 선택형 국소 보정 이후)의 L1 오차다. Sandbox는 checkbox 및 비교 통계를 표시하고 Field 리사이즈 시 옵션을 보존한다.
+- 별도 유체 회귀 테스트는 다각형의 다양한 병진·회전, 정적 장애물의 적분 생략, `clear()` 이후 설정 유지, 시간 세분화로 인한 오차 비증가를 확인한다.
+
+**제한:** 시간 표본을 늘린다고 4개 공간 표본의 cut interface 근사나 discrete snapshot 자체의 aliasing이 없어지는 것은 아니다. 회전·고속 이동에서 비용이 증가하며 오차가 개선되지 않을 경우 원래 표본을 채택한다. 이것은 moving-boundary의 완전한 기하 보존 또는 전체 FSI 에너지·질량 보존 증명이 아니다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
