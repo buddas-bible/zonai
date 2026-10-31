@@ -276,6 +276,16 @@ void checkFluidRateAndStaticObstacles()
     check( scene.getWindCouplingSteps() == 1 &&
         scene.getWindField()->getPressureMomentum().usedCoupledProjection,
         "World substeps must not force additional Fluid projection when fluid rate is one" );
+    for( int frame = 0; frame < 120; ++frame )
+    {
+        scene.step( dt, 8 );
+        const vec2 velocity = world.GetBodyLinearVelocity( dynamicBody );
+        check( scene.getWindCouplingSteps() == 1 &&
+            scene.getWindField()->getPressureMomentum().usedCoupledProjection &&
+            !scene.getWindField()->getPressureMomentum().coupledSolveFailed &&
+            IsFinite( velocity ) && Length( velocity ) < 20.0f,
+            "one Fluid step with eight World substeps must avoid added-mass speed runaway" );
+    }
     scene.resetWindFlow();
     scene.setWindFluidSubstepCount( 2 );
     world.SetBodyLinearVelocity( dynamicBody, { 2.0f, 0.0f } );
