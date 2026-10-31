@@ -308,6 +308,12 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 const vec2 center = TransformPoint( world_.GetBodyTransform( visual.bodyHandle ),
                     world_.GetBodyLocalCenter( visual.bodyHandle ) );
                 const float radius = std::max( Length( Extents( world_.GetShapeAABB( visual.shapeHandle ) ) ), spacing );
+                const vec2 fieldMin = windField_->getOrigin();
+                const vec2 fieldMax = fieldMin + spacing * vec2{
+                    static_cast<float>( windField_->getWidth() ), static_cast<float>( windField_->getHeight() ) };
+                // Field 바깥에는 이 모델의 유체가 없다. 샘플 경계값을 외부 물체에 투영하지 않는다.
+                if( center.x + radius < fieldMin.x || center.y + radius < fieldMin.y ||
+                    center.x - radius > fieldMax.x || center.y - radius > fieldMax.y ) continue;
                 const float distance = radius + spacing;
                 vec2 fluidVelocity = windField_->sampleVelocity( center );
                 if( windObstacleCouplingEnabled_ )
