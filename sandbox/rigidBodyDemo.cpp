@@ -349,7 +349,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 }
     
                 vec2 dragForce = dragForces[i];
-                if( windObstacleCouplingEnabled_ )
+                if( windObstacleCouplingEnabled_ && LengthSquared( dragForce ) > 0.0f )
                 {
                     const vec2 upstream = dragCenters[i] -
                         ( dragRadii[i] + spacing ) * Normalize( dragForce );
