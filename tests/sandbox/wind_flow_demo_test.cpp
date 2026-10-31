@@ -609,6 +609,57 @@ void checkExperimentalCutCellWorldCoupling()
         "one-way field with optional static obstacles must not silently insert dynamic-body inverse masses" );
 }
 
+void checkMovingCutCellSweptVolumeLedger()
+{
+    // World의 실제 pose 이동만 다음 Fluid 구간의 기하 ΔV를 만든다.
+    // 압력 단계에서 예측한 추가 boundary swept volume은 진단용이며,
+    // 실제 snapshot ΔV에 다시 더해져서는 안 된다.
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindCutCellCoupledProjectionEnabled( true );
+    scene.setWindSynchronizedCouplingEnabled( true );
+    scene.setWindFluidSubstepCount( 2 );
+    const bodyId circle = scene.getShapes()[0].bodyHandle;
+    const bodyId box = scene.getShapes()[2].bodyHandle;
+    scene.getWorld().SetBodyLinearVelocity( circle, { 1.25f, -0.3f } );
+    scene.getWorld().SetBodyAngularVelocity( box, 0.9f );
+    scene.addWindVortex();
+
+    int sweptFrames = 0;
+    int coupledFrames = 0;
+    float largestPredictedVolume = 0.0f;
+    for( int frame = 0; frame < 36; ++frame )
+    {
+        scene.step( dt, 4 );
+        const fluidField2* field = scene.getWindField();
+        const fluidCutCellPressure2& pressure = field->getCutCellPressure();
+        const fluidCutCellTransition2& transition = field->getCutCellTransition();
+        const fluidSweptFaceFlux2& swept = field->getSweptFaceFlux();
+        check( scene.getWindCouplingSteps() == 2 && pressure.hasVolumeHistory &&
+            std::isfinite( pressure.volumeRate ) && std::isfinite( transition.volumeDelta() ) &&
+            std::isfinite( pressure.predictedContinuityRms ) &&
+            std::isfinite( pressure.predictedSolidVolumeL1 ) &&
+            IsFinite( scene.getWorld().GetBodyLinearVelocity( circle ) ) &&
+            std::isfinite( scene.getWorld().GetBodyAngularVelocity( box ) ),
+            "successive World/Fluid intervals must have finite cut-cell occupancy and pressure diagnostics" );
+        // 두 Fluid 구간이 각각 dt/2 동안 진행되므로, 보고된 기하 변화율은
+        // 마지막 구간의 실제 snapshot 점유 변화만 포함해야 한다.
+        check( std::abs( pressure.volumeRate * ( 0.5f * dt ) - transition.volumeDelta() ) < 2.0e-4f,
+            "cut-cell geometric volume rate must match the actual snapshot delta without predicted swept-volume double counting" );
+        if( swept.usedSweptFlux ) ++sweptFrames;
+        if( pressure.usedCoupledProjection )
+        {
+            ++coupledFrames;
+            largestPredictedVolume = std::max( largestPredictedVolume, pressure.predictedSolidVolumeL1 );
+        }
+    }
+    check( sweptFrames >= 30 && coupledFrames >= 1 && largestPredictedVolume > 0.0f,
+        "long-running cut-cell World test must exercise both real swept faces and pressure-predicted boundary motion" );
+}
+
 void checkExperimentalCutCellProjection()
 {
     rigidBodyDemo scene{ demoKind::windFlow };
@@ -731,5 +782,6 @@ int main()
     checkPressureLedgerInSandbox();
     checkExperimentalCutCellProjection();
     checkExperimentalCutCellWorldCoupling();
+    checkMovingCutCellSweptVolumeLedger();
     checkSandboxConservativeAdvectionTrial();
 }
