@@ -350,6 +350,15 @@ Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들�
 
 **제한:** 시간 표본을 늘린다고 4개 공간 표본의 cut interface 근사나 discrete snapshot 자체의 aliasing이 없어지는 것은 아니다. 회전·고속 이동에서 비용이 증가하며 오차가 개선되지 않을 경우 원래 표본을 채택한다. 이것은 moving-boundary의 완전한 기하 보존 또는 전체 FSI 에너지·질량 보존 증명이 아니다.
 
+## Part 13m — Cut-cell 공간 표본 해상도 통합 (4×4 또는 8×8)
+
+- `setCutCellSampleCount(4|8)`을 추가한다. 기본 4는 기존 4×4 cell 점유·공유 MAC face당 4점의 이산화 및 성능을 유지한다. 8을 사용하면 셀은 8×8=64점, 각 U/V face는 8점으로 계산한다. 유효 범위를 벗어난 입력은 4(8 미만) 또는 8(8 이상)로 정규화한다.
+- 중요한 점은 **같은 공간 표본 수를 반드시 전체 Cut-cell 체인에서 공유**한다는 것이다. `updateCutCellGeometry`의 cell 면적·면 개방율/solid 표면 속도, 결합 PCG `B, Bᵀ`의 blocked sub-face 힘·토크, `synchronizeCutCellBoundaries`의 pressure-predicted blocked normal flux, 그리고 `updateSweptSolidFlux`의 이동 물체 시간 적분을 동일한 표본 단위로 맞춘다. 다른 값들을 혼용하면 면 질량·반력과 연속방정식이 맞지 않는다.
+- **작동 중 공간 표본 수를 바꾸면** 이전 형상/체적 이력과 swept 진단을 무효화한다. 첫 새 프레임에는 이전 4×4 표본을 새로운 8×8 점유율에서 차분해 가짜 체적 source를 만들지 않는다. 이후 새 기준의 연속 스냅샷에서만 swept 적분한다. `clear()` 및 Sandbox Field 재설정에서는 선택된 8×8 옵션을 유지한다.
+- Sandbox는 8×8 체크박스와 현재 공간 표본 수를 표시한다. 유체 회귀 테스트는 분석적 원 면적과 비교한 고정 fixture 정확도, 4→8 전환 시 이력 초기화, 실제 이동 후 swept 이력 정상 생성, 8점 PCG의 pressure–blocked-flux adjoint/연속방정식 잔차를 검사한다.
+
+**한계:** 8×8은 4×4보다 셀 점유 면적의 `Contains` 호출이 최대 4배 늘고, cut-face의 샘플 및 Schur boundary 수가 늘어난다. 모든 형상·위치에서 분석적 기하 오차가 반드시 작아지는 것은 아니며, 이 단계는 *선택 가능한 균일 공간 이산화*다. 적응형 쿼드트리 기하·정확한 면적 분할·이동 표면의 보존적 이류·전체 FSI 질량/에너지 보존은 후속 작업이다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
