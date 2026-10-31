@@ -50,6 +50,8 @@ struct fluidPressureMomentum2
     vec2 fluid{};
     vec2 solid{};
     vec2 wall{};
+    bool usedCoupledProjection = false;
+    bool coupledSolveFailed = false;
 
     [[nodiscard]] vec2 residual() const noexcept { return fluid + solid + wall; }
 };
