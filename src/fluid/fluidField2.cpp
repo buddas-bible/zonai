@@ -540,7 +540,7 @@ float fluidField2::getVFaceSolidVelocity( int x, int y ) const noexcept
 
 void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> obstacles )
 {
-    // 이진 cell-center mask와 별도로 4x4 sub-cell / 4개 face 표본을 계산.
+    // 이진 cell-center mask와 별도로 NxN sub-cell / face당 N점 표본을 계산.
     // 선택적 가중 압력 경로에서 면 개방율과 강체 속도를 직접 사용한다.
     const int sampleCount = cutCellSampleCount_;
     const float inverseCount = 1.0f / sampleCount;
