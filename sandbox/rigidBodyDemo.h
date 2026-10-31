@@ -256,6 +256,7 @@ public:
     void setWindDragCoefficient( float rate );
     void setWindSourceEnabled( bool enabled ) noexcept { windSourceEnabled_ = enabled; }
     void setWindObstacleCouplingEnabled( bool enabled ) noexcept { windObstacleCouplingEnabled_ = enabled; }
+    void setWindSynchronizedCouplingEnabled( bool enabled ) noexcept { windSynchronizedCouplingEnabled_ = enabled; }
     void setWindCutCellProjectionEnabled( bool enabled ) noexcept
     {
         if( windField_ ) windField_->setCutCellProjectionEnabled( enabled );
@@ -296,6 +297,8 @@ public:
     [[nodiscard]] float getWindDragCoefficient() const noexcept { return windDragCoefficient_; }
     [[nodiscard]] bool isWindSourceEnabled() const noexcept { return windSourceEnabled_; }
     [[nodiscard]] bool isWindObstacleCouplingEnabled() const noexcept { return windObstacleCouplingEnabled_; }
+    [[nodiscard]] bool isWindSynchronizedCouplingEnabled() const noexcept { return windSynchronizedCouplingEnabled_; }
+    [[nodiscard]] int getWindCouplingSteps() const noexcept { return windCouplingSteps_; }
     [[nodiscard]] std::span<const fluidObstacleForce2> getWindPressureForces() const noexcept { return windPressureForces_; }
     [[nodiscard]] vec2 getWindDragBodyImpulse() const noexcept { return windDragBodyImpulse_; }
     [[nodiscard]] vec2 getWindDragFluidImpulse() const noexcept { return windDragFluidImpulse_; }
@@ -517,6 +520,8 @@ private:
     float windTime_ = 0.0f;
     bool windSourceEnabled_ = true;
     bool windObstacleCouplingEnabled_ = true;
+    bool windSynchronizedCouplingEnabled_ = true;
+    int windCouplingSteps_ = 0;
     std::array<fluidObstacleForce2, 3> windPressureForces_{};
     vec2 windDragBodyImpulse_{};
     vec2 windDragFluidImpulse_{};

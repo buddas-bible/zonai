@@ -117,6 +117,9 @@ void checkMovingSolidReaction()
     }
     disabled.setWindObstacleCouplingEnabled( false );
     enabled.setWindObstacleCouplingEnabled( true );
+    // 이 검사는 1회 유체 압력 반력의 방향에 대한 기존 oracle이다.
+    // Substep 평균 힘은 별도의 동기화 회귀에서 검증한다.
+    enabled.setWindSynchronizedCouplingEnabled( false );
 
     disabled.step( 1.0f / 60.0f, 4 );
     enabled.step( 1.0f / 60.0f, 4 );
@@ -184,10 +187,86 @@ void checkDragMomentumBudget()
         "pressure reaction must remain independent when drag coefficient is zero" );
 }
 
+void checkSynchronizedWindCoupling()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.setWindObstacleCouplingEnabled( true );
+    check( scene.isWindSynchronizedCouplingEnabled(),
+        "wind sandbox must enable synchronized pressure coupling by default" );
+
+    const bodyId moving = scene.getShapes()[0].bodyHandle;
+    scene.getWorld().SetBodyLinearVelocity( moving, { 2.0f, 0.0f } );
+    scene.step( dt, 4 );
+    check( scene.getWindCouplingSteps() == 4 &&
+        scene.getWindField()->getPressureMomentum().usedCoupledProjection &&
+        !scene.getWindField()->getPressureMomentum().coupledSolveFailed &&
+        scene.getWindField()->getSolidCellCount() > 0 &&
+        IsFinite( scene.getWorld().GetBodyLinearVelocity( moving ) ) &&
+        IsFinite( scene.getWindPressureForces()[0].force ),
+        "bidirectional wind must advance fluid and rigid geometry on matching substep clocks" );
+
+    scene.resetWindFlow();
+    scene.setWindSynchronizedCouplingEnabled( false );
+    scene.getWorld().SetBodyLinearVelocity( moving, { 2.0f, 0.0f } );
+    scene.step( dt, 4 );
+    check( scene.getWindCouplingSteps() == 1 &&
+        IsFinite( scene.getWindPressureForces()[0].force ),
+        "legacy one-exchange wind mode must remain reproducible" );
+
+    scene.resetWindFlow();
+    scene.setWindSynchronizedCouplingEnabled( true );
+    scene.setWindObstacleCouplingEnabled( false );
+    scene.step( dt, 4 );
+    check( scene.getWindCouplingSteps() == 1 &&
+        scene.getWindField()->getSolidCellCount() == 0,
+        "one-way wind should keep legacy World substeps without fluid obstacle feedback" );
+
+    scene.resetWindFlow();
+    scene.setWindObstacleCouplingEnabled( true );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.step( dt, 4 );
+    check( scene.getWindCouplingSteps() == 1 &&
+        !scene.getWindField()->getPressureMomentum().usedCoupledProjection,
+        "Cut-cell pressure must not use unsupported explicit synchronized subcycling" );
+
+    scene.resetWindFlow();
+    scene.setWindCutCellProjectionEnabled( false );
+    scene.getWorld().SetBodyLinearVelocity( moving, { 2.0f, 0.0f } );
+    scene.step( dt, 1 );
+    check( scene.getWindCouplingSteps() == 1 &&
+        scene.getWindField()->getPressureMomentum().usedCoupledProjection,
+        "mass-aware pressure must remain active even with one rigid substep" );
+    scene.resetWindFlow();
+    scene.getWorld().SetBodyLinearVelocity( moving, { 2.0f, 0.0f } );
+    float maxSpeed = 0.0f;
+    for( int i = 0; i < 120; ++i )
+    {
+        scene.step( dt, 4 );
+        const vec2 velocity = scene.getWorld().GetBodyLinearVelocity( moving );
+        check( scene.getWindField()->getPressureMomentum().usedCoupledProjection &&
+            !scene.getWindField()->getPressureMomentum().coupledSolveFailed &&
+            IsFinite( velocity ) && IsFinite( scene.getWindPressureForces()[0].force ) &&
+            std::isfinite( scene.getWindPressureForces()[0].torque ),
+            "synchronized moving obstacle must keep finite velocity and pressure feedback over 120 frames" );
+        maxSpeed = std::max( maxSpeed, Length( velocity ) );
+        if( maxSpeed >= 20.0f )
+        {
+            const vec2 pressure = scene.getWindPressureForces()[0].force;
+            std::fprintf( stderr, "wind coupled instability: frame=%d speed=%.5f body=(%.5f,%.5f) pressure=(%.5f,%.5f)\n",
+                i, maxSpeed, velocity.x, velocity.y, pressure.x, pressure.y );
+            check( false, "synchronized pressure feedback must not accelerate a released body without wind source or drag without bound" );
+        }
+    }
+}
+
 void checkPressureLedgerInSandbox()
 {
     rigidBodyDemo scene{ demoKind::windFlow };
     scene.setWindSourceEnabled( false );
+    scene.setWindSynchronizedCouplingEnabled( false );
     scene.setWindDragCoefficient( 0.0f );
     const bodyId body = scene.getShapes()[0].bodyHandle;
     scene.getWorld().SetBodyLinearVelocity( body, { 2.0f, 0.0f } );
@@ -330,6 +409,7 @@ int main()
 {
     checkFluidCoupling();
     checkMovingSolidReaction();
+    checkSynchronizedWindCoupling();
     checkRotatedSandboxObstacles();
     checkDragMomentumBudget();
     checkPressureLedgerInSandbox();
