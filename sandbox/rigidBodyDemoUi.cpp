@@ -1127,6 +1127,13 @@ void rigidBodyDemoUi::drawExperimentControls()
                 ImGui::Text( "강체 Δp: (%.5f, %.5f) N·s", pressure.solid.x, pressure.solid.y );
                 ImGui::Text( "외벽 Δp: (%.5f, %.5f) N·s", pressure.wall.x, pressure.wall.y );
                 ImGui::Text( "압력 수지 잔차: %.7f N·s", Length( pressure.residual() ) );
+                ImGui::SeparatorText( "압력 단계 운동 에너지 (부분 MAC 장부)" );
+                ImGui::Text( "자유 face: %.5f -> %.5f J (Δ%+.5f)",
+                    pressure.energy.fluidBefore, pressure.energy.fluidAfter, pressure.energy.fluidDelta() );
+                ImGui::Text( "강체 예측: %.5f -> %.5f J (Δ%+.5f)",
+                    pressure.energy.rigidBefore, pressure.energy.rigidAfter, pressure.energy.rigidDelta() );
+                ImGui::Text( "합산 ΔE: %+.6f J", pressure.energy.totalDelta() );
+                ImGui::TextDisabled( "경계 face의 유체 dual-volume·이류·외력·Drag가 빠진 부분 에너지. 양의 ΔE가 곧 전체 에너지 비보존이라는 뜻은 아닙니다." );
             }
             else ImGui::TextWrapped( "실험 모드는 이진 MAC 압력 운동량 장부를 지원하지 않습니다." );
             ImGui::Text( "점유 변경 Δp: (%.5f, %.5f) N·s", stages.occupancyDelta().x, stages.occupancyDelta().y );
