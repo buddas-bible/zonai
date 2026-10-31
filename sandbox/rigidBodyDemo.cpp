@@ -253,6 +253,16 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 const vec2 center = TransformPoint( transform, world_.GetBodyLocalCenter( visual.bodyHandle ) );
                 obstacles[i] = { geometry, transform, center,
                     world_.GetBodyLinearVelocity( visual.bodyHandle ), world_.GetBodyAngularVelocity( visual.bodyHandle ) };
+                // Time-synchronized binary pressure path: Body effective inverse mass
+                // enters the same projection operator as fluid face corrections.
+                if( synchronizedWind && !windField_->isCutCellProjectionEnabled() &&
+                    world_.GetBody( visual.bodyHandle ).type == bodyType::Dynamic )
+                {
+                    const float mass = world_.GetBodyMass( visual.bodyHandle );
+                    const float inertia = world_.GetBodyRotationalInertia( visual.bodyHandle );
+                    obstacles[i].inverseMass = mass > 0.0f ? 1.0f / mass : 0.0f;
+                    obstacles[i].inverseInertia = inertia > 0.0f ? 1.0f / inertia : 0.0f;
+                }
             }
     
             windPressureForces_.fill( {} );
