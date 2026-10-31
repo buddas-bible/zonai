@@ -272,6 +272,14 @@ public:
     {
         return windField_ && windField_->isConservativeAdvectionEnabled();
     }
+    void setWindSweptGeometryCorrectionEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setSweptGeometryCorrectionEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindSweptGeometryCorrectionEnabled() const noexcept
+    {
+        return windField_ && windField_->isSweptGeometryCorrectionEnabled();
+    }
     void setWindSweptTracerRemapEnabled( bool enabled ) noexcept
     {
         if( windField_ ) windField_->setSweptTracerRemapEnabled( enabled );

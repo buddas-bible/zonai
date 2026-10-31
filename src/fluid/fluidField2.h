@@ -127,6 +127,9 @@ struct fluidSweptFaceFlux2
     int timeSamples = 0;
     float totalAbsoluteFlux = 0.0f;
     float geometryMismatch = 0.0f;
+    float rawGeometryMismatch = 0.0f;
+    float correctionAbsoluteFlux = 0.0f;
+    int correctedFaces = 0;
 };
 
 // 이류 단계만의 가중 dual MAC face 운동량 계측 (rho=1, depth=1m).
@@ -186,6 +189,12 @@ public:
     // 정확한 swept-volume 경로/보존형 이류는 아직 구현하지 않음.
     void setCutCellProjectionEnabled( bool enabled ) noexcept { cutCellProjectionEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellProjectionEnabled() const noexcept { return cutCellProjectionEnabled_; }
+
+    // 이동 중인 solid의 공유 MAC 면 swept volume을 주변 cell의 기하 ΔV와
+    // 국소적으로 맞추는 실험 경로. 부호가 반대인 인접 잔차만 상쇄한다.
+    // 기본 false. 닫힌 외벽의 유량 및 전체 체적 오차를 임의로 제거하지 않는다.
+    void setSweptGeometryCorrectionEnabled( bool enabled ) noexcept { sweptGeometryCorrectionEnabled_ = enabled; }
+    [[nodiscard]] bool isSweptGeometryCorrectionEnabled() const noexcept { return sweptGeometryCorrectionEnabled_; }
 
     // MAC dual control volume의 upwind flux-form 이류. 선택형이며 기본 false.
     // 고정된 현재 open fraction에 대한 face 운동량만 보존한다.
@@ -280,6 +289,7 @@ private:
     [[nodiscard]] float cutCellFluxDivergenceRms( float inverseTimeStep ) const noexcept;
     void prepareCutCellVolumeChange( float timeStep );
     void updateSweptSolidFlux( float timeStep, std::span<const fluidShapeObstacle2> obstacles );
+    void reconcileSweptSolidFlux();
     void applyCutCellBoundaries() noexcept;
     void projectCutCell( float timeStep, int pressureIterations,
         std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback );
@@ -329,6 +339,7 @@ private:
     fluidTracerStats2 tracerStats_{};
     bool tracerEnabled_ = false;
     bool sweptTracerRemapEnabled_ = false;
+    bool sweptGeometryCorrectionEnabled_ = false;
     bool cutCellProjectionEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;

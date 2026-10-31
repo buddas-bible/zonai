@@ -945,6 +945,66 @@ void checkSweptTracerRemap()
         "clear must reset swept remap diagnostics while retaining the selected mode" );
 }
 
+void checkSweptGeometryCorrection()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    std::array<fluidObstacleForce2, 1> feedback{};
+    fluidField2 baseline{ 16, 16, 0.5f, { -4.0f, -4.0f } };
+    fluidField2 corrected{ 16, 16, 0.5f, { -4.0f, -4.0f } };
+    baseline.setCutCellProjectionEnabled( true );
+    corrected.setCutCellProjectionEnabled( true );
+    corrected.setSweptGeometryCorrectionEnabled( true );
+    corrected.setSweptTracerRemapEnabled( true );
+
+    fluidShapeObstacle2 box{ MakeBox( { 0.8f, 0.3f } ),
+        { { -1.0f, -0.25f }, {} }, { -1.0f, -0.25f }, {}, 0.0f };
+    for( fluidField2* field : { &baseline, &corrected } )
+    {
+        field->step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 160 );
+        check( !field->getSweptFaceFlux().usedSweptFlux,
+            "initial cut-cell snapshot must not use synthetic swept correction" );
+    }
+
+    corrected.setTracerConcentration( 8, 7, 4.0f );
+    const float mass = corrected.getTracerMass();
+    box.transform.position.x += 1.25f;
+    box.center.x += 1.25f;
+    baseline.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 160 );
+    corrected.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 160 );
+    const fluidSweptFaceFlux2& raw = baseline.getSweptFaceFlux();
+    const fluidSweptFaceFlux2& balanced = corrected.getSweptFaceFlux();
+    check( raw.usedSweptFlux && balanced.usedSweptFlux &&
+        raw.geometryMismatch > 0.0f &&
+        close( raw.geometryMismatch, balanced.rawGeometryMismatch, 1.0e-4f ) &&
+        balanced.geometryMismatch <= balanced.rawGeometryMismatch + 1.0e-4f,
+        "swept face correction must not increase local geometry mismatch relative to same raw path" );
+    check( balanced.correctedFaces > 0 &&
+        balanced.correctionAbsoluteFlux > 0.0f &&
+        balanced.geometryMismatch < balanced.rawGeometryMismatch,
+        "translation must cancel opposite cut-cell residuals by paired internal face corrections" );
+    check( close( corrected.getTracerMass(), mass, 1.0e-4f ) &&
+        std::abs( corrected.getTracerStats().delta() ) < 1.0e-4f &&
+        std::isfinite( corrected.getCutCellPressure().divergenceAfter ),
+        "corrected swept flux must remain usable by pressure and tracer transport without mass loss" );
+
+    // 같은 장애물의 연속된 변환에서 정지 경로 및 기하 변경은 임의 유량을 만들지 않음.
+    corrected.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 160 );
+    check( corrected.getSweptFaceFlux().usedSweptFlux &&
+        corrected.getSweptFaceFlux().correctionAbsoluteFlux == 0.0f &&
+        corrected.getSweptFaceFlux().rawGeometryMismatch == 0.0f,
+        "static obstacle must not accumulate fictitious swept correction" );
+    box.geometry = MakeBox( { 0.7f, 0.3f } );
+    corrected.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 160 );
+    check( !corrected.getSweptFaceFlux().usedSweptFlux &&
+        corrected.getSweptFaceFlux().correctedFaces == 0,
+        "geometry edits must invalidate swept correction" );
+    corrected.clear();
+    check( corrected.isSweptGeometryCorrectionEnabled() &&
+        corrected.getSweptFaceFlux().correctedFaces == 0 &&
+        close( corrected.getTracerMass(), 0.0f ),
+        "clear must remove correction diagnostics while preserving experimental setting" );
+}
+
 } // namespace
 
 int main()
@@ -963,4 +1023,5 @@ int main()
     checkConservativeMacAdvection();
     checkConservativeTracerTransport();
     checkSweptTracerRemap();
+    checkSweptGeometryCorrection();
 }

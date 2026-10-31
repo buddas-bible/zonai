@@ -933,6 +933,9 @@ void rigidBodyDemoUi::drawExperimentControls()
         bool cutCellProjection = isWindCutCellProjectionEnabled();
         if( ImGui::Checkbox( "부분 개방 압력 투영 (실험)###WindCutCellPressure", &cutCellProjection ) )
             setWindCutCellProjectionEnabled( cutCellProjection );
+        bool correction = isWindSweptGeometryCorrectionEnabled();
+        if( ImGui::Checkbox( "Swept 면 기하 오차 국소 보정 (실험)###WindSweptGeometryCorrection", &correction ) )
+            setWindSweptGeometryCorrectionEnabled( correction );
 
         float drag = getWindDragCoefficient();
         if( ImGui::SliderFloat( "강체 바람 저항 계수###WindBodyDrag", &drag, 0.0f, 15.0f, "%.1f N·s/m" ) )
@@ -990,7 +993,10 @@ void rigidBodyDemoUi::drawExperimentControls()
                 ImGui::Text( "Solid 시간 적분: %s / 구간 %d",
                     swept.usedSweptFlux ? "Swept face flux" : "Snapshot 변화", swept.timeSamples );
                 ImGui::Text( "통과한 MAC 면 체적 절댓값 합: %.5f m³", swept.totalAbsoluteFlux );
-                ImGui::Text( "이동 경로/종료 점유율 L1 차이: %.5f m³", swept.geometryMismatch );
+                ImGui::Text( "Swept 체적 오차 L1 보정 전/후: %.5f / %.5f m³",
+                    swept.rawGeometryMismatch, swept.geometryMismatch );
+                ImGui::Text( "국소 면 보정 누적량: %.5f m³ / 갱신 횟수: %d",
+                    swept.correctionAbsoluteFlux, swept.correctedFaces );
                 ImGui::Text( "부분 유체 셀: %d", projection.activeCells );
             }
             ImGui::Text( "강체 점유 셀: %d", field->getSolidCellCount() );

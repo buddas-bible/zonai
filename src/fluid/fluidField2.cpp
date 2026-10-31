@@ -1094,7 +1094,11 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     stepMomentum_.before = getFluidMomentum();
     updateObstacles( obstacles );
     updateCutCellGeometry( obstacles );
-    if( cutCellProjectionEnabled_ ) updateSweptSolidFlux( timeStep, obstacles );
+    if( cutCellProjectionEnabled_ )
+    {
+        updateSweptSolidFlux( timeStep, obstacles );
+        reconcileSweptSolidFlux();
+    }
     else sweptFaceFlux_ = {};
     remapExposedFaces();
     stepMomentum_.afterObstacles = getFluidMomentum();
@@ -1301,6 +1305,92 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
     sweptFaceFlux_.totalAbsoluteFlux = static_cast<float>( absoluteFlux );
 }
 
+void fluidField2::reconcileSweptSolidFlux()
+{
+    // 기본 Cut-cell 경로에 잔차 vector 할당/추가 순회를 발생시키지 않는다.
+    // 보정 미사용 시 raw 값은 prepareCutCellVolumeChange의 최종 관측값과 같다.
+    if( !sweptFaceFlux_.usedSweptFlux || !sweptGeometryCorrectionEnabled_ ) return;
+
+    // 순수 기하 discrepancy: 시작/종료 점유율 변화와 경로 적분된 공유 면
+    // 체적의 divergence 간 차이. 외벽의 swept flux는 항상 0.
+    const double area = static_cast<double>( cellSize_ ) * cellSize_;
+    std::vector<double> residual( cellFluidFraction_.size() );
+    double mismatch = 0.0;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const int cell = cellIndex( x, y );
+            const double snapshot = static_cast<double>(
+                cellFluidFraction_[cell] - previousCellFluidFraction_[cell] ) * area;
+            const double swept =
+                static_cast<double>( sweptUVolume_[uIndex( x + 1, y )] ) -
+                static_cast<double>( sweptUVolume_[uIndex( x, y )] ) +
+                static_cast<double>( sweptVVolume_[vIndex( x, y + 1 )] ) -
+                static_cast<double>( sweptVVolume_[vIndex( x, y )] );
+            residual[cell] = snapshot - swept;
+            mismatch += std::abs( residual[cell] );
+        }
+    sweptFaceFlux_.rawGeometryMismatch = static_cast<float>( mismatch );
+    // 서로 부호가 반대인 이웃의 discrepancy만 공유 edge에서 국소 상쇄.
+    // 각 update는 두 셀의 잔차를 같은 크기·반대 부호로 변경해
+    // 전체 체적 부호합 및 닫힌 외벽을 보존하고 L1 오차를 증가시키지 않는다.
+    // 더 먼 이웃까지 강제로 전달하거나 total ΔV의 비영(非零) 합을 지우지 않는다.
+    const auto reconcile = [&]( int left, int right, float& face )
+    {
+        const double a = residual[left];
+        const double b = residual[right];
+        double delta = 0.0;
+        if( a > 0.0 && b < 0.0 ) delta = std::min( a, -b );
+        else if( a < 0.0 && b > 0.0 ) delta = -std::min( -a, b );
+        if( delta == 0.0 ) return;
+
+        const double before = face;
+        double next = before + delta;
+        // 원래 측정된 면 속도를 정반대로 뒤집지 않음.
+        if( before != 0.0 && ( before > 0.0 ) != ( next > 0.0 ) ) next = 0.0;
+        if( !std::isfinite( next ) || std::abs( next ) > std::numeric_limits<float>::max() ) return;
+        face = static_cast<float>( next );
+        const double applied = static_cast<double>( face ) - before;
+        if( applied == 0.0 ) return;
+        residual[left] -= applied;
+        residual[right] += applied;
+        sweptFaceFlux_.correctionAbsoluteFlux += static_cast<float>( std::abs( applied ) );
+        ++sweptFaceFlux_.correctedFaces;
+    };
+
+    // 변한 셀에 인접하거나 원래 swept flux가 있는 면만 보정한다.
+    // 먼 정적 영역을 통과하는 전역적 보정 흐름은 생성하지 않는다.
+    constexpr int passes = 4;
+    for( int pass = 0; pass < passes; ++pass )
+    {
+        for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x )
+            {
+                const int left = cellIndex( x - 1, y );
+                const int right = cellIndex( x, y );
+                float& face = sweptUVolume_[uIndex( x, y )];
+                if( face == 0.0f &&
+                    cellFluidFraction_[left] == previousCellFluidFraction_[left] &&
+                    cellFluidFraction_[right] == previousCellFluidFraction_[right] ) continue;
+                reconcile( left, right, face );
+            }
+        for( int y = 1; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+            {
+                const int bottom = cellIndex( x, y - 1 );
+                const int top = cellIndex( x, y );
+                float& face = sweptVVolume_[vIndex( x, y )];
+                if( face == 0.0f &&
+                    cellFluidFraction_[bottom] == previousCellFluidFraction_[bottom] &&
+                    cellFluidFraction_[top] == previousCellFluidFraction_[top] ) continue;
+                reconcile( bottom, top, face );
+            }
+    }
+
+    // final geometryMismatch는 기존 prepareCutCellVolumeChange가 새 face를
+    // 이용해 계산한다. rawGeometryMismatch와 직접 비교할 수 있다.
+}
+
 void fluidField2::prepareCutCellVolumeChange( float timeStep )
 {
     std::fill( cutCellVolumeRate_.begin(), cutCellVolumeRate_.end(), 0.0f );
@@ -1368,6 +1458,8 @@ void fluidField2::prepareCutCellVolumeChange( float timeStep )
             else unresolvedRate += static_cast<double>( change ) * scale;
         }
     }
+    if( sweptFaceFlux_.usedSweptFlux && !sweptGeometryCorrectionEnabled_ )
+        sweptFaceFlux_.rawGeometryMismatch = sweptFaceFlux_.geometryMismatch;
     cutCellPressure_.volumeRate = static_cast<float>( volumeRate );
     cutCellPressure_.redistributedVolumeRate = static_cast<float>( relocatedRate );
     cutCellPressure_.unresolvedVolumeRate = static_cast<float>( unresolvedRate );

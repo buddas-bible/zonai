@@ -220,6 +220,18 @@ Part 12b는 `sweptU/VVolume`을 이송 **방향의 가중치**로만 사용해, 
 
 **한계:** `sweptU/VVolume`은 완전한 시간 연속 cut-cell 표면의 체적 변화가 아니라 **MAC 면 4표본 × 최대 32 시간 구간 적분**이다. 시작·끝 셀 유체 비율은 또 다른 4×4 표본이므로 이산 기하학적 불일치가 있고, 위 질량 수송은 이를 완전히 복구하지 않는다. 이 단계는 tracer의 대수적 총질량 보존과 swept 체적 기반 이송 **정량화**를 개선하지만, 압력-강체 표면 반력이나 정확한 전체 유체 질량·운동량 보존을 뜻하지 않는다.
 
+## Part 12d — 공유 MAC 면의 국소 Swept 체적 일치 보정
+
+기존 Part 10의 swept 면 적분은 시간·공간 표본화 방식이므로, 각 셀에 누적된 면 체적의 **signed divergence**가 시작/끝 4×4 cut-cell 표본에서 구한 유체 공간 변화와 다를 수 있다. Part 12d에서는 해당 불일치를 억지로 없애거나 전역에 확산하는 대신, **서로 부호가 반대인 인접 셀의 잔차만** 공유 face에서 상쇄하는 실험 기능을 추가했다.
+
+- `setSweptGeometryCorrectionEnabled(true)`는 기본 false이며 Cut-cell 모드와 유효한 연속 Shape swept 이력을 함께 요구한다. 첫 snapshot, 기하 변화, 외벽 교차 등 불확실한 경로는 기존 fallback으로 처리한다.
+- 셀 `i`의 discrepancy 체적은 `e_i = (f_new - f_old) h² - (Q_right - Q_left + Q_top - Q_bottom)`이다. 면 오른쪽/위쪽의 두 셀에 `e_a > 0`, `e_b < 0`이라면 공유 면 체적에 `min(e_a, -e_b)`를 더하고, 반대 부호라면 그만큼 뺀다. 이렇게 양쪽 셀의 불일치가 동시에 줄어든다.
+- 기존 sampled swept flux가 있거나, 두 셀 중 하나의 기하 점유율이 실제로 변한 공유 면만 사용한다. 외벽 face는 수정하지 않으며, 기존에 통과 방향이 기록된 유량을 반대로 뒤집지 않는다. 최대 4회 순회하고 **인접하지 않은 오차**나 전체 체적의 비영합은 고치지 않는다.
+- `getSweptFaceFlux()`의 `rawGeometryMismatch`는 보정 전 L1 체적 오차, `geometryMismatch`는 압력 소스에 사용할 최종 체적 오차다. `correctionAbsoluteFlux`는 공유 면을 수정한 체적 절댓값 누적치(같은 면 반복 가능), `correctedFaces`는 수정 **횟수**다.
+- 보정된 `sweptUVolume_/sweptVVolume_`은 이미 구현된 Cut-cell 연속방정식 소스와 Part 12c의 tracer 체적 기반 이송에 공통으로 전달된다. 폐쇄 도메인에서 쌍으로 교환한 체적은 합계가 0이므로 전체 기하적 불일치를 은폐하지 않는다.
+
+**한계:** 이는 두 가지 서로 다른 격자 표본 간 *불일치 완화*이며 실제 움직이는 연속 계면의 정확한 체적/압력 반력 해석이 아니다. 부호가 반대인 인접 오차가 없는 경우에는 차이가 그대로 남는다. 강체 압력 반력과 함께 전체 유체 질량/운동량 보존이 완성되었다는 의미는 아니다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.

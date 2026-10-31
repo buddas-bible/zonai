@@ -291,9 +291,11 @@ void checkSandboxConservativeAdvectionTrial()
     scene.setWindConservativeAdvectionEnabled( true );
     scene.setWindCutCellProjectionEnabled( true );
     scene.setWindSweptTracerRemapEnabled( true );
+    scene.setWindSweptGeometryCorrectionEnabled( true );
     scene.setWindObstacleCouplingEnabled( true );
     scene.resetWindFlow();
-    check( scene.isWindSweptTracerRemapEnabled() && !field->getTracerStats().usedSweptRemap,
+    check( scene.isWindSweptTracerRemapEnabled() &&
+        scene.isWindSweptGeometryCorrectionEnabled() && !field->getTracerStats().usedSweptRemap,
         "sandbox reset must preserve swept tracer remap selection and clear last-step diagnostics" );
     scene.step( 1.0f / 60.0f, 4 );
     check( field->getAdvectionStats().conservative &&
@@ -309,6 +311,8 @@ void checkSandboxConservativeAdvectionTrial()
     scene.getWorld().SetBodyTransform( circleBody, { { -2.75f, -0.25f }, {} } );
     scene.step( 1.0f / 60.0f, 4 );
     check( field->getSweptFaceFlux().usedSweptFlux &&
+        field->getSweptFaceFlux().geometryMismatch <=
+            field->getSweptFaceFlux().rawGeometryMismatch + 1.0e-4f &&
         field->getTracerStats().usedSweptRemap &&
         close( field->getTracerMass(), tracerBefore, 1.0e-4f ) &&
         std::isfinite( field->getTracerStats().unresolvedDisplacementMass ),
