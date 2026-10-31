@@ -1001,6 +1001,91 @@ void checkCoupledCutCellAdjointContinuity()
         "legacy cut-cell pressure must not pretend to predict coupled volume response" );
 }
 
+void checkAnalyticSingleCircleCutCell()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr float h = 0.5f;
+    constexpr float radius = 0.83f;
+    constexpr vec2 center{ 0.17f, -0.21f };
+    constexpr float expected = 24.0f * 16.0f * h * h -
+        std::numbers::pi_v<float> * radius * radius;
+    fluidField2 analytic{ 24, 16, h, { -6.0f, -4.0f } };
+    analytic.setCutCellProjectionEnabled( true );
+    analytic.setAnalyticCircleCutCellEnabled( true );
+    fluidShapeObstacle2 circle{
+        circle2{ {}, radius }, { center, {} }, center, {}, 0.0f
+    };
+    std::array<fluidObstacleForce2, 1> forces{};
+    analytic.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), forces, 160 );
+    const float area = analytic.getCutCellTransition().fluidVolume;
+    check( std::abs( area - expected ) < 1.0e-4f &&
+        !analytic.getCutCellPressure().hasVolumeHistory,
+        "analytic circle-rectangle clipping must match exact disc area on initial frame" );
+
+    // x=0.5, y=[0.5,1.0] 수직 MAC 면은 원의 윗부분에서 일부만 막힘.
+    const float verticalHalfChord = std::sqrt( radius * radius -
+        ( 0.5f - center.x ) * ( 0.5f - center.x ) );
+    const float clippedU = std::clamp( ( center.y + verticalHalfChord - 0.5f ) / h, 0.0f, 1.0f );
+    check( std::abs( analytic.getUFaceOpenFraction( 13, 9 ) - ( 1.0f - clippedU ) ) < 2.0e-5f,
+        "analytic circle U face must use the exact blocked interval length" );
+
+    // y=0.5, x=[0.5,1.0] 수평 MAC 면 역시 실제 원-직선 교차 길이.
+    const float horizontalHalfChord = std::sqrt( radius * radius -
+        ( 0.5f - center.y ) * ( 0.5f - center.y ) );
+    const float clippedV = std::clamp( ( center.x + horizontalHalfChord - 0.5f ) / h, 0.0f, 1.0f );
+    check( std::abs( analytic.getVFaceOpenFraction( 13, 9 ) - ( 1.0f - clippedV ) ) < 2.0e-5f,
+        "analytic circle V face must use the exact blocked interval length" );
+
+    analytic.setCutCellSampleCount( 8 );
+    analytic.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), forces, 160 );
+    check( std::abs( analytic.getCutCellTransition().fluidVolume - expected ) < 1.0e-4f &&
+        !analytic.getCutCellPressure().hasVolumeHistory,
+        "analytic Circle coverage must be independent of 4x4/8x8 and reset history on sample changes" );
+    analytic.setCutCellSampleCount( 4 );
+    analytic.setCutCellCoupledProjectionEnabled( true );
+    circle.linearVelocity = { 0.9f, -0.4f };
+    circle.inverseMass = 0.5f;
+    circle.inverseInertia = 1.2f;
+    analytic.addVelocity( { -1.1f, 0.25f }, { 1.3f, -0.4f }, 1.4f );
+    analytic.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), forces, 200 );
+    const auto& pressure = analytic.getCutCellPressure();
+    check( pressure.usedCoupledProjection && !pressure.coupledSolveFailed &&
+        std::isfinite( pressure.predictedContinuityRms ) &&
+        std::abs( pressure.predictedContinuityRms - pressure.pressureResidual ) <
+            2.0e-3f + 0.1f * pressure.pressureResidual,
+        "analytic Circle Schur pressure and predicted blocked face flux must remain adjoint" );
+
+    circle.transform.position.x += 0.2f;
+    circle.center.x += 0.2f;
+    analytic.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), forces, 200 );
+    check( analytic.getSweptFaceFlux().usedSweptFlux &&
+        analytic.getCutCellPressure().hasVolumeHistory &&
+        std::isfinite( analytic.getSweptFaceFlux().geometryMismatch ) &&
+        std::abs( analytic.getCutCellTransition().fluidVolume - expected ) < 1.0e-4f,
+        "moving analytic Circle must use clipped swept faces without losing its exact covered area" );
+
+    // 실험 경로를 꺼도 이전의 exact area를 표본 점유율 차이로 해석하면 안 된다.
+    analytic.setAnalyticCircleCutCellEnabled( false );
+    analytic.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), forces, 200 );
+    check( !analytic.getCutCellPressure().hasVolumeHistory &&
+        !analytic.getSweptFaceFlux().usedSweptFlux,
+        "switching exact Circle geometry off must invalidate previous swept occupancy history" );
+
+    fluidField2 fallback{ 24, 16, h, { -6.0f, -4.0f } };
+    fallback.setCutCellProjectionEnabled( true );
+    fallback.setAnalyticCircleCutCellEnabled( true );
+    circle.geometry = MakeBox( { 0.7f, 0.3f } );
+    fallback.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), forces, 160 );
+    check( fallback.getCutCellTransition().partialCells > 0 &&
+        !fallback.getSweptFaceFlux().usedSweptFlux,
+        "unsupported polygon must safely fall back to existing spatial cut-cell sampling" );
+
+    analytic.clear();
+    check( !analytic.getSweptFaceFlux().usedSweptFlux &&
+        !analytic.isAnalyticCircleCutCellEnabled(),
+        "the optional analytic Circle toggle must remain off across clear" );
+}
+
 void checkCutCellSpatialQuadrature()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1658,6 +1743,7 @@ int main()
     checkCutCellPredictedBoundarySynchronization();
     checkCoupledCutCellAdjointContinuity();
     checkCutCellSpatialQuadrature();
+    checkAnalyticSingleCircleCutCell();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();

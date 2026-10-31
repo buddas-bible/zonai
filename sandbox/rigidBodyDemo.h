@@ -276,6 +276,22 @@ public:
     {
         if( windField_ ) windField_->setCutCellSampleCount( count );
     }
+    void setWindAnalyticCircleEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setAnalyticCircleCutCellEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindAnalyticCircleEnabled() const noexcept
+    {
+        return windField_ && windField_->isAnalyticCircleCutCellEnabled();
+    }
+    // 단일 Circle 분석 경로를 Sandbox에서 테스트할 때 나머지 Shape의 유체 점유만 제외.
+    void setWindCircleOnlyFluidEnabled( bool enabled ) noexcept
+    {
+        if( windCircleOnlyFluidEnabled_ == enabled ) return;
+        windCircleOnlyFluidEnabled_ = enabled;
+        if( windField_ ) windField_->invalidateObstacleHistory();
+    }
+    [[nodiscard]] bool isWindCircleOnlyFluidEnabled() const noexcept { return windCircleOnlyFluidEnabled_; }
     [[nodiscard]] int getWindCutCellSampleCount() const noexcept
     {
         return windField_ ? windField_->getCutCellSampleCount() : 4;
@@ -556,6 +572,7 @@ private:
     float windTime_ = 0.0f;
     bool windSourceEnabled_ = true;
     bool windObstacleCouplingEnabled_ = true;
+    bool windCircleOnlyFluidEnabled_ = false;
     bool windSynchronizedCouplingEnabled_ = true;
     int windCouplingSteps_ = 0;
     int windFluidSubstepCount_ = 1; // World Substep과 독립적인 Fluid 압력/이류 횟수.

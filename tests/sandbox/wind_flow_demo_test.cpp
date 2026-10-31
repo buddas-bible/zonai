@@ -613,6 +613,48 @@ void checkExperimentalCutCellWorldCoupling()
         "one-way field with optional static obstacles must not silently insert dynamic-body inverse masses" );
 }
 
+void checkSandboxAnalyticCircleMode()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindCutCellCoupledProjectionEnabled( true );
+    scene.setWindCircleOnlyFluidEnabled( true );
+    scene.setWindAnalyticCircleEnabled( true );
+    scene.setWindFluidSubstepCount( 2 );
+    const bodyId body = scene.getShapes()[0].bodyHandle;
+    scene.getWorld().SetBodyLinearVelocity( body, { 1.2f, 0.3f } );
+    scene.addWindVortex();
+    scene.step( dt, 4 );
+
+    const fluidCutCellPressure2& first = scene.getWindField()->getCutCellPressure();
+    check( scene.getWindCouplingSteps() == 2 &&
+        scene.isWindCircleOnlyFluidEnabled() && scene.isWindAnalyticCircleEnabled() &&
+        first.usedCoupledProjection && !first.coupledSolveFailed &&
+        std::isfinite( first.predictedContinuityRms ) &&
+        IsFinite( scene.getWorld().GetBodyLinearVelocity( body ) ),
+        "isolated analytic Circle wind sandbox must use World mass-aware Schur pressure" );
+    scene.step( dt, 4 );
+    check( scene.getWindField()->getSweptFaceFlux().usedSweptFlux &&
+        scene.getWindField()->getCutCellPressure().hasVolumeHistory,
+        "moving isolated Circle in wind sandbox must generate a new swept geometry interval" );
+    scene.configureWindField( 24, 14, 0.5f );
+    check( scene.isWindAnalyticCircleEnabled() && scene.isWindCircleOnlyFluidEnabled() &&
+        !scene.getWindField()->getCutCellPressure().hasVolumeHistory,
+        "wind field resize must preserve circle geometry option without retaining swept history" );
+    scene.setWindAnalyticCircleEnabled( false );
+    scene.setWindCircleOnlyFluidEnabled( false );
+    // 두 번의 Fluid 구간을 쓰면 두 번째 구간은 이미 유효한 현재 모드 이력임.
+    // 전환 직후 첫 스냅샷의 무이력 보장을 독립적으로 검사하려고 1회만 진행.
+    scene.setWindFluidSubstepCount( 1 );
+    scene.step( dt, 4 );
+    check( scene.getWindField()->getCutCellPressure().activeCells > 0 &&
+        !scene.getWindField()->getCutCellPressure().hasVolumeHistory,
+        "wind sandbox must restore mixed-shape sampled cut-cells after disabling analytic mode" );
+}
+
 void checkMovingCutCellSweptVolumeLedger()
 {
     // World의 실제 pose 이동만 다음 Fluid 구간의 기하 ΔV를 만든다.
@@ -787,5 +829,6 @@ int main()
     checkExperimentalCutCellProjection();
     checkExperimentalCutCellWorldCoupling();
     checkMovingCutCellSweptVolumeLedger();
+    checkSandboxAnalyticCircleMode();
     checkSandboxConservativeAdvectionTrial();
 }
