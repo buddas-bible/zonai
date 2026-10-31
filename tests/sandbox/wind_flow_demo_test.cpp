@@ -201,6 +201,8 @@ void checkSynchronizedWindCoupling()
     scene.getWorld().SetBodyLinearVelocity( moving, { 2.0f, 0.0f } );
     scene.step( dt, 4 );
     check( scene.getWindCouplingSteps() == 4 &&
+        scene.getWindField()->getPressureMomentum().usedCoupledProjection &&
+        !scene.getWindField()->getPressureMomentum().coupledSolveFailed &&
         scene.getWindField()->getSolidCellCount() > 0 &&
         IsFinite( scene.getWorld().GetBodyLinearVelocity( moving ) ) &&
         IsFinite( scene.getWindPressureForces()[0].force ),
@@ -230,7 +232,9 @@ void checkSynchronizedWindCoupling()
     {
         scene.step( dt, 4 );
         const vec2 velocity = scene.getWorld().GetBodyLinearVelocity( moving );
-        check( IsFinite( velocity ) && IsFinite( scene.getWindPressureForces()[0].force ) &&
+        check( scene.getWindField()->getPressureMomentum().usedCoupledProjection &&
+            !scene.getWindField()->getPressureMomentum().coupledSolveFailed &&
+            IsFinite( velocity ) && IsFinite( scene.getWindPressureForces()[0].force ) &&
             std::isfinite( scene.getWindPressureForces()[0].torque ),
             "synchronized moving obstacle must keep finite velocity and pressure feedback over 120 frames" );
         maxSpeed = std::max( maxSpeed, Length( velocity ) );
