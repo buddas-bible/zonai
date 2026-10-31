@@ -2270,6 +2270,43 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     };
     if( cutCell )
     {
+        analyticFluidCircle circle{};
+        if( analyticCircleCutCellEnabled_ && TryGetAnalyticCircle( obstacles, circle ) )
+        {
+            const double h = cellSize_;
+            for( int y = 0; y < height_; ++y )
+                for( int x = 1; x < width_; ++x )
+                {
+                    const int left = cellIndex( x - 1, y );
+                    const int right = cellIndex( x, y );
+                    if( cellFluidFraction_[left] <= 0.0f && cellFluidFraction_[right] <= 0.0f ) continue;
+                    const double normal = origin_.x + x * h;
+                    const double low = origin_.y + y * h;
+                    const auto clipped = ClipCircleFace( circle, true, normal, low, low + h );
+                    if( clipped.length <= 0.0 ) continue;
+                    const vec2 point{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) };
+                    const vec2 force{ static_cast<float>( clipped.length ), 0.0f };
+                    if( cellFluidFraction_[left] > 0.0f ) addBoundary( left, 0, force, point );
+                    if( cellFluidFraction_[right] > 0.0f ) addBoundary( right, 0, -force, point );
+                }
+            for( int y = 1; y < height_; ++y )
+                for( int x = 0; x < width_; ++x )
+                {
+                    const int bottom = cellIndex( x, y - 1 );
+                    const int top = cellIndex( x, y );
+                    if( cellFluidFraction_[bottom] <= 0.0f && cellFluidFraction_[top] <= 0.0f ) continue;
+                    const double normal = origin_.y + y * h;
+                    const double low = origin_.x + x * h;
+                    const auto clipped = ClipCircleFace( circle, false, normal, low, low + h );
+                    if( clipped.length <= 0.0 ) continue;
+                    const vec2 point{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
+                    const vec2 force{ 0.0f, static_cast<float>( clipped.length ) };
+                    if( cellFluidFraction_[bottom] > 0.0f ) addBoundary( bottom, 0, force, point );
+                    if( cellFluidFraction_[top] > 0.0f ) addBoundary( top, 0, -force, point );
+                }
+        }
+        else
+        {
         // 막힌 공유 sub-face를 힘/토크 적분점으로 사용한다. 점유율 및
         // 경계 속도와 같은 표본 수를 사용해 B와 B^T의 adjoint를 유지한다.
         const int sampleCount = cutCellSampleCount_;
@@ -2326,6 +2363,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     if( cellFluidFraction_[top] > 0.0f ) addBoundary( top, owner, -force, point );
                 }
             }
+        }
     }
     else
     {
