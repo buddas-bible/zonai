@@ -248,6 +248,15 @@ Part 12b는 `sweptU/VVolume`을 이송 **방향의 가중치**로만 사용해, 
 
 **범위와 한계:** 이 변경은 **Sandbox의 시간 배치**만 변경하고 `World`의 충돌/Joint solver, `fluidField2`의 압력 행렬, 접촉 계산과 대수적 운동량 교환은 변경하지 않는다. `World::Step(dt/N, 1)` N회는 `World::Step(dt, N)` 1회와 Solver 관점에서 완전히 동일하지 않을 수 있다. 시간 동기화는 프레임 지연과 큰 장애물 점유 변화는 줄이지만 **추가질량(added-mass) 불안정성, coarse-grid 압력 반력 스파이크, Cut-cell 표면 적분 오차를 자체적으로 해결하지 않는다.** 장기적으로는 World/Fluid를 함께 호출하는 공통 Physics Scheduler와 강체 유효 질량이 포함된 implicit 압력 결합이 필요하다.
 
+## Part 13b — Fluid 계산 횟수 분리, 가변 Field, Static 장애물
+
+- **비용 분리:** World의 `subStepCount`는 Contact/Joint 정확도에 사용하고 Fluid 압력·기하 갱신·이류 횟수는 `setWindFluidSubstepCount(n)`(기본 1회, 1~32)로 별도로 설정한다. 이진 MAC 질량 결합이 활성화되면 실제 Fluid 횟수는 `min(n, worldSubSteps)`이며 한 Fluid 구간마다 여러 World substep을 묶어 `World::Step(groupDt, groupSubsteps)`를 수행한다. World=8 / Fluid=1이라면 PCG 압력은 1회, World는 8 substep이다. World=8 / Fluid=2라면 PCG 2회, World 4+4 substep이다. 불균등 분할은 World substep당 dt를 동일하게 유지해 그룹별 시간으로 합산한다.
+- **절충:** Fluid 계산 횟수 1은 연산 비용을 줄이지만 강체 움직임과 Fluid 경계의 재샘플링 간격은 늘린다. 결과 정확도가 World substeps에만 의존하지 않으므로 매우 빠른 장애물·강한 유동·격자 이동이 큰 경우 Fluid 횟수를 늘리거나 시간 간격을 줄여 비교해야 한다. Cut-cell 실험 모드에서는 아직 강체 질량 결합이 없어 기존 Fluid 1회 경로를 유지한다. 기존 동기화 옵션을 끈 단방향/레거시 경로도 Fluid 1회다.
+- **Field 크기:** Sandbox의 가로/세로 셀 수(각 8~128), 셀 크기(0.25~2m)를 편집하고 적용하면 원점 기준 중앙에 맞춘 새 `fluidField2`를 생성한다. 크기 변경은 기존 Fluid 속도·압력·tracer 해를 초기화하고 World의 Static 장애물 및 모드 설정은 유지한다. 소스 위치는 변경된 Field 왼쪽 상대 위치에서 계산한다. 실제 물리 격자 크기는 `width * height`와 `cellSize`가 함께 결정하며, 셀 수/압력 반복/장애물 수가 비용을 지배한다.
+- **Static 장애물:** Sandbox에서 Static Box 또는 Circle을 좌표·반크기·반경으로 최대 24개 생성하고 Inspector에서 위치·회전을 조정하며 삭제할 수 있다. 이는 별도 그래픽 표시용 물체가 아닌 실제 `World::CreateBody(Static)`과 `CreateShape`로 생성되므로 강체 충돌에도 참여한다. Fluid는 기존 동적 3개에 추가한 모든 Static을 장애물 스냅샷으로 받고 Static의 역질량은 0이다. **Dynamic 양방향 옵션을 끄더라도 Static은 유체를 막는다.**
+- 기존 `getWindPressureForces()`는 Dynamic 강체 세 개의 진단을 유지한다. 나머지 Static 경계 반력은 `fluidField2`가 내부적으로 계산하지만 현재 Sandbox UI에는 별도 배열로 제공하지 않는다.
+- **검증:** Fluid 1/2/3회와 World 8/3 substep 분리, 기존 결합 압력 사용, Field 재구축 후 옵션과 Static의 유지, 장애물의 점유 갱신 및 삭제, 단방향에서도 Static 유체 경계 유지 등을 GUI 없는 Sandbox 테스트로 검사한다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
