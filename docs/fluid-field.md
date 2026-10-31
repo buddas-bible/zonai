@@ -313,6 +313,16 @@ Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들�
 
 **제한:** 이 경로는 현재 고정된 Cut-cell geometry에서 압력 단계 동안 고체의 예측 속도 변화가 유발할 *1차 체적 flux*를 포함한다. **실제 형상의 다음 위치를 즉시 변형하거나**, swept geometry 적분, tracer 이송, 유체 전체 질량·에너지·각운동량 보존을 구현한 것은 아니다. 부분 개방 면의 4점 근사, 도메인 경계와 접촉하는 형상, 분리된 fluid pocket의 gauge/호환성 등은 추가 검증이 필요하다. 이 단계도 기본 OFF인 결합 Cut-cell 실험 모드에만 적용한다.
 
+## Part 13j — Sandbox에서 Cut-cell 강체 양방향 연성 선택 실행
+
+- `rigidBodyDemo::setWindCutCellCoupledProjectionEnabled(true)`와 Wind Sandbox 체크박스 **Cut-cell 질량·관성 연성 PCG (실험)**을 추가한다. 기존 Cut-cell 가중 Jacobi/이진 MAC은 수정하지 않고, 옵션의 기본값은 false다.
+- `Cut-cell 압력 투영 + Cut-cell 연성 PCG + 강체·유체 양방향 + 강체 질량 압력 결합(동기화)`가 모두 켜져야 World의 **Dynamic Body 역질량/역관성**을 `fluidShapeObstacle2`에 넣는다. 이 경우에만 사용자가 선택한 Fluid 계산 횟수(1–32회, World substep 이하)만큼 World와 Field를 교대로 갱신한다. 실제 이동된 World pose가 다음 Fluid interval의 `previousObstacles_`와 비교되어 swept geometry에 들어가며, 압력 단계의 예측 체적 유량을 다음 구간의 실제 geometry에 **추가로 더하지 않는다**.
+- 실험 Cut-cell 결합 경로는 200회의 PCG 한도, 나머지 경로는 기존 80회 기본 한도를 사용한다. PCG가 수렴하지 않으면 해당 interval의 압력 반력은 생략되며, UI에서 상태·반복 수·예측 연속방정식 RMS·동기화 face 수·추가 체적 L1을 확인할 수 있다.
+- `configureWindField()`로 격자를 재생성해도 옵션은 보존하고 체적 이력은 초기화한다. `resetWindFlow()`도 옵션은 보존한다. 양방향 또는 동기화를 해제하면 Cut-cell의 legacy weighted 경로로 돌아간다.
+- `sandboxWindFlowDemoTests`는 Circle의 실제 선속도·각속도 변화, World4/Fluid2 동기화, 다음 구간의 swept geometry 이력, Field 리사이즈와 양방향/동기화 비활성화를 검사한다.
+
+**물리 모델 한계:** 이 Sandbox 연동은 Cut-cell 연속방정식의 swept geometry와 pressure-predicted 속도의 시간 순서를 실제 움직이는 강체로 검증하기 위한 *실험 환경*이지, 아직 전체 유체–강체/Tracers의 질량·각운동량·에너지 완전 보존을 입증하거나 실제 움직이는 표면의 정확한 연속 적분을 제공하지 않는다. 특히 Body contact/joint/drag가 World 다음 구간에서 최종 속도를 바꾸므로 압력 예측치와 실제 위치 변화는 일치하지 않을 수 있다. Field substep 횟수가 늘면 가격이 증가한다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
