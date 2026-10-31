@@ -1677,24 +1677,24 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
         std::fill( pressure_.begin(), pressure_.end(), 0.0f );
         for( int iteration = 0; iteration < pressureIterations; ++iteration )
         {
-        for( int y = 0; y < height_; ++y )
-            for( int x = 0; x < width_; ++x )
-            {
-                const int cell = cellIndex( x, y );
-                if( cellFluidFraction_[cell] <= 0.0f ) { nextPressure_[cell] = 0.0f; continue; }
-                const float left = cutCellUOpen( x, y );
-                const float right = cutCellUOpen( x + 1, y );
-                const float bottom = cutCellVOpen( x, y );
-                const float top = cutCellVOpen( x, y + 1 );
-                const float diagonal = left + right + bottom + top;
-                const float sum =
-                    ( left > 0.0f ? left * pressure_[cellIndex( x - 1, y )] : 0.0f ) +
-                    ( right > 0.0f ? right * pressure_[cellIndex( x + 1, y )] : 0.0f ) +
-                    ( bottom > 0.0f ? bottom * pressure_[cellIndex( x, y - 1 )] : 0.0f ) +
-                    ( top > 0.0f ? top * pressure_[cellIndex( x, y + 1 )] : 0.0f );
-                nextPressure_[cell] = diagonal > 0.0f
-                    ? ( sum - divergence_[cell] * pressureScale ) / diagonal : 0.0f;
-            }
+            for( int y = 0; y < height_; ++y )
+                for( int x = 0; x < width_; ++x )
+                {
+                    const int cell = cellIndex( x, y );
+                    if( cellFluidFraction_[cell] <= 0.0f ) { nextPressure_[cell] = 0.0f; continue; }
+                    const float left = cutCellUOpen( x, y );
+                    const float right = cutCellUOpen( x + 1, y );
+                    const float bottom = cutCellVOpen( x, y );
+                    const float top = cutCellVOpen( x, y + 1 );
+                    const float diagonal = left + right + bottom + top;
+                    const float sum =
+                        ( left > 0.0f ? left * pressure_[cellIndex( x - 1, y )] : 0.0f ) +
+                        ( right > 0.0f ? right * pressure_[cellIndex( x + 1, y )] : 0.0f ) +
+                        ( bottom > 0.0f ? bottom * pressure_[cellIndex( x, y - 1 )] : 0.0f ) +
+                        ( top > 0.0f ? top * pressure_[cellIndex( x, y + 1 )] : 0.0f );
+                    nextPressure_[cell] = diagonal > 0.0f
+                        ? ( sum - divergence_[cell] * pressureScale ) / diagonal : 0.0f;
+                }
             pressure_.swap( nextPressure_ );
         }
     }
@@ -1852,30 +1852,30 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     }
     else
     {
-    for( int y = 0; y < height_; ++y )
-        for( int x = 1; x < width_; ++x )
-        {
-            const int left = cellIndex( x - 1, y );
-            const int right = cellIndex( x, y );
-            const int leftOwner = solidOwner_[left];
-            const int rightOwner = solidOwner_[right];
-            const vec2 point = origin_ + cellSize_ *
-                vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
-            if( leftOwner < 0 && rightOwner >= 0 ) addBoundary( left, rightOwner, { cellSize_, 0.0f }, point );
-            if( rightOwner < 0 && leftOwner >= 0 ) addBoundary( right, leftOwner, { -cellSize_, 0.0f }, point );
-        }
-    for( int y = 1; y < height_; ++y )
-        for( int x = 0; x < width_; ++x )
-        {
-            const int bottom = cellIndex( x, y - 1 );
-            const int top = cellIndex( x, y );
-            const int bottomOwner = solidOwner_[bottom];
-            const int topOwner = solidOwner_[top];
-            const vec2 point = origin_ + cellSize_ *
-                vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
-            if( bottomOwner < 0 && topOwner >= 0 ) addBoundary( bottom, topOwner, { 0.0f, cellSize_ }, point );
-            if( topOwner < 0 && bottomOwner >= 0 ) addBoundary( top, bottomOwner, { 0.0f, -cellSize_ }, point );
-        }
+        for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x )
+            {
+                const int left = cellIndex( x - 1, y );
+                const int right = cellIndex( x, y );
+                const int leftOwner = solidOwner_[left];
+                const int rightOwner = solidOwner_[right];
+                const vec2 point = origin_ + cellSize_ *
+                    vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
+                if( leftOwner < 0 && rightOwner >= 0 ) addBoundary( left, rightOwner, { cellSize_, 0.0f }, point );
+                if( rightOwner < 0 && leftOwner >= 0 ) addBoundary( right, leftOwner, { -cellSize_, 0.0f }, point );
+            }
+        for( int y = 1; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+            {
+                const int bottom = cellIndex( x, y - 1 );
+                const int top = cellIndex( x, y );
+                const int bottomOwner = solidOwner_[bottom];
+                const int topOwner = solidOwner_[top];
+                const vec2 point = origin_ + cellSize_ *
+                    vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
+                if( bottomOwner < 0 && topOwner >= 0 ) addBoundary( bottom, topOwner, { 0.0f, cellSize_ }, point );
+                if( topOwner < 0 && bottomOwner >= 0 ) addBoundary( top, bottomOwner, { 0.0f, -cellSize_ }, point );
+            }
     }
     if( faces.empty() ) return fail( fluidCoupledPressureStatus2::noBoundary );
 
