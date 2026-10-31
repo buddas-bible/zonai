@@ -261,8 +261,12 @@ void fluidField2::setCutCellSampleCount( int count ) noexcept
     if( cutCellSampleCount_ == samples ) return;
     cutCellSampleCount_ = samples;
 
-    // 서로 다른 이산 면적의 연속 snapshot을 차분하면 정지 물체의
-    // 가짜 swept flux/체적 변화가 발생한다. 다음 step은 새로운 첫 snapshot.
+    // 서로 다른 이산 면적의 연속 snapshot을 차분하면 가짜 체적 source가 발생한다.
+    invalidateObstacleHistory();
+}
+
+void fluidField2::invalidateObstacleHistory() noexcept
+{
     hasCutCellHistory_ = false;
     volumeSourceValid_ = false;
     previousObstacles_.clear();
@@ -274,11 +278,7 @@ void fluidField2::setAnalyticCircleCutCellEnabled( bool enabled ) noexcept
 {
     if( analyticCircleCutCellEnabled_ == enabled ) return;
     analyticCircleCutCellEnabled_ = enabled;
-    hasCutCellHistory_ = false;
-    volumeSourceValid_ = false;
-    previousObstacles_.clear();
-    sweptFaceFlux_ = {};
-    cutCellPressure_ = {};
+    invalidateObstacleHistory();
 }
 
 void fluidField2::clear() noexcept
