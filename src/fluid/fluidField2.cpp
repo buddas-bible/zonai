@@ -1686,6 +1686,12 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     // 이진 MAC face의 압력 변위와 rigid body의 유효 질량을 동시에 푼다.
     // A = D D^T + B M_body^-1 B^T (단위 깊이 rho=1).
     // B는 기존 pressure traction과 동일한 face 법선·COM 레버암을 사용한다.
+    pressureMomentum_.coupledIterationLimit = iterations;
+    const auto fail = [&]( fluidCoupledPressureStatus2 status )
+    {
+        pressureMomentum_.coupledStatus = status;
+        return false;
+    };
     auto& scratch = coupledPressureScratch_;
     auto& faces = scratch.faces;
     faces.clear();
@@ -1711,7 +1717,12 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
             rhsSum += rhs[cell];
             ++active;
         }
-    if( active == 0 ) { std::fill( pressure_.begin(), pressure_.end(), 0.0f ); return true; }
+    if( active == 0 )
+    {
+        std::fill( pressure_.begin(), pressure_.end(), 0.0f );
+        pressureMomentum_.coupledStatus = fluidCoupledPressureStatus2::converged;
+        return true;
+    }
 
     const auto addBoundary = [&]( int cell, int owner, vec2 normal, vec2 point )
     {
@@ -1751,7 +1762,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
             if( bottomOwner < 0 && topOwner >= 0 ) addBoundary( bottom, topOwner, { 0.0f, 1.0f }, point );
             if( topOwner < 0 && bottomOwner >= 0 ) addBoundary( top, bottomOwner, { 0.0f, -1.0f }, point );
         }
-    if( faces.empty() ) return false;
+    if( faces.empty() ) return fail( fluidCoupledPressureStatus2::noBoundary );
 
     // Closed-domain Neumann pressure has an arbitrary gauge. Remove the global
     // incompatible source; disconnected cavities need a future component treatment.
@@ -1820,16 +1831,22 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         rz += residual[i] * z[i];
         squared += residual[i] * residual[i];
     }
-    if( !std::isfinite( rz ) || !std::isfinite( squared ) ) return false;
-    const double tolerance = std::max( 1.0e-18, squared * 1.0e-10 );
+    if( !std::isfinite( rz ) || !std::isfinite( squared ) )
+        return fail( fluidCoupledPressureStatus2::numericalBreakdown );
+    const double initialSquared = squared;
+    const double tolerance = std::max( 1.0e-18, initialSquared * 1.0e-10 );
+    pressureMomentum_.coupledInitialResidualRms = static_cast<float>( std::sqrt( initialSquared / active ) );
     for( int iteration = 0; iteration < iterations && squared > tolerance; ++iteration )
     {
         multiply( direction, product );
         double denom = 0.0;
         for( std::size_t i = 0; i < rhs.size(); ++i )
             denom += direction[i] * product[i];
-        if( !std::isfinite( denom ) || denom <= 0.0 ) return false;
+        if( !std::isfinite( denom ) || denom <= 0.0 )
+            return fail( fluidCoupledPressureStatus2::numericalBreakdown );
         const double alpha = rz / denom;
+        if( !std::isfinite( alpha ) )
+            return fail( fluidCoupledPressureStatus2::numericalBreakdown );
         squared = 0.0;
         for( std::size_t i = 0; i < rhs.size(); ++i )
         {
@@ -1837,7 +1854,9 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
             residual[i] -= alpha * product[i];
             squared += residual[i] * residual[i];
         }
-        if( !std::isfinite( squared ) ) return false;
+        pressureMomentum_.coupledIterations = iteration + 1;
+        if( !std::isfinite( squared ) )
+            return fail( fluidCoupledPressureStatus2::numericalBreakdown );
         if( squared <= tolerance ) break;
         double nextRz = 0.0;
         for( std::size_t i = 0; i < rhs.size(); ++i )
@@ -1845,12 +1864,33 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
             z[i] = residual[i] / std::max( 1.0e-8, diagonal[i] );
             nextRz += residual[i] * z[i];
         }
-        if( !std::isfinite( nextRz ) || rz <= 0.0 ) return false;
+        if( !std::isfinite( nextRz ) || rz <= 0.0 )
+            return fail( fluidCoupledPressureStatus2::numericalBreakdown );
         const double beta = nextRz / rz;
+        if( !std::isfinite( beta ) )
+            return fail( fluidCoupledPressureStatus2::numericalBreakdown );
         for( std::size_t i = 0; i < rhs.size(); ++i )
             direction[i] = z[i] + beta * direction[i];
         rz = nextRz;
     }
+
+    // Recursive CG 잔차는 반올림으로 실제 b-A*x와 달라질 수 있으므로
+    // 종료 시 항상 원래 연산자로 직접 재계산한다. 반복 한도는 성공 조건이 아님.
+    multiply( x, product );
+    double trueSquared = 0.0;
+    for( std::size_t i = 0; i < rhs.size(); ++i )
+    {
+        if( solidOwner_[i] >= 0 ) continue;
+        const double error = rhs[i] - product[i];
+        trueSquared += error * error;
+    }
+    if( !std::isfinite( trueSquared ) )
+        return fail( fluidCoupledPressureStatus2::numericalBreakdown );
+    pressureMomentum_.coupledFinalResidualRms = static_cast<float>( std::sqrt( trueSquared / active ) );
+    pressureMomentum_.coupledRelativeResidual = initialSquared > 0.0
+        ? static_cast<float>( std::sqrt( trueSquared / initialSquared ) ) : 0.0f;
+    if( trueSquared > tolerance )
+        return fail( fluidCoupledPressureStatus2::iterationLimit );
 
     double pressureSum = 0.0;
     for( std::size_t i = 0; i < rhs.size(); ++i )
@@ -1861,9 +1901,10 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         if( solidOwner_[i] >= 0 ) { pressure_[i] = 0.0f; continue; }
         const double value = x[i] - gauge;
         if( !std::isfinite( value ) || std::abs( value ) > std::numeric_limits<float>::max() )
-            return false;
+            return fail( fluidCoupledPressureStatus2::invalidPressure );
         pressure_[i] = static_cast<float>( value );
     }
+    pressureMomentum_.coupledStatus = fluidCoupledPressureStatus2::converged;
     return true;
 }
 
@@ -1893,8 +1934,14 @@ void fluidField2::project( float timeStep, int pressureIterations,
         } );
     const bool solvedCoupled = coupled && solveCoupledPressure( timeStep, pressureIterations, obstacles );
     pressureMomentum_.usedCoupledProjection = solvedCoupled;
-    pressureMomentum_.coupledSolveFailed = coupled && !solvedCoupled;
-    if( !solvedCoupled )
+    pressureMomentum_.coupledSolveFailed = coupled && !solvedCoupled &&
+        pressureMomentum_.coupledStatus != fluidCoupledPressureStatus2::noBoundary;
+    // 연립 압력 계산에 실패했을 때 질량을 무시하는 Jacobi 반력을 강체에
+    // 주입하면 added-mass 폭주가 재발할 수 있다. 실패 Step은 압력 반력을
+    // 건너뛰고 진단을 남긴다. 이 경우 비압축성 제약은 만족하지 않을 수 있다.
+    if( pressureMomentum_.coupledSolveFailed )
+        std::fill( pressure_.begin(), pressure_.end(), 0.0f );
+    else if( !solvedCoupled )
     {
         std::fill( pressure_.begin(), pressure_.end(), 0.0f );
         for( int iteration = 0; iteration < pressureIterations; ++iteration )
