@@ -1001,6 +1001,86 @@ void checkCoupledCutCellAdjointContinuity()
         "legacy cut-cell pressure must not pretend to predict coupled volume response" );
 }
 
+void checkCutCellSpatialQuadrature()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr float radius = 0.83f;
+    constexpr float h = 0.5f;
+    constexpr int width = 24;
+    constexpr int height = 16;
+    const float expectedFluidArea = width * height * h * h -
+        std::numbers::pi_v<float> * radius * radius;
+    fluidField2 base{ width, height, h, { -6.0f, -4.0f } };
+    fluidField2 refined{ width, height, h, { -6.0f, -4.0f } };
+    for( fluidField2* field : { &base, &refined } )
+        field->setCutCellProjectionEnabled( true );
+    refined.setCutCellSampleCount( 8 );
+    check( base.getCutCellSampleCount() == 4 && refined.getCutCellSampleCount() == 8,
+        "spatial quadrature must default to 4x4 and allow 8x8" );
+    fluidShapeObstacle2 disk{
+        circle2{ {}, radius }, { { 0.18f, -0.23f }, {} },
+        { 0.18f, -0.23f }, {}, 0.0f
+    };
+    std::array<fluidObstacleForce2, 1> feedback{};
+    for( fluidField2* field : { &base, &refined } )
+        field->step( dt, std::span<const fluidShapeObstacle2>( &disk, 1 ), feedback, 120 );
+    const float error4 = std::abs( base.getCutCellTransition().fluidVolume - expectedFluidArea );
+    const float error8 = std::abs( refined.getCutCellTransition().fluidVolume - expectedFluidArea );
+    check( error8 < error4 * 0.6f && error8 < 0.004f,
+        "8x8 geometry sampling should improve analytic disk area for the reference fixture" );
+
+    // 이산화 규칙이 바뀌면 이전 4x4 snapshot을 8x8 기하에 대입해서는 안 된다.
+    base.setCutCellSampleCount( 8 );
+    check( !base.getSweptFaceFlux().usedSweptFlux && base.getCutCellSampleCount() == 8,
+        "changing cut-cell spatial resolution must invalidate the old swept history" );
+    base.step( dt, std::span<const fluidShapeObstacle2>( &disk, 1 ), feedback, 120 );
+    check( !base.getCutCellPressure().hasVolumeHistory &&
+        !base.getSweptFaceFlux().usedSweptFlux &&
+        std::abs( base.getCutCellTransition().fluidVolume -
+            refined.getCutCellTransition().fluidVolume ) < 1.0e-5f,
+        "first 8x8 frame must rebuild same geometry without synthetic swept-volume source" );
+
+    disk.transform.position.x += 0.2f;
+    disk.center.x += 0.2f;
+    for( fluidField2* field : { &base, &refined } )
+        field->step( dt, std::span<const fluidShapeObstacle2>( &disk, 1 ), feedback, 120 );
+    check( base.getSweptFaceFlux().usedSweptFlux &&
+        refined.getSweptFaceFlux().usedSweptFlux &&
+        base.getCutCellPressure().hasVolumeHistory &&
+        std::isfinite( base.getSweptFaceFlux().geometryMismatch ) &&
+        std::abs( base.getSweptFaceFlux().geometryMismatch -
+            refined.getSweptFaceFlux().geometryMismatch ) < 1.0e-4f,
+        "spatial resolution changes must preserve consistent swept face quadrature on the next moving frame" );
+
+    // 정적 Circle뿐 아니라 이동/회전하는 Body와 PCG Schur 역시 8점 표본을 사용해야 한다.
+    fluidField2 coupled{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    coupled.setCutCellProjectionEnabled( true );
+    coupled.setCutCellCoupledProjectionEnabled( true );
+    coupled.setCutCellSampleCount( 8 );
+    fluidShapeObstacle2 box{
+        MakeBox( { 0.73f, 0.31f } ),
+        { { 0.13f, -0.17f }, rot2::FromRadians( 0.31f ) },
+        { 0.13f, -0.17f }, { 1.0f, -0.5f }, 1.2f, 0.5f, 1.25f
+    };
+    coupled.addVelocity( { -1.1f, 0.25f }, { 1.3f, -0.4f }, 1.4f );
+    coupled.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 200 );
+    const fluidCutCellPressure2& stats = coupled.getCutCellPressure();
+    check( stats.usedCoupledProjection && !stats.coupledSolveFailed &&
+        stats.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        stats.synchronizedPartialFaces > 0 &&
+        std::isfinite( stats.predictedContinuityRms ) &&
+        std::abs( stats.predictedContinuityRms - stats.pressureResidual ) <
+            2.0e-3f + 0.1f * stats.pressureResidual,
+        "8x8 cut-cell pressure B/B^T and predicted blocked-face volume flux must remain adjoint" );
+    coupled.clear();
+    check( coupled.getCutCellSampleCount() == 8 &&
+        !coupled.getSweptFaceFlux().usedSweptFlux,
+        "clear must keep spatial quadrature selection without retaining old shape history" );
+    coupled.setCutCellSampleCount( 3 );
+    check( coupled.getCutCellSampleCount() == 4,
+        "unsupported small sample counts must resolve to safe 4x4 default" );
+}
+
 void checkCutCellTemporalContinuity()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1577,6 +1657,7 @@ int main()
     checkCutCellCoupledPressure();
     checkCutCellPredictedBoundarySynchronization();
     checkCoupledCutCellAdjointContinuity();
+    checkCutCellSpatialQuadrature();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();
