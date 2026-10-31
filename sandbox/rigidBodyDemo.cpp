@@ -318,6 +318,8 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 if( !world_.IsValid( visual.bodyHandle ) || !world_.IsValid( visual.shapeHandle ) ||
                     world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
 
+                if( windDragCoefficient_ <= 0.0f ) continue;
+
                 const vec2 center = TransformPoint( world_.GetBodyTransform( visual.bodyHandle ),
                     world_.GetBodyLocalCenter( visual.bodyHandle ) );
                 const vec2 extents = Extents( world_.GetShapeAABB( visual.shapeHandle ) );
@@ -358,6 +360,9 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                     world_.ApplyTorque( visual.bodyHandle, windPressureForces_[i].torque );
                 }
     
+                // Drag=0은 비싼 표면 샘플링·ApplyForce를 생략하지만 압력은 유지한다.
+                if( windDragCoefficient_ <= 0.0f ) continue;
+
                 for( std::size_t sample = 0; sample < DIRECTIONS.size(); ++sample )
                 {
                     vec2 dragForce = dragForces[i][sample];
