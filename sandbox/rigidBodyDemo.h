@@ -272,6 +272,15 @@ public:
     {
         return windField_ && windField_->isCutCellProjectionEnabled();
     }
+    // Cut-cell Body 유효질량 Schur 연성은 기본 OFF. 이진 MAC 모드에는 영향 없음.
+    void setWindCutCellCoupledProjectionEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setCutCellCoupledProjectionEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindCutCellCoupledProjectionEnabled() const noexcept
+    {
+        return windField_ && windField_->isCutCellCoupledProjectionEnabled();
+    }
     void setWindConservativeAdvectionEnabled( bool enabled ) noexcept
     {
         if( windField_ ) windField_->setConservativeAdvectionEnabled( enabled );

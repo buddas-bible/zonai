@@ -216,11 +216,14 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
     }
     updateSplinePath( timeStep );
     // World solver의 작은 Substep은 유지하되 Fluid는 독립된 횟수로 실행한다.
-    // 이진 MAC의 질량·관성 결합 압력 Solver는 Fluid 1회에서도 사용한다.
-    // Cut-cell은 아직 Body 유효질량을 압력 행렬에 결합하지 않으므로
-    // explicit 압력 반력을 더 자주 주입하는 동기화를 사용하지 않는다.
+    // 이진 MAC은 기본 질량 결합, Cut-cell은 별도 명시적 실험 옵션에서만
+    // Body 유효질량을 압력 행렬에 포함한다. World substep과 Fluid 횟수는 독립.
+    const bool experimentalCutCellCoupling = windField_ &&
+        windField_->isCutCellProjectionEnabled() &&
+        windField_->isCutCellCoupledProjectionEnabled();
     const bool coupledPressureEnabled = windField_ && windObstacleCouplingEnabled_ &&
-        windSynchronizedCouplingEnabled_ && !windField_->isCutCellProjectionEnabled();
+        windSynchronizedCouplingEnabled_ &&
+        ( !windField_->isCutCellProjectionEnabled() || experimentalCutCellCoupling );
     // World의 Contact/Joint substeps와 비용이 큰 Fluid 투영 횟수를 분리한다.
     // 한 Fluid 구간은 하나 이상의 World substeps를 포함한다.
     const int windSteps = coupledPressureEnabled && timeStep > 0.0f
@@ -268,8 +271,8 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 const vec2 center = TransformPoint( transform, world_.GetBodyLocalCenter( visual.bodyHandle ) );
                 windObstacleSnapshots_[i] = { geometry, transform, center,
                     world_.GetBodyLinearVelocity( visual.bodyHandle ), world_.GetBodyAngularVelocity( visual.bodyHandle ) };
-                // Time-synchronized binary pressure path: Body effective inverse mass
-                // enters the same projection operator as fluid face corrections.
+                // World 질량/관성은 이진 MAC 및 선택한 Cut-cell Schur 압력 Solver에
+                // 같은 substep의 실제 Body snapshot으로만 전달한다.
                 if( coupledPressureEnabled &&
                     world_.GetBody( visual.bodyHandle ).type == bodyType::Dynamic )
                 {
@@ -283,7 +286,10 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
             windPressureForces_.fill( {} );
             if( windObstacleCouplingEnabled_ )
             {
-                windField_->step( windTimeStep, windObstacleSnapshots_, windObstacleFeedback_ );
+                // Cut-cell 실험 경로는 부분 면에 대한 Schur PCG가 수렴하도록
+                // 충분한 반복 한도를 주되, 일반 이진/Jacobi 경로의 비용은 유지.
+                const int pressureIterations = experimentalCutCellCoupling && coupledPressureEnabled ? 200 : 80;
+                windField_->step( windTimeStep, windObstacleSnapshots_, windObstacleFeedback_, pressureIterations );
                 for( std::size_t i = 0; i < windPressureForces_.size(); ++i )
                     windPressureForces_[i] = windObstacleFeedback_[i];
             }
@@ -1347,6 +1353,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     height = std::clamp( height, 8, 128 );
     cellSize = std::clamp( cellSize, 0.25f, 2.0f );
     const bool cutCell = windField_->isCutCellProjectionEnabled();
+    const bool cutCellCoupled = windField_->isCutCellCoupledProjectionEnabled();
     const bool conservative = windField_->isConservativeAdvectionEnabled();
     const bool geometryCorrection = windField_->isSweptGeometryCorrectionEnabled();
     const bool sweptTracer = windField_->isSweptTracerRemapEnabled();
@@ -1355,6 +1362,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     windField_.emplace( width, height, cellSize,
         vec2{ -0.5f * width * cellSize, -0.5f * height * cellSize } );
     windField_->setCutCellProjectionEnabled( cutCell );
+    windField_->setCutCellCoupledProjectionEnabled( cutCellCoupled );
     windField_->setConservativeAdvectionEnabled( conservative );
     windField_->setSweptGeometryCorrectionEnabled( geometryCorrection );
     windField_->setSweptTracerRemapEnabled( sweptTracer );

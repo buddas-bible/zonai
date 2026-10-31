@@ -932,7 +932,7 @@ void rigidBodyDemoUi::drawExperimentControls()
             setWindObstacleCouplingEnabled( couple );
 
         bool synchronize = isWindSynchronizedCouplingEnabled();
-        if( ImGui::Checkbox( "질량 결합 압력 (이진 MAC)###WindSynchronizedCoupling", &synchronize ) )
+        if( ImGui::Checkbox( "강체 질량 압력 결합 (동기화)###WindSynchronizedCoupling", &synchronize ) )
             setWindSynchronizedCouplingEnabled( synchronize );
         int fluidSteps = getWindFluidSubstepCount();
         if( ImGui::SliderInt( "Fluid 계산 횟수/Step###WindFluidSteps", &fluidSteps, 1, 16 ) )
@@ -955,6 +955,12 @@ void rigidBodyDemoUi::drawExperimentControls()
         bool cutCellProjection = isWindCutCellProjectionEnabled();
         if( ImGui::Checkbox( "부분 개방 압력 투영 (실험)###WindCutCellPressure", &cutCellProjection ) )
             setWindCutCellProjectionEnabled( cutCellProjection );
+        bool cutCellCoupled = isWindCutCellCoupledProjectionEnabled();
+        ImGui::BeginDisabled( !isWindCutCellProjectionEnabled() );
+        if( ImGui::Checkbox( "Cut-cell 질량·관성 연성 PCG (실험)###WindCutCellCoupled", &cutCellCoupled ) )
+            setWindCutCellCoupledProjectionEnabled( cutCellCoupled );
+        ImGui::EndDisabled();
+        ImGui::TextDisabled( "Cut-cell 결합은 양방향 + 강체 질량 압력 결합 활성 시에만 적용. 완전 보존 모델은 아닙니다." );
         bool correction = isWindSweptGeometryCorrectionEnabled();
         if( ImGui::Checkbox( "Swept 면 기하 오차 국소 보정 (실험)###WindSweptGeometryCorrection", &correction ) )
             setWindSweptGeometryCorrectionEnabled( correction );
@@ -1061,6 +1067,29 @@ void rigidBodyDemoUi::drawExperimentControls()
                 ImGui::Text( "국소 면 보정 누적량: %.5f m³ / 갱신 횟수: %d",
                     swept.correctionAbsoluteFlux, swept.correctedFaces );
                 ImGui::Text( "부분 유체 셀: %d", projection.activeCells );
+                if( isWindCutCellCoupledProjectionEnabled() )
+                {
+                    const char* status = "미요청 (동기화/양방향 설정 확인)";
+                    switch( projection.coupledStatus )
+                    {
+                    case fluidCoupledPressureStatus2::converged: status = "PCG 수렴"; break;
+                    case fluidCoupledPressureStatus2::noBoundary: status = "동적 경계 없음"; break;
+                    case fluidCoupledPressureStatus2::iterationLimit: status = "반복 한도"; break;
+                    case fluidCoupledPressureStatus2::numericalBreakdown: status = "수치 실패"; break;
+                    case fluidCoupledPressureStatus2::invalidPressure: status = "압력값 오류"; break;
+                    default: break;
+                    }
+                    ImGui::Text( "Cut-cell 강체 결합: %s / PCG %d회 (상대 %.3e)",
+                        status, projection.coupledIterations, projection.coupledRelativeResidual );
+                    ImGui::Text( "동기화된 경계: %d / 부분 개방 %d face",
+                        projection.synchronizedBoundaryFaces, projection.synchronizedPartialFaces );
+                    ImGui::Text( "예측 연속성 잔차 RMS: %.4e /s / 압력 잔차 %.4e /s",
+                        projection.predictedContinuityRms, projection.pressureResidual );
+                    ImGui::Text( "예측 추가 Solid 체적 L1: %.6f m³ / 경계 속도 변화 RMS %.5f m/s",
+                        projection.predictedSolidVolumeL1, projection.boundaryNormalChangeRms );
+                    if( projection.coupledSolveFailed )
+                        ImGui::TextWrapped( "Cut-cell PCG 수렴 실패: 해당 Fluid Step에서는 압력 반력을 생략했습니다." );
+                }
             }
             ImGui::Text( "강체 점유 셀: %d", field->getSolidCellCount() );
             const fluidSolidTransition2& transition = field->getSolidTransition();
