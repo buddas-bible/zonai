@@ -28,6 +28,10 @@ struct fluidShapeObstacle2
     vec2 center{};
     vec2 linearVelocity{};
     float angularVelocity = 0.0f;
+    // 압력-강체 연립 투영에서 사용할 COM 역질량/역관성.
+    // 둘 다 0이면 기존 고정 운동학 경계와 Jacobi 압력 solver로 처리.
+    float inverseMass = 0.0f;
+    float inverseInertia = 0.0f;
 };
 
 // 2D 단위 깊이, 유체 밀도 1kg/m³ 가정의 압력 반력. force(N), torque(N·m).
@@ -294,6 +298,8 @@ private:
     void projectCutCell( float timeStep, int pressureIterations,
         std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback );
     void applySolidBoundaries( std::span<const fluidShapeObstacle2> obstacles );
+    [[nodiscard]] bool solveCoupledPressure( float timeStep, int iterations,
+        std::span<const fluidShapeObstacle2> obstacles );
     void project( float timeStep, int pressureIterations, std::span<const fluidShapeObstacle2> obstacles,
         std::span<fluidObstacleForce2> feedback );
 #pragma endregion Helpers
