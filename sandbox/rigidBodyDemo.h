@@ -272,6 +272,14 @@ public:
     {
         return windField_ && windField_->isCutCellProjectionEnabled();
     }
+    void setWindCutCellSampleCount( int count ) noexcept
+    {
+        if( windField_ ) windField_->setCutCellSampleCount( count );
+    }
+    [[nodiscard]] int getWindCutCellSampleCount() const noexcept
+    {
+        return windField_ ? windField_->getCutCellSampleCount() : 4;
+    }
     // Cut-cell Body 유효질량 Schur 연성은 기본 OFF. 이진 MAC 모드에는 영향 없음.
     void setWindCutCellCoupledProjectionEnabled( bool enabled ) noexcept
     {

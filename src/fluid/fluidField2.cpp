@@ -162,6 +162,21 @@ fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
     }
 }
 
+void fluidField2::setCutCellSampleCount( int count ) noexcept
+{
+    const int samples = count >= 8 ? 8 : 4;
+    if( cutCellSampleCount_ == samples ) return;
+    cutCellSampleCount_ = samples;
+
+    // 서로 다른 이산 면적의 연속 snapshot을 차분하면 정지 물체의
+    // 가짜 swept flux/체적 변화가 발생한다. 다음 step은 새로운 첫 snapshot.
+    hasCutCellHistory_ = false;
+    volumeSourceValid_ = false;
+    previousObstacles_.clear();
+    sweptFaceFlux_ = {};
+    cutCellPressure_ = {};
+}
+
 void fluidField2::clear() noexcept
 {
     std::fill( u_.begin(), u_.end(), 0.0f );
@@ -525,11 +540,11 @@ float fluidField2::getVFaceSolidVelocity( int x, int y ) const noexcept
 
 void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> obstacles )
 {
-    // 이진 cell-center mask와 별도로 4x4 sub-cell / 4개 face 표본을 계산.
+    // 이진 cell-center mask와 별도로 NxN sub-cell / face당 N점 표본을 계산.
     // 선택적 가중 압력 경로에서 면 개방율과 강체 속도를 직접 사용한다.
-    constexpr int sampleCount = 4;
-    constexpr float inverseCount = 1.0f / sampleCount;
-    constexpr float inverseCellSamples = 1.0f / ( sampleCount * sampleCount );
+    const int sampleCount = cutCellSampleCount_;
+    const float inverseCount = 1.0f / sampleCount;
+    const float inverseCellSamples = inverseCount * inverseCount;
     std::copy( cellFluidFraction_.begin(), cellFluidFraction_.end(), previousCellFluidFraction_.begin() );
     volumeSourceValid_ = hasCutCellHistory_;
     hasCutCellHistory_ = true;
@@ -571,9 +586,35 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
         };
         const auto isOccupied = [&]( vec2 point ) { return firstOwner( point ) >= 0; };
 
+        // 대부분의 셀/face는 장애물 바깥이다. 보수적 원형 경계의 AABB와
+        // 대상 셀/면 구간이 만나지 않으면 공간 N×N 표본 검사를 생략한다.
+        // 반경 여유는 경계 부동소수점 오차로 인한 누락을 막는다.
+        const auto mayOverlap = [&]( vec2 center, vec2 halfSize )
+        {
+            constexpr double tolerance = 1.0e-5;
+            for( std::size_t i = 0; i < obstacles.size(); ++i )
+            {
+                if( bounds[i] < 0.0 ) continue;
+                const vec2 body = obstacles[i].transform.position;
+                if( std::abs( static_cast<double>( center.x ) - body.x ) >
+                        bounds[i] + halfSize.x + tolerance ||
+                    std::abs( static_cast<double>( center.y ) - body.y ) >
+                        bounds[i] + halfSize.y + tolerance ) continue;
+                return true;
+            }
+            return false;
+        };
+
         for( int y = 0; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
             {
+                const vec2 center = origin_ + cellSize_ * vec2{
+                    static_cast<float>( x ) + 0.5f, static_cast<float>( y ) + 0.5f };
+                if( !mayOverlap( center, { 0.5f * cellSize_, 0.5f * cellSize_ } ) )
+                {
+                    cellFluidFraction_[cellIndex( x, y )] = 1.0f;
+                    continue;
+                }
                 int covered = 0;
                 for( int sy = 0; sy < sampleCount; ++sy )
                     for( int sx = 0; sx < sampleCount; ++sx )
@@ -589,6 +630,13 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
         for( int y = 0; y < height_; ++y )
             for( int x = 1; x < width_; ++x )
             {
+                const vec2 center = origin_ + cellSize_ * vec2{
+                    static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
+                if( !mayOverlap( center, { 0.0f, 0.5f * cellSize_ } ) )
+                {
+                    uOpenFraction_[uIndex( x, y )] = 1.0f;
+                    continue;
+                }
                 int blocked = 0;
                 for( int sample = 0; sample < sampleCount; ++sample )
                 {
@@ -610,6 +658,13 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
         for( int y = 1; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
             {
+                const vec2 center = origin_ + cellSize_ * vec2{
+                    static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
+                if( !mayOverlap( center, { 0.5f * cellSize_, 0.0f } ) )
+                {
+                    vOpenFraction_[vIndex( x, y )] = 1.0f;
+                    continue;
+                }
                 int blocked = 0;
                 for( int sample = 0; sample < sampleCount; ++sample )
                 {
@@ -1302,10 +1357,10 @@ void fluidField2::applyCutCellBoundaries() noexcept
 void fluidField2::synchronizeCutCellBoundaries( float timeStep,
     std::span<const fluidShapeObstacle2> obstacles, std::span<const fluidObstacleForce2> feedback )
 {
-    // updateCutCellGeometry와 동일한 sub-face 4점 / 첫 점유 Shape 규칙으로 재계산한다.
+    // updateCutCellGeometry와 동일한 sub-face 표본 / 첫 점유 Shape 규칙으로 재계산한다.
     // fluid 면의 속도 u_/v_는 보존하고 막힌 비율의 solid 속도만 예측값으로 갱신.
-    constexpr int sampleCount = 4;
-    constexpr float inverseCount = 1.0f / sampleCount;
+    const int sampleCount = cutCellSampleCount_;
+    const float inverseCount = 1.0f / sampleCount;
     struct predictedBody
     {
         vec2 linear{};
@@ -1474,7 +1529,7 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
         return;
     }
 
-    constexpr int faceSamples = 4;
+    const int faceSamples = cutCellSampleCount_;
     constexpr int maxTimeSamples = 64;
     int timeSamples = std::clamp(
         static_cast<int>( std::ceil( maximumTravel / ( 0.25f * cellSize_ ) ) ), 1, 32 );
@@ -2057,11 +2112,10 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     };
     if( cutCell )
     {
-        // 공유 face에서 막힌 네 sub-face를 각각 힘과 모멘트의 적분점으로 사용한다.
-        // 같은 B를 Body 압력 traction과 blocked-face 속도 변화에 사용하므로
-        // 압력 행렬의 B M^-1 B^T가 실제 경계 flux 선형화의 adjoint가 된다.
-        constexpr int sampleCount = 4;
-        constexpr float sampleScale = 1.0f / sampleCount;
+        // 막힌 공유 sub-face를 힘/토크 적분점으로 사용한다. 점유율 및
+        // 경계 속도와 같은 표본 수를 사용해 B와 B^T의 adjoint를 유지한다.
+        const int sampleCount = cutCellSampleCount_;
+        const float sampleScale = 1.0f / sampleCount;
         std::vector<double> bounds( obstacles.size(), -1.0 );
         for( std::size_t i = 0; i < obstacles.size(); ++i )
             if( IsValidFluidObstacle( obstacles[i] ) )
