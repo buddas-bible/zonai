@@ -218,9 +218,9 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
     // Sandbox 전용의 시간 동기화 실험이며 implicit added-mass 결합은 아니다.
     // Cut-cell은 아직 Body 유효질량을 압력 행렬에 결합하지 않으므로
     // explicit 압력 반력을 더 자주 주입하는 동기화를 사용하지 않는다.
-    const bool synchronizedWind = windField_ && windObstacleCouplingEnabled_ &&
-        windSynchronizedCouplingEnabled_ && !windField_->isCutCellProjectionEnabled() &&
-        timeStep > 0.0f && subStepCount > 1;
+    const bool coupledPressureEnabled = windField_ && windObstacleCouplingEnabled_ &&
+        windSynchronizedCouplingEnabled_ && !windField_->isCutCellProjectionEnabled();
+    const bool synchronizedWind = coupledPressureEnabled && timeStep > 0.0f && subStepCount > 1;
     const int windSteps = synchronizedWind ? subStepCount : 1;
     const float windTimeStep = timeStep / windSteps;
     windCouplingSteps_ = windField_ && timeStep > 0.0f ? windSteps : 0;
@@ -258,7 +258,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                     world_.GetBodyLinearVelocity( visual.bodyHandle ), world_.GetBodyAngularVelocity( visual.bodyHandle ) };
                 // Time-synchronized binary pressure path: Body effective inverse mass
                 // enters the same projection operator as fluid face corrections.
-                if( synchronizedWind && !windField_->isCutCellProjectionEnabled() &&
+                if( coupledPressureEnabled &&
                     world_.GetBody( visual.bodyHandle ).type == bodyType::Dynamic )
                 {
                     const float mass = world_.GetBodyMass( visual.bodyHandle );
