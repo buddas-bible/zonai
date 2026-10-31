@@ -266,6 +266,42 @@ void checkSynchronizedWindCoupling()
     }
 }
 
+void checkPressurePredictedWorldVelocity()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+
+    // 중력/Drag/Contact가 없는 단일 World Step에서 실제 속도 증분은
+    // Fluid가 반환한 압력 반력 dt*F/m, dt*tau/I와 같아야 한다.
+    const bodyId body = scene.getShapes()[2].bodyHandle;
+    auto& world = scene.getWorld();
+    transform2 pose = world.GetBodyTransform( body );
+    pose.rotation = rot2::FromRadians( 0.4f );
+    world.SetBodyTransform( body, pose );
+    world.SetBodyLinearVelocity( body, { 1.1f, -0.7f } );
+    world.SetBodyAngularVelocity( body, 0.8f );
+
+    const vec2 initialLinear = world.GetBodyLinearVelocity( body );
+    const float initialAngular = world.GetBodyAngularVelocity( body );
+    const float inverseMass = 1.0f / world.GetBodyMass( body );
+    const float inverseInertia = 1.0f / world.GetBodyRotationalInertia( body );
+    scene.step( dt, 1 );
+
+    const fluidPressureMomentum2& pressure = scene.getWindField()->getPressureMomentum();
+    check( pressure.usedCoupledProjection &&
+        pressure.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        pressure.synchronizedBoundaryFaces > 0,
+        "World and Fluid test requires converged pressure and synchronized MAC boundaries" );
+    const fluidObstacleForce2& force = scene.getWindPressureForces()[2];
+    const vec2 expectedLinear = initialLinear + ( dt * inverseMass ) * force.force;
+    const float expectedAngular = initialAngular + dt * inverseInertia * force.torque;
+    check( near( world.GetBodyLinearVelocity( body ), expectedLinear, 1.0e-3f ) &&
+        close( world.GetBodyAngularVelocity( body ), expectedAngular, 1.0e-3f ),
+        "without drag, gravity or contacts, World velocity must match Fluid pressure-predicted body velocity" );
+}
+
 void checkFluidRateAndStaticObstacles()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -509,6 +545,7 @@ int main()
     checkFluidCoupling();
     checkMovingSolidReaction();
     checkSynchronizedWindCoupling();
+    checkPressurePredictedWorldVelocity();
     checkFluidRateAndStaticObstacles();
     checkRotatedSandboxObstacles();
     checkDragMomentumBudget();
