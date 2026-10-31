@@ -232,6 +232,17 @@ Part 12b는 `sweptU/VVolume`을 이송 **방향의 가중치**로만 사용해, 
 
 **한계:** 이는 두 가지 서로 다른 격자 표본 간 *불일치 완화*이며 실제 움직이는 연속 계면의 정확한 체적/압력 반력 해석이 아니다. 부호가 반대인 인접 오차가 없는 경우에는 차이가 그대로 남는다. 강체 압력 반력과 함께 전체 유체 질량/운동량 보존이 완성되었다는 의미는 아니다.
 
+## Part 13a — Sandbox 강체·Fluid Substep 시간 동기화 (실험)
+
+원래 Sandbox는 한 외부 프레임에서 `fluidField2::step(dt)`를 1회 호출해 Pressure/Drag를 강체에 가한 뒤 `World::Step(dt, subStepCount)`를 호출했다. Fluid가 사용한 강체 경계 형상과 속도는 World 하위 Step 동안 갱신되지 않아, 빠르게 움직이는 강체에서는 압력 피드백이 지연될 수 있었다.
+
+- `setWindSynchronizedCouplingEnabled(true)`를 Wind Flow Sandbox에서 기본으로 사용한다. **강체·유체 양방향 ON**, `dt > 0`, `subStepCount > 1`일 때만 `subDt = dt/subStepCount`로 나눈다. 매 하위 구간에 `World`의 현재 강체 Pose/속도를 읽고 `Fluid::step(subDt, obstacles, feedback)` → 압력 반력·Drag 적용 → `World::Step(subDt, 1)`을 반복한다.
+- 원래의 `World::Step(dt, subStepCount)`와 단일 Fluid Step 경로는 동기화 옵션 OFF 또는 단방향일 때 유지한다. Sandbox UI에서 토글하고 실제 실행한 Fluid 구간 수를 확인할 수 있다.
+- 동기화 모드의 `getWindPressureForces()`는 **외부 Step 동안 적분한 압력 충격량을 원래 `dt`로 나눈 평균 힘·평균 토크**를 나타낸다. `getWindDragBodyImpulse()`와 `getWindDragFluidImpulse()`는 하위 Step 충격량의 **합**을 유지한다.
+- `fluidField2::getPressureMomentum()`과 `getCutCellPressure()`는 **마지막 Fluid 하위 Step**의 진단값이므로, 외부 Step 전체의 평균 압력 반력과 직접 대조하면 안 된다. 이전 단일 Step pressure-ledger 회귀는 동기화 옵션 OFF로 검사하며, 장시간 안정성·양방향·단방향 호환 회귀를 추가한다.
+
+**범위와 한계:** 이 변경은 **Sandbox의 시간 배치**만 변경하고 `World`의 충돌/Joint solver, `fluidField2`의 압력 행렬, 접촉 계산과 대수적 운동량 교환은 변경하지 않는다. `World::Step(dt/N, 1)` N회는 `World::Step(dt, N)` 1회와 Solver 관점에서 완전히 동일하지 않을 수 있다. 시간 동기화는 프레임 지연과 큰 장애물 점유 변화는 줄이지만 **추가질량(added-mass) 불안정성, coarse-grid 압력 반력 스파이크, Cut-cell 표면 적분 오차를 자체적으로 해결하지 않는다.** 장기적으로는 World/Fluid를 함께 호출하는 공통 Physics Scheduler와 강체 유효 질량이 포함된 implicit 압력 결합이 필요하다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
