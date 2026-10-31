@@ -26,6 +26,12 @@ private:
 #pragma endregion Controls
     int selectedShapeIndex_ = 0;
     shapeId selectedShape_{};
+    int windFieldWidthEdit_ = 24;
+    int windFieldHeightEdit_ = 14;
+    float windCellSizeEdit_ = 0.5f;
+    float windStaticPositionEdit_[2]{ 0.0f, 0.0f };
+    float windStaticHalfExtentsEdit_[2]{ 0.7f, 0.3f };
+    float windStaticRadiusEdit_ = 0.5f;
     int terrainProbeIndex_ = 0;
     std::size_t splineControlIndex_ = 0;
     bool splineRailSelecting_ = false;

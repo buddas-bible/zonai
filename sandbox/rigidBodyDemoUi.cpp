@@ -217,8 +217,19 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         if( const fluidField2* field = getWindField() )
         {
             constexpr ImU32 WIND_COLOR = IM_COL32( 85, 205, 255, 225 );
-            for( int y = 0; y < field->getHeight(); y += 2 )
-                for( int x = 0; x < field->getWidth(); x += 2 )
+            const vec2 lower = field->getOrigin();
+            const vec2 upper = lower + field->getCellSize() * vec2{
+                static_cast<float>( field->getWidth() ), static_cast<float>( field->getHeight() ) };
+            constexpr ImU32 FIELD_BORDER = IM_COL32( 110, 160, 220, 200 );
+            draw.DrawSegment( { lower, { upper.x, lower.y } }, FIELD_BORDER, 1.5f );
+            draw.DrawSegment( { { upper.x, lower.y }, upper }, FIELD_BORDER, 1.5f );
+            draw.DrawSegment( { upper, { lower.x, upper.y } }, FIELD_BORDER, 1.5f );
+            draw.DrawSegment( { { lower.x, upper.y }, lower }, FIELD_BORDER, 1.5f );
+            // 큰 Field에서는 렌더링 자체가 프레임을 잡아먹지 않게 표시 밀도를 제한.
+            const float cellsPerArrow = static_cast<float>( field->getWidth() * field->getHeight() ) / 350.0f;
+            const int drawStride = std::max( 2, static_cast<int>( std::ceil( std::sqrt( cellsPerArrow ) ) ) );
+            for( int y = 0; y < field->getHeight(); y += drawStride )
+                for( int x = 0; x < field->getWidth(); x += drawStride )
                 {
                     const vec2 point = field->getCellCenter( x, y );
                     if( field->isSolidCell( x, y ) )
@@ -231,8 +242,9 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
                     if( speed > 0.025f )
                         draw.DrawArrow( point, velocity, WIND_COLOR, std::min( 0.48f, 0.12f + 0.12f * speed ) );
                 }
-            draw.DrawPoint( { -3.5f, 0.0f }, IM_COL32( 250, 200, 90, 245 ), 6.0f );
-            draw.DrawLabel( { -3.5f, -0.45f }, "바람 소스", IM_COL32( 250, 200, 90, 245 ) );
+            const vec2 source{ lower.x + std::min( 2.5f, 0.25f * ( upper.x - lower.x ) ), 0.0f };
+            draw.DrawPoint( source, IM_COL32( 250, 200, 90, 245 ), 6.0f );
+            draw.DrawLabel( source + vec2{ 0.0f, -0.45f }, "바람 소스", IM_COL32( 250, 200, 90, 245 ) );
         }
     }
 
@@ -920,10 +932,14 @@ void rigidBodyDemoUi::drawExperimentControls()
             setWindObstacleCouplingEnabled( couple );
 
         bool synchronize = isWindSynchronizedCouplingEnabled();
-        if( ImGui::Checkbox( "양방향 동기화 Substep (실험)###WindSynchronizedCoupling", &synchronize ) )
+        if( ImGui::Checkbox( "질량 결합 압력 (이진 MAC)###WindSynchronizedCoupling", &synchronize ) )
             setWindSynchronizedCouplingEnabled( synchronize );
-        ImGui::Text( "마지막 Fluid/World 동기화 구간: %d (World 설정 substep 기준)",
-            getWindCouplingSteps() );
+        int fluidSteps = getWindFluidSubstepCount();
+        if( ImGui::SliderInt( "Fluid 계산 횟수/Step###WindFluidSteps", &fluidSteps, 1, 16 ) )
+            setWindFluidSubstepCount( fluidSteps );
+        ImGui::Text( "최근 Fluid 계산: %d회 (World Substep과 독립)", getWindCouplingSteps() );
+        ImGui::Text( "최근 Fluid+연동: %.2f ms / World: %.2f ms", getWindFluidMilliseconds(), getWindWorldMilliseconds() );
+        ImGui::TextDisabled( "1회가 가장 가볍습니다. 2회 이상이면 World Substep을 여러 구간으로 묶어 교대로 계산합니다." );
 
         bool conservative = isWindConservativeAdvectionEnabled();
         if( ImGui::Checkbox( "보존형 MAC 이류 (실험)###WindConservativeAdvection", &conservative ) )
@@ -946,6 +962,47 @@ void rigidBodyDemoUi::drawExperimentControls()
         float drag = getWindDragCoefficient();
         if( ImGui::SliderFloat( "강체 바람 저항 계수###WindBodyDrag", &drag, 0.0f, 15.0f, "%.1f N·s/m" ) )
             setWindDragCoefficient( drag );
+
+        ImGui::SeparatorText( "Fluid Field 크기" );
+        ImGui::InputInt( "가로 셀 수###WindWidth", &windFieldWidthEdit_ );
+        ImGui::InputInt( "세로 셀 수###WindHeight", &windFieldHeightEdit_ );
+        ImGui::DragFloat( "셀 크기###WindCellSize", &windCellSizeEdit_, 0.025f, 0.25f, 2.0f, "%.3f m" );
+        if( ImGui::Button( "Field 크기 적용 (유체 초기화)###WindResize" ) )
+        {
+            configureWindField( windFieldWidthEdit_, windFieldHeightEdit_, windCellSizeEdit_ );
+            const fluidField2* newField = getWindField();
+            windFieldWidthEdit_ = newField->getWidth();
+            windFieldHeightEdit_ = newField->getHeight();
+            windCellSizeEdit_ = newField->getCellSize();
+        }
+        ImGui::TextDisabled( "가로/세로 각각 8~128셀. Field는 원점 중심이고 기존 Static 장애물은 유지됩니다." );
+
+        ImGui::SeparatorText( "Static 장애물" );
+        ImGui::DragFloat2( "배치 위치###WindStaticPosition", windStaticPositionEdit_, 0.05f, -100.0f, 100.0f, "%.2f m" );
+        ImGui::DragFloat2( "상자 반크기###WindStaticSize", windStaticHalfExtentsEdit_, 0.05f, 0.1f, 10.0f, "%.2f m" );
+        ImGui::DragFloat( "원 반경###WindStaticRadius", &windStaticRadiusEdit_, 0.05f, 0.1f, 10.0f, "%.2f m" );
+        ImGui::Text( "배치된 Static: %zu / 24", getWindStaticObstacleCount() );
+        ImGui::BeginDisabled( getWindStaticObstacleCount() >= 24 );
+        if( ImGui::Button( "Static 상자 추가###WindAddBox" ) )
+            selectedShape_ = addWindStaticBox( { windStaticPositionEdit_[0], windStaticPositionEdit_[1] },
+                { windStaticHalfExtentsEdit_[0], windStaticHalfExtentsEdit_[1] } );
+        ImGui::SameLine();
+        if( ImGui::Button( "Static 원 추가###WindAddCircle" ) )
+            selectedShape_ = addWindStaticCircle( { windStaticPositionEdit_[0], windStaticPositionEdit_[1] },
+                windStaticRadiusEdit_ );
+        ImGui::EndDisabled();
+        if( getWorld().IsValid( selectedShape_ ) )
+        {
+            const auto visuals = getShapes();
+            const auto selected = std::find_if( visuals.begin() + std::min<std::size_t>( 3, visuals.size() ),
+                visuals.end(), [this]( const visualShape& item ) { return item.shapeHandle == selectedShape_; } );
+            if( selected != visuals.end() && ImGui::Button( "선택한 Static 장애물 삭제###WindRemoveStatic" ) )
+            {
+                removeWindStaticObstacle( selectedShape_ );
+                selectedShape_ = {};
+            }
+        }
+        ImGui::TextDisabled( "생성한 Static은 World 충돌과 유체 no-through 경계에 모두 적용됩니다. 위치·회전은 오브젝트 인스펙터에서 수정할 수 있습니다." );
 
         if( const fluidField2* field = getWindField() )
         {
@@ -1044,7 +1101,7 @@ void rigidBodyDemoUi::drawExperimentControls()
                     getWindPressureForces()[i].force.x, getWindPressureForces()[i].force.y );
         }
         if( ImGui::Button( "유체·물체 초기화###WindReset" ) ) resetWindFlow();
-        ImGui::TextDisabled( "동기화 ON: Fluid와 World를 dt/substep 간격으로 번갈아 전진. 압력 반력은 전체 Step의 평균 힘으로 표시. Added-mass 안정성을 보장하는 implicit 결합은 아님." );
+        ImGui::TextDisabled( "이진 MAC 양방향 결합은 질량/관성을 압력에 포함하며, Fluid 횟수는 World Substep과 독립입니다. 여러 번 계산하면 외부 Step 평균 힘을 표시합니다." );
         ImGui::TextWrapped( "파란 화살표는 유체 속도, 주황색 점은 강체가 차지한 셀입니다. 원·캡슐·볼록 다각형은 실제 회전한 도형으로 셀을 점유합니다. 양방향 모드에서는 해당 경계의 수직 속도를 유체에 적용하고 압력 반력을 강체에 전달합니다. Drag는 유체 내부 face의 유효 질량 기준으로 실제 전달한 충격량만 강체에 반대로 적용합니다. Drag 교환 잔차와 압력(유체·강체·외벽) 수지 잔차를 별도로 표시합니다. 점유 변경 때 새로 열린 유체 면은 이전의 순수 유체 이웃 속도로 복원합니다. 셀 중심 마스크 외에도 4x4 표본으로 부분 점유와 면 개방율을 측정합니다. 부분 점유 체적 변동은 진단값입니다. 실험 모드에서는 개방면 유체 유량과 이전/현재 강체 이동·회전 경로의 MAC 면 통과 체적을 압력 방정식에 사용합니다. 경로가 없거나 도메인 벽을 통과하면 점유율 차이로 돌아갑니다. 첫 snapshot은 이동으로 취급하지 않고, 완전히 가려진 셀의 체적 소스는 근접 유체 셀로 이동합니다. 영역별로 풀 수 없는 체적 변동도 표시합니다. 보존형 MAC 이류 실험 모드에서는 고정된 면 개방율의 dual volume upwind flux를 사용하고 이류 단계 자체의 운동량을 비교할 수 있습니다. 정확한 moving interface·보존형 전체 유체 질량·표면 압력 적분·전체 운동량 보존은 아직 지원하지 않습니다. 점유 변경과 이류 단계의 운동량 변화도 따로 기록합니다. 이 압력 수지의 작은 잔차는 이산화된 face 회계이며 전체 유체·강체 운동량 보존을 뜻하지 않습니다." );
         return;
     }

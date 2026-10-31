@@ -1,7 +1,9 @@
 #pragma once
 
 #include <array>
+#include <deque>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "demo.h"
@@ -254,6 +256,11 @@ public:
     void applyPogoJointPreset( pogoJointDemoPreset preset );
     void setWindSourceStrength( float strength );
     void setWindDragCoefficient( float rate );
+    void setWindFluidSubstepCount( int count ) noexcept;
+    void configureWindField( int width, int height, float cellSize );
+    [[nodiscard]] shapeId addWindStaticBox( vec2 center, vec2 halfExtents );
+    [[nodiscard]] shapeId addWindStaticCircle( vec2 center, float radius );
+    bool removeWindStaticObstacle( shapeId id );
     void setWindSourceEnabled( bool enabled ) noexcept { windSourceEnabled_ = enabled; }
     void setWindObstacleCouplingEnabled( bool enabled ) noexcept { windObstacleCouplingEnabled_ = enabled; }
     void setWindSynchronizedCouplingEnabled( bool enabled ) noexcept { windSynchronizedCouplingEnabled_ = enabled; }
@@ -299,6 +306,10 @@ public:
     [[nodiscard]] bool isWindObstacleCouplingEnabled() const noexcept { return windObstacleCouplingEnabled_; }
     [[nodiscard]] bool isWindSynchronizedCouplingEnabled() const noexcept { return windSynchronizedCouplingEnabled_; }
     [[nodiscard]] int getWindCouplingSteps() const noexcept { return windCouplingSteps_; }
+    [[nodiscard]] int getWindFluidSubstepCount() const noexcept { return windFluidSubstepCount_; }
+    [[nodiscard]] float getWindFluidMilliseconds() const noexcept { return windFluidMilliseconds_; }
+    [[nodiscard]] float getWindWorldMilliseconds() const noexcept { return windWorldMilliseconds_; }
+    [[nodiscard]] std::size_t getWindStaticObstacleCount() const noexcept { return shapes_.size() > 3 && kind_ == demoKind::windFlow ? shapes_.size() - 3 : 0; }
     [[nodiscard]] std::span<const fluidObstacleForce2> getWindPressureForces() const noexcept { return windPressureForces_; }
     [[nodiscard]] vec2 getWindDragBodyImpulse() const noexcept { return windDragBodyImpulse_; }
     [[nodiscard]] vec2 getWindDragFluidImpulse() const noexcept { return windDragFluidImpulse_; }
@@ -522,6 +533,13 @@ private:
     bool windObstacleCouplingEnabled_ = true;
     bool windSynchronizedCouplingEnabled_ = true;
     int windCouplingSteps_ = 0;
+    int windFluidSubstepCount_ = 1; // World Substep과 독립적인 Fluid 압력/이류 횟수.
+    float windFluidMilliseconds_ = 0.0f;
+    float windWorldMilliseconds_ = 0.0f;
+    std::vector<fluidShapeObstacle2> windObstacleSnapshots_{};
+    std::vector<fluidObstacleForce2> windObstacleFeedback_{};
+    std::deque<std::string> windStaticLabels_{};
+    int windStaticSerial_ = 0;
     std::array<fluidObstacleForce2, 3> windPressureForces_{};
     vec2 windDragBodyImpulse_{};
     vec2 windDragFluidImpulse_{};
