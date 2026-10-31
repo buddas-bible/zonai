@@ -409,7 +409,6 @@ void checkBoundedObstacleRasterAndReusablePressure()
 
     // Reuse of scratch memory must not retain an old pressure solution after clear().
     fluidField2 reused{ 24, 16, 0.5f, { -6.0f, -4.0f } };
-    fluidField2 fresh{ 24, 16, 0.5f, { -6.0f, -4.0f } };
     fluidShapeObstacle2 dynamic{ circle2{ {}, 0.75f },
         { { 0.0f, 0.0f }, {} }, {}, { 1.25f, 0.0f }, 0.0f, 2.0f, 16.0f };
     std::array<fluidObstacleForce2, 1> reuseForce{};
@@ -417,7 +416,7 @@ void checkBoundedObstacleRasterAndReusablePressure()
     for( int test = 0; test < 5; ++test )
     {
         reused.clear();
-        fresh.clear();
+        fluidField2 fresh{ 24, 16, 0.5f, { -6.0f, -4.0f } };
         dynamic.linearVelocity = { test % 2 == 0 ? 1.25f : -0.75f, 0.0f };
         reused.step( dt, std::span<const fluidShapeObstacle2>( &dynamic, 1 ), reuseForce, 160 );
         fresh.step( dt, std::span<const fluidShapeObstacle2>( &dynamic, 1 ), freshForce, 160 );
