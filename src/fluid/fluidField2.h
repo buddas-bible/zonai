@@ -153,6 +153,10 @@ struct fluidTracerStats2
     float afterMass = 0.0f;
     float trappedMass = 0.0f;
     // 이번 Step에서 줄어든 유체 점유 면적에 대해 displaced mass를 재배치한 양.
+    // Swept 면의 시간 적분 부피 × 출발 셀 농도로 제안된 이송량(제한 전).
+    float sweptRequestedMass = 0.0f;
+    // 출발 셀의 감소 체적으로 이송량을 제한한 양.
+    float sweptLimitedMass = 0.0f;
     float sweptRemappedMass = 0.0f;
     float fallbackRemappedMass = 0.0f;
     float unresolvedDisplacementMass = 0.0f;
