@@ -1652,9 +1652,31 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
             divergence_[i] -= static_cast<float>( regionSums[region] / regionSizes[region] );
     }
 
-    std::fill( pressure_.begin(), pressure_.end(), 0.0f );
-    for( int iteration = 0; iteration < pressureIterations; ++iteration )
+    // Cut-cell + 질량 결합은 별도 선택 경로. PCG가 실패하면 명시적 Jacobi
+    // 압력 반력을 Dynamic Body에 적용하지 않고 해당 Step을 격리한다.
+    const bool coupled = cutCellCoupledProjectionEnabled_ &&
+        std::any_of( obstacles.begin(), obstacles.end(), []( const fluidShapeObstacle2& obstacle )
+        {
+            return obstacle.inverseMass > 0.0f || obstacle.inverseInertia > 0.0f;
+        } );
+    const bool solvedCoupled = coupled && solveCoupledPressure( timeStep, pressureIterations, obstacles, true );
+    cutCellPressure_.usedCoupledProjection = solvedCoupled;
+    cutCellPressure_.coupledStatus = coupled ? pressureMomentum_.coupledStatus :
+        fluidCoupledPressureStatus2::notRequested;
+    cutCellPressure_.coupledIterations = coupled ? pressureMomentum_.coupledIterations : 0;
+    cutCellPressure_.coupledRelativeResidual = coupled ? pressureMomentum_.coupledRelativeResidual : 0.0f;
+    cutCellPressure_.coupledSolveFailed = coupled && !solvedCoupled &&
+        cutCellPressure_.coupledStatus != fluidCoupledPressureStatus2::noBoundary;
+    const float coupledPressureResidual = pressureMomentum_.coupledFinalResidualRms;
+    pressureMomentum_ = {}; // 이진 MAC 압력 운동량 장부를 Cut-cell의 반력과 혼합하지 않는다.
+
+    if( cutCellPressure_.coupledSolveFailed )
+        std::fill( pressure_.begin(), pressure_.end(), 0.0f );
+    else if( !solvedCoupled )
     {
+        std::fill( pressure_.begin(), pressure_.end(), 0.0f );
+        for( int iteration = 0; iteration < pressureIterations; ++iteration )
+        {
         for( int y = 0; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
             {
@@ -1673,7 +1695,8 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
                 nextPressure_[cell] = diagonal > 0.0f
                     ? ( sum - divergence_[cell] * pressureScale ) / diagonal : 0.0f;
             }
-        pressure_.swap( nextPressure_ );
+            pressure_.swap( nextPressure_ );
+        }
     }
 
     for( int y = 0; y < height_; ++y )
@@ -1708,8 +1731,9 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
                 sum - divergence_[cell] * pressureScale ) * ( timeStep / cellSize_ );
             squaredResidual += residual * residual;
         }
-    cutCellPressure_.pressureResidual = cutCellPressure_.activeCells > 0
-        ? static_cast<float>( std::sqrt( squaredResidual / cutCellPressure_.activeCells ) ) : 0.0f;
+    cutCellPressure_.pressureResidual = solvedCoupled ? coupledPressureResidual * ( timeStep / cellSize_ ) :
+        ( cutCellPressure_.activeCells > 0
+            ? static_cast<float>( std::sqrt( squaredResidual / cutCellPressure_.activeCells ) ) : 0.0f );
 
     // Cut-cell 내부 solid 면적의 pressure traction을 cell aperture 차이로 근사.
     // Face 중심 마스크 traction과 달리 부분 막힘에도 반응한다. 다중 shape 소유는
