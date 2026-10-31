@@ -2219,7 +2219,10 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     double pressureSum = 0.0;
     for( std::size_t i = 0; i < rhs.size(); ++i )
         if( cutCell ? cellFluidFraction_[i] > 0.0f : solidOwner_[i] < 0 ) pressureSum += x[i];
-    const double gauge = pressureSum / active;
+    // B*invM*B^T가 있는 Cut-cell에서는 불완전 점유/외벽 근사로
+    // 상수 압력 방향이 정확한 nullspace가 아닐 수 있다. 수렴한 x에서
+    // 임의의 gauge를 빼면 A*x=b를 다시 위반하므로 그대로 사용한다.
+    const double gauge = cutCell ? 0.0 : pressureSum / active;
     for( std::size_t i = 0; i < rhs.size(); ++i )
     {
         if( cutCell ? cellFluidFraction_[i] <= 0.0f : solidOwner_[i] >= 0 ) { pressure_[i] = 0.0f; continue; }
