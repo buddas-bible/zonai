@@ -217,8 +217,19 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
         if( const fluidField2* field = getWindField() )
         {
             constexpr ImU32 WIND_COLOR = IM_COL32( 85, 205, 255, 225 );
-            for( int y = 0; y < field->getHeight(); y += 2 )
-                for( int x = 0; x < field->getWidth(); x += 2 )
+            const vec2 lower = field->getOrigin();
+            const vec2 upper = lower + field->getCellSize() * vec2{
+                static_cast<float>( field->getWidth() ), static_cast<float>( field->getHeight() ) };
+            constexpr ImU32 FIELD_BORDER = IM_COL32( 110, 160, 220, 200 );
+            draw.DrawSegment( lower, { upper.x, lower.y }, FIELD_BORDER, 1.5f );
+            draw.DrawSegment( { upper.x, lower.y }, upper, FIELD_BORDER, 1.5f );
+            draw.DrawSegment( upper, { lower.x, upper.y }, FIELD_BORDER, 1.5f );
+            draw.DrawSegment( { lower.x, upper.y }, lower, FIELD_BORDER, 1.5f );
+            // 큰 Field에서는 렌더링 자체가 프레임을 잡아먹지 않게 표시 밀도를 제한.
+            const float cellsPerArrow = static_cast<float>( field->getWidth() * field->getHeight() ) / 350.0f;
+            const int drawStride = std::max( 2, static_cast<int>( std::ceil( std::sqrt( cellsPerArrow ) ) ) );
+            for( int y = 0; y < field->getHeight(); y += drawStride )
+                for( int x = 0; x < field->getWidth(); x += drawStride )
                 {
                     const vec2 point = field->getCellCenter( x, y );
                     if( field->isSolidCell( x, y ) )
@@ -231,8 +242,9 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
                     if( speed > 0.025f )
                         draw.DrawArrow( point, velocity, WIND_COLOR, std::min( 0.48f, 0.12f + 0.12f * speed ) );
                 }
-            draw.DrawPoint( { -3.5f, 0.0f }, IM_COL32( 250, 200, 90, 245 ), 6.0f );
-            draw.DrawLabel( { -3.5f, -0.45f }, "바람 소스", IM_COL32( 250, 200, 90, 245 ) );
+            const vec2 source{ lower.x + std::min( 2.5f, 0.25f * ( upper.x - lower.x ) ), 0.0f };
+            draw.DrawPoint( source, IM_COL32( 250, 200, 90, 245 ), 6.0f );
+            draw.DrawLabel( source + vec2{ 0.0f, -0.45f }, "바람 소스", IM_COL32( 250, 200, 90, 245 ) );
         }
     }
 
