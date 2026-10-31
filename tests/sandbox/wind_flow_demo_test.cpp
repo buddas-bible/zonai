@@ -496,6 +496,76 @@ void checkPressureLedgerInSandbox()
         "one-way mode must not report rigid pressure reaction" );
 }
 
+void checkExperimentalCutCellWorldCoupling()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindCutCellCoupledProjectionEnabled( true );
+    scene.setWindFluidSubstepCount( 2 );
+    check( scene.isWindCutCellCoupledProjectionEnabled() &&
+        scene.isWindSynchronizedCouplingEnabled() &&
+        scene.isWindObstacleCouplingEnabled(),
+        "experimental cut-cell coupling should require an explicit opt-in and existing bidirectional clock" );
+
+    const bodyId moving = scene.getShapes()[0].bodyHandle;
+    scene.getWorld().SetBodyLinearVelocity( moving, { 1.1f, 0.4f } );
+    scene.getWorld().SetBodyAngularVelocity( moving, 0.8f );
+    scene.addWindVortex();
+    scene.step( dt, 4 );
+    const fluidCutCellPressure2 first = scene.getWindField()->getCutCellPressure();
+    check( scene.getWindCouplingSteps() == 2 &&
+        first.usedCoupledProjection && !first.coupledSolveFailed &&
+        first.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        first.synchronizedBoundaryFaces > 0 &&
+        std::isfinite( first.predictedContinuityRms ) &&
+        IsFinite( scene.getWorld().GetBodyLinearVelocity( moving ) ),
+        "opt-in weighted Schur pressure must receive World mass/inertia and advance substep-aligned rigid bodies" );
+
+    scene.step( dt, 4 );
+    const fluidCutCellPressure2 moved = scene.getWindField()->getCutCellPressure();
+    const fluidSweptFaceFlux2 swept = scene.getWindField()->getSweptFaceFlux();
+    check( scene.getWindCouplingSteps() == 2 && swept.usedSweptFlux &&
+        moved.hasVolumeHistory && std::isfinite( moved.volumeRate ) &&
+        std::isfinite( moved.predictedContinuityRms ) &&
+        std::isfinite( moved.predictedSolidVolumeL1 ) &&
+        IsFinite( scene.getWorld().GetBodyLinearVelocity( moving ) ),
+        "next cut-cell fluid interval must use the actual World geometry swept history without reapplying predicted displacement" );
+
+    scene.configureWindField( 32, 18, 0.5f );
+    check( scene.isWindCutCellProjectionEnabled() &&
+        scene.isWindCutCellCoupledProjectionEnabled() &&
+        scene.getWindField()->getCutCellPressure().activeCells == 0,
+        "field resize must keep explicit experimental coupling while resetting old geometry history" );
+
+    scene.setWindSynchronizedCouplingEnabled( false );
+    scene.addWindVortex();
+    scene.step( dt, 4 );
+    check( scene.getWindCouplingSteps() == 1 &&
+        !scene.getWindField()->getCutCellPressure().usedCoupledProjection,
+        "disabling synchronized coupling must keep the weighted legacy solver despite the opt-in" );
+
+    scene.resetWindFlow();
+    scene.setWindSynchronizedCouplingEnabled( true );
+    scene.setWindCutCellCoupledProjectionEnabled( false );
+    scene.addWindVortex();
+    scene.step( dt, 4 );
+    check( scene.getWindCouplingSteps() == 1 &&
+        !scene.getWindField()->getCutCellPressure().usedCoupledProjection &&
+        !scene.getWindField()->getCutCellPressure().coupledSolveFailed,
+        "cut-cell mass coupling disabled must preserve the old single-exchange weighted projection" );
+
+    scene.resetWindFlow();
+    scene.setWindCutCellCoupledProjectionEnabled( true );
+    scene.setWindObstacleCouplingEnabled( false );
+    scene.step( dt, 4 );
+    check( scene.getWindCouplingSteps() == 1 &&
+        !scene.getWindField()->getCutCellPressure().usedCoupledProjection,
+        "one-way field with optional static obstacles must not silently insert dynamic-body inverse masses" );
+}
+
 void checkExperimentalCutCellProjection()
 {
     rigidBodyDemo scene{ demoKind::windFlow };
@@ -616,5 +686,6 @@ int main()
     checkDragMomentumBudget();
     checkPressureLedgerInSandbox();
     checkExperimentalCutCellProjection();
+    checkExperimentalCutCellWorldCoupling();
     checkSandboxConservativeAdvectionTrial();
 }
