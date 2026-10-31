@@ -152,6 +152,11 @@ struct fluidTracerStats2
     float beforeMass = 0.0f;
     float afterMass = 0.0f;
     float trappedMass = 0.0f;
+    // 이번 Step에서 줄어든 유체 점유 면적에 대해 displaced mass를 재배치한 양.
+    float sweptRemappedMass = 0.0f;
+    float fallbackRemappedMass = 0.0f;
+    float unresolvedDisplacementMass = 0.0f;
+    bool usedSweptRemap = false;
     float maxCfl = 0.0f;
     int substeps = 0;
     bool cflLimited = false;
@@ -186,6 +191,11 @@ public:
     // 셀의 tracer 밀도(kg/m³, unit depth)를 지정. 음수/비유한 값과 범위 밖은 무시.
     // 일반 이류/압력 Solver를 바꾸지 않으며, 보존형 tracer 수송은 활성화된 뒤 매 Step 동작.
     void setTracerConcentration( int x, int y, float concentration ) noexcept;
+
+    // 선택형 moving solid remap. 유효한 swept 경로에서만 수동 tracer 질량을
+    // 열린 이웃 또는 가까운 유체 셀로 옮김. 기본 false (Part 12a 호환).
+    void setSweptTracerRemapEnabled( bool enabled ) noexcept { sweptTracerRemapEnabled_ = enabled; }
+    [[nodiscard]] bool isSweptTracerRemapEnabled() const noexcept { return sweptTracerRemapEnabled_; }
 
     // 지정 위치 주변 face 속도에 world-space 속도 변화(m/s)를 더함.
     // 소스가 격자 바깥이거나 radius가 유효하지 않으면 아무 일도 하지 않음.
@@ -260,6 +270,7 @@ private:
     void advectConservative( float timeStep );
     [[nodiscard]] float tracerCellFraction( int x, int y ) const noexcept;
     void transportTracer( float timeStep );
+    void remapTracerSwept();
     [[nodiscard]] float cutCellUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellVOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellFluxDivergenceRms( float inverseTimeStep ) const noexcept;
@@ -313,6 +324,7 @@ private:
     fluidAdvectionStats2 advectionStats_{};
     fluidTracerStats2 tracerStats_{};
     bool tracerEnabled_ = false;
+    bool sweptTracerRemapEnabled_ = false;
     bool cutCellProjectionEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;

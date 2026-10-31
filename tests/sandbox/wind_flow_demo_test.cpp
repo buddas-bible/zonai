@@ -290,13 +290,29 @@ void checkSandboxConservativeAdvectionTrial()
 
     scene.setWindConservativeAdvectionEnabled( true );
     scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindSweptTracerRemapEnabled( true );
     scene.setWindObstacleCouplingEnabled( true );
     scene.resetWindFlow();
+    check( scene.isWindSweptTracerRemapEnabled() && !field->getTracerStats().usedSweptRemap,
+        "sandbox reset must preserve swept tracer remap selection and clear last-step diagnostics" );
     scene.step( 1.0f / 60.0f, 4 );
     check( field->getAdvectionStats().conservative &&
         field->getCutCellPressure().activeCells > 0 &&
+        !field->getTracerStats().usedSweptRemap &&
         std::isfinite( field->getCutCellPressure().pressureResidual ),
         "conservative advection must also integrate with moving-solid cut-cell wind sandbox" );
+
+    // 장면의 실제 Circle transform을 바꾸어 연속된 강체 snapshot의 swept remap 경로를 검사.
+    scene.seedWindTracer();
+    const float tracerBefore = field->getTracerMass();
+    const bodyId circleBody = scene.getShapes()[0].bodyHandle;
+    scene.getWorld().SetBodyTransform( circleBody, { { -2.75f, -0.25f }, {} } );
+    scene.step( 1.0f / 60.0f, 4 );
+    check( field->getSweptFaceFlux().usedSweptFlux &&
+        field->getTracerStats().usedSweptRemap &&
+        close( field->getTracerMass(), tracerBefore, 1.0e-4f ) &&
+        std::isfinite( field->getTracerStats().unresolvedDisplacementMass ),
+        "sandbox moving Circle must run swept-guided tracer remap without mass loss" );
 
     scene.resetWindFlow();
     check( scene.isWindConservativeAdvectionEnabled() &&

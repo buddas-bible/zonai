@@ -196,6 +196,18 @@ Part 11의 가중 MAC face 운동량과는 별개로, **셀 중심 수동 tracer
 
 **한계:** 움직이는 장애물이 완전히 점유한 셀에는 tracer 질량을 삭제하지 않고 남겨서 `trappedMass`로 별도 표시한다. 이 질량은 다시 열린 셀에서 나타나므로 **swept interface 물질 수송을 구현했다고 볼 수 없다**. 또한 현재 cut-cell 비율은 표본 근사이며 tracer 질량 합계가 실제 유체 총 질량·운동량을 의미하지 않는다. Moving swept-flux와 물질 수송의 결합, 정확한 dual mass, 압력/강체 운동량 장부는 후속 단계로 남긴다.
 
+## Part 12b — Swept Solid 방향 기반 tracer 재배치 (선택형)
+
+Part 12a에서는 움직이는 Solid가 부분 점유율을 낮추거나 셀을 완전히 막아도 tracer 저장 질량을 그대로 두었다. Part 12b에서는 **유효한 연속 Shape 이동 경로가 있을 때만** 감소한 유체 공간의 tracer 일부를 다른 열린 셀로 옮기는 근사 보정을 추가한다.
+
+- `setSweptTracerRemapEnabled(true)`로 명시적으로 활성화한다(기본 false). 실험 Cut-cell 압력 모드와 Part 10의 유효한 Swept Solid Flux 이력이 필요하다. 기존 수동 tracer 수송과 압력 Solver는 유지한다.
+- 각 셀에서 `oldFraction > newFraction >= 0`인 경우 `displacedMass = oldTracerMass * (oldFraction-newFraction)/oldFraction`을 계산한다. 공유 MAC 면의 기존 **부호 있는 swept solid flux가 셀에서 바깥쪽을 가리키면**, 현재 유체가 남아 있는 인접 셀로 해당 질량을 방향 가중 분배한다. 이동한 질량을 donor에서 빼는 동시에 recipient에 같은 양을 더한다.
+- 방향성 있는 인접 목적지가 없으면 완전히 막힌 셀에서는 Part 9의 **가장 가까운 활성 유체 셀**, 일부 열린 셀에서는 새로 열린 인접 유체 셀을 사용한다. 대상이 전혀 없으면 이동시키지 않고 `unresolvedDisplacementMass`로 기록한다.
+- `getTracerStats()`에 `usedSweptRemap`, `sweptRemappedMass`, `fallbackRemappedMass`, `unresolvedDisplacementMass`가 추가됐다. 기존 `trappedMass`는 remap과 tracer 이류 후 완전히 막힌 셀에 남은 질량이다.
+- Sandbox Wind Flow에서 **이동 강체의 tracer 재배치 (실험)**을 켜면 기존 수동 tracer 주입과 함께 재배치·미해결량을 확인할 수 있다. Core 회귀에서 이동하는 Box, 회전만 하는 Box, 최초 배치/기하 변경/정지, 기본값 호환 및 총 질량 보존을 검사한다.
+
+**수치적 한계:** Swept flux는 강체의 이동을 표본화한 **방향 근거**일 뿐, 유체-고체 경계의 정확한 물질 유량은 아니다. 셀의 감소 면적은 별도의 시작/끝 4×4 표본에서 추정하고, 직접 인접하지 않은 fluid 셀로 fallback하면 경로를 건너뛰는 인공적인 이동이 생길 수 있다. 빠른 이동/회전, 작은 Cut-cell, 다중 Shape의 정확한 질량·체적 대응은 보장하지 않는다. **총 tracer 질량의 대수적 보존과 실제 물리적 이동 경계 수송의 정확도는 다르다.** 장차 표면 교차 및 공간–시간 체적 재구성이 필요하다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
