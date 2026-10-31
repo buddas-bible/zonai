@@ -117,6 +117,9 @@ void checkMovingSolidReaction()
     }
     disabled.setWindObstacleCouplingEnabled( false );
     enabled.setWindObstacleCouplingEnabled( true );
+    // 이 검사는 1회 유체 압력 반력의 방향에 대한 기존 oracle이다.
+    // Substep 평균 힘은 별도의 동기화 회귀에서 검증한다.
+    enabled.setWindSynchronizedCouplingEnabled( false );
 
     disabled.step( 1.0f / 60.0f, 4 );
     enabled.step( 1.0f / 60.0f, 4 );
