@@ -841,14 +841,15 @@ void fluidField2::advectConservative( float timeStep )
 
 void fluidField2::remapTracerSwept()
 {
-    // Part 12a의 고정 개방율 수송과 별개인 선택적 이동 경계 보정.
-    // swept solid face 유량은 정확한 fluid material flux가 아니므로 이동 경로
-    // 방향만 사용한다. 질량은 오직 실제 shrinking cell에서만 제거한다.
+    // 끝점의 cut-cell 체적 감소를 이송 상한으로, 실제 sampled swept face
+    // 통과 체적에 출발 셀의 이전 농도를 곱한 값을 면별 이송 제안량으로 사용.
+    // 정확한 공간-시간 계면 재구성은 아니므로 Part 12a 방식은 기본값으로 유지.
     if( !sweptTracerRemapEnabled_ || !cutCellProjectionEnabled_ ||
         !volumeSourceValid_ || !sweptFaceFlux_.usedSweptFlux ) return;
 
     tracerStats_.usedSweptRemap = true;
     std::copy( tracerMass_.begin(), tracerMass_.end(), nextTracerMass_.begin() );
+    const double cellVolume = static_cast<double>( cellSize_ ) * cellSize_; // unit depth, 1m
 
     for( int y = 0; y < height_; ++y )
         for( int x = 0; x < width_; ++x )
@@ -856,14 +857,16 @@ void fluidField2::remapTracerSwept()
             const int source = cellIndex( x, y );
             const double previous = previousCellFluidFraction_[source];
             const double current = cellFluidFraction_[source];
-            if( previous <= current || previous <= 0.0 || tracerMass_[source] <= 0.0 ) continue;
+            const double availableMass = tracerMass_[source];
+            if( previous <= current || previous <= 0.0 || availableMass <= 0.0 ) continue;
 
-            // 전/후 표본의 감소한 유체 체적에 비례해 tracer를 밀어낸다.
-            // 이 양을 실제 swept 면적 물리량과 같다고 해석하지 않는다.
-            const double displaced = tracerMass_[source] * ( previous - current ) / previous;
+            // 사라진 유체 부피 안에 있던 수동 tracer 질량의 snapshot 추정.
+            const double concentration = availableMass / ( previous * cellVolume );
+            const double displaced = std::min( availableMass,
+                concentration * ( previous - current ) * cellVolume );
             if( displaced <= 0.0 ) continue;
 
-            std::array<int, 4> neighbors{{
+            const std::array<int, 4> neighbors{{
                 x > 0 ? cellIndex( x - 1, y ) : -1,
                 x + 1 < width_ ? cellIndex( x + 1, y ) : -1,
                 y > 0 ? cellIndex( x, y - 1 ) : -1,
@@ -876,52 +879,62 @@ void fluidField2::remapTracerSwept()
                 static_cast<double>( sweptVVolume_[vIndex( x, y + 1 )] )
             }};
 
-            double totalWeight = 0.0;
+            // 각 U/V face의 부호를 셀 바깥쪽으로 통일. 목적지가 현재
+            // solid라면 현재 유체의 shared-face 수송 경로로 인정하지 않는다.
+            double totalOutwardVolume = 0.0;
             for( int direction = 0; direction < 4; ++direction )
             {
                 const int neighbor = neighbors[direction];
-                if( neighbor < 0 || cellFluidFraction_[neighbor] <= 0.0f )
+                if( neighbor < 0 || cellFluidFraction_[neighbor] <= 0.0f ||
+                    !std::isfinite( outward[direction] ) )
                     outward[direction] = 0.0;
                 else
                     outward[direction] = std::max( 0.0, outward[direction] );
-                totalWeight += outward[direction];
+                totalOutwardVolume += outward[direction];
             }
 
-            if( totalWeight > 0.0 )
+            const double requested = concentration * totalOutwardVolume;
+            const double sweptTransfer = std::min( displaced, requested );
+            tracerStats_.sweptRequestedMass += static_cast<float>( requested );
+            tracerStats_.sweptLimitedMass += static_cast<float>( std::max( 0.0, requested - displaced ) );
+            if( sweptTransfer > 0.0 )
             {
-                // 단일 source snapshot으로만 계산: 새로 받은 질량을 같은 Step에
-                // 다시 donor로 쓰지 않는다. 서로 같은 face를 공유해도 질량 쌍은 보존.
-                double remaining = displaced;
+                // 공유 swept face가 기록한 체적 비율대로 각 recipient에게
+                // 양을 분배한다. 요청량이 축소 체적을 초과하면 함께 축소한다.
+                // 모든 원천 계산은 이 Step 시작 질량만 참조하므로 순서 독립.
+                double remaining = sweptTransfer;
+                int lastDestination = -1;
                 for( int direction = 0; direction < 4; ++direction )
                 {
-                    const double weight = outward[direction];
-                    if( weight <= 0.0 ) continue;
-                    const double transfer = std::min( remaining, displaced * weight / totalWeight );
+                    if( outward[direction] <= 0.0 ) continue;
+                    const double proposed = sweptTransfer * outward[direction] / totalOutwardVolume;
+                    const double transfer = std::min( remaining, proposed );
                     nextTracerMass_[source] -= transfer;
                     nextTracerMass_[neighbors[direction]] += transfer;
                     tracerStats_.sweptRemappedMass += static_cast<float>( transfer );
                     remaining -= transfer;
+                    lastDestination = neighbors[direction];
                 }
-                // 이중 정밀도 반올림으로 남는 차이는 마지막 유효 목적지에 전달.
-                if( remaining > 0.0 )
-                    for( int direction = 0; direction < 4; ++direction )
-                        if( outward[direction] > 0.0 )
-                        {
-                            nextTracerMass_[source] -= remaining;
-                            nextTracerMass_[neighbors[direction]] += remaining;
-                            tracerStats_.sweptRemappedMass += static_cast<float>( remaining );
-                            break;
-                        }
-                continue;
+                if( remaining > 0.0 && lastDestination >= 0 )
+                {
+                    nextTracerMass_[source] -= remaining;
+                    nextTracerMass_[lastDestination] += remaining;
+                    tracerStats_.sweptRemappedMass += static_cast<float>( remaining );
+                }
             }
 
-            // 표본된 swept face의 outward 목적지가 현재 막혀 있으면 nearest
-            // active fluid로 보수적 fallback. 현재도 일부 열린 donor는 자기
-            // 자신을 nearest로 가리키므로 newly exposed 인접 셀만 우선한다.
-            int destination = cutCellNearestFluid_[source];
-            if( destination == source )
+            const double unmatched = displaced - sweptTransfer;
+            if( unmatched <= 1.0e-12 * std::max( 1.0, displaced ) ) continue;
+
+            // 적분된 swept 체적이 감소한 cut-cell 체적보다 작을 수 있다.
+            // 완전 차폐 셀에서는 기존의 가장 가까운 활성 유체로 이동하고,
+            // 부분 개방 셀에서는 새로 열린 이웃이 있을 때에만 이동한다.
+            // 그 밖에는 질량을 그대로 두고 미해결량을 공개한다.
+            int destination = -1;
+            if( current <= 0.0 )
+                destination = cutCellNearestFluid_[source];
+            else
             {
-                destination = -1;
                 float largestGain = 0.0f;
                 for( const int neighbor : neighbors )
                 {
@@ -937,15 +950,12 @@ void fluidField2::remapTracerSwept()
 
             if( destination >= 0 && destination != source )
             {
-                nextTracerMass_[source] -= displaced;
-                nextTracerMass_[destination] += displaced;
-                tracerStats_.fallbackRemappedMass += static_cast<float>( displaced );
+                nextTracerMass_[source] -= unmatched;
+                nextTracerMass_[destination] += unmatched;
+                tracerStats_.fallbackRemappedMass += static_cast<float>( unmatched );
             }
             else
-            {
-                // 고립된 곳에서 물질량을 버리거나 음수로 만들지 않는다.
-                tracerStats_.unresolvedDisplacementMass += static_cast<float>( displaced );
-            }
+                tracerStats_.unresolvedDisplacementMass += static_cast<float>( unmatched );
         }
 
     tracerMass_.swap( nextTracerMass_ );
