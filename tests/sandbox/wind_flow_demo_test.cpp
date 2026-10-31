@@ -187,6 +187,49 @@ void checkDragMomentumBudget()
         "pressure reaction must remain independent when drag coefficient is zero" );
 }
 
+void checkAngularDragResponse()
+{
+    // 원천 유동이 없는 곳에서 순수 회전하는 강체도 표면 상대속도 때문에 저항 토크를 받는다.
+    // 압력 feedback을 비활성화해 Drag만 독립 비교한다.
+    rigidBodyDemo noDrag{ demoKind::windFlow };
+    rigidBodyDemo withDrag{ demoKind::windFlow };
+    noDrag.setWindSourceEnabled( false );
+    withDrag.setWindSourceEnabled( false );
+    noDrag.setWindObstacleCouplingEnabled( false );
+    withDrag.setWindObstacleCouplingEnabled( false );
+    noDrag.setWindDragCoefficient( 0.0f );
+    withDrag.setWindDragCoefficient( 8.0f );
+
+    const bodyId referenceBody = noDrag.getShapes()[2].bodyHandle;
+    const bodyId dragBody = withDrag.getShapes()[2].bodyHandle;
+    noDrag.getWorld().SetBodyAngularVelocity( referenceBody, 3.0f );
+    withDrag.getWorld().SetBodyAngularVelocity( dragBody, 3.0f );
+    constexpr float dt = 1.0f / 60.0f;
+    noDrag.step( dt, 4 );
+    withDrag.step( dt, 4 );
+
+    const float referenceSpin = noDrag.getWorld().GetBodyAngularVelocity( referenceBody );
+    const float dampedSpin = withDrag.getWorld().GetBodyAngularVelocity( dragBody );
+    check( referenceSpin > 0.0f && dampedSpin > 0.0f &&
+        dampedSpin < referenceSpin - 1.0e-3f,
+        "surface-relative drag must slow pure rigid-body rotation without wind" );
+    check( near( withDrag.getWorld().GetBodyLinearVelocity( dragBody ), {}, 1.0e-4f ),
+        "symmetric surface drag on a spinning box must not create center-of-mass drift" );
+    check( LengthSquared( withDrag.getWindDragFluidImpulse() ) == 0.0f,
+        "one-way rotational drag must not modify fluid momentum" );
+
+    // 유체 반작용이 활성화되어도 각 표면점의 선형 충격량은 정확히 상쇄되어야 한다.
+    rigidBodyDemo coupled{ demoKind::windFlow };
+    coupled.setWindSourceEnabled( false );
+    coupled.setWindDragCoefficient( 8.0f );
+    coupled.getWorld().SetBodyAngularVelocity( coupled.getShapes()[2].bodyHandle, 3.0f );
+    coupled.step( dt, 4 );
+    check( Length( coupled.getWindDragExchangeResidual() ) < 1.0e-5f &&
+        IsFinite( coupled.getWindDragBodyImpulse() ) &&
+        IsFinite( coupled.getWindDragFluidImpulse() ),
+        "four-point drag must preserve equal-and-opposite linear impulse exchange" );
+}
+
 void checkSynchronizedWindCoupling()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -614,6 +657,7 @@ int main()
     checkFluidRateAndStaticObstacles();
     checkRotatedSandboxObstacles();
     checkDragMomentumBudget();
+    checkAngularDragResponse();
     checkPressureLedgerInSandbox();
     checkExperimentalCutCellProjection();
     checkSandboxConservativeAdvectionTrial();
