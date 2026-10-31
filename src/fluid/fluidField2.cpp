@@ -270,6 +270,17 @@ void fluidField2::setCutCellSampleCount( int count ) noexcept
     cutCellPressure_ = {};
 }
 
+void fluidField2::setAnalyticCircleCutCellEnabled( bool enabled ) noexcept
+{
+    if( analyticCircleCutCellEnabled_ == enabled ) return;
+    analyticCircleCutCellEnabled_ = enabled;
+    hasCutCellHistory_ = false;
+    volumeSourceValid_ = false;
+    previousObstacles_.clear();
+    sweptFaceFlux_ = {};
+    cutCellPressure_ = {};
+}
+
 void fluidField2::clear() noexcept
 {
     std::fill( u_.begin(), u_.end(), 0.0f );
@@ -658,6 +669,59 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     }
     else
     {
+        analyticFluidCircle circle{};
+        if( analyticCircleCutCellEnabled_ && TryGetAnalyticCircle( obstacles, circle ) )
+        {
+            const double h = cellSize_;
+            const double inverseArea = 1.0 / ( h * h );
+            const fluidShapeObstacle2& shape = obstacles.front();
+            for( int y = 0; y < height_; ++y )
+                for( int x = 0; x < width_; ++x )
+                {
+                    const double left = origin_.x + x * h;
+                    const double bottom = origin_.y + y * h;
+                    const double covered = CircleRectangleArea( circle,
+                        left, bottom, left + h, bottom + h );
+                    cellFluidFraction_[cellIndex( x, y )] =
+                        static_cast<float>( std::clamp( 1.0 - covered * inverseArea, 0.0, 1.0 ) );
+                }
+            for( int y = 0; y < height_; ++y )
+                for( int x = 1; x < width_; ++x )
+                {
+                    const double normal = origin_.x + x * h;
+                    const double low = origin_.y + y * h;
+                    const auto interval = ClipCircleFace( circle, true, normal, low, low + h );
+                    const int face = uIndex( x, y );
+                    uOpenFraction_[face] = static_cast<float>(
+                        std::clamp( 1.0 - interval.length / h, 0.0, 1.0 ) );
+                    if( interval.length > 0.0 )
+                    {
+                        const vec2 point{ static_cast<float>( normal ),
+                            static_cast<float>( interval.midpoint ) };
+                        uSolidVelocity_[face] = ( shape.linearVelocity +
+                            Cross( shape.angularVelocity, point - shape.center ) ).x;
+                    }
+                }
+            for( int y = 1; y < height_; ++y )
+                for( int x = 0; x < width_; ++x )
+                {
+                    const double normal = origin_.y + y * h;
+                    const double low = origin_.x + x * h;
+                    const auto interval = ClipCircleFace( circle, false, normal, low, low + h );
+                    const int face = vIndex( x, y );
+                    vOpenFraction_[face] = static_cast<float>(
+                        std::clamp( 1.0 - interval.length / h, 0.0, 1.0 ) );
+                    if( interval.length > 0.0 )
+                    {
+                        const vec2 point{ static_cast<float>( interval.midpoint ),
+                            static_cast<float>( normal ) };
+                        vSolidVelocity_[face] = ( shape.linearVelocity +
+                            Cross( shape.angularVelocity, point - shape.center ) ).y;
+                    }
+                }
+        }
+        else
+        {
         // 서브셀 16표본과 MAC face 4표본 각각에 대해 Shape Contains를
         // 호출하기 전에 도형의 보수적 world 반경으로 대부분을 걸러낸다.
         std::vector<double> bounds( obstacles.size(), -1.0 );
@@ -775,6 +839,7 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                 vOpenFraction_[vIndex( x, y )] = 1.0f - blocked * inverseCount;
                 if( blocked > 0 ) vSolidVelocity_[vIndex( x, y )] /= blocked;
             }
+        }
     }
 
     // Exterior faces always remain closed even in a geometrically empty domain.
