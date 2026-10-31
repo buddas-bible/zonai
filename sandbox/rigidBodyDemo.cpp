@@ -1365,6 +1365,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     height = std::clamp( height, 8, 128 );
     cellSize = std::clamp( cellSize, 0.25f, 2.0f );
     const bool cutCell = windField_->isCutCellProjectionEnabled();
+    const int cutCellSamples = windField_->getCutCellSampleCount();
     const bool cutCellCoupled = windField_->isCutCellCoupledProjectionEnabled();
     const bool conservative = windField_->isConservativeAdvectionEnabled();
     const bool geometryCorrection = windField_->isSweptGeometryCorrectionEnabled();
@@ -1375,6 +1376,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     windField_.emplace( width, height, cellSize,
         vec2{ -0.5f * width * cellSize, -0.5f * height * cellSize } );
     windField_->setCutCellProjectionEnabled( cutCell );
+    windField_->setCutCellSampleCount( cutCellSamples );
     windField_->setCutCellCoupledProjectionEnabled( cutCellCoupled );
     windField_->setConservativeAdvectionEnabled( conservative );
     windField_->setSweptGeometryCorrectionEnabled( geometryCorrection );
