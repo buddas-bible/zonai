@@ -507,6 +507,18 @@ float fluidField2::getVFaceOpenFraction( int x, int y ) const noexcept
     return x >= 0 && x < width_ && y > 0 && y < height_ ? vOpenFraction_[vIndex( x, y )] : 0.0f;
 }
 
+float fluidField2::getUFaceSolidVelocity( int x, int y ) const noexcept
+{
+    return x > 0 && x < width_ && y >= 0 && y < height_
+        ? uSolidVelocity_[uIndex( x, y )] : 0.0f;
+}
+
+float fluidField2::getVFaceSolidVelocity( int x, int y ) const noexcept
+{
+    return x >= 0 && x < width_ && y > 0 && y < height_
+        ? vSolidVelocity_[vIndex( x, y )] : 0.0f;
+}
+
 void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> obstacles )
 {
     // 이진 cell-center mask와 별도로 4x4 sub-cell / 4개 face 표본을 계산.
@@ -1283,6 +1295,103 @@ void fluidField2::applyCutCellBoundaries() noexcept
             if( cutCellVOpen( x, y ) == 0.0f ) v_[vIndex( x, y )] = vSolidVelocity_[vIndex( x, y )];
 }
 
+void fluidField2::synchronizeCutCellBoundaries( float timeStep,
+    std::span<const fluidShapeObstacle2> obstacles, std::span<const fluidObstacleForce2> feedback )
+{
+    // updateCutCellGeometry와 동일한 sub-face 4점 / 첫 점유 Shape 규칙으로 재계산한다.
+    // fluid 면의 속도 u_/v_는 보존하고 막힌 비율의 solid 속도만 예측값으로 갱신.
+    constexpr int sampleCount = 4;
+    constexpr float inverseCount = 1.0f / sampleCount;
+    struct predictedBody
+    {
+        vec2 linear{};
+        float angular = 0.0f;
+    };
+    std::vector<predictedBody> predicted( obstacles.size() );
+    std::vector<double> bounds( obstacles.size(), -1.0 );
+    for( std::size_t i = 0; i < obstacles.size(); ++i )
+    {
+        const fluidShapeObstacle2& body = obstacles[i];
+        predicted[i].linear = body.linearVelocity + ( timeStep * body.inverseMass ) * feedback[i].force;
+        predicted[i].angular = body.angularVelocity + timeStep * body.inverseInertia * feedback[i].torque;
+        if( IsValidFluidObstacle( body ) ) bounds[i] = FluidObstacleBoundRadius( body );
+    }
+    const auto firstOwner = [&]( vec2 point )
+    {
+        for( std::size_t i = 0; i < obstacles.size(); ++i )
+        {
+            if( bounds[i] < 0.0 ) continue;
+            const vec2 center = obstacles[i].transform.position;
+            if( std::abs( static_cast<double>( point.x ) - center.x ) > bounds[i] ||
+                std::abs( static_cast<double>( point.y ) - center.y ) > bounds[i] ) continue;
+            if( ContainsFluidObstacle( obstacles[i], point ) ) return static_cast<int>( i );
+        }
+        return -1;
+    };
+
+    double changedSquared = 0.0;
+    int boundaryFaces = 0;
+    int partialFaces = 0;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+        {
+            const int face = uIndex( x, y );
+            if( uOpenFraction_[face] >= 1.0f ) continue;
+            float sum = 0.0f;
+            int blocked = 0;
+            for( int sample = 0; sample < sampleCount; ++sample )
+            {
+                const vec2 point = origin_ + cellSize_ * vec2{
+                    static_cast<float>( x ), static_cast<float>( y ) + ( sample + 0.5f ) * inverseCount };
+                const int owner = firstOwner( point );
+                if( owner < 0 ) continue;
+                const predictedBody& body = predicted[static_cast<std::size_t>( owner )];
+                sum += ( body.linear + Cross( body.angular, point - obstacles[owner].center ) ).x;
+                ++blocked;
+            }
+            if( blocked == 0 ) continue;
+            const float next = sum / blocked;
+            const double change = static_cast<double>( next ) - uSolidVelocity_[face];
+            changedSquared += change * change;
+            uSolidVelocity_[face] = next;
+            ++boundaryFaces;
+            if( uOpenFraction_[face] > 0.0f ) ++partialFaces;
+        }
+
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const int face = vIndex( x, y );
+            if( vOpenFraction_[face] >= 1.0f ) continue;
+            float sum = 0.0f;
+            int blocked = 0;
+            for( int sample = 0; sample < sampleCount; ++sample )
+            {
+                const vec2 point = origin_ + cellSize_ * vec2{
+                    static_cast<float>( x ) + ( sample + 0.5f ) * inverseCount, static_cast<float>( y ) };
+                const int owner = firstOwner( point );
+                if( owner < 0 ) continue;
+                const predictedBody& body = predicted[static_cast<std::size_t>( owner )];
+                sum += ( body.linear + Cross( body.angular, point - obstacles[owner].center ) ).y;
+                ++blocked;
+            }
+            if( blocked == 0 ) continue;
+            const float next = sum / blocked;
+            const double change = static_cast<double>( next ) - vSolidVelocity_[face];
+            changedSquared += change * change;
+            vSolidVelocity_[face] = next;
+            ++boundaryFaces;
+            if( vOpenFraction_[face] > 0.0f ) ++partialFaces;
+        }
+
+    // 완전히 막힌 MAC 면만 u_/v_로 복사한다. 부분 개방 면의 유체 성분은 그대로 둔다.
+    applyCutCellBoundaries();
+    cutCellPressure_.synchronizedBoundaryFaces = boundaryFaces;
+    cutCellPressure_.synchronizedPartialFaces = partialFaces;
+    cutCellPressure_.boundaryNormalChangeRms = boundaryFaces > 0
+        ? static_cast<float>( std::sqrt( changedSquared / boundaryFaces ) ) : 0.0f;
+}
+
 float fluidField2::cutCellFluxDivergenceRms( float inverseTimeStep ) const noexcept
 {
     double sum = 0.0;
@@ -1763,6 +1872,7 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
             feedback[owner].force += force;
             feedback[owner].torque += Cross( center - obstacles[owner].center, force );
         }
+    if( solvedCoupled ) synchronizeCutCellBoundaries( timeStep, obstacles, feedback );
 }
 
 bool fluidField2::solveCoupledPressure( float timeStep, int iterations,

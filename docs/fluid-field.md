@@ -289,6 +289,16 @@ Part 12b는 `sweptU/VVolume`을 이송 **방향의 가중치**로만 사용해, 
 
 **현재 한계:** 이 변경은 Cut-cell의 **압력 계수와 Body 유효질량을 같은 이산 행렬에서 계산하는 첫 단계**다. 현재 `B`는 정확한 실제 cut surface traction이 아니라 근사 셀 압력 반력이며, 움직이는 인터페이스의 swept 체적과 Body 속도 변화를 연속 시간으로 완전 연립한 모델이 아니다. 단절된 유체 영역 간 gauge·반력 배분, 외벽 및 미분할 dual volume의 운동량, pressure-predicted cut-face 법선 속도 동기화도 완성되지 않았다. 복합 Shape의 정확한 ownership과 end-to-end 보존 검증 전에 일반 Sandbox 모드의 기본 경로를 이 Solver로 교체하면 안 된다.
 
+## Part 13h — Cut-cell 압력 반력 이후 Solid face 속도 동기화
+
+- Part 13g의 **선택형 Cut-cell 연립 PCG가 수렴했을 때만** `synchronizeCutCellBoundaries()`를 호출한다. 이진 MAC 경로와 기존 Cut-cell Jacobi, PCG 실패 시에는 적용하지 않는다.
+- 앞선 Cut-cell 기하 갱신에 사용한 **각 U/V face의 4개 sub-face 표본**을 다시 순회한다. 같은 Shape 첫 점유자 규칙과 같은 위치에서 `v'_COM = v_COM + dt·inverseMass·F_pressure`, `ω' = ω + dt·inverseInertia·τ_pressure`로 계산한 강체 표면 속도의 법선 성분을 평균한다. 고정/정적 장애물은 역질량과 역관성이 0이므로 원래 속도를 유지한다.
+- 완전히 차단된 face는 계산된 `uSolidVelocity_/vSolidVelocity_`와 함께 MAC `u_/v_`를 갱신한다. **부분 개방 face에서는 막힌 부분의 Solid 법선 속도만 갱신하고 열린 부분의 유체 법선 속도는 변경하지 않는다.** 압력으로 투영한 유체 속도를 다시 덮어쓰지 않기 위해서다.
+- `getUFaceSolidVelocity()/getVFaceSolidVelocity()`에서 해당 면의 막힌 부분 평균 속도를 읽을 수 있다(외곽 face/범위 밖은 0). `getCutCellPressure()`의 `synchronizedBoundaryFaces`, `synchronizedPartialFaces`, `boundaryNormalChangeRms`는 마지막 **수렴한 연립 압력 단계**가 갱신한 면 개수와 원래 Solid face 속도에 대한 RMS 변화량이다. `clear()`는 이 값도 초기화한다.
+- 회귀 테스트는 Circle이 이동·회전할 때 가려진 sub-face에서 독립 계산한 예측 속도와 저장된 U/V Solid 경계값이 일치하는지, 일부만 열린 face와 완전 차단 face, PCG 실패/clear를 검사한다.
+
+**보존 범위:** 이번 동기화는 압력 단계 말미의 **경계 속도 저장 상태**를 고치는 것이다. 다음 Step의 `updateCutCellGeometry()`는 World의 실제 최신 속도·형상을 다시 사용하며, 현재 `prepareCutCellVolumeChange()`의 Swept Volume/Cell Fraction을 이 예측 속도로 다시 적분하지 않는다. 따라서 `divergenceAfter`는 기존 fluid aperture flux 진단이고, 이 변경만으로 moving-interface 연속성, 전체 유체–강체 운동량·각운동량·에너지 보존을 증명하지 않는다. 또한 각 sub-face 재검사는 선택 모드에서만 수행하지만 추가적인 격자 스캔 비용이 있다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.

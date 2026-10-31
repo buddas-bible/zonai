@@ -165,6 +165,11 @@ struct fluidCutCellPressure2
     fluidCoupledPressureStatus2 coupledStatus = fluidCoupledPressureStatus2::notRequested;
     int coupledIterations = 0;
     float coupledRelativeResidual = 0.0f;
+    // 수렴한 Cut-cell PCG의 Body 예측속도를 다시 적용한 solid-normal MAC face.
+    // 부분 개방 face는 blocked 구간만 갱신하며 fluid face 속도는 보존한다.
+    int synchronizedBoundaryFaces = 0;
+    int synchronizedPartialFaces = 0;
+    float boundaryNormalChangeRms = 0.0f;
 };
 
 // 연속한 Shape 변환 사이의 내부 MAC 면을 통과한 Solid 속도를 시간 적분한 근사.
@@ -316,6 +321,9 @@ public:
     [[nodiscard]] float getCellFluidFraction( int x, int y ) const noexcept;
     [[nodiscard]] float getUFaceOpenFraction( int x, int y ) const noexcept;
     [[nodiscard]] float getVFaceOpenFraction( int x, int y ) const noexcept;
+    // Sub-face에서 막힌 구간의 평균 solid 법선 속도. 부분 개방 U/V의 fluid 성분과 별개.
+    [[nodiscard]] float getUFaceSolidVelocity( int x, int y ) const noexcept;
+    [[nodiscard]] float getVFaceSolidVelocity( int x, int y ) const noexcept;
     [[nodiscard]] bool isSolidCell( int x, int y ) const noexcept;
     [[nodiscard]] int getSolidCellCount() const noexcept { return solidCellCount_; }
     [[nodiscard]] vec2 getCellCenter( int x, int y ) const noexcept;
@@ -349,6 +357,8 @@ private:
     void updateSweptSolidFlux( float timeStep, std::span<const fluidShapeObstacle2> obstacles );
     void reconcileSweptSolidFlux();
     void applyCutCellBoundaries() noexcept;
+    void synchronizeCutCellBoundaries( float timeStep, std::span<const fluidShapeObstacle2> obstacles,
+        std::span<const fluidObstacleForce2> feedback );
     void projectCutCell( float timeStep, int pressureIterations,
         std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback );
     void applySolidBoundaries( std::span<const fluidShapeObstacle2> obstacles,
