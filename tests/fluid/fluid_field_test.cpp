@@ -865,6 +865,7 @@ void checkSweptTracerRemap()
     moving.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback, 160 );
     const fluidTracerStats2 moved = moving.getTracerStats();
     check( moved.usedSweptRemap && moved.sweptRemappedMass + moved.fallbackRemappedMass > 0.9f &&
+        moved.sweptRequestedMass >= moved.sweptRemappedMass - 1.0e-5f &&
         moved.unresolvedDisplacementMass < 1.0e-5f &&
         moved.trappedMass < 1.0e-5f && close( moving.getTracerMass(), 1.0f, 1.0e-4f ) &&
         std::abs( moved.delta() ) < 1.0e-4f,
@@ -886,10 +887,18 @@ void checkSweptTracerRemap()
     leadingBox.transform.position.x += 1.5f;
     leadingBox.center.x += 1.5f;
     direct.step( dt, std::span<const fluidShapeObstacle2>( &leadingBox, 1 ), feedback, 160 );
-    check( direct.getTracerStats().sweptRemappedMass > 0.5f &&
+    const fluidTracerStats2& directStats = direct.getTracerStats();
+    check( directStats.sweptRemappedMass > 0.0f &&
         close( direct.getTracerMass(), 1.0f, 1.0e-4f ) &&
-        direct.getTracerStats().trappedMass < 1.0e-5f,
+        directStats.trappedMass < 1.0e-5f,
         "swept face outward flux must guide direct conservative mass transfer to the open neighbor" );
+    const float displaced = 1.0f - direct.getCellFluidFraction( 9, 7 );
+    check( directStats.sweptRequestedMass >= directStats.sweptRemappedMass - 1.0e-5f &&
+        close( directStats.sweptLimitedMass,
+            std::max( 0.0f, directStats.sweptRequestedMass - displaced ), 1.0e-4f ) &&
+        close( directStats.sweptRemappedMass + directStats.fallbackRemappedMass +
+            directStats.unresolvedDisplacementMass, displaced, 1.0e-4f ),
+        "integrated swept volume must bound physical tracer transfer and expose uncovered displacement" );
 
     moving.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), feedback );
     check( moving.getTracerStats().usedSweptRemap &&
