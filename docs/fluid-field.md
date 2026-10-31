@@ -25,7 +25,7 @@ u_next = u* - dt * ∇p
 
 - `demoKind::windFlow`의 24×14, 셀 0.5m 속도장을 시각화한다. 파란 화살표는 샘플링된 속도, 노란 점은 바람 source 위치다.
 - 시간에 따라 Y 방향이 진동하는 국소 wind source를 주입하고 한 물리 Step마다 격자도 진전한다.
-- 세 Dynamic Body는 국소 유체 속도 `v_fluid`와 강체 중심 속도 `v_body`의 차이에 비례하는 경험적 힘 `F = dragCoefficient * (v_fluid - v_body)` (계수 단위 N·s/m)을 받는다. 따라서 강체가 속도장을 따라 가속하며, 원래 `World`의 force/velocity/Contact solver를 재사용한다.
+- 세 Dynamic Body는 4개 표면 근사점에서 `F_i = (dragCoefficient / 4) * (v_fluid,i - (v_COM + ω × r_i))` (계수 단위 N·s/m)의 경험적 Drag를 받는다. 각 힘을 실제 적용점에 가하므로 선형 가속뿐 아니라 회전 저항 토크도 생기며, 원래 `World`의 force/velocity/Contact solver를 재사용한다.
 - 바람 source On/Off, source 강도, 경험적 drag 계수, 양방향 obstacle coupling On/Off, 흐름+Body 초기화 기능을 제공한다. Drag를 0으로 설정하더라도 양방향이 활성화되면 압력 반력이 남는다.
 - `Step(0)`은 유체를 전진시키거나 힘을 주입하지 않는다.
 
@@ -73,7 +73,7 @@ u_next = u* - dt * ∇p
 - `applyMomentumImpulse`는 지정 반경 내부의 유효 U/V face에 거리 기반 가중치를 매기고 **성분별로 가중치 합을 정규화**해 속도를 변경한다. 바깥 영역, 잘못된 입력, 유효 face가 없는 성분은 0 충격량을 반환한다. float 표현 오차를 포함한 *실제 face 운동량 증가량*을 반환한다.
 - Sandbox는 Pressure Solver를 수행한 다음 Body별 Drag 목표 `J = F_drag·dt`를 계산한다. 양방향 모드에서는 `applyMomentumImpulse(-J)`가 실제 유체에 가한 충격량 `J_fluid`를 보고하고 **강체에는 `J_body = -J_fluid`만 적용**한다. 주변 유효 face가 전혀 없으면 강체 Drag도 그만큼 줄어든다.
 - Body와 유체의 Drag 충격량을 합한 `J_body + J_fluid`을 Sandbox에 표시한다. 두 모드를 쉽게 비교하도록 단방향 모드는 종전처럼 유체의 Drag 피드백을 생략한다.
-- Solid 내부의 속도를 그대로 Drag 샘플로 쓰면 강체 경계 속도가 읽히므로, 양방향 Drag는 Body 바깥 4방향에서 흐름을 샘플링하고 유체를 교란하는 방향 바깥쪽에 반작용을 분배한다.
+- Solid 내부의 속도를 그대로 Drag 샘플로 쓰면 강체 경계 속도가 읽히므로, Sandbox의 4점 Drag는 AABB 축방향 표면점 바깥 한 셀에서 흐름을 샘플링한다. 양방향 모드에서는 각 표면점 주변 유효 MAC face에 반대 충격량을 분배하고 실제 교환된 양만큼 Body에 힘을 가한다.
 
 ### 보존 범위의 경계
 
@@ -279,6 +279,15 @@ Part 12b는 `sweptU/VVolume`을 이송 **방향의 가중치**로만 사용해, 
 - **중요:** `energy.totalDelta()`는 *부분 장부의 압력 단계 에너지 변화*이지 **전체 유체–강체 시스템의 총 에너지 보존 증명**이 아니다. 이류·변형 경계에서 바뀐 유체 자유 face 선택, Drag, 외부 source, 벽으로 전달된 일, missing interface dual volumes를 포함하지 않는다. 양수 변화만으로 에너지가 생성됐다고 단정해서는 안 된다.
 - GUI 없이 **3개 질량(0.25/2/12kg)·3개 회전 관성(0.08/1/8kg·m²) 중 대응한 3쌍·2개 해상도(h=0.5/0.25m)**를 36회 연속 압력 교환하며 자유 MAC face 에너지, 압력 예상 강체 에너지, discrete fluid+solid+wall 운동량 잔차, 최대/마지막 에너지와 양의 압력 단계 에너지 변화 누적량을 검증·출력한다. 이 실험은 geometry를 고정한 solver-only 시나리오로 swept solid 체적 보존의 증명은 아니다.
 - Sandbox에서는 wind source/Drag/gravity 없는 World8/Fluid1의 60프레임 실제 강체 이동·회전을 반복하고 강체/Fluid 부분 운동 에너지를 검사한다. World 자체 속도에서 독립적으로 계산한 강체 운동 에너지가 Fluid의 압력 예측값과 일치하는지도 별도 검증한다. 현 단계의 폭주 안전성 회귀는 **느슨한 상한**이며, 이를 전체 에너지 보존의 성립으로 해석하지 않는다.
+
+## Part 13f — 회전 표면 속도를 고려한 4점 Drag (Sandbox)
+
+- 기존 Sandbox는 Body 중심의 단일 속도 차이로 Drag를 계산한 뒤 중심에 적용했다. 이 경우 물체가 제자리에서 회전해도 접선 방향의 상대속도가 반영되지 않아 **회전 Drag 토크가 0**이었다.
+- 이제 강체 AABB의 좌/우/상/하 4개 표면 근사점 `r_i`를 사용한다. 각 점의 강체 표면 속도는 `v_COM + ω × r_i`, 유체 속도는 그 점의 바깥 한 셀에서 샘플링한다. 4개 점의 Drag 계수는 각각 `dragCoefficient/4`로 나누어 합성하므로 균일한 유속·순수 병진의 기본 계수 의미는 유지한다.
+- 양방향에서는 **모든 Drag 목표 충격량을 먼저 계산한 후** 각 표면점 인근의 유효 MAC face에 `-J`를 주입한다. 반환된 실제 전달량의 반대값만 `World::ApplyForce(body, force, point)`에 전달한다. 따라서 기존 `getWindDragExchangeResidual()`은 각 교환의 **선운동량**을 비교하며 회전 저항은 Body COM에 대한 지점별 모멘트로 반영된다.
+- 회귀 테스트는 소스 없는 정지 유체에서 **순수 회전하는 Box의 각속도 감쇠**(Drag 0 비교), 대칭 표면 Drag의 COM 이동 없음, 양방향 선운동량 잔차를 검증한다.
+
+**한계:** 표면은 정확한 Circle/Capsule/Polygon 경계 적분이 아닌 AABB 축방향 4점 근사다. 유체에 분배된 MAC face 충격량의 **각운동량**은 현재 계산·반환하지 않으며 실제 `fluid+rigid` 각운동량 보존을 주장하지 않는다. 회전 Drag의 정확한 물리 계수, 고속 유동의 양력과 점성 전단력, 천 표면 패치에 대한 유체 저항은 후속 구현이 필요하다.
 
 ## 다음 구현 후보
 
