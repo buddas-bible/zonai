@@ -232,7 +232,7 @@ Part 12b는 `sweptU/VVolume`을 이송 **방향의 가중치**로만 사용해, 
 
 **한계:** 이는 두 가지 서로 다른 격자 표본 간 *불일치 완화*이며 실제 움직이는 연속 계면의 정확한 체적/압력 반력 해석이 아니다. 부호가 반대인 인접 오차가 없는 경우에는 차이가 그대로 남는다. 강체 압력 반력과 함께 전체 유체 질량/운동량 보존이 완성되었다는 의미는 아니다.
 
-## Part 13a — Sandbox 강체·Fluid Substep 시간 동기화 (실험)
+## Part 13a — Sandbox 강체·Fluid Substep 동기화 + 이진 MAC 압력-강체 연립 투영 (실험)
 
 원래 Sandbox는 한 외부 프레임에서 `fluidField2::step(dt)`를 1회 호출해 Pressure/Drag를 강체에 가한 뒤 `World::Step(dt, subStepCount)`를 호출했다. Fluid가 사용한 강체 경계 형상과 속도는 World 하위 Step 동안 갱신되지 않아, 빠르게 움직이는 강체에서는 압력 피드백이 지연될 수 있었다.
 
@@ -240,6 +240,9 @@ Part 12b는 `sweptU/VVolume`을 이송 **방향의 가중치**로만 사용해, 
 - 원래의 `World::Step(dt, subStepCount)`와 단일 Fluid Step 경로는 동기화 옵션 OFF 또는 단방향일 때 유지한다. Sandbox UI에서 토글하고 실제 실행한 Fluid 구간 수를 확인할 수 있다.
 - 동기화 모드의 `getWindPressureForces()`는 **외부 Step 동안 적분한 압력 충격량을 원래 `dt`로 나눈 평균 힘·평균 토크**를 나타낸다. `getWindDragBodyImpulse()`와 `getWindDragFluidImpulse()`는 하위 Step 충격량의 **합**을 유지한다.
 - `fluidField2::getPressureMomentum()`과 `getCutCellPressure()`는 **마지막 Fluid 하위 Step**의 진단값이므로, 외부 Step 전체의 평균 압력 반력과 직접 대조하면 안 된다. 이전 단일 Step pressure-ledger 회귀는 동기화 옵션 OFF로 검사하며, 장시간 안정성·양방향·단방향 호환 회귀를 추가한다.
+
+- `fluidShapeObstacle2` 끝에 `inverseMass`·`inverseInertia`를 기본 0으로 추가했다. 동기화된 이진 MAC 투영에서는 Sandbox가 실제 Dynamic Body 질량·관성의 역수를 설정하고, 유체 자유 face 압력 기울기와 고체 경계 압력 반력이 같은 SPD Schur complement(`A = L + B M_body^-1 B^T`)에 들어간다. 이 압력은 preconditioned CG로 반복 계산하고 기존 pressure face force/torque 그대로 World에 전달한다. 기본 0인 독립 Fluid API 및 기존 Jacobi 경로는 유지된다.
+- **한계:** 아직 Cut-cell 가중 투영에는 강체 유효질량 연립항이 적용되지 않는다(그 모드에서는 기존 투영 사용). 단일 압력 gauge, 폐쇄된 단절 영역 정합, 정확한 다중 Shape force ownership, 점성/Drag 합동 투영도 미완성이다. 이 새로운 경로가 추가질량 불안정성 완전 해결이라는 뜻은 아니며, 장시간 압력-운동량·에너지 회귀로 증명해야 한다.
 
 **범위와 한계:** 이 변경은 **Sandbox의 시간 배치**만 변경하고 `World`의 충돌/Joint solver, `fluidField2`의 압력 행렬, 접촉 계산과 대수적 운동량 교환은 변경하지 않는다. `World::Step(dt/N, 1)` N회는 `World::Step(dt, N)` 1회와 Solver 관점에서 완전히 동일하지 않을 수 있다. 시간 동기화는 프레임 지연과 큰 장애물 점유 변화는 줄이지만 **추가질량(added-mass) 불안정성, coarse-grid 압력 반력 스파이크, Cut-cell 표면 적분 오차를 자체적으로 해결하지 않는다.** 장기적으로는 World/Fluid를 함께 호출하는 공통 Physics Scheduler와 강체 유효 질량이 포함된 implicit 압력 결합이 필요하다.
 
