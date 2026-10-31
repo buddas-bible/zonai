@@ -717,10 +717,29 @@ bool fluidField2::isSolidCell( int x, int y ) const noexcept
     return x >= 0 && x < width_ && y >= 0 && y < height_ && solidOwner_[cellIndex( x, y )] >= 0;
 }
 
-void fluidField2::applySolidBoundaries( std::span<const fluidShapeObstacle2> obstacles )
+void fluidField2::applySolidBoundaries( std::span<const fluidShapeObstacle2> obstacles,
+    std::span<const fluidObstacleForce2> pressureFeedback, float timeStep )
 {
-    // Solid와 인접한 모든 face의 normal velocity를 rigid body 표면속도로 지정.
-    // 유체-유체 face만 pressure gradient로 보정하며 가장자리 수직 flux는 0.
+    // 압력 투영 전에는 전달된 Body 속도로 no-through 경계를 설정한다.
+    // 수렴한 Schur 압력 이후에는 같은 pressure traction으로 계산한
+    // Δv=dt*M^-1*F, Δomega=dt*I^-1*tau를 같은 MAC face에도 반영한다.
+    const bool applyPressure = timeStep > 0.0f && pressureFeedback.size() == obstacles.size();
+    double changedSquared = 0.0;
+    int boundaryFaces = 0;
+    const auto predictedVelocity = [&]( int owner, vec2 point )
+    {
+        const fluidShapeObstacle2& solid = obstacles[static_cast<std::size_t>( owner )];
+        vec2 linear = solid.linearVelocity;
+        float angular = solid.angularVelocity;
+        if( applyPressure )
+        {
+            const fluidObstacleForce2& pressure = pressureFeedback[static_cast<std::size_t>( owner )];
+            linear += ( timeStep * solid.inverseMass ) * pressure.force;
+            angular += timeStep * solid.inverseInertia * pressure.torque;
+        }
+        return linear + Cross( angular, point - solid.center );
+    };
+
     for( int y = 0; y < height_; ++y )
         for( int x = 1; x < width_; ++x )
         {
@@ -728,9 +747,16 @@ void fluidField2::applySolidBoundaries( std::span<const fluidShapeObstacle2> obs
             const int right = solidOwner_[cellIndex( x, y )];
             const int owner = left >= 0 ? left : right;
             if( owner < 0 ) continue;
-            const fluidShapeObstacle2& solid = obstacles[static_cast<std::size_t>( owner )];
             const vec2 point = origin_ + cellSize_ * vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
-            u_[uIndex( x, y )] = ( solid.linearVelocity + Cross( solid.angularVelocity, point - solid.center ) ).x;
+            const int face = uIndex( x, y );
+            const float next = predictedVelocity( owner, point ).x;
+            if( applyPressure && ( left < 0 || right < 0 ) )
+            {
+                const double difference = static_cast<double>( next ) - u_[face];
+                changedSquared += difference * difference;
+                ++boundaryFaces;
+            }
+            u_[face] = next;
         }
 
     for( int y = 1; y < height_; ++y )
@@ -740,10 +766,24 @@ void fluidField2::applySolidBoundaries( std::span<const fluidShapeObstacle2> obs
             const int top = solidOwner_[cellIndex( x, y )];
             const int owner = bottom >= 0 ? bottom : top;
             if( owner < 0 ) continue;
-            const fluidShapeObstacle2& solid = obstacles[static_cast<std::size_t>( owner )];
             const vec2 point = origin_ + cellSize_ * vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
-            v_[vIndex( x, y )] = ( solid.linearVelocity + Cross( solid.angularVelocity, point - solid.center ) ).y;
+            const int face = vIndex( x, y );
+            const float next = predictedVelocity( owner, point ).y;
+            if( applyPressure && ( bottom < 0 || top < 0 ) )
+            {
+                const double difference = static_cast<double>( next ) - v_[face];
+                changedSquared += difference * difference;
+                ++boundaryFaces;
+            }
+            v_[face] = next;
         }
+
+    if( applyPressure )
+    {
+        pressureMomentum_.synchronizedBoundaryFaces = boundaryFaces;
+        pressureMomentum_.boundaryNormalChangeRms = boundaryFaces > 0
+            ? static_cast<float>( std::sqrt( changedSquared / boundaryFaces ) ) : 0.0f;
+    }
 }
 
 float fluidField2::advectionUOpen( int x, int y ) const noexcept
@@ -2003,6 +2043,11 @@ void fluidField2::project( float timeStep, int pressureIterations,
             if( bottom < 0 && top >= 0 ) accumulate( top, { 0.0f, 1.0f }, point, pressure_[cellIndex( x, y - 1 )] );
             else if( top < 0 && bottom >= 0 ) accumulate( bottom, { 0.0f, -1.0f }, point, pressure_[cellIndex( x, y )] );
         }
+
+    // 내부 face와 강체 사이의 같은 압력해를 적용한다. pressure traction으로
+    // 예측되는 Body 속도 증분을 solid-normal MAC face에도 갱신한다.
+    // World의 Drag/Contact/Joint로 뒤이어 변하는 속도까지 미리 반영하지는 않는다.
+    if( solvedCoupled ) applySolidBoundaries( obstacles, feedback, timeStep );
 
     // 닫힌 격자의 외벽도 유체 압력으로 반력을 받는다.
     // Solid가 외곽에 걸쳐 있는 셀은 외벽에 유체 압력이 없으므로 제외한다.
