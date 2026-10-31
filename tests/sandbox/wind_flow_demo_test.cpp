@@ -239,6 +239,8 @@ void checkSynchronizedWindCoupling()
     check( scene.getWindCouplingSteps() == 1 &&
         scene.getWindField()->getPressureMomentum().usedCoupledProjection,
         "mass-aware pressure must remain active even with one rigid substep" );
+    scene.resetWindFlow();
+    scene.getWorld().SetBodyLinearVelocity( moving, { 2.0f, 0.0f } );
     float maxSpeed = 0.0f;
     for( int i = 0; i < 120; ++i )
     {
