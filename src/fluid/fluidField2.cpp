@@ -1551,6 +1551,42 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
     double changedSquared = 0.0;
     int boundaryFaces = 0;
     int partialFaces = 0;
+    analyticFluidCircle circle{};
+    if( analyticCircleCutCellEnabled_ && TryGetAnalyticCircle( obstacles, circle ) )
+    {
+        const double h = cellSize_;
+        const auto& body = predicted.front();
+        const auto updateFace = [&]( bool vertical, int x, int y )
+        {
+            const int face = vertical ? uIndex( x, y ) : vIndex( x, y );
+            const float open = vertical ? uOpenFraction_[face] : vOpenFraction_[face];
+            if( open >= 1.0f ) return;
+            const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+            const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+            const auto clipped = ClipCircleFace( circle, vertical, normal, low, low + h );
+            if( clipped.length <= 0.0 ) return;
+            const vec2 point = vertical
+                ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
+                : vec2{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
+            const vec2 velocity = body.linear + Cross( body.angular, point - obstacles.front().center );
+            const float next = vertical ? velocity.x : velocity.y;
+            float& previous = vertical ? uSolidVelocity_[face] : vSolidVelocity_[face];
+            const double change = static_cast<double>( next ) - previous;
+            changedSquared += change * change;
+            const float solidFraction = static_cast<float>( clipped.length / h );
+            if( vertical ) pressureUSolidFlux_[face] = solidFraction * static_cast<float>( change );
+            else pressureVSolidFlux_[face] = solidFraction * static_cast<float>( change );
+            previous = next;
+            ++boundaryFaces;
+            if( open > 0.0f ) ++partialFaces;
+        };
+        for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x ) updateFace( true, x, y );
+        for( int y = 1; y < height_; ++y )
+            for( int x = 0; x < width_; ++x ) updateFace( false, x, y );
+    }
+    else
+    {
     for( int y = 0; y < height_; ++y )
         for( int x = 1; x < width_; ++x )
         {
@@ -1604,6 +1640,7 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
             ++boundaryFaces;
             if( vOpenFraction_[face] > 0.0f ) ++partialFaces;
         }
+    }
 
     // 완전히 막힌 MAC 면만 u_/v_로 복사한다. 부분 개방 면의 유체 성분은 그대로 둔다.
     applyCutCellBoundaries();
