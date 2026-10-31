@@ -1081,9 +1081,38 @@ void rigidBodyDemoUi::drawExperimentControls()
             const vec2 momentum = field->getFluidMomentum();
             ImGui::Text( "유체 내부 face 운동량: (%.4f, %.4f) N·s", momentum.x, momentum.y );
             const fluidPressureMomentum2& pressure = field->getPressureMomentum();
-            ImGui::Text( "동적 강체 결합 압력: %s",
-                pressure.usedCoupledProjection ? "PCG Schur" :
-                pressure.coupledSolveFailed ? "실패 - 기존 Jacobi fallback" : "기존 압력 경로" );
+            const char* pressureMode = "기존 압력 경로";
+            switch( pressure.coupledStatus )
+            {
+            case fluidCoupledPressureStatus2::converged:
+                pressureMode = "PCG Schur (수렴)";
+                break;
+            case fluidCoupledPressureStatus2::noBoundary:
+                pressureMode = "결합 경계 없음 - 기존 압력 경로";
+                break;
+            case fluidCoupledPressureStatus2::iterationLimit:
+                pressureMode = "PCG 반복 한도 - 압력 반력 생략";
+                break;
+            case fluidCoupledPressureStatus2::numericalBreakdown:
+                pressureMode = "PCG 수치 실패 - 압력 반력 생략";
+                break;
+            case fluidCoupledPressureStatus2::invalidPressure:
+                pressureMode = "PCG 압력값 오류 - 압력 반력 생략";
+                break;
+            default:
+                break;
+            }
+            ImGui::Text( "동적 강체 결합 압력: %s", pressureMode );
+            if( pressure.coupledStatus != fluidCoupledPressureStatus2::notRequested &&
+                pressure.coupledStatus != fluidCoupledPressureStatus2::noBoundary )
+            {
+                ImGui::Text( "PCG 반복: %d / %d", pressure.coupledIterations, pressure.coupledIterationLimit );
+                ImGui::Text( "PCG 실제 잔차 RMS: %.3e -> %.3e (상대 %.3e)",
+                    pressure.coupledInitialResidualRms,
+                    pressure.coupledFinalResidualRms, pressure.coupledRelativeResidual );
+                if( pressure.coupledSolveFailed )
+                    ImGui::TextWrapped( "수렴 실패: 강체 질량을 무시한 Jacobi 반력 대신 이번 Step의 압력 반력을 생략합니다. 발산이 남을 수 있습니다." );
+            }
             const fluidStepMomentum2& stages = field->getStepMomentum();
             if( !field->isCutCellProjectionEnabled() )
             {
