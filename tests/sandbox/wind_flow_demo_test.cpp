@@ -646,6 +646,9 @@ void checkSandboxAnalyticCircleMode()
         "wind field resize must preserve circle geometry option without retaining swept history" );
     scene.setWindAnalyticCircleEnabled( false );
     scene.setWindCircleOnlyFluidEnabled( false );
+    // 두 번의 Fluid 구간을 쓰면 두 번째 구간은 이미 유효한 현재 모드 이력임.
+    // 전환 직후 첫 스냅샷의 무이력 보장을 독립적으로 검사하려고 1회만 진행.
+    scene.setWindFluidSubstepCount( 1 );
     scene.step( dt, 4 );
     check( scene.getWindField()->getCutCellPressure().activeCells > 0 &&
         !scene.getWindField()->getCutCellPressure().hasVolumeHistory,
