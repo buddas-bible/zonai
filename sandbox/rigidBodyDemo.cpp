@@ -214,104 +214,135 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
         torqueTrialTime_ += timeStep;
     }
     updateSplinePath( timeStep );
-    if( windField_ && timeStep > 0.0f )
+    // Fluid와 강체의 외부 Step을 동일한 dt로 교대 전진시킨다. 이 옵션은
+    // Sandbox 전용의 시간 동기화 실험이며 implicit added-mass 결합은 아니다.
+    const bool synchronizedWind = windField_ && windObstacleCouplingEnabled_ &&
+        windSynchronizedCouplingEnabled_ && timeStep > 0.0f && subStepCount > 1;
+    const int windSteps = synchronizedWind ? subStepCount : 1;
+    const float windTimeStep = timeStep / windSteps;
+    windCouplingSteps_ = windField_ && timeStep > 0.0f ? windSteps : 0;
+    if( windField_ )
     {
-        windTime_ += timeStep;
-        if( windSourceEnabled_ )
-        {
-            const vec2 source{ -3.5f, 0.0f };
-            const vec2 velocityDelta{ windSourceStrength_ * timeStep, 0.5f * windSourceStrength_ * timeStep * std::sin( 1.7f * windTime_ ) };
-            windField_->addVelocity( source, velocityDelta, 1.7f );
-        }
-        // fluidField2는 World나 Body를 소유하지 않음. 매 Step마다 실제 pose/속도를 전달함.
-        std::array<fluidShapeObstacle2, 3> obstacles{};
-        const std::size_t obstacleCount = std::min( shapes_.size(), obstacles.size() );
-        for( std::size_t i = 0; i < obstacleCount; ++i )
-        {
-            const visualShape& visual = shapes_[i];
-            if( !world_.IsValid( visual.bodyHandle ) || !world_.IsValid( visual.shapeHandle ) ) continue;
-            const shapeGeometry& geometry = world_.GetShape( visual.shapeHandle ).geometry;
-            if( !std::holds_alternative<circle2>( geometry ) && !std::holds_alternative<capsule2>( geometry ) &&
-                !std::holds_alternative<polygon2>( geometry ) ) continue;
-            const transform2 transform = world_.GetBodyTransform( visual.bodyHandle );
-            const vec2 center = TransformPoint( transform, world_.GetBodyLocalCenter( visual.bodyHandle ) );
-            obstacles[i] = { geometry, transform, center,
-                world_.GetBodyLinearVelocity( visual.bodyHandle ), world_.GetBodyAngularVelocity( visual.bodyHandle ) };
-        }
-
-        windPressureForces_.fill( {} );
-        if( windObstacleCouplingEnabled_ )
-            windField_->step( timeStep, std::span<const fluidShapeObstacle2>( obstacles ).first( obstacleCount ),
-                std::span<fluidObstacleForce2>( windPressureForces_ ).first( obstacleCount ) );
-        else windField_->step( timeStep );
-
-        // Drag는 기존 유체 face를 갱신하기 전에 모든 Body의 상대속도로 계산한다.
-        // Solid 내부 샘플은 경계 속도에 오염되므로 바깥쪽 네 방향의 흐름을 사용.
-        std::array<vec2, 3> dragForces{};
-        std::array<vec2, 3> dragCenters{};
-        std::array<float, 3> dragRadii{};
-        const float spacing = windField_->getCellSize();
         windDragBodyImpulse_ = {};
         windDragFluidImpulse_ = {};
-
-        for( std::size_t i = 0; i < obstacleCount; ++i )
+    }
+    std::array<fluidObstacleForce2, 3> summedPressureImpulse{};
+    if( contactEventVisualizationEnabled_ ) syncContactEventSubscriptions();
+    for( int windSubstep = 0; windSubstep < windSteps; ++windSubstep )
+    {
+        if( windField_ && windTimeStep > 0.0f )
         {
-            const visualShape& visual = shapes_[i];
-            if( !world_.IsValid( visual.bodyHandle ) ||
-                world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
-
-            const vec2 center = TransformPoint( world_.GetBodyTransform( visual.bodyHandle ),
-                world_.GetBodyLocalCenter( visual.bodyHandle ) );
-            const float radius = std::max( Length( Extents( world_.GetShapeAABB( visual.shapeHandle ) ) ), spacing );
-            const float distance = radius + spacing;
-            vec2 fluidVelocity = windField_->sampleVelocity( center );
-            if( windObstacleCouplingEnabled_ )
+            windTime_ += windTimeStep;
+            if( windSourceEnabled_ )
             {
-                fluidVelocity = 0.25f * (
-                    windField_->sampleVelocity( center + vec2{ distance, 0.0f } ) +
-                    windField_->sampleVelocity( center - vec2{ distance, 0.0f } ) +
-                    windField_->sampleVelocity( center + vec2{ 0.0f, distance } ) +
-                    windField_->sampleVelocity( center - vec2{ 0.0f, distance } ) );
+                const vec2 source{ -3.5f, 0.0f };
+                const vec2 velocityDelta{ windSourceStrength_ * windTimeStep, 0.5f * windSourceStrength_ * windTimeStep * std::sin( 1.7f * windTime_ ) };
+                windField_->addVelocity( source, velocityDelta, 1.7f );
             }
-
-            dragCenters[i] = center;
-            dragRadii[i] = radius;
-            dragForces[i] = windDragCoefficient_ * ( fluidVelocity - world_.GetBodyLinearVelocity( visual.bodyHandle ) );
+            // fluidField2는 World나 Body를 소유하지 않음. 매 Step마다 실제 pose/속도를 전달함.
+            std::array<fluidShapeObstacle2, 3> obstacles{};
+            const std::size_t obstacleCount = std::min( shapes_.size(), obstacles.size() );
+            for( std::size_t i = 0; i < obstacleCount; ++i )
+            {
+                const visualShape& visual = shapes_[i];
+                if( !world_.IsValid( visual.bodyHandle ) || !world_.IsValid( visual.shapeHandle ) ) continue;
+                const shapeGeometry& geometry = world_.GetShape( visual.shapeHandle ).geometry;
+                if( !std::holds_alternative<circle2>( geometry ) && !std::holds_alternative<capsule2>( geometry ) &&
+                    !std::holds_alternative<polygon2>( geometry ) ) continue;
+                const transform2 transform = world_.GetBodyTransform( visual.bodyHandle );
+                const vec2 center = TransformPoint( transform, world_.GetBodyLocalCenter( visual.bodyHandle ) );
+                obstacles[i] = { geometry, transform, center,
+                    world_.GetBodyLinearVelocity( visual.bodyHandle ), world_.GetBodyAngularVelocity( visual.bodyHandle ) };
+            }
+    
+            windPressureForces_.fill( {} );
+            if( windObstacleCouplingEnabled_ )
+                windField_->step( windTimeStep, std::span<const fluidShapeObstacle2>( obstacles ).first( obstacleCount ),
+                    std::span<fluidObstacleForce2>( windPressureForces_ ).first( obstacleCount ) );
+            else windField_->step( windTimeStep );
+    
+            // Drag는 기존 유체 face를 갱신하기 전에 모든 Body의 상대속도로 계산한다.
+            // Solid 내부 샘플은 경계 속도에 오염되므로 바깥쪽 네 방향의 흐름을 사용.
+            std::array<vec2, 3> dragForces{};
+            std::array<vec2, 3> dragCenters{};
+            std::array<float, 3> dragRadii{};
+            const float spacing = windField_->getCellSize();
+    
+            for( std::size_t i = 0; i < obstacleCount; ++i )
+            {
+                const visualShape& visual = shapes_[i];
+                if( !world_.IsValid( visual.bodyHandle ) ||
+                    world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
+    
+                const vec2 center = TransformPoint( world_.GetBodyTransform( visual.bodyHandle ),
+                    world_.GetBodyLocalCenter( visual.bodyHandle ) );
+                const float radius = std::max( Length( Extents( world_.GetShapeAABB( visual.shapeHandle ) ) ), spacing );
+                const float distance = radius + spacing;
+                vec2 fluidVelocity = windField_->sampleVelocity( center );
+                if( windObstacleCouplingEnabled_ )
+                {
+                    fluidVelocity = 0.25f * (
+                        windField_->sampleVelocity( center + vec2{ distance, 0.0f } ) +
+                        windField_->sampleVelocity( center - vec2{ distance, 0.0f } ) +
+                        windField_->sampleVelocity( center + vec2{ 0.0f, distance } ) +
+                        windField_->sampleVelocity( center - vec2{ 0.0f, distance } ) );
+                }
+    
+                dragCenters[i] = center;
+                dragRadii[i] = radius;
+                dragForces[i] = windDragCoefficient_ * ( fluidVelocity - world_.GetBodyLinearVelocity( visual.bodyHandle ) );
+            }
+    
+            // 압력 traction은 별도 근사. 여기서는 Drag에 한해 유체/Body 충격량을 쌍으로 적용.
+            // World::Step에서 Body force가 소비되기 전에, 유체가 실제로 받은 -J 만큼만 Body에 +J를 줌.
+            for( std::size_t i = 0; i < obstacleCount; ++i )
+            {
+                const visualShape& visual = shapes_[i];
+                if( !world_.IsValid( visual.bodyHandle ) ||
+                    world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
+    
+                if( windObstacleCouplingEnabled_ )
+                {
+                    world_.ApplyForceToCenter( visual.bodyHandle, windPressureForces_[i].force );
+                    world_.ApplyTorque( visual.bodyHandle, windPressureForces_[i].torque );
+                }
+    
+                vec2 dragForce = dragForces[i];
+                if( windObstacleCouplingEnabled_ )
+                {
+                    const vec2 upstream = dragCenters[i] -
+                        ( dragRadii[i] + spacing ) * Normalize( dragForce );
+                    const vec2 fluidImpulse = windField_->applyMomentumImpulse(
+                        upstream, -windTimeStep * dragForce, 2.0f * spacing );
+                    // 벽 또는 Solid에 가려 유효 face가 없으면 그 성분의 drag도 전달하지 않음.
+                    dragForce = -fluidImpulse / windTimeStep;
+                    windDragFluidImpulse_ += fluidImpulse;
+                }
+    
+                world_.ApplyForceToCenter( visual.bodyHandle, dragForce );
+                windDragBodyImpulse_ += windTimeStep * dragForce;
+            }
         }
-
-        // 압력 traction은 별도 근사. 여기서는 Drag에 한해 유체/Body 충격량을 쌍으로 적용.
-        // World::Step에서 Body force가 소비되기 전에, 유체가 실제로 받은 -J 만큼만 Body에 +J를 줌.
-        for( std::size_t i = 0; i < obstacleCount; ++i )
+        if( synchronizedWind )
         {
-            const visualShape& visual = shapes_[i];
-            if( !world_.IsValid( visual.bodyHandle ) ||
-                world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
-
-            if( windObstacleCouplingEnabled_ )
+            for( std::size_t i = 0; i < windPressureForces_.size(); ++i )
             {
-                world_.ApplyForceToCenter( visual.bodyHandle, windPressureForces_[i].force );
-                world_.ApplyTorque( visual.bodyHandle, windPressureForces_[i].torque );
+                summedPressureImpulse[i].force += windTimeStep * windPressureForces_[i].force;
+                summedPressureImpulse[i].torque += windTimeStep * windPressureForces_[i].torque;
             }
-
-            vec2 dragForce = dragForces[i];
-            if( windObstacleCouplingEnabled_ )
-            {
-                const vec2 upstream = dragCenters[i] -
-                    ( dragRadii[i] + spacing ) * Normalize( dragForce );
-                const vec2 fluidImpulse = windField_->applyMomentumImpulse(
-                    upstream, -timeStep * dragForce, 2.0f * spacing );
-                // 벽 또는 Solid에 가려 유효 face가 없으면 그 성분의 drag도 전달하지 않음.
-                dragForce = -fluidImpulse / timeStep;
-                windDragFluidImpulse_ += fluidImpulse;
-            }
-
-            world_.ApplyForceToCenter( visual.bodyHandle, dragForce );
-            windDragBodyImpulse_ += timeStep * dragForce;
+            // Contact/Joint solver 역시 같은 substep 경계에서 전진시켜
+            // 다음 Fluid Step이 최신 위치·속도로 경계조건을 다시 계산하게 한다.
+            world_.Step( windTimeStep, 1 );
         }
     }
+    if( synchronizedWind )
+        for( std::size_t i = 0; i < windPressureForces_.size(); ++i )
+        {
+            windPressureForces_[i].force = summedPressureImpulse[i].force / timeStep;
+            windPressureForces_[i].torque = summedPressureImpulse[i].torque / timeStep;
+        }
     // 새로 생성된 Shape에도 구독을 적용하되 표시를 끄면 순회 비용을 내지 않음.
-    if( contactEventVisualizationEnabled_ ) syncContactEventSubscriptions();
-    world_.Step( timeStep, subStepCount );
+    if( !synchronizedWind ) world_.Step( timeStep, subStepCount );
     if( contactEventVisualizationEnabled_ ) updateContactEventTrail( timeStep );
     if( kind_ == demoKind::splinePath && splinePathDistance_ == splinePathLength_ && world_.IsValid( impulseBody_ ) )
     {
