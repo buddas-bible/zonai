@@ -963,9 +963,11 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::Text( "이동 강체 remap: %s / 직접 %.6f kg / 최근접 %.6f kg",
                 tracer.usedSweptRemap ? "적용" : "미적용",
                 tracer.sweptRemappedMass, tracer.fallbackRemappedMass );
+            ImGui::Text( "Swept 통과 체적 기반 요청/제한: %.6f / %.6f kg",
+                tracer.sweptRequestedMass, tracer.sweptLimitedMass );
             ImGui::Text( "재배치하지 못한 감소 체적의 tracer: %.6f kg",
                 tracer.unresolvedDisplacementMass );
-            ImGui::TextDisabled( "Swept flux의 이동 방향만 이용한 근사, 정확한 표면 수송은 아님" );
+            ImGui::TextDisabled( "Swept 체적 × 이전 농도 (표본 근사), 정확한 표면 수송은 아님" );
             if( advection.cflLimited )
                 ImGui::TextColored( ImVec4{ 1.0f, 0.4f, 0.2f, 1.0f },
                     "CFL substep 상한 도달: 정확도/안정성 저하 가능" );
