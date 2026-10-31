@@ -558,6 +558,84 @@ void checkCoupledPressureBoundaryFaceSynchronization()
             }
 }
 
+void checkCoupledPressureEnergyAudit()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr std::array<float, 3> MASSES{ 0.25f, 2.0f, 12.0f };
+    constexpr std::array<float, 3> INERTIAS{ 0.08f, 1.0f, 8.0f };
+    constexpr std::array<float, 2> CELL_SIZES{ 0.5f, 0.25f };
+
+    // 같은 물리 영역을 두 해상도로 계산한다. 별도의 source, Drag, 외력 없음.
+    // 여기서는 형상을 고정한 채 전달 속도만 적분해 pressure 연산을 단독 계측한다.
+    // 이는 움직이는 경계의 공간-시간 체적 보존을 검증하는 테스트가 아니다.
+    for( float h : CELL_SIZES )
+        for( std::size_t massIndex = 0; massIndex < MASSES.size(); ++massIndex )
+        {
+            const int width = static_cast<int>( 12.0f / h );
+            const int height = static_cast<int>( 8.0f / h );
+            fluidField2 field{ width, height, h, { -6.0f, -4.0f } };
+            fluidShapeObstacle2 obstacle{
+                MakeBox( { 0.65f, 0.35f } ),
+                { { 0.0f, 0.0f }, rot2::FromRadians( 0.35f ) },
+                {}, { 1.1f, -0.45f }, 0.85f,
+                1.0f / MASSES[massIndex], 1.0f / INERTIAS[massIndex]
+            };
+            std::array<fluidObstacleForce2, 1> feedback{};
+            const auto kinetic = [&]
+            {
+                const double linear = static_cast<double>( Dot( obstacle.linearVelocity, obstacle.linearVelocity ) );
+                const double spin = static_cast<double>( obstacle.angularVelocity ) * obstacle.angularVelocity;
+                return 0.5 * ( MASSES[massIndex] * linear + INERTIAS[massIndex] * spin );
+            };
+            const double initialEnergy = kinetic();
+            double peakEnergy = initialEnergy;
+            double positivePressureWork = 0.0;
+            float maxMomentumError = 0.0f;
+            for( int step = 0; step < 36; ++step )
+            {
+                const double previousRigidEnergy = kinetic();
+                field.step( dt, std::span<const fluidShapeObstacle2>( &obstacle, 1 ), feedback, 200 );
+                const fluidPressureMomentum2& pressure = field.getPressureMomentum();
+                check( pressure.usedCoupledProjection &&
+                    pressure.coupledStatus == fluidCoupledPressureStatus2::converged &&
+                    !pressure.coupledSolveFailed,
+                    "isolated pressure energy trial requires a converged body-mass-aware solver" );
+                const auto& energy = pressure.energy;
+                check( std::isfinite( energy.fluidBefore ) && std::isfinite( energy.fluidAfter ) &&
+                    std::isfinite( energy.rigidBefore ) && std::isfinite( energy.rigidAfter ) &&
+                    std::abs( energy.fluidAfter - field.getFluidKineticEnergy() ) < 1.0e-8 * ( 1.0 + energy.fluidAfter ) &&
+                    std::abs( energy.rigidBefore - previousRigidEnergy ) < 1.0e-5 * ( 1.0 + previousRigidEnergy ),
+                    "pressure energy ledger must agree with the independent face sum and initial body mass/inertia" );
+                obstacle.linearVelocity += dt * obstacle.inverseMass * feedback[0].force;
+                obstacle.angularVelocity += dt * obstacle.inverseInertia * feedback[0].torque;
+                const double currentRigidEnergy = kinetic();
+                check( std::abs( currentRigidEnergy - energy.rigidAfter ) < 1.0e-5 * ( 1.0 + currentRigidEnergy ),
+                    "pressure-predicted rigid kinetic energy must equal integrated force/torque with given mass and inertia" );
+                const float impulseMagnitude = Length( pressure.fluid ) + Length( pressure.solid ) + Length( pressure.wall );
+                const float normalizedError = Length( pressure.residual() ) / ( 1.0f + impulseMagnitude );
+                maxMomentumError = std::max( maxMomentumError, normalizedError );
+                check( normalizedError < 5.0e-4f,
+                    "fluid, solid and wall pressure impulses must close at both resolutions and across masses" );
+                peakEnergy = std::max( peakEnergy, energy.fluidAfter + currentRigidEnergy );
+                positivePressureWork += std::max( 0.0, energy.totalDelta() );
+                check( std::isfinite( peakEnergy ) && peakEnergy < 4.0 * ( 1.0 + initialEnergy ),
+                    "source-free isolated pressure exchange must not exhibit explosive kinetic-energy growth" );
+            }
+            std::printf( "FSI energy audit: h=%.2f mass=%.2f inertia=%.2f initial=%.6f peak=%.6f final=%.6f positivePressureDelta=%.6f maxMomentumError=%.3g\n",
+                h, MASSES[massIndex], INERTIAS[massIndex], initialEnergy, peakEnergy,
+                field.getFluidKineticEnergy() + kinetic(), positivePressureWork, maxMomentumError );
+        }
+
+    fluidField2 empty{ 8, 8, 0.5f, { -2.0f, -2.0f } };
+    check( empty.getFluidKineticEnergy() == 0.0, "fresh Fluid Field has no MAC kinetic energy" );
+    empty.addVelocity( {}, { 2.0f, 1.0f }, 1.0f );
+    check( empty.getFluidKineticEnergy() > 0.0, "velocity injection must increase MAC kinetic energy" );
+    empty.clear();
+    check( empty.getFluidKineticEnergy() == 0.0 &&
+        empty.getPressureMomentum().energy.totalDelta() == 0.0,
+        "clearing Fluid Field must clear kinetic energy and pressure-stage energy diagnostics" );
+}
+
 void checkFractionalCutCells()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1209,6 +1287,7 @@ int main()
     checkBoundedObstacleRasterAndReusablePressure();
     checkCoupledPressureConvergenceDiagnostics();
     checkCoupledPressureBoundaryFaceSynchronization();
+    checkCoupledPressureEnergyAudit();
     checkFractionalCutCells();
     checkWeightedCutCellPressure();
     checkCutCellTemporalContinuity();

@@ -333,6 +333,27 @@ vec2 fluidField2::getFluidMomentum() const noexcept
     return { static_cast<float>( x * faceMass ), static_cast<float>( y * faceMass ) };
 }
 
+double fluidField2::getFluidKineticEnergy() const noexcept
+{
+    // fluid-fluid face에만 정의한 MAC dual kinetic energy. 전체 유체 에너지는 아님.
+    double squared = 0.0;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+            if( !isSolidCell( x - 1, y ) && !isSolidCell( x, y ) )
+            {
+                const double speed = u_[uIndex( x, y )];
+                squared += speed * speed;
+            }
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+            if( !isSolidCell( x, y - 1 ) && !isSolidCell( x, y ) )
+            {
+                const double speed = v_[vIndex( x, y )];
+                squared += speed * speed;
+            }
+    return 0.5 * static_cast<double>( cellSize_ ) * cellSize_ * squared;
+}
+
 vec2 fluidField2::applyMomentumImpulse( vec2 position, vec2 impulse, float radius )
 {
     if( !IsFinite( position ) || !IsFinite( impulse ) || !std::isfinite( radius ) || radius <= 0.0f )
@@ -1954,6 +1975,30 @@ void fluidField2::project( float timeStep, int pressureIterations,
     // div(v) / dt = Laplace(p). 벽/solid no-through, Neumann 압력 경계.
     // 압력 경계가 fluid-fluid face 운동량을 얼마나 변경하는지 독립 측정한다.
     pressureMomentum_ = {};
+    pressureMomentum_.energy.fluidBefore = getFluidKineticEnergy();
+    const auto rigidKineticEnergy = []( std::span<const fluidShapeObstacle2> shapes,
+        std::span<const fluidObstacleForce2> impulses, float dt )
+    {
+        double energy = 0.0;
+        for( std::size_t i = 0; i < shapes.size(); ++i )
+        {
+            const fluidShapeObstacle2& shape = shapes[i];
+            if( shape.inverseMass > 0.0f )
+            {
+                const vec2 velocity = shape.linearVelocity + ( impulses.empty() ? vec2{} :
+                    ( dt * shape.inverseMass ) * impulses[i].force );
+                energy += 0.5 * static_cast<double>( Dot( velocity, velocity ) ) / shape.inverseMass;
+            }
+            if( shape.inverseInertia > 0.0f )
+            {
+                const double omega = static_cast<double>( shape.angularVelocity ) + ( impulses.empty() ? 0.0 :
+                    static_cast<double>( dt ) * shape.inverseInertia * impulses[i].torque );
+                energy += 0.5 * omega * omega / shape.inverseInertia;
+            }
+        }
+        return energy;
+    };
+    pressureMomentum_.energy.rigidBefore = rigidKineticEnergy( obstacles, {}, 0.0f );
     const vec2 beforePressure = getFluidMomentum();
     const float inverseCell = 1.0f / cellSize_;
     const float scale = cellSize_ * cellSize_ / timeStep;
@@ -2066,6 +2111,9 @@ void fluidField2::project( float timeStep, int pressureIterations,
         if( !isSolidCell( x, 0 ) ) wallY -= pressure_[cellIndex( x, 0 )] * faceArea;
         if( !isSolidCell( x, height_ - 1 ) ) wallY += pressure_[cellIndex( x, height_ - 1 )] * faceArea;
     }
+
+    pressureMomentum_.energy.fluidAfter = getFluidKineticEnergy();
+    pressureMomentum_.energy.rigidAfter = rigidKineticEnergy( obstacles, feedback, timeStep );
 
     vec2 solidForce{};
     for( const fluidObstacleForce2& force : feedback ) solidForce += force.force;

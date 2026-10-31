@@ -52,6 +52,21 @@ enum class fluidCoupledPressureStatus2
     invalidPressure
 };
 
+// Pressure 전후 자유 fluid-fluid MAC face와 강체 예측속도의 운동 에너지(J).
+// Solid 경계/외벽 및 누락된 interface dual volume은 포함하지 않는 진단용 부분 장부.
+// 양의 delta가 곧 전체 FSI 에너지 생성이라는 뜻은 아니다.
+struct fluidPressureEnergy2
+{
+    double fluidBefore = 0.0;
+    double fluidAfter = 0.0;
+    double rigidBefore = 0.0;
+    double rigidAfter = 0.0;
+
+    [[nodiscard]] double fluidDelta() const noexcept { return fluidAfter - fluidBefore; }
+    [[nodiscard]] double rigidDelta() const noexcept { return rigidAfter - rigidBefore; }
+    [[nodiscard]] double totalDelta() const noexcept { return fluidDelta() + rigidDelta(); }
+};
+
 // Pressure projection 한 번의 운동량 수지. 모든 값은 N·s.
 // fluid: 유체-유체 MAC face 속도 보정량의 운동량 변화.
 // solid: 유체 압력으로 강체에 가해진 충격량. wall: 외곽 닫힌 벽에 가해진 충격량.
@@ -61,6 +76,7 @@ struct fluidPressureMomentum2
     vec2 fluid{};
     vec2 solid{};
     vec2 wall{};
+    fluidPressureEnergy2 energy{};
     bool usedCoupledProjection = false;
     bool coupledSolveFailed = false;
     fluidCoupledPressureStatus2 coupledStatus = fluidCoupledPressureStatus2::notRequested;
@@ -271,6 +287,9 @@ public:
     // 내부 fluid-fluid MAC face 속도를 dual-cell mass로 적분한 운동량.
     // solid 경계의 지정 속도 및 외곽 wall face는 제외한다.
     [[nodiscard]] vec2 getFluidMomentum() const noexcept;
+    // fluid-fluid U/V MAC face에 각 0.5*h²*v²를 합산한 부분 운동 에너지.
+    // Solid/moving boundary dual face volume은 포함하지 않는다.
+    [[nodiscard]] double getFluidKineticEnergy() const noexcept;
     [[nodiscard]] const fluidPressureMomentum2& getPressureMomentum() const noexcept { return pressureMomentum_; }
     [[nodiscard]] const fluidStepMomentum2& getStepMomentum() const noexcept { return stepMomentum_; }
     [[nodiscard]] const fluidSolidTransition2& getSolidTransition() const noexcept { return solidTransition_; }
