@@ -1874,7 +1874,6 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
         // swept volume·tracer mass와 이 예측 증분을 이중 적용하지 않는다.
         double squaredContinuity = 0.0;
         double volumeL1 = 0.0;
-        const double area = static_cast<double>( cellSize_ ) * cellSize_;
         for( int y = 0; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
             {
@@ -1975,15 +1974,21 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         return true;
     }
 
+    int dynamicBoundaryFaces = 0;
     const auto addBoundary = [&]( int cell, int owner, vec2 force, vec2 point )
     {
         if( owner < 0 || cell < 0 ) return;
         const fluidShapeObstacle2& obstacle = obstacles[static_cast<std::size_t>( owner )];
-        if( obstacle.inverseMass <= 0.0f && obstacle.inverseInertia <= 0.0f ) return;
+        const bool dynamic = obstacle.inverseMass > 0.0f || obstacle.inverseInertia > 0.0f;
+        // 이진 MAC은 종전과 같이 dynamic interface만 기록한다.
+        // Cut-cell은 static/kinematic pressure traction도 feedback에 남긴다.
+        if( !cutCell && !dynamic ) return;
         const double torque = Cross( point - obstacle.center, force );
         faces.push_back( { cell, owner, force.x, force.y, torque } );
-        // Diagonal-only (Jacobi) preconditioner; ignoring within-cell off-diagonal
-        // body terms still leaves a strictly positive preconditioner.
+        if( !dynamic ) return;
+        ++dynamicBoundaryFaces;
+        // Diagonal-only (Jacobi) preconditioner. Same-body cross terms are
+        // ignored in the preconditioner, not in the Schur matrix product.
         diagonal[cell] += static_cast<double>( obstacle.inverseMass ) *
             ( static_cast<double>( force.x ) * force.x + static_cast<double>( force.y ) * force.y ) +
             static_cast<double>( obstacle.inverseInertia ) * torque * torque;
@@ -2075,7 +2080,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                 if( topOwner < 0 && bottomOwner >= 0 ) addBoundary( top, bottomOwner, { 0.0f, -cellSize_ }, point );
             }
     }
-    if( faces.empty() ) return fail( fluidCoupledPressureStatus2::noBoundary );
+    if( dynamicBoundaryFaces == 0 ) return fail( fluidCoupledPressureStatus2::noBoundary );
 
     // Closed-domain Neumann pressure has an arbitrary gauge. Remove the global
     // incompatible source; disconnected cavities need a future component treatment.
