@@ -959,8 +959,14 @@ void rigidBodyDemoUi::drawExperimentControls()
         ImGui::BeginDisabled( !isWindCutCellProjectionEnabled() );
         if( ImGui::Checkbox( "Cut-cell 공간 8x8 표본 (실험)###WindCutCellSpatialSamples", &highResolutionCutCell ) )
             setWindCutCellSampleCount( highResolutionCutCell ? 8 : 4 );
+        bool circleOnly = isWindCircleOnlyFluidEnabled();
+        if( ImGui::Checkbox( "원형 Body만 유체 장애물로 사용###WindCircleOnly", &circleOnly ) )
+            setWindCircleOnlyFluidEnabled( circleOnly );
+        bool analyticCircle = isWindAnalyticCircleEnabled();
+        if( ImGui::Checkbox( "원형 경계 분석적 적분 (실험)###WindAnalyticCircle", &analyticCircle ) )
+            setWindAnalyticCircleEnabled( analyticCircle );
         ImGui::EndDisabled();
-        ImGui::TextDisabled( "기본 4x4. 8x8은 정확도가 항상 높지는 않으며 계산량이 증가합니다." );
+        ImGui::TextDisabled( "단일 Circle에서만 분석적 적분. 그 밖에는 4x4/8x8 표본으로 복귀합니다." );
         bool cutCellCoupled = isWindCutCellCoupledProjectionEnabled();
         ImGui::BeginDisabled( !isWindCutCellProjectionEnabled() );
         if( ImGui::Checkbox( "Cut-cell 질량·관성 연성 PCG (실험)###WindCutCellCoupled", &cutCellCoupled ) )
