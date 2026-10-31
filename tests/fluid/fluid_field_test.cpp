@@ -1176,8 +1176,6 @@ void checkAdaptiveSweptTemporalQuadrature()
         vec2{ 0.32f, 0.12f }, vec2{ 0.85f, -0.14f }, vec2{ -0.64f, 0.27f }
     };
     const std::array<float, 3> rotations{ 0.27f, 0.67f, -0.82f };
-    int acceptedRefinements = 0;
-
     for( std::size_t trial = 0; trial < translations.size(); ++trial )
     {
         fluidField2 standard{ 20, 18, 0.5f, { -5.0f, -4.5f } };
@@ -1211,7 +1209,6 @@ void checkAdaptiveSweptTemporalQuadrature()
             "adaptive swept temporal quadrature must never worsen measured cell geometry mismatch" );
         if( refined.refinements > 0 )
         {
-            ++acceptedRefinements;
             check( refined.geometryMismatch < refined.initialGeometryMismatch &&
                 refined.timeSamples > refined.initialTimeSamples,
                 "adaptive swept quadrature must accept only strictly beneficial refinements" );
@@ -1238,7 +1235,6 @@ void checkAdaptiveSweptTemporalQuadrature()
         !staticField.getSweptFaceFlux().usedSweptFlux &&
         staticField.getSweptFaceFlux().refinements == 0,
         "clearing field must keep optional adaptive setting and reset quadrature statistics" );
-    (void)acceptedRefinements;
 }
 
 void checkConservativeMacAdvection()
