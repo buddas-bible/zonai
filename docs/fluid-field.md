@@ -331,6 +331,14 @@ Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들�
 
 **물리 모델 한계:** 이 Sandbox 연동은 Cut-cell 연속방정식의 swept geometry와 pressure-predicted 속도의 시간 순서를 실제 움직이는 강체로 검증하기 위한 *실험 환경*이지, 아직 전체 유체–강체/Tracers의 질량·각운동량·에너지 완전 보존을 입증하거나 실제 움직이는 표면의 정확한 연속 적분을 제공하지 않는다. 특히 Body contact/joint/drag가 World 다음 구간에서 최종 속도를 바꾸므로 압력 예측치와 실제 위치 변화는 일치하지 않을 수 있다. Field substep 횟수가 늘면 가격이 증가한다.
 
+## Part 13k — World 이동 Cut-cell의 Swept 체적 이중 계상 감시
+
+- Windows/Ubuntu CTest의 Wind Sandbox 통합 검증에서 `World4/Fluid2`를 36프레임 실행하며 동적 Circle 병진·Box 회전과 소스 없는 유체 와류를 동시에 사용한다.
+- 각 Fluid 구간의 `volumeRate * fluidDt`와 별도 `getCutCellTransition().volumeDelta()`를 직접 대조한다. 압력 단계에서 보고한 `predictedSolidVolumeL1`은 별도 **선형화 진단값**으로 유지하며 다음 구간의 실제 형상 점유 변화율에 더하지 않는다. 정상 swept face 이력이 반복해서 만들어지는지, 결합 PCG가 실제 사용되는지, 관찰값과 Body 속도가 유한한지도 검사한다.
+- 회전 Drag는 별도 단방향 감쇠와 양방향 선운동량 교환 테스트로 검증한다. Drag torque를 World의 작용점에 적용하지만 유체 각운동량 장부는 아직 없다.
+
+**주의:** 이 검증은 형상 snapshot과 solver source 사이의 *중복 유량 방지* 회귀 테스트다. 장기 전체 물리 에너지 보존, swept surface의 정확한 연속 적분, 자유 수면/물의 체적 보존까지 보증하지 않는다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
