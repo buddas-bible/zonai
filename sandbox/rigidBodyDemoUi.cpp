@@ -938,6 +938,7 @@ void rigidBodyDemoUi::drawExperimentControls()
         if( ImGui::SliderInt( "Fluid 계산 횟수/Step###WindFluidSteps", &fluidSteps, 1, 16 ) )
             setWindFluidSubstepCount( fluidSteps );
         ImGui::Text( "최근 Fluid 계산: %d회 (World Substep과 독립)", getWindCouplingSteps() );
+        ImGui::Text( "최근 Fluid+연동: %.2f ms / World: %.2f ms", getWindFluidMilliseconds(), getWindWorldMilliseconds() );
         ImGui::TextDisabled( "1회가 가장 가볍습니다. 2회 이상이면 World Substep을 여러 구간으로 묶어 교대로 계산합니다." );
 
         bool conservative = isWindConservativeAdvectionEnabled();
