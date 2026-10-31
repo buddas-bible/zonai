@@ -368,6 +368,68 @@ void checkMovingSolidRemap()
         "clear must reset solid transition diagnostics" );
 }
 
+void checkBoundedObstacleRasterAndReusablePressure()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    const auto verify = [&]( bool cutCell )
+    {
+        fluidField2 reference{ 40, 30, 0.5f, { -10.0f, -7.5f } };
+        fluidField2 withFarShapes{ 40, 30, 0.5f, { -10.0f, -7.5f } };
+        reference.setCutCellProjectionEnabled( cutCell );
+        withFarShapes.setCutCellProjectionEnabled( cutCell );
+        fluidShapeObstacle2 box{ MakeBox( { 0.85f, 0.35f } ),
+            { { -0.25f, 0.3f }, rot2::FromRadians( 0.3f ) }, { -0.25f, 0.3f }, {}, 0.0f };
+        fluidShapeObstacle2 capsule{ capsule2{ { -0.65f, 0.0f }, { 0.65f, 0.0f }, 0.22f },
+            { { 3.5f, -1.0f }, rot2::FromRadians( -0.45f ) }, { 3.5f, -1.0f }, {}, 0.0f };
+        const fluidShapeObstacle2 farAway{ circle2{ {}, 0.8f },
+            { { 10000.0f, 10000.0f }, {} }, { 10000.0f, 10000.0f }, {}, 0.0f };
+        const std::array nearby{ box, capsule };
+        const std::array expanded{ box, capsule, farAway };
+        std::array<fluidObstacleForce2, 2> referenceForce{};
+        std::array<fluidObstacleForce2, 3> expandedForce{};
+        reference.addVelocity( { -2.0f, 0.2f }, { 2.0f, -0.1f }, 1.5f );
+        withFarShapes.addVelocity( { -2.0f, 0.2f }, { 2.0f, -0.1f }, 1.5f );
+        reference.step( dt, nearby, referenceForce, 120 );
+        withFarShapes.step( dt, expanded, expandedForce, 120 );
+        check( reference.getSolidCellCount() == withFarShapes.getSolidCellCount() &&
+            close( reference.getCutCellTransition().fluidVolume,
+                withFarShapes.getCutCellTransition().fluidVolume ) &&
+            close( Length( referenceForce[0].force - expandedForce[0].force ), 0.0f ) &&
+            close( Length( referenceForce[1].force - expandedForce[1].force ), 0.0f ) &&
+            LengthSquared( expandedForce[2].force ) == 0.0f,
+            "distant obstacles must not change local fluid occupancy or pressure reaction" );
+        for( int y = 0; y < reference.getHeight(); ++y )
+            for( int x = 0; x < reference.getWidth(); ++x )
+                check( reference.isSolidCell( x, y ) == withFarShapes.isSolidCell( x, y ) &&
+                    close( reference.getCellFluidFraction( x, y ), withFarShapes.getCellFluidFraction( x, y ) ),
+                    "bounded obstacle sampling must preserve every cell mask and fractional coverage" );
+    };
+    verify( false );
+    verify( true );
+
+    // Reuse of scratch memory must not retain an old pressure solution after clear().
+    fluidField2 reused{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    fluidField2 fresh{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    fluidShapeObstacle2 dynamic{ circle2{ {}, 0.75f },
+        { { 0.0f, 0.0f }, {} }, {}, { 1.25f, 0.0f }, 0.0f, 2.0f, 16.0f };
+    std::array<fluidObstacleForce2, 1> reuseForce{};
+    std::array<fluidObstacleForce2, 1> freshForce{};
+    for( int test = 0; test < 5; ++test )
+    {
+        reused.clear();
+        fresh.clear();
+        dynamic.linearVelocity = { test % 2 == 0 ? 1.25f : -0.75f, 0.0f };
+        reused.step( dt, std::span<const fluidShapeObstacle2>( &dynamic, 1 ), reuseForce, 160 );
+        fresh.step( dt, std::span<const fluidShapeObstacle2>( &dynamic, 1 ), freshForce, 160 );
+        check( reused.getPressureMomentum().usedCoupledProjection &&
+            fresh.getPressureMomentum().usedCoupledProjection &&
+            !reused.getPressureMomentum().coupledSolveFailed &&
+            close( Length( reuseForce[0].force - freshForce[0].force ), 0.0f, 1.0e-5f ) &&
+            close( reused.getDivergenceRms(), fresh.getDivergenceRms(), 1.0e-5f ),
+            "reused PCG buffers must reproduce cold-field coupled projection");
+    }
+}
+
 void checkFractionalCutCells()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1016,6 +1078,7 @@ int main()
     checkDiscreteMomentumExchange();
     checkPressureMomentumLedger();
     checkMovingSolidRemap();
+    checkBoundedObstacleRasterAndReusablePressure();
     checkFractionalCutCells();
     checkWeightedCutCellPressure();
     checkCutCellTemporalContinuity();
