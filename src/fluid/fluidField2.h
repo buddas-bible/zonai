@@ -189,6 +189,11 @@ struct fluidSweptFaceFlux2
     float rawGeometryMismatch = 0.0f;
     float correctionAbsoluteFlux = 0.0f;
     int correctedFaces = 0;
+    // 선택형 시간 적응 표본: refining 전 L1 오차와 최종 채택한 시간 표본 수.
+    // 0은 적응 검사 미실행. geometryMismatch는 이후 국소 면 보정까지 반영한다.
+    int initialTimeSamples = 0;
+    int refinements = 0;
+    float initialGeometryMismatch = 0.0f;
 };
 
 // 이류 단계만의 가중 dual MAC face 운동량 계측 (rho=1, depth=1m).
@@ -259,6 +264,11 @@ public:
     // 기본 false. 닫힌 외벽의 유량 및 전체 체적 오차를 임의로 제거하지 않는다.
     void setSweptGeometryCorrectionEnabled( bool enabled ) noexcept { sweptGeometryCorrectionEnabled_ = enabled; }
     [[nodiscard]] bool isSweptGeometryCorrectionEnabled() const noexcept { return sweptGeometryCorrectionEnabled_; }
+
+    // 선택형 swept face 시간 표본 재계산: 셀 점유 변화 대비 L1 오차가 감소할 때만 채택.
+    // 기본 OFF. 국소 면 flux 재배분과 독립이며 공간 4점 표본 자체를 바꾸지 않는다.
+    void setAdaptiveSweptSamplingEnabled( bool enabled ) noexcept { adaptiveSweptSamplingEnabled_ = enabled; }
+    [[nodiscard]] bool isAdaptiveSweptSamplingEnabled() const noexcept { return adaptiveSweptSamplingEnabled_; }
 
     // MAC dual control volume의 upwind flux-form 이류. 선택형이며 기본 false.
     // 고정된 현재 open fraction에 대한 face 운동량만 보존한다.
@@ -448,6 +458,7 @@ private:
     bool tracerEnabled_ = false;
     bool sweptTracerRemapEnabled_ = false;
     bool sweptGeometryCorrectionEnabled_ = false;
+    bool adaptiveSweptSamplingEnabled_ = false;
     bool cutCellProjectionEnabled_ = false;
     bool cutCellCoupledProjectionEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
