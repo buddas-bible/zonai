@@ -142,6 +142,8 @@ fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
     vOpenFraction_.assign( v_.size(), 1.0f );
     uSolidVelocity_.assign( u_.size(), 0.0f );
     vSolidVelocity_.assign( v_.size(), 0.0f );
+    pressureUSolidFlux_.assign( u_.size(), 0.0f );
+    pressureVSolidFlux_.assign( v_.size(), 0.0f );
     cutCellVolumeRate_.assign( pressure_.size(), 0.0f );
     sweptUVolume_.assign( u_.size(), 0.0f );
     sweptVVolume_.assign( v_.size(), 0.0f );
@@ -182,6 +184,8 @@ void fluidField2::clear() noexcept
     std::fill( previousCellFluidFraction_.begin(), previousCellFluidFraction_.end(), 1.0f );
     std::fill( uSolidVelocity_.begin(), uSolidVelocity_.end(), 0.0f );
     std::fill( vSolidVelocity_.begin(), vSolidVelocity_.end(), 0.0f );
+    std::fill( pressureUSolidFlux_.begin(), pressureUSolidFlux_.end(), 0.0f );
+    std::fill( pressureVSolidFlux_.begin(), pressureVSolidFlux_.end(), 0.0f );
     std::fill( cutCellVolumeRate_.begin(), cutCellVolumeRate_.end(), 0.0f );
     std::fill( sweptUVolume_.begin(), sweptUVolume_.end(), 0.0f );
     std::fill( sweptVVolume_.begin(), sweptVVolume_.end(), 0.0f );
@@ -1307,6 +1311,8 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
         vec2 linear{};
         float angular = 0.0f;
     };
+    std::fill( pressureUSolidFlux_.begin(), pressureUSolidFlux_.end(), 0.0f );
+    std::fill( pressureVSolidFlux_.begin(), pressureVSolidFlux_.end(), 0.0f );
     std::vector<predictedBody> predicted( obstacles.size() );
     std::vector<double> bounds( obstacles.size(), -1.0 );
     for( std::size_t i = 0; i < obstacles.size(); ++i )
@@ -1353,6 +1359,7 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
             const float next = sum / blocked;
             const double change = static_cast<double>( next ) - uSolidVelocity_[face];
             changedSquared += change * change;
+            pressureUSolidFlux_[face] = ( 1.0f - uOpenFraction_[face] ) * static_cast<float>( change );
             uSolidVelocity_[face] = next;
             ++boundaryFaces;
             if( uOpenFraction_[face] > 0.0f ) ++partialFaces;
@@ -1379,6 +1386,7 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
             const float next = sum / blocked;
             const double change = static_cast<double>( next ) - vSolidVelocity_[face];
             changedSquared += change * change;
+            pressureVSolidFlux_[face] = ( 1.0f - vOpenFraction_[face] ) * static_cast<float>( change );
             vSolidVelocity_[face] = next;
             ++boundaryFaces;
             if( vOpenFraction_[face] > 0.0f ) ++partialFaces;
@@ -1840,13 +1848,59 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
                 sum - divergence_[cell] * pressureScale ) * ( timeStep / cellSize_ );
             squaredResidual += residual * residual;
         }
-    cutCellPressure_.pressureResidual = solvedCoupled ? coupledPressureResidual * ( timeStep / cellSize_ ) :
+    // 결합 PCG의 압력 방정식 잔차는 dt/h²를 곱하면 연속성 잔차 (1/s)다.
+    // 기존 Jacobi의 legacy pressureResidual 표시 단위는 이 단계에서 변경하지 않는다.
+    cutCellPressure_.pressureResidual = solvedCoupled
+        ? coupledPressureResidual * ( timeStep / ( cellSize_ * cellSize_ ) ) :
         ( cutCellPressure_.activeCells > 0
             ? static_cast<float>( std::sqrt( squaredResidual / cutCellPressure_.activeCells ) ) : 0.0f );
 
-    // Cut-cell 내부 solid 면적의 pressure traction을 cell aperture 차이로 근사.
-    // Face 중심 마스크 traction과 달리 부분 막힘에도 반응한다. 다중 shape 소유는
-    // 가장 가까운 COM으로 근사하고 면의 정확한 중심은 추후 cut boundary에서 계산한다.
+    // 수렴한 Schur 해에서는 행렬에 들어간 B 자체를 pressure traction으로
+    // 사용한다. 별도의 COM 근사 압력 적분은 중복하면 안 된다.
+    if( solvedCoupled )
+    {
+        for( const coupledPressureFace& face : coupledPressureScratch_.faces )
+        {
+            const double p = pressure_[face.cell];
+            fluidObstacleForce2& force = feedback[face.owner];
+            force.force += static_cast<float>( p ) *
+                vec2{ static_cast<float>( face.fx ), static_cast<float>( face.fy ) };
+            force.torque += static_cast<float>( p * face.torque );
+        }
+        synchronizeCutCellBoundaries( timeStep, obstacles, feedback );
+
+        // 동일 sub-face 교환의 선형화된 volume source Δ(f)/dt를 추가한다.
+        // 마지막 geometry snapshot 자체를 변경하지 않으므로 다음 Step의
+        // swept volume·tracer mass와 이 예측 증분을 이중 적용하지 않는다.
+        double squaredContinuity = 0.0;
+        double volumeL1 = 0.0;
+        for( int y = 0; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+            {
+                const int cell = cellIndex( x, y );
+                if( cellFluidFraction_[cell] <= 0.0f ) continue;
+                const float fluidFlux =
+                    cutCellUOpen( x + 1, y ) * u_[uIndex( x + 1, y )] -
+                    cutCellUOpen( x, y ) * u_[uIndex( x, y )] +
+                    cutCellVOpen( x, y + 1 ) * v_[vIndex( x, y + 1 )] -
+                    cutCellVOpen( x, y ) * v_[vIndex( x, y )];
+                const float solidFlux =
+                    pressureUSolidFlux_[uIndex( x + 1, y )] - pressureUSolidFlux_[uIndex( x, y )] +
+                    pressureVSolidFlux_[vIndex( x, y + 1 )] - pressureVSolidFlux_[vIndex( x, y )];
+                const int region = cutCellComponent_[cell];
+                const double mean = region >= 0 ? regionSums[region] / regionSizes[region] : 0.0;
+                const double error = static_cast<double>( fluidFlux + solidFlux ) / cellSize_ +
+                    static_cast<double>( cutCellVolumeRate_[cell] ) / timeStep - mean;
+                squaredContinuity += error * error;
+                volumeL1 += std::abs( static_cast<double>( solidFlux ) ) * cellSize_ * timeStep;
+            }
+        cutCellPressure_.predictedContinuityRms = cutCellPressure_.activeCells > 0
+            ? static_cast<float>( std::sqrt( squaredContinuity / cutCellPressure_.activeCells ) ) : 0.0f;
+        cutCellPressure_.predictedSolidVolumeL1 = static_cast<float>( volumeL1 );
+        return;
+    }
+
+    // 비결합 Cut-cell의 기존 셀 aperture/nearest COM 표면 반력 경로.
     if( obstacles.empty() ) return;
     for( int y = 0; y < height_; ++y )
         for( int x = 0; x < width_; ++x )
@@ -1872,7 +1926,6 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
             feedback[owner].force += force;
             feedback[owner].torque += Cross( center - obstacles[owner].center, force );
         }
-    if( solvedCoupled ) synchronizeCutCellBoundaries( timeStep, obstacles, feedback );
 }
 
 bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
@@ -1921,43 +1974,83 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         return true;
     }
 
+    int dynamicBoundaryFaces = 0;
     const auto addBoundary = [&]( int cell, int owner, vec2 force, vec2 point )
     {
         if( owner < 0 || cell < 0 ) return;
         const fluidShapeObstacle2& obstacle = obstacles[static_cast<std::size_t>( owner )];
-        if( obstacle.inverseMass <= 0.0f && obstacle.inverseInertia <= 0.0f ) return;
+        const bool dynamic = obstacle.inverseMass > 0.0f || obstacle.inverseInertia > 0.0f;
+        // 이진 MAC은 종전과 같이 dynamic interface만 기록한다.
+        // Cut-cell은 static/kinematic pressure traction도 feedback에 남긴다.
+        if( !cutCell && !dynamic ) return;
         const double torque = Cross( point - obstacle.center, force );
         faces.push_back( { cell, owner, force.x, force.y, torque } );
-        // Diagonal-only (Jacobi) preconditioner; ignoring within-cell off-diagonal
-        // body terms still leaves a strictly positive preconditioner.
+        if( !dynamic ) return;
+        ++dynamicBoundaryFaces;
+        // Diagonal-only (Jacobi) preconditioner. Same-body cross terms are
+        // ignored in the preconditioner, not in the Schur matrix product.
         diagonal[cell] += static_cast<double>( obstacle.inverseMass ) *
             ( static_cast<double>( force.x ) * force.x + static_cast<double>( force.y ) * force.y ) +
             static_cast<double>( obstacle.inverseInertia ) * torque * torque;
     };
     if( cutCell )
     {
-        // 이 반력 stencil은 projectCutCell()의 aperture 차이와 일치해야 한다.
+        // 공유 face에서 막힌 네 sub-face를 각각 힘과 모멘트의 적분점으로 사용한다.
+        // 같은 B를 Body 압력 traction과 blocked-face 속도 변화에 사용하므로
+        // 압력 행렬의 B M^-1 B^T가 실제 경계 flux 선형화의 adjoint가 된다.
+        constexpr int sampleCount = 4;
+        constexpr float sampleScale = 1.0f / sampleCount;
+        std::vector<double> bounds( obstacles.size(), -1.0 );
+        for( std::size_t i = 0; i < obstacles.size(); ++i )
+            if( IsValidFluidObstacle( obstacles[i] ) )
+                bounds[i] = FluidObstacleBoundRadius( obstacles[i] );
+        const auto firstOwner = [&]( vec2 point )
+        {
+            for( std::size_t i = 0; i < obstacles.size(); ++i )
+            {
+                if( bounds[i] < 0.0 ) continue;
+                const vec2 center = obstacles[i].transform.position;
+                if( std::abs( static_cast<double>( point.x ) - center.x ) > bounds[i] ||
+                    std::abs( static_cast<double>( point.y ) - center.y ) > bounds[i] ) continue;
+                if( ContainsFluidObstacle( obstacles[i], point ) ) return static_cast<int>( i );
+            }
+            return -1;
+        };
+
         for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x )
+            {
+                const int left = cellIndex( x - 1, y );
+                const int right = cellIndex( x, y );
+                if( cellFluidFraction_[left] <= 0.0f && cellFluidFraction_[right] <= 0.0f ) continue;
+                const vec2 force{ cellSize_ * sampleScale, 0.0f };
+                for( int sample = 0; sample < sampleCount; ++sample )
+                {
+                    const vec2 point = origin_ + cellSize_ * vec2{
+                        static_cast<float>( x ), static_cast<float>( y ) + ( sample + 0.5f ) * sampleScale };
+                    const int owner = firstOwner( point );
+                    if( owner < 0 ) continue;
+                    if( cellFluidFraction_[left] > 0.0f ) addBoundary( left, owner, force, point );
+                    if( cellFluidFraction_[right] > 0.0f ) addBoundary( right, owner, -force, point );
+                }
+            }
+
+        for( int y = 1; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
             {
-                const int cell = cellIndex( x, y );
-                if( cellFluidFraction_[cell] <= 0.0f ) continue;
-                const float l = x == 0 ? cellFluidFraction_[cell] : cutCellUOpen( x, y );
-                const float r = x == width_ - 1 ? cellFluidFraction_[cell] : cutCellUOpen( x + 1, y );
-                const float b = y == 0 ? cellFluidFraction_[cell] : cutCellVOpen( x, y );
-                const float t = y == height_ - 1 ? cellFluidFraction_[cell] : cutCellVOpen( x, y + 1 );
-                const vec2 traction = -cellSize_ * vec2{ r - l, t - b };
-                if( LengthSquared( traction ) == 0.0f ) continue;
-                const vec2 point = getCellCenter( x, y );
-                int owner = -1;
-                float nearest = std::numeric_limits<float>::max();
-                for( std::size_t i = 0; i < obstacles.size(); ++i )
+                const int bottom = cellIndex( x, y - 1 );
+                const int top = cellIndex( x, y );
+                if( cellFluidFraction_[bottom] <= 0.0f && cellFluidFraction_[top] <= 0.0f ) continue;
+                const vec2 force{ 0.0f, cellSize_ * sampleScale };
+                for( int sample = 0; sample < sampleCount; ++sample )
                 {
-                    if( !IsValidFluidObstacle( obstacles[i] ) ) continue;
-                    const float distance = LengthSquared( point - obstacles[i].center );
-                    if( distance < nearest ) { nearest = distance; owner = static_cast<int>( i ); }
+                    const vec2 point = origin_ + cellSize_ * vec2{
+                        static_cast<float>( x ) + ( sample + 0.5f ) * sampleScale, static_cast<float>( y ) };
+                    const int owner = firstOwner( point );
+                    if( owner < 0 ) continue;
+                    if( cellFluidFraction_[bottom] > 0.0f ) addBoundary( bottom, owner, force, point );
+                    if( cellFluidFraction_[top] > 0.0f ) addBoundary( top, owner, -force, point );
                 }
-                addBoundary( cell, owner, traction, point );
             }
     }
     else
@@ -1987,7 +2080,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                 if( topOwner < 0 && bottomOwner >= 0 ) addBoundary( top, bottomOwner, { 0.0f, -cellSize_ }, point );
             }
     }
-    if( faces.empty() ) return fail( fluidCoupledPressureStatus2::noBoundary );
+    if( dynamicBoundaryFaces == 0 ) return fail( fluidCoupledPressureStatus2::noBoundary );
 
     // Closed-domain Neumann pressure has an arbitrary gauge. Remove the global
     // incompatible source; disconnected cavities need a future component treatment.
@@ -2126,7 +2219,10 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     double pressureSum = 0.0;
     for( std::size_t i = 0; i < rhs.size(); ++i )
         if( cutCell ? cellFluidFraction_[i] > 0.0f : solidOwner_[i] < 0 ) pressureSum += x[i];
-    const double gauge = pressureSum / active;
+    // B*invM*B^T가 있는 Cut-cell에서는 불완전 점유/외벽 근사로
+    // 상수 압력 방향이 정확한 nullspace가 아닐 수 있다. 수렴한 x에서
+    // 임의의 gauge를 빼면 A*x=b를 다시 위반하므로 그대로 사용한다.
+    const double gauge = cutCell ? 0.0 : pressureSum / active;
     for( std::size_t i = 0; i < rhs.size(); ++i )
     {
         if( cutCell ? cellFluidFraction_[i] <= 0.0f : solidOwner_[i] >= 0 ) { pressure_[i] = 0.0f; continue; }

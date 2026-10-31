@@ -299,6 +299,20 @@ Part 12b는 `sweptU/VVolume`을 이송 **방향의 가중치**로만 사용해, 
 
 **보존 범위:** 이번 동기화는 압력 단계 말미의 **경계 속도 저장 상태**를 고치는 것이다. 다음 Step의 `updateCutCellGeometry()`는 World의 실제 최신 속도·형상을 다시 사용하며, 현재 `prepareCutCellVolumeChange()`의 Swept Volume/Cell Fraction을 이 예측 속도로 다시 적분하지 않는다. 따라서 `divergenceAfter`는 기존 fluid aperture flux 진단이고, 이 변경만으로 moving-interface 연속성, 전체 유체–강체 운동량·각운동량·에너지 보존을 증명하지 않는다. 또한 각 sub-face 재검사는 선택 모드에서만 수행하지만 추가적인 격자 스캔 비용이 있다.
 
+## Part 13i — Cut-cell 압력 반력과 예측 체적 유량의 Adjoint 검사
+
+Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들고, 실제 경계 속도는 4개 sub-face의 점유 Shape와 그 위치에서 계산했다. **같은 연립 압력해인데도 토크 레버암과 Shape 소유자가 일치하지 않아**, 압력 행렬의 `B M_body⁻¹ Bᵀ`가 경계 유량 변화에 대응하지 않을 수 있었다.
+
+- **결합 Cut-cell 모드에 한정**해서 압력 연립행렬 `B`와 압력으로 강체에 돌려주는 힘/토크를 동일한 U/V sub-face 4점으로 정의한다. 내부 공유 face의 막힌 표본마다 왼쪽/아래 셀에는 `+h/4\cdot n`, 오른쪽/위 셀에는 `-h/4\cdot n`의 계수를 부여하고, 해당 점에서 `(point - COM) × F`로 토크를 구한다. 열린 유체 face에는 기존 aperture 가중 `L`을 유지한다.
+- 같은 표본 규칙을 static/kinematic 표면 압력 반력 진단에도 사용한다. 반력 장부에는 남기지만 `inverseMass=0`, `inverseInertia=0`인 경계는 Schur Body 응답 항에 기여하지 않는다. **동적 경계가 실제로 존재할 때만** 결합 PCG를 수행한다.
+- PCG가 수렴한 Cut-cell 압력은 해 `x`에서 임의의 전역 평균을 빼지 않고 사용한다. 근사 Cut-cell의 `B`는 완전한 pressure gauge nullspace를 보장하지 않으므로, 수렴 뒤 상수 압력을 빼면 `A*p=b`가 깨질 수 있다. 이진 MAC gauge 동작은 변경하지 않는다.
+- 따라서 압력해에서 강체가 받는 `Δv=dt·M⁻¹·Bᵀp`와 face의 고체 부분 평균 속도 변화가 동일한 `B`의 기하·소유자를 따른다. **기존 Cut-cell Jacobi와 이진 MAC 경로는 변경하지 않는다.**
+- `pressureUSolidFlux_/pressureVSolidFlux_`에는 `(blockedFraction) × (v_predicted - v_initial)`을 저장한다. `getCutCellPressure().predictedContinuityRms`는 투영된 열린 유체 flux + 기존 swept/점유 체적 source + **압력으로 예측한 추가 blocked face flux**, 그리고 분리 유체 영역별 호환성 평균 보정을 합친 연속방정식 잔차 RMS(1/s)이다. `predictedSolidVolumeL1`은 각 셀의 예측 추가 체적 변화 절댓값 합(m² × 단위 깊이 1m)이다. 실제 geometry를 이동/변경하는 값이 아니라 `dt·Δv` 선형화 측정치다.
+- 결합 `pressureResidual`에도 `dt/h²`를 적용해 PCG `b-Ap`를 연속방정식 단위(1/s)로 반환한다. 기존 legacy Jacobi 잔차 표시 방식은 변경하지 않는다.
+- 회귀 테스트는 고정된 영역에서 질량·관성 3종, 격자 크기 2종, 유체 시간 간격 2종의 12개 조건을 비교하고, 예측 경계 flux의 연속성 잔차가 PCG 행렬 잔차와 일치하는지 검증한다.
+
+**제한:** 이 경로는 현재 고정된 Cut-cell geometry에서 압력 단계 동안 고체의 예측 속도 변화가 유발할 *1차 체적 flux*를 포함한다. **실제 형상의 다음 위치를 즉시 변형하거나**, swept geometry 적분, tracer 이송, 유체 전체 질량·에너지·각운동량 보존을 구현한 것은 아니다. 부분 개방 면의 4점 근사, 도메인 경계와 접촉하는 형상, 분리된 fluid pocket의 gauge/호환성 등은 추가 검증이 필요하다. 이 단계도 기본 OFF인 결합 Cut-cell 실험 모드에만 적용한다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.

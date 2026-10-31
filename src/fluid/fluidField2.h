@@ -170,6 +170,10 @@ struct fluidCutCellPressure2
     int synchronizedBoundaryFaces = 0;
     int synchronizedPartialFaces = 0;
     float boundaryNormalChangeRms = 0.0f;
+    // 압력으로 예측한 추가 고체 face flux까지 포함한 국소 연속방정식 잔차.
+    // 분리된 pocket의 호환성 보정 후 값이며 전체 기하 보존을 뜻하지 않는다.
+    float predictedContinuityRms = 0.0f;
+    float predictedSolidVolumeL1 = 0.0f;
 };
 
 // 연속한 Shape 변환 사이의 내부 MAC 면을 통과한 Solid 속도를 시간 적분한 근사.
@@ -424,6 +428,9 @@ private:
     std::vector<float> vOpenFraction_;
     std::vector<float> uSolidVelocity_;
     std::vector<float> vSolidVelocity_;
+    // 압력 반력으로 예상된 추가 blocked-face swept flux (m/s, blocked fraction 포함).
+    std::vector<float> pressureUSolidFlux_;
+    std::vector<float> pressureVSolidFlux_;
     std::vector<float> cutCellVolumeRate_;
     std::vector<float> sweptUVolume_;
     std::vector<float> sweptVVolume_;
