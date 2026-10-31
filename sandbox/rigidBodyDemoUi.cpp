@@ -955,6 +955,12 @@ void rigidBodyDemoUi::drawExperimentControls()
         bool cutCellProjection = isWindCutCellProjectionEnabled();
         if( ImGui::Checkbox( "부분 개방 압력 투영 (실험)###WindCutCellPressure", &cutCellProjection ) )
             setWindCutCellProjectionEnabled( cutCellProjection );
+        bool highResolutionCutCell = getWindCutCellSampleCount() == 8;
+        ImGui::BeginDisabled( !isWindCutCellProjectionEnabled() );
+        if( ImGui::Checkbox( "Cut-cell 공간 8x8 표본 (실험)###WindCutCellSpatialSamples", &highResolutionCutCell ) )
+            setWindCutCellSampleCount( highResolutionCutCell ? 8 : 4 );
+        ImGui::EndDisabled();
+        ImGui::TextDisabled( "기본 4x4. 8x8은 정확도가 항상 높지는 않으며 계산량이 증가합니다." );
         bool cutCellCoupled = isWindCutCellCoupledProjectionEnabled();
         ImGui::BeginDisabled( !isWindCutCellProjectionEnabled() );
         if( ImGui::Checkbox( "Cut-cell 질량·관성 연성 PCG (실험)###WindCutCellCoupled", &cutCellCoupled ) )
@@ -1074,7 +1080,9 @@ void rigidBodyDemoUi::drawExperimentControls()
                     swept.rawGeometryMismatch, swept.geometryMismatch );
                 ImGui::Text( "국소 면 보정 누적량: %.5f m³ / 갱신 횟수: %d",
                     swept.correctionAbsoluteFlux, swept.correctedFaces );
-                ImGui::Text( "부분 유체 셀: %d", projection.activeCells );
+                ImGui::Text( "부분 유체 셀: %d / 공간 표본: %dx%d, 면당 %d점",
+                    projection.activeCells, field->getCutCellSampleCount(),
+                    field->getCutCellSampleCount(), field->getCutCellSampleCount() );
                 if( isWindCutCellCoupledProjectionEnabled() )
                 {
                     const char* status = "미요청 (동기화/양방향 설정 확인)";
