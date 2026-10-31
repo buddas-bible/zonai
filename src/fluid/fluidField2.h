@@ -272,7 +272,7 @@ public:
     [[nodiscard]] bool isSweptGeometryCorrectionEnabled() const noexcept { return sweptGeometryCorrectionEnabled_; }
 
     // 선택형 swept face 시간 표본 재계산: 셀 점유 변화 대비 L1 오차가 감소할 때만 채택.
-    // 기본 OFF. 국소 면 flux 재배분과 독립이며 공간 4점 표본 자체를 바꾸지 않는다.
+    // 기본 OFF. 국소 면 flux 재배분과 독립이며 선택한 공간 표본 수는 유지한다.
     void setAdaptiveSweptSamplingEnabled( bool enabled ) noexcept { adaptiveSweptSamplingEnabled_ = enabled; }
     [[nodiscard]] bool isAdaptiveSweptSamplingEnabled() const noexcept { return adaptiveSweptSamplingEnabled_; }
 
