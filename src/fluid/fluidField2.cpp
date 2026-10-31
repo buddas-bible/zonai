@@ -1639,6 +1639,190 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
         }
 }
 
+bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
+    std::span<const fluidShapeObstacle2> obstacles )
+{
+    // 이진 MAC face의 압력 변위와 rigid body의 유효 질량을 동시에 푼다.
+    // A = D D^T + B M_body^-1 B^T (단위 깊이 rho=1).
+    // B는 기존 pressure traction과 동일한 face 법선·COM 레버암을 사용한다.
+    struct pressureFace
+    {
+        int cell = 0;
+        int owner = 0;
+        double fx = 0.0, fy = 0.0, torque = 0.0;
+    };
+    struct bodyResponse
+    {
+        double fx = 0.0, fy = 0.0, torque = 0.0;
+    };
+    std::vector<pressureFace> faces;
+    std::vector<double> diagonal( pressure_.size(), 0.0 );
+    int active = 0;
+    double rhsSum = 0.0;
+    const double scale = static_cast<double>( cellSize_ ) * cellSize_ / timeStep;
+    std::vector<double> rhs( pressure_.size(), 0.0 );
+    for( int y = 0; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const int cell = cellIndex( x, y );
+            if( solidOwner_[cell] >= 0 ) continue;
+            const int count =
+                ( x > 0 && !isSolidCell( x - 1, y ) ? 1 : 0 ) +
+                ( x + 1 < width_ && !isSolidCell( x + 1, y ) ? 1 : 0 ) +
+                ( y > 0 && !isSolidCell( x, y - 1 ) ? 1 : 0 ) +
+                ( y + 1 < height_ && !isSolidCell( x, y + 1 ) ? 1 : 0 );
+            diagonal[cell] = count;
+            rhs[cell] = -static_cast<double>( divergence_[cell] ) * scale;
+            rhsSum += rhs[cell];
+            ++active;
+        }
+    if( active == 0 ) { std::fill( pressure_.begin(), pressure_.end(), 0.0f ); return true; }
+
+    const auto addBoundary = [&]( int cell, int owner, vec2 normal, vec2 point )
+    {
+        if( owner < 0 || cell < 0 ) return;
+        const fluidShapeObstacle2& obstacle = obstacles[static_cast<std::size_t>( owner )];
+        if( obstacle.inverseMass <= 0.0f && obstacle.inverseInertia <= 0.0f ) return;
+        const vec2 force = cellSize_ * normal;
+        const double torque = Cross( point - obstacle.center, force );
+        faces.push_back( { cell, owner, force.x, force.y, torque } );
+        // Diagonal-only (Jacobi) preconditioner; ignoring within-cell off-diagonal
+        // body terms still leaves a strictly positive preconditioner.
+        diagonal[cell] += static_cast<double>( obstacle.inverseMass ) *
+            ( static_cast<double>( force.x ) * force.x + static_cast<double>( force.y ) * force.y ) +
+            static_cast<double>( obstacle.inverseInertia ) * torque * torque;
+    };
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+        {
+            const int left = cellIndex( x - 1, y );
+            const int right = cellIndex( x, y );
+            const int leftOwner = solidOwner_[left];
+            const int rightOwner = solidOwner_[right];
+            const vec2 point = origin_ + cellSize_ *
+                vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
+            if( leftOwner < 0 && rightOwner >= 0 ) addBoundary( left, rightOwner, { 1.0f, 0.0f }, point );
+            if( rightOwner < 0 && leftOwner >= 0 ) addBoundary( right, leftOwner, { -1.0f, 0.0f }, point );
+        }
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const int bottom = cellIndex( x, y - 1 );
+            const int top = cellIndex( x, y );
+            const int bottomOwner = solidOwner_[bottom];
+            const int topOwner = solidOwner_[top];
+            const vec2 point = origin_ + cellSize_ *
+                vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
+            if( bottomOwner < 0 && topOwner >= 0 ) addBoundary( bottom, topOwner, { 0.0f, 1.0f }, point );
+            if( topOwner < 0 && bottomOwner >= 0 ) addBoundary( top, bottomOwner, { 0.0f, -1.0f }, point );
+        }
+    if( faces.empty() ) return false;
+
+    // Closed-domain Neumann pressure has an arbitrary gauge. Remove the global
+    // incompatible source; disconnected cavities need a future component treatment.
+    const double mean = rhsSum / active;
+    for( std::size_t i = 0; i < rhs.size(); ++i )
+        if( solidOwner_[i] < 0 ) rhs[i] -= mean;
+
+    std::vector<bodyResponse> response( obstacles.size() );
+    const auto multiply = [&]( const std::vector<double>& values, std::vector<double>& result )
+    {
+        std::fill( result.begin(), result.end(), 0.0 );
+        std::fill( response.begin(), response.end(), bodyResponse{} );
+        for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x )
+            {
+                const int left = cellIndex( x - 1, y ), right = cellIndex( x, y );
+                if( solidOwner_[left] >= 0 || solidOwner_[right] >= 0 ) continue;
+                const double d = values[left] - values[right];
+                result[left] += d;
+                result[right] -= d;
+            }
+        for( int y = 1; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+            {
+                const int bottom = cellIndex( x, y - 1 ), top = cellIndex( x, y );
+                if( solidOwner_[bottom] >= 0 || solidOwner_[top] >= 0 ) continue;
+                const double d = values[bottom] - values[top];
+                result[bottom] += d;
+                result[top] -= d;
+            }
+        for( const pressureFace& face : faces )
+        {
+            bodyResponse& body = response[face.owner];
+            const double p = values[face.cell];
+            body.fx += p * face.fx;
+            body.fy += p * face.fy;
+            body.torque += p * face.torque;
+        }
+        for( const pressureFace& face : faces )
+        {
+            const fluidShapeObstacle2& obstacle = obstacles[static_cast<std::size_t>( face.owner )];
+            const bodyResponse& body = response[face.owner];
+            result[face.cell] += static_cast<double>( obstacle.inverseMass ) *
+                ( face.fx * body.fx + face.fy * body.fy ) +
+                static_cast<double>( obstacle.inverseInertia ) * face.torque * body.torque;
+        }
+    };
+
+    std::vector<double> x( rhs.size(), 0.0 ), residual = rhs;
+    std::vector<double> z( rhs.size() ), direction( rhs.size() ), product( rhs.size() );
+    double rz = 0.0, squared = 0.0;
+    for( std::size_t i = 0; i < rhs.size(); ++i )
+    {
+        if( solidOwner_[i] >= 0 ) continue;
+        z[i] = residual[i] / std::max( 1.0e-8, diagonal[i] );
+        direction[i] = z[i];
+        rz += residual[i] * z[i];
+        squared += residual[i] * residual[i];
+    }
+    if( !std::isfinite( rz ) || !std::isfinite( squared ) ) return false;
+    const double tolerance = std::max( 1.0e-18, squared * 1.0e-10 );
+    for( int iteration = 0; iteration < iterations && squared > tolerance; ++iteration )
+    {
+        multiply( direction, product );
+        double denom = 0.0;
+        for( std::size_t i = 0; i < rhs.size(); ++i )
+            denom += direction[i] * product[i];
+        if( !std::isfinite( denom ) || denom <= 0.0 ) return false;
+        const double alpha = rz / denom;
+        squared = 0.0;
+        for( std::size_t i = 0; i < rhs.size(); ++i )
+        {
+            x[i] += alpha * direction[i];
+            residual[i] -= alpha * product[i];
+            squared += residual[i] * residual[i];
+        }
+        if( !std::isfinite( squared ) ) return false;
+        if( squared <= tolerance ) break;
+        double nextRz = 0.0;
+        for( std::size_t i = 0; i < rhs.size(); ++i )
+        {
+            z[i] = residual[i] / std::max( 1.0e-8, diagonal[i] );
+            nextRz += residual[i] * z[i];
+        }
+        if( !std::isfinite( nextRz ) || rz <= 0.0 ) return false;
+        const double beta = nextRz / rz;
+        for( std::size_t i = 0; i < rhs.size(); ++i )
+            direction[i] = z[i] + beta * direction[i];
+        rz = nextRz;
+    }
+
+    double pressureSum = 0.0;
+    for( std::size_t i = 0; i < rhs.size(); ++i )
+        if( solidOwner_[i] < 0 ) pressureSum += x[i];
+    const double gauge = pressureSum / active;
+    for( std::size_t i = 0; i < rhs.size(); ++i )
+    {
+        if( solidOwner_[i] >= 0 ) { pressure_[i] = 0.0f; continue; }
+        const double value = x[i] - gauge;
+        if( !std::isfinite( value ) || std::abs( value ) > std::numeric_limits<float>::max() )
+            return false;
+        pressure_[i] = static_cast<float>( value );
+    }
+    return true;
+}
+
 void fluidField2::project( float timeStep, int pressureIterations,
     std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback )
 {
@@ -1658,14 +1842,22 @@ void fluidField2::project( float timeStep, int pressureIterations,
                 : 0.0f;
         }
 
-    std::fill( pressure_.begin(), pressure_.end(), 0.0f );
-    for( int iteration = 0; iteration < pressureIterations; ++iteration )
+    const bool coupled = std::any_of( obstacles.begin(), obstacles.end(),
+        []( const fluidShapeObstacle2& obstacle )
+        {
+            return obstacle.inverseMass > 0.0f || obstacle.inverseInertia > 0.0f;
+        } );
+    const bool solvedCoupled = coupled && solveCoupledPressure( timeStep, pressureIterations, obstacles );
+    if( !solvedCoupled )
     {
-        for( int y = 0; y < height_; ++y )
-            for( int x = 0; x < width_; ++x )
-            {
-                const int cell = cellIndex( x, y );
-                if( solidOwner_[cell] >= 0 ) { nextPressure_[cell] = 0.0f; continue; }
+        std::fill( pressure_.begin(), pressure_.end(), 0.0f );
+        for( int iteration = 0; iteration < pressureIterations; ++iteration )
+        {
+            for( int y = 0; y < height_; ++y )
+                for( int x = 0; x < width_; ++x )
+                {
+                    const int cell = cellIndex( x, y );
+                    if( solidOwner_[cell] >= 0 ) { nextPressure_[cell] = 0.0f; continue; }
                 float sum = 0.0f;
                 int neighbors = 0;
                 if( x > 0 && !isSolidCell( x - 1, y ) ) { sum += pressure_[cellIndex( x - 1, y )]; ++neighbors; }
@@ -1674,7 +1866,8 @@ void fluidField2::project( float timeStep, int pressureIterations,
                 if( y + 1 < height_ && !isSolidCell( x, y + 1 ) ) { sum += pressure_[cellIndex( x, y + 1 )]; ++neighbors; }
                 nextPressure_[cell] = neighbors > 0 ? ( sum - divergence_[cell] * scale ) / neighbors : 0.0f;
             }
-        pressure_.swap( nextPressure_ );
+            pressure_.swap( nextPressure_ );
+        }
     }
 
     const float gradientScale = timeStep * inverseCell;
