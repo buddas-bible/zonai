@@ -1848,7 +1848,10 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
                 sum - divergence_[cell] * pressureScale ) * ( timeStep / cellSize_ );
             squaredResidual += residual * residual;
         }
-    cutCellPressure_.pressureResidual = solvedCoupled ? coupledPressureResidual * ( timeStep / cellSize_ ) :
+    // 결합 PCG의 압력 방정식 잔차는 dt/h²를 곱하면 연속성 잔차 (1/s)다.
+    // 기존 Jacobi의 legacy pressureResidual 표시 단위는 이 단계에서 변경하지 않는다.
+    cutCellPressure_.pressureResidual = solvedCoupled
+        ? coupledPressureResidual * ( timeStep / ( cellSize_ * cellSize_ ) ) :
         ( cutCellPressure_.activeCells > 0
             ? static_cast<float>( std::sqrt( squaredResidual / cutCellPressure_.activeCells ) ) : 0.0f );
 
