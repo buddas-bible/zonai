@@ -1686,22 +1686,16 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     // 이진 MAC face의 압력 변위와 rigid body의 유효 질량을 동시에 푼다.
     // A = D D^T + B M_body^-1 B^T (단위 깊이 rho=1).
     // B는 기존 pressure traction과 동일한 face 법선·COM 레버암을 사용한다.
-    struct pressureFace
-    {
-        int cell = 0;
-        int owner = 0;
-        double fx = 0.0, fy = 0.0, torque = 0.0;
-    };
-    struct bodyResponse
-    {
-        double fx = 0.0, fy = 0.0, torque = 0.0;
-    };
-    std::vector<pressureFace> faces;
-    std::vector<double> diagonal( pressure_.size(), 0.0 );
+    auto& scratch = coupledPressureScratch_;
+    auto& faces = scratch.faces;
+    faces.clear();
+    auto& diagonal = scratch.diagonal;
+    diagonal.assign( pressure_.size(), 0.0 );
     int active = 0;
     double rhsSum = 0.0;
     const double scale = static_cast<double>( cellSize_ ) * cellSize_ / timeStep;
-    std::vector<double> rhs( pressure_.size(), 0.0 );
+    auto& rhs = scratch.rhs;
+    rhs.assign( pressure_.size(), 0.0 );
     for( int y = 0; y < height_; ++y )
         for( int x = 0; x < width_; ++x )
         {
@@ -1765,11 +1759,12 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     for( std::size_t i = 0; i < rhs.size(); ++i )
         if( solidOwner_[i] < 0 ) rhs[i] -= mean;
 
-    std::vector<bodyResponse> response( obstacles.size() );
+    auto& response = scratch.response;
+    response.assign( obstacles.size(), {} );
     const auto multiply = [&]( const std::vector<double>& values, std::vector<double>& result )
     {
         std::fill( result.begin(), result.end(), 0.0 );
-        std::fill( response.begin(), response.end(), bodyResponse{} );
+        std::fill( response.begin(), response.end(), coupledBodyResponse{} );
         for( int y = 0; y < height_; ++y )
             for( int x = 1; x < width_; ++x )
             {
@@ -1788,26 +1783,34 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                 result[bottom] += d;
                 result[top] -= d;
             }
-        for( const pressureFace& face : faces )
+        for( const coupledPressureFace& face : faces )
         {
-            bodyResponse& body = response[face.owner];
+            coupledBodyResponse& body = response[face.owner];
             const double p = values[face.cell];
             body.fx += p * face.fx;
             body.fy += p * face.fy;
             body.torque += p * face.torque;
         }
-        for( const pressureFace& face : faces )
+        for( const coupledPressureFace& face : faces )
         {
             const fluidShapeObstacle2& obstacle = obstacles[static_cast<std::size_t>( face.owner )];
-            const bodyResponse& body = response[face.owner];
+            const coupledBodyResponse& body = response[face.owner];
             result[face.cell] += static_cast<double>( obstacle.inverseMass ) *
                 ( face.fx * body.fx + face.fy * body.fy ) +
                 static_cast<double>( obstacle.inverseInertia ) * face.torque * body.torque;
         }
     };
 
-    std::vector<double> x( rhs.size(), 0.0 ), residual = rhs;
-    std::vector<double> z( rhs.size() ), direction( rhs.size() ), product( rhs.size() );
+    auto& x = scratch.x;
+    auto& residual = scratch.residual;
+    auto& z = scratch.z;
+    auto& direction = scratch.direction;
+    auto& product = scratch.product;
+    x.assign( rhs.size(), 0.0 );
+    residual = rhs;
+    z.assign( rhs.size(), 0.0 );
+    direction.assign( rhs.size(), 0.0 );
+    product.assign( rhs.size(), 0.0 );
     double rz = 0.0, squared = 0.0;
     for( std::size_t i = 0; i < rhs.size(); ++i )
     {
