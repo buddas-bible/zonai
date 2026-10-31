@@ -226,6 +226,14 @@ void checkSynchronizedWindCoupling()
 
     scene.resetWindFlow();
     scene.setWindObstacleCouplingEnabled( true );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.step( dt, 4 );
+    check( scene.getWindCouplingSteps() == 1 &&
+        !scene.getWindField()->getPressureMomentum().usedCoupledProjection,
+        "Cut-cell pressure must not use unsupported explicit synchronized subcycling" );
+
+    scene.resetWindFlow();
+    scene.setWindCutCellProjectionEnabled( false );
     scene.getWorld().SetBodyLinearVelocity( moving, { 2.0f, 0.0f } );
     float maxSpeed = 0.0f;
     for( int i = 0; i < 120; ++i )
