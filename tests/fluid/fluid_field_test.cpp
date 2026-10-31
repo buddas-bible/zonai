@@ -429,6 +429,61 @@ void checkBoundedObstacleRasterAndReusablePressure()
     }
 }
 
+void checkCoupledPressureConvergenceDiagnostics()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    fluidShapeObstacle2 moving{ circle2{ {}, 0.75f },
+        { { 0.0f, 0.0f }, {} }, {}, { 1.5f, 0.0f }, 0.0f, 2.0f, 16.0f };
+    std::array<fluidObstacleForce2, 1> feedback{};
+
+    // PCG 1회는 이 영역의 다수 압력 자유도를 해결하기 부족하다.
+    fluidField2 limited{ 32, 24, 0.25f, { -4.0f, -3.0f } };
+    limited.addVelocity( { -1.2f, 0.25f }, { 3.0f, -0.6f }, 1.0f );
+    limited.step( dt, std::span<const fluidShapeObstacle2>( &moving, 1 ), feedback, 1 );
+    const fluidPressureMomentum2 limitedStats = limited.getPressureMomentum();
+    check( limitedStats.coupledStatus == fluidCoupledPressureStatus2::iterationLimit &&
+        limitedStats.coupledSolveFailed && !limitedStats.usedCoupledProjection &&
+        limitedStats.coupledIterations == 1 && limitedStats.coupledIterationLimit == 1 &&
+        limitedStats.coupledInitialResidualRms > 0.0f &&
+        limitedStats.coupledFinalResidualRms > 0.0f &&
+        limitedStats.coupledRelativeResidual > 1.0e-5f,
+        "one CG iteration must report unmet true residual, not a successful pressure solve" );
+    check( LengthSquared( feedback[0].force ) == 0.0f &&
+        LengthSquared( limitedStats.solid ) == 0.0f &&
+        LengthSquared( limitedStats.wall ) == 0.0f,
+        "failed coupled PCG must not inject an uncoupled Jacobi reaction into a dynamic body" );
+
+    fluidField2 converged{ 32, 24, 0.25f, { -4.0f, -3.0f } };
+    converged.addVelocity( { -1.2f, 0.25f }, { 3.0f, -0.6f }, 1.0f );
+    converged.step( dt, std::span<const fluidShapeObstacle2>( &moving, 1 ), feedback, 200 );
+    const fluidPressureMomentum2 good = converged.getPressureMomentum();
+    check( good.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        good.usedCoupledProjection && !good.coupledSolveFailed &&
+        good.coupledIterations > 1 && good.coupledIterations <= good.coupledIterationLimit &&
+        good.coupledInitialResidualRms > 0.0f &&
+        good.coupledRelativeResidual <= 1.0001e-5f,
+        "adequate PCG iterations must yield small measured true residual and a valid pressure solve" );
+    check( std::isfinite( feedback[0].force.x ) && std::isfinite( feedback[0].force.y ) &&
+        Length( feedback[0].force ) > 0.001f,
+        "converged coupled pressure should return finite nonzero reaction" );
+
+    fluidField2 noContact{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    fluidShapeObstacle2 outside = moving;
+    outside.transform.position = { 100.0f, 100.0f };
+    outside.center = outside.transform.position;
+    noContact.addVelocity( { -2.0f, 0.0f }, { 3.0f, 0.0f }, 1.0f );
+    noContact.step( dt, std::span<const fluidShapeObstacle2>( &outside, 1 ), feedback );
+    check( noContact.getPressureMomentum().coupledStatus == fluidCoupledPressureStatus2::noBoundary &&
+        !noContact.getPressureMomentum().coupledSolveFailed &&
+        !noContact.getPressureMomentum().usedCoupledProjection,
+        "dynamic body outside the Fluid Field should use legacy pressure without reporting a PCG failure" );
+
+    converged.clear();
+    check( converged.getPressureMomentum().coupledStatus == fluidCoupledPressureStatus2::notRequested &&
+        converged.getPressureMomentum().coupledIterations == 0,
+        "clearing Fluid Field must clear previous PCG diagnostics" );
+}
+
 void checkFractionalCutCells()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1078,6 +1133,7 @@ int main()
     checkPressureMomentumLedger();
     checkMovingSolidRemap();
     checkBoundedObstacleRasterAndReusablePressure();
+    checkCoupledPressureConvergenceDiagnostics();
     checkFractionalCutCells();
     checkWeightedCutCellPressure();
     checkCutCellTemporalContinuity();
