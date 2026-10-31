@@ -1307,7 +1307,9 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
 
 void fluidField2::reconcileSweptSolidFlux()
 {
-    if( !sweptFaceFlux_.usedSweptFlux ) return;
+    // 기본 Cut-cell 경로에 잔차 vector 할당/추가 순회를 발생시키지 않는다.
+    // 보정 미사용 시 raw 값은 prepareCutCellVolumeChange의 최종 관측값과 같다.
+    if( !sweptFaceFlux_.usedSweptFlux || !sweptGeometryCorrectionEnabled_ ) return;
 
     // 순수 기하 discrepancy: 시작/종료 점유율 변화와 경로 적분된 공유 면
     // 체적의 divergence 간 차이. 외벽의 swept flux는 항상 0.
@@ -1329,8 +1331,6 @@ void fluidField2::reconcileSweptSolidFlux()
             mismatch += std::abs( residual[cell] );
         }
     sweptFaceFlux_.rawGeometryMismatch = static_cast<float>( mismatch );
-    if( !sweptGeometryCorrectionEnabled_ ) return;
-
     // 서로 부호가 반대인 이웃의 discrepancy만 공유 edge에서 국소 상쇄.
     // 각 update는 두 셀의 잔차를 같은 크기·반대 부호로 변경해
     // 전체 체적 부호합 및 닫힌 외벽을 보존하고 L1 오차를 증가시키지 않는다.
@@ -1458,6 +1458,8 @@ void fluidField2::prepareCutCellVolumeChange( float timeStep )
             else unresolvedRate += static_cast<double>( change ) * scale;
         }
     }
+    if( sweptFaceFlux_.usedSweptFlux && !sweptGeometryCorrectionEnabled_ )
+        sweptFaceFlux_.rawGeometryMismatch = sweptFaceFlux_.geometryMismatch;
     cutCellPressure_.volumeRate = static_cast<float>( volumeRate );
     cutCellPressure_.redistributedVolumeRate = static_cast<float>( relocatedRate );
     cutCellPressure_.unresolvedVolumeRate = static_cast<float>( unresolvedRate );
