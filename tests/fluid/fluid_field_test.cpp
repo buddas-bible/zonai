@@ -1102,6 +1102,39 @@ void checkAnalyticRoundedPolygonCutCell()
         sampled.getCutCellTransition().fluidVolume ) < 1.0e-5f,
         "multiple rounded polygons must use existing sampled union geometry" );
 
+    // 비축정렬/비직각의 CCW 삼각형에서도 core + perimeter*r + pi*r²를 만족.
+    constexpr std::array<vec2, 3> TRIANGLE{
+        vec2{ -0.50f, -0.35f }, vec2{ 0.55f, -0.20f }, vec2{ 0.08f, 0.67f }
+    };
+    constexpr float triangleRadius = 0.17f;
+    const float triangleArea = 0.5f * Cross( TRIANGLE[1] - TRIANGLE[0],
+        TRIANGLE[2] - TRIANGLE[0] );
+    const float trianglePerimeter =
+        Length( TRIANGLE[1] - TRIANGLE[0] ) +
+        Length( TRIANGLE[2] - TRIANGLE[1] ) +
+        Length( TRIANGLE[0] - TRIANGLE[2] );
+    const float triangleFluidVolume = 24.0f * 16.0f * h * h -
+        ( triangleArea + trianglePerimeter * triangleRadius +
+            std::numbers::pi_v<float> * triangleRadius * triangleRadius );
+
+    polygon2 triangle = MakePolygon( TRIANGLE );
+    triangle.radius = triangleRadius;
+    fluidShapeObstacle2 triangularBody{
+        triangle, { { 0.16f, -0.08f }, {} }, { 0.16f, -0.08f }, {}, 0.0f
+    };
+    fluidField2 triangleField{ 24, 16, h, { -6.0f, -4.0f } };
+    triangleField.setCutCellProjectionEnabled( true );
+    triangleField.setAnalyticRoundedPolygonCutCellEnabled( true );
+    for( float angle : { 0.0f, 0.37f, 1.02f, -0.61f } )
+    {
+        triangularBody.transform.rotation = rot2::FromRadians( angle );
+        triangleField.step( dt,
+            std::span<const fluidShapeObstacle2>( &triangularBody, 1 ), forces, 180 );
+        check( std::abs( triangleField.getCutCellTransition().fluidVolume -
+            triangleFluidVolume ) < 1.0e-4f,
+            "nonrectangular rounded convex triangle must preserve analytic offset area under rotation" );
+    }
+
     field.clear();
     check( !field.getSweptFaceFlux().usedSweptFlux &&
         !field.isAnalyticRoundedPolygonCutCellEnabled(),
