@@ -2718,11 +2718,14 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     {
         analyticFluidCircle circle{};
         analyticFluidPolygon polygon{};
+        analyticFluidCapsule capsule{};
         const bool circleGeometry = analyticCircleCutCellEnabled_ &&
             TryGetAnalyticCircle( obstacles, circle );
         const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
             TryGetAnalyticPolygon( obstacles, polygon );
-        if( circleGeometry || polygonGeometry )
+        const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
+            analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule );
+        if( circleGeometry || polygonGeometry || capsuleGeometry )
         {
             const double h = cellSize_;
             for( int y = 0; y < height_; ++y )
@@ -2735,7 +2738,9 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     const double low = origin_.y + y * h;
                     const auto clipped = circleGeometry
                         ? ClipCircleFace( circle, true, normal, low, low + h )
-                        : ClipPolygonFace( polygon, true, normal, low, low + h );
+                        : polygonGeometry
+                            ? ClipPolygonFace( polygon, true, normal, low, low + h )
+                            : ClipCapsuleFace( capsule, true, normal, low, low + h );
                     if( clipped.length <= 0.0 ) continue;
                     const vec2 point{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) };
                     const vec2 force{ static_cast<float>( clipped.length ), 0.0f };
@@ -2752,7 +2757,9 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     const double low = origin_.x + x * h;
                     const auto clipped = circleGeometry
                         ? ClipCircleFace( circle, false, normal, low, low + h )
-                        : ClipPolygonFace( polygon, false, normal, low, low + h );
+                        : polygonGeometry
+                            ? ClipPolygonFace( polygon, false, normal, low, low + h )
+                            : ClipCapsuleFace( capsule, false, normal, low, low + h );
                     if( clipped.length <= 0.0 ) continue;
                     const vec2 point{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
                     const vec2 force{ 0.0f, static_cast<float>( clipped.length ) };
