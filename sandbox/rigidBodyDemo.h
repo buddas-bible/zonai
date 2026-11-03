@@ -292,12 +292,24 @@ public:
     {
         return windField_ && windField_->isAnalyticPolygonCutCellEnabled();
     }
+    void setWindAnalyticCapsuleEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setAnalyticCapsuleCutCellEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindAnalyticCapsuleEnabled() const noexcept
+    {
+        return windField_ && windField_->isAnalyticCapsuleCutCellEnabled();
+    }
     // 단일 Circle 분석 경로를 Sandbox에서 테스트할 때 나머지 Shape의 유체 점유만 제외.
     void setWindCircleOnlyFluidEnabled( bool enabled ) noexcept
     {
         if( windCircleOnlyFluidEnabled_ == enabled ) return;
         windCircleOnlyFluidEnabled_ = enabled;
-        if( enabled ) windPolygonOnlyFluidEnabled_ = false;
+        if( enabled )
+        {
+            windPolygonOnlyFluidEnabled_ = false;
+            windCapsuleOnlyFluidEnabled_ = false;
+        }
         if( windField_ ) windField_->invalidateObstacleHistory();
     }
     [[nodiscard]] bool isWindCircleOnlyFluidEnabled() const noexcept { return windCircleOnlyFluidEnabled_; }
@@ -306,10 +318,27 @@ public:
     {
         if( windPolygonOnlyFluidEnabled_ == enabled ) return;
         windPolygonOnlyFluidEnabled_ = enabled;
-        if( enabled ) windCircleOnlyFluidEnabled_ = false;
+        if( enabled )
+        {
+            windCircleOnlyFluidEnabled_ = false;
+            windCapsuleOnlyFluidEnabled_ = false;
+        }
         if( windField_ ) windField_->invalidateObstacleHistory();
     }
     [[nodiscard]] bool isWindPolygonOnlyFluidEnabled() const noexcept { return windPolygonOnlyFluidEnabled_; }
+
+    void setWindCapsuleOnlyFluidEnabled( bool enabled ) noexcept
+    {
+        if( windCapsuleOnlyFluidEnabled_ == enabled ) return;
+        windCapsuleOnlyFluidEnabled_ = enabled;
+        if( enabled )
+        {
+            windCircleOnlyFluidEnabled_ = false;
+            windPolygonOnlyFluidEnabled_ = false;
+        }
+        if( windField_ ) windField_->invalidateObstacleHistory();
+    }
+    [[nodiscard]] bool isWindCapsuleOnlyFluidEnabled() const noexcept { return windCapsuleOnlyFluidEnabled_; }
     [[nodiscard]] int getWindCutCellSampleCount() const noexcept
     {
         return windField_ ? windField_->getCutCellSampleCount() : 4;
@@ -592,6 +621,7 @@ private:
     bool windObstacleCouplingEnabled_ = true;
     bool windCircleOnlyFluidEnabled_ = false;
     bool windPolygonOnlyFluidEnabled_ = false;
+    bool windCapsuleOnlyFluidEnabled_ = false;
     bool windSynchronizedCouplingEnabled_ = true;
     int windCouplingSteps_ = 0;
     int windFluidSubstepCount_ = 1; // World Substep과 독립적인 Fluid 압력/이류 횟수.
