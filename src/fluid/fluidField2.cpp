@@ -2498,7 +2498,12 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     if( cutCell )
     {
         analyticFluidCircle circle{};
-        if( analyticCircleCutCellEnabled_ && TryGetAnalyticCircle( obstacles, circle ) )
+        analyticFluidPolygon polygon{};
+        const bool circleGeometry = analyticCircleCutCellEnabled_ &&
+            TryGetAnalyticCircle( obstacles, circle );
+        const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
+            TryGetAnalyticPolygon( obstacles, polygon );
+        if( circleGeometry || polygonGeometry )
         {
             const double h = cellSize_;
             for( int y = 0; y < height_; ++y )
@@ -2509,7 +2514,9 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     if( cellFluidFraction_[left] <= 0.0f && cellFluidFraction_[right] <= 0.0f ) continue;
                     const double normal = origin_.x + x * h;
                     const double low = origin_.y + y * h;
-                    const auto clipped = ClipCircleFace( circle, true, normal, low, low + h );
+                    const auto clipped = circleGeometry
+                        ? ClipCircleFace( circle, true, normal, low, low + h )
+                        : ClipPolygonFace( polygon, true, normal, low, low + h );
                     if( clipped.length <= 0.0 ) continue;
                     const vec2 point{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) };
                     const vec2 force{ static_cast<float>( clipped.length ), 0.0f };
@@ -2524,7 +2531,9 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     if( cellFluidFraction_[bottom] <= 0.0f && cellFluidFraction_[top] <= 0.0f ) continue;
                     const double normal = origin_.y + y * h;
                     const double low = origin_.x + x * h;
-                    const auto clipped = ClipCircleFace( circle, false, normal, low, low + h );
+                    const auto clipped = circleGeometry
+                        ? ClipCircleFace( circle, false, normal, low, low + h )
+                        : ClipPolygonFace( polygon, false, normal, low, low + h );
                     if( clipped.length <= 0.0 ) continue;
                     const vec2 point{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
                     const vec2 force{ 0.0f, static_cast<float>( clipped.length ) };
