@@ -274,6 +274,11 @@ public:
     void setAnalyticPolygonCutCellEnabled( bool enabled ) noexcept;
     [[nodiscard]] bool isAnalyticPolygonCutCellEnabled() const noexcept { return analyticPolygonCutCellEnabled_; }
 
+    // 단일 Capsule (회전 지원)를 중앙 strip + 양 끝 반원으로 분석적 적분.
+    // 기본 OFF. 장애물 여러 개 또는 비정상 Capsule은 기존 공간 표본 사용.
+    void setAnalyticCapsuleCutCellEnabled( bool enabled ) noexcept;
+    [[nodiscard]] bool isAnalyticCapsuleCutCellEnabled() const noexcept { return analyticCapsuleCutCellEnabled_; }
+
     // 실험적 Cut-cell/Body 유효질량 연립 PCG. 기본 OFF로 기존 Jacobi 경로 보존.
     // 수렴한 경우에만 Body 압력 반력을 돌려주며, 실패 시 해당 압력을 생략한다.
     void setCutCellCoupledProjectionEnabled( bool enabled ) noexcept { cutCellCoupledProjectionEnabled_ = enabled; }
@@ -482,6 +487,7 @@ private:
     int cutCellSampleCount_ = 4;
     bool analyticCircleCutCellEnabled_ = false;
     bool analyticPolygonCutCellEnabled_ = false;
+    bool analyticCapsuleCutCellEnabled_ = false;
     bool cutCellProjectionEnabled_ = false;
     bool cutCellCoupledProjectionEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
