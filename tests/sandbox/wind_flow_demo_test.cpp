@@ -613,6 +613,52 @@ void checkExperimentalCutCellWorldCoupling()
         "one-way field with optional static obstacles must not silently insert dynamic-body inverse masses" );
 }
 
+void checkSandboxAnalyticPolygonMode()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindCutCellCoupledProjectionEnabled( true );
+    scene.setWindPolygonOnlyFluidEnabled( true );
+    scene.setWindAnalyticPolygonEnabled( true );
+    scene.setWindFluidSubstepCount( 2 );
+    const bodyId body = scene.getShapes()[2].bodyHandle;
+    scene.getWorld().SetBodyLinearVelocity( body, { -0.7f, 0.25f } );
+    scene.getWorld().SetBodyAngularVelocity( body, 0.6f );
+    scene.addWindVortex();
+    scene.step( dt, 4 );
+
+    const fluidCutCellPressure2& first = scene.getWindField()->getCutCellPressure();
+    check( scene.getWindCouplingSteps() == 2 &&
+        scene.isWindPolygonOnlyFluidEnabled() && !scene.isWindCircleOnlyFluidEnabled() &&
+        scene.isWindAnalyticPolygonEnabled() &&
+        first.usedCoupledProjection && !first.coupledSolveFailed &&
+        std::isfinite( first.predictedContinuityRms ) &&
+        IsFinite( scene.getWorld().GetBodyLinearVelocity( body ) ),
+        "isolated analytic polygon must receive mass-aware World pressure coupling" );
+
+    scene.step( dt, 4 );
+    check( scene.getWindField()->getSweptFaceFlux().usedSweptFlux &&
+        scene.getWindField()->getCutCellPressure().hasVolumeHistory &&
+        std::isfinite( scene.getWindField()->getSweptFaceFlux().geometryMismatch ),
+        "moving and rotating analytic sandbox polygon must integrate swept face volume" );
+
+    scene.configureWindField( 24, 14, 0.5f );
+    check( scene.isWindAnalyticPolygonEnabled() && scene.isWindPolygonOnlyFluidEnabled() &&
+        !scene.getWindField()->getCutCellPressure().hasVolumeHistory,
+        "wind field resize must preserve polygon analytic mode but reset geometry history" );
+
+    scene.setWindPolygonOnlyFluidEnabled( false );
+    scene.setWindAnalyticPolygonEnabled( false );
+    scene.setWindFluidSubstepCount( 1 );
+    scene.step( dt, 4 );
+    check( scene.getWindField()->getCutCellPressure().activeCells > 0 &&
+        !scene.getWindField()->getCutCellPressure().hasVolumeHistory,
+        "switching from polygon-only to mixed shapes must rebuild sampled occupancy without fake volume flux" );
+}
+
 void checkSandboxAnalyticCircleMode()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -830,5 +876,6 @@ int main()
     checkExperimentalCutCellWorldCoupling();
     checkMovingCutCellSweptVolumeLedger();
     checkSandboxAnalyticCircleMode();
+    checkSandboxAnalyticPolygonMode();
     checkSandboxConservativeAdvectionTrial();
 }
