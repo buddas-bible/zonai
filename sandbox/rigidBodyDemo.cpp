@@ -293,6 +293,10 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                     windField_->step( windTimeStep,
                         std::span<const fluidShapeObstacle2>( windObstacleSnapshots_ ).first( 1 ),
                         std::span<fluidObstacleForce2>( windObstacleFeedback_ ).first( 1 ), pressureIterations );
+                else if( windPolygonOnlyFluidEnabled_ )
+                    windField_->step( windTimeStep,
+                        std::span<const fluidShapeObstacle2>( windObstacleSnapshots_ ).subspan( 2, 1 ),
+                        std::span<fluidObstacleForce2>( windObstacleFeedback_ ).subspan( 2, 1 ), pressureIterations );
                 else windField_->step( windTimeStep, windObstacleSnapshots_, windObstacleFeedback_, pressureIterations );
                 for( std::size_t i = 0; i < windPressureForces_.size(); ++i )
                     windPressureForces_[i] = windObstacleFeedback_[i];
@@ -318,7 +322,8 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
 
             for( std::size_t i = 0; i < windPressureForces_.size(); ++i )
             {
-                if( windCircleOnlyFluidEnabled_ && i > 0 ) continue;
+                if( ( windCircleOnlyFluidEnabled_ && i > 0 ) ||
+                    ( windPolygonOnlyFluidEnabled_ && i != 2 ) ) continue;
                 const visualShape& visual = shapes_[i];
                 if( !world_.IsValid( visual.bodyHandle ) || !world_.IsValid( visual.shapeHandle ) ||
                     world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
@@ -355,7 +360,8 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
             // World::Step에서 Body force가 소비되기 전에, 유체가 실제로 받은 -J 만큼만 Body에 +J를 줌.
             for( std::size_t i = 0; i < windPressureForces_.size(); ++i )
             {
-                if( windCircleOnlyFluidEnabled_ && i > 0 ) continue;
+                if( ( windCircleOnlyFluidEnabled_ && i > 0 ) ||
+                    ( windPolygonOnlyFluidEnabled_ && i != 2 ) ) continue;
                 const visualShape& visual = shapes_[i];
                 if( !world_.IsValid( visual.bodyHandle ) ||
                     world_.GetBody( visual.bodyHandle ).type != bodyType::Dynamic ) continue;
@@ -1372,6 +1378,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     cellSize = std::clamp( cellSize, 0.25f, 2.0f );
     const bool cutCell = windField_->isCutCellProjectionEnabled();
     const bool analyticCircle = windField_->isAnalyticCircleCutCellEnabled();
+    const bool analyticPolygon = windField_->isAnalyticPolygonCutCellEnabled();
     const int cutCellSamples = windField_->getCutCellSampleCount();
     const bool cutCellCoupled = windField_->isCutCellCoupledProjectionEnabled();
     const bool conservative = windField_->isConservativeAdvectionEnabled();
@@ -1385,6 +1392,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     windField_->setCutCellProjectionEnabled( cutCell );
     windField_->setCutCellSampleCount( cutCellSamples );
     windField_->setAnalyticCircleCutCellEnabled( analyticCircle );
+    windField_->setAnalyticPolygonCutCellEnabled( analyticPolygon );
     windField_->setCutCellCoupledProjectionEnabled( cutCellCoupled );
     windField_->setConservativeAdvectionEnabled( conservative );
     windField_->setSweptGeometryCorrectionEnabled( geometryCorrection );

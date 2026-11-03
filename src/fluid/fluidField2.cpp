@@ -205,6 +205,133 @@ double CircleRectangleArea( const analyticFluidCircle& circle,
     return std::clamp( area, 0.0, ( x1 - x0 ) * ( y1 - y0 ) );
 }
 
+// 원과 달리 반지름이 0인 단일 convex polygon의 경계는 선분 조합이다.
+// CCW polygon의 half-plane으로 격자 셀과 MAC 면을 정확히 clipping한다.
+struct analyticFluidPolygon
+{
+    std::array<vec2, MAX_POLYGON_VERTICES> vertices{};
+    int count = 0;
+};
+
+bool TryGetAnalyticPolygon( std::span<const fluidShapeObstacle2> obstacles, analyticFluidPolygon& result )
+{
+    if( obstacles.size() != 1 || !IsValidFluidObstacle( obstacles.front() ) ) return false;
+    const auto* polygon = std::get_if<polygon2>( &obstacles.front().geometry );
+    if( !polygon || polygon->radius != 0.0f || polygon->vertexCount < 3 ||
+        polygon->vertexCount > static_cast<int>( MAX_POLYGON_VERTICES ) ) return false;
+    result = {};
+    result.count = polygon->vertexCount;
+    for( int i = 0; i < result.count; ++i )
+    {
+        result.vertices[i] = TransformPoint( obstacles.front().transform, polygon->vertices[i] );
+        if( !IsFinite( result.vertices[i] ) ) return false;
+    }
+    // Box와 MakePolygon이 제공하는 CCW, strictly convex geometry만 처리한다.
+    double area2 = 0.0;
+    for( int i = 0; i < result.count; ++i )
+    {
+        const vec2& a = result.vertices[i];
+        const vec2& b = result.vertices[( i + 1 ) % result.count];
+        area2 += static_cast<double>( a.x ) * b.y - static_cast<double>( b.x ) * a.y;
+    }
+    if( area2 <= 1.0e-8 ) return false;
+    for( int i = 0; i < result.count; ++i )
+    {
+        const vec2 a = result.vertices[i];
+        const vec2 b = result.vertices[( i + 1 ) % result.count];
+        const vec2 c = result.vertices[( i + 2 ) % result.count];
+        if( Cross( b - a, c - b ) <= 0.0f ) return false;
+    }
+    return true;
+}
+
+// 공유 MAC face의 line segment를 polygon의 CCW half-planes에 clip.
+// 결과 길이/중심점은 면적 개방율, 강체 표면 속도, Schur 힘과 swept flux가 공유한다.
+analyticCircleInterval ClipPolygonFace( const analyticFluidPolygon& polygon,
+    bool vertical, double coordinate, double low, double high )
+{
+    double enter = low;
+    double exit = high;
+    for( int i = 0; i < polygon.count; ++i )
+    {
+        const vec2 a = polygon.vertices[i];
+        const vec2 b = polygon.vertices[( i + 1 ) % polygon.count];
+        const double ex = static_cast<double>( b.x ) - a.x;
+        const double ey = static_cast<double>( b.y ) - a.y;
+        // cross(edge, P(t)-a) >= 0, t is tangent position.
+        const double constant = vertical
+            ? ex * ( -static_cast<double>( a.y ) ) - ey * ( coordinate - a.x )
+            : ex * ( coordinate - a.y ) - ey * ( -static_cast<double>( a.x ) );
+        const double slope = vertical ? ex : -ey;
+        if( slope == 0.0 )
+        {
+            if( constant < 0.0 ) return {};
+            continue;
+        }
+        const double boundary = -constant / slope;
+        if( slope > 0.0 ) enter = std::max( enter, boundary );
+        else exit = std::min( exit, boundary );
+        if( exit <= enter ) return {};
+    }
+    return { exit - enter, 0.5 * ( enter + exit ) };
+}
+
+struct analyticPoint2
+{
+    double x = 0.0;
+    double y = 0.0;
+};
+
+// Sutherland-Hodgman 4 half-plane rectangle clipping. Convex input has
+// <=MAX_POLYGON_VERTICES+4 clipped vertices; no per-cell heap allocations.
+double ConvexPolygonRectangleArea( const analyticFluidPolygon& polygon,
+    double x0, double y0, double x1, double y1 )
+{
+    constexpr std::size_t capacity = MAX_POLYGON_VERTICES + 8;
+    std::array<analyticPoint2, capacity> current{};
+    std::array<analyticPoint2, capacity> next{};
+    int count = polygon.count;
+    for( int i = 0; i < count; ++i )
+        current[i] = { polygon.vertices[i].x, polygon.vertices[i].y };
+
+    for( int side = 0; side < 4 && count > 0; ++side )
+    {
+        const auto signedDistance = [&]( analyticPoint2 p )
+        {
+            if( side == 0 ) return p.x - x0;
+            if( side == 1 ) return x1 - p.x;
+            if( side == 2 ) return p.y - y0;
+            return y1 - p.y;
+        };
+        int nextCount = 0;
+        analyticPoint2 previous = current[count - 1];
+        double before = signedDistance( previous );
+        for( int i = 0; i < count; ++i )
+        {
+            const analyticPoint2 point = current[i];
+            const double after = signedDistance( point );
+            if( ( before >= 0.0 ) != ( after >= 0.0 ) )
+            {
+                const double t = before / ( before - after );
+                next[nextCount++] = { previous.x + t * ( point.x - previous.x ),
+                    previous.y + t * ( point.y - previous.y ) };
+            }
+            if( after >= 0.0 ) next[nextCount++] = point;
+            previous = point;
+            before = after;
+        }
+        current.swap( next );
+        count = nextCount;
+    }
+    if( count < 3 ) return 0.0;
+    double area2 = 0.0;
+    const analyticPoint2 origin = current[0];
+    for( int i = 1; i + 1 < count; ++i )
+        area2 += ( current[i].x - origin.x ) * ( current[i + 1].y - origin.y ) -
+            ( current[i].y - origin.y ) * ( current[i + 1].x - origin.x );
+    return std::clamp( 0.5 * std::abs( area2 ), 0.0, ( x1 - x0 ) * ( y1 - y0 ) );
+}
+
 } // namespace
 
 fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
@@ -278,6 +405,13 @@ void fluidField2::setAnalyticCircleCutCellEnabled( bool enabled ) noexcept
 {
     if( analyticCircleCutCellEnabled_ == enabled ) return;
     analyticCircleCutCellEnabled_ = enabled;
+    invalidateObstacleHistory();
+}
+
+void fluidField2::setAnalyticPolygonCutCellEnabled( bool enabled ) noexcept
+{
+    if( analyticPolygonCutCellEnabled_ == enabled ) return;
+    analyticPolygonCutCellEnabled_ = enabled;
     invalidateObstacleHistory();
 }
 
@@ -670,7 +804,12 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     else
     {
         analyticFluidCircle circle{};
-        if( analyticCircleCutCellEnabled_ && TryGetAnalyticCircle( obstacles, circle ) )
+        analyticFluidPolygon polygon{};
+        const bool circleGeometry = analyticCircleCutCellEnabled_ &&
+            TryGetAnalyticCircle( obstacles, circle );
+        const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
+            TryGetAnalyticPolygon( obstacles, polygon );
+        if( circleGeometry || polygonGeometry )
         {
             const double h = cellSize_;
             const double inverseArea = 1.0 / ( h * h );
@@ -680,8 +819,9 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                 {
                     const double left = origin_.x + x * h;
                     const double bottom = origin_.y + y * h;
-                    const double covered = CircleRectangleArea( circle,
-                        left, bottom, left + h, bottom + h );
+                    const double covered = circleGeometry
+                        ? CircleRectangleArea( circle, left, bottom, left + h, bottom + h )
+                        : ConvexPolygonRectangleArea( polygon, left, bottom, left + h, bottom + h );
                     cellFluidFraction_[cellIndex( x, y )] =
                         static_cast<float>( std::clamp( 1.0 - covered * inverseArea, 0.0, 1.0 ) );
                 }
@@ -690,7 +830,9 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                 {
                     const double normal = origin_.x + x * h;
                     const double low = origin_.y + y * h;
-                    const auto interval = ClipCircleFace( circle, true, normal, low, low + h );
+                    const auto interval = circleGeometry
+                        ? ClipCircleFace( circle, true, normal, low, low + h )
+                        : ClipPolygonFace( polygon, true, normal, low, low + h );
                     const int face = uIndex( x, y );
                     uOpenFraction_[face] = static_cast<float>(
                         std::clamp( 1.0 - interval.length / h, 0.0, 1.0 ) );
@@ -707,7 +849,9 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                 {
                     const double normal = origin_.y + y * h;
                     const double low = origin_.x + x * h;
-                    const auto interval = ClipCircleFace( circle, false, normal, low, low + h );
+                    const auto interval = circleGeometry
+                        ? ClipCircleFace( circle, false, normal, low, low + h )
+                        : ClipPolygonFace( polygon, false, normal, low, low + h );
                     const int face = vIndex( x, y );
                     vOpenFraction_[face] = static_cast<float>(
                         std::clamp( 1.0 - interval.length / h, 0.0, 1.0 ) );
@@ -1552,7 +1696,12 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
     int boundaryFaces = 0;
     int partialFaces = 0;
     analyticFluidCircle circle{};
-    if( analyticCircleCutCellEnabled_ && TryGetAnalyticCircle( obstacles, circle ) )
+    analyticFluidPolygon polygon{};
+    const bool circleGeometry = analyticCircleCutCellEnabled_ &&
+        TryGetAnalyticCircle( obstacles, circle );
+    const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
+        TryGetAnalyticPolygon( obstacles, polygon );
+    if( circleGeometry || polygonGeometry )
     {
         const double h = cellSize_;
         const auto& body = predicted.front();
@@ -1563,7 +1712,9 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
             if( open >= 1.0f ) return;
             const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
             const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
-            const auto clipped = ClipCircleFace( circle, vertical, normal, low, low + h );
+            const auto clipped = circleGeometry
+                ? ClipCircleFace( circle, vertical, normal, low, low + h )
+                : ClipPolygonFace( polygon, vertical, normal, low, low + h );
             if( clipped.length <= 0.0 ) return;
             const vec2 point = vertical
                 ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
@@ -1749,7 +1900,12 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
             }
 
             analyticFluidCircle circle{};
-            if( analyticCircleCutCellEnabled_ && TryGetAnalyticCircle( intermediate, circle ) )
+            analyticFluidPolygon polygon{};
+            const bool circleGeometry = analyticCircleCutCellEnabled_ &&
+                TryGetAnalyticCircle( intermediate, circle );
+            const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
+                TryGetAnalyticPolygon( intermediate, polygon );
+            if( circleGeometry || polygonGeometry )
             {
                 const double h = cellSize_;
                 const float intervalDt = timeStep / samples;
@@ -1765,7 +1921,9 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                     {
                         const double normal = origin_.x + x * h;
                         const double low = origin_.y + y * h;
-                        const auto clipped = ClipCircleFace( circle, true, normal, low, low + h );
+                        const auto clipped = circleGeometry
+                            ? ClipCircleFace( circle, true, normal, low, low + h )
+                            : ClipPolygonFace( polygon, true, normal, low, low + h );
                         if( clipped.length <= 0.0 ) continue;
                         const vec2 point{ static_cast<float>( normal ),
                             static_cast<float>( clipped.midpoint ) };
@@ -1777,7 +1935,9 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                     {
                         const double normal = origin_.y + y * h;
                         const double low = origin_.x + x * h;
-                        const auto clipped = ClipCircleFace( circle, false, normal, low, low + h );
+                        const auto clipped = circleGeometry
+                            ? ClipCircleFace( circle, false, normal, low, low + h )
+                            : ClipPolygonFace( polygon, false, normal, low, low + h );
                         if( clipped.length <= 0.0 ) continue;
                         const vec2 point{ static_cast<float>( clipped.midpoint ),
                             static_cast<float>( normal ) };
@@ -2347,7 +2507,12 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     if( cutCell )
     {
         analyticFluidCircle circle{};
-        if( analyticCircleCutCellEnabled_ && TryGetAnalyticCircle( obstacles, circle ) )
+        analyticFluidPolygon polygon{};
+        const bool circleGeometry = analyticCircleCutCellEnabled_ &&
+            TryGetAnalyticCircle( obstacles, circle );
+        const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
+            TryGetAnalyticPolygon( obstacles, polygon );
+        if( circleGeometry || polygonGeometry )
         {
             const double h = cellSize_;
             for( int y = 0; y < height_; ++y )
@@ -2358,7 +2523,9 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     if( cellFluidFraction_[left] <= 0.0f && cellFluidFraction_[right] <= 0.0f ) continue;
                     const double normal = origin_.x + x * h;
                     const double low = origin_.y + y * h;
-                    const auto clipped = ClipCircleFace( circle, true, normal, low, low + h );
+                    const auto clipped = circleGeometry
+                        ? ClipCircleFace( circle, true, normal, low, low + h )
+                        : ClipPolygonFace( polygon, true, normal, low, low + h );
                     if( clipped.length <= 0.0 ) continue;
                     const vec2 point{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) };
                     const vec2 force{ static_cast<float>( clipped.length ), 0.0f };
@@ -2373,7 +2540,9 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     if( cellFluidFraction_[bottom] <= 0.0f && cellFluidFraction_[top] <= 0.0f ) continue;
                     const double normal = origin_.y + y * h;
                     const double low = origin_.x + x * h;
-                    const auto clipped = ClipCircleFace( circle, false, normal, low, low + h );
+                    const auto clipped = circleGeometry
+                        ? ClipCircleFace( circle, false, normal, low, low + h )
+                        : ClipPolygonFace( polygon, false, normal, low, low + h );
                     if( clipped.length <= 0.0 ) continue;
                     const vec2 point{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
                     const vec2 force{ 0.0f, static_cast<float>( clipped.length ) };

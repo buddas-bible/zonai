@@ -269,6 +269,11 @@ public:
     void setAnalyticCircleCutCellEnabled( bool enabled ) noexcept;
     [[nodiscard]] bool isAnalyticCircleCutCellEnabled() const noexcept { return analyticCircleCutCellEnabled_; }
 
+    // 단일 sharp convex Polygon(radius=0)에서 면적과 공유 면을 직접 clip.
+    // Circle 설정과 독립적이며 기본 OFF. Polygon 외 형상은 공간 표본 경로.
+    void setAnalyticPolygonCutCellEnabled( bool enabled ) noexcept;
+    [[nodiscard]] bool isAnalyticPolygonCutCellEnabled() const noexcept { return analyticPolygonCutCellEnabled_; }
+
     // 실험적 Cut-cell/Body 유효질량 연립 PCG. 기본 OFF로 기존 Jacobi 경로 보존.
     // 수렴한 경우에만 Body 압력 반력을 돌려주며, 실패 시 해당 압력을 생략한다.
     void setCutCellCoupledProjectionEnabled( bool enabled ) noexcept { cutCellCoupledProjectionEnabled_ = enabled; }
@@ -476,6 +481,7 @@ private:
     bool adaptiveSweptSamplingEnabled_ = false;
     int cutCellSampleCount_ = 4;
     bool analyticCircleCutCellEnabled_ = false;
+    bool analyticPolygonCutCellEnabled_ = false;
     bool cutCellProjectionEnabled_ = false;
     bool cutCellCoupledProjectionEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
