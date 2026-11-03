@@ -965,8 +965,14 @@ void rigidBodyDemoUi::drawExperimentControls()
         bool analyticCircle = isWindAnalyticCircleEnabled();
         if( ImGui::Checkbox( "원형 경계 분석적 적분 (실험)###WindAnalyticCircle", &analyticCircle ) )
             setWindAnalyticCircleEnabled( analyticCircle );
+        bool polygonOnly = isWindPolygonOnlyFluidEnabled();
+        if( ImGui::Checkbox( "다각형 상자만 유체 장애물로 사용###WindPolygonOnly", &polygonOnly ) )
+            setWindPolygonOnlyFluidEnabled( polygonOnly );
+        bool analyticPolygon = isWindAnalyticPolygonEnabled();
+        if( ImGui::Checkbox( "Sharp 다각형 경계 분석적 적분 (실험)###WindAnalyticPolygon", &analyticPolygon ) )
+            setWindAnalyticPolygonEnabled( analyticPolygon );
         ImGui::EndDisabled();
-        ImGui::TextDisabled( "단일 Circle에서만 분석적 적분. 그 밖에는 4x4/8x8 표본으로 복귀합니다." );
+        ImGui::TextDisabled( "단일 Circle 또는 radius=0 볼록 다각형만 분석적 적분. 그 외 형상은 4x4/8x8 표본." );
         bool cutCellCoupled = isWindCutCellCoupledProjectionEnabled();
         ImGui::BeginDisabled( !isWindCutCellProjectionEnabled() );
         if( ImGui::Checkbox( "Cut-cell 질량·관성 연성 PCG (실험)###WindCutCellCoupled", &cutCellCoupled ) )
