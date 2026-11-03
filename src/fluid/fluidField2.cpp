@@ -1696,7 +1696,12 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
     int boundaryFaces = 0;
     int partialFaces = 0;
     analyticFluidCircle circle{};
-    if( analyticCircleCutCellEnabled_ && TryGetAnalyticCircle( obstacles, circle ) )
+    analyticFluidPolygon polygon{};
+    const bool circleGeometry = analyticCircleCutCellEnabled_ &&
+        TryGetAnalyticCircle( obstacles, circle );
+    const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
+        TryGetAnalyticPolygon( obstacles, polygon );
+    if( circleGeometry || polygonGeometry )
     {
         const double h = cellSize_;
         const auto& body = predicted.front();
@@ -1707,7 +1712,9 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
             if( open >= 1.0f ) return;
             const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
             const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
-            const auto clipped = ClipCircleFace( circle, vertical, normal, low, low + h );
+            const auto clipped = circleGeometry
+                ? ClipCircleFace( circle, vertical, normal, low, low + h )
+                : ClipPolygonFace( polygon, vertical, normal, low, low + h );
             if( clipped.length <= 0.0 ) return;
             const vec2 point = vertical
                 ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
