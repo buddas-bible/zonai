@@ -536,6 +536,196 @@ double CapsuleRectangleArea( const analyticFluidCapsule& capsule,
     return std::clamp( area, 0.0, ( x1 - x0 ) * ( y1 - y0 ) );
 }
 
+// Rounded Polygon = convex core + 각 변 외부 strip + 각 꼭짓점의 바깥 원호 sector.
+// 세 부분은 convex shape의 nearest-feature Voronoi 영역으로 면적이 겹치지 않는다.
+struct analyticFluidRoundedPolygon
+{
+    analyticFluidPolygon core{};
+    std::array<analyticFluidPolygon, MAX_POLYGON_VERTICES> strips{};
+    std::array<vec2, MAX_POLYGON_VERTICES> outwardNormals{};
+    double radius = 0.0;
+    double minX = 0.0;
+    double maxX = 0.0;
+    double minY = 0.0;
+    double maxY = 0.0;
+};
+
+bool TryGetAnalyticRoundedPolygon( std::span<const fluidShapeObstacle2> obstacles,
+    analyticFluidRoundedPolygon& result )
+{
+    if( obstacles.size() != 1 || !IsValidFluidObstacle( obstacles.front() ) ) return false;
+    fluidShapeObstacle2 sharp = obstacles.front();
+    auto* polygon = std::get_if<polygon2>( &sharp.geometry );
+    if( !polygon || !std::isfinite( polygon->radius ) || polygon->radius <= 0.0f ) return false;
+    const double radius = polygon->radius;
+    polygon->radius = 0.0f;
+    analyticFluidRoundedPolygon rounded{};
+    if( !TryGetAnalyticPolygon( std::span<const fluidShapeObstacle2>( &sharp, 1 ), rounded.core ) )
+        return false;
+
+    rounded.radius = radius;
+    rounded.minX = rounded.maxX = rounded.core.vertices[0].x;
+    rounded.minY = rounded.maxY = rounded.core.vertices[0].y;
+    for( int i = 0; i < rounded.core.count; ++i )
+    {
+        const vec2 a = rounded.core.vertices[i];
+        const vec2 b = rounded.core.vertices[( i + 1 ) % rounded.core.count];
+        const vec2 edge = b - a;
+        const float length = Length( edge );
+        if( !std::isfinite( length ) || length <= 1.0e-6f ) return false;
+        const vec2 outward{ edge.y / length, -edge.x / length };
+        rounded.outwardNormals[i] = outward;
+        const vec2 offset = static_cast<float>( radius ) * outward;
+        analyticFluidPolygon& strip = rounded.strips[i];
+        strip.count = 4;
+        strip.vertices[0] = a;
+        strip.vertices[1] = a + offset;
+        strip.vertices[2] = b + offset;
+        strip.vertices[3] = b;
+        rounded.minX = std::min( rounded.minX, static_cast<double>( a.x ) );
+        rounded.maxX = std::max( rounded.maxX, static_cast<double>( a.x ) );
+        rounded.minY = std::min( rounded.minY, static_cast<double>( a.y ) );
+        rounded.maxY = std::max( rounded.maxY, static_cast<double>( a.y ) );
+    }
+    rounded.minX -= radius;
+    rounded.maxX += radius;
+    rounded.minY -= radius;
+    rounded.maxY += radius;
+    result = rounded;
+    return true;
+}
+
+// Circle chord를 vertex의 두 바깥 edge normal 사이 sector로 clip.
+analyticCircleInterval ClipRoundedCornerFace( const analyticFluidRoundedPolygon& polygon,
+    int vertexIndex, bool vertical, double coordinate, double low, double high )
+{
+    const int count = polygon.core.count;
+    const vec2 vertex = polygon.core.vertices[vertexIndex];
+    const vec2 previous = polygon.outwardNormals[( vertexIndex + count - 1 ) % count];
+    const vec2 next = polygon.outwardNormals[vertexIndex];
+    const auto chord = ClipCircleFace( { vertex, polygon.radius },
+        vertical, coordinate, low, high );
+    if( chord.length <= 0.0 ) return {};
+
+    double enter = chord.midpoint - 0.5 * chord.length;
+    double exit = chord.midpoint + 0.5 * chord.length;
+    const double px = vertical ? coordinate : 0.0;
+    const double py = vertical ? 0.0 : coordinate;
+    const double dx = vertical ? 0.0 : 1.0;
+    const double dy = vertical ? 1.0 : 0.0;
+    const auto clipHalfPlane = [&]( double constant, double slope )
+    {
+        if( std::abs( slope ) <= 1.0e-14 ) return constant >= 0.0;
+        const double crossing = -constant / slope;
+        if( slope > 0.0 ) enter = std::max( enter, crossing );
+        else exit = std::min( exit, crossing );
+        return exit > enter;
+    };
+
+    // cross(previousNormal, P - vertex) >= 0
+    if( !clipHalfPlane(
+        static_cast<double>( previous.x ) * ( py - vertex.y ) -
+            static_cast<double>( previous.y ) * ( px - vertex.x ),
+        static_cast<double>( previous.x ) * dy - static_cast<double>( previous.y ) * dx ) )
+        return {};
+    // cross(P - vertex, nextNormal) >= 0
+    if( !clipHalfPlane(
+        ( px - vertex.x ) * static_cast<double>( next.y ) -
+            ( py - vertex.y ) * static_cast<double>( next.x ),
+        dx * static_cast<double>( next.y ) - dy * static_cast<double>( next.x ) ) )
+        return {};
+    return { exit - enter, 0.5 * ( enter + exit ) };
+}
+
+analyticCircleInterval ClipRoundedPolygonFace( const analyticFluidRoundedPolygon& polygon,
+    bool vertical, double coordinate, double low, double high )
+{
+    if( vertical ? ( coordinate <= polygon.minX || coordinate >= polygon.maxX ||
+                      high <= polygon.minY || low >= polygon.maxY )
+                 : ( coordinate <= polygon.minY || coordinate >= polygon.maxY ||
+                      high <= polygon.minX || low >= polygon.maxX ) )
+        return {};
+
+    // Rounded convex polygon과 직선의 교차는 연속 구간. 각 feature의 구간을 합산.
+    double enter = high;
+    double exit = low;
+    const auto collect = [&]( analyticCircleInterval clipped )
+    {
+        if( clipped.length <= 0.0 ) return;
+        enter = std::min( enter, clipped.midpoint - 0.5 * clipped.length );
+        exit = std::max( exit, clipped.midpoint + 0.5 * clipped.length );
+    };
+    collect( ClipPolygonFace( polygon.core, vertical, coordinate, low, high ) );
+    for( int i = 0; i < polygon.core.count; ++i )
+    {
+        collect( ClipPolygonFace( polygon.strips[i], vertical, coordinate, low, high ) );
+        collect( ClipRoundedCornerFace( polygon, i, vertical, coordinate, low, high ) );
+    }
+    return exit > enter ? analyticCircleInterval{ exit - enter, 0.5 * ( enter + exit ) }
+        : analyticCircleInterval{};
+}
+
+// 단일 rounded vertex Voronoi sector와 셀 사각형 교차. CircleClippedPolygonArea
+// 는 polygon 영역 중 원판 내부 면적을 edge-triangle / sector로 정확히 적분한다.
+double RoundedCornerRectangleArea( const analyticFluidRoundedPolygon& polygon, int vertexIndex,
+    double x0, double y0, double x1, double y1 )
+{
+    const int count = polygon.core.count;
+    const vec2 vertex = polygon.core.vertices[vertexIndex];
+    const vec2 previous = polygon.outwardNormals[( vertexIndex + count - 1 ) % count];
+    const vec2 next = polygon.outwardNormals[vertexIndex];
+    std::array<analyticPoint2, 8> current{{
+        { x0, y0 }, { x1, y0 }, { x1, y1 }, { x0, y1 }
+    }};
+    std::array<analyticPoint2, 8> temporary{};
+    int vertices = 4;
+    for( int plane = 0; plane < 2 && vertices > 0; ++plane )
+    {
+        const auto signedDistance = [&]( analyticPoint2 p )
+        {
+            const double dx = p.x - vertex.x;
+            const double dy = p.y - vertex.y;
+            return plane == 0
+                ? static_cast<double>( previous.x ) * dy - static_cast<double>( previous.y ) * dx
+                : dx * static_cast<double>( next.y ) - dy * static_cast<double>( next.x );
+        };
+        int nextCount = 0;
+        analyticPoint2 a = current[vertices - 1];
+        double da = signedDistance( a );
+        for( int i = 0; i < vertices; ++i )
+        {
+            const analyticPoint2 b = current[i];
+            const double db = signedDistance( b );
+            if( ( da >= 0.0 ) != ( db >= 0.0 ) )
+            {
+                const double t = da / ( da - db );
+                temporary[nextCount++] = { a.x + t * ( b.x - a.x ), a.y + t * ( b.y - a.y ) };
+            }
+            if( db >= 0.0 ) temporary[nextCount++] = b;
+            a = b;
+            da = db;
+        }
+        current.swap( temporary );
+        vertices = nextCount;
+    }
+    return vertices >= 3
+        ? CircleClippedPolygonArea( { vertex, polygon.radius }, current, vertices ) : 0.0;
+}
+
+double RoundedPolygonRectangleArea( const analyticFluidRoundedPolygon& polygon,
+    double x0, double y0, double x1, double y1 )
+{
+    if( x1 <= polygon.minX || x0 >= polygon.maxX || y1 <= polygon.minY || y0 >= polygon.maxY )
+        return 0.0;
+    double area = ConvexPolygonRectangleArea( polygon.core, x0, y0, x1, y1 );
+    for( int i = 0; i < polygon.core.count; ++i )
+    {
+        area += ConvexPolygonRectangleArea( polygon.strips[i], x0, y0, x1, y1 );
+        area += RoundedCornerRectangleArea( polygon, i, x0, y0, x1, y1 );
+    }
+    return std::clamp( area, 0.0, ( x1 - x0 ) * ( y1 - y0 ) );
+}
+
 } // namespace
 
 fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
