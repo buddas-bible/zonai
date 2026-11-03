@@ -248,6 +248,10 @@ public:
 #pragma region Simulation
     void clear() noexcept;
 
+    // 장애물 수/구성이나 이산 기하 규칙이 바뀌면 첫 새 snapshot을
+    // 이전 체적과 차분하지 않는다. 유체 속도·Tracer는 초기화하지 않음.
+    void invalidateObstacleHistory() noexcept;
+
     // 실험 모드: sub-cell 개방 비율의 유량과 가중 압력 Poisson 사용.
     // 기본은 기존 이진 solid 압력 solver. 위치 snapshot의 체적 변화율만 근사하며
     // 정확한 swept-volume 경로/보존형 이류는 아직 구현하지 않음.
@@ -259,6 +263,11 @@ public:
     // 표본 해상도 차이를 실제 물체 이동으로 계산하지 않는다.
     void setCutCellSampleCount( int count ) noexcept;
     [[nodiscard]] int getCutCellSampleCount() const noexcept { return cutCellSampleCount_; }
+    // 선택형 단일 Circle 전용 분석적 셀 면적/공유 MAC 면 클리핑.
+    // 다중 장애물, Capsule, Polygon은 기존 공간 표본 경로를 유지한다.
+    // 모드 변경 시 이산 점유율 차이를 swept 이동으로 오해하지 않도록 이력 초기화.
+    void setAnalyticCircleCutCellEnabled( bool enabled ) noexcept;
+    [[nodiscard]] bool isAnalyticCircleCutCellEnabled() const noexcept { return analyticCircleCutCellEnabled_; }
 
     // 실험적 Cut-cell/Body 유효질량 연립 PCG. 기본 OFF로 기존 Jacobi 경로 보존.
     // 수렴한 경우에만 Body 압력 반력을 돌려주며, 실패 시 해당 압력을 생략한다.
@@ -466,6 +475,7 @@ private:
     bool sweptGeometryCorrectionEnabled_ = false;
     bool adaptiveSweptSamplingEnabled_ = false;
     int cutCellSampleCount_ = 4;
+    bool analyticCircleCutCellEnabled_ = false;
     bool cutCellProjectionEnabled_ = false;
     bool cutCellCoupledProjectionEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
