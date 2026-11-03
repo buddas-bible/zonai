@@ -1220,9 +1220,9 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
         const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
             TryGetAnalyticPolygon( obstacles, polygon );
         const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
-            analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule  );
+            analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule );
         const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
-            analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded  );
+            analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded );
         if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
         {
             const double h = cellSize_;
@@ -2130,9 +2130,9 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
     const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
         TryGetAnalyticPolygon( obstacles, polygon );
     const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
-        analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule  );
+        analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule );
     const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
-        analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded  );
+        analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded );
     if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
     {
         const double h = cellSize_;
@@ -2344,9 +2344,9 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
             const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
                 TryGetAnalyticPolygon( intermediate, polygon );
             const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
-                analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( intermediate, capsule  );
+                analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( intermediate, capsule );
             const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
-                analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( intermediate, rounded  );
+                analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( intermediate, rounded );
             if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
             {
                 const double h = cellSize_;
@@ -2965,9 +2965,9 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
             TryGetAnalyticPolygon( obstacles, polygon );
         const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
-            analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule  );
+            analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule );
         const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
-            analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded  );
+            analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded );
         if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
         {
             const double h = cellSize_;
