@@ -1214,13 +1214,16 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
         analyticFluidCircle circle{};
         analyticFluidPolygon polygon{};
         analyticFluidCapsule capsule{};
+        analyticFluidRoundedPolygon rounded{};
         const bool circleGeometry = analyticCircleCutCellEnabled_ &&
             TryGetAnalyticCircle( obstacles, circle );
         const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
             TryGetAnalyticPolygon( obstacles, polygon );
         const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
             analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule );
-        if( circleGeometry || polygonGeometry || capsuleGeometry )
+            const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
+                analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded );
+        if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
         {
             const double h = cellSize_;
             const double inverseArea = 1.0 / ( h * h );
@@ -1234,7 +1237,9 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                         ? CircleRectangleArea( circle, left, bottom, left + h, bottom + h )
                         : polygonGeometry
                             ? ConvexPolygonRectangleArea( polygon, left, bottom, left + h, bottom + h )
-                            : CapsuleRectangleArea( capsule, left, bottom, left + h, bottom + h );
+                            : capsuleGeometry
+                                ? CapsuleRectangleArea( capsule, left, bottom, left + h, bottom + h )
+                                : RoundedPolygonRectangleArea( rounded, left, bottom, left + h, bottom + h );
                     cellFluidFraction_[cellIndex( x, y )] =
                         static_cast<float>( std::clamp( 1.0 - covered * inverseArea, 0.0, 1.0 ) );
                 }
@@ -1247,7 +1252,9 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                         ? ClipCircleFace( circle, true, normal, low, low + h )
                         : polygonGeometry
                             ? ClipPolygonFace( polygon, true, normal, low, low + h )
-                            : ClipCapsuleFace( capsule, true, normal, low, low + h );
+                            : capsuleGeometry
+                                ? ClipCapsuleFace( capsule, true, normal, low, low + h )
+                                : ClipRoundedPolygonFace( rounded, true, normal, low, low + h );
                     const int face = uIndex( x, y );
                     uOpenFraction_[face] = static_cast<float>(
                         std::clamp( 1.0 - interval.length / h, 0.0, 1.0 ) );
@@ -1268,7 +1275,9 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                         ? ClipCircleFace( circle, false, normal, low, low + h )
                         : polygonGeometry
                             ? ClipPolygonFace( polygon, false, normal, low, low + h )
-                            : ClipCapsuleFace( capsule, false, normal, low, low + h );
+                            : capsuleGeometry
+                                ? ClipCapsuleFace( capsule, false, normal, low, low + h )
+                                : ClipRoundedPolygonFace( rounded, false, normal, low, low + h );
                     const int face = vIndex( x, y );
                     vOpenFraction_[face] = static_cast<float>(
                         std::clamp( 1.0 - interval.length / h, 0.0, 1.0 ) );
@@ -2115,13 +2124,16 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
     analyticFluidCircle circle{};
     analyticFluidPolygon polygon{};
     analyticFluidCapsule capsule{};
+        analyticFluidRoundedPolygon rounded{};
     const bool circleGeometry = analyticCircleCutCellEnabled_ &&
         TryGetAnalyticCircle( obstacles, circle );
     const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
         TryGetAnalyticPolygon( obstacles, polygon );
     const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
         analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule );
-    if( circleGeometry || polygonGeometry || capsuleGeometry )
+        const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
+            analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded );
+    if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
     {
         const double h = cellSize_;
         const auto& body = predicted.front();
@@ -2136,7 +2148,9 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
                 ? ClipCircleFace( circle, vertical, normal, low, low + h )
                 : polygonGeometry
                     ? ClipPolygonFace( polygon, vertical, normal, low, low + h )
-                    : ClipCapsuleFace( capsule, vertical, normal, low, low + h );
+                    : capsuleGeometry
+                                ? ClipCapsuleFace( capsule, vertical, normal, low, low + h )
+                                : ClipRoundedPolygonFace( rounded, vertical, normal, low, low + h );
             if( clipped.length <= 0.0 ) return;
             const vec2 point = vertical
                 ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
@@ -2324,13 +2338,16 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
             analyticFluidCircle circle{};
             analyticFluidPolygon polygon{};
             analyticFluidCapsule capsule{};
+        analyticFluidRoundedPolygon rounded{};
             const bool circleGeometry = analyticCircleCutCellEnabled_ &&
                 TryGetAnalyticCircle( intermediate, circle );
             const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
                 TryGetAnalyticPolygon( intermediate, polygon );
             const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
                 analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( intermediate, capsule );
-            if( circleGeometry || polygonGeometry || capsuleGeometry )
+                const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
+                    analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( intermediate, rounded );
+            if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
             {
                 const double h = cellSize_;
                 const float intervalDt = timeStep / samples;
@@ -2350,7 +2367,9 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                             ? ClipCircleFace( circle, true, normal, low, low + h )
                             : polygonGeometry
                                 ? ClipPolygonFace( polygon, true, normal, low, low + h )
-                                : ClipCapsuleFace( capsule, true, normal, low, low + h );
+                                : capsuleGeometry
+                                ? ClipCapsuleFace( capsule, true, normal, low, low + h )
+                                : ClipRoundedPolygonFace( rounded, true, normal, low, low + h );
                         if( clipped.length <= 0.0 ) continue;
                         const vec2 point{ static_cast<float>( normal ),
                             static_cast<float>( clipped.midpoint ) };
@@ -2366,7 +2385,9 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                             ? ClipCircleFace( circle, false, normal, low, low + h )
                             : polygonGeometry
                                 ? ClipPolygonFace( polygon, false, normal, low, low + h )
-                                : ClipCapsuleFace( capsule, false, normal, low, low + h );
+                                : capsuleGeometry
+                                ? ClipCapsuleFace( capsule, false, normal, low, low + h )
+                                : ClipRoundedPolygonFace( rounded, false, normal, low, low + h );
                         if( clipped.length <= 0.0 ) continue;
                         const vec2 point{ static_cast<float>( clipped.midpoint ),
                             static_cast<float>( normal ) };
@@ -2938,13 +2959,16 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         analyticFluidCircle circle{};
         analyticFluidPolygon polygon{};
         analyticFluidCapsule capsule{};
+        analyticFluidRoundedPolygon rounded{};
         const bool circleGeometry = analyticCircleCutCellEnabled_ &&
             TryGetAnalyticCircle( obstacles, circle );
         const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
             TryGetAnalyticPolygon( obstacles, polygon );
         const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
             analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule );
-        if( circleGeometry || polygonGeometry || capsuleGeometry )
+            const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
+                analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded );
+        if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
         {
             const double h = cellSize_;
             for( int y = 0; y < height_; ++y )
@@ -2959,7 +2983,9 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                         ? ClipCircleFace( circle, true, normal, low, low + h )
                         : polygonGeometry
                             ? ClipPolygonFace( polygon, true, normal, low, low + h )
-                            : ClipCapsuleFace( capsule, true, normal, low, low + h );
+                            : capsuleGeometry
+                                ? ClipCapsuleFace( capsule, true, normal, low, low + h )
+                                : ClipRoundedPolygonFace( rounded, true, normal, low, low + h );
                     if( clipped.length <= 0.0 ) continue;
                     const vec2 point{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) };
                     const vec2 force{ static_cast<float>( clipped.length ), 0.0f };
@@ -2978,7 +3004,9 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                         ? ClipCircleFace( circle, false, normal, low, low + h )
                         : polygonGeometry
                             ? ClipPolygonFace( polygon, false, normal, low, low + h )
-                            : ClipCapsuleFace( capsule, false, normal, low, low + h );
+                            : capsuleGeometry
+                                ? ClipCapsuleFace( capsule, false, normal, low, low + h )
+                                : ClipRoundedPolygonFace( rounded, false, normal, low, low + h );
                     if( clipped.length <= 0.0 ) continue;
                     const vec2 point{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
                     const vec2 force{ 0.0f, static_cast<float>( clipped.length ) };
