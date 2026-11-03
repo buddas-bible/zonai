@@ -1902,11 +1902,14 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
     int partialFaces = 0;
     analyticFluidCircle circle{};
     analyticFluidPolygon polygon{};
+    analyticFluidCapsule capsule{};
     const bool circleGeometry = analyticCircleCutCellEnabled_ &&
         TryGetAnalyticCircle( obstacles, circle );
     const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
         TryGetAnalyticPolygon( obstacles, polygon );
-    if( circleGeometry || polygonGeometry )
+    const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
+        analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule );
+    if( circleGeometry || polygonGeometry || capsuleGeometry )
     {
         const double h = cellSize_;
         const auto& body = predicted.front();
@@ -1919,7 +1922,9 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
             const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
             const auto clipped = circleGeometry
                 ? ClipCircleFace( circle, vertical, normal, low, low + h )
-                : ClipPolygonFace( polygon, vertical, normal, low, low + h );
+                : polygonGeometry
+                    ? ClipPolygonFace( polygon, vertical, normal, low, low + h )
+                    : ClipCapsuleFace( capsule, vertical, normal, low, low + h );
             if( clipped.length <= 0.0 ) return;
             const vec2 point = vertical
                 ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
