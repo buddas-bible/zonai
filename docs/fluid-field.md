@@ -380,6 +380,16 @@ Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들�
 
 **제한:** 다각형의 선분 경계 기하 자체만 정확하게 clip한다. 이동 중 시간 적분은 여전히 유한한 midpoint 표본이고, 다중 도형 union, rounded/capsule 표면, continuous swept volume 및 FSI 전체 질량·에너지 보존은 미구현이다. `radius == 0`인 sharp convex geometry만 분석적으로 처리한다.
 
+## Part 13p — 단일 회전 Capsule의 분석적 Cut-cell 기하 (선택형)
+
+- `setAnalyticCapsuleCutCellEnabled(true)`은 기본 OFF이고, **유효한 Capsule 하나**(양 끝점 사이 선분 길이 양수, 반지름 양수)에서만 활성화된다. Circle과 Sharp Polygon의 선택형 적분 경로는 유지하고, 두 개 이상 장애물/미지원/잘못된 기하에서는 기존 4×4/8×8 공간 표본으로 돌아간다.
+- Capsule를 **중앙 유한 직사각형 + 양 끝의 분리된 반원판**으로 나눠, 회전한 경우에도 각 Cut-cell의 점유 면적을 직접 계산한다. 중앙 strip은 convex polygon과 셀 사각형의 clipping/shoelace 면적이고, 반원판은 셀을 Capsule 축의 끝 반평면으로 자른 뒤 circle–convex-polygon의 edge triangle/circular sector 적분을 수행한다. 반원 두 개와 중앙 strip은 넓이 중복 없이 Capsule를 덮으며 전체 면적은 `2*r*axisLength + π*r²`이다.
+- 공유 U/V MAC face의 막힌 길이는 **중앙 strip/양쪽 반원과 선분의 교차구간**을 클리핑해서 하나의 연속 구간으로 얻는다. 같은 길이·중점으로 **열린 면 비율, 강체 법선 속도, Schur pressure 반력/토크 B/Bᵀ, 압력 예측 blocked face flux, moving rigid swept face flux**를 계산한다. 시간 방향 적분은 기존 adaptive midpoint quadrature를 유지한다.
+- `fluidField2`의 실험 설정 전환은 기존 기하/체적 이력을 무효화한다. Sandbox Wind에서 **Capsule만 유체 장애물로 사용** 모드로 중간 Dynamic Body만 골라 World와 연동하며, 세 종류 단독 모드(Circle/Capsule/Polygon)는 상호 배타적이다. Field 크기를 바꾸더라도 모드 설정을 유지한다.
+- 테스트는 축 정렬/여러 회전 각도/이동 Capsule의 분석적 전체 면적, U/V의 straight strip+cap 폐색 길이, 공간 표본 수 변경 후 기하 이력 초기화, Schur 압력–강체 회전 예측 유량 일치, 다중 Capsule일 때 표본 경로 복귀와 Sandbox World 결합을 검증한다.
+
+**한계:** Capsule **한 개**의 셀/면 교차 기하만 분석적으로 적분한다. 여러 장애물의 합집합 면적, 둥근 다각형, 시공간을 통째로 적분한 정확한 swept volume, 유체–강체 전체 에너지/질량 완전 보존은 이 단계의 범위 밖이다. 다중/미지원 장애물은 공간 표본 경로로 남는다. 참고로 circle–polygon 교차 적분은 Green 정리 기반의 선분 삼각형/원호 부채꼴 방법을 사용한다(KACTL CirclePolygonIntersection, CC0).
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
