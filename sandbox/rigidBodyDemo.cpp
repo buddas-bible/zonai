@@ -1385,6 +1385,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     const bool cutCell = windField_->isCutCellProjectionEnabled();
     const bool analyticCircle = windField_->isAnalyticCircleCutCellEnabled();
     const bool analyticPolygon = windField_->isAnalyticPolygonCutCellEnabled();
+    const bool analyticRoundedPolygon = windField_->isAnalyticRoundedPolygonCutCellEnabled();
     const bool analyticCapsule = windField_->isAnalyticCapsuleCutCellEnabled();
     const int cutCellSamples = windField_->getCutCellSampleCount();
     const bool cutCellCoupled = windField_->isCutCellCoupledProjectionEnabled();
@@ -1400,6 +1401,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     windField_->setCutCellSampleCount( cutCellSamples );
     windField_->setAnalyticCircleCutCellEnabled( analyticCircle );
     windField_->setAnalyticPolygonCutCellEnabled( analyticPolygon );
+    windField_->setAnalyticRoundedPolygonCutCellEnabled( analyticRoundedPolygon );
     windField_->setAnalyticCapsuleCutCellEnabled( analyticCapsule );
     windField_->setCutCellCoupledProjectionEnabled( cutCellCoupled );
     windField_->setConservativeAdvectionEnabled( conservative );
@@ -1505,6 +1507,30 @@ void rigidBodyDemo::resetWindFlow()
     }
     clearContactEventTrail();
     refreshContacts();
+}
+
+void rigidBodyDemo::setWindRoundedBoxEnabled( bool enabled )
+{
+    if( kind_ != demoKind::windFlow || shapes_.size() < 3 ||
+        windRoundedBoxEnabled_ == enabled ) return;
+    visualShape& visual = shapes_[2];
+    if( !world_.IsValid( visual.bodyHandle ) || !world_.IsValid( visual.shapeHandle ) ) return;
+    const auto* polygon = std::get_if<polygon2>( &world_.GetShape( visual.shapeHandle ).geometry );
+    if( !polygon ) return;
+
+    polygon2 geometry = *polygon;
+    geometry.radius = enabled ? 0.14f : 0.0f;
+    const collisionFilter filter = world_.GetShapeFilter( visual.shapeHandle );
+    const float density = world_.GetShapeDensity( visual.shapeHandle );
+    const float friction = world_.GetShapeFriction( visual.shapeHandle );
+    const float restitution = world_.GetShapeRestitution( visual.shapeHandle );
+
+    world_.DestroyShape( visual.shapeHandle );
+    visual.shapeHandle = world_.CreateShape( visual.bodyHandle, geometry, filter, density );
+    world_.SetShapeFriction( visual.shapeHandle, friction );
+    world_.SetShapeRestitution( visual.shapeHandle, restitution );
+    windRoundedBoxEnabled_ = enabled;
+    if( windField_ ) windField_->invalidateObstacleHistory();
 }
 
 void rigidBodyDemo::createWindFlow()

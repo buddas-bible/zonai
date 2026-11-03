@@ -292,6 +292,19 @@ public:
     {
         return windField_ && windField_->isAnalyticPolygonCutCellEnabled();
     }
+    void setWindAnalyticRoundedPolygonEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setAnalyticRoundedPolygonCutCellEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindAnalyticRoundedPolygonEnabled() const noexcept
+    {
+        return windField_ && windField_->isAnalyticRoundedPolygonCutCellEnabled();
+    }
+
+    // World의 기존 다각형 상자를 재생성하여 vertex radius를 전환한다.
+    // Rounded Polygon 테스트에서만 사용. 다른 Body는 그대로 유지한다.
+    void setWindRoundedBoxEnabled( bool enabled );
+    [[nodiscard]] bool isWindRoundedBoxEnabled() const noexcept { return windRoundedBoxEnabled_; }
     void setWindAnalyticCapsuleEnabled( bool enabled ) noexcept
     {
         if( windField_ ) windField_->setAnalyticCapsuleCutCellEnabled( enabled );
@@ -621,6 +634,7 @@ private:
     bool windObstacleCouplingEnabled_ = true;
     bool windCircleOnlyFluidEnabled_ = false;
     bool windPolygonOnlyFluidEnabled_ = false;
+    bool windRoundedBoxEnabled_ = false;
     bool windCapsuleOnlyFluidEnabled_ = false;
     bool windSynchronizedCouplingEnabled_ = true;
     int windCouplingSteps_ = 0;

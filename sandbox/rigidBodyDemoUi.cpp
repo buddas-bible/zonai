@@ -971,6 +971,13 @@ void rigidBodyDemoUi::drawExperimentControls()
         bool analyticPolygon = isWindAnalyticPolygonEnabled();
         if( ImGui::Checkbox( "Sharp 다각형 경계 분석적 적분 (실험)###WindAnalyticPolygon", &analyticPolygon ) )
             setWindAnalyticPolygonEnabled( analyticPolygon );
+        bool roundedBox = isWindRoundedBoxEnabled();
+        if( ImGui::Checkbox( "World 다각형 상자 모서리 둥글게 (R=0.14)###WindRoundedBox", &roundedBox ) )
+            setWindRoundedBoxEnabled( roundedBox );
+        bool analyticRoundedPolygon = isWindAnalyticRoundedPolygonEnabled();
+        if( ImGui::Checkbox( "Rounded 다각형 경계 분석적 적분 (실험)###WindAnalyticRoundedPolygon",
+                &analyticRoundedPolygon ) )
+            setWindAnalyticRoundedPolygonEnabled( analyticRoundedPolygon );
         bool capsuleOnly = isWindCapsuleOnlyFluidEnabled();
         if( ImGui::Checkbox( "Capsule만 유체 장애물로 사용###WindCapsuleOnly", &capsuleOnly ) )
             setWindCapsuleOnlyFluidEnabled( capsuleOnly );
@@ -978,7 +985,7 @@ void rigidBodyDemoUi::drawExperimentControls()
         if( ImGui::Checkbox( "Capsule 경계 분석적 적분 (실험)###WindAnalyticCapsule", &analyticCapsule ) )
             setWindAnalyticCapsuleEnabled( analyticCapsule );
         ImGui::EndDisabled();
-        ImGui::TextDisabled( "단일 Circle, Capsule, Sharp 다각형만 분석적 적분. 혼합 및 Rounded Polygon은 표본 경로." );
+        ImGui::TextDisabled( "분석적 경계는 단일 Circle/Capsule/Sharp/Rounded Polygon 전용. 다중 장애물은 표본 방식." );
         bool cutCellCoupled = isWindCutCellCoupledProjectionEnabled();
         ImGui::BeginDisabled( !isWindCutCellProjectionEnabled() );
         if( ImGui::Checkbox( "Cut-cell 질량·관성 연성 PCG (실험)###WindCutCellCoupled", &cutCellCoupled ) )

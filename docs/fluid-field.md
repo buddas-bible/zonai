@@ -390,6 +390,16 @@ Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들�
 
 **한계:** Capsule **한 개**의 셀/면 교차 기하만 분석적으로 적분한다. 여러 장애물의 합집합 면적, 둥근 다각형, 시공간을 통째로 적분한 정확한 swept volume, 유체–강체 전체 에너지/질량 완전 보존은 이 단계의 범위 밖이다. 다중/미지원 장애물은 공간 표본 경로로 남는다. 참고로 circle–polygon 교차 적분은 Green 정리 기반의 선분 삼각형/원호 부채꼴 방법을 사용한다(KACTL CirclePolygonIntersection, CC0).
 
+## Part 13q — 단일 Rounded Convex Polygon의 분석적 Cut-cell 기하 (선택형)
+
+- `setAnalyticRoundedPolygonCutCellEnabled(true)`는 기본 **OFF**, 유효한 단일 `polygon2`(엄격히 볼록, CCW 정점 3–8개, `radius > 0`)에서만 동작한다. 기존 Sharp Polygon(`radius == 0`), Circle, Capsule용 별도 분석 경로는 유지된다. 다중/미지원 장애물은 기존 4×4/8×8 공간 표본 모드로 되돌아간다.
+- Rounded Polygon은 **core convex polygon + 각 변의 외부 strip + 각 꼭짓점의 원호 sector**로 분리한다. 서로 면적 중복이 없는 가장 가까운 feature의 Voronoi 영역으로 분할하며, cell rectangle과 core/strip을 Sutherland–Hodgman clipping한 정확한 면적 및 원호 wedge를 half-plane clipping한 뒤 circle–polygon 선분/부채꼴 적분으로 점유 면적을 계산한다. 충분히 큰 직사각형 안에서는 `A = A_core + perimeter * radius + pi * radius²`가 되어야 한다.
+- 공유 U/V MAC face는 core/strip/vertex sector와의 교차 구간을 합친 하나의 **막힌 선분 길이와 중점**을 사용한다. 동일한 길이와 중점을 열린 면 비율, rigid normal 속도, PCG Schur `B/Bᵀ` 압력 반력/회전 토크, predicted blocked face flux, 이동 중 swept face 시간 적분에 공통 적용한다. bbox 밖 셀/면은 계산을 생략한다.
+- Sandbox Wind에서 다각형 상자 모서리 둥글게를 켜면 마지막 Dynamic 상자의 실제 World shape을 원래 Sharp Polygon에서 `radius=0.14`인 Polygon으로 변경한다. 이 상태에서 `다각형 상자만 유체 장애물로 사용`과 `Rounded 다각형 경계 분석적 적분`을 켜면 해당 Body의 World 질량/관성과 연성하는 압력·바람 테스트가 가능하다. Shape 교체 또는 알고리즘 모드 전환 시 유체 속도·Tracer는 그대로 두고 이전 Cut-cell/swept 기하 이력만 무효화한다.
+- 회귀 테스트는 Sharp core + 곡선 모서리의 분석적 전체 면적, U/V 원호 face 개방 비율, 여러 회전 각도의 일정 면적, 4×4/8×8 독립, 이동 후 swept flux, 압력 Schur/경계 속도 예측 잔차, 다중 장애물 fallback, Sandbox shape 교체 및 Field 재설정을 확인한다.
+
+**제한:** 이 적분은 단일 Rounded Polygon의 **각 시점**에서 정확한 공간 기하량을 계산한다. 움직이는 표면의 시간 적분은 midpoint quadrature 기반 근사이며, 여러 장애물의 합집합, Shape끼리 겹칠 때의 모멘텀 재분배, 전체 FSI 에너지/질량 보존 증명은 아직 포함하지 않는다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.

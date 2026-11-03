@@ -1001,6 +1001,146 @@ void checkCoupledCutCellAdjointContinuity()
         "legacy cut-cell pressure must not pretend to predict coupled volume response" );
 }
 
+void checkAnalyticRoundedPolygonCutCell()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr float h = 0.5f;
+    constexpr float radius = 0.35f;
+    constexpr float halfExtent = 0.35f;
+    constexpr vec2 center{ 0.0f, -0.15f };
+    constexpr float coreArea = 4.0f * halfExtent * halfExtent;
+    constexpr float perimeter = 8.0f * halfExtent;
+    constexpr float expectedVolume = 24.0f * 16.0f * h * h -
+        ( coreArea + perimeter * radius + std::numbers::pi_v<float> * radius * radius );
+
+    fluidField2 field{ 24, 16, h, { -6.0f, -4.0f } };
+    field.setCutCellProjectionEnabled( true );
+    field.setAnalyticRoundedPolygonCutCellEnabled( true );
+    polygon2 geometry = MakeBox( { halfExtent, halfExtent } );
+    geometry.radius = radius;
+    fluidShapeObstacle2 box{ geometry, { center, {} }, center, {}, 0.0f };
+    std::array<fluidObstacleForce2, 1> forces{};
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), forces, 160 );
+    check( std::abs( field.getCutCellTransition().fluidVolume - expectedVolume ) < 1.0e-4f &&
+        !field.getCutCellPressure().hasVolumeHistory &&
+        !field.getSweptFaceFlux().usedSweptFlux,
+        "analytic rounded Polygon must have area A + perimeter*r + pi*r^2 on first snapshot" );
+
+    // 오른쪽 위 원호(vertex=(0.35,0.20))와 x=0.5, y=0.5 face의 정확한 교차.
+    const float topRightX = center.x + halfExtent;
+    const float topRightY = center.y + halfExtent;
+    const float yUpper = topRightY +
+        std::sqrt( radius * radius - ( 0.5f - topRightX ) * ( 0.5f - topRightX ) );
+    const float xUpper = topRightX +
+        std::sqrt( radius * radius - ( 0.5f - topRightY ) * ( 0.5f - topRightY ) );
+    check( std::abs( field.getUFaceOpenFraction( 13, 9 ) -
+        ( 1.0f - ( yUpper - 0.5f ) / h ) ) < 2.0e-5f,
+        "rounded Polygon U face must clip the curved corner rather than its sharp core" );
+    check( std::abs( field.getVFaceOpenFraction( 13, 9 ) -
+        ( 1.0f - ( xUpper - 0.5f ) / h ) ) < 2.0e-5f,
+        "rounded Polygon V face must clip the circular vertex sector" );
+
+    field.setCutCellSampleCount( 8 );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), forces, 160 );
+    check( std::abs( field.getCutCellTransition().fluidVolume - expectedVolume ) < 1.0e-4f &&
+        !field.getCutCellPressure().hasVolumeHistory,
+        "analytic rounded Polygon volume must be independent of 4x4/8x8 samples" );
+
+    for( float angle : { 0.26f, 0.64f, 1.13f, -0.79f } )
+    {
+        box.transform.rotation = rot2::FromRadians( angle );
+        field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), forces, 180 );
+        check( std::abs( field.getCutCellTransition().fluidVolume - expectedVolume ) < 1.0e-4f &&
+            field.getSweptFaceFlux().usedSweptFlux &&
+            std::isfinite( field.getSweptFaceFlux().geometryMismatch ),
+            "arbitrarily rotated rounded Polygon must keep exact area and finite swept flux" );
+    }
+
+    field.setCutCellCoupledProjectionEnabled( true );
+    box.linearVelocity = { 0.8f, -0.3f };
+    box.angularVelocity = 0.8f;
+    box.inverseMass = 0.5f;
+    box.inverseInertia = 1.2f;
+    field.addVelocity( { -1.1f, 0.25f }, { 1.3f, -0.4f }, 1.4f );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), forces, 200 );
+    const auto& pressure = field.getCutCellPressure();
+    check( pressure.usedCoupledProjection && !pressure.coupledSolveFailed &&
+        pressure.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        pressure.synchronizedPartialFaces > 0 &&
+        std::isfinite( pressure.predictedContinuityRms ) &&
+        std::abs( pressure.predictedContinuityRms - pressure.pressureResidual ) <
+            2.0e-3f + 0.1f * pressure.pressureResidual,
+        "rounded Polygon Schur traction and predicted blocked face flux must stay adjoint" );
+
+    box.transform.position += vec2{ 0.16f, 0.08f };
+    box.center = box.transform.position;
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), forces, 200 );
+    check( field.getSweptFaceFlux().usedSweptFlux &&
+        field.getSweptFaceFlux().totalAbsoluteFlux > 0.0f &&
+        std::isfinite( field.getSweptFaceFlux().geometryMismatch ) &&
+        std::abs( field.getCutCellTransition().fluidVolume - expectedVolume ) < 1.0e-4f,
+        "moving rounded Polygon must integrate swept face flux with invariant area" );
+
+    field.setAnalyticRoundedPolygonCutCellEnabled( false );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), forces, 200 );
+    check( !field.getCutCellPressure().hasVolumeHistory &&
+        !field.getSweptFaceFlux().usedSweptFlux,
+        "disabling rounded Polygon analysis must reset swept geometry history" );
+
+    fluidField2 fallback{ 24, 16, h, { -6.0f, -4.0f } };
+    fluidField2 sampled{ 24, 16, h, { -6.0f, -4.0f } };
+    fallback.setCutCellProjectionEnabled( true );
+    sampled.setCutCellProjectionEnabled( true );
+    fallback.setAnalyticRoundedPolygonCutCellEnabled( true );
+    std::array<fluidShapeObstacle2, 2> obstacles{ box, box };
+    obstacles[1].transform.position += vec2{ 1.2f, 0.7f };
+    obstacles[1].center = obstacles[1].transform.position;
+    std::array<fluidObstacleForce2, 2> reactions{};
+    fallback.step( dt, obstacles, reactions, 120 );
+    sampled.step( dt, obstacles, reactions, 120 );
+    check( std::abs( fallback.getCutCellTransition().fluidVolume -
+        sampled.getCutCellTransition().fluidVolume ) < 1.0e-5f,
+        "multiple rounded polygons must use existing sampled union geometry" );
+
+    // 비축정렬/비직각의 CCW 삼각형에서도 core + perimeter*r + pi*r²를 만족.
+    constexpr std::array<vec2, 3> TRIANGLE{
+        vec2{ -0.50f, -0.35f }, vec2{ 0.55f, -0.20f }, vec2{ 0.08f, 0.67f }
+    };
+    constexpr float triangleRadius = 0.17f;
+    const float triangleArea = 0.5f * Cross( TRIANGLE[1] - TRIANGLE[0],
+        TRIANGLE[2] - TRIANGLE[0] );
+    const float trianglePerimeter =
+        Length( TRIANGLE[1] - TRIANGLE[0] ) +
+        Length( TRIANGLE[2] - TRIANGLE[1] ) +
+        Length( TRIANGLE[0] - TRIANGLE[2] );
+    const float triangleFluidVolume = 24.0f * 16.0f * h * h -
+        ( triangleArea + trianglePerimeter * triangleRadius +
+            std::numbers::pi_v<float> * triangleRadius * triangleRadius );
+
+    polygon2 triangle = MakePolygon( TRIANGLE );
+    triangle.radius = triangleRadius;
+    fluidShapeObstacle2 triangularBody{
+        triangle, { { 0.16f, -0.08f }, {} }, { 0.16f, -0.08f }, {}, 0.0f
+    };
+    fluidField2 triangleField{ 24, 16, h, { -6.0f, -4.0f } };
+    triangleField.setCutCellProjectionEnabled( true );
+    triangleField.setAnalyticRoundedPolygonCutCellEnabled( true );
+    for( float angle : { 0.0f, 0.37f, 1.02f, -0.61f } )
+    {
+        triangularBody.transform.rotation = rot2::FromRadians( angle );
+        triangleField.step( dt,
+            std::span<const fluidShapeObstacle2>( &triangularBody, 1 ), forces, 180 );
+        check( std::abs( triangleField.getCutCellTransition().fluidVolume -
+            triangleFluidVolume ) < 1.0e-4f,
+            "nonrectangular rounded convex triangle must preserve analytic offset area under rotation" );
+    }
+
+    field.clear();
+    check( !field.getSweptFaceFlux().usedSweptFlux &&
+        !field.isAnalyticRoundedPolygonCutCellEnabled(),
+        "clear must retain explicit rounded geometry off setting" );
+}
+
 void checkAnalyticSingleCapsuleCutCell()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1944,6 +2084,7 @@ int main()
     checkAnalyticSingleCircleCutCell();
     checkAnalyticSharpPolygonCutCell();
     checkAnalyticSingleCapsuleCutCell();
+    checkAnalyticRoundedPolygonCutCell();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();

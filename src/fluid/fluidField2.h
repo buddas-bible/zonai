@@ -279,6 +279,14 @@ public:
     void setAnalyticCapsuleCutCellEnabled( bool enabled ) noexcept;
     [[nodiscard]] bool isAnalyticCapsuleCutCellEnabled() const noexcept { return analyticCapsuleCutCellEnabled_; }
 
+    // 단일 radius>0인 strictly convex Polygon의 core/edge/corner 분석적 적분.
+    // 기본 OFF. 다중·미지원 Shape은 기존 공간 표본 경로.
+    void setAnalyticRoundedPolygonCutCellEnabled( bool enabled ) noexcept;
+    [[nodiscard]] bool isAnalyticRoundedPolygonCutCellEnabled() const noexcept
+    {
+        return analyticRoundedPolygonCutCellEnabled_;
+    }
+
     // 실험적 Cut-cell/Body 유효질량 연립 PCG. 기본 OFF로 기존 Jacobi 경로 보존.
     // 수렴한 경우에만 Body 압력 반력을 돌려주며, 실패 시 해당 압력을 생략한다.
     void setCutCellCoupledProjectionEnabled( bool enabled ) noexcept { cutCellCoupledProjectionEnabled_ = enabled; }
@@ -488,6 +496,7 @@ private:
     bool analyticCircleCutCellEnabled_ = false;
     bool analyticPolygonCutCellEnabled_ = false;
     bool analyticCapsuleCutCellEnabled_ = false;
+    bool analyticRoundedPolygonCutCellEnabled_ = false;
     bool cutCellProjectionEnabled_ = false;
     bool cutCellCoupledProjectionEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
