@@ -1900,7 +1900,12 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
             }
 
             analyticFluidCircle circle{};
-            if( analyticCircleCutCellEnabled_ && TryGetAnalyticCircle( intermediate, circle ) )
+            analyticFluidPolygon polygon{};
+            const bool circleGeometry = analyticCircleCutCellEnabled_ &&
+                TryGetAnalyticCircle( intermediate, circle );
+            const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
+                TryGetAnalyticPolygon( intermediate, polygon );
+            if( circleGeometry || polygonGeometry )
             {
                 const double h = cellSize_;
                 const float intervalDt = timeStep / samples;
@@ -1916,7 +1921,9 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                     {
                         const double normal = origin_.x + x * h;
                         const double low = origin_.y + y * h;
-                        const auto clipped = ClipCircleFace( circle, true, normal, low, low + h );
+                        const auto clipped = circleGeometry
+                            ? ClipCircleFace( circle, true, normal, low, low + h )
+                            : ClipPolygonFace( polygon, true, normal, low, low + h );
                         if( clipped.length <= 0.0 ) continue;
                         const vec2 point{ static_cast<float>( normal ),
                             static_cast<float>( clipped.midpoint ) };
@@ -1928,7 +1935,9 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                     {
                         const double normal = origin_.y + y * h;
                         const double low = origin_.x + x * h;
-                        const auto clipped = ClipCircleFace( circle, false, normal, low, low + h );
+                        const auto clipped = circleGeometry
+                            ? ClipCircleFace( circle, false, normal, low, low + h )
+                            : ClipPolygonFace( polygon, false, normal, low, low + h );
                         if( clipped.length <= 0.0 ) continue;
                         const vec2 point{ static_cast<float>( clipped.midpoint ),
                             static_cast<float>( normal ) };
