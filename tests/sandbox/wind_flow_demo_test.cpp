@@ -659,6 +659,61 @@ void checkSandboxAnalyticCapsuleMode()
         "returning Capsule-only Wind to mixed obstacles must rebuild first sampled geometry snapshot" );
 }
 
+void checkSandboxAnalyticRoundedPolygonMode()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindCutCellCoupledProjectionEnabled( true );
+    scene.setWindPolygonOnlyFluidEnabled( true );
+    scene.setWindRoundedBoxEnabled( true );
+    scene.setWindAnalyticRoundedPolygonEnabled( true );
+    scene.setWindFluidSubstepCount( 2 );
+    const visualShape& box = scene.getShapes()[2];
+    const auto* rounded = std::get_if<polygon2>(
+        &scene.getWorld().GetShape( box.shapeHandle ).geometry );
+    check( rounded && rounded->radius > 0.0f &&
+        scene.isWindRoundedBoxEnabled() && scene.isWindAnalyticRoundedPolygonEnabled(),
+        "wind box geometry switch must create a real World rounded Polygon shape" );
+
+    const bodyId body = box.bodyHandle;
+    scene.getWorld().SetBodyLinearVelocity( body, { -0.7f, 0.25f } );
+    scene.getWorld().SetBodyAngularVelocity( body, 0.6f );
+    scene.addWindVortex();
+    scene.step( dt, 4 );
+    const auto& first = scene.getWindField()->getCutCellPressure();
+    check( scene.getWindCouplingSteps() == 2 &&
+        first.usedCoupledProjection && !first.coupledSolveFailed &&
+        std::isfinite( first.predictedContinuityRms ) &&
+        IsFinite( scene.getWorld().GetBodyLinearVelocity( body ) ),
+        "isolated rounded box must use World mass/inertia-aware pressure coupling" );
+
+    scene.step( dt, 4 );
+    check( scene.getWindField()->getSweptFaceFlux().usedSweptFlux &&
+        scene.getWindField()->getCutCellPressure().hasVolumeHistory &&
+        std::isfinite( scene.getWindField()->getSweptFaceFlux().geometryMismatch ),
+        "moving rounded World box must create swept-face geometry history" );
+
+    scene.configureWindField( 24, 14, 0.5f );
+    check( scene.isWindRoundedBoxEnabled() && scene.isWindAnalyticRoundedPolygonEnabled() &&
+        !scene.getWindField()->getCutCellPressure().hasVolumeHistory,
+        "field resize must preserve rounded box and analytic settings without old history" );
+
+    scene.setWindRoundedBoxEnabled( false );
+    scene.setWindAnalyticRoundedPolygonEnabled( false );
+    scene.setWindPolygonOnlyFluidEnabled( false );
+    scene.setWindFluidSubstepCount( 1 );
+    scene.step( dt, 4 );
+    const auto* sharp = std::get_if<polygon2>(
+        &scene.getWorld().GetShape( scene.getShapes()[2].shapeHandle ).geometry );
+    check( sharp && sharp->radius == 0.0f &&
+        scene.getWindField()->getCutCellPressure().activeCells > 0 &&
+        !scene.getWindField()->getCutCellPressure().hasVolumeHistory,
+        "restoring sharp mixed-shape wind must reset rounded geometry and old volume source" );
+}
+
 void checkSandboxAnalyticPolygonMode()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -923,6 +978,7 @@ int main()
     checkMovingCutCellSweptVolumeLedger();
     checkSandboxAnalyticCircleMode();
     checkSandboxAnalyticPolygonMode();
+    checkSandboxAnalyticRoundedPolygonMode();
     checkSandboxAnalyticCapsuleMode();
     checkSandboxConservativeAdvectionTrial();
 }
