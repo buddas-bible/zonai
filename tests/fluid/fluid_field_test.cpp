@@ -1001,6 +1001,108 @@ void checkCoupledCutCellAdjointContinuity()
         "legacy cut-cell pressure must not pretend to predict coupled volume response" );
 }
 
+void checkAnalyticSingleCapsuleCutCell()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr float h = 0.5f;
+    constexpr float radius = 0.30f;
+    constexpr float axisLength = 1.40f;
+    constexpr float expectedVolume = 24.0f * 16.0f * h * h -
+        ( 2.0f * radius * axisLength + std::numbers::pi_v<float> * radius * radius );
+
+    fluidField2 field{ 24, 16, h, { -6.0f, -4.0f } };
+    field.setCutCellProjectionEnabled( true );
+    field.setAnalyticCapsuleCutCellEnabled( true );
+    fluidShapeObstacle2 capsule{
+        capsule2{ { -0.70f, 0.0f }, { 0.70f, 0.0f }, radius },
+        { { 0.0f, -0.17f }, {} }, { 0.0f, -0.17f }, {}, 0.0f
+    };
+    std::array<fluidObstacleForce2, 1> feedback{};
+    field.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ), feedback, 180 );
+    check( std::abs( field.getCutCellTransition().fluidVolume - expectedVolume ) < 1.0e-4f &&
+        !field.getCutCellPressure().hasVolumeHistory &&
+        !field.getSweptFaceFlux().usedSweptFlux,
+        "analytic Capsule must recover central strip and semicircle areas on first snapshot" );
+
+    // x=0의 U-face (y=0..0.5): 가운데 strip의 blocked 길이는 0.13 m.
+    check( std::abs( field.getUFaceOpenFraction( 12, 8 ) - 0.74f ) < 2.0e-5f,
+        "Capsule U aperture must clip its straight core without spatial samples" );
+    // y=0의 V-face (x=0.5..1): 중앙 strip + 오른쪽 둥근 cap 한 구간.
+    const float capExtent = std::sqrt( radius * radius - 0.17f * 0.17f );
+    const float expectedVOpen = 1.0f - ( 0.70f + capExtent - 0.50f ) / h;
+    check( std::abs( field.getVFaceOpenFraction( 13, 8 ) - expectedVOpen ) < 2.0e-5f,
+        "Capsule V aperture must combine core and semicircle face intervals exactly" );
+
+    field.setCutCellSampleCount( 8 );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ), feedback, 180 );
+    check( std::abs( field.getCutCellTransition().fluidVolume - expectedVolume ) < 1.0e-4f &&
+        !field.getCutCellPressure().hasVolumeHistory,
+        "Capsule analytic area must remain unchanged at 4x4 or 8x8 and reset history on switching" );
+
+    // 임의 회전한 Capsule의 넓이는 항상 2*r*L + pi*r^2.
+    for( const float angle : { 0.19f, 0.58f, 1.23f, -0.77f } )
+    {
+        capsule.transform.rotation = rot2::FromRadians( angle );
+        field.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ), feedback, 180 );
+        check( std::abs( field.getCutCellTransition().fluidVolume - expectedVolume ) < 1.0e-4f &&
+            field.getSweptFaceFlux().usedSweptFlux &&
+            std::isfinite( field.getSweptFaceFlux().geometryMismatch ),
+            "rotated Capsule must retain exact area and finite swept-face geometry diagnostics" );
+    }
+
+    field.setCutCellCoupledProjectionEnabled( true );
+    capsule.linearVelocity = { 0.85f, -0.25f };
+    capsule.angularVelocity = 0.9f;
+    capsule.inverseMass = 0.5f;
+    capsule.inverseInertia = 1.25f;
+    field.addVelocity( { -1.1f, 0.25f }, { 1.3f, -0.4f }, 1.4f );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ), feedback, 200 );
+    const fluidCutCellPressure2& pressure = field.getCutCellPressure();
+    check( pressure.usedCoupledProjection && !pressure.coupledSolveFailed &&
+        pressure.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        pressure.synchronizedPartialFaces > 0 &&
+        std::isfinite( pressure.predictedContinuityRms ) &&
+        std::abs( pressure.predictedContinuityRms - pressure.pressureResidual ) <
+            2.0e-3f + 0.1f * pressure.pressureResidual,
+        "rotated Capsule Schur traction must agree with clipped blocked-face velocity response" );
+
+    capsule.transform.position += vec2{ 0.15f, 0.08f };
+    capsule.center = capsule.transform.position;
+    field.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ), feedback, 200 );
+    check( field.getSweptFaceFlux().usedSweptFlux &&
+        field.getSweptFaceFlux().totalAbsoluteFlux > 0.0f &&
+        std::isfinite( field.getSweptFaceFlux().geometryMismatch ) &&
+        std::abs( field.getCutCellTransition().fluidVolume - expectedVolume ) < 1.0e-4f,
+        "translated Capsule must produce finite swept pressure geometry and conserve analytic shape area" );
+
+    field.setAnalyticCapsuleCutCellEnabled( false );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ), feedback, 200 );
+    check( !field.getCutCellPressure().hasVolumeHistory &&
+        !field.getSweptFaceFlux().usedSweptFlux,
+        "disabling analytic Capsule must invalidate prior geometric source history" );
+
+    // Capsule 둘을 하나의 해석 경로로 합치지 않는다: 혼합/중첩은 기존 표본 방식.
+    fluidField2 fallback{ 24, 16, h, { -6.0f, -4.0f } };
+    fluidField2 sampled{ 24, 16, h, { -6.0f, -4.0f } };
+    fallback.setCutCellProjectionEnabled( true );
+    sampled.setCutCellProjectionEnabled( true );
+    fallback.setAnalyticCapsuleCutCellEnabled( true );
+    std::array<fluidShapeObstacle2, 2> obstacles{ capsule, capsule };
+    obstacles[1].transform.position += vec2{ 1.6f, 0.5f };
+    obstacles[1].center = obstacles[1].transform.position;
+    std::array<fluidObstacleForce2, 2> forces{};
+    fallback.step( dt, obstacles, forces, 120 );
+    sampled.step( dt, obstacles, forces, 120 );
+    check( std::abs( fallback.getCutCellTransition().fluidVolume -
+        sampled.getCutCellTransition().fluidVolume ) < 1.0e-5f,
+        "multiple Capsule obstacles must preserve sampled union geometry fallback" );
+
+    field.clear();
+    check( field.isAnalyticCapsuleCutCellEnabled() == false &&
+        !field.getSweptFaceFlux().usedSweptFlux,
+        "clear must not enable analytic Capsule after the explicit disable" );
+}
+
 void checkAnalyticSharpPolygonCutCell()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1841,6 +1943,7 @@ int main()
     checkCutCellSpatialQuadrature();
     checkAnalyticSingleCircleCutCell();
     checkAnalyticSharpPolygonCutCell();
+    checkAnalyticSingleCapsuleCutCell();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();
