@@ -404,6 +404,15 @@ analyticCircleInterval ClipCapsuleCapFace( const analyticFluidCapsule& capsule,
 analyticCircleInterval ClipCapsuleFace( const analyticFluidCapsule& capsule,
     bool vertical, double coordinate, double low, double high )
 {
+    // 대부분의 MAC face는 Capsule AABB 외부다. 정확한 클리핑 이전에 제외.
+    const double r = capsule.first.radius;
+    const double minX = std::min( capsule.first.center.x, capsule.last.center.x ) - r;
+    const double maxX = std::max( capsule.first.center.x, capsule.last.center.x ) + r;
+    const double minY = std::min( capsule.first.center.y, capsule.last.center.y ) - r;
+    const double maxY = std::max( capsule.first.center.y, capsule.last.center.y ) + r;
+    if( vertical ? ( coordinate <= minX || coordinate >= maxX || high <= minY || low >= maxY )
+                 : ( coordinate <= minY || coordinate >= maxY || high <= minX || low >= maxX ) )
+        return {};
     const std::array<analyticCircleInterval, 3> parts{
         ClipPolygonFace( capsule.core, vertical, coordinate, low, high ),
         ClipCapsuleCapFace( capsule, true, vertical, coordinate, low, high ),
@@ -515,6 +524,12 @@ double CapsuleCapRectangleArea( const analyticFluidCapsule& capsule, bool firstC
 double CapsuleRectangleArea( const analyticFluidCapsule& capsule,
     double x0, double y0, double x1, double y1 )
 {
+    const double r = capsule.first.radius;
+    const double minX = std::min( capsule.first.center.x, capsule.last.center.x ) - r;
+    const double maxX = std::max( capsule.first.center.x, capsule.last.center.x ) + r;
+    const double minY = std::min( capsule.first.center.y, capsule.last.center.y ) - r;
+    const double maxY = std::max( capsule.first.center.y, capsule.last.center.y ) + r;
+    if( x1 <= minX || x0 >= maxX || y1 <= minY || y0 >= maxY ) return 0.0;
     const double area = ConvexPolygonRectangleArea( capsule.core, x0, y0, x1, y1 ) +
         CapsuleCapRectangleArea( capsule, true, x0, y0, x1, y1 ) +
         CapsuleCapRectangleArea( capsule, false, x0, y0, x1, y1 );
