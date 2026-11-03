@@ -370,6 +370,16 @@ Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들�
 
 **제한:** 이 분석적 적분은 단일 Circle의 **현재 시점 셀 면적과 격자 면 교차**에 한정된다. 다중 Shape 겹침, Capsule/Polygon 표면, 정확한 시간 연속 swept 적분(현재는 시간 표본별 정확한 면 교차), 압력 외력·이류를 포함한 전체 유체–강체 질량/에너지 보존은 아직 구현·증명되지 않았다.
 
+## Part 13o — 단일 Sharp 볼록 다각형 Cut-cell 분석적 Clipping
+
+- `setAnalyticPolygonCutCellEnabled(true)`를 제공한다. 기본 **OFF**, 단일 유효한 CCW convex `polygon2`(`vertexCount` 3–8, `radius == 0`)에 한하여 기하 적분 경로를 사용한다. Capsule, rounded Polygon(`radius > 0`), 여러 장애물 및 비정상 도형은 기존 4×4/8×8 공간 표본으로 유지한다.
+- World 회전을 적용한 정점들을 **셀 사각형 네 half-plane**으로 Sutherland–Hodgman clipping한 뒤, 면적은 polygon shoelace로 직접 적분한다. 내부 MAC face 선분은 동일한 볼록 다각형 half-plane으로 clipping하여 **막힌 구간 길이와 중심점**을 계산한다. 다각형은 볼록이므로 선분과의 교차 구간은 연속한 하나의 구간이다.
+- 셀 면적과 MAC face aperture/막힌 구간 평균 강체 속도, Cut-cell Schur의 강체 힘·토크 `B/Bᵀ`, 압력 수렴 이후 predicted blocked-face flux, 실제 moving rigid pose의 swept-face 적분이 같은 clipped **면 길이와 중심**을 사용한다. 공간 4×4/8×8 옵션은 이 분석적 경로의 기하 결과를 바꾸지 않는다.
+- **Sandbox Wind**에서 `다각형 상자만 유체 장애물로 사용`과 `Sharp 다각형 경계 분석적 적분` 옵션을 켜면 세 Dynamic Body 가운데 마지막 상자를 유체에만 연결한다. 다른 Body는 World에서는 계속 움직인다. Circle-only 모드와는 상호 배타적으로 전환하며 장애물 구성 변경 시 유체 속도·Tracer를 보존한 채 이전 swept/기하 이력을 초기화한다.
+- 새 회귀 테스트는 분석적 축정렬 상자 면적, U/V 면의 정확한 부분 폐색, 회전 이후 전체 기하 면적, 후속 swept flux, Schur adjoint 예측 잔차, rounded polygon fallback, Sandbox World mass coupling과 모드 전환 이력을 점검한다.
+
+**제한:** 다각형의 선분 경계 기하 자체만 정확하게 clip한다. 이동 중 시간 적분은 여전히 유한한 midpoint 표본이고, 다중 도형 union, rounded/capsule 표면, continuous swept volume 및 FSI 전체 질량·에너지 보존은 미구현이다. `radius == 0`인 sharp convex geometry만 분석적으로 처리한다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
