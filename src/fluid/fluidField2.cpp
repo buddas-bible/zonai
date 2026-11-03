@@ -604,6 +604,13 @@ void fluidField2::setAnalyticPolygonCutCellEnabled( bool enabled ) noexcept
     invalidateObstacleHistory();
 }
 
+void fluidField2::setAnalyticCapsuleCutCellEnabled( bool enabled ) noexcept
+{
+    if( analyticCapsuleCutCellEnabled_ == enabled ) return;
+    analyticCapsuleCutCellEnabled_ = enabled;
+    invalidateObstacleHistory();
+}
+
 void fluidField2::clear() noexcept
 {
     std::fill( u_.begin(), u_.end(), 0.0f );
