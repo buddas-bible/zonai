@@ -1001,6 +1001,102 @@ void checkCoupledCutCellAdjointContinuity()
         "legacy cut-cell pressure must not pretend to predict coupled volume response" );
 }
 
+void checkAnalyticSharpPolygonCutCell()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr float h = 0.5f;
+    constexpr vec2 center{ 0.13f, -0.20f };
+    constexpr float halfWidth = 0.63f;
+    constexpr float halfHeight = 0.33f;
+    constexpr float expectedArea = 24.0f * 16.0f * h * h - 4.0f * halfWidth * halfHeight;
+
+    fluidField2 field{ 24, 16, h, { -6.0f, -4.0f } };
+    field.setCutCellProjectionEnabled( true );
+    field.setAnalyticPolygonCutCellEnabled( true );
+    fluidShapeObstacle2 box{
+        MakeBox( { halfWidth, halfHeight } ),
+        { center, {} }, center, {}, 0.0f
+    };
+    std::array<fluidObstacleForce2, 1> forces{};
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), forces, 180 );
+    check( std::abs( field.getCutCellTransition().fluidVolume - expectedArea ) < 1.0e-4f &&
+        !field.getSweptFaceFlux().usedSweptFlux &&
+        !field.getCutCellPressure().hasVolumeHistory,
+        "analytic sharp polygon clipping must reproduce box area on first frame" );
+
+    // U x=0.5 y=[0,0.5], box upper y=0.13 -> blocked length=0.13.
+    check( std::abs( field.getUFaceOpenFraction( 13, 8 ) - 0.74f ) < 1.0e-5f,
+        "analytic polygon U face must use exact vertical line clipping" );
+    // V y=0 x=[0.5,1.0], box right x=0.76 -> blocked length=0.26.
+    check( std::abs( field.getVFaceOpenFraction( 13, 8 ) - 0.48f ) < 1.0e-5f,
+        "analytic polygon V face must use exact horizontal line clipping" );
+
+    field.setCutCellSampleCount( 8 );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), forces, 180 );
+    check( std::abs( field.getCutCellTransition().fluidVolume - expectedArea ) < 1.0e-4f &&
+        !field.getCutCellPressure().hasVolumeHistory,
+        "analytical polygon area must not depend on 4x4 or 8x8 sampling" );
+
+    box.transform.rotation = rot2::FromRadians( 0.41f );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), forces, 180 );
+    check( field.getSweptFaceFlux().usedSweptFlux &&
+        field.getCutCellPressure().hasVolumeHistory &&
+        std::isfinite( field.getSweptFaceFlux().geometryMismatch ) &&
+        std::abs( field.getCutCellTransition().fluidVolume - expectedArea ) < 1.0e-4f,
+        "rotated sharp polygon must keep analytic covered area and produce swept faces" );
+
+    field.setAnalyticPolygonCutCellEnabled( false );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), forces, 180 );
+    check( !field.getCutCellPressure().hasVolumeHistory &&
+        !field.getSweptFaceFlux().usedSweptFlux,
+        "changing analytic polygon geometry mode must invalidate old volume history" );
+
+    // Pressure Schur and predicted blocked-face flux must use the same clipped lengths.
+    field.setAnalyticPolygonCutCellEnabled( true );
+    field.setCutCellCoupledProjectionEnabled( true );
+    box.linearVelocity = { 0.8f, -0.4f };
+    box.angularVelocity = 1.1f;
+    box.inverseMass = 0.5f;
+    box.inverseInertia = 1.25f;
+    field.addVelocity( { -1.1f, 0.25f }, { 1.3f, -0.4f }, 1.4f );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), forces, 200 );
+    const auto& pressure = field.getCutCellPressure();
+    check( pressure.usedCoupledProjection && !pressure.coupledSolveFailed &&
+        pressure.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        pressure.synchronizedPartialFaces > 0 &&
+        std::isfinite( pressure.predictedContinuityRms ) &&
+        std::abs( pressure.predictedContinuityRms - pressure.pressureResidual ) <
+            2.0e-3f + 0.1f * pressure.pressureResidual,
+        "sharp polygon clipping must keep Schur traction and blocked-flux prediction adjoint" );
+
+    box.transform.position += vec2{ 0.2f, -0.1f };
+    box.center = box.transform.position;
+    field.step( dt, std::span<const fluidShapeObstacle2>( &box, 1 ), forces, 200 );
+    check( field.getSweptFaceFlux().usedSweptFlux &&
+        field.getSweptFaceFlux().totalAbsoluteFlux > 0.0f &&
+        std::isfinite( field.getSweptFaceFlux().geometryMismatch ) &&
+        std::abs( field.getCutCellTransition().fluidVolume - expectedArea ) < 1.0e-4f,
+        "moving and rotating sharp polygon must retain area and swept face volume diagnostics" );
+
+    // Rounded polygon remains handled by original sampled geometry, not silently as a sharp core.
+    fluidField2 fallback{ 24, 16, h, { -6.0f, -4.0f } };
+    fluidField2 sampled{ 24, 16, h, { -6.0f, -4.0f } };
+    fallback.setCutCellProjectionEnabled( true );
+    sampled.setCutCellProjectionEnabled( true );
+    fallback.setAnalyticPolygonCutCellEnabled( true );
+    auto rounded = box;
+    std::get<polygon2>( rounded.geometry ).radius = 0.12f;
+    fallback.step( dt, std::span<const fluidShapeObstacle2>( &rounded, 1 ), forces, 120 );
+    sampled.step( dt, std::span<const fluidShapeObstacle2>( &rounded, 1 ), forces, 120 );
+    check( std::abs( fallback.getCutCellTransition().fluidVolume -
+        sampled.getCutCellTransition().fluidVolume ) < 1.0e-5f,
+        "rounded polygon must fall back to original sampled cut-cell geometry" );
+    field.clear();
+    check( field.isAnalyticPolygonCutCellEnabled() &&
+        !field.getSweptFaceFlux().usedSweptFlux,
+        "clear must preserve analytic polygon selection while resetting geometry diagnostics" );
+}
+
 void checkAnalyticSingleCircleCutCell()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1744,6 +1840,7 @@ int main()
     checkCoupledCutCellAdjointContinuity();
     checkCutCellSpatialQuadrature();
     checkAnalyticSingleCircleCutCell();
+    checkAnalyticSharpPolygonCutCell();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();
