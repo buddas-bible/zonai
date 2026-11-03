@@ -1001,11 +1001,14 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     {
         analyticFluidCircle circle{};
         analyticFluidPolygon polygon{};
+        analyticFluidCapsule capsule{};
         const bool circleGeometry = analyticCircleCutCellEnabled_ &&
             TryGetAnalyticCircle( obstacles, circle );
         const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
             TryGetAnalyticPolygon( obstacles, polygon );
-        if( circleGeometry || polygonGeometry )
+        const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
+            analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule );
+        if( circleGeometry || polygonGeometry || capsuleGeometry )
         {
             const double h = cellSize_;
             const double inverseArea = 1.0 / ( h * h );
@@ -1017,7 +1020,9 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                     const double bottom = origin_.y + y * h;
                     const double covered = circleGeometry
                         ? CircleRectangleArea( circle, left, bottom, left + h, bottom + h )
-                        : ConvexPolygonRectangleArea( polygon, left, bottom, left + h, bottom + h );
+                        : polygonGeometry
+                            ? ConvexPolygonRectangleArea( polygon, left, bottom, left + h, bottom + h )
+                            : CapsuleRectangleArea( capsule, left, bottom, left + h, bottom + h );
                     cellFluidFraction_[cellIndex( x, y )] =
                         static_cast<float>( std::clamp( 1.0 - covered * inverseArea, 0.0, 1.0 ) );
                 }
@@ -1028,7 +1033,9 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                     const double low = origin_.y + y * h;
                     const auto interval = circleGeometry
                         ? ClipCircleFace( circle, true, normal, low, low + h )
-                        : ClipPolygonFace( polygon, true, normal, low, low + h );
+                        : polygonGeometry
+                            ? ClipPolygonFace( polygon, true, normal, low, low + h )
+                            : ClipCapsuleFace( capsule, true, normal, low, low + h );
                     const int face = uIndex( x, y );
                     uOpenFraction_[face] = static_cast<float>(
                         std::clamp( 1.0 - interval.length / h, 0.0, 1.0 ) );
@@ -1047,7 +1054,9 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                     const double low = origin_.x + x * h;
                     const auto interval = circleGeometry
                         ? ClipCircleFace( circle, false, normal, low, low + h )
-                        : ClipPolygonFace( polygon, false, normal, low, low + h );
+                        : polygonGeometry
+                            ? ClipPolygonFace( polygon, false, normal, low, low + h )
+                            : ClipCapsuleFace( capsule, false, normal, low, low + h );
                     const int face = vIndex( x, y );
                     vOpenFraction_[face] = static_cast<float>(
                         std::clamp( 1.0 - interval.length / h, 0.0, 1.0 ) );
