@@ -613,6 +613,52 @@ void checkExperimentalCutCellWorldCoupling()
         "one-way field with optional static obstacles must not silently insert dynamic-body inverse masses" );
 }
 
+void checkSandboxAnalyticCapsuleMode()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindCutCellCoupledProjectionEnabled( true );
+    scene.setWindCapsuleOnlyFluidEnabled( true );
+    scene.setWindAnalyticCapsuleEnabled( true );
+    scene.setWindFluidSubstepCount( 2 );
+    const bodyId capsule = scene.getShapes()[1].bodyHandle;
+    scene.getWorld().SetBodyLinearVelocity( capsule, { 0.7f, -0.25f } );
+    scene.getWorld().SetBodyAngularVelocity( capsule, 0.7f );
+    scene.addWindVortex();
+    scene.step( dt, 4 );
+
+    const fluidCutCellPressure2& first = scene.getWindField()->getCutCellPressure();
+    check( scene.getWindCouplingSteps() == 2 &&
+        scene.isWindCapsuleOnlyFluidEnabled() &&
+        !scene.isWindCircleOnlyFluidEnabled() && !scene.isWindPolygonOnlyFluidEnabled() &&
+        scene.isWindAnalyticCapsuleEnabled() &&
+        first.usedCoupledProjection && !first.coupledSolveFailed &&
+        std::isfinite( first.predictedContinuityRms ) &&
+        IsFinite( scene.getWorld().GetBodyLinearVelocity( capsule ) ),
+        "isolated analytical Capsule wind trial must run World mass-aware pressure coupling" );
+
+    scene.step( dt, 4 );
+    check( scene.getWindField()->getSweptFaceFlux().usedSweptFlux &&
+        scene.getWindField()->getCutCellPressure().hasVolumeHistory &&
+        std::isfinite( scene.getWindField()->getSweptFaceFlux().geometryMismatch ),
+        "moving rotating wind Capsule must produce swept geometry history" );
+
+    scene.configureWindField( 24, 14, 0.5f );
+    check( scene.isWindAnalyticCapsuleEnabled() && scene.isWindCapsuleOnlyFluidEnabled() &&
+        !scene.getWindField()->getCutCellPressure().hasVolumeHistory,
+        "wind field resize must preserve analytic Capsule mode and reset volume history" );
+    scene.setWindCapsuleOnlyFluidEnabled( false );
+    scene.setWindAnalyticCapsuleEnabled( false );
+    scene.setWindFluidSubstepCount( 1 );
+    scene.step( dt, 4 );
+    check( scene.getWindField()->getCutCellPressure().activeCells > 0 &&
+        !scene.getWindField()->getCutCellPressure().hasVolumeHistory,
+        "returning Capsule-only Wind to mixed obstacles must rebuild first sampled geometry snapshot" );
+}
+
 void checkSandboxAnalyticPolygonMode()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -877,5 +923,6 @@ int main()
     checkMovingCutCellSweptVolumeLedger();
     checkSandboxAnalyticCircleMode();
     checkSandboxAnalyticPolygonMode();
+    checkSandboxAnalyticCapsuleMode();
     checkSandboxConservativeAdvectionTrial();
 }
