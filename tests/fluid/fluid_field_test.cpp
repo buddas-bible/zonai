@@ -1185,6 +1185,80 @@ void checkDisjointAnalyticMultiShapeCutCell()
         "clear must preserve an explicitly disabled disjoint multi analytic mode" );
 }
 
+void checkAnalyticCutCellPreconditionerComparison()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr vec2 origin{ -6.0f, -4.0f };
+    const std::array<fluidShapeObstacle2, 2> bodies{{
+        { circle2{ {}, 0.58f }, { { -0.21f, -0.18f }, {} },
+            { -0.21f, -0.18f }, { 0.95f, -0.30f }, 0.70f, 0.35f, 1.10f },
+        { circle2{ {}, 0.58f }, { { 0.26f, 0.19f }, {} },
+            { 0.26f, 0.19f }, { -0.65f, 0.75f }, -0.55f, 0.80f, 0.70f }
+    }};
+    const auto seed = [&]( fluidField2& field, bool incomplete )
+    {
+        field.setCutCellProjectionEnabled( true );
+        field.setCutCellCoupledProjectionEnabled( true );
+        field.setDisjointAnalyticCutCellEnabled( true );
+        field.setAnalyticCutCellIncompleteCholeskyEnabled( incomplete );
+        field.setCutCellPressureTimingEnabled( true );
+        field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
+    };
+    fluidField2 jacobi{ 24, 16, 0.5f, origin };
+    fluidField2 ic0{ 24, 16, 0.5f, origin };
+    check( jacobi.isAnalyticCutCellIncompleteCholeskyEnabled(),
+        "IC0 must remain the default analytic Cut-cell preconditioner" );
+    seed( jacobi, false );
+    seed( ic0, true );
+    std::array<fluidObstacleForce2, 2> jacobiForces{}, ic0Forces{};
+    jacobi.step( dt, bodies, jacobiForces, 200 );
+    ic0.step( dt, bodies, ic0Forces, 200 );
+    const auto& a = jacobi.getCutCellPressure();
+    const auto& b = ic0.getCutCellPressure();
+    check( a.usedCoupledProjection && b.usedCoupledProjection &&
+        !a.usedIncompleteCholesky && b.usedIncompleteCholesky &&
+        a.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        b.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        a.coupledIterations > 0 && b.coupledIterations > 0 &&
+        std::isfinite( a.coupledSolveMilliseconds ) && a.coupledSolveMilliseconds >= 0.0 &&
+        std::isfinite( b.coupledSolveMilliseconds ) && b.coupledSolveMilliseconds >= 0.0,
+        "Jacobi and IC0 must solve the identical analytic pressure system with measured elapsed time" );
+    check( std::abs( a.pressureResidual - b.pressureResidual ) < 2.0e-3f &&
+        std::abs( a.predictedContinuityRms - b.predictedContinuityRms ) < 2.0e-3f,
+        "the pressure residual and predicted continuity must agree across preconditioners" );
+    for( int i = 0; i < 2; ++i )
+    {
+        const float scale = 1.0f + Length( ic0Forces[i].force );
+        check( Length( jacobiForces[i].force - ic0Forces[i].force ) < 2.0e-2f * scale &&
+            std::abs( jacobiForces[i].torque - ic0Forces[i].torque ) < 2.0e-2f * scale,
+            "Jacobi and IC0 must return consistent owner-specific pressure feedback" );
+    }
+    // Higher resolution previously reached the Jacobi 200-iteration limit.
+    fluidField2 fineJacobi{ 48, 32, 0.25f, origin };
+    fluidField2 fineIc0{ 48, 32, 0.25f, origin };
+    seed( fineJacobi, false );
+    seed( fineIc0, true );
+    fineJacobi.step( dt, bodies, jacobiForces, 200 );
+    fineIc0.step( dt, bodies, ic0Forces, 200 );
+    const auto& coarse = fineJacobi.getCutCellPressure();
+    const auto& fine = fineIc0.getCutCellPressure();
+    check( !coarse.usedIncompleteCholesky && fine.usedIncompleteCholesky &&
+        coarse.coupledSolveFailed &&
+        coarse.coupledStatus == fluidCoupledPressureStatus2::iterationLimit &&
+        !coarse.hasAnalyticImpulseBudget &&
+        LengthSquared( jacobiForces[0].force ) == 0.0f &&
+        LengthSquared( jacobiForces[1].force ) == 0.0f &&
+        fine.usedCoupledProjection &&
+        fine.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        fine.hasAnalyticImpulseBudget && fine.coupledIterations < 200,
+        "IC0 must converge where fine-grid Jacobi safely reaches its established iteration limit" );
+    fineJacobi.clear();
+    check( !fineJacobi.isAnalyticCutCellIncompleteCholeskyEnabled() &&
+        fineJacobi.isCutCellPressureTimingEnabled() &&
+        fineJacobi.getCutCellPressure().coupledSolveMilliseconds == 0.0,
+        "clear must preserve the benchmark mode and reset elapsed-time diagnostics" );
+}
+
 void checkAnalyticCutCellPressureImpulseBudget()
 {
     constexpr vec2 origin{ -6.0f, -4.0f };
@@ -2791,6 +2865,7 @@ int main()
     checkAnalyticContainedCircleUnion();
     checkAnalyticPartialCircleUnion();
     checkAnalyticCutCellPressureImpulseBudget();
+    checkAnalyticCutCellPreconditionerComparison();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();
