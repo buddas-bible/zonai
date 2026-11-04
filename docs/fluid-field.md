@@ -400,6 +400,18 @@ Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들�
 
 **제한:** 이 적분은 단일 Rounded Polygon의 **각 시점**에서 정확한 공간 기하량을 계산한다. 움직이는 표면의 시간 적분은 midpoint quadrature 기반 근사이며, 여러 장애물의 합집합, Shape끼리 겹칠 때의 모멘텀 재분배, 전체 FSI 에너지/질량 보존 증명은 아직 포함하지 않는다.
 
+## Part 13r — 서로 분리된 다중 Shape의 분석적 Cut-cell 합집합 (선택형)
+
+- `setDisjointAnalyticCutCellEnabled(true)`는 기본 **OFF**인 선택형 다중 장애물 경로다. 같은 `fluidField2`에 두 개 이상의 유효한 Circle/Capsule/Sharp Polygon/Rounded Polygon이 전달되고, **모든 Shape의 world AABB가 쌍마다 겹치지 않을 때만** 동작한다. 개별 Shape별 실험 토글은 다중 경로의 자격 요건이 아니며 단일 Shape로 변경되면 기존 단일/표본 경로를 사용한다.
+- AABB가 분리되므로 실제 Shape도 서로 겹치지 않는다. 따라서 각 Cut-cell의 실제 solid union 면적은 **개별 분석적 셀 교차 면적의 합**이고, 공유 U/V MAC face의 막힌 길이는 소유자별 **개별 교차 선분 길이의 합**이다. 면에 두 Shape의 막힌 구간이 있는 경우에도 그 사이의 열린 간격은 보존한다. 막힌 구간의 강체 속도는 길이 가중 평균으로 저장한다.
+- 연립 PCG의 `B` 및 `Bᵀ`에는 각 구간마다 **해당 Body owner, 힘 벡터 및 COM 기준 토크**를 별도로 넣는다. 압력 후 예측 경계 법선 유량은 각 Body의 속도 보정에 구간 길이를 가중해 합산한다. 즉 한 MAC 면을 여러 Body가 막아도 임펄스가 한 Body에 합쳐지지 않으며, 일반적인 이산 Cut-cell 압력 근사 범위 안에서 Schur adjoint를 유지한다.
+- 실제 이동한 Body는 중간 시간 snapshot마다 AABB가 분리되면 각 Shape의 정확한 blocked face 구간을 이용해 **소유자별 swept flux**를 적분한다. 중간에 AABB가 겹치면 그 시각 표본은 종전의 `firstOwner` 공간 표본 합집합으로 돌아간다. 시간 적분 자체는 기존 adaptive midpoint quadrature이므로 연속 시간의 정확한 swept union은 아직 아니다.
+- 현재의 분석적 다중 경로로 들어가거나 AABB 겹침 때문에 표본 경로로 돌아가면 **기하 이력을 새 snapshot으로 재시작**한다. 서로 다른 점유율 계산 방법의 차이를 실제 이동 체적 `ΔV`로 오해하지 않도록 `volumeSourceValid_`과 swept history를 무효화한다. 유체 속도·Tracer는 유지한다.
+- `getCutCellTransition().usedDisjointAnalyticGeometry` 및 `disjointAnalyticShapes`로 실제 선택된 경로와 Shape 수를 확인할 수 있다. Sandbox Wind의 **분리된 여러 장애물 분석적 Cut-cell** 체크박스로 기본 혼합 Circle/Capsule/Box World 장면을 시험할 수 있다. Field resize 시 선택을 유지한다.
+- 테스트는 분석적 혼합 Shape union 면적, 한 MAC face에 두 별도 Circle이 각기 일부 막을 때 정확한 개방율/가중 속도, 두 강체의 질량·관성에 대한 Schur 잔차 일치, 이동/회전 중 swept face, AABB 겹침 시 표본 합집합과 모드 전환 이력, 실제 Sandbox World FSI를 검증한다.
+
+**범위/한계:** *진짜로 겹치는 여러 Shape의 기하 합집합을 분석적으로 계산하지 않는다.* 심지어 실제 Shape가 분리돼 있어도 AABB가 서로 겹치면 안전하게 표본 계산으로 돌아간다. 따라서 **정확한 overlap clipping, 근접 Body의 owner 공유/pressure interface, 연속 시간 swept union, FSI 전체 질량·에너지 보존**은 후속 작업이다. 기본 모드는 기존 4×4/8×8 표본과 동일하다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
