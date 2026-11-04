@@ -140,6 +140,7 @@ struct fluidCutCellTransition2
     bool usedDisjointAnalyticGeometry = false;
     int disjointAnalyticShapes = 0;
     int containedAnalyticShapes = 0;
+    bool usedPartialCircleAnalyticUnion = false;
 
     [[nodiscard]] float volumeDelta() const noexcept { return fluidVolume - previousFluidVolume; }
 };
@@ -291,8 +292,8 @@ public:
         return analyticRoundedPolygonCutCellEnabled_;
     }
 
-    // 다중 convex Shape가 서로 분리되거나 두 Circle이 엄격히 포함된 경우
-    // 정확한 union 계산. 나머지 교차/근접/불확실한 구성은 표본 합집합 사용.
+    // 분리된 convex Shape, 두 Circle의 엄격한 포함/부분 교차에 분석적 union 계산.
+    // 다른 실제 교차/접촉 근접/불확실 구성은 기존 표본 합집합 사용.
     void setDisjointAnalyticCutCellEnabled( bool enabled ) noexcept;
     [[nodiscard]] bool isDisjointAnalyticCutCellEnabled() const noexcept
     {
@@ -512,6 +513,7 @@ private:
     bool disjointAnalyticCutCellEnabled_ = false;
     bool previousDisjointAnalyticGeometry_ = false;
     int previousContainedCircleIndex_ = -1;
+    bool previousPartialCircleOverlap_ = false;
     bool cutCellProjectionEnabled_ = false;
     bool cutCellCoupledProjectionEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;

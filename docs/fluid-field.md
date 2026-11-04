@@ -436,6 +436,19 @@ Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들�
 
 **범위와 한계:** 일반적인 두 원의 *부분 교집합*을 정확히 적분하지는 않는다. 다른 Shape와의 실제 겹침이나 세 개 이상의 Shape 조합은 기존 표본 union을 유지한다. 내부 원이 외부 원을 벗어나지 않는 시간 중간 snapshot에 대해서만 해당 swept 적분에서 내부 원 기여가 0이다. 이 경로에서도 pressure/advective momentum, fluid–rigid 에너지의 전체 보존을 증명하지 않는다. 기본 분석 옵션은 여전히 OFF다.
 
+## Part 13u — 일부 겹치는 두 Circle의 분석적 Cut-cell Union (선택형)
+
+기존 Part 13t의 두 Circle 완전 포함을 확장하여, **두 개의 유효한 Circle이 서로 일부만 교차하는 경우**의 셀 합집합 면적과 MAC face 막힌 길이를 분석적으로 계산한다. 기존 다중 분석 설정을 켰을 때만 사용하고 기본값은 OFF다.
+
+- Circle 두 개의 중심거리 `d`가 반지름 차이보다 충분히 크고 반지름 합보다 충분히 작아야 한다. 거의 접하는 내부·외부 경계, 비정규 회전 또는 다른 실제 겹침 형상은 표본 경로로 돌아간다.
+- 셀 면적은 포함-배제 `A_union = A_circle0 + A_circle1 - A_intersection`이다. 두 원호의 교차점 X 좌표, 셀 위·아래 선과 각 원의 교차 X 좌표에서 X 구간을 나눈 뒤, 각 구간에서 실제 아래/위 경계를 택하고 원의 정확한 `sqrt(r²-x²)` 원시함수로 적분한다. 보편적인 렌즈 넓이 공식과 달리 **각 개별 셀 직사각형으로 클리핑된 교집합**을 구한다.
+- U/V MAC face에서 두 원의 각 chord 구간을 잘라 겹친 부분은 **첫 입력 원의 owner**에게만 부여한다. 둘째 owner는 첫 구간 외부에 노출된 왼쪽·오른쪽의 최대 두 구간만 소유한다. 중복 막힌 길이를 더하지 않고, 각 구간의 중점에서 회전 속도·토크를 계산한다.
+- 동일한 face 구간 열거를 기하 개방율 및 표면 속도, Schur 압력 `B/Bᵀ`의 owner별 임펄스/토크, 예측된 solid-normal flux 및 시간 midpoint swept flux에 공통 적용한다. `getCutCellTransition().usedPartialCircleAnalyticUnion`과 Sandbox 진단에 실제 경로를 표시한다.
+- 부분 교차 ↔ 완전 포함/분리/표본 전환에서는 이전 Cut-cell/swept 체적 이력을 무효화한다. 유체 속도·tracer는 그대로 유지한다.
+- 회귀 테스트는 이론적 두 원 렌즈 면적, 완전히 막힌 U/V face에서 중복 없는 속도 가중, Shape 입력 역순 및 4×4/8×8 변경, 두 동적 강체의 Schur 연속방정식 잔차, 이동·전환 이력, 외접에 가까운 경계의 표본 fallback을 확인한다.
+
+**제한:** 겹친 내부 구간의 소유자를 첫 Shape로 고정하는 규칙은 *이산 압력 결합의 중복 제거와 일관성*을 위한 것으로, 두 실제 강체가 서로 관통한 상황의 고유한 물리적 접촉면을 정의하지 않는다. 완전한 자유 표면과 실제 경계의 정확한 traction, FSI 질량·운동량·에너지 보존 증명은 아직 지원하지 않는다. 세 개 이상 겹치는 Shape 또는 Circle 외 형상 간 교집합은 기존 sampled union을 유지한다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
