@@ -1174,6 +1174,8 @@ void fluidField2::clear() noexcept
     std::fill( sweptVVolume_.begin(), sweptVVolume_.end(), 0.0f );
     analyticUBlockedFaces_.clear();
     analyticVBlockedFaces_.clear();
+    analyticUFaceScratch_.clear();
+    analyticVFaceScratch_.clear();
     previousObstacles_.clear();
     sweptFaceFlux_ = {};
     std::fill( cutCellComponent_.begin(), cutCellComponent_.end(), -1 );
@@ -1621,24 +1623,92 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                     cellFluidFraction_[cell] = static_cast<float>(
                         std::clamp( 1.0 - covered * inverseArea, 0.0, 1.0 ) );
                 }
+            // For three or more disjoint shapes, the blocked intervals are
+            // independent. Accumulate them shape-major in their AABB face
+            // ranges, retaining the original per-face shape addition order.
+            // Two-circle overlap/containment continues through the reference
+            // clipping path and its explicit ownership rules.
+            const bool boundedFaceClipping = analyticCutCellBoundedFaceClippingEnabled_ &&
+                disjointShapes.size() > 2;
+            if( boundedFaceClipping )
+            {
+                analyticUFaceScratch_.assign( u_.size(), {} );
+                analyticVFaceScratch_.assign( v_.size(), {} );
+                const auto clampFace = []( double index, int minimum, int maximum )
+                {
+                    return static_cast<int>( std::clamp( index,
+                        static_cast<double>( minimum ), static_cast<double>( maximum ) ) );
+                };
+                for( std::size_t i = 0; i < disjointShapes.size(); ++i )
+                {
+                    const auto& shape = disjointShapes[i];
+                    if( shape.occluded ) continue;
+                    const auto accumulateFaces = [&]( bool vertical )
+                    {
+                        const int minX = clampFace( std::floor(
+                            ( static_cast<double>( shape.bounds.min.x ) - origin_.x ) / h ) - 1.0,
+                            vertical ? 1 : 0, width_ - 1 );
+                        const int maxX = clampFace( std::ceil(
+                            ( static_cast<double>( shape.bounds.max.x ) - origin_.x ) / h ) + 1.0,
+                            vertical ? 1 : 0, width_ - 1 );
+                        const int minY = clampFace( std::floor(
+                            ( static_cast<double>( shape.bounds.min.y ) - origin_.y ) / h ) - 1.0,
+                            vertical ? 0 : 1, height_ - 1 );
+                        const int maxY = clampFace( std::ceil(
+                            ( static_cast<double>( shape.bounds.max.y ) - origin_.y ) / h ) + 1.0,
+                            vertical ? 0 : 1, height_ - 1 );
+                        for( int y = minY; y <= maxY; ++y )
+                            for( int x = minX; x <= maxX; ++x )
+                            {
+                                const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+                                const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+                                const auto clipped = ClipDisjointShapeFace(
+                                    shape, vertical, normal, low, low + h );
+                                if( clipped.length <= 0.0 ) continue;
+                                const vec2 point = vertical
+                                    ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
+                                    : vec2{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
+                                const auto& body = obstacles[i];
+                                const vec2 velocity = body.linearVelocity +
+                                    Cross( body.angularVelocity, point - body.center );
+                                auto& face = vertical ? analyticUFaceScratch_[uIndex( x, y )] :
+                                    analyticVFaceScratch_[vIndex( x, y )];
+                                face.blockedLength += clipped.length;
+                                face.velocitySum += clipped.length * ( vertical ? velocity.x : velocity.y );
+                            }
+                    };
+                    accumulateFaces( true );
+                    accumulateFaces( false );
+                }
+            }
             const auto updateFace = [&]( bool vertical, int x, int y )
             {
-                const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
-                const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
                 double blockedLength = 0.0;
                 double velocitySum = 0.0;
-                ForEachAnalyticFacePortion( disjointShapes, vertical, normal, low, low + h,
-                    [&]( std::size_t i, analyticCircleInterval interval )
+                if( boundedFaceClipping )
                 {
-                    const vec2 point = vertical
-                        ? vec2{ static_cast<float>( normal ), static_cast<float>( interval.midpoint ) }
-                        : vec2{ static_cast<float>( interval.midpoint ), static_cast<float>( normal ) };
-                    const auto& body = obstacles[i];
-                    const vec2 velocity = body.linearVelocity +
-                        Cross( body.angularVelocity, point - body.center );
-                    blockedLength += interval.length;
-                    velocitySum += interval.length * ( vertical ? velocity.x : velocity.y );
-                } );
+                    const auto& face = vertical ? analyticUFaceScratch_[uIndex( x, y )] :
+                        analyticVFaceScratch_[vIndex( x, y )];
+                    blockedLength = face.blockedLength;
+                    velocitySum = face.velocitySum;
+                }
+                else
+                {
+                    const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+                    const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+                    ForEachAnalyticFacePortion( disjointShapes, vertical, normal, low, low + h,
+                        [&]( std::size_t i, analyticCircleInterval interval )
+                    {
+                        const vec2 point = vertical
+                            ? vec2{ static_cast<float>( normal ), static_cast<float>( interval.midpoint ) }
+                            : vec2{ static_cast<float>( interval.midpoint ), static_cast<float>( normal ) };
+                        const auto& body = obstacles[i];
+                        const vec2 velocity = body.linearVelocity +
+                            Cross( body.angularVelocity, point - body.center );
+                        blockedLength += interval.length;
+                        velocitySum += interval.length * ( vertical ? velocity.x : velocity.y );
+                    } );
+                }
                 const int face = vertical ? uIndex( x, y ) : vIndex( x, y );
                 // Retain every positive analytic intersection, including those
                 // too narrow to change the stored float aperture from 1.0.
