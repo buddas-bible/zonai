@@ -1060,6 +1060,26 @@ void checkDisjointAnalyticMultiShapeCutCell()
         std::isfinite( field.getSweptFaceFlux().geometryMismatch ),
         "moving and rotating separated shapes must use owner-specific swept face integration" );
 
+    // Sharp Polygon may lie exactly on a grid line. Inclusive boundary
+    // clipping must agree with the previous single-shape analytic convention.
+    fluidField2 aligned{ 24, 16, h, { -6.0f, -4.0f } };
+    aligned.setCutCellProjectionEnabled( true );
+    aligned.setDisjointAnalyticCutCellEnabled( true );
+    std::array<fluidShapeObstacle2, 2> alignedShapes{{
+        { MakeBox( { 0.5f, 0.5f } ), { { 0.0f, 0.0f }, {} },
+            {}, {}, 0.0f },
+        { circle2{ {}, 0.25f }, { { 3.0f, 1.0f }, {} },
+            { 3.0f, 1.0f }, {}, 0.0f }
+    }};
+    std::array<fluidObstacleForce2, 2> alignedFeedback{};
+    aligned.step( dt, alignedShapes, alignedFeedback, 160 );
+    check( aligned.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        std::abs( aligned.getCutCellTransition().fluidVolume -
+            ( domainArea - 1.0f - std::numbers::pi_v<float> * 0.25f * 0.25f ) ) < 1.0e-4f &&
+        aligned.getUFaceOpenFraction( 13, 8 ) < 2.0e-5f &&
+        aligned.getVFaceOpenFraction( 12, 9 ) < 2.0e-5f,
+        "multi analytic clipping must include grid-aligned sharp polygon boundary faces" );
+
     // Two disjoint circles can block different segments of *the same* U face.
     // Their face averages and Schur pressure owners must not be merged into body 0.
     fluidField2 shared{ 24, 16, h, { -6.0f, -4.0f } };
