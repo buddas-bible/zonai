@@ -3162,6 +3162,42 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     };
     if( cutCell )
     {
+        const auto disjointShapes = disjointAnalyticCutCellEnabled_
+            ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+        if( !disjointShapes.empty() )
+        {
+            const double h = cellSize_;
+            const auto addClippedFace = [&]( bool vertical, int x, int y )
+            {
+                const int a = vertical ? cellIndex( x - 1, y ) : cellIndex( x, y - 1 );
+                const int b = vertical ? cellIndex( x, y ) : cellIndex( x, y );
+                if( cellFluidFraction_[a] <= 0.0f && cellFluidFraction_[b] <= 0.0f ) return;
+                const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+                const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+                for( std::size_t owner = 0; owner < disjointShapes.size(); ++owner )
+                {
+                    const auto clipped = ClipDisjointShapeFace(
+                        disjointShapes[owner], vertical, normal, low, low + h );
+                    if( clipped.length <= 0.0 ) continue;
+                    const vec2 point = vertical
+                        ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
+                        : vec2{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
+                    const vec2 force = vertical
+                        ? vec2{ static_cast<float>( clipped.length ), 0.0f }
+                        : vec2{ 0.0f, static_cast<float>( clipped.length ) };
+                    if( cellFluidFraction_[a] > 0.0f )
+                        addBoundary( a, static_cast<int>( owner ), force, point );
+                    if( cellFluidFraction_[b] > 0.0f )
+                        addBoundary( b, static_cast<int>( owner ), -force, point );
+                }
+            };
+            for( int y = 0; y < height_; ++y )
+                for( int x = 1; x < width_; ++x ) addClippedFace( true, x, y );
+            for( int y = 1; y < height_; ++y )
+                for( int x = 0; x < width_; ++x ) addClippedFace( false, x, y );
+        }
+        else
+        {
         analyticFluidCircle circle{};
         analyticFluidPolygon polygon{};
         analyticFluidCapsule capsule{};
@@ -3278,6 +3314,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     if( cellFluidFraction_[top] > 0.0f ) addBoundary( top, owner, -force, point );
                 }
             }
+        }
         }
     }
     else
