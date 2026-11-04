@@ -1347,6 +1347,93 @@ void checkAnalyticCutCellPreconditionerComparison()
         "disabled cut-cell profiling must not retain stale phase counts or durations" );
 }
 
+void checkCachedIc0Differential()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr vec2 origin{ -6.0f, -4.0f };
+    for( float h : { 0.5f, 0.25f } )
+        for( int mode = 0; mode < 3; ++mode )
+        {
+            std::array<fluidShapeObstacle2, 2> bodies{{
+                { circle2{ {}, mode == 2 ? 0.78f : 0.58f },
+                    { { -0.21f, -0.18f }, {} }, { -0.21f, -0.18f },
+                    { 0.95f, -0.30f }, 0.70f, 0.35f, 1.10f },
+                { circle2{ {}, mode == 2 ? 0.18f : 0.58f },
+                    { { mode == 1 ? 1.50f : 0.26f, 0.19f }, {} },
+                    { mode == 1 ? 1.50f : 0.26f, 0.19f },
+                    { -0.65f, 0.75f }, -0.55f, 0.80f, 0.70f }
+            }};
+            if( mode == 2 )
+            {
+                bodies[1].transform.position = { -0.12f, -0.12f };
+                bodies[1].center = bodies[1].transform.position;
+            }
+            fluidField2 reference{ static_cast<int>( 12.0f / h ),
+                static_cast<int>( 8.0f / h ), h, origin };
+            fluidField2 cached{ static_cast<int>( 12.0f / h ),
+                static_cast<int>( 8.0f / h ), h, origin };
+            check( cached.isAnalyticCutCellCachedIc0Enabled(),
+                "per-solve cached IC0 sweep must default to on" );
+            for( fluidField2* field : { &reference, &cached } )
+            {
+                field->setCutCellProjectionEnabled( true );
+                field->setCutCellCoupledProjectionEnabled( true );
+                field->setDisjointAnalyticCutCellEnabled( true );
+                field->setCutCellPressureTimingEnabled( true );
+                field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
+            }
+            reference.setAnalyticCutCellCachedIc0Enabled( false );
+            std::array<fluidObstacleForce2, 2> originalForces{}, cachedForces{};
+            // Multiple moving snapshots must rebuild coefficients; no stale
+            // face opening or pivot from a previous pressure solve may survive.
+            for( int frame = 0; frame < 4; ++frame )
+            {
+                reference.step( dt, bodies, originalForces, 200 );
+                cached.step( dt, bodies, cachedForces, 200 );
+                const auto& a = reference.getCutCellPressure();
+                const auto& b = cached.getCutCellPressure();
+                check( a.usedCoupledProjection && b.usedCoupledProjection &&
+                    a.coupledStatus == fluidCoupledPressureStatus2::converged &&
+                    b.coupledStatus == fluidCoupledPressureStatus2::converged &&
+                    a.usedIncompleteCholesky && b.usedIncompleteCholesky &&
+                    a.coupledRelativeResidual <= 1.1e-5f &&
+                    b.coupledRelativeResidual <= 1.1e-5f &&
+                    a.hasAnalyticImpulseBudget && b.hasAnalyticImpulseBudget &&
+                    a.coupledTiming.preconditionerApplications > 0 &&
+                    b.coupledTiming.preconditionerApplications > 0,
+                    "reference and cached IC0 must both pass true residual and impulse-budget gates" );
+                check( std::abs( a.predictedContinuityRms - b.predictedContinuityRms ) < 5.0e-3f &&
+                    std::abs( a.pressureResidual - b.pressureResidual ) < 5.0e-3f &&
+                    std::abs( a.coupledIterations - b.coupledIterations ) <= 3,
+                    "cached IC0 must preserve coupled pressure continuity and comparable convergence" );
+                for( std::size_t i = 0; i < bodies.size(); ++i )
+                {
+                    const float scale = 1.0f + Length( originalForces[i].force );
+                    check( Length( originalForces[i].force - cachedForces[i].force ) < 2.0e-2f * scale &&
+                        std::abs( originalForces[i].torque - cachedForces[i].torque ) < 2.0e-2f * scale,
+                        "cached IC0 must preserve each body's linear/angular pressure feedback" );
+                }
+                const vec2 probe{ -1.05f, 0.14f };
+                const float momentumScale = 1.0f + Length( reference.getFluidMomentum() );
+                check( Length( reference.sampleVelocity( probe ) - cached.sampleVelocity( probe ) ) < 2.0e-2f &&
+                    Length( reference.getFluidMomentum() - cached.getFluidMomentum() ) < 2.0e-2f * momentumScale,
+                    "cached IC0 must not significantly change the fluid velocity or momentum" );
+                for( fluidShapeObstacle2& body : bodies )
+                {
+                    body.transform.position += dt * body.linearVelocity;
+                    body.center = body.transform.position;
+                }
+            }
+            cached.clear();
+            check( cached.isAnalyticCutCellCachedIc0Enabled() &&
+                cached.getCutCellPressure().coupledTiming.total == 0.0,
+                "clear must retain cached IC0 choice without stale pressure timing" );
+            reference.clear();
+            check( !reference.isAnalyticCutCellCachedIc0Enabled(),
+                "clear must retain reference IC0 comparison option" );
+        }
+}
+
 void checkAnalyticCutCellPressureImpulseBudget()
 {
     constexpr vec2 origin{ -6.0f, -4.0f };
@@ -2955,6 +3042,7 @@ int main()
     checkAnalyticPartialCircleUnion();
     checkAnalyticCutCellPressureImpulseBudget();
     checkAnalyticCutCellPreconditionerComparison();
+    checkCachedIc0Differential();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();

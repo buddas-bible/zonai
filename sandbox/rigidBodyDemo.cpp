@@ -1397,6 +1397,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     const bool analyticCapsule = windField_->isAnalyticCapsuleCutCellEnabled();
     const int cutCellSamples = windField_->getCutCellSampleCount();
     const bool cutCellCoupled = windField_->isCutCellCoupledProjectionEnabled();
+    const bool cachedIc0 = windField_->isAnalyticCutCellCachedIc0Enabled();
     const bool conservative = windField_->isConservativeAdvectionEnabled();
     const bool geometryCorrection = windField_->isSweptGeometryCorrectionEnabled();
     const bool adaptiveSwept = windField_->isAdaptiveSweptSamplingEnabled();
@@ -1413,6 +1414,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     windField_->setDisjointAnalyticCutCellEnabled( disjointAnalytic );
     windField_->setAnalyticCapsuleCutCellEnabled( analyticCapsule );
     windField_->setCutCellCoupledProjectionEnabled( cutCellCoupled );
+    windField_->setAnalyticCutCellCachedIc0Enabled( cachedIc0 );
     windField_->setConservativeAdvectionEnabled( conservative );
     windField_->setSweptGeometryCorrectionEnabled( geometryCorrection );
     windField_->setAdaptiveSweptSamplingEnabled( adaptiveSwept );

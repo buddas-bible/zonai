@@ -257,6 +257,15 @@ public:
     void setWindSourceStrength( float strength );
     void setWindDragCoefficient( float rate );
     void setWindFluidSubstepCount( int count ) noexcept;
+    // Benchmark comparison: preserve baseline IC(0) while keeping cached ON by default.
+    void setWindCachedIc0Enabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setAnalyticCutCellCachedIc0Enabled( enabled );
+    }
+    [[nodiscard]] bool isWindCachedIc0Enabled() const noexcept
+    {
+        return windField_ && windField_->isAnalyticCutCellCachedIc0Enabled();
+    }
     void setWindStepProfilingEnabled( bool enabled ) noexcept
     {
         windStepProfilingEnabled_ = enabled;

@@ -420,6 +420,18 @@ public:
         return analyticCutCellIncompleteCholeskyEnabled_;
     }
 
+    // IC(0) forward/backward sweep에서 열린 면 계수와 역피벗을 Step당 한 번 계산.
+    // 기본 ON. OFF는 같은 Schur 연산자의 기존 매-적용 조회/나눗셈 기준 경로.
+    // 장애물/격자 변화가 있는 각 coupled solve마다 새로 구축하고 프레임 간 재사용하지 않는다.
+    void setAnalyticCutCellCachedIc0Enabled( bool enabled ) noexcept
+    {
+        analyticCutCellCachedIc0Enabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellCachedIc0Enabled() const noexcept
+    {
+        return analyticCutCellCachedIc0Enabled_;
+    }
+
     // 벤치마크 전용 PCG 시간 측정. 기본 OFF로 일반 Step에 시계 측정 비용 없음.
     void setCutCellPressureTimingEnabled( bool enabled ) noexcept { cutCellPressureTimingEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellPressureTimingEnabled() const noexcept { return cutCellPressureTimingEnabled_; }
@@ -566,6 +578,14 @@ private:
         double fy = 0.0;
         double torque = 0.0;
     };
+    struct incompleteCachedCoefficients
+    {
+        double west = 0.0;
+        double south = 0.0;
+        double westOverPivot = 0.0;
+        double southOverPivot = 0.0;
+        double inversePivot = 0.0;
+    };
     struct coupledPressureScratch
     {
         std::vector<coupledPressureFace> faces;
@@ -573,6 +593,7 @@ private:
         std::vector<double> diagonal;
         std::vector<double> incompletePivot;
         std::vector<double> incompleteForward;
+        std::vector<incompleteCachedCoefficients> incompleteCached;
         std::vector<double> rhs;
         std::vector<double> x;
         std::vector<double> residual;
@@ -639,6 +660,7 @@ private:
     bool cutCellProjectionEnabled_ = false;
     bool cutCellCoupledProjectionEnabled_ = false;
     bool analyticCutCellIncompleteCholeskyEnabled_ = true;
+    bool analyticCutCellCachedIc0Enabled_ = true;
     bool cutCellPressureTimingEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;

@@ -44,7 +44,7 @@ struct summary
     int validFrames = 0;
 };
 
-summary measure( float h, int fluidSubsteps )
+summary measure( float h, int fluidSubsteps, bool cached )
 {
     // Run the real sandbox World/Fluid interleave (including rigid force feedback,
     // drag sampling, and World::Step). No synthetic obstacle trajectory or snapshots.
@@ -54,6 +54,7 @@ summary measure( float h, int fluidSubsteps )
     scene.setWindCutCellProjectionEnabled( true );
     scene.setWindCutCellCoupledProjectionEnabled( true );
     scene.setWindDisjointAnalyticEnabled( true );
+    scene.setWindCachedIc0Enabled( cached );
     scene.setWindFluidSubstepCount( fluidSubsteps );
     scene.setWindStepProfilingEnabled( true );
     scene.setWindSourceStrength( 8.0f );
@@ -127,19 +128,25 @@ summary measure( float h, int fluidSubsteps )
 
 int main( int argc, char** argv )
 {
-    const bool csv = argc > 1 && std::string_view( argv[1] ) == "--csv";
+    bool csv = false;
+    bool reference = false;
+    for( int i = 1; i < argc; ++i )
+    {
+        csv |= std::string_view( argv[i] ) == "--csv";
+        reference |= std::string_view( argv[i] ) == "--ic0-reference";
+    }
     if( csv )
         std::puts( "cell_m,world_substeps,fluid_substeps,frames,pcg_converged_frames,pcg_failed_frames,analytic_frames,fluid_coupling_ms,world_ms,field_ms,mask_ms,geometry_ms,swept_ms,remap_ms,boundary_ms,advection_ms,pressure_ms,tracer_ms,other_ms,"
             "schur_total_ms,schur_assembly_ms,schur_ic0_ms,schur_operator_ms,"
             "schur_preconditioner_ms,schur_vector_ms,schur_validation_ms,schur_output_ms,"
-            "operator_calls,preconditioner_calls" );
+            "operator_calls,preconditioner_calls,ic0_mode" );
     else
         std::puts( "Wind sandbox: actual World/Fluid interleaving, 8 World substeps, 12 measured frames after 4 warmup frames; medians per frame; informational only." );
 
     for( float h : { 0.5f, 0.25f } )
         for( int steps : { 1, 2, 4, 8 } )
         {
-            const summary stats = measure( h, steps );
+            const summary stats = measure( h, steps, !reference );
             const auto& p = stats.medians.phases;
             const auto& pcg = stats.medians.pcg;
             if( csv )
@@ -149,18 +156,20 @@ int main( int argc, char** argv )
                     stats.failedFrames, stats.analyticFrames, stats.medians.fluid, stats.medians.world,
                     p.total, p.occupancy, p.geometry, p.swept, p.remap, p.boundaries,
                     p.advection, p.pressure, p.tracer, p.other );
-                std::printf( ",%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d\n",
+                std::printf( ",%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d,%s\n",
                     pcg.total, pcg.assembly, pcg.factorization, pcg.multiply, pcg.preconditioner,
                     pcg.vector, pcg.validation, pcg.output,
-                    pcg.matrixProducts, pcg.preconditionerApplications );
+                    pcg.matrixProducts, pcg.preconditionerApplications,
+                    reference ? "reference" : "cached" );
             }
             else
                 std::printf( "h=%.2f World=%d Fluid=%d: field %.3f ms, pressure %.3f ms, "
                     "Schur %.3f (setup %.3f IC0 %.3f A*v %.3f precond %.3f vec %.3f), "
-                    "World %.3f ms, converged %d/%d, failed %d\n",
+                    "World %.3f ms, converged %d/%d, failed %d, IC0=%s\n",
                     h, worldSubsteps, steps, p.total, p.pressure,
                     pcg.total, pcg.assembly, pcg.factorization,
                     pcg.multiply, pcg.preconditioner, pcg.vector, stats.medians.world,
-                    stats.coupledFrames, stats.validFrames, stats.failedFrames );
+                    stats.coupledFrames, stats.validFrames, stats.failedFrames,
+                    reference ? "reference" : "cached" );
         }
 }
