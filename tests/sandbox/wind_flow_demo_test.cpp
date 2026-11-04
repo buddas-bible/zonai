@@ -48,15 +48,26 @@ void checkWorldWindStepProfiling()
         first.pressure > 0.0 && first.accounted() <= first.total + 0.2 &&
         scene.getWindFluidMilliseconds() >= 0.0f && scene.getWindWorldMilliseconds() >= 0.0f,
         "World wind profile must accumulate field phase time across four fluid intervals" );
+    const fluidCoupledPressureTiming2 firstPcg = scene.getWindCoupledTiming();
+    check( firstPcg.total > 0.0 && firstPcg.matrixProducts > 0 &&
+        firstPcg.preconditionerApplications > 0 &&
+        firstPcg.accounted() <= firstPcg.total + 0.2 &&
+        firstPcg.total <= first.pressure + 0.2,
+        "World wind profile must account for every coupled PCG solve within its pressure phase" );
     scene.step( dt, 8 );
     const fluidStepTiming2 second = scene.getWindFieldTiming();
     check( second.total > 0.0 && second.swept > 0.0 &&
         second.accounted() <= second.total + 0.2,
         "successive synchronized World steps must report a fresh swept phase timing" );
+    check( scene.getWindCoupledTiming().total > 0.0 &&
+        scene.getWindCoupledTiming().total <= second.pressure + 0.2,
+        "Schur solve phase times must reset per frame rather than accumulate across frames" );
 
     scene.configureWindField( 28, 16, 0.5f );
     check( scene.isWindStepProfilingEnabled() && scene.getWindField()->isStepTimingEnabled() &&
-        scene.getWindFieldTiming().total == 0.0,
+        scene.getWindFieldTiming().total == 0.0 &&
+        scene.getWindCoupledTiming().total == 0.0 &&
+        scene.getWindField()->isCutCellPressureTimingEnabled(),
         "resizing the wind grid must preserve the profiling choice without stale timings" );
     scene.step( dt, 8 );
     check( scene.getWindFieldTiming().total > 0.0,
@@ -64,7 +75,9 @@ void checkWorldWindStepProfiling()
     scene.setWindStepProfilingEnabled( false );
     scene.step( dt, 8 );
     check( scene.getWindFieldTiming().total == 0.0 &&
-        scene.getWindField()->getStepTiming().total == 0.0,
+        scene.getWindCoupledTiming().total == 0.0 &&
+        scene.getWindField()->getStepTiming().total == 0.0 &&
+        !scene.getWindField()->isCutCellPressureTimingEnabled(),
         "disabled sandbox profiling must not publish old observations" );
 }
 
