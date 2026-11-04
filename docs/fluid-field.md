@@ -474,6 +474,17 @@ Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들�
 
 **한계:** IC(0)는 Jacobi보다 한 반복당 연산이 늘어난다. 전체 실행 시간이 모든 조건에서 감소하거나 FSI 전체 보존을 보장하는 것은 아니며, 다중 유체 포켓과 더 큰 격자에는 별도 성능 검증이 필요하다.
 
+## Part 13x — Jacobi / IC(0) 성능 비교와 재현 가능한 계측
+
+- 분석적 다중 Cut-cell Schur PCG는 기본적으로 IC(0)를 사용한다. `setAnalyticCutCellIncompleteCholeskyEnabled(false)`를 호출하면 **동일한 원래 Schur 연산자, RHS, 반복 200회 한계, 엄격한 실제 잔차 검증**을 유지하며 이전 Jacobi 전처리기로 비교할 수 있다. 전처리기 전환은 Geometry/Tracer 이력을 초기화하지 않는다.
+- `setCutCellPressureTimingEnabled(true)`로 켜는 opt-in 프로파일은 `getCutCellPressure().coupledSolveMilliseconds`에 **연립 Schur PCG 호출에 걸린 실제 벽시계 시간(ms)**을 기록한다. 기본 OFF이며, 압력 Jacobi fallback, 전체 Fluid Step 또는 Shape 갱신·이류·Tracer 시간까지 포함하지 않는다. 미요청 상태는 0이다. 마지막으로 완료된 Fluid substep의 진단값이라는 제약은 같다.
+- `fluidPreconditionerBenchmark`는 동일 초기 조건에서 h=0.5/0.25m, 두 Circle의 부분 교차·분리·완전 포함, dt=1/60, 압력 반복 상한 200을 사용한다. 각 실행은 **새 Field 및 동일 initial velocity source**에서 시작하며, 생성·seed 시간은 제외하고 1회 `step()`의 전체 시간과 분리 계측된 PCG 시간, 반복 횟수와 실제 상대 잔차를 수집한다. 첫 시도는 CPU/캐시 warmup으로 제외하고 나머지 5회의 중앙값을 CSV로 출력한다.
+- 실행 예: `cmake --build build --config Release --target fluidPreconditionerBenchmark` 뒤 Windows에서는 `build/tests/Release/fluidPreconditionerBenchmark.exe --csv`. CI Windows Release에도 **정보 제공 전용** 명령이 추가됐다. 실행 환경·CPU 부하가 다른 CI 시간의 절대치를 서로 직접 비교하거나 CI 시간에 성능 합격/불합격 기준을 걸지 않는다.
+- 어느 전처리기가 200회 안에 수렴하지 않으면 그 조합의 **비교 가능한 speedup을 0으로 표시**한다. 수렴하지 않은 Jacobi가 중간에 종료되어 빨라 보이는 현상을 최적화 성과로 주장하지 않는다. PCG 시간과 Field Step 전체 시간을 별도로 출력해 전처리기 비용이 전체 시뮬레이션에 차지하는 비중을 검토한다.
+- 단위 테스트는 h=0.5m에서 동일 입력의 두 압력해/개별 Body 반력 및 연속성 잔차의 일치를 검사한다. h=0.25m의 이미 확인된 Jacobi 반복 한도 실패와 IC(0) 수렴, 반력 미주입 정책, 사용자 설정과 clear 후 통계 초기화를 검사한다.
+
+**범위:** 벤치마크는 cold-start 단일 Fluid Step의 비용 비교다. 이동하는 강체의 여러 World substep, 다양한 풍속/해상도, 긴 시간의 warm-start solver, 정적인 삼각망이나 다량의 obstacle 장면에 대한 프레임 시간이나 안정성까지 대표하지 않는다. 벤치마크에서 빠르다고 해서 자동으로 기본 전처리기를 바꾸지 않는다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
