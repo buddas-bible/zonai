@@ -67,6 +67,43 @@ struct fluidPressureEnergy2
     [[nodiscard]] double totalDelta() const noexcept { return fluidDelta() + rigidDelta(); }
 };
 
+// 하나의 coupled Schur A*p=b solve 안에서 소비된 CPU wall-clock(ms) 분해.
+// `setCutCellPressureTimingEnabled(true)`인 경우에만 유효하며 기본 OFF.
+// assembly에는 matrix-free 연산자에 필요한 diagonal, RHS 및 face clipping을 포함.
+// multiply는 PCG 반복 중 A*v 횟수만, validation은 별도 실제 b-A*x 재검증.
+struct fluidCoupledPressureTiming2
+{
+    double total = 0.0;
+    double assembly = 0.0;
+    double factorization = 0.0;
+    double multiply = 0.0;
+    double preconditioner = 0.0;
+    double vector = 0.0;
+    double validation = 0.0;
+    double output = 0.0;
+    int matrixProducts = 0;
+    int preconditionerApplications = 0;
+
+    [[nodiscard]] double accounted() const noexcept
+    {
+        return assembly + factorization + multiply + preconditioner + vector + validation + output;
+    }
+
+    void accumulate( const fluidCoupledPressureTiming2& next ) noexcept
+    {
+        total += next.total;
+        assembly += next.assembly;
+        factorization += next.factorization;
+        multiply += next.multiply;
+        preconditioner += next.preconditioner;
+        vector += next.vector;
+        validation += next.validation;
+        output += next.output;
+        matrixProducts += next.matrixProducts;
+        preconditionerApplications += next.preconditionerApplications;
+    }
+};
+
 // Pressure projection 한 번의 운동량 수지. 모든 값은 N·s.
 // fluid: 유체-유체 MAC face 속도 보정량의 운동량 변화.
 // solid: 유체 압력으로 강체에 가해진 충격량. wall: 외곽 닫힌 벽에 가해진 충격량.
@@ -87,6 +124,7 @@ struct fluidPressureMomentum2
     float coupledFinalResidualRms = 0.0f;
     float coupledRelativeResidual = 0.0f;
     bool usedIncompleteCholesky = false;
+    fluidCoupledPressureTiming2 coupledTiming{};
     // 수렴한 압력이 예측한 Body Δv/Δω를 MAC solid 법선 face에 반영한 결과.
     // 실제 World의 후속 Drag/Contact/Joint Δv는 여기에 포함하지 않는다.
     int synchronizedBoundaryFaces = 0;
@@ -187,6 +225,7 @@ struct fluidCutCellPressure2
     bool usedIncompleteCholesky = false;
     // opt-in 측정: Schur PCG 호출에 소비된 wall clock 시간(ms). 전체 Field Step은 아님.
     double coupledSolveMilliseconds = 0.0;
+    fluidCoupledPressureTiming2 coupledTiming{};
     // 수렴한 Cut-cell PCG의 Body 예측속도를 다시 적용한 solid-normal MAC face.
     // 부분 개방 face는 blocked 구간만 갱신하며 fluid face 속도는 보존한다.
     int synchronizedBoundaryFaces = 0;
