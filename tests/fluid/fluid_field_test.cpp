@@ -1189,6 +1189,7 @@ void checkAnalyticCutCellPressureImpulseBudget()
     constexpr vec2 origin{ -6.0f, -4.0f };
     constexpr std::array<float, 2> GRID_SIZES{ 0.5f, 0.25f };
     constexpr std::array<float, 2> TIME_STEPS{ 1.0f / 60.0f, 1.0f / 120.0f };
+    int unavailableCases = 0;
 
     for( float h : GRID_SIZES )
         for( float dt : TIME_STEPS )
@@ -1233,8 +1234,8 @@ void checkAnalyticCutCellPressureImpulseBudget()
                         projection.coupledRelativeResidual,
                         field.getCutCellTransition().usedDisjointAnalyticGeometry,
                         projection.hasAnalyticImpulseBudget );
-                    check( false,
-                        "analytic multi-shape pressure must produce an explicit cut-cell impulse ledger" );
+                    ++unavailableCases;
+                    continue;
                 }
 
                 const vec2 expected = dt * ( reactions[0].force + reactions[1].force );
@@ -1269,6 +1270,9 @@ void checkAnalyticCutCellPressureImpulseBudget()
                     LengthSquared( field.getCutCellPressure().impulse.residual() ) == 0.0f,
                     "clear must reset analytic cut-cell pressure impulse diagnostics" );
             }
+
+    check( unavailableCases == 0,
+        "all analytic multi-shape pressure configurations must converge and expose the impulse ledger" );
 
     // Failed PCG and sampled geometry must not claim a valid analytic pressure audit.
     const std::array<fluidShapeObstacle2, 2> touching{{
