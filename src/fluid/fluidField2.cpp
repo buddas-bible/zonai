@@ -791,9 +791,9 @@ analyticCircleInterval ClipDisjointShapeFace( const analyticDisjointShape2& shap
     bool vertical, double coordinate, double low, double high )
 {
     if( vertical
-        ? ( coordinate <= shape.bounds.min.x || coordinate >= shape.bounds.max.x ||
+        ? ( coordinate < shape.bounds.min.x || coordinate > shape.bounds.max.x ||
             high <= shape.bounds.min.y || low >= shape.bounds.max.y )
-        : ( coordinate <= shape.bounds.min.y || coordinate >= shape.bounds.max.y ||
+        : ( coordinate < shape.bounds.min.y || coordinate > shape.bounds.max.y ||
             high <= shape.bounds.min.x || low >= shape.bounds.max.x ) ) return {};
     return std::visit( [&]( const auto& geometry ) -> analyticCircleInterval
     {
