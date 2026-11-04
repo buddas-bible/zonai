@@ -22,6 +22,7 @@ struct result
     double pressureMilliseconds = 0.0;
     double iterations = 0.0;
     double residual = 0.0;
+    fluidCoupledPressureTiming2 phases{};
     int converged = 0;
     int attempts = 0;
 };
@@ -56,6 +57,7 @@ result measure( float h, int mode, bool ic0 )
 {
     const auto bodies = makeObstacles( mode );
     std::vector<double> totalSamples, pressureSamples, iterationSamples, residualSamples;
+    std::vector<fluidCoupledPressureTiming2> phaseSamples;
     result stats{};
     for( int i = 0; i < rounds + 1; ++i )
     {
@@ -82,11 +84,31 @@ result measure( float h, int mode, bool ic0 )
         pressureSamples.push_back( pressure.coupledSolveMilliseconds );
         iterationSamples.push_back( pressure.coupledIterations );
         residualSamples.push_back( pressure.coupledRelativeResidual );
+        phaseSamples.push_back( pressure.coupledTiming );
     }
     stats.stepMilliseconds = median( totalSamples );
     stats.pressureMilliseconds = median( pressureSamples );
     stats.iterations = median( iterationSamples );
     stats.residual = median( residualSamples );
+    const auto phaseMedian = [&]( auto getter )
+    {
+        std::vector<double> samples;
+        samples.reserve( phaseSamples.size() );
+        for( const auto& item : phaseSamples ) samples.push_back( getter( item ) );
+        return median( std::move( samples ) );
+    };
+    auto& p = stats.phases;
+    p.total = phaseMedian( []( const auto& v ) { return v.total; } );
+    p.assembly = phaseMedian( []( const auto& v ) { return v.assembly; } );
+    p.factorization = phaseMedian( []( const auto& v ) { return v.factorization; } );
+    p.multiply = phaseMedian( []( const auto& v ) { return v.multiply; } );
+    p.preconditioner = phaseMedian( []( const auto& v ) { return v.preconditioner; } );
+    p.vector = phaseMedian( []( const auto& v ) { return v.vector; } );
+    p.validation = phaseMedian( []( const auto& v ) { return v.validation; } );
+    p.output = phaseMedian( []( const auto& v ) { return v.output; } );
+    p.matrixProducts = static_cast<int>( phaseMedian( []( const auto& v ) { return v.matrixProducts; } ) );
+    p.preconditionerApplications =
+        static_cast<int>( phaseMedian( []( const auto& v ) { return v.preconditionerApplications; } ) );
     return stats;
 }
 
@@ -97,7 +119,9 @@ int main( int argc, char** argv )
     const bool csv = argc > 1 && std::string_view( argv[1] ) == "--csv";
     if( csv )
         std::puts( "geometry,cell_m,preconditioner,converged,attempts,pcg_median_ms,"
-            "step_median_ms,iterations_median,relative_residual_median,pcg_speedup_ic0_over_jacobi" );
+            "step_median_ms,iterations_median,relative_residual_median,pcg_speedup_ic0_over_jacobi,"
+            "assembly_ms,factorization_ms,operator_ms,preconditioner_ms,vector_ms,validation_ms,output_ms,"
+            "operator_calls,preconditioner_calls" );
     else
         std::puts( "Analytic Cut-cell Schur PCG, cold start, unit density, 200 iterations max. "
             "Medians are informative, not CI performance gates." );
@@ -114,17 +138,25 @@ int main( int argc, char** argv )
                 ? jacobi.pressureMilliseconds / ic0.pressureMilliseconds : 0.0;
             const auto print = [&]( const char* name, const result& stats )
             {
+                const auto& p = stats.phases;
                 if( csv )
-                    std::printf( "%s,%.2f,%s,%d,%d,%.5f,%.5f,%.0f,%.6g,%.4f\n",
+                {
+                    std::printf( "%s,%.2f,%s,%d,%d,%.5f,%.5f,%.0f,%.6g,%.4f",
                         labels[mode], h, name, stats.converged, stats.attempts,
                         stats.pressureMilliseconds, stats.stepMilliseconds, stats.iterations,
                         stats.residual, speedup );
+                    std::printf( ",%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%d,%d\n",
+                        p.assembly, p.factorization, p.multiply, p.preconditioner,
+                        p.vector, p.validation, p.output, p.matrixProducts, p.preconditionerApplications );
+                }
                 else
-                    std::printf( "%s h=%.2f %s %d/%d converged, PCG %.4f ms, "
-                        "step %.4f ms, iterations %.0f, relResidual %.6g, comparable speedup %.3fx\n",
+                    std::printf( "%s h=%.2f %s %d/%d converged: PCG %.4f ms, A*v %.4f ms (%d), "
+                        "preconditioner %.4f ms (%d), assembly %.4f ms, IC0 setup %.4f ms, "
+                        "vector %.4f ms, validation %.4f ms, relative %.6g\n",
                         labels[mode], h, name, stats.converged, stats.attempts,
-                        stats.pressureMilliseconds, stats.stepMilliseconds, stats.iterations,
-                        stats.residual, speedup );
+                        stats.pressureMilliseconds, p.multiply, p.matrixProducts,
+                        p.preconditioner, p.preconditionerApplications,
+                        p.assembly, p.factorization, p.vector, p.validation, stats.residual );
             };
             print( "Jacobi", jacobi );
             print( "IC0", ic0 );
