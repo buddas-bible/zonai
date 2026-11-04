@@ -257,6 +257,13 @@ public:
     void setWindSourceStrength( float strength );
     void setWindDragCoefficient( float rate );
     void setWindFluidSubstepCount( int count ) noexcept;
+    void setWindStepProfilingEnabled( bool enabled ) noexcept
+    {
+        windStepProfilingEnabled_ = enabled;
+        windFieldTiming_ = {};
+        if( windField_ ) windField_->setStepTimingEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindStepProfilingEnabled() const noexcept { return windStepProfilingEnabled_; }
     void configureWindField( int width, int height, float cellSize );
     [[nodiscard]] shapeId addWindStaticBox( vec2 center, vec2 halfExtents );
     [[nodiscard]] shapeId addWindStaticCircle( vec2 center, float radius );
@@ -418,6 +425,7 @@ public:
     [[nodiscard]] int getWindFluidSubstepCount() const noexcept { return windFluidSubstepCount_; }
     [[nodiscard]] float getWindFluidMilliseconds() const noexcept { return windFluidMilliseconds_; }
     [[nodiscard]] float getWindWorldMilliseconds() const noexcept { return windWorldMilliseconds_; }
+    [[nodiscard]] const fluidStepTiming2& getWindFieldTiming() const noexcept { return windFieldTiming_; }
     [[nodiscard]] std::size_t getWindStaticObstacleCount() const noexcept { return shapes_.size() > 3 && kind_ == demoKind::windFlow ? shapes_.size() - 3 : 0; }
     [[nodiscard]] std::span<const fluidObstacleForce2> getWindPressureForces() const noexcept { return windPressureForces_; }
     [[nodiscard]] vec2 getWindDragBodyImpulse() const noexcept { return windDragBodyImpulse_; }
@@ -649,6 +657,8 @@ private:
     int windFluidSubstepCount_ = 1; // World Substep과 독립적인 Fluid 압력/이류 횟수.
     float windFluidMilliseconds_ = 0.0f;
     float windWorldMilliseconds_ = 0.0f;
+    bool windStepProfilingEnabled_ = false;
+    fluidStepTiming2 windFieldTiming_{};
     std::vector<fluidShapeObstacle2> windObstacleSnapshots_{};
     std::vector<fluidObstacleForce2> windObstacleFeedback_{};
     std::deque<std::string> windStaticLabels_{};
