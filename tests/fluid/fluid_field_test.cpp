@@ -1102,6 +1102,39 @@ void checkDisjointAnalyticMultiShapeCutCell()
         std::abs( shared.getUFaceSolidVelocity( 12, 8 ) - 0.4f ) < 2.0e-5f,
         "two distinct body owners on the same MAC face must share exact blocked length and weighted velocity" );
 
+    // Transposed two-owner case: different solid segments of a shared V face.
+    // Validate both the clipped aperture and owner-specific Schur feedback.
+    fluidField2 vertical{ 24, 16, h, { -6.0f, -4.0f } };
+    vertical.setCutCellProjectionEnabled( true );
+    vertical.setDisjointAnalyticCutCellEnabled( true );
+    std::array<fluidShapeObstacle2, 2> verticalCircles{{
+        { circle2{ {}, radius }, { { 0.08f, 0.0f }, {} },
+            { 0.08f, 0.0f }, { 0.0f, 1.0f }, 0.0f },
+        { circle2{ {}, radius }, { { 0.42f, 0.0f }, {} },
+            { 0.42f, 0.0f }, { 0.0f, -0.2f }, 0.0f }
+    }};
+    std::array<fluidObstacleForce2, 2> verticalReactions{};
+    vertical.step( dt, verticalCircles, verticalReactions, 160 );
+    check( vertical.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        std::abs( vertical.getVFaceOpenFraction( 12, 8 ) - ( 1.0f - blocked / h ) ) < 2.0e-5f &&
+        std::abs( vertical.getVFaceSolidVelocity( 12, 8 ) - 0.4f ) < 2.0e-5f,
+        "two distinct owners of a V face must preserve exact blocked length and weighted velocity" );
+
+    vertical.setCutCellCoupledProjectionEnabled( true );
+    verticalCircles[0].inverseMass = 0.5f;
+    verticalCircles[1].inverseMass = 0.8f;
+    verticalCircles[0].inverseInertia = 1.3f;
+    verticalCircles[1].inverseInertia = 1.1f;
+    vertical.addVelocity( { 0.25f, -1.1f }, { -0.4f, 1.3f }, 1.4f );
+    vertical.step( dt, verticalCircles, verticalReactions, 200 );
+    const auto& verticalPressure = vertical.getCutCellPressure();
+    check( verticalPressure.usedCoupledProjection && !verticalPressure.coupledSolveFailed &&
+        verticalPressure.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        std::isfinite( verticalPressure.predictedContinuityRms ) &&
+        std::abs( verticalPressure.predictedContinuityRms - verticalPressure.pressureResidual ) <
+            2.0e-3f + 0.1f * verticalPressure.pressureResidual,
+        "same-V-face disjoint owners must retain Schur B/B-transpose blocked flux consistency" );
+
     shared.setCutCellCoupledProjectionEnabled( true );
     circles[0].inverseMass = 0.5f;
     circles[1].inverseMass = 0.8f;
