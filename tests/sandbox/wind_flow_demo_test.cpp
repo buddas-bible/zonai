@@ -659,6 +659,58 @@ void checkSandboxAnalyticCapsuleMode()
         "returning Capsule-only Wind to mixed obstacles must rebuild first sampled geometry snapshot" );
 }
 
+void checkSandboxDisjointAnalyticMultiShapeMode()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindCutCellCoupledProjectionEnabled( true );
+    scene.setWindDisjointAnalyticEnabled( true );
+    scene.setWindFluidSubstepCount( 2 );
+    scene.addWindVortex();
+    scene.step( dt, 4 );
+    const fluidField2* field = scene.getWindField();
+    const fluidCutCellTransition2& first = field->getCutCellTransition();
+    const fluidCutCellPressure2& pressure = field->getCutCellPressure();
+    check( scene.isWindDisjointAnalyticEnabled() && scene.getWindCouplingSteps() == 2 &&
+        first.usedDisjointAnalyticGeometry && first.disjointAnalyticShapes == 3 &&
+        pressure.usedCoupledProjection && !pressure.coupledSolveFailed &&
+        std::isfinite( pressure.predictedContinuityRms ),
+        "wind mixed Circle/Capsule/Box must use disjoint analytic multi-owner pressure coupling" );
+
+    for( const visualShape& visual : scene.getShapes() )
+        check( IsFinite( scene.getWorld().GetBodyLinearVelocity( visual.bodyHandle ) ),
+            "disjoint multi-shape wind pressure response must leave all World body velocities finite" );
+
+    scene.step( dt, 4 );
+    check( field->getCutCellTransition().usedDisjointAnalyticGeometry &&
+        field->getSweptFaceFlux().usedSweptFlux &&
+        field->getCutCellPressure().hasVolumeHistory &&
+        std::isfinite( field->getSweptFaceFlux().geometryMismatch ),
+        "moving multiple disjoint World shapes must retain swept flux and pressure geometry continuity" );
+
+    scene.setWindRoundedBoxEnabled( true );
+    scene.setWindFluidSubstepCount( 1 );
+    scene.step( dt, 4 );
+    check( field->getCutCellTransition().usedDisjointAnalyticGeometry &&
+        field->getCutCellTransition().disjointAnalyticShapes == 3 &&
+        !field->getCutCellPressure().hasVolumeHistory,
+        "changing the rounded World shape must invalidate old cut-cell history and preserve mixed analytics" );
+
+    scene.configureWindField( 24, 14, 0.5f );
+    check( scene.isWindDisjointAnalyticEnabled() &&
+        !scene.getWindField()->getCutCellPressure().hasVolumeHistory,
+        "resizing fluid field must retain mixed analytic selection without old geometry history" );
+
+    scene.setWindDisjointAnalyticEnabled( false );
+    scene.step( dt, 4 );
+    check( !scene.getWindField()->getCutCellTransition().usedDisjointAnalyticGeometry &&
+        !scene.getWindField()->getCutCellPressure().hasVolumeHistory,
+        "switching Sandbox multi-analytic off must return to sampled union without fake volume change" );
+}
+
 void checkSandboxAnalyticRoundedPolygonMode()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -979,6 +1031,7 @@ int main()
     checkSandboxAnalyticCircleMode();
     checkSandboxAnalyticPolygonMode();
     checkSandboxAnalyticRoundedPolygonMode();
+    checkSandboxDisjointAnalyticMultiShapeMode();
     checkSandboxAnalyticCapsuleMode();
     checkSandboxConservativeAdvectionTrial();
 }
