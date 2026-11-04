@@ -237,6 +237,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
         windDragFluidImpulse_ = {};
         windFluidMilliseconds_ = 0.0f;
         windWorldMilliseconds_ = 0.0f;
+        windFieldTiming_ = {};
     }
     std::array<fluidObstacleForce2, 3> summedPressureImpulse{};
     if( contactEventVisualizationEnabled_ ) syncContactEventSubscriptions();
@@ -313,7 +314,9 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                     std::span<fluidObstacleForce2>( windObstacleFeedback_ ).subspan( 3 ) );
             }
             else windField_->step( windTimeStep );
-    
+            if( windStepProfilingEnabled_ )
+                windFieldTiming_.accumulate( windField_->getStepTiming() );
+
             // 표면 네 지점의 상대속도를 사용해 선형 Drag와 회전 저항을 함께 계산한다.
             // 힘을 갱신하기 전에 모든 샘플을 수집해 Body 순회 순서에 의존하지 않는다.
             constexpr std::array<vec2, 4> DIRECTIONS{
@@ -1410,6 +1413,8 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     windField_->setSweptGeometryCorrectionEnabled( geometryCorrection );
     windField_->setAdaptiveSweptSamplingEnabled( adaptiveSwept );
     windField_->setSweptTracerRemapEnabled( sweptTracer );
+    windField_->setStepTimingEnabled( windStepProfilingEnabled_ );
+    windFieldTiming_ = {};
     resetWindFlow();
 }
 
@@ -1492,6 +1497,7 @@ void rigidBodyDemo::resetWindFlow()
 {
     if( kind_ != demoKind::windFlow || !windField_ ) return;
     windField_->clear();
+    windFieldTiming_ = {};
     windPressureForces_.fill( {} );
     windDragBodyImpulse_ = {};
     windDragFluidImpulse_ = {};
