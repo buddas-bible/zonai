@@ -146,6 +146,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --csv
 
+      # Identical World/Fluid scene using original on-the-fly IC(0) sweeps.
+      # Compare with the previous cached run on this same Windows runner.
+      - name: Sample Wind reference IC0 sweep (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --ic0-reference --csv
+
       - name: Test Release lifecycle invariants
         if: runner.os == 'Windows'
         run: ctest --test-dir build -C Release -R "^(rotatingSweepBoundsTests|worldRotatingSceneBenchmarkOracle|worldRotatingToiBenchmarkOracle|worldChainRetryBenchmarkOracle|worldShapeCastBenchmarkOracle|dynamicTreeBoxCastBenchmarkOracle|dynamicTreeBoxCastTests|worldRotatingShapeSweepOracleTests|worldRotatingBoxSweepOracleTests|worldRotatingCapsulePolygonOracleTests|worldChainRotatingConvexOracleTests|worldChainBentRotatingOracleTests|worldChainRetryTemporalTests|worldChainRetryStressTests|broadPhaseLifecycleTests|bodyShapeContactLifecycleTests|contactConstraintTests|restitutionTests|islandTests|islandSleepCcdTests|worldQuerySensorTests|worldContactEventTests|worldContactHitEventTests|worldOverlapAABBTests|worldOverlapShapeTests|worldSpatialQueryStressTests|worldRayCastTests|worldShapeCastTests|worldChainShapeCastOwnershipTests|worldChainConvexCastOwnershipTests|sandboxShapeCastDemoTests|sandboxShapeCastViewTests|sandboxOverlapShapeDemoTests|sandboxOverlapShapeViewTests|contactCacheTests|distanceJointTests|distanceJointWorldTests|moverJointTests|moverJointWorldTests|pogoJointTests|pogoJointWorldTests|filterJointTests|filterJointWorldTests|mouseJointTests|mouseJointWorldTests|revoluteJointTests|revoluteJointWorldTests|wheelJointTests|wheelJointWorldTests|sandboxDemoTests|fluidFieldTests|sandboxWindFlowDemoTests)$" --output-on-failure
