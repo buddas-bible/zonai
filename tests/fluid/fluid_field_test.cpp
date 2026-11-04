@@ -1239,7 +1239,9 @@ void checkAnalyticPartialCircleUnion()
         !field.getCutCellPressure().hasVolumeHistory,
         "partial two-circle union must be independent of 4x4/8x8 spatial samples" );
 
-    // The first-owner rule must not change total union area when input order changes.
+    // Changing the obstacle array order changes owner identity, so invalidate
+    // temporal history as required for any obstacle composition change.
+    field.invalidateObstacleHistory();
     std::swap( circles[0], circles[1] );
     field.step( dt, circles, reactions, 160 );
     check( field.getCutCellTransition().usedPartialCircleAnalyticUnion &&
