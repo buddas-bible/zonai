@@ -954,6 +954,18 @@ void rigidBodyDemoUi::drawExperimentControls()
                 time.remap, time.boundaries, time.advection );
             ImGui::Text( "Pressure %.3f / Tracer %.3f / 기타 %.3f ms",
                 time.pressure, time.tracer, time.other );
+            const fluidCoupledPressureTiming2& pcg = getWindCoupledTiming();
+            if( pcg.total > 0.0 )
+            {
+                ImGui::Text( "Schur PCG %.3f ms (준비 %.3f / IC(0) %.3f)",
+                    pcg.total, pcg.assembly, pcg.factorization );
+                ImGui::Text( "A*v %.3f (%d회) / 전처리 %.3f (%d회)",
+                    pcg.multiply, pcg.matrixProducts,
+                    pcg.preconditioner, pcg.preconditionerApplications );
+                ImGui::Text( "벡터 %.3f / 실제 잔차 %.3f / 해 출력 %.3f ms",
+                    pcg.vector, pcg.validation, pcg.output );
+                ImGui::TextDisabled( "Schur 세부 시간은 Pressure 전체의 일부이며, 기본 OFF입니다." );
+            }
             ImGui::TextDisabled( "마지막 프레임의 모든 Fluid substep 합. 계측/World 호출 오버헤드가 포함됩니다." );
         }
         ImGui::TextDisabled( "1회가 가장 가볍습니다. 2회 이상이면 World Substep을 여러 구간으로 묶어 교대로 계산합니다." );
