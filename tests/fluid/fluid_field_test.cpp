@@ -1210,9 +1210,12 @@ void checkAnalyticContainedCircleUnion()
         std::abs( field.getCutCellTransition().fluidVolume - expectedArea ) < 1.0e-4f &&
         !field.getCutCellPressure().hasVolumeHistory,
         "fully enclosed circle must not add solid area to analytic union" );
-    check( field.getUFaceOpenFraction( 13, 8 ) < 2.0e-5f &&
-        std::abs( field.getUFaceSolidVelocity( 13, 8 ) - outer.linearVelocity.x ) < 2.0e-5f,
-        "hidden circle must not overwrite the exposed outer circle U-face velocity" );
+    // Both circles cover part of these faces. Only the outer body's velocity counts.
+    check( field.getUFaceOpenFraction( 12, 8 ) < 2.0e-5f &&
+        field.getVFaceOpenFraction( 12, 8 ) < 2.0e-5f &&
+        std::abs( field.getUFaceSolidVelocity( 12, 8 ) - outer.linearVelocity.x ) < 2.0e-5f &&
+        std::abs( field.getVFaceSolidVelocity( 12, 8 ) - outer.linearVelocity.y ) < 2.0e-5f,
+        "hidden circle must not overwrite either shared U/V face solid velocity" );
 
     field.setCutCellSampleCount( 8 );
     field.step( dt, bodies, feedback, 180 );
@@ -1228,7 +1231,7 @@ void checkAnalyticContainedCircleUnion()
         field.getCutCellTransition().containedAnalyticShapes == 1 &&
         std::abs( field.getCutCellTransition().fluidVolume - expectedArea ) < 1.0e-4f &&
         !field.getCutCellPressure().hasVolumeHistory &&
-        std::abs( field.getUFaceSolidVelocity( 13, 8 ) - outer.linearVelocity.x ) < 2.0e-5f,
+        std::abs( field.getUFaceSolidVelocity( 12, 8 ) - outer.linearVelocity.x ) < 2.0e-5f,
         "input order inversion must keep exposed circle owner and invalidate containment history" );
 
     // Compare coupled pressure with the exact single-circle oracle.
