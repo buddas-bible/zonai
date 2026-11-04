@@ -140,6 +140,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --csv
 
+      # Compare 0/16/48 immovable obstacles with two movable bodies.
+      # Informational only: report both convergence and per-phase timings.
+      - name: Sample static obstacle Schur scaling (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --static-sweep
+
       # A real headless Sandbox World interleave, 8 World substeps and 1/2/4/8 Fluid steps.
       # Frame medians are informational; never gate CI on runner-dependent wall time.
       - name: Sample Wind multi-substep stage profile (Windows Release, informational)
