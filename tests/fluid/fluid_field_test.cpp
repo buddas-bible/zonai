@@ -1273,6 +1273,28 @@ void checkAnalyticCutCellPreconditionerComparison()
         std::isfinite( a.coupledSolveMilliseconds ) && a.coupledSolveMilliseconds >= 0.0 &&
         std::isfinite( b.coupledSolveMilliseconds ) && b.coupledSolveMilliseconds >= 0.0,
         "Jacobi and IC0 must solve the identical analytic pressure system with measured elapsed time" );
+    for( const auto* solved : { &a, &b } )
+    {
+        const fluidCoupledPressureTiming2& timing = solved->coupledTiming;
+        check( timing.total > 0.0 && std::isfinite( timing.accounted() ) &&
+            timing.accounted() <= timing.total + 0.1 &&
+            timing.assembly > 0.0 && timing.validation > 0.0 &&
+            timing.multiply > 0.0 && timing.preconditioner > 0.0 &&
+            timing.matrixProducts == solved->coupledIterations &&
+            timing.preconditionerApplications >= 1 &&
+            timing.preconditionerApplications <= solved->coupledIterations + 1,
+            "Schur PCG timing must separate non-overlapping phases and count actual operations" );
+    }
+    check( a.coupledTiming.factorization >= 0.0 &&
+        b.coupledTiming.factorization > a.coupledTiming.factorization &&
+        b.coupledTiming.preconditionerApplications > 0,
+        "IC0 must report factorization separately from preconditioner application" );
+    fluidCoupledPressureTiming2 aggregate = a.coupledTiming;
+    aggregate.accumulate( b.coupledTiming );
+    check( std::abs( aggregate.total - a.coupledTiming.total - b.coupledTiming.total ) < 1.0e-6 &&
+        aggregate.matrixProducts == a.coupledTiming.matrixProducts + b.coupledTiming.matrixProducts,
+        "solver phase diagnostics must aggregate independent solves" );
+
     check( std::abs( a.pressureResidual - b.pressureResidual ) < 2.0e-3f &&
         std::abs( a.predictedContinuityRms - b.predictedContinuityRms ) < 2.0e-3f,
         "the pressure residual and predicted continuity must agree across preconditioners" );
@@ -1302,11 +1324,27 @@ void checkAnalyticCutCellPreconditionerComparison()
         fine.coupledStatus == fluidCoupledPressureStatus2::converged &&
         fine.hasAnalyticImpulseBudget && fine.coupledIterations < 200,
         "IC0 must converge where fine-grid Jacobi safely reaches its established iteration limit" );
+    check( coarse.coupledTiming.total > 0.0 && fine.coupledTiming.total > 0.0 &&
+        coarse.coupledTiming.matrixProducts == coarse.coupledIterations &&
+        fine.coupledTiming.matrixProducts == fine.coupledIterations &&
+        coarse.coupledTiming.validation > 0.0 &&
+        fine.coupledTiming.validation > 0.0 &&
+        !coarse.hasAnalyticImpulseBudget,
+        "failed Jacobi and converged IC0 must both retain their actual PCG workload diagnostics" );
     fineJacobi.clear();
     check( !fineJacobi.isAnalyticCutCellIncompleteCholeskyEnabled() &&
         fineJacobi.isCutCellPressureTimingEnabled() &&
-        fineJacobi.getCutCellPressure().coupledSolveMilliseconds == 0.0,
+        fineJacobi.getCutCellPressure().coupledSolveMilliseconds == 0.0 &&
+        fineJacobi.getCutCellPressure().coupledTiming.total == 0.0,
         "clear must preserve the benchmark mode and reset elapsed-time diagnostics" );
+    fineIc0.setCutCellPressureTimingEnabled( false );
+    fineIc0.clear();
+    fineIc0.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
+    fineIc0.step( dt, bodies, ic0Forces, 200 );
+    check( fineIc0.getCutCellPressure().coupledTiming.total == 0.0 &&
+        fineIc0.getCutCellPressure().coupledTiming.matrixProducts == 0 &&
+        fineIc0.getCutCellPressure().coupledSolveMilliseconds == 0.0,
+        "disabled cut-cell profiling must not retain stale phase counts or durations" );
 }
 
 void checkAnalyticCutCellPressureImpulseBudget()
