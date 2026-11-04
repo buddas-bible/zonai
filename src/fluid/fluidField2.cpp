@@ -2279,6 +2279,53 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
     double changedSquared = 0.0;
     int boundaryFaces = 0;
     int partialFaces = 0;
+    const auto disjointShapes = disjointAnalyticCutCellEnabled_
+        ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+    if( !disjointShapes.empty() )
+    {
+        const double h = cellSize_;
+        const auto updateFace = [&]( bool vertical, int x, int y )
+        {
+            const int face = vertical ? uIndex( x, y ) : vIndex( x, y );
+            const float open = vertical ? uOpenFraction_[face] : vOpenFraction_[face];
+            if( open >= 1.0f ) return;
+            const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+            const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+            double length = 0.0;
+            double sum = 0.0;
+            for( std::size_t i = 0; i < disjointShapes.size(); ++i )
+            {
+                const auto clipped = ClipDisjointShapeFace(
+                    disjointShapes[i], vertical, normal, low, low + h );
+                if( clipped.length <= 0.0 ) continue;
+                const vec2 point = vertical
+                    ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
+                    : vec2{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
+                const vec2 velocity = predicted[i].linear +
+                    Cross( predicted[i].angular, point - obstacles[i].center );
+                length += clipped.length;
+                sum += clipped.length * ( vertical ? velocity.x : velocity.y );
+            }
+            if( length <= 0.0 ) return;
+            float& previous = vertical ? uSolidVelocity_[face] : vSolidVelocity_[face];
+            const float next = static_cast<float>( sum / length );
+            const double change = static_cast<double>( next ) - previous;
+            changedSquared += change * change;
+            // Weighted mean is exactly equivalent to the sum of owner-specific Bᵀ fluxes.
+            const float flux = ( 1.0f - open ) * static_cast<float>( change );
+            if( vertical ) pressureUSolidFlux_[face] = flux;
+            else pressureVSolidFlux_[face] = flux;
+            previous = next;
+            ++boundaryFaces;
+            if( open > 0.0f ) ++partialFaces;
+        };
+        for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x ) updateFace( true, x, y );
+        for( int y = 1; y < height_; ++y )
+            for( int x = 0; x < width_; ++x ) updateFace( false, x, y );
+    }
+    else
+    {
     analyticFluidCircle circle{};
     analyticFluidPolygon polygon{};
     analyticFluidCapsule capsule{};
@@ -2385,6 +2432,7 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
             ++boundaryFaces;
             if( vOpenFraction_[face] > 0.0f ) ++partialFaces;
         }
+    }
     }
 
     // 완전히 막힌 MAC 면만 u_/v_로 복사한다. 부분 개방 면의 유체 성분은 그대로 둔다.
