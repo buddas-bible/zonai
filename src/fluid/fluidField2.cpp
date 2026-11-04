@@ -3819,13 +3819,16 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     const bool useIncompleteCholesky = cutCell && cutCellTransition_.usedDisjointAnalyticGeometry &&
         analyticCutCellIncompleteCholeskyEnabled_;
     pressureMomentum_.usedIncompleteCholesky = useIncompleteCholesky;
+    const bool cachedIc0 = useIncompleteCholesky && analyticCutCellCachedIc0Enabled_;
     auto& incompletePivot = scratch.incompletePivot;
     auto& incompleteForward = scratch.incompleteForward;
+    auto& incompleteCached = scratch.incompleteCached;
     nextPhase( phase::factorization );
     if( useIncompleteCholesky )
     {
         incompletePivot.assign( rhs.size(), 0.0 );
         incompleteForward.assign( rhs.size(), 0.0 );
+        if( cachedIc0 ) incompleteCached.assign( rhs.size(), {} );
         for( int y = 0; y < height_; ++y )
             for( int xCell = 0; xCell < width_; ++xCell )
             {
@@ -3836,14 +3839,33 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                 if( xCell > 0 )
                 {
                     const double west = cutCellUOpen( xCell, y );
-                    if( west > 0.0 ) pivot -= west * west / incompletePivot[cell - 1];
+                    if( west > 0.0 )
+                    {
+                        pivot -= west * west / incompletePivot[cell - 1];
+                        if( cachedIc0 )
+                        {
+                            auto& coefficients = incompleteCached[cell];
+                            coefficients.west = west;
+                            coefficients.westOverPivot = west / incompletePivot[cell - 1];
+                        }
+                    }
                 }
                 if( y > 0 )
                 {
                     const double south = cutCellVOpen( xCell, y );
-                    if( south > 0.0 ) pivot -= south * south / incompletePivot[cell - width_];
+                    if( south > 0.0 )
+                    {
+                        pivot -= south * south / incompletePivot[cell - width_];
+                        if( cachedIc0 )
+                        {
+                            auto& coefficients = incompleteCached[cell];
+                            coefficients.south = south;
+                            coefficients.southOverPivot = south / incompletePivot[cell - width_];
+                        }
+                    }
                 }
                 incompletePivot[cell] = std::max( regularization, pivot );
+                if( cachedIc0 ) incompleteCached[cell].inversePivot = 1.0 / incompletePivot[cell];
             }
     }
     nextPhase( phase::pcg );
@@ -3855,6 +3877,39 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                 z[i] = source[i] / std::max( 1.0e-8, diagonal[i] );
             return;
         }
+        if( cachedIc0 )
+        {
+            // Precomputed face coefficients and reciprocal pivots are valid for
+            // this solve only. No cut-cell lookup or division in either sweep.
+            for( int y = 0; y < height_; ++y )
+                for( int xCell = 0; xCell < width_; ++xCell )
+                {
+                    const int cell = cellIndex( xCell, y );
+                    if( cellFluidFraction_[cell] <= 0.0f ) continue;
+                    const auto& coefficients = incompleteCached[cell];
+                    double value = source[cell];
+                    if( xCell > 0 )
+                        value += coefficients.westOverPivot * incompleteForward[cell - 1];
+                    if( y > 0 )
+                        value += coefficients.southOverPivot * incompleteForward[cell - width_];
+                    incompleteForward[cell] = value;
+                }
+            for( int y = height_ - 1; y >= 0; --y )
+                for( int xCell = width_ - 1; xCell >= 0; --xCell )
+                {
+                    const int cell = cellIndex( xCell, y );
+                    if( cellFluidFraction_[cell] <= 0.0f ) continue;
+                    double value = incompleteForward[cell];
+                    if( xCell + 1 < width_ )
+                        value += incompleteCached[cell + 1].west * z[cell + 1];
+                    if( y + 1 < height_ )
+                        value += incompleteCached[cell + width_].south * z[cell + width_];
+                    z[cell] = value * incompleteCached[cell].inversePivot;
+                }
+            return;
+        }
+        // Reference path: fetch face apertures and divide by pivots on every
+        // application. Keep it for deterministic differential verification.
         // Forward solve L*y=r (unit lower triangular, west/south neighbors).
         for( int y = 0; y < height_; ++y )
             for( int xCell = 0; xCell < width_; ++xCell )
