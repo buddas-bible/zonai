@@ -159,7 +159,7 @@ int main( int argc, char** argv )
                 for( bool bounded : { false, true } )
                 {
                     const result stats = measure( h, 1, 4, count, true, bounded, true );
-                    std::printf( "%d,%.2f,%s,%d,%d,%.5f,%.5f,%.5f,%.0f,%.6g\\n",
+                    std::printf( "%d,%.2f,%s,%d,%d,%.5f,%.5f,%.5f,%.0f,%.6g\n",
                         count, h, bounded ? "bounded" : "reference",
                         stats.converged, stats.attempts, stats.geometryMilliseconds,
                         stats.pressureMilliseconds, stats.stepMilliseconds,
