@@ -1184,6 +1184,137 @@ void checkDisjointAnalyticMultiShapeCutCell()
         "clear must preserve an explicitly disabled disjoint multi analytic mode" );
 }
 
+void checkAnalyticContainedCircleUnion()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr float h = 0.5f;
+    constexpr float outerRadius = 0.78f;
+    constexpr float innerRadius = 0.18f;
+    constexpr float domainArea = 24.0f * 16.0f * h * h;
+    constexpr float expectedArea = domainArea - std::numbers::pi_v<float> * outerRadius * outerRadius;
+
+    fluidShapeObstacle2 outer{ circle2{ {}, outerRadius }, { {}, {} }, {},
+        { 1.2f, -0.3f }, 0.0f };
+    fluidShapeObstacle2 inner{ circle2{ {}, innerRadius }, { { 0.12f, 0.08f }, {} },
+        { 0.12f, 0.08f }, { -5.0f, 4.0f }, 1.0f };
+    std::array<fluidShapeObstacle2, 2> bodies{ outer, inner };
+    std::array<fluidObstacleForce2, 2> feedback{};
+
+    fluidField2 field{ 24, 16, h, { -6.0f, -4.0f } };
+    field.setCutCellProjectionEnabled( true );
+    field.setDisjointAnalyticCutCellEnabled( true );
+    field.step( dt, bodies, feedback, 180 );
+    check( field.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        field.getCutCellTransition().disjointAnalyticShapes == 2 &&
+        field.getCutCellTransition().containedAnalyticShapes == 1 &&
+        std::abs( field.getCutCellTransition().fluidVolume - expectedArea ) < 1.0e-4f &&
+        !field.getCutCellPressure().hasVolumeHistory,
+        "fully enclosed circle must not add solid area to analytic union" );
+    check( field.getUFaceOpenFraction( 13, 8 ) < 2.0e-5f &&
+        std::abs( field.getUFaceSolidVelocity( 13, 8 ) - outer.linearVelocity.x ) < 2.0e-5f,
+        "hidden circle must not overwrite the exposed outer circle U-face velocity" );
+
+    field.setCutCellSampleCount( 8 );
+    field.step( dt, bodies, feedback, 180 );
+    check( field.getCutCellTransition().containedAnalyticShapes == 1 &&
+        std::abs( field.getCutCellTransition().fluidVolume - expectedArea ) < 1.0e-4f &&
+        !field.getCutCellPressure().hasVolumeHistory,
+        "contained analytic union must be independent of 4x4/8x8 spatial samples" );
+
+    // The first input shape may be enclosed; pressure ownership is the outer shape's.
+    std::swap( bodies[0], bodies[1] );
+    field.step( dt, bodies, feedback, 180 );
+    check( field.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        field.getCutCellTransition().containedAnalyticShapes == 1 &&
+        std::abs( field.getCutCellTransition().fluidVolume - expectedArea ) < 1.0e-4f &&
+        !field.getCutCellPressure().hasVolumeHistory &&
+        std::abs( field.getUFaceSolidVelocity( 13, 8 ) - outer.linearVelocity.x ) < 2.0e-5f,
+        "input order inversion must keep exposed circle owner and invalidate containment history" );
+
+    // Compare coupled pressure with the exact single-circle oracle.
+    bodies[0].inverseMass = 2.0f;
+    bodies[0].inverseInertia = 3.0f;
+    bodies[1].inverseMass = 0.5f;
+    bodies[1].inverseInertia = 1.2f;
+    fluidField2 nested{ 24, 16, h, { -6.0f, -4.0f } };
+    fluidField2 reference{ 24, 16, h, { -6.0f, -4.0f } };
+    nested.setCutCellProjectionEnabled( true );
+    nested.setDisjointAnalyticCutCellEnabled( true );
+    nested.setCutCellCoupledProjectionEnabled( true );
+    reference.setCutCellProjectionEnabled( true );
+    reference.setAnalyticCircleCutCellEnabled( true );
+    reference.setCutCellCoupledProjectionEnabled( true );
+    std::array<fluidObstacleForce2, 2> nestedReactions{};
+    std::array<fluidObstacleForce2, 1> referenceReaction{};
+    nested.addVelocity( { -1.2f, 0.2f }, { 1.3f, -0.4f }, 1.4f );
+    reference.addVelocity( { -1.2f, 0.2f }, { 1.3f, -0.4f }, 1.4f );
+    nested.step( dt, bodies, nestedReactions, 200 );
+    reference.step( dt, std::span<const fluidShapeObstacle2>( &bodies[1], 1 ),
+        referenceReaction, 200 );
+    const auto& coupled = nested.getCutCellPressure();
+    check( coupled.usedCoupledProjection && !coupled.coupledSolveFailed &&
+        coupled.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        std::isfinite( coupled.predictedContinuityRms ) &&
+        std::abs( coupled.predictedContinuityRms - coupled.pressureResidual ) <
+            2.0e-3f + 0.1f * coupled.pressureResidual,
+        "contained circle pressure must preserve coupled Schur adjoint consistency" );
+    check( Length( nestedReactions[0].force ) < 1.0e-5f &&
+        std::abs( nestedReactions[0].torque ) < 1.0e-5f &&
+        Length( nestedReactions[1].force - referenceReaction[0].force ) < 5.0e-3f &&
+        std::abs( nestedReactions[1].torque - referenceReaction[0].torque ) < 5.0e-3f,
+        "fully occluded body must receive zero pressure traction and outer body must match single-circle coupling" );
+
+    // A moving hidden circle must not displace any extra fluid or contribute swept flux.
+    fluidField2 transitions{ 24, 16, h, { -6.0f, -4.0f } };
+    transitions.setCutCellProjectionEnabled( true );
+    transitions.setDisjointAnalyticCutCellEnabled( true );
+    bodies[0] = inner;
+    bodies[1] = outer;
+    bodies[0].linearVelocity = {};
+    bodies[1].linearVelocity = {};
+    transitions.step( dt, bodies, feedback, 160 );
+    bodies[0].transform.position += vec2{ 0.03f, -0.01f };
+    bodies[0].center = bodies[0].transform.position;
+    transitions.step( dt, bodies, feedback, 160 );
+    check( transitions.getCutCellPressure().hasVolumeHistory &&
+        transitions.getCutCellTransition().containedAnalyticShapes == 1 &&
+        std::abs( transitions.getCutCellTransition().volumeDelta() ) < 1.0e-5f &&
+        transitions.getSweptFaceFlux().usedSweptFlux &&
+        transitions.getSweptFaceFlux().totalAbsoluteFlux < 1.0e-6f,
+        "moving a fully hidden circle must generate no fictitious displaced fluid" );
+
+    // Partial intersection is outside this special case: use the sampled union.
+    bodies[0].transform.position = { 0.65f, 0.0f };
+    bodies[0].center = bodies[0].transform.position;
+    transitions.step( dt, bodies, feedback, 160 );
+    check( !transitions.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        transitions.getCutCellTransition().containedAnalyticShapes == 0 &&
+        !transitions.getCutCellPressure().hasVolumeHistory &&
+        !transitions.getSweptFaceFlux().usedSweptFlux,
+        "partially intersecting circles must invalidate history and use sampled union" );
+
+    bodies[0].transform.position = { 0.12f, 0.08f };
+    bodies[0].center = bodies[0].transform.position;
+    transitions.step( dt, bodies, feedback, 160 );
+    check( transitions.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        transitions.getCutCellTransition().containedAnalyticShapes == 1 &&
+        !transitions.getCutCellPressure().hasVolumeHistory &&
+        !transitions.getSweptFaceFlux().usedSweptFlux,
+        "returning to full containment must restart volume and swept history" );
+
+    // Tangency is deliberately not counted as strict containment.
+    bodies[0].transform.position = { outerRadius - innerRadius, 0.0f };
+    bodies[0].center = bodies[0].transform.position;
+    transitions.step( dt, bodies, feedback, 160 );
+    check( !transitions.getCutCellTransition().usedDisjointAnalyticGeometry,
+        "tangent containment must conservatively fall back to sampled union" );
+
+    transitions.clear();
+    check( transitions.isDisjointAnalyticCutCellEnabled() &&
+        transitions.getCutCellTransition().containedAnalyticShapes == 0,
+        "clear must retain enabled option while dropping containment diagnostics" );
+}
+
 void checkDisjointAnalyticOverlappingAabbs()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -2381,6 +2512,7 @@ int main()
     checkAnalyticRoundedPolygonCutCell();
     checkDisjointAnalyticMultiShapeCutCell();
     checkDisjointAnalyticOverlappingAabbs();
+    checkAnalyticContainedCircleUnion();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();
