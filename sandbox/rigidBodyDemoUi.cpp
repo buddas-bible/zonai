@@ -1144,9 +1144,9 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::Text( "이산 유체 체적 변화: %+.4f m³", transition.fluidVolumeDelta );
             const fluidCutCellTransition2& cut = field->getCutCellTransition();
             ImGui::SeparatorText( "부분 점유 기하" );
-            ImGui::Text( "분리된 다중 분석: %s / Shape %d개",
+            ImGui::Text( "다중 분석: %s / Shape %d개 (내부 포함 %d개)",
                 cut.usedDisjointAnalyticGeometry ? "사용" : "미사용(표본 또는 단일)",
-                cut.disjointAnalyticShapes );
+                cut.disjointAnalyticShapes, cut.containedAnalyticShapes );
             ImGui::Text( "유체 체적: %.4f m³ / 변화 %+.4f m³", cut.fluidVolume, cut.volumeDelta() );
             ImGui::Text( "가린/다시 열린 체적: %.4f / %.4f m³", cut.coveredVolume, cut.releasedVolume );
             ImGui::Text( "부분 셀/개방 U/V face: %d / %d / %d", cut.partialCells, cut.partialUFaces, cut.partialVFaces );

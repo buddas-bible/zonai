@@ -424,6 +424,18 @@ Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들�
 
 **한계:** GJK는 convex surface의 분리 **판정**에만 사용하며, 실제로 겹치는 Shape의 분석적 기하 union이나 소유자별 겹친 표면의 물리적 반력 분배를 제공하지 않는다. 접촉에 가까운 형상은 보수적으로 근사 경로로 돌아가므로 exact 경로가 항상 사용된다는 보장은 없다. swept 면적의 시간 적분과 전체 유체–강체 질량·운동량·에너지 보존에 대한 한계도 유지된다.
 
+## Part 13t — 완전히 포함된 두 Circle의 분석적 Union (선택형)
+
+다중 분석적 Cut-cell 토글의 첫 번째 **실제 겹침** 확장이다. 이 단계는 임의의 서로 교차하는 Circle·Capsule·Polygon의 합집합이 아니라, 유효한 **Circle 두 개 중 하나가 다른 원 내부에 엄격하게 포함되는 경우**만 추가로 지원한다.
+
+- 두 원의 world-space 중심 거리 `d`와 반지름 `r_inner, r_outer`가 `d + r_inner + tolerance < r_outer`를 만족할 때 내부 원을 외부 유체에서 보이지 않는 Shape로 판정한다. `tolerance`는 float 좌표 및 반지름 크기에 따른 보수적 여유다. 정규화되지 않은 회전과 포함 경계에 접하는 배치는 표본 경로로 돌린다.
+- 입력 `fluidShapeObstacle2`의 **원래 index를 보존**한 채 내부 원에 `occluded` 표시를 한다. 셀 면적과 U/V face 클리핑을 공통으로 건너뛰므로, 내부 원의 표면 속도·압력 반력/토크·Schur `B/Bᵀ`·압력 예측 경계 유량·swept flux는 모두 0으로 취급한다. 외부 원만 해당 외부 경계의 owner가 된다. 인덱스 순서가 바뀌어도 동일하다.
+- `getCutCellTransition().containedAnalyticShapes`는 보이지 않는 내부 원 수(이 단계에서는 0 또는 1)다. Sandbox의 다중 분석 진단에서 함께 표시한다.
+- `previousContainedCircleIndex_`로 포함된 owner의 변화도 검출한다. 포함↔부분 겹침/분리, 포함 owner 변경 시 이전 volume/swept 기하 이력을 새 snapshot으로 시작하며, 유체 속도·Tracer는 초기화하지 않는다.
+- 회귀 테스트는 외부 원 하나의 이론적 면적과 길이/solid face 속도, 4×4/8×8 독립, 원래 Shape 순서를 뒤집은 경우, 내부 동적 원의 압력 반력 0과 단일 외부 원 대비 Schur 일치, 내부 원 이동 시 추가 swept flux 0, 부분 겹침/접선 접촉 fallback 및 이력 재진입을 확인한다.
+
+**범위와 한계:** 일반적인 두 원의 *부분 교집합*을 정확히 적분하지는 않는다. 다른 Shape와의 실제 겹침이나 세 개 이상의 Shape 조합은 기존 표본 union을 유지한다. 내부 원이 외부 원을 벗어나지 않는 시간 중간 snapshot에 대해서만 해당 swept 적분에서 내부 원 기여가 0이다. 이 경로에서도 pressure/advective momentum, fluid–rigid 에너지의 전체 보존을 증명하지 않는다. 기본 분석 옵션은 여전히 OFF다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.

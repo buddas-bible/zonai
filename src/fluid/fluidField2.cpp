@@ -731,6 +731,12 @@ double RoundedPolygonRectangleArea( const analyticFluidRoundedPolygon& polygon,
     return std::clamp( area, 0.0, ( x1 - x0 ) * ( y1 - y0 ) );
 }
 
+bool HasUnitFluidRotation( const rot2& rotation )
+{
+    const float squared = rotation.c * rotation.c + rotation.s * rotation.s;
+    return std::isfinite( squared ) && std::abs( squared - 1.0f ) <= 1.0e-4f;
+}
+
 // AABB가 겹치는 경우에도 실제 convex Shape가 충분히 떨어져 있으면
 // 분석적 합집합을 유지한다. 접촉/근접/비정상 회전/거리 계산 실패는 표본 경로로 복귀.
 bool AreDisjointFluidShapes( const fluidShapeObstacle2& first,
@@ -738,13 +744,8 @@ bool AreDisjointFluidShapes( const fluidShapeObstacle2& first,
 {
     if( !Overlaps( firstBounds, secondBounds ) ) return true;
 
-    const auto isUnitRotation = []( const rot2& rotation )
-    {
-        const float squared = rotation.c * rotation.c + rotation.s * rotation.s;
-        return std::isfinite( squared ) && std::abs( squared - 1.0f ) <= 1.0e-4f;
-    };
-    if( !isUnitRotation( first.transform.rotation ) ||
-        !isUnitRotation( second.transform.rotation ) ) return false;
+    if( !HasUnitFluidRotation( first.transform.rotation ) ||
+        !HasUnitFluidRotation( second.transform.rotation ) ) return false;
 
     distanceInput2 input{};
     input.proxyA = MakeShapeProxy( first.geometry );
@@ -771,7 +772,33 @@ struct analyticDisjointShape2
     std::variant<analyticFluidCircle, analyticFluidPolygon,
         analyticFluidCapsule, analyticFluidRoundedPolygon> geometry{};
     aabb2 bounds{};
+    bool occluded = false;
 };
+
+// 두 원이 엄격히 포함 관계라면 작은 원은 외부 유체와 접하는 경계가 없다.
+// 접선 접촉 또는 비정상 회전은 분석적 소유자 판정을 하지 않는다.
+int FindOccludedCircle( const analyticDisjointShape2& first,
+    const analyticDisjointShape2& second, const fluidShapeObstacle2& firstBody,
+    const fluidShapeObstacle2& secondBody )
+{
+    const auto* a = std::get_if<analyticFluidCircle>( &first.geometry );
+    const auto* b = std::get_if<analyticFluidCircle>( &second.geometry );
+    if( !a || !b || !HasUnitFluidRotation( firstBody.transform.rotation ) ||
+        !HasUnitFluidRotation( secondBody.transform.rotation ) ) return -1;
+
+    const double centerDistance = std::hypot(
+        static_cast<double>( a->center.x ) - b->center.x,
+        static_cast<double>( a->center.y ) - b->center.y );
+    const double scale = std::max( { 1.0, a->radius, b->radius,
+        std::abs( static_cast<double>( a->center.x ) ),
+        std::abs( static_cast<double>( a->center.y ) ),
+        std::abs( static_cast<double>( b->center.x ) ),
+        std::abs( static_cast<double>( b->center.y ) ) } );
+    const double tolerance = 32.0 * std::numeric_limits<float>::epsilon() * scale;
+    if( centerDistance + b->radius + tolerance < a->radius ) return 1;
+    if( centerDistance + a->radius + tolerance < b->radius ) return 0;
+    return -1;
+}
 
 std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
     std::span<const fluidShapeObstacle2> obstacles )
@@ -796,10 +823,19 @@ std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
 
         analytic.bounds = ComputeShapeAABB( obstacle.geometry, obstacle.transform );
         if( !IsValidAABB( analytic.bounds ) ) return {};
-        // AABB 중첩 후보만 GJK로 좁혀 검사한다. 실제 교차하면 표본 union 사용.
+        // 실제 분리된 Shape는 원래대로 합산한다. 두 원의 엄격한 포함 관계에
+        // 한해서만 내부 원의 모든 면적/face 반력을 무시한다.
         for( std::size_t i = 0; i < shapes.size(); ++i )
-            if( !AreDisjointFluidShapes( obstacles[i], obstacle,
-                shapes[i].bounds, analytic.bounds ) ) return {};
+        {
+            if( AreDisjointFluidShapes( obstacles[i], obstacle,
+                shapes[i].bounds, analytic.bounds ) ) continue;
+            if( obstacles.size() != 2 || shapes.size() != 1 ) return {};
+            const int occluded = FindOccludedCircle(
+                shapes[i], analytic, obstacles[i], obstacle );
+            if( occluded < 0 ) return {};
+            if( occluded == 0 ) shapes[i].occluded = true;
+            else analytic.occluded = true;
+        }
         shapes.push_back( std::move( analytic ) );
     }
     return shapes;
@@ -808,6 +844,7 @@ std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
 double DisjointShapeRectangleArea( const analyticDisjointShape2& shape,
     double x0, double y0, double x1, double y1 )
 {
+    if( shape.occluded ) return 0.0;
     if( x1 <= shape.bounds.min.x || x0 >= shape.bounds.max.x ||
         y1 <= shape.bounds.min.y || y0 >= shape.bounds.max.y ) return 0.0;
     return std::visit( [&]( const auto& geometry ) -> double
@@ -826,6 +863,7 @@ double DisjointShapeRectangleArea( const analyticDisjointShape2& shape,
 analyticCircleInterval ClipDisjointShapeFace( const analyticDisjointShape2& shape,
     bool vertical, double coordinate, double low, double high )
 {
+    if( shape.occluded ) return {};
     if( vertical
         ? ( coordinate < shape.bounds.min.x || coordinate > shape.bounds.max.x ||
             high <= shape.bounds.min.y || low >= shape.bounds.max.y )
@@ -909,6 +947,7 @@ void fluidField2::invalidateObstacleHistory() noexcept
     hasCutCellHistory_ = false;
     volumeSourceValid_ = false;
     previousDisjointAnalyticGeometry_ = false;
+    previousContainedCircleIndex_ = -1;
     previousObstacles_.clear();
     sweptFaceFlux_ = {};
     cutCellPressure_ = {};
@@ -984,6 +1023,7 @@ void fluidField2::clear() noexcept
     hasCutCellHistory_ = false;
     volumeSourceValid_ = false;
     previousDisjointAnalyticGeometry_ = false;
+    previousContainedCircleIndex_ = -1;
     std::fill( uOpenFraction_.begin(), uOpenFraction_.end(), 1.0f );
     std::fill( vOpenFraction_.begin(), vOpenFraction_.end(), 1.0f );
     for( int y = 0; y < height_; ++y )
@@ -1320,9 +1360,14 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     const auto disjointShapes = disjointAnalyticCutCellEnabled_
         ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
     const bool disjointGeometry = !disjointShapes.empty();
-    if( hasCutCellHistory_ && disjointGeometry != previousDisjointAnalyticGeometry_ )
+    int containedCircle = -1;
+    for( std::size_t i = 0; i < disjointShapes.size(); ++i )
+        if( disjointShapes[i].occluded ) containedCircle = static_cast<int>( i );
+    if( hasCutCellHistory_ && ( disjointGeometry != previousDisjointAnalyticGeometry_ ||
+        containedCircle != previousContainedCircleIndex_ ) )
         invalidateObstacleHistory();
     previousDisjointAnalyticGeometry_ = disjointGeometry;
+    previousContainedCircleIndex_ = containedCircle;
     const int sampleCount = cutCellSampleCount_;
     const float inverseCount = 1.0f / sampleCount;
     const float inverseCellSamples = inverseCount * inverseCount;
@@ -1333,6 +1378,7 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     cutCellTransition_.usedDisjointAnalyticGeometry = disjointGeometry;
     cutCellTransition_.disjointAnalyticShapes =
         disjointGeometry ? static_cast<int>( disjointShapes.size() ) : 0;
+    cutCellTransition_.containedAnalyticShapes = containedCircle >= 0 ? 1 : 0;
     std::fill( uSolidVelocity_.begin(), uSolidVelocity_.end(), 0.0f );
     std::fill( vSolidVelocity_.begin(), vSolidVelocity_.end(), 0.0f );
 
