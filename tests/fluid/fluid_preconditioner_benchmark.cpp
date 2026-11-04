@@ -74,7 +74,8 @@ std::vector<fluidShapeObstacle2> makeObstacles( int mode, int staticCount = 0 )
     return bodies;
 }
 
-result measure( float h, int mode, int preconditioner, int staticCount = 0 )
+result measure( float h, int mode, int preconditioner, int staticCount = 0,
+    bool indexedBoundaries = true )
 {
     const auto bodies = makeObstacles( mode, staticCount );
     std::vector<double> totalSamples, pressureSamples, iterationSamples, residualSamples;
@@ -93,6 +94,7 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0 )
         field.setAnalyticCutCellCachedIc0Enabled( preconditioner >= 2 );
         field.setAnalyticCutCellActiveIc0SweepEnabled( preconditioner >= 3 );
         field.setAnalyticCutCellCachedSchurEdgesEnabled( preconditioner == 4 );
+        field.setAnalyticCutCellIndexedBoundaryFacesEnabled( indexedBoundaries );
         field.setCutCellPressureTimingEnabled( true );
         field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
         std::vector<fluidObstacleForce2> feedback( bodies.size() );
@@ -145,21 +147,23 @@ int main( int argc, char** argv )
     const bool staticSweep = argc > 1 && std::string_view( argv[1] ) == "--static-sweep";
     if( staticSweep )
     {
-        // Same two dynamic bodies, increasing numbers of disjoint immovable
-        // obstacles. This reports costs rather than asserting FPS thresholds.
-        std::puts( "static_obstacles,cell_m,converged,attempts,pcg_ms,step_ms,"
+        // Same two movable bodies and geometry for reference / indexed runs.
+        // Compare only converged rows; absolute timings vary by CI runner.
+        std::puts( "static_obstacles,cell_m,boundary_mode,converged,attempts,pcg_ms,step_ms,"
             "assembly_ms,operator_ms,preconditioner_ms,iterations,relative_residual,cached_edges" );
         for( float h : { 0.5f, 0.25f } )
             for( int staticCount : { 0, 16, 48 } )
-            {
-                const result stats = measure( h, 1, 4, staticCount );
-                std::printf( "%d,%.2f,%d,%d,%.5f,%.5f,%.5f,%.5f,%.5f,%.0f,%.6g,%d\n",
-                    staticCount, h, stats.converged, stats.attempts,
-                    stats.pressureMilliseconds, stats.stepMilliseconds,
-                    stats.phases.assembly, stats.phases.multiply,
-                    stats.phases.preconditioner, stats.iterations,
-                    stats.residual, stats.phases.cachedLaplacianEdges );
-            }
+                for( bool indexed : { false, true } )
+                {
+                    const result stats = measure( h, 1, 4, staticCount, indexed );
+                    std::printf( "%d,%.2f,%s,%d,%d,%.5f,%.5f,%.5f,%.5f,%.5f,%.0f,%.6g,%d\n",
+                        staticCount, h, indexed ? "indexed" : "full",
+                        stats.converged, stats.attempts,
+                        stats.pressureMilliseconds, stats.stepMilliseconds,
+                        stats.phases.assembly, stats.phases.multiply,
+                        stats.phases.preconditioner, stats.iterations,
+                        stats.residual, stats.phases.cachedLaplacianEdges );
+                }
         return 0;
     }
     const bool csv = argc > 1 && std::string_view( argv[1] ) == "--csv";
