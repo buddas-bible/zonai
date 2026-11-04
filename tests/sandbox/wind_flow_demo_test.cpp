@@ -130,6 +130,67 @@ void checkActiveIc0WorldDifferential()
         "wind grid resize must preserve the active-cell IC0 sweep choice" );
 }
 
+void checkCachedSchurEdgesWorldDifferential()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo reference{ demoKind::windFlow };
+    rigidBodyDemo cached{ demoKind::windFlow };
+    for( rigidBodyDemo* scene : { &reference, &cached } )
+    {
+        scene->setWindCutCellProjectionEnabled( true );
+        scene->setWindCutCellCoupledProjectionEnabled( true );
+        scene->setWindDisjointAnalyticEnabled( true );
+        scene->setWindFluidSubstepCount( 4 );
+        scene->setWindStepProfilingEnabled( true );
+        scene->setWindSourceEnabled( false );
+        scene->setWindDragCoefficient( 1.5f );
+        const auto shapes = scene->getShapes();
+        scene->getWorld().SetBodyLinearVelocity( shapes[0].bodyHandle, { 0.7f, -0.20f } );
+        scene->getWorld().SetBodyAngularVelocity( shapes[1].bodyHandle, 0.4f );
+        scene->addWindVortex();
+    }
+    reference.setWindCachedSchurEdgesEnabled( false );
+    check( !reference.isWindCachedSchurEdgesEnabled() &&
+        cached.isWindCachedSchurEdgesEnabled(),
+        "wind demo must allow the coupled Schur edge cache to be disabled" );
+
+    for( int frame = 0; frame < 6; ++frame )
+    {
+        reference.step( dt, 8 );
+        cached.step( dt, 8 );
+        const auto& a = reference.getWindField()->getCutCellPressure();
+        const auto& b = cached.getWindField()->getCutCellPressure();
+        check( a.usedCoupledProjection && b.usedCoupledProjection &&
+            !a.coupledSolveFailed && !b.coupledSolveFailed &&
+            a.coupledStatus == fluidCoupledPressureStatus2::converged &&
+            b.coupledStatus == fluidCoupledPressureStatus2::converged &&
+            a.coupledIterations == b.coupledIterations &&
+            a.coupledTiming.cachedLaplacianEdges == 0 &&
+            b.coupledTiming.cachedLaplacianEdges > 0 &&
+            std::abs( a.coupledRelativeResidual - b.coupledRelativeResidual ) < 1.0e-6f,
+            "World Schur edge cache must preserve convergence and report cached face count" );
+        check( reference.getWindCoupledTiming().cachedLaplacianEdges == 0 &&
+            cached.getWindCoupledTiming().cachedLaplacianEdges >=
+                b.coupledTiming.cachedLaplacianEdges,
+            "synchronized World profiling must sum cached faces across fluid substeps" );
+        for( std::size_t i = 0; i < reference.getShapes().size(); ++i )
+        {
+            const bodyId lhs = reference.getShapes()[i].bodyHandle;
+            const bodyId rhs = cached.getShapes()[i].bodyHandle;
+            check( near( reference.getWorld().GetBodyTransform( lhs ).position,
+                    cached.getWorld().GetBodyTransform( rhs ).position, 1.0e-3f ) &&
+                near( reference.getWorld().GetBodyLinearVelocity( lhs ),
+                    cached.getWorld().GetBodyLinearVelocity( rhs ), 1.0e-3f ),
+                "cached Schur face operator must preserve World body motion" );
+        }
+    }
+    reference.configureWindField( 28, 16, 0.5f );
+    cached.configureWindField( 28, 16, 0.5f );
+    check( !reference.isWindCachedSchurEdgesEnabled() &&
+        cached.isWindCachedSchurEdgesEnabled(),
+        "wind grid resize must retain Schur edge cache comparison option" );
+}
+
 void checkWorldWindStepProfiling()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1176,6 +1237,7 @@ int main()
     checkWorldWindStepProfiling();
     checkCachedIc0WorldDifferential();
     checkActiveIc0WorldDifferential();
+    checkCachedSchurEdgesWorldDifferential();
     checkMovingSolidReaction();
     checkSynchronizedWindCoupling();
     checkPressurePredictedWorldVelocity();
