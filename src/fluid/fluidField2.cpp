@@ -3757,32 +3757,74 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     }
     // Cut-cell의 region별 호환성 보정은 projectCutCell()에서 이미 완료했다.
 
+    // Keep the original horizontal-then-vertical face order. The Laplacian
+    // remains matrix-free; only its fixed nonzero edge weights are cached for
+    // this solve. Dynamic body Schur response stays in the original loops.
+    const bool cachedSchurEdges = cutCell && cutCellTransition_.usedDisjointAnalyticGeometry &&
+        analyticCutCellCachedSchurEdgesEnabled_;
+    auto& laplacianEdges = scratch.laplacianEdges;
+    if( cachedSchurEdges )
+    {
+        laplacianEdges.clear();
+        laplacianEdges.reserve( static_cast<std::size_t>( 2 * width_ * height_ ) );
+        for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x )
+            {
+                const double weight = cutCellUOpen( x, y );
+                if( weight == 0.0 ) continue;
+                laplacianEdges.push_back( { cellIndex( x - 1, y ), cellIndex( x, y ), weight } );
+            }
+        for( int y = 1; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+            {
+                const double weight = cutCellVOpen( x, y );
+                if( weight == 0.0 ) continue;
+                laplacianEdges.push_back( { cellIndex( x, y - 1 ), cellIndex( x, y ), weight } );
+            }
+        if( profile )
+            timing.cachedLaplacianEdges = static_cast<int>( laplacianEdges.size() );
+    }
+
     auto& response = scratch.response;
     response.assign( obstacles.size(), {} );
     const auto multiply = [&]( const std::vector<double>& values, std::vector<double>& result )
     {
         std::fill( result.begin(), result.end(), 0.0 );
         std::fill( response.begin(), response.end(), coupledBodyResponse{} );
-        for( int y = 0; y < height_; ++y )
-            for( int x = 1; x < width_; ++x )
+        if( cachedSchurEdges )
+        {
+            for( const coupledPressureEdge& edge : laplacianEdges )
             {
-                const int left = cellIndex( x - 1, y ), right = cellIndex( x, y );
-                if( !cutCell && ( solidOwner_[left] >= 0 || solidOwner_[right] >= 0 ) ) continue;
-                const double weight = cutCell ? cutCellUOpen( x, y ) : 1.0;
-                const double d = weight * ( values[left] - values[right] );
-                result[left] += d;
-                result[right] -= d;
+                const double d = edge.weight * ( values[edge.first] - values[edge.second] );
+                result[edge.first] += d;
+                result[edge.second] -= d;
             }
-        for( int y = 1; y < height_; ++y )
-            for( int x = 0; x < width_; ++x )
-            {
-                const int bottom = cellIndex( x, y - 1 ), top = cellIndex( x, y );
-                if( !cutCell && ( solidOwner_[bottom] >= 0 || solidOwner_[top] >= 0 ) ) continue;
-                const double weight = cutCell ? cutCellVOpen( x, y ) : 1.0;
-                const double d = weight * ( values[bottom] - values[top] );
-                result[bottom] += d;
-                result[top] -= d;
-            }
+        }
+        else
+        {
+            // Reference path retained for deterministic pressure/impulse
+            // comparison. Iterate horizontal faces before vertical faces.
+            for( int y = 0; y < height_; ++y )
+                for( int x = 1; x < width_; ++x )
+                {
+                    const int left = cellIndex( x - 1, y ), right = cellIndex( x, y );
+                    if( !cutCell && ( solidOwner_[left] >= 0 || solidOwner_[right] >= 0 ) ) continue;
+                    const double weight = cutCell ? cutCellUOpen( x, y ) : 1.0;
+                    const double d = weight * ( values[left] - values[right] );
+                    result[left] += d;
+                    result[right] -= d;
+                }
+            for( int y = 1; y < height_; ++y )
+                for( int x = 0; x < width_; ++x )
+                {
+                    const int bottom = cellIndex( x, y - 1 ), top = cellIndex( x, y );
+                    if( !cutCell && ( solidOwner_[bottom] >= 0 || solidOwner_[top] >= 0 ) ) continue;
+                    const double weight = cutCell ? cutCellVOpen( x, y ) : 1.0;
+                    const double d = weight * ( values[bottom] - values[top] );
+                    result[bottom] += d;
+                    result[top] -= d;
+                }
+        }
         for( const coupledPressureFace& face : faces )
         {
             coupledBodyResponse& body = response[face.owner];

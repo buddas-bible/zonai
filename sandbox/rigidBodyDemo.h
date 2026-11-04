@@ -275,6 +275,15 @@ public:
     {
         return windField_ && windField_->isAnalyticCutCellActiveIc0SweepEnabled();
     }
+    // Benchmark: cache nonzero Cut-cell Schur edges, or replay the reference operator.
+    void setWindCachedSchurEdgesEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setAnalyticCutCellCachedSchurEdgesEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindCachedSchurEdgesEnabled() const noexcept
+    {
+        return windField_ && windField_->isAnalyticCutCellCachedSchurEdgesEnabled();
+    }
     void setWindStepProfilingEnabled( bool enabled ) noexcept
     {
         windStepProfilingEnabled_ = enabled;

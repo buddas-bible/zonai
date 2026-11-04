@@ -70,7 +70,8 @@ result measure( float h, int mode, int preconditioner )
         field.setDisjointAnalyticCutCellEnabled( true );
         field.setAnalyticCutCellIncompleteCholeskyEnabled( preconditioner != 0 );
         field.setAnalyticCutCellCachedIc0Enabled( preconditioner >= 2 );
-        field.setAnalyticCutCellActiveIc0SweepEnabled( preconditioner == 3 );
+        field.setAnalyticCutCellActiveIc0SweepEnabled( preconditioner >= 3 );
+        field.setAnalyticCutCellCachedSchurEdgesEnabled( preconditioner == 4 );
         field.setCutCellPressureTimingEnabled( true );
         field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
         std::array<fluidObstacleForce2, 2> feedback{};
@@ -111,6 +112,8 @@ result measure( float h, int mode, int preconditioner )
     p.matrixProducts = static_cast<int>( phaseMedian( []( const auto& v ) { return v.matrixProducts; } ) );
     p.preconditionerApplications =
         static_cast<int>( phaseMedian( []( const auto& v ) { return v.preconditionerApplications; } ) );
+    p.cachedLaplacianEdges =
+        static_cast<int>( phaseMedian( []( const auto& v ) { return v.cachedLaplacianEdges; } ) );
     return stats;
 }
 
@@ -125,7 +128,8 @@ int main( int argc, char** argv )
             "assembly_ms,factorization_ms,operator_ms,preconditioner_ms,vector_ms,validation_ms,output_ms,"
             "operator_calls,preconditioner_calls,"
             "cached_ic0_vs_reference_speedup,cached_preconditioner_vs_reference_speedup,"
-            "active_ic0_vs_dense_speedup,active_preconditioner_vs_dense_speedup" );
+            "active_ic0_vs_dense_speedup,active_preconditioner_vs_dense_speedup,"
+            "schur_cached_vs_reference_speedup,schur_operator_cached_vs_reference_speedup,cached_laplacian_edges" );
     else
         std::puts( "Analytic Cut-cell Schur PCG, cold start, unit density, 200 iterations max. "
             "Medians are informative, not CI performance gates." );
@@ -138,6 +142,7 @@ int main( int argc, char** argv )
             const result reference = measure( h, mode, 1 );
             const result dense = measure( h, mode, 2 );
             const result active = measure( h, mode, 3 );
+            const result edgeCached = measure( h, mode, 4 );
             // Only compare timings when both modes have fully converged.
             // A fail-closed Jacobi step cannot be used to claim a speedup.
             const bool comparable = reference.converged == reference.attempts &&
@@ -155,6 +160,12 @@ int main( int argc, char** argv )
                 ? dense.pressureMilliseconds / active.pressureMilliseconds : 0.0;
             const double activePreconditionerSpeedup = denseComparable && active.phases.preconditioner > 0.0
                 ? dense.phases.preconditioner / active.phases.preconditioner : 0.0;
+            const bool edgeComparable = active.converged == active.attempts &&
+                edgeCached.converged == edgeCached.attempts;
+            const double edgeSpeedup = edgeComparable && edgeCached.pressureMilliseconds > 0.0
+                ? active.pressureMilliseconds / edgeCached.pressureMilliseconds : 0.0;
+            const double edgeOperatorSpeedup = edgeComparable && edgeCached.phases.multiply > 0.0
+                ? active.phases.multiply / edgeCached.phases.multiply : 0.0;
             const auto print = [&]( const char* name, const result& stats )
             {
                 const auto& p = stats.phases;
@@ -164,11 +175,12 @@ int main( int argc, char** argv )
                         labels[mode], h, name, stats.converged, stats.attempts,
                         stats.pressureMilliseconds, stats.stepMilliseconds, stats.iterations,
                         stats.residual, speedup );
-                    std::printf( ",%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%d,%d,%.4f,%.4f,%.4f,%.4f\n",
+                    std::printf( ",%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%d,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d\n",
                         p.assembly, p.factorization, p.multiply, p.preconditioner,
                         p.vector, p.validation, p.output, p.matrixProducts,
                         p.preconditionerApplications, cachedSpeedup, preconditionerSpeedup,
-                        activeSpeedup, activePreconditionerSpeedup );
+                        activeSpeedup, activePreconditionerSpeedup, edgeSpeedup,
+                        edgeOperatorSpeedup, p.cachedLaplacianEdges );
                 }
                 else
                     std::printf( "%s h=%.2f %s %d/%d converged: PCG %.4f ms, A*v %.4f ms (%d), "
@@ -183,5 +195,6 @@ int main( int argc, char** argv )
             print( "IC0-reference", reference );
             print( "IC0-cached-dense", dense );
             print( "IC0-active-sweep", active );
+            print( "IC0-schur-edge-cached", edgeCached );
         }
 }
