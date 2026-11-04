@@ -1220,11 +1220,22 @@ void checkAnalyticCutCellPressureImpulseBudget()
 
                 const auto& projection = field.getCutCellPressure();
                 const auto& budget = projection.impulse;
-                check( projection.usedCoupledProjection && !projection.coupledSolveFailed &&
-                    projection.coupledStatus == fluidCoupledPressureStatus2::converged &&
-                    projection.hasAnalyticImpulseBudget &&
-                    field.getCutCellTransition().usedDisjointAnalyticGeometry,
-                    "analytic multi-shape pressure must produce an explicit cut-cell impulse ledger" );
+                if( !projection.usedCoupledProjection || projection.coupledSolveFailed ||
+                    projection.coupledStatus != fluidCoupledPressureStatus2::converged ||
+                    !projection.hasAnalyticImpulseBudget ||
+                    !field.getCutCellTransition().usedDisjointAnalyticGeometry )
+                {
+                    std::fprintf( stderr,
+                        "analytic impulse unavailable: mode=%d h=%.3f dt=%.6f "
+                        "coupled=%d failed=%d status=%d relative=%.6g analytic=%d impulse=%d\n",
+                        geometryMode, h, dt, projection.usedCoupledProjection,
+                        projection.coupledSolveFailed, static_cast<int>( projection.coupledStatus ),
+                        projection.coupledRelativeResidual,
+                        field.getCutCellTransition().usedDisjointAnalyticGeometry,
+                        projection.hasAnalyticImpulseBudget );
+                    check( false,
+                        "analytic multi-shape pressure must produce an explicit cut-cell impulse ledger" );
+                }
 
                 const vec2 expected = dt * ( reactions[0].force + reactions[1].force );
                 const float scale = 1.0f + Length( budget.fluid ) +
