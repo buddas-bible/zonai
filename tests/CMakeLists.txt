@@ -858,6 +858,10 @@ add_executable(fluidFieldTests fluid/fluid_field_test.cpp)
 target_link_libraries(fluidFieldTests PRIVATE zonai::zonai)
 add_test(NAME fluidFieldTests COMMAND fluidFieldTests)
 
+# Standalone informational Release benchmark: never assert on runner-specific timing.
+add_executable(fluidPreconditionerBenchmark fluid/fluid_preconditioner_benchmark.cpp)
+target_link_libraries(fluidPreconditionerBenchmark PRIVATE zonai::zonai)
+
 
 add_executable(sandboxWindFlowDemoTests sandbox/wind_flow_demo_test.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
 target_include_directories(sandboxWindFlowDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")

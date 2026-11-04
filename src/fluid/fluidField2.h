@@ -185,6 +185,8 @@ struct fluidCutCellPressure2
     int coupledIterations = 0;
     float coupledRelativeResidual = 0.0f;
     bool usedIncompleteCholesky = false;
+    // opt-in 측정: Schur PCG 호출에 소비된 wall clock 시간(ms). 전체 Field Step은 아님.
+    double coupledSolveMilliseconds = 0.0;
     // 수렴한 Cut-cell PCG의 Body 예측속도를 다시 적용한 solid-normal MAC face.
     // 부분 개방 face는 blocked 구간만 갱신하며 fluid face 속도는 보존한다.
     int synchronizedBoundaryFaces = 0;
@@ -323,6 +325,21 @@ public:
     // 수렴한 경우에만 Body 압력 반력을 돌려주며, 실패 시 해당 압력을 생략한다.
     void setCutCellCoupledProjectionEnabled( bool enabled ) noexcept { cutCellCoupledProjectionEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellCoupledProjectionEnabled() const noexcept { return cutCellCoupledProjectionEnabled_; }
+
+    // 분석적 다중 Cut-cell Schur의 전처리기 비교용 설정. 기본 IC(0),
+    // OFF는 기존 Jacobi. 원래 Schur 행렬/수렴 허용오차/기하 이력은 그대로 둔다.
+    void setAnalyticCutCellIncompleteCholeskyEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellIncompleteCholeskyEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellIncompleteCholeskyEnabled() const noexcept
+    {
+        return analyticCutCellIncompleteCholeskyEnabled_;
+    }
+
+    // 벤치마크 전용 PCG 시간 측정. 기본 OFF로 일반 Step에 시계 측정 비용 없음.
+    void setCutCellPressureTimingEnabled( bool enabled ) noexcept { cutCellPressureTimingEnabled_ = enabled; }
+    [[nodiscard]] bool isCutCellPressureTimingEnabled() const noexcept { return cutCellPressureTimingEnabled_; }
 
     // 이동 중인 solid의 공유 MAC 면 swept volume을 주변 cell의 기하 ΔV와
     // 국소적으로 맞추는 실험 경로. 부호가 반대인 인접 잔차만 상쇄한다.
@@ -537,6 +554,8 @@ private:
     bool previousPartialCircleOverlap_ = false;
     bool cutCellProjectionEnabled_ = false;
     bool cutCellCoupledProjectionEnabled_ = false;
+    bool analyticCutCellIncompleteCholeskyEnabled_ = true;
+    bool cutCellPressureTimingEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
     bool volumeSourceValid_ = false;
