@@ -1721,6 +1721,108 @@ void checkIndexedAnalyticBoundaryDifferential()
         }
 }
 
+void checkBoundedAnalyticFaceClippingDifferential()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    for( float h : { 0.5f, 0.25f } )
+        for( int staticCount : { 16, 48 } )
+        {
+            std::vector<fluidShapeObstacle2> bodies{
+                { circle2{ {}, 0.58f }, { { -0.21f, -0.18f }, {} }, { -0.21f, -0.18f },
+                    { 0.95f, -0.30f }, 0.70f, 0.35f, 1.10f },
+                { circle2{ {}, 0.58f }, { { 1.50f, 0.19f }, {} }, { 1.50f, 0.19f },
+                    { -0.65f, 0.75f }, -0.55f, 0.80f, 0.70f }
+            };
+            int added = 0;
+            for( int row = 0; row < 7 && added < staticCount; ++row )
+                for( int col = 0; col < 10 && added < staticCount; ++col )
+                {
+                    const vec2 position{ -5.25f + 1.05f * col, -3.15f + 0.95f * row };
+                    bool separated = true;
+                    for( const auto& body : bodies )
+                    {
+                        const float clearance = std::get<circle2>( body.geometry ).radius + 0.17f;
+                        if( LengthSquared( position - body.center ) < clearance * clearance )
+                        {
+                            separated = false;
+                            break;
+                        }
+                    }
+                    if( !separated ) continue;
+                    bodies.push_back( { circle2{ {}, 0.12f }, { position, {} },
+                        position, {}, 0.0f, 0.0f, 0.0f } );
+                    ++added;
+                }
+            check( added == staticCount,
+                "static Schur comparison must contain the requested disjoint obstacles" );
+
+            fluidField2 reference{ static_cast<int>( 12.0f / h ),
+                static_cast<int>( 8.0f / h ), h, { -6.0f, -4.0f } };
+            fluidField2 bounded{ static_cast<int>( 12.0f / h ),
+                static_cast<int>( 8.0f / h ), h, { -6.0f, -4.0f } };
+            for( fluidField2* field : { &reference, &bounded } )
+            {
+                field->setCutCellProjectionEnabled( true );
+                field->setCutCellCoupledProjectionEnabled( true );
+                field->setDisjointAnalyticCutCellEnabled( true );
+                field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
+            }
+            reference.setAnalyticCutCellBoundedFaceClippingEnabled( false );
+            std::vector<fluidObstacleForce2> refForces( bodies.size() ), boundedForces( bodies.size() );
+            for( int frame = 0; frame < 3; ++frame )
+            {
+                reference.step( dt, bodies, refForces, 200 );
+                bounded.step( dt, bodies, boundedForces, 200 );
+                const auto& a = reference.getCutCellPressure();
+                const auto& b = bounded.getCutCellPressure();
+                check( a.usedCoupledProjection && b.usedCoupledProjection &&
+                    a.coupledStatus == fluidCoupledPressureStatus2::converged &&
+                    b.coupledStatus == fluidCoupledPressureStatus2::converged &&
+                    a.coupledIterations == b.coupledIterations &&
+                    std::abs( a.coupledRelativeResidual - b.coupledRelativeResidual ) < 1.0e-6f &&
+                    std::abs( a.predictedContinuityRms - b.predictedContinuityRms ) < 1.0e-4f,
+                    "bounded analytic faces must preserve Schur convergence with many static bodies" );
+                check( bounded.getCutCellTransition().usedDisjointAnalyticGeometry &&
+                    reference.getCutCellTransition().usedDisjointAnalyticGeometry,
+                    "bounded analytic differential must remain on the analytic geometry path" );
+                for( int y = 0; y < bounded.getHeight(); ++y )
+                    for( int x = 1; x < bounded.getWidth(); ++x )
+                        check( reference.getUFaceOpenFraction( x, y ) ==
+                            bounded.getUFaceOpenFraction( x, y ) &&
+                            reference.getUFaceSolidVelocity( x, y ) ==
+                            bounded.getUFaceSolidVelocity( x, y ),
+                            "bounded analytic U faces must preserve apertures and velocities" );
+                for( int y = 1; y < bounded.getHeight(); ++y )
+                    for( int x = 0; x < bounded.getWidth(); ++x )
+                        check( reference.getVFaceOpenFraction( x, y ) ==
+                            bounded.getVFaceOpenFraction( x, y ) &&
+                            reference.getVFaceSolidVelocity( x, y ) ==
+                            bounded.getVFaceSolidVelocity( x, y ),
+                            "bounded analytic V faces must preserve apertures and velocities" );
+                for( std::size_t i = 0; i < bodies.size(); ++i )
+                {
+                    const float scale = 1.0f + Length( refForces[i].force );
+                    check( Length( refForces[i].force - boundedForces[i].force ) < 1.0e-4f * scale &&
+                        std::abs( refForces[i].torque - boundedForces[i].torque ) < 1.0e-4f * scale,
+                        "bounded analytic faces must retain dynamic and static traction" );
+                }
+                const float scale = 1.0f + Length( reference.getFluidMomentum() );
+                check( Length( reference.getFluidMomentum() - bounded.getFluidMomentum() ) <
+                    1.0e-4f * scale, "bounded analytic faces must preserve fluid momentum" );
+                for( std::size_t i = 0; i < 2; ++i )
+                {
+                    bodies[i].transform.position += dt * bodies[i].linearVelocity;
+                    bodies[i].center = bodies[i].transform.position;
+                }
+            }
+            reference.clear();
+            bounded.clear();
+            check( !reference.isAnalyticCutCellBoundedFaceClippingEnabled() &&
+                bounded.isAnalyticCutCellBoundedFaceClippingEnabled(),
+                "clear must preserve selected analytic boundary indexing mode" );
+        }
+}
+
 void checkBoundedAnalyticCellAreaDifferential()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -3439,6 +3541,7 @@ int main()
     checkActiveCellIc0SweepDifferential();
     checkCachedSchurLaplacianDifferential();
     checkIndexedAnalyticBoundaryDifferential();
+    checkBoundedAnalyticFaceClippingDifferential();
     checkBoundedAnalyticCellAreaDifferential();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
