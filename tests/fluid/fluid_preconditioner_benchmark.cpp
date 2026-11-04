@@ -37,7 +37,6 @@ double median( std::vector<double> samples )
 std::vector<fluidShapeObstacle2> makeObstacles( int mode, int staticCount = 0 )
 {
     std::vector<fluidShapeObstacle2> bodies{
-
         { circle2{ {}, mode == 2 ? 0.78f : 0.58f },
             { { -0.21f, -0.18f }, {} }, { -0.21f, -0.18f },
             { 0.95f, -0.30f }, 0.70f, 0.35f, 1.10f },
@@ -59,11 +58,14 @@ std::vector<fluidShapeObstacle2> makeObstacles( int mode, int staticCount = 0 )
             const vec2 position{ -5.25f + 1.05f * col, -3.15f + 0.95f * row };
             bool separated = true;
             for( const auto& body : bodies )
-                if( LengthSquared( position - body.center ) < 1.0f )
+            {
+                const float clearance = std::get<circle2>( body.geometry ).radius + 0.17f;
+                if( LengthSquared( position - body.center ) < clearance * clearance )
                 {
                     separated = false;
                     break;
                 }
+            }
             if( !separated ) continue;
             bodies.push_back( { circle2{ {}, 0.12f }, { position, {} }, position,
                 {}, 0.0f, 0.0f, 0.0f } );
