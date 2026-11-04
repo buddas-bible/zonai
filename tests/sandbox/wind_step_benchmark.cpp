@@ -44,7 +44,7 @@ struct summary
     int validFrames = 0;
 };
 
-summary measure( float h, int fluidSubsteps, bool cached )
+summary measure( float h, int fluidSubsteps, bool cached, bool active )
 {
     // Run the real sandbox World/Fluid interleave (including rigid force feedback,
     // drag sampling, and World::Step). No synthetic obstacle trajectory or snapshots.
@@ -55,6 +55,7 @@ summary measure( float h, int fluidSubsteps, bool cached )
     scene.setWindCutCellCoupledProjectionEnabled( true );
     scene.setWindDisjointAnalyticEnabled( true );
     scene.setWindCachedIc0Enabled( cached );
+    scene.setWindActiveIc0SweepEnabled( active );
     scene.setWindFluidSubstepCount( fluidSubsteps );
     scene.setWindStepProfilingEnabled( true );
     scene.setWindSourceStrength( 8.0f );
@@ -130,11 +131,14 @@ int main( int argc, char** argv )
 {
     bool csv = false;
     bool reference = false;
+    bool dense = false;
     for( int i = 1; i < argc; ++i )
     {
         csv |= std::string_view( argv[i] ) == "--csv";
         reference |= std::string_view( argv[i] ) == "--ic0-reference";
+        dense |= std::string_view( argv[i] ) == "--ic0-dense";
     }
+    const char* ic0Mode = reference ? "reference" : dense ? "dense" : "active";
     if( csv )
         std::puts( "cell_m,world_substeps,fluid_substeps,frames,pcg_converged_frames,pcg_failed_frames,analytic_frames,fluid_coupling_ms,world_ms,field_ms,mask_ms,geometry_ms,swept_ms,remap_ms,boundary_ms,advection_ms,pressure_ms,tracer_ms,other_ms,"
             "schur_total_ms,schur_assembly_ms,schur_ic0_ms,schur_operator_ms,"
@@ -146,7 +150,7 @@ int main( int argc, char** argv )
     for( float h : { 0.5f, 0.25f } )
         for( int steps : { 1, 2, 4, 8 } )
         {
-            const summary stats = measure( h, steps, !reference );
+            const summary stats = measure( h, steps, !reference, !dense );
             const auto& p = stats.medians.phases;
             const auto& pcg = stats.medians.pcg;
             if( csv )
@@ -160,7 +164,7 @@ int main( int argc, char** argv )
                     pcg.total, pcg.assembly, pcg.factorization, pcg.multiply, pcg.preconditioner,
                     pcg.vector, pcg.validation, pcg.output,
                     pcg.matrixProducts, pcg.preconditionerApplications,
-                    reference ? "reference" : "cached" );
+                    ic0Mode );
             }
             else
                 std::printf( "h=%.2f World=%d Fluid=%d: field %.3f ms, pressure %.3f ms, "
