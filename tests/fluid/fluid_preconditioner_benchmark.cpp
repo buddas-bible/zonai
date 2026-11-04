@@ -22,6 +22,7 @@ struct result
     double pressureMilliseconds = 0.0;
     double iterations = 0.0;
     double residual = 0.0;
+    double geometryMilliseconds = 0.0;
     fluidCoupledPressureTiming2 phases{};
     int converged = 0;
     int attempts = 0;
@@ -75,10 +76,10 @@ std::vector<fluidShapeObstacle2> makeObstacles( int mode, int staticCount = 0 )
 }
 
 result measure( float h, int mode, int preconditioner, int staticCount = 0,
-    bool indexedBoundaries = true )
+    bool indexedBoundaries = true, bool boundedAreas = true, bool geometryTiming = false )
 {
     const auto bodies = makeObstacles( mode, staticCount );
-    std::vector<double> totalSamples, pressureSamples, iterationSamples, residualSamples;
+    std::vector<double> totalSamples, pressureSamples, iterationSamples, residualSamples, geometrySamples;
     std::vector<fluidCoupledPressureTiming2> phaseSamples;
     result stats{};
     for( int i = 0; i < rounds + 1; ++i )
@@ -95,6 +96,8 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
         field.setAnalyticCutCellActiveIc0SweepEnabled( preconditioner >= 3 );
         field.setAnalyticCutCellCachedSchurEdgesEnabled( preconditioner == 4 );
         field.setAnalyticCutCellIndexedBoundaryFacesEnabled( indexedBoundaries );
+        field.setAnalyticCutCellBoundedCellAreasEnabled( boundedAreas );
+        field.setStepTimingEnabled( geometryTiming );
         field.setCutCellPressureTimingEnabled( true );
         field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
         std::vector<fluidObstacleForce2> feedback( bodies.size() );
@@ -108,6 +111,7 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
         stats.converged += pressure.usedCoupledProjection ? 1 : 0;
         totalSamples.push_back( stepMs );
         pressureSamples.push_back( pressure.coupledSolveMilliseconds );
+        if( geometryTiming ) geometrySamples.push_back( field.getStepTiming().geometry );
         iterationSamples.push_back( pressure.coupledIterations );
         residualSamples.push_back( pressure.coupledRelativeResidual );
         phaseSamples.push_back( pressure.coupledTiming );
@@ -116,6 +120,7 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
     stats.pressureMilliseconds = median( pressureSamples );
     stats.iterations = median( iterationSamples );
     stats.residual = median( residualSamples );
+    stats.geometryMilliseconds = median( geometrySamples );
     const auto phaseMedian = [&]( auto getter )
     {
         std::vector<double> samples;
@@ -144,6 +149,24 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
 
 int main( int argc, char** argv )
 {
+    const bool areaSweep = argc > 1 && std::string_view( argv[1] ) == "--area-sweep";
+    if( areaSweep )
+    {
+        std::puts( "static_obstacles,cell_m,area_mode,converged,attempts,geometry_ms,"
+            "pcg_ms,step_ms,iterations,relative_residual" );
+        for( float h : { 0.5f, 0.25f } )
+            for( int count : { 0, 16, 48 } )
+                for( bool bounded : { false, true } )
+                {
+                    const result stats = measure( h, 1, 4, count, true, bounded, true );
+                    std::printf( "%d,%.2f,%s,%d,%d,%.5f,%.5f,%.5f,%.0f,%.6g\n",
+                        count, h, bounded ? "bounded" : "reference",
+                        stats.converged, stats.attempts, stats.geometryMilliseconds,
+                        stats.pressureMilliseconds, stats.stepMilliseconds,
+                        stats.iterations, stats.residual );
+                }
+        return 0;
+    }
     const bool staticSweep = argc > 1 && std::string_view( argv[1] ) == "--static-sweep";
     if( staticSweep )
     {

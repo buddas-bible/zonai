@@ -1164,6 +1164,7 @@ void fluidField2::clear() noexcept
     std::fill( previousSolidOwner_.begin(), previousSolidOwner_.end(), -1 );
     std::fill( cellFluidFraction_.begin(), cellFluidFraction_.end(), 1.0f );
     std::fill( previousCellFluidFraction_.begin(), previousCellFluidFraction_.end(), 1.0f );
+    analyticCoveredAreaScratch_.clear();
     std::fill( uSolidVelocity_.begin(), uSolidVelocity_.end(), 0.0f );
     std::fill( vSolidVelocity_.begin(), vSolidVelocity_.end(), 0.0f );
     std::fill( pressureUSolidFlux_.begin(), pressureUSolidFlux_.end(), 0.0f );
@@ -1566,20 +1567,58 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
         {
             const double h = cellSize_;
             const double inverseArea = 1.0 / ( h * h );
+            if( analyticCutCellBoundedCellAreasEnabled_ )
+            {
+                // Accumulate each shape into only the cells that overlap its
+                // world-space AABB. Shape-major order preserves each cell's
+                // original addition order and double-precision area.
+                analyticCoveredAreaScratch_.assign( pressure_.size(), 0.0 );
+                const auto clampIndex = []( double index, int maximum )
+                {
+                    return static_cast<int>( std::clamp( index, 0.0, static_cast<double>( maximum ) ) );
+                };
+                for( const auto& shape : disjointShapes )
+                {
+                    if( shape.occluded ) continue;
+                    // Expand by one cell to conservatively include grid-edge
+                    // rounding; the exact rectangle/shape intersection still
+                    // decides whether a covered area is nonzero.
+                    const int minX = clampIndex( std::floor(
+                        ( static_cast<double>( shape.bounds.min.x ) - origin_.x ) / h ) - 1.0, width_ - 1 );
+                    const int maxX = clampIndex( std::ceil(
+                        ( static_cast<double>( shape.bounds.max.x ) - origin_.x ) / h ) + 1.0, width_ - 1 );
+                    const int minY = clampIndex( std::floor(
+                        ( static_cast<double>( shape.bounds.min.y ) - origin_.y ) / h ) - 1.0, height_ - 1 );
+                    const int maxY = clampIndex( std::ceil(
+                        ( static_cast<double>( shape.bounds.max.y ) - origin_.y ) / h ) + 1.0, height_ - 1 );
+                    for( int y = minY; y <= maxY; ++y )
+                        for( int x = minX; x <= maxX; ++x )
+                        {
+                            const double left = origin_.x + x * h;
+                            const double bottom = origin_.y + y * h;
+                            analyticCoveredAreaScratch_[cellIndex( x, y )] +=
+                                DisjointShapeRectangleArea( shape, left, bottom, left + h, bottom + h );
+                        }
+                }
+            }
             for( int y = 0; y < height_; ++y )
                 for( int x = 0; x < width_; ++x )
                 {
+                    const int cell = cellIndex( x, y );
                     const double left = origin_.x + x * h;
                     const double bottom = origin_.y + y * h;
                     double covered = 0.0;
-                    for( const auto& shape : disjointShapes )
-                        covered += DisjointShapeRectangleArea( shape, left, bottom, left + h, bottom + h );
+                    if( analyticCutCellBoundedCellAreasEnabled_ )
+                        covered = analyticCoveredAreaScratch_[cell];
+                    else
+                        for( const auto& shape : disjointShapes )
+                            covered += DisjointShapeRectangleArea( shape, left, bottom, left + h, bottom + h );
                     if( partialCircleOverlap )
                         covered -= CirclePairRectangleIntersectionArea(
                             std::get<analyticFluidCircle>( disjointShapes[0].geometry ),
                             std::get<analyticFluidCircle>( disjointShapes[1].geometry ),
                             left, bottom, left + h, bottom + h );
-                    cellFluidFraction_[cellIndex( x, y )] = static_cast<float>(
+                    cellFluidFraction_[cell] = static_cast<float>(
                         std::clamp( 1.0 - covered * inverseArea, 0.0, 1.0 ) );
                 }
             const auto updateFace = [&]( bool vertical, int x, int y )

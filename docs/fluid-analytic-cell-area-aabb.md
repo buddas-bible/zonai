@@ -1,0 +1,11 @@
+# Bounded analytic Cut-cell cell-area assembly
+
+The original disjoint-analytic geometry path in `fluidField2::updateCutCellGeometry` visited **every analytic shape for every grid cell**, even when a shape was far from the cell. The pressure projection subsequently uses the resulting per-cell fluid fractions. This change keeps the analytic geometry equations and the two-circle overlap/containment semantics, but reduces unnecessary rectangle/shape intersection calls.
+
+`setAnalyticCutCellBoundedCellAreasEnabled(bool)` is enabled by default. Each valid geometry step clears a reused double-precision per-cell accumulator. For each shape, only cells in a conservatively expanded (one-cell padding) AABB range receive `DisjointShapeRectangleArea` contributions. The final cell pass uses those accumulators and applies the **same** two-circle overlap subtraction and float fraction clamping. Because shapes are processed in original vector order, the per-cell addition order is unchanged. Disabled mode retains the original cell-major full-shape scan for differential verification.
+
+The optimization is only active for the existing disjoint analytic Cut-cell path. The sampled union, binary MAC and other pressure paths are unchanged. It does not cache geometry across fluid steps: moving obstacles, resizing and `clear()` cannot reuse stale areas. Scratch capacity is reused but cell values are reset for each analytic update.
+
+Validation includes paired full/bounded runs across 0.5m/0.25m grids, overlapping and contained circle geometry, 48 separated static obstacles with two moving dynamic bodies, exact per-cell fraction comparisons, fluid volume, PCG convergence, pressure force/torque and fluid momentum.
+
+`fluidPreconditionerBenchmark --area-sweep` reports identical 0/16/48-static-circle scenes for both area modes on the same Windows Release runner. The CSV includes geometry phase median, coupled pressure time, full Field step time, convergence count, iterations and relative residual. Timing remains informational and is **not** a CI acceptance threshold. End-to-end improvement may be smaller than the geometry-phase speedup because face clipping, swept flux and pressure solving still have separate costs.

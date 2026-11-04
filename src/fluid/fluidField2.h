@@ -468,6 +468,17 @@ public:
         return analyticCutCellIndexedBoundaryFacesEnabled_;
     }
 
+    // Analytic Cut-cell 셀 면적 계산은 Shape AABB와 교차하는 셀만 방문한다.
+    // 기본 ON. OFF는 모든 셀에서 전체 Shape를 순회하는 참조 경로.
+    void setAnalyticCutCellBoundedCellAreasEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellBoundedCellAreasEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellBoundedCellAreasEnabled() const noexcept
+    {
+        return analyticCutCellBoundedCellAreasEnabled_;
+    }
+
     // 벤치마크 전용 PCG 시간 측정. 기본 OFF로 일반 Step에 시계 측정 비용 없음.
     void setCutCellPressureTimingEnabled( bool enabled ) noexcept { cutCellPressureTimingEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellPressureTimingEnabled() const noexcept { return cutCellPressureTimingEnabled_; }
@@ -670,6 +681,8 @@ private:
     std::vector<int> previousSolidOwner_;
     std::vector<float> cellFluidFraction_;
     std::vector<float> previousCellFluidFraction_;
+    // Reused double accumulation preserves per-cell analytic shape summation order.
+    std::vector<double> analyticCoveredAreaScratch_;
     std::vector<float> uOpenFraction_;
     std::vector<float> vOpenFraction_;
     // Exact positive blocked lengths from this step's analytic geometry pass.
@@ -715,6 +728,7 @@ private:
     bool analyticCutCellActiveIc0SweepEnabled_ = true;
     bool analyticCutCellCachedSchurEdgesEnabled_ = true;
     bool analyticCutCellIndexedBoundaryFacesEnabled_ = true;
+    bool analyticCutCellBoundedCellAreasEnabled_ = true;
     bool cutCellPressureTimingEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
