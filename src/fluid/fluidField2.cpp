@@ -3232,6 +3232,12 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
         cutCellPressure_.coupledStatus != fluidCoupledPressureStatus2::noBoundary;
     const float coupledPressureResidual = pressureMomentum_.coupledFinalResidualRms;
     pressureMomentum_ = {}; // 이진 MAC 압력 운동량 장부를 Cut-cell의 반력과 혼합하지 않는다.
+    // 분석적 multi-shape Schur 경로에서만 압력 impulse 장부를 기록한다.
+    // 면 개방율과 실제 MAC Δu/Δv를 곱하고, pressure feedback/외벽과 대조.
+    const bool auditImpulse = solvedCoupled && cutCellTransition_.usedDisjointAnalyticGeometry;
+    const double dualFaceMass = static_cast<double>( cellSize_ ) * cellSize_;
+    double fluidImpulseX = 0.0;
+    double fluidImpulseY = 0.0;
 
     if( cutCellPressure_.coupledSolveFailed )
         std::fill( pressure_.begin(), pressure_.end(), 0.0f );
@@ -3264,15 +3270,31 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
 
     for( int y = 0; y < height_; ++y )
         for( int x = 1; x < width_; ++x )
-            if( cutCellUOpen( x, y ) > 0.0f )
-                u_[uIndex( x, y )] -= gradientScale *
-                    ( pressure_[cellIndex( x, y )] - pressure_[cellIndex( x - 1, y )] );
+        {
+            const float open = cutCellUOpen( x, y );
+            if( open <= 0.0f ) continue;
+            float& velocity = u_[uIndex( x, y )];
+            const float before = velocity;
+            velocity -= gradientScale *
+                ( pressure_[cellIndex( x, y )] - pressure_[cellIndex( x - 1, y )] );
+            if( auditImpulse )
+                fluidImpulseX += dualFaceMass * open *
+                    ( static_cast<double>( velocity ) - before );
+        }
 
     for( int y = 1; y < height_; ++y )
         for( int x = 0; x < width_; ++x )
-            if( cutCellVOpen( x, y ) > 0.0f )
-                v_[vIndex( x, y )] -= gradientScale *
-                    ( pressure_[cellIndex( x, y )] - pressure_[cellIndex( x, y - 1 )] );
+        {
+            const float open = cutCellVOpen( x, y );
+            if( open <= 0.0f ) continue;
+            float& velocity = v_[vIndex( x, y )];
+            const float before = velocity;
+            velocity -= gradientScale *
+                ( pressure_[cellIndex( x, y )] - pressure_[cellIndex( x, y - 1 )] );
+            if( auditImpulse )
+                fluidImpulseY += dualFaceMass * open *
+                    ( static_cast<double>( velocity ) - before );
+        }
 
     cutCellPressure_.divergenceAfter = cutCellFluxDivergenceRms( 1.0f / timeStep );
     double squaredResidual = 0.0;
@@ -3312,6 +3334,37 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
             force.force += static_cast<float>( p ) *
                 vec2{ static_cast<float>( face.fx ), static_cast<float>( face.fy ) };
             force.torque += static_cast<float>( p * face.torque );
+        }
+        if( auditImpulse )
+        {
+            double forceX = 0.0;
+            double forceY = 0.0;
+            for( const fluidObstacleForce2& body : feedback )
+            {
+                forceX += body.force.x;
+                forceY += body.force.y;
+            }
+            // 외벽은 닫힌 격자 경계의 압력 traction. Pressure 미지수가 없는
+            // 완전 고체 셀은 압력 0이며, 모든 내부 open/blocked face는 상쇄된다.
+            double wallX = 0.0;
+            double wallY = 0.0;
+            for( int y = 0; y < height_; ++y )
+            {
+                wallX -= static_cast<double>( pressure_[cellIndex( 0, y )] ) * cellSize_;
+                wallX += static_cast<double>( pressure_[cellIndex( width_ - 1, y )] ) * cellSize_;
+            }
+            for( int x = 0; x < width_; ++x )
+            {
+                wallY -= static_cast<double>( pressure_[cellIndex( x, 0 )] ) * cellSize_;
+                wallY += static_cast<double>( pressure_[cellIndex( x, height_ - 1 )] ) * cellSize_;
+            }
+            cutCellPressure_.hasAnalyticImpulseBudget = true;
+            cutCellPressure_.impulse.fluid = {
+                static_cast<float>( fluidImpulseX ), static_cast<float>( fluidImpulseY ) };
+            cutCellPressure_.impulse.solid = timeStep * vec2{
+                static_cast<float>( forceX ), static_cast<float>( forceY ) };
+            cutCellPressure_.impulse.wall = timeStep * vec2{
+                static_cast<float>( wallX ), static_cast<float>( wallY ) };
         }
         synchronizeCutCellBoundaries( timeStep, obstacles, feedback );
 

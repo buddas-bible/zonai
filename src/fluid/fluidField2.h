@@ -145,6 +145,19 @@ struct fluidCutCellTransition2
     [[nodiscard]] float volumeDelta() const noexcept { return fluidVolume - previousFluidVolume; }
 };
 
+// 분석적 Cut-cell 연립 압력 Step에서만 측정한 이산 충격량(N·s).
+// fluid: 개방 MAC face 속도 보정 × 열린 dual-face 면적, solid: Body 반력 × dt,
+// wall: 닫힌 외벽의 전체 face 압력 반력. 이 셋의 합은 이산 압력 exchange 잔차.
+// 이류/drag/기하 이동·고체 표면의 정확한 연속 적분을 포함하지 않음.
+struct fluidCutCellPressureImpulse2
+{
+    vec2 fluid{};
+    vec2 solid{};
+    vec2 wall{};
+
+    [[nodiscard]] vec2 residual() const noexcept { return fluid + solid + wall; }
+};
+
 // 부분 개방 면의 유량을 사용하는 실험용 압력 투영 결과.
 // divergenceBefore/After는 div(a*u) + ΔfluidFraction/dt의 RMS (1/s).
 // sourceImbalance: 닫힌 도메인에서 압력으로 해소할 수 없는 전체 유량 (m³/s).
@@ -179,6 +192,10 @@ struct fluidCutCellPressure2
     // 분리된 pocket의 호환성 보정 후 값이며 전체 기하 보존을 뜻하지 않는다.
     float predictedContinuityRms = 0.0f;
     float predictedSolidVolumeL1 = 0.0f;
+    // 다중 분석적 Cut-cell의 Schur 결합 압력이 실제 수렴했을 때만 유효.
+    // 기존 이진 MAC getPressureMomentum()과 별도 측정이며 전체 FSI 보존값은 아님.
+    bool hasAnalyticImpulseBudget = false;
+    fluidCutCellPressureImpulse2 impulse{};
 };
 
 // 연속한 Shape 변환 사이의 내부 MAC 면을 통과한 Solid 속도를 시간 적분한 근사.

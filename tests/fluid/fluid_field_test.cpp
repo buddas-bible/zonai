@@ -1184,6 +1184,153 @@ void checkDisjointAnalyticMultiShapeCutCell()
         "clear must preserve an explicitly disabled disjoint multi analytic mode" );
 }
 
+void checkAnalyticCutCellPressureImpulseBudget()
+{
+    constexpr vec2 origin{ -6.0f, -4.0f };
+    constexpr std::array<float, 2> GRID_SIZES{ 0.5f, 0.25f };
+    constexpr std::array<float, 2> TIME_STEPS{ 1.0f / 60.0f, 1.0f / 120.0f };
+    int unavailableCases = 0;
+    int iterationLimitCases = 0;
+    std::array<int, 3> convergedModes{};
+
+    for( float h : GRID_SIZES )
+        for( float dt : TIME_STEPS )
+            for( int geometryMode = 0; geometryMode < 3; ++geometryMode )
+            {
+                // 0: partial two-circle overlap, 1: separate, 2: strict containment.
+                std::array<fluidShapeObstacle2, 2> bodies{{
+                    { circle2{ {}, geometryMode == 2 ? 0.78f : 0.58f },
+                        { { -0.21f, -0.18f }, {} }, { -0.21f, -0.18f },
+                        { 0.95f, -0.30f }, 0.70f, 0.35f, 1.10f },
+                    { circle2{ {}, geometryMode == 2 ? 0.18f : 0.58f },
+                        { { geometryMode == 1 ? 1.50f : 0.26f, 0.19f }, {} },
+                        { geometryMode == 1 ? 1.50f : 0.26f, 0.19f },
+                        { -0.65f, 0.75f }, -0.55f, 0.80f, 0.70f }
+                }};
+                if( geometryMode == 2 )
+                {
+                    bodies[1].transform.position = { -0.12f, -0.12f };
+                    bodies[1].center = bodies[1].transform.position;
+                }
+                fluidField2 field{ static_cast<int>( 12.0f / h ),
+                    static_cast<int>( 8.0f / h ), h, origin };
+                field.setCutCellProjectionEnabled( true );
+                field.setCutCellCoupledProjectionEnabled( true );
+                field.setDisjointAnalyticCutCellEnabled( true );
+                field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
+                std::array<fluidObstacleForce2, 2> reactions{};
+                field.step( dt, bodies, reactions, 200 );
+
+                const auto& projection = field.getCutCellPressure();
+                const auto& budget = projection.impulse;
+                if( projection.coupledSolveFailed &&
+                    projection.coupledStatus == fluidCoupledPressureStatus2::iterationLimit &&
+                    field.getCutCellTransition().usedDisjointAnalyticGeometry &&
+                    !projection.hasAnalyticImpulseBudget &&
+                    LengthSquared( reactions[0].force ) == 0.0f &&
+                    LengthSquared( reactions[1].force ) == 0.0f &&
+                    reactions[0].torque == 0.0f && reactions[1].torque == 0.0f )
+                {
+                    // Higher grid resolution can hit the existing 200-iteration cap.
+                    // A failed Schur solve must not inject rigid momentum or publish a ledger.
+                    ++iterationLimitCases;
+                    continue;
+                }
+                if( !projection.usedCoupledProjection || projection.coupledSolveFailed ||
+                    projection.coupledStatus != fluidCoupledPressureStatus2::converged ||
+                    !projection.hasAnalyticImpulseBudget ||
+                    !field.getCutCellTransition().usedDisjointAnalyticGeometry )
+                {
+                    std::fprintf( stderr,
+                        "analytic impulse unavailable: mode=%d h=%.3f dt=%.6f "
+                        "coupled=%d failed=%d status=%d relative=%.6g analytic=%d impulse=%d\n",
+                        geometryMode, h, dt, projection.usedCoupledProjection,
+                        projection.coupledSolveFailed, static_cast<int>( projection.coupledStatus ),
+                        projection.coupledRelativeResidual,
+                        field.getCutCellTransition().usedDisjointAnalyticGeometry,
+                        projection.hasAnalyticImpulseBudget );
+                    ++unavailableCases;
+                    continue;
+                }
+                ++convergedModes[geometryMode];
+
+                const vec2 expected = dt * ( reactions[0].force + reactions[1].force );
+                const float scale = 1.0f + Length( budget.fluid ) +
+                    Length( budget.solid ) + Length( budget.wall );
+                if( Length( budget.solid - expected ) > 2.0e-5f * scale ||
+                    Length( budget.residual() ) > 2.0e-4f * scale )
+                {
+                    std::fprintf( stderr,
+                        "analytic impulse closure mismatch: mode=%d h=%.2f dt=%.6f "
+                        "fluid=(%.6g,%.6g) solid=(%.6g,%.6g) wall=(%.6g,%.6g) "
+                        "residual=(%.6g,%.6g)\n",
+                        geometryMode, h, dt, budget.fluid.x, budget.fluid.y,
+                        budget.solid.x, budget.solid.y, budget.wall.x, budget.wall.y,
+                        budget.residual().x, budget.residual().y );
+                    check( false,
+                        "analytic cut-cell pressure fluid/rigid/wall impulse must close at MAC precision" );
+                }
+                check( IsFinite( budget.fluid ) && IsFinite( budget.solid ) &&
+                    IsFinite( budget.wall ) && IsFinite( budget.residual() ),
+                    "coupled cut-cell impulse bookkeeping must remain finite" );
+                check( LengthSquared( field.getPressureMomentum().residual() ) == 0.0f,
+                    "analytic cut-cell ledger must not write to binary MAC pressure momentum" );
+
+                if( geometryMode == 2 )
+                    check( LengthSquared( reactions[1].force ) < 1.0e-10f &&
+                        std::abs( reactions[1].torque ) < 1.0e-5f,
+                        "fully hidden inner circle must not receive coupled pressure impulse" );
+
+                field.clear();
+                check( !field.getCutCellPressure().hasAnalyticImpulseBudget &&
+                    LengthSquared( field.getCutCellPressure().impulse.residual() ) == 0.0f,
+                    "clear must reset analytic cut-cell pressure impulse diagnostics" );
+            }
+
+    check( unavailableCases == 0 &&
+        convergedModes[0] > 0 && convergedModes[1] > 0 && convergedModes[2] > 0,
+        "each analytic union mode must converge at least once and audit its pressure exchange" );
+    // A capped iterationLimit is a separate solver convergence target, not a
+    // fabricated momentum exchange. The failure path above checks zero feedback.
+    (void)iterationLimitCases;
+
+    // Failed PCG and sampled geometry must not claim a valid analytic pressure audit.
+    const std::array<fluidShapeObstacle2, 2> touching{{
+        { circle2{ {}, 0.58f }, { { -0.21f, -0.18f }, {} },
+            { -0.21f, -0.18f }, { 0.9f, -0.3f }, 0.7f, 0.35f, 1.10f },
+        { circle2{ {}, 0.58f }, { { 0.26f, 0.19f }, {} },
+            { 0.26f, 0.19f }, { -0.6f, 0.7f }, -0.5f, 0.8f, 0.7f }
+    }};
+    for( int scenario = 0; scenario < 3; ++scenario )
+    {
+        fluidField2 field{ 24, 16, 0.5f, origin };
+        field.setCutCellProjectionEnabled( true );
+        field.setCutCellCoupledProjectionEnabled( true );
+        field.setDisjointAnalyticCutCellEnabled( scenario != 1 );
+        field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
+        std::array<fluidObstacleForce2, 2> forces{};
+        std::array<fluidShapeObstacle2, 2> inputs = touching;
+        if( scenario == 2 )
+        {
+            inputs[0].inverseMass = 0.0f;
+            inputs[0].inverseInertia = 0.0f;
+            inputs[1].inverseMass = 0.0f;
+            inputs[1].inverseInertia = 0.0f;
+        }
+        field.step( 1.0f / 60.0f, inputs, forces, scenario == 0 ? 1 : 200 );
+        const auto& pressure = field.getCutCellPressure();
+        check( !pressure.hasAnalyticImpulseBudget &&
+            LengthSquared( pressure.impulse.fluid ) == 0.0f &&
+            LengthSquared( pressure.impulse.solid ) == 0.0f &&
+            LengthSquared( pressure.impulse.wall ) == 0.0f,
+            "failure, sampled, and uncoupled pressure paths must not populate analytic impulse ledger" );
+        if( scenario == 0 )
+            check( pressure.coupledSolveFailed &&
+                LengthSquared( forces[0].force ) + LengthSquared( forces[1].force ) == 0.0f,
+                "failed Schur pressure must produce no analytic impulse or rigid feedback" );
+    }
+}
+
 void checkAnalyticPartialCircleUnion()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -2635,6 +2782,7 @@ int main()
     checkDisjointAnalyticOverlappingAabbs();
     checkAnalyticContainedCircleUnion();
     checkAnalyticPartialCircleUnion();
+    checkAnalyticCutCellPressureImpulseBudget();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();

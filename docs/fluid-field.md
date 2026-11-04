@@ -449,6 +449,19 @@ Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들�
 
 **제한:** 겹친 내부 구간의 소유자를 첫 Shape로 고정하는 규칙은 *이산 압력 결합의 중복 제거와 일관성*을 위한 것으로, 두 실제 강체가 서로 관통한 상황의 고유한 물리적 접촉면을 정의하지 않는다. 완전한 자유 표면과 실제 경계의 정확한 traction, FSI 질량·운동량·에너지 보존 증명은 아직 지원하지 않는다. 세 개 이상 겹치는 Shape 또는 Circle 외 형상 간 교집합은 기존 sampled union을 유지한다.
 
+## Part 13v — 분석적 다중 Cut-cell 압력 충격량 교환 장부
+
+다중 분석적 Cut-cell이 활성화되고 연립 Schur PCG 압력이 **실제로 수렴한 Step**에서만 `getCutCellPressure().hasAnalyticImpulseBudget`를 `true`로 둔다. `impulse`는 세 개의 `vec2`를 제공하며 모두 단위 깊이 1m, 유체 밀도 1인 이산 모델의 N·s 단위다.
+
+- **fluid:** 압력 투영 직전·직후의 실제 내부 MAC U/V face 속도 차이에 `ρ·h²·openFraction`을 곱한 합. 새 속도장을 다시 표본 추정하지 않고 **압력 gradient를 적용하는 바로 그 위치**에서 누적한다. 이것은 cut-cell의 제한적인 face dual-mass 장부이지, 실제 이동 경계를 포함한 연속체의 전체 유체 운동량 변화가 아니다.
+- **solid:** 같은 압력 미지수와 `Bᵀ`로 계산되어 각 `fluidObstacleForce2`에 반환된 힘의 합에 `dt`를 곱한다. 정적·운동학적 Shape가 받은 지지 반력도 포함하며, 자유롭게 움직이는 강체에 가해진 운동량만을 뜻하지는 않는다.
+- **wall:** 닫힌 직사각형 격자 외곽의 셀 압력을 전체 edge 길이 `h`로 적분한 이산 반력 `dt·h·p`. 부분적으로 막힌 외벽의 연속 표면 반력을 정확히 재구성한 값이 아니다.
+- `impulse.residual() = fluid + solid + wall`은 같은 압력 unknown과 open/blocked MAC face의 상호작용이 일관적인지 검사한다. 수렴 오차와 float 누적 오차를 제외하면 인접 셀 압력 항은 telescope되어 상쇄되어야 한다. `getPressureMomentum()`의 기존 이진 MAC 장부는 여전히 Cut-cell Step에서 초기화한다.
+- 실패한 연립 PCG, 분석적 다중 모드 OFF, sampled union, 질량 결합 미사용 시 진단의 유효성은 `false`, 값은 0이다. `clear()`도 값을 초기화한다. 기존 샌드박스 Wind 진단에서는 **유효한 경우에만** 유체/강체/벽 충격량과 잔차를 표시한다.
+- 회귀는 서로 분리·완전 포함·일부 교차하는 두 원에 대해 두 격자 해상도, 두 dt, 서로 다른 역질량/역관성에서 실제 반환한 압력 힘과 `solid`를 비교하고, 위 이산 운동량 교환 잔차가 작게 유지되는지 확인한다. 내부에 완전히 숨은 원에는 압력 반력을 가하지 않는 기존 규칙도 유지한다.
+
+**중요한 한계:** 이 진단은 압력 투영 **한 단계의 이산 충격량 상쇄**만 검증한다. 개별 유체 질량의 cut-cell volume 가중 관성, 이류·점성·drag, swept 이동, 월드 Contact/Joint, 외부 연결이나 완전한 FSI 에너지 수지까지 평가하지 않는다. 매우 작은 잔차가 물리 엔진 전체의 운동량 보존을 증명하지는 않는다. 압력 솔버/강체 반력 알고리즘 자체는 변경하지 않는다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.

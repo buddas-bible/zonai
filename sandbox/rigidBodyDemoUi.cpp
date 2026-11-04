@@ -1132,6 +1132,19 @@ void rigidBodyDemoUi::drawExperimentControls()
                         projection.predictedContinuityRms, projection.pressureResidual );
                     ImGui::Text( "예측 추가 Solid 체적 L1: %.6f m³ / 경계 속도 변화 RMS %.5f m/s",
                         projection.predictedSolidVolumeL1, projection.boundaryNormalChangeRms );
+                    if( projection.hasAnalyticImpulseBudget )
+                    {
+                        const auto& impulse = projection.impulse;
+                        ImGui::Text( "Cut-cell 압력 Δp 유체: (%.6f, %.6f) N·s",
+                            impulse.fluid.x, impulse.fluid.y );
+                        ImGui::Text( "Cut-cell 압력 Δp 강체: (%.6f, %.6f) N·s",
+                            impulse.solid.x, impulse.solid.y );
+                        ImGui::Text( "Cut-cell 압력 Δp 외벽: (%.6f, %.6f) N·s",
+                            impulse.wall.x, impulse.wall.y );
+                        ImGui::Text( "Cut-cell 이산 압력 교환 잔차: %.8f N·s",
+                            Length( impulse.residual() ) );
+                        ImGui::TextDisabled( "압력 Step 한정, 전체 FSI 질량/운동량 보존 측정값 아님" );
+                    }
                     if( projection.coupledSolveFailed )
                         ImGui::TextWrapped( "Cut-cell PCG 수렴 실패: 해당 Fluid Step에서는 압력 반력을 생략했습니다." );
                 }
