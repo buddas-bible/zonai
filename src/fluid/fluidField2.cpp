@@ -869,6 +869,7 @@ void fluidField2::invalidateObstacleHistory() noexcept
 {
     hasCutCellHistory_ = false;
     volumeSourceValid_ = false;
+    previousDisjointAnalyticGeometry_ = false;
     previousObstacles_.clear();
     sweptFaceFlux_ = {};
     cutCellPressure_ = {};
@@ -899,6 +900,13 @@ void fluidField2::setAnalyticRoundedPolygonCutCellEnabled( bool enabled ) noexce
 {
     if( analyticRoundedPolygonCutCellEnabled_ == enabled ) return;
     analyticRoundedPolygonCutCellEnabled_ = enabled;
+    invalidateObstacleHistory();
+}
+
+void fluidField2::setDisjointAnalyticCutCellEnabled( bool enabled ) noexcept
+{
+    if( disjointAnalyticCutCellEnabled_ == enabled ) return;
+    disjointAnalyticCutCellEnabled_ = enabled;
     invalidateObstacleHistory();
 }
 
@@ -936,6 +944,7 @@ void fluidField2::clear() noexcept
     cutCellQueue_.clear();
     hasCutCellHistory_ = false;
     volumeSourceValid_ = false;
+    previousDisjointAnalyticGeometry_ = false;
     std::fill( uOpenFraction_.begin(), uOpenFraction_.end(), 1.0f );
     std::fill( vOpenFraction_.begin(), vOpenFraction_.end(), 1.0f );
     for( int y = 0; y < height_; ++y )
