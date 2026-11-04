@@ -624,6 +624,7 @@ private:
         std::vector<coupledPressureFace> faces;
         std::vector<coupledPressureEdge> laplacianEdges;
         std::vector<coupledBodyResponse> response;
+        std::vector<int> dynamicResponseOwners;
         std::vector<double> diagonal;
         std::vector<double> incompletePivot;
         std::vector<double> incompleteForward;
