@@ -266,6 +266,15 @@ public:
     {
         return windField_ && windField_->isAnalyticCutCellCachedIc0Enabled();
     }
+    // Performance trial: compare active-cell IC0 sweeps against dense cached sweeps.
+    void setWindActiveIc0SweepEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setAnalyticCutCellActiveIc0SweepEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindActiveIc0SweepEnabled() const noexcept
+    {
+        return windField_ && windField_->isAnalyticCutCellActiveIc0SweepEnabled();
+    }
     void setWindStepProfilingEnabled( bool enabled ) noexcept
     {
         windStepProfilingEnabled_ = enabled;
