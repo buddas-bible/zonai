@@ -3664,6 +3664,12 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         return true;
     }
 
+    auto& dynamicResponseOwners = scratch.dynamicResponseOwners;
+    dynamicResponseOwners.clear();
+    for( std::size_t i = 0; i < obstacles.size(); ++i )
+        if( obstacles[i].inverseMass > 0.0f || obstacles[i].inverseInertia > 0.0f )
+            dynamicResponseOwners.push_back( static_cast<int>( i ) );
+
     int dynamicBoundaryFaces = 0;
     const auto addBoundary = [&]( int cell, int owner, vec2 force, vec2 point )
     {
@@ -3701,8 +3707,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                 if( cellFluidFraction_[a] <= 0.0f && cellFluidFraction_[b] <= 0.0f ) return;
                 const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
                 const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
-                ForEachAnalyticFacePortion( disjointShapes, vertical, normal, low, low + h,
-                    [&]( std::size_t owner, analyticCircleInterval clipped )
+                const auto addPortion = [&]( std::size_t owner, analyticCircleInterval clipped )
                 {
                     const vec2 point = vertical
                         ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
@@ -3714,7 +3719,23 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                         addBoundary( a, static_cast<int>( owner ), force, point );
                     if( cellFluidFraction_[b] > 0.0f )
                         addBoundary( b, static_cast<int>( owner ), -force, point );
-                } );
+                };
+                if( analyticCutCellMovableSchurFacesEnabled_ && disjointShapes.size() > 2 )
+                {
+                    // For 3+ analytically disjoint shapes, the face contributions
+                    // are independent. Static/kinematic bodies have zero Schur
+                    // mass response, so their clipped intervals cannot enter B.
+                    // Keep original owner order and the U/V face order.
+                    for( int owner : dynamicResponseOwners )
+                    {
+                        const auto clipped = ClipDisjointShapeFace(
+                            disjointShapes[owner], vertical, normal, low, low + h );
+                        if( clipped.length > 0.0 ) addPortion( owner, clipped );
+                    }
+                }
+                else
+                    ForEachAnalyticFacePortion( disjointShapes, vertical, normal, low, low + h,
+                        addPortion );
             };
             if( analyticCutCellIndexedBoundaryFacesEnabled_ )
             {
@@ -3923,11 +3944,6 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
 
     auto& response = scratch.response;
     response.resize( obstacles.size() );
-    auto& dynamicResponseOwners = scratch.dynamicResponseOwners;
-    dynamicResponseOwners.clear();
-    for( std::size_t i = 0; i < obstacles.size(); ++i )
-        if( obstacles[i].inverseMass > 0.0f || obstacles[i].inverseInertia > 0.0f )
-            dynamicResponseOwners.push_back( static_cast<int>( i ) );
     const auto multiply = [&]( const std::vector<double>& values, std::vector<double>& result )
     {
         std::fill( result.begin(), result.end(), 0.0 );
