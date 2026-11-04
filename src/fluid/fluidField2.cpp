@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -3222,7 +3223,13 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
         {
             return obstacle.inverseMass > 0.0f || obstacle.inverseInertia > 0.0f;
         } );
+    const auto solveStart = cutCellPressureTimingEnabled_ && coupled
+        ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     const bool solvedCoupled = coupled && solveCoupledPressure( timeStep, pressureIterations, obstacles, true );
+    if( cutCellPressureTimingEnabled_ && coupled )
+        cutCellPressure_.coupledSolveMilliseconds =
+            std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - solveStart ).count();
     cutCellPressure_.usedCoupledProjection = solvedCoupled;
     cutCellPressure_.coupledStatus = coupled ? pressureMomentum_.coupledStatus :
         fluidCoupledPressureStatus2::notRequested;
@@ -3746,7 +3753,8 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     // existing diagonal body Schur approximation. The full A = L + B M^-1 B^T
     // stays unchanged in multiply(), so this cannot hide the true residual.
     // The small positive shift protects isolated Neumann pockets and tiny pivots.
-    const bool useIncompleteCholesky = cutCell && cutCellTransition_.usedDisjointAnalyticGeometry;
+    const bool useIncompleteCholesky = cutCell && cutCellTransition_.usedDisjointAnalyticGeometry &&
+        analyticCutCellIncompleteCholeskyEnabled_;
     pressureMomentum_.usedIncompleteCholesky = useIncompleteCholesky;
     auto& incompletePivot = scratch.incompletePivot;
     auto& incompleteForward = scratch.incompleteForward;
