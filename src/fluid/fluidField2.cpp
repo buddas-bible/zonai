@@ -6,6 +6,9 @@
 #include <limits>
 #include <stdexcept>
 #include <numbers>
+#include <type_traits>
+#include <utility>
+#include <variant>
 
 namespace zonai
 {
@@ -3204,7 +3207,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
             const auto addClippedFace = [&]( bool vertical, int x, int y )
             {
                 const int a = vertical ? cellIndex( x - 1, y ) : cellIndex( x, y - 1 );
-                const int b = vertical ? cellIndex( x, y ) : cellIndex( x, y );
+                const int b = cellIndex( x, y );
                 if( cellFluidFraction_[a] <= 0.0f && cellFluidFraction_[b] <= 0.0f ) return;
                 const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
                 const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
