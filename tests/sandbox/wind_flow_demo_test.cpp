@@ -27,6 +27,58 @@ bool close( float a, float b, float tolerance = 1.0e-4f )
     return std::abs( a - b ) <= tolerance;
 }
 
+void checkCachedIc0WorldDifferential()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo reference{ demoKind::windFlow };
+    rigidBodyDemo cached{ demoKind::windFlow };
+    for( rigidBodyDemo* scene : { &reference, &cached } )
+    {
+        scene->setWindCutCellProjectionEnabled( true );
+        scene->setWindCutCellCoupledProjectionEnabled( true );
+        scene->setWindDisjointAnalyticEnabled( true );
+        scene->setWindFluidSubstepCount( 4 );
+        scene->setWindSourceEnabled( false );
+        scene->setWindDragCoefficient( 1.5f );
+        const auto shapes = scene->getShapes();
+        scene->getWorld().SetBodyLinearVelocity( shapes[0].bodyHandle, { 0.7f, -0.20f } );
+        scene->getWorld().SetBodyAngularVelocity( shapes[1].bodyHandle, 0.4f );
+        scene->addWindVortex();
+    }
+    reference.setWindCachedIc0Enabled( false );
+    check( !reference.isWindCachedIc0Enabled() && cached.isWindCachedIc0Enabled(),
+        "World wind must allow reproducible original versus cached IC0 comparison" );
+
+    for( int frame = 0; frame < 6; ++frame )
+    {
+        reference.step( dt, 8 );
+        cached.step( dt, 8 );
+        const auto& a = reference.getWindField()->getCutCellPressure();
+        const auto& b = cached.getWindField()->getCutCellPressure();
+        check( a.usedCoupledProjection && b.usedCoupledProjection &&
+            !a.coupledSolveFailed && !b.coupledSolveFailed &&
+            a.coupledStatus == fluidCoupledPressureStatus2::converged &&
+            b.coupledStatus == fluidCoupledPressureStatus2::converged &&
+            std::abs( a.coupledIterations - b.coupledIterations ) <= 3,
+            "World interleave must converge for both original and cached IC0" );
+        for( std::size_t i = 0; i < reference.getShapes().size(); ++i )
+        {
+            const bodyId lhs = reference.getShapes()[i].bodyHandle;
+            const bodyId rhs = cached.getShapes()[i].bodyHandle;
+            const vec2 p1 = reference.getWorld().GetBodyTransform( lhs ).position;
+            const vec2 p2 = cached.getWorld().GetBodyTransform( rhs ).position;
+            check( near( p1, p2, 2.0e-2f ) &&
+                near( reference.getWorld().GetBodyLinearVelocity( lhs ),
+                    cached.getWorld().GetBodyLinearVelocity( rhs ), 2.0e-2f ),
+                "cached IC0 must preserve World body motion with synchronized fluid steps" );
+        }
+    }
+    reference.configureWindField( 28, 16, 0.5f );
+    cached.configureWindField( 28, 16, 0.5f );
+    check( !reference.isWindCachedIc0Enabled() && cached.isWindCachedIc0Enabled(),
+        "wind field resize must preserve the selected IC0 benchmark mode" );
+}
+
 void checkWorldWindStepProfiling()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1071,6 +1123,7 @@ int main()
 {
     checkFluidCoupling();
     checkWorldWindStepProfiling();
+    checkCachedIc0WorldDifferential();
     checkMovingSolidReaction();
     checkSynchronizedWindCoupling();
     checkPressurePredictedWorldVelocity();
