@@ -83,6 +83,7 @@ struct fluidCoupledPressureTiming2
     double output = 0.0;
     int matrixProducts = 0;
     int preconditionerApplications = 0;
+    int cachedLaplacianEdges = 0;
 
     [[nodiscard]] double accounted() const noexcept
     {
@@ -101,6 +102,7 @@ struct fluidCoupledPressureTiming2
         output += next.output;
         matrixProducts += next.matrixProducts;
         preconditionerApplications += next.preconditionerApplications;
+        cachedLaplacianEdges += next.cachedLaplacianEdges;
     }
 };
 
@@ -443,6 +445,18 @@ public:
         return analyticCutCellActiveIc0SweepEnabled_;
     }
 
+    // 분석적 Cut-cell Schur L의 MAC face 연결/개방율을 coupled solve마다 한 번 캐시.
+    // 기본 ON. OFF는 기존 matrix-free 격자 face 조회 경로로 결과/속도 비교.
+    // Body Schur B M^-1 B^T 및 이진 MAC 연산자는 변경하지 않는다.
+    void setAnalyticCutCellCachedSchurEdgesEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellCachedSchurEdgesEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellCachedSchurEdgesEnabled() const noexcept
+    {
+        return analyticCutCellCachedSchurEdgesEnabled_;
+    }
+
     // 벤치마크 전용 PCG 시간 측정. 기본 OFF로 일반 Step에 시계 측정 비용 없음.
     void setCutCellPressureTimingEnabled( bool enabled ) noexcept { cutCellPressureTimingEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellPressureTimingEnabled() const noexcept { return cutCellPressureTimingEnabled_; }
@@ -599,9 +613,16 @@ private:
         double southOverPivot = 0.0;
         double inversePivot = 0.0;
     };
+    struct coupledPressureEdge
+    {
+        int first = 0;
+        int second = 0;
+        double weight = 0.0;
+    };
     struct coupledPressureScratch
     {
         std::vector<coupledPressureFace> faces;
+        std::vector<coupledPressureEdge> laplacianEdges;
         std::vector<coupledBodyResponse> response;
         std::vector<double> diagonal;
         std::vector<double> incompletePivot;
@@ -676,6 +697,7 @@ private:
     bool analyticCutCellIncompleteCholeskyEnabled_ = true;
     bool analyticCutCellCachedIc0Enabled_ = true;
     bool analyticCutCellActiveIc0SweepEnabled_ = true;
+    bool analyticCutCellCachedSchurEdgesEnabled_ = true;
     bool cutCellPressureTimingEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
