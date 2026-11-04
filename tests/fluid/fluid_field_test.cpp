@@ -1150,10 +1150,10 @@ void checkDisjointAnalyticMultiShapeCutCell()
             2.0e-3f + 0.1f * pressure.pressureResidual,
         "same-face disjoint owners must retain Schur B/B-transpose blocked flux consistency" );
 
-    // When AABBs begin overlapping, fallback to the sampled union. Do not
-    // misinterpret an analytic->sampled occupancy change as swept displacement.
-    circles[1].transform.position.y = 0.20f;
-    circles[1].center.y = 0.20f;
+    // Exactly tangent circles are excluded by the strict overlap tolerance.
+    // Do not misinterpret an analytic->sampled transition as swept displacement.
+    circles[1].transform.position.y = 0.34f;
+    circles[1].center.y = 0.34f;
     shared.step( dt, circles, reactions, 200 );
     fluidField2 sampled{ 24, 16, h, { -6.0f, -4.0f } };
     sampled.setCutCellProjectionEnabled( true );
@@ -1164,7 +1164,7 @@ void checkDisjointAnalyticMultiShapeCutCell()
         !shared.getSweptFaceFlux().usedSweptFlux &&
         std::abs( shared.getCutCellTransition().fluidVolume -
             sampled.getCutCellTransition().fluidVolume ) < 1.0e-5f,
-        "overlapping AABBs must fall back to sampled union and invalidate geometry history" );
+        "tangent circles must fall back to sampled union and invalidate geometry history" );
 
     circles[1].transform.position.y = 0.42f;
     circles[1].center.y = 0.42f;
@@ -1399,15 +1399,17 @@ void checkAnalyticContainedCircleUnion()
         transitions.getSweptFaceFlux().totalAbsoluteFlux < 1.0e-6f,
         "moving a fully hidden circle must generate no fictitious displaced fluid" );
 
-    // Partial intersection is outside this special case: use the sampled union.
+    // Partial intersection switches to the exact lens path and clears the
+    // previous full-containment history.
     bodies[0].transform.position = { 0.65f, 0.0f };
     bodies[0].center = bodies[0].transform.position;
     transitions.step( dt, bodies, feedback, 160 );
-    check( !transitions.getCutCellTransition().usedDisjointAnalyticGeometry &&
+    check( transitions.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        transitions.getCutCellTransition().usedPartialCircleAnalyticUnion &&
         transitions.getCutCellTransition().containedAnalyticShapes == 0 &&
         !transitions.getCutCellPressure().hasVolumeHistory &&
         !transitions.getSweptFaceFlux().usedSweptFlux,
-        "partially intersecting circles must invalidate history and use sampled union" );
+        "contained-to-partial circle union transition must invalidate history" );
 
     bodies[0].transform.position = { 0.12f, 0.08f };
     bodies[0].center = bodies[0].transform.position;
@@ -1475,20 +1477,23 @@ void checkDisjointAnalyticOverlappingAabbs()
         std::isfinite( field.getSweptFaceFlux().geometryMismatch ),
         "moving GJK-separated shapes must preserve swept geometry history" );
 
-    // The AABBs still overlap, but the actual circles now intersect.
+    // Both AABBs and the actual circles now intersect. The exact clipped lens
+    // union is supported, but the disjoint->partial mode switch resets history.
     circles[1].transform.position = { 0.20f, 0.20f };
     circles[1].center = circles[1].transform.position;
     field.step( dt, circles, reactions, 160 );
-    fluidField2 sampled{ 24, 16, h, { -6.0f, -4.0f } };
-    sampled.setCutCellProjectionEnabled( true );
-    sampled.setCutCellSampleCount( 8 );
-    sampled.step( dt, circles, reactions, 160 );
-    check( !field.getCutCellTransition().usedDisjointAnalyticGeometry &&
+    const float intersectDistance = Length( circles[1].center - circles[0].center );
+    const float lens = 2.0f * circleRadius * circleRadius *
+        std::acos( intersectDistance / ( 2.0f * circleRadius ) ) -
+        0.5f * intersectDistance *
+            std::sqrt( 4.0f * circleRadius * circleRadius - intersectDistance * intersectDistance );
+    check( field.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        field.getCutCellTransition().usedPartialCircleAnalyticUnion &&
         !field.getCutCellPressure().hasVolumeHistory &&
         !field.getSweptFaceFlux().usedSweptFlux &&
         std::abs( field.getCutCellTransition().fluidVolume -
-            sampled.getCutCellTransition().fluidVolume ) < 1.0e-5f,
-        "actual circle overlap must use sampled union with invalidated swept history" );
+            ( expectedArea + lens ) ) < 1.0e-4f,
+        "actual partial circle overlap must use exact lens union and invalidate geometry history" );
 
     circles[1].transform.position = { 0.42f, 0.42f };
     circles[1].center = circles[1].transform.position;
