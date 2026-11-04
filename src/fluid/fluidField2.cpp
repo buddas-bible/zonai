@@ -726,6 +726,85 @@ double RoundedPolygonRectangleArea( const analyticFluidRoundedPolygon& polygon,
     return std::clamp( area, 0.0, ( x1 - x0 ) * ( y1 - y0 ) );
 }
 
+// Analytic union of *disjoint* shapes. AABB separation is deliberately stricter
+// than shape separation: if bounds meet or overlap, sampled union owns the frame.
+struct analyticDisjointShape2
+{
+    std::variant<analyticFluidCircle, analyticFluidPolygon,
+        analyticFluidCapsule, analyticFluidRoundedPolygon> geometry{};
+    aabb2 bounds{};
+};
+
+std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
+    std::span<const fluidShapeObstacle2> obstacles )
+{
+    if( obstacles.size() < 2 ) return {};
+    std::vector<analyticDisjointShape2> shapes;
+    shapes.reserve( obstacles.size() );
+    for( const fluidShapeObstacle2& obstacle : obstacles )
+    {
+        if( !IsValidFluidObstacle( obstacle ) ) return {};
+        const auto single = std::span<const fluidShapeObstacle2>( &obstacle, 1 );
+        analyticDisjointShape2 analytic{};
+        analyticFluidCircle circle{};
+        analyticFluidCapsule capsule{};
+        analyticFluidPolygon polygon{};
+        analyticFluidRoundedPolygon rounded{};
+        if( TryGetAnalyticCircle( single, circle ) ) analytic.geometry = circle;
+        else if( TryGetAnalyticCapsule( single, capsule ) ) analytic.geometry = capsule;
+        else if( TryGetAnalyticPolygon( single, polygon ) ) analytic.geometry = polygon;
+        else if( TryGetAnalyticRoundedPolygon( single, rounded ) ) analytic.geometry = rounded;
+        else return {};
+
+        analytic.bounds = ComputeShapeAABB( obstacle.geometry, obstacle.transform );
+        if( !IsValidAABB( analytic.bounds ) ) return {};
+        // Consecutive geometric snapshots must not add overlapping solid volumes.
+        for( const auto& previous : shapes )
+            if( Overlaps( previous.bounds, analytic.bounds ) ) return {};
+        shapes.push_back( std::move( analytic ) );
+    }
+    return shapes;
+}
+
+double DisjointShapeRectangleArea( const analyticDisjointShape2& shape,
+    double x0, double y0, double x1, double y1 )
+{
+    if( x1 <= shape.bounds.min.x || x0 >= shape.bounds.max.x ||
+        y1 <= shape.bounds.min.y || y0 >= shape.bounds.max.y ) return 0.0;
+    return std::visit( [&]( const auto& geometry ) -> double
+    {
+        using T = std::remove_cvref_t<decltype( geometry )>;
+        if constexpr( std::is_same_v<T, analyticFluidCircle> )
+            return CircleRectangleArea( geometry, x0, y0, x1, y1 );
+        else if constexpr( std::is_same_v<T, analyticFluidPolygon> )
+            return ConvexPolygonRectangleArea( geometry, x0, y0, x1, y1 );
+        else if constexpr( std::is_same_v<T, analyticFluidCapsule> )
+            return CapsuleRectangleArea( geometry, x0, y0, x1, y1 );
+        else return RoundedPolygonRectangleArea( geometry, x0, y0, x1, y1 );
+    }, shape.geometry );
+}
+
+analyticCircleInterval ClipDisjointShapeFace( const analyticDisjointShape2& shape,
+    bool vertical, double coordinate, double low, double high )
+{
+    if( vertical
+        ? ( coordinate <= shape.bounds.min.x || coordinate >= shape.bounds.max.x ||
+            high <= shape.bounds.min.y || low >= shape.bounds.max.y )
+        : ( coordinate <= shape.bounds.min.y || coordinate >= shape.bounds.max.y ||
+            high <= shape.bounds.min.x || low >= shape.bounds.max.x ) ) return {};
+    return std::visit( [&]( const auto& geometry ) -> analyticCircleInterval
+    {
+        using T = std::remove_cvref_t<decltype( geometry )>;
+        if constexpr( std::is_same_v<T, analyticFluidCircle> )
+            return ClipCircleFace( geometry, vertical, coordinate, low, high );
+        else if constexpr( std::is_same_v<T, analyticFluidPolygon> )
+            return ClipPolygonFace( geometry, vertical, coordinate, low, high );
+        else if constexpr( std::is_same_v<T, analyticFluidCapsule> )
+            return ClipCapsuleFace( geometry, vertical, coordinate, low, high );
+        else return ClipRoundedPolygonFace( geometry, vertical, coordinate, low, high );
+    }, shape.geometry );
+}
+
 } // namespace
 
 fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
