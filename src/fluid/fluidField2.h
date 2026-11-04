@@ -290,8 +290,8 @@ public:
         return analyticRoundedPolygonCutCellEnabled_;
     }
 
-    // 단일 Shape의 별도 선택과 무관한 다중 분석적 경로. 전 Shape의 AABB가
-    // 서로 분리된 경우에만 정확한 점유/면 클리핑, 겹치면 기존 표본 합집합 사용.
+    // 단일 Shape의 별도 선택과 무관한 다중 분석적 경로. 실제 convex Shape가
+    // 서로 분리되면 정확한 점유/면 클리핑. 교차/근접/불확실하면 표본 합집합 사용.
     void setDisjointAnalyticCutCellEnabled( bool enabled ) noexcept;
     [[nodiscard]] bool isDisjointAnalyticCutCellEnabled() const noexcept
     {
