@@ -152,6 +152,11 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --area-sweep
 
+      # Compare disjoint analytic MAC face clipping against the full face scan.
+      - name: Sample analytic Cut-cell face clipping (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --face-sweep
+
       # A real headless Sandbox World interleave, 8 World substeps and 1/2/4/8 Fluid steps.
       # Frame medians are informational; never gate CI on runner-dependent wall time.
       - name: Sample Wind multi-substep stage profile (Windows Release, informational)
