@@ -3265,6 +3265,7 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
     cutCellPressure_.coupledIterations = coupled ? pressureMomentum_.coupledIterations : 0;
     cutCellPressure_.coupledRelativeResidual = coupled ? pressureMomentum_.coupledRelativeResidual : 0.0f;
     cutCellPressure_.usedIncompleteCholesky = coupled && pressureMomentum_.usedIncompleteCholesky;
+    cutCellPressure_.coupledTiming = coupled ? pressureMomentum_.coupledTiming : fluidCoupledPressureTiming2{};
     cutCellPressure_.coupledSolveFailed = coupled && !solvedCoupled &&
         cutCellPressure_.coupledStatus != fluidCoupledPressureStatus2::noBoundary;
     const float coupledPressureResidual = pressureMomentum_.coupledFinalResidualRms;
@@ -3471,9 +3472,41 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     // Cut-cell L은 개방 면적 가중치, B는 반환하는 표면 압력 반력과 동일한 계수다.
     // 정확한 cut interface 적분이 아닌 기존 cell aperture traction 근사만 결합한다.
     pressureMomentum_.coupledIterationLimit = iterations;
+    // One opt-in clock for the whole matrix-free Schur solve. PCG operation
+    // counters and their timings are recorded only during explicit profiling.
+    using clock = std::chrono::steady_clock;
+    const bool profile = cutCellPressureTimingEnabled_;
+    auto& timing = pressureMomentum_.coupledTiming;
+    timing = {};
+    const auto started = profile ? clock::now() : clock::time_point{};
+    auto phaseStarted = started;
+    enum class phase { assembly, factorization, pcg, validation, output, done };
+    phase current = phase::assembly;
+    const auto nextPhase = [&]( phase next )
+    {
+        if( !profile ) return;
+        const auto now = clock::now();
+        const double elapsed = std::chrono::duration<double, std::milli>( now - phaseStarted ).count();
+        switch( current )
+        {
+        case phase::assembly: timing.assembly += elapsed; break;
+        case phase::factorization: timing.factorization += elapsed; break;
+        case phase::pcg:
+            timing.vector += std::max( 0.0, elapsed - timing.multiply - timing.preconditioner );
+            break;
+        case phase::validation: timing.validation += elapsed; break;
+        case phase::output: timing.output += elapsed; break;
+        case phase::done: break;
+        }
+        if( next == phase::done )
+            timing.total = std::chrono::duration<double, std::milli>( now - started ).count();
+        current = next;
+        phaseStarted = now;
+    };
     const auto fail = [&]( fluidCoupledPressureStatus2 status )
     {
         pressureMomentum_.coupledStatus = status;
+        nextPhase( phase::done );
         return false;
     };
     auto& scratch = coupledPressureScratch_;
@@ -3507,6 +3540,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     {
         std::fill( pressure_.begin(), pressure_.end(), 0.0f );
         pressureMomentum_.coupledStatus = fluidCoupledPressureStatus2::converged;
+        nextPhase( phase::done );
         return true;
     }
 
@@ -3787,6 +3821,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     pressureMomentum_.usedIncompleteCholesky = useIncompleteCholesky;
     auto& incompletePivot = scratch.incompletePivot;
     auto& incompleteForward = scratch.incompleteForward;
+    nextPhase( phase::factorization );
     if( useIncompleteCholesky )
     {
         incompletePivot.assign( rhs.size(), 0.0 );
@@ -3811,6 +3846,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                 incompletePivot[cell] = std::max( regularization, pivot );
             }
     }
+    nextPhase( phase::pcg );
     const auto applyPreconditioner = [&]( const std::vector<double>& source )
     {
         if( !useIncompleteCholesky )
@@ -3855,7 +3891,24 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
             }
     };
 
-    applyPreconditioner( residual );
+    const auto timedPreconditioner = [&]( const std::vector<double>& source )
+    {
+        if( !profile ) { applyPreconditioner( source ); return; }
+        const auto begin = clock::now();
+        applyPreconditioner( source );
+        timing.preconditioner += std::chrono::duration<double, std::milli>( clock::now() - begin ).count();
+        ++timing.preconditionerApplications;
+    };
+    const auto timedMultiply = [&]( const std::vector<double>& source, std::vector<double>& target )
+    {
+        if( !profile ) { multiply( source, target ); return; }
+        const auto begin = clock::now();
+        multiply( source, target );
+        timing.multiply += std::chrono::duration<double, std::milli>( clock::now() - begin ).count();
+        ++timing.matrixProducts;
+    };
+
+    timedPreconditioner( residual );
     double rz = 0.0, squared = 0.0;
     for( std::size_t i = 0; i < rhs.size(); ++i )
     {
@@ -3871,7 +3924,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     pressureMomentum_.coupledInitialResidualRms = static_cast<float>( std::sqrt( initialSquared / active ) );
     for( int iteration = 0; iteration < iterations && squared > tolerance; ++iteration )
     {
-        multiply( direction, product );
+        timedMultiply( direction, product );
         double denom = 0.0;
         for( std::size_t i = 0; i < rhs.size(); ++i )
             denom += direction[i] * product[i];
@@ -3891,7 +3944,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         if( !std::isfinite( squared ) )
             return fail( fluidCoupledPressureStatus2::numericalBreakdown );
         if( squared <= tolerance ) break;
-        applyPreconditioner( residual );
+        timedPreconditioner( residual );
         double nextRz = 0.0;
         for( std::size_t i = 0; i < rhs.size(); ++i )
             nextRz += residual[i] * z[i];
@@ -3905,6 +3958,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         rz = nextRz;
     }
 
+    nextPhase( phase::validation );
     // Recursive CG 잔차는 반올림으로 실제 b-A*x와 달라질 수 있으므로
     // 종료 시 항상 원래 연산자로 직접 재계산한다. 반복 한도는 성공 조건이 아님.
     multiply( x, product );
@@ -3922,6 +3976,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         ? static_cast<float>( std::sqrt( trueSquared / initialSquared ) ) : 0.0f;
     if( trueSquared > tolerance )
         return fail( fluidCoupledPressureStatus2::iterationLimit );
+    nextPhase( phase::output );
 
     double pressureSum = 0.0;
     for( std::size_t i = 0; i < rhs.size(); ++i )
@@ -3939,6 +3994,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         pressure_[i] = static_cast<float>( value );
     }
     pressureMomentum_.coupledStatus = fluidCoupledPressureStatus2::converged;
+    nextPhase( phase::done );
     return true;
 }
 
