@@ -1171,6 +1171,8 @@ void fluidField2::clear() noexcept
     std::fill( cutCellVolumeRate_.begin(), cutCellVolumeRate_.end(), 0.0f );
     std::fill( sweptUVolume_.begin(), sweptUVolume_.end(), 0.0f );
     std::fill( sweptVVolume_.begin(), sweptVVolume_.end(), 0.0f );
+    analyticUBlockedFaces_.clear();
+    analyticVBlockedFaces_.clear();
     previousObstacles_.clear();
     sweptFaceFlux_ = {};
     std::fill( cutCellComponent_.begin(), cutCellComponent_.end(), -1 );
@@ -1518,6 +1520,8 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     const auto disjointShapes = disjointAnalyticCutCellEnabled_
         ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
     const bool disjointGeometry = !disjointShapes.empty();
+    analyticUBlockedFaces_.clear();
+    analyticVBlockedFaces_.clear();
     int containedCircle = -1;
     for( std::size_t i = 0; i < disjointShapes.size(); ++i )
         if( disjointShapes[i].occluded ) containedCircle = static_cast<int>( i );
@@ -1597,6 +1601,13 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                     velocitySum += interval.length * ( vertical ? velocity.x : velocity.y );
                 } );
                 const int face = vertical ? uIndex( x, y ) : vIndex( x, y );
+                // Retain every positive analytic intersection, including those
+                // too narrow to change the stored float aperture from 1.0.
+                if( blockedLength > 0.0 )
+                {
+                    if( vertical ) analyticUBlockedFaces_.push_back( face );
+                    else analyticVBlockedFaces_.push_back( face );
+                }
                 const float open = static_cast<float>(
                     std::clamp( 1.0 - blockedLength / h, 0.0, 1.0 ) );
                 const float speed = blockedLength > 0.0
@@ -3596,10 +3607,22 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                         addBoundary( b, static_cast<int>( owner ), -force, point );
                 } );
             };
-            for( int y = 0; y < height_; ++y )
-                for( int x = 1; x < width_; ++x ) addClippedFace( true, x, y );
-            for( int y = 1; y < height_; ++y )
-                for( int x = 0; x < width_; ++x ) addClippedFace( false, x, y );
+            if( analyticCutCellIndexedBoundaryFacesEnabled_ )
+            {
+                // Same U-then-V row-major face order as the reference path,
+                // without scanning fully open faces or changing Schur physics.
+                for( int face : analyticUBlockedFaces_ )
+                    addClippedFace( true, face % ( width_ + 1 ), face / ( width_ + 1 ) );
+                for( int face : analyticVBlockedFaces_ )
+                    addClippedFace( false, face % width_, face / width_ );
+            }
+            else
+            {
+                for( int y = 0; y < height_; ++y )
+                    for( int x = 1; x < width_; ++x ) addClippedFace( true, x, y );
+                for( int y = 1; y < height_; ++y )
+                    for( int x = 0; x < width_; ++x ) addClippedFace( false, x, y );
+            }
         }
         else
         {
