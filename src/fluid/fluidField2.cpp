@@ -1,5 +1,7 @@
 #include "fluid/fluidField2.h"
 
+#include "collision/distance2.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -729,8 +731,41 @@ double RoundedPolygonRectangleArea( const analyticFluidRoundedPolygon& polygon,
     return std::clamp( area, 0.0, ( x1 - x0 ) * ( y1 - y0 ) );
 }
 
-// Analytic union of *disjoint* shapes. AABB separation is deliberately stricter
-// than shape separation: if bounds meet or overlap, sampled union owns the frame.
+// AABB가 겹치는 경우에도 실제 convex Shape가 충분히 떨어져 있으면
+// 분석적 합집합을 유지한다. 접촉/근접/비정상 회전/거리 계산 실패는 표본 경로로 복귀.
+bool AreDisjointFluidShapes( const fluidShapeObstacle2& first,
+    const fluidShapeObstacle2& second, const aabb2& firstBounds, const aabb2& secondBounds )
+{
+    if( !Overlaps( firstBounds, secondBounds ) ) return true;
+
+    const auto isUnitRotation = []( const rot2& rotation )
+    {
+        const float squared = rotation.c * rotation.c + rotation.s * rotation.s;
+        return std::isfinite( squared ) && std::abs( squared - 1.0f ) <= 1.0e-4f;
+    };
+    if( !isUnitRotation( first.transform.rotation ) ||
+        !isUnitRotation( second.transform.rotation ) ) return false;
+
+    distanceInput2 input{};
+    input.proxyA = MakeShapeProxy( first.geometry );
+    input.proxyB = MakeShapeProxy( second.geometry );
+    input.transform = InverseMul( first.transform, second.transform );
+    input.useRadii = true;
+    simplexCache2 cache{};
+    const distanceOutput2 distance = ShapeDistance( input, cache );
+
+    // Float GJK의 세계 좌표 오차를 감안해 작은 간격은 겹침으로 취급한다.
+    const float scale = std::max( { 1.0f,
+        std::abs( firstBounds.min.x ), std::abs( firstBounds.min.y ),
+        std::abs( firstBounds.max.x ), std::abs( firstBounds.max.y ),
+        std::abs( secondBounds.min.x ), std::abs( secondBounds.min.y ),
+        std::abs( secondBounds.max.x ), std::abs( secondBounds.max.y ) } );
+    const float tolerance = 32.0f * std::numeric_limits<float>::epsilon() * scale;
+    return std::isfinite( distance.distance ) && distance.iterations < 20 &&
+        distance.distance > tolerance;
+}
+
+// Convex Shape끼리 실제로 분리돼야 개별 분석적 면적/face 구간을 더할 수 있다.
 struct analyticDisjointShape2
 {
     std::variant<analyticFluidCircle, analyticFluidPolygon,
@@ -761,9 +796,10 @@ std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
 
         analytic.bounds = ComputeShapeAABB( obstacle.geometry, obstacle.transform );
         if( !IsValidAABB( analytic.bounds ) ) return {};
-        // Consecutive geometric snapshots must not add overlapping solid volumes.
-        for( const auto& previous : shapes )
-            if( Overlaps( previous.bounds, analytic.bounds ) ) return {};
+        // AABB 중첩 후보만 GJK로 좁혀 검사한다. 실제 교차하면 표본 union 사용.
+        for( std::size_t i = 0; i < shapes.size(); ++i )
+            if( !AreDisjointFluidShapes( obstacles[i], obstacle,
+                shapes[i].bounds, analytic.bounds ) ) return {};
         shapes.push_back( std::move( analytic ) );
     }
     return shapes;

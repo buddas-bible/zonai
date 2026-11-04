@@ -1184,6 +1184,117 @@ void checkDisjointAnalyticMultiShapeCutCell()
         "clear must preserve an explicitly disabled disjoint multi analytic mode" );
 }
 
+void checkDisjointAnalyticOverlappingAabbs()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr float h = 0.5f;
+    constexpr float domainArea = 24.0f * 16.0f * h * h;
+    constexpr float circleRadius = 0.20f;
+    fluidField2 field{ 24, 16, h, { -6.0f, -4.0f } };
+    field.setCutCellProjectionEnabled( true );
+    field.setDisjointAnalyticCutCellEnabled( true );
+    std::array<fluidShapeObstacle2, 2> circles{{
+        { circle2{ {}, circleRadius }, { { 0.08f, 0.08f }, {} },
+            { 0.08f, 0.08f }, {}, 0.0f },
+        { circle2{ {}, circleRadius }, { { 0.42f, 0.42f }, {} },
+            { 0.42f, 0.42f }, {}, 0.0f }
+    }};
+    std::array<fluidObstacleForce2, 2> reactions{};
+    const float expectedArea = domainArea -
+        2.0f * std::numbers::pi_v<float> * circleRadius * circleRadius;
+    check( Overlaps( ComputeShapeAABB( circles[0].geometry, circles[0].transform ),
+        ComputeShapeAABB( circles[1].geometry, circles[1].transform ) ),
+        "diagonally separated circles must have overlapping AABBs in this fixture" );
+
+    field.step( dt, circles, reactions, 160 );
+    check( field.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        field.getCutCellTransition().disjointAnalyticShapes == 2 &&
+        std::abs( field.getCutCellTransition().fluidVolume - expectedArea ) < 1.0e-4f,
+        "GJK-separated circles with overlapping AABBs must retain exact analytic union" );
+
+    field.setCutCellSampleCount( 8 );
+    field.step( dt, circles, reactions, 160 );
+    check( field.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        !field.getCutCellPressure().hasVolumeHistory &&
+        std::abs( field.getCutCellTransition().fluidVolume - expectedArea ) < 1.0e-4f,
+        "overlapping-AABB disjoint analytic area must be independent of spatial samples" );
+
+    circles[1].transform.position += vec2{ 0.03f, 0.03f };
+    circles[1].center = circles[1].transform.position;
+    field.step( dt, circles, reactions, 160 );
+    check( field.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        field.getCutCellPressure().hasVolumeHistory &&
+        field.getSweptFaceFlux().usedSweptFlux &&
+        std::isfinite( field.getSweptFaceFlux().geometryMismatch ),
+        "moving GJK-separated shapes must preserve swept geometry history" );
+
+    // The AABBs still overlap, but the actual circles now intersect.
+    circles[1].transform.position = { 0.20f, 0.20f };
+    circles[1].center = circles[1].transform.position;
+    field.step( dt, circles, reactions, 160 );
+    fluidField2 sampled{ 24, 16, h, { -6.0f, -4.0f } };
+    sampled.setCutCellProjectionEnabled( true );
+    sampled.setCutCellSampleCount( 8 );
+    sampled.step( dt, circles, reactions, 160 );
+    check( !field.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        !field.getCutCellPressure().hasVolumeHistory &&
+        !field.getSweptFaceFlux().usedSweptFlux &&
+        std::abs( field.getCutCellTransition().fluidVolume -
+            sampled.getCutCellTransition().fluidVolume ) < 1.0e-5f,
+        "actual circle overlap must use sampled union with invalidated swept history" );
+
+    circles[1].transform.position = { 0.42f, 0.42f };
+    circles[1].center = circles[1].transform.position;
+    field.step( dt, circles, reactions, 160 );
+    check( field.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        !field.getCutCellPressure().hasVolumeHistory &&
+        !field.getSweptFaceFlux().usedSweptFlux,
+        "returning to GJK separation must not invent swept volume" );
+
+    // A tangent pair is numerically ambiguous, so keep the sampled union.
+    circles[1].transform.position = { 0.48f, 0.08f };
+    circles[1].center = circles[1].transform.position;
+    field.step( dt, circles, reactions, 160 );
+    check( !field.getCutCellTransition().usedDisjointAnalyticGeometry,
+        "touching shapes must conservatively fall back to sampled union" );
+
+    // Mixed convex proxies share the same exact separation test.
+    // The rotated capsule AABB overlaps the small circle's AABB, not its shape.
+    polygon2 rounded = MakeBox( { 0.30f, 0.20f } );
+    rounded.radius = 0.12f;
+    std::array<fluidShapeObstacle2, 4> mixed{{
+        { capsule2{ { -0.45f, 0.0f }, { 0.45f, 0.0f }, 0.08f },
+            { {}, rot2::FromRadians( std::numbers::pi_v<float> * 0.25f ) },
+            {}, {}, 0.0f },
+        { circle2{ {}, 0.18f }, { { 0.45f, 0.0f }, {} },
+            { 0.45f, 0.0f }, {}, 0.0f },
+        { MakeBox( { 0.33f, 0.23f } ), { { 3.0f, 1.0f }, {} },
+            { 3.0f, 1.0f }, {}, 0.0f },
+        { rounded, { { -3.0f, -1.0f }, rot2::FromRadians( 0.29f ) },
+            { -3.0f, -1.0f }, {}, 0.0f }
+    }};
+    std::array<fluidObstacleForce2, 4> mixedReactions{};
+    const float capsuleArea = 2.0f * 0.08f * 0.90f +
+        std::numbers::pi_v<float> * 0.08f * 0.08f;
+    const float mixedArea = domainArea - ( capsuleArea +
+        std::numbers::pi_v<float> * 0.18f * 0.18f +
+        4.0f * 0.33f * 0.23f +
+        4.0f * 0.30f * 0.20f + 4.0f * ( 0.30f + 0.20f ) * 0.12f +
+        std::numbers::pi_v<float> * 0.12f * 0.12f );
+    check( Overlaps( ComputeShapeAABB( mixed[0].geometry, mixed[0].transform ),
+        ComputeShapeAABB( mixed[1].geometry, mixed[1].transform ) ),
+        "rotated capsule and circle fixture must have overlapping AABBs" );
+
+    fluidField2 mixedField{ 24, 16, h, { -6.0f, -4.0f } };
+    mixedField.setCutCellProjectionEnabled( true );
+    mixedField.setDisjointAnalyticCutCellEnabled( true );
+    mixedField.step( dt, mixed, mixedReactions, 160 );
+    check( mixedField.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        mixedField.getCutCellTransition().disjointAnalyticShapes == 4 &&
+        std::abs( mixedField.getCutCellTransition().fluidVolume - mixedArea ) < 1.0e-4f,
+        "GJK-separated mixed capsule/circle/polygon/rounded geometry must keep exact union" );
+}
+
 void checkAnalyticRoundedPolygonCutCell()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -2269,6 +2380,7 @@ int main()
     checkAnalyticSingleCapsuleCutCell();
     checkAnalyticRoundedPolygonCutCell();
     checkDisjointAnalyticMultiShapeCutCell();
+    checkDisjointAnalyticOverlappingAabbs();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();
