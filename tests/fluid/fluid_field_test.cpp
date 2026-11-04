@@ -8,6 +8,7 @@
 #include <limits>
 #include <numbers>
 #include <stdexcept>
+#include <vector>
 
 using namespace zonai;
 
@@ -1553,8 +1554,9 @@ void checkCachedSchurLaplacianDifferential()
                 static_cast<int>( 8.0f / h ), h, origin };
             fluidField2 cached{ static_cast<int>( 12.0f / h ),
                 static_cast<int>( 8.0f / h ), h, origin };
-            check( cached.isAnalyticCutCellCachedSchurEdgesEnabled(),
-                "analytic Schur edge cache must be on by default" );
+            check( cached.isAnalyticCutCellCachedSchurEdgesEnabled() &&
+                cached.isAnalyticCutCellIndexedBoundaryFacesEnabled(),
+                "analytic Schur edge and boundary index caches must be on by default" );
             for( fluidField2* field : { &reference, &cached } )
             {
                 field->setCutCellProjectionEnabled( true );
@@ -1564,6 +1566,7 @@ void checkCachedSchurLaplacianDifferential()
                 field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
             }
             reference.setAnalyticCutCellCachedSchurEdgesEnabled( false );
+            reference.setAnalyticCutCellIndexedBoundaryFacesEnabled( false );
             std::array<fluidObstacleForce2, 2> refForces{}, cachedForces{};
             // The edge list must be rebuilt for every changing occupancy.
             for( int frame = 0; frame < 4; ++frame )
@@ -1622,9 +1625,99 @@ void checkCachedSchurLaplacianDifferential()
             cached.clear();
             reference.clear();
             check( cached.isAnalyticCutCellCachedSchurEdgesEnabled() &&
+                cached.isAnalyticCutCellIndexedBoundaryFacesEnabled() &&
                 !reference.isAnalyticCutCellCachedSchurEdgesEnabled() &&
+                !reference.isAnalyticCutCellIndexedBoundaryFacesEnabled() &&
                 cached.getCutCellPressure().coupledTiming.cachedLaplacianEdges == 0,
                 "clear must retain selected edge-cache option but discard old data" );
+        }
+}
+
+void checkIndexedAnalyticBoundaryDifferential()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    for( float h : { 0.5f, 0.25f } )
+        for( int staticCount : { 16, 48 } )
+        {
+            std::vector<fluidShapeObstacle2> bodies{
+                { circle2{ {}, 0.58f }, { { -0.21f, -0.18f }, {} }, { -0.21f, -0.18f },
+                    { 0.95f, -0.30f }, 0.70f, 0.35f, 1.10f },
+                { circle2{ {}, 0.58f }, { { 1.50f, 0.19f }, {} }, { 1.50f, 0.19f },
+                    { -0.65f, 0.75f }, -0.55f, 0.80f, 0.70f }
+            };
+            int added = 0;
+            for( int row = 0; row < 7 && added < staticCount; ++row )
+                for( int col = 0; col < 10 && added < staticCount; ++col )
+                {
+                    const vec2 position{ -5.25f + 1.05f * col, -3.15f + 0.95f * row };
+                    bool separated = true;
+                    for( const auto& body : bodies )
+                    {
+                        const float clearance = std::get<circle2>( body.geometry ).radius + 0.17f;
+                        if( LengthSquared( position - body.center ) < clearance * clearance )
+                        {
+                            separated = false;
+                            break;
+                        }
+                    }
+                    if( !separated ) continue;
+                    bodies.push_back( { circle2{ {}, 0.12f }, { position, {} },
+                        position, {}, 0.0f, 0.0f, 0.0f } );
+                    ++added;
+                }
+            check( added == staticCount,
+                "static Schur comparison must contain the requested disjoint obstacles" );
+
+            fluidField2 reference{ static_cast<int>( 12.0f / h ),
+                static_cast<int>( 8.0f / h ), h, { -6.0f, -4.0f } };
+            fluidField2 indexed{ static_cast<int>( 12.0f / h ),
+                static_cast<int>( 8.0f / h ), h, { -6.0f, -4.0f } };
+            for( fluidField2* field : { &reference, &indexed } )
+            {
+                field->setCutCellProjectionEnabled( true );
+                field->setCutCellCoupledProjectionEnabled( true );
+                field->setDisjointAnalyticCutCellEnabled( true );
+                field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
+            }
+            reference.setAnalyticCutCellIndexedBoundaryFacesEnabled( false );
+            std::vector<fluidObstacleForce2> refForces( bodies.size() ), indexedForces( bodies.size() );
+            for( int frame = 0; frame < 3; ++frame )
+            {
+                reference.step( dt, bodies, refForces, 200 );
+                indexed.step( dt, bodies, indexedForces, 200 );
+                const auto& a = reference.getCutCellPressure();
+                const auto& b = indexed.getCutCellPressure();
+                check( a.usedCoupledProjection && b.usedCoupledProjection &&
+                    a.coupledStatus == fluidCoupledPressureStatus2::converged &&
+                    b.coupledStatus == fluidCoupledPressureStatus2::converged &&
+                    a.coupledIterations == b.coupledIterations &&
+                    std::abs( a.coupledRelativeResidual - b.coupledRelativeResidual ) < 1.0e-6f &&
+                    std::abs( a.predictedContinuityRms - b.predictedContinuityRms ) < 1.0e-4f,
+                    "indexed analytic faces must preserve Schur convergence with many static bodies" );
+                check( indexed.getCutCellTransition().usedDisjointAnalyticGeometry &&
+                    reference.getCutCellTransition().usedDisjointAnalyticGeometry,
+                    "indexed analytic differential must remain on the analytic geometry path" );
+                for( std::size_t i = 0; i < bodies.size(); ++i )
+                {
+                    const float scale = 1.0f + Length( refForces[i].force );
+                    check( Length( refForces[i].force - indexedForces[i].force ) < 1.0e-4f * scale &&
+                        std::abs( refForces[i].torque - indexedForces[i].torque ) < 1.0e-4f * scale,
+                        "indexed analytic faces must retain dynamic and static traction" );
+                }
+                const float scale = 1.0f + Length( reference.getFluidMomentum() );
+                check( Length( reference.getFluidMomentum() - indexed.getFluidMomentum() ) <
+                    1.0e-4f * scale, "indexed analytic faces must preserve fluid momentum" );
+                for( std::size_t i = 0; i < 2; ++i )
+                {
+                    bodies[i].transform.position += dt * bodies[i].linearVelocity;
+                    bodies[i].center = bodies[i].transform.position;
+                }
+            }
+            reference.clear();
+            indexed.clear();
+            check( !reference.isAnalyticCutCellIndexedBoundaryFacesEnabled() &&
+                indexed.isAnalyticCutCellIndexedBoundaryFacesEnabled(),
+                "clear must preserve selected analytic boundary indexing mode" );
         }
 }
 
@@ -3239,6 +3332,7 @@ int main()
     checkCachedIc0Differential();
     checkActiveCellIc0SweepDifferential();
     checkCachedSchurLaplacianDifferential();
+    checkIndexedAnalyticBoundaryDifferential();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();
