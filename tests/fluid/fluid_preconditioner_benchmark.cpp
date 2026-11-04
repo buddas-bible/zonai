@@ -34,9 +34,9 @@ double median( std::vector<double> samples )
     return samples[samples.size() / 2];
 }
 
-std::array<fluidShapeObstacle2, 2> makeObstacles( int mode )
+std::vector<fluidShapeObstacle2> makeObstacles( int mode, int staticCount = 0 )
 {
-    std::array<fluidShapeObstacle2, 2> bodies{{
+    std::vector<fluidShapeObstacle2> bodies{
         { circle2{ {}, mode == 2 ? 0.78f : 0.58f },
             { { -0.21f, -0.18f }, {} }, { -0.21f, -0.18f },
             { 0.95f, -0.30f }, 0.70f, 0.35f, 1.10f },
@@ -44,18 +44,39 @@ std::array<fluidShapeObstacle2, 2> makeObstacles( int mode )
             { { mode == 1 ? 1.50f : 0.26f, 0.19f }, {} },
             { mode == 1 ? 1.50f : 0.26f, 0.19f },
             { -0.65f, 0.75f }, -0.55f, 0.80f, 0.70f }
-    }};
+    };
     if( mode == 2 )
     {
         bodies[1].transform.position = { -0.12f, -0.12f };
         bodies[1].center = bodies[1].transform.position;
     }
+    // Disjoint immovable circles exercise Schur scratch cost with increasing
+    // obstacle count without changing the number of movable bodies.
+    for( int row = 0; row < 7 && staticCount > 0; ++row )
+        for( int col = 0; col < 10 && staticCount > 0; ++col )
+        {
+            const vec2 position{ -5.25f + 1.05f * col, -3.15f + 0.95f * row };
+            bool separated = true;
+            for( const auto& body : bodies )
+            {
+                const float clearance = std::get<circle2>( body.geometry ).radius + 0.17f;
+                if( LengthSquared( position - body.center ) < clearance * clearance )
+                {
+                    separated = false;
+                    break;
+                }
+            }
+            if( !separated ) continue;
+            bodies.push_back( { circle2{ {}, 0.12f }, { position, {} }, position,
+                {}, 0.0f, 0.0f, 0.0f } );
+            --staticCount;
+        }
     return bodies;
 }
 
-result measure( float h, int mode, int preconditioner )
+result measure( float h, int mode, int preconditioner, int staticCount = 0 )
 {
-    const auto bodies = makeObstacles( mode );
+    const auto bodies = makeObstacles( mode, staticCount );
     std::vector<double> totalSamples, pressureSamples, iterationSamples, residualSamples;
     std::vector<fluidCoupledPressureTiming2> phaseSamples;
     result stats{};
@@ -74,7 +95,7 @@ result measure( float h, int mode, int preconditioner )
         field.setAnalyticCutCellCachedSchurEdgesEnabled( preconditioner == 4 );
         field.setCutCellPressureTimingEnabled( true );
         field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
-        std::array<fluidObstacleForce2, 2> feedback{};
+        std::vector<fluidObstacleForce2> feedback( bodies.size() );
         const auto start = std::chrono::steady_clock::now();
         field.step( dt, bodies, feedback, 200 );
         const double stepMs = std::chrono::duration<double, std::milli>(
@@ -121,6 +142,26 @@ result measure( float h, int mode, int preconditioner )
 
 int main( int argc, char** argv )
 {
+    const bool staticSweep = argc > 1 && std::string_view( argv[1] ) == "--static-sweep";
+    if( staticSweep )
+    {
+        // Same two dynamic bodies, increasing numbers of disjoint immovable
+        // obstacles. This reports costs rather than asserting FPS thresholds.
+        std::puts( "static_obstacles,cell_m,converged,attempts,pcg_ms,step_ms,"
+            "assembly_ms,operator_ms,preconditioner_ms,iterations,relative_residual,cached_edges" );
+        for( float h : { 0.5f, 0.25f } )
+            for( int staticCount : { 0, 16, 48 } )
+            {
+                const result stats = measure( h, 1, 4, staticCount );
+                std::printf( "%d,%.2f,%d,%d,%.5f,%.5f,%.5f,%.5f,%.5f,%.0f,%.6g,%d\n",
+                    staticCount, h, stats.converged, stats.attempts,
+                    stats.pressureMilliseconds, stats.stepMilliseconds,
+                    stats.phases.assembly, stats.phases.multiply,
+                    stats.phases.preconditioner, stats.iterations,
+                    stats.residual, stats.phases.cachedLaplacianEdges );
+            }
+        return 0;
+    }
     const bool csv = argc > 1 && std::string_view( argv[1] ) == "--csv";
     if( csv )
         std::puts( "geometry,cell_m,preconditioner,converged,attempts,pcg_median_ms,"
