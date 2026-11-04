@@ -3790,11 +3790,20 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     }
 
     auto& response = scratch.response;
-    response.assign( obstacles.size(), {} );
+    response.resize( obstacles.size() );
+    auto& dynamicResponseOwners = scratch.dynamicResponseOwners;
+    dynamicResponseOwners.clear();
+    for( std::size_t i = 0; i < obstacles.size(); ++i )
+        if( obstacles[i].inverseMass > 0.0f || obstacles[i].inverseInertia > 0.0f )
+            dynamicResponseOwners.push_back( static_cast<int>( i ) );
     const auto multiply = [&]( const std::vector<double>& values, std::vector<double>& result )
     {
         std::fill( result.begin(), result.end(), 0.0 );
-        std::fill( response.begin(), response.end(), coupledBodyResponse{} );
+        // Only movable bodies have Schur faces. Static response slots are
+        // never read, so clearing every obstacle on each PCG iteration wastes
+        // work in scenes with many immovable walls.
+        for( int owner : dynamicResponseOwners )
+            response[owner] = {};
         if( cachedSchurEdges )
         {
             for( const coupledPressureEdge& edge : laplacianEdges )
