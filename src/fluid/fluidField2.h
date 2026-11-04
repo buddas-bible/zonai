@@ -457,6 +457,17 @@ public:
         return analyticCutCellCachedSchurEdgesEnabled_;
     }
 
+    // Analytic Cut-cell geometry에서 막힌 MAC face만 Schur B 조립에 방문한다.
+    // 기본 ON. OFF는 전체 내부 face를 다시 검사하는 참조 경로.
+    void setAnalyticCutCellIndexedBoundaryFacesEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellIndexedBoundaryFacesEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellIndexedBoundaryFacesEnabled() const noexcept
+    {
+        return analyticCutCellIndexedBoundaryFacesEnabled_;
+    }
+
     // 벤치마크 전용 PCG 시간 측정. 기본 OFF로 일반 Step에 시계 측정 비용 없음.
     void setCutCellPressureTimingEnabled( bool enabled ) noexcept { cutCellPressureTimingEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellPressureTimingEnabled() const noexcept { return cutCellPressureTimingEnabled_; }
@@ -661,6 +672,10 @@ private:
     std::vector<float> previousCellFluidFraction_;
     std::vector<float> uOpenFraction_;
     std::vector<float> vOpenFraction_;
+    // Exact positive blocked lengths from this step's analytic geometry pass.
+    // U/V entries retain row-major face traversal order for Schur assembly.
+    std::vector<int> analyticUBlockedFaces_;
+    std::vector<int> analyticVBlockedFaces_;
     std::vector<float> uSolidVelocity_;
     std::vector<float> vSolidVelocity_;
     // 압력 반력으로 예상된 추가 blocked-face swept flux (m/s, blocked fraction 포함).
@@ -699,6 +714,7 @@ private:
     bool analyticCutCellCachedIc0Enabled_ = true;
     bool analyticCutCellActiveIc0SweepEnabled_ = true;
     bool analyticCutCellCachedSchurEdgesEnabled_ = true;
+    bool analyticCutCellIndexedBoundaryFacesEnabled_ = true;
     bool cutCellPressureTimingEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
