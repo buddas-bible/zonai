@@ -1282,7 +1282,7 @@ void checkAnalyticPartialCircleUnion()
         !field.getSweptFaceFlux().usedSweptFlux,
         "partial overlap to disjoint transition must invalidate swept volume history" );
 
-    circles[0].transform.position = { 0.23f, 1.45f };
+    circles[0].transform.position = { 1.04f, -0.20f };
     circles[0].center = circles[0].transform.position;
     field.step( dt, circles, reactions, 200 );
     check( !field.getCutCellTransition().usedDisjointAnalyticGeometry &&
