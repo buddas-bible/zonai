@@ -3820,20 +3820,24 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         analyticCutCellIncompleteCholeskyEnabled_;
     pressureMomentum_.usedIncompleteCholesky = useIncompleteCholesky;
     const bool cachedIc0 = useIncompleteCholesky && analyticCutCellCachedIc0Enabled_;
+    const bool activeSweep = cachedIc0 && analyticCutCellActiveIc0SweepEnabled_;
     auto& incompletePivot = scratch.incompletePivot;
     auto& incompleteForward = scratch.incompleteForward;
     auto& incompleteCached = scratch.incompleteCached;
+    auto& incompleteActiveCells = scratch.incompleteActiveCells;
     nextPhase( phase::factorization );
     if( useIncompleteCholesky )
     {
         incompletePivot.assign( rhs.size(), 0.0 );
         incompleteForward.assign( rhs.size(), 0.0 );
         if( cachedIc0 ) incompleteCached.assign( rhs.size(), {} );
+        if( activeSweep ) incompleteActiveCells.clear();
         for( int y = 0; y < height_; ++y )
             for( int xCell = 0; xCell < width_; ++xCell )
             {
                 const int cell = cellIndex( xCell, y );
                 if( cellFluidFraction_[cell] <= 0.0f ) continue;
+                if( activeSweep ) incompleteActiveCells.push_back( cell );
                 const double regularization = std::max( 1.0e-5, diagonal[cell] * 1.0e-3 );
                 double pivot = diagonal[cell] + regularization;
                 if( xCell > 0 )
@@ -3847,6 +3851,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                             auto& coefficients = incompleteCached[cell];
                             coefficients.west = west;
                             coefficients.westOverPivot = west / incompletePivot[cell - 1];
+                            if( activeSweep ) incompleteCached[cell - 1].east = west;
                         }
                     }
                 }
@@ -3861,6 +3866,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                             auto& coefficients = incompleteCached[cell];
                             coefficients.south = south;
                             coefficients.southOverPivot = south / incompletePivot[cell - width_];
+                            if( activeSweep ) incompleteCached[cell - width_].north = south;
                         }
                     }
                 }
@@ -3875,6 +3881,35 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         {
             for( std::size_t i = 0; i < source.size(); ++i )
                 z[i] = source[i] / std::max( 1.0e-8, diagonal[i] );
+            return;
+        }
+        if( activeSweep )
+        {
+            // Each active cell is visited once in row-major order. The face
+            // coefficients were stored when the pivot was assembled, including
+            // east/north weights of the next neighbor. No per-iteration fluid
+            // occupancy test, x/y decoding, or cut-cell lookup is necessary.
+            for( int cell : incompleteActiveCells )
+            {
+                const auto& coefficients = incompleteCached[cell];
+                double value = source[cell];
+                if( coefficients.west != 0.0 )
+                    value += coefficients.westOverPivot * incompleteForward[cell - 1];
+                if( coefficients.south != 0.0 )
+                    value += coefficients.southOverPivot * incompleteForward[cell - width_];
+                incompleteForward[cell] = value;
+            }
+            for( auto it = incompleteActiveCells.rbegin(); it != incompleteActiveCells.rend(); ++it )
+            {
+                const int cell = *it;
+                const auto& coefficients = incompleteCached[cell];
+                double value = incompleteForward[cell];
+                if( coefficients.east != 0.0 )
+                    value += coefficients.east * z[cell + 1];
+                if( coefficients.north != 0.0 )
+                    value += coefficients.north * z[cell + width_];
+                z[cell] = value * coefficients.inversePivot;
+            }
             return;
         }
         if( cachedIc0 )

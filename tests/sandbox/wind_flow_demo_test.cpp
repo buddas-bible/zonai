@@ -79,6 +79,57 @@ void checkCachedIc0WorldDifferential()
         "wind field resize must preserve the selected IC0 benchmark mode" );
 }
 
+void checkActiveIc0WorldDifferential()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo dense{ demoKind::windFlow };
+    rigidBodyDemo active{ demoKind::windFlow };
+    for( rigidBodyDemo* scene : { &dense, &active } )
+    {
+        scene->setWindCutCellProjectionEnabled( true );
+        scene->setWindCutCellCoupledProjectionEnabled( true );
+        scene->setWindDisjointAnalyticEnabled( true );
+        scene->setWindFluidSubstepCount( 4 );
+        scene->setWindSourceEnabled( false );
+        scene->setWindDragCoefficient( 1.5f );
+        const auto shapes = scene->getShapes();
+        scene->getWorld().SetBodyLinearVelocity( shapes[0].bodyHandle, { 0.7f, -0.20f } );
+        scene->getWorld().SetBodyAngularVelocity( shapes[1].bodyHandle, 0.4f );
+        scene->addWindVortex();
+    }
+    dense.setWindActiveIc0SweepEnabled( false );
+    check( !dense.isWindActiveIc0SweepEnabled() && active.isWindActiveIc0SweepEnabled(),
+        "active IC0 World sweep must be independently selectable" );
+
+    for( int frame = 0; frame < 6; ++frame )
+    {
+        dense.step( dt, 8 );
+        active.step( dt, 8 );
+        const auto& a = dense.getWindField()->getCutCellPressure();
+        const auto& b = active.getWindField()->getCutCellPressure();
+        check( a.usedCoupledProjection && b.usedCoupledProjection &&
+            !a.coupledSolveFailed && !b.coupledSolveFailed &&
+            a.coupledStatus == fluidCoupledPressureStatus2::converged &&
+            b.coupledStatus == fluidCoupledPressureStatus2::converged &&
+            a.coupledIterations == b.coupledIterations,
+            "World active sweep and dense IC0 must have matching coupled convergence" );
+        for( std::size_t i = 0; i < dense.getShapes().size(); ++i )
+        {
+            const bodyId lhs = dense.getShapes()[i].bodyHandle;
+            const bodyId rhs = active.getShapes()[i].bodyHandle;
+            check( near( dense.getWorld().GetBodyTransform( lhs ).position,
+                    active.getWorld().GetBodyTransform( rhs ).position, 1.0e-3f ) &&
+                near( dense.getWorld().GetBodyLinearVelocity( lhs ),
+                    active.getWorld().GetBodyLinearVelocity( rhs ), 1.0e-3f ),
+                "active-cell IC0 must preserve synchronized World body motion" );
+        }
+    }
+    dense.configureWindField( 28, 16, 0.5f );
+    active.configureWindField( 28, 16, 0.5f );
+    check( !dense.isWindActiveIc0SweepEnabled() && active.isWindActiveIc0SweepEnabled(),
+        "wind grid resize must preserve the active-cell IC0 sweep choice" );
+}
+
 void checkWorldWindStepProfiling()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1124,6 +1175,7 @@ int main()
     checkFluidCoupling();
     checkWorldWindStepProfiling();
     checkCachedIc0WorldDifferential();
+    checkActiveIc0WorldDifferential();
     checkMovingSolidReaction();
     checkSynchronizedWindCoupling();
     checkPressurePredictedWorldVelocity();

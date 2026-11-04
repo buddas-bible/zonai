@@ -432,6 +432,17 @@ public:
         return analyticCutCellCachedIc0Enabled_;
     }
 
+    // Cache IC(0) apply의 비활성 셀과 매-반복 x/y 경계 분기를 제거.
+    // 기본 ON. OFF는 기존 격자 전체 순회 cached IC(0) 경로로 성능 비교.
+    void setAnalyticCutCellActiveIc0SweepEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellActiveIc0SweepEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellActiveIc0SweepEnabled() const noexcept
+    {
+        return analyticCutCellActiveIc0SweepEnabled_;
+    }
+
     // 벤치마크 전용 PCG 시간 측정. 기본 OFF로 일반 Step에 시계 측정 비용 없음.
     void setCutCellPressureTimingEnabled( bool enabled ) noexcept { cutCellPressureTimingEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellPressureTimingEnabled() const noexcept { return cutCellPressureTimingEnabled_; }
@@ -582,6 +593,8 @@ private:
     {
         double west = 0.0;
         double south = 0.0;
+        double east = 0.0;
+        double north = 0.0;
         double westOverPivot = 0.0;
         double southOverPivot = 0.0;
         double inversePivot = 0.0;
@@ -594,6 +607,7 @@ private:
         std::vector<double> incompletePivot;
         std::vector<double> incompleteForward;
         std::vector<incompleteCachedCoefficients> incompleteCached;
+        std::vector<int> incompleteActiveCells;
         std::vector<double> rhs;
         std::vector<double> x;
         std::vector<double> residual;
@@ -661,6 +675,7 @@ private:
     bool cutCellCoupledProjectionEnabled_ = false;
     bool analyticCutCellIncompleteCholeskyEnabled_ = true;
     bool analyticCutCellCachedIc0Enabled_ = true;
+    bool analyticCutCellActiveIc0SweepEnabled_ = true;
     bool cutCellPressureTimingEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
