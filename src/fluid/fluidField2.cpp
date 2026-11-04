@@ -2541,6 +2541,40 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                     rot2::FromRadians( startAngles[i] + angularSpeeds[i] * timeStep * alpha );
             }
 
+            const auto disjointShapes = disjointAnalyticCutCellEnabled_
+                ? BuildDisjointAnalyticShapes( intermediate ) : std::vector<analyticDisjointShape2>{};
+            if( !disjointShapes.empty() )
+            {
+                const double h = cellSize_;
+                const float intervalDt = timeStep / samples;
+                const auto accumulateFace = [&]( bool vertical, int x, int y )
+                {
+                    const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+                    const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+                    double flux = 0.0;
+                    for( std::size_t i = 0; i < disjointShapes.size(); ++i )
+                    {
+                        const auto clipped = ClipDisjointShapeFace(
+                            disjointShapes[i], vertical, normal, low, low + h );
+                        if( clipped.length <= 0.0 ) continue;
+                        const vec2 point = vertical
+                            ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
+                            : vec2{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
+                        const vec2 velocity = linearSpeeds[i] +
+                            Cross( angularSpeeds[i], point - intermediate[i].transform.position );
+                        flux += clipped.length * ( vertical ? velocity.x : velocity.y );
+                    }
+                    const float swept = intervalDt * static_cast<float>( flux );
+                    if( vertical ) sweptU[uIndex( x, y )] += swept;
+                    else sweptV[vIndex( x, y )] += swept;
+                };
+                for( int y = 0; y < height_; ++y )
+                    for( int x = 1; x < width_; ++x ) accumulateFace( true, x, y );
+                for( int y = 1; y < height_; ++y )
+                    for( int x = 0; x < width_; ++x ) accumulateFace( false, x, y );
+                continue;
+            }
+
             analyticFluidCircle circle{};
             analyticFluidPolygon polygon{};
             analyticFluidCapsule capsule{};
