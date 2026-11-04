@@ -69,7 +69,8 @@ result measure( float h, int mode, int preconditioner )
         field.setCutCellCoupledProjectionEnabled( true );
         field.setDisjointAnalyticCutCellEnabled( true );
         field.setAnalyticCutCellIncompleteCholeskyEnabled( preconditioner != 0 );
-        field.setAnalyticCutCellCachedIc0Enabled( preconditioner == 2 );
+        field.setAnalyticCutCellCachedIc0Enabled( preconditioner >= 2 );
+        field.setAnalyticCutCellActiveIc0SweepEnabled( preconditioner == 3 );
         field.setCutCellPressureTimingEnabled( true );
         field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
         std::array<fluidObstacleForce2, 2> feedback{};
@@ -123,7 +124,8 @@ int main( int argc, char** argv )
             "step_median_ms,iterations_median,relative_residual_median,pcg_speedup_ic0_over_jacobi,"
             "assembly_ms,factorization_ms,operator_ms,preconditioner_ms,vector_ms,validation_ms,output_ms,"
             "operator_calls,preconditioner_calls,"
-            "cached_ic0_vs_reference_speedup,cached_preconditioner_vs_reference_speedup" );
+            "cached_ic0_vs_reference_speedup,cached_preconditioner_vs_reference_speedup,"
+            "active_ic0_vs_dense_speedup,active_preconditioner_vs_dense_speedup" );
     else
         std::puts( "Analytic Cut-cell Schur PCG, cold start, unit density, 200 iterations max. "
             "Medians are informative, not CI performance gates." );
@@ -134,18 +136,25 @@ int main( int argc, char** argv )
         {
             const result jacobi = measure( h, mode, 0 );
             const result reference = measure( h, mode, 1 );
-            const result cached = measure( h, mode, 2 );
+            const result dense = measure( h, mode, 2 );
+            const result active = measure( h, mode, 3 );
             // Only compare timings when both modes have fully converged.
             // A fail-closed Jacobi step cannot be used to claim a speedup.
             const bool comparable = reference.converged == reference.attempts &&
-                cached.converged == cached.attempts;
+                active.converged == active.attempts;
+            const bool denseComparable = dense.converged == dense.attempts &&
+                active.converged == active.attempts;
             const double speedup = jacobi.converged == jacobi.attempts &&
-                cached.converged == cached.attempts && cached.pressureMilliseconds > 0.0
-                ? jacobi.pressureMilliseconds / cached.pressureMilliseconds : 0.0;
-            const double cachedSpeedup = comparable && cached.pressureMilliseconds > 0.0
-                ? reference.pressureMilliseconds / cached.pressureMilliseconds : 0.0;
-            const double preconditionerSpeedup = comparable && cached.phases.preconditioner > 0.0
-                ? reference.phases.preconditioner / cached.phases.preconditioner : 0.0;
+                active.converged == active.attempts && active.pressureMilliseconds > 0.0
+                ? jacobi.pressureMilliseconds / active.pressureMilliseconds : 0.0;
+            const double cachedSpeedup = comparable && active.pressureMilliseconds > 0.0
+                ? reference.pressureMilliseconds / active.pressureMilliseconds : 0.0;
+            const double preconditionerSpeedup = comparable && active.phases.preconditioner > 0.0
+                ? reference.phases.preconditioner / active.phases.preconditioner : 0.0;
+            const double activeSpeedup = denseComparable && active.pressureMilliseconds > 0.0
+                ? dense.pressureMilliseconds / active.pressureMilliseconds : 0.0;
+            const double activePreconditionerSpeedup = denseComparable && active.phases.preconditioner > 0.0
+                ? dense.phases.preconditioner / active.phases.preconditioner : 0.0;
             const auto print = [&]( const char* name, const result& stats )
             {
                 const auto& p = stats.phases;
@@ -155,10 +164,11 @@ int main( int argc, char** argv )
                         labels[mode], h, name, stats.converged, stats.attempts,
                         stats.pressureMilliseconds, stats.stepMilliseconds, stats.iterations,
                         stats.residual, speedup );
-                    std::printf( ",%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%d,%d,%.4f,%.4f\n",
+                    std::printf( ",%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%d,%d,%.4f,%.4f,%.4f,%.4f\n",
                         p.assembly, p.factorization, p.multiply, p.preconditioner,
                         p.vector, p.validation, p.output, p.matrixProducts,
-                        p.preconditionerApplications, cachedSpeedup, preconditionerSpeedup );
+                        p.preconditionerApplications, cachedSpeedup, preconditionerSpeedup,
+                        activeSpeedup, activePreconditionerSpeedup );
                 }
                 else
                     std::printf( "%s h=%.2f %s %d/%d converged: PCG %.4f ms, A*v %.4f ms (%d), "
@@ -171,6 +181,7 @@ int main( int argc, char** argv )
             };
             print( "Jacobi", jacobi );
             print( "IC0-reference", reference );
-            print( "IC0-cached", cached );
+            print( "IC0-cached-dense", dense );
+            print( "IC0-active-sweep", active );
         }
 }
