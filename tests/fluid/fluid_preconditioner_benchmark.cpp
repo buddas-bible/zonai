@@ -76,7 +76,8 @@ std::vector<fluidShapeObstacle2> makeObstacles( int mode, int staticCount = 0 )
 }
 
 result measure( float h, int mode, int preconditioner, int staticCount = 0,
-    bool indexedBoundaries = true, bool boundedAreas = true, bool geometryTiming = false )
+    bool indexedBoundaries = true, bool boundedAreas = true, bool geometryTiming = false,
+    bool boundedFaceClipping = true )
 {
     const auto bodies = makeObstacles( mode, staticCount );
     std::vector<double> totalSamples, pressureSamples, iterationSamples, residualSamples, geometrySamples;
@@ -97,6 +98,7 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
         field.setAnalyticCutCellCachedSchurEdgesEnabled( preconditioner == 4 );
         field.setAnalyticCutCellIndexedBoundaryFacesEnabled( indexedBoundaries );
         field.setAnalyticCutCellBoundedCellAreasEnabled( boundedAreas );
+        field.setAnalyticCutCellBoundedFaceClippingEnabled( boundedFaceClipping );
         field.setStepTimingEnabled( geometryTiming );
         field.setCutCellPressureTimingEnabled( true );
         field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
@@ -149,6 +151,24 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
 
 int main( int argc, char** argv )
 {
+    const bool faceSweep = argc > 1 && std::string_view( argv[1] ) == "--face-sweep";
+    if( faceSweep )
+    {
+        std::puts( "static_obstacles,cell_m,face_mode,converged,attempts,geometry_ms,"
+            "pcg_ms,step_ms,iterations,relative_residual" );
+        for( float h : { 0.5f, 0.25f } )
+            for( int count : { 0, 16, 48 } )
+                for( bool bounded : { false, true } )
+                {
+                    const result stats = measure( h, 1, 4, count, true, true, true, bounded );
+                    std::printf( "%d,%.2f,%s,%d,%d,%.5f,%.5f,%.5f,%.0f,%.6g\n",
+                        count, h, bounded ? "bounded" : "reference",
+                        stats.converged, stats.attempts, stats.geometryMilliseconds,
+                        stats.pressureMilliseconds, stats.stepMilliseconds,
+                        stats.iterations, stats.residual );
+                }
+        return 0;
+    }
     const bool areaSweep = argc > 1 && std::string_view( argv[1] ) == "--area-sweep";
     if( areaSweep )
     {
