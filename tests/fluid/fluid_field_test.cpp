@@ -1537,6 +1537,13 @@ void checkCachedSchurLaplacianDifferential()
                     { mode == 1 ? 1.50f : 0.26f, 0.19f },
                     { -0.65f, 0.75f }, -0.55f, 0.80f, 0.70f }
             }};
+            if( mode == 1 )
+            {
+                // Mixed static/dynamic bodies must retain coupled pressure
+                // convergence and immovable obstacle feedback.
+                bodies[1].inverseMass = 0.0f;
+                bodies[1].inverseInertia = 0.0f;
+            }
             if( mode == 2 )
             {
                 bodies[1].transform.position = { -0.12f, -0.12f };

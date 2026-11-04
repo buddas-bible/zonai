@@ -3554,8 +3554,12 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         // Cut-cell은 static/kinematic pressure traction도 feedback에 남긴다.
         if( !cutCell && !dynamic ) return;
         const double torque = Cross( point - obstacle.center, force );
-        faces.push_back( { cell, owner, force.x, force.y, torque } );
+        // Static/kinematic boundaries have zero inverse mass and inertia,
+        // so they contribute nothing to B M_body^-1 B^T. Keep their
+        // pressure traction in the separate feedback path, but do not
+        // revisit them in every PCG matrix product.
         if( !dynamic ) return;
+        faces.push_back( { cell, owner, force.x, force.y, torque } );
         ++dynamicBoundaryFaces;
         // Diagonal-only (Jacobi) preconditioner. Same-body cross terms are
         // ignored in the preconditioner, not in the Schur matrix product.
