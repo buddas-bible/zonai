@@ -1598,6 +1598,21 @@ void checkCachedSchurLaplacianDifferential()
                     Length( reference.sampleVelocity( { -1.05f, 0.14f } ) -
                         cached.sampleVelocity( { -1.05f, 0.14f } ) ) < 1.0e-4f,
                     "cached Schur edges must not alter fluid momentum and velocity" );
+                if( mode == 1 )
+                {
+                    // A static obstacle may become dynamic and return to
+                    // static without stale Schur response entering the solve.
+                    if( frame == 1 )
+                    {
+                        bodies[1].inverseMass = 0.8f;
+                        bodies[1].inverseInertia = 0.7f;
+                    }
+                    else if( frame == 2 )
+                    {
+                        bodies[1].inverseMass = 0.0f;
+                        bodies[1].inverseInertia = 0.0f;
+                    }
+                }
                 for( fluidShapeObstacle2& body : bodies )
                 {
                     body.transform.position += dt * body.linearVelocity;
