@@ -1386,6 +1386,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     const bool analyticCircle = windField_->isAnalyticCircleCutCellEnabled();
     const bool analyticPolygon = windField_->isAnalyticPolygonCutCellEnabled();
     const bool analyticRoundedPolygon = windField_->isAnalyticRoundedPolygonCutCellEnabled();
+    const bool disjointAnalytic = windField_->isDisjointAnalyticCutCellEnabled();
     const bool analyticCapsule = windField_->isAnalyticCapsuleCutCellEnabled();
     const int cutCellSamples = windField_->getCutCellSampleCount();
     const bool cutCellCoupled = windField_->isCutCellCoupledProjectionEnabled();
@@ -1402,6 +1403,7 @@ void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
     windField_->setAnalyticCircleCutCellEnabled( analyticCircle );
     windField_->setAnalyticPolygonCutCellEnabled( analyticPolygon );
     windField_->setAnalyticRoundedPolygonCutCellEnabled( analyticRoundedPolygon );
+    windField_->setDisjointAnalyticCutCellEnabled( disjointAnalytic );
     windField_->setAnalyticCapsuleCutCellEnabled( analyticCapsule );
     windField_->setCutCellCoupledProjectionEnabled( cutCellCoupled );
     windField_->setConservativeAdvectionEnabled( conservative );

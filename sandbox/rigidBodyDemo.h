@@ -300,6 +300,14 @@ public:
     {
         return windField_ && windField_->isAnalyticRoundedPolygonCutCellEnabled();
     }
+    void setWindDisjointAnalyticEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setDisjointAnalyticCutCellEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindDisjointAnalyticEnabled() const noexcept
+    {
+        return windField_ && windField_->isDisjointAnalyticCutCellEnabled();
+    }
 
     // World의 기존 다각형 상자를 재생성하여 vertex radius를 전환한다.
     // Rounded Polygon 테스트에서만 사용. 다른 Body는 그대로 유지한다.

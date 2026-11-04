@@ -6,6 +6,9 @@
 #include <limits>
 #include <stdexcept>
 #include <numbers>
+#include <type_traits>
+#include <utility>
+#include <variant>
 
 namespace zonai
 {
@@ -726,6 +729,85 @@ double RoundedPolygonRectangleArea( const analyticFluidRoundedPolygon& polygon,
     return std::clamp( area, 0.0, ( x1 - x0 ) * ( y1 - y0 ) );
 }
 
+// Analytic union of *disjoint* shapes. AABB separation is deliberately stricter
+// than shape separation: if bounds meet or overlap, sampled union owns the frame.
+struct analyticDisjointShape2
+{
+    std::variant<analyticFluidCircle, analyticFluidPolygon,
+        analyticFluidCapsule, analyticFluidRoundedPolygon> geometry{};
+    aabb2 bounds{};
+};
+
+std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
+    std::span<const fluidShapeObstacle2> obstacles )
+{
+    if( obstacles.size() < 2 ) return {};
+    std::vector<analyticDisjointShape2> shapes;
+    shapes.reserve( obstacles.size() );
+    for( const fluidShapeObstacle2& obstacle : obstacles )
+    {
+        if( !IsValidFluidObstacle( obstacle ) ) return {};
+        const auto single = std::span<const fluidShapeObstacle2>( &obstacle, 1 );
+        analyticDisjointShape2 analytic{};
+        analyticFluidCircle circle{};
+        analyticFluidCapsule capsule{};
+        analyticFluidPolygon polygon{};
+        analyticFluidRoundedPolygon rounded{};
+        if( TryGetAnalyticCircle( single, circle ) ) analytic.geometry = circle;
+        else if( TryGetAnalyticCapsule( single, capsule ) ) analytic.geometry = capsule;
+        else if( TryGetAnalyticPolygon( single, polygon ) ) analytic.geometry = polygon;
+        else if( TryGetAnalyticRoundedPolygon( single, rounded ) ) analytic.geometry = rounded;
+        else return {};
+
+        analytic.bounds = ComputeShapeAABB( obstacle.geometry, obstacle.transform );
+        if( !IsValidAABB( analytic.bounds ) ) return {};
+        // Consecutive geometric snapshots must not add overlapping solid volumes.
+        for( const auto& previous : shapes )
+            if( Overlaps( previous.bounds, analytic.bounds ) ) return {};
+        shapes.push_back( std::move( analytic ) );
+    }
+    return shapes;
+}
+
+double DisjointShapeRectangleArea( const analyticDisjointShape2& shape,
+    double x0, double y0, double x1, double y1 )
+{
+    if( x1 <= shape.bounds.min.x || x0 >= shape.bounds.max.x ||
+        y1 <= shape.bounds.min.y || y0 >= shape.bounds.max.y ) return 0.0;
+    return std::visit( [&]( const auto& geometry ) -> double
+    {
+        using T = std::remove_cvref_t<decltype( geometry )>;
+        if constexpr( std::is_same_v<T, analyticFluidCircle> )
+            return CircleRectangleArea( geometry, x0, y0, x1, y1 );
+        else if constexpr( std::is_same_v<T, analyticFluidPolygon> )
+            return ConvexPolygonRectangleArea( geometry, x0, y0, x1, y1 );
+        else if constexpr( std::is_same_v<T, analyticFluidCapsule> )
+            return CapsuleRectangleArea( geometry, x0, y0, x1, y1 );
+        else return RoundedPolygonRectangleArea( geometry, x0, y0, x1, y1 );
+    }, shape.geometry );
+}
+
+analyticCircleInterval ClipDisjointShapeFace( const analyticDisjointShape2& shape,
+    bool vertical, double coordinate, double low, double high )
+{
+    if( vertical
+        ? ( coordinate < shape.bounds.min.x || coordinate > shape.bounds.max.x ||
+            high <= shape.bounds.min.y || low >= shape.bounds.max.y )
+        : ( coordinate < shape.bounds.min.y || coordinate > shape.bounds.max.y ||
+            high <= shape.bounds.min.x || low >= shape.bounds.max.x ) ) return {};
+    return std::visit( [&]( const auto& geometry ) -> analyticCircleInterval
+    {
+        using T = std::remove_cvref_t<decltype( geometry )>;
+        if constexpr( std::is_same_v<T, analyticFluidCircle> )
+            return ClipCircleFace( geometry, vertical, coordinate, low, high );
+        else if constexpr( std::is_same_v<T, analyticFluidPolygon> )
+            return ClipPolygonFace( geometry, vertical, coordinate, low, high );
+        else if constexpr( std::is_same_v<T, analyticFluidCapsule> )
+            return ClipCapsuleFace( geometry, vertical, coordinate, low, high );
+        else return ClipRoundedPolygonFace( geometry, vertical, coordinate, low, high );
+    }, shape.geometry );
+}
+
 } // namespace
 
 fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
@@ -790,6 +872,7 @@ void fluidField2::invalidateObstacleHistory() noexcept
 {
     hasCutCellHistory_ = false;
     volumeSourceValid_ = false;
+    previousDisjointAnalyticGeometry_ = false;
     previousObstacles_.clear();
     sweptFaceFlux_ = {};
     cutCellPressure_ = {};
@@ -820,6 +903,13 @@ void fluidField2::setAnalyticRoundedPolygonCutCellEnabled( bool enabled ) noexce
 {
     if( analyticRoundedPolygonCutCellEnabled_ == enabled ) return;
     analyticRoundedPolygonCutCellEnabled_ = enabled;
+    invalidateObstacleHistory();
+}
+
+void fluidField2::setDisjointAnalyticCutCellEnabled( bool enabled ) noexcept
+{
+    if( disjointAnalyticCutCellEnabled_ == enabled ) return;
+    disjointAnalyticCutCellEnabled_ = enabled;
     invalidateObstacleHistory();
 }
 
@@ -857,6 +947,7 @@ void fluidField2::clear() noexcept
     cutCellQueue_.clear();
     hasCutCellHistory_ = false;
     volumeSourceValid_ = false;
+    previousDisjointAnalyticGeometry_ = false;
     std::fill( uOpenFraction_.begin(), uOpenFraction_.end(), 1.0f );
     std::fill( vOpenFraction_.begin(), vOpenFraction_.end(), 1.0f );
     for( int y = 0; y < height_; ++y )
@@ -1188,6 +1279,14 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
 {
     // 이진 cell-center mask와 별도로 NxN sub-cell / face당 N점 표본을 계산.
     // 선택적 가중 압력 경로에서 면 개방율과 강체 속도를 직접 사용한다.
+    // Disjoint analytic and sampled union use different area discretizations.
+    // A transition between them is a new geometry snapshot, not a swept ΔV.
+    const auto disjointShapes = disjointAnalyticCutCellEnabled_
+        ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+    const bool disjointGeometry = !disjointShapes.empty();
+    if( hasCutCellHistory_ && disjointGeometry != previousDisjointAnalyticGeometry_ )
+        invalidateObstacleHistory();
+    previousDisjointAnalyticGeometry_ = disjointGeometry;
     const int sampleCount = cutCellSampleCount_;
     const float inverseCount = 1.0f / sampleCount;
     const float inverseCellSamples = inverseCount * inverseCount;
@@ -1195,6 +1294,9 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     volumeSourceValid_ = hasCutCellHistory_;
     hasCutCellHistory_ = true;
     cutCellTransition_ = {};
+    cutCellTransition_.usedDisjointAnalyticGeometry = disjointGeometry;
+    cutCellTransition_.disjointAnalyticShapes =
+        disjointGeometry ? static_cast<int>( disjointShapes.size() ) : 0;
     std::fill( uSolidVelocity_.begin(), uSolidVelocity_.end(), 0.0f );
     std::fill( vSolidVelocity_.begin(), vSolidVelocity_.end(), 0.0f );
 
@@ -1211,6 +1313,64 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     }
     else
     {
+        if( disjointGeometry )
+        {
+            const double h = cellSize_;
+            const double inverseArea = 1.0 / ( h * h );
+            for( int y = 0; y < height_; ++y )
+                for( int x = 0; x < width_; ++x )
+                {
+                    const double left = origin_.x + x * h;
+                    const double bottom = origin_.y + y * h;
+                    double covered = 0.0;
+                    for( const auto& shape : disjointShapes )
+                        covered += DisjointShapeRectangleArea( shape, left, bottom, left + h, bottom + h );
+                    cellFluidFraction_[cellIndex( x, y )] = static_cast<float>(
+                        std::clamp( 1.0 - covered * inverseArea, 0.0, 1.0 ) );
+                }
+            const auto updateFace = [&]( bool vertical, int x, int y )
+            {
+                const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+                const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+                double blockedLength = 0.0;
+                double velocitySum = 0.0;
+                for( std::size_t i = 0; i < disjointShapes.size(); ++i )
+                {
+                    const auto interval = ClipDisjointShapeFace(
+                        disjointShapes[i], vertical, normal, low, low + h );
+                    if( interval.length <= 0.0 ) continue;
+                    const vec2 point = vertical
+                        ? vec2{ static_cast<float>( normal ), static_cast<float>( interval.midpoint ) }
+                        : vec2{ static_cast<float>( interval.midpoint ), static_cast<float>( normal ) };
+                    const auto& body = obstacles[i];
+                    const vec2 velocity = body.linearVelocity +
+                        Cross( body.angularVelocity, point - body.center );
+                    blockedLength += interval.length;
+                    velocitySum += interval.length * ( vertical ? velocity.x : velocity.y );
+                }
+                const int face = vertical ? uIndex( x, y ) : vIndex( x, y );
+                const float open = static_cast<float>(
+                    std::clamp( 1.0 - blockedLength / h, 0.0, 1.0 ) );
+                const float speed = blockedLength > 0.0
+                    ? static_cast<float>( velocitySum / blockedLength ) : 0.0f;
+                if( vertical )
+                {
+                    uOpenFraction_[face] = open;
+                    uSolidVelocity_[face] = speed;
+                }
+                else
+                {
+                    vOpenFraction_[face] = open;
+                    vSolidVelocity_[face] = speed;
+                }
+            };
+            for( int y = 0; y < height_; ++y )
+                for( int x = 1; x < width_; ++x ) updateFace( true, x, y );
+            for( int y = 1; y < height_; ++y )
+                for( int x = 0; x < width_; ++x ) updateFace( false, x, y );
+        }
+        else
+        {
         analyticFluidCircle circle{};
         analyticFluidPolygon polygon{};
         analyticFluidCapsule capsule{};
@@ -1409,6 +1569,7 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                 vOpenFraction_[vIndex( x, y )] = 1.0f - blocked * inverseCount;
                 if( blocked > 0 ) vSolidVelocity_[vIndex( x, y )] /= blocked;
             }
+        }
         }
     }
 
@@ -2121,6 +2282,53 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
     double changedSquared = 0.0;
     int boundaryFaces = 0;
     int partialFaces = 0;
+    const auto disjointShapes = disjointAnalyticCutCellEnabled_
+        ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+    if( !disjointShapes.empty() )
+    {
+        const double h = cellSize_;
+        const auto updateFace = [&]( bool vertical, int x, int y )
+        {
+            const int face = vertical ? uIndex( x, y ) : vIndex( x, y );
+            const float open = vertical ? uOpenFraction_[face] : vOpenFraction_[face];
+            if( open >= 1.0f ) return;
+            const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+            const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+            double length = 0.0;
+            double sum = 0.0;
+            for( std::size_t i = 0; i < disjointShapes.size(); ++i )
+            {
+                const auto clipped = ClipDisjointShapeFace(
+                    disjointShapes[i], vertical, normal, low, low + h );
+                if( clipped.length <= 0.0 ) continue;
+                const vec2 point = vertical
+                    ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
+                    : vec2{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
+                const vec2 velocity = predicted[i].linear +
+                    Cross( predicted[i].angular, point - obstacles[i].center );
+                length += clipped.length;
+                sum += clipped.length * ( vertical ? velocity.x : velocity.y );
+            }
+            if( length <= 0.0 ) return;
+            float& previous = vertical ? uSolidVelocity_[face] : vSolidVelocity_[face];
+            const float next = static_cast<float>( sum / length );
+            const double change = static_cast<double>( next ) - previous;
+            changedSquared += change * change;
+            // Weighted mean is exactly equivalent to the sum of owner-specific Bᵀ fluxes.
+            const float flux = ( 1.0f - open ) * static_cast<float>( change );
+            if( vertical ) pressureUSolidFlux_[face] = flux;
+            else pressureVSolidFlux_[face] = flux;
+            previous = next;
+            ++boundaryFaces;
+            if( open > 0.0f ) ++partialFaces;
+        };
+        for( int y = 0; y < height_; ++y )
+            for( int x = 1; x < width_; ++x ) updateFace( true, x, y );
+        for( int y = 1; y < height_; ++y )
+            for( int x = 0; x < width_; ++x ) updateFace( false, x, y );
+    }
+    else
+    {
     analyticFluidCircle circle{};
     analyticFluidPolygon polygon{};
     analyticFluidCapsule capsule{};
@@ -2228,6 +2436,7 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
             if( vOpenFraction_[face] > 0.0f ) ++partialFaces;
         }
     }
+    }
 
     // 완전히 막힌 MAC 면만 u_/v_로 복사한다. 부분 개방 면의 유체 성분은 그대로 둔다.
     applyCutCellBoundaries();
@@ -2333,6 +2542,40 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                     start.transform.position + alpha * ( finish.transform.position - start.transform.position );
                 intermediate[i].transform.rotation =
                     rot2::FromRadians( startAngles[i] + angularSpeeds[i] * timeStep * alpha );
+            }
+
+            const auto disjointShapes = disjointAnalyticCutCellEnabled_
+                ? BuildDisjointAnalyticShapes( intermediate ) : std::vector<analyticDisjointShape2>{};
+            if( !disjointShapes.empty() )
+            {
+                const double h = cellSize_;
+                const float intervalDt = timeStep / samples;
+                const auto accumulateFace = [&]( bool vertical, int x, int y )
+                {
+                    const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+                    const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+                    double flux = 0.0;
+                    for( std::size_t i = 0; i < disjointShapes.size(); ++i )
+                    {
+                        const auto clipped = ClipDisjointShapeFace(
+                            disjointShapes[i], vertical, normal, low, low + h );
+                        if( clipped.length <= 0.0 ) continue;
+                        const vec2 point = vertical
+                            ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
+                            : vec2{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
+                        const vec2 velocity = linearSpeeds[i] +
+                            Cross( angularSpeeds[i], point - intermediate[i].transform.position );
+                        flux += clipped.length * ( vertical ? velocity.x : velocity.y );
+                    }
+                    const float swept = intervalDt * static_cast<float>( flux );
+                    if( vertical ) sweptU[uIndex( x, y )] += swept;
+                    else sweptV[vIndex( x, y )] += swept;
+                };
+                for( int y = 0; y < height_; ++y )
+                    for( int x = 1; x < width_; ++x ) accumulateFace( true, x, y );
+                for( int y = 1; y < height_; ++y )
+                    for( int x = 0; x < width_; ++x ) accumulateFace( false, x, y );
+                continue;
             }
 
             analyticFluidCircle circle{};
@@ -2956,6 +3199,42 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     };
     if( cutCell )
     {
+        const auto disjointShapes = disjointAnalyticCutCellEnabled_
+            ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+        if( !disjointShapes.empty() )
+        {
+            const double h = cellSize_;
+            const auto addClippedFace = [&]( bool vertical, int x, int y )
+            {
+                const int a = vertical ? cellIndex( x - 1, y ) : cellIndex( x, y - 1 );
+                const int b = cellIndex( x, y );
+                if( cellFluidFraction_[a] <= 0.0f && cellFluidFraction_[b] <= 0.0f ) return;
+                const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+                const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+                for( std::size_t owner = 0; owner < disjointShapes.size(); ++owner )
+                {
+                    const auto clipped = ClipDisjointShapeFace(
+                        disjointShapes[owner], vertical, normal, low, low + h );
+                    if( clipped.length <= 0.0 ) continue;
+                    const vec2 point = vertical
+                        ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
+                        : vec2{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
+                    const vec2 force = vertical
+                        ? vec2{ static_cast<float>( clipped.length ), 0.0f }
+                        : vec2{ 0.0f, static_cast<float>( clipped.length ) };
+                    if( cellFluidFraction_[a] > 0.0f )
+                        addBoundary( a, static_cast<int>( owner ), force, point );
+                    if( cellFluidFraction_[b] > 0.0f )
+                        addBoundary( b, static_cast<int>( owner ), -force, point );
+                }
+            };
+            for( int y = 0; y < height_; ++y )
+                for( int x = 1; x < width_; ++x ) addClippedFace( true, x, y );
+            for( int y = 1; y < height_; ++y )
+                for( int x = 0; x < width_; ++x ) addClippedFace( false, x, y );
+        }
+        else
+        {
         analyticFluidCircle circle{};
         analyticFluidPolygon polygon{};
         analyticFluidCapsule capsule{};
@@ -3072,6 +3351,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     if( cellFluidFraction_[top] > 0.0f ) addBoundary( top, owner, -force, point );
                 }
             }
+        }
         }
     }
     else

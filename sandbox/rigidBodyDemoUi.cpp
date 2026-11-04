@@ -984,8 +984,12 @@ void rigidBodyDemoUi::drawExperimentControls()
         bool analyticCapsule = isWindAnalyticCapsuleEnabled();
         if( ImGui::Checkbox( "Capsule 경계 분석적 적분 (실험)###WindAnalyticCapsule", &analyticCapsule ) )
             setWindAnalyticCapsuleEnabled( analyticCapsule );
+        bool disjointAnalytic = isWindDisjointAnalyticEnabled();
+        if( ImGui::Checkbox( "분리된 여러 장애물 분석적 Cut-cell (실험)###WindDisjointAnalytic",
+                &disjointAnalytic ) )
+            setWindDisjointAnalyticEnabled( disjointAnalytic );
         ImGui::EndDisabled();
-        ImGui::TextDisabled( "분석적 경계는 단일 Circle/Capsule/Sharp/Rounded Polygon 전용. 다중 장애물은 표본 방식." );
+        ImGui::TextDisabled( "다중 분석은 AABB가 모두 분리된 경우만 사용. 겹치는 영역은 4x4/8x8 표본으로 복귀." );
         bool cutCellCoupled = isWindCutCellCoupledProjectionEnabled();
         ImGui::BeginDisabled( !isWindCutCellProjectionEnabled() );
         if( ImGui::Checkbox( "Cut-cell 질량·관성 연성 PCG (실험)###WindCutCellCoupled", &cutCellCoupled ) )
@@ -1139,7 +1143,10 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::Text( "이웃 복원/0 대체: %d / %d", transition.extrapolatedFaces, transition.fallbackFaces );
             ImGui::Text( "이산 유체 체적 변화: %+.4f m³", transition.fluidVolumeDelta );
             const fluidCutCellTransition2& cut = field->getCutCellTransition();
-            ImGui::SeparatorText( "부분 점유 기하 (4x4 표본)" );
+            ImGui::SeparatorText( "부분 점유 기하" );
+            ImGui::Text( "분리된 다중 분석: %s / Shape %d개",
+                cut.usedDisjointAnalyticGeometry ? "사용" : "미사용(표본 또는 단일)",
+                cut.disjointAnalyticShapes );
             ImGui::Text( "유체 체적: %.4f m³ / 변화 %+.4f m³", cut.fluidVolume, cut.volumeDelta() );
             ImGui::Text( "가린/다시 열린 체적: %.4f / %.4f m³", cut.coveredVolume, cut.releasedVolume );
             ImGui::Text( "부분 셀/개방 U/V face: %d / %d / %d", cut.partialCells, cut.partialUFaces, cut.partialVFaces );

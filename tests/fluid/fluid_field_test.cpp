@@ -1001,6 +1001,156 @@ void checkCoupledCutCellAdjointContinuity()
         "legacy cut-cell pressure must not pretend to predict coupled volume response" );
 }
 
+void checkDisjointAnalyticMultiShapeCutCell()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr float h = 0.5f;
+    constexpr float domainArea = 24.0f * 16.0f * h * h;
+    fluidField2 field{ 24, 16, h, { -6.0f, -4.0f } };
+    field.setCutCellProjectionEnabled( true );
+    field.setDisjointAnalyticCutCellEnabled( true );
+    polygon2 rounded = MakeBox( { 0.34f, 0.29f } );
+    rounded.radius = 0.17f;
+    std::array<fluidShapeObstacle2, 4> objects{{
+        { circle2{ {}, 0.42f }, { { -3.4f, -1.15f }, {} },
+            { -3.4f, -1.15f }, {}, 0.0f },
+        { capsule2{ { -0.4f, 0.0f }, { 0.4f, 0.0f }, 0.23f },
+            { { -1.5f, 1.1f }, {} }, { -1.5f, 1.1f }, {}, 0.0f },
+        { MakeBox( { 0.46f, 0.31f } ),
+            { { 1.4f, -1.1f }, rot2::FromRadians( 0.32f ) },
+            { 1.4f, -1.1f }, {}, 0.0f },
+        { rounded, { { 3.65f, 1.0f }, rot2::FromRadians( 0.21f ) },
+            { 3.65f, 1.0f }, {}, 0.0f }
+    }};
+    std::array<fluidObstacleForce2, 4> forces{};
+    const float circleArea = std::numbers::pi_v<float> * 0.42f * 0.42f;
+    const float capsuleArea = 2.0f * 0.23f * 0.8f +
+        std::numbers::pi_v<float> * 0.23f * 0.23f;
+    const float sharpArea = 4.0f * 0.46f * 0.31f;
+    const float roundedArea = 4.0f * 0.34f * 0.29f +
+        4.0f * ( 0.34f + 0.29f ) * 0.17f +
+        std::numbers::pi_v<float> * 0.17f * 0.17f;
+    const float expectedFluidArea = domainArea -
+        ( circleArea + capsuleArea + sharpArea + roundedArea );
+
+    field.step( dt, objects, forces, 160 );
+    const auto& first = field.getCutCellTransition();
+    check( first.usedDisjointAnalyticGeometry && first.disjointAnalyticShapes == 4 &&
+        std::abs( first.fluidVolume - expectedFluidArea ) < 1.0e-4f &&
+        !field.getCutCellPressure().hasVolumeHistory,
+        "separated mixed circle/capsule/sharp/rounded shapes must have exact additive union area" );
+
+    field.setCutCellSampleCount( 8 );
+    field.step( dt, objects, forces, 160 );
+    check( field.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        std::abs( field.getCutCellTransition().fluidVolume - expectedFluidArea ) < 1.0e-4f &&
+        !field.getCutCellPressure().hasVolumeHistory,
+        "disjoint analytic union must ignore 4x4/8x8 spatial resolution with clean history" );
+
+    // Across a moving frame the obstacle AABBs remain separated.
+    objects[0].transform.position.x += 0.07f;
+    objects[0].center = objects[0].transform.position;
+    objects[2].transform.rotation = rot2::FromRadians( 0.41f );
+    field.step( dt, objects, forces, 160 );
+    check( field.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        std::abs( field.getCutCellTransition().fluidVolume - expectedFluidArea ) < 1.0e-4f &&
+        field.getCutCellPressure().hasVolumeHistory &&
+        field.getSweptFaceFlux().usedSweptFlux &&
+        field.getSweptFaceFlux().totalAbsoluteFlux > 0.0f &&
+        std::isfinite( field.getSweptFaceFlux().geometryMismatch ),
+        "moving and rotating separated shapes must use owner-specific swept face integration" );
+
+    // Sharp Polygon may lie exactly on a grid line. Inclusive boundary
+    // clipping must agree with the previous single-shape analytic convention.
+    fluidField2 aligned{ 24, 16, h, { -6.0f, -4.0f } };
+    aligned.setCutCellProjectionEnabled( true );
+    aligned.setDisjointAnalyticCutCellEnabled( true );
+    std::array<fluidShapeObstacle2, 2> alignedShapes{{
+        { MakeBox( { 0.5f, 0.5f } ), { { 0.0f, 0.0f }, {} },
+            {}, {}, 0.0f },
+        { circle2{ {}, 0.25f }, { { 3.0f, 1.0f }, {} },
+            { 3.0f, 1.0f }, {}, 0.0f }
+    }};
+    std::array<fluidObstacleForce2, 2> alignedFeedback{};
+    aligned.step( dt, alignedShapes, alignedFeedback, 160 );
+    check( aligned.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        std::abs( aligned.getCutCellTransition().fluidVolume -
+            ( domainArea - 1.0f - std::numbers::pi_v<float> * 0.25f * 0.25f ) ) < 1.0e-4f &&
+        aligned.getUFaceOpenFraction( 13, 8 ) < 2.0e-5f &&
+        aligned.getVFaceOpenFraction( 12, 9 ) < 2.0e-5f,
+        "multi analytic clipping must include grid-aligned sharp polygon boundary faces" );
+
+    // Two disjoint circles can block different segments of *the same* U face.
+    // Their face averages and Schur pressure owners must not be merged into body 0.
+    fluidField2 shared{ 24, 16, h, { -6.0f, -4.0f } };
+    shared.setCutCellProjectionEnabled( true );
+    shared.setDisjointAnalyticCutCellEnabled( true );
+    constexpr float radius = 0.13f;
+    std::array<fluidShapeObstacle2, 2> circles{{
+        { circle2{ {}, radius }, { { 0.0f, 0.08f }, {} },
+            { 0.0f, 0.08f }, { 1.0f, 0.0f }, 0.0f },
+        { circle2{ {}, radius }, { { 0.0f, 0.42f }, {} },
+            { 0.0f, 0.42f }, { -0.2f, 0.0f }, 0.0f }
+    }};
+    std::array<fluidObstacleForce2, 2> reactions{};
+    shared.step( dt, circles, reactions, 160 );
+    const float blocked = ( radius + 0.08f ) + ( 0.50f - ( 0.42f - radius ) );
+    check( shared.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        std::abs( shared.getCutCellTransition().fluidVolume -
+            ( domainArea - 2.0f * std::numbers::pi_v<float> * radius * radius ) ) < 1.0e-4f &&
+        std::abs( shared.getUFaceOpenFraction( 12, 8 ) - ( 1.0f - blocked / h ) ) < 2.0e-5f &&
+        std::abs( shared.getUFaceSolidVelocity( 12, 8 ) - 0.4f ) < 2.0e-5f,
+        "two distinct body owners on the same MAC face must share exact blocked length and weighted velocity" );
+
+    shared.setCutCellCoupledProjectionEnabled( true );
+    circles[0].inverseMass = 0.5f;
+    circles[1].inverseMass = 0.8f;
+    circles[0].inverseInertia = 1.3f;
+    circles[1].inverseInertia = 1.1f;
+    shared.addVelocity( { -1.1f, 0.25f }, { 1.3f, -0.4f }, 1.4f );
+    shared.step( dt, circles, reactions, 200 );
+    const auto& pressure = shared.getCutCellPressure();
+    check( pressure.usedCoupledProjection && !pressure.coupledSolveFailed &&
+        pressure.coupledStatus == fluidCoupledPressureStatus2::converged &&
+        std::isfinite( pressure.predictedContinuityRms ) &&
+        std::abs( pressure.predictedContinuityRms - pressure.pressureResidual ) <
+            2.0e-3f + 0.1f * pressure.pressureResidual,
+        "same-face disjoint owners must retain Schur B/B-transpose blocked flux consistency" );
+
+    // When AABBs begin overlapping, fallback to the sampled union. Do not
+    // misinterpret an analytic->sampled occupancy change as swept displacement.
+    circles[1].transform.position.y = 0.20f;
+    circles[1].center.y = 0.20f;
+    shared.step( dt, circles, reactions, 200 );
+    fluidField2 sampled{ 24, 16, h, { -6.0f, -4.0f } };
+    sampled.setCutCellProjectionEnabled( true );
+    sampled.step( dt, circles, reactions, 200 );
+    check( !shared.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        shared.getCutCellTransition().disjointAnalyticShapes == 0 &&
+        !shared.getCutCellPressure().hasVolumeHistory &&
+        !shared.getSweptFaceFlux().usedSweptFlux &&
+        std::abs( shared.getCutCellTransition().fluidVolume -
+            sampled.getCutCellTransition().fluidVolume ) < 1.0e-5f,
+        "overlapping AABBs must fall back to sampled union and invalidate geometry history" );
+
+    circles[1].transform.position.y = 0.42f;
+    circles[1].center.y = 0.42f;
+    shared.step( dt, circles, reactions, 200 );
+    check( shared.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        !shared.getCutCellPressure().hasVolumeHistory &&
+        !shared.getSweptFaceFlux().usedSweptFlux,
+        "returning to separated AABBs must not create artificial swept volume" );
+
+    shared.setDisjointAnalyticCutCellEnabled( false );
+    shared.step( dt, circles, reactions, 200 );
+    check( !shared.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        !shared.getCutCellPressure().hasVolumeHistory,
+        "disabling multi analytic option must restore original sampled geometry without stale history" );
+    shared.clear();
+    check( !shared.isDisjointAnalyticCutCellEnabled(),
+        "clear must preserve an explicitly disabled disjoint multi analytic mode" );
+}
+
 void checkAnalyticRoundedPolygonCutCell()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -2085,6 +2235,7 @@ int main()
     checkAnalyticSharpPolygonCutCell();
     checkAnalyticSingleCapsuleCutCell();
     checkAnalyticRoundedPolygonCutCell();
+    checkDisjointAnalyticMultiShapeCutCell();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();

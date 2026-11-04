@@ -136,6 +136,9 @@ struct fluidCutCellTransition2
     int partialCells = 0;
     int partialUFaces = 0;
     int partialVFaces = 0;
+    // 다중 장애물 분석 경로를 실제 사용했는지 관측(구성/AABB 겹침 시 false).
+    bool usedDisjointAnalyticGeometry = false;
+    int disjointAnalyticShapes = 0;
 
     [[nodiscard]] float volumeDelta() const noexcept { return fluidVolume - previousFluidVolume; }
 };
@@ -285,6 +288,14 @@ public:
     [[nodiscard]] bool isAnalyticRoundedPolygonCutCellEnabled() const noexcept
     {
         return analyticRoundedPolygonCutCellEnabled_;
+    }
+
+    // 단일 Shape의 별도 선택과 무관한 다중 분석적 경로. 전 Shape의 AABB가
+    // 서로 분리된 경우에만 정확한 점유/면 클리핑, 겹치면 기존 표본 합집합 사용.
+    void setDisjointAnalyticCutCellEnabled( bool enabled ) noexcept;
+    [[nodiscard]] bool isDisjointAnalyticCutCellEnabled() const noexcept
+    {
+        return disjointAnalyticCutCellEnabled_;
     }
 
     // 실험적 Cut-cell/Body 유효질량 연립 PCG. 기본 OFF로 기존 Jacobi 경로 보존.
@@ -497,6 +508,8 @@ private:
     bool analyticPolygonCutCellEnabled_ = false;
     bool analyticCapsuleCutCellEnabled_ = false;
     bool analyticRoundedPolygonCutCellEnabled_ = false;
+    bool disjointAnalyticCutCellEnabled_ = false;
+    bool previousDisjointAnalyticGeometry_ = false;
     bool cutCellProjectionEnabled_ = false;
     bool cutCellCoupledProjectionEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
