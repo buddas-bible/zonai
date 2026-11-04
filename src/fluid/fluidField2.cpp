@@ -1276,6 +1276,14 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
 {
     // 이진 cell-center mask와 별도로 NxN sub-cell / face당 N점 표본을 계산.
     // 선택적 가중 압력 경로에서 면 개방율과 강체 속도를 직접 사용한다.
+    // Disjoint analytic and sampled union use different area discretizations.
+    // A transition between them is a new geometry snapshot, not a swept ΔV.
+    const auto disjointShapes = disjointAnalyticCutCellEnabled_
+        ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+    const bool disjointGeometry = !disjointShapes.empty();
+    if( hasCutCellHistory_ && disjointGeometry != previousDisjointAnalyticGeometry_ )
+        invalidateObstacleHistory();
+    previousDisjointAnalyticGeometry_ = disjointGeometry;
     const int sampleCount = cutCellSampleCount_;
     const float inverseCount = 1.0f / sampleCount;
     const float inverseCellSamples = inverseCount * inverseCount;
@@ -1283,6 +1291,9 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     volumeSourceValid_ = hasCutCellHistory_;
     hasCutCellHistory_ = true;
     cutCellTransition_ = {};
+    cutCellTransition_.usedDisjointAnalyticGeometry = disjointGeometry;
+    cutCellTransition_.disjointAnalyticShapes =
+        disjointGeometry ? static_cast<int>( disjointShapes.size() ) : 0;
     std::fill( uSolidVelocity_.begin(), uSolidVelocity_.end(), 0.0f );
     std::fill( vSolidVelocity_.begin(), vSolidVelocity_.end(), 0.0f );
 
@@ -1299,6 +1310,64 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     }
     else
     {
+        if( disjointGeometry )
+        {
+            const double h = cellSize_;
+            const double inverseArea = 1.0 / ( h * h );
+            for( int y = 0; y < height_; ++y )
+                for( int x = 0; x < width_; ++x )
+                {
+                    const double left = origin_.x + x * h;
+                    const double bottom = origin_.y + y * h;
+                    double covered = 0.0;
+                    for( const auto& shape : disjointShapes )
+                        covered += DisjointShapeRectangleArea( shape, left, bottom, left + h, bottom + h );
+                    cellFluidFraction_[cellIndex( x, y )] = static_cast<float>(
+                        std::clamp( 1.0 - covered * inverseArea, 0.0, 1.0 ) );
+                }
+            const auto updateFace = [&]( bool vertical, int x, int y )
+            {
+                const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+                const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+                double blockedLength = 0.0;
+                double velocitySum = 0.0;
+                for( std::size_t i = 0; i < disjointShapes.size(); ++i )
+                {
+                    const auto interval = ClipDisjointShapeFace(
+                        disjointShapes[i], vertical, normal, low, low + h );
+                    if( interval.length <= 0.0 ) continue;
+                    const vec2 point = vertical
+                        ? vec2{ static_cast<float>( normal ), static_cast<float>( interval.midpoint ) }
+                        : vec2{ static_cast<float>( interval.midpoint ), static_cast<float>( normal ) };
+                    const auto& body = obstacles[i];
+                    const vec2 velocity = body.linearVelocity +
+                        Cross( body.angularVelocity, point - body.center );
+                    blockedLength += interval.length;
+                    velocitySum += interval.length * ( vertical ? velocity.x : velocity.y );
+                }
+                const int face = vertical ? uIndex( x, y ) : vIndex( x, y );
+                const float open = static_cast<float>(
+                    std::clamp( 1.0 - blockedLength / h, 0.0, 1.0 ) );
+                const float speed = blockedLength > 0.0
+                    ? static_cast<float>( velocitySum / blockedLength ) : 0.0f;
+                if( vertical )
+                {
+                    uOpenFraction_[face] = open;
+                    uSolidVelocity_[face] = speed;
+                }
+                else
+                {
+                    vOpenFraction_[face] = open;
+                    vSolidVelocity_[face] = speed;
+                }
+            };
+            for( int y = 0; y < height_; ++y )
+                for( int x = 1; x < width_; ++x ) updateFace( true, x, y );
+            for( int y = 1; y < height_; ++y )
+                for( int x = 0; x < width_; ++x ) updateFace( false, x, y );
+        }
+        else
+        {
         analyticFluidCircle circle{};
         analyticFluidPolygon polygon{};
         analyticFluidCapsule capsule{};
@@ -1497,6 +1566,7 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                 vOpenFraction_[vIndex( x, y )] = 1.0f - blocked * inverseCount;
                 if( blocked > 0 ) vSolidVelocity_[vIndex( x, y )] /= blocked;
             }
+        }
         }
     }
 
