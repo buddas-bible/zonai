@@ -157,6 +157,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --face-sweep
 
+      # Compare 0/16/48 static obstacles with all-shape vs movable-only
+      # coupled Schur boundary assembly, on the same Release runner.
+      - name: Sample movable-only Schur boundaries (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --mobility-sweep
+
       # A real headless Sandbox World interleave, 8 World substeps and 1/2/4/8 Fluid steps.
       # Frame medians are informational; never gate CI on runner-dependent wall time.
       - name: Sample Wind multi-substep stage profile (Windows Release, informational)
