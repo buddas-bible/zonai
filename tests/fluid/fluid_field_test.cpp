@@ -1434,6 +1434,93 @@ void checkCachedIc0Differential()
         }
 }
 
+void checkActiveCellIc0SweepDifferential()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr vec2 origin{ -6.0f, -4.0f };
+    for( float h : { 0.5f, 0.25f } )
+        for( int mode = 0; mode < 3; ++mode )
+        {
+            std::array<fluidShapeObstacle2, 2> bodies{{
+                { circle2{ {}, mode == 2 ? 0.78f : 0.58f },
+                    { { -0.21f, -0.18f }, {} }, { -0.21f, -0.18f },
+                    { 0.95f, -0.30f }, 0.70f, 0.35f, 1.10f },
+                { circle2{ {}, mode == 2 ? 0.18f : 0.58f },
+                    { { mode == 1 ? 1.50f : 0.26f, 0.19f }, {} },
+                    { mode == 1 ? 1.50f : 0.26f, 0.19f },
+                    { -0.65f, 0.75f }, -0.55f, 0.80f, 0.70f }
+            }};
+            if( mode == 2 )
+            {
+                bodies[1].transform.position = { -0.12f, -0.12f };
+                bodies[1].center = bodies[1].transform.position;
+            }
+            fluidField2 dense{ static_cast<int>( 12.0f / h ),
+                static_cast<int>( 8.0f / h ), h, origin };
+            fluidField2 active{ static_cast<int>( 12.0f / h ),
+                static_cast<int>( 8.0f / h ), h, origin };
+            check( active.isAnalyticCutCellActiveIc0SweepEnabled(),
+                "active-cell IC0 sweep should be the default" );
+            for( fluidField2* field : { &dense, &active } )
+            {
+                field->setCutCellProjectionEnabled( true );
+                field->setCutCellCoupledProjectionEnabled( true );
+                field->setDisjointAnalyticCutCellEnabled( true );
+                field->setCutCellPressureTimingEnabled( true );
+                field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
+            }
+            dense.setAnalyticCutCellActiveIc0SweepEnabled( false );
+            std::array<fluidObstacleForce2, 2> denseForces{}, activeForces{};
+            // Recompute the active-cell schedule from each changed cut-cell
+            // geometry. Previously solid cells cannot be carried over.
+            for( int frame = 0; frame < 4; ++frame )
+            {
+                dense.step( dt, bodies, denseForces, 200 );
+                active.step( dt, bodies, activeForces, 200 );
+                const auto& a = dense.getCutCellPressure();
+                const auto& b = active.getCutCellPressure();
+                check( a.usedCoupledProjection && b.usedCoupledProjection &&
+                    a.coupledStatus == fluidCoupledPressureStatus2::converged &&
+                    b.coupledStatus == fluidCoupledPressureStatus2::converged &&
+                    a.usedIncompleteCholesky && b.usedIncompleteCholesky &&
+                    a.hasAnalyticImpulseBudget && b.hasAnalyticImpulseBudget &&
+                    a.coupledIterations == b.coupledIterations &&
+                    a.coupledTiming.matrixProducts == b.coupledTiming.matrixProducts &&
+                    a.coupledRelativeResidual <= 1.1e-5f &&
+                    b.coupledRelativeResidual <= 1.1e-5f,
+                    "dense and active-cell IC0 must converge with the same PCG workload" );
+                check( std::abs( a.coupledRelativeResidual - b.coupledRelativeResidual ) < 1.0e-6f &&
+                    std::abs( a.predictedContinuityRms - b.predictedContinuityRms ) < 2.0e-4f &&
+                    std::abs( a.pressureResidual - b.pressureResidual ) < 2.0e-4f,
+                    "active-cell IC0 must retain true pressure residual and continuity" );
+                for( std::size_t i = 0; i < bodies.size(); ++i )
+                {
+                    const float scale = 1.0f + Length( denseForces[i].force );
+                    check( Length( denseForces[i].force - activeForces[i].force ) < 1.0e-3f * scale &&
+                        std::abs( denseForces[i].torque - activeForces[i].torque ) < 1.0e-3f * scale,
+                        "active-cell IC0 must preserve individual body pressure feedback" );
+                }
+                const float massScale = 1.0f + Length( dense.getFluidMomentum() );
+                check( Length( dense.getFluidMomentum() - active.getFluidMomentum() ) < 1.0e-3f * massScale &&
+                    Length( dense.sampleVelocity( { -1.05f, 0.14f } ) -
+                        active.sampleVelocity( { -1.05f, 0.14f } ) ) < 1.0e-3f,
+                    "active-cell IC0 must preserve fluid velocities and momentum" );
+                for( fluidShapeObstacle2& body : bodies )
+                {
+                    body.transform.position += dt * body.linearVelocity;
+                    body.center = body.transform.position;
+                }
+            }
+            dense.clear();
+            active.clear();
+            check( !dense.isAnalyticCutCellActiveIc0SweepEnabled() &&
+                active.isAnalyticCutCellActiveIc0SweepEnabled() &&
+                dense.getCutCellPressure().coupledTiming.total == 0.0 &&
+                active.getCutCellPressure().coupledTiming.total == 0.0,
+                "clear must preserve the selected active sweep mode and discard old data" );
+        }
+}
+
 void checkAnalyticCutCellPressureImpulseBudget()
 {
     constexpr vec2 origin{ -6.0f, -4.0f };
@@ -3043,6 +3130,7 @@ int main()
     checkAnalyticCutCellPressureImpulseBudget();
     checkAnalyticCutCellPreconditionerComparison();
     checkCachedIc0Differential();
+    checkActiveCellIc0SweepDifferential();
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();
