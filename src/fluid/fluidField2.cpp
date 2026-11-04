@@ -3228,6 +3228,7 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
         fluidCoupledPressureStatus2::notRequested;
     cutCellPressure_.coupledIterations = coupled ? pressureMomentum_.coupledIterations : 0;
     cutCellPressure_.coupledRelativeResidual = coupled ? pressureMomentum_.coupledRelativeResidual : 0.0f;
+    cutCellPressure_.usedIncompleteCholesky = coupled && pressureMomentum_.usedIncompleteCholesky;
     cutCellPressure_.coupledSolveFailed = coupled && !solvedCoupled &&
         cutCellPressure_.coupledStatus != fluidCoupledPressureStatus2::noBoundary;
     const float coupledPressureResidual = pressureMomentum_.coupledFinalResidualRms;
@@ -3740,11 +3741,88 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     z.assign( rhs.size(), 0.0 );
     direction.assign( rhs.size(), 0.0 );
     product.assign( rhs.size(), 0.0 );
+
+    // Zero-fill incomplete LDL^T on the 5-point cut-cell Laplacian plus the
+    // existing diagonal body Schur approximation. The full A = L + B M^-1 B^T
+    // stays unchanged in multiply(), so this cannot hide the true residual.
+    // The small positive shift protects isolated Neumann pockets and tiny pivots.
+    const bool useIncompleteCholesky = cutCell && cutCellTransition_.usedDisjointAnalyticGeometry;
+    pressureMomentum_.usedIncompleteCholesky = useIncompleteCholesky;
+    auto& incompletePivot = scratch.incompletePivot;
+    auto& incompleteForward = scratch.incompleteForward;
+    if( useIncompleteCholesky )
+    {
+        incompletePivot.assign( rhs.size(), 0.0 );
+        incompleteForward.assign( rhs.size(), 0.0 );
+        for( int y = 0; y < height_; ++y )
+            for( int xCell = 0; xCell < width_; ++xCell )
+            {
+                const int cell = cellIndex( xCell, y );
+                if( cellFluidFraction_[cell] <= 0.0f ) continue;
+                const double regularization = std::max( 1.0e-5, diagonal[cell] * 1.0e-3 );
+                double pivot = diagonal[cell] + regularization;
+                if( xCell > 0 )
+                {
+                    const double west = cutCellUOpen( xCell, y );
+                    if( west > 0.0 ) pivot -= west * west / incompletePivot[cell - 1];
+                }
+                if( y > 0 )
+                {
+                    const double south = cutCellVOpen( xCell, y );
+                    if( south > 0.0 ) pivot -= south * south / incompletePivot[cell - width_];
+                }
+                incompletePivot[cell] = std::max( regularization, pivot );
+            }
+    }
+    const auto applyPreconditioner = [&]( const std::vector<double>& source )
+    {
+        if( !useIncompleteCholesky )
+        {
+            for( std::size_t i = 0; i < source.size(); ++i )
+                z[i] = source[i] / std::max( 1.0e-8, diagonal[i] );
+            return;
+        }
+        // Forward solve L*y=r (unit lower triangular, west/south neighbors).
+        for( int y = 0; y < height_; ++y )
+            for( int xCell = 0; xCell < width_; ++xCell )
+            {
+                const int cell = cellIndex( xCell, y );
+                if( cellFluidFraction_[cell] <= 0.0f ) continue;
+                double value = source[cell];
+                if( xCell > 0 )
+                {
+                    const double west = cutCellUOpen( xCell, y );
+                    if( west > 0.0 )
+                        value += west * incompleteForward[cell - 1] / incompletePivot[cell - 1];
+                }
+                if( y > 0 )
+                {
+                    const double south = cutCellVOpen( xCell, y );
+                    if( south > 0.0 )
+                        value += south * incompleteForward[cell - width_] / incompletePivot[cell - width_];
+                }
+                incompleteForward[cell] = value;
+            }
+        // Backward solve D*L^T*z=y (east/north neighbors).
+        for( int y = height_ - 1; y >= 0; --y )
+            for( int xCell = width_ - 1; xCell >= 0; --xCell )
+            {
+                const int cell = cellIndex( xCell, y );
+                if( cellFluidFraction_[cell] <= 0.0f ) continue;
+                double value = incompleteForward[cell];
+                if( xCell + 1 < width_ )
+                    value += cutCellUOpen( xCell + 1, y ) * z[cell + 1];
+                if( y + 1 < height_ )
+                    value += cutCellVOpen( xCell, y + 1 ) * z[cell + width_];
+                z[cell] = value / incompletePivot[cell];
+            }
+    };
+
+    applyPreconditioner( residual );
     double rz = 0.0, squared = 0.0;
     for( std::size_t i = 0; i < rhs.size(); ++i )
     {
         if( cutCell ? cellFluidFraction_[i] <= 0.0f : solidOwner_[i] >= 0 ) continue;
-        z[i] = residual[i] / std::max( 1.0e-8, diagonal[i] );
         direction[i] = z[i];
         rz += residual[i] * z[i];
         squared += residual[i] * residual[i];
@@ -3776,12 +3854,10 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         if( !std::isfinite( squared ) )
             return fail( fluidCoupledPressureStatus2::numericalBreakdown );
         if( squared <= tolerance ) break;
+        applyPreconditioner( residual );
         double nextRz = 0.0;
         for( std::size_t i = 0; i < rhs.size(); ++i )
-        {
-            z[i] = residual[i] / std::max( 1.0e-8, diagonal[i] );
             nextRz += residual[i] * z[i];
-        }
         if( !std::isfinite( nextRz ) || rz <= 0.0 )
             return fail( fluidCoupledPressureStatus2::numericalBreakdown );
         const double beta = nextRz / rz;

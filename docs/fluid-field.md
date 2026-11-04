@@ -462,6 +462,18 @@ Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들�
 
 **중요한 한계:** 이 진단은 압력 투영 **한 단계의 이산 충격량 상쇄**만 검증한다. 개별 유체 질량의 cut-cell volume 가중 관성, 이류·점성·drag, swept 이동, 월드 Contact/Joint, 외부 연결이나 완전한 FSI 에너지 수지까지 평가하지 않는다. 매우 작은 잔차가 물리 엔진 전체의 운동량 보존을 증명하지는 않는다. 압력 솔버/강체 반력 알고리즘 자체는 변경하지 않는다.
 
+## Part 13w — 분석적 Cut-cell Schur PCG의 IC(0) 전처리
+
+고해상도(0.25m)에서 두 Circle의 부분 교차를 입력했을 때 기존 대각 Jacobi-PCG가 200회 반복 한도에 도달한 사례를 개선하기 위해, **다중 Shape 분석적 Cut-cell 경로에만** 0-fill incomplete LDLᵀ를 전처리기로 적용한다. 이는 원래 Schur 행렬이나 수렴 기준의 변경이 아니라 PCG의 전처리 단계 교체다.
+
+- Cut-cell 압력 행렬의 5-point 열린 face 계수 (-a_U, -a_V)와 기존 Schur 대각 추정값으로 west/south 이웃만 쓰는 불완전 LDLᵀ를 구축하고, 각 반복에서 forward/backward 두 번의 격자 순회를 수행한다. Body Schur의 비국소 항은 **전처리기에서만 생략**하며 실제 A*p에는 모두 포함한다.
+- 작은 양의 diagonal shift와 pivot 하한으로 고립된 유체 포켓, 닫힌 외벽 Neumann null-space의 불안정한 pivot을 보호한다. 실제 A, RHS, 상대 잔차 종료 한계(약 1e-5), 최대 반복 200은 기존과 같고, 마지막에는 실제 b-A*p 잔차를 재계산한다. 실패하면 강체에 압력 반력을 주지 않는 정책을 유지한다.
+- IC(0)는 다중 분석적 Cut-cell 선택 경로에서만 사용한다. 분리/완전 포함/부분 교차 Circle이 포함된다. 표본 기반 Cut-cell과 기존 Binary MAC PCG는 Jacobi를 유지한다.
+- coupledPressureScratch의 incompletePivot과 incompleteForward를 재사용하므로 반복 중 새 버퍼를 할당하지 않는다. getCutCellPressure().usedIncompleteCholesky와 Sandbox UI의 전처리기 표기로 확인할 수 있다.
+- 회귀는 부분 교차 Circle h=0.25m 및 0.5m, dt=1/60 및 1/120 조건과 분리/완전 포함 모드의 진짜 PCG 잔차 및 압력 충격량 장부의 교환 잔차를 검사한다.
+
+**한계:** IC(0)는 Jacobi보다 한 반복당 연산이 늘어난다. 전체 실행 시간이 모든 조건에서 감소하거나 FSI 전체 보존을 보장하는 것은 아니며, 다중 유체 포켓과 더 큰 격자에는 별도 성능 검증이 필요하다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.

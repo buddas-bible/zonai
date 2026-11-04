@@ -808,6 +808,7 @@ void checkCutCellCoupledPressure()
     coupled.step( dt, std::span<const fluidShapeObstacle2>( &moving, 1 ), feedback, 200 );
     const fluidCutCellPressure2 stats = coupled.getCutCellPressure();
     check( stats.usedCoupledProjection && !stats.coupledSolveFailed &&
+        !stats.usedIncompleteCholesky &&
         stats.coupledStatus == fluidCoupledPressureStatus2::converged &&
         stats.coupledRelativeResidual < 1.1e-5f && stats.activeCells > 0 &&
         std::isfinite( stats.pressureResidual ) &&
@@ -1231,8 +1232,11 @@ void checkAnalyticCutCellPressureImpulseBudget()
                     LengthSquared( reactions[1].force ) == 0.0f &&
                     reactions[0].torque == 0.0f && reactions[1].torque == 0.0f )
                 {
-                    // Higher grid resolution can hit the existing 200-iteration cap.
-                    // A failed Schur solve must not inject rigid momentum or publish a ledger.
+                    // Keep a diagnostic if the new preconditioner still hits the cap.
+                    std::fprintf( stderr,
+                        "IC0 iteration limit: mode=%d h=%.3f dt=%.6f rel=%.6g iterations=%d\n",
+                        geometryMode, h, dt, projection.coupledRelativeResidual,
+                        projection.coupledIterations );
                     ++iterationLimitCases;
                     continue;
                 }
@@ -1253,6 +1257,10 @@ void checkAnalyticCutCellPressureImpulseBudget()
                     continue;
                 }
                 ++convergedModes[geometryMode];
+                check( projection.usedIncompleteCholesky &&
+                    projection.coupledIterations > 0 && projection.coupledIterations < 200 &&
+                    projection.coupledRelativeResidual < 1.01e-5f,
+                    "analytic Cut-cell PCG must converge within 200 iterations using IC(0)" );
 
                 const vec2 expected = dt * ( reactions[0].force + reactions[1].force );
                 const float scale = 1.0f + Length( budget.fluid ) +
@@ -1287,12 +1295,9 @@ void checkAnalyticCutCellPressureImpulseBudget()
                     "clear must reset analytic cut-cell pressure impulse diagnostics" );
             }
 
-    check( unavailableCases == 0 &&
-        convergedModes[0] > 0 && convergedModes[1] > 0 && convergedModes[2] > 0,
-        "each analytic union mode must converge at least once and audit its pressure exchange" );
-    // A capped iterationLimit is a separate solver convergence target, not a
-    // fabricated momentum exchange. The failure path above checks zero feedback.
-    (void)iterationLimitCases;
+    check( unavailableCases == 0 && iterationLimitCases == 0 &&
+        convergedModes[0] == 4 && convergedModes[1] == 4 && convergedModes[2] == 4,
+        "IC(0) must converge for all 2-circle modes at both grid sizes and time steps" );
 
     // Failed PCG and sampled geometry must not claim a valid analytic pressure audit.
     const std::array<fluidShapeObstacle2, 2> touching{{
@@ -1319,6 +1324,9 @@ void checkAnalyticCutCellPressureImpulseBudget()
         }
         field.step( 1.0f / 60.0f, inputs, forces, scenario == 0 ? 1 : 200 );
         const auto& pressure = field.getCutCellPressure();
+        check( scenario == 1 ? !pressure.usedIncompleteCholesky :
+            ( scenario == 2 ? !pressure.usedIncompleteCholesky : pressure.usedIncompleteCholesky ),
+            "IC(0) must be limited to an attempted analytic coupled pressure solve" );
         check( !pressure.hasAnalyticImpulseBudget &&
             LengthSquared( pressure.impulse.fluid ) == 0.0f &&
             LengthSquared( pressure.impulse.solid ) == 0.0f &&

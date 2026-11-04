@@ -1124,8 +1124,10 @@ void rigidBodyDemoUi::drawExperimentControls()
                     case fluidCoupledPressureStatus2::invalidPressure: status = "압력값 오류"; break;
                     default: break;
                     }
-                    ImGui::Text( "Cut-cell 강체 결합: %s / PCG %d회 (상대 %.3e)",
-                        status, projection.coupledIterations, projection.coupledRelativeResidual );
+                    ImGui::Text( "Cut-cell 강체 결합: %s / PCG %d회 (%s, 상대 %.3e)",
+                        status, projection.coupledIterations,
+                        projection.usedIncompleteCholesky ? "IC(0)" : "Jacobi",
+                        projection.coupledRelativeResidual );
                     ImGui::Text( "동기화된 경계: %d / 부분 개방 %d face",
                         projection.synchronizedBoundaryFaces, projection.synchronizedPartialFaces );
                     ImGui::Text( "예측 연속성 잔차 RMS: %.4e /s / 압력 잔차 %.4e /s",
