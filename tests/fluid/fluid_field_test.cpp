@@ -1150,10 +1150,10 @@ void checkDisjointAnalyticMultiShapeCutCell()
             2.0e-3f + 0.1f * pressure.pressureResidual,
         "same-face disjoint owners must retain Schur B/B-transpose blocked flux consistency" );
 
-    // Exactly tangent circles are excluded by the strict overlap tolerance.
+    // Slightly intersecting circles inside the tolerance must use sampled union.
     // Do not misinterpret an analytic->sampled transition as swept displacement.
-    circles[1].transform.position.y = 0.34f;
-    circles[1].center.y = 0.34f;
+    circles[1].transform.position.y = 0.339999f;
+    circles[1].center.y = 0.339999f;
     shared.step( dt, circles, reactions, 200 );
     fluidField2 sampled{ 24, 16, h, { -6.0f, -4.0f } };
     sampled.setCutCellProjectionEnabled( true );
@@ -1164,7 +1164,7 @@ void checkDisjointAnalyticMultiShapeCutCell()
         !shared.getSweptFaceFlux().usedSweptFlux &&
         std::abs( shared.getCutCellTransition().fluidVolume -
             sampled.getCutCellTransition().fluidVolume ) < 1.0e-5f,
-        "tangent circles must fall back to sampled union and invalidate geometry history" );
+        "near-tangent circles must fall back to sampled union and invalidate geometry history" );
 
     circles[1].transform.position.y = 0.42f;
     circles[1].center.y = 0.42f;
@@ -1284,7 +1284,7 @@ void checkAnalyticPartialCircleUnion()
         !field.getSweptFaceFlux().usedSweptFlux,
         "partial overlap to disjoint transition must invalidate swept volume history" );
 
-    circles[0].transform.position = { 1.04f, -0.20f };
+    circles[0].transform.position = { 1.039999f, -0.20f };
     circles[0].center = circles[0].transform.position;
     field.step( dt, circles, reactions, 200 );
     check( !field.getCutCellTransition().usedDisjointAnalyticGeometry &&
@@ -1504,7 +1504,7 @@ void checkDisjointAnalyticOverlappingAabbs()
         "returning to GJK separation must not invent swept volume" );
 
     // A tangent pair is numerically ambiguous, so keep the sampled union.
-    circles[1].transform.position = { 0.48f, 0.08f };
+    circles[1].transform.position = { 0.479999f, 0.08f };
     circles[1].center = circles[1].transform.position;
     field.step( dt, circles, reactions, 160 );
     check( !field.getCutCellTransition().usedDisjointAnalyticGeometry,
