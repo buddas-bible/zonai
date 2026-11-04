@@ -1633,7 +1633,7 @@ void checkCachedSchurLaplacianDifferential()
         }
 }
 
-void checkIndexedAnalyticBoundaryDifferential()
+void checkIndexedAnalyticBoundaryDifferential( bool compareMovableOnly = false )
 {
     constexpr float dt = 1.0f / 60.0f;
     for( float h : { 0.5f, 0.25f } )
@@ -1679,7 +1679,10 @@ void checkIndexedAnalyticBoundaryDifferential()
                 field->setDisjointAnalyticCutCellEnabled( true );
                 field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
             }
-            reference.setAnalyticCutCellIndexedBoundaryFacesEnabled( false );
+            if( compareMovableOnly )
+                reference.setAnalyticCutCellMovableSchurFacesEnabled( false );
+            else
+                reference.setAnalyticCutCellIndexedBoundaryFacesEnabled( false );
             std::vector<fluidObstacleForce2> refForces( bodies.size() ), indexedForces( bodies.size() );
             for( int frame = 0; frame < 3; ++frame )
             {
@@ -1715,9 +1718,12 @@ void checkIndexedAnalyticBoundaryDifferential()
             }
             reference.clear();
             indexed.clear();
-            check( !reference.isAnalyticCutCellIndexedBoundaryFacesEnabled() &&
-                indexed.isAnalyticCutCellIndexedBoundaryFacesEnabled(),
-                "clear must preserve selected analytic boundary indexing mode" );
+            check( compareMovableOnly
+                    ? !reference.isAnalyticCutCellMovableSchurFacesEnabled() &&
+                        indexed.isAnalyticCutCellMovableSchurFacesEnabled()
+                    : !reference.isAnalyticCutCellIndexedBoundaryFacesEnabled() &&
+                        indexed.isAnalyticCutCellIndexedBoundaryFacesEnabled(),
+                "clear must preserve the selected analytic Schur assembly mode" );
         }
 }
 
@@ -3541,6 +3547,7 @@ int main()
     checkActiveCellIc0SweepDifferential();
     checkCachedSchurLaplacianDifferential();
     checkIndexedAnalyticBoundaryDifferential();
+    checkIndexedAnalyticBoundaryDifferential( true );
     checkBoundedAnalyticFaceClippingDifferential();
     checkBoundedAnalyticCellAreaDifferential();
     checkCutCellTemporalContinuity();
