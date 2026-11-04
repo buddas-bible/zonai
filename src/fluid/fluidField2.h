@@ -479,6 +479,17 @@ public:
         return analyticCutCellBoundedCellAreasEnabled_;
     }
 
+    // 서로 분리된 여러 Analytic Shape의 MAC face 교차는 AABB 범위에서만 계산.
+    // 기본 ON. OFF는 face마다 모든 Shape를 확인하는 참조 경로.
+    void setAnalyticCutCellBoundedFaceClippingEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellBoundedFaceClippingEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellBoundedFaceClippingEnabled() const noexcept
+    {
+        return analyticCutCellBoundedFaceClippingEnabled_;
+    }
+
     // 벤치마크 전용 PCG 시간 측정. 기본 OFF로 일반 Step에 시계 측정 비용 없음.
     void setCutCellPressureTimingEnabled( bool enabled ) noexcept { cutCellPressureTimingEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellPressureTimingEnabled() const noexcept { return cutCellPressureTimingEnabled_; }
@@ -611,6 +622,11 @@ private:
 #pragma region Data
     // 압력 연립 반복의 작업 버퍼는 Field 크기에 묶어 재사용한다.
     // Cell/Body 수가 일정한 시뮬레이션에서 매 투영마다 heap 할당하지 않는다.
+    struct analyticFaceAccumulator
+    {
+        double blockedLength = 0.0;
+        double velocitySum = 0.0;
+    };
     struct coupledPressureFace
     {
         int cell = 0;
@@ -689,6 +705,8 @@ private:
     // U/V entries retain row-major face traversal order for Schur assembly.
     std::vector<int> analyticUBlockedFaces_;
     std::vector<int> analyticVBlockedFaces_;
+    std::vector<analyticFaceAccumulator> analyticUFaceScratch_;
+    std::vector<analyticFaceAccumulator> analyticVFaceScratch_;
     std::vector<float> uSolidVelocity_;
     std::vector<float> vSolidVelocity_;
     // 압력 반력으로 예상된 추가 blocked-face swept flux (m/s, blocked fraction 포함).
@@ -729,6 +747,7 @@ private:
     bool analyticCutCellCachedSchurEdgesEnabled_ = true;
     bool analyticCutCellIndexedBoundaryFacesEnabled_ = true;
     bool analyticCutCellBoundedCellAreasEnabled_ = true;
+    bool analyticCutCellBoundedFaceClippingEnabled_ = true;
     bool cutCellPressureTimingEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
