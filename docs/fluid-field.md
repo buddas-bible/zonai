@@ -412,6 +412,18 @@ Part 13h까지는 강체 반력을 셀 중심 `-h(r-l,t-b)\,` 근사로 만들�
 
 **범위/한계:** *진짜로 겹치는 여러 Shape의 기하 합집합을 분석적으로 계산하지 않는다.* 심지어 실제 Shape가 분리돼 있어도 AABB가 서로 겹치면 안전하게 표본 계산으로 돌아간다. 따라서 **정확한 overlap clipping, 근접 Body의 owner 공유/pressure interface, 연속 시간 swept union, FSI 전체 질량·에너지 보존**은 후속 작업이다. 기본 모드는 기존 4×4/8×8 표본과 동일하다.
 
+## Part 13s — AABB는 겹치지만 실제 Shape가 분리된 다중 분석적 Cut-cell
+
+기존 Part 13r은 **AABB의 분리**를 분석적 합집합의 충분조건으로 사용했다. 이제 다중 분석 옵션이 켜져 있을 때 world AABB가 겹치는 후보에 한해 기존 `ShapeDistance` GJK를 호출하여 **실제 convex Shape의 분리 여부**를 검사한다.
+
+- Circle/Capsule/Sharp·Rounded Convex Polygon은 기존 `MakeShapeProxy`의 core vertex와 radius를 그대로 사용하고, 두 Body의 상대 Transform 및 `useRadii=true`로 표면 간 최단 거리를 구한다. AABB가 분리돼 있으면 GJK를 생략한다.
+- 표면 거리 `distance > 32 * float_epsilon * max(1, |AABB coordinates|)`이고 GJK가 유한한 거리로 20회 미만에 끝났을 때만 분석적 면적/막힌 MAC face 합산을 허용한다. GJK가 불확실하거나 실제로 겹치거나 접할 정도로 가까우면 기존 표본 union으로 돌아간다. 상대 변환에서 회전이 단위 길이에서 벗어난 후보 역시 안전하게 표본 경로를 사용한다.
+- 분석적으로 분리된 여러 Shape의 셀 면적, face 구간별 소유자 속도 및 Schur `B/Bᵀ` 계산 자체는 Part 13r과 같다. 이동하는 장애물의 시간 중간 snapshot에도 동일한 검사를 수행하므로 순간적인 실제 겹침은 해당 시각의 표본 경로로 처리한다.
+- 기존 `usedDisjointAnalyticGeometry` 진단과 기하 모드 전환 시 volume/swept history 무효화 규칙을 재사용한다. 모드 OFF 기본값, 유체 속도 및 tracer 유지, Sandbox 설정은 변경하지 않는다.
+- 회귀 테스트에서는 AABB가 겹치는 대각선 분리 Circle, 회전 Capsule+Circle이 포함된 네 Shape의 이론 면적, 4×4/8×8 독립성, swept 이동, 실제 겹침 및 근접 접촉에서의 표본 fallback과 재진입 이력을 확인한다.
+
+**한계:** GJK는 convex surface의 분리 **판정**에만 사용하며, 실제로 겹치는 Shape의 분석적 기하 union이나 소유자별 겹친 표면의 물리적 반력 분배를 제공하지 않는다. 접촉에 가까운 형상은 보수적으로 근사 경로로 돌아가므로 exact 경로가 항상 사용된다는 보장은 없다. swept 면적의 시간 적분과 전체 유체–강체 질량·운동량·에너지 보존에 대한 한계도 유지된다.
+
 ## 다음 구현 후보
 
 1. 정확한 moving interface surface 적분, 실제 cut-cell dual mass와 swept interface 연동형 이류, pressure–rigid 반력 수지 정밀화 및 성능 측정.
