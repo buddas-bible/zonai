@@ -261,6 +261,42 @@ struct fluidTracerStats2
     [[nodiscard]] float delta() const noexcept { return afterMass - beforeMass; }
 };
 
+// 마지막 유효 Fluid Step의 경과시간 분해(ms), 계측 옵션을 켠 경우에만 유효.
+// wall-clock 계측이며 World::Step 및 World에서 전달한 drag/힘 처리 시간을 포함하지 않는다.
+struct fluidStepTiming2
+{
+    double total = 0.0;
+    double occupancy = 0.0;    // Body 중심점 마스크
+    double geometry = 0.0;     // Cut-cell 면적 및 face 개방율
+    double swept = 0.0;        // 이동 표면 swept + 선택한 오차 보정
+    double remap = 0.0;        // 새로 열린 MAC face 재구성
+    double boundaries = 0.0;   // 이류 전/후 경계 적용 및 속도 진단
+    double advection = 0.0;    // 유체 속도 이류
+    double pressure = 0.0;     // 투영 전체(PCG 또는 Jacobi), 반력 및 경계 예측
+    double tracer = 0.0;       // 추적 물질 수송
+    double other = 0.0;        // 원래 관측량 및 이전 장애물 snapshot 저장
+
+    [[nodiscard]] double accounted() const noexcept
+    {
+        return occupancy + geometry + swept + remap + boundaries +
+            advection + pressure + tracer + other;
+    }
+
+    void accumulate( const fluidStepTiming2& next ) noexcept
+    {
+        total += next.total;
+        occupancy += next.occupancy;
+        geometry += next.geometry;
+        swept += next.swept;
+        remap += next.remap;
+        boundaries += next.boundaries;
+        advection += next.advection;
+        pressure += next.pressure;
+        tracer += next.tracer;
+        other += next.other;
+    }
+};
+
 // 균일 MAC(staggered) grid: x속도는 수직 face, y속도는 수평 face에 저장.
 // 내부 Circle/Capsule/Convex Polygon solid 경계 face는 no-through로 처리함.
 class fluidField2
@@ -273,6 +309,14 @@ public:
 
 #pragma region Simulation
     void clear() noexcept;
+
+    // 선택형 단계별 wall-clock profiler. 기본 OFF, 성능 측정 중에만 켠다.
+    void setStepTimingEnabled( bool enabled ) noexcept
+    {
+        stepTimingEnabled_ = enabled;
+        if( !enabled ) stepTiming_ = {};
+    }
+    [[nodiscard]] bool isStepTimingEnabled() const noexcept { return stepTimingEnabled_; }
 
     // 장애물 수/구성이나 이산 기하 규칙이 바뀌면 첫 새 snapshot을
     // 이전 체적과 차분하지 않는다. 유체 속도·Tracer는 초기화하지 않음.
@@ -404,6 +448,7 @@ public:
     [[nodiscard]] double getFluidKineticEnergy() const noexcept;
     [[nodiscard]] const fluidPressureMomentum2& getPressureMomentum() const noexcept { return pressureMomentum_; }
     [[nodiscard]] const fluidStepMomentum2& getStepMomentum() const noexcept { return stepMomentum_; }
+    [[nodiscard]] const fluidStepTiming2& getStepTiming() const noexcept { return stepTiming_; }
     [[nodiscard]] const fluidSolidTransition2& getSolidTransition() const noexcept { return solidTransition_; }
     [[nodiscard]] const fluidCutCellTransition2& getCutCellTransition() const noexcept { return cutCellTransition_; }
     [[nodiscard]] const fluidCutCellPressure2& getCutCellPressure() const noexcept { return cutCellPressure_; }
@@ -561,6 +606,8 @@ private:
     bool volumeSourceValid_ = false;
     fluidPressureMomentum2 pressureMomentum_{};
     fluidStepMomentum2 stepMomentum_{};
+    fluidStepTiming2 stepTiming_{};
+    bool stepTimingEnabled_ = false;
 #pragma endregion Data
 };
 

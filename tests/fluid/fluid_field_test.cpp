@@ -26,6 +26,56 @@ bool close( float a, float b, float tolerance = 1.0e-4f )
     return std::abs( a - b ) <= tolerance;
 }
 
+void checkStepTimingProfiler()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    fluidField2 field{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    check( !field.isStepTimingEnabled() && field.getStepTiming().total == 0.0,
+        "field stage timing must be off by default" );
+    field.setCutCellProjectionEnabled( true );
+    field.setAnalyticCircleCutCellEnabled( true );
+    field.setStepTimingEnabled( true );
+    field.setTracerConcentration( 8, 8, 3.0f );
+    fluidShapeObstacle2 circle{ circle2{ {}, 0.8f }, { { -0.4f, 0.0f }, {} },
+        { -0.4f, 0.0f }, { 0.6f, 0.0f }, 0.0f };
+    std::array<fluidObstacleForce2, 1> reaction{};
+    field.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), reaction );
+    const fluidStepTiming2 first = field.getStepTiming();
+    check( first.total > 0.0 && first.occupancy >= 0.0 && first.geometry > 0.0 &&
+        first.advection > 0.0 && first.pressure > 0.0 && first.tracer >= 0.0 &&
+        first.swept >= 0.0 && std::isfinite( first.accounted() ) &&
+        first.accounted() <= first.total + 0.1,
+        "opt-in timings must cover the fluid step without double-counting phases" );
+
+    circle.transform.position.x += dt * circle.linearVelocity.x;
+    circle.center = circle.transform.position;
+    field.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), reaction );
+    const fluidStepTiming2 second = field.getStepTiming();
+    check( field.getSweptFaceFlux().usedSweptFlux && second.swept > 0.0 &&
+        second.total >= second.accounted() - 0.1,
+        "moving obstacle must record swept cost in the latest-step profile" );
+
+    fluidStepTiming2 frame = first;
+    frame.accumulate( second );
+    check( std::abs( frame.total - first.total - second.total ) < 1.0e-6 &&
+        std::abs( frame.geometry - first.geometry - second.geometry ) < 1.0e-6 &&
+        frame.accounted() <= frame.total + 0.2,
+        "accumulated phase stats must sum multiple fluid substeps" );
+
+    field.setStepTimingEnabled( false );
+    check( field.getStepTiming().total == 0.0,
+        "turning off profiling must discard stale duration values" );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), reaction );
+    check( field.getStepTiming().total == 0.0,
+        "normal field steps must not publish profiling values" );
+    field.setStepTimingEnabled( true );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), reaction );
+    field.clear();
+    check( field.isStepTimingEnabled() && field.getStepTiming().total == 0.0 &&
+        field.getStepTiming().accounted() == 0.0,
+        "clear must retain the profiler choice and reset its latest observation" );
+}
+
 void checkBoundsAndSampling()
 {
     bool rejected = false;
@@ -2840,6 +2890,7 @@ void checkSweptGeometryCorrection()
 int main()
 {
     checkBoundsAndSampling();
+    checkStepTimingProfiler();
     checkPressureProjection();
     checkCircleSolidBoundary();
     checkGeneralShapeObstacles();

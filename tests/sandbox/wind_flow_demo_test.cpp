@@ -27,6 +27,47 @@ bool close( float a, float b, float tolerance = 1.0e-4f )
     return std::abs( a - b ) <= tolerance;
 }
 
+void checkWorldWindStepProfiling()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    check( !scene.isWindStepProfilingEnabled() &&
+        !scene.getWindField()->isStepTimingEnabled(),
+        "sandbox stage timing must be opt-in" );
+    scene.setWindStepProfilingEnabled( true );
+    scene.setWindSourceEnabled( false );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindCutCellCoupledProjectionEnabled( true );
+    scene.setWindFluidSubstepCount( 4 );
+    scene.getWorld().SetBodyLinearVelocity( scene.getShapes()[0].bodyHandle, { 0.6f, -0.1f } );
+    scene.step( dt, 8 );
+    const fluidStepTiming2 first = scene.getWindFieldTiming();
+    check( scene.getWindCouplingSteps() == 4 && scene.getWindField()->isStepTimingEnabled() &&
+        first.total > 0.0 && first.geometry > 0.0 && first.advection > 0.0 &&
+        first.pressure > 0.0 && first.accounted() <= first.total + 0.2 &&
+        scene.getWindFluidMilliseconds() >= 0.0f && scene.getWindWorldMilliseconds() >= 0.0f,
+        "World wind profile must accumulate field phase time across four fluid intervals" );
+    scene.step( dt, 8 );
+    const fluidStepTiming2 second = scene.getWindFieldTiming();
+    check( second.total > 0.0 && second.swept > 0.0 &&
+        second.accounted() <= second.total + 0.2,
+        "successive synchronized World steps must report a fresh swept phase timing" );
+
+    scene.configureWindField( 28, 16, 0.5f );
+    check( scene.isWindStepProfilingEnabled() && scene.getWindField()->isStepTimingEnabled() &&
+        scene.getWindFieldTiming().total == 0.0,
+        "resizing the wind grid must preserve the profiling choice without stale timings" );
+    scene.step( dt, 8 );
+    check( scene.getWindFieldTiming().total > 0.0,
+        "resized wind field must continue reporting phase timing" );
+    scene.setWindStepProfilingEnabled( false );
+    scene.step( dt, 8 );
+    check( scene.getWindFieldTiming().total == 0.0 &&
+        scene.getWindField()->getStepTiming().total == 0.0,
+        "disabled sandbox profiling must not publish old observations" );
+}
+
 void checkFluidCoupling()
 {
     rigidBodyDemo scene{ demoKind::windFlow };
@@ -1016,6 +1057,7 @@ void checkSandboxConservativeAdvectionTrial()
 int main()
 {
     checkFluidCoupling();
+    checkWorldWindStepProfiling();
     checkMovingSolidReaction();
     checkSynchronizedWindCoupling();
     checkPressurePredictedWorldVelocity();

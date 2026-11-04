@@ -939,6 +939,23 @@ void rigidBodyDemoUi::drawExperimentControls()
             setWindFluidSubstepCount( fluidSteps );
         ImGui::Text( "최근 Fluid 계산: %d회 (World Substep과 독립)", getWindCouplingSteps() );
         ImGui::Text( "최근 Fluid+연동: %.2f ms / World: %.2f ms", getWindFluidMilliseconds(), getWindWorldMilliseconds() );
+        bool stepProfile = isWindStepProfilingEnabled();
+        if( ImGui::Checkbox( "유체 단계별 시간 측정 (실험)###WindStepProfile", &stepProfile ) )
+            setWindStepProfilingEnabled( stepProfile );
+        if( stepProfile )
+        {
+            const fluidStepTiming2& time = getWindFieldTiming();
+            const double external = std::max( 0.0, static_cast<double>( getWindFluidMilliseconds() ) - time.total );
+            ImGui::Text( "Field Step 합 %.3f ms / World 결합·Drag·snapshot %.3f ms",
+                time.total, external );
+            ImGui::Text( "Mask %.3f / Geometry %.3f / Swept %.3f ms",
+                time.occupancy, time.geometry, time.swept );
+            ImGui::Text( "Remap %.3f / Boundary %.3f / Advection %.3f ms",
+                time.remap, time.boundaries, time.advection );
+            ImGui::Text( "Pressure %.3f / Tracer %.3f / 기타 %.3f ms",
+                time.pressure, time.tracer, time.other );
+            ImGui::TextDisabled( "마지막 프레임의 모든 Fluid substep 합. 계측/World 호출 오버헤드가 포함됩니다." );
+        }
         ImGui::TextDisabled( "1회가 가장 가볍습니다. 2회 이상이면 World Substep을 여러 구간으로 묶어 교대로 계산합니다." );
 
         bool conservative = isWindConservativeAdvectionEnabled();

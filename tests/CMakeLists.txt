@@ -867,3 +867,8 @@ add_executable(sandboxWindFlowDemoTests sandbox/wind_flow_demo_test.cpp "${PROJE
 target_include_directories(sandboxWindFlowDemoTests PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxWindFlowDemoTests PRIVATE zonai::zonai)
 add_test(NAME sandboxWindFlowDemoTests COMMAND sandboxWindFlowDemoTests)
+
+# Informational headless benchmark of real Sandbox World/Fluid interleaving.
+add_executable(sandboxWindStepBenchmark sandbox/wind_step_benchmark.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
+target_include_directories(sandboxWindStepBenchmark PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
+target_link_libraries(sandboxWindStepBenchmark PRIVATE zonai::zonai)

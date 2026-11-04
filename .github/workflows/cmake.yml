@@ -26,7 +26,7 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     strategy:
       fail-fast: false
@@ -106,7 +106,7 @@ jobs:
 
       - name: Build Release lifecycle tests
         if: runner.os == 'Windows'
-        run: cmake --build build --config Release --target rotatingSweepBoundsTests worldRotatingCapsulePolygonOracleTests worldChainRotatingConvexOracleTests worldChainBentRotatingOracleTests worldChainRetryTemporalTests worldChainRetryStressTests worldShapeCastBenchmark worldRotatingToiBenchmark worldChainRetryBenchmark worldRotatingSceneBenchmark dynamicTreeBoxCastBenchmark dynamicTreeBoxCastTests worldRotatingShapeSweepOracleTests worldRotatingBoxSweepOracleTests broadPhaseLifecycleTests bodyShapeContactLifecycleTests contactConstraintTests restitutionTests islandTests islandSleepCcdTests worldQuerySensorTests worldContactEventTests worldContactHitEventTests worldOverlapAABBTests worldOverlapShapeTests worldSpatialQueryStressTests worldRayCastTests worldShapeCastTests worldChainShapeCastOwnershipTests worldChainConvexCastOwnershipTests sandboxShapeCastDemoTests sandboxShapeCastViewTests sandboxOverlapShapeDemoTests sandboxOverlapShapeViewTests contactCacheTests distanceJointTests distanceJointWorldTests moverJointTests moverJointWorldTests pogoJointTests pogoJointWorldTests filterJointTests filterJointWorldTests mouseJointTests mouseJointWorldTests revoluteJointTests revoluteJointWorldTests wheelJointTests wheelJointWorldTests sandboxDemoTests fluidFieldTests fluidPreconditionerBenchmark sandboxWindFlowDemoTests --parallel
+        run: cmake --build build --config Release --target rotatingSweepBoundsTests worldRotatingCapsulePolygonOracleTests worldChainRotatingConvexOracleTests worldChainBentRotatingOracleTests worldChainRetryTemporalTests worldChainRetryStressTests worldShapeCastBenchmark worldRotatingToiBenchmark worldChainRetryBenchmark worldRotatingSceneBenchmark dynamicTreeBoxCastBenchmark dynamicTreeBoxCastTests worldRotatingShapeSweepOracleTests worldRotatingBoxSweepOracleTests broadPhaseLifecycleTests bodyShapeContactLifecycleTests contactConstraintTests restitutionTests islandTests islandSleepCcdTests worldQuerySensorTests worldContactEventTests worldContactHitEventTests worldOverlapAABBTests worldOverlapShapeTests worldSpatialQueryStressTests worldRayCastTests worldShapeCastTests worldChainShapeCastOwnershipTests worldChainConvexCastOwnershipTests sandboxShapeCastDemoTests sandboxShapeCastViewTests sandboxOverlapShapeDemoTests sandboxOverlapShapeViewTests contactCacheTests distanceJointTests distanceJointWorldTests moverJointTests moverJointWorldTests pogoJointTests pogoJointWorldTests filterJointTests filterJointWorldTests mouseJointTests mouseJointWorldTests revoluteJointTests revoluteJointWorldTests wheelJointTests wheelJointWorldTests sandboxDemoTests fluidFieldTests fluidPreconditionerBenchmark sandboxWindFlowDemoTests sandboxWindStepBenchmark --parallel
 
       # Informational only: no numerical speed threshold or assertion on CI timings.
       - name: Sample BoxCast performance (Release, informational)
@@ -139,6 +139,12 @@ jobs:
       - name: Sample Cut-cell PCG preconditioner performance (Windows Release, informational)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --csv
+
+      # A real headless Sandbox World interleave, 8 World substeps and 1/2/4/8 Fluid steps.
+      # Frame medians are informational; never gate CI on runner-dependent wall time.
+      - name: Sample Wind multi-substep stage profile (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --csv
 
       - name: Test Release lifecycle invariants
         if: runner.os == 'Windows'
