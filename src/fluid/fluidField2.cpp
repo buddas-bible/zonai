@@ -1200,6 +1200,7 @@ void fluidField2::clear() noexcept
     advectionStats_ = {};
     pressureMomentum_ = {};
     stepMomentum_ = {};
+    stepTiming_ = {};
 }
 
 float fluidField2::tracerCellFraction( int x, int y ) const noexcept
@@ -2400,16 +2401,35 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     std::fill( feedback.begin(), feedback.end(), fluidObstacleForce2{} );
     if( !std::isfinite( timeStep ) || timeStep <= 0.0f ) return;
 
+    // No clock reads in normal simulation: this is an explicit profiling mode.
+    using clock = std::chrono::steady_clock;
+    const bool profile = stepTimingEnabled_;
+    if( profile ) stepTiming_ = {};
+    const auto started = profile ? clock::now() : clock::time_point{};
+    auto sectionStarted = started;
+    const auto record = [&]( double& elapsed )
+    {
+        if( !profile ) return;
+        const auto now = clock::now();
+        elapsed += std::chrono::duration<double, std::milli>( now - sectionStarted ).count();
+        sectionStarted = now;
+    };
+
     stepMomentum_.before = getFluidMomentum();
+    record( stepTiming_.other );
     updateObstacles( obstacles );
+    record( stepTiming_.occupancy );
     updateCutCellGeometry( obstacles );
+    record( stepTiming_.geometry );
     if( cutCellProjectionEnabled_ )
     {
         updateSweptSolidFlux( timeStep, obstacles );
         reconcileSweptSolidFlux();
     }
     else sweptFaceFlux_ = {};
+    record( stepTiming_.swept );
     remapExposedFaces();
+    record( stepTiming_.remap );
     stepMomentum_.afterObstacles = getFluidMomentum();
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
     else applySolidBoundaries( obstacles );
@@ -2417,6 +2437,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     advectionStats_ = {};
     advectionStats_.conservative = conservativeAdvectionEnabled_;
     advectionStats_.before = getAdvectionFaceMomentum();
+    record( stepTiming_.boundaries );
     if( conservativeAdvectionEnabled_ ) advectConservative( timeStep );
     else
     {
@@ -2443,10 +2464,12 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         v_.swap( nextV_ );
         advectionStats_.substeps = 1;
     }
+    record( stepTiming_.advection );
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
     else applySolidBoundaries( obstacles );
     advectionStats_.after = getAdvectionFaceMomentum();
     stepMomentum_.afterAdvection = getFluidMomentum();
+    record( stepTiming_.boundaries );
     if( cutCellProjectionEnabled_ )
     {
         pressureMomentum_ = {}; // 이전 이진 MAC face impulse ledger와 단위가 다르므로 혼합하지 않음.
@@ -2458,8 +2481,14 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
     }
     stepMomentum_.afterPressure = getFluidMomentum();
+    record( stepTiming_.pressure );
     transportTracer( timeStep );
+    record( stepTiming_.tracer );
     previousObstacles_.assign( obstacles.begin(), obstacles.end() );
+    record( stepTiming_.other );
+    if( profile )
+        stepTiming_.total = std::chrono::duration<double, std::milli>(
+            clock::now() - started ).count();
 }
 
 float fluidField2::cutCellUOpen( int x, int y ) const noexcept
