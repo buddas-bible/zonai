@@ -86,6 +86,7 @@ struct fluidPressureMomentum2
     float coupledInitialResidualRms = 0.0f;
     float coupledFinalResidualRms = 0.0f;
     float coupledRelativeResidual = 0.0f;
+    bool usedIncompleteCholesky = false;
     // 수렴한 압력이 예측한 Body Δv/Δω를 MAC solid 법선 face에 반영한 결과.
     // 실제 World의 후속 Drag/Contact/Joint Δv는 여기에 포함하지 않는다.
     int synchronizedBoundaryFaces = 0;
@@ -183,6 +184,7 @@ struct fluidCutCellPressure2
     fluidCoupledPressureStatus2 coupledStatus = fluidCoupledPressureStatus2::notRequested;
     int coupledIterations = 0;
     float coupledRelativeResidual = 0.0f;
+    bool usedIncompleteCholesky = false;
     // 수렴한 Cut-cell PCG의 Body 예측속도를 다시 적용한 solid-normal MAC face.
     // 부분 개방 face는 blocked 구간만 갱신하며 fluid face 속도는 보존한다.
     int synchronizedBoundaryFaces = 0;
@@ -468,6 +470,8 @@ private:
         std::vector<coupledPressureFace> faces;
         std::vector<coupledBodyResponse> response;
         std::vector<double> diagonal;
+        std::vector<double> incompletePivot;
+        std::vector<double> incompleteForward;
         std::vector<double> rhs;
         std::vector<double> x;
         std::vector<double> residual;
