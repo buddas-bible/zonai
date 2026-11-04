@@ -261,7 +261,12 @@ public:
     {
         windStepProfilingEnabled_ = enabled;
         windFieldTiming_ = {};
-        if( windField_ ) windField_->setStepTimingEnabled( enabled );
+        windCoupledTiming_ = {};
+        if( windField_ )
+        {
+            windField_->setStepTimingEnabled( enabled );
+            windField_->setCutCellPressureTimingEnabled( enabled );
+        }
     }
     [[nodiscard]] bool isWindStepProfilingEnabled() const noexcept { return windStepProfilingEnabled_; }
     void configureWindField( int width, int height, float cellSize );
@@ -426,6 +431,7 @@ public:
     [[nodiscard]] float getWindFluidMilliseconds() const noexcept { return windFluidMilliseconds_; }
     [[nodiscard]] float getWindWorldMilliseconds() const noexcept { return windWorldMilliseconds_; }
     [[nodiscard]] const fluidStepTiming2& getWindFieldTiming() const noexcept { return windFieldTiming_; }
+    [[nodiscard]] const fluidCoupledPressureTiming2& getWindCoupledTiming() const noexcept { return windCoupledTiming_; }
     [[nodiscard]] std::size_t getWindStaticObstacleCount() const noexcept { return shapes_.size() > 3 && kind_ == demoKind::windFlow ? shapes_.size() - 3 : 0; }
     [[nodiscard]] std::span<const fluidObstacleForce2> getWindPressureForces() const noexcept { return windPressureForces_; }
     [[nodiscard]] vec2 getWindDragBodyImpulse() const noexcept { return windDragBodyImpulse_; }
@@ -659,6 +665,7 @@ private:
     float windWorldMilliseconds_ = 0.0f;
     bool windStepProfilingEnabled_ = false;
     fluidStepTiming2 windFieldTiming_{};
+    fluidCoupledPressureTiming2 windCoupledTiming_{};
     std::vector<fluidShapeObstacle2> windObstacleSnapshots_{};
     std::vector<fluidObstacleForce2> windObstacleFeedback_{};
     std::deque<std::string> windStaticLabels_{};
