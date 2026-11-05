@@ -3309,10 +3309,14 @@ void checkMovingOnlyAnalyticSweptDifferential()
                     pa.predictedContinuityRms == pb.predictedContinuityRms,
                     "moving-only swept faces must preserve coupled pressure and continuity" );
                 for( std::size_t i = 0; i < bodies.size(); ++i )
-                    check( refForces[i].force == newForces[i].force &&
+                    check( refForces[i].force.x == newForces[i].force.x &&
+                        refForces[i].force.y == newForces[i].force.y &&
                         refForces[i].torque == newForces[i].torque,
                         "moving-only swept faces must preserve per-body traction" );
-                check( reference.getFluidMomentum() == movingOnly.getFluidMomentum(),
+                const vec2 originalMomentum = reference.getFluidMomentum();
+                const vec2 optimizedMomentum = movingOnly.getFluidMomentum();
+                check( originalMomentum.x == optimizedMomentum.x &&
+                    originalMomentum.y == optimizedMomentum.y,
                     "moving-only swept faces must preserve fluid momentum" );
                 if( frame == 0 )
                 {
