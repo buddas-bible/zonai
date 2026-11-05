@@ -23,6 +23,7 @@ struct result
     double iterations = 0.0;
     double residual = 0.0;
     double geometryMilliseconds = 0.0;
+    double pressureStageMilliseconds = 0.0;
     fluidCoupledPressureTiming2 phases{};
     int converged = 0;
     int attempts = 0;
@@ -77,10 +78,12 @@ std::vector<fluidShapeObstacle2> makeObstacles( int mode, int staticCount = 0 )
 
 result measure( float h, int mode, int preconditioner, int staticCount = 0,
     bool indexedBoundaries = true, bool boundedAreas = true, bool geometryTiming = false,
-    bool boundedFaceClipping = true, bool movableOnlySchur = true )
+    bool boundedFaceClipping = true, bool movableOnlySchur = true,
+    bool indexedBoundarySync = true )
 {
     const auto bodies = makeObstacles( mode, staticCount );
     std::vector<double> totalSamples, pressureSamples, iterationSamples, residualSamples, geometrySamples;
+    std::vector<double> pressureStageSamples;
     std::vector<fluidCoupledPressureTiming2> phaseSamples;
     result stats{};
     for( int i = 0; i < rounds + 1; ++i )
@@ -100,6 +103,7 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
         field.setAnalyticCutCellBoundedCellAreasEnabled( boundedAreas );
         field.setAnalyticCutCellBoundedFaceClippingEnabled( boundedFaceClipping );
         field.setAnalyticCutCellMovableSchurFacesEnabled( movableOnlySchur );
+        field.setAnalyticCutCellIndexedBoundarySyncEnabled( indexedBoundarySync );
         field.setStepTimingEnabled( geometryTiming );
         field.setCutCellPressureTimingEnabled( true );
         field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
@@ -114,7 +118,11 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
         stats.converged += pressure.usedCoupledProjection ? 1 : 0;
         totalSamples.push_back( stepMs );
         pressureSamples.push_back( pressure.coupledSolveMilliseconds );
-        if( geometryTiming ) geometrySamples.push_back( field.getStepTiming().geometry );
+        if( geometryTiming )
+        {
+            geometrySamples.push_back( field.getStepTiming().geometry );
+            pressureStageSamples.push_back( field.getStepTiming().pressure );
+        }
         iterationSamples.push_back( pressure.coupledIterations );
         residualSamples.push_back( pressure.coupledRelativeResidual );
         phaseSamples.push_back( pressure.coupledTiming );
@@ -124,6 +132,7 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
     stats.iterations = median( iterationSamples );
     stats.residual = median( residualSamples );
     stats.geometryMilliseconds = median( geometrySamples );
+    stats.pressureStageMilliseconds = median( pressureStageSamples );
     const auto phaseMedian = [&]( auto getter )
     {
         std::vector<double> samples;
@@ -152,6 +161,25 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
 
 int main( int argc, char** argv )
 {
+    const bool boundarySyncSweep = argc > 1 && std::string_view( argv[1] ) == "--boundary-sync-sweep";
+    if( boundarySyncSweep )
+    {
+        std::puts( "static_obstacles,cell_m,sync_mode,converged,attempts,pressure_stage_ms,"
+            "pcg_ms,step_ms,iterations,relative_residual" );
+        for( float h : { 0.5f, 0.25f } )
+            for( int count : { 0, 16, 48 } )
+                for( bool indexed : { false, true } )
+                {
+                    const result stats = measure( h, 1, 4, count, true, true, true,
+                        true, true, indexed );
+                    std::printf( "%d,%.2f,%s,%d,%d,%.5f,%.5f,%.5f,%.0f,%.6g\n",
+                        count, h, indexed ? "indexed" : "full",
+                        stats.converged, stats.attempts, stats.pressureStageMilliseconds,
+                        stats.pressureMilliseconds, stats.stepMilliseconds,
+                        stats.iterations, stats.residual );
+                }
+        return 0;
+    }
     const bool mobilitySweep = argc > 1 && std::string_view( argv[1] ) == "--mobility-sweep";
     if( mobilitySweep )
     {
