@@ -468,6 +468,17 @@ public:
         return analyticCutCellIndexedBoundaryFacesEnabled_;
     }
 
+    // 압력 반력에 따른 고체 경계 속도 동기화 시, 이미 계산한 막힌 face만 방문.
+    // 기본 ON. OFF는 모든 내부 face를 방문하는 참조 경로.
+    void setAnalyticCutCellIndexedBoundarySyncEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellIndexedBoundarySyncEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellIndexedBoundarySyncEnabled() const noexcept
+    {
+        return analyticCutCellIndexedBoundarySyncEnabled_;
+    }
+
     // Analytic Cut-cell 셀 면적 계산은 Shape AABB와 교차하는 셀만 방문한다.
     // 기본 ON. OFF는 모든 셀에서 전체 Shape를 순회하는 참조 경로.
     void setAnalyticCutCellBoundedCellAreasEnabled( bool enabled ) noexcept
@@ -758,6 +769,7 @@ private:
     bool analyticCutCellActiveIc0SweepEnabled_ = true;
     bool analyticCutCellCachedSchurEdgesEnabled_ = true;
     bool analyticCutCellIndexedBoundaryFacesEnabled_ = true;
+    bool analyticCutCellIndexedBoundarySyncEnabled_ = true;
     bool analyticCutCellBoundedCellAreasEnabled_ = true;
     bool analyticCutCellBoundedFaceClippingEnabled_ = true;
     bool analyticCutCellMovableSchurFacesEnabled_ = true;
