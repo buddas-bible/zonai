@@ -2973,6 +2973,9 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
     int timeSamples = std::clamp(
         static_cast<int>( std::ceil( maximumTravel / ( 0.25f * cellSize_ ) ) ), 1, 32 );
     std::vector<fluidShapeObstacle2> intermediate( obstacles.begin(), obstacles.end() );
+    // Reused only by the bounded multi-shape analytic swept path; allocation
+    // and clearing are skipped for other swept geometry modes.
+    std::vector<double> boundedUSweptScratch, boundedVSweptScratch;
 
     const auto integrate = [&]( int samples, std::vector<float>& sweptU, std::vector<float>& sweptV )
     {
@@ -2998,44 +3001,116 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
             {
                 const double h = cellSize_;
                 const float intervalDt = timeStep / samples;
-                const auto accumulateFace = [&]( bool vertical, int x, int y )
+                if( analyticCutCellBoundedSweptFacesEnabled_ &&
+                    analyticCutCellMovingSweptFacesEnabled_ && disjointShapes.size() > 2 )
                 {
-                    const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
-                    const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
-                    double flux = 0.0;
-                    const auto addPortion = [&]( std::size_t i, analyticCircleInterval clipped )
+                    // Unlike the current-step geometry cache, these analytic
+                    // shapes belong to the *intermediate* time snapshot.
+                    // Only moving owners have swept normal velocity. Evaluate
+                    // their clipped intervals inside conservatively padded
+                    // AABB face ranges, keeping each face's owner sum order.
+                    boundedUSweptScratch.assign( u_.size(), 0.0 );
+                    boundedVSweptScratch.assign( v_.size(), 0.0 );
+                    const auto clampFace = []( double index, int lower, int upper )
                     {
-                        const vec2 point = vertical
-                            ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
-                            : vec2{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
-                        const vec2 velocity = linearSpeeds[i] +
-                            Cross( angularSpeeds[i], point - intermediate[i].transform.position );
-                        flux += clipped.length * ( vertical ? velocity.x : velocity.y );
+                        return static_cast<int>( std::clamp( index,
+                            static_cast<double>( lower ), static_cast<double>( upper ) ) );
                     };
-                    if( analyticCutCellMovingSweptFacesEnabled_ && disjointShapes.size() > 2 )
+                    for( int owner : movingOwners )
                     {
-                        // For 3+ disjoint analytic shapes, zero-transform-motion
-                        // bodies cannot contribute to face-swept volume. Keep
-                        // input order and reclip intermediate poses each time;
-                        // two-circle overlap/containment still uses ownership.
-                        for( int owner : movingOwners )
+                        const auto& shape = disjointShapes[owner];
+                        const auto accumulateFaces = [&]( bool vertical )
                         {
-                            const auto clipped = ClipDisjointShapeFace(
-                                disjointShapes[owner], vertical, normal, low, low + h );
-                            if( clipped.length > 0.0 ) addPortion( owner, clipped );
-                        }
+                            const int minX = clampFace( std::floor(
+                                ( static_cast<double>( shape.bounds.min.x ) - origin_.x ) / h ) - 1.0,
+                                vertical ? 1 : 0, width_ - 1 );
+                            const int maxX = clampFace( std::ceil(
+                                ( static_cast<double>( shape.bounds.max.x ) - origin_.x ) / h ) + 1.0,
+                                vertical ? 1 : 0, width_ - 1 );
+                            const int minY = clampFace( std::floor(
+                                ( static_cast<double>( shape.bounds.min.y ) - origin_.y ) / h ) - 1.0,
+                                vertical ? 0 : 1, height_ - 1 );
+                            const int maxY = clampFace( std::ceil(
+                                ( static_cast<double>( shape.bounds.max.y ) - origin_.y ) / h ) + 1.0,
+                                vertical ? 0 : 1, height_ - 1 );
+                            for( int y = minY; y <= maxY; ++y )
+                                for( int x = minX; x <= maxX; ++x )
+                                {
+                                    const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+                                    const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+                                    const auto clipped = ClipDisjointShapeFace(
+                                        shape, vertical, normal, low, low + h );
+                                    if( clipped.length <= 0.0 ) continue;
+                                    const vec2 point = vertical
+                                        ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
+                                        : vec2{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
+                                    const vec2 velocity = linearSpeeds[owner] +
+                                        Cross( angularSpeeds[owner], point - intermediate[owner].transform.position );
+                                    double& flux = vertical ? boundedUSweptScratch[uIndex( x, y )] :
+                                        boundedVSweptScratch[vIndex( x, y )];
+                                    flux += clipped.length * ( vertical ? velocity.x : velocity.y );
+                                }
+                        };
+                        accumulateFaces( true );
+                        accumulateFaces( false );
                     }
-                    else
-                        ForEachAnalyticFacePortion( disjointShapes, vertical, normal, low, low + h,
-                            addPortion );
-                    const float swept = intervalDt * static_cast<float>( flux );
-                    if( vertical ) sweptU[uIndex( x, y )] += swept;
-                    else sweptV[vIndex( x, y )] += swept;
-                };
-                for( int y = 0; y < height_; ++y )
-                    for( int x = 1; x < width_; ++x ) accumulateFace( true, x, y );
-                for( int y = 1; y < height_; ++y )
-                    for( int x = 0; x < width_; ++x ) accumulateFace( false, x, y );
+
+                    // Convert the per-face double sum to float exactly once,
+                    // in the same U-then-V order as the original reference.
+                    for( int y = 0; y < height_; ++y )
+                        for( int x = 1; x < width_; ++x )
+                        {
+                            const int face = uIndex( x, y );
+                            sweptU[face] += intervalDt * static_cast<float>( boundedUSweptScratch[face] );
+                        }
+                    for( int y = 1; y < height_; ++y )
+                        for( int x = 0; x < width_; ++x )
+                        {
+                            const int face = vIndex( x, y );
+                            sweptV[face] += intervalDt * static_cast<float>( boundedVSweptScratch[face] );
+                        }
+                }
+                else
+                {
+                    const auto accumulateFace = [&]( bool vertical, int x, int y )
+                    {
+                        const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+                        const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+                        double flux = 0.0;
+                        const auto addPortion = [&]( std::size_t i, analyticCircleInterval clipped )
+                        {
+                            const vec2 point = vertical
+                                ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
+                                : vec2{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
+                            const vec2 velocity = linearSpeeds[i] +
+                                Cross( angularSpeeds[i], point - intermediate[i].transform.position );
+                            flux += clipped.length * ( vertical ? velocity.x : velocity.y );
+                        };
+                        if( analyticCutCellMovingSweptFacesEnabled_ && disjointShapes.size() > 2 )
+                        {
+                            // For 3+ disjoint analytic shapes, zero-transform-motion
+                            // bodies cannot contribute to face-swept volume. Keep
+                            // input order and reclip intermediate poses each time;
+                            // two-circle overlap/containment still uses ownership.
+                            for( int owner : movingOwners )
+                            {
+                                const auto clipped = ClipDisjointShapeFace(
+                                    disjointShapes[owner], vertical, normal, low, low + h );
+                                if( clipped.length > 0.0 ) addPortion( owner, clipped );
+                            }
+                        }
+                        else
+                            ForEachAnalyticFacePortion( disjointShapes, vertical, normal, low, low + h,
+                                addPortion );
+                        const float swept = intervalDt * static_cast<float>( flux );
+                        if( vertical ) sweptU[uIndex( x, y )] += swept;
+                        else sweptV[vIndex( x, y )] += swept;
+                    };
+                    for( int y = 0; y < height_; ++y )
+                        for( int x = 1; x < width_; ++x ) accumulateFace( true, x, y );
+                    for( int y = 1; y < height_; ++y )
+                        for( int x = 0; x < width_; ++x ) accumulateFace( false, x, y );
+                }
                 continue;
             }
 
