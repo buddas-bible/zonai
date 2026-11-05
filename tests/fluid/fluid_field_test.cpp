@@ -3345,6 +3345,94 @@ void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false )
         }
 }
 
+void checkBoundedSweptMixedAnalyticShapes()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    for( float h : { 0.5f, 0.25f } )
+    {
+        const vec2 boxCenter{ -2.0f, -1.0f };
+        const vec2 capsuleCenter{ 1.0f, -0.2f };
+        const vec2 staticCenter{ 3.5f, 2.0f };
+        std::array<fluidShapeObstacle2, 3> bodies{{
+            { MakeBox( { 0.65f, 0.25f } ),
+                { boxCenter, rot2::FromRadians( 0.20f ) }, boxCenter,
+                {}, 0.0f, 0.8f, 0.6f },
+            { capsule2{ { -0.4f, 0.0f }, { 0.4f, 0.0f }, 0.20f },
+                { capsuleCenter, {} }, capsuleCenter,
+                {}, 0.0f, 0.0f, 0.0f },
+            { circle2{ {}, 0.35f }, { staticCenter, {} }, staticCenter,
+                {}, 0.0f, 0.0f, 0.0f }
+        }};
+        fluidField2 reference{ static_cast<int>( 12.0f / h ),
+            static_cast<int>( 10.0f / h ), h, { -6.0f, -5.0f } };
+        fluidField2 bounded{ static_cast<int>( 12.0f / h ),
+            static_cast<int>( 10.0f / h ), h, { -6.0f, -5.0f } };
+        for( fluidField2* field : { &reference, &bounded } )
+        {
+            field->setCutCellProjectionEnabled( true );
+            field->setCutCellCoupledProjectionEnabled( true );
+            field->setDisjointAnalyticCutCellEnabled( true );
+            field->addVelocity( { -1.5f, -0.7f }, { 1.4f, 0.6f }, 1.3f );
+        }
+        reference.setAnalyticCutCellBoundedSweptFacesEnabled( false );
+        std::array<fluidObstacleForce2, 3> refForces{}, newForces{};
+        for( int frame = 0; frame < 3; ++frame )
+        {
+            reference.step( dt, bodies, refForces, 200 );
+            bounded.step( dt, bodies, newForces, 200 );
+            check( reference.getCutCellTransition().usedDisjointAnalyticGeometry &&
+                bounded.getCutCellTransition().usedDisjointAnalyticGeometry,
+                "mixed moving swept comparison must remain on disjoint analytic geometry" );
+            const auto& a = reference.getSweptFaceFlux();
+            const auto& b = bounded.getSweptFaceFlux();
+            check( a.usedSweptFlux == b.usedSweptFlux &&
+                a.timeSamples == b.timeSamples &&
+                a.totalAbsoluteFlux == b.totalAbsoluteFlux &&
+                a.geometryMismatch == b.geometryMismatch &&
+                a.rawGeometryMismatch == b.rawGeometryMismatch,
+                "AABB-bounded swept clipping must preserve polygon and capsule flux exactly" );
+            if( frame > 0 )
+                check( b.usedSweptFlux && b.totalAbsoluteFlux > 0.0f &&
+                    b.timeSamples >= 2,
+                    "polygon and capsule transform changes must generate swept face flux" );
+            const auto& pa = reference.getCutCellPressure();
+            const auto& pb = bounded.getCutCellPressure();
+            check( pa.usedCoupledProjection == pb.usedCoupledProjection &&
+                pa.coupledStatus == pb.coupledStatus &&
+                pa.coupledIterations == pb.coupledIterations &&
+                pa.coupledRelativeResidual == pb.coupledRelativeResidual &&
+                pa.predictedContinuityRms == pb.predictedContinuityRms,
+                "mixed analytic swept clipping must preserve coupled pressure and continuity" );
+            for( std::size_t i = 0; i < bodies.size(); ++i )
+                check( refForces[i].force.x == newForces[i].force.x &&
+                    refForces[i].force.y == newForces[i].force.y &&
+                    refForces[i].torque == newForces[i].torque,
+                    "mixed analytic swept clipping must preserve per-body traction" );
+            const vec2 first = reference.getFluidMomentum();
+            const vec2 second = bounded.getFluidMomentum();
+            check( first.x == second.x && first.y == second.y,
+                "mixed analytic swept clipping must preserve fluid momentum" );
+
+            if( frame == 0 )
+            {
+                bodies[0].transform.position += { 0.32f, 0.14f };
+                bodies[0].transform.rotation = rot2::FromRadians( 0.52f );
+                bodies[1].transform.position += { -0.18f, 0.12f };
+                bodies[1].transform.rotation = rot2::FromRadians( -0.26f );
+            }
+            else if( frame == 1 )
+            {
+                bodies[0].transform.position += { -0.16f, -0.09f };
+                bodies[0].transform.rotation = rot2::FromRadians( -0.18f );
+                bodies[1].transform.position += { 0.11f, -0.08f };
+                bodies[1].transform.rotation = rot2::FromRadians( 0.34f );
+            }
+            for( std::size_t i = 0; i < 2; ++i )
+                bodies[i].center = bodies[i].transform.position;
+        }
+    }
+}
+
 void checkAdaptiveSweptTemporalQuadrature()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -3779,6 +3867,7 @@ int main()
     checkSweptSolidFaceFlux();
     checkMovingOnlyAnalyticSweptDifferential();
     checkMovingOnlyAnalyticSweptDifferential( true );
+    checkBoundedSweptMixedAnalyticShapes();
     checkAdaptiveSweptTemporalQuadrature();
     checkConservativeMacAdvection();
     checkConservativeTracerTransport();
