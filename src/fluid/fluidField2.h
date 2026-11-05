@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -8,6 +9,8 @@
 
 namespace zonai
 {
+
+struct analyticDisjointCache2;
 
 // Body 좌표가 아닌 유체 world 좌표. 원형 solid의 cell-centered occupancy 근사.
 struct fluidCircleObstacle2
@@ -513,6 +516,19 @@ public:
         return analyticCutCellMovableSchurFacesEnabled_;
     }
 
+    // 현재 Fluid Step의 Analytic Shape 기하를 압력 행렬과 경계 예측에서 재사용.
+    // Swept flux의 중간 시각 Shape는 별도 구성하며 재사용하지 않는다.
+    // 기본 ON. OFF는 각 단계에서 재구축하는 참조 경로.
+    void setAnalyticCutCellCurrentGeometryReuseEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellCurrentGeometryReuseEnabled_ = enabled;
+        if( !enabled ) analyticDisjointCache_.reset();
+    }
+    [[nodiscard]] bool isAnalyticCutCellCurrentGeometryReuseEnabled() const noexcept
+    {
+        return analyticCutCellCurrentGeometryReuseEnabled_;
+    }
+
     // 벤치마크 전용 PCG 시간 측정. 기본 OFF로 일반 Step에 시계 측정 비용 없음.
     void setCutCellPressureTimingEnabled( bool enabled ) noexcept { cutCellPressureTimingEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellPressureTimingEnabled() const noexcept { return cutCellPressureTimingEnabled_; }
@@ -728,6 +744,9 @@ private:
     // U/V entries retain row-major face traversal order for Schur assembly.
     std::vector<int> analyticUBlockedFaces_;
     std::vector<int> analyticVBlockedFaces_;
+    // Snapshot immutable between geometry update, Schur solve and boundary sync.
+    // Opaque here to keep analytic polygon/capsule internals in the .cpp file.
+    std::shared_ptr<const analyticDisjointCache2> analyticDisjointCache_;
     std::vector<analyticFaceAccumulator> analyticUFaceScratch_;
     std::vector<analyticFaceAccumulator> analyticVFaceScratch_;
     std::vector<float> uSolidVelocity_;
@@ -773,6 +792,7 @@ private:
     bool analyticCutCellBoundedCellAreasEnabled_ = true;
     bool analyticCutCellBoundedFaceClippingEnabled_ = true;
     bool analyticCutCellMovableSchurFacesEnabled_ = true;
+    bool analyticCutCellCurrentGeometryReuseEnabled_ = true;
     bool cutCellPressureTimingEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;

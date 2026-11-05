@@ -1039,6 +1039,14 @@ void ForEachAnalyticFacePortion( const std::vector<analyticDisjointShape2>& shap
 
 } // namespace
 
+// Current-step immutable analytic geometry is shared by geometry, Schur
+// assembly and post-pressure boundary synchronization. Swept intermediate
+// poses intentionally build their own independent shape snapshots.
+struct analyticDisjointCache2
+{
+    std::vector<analyticDisjointShape2> shapes;
+};
+
 fluidField2::fluidField2( int width, int height, float cellSize, vec2 origin )
     : width_( width ), height_( height ), cellSize_( cellSize ), origin_( origin )
 {
@@ -1104,6 +1112,7 @@ void fluidField2::invalidateObstacleHistory() noexcept
     previousDisjointAnalyticGeometry_ = false;
     previousContainedCircleIndex_ = -1;
     previousPartialCircleOverlap_ = false;
+    analyticDisjointCache_.reset();
     previousObstacles_.clear();
     sweptFaceFlux_ = {};
     cutCellPressure_ = {};
@@ -1174,6 +1183,7 @@ void fluidField2::clear() noexcept
     std::fill( sweptVVolume_.begin(), sweptVVolume_.end(), 0.0f );
     analyticUBlockedFaces_.clear();
     analyticVBlockedFaces_.clear();
+    analyticDisjointCache_.reset();
     analyticUFaceScratch_.clear();
     analyticVFaceScratch_.clear();
     previousObstacles_.clear();
@@ -1520,7 +1530,9 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     // 선택적 가중 압력 경로에서 면 개방율과 강체 속도를 직접 사용한다.
     // Disjoint analytic and sampled union use different area discretizations.
     // A transition between them is a new geometry snapshot, not a swept ΔV.
-    const auto disjointShapes = disjointAnalyticCutCellEnabled_
+    // Rebuild for this World snapshot. Swept intermediate snapshots differ.
+    analyticDisjointCache_.reset();
+    auto disjointShapes = disjointAnalyticCutCellEnabled_
         ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
     const bool disjointGeometry = !disjointShapes.empty();
     analyticUBlockedFaces_.clear();
@@ -1974,6 +1986,17 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     cutCellTransition_.fluidVolume = static_cast<float>( current * volumeScale );
     cutCellTransition_.coveredVolume = static_cast<float>( covered * volumeScale );
     cutCellTransition_.releasedVolume = static_cast<float>( released * volumeScale );
+    // The cached list is consumed only by coupled Cut-cell pressure. Do not
+    // allocate it for one-way fields or scenes with immovable obstacles only.
+    const bool needsCoupledGeometry = cutCellProjectionEnabled_ &&
+        cutCellCoupledProjectionEnabled_ &&
+        std::any_of( obstacles.begin(), obstacles.end(), []( const fluidShapeObstacle2& body )
+        {
+            return body.inverseMass > 0.0f || body.inverseInertia > 0.0f;
+        } );
+    if( analyticCutCellCurrentGeometryReuseEnabled_ && disjointGeometry && needsCoupledGeometry )
+        analyticDisjointCache_ = std::make_shared<const analyticDisjointCache2>(
+            analyticDisjointCache2{ std::move( disjointShapes ) } );
 }
 
 void fluidField2::remapExposedFaces()
@@ -2678,8 +2701,11 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
     double changedSquared = 0.0;
     int boundaryFaces = 0;
     int partialFaces = 0;
-    const auto disjointShapes = disjointAnalyticCutCellEnabled_
-        ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+    const auto referenceShapes = analyticDisjointCache_
+        ? std::vector<analyticDisjointShape2>{} : disjointAnalyticCutCellEnabled_
+            ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+    const auto& disjointShapes = analyticDisjointCache_
+        ? analyticDisjointCache_->shapes : referenceShapes;
     if( !disjointShapes.empty() )
     {
         const double h = cellSize_;
@@ -3710,8 +3736,11 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     };
     if( cutCell )
     {
-        const auto disjointShapes = disjointAnalyticCutCellEnabled_
-            ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+        const auto referenceShapes = analyticDisjointCache_
+            ? std::vector<analyticDisjointShape2>{} : disjointAnalyticCutCellEnabled_
+                ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+        const auto& disjointShapes = analyticDisjointCache_
+            ? analyticDisjointCache_->shapes : referenceShapes;
         if( !disjointShapes.empty() )
         {
             const double h = cellSize_;

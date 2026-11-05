@@ -1914,7 +1914,7 @@ void checkBoundedAnalyticFaceClippingDifferential()
         }
 }
 
-void checkBoundedAnalyticCellAreaDifferential()
+void checkBoundedAnalyticCellAreaDifferential( bool compareGeometryReuse = false )
 {
     constexpr float dt = 1.0f / 60.0f;
     for( float h : { 0.5f, 0.25f } )
@@ -1970,7 +1970,10 @@ void checkBoundedAnalyticCellAreaDifferential()
                 field->setDisjointAnalyticCutCellEnabled( true );
                 field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
             }
-            reference.setAnalyticCutCellBoundedCellAreasEnabled( false );
+            if( compareGeometryReuse )
+                reference.setAnalyticCutCellCurrentGeometryReuseEnabled( false );
+            else
+                reference.setAnalyticCutCellBoundedCellAreasEnabled( false );
             std::vector<fluidObstacleForce2> oldForces( bodies.size() ), newForces( bodies.size() );
             for( int frame = 0; frame < 3; ++frame )
             {
@@ -1996,6 +1999,23 @@ void checkBoundedAnalyticCellAreaDifferential()
                         check( reference.getCellFluidFraction( x, y ) ==
                             bounded.getCellFluidFraction( x, y ),
                             "bounded analytic cell areas must preserve every cell fraction" );
+                if( compareGeometryReuse )
+                {
+                    for( int y = 0; y < reference.getHeight(); ++y )
+                        for( int x = 1; x < reference.getWidth(); ++x )
+                            check( reference.getUFaceOpenFraction( x, y ) ==
+                                    bounded.getUFaceOpenFraction( x, y ) &&
+                                reference.getUFaceSolidVelocity( x, y ) ==
+                                    bounded.getUFaceSolidVelocity( x, y ),
+                                "same-step analytic reuse must preserve each U-face aperture and solid speed" );
+                    for( int y = 1; y < reference.getHeight(); ++y )
+                        for( int x = 0; x < reference.getWidth(); ++x )
+                            check( reference.getVFaceOpenFraction( x, y ) ==
+                                    bounded.getVFaceOpenFraction( x, y ) &&
+                                reference.getVFaceSolidVelocity( x, y ) ==
+                                    bounded.getVFaceSolidVelocity( x, y ),
+                                "same-step analytic reuse must preserve each V-face aperture and solid speed" );
+                }
                 for( std::size_t i = 0; i < bodies.size(); ++i )
                 {
                     const float scale = 1.0f + Length( oldForces[i].force );
@@ -2014,9 +2034,12 @@ void checkBoundedAnalyticCellAreaDifferential()
             }
             bounded.clear();
             reference.clear();
-            check( bounded.isAnalyticCutCellBoundedCellAreasEnabled() &&
-                !reference.isAnalyticCutCellBoundedCellAreasEnabled(),
-                "clear must preserve the analytic cell area selection" );
+            check( compareGeometryReuse
+                    ? bounded.isAnalyticCutCellCurrentGeometryReuseEnabled() &&
+                        !reference.isAnalyticCutCellCurrentGeometryReuseEnabled()
+                    : bounded.isAnalyticCutCellBoundedCellAreasEnabled() &&
+                        !reference.isAnalyticCutCellBoundedCellAreasEnabled(),
+                "clear must preserve the selected analytic geometry option" );
         }
 }
 
@@ -3637,6 +3660,7 @@ int main()
     checkIndexedAnalyticBoundarySyncCircleUnion();
     checkBoundedAnalyticFaceClippingDifferential();
     checkBoundedAnalyticCellAreaDifferential();
+    checkBoundedAnalyticCellAreaDifferential( true );
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();

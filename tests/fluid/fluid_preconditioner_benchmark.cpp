@@ -79,7 +79,7 @@ std::vector<fluidShapeObstacle2> makeObstacles( int mode, int staticCount = 0 )
 result measure( float h, int mode, int preconditioner, int staticCount = 0,
     bool indexedBoundaries = true, bool boundedAreas = true, bool geometryTiming = false,
     bool boundedFaceClipping = true, bool movableOnlySchur = true,
-    bool indexedBoundarySync = true )
+    bool indexedBoundarySync = true, bool reuseCurrentGeometry = true )
 {
     const auto bodies = makeObstacles( mode, staticCount );
     std::vector<double> totalSamples, pressureSamples, iterationSamples, residualSamples, geometrySamples;
@@ -104,6 +104,7 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
         field.setAnalyticCutCellBoundedFaceClippingEnabled( boundedFaceClipping );
         field.setAnalyticCutCellMovableSchurFacesEnabled( movableOnlySchur );
         field.setAnalyticCutCellIndexedBoundarySyncEnabled( indexedBoundarySync );
+        field.setAnalyticCutCellCurrentGeometryReuseEnabled( reuseCurrentGeometry );
         field.setStepTimingEnabled( geometryTiming );
         field.setCutCellPressureTimingEnabled( true );
         field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
@@ -161,6 +162,25 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
 
 int main( int argc, char** argv )
 {
+    const bool geometryReuseSweep = argc > 1 && std::string_view( argv[1] ) == "--geometry-reuse-sweep";
+    if( geometryReuseSweep )
+    {
+        std::puts( "static_obstacles,cell_m,reuse_mode,converged,attempts,pressure_stage_ms,"
+            "schur_assembly_ms,pcg_ms,step_ms,iterations,relative_residual" );
+        for( float h : { 0.5f, 0.25f } )
+            for( int count : { 0, 16, 48 } )
+                for( bool reuse : { false, true } )
+                {
+                    const result stats = measure( h, 1, 4, count, true, true, true,
+                        true, true, true, reuse );
+                    std::printf( "%d,%.2f,%s,%d,%d,%.5f,%.5f,%.5f,%.5f,%.0f,%.6g\n",
+                        count, h, reuse ? "reuse" : "rebuild",
+                        stats.converged, stats.attempts, stats.pressureStageMilliseconds,
+                        stats.phases.assembly, stats.pressureMilliseconds,
+                        stats.stepMilliseconds, stats.iterations, stats.residual );
+                }
+        return 0;
+    }
     const bool boundarySyncSweep = argc > 1 && std::string_view( argv[1] ) == "--boundary-sync-sweep";
     if( boundarySyncSweep )
     {
