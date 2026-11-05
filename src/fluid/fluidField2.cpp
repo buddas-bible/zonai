@@ -2955,6 +2955,19 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
         return;
     }
 
+    // Swept velocity is derived from the change in transform, not the
+    // obstacle's instantaneous velocity or inverse mass. Kinematic moving
+    // walls are included; physically stationary bodies contribute zero flux.
+    std::vector<int> movingOwners;
+    if( analyticCutCellMovingSweptFacesEnabled_ )
+    {
+        movingOwners.reserve( obstacles.size() );
+        for( std::size_t i = 0; i < obstacles.size(); ++i )
+            if( linearSpeeds[i].x != 0.0f || linearSpeeds[i].y != 0.0f ||
+                angularSpeeds[i] != 0.0f )
+                movingOwners.push_back( static_cast<int>( i ) );
+    }
+
     const int faceSamples = cutCellSampleCount_;
     constexpr int maxTimeSamples = 64;
     int timeSamples = std::clamp(
@@ -2990,8 +3003,7 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                     const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
                     const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
                     double flux = 0.0;
-                    ForEachAnalyticFacePortion( disjointShapes, vertical, normal, low, low + h,
-                        [&]( std::size_t i, analyticCircleInterval clipped )
+                    const auto addPortion = [&]( std::size_t i, analyticCircleInterval clipped )
                     {
                         const vec2 point = vertical
                             ? vec2{ static_cast<float>( normal ), static_cast<float>( clipped.midpoint ) }
@@ -2999,7 +3011,23 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                         const vec2 velocity = linearSpeeds[i] +
                             Cross( angularSpeeds[i], point - intermediate[i].transform.position );
                         flux += clipped.length * ( vertical ? velocity.x : velocity.y );
-                    } );
+                    };
+                    if( analyticCutCellMovingSweptFacesEnabled_ && disjointShapes.size() > 2 )
+                    {
+                        // For 3+ disjoint analytic shapes, zero-transform-motion
+                        // bodies cannot contribute to face-swept volume. Keep
+                        // input order and reclip intermediate poses each time;
+                        // two-circle overlap/containment still uses ownership.
+                        for( int owner : movingOwners )
+                        {
+                            const auto clipped = ClipDisjointShapeFace(
+                                disjointShapes[owner], vertical, normal, low, low + h );
+                            if( clipped.length > 0.0 ) addPortion( owner, clipped );
+                        }
+                    }
+                    else
+                        ForEachAnalyticFacePortion( disjointShapes, vertical, normal, low, low + h,
+                            addPortion );
                     const float swept = intervalDt * static_cast<float>( flux );
                     if( vertical ) sweptU[uIndex( x, y )] += swept;
                     else sweptV[vIndex( x, y )] += swept;
