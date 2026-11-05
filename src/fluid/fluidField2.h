@@ -529,6 +529,18 @@ public:
         return analyticCutCellCurrentGeometryReuseEnabled_;
     }
 
+    // Analytic swept flux의 중간 시간 샘플은 실제 위치/회전이 움직인
+    // Shape의 경계만 합산한다. 서로 분리된 다중 Shape에서만 적용.
+    // 기본 ON. OFF는 정지 Shape를 포함한 원래 전체 face 조회 경로.
+    void setAnalyticCutCellMovingSweptFacesEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellMovingSweptFacesEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellMovingSweptFacesEnabled() const noexcept
+    {
+        return analyticCutCellMovingSweptFacesEnabled_;
+    }
+
     // 벤치마크 전용 PCG 시간 측정. 기본 OFF로 일반 Step에 시계 측정 비용 없음.
     void setCutCellPressureTimingEnabled( bool enabled ) noexcept { cutCellPressureTimingEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellPressureTimingEnabled() const noexcept { return cutCellPressureTimingEnabled_; }
@@ -793,6 +805,7 @@ private:
     bool analyticCutCellBoundedFaceClippingEnabled_ = true;
     bool analyticCutCellMovableSchurFacesEnabled_ = true;
     bool analyticCutCellCurrentGeometryReuseEnabled_ = true;
+    bool analyticCutCellMovingSweptFacesEnabled_ = true;
     bool cutCellPressureTimingEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
