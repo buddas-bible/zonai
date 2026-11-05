@@ -2716,10 +2716,25 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
             ++boundaryFaces;
             if( open > 0.0f ) ++partialFaces;
         };
-        for( int y = 0; y < height_; ++y )
-            for( int x = 1; x < width_; ++x ) updateFace( true, x, y );
-        for( int y = 1; y < height_; ++y )
-            for( int x = 0; x < width_; ++x ) updateFace( false, x, y );
+        if( analyticCutCellIndexedBoundarySyncEnabled_ )
+        {
+            // The geometry pass stored every positive blocked interval, even
+            // when the float aperture rounds to fully open. Since updateFace
+            // already skips open >= 1, these are an exact superset of faces
+            // that can receive a predicted solid boundary velocity change.
+            // Preserve U-then-V row-major traversal and per-face reductions.
+            for( int face : analyticUBlockedFaces_ )
+                updateFace( true, face % ( width_ + 1 ), face / ( width_ + 1 ) );
+            for( int face : analyticVBlockedFaces_ )
+                updateFace( false, face % width_, face / width_ );
+        }
+        else
+        {
+            for( int y = 0; y < height_; ++y )
+                for( int x = 1; x < width_; ++x ) updateFace( true, x, y );
+            for( int y = 1; y < height_; ++y )
+                for( int x = 0; x < width_; ++x ) updateFace( false, x, y );
+        }
     }
     else
     {
