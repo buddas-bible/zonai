@@ -1633,7 +1633,8 @@ void checkCachedSchurLaplacianDifferential()
         }
 }
 
-void checkIndexedAnalyticBoundaryDifferential( bool compareMovableOnly = false )
+void checkIndexedAnalyticBoundaryDifferential( bool compareMovableOnly = false,
+    bool compareBoundarySync = false )
 {
     constexpr float dt = 1.0f / 60.0f;
     for( float h : { 0.5f, 0.25f } )
@@ -1679,7 +1680,9 @@ void checkIndexedAnalyticBoundaryDifferential( bool compareMovableOnly = false )
                 field->setDisjointAnalyticCutCellEnabled( true );
                 field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
             }
-            if( compareMovableOnly )
+            if( compareBoundarySync )
+                reference.setAnalyticCutCellIndexedBoundarySyncEnabled( false );
+            else if( compareMovableOnly )
                 reference.setAnalyticCutCellMovableSchurFacesEnabled( false );
             else
                 reference.setAnalyticCutCellIndexedBoundaryFacesEnabled( false );
@@ -1700,6 +1703,23 @@ void checkIndexedAnalyticBoundaryDifferential( bool compareMovableOnly = false )
                 check( indexed.getCutCellTransition().usedDisjointAnalyticGeometry &&
                     reference.getCutCellTransition().usedDisjointAnalyticGeometry,
                     "indexed analytic differential must remain on the analytic geometry path" );
+                if( compareBoundarySync )
+                {
+                    for( int y = 0; y < reference.getHeight(); ++y )
+                        for( int x = 1; x < reference.getWidth(); ++x )
+                            check( reference.getUFaceOpenFraction( x, y ) ==
+                                    indexed.getUFaceOpenFraction( x, y ) &&
+                                reference.getUFaceSolidVelocity( x, y ) ==
+                                    indexed.getUFaceSolidVelocity( x, y ),
+                                "indexed boundary sync must preserve every U-face aperture and solid speed" );
+                    for( int y = 1; y < reference.getHeight(); ++y )
+                        for( int x = 0; x < reference.getWidth(); ++x )
+                            check( reference.getVFaceOpenFraction( x, y ) ==
+                                    indexed.getVFaceOpenFraction( x, y ) &&
+                                reference.getVFaceSolidVelocity( x, y ) ==
+                                    indexed.getVFaceSolidVelocity( x, y ),
+                                "indexed boundary sync must preserve every V-face aperture and solid speed" );
+                }
                 for( std::size_t i = 0; i < bodies.size(); ++i )
                 {
                     const float scale = 1.0f + Length( refForces[i].force );
@@ -1718,12 +1738,15 @@ void checkIndexedAnalyticBoundaryDifferential( bool compareMovableOnly = false )
             }
             reference.clear();
             indexed.clear();
-            check( compareMovableOnly
-                    ? !reference.isAnalyticCutCellMovableSchurFacesEnabled() &&
-                        indexed.isAnalyticCutCellMovableSchurFacesEnabled()
-                    : !reference.isAnalyticCutCellIndexedBoundaryFacesEnabled() &&
-                        indexed.isAnalyticCutCellIndexedBoundaryFacesEnabled(),
-                "clear must preserve the selected analytic Schur assembly mode" );
+            check( compareBoundarySync
+                    ? !reference.isAnalyticCutCellIndexedBoundarySyncEnabled() &&
+                        indexed.isAnalyticCutCellIndexedBoundarySyncEnabled()
+                    : compareMovableOnly
+                        ? !reference.isAnalyticCutCellMovableSchurFacesEnabled() &&
+                            indexed.isAnalyticCutCellMovableSchurFacesEnabled()
+                        : !reference.isAnalyticCutCellIndexedBoundaryFacesEnabled() &&
+                            indexed.isAnalyticCutCellIndexedBoundaryFacesEnabled(),
+                "clear must preserve the selected analytic boundary processing mode" );
         }
 }
 
@@ -3548,6 +3571,7 @@ int main()
     checkCachedSchurLaplacianDifferential();
     checkIndexedAnalyticBoundaryDifferential();
     checkIndexedAnalyticBoundaryDifferential( true );
+    checkIndexedAnalyticBoundaryDifferential( false, true );
     checkBoundedAnalyticFaceClippingDifferential();
     checkBoundedAnalyticCellAreaDifferential();
     checkCutCellTemporalContinuity();
