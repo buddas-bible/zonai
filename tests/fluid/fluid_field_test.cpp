@@ -3231,7 +3231,7 @@ void checkSweptSolidFaceFlux()
         "clear must reset swept volume diagnostics and previous shape history" );
 }
 
-void checkMovingOnlyAnalyticSweptDifferential()
+void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false )
 {
     constexpr float dt = 1.0f / 60.0f;
     for( float h : { 0.5f, 0.25f } )
@@ -3282,7 +3282,10 @@ void checkMovingOnlyAnalyticSweptDifferential()
                     field->setAdaptiveSweptSamplingEnabled( true );
                 field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
             }
-            reference.setAnalyticCutCellMovingSweptFacesEnabled( false );
+            if( compareBounded )
+                reference.setAnalyticCutCellBoundedSweptFacesEnabled( false );
+            else
+                reference.setAnalyticCutCellMovingSweptFacesEnabled( false );
             std::vector<fluidObstacleForce2> refForces( bodies.size() ), newForces( bodies.size() );
             for( int frame = 0; frame < 3; ++frame )
             {
@@ -3333,9 +3336,12 @@ void checkMovingOnlyAnalyticSweptDifferential()
             }
             reference.clear();
             movingOnly.clear();
-            check( !reference.isAnalyticCutCellMovingSweptFacesEnabled() &&
-                movingOnly.isAnalyticCutCellMovingSweptFacesEnabled(),
-                "clear must preserve analytic moving-only swept traversal selection" );
+            check( compareBounded
+                    ? !reference.isAnalyticCutCellBoundedSweptFacesEnabled() &&
+                        movingOnly.isAnalyticCutCellBoundedSweptFacesEnabled()
+                    : !reference.isAnalyticCutCellMovingSweptFacesEnabled() &&
+                        movingOnly.isAnalyticCutCellMovingSweptFacesEnabled(),
+                "clear must preserve selected analytic swept traversal mode" );
         }
 }
 
@@ -3772,6 +3778,7 @@ int main()
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkMovingOnlyAnalyticSweptDifferential();
+    checkMovingOnlyAnalyticSweptDifferential( true );
     checkAdaptiveSweptTemporalQuadrature();
     checkConservativeMacAdvection();
     checkConservativeTracerTransport();
