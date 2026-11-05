@@ -1999,6 +1999,23 @@ void checkBoundedAnalyticCellAreaDifferential( bool compareGeometryReuse = false
                         check( reference.getCellFluidFraction( x, y ) ==
                             bounded.getCellFluidFraction( x, y ),
                             "bounded analytic cell areas must preserve every cell fraction" );
+                if( compareGeometryReuse )
+                {
+                    for( int y = 0; y < reference.getHeight(); ++y )
+                        for( int x = 1; x < reference.getWidth(); ++x )
+                            check( reference.getUFaceOpenFraction( x, y ) ==
+                                    bounded.getUFaceOpenFraction( x, y ) &&
+                                reference.getUFaceSolidVelocity( x, y ) ==
+                                    bounded.getUFaceSolidVelocity( x, y ),
+                                "same-step analytic reuse must preserve each U-face aperture and solid speed" );
+                    for( int y = 1; y < reference.getHeight(); ++y )
+                        for( int x = 0; x < reference.getWidth(); ++x )
+                            check( reference.getVFaceOpenFraction( x, y ) ==
+                                    bounded.getVFaceOpenFraction( x, y ) &&
+                                reference.getVFaceSolidVelocity( x, y ) ==
+                                    bounded.getVFaceSolidVelocity( x, y ),
+                                "same-step analytic reuse must preserve each V-face aperture and solid speed" );
+                }
                 for( std::size_t i = 0; i < bodies.size(); ++i )
                 {
                     const float scale = 1.0f + Length( oldForces[i].force );
