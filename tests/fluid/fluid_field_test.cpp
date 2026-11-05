@@ -3231,6 +3231,110 @@ void checkSweptSolidFaceFlux()
         "clear must reset swept volume diagnostics and previous shape history" );
 }
 
+void checkMovingOnlyAnalyticSweptDifferential()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    for( float h : { 0.5f, 0.25f } )
+        for( int staticCount : { 16, 48 } )
+        {
+            // Body 1 is kinematic but moving; use transform displacement, not
+            // inverse mass, to select swept surface contributors.
+            const vec2 first{ -0.30f, -0.20f };
+            const vec2 second{ 1.45f, 0.20f };
+            std::vector<fluidShapeObstacle2> bodies{
+                { circle2{ {}, 0.45f }, { first, {} }, first,
+                    {}, 0.0f, 0.5f, 0.6f },
+                { circle2{ {}, 0.45f }, { second, {} }, second,
+                    {}, 0.0f, 0.0f, 0.0f }
+            };
+            int added = 0;
+            for( int row = 0; row < 7 && added < staticCount; ++row )
+                for( int col = 0; col < 10 && added < staticCount; ++col )
+                {
+                    const vec2 position{ -5.25f + 1.05f * col, -3.15f + 0.95f * row };
+                    bool separated = true;
+                    for( std::size_t i = 0; i < 2; ++i )
+                        if( LengthSquared( position - bodies[i].center ) < 1.25f * 1.25f )
+                        {
+                            separated = false;
+                            break;
+                        }
+                    if( !separated ) continue;
+                    bodies.push_back( { circle2{ {}, 0.12f }, { position, {} },
+                        position, {}, 0.0f, 0.0f, 0.0f } );
+                    ++added;
+                }
+            check( added == staticCount,
+                "moving swept differential requires enough separated stationary shapes" );
+
+            fluidField2 reference{ static_cast<int>( 12.0f / h ),
+                static_cast<int>( 8.0f / h ), h, { -6.0f, -4.0f } };
+            fluidField2 movingOnly{ static_cast<int>( 12.0f / h ),
+                static_cast<int>( 8.0f / h ), h, { -6.0f, -4.0f } };
+            check( movingOnly.isAnalyticCutCellMovingSweptFacesEnabled(),
+                "moving-only analytic swept traversal must be enabled by default" );
+            for( fluidField2* field : { &reference, &movingOnly } )
+            {
+                field->setCutCellProjectionEnabled( true );
+                field->setCutCellCoupledProjectionEnabled( true );
+                field->setDisjointAnalyticCutCellEnabled( true );
+                if( staticCount == 16 && h == 0.5f )
+                    field->setAdaptiveSweptSamplingEnabled( true );
+                field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
+            }
+            reference.setAnalyticCutCellMovingSweptFacesEnabled( false );
+            std::vector<fluidObstacleForce2> refForces( bodies.size() ), newForces( bodies.size() );
+            for( int frame = 0; frame < 3; ++frame )
+            {
+                reference.step( dt, bodies, refForces, 200 );
+                movingOnly.step( dt, bodies, newForces, 200 );
+                const auto& a = reference.getSweptFaceFlux();
+                const auto& b = movingOnly.getSweptFaceFlux();
+                check( a.usedSweptFlux == b.usedSweptFlux &&
+                    a.timeSamples == b.timeSamples &&
+                    a.refinements == b.refinements &&
+                    a.totalAbsoluteFlux == b.totalAbsoluteFlux &&
+                    a.rawGeometryMismatch == b.rawGeometryMismatch &&
+                    a.geometryMismatch == b.geometryMismatch,
+                    "moving-only swept faces must preserve each swept volume diagnostic exactly" );
+                if( frame > 0 )
+                    check( b.usedSweptFlux && b.timeSamples >= 2 && b.totalAbsoluteFlux > 0.0f,
+                        "moving-only swept comparison must integrate time-varying geometry" );
+                const auto& pa = reference.getCutCellPressure();
+                const auto& pb = movingOnly.getCutCellPressure();
+                check( pa.usedCoupledProjection && pb.usedCoupledProjection &&
+                    pa.coupledStatus == pb.coupledStatus &&
+                    pa.coupledIterations == pb.coupledIterations &&
+                    pa.coupledRelativeResidual == pb.coupledRelativeResidual &&
+                    pa.predictedContinuityRms == pb.predictedContinuityRms,
+                    "moving-only swept faces must preserve coupled pressure and continuity" );
+                for( std::size_t i = 0; i < bodies.size(); ++i )
+                    check( refForces[i].force == newForces[i].force &&
+                        refForces[i].torque == newForces[i].torque,
+                        "moving-only swept faces must preserve per-body traction" );
+                check( reference.getFluidMomentum() == movingOnly.getFluidMomentum(),
+                    "moving-only swept faces must preserve fluid momentum" );
+                if( frame == 0 )
+                {
+                    bodies[0].transform.position += vec2{ 0.24f, 0.08f };
+                    bodies[1].transform.position += vec2{ -0.12f, -0.09f };
+                }
+                else if( frame == 1 )
+                {
+                    bodies[0].transform.position += vec2{ -0.14f, 0.03f };
+                    bodies[1].transform.position += vec2{ 0.10f, 0.04f };
+                }
+                for( std::size_t i = 0; i < 2; ++i )
+                    bodies[i].center = bodies[i].transform.position;
+            }
+            reference.clear();
+            movingOnly.clear();
+            check( !reference.isAnalyticCutCellMovingSweptFacesEnabled() &&
+                movingOnly.isAnalyticCutCellMovingSweptFacesEnabled(),
+                "clear must preserve analytic moving-only swept traversal selection" );
+        }
+}
+
 void checkAdaptiveSweptTemporalQuadrature()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -3663,6 +3767,7 @@ int main()
     checkBoundedAnalyticCellAreaDifferential( true );
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
+    checkMovingOnlyAnalyticSweptDifferential();
     checkAdaptiveSweptTemporalQuadrature();
     checkConservativeMacAdvection();
     checkConservativeTracerTransport();
