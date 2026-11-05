@@ -158,10 +158,82 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
     return stats;
 }
 
+struct sweptResult
+{
+    double stepMilliseconds = 0.0;
+    double sweptMilliseconds = 0.0;
+    double absoluteFlux = 0.0;
+    double geometryMismatch = 0.0;
+    int timeSamples = 0;
+    int converged = 0;
+};
+
+sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly )
+{
+    std::vector<double> stepSamples, sweptSamples, fluxSamples, mismatchSamples, timeSamples;
+    sweptResult result{};
+    for( int trial = 0; trial < rounds + 1; ++trial )
+    {
+        auto bodies = makeObstacles( 1, staticCount );
+        fluidField2 field{ static_cast<int>( 12.0f / h ),
+            static_cast<int>( 8.0f / h ), h, { -6.0f, -4.0f } };
+        field.setCutCellProjectionEnabled( true );
+        field.setCutCellCoupledProjectionEnabled( true );
+        field.setDisjointAnalyticCutCellEnabled( true );
+        field.setAnalyticCutCellMovingSweptFacesEnabled( movingOnly );
+        field.setStepTimingEnabled( true );
+        field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
+        std::vector<fluidObstacleForce2> feedback( bodies.size() );
+
+        // Initial placement supplies a history snapshot, not a swept path.
+        field.step( dt, bodies, feedback, 200 );
+        bodies[0].transform.position += vec2{ 0.16f, 0.05f };
+        bodies[1].transform.position += vec2{ -0.10f, -0.06f };
+        for( int i = 0; i < 2; ++i )
+            bodies[i].center = bodies[i].transform.position;
+
+        const auto started = std::chrono::steady_clock::now();
+        field.step( dt, bodies, feedback, 200 );
+        const double elapsed = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - started ).count();
+        if( trial == 0 ) continue;
+        stepSamples.push_back( elapsed );
+        sweptSamples.push_back( field.getStepTiming().swept );
+        fluxSamples.push_back( field.getSweptFaceFlux().totalAbsoluteFlux );
+        mismatchSamples.push_back( field.getSweptFaceFlux().geometryMismatch );
+        timeSamples.push_back( field.getSweptFaceFlux().timeSamples );
+        result.converged += field.getCutCellPressure().usedCoupledProjection ? 1 : 0;
+    }
+    result.stepMilliseconds = median( stepSamples );
+    result.sweptMilliseconds = median( sweptSamples );
+    result.absoluteFlux = median( fluxSamples );
+    result.geometryMismatch = median( mismatchSamples );
+    result.timeSamples = static_cast<int>( median( timeSamples ) );
+    return result;
+}
+
 } // namespace
 
 int main( int argc, char** argv )
 {
+    const bool sweptMotionSweep = argc > 1 && std::string_view( argv[1] ) == "--swept-motion-sweep";
+    if( sweptMotionSweep )
+    {
+        std::puts( "static_obstacles,cell_m,swept_mode,converged,attempts,samples,"
+            "swept_ms,step_ms,absolute_flux,geometry_mismatch" );
+        for( float h : { 0.5f, 0.25f } )
+            for( int count : { 0, 16, 48 } )
+                for( bool movingOnly : { false, true } )
+                {
+                    const sweptResult stats = measureMovingSwept( h, count, movingOnly );
+                    std::printf( "%d,%.2f,%s,%d,%d,%d,%.5f,%.5f,%.6g,%.6g\n",
+                        count, h, movingOnly ? "moving" : "all",
+                        stats.converged, rounds, stats.timeSamples,
+                        stats.sweptMilliseconds, stats.stepMilliseconds,
+                        stats.absoluteFlux, stats.geometryMismatch );
+                }
+        return 0;
+    }
     const bool geometryReuseSweep = argc > 1 && std::string_view( argv[1] ) == "--geometry-reuse-sweep";
     if( geometryReuseSweep )
     {
