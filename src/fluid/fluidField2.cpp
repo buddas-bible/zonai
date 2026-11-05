@@ -1986,7 +1986,15 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     cutCellTransition_.fluidVolume = static_cast<float>( current * volumeScale );
     cutCellTransition_.coveredVolume = static_cast<float>( covered * volumeScale );
     cutCellTransition_.releasedVolume = static_cast<float>( released * volumeScale );
-    if( analyticCutCellCurrentGeometryReuseEnabled_ && disjointGeometry )
+    // The cached list is consumed only by coupled Cut-cell pressure. Do not
+    // allocate it for one-way fields or scenes with immovable obstacles only.
+    const bool needsCoupledGeometry = cutCellProjectionEnabled_ &&
+        cutCellCoupledProjectionEnabled_ &&
+        std::any_of( obstacles.begin(), obstacles.end(), []( const fluidShapeObstacle2& body )
+        {
+            return body.inverseMass > 0.0f || body.inverseInertia > 0.0f;
+        } );
+    if( analyticCutCellCurrentGeometryReuseEnabled_ && disjointGeometry && needsCoupledGeometry )
         analyticDisjointCache_ = std::make_shared<const analyticDisjointCache2>(
             analyticDisjointCache2{ std::move( disjointShapes ) } );
 }
