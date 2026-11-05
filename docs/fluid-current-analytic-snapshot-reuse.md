@@ -1,0 +1,13 @@
+# Current-step Analytic Cut-cell geometry reuse
+
+The same obstacle span is passed through three phases of one valid Fluid step: `updateCutCellGeometry`, `solveCoupledPressure(..., cutCell=true)`, and `synchronizeCutCellBoundaries`. Previously each phase independently called `BuildDisjointAnalyticShapes`, rebuilding each shape's transformed analytic geometry and checking all relevant shape pairs.
+
+The new **default-on** `setAnalyticCutCellCurrentGeometryReuseEnabled(bool)` stores an immutable, opaque snapshot **after the current geometry pass has completed**, and the later Schur and post-pressure boundary phases reuse its exact shape list. A `shared_ptr<const analyticDisjointCache2>` in `fluidField2` keeps the large analytic polygon/capsule representations out of the public header, while allowing the existing value-semantic field object to retain a valid immutable snapshot if copied. Each new geometry update discards the previous snapshot and constructs geometry for the **current** obstacle span; disabling the option or calling `clear()`/`invalidateObstacleHistory()` resets it.
+
+**Do not reuse snapshots across different times.** The moving-boundary swept-flux integrator evaluates interpolated transforms inside sub-time samples. It still calls `BuildDisjointAnalyticShapes(intermediate)` for **each distinct intermediate pose**. The cache is not read in that path. The cache is likewise not used for sampled fallback, binary MAC, invalid analytic unions, or when geometry reuse is explicitly disabled.
+
+The reference `reuse=false` path recreates the same analytic list in Schur assembly and boundary synchronization independently. Pressure equations, body masses/inertias, face clipping, preconditioner, and fluid substep integration are unchanged.
+
+Regressions compare reuse ON vs OFF in moving, partially overlapping, contained-circle and 48-static-body disjoint scenes at 0.5m and 0.25m cell sizes. They compare the per-cell fluid fractions exactly, coupled PCG convergence/iterations/residual, pressure traction, fluid volume and momentum over successive frames. The same test also verifies that `clear()` does not change the toggle setting. Existing swept-flux and temporal-continuity tests still run against the resulting new default.
+
+`fluidPreconditionerBenchmark --geometry-reuse-sweep` compares matched rebuild/reuse runs with 0/16/48 static bodies on the same Windows Release CI runner. It reports the pressure-stage median, Schur assembly phase median, coupled PCG median, whole step median and convergence information. Timings are **informational only**, not a performance pass/fail gate; improvements should not be assumed for tiny scenes or all CPUs.
