@@ -1633,6 +1633,68 @@ void checkCachedSchurLaplacianDifferential()
         }
 }
 
+void checkIndexedAnalyticBoundarySyncCircleUnion()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    for( float h : { 0.5f, 0.25f } )
+        for( int mode = 0; mode < 2; ++mode )
+        {
+            const bool contained = mode == 1;
+            const vec2 first{ -0.21f, -0.18f };
+            const vec2 second = contained ? vec2{ -0.12f, -0.12f } :
+                vec2{ 0.26f, 0.19f };
+            std::array<fluidShapeObstacle2, 2> bodies{{
+                { circle2{ {}, contained ? 0.78f : 0.58f }, { first, {} }, first,
+                    { 0.95f, -0.30f }, 0.70f, 0.35f, 1.10f },
+                { circle2{ {}, contained ? 0.18f : 0.58f }, { second, {} }, second,
+                    { -0.65f, 0.75f }, -0.55f, 0.80f, 0.70f }
+            }};
+            fluidField2 reference{ static_cast<int>( 12.0f / h ),
+                static_cast<int>( 8.0f / h ), h, { -6.0f, -4.0f } };
+            fluidField2 indexed{ static_cast<int>( 12.0f / h ),
+                static_cast<int>( 8.0f / h ), h, { -6.0f, -4.0f } };
+            for( fluidField2* field : { &reference, &indexed } )
+            {
+                field->setCutCellProjectionEnabled( true );
+                field->setCutCellCoupledProjectionEnabled( true );
+                field->setDisjointAnalyticCutCellEnabled( true );
+                field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
+            }
+            reference.setAnalyticCutCellIndexedBoundarySyncEnabled( false );
+            std::array<fluidObstacleForce2, 2> refFeedback{}, indexedFeedback{};
+            for( int frame = 0; frame < 3; ++frame )
+            {
+                reference.step( dt, bodies, refFeedback, 200 );
+                indexed.step( dt, bodies, indexedFeedback, 200 );
+                const auto& a = reference.getCutCellPressure();
+                const auto& b = indexed.getCutCellPressure();
+                check( a.usedCoupledProjection && b.usedCoupledProjection &&
+                    a.coupledIterations == b.coupledIterations &&
+                    std::abs( a.coupledRelativeResidual - b.coupledRelativeResidual ) < 1.0e-6f &&
+                    std::abs( a.predictedContinuityRms - b.predictedContinuityRms ) < 1.0e-5f,
+                    "indexed boundary sync must preserve overlapping-circle continuity" );
+                for( int y = 0; y < reference.getHeight(); ++y )
+                    for( int x = 1; x < reference.getWidth(); ++x )
+                        check( reference.getUFaceSolidVelocity( x, y ) ==
+                            indexed.getUFaceSolidVelocity( x, y ),
+                            "indexed U boundary sync must preserve overlapping-circle solid speed" );
+                for( int y = 1; y < reference.getHeight(); ++y )
+                    for( int x = 0; x < reference.getWidth(); ++x )
+                        check( reference.getVFaceSolidVelocity( x, y ) ==
+                            indexed.getVFaceSolidVelocity( x, y ),
+                            "indexed V boundary sync must preserve overlapping-circle solid speed" );
+                for( std::size_t i = 0; i < bodies.size(); ++i )
+                {
+                    const float scale = 1.0f + Length( refFeedback[i].force );
+                    check( Length( refFeedback[i].force - indexedFeedback[i].force ) <
+                        1.0e-4f * scale, "indexed boundary sync must preserve circle traction" );
+                    bodies[i].transform.position += dt * bodies[i].linearVelocity;
+                    bodies[i].center = bodies[i].transform.position;
+                }
+            }
+        }
+}
+
 void checkIndexedAnalyticBoundaryDifferential( bool compareMovableOnly = false,
     bool compareBoundarySync = false )
 {
@@ -3572,6 +3634,7 @@ int main()
     checkIndexedAnalyticBoundaryDifferential();
     checkIndexedAnalyticBoundaryDifferential( true );
     checkIndexedAnalyticBoundaryDifferential( false, true );
+    checkIndexedAnalyticBoundarySyncCircleUnion();
     checkBoundedAnalyticFaceClippingDifferential();
     checkBoundedAnalyticCellAreaDifferential();
     checkCutCellTemporalContinuity();
