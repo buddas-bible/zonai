@@ -1914,7 +1914,7 @@ void checkBoundedAnalyticFaceClippingDifferential()
         }
 }
 
-void checkBoundedAnalyticCellAreaDifferential()
+void checkBoundedAnalyticCellAreaDifferential( bool compareGeometryReuse = false )
 {
     constexpr float dt = 1.0f / 60.0f;
     for( float h : { 0.5f, 0.25f } )
@@ -1970,7 +1970,10 @@ void checkBoundedAnalyticCellAreaDifferential()
                 field->setDisjointAnalyticCutCellEnabled( true );
                 field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
             }
-            reference.setAnalyticCutCellBoundedCellAreasEnabled( false );
+            if( compareGeometryReuse )
+                reference.setAnalyticCutCellCurrentGeometryReuseEnabled( false );
+            else
+                reference.setAnalyticCutCellBoundedCellAreasEnabled( false );
             std::vector<fluidObstacleForce2> oldForces( bodies.size() ), newForces( bodies.size() );
             for( int frame = 0; frame < 3; ++frame )
             {
@@ -2014,9 +2017,12 @@ void checkBoundedAnalyticCellAreaDifferential()
             }
             bounded.clear();
             reference.clear();
-            check( bounded.isAnalyticCutCellBoundedCellAreasEnabled() &&
-                !reference.isAnalyticCutCellBoundedCellAreasEnabled(),
-                "clear must preserve the analytic cell area selection" );
+            check( compareGeometryReuse
+                    ? bounded.isAnalyticCutCellCurrentGeometryReuseEnabled() &&
+                        !reference.isAnalyticCutCellCurrentGeometryReuseEnabled()
+                    : bounded.isAnalyticCutCellBoundedCellAreasEnabled() &&
+                        !reference.isAnalyticCutCellBoundedCellAreasEnabled(),
+                "clear must preserve the selected analytic geometry option" );
         }
 }
 
@@ -3637,6 +3643,7 @@ int main()
     checkIndexedAnalyticBoundarySyncCircleUnion();
     checkBoundedAnalyticFaceClippingDifferential();
     checkBoundedAnalyticCellAreaDifferential();
+    checkBoundedAnalyticCellAreaDifferential( true );
     checkCutCellTemporalContinuity();
     checkSweptSolidFaceFlux();
     checkAdaptiveSweptTemporalQuadrature();
