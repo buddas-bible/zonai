@@ -541,6 +541,17 @@ public:
         return analyticCutCellMovingSweptFacesEnabled_;
     }
 
+    // Moving-only analytic swept 적분에서 Shape AABB와 교차하는 MAC face만 clip.
+    // 기본 ON. OFF는 모든 내부 face를 검사하는 참조 경로.
+    void setAnalyticCutCellBoundedSweptFacesEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellBoundedSweptFacesEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellBoundedSweptFacesEnabled() const noexcept
+    {
+        return analyticCutCellBoundedSweptFacesEnabled_;
+    }
+
     // 벤치마크 전용 PCG 시간 측정. 기본 OFF로 일반 Step에 시계 측정 비용 없음.
     void setCutCellPressureTimingEnabled( bool enabled ) noexcept { cutCellPressureTimingEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellPressureTimingEnabled() const noexcept { return cutCellPressureTimingEnabled_; }
@@ -806,6 +817,7 @@ private:
     bool analyticCutCellMovableSchurFacesEnabled_ = true;
     bool analyticCutCellCurrentGeometryReuseEnabled_ = true;
     bool analyticCutCellMovingSweptFacesEnabled_ = true;
+    bool analyticCutCellBoundedSweptFacesEnabled_ = true;
     bool cutCellPressureTimingEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
