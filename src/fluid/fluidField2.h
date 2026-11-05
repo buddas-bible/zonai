@@ -490,6 +490,18 @@ public:
         return analyticCutCellBoundedFaceClippingEnabled_;
     }
 
+    // 분리된 다중 Shape의 Schur B 조립은 움직일 수 있는 강체의 경계만 검사.
+    // 정적 Shape는 M_body^-1=0이고 PCG 연산에 기여하지 않는다.
+    // 기본 ON. OFF는 모든 Shape를 검사하는 참조 경로.
+    void setAnalyticCutCellMovableSchurFacesEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellMovableSchurFacesEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellMovableSchurFacesEnabled() const noexcept
+    {
+        return analyticCutCellMovableSchurFacesEnabled_;
+    }
+
     // 벤치마크 전용 PCG 시간 측정. 기본 OFF로 일반 Step에 시계 측정 비용 없음.
     void setCutCellPressureTimingEnabled( bool enabled ) noexcept { cutCellPressureTimingEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellPressureTimingEnabled() const noexcept { return cutCellPressureTimingEnabled_; }
@@ -748,6 +760,7 @@ private:
     bool analyticCutCellIndexedBoundaryFacesEnabled_ = true;
     bool analyticCutCellBoundedCellAreasEnabled_ = true;
     bool analyticCutCellBoundedFaceClippingEnabled_ = true;
+    bool analyticCutCellMovableSchurFacesEnabled_ = true;
     bool cutCellPressureTimingEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
