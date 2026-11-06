@@ -552,6 +552,18 @@ public:
         return analyticCutCellBoundedSweptFacesEnabled_;
     }
 
+    // AABB-bounded swept flux는 실제 교차한 MAC face만 적용하며,
+    // U/V 인덱스를 정렬해 기존 row-major 누적 순서를 유지한다.
+    // 기본 ON. OFF는 매 시간 표본에 전체 face scratch를 초기화·순회.
+    void setAnalyticCutCellSparseSweptFacesEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellSparseSweptFacesEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellSparseSweptFacesEnabled() const noexcept
+    {
+        return analyticCutCellSparseSweptFacesEnabled_;
+    }
+
     // 벤치마크 전용 PCG 시간 측정. 기본 OFF로 일반 Step에 시계 측정 비용 없음.
     void setCutCellPressureTimingEnabled( bool enabled ) noexcept { cutCellPressureTimingEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellPressureTimingEnabled() const noexcept { return cutCellPressureTimingEnabled_; }
@@ -818,6 +830,7 @@ private:
     bool analyticCutCellCurrentGeometryReuseEnabled_ = true;
     bool analyticCutCellMovingSweptFacesEnabled_ = true;
     bool analyticCutCellBoundedSweptFacesEnabled_ = true;
+    bool analyticCutCellSparseSweptFacesEnabled_ = true;
     bool cutCellPressureTimingEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
