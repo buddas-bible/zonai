@@ -187,6 +187,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --swept-bounds-sweep
 
+      # Sparse MAC swept flux: compare touched-only output with the dense
+      # full-grid scratch/reference after an actual moving second Step.
+      - name: Sample sparse bounded swept faces (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --swept-sparse-sweep
+
       # A real headless Sandbox World interleave, 8 World substeps and 1/2/4/8 Fluid steps.
       # Frame medians are informational; never gate CI on runner-dependent wall time.
       - name: Sample Wind multi-substep stage profile (Windows Release, informational)
