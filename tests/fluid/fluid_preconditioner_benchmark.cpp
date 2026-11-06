@@ -169,7 +169,7 @@ struct sweptResult
 };
 
 sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
-    bool boundedFaces = true )
+    bool boundedFaces = true, bool sparseFaces = true )
 {
     std::vector<double> stepSamples, sweptSamples, fluxSamples, mismatchSamples, timeSamples;
     sweptResult result{};
@@ -183,6 +183,7 @@ sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
         field.setDisjointAnalyticCutCellEnabled( true );
         field.setAnalyticCutCellMovingSweptFacesEnabled( movingOnly );
         field.setAnalyticCutCellBoundedSweptFacesEnabled( boundedFaces );
+        field.setAnalyticCutCellSparseSweptFacesEnabled( sparseFaces );
         field.setStepTimingEnabled( true );
         field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
         std::vector<fluidObstacleForce2> feedback( bodies.size() );
@@ -218,6 +219,26 @@ sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
 
 int main( int argc, char** argv )
 {
+    const bool sweptSparseSweep = argc > 1 && std::string_view( argv[1] ) == "--swept-sparse-sweep";
+    if( sweptSparseSweep )
+    {
+        std::puts( "static_obstacles,cell_m,swept_mode,converged,attempts,samples,"
+            "swept_ms,step_ms,absolute_flux,geometry_mismatch" );
+        for( float h : { 0.5f, 0.25f } )
+            for( int count : { 0, 16, 48 } )
+                for( bool sparse : { false, true } )
+                {
+                    // All modes use moving-only AABB-bounded clipping. This
+                    // isolates dense full-grid scratch vs touched-face output.
+                    const sweptResult stats = measureMovingSwept( h, count, true, true, sparse );
+                    std::printf( "%d,%.2f,%s,%d,%d,%d,%.5f,%.5f,%.6g,%.6g\n",
+                        count, h, sparse ? "sparse" : "dense",
+                        stats.converged, rounds, stats.timeSamples,
+                        stats.sweptMilliseconds, stats.stepMilliseconds,
+                        stats.absoluteFlux, stats.geometryMismatch );
+                }
+        return 0;
+    }
     const bool sweptBoundsSweep = argc > 1 && std::string_view( argv[1] ) == "--swept-bounds-sweep";
     if( sweptBoundsSweep )
     {
