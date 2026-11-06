@@ -3442,6 +3442,69 @@ void checkBoundedSweptMixedAnalyticShapes( bool compareSparse = false )
     }
 }
 
+void checkSparseSweptSharedFaceOwnerOrder()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    for( float h : { 0.5f, 0.25f } )
+    {
+        // Two separate moving circles clip the *same* vertical MAC face
+        // at distinct intervals. The third static circle selects the 3+
+        // disjoint analytic path while never contributing swept volume.
+        const vec2 first{ 0.0f, 0.4f * h };
+        const vec2 second{ 0.0f, 1.2f * h };
+        const vec2 wall{ 1.5f, 1.5f };
+        std::array<fluidShapeObstacle2, 3> bodies{{
+            { circle2{ {}, 0.32f * h }, { first, {} }, first,
+                {}, 0.0f, 0.5f, 0.5f },
+            { circle2{ {}, 0.32f * h }, { second, {} }, second,
+                {}, 0.0f, 0.0f, 0.0f },
+            { circle2{ {}, 0.2f }, { wall, {} }, wall,
+                {}, 0.0f, 0.0f, 0.0f }
+        }};
+        fluidField2 dense{ static_cast<int>( 4.0f / h ),
+            static_cast<int>( 4.0f / h ), h, { -2.0f, -2.0f } };
+        fluidField2 sparse{ static_cast<int>( 4.0f / h ),
+            static_cast<int>( 4.0f / h ), h, { -2.0f, -2.0f } };
+        for( fluidField2* field : { &dense, &sparse } )
+        {
+            field->setCutCellProjectionEnabled( true );
+            field->setCutCellCoupledProjectionEnabled( true );
+            field->setDisjointAnalyticCutCellEnabled( true );
+            field->addVelocity( { -0.5f, 0.0f }, { 0.6f, 0.1f }, 0.9f );
+        }
+        dense.setAnalyticCutCellSparseSweptFacesEnabled( false );
+        std::array<fluidObstacleForce2, 3> refForces{}, sparseForces{};
+        dense.step( dt, bodies, refForces, 200 );
+        sparse.step( dt, bodies, sparseForces, 200 );
+        bodies[0].transform.position.x += 0.2f * h;
+        bodies[1].transform.position.x -= 0.2f * h;
+        bodies[0].center = bodies[0].transform.position;
+        bodies[1].center = bodies[1].transform.position;
+        dense.step( dt, bodies, refForces, 200 );
+        sparse.step( dt, bodies, sparseForces, 200 );
+        const auto& a = dense.getSweptFaceFlux();
+        const auto& b = sparse.getSweptFaceFlux();
+        check( a.usedSweptFlux && b.usedSweptFlux &&
+            a.timeSamples == b.timeSamples &&
+            a.totalAbsoluteFlux == b.totalAbsoluteFlux &&
+            a.geometryMismatch == b.geometryMismatch &&
+            a.rawGeometryMismatch == b.rawGeometryMismatch,
+            "sparse swept shared-face owner accumulation must match dense sorted output" );
+        const auto& pa = dense.getCutCellPressure();
+        const auto& pb = sparse.getCutCellPressure();
+        check( pa.coupledStatus == pb.coupledStatus &&
+            pa.coupledIterations == pb.coupledIterations &&
+            pa.coupledRelativeResidual == pb.coupledRelativeResidual &&
+            pa.predictedContinuityRms == pb.predictedContinuityRms,
+            "sparse shared-face order must preserve pressure convergence and continuity" );
+        for( std::size_t i = 0; i < bodies.size(); ++i )
+            check( refForces[i].force.x == sparseForces[i].force.x &&
+                refForces[i].force.y == sparseForces[i].force.y &&
+                refForces[i].torque == sparseForces[i].torque,
+                "sparse shared-face order must preserve every body force" );
+    }
+}
+
 void checkAdaptiveSweptTemporalQuadrature()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -3879,6 +3942,7 @@ int main()
     checkMovingOnlyAnalyticSweptDifferential( false, true );
     checkBoundedSweptMixedAnalyticShapes();
     checkBoundedSweptMixedAnalyticShapes( true );
+    checkSparseSweptSharedFaceOwnerOrder();
     checkAdaptiveSweptTemporalQuadrature();
     checkConservativeMacAdvection();
     checkConservativeTracerTransport();
