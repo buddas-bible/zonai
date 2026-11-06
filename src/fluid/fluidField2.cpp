@@ -2976,6 +2976,10 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
     // Reused only by the bounded multi-shape analytic swept path; allocation
     // and clearing are skipped for other swept geometry modes.
     std::vector<double> boundedUSweptScratch, boundedVSweptScratch;
+    // Sparse face indices and marks are reused across intermediate time
+    // samples, including opt-in adaptive temporal quadrature refinements.
+    std::vector<unsigned char> boundedUFaceMarked, boundedVFaceMarked;
+    std::vector<int> boundedUTouchedFaces, boundedVTouchedFaces;
 
     const auto integrate = [&]( int samples, std::vector<float>& sweptU, std::vector<float>& sweptV )
     {
@@ -3009,8 +3013,22 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                     // Only moving owners have swept normal velocity. Evaluate
                     // their clipped intervals inside conservatively padded
                     // AABB face ranges, keeping each face's owner sum order.
-                    boundedUSweptScratch.assign( u_.size(), 0.0 );
-                    boundedVSweptScratch.assign( v_.size(), 0.0 );
+                    const bool sparse = analyticCutCellSparseSweptFacesEnabled_;
+                    if( sparse )
+                    {
+                        if( boundedUSweptScratch.empty() )
+                        {
+                            boundedUSweptScratch.resize( u_.size(), 0.0 );
+                            boundedVSweptScratch.resize( v_.size(), 0.0 );
+                            boundedUFaceMarked.resize( u_.size(), 0 );
+                            boundedVFaceMarked.resize( v_.size(), 0 );
+                        }
+                    }
+                    else
+                    {
+                        boundedUSweptScratch.assign( u_.size(), 0.0 );
+                        boundedVSweptScratch.assign( v_.size(), 0.0 );
+                    }
                     const auto clampFace = []( double index, int lower, int upper )
                     {
                         return static_cast<int>( std::clamp( index,
@@ -3046,8 +3064,18 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                                         : vec2{ static_cast<float>( clipped.midpoint ), static_cast<float>( normal ) };
                                     const vec2 velocity = linearSpeeds[owner] +
                                         Cross( angularSpeeds[owner], point - intermediate[owner].transform.position );
-                                    double& flux = vertical ? boundedUSweptScratch[uIndex( x, y )] :
-                                        boundedVSweptScratch[vIndex( x, y )];
+                                    const int face = vertical ? uIndex( x, y ) : vIndex( x, y );
+                                    if( sparse )
+                                    {
+                                        auto& marked = vertical ? boundedUFaceMarked : boundedVFaceMarked;
+                                        if( !marked[face] )
+                                        {
+                                            marked[face] = 1;
+                                            ( vertical ? boundedUTouchedFaces : boundedVTouchedFaces ).push_back( face );
+                                        }
+                                    }
+                                    double& flux = vertical ? boundedUSweptScratch[face] :
+                                        boundedVSweptScratch[face];
                                     flux += clipped.length * ( vertical ? velocity.x : velocity.y );
                                 }
                         };
@@ -3055,20 +3083,43 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                         accumulateFaces( false );
                     }
 
-                    // Convert the per-face double sum to float exactly once,
-                    // in the same U-then-V order as the original reference.
-                    for( int y = 0; y < height_; ++y )
-                        for( int x = 1; x < width_; ++x )
+                    // Per-face shape accumulation is already in owner order.
+                    // Sort only the truly clipped faces to retain U-then-V
+                    // row-major float conversion and swept-volume updates.
+                    if( sparse )
+                    {
+                        std::sort( boundedUTouchedFaces.begin(), boundedUTouchedFaces.end() );
+                        std::sort( boundedVTouchedFaces.begin(), boundedVTouchedFaces.end() );
+                        for( int face : boundedUTouchedFaces )
                         {
-                            const int face = uIndex( x, y );
                             sweptU[face] += intervalDt * static_cast<float>( boundedUSweptScratch[face] );
+                            boundedUSweptScratch[face] = 0.0;
+                            boundedUFaceMarked[face] = 0;
                         }
-                    for( int y = 1; y < height_; ++y )
-                        for( int x = 0; x < width_; ++x )
+                        for( int face : boundedVTouchedFaces )
                         {
-                            const int face = vIndex( x, y );
                             sweptV[face] += intervalDt * static_cast<float>( boundedVSweptScratch[face] );
+                            boundedVSweptScratch[face] = 0.0;
+                            boundedVFaceMarked[face] = 0;
                         }
+                        boundedUTouchedFaces.clear();
+                        boundedVTouchedFaces.clear();
+                    }
+                    else
+                    {
+                        for( int y = 0; y < height_; ++y )
+                            for( int x = 1; x < width_; ++x )
+                            {
+                                const int face = uIndex( x, y );
+                                sweptU[face] += intervalDt * static_cast<float>( boundedUSweptScratch[face] );
+                            }
+                        for( int y = 1; y < height_; ++y )
+                            for( int x = 0; x < width_; ++x )
+                            {
+                                const int face = vIndex( x, y );
+                                sweptV[face] += intervalDt * static_cast<float>( boundedVSweptScratch[face] );
+                            }
+                    }
                 }
                 else
                 {
