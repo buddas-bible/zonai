@@ -264,6 +264,9 @@ struct fluidSweptFaceFlux2
     int initialTimeSamples = 0;
     int refinements = 0;
     float initialGeometryMismatch = 0.0f;
+    // Swept 중간 시각의 정지-정지 Shape 분리 재검증 생략 횟수와 최초 판정 횟수.
+    int cachedStaticSeparationPairs = 0;
+    int evaluatedStaticSeparationPairs = 0;
 };
 
 // 이류 단계만의 가중 dual MAC face 운동량 계측 (rho=1, depth=1m).
@@ -552,6 +555,18 @@ public:
         return analyticCutCellBoundedSweptFacesEnabled_;
     }
 
+    // Swept 중간 시간 샘플 간 정지-정지 Shape 쌍의 분리 판정을 재사용.
+    // 매 시간 샘플마다 움직이는 Shape와의 분리 판정은 수행한다.
+    // 기본 ON. OFF는 모든 Shape 쌍을 다시 검사하는 참조 경로.
+    void setAnalyticCutCellSweptStaticPairCacheEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellSweptStaticPairCacheEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellSweptStaticPairCacheEnabled() const noexcept
+    {
+        return analyticCutCellSweptStaticPairCacheEnabled_;
+    }
+
     // 벤치마크 전용 PCG 시간 측정. 기본 OFF로 일반 Step에 시계 측정 비용 없음.
     void setCutCellPressureTimingEnabled( bool enabled ) noexcept { cutCellPressureTimingEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellPressureTimingEnabled() const noexcept { return cutCellPressureTimingEnabled_; }
@@ -818,6 +833,7 @@ private:
     bool analyticCutCellCurrentGeometryReuseEnabled_ = true;
     bool analyticCutCellMovingSweptFacesEnabled_ = true;
     bool analyticCutCellBoundedSweptFacesEnabled_ = true;
+    bool analyticCutCellSweptStaticPairCacheEnabled_ = true;
     bool cutCellPressureTimingEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
