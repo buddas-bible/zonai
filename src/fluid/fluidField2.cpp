@@ -3002,8 +3002,12 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
         static_cast<int>( std::ceil( maximumTravel / ( 0.25f * cellSize_ ) ) ), 1, 32 );
     std::vector<fluidShapeObstacle2> intermediate( obstacles.begin(), obstacles.end() );
     sweptStaticPairCache2 staticPairCache{};
+    // Cap the quadratic pair table (512² bytes) for heavily fragmented
+    // scenes. Beyond this limit retain the original uncached validation.
+    constexpr std::size_t maxStaticPairCacheShapes = 512;
     if( analyticCutCellSweptStaticPairCacheEnabled_ && disjointAnalyticCutCellEnabled_ &&
-        obstacles.size() > 2 && timeSamples >= 2 )
+        obstacles.size() > 2 && obstacles.size() <= maxStaticPairCacheShapes &&
+        timeSamples >= 2 )
     {
         staticPairCache.stationary.resize( obstacles.size(), 0 );
         int stationaryCount = 0;
