@@ -911,8 +911,19 @@ bool HasPartialCircleOverlap( const analyticDisjointShape2& first,
         distance + tolerance < a->radius + b->radius;
 }
 
+// This cache belongs exclusively to one swept-flux integration, including
+// adaptive temporal refinements. Values 1/2 represent disjoint/not disjoint.
+// Dynamic-static and dynamic-dynamic pairs always use fresh geometry checks.
+struct sweptStaticPairCache2
+{
+    std::vector<unsigned char> stationary;
+    std::vector<unsigned char> separation;
+    int reused = 0;
+    int evaluated = 0;
+};
+
 std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
-    std::span<const fluidShapeObstacle2> obstacles )
+    std::span<const fluidShapeObstacle2> obstacles, sweptStaticPairCache2* cache = nullptr )
 {
     if( obstacles.size() < 2 ) return {};
     std::vector<analyticDisjointShape2> shapes;
@@ -938,8 +949,25 @@ std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
         // 한해서만 내부 원의 모든 면적/face 반력을 무시한다.
         for( std::size_t i = 0; i < shapes.size(); ++i )
         {
-            if( AreDisjointFluidShapes( obstacles[i], obstacle,
-                shapes[i].bounds, analytic.bounds ) ) continue;
+            bool separated = false;
+            if( cache && cache->stationary.size() == obstacles.size() &&
+                cache->separation.size() == obstacles.size() * obstacles.size() &&
+                cache->stationary[i] && cache->stationary[shapes.size()] )
+            {
+                unsigned char& state = cache->separation[shapes.size() * obstacles.size() + i];
+                if( state == 0 )
+                {
+                    state = AreDisjointFluidShapes( obstacles[i], obstacle,
+                        shapes[i].bounds, analytic.bounds ) ? 1 : 2;
+                    ++cache->evaluated;
+                }
+                else ++cache->reused;
+                separated = state == 1;
+            }
+            else
+                separated = AreDisjointFluidShapes( obstacles[i], obstacle,
+                    shapes[i].bounds, analytic.bounds );
+            if( separated ) continue;
             if( obstacles.size() != 2 || shapes.size() != 1 ) return {};
             const int occluded = FindOccludedCircle(
                 shapes[i], analytic, obstacles[i], obstacle );
@@ -2973,6 +3001,24 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
     int timeSamples = std::clamp(
         static_cast<int>( std::ceil( maximumTravel / ( 0.25f * cellSize_ ) ) ), 1, 32 );
     std::vector<fluidShapeObstacle2> intermediate( obstacles.begin(), obstacles.end() );
+    sweptStaticPairCache2 staticPairCache{};
+    if( analyticCutCellSweptStaticPairCacheEnabled_ && disjointAnalyticCutCellEnabled_ &&
+        obstacles.size() > 2 && timeSamples >= 2 )
+    {
+        staticPairCache.stationary.resize( obstacles.size(), 0 );
+        int stationaryCount = 0;
+        for( std::size_t i = 0; i < obstacles.size(); ++i )
+        {
+            if( linearSpeeds[i].x != 0.0f || linearSpeeds[i].y != 0.0f ||
+                angularSpeeds[i] != 0.0f ) continue;
+            staticPairCache.stationary[i] = 1;
+            ++stationaryCount;
+        }
+        // Avoid the quadratic scratch for scenes with zero or one static.
+        if( stationaryCount >= 2 )
+            staticPairCache.separation.resize( obstacles.size() * obstacles.size(), 0 );
+        else staticPairCache.stationary.clear();
+    }
     // Reused only by the bounded multi-shape analytic swept path; allocation
     // and clearing are skipped for other swept geometry modes.
     std::vector<double> boundedUSweptScratch, boundedVSweptScratch;
@@ -2996,7 +3042,9 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
             }
 
             const auto disjointShapes = disjointAnalyticCutCellEnabled_
-                ? BuildDisjointAnalyticShapes( intermediate ) : std::vector<analyticDisjointShape2>{};
+                ? BuildDisjointAnalyticShapes( intermediate,
+                    staticPairCache.separation.empty() ? nullptr : &staticPairCache )
+                : std::vector<analyticDisjointShape2>{};
             if( !disjointShapes.empty() )
             {
                 const double h = cellSize_;
@@ -3262,6 +3310,8 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
     for( const float flux : sweptVVolume_ ) absoluteFlux += std::abs( flux );
     sweptFaceFlux_.timeSamples = timeSamples;
     sweptFaceFlux_.totalAbsoluteFlux = static_cast<float>( absoluteFlux );
+    sweptFaceFlux_.cachedStaticSeparationPairs = staticPairCache.reused;
+    sweptFaceFlux_.evaluatedStaticSeparationPairs = staticPairCache.evaluated;
 }
 
 void fluidField2::reconcileSweptSolidFlux()
