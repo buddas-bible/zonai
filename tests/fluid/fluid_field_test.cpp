@@ -3231,7 +3231,8 @@ void checkSweptSolidFaceFlux()
         "clear must reset swept volume diagnostics and previous shape history" );
 }
 
-void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false )
+void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false,
+    bool compareStaticPairCache = false )
 {
     constexpr float dt = 1.0f / 60.0f;
     for( float h : { 0.5f, 0.25f } )
@@ -3282,7 +3283,9 @@ void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false )
                     field->setAdaptiveSweptSamplingEnabled( true );
                 field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
             }
-            if( compareBounded )
+            if( compareStaticPairCache )
+                reference.setAnalyticCutCellSweptStaticPairCacheEnabled( false );
+            else if( compareBounded )
                 reference.setAnalyticCutCellBoundedSweptFacesEnabled( false );
             else
                 reference.setAnalyticCutCellMovingSweptFacesEnabled( false );
@@ -3300,6 +3303,12 @@ void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false )
                     a.rawGeometryMismatch == b.rawGeometryMismatch &&
                     a.geometryMismatch == b.geometryMismatch,
                     "moving-only swept faces must preserve each swept volume diagnostic exactly" );
+                if( compareStaticPairCache && frame > 0 )
+                    check( a.cachedStaticSeparationPairs == 0 &&
+                        a.evaluatedStaticSeparationPairs == 0 &&
+                        b.evaluatedStaticSeparationPairs > 0 &&
+                        b.cachedStaticSeparationPairs > 0,
+                        "static pair cache must skip repeat separation checks in actual moving steps" );
                 if( frame > 0 )
                     check( b.usedSweptFlux && b.timeSamples >= 2 && b.totalAbsoluteFlux > 0.0f,
                         "moving-only swept comparison must integrate time-varying geometry" );
@@ -3336,11 +3345,14 @@ void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false )
             }
             reference.clear();
             movingOnly.clear();
-            check( compareBounded
-                    ? !reference.isAnalyticCutCellBoundedSweptFacesEnabled() &&
-                        movingOnly.isAnalyticCutCellBoundedSweptFacesEnabled()
-                    : !reference.isAnalyticCutCellMovingSweptFacesEnabled() &&
-                        movingOnly.isAnalyticCutCellMovingSweptFacesEnabled(),
+            check( compareStaticPairCache
+                    ? !reference.isAnalyticCutCellSweptStaticPairCacheEnabled() &&
+                        movingOnly.isAnalyticCutCellSweptStaticPairCacheEnabled()
+                    : compareBounded
+                        ? !reference.isAnalyticCutCellBoundedSweptFacesEnabled() &&
+                            movingOnly.isAnalyticCutCellBoundedSweptFacesEnabled()
+                        : !reference.isAnalyticCutCellMovingSweptFacesEnabled() &&
+                            movingOnly.isAnalyticCutCellMovingSweptFacesEnabled(),
                 "clear must preserve selected analytic swept traversal mode" );
         }
 }
@@ -3431,6 +3443,81 @@ void checkBoundedSweptMixedAnalyticShapes()
                 bodies[i].center = bodies[i].transform.position;
         }
     }
+}
+
+void checkSweptStaticPairCacheMovingOverlapFallback()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    const vec2 movingStart{ -1.2f, 0.0f };
+    const vec2 firstStatic{ 0.0f, 0.0f };
+    const vec2 secondStatic{ 2.5f, 2.5f };
+    const vec2 thirdStatic{ -2.2f, 2.0f };
+    std::array<fluidShapeObstacle2, 4> bodies{{
+        { circle2{ {}, 0.45f }, { movingStart, {} }, movingStart,
+            {}, 0.0f, 0.7f, 0.6f },
+        { circle2{ {}, 0.5f }, { firstStatic, {} }, firstStatic,
+            {}, 0.0f, 0.0f, 0.0f },
+        { circle2{ {}, 0.35f }, { secondStatic, {} }, secondStatic,
+            {}, 0.0f, 0.0f, 0.0f },
+        { circle2{ {}, 0.35f }, { thirdStatic, {} }, thirdStatic,
+            {}, 0.0f, 0.0f, 0.0f }
+    }};
+    fluidField2 reference{ 20, 20, 0.5f, { -5.0f, -5.0f } };
+    fluidField2 cached{ 20, 20, 0.5f, { -5.0f, -5.0f } };
+    for( fluidField2* field : { &reference, &cached } )
+    {
+        field->setCutCellProjectionEnabled( true );
+        field->setCutCellCoupledProjectionEnabled( true );
+        field->setDisjointAnalyticCutCellEnabled( true );
+        field->addVelocity( { -1.0f, 0.2f }, { 1.1f, -0.2f }, 1.2f );
+    }
+    reference.setAnalyticCutCellSweptStaticPairCacheEnabled( false );
+    std::array<fluidObstacleForce2, 4> referenceForces{}, cachedForces{};
+    reference.step( dt, bodies, referenceForces, 160 );
+    cached.step( dt, bodies, cachedForces, 160 );
+    check( reference.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        cached.getCutCellTransition().usedDisjointAnalyticGeometry,
+        "the initial moving/static scene must support disjoint analytic geometry" );
+
+    // The moving body overlaps the first static at the new snapshot, forcing
+    // the sampled union path at intermediate timestamps as well. Static-static
+    // separation decisions remain valid, but moving-static checks must not be reused.
+    bodies[0].transform.position.x = -0.15f;
+    bodies[0].center = bodies[0].transform.position;
+    reference.step( dt, bodies, referenceForces, 160 );
+    cached.step( dt, bodies, cachedForces, 160 );
+    const auto& a = reference.getSweptFaceFlux();
+    const auto& b = cached.getSweptFaceFlux();
+    check( !reference.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        !cached.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        a.usedSweptFlux && b.usedSweptFlux && a.timeSamples >= 2 &&
+        a.timeSamples == b.timeSamples &&
+        a.totalAbsoluteFlux == b.totalAbsoluteFlux &&
+        a.rawGeometryMismatch == b.rawGeometryMismatch &&
+        a.geometryMismatch == b.geometryMismatch &&
+        b.cachedStaticSeparationPairs > 0 &&
+        a.cachedStaticSeparationPairs == 0,
+        "static-pair cache must preserve moving/static overlap fallback across swept samples" );
+    const auto& pa = reference.getCutCellPressure();
+    const auto& pb = cached.getCutCellPressure();
+    check( pa.coupledStatus == pb.coupledStatus &&
+        pa.coupledIterations == pb.coupledIterations &&
+        pa.coupledRelativeResidual == pb.coupledRelativeResidual &&
+        pa.predictedContinuityRms == pb.predictedContinuityRms,
+        "static-pair reuse must not alter sampled fallback pressure" );
+    for( std::size_t i = 0; i < bodies.size(); ++i )
+        check( referenceForces[i].force.x == cachedForces[i].force.x &&
+            referenceForces[i].force.y == cachedForces[i].force.y &&
+            referenceForces[i].torque == cachedForces[i].torque,
+            "static-pair reuse must retain all forces when analytic union is invalid" );
+    const vec2 momentumA = reference.getFluidMomentum();
+    const vec2 momentumB = cached.getFluidMomentum();
+    check( momentumA.x == momentumB.x && momentumA.y == momentumB.y,
+        "static-pair reuse must preserve fluid momentum across geometric fallback" );
+    cached.clear();
+    check( cached.isAnalyticCutCellSweptStaticPairCacheEnabled() &&
+        cached.getSweptFaceFlux().cachedStaticSeparationPairs == 0,
+        "clear must preserve static swept-pair option and discard diagnostics" );
 }
 
 void checkAdaptiveSweptTemporalQuadrature()
@@ -3867,6 +3954,8 @@ int main()
     checkSweptSolidFaceFlux();
     checkMovingOnlyAnalyticSweptDifferential();
     checkMovingOnlyAnalyticSweptDifferential( true );
+    checkMovingOnlyAnalyticSweptDifferential( false, true );
+    checkSweptStaticPairCacheMovingOverlapFallback();
     checkBoundedSweptMixedAnalyticShapes();
     checkAdaptiveSweptTemporalQuadrature();
     checkConservativeMacAdvection();
