@@ -166,12 +166,15 @@ struct sweptResult
     double geometryMismatch = 0.0;
     int timeSamples = 0;
     int converged = 0;
+    int reusedStaticPairs = 0;
+    int evaluatedStaticPairs = 0;
 };
 
 sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
-    bool boundedFaces = true )
+    bool boundedFaces = true, bool reuseStaticPairs = true )
 {
     std::vector<double> stepSamples, sweptSamples, fluxSamples, mismatchSamples, timeSamples;
+    std::vector<double> reusedPairsSamples, evaluatedPairsSamples;
     sweptResult result{};
     for( int trial = 0; trial < rounds + 1; ++trial )
     {
@@ -183,6 +186,7 @@ sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
         field.setDisjointAnalyticCutCellEnabled( true );
         field.setAnalyticCutCellMovingSweptFacesEnabled( movingOnly );
         field.setAnalyticCutCellBoundedSweptFacesEnabled( boundedFaces );
+        field.setAnalyticCutCellSweptStaticPairCacheEnabled( reuseStaticPairs );
         field.setStepTimingEnabled( true );
         field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
         std::vector<fluidObstacleForce2> feedback( bodies.size() );
@@ -204,6 +208,8 @@ sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
         fluxSamples.push_back( field.getSweptFaceFlux().totalAbsoluteFlux );
         mismatchSamples.push_back( field.getSweptFaceFlux().geometryMismatch );
         timeSamples.push_back( field.getSweptFaceFlux().timeSamples );
+        reusedPairsSamples.push_back( field.getSweptFaceFlux().cachedStaticSeparationPairs );
+        evaluatedPairsSamples.push_back( field.getSweptFaceFlux().evaluatedStaticSeparationPairs );
         result.converged += field.getCutCellPressure().usedCoupledProjection ? 1 : 0;
     }
     result.stepMilliseconds = median( stepSamples );
@@ -211,6 +217,8 @@ sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
     result.absoluteFlux = median( fluxSamples );
     result.geometryMismatch = median( mismatchSamples );
     result.timeSamples = static_cast<int>( median( timeSamples ) );
+    result.reusedStaticPairs = static_cast<int>( median( reusedPairsSamples ) );
+    result.evaluatedStaticPairs = static_cast<int>( median( evaluatedPairsSamples ) );
     return result;
 }
 
@@ -218,6 +226,25 @@ sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
 
 int main( int argc, char** argv )
 {
+    const bool sweptStaticPairsSweep = argc > 1 && std::string_view( argv[1] ) == "--swept-static-pairs-sweep";
+    if( sweptStaticPairsSweep )
+    {
+        std::puts( "static_obstacles,cell_m,pair_mode,converged,attempts,samples,"
+            "swept_ms,step_ms,absolute_flux,geometry_mismatch,cached_pairs,evaluated_pairs" );
+        for( float h : { 0.5f, 0.25f } )
+            for( int count : { 0, 16, 48 } )
+                for( bool cache : { false, true } )
+                {
+                    const sweptResult stats = measureMovingSwept( h, count, true, true, cache );
+                    std::printf( "%d,%.2f,%s,%d,%d,%d,%.5f,%.5f,%.6g,%.6g,%d,%d\n",
+                        count, h, cache ? "cached" : "reference",
+                        stats.converged, rounds, stats.timeSamples,
+                        stats.sweptMilliseconds, stats.stepMilliseconds,
+                        stats.absoluteFlux, stats.geometryMismatch,
+                        stats.reusedStaticPairs, stats.evaluatedStaticPairs );
+                }
+        return 0;
+    }
     const bool sweptBoundsSweep = argc > 1 && std::string_view( argv[1] ) == "--swept-bounds-sweep";
     if( sweptBoundsSweep )
     {
