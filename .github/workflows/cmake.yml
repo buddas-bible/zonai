@@ -187,6 +187,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --swept-bounds-sweep
 
+      # Reuse disjointness decisions only for pairs of immovable shapes
+      # across interpolated swept timestamps (moving geometry still checked).
+      - name: Sample swept static pair reuse (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --swept-static-pairs-sweep
+
       # A real headless Sandbox World interleave, 8 World substeps and 1/2/4/8 Fluid steps.
       # Frame medians are informational; never gate CI on runner-dependent wall time.
       - name: Sample Wind multi-substep stage profile (Windows Release, informational)
