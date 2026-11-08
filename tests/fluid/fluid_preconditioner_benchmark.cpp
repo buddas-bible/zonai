@@ -79,7 +79,8 @@ std::vector<fluidShapeObstacle2> makeObstacles( int mode, int staticCount = 0 )
 result measure( float h, int mode, int preconditioner, int staticCount = 0,
     bool indexedBoundaries = true, bool boundedAreas = true, bool geometryTiming = false,
     bool boundedFaceClipping = true, bool movableOnlySchur = true,
-    bool indexedBoundarySync = true, bool reuseCurrentGeometry = true )
+    bool indexedBoundarySync = true, bool reuseCurrentGeometry = true,
+    bool splitIc0 = true )
 {
     const auto bodies = makeObstacles( mode, staticCount );
     std::vector<double> totalSamples, pressureSamples, iterationSamples, residualSamples, geometrySamples;
@@ -99,6 +100,7 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
         field.setAnalyticCutCellCachedIc0Enabled( preconditioner >= 2 );
         field.setAnalyticCutCellActiveIc0SweepEnabled( preconditioner >= 3 );
         field.setAnalyticCutCellCachedSchurEdgesEnabled( preconditioner == 4 );
+        field.setAnalyticCutCellSplitIc0CoefficientsEnabled( splitIc0 );
         field.setAnalyticCutCellIndexedBoundaryFacesEnabled( indexedBoundaries );
         field.setAnalyticCutCellBoundedCellAreasEnabled( boundedAreas );
         field.setAnalyticCutCellBoundedFaceClippingEnabled( boundedFaceClipping );
@@ -218,6 +220,26 @@ sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
 
 int main( int argc, char** argv )
 {
+    const bool ic0SplitSweep = argc > 1 && std::string_view( argv[1] ) == "--ic0-split-sweep";
+    if( ic0SplitSweep )
+    {
+        std::puts( "static_obstacles,cell_m,ic0_layout,converged,attempts,ic0_build_ms,"
+            "ic0_apply_ms,schur_multiply_ms,pcg_ms,step_ms,iterations,relative_residual" );
+        for( float h : { 0.5f, 0.25f } )
+            for( int count : { 0, 16, 48 } )
+                for( bool split : { false, true } )
+                {
+                    const result stats = measure( h, 1, 4, count, true, true, true,
+                        true, true, true, true, split );
+                    std::printf( "%d,%.2f,%s,%d,%d,%.5f,%.5f,%.5f,%.5f,%.5f,%.0f,%.6g\n",
+                        count, h, split ? "split" : "aos",
+                        stats.converged, stats.attempts, stats.phases.factorization,
+                        stats.phases.preconditioner, stats.phases.multiply,
+                        stats.pressureMilliseconds, stats.stepMilliseconds,
+                        stats.iterations, stats.residual );
+                }
+        return 0;
+    }
     const bool sweptBoundsSweep = argc > 1 && std::string_view( argv[1] ) == "--swept-bounds-sweep";
     if( sweptBoundsSweep )
     {
