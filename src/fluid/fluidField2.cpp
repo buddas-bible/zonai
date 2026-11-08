@@ -4091,6 +4091,19 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
 
     auto& response = scratch.response;
     response.resize( obstacles.size() );
+    const bool compactBodyMass = cutCell && cutCellTransition_.usedDisjointAnalyticGeometry &&
+        analyticCutCellCompactSchurBodyMassEnabled_;
+    auto& bodyInverseMass = scratch.bodyInverseMass;
+    if( compactBodyMass )
+    {
+        bodyInverseMass.resize( obstacles.size() );
+        for( int owner : dynamicResponseOwners )
+        {
+            const fluidShapeObstacle2& obstacle = obstacles[static_cast<std::size_t>( owner )];
+            bodyInverseMass[owner] = { static_cast<double>( obstacle.inverseMass ),
+                static_cast<double>( obstacle.inverseInertia ) };
+        }
+    }
     const auto multiply = [&]( const std::vector<double>& values, std::vector<double>& result )
     {
         std::fill( result.begin(), result.end(), 0.0 );
@@ -4141,13 +4154,30 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
             body.fy += p * face.fy;
             body.torque += p * face.torque;
         }
-        for( const coupledPressureFace& face : faces )
+        if( compactBodyMass )
         {
-            const fluidShapeObstacle2& obstacle = obstacles[static_cast<std::size_t>( face.owner )];
-            const coupledBodyResponse& body = response[face.owner];
-            result[face.cell] += static_cast<double>( obstacle.inverseMass ) *
-                ( face.fx * body.fx + face.fy * body.fy ) +
-                static_cast<double>( obstacle.inverseInertia ) * face.torque * body.torque;
+            // One compact two-double mass pair per dynamic owner avoids
+            // fetching a full obstacle variant for every Schur face/iteration.
+            for( const coupledPressureFace& face : faces )
+            {
+                const coupledBodyInverseMass& inverse = bodyInverseMass[face.owner];
+                const coupledBodyResponse& body = response[face.owner];
+                result[face.cell] += inverse.inverseMass *
+                    ( face.fx * body.fx + face.fy * body.fy ) +
+                    inverse.inverseInertia * face.torque * body.torque;
+            }
+        }
+        else
+        {
+            // Reference: original obstacle lookup and summation order.
+            for( const coupledPressureFace& face : faces )
+            {
+                const fluidShapeObstacle2& obstacle = obstacles[static_cast<std::size_t>( face.owner )];
+                const coupledBodyResponse& body = response[face.owner];
+                result[face.cell] += static_cast<double>( obstacle.inverseMass ) *
+                    ( face.fx * body.fx + face.fy * body.fy ) +
+                    static_cast<double>( obstacle.inverseInertia ) * face.torque * body.torque;
+            }
         }
     };
 
