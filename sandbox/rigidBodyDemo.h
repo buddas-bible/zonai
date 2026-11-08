@@ -266,6 +266,12 @@ public:
     {
         return windField_ && windField_->isAnalyticCutCellCachedIc0Enabled();
     }
+    // Opt-in diagnostic for previous pressure as a hypothetical PCG initial guess.
+    // Does not alter fluid pressure or rigid-body coupling.
+    void setWindPressureWarmStartProbeEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setCoupledPressureWarmStartProbeEnabled( enabled );
+    }
     // Performance trial: compare active-cell IC0 sweeps against dense cached sweeps.
     void setWindActiveIc0SweepEnabled( bool enabled ) noexcept
     {
