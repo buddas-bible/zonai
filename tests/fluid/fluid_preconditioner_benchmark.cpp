@@ -166,12 +166,15 @@ struct sweptResult
     double geometryMismatch = 0.0;
     int timeSamples = 0;
     int converged = 0;
+    int staticGeometryBuilt = 0;
+    int staticGeometryReused = 0;
 };
 
 sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
-    bool boundedFaces = true )
+    bool boundedFaces = true, bool reuseStaticGeometry = true )
 {
     std::vector<double> stepSamples, sweptSamples, fluxSamples, mismatchSamples, timeSamples;
+    std::vector<double> builtSamples, reusedSamples;
     sweptResult result{};
     for( int trial = 0; trial < rounds + 1; ++trial )
     {
@@ -183,6 +186,7 @@ sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
         field.setDisjointAnalyticCutCellEnabled( true );
         field.setAnalyticCutCellMovingSweptFacesEnabled( movingOnly );
         field.setAnalyticCutCellBoundedSweptFacesEnabled( boundedFaces );
+        field.setAnalyticCutCellSweptStaticShapeReuseEnabled( reuseStaticGeometry );
         field.setStepTimingEnabled( true );
         field.addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
         std::vector<fluidObstacleForce2> feedback( bodies.size() );
@@ -204,6 +208,8 @@ sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
         fluxSamples.push_back( field.getSweptFaceFlux().totalAbsoluteFlux );
         mismatchSamples.push_back( field.getSweptFaceFlux().geometryMismatch );
         timeSamples.push_back( field.getSweptFaceFlux().timeSamples );
+        builtSamples.push_back( field.getSweptFaceFlux().builtStaticAnalyticShapes );
+        reusedSamples.push_back( field.getSweptFaceFlux().reusedStaticAnalyticShapes );
         result.converged += field.getCutCellPressure().usedCoupledProjection ? 1 : 0;
     }
     result.stepMilliseconds = median( stepSamples );
@@ -211,6 +217,8 @@ sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
     result.absoluteFlux = median( fluxSamples );
     result.geometryMismatch = median( mismatchSamples );
     result.timeSamples = static_cast<int>( median( timeSamples ) );
+    result.staticGeometryBuilt = static_cast<int>( median( builtSamples ) );
+    result.staticGeometryReused = static_cast<int>( median( reusedSamples ) );
     return result;
 }
 
@@ -218,6 +226,25 @@ sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
 
 int main( int argc, char** argv )
 {
+    const bool sweptStaticShapesSweep = argc > 1 && std::string_view( argv[1] ) == "--swept-static-shapes-sweep";
+    if( sweptStaticShapesSweep )
+    {
+        std::puts( "static_obstacles,cell_m,shape_mode,converged,attempts,samples,"
+            "swept_ms,step_ms,absolute_flux,geometry_mismatch,static_builds,static_reuses" );
+        for( float h : { 0.5f, 0.25f } )
+            for( int count : { 0, 16, 48 } )
+                for( bool reuse : { false, true } )
+                {
+                    const sweptResult stats = measureMovingSwept( h, count, true, true, reuse );
+                    std::printf( "%d,%.2f,%s,%d,%d,%d,%.5f,%.5f,%.6g,%.6g,%d,%d\n",
+                        count, h, reuse ? "reuse" : "reference",
+                        stats.converged, rounds, stats.timeSamples,
+                        stats.sweptMilliseconds, stats.stepMilliseconds,
+                        stats.absoluteFlux, stats.geometryMismatch,
+                        stats.staticGeometryBuilt, stats.staticGeometryReused );
+                }
+        return 0;
+    }
     const bool sweptBoundsSweep = argc > 1 && std::string_view( argv[1] ) == "--swept-bounds-sweep";
     if( sweptBoundsSweep )
     {
