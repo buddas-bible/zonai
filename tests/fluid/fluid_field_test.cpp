@@ -3384,7 +3384,10 @@ void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false,
             }
             reference.clear();
             movingOnly.clear();
-            check( comparePcgVectors
+            check( compareCompactBackward
+                    ? !reference.isAnalyticCutCellCompactIc0BackwardEnabled() &&
+                        movingOnly.isAnalyticCutCellCompactIc0BackwardEnabled()
+                    : comparePcgVectors
                     ? !reference.isAnalyticCutCellActivePcgVectorsEnabled() &&
                         movingOnly.isAnalyticCutCellActivePcgVectorsEnabled()
                     : compareBounded
