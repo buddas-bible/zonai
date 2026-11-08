@@ -80,7 +80,7 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
     bool indexedBoundaries = true, bool boundedAreas = true, bool geometryTiming = false,
     bool boundedFaceClipping = true, bool movableOnlySchur = true,
     bool indexedBoundarySync = true, bool reuseCurrentGeometry = true,
-    bool splitIc0 = true )
+    bool splitIc0 = true, bool compactBodyMass = true )
 {
     const auto bodies = makeObstacles( mode, staticCount );
     std::vector<double> totalSamples, pressureSamples, iterationSamples, residualSamples, geometrySamples;
@@ -101,6 +101,7 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
         field.setAnalyticCutCellActiveIc0SweepEnabled( preconditioner >= 3 );
         field.setAnalyticCutCellCachedSchurEdgesEnabled( preconditioner == 4 );
         field.setAnalyticCutCellSplitIc0CoefficientsEnabled( splitIc0 );
+        field.setAnalyticCutCellCompactSchurBodyMassEnabled( compactBodyMass );
         field.setAnalyticCutCellIndexedBoundaryFacesEnabled( indexedBoundaries );
         field.setAnalyticCutCellBoundedCellAreasEnabled( boundedAreas );
         field.setAnalyticCutCellBoundedFaceClippingEnabled( boundedFaceClipping );
@@ -220,6 +221,25 @@ sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
 
 int main( int argc, char** argv )
 {
+    const bool schurBodyMassSweep = argc > 1 && std::string_view( argv[1] ) == "--schur-body-mass-sweep";
+    if( schurBodyMassSweep )
+    {
+        std::puts( "static_obstacles,cell_m,body_mass_mode,converged,attempts,"
+            "schur_multiply_ms,ic0_apply_ms,pcg_ms,step_ms,iterations,relative_residual" );
+        for( float h : { 0.5f, 0.25f } )
+            for( int count : { 0, 16, 48 } )
+                for( bool compact : { false, true } )
+                {
+                    const result stats = measure( h, 1, 4, count, true, true, true,
+                        true, true, true, true, true, compact );
+                    std::printf( "%d,%.2f,%s,%d,%d,%.5f,%.5f,%.5f,%.5f,%.0f,%.6g\n",
+                        count, h, compact ? "compact" : "obstacle",
+                        stats.converged, stats.attempts, stats.phases.multiply,
+                        stats.phases.preconditioner, stats.pressureMilliseconds,
+                        stats.stepMilliseconds, stats.iterations, stats.residual );
+                }
+        return 0;
+    }
     const bool ic0SplitSweep = argc > 1 && std::string_view( argv[1] ) == "--ic0-split-sweep";
     if( ic0SplitSweep )
     {
