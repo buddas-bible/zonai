@@ -13,6 +13,10 @@ With `setCutCellPressureTimingEnabled(true)`, the split active-cell path now rep
 of `preconditioner`. They are not additional phases in `accounted()` and remain
 zero on Jacobi, AoS and other paths. Timing is accumulated over all preconditioner
 applications during one solve; the clock is only sampled when profiling is enabled.
+`sandboxWindStepBenchmark --csv` also appends the two sweep-time columns for real
+World/Fluid interleaved frames at 1/2/4/8 Fluid substeps, and the Sandbox Wind
+profiling UI shows the same per-frame accumulated values. These measurements
+remain subsets of preconditioner time and are reset when profiling is disabled.
 `fluidPreconditionerBenchmark --ic0-split-sweep` adds both columns, allowing the
 sequential forward and backward costs to be compared before considering a change
 to dependency traversal or memory layout. No solver arithmetic or stopping rule
