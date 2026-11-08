@@ -193,6 +193,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --ic0-split-sweep
 
+      # Backward IC(0): identical float MAC face values stored at native
+      # precision versus expanded double coefficients; timings are informative.
+      - name: Sample compact IC0 backward faces (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --ic0-backward-face-sweep
+
       # PCG vector dot products and updates: full grid vs already computed
       # active fluid cells, including thin and substantial static obstacles.
       - name: Sample active-cell PCG vectors (Windows Release, informational)
