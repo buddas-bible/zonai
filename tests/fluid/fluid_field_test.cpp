@@ -1435,7 +1435,7 @@ void checkCachedIc0Differential()
         }
 }
 
-void checkActiveCellIc0SweepDifferential()
+void checkActiveCellIc0SweepDifferential( bool compareSplit = false )
 {
     constexpr float dt = 1.0f / 60.0f;
     constexpr vec2 origin{ -6.0f, -4.0f };
@@ -1470,7 +1470,10 @@ void checkActiveCellIc0SweepDifferential()
                 field->setCutCellPressureTimingEnabled( true );
                 field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
             }
-            dense.setAnalyticCutCellActiveIc0SweepEnabled( false );
+            if( compareSplit )
+                dense.setAnalyticCutCellSplitIc0CoefficientsEnabled( false );
+            else
+                dense.setAnalyticCutCellActiveIc0SweepEnabled( false );
             std::array<fluidObstacleForce2, 2> denseForces{}, activeForces{};
             // Recompute the active-cell schedule from each changed cut-cell
             // geometry. Previously solid cells cannot be carried over.
@@ -1490,6 +1493,12 @@ void checkActiveCellIc0SweepDifferential()
                     a.coupledRelativeResidual <= 1.1e-5f &&
                     b.coupledRelativeResidual <= 1.1e-5f,
                     "dense and active-cell IC0 must converge with the same PCG workload" );
+                if( compareSplit )
+                    check( a.coupledIterations == b.coupledIterations &&
+                        a.coupledRelativeResidual == b.coupledRelativeResidual &&
+                        a.predictedContinuityRms == b.predictedContinuityRms &&
+                        a.pressureResidual == b.pressureResidual,
+                        "split IC0 cache must reproduce the original active sweep pressure exactly" );
                 check( std::abs( a.coupledRelativeResidual - b.coupledRelativeResidual ) < 1.0e-6f &&
                     std::abs( a.predictedContinuityRms - b.predictedContinuityRms ) < 2.0e-4f &&
                     std::abs( a.pressureResidual - b.pressureResidual ) < 2.0e-4f,
@@ -1501,6 +1510,12 @@ void checkActiveCellIc0SweepDifferential()
                         std::abs( denseForces[i].torque - activeForces[i].torque ) < 1.0e-3f * scale,
                         "active-cell IC0 must preserve individual body pressure feedback" );
                 }
+                if( compareSplit )
+                    for( std::size_t i = 0; i < bodies.size(); ++i )
+                        check( denseForces[i].force.x == activeForces[i].force.x &&
+                            denseForces[i].force.y == activeForces[i].force.y &&
+                            denseForces[i].torque == activeForces[i].torque,
+                            "split IC0 cache must reproduce each owner's pressure traction exactly" );
                 const float massScale = 1.0f + Length( dense.getFluidMomentum() );
                 check( Length( dense.getFluidMomentum() - active.getFluidMomentum() ) < 1.0e-3f * massScale &&
                     Length( dense.sampleVelocity( { -1.05f, 0.14f } ) -
@@ -1514,11 +1529,15 @@ void checkActiveCellIc0SweepDifferential()
             }
             dense.clear();
             active.clear();
-            check( !dense.isAnalyticCutCellActiveIc0SweepEnabled() &&
-                active.isAnalyticCutCellActiveIc0SweepEnabled() &&
-                dense.getCutCellPressure().coupledTiming.total == 0.0 &&
+            check( compareSplit
+                    ? !dense.isAnalyticCutCellSplitIc0CoefficientsEnabled() &&
+                        active.isAnalyticCutCellSplitIc0CoefficientsEnabled()
+                    : !dense.isAnalyticCutCellActiveIc0SweepEnabled() &&
+                        active.isAnalyticCutCellActiveIc0SweepEnabled(),
+                "clear must preserve the selected IC0 coefficient layout or active sweep" );
+            check( dense.getCutCellPressure().coupledTiming.total == 0.0 &&
                 active.getCutCellPressure().coupledTiming.total == 0.0,
-                "clear must preserve the selected active sweep mode and discard old data" );
+                "clear must discard old IC0 pressure timing" );
         }
 }
 
@@ -3855,6 +3874,7 @@ int main()
     checkAnalyticCutCellPreconditionerComparison();
     checkCachedIc0Differential();
     checkActiveCellIc0SweepDifferential();
+    checkActiveCellIc0SweepDifferential( true );
     checkCachedSchurLaplacianDifferential();
     checkIndexedAnalyticBoundaryDifferential();
     checkIndexedAnalyticBoundaryDifferential( true );
