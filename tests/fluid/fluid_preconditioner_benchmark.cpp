@@ -84,7 +84,7 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
     bool boundedFaceClipping = true, bool movableOnlySchur = true,
     bool indexedBoundarySync = true, bool reuseCurrentGeometry = true,
     bool splitIc0 = true, bool activePcgVectors = true,
-    float staticRadius = 0.12f )
+    float staticRadius = 0.12f, bool compactBackward = true )
 {
     const auto bodies = makeObstacles( mode, staticCount, staticRadius );
     std::vector<double> totalSamples, pressureSamples, iterationSamples, residualSamples, geometrySamples;
@@ -106,6 +106,7 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
         field.setAnalyticCutCellActiveIc0SweepEnabled( preconditioner >= 3 );
         field.setAnalyticCutCellCachedSchurEdgesEnabled( preconditioner == 4 );
         field.setAnalyticCutCellSplitIc0CoefficientsEnabled( splitIc0 );
+        field.setAnalyticCutCellCompactIc0BackwardEnabled( compactBackward );
         field.setAnalyticCutCellActivePcgVectorsEnabled( activePcgVectors );
         field.setAnalyticCutCellIndexedBoundaryFacesEnabled( indexedBoundaries );
         field.setAnalyticCutCellBoundedCellAreasEnabled( boundedAreas );
@@ -250,6 +251,32 @@ int main( int argc, char** argv )
                             stats.converged, stats.attempts, stats.activeCells,
                             stats.phases.vector, stats.phases.multiply,
                             stats.phases.preconditioner, stats.pressureMilliseconds,
+                            stats.stepMilliseconds, stats.iterations, stats.residual );
+                    }
+        return 0;
+    }
+    const bool compactBackwardSweep = argc > 1 &&
+        std::string_view( argv[1] ) == "--ic0-backward-face-sweep";
+    if( compactBackwardSweep )
+    {
+        std::puts( "static_obstacles,static_radius_m,cell_m,backward_face_layout,"
+            "converged,attempts,active_cells,ic0_build_ms,ic0_forward_ms,"
+            "ic0_backward_ms,ic0_apply_ms,schur_multiply_ms,pcg_ms,step_ms,"
+            "iterations,relative_residual" );
+        for( float h : { 0.5f, 0.25f } )
+            for( float radius : { 0.12f, 0.35f } )
+                for( int count : { 0, 16, 48 } )
+                    for( bool compact : { false, true } )
+                    {
+                        const result stats = measure( h, 1, 4, count, true, true, true,
+                            true, true, true, true, true, true, radius, compact );
+                        std::printf( "%d,%.2f,%.2f,%s,%d,%d,%.0f,%.5f,%.5f,"
+                            "%.5f,%.5f,%.5f,%.5f,%.5f,%.0f,%.6g\n",
+                            count, radius, h, compact ? "float" : "double",
+                            stats.converged, stats.attempts, stats.activeCells,
+                            stats.phases.factorization, stats.phases.ic0Forward,
+                            stats.phases.ic0Backward, stats.phases.preconditioner,
+                            stats.phases.multiply, stats.pressureMilliseconds,
                             stats.stepMilliseconds, stats.iterations, stats.residual );
                     }
         return 0;
