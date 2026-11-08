@@ -472,6 +472,17 @@ public:
         return analyticCutCellCachedSchurEdgesEnabled_;
     }
 
+    // Schur PCG 행렬-벡터 곱에서 Body의 역질량/역관성을 별도 소형 배열로 읽는다.
+    // 기본 ON. OFF는 매 B M^-1 B^T 곱에서 원본 obstacle을 조회하는 참조 경로.
+    void setAnalyticCutCellCompactSchurBodyMassEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellCompactSchurBodyMassEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellCompactSchurBodyMassEnabled() const noexcept
+    {
+        return analyticCutCellCompactSchurBodyMassEnabled_;
+    }
+
     // Analytic Cut-cell geometry에서 막힌 MAC face만 Schur B 조립에 방문한다.
     // 기본 ON. OFF는 전체 내부 face를 다시 검사하는 참조 경로.
     void setAnalyticCutCellIndexedBoundaryFacesEnabled( bool enabled ) noexcept
@@ -715,6 +726,11 @@ private:
         double fy = 0.0;
         double torque = 0.0;
     };
+    struct coupledBodyInverseMass
+    {
+        double inverseMass = 0.0;
+        double inverseInertia = 0.0;
+    };
     struct incompleteCachedCoefficients
     {
         double west = 0.0;
@@ -747,6 +763,7 @@ private:
         std::vector<coupledPressureFace> faces;
         std::vector<coupledPressureEdge> laplacianEdges;
         std::vector<coupledBodyResponse> response;
+        std::vector<coupledBodyInverseMass> bodyInverseMass;
         std::vector<int> dynamicResponseOwners;
         std::vector<double> diagonal;
         std::vector<double> incompletePivot;
@@ -836,6 +853,7 @@ private:
     bool analyticCutCellActiveIc0SweepEnabled_ = true;
     bool analyticCutCellSplitIc0CoefficientsEnabled_ = true;
     bool analyticCutCellCachedSchurEdgesEnabled_ = true;
+    bool analyticCutCellCompactSchurBodyMassEnabled_ = true;
     bool analyticCutCellIndexedBoundaryFacesEnabled_ = true;
     bool analyticCutCellIndexedBoundarySyncEnabled_ = true;
     bool analyticCutCellBoundedCellAreasEnabled_ = true;
