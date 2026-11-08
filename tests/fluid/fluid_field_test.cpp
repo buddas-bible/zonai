@@ -1541,7 +1541,7 @@ void checkActiveCellIc0SweepDifferential( bool compareSplit = false )
         }
 }
 
-void checkCachedSchurLaplacianDifferential()
+void checkCachedSchurLaplacianDifferential( bool compareCompactBodyMass = false )
 {
     constexpr float dt = 1.0f / 60.0f;
     constexpr vec2 origin{ -6.0f, -4.0f };
@@ -1584,8 +1584,13 @@ void checkCachedSchurLaplacianDifferential()
                 field->setCutCellPressureTimingEnabled( true );
                 field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
             }
-            reference.setAnalyticCutCellCachedSchurEdgesEnabled( false );
-            reference.setAnalyticCutCellIndexedBoundaryFacesEnabled( false );
+            if( compareCompactBodyMass )
+                reference.setAnalyticCutCellCompactSchurBodyMassEnabled( false );
+            else
+            {
+                reference.setAnalyticCutCellCachedSchurEdgesEnabled( false );
+                reference.setAnalyticCutCellIndexedBoundaryFacesEnabled( false );
+            }
             std::array<fluidObstacleForce2, 2> refForces{}, cachedForces{};
             // The edge list must be rebuilt for every changing occupancy.
             for( int frame = 0; frame < 4; ++frame )
@@ -1601,19 +1606,38 @@ void checkCachedSchurLaplacianDifferential()
                     a.hasAnalyticImpulseBudget && b.hasAnalyticImpulseBudget &&
                     a.coupledIterations == b.coupledIterations &&
                     a.coupledTiming.matrixProducts == b.coupledTiming.matrixProducts &&
-                    a.coupledTiming.cachedLaplacianEdges == 0 &&
+                    ( compareCompactBodyMass ? a.coupledTiming.cachedLaplacianEdges > 0 :
+                        a.coupledTiming.cachedLaplacianEdges == 0 ) &&
                     b.coupledTiming.cachedLaplacianEdges > 0,
                     "Schur edge cache must preserve solver convergence while recording reused faces" );
+                if( compareCompactBodyMass )
+                    check( a.coupledIterations == b.coupledIterations &&
+                        a.coupledRelativeResidual == b.coupledRelativeResidual &&
+                        a.pressureResidual == b.pressureResidual &&
+                        a.predictedContinuityRms == b.predictedContinuityRms,
+                        "compact Schur mass lookup must preserve the exact pressure solution" );
                 check( std::abs( a.coupledRelativeResidual - b.coupledRelativeResidual ) < 1.0e-6f &&
                     std::abs( a.predictedContinuityRms - b.predictedContinuityRms ) < 1.0e-4f &&
                     std::abs( a.pressureResidual - b.pressureResidual ) < 1.0e-4f,
                     "cached Laplacian and direct matrix-free paths must retain true residual and continuity" );
                 for( std::size_t i = 0; i < bodies.size(); ++i )
                 {
+                    if( compareCompactBodyMass )
+                        check( refForces[i].force.x == cachedForces[i].force.x &&
+                            refForces[i].force.y == cachedForces[i].force.y &&
+                            refForces[i].torque == cachedForces[i].torque,
+                            "compact Schur mass lookup must preserve exact pressure traction" );
                     const float scale = 1.0f + Length( refForces[i].force );
                     check( Length( refForces[i].force - cachedForces[i].force ) < 1.0e-4f * scale &&
                         std::abs( refForces[i].torque - cachedForces[i].torque ) < 1.0e-4f * scale,
                         "cached Schur edges must preserve per-body pressure force and torque" );
+                }
+                if( compareCompactBodyMass )
+                {
+                    const vec2 aa = reference.getFluidMomentum();
+                    const vec2 bb = cached.getFluidMomentum();
+                    check( aa.x == bb.x && aa.y == bb.y,
+                        "compact Schur mass lookup must preserve exact fluid momentum" );
                 }
                 const float scale = 1.0f + Length( reference.getFluidMomentum() );
                 check( Length( reference.getFluidMomentum() - cached.getFluidMomentum() ) < 1.0e-4f * scale &&
@@ -1645,8 +1669,11 @@ void checkCachedSchurLaplacianDifferential()
             reference.clear();
             check( cached.isAnalyticCutCellCachedSchurEdgesEnabled() &&
                 cached.isAnalyticCutCellIndexedBoundaryFacesEnabled() &&
-                !reference.isAnalyticCutCellCachedSchurEdgesEnabled() &&
-                !reference.isAnalyticCutCellIndexedBoundaryFacesEnabled() &&
+                ( compareCompactBodyMass
+                    ? !reference.isAnalyticCutCellCompactSchurBodyMassEnabled() &&
+                        cached.isAnalyticCutCellCompactSchurBodyMassEnabled()
+                    : !reference.isAnalyticCutCellCachedSchurEdgesEnabled() &&
+                        !reference.isAnalyticCutCellIndexedBoundaryFacesEnabled() ) &&
                 cached.getCutCellPressure().coupledTiming.cachedLaplacianEdges == 0,
                 "clear must retain selected edge-cache option but discard old data" );
         }
@@ -3876,6 +3903,7 @@ int main()
     checkActiveCellIc0SweepDifferential();
     checkActiveCellIc0SweepDifferential( true );
     checkCachedSchurLaplacianDifferential();
+    checkCachedSchurLaplacianDifferential( true );
     checkIndexedAnalyticBoundaryDifferential();
     checkIndexedAnalyticBoundaryDifferential( true );
     checkIndexedAnalyticBoundaryDifferential( false, true );
