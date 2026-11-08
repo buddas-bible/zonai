@@ -4405,15 +4405,29 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         ++timing.matrixProducts;
     };
 
+    // IC(0) constructed this sorted active-cell list during factorization.
+    // Only the PCG vector operations change: matrix products and true-residual
+    // validation keep their full-grid reference paths. When inactive cells are
+    // skipped, their x/r/z/direction values remain zero as initialized above.
+    const bool activePcgVectors = activeSweep && analyticCutCellActivePcgVectorsEnabled_;
+    const auto forEachPcgCell = [&]( const auto& visit )
+    {
+        if( activePcgVectors )
+            for( int cell : incompleteActiveCells ) visit( static_cast<std::size_t>( cell ) );
+        else
+            for( std::size_t cell = 0; cell < rhs.size(); ++cell ) visit( cell );
+    };
+
     timedPreconditioner( residual );
     double rz = 0.0, squared = 0.0;
-    for( std::size_t i = 0; i < rhs.size(); ++i )
+    forEachPcgCell( [&]( std::size_t i )
     {
-        if( cutCell ? cellFluidFraction_[i] <= 0.0f : solidOwner_[i] >= 0 ) continue;
+        if( !activePcgVectors &&
+            ( cutCell ? cellFluidFraction_[i] <= 0.0f : solidOwner_[i] >= 0 ) ) return;
         direction[i] = z[i];
         rz += residual[i] * z[i];
         squared += residual[i] * residual[i];
-    }
+    } );
     if( !std::isfinite( rz ) || !std::isfinite( squared ) )
         return fail( fluidCoupledPressureStatus2::numericalBreakdown );
     const double initialSquared = squared;
@@ -4423,35 +4437,41 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     {
         timedMultiply( direction, product );
         double denom = 0.0;
-        for( std::size_t i = 0; i < rhs.size(); ++i )
+        forEachPcgCell( [&]( std::size_t i )
+        {
             denom += direction[i] * product[i];
+        } );
         if( !std::isfinite( denom ) || denom <= 0.0 )
             return fail( fluidCoupledPressureStatus2::numericalBreakdown );
         const double alpha = rz / denom;
         if( !std::isfinite( alpha ) )
             return fail( fluidCoupledPressureStatus2::numericalBreakdown );
         squared = 0.0;
-        for( std::size_t i = 0; i < rhs.size(); ++i )
+        forEachPcgCell( [&]( std::size_t i )
         {
             x[i] += alpha * direction[i];
             residual[i] -= alpha * product[i];
             squared += residual[i] * residual[i];
-        }
+        } );
         pressureMomentum_.coupledIterations = iteration + 1;
         if( !std::isfinite( squared ) )
             return fail( fluidCoupledPressureStatus2::numericalBreakdown );
         if( squared <= tolerance ) break;
         timedPreconditioner( residual );
         double nextRz = 0.0;
-        for( std::size_t i = 0; i < rhs.size(); ++i )
+        forEachPcgCell( [&]( std::size_t i )
+        {
             nextRz += residual[i] * z[i];
+        } );
         if( !std::isfinite( nextRz ) || rz <= 0.0 )
             return fail( fluidCoupledPressureStatus2::numericalBreakdown );
         const double beta = nextRz / rz;
         if( !std::isfinite( beta ) )
             return fail( fluidCoupledPressureStatus2::numericalBreakdown );
-        for( std::size_t i = 0; i < rhs.size(); ++i )
+        forEachPcgCell( [&]( std::size_t i )
+        {
             direction[i] = z[i] + beta * direction[i];
+        } );
         rz = nextRz;
     }
 

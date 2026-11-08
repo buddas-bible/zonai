@@ -448,6 +448,18 @@ public:
         return analyticCutCellActiveIc0SweepEnabled_;
     }
 
+    // Analytic Cut-cell의 PCG 내적과 벡터 갱신에서 활성 Fluid Cell만 순회.
+    // Active IC(0)에서 이미 만든 row-major 셀 목록을 재사용한다. 기본 ON.
+    // OFF는 격자 전체를 방문하는 기존 벡터 연산 참조 경로.
+    void setAnalyticCutCellActivePcgVectorsEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellActivePcgVectorsEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellActivePcgVectorsEnabled() const noexcept
+    {
+        return analyticCutCellActivePcgVectorsEnabled_;
+    }
+
     // IC(0) active forward/backward sweep 계수를 두 소형 배열로 분리해
     // 각 순회에서 필요한 계수만 순차적으로 읽는다. 기본 ON.
     // OFF는 동일한 pivot과 수식을 쓰는 기존 AoS 캐시 참조 경로.
@@ -834,6 +846,7 @@ private:
     bool analyticCutCellIncompleteCholeskyEnabled_ = true;
     bool analyticCutCellCachedIc0Enabled_ = true;
     bool analyticCutCellActiveIc0SweepEnabled_ = true;
+    bool analyticCutCellActivePcgVectorsEnabled_ = true;
     bool analyticCutCellSplitIc0CoefficientsEnabled_ = true;
     bool analyticCutCellCachedSchurEdgesEnabled_ = true;
     bool analyticCutCellIndexedBoundaryFacesEnabled_ = true;
