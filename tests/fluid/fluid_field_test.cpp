@@ -3922,6 +3922,7 @@ int main()
     checkMovingOnlyAnalyticSweptDifferential();
     checkMovingOnlyAnalyticSweptDifferential( true );
     checkMovingOnlyAnalyticSweptDifferential( false, true, 0.35f );
+    checkMovingOnlyAnalyticSweptDifferential( false, false, 0.35f, true );
     checkBoundedSweptMixedAnalyticShapes();
     checkAdaptiveSweptTemporalQuadrature();
     checkConservativeMacAdvection();
