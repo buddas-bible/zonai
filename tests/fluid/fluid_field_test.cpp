@@ -3263,7 +3263,8 @@ void checkSweptSolidFaceFlux()
         "clear must reset swept volume diagnostics and previous shape history" );
 }
 
-void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false )
+void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false,
+    bool comparePcgVectors = false, float staticRadius = 0.12f )
 {
     constexpr float dt = 1.0f / 60.0f;
     for( float h : { 0.5f, 0.25f } )
@@ -3292,7 +3293,7 @@ void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false )
                             break;
                         }
                     if( !separated ) continue;
-                    bodies.push_back( { circle2{ {}, 0.12f }, { position, {} },
+                    bodies.push_back( { circle2{ {}, staticRadius }, { position, {} },
                         position, {}, 0.0f, 0.0f, 0.0f } );
                     ++added;
                 }
@@ -3314,7 +3315,9 @@ void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false )
                     field->setAdaptiveSweptSamplingEnabled( true );
                 field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
             }
-            if( compareBounded )
+            if( comparePcgVectors )
+                reference.setAnalyticCutCellActivePcgVectorsEnabled( false );
+            else if( compareBounded )
                 reference.setAnalyticCutCellBoundedSweptFacesEnabled( false );
             else
                 reference.setAnalyticCutCellMovingSweptFacesEnabled( false );
@@ -3368,11 +3371,14 @@ void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false )
             }
             reference.clear();
             movingOnly.clear();
-            check( compareBounded
-                    ? !reference.isAnalyticCutCellBoundedSweptFacesEnabled() &&
-                        movingOnly.isAnalyticCutCellBoundedSweptFacesEnabled()
-                    : !reference.isAnalyticCutCellMovingSweptFacesEnabled() &&
-                        movingOnly.isAnalyticCutCellMovingSweptFacesEnabled(),
+            check( comparePcgVectors
+                    ? !reference.isAnalyticCutCellActivePcgVectorsEnabled() &&
+                        movingOnly.isAnalyticCutCellActivePcgVectorsEnabled()
+                    : compareBounded
+                        ? !reference.isAnalyticCutCellBoundedSweptFacesEnabled() &&
+                            movingOnly.isAnalyticCutCellBoundedSweptFacesEnabled()
+                        : !reference.isAnalyticCutCellMovingSweptFacesEnabled() &&
+                            movingOnly.isAnalyticCutCellMovingSweptFacesEnabled(),
                 "clear must preserve selected analytic swept traversal mode" );
         }
 }
@@ -3901,6 +3907,7 @@ int main()
     checkSweptSolidFaceFlux();
     checkMovingOnlyAnalyticSweptDifferential();
     checkMovingOnlyAnalyticSweptDifferential( true );
+    checkMovingOnlyAnalyticSweptDifferential( false, true, 0.35f );
     checkBoundedSweptMixedAnalyticShapes();
     checkAdaptiveSweptTemporalQuadrature();
     checkConservativeMacAdvection();
