@@ -187,6 +187,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --swept-bounds-sweep
 
+      # Build immovable analytic geometry once per swept interval, but still
+      # recheck every moving/static shape-pair intersection at each timestamp.
+      - name: Sample swept static analytic shape reuse (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --swept-static-shapes-sweep
+
       # A real headless Sandbox World interleave, 8 World substeps and 1/2/4/8 Fluid steps.
       # Frame medians are informational; never gate CI on runner-dependent wall time.
       - name: Sample Wind multi-substep stage profile (Windows Release, informational)
