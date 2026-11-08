@@ -157,6 +157,8 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
     p.factorization = phaseMedian( []( const auto& v ) { return v.factorization; } );
     p.multiply = phaseMedian( []( const auto& v ) { return v.multiply; } );
     p.preconditioner = phaseMedian( []( const auto& v ) { return v.preconditioner; } );
+    p.ic0Forward = phaseMedian( []( const auto& v ) { return v.ic0Forward; } );
+    p.ic0Backward = phaseMedian( []( const auto& v ) { return v.ic0Backward; } );
     p.vector = phaseMedian( []( const auto& v ) { return v.vector; } );
     p.validation = phaseMedian( []( const auto& v ) { return v.validation; } );
     p.output = phaseMedian( []( const auto& v ) { return v.output; } );
@@ -256,17 +258,18 @@ int main( int argc, char** argv )
     if( ic0SplitSweep )
     {
         std::puts( "static_obstacles,cell_m,ic0_layout,converged,attempts,ic0_build_ms,"
-            "ic0_apply_ms,schur_multiply_ms,pcg_ms,step_ms,iterations,relative_residual" );
+            "ic0_apply_ms,ic0_forward_ms,ic0_backward_ms,schur_multiply_ms,pcg_ms,step_ms,iterations,relative_residual" );
         for( float h : { 0.5f, 0.25f } )
             for( int count : { 0, 16, 48 } )
                 for( bool split : { false, true } )
                 {
                     const result stats = measure( h, 1, 4, count, true, true, true,
                         true, true, true, true, split );
-                    std::printf( "%d,%.2f,%s,%d,%d,%.5f,%.5f,%.5f,%.5f,%.5f,%.0f,%.6g\n",
+                    std::printf( "%d,%.2f,%s,%d,%d,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.0f,%.6g\n",
                         count, h, split ? "split" : "aos",
                         stats.converged, stats.attempts, stats.phases.factorization,
-                        stats.phases.preconditioner, stats.phases.multiply,
+                        stats.phases.preconditioner, stats.phases.ic0Forward,
+                        stats.phases.ic0Backward, stats.phases.multiply,
                         stats.pressureMilliseconds, stats.stepMilliseconds,
                         stats.iterations, stats.residual );
                 }
