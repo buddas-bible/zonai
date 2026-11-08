@@ -3453,14 +3453,14 @@ void checkSweptStaticPairCacheMovingOverlapFallback()
     const vec2 secondStatic{ 2.5f, 2.5f };
     const vec2 thirdStatic{ -2.2f, 2.0f };
     std::array<fluidShapeObstacle2, 4> bodies{{
-        { circle2{ {}, 0.45f }, { movingStart, {} }, movingStart,
-            {}, 0.0f, 0.7f, 0.6f },
         { circle2{ {}, 0.5f }, { firstStatic, {} }, firstStatic,
             {}, 0.0f, 0.0f, 0.0f },
         { circle2{ {}, 0.35f }, { secondStatic, {} }, secondStatic,
             {}, 0.0f, 0.0f, 0.0f },
         { circle2{ {}, 0.35f }, { thirdStatic, {} }, thirdStatic,
-            {}, 0.0f, 0.0f, 0.0f }
+            {}, 0.0f, 0.0f, 0.0f },
+        { circle2{ {}, 0.45f }, { movingStart, {} }, movingStart,
+            {}, 0.0f, 0.7f, 0.6f }
     }};
     fluidField2 reference{ 20, 20, 0.5f, { -5.0f, -5.0f } };
     fluidField2 cached{ 20, 20, 0.5f, { -5.0f, -5.0f } };
@@ -3482,8 +3482,8 @@ void checkSweptStaticPairCacheMovingOverlapFallback()
     // The moving body overlaps the first static at the new snapshot, forcing
     // the sampled union path at intermediate timestamps as well. Static-static
     // separation decisions remain valid, but moving-static checks must not be reused.
-    bodies[0].transform.position.x = -0.15f;
-    bodies[0].center = bodies[0].transform.position;
+    bodies[3].transform.position.x = -0.15f;
+    bodies[3].center = bodies[3].transform.position;
     reference.step( dt, bodies, referenceForces, 160 );
     cached.step( dt, bodies, cachedForces, 160 );
     const auto& a = reference.getSweptFaceFlux();
