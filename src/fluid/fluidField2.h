@@ -448,6 +448,18 @@ public:
         return analyticCutCellActiveIc0SweepEnabled_;
     }
 
+    // IC(0) active forward/backward sweep 계수를 두 소형 배열로 분리해
+    // 각 순회에서 필요한 계수만 순차적으로 읽는다. 기본 ON.
+    // OFF는 동일한 pivot과 수식을 쓰는 기존 AoS 캐시 참조 경로.
+    void setAnalyticCutCellSplitIc0CoefficientsEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellSplitIc0CoefficientsEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellSplitIc0CoefficientsEnabled() const noexcept
+    {
+        return analyticCutCellSplitIc0CoefficientsEnabled_;
+    }
+
     // 분석적 Cut-cell Schur L의 MAC face 연결/개방율을 coupled solve마다 한 번 캐시.
     // 기본 ON. OFF는 기존 matrix-free 격자 face 조회 경로로 결과/속도 비교.
     // Body Schur B M^-1 B^T 및 이진 MAC 연산자는 변경하지 않는다.
@@ -713,6 +725,17 @@ private:
         double southOverPivot = 0.0;
         double inversePivot = 0.0;
     };
+    struct incompleteForwardCoefficients
+    {
+        double westOverPivot = 0.0;
+        double southOverPivot = 0.0;
+    };
+    struct incompleteBackwardCoefficients
+    {
+        double east = 0.0;
+        double north = 0.0;
+        double inversePivot = 0.0;
+    };
     struct coupledPressureEdge
     {
         int first = 0;
@@ -729,6 +752,8 @@ private:
         std::vector<double> incompletePivot;
         std::vector<double> incompleteForward;
         std::vector<incompleteCachedCoefficients> incompleteCached;
+        std::vector<incompleteForwardCoefficients> incompleteSplitForward;
+        std::vector<incompleteBackwardCoefficients> incompleteSplitBackward;
         std::vector<int> incompleteActiveCells;
         std::vector<double> rhs;
         std::vector<double> x;
@@ -809,6 +834,7 @@ private:
     bool analyticCutCellIncompleteCholeskyEnabled_ = true;
     bool analyticCutCellCachedIc0Enabled_ = true;
     bool analyticCutCellActiveIc0SweepEnabled_ = true;
+    bool analyticCutCellSplitIc0CoefficientsEnabled_ = true;
     bool analyticCutCellCachedSchurEdgesEnabled_ = true;
     bool analyticCutCellIndexedBoundaryFacesEnabled_ = true;
     bool analyticCutCellIndexedBoundarySyncEnabled_ = true;

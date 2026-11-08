@@ -4171,16 +4171,24 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     pressureMomentum_.usedIncompleteCholesky = useIncompleteCholesky;
     const bool cachedIc0 = useIncompleteCholesky && analyticCutCellCachedIc0Enabled_;
     const bool activeSweep = cachedIc0 && analyticCutCellActiveIc0SweepEnabled_;
+    const bool splitIc0 = activeSweep && analyticCutCellSplitIc0CoefficientsEnabled_;
     auto& incompletePivot = scratch.incompletePivot;
     auto& incompleteForward = scratch.incompleteForward;
     auto& incompleteCached = scratch.incompleteCached;
+    auto& splitForward = scratch.incompleteSplitForward;
+    auto& splitBackward = scratch.incompleteSplitBackward;
     auto& incompleteActiveCells = scratch.incompleteActiveCells;
     nextPhase( phase::factorization );
     if( useIncompleteCholesky )
     {
         incompletePivot.assign( rhs.size(), 0.0 );
         incompleteForward.assign( rhs.size(), 0.0 );
-        if( cachedIc0 ) incompleteCached.assign( rhs.size(), {} );
+        if( cachedIc0 && !splitIc0 ) incompleteCached.assign( rhs.size(), {} );
+        if( splitIc0 )
+        {
+            splitForward.assign( rhs.size(), {} );
+            splitBackward.assign( rhs.size(), {} );
+        }
         if( activeSweep ) incompleteActiveCells.clear();
         for( int y = 0; y < height_; ++y )
             for( int xCell = 0; xCell < width_; ++xCell )
@@ -4198,10 +4206,18 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                         pivot -= west * west / incompletePivot[cell - 1];
                         if( cachedIc0 )
                         {
-                            auto& coefficients = incompleteCached[cell];
-                            coefficients.west = west;
-                            coefficients.westOverPivot = west / incompletePivot[cell - 1];
-                            if( activeSweep ) incompleteCached[cell - 1].east = west;
+                            if( splitIc0 )
+                            {
+                                splitForward[cell].westOverPivot = west / incompletePivot[cell - 1];
+                                splitBackward[cell - 1].east = west;
+                            }
+                            else
+                            {
+                                auto& coefficients = incompleteCached[cell];
+                                coefficients.west = west;
+                                coefficients.westOverPivot = west / incompletePivot[cell - 1];
+                                if( activeSweep ) incompleteCached[cell - 1].east = west;
+                            }
                         }
                     }
                 }
@@ -4213,15 +4229,27 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                         pivot -= south * south / incompletePivot[cell - width_];
                         if( cachedIc0 )
                         {
-                            auto& coefficients = incompleteCached[cell];
-                            coefficients.south = south;
-                            coefficients.southOverPivot = south / incompletePivot[cell - width_];
-                            if( activeSweep ) incompleteCached[cell - width_].north = south;
+                            if( splitIc0 )
+                            {
+                                splitForward[cell].southOverPivot = south / incompletePivot[cell - width_];
+                                splitBackward[cell - width_].north = south;
+                            }
+                            else
+                            {
+                                auto& coefficients = incompleteCached[cell];
+                                coefficients.south = south;
+                                coefficients.southOverPivot = south / incompletePivot[cell - width_];
+                                if( activeSweep ) incompleteCached[cell - width_].north = south;
+                            }
                         }
                     }
                 }
                 incompletePivot[cell] = std::max( regularization, pivot );
-                if( cachedIc0 ) incompleteCached[cell].inversePivot = 1.0 / incompletePivot[cell];
+                if( cachedIc0 )
+                {
+                    if( splitIc0 ) splitBackward[cell].inversePivot = 1.0 / incompletePivot[cell];
+                    else incompleteCached[cell].inversePivot = 1.0 / incompletePivot[cell];
+                }
             }
     }
     nextPhase( phase::pcg );
@@ -4231,6 +4259,35 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         {
             for( std::size_t i = 0; i < source.size(); ++i )
                 z[i] = source[i] / std::max( 1.0e-8, diagonal[i] );
+            return;
+        }
+        if( splitIc0 )
+        {
+            // The forward pass only touches two cached multipliers. The
+            // reverse pass uses east/north face weights and the inverse pivot.
+            // The active-cell traversal and arithmetic order are identical
+            // to the existing AoS IC(0) path.
+            for( int cell : incompleteActiveCells )
+            {
+                const auto& coefficients = splitForward[cell];
+                double value = source[cell];
+                if( coefficients.westOverPivot != 0.0 )
+                    value += coefficients.westOverPivot * incompleteForward[cell - 1];
+                if( coefficients.southOverPivot != 0.0 )
+                    value += coefficients.southOverPivot * incompleteForward[cell - width_];
+                incompleteForward[cell] = value;
+            }
+            for( auto it = incompleteActiveCells.rbegin(); it != incompleteActiveCells.rend(); ++it )
+            {
+                const int cell = *it;
+                const auto& coefficients = splitBackward[cell];
+                double value = incompleteForward[cell];
+                if( coefficients.east != 0.0 )
+                    value += coefficients.east * z[cell + 1];
+                if( coefficients.north != 0.0 )
+                    value += coefficients.north * z[cell + width_];
+                z[cell] = value * coefficients.inversePivot;
+            }
             return;
         }
         if( activeSweep )
