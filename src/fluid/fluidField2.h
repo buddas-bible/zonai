@@ -478,6 +478,18 @@ public:
         return analyticCutCellSplitIc0CoefficientsEnabled_;
     }
 
+    // IC(0) 후진 대입의 east/north를 원본 face 개방율의 float로 보관.
+    // double inverse pivot은 유지하며, OFF는 기존 double-face 캐시 경로.
+    // 기본 ON. 수치 차이 없이 후진 계수의 메모리 이동량을 줄이는 실험.
+    void setAnalyticCutCellCompactIc0BackwardEnabled( bool enabled ) noexcept
+    {
+        analyticCutCellCompactIc0BackwardEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isAnalyticCutCellCompactIc0BackwardEnabled() const noexcept
+    {
+        return analyticCutCellCompactIc0BackwardEnabled_;
+    }
+
     // 분석적 Cut-cell Schur L의 MAC face 연결/개방율을 coupled solve마다 한 번 캐시.
     // 기본 ON. OFF는 기존 matrix-free 격자 face 조회 경로로 결과/속도 비교.
     // Body Schur B M^-1 B^T 및 이진 MAC 연산자는 변경하지 않는다.
@@ -754,6 +766,16 @@ private:
         double north = 0.0;
         double inversePivot = 0.0;
     };
+    // The face apertures originate from float MAC fractions. Storing these
+    // two weights as float preserves their exact value when promoted to double
+    // in the backward solve; the inverse pivot remains full precision.
+    struct incompleteCompactBackwardCoefficients
+    {
+        float east = 0.0f;
+        float north = 0.0f;
+        double inversePivot = 0.0;
+    };
+    static_assert( sizeof( incompleteCompactBackwardCoefficients ) == 16 );
     struct coupledPressureEdge
     {
         int first = 0;
@@ -772,6 +794,7 @@ private:
         std::vector<incompleteCachedCoefficients> incompleteCached;
         std::vector<incompleteForwardCoefficients> incompleteSplitForward;
         std::vector<incompleteBackwardCoefficients> incompleteSplitBackward;
+        std::vector<incompleteCompactBackwardCoefficients> incompleteCompactBackward;
         std::vector<int> incompleteActiveCells;
         std::vector<double> rhs;
         std::vector<double> x;
@@ -854,6 +877,7 @@ private:
     bool analyticCutCellActiveIc0SweepEnabled_ = true;
     bool analyticCutCellActivePcgVectorsEnabled_ = true;
     bool analyticCutCellSplitIc0CoefficientsEnabled_ = true;
+    bool analyticCutCellCompactIc0BackwardEnabled_ = true;
     bool analyticCutCellCachedSchurEdgesEnabled_ = true;
     bool analyticCutCellIndexedBoundaryFacesEnabled_ = true;
     bool analyticCutCellIndexedBoundarySyncEnabled_ = true;
