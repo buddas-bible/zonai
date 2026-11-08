@@ -85,6 +85,11 @@ struct fluidCoupledPressureTiming2
     // Nonzero only for the split active-cell IC(0) path with timing enabled.
     double ic0Forward = 0.0;
     double ic0Backward = 0.0;
+    // Opt-in previous-pressure probe: summed ||b||², ||b-A*p_previous||².
+    // These are diagnostics, not extra phases in accounted().
+    double warmStartRhsSquared = 0.0;
+    double warmStartGuessSquared = 0.0;
+    int warmStartProbes = 0;
     double vector = 0.0;
     double validation = 0.0;
     double output = 0.0;
@@ -106,6 +111,9 @@ struct fluidCoupledPressureTiming2
         preconditioner += next.preconditioner;
         ic0Forward += next.ic0Forward;
         ic0Backward += next.ic0Backward;
+        warmStartRhsSquared += next.warmStartRhsSquared;
+        warmStartGuessSquared += next.warmStartGuessSquared;
+        warmStartProbes += next.warmStartProbes;
         vector += next.vector;
         validation += next.validation;
         output += next.output;
@@ -586,6 +594,17 @@ public:
     void setCutCellPressureTimingEnabled( bool enabled ) noexcept { cutCellPressureTimingEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellPressureTimingEnabled() const noexcept { return cutCellPressureTimingEnabled_; }
 
+    // 계측 전용: 이전 압력을 현재 연립 압력식에 대입한 실제 잔차 비교.
+    // 기본 OFF. PCG 초기값과 물리 계산에는 사용하지 않는다.
+    void setCoupledPressureWarmStartProbeEnabled( bool enabled ) noexcept
+    {
+        coupledPressureWarmStartProbeEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isCoupledPressureWarmStartProbeEnabled() const noexcept
+    {
+        return coupledPressureWarmStartProbeEnabled_;
+    }
+
     // 이동 중인 solid의 공유 MAC 면 swept volume을 주변 cell의 기하 ΔV와
     // 국소적으로 맞추는 실험 경로. 부호가 반대인 인접 잔차만 상쇄한다.
     // 기본 false. 닫힌 외벽의 유량 및 전체 체적 오차를 임의로 제거하지 않는다.
@@ -864,6 +883,7 @@ private:
     bool analyticCutCellMovingSweptFacesEnabled_ = true;
     bool analyticCutCellBoundedSweptFacesEnabled_ = true;
     bool cutCellPressureTimingEnabled_ = false;
+    bool coupledPressureWarmStartProbeEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
     bool volumeSourceValid_ = false;
