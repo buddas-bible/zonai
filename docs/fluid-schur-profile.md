@@ -11,3 +11,29 @@ Sandbox의 **유체 단계별 시간 측정** 옵션은 내부 Cut-cell Schur �
 기존 `fluidPreconditionerBenchmark --csv`와 `sandboxWindStepBenchmark --csv`를 확장해 행렬 구성·IC(0)·A*v·전처리 적용·벡터·진짜 잔차 측정값과 연산 횟수를 출력한다. Windows Release CI는 기존 벤치마크를 정보 제공 전용으로 실행하고 속도 수치로 CI 합격·실패를 결정하지 않는다. **수렴하지 않은 Jacobi와 수렴한 IC(0)의 실행 시간 비율을 성능 개선으로 간주하지 않는다.**
 
 본 변경은 관찰용 프로파일만 추가한 것으로, 빠른 알고리즘/메모리 레이아웃 최적화는 측정 결과를 보고 별도 PR에서 검증한다. 계측이 켜진 실행은 시계 호출 비용으로 인해 순수 실행시간보다 느릴 수 있고, CI 환경은 사용자 실제 PC의 FPS를 대변하지 않는다.
+
+
+## 이전 압력 초기값 타당성 계측 (실험)
+
+`setCoupledPressureWarmStartProbeEnabled(true)`와 압력 타이밍을 모두 켜면, 매
+Cut-cell Schur solve에서 **이전 Step의 압력**을 현재 연산자에 적용한다.
+`warmStartRhsSquared`는 새 RHS의 제곱노름 `||b||²`,
+`warmStartGuessSquared`는 이전 압력을 초기값으로 가정한
+`||b-A*p_previous||²`, `warmStartProbes`는 성공한 계측 횟수다.
+각 값은 substep별로 더할 수 있으므로 Sandbox의 프레임 합산에도 적합하다.
+`sqrt(guessSquared/rhsSquared)`가 1보다 작으면 이전 압력이 0 초기값보다
+작은 잔차를 만들었다는 뜻이지만, **PCG 반복 감소 또는 성능 향상을 보장하지는 않는다.**
+0보다 큰 새 RHS 제곱노름과 유한한 값만 분석한다.
+
+이 모드는 실제 PCG의 x, residual, 수렴 판정, 압력, 힘/토크를 변경하지 않는다.
+추가 A*p 연산은 오직 옵트인 계측에만 사용되며 정규 PCG 반복 횟수에는 세지 않는다.
+대신 Schur `assembly`와 `total` 시간에 추가 비용이 포함되므로
+`--pressure-reuse-probe`의 프레임 시간은 일반 벤치마크와 속도 비교에 쓰면 안 된다.
+기본값은 OFF이며, 압력 타이밍이 꺼져 있으면 추가 A*p도 수행하지 않는다.
+
+Windows Release CI의
+`sandboxWindStepBenchmark --pressure-reuse-probe`는 실제 World 8 substeps와
+Fluid 1/2/4/8 substeps를 각각 측정하고 중앙 프레임별 잔차 비율과
+probe 횟수를 마지막 CSV 열에 기록한다. `fluidFieldTests`에서는
+회전/이동 강체의 연속 스냅샷과 두 격자 크기에서 probe ON/OFF의
+PCG 반복, 압력 잔차, 강체 반력 및 운동량의 정확한 일치를 검증한다.
