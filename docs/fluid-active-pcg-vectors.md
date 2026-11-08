@@ -10,7 +10,7 @@ Switching to uncached IC(0), dense IC(0), Jacobi, sampled or non-cut-cell geomet
 
 ## Differential regression
 
-`checkActiveCellIc0SweepDifferential(false, true)` compares dense vector passes with active vector passes on identical split-IC(0) / Schur operator configurations, at 0.5m and 0.25m grid spacing, with disjoint, overlapping and contained moving circles for four evolving snapshots. It checks exactly equal coupled PCG iterations, relative residual, predicted continuity, pressure residual, per-body force/torque and fluid momentum, in addition to the existing finite-pressure/true-residual gates. An explicit `clear()` assertion checks the toggle lifetime. The previous AoS/split and dense/active IC(0) tests remain unchanged.
+`checkActiveCellIc0SweepDifferential(false, true)` compares dense vector passes with active vector passes on identical split-IC(0) / Schur operator configurations, at 0.5m and 0.25m grid spacing, with disjoint, overlapping and contained moving circles for four evolving snapshots. It checks exactly equal coupled PCG iterations, relative residual, predicted continuity, pressure residual, per-body force/torque and fluid momentum, in addition to the existing finite-pressure/true-residual gates. The existing moving-swept multi-shape differential is also run with active PCG ON/OFF and 16/48 **0.35m radius stationary circles** at both resolutions over three changing snapshots, checking exact pressure, swept volume, per-owner forces and momentum in a more solid-heavy region. An explicit `clear()` assertion checks the toggle lifetime. The previous AoS/split and dense/active IC(0) tests remain unchanged.
 
 ## Performance gate
 
