@@ -3479,17 +3479,18 @@ void checkSweptStaticPairCacheMovingOverlapFallback()
         cached.getCutCellTransition().usedDisjointAnalyticGeometry,
         "the initial moving/static scene must support disjoint analytic geometry" );
 
-    // The moving body overlaps the first static at the new snapshot, forcing
-    // the sampled union path at intermediate timestamps as well. Static-static
-    // separation decisions remain valid, but moving-static checks must not be reused.
-    bodies[3].transform.position.x = -0.15f;
+    // Both endpoint snapshots remain disjoint (and preserve swept history),
+    // but the moving circle passes straight through the first static circle
+    // between them. Intermediate-time geometry must use sampled fallback
+    // during the overlap, even when stationary pairs are cached.
+    bodies[3].transform.position.x = 1.2f;
     bodies[3].center = bodies[3].transform.position;
     reference.step( dt, bodies, referenceForces, 160 );
     cached.step( dt, bodies, cachedForces, 160 );
     const auto& a = reference.getSweptFaceFlux();
     const auto& b = cached.getSweptFaceFlux();
-    check( !reference.getCutCellTransition().usedDisjointAnalyticGeometry &&
-        !cached.getCutCellTransition().usedDisjointAnalyticGeometry &&
+    check( reference.getCutCellTransition().usedDisjointAnalyticGeometry &&
+        cached.getCutCellTransition().usedDisjointAnalyticGeometry &&
         a.usedSweptFlux && b.usedSweptFlux && a.timeSamples >= 2 &&
         a.timeSamples == b.timeSamples &&
         a.totalAbsoluteFlux == b.totalAbsoluteFlux &&
