@@ -22,6 +22,32 @@ sequential forward and backward costs to be compared before considering a change
 to dependency traversal or memory layout. No solver arithmetic or stopping rule
 is changed by this measurement.
 
+## Compact backward MAC face weights
+
+In the split active-cell IC(0) backward sweep, the east/north coefficients
+come directly from `cutCellUOpen` / `cutCellVOpen`, both of which return
+`float`. The solver previously widened these values to `double` for storage.
+The optional default-ON `setAnalyticCutCellCompactIc0BackwardEnabled(bool)`
+instead stores two native `float` coefficients and the unchanged `double`
+inverse pivot in a 16-byte record (versus 24 bytes for the reference record).
+When multiplied with `double` vector elements, the stored floats are promoted
+exactly to the same `double` values as before; arithmetic and traversal order
+remain unchanged. The OFF path retains the existing double-face layout.
+
+The optimization is only used with split active-cell IC(0), and each pressure
+solve rebuilds exactly one of the two backward caches. A/B regressions compare
+four moving snapshots of disjoint, overlapping and contained circles at
+h=0.5/0.25m, plus moving bodies with 16/48 static shapes. They require exact
+PCG iterations, true residuals, continuity, individual pressure forces/torques,
+and fluid momentum.
+
+`fluidPreconditionerBenchmark --ic0-backward-face-sweep` compares the two
+coefficient layouts on the same Windows Release runner with 0/16/48 static
+circles, radii 0.12/0.35m and h=0.5/0.25m. The CSV separates factorization,
+IC(0) forward/backward, total preconditioner, Schur multiply, whole PCG and
+whole Field step. The timings are informational; do not assume a performance
+gain or merge based on smaller storage alone.
+
 ## Validation
 
 The `checkActiveCellIc0SweepDifferential(true)` regression compares AoS OFF vs split ON across 0.5m and 0.25m grids and three two-circle relationships (partly overlapping, disjoint, strict containment) over four changing snapshots. It checks coupled convergence/iterations, exact residual and continuity results, exact per-body pressure traction, sampled velocities and fluid momentum. The original active-vs-dense IC0 differential is retained, along with `clear()` toggle and state checks.
