@@ -187,6 +187,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --swept-bounds-sweep
 
+      # Profile the dominant IC0 application stage with per-pass coefficient
+      # arrays versus original per-cell AoS, preserving PCG convergence.
+      - name: Sample split active IC0 coefficients (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --ic0-split-sweep
+
       # A real headless Sandbox World interleave, 8 World substeps and 1/2/4/8 Fluid steps.
       # Frame medians are informational; never gate CI on runner-dependent wall time.
       - name: Sample Wind multi-substep stage profile (Windows Release, informational)
