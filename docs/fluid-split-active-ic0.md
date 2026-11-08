@@ -6,6 +6,22 @@ The optional, **default-ON** `setAnalyticCutCellSplitIc0CoefficientsEnabled(bool
 
 The layout applies only when *all three* IC0 features are enabled: incomplete Cholesky, cached coefficients and active-cell sweeps. If the new toggle is OFF, the original AoS implementation runs unchanged. Dense cached sweeps, reference on-demand IC0, Jacobi, sampled geometry, and binary MAC paths are unaffected. Both split arrays are cleared/rebuilt for each coupled pressure solve; no cross-step reuse occurs.
 
+## Forward / backward timing diagnostics
+
+With `setCutCellPressureTimingEnabled(true)`, the split active-cell path now reports
+`coupledTiming.ic0Forward` and `coupledTiming.ic0Backward` as diagnostic subsets
+of `preconditioner`. They are not additional phases in `accounted()` and remain
+zero on Jacobi, AoS and other paths. Timing is accumulated over all preconditioner
+applications during one solve; the clock is only sampled when profiling is enabled.
+`sandboxWindStepBenchmark --csv` also appends the two sweep-time columns for real
+World/Fluid interleaved frames at 1/2/4/8 Fluid substeps, and the Sandbox Wind
+profiling UI shows the same per-frame accumulated values. These measurements
+remain subsets of preconditioner time and are reset when profiling is disabled.
+`fluidPreconditionerBenchmark --ic0-split-sweep` adds both columns, allowing the
+sequential forward and backward costs to be compared before considering a change
+to dependency traversal or memory layout. No solver arithmetic or stopping rule
+is changed by this measurement.
+
 ## Validation
 
 The `checkActiveCellIc0SweepDifferential(true)` regression compares AoS OFF vs split ON across 0.5m and 0.25m grids and three two-circle relationships (partly overlapping, disjoint, strict containment) over four changing snapshots. It checks coupled convergence/iterations, exact residual and continuity results, exact per-body pressure traction, sampled velocities and fluid momentum. The original active-vs-dense IC0 differential is retained, along with `clear()` toggle and state checks.

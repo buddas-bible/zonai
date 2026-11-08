@@ -962,6 +962,9 @@ void rigidBodyDemoUi::drawExperimentControls()
                 ImGui::Text( "A*v %.3f (%d회) / 전처리 %.3f (%d회)",
                     pcg.multiply, pcg.matrixProducts,
                     pcg.preconditioner, pcg.preconditionerApplications );
+                if( pcg.ic0Forward > 0.0 || pcg.ic0Backward > 0.0 )
+                    ImGui::Text( "IC(0) 전진 %.3f / 후진 %.3f ms (전처리 시간에 포함)",
+                        pcg.ic0Forward, pcg.ic0Backward );
                 ImGui::Text( "벡터 %.3f / 실제 잔차 %.3f / 해 출력 %.3f ms",
                     pcg.vector, pcg.validation, pcg.output );
                 ImGui::TextDisabled( "Schur 세부 시간은 Pressure 전체의 일부이며, 기본 OFF입니다." );

@@ -1286,6 +1286,11 @@ void checkAnalyticCutCellPreconditionerComparison()
             timing.preconditionerApplications <= solved->coupledIterations + 1,
             "Schur PCG timing must separate non-overlapping phases and count actual operations" );
     }
+    check( a.coupledTiming.ic0Forward == 0.0 && a.coupledTiming.ic0Backward == 0.0 &&
+        b.coupledTiming.ic0Forward > 0.0 && b.coupledTiming.ic0Backward > 0.0 &&
+        b.coupledTiming.ic0Forward + b.coupledTiming.ic0Backward <=
+            b.coupledTiming.preconditioner + 0.01,
+        "Split active IC0 must expose its forward/backward timings within preconditioner time" );
     check( a.coupledTiming.factorization >= 0.0 &&
         b.coupledTiming.factorization > a.coupledTiming.factorization &&
         b.coupledTiming.preconditionerApplications > 0,

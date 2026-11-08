@@ -4267,6 +4267,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
             // reverse pass uses east/north face weights and the inverse pivot.
             // The active-cell traversal and arithmetic order are identical
             // to the existing AoS IC(0) path.
+            const auto forwardBegin = profile ? clock::now() : clock::time_point{};
             for( int cell : incompleteActiveCells )
             {
                 const auto& coefficients = splitForward[cell];
@@ -4277,6 +4278,10 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     value += coefficients.southOverPivot * incompleteForward[cell - width_];
                 incompleteForward[cell] = value;
             }
+            const auto backwardBegin = profile ? clock::now() : clock::time_point{};
+            if( profile )
+                timing.ic0Forward += std::chrono::duration<double, std::milli>(
+                    backwardBegin - forwardBegin ).count();
             for( auto it = incompleteActiveCells.rbegin(); it != incompleteActiveCells.rend(); ++it )
             {
                 const int cell = *it;
@@ -4288,6 +4293,9 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     value += coefficients.north * z[cell + width_];
                 z[cell] = value * coefficients.inversePivot;
             }
+            if( profile )
+                timing.ic0Backward += std::chrono::duration<double, std::milli>(
+                    clock::now() - backwardBegin ).count();
             return;
         }
         if( activeSweep )

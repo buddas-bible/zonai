@@ -81,6 +81,10 @@ struct fluidCoupledPressureTiming2
     double factorization = 0.0;
     double multiply = 0.0;
     double preconditioner = 0.0;
+    // Diagnostic subsets of preconditioner (not additional accounted phases).
+    // Nonzero only for the split active-cell IC(0) path with timing enabled.
+    double ic0Forward = 0.0;
+    double ic0Backward = 0.0;
     double vector = 0.0;
     double validation = 0.0;
     double output = 0.0;
@@ -100,6 +104,8 @@ struct fluidCoupledPressureTiming2
         factorization += next.factorization;
         multiply += next.multiply;
         preconditioner += next.preconditioner;
+        ic0Forward += next.ic0Forward;
+        ic0Backward += next.ic0Backward;
         vector += next.vector;
         validation += next.validation;
         output += next.output;
