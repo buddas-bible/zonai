@@ -27,6 +27,7 @@ struct result
     fluidCoupledPressureTiming2 phases{};
     int converged = 0;
     int attempts = 0;
+    double activeCells = 0.0;
 };
 
 double median( std::vector<double> samples )
@@ -36,7 +37,8 @@ double median( std::vector<double> samples )
     return samples[samples.size() / 2];
 }
 
-std::vector<fluidShapeObstacle2> makeObstacles( int mode, int staticCount = 0 )
+std::vector<fluidShapeObstacle2> makeObstacles( int mode, int staticCount = 0,
+    float staticRadius = 0.12f )
 {
     std::vector<fluidShapeObstacle2> bodies{
         { circle2{ {}, mode == 2 ? 0.78f : 0.58f },
@@ -61,7 +63,8 @@ std::vector<fluidShapeObstacle2> makeObstacles( int mode, int staticCount = 0 )
             bool separated = true;
             for( const auto& body : bodies )
             {
-                const float clearance = std::get<circle2>( body.geometry ).radius + 0.17f;
+                const float clearance = std::get<circle2>( body.geometry ).radius +
+                    staticRadius + 0.05f;
                 if( LengthSquared( position - body.center ) < clearance * clearance )
                 {
                     separated = false;
@@ -69,7 +72,7 @@ std::vector<fluidShapeObstacle2> makeObstacles( int mode, int staticCount = 0 )
                 }
             }
             if( !separated ) continue;
-            bodies.push_back( { circle2{ {}, 0.12f }, { position, {} }, position,
+            bodies.push_back( { circle2{ {}, staticRadius }, { position, {} }, position,
                 {}, 0.0f, 0.0f, 0.0f } );
             --staticCount;
         }
@@ -80,10 +83,12 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
     bool indexedBoundaries = true, bool boundedAreas = true, bool geometryTiming = false,
     bool boundedFaceClipping = true, bool movableOnlySchur = true,
     bool indexedBoundarySync = true, bool reuseCurrentGeometry = true,
-    bool splitIc0 = true )
+    bool splitIc0 = true, bool activePcgVectors = true,
+    float staticRadius = 0.12f )
 {
-    const auto bodies = makeObstacles( mode, staticCount );
+    const auto bodies = makeObstacles( mode, staticCount, staticRadius );
     std::vector<double> totalSamples, pressureSamples, iterationSamples, residualSamples, geometrySamples;
+    std::vector<double> activeCellSamples;
     std::vector<double> pressureStageSamples;
     std::vector<fluidCoupledPressureTiming2> phaseSamples;
     result stats{};
@@ -101,6 +106,7 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
         field.setAnalyticCutCellActiveIc0SweepEnabled( preconditioner >= 3 );
         field.setAnalyticCutCellCachedSchurEdgesEnabled( preconditioner == 4 );
         field.setAnalyticCutCellSplitIc0CoefficientsEnabled( splitIc0 );
+        field.setAnalyticCutCellActivePcgVectorsEnabled( activePcgVectors );
         field.setAnalyticCutCellIndexedBoundaryFacesEnabled( indexedBoundaries );
         field.setAnalyticCutCellBoundedCellAreasEnabled( boundedAreas );
         field.setAnalyticCutCellBoundedFaceClippingEnabled( boundedFaceClipping );
@@ -128,12 +134,14 @@ result measure( float h, int mode, int preconditioner, int staticCount = 0,
         }
         iterationSamples.push_back( pressure.coupledIterations );
         residualSamples.push_back( pressure.coupledRelativeResidual );
+        activeCellSamples.push_back( pressure.activeCells );
         phaseSamples.push_back( pressure.coupledTiming );
     }
     stats.stepMilliseconds = median( totalSamples );
     stats.pressureMilliseconds = median( pressureSamples );
     stats.iterations = median( iterationSamples );
     stats.residual = median( residualSamples );
+    stats.activeCells = median( activeCellSamples );
     stats.geometryMilliseconds = median( geometrySamples );
     stats.pressureStageMilliseconds = median( pressureStageSamples );
     const auto phaseMedian = [&]( auto getter )
@@ -220,6 +228,30 @@ sweptResult measureMovingSwept( float h, int staticCount, bool movingOnly,
 
 int main( int argc, char** argv )
 {
+    const bool activePcgSweep = argc > 1 && std::string_view( argv[1] ) == "--pcg-active-vectors-sweep";
+    if( activePcgSweep )
+    {
+        std::puts( "static_obstacles,static_radius_m,cell_m,vector_mode,converged,attempts,"
+            "active_cells,pcg_vector_ms,schur_multiply_ms,ic0_apply_ms,pcg_ms,"
+            "step_ms,iterations,relative_residual" );
+        for( float h : { 0.5f, 0.25f } )
+            for( float radius : { 0.12f, 0.35f } )
+                for( int count : { 0, 16, 48 } )
+                    for( bool active : { false, true } )
+                    {
+                        // Cache IC0 and matrix-free Schur are identical; only
+                        // full-grid vs preexisting active cell PCG vector loops differ.
+                        const result stats = measure( h, 1, 4, count, true, true, true,
+                            true, true, true, true, true, active, radius );
+                        std::printf( "%d,%.2f,%.2f,%s,%d,%d,%.0f,%.5f,%.5f,%.5f,%.5f,%.5f,%.0f,%.6g\n",
+                            count, radius, h, active ? "active" : "full",
+                            stats.converged, stats.attempts, stats.activeCells,
+                            stats.phases.vector, stats.phases.multiply,
+                            stats.phases.preconditioner, stats.pressureMilliseconds,
+                            stats.stepMilliseconds, stats.iterations, stats.residual );
+                    }
+        return 0;
+    }
     const bool ic0SplitSweep = argc > 1 && std::string_view( argv[1] ) == "--ic0-split-sweep";
     if( ic0SplitSweep )
     {
