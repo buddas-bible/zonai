@@ -4172,11 +4172,13 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     const bool cachedIc0 = useIncompleteCholesky && analyticCutCellCachedIc0Enabled_;
     const bool activeSweep = cachedIc0 && analyticCutCellActiveIc0SweepEnabled_;
     const bool splitIc0 = activeSweep && analyticCutCellSplitIc0CoefficientsEnabled_;
+    const bool compactBackward = splitIc0 && analyticCutCellCompactIc0BackwardEnabled_;
     auto& incompletePivot = scratch.incompletePivot;
     auto& incompleteForward = scratch.incompleteForward;
     auto& incompleteCached = scratch.incompleteCached;
     auto& splitForward = scratch.incompleteSplitForward;
     auto& splitBackward = scratch.incompleteSplitBackward;
+    auto& compactBackwardCache = scratch.incompleteCompactBackward;
     auto& incompleteActiveCells = scratch.incompleteActiveCells;
     nextPhase( phase::factorization );
     if( useIncompleteCholesky )
@@ -4187,7 +4189,8 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         if( splitIc0 )
         {
             splitForward.assign( rhs.size(), {} );
-            splitBackward.assign( rhs.size(), {} );
+            if( compactBackward ) compactBackwardCache.assign( rhs.size(), {} );
+            else splitBackward.assign( rhs.size(), {} );
         }
         if( activeSweep ) incompleteActiveCells.clear();
         for( int y = 0; y < height_; ++y )
@@ -4209,7 +4212,8 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                             if( splitIc0 )
                             {
                                 splitForward[cell].westOverPivot = west / incompletePivot[cell - 1];
-                                splitBackward[cell - 1].east = west;
+                                if( compactBackward ) compactBackwardCache[cell - 1].east = static_cast<float>( west );
+                                else splitBackward[cell - 1].east = west;
                             }
                             else
                             {
@@ -4232,7 +4236,8 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                             if( splitIc0 )
                             {
                                 splitForward[cell].southOverPivot = south / incompletePivot[cell - width_];
-                                splitBackward[cell - width_].north = south;
+                                if( compactBackward ) compactBackwardCache[cell - width_].north = static_cast<float>( south );
+                                else splitBackward[cell - width_].north = south;
                             }
                             else
                             {
@@ -4247,7 +4252,12 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                 incompletePivot[cell] = std::max( regularization, pivot );
                 if( cachedIc0 )
                 {
-                    if( splitIc0 ) splitBackward[cell].inversePivot = 1.0 / incompletePivot[cell];
+                    if( splitIc0 )
+                    {
+                        const double inversePivot = 1.0 / incompletePivot[cell];
+                        if( compactBackward ) compactBackwardCache[cell].inversePivot = inversePivot;
+                        else splitBackward[cell].inversePivot = inversePivot;
+                    }
                     else incompleteCached[cell].inversePivot = 1.0 / incompletePivot[cell];
                 }
             }
@@ -4282,17 +4292,24 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
             if( profile )
                 timing.ic0Forward += std::chrono::duration<double, std::milli>(
                     backwardBegin - forwardBegin ).count();
-            for( auto it = incompleteActiveCells.rbegin(); it != incompleteActiveCells.rend(); ++it )
+            // Both layouts use the same ordered double arithmetic. The compact
+            // weights round-trip exactly because cutCellU/VOpen return float.
+            const auto solveBackward = [&]( const auto& backwardCoefficients )
             {
-                const int cell = *it;
-                const auto& coefficients = splitBackward[cell];
-                double value = incompleteForward[cell];
-                if( coefficients.east != 0.0 )
-                    value += coefficients.east * z[cell + 1];
-                if( coefficients.north != 0.0 )
-                    value += coefficients.north * z[cell + width_];
-                z[cell] = value * coefficients.inversePivot;
-            }
+                for( auto it = incompleteActiveCells.rbegin(); it != incompleteActiveCells.rend(); ++it )
+                {
+                    const int cell = *it;
+                    const auto& coefficients = backwardCoefficients[cell];
+                    double value = incompleteForward[cell];
+                    if( coefficients.east != 0.0 )
+                        value += coefficients.east * z[cell + 1];
+                    if( coefficients.north != 0.0 )
+                        value += coefficients.north * z[cell + width_];
+                    z[cell] = value * coefficients.inversePivot;
+                }
+            };
+            if( compactBackward ) solveBackward( compactBackwardCache );
+            else solveBackward( splitBackward );
             if( profile )
                 timing.ic0Backward += std::chrono::duration<double, std::milli>(
                     clock::now() - backwardBegin ).count();
