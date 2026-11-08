@@ -193,6 +193,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --ic0-split-sweep
 
+      # Matrix-free Schur B M^-1 B^T product: read a compact per-body
+      # inverse-mass pair instead of large obstacle geometry each PCG apply.
+      - name: Sample compact Schur body mass (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\fluidPreconditionerBenchmark.exe --schur-body-mass-sweep
+
       # A real headless Sandbox World interleave, 8 World substeps and 1/2/4/8 Fluid steps.
       # Frame medians are informational; never gate CI on runner-dependent wall time.
       - name: Sample Wind multi-substep stage profile (Windows Release, informational)
