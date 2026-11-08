@@ -3231,7 +3231,8 @@ void checkSweptSolidFaceFlux()
         "clear must reset swept volume diagnostics and previous shape history" );
 }
 
-void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false )
+void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false,
+    bool compareStaticShapeReuse = false )
 {
     constexpr float dt = 1.0f / 60.0f;
     for( float h : { 0.5f, 0.25f } )
@@ -3282,7 +3283,9 @@ void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false )
                     field->setAdaptiveSweptSamplingEnabled( true );
                 field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
             }
-            if( compareBounded )
+            if( compareStaticShapeReuse )
+                reference.setAnalyticCutCellSweptStaticShapeReuseEnabled( false );
+            else if( compareBounded )
                 reference.setAnalyticCutCellBoundedSweptFacesEnabled( false );
             else
                 reference.setAnalyticCutCellMovingSweptFacesEnabled( false );
@@ -3300,6 +3303,12 @@ void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false )
                     a.rawGeometryMismatch == b.rawGeometryMismatch &&
                     a.geometryMismatch == b.geometryMismatch,
                     "moving-only swept faces must preserve each swept volume diagnostic exactly" );
+                if( compareStaticShapeReuse && frame > 0 )
+                    check( a.builtStaticAnalyticShapes == 0 &&
+                        a.reusedStaticAnalyticShapes == 0 &&
+                        b.builtStaticAnalyticShapes == staticCount &&
+                        b.reusedStaticAnalyticShapes >= staticCount,
+                        "stationary analytic geometry must be constructed once per moving swept interval" );
                 if( frame > 0 )
                     check( b.usedSweptFlux && b.timeSamples >= 2 && b.totalAbsoluteFlux > 0.0f,
                         "moving-only swept comparison must integrate time-varying geometry" );
@@ -3336,16 +3345,19 @@ void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false )
             }
             reference.clear();
             movingOnly.clear();
-            check( compareBounded
-                    ? !reference.isAnalyticCutCellBoundedSweptFacesEnabled() &&
-                        movingOnly.isAnalyticCutCellBoundedSweptFacesEnabled()
-                    : !reference.isAnalyticCutCellMovingSweptFacesEnabled() &&
-                        movingOnly.isAnalyticCutCellMovingSweptFacesEnabled(),
+            check( compareStaticShapeReuse
+                    ? !reference.isAnalyticCutCellSweptStaticShapeReuseEnabled() &&
+                        movingOnly.isAnalyticCutCellSweptStaticShapeReuseEnabled()
+                    : compareBounded
+                        ? !reference.isAnalyticCutCellBoundedSweptFacesEnabled() &&
+                            movingOnly.isAnalyticCutCellBoundedSweptFacesEnabled()
+                        : !reference.isAnalyticCutCellMovingSweptFacesEnabled() &&
+                            movingOnly.isAnalyticCutCellMovingSweptFacesEnabled(),
                 "clear must preserve selected analytic swept traversal mode" );
         }
 }
 
-void checkBoundedSweptMixedAnalyticShapes()
+void checkBoundedSweptMixedAnalyticShapes( bool compareStaticShapeReuse = false )
 {
     constexpr float dt = 1.0f / 60.0f;
     for( float h : { 0.5f, 0.25f } )
@@ -3374,7 +3386,10 @@ void checkBoundedSweptMixedAnalyticShapes()
             field->setDisjointAnalyticCutCellEnabled( true );
             field->addVelocity( { -1.5f, -0.7f }, { 1.4f, 0.6f }, 1.3f );
         }
-        reference.setAnalyticCutCellBoundedSweptFacesEnabled( false );
+        if( compareStaticShapeReuse )
+            reference.setAnalyticCutCellSweptStaticShapeReuseEnabled( false );
+        else
+            reference.setAnalyticCutCellBoundedSweptFacesEnabled( false );
         std::array<fluidObstacleForce2, 3> refForces{}, newForces{};
         for( int frame = 0; frame < 3; ++frame )
         {
@@ -3867,7 +3882,9 @@ int main()
     checkSweptSolidFaceFlux();
     checkMovingOnlyAnalyticSweptDifferential();
     checkMovingOnlyAnalyticSweptDifferential( true );
+    checkMovingOnlyAnalyticSweptDifferential( false, true );
     checkBoundedSweptMixedAnalyticShapes();
+    checkBoundedSweptMixedAnalyticShapes( true );
     checkAdaptiveSweptTemporalQuadrature();
     checkConservativeMacAdvection();
     checkConservativeTracerTransport();
