@@ -1435,7 +1435,8 @@ void checkCachedIc0Differential()
         }
 }
 
-void checkActiveCellIc0SweepDifferential( bool compareSplit = false )
+void checkActiveCellIc0SweepDifferential( bool compareSplit = false,
+    bool comparePcgVectors = false )
 {
     constexpr float dt = 1.0f / 60.0f;
     constexpr vec2 origin{ -6.0f, -4.0f };
@@ -1470,7 +1471,9 @@ void checkActiveCellIc0SweepDifferential( bool compareSplit = false )
                 field->setCutCellPressureTimingEnabled( true );
                 field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
             }
-            if( compareSplit )
+            if( comparePcgVectors )
+                dense.setAnalyticCutCellActivePcgVectorsEnabled( false );
+            else if( compareSplit )
                 dense.setAnalyticCutCellSplitIc0CoefficientsEnabled( false );
             else
                 dense.setAnalyticCutCellActiveIc0SweepEnabled( false );
@@ -1493,12 +1496,12 @@ void checkActiveCellIc0SweepDifferential( bool compareSplit = false )
                     a.coupledRelativeResidual <= 1.1e-5f &&
                     b.coupledRelativeResidual <= 1.1e-5f,
                     "dense and active-cell IC0 must converge with the same PCG workload" );
-                if( compareSplit )
+                if( compareSplit || comparePcgVectors )
                     check( a.coupledIterations == b.coupledIterations &&
                         a.coupledRelativeResidual == b.coupledRelativeResidual &&
                         a.predictedContinuityRms == b.predictedContinuityRms &&
                         a.pressureResidual == b.pressureResidual,
-                        "split IC0 cache must reproduce the original active sweep pressure exactly" );
+                        "active PCG optimization must preserve pressure and continuity exactly" );
                 check( std::abs( a.coupledRelativeResidual - b.coupledRelativeResidual ) < 1.0e-6f &&
                     std::abs( a.predictedContinuityRms - b.predictedContinuityRms ) < 2.0e-4f &&
                     std::abs( a.pressureResidual - b.pressureResidual ) < 2.0e-4f,
@@ -1510,12 +1513,19 @@ void checkActiveCellIc0SweepDifferential( bool compareSplit = false )
                         std::abs( denseForces[i].torque - activeForces[i].torque ) < 1.0e-3f * scale,
                         "active-cell IC0 must preserve individual body pressure feedback" );
                 }
-                if( compareSplit )
+                if( compareSplit || comparePcgVectors )
                     for( std::size_t i = 0; i < bodies.size(); ++i )
                         check( denseForces[i].force.x == activeForces[i].force.x &&
                             denseForces[i].force.y == activeForces[i].force.y &&
                             denseForces[i].torque == activeForces[i].torque,
-                            "split IC0 cache must reproduce each owner's pressure traction exactly" );
+                            "active PCG optimization must reproduce each owner's pressure traction exactly" );
+                if( comparePcgVectors )
+                {
+                    const vec2 aMomentum = dense.getFluidMomentum();
+                    const vec2 bMomentum = active.getFluidMomentum();
+                    check( aMomentum.x == bMomentum.x && aMomentum.y == bMomentum.y,
+                        "active PCG vectors must preserve fluid momentum exactly" );
+                }
                 const float massScale = 1.0f + Length( dense.getFluidMomentum() );
                 check( Length( dense.getFluidMomentum() - active.getFluidMomentum() ) < 1.0e-3f * massScale &&
                     Length( dense.sampleVelocity( { -1.05f, 0.14f } ) -
@@ -1529,12 +1539,15 @@ void checkActiveCellIc0SweepDifferential( bool compareSplit = false )
             }
             dense.clear();
             active.clear();
-            check( compareSplit
-                    ? !dense.isAnalyticCutCellSplitIc0CoefficientsEnabled() &&
-                        active.isAnalyticCutCellSplitIc0CoefficientsEnabled()
-                    : !dense.isAnalyticCutCellActiveIc0SweepEnabled() &&
-                        active.isAnalyticCutCellActiveIc0SweepEnabled(),
-                "clear must preserve the selected IC0 coefficient layout or active sweep" );
+            check( comparePcgVectors
+                    ? !dense.isAnalyticCutCellActivePcgVectorsEnabled() &&
+                        active.isAnalyticCutCellActivePcgVectorsEnabled()
+                    : compareSplit
+                        ? !dense.isAnalyticCutCellSplitIc0CoefficientsEnabled() &&
+                            active.isAnalyticCutCellSplitIc0CoefficientsEnabled()
+                        : !dense.isAnalyticCutCellActiveIc0SweepEnabled() &&
+                            active.isAnalyticCutCellActiveIc0SweepEnabled(),
+                "clear must preserve the selected IC0 coefficient layout, sweep or PCG vector mode" );
             check( dense.getCutCellPressure().coupledTiming.total == 0.0 &&
                 active.getCutCellPressure().coupledTiming.total == 0.0,
                 "clear must discard old IC0 pressure timing" );
@@ -3875,6 +3888,7 @@ int main()
     checkCachedIc0Differential();
     checkActiveCellIc0SweepDifferential();
     checkActiveCellIc0SweepDifferential( true );
+    checkActiveCellIc0SweepDifferential( false, true );
     checkCachedSchurLaplacianDifferential();
     checkIndexedAnalyticBoundaryDifferential();
     checkIndexedAnalyticBoundaryDifferential( true );
