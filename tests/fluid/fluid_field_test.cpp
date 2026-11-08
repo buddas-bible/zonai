@@ -1441,7 +1441,7 @@ void checkCachedIc0Differential()
 }
 
 void checkActiveCellIc0SweepDifferential( bool compareSplit = false,
-    bool comparePcgVectors = false )
+    bool comparePcgVectors = false, bool compareCompactBackward = false )
 {
     constexpr float dt = 1.0f / 60.0f;
     constexpr vec2 origin{ -6.0f, -4.0f };
@@ -1476,7 +1476,9 @@ void checkActiveCellIc0SweepDifferential( bool compareSplit = false,
                 field->setCutCellPressureTimingEnabled( true );
                 field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
             }
-            if( comparePcgVectors )
+            if( compareCompactBackward )
+                dense.setAnalyticCutCellCompactIc0BackwardEnabled( false );
+            else if( comparePcgVectors )
                 dense.setAnalyticCutCellActivePcgVectorsEnabled( false );
             else if( compareSplit )
                 dense.setAnalyticCutCellSplitIc0CoefficientsEnabled( false );
@@ -1501,7 +1503,7 @@ void checkActiveCellIc0SweepDifferential( bool compareSplit = false,
                     a.coupledRelativeResidual <= 1.1e-5f &&
                     b.coupledRelativeResidual <= 1.1e-5f,
                     "dense and active-cell IC0 must converge with the same PCG workload" );
-                if( compareSplit || comparePcgVectors )
+                if( compareSplit || comparePcgVectors || compareCompactBackward )
                     check( a.coupledIterations == b.coupledIterations &&
                         a.coupledRelativeResidual == b.coupledRelativeResidual &&
                         a.predictedContinuityRms == b.predictedContinuityRms &&
@@ -1518,13 +1520,13 @@ void checkActiveCellIc0SweepDifferential( bool compareSplit = false,
                         std::abs( denseForces[i].torque - activeForces[i].torque ) < 1.0e-3f * scale,
                         "active-cell IC0 must preserve individual body pressure feedback" );
                 }
-                if( compareSplit || comparePcgVectors )
+                if( compareSplit || comparePcgVectors || compareCompactBackward )
                     for( std::size_t i = 0; i < bodies.size(); ++i )
                         check( denseForces[i].force.x == activeForces[i].force.x &&
                             denseForces[i].force.y == activeForces[i].force.y &&
                             denseForces[i].torque == activeForces[i].torque,
                             "active PCG optimization must reproduce each owner's pressure traction exactly" );
-                if( comparePcgVectors )
+                if( comparePcgVectors || compareCompactBackward )
                 {
                     const vec2 aMomentum = dense.getFluidMomentum();
                     const vec2 bMomentum = active.getFluidMomentum();
@@ -1544,7 +1546,10 @@ void checkActiveCellIc0SweepDifferential( bool compareSplit = false,
             }
             dense.clear();
             active.clear();
-            check( comparePcgVectors
+            check( compareCompactBackward
+                    ? !dense.isAnalyticCutCellCompactIc0BackwardEnabled() &&
+                        active.isAnalyticCutCellCompactIc0BackwardEnabled()
+                    : comparePcgVectors
                     ? !dense.isAnalyticCutCellActivePcgVectorsEnabled() &&
                         active.isAnalyticCutCellActivePcgVectorsEnabled()
                     : compareSplit
@@ -3269,7 +3274,8 @@ void checkSweptSolidFaceFlux()
 }
 
 void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false,
-    bool comparePcgVectors = false, float staticRadius = 0.12f )
+    bool comparePcgVectors = false, float staticRadius = 0.12f,
+    bool compareCompactBackward = false )
 {
     constexpr float dt = 1.0f / 60.0f;
     for( float h : { 0.5f, 0.25f } )
@@ -3320,7 +3326,9 @@ void checkMovingOnlyAnalyticSweptDifferential( bool compareBounded = false,
                     field->setAdaptiveSweptSamplingEnabled( true );
                 field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
             }
-            if( comparePcgVectors )
+            if( compareCompactBackward )
+                reference.setAnalyticCutCellCompactIc0BackwardEnabled( false );
+            else if( comparePcgVectors )
                 reference.setAnalyticCutCellActivePcgVectorsEnabled( false );
             else if( compareBounded )
                 reference.setAnalyticCutCellBoundedSweptFacesEnabled( false );
@@ -3900,6 +3908,7 @@ int main()
     checkActiveCellIc0SweepDifferential();
     checkActiveCellIc0SweepDifferential( true );
     checkActiveCellIc0SweepDifferential( false, true );
+    checkActiveCellIc0SweepDifferential( false, false, true );
     checkCachedSchurLaplacianDifferential();
     checkIndexedAnalyticBoundaryDifferential();
     checkIndexedAnalyticBoundaryDifferential( true );
