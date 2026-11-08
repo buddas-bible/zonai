@@ -216,8 +216,10 @@ void checkWorldWindStepProfiling()
     check( firstPcg.total > 0.0 && firstPcg.matrixProducts > 0 &&
         firstPcg.preconditionerApplications > 0 &&
         firstPcg.accounted() <= firstPcg.total + 0.2 &&
-        firstPcg.total <= first.pressure + 0.2,
-        "World wind profile must account for every coupled PCG solve within its pressure phase" );
+        firstPcg.total <= first.pressure + 0.2 &&
+        firstPcg.ic0Forward >= 0.0 && firstPcg.ic0Backward >= 0.0 &&
+        firstPcg.ic0Forward + firstPcg.ic0Backward <= firstPcg.preconditioner + 0.2,
+        "World wind profile must account for every coupled PCG solve and IC0 sweep timing" );
     scene.step( dt, 8 );
     const fluidStepTiming2 second = scene.getWindFieldTiming();
     check( second.total > 0.0 && second.swept > 0.0 &&
@@ -240,6 +242,8 @@ void checkWorldWindStepProfiling()
     scene.step( dt, 8 );
     check( scene.getWindFieldTiming().total == 0.0 &&
         scene.getWindCoupledTiming().total == 0.0 &&
+        scene.getWindCoupledTiming().ic0Forward == 0.0 &&
+        scene.getWindCoupledTiming().ic0Backward == 0.0 &&
         scene.getWindField()->getStepTiming().total == 0.0 &&
         !scene.getWindField()->isCutCellPressureTimingEnabled(),
         "disabled sandbox profiling must not publish old observations" );
