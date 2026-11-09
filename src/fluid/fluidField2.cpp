@@ -1310,9 +1310,13 @@ float fluidField2::sampleApertureAwareComponent( const std::vector<float>& value
     const float w11 = tx * ty * o11;
     const float total = w00 + w10 + w01 + w11;
     if( total <= 0.0f ) return 0.0f; // No fluid face support in this stencil.
-    const float numerator =
-        w00 * values[j * width + i] + w10 * values[j * width + i1] +
-        w01 * values[j1 * width + i] + w11 * values[j1 * width + i1];
+    // Avoid multiplying closed-face values by zero: 0 * NaN is still NaN.
+    // An actual non-finite velocity on an open face remains visible to tests.
+    float numerator = 0.0f;
+    if( w00 > 0.0f ) numerator += w00 * values[j * width + i];
+    if( w10 > 0.0f ) numerator += w10 * values[j * width + i1];
+    if( w01 > 0.0f ) numerator += w01 * values[j1 * width + i];
+    if( w11 > 0.0f ) numerator += w11 * values[j1 * width + i1];
     return numerator / total;
 }
 
