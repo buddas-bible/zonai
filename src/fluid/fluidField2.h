@@ -654,6 +654,12 @@ public:
     void setConservativeAdvectionEnabled( bool enabled ) noexcept { conservativeAdvectionEnabled_ = enabled; }
     [[nodiscard]] bool isConservativeAdvectionEnabled() const noexcept { return conservativeAdvectionEnabled_; }
 
+    // Experimental velocity reconstruction: aperture-weighted normalized
+    // bilinear interpolation near Cut-cell faces. Applies to velocity queries
+    // and semi-Lagrangian backtraces only; no pressure/flux changes. Default OFF.
+    void setApertureAwareSamplingEnabled( bool enabled ) noexcept { apertureAwareSamplingEnabled_ = enabled; }
+    [[nodiscard]] bool isApertureAwareSamplingEnabled() const noexcept { return apertureAwareSamplingEnabled_; }
+
     // 셀의 tracer 밀도(kg/m³, unit depth)를 지정. 음수/비유한 값과 범위 밖은 무시.
     // 일반 이류/압력 Solver를 바꾸지 않으며, 보존형 tracer 수송은 활성화된 뒤 매 Step 동작.
     void setTracerConcentration( int x, int y, float concentration ) noexcept;
@@ -691,6 +697,10 @@ public:
 
 #pragma region Queries
     [[nodiscard]] vec2 sampleVelocity( vec2 position ) const noexcept;
+    // Explicit comparison query, independent of the current solver toggle.
+    // With no open faces in a four-face stencil the component is zero;
+    // this is not a solid boundary velocity or a conservative flux query.
+    [[nodiscard]] vec2 sampleVelocityApertureAware( vec2 position ) const noexcept;
     [[nodiscard]] float getDivergenceRms() const noexcept;
     // Explicit diagnostic: reads the current field, including changes after Step.
     // Not called on the normal simulation path; timeStep must be finite and positive.
@@ -736,6 +746,9 @@ private:
     [[nodiscard]] int uIndex( int x, int y ) const noexcept { return y * ( width_ + 1 ) + x; }
     [[nodiscard]] int vIndex( int x, int y ) const noexcept { return y * width_ + x; }
     [[nodiscard]] vec2 sampleFrom( const std::vector<float>& u, const std::vector<float>& v, vec2 position ) const noexcept;
+    [[nodiscard]] vec2 sampleApertureAwareFrom( const std::vector<float>& u, const std::vector<float>& v, vec2 position ) const noexcept;
+    [[nodiscard]] float sampleApertureAwareComponent( const std::vector<float>& values,
+        int width, int height, float x, float y, bool isU ) const noexcept;
     static float sampleComponent( const std::vector<float>& values, int width, int height, float x, float y ) noexcept;
     void updateObstacles( std::span<const fluidShapeObstacle2> obstacles );
     void updateCutCellGeometry( std::span<const fluidShapeObstacle2> obstacles );
@@ -922,6 +935,7 @@ private:
     bool coupledPressureWarmStartProbeEnabled_ = false;
     bool coupledPressureWarmStartEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
+    bool apertureAwareSamplingEnabled_ = false;
     bool hasCutCellHistory_ = false;
     bool volumeSourceValid_ = false;
     fluidPressureMomentum2 pressureMomentum_{};
