@@ -224,7 +224,7 @@ jobs:
       # CSV is diagnostic; do not gate CI on runner-dependent physics magnitudes.
       - name: Sample Wind coupling spikes (Windows Release, informational)
         shell: pwsh
-        run: .\\\\build\\\\tests\\\\Release\\\\sandboxWindStepBenchmark.exe --coupling-spike-audit
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --coupling-spike-audit
 
       - name: Sample Wind reference IC0 sweep (Windows Release, informational)
         if: runner.os == 'Windows'
