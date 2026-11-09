@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -292,6 +293,8 @@ void auditFrozenPressure()
     scene.setWindObstacleCouplingEnabled( true );
     scene.setWindSourceStrength( 8.0f );
     scene.setWindDragCoefficient( 0.0f );
+    // Passive tracer must be nonzero for the frozen-state mass audit.
+    scene.seedWindTracer();
     scene.getWorld().SetBodyLinearVelocity( scene.getShapes()[0].bodyHandle, { 0.7f, -0.10f } );
     scene.getWorld().SetBodyAngularVelocity( scene.getShapes()[1].bodyHandle, 0.5f );
     std::optional<fluidField2> snapshot;

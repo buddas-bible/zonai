@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -134,6 +135,7 @@ void checkFrozenPressureReplay()
     field.setCutCellProjectionEnabled( true );
     field.setAnalyticCircleCutCellEnabled( true );
     field.addVelocity( { -1.0f, 0.0f }, { 1.5f, 0.3f }, 1.5f );
+    field.setTracerConcentration( 7, 8, 2.0f );
     fluidShapeObstacle2 circle{};
     circle.geometry = circle2{ {}, 0.65f };
     circle.transform.position = { 0.0f, 0.0f };
@@ -185,8 +187,10 @@ void checkFrozenPressureReplay()
         Length( baseline.getFluidMomentum() - reference.getFluidMomentum() ) < 1.0e-5f &&
         close( field.getCutCellPressure().divergenceAfter,
             baseline.getCutCellPressure().divergenceAfter, 1.0e-5f ) &&
+        baseline.getTracerMass() > 0.0f &&
+        close( field.getTracerMass(), baseline.getTracerMass(), 1.0e-5f ) &&
         close( baseline.getTracerMass(), reference.getTracerMass(), 1.0e-6f ),
-        "frozen pressure replay must reproduce the actual Step and alternative operator" );
+        "frozen pressure replay must reproduce Step and preserve nonzero passive tracer mass" );
     check( Length( feedback[0].force - ( *forceBaseline )[0].force ) < 1.0e-5f &&
         std::abs( feedback[0].torque - ( *forceBaseline )[0].torque ) < 1.0e-5f &&
         Length( ( *forceBaseline )[0].force - ( *forceReference )[0].force ) < 1.0e-5f &&
