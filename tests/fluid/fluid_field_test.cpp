@@ -127,6 +127,76 @@ void checkFaceStageAudit()
     check( !monitored.getFaceStageAudit().valid, "disabled stage audit must not retain stale data" );
 }
 
+void checkFrozenPressureReplay()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    fluidField2 field{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    field.setCutCellProjectionEnabled( true );
+    field.setAnalyticCircleCutCellEnabled( true );
+    field.addVelocity( { -1.0f, 0.0f }, { 1.5f, 0.3f }, 1.5f );
+    fluidShapeObstacle2 circle{};
+    circle.geometry = circle2{ {}, 0.65f };
+    circle.transform.position = { 0.0f, 0.0f };
+    circle.center = circle.transform.position;
+    circle.linearVelocity = { 0.4f, 0.1f };
+    std::array<fluidObstacleForce2, 1> feedback{};
+    const std::span<const fluidShapeObstacle2> obstacle{ &circle, 1 };
+
+    // First Step establishes the geometry/swept history. Freeze the second
+    // Step strictly after moving-boundary geometry and velocity advection.
+    field.step( dt, obstacle, feedback, 80 );
+    circle.transform.position += dt * circle.linearVelocity;
+    circle.center = circle.transform.position;
+    std::optional<fluidField2> frozen;
+    int callbacks = 0;
+    field.setPrePressureSnapshotObserver( [&]( const fluidField2& ready )
+    {
+        ++callbacks;
+        frozen.emplace( ready );
+    } );
+    field.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), feedback, 80 );
+    field.setPrePressureSnapshotObserver( {} );
+    check( callbacks == 1 && frozen.has_value(),
+        "frozen pressure observer must capture exactly one pre-projection step" );
+    check( !field.replayFrozenCutCellPressure().has_value(),
+        "ordinary field must not expose a replayable pressure snapshot" );
+
+    fluidField2 baseline = *frozen;
+    fluidField2 reference = *frozen;
+    baseline.setPrePressureSnapshotObserver( {} );
+    reference.setPrePressureSnapshotObserver( {} );
+    reference.setAnalyticCutCellCachedSchurEdgesEnabled( false );
+    const auto forceBaseline = baseline.replayFrozenCutCellPressure();
+    const auto forceReference = reference.replayFrozenCutCellPressure();
+    check( forceBaseline.has_value() && forceReference.has_value() &&
+        forceBaseline->size() == feedback.size() && forceReference->size() == feedback.size(),
+        "both pressure solvers must replay from one identical frozen state" );
+    check( !baseline.replayFrozenCutCellPressure().has_value(),
+        "a frozen pressure snapshot must be consumed at most once" );
+
+    const auto live = field.getFlowAudit( dt );
+    const auto replay = baseline.getFlowAudit( dt );
+    const auto other = reference.getFlowAudit( dt );
+    check( close( live.maxFluidFaceSpeed, replay.maxFluidFaceSpeed, 1.0e-5f ) &&
+        close( live.continuityRms, replay.continuityRms, 1.0e-5f ) &&
+        close( replay.maxFluidFaceSpeed, other.maxFluidFaceSpeed, 1.0e-5f ) &&
+        close( replay.continuityRms, other.continuityRms, 1.0e-5f ) &&
+        Length( field.getFluidMomentum() - baseline.getFluidMomentum() ) < 1.0e-5f &&
+        Length( baseline.getFluidMomentum() - reference.getFluidMomentum() ) < 1.0e-5f &&
+        close( field.getCutCellPressure().divergenceAfter,
+            baseline.getCutCellPressure().divergenceAfter, 1.0e-5f ) &&
+        close( baseline.getTracerMass(), reference.getTracerMass(), 1.0e-6f ),
+        "frozen pressure replay must reproduce the actual Step and alternative operator" );
+    check( Length( feedback[0].force - ( *forceBaseline )[0].force ) < 1.0e-5f &&
+        std::abs( feedback[0].torque - ( *forceBaseline )[0].torque ) < 1.0e-5f &&
+        Length( ( *forceBaseline )[0].force - ( *forceReference )[0].force ) < 1.0e-5f &&
+        std::abs( ( *forceBaseline )[0].torque - ( *forceReference )[0].torque ) < 1.0e-5f,
+        "frozen pressure replay must preserve pressure force and torque" );
+    frozen->clear();
+    check( !frozen->replayFrozenCutCellPressure().has_value(),
+        "clear must invalidate a previously captured pressure state" );
+}
+
 void checkStepTimingProfiler()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -4136,6 +4206,7 @@ int main()
     checkBoundsAndSampling();
     checkLiveFlowAudit();
     checkFaceStageAudit();
+    checkFrozenPressureReplay();
     checkStepTimingProfiler();
     checkPressureProjection();
     checkCircleSolidBoundary();

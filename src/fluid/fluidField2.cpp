@@ -1216,6 +1216,8 @@ void fluidField2::clear() noexcept
     pressureMomentum_ = {};
     stepMomentum_ = {};
     stepTiming_ = {};
+    frozenPressureReplayReady_ = false;
+    frozenPressureObstacles_.clear();
 }
 
 float fluidField2::tracerCellFraction( int x, int y ) const noexcept
@@ -2637,6 +2639,24 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     advectionStats_.after = getAdvectionFaceMomentum();
     stepMomentum_.afterAdvection = getFluidMomentum();
     record( stepTiming_.boundaries );
+    if( cutCellProjectionEnabled_ && prePressureSnapshotObserver_ )
+    {
+        // Only an explicit S0 observer pays for this obstacle copy. The
+        // observer may deep-copy *this; no shared mutable replay workspace.
+        frozenPressureObstacles_.assign( obstacles.begin(), obstacles.end() );
+        frozenPressureTimeStep_ = timeStep;
+        frozenPressureIterations_ = std::clamp( pressureIterations, 1, 200 );
+        frozenPressureReplayReady_ = true;
+        try { prePressureSnapshotObserver_( *this ); }
+        catch( ... )
+        {
+            frozenPressureReplayReady_ = false;
+            frozenPressureObstacles_.clear();
+            throw;
+        }
+        frozenPressureReplayReady_ = false;
+        frozenPressureObstacles_.clear();
+    }
     if( cutCellProjectionEnabled_ )
     {
         pressureMomentum_ = {}; // 이전 이진 MAC face impulse ledger와 단위가 다르므로 혼합하지 않음.
@@ -3522,6 +3542,20 @@ void fluidField2::prepareCutCellVolumeChange( float timeStep )
     cutCellPressure_.volumeRate = static_cast<float>( volumeRate );
     cutCellPressure_.redistributedVolumeRate = static_cast<float>( relocatedRate );
     cutCellPressure_.unresolvedVolumeRate = static_cast<float>( unresolvedRate );
+}
+
+std::optional<std::vector<fluidObstacleForce2>> fluidField2::replayFrozenCutCellPressure()
+{
+    if( !frozenPressureReplayReady_ || !cutCellProjectionEnabled_ ||
+        !std::isfinite( frozenPressureTimeStep_ ) || frozenPressureTimeStep_ <= 0.0f )
+        return std::nullopt;
+    frozenPressureReplayReady_ = false;
+    std::vector<fluidObstacleForce2> feedback( frozenPressureObstacles_.size() );
+    pressureMomentum_ = {};
+    projectCutCell( frozenPressureTimeStep_, frozenPressureIterations_,
+        frozenPressureObstacles_, feedback );
+    stepMomentum_.afterPressure = getFluidMomentum();
+    return feedback;
 }
 
 void fluidField2::projectCutCell( float timeStep, int pressureIterations,

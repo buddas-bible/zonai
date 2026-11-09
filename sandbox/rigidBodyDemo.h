@@ -464,6 +464,10 @@ public:
     {
         if( windField_ ) windField_->setFaceStageAuditTarget( x, y, isU );
     }
+    void setWindPrePressureSnapshotObserver( fluidField2::prePressureSnapshotObserver2 observer )
+    {
+        if( windField_ ) windField_->setPrePressureSnapshotObserver( std::move( observer ) );
+    }
     void setWindSweptGeometryCorrectionEnabled( bool enabled ) noexcept
     {
         if( windField_ ) windField_->setSweptGeometryCorrectionEnabled( enabled );
