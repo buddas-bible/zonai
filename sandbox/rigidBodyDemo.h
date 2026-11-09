@@ -188,6 +188,7 @@ struct windCouplingAudit2
     // centers. These are sampled in the same Fluid substep as the peak.
     float peakSampledNormalVelocity = 0.0f;
     float peakAdjacentCellNormalSpeed = 0.0f;
+    float peakAdjacentCellFluidFraction = 0.0f;
     int peakFluidSubstep = -1;
     int nonFiniteFluidFaces = 0;
     int sampledFluidSteps = 0;
