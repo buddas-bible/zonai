@@ -27,6 +27,41 @@ bool close( float a, float b, float tolerance = 1.0e-4f )
     return std::abs( a - b ) <= tolerance;
 }
 
+void checkLiveFlowAudit()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    fluidField2 field{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    const auto empty = field.getFlowAudit( dt );
+    check( empty.continuityRms == 0.0f && empty.maxFluidFaceSpeed == 0.0f &&
+        empty.nonFiniteFluidFaces == 0,
+        "initial live MAC field audit must report zero flow and continuity" );
+    field.addVelocity( { -1.0f, 0.0f }, { 1.5f, 0.3f }, 1.5f );
+    const auto driven = field.getFlowAudit( dt );
+    check( driven.maxFluidFaceSpeed > 0.0f && driven.continuityRms > 0.0f &&
+        driven.nonFiniteFluidFaces == 0,
+        "live audit must detect an unprojected local velocity source" );
+    const vec2 momentum = field.getFluidMomentum();
+    const auto repeat = field.getFlowAudit( dt );
+    check( repeat.maxFluidFaceSpeed == driven.maxFluidFaceSpeed &&
+        repeat.continuityRms == driven.continuityRms &&
+        near( field.getFluidMomentum(), momentum, 1.0e-6f ),
+        "repeated flow audits must not alter simulation state" );
+    field.setCutCellProjectionEnabled( true );
+    fluidShapeObstacle2 fixed{};
+    fixed.geometry = circle2{ {}, 0.65f };
+    fixed.transform.position = { 0.0f, 0.0f };
+    fixed.center = fixed.transform.position;
+    std::array<fluidObstacleForce2, 1> reaction{};
+    field.step( dt, std::span<const fluidShapeObstacle2>( &fixed, 1 ), reaction, 80 );
+    const auto after = field.getFlowAudit( dt );
+    check( std::isfinite( after.continuityRms ) &&
+        std::isfinite( after.maxFluidFaceSpeed ) && after.nonFiniteFluidFaces == 0 &&
+        std::abs( after.continuityRms - field.getCutCellPressure().divergenceAfter ) < 1.0e-4f,
+        "Cut-cell live audit must use its volume-aware continuity diagnostic" );
+    check( std::isnan( field.getFlowAudit( 0.0f ).continuityRms ),
+        "invalid time step must not silently return a valid continuity measurement" );
+}
+
 void checkStepTimingProfiler()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -4034,6 +4069,7 @@ void checkCoupledPressureWarmStartDifferential()
 int main()
 {
     checkBoundsAndSampling();
+    checkLiveFlowAudit();
     checkStepTimingProfiler();
     checkPressureProjection();
     checkCircleSolidBoundary();
