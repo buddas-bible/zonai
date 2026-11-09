@@ -272,6 +272,12 @@ public:
     {
         if( windField_ ) windField_->setCoupledPressureWarmStartProbeEnabled( enabled );
     }
+    // Opt-in actual PCG previous-pressure initial guess, for a paired
+    // benchmark against the original zero-initialized solver.
+    void setWindPressureWarmStartEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setCoupledPressureWarmStartEnabled( enabled );
+    }
     // Performance trial: compare active-cell IC0 sweeps against dense cached sweeps.
     void setWindActiveIc0SweepEnabled( bool enabled ) noexcept
     {

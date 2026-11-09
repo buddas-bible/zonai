@@ -4162,10 +4162,14 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     direction.assign( rhs.size(), 0.0 );
     product.assign( rhs.size(), 0.0 );
 
-    // Diagnostic only: evaluate the previous converged pressure on the *new*
-    // operator and RHS before the cold-start solve. The normal PCG still starts
-    // with x=0, residual=rhs. This probe never changes the pressure solution.
-    if( profile && cutCell && coupledPressureWarmStartProbeEnabled_ )
+    // Opt-in warm start or diagnostic: apply the *new* Schur operator to
+    // last step's float pressure. Never reuse the old RHS or preconditioner.
+    // Reject stale guesses unless they halve the residual norm. Keep the
+    // original ||b|| baseline for relative tolerance and true-residual tests.
+    bool warmStartAccepted = false;
+    double coldRhsSquared = 0.0;
+    if( cutCell && ( coupledPressureWarmStartEnabled_ ||
+        ( profile && coupledPressureWarmStartProbeEnabled_ ) ) )
     {
         bool validGuess = true;
         for( std::size_t i = 0; i < rhs.size(); ++i )
@@ -4181,23 +4185,37 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         if( validGuess )
         {
             multiply( x, product );
-            double rhsSquared = 0.0;
             double guessSquared = 0.0;
             for( std::size_t i = 0; i < rhs.size(); ++i )
             {
                 if( cellFluidFraction_[i] <= 0.0f ) continue;
                 const double error = rhs[i] - product[i];
-                rhsSquared += rhs[i] * rhs[i];
+                coldRhsSquared += rhs[i] * rhs[i];
                 guessSquared += error * error;
             }
-            if( std::isfinite( rhsSquared ) && std::isfinite( guessSquared ) )
+            if( std::isfinite( coldRhsSquared ) && std::isfinite( guessSquared ) )
             {
-                timing.warmStartRhsSquared += rhsSquared;
-                timing.warmStartGuessSquared += guessSquared;
-                ++timing.warmStartProbes;
+                if( profile && coupledPressureWarmStartProbeEnabled_ )
+                {
+                    timing.warmStartRhsSquared += coldRhsSquared;
+                    timing.warmStartGuessSquared += guessSquared;
+                    ++timing.warmStartProbes;
+                }
+                // squared residual < 0.25 * ||b||² => at least 50% reduction.
+                warmStartAccepted = coupledPressureWarmStartEnabled_ &&
+                    coldRhsSquared > 0.0 && guessSquared < 0.25 * coldRhsSquared;
+                if( warmStartAccepted )
+                    for( std::size_t i = 0; i < rhs.size(); ++i )
+                        if( cellFluidFraction_[i] > 0.0f )
+                            residual[i] = rhs[i] - product[i];
             }
         }
-        std::fill( x.begin(), x.end(), 0.0 );
+        if( profile && coupledPressureWarmStartEnabled_ )
+        {
+            ++timing.warmStartAttempts;
+            if( warmStartAccepted ) ++timing.warmStartAccepted;
+        }
+        if( !warmStartAccepted ) std::fill( x.begin(), x.end(), 0.0 );
         std::fill( product.begin(), product.end(), 0.0 );
     }
 
@@ -4477,7 +4495,9 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     } );
     if( !std::isfinite( rz ) || !std::isfinite( squared ) )
         return fail( fluidCoupledPressureStatus2::numericalBreakdown );
-    const double initialSquared = squared;
+    // Target the same residual relative to the *cold* RHS, even when
+    // the recursive PCG residual started from the accepted previous pressure.
+    const double initialSquared = warmStartAccepted ? coldRhsSquared : squared;
     const double tolerance = std::max( 1.0e-18, initialSquared * 1.0e-10 );
     pressureMomentum_.coupledInitialResidualRms = static_cast<float>( std::sqrt( initialSquared / active ) );
     for( int iteration = 0; iteration < iterations && squared > tolerance; ++iteration )

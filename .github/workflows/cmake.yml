@@ -211,6 +211,13 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --pressure-reuse-probe
 
+      # Trial: reuse previous pressure as guarded PCG x0 only when its true
+      # residual is at least 50% smaller; compare convergence and real FPS cost.
+      # Timings remain informational, not performance gates.
+      - name: Sample guarded PCG pressure warm start (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --pcg-warmstart-sweep
+
       # Identical World/Fluid scene using original on-the-fly IC(0) sweeps.
       # Compare with the previous cached run on this same Windows runner.
       - name: Sample Wind reference IC0 sweep (Windows Release, informational)
