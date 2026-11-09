@@ -229,6 +229,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --face-stage-audit
 
+      # Copy the real pre-projection state once; compare cached vs reference
+      # Schur L on identical moving-boundary geometry and Body snapshots.
+      - name: Sample frozen Cut-cell pressure A-B (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --frozen-pressure-audit
+
       # Identical World/Fluid scene using original on-the-fly IC(0) sweeps.
       # Compare with the previous cached run on this same Windows runner.
       - name: Sample Wind reference IC0 sweep (Windows Release, informational)

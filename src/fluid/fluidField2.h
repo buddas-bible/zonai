@@ -1,6 +1,9 @@
 #pragma once
 
+#include <functional>
 #include <memory>
+#include <optional>
+#include <utility>
 #include <span>
 #include <vector>
 
@@ -442,6 +445,23 @@ public:
         if( !enabled ) stepTiming_ = {};
     }
     [[nodiscard]] bool isStepTimingEnabled() const noexcept { return stepTimingEnabled_; }
+
+    // S0 diagnostic only. Called after advection/boundaries, immediately
+    // before Cut-cell projection. The caller can COPY this field to freeze
+    // every MAC face, geometry/swept history, warm-start pressure and cache.
+    // A snapshot contains its own immutable copy of the obstacle inputs.
+    // No observer means no snapshot allocation or pressure replay overhead.
+    using prePressureSnapshotObserver2 = std::function<void(const fluidField2&)>;
+    void setPrePressureSnapshotObserver( prePressureSnapshotObserver2 observer )
+    {
+        prePressureSnapshotObserver_ = std::move( observer );
+    }
+
+    // Executes only Cut-cell pressure on a COPY made inside the observer.
+    // One replay per copy; returns nullopt for an ordinary/later Field state.
+    // Pressure and feedback remain observable on the copy after replay.
+    [[nodiscard]] std::optional<std::vector<fluidObstacleForce2>>
+        replayFrozenCutCellPressure();
 
     // Opt-in single interior MAC-face stage trace; negative coordinates disable.
     // Does not change fluid velocities, projection, or geometry.
@@ -988,6 +1008,13 @@ private:
     fluidStepTiming2 stepTiming_{};
     bool stepTimingEnabled_ = false;
     // Diagnostics must remain OFF in regular simulation.
+    // Diagnostic callback never runs unless explicitly installed. Only the
+    // observer's copied Field retains a one-use frozen projection context.
+    prePressureSnapshotObserver2 prePressureSnapshotObserver_{};
+    std::vector<fluidShapeObstacle2> frozenPressureObstacles_;
+    float frozenPressureTimeStep_ = 0.0f;
+    int frozenPressureIterations_ = 0;
+    bool frozenPressureReplayReady_ = false;
     bool faceStageAuditEnabled_ = false;
     bool faceStageAuditIsU_ = true;
     int faceStageAuditX_ = -1;

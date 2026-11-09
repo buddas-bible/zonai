@@ -4,6 +4,8 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -272,6 +274,98 @@ void auditFaceStages()
     }
 }
 
+// Pressure-only differential: both runs start at the identical live World
+// snapshot AFTER geometry, swept flux and velocity advection, BEFORE PCG.
+// Unlike separate World trajectories, this probes only Schur L traversal.
+void auditFrozenPressure()
+{
+    constexpr int targetMeasuredFrame = 6;
+    constexpr int fluidSubsteps = 4;
+    constexpr int targetSubstep = 3;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    constexpr float h = 0.25f;
+    scene.configureWindField( 48, 28, h );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindCutCellCoupledProjectionEnabled( true );
+    scene.setWindDisjointAnalyticEnabled( true );
+    scene.setWindFluidSubstepCount( fluidSubsteps );
+    scene.setWindFaceStageAuditTarget( 17, 13, false );
+    scene.setWindObstacleCouplingEnabled( true );
+    scene.setWindSourceStrength( 8.0f );
+    scene.setWindDragCoefficient( 0.0f );
+    // Passive tracer must be nonzero for the frozen-state mass audit.
+    scene.seedWindTracer();
+    scene.getWorld().SetBodyLinearVelocity( scene.getShapes()[0].bodyHandle, { 0.7f, -0.10f } );
+    scene.getWorld().SetBodyAngularVelocity( scene.getShapes()[1].bodyHandle, 0.5f );
+    std::optional<fluidField2> snapshot;
+    int capturedIndex = -1;
+    int fluidIndex = 0;
+    const int targetIndex = ( warmupFrames + targetMeasuredFrame ) * fluidSubsteps + targetSubstep;
+    scene.setWindPrePressureSnapshotObserver( [&]( const fluidField2& before )
+    {
+        if( fluidIndex == targetIndex )
+        {
+            snapshot.emplace( before );
+            capturedIndex = fluidIndex;
+        }
+        ++fluidIndex;
+    } );
+    for( int frame = 0; frame <= warmupFrames + targetMeasuredFrame; ++frame )
+        scene.step( dt, worldSubsteps );
+    scene.setWindPrePressureSnapshotObserver( {} );
+
+    if( !snapshot || capturedIndex != targetIndex )
+    {
+        std::fprintf( stderr, "frozen Cut-cell pressure substep was not captured\n" );
+        std::exit( 1 );
+    }
+    fluidField2 baseline = *snapshot;
+    fluidField2 reference = *snapshot;
+    baseline.setPrePressureSnapshotObserver( {} );
+    reference.setPrePressureSnapshotObserver( {} );
+    reference.setAnalyticCutCellCachedSchurEdgesEnabled( false );
+    const auto forceA = baseline.replayFrozenCutCellPressure();
+    const auto forceB = reference.replayFrozenCutCellPressure();
+    if( !forceA || !forceB || forceA->size() != forceB->size() )
+    {
+        std::fprintf( stderr, "frozen pressure replay failed\n" );
+        std::exit( 1 );
+    }
+    const vec2 point = snapshot->getOrigin() + h * vec2{ 17.5f, 13.0f };
+    const float actual = scene.getWindField()->sampleVelocity( point ).y;
+    const float a = baseline.sampleVelocity( point ).y;
+    const float b = reference.sampleVelocity( point ).y;
+    float forceDifference = 0.0f;
+    float torqueDifference = 0.0f;
+    for( std::size_t i = 0; i < forceA->size(); ++i )
+    {
+        forceDifference = std::max( forceDifference,
+            Length( ( *forceA )[i].force - ( *forceB )[i].force ) );
+        torqueDifference = std::max( torqueDifference,
+            std::abs( ( *forceA )[i].torque - ( *forceB )[i].torque ) );
+    }
+    const auto& pA = baseline.getCutCellPressure();
+    const auto& pB = reference.getCutCellPressure();
+    const auto& live = scene.getWindField()->getCutCellPressure();
+    const auto& traced = scene.getWindField()->getFaceStageAudit();
+    std::puts( "substep_index,field_substeps,face_open,upper_cell_fraction,"
+        "live_v,default_v,reference_v,default_pcg_status,reference_pcg_status,"
+        "default_pressure_residual,reference_pressure_residual,"
+        "default_continuity,reference_continuity,live_continuity,"
+        "default_pressure_impulse_residual,reference_pressure_impulse_residual,"
+        "default_tracer_mass,reference_tracer_mass,force_difference,torque_difference,"
+        "live_upper_pressure_row_residual" );
+    std::printf( "%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%d,%d,"
+        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+        capturedIndex, fluidIndex, traced.openFraction, traced.upperCellFraction,
+        actual, a, b, static_cast<int>( pA.coupledStatus ),
+        static_cast<int>( pB.coupledStatus ), pA.pressureResidual, pB.pressureResidual,
+        pA.divergenceAfter, pB.divergenceAfter, live.divergenceAfter,
+        Length( pA.impulse.residual() ), Length( pB.impulse.residual() ),
+        baseline.getTracerMass(), reference.getTracerMass(),
+        forceDifference, torqueDifference, traced.upperRow.rowResidual );
+}
+
 } // namespace
 
 int main( int argc, char** argv )
@@ -284,6 +378,7 @@ int main( int argc, char** argv )
     bool warmStartSweep = false;
     bool couplingAudit = false;
     bool faceStageAudit = false;
+    bool frozenPressureAudit = false;
     for( int i = 1; i < argc; ++i )
     {
         csv |= std::string_view( argv[i] ) == "--csv";
@@ -294,9 +389,11 @@ int main( int argc, char** argv )
         warmStartSweep |= std::string_view( argv[i] ) == "--pcg-warmstart-sweep";
         couplingAudit |= std::string_view( argv[i] ) == "--coupling-spike-audit";
         faceStageAudit |= std::string_view( argv[i] ) == "--face-stage-audit";
+        frozenPressureAudit |= std::string_view( argv[i] ) == "--frozen-pressure-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
     if( faceStageAudit ) { auditFaceStages(); return 0; }
+    if( frozenPressureAudit ) { auditFrozenPressure(); return 0; }
     if( warmStartSweep )
     {
         std::puts( "cell_m,world_substeps,fluid_substeps,warm_start,frames,"
