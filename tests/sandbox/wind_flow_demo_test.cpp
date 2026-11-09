@@ -68,6 +68,8 @@ void checkWindCouplingAudit()
                 audit.peakBeforeDrag.maxFaceOpenFraction <= 1.0f &&
                 std::isfinite( audit.peakSampledNormalVelocity ) &&
                 std::isfinite( audit.peakAdjacentCellNormalSpeed ) &&
+                audit.peakAdjacentCellFluidFraction >= 0.0f &&
+                audit.peakAdjacentCellFluidFraction <= 1.0f &&
                 std::abs( audit.peakSampledNormalVelocity -
                     audit.peakBeforeDrag.maxFaceVelocity ) <
                     1.0e-2f * ( 1.0f + audit.peakBeforeDrag.maxFluidFaceSpeed ) &&
