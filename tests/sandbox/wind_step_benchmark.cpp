@@ -277,7 +277,7 @@ void auditFaceStages()
 // Pressure-only differential: both runs start at the identical live World
 // snapshot AFTER geometry, swept flux and velocity advection, BEFORE PCG.
 // Unlike separate World trajectories, this probes only Schur L traversal.
-void auditFrozenPressure()
+void auditFrozenPressure( bool smallCellTrial = false )
 {
     constexpr int targetMeasuredFrame = 6;
     constexpr int fluidSubsteps = 4;
@@ -323,7 +323,9 @@ void auditFrozenPressure()
     fluidField2 reference = *snapshot;
     baseline.setPrePressureSnapshotObserver( {} );
     reference.setPrePressureSnapshotObserver( {} );
-    reference.setAnalyticCutCellCachedSchurEdgesEnabled( false );
+    if( smallCellTrial )
+        reference.setSmallCellPressureMergeFraction( 1.0e-4f );
+    else reference.setAnalyticCutCellCachedSchurEdgesEnabled( false );
     const auto forceA = baseline.replayFrozenCutCellPressure();
     const auto forceB = reference.replayFrozenCutCellPressure();
     if( !forceA || !forceB || forceA->size() != forceB->size() )
@@ -348,6 +350,32 @@ void auditFrozenPressure()
     const auto& pB = reference.getCutCellPressure();
     const auto& live = scene.getWindField()->getCutCellPressure();
     const auto& traced = scene.getWindField()->getFaceStageAudit();
+    if( smallCellTrial )
+    {
+        std::puts( "substep_index,face_open,upper_fraction,base_v,merged_v,"
+            "base_status,merged_status,merged_cells,orphan_slivers,merged_fraction,"
+            "base_continuity_rms,merged_continuity_rms,"
+            "base_predicted_continuity_rms,merged_predicted_continuity_rms,"
+            "base_impulse_residual,merged_impulse_residual,"
+            "base_source_imbalance,merged_source_imbalance,"
+            "base_tracer_mass,merged_tracer_mass,base_energy,merged_energy,"
+            "base_schur_ms,merged_schur_ms,feedback_force_delta,feedback_torque_delta" );
+        std::printf( "%d,%.9g,%.9g,%.9g,%.9g,%d,%d,%d,%d,%.9g,"
+            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+            capturedIndex, traced.openFraction, traced.upperCellFraction,
+            a, b, static_cast<int>( pA.coupledStatus ), static_cast<int>( pB.coupledStatus ),
+            pB.mergedPressureCells, pB.unmergedSmallPressureCells,
+            pB.mergedFluidFraction, pA.divergenceAfter, pB.divergenceAfter,
+            pA.predictedContinuityRms, pB.predictedContinuityRms,
+            Length( pA.impulse.residual() ), Length( pB.impulse.residual() ),
+            pA.sourceImbalance, pB.sourceImbalance,
+            baseline.getTracerMass(), reference.getTracerMass(),
+            baseline.getFluidKineticEnergy(), reference.getFluidKineticEnergy(),
+            pA.coupledSolveMilliseconds, pB.coupledSolveMilliseconds,
+            forceDifference, torqueDifference );
+        return;
+    }
     std::puts( "substep_index,field_substeps,face_open,upper_cell_fraction,"
         "live_v,default_v,reference_v,default_pcg_status,reference_pcg_status,"
         "default_pressure_residual,reference_pressure_residual,"
@@ -379,6 +407,7 @@ int main( int argc, char** argv )
     bool couplingAudit = false;
     bool faceStageAudit = false;
     bool frozenPressureAudit = false;
+    bool smallCellMergeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
         csv |= std::string_view( argv[i] ) == "--csv";
@@ -390,10 +419,12 @@ int main( int argc, char** argv )
         couplingAudit |= std::string_view( argv[i] ) == "--coupling-spike-audit";
         faceStageAudit |= std::string_view( argv[i] ) == "--face-stage-audit";
         frozenPressureAudit |= std::string_view( argv[i] ) == "--frozen-pressure-audit";
+        smallCellMergeAudit |= std::string_view( argv[i] ) == "--small-cell-merge-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
     if( faceStageAudit ) { auditFaceStages(); return 0; }
     if( frozenPressureAudit ) { auditFrozenPressure(); return 0; }
+    if( smallCellMergeAudit ) { auditFrozenPressure( true ); return 0; }
     if( warmStartSweep )
     {
         std::puts( "cell_m,world_substeps,fluid_substeps,warm_start,frames,"

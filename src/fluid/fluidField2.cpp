@@ -3942,6 +3942,61 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         return true;
     }
 
+    // Experimental virtual pressure-cell merging: each tiny active cell
+    // pools its pressure with the most-open directly connected neighbor that
+    // is at least the chosen fluid-fraction threshold. Never cross a closed
+    // face or join two slivers into a cycle. All original face geometry and
+    // swept source remain untouched.
+    auto& pressureRoot = scratch.smallCellPressureRoots;
+    int mergedCells = 0;
+    if( cutCell && smallCellPressureMergeFraction_ > 0.0f )
+    {
+        pressureRoot.resize( rhs.size() );
+        for( std::size_t i = 0; i < rhs.size(); ++i )
+            pressureRoot[i] = static_cast<int>( i );
+        for( int y = 0; y < height_; ++y )
+            for( int xCell = 0; xCell < width_; ++xCell )
+            {
+                const int cell = cellIndex( xCell, y );
+                const float fraction = cellFluidFraction_[cell];
+                if( fraction <= 0.0f || fraction >= smallCellPressureMergeFraction_ ) continue;
+                int neighbor = -1;
+                float bestOpening = 0.0f;
+                const auto visit = [&]( int other, float opening )
+                {
+                    if( opening <= bestOpening ||
+                        cellFluidFraction_[other] < smallCellPressureMergeFraction_ ) return;
+                    neighbor = other;
+                    bestOpening = opening;
+                };
+                if( xCell > 0 ) visit( cell - 1, cutCellUOpen( xCell, y ) );
+                if( xCell + 1 < width_ ) visit( cell + 1, cutCellUOpen( xCell + 1, y ) );
+                if( y > 0 ) visit( cell - width_, cutCellVOpen( xCell, y ) );
+                if( y + 1 < height_ ) visit( cell + width_, cutCellVOpen( xCell, y + 1 ) );
+                if( neighbor >= 0 )
+                {
+                    pressureRoot[cell] = neighbor;
+                    ++mergedCells;
+                    cutCellPressure_.mergedFluidFraction += fraction;
+                }
+                else ++cutCellPressure_.unmergedSmallPressureCells;
+            }
+        // P^T*b: accumulate every cell's original conservation RHS, including
+        // tiny swept-volume sources, in the retained neighbor's pressure row.
+        for( std::size_t i = 0; i < rhs.size(); ++i )
+            if( pressureRoot[i] != static_cast<int>( i ) )
+            {
+                rhs[pressureRoot[i]] += rhs[i];
+                rhs[i] = 0.0;
+            }
+    }
+    cutCellPressure_.mergedPressureCells = mergedCells;
+    const bool merging = mergedCells > 0;
+    const auto pressureCell = [&]( int cell )
+    {
+        return merging ? pressureRoot[cell] : cell;
+    };
+
     auto& dynamicResponseOwners = scratch.dynamicResponseOwners;
     dynamicResponseOwners.clear();
     for( std::size_t i = 0; i < obstacles.size(); ++i )
@@ -4237,9 +4292,11 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         {
             for( const coupledPressureEdge& edge : laplacianEdges )
             {
-                const double d = edge.weight * ( values[edge.first] - values[edge.second] );
-                result[edge.first] += d;
-                result[edge.second] -= d;
+                const int first = pressureCell( edge.first );
+                const int second = pressureCell( edge.second );
+                const double d = edge.weight * ( values[first] - values[second] );
+                result[first] += d;
+                result[second] -= d;
             }
         }
         else
@@ -4252,9 +4309,10 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     const int left = cellIndex( x - 1, y ), right = cellIndex( x, y );
                     if( !cutCell && ( solidOwner_[left] >= 0 || solidOwner_[right] >= 0 ) ) continue;
                     const double weight = cutCell ? cutCellUOpen( x, y ) : 1.0;
-                    const double d = weight * ( values[left] - values[right] );
-                    result[left] += d;
-                    result[right] -= d;
+                    const int a = pressureCell( left ), b = pressureCell( right );
+                    const double d = weight * ( values[a] - values[b] );
+                    result[a] += d;
+                    result[b] -= d;
                 }
             for( int y = 1; y < height_; ++y )
                 for( int x = 0; x < width_; ++x )
@@ -4262,15 +4320,16 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     const int bottom = cellIndex( x, y - 1 ), top = cellIndex( x, y );
                     if( !cutCell && ( solidOwner_[bottom] >= 0 || solidOwner_[top] >= 0 ) ) continue;
                     const double weight = cutCell ? cutCellVOpen( x, y ) : 1.0;
-                    const double d = weight * ( values[bottom] - values[top] );
-                    result[bottom] += d;
-                    result[top] -= d;
+                    const int a = pressureCell( bottom ), b = pressureCell( top );
+                    const double d = weight * ( values[a] - values[b] );
+                    result[a] += d;
+                    result[b] -= d;
                 }
         }
         for( const coupledPressureFace& face : faces )
         {
             coupledBodyResponse& body = response[face.owner];
-            const double p = values[face.cell];
+            const double p = values[pressureCell( face.cell )];
             body.fx += p * face.fx;
             body.fy += p * face.fy;
             body.torque += p * face.torque;
@@ -4279,7 +4338,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         {
             const fluidShapeObstacle2& obstacle = obstacles[static_cast<std::size_t>( face.owner )];
             const coupledBodyResponse& body = response[face.owner];
-            result[face.cell] += static_cast<double>( obstacle.inverseMass ) *
+            result[pressureCell( face.cell )] += static_cast<double>( obstacle.inverseMass ) *
                 ( face.fx * body.fx + face.fy * body.fy ) +
                 static_cast<double>( obstacle.inverseInertia ) * face.torque * body.torque;
         }
@@ -4314,6 +4373,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                 validGuess = false;
                 break;
             }
+            if( merging && pressureRoot[i] != static_cast<int>( i ) ) continue;
             x[i] = static_cast<double>( pressure_[i] );
         }
         if( validGuess )
@@ -4587,13 +4647,35 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
             }
     };
 
+    // P^T M_full^-1 P is symmetric positive definite for the pooled solve.
+    // Keep the original IC(0) on the unmodified five-point grid; lift the
+    // reduced residual to every member, then restrict the preconditioned
+    // vector by group sum. No IC(0) on a non-Cartesian merged graph required.
     const auto timedPreconditioner = [&]( const std::vector<double>& source )
     {
-        if( !profile ) { applyPreconditioner( source ); return; }
-        const auto begin = clock::now();
-        applyPreconditioner( source );
-        timing.preconditioner += std::chrono::duration<double, std::milli>( clock::now() - begin ).count();
-        ++timing.preconditionerApplications;
+        const auto begin = profile ? clock::now() : clock::time_point{};
+        if( merging )
+        {
+            auto& lifted = scratch.smallCellLiftedResidual;
+            lifted.resize( source.size() );
+            for( std::size_t i = 0; i < source.size(); ++i )
+                lifted[i] = cellFluidFraction_[i] > 0.0f
+                    ? source[pressureRoot[i]] : 0.0;
+            applyPreconditioner( lifted );
+            auto& reduced = scratch.smallCellReducedPreconditioner;
+            reduced.assign( source.size(), 0.0 );
+            for( std::size_t i = 0; i < source.size(); ++i )
+                if( cellFluidFraction_[i] > 0.0f )
+                    reduced[pressureRoot[i]] += z[i];
+            z.swap( reduced );
+        }
+        else applyPreconditioner( source );
+        if( profile )
+        {
+            timing.preconditioner += std::chrono::duration<double, std::milli>(
+                clock::now() - begin ).count();
+            ++timing.preconditionerApplications;
+        }
     };
     const auto timedMultiply = [&]( const std::vector<double>& source, std::vector<double>& target )
     {
@@ -4612,7 +4694,17 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     const auto forEachPcgCell = [&]( const auto& visit )
     {
         if( activePcgVectors )
-            for( int cell : incompleteActiveCells ) visit( static_cast<std::size_t>( cell ) );
+        {
+            for( int cell : incompleteActiveCells )
+                if( !merging || pressureRoot[cell] == cell )
+                    visit( static_cast<std::size_t>( cell ) );
+        }
+        else if( merging )
+        {
+            for( std::size_t cell = 0; cell < rhs.size(); ++cell )
+                if( cellFluidFraction_[cell] > 0.0f &&
+                    pressureRoot[cell] == static_cast<int>( cell ) ) visit( cell );
+        }
         else
             for( std::size_t cell = 0; cell < rhs.size(); ++cell ) visit( cell );
     };
@@ -4706,7 +4798,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     for( std::size_t i = 0; i < rhs.size(); ++i )
     {
         if( cutCell ? cellFluidFraction_[i] <= 0.0f : solidOwner_[i] >= 0 ) { pressure_[i] = 0.0f; continue; }
-        const double value = x[i] - gauge;
+        const double value = x[pressureCell( static_cast<int>( i ) )] - gauge;
         if( !std::isfinite( value ) || std::abs( value ) > std::numeric_limits<float>::max() )
             return fail( fluidCoupledPressureStatus2::invalidPressure );
         pressure_[i] = static_cast<float>( value );

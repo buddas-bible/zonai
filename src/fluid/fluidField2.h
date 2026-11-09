@@ -250,6 +250,13 @@ struct fluidCutCellPressure2
     int coupledIterations = 0;
     float coupledRelativeResidual = 0.0f;
     bool usedIncompleteCholesky = false;
+    // Experimental Galerkin pressure pooling P^T (L + B M^-1 B^T) P.
+    // A disappearing fluid cell shares pressure with a connected larger cell.
+    // Volume-source RHS is summed (not discarded); individual sliver
+    // continuity can remain nonzero even when the group constraint converges.
+    int mergedPressureCells = 0;
+    int unmergedSmallPressureCells = 0;
+    float mergedFluidFraction = 0.0f;
     // opt-in 측정: Schur PCG 호출에 소비된 wall clock 시간(ms). 전체 Field Step은 아님.
     double coupledSolveMilliseconds = 0.0;
     fluidCoupledPressureTiming2 coupledTiming{};
@@ -526,6 +533,21 @@ public:
     // 수렴한 경우에만 Body 압력 반력을 돌려주며, 실패 시 해당 압력을 생략한다.
     void setCutCellCoupledProjectionEnabled( bool enabled ) noexcept { cutCellCoupledProjectionEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellCoupledProjectionEnabled() const noexcept { return cutCellCoupledProjectionEnabled_; }
+
+    // Experimental small-cell pressure pooling. Default 0 disables it.
+    // Only used with coupled Cut-cell PCG: p = P*q, solve P^T*A*P with
+    // A = L + B*M^-1*B^T, and preserve sum of moving-volume RHS per group.
+    // Reject non-finite/negative/too-large thresholds. The inherited IC(0)
+    // preconditioner is lifted/restricted with P to stay SPD.
+    void setSmallCellPressureMergeFraction( float fraction ) noexcept
+    {
+        if( fraction >= 0.0f && fraction <= 0.05f )
+            smallCellPressureMergeFraction_ = fraction;
+    }
+    [[nodiscard]] float getSmallCellPressureMergeFraction() const noexcept
+    {
+        return smallCellPressureMergeFraction_;
+    }
 
     // 분석적 다중 Cut-cell Schur의 전처리기 비교용 설정. 기본 IC(0),
     // OFF는 기존 Jacobi. 원래 Schur 행렬/수렴 허용오차/기하 이력은 그대로 둔다.
@@ -907,6 +929,9 @@ private:
         std::vector<incompleteForwardCoefficients> incompleteSplitForward;
         std::vector<incompleteBackwardCoefficients> incompleteSplitBackward;
         std::vector<int> incompleteActiveCells;
+        std::vector<int> smallCellPressureRoots;
+        std::vector<double> smallCellLiftedResidual;
+        std::vector<double> smallCellReducedPreconditioner;
         std::vector<double> rhs;
         std::vector<double> x;
         std::vector<double> residual;
@@ -983,6 +1008,7 @@ private:
     bool previousPartialCircleOverlap_ = false;
     bool cutCellProjectionEnabled_ = false;
     bool cutCellCoupledProjectionEnabled_ = false;
+    float smallCellPressureMergeFraction_ = 0.0f;
     bool analyticCutCellIncompleteCholeskyEnabled_ = true;
     bool analyticCutCellCachedIc0Enabled_ = true;
     bool analyticCutCellActiveIc0SweepEnabled_ = true;
