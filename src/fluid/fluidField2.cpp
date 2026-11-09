@@ -4004,6 +4004,9 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     pressureRoot[cell] = neighbor;
                     ++mergedCells;
                     cutCellPressure_.mergedFluidFraction += fraction;
+                    cutCellPressure_.mergedSnapshotDecreaseVolume +=
+                        ( previousCellFluidFraction_[cell] - fraction ) *
+                        cellSize_ * cellSize_;
                 }
                 else ++cutCellPressure_.unmergedSmallPressureCells;
             }

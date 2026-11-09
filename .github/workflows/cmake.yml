@@ -241,6 +241,10 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-merge-audit
 
+      - name: Sweep frozen small-cell pressure thresholds (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-merge-threshold-audit
+
       # Identical World/Fluid scene using original on-the-fly IC(0) sweeps.
       # Compare with the previous cached run on this same Windows runner.
       - name: Sample Wind reference IC0 sweep (Windows Release, informational)

@@ -257,6 +257,9 @@ struct fluidCutCellPressure2
     int mergedPressureCells = 0;
     int unmergedSmallPressureCells = 0;
     float mergedFluidFraction = 0.0f;
+    // Snapshot decrease in fluid area for merged shrinking cells (m^3,
+    // unit depth). Not swept transfer or actual tracer mass movement.
+    float mergedSnapshotDecreaseVolume = 0.0f;
     // RMS of grouped flux+moving-volume continuity (including Body response);
     // each merged group is one conservation row, NOT exact child-cell continuity.
     // Valid only when mergedPressureCells > 0 and coupled PCG has converged.

@@ -277,7 +277,7 @@ void auditFaceStages()
 // Pressure-only differential: both runs start at the identical live World
 // snapshot AFTER geometry, swept flux and velocity advection, BEFORE PCG.
 // Unlike separate World trajectories, this probes only Schur L traversal.
-void auditFrozenPressure( bool smallCellTrial = false )
+void auditFrozenPressure( bool smallCellTrial = false, bool thresholdSweep = false )
 {
     constexpr int targetMeasuredFrame = 6;
     constexpr int fluidSubsteps = 4;
@@ -318,6 +318,37 @@ void auditFrozenPressure( bool smallCellTrial = false )
     {
         std::fprintf( stderr, "frozen Cut-cell pressure substep was not captured\n" );
         std::exit( 1 );
+    }
+    if( thresholdSweep )
+    {
+        // Exactly the same World/Fluid state, pressure inputs, and obstacle
+        // transforms for every candidate. Only P^T A P grouping changes.
+        std::puts( "threshold,merged_cells,orphan_slivers,pcg_status,pcg_iterations,"
+            "target_v,max_face_speed,group_continuity,individual_continuity,"
+            "impulse_residual,virtual_exchange,snapshot_decrease,tracer_mass" );
+        for( float threshold : { 0.0f, 1.0e-9f, 1.0e-8f, 1.0e-6f, 1.0e-4f, 1.0e-2f } )
+        {
+            fluidField2 trial = *snapshot;
+            trial.setPrePressureSnapshotObserver( {} );
+            trial.setSmallCellPressureMergeFraction( threshold );
+            if( !trial.replayFrozenCutCellPressure() )
+            {
+                std::fprintf( stderr, "pressure threshold replay failed\n" );
+                std::exit( 1 );
+            }
+            const auto& p = trial.getCutCellPressure();
+            const vec2 point = snapshot->getOrigin() + h * vec2{ 17.5f, 13.0f };
+            std::printf( "%.9g,%d,%d,%d,%d,%.9g,%.9g,%.9g,%.9g,"
+                "%.9g,%.9g,%.9g,%.9g\n",
+                threshold, p.mergedPressureCells, p.unmergedSmallPressureCells,
+                static_cast<int>( p.coupledStatus ), p.coupledIterations,
+                trial.sampleVelocity( point ).y,
+                trial.getFlowAudit( dt / fluidSubsteps ).maxFluidFaceSpeed,
+                p.groupedPredictedContinuityRms, p.predictedContinuityRms,
+                Length( p.impulse.residual() ), p.virtualInternalExchangeVolume,
+                p.mergedSnapshotDecreaseVolume, trial.getTracerMass() );
+        }
+        return;
     }
     fluidField2 baseline = *snapshot;
     fluidField2 reference = *snapshot;
@@ -378,20 +409,21 @@ void auditFrozenPressure( bool smallCellTrial = false )
             "base_status,merged_status,merged_cells,orphan_slivers,merged_fraction,"
             "base_continuity_rms,merged_continuity_rms,"
             "base_predicted_continuity_rms,merged_predicted_continuity_rms,"
-            "merged_group_continuity_rms,virtual_exchange_m3,"
+            "merged_group_continuity_rms,virtual_exchange_m3,snapshot_decrease_m3,"
             "base_impulse_residual,merged_impulse_residual,"
             "base_source_imbalance,merged_source_imbalance,"
             "base_tracer_mass,merged_tracer_mass,base_energy,merged_energy,"
             "base_schur_ms,merged_schur_ms,feedback_force_delta,feedback_torque_delta" );
         std::printf( "%d,%.9g,%.9g,%.9g,%.9g,%d,%d,%d,%d,%.9g,"
-            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
-            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
             capturedIndex, traced.openFraction, traced.upperCellFraction,
             a, b, static_cast<int>( pA.coupledStatus ), static_cast<int>( pB.coupledStatus ),
             pB.mergedPressureCells, pB.unmergedSmallPressureCells,
             pB.mergedFluidFraction, pA.divergenceAfter, pB.divergenceAfter,
             pA.predictedContinuityRms, pB.predictedContinuityRms,
             pB.groupedPredictedContinuityRms, pB.virtualInternalExchangeVolume,
+            pB.mergedSnapshotDecreaseVolume,
             Length( pA.impulse.residual() ), Length( pB.impulse.residual() ),
             pA.sourceImbalance, pB.sourceImbalance,
             baseline.getTracerMass(), reference.getTracerMass(),
@@ -432,6 +464,7 @@ int main( int argc, char** argv )
     bool faceStageAudit = false;
     bool frozenPressureAudit = false;
     bool smallCellMergeAudit = false;
+    bool smallCellThresholdSweep = false;
     for( int i = 1; i < argc; ++i )
     {
         csv |= std::string_view( argv[i] ) == "--csv";
@@ -444,11 +477,13 @@ int main( int argc, char** argv )
         faceStageAudit |= std::string_view( argv[i] ) == "--face-stage-audit";
         frozenPressureAudit |= std::string_view( argv[i] ) == "--frozen-pressure-audit";
         smallCellMergeAudit |= std::string_view( argv[i] ) == "--small-cell-merge-audit";
+        smallCellThresholdSweep |= std::string_view( argv[i] ) == "--small-cell-merge-threshold-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
     if( faceStageAudit ) { auditFaceStages(); return 0; }
     if( frozenPressureAudit ) { auditFrozenPressure(); return 0; }
     if( smallCellMergeAudit ) { auditFrozenPressure( true ); return 0; }
+    if( smallCellThresholdSweep ) { auditFrozenPressure( true, true ); return 0; }
     if( warmStartSweep )
     {
         std::puts( "cell_m,world_substeps,fluid_substeps,warm_start,frames,"
