@@ -450,6 +450,92 @@ void auditFrozenPressure( bool smallCellTrial = false, bool thresholdSweep = fal
         forceDifference, torqueDifference, traced.upperRow.rowResidual );
 }
 
+// Cross-cadence *sensitivity* audit: each row has its own live World history,
+// but baseline and pooling in that row share one exact pre-pressure snapshot.
+// These are not matched full-World trajectory A/B runs.
+void auditSmallCellPressureCadences()
+{
+    std::puts( "cell_m,world_substeps,fluid_substeps,snapshot_index,pcg_base,pcg_pooled,"
+        "pcg_iters_base,pcg_iters_pooled,merged_cells,orphan_slivers,"
+        "max_velocity_base,max_velocity_pooled,max_weighted_base,max_weighted_pooled,"
+        "individual_continuity_base,individual_continuity_pooled,group_continuity_pooled,"
+        "virtual_exchange_m3,snapshot_decrease_m3,impulse_residual_base,"
+        "impulse_residual_pooled,tracer_mass_base,tracer_mass_pooled,"
+        "feedback_force_delta,feedback_torque_delta" );
+    for( float h : { 0.5f, 0.25f } )
+        for( int fluidSubsteps : { 2, 4, 8 } )
+        {
+            rigidBodyDemo scene{ demoKind::windFlow };
+            scene.configureWindField( static_cast<int>( 12.0f / h ),
+                static_cast<int>( 7.0f / h ), h );
+            scene.setWindCutCellProjectionEnabled( true );
+            scene.setWindCutCellCoupledProjectionEnabled( true );
+            scene.setWindDisjointAnalyticEnabled( true );
+            scene.setWindFluidSubstepCount( fluidSubsteps );
+            scene.setWindObstacleCouplingEnabled( true );
+            scene.setWindSourceStrength( 8.0f );
+            scene.setWindDragCoefficient( 0.0f );
+            scene.seedWindTracer();
+            scene.getWorld().SetBodyLinearVelocity(
+                scene.getShapes()[0].bodyHandle, { 0.7f, -0.10f } );
+            scene.getWorld().SetBodyAngularVelocity(
+                scene.getShapes()[1].bodyHandle, 0.5f );
+            const int target = ( warmupFrames + 6 ) * fluidSubsteps + fluidSubsteps - 1;
+            int fluidIndex = 0;
+            std::optional<fluidField2> frozen;
+            scene.setWindPrePressureSnapshotObserver( [&]( const fluidField2& ready )
+            {
+                if( fluidIndex == target ) frozen.emplace( ready );
+                ++fluidIndex;
+            } );
+            for( int frame = 0; frame <= warmupFrames + 6; ++frame )
+                scene.step( dt, worldSubsteps );
+            scene.setWindPrePressureSnapshotObserver( {} );
+            if( !frozen )
+            {
+                std::fprintf( stderr, "small-cell cadence snapshot missing\n" );
+                std::exit( 1 );
+            }
+            fluidField2 base = *frozen, pooled = *frozen;
+            base.setPrePressureSnapshotObserver( {} );
+            pooled.setPrePressureSnapshotObserver( {} );
+            pooled.setSmallCellPressureMergeFraction( 1.0e-4f );
+            const auto forcesA = base.replayFrozenCutCellPressure();
+            const auto forcesB = pooled.replayFrozenCutCellPressure();
+            if( !forcesA || !forcesB || forcesA->size() != forcesB->size() )
+            {
+                std::fprintf( stderr, "small-cell cadence pressure replay failed\n" );
+                std::exit( 1 );
+            }
+            float forceDelta = 0.0f, torqueDelta = 0.0f;
+            for( std::size_t i = 0; i < forcesA->size(); ++i )
+            {
+                forceDelta = std::max( forceDelta,
+                    Length( ( *forcesA )[i].force - ( *forcesB )[i].force ) );
+                torqueDelta = std::max( torqueDelta,
+                    std::abs( ( *forcesA )[i].torque - ( *forcesB )[i].torque ) );
+            }
+            const auto& a = base.getCutCellPressure();
+            const auto& p = pooled.getCutCellPressure();
+            const auto peakA = base.getFlowAudit( dt / fluidSubsteps );
+            const auto peakB = pooled.getFlowAudit( dt / fluidSubsteps );
+            std::printf( "%.9g,%d,%d,%d,%d,%d,%d,%d,%d,%d,"
+                "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+                "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+                h, worldSubsteps, fluidSubsteps, target,
+                static_cast<int>( a.coupledStatus ), static_cast<int>( p.coupledStatus ),
+                a.coupledIterations, p.coupledIterations,
+                p.mergedPressureCells, p.unmergedSmallPressureCells,
+                peakA.maxFluidFaceSpeed, peakB.maxFluidFaceSpeed,
+                peakA.maxOpenWeightedFaceSpeed, peakB.maxOpenWeightedFaceSpeed,
+                a.predictedContinuityRms, p.predictedContinuityRms,
+                p.groupedPredictedContinuityRms,
+                p.virtualInternalExchangeVolume, p.mergedSnapshotDecreaseVolume,
+                Length( a.impulse.residual() ), Length( p.impulse.residual() ),
+                base.getTracerMass(), pooled.getTracerMass(), forceDelta, torqueDelta );
+        }
+}
+
 } // namespace
 
 int main( int argc, char** argv )
@@ -465,6 +551,7 @@ int main( int argc, char** argv )
     bool frozenPressureAudit = false;
     bool smallCellMergeAudit = false;
     bool smallCellThresholdSweep = false;
+    bool smallCellCadenceAudit = false;
     for( int i = 1; i < argc; ++i )
     {
         csv |= std::string_view( argv[i] ) == "--csv";
@@ -478,12 +565,14 @@ int main( int argc, char** argv )
         frozenPressureAudit |= std::string_view( argv[i] ) == "--frozen-pressure-audit";
         smallCellMergeAudit |= std::string_view( argv[i] ) == "--small-cell-merge-audit";
         smallCellThresholdSweep |= std::string_view( argv[i] ) == "--small-cell-merge-threshold-audit";
+        smallCellCadenceAudit |= std::string_view( argv[i] ) == "--small-cell-merge-cadence-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
     if( faceStageAudit ) { auditFaceStages(); return 0; }
     if( frozenPressureAudit ) { auditFrozenPressure(); return 0; }
     if( smallCellMergeAudit ) { auditFrozenPressure( true ); return 0; }
     if( smallCellThresholdSweep ) { auditFrozenPressure( true, true ); return 0; }
+    if( smallCellCadenceAudit ) { auditSmallCellPressureCadences(); return 0; }
     if( warmStartSweep )
     {
         std::puts( "cell_m,world_substeps,fluid_substeps,warm_start,frames,"
