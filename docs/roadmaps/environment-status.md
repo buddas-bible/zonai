@@ -14,13 +14,14 @@
 - 이번 로드맵 변경 범위: **문서만**. 코드, 기본 연성 옵션, 엔진 런타임/성능을 바꾸지 않는다.
 - **S0 1차 완료:** [PR #319](https://github.com/buddas-bible/zonai/pull/319) merged, master SHA **5842f8c58b3e3fbceff34747c9d5b5464db62f90**, Ubuntu 112/112, Windows Debug 115/115, Release 52/52 passed (CI 42571477840). Baseline flow/Drag diagnostics and matched cadence CSV landed.
 - **실측 발견:** Windows Release h=0.25m, World 8/Fluid 4, TwoWay ON/Drag 0의 측정 frame 6에서 열린 MAC face 최대 속도 **28.13385m/s** 단일 spike. 앞뒤 frame 0.595/0.712m/s; PCG **수렴**, iterations 61 (보통 46~47), 상대 잔차 8.20e-6, Body 속도 연속. 즉 Drag 주입이 **같은 프레임의** 해당 급등 원인은 아님. 확정 원인은 미상.
-- **S0 2차 진행 중:** [PR #320](https://github.com/buddas-bible/zonai/pull/320), `test/fluid-cutcell-velocity-spike-localization` Draft: 열린 U/V face 위치·개방율·signed 속도·open-weighted speed와 실제 Fluid substep 기록. CI run **42585749190** 검증 진행 중. 고립된 아주 얇은 face인지 물리적으로 넓게 영향을 주는 흐름인지 구분한 뒤 다음 알고리즘 수정 판단.
+- **S0 2차 완료:** [PR #320](https://github.com/buddas-bible/zonai/pull/320) merged, master **1fc3be3cfd4d31c2d4435719131bc13d58fd08e1**, Ubuntu 112/112, Windows Debug 115/115, Release 52/52 통과(CI 42585749190). 문제 face는 V(x=17,y=13), Fluid substep=3, signed velocity=-28.13385m/s, open fraction=**0.00006395081**(0.0064%), 해당 면의 |velocity × open| ≈ 0.0018m/s. 별도로 전체 field의 최대 open-weighted face speed는 0.6536318m/s. 이는 국소 거의 닫힌 Cut-cell 현상이지 전역 유체 속도 급등으로 단정할 수 없음.
+- **S0 3차 진행 중:** [PR #321](https://github.com/buddas-bible/zonai/pull/321), `test/fluid-aperture-sampling-contamination` Draft, CI **42587916950**. 기존 `sampleVelocity`/Semi-Lagrangian의 raw MAC 속도 보간이 거의 닫힌 face에서 이웃 실제 유체 셀 샘플에 얼마나 전파되는지 읽기 전용으로 측정. 이번 PR은 기존 물리 모델 변경 없음.
 
 ## 1. 단계별 상태
 
 | 단계 | 상태 | 메모 |
 | --- | --- | --- |
-| S0 재현·진단 baseline | **1차 병합, 2차 PR #320 진행 중** | 28.13m/s 단일 유속 급등 재현, Cut-cell face 위치/개방율 조사 |
+| S0 재현·진단 baseline | **1·2차 병합, 3차 PR #321 검증 중** | 거의 닫힌 V면(0.0064%)의 raw 보간 전파 여부 조사 |
 | S1 Body별 4종 Interaction | 미착수 | 정책/수명 + Static/Kinematic/Compound Body |
 | S2 압력·Drag 수치 안정화 | 부분 기반 존재 | PCG/IC0/Warm Start 구현; Warm→Cold retry 미착수 |
 | S3 Wind + 돛·Joint 실험 | 미착수 | 기존 일반 Joint와 Wind를 새 gameplay scene으로 연결 |
@@ -38,9 +39,10 @@ test/bench(fluid): isolate wind two-way coupling spikes at fixed step cadence
 
 ### 진행 상황과 범위 경계
 - PR #319 (1차 계측) **병합**: World 8, Fluid 1/4, h=0.5/0.25, coupling ON/OFF, drag=0/3 (source ON), Windows Release 프레임별 CSV. 기본 물리 계산과 스케줄은 변하지 않음.
-- PR #320 **Draft**: 28.13m/s 속도가 실제로 발생한 open U/V face index, opening, substep, area-weighted 속도 로깅. 아직 CI와 결과 평가 남음.
+- PR #320 **병합 완료**: 이상 face의 위치, opening, raw/weighted 속도 확인. V면(17,13) 개방율 0.00006395081.
+- PR #321 **Draft**: peak face 및 실제 유체가 남은 이웃 셀에서 현재 bilinear sample값을 같은 Fluid substep에 로깅. 새로운 계산식 도입 전 외부 쿼리의 오염 여부 검증.
 - **S0 미완료**: Fluid 2/8 및 static 많은 장면, 경계 걸침, moving cut-cell swept mismatch 연관 분석, 국소 face velocity/시각 tracer 관계, 사용자 장면 장기 재현 및 알고리즘 원인 수정.
-- 새 대화의 첫 작업: PR #320 run 42585749190 Windows Release --coupling-spike-audit CSV의 **h=0.25 / Fluid=4 / coupled=1 / drag=0 / frame=6** 데이터를 확인하고, max face opening과 좌표를 근처 Body pose 및 이웃 face 흐름과 대조. 단일-frame 극단값을 clamp로 숨기지 않는다.
+- 새 대화의 첫 작업: PR #321 CI run **42587916950** Windows Release `--coupling-spike-audit`의 **h=0.25 / Fluid=4 / coupled=1 / drag=0 / frame=6** 결과를 확인. `peak_adjacent_cell_normal_speed`와 해당 cell fluid fraction을 분석해 raw face velocity가 실제 유체 영역 샘플에 전파되는지 판정. 그 뒤에만 opt-in aperture-aware sample 실험을 설계. Clamp로 숨기지 않는다.
 
 ### 이번 PR에서 할 일
 1. 기존 Wind Sandbox World/Fluid의 호출 횟수와 입력을 동일하게 고정한 reference와 experiment scene을 구성.
@@ -84,4 +86,4 @@ test/bench(fluid): isolate wind two-way coupling spikes at fixed step cadence
 
 ## 5. 새 대화 시작 문장
 
-zonai 환경 물리 개발을 이어가자. GitHub buddas-bible/zonai에서 docs/roadmaps/environment-status.md와 environment-simulation.md, 병합된 PR #319 및 Draft PR #320의 최신 코드/CI를 확인해. PR #320의 Windows Release audit CSV에서 h=0.25m/Fluid=4/coupled ON/drag 0/recorded frame 6에 발생한 28.13385m/s peak의 U/V face 좌표·개방율·가중 속도를 확인하고 실제 원인을 좁혀라. PCG는 수렴했으며 해당 간격에 Drag가 없어 Drag 직접 원인으로 단정하지 말 것. 테스트와 stage status를 갱신하되 S0 전체 완료로 표시하지 말 것.
+zonai 환경 물리 개발을 이어가자. docs/roadmaps/environment-status.md 및 environment-simulation.md와 병합된 PR #319/#320, Draft PR #321을 코드·CI로 검증하라. PR #321 CI 42587916950의 Windows Release CSV에서 h=0.25/Fluid=4/TwoWay ON/Drag=0/frame 6의 peak face V(17,13) 개방율 0.00006395081 및 인접 실제 유체 셀의 `sampleVelocity` 결과를 분석하라. 현재 물리적 근본 원인은 미확정이므로 무작정 clamp 또는 속도 수정하지 말고 원인에 맞는 차등 테스트부터 진행하라. S0 전체 완료로 표시하지 말 것.
