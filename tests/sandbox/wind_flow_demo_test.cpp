@@ -62,6 +62,10 @@ void checkWindCouplingAudit()
             check( audited.getWindCouplingSteps() == 4 &&
                 reference.getWindCouplingSteps() == 4 &&
                 audit.sampledFluidSteps == 4 && audit.nonFiniteFluidFaces == 0 &&
+                audit.peakFluidSubstep >= 0 && audit.peakFluidSubstep < 4 &&
+                close( audit.peakBeforeDrag.maxFluidFaceSpeed, audit.maxFaceSpeedBeforeDrag ) &&
+                audit.peakBeforeDrag.maxFaceOpenFraction > 0.0f &&
+                audit.peakBeforeDrag.maxFaceOpenFraction <= 1.0f &&
                 std::isfinite( audit.maxContinuityBeforeDrag ) &&
                 std::isfinite( audit.maxContinuityAfterDrag ) &&
                 std::isfinite( audit.maxContinuityIncreaseFromDrag ) &&
