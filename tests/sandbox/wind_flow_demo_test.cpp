@@ -27,6 +27,95 @@ bool close( float a, float b, float tolerance = 1.0e-4f )
     return std::abs( a - b ) <= tolerance;
 }
 
+void checkWorldPressureWarmStartDifferential()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    // The benchmark showed that a continuously forced World/Fluid interleave
+    // reuses pressure effectively. Unlike fast-changing isolated geometry,
+    // this test must exercise the *accepted* PCG initial-guess path.
+    for( float h : { 0.5f, 0.25f } )
+    {
+        rigidBodyDemo cold{ demoKind::windFlow };
+        rigidBodyDemo warm{ demoKind::windFlow };
+        for( rigidBodyDemo* scene : { &cold, &warm } )
+        {
+            scene->configureWindField( static_cast<int>( 12.0f / h ),
+                static_cast<int>( 7.0f / h ), h );
+            scene->setWindCutCellProjectionEnabled( true );
+            scene->setWindCutCellCoupledProjectionEnabled( true );
+            scene->setWindDisjointAnalyticEnabled( true );
+            scene->setWindFluidSubstepCount( 4 );
+            scene->setWindStepProfilingEnabled( true );
+            scene->setWindSourceStrength( 8.0f );
+            scene->setWindDragCoefficient( 3.0f );
+            scene->seedWindTracer();
+            const auto shapes = scene->getShapes();
+            scene->getWorld().SetBodyLinearVelocity( shapes[0].bodyHandle, { 0.7f, -0.10f } );
+            scene->getWorld().SetBodyAngularVelocity( shapes[1].bodyHandle, 0.5f );
+        }
+        warm.setWindPressureWarmStartEnabled( true );
+        check( !cold.getWindField()->isCoupledPressureWarmStartEnabled() &&
+            warm.getWindField()->isCoupledPressureWarmStartEnabled(),
+            "World pressure warm start must be explicitly enabled" );
+
+        int coldIterations = 0, warmIterations = 0, warmAcceptances = 0;
+        for( int frame = 0; frame < 12; ++frame )
+        {
+            cold.step( dt, 8 );
+            warm.step( dt, 8 );
+            const auto& a = cold.getWindField()->getCutCellPressure();
+            const auto& b = warm.getWindField()->getCutCellPressure();
+            const auto& coldStats = cold.getWindCoupledTiming();
+            const auto& warmStats = warm.getWindCoupledTiming();
+            check( a.usedCoupledProjection && b.usedCoupledProjection &&
+                !a.coupledSolveFailed && !b.coupledSolveFailed &&
+                a.coupledStatus == fluidCoupledPressureStatus2::converged &&
+                b.coupledStatus == fluidCoupledPressureStatus2::converged &&
+                a.coupledRelativeResidual < 1.1e-5f &&
+                b.coupledRelativeResidual < 1.1e-5f &&
+                coldStats.warmStartAttempts == 0 &&
+                warmStats.warmStartAttempts == 4 &&
+                warmStats.warmStartAccepted <= warmStats.warmStartAttempts,
+                "accepted pressure warm start must preserve four coupled solves per World frame" );
+
+            coldIterations += coldStats.matrixProducts;
+            warmIterations += warmStats.matrixProducts;
+            warmAcceptances += warmStats.warmStartAccepted;
+
+            const float continuityScale = 1.0f + std::abs( a.predictedContinuityRms );
+            check( std::abs( a.predictedContinuityRms - b.predictedContinuityRms ) <
+                1.0e-2f * continuityScale,
+                "World warm start must preserve Cut-cell continuity accuracy" );
+
+            const auto baseForces = cold.getWindPressureForces();
+            const auto newForces = warm.getWindPressureForces();
+            check( baseForces.size() == newForces.size(),
+                "World pressure feedback arrays must stay aligned under warm start" );
+            for( std::size_t i = 0; i < baseForces.size(); ++i )
+            {
+                const float scale = 1.0f + Length( baseForces[i].force );
+                check( near( baseForces[i].force, newForces[i].force,
+                        2.0e-2f * scale ) &&
+                    std::abs( baseForces[i].torque - newForces[i].torque ) <
+                        2.0e-2f * scale,
+                    "World warm start must preserve body pressure force and torque" );
+            }
+            for( std::size_t i = 0; i < cold.getShapes().size(); ++i )
+            {
+                const bodyId lhs = cold.getShapes()[i].bodyHandle;
+                const bodyId rhs = warm.getShapes()[i].bodyHandle;
+                check( near( cold.getWorld().GetBodyTransform( lhs ).position,
+                        warm.getWorld().GetBodyTransform( rhs ).position, 2.0e-2f ) &&
+                    near( cold.getWorld().GetBodyLinearVelocity( lhs ),
+                        warm.getWorld().GetBodyLinearVelocity( rhs ), 2.0e-2f ),
+                    "World warm start must preserve rigid-body trajectories" );
+            }
+        }
+        check( warmAcceptances > 0 && warmIterations < coldIterations,
+            "World scene must exercise accepted warm starts with less total PCG work" );
+    }
+}
+
 void checkCachedIc0WorldDifferential()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1240,6 +1329,7 @@ int main()
     checkFluidCoupling();
     checkWorldWindStepProfiling();
     checkCachedIc0WorldDifferential();
+    checkWorldPressureWarmStartDifferential();
     checkActiveIc0WorldDifferential();
     checkCachedSchurEdgesWorldDifferential();
     checkMovingSolidReaction();
