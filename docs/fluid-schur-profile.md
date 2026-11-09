@@ -68,3 +68,21 @@ Fluid 서브스텝 1/2/4/8회에서 cold/warm의 PCG 반복, 수렴 횟수, 전�
 강체, 셀 점유 급변, 다중 분리 유체 영역, Warm Start 실패 시 안정적인
 Cold retry 등 회귀 테스트가 충분히 쌓이기 전에는 기본 ON으로
 전환하지 않는다.
+
+
+### World/Fluid에서 실제 채택 경로 회귀 검증
+
+`sandboxWindFlowDemoTests`의 `checkWorldPressureWarmStartDifferential`은
+같은 초기 상태의 Cold/Warm 장면을 각각 12프레임 실행한다. World 8회,
+Fluid 4회 서브스텝을 교대하고, h=0.5m와 h=0.25m를 모두 포함한다.
+기존 pressure diagnostic과 달리 **채택된 Warm Start 경로가 실제로
+실행되는지**를 검사하며, 프레임 내 Warm Start 시도 횟수(4회),
+양쪽 최종 수렴, 잔차, 압력 연속성, body별 압력 force/torque,
+World의 body 위치/선형 속도를 대조한다.
+
+또한 Warm Start 채택이 1회 이상 발생하고, 전 구간 PCG
+`matrixProducts` 총합이 Cold 대비 감소해야 통과한다. 벽시계(ms)는
+CI 런너 편차 때문에 회귀 조건으로 삼지 않고 Release 벤치마크에서
+별도로 비교한다. 빠른 물체/급격한 점유 변화에서는 단순히 이전 압력을
+재사용할 수 없으므로, Field 레벨의 기하 변화 회귀는 Warm Start
+거부 시 원본 Cold 반복 횟수를 보존하는 조건을 계속 검증한다.
