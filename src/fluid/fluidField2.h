@@ -261,6 +261,10 @@ struct fluidCutCellPressure2
     // each merged group is one conservation row, NOT exact child-cell continuity.
     // Valid only when mergedPressureCells > 0 and coupled PCG has converged.
     float groupedPredictedContinuityRms = 0.0f;
+    // L1 volume hypothetically exchanged within pooled cells to satisfy
+    // group-only continuity (m^3 with unit depth, one Fluid substep).
+    // This is NOT actual tracer remap or guaranteed pointwise conservation.
+    float virtualInternalExchangeVolume = 0.0f;
     // opt-in 측정: Schur PCG 호출에 소비된 wall clock 시간(ms). 전체 Field Step은 아님.
     double coupledSolveMilliseconds = 0.0;
     fluidCoupledPressureTiming2 coupledTiming{};
@@ -538,7 +542,9 @@ public:
     void setCutCellCoupledProjectionEnabled( bool enabled ) noexcept { cutCellCoupledProjectionEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellCoupledProjectionEnabled() const noexcept { return cutCellCoupledProjectionEnabled_; }
 
-    // Experimental small-cell pressure pooling. Default 0 disables it.
+    // Experimental shrinking small-cell pressure pooling. Default 0 disables it.
+    // Only active on valid moving-geometry history and a shrinking fluid
+    // fraction. Stationary narrow gaps retain the original pressure cells.
     // Only used with coupled Cut-cell PCG: p = P*q, solve P^T*A*P with
     // A = L + B*M^-1*B^T, and preserve sum of moving-volume RHS per group.
     // Reject non-finite/negative/too-large thresholds. The inherited IC(0)

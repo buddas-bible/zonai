@@ -166,6 +166,25 @@ void checkSmallCellPressureMergeConfiguration()
         Length( field.getFluidMomentum() - reference.getFluidMomentum() ) < 1.0e-6f &&
         Length( reactionA[0].force - reactionB[0].force ) < 1.0e-6f,
         "small-cell pressure merging must not alter the non-coupled reference solver" );
+    // Stationary geometry may have tiny cut cells, but its pressure
+    // topology must not change just because the experimental switch is ON.
+    shape.inverseMass = 0.5f;
+    shape.inverseInertia = 0.7f;
+    field.setCutCellCoupledProjectionEnabled( true );
+    reference.setCutCellCoupledProjectionEnabled( true );
+    field.setSmallCellPressureMergeFraction( 0.05f );
+    for( int i = 0; i < 2; ++i )
+    {
+        field.step( 1.0f / 60.0f, std::span<const fluidShapeObstacle2>( &shape, 1 ), reactionA, 200 );
+        reference.step( 1.0f / 60.0f, std::span<const fluidShapeObstacle2>( &shape, 1 ), reactionB, 200 );
+        check( field.getCutCellPressure().mergedPressureCells == 0 &&
+            close( field.getFlowAudit( 1.0f / 60.0f ).maxFluidFaceSpeed,
+                reference.getFlowAudit( 1.0f / 60.0f ).maxFluidFaceSpeed, 1.0e-6f ) &&
+            close( field.getCutCellPressure().pressureResidual,
+                reference.getCutCellPressure().pressureResidual, 1.0e-6f ) &&
+            Length( reactionA[0].force - reactionB[0].force ) < 1.0e-6f,
+            "static narrow-gap pressure geometry must not be merged by motion-only trial" );
+    }
     field.setSmallCellPressureMergeFraction( 0.0f );
     check( field.getSmallCellPressureMergeFraction() == 0.0f,
         "zero threshold must disable experimental pressure merging" );

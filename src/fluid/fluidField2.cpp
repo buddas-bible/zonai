@@ -3833,7 +3833,13 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
                     static_cast<double>( cutCellVolumeRate_[cell] ) / timeStep - mean;
                 squaredContinuity += error * error;
                 if( groupedPressure )
-                    groupError[coupledPressureScratch_.smallCellPressureRoots[cell]] += error;
+                {
+                    const int root = coupledPressureScratch_.smallCellPressureRoots[cell];
+                    groupError[root] += error;
+                    if( root != cell )
+                        cutCellPressure_.virtualInternalExchangeVolume +=
+                            static_cast<float>( std::abs( error ) * timeStep * cellSize_ * cellSize_ );
+                }
                 volumeL1 += std::abs( static_cast<double>( solidFlux ) ) * cellSize_ * timeStep;
             }
         if( groupedPressure )
@@ -3978,7 +3984,8 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
             {
                 const int cell = cellIndex( xCell, y );
                 const float fraction = cellFluidFraction_[cell];
-                if( fraction <= 0.0f || fraction >= smallCellPressureMergeFraction_ ) continue;
+                if( fraction <= 0.0f || fraction >= smallCellPressureMergeFraction_ ||
+                    !volumeSourceValid_ || previousCellFluidFraction_[cell] <= fraction ) continue;
                 int neighbor = -1;
                 float bestOpening = 0.0f;
                 const auto visit = [&]( int other, float opening )

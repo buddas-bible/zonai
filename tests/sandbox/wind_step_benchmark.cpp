@@ -352,29 +352,51 @@ void auditFrozenPressure( bool smallCellTrial = false )
     const auto& traced = scene.getWindField()->getFaceStageAudit();
     if( smallCellTrial )
     {
+        // Paired repeated frozen solves avoid attributing CI runner noise
+        // or separate World trajectories to the pressure model. The two
+        // pressure solvers alternate execution order on the same snapshot.
+        std::array<std::vector<double>, 2> timings{};
+        for( int iteration = 0; iteration < 7; ++iteration )
+            for( int order = 0; order < 2; ++order )
+            {
+                const int variant = ( iteration + order ) & 1;
+                fluidField2 probe = *snapshot;
+                probe.setPrePressureSnapshotObserver( {} );
+                if( variant == 1 ) probe.setSmallCellPressureMergeFraction( 1.0e-4f );
+                probe.setCutCellPressureTimingEnabled( true );
+                const auto feedback = probe.replayFrozenCutCellPressure();
+                if( !feedback || !probe.getCutCellPressure().usedCoupledProjection )
+                {
+                    std::fprintf( stderr, "frozen pressure timing variant failed\n" );
+                    std::exit( 1 );
+                }
+                timings[variant].push_back( probe.getCutCellPressure().coupledSolveMilliseconds );
+            }
+        const double baseMedianMs = median( timings[0] );
+        const double mergedMedianMs = median( timings[1] );
         std::puts( "substep_index,face_open,upper_fraction,base_v,merged_v,"
             "base_status,merged_status,merged_cells,orphan_slivers,merged_fraction,"
             "base_continuity_rms,merged_continuity_rms,"
             "base_predicted_continuity_rms,merged_predicted_continuity_rms,"
-            "merged_group_continuity_rms,"
+            "merged_group_continuity_rms,virtual_exchange_m3,"
             "base_impulse_residual,merged_impulse_residual,"
             "base_source_imbalance,merged_source_imbalance,"
             "base_tracer_mass,merged_tracer_mass,base_energy,merged_energy,"
             "base_schur_ms,merged_schur_ms,feedback_force_delta,feedback_torque_delta" );
         std::printf( "%d,%.9g,%.9g,%.9g,%.9g,%d,%d,%d,%d,%.9g,"
-            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
             "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
             capturedIndex, traced.openFraction, traced.upperCellFraction,
             a, b, static_cast<int>( pA.coupledStatus ), static_cast<int>( pB.coupledStatus ),
             pB.mergedPressureCells, pB.unmergedSmallPressureCells,
             pB.mergedFluidFraction, pA.divergenceAfter, pB.divergenceAfter,
             pA.predictedContinuityRms, pB.predictedContinuityRms,
-            pB.groupedPredictedContinuityRms,
+            pB.groupedPredictedContinuityRms, pB.virtualInternalExchangeVolume,
             Length( pA.impulse.residual() ), Length( pB.impulse.residual() ),
             pA.sourceImbalance, pB.sourceImbalance,
             baseline.getTracerMass(), reference.getTracerMass(),
             baseline.getFluidKineticEnergy(), reference.getFluidKineticEnergy(),
-            pA.coupledSolveMilliseconds, pB.coupledSolveMilliseconds,
+            baseMedianMs, mergedMedianMs,
             forceDifference, torqueDifference );
         return;
     }
