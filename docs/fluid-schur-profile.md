@@ -37,3 +37,34 @@ Fluid 1/2/4/8 substeps를 각각 측정하고 중앙 프레임별 잔차 비율�
 probe 횟수를 마지막 CSV 열에 기록한다. `fluidFieldTests`에서는
 회전/이동 강체의 연속 스냅샷과 두 격자 크기에서 probe ON/OFF의
 PCG 반복, 압력 잔차, 강체 반력 및 운동량의 정확한 일치를 검증한다.
+
+
+## 실제 PCG Warm Start (선택형 성능 실험)
+
+`setCoupledPressureWarmStartEnabled(true)`는 analytic Cut-cell Schur PCG에서
+직전 Fluid Step의 `pressure_` (float)을 현재 압력 연산자에 대입한다.
+기본 OFF이며 기존 zero-initialized PCG는 변함없이 남겨둔다.
+현재 `b`와 `A = L + B M^-1 B^T`를 조립한 다음 정확히 한 번 `A*p_previous`를
+계산하고, `||b-A*p_previous||² < 0.25 ||b||²`이며 모든 값이 유한할 때만
+이전 압력을 초기 `x`로 채택한다. 그렇지 않으면 기존 0 초기값으로 진행한다.
+
+채택 시 `r=b-A*x`와 `x=p_previous`로 시작하지만 **종료 기준은 원래
+`max(1e-18, ||b||²*1e-10)`을 그대로 사용**한다. 종료 시 별도
+`b-A*x` 검증, 강체 압력 반력/운동량 경로도 유지한다.
+`coupledInitialResidualRms`와 `coupledRelativeResidual` 역시 기존
+Cold RHS 기준으로 표시한다. 공통 압력 계수 캐시와 압력 solver 전체를
+매 Step 새로 준비하므로 오래된 factorization을 재사용하지 않는다.
+기본 동작에는 추가 행렬 곱과 수치 변경이 없다.
+
+계측 중에는 `warmStartAttempts` / `warmStartAccepted`가 누적되며,
+기존 `--pressure-reuse-probe`와 함께 켜면 잔차 비율도 별도 기록한다.
+Windows Release의
+`sandboxWindStepBenchmark --pcg-warmstart-sweep`는 실제 World 서브스텝 8회와
+Fluid 서브스텝 1/2/4/8회에서 cold/warm의 PCG 반복, 수렴 횟수, 전처리
+호출, Pressure/Field/Fluid 시간을 출력한다. 추가 `A*x` 비용 때문에
+반복 수가 줄어도 반드시 전체 시간 개선으로 이어지는 것은 아니다.
+
+이 경로는 현재 **옵트인 검증용**이다. 장기적인 고속·고충격 동적
+강체, 셀 점유 급변, 다중 분리 유체 영역, Warm Start 실패 시 안정적인
+Cold retry 등 회귀 테스트가 충분히 쌓이기 전에는 기본 ON으로
+전환하지 않는다.
