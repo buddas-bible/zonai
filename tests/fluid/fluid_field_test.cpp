@@ -97,8 +97,16 @@ void checkFaceStageAudit()
         std::isfinite( trace.afterBoundary ) && std::isfinite( trace.afterAdvection ) &&
         std::isfinite( trace.afterPressure ) &&
         close( trace.openFraction, monitored.getVFaceOpenFraction( 12, 8 ) ) &&
-        close( trace.afterPressure, monitored.sampleVelocity( face ).y, 1.0e-5f ),
-        "opt-in stage audit must observe the selected face through the whole Fluid step" );
+        close( trace.afterPressure, monitored.sampleVelocity( face ).y, 1.0e-5f ) &&
+        trace.lowerCellFraction >= 0.0f && trace.lowerCellFraction <= 1.0f &&
+        trace.upperCellFraction >= 0.0f && trace.upperCellFraction <= 1.0f &&
+        std::isfinite( trace.lowerPressure ) && std::isfinite( trace.upperPressure ) &&
+        std::isfinite( trace.predictedPressureDelta ),
+        "opt-in stage audit must observe the selected face and adjacent pressure cells" );
+    if( trace.openFraction > 0.0f )
+        check( close( trace.afterPressure - trace.afterAdvection,
+            trace.predictedPressureDelta, 1.0e-4f ),
+            "observed open-face pressure correction must match the pressure gradient" );
     check( !baseline.getFaceStageAudit().valid &&
         Length( baseline.getFluidMomentum() - monitored.getFluidMomentum() ) < 1.0e-6f &&
         close( baseline.getFlowAudit( dt ).maxFluidFaceSpeed,

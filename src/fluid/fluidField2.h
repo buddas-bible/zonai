@@ -356,6 +356,15 @@ struct fluidFaceStageAudit2
     float afterBoundary = 0.0f;
     float afterAdvection = 0.0f;
     float afterPressure = 0.0f;
+    // The two cells sharing the monitored face. These are sampled after the
+    // pressure solve and never change pressure or the fluid boundary.
+    float lowerCellFraction = 0.0f;
+    float upperCellFraction = 0.0f;
+    float lowerVolumeRate = 0.0f;
+    float upperVolumeRate = 0.0f;
+    float lowerPressure = 0.0f;
+    float upperPressure = 0.0f;
+    float predictedPressureDelta = 0.0f;
 };
 
 // 마지막 유효 Fluid Step의 경과시간 분해(ms), 계측 옵션을 켠 경우에만 유효.

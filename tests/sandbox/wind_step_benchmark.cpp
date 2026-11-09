@@ -237,7 +237,9 @@ void auditFaceStages()
     std::puts( "frame,peak_substep,peak_face_is_u,peak_face_x,peak_face_y,"
         "peak_face_speed,peak_face_open,target_valid,target_open,"
         "target_before_geometry,target_after_remap,target_after_boundary,"
-        "target_after_advection,target_after_pressure,target_pressure_delta" );
+        "target_after_advection,target_after_pressure,target_pressure_delta,"
+        "lower_cell_fraction,upper_cell_fraction,lower_volume_rate,upper_volume_rate,"
+        "lower_pressure,upper_pressure,predicted_pressure_delta" );
     for( int frame = 0; frame < warmupFrames + measuredFrames; ++frame )
     {
         scene.step( dt, worldSubsteps );
@@ -245,13 +247,17 @@ void auditFaceStages()
         const auto& audit = scene.getWindCouplingAudit();
         const auto& peak = audit.peakBeforeDrag;
         const auto& stages = audit.peakFaceStages;
-        std::printf( "%d,%d,%d,%d,%d,%.9g,%.9g,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+        std::printf( "%d,%d,%d,%d,%d,%.9g,%.9g,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
             frame - warmupFrames, audit.peakFluidSubstep,
             peak.maxFaceIsU ? 1 : 0, peak.maxFaceX, peak.maxFaceY,
             peak.maxFaceVelocity, peak.maxFaceOpenFraction,
             stages.valid ? 1 : 0, stages.openFraction, stages.beforeGeometry,
             stages.afterRemap, stages.afterBoundary, stages.afterAdvection,
-            stages.afterPressure, stages.afterPressure - stages.afterAdvection );
+            stages.afterPressure, stages.afterPressure - stages.afterAdvection,
+            stages.lowerCellFraction, stages.upperCellFraction,
+            stages.lowerVolumeRate, stages.upperVolumeRate,
+            stages.lowerPressure, stages.upperPressure, stages.predictedPressureDelta );
     }
 }
 

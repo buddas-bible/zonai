@@ -2648,7 +2648,25 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
     }
     stepMomentum_.afterPressure = getFluidMomentum();
-    if( auditFace ) faceStageAudit_.afterPressure = readAuditFace();
+    if( auditFace )
+    {
+        faceStageAudit_.afterPressure = readAuditFace();
+        const int x = faceStageAuditX_;
+        const int y = faceStageAuditY_;
+        const int lower = faceStageAuditIsU_ ? cellIndex( x - 1, y ) : cellIndex( x, y - 1 );
+        const int upper = cellIndex( x, y );
+        faceStageAudit_.lowerCellFraction = cellFluidFraction_[lower];
+        faceStageAudit_.upperCellFraction = cellFluidFraction_[upper];
+        faceStageAudit_.lowerVolumeRate = cutCellVolumeRate_[lower];
+        faceStageAudit_.upperVolumeRate = cutCellVolumeRate_[upper];
+        faceStageAudit_.lowerPressure = pressure_[lower];
+        faceStageAudit_.upperPressure = pressure_[upper];
+        // The open-face correction in projectCutCell is -dt/h * (pUpper-pLower).
+        // Closed faces have boundary velocity and are not pressure-corrected.
+        if( faceStageAudit_.openFraction > 0.0f )
+            faceStageAudit_.predictedPressureDelta = timeStep * ( 1.0f / cellSize_ ) *
+                ( pressure_[lower] - pressure_[upper] );
+    }
     record( stepTiming_.pressure );
     transportTracer( timeStep );
     record( stepTiming_.tracer );
