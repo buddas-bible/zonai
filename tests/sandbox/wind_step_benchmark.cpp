@@ -356,18 +356,20 @@ void auditFrozenPressure( bool smallCellTrial = false )
             "base_status,merged_status,merged_cells,orphan_slivers,merged_fraction,"
             "base_continuity_rms,merged_continuity_rms,"
             "base_predicted_continuity_rms,merged_predicted_continuity_rms,"
+            "merged_group_continuity_rms,"
             "base_impulse_residual,merged_impulse_residual,"
             "base_source_imbalance,merged_source_imbalance,"
             "base_tracer_mass,merged_tracer_mass,base_energy,merged_energy,"
             "base_schur_ms,merged_schur_ms,feedback_force_delta,feedback_torque_delta" );
         std::printf( "%d,%.9g,%.9g,%.9g,%.9g,%d,%d,%d,%d,%.9g,"
-            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
             "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
             capturedIndex, traced.openFraction, traced.upperCellFraction,
             a, b, static_cast<int>( pA.coupledStatus ), static_cast<int>( pB.coupledStatus ),
             pB.mergedPressureCells, pB.unmergedSmallPressureCells,
             pB.mergedFluidFraction, pA.divergenceAfter, pB.divergenceAfter,
             pA.predictedContinuityRms, pB.predictedContinuityRms,
+            pB.groupedPredictedContinuityRms,
             Length( pA.impulse.residual() ), Length( pB.impulse.residual() ),
             pA.sourceImbalance, pB.sourceImbalance,
             baseline.getTracerMass(), reference.getTracerMass(),

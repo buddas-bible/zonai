@@ -128,6 +128,49 @@ void checkFaceStageAudit()
     check( !monitored.getFaceStageAudit().valid, "disabled stage audit must not retain stale data" );
 }
 
+void checkSmallCellPressureMergeConfiguration()
+{
+    fluidField2 field{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    check( field.getSmallCellPressureMergeFraction() == 0.0f,
+        "connected small-cell pressure merging must be default OFF" );
+    field.setSmallCellPressureMergeFraction( 0.005f );
+    check( close( field.getSmallCellPressureMergeFraction(), 0.005f ),
+        "pressure merging must accept a small positive fluid fraction threshold" );
+    field.setSmallCellPressureMergeFraction( -0.1f );
+    field.setSmallCellPressureMergeFraction( 0.25f );
+    field.setSmallCellPressureMergeFraction( std::numeric_limits<float>::infinity() );
+    field.setSmallCellPressureMergeFraction( std::numeric_limits<float>::quiet_NaN() );
+    check( close( field.getSmallCellPressureMergeFraction(), 0.005f ),
+        "pressure merging must reject negative, excessive and nonfinite thresholds" );
+
+    // The setting is ignored by non-coupled Jacobi; its pressure/geometry
+    // and source terms are never silently adjusted.
+    fluidField2 reference = field;
+    field.setCutCellProjectionEnabled( true );
+    reference.setCutCellProjectionEnabled( true );
+    reference.setSmallCellPressureMergeFraction( 0.0f );
+    fluidShapeObstacle2 shape{};
+    shape.geometry = circle2{ {}, 0.73f };
+    shape.transform.position = { 0.14f, 0.18f };
+    shape.center = shape.transform.position;
+    std::array<fluidObstacleForce2, 1> reactionA{}, reactionB{};
+    field.addVelocity( { -1.0f, 0.0f }, { 1.4f, 0.25f }, 1.1f );
+    reference.addVelocity( { -1.0f, 0.0f }, { 1.4f, 0.25f }, 1.1f );
+    field.step( 1.0f / 60.0f, std::span<const fluidShapeObstacle2>( &shape, 1 ), reactionA );
+    reference.step( 1.0f / 60.0f, std::span<const fluidShapeObstacle2>( &shape, 1 ), reactionB );
+    check( field.getCutCellPressure().mergedPressureCells == 0 &&
+        close( field.getFlowAudit( 1.0f / 60.0f ).maxFluidFaceSpeed,
+            reference.getFlowAudit( 1.0f / 60.0f ).maxFluidFaceSpeed, 1.0e-6f ) &&
+        close( field.getCutCellPressure().divergenceAfter,
+            reference.getCutCellPressure().divergenceAfter, 1.0e-6f ) &&
+        Length( field.getFluidMomentum() - reference.getFluidMomentum() ) < 1.0e-6f &&
+        Length( reactionA[0].force - reactionB[0].force ) < 1.0e-6f,
+        "small-cell pressure merging must not alter the non-coupled reference solver" );
+    field.setSmallCellPressureMergeFraction( 0.0f );
+    check( field.getSmallCellPressureMergeFraction() == 0.0f,
+        "zero threshold must disable experimental pressure merging" );
+}
+
 void checkFrozenPressureReplay()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -4210,6 +4253,7 @@ int main()
     checkBoundsAndSampling();
     checkLiveFlowAudit();
     checkFaceStageAudit();
+    checkSmallCellPressureMergeConfiguration();
     checkFrozenPressureReplay();
     checkStepTimingProfiler();
     checkPressureProjection();

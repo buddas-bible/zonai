@@ -3809,6 +3809,11 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
         // swept volume·tracer mass와 이 예측 증분을 이중 적용하지 않는다.
         double squaredContinuity = 0.0;
         double volumeL1 = 0.0;
+        // P^T continuity must be checked in the SAME pooled groups as
+        // P^T A P. A tiny child cell need not independently satisfy div=0.
+        const bool groupedPressure = cutCellPressure_.mergedPressureCells > 0;
+        auto& groupError = coupledPressureScratch_.smallCellReducedPreconditioner;
+        if( groupedPressure ) groupError.assign( pressure_.size(), 0.0 );
         for( int y = 0; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
             {
@@ -3827,8 +3832,22 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
                 const double error = static_cast<double>( fluidFlux + solidFlux ) / cellSize_ +
                     static_cast<double>( cutCellVolumeRate_[cell] ) / timeStep - mean;
                 squaredContinuity += error * error;
+                if( groupedPressure )
+                    groupError[coupledPressureScratch_.smallCellPressureRoots[cell]] += error;
                 volumeL1 += std::abs( static_cast<double>( solidFlux ) ) * cellSize_ * timeStep;
             }
+        if( groupedPressure )
+        {
+            double totalSquared = 0.0;
+            const auto& roots = coupledPressureScratch_.smallCellPressureRoots;
+            for( std::size_t i = 0; i < roots.size(); ++i )
+                if( cellFluidFraction_[i] > 0.0f &&
+                    roots[i] == static_cast<int>( i ) ) totalSquared += groupError[i] * groupError[i];
+            const int groups = cutCellPressure_.activeCells - cutCellPressure_.mergedPressureCells;
+            if( groups > 0 )
+                cutCellPressure_.groupedPredictedContinuityRms =
+                    static_cast<float>( std::sqrt( totalSquared / groups ) );
+        }
         cutCellPressure_.predictedContinuityRms = cutCellPressure_.activeCells > 0
             ? static_cast<float>( std::sqrt( squaredContinuity / cutCellPressure_.activeCells ) ) : 0.0f;
         cutCellPressure_.predictedSolidVolumeL1 = static_cast<float>( volumeL1 );

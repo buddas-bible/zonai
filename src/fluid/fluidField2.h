@@ -257,6 +257,10 @@ struct fluidCutCellPressure2
     int mergedPressureCells = 0;
     int unmergedSmallPressureCells = 0;
     float mergedFluidFraction = 0.0f;
+    // RMS of grouped flux+moving-volume continuity (including Body response);
+    // each merged group is one conservation row, NOT exact child-cell continuity.
+    // Valid only when mergedPressureCells > 0 and coupled PCG has converged.
+    float groupedPredictedContinuityRms = 0.0f;
     // opt-in 측정: Schur PCG 호출에 소비된 wall clock 시간(ms). 전체 Field Step은 아님.
     double coupledSolveMilliseconds = 0.0;
     fluidCoupledPressureTiming2 coupledTiming{};
