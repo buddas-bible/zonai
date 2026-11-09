@@ -90,6 +90,9 @@ struct fluidCoupledPressureTiming2
     double warmStartRhsSquared = 0.0;
     double warmStartGuessSquared = 0.0;
     int warmStartProbes = 0;
+    // Diagnostic counters for the opt-in guarded actual warm start.
+    int warmStartAttempts = 0;
+    int warmStartAccepted = 0;
     double vector = 0.0;
     double validation = 0.0;
     double output = 0.0;
@@ -114,6 +117,8 @@ struct fluidCoupledPressureTiming2
         warmStartRhsSquared += next.warmStartRhsSquared;
         warmStartGuessSquared += next.warmStartGuessSquared;
         warmStartProbes += next.warmStartProbes;
+        warmStartAttempts += next.warmStartAttempts;
+        warmStartAccepted += next.warmStartAccepted;
         vector += next.vector;
         validation += next.validation;
         output += next.output;
@@ -605,6 +610,18 @@ public:
         return coupledPressureWarmStartProbeEnabled_;
     }
 
+    // 실험적 연립 Cut-cell PCG 이전 압력 Warm Start. 기본 OFF.
+    // 현재 방정식의 잔차가 0 초기값 대비 충분히 작을 때만 채택하며,
+    // 실제 b 기준 수렴 허용오차와 마지막 true residual 검증을 유지한다.
+    void setCoupledPressureWarmStartEnabled( bool enabled ) noexcept
+    {
+        coupledPressureWarmStartEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isCoupledPressureWarmStartEnabled() const noexcept
+    {
+        return coupledPressureWarmStartEnabled_;
+    }
+
     // 이동 중인 solid의 공유 MAC 면 swept volume을 주변 cell의 기하 ΔV와
     // 국소적으로 맞추는 실험 경로. 부호가 반대인 인접 잔차만 상쇄한다.
     // 기본 false. 닫힌 외벽의 유량 및 전체 체적 오차를 임의로 제거하지 않는다.
@@ -884,6 +901,7 @@ private:
     bool analyticCutCellBoundedSweptFacesEnabled_ = true;
     bool cutCellPressureTimingEnabled_ = false;
     bool coupledPressureWarmStartProbeEnabled_ = false;
+    bool coupledPressureWarmStartEnabled_ = false;
     bool conservativeAdvectionEnabled_ = false;
     bool hasCutCellHistory_ = false;
     bool volumeSourceValid_ = false;
