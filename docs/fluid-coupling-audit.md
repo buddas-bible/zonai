@@ -83,3 +83,43 @@ Next analysis: compare the 28.13 m/s face with the sampled normal velocity of ac
 **No root cause is claimed before reading actual trace and tests.** When Windows Release CI completes, inspect spikes by frame and compare: (1) coupled vs uncoupled at matching h/steps/drag, (2) drag 0 vs 3 at matching h/steps/coupling, (3) continuity increase immediately after drag, and (4) coincident PCG failures or Body acceleration jumps. If a spike occurs before drag, investigate pressure/geometry/velocity remap; if after drag, test an explicit pre-projection force application in a separate opt-in differential PR. Pressure/Drag stage changes, solver restarts, obstacle identity and API policy changes remain **out of scope** in this PR.
 
 The full environmental physics plan is being reviewed in PR #318, in `docs/roadmaps/environment-simulation.md` and `docs/roadmaps/environment-status.md`; since that PR is still Draft, these files are not yet expected on master.
+
+## Audit 5 — Near-vanishing Cut-cell pressure row (PR #323, Windows Release)
+
+**Status:** Read-only diagnosis verified; **no solver stabilization or default physics change**. PR #323 extends the original Cut-cell spike audit with an optional exact MAC face stage trace and its two neighboring pressure rows. `--face-stage-audit` fixes h=0.25m, World=8, Fluid=4, TwoWay ON, Drag=0, and watches V-face (17,13). It samples the same Fluid substep as the frame's maximum pre-Drag face speed. The opt-in trace is absent in normal stepping.
+
+### Verified evidence
+
+CI [42613271263](https://github.com/buddas-bible/zonai/actions/runs/42613271263) and [42628881990](https://github.com/buddas-bible/zonai/actions/runs/42628881990) both passed Ubuntu 112/112, Windows Debug 115/115, Windows Release 52/52. The final trace is from the latter run, measured frame 6, Fluid substep 3 (zero-based).
+
+| Quantity | V(17,13) / upper fluid cell |
+| --- | ---: |
+| Face raw normal velocity after advection | -0.51022017 m/s |
+| Face raw normal velocity after pressure | **-28.1338482 m/s** |
+| Same face's pressure velocity correction | **-27.6236286 m/s** |
+| Face opening to lower cell (south) | 0.0000639508144 |
+| Upper cell opening to east | 0.0000572343561 |
+| Upper cell opening to west/north | 0 / 0 |
+| Upper fluid fraction | **1.83005056e-9** |
+| Lower fluid fraction | 0.761748731 |
+| Upper swept volume fraction source (`cutCellVolumeRate_`) | -0.0000567354728 (not yet /dt) |
+| Upper pressure | **1657.2511** (solver pressure variable) |
+| Lower pressure | -0.166460514 |
+| Upper compatibility-corrected pressure RHS | **0.200819619** |
+| Upper Laplacian row contribution | 0.200840368 |
+| Upper Body Schur row contribution | -0.000020744827 |
+| **Upper actual `b - (L + B M^-1 B^T)p`** | **-4.53992929e-9** |
+| Upper open-flux divergence + swept source, before region mean / predicted boundary correction | 1.38303741e-6 1/s |
+
+The pressure gradient prediction `-(dt/h)*(p_upper-p_lower)` exactly matches the measured correction. The upper cell has only two extremely narrow open faces. Their **combined** aperture fell from approximately **0.08511669** at measured frame 5 to **0.00012118517** at frame 6 (**702x smaller**), while that cell's pressure RHS increased **4.80x** (0.04181865 to 0.20081962). Accordingly, pressure climbed from 2.69648 to 1657.25. The row has a very small computed residual and negligible Schur term compared with the Laplacian/RHS. The original 28.13 m/s velocity spike was **generated during projection on a near-vanishing active Cut-cell; it is not evidence that the PCG mistakenly failed to solve the assembled equations.**
+
+### Why this is not yet a numerical fix
+
+The current Cut-cell projection evaluates the moving-boundary volume source derived from swept geometry against the **final-time open face fractions**. A cell that nearly closes during the interval may be required to transfer a nonzero amount through extremely narrow final openings. This is a concrete candidate explanation for the high but algebraically converged pressure. It is **not yet proof** that any proposed space-time geometry discretization, cell agglomeration or source redistribution will conserve all mass, preserve pressure–Body impulse adjoint consistency, and remain stable in other topologies.
+
+- Do not suppress the spike with unconditional speed/pressure clamping or silently turn on PR #322's aperture-aware velocity sampler as a pressure fix.
+- Evaluate an **opt-in, isolated** near-vanishing-cell model that explicitly accounts for disappearing fluid volume and connected face topology. Compare it to the same snapshots for the original pressure RHS, row residual, predicted continuity, Body reaction, tracer mass, and runtime.
+- Include a stationary thin gap, moving-closure and reopening, all four neighbor directions, near-disconnected fluid pockets and different World/Fluid cadences. Test conserved/relocated volume separately from any approximated fluid face speed.
+- Compare literature-backed strategies such as conservative cell agglomeration or time-consistent moving-interface flux handling before selecting one. Do not assume a recipe from *compressible* cut-cell literature automatically transfers to this incompressible Schur projection.
+
+The S0 spike *pathway* is now localized to near-vanishing Cut-cell pressure projection, but the S0/S2 numerical **remedy and broad robustness acceptance remain open**. PR #322 is still Draft (opt-in OFF). PR #318's S0–S9 roadmap remains the reference for subsequent scoped work.
