@@ -326,6 +326,8 @@ void auditFrozenPressure( bool smallCellTrial = false, bool thresholdSweep = fal
         std::puts( "threshold,merged_cells,orphan_slivers,pcg_status,pcg_iterations,"
             "target_v,max_face_speed,group_continuity,individual_continuity,"
             "impulse_residual,virtual_exchange,snapshot_decrease,tracer_mass" );
+        float baselineTargetSpeed = 0.0f;
+        float baselineTracerMass = 0.0f;
         for( float threshold : { 0.0f, 1.0e-9f, 1.0e-8f, 1.0e-6f, 1.0e-4f, 1.0e-2f } )
         {
             fluidField2 trial = *snapshot;
@@ -347,6 +349,34 @@ void auditFrozenPressure( bool smallCellTrial = false, bool thresholdSweep = fal
                 p.groupedPredictedContinuityRms, p.predictedContinuityRms,
                 Length( p.impulse.residual() ), p.virtualInternalExchangeVolume,
                 p.mergedSnapshotDecreaseVolume, trial.getTracerMass() );
+            if( threshold == 0.0f )
+            {
+                baselineTargetSpeed = std::abs( trial.sampleVelocity( point ).y );
+                baselineTracerMass = trial.getTracerMass();
+                continue;
+            }
+            if( threshold == 1.0e-4f )
+            {
+                // Golden frozen-frame regression, not a general proof of
+                // moving-boundary volume or tracer transport conservation.
+                const float sliverSpeed = std::abs( trial.sampleVelocity( point ).y );
+                if( !p.usedCoupledProjection || p.mergedPressureCells == 0 ||
+                    !std::isfinite( sliverSpeed ) ||
+                    sliverSpeed >= 0.5f * baselineTargetSpeed ||
+                    !std::isfinite( p.groupedPredictedContinuityRms ) ||
+                    p.groupedPredictedContinuityRms > 1.0e-5f ||
+                    !std::isfinite( p.virtualInternalExchangeVolume ) ||
+                    p.virtualInternalExchangeVolume <= 0.0f ||
+                    p.mergedSnapshotDecreaseVolume <= 0.0f ||
+                    p.virtualInternalExchangeVolume >
+                        2.0f * p.mergedSnapshotDecreaseVolume ||
+                    Length( p.impulse.residual() ) > 1.0e-4f ||
+                    std::abs( trial.getTracerMass() - baselineTracerMass ) > 1.0e-6f )
+                {
+                    std::fprintf( stderr, "small-cell frozen pressure conservation regression\n" );
+                    std::exit( 1 );
+                }
+            }
         }
         return;
     }
