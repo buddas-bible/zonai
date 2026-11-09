@@ -51,6 +51,11 @@ void checkWindApertureSamplingDifferential()
         explicitOff.setWindApertureAwareSamplingEnabled( false );
         experiment.setWindApertureAwareSamplingEnabled( true );
         experiment.configureWindField( 48, 28, 0.25f );
+        // configureWindField resets bodies as well as the fluid. Restore the
+        // same prescribed initial velocities before comparing World motion.
+        const auto trialShapes = experiment.getShapes();
+        experiment.getWorld().SetBodyLinearVelocity( trialShapes[0].bodyHandle, { 0.7f, -0.1f } );
+        experiment.getWorld().SetBodyAngularVelocity( trialShapes[1].bodyHandle, 0.5f );
         check( !legacy.isWindApertureAwareSamplingEnabled() &&
             !explicitOff.isWindApertureAwareSamplingEnabled() &&
             experiment.isWindApertureAwareSamplingEnabled(),
