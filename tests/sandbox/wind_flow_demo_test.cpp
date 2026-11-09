@@ -153,6 +153,12 @@ void checkWindCouplingAudit()
                 std::isfinite( audit.maxFaceSpeedAfterDrag ) &&
                 !projection.coupledSolveFailed,
                 "opt-in audit must collect finite pre/post drag states without disrupting coupled solve" );
+            if( audit.peakNearbyComparisonValid )
+                check( audit.peakNearbyFluidFraction >= 0.1f &&
+                    audit.peakNearbyFluidFraction <= 1.0f &&
+                    std::isfinite( audit.peakNearbyLegacyNormalVelocity ) &&
+                    std::isfinite( audit.peakNearbyAwareNormalVelocity ),
+                    "paired interpolation audit must sample the same fluid-bearing cell without modifying state" );
             if( LengthSquared( audited.getWindDragBodyImpulse() ) > 1.0e-12f )
                 ++nonzeroDragFrames;
             check( near( audited.getWindDragBodyImpulse(), reference.getWindDragBodyImpulse(), 1.0e-5f ) &&
