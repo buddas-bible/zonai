@@ -182,6 +182,9 @@ struct windCouplingAudit2
     float maxFaceSpeedBeforeDrag = 0.0f;
     float maxFaceSpeedAfterDrag = 0.0f;
     float maxFaceSpeedIncreaseFromDrag = 0.0f;
+    // Snapshot at the largest open-face speed before drag among Fluid substeps.
+    fluidFlowAudit2 peakBeforeDrag{};
+    int peakFluidSubstep = -1;
     int nonFiniteFluidFaces = 0;
     int sampledFluidSteps = 0;
 };

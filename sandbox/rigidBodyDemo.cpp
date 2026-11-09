@@ -417,6 +417,11 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
             if( windCouplingAuditEnabled_ )
             {
                 const fluidFlowAudit2 afterDrag = windField_->getFlowAudit( windTimeStep );
+                if( beforeDrag.maxFluidFaceSpeed > windCouplingAudit_.peakBeforeDrag.maxFluidFaceSpeed )
+                {
+                    windCouplingAudit_.peakBeforeDrag = beforeDrag;
+                    windCouplingAudit_.peakFluidSubstep = windSubstep;
+                }
                 windCouplingAudit_.maxContinuityBeforeDrag = std::max(
                     windCouplingAudit_.maxContinuityBeforeDrag, beforeDrag.continuityRms );
                 windCouplingAudit_.maxContinuityAfterDrag = std::max(

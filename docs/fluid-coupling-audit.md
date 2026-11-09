@@ -37,6 +37,22 @@ The `fluidField2::getFlowAudit(dt)` query is side-effect-free and uses the lates
 - An uncoupled scene can run the specified Fluid cadence for diagnostics; turning off audit restores the old single-fluid-step schedule.
 - A standalone Field query is repeatable and does not mutate velocity/momentum; Cut-cell query is compatible with its volume-aware divergence diagnostics.
 
+## Verified Audit 1 results (PR #319, Windows Release 42571477840)
+
+Ubuntu 112/112, Windows Debug 115/115 and Windows Release 52/52 passed. Windows Release emitted 192 per-frame records, with 0 PCG failures and 0 non-finite open fluid faces across all 16 scenarios (two grid sizes, two Fluid counts, coupling ON/OFF, drag 0/3).
+
+A **single-frame 28.13385 m/s maximum open MAC face velocity** was observed at **h=0.25m, World=8, Fluid=4, two-way ON, Drag=0, measured frame 6** (after four warmup frames). Neighboring measured frames 5 and 7 had respective peaks **0.5953736** and **0.7118427 m/s**. The same frame's PCG iterations rose to **61** from typical **46–47**, but the PCG relative residual was **8.197879e-6** and reported converged; Body 0 continued smoothly at approximately **0.589 m/s**. This is **a local face-speed spike, not proof of a whole-field or rendered tracer explosion**.
+
+At the same h and Fluid count with Drag=3, maximum open face velocity across recorded frames was only **1.017758 m/s**. Post-drag continuity RMS increased by at most **0.000605896 1/s** in that case; the original Drag=0 spike appears equally in pre/post-Drag reads (no Drag exchange performed). Therefore the **28.13 m/s spike cannot have been caused by post-projection Drag injection in that same interval**. This does not rule out preceding geometry, Schur pressure, very small open faces or solver boundary synchronization. It also does not prove that drag stabilizes the solver in general: dragged bodies follow different trajectories.
+
+These numbers were extracted from the successful Windows job logs of [run 42571477840](https://github.com/buddas-bible/zonai/actions/runs/42571477840), on the merged [PR #319](https://github.com/buddas-bible/zonai/pull/319).
+
+### Follow-up instrumentation (PR #320)
+
+The existing live-flow audit now also captures the **exact U/V face index, its signed velocity, open fraction**, and the **largest open-fraction-weighted face speed**. The Sandbox retains the substep and peak face across all Fluid intervals; the `--coupling-spike-audit` CSV adds `peak_face_substep`, `peak_face_is_u`, `peak_face_x`, `peak_face_y`, `peak_face_open_fraction`, `peak_face_signed_velocity`, `peak_open_weighted_max_speed`.
+
+The distinction matters: a huge speed on a nearly blocked face may carry little area-weighted flux, while a large speed on a mostly open face is potentially more consequential. The area-weighted speed is a diagnostic, not a physical stability proof; it is not a kinetic energy norm or a spatially filtered velocity. These new measurements are read-only, and no pressure/drag solver change is included.
+
 ## First results / next decisions
 
 **No root cause is claimed before reading actual trace and tests.** When Windows Release CI completes, inspect spikes by frame and compare: (1) coupled vs uncoupled at matching h/steps/drag, (2) drag 0 vs 3 at matching h/steps/coupling, (3) continuity increase immediately after drag, and (4) coincident PCG failures or Body acceleration jumps. If a spike occurs before drag, investigate pressure/geometry/velocity remap; if after drag, test an explicit pre-projection force application in a separate opt-in differential PR. Pressure/Drag stage changes, solver restarts, obstacle identity and API policy changes remain **out of scope** in this PR.

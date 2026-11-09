@@ -4746,22 +4746,34 @@ fluidFlowAudit2 fluidField2::getFlowAudit( float timeStep ) const noexcept
 
     result.continuityRms = cutCellProjectionEnabled_
         ? cutCellFluxDivergenceRms( 1.0f / timeStep ) : getDivergenceRms();
+    // A pressure solve can converge while a nearly closed face carries an
+    // unexpectedly large velocity. Preserve the exact face and open fraction.
+    const auto observe = [&]( float speed, float open, int x, int y, bool isU )
+    {
+        if( open <= 0.0f ) return;
+        if( !std::isfinite( speed ) )
+        {
+            ++result.nonFiniteFluidFaces;
+            return;
+        }
+        const float magnitude = std::abs( speed );
+        result.maxOpenWeightedFaceSpeed = std::max( result.maxOpenWeightedFaceSpeed, magnitude * open );
+        if( magnitude > result.maxFluidFaceSpeed )
+        {
+            result.maxFluidFaceSpeed = magnitude;
+            result.maxFaceVelocity = speed;
+            result.maxFaceOpenFraction = open;
+            result.maxFaceX = x;
+            result.maxFaceY = y;
+            result.maxFaceIsU = isU;
+        }
+    };
     for( int y = 0; y < height_; ++y )
         for( int x = 1; x < width_; ++x )
-        {
-            if( advectionUOpen( x, y ) <= 0.0f ) continue;
-            const float speed = u_[uIndex( x, y )];
-            if( !std::isfinite( speed ) ) ++result.nonFiniteFluidFaces;
-            else result.maxFluidFaceSpeed = std::max( result.maxFluidFaceSpeed, std::abs( speed ) );
-        }
+            observe( u_[uIndex( x, y )], advectionUOpen( x, y ), x, y, true );
     for( int y = 1; y < height_; ++y )
         for( int x = 0; x < width_; ++x )
-        {
-            if( advectionVOpen( x, y ) <= 0.0f ) continue;
-            const float speed = v_[vIndex( x, y )];
-            if( !std::isfinite( speed ) ) ++result.nonFiniteFluidFaces;
-            else result.maxFluidFaceSpeed = std::max( result.maxFluidFaceSpeed, std::abs( speed ) );
-        }
+            observe( v_[vIndex( x, y )], advectionVOpen( x, y ), x, y, false );
     return result;
 }
 
