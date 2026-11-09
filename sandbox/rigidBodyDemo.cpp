@@ -459,6 +459,29 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                             windCouplingAudit_.peakAdjacentCellNormalSpeed = upperSpeed;
                             windCouplingAudit_.peakAdjacentCellFluidFraction = upperFraction;
                         }
+                        windCouplingAudit_.peakNearbyComparisonValid = false;
+                        if( !windField_->isApertureAwareSamplingEnabled() )
+                        {
+                            // Compare the two interpolation policies on this
+                            // *same stored field*, not diverged World paths.
+                            // Ignore essentially solid cell centers.
+                            const bool useLower = lowerFraction >= 0.1f &&
+                                ( upperFraction < 0.1f || lowerSpeed >= upperSpeed );
+                            const bool useUpper = !useLower && upperFraction >= 0.1f;
+                            if( useLower || useUpper )
+                            {
+                                const vec2 point = useLower
+                                    ? windField_->getCellCenter( lowerX, lowerY )
+                                    : windField_->getCellCenter( x, y );
+                                const vec2 legacy = useLower ? lower : upper;
+                                const vec2 aware = windField_->sampleVelocityApertureAware( point );
+                                windCouplingAudit_.peakNearbyLegacyNormalVelocity = isU ? legacy.x : legacy.y;
+                                windCouplingAudit_.peakNearbyAwareNormalVelocity = isU ? aware.x : aware.y;
+                                windCouplingAudit_.peakNearbyFluidFraction =
+                                    useLower ? lowerFraction : upperFraction;
+                                windCouplingAudit_.peakNearbyComparisonValid = true;
+                            }
+                        }
                     }
                 }
                 windCouplingAudit_.maxContinuityBeforeDrag = std::max(
