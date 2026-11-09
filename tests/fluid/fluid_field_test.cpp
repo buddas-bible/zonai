@@ -44,7 +44,7 @@ void checkLiveFlowAudit()
     const auto repeat = field.getFlowAudit( dt );
     check( repeat.maxFluidFaceSpeed == driven.maxFluidFaceSpeed &&
         repeat.continuityRms == driven.continuityRms &&
-        near( field.getFluidMomentum(), momentum, 1.0e-6f ),
+        Length( field.getFluidMomentum() - momentum ) < 1.0e-6f,
         "repeated flow audits must not alter simulation state" );
     field.setCutCellProjectionEnabled( true );
     fluidShapeObstacle2 fixed{};
