@@ -421,6 +421,30 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 {
                     windCouplingAudit_.peakBeforeDrag = beforeDrag;
                     windCouplingAudit_.peakFluidSubstep = windSubstep;
+
+                    // Inspect the existing bilinear sampler at the exact
+                    // high-speed face and at both neighboring cell centers.
+                    // Never change the solver velocities for this audit.
+                    const int x = beforeDrag.maxFaceX;
+                    const int y = beforeDrag.maxFaceY;
+                    const bool isU = beforeDrag.maxFaceIsU;
+                    if( x >= 0 && y >= 0 )
+                    {
+                        const float h = windField_->getCellSize();
+                        const vec2 origin = windField_->getOrigin();
+                        const vec2 facePoint = origin + h * ( isU
+                            ? vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f }
+                            : vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) } );
+                        const vec2 sampled = windField_->sampleVelocity( facePoint );
+                        windCouplingAudit_.peakSampledNormalVelocity = isU ? sampled.x : sampled.y;
+                        const vec2 lower = windField_->sampleVelocity(
+                            windField_->getCellCenter( isU ? x - 1 : x, isU ? y : y - 1 ) );
+                        const vec2 upper = windField_->sampleVelocity(
+                            windField_->getCellCenter( x, y ) );
+                        windCouplingAudit_.peakAdjacentCellNormalSpeed = std::max(
+                            std::abs( isU ? lower.x : lower.y ),
+                            std::abs( isU ? upper.x : upper.y ) );
+                    }
                 }
                 windCouplingAudit_.maxContinuityBeforeDrag = std::max(
                     windCouplingAudit_.maxContinuityBeforeDrag, beforeDrag.continuityRms );
