@@ -3932,6 +3932,99 @@ void checkPreviousPressureResidualProbe()
     }
 }
 
+void checkCoupledPressureWarmStartDifferential()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    for( float h : { 0.5f, 0.25f } )
+        for( int mode = 0; mode < 3; ++mode )
+        {
+            std::array<fluidShapeObstacle2, 2> bodies{{
+                { circle2{ {}, mode == 2 ? 0.78f : 0.58f },
+                    { { -0.21f, -0.18f }, {} }, { -0.21f, -0.18f },
+                    { 0.95f, -0.30f }, 0.70f, 0.35f, 1.10f },
+                { circle2{ {}, mode == 2 ? 0.18f : 0.58f },
+                    { { mode == 1 ? 1.50f : 0.26f, 0.19f }, {} },
+                    { mode == 1 ? 1.50f : 0.26f, 0.19f },
+                    { -0.65f, 0.75f }, -0.55f, 0.80f, 0.70f }
+            }};
+            if( mode == 2 )
+            {
+                bodies[1].transform.position = { -0.12f, -0.12f };
+                bodies[1].center = bodies[1].transform.position;
+            }
+            fluidField2 reference{ static_cast<int>( 12.0f / h ),
+                static_cast<int>( 8.0f / h ), h, { -6.0f, -4.0f } };
+            fluidField2 warm{ static_cast<int>( 12.0f / h ),
+                static_cast<int>( 8.0f / h ), h, { -6.0f, -4.0f } };
+            for( fluidField2* field : { &reference, &warm } )
+            {
+                field->setCutCellProjectionEnabled( true );
+                field->setCutCellCoupledProjectionEnabled( true );
+                field->setDisjointAnalyticCutCellEnabled( true );
+                field->setCutCellPressureTimingEnabled( true );
+                field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
+            }
+            check( !reference.isCoupledPressureWarmStartEnabled() &&
+                !warm.isCoupledPressureWarmStartEnabled(),
+                "pressure warm start must remain opt-in by default" );
+            warm.setCoupledPressureWarmStartEnabled( true );
+            std::array<fluidObstacleForce2, 2> referenceForces{}, warmForces{};
+            int originalIterations = 0, warmIterations = 0, accepted = 0;
+            for( int frame = 0; frame < 4; ++frame )
+            {
+                reference.step( dt, bodies, referenceForces, 200 );
+                warm.step( dt, bodies, warmForces, 200 );
+                const auto& a = reference.getCutCellPressure();
+                const auto& b = warm.getCutCellPressure();
+                originalIterations += a.coupledIterations;
+                warmIterations += b.coupledIterations;
+                accepted += b.coupledTiming.warmStartAccepted;
+                check( a.usedCoupledProjection && b.usedCoupledProjection &&
+                    a.coupledStatus == fluidCoupledPressureStatus2::converged &&
+                    b.coupledStatus == fluidCoupledPressureStatus2::converged &&
+                    a.coupledRelativeResidual <= 1.1e-5f &&
+                    b.coupledRelativeResidual <= 1.1e-5f &&
+                    b.coupledTiming.warmStartAttempts == 1 &&
+                    b.coupledTiming.warmStartAccepted <= 1 &&
+                    a.coupledTiming.warmStartAttempts == 0,
+                    "warm-started PCG must converge to the original cold RHS tolerance" );
+                if( frame == 0 )
+                    check( b.coupledTiming.warmStartAccepted == 0 &&
+                        b.coupledIterations == a.coupledIterations,
+                        "first pressure step must use identical zero-guess PCG" );
+                const float continuityScale = 1.0f + std::abs( a.predictedContinuityRms );
+                check( std::abs( b.predictedContinuityRms - a.predictedContinuityRms ) <
+                    2.0e-3f * continuityScale,
+                    "warm-started PCG must preserve coupled continuity accuracy" );
+                for( std::size_t i = 0; i < bodies.size(); ++i )
+                {
+                    const float forceScale = 1.0f + Length( referenceForces[i].force );
+                    check( Length( referenceForces[i].force - warmForces[i].force ) <
+                        1.0e-2f * forceScale &&
+                        std::abs( referenceForces[i].torque - warmForces[i].torque ) <
+                            1.0e-2f * forceScale,
+                        "warm-started PCG must preserve each owner's pressure feedback" );
+                }
+                const vec2 oldMomentum = reference.getFluidMomentum();
+                const vec2 newMomentum = warm.getFluidMomentum();
+                check( Length( oldMomentum - newMomentum ) <
+                    1.0e-2f * ( 1.0f + Length( oldMomentum ) ),
+                    "warm-started PCG must preserve fluid momentum" );
+                for( fluidShapeObstacle2& body : bodies )
+                {
+                    body.transform.position += dt * body.linearVelocity;
+                    body.center = body.transform.position;
+                }
+            }
+            check( accepted > 0 && warmIterations < originalIterations,
+                "warm-started PCG must reduce work on consecutive smooth geometry frames" );
+            warm.clear();
+            check( warm.isCoupledPressureWarmStartEnabled() &&
+                warm.getCutCellPressure().coupledTiming.warmStartAccepted == 0,
+                "clear must retain warm-start choice but clear its diagnostics" );
+        }
+}
+
 } // namespace
 
 int main()
@@ -3965,6 +4058,7 @@ int main()
     checkAnalyticCutCellPressureImpulseBudget();
     checkAnalyticCutCellPreconditionerComparison();
     checkPreviousPressureResidualProbe();
+    checkCoupledPressureWarmStartDifferential();
     checkCachedIc0Differential();
     checkActiveCellIc0SweepDifferential();
     checkActiveCellIc0SweepDifferential( true );
