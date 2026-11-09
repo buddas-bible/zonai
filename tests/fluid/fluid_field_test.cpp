@@ -731,6 +731,96 @@ void checkCoupledPressureEnergyAudit()
         "clearing Fluid Field must clear kinetic energy and pressure-stage energy diagnostics" );
 }
 
+void checkApertureAwareVelocitySampling()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    // The experimental switch must be neutral in the ordinary fluid domain.
+    fluidField2 unobstructed{ 24, 24, 0.25f, { -3.0f, -3.0f } };
+    check( !unobstructed.isApertureAwareSamplingEnabled(),
+        "aperture-aware velocity sampling must be opt-in" );
+    unobstructed.addVelocity( { 0.0f, 0.0f }, { 2.0f, -1.0f }, 0.8f );
+    const vec2 atSource = unobstructed.sampleVelocity( { 0.0f, 0.0f } );
+    unobstructed.setApertureAwareSamplingEnabled( true );
+    check( near( atSource, unobstructed.sampleVelocity( { 0.0f, 0.0f } ), 1.0e-6f ) &&
+        near( atSource, unobstructed.sampleVelocityApertureAware( { 0.0f, 0.0f } ), 1.0e-6f ),
+        "aperture sampling must exactly preserve the legacy query without Cut-cell projection" );
+
+    // Use analytic circle geometry and identify a nearly blocked horizontal
+    // face with a more open adjacent face. Do not hard-code a special cell.
+    fluidShapeObstacle2 circle{};
+    circle.geometry = circle2{ {}, 0.32f };
+    circle.transform.position = { 0.13f, 0.09f };
+    circle.center = circle.transform.position;
+    fluidField2 field{ 24, 24, 0.25f, { -3.0f, -3.0f } };
+    field.setCutCellProjectionEnabled( true );
+    field.setAnalyticCircleCutCellEnabled( true );
+    std::array<fluidObstacleForce2, 1> reactions{};
+    field.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), reactions );
+    int faceX = -1;
+    int faceY = -1;
+    for( int y = 1; y < field.getHeight() - 1 && faceY < 0; ++y )
+        for( int x = 0; x < field.getWidth(); ++x )
+        {
+            const float open = field.getVFaceOpenFraction( x, y );
+            const float nextOpen = field.getVFaceOpenFraction( x, y + 1 );
+            if( open > 0.0f && open < 0.5f && nextOpen > open * 2.0f &&
+                field.getCellFluidFraction( x, y ) > 0.1f )
+            {
+                faceX = x;
+                faceY = y;
+                break;
+            }
+        }
+    check( faceY >= 0, "analytic circle must provide a narrow face with fluid support next to it" );
+    if( faceY < 0 ) return;
+
+    const float h = field.getCellSize();
+    const vec2 face = field.getOrigin() + h * vec2{
+        static_cast<float>( faceX ) + 0.5f, static_cast<float>( faceY ) };
+    const vec2 adjacentCell = field.getCellCenter( faceX, faceY );
+    field.addVelocity( face, { 0.0f, 6.0f }, 0.10f );
+    const vec2 legacy = field.sampleVelocity( adjacentCell );
+    const vec2 aware = field.sampleVelocityApertureAware( adjacentCell );
+    const vec2 faceSample = field.sampleVelocityApertureAware( face );
+    const vec2 beforeMomentum = field.getFluidMomentum();
+    check( legacy.y > 2.9f && aware.y >= 0.0f && aware.y < legacy.y * 0.8f &&
+        std::abs( faceSample.y - 6.0f ) < 0.01f,
+        "aperture-weighted interpolation must suppress narrow-face leakage into adjacent fluid, without clamping the face itself" );
+    field.setApertureAwareSamplingEnabled( true );
+    check( near( field.sampleVelocity( adjacentCell ), aware, 1.0e-6f ) &&
+        near( field.getFluidMomentum(), beforeMomentum, 1.0e-6f ),
+        "switching the sampler must change queries only, not the stored fluid state" );
+    field.setApertureAwareSamplingEnabled( false );
+    check( near( field.sampleVelocity( adjacentCell ), legacy, 1.0e-6f ),
+        "turning off aperture sampling must restore the legacy velocity query" );
+    check( close( field.sampleVelocityApertureAware( { 10.0f, 10.0f } ).x, 0.0f ),
+        "aperture-aware query must respect the fluid domain" );
+
+    // The original and opt-in advection paths must both continue to project
+    // and keep tracer mass finite. Tracer uses existing aperture-weighted flux.
+    fluidField2 original{ 24, 24, 0.25f, { -3.0f, -3.0f } };
+    fluidField2 experimental{ 24, 24, 0.25f, { -3.0f, -3.0f } };
+    for( fluidField2* current : { &original, &experimental } )
+    {
+        current->setCutCellProjectionEnabled( true );
+        current->setAnalyticCircleCutCellEnabled( true );
+        current->step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), reactions );
+        current->addVelocity( face, { 0.0f, 6.0f }, 0.10f );
+        current->setTracerConcentration( 7, 7, 0.6f );
+    }
+    experimental.setApertureAwareSamplingEnabled( true );
+    const float massBefore = original.getTracerMass();
+    original.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), reactions );
+    experimental.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), reactions );
+    check( !original.getCutCellPressure().coupledSolveFailed &&
+        !experimental.getCutCellPressure().coupledSolveFailed &&
+        std::isfinite( experimental.getFlowAudit( dt ).continuityRms ) &&
+        std::isfinite( experimental.getFlowAudit( dt ).maxFluidFaceSpeed ) &&
+        std::abs( experimental.getTracerMass() - massBefore ) < 1.0e-4f &&
+        std::abs( original.getTracerMass() - massBefore ) < 1.0e-4f,
+        "both advection samplers must keep projected fluid finite and conserve tracer mass" );
+}
+
 void checkFractionalCutCells()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -4078,6 +4168,7 @@ void checkCoupledPressureWarmStartDifferential()
 int main()
 {
     checkBoundsAndSampling();
+    checkApertureAwareVelocitySampling();
     checkLiveFlowAudit();
     checkStepTimingProfiler();
     checkPressureProjection();
