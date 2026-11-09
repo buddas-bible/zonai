@@ -340,6 +340,23 @@ struct fluidFlowAudit2
     int nonFiniteFluidFaces = 0;
 };
 
+// A pressure row local to one fluid cell; the Schur term includes every
+// moving Body response affecting that row. Values only exist for an opt-in
+// stage trace; no solver values are modified.
+struct fluidFaceCellPressureAudit2
+{
+    float westOpen = 0.0f;
+    float eastOpen = 0.0f;
+    float southOpen = 0.0f;
+    float northOpen = 0.0f;
+    double rhs = 0.0;
+    double laplacian = 0.0;
+    double schur = 0.0;
+    double rowResidual = 0.0;
+    double finalOpenFlux = 0.0; // Net open face flux in face-speed units.
+    double rawContinuity = 0.0; // Includes swept volume rate, not region mean.
+};
+
 // Selected staggered face velocity at successive Fluid stages.
 // Read-only and opt-in: this describes one face, not a global maximum.
 // Before geometry uses the previous snapshot; all later values use the
@@ -365,6 +382,8 @@ struct fluidFaceStageAudit2
     float lowerPressure = 0.0f;
     float upperPressure = 0.0f;
     float predictedPressureDelta = 0.0f;
+    fluidFaceCellPressureAudit2 lowerRow{};
+    fluidFaceCellPressureAudit2 upperRow{};
 };
 
 // 마지막 유효 Fluid Step의 경과시간 분해(ms), 계측 옵션을 켠 경우에만 유효.

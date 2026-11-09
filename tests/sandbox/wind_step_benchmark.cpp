@@ -239,7 +239,11 @@ void auditFaceStages()
         "target_before_geometry,target_after_remap,target_after_boundary,"
         "target_after_advection,target_after_pressure,target_pressure_delta,"
         "lower_cell_fraction,upper_cell_fraction,lower_volume_rate,upper_volume_rate,"
-        "lower_pressure,upper_pressure,predicted_pressure_delta" );
+        "lower_pressure,upper_pressure,predicted_pressure_delta,"
+        "upper_west_open,upper_east_open,upper_south_open,upper_north_open,"
+        "upper_rhs,upper_laplacian,upper_schur,upper_row_residual,"
+        "upper_final_open_flux,upper_raw_continuity,"
+        "lower_rhs,lower_row_residual" );
     for( int frame = 0; frame < warmupFrames + measuredFrames; ++frame )
     {
         scene.step( dt, worldSubsteps );
@@ -248,7 +252,8 @@ void auditFaceStages()
         const auto& peak = audit.peakBeforeDrag;
         const auto& stages = audit.peakFaceStages;
         std::printf( "%d,%d,%d,%d,%d,%.9g,%.9g,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
-            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
             frame - warmupFrames, audit.peakFluidSubstep,
             peak.maxFaceIsU ? 1 : 0, peak.maxFaceX, peak.maxFaceY,
             peak.maxFaceVelocity, peak.maxFaceOpenFraction,
@@ -257,7 +262,13 @@ void auditFaceStages()
             stages.afterPressure, stages.afterPressure - stages.afterAdvection,
             stages.lowerCellFraction, stages.upperCellFraction,
             stages.lowerVolumeRate, stages.upperVolumeRate,
-            stages.lowerPressure, stages.upperPressure, stages.predictedPressureDelta );
+            stages.lowerPressure, stages.upperPressure, stages.predictedPressureDelta,
+            stages.upperRow.westOpen, stages.upperRow.eastOpen,
+            stages.upperRow.southOpen, stages.upperRow.northOpen,
+            stages.upperRow.rhs, stages.upperRow.laplacian, stages.upperRow.schur,
+            stages.upperRow.rowResidual, stages.upperRow.finalOpenFlux,
+            stages.upperRow.rawContinuity,
+            stages.lowerRow.rhs, stages.lowerRow.rowResidual );
     }
 }
 

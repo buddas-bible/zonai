@@ -101,8 +101,18 @@ void checkFaceStageAudit()
         trace.lowerCellFraction >= 0.0f && trace.lowerCellFraction <= 1.0f &&
         trace.upperCellFraction >= 0.0f && trace.upperCellFraction <= 1.0f &&
         std::isfinite( trace.lowerPressure ) && std::isfinite( trace.upperPressure ) &&
-        std::isfinite( trace.predictedPressureDelta ),
-        "opt-in stage audit must observe the selected face and adjacent pressure cells" );
+        std::isfinite( trace.predictedPressureDelta ) &&
+        std::isfinite( trace.upperRow.rhs ) &&
+        std::isfinite( trace.upperRow.laplacian ) &&
+        std::isfinite( trace.upperRow.rowResidual ) &&
+        std::isfinite( trace.upperRow.rawContinuity ) &&
+        std::isfinite( trace.lowerRow.rowResidual ) &&
+        trace.upperRow.westOpen >= 0.0f && trace.upperRow.westOpen <= 1.0f &&
+        trace.upperRow.eastOpen >= 0.0f && trace.upperRow.eastOpen <= 1.0f &&
+        trace.upperRow.southOpen >= 0.0f && trace.upperRow.southOpen <= 1.0f &&
+        trace.upperRow.northOpen >= 0.0f && trace.upperRow.northOpen <= 1.0f &&
+        close( static_cast<float>( trace.upperRow.schur ), 0.0f ),
+        "opt-in stage audit must observe the selected face and local non-coupled pressure row" );
     if( trace.openFraction > 0.0f )
         check( close( trace.afterPressure - trace.afterAdvection,
             trace.predictedPressureDelta, 1.0e-4f ),
