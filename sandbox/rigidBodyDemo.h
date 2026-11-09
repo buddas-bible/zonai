@@ -171,6 +171,21 @@ enum class pogoJointDemoPreset
     asymmetric
 };
 
+// Opt-in per-frame maxima from samples immediately after fluid projection and
+// immediately after drag feedback. Both samples use the same field geometry
+// and dt; this is diagnostic, not a new coupling algorithm.
+struct windCouplingAudit2
+{
+    float maxContinuityBeforeDrag = 0.0f;
+    float maxContinuityAfterDrag = 0.0f;
+    float maxContinuityIncreaseFromDrag = 0.0f;
+    float maxFaceSpeedBeforeDrag = 0.0f;
+    float maxFaceSpeedAfterDrag = 0.0f;
+    float maxFaceSpeedIncreaseFromDrag = 0.0f;
+    int nonFiniteFluidFaces = 0;
+    int sampledFluidSteps = 0;
+};
+
 class rigidBodyDemo : public demo
 {
 public:
@@ -257,6 +272,10 @@ public:
     void setWindSourceStrength( float strength );
     void setWindDragCoefficient( float rate );
     void setWindFluidSubstepCount( int count ) noexcept;
+    // Instrumentation only. Also forces the requested Fluid cadence while
+    // comparing coupled vs uncoupled scenes; normal scheduling stays unchanged.
+    void setWindCouplingAuditEnabled( bool enabled ) noexcept { windCouplingAuditEnabled_ = enabled; }
+    [[nodiscard]] bool isWindCouplingAuditEnabled() const noexcept { return windCouplingAuditEnabled_; }
     // Benchmark comparison: preserve baseline IC(0) while keeping cached ON by default.
     void setWindCachedIc0Enabled( bool enabled ) noexcept
     {
@@ -471,6 +490,7 @@ public:
     [[nodiscard]] float getWindWorldMilliseconds() const noexcept { return windWorldMilliseconds_; }
     [[nodiscard]] const fluidStepTiming2& getWindFieldTiming() const noexcept { return windFieldTiming_; }
     [[nodiscard]] const fluidCoupledPressureTiming2& getWindCoupledTiming() const noexcept { return windCoupledTiming_; }
+    [[nodiscard]] const windCouplingAudit2& getWindCouplingAudit() const noexcept { return windCouplingAudit_; }
     [[nodiscard]] std::size_t getWindStaticObstacleCount() const noexcept { return shapes_.size() > 3 && kind_ == demoKind::windFlow ? shapes_.size() - 3 : 0; }
     [[nodiscard]] std::span<const fluidObstacleForce2> getWindPressureForces() const noexcept { return windPressureForces_; }
     [[nodiscard]] vec2 getWindDragBodyImpulse() const noexcept { return windDragBodyImpulse_; }
@@ -703,6 +723,8 @@ private:
     float windFluidMilliseconds_ = 0.0f;
     float windWorldMilliseconds_ = 0.0f;
     bool windStepProfilingEnabled_ = false;
+    bool windCouplingAuditEnabled_ = false;
+    windCouplingAudit2 windCouplingAudit_{};
     fluidStepTiming2 windFieldTiming_{};
     fluidCoupledPressureTiming2 windCoupledTiming_{};
     std::vector<fluidShapeObstacle2> windObstacleSnapshots_{};

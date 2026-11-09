@@ -27,6 +27,108 @@ bool close( float a, float b, float tolerance = 1.0e-4f )
     return std::abs( a - b ) <= tolerance;
 }
 
+void checkWindCouplingAudit()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    for( float h : { 0.5f, 0.25f } )
+    {
+        rigidBodyDemo reference{ demoKind::windFlow };
+        rigidBodyDemo audited{ demoKind::windFlow };
+        for( rigidBodyDemo* scene : { &reference, &audited } )
+        {
+            scene->configureWindField( static_cast<int>( 12.0f / h ),
+                static_cast<int>( 7.0f / h ), h );
+            scene->setWindCutCellProjectionEnabled( true );
+            scene->setWindCutCellCoupledProjectionEnabled( true );
+            scene->setWindDisjointAnalyticEnabled( true );
+            scene->setWindFluidSubstepCount( 4 );
+            scene->setWindSourceStrength( 8.0f );
+            scene->setWindDragCoefficient( 3.0f );
+            const auto shapes = scene->getShapes();
+            scene->getWorld().SetBodyLinearVelocity( shapes[0].bodyHandle, { 0.7f, -0.10f } );
+            scene->getWorld().SetBodyAngularVelocity( shapes[1].bodyHandle, 0.5f );
+        }
+        audited.setWindCouplingAuditEnabled( true );
+        check( !reference.isWindCouplingAuditEnabled() && audited.isWindCouplingAuditEnabled(),
+            "coupling spike diagnostics must be opt-in" );
+
+        int nonzeroDragFrames = 0;
+        for( int frame = 0; frame < 12; ++frame )
+        {
+            reference.step( dt, 8 );
+            audited.step( dt, 8 );
+            const auto& audit = audited.getWindCouplingAudit();
+            const auto& projection = audited.getWindField()->getCutCellPressure();
+            check( audited.getWindCouplingSteps() == 4 &&
+                reference.getWindCouplingSteps() == 4 &&
+                audit.sampledFluidSteps == 4 && audit.nonFiniteFluidFaces == 0 &&
+                std::isfinite( audit.maxContinuityBeforeDrag ) &&
+                std::isfinite( audit.maxContinuityAfterDrag ) &&
+                std::isfinite( audit.maxContinuityIncreaseFromDrag ) &&
+                std::isfinite( audit.maxFaceSpeedBeforeDrag ) &&
+                std::isfinite( audit.maxFaceSpeedAfterDrag ) &&
+                !projection.coupledSolveFailed,
+                "opt-in audit must collect finite pre/post drag states without disrupting coupled solve" );
+            if( LengthSquared( audited.getWindDragBodyImpulse() ) > 1.0e-12f )
+                ++nonzeroDragFrames;
+            check( near( audited.getWindDragBodyImpulse(), reference.getWindDragBodyImpulse(), 1.0e-5f ) &&
+                near( audited.getWindDragFluidImpulse(), reference.getWindDragFluidImpulse(), 1.0e-5f ) &&
+                near( audited.getWindField()->getFluidMomentum(),
+                    reference.getWindField()->getFluidMomentum(), 1.0e-5f ),
+                "observing drag must not change exchanged impulses or fluid momentum" );
+            for( std::size_t i = 0; i < reference.getShapes().size(); ++i )
+            {
+                const bodyId a = reference.getShapes()[i].bodyHandle;
+                const bodyId b = audited.getShapes()[i].bodyHandle;
+                check( near( reference.getWorld().GetBodyTransform( a ).position,
+                        audited.getWorld().GetBodyTransform( b ).position, 1.0e-5f ) &&
+                    near( reference.getWorld().GetBodyLinearVelocity( a ),
+                        audited.getWorld().GetBodyLinearVelocity( b ), 1.0e-5f ),
+                    "coupling audit must not change rigid motion or integration cadence" );
+            }
+        }
+        check( nonzeroDragFrames > 0,
+            "driven two-way scene must exercise nonzero drag exchange during audit" );
+    }
+
+    // With drag disabled, both samples read exactly the same current field.
+    rigidBodyDemo noDrag{ demoKind::windFlow };
+    noDrag.setWindCouplingAuditEnabled( true );
+    noDrag.setWindDragCoefficient( 0.0f );
+    noDrag.setWindFluidSubstepCount( 4 );
+    for( int i = 0; i < 6; ++i )
+    {
+        noDrag.step( dt, 8 );
+        const auto& audit = noDrag.getWindCouplingAudit();
+        check( audit.sampledFluidSteps == 4 &&
+            audit.maxContinuityBeforeDrag == audit.maxContinuityAfterDrag &&
+            audit.maxFaceSpeedBeforeDrag == audit.maxFaceSpeedAfterDrag &&
+            audit.maxContinuityIncreaseFromDrag == 0.0f &&
+            audit.maxFaceSpeedIncreaseFromDrag == 0.0f &&
+            LengthSquared( noDrag.getWindDragBodyImpulse() ) == 0.0f &&
+            LengthSquared( noDrag.getWindDragFluidImpulse() ) == 0.0f,
+            "zero-drag audit must report identical before/after flow states" );
+    }
+
+    // The diagnostic flag alone must retain the requested Fluid cadence even
+    // when the old global coupling switch would normally force one interval.
+    rigidBodyDemo uncoupled{ demoKind::windFlow };
+    uncoupled.setWindCouplingAuditEnabled( true );
+    uncoupled.setWindFluidSubstepCount( 4 );
+    uncoupled.setWindObstacleCouplingEnabled( false );
+    uncoupled.setWindDragCoefficient( 0.0f );
+    uncoupled.step( dt, 8 );
+    check( uncoupled.getWindCouplingSteps() == 4 &&
+        uncoupled.getWindCouplingAudit().sampledFluidSteps == 4 &&
+        !uncoupled.getWindField()->getPressureMomentum().usedCoupledProjection,
+        "uncoupled audit must retain fixed Fluid cadence without enabling two-way forces" );
+    uncoupled.setWindCouplingAuditEnabled( false );
+    uncoupled.step( dt, 8 );
+    check( uncoupled.getWindCouplingSteps() == 1 &&
+        uncoupled.getWindCouplingAudit().sampledFluidSteps == 0,
+        "turning off diagnostic mode must restore existing single-exchange scheduling" );
+}
+
 void checkWorldPressureWarmStartDifferential()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -1327,6 +1429,7 @@ void checkSandboxConservativeAdvectionTrial()
 int main()
 {
     checkFluidCoupling();
+    checkWindCouplingAudit();
     checkWorldWindStepProfiling();
     checkCachedIc0WorldDifferential();
     checkWorldPressureWarmStartDifferential();

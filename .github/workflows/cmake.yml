@@ -218,6 +218,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --pcg-warmstart-sweep
 
+      # Per-frame, fixed-cadence comparison of coupled/uncoupled and drag on/off.
+      # CSV is diagnostic; do not gate CI on runner-dependent physics magnitudes.
+      - name: Sample Wind coupling spikes (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --coupling-spike-audit
+
       # Identical World/Fluid scene using original on-the-fly IC(0) sweeps.
       # Compare with the previous cached run on this same Windows runner.
       - name: Sample Wind reference IC0 sweep (Windows Release, informational)

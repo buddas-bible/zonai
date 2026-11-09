@@ -226,7 +226,9 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
         ( !windField_->isCutCellProjectionEnabled() || experimentalCutCellCoupling );
     // World의 Contact/Joint substeps와 비용이 큰 Fluid 투영 횟수를 분리한다.
     // 한 Fluid 구간은 하나 이상의 World substeps를 포함한다.
-    const int windSteps = coupledPressureEnabled && timeStep > 0.0f
+    // Audit compares ON/OFF with the same Fluid/World cadence, without
+    // changing the existing default single-exchange scheduling.
+    const int windSteps = ( coupledPressureEnabled || windCouplingAuditEnabled_ ) && timeStep > 0.0f
         ? std::min( subStepCount, windFluidSubstepCount_ ) : 1;
     const bool synchronizedWind = windSteps > 1;
     const float worldSubstepTime = timeStep / subStepCount;
@@ -239,6 +241,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
         windWorldMilliseconds_ = 0.0f;
         windFieldTiming_ = {};
         windCoupledTiming_ = {};
+        windCouplingAudit_ = {};
     }
     std::array<fluidObstacleForce2, 3> summedPressureImpulse{};
     if( contactEventVisualizationEnabled_ ) syncContactEventSubscriptions();
@@ -320,6 +323,11 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 windFieldTiming_.accumulate( windField_->getStepTiming() );
                 windCoupledTiming_.accumulate( windField_->getCutCellPressure().coupledTiming );
             }
+
+            // Sample identical Cut-cell volume-source and live face state on
+            // either side of drag. No extra projection or velocity write.
+            const fluidFlowAudit2 beforeDrag = windCouplingAuditEnabled_
+                ? windField_->getFlowAudit( windTimeStep ) : fluidFlowAudit2{};
 
             // 표면 네 지점의 상대속도를 사용해 선형 Drag와 회전 저항을 함께 계산한다.
             // 힘을 갱신하기 전에 모든 샘플을 수집해 Body 순회 순서에 의존하지 않는다.
@@ -405,6 +413,26 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                     world_.ApplyForce( visual.bodyHandle, dragForce, point );
                     windDragBodyImpulse_ += windTimeStep * dragForce;
                 }
+            }
+            if( windCouplingAuditEnabled_ )
+            {
+                const fluidFlowAudit2 afterDrag = windField_->getFlowAudit( windTimeStep );
+                windCouplingAudit_.maxContinuityBeforeDrag = std::max(
+                    windCouplingAudit_.maxContinuityBeforeDrag, beforeDrag.continuityRms );
+                windCouplingAudit_.maxContinuityAfterDrag = std::max(
+                    windCouplingAudit_.maxContinuityAfterDrag, afterDrag.continuityRms );
+                windCouplingAudit_.maxContinuityIncreaseFromDrag = std::max(
+                    windCouplingAudit_.maxContinuityIncreaseFromDrag,
+                    afterDrag.continuityRms - beforeDrag.continuityRms );
+                windCouplingAudit_.maxFaceSpeedBeforeDrag = std::max(
+                    windCouplingAudit_.maxFaceSpeedBeforeDrag, beforeDrag.maxFluidFaceSpeed );
+                windCouplingAudit_.maxFaceSpeedAfterDrag = std::max(
+                    windCouplingAudit_.maxFaceSpeedAfterDrag, afterDrag.maxFluidFaceSpeed );
+                windCouplingAudit_.maxFaceSpeedIncreaseFromDrag = std::max(
+                    windCouplingAudit_.maxFaceSpeedIncreaseFromDrag,
+                    afterDrag.maxFluidFaceSpeed - beforeDrag.maxFluidFaceSpeed );
+                windCouplingAudit_.nonFiniteFluidFaces += afterDrag.nonFiniteFluidFaces;
+                ++windCouplingAudit_.sampledFluidSteps;
             }
             windFluidMilliseconds_ += std::chrono::duration<float, std::milli>(
                 std::chrono::steady_clock::now() - fluidStart ).count();
@@ -1511,6 +1539,7 @@ void rigidBodyDemo::resetWindFlow()
     windField_->clear();
     windFieldTiming_ = {};
     windCoupledTiming_ = {};
+    windCouplingAudit_ = {};
     windPressureForces_.fill( {} );
     windDragBodyImpulse_ = {};
     windDragFluidImpulse_ = {};
