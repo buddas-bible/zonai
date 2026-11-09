@@ -741,8 +741,8 @@ void checkApertureAwareVelocitySampling()
     unobstructed.addVelocity( { 0.0f, 0.0f }, { 2.0f, -1.0f }, 0.8f );
     const vec2 atSource = unobstructed.sampleVelocity( { 0.0f, 0.0f } );
     unobstructed.setApertureAwareSamplingEnabled( true );
-    check( near( atSource, unobstructed.sampleVelocity( { 0.0f, 0.0f } ), 1.0e-6f ) &&
-        near( atSource, unobstructed.sampleVelocityApertureAware( { 0.0f, 0.0f } ), 1.0e-6f ),
+    check( Length( atSource - unobstructed.sampleVelocity( { 0.0f, 0.0f } ) ) < 1.0e-6f &&
+        Length( atSource - unobstructed.sampleVelocityApertureAware( { 0.0f, 0.0f } ) ) < 1.0e-6f,
         "aperture sampling must exactly preserve the legacy query without Cut-cell projection" );
 
     // Use analytic circle geometry and identify a nearly blocked horizontal
@@ -787,11 +787,11 @@ void checkApertureAwareVelocitySampling()
         std::abs( faceSample.y - 6.0f ) < 0.01f,
         "aperture-weighted interpolation must suppress narrow-face leakage into adjacent fluid, without clamping the face itself" );
     field.setApertureAwareSamplingEnabled( true );
-    check( near( field.sampleVelocity( adjacentCell ), aware, 1.0e-6f ) &&
-        near( field.getFluidMomentum(), beforeMomentum, 1.0e-6f ),
+    check( Length( field.sampleVelocity( adjacentCell ) - aware ) < 1.0e-6f &&
+        Length( field.getFluidMomentum() - beforeMomentum ) < 1.0e-6f,
         "switching the sampler must change queries only, not the stored fluid state" );
     field.setApertureAwareSamplingEnabled( false );
-    check( near( field.sampleVelocity( adjacentCell ), legacy, 1.0e-6f ),
+    check( Length( field.sampleVelocity( adjacentCell ) - legacy ) < 1.0e-6f,
         "turning off aperture sampling must restore the legacy velocity query" );
     check( close( field.sampleVelocityApertureAware( { 10.0f, 10.0f } ).x, 0.0f ),
         "aperture-aware query must respect the fluid domain" );
