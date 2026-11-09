@@ -4735,6 +4735,36 @@ void fluidField2::project( float timeStep, int pressureIterations,
     pressureMomentum_.wall = timeStep * vec2{ static_cast<float>( wallX ), static_cast<float>( wallY ) };
 }
 
+fluidFlowAudit2 fluidField2::getFlowAudit( float timeStep ) const noexcept
+{
+    fluidFlowAudit2 result{};
+    if( !std::isfinite( timeStep ) || timeStep <= 0.0f )
+    {
+        result.continuityRms = std::numeric_limits<float>::quiet_NaN();
+        return result;
+    }
+
+    result.continuityRms = cutCellProjectionEnabled_
+        ? cutCellFluxDivergenceRms( 1.0f / timeStep ) : getDivergenceRms();
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+        {
+            if( advectionUOpen( x, y ) <= 0.0f ) continue;
+            const float speed = u_[uIndex( x, y )];
+            if( !std::isfinite( speed ) ) ++result.nonFiniteFluidFaces;
+            else result.maxFluidFaceSpeed = std::max( result.maxFluidFaceSpeed, std::abs( speed ) );
+        }
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            if( advectionVOpen( x, y ) <= 0.0f ) continue;
+            const float speed = v_[vIndex( x, y )];
+            if( !std::isfinite( speed ) ) ++result.nonFiniteFluidFaces;
+            else result.maxFluidFaceSpeed = std::max( result.maxFluidFaceSpeed, std::abs( speed ) );
+        }
+    return result;
+}
+
 float fluidField2::getDivergenceRms() const noexcept
 {
     double sum = 0.0;
