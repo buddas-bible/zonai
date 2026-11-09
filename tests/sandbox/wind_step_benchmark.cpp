@@ -416,7 +416,7 @@ void auditFrozenPressure( bool smallCellTrial = false, bool thresholdSweep = fal
             "base_schur_ms,merged_schur_ms,feedback_force_delta,feedback_torque_delta" );
         std::printf( "%d,%.9g,%.9g,%.9g,%.9g,%d,%d,%d,%d,%.9g,"
             "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
-            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
             capturedIndex, traced.openFraction, traced.upperCellFraction,
             a, b, static_cast<int>( pA.coupledStatus ), static_cast<int>( pB.coupledStatus ),
             pB.mergedPressureCells, pB.unmergedSmallPressureCells,
