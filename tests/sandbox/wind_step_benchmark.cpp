@@ -160,7 +160,7 @@ void auditCoupling( bool apertureTrial )
         "peak_face_x,peak_face_y,peak_face_open_fraction,peak_face_signed_velocity,"
         "peak_open_weighted_max_speed,peak_sampled_normal_velocity,"
         "peak_adjacent_cell_normal_speed,peak_adjacent_cell_fluid_fraction,"
-        "peak_face_flux_normal_velocity,fluid_ms,world_ms" );
+        "peak_face_flux_normal_velocity,same_field_pair_valid,same_field_legacy_sample,same_field_aware_sample,same_field_fluid_fraction,fluid_ms,world_ms" );
     for( float h : { 0.5f, 0.25f } )
         for( int steps : { 1, 4 } )
             for( bool coupled : { false, true } )
@@ -195,7 +195,7 @@ void auditCoupling( bool apertureTrial )
                         const vec2 speed = scene.getWorld().GetBodyLinearVelocity( body );
                         std::printf( "%.2f,%d,%d,%d,%.1f,%d,%d,%d,%.7g,%.7g,%.7g,"
                             "%.7g,%.7g,%.7g,%d,%d,%d,%.7g,%d,%.7g,%.7g,%.7g,%.7g,"
-                            "%.7g,%.7g,%d,%d,%d,%d,%.7g,%.7g,%.7g,%.7g,%.7g,%.7g,%.7g,%.4f,%.4f\n",
+                            "%.7g,%.7g,%d,%d,%d,%d,%.7g,%.7g,%.7g,%.7g,%.7g,%.7g,%.7g,%d,%.7g,%.7g,%.7g,%.4f,%.4f\n",
                             h, worldSubsteps, steps, coupled ? 1 : 0, drag,
                             apertureAware ? 1 : 0, frame - warmupFrames, scene.getWindCouplingSteps(),
                             audit.maxContinuityBeforeDrag, audit.maxContinuityAfterDrag,
@@ -214,6 +214,10 @@ void auditCoupling( bool apertureTrial )
                             audit.peakSampledNormalVelocity, audit.peakAdjacentCellNormalSpeed,
                             audit.peakAdjacentCellFluidFraction,
                             peak.maxFaceVelocity * peak.maxFaceOpenFraction,
+                            audit.peakNearbyComparisonValid ? 1 : 0,
+                            audit.peakNearbyLegacyNormalVelocity,
+                            audit.peakNearbyAwareNormalVelocity,
+                            audit.peakNearbyFluidFraction,
                             scene.getWindFluidMilliseconds(), scene.getWindWorldMilliseconds() );
                     }
                 }
