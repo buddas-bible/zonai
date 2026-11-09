@@ -12,7 +12,7 @@
 - Warm Start 기본값: **OFF**, 실험으로만 설정 가능. Warm 실패 후 같은 solve에서 Cold 재시도 경로는 **미구현**.
 - 기능 개발 상태: 기존 MAC Wind + cut-cell/analytic Schur PCG + 다수 Joint/Ragdoll/자동차/Chain/Spline 데모 구현. Water 자유 수면, 부력/수면 항력, 침식/퇴적, Cloth/Soft Body, GPU Fluid는 이 로드맵상 **미착수**.
 - 이번 로드맵 변경 범위: **문서만**. 코드, 기본 연성 옵션, 엔진 런타임/성능을 바꾸지 않는다.
-- **진행 중:** [PR #319](https://github.com/buddas-bible/zonai/pull/319), `test/fluid-coupling-spike-audit`는 S0a의 **첫 계측 하위 작업**. Side-effect-free Cut-cell/Drag 진단, 고정 cadence 실험과 CSV, 회귀 테스트를 추가했으나 **Draft, 병합 전, CI run 42571092635 검증 중**. 상세 `docs/fluid-coupling-audit.md`는 PR #319 브랜치에서 확인.
+- **진행 중:** [PR #319](https://github.com/buddas-bible/zonai/pull/319), `test/fluid-coupling-spike-audit`는 S0a의 **첫 계측 하위 작업**. Side-effect-free Cut-cell/Drag 진단, 고정 cadence 실험과 CSV, 회귀 테스트를 추가했으나 **Draft, 병합 전, 첫 CI 42571092635는 Windows 전용 단계의 Ubuntu 실행 설정 오류로 실패(물리 테스트 112/112 통과). 수정 CI **42571477840**는 Ubuntu 전체 성공, Windows 검증 중**. 상세 `docs/fluid-coupling-audit.md`는 PR #319 브랜치에서 확인.
 
 ## 1. 단계별 상태
 
@@ -37,7 +37,7 @@ test/bench(fluid): isolate wind two-way coupling spikes at fixed step cadence
 ### 진행 상황과 범위 경계
 - PR #319은 **1차 계측**: World 8, Fluid 1/4, h=0.5/0.25, coupling ON/OFF, drag=0/3 (source ON), Windows Release 프레임별 CSV. 현재 물리 계산·기본 스케줄은 변경하지 않음.
 - 미완료: Fluid 2/8, Static 다수/경계에 걸친 장애물, Cut-cell swept mismatch 연관 분석, 압력 단계별 최대 속도 변화, 사용자 관찰한 이상 프레임의 실제 재현, 원인별 독립 해결 PR. PR #319이 통과하더라도 **S0 전체 완료로 표시하지 말 것**.
-- 다음 대화는 먼저 PR #319 CI run **42571092635**의 테스트/Windows CSV를 확인하여 실패·스파이크를 분석하고 PR을 수정/유지/병합 판단한다.
+- 다음 대화는 먼저 PR #319 수정 CI run **42571477840**의 테스트/Windows CSV를 확인하여 실패·스파이크를 분석하고 PR을 수정/유지/병합 판단한다.
 
 ### 이번 PR에서 할 일
 1. 기존 Wind Sandbox World/Fluid의 호출 횟수와 입력을 동일하게 고정한 reference와 experiment scene을 구성.
