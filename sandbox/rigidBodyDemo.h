@@ -184,6 +184,7 @@ struct windCouplingAudit2
     float maxFaceSpeedIncreaseFromDrag = 0.0f;
     // Snapshot at the largest open-face speed before drag among Fluid substeps.
     fluidFlowAudit2 peakBeforeDrag{};
+    fluidFaceStageAudit2 peakFaceStages{};
     // Legacy bilinear sampler at the peak face and its neighboring cell
     // centers. These are sampled in the same Fluid substep as the peak.
     float peakSampledNormalVelocity = 0.0f;
@@ -458,6 +459,10 @@ public:
     [[nodiscard]] bool isWindConservativeAdvectionEnabled() const noexcept
     {
         return windField_ && windField_->isConservativeAdvectionEnabled();
+    }
+    void setWindFaceStageAuditTarget( int x, int y, bool isU ) noexcept
+    {
+        if( windField_ ) windField_->setFaceStageAuditTarget( x, y, isU );
     }
     void setWindSweptGeometryCorrectionEnabled( bool enabled ) noexcept
     {

@@ -215,6 +215,46 @@ void auditCoupling()
                 }
 }
 
+// Isolate when the verified h=0.25 moving-circle V(17,13) face spikes.
+// The target is sampled in the same Fluid interval as each frame's raw peak.
+// Its fixed index is deliberately specific to the regression scene.
+void auditFaceStages()
+{
+    constexpr float h = 0.25f;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.configureWindField( 48, 28, h );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindCutCellCoupledProjectionEnabled( true );
+    scene.setWindDisjointAnalyticEnabled( true );
+    scene.setWindFluidSubstepCount( 4 );
+    scene.setWindCouplingAuditEnabled( true );
+    scene.setWindFaceStageAuditTarget( 17, 13, false );
+    scene.setWindObstacleCouplingEnabled( true );
+    scene.setWindSourceStrength( 8.0f );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.getWorld().SetBodyLinearVelocity( scene.getShapes()[0].bodyHandle, { 0.7f, -0.10f } );
+    scene.getWorld().SetBodyAngularVelocity( scene.getShapes()[1].bodyHandle, 0.5f );
+    std::puts( "frame,peak_substep,peak_face_is_u,peak_face_x,peak_face_y,"
+        "peak_face_speed,peak_face_open,target_valid,target_open,"
+        "target_before_geometry,target_after_remap,target_after_boundary,"
+        "target_after_advection,target_after_pressure,target_pressure_delta" );
+    for( int frame = 0; frame < warmupFrames + measuredFrames; ++frame )
+    {
+        scene.step( dt, worldSubsteps );
+        if( frame < warmupFrames ) continue;
+        const auto& audit = scene.getWindCouplingAudit();
+        const auto& peak = audit.peakBeforeDrag;
+        const auto& stages = audit.peakFaceStages;
+        std::printf( "%d,%d,%d,%d,%d,%.9g,%.9g,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+            frame - warmupFrames, audit.peakFluidSubstep,
+            peak.maxFaceIsU ? 1 : 0, peak.maxFaceX, peak.maxFaceY,
+            peak.maxFaceVelocity, peak.maxFaceOpenFraction,
+            stages.valid ? 1 : 0, stages.openFraction, stages.beforeGeometry,
+            stages.afterRemap, stages.afterBoundary, stages.afterAdvection,
+            stages.afterPressure, stages.afterPressure - stages.afterAdvection );
+    }
+}
+
 } // namespace
 
 int main( int argc, char** argv )
@@ -226,6 +266,7 @@ int main( int argc, char** argv )
     bool warmStartProbe = false;
     bool warmStartSweep = false;
     bool couplingAudit = false;
+    bool faceStageAudit = false;
     for( int i = 1; i < argc; ++i )
     {
         csv |= std::string_view( argv[i] ) == "--csv";
@@ -235,8 +276,10 @@ int main( int argc, char** argv )
         warmStartProbe |= std::string_view( argv[i] ) == "--pressure-reuse-probe";
         warmStartSweep |= std::string_view( argv[i] ) == "--pcg-warmstart-sweep";
         couplingAudit |= std::string_view( argv[i] ) == "--coupling-spike-audit";
+        faceStageAudit |= std::string_view( argv[i] ) == "--face-stage-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
+    if( faceStageAudit ) { auditFaceStages(); return 0; }
     if( warmStartSweep )
     {
         std::puts( "cell_m,world_substeps,fluid_substeps,warm_start,frames,"

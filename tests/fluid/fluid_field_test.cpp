@@ -71,6 +71,44 @@ void checkLiveFlowAudit()
         "invalid time step must not silently return a valid continuity measurement" );
 }
 
+void checkFaceStageAudit()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    fluidField2 baseline{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    fluidField2 monitored{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    fluidShapeObstacle2 circle{};
+    circle.geometry = circle2{ {}, 0.65f };
+    circle.transform.position = { 0.0f, 0.0f };
+    circle.center = circle.transform.position;
+    std::array<fluidObstacleForce2, 1> baselineFeedback{};
+    std::array<fluidObstacleForce2, 1> monitoredFeedback{};
+    for( fluidField2* field : { &baseline, &monitored } )
+    {
+        field->setCutCellProjectionEnabled( true );
+        field->addVelocity( { -1.0f, 0.0f }, { 1.5f, 0.3f }, 1.5f );
+    }
+    monitored.setFaceStageAuditTarget( 12, 8, false );
+    baseline.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), baselineFeedback );
+    monitored.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), monitoredFeedback );
+    const auto& trace = monitored.getFaceStageAudit();
+    const vec2 face = monitored.getOrigin() + monitored.getCellSize() * vec2{ 12.5f, 8.0f };
+    check( trace.valid && !trace.isU && trace.x == 12 && trace.y == 8 &&
+        std::isfinite( trace.beforeGeometry ) && std::isfinite( trace.afterRemap ) &&
+        std::isfinite( trace.afterBoundary ) && std::isfinite( trace.afterAdvection ) &&
+        std::isfinite( trace.afterPressure ) &&
+        close( trace.openFraction, monitored.getVFaceOpenFraction( 12, 8 ) ) &&
+        close( trace.afterPressure, monitored.sampleVelocity( face ).y, 1.0e-5f ),
+        "opt-in stage audit must observe the selected face through the whole Fluid step" );
+    check( !baseline.getFaceStageAudit().valid &&
+        Length( baseline.getFluidMomentum() - monitored.getFluidMomentum() ) < 1.0e-6f &&
+        close( baseline.getFlowAudit( dt ).maxFluidFaceSpeed,
+            monitored.getFlowAudit( dt ).maxFluidFaceSpeed, 1.0e-6f ),
+        "face stage audit must not perturb default fluid physics" );
+    monitored.setFaceStageAuditTarget( -1, -1, false );
+    monitored.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ), monitoredFeedback );
+    check( !monitored.getFaceStageAudit().valid, "disabled stage audit must not retain stale data" );
+}
+
 void checkStepTimingProfiler()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -4079,6 +4117,7 @@ int main()
 {
     checkBoundsAndSampling();
     checkLiveFlowAudit();
+    checkFaceStageAudit();
     checkStepTimingProfiler();
     checkPressureProjection();
     checkCircleSolidBoundary();

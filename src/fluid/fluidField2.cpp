@@ -2558,11 +2558,32 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         sectionStarted = now;
     };
 
+    faceStageAudit_ = {};
+    const bool auditFace = faceStageAuditEnabled_ && cutCellProjectionEnabled_;
+    const auto readAuditFace = [&]() noexcept
+    {
+        return faceStageAuditIsU_
+            ? u_[uIndex( faceStageAuditX_, faceStageAuditY_ )]
+            : v_[vIndex( faceStageAuditX_, faceStageAuditY_ )];
+    };
+    if( auditFace )
+    {
+        faceStageAudit_.valid = true;
+        faceStageAudit_.isU = faceStageAuditIsU_;
+        faceStageAudit_.x = faceStageAuditX_;
+        faceStageAudit_.y = faceStageAuditY_;
+        faceStageAudit_.beforeGeometry = readAuditFace();
+    }
+
     stepMomentum_.before = getFluidMomentum();
     record( stepTiming_.other );
     updateObstacles( obstacles );
     record( stepTiming_.occupancy );
     updateCutCellGeometry( obstacles );
+    if( auditFace )
+        faceStageAudit_.openFraction = faceStageAuditIsU_
+            ? cutCellUOpen( faceStageAuditX_, faceStageAuditY_ )
+            : cutCellVOpen( faceStageAuditX_, faceStageAuditY_ );
     record( stepTiming_.geometry );
     if( cutCellProjectionEnabled_ )
     {
@@ -2572,10 +2593,12 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     else sweptFaceFlux_ = {};
     record( stepTiming_.swept );
     remapExposedFaces();
+    if( auditFace ) faceStageAudit_.afterRemap = readAuditFace();
     record( stepTiming_.remap );
     stepMomentum_.afterObstacles = getFluidMomentum();
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
     else applySolidBoundaries( obstacles );
+    if( auditFace ) faceStageAudit_.afterBoundary = readAuditFace();
 
     advectionStats_ = {};
     advectionStats_.conservative = conservativeAdvectionEnabled_;
@@ -2610,6 +2633,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     record( stepTiming_.advection );
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
     else applySolidBoundaries( obstacles );
+    if( auditFace ) faceStageAudit_.afterAdvection = readAuditFace();
     advectionStats_.after = getAdvectionFaceMomentum();
     stepMomentum_.afterAdvection = getFluidMomentum();
     record( stepTiming_.boundaries );
@@ -2624,6 +2648,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
     }
     stepMomentum_.afterPressure = getFluidMomentum();
+    if( auditFace ) faceStageAudit_.afterPressure = readAuditFace();
     record( stepTiming_.pressure );
     transportTracer( timeStep );
     record( stepTiming_.tracer );
