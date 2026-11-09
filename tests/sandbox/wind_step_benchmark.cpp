@@ -42,9 +42,11 @@ struct summary
     int failedFrames = 0;
     int analyticFrames = 0;
     int validFrames = 0;
+    double warmStartGuessRatio = 0.0;
 };
 
-summary measure( float h, int fluidSubsteps, bool cached, bool active, bool schurCached )
+summary measure( float h, int fluidSubsteps, bool cached, bool active, bool schurCached,
+    bool warmStartProbe = false )
 {
     // Run the real sandbox World/Fluid interleave (including rigid force feedback,
     // drag sampling, and World::Step). No synthetic obstacle trajectory or snapshots.
@@ -57,6 +59,7 @@ summary measure( float h, int fluidSubsteps, bool cached, bool active, bool schu
     scene.setWindCachedIc0Enabled( cached );
     scene.setWindActiveIc0SweepEnabled( active );
     scene.setWindCachedSchurEdgesEnabled( schurCached );
+    scene.setWindPressureWarmStartProbeEnabled( warmStartProbe );
     scene.setWindFluidSubstepCount( fluidSubsteps );
     scene.setWindStepProfilingEnabled( true );
     scene.setWindSourceStrength( 8.0f );
@@ -118,6 +121,15 @@ summary measure( float h, int fluidSubsteps, bool cached, bool active, bool schu
     pcg.preconditioner = get( []( const auto& s ) { return s.pcg.preconditioner; } );
     pcg.ic0Forward = get( []( const auto& s ) { return s.pcg.ic0Forward; } );
     pcg.ic0Backward = get( []( const auto& s ) { return s.pcg.ic0Backward; } );
+    pcg.warmStartRhsSquared = get( []( const auto& s ) { return s.pcg.warmStartRhsSquared; } );
+    pcg.warmStartGuessSquared = get( []( const auto& s ) { return s.pcg.warmStartGuessSquared; } );
+    pcg.warmStartProbes = static_cast<int>(
+        get( []( const auto& s ) { return s.pcg.warmStartProbes; } ) );
+    stats.warmStartGuessRatio = get( []( const auto& s )
+    {
+        return s.pcg.warmStartRhsSquared > 0.0
+            ? std::sqrt( s.pcg.warmStartGuessSquared / s.pcg.warmStartRhsSquared ) : 0.0;
+    } );
     pcg.vector = get( []( const auto& s ) { return s.pcg.vector; } );
     pcg.validation = get( []( const auto& s ) { return s.pcg.validation; } );
     pcg.output = get( []( const auto& s ) { return s.pcg.output; } );
@@ -138,28 +150,33 @@ int main( int argc, char** argv )
     bool reference = false;
     bool dense = false;
     bool schurReference = false;
+    bool warmStartProbe = false;
     for( int i = 1; i < argc; ++i )
     {
         csv |= std::string_view( argv[i] ) == "--csv";
         reference |= std::string_view( argv[i] ) == "--ic0-reference";
         dense |= std::string_view( argv[i] ) == "--ic0-dense";
         schurReference |= std::string_view( argv[i] ) == "--schur-reference";
+        warmStartProbe |= std::string_view( argv[i] ) == "--pressure-reuse-probe";
     }
+    csv |= warmStartProbe;
     const char* ic0Mode = reference ? "reference" : dense ? "dense" : "active";
     const bool schurCached = !reference && !dense && !schurReference;
     if( csv )
-        std::puts( "cell_m,world_substeps,fluid_substeps,frames,pcg_converged_frames,pcg_failed_frames,analytic_frames,fluid_coupling_ms,world_ms,field_ms,mask_ms,geometry_ms,swept_ms,remap_ms,boundary_ms,advection_ms,pressure_ms,tracer_ms,other_ms,"
+        std::printf( "%s%s\n",
+            "cell_m,world_substeps,fluid_substeps,frames,pcg_converged_frames,pcg_failed_frames,analytic_frames,fluid_coupling_ms,world_ms,field_ms,mask_ms,geometry_ms,swept_ms,remap_ms,boundary_ms,advection_ms,pressure_ms,tracer_ms,other_ms,"
             "schur_total_ms,schur_assembly_ms,schur_ic0_ms,schur_operator_ms,"
             "schur_preconditioner_ms,schur_vector_ms,schur_validation_ms,schur_output_ms,"
             "operator_calls,preconditioner_calls,ic0_mode,schur_mode,cached_laplacian_edges,"
-            "schur_ic0_forward_ms,schur_ic0_backward_ms" );
+            "schur_ic0_forward_ms,schur_ic0_backward_ms",
+            warmStartProbe ? ",pressure_guess_ratio,pressure_probe_count" : "" );
     else
         std::puts( "Wind sandbox: actual World/Fluid interleaving, 8 World substeps, 12 measured frames after 4 warmup frames; medians per frame; informational only." );
 
     for( float h : { 0.5f, 0.25f } )
         for( int steps : { 1, 2, 4, 8 } )
         {
-            const summary stats = measure( h, steps, !reference, !dense, schurCached );
+            const summary stats = measure( h, steps, !reference, !dense, schurCached, warmStartProbe );
             const auto& p = stats.medians.phases;
             const auto& pcg = stats.medians.pcg;
             if( csv )
@@ -169,12 +186,15 @@ int main( int argc, char** argv )
                     stats.failedFrames, stats.analyticFrames, stats.medians.fluid, stats.medians.world,
                     p.total, p.occupancy, p.geometry, p.swept, p.remap, p.boundaries,
                     p.advection, p.pressure, p.tracer, p.other );
-                std::printf( ",%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d,%s,%s,%d,%.4f,%.4f\n",
+                std::printf( ",%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d,%s,%s,%d,%.4f,%.4f",
                     pcg.total, pcg.assembly, pcg.factorization, pcg.multiply, pcg.preconditioner,
                     pcg.vector, pcg.validation, pcg.output,
                     pcg.matrixProducts, pcg.preconditionerApplications,
                     ic0Mode, schurCached ? "cached" : "reference", pcg.cachedLaplacianEdges,
                     pcg.ic0Forward, pcg.ic0Backward );
+                if( warmStartProbe )
+                    std::printf( ",%.6f,%d", stats.warmStartGuessRatio, pcg.warmStartProbes );
+                std::putchar( '\n' );
             }
             else
                 std::printf( "h=%.2f World=%d Fluid=%d: field %.3f ms, pressure %.3f ms, "

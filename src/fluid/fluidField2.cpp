@@ -4162,6 +4162,45 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     direction.assign( rhs.size(), 0.0 );
     product.assign( rhs.size(), 0.0 );
 
+    // Diagnostic only: evaluate the previous converged pressure on the *new*
+    // operator and RHS before the cold-start solve. The normal PCG still starts
+    // with x=0, residual=rhs. This probe never changes the pressure solution.
+    if( profile && cutCell && coupledPressureWarmStartProbeEnabled_ )
+    {
+        bool validGuess = true;
+        for( std::size_t i = 0; i < rhs.size(); ++i )
+        {
+            if( cellFluidFraction_[i] <= 0.0f ) continue;
+            if( !std::isfinite( pressure_[i] ) )
+            {
+                validGuess = false;
+                break;
+            }
+            x[i] = static_cast<double>( pressure_[i] );
+        }
+        if( validGuess )
+        {
+            multiply( x, product );
+            double rhsSquared = 0.0;
+            double guessSquared = 0.0;
+            for( std::size_t i = 0; i < rhs.size(); ++i )
+            {
+                if( cellFluidFraction_[i] <= 0.0f ) continue;
+                const double error = rhs[i] - product[i];
+                rhsSquared += rhs[i] * rhs[i];
+                guessSquared += error * error;
+            }
+            if( std::isfinite( rhsSquared ) && std::isfinite( guessSquared ) )
+            {
+                timing.warmStartRhsSquared += rhsSquared;
+                timing.warmStartGuessSquared += guessSquared;
+                ++timing.warmStartProbes;
+            }
+        }
+        std::fill( x.begin(), x.end(), 0.0 );
+        std::fill( product.begin(), product.end(), 0.0 );
+    }
+
     // Zero-fill incomplete LDL^T on the 5-point cut-cell Laplacian plus the
     // existing diagonal body Schur approximation. The full A = L + B M^-1 B^T
     // stays unchanged in multiply(), so this cannot hide the true residual.

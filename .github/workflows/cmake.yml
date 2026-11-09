@@ -205,6 +205,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --csv
 
+      # Evaluate the previous pressure against the *new* Schur system without
+      # modifying PCG initial guesses; measure residual ratio over 1/2/4/8 steps.
+      - name: Probe previous pressure as potential PCG initial guess (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --pressure-reuse-probe
+
       # Identical World/Fluid scene using original on-the-fly IC(0) sweeps.
       # Compare with the previous cached run on this same Windows runner.
       - name: Sample Wind reference IC0 sweep (Windows Release, informational)

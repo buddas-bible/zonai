@@ -3864,6 +3864,74 @@ void checkSweptGeometryCorrection()
         "clear must remove correction diagnostics while preserving experimental setting" );
 }
 
+void checkPreviousPressureResidualProbe()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    for( float h : { 0.5f, 0.25f } )
+    {
+        std::array<fluidShapeObstacle2, 2> bodies{{
+            { circle2{ {}, 0.58f }, { { -0.21f, -0.18f }, {} },
+                { -0.21f, -0.18f }, { 0.95f, -0.30f }, 0.70f, 0.35f, 1.10f },
+            { circle2{ {}, 0.58f }, { { 0.26f, 0.19f }, {} },
+                { 0.26f, 0.19f }, { -0.65f, 0.75f }, -0.55f, 0.80f, 0.70f }
+        }};
+        fluidField2 reference{ static_cast<int>( 12.0f / h ),
+            static_cast<int>( 8.0f / h ), h, { -6.0f, -4.0f } };
+        fluidField2 probe{ static_cast<int>( 12.0f / h ),
+            static_cast<int>( 8.0f / h ), h, { -6.0f, -4.0f } };
+        for( fluidField2* field : { &reference, &probe } )
+        {
+            field->setCutCellProjectionEnabled( true );
+            field->setCutCellCoupledProjectionEnabled( true );
+            field->setDisjointAnalyticCutCellEnabled( true );
+            field->setCutCellPressureTimingEnabled( true );
+            field->addVelocity( { -1.2f, 0.14f }, { 1.4f, -0.27f }, 1.6f );
+        }
+        probe.setCoupledPressureWarmStartProbeEnabled( true );
+        std::array<fluidObstacleForce2, 2> baseForces{}, probeForces{};
+        for( int frame = 0; frame < 4; ++frame )
+        {
+            reference.step( dt, bodies, baseForces, 200 );
+            probe.step( dt, bodies, probeForces, 200 );
+            const auto& a = reference.getCutCellPressure();
+            const auto& b = probe.getCutCellPressure();
+            const auto& timing = b.coupledTiming;
+            check( a.usedCoupledProjection && b.usedCoupledProjection &&
+                a.coupledIterations == b.coupledIterations &&
+                a.coupledRelativeResidual == b.coupledRelativeResidual &&
+                a.predictedContinuityRms == b.predictedContinuityRms &&
+                a.pressureResidual == b.pressureResidual &&
+                a.coupledTiming.warmStartProbes == 0 &&
+                timing.warmStartProbes == 1 &&
+                std::isfinite( timing.warmStartRhsSquared ) &&
+                std::isfinite( timing.warmStartGuessSquared ) &&
+                timing.warmStartRhsSquared > 0.0 && timing.warmStartGuessSquared >= 0.0,
+                "previous-pressure diagnostic must not change the cold PCG result" );
+            if( frame == 0 )
+                check( timing.warmStartRhsSquared == timing.warmStartGuessSquared,
+                    "first pressure probe must equal the zero-initial-guess residual" );
+            for( std::size_t i = 0; i < bodies.size(); ++i )
+                check( baseForces[i].force.x == probeForces[i].force.x &&
+                    baseForces[i].force.y == probeForces[i].force.y &&
+                    baseForces[i].torque == probeForces[i].torque,
+                    "previous-pressure diagnostic must preserve each rigid body's feedback" );
+            const vec2 aMomentum = reference.getFluidMomentum();
+            const vec2 bMomentum = probe.getFluidMomentum();
+            check( aMomentum.x == bMomentum.x && aMomentum.y == bMomentum.y,
+                "previous-pressure diagnostic must not alter fluid momentum" );
+            for( fluidShapeObstacle2& body : bodies )
+            {
+                body.transform.position += dt * body.linearVelocity;
+                body.center = body.transform.position;
+            }
+        }
+        probe.clear();
+        check( probe.isCoupledPressureWarmStartProbeEnabled() &&
+            probe.getCutCellPressure().coupledTiming.warmStartProbes == 0,
+            "clear must keep pressure probe selection without stale diagnostics" );
+    }
+}
+
 } // namespace
 
 int main()
@@ -3896,6 +3964,7 @@ int main()
     checkAnalyticPartialCircleUnion();
     checkAnalyticCutCellPressureImpulseBudget();
     checkAnalyticCutCellPreconditionerComparison();
+    checkPreviousPressureResidualProbe();
     checkCachedIc0Differential();
     checkActiveCellIc0SweepDifferential();
     checkActiveCellIc0SweepDifferential( true );
