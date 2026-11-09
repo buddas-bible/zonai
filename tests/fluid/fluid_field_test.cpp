@@ -40,6 +40,11 @@ void checkLiveFlowAudit()
     check( driven.maxFluidFaceSpeed > 0.0f && driven.continuityRms > 0.0f &&
         driven.nonFiniteFluidFaces == 0,
         "live audit must detect an unprojected local velocity source" );
+    check( driven.maxFaceX >= 0 && driven.maxFaceY >= 0 &&
+        driven.maxFaceOpenFraction == 1.0f &&
+        std::abs( driven.maxFaceVelocity ) == driven.maxFluidFaceSpeed &&
+        close( driven.maxOpenWeightedFaceSpeed, driven.maxFluidFaceSpeed ),
+        "unobstructed peak face must report its index, full opening and signed speed" );
     const vec2 momentum = field.getFluidMomentum();
     const auto repeat = field.getFlowAudit( dt );
     check( repeat.maxFluidFaceSpeed == driven.maxFluidFaceSpeed &&
@@ -58,6 +63,10 @@ void checkLiveFlowAudit()
         std::isfinite( after.maxFluidFaceSpeed ) && after.nonFiniteFluidFaces == 0 &&
         std::abs( after.continuityRms - field.getCutCellPressure().divergenceAfter ) < 1.0e-4f,
         "Cut-cell live audit must use its volume-aware continuity diagnostic" );
+    check( after.maxFaceOpenFraction > 0.0f && after.maxFaceOpenFraction <= 1.0f &&
+        after.maxFaceX >= 0 && after.maxFaceY >= 0 &&
+        after.maxOpenWeightedFaceSpeed <= after.maxFluidFaceSpeed + 1.0e-6f,
+        "Cut-cell peak face must be open and weighted velocity must not exceed raw speed" );
     check( std::isnan( field.getFlowAudit( 0.0f ).continuityRms ),
         "invalid time step must not silently return a valid continuity measurement" );
 }
