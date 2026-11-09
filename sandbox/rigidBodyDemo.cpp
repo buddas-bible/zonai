@@ -420,6 +420,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 if( beforeDrag.maxFluidFaceSpeed > windCouplingAudit_.peakBeforeDrag.maxFluidFaceSpeed )
                 {
                     windCouplingAudit_.peakBeforeDrag = beforeDrag;
+                    windCouplingAudit_.peakFaceStages = windField_->getFaceStageAudit();
                     windCouplingAudit_.peakFluidSubstep = windSubstep;
 
                     // Inspect the existing bilinear sampler at the exact

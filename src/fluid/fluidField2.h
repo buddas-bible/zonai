@@ -340,6 +340,52 @@ struct fluidFlowAudit2
     int nonFiniteFluidFaces = 0;
 };
 
+// A pressure row local to one fluid cell; the Schur term includes every
+// moving Body response affecting that row. Values only exist for an opt-in
+// stage trace; no solver values are modified.
+struct fluidFaceCellPressureAudit2
+{
+    float westOpen = 0.0f;
+    float eastOpen = 0.0f;
+    float southOpen = 0.0f;
+    float northOpen = 0.0f;
+    double rhs = 0.0;
+    double laplacian = 0.0;
+    double schur = 0.0;
+    double rowResidual = 0.0;
+    double finalOpenFlux = 0.0; // Net open face flux in face-speed units.
+    double rawContinuity = 0.0; // Includes swept volume rate, not region mean.
+};
+
+// Selected staggered face velocity at successive Fluid stages.
+// Read-only and opt-in: this describes one face, not a global maximum.
+// Before geometry uses the previous snapshot; all later values use the
+// current face opening. A blocked face can contain solid boundary velocity.
+struct fluidFaceStageAudit2
+{
+    bool valid = false;
+    bool isU = true;
+    int x = -1;
+    int y = -1;
+    float openFraction = 0.0f;
+    float beforeGeometry = 0.0f;
+    float afterRemap = 0.0f;
+    float afterBoundary = 0.0f;
+    float afterAdvection = 0.0f;
+    float afterPressure = 0.0f;
+    // The two cells sharing the monitored face. These are sampled after the
+    // pressure solve and never change pressure or the fluid boundary.
+    float lowerCellFraction = 0.0f;
+    float upperCellFraction = 0.0f;
+    float lowerVolumeRate = 0.0f;
+    float upperVolumeRate = 0.0f;
+    float lowerPressure = 0.0f;
+    float upperPressure = 0.0f;
+    float predictedPressureDelta = 0.0f;
+    fluidFaceCellPressureAudit2 lowerRow{};
+    fluidFaceCellPressureAudit2 upperRow{};
+};
+
 // 마지막 유효 Fluid Step의 경과시간 분해(ms), 계측 옵션을 켠 경우에만 유효.
 // wall-clock 계측이며 World::Step 및 World에서 전달한 drag/힘 처리 시간을 포함하지 않는다.
 struct fluidStepTiming2
@@ -396,6 +442,18 @@ public:
         if( !enabled ) stepTiming_ = {};
     }
     [[nodiscard]] bool isStepTimingEnabled() const noexcept { return stepTimingEnabled_; }
+
+    // Opt-in single interior MAC-face stage trace; negative coordinates disable.
+    // Does not change fluid velocities, projection, or geometry.
+    void setFaceStageAuditTarget( int x, int y, bool isU ) noexcept
+    {
+        faceStageAuditEnabled_ = isU ? x > 0 && x < width_ && y >= 0 && y < height_
+            : x >= 0 && x < width_ && y > 0 && y < height_;
+        faceStageAuditX_ = x;
+        faceStageAuditY_ = y;
+        faceStageAuditIsU_ = isU;
+        faceStageAudit_ = {};
+    }
 
     // 장애물 수/구성이나 이산 기하 규칙이 바뀌면 첫 새 snapshot을
     // 이전 체적과 차분하지 않는다. 유체 속도·Tracer는 초기화하지 않음.
@@ -695,6 +753,7 @@ public:
     // Explicit diagnostic: reads the current field, including changes after Step.
     // Not called on the normal simulation path; timeStep must be finite and positive.
     [[nodiscard]] fluidFlowAudit2 getFlowAudit( float timeStep ) const noexcept;
+    [[nodiscard]] const fluidFaceStageAudit2& getFaceStageAudit() const noexcept { return faceStageAudit_; }
 
     // 내부 fluid-fluid MAC face 속도를 dual-cell mass로 적분한 운동량.
     // solid 경계의 지정 속도 및 외곽 wall face는 제외한다.
@@ -928,6 +987,12 @@ private:
     fluidStepMomentum2 stepMomentum_{};
     fluidStepTiming2 stepTiming_{};
     bool stepTimingEnabled_ = false;
+    // Diagnostics must remain OFF in regular simulation.
+    bool faceStageAuditEnabled_ = false;
+    bool faceStageAuditIsU_ = true;
+    int faceStageAuditX_ = -1;
+    int faceStageAuditY_ = -1;
+    fluidFaceStageAudit2 faceStageAudit_{};
 #pragma endregion Data
 };
 

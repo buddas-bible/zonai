@@ -2558,11 +2558,32 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         sectionStarted = now;
     };
 
+    faceStageAudit_ = {};
+    const bool auditFace = faceStageAuditEnabled_ && cutCellProjectionEnabled_;
+    const auto readAuditFace = [&]() noexcept
+    {
+        return faceStageAuditIsU_
+            ? u_[uIndex( faceStageAuditX_, faceStageAuditY_ )]
+            : v_[vIndex( faceStageAuditX_, faceStageAuditY_ )];
+    };
+    if( auditFace )
+    {
+        faceStageAudit_.valid = true;
+        faceStageAudit_.isU = faceStageAuditIsU_;
+        faceStageAudit_.x = faceStageAuditX_;
+        faceStageAudit_.y = faceStageAuditY_;
+        faceStageAudit_.beforeGeometry = readAuditFace();
+    }
+
     stepMomentum_.before = getFluidMomentum();
     record( stepTiming_.other );
     updateObstacles( obstacles );
     record( stepTiming_.occupancy );
     updateCutCellGeometry( obstacles );
+    if( auditFace )
+        faceStageAudit_.openFraction = faceStageAuditIsU_
+            ? cutCellUOpen( faceStageAuditX_, faceStageAuditY_ )
+            : cutCellVOpen( faceStageAuditX_, faceStageAuditY_ );
     record( stepTiming_.geometry );
     if( cutCellProjectionEnabled_ )
     {
@@ -2572,10 +2593,12 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     else sweptFaceFlux_ = {};
     record( stepTiming_.swept );
     remapExposedFaces();
+    if( auditFace ) faceStageAudit_.afterRemap = readAuditFace();
     record( stepTiming_.remap );
     stepMomentum_.afterObstacles = getFluidMomentum();
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
     else applySolidBoundaries( obstacles );
+    if( auditFace ) faceStageAudit_.afterBoundary = readAuditFace();
 
     advectionStats_ = {};
     advectionStats_.conservative = conservativeAdvectionEnabled_;
@@ -2610,6 +2633,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     record( stepTiming_.advection );
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
     else applySolidBoundaries( obstacles );
+    if( auditFace ) faceStageAudit_.afterAdvection = readAuditFace();
     advectionStats_.after = getAdvectionFaceMomentum();
     stepMomentum_.afterAdvection = getFluidMomentum();
     record( stepTiming_.boundaries );
@@ -2624,6 +2648,82 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
     }
     stepMomentum_.afterPressure = getFluidMomentum();
+    if( auditFace )
+    {
+        faceStageAudit_.afterPressure = readAuditFace();
+        const int x = faceStageAuditX_;
+        const int y = faceStageAuditY_;
+        const int lower = faceStageAuditIsU_ ? cellIndex( x - 1, y ) : cellIndex( x, y - 1 );
+        const int upper = cellIndex( x, y );
+        faceStageAudit_.lowerCellFraction = cellFluidFraction_[lower];
+        faceStageAudit_.upperCellFraction = cellFluidFraction_[upper];
+        faceStageAudit_.lowerVolumeRate = cutCellVolumeRate_[lower];
+        faceStageAudit_.upperVolumeRate = cutCellVolumeRate_[upper];
+        faceStageAudit_.lowerPressure = pressure_[lower];
+        faceStageAudit_.upperPressure = pressure_[upper];
+        // The open-face correction in projectCutCell is -dt/h * (pUpper-pLower).
+        // Closed faces have boundary velocity and are not pressure-corrected.
+        if( faceStageAudit_.openFraction > 0.0f )
+            faceStageAudit_.predictedPressureDelta = timeStep * ( 1.0f / cellSize_ ) *
+                ( pressure_[lower] - pressure_[upper] );
+
+        // Mirror the final pressure operator row without writing to scratch,
+        // pressure, velocities or feedback. Only active for a selected face.
+        std::vector<coupledBodyResponse> responses;
+        if( cutCellPressure_.usedCoupledProjection )
+        {
+            responses.resize( obstacles.size() );
+            for( const coupledPressureFace& face : coupledPressureScratch_.faces )
+            {
+                coupledBodyResponse& response = responses[face.owner];
+                const double p = pressure_[face.cell];
+                response.fx += p * face.fx;
+                response.fy += p * face.fy;
+                response.torque += p * face.torque;
+            }
+        }
+        const auto inspect = [&]( int cell ) -> fluidFaceCellPressureAudit2
+        {
+            fluidFaceCellPressureAudit2 row{};
+            const int cx = cell % width_;
+            const int cy = cell / width_;
+            row.westOpen = cutCellUOpen( cx, cy );
+            row.eastOpen = cutCellUOpen( cx + 1, cy );
+            row.southOpen = cutCellVOpen( cx, cy );
+            row.northOpen = cutCellVOpen( cx, cy + 1 );
+            const double p = pressure_[cell];
+            if( row.westOpen > 0.0f )
+                row.laplacian += row.westOpen * ( p - pressure_[cellIndex( cx - 1, cy )] );
+            if( row.eastOpen > 0.0f )
+                row.laplacian += row.eastOpen * ( p - pressure_[cellIndex( cx + 1, cy )] );
+            if( row.southOpen > 0.0f )
+                row.laplacian += row.southOpen * ( p - pressure_[cellIndex( cx, cy - 1 )] );
+            if( row.northOpen > 0.0f )
+                row.laplacian += row.northOpen * ( p - pressure_[cellIndex( cx, cy + 1 )] );
+            if( cutCellPressure_.usedCoupledProjection )
+                for( const coupledPressureFace& face : coupledPressureScratch_.faces )
+                {
+                    if( face.cell != cell ) continue;
+                    const fluidShapeObstacle2& obstacle = obstacles[face.owner];
+                    const coupledBodyResponse& response = responses[face.owner];
+                    row.schur += static_cast<double>( obstacle.inverseMass ) *
+                        ( face.fx * response.fx + face.fy * response.fy ) +
+                        static_cast<double>( obstacle.inverseInertia ) * face.torque * response.torque;
+                }
+            row.rhs = -static_cast<double>( divergence_[cell] ) *
+                ( static_cast<double>( cellSize_ ) * cellSize_ / timeStep );
+            row.rowResidual = row.rhs - row.laplacian - row.schur;
+            row.finalOpenFlux = static_cast<double>( row.eastOpen ) * u_[uIndex( cx + 1, cy )] -
+                static_cast<double>( row.westOpen ) * u_[uIndex( cx, cy )] +
+                static_cast<double>( row.northOpen ) * v_[vIndex( cx, cy + 1 )] -
+                static_cast<double>( row.southOpen ) * v_[vIndex( cx, cy )];
+            row.rawContinuity = row.finalOpenFlux / cellSize_ +
+                static_cast<double>( cutCellVolumeRate_[cell] ) / timeStep;
+            return row;
+        };
+        faceStageAudit_.lowerRow = inspect( lower );
+        faceStageAudit_.upperRow = inspect( upper );
+    }
     record( stepTiming_.pressure );
     transportTracer( timeStep );
     record( stepTiming_.tracer );
