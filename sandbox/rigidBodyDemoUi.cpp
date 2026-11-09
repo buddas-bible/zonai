@@ -976,6 +976,12 @@ void rigidBodyDemoUi::drawExperimentControls()
         bool conservative = isWindConservativeAdvectionEnabled();
         if( ImGui::Checkbox( "보존형 MAC 이류 (실험)###WindConservativeAdvection", &conservative ) )
             setWindConservativeAdvectionEnabled( conservative );
+        bool apertureAware = isWindApertureAwareSamplingEnabled();
+        ImGui::BeginDisabled( !isWindCutCellProjectionEnabled() );
+        if( ImGui::Checkbox( "Cut-cell 개방율 가중 속도 보간 (실험)###WindApertureSample", &apertureAware ) )
+            setWindApertureAwareSamplingEnabled( apertureAware );
+        ImGui::EndDisabled();
+        ImGui::TextDisabled( "속도 쿼리와 Semi-Lagrangian 이류에만 적용. 압력/유량은 그대로입니다." );
         if( ImGui::Button( "이류 비교 프리셋 (와류 + 외력/강체 OFF)###WindAdvectionTrial" ) )
             beginWindAdvectionTrial();
         if( ImGui::Button( "현재 흐름에 와류 추가###WindVortex" ) ) addWindVortex();
