@@ -186,7 +186,7 @@ void auditCoupling()
                         const vec2 speed = scene.getWorld().GetBodyLinearVelocity( body );
                         std::printf( "%.2f,%d,%d,%d,%.1f,%d,%d,%.7g,%.7g,%.7g,"
                             "%.7g,%.7g,%.7g,%d,%d,%d,%.7g,%d,%.7g,%.7g,%.7g,%.7g,"
-                            "%.7g,%.7g,%.4f,%.4f\\n",
+                            "%.7g,%.7g,%.4f,%.4f\n",
                             h, worldSubsteps, steps, coupled ? 1 : 0, drag,
                             frame - warmupFrames, scene.getWindCouplingSteps(),
                             audit.maxContinuityBeforeDrag, audit.maxContinuityAfterDrag,
