@@ -12,13 +12,15 @@
 - Warm Start 기본값: **OFF**, 실험으로만 설정 가능. Warm 실패 후 같은 solve에서 Cold 재시도 경로는 **미구현**.
 - 기능 개발 상태: 기존 MAC Wind + cut-cell/analytic Schur PCG + 다수 Joint/Ragdoll/자동차/Chain/Spline 데모 구현. Water 자유 수면, 부력/수면 항력, 침식/퇴적, Cloth/Soft Body, GPU Fluid는 이 로드맵상 **미착수**.
 - 이번 로드맵 변경 범위: **문서만**. 코드, 기본 연성 옵션, 엔진 런타임/성능을 바꾸지 않는다.
-- **진행 중:** [PR #319](https://github.com/buddas-bible/zonai/pull/319), `test/fluid-coupling-spike-audit`는 S0a의 **첫 계측 하위 작업**. Side-effect-free Cut-cell/Drag 진단, 고정 cadence 실험과 CSV, 회귀 테스트를 추가했으나 **Draft, 병합 전, 첫 CI 42571092635는 Windows 전용 단계의 Ubuntu 실행 설정 오류로 실패(물리 테스트 112/112 통과). 수정 CI **42571477840**는 Ubuntu 전체 성공, Windows 검증 중**. 상세 `docs/fluid-coupling-audit.md`는 PR #319 브랜치에서 확인.
+- **S0 1차 완료:** [PR #319](https://github.com/buddas-bible/zonai/pull/319) merged, master SHA **5842f8c58b3e3fbceff34747c9d5b5464db62f90**, Ubuntu 112/112, Windows Debug 115/115, Release 52/52 passed (CI 42571477840). Baseline flow/Drag diagnostics and matched cadence CSV landed.
+- **실측 발견:** Windows Release h=0.25m, World 8/Fluid 4, TwoWay ON/Drag 0의 측정 frame 6에서 열린 MAC face 최대 속도 **28.13385m/s** 단일 spike. 앞뒤 frame 0.595/0.712m/s; PCG **수렴**, iterations 61 (보통 46~47), 상대 잔차 8.20e-6, Body 속도 연속. 즉 Drag 주입이 **같은 프레임의** 해당 급등 원인은 아님. 확정 원인은 미상.
+- **S0 2차 진행 중:** [PR #320](https://github.com/buddas-bible/zonai/pull/320), `test/fluid-cutcell-velocity-spike-localization` Draft: 열린 U/V face 위치·개방율·signed 속도·open-weighted speed와 실제 Fluid substep 기록. CI run **42585749190** 검증 진행 중. 고립된 아주 얇은 face인지 물리적으로 넓게 영향을 주는 흐름인지 구분한 뒤 다음 알고리즘 수정 판단.
 
 ## 1. 단계별 상태
 
 | 단계 | 상태 | 메모 |
 | --- | --- | --- |
-| S0 재현·진단 baseline | **진행 중 — PR #319 Draft** | 먼저 동일 시간 분할 + Drag 전후 진단, 실제 튐 원인 분리는 후속 |
+| S0 재현·진단 baseline | **1차 병합, 2차 PR #320 진행 중** | 28.13m/s 단일 유속 급등 재현, Cut-cell face 위치/개방율 조사 |
 | S1 Body별 4종 Interaction | 미착수 | 정책/수명 + Static/Kinematic/Compound Body |
 | S2 압력·Drag 수치 안정화 | 부분 기반 존재 | PCG/IC0/Warm Start 구현; Warm→Cold retry 미착수 |
 | S3 Wind + 돛·Joint 실험 | 미착수 | 기존 일반 Joint와 Wind를 새 gameplay scene으로 연결 |
@@ -35,9 +37,10 @@
 test/bench(fluid): isolate wind two-way coupling spikes at fixed step cadence
 
 ### 진행 상황과 범위 경계
-- PR #319은 **1차 계측**: World 8, Fluid 1/4, h=0.5/0.25, coupling ON/OFF, drag=0/3 (source ON), Windows Release 프레임별 CSV. 현재 물리 계산·기본 스케줄은 변경하지 않음.
-- 미완료: Fluid 2/8, Static 다수/경계에 걸친 장애물, Cut-cell swept mismatch 연관 분석, 압력 단계별 최대 속도 변화, 사용자 관찰한 이상 프레임의 실제 재현, 원인별 독립 해결 PR. PR #319이 통과하더라도 **S0 전체 완료로 표시하지 말 것**.
-- 다음 대화는 먼저 PR #319 수정 CI run **42571477840**의 테스트/Windows CSV를 확인하여 실패·스파이크를 분석하고 PR을 수정/유지/병합 판단한다.
+- PR #319 (1차 계측) **병합**: World 8, Fluid 1/4, h=0.5/0.25, coupling ON/OFF, drag=0/3 (source ON), Windows Release 프레임별 CSV. 기본 물리 계산과 스케줄은 변하지 않음.
+- PR #320 **Draft**: 28.13m/s 속도가 실제로 발생한 open U/V face index, opening, substep, area-weighted 속도 로깅. 아직 CI와 결과 평가 남음.
+- **S0 미완료**: Fluid 2/8 및 static 많은 장면, 경계 걸침, moving cut-cell swept mismatch 연관 분석, 국소 face velocity/시각 tracer 관계, 사용자 장면 장기 재현 및 알고리즘 원인 수정.
+- 새 대화의 첫 작업: PR #320 run 42585749190 Windows Release --coupling-spike-audit CSV의 **h=0.25 / Fluid=4 / coupled=1 / drag=0 / frame=6** 데이터를 확인하고, max face opening과 좌표를 근처 Body pose 및 이웃 face 흐름과 대조. 단일-frame 극단값을 clamp로 숨기지 않는다.
 
 ### 이번 PR에서 할 일
 1. 기존 Wind Sandbox World/Fluid의 호출 횟수와 입력을 동일하게 고정한 reference와 experiment scene을 구성.
@@ -81,4 +84,4 @@ test/bench(fluid): isolate wind two-way coupling spikes at fixed step cadence
 
 ## 5. 새 대화 시작 문장
 
-zonai 환경 물리 개발을 이어가자. docs/roadmaps/environment-status.md와 environment-simulation.md 및 진행 중인 PR #319를 읽고 최신 master/CI(run 42571092635) 상태를 확인해. PR #319의 Windows Release --coupling-spike-audit CSV와 테스트 결과를 먼저 분석하고, 실패를 수정하거나 원인 후보를 분리해. PR #319는 진단 첫 하위 작업일 뿐 S0 전체 완료는 아니다. 검증 결과와 다음 원자 작업을 상태 문서에 기록해.
+zonai 환경 물리 개발을 이어가자. GitHub buddas-bible/zonai에서 docs/roadmaps/environment-status.md와 environment-simulation.md, 병합된 PR #319 및 Draft PR #320의 최신 코드/CI를 확인해. PR #320의 Windows Release audit CSV에서 h=0.25m/Fluid=4/coupled ON/drag 0/recorded frame 6에 발생한 28.13385m/s peak의 U/V face 좌표·개방율·가중 속도를 확인하고 실제 원인을 좁혀라. PCG는 수렴했으며 해당 간격에 Drag가 없어 Drag 직접 원인으로 단정하지 말 것. 테스트와 stage status를 갱신하되 S0 전체 완료로 표시하지 말 것.
