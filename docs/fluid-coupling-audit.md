@@ -116,3 +116,23 @@ When every face is fully open, the code directly uses the legacy interpolator, m
 4. A large `v_f` can still exist on a nearly closed face. Correcting **the source of that pressure/geometry spike** and ensuring a consistent moving-wall velocity boundary are independent future investigations.
 5. The formulation is not automatically correct in wholly blocked or very low-support stencils, and does not guarantee pointwise monotonicity or conservation for semi-Lagrangian advection. Evaluate any change to gameplay force and visuals against these limitations.
 
+
+### Initial matched-scene findings (Windows Release CI 42594468337)
+
+Both platform jobs passed, including Ubuntu 112/112, Windows Debug 115/115, Windows Release 52/52. The initial `--aperture-sampling-differential` CSV captured 96 rows (8 scenarios, 12 frames). **At h=0.25m, Fluid=4, TwoWay ON, Drag=0**:
+
+| Measurement | Legacy sampler | Aperture sampler |
+| --- | ---: | ---: |
+| Maximum **raw face** speed over measured frames | 28.13385 m/s | 2.93254 m/s |
+| Frame of maximum | 6 | 6 |
+| Aperture of the respective peak face | 0.00006395081 | 0.0006971757 |
+| Maximum sampled adjacent-cell speed recorded at each scene's peak face | 14.17676 m/s | 2.93254 m/s |
+| Adjacent fluid fraction at each respective peak | 0.7617487 | **0.00000021755** |
+| PCG failures and nonfinite open faces | 0 | 0 |
+
+**Do not treat the apparent 14.18 → 2.93 sampled-speed comparison as proof of a pointwise interpolation improvement:** the respective peak neighboring cells are completely different in physical fluid occupancy, and the solvers' velocity advection and Body trajectories evolve independently. The lower raw face speed is encouraging, but it does **not** prove the pressure/geometry cause is fixed.
+
+In the 12 measured frames, the reported mean of instrumented fluid wall time was ~7.70ms for legacy and ~8.45ms for the trial in this case. The h=0.5/Drag=0 comparison was ~1.22ms vs ~1.56ms. These values include diagnostic work and runner scheduling effects; they indicate **a potential performance cost**, not authoritative performance improvement or a stable benchmark.
+
+**Follow-up added within the same PR:** CSV `same_field_pair_valid`, `same_field_legacy_sample`, `same_field_aware_sample`, `same_field_fluid_fraction` capture both interpolation policies at **the exact same stored MAC field, same Fluid substep and same adjacent cell** whenever the legacy mode is active and a neighboring cell has fluid fraction >=0.1. For the opt-in World scene the paired flag is false (no independent legacy query), so those fields must not be treated as measured pairs. This test isolates interpolation differences from pressure/Body trajectory changes, and its updated CI must be inspected before considering promotion.
+
