@@ -149,9 +149,9 @@ summary measure( float h, int fluidSubsteps, bool cached, bool active, bool schu
 
 // Per-frame trace, not a timing comparison: identical Fluid cadence for ON
 // and OFF, with the actual World/Fluid/Drag path used by the Sandbox.
-void auditCoupling()
+void auditCoupling( bool apertureTrial )
 {
-    std::puts( "cell_m,world_substeps,fluid_substeps,obstacle_coupling,drag,frame,"
+    std::puts( "cell_m,world_substeps,fluid_substeps,obstacle_coupling,drag,aperture_sampler,frame,"
         "actual_fluid_steps,pre_drag_continuity_rms,post_drag_continuity_rms,"
         "max_drag_continuity_increase,pre_drag_max_face_speed,post_drag_max_face_speed,"
         "max_drag_face_speed_increase,nonfinite_faces,pcg_status,pcg_iterations,"
@@ -160,12 +160,15 @@ void auditCoupling()
         "peak_face_x,peak_face_y,peak_face_open_fraction,peak_face_signed_velocity,"
         "peak_open_weighted_max_speed,peak_sampled_normal_velocity,"
         "peak_adjacent_cell_normal_speed,peak_adjacent_cell_fluid_fraction,"
-        "peak_face_flux_normal_velocity,fluid_ms,world_ms" );
+        "peak_face_flux_normal_velocity,same_field_pair_valid,same_field_legacy_sample,same_field_aware_sample,same_field_fluid_fraction,fluid_ms,world_ms" );
     for( float h : { 0.5f, 0.25f } )
         for( int steps : { 1, 4 } )
             for( bool coupled : { false, true } )
                 for( float drag : { 0.0f, 3.0f } )
+                    for( bool apertureAware : { false, true } )
                 {
+                    if( !apertureTrial && apertureAware ) continue;
+                    if( apertureTrial && ( steps != 4 || !coupled ) ) continue;
                     rigidBodyDemo scene{ demoKind::windFlow };
                     scene.configureWindField( static_cast<int>( 12.0f / h ),
                         static_cast<int>( 7.0f / h ), h );
@@ -174,6 +177,7 @@ void auditCoupling()
                     scene.setWindDisjointAnalyticEnabled( true );
                     scene.setWindFluidSubstepCount( steps );
                     scene.setWindCouplingAuditEnabled( true );
+                    scene.setWindApertureAwareSamplingEnabled( apertureAware );
                     scene.setWindObstacleCouplingEnabled( coupled );
                     scene.setWindSourceStrength( 8.0f );
                     scene.setWindDragCoefficient( drag );
@@ -189,11 +193,11 @@ void auditCoupling()
                         const auto& pressure = scene.getWindField()->getCutCellPressure();
                         const vec2 position = scene.getWorld().GetBodyTransform( body ).position;
                         const vec2 speed = scene.getWorld().GetBodyLinearVelocity( body );
-                        std::printf( "%.2f,%d,%d,%d,%.1f,%d,%d,%.7g,%.7g,%.7g,"
+                        std::printf( "%.2f,%d,%d,%d,%.1f,%d,%d,%d,%.7g,%.7g,%.7g,"
                             "%.7g,%.7g,%.7g,%d,%d,%d,%.7g,%d,%.7g,%.7g,%.7g,%.7g,"
-                            "%.7g,%.7g,%d,%d,%d,%d,%.7g,%.7g,%.7g,%.7g,%.7g,%.7g,%.7g,%.4f,%.4f\n",
+                            "%.7g,%.7g,%d,%d,%d,%d,%.7g,%.7g,%.7g,%.7g,%.7g,%.7g,%.7g,%d,%.7g,%.7g,%.7g,%.4f,%.4f\n",
                             h, worldSubsteps, steps, coupled ? 1 : 0, drag,
-                            frame - warmupFrames, scene.getWindCouplingSteps(),
+                            apertureAware ? 1 : 0, frame - warmupFrames, scene.getWindCouplingSteps(),
                             audit.maxContinuityBeforeDrag, audit.maxContinuityAfterDrag,
                             audit.maxContinuityIncreaseFromDrag,
                             audit.maxFaceSpeedBeforeDrag, audit.maxFaceSpeedAfterDrag,
@@ -210,6 +214,10 @@ void auditCoupling()
                             audit.peakSampledNormalVelocity, audit.peakAdjacentCellNormalSpeed,
                             audit.peakAdjacentCellFluidFraction,
                             peak.maxFaceVelocity * peak.maxFaceOpenFraction,
+                            audit.peakNearbyComparisonValid ? 1 : 0,
+                            audit.peakNearbyLegacyNormalVelocity,
+                            audit.peakNearbyAwareNormalVelocity,
+                            audit.peakNearbyFluidFraction,
                             scene.getWindFluidMilliseconds(), scene.getWindWorldMilliseconds() );
                     }
                 }
@@ -226,6 +234,7 @@ int main( int argc, char** argv )
     bool warmStartProbe = false;
     bool warmStartSweep = false;
     bool couplingAudit = false;
+    bool apertureTrial = false;
     for( int i = 1; i < argc; ++i )
     {
         csv |= std::string_view( argv[i] ) == "--csv";
@@ -235,8 +244,9 @@ int main( int argc, char** argv )
         warmStartProbe |= std::string_view( argv[i] ) == "--pressure-reuse-probe";
         warmStartSweep |= std::string_view( argv[i] ) == "--pcg-warmstart-sweep";
         couplingAudit |= std::string_view( argv[i] ) == "--coupling-spike-audit";
+        apertureTrial |= std::string_view( argv[i] ) == "--aperture-sampling-differential";
     }
-    if( couplingAudit ) { auditCoupling(); return 0; }
+    if( couplingAudit || apertureTrial ) { auditCoupling( apertureTrial ); return 0; }
     if( warmStartSweep )
     {
         std::puts( "cell_m,world_substeps,fluid_substeps,warm_start,frames,"

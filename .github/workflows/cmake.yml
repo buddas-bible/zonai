@@ -224,6 +224,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --coupling-spike-audit
 
+      # Optional Cut-cell interpolation differential against default sampler.
+      # These per-frame CSV rows are informational, not a numeric CI gate.
+      - name: Sample Wind aperture-aware interpolation (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --aperture-sampling-differential
+
       # Identical World/Fluid scene using original on-the-fly IC(0) sweeps.
       # Compare with the previous cached run on this same Windows runner.
       - name: Sample Wind reference IC0 sweep (Windows Release, informational)

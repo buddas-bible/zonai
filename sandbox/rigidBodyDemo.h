@@ -184,11 +184,17 @@ struct windCouplingAudit2
     float maxFaceSpeedIncreaseFromDrag = 0.0f;
     // Snapshot at the largest open-face speed before drag among Fluid substeps.
     fluidFlowAudit2 peakBeforeDrag{};
-    // Legacy bilinear sampler at the peak face and its neighboring cell
-    // centers. These are sampled in the same Fluid substep as the peak.
+    // Selected velocity sampler at the peak face and neighboring centers,
+    // measured in the same Fluid substep as the peak.
     float peakSampledNormalVelocity = 0.0f;
     float peakAdjacentCellNormalSpeed = 0.0f;
     float peakAdjacentCellFluidFraction = 0.0f;
+    // Same snapshot and same fluid-bearing cell (fraction >= 0.1).
+    // Valid only while the legacy sampler is selected for the audit.
+    float peakNearbyLegacyNormalVelocity = 0.0f;
+    float peakNearbyAwareNormalVelocity = 0.0f;
+    float peakNearbyFluidFraction = 0.0f;
+    bool peakNearbyComparisonValid = false;
     int peakFluidSubstep = -1;
     int nonFiniteFluidFaces = 0;
     int sampledFluidSteps = 0;
@@ -458,6 +464,14 @@ public:
     [[nodiscard]] bool isWindConservativeAdvectionEnabled() const noexcept
     {
         return windField_ && windField_->isConservativeAdvectionEnabled();
+    }
+    void setWindApertureAwareSamplingEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setApertureAwareSamplingEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindApertureAwareSamplingEnabled() const noexcept
+    {
+        return windField_ && windField_->isApertureAwareSamplingEnabled();
     }
     void setWindSweptGeometryCorrectionEnabled( bool enabled ) noexcept
     {

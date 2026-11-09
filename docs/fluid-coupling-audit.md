@@ -83,3 +83,56 @@ Next analysis: compare the 28.13 m/s face with the sampled normal velocity of ac
 **No root cause is claimed before reading actual trace and tests.** When Windows Release CI completes, inspect spikes by frame and compare: (1) coupled vs uncoupled at matching h/steps/drag, (2) drag 0 vs 3 at matching h/steps/coupling, (3) continuity increase immediately after drag, and (4) coincident PCG failures or Body acceleration jumps. If a spike occurs before drag, investigate pressure/geometry/velocity remap; if after drag, test an explicit pre-projection force application in a separate opt-in differential PR. Pressure/Drag stage changes, solver restarts, obstacle identity and API policy changes remain **out of scope** in this PR.
 
 The full environmental physics plan is being reviewed in PR #318, in `docs/roadmaps/environment-simulation.md` and `docs/roadmaps/environment-status.md`; since that PR is still Draft, these files are not yet expected on master.
+
+## Audit 4 — Opt-in aperture-aware velocity sampling (PR #322)
+
+**Status:** Experimental implementation; **not validated as the production fix**. Earlier audits (#319–#321) are on master. On a partially covered MAC V-face (17, 13), a raw -28.13385 m/s at a=0.00006395081 propagated to an adjacent 76.17%-fluid cell as 14.17676 m/s through legacy bilinear interpolation (Windows Release 42588105495). This demonstrates interpolation contamination, but not the original pressure spike's mathematical cause.
+
+### Model
+
+For each U/V velocity component, define the ordinary bilinear weights `w_f >= 0` of the four surrounding staggered faces, their open fractions `a_f in [0,1]`, and stored fluid normal velocity `v_f`. The **experimental reconstructed component** is:
+
+```text
+v_sample = sum_f(w_f * a_f * v_f) / sum_f(w_f * a_f), if sum_f(w_f * a_f) > 0
+v_sample = 0, otherwise
+```
+
+When every face is fully open, the code directly uses the legacy interpolator, maintaining the original calculation path. If Cut-cell projection is not enabled, aperture-aware queries also return the old implementation exactly. A sample at the center of a very narrow open face still returns its original raw velocity; **no velocity clipping, new pressure boundary, implicit solid velocity, or momentum correction** is performed. A fully blocked stencil returns zero, which is an experimental query convention, *not* a stationary or moving boundary condition. In mixed apertures this is a **velocity reconstruction heuristic, not physically conservative face flux**. Multiplying raw velocity by `open` is not in itself an alternative physically correct sampled velocity.
+
+### API and integration
+
+- `sampleVelocityApertureAware(position)` explicitly queries the new reconstruction regardless of the flag and never writes field data.
+- `setApertureAwareSamplingEnabled(bool)`, default **false**, affects normal `sampleVelocity(position)` and both backtrace and reconstruction reads of the **Semi-Lagrangian** velocity advection path. It does not change the conservative flux-form advection branch, tracer transport, stored face velocities, Cut-cell face openings, pressure equation, or Schur PCG algorithm.
+- Sandbox exposes a `Cut-cell 개방율 가중 속도 보간 (실험)` toggle and preserves the flag on field resize. Because `sampleVelocity` also drives Sandbox drag and displayed arrows, trial trajectories and forces can change even though the underlying pressure solver code is identical.
+- `sandboxWindStepBenchmark --aperture-sampling-differential` emits the same per-frame audit fields as `--coupling-spike-audit`, adding `aperture_sampler` (0 legacy, 1 experimental). It compares h=0.5/0.25, World 8, Fluid 4, two-way ON, drag 0/3, fixed source and initial Body velocities. Keep comparisons between **matched settings** and do not infer causes from different Body trajectories.
+- The existing `--coupling-spike-audit` remains baseline (all original 16 parameter combinations, `aperture_sampler=0`). Both are informational Windows Release CSV steps in CI.
+- The mode is opt-in and **not recommended for production** before differential metrics and visual/long-running tests establish behavior near solid walls, moving obstacles and numerical edge cases.
+
+### Acceptance and limitations
+
+1. Baseline and explicitly disabled mode yield the same World and fluid state; no previous test or default behavior changes.
+2. Fully open/non-Cut-cell fluid sampling stays identical; a deliberately narrow face contributes less to an adjacent cell sample while the face itself is not artificially clamped.
+3. Trial and default remain finite, and tracer mass accounting, World motion, pressure solve status and timing can be compared.
+4. A large `v_f` can still exist on a nearly closed face. Correcting **the source of that pressure/geometry spike** and ensuring a consistent moving-wall velocity boundary are independent future investigations.
+5. The formulation is not automatically correct in wholly blocked or very low-support stencils, and does not guarantee pointwise monotonicity or conservation for semi-Lagrangian advection. Evaluate any change to gameplay force and visuals against these limitations.
+
+
+### Initial matched-scene findings (Windows Release CI 42594468337)
+
+Both platform jobs passed, including Ubuntu 112/112, Windows Debug 115/115, Windows Release 52/52. The initial `--aperture-sampling-differential` CSV captured 96 rows (8 scenarios, 12 frames). **At h=0.25m, Fluid=4, TwoWay ON, Drag=0**:
+
+| Measurement | Legacy sampler | Aperture sampler |
+| --- | ---: | ---: |
+| Maximum **raw face** speed over measured frames | 28.13385 m/s | 2.93254 m/s |
+| Frame of maximum | 6 | 6 |
+| Aperture of the respective peak face | 0.00006395081 | 0.0006971757 |
+| Maximum sampled adjacent-cell speed recorded at each scene's peak face | 14.17676 m/s | 2.93254 m/s |
+| Adjacent fluid fraction at each respective peak | 0.7617487 | **0.00000021755** |
+| PCG failures and nonfinite open faces | 0 | 0 |
+
+**Do not treat the apparent 14.18 → 2.93 sampled-speed comparison as proof of a pointwise interpolation improvement:** the respective peak neighboring cells are completely different in physical fluid occupancy, and the solvers' velocity advection and Body trajectories evolve independently. The lower raw face speed is encouraging, but it does **not** prove the pressure/geometry cause is fixed.
+
+In the 12 measured frames, the reported mean of instrumented fluid wall time was ~7.70ms for legacy and ~8.45ms for the trial in this case. The h=0.5/Drag=0 comparison was ~1.22ms vs ~1.56ms. These values include diagnostic work and runner scheduling effects; they indicate **a potential performance cost**, not authoritative performance improvement or a stable benchmark.
+
+**Follow-up added within the same PR:** CSV `same_field_pair_valid`, `same_field_legacy_sample`, `same_field_aware_sample`, `same_field_fluid_fraction` capture both interpolation policies at **the exact same stored MAC field, same Fluid substep and same adjacent cell** whenever the legacy mode is active and a neighboring cell has fluid fraction >=0.1. For the opt-in World scene the paired flag is false (no independent legacy query), so those fields must not be treated as measured pairs. This test isolates interpolation differences from pressure/Body trajectory changes, and its updated CI must be inspected before considering promotion.
+

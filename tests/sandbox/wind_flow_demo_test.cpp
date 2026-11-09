@@ -27,6 +27,79 @@ bool close( float a, float b, float tolerance = 1.0e-4f )
     return std::abs( a - b ) <= tolerance;
 }
 
+void checkWindApertureSamplingDifferential()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    for( float drag : { 0.0f, 3.0f } )
+    {
+        rigidBodyDemo legacy{ demoKind::windFlow };
+        rigidBodyDemo explicitOff{ demoKind::windFlow };
+        rigidBodyDemo experiment{ demoKind::windFlow };
+        for( rigidBodyDemo* scene : { &legacy, &explicitOff, &experiment } )
+        {
+            scene->configureWindField( 48, 28, 0.25f );
+            scene->setWindCutCellProjectionEnabled( true );
+            scene->setWindCutCellCoupledProjectionEnabled( true );
+            scene->setWindDisjointAnalyticEnabled( true );
+            scene->setWindFluidSubstepCount( 4 );
+            scene->setWindSourceStrength( 8.0f );
+            scene->setWindDragCoefficient( drag );
+            const auto shapes = scene->getShapes();
+            scene->getWorld().SetBodyLinearVelocity( shapes[0].bodyHandle, { 0.7f, -0.1f } );
+            scene->getWorld().SetBodyAngularVelocity( shapes[1].bodyHandle, 0.5f );
+        }
+        explicitOff.setWindApertureAwareSamplingEnabled( false );
+        experiment.setWindApertureAwareSamplingEnabled( true );
+        experiment.configureWindField( 48, 28, 0.25f );
+        // configureWindField resets bodies as well as the fluid. Restore the
+        // same prescribed initial velocities before comparing World motion.
+        const auto trialShapes = experiment.getShapes();
+        experiment.getWorld().SetBodyLinearVelocity( trialShapes[0].bodyHandle, { 0.7f, -0.1f } );
+        experiment.getWorld().SetBodyAngularVelocity( trialShapes[1].bodyHandle, 0.5f );
+        check( !legacy.isWindApertureAwareSamplingEnabled() &&
+            !explicitOff.isWindApertureAwareSamplingEnabled() &&
+            experiment.isWindApertureAwareSamplingEnabled(),
+            "opt-in aperture sampler must retain selection on resize, with default disabled" );
+
+        float largestSampleDifference = 0.0f;
+        for( int frame = 0; frame < 12; ++frame )
+        {
+            legacy.step( dt, 8 );
+            explicitOff.step( dt, 8 );
+            experiment.step( dt, 8 );
+
+            check( legacy.getWindCouplingSteps() == experiment.getWindCouplingSteps() &&
+                legacy.getWindCouplingSteps() == 4 &&
+                !legacy.getWindField()->getCutCellPressure().coupledSolveFailed &&
+                !experiment.getWindField()->getCutCellPressure().coupledSolveFailed &&
+                std::isfinite( experiment.getWindField()->getFlowAudit( dt / 4.0f ).continuityRms ),
+                "aperture-sampling trial must preserve cadence and finish finite pressure solves" );
+            const vec2 samplePoint = experiment.getWorld().GetBodyTransform(
+                experiment.getShapes()[0].bodyHandle ).position;
+            const vec2 legacyFlow = legacy.getWindField()->sampleVelocity( samplePoint );
+            const vec2 trialFlow = experiment.getWindField()->sampleVelocity( samplePoint );
+            largestSampleDifference = std::max( largestSampleDifference, Length( legacyFlow - trialFlow ) );
+            for( std::size_t i = 0; i < legacy.getShapes().size(); ++i )
+            {
+                const bodyId base = legacy.getShapes()[i].bodyHandle;
+                const bodyId neutral = explicitOff.getShapes()[i].bodyHandle;
+                const bodyId optIn = experiment.getShapes()[i].bodyHandle;
+                check( near( legacy.getWorld().GetBodyLinearVelocity( base ),
+                        explicitOff.getWorld().GetBodyLinearVelocity( neutral ), 1.0e-5f ) &&
+                    near( legacy.getWorld().GetBodyTransform( base ).position,
+                        explicitOff.getWorld().GetBodyTransform( neutral ).position, 1.0e-5f ),
+                    "explicitly disabled sampler must remain identical to legacy World" );
+                check( IsFinite( experiment.getWorld().GetBodyLinearVelocity( optIn ) ) &&
+                    IsFinite( experiment.getWorld().GetBodyTransform( optIn ).position ) &&
+                    std::isfinite( experiment.getWorld().GetBodyAngularVelocity( optIn ) ),
+                    "experimental Cut-cell sample must not produce nonfinite rigid motion" );
+            }
+        }
+        check( std::isfinite( largestSampleDifference ),
+            "opt-in sampler must produce finite velocity samples near moving bodies" );
+    }
+}
+
 void checkWindCouplingAudit()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -80,6 +153,12 @@ void checkWindCouplingAudit()
                 std::isfinite( audit.maxFaceSpeedAfterDrag ) &&
                 !projection.coupledSolveFailed,
                 "opt-in audit must collect finite pre/post drag states without disrupting coupled solve" );
+            if( audit.peakNearbyComparisonValid )
+                check( audit.peakNearbyFluidFraction >= 0.1f &&
+                    audit.peakNearbyFluidFraction <= 1.0f &&
+                    std::isfinite( audit.peakNearbyLegacyNormalVelocity ) &&
+                    std::isfinite( audit.peakNearbyAwareNormalVelocity ),
+                    "paired interpolation audit must sample the same fluid-bearing cell without modifying state" );
             if( LengthSquared( audited.getWindDragBodyImpulse() ) > 1.0e-12f )
                 ++nonzeroDragFrames;
             check( near( audited.getWindDragBodyImpulse(), reference.getWindDragBodyImpulse(), 1.0e-5f ) &&
@@ -1441,6 +1520,7 @@ int main()
 {
     checkFluidCoupling();
     checkWindCouplingAudit();
+    checkWindApertureSamplingDifferential();
     checkWorldWindStepProfiling();
     checkCachedIc0WorldDifferential();
     checkWorldPressureWarmStartDifferential();
