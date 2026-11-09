@@ -159,7 +159,8 @@ void auditCoupling()
         "drag_body_impulse,drag_exchange_residual,peak_face_substep,peak_face_is_u,"
         "peak_face_x,peak_face_y,peak_face_open_fraction,peak_face_signed_velocity,"
         "peak_open_weighted_max_speed,peak_sampled_normal_velocity,"
-        "peak_adjacent_cell_normal_speed,peak_face_flux_normal_velocity,fluid_ms,world_ms" );
+        "peak_adjacent_cell_normal_speed,peak_adjacent_cell_fluid_fraction,"
+        "peak_face_flux_normal_velocity,fluid_ms,world_ms" );
     for( float h : { 0.5f, 0.25f } )
         for( int steps : { 1, 4 } )
             for( bool coupled : { false, true } )
@@ -190,7 +191,7 @@ void auditCoupling()
                         const vec2 speed = scene.getWorld().GetBodyLinearVelocity( body );
                         std::printf( "%.2f,%d,%d,%d,%.1f,%d,%d,%.7g,%.7g,%.7g,"
                             "%.7g,%.7g,%.7g,%d,%d,%d,%.7g,%d,%.7g,%.7g,%.7g,%.7g,"
-                            "%.7g,%.7g,%d,%d,%d,%d,%.7g,%.7g,%.7g,%.7g,%.7g,%.7g,%.4f,%.4f\n",
+                            "%.7g,%.7g,%d,%d,%d,%d,%.7g,%.7g,%.7g,%.7g,%.7g,%.7g,%.7g,%.4f,%.4f\n",
                             h, worldSubsteps, steps, coupled ? 1 : 0, drag,
                             frame - warmupFrames, scene.getWindCouplingSteps(),
                             audit.maxContinuityBeforeDrag, audit.maxContinuityAfterDrag,
@@ -207,6 +208,7 @@ void auditCoupling()
                             peak.maxFaceX, peak.maxFaceY, peak.maxFaceOpenFraction,
                             peak.maxFaceVelocity, peak.maxOpenWeightedFaceSpeed,
                             audit.peakSampledNormalVelocity, audit.peakAdjacentCellNormalSpeed,
+                            audit.peakAdjacentCellFluidFraction,
                             peak.maxFaceVelocity * peak.maxFaceOpenFraction,
                             scene.getWindFluidMilliseconds(), scene.getWindWorldMilliseconds() );
                     }
