@@ -246,6 +246,13 @@ C++20 기반 2D 물리 엔진 zonai에서 환경이 게임플레이에 실질적
 - 정밀도 저하나 누락된 반력을 감춘 '빠른 실패'와 수렴한 계산의 실행 시간을 직접 비교하지 않음.
 - GPU 도입의 채택 조건은 end-to-end 절감 + gameplay latency/force consistency 충족 + 개발/이식 비용의 실익임.
 
+### 프로젝트 구현 컨벤션
+- C++20, Box2D 알고리즘과 자료 수명 의도를 보존한다. 원시 배열/매크로를 무작정 새로 늘리지 않고 필요 시 std::array/std::span/constexpr·정확한 정수 타입을 사용한다.
+- zonai에서 유지하는 camelCase 명명, 선언/정의 순서 일치, 기존 private member 규칙과 #pragma region 구획을 존중한다. 주석은 물리적 의도·불변식·검증 한계 위주로 짧고 명확하게 작성한다.
+- 기존 소스의 파일 배치/줄바꿈/인코딩을 보존하고, unrelated rename·reformat이나 전체 리팩터링은 작은 기능 PR에 섞지 않는다.
+- new public field/method는 단위·수명·default/disabled 동작, invalid input, reset·resize 동작을 명시한다.
+- Windows CI와 로컬 빌드는 README의 CMake preset을 따르고, Linux headless/library/test를 계속 유지한다. D3D11 Compute 코드는 CPU library의 link dependency가 되지 않는다.
+
 ## F. 변경 관리 / PR 절차
 
 - 우선순위: (1) 사용자 재현 버그와 물리 안정성 (2) 개별 Body 연성 (3) Joint+Wind 게임플레이 데모 (4) Water/부력 (5) Terrain/Cloth/GPU와 대규모 확장.
