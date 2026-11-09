@@ -331,6 +331,12 @@ struct fluidFlowAudit2
 {
     float continuityRms = 0.0f;     // 1/s
     float maxFluidFaceSpeed = 0.0f; // m/s, open fluid faces only
+    float maxOpenWeightedFaceSpeed = 0.0f; // m/s, |velocity| * open fraction
+    float maxFaceVelocity = 0.0f;   // signed face component, m/s
+    float maxFaceOpenFraction = 0.0f;
+    int maxFaceX = -1;
+    int maxFaceY = -1;
+    bool maxFaceIsU = true;
     int nonFiniteFluidFaces = 0;
 };
 
