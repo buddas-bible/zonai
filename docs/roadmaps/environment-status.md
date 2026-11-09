@@ -15,13 +15,14 @@
 - **S0 1차 완료:** [PR #319](https://github.com/buddas-bible/zonai/pull/319) merged, master SHA **5842f8c58b3e3fbceff34747c9d5b5464db62f90**, Ubuntu 112/112, Windows Debug 115/115, Release 52/52 passed (CI 42571477840). Baseline flow/Drag diagnostics and matched cadence CSV landed.
 - **실측 발견:** Windows Release h=0.25m, World 8/Fluid 4, TwoWay ON/Drag 0의 측정 frame 6에서 열린 MAC face 최대 속도 **28.13385m/s** 단일 spike. 앞뒤 frame 0.595/0.712m/s; PCG **수렴**, iterations 61 (보통 46~47), 상대 잔차 8.20e-6, Body 속도 연속. 즉 Drag 주입이 **같은 프레임의** 해당 급등 원인은 아님. 확정 원인은 미상.
 - **S0 2차 완료:** [PR #320](https://github.com/buddas-bible/zonai/pull/320) merged, master **1fc3be3cfd4d31c2d4435719131bc13d58fd08e1**, Ubuntu 112/112, Windows Debug 115/115, Release 52/52 통과(CI 42585749190). 문제 face는 V(x=17,y=13), Fluid substep=3, signed velocity=-28.13385m/s, open fraction=**0.00006395081**(0.0064%), 해당 면의 |velocity × open| ≈ 0.0018m/s. 별도로 전체 field의 최대 open-weighted face speed는 0.6536318m/s. 이는 국소 거의 닫힌 Cut-cell 현상이지 전역 유체 속도 급등으로 단정할 수 없음.
-- **S0 3차 진행 중:** [PR #321](https://github.com/buddas-bible/zonai/pull/321), `test/fluid-aperture-sampling-contamination` Draft, CI **42587916950**. 기존 `sampleVelocity`/Semi-Lagrangian의 raw MAC 속도 보간이 거의 닫힌 face에서 이웃 실제 유체 셀 샘플에 얼마나 전파되는지 읽기 전용으로 측정. 이번 PR은 기존 물리 모델 변경 없음.
+- **S0 3차 완료:** [PR #321](https://github.com/buddas-bible/zonai/pull/321) merged, master SHA **21046fc26fd247dc1292547d0d8a807e3e12f8e8**, Ubuntu 112/112, Windows Debug 115/115, Release 52/52 통과(CI **42588105495**). 문제 V(17,13) 면 원시 속도 **-28.13385m/s**가 인접 **유체 점유율 0.7617487**인 셀의 legacy `sampleVelocity` normal component **14.17676m/s**로 전달됨을 실측. 면 유량 관점의 `velocity * open`는 -0.001799183m/s. 즉 작은 aperture의 국소 원시속도가 raw bilinear 샘플링에 혼합되는 것은 확인됨. 이 값만으로 실제 Body 힘 폭주/전체 tracer 불안정은 입증되지 않음.
+- **S0 다음 원자 작업:** pressure/flux는 그대로 두고 **선택형 aperture-aware velocity sampling 비교 PoC** 설계. 일반 fluid 영역 결과 동등성, Cut-cell 인접 보간값·강체 드래그/시각화/이류 영향, 체적·운동량·PCG 잔차/속도 급등 등 서로 다른 수치량을 분리 검증. 보간을 물리적으로 정확하다고 성급히 단정하거나 전역 속도 clamp 금지.
 
 ## 1. 단계별 상태
 
 | 단계 | 상태 | 메모 |
 | --- | --- | --- |
-| S0 재현·진단 baseline | **1·2차 병합, 3차 PR #321 검증 중** | 거의 닫힌 V면(0.0064%)의 raw 보간 전파 여부 조사 |
+| S0 재현·진단 baseline | **1~3차 병합, 샘플링 실험 설계 단계** | 0.0064% V면에서 인접 76.17% 유체 셀로 14.18m/s 보간 전파 확인 |
 | S1 Body별 4종 Interaction | 미착수 | 정책/수명 + Static/Kinematic/Compound Body |
 | S2 압력·Drag 수치 안정화 | 부분 기반 존재 | PCG/IC0/Warm Start 구현; Warm→Cold retry 미착수 |
 | S3 Wind + 돛·Joint 실험 | 미착수 | 기존 일반 Joint와 Wind를 새 gameplay scene으로 연결 |
@@ -40,9 +41,10 @@ test/bench(fluid): isolate wind two-way coupling spikes at fixed step cadence
 ### 진행 상황과 범위 경계
 - PR #319 (1차 계측) **병합**: World 8, Fluid 1/4, h=0.5/0.25, coupling ON/OFF, drag=0/3 (source ON), Windows Release 프레임별 CSV. 기본 물리 계산과 스케줄은 변하지 않음.
 - PR #320 **병합 완료**: 이상 face의 위치, opening, raw/weighted 속도 확인. V면(17,13) 개방율 0.00006395081.
-- PR #321 **Draft**: peak face 및 실제 유체가 남은 이웃 셀에서 현재 bilinear sample값을 같은 Fluid substep에 로깅. 새로운 계산식 도입 전 외부 쿼리의 오염 여부 검증.
+- PR #321 **병합**: 문제 V-face 인접 유체 셀 76.17%에서 기존 raw normal sample 14.17676m/s 측정.
+- 후속 atomic PR은 **실험 기능만**: Cut-cell을 고려하는 속도 보간 방식을 opt-in으로 도입하고, 동일 장면에서 기존 샘플러/PCG/반력/Tracer/World와 차이를 계측. 정식 기본값 변경은 별도 결정.
 - **S0 미완료**: Fluid 2/8 및 static 많은 장면, 경계 걸침, moving cut-cell swept mismatch 연관 분석, 국소 face velocity/시각 tracer 관계, 사용자 장면 장기 재현 및 알고리즘 원인 수정.
-- 새 대화의 첫 작업: PR #321 CI run **42587916950** Windows Release `--coupling-spike-audit`의 **h=0.25 / Fluid=4 / coupled=1 / drag=0 / frame=6** 결과를 확인. `peak_adjacent_cell_normal_speed`와 해당 cell fluid fraction을 분석해 raw face velocity가 실제 유체 영역 샘플에 전파되는지 판정. 그 뒤에만 opt-in aperture-aware sample 실험을 설계. Clamp로 숨기지 않는다.
+- 새 대화의 첫 작업: master에 병합된 PR #319~#321과 CI **42588105495**, docs/fluid-coupling-audit.md를 먼저 확인. h=0.25/Fluid=4/TwoWay ON/Drag=0/frame 6의 V면(17,13)에서 raw face -28.13385m/s / opening 0.00006395081 / adjacent 76.17% fluid cell raw sample **14.17676m/s**를 기준 장면으로 삼아 선택형 aperture-aware velocity sampling PoC의 수학적 의미·기존 결과 보존·회귀를 설계하고 작은 독립 PR로 수행. 먼저 원시 interpolation의 책임을 분리하며 압력·Schur 수식은 건드리지 않는다.
 
 ### 이번 PR에서 할 일
 1. 기존 Wind Sandbox World/Fluid의 호출 횟수와 입력을 동일하게 고정한 reference와 experiment scene을 구성.
@@ -86,4 +88,4 @@ test/bench(fluid): isolate wind two-way coupling spikes at fixed step cadence
 
 ## 5. 새 대화 시작 문장
 
-zonai 환경 물리 개발을 이어가자. docs/roadmaps/environment-status.md 및 environment-simulation.md와 병합된 PR #319/#320, Draft PR #321을 코드·CI로 검증하라. PR #321 CI 42587916950의 Windows Release CSV에서 h=0.25/Fluid=4/TwoWay ON/Drag=0/frame 6의 peak face V(17,13) 개방율 0.00006395081 및 인접 실제 유체 셀의 `sampleVelocity` 결과를 분석하라. 현재 물리적 근본 원인은 미확정이므로 무작정 clamp 또는 속도 수정하지 말고 원인에 맞는 차등 테스트부터 진행하라. S0 전체 완료로 표시하지 말 것.
+zonai 환경 물리 계획 이어가자. 먼저 master의 병합 PR #319/#320/#321와 docs/fluid-coupling-audit.md, Draft 로드맵 PR #318의 docs/roadmaps/environment-status.md 및 environment-simulation.md를 읽어라. PR #321 CI 42588105495에서 거의 닫힌 V(17,13) face -28.13385m/s가 인접 76.17% 유체 셀의 raw bilinear sample 14.17676m/s까지 전파됨을 실측했다. 이제 압력/PCG/강체 연성을 변경하지 않고 opt-in aperture-aware velocity sampling의 수학적 정책과 차등 테스트를 좁은 PR로 구현·검증하라. 수치 원인을 확정하지 않고 clamp로 숨기지 말며 전체 S0 완료를 선언하지 말라.
