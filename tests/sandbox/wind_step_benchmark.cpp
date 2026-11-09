@@ -147,6 +147,63 @@ summary measure( float h, int fluidSubsteps, bool cached, bool active, bool schu
     return stats;
 }
 
+// Per-frame trace, not a timing comparison: identical Fluid cadence for ON
+// and OFF, with the actual World/Fluid/Drag path used by the Sandbox.
+void auditCoupling()
+{
+    std::puts( "cell_m,world_substeps,fluid_substeps,obstacle_coupling,drag,frame,"
+        "actual_fluid_steps,pre_drag_continuity_rms,post_drag_continuity_rms,"
+        "max_drag_continuity_increase,pre_drag_max_face_speed,post_drag_max_face_speed,"
+        "max_drag_face_speed_increase,nonfinite_faces,pcg_status,pcg_iterations,"
+        "pcg_relative_residual,pcg_failed,body0_speed,body0_omega,body0_x,body0_y,"
+        "drag_body_impulse,drag_exchange_residual,fluid_ms,world_ms" );
+    for( float h : { 0.5f, 0.25f } )
+        for( int steps : { 1, 4 } )
+            for( bool coupled : { false, true } )
+                for( float drag : { 0.0f, 3.0f } )
+                {
+                    rigidBodyDemo scene{ demoKind::windFlow };
+                    scene.configureWindField( static_cast<int>( 12.0f / h ),
+                        static_cast<int>( 7.0f / h ), h );
+                    scene.setWindCutCellProjectionEnabled( true );
+                    scene.setWindCutCellCoupledProjectionEnabled( true );
+                    scene.setWindDisjointAnalyticEnabled( true );
+                    scene.setWindFluidSubstepCount( steps );
+                    scene.setWindCouplingAuditEnabled( true );
+                    scene.setWindObstacleCouplingEnabled( coupled );
+                    scene.setWindSourceStrength( 8.0f );
+                    scene.setWindDragCoefficient( drag );
+                    const bodyId body = scene.getShapes()[0].bodyHandle;
+                    scene.getWorld().SetBodyLinearVelocity( body, { 0.7f, -0.10f } );
+                    scene.getWorld().SetBodyAngularVelocity( scene.getShapes()[1].bodyHandle, 0.5f );
+                    for( int frame = 0; frame < warmupFrames + measuredFrames; ++frame )
+                    {
+                        scene.step( dt, worldSubsteps );
+                        if( frame < warmupFrames ) continue;
+                        const auto& audit = scene.getWindCouplingAudit();
+                        const auto& pressure = scene.getWindField()->getCutCellPressure();
+                        const vec2 position = scene.getWorld().GetBodyTransform( body ).position;
+                        const vec2 speed = scene.getWorld().GetBodyLinearVelocity( body );
+                        std::printf( "%.2f,%d,%d,%d,%.1f,%d,%d,%.7g,%.7g,%.7g,"
+                            "%.7g,%.7g,%.7g,%d,%d,%d,%.7g,%d,%.7g,%.7g,%.7g,%.7g,"
+                            "%.7g,%.7g,%.4f,%.4f\\n",
+                            h, worldSubsteps, steps, coupled ? 1 : 0, drag,
+                            frame - warmupFrames, scene.getWindCouplingSteps(),
+                            audit.maxContinuityBeforeDrag, audit.maxContinuityAfterDrag,
+                            audit.maxContinuityIncreaseFromDrag,
+                            audit.maxFaceSpeedBeforeDrag, audit.maxFaceSpeedAfterDrag,
+                            audit.maxFaceSpeedIncreaseFromDrag, audit.nonFiniteFluidFaces,
+                            static_cast<int>( pressure.coupledStatus ), pressure.coupledIterations,
+                            pressure.coupledRelativeResidual, pressure.coupledSolveFailed ? 1 : 0,
+                            Length( speed ), scene.getWorld().GetBodyAngularVelocity( body ),
+                            position.x, position.y,
+                            Length( scene.getWindDragBodyImpulse() ),
+                            Length( scene.getWindDragExchangeResidual() ),
+                            scene.getWindFluidMilliseconds(), scene.getWindWorldMilliseconds() );
+                    }
+                }
+}
+
 } // namespace
 
 int main( int argc, char** argv )
@@ -157,6 +214,7 @@ int main( int argc, char** argv )
     bool schurReference = false;
     bool warmStartProbe = false;
     bool warmStartSweep = false;
+    bool couplingAudit = false;
     for( int i = 1; i < argc; ++i )
     {
         csv |= std::string_view( argv[i] ) == "--csv";
@@ -165,7 +223,9 @@ int main( int argc, char** argv )
         schurReference |= std::string_view( argv[i] ) == "--schur-reference";
         warmStartProbe |= std::string_view( argv[i] ) == "--pressure-reuse-probe";
         warmStartSweep |= std::string_view( argv[i] ) == "--pcg-warmstart-sweep";
+        couplingAudit |= std::string_view( argv[i] ) == "--coupling-spike-audit";
     }
+    if( couplingAudit ) { auditCoupling(); return 0; }
     if( warmStartSweep )
     {
         std::puts( "cell_m,world_substeps,fluid_substeps,warm_start,frames,"
