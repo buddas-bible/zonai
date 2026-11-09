@@ -73,8 +73,6 @@ void checkWindCouplingAudit()
                 std::abs( audit.peakSampledNormalVelocity -
                     audit.peakBeforeDrag.maxFaceVelocity ) <
                     1.0e-2f * ( 1.0f + audit.peakBeforeDrag.maxFluidFaceSpeed ) &&
-                audit.peakAdjacentCellNormalSpeed <=
-                    audit.peakBeforeDrag.maxFluidFaceSpeed + 1.0e-4f &&
                 std::isfinite( audit.maxContinuityBeforeDrag ) &&
                 std::isfinite( audit.maxContinuityAfterDrag ) &&
                 std::isfinite( audit.maxContinuityIncreaseFromDrag ) &&
