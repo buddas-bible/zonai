@@ -1282,12 +1282,66 @@ vec2 fluidField2::sampleFrom( const std::vector<float>& u, const std::vector<flo
     };
 }
 
+// This reconstruction is a velocity query, not a flux/pressure correction.
+// Small open faces contribute proportionately less to off-face interpolation,
+// while a sample exactly on an isolated tiny face still returns its raw speed.
+// When all contributing faces are fully open, keep the legacy operation exact.
+float fluidField2::sampleApertureAwareComponent( const std::vector<float>& values,
+    int width, int height, float x, float y, bool isU ) const noexcept
+{
+    x = std::clamp( x, 0.0f, static_cast<float>( width - 1 ) );
+    y = std::clamp( y, 0.0f, static_cast<float>( height - 1 ) );
+    const int i = static_cast<int>( x );
+    const int j = static_cast<int>( y );
+    const int i1 = std::min( i + 1, width - 1 );
+    const int j1 = std::min( j + 1, height - 1 );
+    const float tx = x - i;
+    const float ty = y - j;
+    const float o00 = isU ? advectionUOpen( i, j ) : advectionVOpen( i, j );
+    const float o10 = isU ? advectionUOpen( i1, j ) : advectionVOpen( i1, j );
+    const float o01 = isU ? advectionUOpen( i, j1 ) : advectionVOpen( i, j1 );
+    const float o11 = isU ? advectionUOpen( i1, j1 ) : advectionVOpen( i1, j1 );
+    if( o00 == 1.0f && o10 == 1.0f && o01 == 1.0f && o11 == 1.0f )
+        return sampleComponent( values, width, height, x, y );
+
+    const float w00 = ( 1.0f - tx ) * ( 1.0f - ty ) * o00;
+    const float w10 = tx * ( 1.0f - ty ) * o10;
+    const float w01 = ( 1.0f - tx ) * ty * o01;
+    const float w11 = tx * ty * o11;
+    const float total = w00 + w10 + w01 + w11;
+    if( total <= 0.0f ) return 0.0f; // No fluid face support in this stencil.
+    const float numerator =
+        w00 * values[j * width + i] + w10 * values[j * width + i1] +
+        w01 * values[j1 * width + i] + w11 * values[j1 * width + i1];
+    return numerator / total;
+}
+
+vec2 fluidField2::sampleApertureAwareFrom( const std::vector<float>& u,
+    const std::vector<float>& v, vec2 position ) const noexcept
+{
+    if( !IsFinite( position ) ) return {};
+    if( !cutCellProjectionEnabled_ ) return sampleFrom( u, v, position );
+    const vec2 grid = ( position - origin_ ) / cellSize_;
+    return {
+        sampleApertureAwareComponent( u, width_ + 1, height_, grid.x, grid.y - 0.5f, true ),
+        sampleApertureAwareComponent( v, width_, height_ + 1, grid.x - 0.5f, grid.y, false )
+    };
+}
+
+vec2 fluidField2::sampleVelocityApertureAware( vec2 position ) const noexcept
+{
+    if( !IsFinite( position ) || position.x < origin_.x || position.y < origin_.y ||
+        position.x > origin_.x + width_ * cellSize_ || position.y > origin_.y + height_ * cellSize_ ) return {};
+    return sampleApertureAwareFrom( u_, v_, position );
+}
+
 vec2 fluidField2::sampleVelocity( vec2 position ) const noexcept
 {
     // 바깥 영역에 유체가 있다고 가정하지 않음.
     if( !IsFinite( position ) || position.x < origin_.x || position.y < origin_.y ||
         position.x > origin_.x + width_ * cellSize_ || position.y > origin_.y + height_ * cellSize_ ) return {};
-    return sampleFrom( u_, v_, position );
+    return apertureAwareSamplingEnabled_
+        ? sampleApertureAwareFrom( u_, v_, position ) : sampleFrom( u_, v_, position );
 }
 
 void fluidField2::addVelocity( vec2 position, vec2 velocityDelta, float radius )
@@ -2584,23 +2638,29 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     if( conservativeAdvectionEnabled_ ) advectConservative( timeStep );
     else
     {
-        // 기존 반 라그랑주 이류: 읽기 전용 source로부터 face별 역추적.
+        // Opt-in aperture-weighted reconstruction only affects sampling
+        // for backtracing and remapping; the stored pressure/face flux is unchanged.
+        const auto sampleAdvection = [&]( vec2 point ) -> vec2
+        {
+            return apertureAwareSamplingEnabled_
+                ? sampleApertureAwareFrom( u_, v_, point ) : sampleFrom( u_, v_, point );
+        };
         std::fill( nextU_.begin(), nextU_.end(), 0.0f );
     std::fill( nextV_.begin(), nextV_.end(), 0.0f );
     for( int y = 0; y < height_; ++y )
         for( int x = 1; x < width_; ++x )
         {
             const vec2 point = origin_ + cellSize_ * vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
-            const vec2 previous = point - timeStep * sampleFrom( u_, v_, point );
-            nextU_[uIndex( x, y )] = sampleFrom( u_, v_, previous ).x;
+            const vec2 previous = point - timeStep * sampleAdvection( point );
+            nextU_[uIndex( x, y )] = sampleAdvection( previous ).x;
         }
 
     for( int y = 1; y < height_; ++y )
         for( int x = 0; x < width_; ++x )
         {
             const vec2 point = origin_ + cellSize_ * vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
-            const vec2 previous = point - timeStep * sampleFrom( u_, v_, point );
-            nextV_[vIndex( x, y )] = sampleFrom( u_, v_, previous ).y;
+            const vec2 previous = point - timeStep * sampleAdvection( point );
+            nextV_[vIndex( x, y )] = sampleAdvection( previous ).y;
         }
 
         u_.swap( nextU_ );
