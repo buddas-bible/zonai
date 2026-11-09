@@ -437,13 +437,28 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                             : vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) } );
                         const vec2 sampled = windField_->sampleVelocity( facePoint );
                         windCouplingAudit_.peakSampledNormalVelocity = isU ? sampled.x : sampled.y;
+                        const int lowerX = isU ? x - 1 : x;
+                        const int lowerY = isU ? y : y - 1;
+                        const float lowerFraction = windField_->getCellFluidFraction( lowerX, lowerY );
+                        const float upperFraction = windField_->getCellFluidFraction( x, y );
                         const vec2 lower = windField_->sampleVelocity(
-                            windField_->getCellCenter( isU ? x - 1 : x, isU ? y : y - 1 ) );
+                            windField_->getCellCenter( lowerX, lowerY ) );
                         const vec2 upper = windField_->sampleVelocity(
                             windField_->getCellCenter( x, y ) );
-                        windCouplingAudit_.peakAdjacentCellNormalSpeed = std::max(
-                            std::abs( isU ? lower.x : lower.y ),
-                            std::abs( isU ? upper.x : upper.y ) );
+                        const float lowerSpeed = lowerFraction > 0.0f
+                            ? std::abs( isU ? lower.x : lower.y ) : 0.0f;
+                        const float upperSpeed = upperFraction > 0.0f
+                            ? std::abs( isU ? upper.x : upper.y ) : 0.0f;
+                        if( lowerSpeed >= upperSpeed )
+                        {
+                            windCouplingAudit_.peakAdjacentCellNormalSpeed = lowerSpeed;
+                            windCouplingAudit_.peakAdjacentCellFluidFraction = lowerFraction;
+                        }
+                        else
+                        {
+                            windCouplingAudit_.peakAdjacentCellNormalSpeed = upperSpeed;
+                            windCouplingAudit_.peakAdjacentCellFluidFraction = upperFraction;
+                        }
                     }
                 }
                 windCouplingAudit_.maxContinuityBeforeDrag = std::max(
