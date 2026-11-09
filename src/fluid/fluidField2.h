@@ -324,6 +324,16 @@ struct fluidTracerStats2
     [[nodiscard]] float delta() const noexcept { return afterMass - beforeMass; }
 };
 
+// Side-effect-free snapshot of the current MAC face state. Not a stored Step result.
+// For Cut-cell, continuity includes the latest swept-volume source; the
+// predicted post-pressure solid flux is a separate diagnostic.
+struct fluidFlowAudit2
+{
+    float continuityRms = 0.0f;     // 1/s
+    float maxFluidFaceSpeed = 0.0f; // m/s, open fluid faces only
+    int nonFiniteFluidFaces = 0;
+};
+
 // 마지막 유효 Fluid Step의 경과시간 분해(ms), 계측 옵션을 켠 경우에만 유효.
 // wall-clock 계측이며 World::Step 및 World에서 전달한 drag/힘 처리 시간을 포함하지 않는다.
 struct fluidStepTiming2
@@ -676,6 +686,9 @@ public:
 #pragma region Queries
     [[nodiscard]] vec2 sampleVelocity( vec2 position ) const noexcept;
     [[nodiscard]] float getDivergenceRms() const noexcept;
+    // Explicit diagnostic: reads the current field, including changes after Step.
+    // Not called on the normal simulation path; timeStep must be finite and positive.
+    [[nodiscard]] fluidFlowAudit2 getFlowAudit( float timeStep ) const noexcept;
 
     // 내부 fluid-fluid MAC face 속도를 dual-cell mass로 적분한 운동량.
     // solid 경계의 지정 속도 및 외곽 wall face는 제외한다.
