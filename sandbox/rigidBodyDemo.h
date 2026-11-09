@@ -459,6 +459,14 @@ public:
     {
         return windField_ && windField_->isConservativeAdvectionEnabled();
     }
+    void setWindApertureAwareSamplingEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setApertureAwareSamplingEnabled( enabled );
+    }
+    [[nodiscard]] bool isWindApertureAwareSamplingEnabled() const noexcept
+    {
+        return windField_ && windField_->isApertureAwareSamplingEnabled();
+    }
     void setWindSweptGeometryCorrectionEnabled( bool enabled ) noexcept
     {
         if( windField_ ) windField_->setSweptGeometryCorrectionEnabled( enabled );
