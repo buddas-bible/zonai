@@ -566,6 +566,111 @@ void auditSmallCellPressureCadences()
         }
 }
 
+// Unlike a frozen one-substep replay this runs TWO independent, initially
+// identical, real World/Fluid timelines with force/torque feedback, collisions,
+// advection and moving solid geometry. Once the first pressure merge occurs,
+// later geometry/forces necessarily diverge; the numbers are no longer
+// same-state A/B after that point. This probes feedback stability, not a
+// controlled pressure-only difference or pointwise volume conservation.
+void auditSmallCellWorldFeedback()
+{
+    constexpr int frames = 24;
+    constexpr float h = 0.25f;
+    constexpr int fluidSubsteps = 4;
+    std::puts( "drag,frame,model,fluid_steps,merge_fraction,merged_cells,"
+        "orphan_slivers,pcg_status,pcg_iterations,pcg_failed,"
+        "peak_face_speed,peak_open_weighted_speed,nonfinite_faces,"
+        "individual_continuity,group_continuity,"
+        "virtual_exchange_m3,snapshot_decrease_m3,pressure_impulse_residual,"
+        "tracer_mass,body0_x,body0_y,body0_speed,body0_omega,"
+        "body1_omega,pressure_force0,pressure_torque0" );
+
+    for( float drag : { 0.0f, 3.0f } )
+    {
+        rigidBodyDemo baseline{ demoKind::windFlow };
+        rigidBodyDemo pooled{ demoKind::windFlow };
+        const auto configure = [&]( rigidBodyDemo& scene, float threshold )
+        {
+            scene.configureWindField( 48, 28, h );
+            scene.setWindCutCellProjectionEnabled( true );
+            scene.setWindCutCellCoupledProjectionEnabled( true );
+            scene.setWindDisjointAnalyticEnabled( true );
+            scene.setWindFluidSubstepCount( fluidSubsteps );
+            scene.setWindCouplingAuditEnabled( true );
+            scene.setWindObstacleCouplingEnabled( true );
+            scene.setWindSourceStrength( 8.0f );
+            scene.setWindDragCoefficient( drag );
+            scene.seedWindTracer();
+            scene.setWindSmallCellPressureMergeFraction( threshold );
+            const auto shapes = scene.getShapes();
+            scene.getWorld().SetBodyLinearVelocity(
+                shapes[0].bodyHandle, { 0.7f, -0.10f } );
+            scene.getWorld().SetBodyAngularVelocity( shapes[1].bodyHandle, 0.5f );
+        };
+        configure( baseline, 0.0f );
+        configure( pooled, 1.0e-4f );
+        if( baseline.getWindField()->getSmallCellPressureMergeFraction() != 0.0f ||
+            pooled.getWindField()->getSmallCellPressureMergeFraction() != 1.0e-4f )
+        {
+            std::fprintf( stderr, "World feedback trial did not select pooling modes\n" );
+            std::exit( 1 );
+        }
+
+        int lastFrameMerged = -1;
+        int totalLastSubstepMerges = 0;
+        for( int frame = 0; frame < frames; ++frame )
+        {
+            baseline.step( dt, worldSubsteps );
+            pooled.step( dt, worldSubsteps );
+            for( int variant = 0; variant < 2; ++variant )
+            {
+                rigidBodyDemo& scene = variant == 0 ? baseline : pooled;
+                const auto& audit = scene.getWindCouplingAudit();
+                const auto& pressure = scene.getWindField()->getCutCellPressure();
+                const bodyId body0 = scene.getShapes()[0].bodyHandle;
+                const bodyId body1 = scene.getShapes()[1].bodyHandle;
+                const vec2 pos = scene.getWorld().GetBodyTransform( body0 ).position;
+                const vec2 velocity = scene.getWorld().GetBodyLinearVelocity( body0 );
+                const auto pressureForces = scene.getWindPressureForces();
+                const fluidObstacleForce2 force = pressureForces.empty()
+                    ? fluidObstacleForce2{} : pressureForces[0];
+                // This field is the LAST Fluid substep only, whereas the
+                // face peak is the maximum over all Fluid substeps in frame.
+                if( variant == 1 && pressure.mergedPressureCells > 0 )
+                {
+                    lastFrameMerged = frame;
+                    totalLastSubstepMerges += pressure.mergedPressureCells;
+                }
+                std::printf( "%.1f,%d,%d,%d,%.9g,%d,%d,%d,%d,%d,"
+                    "%.9g,%.9g,%d,%.9g,%.9g,%.9g,%.9g,%.9g,"
+                    "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+                    drag, frame, variant, scene.getWindCouplingSteps(),
+                    scene.getWindField()->getSmallCellPressureMergeFraction(),
+                    pressure.mergedPressureCells, pressure.unmergedSmallPressureCells,
+                    static_cast<int>( pressure.coupledStatus ), pressure.coupledIterations,
+                    pressure.coupledSolveFailed ? 1 : 0,
+                    audit.maxFaceSpeedBeforeDrag, audit.peakBeforeDrag.maxOpenWeightedFaceSpeed,
+                    audit.nonFiniteFluidFaces, pressure.predictedContinuityRms,
+                    pressure.groupedPredictedContinuityRms,
+                    pressure.virtualInternalExchangeVolume,
+                    pressure.mergedSnapshotDecreaseVolume,
+                    Length( pressure.impulse.residual() ),
+                    scene.getWindField()->getTracerMass(),
+                    pos.x, pos.y, Length( velocity ),
+                    scene.getWorld().GetBodyAngularVelocity( body0 ),
+                    scene.getWorld().GetBodyAngularVelocity( body1 ),
+                    Length( force.force ), force.torque );
+            }
+        }
+        // Informational signal only; no assertion that merging must improve
+        // an entire diverged World trajectory or that the target sliver
+        // exists on every fluid cadence.
+        std::fprintf( stderr, "small-cell feedback drag=%.1f last-merged-frame=%d "
+            "sum-last-substep-merged=%d\n",
+            drag, lastFrameMerged, totalLastSubstepMerges );
+    }
+}
+
 } // namespace
 
 int main( int argc, char** argv )
@@ -582,6 +687,7 @@ int main( int argc, char** argv )
     bool smallCellMergeAudit = false;
     bool smallCellThresholdSweep = false;
     bool smallCellCadenceAudit = false;
+    bool smallCellWorldFeedbackAudit = false;
     for( int i = 1; i < argc; ++i )
     {
         csv |= std::string_view( argv[i] ) == "--csv";
@@ -596,6 +702,7 @@ int main( int argc, char** argv )
         smallCellMergeAudit |= std::string_view( argv[i] ) == "--small-cell-merge-audit";
         smallCellThresholdSweep |= std::string_view( argv[i] ) == "--small-cell-merge-threshold-audit";
         smallCellCadenceAudit |= std::string_view( argv[i] ) == "--small-cell-merge-cadence-audit";
+        smallCellWorldFeedbackAudit |= std::string_view( argv[i] ) == "--small-cell-world-feedback-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
     if( faceStageAudit ) { auditFaceStages(); return 0; }
@@ -603,6 +710,7 @@ int main( int argc, char** argv )
     if( smallCellMergeAudit ) { auditFrozenPressure( true ); return 0; }
     if( smallCellThresholdSweep ) { auditFrozenPressure( true, true ); return 0; }
     if( smallCellCadenceAudit ) { auditSmallCellPressureCadences(); return 0; }
+    if( smallCellWorldFeedbackAudit ) { auditSmallCellWorldFeedback(); return 0; }
     if( warmStartSweep )
     {
         std::puts( "cell_m,world_substeps,fluid_substeps,warm_start,frames,"

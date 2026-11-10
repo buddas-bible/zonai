@@ -464,6 +464,12 @@ public:
     {
         if( windField_ ) windField_->setFaceStageAuditTarget( x, y, isU );
     }
+    // Opt-in shrinking Cut-cell pressure pooling for end-to-end World
+    // feedback trials. Zero is the default and leaves normal physics intact.
+    void setWindSmallCellPressureMergeFraction( float fraction ) noexcept
+    {
+        if( windField_ ) windField_->setSmallCellPressureMergeFraction( fraction );
+    }
     void setWindPrePressureSnapshotObserver( fluidField2::prePressureSnapshotObserver2 observer )
     {
         if( windField_ ) windField_->setPrePressureSnapshotObserver( std::move( observer ) );

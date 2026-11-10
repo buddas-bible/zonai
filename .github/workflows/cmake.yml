@@ -81,6 +81,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ctest --test-dir build --output-on-failure
 
+      # First continuous FSI response check. Both variants run independent
+      # but identically seeded World timelines, NOT frozen pressure replays.
+      - name: Probe continuous small-cell World feedback (Ubuntu Debug, informational)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-world-feedback-audit
+
       # Diagnostic numbers are informational; TOI may miss some intermediate rotational contacts.
       - name: Report World rotational sweep oracle (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
@@ -248,6 +254,10 @@ jobs:
       - name: Check frozen small-cell pressure at different cadences (Windows Release, informational)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-merge-cadence-audit
+
+      - name: Probe continuous small-cell World feedback (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-world-feedback-audit
 
       # Identical World/Fluid scene using original on-the-fly IC(0) sweeps.
       # Compare with the previous cached run on this same Windows runner.
