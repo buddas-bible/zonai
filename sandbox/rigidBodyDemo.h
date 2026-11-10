@@ -475,10 +475,6 @@ public:
     {
         if( windField_ ) windField_->setTracerConcentration( x, y, concentration );
     }
-    void setWindSweptTracerRemapEnabled( bool enabled ) noexcept
-    {
-        if( windField_ ) windField_->setSweptTracerRemapEnabled( enabled );
-    }
     void setWindPrePressureSnapshotObserver( fluidField2::prePressureSnapshotObserver2 observer )
     {
         if( windField_ ) windField_->setPrePressureSnapshotObserver( std::move( observer ) );
