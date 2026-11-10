@@ -470,6 +470,15 @@ public:
     {
         if( windField_ ) windField_->setSmallCellPressureMergeFraction( fraction );
     }
+    // Explicit tracer-only probes; never change the pressure operator.
+    void setWindTracerCellConcentration( int x, int y, float concentration ) noexcept
+    {
+        if( windField_ ) windField_->setTracerConcentration( x, y, concentration );
+    }
+    void setWindSweptTracerRemapEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setSweptTracerRemapEnabled( enabled );
+    }
     void setWindPrePressureSnapshotObserver( fluidField2::prePressureSnapshotObserver2 observer )
     {
         if( windField_ ) windField_->setPrePressureSnapshotObserver( std::move( observer ) );

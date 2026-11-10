@@ -671,6 +671,160 @@ void auditSmallCellWorldFeedback()
     }
 }
 
+// Seed tracer just BEFORE the reproducible collapsing V(17,13) face,
+// then track actual per-cell stored mass through live geometry and flow.
+// The existing swept tracer remap and pressure pooling are independent
+// toggles. Summing raw cell masses detects material hidden behind solid
+// masks, unlike concentration (which is zero for a fully covered cell).
+void auditSmallCellLocalTracer()
+{
+    constexpr float h = 0.25f;
+    constexpr int fluidSubsteps = 4;
+    constexpr int frames = 20;
+    constexpr int seedAfterFrame = 4;
+    constexpr int targetX = 17;
+    constexpr int targetY = 13;
+    std::puts( "swept_remap,frame,model,seed_x,seed_y,seed_fraction,seed_mass,"
+        "merged_cells,pcg_status,pcg_failed,target_fluid_fraction,"
+        "target_cell_mass,target_concentration,neighbor_mass,region_mass,"
+        "region_trapped_mass,global_trapped_mass,global_mass,centroid_x,centroid_y,"
+        "swept_remapped_kg,fallback_remapped_kg,unresolved_kg,"
+        "virtual_exchange_m3,snapshot_decrease_m3,peak_face_speed" );
+
+    for( bool sweptRemap : { false, true } )
+    {
+        rigidBodyDemo baseline{ demoKind::windFlow };
+        rigidBodyDemo pooled{ demoKind::windFlow };
+        const auto configure = [&]( rigidBodyDemo& scene, float threshold )
+        {
+            scene.configureWindField( 48, 28, h );
+            scene.setWindCutCellProjectionEnabled( true );
+            scene.setWindCutCellCoupledProjectionEnabled( true );
+            scene.setWindDisjointAnalyticEnabled( true );
+            scene.setWindFluidSubstepCount( fluidSubsteps );
+            scene.setWindObstacleCouplingEnabled( true );
+            scene.setWindSourceStrength( 8.0f );
+            scene.setWindDragCoefficient( 0.0f );
+            scene.setWindSmallCellPressureMergeFraction( threshold );
+            scene.setWindSweptTracerRemapEnabled( sweptRemap );
+            const auto shapes = scene.getShapes();
+            scene.getWorld().SetBodyLinearVelocity( shapes[0].bodyHandle, { 0.7f, -0.10f } );
+            scene.getWorld().SetBodyAngularVelocity( shapes[1].bodyHandle, 0.5f );
+        };
+        configure( baseline, 0.0f );
+        configure( pooled, 1.0e-4f );
+
+        int seedX = targetX, seedY = targetY;
+        float seedFraction = 0.0f;
+        double seedMass = 0.0;
+        for( int frame = 0; frame < frames; ++frame )
+        {
+            baseline.step( dt, worldSubsteps );
+            pooled.step( dt, worldSubsteps );
+            if( frame == seedAfterFrame )
+            {
+                // Both World histories have identical pressure treatment
+                // before the targeted disappearance; compare fractions to
+                // confirm the seed represents the same source fluid volume.
+                const fluidField2& seedField = *baseline.getWindField();
+                if( seedField.getCellFluidFraction( targetX, targetY ) <= 0.0f )
+                {
+                    // Deterministic closest useful neighbor if the exact
+                    // vanishing cell was already fully covered at seed time.
+                    const std::array<std::array<int, 2>, 4> candidates{{
+                        {{ targetX + 1, targetY }}, {{ targetX, targetY - 1 }},
+                        {{ targetX - 1, targetY }}, {{ targetX, targetY + 1 }}
+                    }};
+                    float best = 0.0f;
+                    for( const auto& candidate : candidates )
+                    {
+                        const float fraction =
+                            seedField.getCellFluidFraction( candidate[0], candidate[1] );
+                        if( fraction > best )
+                        {
+                            best = fraction;
+                            seedX = candidate[0];
+                            seedY = candidate[1];
+                        }
+                    }
+                }
+                seedFraction = seedField.getCellFluidFraction( seedX, seedY );
+                if( seedFraction <= 0.0f ||
+                    std::abs( seedFraction -
+                        pooled.getWindField()->getCellFluidFraction( seedX, seedY ) ) > 1.0e-6f )
+                {
+                    std::fprintf( stderr, "local tracer seed is not shared fluid geometry\n" );
+                    std::exit( 1 );
+                }
+                baseline.setWindTracerCellConcentration( seedX, seedY, 4.0f );
+                pooled.setWindTracerCellConcentration( seedX, seedY, 4.0f );
+                seedMass = baseline.getWindField()->getTracerCellMass( seedX, seedY );
+                if( seedMass <= 0.0 ||
+                    std::abs( seedMass - pooled.getWindField()->getTracerCellMass( seedX, seedY ) ) > 1.0e-12 )
+                {
+                    std::fprintf( stderr, "local tracer patch was not seeded consistently\n" );
+                    std::exit( 1 );
+                }
+            }
+            if( frame <= seedAfterFrame ) continue;
+            for( int variant = 0; variant < 2; ++variant )
+            {
+                const rigidBodyDemo& scene = variant == 0 ? baseline : pooled;
+                const fluidField2& field = *scene.getWindField();
+                const auto& pressure = field.getCutCellPressure();
+                const auto& tracer = field.getTracerStats();
+                double regionMass = 0.0;
+                double regionTrapped = 0.0;
+                double weightedX = 0.0;
+                double weightedY = 0.0;
+                double neighborMass = 0.0;
+                // Unit-depth mass stays in the source cell even when hidden
+                // behind a fully solid mask; this query does not discard it.
+                for( int y = targetY - 2; y <= targetY + 2; ++y )
+                    for( int x = targetX - 2; x <= targetX + 2; ++x )
+                    {
+                        const double mass = field.getTracerCellMass( x, y );
+                        regionMass += mass;
+                        weightedX += mass * x;
+                        weightedY += mass * y;
+                        if( field.getCellFluidFraction( x, y ) <= 0.0f )
+                            regionTrapped += mass;
+                        if( x != targetX || y != targetY )
+                            neighborMass += mass;
+                    }
+                const double centroidX = regionMass > 0.0 ? weightedX / regionMass : 0.0;
+                const double centroidY = regionMass > 0.0 ? weightedY / regionMass : 0.0;
+                const float totalMass = field.getTracerMass();
+                if( !std::isfinite( totalMass ) ||
+                    std::abs( static_cast<double>( totalMass ) - seedMass ) >
+                        1.0e-5 * std::max( 1.0, seedMass ) ||
+                    !std::isfinite( centroidX ) || !std::isfinite( centroidY ) )
+                {
+                    std::fprintf( stderr, "local tracer stored mass or centroid invalid\n" );
+                    std::exit( 1 );
+                }
+                std::printf( "%d,%d,%d,%d,%d,%.9g,%.9g,%d,%d,%d,"
+                    "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+                    "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+                    sweptRemap ? 1 : 0, frame, variant, seedX, seedY,
+                    seedFraction, seedMass, pressure.mergedPressureCells,
+                    static_cast<int>( pressure.coupledStatus ),
+                    pressure.coupledSolveFailed ? 1 : 0,
+                    field.getCellFluidFraction( targetX, targetY ),
+                    field.getTracerCellMass( targetX, targetY ),
+                    field.getTracerConcentration( targetX, targetY ),
+                    neighborMass, regionMass, regionTrapped,
+                    tracer.trappedMass, totalMass, centroidX, centroidY,
+                    tracer.sweptRemappedMass, tracer.fallbackRemappedMass,
+                    tracer.unresolvedDisplacementMass,
+                    pressure.virtualInternalExchangeVolume,
+                    pressure.mergedSnapshotDecreaseVolume,
+                    field.getFlowAudit( dt / fluidSubsteps ).maxFluidFaceSpeed );
+            }
+        }
+    }
+}
+
 } // namespace
 
 int main( int argc, char** argv )
@@ -688,6 +842,7 @@ int main( int argc, char** argv )
     bool smallCellThresholdSweep = false;
     bool smallCellCadenceAudit = false;
     bool smallCellWorldFeedbackAudit = false;
+    bool smallCellLocalTracerAudit = false;
     for( int i = 1; i < argc; ++i )
     {
         csv |= std::string_view( argv[i] ) == "--csv";
@@ -703,6 +858,7 @@ int main( int argc, char** argv )
         smallCellThresholdSweep |= std::string_view( argv[i] ) == "--small-cell-merge-threshold-audit";
         smallCellCadenceAudit |= std::string_view( argv[i] ) == "--small-cell-merge-cadence-audit";
         smallCellWorldFeedbackAudit |= std::string_view( argv[i] ) == "--small-cell-world-feedback-audit";
+        smallCellLocalTracerAudit |= std::string_view( argv[i] ) == "--small-cell-local-tracer-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
     if( faceStageAudit ) { auditFaceStages(); return 0; }
@@ -711,6 +867,7 @@ int main( int argc, char** argv )
     if( smallCellThresholdSweep ) { auditFrozenPressure( true, true ); return 0; }
     if( smallCellCadenceAudit ) { auditSmallCellPressureCadences(); return 0; }
     if( smallCellWorldFeedbackAudit ) { auditSmallCellWorldFeedback(); return 0; }
+    if( smallCellLocalTracerAudit ) { auditSmallCellLocalTracer(); return 0; }
     if( warmStartSweep )
     {
         std::puts( "cell_m,world_substeps,fluid_substeps,warm_start,frames,"

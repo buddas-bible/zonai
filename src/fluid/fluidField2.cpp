@@ -1254,6 +1254,12 @@ float fluidField2::getTracerMass() const noexcept
     return static_cast<float>( mass );
 }
 
+double fluidField2::getTracerCellMass( int x, int y ) const noexcept
+{
+    if( x < 0 || x >= width_ || y < 0 || y >= height_ ) return 0.0;
+    return tracerMass_[cellIndex( x, y )];
+}
+
 vec2 fluidField2::getCellCenter( int x, int y ) const noexcept
 {
     return origin_ + cellSize_ * vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) + 0.5f };

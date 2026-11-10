@@ -826,6 +826,10 @@ public:
     [[nodiscard]] const fluidAdvectionStats2& getAdvectionStats() const noexcept { return advectionStats_; }
     [[nodiscard]] float getTracerConcentration( int x, int y ) const noexcept;
     [[nodiscard]] float getTracerMass() const noexcept;
+    // Raw stored cell mass (kg, unit depth), including tracer trapped in
+    // fully covered cells where concentration queries return zero.
+    // Diagnostic only: does not normalize by current fluid fraction.
+    [[nodiscard]] double getTracerCellMass( int x, int y ) const noexcept;
     [[nodiscard]] const fluidTracerStats2& getTracerStats() const noexcept { return tracerStats_; }
     // 기하 표본의 유체 면적 비율 [0,1]. 범위 밖은 0.
     // 외곽 wall face는 기하상 열려있어도 닫힌 경계이므로 0.

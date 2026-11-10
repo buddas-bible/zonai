@@ -3941,10 +3941,16 @@ void checkSweptTracerRemap()
     check( close( legacy.getCellFluidFraction( 8, 7 ), 1.0f ),
         "baseline tracer source must be fluid before moving obstacle" );
     legacy.setTracerConcentration( 8, 7, 4.0f );
+    check( std::abs( legacy.getTracerCellMass( 8, 7 ) - 1.0 ) < 1.0e-6 &&
+        legacy.getTracerCellMass( -1, 7 ) == 0.0 &&
+        legacy.getTracerCellMass( 8, 16 ) == 0.0,
+        "raw tracer cell mass must expose stored mass and safely reject invalid coordinates" );
     oldBox.transform.position.x += 1.25f;
     oldBox.center.x += 1.25f;
     legacy.step( dt, std::span<const fluidShapeObstacle2>( &oldBox, 1 ), feedback, 160 );
     check( legacy.getSweptFaceFlux().usedSweptFlux &&
+        legacy.getTracerCellMass( 8, 7 ) > 0.999 &&
+        legacy.getTracerConcentration( 8, 7 ) == 0.0f &&
         close( legacy.getTracerStats().trappedMass, 1.0f, 1.0e-4f ) &&
         !legacy.getTracerStats().usedSweptRemap,
         "default mode must keep Part 12a trapped tracer behavior" );
