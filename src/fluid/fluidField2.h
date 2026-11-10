@@ -322,6 +322,39 @@ struct fluidAdvectionStats2
     [[nodiscard]] vec2 delta() const noexcept { return after - before; }
 };
 
+// Diagnostic accounting for displaced tracer that the swept face + fallback
+// remapper did not move in a single Fluid substep. All masses are kg for unit
+// depth. Each unresolved source is counted in exactly one bin in EACH of the
+// three mutually exclusive pairs (partial/solid, connected/disconnected,
+// no-outward-sweep/insufficient-sweep). The pairs are different explanations,
+// not additional mass to sum together.
+struct fluidSweptTracerUnresolvedAudit2
+{
+    double totalMass = 0.0;
+    double partialCellMass = 0.0;
+    double fullyCoveredCellMass = 0.0;
+    double connectedFluidFaceMass = 0.0;
+    double noConnectedFluidFaceMass = 0.0;
+    double noUsableOutwardSweepMass = 0.0;
+    double insufficientOutwardSweepMass = 0.0;
+    int sources = 0;
+
+    // Largest unresolved source, ordered West, East, South, North.
+    int worstX = -1;
+    int worstY = -1;
+    double worstUnmatchedMass = 0.0;
+    double worstDisplacedMass = 0.0;
+    double worstSweptTransferMass = 0.0;
+    float worstPreviousFraction = 0.0f;
+    float worstCurrentFraction = 0.0f;
+    std::array<float, 4> worstFaceOpen{};
+    std::array<float, 4> worstNeighborFraction{};
+    std::array<float, 4> worstNeighborGain{};
+    // Signed swept volume (m^3), outward-positive from the source;
+    // includes blocked/closed destinations BEFORE remapper filtering.
+    std::array<double, 4> worstRawOutwardSweptVolume{};
+};
+
 // 양수 수동 tracer의 보존형 유량 수송. 질량은 셀에 보관하며 외곽 유량은 0.
 // trappedMass는 현재 solid가 차지한 셀에 남아 있는 질량: 물리적인 displaced-fluid remap이 아님.
 struct fluidTracerStats2
@@ -337,6 +370,7 @@ struct fluidTracerStats2
     float sweptRemappedMass = 0.0f;
     float fallbackRemappedMass = 0.0f;
     float unresolvedDisplacementMass = 0.0f;
+    fluidSweptTracerUnresolvedAudit2 unresolvedAudit{};
     bool usedSweptRemap = false;
     float maxCfl = 0.0f;
     int substeps = 0;

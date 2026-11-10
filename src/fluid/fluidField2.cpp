@@ -2416,7 +2416,60 @@ void fluidField2::remapTracerSwept()
                 tracerStats_.fallbackRemappedMass += static_cast<float>( unmatched );
             }
             else
+            {
                 tracerStats_.unresolvedDisplacementMass += static_cast<float>( unmatched );
+                auto& audit = tracerStats_.unresolvedAudit;
+                audit.totalMass += unmatched;
+                ++audit.sources;
+                if( current > 0.0 ) audit.partialCellMass += unmatched;
+                else audit.fullyCoveredCellMass += unmatched;
+
+                // The swept volume may have the right outward sign but its
+                // destination can still be fully solid or its current shared
+                // face can be geometrically closed. This is diagnostic only:
+                // the existing remapper's transfer decisions do not change.
+                const std::array<float, 4> faceOpen{{
+                    cutCellUOpen( x, y ), cutCellUOpen( x + 1, y ),
+                    cutCellVOpen( x, y ), cutCellVOpen( x, y + 1 )
+                }};
+                bool hasConnectedFace = false;
+                std::array<float, 4> fractions{};
+                std::array<float, 4> gains{};
+                for( int direction = 0; direction < 4; ++direction )
+                {
+                    const int neighbor = neighbors[direction];
+                    if( neighbor < 0 ) continue;
+                    fractions[direction] = cellFluidFraction_[neighbor];
+                    gains[direction] = fractions[direction] -
+                        previousCellFluidFraction_[neighbor];
+                    if( faceOpen[direction] > 0.0f && fractions[direction] > 0.0f )
+                        hasConnectedFace = true;
+                }
+                if( hasConnectedFace ) audit.connectedFluidFaceMass += unmatched;
+                else audit.noConnectedFluidFaceMass += unmatched;
+                if( totalOutwardVolume > 0.0 ) audit.insufficientOutwardSweepMass += unmatched;
+                else audit.noUsableOutwardSweepMass += unmatched;
+
+                if( unmatched > audit.worstUnmatchedMass )
+                {
+                    audit.worstX = x;
+                    audit.worstY = y;
+                    audit.worstUnmatchedMass = unmatched;
+                    audit.worstDisplacedMass = displaced;
+                    audit.worstSweptTransferMass = sweptTransfer;
+                    audit.worstPreviousFraction = static_cast<float>( previous );
+                    audit.worstCurrentFraction = static_cast<float>( current );
+                    audit.worstFaceOpen = faceOpen;
+                    audit.worstNeighborFraction = fractions;
+                    audit.worstNeighborGain = gains;
+                    audit.worstRawOutwardSweptVolume = {{
+                        -static_cast<double>( sweptUVolume_[uIndex( x, y )] ),
+                        static_cast<double>( sweptUVolume_[uIndex( x + 1, y )] ),
+                        -static_cast<double>( sweptVVolume_[vIndex( x, y )] ),
+                        static_cast<double>( sweptVVolume_[vIndex( x, y + 1 )] )
+                    }};
+                }
+            }
         }
 
     tracerMass_.swap( nextTracerMass_ );

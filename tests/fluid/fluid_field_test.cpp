@@ -3989,6 +3989,16 @@ void checkSweptTracerRemap()
     leadingBox.center.x += 1.5f;
     direct.step( dt, std::span<const fluidShapeObstacle2>( &leadingBox, 1 ), feedback, 160 );
     const fluidTracerStats2& directStats = direct.getTracerStats();
+    const auto& unresolved = directStats.unresolvedAudit;
+    check( std::abs( unresolved.totalMass - directStats.unresolvedDisplacementMass ) < 1.0e-5 &&
+        std::abs( unresolved.totalMass -
+            ( unresolved.partialCellMass + unresolved.fullyCoveredCellMass ) ) < 1.0e-10 &&
+        std::abs( unresolved.totalMass -
+            ( unresolved.connectedFluidFaceMass + unresolved.noConnectedFluidFaceMass ) ) < 1.0e-10 &&
+        std::abs( unresolved.totalMass -
+            ( unresolved.noUsableOutwardSweepMass + unresolved.insufficientOutwardSweepMass ) ) < 1.0e-10 &&
+        ( unresolved.sources == 0 || ( unresolved.worstX >= 0 && unresolved.worstY >= 0 ) ),
+        "unmatched swept remap diagnostic bins must partition the unchanged unresolved mass" );
     check( directStats.sweptRemappedMass > 0.0f &&
         close( direct.getTracerMass(), 1.0f, 1.0e-4f ) &&
         directStats.trappedMass < 1.0e-5f,
@@ -4042,7 +4052,9 @@ void checkSweptTracerRemap()
 
     moving.clear();
     check( moving.isSweptTracerRemapEnabled() && close( moving.getTracerMass(), 0.0f ) &&
-        !moving.getTracerStats().usedSweptRemap,
+        !moving.getTracerStats().usedSweptRemap &&
+        moving.getTracerStats().unresolvedAudit.sources == 0 &&
+        moving.getTracerStats().unresolvedAudit.totalMass == 0.0,
         "clear must reset swept remap diagnostics while retaining the selected mode" );
 }
 

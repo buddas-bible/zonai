@@ -689,7 +689,16 @@ void auditSmallCellLocalTracer()
         "target_cell_mass,target_concentration,neighbor_mass,region_mass,"
         "region_trapped_mass,global_trapped_mass,global_mass,centroid_x,centroid_y,"
         "swept_remapped_kg,fallback_remapped_kg,unresolved_kg,"
-        "virtual_exchange_m3,snapshot_decrease_m3,peak_face_speed" );
+        "virtual_exchange_m3,snapshot_decrease_m3,peak_face_speed,"
+        "unresolved_sources,unresolved_partial_kg,unresolved_solid_kg,"
+        "unresolved_connected_kg,unresolved_disconnected_kg,"
+        "unresolved_zero_outward_kg,unresolved_insufficient_outward_kg,"
+        "worst_source_x,worst_source_y,worst_unmatched_kg,"
+        "worst_previous_fraction,worst_current_fraction,"
+        "worst_west_open,worst_east_open,worst_south_open,worst_north_open,"
+        "worst_west_swept_m3,worst_east_swept_m3,"
+        "worst_south_swept_m3,worst_north_swept_m3,"
+        "worst_west_gain,worst_east_gain,worst_south_gain,worst_north_gain" );
 
     for( bool sweptRemap : { false, true } )
     {
@@ -805,7 +814,7 @@ void auditSmallCellLocalTracer()
                 }
                 std::printf( "%d,%d,%d,%d,%d,%.9g,%.9g,%d,%d,%d,"
                     "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
-                    "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+                    "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g",
                     sweptRemap ? 1 : 0, frame, variant, seedX, seedY,
                     seedFraction, seedMass, pressure.mergedPressureCells,
                     static_cast<int>( pressure.coupledStatus ),
@@ -820,6 +829,40 @@ void auditSmallCellLocalTracer()
                     pressure.virtualInternalExchangeVolume,
                     pressure.mergedSnapshotDecreaseVolume,
                     field.getFlowAudit( dt / fluidSubsteps ).maxFluidFaceSpeed );
+                const auto& unresolved = tracer.unresolvedAudit;
+                if( std::abs( unresolved.totalMass - tracer.unresolvedDisplacementMass ) >
+                        1.0e-6 * std::max( 1.0, unresolved.totalMass ) ||
+                    std::abs( unresolved.totalMass -
+                        unresolved.partialCellMass - unresolved.fullyCoveredCellMass ) > 1.0e-12 ||
+                    std::abs( unresolved.totalMass -
+                        unresolved.connectedFluidFaceMass - unresolved.noConnectedFluidFaceMass ) > 1.0e-12 ||
+                    std::abs( unresolved.totalMass -
+                        unresolved.noUsableOutwardSweepMass - unresolved.insufficientOutwardSweepMass ) > 1.0e-12 ||
+                    ( unresolved.sources > 0 &&
+                        ( unresolved.worstX < 0 || unresolved.worstY < 0 ||
+                            unresolved.worstUnmatchedMass <= 0.0 ) ) )
+                {
+                    std::fprintf( stderr, "invalid unmatched swept tracer mass accounting\n" );
+                    std::exit( 1 );
+                }
+                std::printf( ",%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%d,%d,%.9g,"
+                    "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+                    "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+                    unresolved.sources, unresolved.partialCellMass,
+                    unresolved.fullyCoveredCellMass, unresolved.connectedFluidFaceMass,
+                    unresolved.noConnectedFluidFaceMass,
+                    unresolved.noUsableOutwardSweepMass,
+                    unresolved.insufficientOutwardSweepMass,
+                    unresolved.worstX, unresolved.worstY, unresolved.worstUnmatchedMass,
+                    unresolved.worstPreviousFraction, unresolved.worstCurrentFraction,
+                    unresolved.worstFaceOpen[0], unresolved.worstFaceOpen[1],
+                    unresolved.worstFaceOpen[2], unresolved.worstFaceOpen[3],
+                    unresolved.worstRawOutwardSweptVolume[0],
+                    unresolved.worstRawOutwardSweptVolume[1],
+                    unresolved.worstRawOutwardSweptVolume[2],
+                    unresolved.worstRawOutwardSweptVolume[3],
+                    unresolved.worstNeighborGain[0], unresolved.worstNeighborGain[1],
+                    unresolved.worstNeighborGain[2], unresolved.worstNeighborGain[3] );
             }
         }
     }
