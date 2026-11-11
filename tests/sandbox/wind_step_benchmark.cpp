@@ -703,7 +703,11 @@ void auditSmallCellLocalTracer()
         "worst_mac_west_mass_kg,worst_mac_east_mass_kg,"
         "worst_mac_south_mass_kg,worst_mac_north_mass_kg,"
         "worst_mac_west_volume_m3,worst_mac_east_volume_m3,"
-        "worst_mac_south_volume_m3,worst_mac_north_volume_m3" );
+        "worst_mac_south_volume_m3,worst_mac_north_volume_m3,"
+        "worst_geom_loss_m3,worst_displaced_kg,worst_swept_transfer_kg,"
+        "worst_mac_net_out_kg,worst_mac_gross_out_kg,worst_mac_gross_in_kg,"
+        "worst_mac_net_out_volume_m3,worst_swept_positive_volume_m3,"
+        "worst_swept_negative_volume_m3" );
 
     for( bool sweptRemap : { false, true } )
     {
@@ -898,6 +902,58 @@ void auditSmallCellLocalTracer()
                     unresolved.worstMacOutwardFluidVolume[1],
                     unresolved.worstMacOutwardFluidVolume[2],
                     unresolved.worstMacOutwardFluidVolume[3] );
+
+                // These are independent accounting quantities: do not
+                // subtract a gross MAC export from unresolved swept demand
+                // and call the difference a true geometric conservation
+                // residual. MAC and Swept are distinct operators and
+                // transport different donor snapshots within a Fluid step.
+                const double geometryDecrease =
+                    std::max( 0.0, static_cast<double>(
+                        unresolved.worstPreviousFraction -
+                        unresolved.worstCurrentFraction ) ) * h * h;
+                double netMacMass = 0.0;
+                double grossMacOut = 0.0;
+                double grossMacIn = 0.0;
+                double netMacVolume = 0.0;
+                double sweptPositive = 0.0;
+                double sweptNegative = 0.0;
+                for( int direction = 0; direction < 4; ++direction )
+                {
+                    const double macMass =
+                        unresolved.worstMacOutwardTracerMass[direction];
+                    netMacMass += macMass;
+                    grossMacOut += std::max( 0.0, macMass );
+                    grossMacIn += std::max( 0.0, -macMass );
+                    netMacVolume +=
+                        unresolved.worstMacOutwardFluidVolume[direction];
+                    const double swept =
+                        unresolved.worstRawOutwardSweptVolume[direction];
+                    sweptPositive += std::max( 0.0, swept );
+                    sweptNegative += std::min( 0.0, swept );
+                }
+                if( !std::isfinite( netMacVolume ) ||
+                    !std::isfinite( geometryDecrease ) ||
+                    !std::isfinite( grossMacOut ) ||
+                    !std::isfinite( grossMacIn ) ||
+                    !std::isfinite( sweptPositive ) ||
+                    !std::isfinite( sweptNegative ) ||
+                    std::abs( netMacMass - grossMacOut + grossMacIn ) > 1.0e-12 ||
+                    ( unresolved.sources > 0 &&
+                        ( unresolved.worstDisplacedMass + 1.0e-12 <
+                            unresolved.worstSweptTransferMass ||
+                          unresolved.worstUnmatchedMass >
+                            unresolved.worstDisplacedMass + 1.0e-12 ) ) )
+                {
+                    std::fprintf( stderr, "worst swept donor geometric/MAC budget invalid\n" );
+                    std::exit( 1 );
+                }
+                std::printf( ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+                    "%.9g,%.9g,%.9g\n",
+                    geometryDecrease, unresolved.worstDisplacedMass,
+                    unresolved.worstSweptTransferMass, netMacMass,
+                    grossMacOut, grossMacIn, netMacVolume,
+                    sweptPositive, sweptNegative );
             }
         }
     }
