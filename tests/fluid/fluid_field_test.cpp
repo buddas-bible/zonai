@@ -3999,6 +3999,17 @@ void checkSweptTracerRemap()
             ( unresolved.noUsableOutwardSweepMass + unresolved.insufficientOutwardSweepMass ) ) < 1.0e-10 &&
         ( unresolved.sources == 0 || ( unresolved.worstX >= 0 && unresolved.worstY >= 0 ) ),
         "unmatched swept remap diagnostic bins must partition the unchanged unresolved mass" );
+    if( unresolved.sources > 0 )
+    {
+        const double netMacOut = unresolved.worstMacOutwardTracerMass[0] +
+            unresolved.worstMacOutwardTracerMass[1] +
+            unresolved.worstMacOutwardTracerMass[2] +
+            unresolved.worstMacOutwardTracerMass[3];
+        check( std::isfinite( netMacOut ) &&
+            std::abs( unresolved.worstMassAfterMacAdvection -
+                unresolved.worstMassBeforeMacAdvection + netMacOut ) < 1.0e-9,
+            "worst unresolved source must reconcile actual limited MAC transfers with stored mass" );
+    }
     check( directStats.sweptRemappedMass > 0.0f &&
         close( direct.getTracerMass(), 1.0f, 1.0e-4f ) &&
         directStats.trappedMass < 1.0e-5f,

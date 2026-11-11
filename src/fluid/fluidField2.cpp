@@ -2482,6 +2482,11 @@ void fluidField2::transportTracer( float timeStep )
 
     tracerStats_.beforeMass = getTracerMass();
     remapTracerSwept();
+    auto& worst = tracerStats_.unresolvedAudit;
+    const bool trackWorst = worst.sources > 0 && worst.worstX >= 0 &&
+        worst.worstX < width_ && worst.worstY >= 0 && worst.worstY < height_;
+    const int trackedCell = trackWorst ? cellIndex( worst.worstX, worst.worstY ) : -1;
+    if( trackWorst ) worst.worstMassBeforeMacAdvection = tracerMass_[trackedCell];
     const double area = static_cast<double>( cellSize_ ) * cellSize_;
     double maxSpeed = 0.0;
     for( int y = 0; y < height_; ++y )
@@ -2570,8 +2575,48 @@ void fluidField2::transportTracer( float timeStep )
                 nextTracerMass_[bottom] -= transfer;
                 nextTracerMass_[top] += transfer;
             }
+        if( trackWorst )
+        {
+            // Read the *same limited* face transfers just applied above.
+            // tracerMass_ is still the donor snapshot until the swap below.
+            // Inspect only four faces instead of branching at every MAC
+            // face; on the default no-unresolved path no extra work occurs.
+            const int x = worst.worstX;
+            const int y = worst.worstY;
+            const auto measureU = [&]( int faceX, int direction, double sign )
+            {
+                if( faceX <= 0 || faceX >= width_ ) return;
+                const int face = uIndex( faceX, y );
+                const double flux = tracerUFlux_[face];
+                const int donor = flux >= 0.0
+                    ? cellIndex( faceX - 1, y ) : cellIndex( faceX, y );
+                worst.worstMacOutwardTracerMass[direction] +=
+                    sign * limitedFlux( flux, donor );
+                worst.worstMacOutwardFluidVolume[direction] +=
+                    sign * static_cast<double>( u_[face] ) *
+                    advectionUOpen( faceX, y ) * lengthTime;
+            };
+            const auto measureV = [&]( int faceY, int direction, double sign )
+            {
+                if( faceY <= 0 || faceY >= height_ ) return;
+                const int face = vIndex( x, faceY );
+                const double flux = tracerVFlux_[face];
+                const int donor = flux >= 0.0
+                    ? cellIndex( x, faceY - 1 ) : cellIndex( x, faceY );
+                worst.worstMacOutwardTracerMass[direction] +=
+                    sign * limitedFlux( flux, donor );
+                worst.worstMacOutwardFluidVolume[direction] +=
+                    sign * static_cast<double>( v_[face] ) *
+                    advectionVOpen( x, faceY ) * lengthTime;
+            };
+            measureU( x, 0, -1.0 );
+            measureU( x + 1, 1, 1.0 );
+            measureV( y, 2, -1.0 );
+            measureV( y + 1, 3, 1.0 );
+        }
         tracerMass_.swap( nextTracerMass_ );
     }
+    if( trackWorst ) worst.worstMassAfterMacAdvection = tracerMass_[trackedCell];
 
     double trapped = 0.0;
     for( int y = 0; y < height_; ++y )

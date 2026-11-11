@@ -353,6 +353,15 @@ struct fluidSweptTracerUnresolvedAudit2
     // Signed swept volume (m^3), outward-positive from the source;
     // includes blocked/closed destinations BEFORE remapper filtering.
     std::array<double, 4> worstRawOutwardSweptVolume{};
+    // The exact MAC tracer transport, AFTER remap and AFTER the usual
+    // donor-outflow limiter, accumulated across every tracer CFL substep.
+    // W/E/S/N positive means mass left this source cell (kg).
+    std::array<double, 4> worstMacOutwardTracerMass{};
+    // Nominal open-fluid volume through each MAC face (m^3/unit depth):
+    // velocity * open aperture * h * dt. Not mass and not limited.
+    std::array<double, 4> worstMacOutwardFluidVolume{};
+    double worstMassBeforeMacAdvection = 0.0;
+    double worstMassAfterMacAdvection = 0.0;
 };
 
 // 양수 수동 tracer의 보존형 유량 수송. 질량은 셀에 보관하며 외곽 유량은 0.

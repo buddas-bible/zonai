@@ -698,7 +698,12 @@ void auditSmallCellLocalTracer()
         "worst_west_open,worst_east_open,worst_south_open,worst_north_open,"
         "worst_west_swept_m3,worst_east_swept_m3,"
         "worst_south_swept_m3,worst_north_swept_m3,"
-        "worst_west_gain,worst_east_gain,worst_south_gain,worst_north_gain" );
+        "worst_west_gain,worst_east_gain,worst_south_gain,worst_north_gain,"
+        "worst_mass_pre_mac_kg,worst_mass_post_mac_kg,"
+        "worst_mac_west_mass_kg,worst_mac_east_mass_kg,"
+        "worst_mac_south_mass_kg,worst_mac_north_mass_kg,"
+        "worst_mac_west_volume_m3,worst_mac_east_volume_m3,"
+        "worst_mac_south_volume_m3,worst_mac_north_volume_m3" );
 
     for( bool sweptRemap : { false, true } )
     {
@@ -847,7 +852,7 @@ void auditSmallCellLocalTracer()
                 }
                 std::printf( ",%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%d,%d,%.9g,"
                     "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
-                    "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+                    "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g",
                     unresolved.sources, unresolved.partialCellMass,
                     unresolved.fullyCoveredCellMass, unresolved.connectedFluidFaceMass,
                     unresolved.noConnectedFluidFaceMass,
@@ -863,6 +868,36 @@ void auditSmallCellLocalTracer()
                     unresolved.worstRawOutwardSweptVolume[3],
                     unresolved.worstNeighborGain[0], unresolved.worstNeighborGain[1],
                     unresolved.worstNeighborGain[2], unresolved.worstNeighborGain[3] );
+                if( unresolved.sources > 0 )
+                {
+                    const double netMacOut = unresolved.worstMacOutwardTracerMass[0] +
+                        unresolved.worstMacOutwardTracerMass[1] +
+                        unresolved.worstMacOutwardTracerMass[2] +
+                        unresolved.worstMacOutwardTracerMass[3];
+                    if( !std::isfinite( netMacOut ) ||
+                        std::abs( unresolved.worstMassAfterMacAdvection -
+                            unresolved.worstMassBeforeMacAdvection + netMacOut ) > 1.0e-9 ||
+                        !std::isfinite( unresolved.worstMacOutwardFluidVolume[0] ) ||
+                        !std::isfinite( unresolved.worstMacOutwardFluidVolume[1] ) ||
+                        !std::isfinite( unresolved.worstMacOutwardFluidVolume[2] ) ||
+                        !std::isfinite( unresolved.worstMacOutwardFluidVolume[3] ) )
+                    {
+                        std::fprintf( stderr, "worst swept source MAC transport mismatch\n" );
+                        std::exit( 1 );
+                    }
+                }
+                std::printf( ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+                    "%.9g,%.9g,%.9g,%.9g\n",
+                    unresolved.worstMassBeforeMacAdvection,
+                    unresolved.worstMassAfterMacAdvection,
+                    unresolved.worstMacOutwardTracerMass[0],
+                    unresolved.worstMacOutwardTracerMass[1],
+                    unresolved.worstMacOutwardTracerMass[2],
+                    unresolved.worstMacOutwardTracerMass[3],
+                    unresolved.worstMacOutwardFluidVolume[0],
+                    unresolved.worstMacOutwardFluidVolume[1],
+                    unresolved.worstMacOutwardFluidVolume[2],
+                    unresolved.worstMacOutwardFluidVolume[3] );
             }
         }
     }
