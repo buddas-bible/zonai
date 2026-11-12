@@ -360,6 +360,13 @@ struct fluidSweptTracerUnresolvedAudit2
     // Nominal open-fluid volume through each MAC face (m^3/unit depth):
     // velocity * open aperture * h * dt. Not mass and not limited.
     std::array<double, 4> worstMacOutwardFluidVolume{};
+    // This is the *applied* swept remap from the worst donor, by W/E/S/N.
+    // Values exclude directionally blocked or inward signed swept faces.
+    std::array<double, 4> worstSweptOutwardTracerMass{};
+    // Snapshot in that source before/after ALL simultaneous swept transfers.
+    // The difference also includes incoming swept remaps from OTHER sources.
+    double worstMassBeforeSweptRemap = 0.0;
+    double worstMassAfterSweptRemap = 0.0;
     double worstMassBeforeMacAdvection = 0.0;
     double worstMassAfterMacAdvection = 0.0;
 };

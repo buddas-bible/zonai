@@ -707,7 +707,11 @@ void auditSmallCellLocalTracer()
         "worst_geom_loss_m3,worst_displaced_kg,worst_swept_transfer_kg,"
         "worst_mac_net_out_kg,worst_mac_gross_out_kg,worst_mac_gross_in_kg,"
         "worst_mac_net_out_volume_m3,worst_swept_positive_volume_m3,"
-        "worst_swept_negative_volume_m3" );
+        "worst_swept_negative_volume_m3,"
+        "worst_swept_west_mass_kg,worst_swept_east_mass_kg,"
+        "worst_swept_south_mass_kg,worst_swept_north_mass_kg,"
+        "worst_mass_before_swept_kg,worst_mass_after_swept_kg,"
+        "worst_other_sources_inward_swept_kg" );
 
     for( bool sweptRemap : { false, true } )
     {
@@ -954,6 +958,32 @@ void auditSmallCellLocalTracer()
                     unresolved.worstSweptTransferMass, netMacMass,
                     grossMacOut, grossMacIn, netMacVolume,
                     sweptPositive, sweptNegative );
+
+                double actualSweptOut = 0.0;
+                for( const double mass : unresolved.worstSweptOutwardTracerMass )
+                    actualSweptOut += mass;
+                const double receivedFromOtherSweptSources =
+                    unresolved.worstMassAfterSweptRemap -
+                    unresolved.worstMassBeforeSweptRemap + actualSweptOut;
+                if( unresolved.sources > 0 &&
+                    ( std::abs( actualSweptOut -
+                        unresolved.worstSweptTransferMass ) > 1.0e-10 ||
+                      std::abs( unresolved.worstMassAfterSweptRemap -
+                        unresolved.worstMassBeforeMacAdvection ) > 1.0e-12 ||
+                      receivedFromOtherSweptSources < -1.0e-10 ||
+                      !std::isfinite( receivedFromOtherSweptSources ) ) )
+                {
+                    std::fprintf( stderr, "worst donor applied Swept transport mismatch\n" );
+                    std::exit( 1 );
+                }
+                std::printf( ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+                    unresolved.worstSweptOutwardTracerMass[0],
+                    unresolved.worstSweptOutwardTracerMass[1],
+                    unresolved.worstSweptOutwardTracerMass[2],
+                    unresolved.worstSweptOutwardTracerMass[3],
+                    unresolved.worstMassBeforeSweptRemap,
+                    unresolved.worstMassAfterSweptRemap,
+                    receivedFromOtherSweptSources );
             }
         }
     }

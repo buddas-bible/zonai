@@ -4005,10 +4005,18 @@ void checkSweptTracerRemap()
             unresolved.worstMacOutwardTracerMass[1] +
             unresolved.worstMacOutwardTracerMass[2] +
             unresolved.worstMacOutwardTracerMass[3];
+        const double sweptOut =
+            unresolved.worstSweptOutwardTracerMass[0] +
+            unresolved.worstSweptOutwardTracerMass[1] +
+            unresolved.worstSweptOutwardTracerMass[2] +
+            unresolved.worstSweptOutwardTracerMass[3];
         check( std::isfinite( netMacOut ) &&
             std::abs( unresolved.worstMassAfterMacAdvection -
-                unresolved.worstMassBeforeMacAdvection + netMacOut ) < 1.0e-9,
-            "worst unresolved source must reconcile actual limited MAC transfers with stored mass" );
+                unresolved.worstMassBeforeMacAdvection + netMacOut ) < 1.0e-9 &&
+            std::abs( sweptOut - unresolved.worstSweptTransferMass ) < 1.0e-10 &&
+            std::abs( unresolved.worstMassAfterSweptRemap -
+                unresolved.worstMassBeforeMacAdvection ) < 1.0e-12,
+            "worst unresolved source must reconcile actual limited Swept and MAC transfers" );
     }
     check( directStats.sweptRemappedMass > 0.0f &&
         close( direct.getTracerMass(), 1.0f, 1.0e-4f ) &&

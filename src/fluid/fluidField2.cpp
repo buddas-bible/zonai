@@ -2358,6 +2358,7 @@ void fluidField2::remapTracerSwept()
             const double sweptTransfer = std::min( displaced, requested );
             tracerStats_.sweptRequestedMass += static_cast<float>( requested );
             tracerStats_.sweptLimitedMass += static_cast<float>( std::max( 0.0, requested - displaced ) );
+            std::array<double, 4> appliedSweptOutward{};
             if( sweptTransfer > 0.0 )
             {
                 // 공유 swept face가 기록한 체적 비율대로 각 recipient에게
@@ -2365,6 +2366,7 @@ void fluidField2::remapTracerSwept()
                 // 모든 원천 계산은 이 Step 시작 질량만 참조하므로 순서 독립.
                 double remaining = sweptTransfer;
                 int lastDestination = -1;
+                int lastDirection = -1;
                 for( int direction = 0; direction < 4; ++direction )
                 {
                     if( outward[direction] <= 0.0 ) continue;
@@ -2373,14 +2375,17 @@ void fluidField2::remapTracerSwept()
                     nextTracerMass_[source] -= transfer;
                     nextTracerMass_[neighbors[direction]] += transfer;
                     tracerStats_.sweptRemappedMass += static_cast<float>( transfer );
+                    appliedSweptOutward[direction] += transfer;
                     remaining -= transfer;
                     lastDestination = neighbors[direction];
+                    lastDirection = direction;
                 }
                 if( remaining > 0.0 && lastDestination >= 0 )
                 {
                     nextTracerMass_[source] -= remaining;
                     nextTracerMass_[lastDestination] += remaining;
                     tracerStats_.sweptRemappedMass += static_cast<float>( remaining );
+                    appliedSweptOutward[lastDirection] += remaining;
                 }
             }
 
@@ -2457,6 +2462,7 @@ void fluidField2::remapTracerSwept()
                     audit.worstUnmatchedMass = unmatched;
                     audit.worstDisplacedMass = displaced;
                     audit.worstSweptTransferMass = sweptTransfer;
+                    audit.worstSweptOutwardTracerMass = appliedSweptOutward;
                     audit.worstPreviousFraction = static_cast<float>( previous );
                     audit.worstCurrentFraction = static_cast<float>( current );
                     audit.worstFaceOpen = faceOpen;
@@ -2472,6 +2478,13 @@ void fluidField2::remapTracerSwept()
             }
         }
 
+    auto& worst = tracerStats_.unresolvedAudit;
+    if( worst.sources > 0 )
+    {
+        const int cell = cellIndex( worst.worstX, worst.worstY );
+        worst.worstMassBeforeSweptRemap = tracerMass_[cell];
+        worst.worstMassAfterSweptRemap = nextTracerMass_[cell];
+    }
     tracerMass_.swap( nextTracerMass_ );
 }
 
