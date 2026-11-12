@@ -373,6 +373,15 @@ struct fluidSweptTracerUnresolvedAudit2
 
 // 양수 수동 tracer의 보존형 유량 수송. 질량은 셀에 보관하며 외곽 유량은 0.
 // trappedMass는 현재 solid가 차지한 셀에 남아 있는 질량: 물리적인 displaced-fluid remap이 아님.
+// Diagnostic callback boundaries for the two conservative tracer operators.
+// Every callback observes the actual stored per-cell mass; no snapshot copy
+// occurs in the engine when the observer is absent.
+enum class fluidTracerStage2
+{
+    afterSweptRemap,
+    afterMacAdvection
+};
+
 struct fluidTracerStats2
 {
     float beforeMass = 0.0f;
@@ -561,6 +570,15 @@ public:
         if( !enabled ) stepTiming_ = {};
     }
     [[nodiscard]] bool isStepTimingEnabled() const noexcept { return stepTimingEnabled_; }
+
+    // Opt-in read-only tracer-stage observer. Its field reference is valid
+    // only during this call. Snapshot/copy the queried masses if persistence
+    // is needed; callback exceptions propagate like other observers.
+    using tracerStageObserver2 = std::function<void(const fluidField2&, fluidTracerStage2)>;
+    void setTracerStageObserver( tracerStageObserver2 observer )
+    {
+        tracerStageObserver_ = std::move( observer );
+    }
 
     // S0 diagnostic only. Called after advection/boundaries, immediately
     // before Cut-cell projection. The caller can COPY this field to freeze
@@ -1114,6 +1132,7 @@ private:
     fluidSweptFaceFlux2 sweptFaceFlux_{};
     fluidAdvectionStats2 advectionStats_{};
     fluidTracerStats2 tracerStats_{};
+    tracerStageObserver2 tracerStageObserver_{};
     bool tracerEnabled_ = false;
     bool sweptTracerRemapEnabled_ = false;
     bool sweptGeometryCorrectionEnabled_ = false;
