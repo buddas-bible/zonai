@@ -1005,6 +1005,103 @@ void auditSmallCellLocalTracer()
     }
 }
 
+// Opt-in, read-only endpoint volume ledger. These are not time-centered
+// aperture integrals; every row is the LAST Fluid substep of a World frame.
+// Different h/cadences have different obstacle histories, so compare only
+// the two pressure variants inside one fixed h/cadence for causal A/B.
+void auditCutCellVolumeBudget()
+{
+    std::puts( "cell_m,fluid_substeps,frame,pressure_pool,cell_x,cell_y,"
+        "history,swept_history,fluid_fraction_previous,fluid_fraction_current,"
+        "snapshot_delta_m3,pressure_source_delta_m3,swept_divergence_m3,"
+        "mac_endpoint_out_m3,pressure_residual_m3,snapshot_residual_m3,"
+        "active_cells,modified_cells,modified_solid_cells,"
+        "pressure_rms_m3,snapshot_rms_m3,"
+        "max_pressure_residual_m3,worst_pressure_x,worst_pressure_y,"
+        "max_snapshot_residual_m3,worst_snapshot_x,worst_snapshot_y,"
+        "total_snapshot_delta_m3,total_pressure_source_delta_m3,"
+        "total_mac_endpoint_out_m3,swept_snapshot_mismatch_l1_m3,"
+        "pcg_status,merged_pressure_cells" );
+    for( float h : { 0.5f, 0.25f } )
+        for( int fluidSubsteps : { 2, 4, 8 } )
+            for( bool pooling : { false, true } )
+            {
+                rigidBodyDemo scene{ demoKind::windFlow };
+                scene.configureWindField( static_cast<int>( 12.0f / h ),
+                    static_cast<int>( 7.0f / h ), h );
+                scene.setWindCutCellProjectionEnabled( true );
+                scene.setWindCutCellCoupledProjectionEnabled( true );
+                scene.setWindDisjointAnalyticEnabled( true );
+                scene.setWindFluidSubstepCount( fluidSubsteps );
+                scene.setWindObstacleCouplingEnabled( true );
+                scene.setWindSourceStrength( 8.0f );
+                scene.setWindDragCoefficient( 0.0f );
+                scene.setWindSmallCellPressureMergeFraction( pooling ? 1.0e-4f : 0.0f );
+                const auto shapes = scene.getShapes();
+                scene.getWorld().SetBodyLinearVelocity(
+                    shapes[0].bodyHandle, { 0.7f, -0.10f } );
+                scene.getWorld().SetBodyAngularVelocity( shapes[1].bodyHandle, 0.5f );
+
+                for( int frame = 0; frame < 20; ++frame )
+                {
+                    scene.step( dt, worldSubsteps );
+                    if( frame != 5 && frame != 10 && frame != 19 ) continue;
+                    const fluidField2& field = *scene.getWindField();
+                    const int targetX = static_cast<int>( 18.0f * 0.25f / h );
+                    const int targetY = static_cast<int>( 13.0f * 0.25f / h );
+                    const float fluidDt = dt / fluidSubsteps;
+                    const auto cell =
+                        field.getCutCellVolumeBudget( targetX, targetY, fluidDt );
+                    const auto all = field.getCutCellVolumeSummary( fluidDt );
+                    if( !cell.valid || !cell.hasVolumeHistory || !all.valid ||
+                        all.activeCells <= 0 ||
+                        !std::isfinite( cell.pressureResidualVolume ) ||
+                        !std::isfinite( cell.snapshotResidualVolume ) ||
+                        !std::isfinite( all.activePressureResidualRmsVolume ) ||
+                        !std::isfinite( all.activeSnapshotResidualRmsVolume ) )
+                    {
+                        std::fprintf( stderr, "invalid Cut-cell endpoint volume audit\n" );
+                        std::exit( 1 );
+                    }
+                    // Validate dimensional and sign conventions against
+                    // the exact four-face ledger, not a velocity-only proxy.
+                    const double sumMac =
+                        cell.macOutwardVolume[0] + cell.macOutwardVolume[1] +
+                        cell.macOutwardVolume[2] + cell.macOutwardVolume[3];
+                    if( std::abs( sumMac - cell.macNetOutwardVolume ) > 1.0e-12 ||
+                        std::abs( cell.pressureResidualVolume -
+                            ( sumMac + cell.pressureSourceDeltaVolume ) ) > 1.0e-12 )
+                    {
+                        std::fprintf( stderr, "Cut-cell endpoint flux/sign mismatch\n" );
+                        std::exit( 1 );
+                    }
+
+                    std::printf( "%.9g,%d,%d,%d,%d,%d,"
+                        "%d,%d,%.9g,%.9g,"
+                        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+                        "%d,%d,%d,%.9g,%.9g,"
+                        "%.9g,%d,%d,%.9g,%d,%d,"
+                        "%.9g,%.9g,%.9g,%.9g,%d,%d\n",
+                        h, fluidSubsteps, frame, pooling ? 1 : 0, targetX, targetY,
+                        cell.hasVolumeHistory ? 1 : 0, cell.hasSweptHistory ? 1 : 0,
+                        cell.previousFraction, cell.currentFraction,
+                        cell.snapshotDeltaVolume, cell.pressureSourceDeltaVolume,
+                        cell.solidSweptDivergenceVolume, cell.macNetOutwardVolume,
+                        cell.pressureResidualVolume, cell.snapshotResidualVolume,
+                        all.activeCells, all.modifiedCells, all.modifiedFullyCoveredCells,
+                        all.activePressureResidualRmsVolume, all.activeSnapshotResidualRmsVolume,
+                        all.maxAbsPressureResidualVolume, all.worstPressureX, all.worstPressureY,
+                        all.maxAbsSnapshotResidualVolume, all.worstSnapshotX, all.worstSnapshotY,
+                        all.totalSnapshotDeltaVolume, all.totalPressureSourceDeltaVolume,
+                        all.totalMacNetOutwardVolume,
+                        all.totalAbsSweptSnapshotMismatchVolume,
+                        static_cast<int>( field.getCutCellPressure().coupledStatus ),
+                        field.getCutCellPressure().mergedPressureCells );
+                }
+            }
+}
+
+
 } // namespace
 
 int main( int argc, char** argv )
@@ -1023,6 +1120,7 @@ int main( int argc, char** argv )
     bool smallCellCadenceAudit = false;
     bool smallCellWorldFeedbackAudit = false;
     bool smallCellLocalTracerAudit = false;
+    bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
         csv |= std::string_view( argv[i] ) == "--csv";
@@ -1039,6 +1137,7 @@ int main( int argc, char** argv )
         smallCellCadenceAudit |= std::string_view( argv[i] ) == "--small-cell-merge-cadence-audit";
         smallCellWorldFeedbackAudit |= std::string_view( argv[i] ) == "--small-cell-world-feedback-audit";
         smallCellLocalTracerAudit |= std::string_view( argv[i] ) == "--small-cell-local-tracer-audit";
+        cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
     if( faceStageAudit ) { auditFaceStages(); return 0; }
@@ -1048,6 +1147,7 @@ int main( int argc, char** argv )
     if( smallCellCadenceAudit ) { auditSmallCellPressureCadences(); return 0; }
     if( smallCellWorldFeedbackAudit ) { auditSmallCellWorldFeedback(); return 0; }
     if( smallCellLocalTracerAudit ) { auditSmallCellLocalTracer(); return 0; }
+    if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
         std::puts( "cell_m,world_substeps,fluid_substeps,warm_start,frames,"

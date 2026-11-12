@@ -91,6 +91,10 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-local-tracer-audit
 
+      - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
+
       # Diagnostic numbers are informational; TOI may miss some intermediate rotational contacts.
       - name: Report World rotational sweep oracle (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
@@ -266,6 +270,10 @@ jobs:
       - name: Probe local tracer near disappearing Cut-cell (Windows Release, informational)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-local-tracer-audit
+
+      - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --cut-cell-volume-budget-audit
 
       # Identical World/Fluid scene using original on-the-fly IC(0) sweeps.
       # Compare with the previous cached run on this same Windows runner.
