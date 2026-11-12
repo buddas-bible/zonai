@@ -825,7 +825,22 @@ void auditSmallCellLocalTracer()
                     std::fprintf( stderr, "local tracer stored mass or centroid invalid\n" );
                     std::exit( 1 );
                 }
-                std::printf( "%d,%d,%d,%d,%d,%.9g,%.9g,%d,%d,%d,"
+                // GitHub Actions prefixes each partial printf flush with
+                // a new log line, so emit each complete CSV record atomically.
+                std::string csvLine;
+                const auto appendCsv = [&]( const char* format, auto... values )
+                {
+                    std::array<char, 1024> segment{};
+                    const int length = std::snprintf( segment.data(), segment.size(),
+                        format, values... );
+                    if( length < 0 || static_cast<std::size_t>( length ) >= segment.size() )
+                    {
+                        std::fprintf( stderr, "small-cell tracer CSV segment overflow\n" );
+                        std::exit( 1 );
+                    }
+                    csvLine.append( segment.data(), static_cast<std::size_t>( length ) );
+                };
+                appendCsv( "%d,%d,%d,%d,%d,%.9g,%.9g,%d,%d,%d,"
                     "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
                     "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g",
                     sweptRemap ? 1 : 0, frame, variant, seedX, seedY,
@@ -858,7 +873,7 @@ void auditSmallCellLocalTracer()
                     std::fprintf( stderr, "invalid unmatched swept tracer mass accounting\n" );
                     std::exit( 1 );
                 }
-                std::printf( ",%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%d,%d,%.9g,"
+                appendCsv( ",%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%d,%d,%.9g,"
                     "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
                     "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g",
                     unresolved.sources, unresolved.partialCellMass,
@@ -894,8 +909,8 @@ void auditSmallCellLocalTracer()
                         std::exit( 1 );
                     }
                 }
-                std::printf( ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
-                    "%.9g,%.9g,%.9g,%.9g\n",
+                appendCsv( ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+                    "%.9g,%.9g,%.9g,%.9g",
                     unresolved.worstMassBeforeMacAdvection,
                     unresolved.worstMassAfterMacAdvection,
                     unresolved.worstMacOutwardTracerMass[0],
@@ -952,8 +967,8 @@ void auditSmallCellLocalTracer()
                     std::fprintf( stderr, "worst swept donor geometric/MAC budget invalid\n" );
                     std::exit( 1 );
                 }
-                std::printf( ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
-                    "%.9g,%.9g,%.9g\n",
+                appendCsv( ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+                    "%.9g,%.9g,%.9g",
                     geometryDecrease, unresolved.worstDisplacedMass,
                     unresolved.worstSweptTransferMass, netMacMass,
                     grossMacOut, grossMacIn, netMacVolume,
@@ -976,7 +991,7 @@ void auditSmallCellLocalTracer()
                     std::fprintf( stderr, "worst donor applied Swept transport mismatch\n" );
                     std::exit( 1 );
                 }
-                std::printf( ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+                appendCsv( ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g",
                     unresolved.worstSweptOutwardTracerMass[0],
                     unresolved.worstSweptOutwardTracerMass[1],
                     unresolved.worstSweptOutwardTracerMass[2],
@@ -984,6 +999,7 @@ void auditSmallCellLocalTracer()
                     unresolved.worstMassBeforeSweptRemap,
                     unresolved.worstMassAfterSweptRemap,
                     receivedFromOtherSweptSources );
+                std::puts( csvLine.c_str() );
             }
         }
     }
