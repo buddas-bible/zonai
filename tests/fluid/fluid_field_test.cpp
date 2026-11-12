@@ -4372,6 +4372,123 @@ void checkCoupledPressureWarmStartDifferential()
         }
 }
 
+
+void checkMovingCutCellLocalClosure()
+{
+    // Diagnostic-only: compare the stored tracer with the reported applied
+    // swept/MAC transfers. Unresolved displacement is retained mass, NOT loss.
+    constexpr float worldDt = 1.0f / 60.0f;
+    const std::array<vec2, 4> motions{{
+        { 0.28f, 0.0f }, { -0.28f, 0.0f },
+        { 0.0f, 0.28f }, { 0.0f, -0.28f }
+    }};
+    for( float h : { 0.5f, 0.25f } )
+        for( int fluidSteps : { 1, 4 } )
+            for( const vec2 motion : motions )
+            {
+                fluidField2 field{ static_cast<int>( 8.0f / h ),
+                    static_cast<int>( 8.0f / h ), h, { -4.0f, -4.0f } };
+                field.setCutCellProjectionEnabled( true );
+                field.setCutCellCoupledProjectionEnabled( true );
+                field.setDisjointAnalyticCutCellEnabled( true );
+                field.setSweptTracerRemapEnabled( true );
+                fluidShapeObstacle2 circle{ circle2{ {}, 0.58f },
+                    { { 0.12f, -0.08f }, {} }, { 0.12f, -0.08f },
+                    {}, 0.0f, 0.0f, 0.0f };
+                std::array<fluidObstacleForce2, 1> forces{};
+                const float dt = worldDt / fluidSteps;
+                field.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                    forces, 120 );
+
+                // Dye the region affected by the moving boundary, including
+                // partially open cells, without relying on a single lucky face.
+                for( int y = 0; y < field.getHeight(); ++y )
+                    for( int x = 0; x < field.getWidth(); ++x )
+                    {
+                        const float wx = -4.0f + ( x + 0.5f ) * h;
+                        const float wy = -4.0f + ( y + 0.5f ) * h;
+                        if( std::abs( wx ) < 1.2f && std::abs( wy ) < 1.2f )
+                            field.setTracerConcentration( x, y, 1.0f );
+                    }
+                const double initialMass = field.getTracerMass();
+                check( initialMass > 0.0, "moving Cut-cell closure needs seeded tracer" );
+
+                for( int substep = 0; substep < fluidSteps; ++substep )
+                {
+                    circle.transform.position += motion / static_cast<float>( fluidSteps );
+                    circle.center = circle.transform.position;
+                    const double before = field.getTracerMass();
+                    field.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                        forces, 120 );
+                    const auto& stats = field.getTracerStats();
+                    const auto& audit = stats.unresolvedAudit;
+                    double stored = 0.0;
+                    for( int y = 0; y < field.getHeight(); ++y )
+                        for( int x = 0; x < field.getWidth(); ++x )
+                        {
+                            const double mass = field.getTracerCellMass( x, y );
+                            check( std::isfinite( mass ) && mass >= -1.0e-10,
+                                "moving Cut-cell must retain finite nonnegative cell mass" );
+                            stored += mass;
+                            const auto volume = field.getCutCellVolumeBudget( x, y, dt );
+                            check( volume.valid && volume.hasVolumeHistory &&
+                                std::abs( volume.pressureResidualVolume -
+                                    ( volume.macNetOutwardVolume +
+                                        volume.pressureSourceDeltaVolume ) ) < 1.0e-10 &&
+                                std::abs( volume.snapshotResidualVolume -
+                                    ( volume.macNetOutwardVolume +
+                                        volume.snapshotDeltaVolume ) ) < 1.0e-10,
+                                "moving Cut-cell endpoint and pressure volume ledgers must reconcile separately" );
+                            if( x + 1 < field.getWidth() )
+                            {
+                                const auto east = field.getCutCellVolumeBudget( x + 1, y, dt );
+                                check( std::abs( volume.macOutwardVolume[1] +
+                                    east.macOutwardVolume[0] ) < 1.0e-10 &&
+                                    std::abs( volume.solidSweptOutwardVolume[1] +
+                                        east.solidSweptOutwardVolume[0] ) < 1.0e-10,
+                                    "shared east/west faces must have opposite signed volume" );
+                            }
+                            if( y + 1 < field.getHeight() )
+                            {
+                                const auto north = field.getCutCellVolumeBudget( x, y + 1, dt );
+                                check( std::abs( volume.macOutwardVolume[3] +
+                                    north.macOutwardVolume[2] ) < 1.0e-10 &&
+                                    std::abs( volume.solidSweptOutwardVolume[3] +
+                                        north.solidSweptOutwardVolume[2] ) < 1.0e-10,
+                                    "shared north/south faces must have opposite signed volume" );
+                            }
+                        }
+                    check( std::abs( stored - field.getTracerMass() ) < 1.0e-7 &&
+                        std::abs( stored - before ) < 1.0e-6 &&
+                        std::abs( stats.beforeMass - before ) < 1.0e-5 &&
+                        std::abs( stats.afterMass - stored ) < 1.0e-5 &&
+                        std::abs( audit.totalMass -
+                            ( audit.partialCellMass + audit.fullyCoveredCellMass ) ) < 1.0e-9 &&
+                        std::abs( audit.totalMass -
+                            ( audit.connectedFluidFaceMass + audit.noConnectedFluidFaceMass ) ) < 1.0e-9,
+                        "swept remap and MAC advection must preserve globally stored tracer mass" );
+
+                    if( audit.sources > 0 )
+                    {
+                        const auto sum = []( const std::array<double, 4>& values )
+                        {
+                            return values[0] + values[1] + values[2] + values[3];
+                        };
+                        check( std::abs( sum( audit.worstSweptOutwardTracerMass ) -
+                            audit.worstSweptTransferMass ) < 1.0e-9 &&
+                            std::abs( audit.worstMassBeforeMacAdvection -
+                                audit.worstMassAfterSweptRemap ) < 1.0e-9 &&
+                            std::abs( audit.worstMassBeforeMacAdvection -
+                                sum( audit.worstMacOutwardTracerMass ) -
+                                audit.worstMassAfterMacAdvection ) < 1.0e-8,
+                            "worst unresolved cell must close each applied swept and MAC stage independently" );
+                    }
+                }
+                check( std::abs( field.getTracerMass() - initialMass ) < 1.0e-6,
+                    "all motion directions and fluid cadences must conserve tracer mass" );
+            }
+}
+
 } // namespace
 
 int main()
@@ -4432,6 +4549,7 @@ int main()
     checkConservativeMacAdvection();
     checkConservativeTracerTransport();
     checkSweptTracerRemap();
+    checkMovingCutCellLocalClosure();
     checkCutCellVolumeLedger();
     checkSweptGeometryCorrection();
 }
