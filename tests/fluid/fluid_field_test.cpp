@@ -4150,6 +4150,127 @@ void checkSweptTracerRemap()
 // S2c: two distinct conservative operators act during a moving obstacle
 // step. Their ledgers must close separately; endpoint MAC volume flux is
 // never substituted for the time-integrated swept geometry transfer.
+// Observe the actual intermediate cell masses instead of inferring swept
+// transfer from the final state. The unobserved field is the physics oracle.
+void checkTracerStageObserverConservation()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    const std::array<vec2, 4> motions{{
+        { 0.28f, 0.0f }, { -0.28f, 0.0f },
+        { 0.0f, 0.28f }, { 0.0f, -0.28f }
+    }};
+    for( float h : { 0.5f, 0.25f } )
+        for( const vec2 motion : motions )
+            for( bool pooled : { false, true } )
+            {
+                const int count = static_cast<int>( 8.0f / h );
+                fluidField2 reference{ count, count, h, { -4.0f, -4.0f } };
+                fluidField2 observed{ count, count, h, { -4.0f, -4.0f } };
+                for( fluidField2* field : { &reference, &observed } )
+                {
+                    field->setCutCellProjectionEnabled( true );
+                    field->setCutCellCoupledProjectionEnabled( true );
+                    field->setDisjointAnalyticCutCellEnabled( true );
+                    field->setSweptTracerRemapEnabled( true );
+                    if( pooled ) field->setSmallCellPressureMergeFraction( 1.0e-4f );
+                }
+                fluidShapeObstacle2 circle{ circle2{ {}, 0.58f },
+                    { { 0.12f, -0.08f }, {} }, { 0.12f, -0.08f },
+                    {}, 0.0f, 0.0f, 0.0f };
+                std::array<fluidObstacleForce2, 1> referenceForce{}, observedForce{};
+                reference.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                    referenceForce, 120 );
+                observed.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                    observedForce, 120 );
+
+                for( int y = 0; y < count; ++y )
+                    for( int x = 0; x < count; ++x )
+                    {
+                        const vec2 center = reference.getCellCenter( x, y );
+                        if( std::abs( center.x ) < 1.2f &&
+                            std::abs( center.y ) < 1.2f )
+                        {
+                            reference.setTracerConcentration( x, y, 1.0f );
+                            observed.setTracerConcentration( x, y, 1.0f );
+                        }
+                    }
+
+                const int cells = count * count;
+                std::vector<double> afterSwept( cells ), afterMac( cells );
+                int calls = 0;
+                observed.setTracerStageObserver( [&]( const fluidField2& field,
+                    fluidTracerStage2 stage )
+                {
+                    check( calls < 2, "tracer observer must be called at most twice per step" );
+                    check( ( calls == 0 && stage == fluidTracerStage2::afterSweptRemap ) ||
+                        ( calls == 1 && stage == fluidTracerStage2::afterMacAdvection ),
+                        "tracer observer must follow swept then MAC execution order" );
+                    auto& snapshot = stage == fluidTracerStage2::afterSweptRemap
+                        ? afterSwept : afterMac;
+                    for( int y = 0; y < count; ++y )
+                        for( int x = 0; x < count; ++x )
+                            snapshot[y * count + x] = field.getTracerCellMass( x, y );
+                    ++calls;
+                } );
+
+                const auto sum = []( const std::vector<double>& values )
+                {
+                    double total = 0.0;
+                    for( double value : values ) total += value;
+                    return total;
+                };
+                for( int phase = 0; phase < 2; ++phase )
+                {
+                    calls = 0;
+                    circle.transform.position += phase == 0 ? motion : -motion;
+                    circle.center = circle.transform.position;
+                    const double before = observed.getTracerMass();
+                    reference.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                        referenceForce, 120 );
+                    observed.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                        observedForce, 120 );
+                    check( calls == 2, "both tracer-stage snapshots must be observable" );
+                    check( std::abs( sum( afterSwept ) - before ) < 1.0e-6 &&
+                        std::abs( sum( afterMac ) - before ) < 1.0e-6 &&
+                        std::abs( observed.getTracerMass() - before ) < 1.0e-6,
+                        "swept and MAC stages must conserve stored mass independently" );
+                    for( int y = 0; y < count; ++y )
+                        for( int x = 0; x < count; ++x )
+                        {
+                            const int cell = y * count + x;
+                            const double actual = observed.getTracerCellMass( x, y );
+                            check( std::isfinite( afterSwept[cell] ) &&
+                                std::isfinite( afterMac[cell] ) &&
+                                afterSwept[cell] >= -1.0e-10 &&
+                                afterMac[cell] >= -1.0e-10 &&
+                                std::abs( actual - afterMac[cell] ) < 1.0e-12 &&
+                                std::abs( actual -
+                                    reference.getTracerCellMass( x, y ) ) < 1.0e-10,
+                                "read-only observer must preserve every stored cell mass" );
+                        }
+                    const auto& worst = observed.getTracerStats().unresolvedAudit;
+                    if( worst.sources > 0 )
+                    {
+                        const int index = worst.worstY * count + worst.worstX;
+                        check( index >= 0 && index < cells &&
+                            std::abs( afterSwept[index] -
+                                worst.worstMassAfterSweptRemap ) < 1.0e-12 &&
+                            std::abs( afterMac[index] -
+                                worst.worstMassAfterMacAdvection ) < 1.0e-12,
+                            "stage snapshots must match independently recorded worst-source ledger" );
+                    }
+                    check( Length( observed.getFluidMomentum() -
+                        reference.getFluidMomentum() ) < 1.0e-6f,
+                        "tracer observation must not alter projected MAC velocities" );
+                }
+                observed.setTracerStageObserver( {} );
+                calls = 0;
+                observed.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                    observedForce, 120 );
+                check( calls == 0, "disabled observer must not receive tracer events" );
+            }
+}
+
 void checkMovingCutCellClosureReopeningDifferential()
 {
     constexpr float frameDt = 1.0f / 60.0f;
@@ -4694,6 +4815,7 @@ int main()
     checkConservativeTracerTransport();
     checkSweptTracerRemap();
     checkMovingCutCellClosureReopeningDifferential();
+    checkTracerStageObserverConservation();
     checkMovingCutCellLocalClosure();
     checkCutCellVolumeLedger();
     checkSweptGeometryCorrection();
