@@ -4150,7 +4150,7 @@ void checkSweptTracerRemap()
 // S2c: two distinct conservative operators act during a moving obstacle
 // step. Their ledgers must close separately; endpoint MAC volume flux is
 // never substituted for the time-integrated swept geometry transfer.
-void checkMovingCutCellLocalClosure()
+void checkMovingCutCellClosureReopeningDifferential()
 {
     constexpr float frameDt = 1.0f / 60.0f;
     const std::array<vec2, 4> directions{{
@@ -4693,7 +4693,7 @@ int main()
     checkConservativeMacAdvection();
     checkConservativeTracerTransport();
     checkSweptTracerRemap();
-    checkMovingCutCellLocalClosure();
+    checkMovingCutCellClosureReopeningDifferential();
     checkMovingCutCellLocalClosure();
     checkCutCellVolumeLedger();
     checkSweptGeometryCorrection();
