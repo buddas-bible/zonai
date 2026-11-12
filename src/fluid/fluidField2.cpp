@@ -2495,6 +2495,8 @@ void fluidField2::transportTracer( float timeStep )
 
     tracerStats_.beforeMass = getTracerMass();
     remapTracerSwept();
+    if( tracerStageObserver_ )
+        tracerStageObserver_( *this, fluidTracerStage2::afterSweptRemap );
     auto& worst = tracerStats_.unresolvedAudit;
     const bool trackWorst = worst.sources > 0 && worst.worstX >= 0 &&
         worst.worstX < width_ && worst.worstY >= 0 && worst.worstY < height_;
@@ -2630,6 +2632,8 @@ void fluidField2::transportTracer( float timeStep )
         tracerMass_.swap( nextTracerMass_ );
     }
     if( trackWorst ) worst.worstMassAfterMacAdvection = tracerMass_[trackedCell];
+    if( tracerStageObserver_ )
+        tracerStageObserver_( *this, fluidTracerStage2::afterMacAdvection );
 
     double trapped = 0.0;
     for( int y = 0; y < height_; ++y )
