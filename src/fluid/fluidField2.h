@@ -398,6 +398,54 @@ struct fluidTracerStats2
 // Side-effect-free snapshot of the current MAC face state. Not a stored Step result.
 // For Cut-cell, continuity includes the latest swept-volume source; the
 // predicted post-pressure solid flux is a separate diagnostic.
+// Read-only Cut-cell volume ledger for one current Fluid substep (unit depth).
+// Signed volume is outward-positive from (x,y), in m^3.
+// MAC uses the *current/endpoint* face open fraction and velocity times dt.
+// It is NOT the actual time-integral of a changing space-time aperture.
+// The pressure source may use swept volume and relocation from solid cells;
+// therefore snapshot, swept and pressure-source residuals are distinct.
+struct fluidCutCellVolumeBudget2
+{
+    bool valid = false;
+    bool hasVolumeHistory = false;
+    bool hasSweptHistory = false;
+    bool active = false;
+    float previousFraction = 0.0f;
+    float currentFraction = 0.0f;
+    std::array<double, 4> macOutwardVolume{}; // W/E/S/N, m^3
+    std::array<double, 4> solidSweptOutwardVolume{}; // W/E/S/N, m^3
+    double snapshotDeltaVolume = 0.0;
+    double pressureSourceDeltaVolume = 0.0;
+    double solidSweptDivergenceVolume = 0.0;
+    double macNetOutwardVolume = 0.0;
+    double pressureResidualVolume = 0.0; // MAC + solver source
+    double snapshotResidualVolume = 0.0; // MAC + geometric delta
+    double sweptResidualVolume = 0.0; // MAC + signed solid swept divergence
+};
+
+// O(grid) opt-in summary; does not run or allocate in the normal Step.
+// RMS metrics count active fluid cells only; totalSnapshotDeltaVolume and
+// modifiedCellCount account for fully covered cells as well.
+struct fluidCutCellVolumeSummary2
+{
+    bool valid = false;
+    int activeCells = 0;
+    int modifiedCells = 0;
+    int modifiedFullyCoveredCells = 0;
+    double totalSnapshotDeltaVolume = 0.0;
+    double totalPressureSourceDeltaVolume = 0.0;
+    double totalMacNetOutwardVolume = 0.0;
+    double totalAbsSweptSnapshotMismatchVolume = 0.0;
+    double activePressureResidualRmsVolume = 0.0;
+    double activeSnapshotResidualRmsVolume = 0.0;
+    double maxAbsPressureResidualVolume = 0.0;
+    double maxAbsSnapshotResidualVolume = 0.0;
+    int worstPressureX = -1;
+    int worstPressureY = -1;
+    int worstSnapshotX = -1;
+    int worstSnapshotY = -1;
+};
+
 struct fluidFlowAudit2
 {
     float continuityRms = 0.0f;     // 1/s
@@ -858,6 +906,12 @@ public:
     // Explicit diagnostic: reads the current field, including changes after Step.
     // Not called on the normal simulation path; timeStep must be finite and positive.
     [[nodiscard]] fluidFlowAudit2 getFlowAudit( float timeStep ) const noexcept;
+    // Endpoint (not time-centered) MAC-vs-geometry and pressure-source ledgers.
+    // Invalid coordinates / nonpositive dt return valid=false.
+    [[nodiscard]] fluidCutCellVolumeBudget2 getCutCellVolumeBudget(
+        int x, int y, float timeStep ) const noexcept;
+    [[nodiscard]] fluidCutCellVolumeSummary2 getCutCellVolumeSummary(
+        float timeStep ) const noexcept;
     [[nodiscard]] const fluidFaceStageAudit2& getFaceStageAudit() const noexcept { return faceStageAudit_; }
 
     // 내부 fluid-fluid MAC face 속도를 dual-cell mass로 적분한 운동량.

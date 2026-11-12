@@ -3923,6 +3923,76 @@ void checkConservativeTracerTransport()
 }
 
 
+void checkCutCellVolumeLedger()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    fluidField2 fluid{ 16, 16, 0.5f, { -4.0f, -4.0f } };
+    fluid.setCutCellProjectionEnabled( true );
+    const auto noHistory = fluid.getCutCellVolumeBudget( 8, 8, dt );
+    check( noHistory.valid && !noHistory.hasVolumeHistory &&
+        !fluid.getCutCellVolumeBudget( -1, 8, dt ).valid &&
+        !fluid.getCutCellVolumeBudget( 8, 8, 0.0f ).valid &&
+        !fluid.getCutCellVolumeSummary( 0.0f ).valid,
+        "Cut-cell volume audit must reject invalid input and expose missing history" );
+
+    std::array<fluidObstacleForce2, 1> feedback{};
+    fluidShapeObstacle2 obstacle{ MakeBox( { 0.8f, 0.3f } ),
+        { { -1.0f, -0.25f }, {} }, { -1.0f, -0.25f }, {}, 0.0f };
+    fluid.step( dt, std::span<const fluidShapeObstacle2>( &obstacle, 1 ), feedback );
+    const auto first = fluid.getCutCellVolumeBudget( 9, 7, dt );
+    check( first.valid && !first.hasVolumeHistory,
+        "first obstacle snapshot must not create a fictitious volume source" );
+
+    obstacle.transform.position.x += 0.5f;
+    obstacle.center.x += 0.5f;
+    fluid.step( dt, std::span<const fluidShapeObstacle2>( &obstacle, 1 ), feedback, 160 );
+    const auto summary = fluid.getCutCellVolumeSummary( dt );
+    check( summary.valid && summary.activeCells > 0 && summary.modifiedCells > 0 &&
+        std::isfinite( summary.activePressureResidualRmsVolume ) &&
+        std::isfinite( summary.activeSnapshotResidualRmsVolume ) &&
+        std::isfinite( summary.totalSnapshotDeltaVolume ),
+        "moving obstacle must have valid finite active-cell endpoint volume budgets" );
+
+    double pressureResidualSquare = 0.0;
+    double snapshotResidualSquare = 0.0;
+    int active = 0;
+    int modified = 0;
+    for( int y = 0; y < fluid.getHeight(); ++y )
+        for( int x = 0; x < fluid.getWidth(); ++x )
+        {
+            const auto cell = fluid.getCutCellVolumeBudget( x, y, dt );
+            check( cell.valid && cell.hasVolumeHistory &&
+                std::isfinite( cell.macNetOutwardVolume ) &&
+                std::isfinite( cell.pressureResidualVolume ) &&
+                std::isfinite( cell.snapshotResidualVolume ),
+                "every Cut-cell must expose finite volume budgets after moving geometry" );
+            const double macSum = cell.macOutwardVolume[0] + cell.macOutwardVolume[1] +
+                cell.macOutwardVolume[2] + cell.macOutwardVolume[3];
+            const double sweptSum = cell.solidSweptOutwardVolume[0] +
+                cell.solidSweptOutwardVolume[1] +
+                cell.solidSweptOutwardVolume[2] +
+                cell.solidSweptOutwardVolume[3];
+            check( std::abs( macSum - cell.macNetOutwardVolume ) < 1.0e-12 &&
+                std::abs( cell.pressureResidualVolume -
+                    ( macSum + cell.pressureSourceDeltaVolume ) ) < 1.0e-12 &&
+                std::abs( cell.snapshotResidualVolume -
+                    ( macSum + cell.snapshotDeltaVolume ) ) < 1.0e-12 &&
+                std::abs( sweptSum - cell.solidSweptDivergenceVolume ) < 1.0e-12,
+                "signed Cut-cell face volumes must reconcile with their individual ledgers" );
+            if( cell.previousFraction != cell.currentFraction ) ++modified;
+            if( !cell.active ) continue;
+            ++active;
+            pressureResidualSquare += cell.pressureResidualVolume * cell.pressureResidualVolume;
+            snapshotResidualSquare += cell.snapshotResidualVolume * cell.snapshotResidualVolume;
+        }
+    check( active == summary.activeCells && modified == summary.modifiedCells &&
+        std::abs( summary.activePressureResidualRmsVolume -
+            std::sqrt( pressureResidualSquare / active ) ) < 1.0e-12 &&
+        std::abs( summary.activeSnapshotResidualRmsVolume -
+            std::sqrt( snapshotResidualSquare / active ) ) < 1.0e-12,
+        "volume summary must agree with independently scanned individual cells" );
+}
+
 void checkSweptTracerRemap()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -4362,5 +4432,6 @@ int main()
     checkConservativeMacAdvection();
     checkConservativeTracerTransport();
     checkSweptTracerRemap();
+    checkCutCellVolumeLedger();
     checkSweptGeometryCorrection();
 }

@@ -5107,6 +5107,115 @@ void fluidField2::project( float timeStep, int pressureIterations,
     pressureMomentum_.wall = timeStep * vec2{ static_cast<float>( wallX ), static_cast<float>( wallY ) };
 }
 
+fluidCutCellVolumeBudget2 fluidField2::getCutCellVolumeBudget(
+    int x, int y, float timeStep ) const noexcept
+{
+    fluidCutCellVolumeBudget2 result{};
+    if( !cutCellProjectionEnabled_ || !std::isfinite( timeStep ) || timeStep <= 0.0f ||
+        x < 0 || x >= width_ || y < 0 || y >= height_ ) return result;
+
+    result.valid = true;
+    result.hasVolumeHistory = cutCellPressure_.hasVolumeHistory;
+    result.hasSweptHistory = sweptFaceFlux_.usedSweptFlux;
+    const int cell = cellIndex( x, y );
+    result.currentFraction = cellFluidFraction_[cell];
+    result.previousFraction = previousCellFluidFraction_[cell];
+    result.active = result.currentFraction > 0.0f;
+    const double area = static_cast<double>( cellSize_ ) * cellSize_;
+    const double faceScale = static_cast<double>( cellSize_ ) * timeStep;
+    result.macOutwardVolume = {{
+        -static_cast<double>( cutCellUOpen( x, y ) ) * u_[uIndex( x, y )] * faceScale,
+        static_cast<double>( cutCellUOpen( x + 1, y ) ) * u_[uIndex( x + 1, y )] * faceScale,
+        -static_cast<double>( cutCellVOpen( x, y ) ) * v_[vIndex( x, y )] * faceScale,
+        static_cast<double>( cutCellVOpen( x, y + 1 ) ) * v_[vIndex( x, y + 1 )] * faceScale
+    }};
+    for( const double volume : result.macOutwardVolume )
+        result.macNetOutwardVolume += volume;
+
+    if( result.hasVolumeHistory )
+    {
+        result.snapshotDeltaVolume =
+            static_cast<double>( result.currentFraction - result.previousFraction ) * area;
+        result.pressureSourceDeltaVolume = static_cast<double>( cutCellVolumeRate_[cell] ) * area;
+    }
+    if( result.hasSweptHistory )
+    {
+        result.solidSweptOutwardVolume = {{
+            -static_cast<double>( sweptUVolume_[uIndex( x, y )] ),
+            static_cast<double>( sweptUVolume_[uIndex( x + 1, y )] ),
+            -static_cast<double>( sweptVVolume_[vIndex( x, y )] ),
+            static_cast<double>( sweptVVolume_[vIndex( x, y + 1 )] )
+        }};
+        for( const double volume : result.solidSweptOutwardVolume )
+            result.solidSweptDivergenceVolume += volume;
+    }
+    // The two geometric residuals are meaningful only when history exists.
+    // For static first snapshots this still reports the endpoint MAC flux.
+    result.pressureResidualVolume =
+        result.macNetOutwardVolume + result.pressureSourceDeltaVolume;
+    result.snapshotResidualVolume =
+        result.macNetOutwardVolume + result.snapshotDeltaVolume;
+    result.sweptResidualVolume =
+        result.macNetOutwardVolume + result.solidSweptDivergenceVolume;
+    return result;
+}
+
+fluidCutCellVolumeSummary2 fluidField2::getCutCellVolumeSummary(
+    float timeStep ) const noexcept
+{
+    fluidCutCellVolumeSummary2 result{};
+    if( !cutCellProjectionEnabled_ || !std::isfinite( timeStep ) || timeStep <= 0.0f )
+        return result;
+
+    result.valid = true;
+    double pressureSquared = 0.0;
+    double snapshotSquared = 0.0;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const fluidCutCellVolumeBudget2 cell =
+                getCutCellVolumeBudget( x, y, timeStep );
+            result.totalSnapshotDeltaVolume += cell.snapshotDeltaVolume;
+            result.totalPressureSourceDeltaVolume += cell.pressureSourceDeltaVolume;
+            result.totalMacNetOutwardVolume += cell.macNetOutwardVolume;
+            if( cell.hasSweptHistory )
+                result.totalAbsSweptSnapshotMismatchVolume +=
+                    std::abs( cell.solidSweptDivergenceVolume - cell.snapshotDeltaVolume );
+            if( cell.hasVolumeHistory && cell.previousFraction != cell.currentFraction )
+            {
+                ++result.modifiedCells;
+                if( !cell.active ) ++result.modifiedFullyCoveredCells;
+            }
+            if( !cell.active ) continue;
+
+            ++result.activeCells;
+            pressureSquared += cell.pressureResidualVolume * cell.pressureResidualVolume;
+            snapshotSquared += cell.snapshotResidualVolume * cell.snapshotResidualVolume;
+            if( std::abs( cell.pressureResidualVolume ) >
+                result.maxAbsPressureResidualVolume )
+            {
+                result.maxAbsPressureResidualVolume = std::abs( cell.pressureResidualVolume );
+                result.worstPressureX = x;
+                result.worstPressureY = y;
+            }
+            if( std::abs( cell.snapshotResidualVolume ) >
+                result.maxAbsSnapshotResidualVolume )
+            {
+                result.maxAbsSnapshotResidualVolume = std::abs( cell.snapshotResidualVolume );
+                result.worstSnapshotX = x;
+                result.worstSnapshotY = y;
+            }
+        }
+    if( result.activeCells > 0 )
+    {
+        result.activePressureResidualRmsVolume =
+            std::sqrt( pressureSquared / result.activeCells );
+        result.activeSnapshotResidualRmsVolume =
+            std::sqrt( snapshotSquared / result.activeCells );
+    }
+    return result;
+}
+
 fluidFlowAudit2 fluidField2::getFlowAudit( float timeStep ) const noexcept
 {
     fluidFlowAudit2 result{};
