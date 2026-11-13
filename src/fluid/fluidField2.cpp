@@ -1171,6 +1171,10 @@ void fluidField2::clear() noexcept
     // other opt-in swept diagnostics. Never retain a stale quadrature.
     sweptUTimeMeanOpen_.clear();
     sweptVTimeMeanOpen_.clear();
+    sweptUAlphaOpenMoment_.clear();
+    sweptVAlphaOpenMoment_.clear();
+    sweptUStartVelocity_.clear();
+    sweptVStartVelocity_.clear();
     std::fill( pressure_.begin(), pressure_.end(), 0.0f );
     std::fill( nextPressure_.begin(), nextPressure_.end(), 0.0f );
     std::fill( divergence_.begin(), divergence_.end(), 0.0f );
@@ -1535,6 +1539,37 @@ float fluidField2::getSweptVTimeMeanOpenFraction( int x, int y ) const noexcept
 {
     return sweptApertureAuditValid_ && x >= 0 && x < width_ &&
         y > 0 && y < height_ ? sweptVTimeMeanOpen_[vIndex( x, y )] : 0.0f;
+}
+
+double fluidField2::getSweptULinearVelocityProxyVolume(
+    int x, int y, float timeStep ) const noexcept
+{
+    if( !sweptApertureAuditValid_ || x <= 0 || x >= width_ ||
+        y < 0 || y >= height_ || !std::isfinite( timeStep ) ||
+        timeStep <= 0.0f || sweptUStartVelocity_.size() != u_.size() ) return 0.0;
+    const int index = uIndex( x, y );
+    const double averageOpen = sweptUTimeMeanOpen_[index];
+    const double alphaMoment = sweptUAlphaOpenMoment_[index];
+    // Linear MAC velocity is an explicit hypothesis, NOT a measured u(t).
+    const double before = sweptUStartVelocity_[index];
+    const double after = u_[index];
+    return static_cast<double>( cellSize_ ) * timeStep *
+        ( before * ( averageOpen - alphaMoment ) + after * alphaMoment );
+}
+
+double fluidField2::getSweptVLinearVelocityProxyVolume(
+    int x, int y, float timeStep ) const noexcept
+{
+    if( !sweptApertureAuditValid_ || x < 0 || x >= width_ ||
+        y <= 0 || y >= height_ || !std::isfinite( timeStep ) ||
+        timeStep <= 0.0f || sweptVStartVelocity_.size() != v_.size() ) return 0.0;
+    const int index = vIndex( x, y );
+    const double averageOpen = sweptVTimeMeanOpen_[index];
+    const double alphaMoment = sweptVAlphaOpenMoment_[index];
+    const double before = sweptVStartVelocity_[index];
+    const double after = v_[index];
+    return static_cast<double>( cellSize_ ) * timeStep *
+        ( before * ( averageOpen - alphaMoment ) + after * alphaMoment );
 }
 
 float fluidField2::getUFaceSolidVelocity( int x, int y ) const noexcept
@@ -2776,6 +2811,16 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         sectionStarted = now;
     };
 
+    // Snapshot actual MAC entry velocities before geometry, advection or
+    // pressure. These are only the interpolation endpoint of a diagnostic,
+    // not a fictitious velocity history.
+    if( sweptApertureAuditEnabled_ && cutCellProjectionEnabled_ )
+    {
+        sweptUStartVelocity_ = u_;
+        sweptVStartVelocity_ = v_;
+    }
+    else sweptApertureAuditValid_ = false;
+
     faceStageAudit_ = {};
     const bool auditFace = faceStageAuditEnabled_ && cutCellProjectionEnabled_;
     const auto readAuditFace = [&]() noexcept
@@ -3603,6 +3648,8 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
         // These are quadrature averages A(t) / h, NOT the swept solid flux.
         sweptUTimeMeanOpen_.assign( u_.size(), 0.0f );
         sweptVTimeMeanOpen_.assign( v_.size(), 0.0f );
+        sweptUAlphaOpenMoment_.assign( u_.size(), 0.0f );
+        sweptVAlphaOpenMoment_.assign( v_.size(), 0.0f );
         const double inverseSamples = 1.0 / timeSamples;
         for( int sampleIndex = 0; sampleIndex < timeSamples; ++sampleIndex )
         {
@@ -3652,12 +3699,20 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
             };
             for( int y = 0; y < height_; ++y )
                 for( int x = 1; x < width_; ++x )
-                    sweptUTimeMeanOpen_[uIndex( x, y )] +=
-                        static_cast<float>( inverseSamples * openAt( true, x, y ) );
+                {
+                    const int index = uIndex( x, y );
+                    const double sample = inverseSamples * openAt( true, x, y );
+                    sweptUTimeMeanOpen_[index] += static_cast<float>( sample );
+                    sweptUAlphaOpenMoment_[index] += static_cast<float>( alpha * sample );
+                }
             for( int y = 1; y < height_; ++y )
                 for( int x = 0; x < width_; ++x )
-                    sweptVTimeMeanOpen_[vIndex( x, y )] +=
-                        static_cast<float>( inverseSamples * openAt( false, x, y ) );
+                {
+                    const int index = vIndex( x, y );
+                    const double sample = inverseSamples * openAt( false, x, y );
+                    sweptVTimeMeanOpen_[index] += static_cast<float>( sample );
+                    sweptVAlphaOpenMoment_[index] += static_cast<float>( alpha * sample );
+                }
         }
         sweptApertureAuditValid_ = true;
     }
