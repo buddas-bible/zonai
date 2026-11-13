@@ -4867,6 +4867,63 @@ void checkConnectedResidualTracerRemap()
         "moving Cut-cell must exercise connected transfer and temporal aperture variation" );
 }
 
+// Independent identity: if the obstacle never intersects a chosen face,
+// the open fraction is 1 throughout the step. The linear-velocity proxy must
+// therefore integrate exactly to h*dt*(uEntry + uProjected)/2 at that face.
+void checkTimeLinearMacProxyOnUnobstructedFace()
+{
+    constexpr float h = 0.5f;
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr int fx = 4, fy = 4;
+    fluidField2 field{ 16, 16, h, { -4.0f, -4.0f } };
+    field.setCutCellProjectionEnabled( true );
+    field.setDisjointAnalyticCutCellEnabled( true );
+    field.setSweptApertureAuditEnabled( true );
+    fluidShapeObstacle2 circle{ circle2{ {}, 0.45f },
+        { { 0.0f, 0.0f }, {} }, { 0.0f, 0.0f },
+        {}, 0.0f, 0.0f, 0.0f };
+    std::array<fluidObstacleForce2, 1> forces{};
+    field.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+        forces, 120 );
+    check( !field.hasSweptApertureAudit(),
+        "static geometry must not fabricate moving-face time history" );
+
+    const vec2 uFace = field.getOrigin() +
+        h * vec2{ static_cast<float>( fx ), static_cast<float>( fy ) + 0.5f };
+    const vec2 vFace = field.getOrigin() +
+        h * vec2{ static_cast<float>( fx ) + 0.5f, static_cast<float>( fy ) };
+    field.addVelocity( uFace, { 1.2f, 0.0f }, 0.15f );
+    field.addVelocity( vFace, { 0.0f, -0.8f }, 0.15f );
+    const double initialU = field.sampleVelocity( uFace ).x;
+    const double initialV = field.sampleVelocity( vFace ).y;
+
+    circle.transform.position = { 0.23f, 0.11f };
+    circle.center = circle.transform.position;
+    field.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+        forces, 120 );
+    const double finalU = field.sampleVelocity( uFace ).x;
+    const double finalV = field.sampleVelocity( vFace ).y;
+    const double expectedU = static_cast<double>( h ) * dt *
+        ( initialU + finalU ) * 0.5;
+    const double expectedV = static_cast<double>( h ) * dt *
+        ( initialV + finalV ) * 0.5;
+    const double actualU = field.getSweptULinearVelocityProxyVolume( fx, fy, dt );
+    const double actualV = field.getSweptVLinearVelocityProxyVolume( fx, fy, dt );
+    check( field.hasSweptApertureAudit() &&
+        std::abs( field.getSweptUTimeMeanOpenFraction( fx, fy ) - 1.0f ) < 1.0e-6f &&
+        std::abs( field.getSweptVTimeMeanOpenFraction( fx, fy ) - 1.0f ) < 1.0e-6f &&
+        std::isfinite( actualU ) && std::isfinite( actualV ) &&
+        std::abs( actualU - expectedU ) < 1.0e-7 &&
+        std::abs( actualV - expectedV ) < 1.0e-7,
+        "linear MAC proxy must integrate to the trapezoidal velocity at constant aperture" );
+
+    field.setSweptApertureAuditEnabled( false );
+    check( !field.hasSweptApertureAudit() &&
+        field.getSweptULinearVelocityProxyVolume( fx, fy, dt ) == 0.0 &&
+        field.getSweptVLinearVelocityProxyVolume( fx, fy, dt ) == 0.0,
+        "disabled temporal MAC proxy must invalidate old geometry and velocity samples" );
+}
+
 void checkMovingCutCellLocalClosure()
 {
     // Diagnostic-only: compare the stored tracer with the reported applied
@@ -5046,6 +5103,7 @@ int main()
     checkMovingCutCellClosureReopeningDifferential();
     checkTracerStageObserverConservation();
     checkConnectedResidualTracerRemap();
+    checkTimeLinearMacProxyOnUnobstructedFace();
     checkMovingCutCellLocalClosure();
     checkCutCellVolumeLedger();
     checkSweptGeometryCorrection();
