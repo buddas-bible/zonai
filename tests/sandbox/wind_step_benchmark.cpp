@@ -1616,22 +1616,31 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
     }
 }
 
-// S2c independent reference: move one kinematic circle along an EXACTLY
+// S2c independent reference: move one obstacle along an EXACTLY
 // prescribed geometric trajectory, and solve the fluid at progressively
 // smaller real dt. The reference is the sum of solved substep endpoint
 // velocities coupled to sampled substep open geometry, not a guessed
 // interpolation of the coarse solution. Even the finest run is not an
 // analytic/continuous-fluid ground truth.
-void auditPrescribedMovingCutCellSubsteps()
+void auditPrescribedMovingCutCellSubsteps( bool convergenceAudit = false,
+    bool rotating = false )
 {
     constexpr float h = 0.25f;
     constexpr float totalDt = 1.0f / 30.0f;
     constexpr int width = 32, height = 32;
-    constexpr vec2 start{ -0.38f, -0.10f };
-    constexpr vec2 finish{ -0.14f, 0.06f };
-    constexpr vec2 motion{ ( finish.x - start.x ) / totalDt,
-        ( finish.y - start.y ) / totalDt };
-    constexpr std::array<int, 5> cadences{{ 1, 2, 4, 8, 16 }};
+    // A circle gives no changing geometry under rotation. Use an elongated
+    // capsule for the pure-rotation trial so the Cut-cell interface genuinely
+    // sweeps across U/V faces without a translating COM.
+    const vec2 start = rotating ? vec2{ -0.20f, -0.12f } :
+        vec2{ -0.38f, -0.10f };
+    const vec2 finish = rotating ? start : vec2{ -0.14f, 0.06f };
+    const vec2 motion = ( finish - start ) / totalDt;
+    const float startAngle = rotating ? 0.18f : 0.0f;
+    const float finishAngle = rotating ? 1.28f : 0.0f;
+    const float angularSpeed = ( finishAngle - startAngle ) / totalDt;
+    const std::vector<int> cadences = convergenceAudit
+        ? std::vector<int>{ 1, 2, 4, 8, 16, 32, 64 }
+        : std::vector<int>{ 1, 2, 4, 8, 16 };
     struct monitoredFace
     {
         bool isU;
@@ -1657,14 +1666,32 @@ void auditPrescribedMovingCutCellSubsteps()
         std::fprintf( stderr, "prescribed Cut-cell reference: %s\n", message );
         std::exit( 1 );
     };
-    std::puts( "prescribed_face,fluid_substeps,face_type,face_x,face_y,"
-        "start_x,start_y,finish_x,finish_y,end_fluid_fraction,"
-        "time_open_seconds,mac_endpoint_m3,mac_linear_m3,solid_swept_m3,"
-        "reference_16_mac_linear_m3,coarse_to_ref_mac_linear_delta_m3,"
-        "coarse_to_ref_endpoint_delta_m3,geometry_time_open_delta_seconds" );
+    if( rotating && !convergenceAudit )
+        fail( "rotation is only supported by the independent extended convergence mode" );
+    if( convergenceAudit )
+    {
+        std::puts( "prescribed_convergence,mode,fluid_substeps,face_type,"
+            "face_x,face_y,start_x,start_y,finish_x,finish_y,"
+            "end_fluid_fraction,time_open_seconds,mac_endpoint_m3,"
+            "mac_linear_m3,solid_swept_m3,reference_64_mac_linear_m3,"
+            "coarse_to_ref_mac_linear_delta_m3,"
+            "coarse_to_ref_endpoint_delta_m3,geometry_time_open_delta_seconds,"
+            "start_angle_rad,finish_angle_rad" );
+        std::puts( "prescribed_convergence_summary,mode,fluid_substeps,"
+            "faces,rms_to_64_linear_m3,rms_to_previous_linear_m3,"
+            "rms_to_64_open_time_s,max_abs_to_64_linear_m3,"
+            "sign_mismatch_to_64_faces" );
+    }
+    else
+        std::puts( "prescribed_face,fluid_substeps,face_type,face_x,face_y,"
+            "start_x,start_y,finish_x,finish_y,end_fluid_fraction,"
+            "time_open_seconds,mac_endpoint_m3,mac_linear_m3,solid_swept_m3,"
+            "reference_16_mac_linear_m3,coarse_to_ref_mac_linear_delta_m3,"
+            "coarse_to_ref_endpoint_delta_m3,geometry_time_open_delta_seconds" );
 
-    std::array<std::array<integratedFace, faces.size()>, cadences.size()> history{};
-    std::array<float, cadences.size()> endFraction{};
+    std::vector<std::array<integratedFace, faces.size()>> history( cadences.size() );
+    std::vector<float> endFraction( cadences.size() );
+    std::vector<std::array<float, 4>> endGeometry( cadences.size() );
     bool observedGeometryMotion = false;
     bool observedVelocityHistoryDifference = false;
     for( std::size_t cadenceIndex = 0; cadenceIndex < cadences.size(); ++cadenceIndex )
@@ -1682,8 +1709,12 @@ void auditPrescribedMovingCutCellSubsteps()
         // Priming must use a motionless obstacle for *every* cadence.
         // Otherwise the cadence-dependent priming dt would apply different
         // boundary velocities before the reference interval even starts.
-        fluidShapeObstacle2 circle{ circle2{ {}, 0.58f },
-            { start, {} }, start, {}, 0.0f, 0.0f, 0.0f };
+        fluidShapeObstacle2 circle{
+            rotating ? shapeGeometry{ capsule2{
+                { -0.63f, 0.0f }, { 0.63f, 0.0f }, 0.19f } } :
+                shapeGeometry{ circle2{ {}, 0.58f } },
+            { start, rot2::FromRadians( startAngle ) }, start,
+            {}, 0.0f, 0.0f, 0.0f };
         std::array<fluidObstacleForce2, 1> feedback{};
         field.step( subDt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
             feedback, 120 );
@@ -1700,10 +1731,13 @@ void auditPrescribedMovingCutCellSubsteps()
         {
             const float alpha = static_cast<float>( step + 1 ) / steps;
             circle.transform.position = start + alpha * ( finish - start );
+            circle.transform.rotation = rot2::FromRadians(
+                startAngle + alpha * ( finishAngle - startAngle ) );
             circle.center = circle.transform.position;
-            // Velocity is from the SAME prescribed path for ALL cadences,
-            // not independently evolved from World contact/Body feedback.
+            // Both COM linear and angular velocity come from the SAME
+            // prescribed path for ALL cadences, not World feedback.
             circle.linearVelocity = motion;
+            circle.angularVelocity = angularSpeed;
             field.step( subDt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
                 feedback, 120 );
             if( !field.hasSweptApertureAudit() ||
@@ -1747,9 +1781,20 @@ void auditPrescribedMovingCutCellSubsteps()
         }
 
         if( std::abs( circle.center.x - finish.x ) > 1.0e-7f ||
-            std::abs( circle.center.y - finish.y ) > 1.0e-7f )
+            std::abs( circle.center.y - finish.y ) > 1.0e-7f ||
+            std::abs( circle.transform.rotation.c - std::cos( finishAngle ) ) > 1.0e-6f ||
+            std::abs( circle.transform.rotation.s - std::sin( finishAngle ) ) > 1.0e-6f )
             fail( "prescribed rigid obstacle did not end at the same pose" );
         endFraction[cadenceIndex] = field.getCellFluidFraction( 17, 16 );
+        endGeometry[cadenceIndex] = {
+            field.getCellFluidFraction( 15, 15 ),
+            field.getCellFluidFraction( 16, 16 ),
+            field.getCellFluidFraction( 17, 16 ),
+            field.getCellFluidFraction( 18, 17 ) };
+        for( std::size_t j = 0; j < endGeometry[cadenceIndex].size(); ++j )
+            if( std::abs( endGeometry[cadenceIndex][j] - endGeometry[0][j] ) >
+                2.0e-5f )
+                fail( "identical final pose produced different Cut-cell geometry" );
         if( !std::isfinite( endFraction[cadenceIndex] ) ||
             std::abs( endFraction[cadenceIndex] - endFraction[0] ) > 2.0e-5f )
             fail( "equal prescribed final geometry changed across cadences" );
@@ -1771,20 +1816,65 @@ void auditPrescribedMovingCutCellSubsteps()
 
             referenceDiffers |= k == 0 &&
                 std::abs( row.macLinear - reference.macLinear ) > 1.0e-9;
-            std::printf( "prescribed_face,%d,%d,%d,%d,"
-                "%.9g,%.9g,%.9g,%.9g,%.9g,"
-                "%.12g,%.12g,%.12g,%.12g,%.12g,"
-                "%.12g,%.12g,%.12g\n",
-                cadences[k], face.isU ? 0 : 1, face.x, face.y,
-                start.x, start.y, finish.x, finish.y,
-                endFraction[k],
-                row.timeOpen, row.macEndpoint, row.macLinear, row.solidSwept,
-                reference.macLinear,
-                row.macLinear - reference.macLinear,
-                row.macEndpoint - reference.macEndpoint,
-                row.timeOpen - reference.timeOpen );
+            if( convergenceAudit )
+                std::printf( "prescribed_convergence,%s,%d,%d,%d,%d,"
+                    "%.9g,%.9g,%.9g,%.9g,%.9g,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g,%.12g,%.9g,%.9g\n",
+                    rotating ? "rotation" : "translation",
+                    cadences[k], face.isU ? 0 : 1, face.x, face.y,
+                    start.x, start.y, finish.x, finish.y,
+                    endFraction[k],
+                    row.timeOpen, row.macEndpoint, row.macLinear, row.solidSwept,
+                    reference.macLinear,
+                    row.macLinear - reference.macLinear,
+                    row.macEndpoint - reference.macEndpoint,
+                    row.timeOpen - reference.timeOpen, startAngle, finishAngle );
+            else
+                std::printf( "prescribed_face,%d,%d,%d,%d,"
+                    "%.9g,%.9g,%.9g,%.9g,%.9g,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g,%.12g\n",
+                    cadences[k], face.isU ? 0 : 1, face.x, face.y,
+                    start.x, start.y, finish.x, finish.y,
+                    endFraction[k],
+                    row.timeOpen, row.macEndpoint, row.macLinear, row.solidSwept,
+                    reference.macLinear,
+                    row.macLinear - reference.macLinear,
+                    row.macEndpoint - reference.macEndpoint,
+                    row.timeOpen - reference.timeOpen );
         }
     }
+    if( convergenceAudit )
+        for( std::size_t k = 0; k < cadences.size(); ++k )
+        {
+            double squaredReference = 0.0, squaredPrevious = 0.0;
+            double squaredOpen = 0.0, peakReference = 0.0;
+            int differentSigns = 0;
+            for( std::size_t i = 0; i < faces.size(); ++i )
+            {
+                const double difference = history[k][i].macLinear - finest[i].macLinear;
+                squaredReference += difference * difference;
+                peakReference = std::max( peakReference, std::abs( difference ) );
+                const double geometry = history[k][i].timeOpen - finest[i].timeOpen;
+                squaredOpen += geometry * geometry;
+                if( k > 0 )
+                {
+                    const double previous = history[k - 1][i].macLinear -
+                        history[k][i].macLinear;
+                    squaredPrevious += previous * previous;
+                }
+                if( history[k][i].macLinear * finest[i].macLinear < 0.0 )
+                    ++differentSigns;
+            }
+            std::printf( "prescribed_convergence_summary,%s,%d,%zu,"
+                "%.12g,%.12g,%.12g,%.12g,%d\n",
+                rotating ? "rotation" : "translation", cadences[k], faces.size(),
+                std::sqrt( squaredReference / faces.size() ),
+                k > 0 ? std::sqrt( squaredPrevious / faces.size() ) : 0.0,
+                std::sqrt( squaredOpen / faces.size() ),
+                peakReference, differentSigns );
+        }
     if( !observedGeometryMotion || !observedVelocityHistoryDifference ||
         !referenceDiffers )
         fail( "reference did not exercise moving aperture and solved intermediate velocities" );
@@ -1911,6 +2001,7 @@ int main( int argc, char** argv )
     bool smallCellGroupedFaceAudit = false;
     bool smallCellTimeVaryingFluxAudit = false;
     bool prescribedSubstepsAudit = false;
+    bool prescribedConvergenceAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -1934,6 +2025,7 @@ int main( int argc, char** argv )
         smallCellGroupedFaceAudit |= std::string_view( argv[i] ) == "--small-cell-grouped-face-audit";
         smallCellTimeVaryingFluxAudit |= std::string_view( argv[i] ) == "--small-cell-time-varying-flux-audit";
         prescribedSubstepsAudit |= std::string_view( argv[i] ) == "--small-cell-prescribed-substeps-audit";
+        prescribedConvergenceAudit |= std::string_view( argv[i] ) == "--small-cell-prescribed-convergence-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -1950,6 +2042,12 @@ int main( int argc, char** argv )
     if( smallCellGroupedFaceAudit ) { auditSmallCellAppliedTransfers( true, true, true ); return 0; }
     if( smallCellTimeVaryingFluxAudit ) { auditSmallCellAppliedTransfers( true, true, true, true ); return 0; }
     if( prescribedSubstepsAudit ) { auditPrescribedMovingCutCellSubsteps(); return 0; }
+    if( prescribedConvergenceAudit )
+    {
+        auditPrescribedMovingCutCellSubsteps( true, false );
+        auditPrescribedMovingCutCellSubsteps( true, true );
+        return 0;
+    }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
