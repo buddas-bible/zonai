@@ -75,6 +75,29 @@ Evidence/commits: `5c3a4d2` (opt-in API), `fface935` (aperture-weighted residual
 
 The earlier Ubuntu Debug workflow [43361541611](https://github.com/buddas-bible/zonai/actions/runs/43361541611) successfully ran the new connected-remap comparison, including actual connected transfer. At identical World8/Fluid4 pressure settings (pooling OFF for both alternatives), the original tracer scheme reported unresolved mass of ~1.4432866e-5 kg at frame 5/substep 3 and ~6.8192834e-5 kg at frame 19/substep 3. The new option reported zero unresolved mass at both snapshots. However **source (18,13) stored mass after MAC** changed from ~0.0014046745 kg (baseline) to ~0.0005070626 kg (new mode) at frame 19/substep 3. This is a large redistribution difference, not proof of more physically correct fluid motion. The original run applied ~3.0e-4 kg of connected transfer over its *printed* experimental records, which are incomplete for zero-unresolved frames; do not report that as a total simulation transfer. Later CI for the strict no-closed-fallback commit: [43361806369](https://github.com/buddas-bible/zonai/actions/runs/43361806369); check job conclusions separately.
 
+### Applied connected-transfer face-capacity probe — 2026-11-13
+
+Added `sandboxWindStepBenchmark --small-cell-connected-capacity-audit` on the **real** h=0.25 m, World8/Fluid4, two-way ON, Drag=0 trajectory (code `020d320`, CI `e8fc99c`, scope fix `de05465`). This is read-only and does not change pressure, Body reaction, MAC velocity, swept remap or the experimental connected-residual distribution.
+
+At the moment each *applied* connected-residual transfer is recorded, the audit reads that donor's last snapshot fraction, original stored tracer mass, endpoint face aperture, signed solid Swept outward volume and signed endpoint MAC outward volume from the **same Fluid substep**. It reports the positive MAC/Swept volume multiplied by donor pre-remap concentration **separately** as kilogram-equivalent comparison scales. These are **not time-centered flux integrals, conservation caps or quantities that should be added**: a moving-solid swept term and a later MAC transport stage are different mechanisms. The event data also classify transport against the sign of the endpoint MAC face and transport through nearly closed apertures.
+
+Ubuntu Debug workflow [43372382516](https://github.com/buddas-bible/zonai/actions/runs/43372382516) passed the new audit; Windows Release result is a separate job to confirm. The Ubuntu Debug log reported **59 emitted substep capacity records** (only substeps with applied connected transfers) and **966 directed transfer events**:
+
+| Read-only risk metric | Observed value |
+| --- | ---: |
+| Records with endpoint MAC volume inward/zero on the chosen face | 341 events |
+| Connected residual transferred by those events | 0.000172069171421 kg |
+| Events with aperture below 0.001 | 2 |
+| Minimum aperture used for a positive connected residual transfer | 0.0000572269055 (frame 10, Fluid substep 3) |
+| Transfer mass on *any* aperture below 0.01, summed over printed events | 2.004276986441e-8 kg |
+| Largest **single-event** connected tracer transfer / positive endpoint MAC kg-equivalent | 94.8656007 (among events with a positive reference) |
+
+The minimum observed open fraction is **0.00572%**. The 94.9× value is a diagnostic **event-level** ratio, not proof of a broken physical conservation law. A printed sum of all per-event MAC/Swept equivalent masses may repeat a face if multiple transfer events share it; **do not interpret such an aggregate as unique available flow capacity**. Actual MAC tracer transport occurs later and is already independently accounted for in its own stage. The 341 opposing-direction events warrant interpretation against the moving obstacle's local displacement; a negative endpoint MAC flux alone does not prove an invalid geometry-driven remap.
+
+The first submitted capacity audit failed compilation because a coverage flag was declared inside the variant loop but referenced after it; `de05465` fixed the scope. It is the corrected commit that ran the passing Ubuntu audit.
+
+**Decision:** preserve the original default-OFF experiment; do not turn the proxy comparison into a hard speed/mass clamp. Next isolate the actual two tiny-face events by source/destination and compare unique-face grouped transfer, the corresponding swept time integral and MAC endpoint flux, then consider a time-integrated open-aperture physical capacity model with independent geometry sampling. Inspect both trajectory and timing before accepting a change.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
