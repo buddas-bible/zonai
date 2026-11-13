@@ -81,7 +81,7 @@ Added `sandboxWindStepBenchmark --small-cell-connected-capacity-audit` on the **
 
 At the moment each *applied* connected-residual transfer is recorded, the audit reads that donor's last snapshot fraction, original stored tracer mass, endpoint face aperture, signed solid Swept outward volume and signed endpoint MAC outward volume from the **same Fluid substep**. It reports the positive MAC/Swept volume multiplied by donor pre-remap concentration **separately** as kilogram-equivalent comparison scales. These are **not time-centered flux integrals, conservation caps or quantities that should be added**: a moving-solid swept term and a later MAC transport stage are different mechanisms. The event data also classify transport against the sign of the endpoint MAC face and transport through nearly closed apertures.
 
-Ubuntu Debug workflow [43372382516](https://github.com/buddas-bible/zonai/actions/runs/43372382516) passed the new audit; Windows Release result is a separate job to confirm. The Ubuntu Debug log reported **59 emitted substep capacity records** (only substeps with applied connected transfers) and **966 directed transfer events**:
+Workflow [43372382516](https://github.com/buddas-bible/zonai/actions/runs/43372382516) concluded **success on both Ubuntu Debug and Windows Release**, including the new face-capacity audit. The Ubuntu Debug log reported **59 emitted substep capacity records** (only substeps with applied connected transfers) and **966 directed transfer events**:
 
 | Read-only risk metric | Observed value |
 | --- | ---: |
@@ -91,6 +91,8 @@ Ubuntu Debug workflow [43372382516](https://github.com/buddas-bible/zonai/action
 | Minimum aperture used for a positive connected residual transfer | 0.0000572269055 (frame 10, Fluid substep 3) |
 | Transfer mass on *any* aperture below 0.01, summed over printed events | 2.004276986441e-8 kg |
 | Largest **single-event** connected tracer transfer / positive endpoint MAC kg-equivalent | 94.8656007 (among events with a positive reference) |
+
+**Windows Release cross-check** from the same successful workflow: 59 emitted substeps, 959 directed transfer events, 340 events with no positive endpoint-MAC outward volume (total 0.000172069181869 kg), 2 transfers using a face aperture below 0.001, minimum open fraction 0.0000572343561 at frame 10 / Fluid substep 3, and largest event-to-positive-endpoint-MAC-equivalent ratio 94.865268 at frame 9 / Fluid substep 1. These are closely aligned with Ubuntu Debug but **not bitwise-identical**; do not assert identical event counts across different build configurations.
 
 The minimum observed open fraction is **0.00572%**. The 94.9× value is a diagnostic **event-level** ratio, not proof of a broken physical conservation law. A printed sum of all per-event MAC/Swept equivalent masses may repeat a face if multiple transfer events share it; **do not interpret such an aggregate as unique available flow capacity**. Actual MAC tracer transport occurs later and is already independently accounted for in its own stage. The 341 opposing-direction events warrant interpretation against the moving obstacle's local displacement; a negative endpoint MAC flux alone does not prove an invalid geometry-driven remap.
 
