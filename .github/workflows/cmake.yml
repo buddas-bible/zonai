@@ -126,6 +126,13 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-prescribed-substeps-audit
 
+      # Same fixed path at real 1..64 Fluid dt, first a translating circle,
+      # then a rotating capsule. Output a 64-step internal reference, not
+      # a claim of analytic convergence or physically exact tracer capacity.
+      - name: Audit high-resolution translation and rotation reference (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-prescribed-convergence-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -331,6 +338,10 @@ jobs:
       - name: Audit prescribed moving Cut-cell Fluid substeps (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-prescribed-substeps-audit
+
+      - name: Audit high-resolution translation and rotation reference (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-prescribed-convergence-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
