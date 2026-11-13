@@ -222,7 +222,7 @@ The high-resolution output distinguishes:
 - `prescribed_spatial_cross_summary`: RMS fluid-flux difference, open-time difference and sign mismatches **between h=0.25 and h=0.125** at each *matched cadence*, over the exact same ten physical 0.25m faces
 - Fine-grid flux is summed without reusing the same physical face twice; the coarse-segment open-time is a length average. The calculated flux inside each actual solved substep **still uses the same documented entry/exit linear MAC velocity assumption**. Neither 128 substeps nor h=0.125m constitutes an analytic solution.
 
-**Ubuntu Debug result:** [Workflow #43388443571](https://github.com/buddas-bible/zonai/actions/runs/43388443571) passed the new high-resolution time-space audit and the complete Ubuntu job. Windows Release is a separate job to cross-check.
+**Cross-platform verified:** [Workflow #43388443571](https://github.com/buddas-bible/zonai/actions/runs/43388443571) finished **success for both Ubuntu Debug and Windows Release**, including the high-resolution time-space audit, baseline suite and lifecycle tests.
 
 | Motion | h (m) | RMS fluid flux 32 vs 128 (m³) | RMS 64 vs 128 (m³) |
 | --- | ---: | ---: | ---: |
@@ -237,6 +237,8 @@ At each h, the finer 64-step approximation gets closer to 128 than 32 in the rep
 | --- | ---: | ---: | ---: |
 | Translation circle | 0.001365246942 | 0.000755847246 | 0.000559086157 |
 | Pure rotating capsule | 0.003348989255 | 0.001876010446 | **0.002211549749** |
+
+**Windows Release independent numerical check:** It reproduced all sixteen time-refinement summary rows and eight matched-grid summary rows with only minor floating-point variation. At 128 Fluid substeps, the Windows translation h=0.25→0.125 physical-face RMS was **0.000559083849m³** (Ubuntu 0.000559086157), and rotation RMS was **0.002211554714m³** (Ubuntu 0.002211549749). The rotation discrepancy also **increased** compared with the Windows 64-substep h-to-h RMS of **0.001876016573m³**. At fixed h=0.125m the Windows 64→128 temporal differences were translation **0.000252586382m³**, rotation **0.000481837450m³**, matching Ubuntu's ~0.000252585469 and ~0.000481830656. Both jobs fully succeeded; differences are small build/float effects, not bitwise identity.
 
 **Important negative result:** The rotating capsule's spatial difference **increased** between the 64-step and 128-step comparisons. At 128 steps, **V(16,16)** contributed the largest single matched-face difference: h=0.25 integrated linear MAC ~0.0254583m³ versus h=0.125 ~0.0318628m³ (difference ~-0.0064045m³). Because the metric includes discretization, nonlinearity, and geometry quadrature, it does **not** prove a specific solver defect. However, it rules out claiming space convergence from finer temporal stepping alone.
 
