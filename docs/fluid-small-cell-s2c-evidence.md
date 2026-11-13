@@ -100,6 +100,27 @@ The first submitted capacity audit failed compilation because a coverage flag wa
 
 **Decision:** preserve the original default-OFF experiment; do not turn the proxy comparison into a hard speed/mass clamp. Next isolate the actual two tiny-face events by source/destination and compare unique-face grouped transfer, the corresponding swept time integral and MAC endpoint flux, then consider a time-integrated open-aperture physical capacity model with independent geometry sampling. Inspect both trajectory and timing before accepting a change.
 
+### Grouped physical-face transfer and time-mean open-aperture quadrature — 2026-11-13
+
+This follow-on uses the **same real h=0.25m, World8/Fluid4, two-way ON, drag 0** moving-obstacle replay, with connected tracer rerouting enabled **only for the experimental variant**. The added diagnostic `setSweptApertureAuditEnabled(true)` samples open geometry independently at exactly the midpoint time nodes selected by the existing Swept solid-flux integrator; disjoint analytic shape-face clipping is used where available, otherwise the existing subface sampling convention. The measured `timeMeanOpen` is the quadrature estimate of `(1/dt)∫ A_open(t)/h dt`, **not** `∫ A_open(t) u(t) dt`. Multiplying that average aperture by the *endpoint* MAC velocity defines an intentionally labeled **constant-endpoint-speed proxy**, not an exact time-integrated mass-flux capacity. The swept solid-normal volume is another independent signed integral, not interchangeable with this open-fluid cross section.
+
+The new `--small-cell-grouped-face-audit` sums applied `connectedResidual` events into unique **physical U/V faces** (both directed signs retained). MAC and Swept reference data are read only **once per physical face and Fluid substep**, using the appropriate positive/negative donor concentration, so duplicate callbacks cannot inflate the reference values. The complete whole-grid per-stage tracer closure from previous audits remains active. New code commits: `6ded9c4` (opt-in geometry API), `820c353` (independent midpoint geometry quadrature), `dd19675` (sandbox setting), `64f8a8f` (unique-face group and detailed risk CSV), `8a1d871` (four-direction two-grid-size regression), `3232959` (CI), `6247446` (explicit header). Workflow [43377590818](https://github.com/buddas-bible/zonai/actions/runs/43377590818) **Ubuntu Debug passed both the normal suite and new grouped audit**; confirm the Windows job separately.
+
+The successful Ubuntu Debug log contains **59 Fluid substeps with connected transfers, 966 callback events but only 727 unique face/substep groups**; 192 of these physical faces had multiple callbacks. The grouped gross tracer transfer was ~0.0027214295955 kg, equal to the independently recorded actual event ledger. The following are *not unique global fluid capacities*: grouped endpoint MAC kg-equivalent over time ~0.00340362244, grouped constant-endpoint-speed/time-mean-aperture proxy ~0.00340892749, and grouped positive outward Swept solid kg-equivalent ~0.000164709834. They belong to different mechanisms and cannot be added or used as global conservation acceptance bounds.
+
+**Both extreme endpoint-aperture faces occurred at frame 10, Fluid substep 3**:
+
+| Unique face | Applied connected transfer | Endpoint open fraction | Swept-time mean open fraction | Solid Swept signed volume | Endpoint MAC signed volume |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| V(17,13), bottom→top | 2.93198744446e-10 kg | 6.39424833935e-5 | 0.00565211242065 | -8.64491885295e-5 m³ | -1.87414818432e-6 m³ |
+| U(18,13), right→left | 1.031502564e-9 kg | 5.72269054828e-5 | 0.00508011784405 | +5.98237034865e-4 m³ | +1.67217895826e-6 m³ |
+
+Signed volumes above use **positive canonical right/up** orientation (independent of the event's direction). Both events transport tracer **opposite the measured endpoint MAC normal flux and solid Swept normal flux**. Importantly, their average apertures during the step were ~80–90× larger than the tiny endpoint aperture: endpoint-only thresholds would misclassify these as nearly closed throughout the whole interval. Their absolute transferred masses are small. **Neither fact validates the direction of transport.**
+
+A separate much larger per-event discrepancy is **U(17,12), right→left at frame 9/substep 1**: endpoint aperture 0.68497616, time mean 0.68529046, applied ~2.87497474122e-6 kg, endpoint-MAC donor kg-equivalent ~3.03057664596e-8 kg, giving grouped ratio ~94.82×. This is **not a tiny-aperture failure**; the endpoint MAC flux magnitude is small relative to a geometry-only residual transfer. Since the MAC velocity is an endpoint observation, this ratio is a high-priority **model discrepancy flag**, not an exact physics-law violation.
+
+The *default OFF* path is unchanged. The next physical acceptance task should derive or independently sample the **full space-time open-fluid volume flux** and distinguish interface displacement from fluid advection, rather than imposing a universal fraction cutoff or a hard velocity/pressure clamp.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
