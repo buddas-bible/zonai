@@ -227,11 +227,24 @@ void checkFrozenPressureReplay()
 
     fluidField2 baseline = *frozen;
     fluidField2 reference = *frozen;
+    fluidField2 sameBudget = *frozen;
+    fluidField2 moreIterations = *frozen;
     baseline.setPrePressureSnapshotObserver( {} );
     reference.setPrePressureSnapshotObserver( {} );
+    sameBudget.setPrePressureSnapshotObserver( {} );
+    moreIterations.setPrePressureSnapshotObserver( {} );
     reference.setAnalyticCutCellCachedSchurEdgesEnabled( false );
+    check( !sameBudget.replayFrozenCutCellPressure( 0 ).has_value() &&
+        !sameBudget.replayFrozenCutCellPressure( -2 ).has_value() &&
+        !sameBudget.replayFrozenCutCellPressure( 201 ).has_value(),
+        "invalid replay iteration budgets must not consume frozen snapshot" );
     const auto forceBaseline = baseline.replayFrozenCutCellPressure();
     const auto forceReference = reference.replayFrozenCutCellPressure();
+    const auto forceSameBudget = sameBudget.replayFrozenCutCellPressure( 80 );
+    const auto forceMoreIterations = moreIterations.replayFrozenCutCellPressure( 200 );
+    check( forceSameBudget.has_value() && forceMoreIterations.has_value() &&
+        !sameBudget.replayFrozenCutCellPressure( 80 ).has_value(),
+        "valid replay iteration override must consume each copied snapshot exactly once" );
     check( forceBaseline.has_value() && forceReference.has_value() &&
         forceBaseline->size() == feedback.size() && forceReference->size() == feedback.size(),
         "both pressure solvers must replay from one identical frozen state" );
@@ -241,10 +254,17 @@ void checkFrozenPressureReplay()
     const auto live = field.getFlowAudit( dt );
     const auto replay = baseline.getFlowAudit( dt );
     const auto other = reference.getFlowAudit( dt );
+    const auto same = sameBudget.getFlowAudit( dt );
+    const auto longer = moreIterations.getFlowAudit( dt );
     check( close( live.maxFluidFaceSpeed, replay.maxFluidFaceSpeed, 1.0e-5f ) &&
         close( live.continuityRms, replay.continuityRms, 1.0e-5f ) &&
         close( replay.maxFluidFaceSpeed, other.maxFluidFaceSpeed, 1.0e-5f ) &&
         close( replay.continuityRms, other.continuityRms, 1.0e-5f ) &&
+        close( replay.continuityRms, same.continuityRms, 1.0e-5f ) &&
+        close( replay.maxFluidFaceSpeed, same.maxFluidFaceSpeed, 1.0e-5f ) &&
+        std::isfinite( longer.continuityRms ) &&
+        std::isfinite( longer.maxFluidFaceSpeed ) &&
+        Length( baseline.getFluidMomentum() - sameBudget.getFluidMomentum() ) < 1.0e-5f &&
         Length( field.getFluidMomentum() - baseline.getFluidMomentum() ) < 1.0e-5f &&
         Length( baseline.getFluidMomentum() - reference.getFluidMomentum() ) < 1.0e-5f &&
         close( field.getCutCellPressure().divergenceAfter,
