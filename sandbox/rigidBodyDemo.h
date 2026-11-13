@@ -475,6 +475,16 @@ public:
     {
         if( windField_ ) windField_->setTracerConcentration( x, y, concentration );
     }
+    // Diagnostic-only: allow real World/Fluid interleaving to report
+    // actual post-Swept/post-MAC cell masses and directed tracer transfers.
+    void setWindTracerStageObserver( fluidField2::tracerStageObserver2 observer )
+    {
+        if( windField_ ) windField_->setTracerStageObserver( std::move( observer ) );
+    }
+    void setWindTracerTransferObserver( fluidField2::tracerTransferObserver2 observer )
+    {
+        if( windField_ ) windField_->setTracerTransferObserver( std::move( observer ) );
+    }
     void setWindPrePressureSnapshotObserver( fluidField2::prePressureSnapshotObserver2 observer )
     {
         if( windField_ ) windField_->setPrePressureSnapshotObserver( std::move( observer ) );
