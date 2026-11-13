@@ -2164,7 +2164,7 @@ void auditPrescribedRotatingFacePressureSplit()
         std::printf( "rotation_pressure_cross,%d,0.25,0.125,"
             "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
             "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
-            "%.12g,%.12g,%.12g,%.12g,%.12g,"
+            "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
             "%.12g,%.12g,%.12g,%.12g,%.12g\n",
             coarse.steps,
             coarse.preLinear, fine.preLinear,
