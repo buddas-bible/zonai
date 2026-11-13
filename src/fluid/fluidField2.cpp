@@ -2376,6 +2376,9 @@ void fluidField2::remapTracerSwept()
                     nextTracerMass_[neighbors[direction]] += transfer;
                     tracerStats_.sweptRemappedMass += static_cast<float>( transfer );
                     appliedSweptOutward[direction] += transfer;
+                    if( tracerTransferObserver_ && transfer > 0.0 )
+                        tracerTransferObserver_( { fluidTracerTransferKind2::sweptFace,
+                            source, neighbors[direction], transfer } );
                     remaining -= transfer;
                     lastDestination = neighbors[direction];
                     lastDirection = direction;
@@ -2386,6 +2389,9 @@ void fluidField2::remapTracerSwept()
                     nextTracerMass_[lastDestination] += remaining;
                     tracerStats_.sweptRemappedMass += static_cast<float>( remaining );
                     appliedSweptOutward[lastDirection] += remaining;
+                    if( tracerTransferObserver_ )
+                        tracerTransferObserver_( { fluidTracerTransferKind2::sweptFace,
+                            source, lastDestination, remaining } );
                 }
             }
 
@@ -2419,6 +2425,9 @@ void fluidField2::remapTracerSwept()
                 nextTracerMass_[source] -= unmatched;
                 nextTracerMass_[destination] += unmatched;
                 tracerStats_.fallbackRemappedMass += static_cast<float>( unmatched );
+                if( tracerTransferObserver_ )
+                    tracerTransferObserver_( { fluidTracerTransferKind2::fallback,
+                        source, destination, unmatched } );
             }
             else
             {
@@ -2579,6 +2588,10 @@ void fluidField2::transportTracer( float timeStep )
                 const double transfer = limitedFlux( flux, flux >= 0.0 ? left : right );
                 nextTracerMass_[left] -= transfer;
                 nextTracerMass_[right] += transfer;
+                if( tracerTransferObserver_ && transfer != 0.0 )
+                    tracerTransferObserver_( { fluidTracerTransferKind2::macFace,
+                        transfer > 0.0 ? left : right, transfer > 0.0 ? right : left,
+                        std::abs( transfer ) } );
             }
         for( int y = 1; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
@@ -2589,6 +2602,10 @@ void fluidField2::transportTracer( float timeStep )
                 const double transfer = limitedFlux( flux, flux >= 0.0 ? bottom : top );
                 nextTracerMass_[bottom] -= transfer;
                 nextTracerMass_[top] += transfer;
+                if( tracerTransferObserver_ && transfer != 0.0 )
+                    tracerTransferObserver_( { fluidTracerTransferKind2::macFace,
+                        transfer > 0.0 ? bottom : top, transfer > 0.0 ? top : bottom,
+                        std::abs( transfer ) } );
             }
         if( trackWorst )
         {
