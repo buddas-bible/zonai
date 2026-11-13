@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -1009,7 +1010,8 @@ void auditSmallCellLocalTracer()
 // Read-only, opt-in: independently reconstruct every cell from directed
 // transfers, then measure transport across the center+four-neighbor stencil.
 // Swept/fallback kilograms and endpoint MAC volume are distinct ledgers.
-void auditSmallCellAppliedTransfers( bool connectedExperiment = false )
+void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
+    bool faceCapacityAudit = false )
 {
     constexpr float h = 0.25f;
     constexpr int fluidSteps = 4;
@@ -1020,6 +1022,11 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false )
     constexpr int target = targetY * width + targetX;
     constexpr int cells = width * height;
     constexpr float fluidDt = dt / fluidSteps;
+    if( faceCapacityAudit && !connectedExperiment )
+    {
+        std::fputs( "face capacity audit requires connected residual mode\n", stderr );
+        std::exit( 1 );
+    }
     std::puts( "mode,variant,frame,fluid_substep,merged_cells,pcg_status,"
         "source_fraction,source_mass_before_kg,source_mass_swept_kg,"
         "source_mass_mac_kg,stencil_mass_before_kg,stencil_mass_swept_kg,"
@@ -1029,6 +1036,15 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false )
         "unresolved_kg,unresolved_sources,worst_x,worst_y,"
         "source_snapshot_delta_m3,source_pressure_delta_m3,"
         "source_swept_divergence_m3,source_endpoint_mac_out_m3" );
+    if( faceCapacityAudit )
+        std::puts( "face_capacity,variant,frame,fluid_substep,events,opposite_mac_events,"
+            "opposite_mac_mass_kg,opposite_swept_mass_kg,"
+            "transfer_kg,endpoint_mac_equiv_kg,positive_swept_equiv_kg,"
+            "aperture_lt_1e3_count,aperture_lt_1e2_mass_kg,"
+            "min_aperture,max_transfer_over_positive_mac,"
+            "max_event_source_x,max_event_source_y,max_event_dir,"
+            "max_event_aperture,max_event_transfer_kg,"
+            "max_event_mac_out_m3,max_event_swept_out_m3" );
 
     int commonSeedX = -1, commonSeedY = -1;
     double commonSeedMass = 0.0;
@@ -1057,6 +1073,28 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false )
         std::vector<double> sweptDelta( cells ), macDelta( cells );
         std::array<double, 4> applied{};
         std::array<double, 2> stencilBoundaryNet{};
+        struct connectedFaceCapacity
+        {
+            int events = 0;
+            int oppositeMacEvents = 0;
+            int tinyApertureEvents = 0;
+            int worstSourceX = -1, worstSourceY = -1, worstDirection = -1;
+            double oppositeMacMass = 0.0;
+            double oppositeSweptMass = 0.0;
+            double transferredMass = 0.0;
+            double macEquivalentMass = 0.0;
+            double sweptEquivalentMass = 0.0;
+            double smallApertureMass = 0.0;
+            double minAperture = 1.0;
+            double maxPositiveMacRatio = 0.0;
+            double worstRatio = 0.0;
+            double worstAperture = 0.0;
+            double worstTransfer = 0.0;
+            double worstMacOutwardVolume = 0.0;
+            double worstSweptOutwardVolume = 0.0;
+        } faceCapacity{};
+        bool sawTinyAperture = false;
+        bool sawOpposingMacFlux = false;
         int stepCount = 0, frameIndex = 0, substepIndex = 0;
         bool sweptObserved = false;
 
@@ -1103,6 +1141,59 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false )
                     !( field.getCellFluidFraction( dx, dy ) > 0.0f ) ||
                     !( open > 0.0f ) )
                     fail( "connected residual tracer crossed a closed face or inactive fluid cell" );
+                if( faceCapacityAudit )
+                {
+                    const int side = dx < sx ? 0 : dx > sx ? 1 : dy < sy ? 2 : 3;
+                    const auto budget = field.getCutCellVolumeBudget( sx, sy, fluidDt );
+                    if( !budget.valid || !budget.hasVolumeHistory ||
+                        !budget.hasSweptHistory ||
+                        !( budget.previousFraction > budget.currentFraction ) ||
+                        !( budget.currentFraction > 0.0f ) )
+                        fail( "connected residual face has no valid shrinking donor history" );
+                    // Read the *pre-Swept* donor concentration. These
+                    // kg-equivalent volumes are independent comparisons,
+                    // NOT caps or a combined physical face flux.
+                    const double concentration = before[source] /
+                        ( static_cast<double>( budget.previousFraction ) * h * h );
+                    const double macOut = budget.macOutwardVolume[side];
+                    const double sweptOut = budget.solidSweptOutwardVolume[side];
+                    const double macEquivalent = std::max( 0.0, macOut ) * concentration;
+                    const double sweptEquivalent = std::max( 0.0, sweptOut ) * concentration;
+                    if( !std::isfinite( concentration ) || concentration < 0.0 ||
+                        !std::isfinite( macEquivalent ) || !std::isfinite( sweptEquivalent ) )
+                        fail( "nonfinite local tracer face capacity comparison" );
+                    ++faceCapacity.events;
+                    faceCapacity.transferredMass += transfer.mass;
+                    faceCapacity.macEquivalentMass += macEquivalent;
+                    faceCapacity.sweptEquivalentMass += sweptEquivalent;
+                    faceCapacity.minAperture = std::min( faceCapacity.minAperture,
+                        static_cast<double>( open ) );
+                    if( open < 1.0e-3f ) ++faceCapacity.tinyApertureEvents;
+                    if( open < 1.0e-2f ) faceCapacity.smallApertureMass += transfer.mass;
+                    if( macOut <= 0.0 )
+                    {
+                        ++faceCapacity.oppositeMacEvents;
+                        faceCapacity.oppositeMacMass += transfer.mass;
+                    }
+                    if( sweptOut <= 0.0 ) faceCapacity.oppositeSweptMass += transfer.mass;
+                    const double ratio = macEquivalent > 1.0e-18
+                        ? transfer.mass / macEquivalent : -1.0;
+                    faceCapacity.maxPositiveMacRatio =
+                        std::max( faceCapacity.maxPositiveMacRatio, ratio );
+                    const double risk = macEquivalent > 1.0e-18
+                        ? ratio : std::numeric_limits<double>::infinity();
+                    if( risk > faceCapacity.worstRatio )
+                    {
+                        faceCapacity.worstRatio = risk;
+                        faceCapacity.worstSourceX = sx;
+                        faceCapacity.worstSourceY = sy;
+                        faceCapacity.worstDirection = side;
+                        faceCapacity.worstAperture = open;
+                        faceCapacity.worstTransfer = transfer.mass;
+                        faceCapacity.worstMacOutwardVolume = macOut;
+                        faceCapacity.worstSweptOutwardVolume = sweptOut;
+                    }
+                }
             }
             const int kind = static_cast<int>( transfer.kind );
             if( kind < 0 || kind > 3 ) fail( "unrecognized tracer transfer type" );
@@ -1158,6 +1249,32 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false )
                     signedSum += macDelta[cell];
                 }
             const auto& tracer = field.getTracerStats();
+            if( faceCapacityAudit && variant == 1 )
+            {
+                if( std::abs( faceCapacity.transferredMass -
+                    applied[3] ) > 1.0e-10 ||
+                    !std::isfinite( faceCapacity.transferredMass ) ||
+                    faceCapacity.events < tracer.connectedResidualSources ||
+                    faceCapacity.minAperture <= 0.0 )
+                    fail( "connected residual face capacity ledger is inconsistent" );
+                sawTinyAperture |= faceCapacity.tinyApertureEvents > 0;
+                sawOpposingMacFlux |= faceCapacity.oppositeMacEvents > 0;
+                if( faceCapacity.events > 0 )
+                    std::printf( "face_capacity,%d,%d,%d,%d,%d,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g,%d,%.12g,"
+                        "%.9g,%.9g,%d,%d,%d,%.9g,%.12g,%.12g,%.12g\n",
+                        variant, frameIndex, substepIndex,
+                        faceCapacity.events, faceCapacity.oppositeMacEvents,
+                        faceCapacity.oppositeMacMass, faceCapacity.oppositeSweptMass,
+                        faceCapacity.transferredMass, faceCapacity.macEquivalentMass,
+                        faceCapacity.sweptEquivalentMass, faceCapacity.tinyApertureEvents,
+                        faceCapacity.smallApertureMass, faceCapacity.minAperture,
+                        faceCapacity.maxPositiveMacRatio, faceCapacity.worstSourceX,
+                        faceCapacity.worstSourceY, faceCapacity.worstDirection,
+                        faceCapacity.worstAperture, faceCapacity.worstTransfer,
+                        faceCapacity.worstMacOutwardVolume,
+                        faceCapacity.worstSweptOutwardVolume );
+            }
             if( std::abs( signedSum ) > 1.0e-9 ||
                 std::abs( totalAfter - totalBefore ) > 1.0e-8 ||
                 std::abs( applied[0] - tracer.sweptRemappedMass ) > 1.0e-5 ||
@@ -1215,6 +1332,7 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false )
             std::fill( macDelta.begin(), macDelta.end(), 0.0 );
             applied = {};
             stencilBoundaryNet = {};
+            faceCapacity = {};
             sweptObserved = false;
             ++stepCount;
             ++substepIndex;
@@ -1274,7 +1392,8 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false )
         scene.setWindTracerTransferObserver( {} );
     }
     if( !sawActualSwept || !sawActualMac || !sawUnresolved ||
-        ( connectedExperiment ? !sawConnectedResidual : !sawPooledPressureCell ) )
+        ( connectedExperiment ? !sawConnectedResidual : !sawPooledPressureCell ) ||
+        ( faceCapacityAudit && !sawOpposingMacFlux ) )
     {
         std::fprintf( stderr, "real Cut-cell tracer audit did not exercise all required paths\n" );
         std::exit( 1 );
@@ -1398,6 +1517,7 @@ int main( int argc, char** argv )
     bool smallCellLocalTracerAudit = false;
     bool smallCellTransferLedgerAudit = false;
     bool smallCellConnectedResidualAudit = false;
+    bool smallCellConnectedCapacityAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -1417,6 +1537,7 @@ int main( int argc, char** argv )
         smallCellLocalTracerAudit |= std::string_view( argv[i] ) == "--small-cell-local-tracer-audit";
         smallCellTransferLedgerAudit |= std::string_view( argv[i] ) == "--small-cell-applied-transfer-audit";
         smallCellConnectedResidualAudit |= std::string_view( argv[i] ) == "--small-cell-connected-residual-audit";
+        smallCellConnectedCapacityAudit |= std::string_view( argv[i] ) == "--small-cell-connected-capacity-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -1429,6 +1550,7 @@ int main( int argc, char** argv )
     if( smallCellLocalTracerAudit ) { auditSmallCellLocalTracer(); return 0; }
     if( smallCellTransferLedgerAudit ) { auditSmallCellAppliedTransfers(); return 0; }
     if( smallCellConnectedResidualAudit ) { auditSmallCellAppliedTransfers( true ); return 0; }
+    if( smallCellConnectedCapacityAudit ) { auditSmallCellAppliedTransfers( true, true ); return 0; }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
