@@ -4155,6 +4155,8 @@ void checkSweptTracerRemap()
 void checkTracerStageObserverConservation()
 {
     constexpr float dt = 1.0f / 60.0f;
+    bool observedSweptTransfer = false;
+    bool observedMacTransfer = false;
     const std::array<vec2, 4> motions{{
         { 0.28f, 0.0f }, { -0.28f, 0.0f },
         { 0.0f, 0.28f }, { 0.0f, -0.28f }
@@ -4196,7 +4198,35 @@ void checkTracerStageObserverConservation()
                     }
 
                 const int cells = count * count;
-                std::vector<double> afterSwept( cells ), afterMac( cells );
+                std::vector<double> beforeCells( cells ), afterSwept( cells ), afterMac( cells );
+                std::vector<double> sweptChanges( cells ), macChanges( cells );
+                double sweptApplied = 0.0, fallbackApplied = 0.0, macApplied = 0.0;
+                int transferCalls = 0;
+                observed.setTracerTransferObserver( [&]( const fluidTracerTransfer2& transfer )
+                {
+                    check( transfer.sourceCell >= 0 && transfer.sourceCell < cells &&
+                        transfer.destinationCell >= 0 && transfer.destinationCell < cells &&
+                        transfer.sourceCell != transfer.destinationCell &&
+                        std::isfinite( transfer.mass ) && transfer.mass > 0.0,
+                        "applied tracer transfer must have valid cells and positive finite mass" );
+                    const int difference = std::abs( transfer.destinationCell - transfer.sourceCell );
+                    if( transfer.kind != fluidTracerTransferKind2::fallback )
+                        check( difference == count ||
+                            ( difference == 1 && transfer.sourceCell / count ==
+                                transfer.destinationCell / count ),
+                            "Swept and MAC transfers must cross exactly one internal face" );
+                    auto& changes = transfer.kind == fluidTracerTransferKind2::macFace
+                        ? macChanges : sweptChanges;
+                    changes[transfer.sourceCell] -= transfer.mass;
+                    changes[transfer.destinationCell] += transfer.mass;
+                    if( transfer.kind == fluidTracerTransferKind2::sweptFace )
+                        sweptApplied += transfer.mass;
+                    else if( transfer.kind == fluidTracerTransferKind2::fallback )
+                        fallbackApplied += transfer.mass;
+                    else
+                        macApplied += transfer.mass;
+                    ++transferCalls;
+                } );
                 int calls = 0;
                 observed.setTracerStageObserver( [&]( const fluidField2& field,
                     fluidTracerStage2 stage )
@@ -4222,6 +4252,13 @@ void checkTracerStageObserverConservation()
                 for( int phase = 0; phase < 2; ++phase )
                 {
                     calls = 0;
+                    transferCalls = 0;
+                    sweptApplied = fallbackApplied = macApplied = 0.0;
+                    std::fill( sweptChanges.begin(), sweptChanges.end(), 0.0 );
+                    std::fill( macChanges.begin(), macChanges.end(), 0.0 );
+                    for( int y = 0; y < count; ++y )
+                        for( int x = 0; x < count; ++x )
+                            beforeCells[y * count + x] = observed.getTracerCellMass( x, y );
                     circle.transform.position += phase == 0 ? motion : -motion;
                     circle.center = circle.transform.position;
                     const double before = observed.getTracerMass();
@@ -4230,6 +4267,17 @@ void checkTracerStageObserverConservation()
                     observed.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
                         observedForce, 120 );
                     check( calls == 2, "both tracer-stage snapshots must be observable" );
+                    observedSweptTransfer |= sweptApplied > 0.0;
+                    observedMacTransfer |= macApplied > 0.0;
+                    check( std::abs( sum( sweptChanges ) ) < 1.0e-10 &&
+                        std::abs( sum( macChanges ) ) < 1.0e-10 &&
+                        std::abs( sum( beforeCells ) - sum( afterSwept ) ) < 1.0e-10 &&
+                        std::abs( sum( afterSwept ) - sum( afterMac ) ) < 1.0e-10 &&
+                        std::abs( sweptApplied -
+                            observed.getTracerStats().sweptRemappedMass ) < 1.0e-5 &&
+                        std::abs( fallbackApplied -
+                            observed.getTracerStats().fallbackRemappedMass ) < 1.0e-5,
+                        "actual transfer events must close both mass stages and match remap counters" );
                     check( std::abs( sum( afterSwept ) - before ) < 1.0e-6 &&
                         std::abs( sum( afterMac ) - before ) < 1.0e-6 &&
                         std::abs( observed.getTracerMass() - before ) < 1.0e-6,
@@ -4239,6 +4287,11 @@ void checkTracerStageObserverConservation()
                         {
                             const int cell = y * count + x;
                             const double actual = observed.getTracerCellMass( x, y );
+                            check( std::abs( beforeCells[cell] + sweptChanges[cell] -
+                                    afterSwept[cell] ) < 1.0e-10 &&
+                                std::abs( afterSwept[cell] + macChanges[cell] -
+                                    afterMac[cell] ) < 1.0e-10,
+                                "each cell must equal its initial mass plus signed applied transfers" );
                             check( std::isfinite( afterSwept[cell] ) &&
                                 std::isfinite( afterMac[cell] ) &&
                                 afterSwept[cell] >= -1.0e-10 &&
@@ -4264,11 +4317,15 @@ void checkTracerStageObserverConservation()
                         "tracer observation must not alter projected MAC velocities" );
                 }
                 observed.setTracerStageObserver( {} );
-                calls = 0;
+                observed.setTracerTransferObserver( {} );
+                calls = transferCalls = 0;
                 observed.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
                     observedForce, 120 );
-                check( calls == 0, "disabled observer must not receive tracer events" );
+                check( calls == 0 && transferCalls == 0,
+                    "disabled tracer observers must not receive callbacks" );
             }
+    check( observedSweptTransfer && observedMacTransfer,
+        "regression must exercise both actual Swept and MAC transfers" );
 }
 
 void checkMovingCutCellClosureReopeningDifferential()
