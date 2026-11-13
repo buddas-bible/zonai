@@ -4695,6 +4695,128 @@ void checkCoupledPressureWarmStartDifferential()
 }
 
 
+// S2c experimental residual routing: do not conflate an endpoint-open face
+// with the time-integrated swept flux. Only tracer moves; every new transfer
+// must be through a directly connected current-fluid face.
+void checkConnectedResidualTracerRemap()
+{
+    constexpr float frameDt = 1.0f / 60.0f;
+    const std::array<vec2, 4> motions{{
+        { 0.28f, 0.0f }, { -0.28f, 0.0f },
+        { 0.0f, 0.28f }, { 0.0f, -0.28f }
+    }};
+    bool observedConnectedTransfer = false;
+    for( float h : { 0.5f, 0.25f } )
+        for( int fluidSubsteps : { 1, 4 } )
+            for( const vec2 motion : motions )
+            {
+                const int count = static_cast<int>( 8.0f / h );
+                fluidField2 original{ count, count, h, { -4.0f, -4.0f } };
+                fluidField2 candidate{ count, count, h, { -4.0f, -4.0f } };
+                check( !original.isConnectedResidualTracerRemapEnabled() &&
+                    !candidate.isConnectedResidualTracerRemapEnabled(),
+                    "experimental connected residual remap must be disabled by default" );
+                for( fluidField2* field : { &original, &candidate } )
+                {
+                    field->setCutCellProjectionEnabled( true );
+                    field->setCutCellCoupledProjectionEnabled( true );
+                    field->setDisjointAnalyticCutCellEnabled( true );
+                    field->setSweptTracerRemapEnabled( true );
+                }
+                candidate.setConnectedResidualTracerRemapEnabled( true );
+                fluidShapeObstacle2 circle{ circle2{ {}, 0.58f },
+                    { { 0.12f, -0.08f }, {} }, { 0.12f, -0.08f },
+                    {}, 0.0f, 0.0f, 0.0f };
+                const float fluidDt = frameDt / fluidSubsteps;
+                std::array<fluidObstacleForce2, 1> originalForce{}, candidateForce{};
+                for( fluidField2* field : { &original, &candidate } )
+                    field->step( fluidDt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                        field == &original ? originalForce : candidateForce, 120 );
+
+                for( int y = 0; y < count; ++y )
+                    for( int x = 0; x < count; ++x )
+                    {
+                        const vec2 point = original.getCellCenter( x, y );
+                        if( std::abs( point.x ) < 1.2f && std::abs( point.y ) < 1.2f )
+                        {
+                            original.setTracerConcentration( x, y, 1.0f );
+                            candidate.setTracerConcentration( x, y, 1.0f );
+                        }
+                    }
+                const double initialMass = original.getTracerMass();
+                double observedMass = 0.0;
+                int observedTransfers = 0;
+                candidate.setTracerTransferObserver( [&]( const fluidTracerTransfer2& transfer )
+                {
+                    if( transfer.kind != fluidTracerTransferKind2::connectedResidual ) return;
+                    const int sx = transfer.sourceCell % count, sy = transfer.sourceCell / count;
+                    const int dx = transfer.destinationCell % count, dy = transfer.destinationCell / count;
+                    check( transfer.sourceCell >= 0 && transfer.sourceCell < count * count &&
+                        transfer.destinationCell >= 0 &&
+                        transfer.destinationCell < count * count &&
+                        transfer.mass > 0.0 && std::isfinite( transfer.mass ) &&
+                        std::abs( dx - sx ) + std::abs( dy - sy ) == 1,
+                        "experimental residual tracer transfer must go to a direct neighbor" );
+                    const float open = sx != dx
+                        ? candidate.getUFaceOpenFraction( std::max( sx, dx ), sy )
+                        : candidate.getVFaceOpenFraction( sx, std::max( sy, dy ) );
+                    check( open > 0.0f &&
+                        candidate.getCellFluidFraction( sx, sy ) > 0.0f &&
+                        candidate.getCellFluidFraction( dx, dy ) > 0.0f,
+                        "experimental residual tracer must never cross closed faces" );
+                    observedMass += transfer.mass;
+                    ++observedTransfers;
+                } );
+
+                for( int phase = 0; phase < 2; ++phase )
+                    for( int substep = 0; substep < fluidSubsteps; ++substep )
+                    {
+                        const vec2 next = phase == 0 ? motion : -motion;
+                        circle.transform.position += next / static_cast<float>( fluidSubsteps );
+                        circle.center = circle.transform.position;
+                        observedMass = 0.0;
+                        observedTransfers = 0;
+                        original.step( fluidDt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                            originalForce, 120 );
+                        candidate.step( fluidDt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                            candidateForce, 120 );
+                        const auto& base = original.getTracerStats();
+                        const auto& alternate = candidate.getTracerStats();
+                        observedConnectedTransfer |= observedTransfers > 0;
+                        check( base.connectedResidualRemappedMass == 0.0f &&
+                            base.connectedResidualSources == 0 &&
+                            original.getSmallCellPressureMergeFraction() == 0.0f &&
+                            candidate.getSmallCellPressureMergeFraction() == 0.0f &&
+                            std::abs( observedMass -
+                                alternate.connectedResidualRemappedMass ) < 1.0e-5 &&
+                            ( observedTransfers > 0 ) ==
+                                ( alternate.connectedResidualSources > 0 ) &&
+                            std::abs( original.getTracerMass() - initialMass ) < 1.0e-5 &&
+                            std::abs( candidate.getTracerMass() - initialMass ) < 1.0e-5,
+                            "opt-in residual remap must conserve tracer without changing the default" );
+                        check( Length( original.getFluidMomentum() -
+                            candidate.getFluidMomentum() ) < 1.0e-6f &&
+                            std::abs( original.getFlowAudit( fluidDt ).maxFluidFaceSpeed -
+                                candidate.getFlowAudit( fluidDt ).maxFluidFaceSpeed ) < 1.0e-6f &&
+                            Length( originalForce[0].force -
+                                candidateForce[0].force ) < 1.0e-6f,
+                            "residual tracer option must not modify pressure, MAC or Body reaction" );
+                        for( int y = 0; y < count; ++y )
+                            for( int x = 0; x < count; ++x )
+                                check( std::isfinite( candidate.getTracerCellMass( x, y ) ) &&
+                                    candidate.getTracerCellMass( x, y ) >= -1.0e-10,
+                                    "experimental connected remap must keep stored tracer nonnegative" );
+                    }
+                candidate.clear();
+                check( candidate.isConnectedResidualTracerRemapEnabled() &&
+                    candidate.getTracerStats().connectedResidualSources == 0 &&
+                    candidate.getTracerStats().connectedResidualRemappedMass == 0.0f,
+                    "clear must retain opt-in mode but reset all experimental diagnostics" );
+            }
+    check( observedConnectedTransfer,
+        "partial moving Cut-cell regression must exercise connected residual transfer" );
+}
+
 void checkMovingCutCellLocalClosure()
 {
     // Diagnostic-only: compare the stored tracer with the reported applied
@@ -4873,6 +4995,7 @@ int main()
     checkSweptTracerRemap();
     checkMovingCutCellClosureReopeningDifferential();
     checkTracerStageObserverConservation();
+    checkConnectedResidualTracerRemap();
     checkMovingCutCellLocalClosure();
     checkCutCellVolumeLedger();
     checkSweptGeometryCorrection();
