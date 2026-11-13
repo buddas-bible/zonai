@@ -1011,7 +1011,7 @@ void auditSmallCellLocalTracer()
 // transfers, then measure transport across the center+four-neighbor stencil.
 // Swept/fallback kilograms and endpoint MAC volume are distinct ledgers.
 void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
-    bool faceCapacityAudit = false )
+    bool faceCapacityAudit = false, bool groupedFaceAudit = false )
 {
     constexpr float h = 0.25f;
     constexpr int fluidSteps = 4;
@@ -1022,9 +1022,10 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
     constexpr int target = targetY * width + targetX;
     constexpr int cells = width * height;
     constexpr float fluidDt = dt / fluidSteps;
-    if( faceCapacityAudit && !connectedExperiment )
+    if( ( faceCapacityAudit && !connectedExperiment ) ||
+        ( groupedFaceAudit && !faceCapacityAudit ) )
     {
-        std::fputs( "face capacity audit requires connected residual mode\n", stderr );
+        std::fputs( "face capacity audit mode arguments are invalid\n", stderr );
         std::exit( 1 );
     }
     std::puts( "mode,variant,frame,fluid_substep,merged_cells,pcg_status,"
@@ -1045,12 +1046,26 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
             "max_event_source_x,max_event_source_y,max_event_dir,"
             "max_event_aperture,max_event_transfer_kg,"
             "max_event_mac_out_m3,max_event_swept_out_m3" );
+    if( groupedFaceAudit )
+    {
+        std::puts( "face_group_summary,variant,frame,fluid_substep,unique_faces,"
+            "multi_event_faces,opposite_mac_faces,tiny_endpoint_faces,"
+            "tiny_time_mean_faces,gross_connected_kg,unique_endpoint_mac_kg,"
+            "mean_aperture_mac_proxy_kg,unique_swept_kg,max_group_over_mac,"
+            "max_group_over_mean_mac" );
+        std::puts( "face_group_detail,variant,frame,fluid_substep,face_type,face_x,"
+            "face_y,events,positive_kg,negative_kg,endpoint_open,"
+            "time_mean_open,swept_forward_m3,mac_forward_m3,"
+            "unique_endpoint_mac_kg,mean_aperture_mac_proxy_kg,"
+            "unique_swept_kg,group_over_mean_mac" );
+    }
 
     int commonSeedX = -1, commonSeedY = -1;
     double commonSeedMass = 0.0;
     bool sawActualSwept = false, sawActualMac = false, sawUnresolved = false;
     bool sawPooledPressureCell = false, sawConnectedResidual = false;
     bool sawTinyAperture = false, sawOpposingMacFlux = false;
+    bool sawGroupedFace = false, sawGroupedTinyFace = false;
     for( int variant = 0; variant < 2; ++variant )
     {
         rigidBodyDemo scene{ demoKind::windFlow };
@@ -1064,6 +1079,7 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
         scene.setWindDragCoefficient( 0.0f );
         scene.setWindSweptTracerRemapEnabled( true );
         scene.setWindConnectedResidualTracerRemapEnabled( connectedExperiment && variant == 1 );
+        scene.setWindSweptApertureAuditEnabled( groupedFaceAudit && variant == 1 );
         scene.setWindSmallCellPressureMergeFraction(
             !connectedExperiment && variant == 1 ? 1.0e-4f : 0.0f );
         const auto shapes = scene.getShapes();
@@ -1094,6 +1110,22 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
             double worstMacOutwardVolume = 0.0;
             double worstSweptOutwardVolume = 0.0;
         } faceCapacity{};
+
+        // One canonical physical U/V face per substep, independent of how
+        // many directed tracer callbacks target it. MAC and Swept data are
+        // sampled once per face; concentrations are donor-direction-specific.
+        struct groupedFace
+        {
+            int key = -1;
+            int x = -1, y = -1;
+            bool isU = true;
+            int events = 0;
+            double positiveMass = 0.0, negativeMass = 0.0;
+            double positiveConcentration = 0.0, negativeConcentration = 0.0;
+            double endpointOpen = 0.0, timeMeanOpen = 0.0;
+            double macForward = 0.0, sweptForward = 0.0;
+        };
+        std::vector<groupedFace> groupedFaces;
 
         int stepCount = 0, frameIndex = 0, substepIndex = 0;
         bool sweptObserved = false;
@@ -1193,6 +1225,55 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
                         faceCapacity.worstMacOutwardVolume = macOut;
                         faceCapacity.worstSweptOutwardVolume = sweptOut;
                     }
+                    if( groupedFaceAudit )
+                    {
+                        if( !field.hasSweptApertureAudit() )
+                            fail( "missing time-sampled aperture for moving Cut-cell" );
+                        const bool isU = sx != dx;
+                        const int faceX = isU ? std::max( sx, dx ) : sx;
+                        const int faceY = isU ? sy : std::max( sy, dy );
+                        const int key = isU ? faceY * ( width + 1 ) + faceX :
+                            ( width + 1 ) * height + faceY * width + faceX;
+                        const double orientation = destination > source ? 1.0 : -1.0;
+                        auto it = std::find_if( groupedFaces.begin(), groupedFaces.end(),
+                            [&]( const groupedFace& group ) { return group.key == key; } );
+                        if( it == groupedFaces.end() )
+                        {
+                            groupedFace group{};
+                            group.key = key;
+                            group.x = faceX;
+                            group.y = faceY;
+                            group.isU = isU;
+                            group.endpointOpen = open;
+                            group.timeMeanOpen = isU ?
+                                field.getSweptUTimeMeanOpenFraction( faceX, faceY ) :
+                                field.getSweptVTimeMeanOpenFraction( faceX, faceY );
+                            group.macForward = orientation * macOut;
+                            group.sweptForward = orientation * sweptOut;
+                            if( !std::isfinite( group.timeMeanOpen ) ||
+                                group.timeMeanOpen < -1.0e-6 ||
+                                group.timeMeanOpen > 1.0 + 1.0e-6 )
+                                fail( "integrated open aperture must lie within [0,1]" );
+                            groupedFaces.push_back( group );
+                            it = std::prev( groupedFaces.end() );
+                        }
+                        else if( std::abs( it->endpointOpen - open ) > 1.0e-6 ||
+                            std::abs( it->macForward - orientation * macOut ) > 1.0e-9 ||
+                            std::abs( it->sweptForward - orientation * sweptOut ) > 1.0e-9 )
+                            fail( "duplicate physical face disagrees on signed shared flux" );
+
+                        ++it->events;
+                        if( orientation > 0.0 )
+                        {
+                            it->positiveMass += transfer.mass;
+                            it->positiveConcentration = concentration;
+                        }
+                        else
+                        {
+                            it->negativeMass += transfer.mass;
+                            it->negativeConcentration = concentration;
+                        }
+                    }
                 }
             }
             const int kind = static_cast<int>( transfer.kind );
@@ -1249,6 +1330,65 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
                     signedSum += macDelta[cell];
                 }
             const auto& tracer = field.getTracerStats();
+            if( groupedFaceAudit && variant == 1 )
+            {
+                int multiEventFaces = 0, oppositeMacFaces = 0;
+                int tinyEndpointFaces = 0, tinyTimeMeanFaces = 0;
+                double gross = 0.0, endpointMacKg = 0.0;
+                double meanMacKg = 0.0, sweptKg = 0.0;
+                double largestEndpointRatio = 0.0, largestMeanRatio = 0.0;
+                for( const groupedFace& group : groupedFaces )
+                {
+                    if( group.events > 1 ) ++multiEventFaces;
+                    if( group.endpointOpen < 1.0e-3 ) ++tinyEndpointFaces;
+                    if( group.timeMeanOpen < 1.0e-3 ) ++tinyTimeMeanFaces;
+                    const double mass = group.positiveMass + group.negativeMass;
+                    const double macKg = std::max( 0.0, group.macForward ) *
+                        group.positiveConcentration +
+                        std::max( 0.0, -group.macForward ) * group.negativeConcentration;
+                    const double sweptMass = std::max( 0.0, group.sweptForward ) *
+                        group.positiveConcentration +
+                        std::max( 0.0, -group.sweptForward ) * group.negativeConcentration;
+                    const double meanMac = group.endpointOpen > 0.0
+                        ? macKg * group.timeMeanOpen / group.endpointOpen : 0.0;
+                    if( ( group.macForward >= 0.0 && group.negativeMass > 0.0 ) ||
+                        ( group.macForward <= 0.0 && group.positiveMass > 0.0 ) )
+                        ++oppositeMacFaces;
+                    gross += mass;
+                    endpointMacKg += macKg;
+                    meanMacKg += meanMac;
+                    sweptKg += sweptMass;
+                    const double ratio = macKg > 1.0e-18 ? mass / macKg : 0.0;
+                    const double meanRatio = meanMac > 1.0e-18 ? mass / meanMac : 0.0;
+                    largestEndpointRatio = std::max( largestEndpointRatio, ratio );
+                    largestMeanRatio = std::max( largestMeanRatio, meanRatio );
+                    if( group.endpointOpen < 1.0e-3 ||
+                        group.timeMeanOpen < 1.0e-3 || ratio > 20.0 )
+                        std::printf( "face_group_detail,%d,%d,%d,%d,%d,%d,%d,"
+                            "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                            "%.12g,%.12g,%.12g,%.9g\n",
+                            variant, frameIndex, substepIndex, group.isU ? 0 : 1,
+                            group.x, group.y, group.events,
+                            group.positiveMass, group.negativeMass,
+                            group.endpointOpen, group.timeMeanOpen,
+                            group.sweptForward, group.macForward, macKg,
+                            meanMac, sweptMass, meanRatio );
+                }
+                if( std::abs( gross - applied[3] ) > 1.0e-10 )
+                    fail( "unique physical faces do not reconcile all connected transfers" );
+                if( !groupedFaces.empty() )
+                {
+                    sawGroupedFace = true;
+                    sawGroupedTinyFace |= tinyEndpointFaces > 0;
+                    std::printf( "face_group_summary,%d,%d,%d,%d,%d,%d,%d,%d,"
+                        "%.12g,%.12g,%.12g,%.12g,%.9g,%.9g\n",
+                        variant, frameIndex, substepIndex,
+                        static_cast<int>( groupedFaces.size() ), multiEventFaces,
+                        oppositeMacFaces, tinyEndpointFaces, tinyTimeMeanFaces,
+                        gross, endpointMacKg, meanMacKg, sweptKg,
+                        largestEndpointRatio, largestMeanRatio );
+                }
+            }
             if( faceCapacityAudit && variant == 1 )
             {
                 if( std::abs( faceCapacity.transferredMass -
@@ -1333,6 +1473,7 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
             applied = {};
             stencilBoundaryNet = {};
             faceCapacity = {};
+            groupedFaces.clear();
             sweptObserved = false;
             ++stepCount;
             ++substepIndex;
@@ -1396,7 +1537,8 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
             sawTinyAperture ? 1 : 0, sawOpposingMacFlux ? 1 : 0 );
     if( !sawActualSwept || !sawActualMac || !sawUnresolved ||
         ( connectedExperiment ? !sawConnectedResidual : !sawPooledPressureCell ) ||
-        ( faceCapacityAudit && !sawOpposingMacFlux ) )
+        ( faceCapacityAudit && !sawOpposingMacFlux ) ||
+        ( groupedFaceAudit && ( !sawGroupedFace || !sawGroupedTinyFace ) ) )
     {
         std::fprintf( stderr, "real Cut-cell tracer audit did not exercise all required paths\n" );
         std::exit( 1 );
@@ -1521,6 +1663,7 @@ int main( int argc, char** argv )
     bool smallCellTransferLedgerAudit = false;
     bool smallCellConnectedResidualAudit = false;
     bool smallCellConnectedCapacityAudit = false;
+    bool smallCellGroupedFaceAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -1541,6 +1684,7 @@ int main( int argc, char** argv )
         smallCellTransferLedgerAudit |= std::string_view( argv[i] ) == "--small-cell-applied-transfer-audit";
         smallCellConnectedResidualAudit |= std::string_view( argv[i] ) == "--small-cell-connected-residual-audit";
         smallCellConnectedCapacityAudit |= std::string_view( argv[i] ) == "--small-cell-connected-capacity-audit";
+        smallCellGroupedFaceAudit |= std::string_view( argv[i] ) == "--small-cell-grouped-face-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -1554,6 +1698,7 @@ int main( int argc, char** argv )
     if( smallCellTransferLedgerAudit ) { auditSmallCellAppliedTransfers(); return 0; }
     if( smallCellConnectedResidualAudit ) { auditSmallCellAppliedTransfers( true ); return 0; }
     if( smallCellConnectedCapacityAudit ) { auditSmallCellAppliedTransfers( true, true ); return 0; }
+    if( smallCellGroupedFaceAudit ) { auditSmallCellAppliedTransfers( true, true, true ); return 0; }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
