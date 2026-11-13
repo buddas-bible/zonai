@@ -120,6 +120,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-time-varying-flux-audit
 
+      # S2c independent temporal-reference experiment: identical prescribed
+      # moving-solid pose/velocity, real fluid resolution 1/2/4/8/16.
+      - name: Audit prescribed moving Cut-cell Fluid substeps (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-prescribed-substeps-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -321,6 +327,10 @@ jobs:
       - name: Audit time-interpolated moving-face MAC proxy (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-time-varying-flux-audit
+
+      - name: Audit prescribed moving Cut-cell Fluid substeps (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-prescribed-substeps-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
