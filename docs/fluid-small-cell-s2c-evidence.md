@@ -123,6 +123,39 @@ A separate much larger per-event discrepancy is **U(17,12), right→left at fram
 
 The *default OFF* path is unchanged. The next physical acceptance task should derive or independently sample the **full space-time open-fluid volume flux** and distinguish interface displacement from fluid advection, rather than imposing a universal fraction cutoff or a hard velocity/pressure clamp.
 
+### Time-interpolated moving-face MAC proxy — 2026-11-13
+
+A full **measured** time history of the MAC fluid velocity is **not available** within one current Fluid Step: advection and pressure produce a new end-of-step field. It would therefore be incorrect to call an endpoint MAC velocity or a linearly reconstructed velocity an exact time-integrated fluid flux. This S2c experiment adds an explicitly **hypothetical interpolation model** for *diagnosis only*, with no effect on the authoritative physics solver, Tracer transport, or Body feedback:
+
+```text
+A0 = average_t(open_fraction(t))
+A1 = average_t(alpha * open_fraction(t)), alpha = (t-t_start)/dt
+u(alpha) = (1-alpha)*u_at_step_entry + alpha*u_after_pressure
+V_linear_proxy = cellSize*dt * [u_at_step_entry*(A0-A1) + u_after_pressure*A1]
+```
+
+The prior midpoint open-face geometry sampling accumulates the extra first moment `A1` at the **same swept-geometry time nodes**, while the diagnostic stores true MAC entry velocities only when enabled. The proxy is evaluated after pressure projection, so `u_after_pressure` is the projected MAC endpoint. Its sign is canonical +U/+V; sign reversal for a donor is applied by the comparison test, not by the field query. The proxy is not a flux through a moving solid boundary; `solidSweptOutwardVolume` remains separate. Units are unit-depth m³. Multiplying this proxy by *pre-Swept source tracer concentration* yields a **comparison scale** in kg, not an independently verified transported tracer mass. Both velocity interpolation and donor concentration history remain assumptions.
+
+Code: `5cb8eba` (API and opt-in scratch), `84d9464` (entry-velocity snapshot, first open-area moment, proxy volume query), `eace805` (unique-face directional A/B output), `14fd2e8` (validity/clear regressions), `feafa61` (Ubuntu/Windows CI). A further independent controlled test `0b59615` checks the identity `A(t)=1 => V_linear_proxy=cellSize*dt*(u_at_entry+u_after_pressure)/2` at a face untouched by a moving obstacle. The corresponding new CI should be checked separately.
+
+The first successful Ubuntu Debug [run 43379203133](https://github.com/buddas-bible/zonai/actions/runs/43379203133) passed the time-interpolated audit. It emitted 59 Fluid substeps with actual connected residual transfers, representing the same 727 unique face/substep groups from the earlier A/B scenario. For comparison, on **only those faces selected by the experimental tracer remap**, the sums over those substeps were:
+
+| Read-only metric | Ubuntu Debug |
+| --- | ---: |
+| Actual experimental connected tracer remap | 0.0027214295955 kg |
+| Endpoint MAC face/positive donor kg proxy | 0.00340362243952 kg |
+| Constant-endpoint-speed/time-mean-aperture kg proxy | 0.00340892748618 kg (previous audit) |
+| **Linear-velocity/time-varying-open-aperture kg proxy** | 0.00338656638747 kg |
+| Face/substep groups transporting mass against the signed linear proxy | 311 |
+| Total mass on those opposing-direction groups | 0.00017206917142 kg |
+| Largest single-group ratio to a positive linear proxy | 29.0476× (but transfer only **7.36e-13 kg**) |
+
+Avoid comparing those summed proxies as a physical field-wide capacity: they include *only selected connected residual faces*, ignore other advection routes and assume constant donor concentration across each interval. The largest ratio occurs on a near-zero-mass event, so is not by itself evidence of material transport error.
+
+A more significant discrepancy persists at **U(17,12), frame 9 / Fluid substep 1**: connected transfer ~2.87497474e-6 kg, endpoint MAC donor proxy ~3.03058e-8 kg (~94.82×), and linear-velocity proxy ~1.40779e-7 kg (**20.42×**). Its endpoint and time-mean apertures are ~0.685, so a tiny aperture is *not* the cause. At frame 10 / Fluid substep 3, V(17,13) and U(18,13) both have endpoint opening ~6e-5 but time-mean opening ~0.005; their extremely small connected transfers ~2.93e-10 and ~1.03e-9 kg remain opposite the linear-interpolated proxy direction. Endpoint aperture alone is therefore a poor physical filter, and changing the flux proxy alone does not justify transporting tracer against it.
+
+**Next gate:** independently resolve intermediate MAC velocities using actual **smaller Fluid substeps** and record per-substep geometry and face flux along matched prescribed obstacle trajectories, without assuming linear velocity between two endpoints. The reference must distinguish geometry-only displacement, moving-solid swept flux, fluid flow, and tracer advection. No transport cap, tuning constant, or solver merge should be introduced merely to reduce diagnostic ratios.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
