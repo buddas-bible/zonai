@@ -382,6 +382,26 @@ enum class fluidTracerStage2
     afterMacAdvection
 };
 
+// Actual, applied tracer transfer (kg, unit depth), not a requested swept
+// volume or an unresolved displacement. Cell IDs use y * width + x.
+// Swept/MAC face transfers are between neighbors; fallback can jump across
+// fully covered cells. Every record subtracts mass from one cell and adds it
+// to another, so the sum of records is independently conservative.
+enum class fluidTracerTransferKind2
+{
+    sweptFace,
+    fallback,
+    macFace
+};
+
+struct fluidTracerTransfer2
+{
+    fluidTracerTransferKind2 kind = fluidTracerTransferKind2::sweptFace;
+    int sourceCell = -1;
+    int destinationCell = -1;
+    double mass = 0.0;
+};
+
 struct fluidTracerStats2
 {
     float beforeMass = 0.0f;
@@ -578,6 +598,17 @@ public:
     void setTracerStageObserver( tracerStageObserver2 observer )
     {
         tracerStageObserver_ = std::move( observer );
+    }
+
+    // Opt-in per-transfer read-only ledger for Swept, fallback and limited
+    // MAC advection. Disabled by default, no storage/allocation when unused.
+    // Records correspond to applied transfers; unresolved material stays in
+    // its source cell and emits no transfer record. Observer must not reenter
+    // or mutate the field while it is stepping.
+    using tracerTransferObserver2 = std::function<void(const fluidTracerTransfer2&)>;
+    void setTracerTransferObserver( tracerTransferObserver2 observer )
+    {
+        tracerTransferObserver_ = std::move( observer );
     }
 
     // S0 diagnostic only. Called after advection/boundaries, immediately
@@ -1133,6 +1164,7 @@ private:
     fluidAdvectionStats2 advectionStats_{};
     fluidTracerStats2 tracerStats_{};
     tracerStageObserver2 tracerStageObserver_{};
+    tracerTransferObserver2 tracerTransferObserver_{};
     bool tracerEnabled_ = false;
     bool sweptTracerRemapEnabled_ = false;
     bool sweptGeometryCorrectionEnabled_ = false;
