@@ -32,4 +32,20 @@ The `--small-cell-local-tracer-audit` tracer-seeded experiment returned global m
 3. Require opening/closing, reopened face, fully disconnected cell, all four directions, varying h and World/Fluid cadence. Record baseline and pooled group continuity **and** individual continuity, local tracer displacement, pressure force/torque, body trajectory and runtime.
 4. No forced velocity/pressure clamp, no default threshold change, no merging #322 sampling into this experiment. Retain #326 as Draft until conservation and dynamic feedback acceptance is justified.
 
-This note records evidence and a bounded test target; it does not claim to have implemented or rerun the test suite beyond CI 43268224810.
+## 2026-11-13: applied local tracer transfer closure (experimental branch)
+
+The first portion of gate 1 now has executable regression coverage in PR #326:
+
+- Commit `a26cf59`: four-direction moving Cut-cell closure/reopening differential, h=0.5/0.25 m, Fluid substeps 1/4, with pressure pooling setting 0/1e-4. Ubuntu/Windows workflow [43302725792](https://github.com/buddas-bible/zonai/actions/runs/43302725792) passed.
+- Commit `195ee87`: opt-in post-Swept and post-MAC `tracerStageObserver2` exposes actual stored intermediate cell mass; no change to solver or advection. Ubuntu/Windows workflow [43304245269](https://github.com/buddas-bible/zonai/actions/runs/43304245269) passed.
+- Commits `de682eb`, `27506cb`, `7f60ce0`: optional `tracerTransferObserver2` records every *applied*, directed, positive-kg Swept-face, fallback and donor-limited MAC transfer. Regression independently reconstructs the post-Swept and post-MAC mass of **every cell** by accumulating outgoing and incoming events against the pre-Step snapshot. It separately checks each stage's global signed delta and zero influence on the unobserved solver path. Workflow [43357224077](https://github.com/buddas-bible/zonai/actions/runs/43357224077) is the corresponding CI run; check both job conclusions before acceptance.
+
+`unresolvedDisplacementMass` is **not** emitted as a transfer event because the unmatched tracer remains stored at its original cell. A remap fallback may send mass to a nonadjacent destination; only Swept/MAC face events must connect direct neighbors. The callbacks are optional observers, not a conservative space-time reconstruction, and should never be used to modify the field during stepping. Default tracer and pressure behavior remain unchanged.
+
+### Remaining S2c acceptance gate
+
+1. Run this applied-transfer ledger on the **actual** h=0.25, World8/Fluid4 source (18,13), its connected neighbors and full domain, and compare old / pooled on a frozen state **and** across two separately evolved World trajectories. The compact four-direction regression fixture does not establish that its pressure cells were actually pooled.
+2. In each Fluid substep record displaced-by-snapshot mass, swept transfer, nonlocal fallback, unresolved mass retained or trapped, and subsequent MAC boundary crossing as **separate** quantities; verify the same-source local stencil, without adding MAC export twice or equating tracer kilograms to displaced geometric cubic metres.
+3. Compare actual transport and pressure-source volume on the same captured geometry; verify opening/closing, nearly zero aperture, full disconnection, body reaction/trajectory, and varying cadence. Decide on physical acceptance criteria only after those measurements.
+4. Measure the opt-in observer's overhead when enabled and normal performance without the observer. Keep the pressure pooling option default OFF and PR #326 Draft. Do not merge #322's sampler into this pressure experiment.
+
