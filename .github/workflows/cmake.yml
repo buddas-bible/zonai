@@ -114,6 +114,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-grouped-face-audit
 
+      # The MAC velocity history is unknown between steps; test the explicit
+      # linear-endpoint interpolation proxy, not a claim of exact A(t)u(t).
+      - name: Audit time-interpolated moving-face MAC proxy (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-time-varying-flux-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -311,6 +317,10 @@ jobs:
       - name: Audit grouped moving-face tracer transport (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-grouped-face-audit
+
+      - name: Audit time-interpolated moving-face MAC proxy (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-time-varying-flux-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
