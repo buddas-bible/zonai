@@ -1616,6 +1616,177 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
     }
 }
 
+// S2c independent reference: move one kinematic circle along an EXACTLY
+// prescribed geometric trajectory, and solve the fluid at progressively
+// smaller real dt. The reference is the sum of solved substep endpoint
+// velocities coupled to sampled substep open geometry, not a guessed
+// interpolation of the coarse solution. Even the finest run is not an
+// analytic/continuous-fluid ground truth.
+void auditPrescribedMovingCutCellSubsteps()
+{
+    constexpr float h = 0.25f;
+    constexpr float totalDt = 1.0f / 30.0f;
+    constexpr int width = 32, height = 32;
+    constexpr vec2 start{ -0.38f, -0.10f };
+    constexpr vec2 finish{ -0.14f, 0.06f };
+    constexpr vec2 motion{ ( finish.x - start.x ) / totalDt,
+        ( finish.y - start.y ) / totalDt };
+    constexpr std::array<int, 5> cadences{{ 1, 2, 4, 8, 16 }};
+    struct monitoredFace
+    {
+        bool isU;
+        int x, y;
+    };
+    // Faces near the moving-circle boundary, with one far-field control.
+    constexpr std::array<monitoredFace, 10> faces{{
+        { true, 15, 15 }, { true, 16, 16 }, { true, 17, 16 },
+        { true, 18, 16 }, { true, 17, 17 },
+        { false, 15, 16 }, { false, 16, 16 }, { false, 17, 16 },
+        { false, 17, 17 }, { false, 3, 3 }
+    }};
+    struct integratedFace
+    {
+        double timeOpen = 0.0; // sec, integral of OPEN fraction dt
+        double macEndpoint = 0.0; // unit-depth m^3: sum dt*h*openEnd*uEnd
+        double macLinear = 0.0; // unit-depth m^3: sum dt*h*open(t)*linear u(t)
+        double solidSwept = 0.0; // unit-depth m^3: geometric solid flux
+        int movingSamples = 0;
+    };
+    const auto fail = []( const char* message )
+    {
+        std::fprintf( stderr, "prescribed Cut-cell reference: %s\n", message );
+        std::exit( 1 );
+    };
+    std::puts( "prescribed_face,fluid_substeps,face_type,face_x,face_y,"
+        "start_x,start_y,finish_x,finish_y,end_fluid_fraction,"
+        "time_open_seconds,mac_endpoint_m3,mac_linear_m3,solid_swept_m3,"
+        "reference_16_mac_linear_m3,coarse_to_ref_mac_linear_delta_m3,"
+        "coarse_to_ref_endpoint_delta_m3,geometry_time_open_delta_seconds" );
+
+    std::array<std::array<integratedFace, faces.size()>, cadences.size()> history{};
+    std::array<float, cadences.size()> endFraction{};
+    bool observedGeometryMotion = false;
+    bool observedVelocityHistoryDifference = false;
+    for( std::size_t cadenceIndex = 0; cadenceIndex < cadences.size(); ++cadenceIndex )
+    {
+        const int steps = cadences[cadenceIndex];
+        const float subDt = totalDt / static_cast<float>( steps );
+        fluidField2 field{ width, height, h, { -4.0f, -4.0f } };
+        field.setCutCellProjectionEnabled( true );
+        field.setDisjointAnalyticCutCellEnabled( true );
+        field.setSweptApertureAuditEnabled( true );
+        if( field.isConnectedResidualTracerRemapEnabled() ||
+            field.getSmallCellPressureMergeFraction() != 0.0f )
+            fail( "reference unexpectedly enabled a solver or tracer experiment" );
+
+        fluidShapeObstacle2 circle{ circle2{ {}, 0.58f },
+            { start, {} }, start, motion, 0.0f, 0.0f, 0.0f };
+        std::array<fluidObstacleForce2, 1> feedback{};
+        field.step( subDt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+            feedback, 120 );
+        if( field.hasSweptApertureAudit() )
+            fail( "unchanged initial obstacle must not create a swept time history" );
+
+        // Identical initial velocity for every cadence. No extra forcing is
+        // applied in the interval: only different solved temporal resolutions.
+        field.addVelocity( { -0.24f, -0.30f }, { 1.3f, 0.65f }, 0.65f );
+        field.addVelocity( { 0.35f, 0.25f }, { -0.55f, 0.8f }, 0.60f );
+
+        auto& integrated = history[cadenceIndex];
+        for( int step = 0; step < steps; ++step )
+        {
+            const float alpha = static_cast<float>( step + 1 ) / steps;
+            circle.transform.position = start + alpha * ( finish - start );
+            circle.center = circle.transform.position;
+            // Velocity is from the SAME prescribed path for ALL cadences,
+            // not independently evolved from World contact/Body feedback.
+            circle.linearVelocity = motion;
+            field.step( subDt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                feedback, 120 );
+            if( !field.hasSweptApertureAudit() ||
+                !field.getSweptFaceFlux().usedSweptFlux )
+                fail( "moving-step history was not observed" );
+
+            for( std::size_t i = 0; i < faces.size(); ++i )
+            {
+                const monitoredFace face = faces[i];
+                const float open = face.isU
+                    ? field.getSweptUTimeMeanOpenFraction( face.x, face.y )
+                    : field.getSweptVTimeMeanOpenFraction( face.x, face.y );
+                const double linear = face.isU
+                    ? field.getSweptULinearVelocityProxyVolume( face.x, face.y, subDt )
+                    : field.getSweptVLinearVelocityProxyVolume( face.x, face.y, subDt );
+                const int cellX = face.isU ? face.x - 1 : face.x;
+                const int cellY = face.isU ? face.y : face.y - 1;
+                const auto budget = field.getCutCellVolumeBudget( cellX, cellY, subDt );
+                if( !budget.valid || !budget.hasVolumeHistory ||
+                    !budget.hasSweptHistory || !std::isfinite( open ) ||
+                    open < 0.0f || open > 1.0f + 1.0e-5f ||
+                    !std::isfinite( linear ) )
+                    fail( "nonfinite or missing moving-face volume history" );
+                integratedFace& value = integrated[i];
+                value.timeOpen += static_cast<double>( open ) * subDt;
+                value.macLinear += linear;
+                value.macEndpoint += budget.macOutwardVolume[face.isU ? 1 : 3];
+                value.solidSwept += budget.solidSweptOutwardVolume[face.isU ? 1 : 3];
+                if( open > 0.0f && open < 1.0f )
+                    ++value.movingSamples;
+                if( !std::isfinite( value.timeOpen ) ||
+                    !std::isfinite( value.macEndpoint ) ||
+                    !std::isfinite( value.macLinear ) ||
+                    !std::isfinite( value.solidSwept ) )
+                    fail( "nonfinite accumulated moving-face volume" );
+                observedVelocityHistoryDifference |= steps > 1 &&
+                    std::abs( linear - budget.macOutwardVolume[face.isU ? 1 : 3] ) >
+                        1.0e-11;
+                observedGeometryMotion |= open > 0.0f && open < 1.0f;
+            }
+        }
+
+        if( std::abs( circle.center.x - finish.x ) > 1.0e-7f ||
+            std::abs( circle.center.y - finish.y ) > 1.0e-7f )
+            fail( "prescribed rigid obstacle did not end at the same pose" );
+        endFraction[cadenceIndex] = field.getCellFluidFraction( 17, 16 );
+        if( !std::isfinite( endFraction[cadenceIndex] ) ||
+            std::abs( endFraction[cadenceIndex] - endFraction[0] ) > 2.0e-5f )
+            fail( "equal prescribed final geometry changed across cadences" );
+    }
+
+    const auto& finest = history.back();
+    bool referenceDiffers = false;
+    for( std::size_t i = 0; i < faces.size(); ++i )
+    {
+        const auto face = faces[i];
+        for( std::size_t k = 0; k < cadences.size(); ++k )
+        {
+            const auto& row = history[k][i];
+            const auto& reference = finest[i];
+            if( row.timeOpen < -1.0e-9 ||
+                row.timeOpen > totalDt + 1.0e-6 ||
+                std::abs( row.timeOpen - reference.timeOpen ) > 3.0e-3 )
+                fail( "open geometry time integral diverged on matched trajectory" );
+
+            referenceDiffers |= k == 0 &&
+                std::abs( row.macLinear - reference.macLinear ) > 1.0e-9;
+            std::printf( "prescribed_face,%d,%d,%d,%d,"
+                "%.9g,%.9g,%.9g,%.9g,%.9g,"
+                "%.12g,%.12g,%.12g,%.12g,%.12g,"
+                "%.12g,%.12g,%.12g\n",
+                cadences[k], face.isU ? 0 : 1, face.x, face.y,
+                start.x, start.y, finish.x, finish.y,
+                endFraction[k],
+                row.timeOpen, row.macEndpoint, row.macLinear, row.solidSwept,
+                reference.macLinear,
+                row.macLinear - reference.macLinear,
+                row.macEndpoint - reference.macEndpoint,
+                row.timeOpen - reference.timeOpen );
+        }
+    }
+    if( !observedGeometryMotion || !observedVelocityHistoryDifference ||
+        !referenceDiffers )
+        fail( "reference did not exercise moving aperture and solved intermediate velocities" );
+}
+
 // Opt-in, read-only endpoint volume ledger. These are not time-centered
 // aperture integrals; every row is the LAST Fluid substep of a World frame.
 // Different h/cadences have different obstacle histories, so compare only
@@ -1736,6 +1907,7 @@ int main( int argc, char** argv )
     bool smallCellConnectedCapacityAudit = false;
     bool smallCellGroupedFaceAudit = false;
     bool smallCellTimeVaryingFluxAudit = false;
+    bool prescribedSubstepsAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -1758,6 +1930,7 @@ int main( int argc, char** argv )
         smallCellConnectedCapacityAudit |= std::string_view( argv[i] ) == "--small-cell-connected-capacity-audit";
         smallCellGroupedFaceAudit |= std::string_view( argv[i] ) == "--small-cell-grouped-face-audit";
         smallCellTimeVaryingFluxAudit |= std::string_view( argv[i] ) == "--small-cell-time-varying-flux-audit";
+        prescribedSubstepsAudit |= std::string_view( argv[i] ) == "--small-cell-prescribed-substeps-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -1773,6 +1946,7 @@ int main( int argc, char** argv )
     if( smallCellConnectedCapacityAudit ) { auditSmallCellAppliedTransfers( true, true ); return 0; }
     if( smallCellGroupedFaceAudit ) { auditSmallCellAppliedTransfers( true, true, true ); return 0; }
     if( smallCellTimeVaryingFluxAudit ) { auditSmallCellAppliedTransfers( true, true, true, true ); return 0; }
+    if( prescribedSubstepsAudit ) { auditPrescribedMovingCutCellSubsteps(); return 0; }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
