@@ -1679,8 +1679,11 @@ void auditPrescribedMovingCutCellSubsteps()
             field.getSmallCellPressureMergeFraction() != 0.0f )
             fail( "reference unexpectedly enabled a solver or tracer experiment" );
 
+        // Priming must use a motionless obstacle for *every* cadence.
+        // Otherwise the cadence-dependent priming dt would apply different
+        // boundary velocities before the reference interval even starts.
         fluidShapeObstacle2 circle{ circle2{ {}, 0.58f },
-            { start, {} }, start, motion, 0.0f, 0.0f, 0.0f };
+            { start, {} }, start, {}, 0.0f, 0.0f, 0.0f };
         std::array<fluidObstacleForce2, 1> feedback{};
         field.step( subDt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
             feedback, 120 );
