@@ -2398,6 +2398,65 @@ void fluidField2::remapTracerSwept()
             const double unmatched = displaced - sweptTransfer;
             if( unmatched <= 1.0e-12 * std::max( 1.0, displaced ) ) continue;
 
+            // S2c opt-in experiment: the swept-face integral may be inward
+            // on every neighbor even though this cell's fluid fraction fell.
+            // For a still-partial cell, redistribute ONLY the unmatched
+            // mass through currently open fluid-fluid faces, proportional
+            // to each aperture. This is a geometric hypothesis, not a
+            // physically derived space-time face flux. Keep the baseline
+            // gain-based fallback and the fully-covered handling unchanged.
+            if( connectedResidualTracerRemapEnabled_ && current > 0.0 )
+            {
+                const std::array<float, 4> openings{{
+                    cutCellUOpen( x, y ), cutCellUOpen( x + 1, y ),
+                    cutCellVOpen( x, y ), cutCellVOpen( x, y + 1 )
+                }};
+                std::array<double, 4> weights{};
+                double totalWeight = 0.0;
+                for( int direction = 0; direction < 4; ++direction )
+                {
+                    const int neighbor = neighbors[direction];
+                    if( neighbor >= 0 && cellFluidFraction_[neighbor] > 0.0f &&
+                        std::isfinite( openings[direction] ) && openings[direction] > 0.0f )
+                    {
+                        weights[direction] = openings[direction];
+                        totalWeight += weights[direction];
+                    }
+                }
+                if( totalWeight > 0.0 )
+                {
+                    double remaining = unmatched;
+                    int lastDestination = -1;
+                    for( int direction = 0; direction < 4; ++direction )
+                    {
+                        if( weights[direction] <= 0.0 ) continue;
+                        const int destination = neighbors[direction];
+                        const double transfer = std::min( remaining,
+                            unmatched * weights[direction] / totalWeight );
+                        if( transfer <= 0.0 ) continue;
+                        nextTracerMass_[source] -= transfer;
+                        nextTracerMass_[destination] += transfer;
+                        tracerStats_.connectedResidualRemappedMass += static_cast<float>( transfer );
+                        if( tracerTransferObserver_ )
+                            tracerTransferObserver_( { fluidTracerTransferKind2::connectedResidual,
+                                source, destination, transfer } );
+                        remaining -= transfer;
+                        lastDestination = destination;
+                    }
+                    if( remaining > 0.0 && lastDestination >= 0 )
+                    {
+                        nextTracerMass_[source] -= remaining;
+                        nextTracerMass_[lastDestination] += remaining;
+                        tracerStats_.connectedResidualRemappedMass += static_cast<float>( remaining );
+                        if( tracerTransferObserver_ )
+                            tracerTransferObserver_( { fluidTracerTransferKind2::connectedResidual,
+                                source, lastDestination, remaining } );
+                    }
+                    ++tracerStats_.connectedResidualSources;
+                    continue;
+                }
+            }
+
             // 적분된 swept 체적이 감소한 cut-cell 체적보다 작을 수 있다.
             // 완전 차폐 셀에서는 기존의 가장 가까운 활성 유체로 이동하고,
             // 부분 개방 셀에서는 새로 열린 이웃이 있을 때에만 이동한다.
