@@ -2464,8 +2464,10 @@ void fluidField2::remapTracerSwept()
             int destination = -1;
             if( current <= 0.0 )
                 destination = cutCellNearestFluid_[source];
-            else
+            else if( !connectedResidualTracerRemapEnabled_ )
             {
+                // Strict opt-in routing must NOT silently fall back to
+                // gain-only neighbors across a geometrically closed face.
                 float largestGain = 0.0f;
                 for( const int neighbor : neighbors )
                 {
