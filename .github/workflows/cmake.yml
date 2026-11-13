@@ -145,6 +145,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-rotation-pressure-split-audit
 
+      # Same frozen geometry/MAC state, pressure Jacobi 40/120/200 copies.
+      # Live field always stays at 120 iterations (read-only A/B).
+      - name: Compare identical-state frozen rotating pressure iterations (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-frozen-pressure-iterations-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -362,6 +368,10 @@ jobs:
       - name: Split rotating face geometry, pre-pressure and pressure flux (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-rotation-pressure-split-audit
+
+      - name: Compare identical-state frozen rotating pressure iterations (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-frozen-pressure-iterations-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
