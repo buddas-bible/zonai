@@ -1032,6 +1032,7 @@ void auditSmallCellAppliedTransfers()
     int commonSeedX = -1, commonSeedY = -1;
     double commonSeedMass = 0.0;
     bool sawActualSwept = false, sawActualMac = false, sawUnresolved = false;
+    bool sawPooledPressureCell = false;
     for( int variant = 0; variant < 2; ++variant )
     {
         rigidBodyDemo scene{ demoKind::windFlow };
@@ -1163,6 +1164,10 @@ void auditSmallCellAppliedTransfers()
             sawActualMac |= applied[2] > 0.0;
             sawUnresolved |= tracer.unresolvedAudit.totalMass > 0.0;
             const auto& pressure = field.getCutCellPressure();
+            if( variant == 0 && pressure.mergedPressureCells != 0 )
+                fail( "baseline tracer audit unexpectedly enabled pressure pooling" );
+            if( variant == 1 && pressure.mergedPressureCells > 0 )
+                sawPooledPressureCell = true;
             const auto volume = field.getCutCellVolumeBudget( targetX, targetY, fluidDt );
             if( !volume.valid || !volume.hasVolumeHistory || !volume.hasSweptHistory )
                 fail( "World local geometry ledger missing matching moving-cut-cell history" );
@@ -1247,7 +1252,8 @@ void auditSmallCellAppliedTransfers()
         scene.setWindTracerStageObserver( {} );
         scene.setWindTracerTransferObserver( {} );
     }
-    if( !sawActualSwept || !sawActualMac || !sawUnresolved )
+    if( !sawActualSwept || !sawActualMac || !sawUnresolved ||
+        !sawPooledPressureCell )
     {
         std::fprintf( stderr, "real Cut-cell tracer audit did not exercise all required paths\n" );
         std::exit( 1 );
