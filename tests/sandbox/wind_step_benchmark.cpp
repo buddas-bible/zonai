@@ -1050,6 +1050,7 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
     double commonSeedMass = 0.0;
     bool sawActualSwept = false, sawActualMac = false, sawUnresolved = false;
     bool sawPooledPressureCell = false, sawConnectedResidual = false;
+    bool sawTinyAperture = false, sawOpposingMacFlux = false;
     for( int variant = 0; variant < 2; ++variant )
     {
         rigidBodyDemo scene{ demoKind::windFlow };
@@ -1093,8 +1094,7 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
             double worstMacOutwardVolume = 0.0;
             double worstSweptOutwardVolume = 0.0;
         } faceCapacity{};
-        bool sawTinyAperture = false;
-        bool sawOpposingMacFlux = false;
+
         int stepCount = 0, frameIndex = 0, substepIndex = 0;
         bool sweptObserved = false;
 
@@ -1391,6 +1391,9 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
         scene.setWindTracerStageObserver( {} );
         scene.setWindTracerTransferObserver( {} );
     }
+    if( faceCapacityAudit )
+        std::fprintf( stderr, "face capacity coverage: tiny_aperture=%d opposite_mac=%d\n",
+            sawTinyAperture ? 1 : 0, sawOpposingMacFlux ? 1 : 0 );
     if( !sawActualSwept || !sawActualMac || !sawUnresolved ||
         ( connectedExperiment ? !sawConnectedResidual : !sawPooledPressureCell ) ||
         ( faceCapacityAudit && !sawOpposingMacFlux ) )
