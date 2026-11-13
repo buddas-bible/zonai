@@ -182,6 +182,34 @@ For example, **U(17,16)** moved from coarse 1-substep integrated linear proxy 0.
 
 **Limits / next validation:** This experiment deliberately isolates prescribed **translation** and does not yet reconstruct instantaneous MAC velocities at arbitrary continuous times or model rotation, multi-obstacle interaction, deforming joints or truly coupled World trajectories. Intermediate velocities are solved at **substep endpoints**, but the open-aperture×velocity integrand inside each fine substep still uses a **linear interpolation**. Increasing 16→32/64 and repeating at different h/cadences is necessary before claiming convergence; a 16-step self-reference has exactly zero error *by definition*. The strong observed dependence on cadence argues against adopting any universal tracer cap from the coarse endpoint or linear-speed proxy. Retain default OFF/PR Draft.
 
+### 32/64-step reference with independent translating circle and rotating capsule — 2026-11-13
+
+**Implementation and reproducible command:** `sandboxWindStepBenchmark --small-cell-prescribed-convergence-audit` in commit `910033f`, CI wired on Ubuntu Debug and Windows Release by `db50ced`. The original `--small-cell-prescribed-substeps-audit` keeps its historical 1/2/4/8/16-step, 16-step-reference behavior. The extended command runs **1/2/4/8/16/32/64 real Fluid solves** per scenario, reinitializing the field separately for each cadence with the same prescribed geometry and the same two post-prime fluid velocity injections. All runs use h=0.25m, a 32×32 domain and total time 1/30s.
+
+- **Translation control:** Circle of radius 0.58m, from (-0.38,-0.10)m to (-0.14,+0.06)m at constant translational velocity, no rotation
+- **Pure rotation:** Elongated capsule with local segment endpoints (-0.63,0)/(+0.63,0)m and radius 0.19m, COM held at (-0.20,-0.12)m, angle **0.18→1.28 radians** (about 63°), nonzero prescribed angular velocity, no COM translation
+- The static prime step is identical in physical initial conditions for each cadence. Within each substep the program prescribes the correct intermediate position, orientation, COM velocity and angular velocity, then **actually solves** `fluidField2::step`. It checks the final geometry and orientation match at all cadences, plus the validity and the separate bookkeeping of integrated temporal aperture, signed fluid MAC volume and moving-solid Swept volume.
+
+The new mode writes `prescribed_convergence` face rows and `prescribed_convergence_summary` rows, both labeled by motion type. Each summary computes RMS difference against **the 64-substep run on exactly the same scenario**, RMS consecutive-refinement difference, RMS integrated open-aperture discrepancy and number of face-integral sign disagreements. The maximum resolution is an *internal numerical reference*, **not a proven converged or analytic solution**. The flux within each *individual* solved substep still uses the separately documented linear entry/exit MAC velocity proxy and moving-shape midpoint aperture quadrature.
+
+**Validation:** [Workflow #43384225037](https://github.com/buddas-bible/zonai/actions/runs/43384225037) passed **all Ubuntu Debug and Windows Release jobs**, including existing unit tests and the new high-resolution trial. The following values are RMS over the same ten monitored U/V faces, measured in unit-depth m³. Windows differences are confined to small floating-point roundoff.
+
+| Actual Fluid substeps | Translation RMS vs 64 (Ubuntu) | Rotation RMS vs 64 (Ubuntu) | Translation RMS vs 64 (Windows) | Rotation RMS vs 64 (Windows) |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 0.00903558820 | 0.03539788717 | 0.00903558905 | 0.03539787449 |
+| 2 | 0.00519515701 | 0.03085913940 | 0.00519515735 | 0.03085912648 |
+| 4 | 0.00238955000 | 0.01264510102 | 0.00238955147 | 0.01264508909 |
+| 8 | 0.00101694578 | 0.00486081036 | 0.00101694619 | 0.00486080582 |
+| 16 | 0.00098541409 | 0.00198642210 | 0.00098541494 | 0.00198641974 |
+| 32 | 0.00038555077 | 0.00113318917 | 0.00038555056 | 0.00113319777 |
+| 64 | 0 (by definition) | 0 (by definition) | 0 (by definition) | 0 (by definition) |
+
+The rotation capsule at **V(17,16)** is especially informative: at 1 Fluid step the integrated linear-proxy MAC volume is about **-4.517277e-4m³**, but at 64 steps it is about **+7.338015e-2m³**. Its signed time-integrated solid Swept volume is recorded separately; neither is a substitute for the other. Out of ten monitored faces, **four rotate-case faces and one translation-case face disagree with the 64-run flux sign at one substep**, whereas by 32 substeps that count is zero on both platforms. The comparison does **not** prove that the sign in the highest-resolution run is physically exact.
+
+The geometry aperture quadrature itself also changes with cadence (for example, the ten-face RMS *open-time* difference between 32 and 64 steps remains ~1.36563659e-4 seconds). Thus the discrepancy is not solely velocity time integration: geometric midpoint quadrature, active-face switching and pressure projection all contribute possible temporal error. The circle and capsule are **different geometries and motions**, so this experiment does not establish a universal claim that rotation is intrinsically less stable than translation.
+
+**Decision:** No solver change, no hard tracer transfer capacity clamp and no automatic change in the engine's Fluid Substep count. Small-cell pressure pooling, connected residual Tracer remap and temporal aperture instrumentation remain OFF by default; PR #326 stays Draft. Before physical acceptance, test further 64→128 refinement where practical, different h/rotation rates, and actual coupled World trajectories. Reconcile the sampled relative solid/fluid flux with stored tracer redistribution at the source cell, not just the signed MAC-only reference.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
