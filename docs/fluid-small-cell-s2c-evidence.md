@@ -158,6 +158,28 @@ A more significant discrepancy persists at **U(17,12), frame 9 / Fluid substep 1
 
 **Next gate:** independently resolve intermediate MAC velocities using actual **smaller Fluid substeps** and record per-substep geometry and face flux along matched prescribed obstacle trajectories, without assuming linear velocity between two endpoints. The reference must distinguish geometry-only displacement, moving-solid swept flux, fluid flow, and tracer advection. No transport cap, tuning constant, or solver merge should be introduced merely to reduce diagnostic ratios.
 
+### Prescribed moving-obstacle, solved substep reference — 2026-11-13
+
+A **new, independent controlled experiment** now uses `sandboxWindStepBenchmark --small-cell-prescribed-substeps-audit`. Unlike the previous single World8/Fluid4 A/B scenario, it explicitly prescribes the **same translation path** for one kinematic analytic circle: radius 0.58m, start (-0.38,-0.10)m, finish (-0.14,+0.06)m in 1/30s, h=0.25m on a 32×32 grid. The starting obstacle is **motionless during initialization**, and each cadence receives the same two velocity injections *after* that initialization. No Body/World integration is performed during the comparison. Pressure pooling and connected-residual Tracer remap remain disabled.
+
+For Fluid substep counts **1, 2, 4, 8, 16**, the harness runs actual smaller `fluidField2::step` solves at interpolated scripted obstacle poses and the same prescribed rigid velocity. Ten interior MAC U/V faces are monitored, including a far-field control. Each real substep records: (1) the accepted swept midpoint open-aperture time average, (2) the signed MAC **endpoint** volume from `getCutCellVolumeBudget`, (3) `getSwept[UV]LinearVelocityProxyVolume` based on **that substep's actually solved entry/exit MAC velocities**, and (4) the independent signed solid Swept normal volume. It asserts identical final geometry within tolerance, finite flux, physical `0≤open≤1`, consistent geometric open-time accumulation across cadences, and a nontrivial velocity/geometry resolution difference. The 16-substep run is an **internal numerical reference**, *not* an exact continuous Navier–Stokes solution or proof of temporal convergence.
+
+Code commits: `795133f` (reference), `7b27b3a` (Ubuntu Debug/Windows Release CI), `75ef36c` (ensure zero initial solid boundary velocity and identical starting states). In [CI 43382460461](https://github.com/buddas-bible/zonai/actions/runs/43382460461), Ubuntu Debug **passed** the added prescribed-trajectory audit plus the existing test suite. Windows Release status is to be confirmed separately.
+
+The initial **Ubuntu Debug** read-only CSV reported the following 10-face RMS differences in integrated linear-proxy fluid volume from the 16-substep run (unit-depth m³), for this one deterministic trajectory:
+
+| Actual Fluid substeps | RMS difference from 16-substep run | RMS difference in open-fraction time integral (s) |
+| ---: | ---: | ---: |
+| 1 | 0.00923168251 | 0.000543266639 |
+| 2 | 0.00541468917 | 0.000380363122 |
+| 4 | 0.00255670464 | 0.000329403940 |
+| 8 | 0.00131424301 | 0.000329403940 |
+| 16 | 0 (reference by definition) | 0 |
+
+For example, **U(17,16)** moved from coarse 1-substep integrated linear proxy 0.00194710538m³, to 2:0.00662258757, 4:0.0162076353, 8:0.0179972764, and 16:0.0197106356m³; its **coarse endpoint MAC volume was 0** despite time-mean partial opening (open-fraction time integral ~0.0100000s, vs ~0.0114583s in the fine run). The *same* final obstacle pose does **not** imply equal interior fluid velocity histories. A second face U(18,16) was always open (time integral ~0.0333333s) but its coarse linear proxy 0.0244184m³ still differed from the 16-substep 0.0409870m³: the temporal error cannot be attributed entirely to aperture aliasing.
+
+**Limits / next validation:** This experiment deliberately isolates prescribed **translation** and does not yet reconstruct instantaneous MAC velocities at arbitrary continuous times or model rotation, multi-obstacle interaction, deforming joints or truly coupled World trajectories. Intermediate velocities are solved at **substep endpoints**, but the open-aperture×velocity integrand inside each fine substep still uses a **linear interpolation**. Increasing 16→32/64 and repeating at different h/cadences is necessary before claiming convergence; a 16-step self-reference has exactly zero error *by definition*. The strong observed dependence on cadence argues against adopting any universal tracer cap from the coarse endpoint or linear-speed proxy. Retain default OFF/PR Draft.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
