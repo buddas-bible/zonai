@@ -133,6 +133,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-prescribed-convergence-audit
 
+      # S2c refinement: 16/32/64/128 solved steps at h=.25 and h=.125.
+      # Two fine half-width faces aggregate to the same coarse physical face.
+      - name: Audit prescribed time-space Cut-cell refinement (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-prescribed-spatial-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -342,6 +348,10 @@ jobs:
       - name: Audit high-resolution translation and rotation reference (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-prescribed-convergence-audit
+
+      - name: Audit prescribed time-space Cut-cell refinement (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-prescribed-spatial-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
