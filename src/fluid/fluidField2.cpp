@@ -3884,15 +3884,20 @@ void fluidField2::prepareCutCellVolumeChange( float timeStep )
     cutCellPressure_.unresolvedVolumeRate = static_cast<float>( unresolvedRate );
 }
 
-std::optional<std::vector<fluidObstacleForce2>> fluidField2::replayFrozenCutCellPressure()
+std::optional<std::vector<fluidObstacleForce2>> fluidField2::replayFrozenCutCellPressure(
+    int pressureIterationsOverride )
 {
     if( !frozenPressureReplayReady_ || !cutCellProjectionEnabled_ ||
-        !std::isfinite( frozenPressureTimeStep_ ) || frozenPressureTimeStep_ <= 0.0f )
+        !std::isfinite( frozenPressureTimeStep_ ) || frozenPressureTimeStep_ <= 0.0f ||
+        ( pressureIterationsOverride != -1 &&
+            ( pressureIterationsOverride < 1 || pressureIterationsOverride > 200 ) ) )
         return std::nullopt;
     frozenPressureReplayReady_ = false;
     std::vector<fluidObstacleForce2> feedback( frozenPressureObstacles_.size() );
     pressureMomentum_ = {};
-    projectCutCell( frozenPressureTimeStep_, frozenPressureIterations_,
+    const int iterations = pressureIterationsOverride == -1
+        ? frozenPressureIterations_ : pressureIterationsOverride;
+    projectCutCell( frozenPressureTimeStep_, iterations,
         frozenPressureObstacles_, feedback );
     stepMomentum_.afterPressure = getFluidMomentum();
     return feedback;
