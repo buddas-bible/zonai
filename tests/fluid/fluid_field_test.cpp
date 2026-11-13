@@ -4788,8 +4788,21 @@ void checkConnectedResidualTracerRemap()
                         const auto& base = original.getTracerStats();
                         const auto& alternate = candidate.getTracerStats();
                         check( candidate.hasSweptApertureAudit() &&
-                            !original.hasSweptApertureAudit(),
-                            "moving face aperture quadrature must be separately opt-in" );
+                            !original.hasSweptApertureAudit() &&
+                            original.getSweptULinearVelocityProxyVolume( 1, 1, fluidDt ) == 0.0 &&
+                            original.getSweptVLinearVelocityProxyVolume( 1, 1, fluidDt ) == 0.0,
+                            "moving face flux proxy must require explicit opt-in history" );
+                        check( std::isfinite( candidate.getSweptULinearVelocityProxyVolume(
+                                count / 2, count / 2, fluidDt ) ) &&
+                            std::isfinite( candidate.getSweptVLinearVelocityProxyVolume(
+                                count / 2, count / 2, fluidDt ) ) &&
+                            candidate.getSweptULinearVelocityProxyVolume(
+                                count / 2, count / 2, -fluidDt ) == 0.0 &&
+                            candidate.getSweptVLinearVelocityProxyVolume(
+                                count / 2, count / 2, 0.0f ) == 0.0 &&
+                            candidate.getSweptULinearVelocityProxyVolume( -1, 1, fluidDt ) == 0.0 &&
+                            candidate.getSweptVLinearVelocityProxyVolume( 1, count, fluidDt ) == 0.0,
+                            "time-linear MAC flux proxy must remain finite and reject invalid queries" );
                         for( int y = 0; y < count; ++y )
                             for( int x = 0; x < count; ++x )
                             {
@@ -4844,6 +4857,8 @@ void checkConnectedResidualTracerRemap()
                     candidate.isSweptApertureAuditEnabled() &&
                     !candidate.hasSweptApertureAudit() &&
                     candidate.getSweptUTimeMeanOpenFraction( 1, 1 ) == 0.0f &&
+                    candidate.getSweptULinearVelocityProxyVolume( 1, 1, fluidDt ) == 0.0 &&
+                    candidate.getSweptVLinearVelocityProxyVolume( 1, 1, fluidDt ) == 0.0 &&
                     candidate.getTracerStats().connectedResidualSources == 0 &&
                     candidate.getTracerStats().connectedResidualRemappedMass == 0.0f,
                     "clear must retain opt-in mode but reset all experimental diagnostics" );
