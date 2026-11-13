@@ -2180,6 +2180,248 @@ void auditPrescribedRotatingFacePressureSplit()
     }
 }
 
+// S2c same-state pressure ONLY experiment. The frozen pre-pressure field
+// includes geometry, all MAC velocities after advection/boundaries, swept
+// history, and the captured obstacle. Three independent deep COPIES get
+// different Jacobi iteration budgets. Never advance those copies or write
+// their projected velocities back to the real World/Fluid history.
+// The two grid sizes are NOT an identical discretized state; comparisons
+// across h retain the previously observed spatial/history difference.
+void auditRotatingFrozenPressureIterationSweep()
+{
+    constexpr float totalDt = 1.0f / 30.0f;
+    constexpr vec2 center{ -0.20f, -0.12f };
+    constexpr float startAngle = 0.18f, endAngle = 1.28f;
+    constexpr float angularSpeed = ( endAngle - startAngle ) / totalDt;
+    constexpr std::array<int, 3> iterations{{ 40, 120, 200 }};
+    constexpr std::array<int, 3> checkpointNumerators{{ 11, 12, 16 }};
+    const auto fail = []( const char* message )
+    {
+        std::fprintf( stderr, "frozen rotating pressure replay: %s\n", message );
+        std::exit( 1 );
+    };
+    std::puts( "rotation_frozen_pressure,cell_m,fluid_substeps,"
+        "checkpoint_numerator_16,angle_rad,iterations,"
+        "pre_endpoint_m3,post_endpoint_m3,pressure_endpoint_m3,"
+        "pre_linear_proxy_m3,post_linear_proxy_m3,pressure_linear_proxy_m3,"
+        "pressure_divergence_after,pressure_residual,"
+        "time_mean_open,solid_swept_m3" );
+    std::puts( "rotation_frozen_pressure_cross,fluid_substeps,"
+        "checkpoint_numerator_16,iterations,"
+        "coarse_pre_linear_m3,fine_pre_linear_m3,"
+        "coarse_pressure_linear_m3,fine_pressure_linear_m3,"
+        "coarse_post_linear_m3,fine_post_linear_m3,"
+        "coarse_pre_endpoint_m3,fine_pre_endpoint_m3,"
+        "coarse_pressure_endpoint_m3,fine_pressure_endpoint_m3,"
+        "coarse_post_endpoint_m3,fine_post_endpoint_m3,"
+        "post_linear_delta_m3,pressure_linear_delta_m3,"
+        "pre_linear_delta_m3" );
+    struct caseResult
+    {
+        int steps = 0, checkpoint = 0, iterations = 0;
+        float h = 0.0f;
+        double preEndpoint = 0.0, postEndpoint = 0.0;
+        double preLinear = 0.0, postLinear = 0.0;
+        double divergenceAfter = 0.0, pressureResidual = 0.0;
+        double openTime = 0.0, swept = 0.0;
+    };
+    std::vector<caseResult> cases;
+    cases.reserve( 2 * 2 * 3 * iterations.size() );
+    bool observedPressureCorrection = false;
+    bool observedIterationSensitivity = false;
+
+    for( float h : { 0.25f, 0.125f } )
+        for( int steps : { 64, 128 } )
+        {
+            const int segments = static_cast<int>( std::lround( 0.25f / h ) );
+            const float subDt = totalDt / steps;
+            fluidField2 field{ 32 * segments, 32 * segments, h, { -4.0f, -4.0f } };
+            field.setCutCellProjectionEnabled( true );
+            field.setDisjointAnalyticCutCellEnabled( true );
+            field.setSweptApertureAuditEnabled( true );
+            if( field.getSmallCellPressureMergeFraction() > 0.0f ||
+                field.isConnectedResidualTracerRemapEnabled() )
+                fail( "experimental solver/tracer flags must stay off" );
+            fluidShapeObstacle2 capsule{
+                capsule2{ { -0.63f, 0.0f }, { 0.63f, 0.0f }, 0.19f },
+                { center, rot2::FromRadians( startAngle ) }, center,
+                {}, 0.0f, 0.0f, 0.0f
+            };
+            std::array<fluidObstacleForce2, 1> feedback{};
+            field.step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                feedback, 120 );
+            field.addVelocity( { -0.24f, -0.30f }, { 1.3f, 0.65f }, 0.65f );
+            field.addVelocity( { 0.35f, 0.25f }, { -0.55f, 0.8f }, 0.60f );
+            bool captured = false;
+            int currentStep = -1;
+
+            // At 11/16, 12/16 and end of the exact same trajectory, freeze
+            // the live PRE-projection state and replay a pressure-only solve
+            // on three independent copies. The live field keeps 120 iters.
+            field.setPrePressureSnapshotObserver( [&]( const fluidField2& frozen )
+            {
+                const int stepOneBased = currentStep + 1;
+                const int checkpoint = stepOneBased * 16 / steps;
+                if( stepOneBased * 16 != checkpoint * steps ||
+                    std::find( checkpointNumerators.begin(),
+                        checkpointNumerators.end(), checkpoint ) ==
+                        checkpointNumerators.end() )
+                    return;
+                if( captured || !frozen.hasSweptApertureAudit() )
+                    fail( "same-state snapshot missing or observed twice" );
+                captured = true;
+                double preEndpoint = 0.0, preLinear = 0.0;
+                double openTime = 0.0, swept = 0.0;
+                for( int segment = 0; segment < segments; ++segment )
+                {
+                    const int faceX = 16 * segments + segment;
+                    const int faceY = 16 * segments;
+                    const auto budget = frozen.getCutCellVolumeBudget(
+                        faceX, faceY - 1, subDt );
+                    if( !budget.valid || !budget.hasSweptHistory )
+                        fail( "frozen pressure face geometry invalid" );
+                    preEndpoint += budget.macOutwardVolume[3];
+                    preLinear += frozen.getSweptVLinearVelocityProxyVolume(
+                        faceX, faceY, subDt );
+                    openTime += frozen.getSweptVTimeMeanOpenFraction(
+                        faceX, faceY ) * subDt / segments;
+                    swept += budget.solidSweptOutwardVolume[3];
+                }
+                double precedingLinear = 0.0;
+                for( int solverIterations : iterations )
+                {
+                    fluidField2 copy = frozen;
+                    copy.setPrePressureSnapshotObserver( {} );
+                    const auto applied = copy.replayFrozenCutCellPressure(
+                        solverIterations );
+                    if( !applied.has_value() ||
+                        copy.replayFrozenCutCellPressure().has_value() )
+                        fail( "frozen pressure replay not one-use or rejected budget" );
+                    double postEndpoint = 0.0, postLinear = 0.0;
+                    for( int segment = 0; segment < segments; ++segment )
+                    {
+                        const int faceX = 16 * segments + segment;
+                        const int faceY = 16 * segments;
+                        const auto budget = copy.getCutCellVolumeBudget(
+                            faceX, faceY - 1, subDt );
+                        postEndpoint += budget.macOutwardVolume[3];
+                        postLinear += copy.getSweptVLinearVelocityProxyVolume(
+                            faceX, faceY, subDt );
+                    }
+                    const auto& pressure = copy.getCutCellPressure();
+                    if( !std::isfinite( postEndpoint ) ||
+                        !std::isfinite( postLinear ) ||
+                        !std::isfinite( pressure.divergenceAfter ) ||
+                        !std::isfinite( pressure.pressureResidual ) )
+                        fail( "nonfinite pressure-only replay" );
+                    observedPressureCorrection |=
+                        std::abs( postEndpoint - preEndpoint ) > 1.0e-12;
+                    observedIterationSensitivity |= solverIterations > iterations.front() &&
+                        std::abs( postLinear - precedingLinear ) > 1.0e-12;
+                    precedingLinear = postLinear;
+                    cases.push_back( { steps, checkpoint, solverIterations, h,
+                        preEndpoint, postEndpoint, preLinear, postLinear,
+                        pressure.divergenceAfter, pressure.pressureResidual,
+                        openTime, swept } );
+                    std::printf( "rotation_frozen_pressure,%.9g,%d,%d,%.9g,%d,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                        "%.12g,%.12g,%.12g,%.12g\n",
+                        h, steps, checkpoint,
+                        startAngle + static_cast<float>( stepOneBased ) / steps *
+                            ( endAngle - startAngle ),
+                        solverIterations, preEndpoint, postEndpoint,
+                        postEndpoint - preEndpoint,
+                        preLinear, postLinear, postLinear - preLinear,
+                        pressure.divergenceAfter, pressure.pressureResidual,
+                        openTime, swept );
+                }
+            } );
+            for( int step = 0; step < steps; ++step )
+            {
+                currentStep = step;
+                captured = false;
+                const float alpha = static_cast<float>( step + 1 ) / steps;
+                capsule.transform.rotation = rot2::FromRadians(
+                    startAngle + alpha * ( endAngle - startAngle ) );
+                capsule.angularVelocity = angularSpeed;
+                field.step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                    feedback, 120 );
+                const int one = step + 1;
+                const int numerator = one * 16 / steps;
+                const bool checkpoint = one * 16 == numerator * steps &&
+                    std::find( checkpointNumerators.begin(),
+                        checkpointNumerators.end(), numerator ) !=
+                        checkpointNumerators.end();
+                if( captured != checkpoint )
+                    fail( "frozen snapshot mismatch at a prescribed timestep" );
+                if( checkpoint )
+                {
+                    const caseResult* baseline = nullptr;
+                    for( const auto& r : cases )
+                        if( r.steps == steps && r.h == h &&
+                            r.checkpoint == numerator && r.iterations == 120 )
+                            baseline = &r;
+                    if( baseline == nullptr )
+                        fail( "120-iteration baseline was not captured" );
+                    double liveEndpoint = 0.0, liveLinear = 0.0;
+                    for( int segment = 0; segment < segments; ++segment )
+                    {
+                        const int x = 16 * segments + segment;
+                        const int y = 16 * segments;
+                        liveEndpoint += field.getCutCellVolumeBudget(
+                            x, y - 1, subDt ).macOutwardVolume[3];
+                        liveLinear += field.getSweptVLinearVelocityProxyVolume(
+                            x, y, subDt );
+                    }
+                    if( std::abs( liveEndpoint - baseline->postEndpoint ) > 1.0e-8 ||
+                        std::abs( liveLinear - baseline->postLinear ) > 1.0e-8 )
+                        fail( "copy-replayed pressure differs from actual live 120-iteration Step" );
+                }
+            }
+        }
+
+    if( cases.size() != 36 ||
+        !observedPressureCorrection || !observedIterationSensitivity )
+        fail( "insufficient controlled pressure replay coverage" );
+    for( int steps : { 64, 128 } )
+        for( int checkpoint : checkpointNumerators )
+            for( int budget : iterations )
+            {
+                const caseResult *coarse = nullptr, *fine = nullptr;
+                for( const auto& row : cases )
+                    if( row.steps == steps && row.checkpoint == checkpoint &&
+                        row.iterations == budget )
+                    {
+                        if( row.h == 0.25f ) coarse = &row;
+                        else if( row.h == 0.125f ) fine = &row;
+                    }
+                if( !coarse || !fine )
+                    fail( "missing matched physical face and time checkpoint" );
+                const double preDifference = coarse->preLinear - fine->preLinear;
+                const double pressureDifference =
+                    ( coarse->postLinear - coarse->preLinear ) -
+                    ( fine->postLinear - fine->preLinear );
+                const double postDifference = coarse->postLinear - fine->postLinear;
+                if( std::abs( preDifference + pressureDifference -
+                    postDifference ) > 1.0e-10 )
+                    fail( "matched frozen pressure ledger does not close" );
+                std::printf( "rotation_frozen_pressure_cross,%d,%d,%d,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g,%.12g\n",
+                    steps, checkpoint, budget,
+                    coarse->preLinear, fine->preLinear,
+                    coarse->postLinear - coarse->preLinear,
+                    fine->postLinear - fine->preLinear,
+                    coarse->postLinear, fine->postLinear,
+                    coarse->preEndpoint, fine->preEndpoint,
+                    coarse->postEndpoint - coarse->preEndpoint,
+                    fine->postEndpoint - fine->preEndpoint,
+                    coarse->postEndpoint, fine->postEndpoint,
+                    postDifference, pressureDifference, preDifference );
+            }
+}
+
 // Opt-in, read-only endpoint volume ledger. These are not time-centered
 // aperture integrals; every row is the LAST Fluid substep of a World frame.
 // Different h/cadences have different obstacle histories, so compare only
@@ -2372,6 +2614,7 @@ int main( int argc, char** argv )
     bool prescribedConvergenceAudit = false;
     bool prescribedSpatialAudit = false;
     bool prescribedRotationPressureSplitAudit = false;
+    bool frozenPressureIterationAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -2398,6 +2641,7 @@ int main( int argc, char** argv )
         prescribedConvergenceAudit |= std::string_view( argv[i] ) == "--small-cell-prescribed-convergence-audit";
         prescribedSpatialAudit |= std::string_view( argv[i] ) == "--small-cell-prescribed-spatial-audit";
         prescribedRotationPressureSplitAudit |= std::string_view( argv[i] ) == "--small-cell-rotation-pressure-split-audit";
+        frozenPressureIterationAudit |= std::string_view( argv[i] ) == "--small-cell-frozen-pressure-iterations-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -2422,6 +2666,7 @@ int main( int argc, char** argv )
     }
     if( prescribedSpatialAudit ) { auditPrescribedSpatialTemporalConvergence(); return 0; }
     if( prescribedRotationPressureSplitAudit ) { auditPrescribedRotatingFacePressureSplit(); return 0; }
+    if( frozenPressureIterationAudit ) { auditRotatingFrozenPressureIterationSweep(); return 0; }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
