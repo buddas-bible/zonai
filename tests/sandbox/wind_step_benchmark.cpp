@@ -1009,7 +1009,7 @@ void auditSmallCellLocalTracer()
 // Read-only, opt-in: independently reconstruct every cell from directed
 // transfers, then measure transport across the center+four-neighbor stencil.
 // Swept/fallback kilograms and endpoint MAC volume are distinct ledgers.
-void auditSmallCellAppliedTransfers()
+void auditSmallCellAppliedTransfers( bool connectedExperiment = false )
 {
     constexpr float h = 0.25f;
     constexpr int fluidSteps = 4;
@@ -1020,19 +1020,20 @@ void auditSmallCellAppliedTransfers()
     constexpr int target = targetY * width + targetX;
     constexpr int cells = width * height;
     constexpr float fluidDt = dt / fluidSteps;
-    std::puts( "variant,frame,fluid_substep,merged_cells,pcg_status,"
+    std::puts( "mode,variant,frame,fluid_substep,merged_cells,pcg_status,"
         "source_fraction,source_mass_before_kg,source_mass_swept_kg,"
         "source_mass_mac_kg,stencil_mass_before_kg,stencil_mass_swept_kg,"
         "stencil_mass_mac_kg,stencil_swept_boundary_net_kg,"
         "stencil_mac_boundary_net_kg,applied_swept_kg,applied_fallback_kg,"
-        "applied_mac_kg,unresolved_kg,unresolved_sources,worst_x,worst_y,"
+        "applied_mac_kg,applied_connected_kg,connected_sources,"
+        "unresolved_kg,unresolved_sources,worst_x,worst_y,"
         "source_snapshot_delta_m3,source_pressure_delta_m3,"
         "source_swept_divergence_m3,source_endpoint_mac_out_m3" );
 
     int commonSeedX = -1, commonSeedY = -1;
     double commonSeedMass = 0.0;
     bool sawActualSwept = false, sawActualMac = false, sawUnresolved = false;
-    bool sawPooledPressureCell = false;
+    bool sawPooledPressureCell = false, sawConnectedResidual = false;
     for( int variant = 0; variant < 2; ++variant )
     {
         rigidBodyDemo scene{ demoKind::windFlow };
@@ -1045,14 +1046,16 @@ void auditSmallCellAppliedTransfers()
         scene.setWindSourceStrength( 8.0f );
         scene.setWindDragCoefficient( 0.0f );
         scene.setWindSweptTracerRemapEnabled( true );
-        scene.setWindSmallCellPressureMergeFraction( variant == 0 ? 0.0f : 1.0e-4f );
+        scene.setWindConnectedResidualTracerRemapEnabled( connectedExperiment && variant == 1 );
+        scene.setWindSmallCellPressureMergeFraction(
+            !connectedExperiment && variant == 1 ? 1.0e-4f : 0.0f );
         const auto shapes = scene.getShapes();
         scene.getWorld().SetBodyLinearVelocity( shapes[0].bodyHandle, { 0.7f, -0.10f } );
         scene.getWorld().SetBodyAngularVelocity( shapes[1].bodyHandle, 0.5f );
 
         std::vector<double> before( cells ), afterSwept( cells );
         std::vector<double> sweptDelta( cells ), macDelta( cells );
-        std::array<double, 3> applied{};
+        std::array<double, 4> applied{};
         std::array<double, 2> stencilBoundaryNet{};
         int stepCount = 0, frameIndex = 0, substepIndex = 0;
         bool sweptObserved = false;
@@ -1082,15 +1085,27 @@ void auditSmallCellAppliedTransfers()
                 destination >= cells || source == destination ||
                 !std::isfinite( transfer.mass ) || transfer.mass <= 0.0 )
                 fail( "invalid applied World tracer transfer" );
+            const int sx = source % width, sy = source / width;
+            const int dx = destination % width, dy = destination / width;
             if( transfer.kind != fluidTracerTransferKind2::fallback )
             {
-                const int dx = std::abs( source % width - destination % width );
-                const int dy = std::abs( source / width - destination / width );
-                if( dx + dy != 1 )
-                    fail( "Swept/MAC transfer bypassed a shared face" );
+                if( std::abs( sx - dx ) + std::abs( sy - dy ) != 1 )
+                    fail( "Swept/MAC/connected transfer bypassed a shared face" );
+            }
+            if( transfer.kind == fluidTracerTransferKind2::connectedResidual )
+            {
+                const fluidField2& field = *scene.getWindField();
+                const float open = sx != dx
+                    ? field.getUFaceOpenFraction( std::max( sx, dx ), sy )
+                    : field.getVFaceOpenFraction( sx, std::max( sy, dy ) );
+                if( !connectedExperiment || variant == 0 ||
+                    !( field.getCellFluidFraction( sx, sy ) > 0.0f ) ||
+                    !( field.getCellFluidFraction( dx, dy ) > 0.0f ) ||
+                    !( open > 0.0f ) )
+                    fail( "connected residual tracer crossed a closed face or inactive fluid cell" );
             }
             const int kind = static_cast<int>( transfer.kind );
-            if( kind < 0 || kind > 2 ) fail( "unrecognized tracer transfer type" );
+            if( kind < 0 || kind > 3 ) fail( "unrecognized tracer transfer type" );
             const bool mac = transfer.kind == fluidTracerTransferKind2::macFace;
             std::vector<double>& delta = mac ? macDelta : sweptDelta;
             delta[source] -= transfer.mass;
@@ -1147,6 +1162,7 @@ void auditSmallCellAppliedTransfers()
                 std::abs( totalAfter - totalBefore ) > 1.0e-8 ||
                 std::abs( applied[0] - tracer.sweptRemappedMass ) > 1.0e-5 ||
                 std::abs( applied[1] - tracer.fallbackRemappedMass ) > 1.0e-5 ||
+                std::abs( applied[3] - tracer.connectedResidualRemappedMass ) > 1.0e-5 ||
                 std::abs( tracer.unresolvedAudit.totalMass -
                     tracer.unresolvedDisplacementMass ) > 1.0e-6 )
                 fail( "World applied transfers or unresolved tracer accounting mismatch" );
@@ -1163,10 +1179,13 @@ void auditSmallCellAppliedTransfers()
             sawActualSwept |= applied[0] > 0.0;
             sawActualMac |= applied[2] > 0.0;
             sawUnresolved |= tracer.unresolvedAudit.totalMass > 0.0;
+            sawConnectedResidual |= applied[3] > 0.0;
             const auto& pressure = field.getCutCellPressure();
-            if( variant == 0 && pressure.mergedPressureCells != 0 )
-                fail( "baseline tracer audit unexpectedly enabled pressure pooling" );
-            if( variant == 1 && pressure.mergedPressureCells > 0 )
+            if( ( connectedExperiment || variant == 0 ) &&
+                pressure.mergedPressureCells != 0 )
+                fail( "unpooled tracer audit unexpectedly enabled pressure pooling" );
+            if( !connectedExperiment && variant == 1 &&
+                pressure.mergedPressureCells > 0 )
                 sawPooledPressureCell = true;
             const auto volume = field.getCutCellVolumeBudget( targetX, targetY, fluidDt );
             if( !volume.valid || !volume.hasVolumeHistory || !volume.hasSweptHistory )
@@ -1174,16 +1193,18 @@ void auditSmallCellAppliedTransfers()
             if( frameIndex == 5 || frameIndex == 6 || frameIndex == 19 ||
                 tracer.unresolvedAudit.totalMass > 0.0 ||
                 pressure.mergedPressureCells > 0 )
-                std::printf( "%d,%d,%d,%d,%d,%.9g,%.12g,%.12g,%.12g,"
+                std::printf( "%d,%d,%d,%d,%d,%d,%.9g,%.12g,%.12g,%.12g,"
                     "%.12g,%.12g,%.12g,%.12g,%.12g,"
-                    "%.12g,%.12g,%.12g,%.12g,%d,%d,%d,"
+                    "%.12g,%.12g,%.12g,%.12g,%d,%.12g,%d,%d,%d,"
                     "%.12g,%.12g,%.12g,%.12g\n",
-                    variant, frameIndex, substepIndex, pressure.mergedPressureCells,
+                    connectedExperiment ? 1 : 0, variant, frameIndex, substepIndex,
+                    pressure.mergedPressureCells,
                     static_cast<int>( pressure.coupledStatus ), volume.currentFraction,
                     before[target], afterSwept[target], afterMac[target],
                     stencilBefore, stencilSwept, stencilMac,
                     stencilBoundaryNet[0], stencilBoundaryNet[1],
-                    applied[0], applied[1], applied[2],
+                    applied[0], applied[1], applied[2], applied[3],
+                    tracer.connectedResidualSources,
                     tracer.unresolvedAudit.totalMass, tracer.unresolvedAudit.sources,
                     tracer.unresolvedAudit.worstX, tracer.unresolvedAudit.worstY,
                     volume.snapshotDeltaVolume, volume.pressureSourceDeltaVolume,
@@ -1253,7 +1274,7 @@ void auditSmallCellAppliedTransfers()
         scene.setWindTracerTransferObserver( {} );
     }
     if( !sawActualSwept || !sawActualMac || !sawUnresolved ||
-        !sawPooledPressureCell )
+        ( connectedExperiment ? !sawConnectedResidual : !sawPooledPressureCell ) )
     {
         std::fprintf( stderr, "real Cut-cell tracer audit did not exercise all required paths\n" );
         std::exit( 1 );
@@ -1376,6 +1397,7 @@ int main( int argc, char** argv )
     bool smallCellWorldFeedbackAudit = false;
     bool smallCellLocalTracerAudit = false;
     bool smallCellTransferLedgerAudit = false;
+    bool smallCellConnectedResidualAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -1394,6 +1416,7 @@ int main( int argc, char** argv )
         smallCellWorldFeedbackAudit |= std::string_view( argv[i] ) == "--small-cell-world-feedback-audit";
         smallCellLocalTracerAudit |= std::string_view( argv[i] ) == "--small-cell-local-tracer-audit";
         smallCellTransferLedgerAudit |= std::string_view( argv[i] ) == "--small-cell-applied-transfer-audit";
+        smallCellConnectedResidualAudit |= std::string_view( argv[i] ) == "--small-cell-connected-residual-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -1405,6 +1428,7 @@ int main( int argc, char** argv )
     if( smallCellWorldFeedbackAudit ) { auditSmallCellWorldFeedback(); return 0; }
     if( smallCellLocalTracerAudit ) { auditSmallCellLocalTracer(); return 0; }
     if( smallCellTransferLedgerAudit ) { auditSmallCellAppliedTransfers(); return 0; }
+    if( smallCellConnectedResidualAudit ) { auditSmallCellAppliedTransfers( true ); return 0; }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
