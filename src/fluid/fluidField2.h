@@ -391,7 +391,8 @@ enum class fluidTracerTransferKind2
 {
     sweptFace,
     fallback,
-    macFace
+    macFace,
+    connectedResidual // Research only: endpoint-open neighboring face.
 };
 
 struct fluidTracerTransfer2
@@ -414,6 +415,10 @@ struct fluidTracerStats2
     float sweptLimitedMass = 0.0f;
     float sweptRemappedMass = 0.0f;
     float fallbackRemappedMass = 0.0f;
+    // Experimental-only aperture-weighted transfer of remaining displaced
+    // tracer across currently open adjacent faces. Not a swept volume flux.
+    float connectedResidualRemappedMass = 0.0f;
+    int connectedResidualSources = 0;
     float unresolvedDisplacementMass = 0.0f;
     fluidSweptTracerUnresolvedAudit2 unresolvedAudit{};
     bool usedSweptRemap = false;
@@ -923,6 +928,22 @@ public:
     void setSweptTracerRemapEnabled( bool enabled ) noexcept { sweptTracerRemapEnabled_ = enabled; }
     [[nodiscard]] bool isSweptTracerRemapEnabled() const noexcept { return sweptTracerRemapEnabled_; }
 
+    // S2c research ONLY, default OFF. If a *partially open* shrinking cell
+    // cannot evacuate all displaced tracer through outward swept volumes,
+    // distribute its remaining mass to adjacent fluid cells using positive
+    // endpoint face apertures. Never cross a closed face or extend the swept
+    // transfer limit; only tracer is changed, not pressure or MAC velocities.
+    // Endpoint aperture is NOT a space-time fluid-flux reconstruction.
+    // Fully covered sources retain the existing nearest-fluid fallback.
+    void setConnectedResidualTracerRemapEnabled( bool enabled ) noexcept
+    {
+        connectedResidualTracerRemapEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isConnectedResidualTracerRemapEnabled() const noexcept
+    {
+        return connectedResidualTracerRemapEnabled_;
+    }
+
     // 지정 위치 주변 face 속도에 world-space 속도 변화(m/s)를 더함.
     // 소스가 격자 바깥이거나 radius가 유효하지 않으면 아무 일도 하지 않음.
     void addVelocity( vec2 position, vec2 velocityDelta, float radius );
@@ -1167,6 +1188,7 @@ private:
     tracerTransferObserver2 tracerTransferObserver_{};
     bool tracerEnabled_ = false;
     bool sweptTracerRemapEnabled_ = false;
+    bool connectedResidualTracerRemapEnabled_ = false;
     bool sweptGeometryCorrectionEnabled_ = false;
     bool adaptiveSweptSamplingEnabled_ = false;
     int cutCellSampleCount_ = 4;
