@@ -244,6 +244,37 @@ At each h, the finer 64-step approximation gets closer to 128 than 32 in the rep
 
 **Decision:** The primary S2c physical acceptance criterion remains unsatisfied. Do not convert endpoint or time-linear MAC observations into a global tracer-transfer cap. Before any default-on change, investigate why rotating interfaces produce a non-monotonic cross-grid response, test h=.0625m if justified by cost and relevance, and compare the **same sampled World/Fluid moving-body state** under different fluid cadences. S2c pressure pooling and connected-residual remap remain default OFF, PR #326 remains Draft, and PR #322 stays independent.
 
+### V(16,16) pure-rotation pressure-stage split and geometric exposure — 2026-11-13
+
+A **new read-only, pressure-stage-specific experiment** `sandboxWindStepBenchmark --small-cell-rotation-pressure-split-audit` (commit `1de7410`, corrected CSV formatter `cdec94f`, cross-platform CI wiring `8d7ed39`) replays the earlier worst physical face **V(16,16)** in a fixed pure-rotation capsule path. It solves **64 and 128 actual Fluid steps**, once on 32×32 h=0.25m and once on 64×64 h=0.125m. The physical segment is **one coarse V face** or **two adjacent fine V faces**, always representing the same 0.25m world-space line. Solid displacement/pose, initial velocity injections and total duration are prescribed identically at each grid/cadence; the pressure-pool and connected-remap experiments are both OFF.
+
+At **every** Fluid substep, the existing `setPrePressureSnapshotObserver` captures the unchanged field's pressure-input MAC face volume and the optional time-linear aperture×MAC velocity proxy **after advection/boundary processing but before pressure projection**. Following the normal pressure solve, the same two values are read again from the actual Field. We sum the two half-width fine faces' signed volumes exactly once and length-average their aperture samples. The differences `post - pre` are explicitly **pressure/projection-stage changes**, not new Swept volume; they also include any normal pressure-stage boundary synchronisation. We separately accumulate the existing signed solid Swept volume, length-averaged open-time and endpoint aperture over the *same physical segment*. The test checks each signed ledger closes at the individual run and cross-grid levels, and never alters the pressure operator.
+
+For a matched coarse-minus-fine signed **time-linear-proxy fluid volume** `Δpost`, the test also provides the exact algebraic split
+
+`Δpost = Δpre + Δprojection = (E_coarse - E_fine) * uEffectiveFine + E_coarse * (uEffectiveCoarse - uEffectiveFine) + Δprojection`,
+
+where `E = physicalFaceLength * (integrated mean open fraction over time)` is the shared-face aperture exposure and `uEffective = preProxyVolume / E` is the exposure-weighted **pre-projection** velocity. This is an identity for the measured quantities, **not a causal diagnosis**: pre-projection velocities at later substeps already contain previous pressure projection and prior velocity advection. The linear speed assumption remains in each individual substep proxy, so neither the proxy nor its decomposition proves the exact physical space-time flux.
+
+**Ubuntu Debug:** The added diagnostic passed [CI #43392265568](https://github.com/buddas-bible/zonai/actions/runs/43392265568). The target V(16,16) results are:
+
+| Metric, signed coarse minus fine | 64 Fluid steps | 128 Fluid steps |
+| --- | ---: | ---: |
+| Geometry aperture exposure contribution (m³) | -0.000211261707 | -0.000871465018 |
+| Pre-projection effective velocity contribution (m³) | -0.004778846030 | -0.005632295548 |
+| Current projection-stage contribution (m³) | +0.000025341898 | +0.000099265404 |
+| **Total time-linear-proxy fluid volume difference (m³)** | **-0.004964765839** | **-0.006404495162** |
+| Endpoint MAC volume: pre-projection difference (m³) | -0.006098198200 | -0.006883569619 |
+| Endpoint MAC volume: pressure-stage difference (m³) | +0.000163801884 | +0.000146038997 |
+| Solid Swept volume coarse / fine (m³) | 0.060679928807 / 0.060580896934 | 0.061029051081 / 0.060355983846 |
+| Aperture open-time coarse / fine (s) | 0.009375000489 / 0.009440104659 | 0.009244792149 / 0.009505208829 |
+
+At 128 steps, the largest signed magnitude in the exact decomposition is the **pre-projection velocity term** (-0.0056323m³). The measured **current** pressure-stage difference is a much smaller positive offset (+0.0000993m³), reducing the final coarse-minus-fine discrepancy. This **does not rule out past pressure history** or geometry-driven state divergence as the source of the pre-projection velocity difference. The geometric exposure term (-0.0008715m³) is meaningful but not the only contributor. The solid swept signed volume remains independently measured; **do not add it to the MAC fluid proxy as if it were a single-face mass transfer**.
+
+The high-difference period is concentrated after the capsule reaches ~0.74 rad. Around **0.91–0.94 rad** (128-step indices ~84–88), the two resolutions can report the **same mean-open fraction (0.5)** and **zero signed Swept face-volume difference for the individual step** while the **pre-projection fluid transport still differs**, up to roughly -0.00033846m³ for one substep. This localizes the issue beyond a *current-step aperture-only* explanation. The sign and size can vary across substeps and pressure updates.
+
+**Decision / follow-up:** Keep the new observer and the experimental tracer path OFF by default. The next useful counterfactual is to hold a *single identical pre-projection fluid state/geometry* fixed while varying only the pressure discretization/face sampling, then separately test propagation of previous-step velocity differences. This would distinguish a **direct projection-operator discrepancy** from **indirect accumulated solver history**. Also return to the actual World8/Fluid4 disappearing-cell tracer source with this independent face staging; do not insert a global tracer cap before a physically accepted space-time flux bound.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
