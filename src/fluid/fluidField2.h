@@ -944,6 +944,29 @@ public:
         return connectedResidualTracerRemapEnabled_;
     }
 
+    // S2c read-only diagnostic. Midpoint quadrature of the moving obstacle's
+    // actual *open face length* at the same selected time samples as Swept
+    // solid flux. Separate from swept solid normal velocity and endpoint MAC.
+    // OFF by default: no grid-sized arrays or extra clipping per normal Step.
+    void setSweptApertureAuditEnabled( bool enabled ) noexcept
+    {
+        sweptApertureAuditEnabled_ = enabled;
+        if( !enabled )
+        {
+            sweptApertureAuditValid_ = false;
+            sweptUTimeMeanOpen_.clear();
+            sweptVTimeMeanOpen_.clear();
+        }
+    }
+    [[nodiscard]] bool isSweptApertureAuditEnabled() const noexcept
+    {
+        return sweptApertureAuditEnabled_;
+    }
+    [[nodiscard]] bool hasSweptApertureAudit() const noexcept
+    {
+        return sweptApertureAuditValid_;
+    }
+
     // 지정 위치 주변 face 속도에 world-space 속도 변화(m/s)를 더함.
     // 소스가 격자 바깥이거나 radius가 유효하지 않으면 아무 일도 하지 않음.
     void addVelocity( vec2 position, vec2 velocityDelta, float radius );
@@ -1010,6 +1033,11 @@ public:
     [[nodiscard]] float getCellFluidFraction( int x, int y ) const noexcept;
     [[nodiscard]] float getUFaceOpenFraction( int x, int y ) const noexcept;
     [[nodiscard]] float getVFaceOpenFraction( int x, int y ) const noexcept;
+    // Time-average OPEN fraction on one interior face over the most recent
+    // valid swept moving-geometry interval. Zero if unavailable/invalid.
+    // Approximate quadrature, not an exact space-time interface integral.
+    [[nodiscard]] float getSweptUTimeMeanOpenFraction( int x, int y ) const noexcept;
+    [[nodiscard]] float getSweptVTimeMeanOpenFraction( int x, int y ) const noexcept;
     // Sub-face에서 막힌 구간의 평균 solid 법선 속도. 부분 개방 U/V의 fluid 성분과 별개.
     [[nodiscard]] float getUFaceSolidVelocity( int x, int y ) const noexcept;
     [[nodiscard]] float getVFaceSolidVelocity( int x, int y ) const noexcept;
@@ -1186,6 +1214,10 @@ private:
     fluidTracerStats2 tracerStats_{};
     tracerStageObserver2 tracerStageObserver_{};
     tracerTransferObserver2 tracerTransferObserver_{};
+    std::vector<float> sweptUTimeMeanOpen_;
+    std::vector<float> sweptVTimeMeanOpen_;
+    bool sweptApertureAuditEnabled_ = false;
+    bool sweptApertureAuditValid_ = false;
     bool tracerEnabled_ = false;
     bool sweptTracerRemapEnabled_ = false;
     bool connectedResidualTracerRemapEnabled_ = false;
