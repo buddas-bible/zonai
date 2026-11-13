@@ -514,6 +514,11 @@ public:
     {
         if( windField_ ) windField_->setConnectedResidualTracerRemapEnabled( enabled );
     }
+    // Opt-in S2c geometry-only time-average aperture probe.
+    void setWindSweptApertureAuditEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setSweptApertureAuditEnabled( enabled );
+    }
     [[nodiscard]] bool isWindSweptTracerRemapEnabled() const noexcept
     {
         return windField_ && windField_->isSweptTracerRemapEnabled();
