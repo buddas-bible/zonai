@@ -4706,6 +4706,7 @@ void checkConnectedResidualTracerRemap()
         { 0.0f, 0.28f }, { 0.0f, -0.28f }
     }};
     bool observedConnectedTransfer = false;
+    bool observedTemporalApertureChange = false;
     for( float h : { 0.5f, 0.25f } )
         for( int fluidSubsteps : { 1, 4 } )
             for( const vec2 motion : motions )
@@ -4724,6 +4725,10 @@ void checkConnectedResidualTracerRemap()
                     field->setSweptTracerRemapEnabled( true );
                 }
                 candidate.setConnectedResidualTracerRemapEnabled( true );
+                candidate.setSweptApertureAuditEnabled( true );
+                check( !candidate.hasSweptApertureAudit() &&
+                    !original.hasSweptApertureAudit(),
+                    "time-sampled aperture diagnostics must require valid moving history" );
                 fluidShapeObstacle2 circle{ circle2{ {}, 0.58f },
                     { { 0.12f, -0.08f }, {} }, { 0.12f, -0.08f },
                     {}, 0.0f, 0.0f, 0.0f };
@@ -4782,6 +4787,33 @@ void checkConnectedResidualTracerRemap()
                             candidateForce, 120 );
                         const auto& base = original.getTracerStats();
                         const auto& alternate = candidate.getTracerStats();
+                        check( candidate.hasSweptApertureAudit() &&
+                            !original.hasSweptApertureAudit(),
+                            "moving face aperture quadrature must be separately opt-in" );
+                        for( int y = 0; y < count; ++y )
+                            for( int x = 0; x < count; ++x )
+                            {
+                                if( x > 0 )
+                                {
+                                    const float mean = candidate.getSweptUTimeMeanOpenFraction( x, y );
+                                    check( std::isfinite( mean ) && mean >= 0.0f &&
+                                        mean <= 1.0f + 1.0e-5f,
+                                        "time-mean U aperture must stay in [0,1]" );
+                                    observedTemporalApertureChange |=
+                                        std::abs( mean -
+                                            candidate.getUFaceOpenFraction( x, y ) ) > 1.0e-3f;
+                                }
+                                if( y > 0 )
+                                {
+                                    const float mean = candidate.getSweptVTimeMeanOpenFraction( x, y );
+                                    check( std::isfinite( mean ) && mean >= 0.0f &&
+                                        mean <= 1.0f + 1.0e-5f,
+                                        "time-mean V aperture must stay in [0,1]" );
+                                    observedTemporalApertureChange |=
+                                        std::abs( mean -
+                                            candidate.getVFaceOpenFraction( x, y ) ) > 1.0e-3f;
+                                }
+                            }
                         observedConnectedTransfer |= observedTransfers > 0;
                         check( base.connectedResidualRemappedMass == 0.0f &&
                             base.connectedResidualSources == 0 &&
@@ -4809,12 +4841,15 @@ void checkConnectedResidualTracerRemap()
                     }
                 candidate.clear();
                 check( candidate.isConnectedResidualTracerRemapEnabled() &&
+                    candidate.isSweptApertureAuditEnabled() &&
+                    !candidate.hasSweptApertureAudit() &&
+                    candidate.getSweptUTimeMeanOpenFraction( 1, 1 ) == 0.0f &&
                     candidate.getTracerStats().connectedResidualSources == 0 &&
                     candidate.getTracerStats().connectedResidualRemappedMass == 0.0f,
                     "clear must retain opt-in mode but reset all experimental diagnostics" );
             }
-    check( observedConnectedTransfer,
-        "partial moving Cut-cell regression must exercise connected residual transfer" );
+    check( observedConnectedTransfer && observedTemporalApertureChange,
+        "moving Cut-cell must exercise connected transfer and temporal aperture variation" );
 }
 
 void checkMovingCutCellLocalClosure()
