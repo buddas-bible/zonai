@@ -139,6 +139,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-prescribed-spatial-audit
 
+      # S2c read-only pressure-stage forensic: same rotating V(16,16)
+      # physical face on h=.25/.125, using real 64 and 128 Fluid steps.
+      - name: Split rotating face geometry, pre-pressure and pressure flux (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-rotation-pressure-split-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -352,6 +358,10 @@ jobs:
       - name: Audit prescribed time-space Cut-cell refinement (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-prescribed-spatial-audit
+
+      - name: Split rotating face geometry, pre-pressure and pressure flux (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-rotation-pressure-split-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
