@@ -1945,6 +1945,241 @@ std::vector<prescribedCutCellFaceResult> auditPrescribedMovingCutCellSubsteps(
     return result;
 }
 
+// S2c physical-face forensic, no solver modifications. On an identical
+// prescribed rotating capsule, observe the SAME physical V(16,16) segment
+// at both h=0.25 and h=0.125, with 64 and 128 real Fluid steps. The
+// pre-pressure observer samples the current field after advection/boundary
+// application. Its velocity is NOT the beginning-of-frame velocity.
+// The post-pressure result is sampled after the normal projection.
+void auditPrescribedRotatingFacePressureSplit()
+{
+    constexpr float totalDt = 1.0f / 30.0f;
+    constexpr vec2 center{ -0.20f, -0.12f };
+    constexpr float startAngle = 0.18f, endAngle = 1.28f;
+    constexpr float angularSpeed = ( endAngle - startAngle ) / totalDt;
+    constexpr float physicalFaceLength = 0.25f;
+    const auto fail = []( const char* message )
+    {
+        std::fprintf( stderr, "rotation pressure split: %s\n", message );
+        std::exit( 1 );
+    };
+    struct faceLedger
+    {
+        float h = 0.0f;
+        int steps = 0;
+        double preLinear = 0.0;
+        double pressureLinear = 0.0;
+        double postLinear = 0.0;
+        double preEndpoint = 0.0;
+        double pressureEndpoint = 0.0;
+        double postEndpoint = 0.0;
+        double sweptSolid = 0.0;
+        double openTime = 0.0;
+        double endpointOpenTime = 0.0;
+        double peakAbsPressureLinear = 0.0;
+        int nonzeroPressureSteps = 0;
+    };
+    std::array<faceLedger, 4> ledgers{};
+    std::puts( "rotation_pressure_substep,cell_m,fluid_substeps,substep,"
+        "angle_rad,physical_face_length_m,pre_projection_mac_m3,"
+        "post_projection_mac_m3,pressure_endpoint_delta_m3,"
+        "pre_projection_linear_proxy_m3,post_projection_linear_proxy_m3,"
+        "pressure_linear_proxy_delta_m3,time_mean_open,endpoint_open,"
+        "solid_swept_m3" );
+    std::puts( "rotation_pressure_cross,fluid_substeps,coarse_h,fine_h,"
+        "coarse_pre_linear_m3,fine_pre_linear_m3,"
+        "coarse_pressure_linear_m3,fine_pressure_linear_m3,"
+        "coarse_post_linear_m3,fine_post_linear_m3,"
+        "coarse_pre_mac_m3,fine_pre_mac_m3,"
+        "coarse_pressure_mac_m3,fine_pressure_mac_m3,"
+        "coarse_post_mac_m3,fine_post_mac_m3,"
+        "coarse_solid_swept_m3,fine_solid_swept_m3,"
+        "coarse_open_time_s,fine_open_time_s,"
+        "geometry_pre_linear_delta_m3,velocity_pre_linear_delta_m3,"
+        "pressure_linear_delta_m3,total_linear_delta_m3,"
+        "pre_mac_delta_m3,pressure_mac_delta_m3,total_mac_delta_m3" );
+
+    for( int grid = 0; grid < 2; ++grid )
+        for( int resolution = 0; resolution < 2; ++resolution )
+        {
+            const float h = grid == 0 ? 0.25f : 0.125f;
+            const int segments = grid == 0 ? 1 : 2;
+            const int steps = resolution == 0 ? 64 : 128;
+            const float subDt = totalDt / steps;
+            faceLedger& ledger = ledgers[grid * 2 + resolution];
+            ledger.h = h;
+            ledger.steps = steps;
+            fluidField2 field{ 32 * segments, 32 * segments, h, { -4.0f, -4.0f } };
+            field.setCutCellProjectionEnabled( true );
+            field.setDisjointAnalyticCutCellEnabled( true );
+            field.setSweptApertureAuditEnabled( true );
+            if( field.getSmallCellPressureMergeFraction() != 0.0f ||
+                field.isConnectedResidualTracerRemapEnabled() )
+                fail( "experimental physics must remain disabled" );
+
+            fluidShapeObstacle2 capsule{
+                capsule2{ { -0.63f, 0.0f }, { 0.63f, 0.0f }, 0.19f },
+                { center, rot2::FromRadians( startAngle ) },
+                center, {}, 0.0f, 0.0f, 0.0f
+            };
+            std::array<fluidObstacleForce2, 1> feedback{};
+            field.step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                feedback, 120 );
+            if( field.hasSweptApertureAudit() )
+                fail( "unchanged initial shape must not create swept history" );
+            field.addVelocity( { -0.24f, -0.30f }, { 1.3f, 0.65f }, 0.65f );
+            field.addVelocity( { 0.35f, 0.25f }, { -0.55f, 0.8f }, 0.60f );
+
+            std::array<double, 2> preLinear{}, preEndpoint{};
+            bool observedPrePressure = false;
+            field.setPrePressureSnapshotObserver( [&]( const fluidField2& snapshot )
+            {
+                if( !snapshot.hasSweptApertureAudit() || observedPrePressure )
+                    fail( "missing or duplicated pre-pressure moving-face observer" );
+                observedPrePressure = true;
+                for( int segment = 0; segment < segments; ++segment )
+                {
+                    const int faceX = 16 * segments + segment;
+                    const int faceY = 16 * segments;
+                    const auto budget = snapshot.getCutCellVolumeBudget(
+                        faceX, faceY - 1, subDt );
+                    if( !budget.valid || !budget.hasSweptHistory )
+                        fail( "pre-pressure face has no current swept geometry" );
+                    preLinear[segment] = snapshot.getSweptVLinearVelocityProxyVolume(
+                        faceX, faceY, subDt );
+                    preEndpoint[segment] = budget.macOutwardVolume[3];
+                }
+            } );
+            for( int step = 0; step < steps; ++step )
+            {
+                observedPrePressure = false;
+                const float alpha = static_cast<float>( step + 1 ) / steps;
+                capsule.transform.rotation = rot2::FromRadians(
+                    startAngle + alpha * ( endAngle - startAngle ) );
+                capsule.angularVelocity = angularSpeed;
+                field.step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                    feedback, 120 );
+                if( !observedPrePressure || !field.hasSweptApertureAudit() )
+                    fail( "missing pressure stage or moving-face time samples" );
+
+                double preLinearStep = 0.0, postLinearStep = 0.0;
+                double preEndpointStep = 0.0, postEndpointStep = 0.0;
+                double sweptStep = 0.0, meanOpen = 0.0, endpointOpen = 0.0;
+                for( int segment = 0; segment < segments; ++segment )
+                {
+                    const int faceX = 16 * segments + segment;
+                    const int faceY = 16 * segments;
+                    const auto budget = field.getCutCellVolumeBudget(
+                        faceX, faceY - 1, subDt );
+                    if( !budget.valid || !budget.hasVolumeHistory ||
+                        !budget.hasSweptHistory )
+                        fail( "post-pressure face has invalid swept/volume history" );
+                    preLinearStep += preLinear[segment];
+                    preEndpointStep += preEndpoint[segment];
+                    postLinearStep += field.getSweptVLinearVelocityProxyVolume(
+                        faceX, faceY, subDt );
+                    postEndpointStep += budget.macOutwardVolume[3];
+                    sweptStep += budget.solidSweptOutwardVolume[3];
+                    meanOpen += field.getSweptVTimeMeanOpenFraction(
+                        faceX, faceY ) / segments;
+                    endpointOpen += field.getVFaceOpenFraction(
+                        faceX, faceY ) / segments;
+                }
+                const double pressureLinearStep = postLinearStep - preLinearStep;
+                const double pressureEndpointStep = postEndpointStep - preEndpointStep;
+                if( !std::isfinite( preLinearStep ) ||
+                    !std::isfinite( postLinearStep ) ||
+                    !std::isfinite( pressureLinearStep ) ||
+                    !std::isfinite( preEndpointStep ) ||
+                    !std::isfinite( postEndpointStep ) ||
+                    !std::isfinite( pressureEndpointStep ) ||
+                    !std::isfinite( sweptStep ) ||
+                    !( meanOpen >= 0.0 && meanOpen <= 1.0 + 1.0e-5 ) ||
+                    !( endpointOpen >= 0.0 && endpointOpen <= 1.0 + 1.0e-5 ) )
+                    fail( "nonfinite or invalid staged face flux" );
+
+                ledger.preLinear += preLinearStep;
+                ledger.postLinear += postLinearStep;
+                ledger.pressureLinear += pressureLinearStep;
+                ledger.preEndpoint += preEndpointStep;
+                ledger.postEndpoint += postEndpointStep;
+                ledger.pressureEndpoint += pressureEndpointStep;
+                ledger.sweptSolid += sweptStep;
+                ledger.openTime += meanOpen * subDt;
+                ledger.endpointOpenTime += endpointOpen * subDt;
+                ledger.peakAbsPressureLinear = std::max(
+                    ledger.peakAbsPressureLinear, std::abs( pressureLinearStep ) );
+                ledger.nonzeroPressureSteps += std::abs( pressureLinearStep ) > 1.0e-12;
+                std::printf( "rotation_pressure_substep,%.9g,%d,%d,%.9g,"
+                    "%.9g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g,%.12g,%.12g\n",
+                    h, steps, step, startAngle + alpha * ( endAngle - startAngle ),
+                    physicalFaceLength, preEndpointStep, postEndpointStep,
+                    pressureEndpointStep, preLinearStep, postLinearStep,
+                    pressureLinearStep, meanOpen, endpointOpen, sweptStep );
+            }
+            if( !ledger.nonzeroPressureSteps ||
+                std::abs( ledger.postLinear -
+                    ( ledger.preLinear + ledger.pressureLinear ) ) > 1.0e-9 ||
+                std::abs( ledger.postEndpoint -
+                    ( ledger.preEndpoint + ledger.pressureEndpoint ) ) > 1.0e-9 )
+                fail( "invalid or unexercised pressure stage decomposition" );
+        }
+
+    for( int resolution = 0; resolution < 2; ++resolution )
+    {
+        const faceLedger& coarse = ledgers[resolution];
+        const faceLedger& fine = ledgers[2 + resolution];
+        if( coarse.steps != fine.steps ||
+            std::abs( coarse.h - 0.25f ) > 1.0e-6f ||
+            std::abs( fine.h - 0.125f ) > 1.0e-6f )
+            fail( "comparison does not refer to same physical face/time interval" );
+
+        const double coarseExposure = physicalFaceLength * coarse.openTime;
+        const double fineExposure = physicalFaceLength * fine.openTime;
+        if( coarseExposure <= 0.0 || fineExposure <= 0.0 )
+            fail( "selected physical face never opened in one reference run" );
+        const double effectiveCoarseVelocity = coarse.preLinear / coarseExposure;
+        const double effectiveFineVelocity = fine.preLinear / fineExposure;
+        // Exact algebra, not a causal inference about the pressure solver:
+        // Δpost = Δpre + Δpressure, while
+        // Δpre = (Ec - Ef) * uEffF + Ec * (uEffC - uEffF).
+        const double geometryDelta = ( coarseExposure - fineExposure ) *
+            effectiveFineVelocity;
+        const double preVelocityDelta = coarseExposure *
+            ( effectiveCoarseVelocity - effectiveFineVelocity );
+        const double pressureDelta = coarse.pressureLinear - fine.pressureLinear;
+        const double totalLinearDelta = coarse.postLinear - fine.postLinear;
+        const double preMacDelta = coarse.preEndpoint - fine.preEndpoint;
+        const double pressureMacDelta =
+            coarse.pressureEndpoint - fine.pressureEndpoint;
+        const double totalMacDelta = coarse.postEndpoint - fine.postEndpoint;
+        const double tolerance = 1.0e-9;
+        if( std::abs( geometryDelta + preVelocityDelta + pressureDelta -
+            totalLinearDelta ) > tolerance ||
+            std::abs( preMacDelta + pressureMacDelta - totalMacDelta ) >
+            tolerance || !std::isfinite( effectiveCoarseVelocity ) ||
+            !std::isfinite( effectiveFineVelocity ) )
+            fail( "algebraic pressure/geometry/velocity closure violated" );
+        std::printf( "rotation_pressure_cross,%d,0.25,0.125,"
+            "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+            "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+            "%.12g,%.12g,%.12g,%.12g,%.12g,"
+            "%.12g,%.12g,%.12g,%.12g,%.12g\n",
+            coarse.steps,
+            coarse.preLinear, fine.preLinear,
+            coarse.pressureLinear, fine.pressureLinear,
+            coarse.postLinear, fine.postLinear,
+            coarse.preEndpoint, fine.preEndpoint,
+            coarse.pressureEndpoint, fine.pressureEndpoint,
+            coarse.postEndpoint, fine.postEndpoint,
+            coarse.sweptSolid, fine.sweptSolid,
+            coarse.openTime, fine.openTime,
+            geometryDelta, preVelocityDelta, pressureDelta, totalLinearDelta,
+            preMacDelta, pressureMacDelta, totalMacDelta );
+    }
+}
+
 // Opt-in, read-only endpoint volume ledger. These are not time-centered
 // aperture integrals; every row is the LAST Fluid substep of a World frame.
 // Different h/cadences have different obstacle histories, so compare only
@@ -2136,6 +2371,7 @@ int main( int argc, char** argv )
     bool prescribedSubstepsAudit = false;
     bool prescribedConvergenceAudit = false;
     bool prescribedSpatialAudit = false;
+    bool prescribedRotationPressureSplitAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -2161,6 +2397,7 @@ int main( int argc, char** argv )
         prescribedSubstepsAudit |= std::string_view( argv[i] ) == "--small-cell-prescribed-substeps-audit";
         prescribedConvergenceAudit |= std::string_view( argv[i] ) == "--small-cell-prescribed-convergence-audit";
         prescribedSpatialAudit |= std::string_view( argv[i] ) == "--small-cell-prescribed-spatial-audit";
+        prescribedRotationPressureSplitAudit |= std::string_view( argv[i] ) == "--small-cell-rotation-pressure-split-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -2184,6 +2421,7 @@ int main( int argc, char** argv )
         return 0;
     }
     if( prescribedSpatialAudit ) { auditPrescribedSpatialTemporalConvergence(); return 0; }
+    if( prescribedRotationPressureSplitAudit ) { auditPrescribedRotatingFacePressureSplit(); return 0; }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
