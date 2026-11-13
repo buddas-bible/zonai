@@ -271,6 +271,12 @@ jobs:
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-local-tracer-audit
 
+      # S2c diagnostic: reconstruct actual transferred tracer on the real
+      # World8/Fluid4 disappearing-cell path, per Cell and local stencil.
+      - name: Audit real small-cell applied tracer transfers (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-applied-transfer-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --cut-cell-volume-budget-audit
