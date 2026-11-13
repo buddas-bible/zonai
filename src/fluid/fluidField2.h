@@ -956,6 +956,10 @@ public:
             sweptApertureAuditValid_ = false;
             sweptUTimeMeanOpen_.clear();
             sweptVTimeMeanOpen_.clear();
+            sweptUAlphaOpenMoment_.clear();
+            sweptVAlphaOpenMoment_.clear();
+            sweptUStartVelocity_.clear();
+            sweptVStartVelocity_.clear();
         }
     }
     [[nodiscard]] bool isSweptApertureAuditEnabled() const noexcept
@@ -1038,6 +1042,15 @@ public:
     // Approximate quadrature, not an exact space-time interface integral.
     [[nodiscard]] float getSweptUTimeMeanOpenFraction( int x, int y ) const noexcept;
     [[nodiscard]] float getSweptVTimeMeanOpenFraction( int x, int y ) const noexcept;
+    // S2c DIAGNOSTIC, not a measured time-dependent velocity field. Computes
+    // h*dt*∫_0^1 open(alpha)*lerp(uAtStepEntry, uAfterPressure, alpha)dalpha.
+    // The two velocity endpoints are known but their intermediate history is
+    // not. Only valid during/after the latest step's pressure+tracer stage.
+    // Invalid/missing time samples return zero. Signed +U/+V canonical face.
+    [[nodiscard]] double getSweptULinearVelocityProxyVolume(
+        int x, int y, float timeStep ) const noexcept;
+    [[nodiscard]] double getSweptVLinearVelocityProxyVolume(
+        int x, int y, float timeStep ) const noexcept;
     // Sub-face에서 막힌 구간의 평균 solid 법선 속도. 부분 개방 U/V의 fluid 성분과 별개.
     [[nodiscard]] float getUFaceSolidVelocity( int x, int y ) const noexcept;
     [[nodiscard]] float getVFaceSolidVelocity( int x, int y ) const noexcept;
@@ -1216,6 +1229,12 @@ private:
     tracerTransferObserver2 tracerTransferObserver_{};
     std::vector<float> sweptUTimeMeanOpen_;
     std::vector<float> sweptVTimeMeanOpen_;
+    // Temporal first moments ∫alpha*open(alpha)dalpha, plus actual MAC
+    // face velocity at entry to this Fluid step. No normal-step allocations.
+    std::vector<float> sweptUAlphaOpenMoment_;
+    std::vector<float> sweptVAlphaOpenMoment_;
+    std::vector<float> sweptUStartVelocity_;
+    std::vector<float> sweptVStartVelocity_;
     bool sweptApertureAuditEnabled_ = false;
     bool sweptApertureAuditValid_ = false;
     bool tracerEnabled_ = false;
