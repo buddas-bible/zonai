@@ -509,6 +509,11 @@ public:
     {
         if( windField_ ) windField_->setSweptTracerRemapEnabled( enabled );
     }
+    // Experimental partial Cut-cell tracer rerouting, independently toggled.
+    void setWindConnectedResidualTracerRemapEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setConnectedResidualTracerRemapEnabled( enabled );
+    }
     [[nodiscard]] bool isWindSweptTracerRemapEnabled() const noexcept
     {
         return windField_ && windField_->isSweptTracerRemapEnabled();
