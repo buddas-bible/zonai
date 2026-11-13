@@ -1166,6 +1166,11 @@ void fluidField2::clear() noexcept
     std::fill( tracerVFlux_.begin(), tracerVFlux_.end(), 0.0 );
     tracerEnabled_ = false;
     tracerStats_ = {};
+    sweptApertureAuditValid_ = false;
+    // Retain the user-selected observer mode across clear(), like the
+    // other opt-in swept diagnostics. Never retain a stale quadrature.
+    sweptUTimeMeanOpen_.clear();
+    sweptVTimeMeanOpen_.clear();
     std::fill( pressure_.begin(), pressure_.end(), 0.0f );
     std::fill( nextPressure_.begin(), nextPressure_.end(), 0.0f );
     std::fill( divergence_.begin(), divergence_.end(), 0.0f );
@@ -1518,6 +1523,18 @@ float fluidField2::getUFaceOpenFraction( int x, int y ) const noexcept
 float fluidField2::getVFaceOpenFraction( int x, int y ) const noexcept
 {
     return x >= 0 && x < width_ && y > 0 && y < height_ ? vOpenFraction_[vIndex( x, y )] : 0.0f;
+}
+
+float fluidField2::getSweptUTimeMeanOpenFraction( int x, int y ) const noexcept
+{
+    return sweptApertureAuditValid_ && x > 0 && x < width_ &&
+        y >= 0 && y < height_ ? sweptUTimeMeanOpen_[uIndex( x, y )] : 0.0f;
+}
+
+float fluidField2::getSweptVTimeMeanOpenFraction( int x, int y ) const noexcept
+{
+    return sweptApertureAuditValid_ && x >= 0 && x < width_ &&
+        y > 0 && y < height_ ? sweptVTimeMeanOpen_[vIndex( x, y )] : 0.0f;
 }
 
 float fluidField2::getUFaceSolidVelocity( int x, int y ) const noexcept
@@ -3226,6 +3243,7 @@ float fluidField2::cutCellFluxDivergenceRms( float inverseTimeStep ) const noexc
 void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidShapeObstacle2> obstacles )
 {
     sweptFaceFlux_ = {};
+    sweptApertureAuditValid_ = false;
     std::fill( sweptUVolume_.begin(), sweptUVolume_.end(), 0.0f );
     std::fill( sweptVVolume_.begin(), sweptVVolume_.end(), 0.0f );
 
@@ -3574,6 +3592,74 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                 ++sweptFaceFlux_.refinements;
             }
         }
+    }
+
+    if( sweptApertureAuditEnabled_ )
+    {
+        // S2c diagnostic ONLY. Sample open geometry at the same accepted
+        // midpoint times as solid swept flux, independently of solid speed.
+        // Reconstruct intermediate poses for this optional pass rather than
+        // introducing extra work in the normal geometry/pressure solver.
+        // These are quadrature averages A(t) / h, NOT the swept solid flux.
+        sweptUTimeMeanOpen_.assign( u_.size(), 0.0f );
+        sweptVTimeMeanOpen_.assign( v_.size(), 0.0f );
+        const double inverseSamples = 1.0 / timeSamples;
+        for( int sampleIndex = 0; sampleIndex < timeSamples; ++sampleIndex )
+        {
+            const float alpha = ( sampleIndex + 0.5f ) / timeSamples;
+            for( std::size_t i = 0; i < obstacles.size(); ++i )
+            {
+                const auto& startShape = previousObstacles_[i];
+                const auto& endShape = obstacles[i];
+                intermediate[i].transform.position =
+                    startShape.transform.position +
+                    alpha * ( endShape.transform.position - startShape.transform.position );
+                intermediate[i].transform.rotation =
+                    rot2::FromRadians( startAngles[i] + angularSpeeds[i] * timeStep * alpha );
+            }
+            const auto analyticShapes = disjointAnalyticCutCellEnabled_
+                ? BuildDisjointAnalyticShapes( intermediate ) :
+                    std::vector<analyticDisjointShape2>{};
+            const auto openAt = [&]( bool vertical, int x, int y )
+            {
+                const double h = cellSize_;
+                const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+                const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+                double blocked = 0.0;
+                if( !analyticShapes.empty() )
+                    ForEachAnalyticFacePortion( analyticShapes, vertical, normal,
+                        low, low + h, [&]( std::size_t, analyticCircleInterval clipped )
+                        {
+                            blocked += clipped.length;
+                        } );
+                else
+                    for( int sub = 0; sub < faceSamples; ++sub )
+                    {
+                        const double t = ( sub + 0.5 ) / faceSamples;
+                        const vec2 point = vertical
+                            ? vec2{ static_cast<float>( normal ),
+                                static_cast<float>( low + h * t ) }
+                            : vec2{ static_cast<float>( low + h * t ),
+                                static_cast<float>( normal ) };
+                        for( const auto& shape : intermediate )
+                            if( ContainsFluidObstacle( shape, point ) )
+                            {
+                                blocked += h / faceSamples;
+                                break;
+                            }
+                    }
+                return static_cast<float>( std::clamp( 1.0 - blocked / h, 0.0, 1.0 ) );
+            };
+            for( int y = 0; y < height_; ++y )
+                for( int x = 1; x < width_; ++x )
+                    sweptUTimeMeanOpen_[uIndex( x, y )] +=
+                        static_cast<float>( inverseSamples * openAt( true, x, y ) );
+            for( int y = 1; y < height_; ++y )
+                for( int x = 0; x < width_; ++x )
+                    sweptVTimeMeanOpen_[vIndex( x, y )] +=
+                        static_cast<float>( inverseSamples * openAt( false, x, y ) );
+        }
+        sweptApertureAuditValid_ = true;
     }
 
     double absoluteFlux = 0.0;
