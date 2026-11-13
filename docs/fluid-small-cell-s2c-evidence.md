@@ -277,6 +277,31 @@ The high-difference period is concentrated after the capsule reaches ~0.74 rad. 
 
 **Decision / follow-up:** Keep the new observer and the experimental tracer path OFF by default. The next useful counterfactual is to hold a *single identical pre-projection fluid state/geometry* fixed while varying only the pressure discretization/face sampling, then separately test propagation of previous-step velocity differences. This would distinguish a **direct projection-operator discrepancy** from **indirect accumulated solver history**. Also return to the actual World8/Fluid4 disappearing-cell tracer source with this independent face staging; do not insert a global tracer cap before a physically accepted space-time flux bound.
 
+### Same frozen pre-projection state: Jacobi 40/120/200 iteration control — 2026-11-13
+
+**Purpose:** The previous `V(16,16)` rotating-capsule investigation found that, at h=0.25m vs h=0.125m, most of the measured signed fluid-face transport discrepancy already existed **before the current pressure projection**. That difference can contain *past* pressure, advection and geometry effects. A pressure-stage split alone cannot identify whether the **current Jacobi iteration budget** is the cause. This new test isolates precisely the current projection solve from a fixed input, without claiming identical grid-discretized states across two different h.
+
+**Implementation:** `replayFrozenCutCellPressure(int pressureIterationsOverride = -1)` accepts an optional diagnostic iteration budget in **[1,200]** on a one-use copy captured by the existing `setPrePressureSnapshotObserver`. The original no-argument replay retains the frozen Step iteration budget; invalid overrides return `nullopt` without consuming a copy. This overload does **not** change production `fluidField2::step`, pressure operator, warm start, geometry, advection or coupling. A unit regression verifies default-versus-explicit identical-budget replay equivalence, finite 200-iteration output and rejection of invalid values.
+
+The command `sandboxWindStepBenchmark --small-cell-frozen-pressure-iterations-audit` reproduces the previous pure capsule rotation with normal **120-iteration live** Fluid steps at 64 or 128 temporal subdivisions, on both h=0.25 and h=0.125. At exact fractions **11/16**, **12/16** and **16/16** of the total prescribed rotation, the observer receives the *actual* pre-projection state, then independently deep-copies it three times and applies **40, 120 or 200 Jacobi iterations** on those copies. The copies share identical velocity, geometry, swept volume, tracer state, pressure history *up to this moment*, pressure source and obstacle pose within each h/cadence. Their only intentional difference is the pressure iteration budget. The live Fluid field is unchanged and must agree numerically with the independently replayed 120-iteration result. Tests assert all cross-grid `post = pre + current projection` face ledgers close and both the projected face flux and iteration sensitivity are exercised.
+
+Code: `24a049b` (optional copy-only API), `10bb3e6` (bounded replay), `44c4074` (unit coverage), `9ecf6e1` (frozen rotating control) and `66c5d06` (Ubuntu/Windows CI). [Workflow #43413289439](https://github.com/buddas-bible/zonai/actions/runs/43413289439) **Ubuntu Debug has passed the new command and the full Ubuntu CI job**; confirm Windows Release status separately.
+
+**Ubuntu Debug target physical face results** (signed coarse h=0.25 minus fine h=0.125, one corresponding **current** Fluid Substep, unit-depth m³):
+
+| Actual Fluid substeps | Rotation fraction | Before pressure, identical across replay budgets | After replay at 40 iterations | After replay at 120 iterations | After replay at 200 iterations |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 64 | 11/16 (~0.936rad) | -0.000639748684 | -0.000525885351 | -0.000527974308 | -0.000528546388 |
+| 64 | 12/16 (~1.005rad) | -0.000256405489 | -0.000257876420 | -0.000258971562 | -0.000259045354 |
+| 64 | 16/16 (1.280rad) | -0.000322752719 | -0.000325398397 | -0.000324764733 | -0.000324705819 |
+| 128 | 11/16 (~0.936rad) | -0.000220951061 | -0.000220408325 | -0.000220680543 | -0.000220777494 |
+| 128 | 12/16 (~1.005rad) | -0.000131374317 | -0.000131987686 | -0.000132014943 | -0.000131999871 |
+| 128 | 16/16 (1.280rad) | -0.000172087672 | -0.000173800677 | -0.000174259171 | -0.000174370879 |
+
+At 128 steps, 11/16 rotation, the pressure-only iteration sweep changes the final coarse-minus-fine volume by ~3.69e-7m³ between 40 and 200 iterations, while the **fixed pre-pressure** difference is ~-2.21e-4m³. Thus the larger input discrepancy persists across the chosen projection budgets. At 64 steps, 11/16, current pressure *does* shift the difference by ~+1.12e-4m³, so neither pressure projection nor its iterative convergence should be declared irrelevant. The opt-in replay data also reveal nonzero pressure residual at 200 Jacobi iterations: finite targeted face-flux sensitivity does **not** establish global convergence of the pressure system.
+
+**Important scope:** "same state" means the three 40/120/200 copies **inside one fixed grid and cadence**. A coarse-grid field and a fine-grid field are different discrete states with different pressure systems; they cannot be declared identical merely because their world-space obstacle path is the same. This test isolates **current iteration-budget sensitivity**, not past pressure history or the entire difference between distinct spatial pressure operators. Further acceptance work should compare a matched cross-grid prepressure field via a justified prolongation/restriction operator, and then isolate previous-step state divergence with short controlled restarts. Keep the original coupled World/Fluid path, default physics and PR Draft status unchanged.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
