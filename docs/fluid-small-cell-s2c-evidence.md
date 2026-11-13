@@ -210,6 +210,38 @@ The geometry aperture quadrature itself also changes with cadence (for example, 
 
 **Decision:** No solver change, no hard tracer transfer capacity clamp and no automatic change in the engine's Fluid Substep count. Small-cell pressure pooling, connected residual Tracer remap and temporal aperture instrumentation remain OFF by default; PR #326 stays Draft. Before physical acceptance, test further 64→128 refinement where practical, different h/rotation rates, and actual coupled World trajectories. Reconcile the sampled relative solid/fluid flux with stored tracer redistribution at the source cell, not just the signed MAC-only reference.
 
+### 128-step temporal and h=0.25/0.125m matched-face refinement — 2026-11-13
+
+The new read-only `sandboxWindStepBenchmark --small-cell-prescribed-spatial-audit` compares the **same prescribed translation and pure rotation trajectories**, the same physical initial velocity injections, and **real 16/32/64/128 Fluid solves** at **h=0.25m (32×32)** and **h=0.125m (64×64)**. It does not change the production fluid timestep or solver. Commits: `98e3d33` (reusable reference with spatially aligned face aggregation, row-by-row temporal/spatial CSV) and `d65b7c2` (Ubuntu/Windows CI). The old 1..16 and 1..64 commands remain unchanged.
+
+**Essential spatial comparison rule:** Each monitored face represents a fixed **0.25m physical line segment** in world coordinates. At h=0.125m, **two adjacent U or V subfaces** cover that same segment. The benchmark **sums** actual sampled fluid flux and moving-solid Swept volume over the two fine faces, but **length-averages** the open-fraction time integral. Thus a half-length face's standalone flux is not incorrectly compared to a full-length coarse face. Initial geometry/velocity sources are specified in world space and all candidates of one grid size must end at the same obstacle pose and Cut-cell occupancy. This comparison includes the expected spatial-discretization effect of sampling the same world-space initial source at different h.
+
+The high-resolution output distinguishes:
+
+- `prescribed_spatial_temporal_summary`: RMS integral-fluid-flux error of 16/32/64-step solutions against **128 steps at the same h**, plus adjacent-step RMS, open-time RMS, and face-flow sign disagreement count
+- `prescribed_spatial_cross_summary`: RMS fluid-flux difference, open-time difference and sign mismatches **between h=0.25 and h=0.125** at each *matched cadence*, over the exact same ten physical 0.25m faces
+- Fine-grid flux is summed without reusing the same physical face twice; the coarse-segment open-time is a length average. The calculated flux inside each actual solved substep **still uses the same documented entry/exit linear MAC velocity assumption**. Neither 128 substeps nor h=0.125m constitutes an analytic solution.
+
+**Ubuntu Debug result:** [Workflow #43388443571](https://github.com/buddas-bible/zonai/actions/runs/43388443571) passed the new high-resolution time-space audit and the complete Ubuntu job. Windows Release is a separate job to cross-check.
+
+| Motion | h (m) | RMS fluid flux 32 vs 128 (m³) | RMS 64 vs 128 (m³) |
+| --- | ---: | ---: | ---: |
+| Translation circle | 0.25 | 0.000384344348 | 0.000286105648 |
+| Translation circle | 0.125 | 0.000616705984 | 0.000252585469 |
+| Pure rotating capsule | 0.25 | 0.001033941631 | 0.000507747638 |
+| Pure rotating capsule | 0.125 | 0.000626045508 | 0.000481830656 |
+
+At each h, the finer 64-step approximation gets closer to 128 than 32 in the reported RMS, but **the 64→128 difference is still nonzero**. The following compares **two different spatial resolutions at equal real Fluid substeps**, rather than incorrectly treating high temporal resolution as a space-convergence proof:
+
+| Motion | h=0.25 vs 0.125 RMS at 16 steps (m³) | At 64 steps | At 128 steps |
+| --- | ---: | ---: | ---: |
+| Translation circle | 0.001365246942 | 0.000755847246 | 0.000559086157 |
+| Pure rotating capsule | 0.003348989255 | 0.001876010446 | **0.002211549749** |
+
+**Important negative result:** The rotating capsule's spatial difference **increased** between the 64-step and 128-step comparisons. At 128 steps, **V(16,16)** contributed the largest single matched-face difference: h=0.25 integrated linear MAC ~0.0254583m³ versus h=0.125 ~0.0318628m³ (difference ~-0.0064045m³). Because the metric includes discretization, nonlinearity, and geometry quadrature, it does **not** prove a specific solver defect. However, it rules out claiming space convergence from finer temporal stepping alone.
+
+**Decision:** The primary S2c physical acceptance criterion remains unsatisfied. Do not convert endpoint or time-linear MAC observations into a global tracer-transfer cap. Before any default-on change, investigate why rotating interfaces produce a non-monotonic cross-grid response, test h=.0625m if justified by cost and relevance, and compare the **same sampled World/Fluid moving-body state** under different fluid cadences. S2c pressure pooling and connected-residual remap remain default OFF, PR #326 remains Draft, and PR #322 stays independent.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
