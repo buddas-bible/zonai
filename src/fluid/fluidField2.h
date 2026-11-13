@@ -629,9 +629,13 @@ public:
 
     // Executes only Cut-cell pressure on a COPY made inside the observer.
     // One replay per copy; returns nullopt for an ordinary/later Field state.
+    // -1 uses the captured normal Step iteration budget; [1,200] explicitly
+    // overrides that budget for SAME-STATE pressure-only research. Other
+    // overrides are rejected without consuming the frozen copy. No change
+    // to production Step(), fluid advection or the solver's default.
     // Pressure and feedback remain observable on the copy after replay.
     [[nodiscard]] std::optional<std::vector<fluidObstacleForce2>>
-        replayFrozenCutCellPressure();
+        replayFrozenCutCellPressure( int pressureIterationsOverride = -1 );
 
     // Opt-in single interior MAC-face stage trace; negative coordinates disable.
     // Does not change fluid velocities, projection, or geometry.
