@@ -1622,12 +1622,26 @@ void auditSmallCellAppliedTransfers( bool connectedExperiment = false,
 // velocities coupled to sampled substep open geometry, not a guessed
 // interpolation of the coarse solution. Even the finest run is not an
 // analytic/continuous-fluid ground truth.
-void auditPrescribedMovingCutCellSubsteps( bool convergenceAudit = false,
-    bool rotating = false )
+struct prescribedCutCellFaceResult
 {
-    constexpr float h = 0.25f;
+    int substeps = 0;
+    int faceType = 0;
+    int x = 0, y = 0; // Physical face segment indexed on the h=0.25 reference grid
+    double timeOpen = 0.0; // Mean open time of that physical 0.25m face (s)
+    double macEndpoint = 0.0;
+    double macLinear = 0.0;
+    double solidSwept = 0.0;
+};
+
+std::vector<prescribedCutCellFaceResult> auditPrescribedMovingCutCellSubsteps(
+    bool convergenceAudit = false, bool rotating = false,
+    float h = 0.25f, bool spatialAudit = false )
+{
+    constexpr float baseH = 0.25f;
     constexpr float totalDt = 1.0f / 30.0f;
-    constexpr int width = 32, height = 32;
+    const int faceSegments = static_cast<int>( std::lround( baseH / h ) );
+    const int width = static_cast<int>( std::lround( 8.0f / h ) );
+    const int height = width;
     // A circle gives no changing geometry under rotation. Use an elongated
     // capsule for the pure-rotation trial so the Cut-cell interface genuinely
     // sweeps across U/V faces without a translating COM.
@@ -1638,9 +1652,10 @@ void auditPrescribedMovingCutCellSubsteps( bool convergenceAudit = false,
     const float startAngle = rotating ? 0.18f : 0.0f;
     const float finishAngle = rotating ? 1.28f : 0.0f;
     const float angularSpeed = ( finishAngle - startAngle ) / totalDt;
-    const std::vector<int> cadences = convergenceAudit
-        ? std::vector<int>{ 1, 2, 4, 8, 16, 32, 64 }
-        : std::vector<int>{ 1, 2, 4, 8, 16 };
+    const std::vector<int> cadences = spatialAudit
+        ? std::vector<int>{ 16, 32, 64, 128 }
+        : convergenceAudit ? std::vector<int>{ 1, 2, 4, 8, 16, 32, 64 }
+            : std::vector<int>{ 1, 2, 4, 8, 16 };
     struct monitoredFace
     {
         bool isU;
@@ -1668,7 +1683,21 @@ void auditPrescribedMovingCutCellSubsteps( bool convergenceAudit = false,
     };
     if( rotating && !convergenceAudit )
         fail( "rotation is only supported by the independent extended convergence mode" );
-    if( convergenceAudit )
+    if( spatialAudit && ( !convergenceAudit ||
+        ( faceSegments != 1 && faceSegments != 2 ) ||
+        std::abs( faceSegments * h - baseH ) > 1.0e-6f ) )
+        fail( "spatial audit needs physical h=0.25m face segments of h=0.25/0.125m" );
+    if( spatialAudit )
+    {
+        std::puts( "prescribed_spatial,mode,cell_m,fluid_substeps,"
+            "face_type,face_x,face_y,time_open_seconds,mac_endpoint_m3,"
+            "mac_linear_m3,solid_swept_m3,reference_128_linear_m3,"
+            "linear_delta_to_128_m3,open_time_delta_to_128_s" );
+        std::puts( "prescribed_spatial_temporal_summary,mode,cell_m,fluid_substeps,"
+            "faces,rms_linear_to_128_m3,rms_to_previous_m3,"
+            "rms_open_time_to_128_s,sign_mismatch_to_128_faces" );
+    }
+    else if( convergenceAudit )
     {
         std::puts( "prescribed_convergence,mode,fluid_substeps,face_type,"
             "face_x,face_y,start_x,start_y,finish_x,finish_y,"
@@ -1689,6 +1718,8 @@ void auditPrescribedMovingCutCellSubsteps( bool convergenceAudit = false,
             "reference_16_mac_linear_m3,coarse_to_ref_mac_linear_delta_m3,"
             "coarse_to_ref_endpoint_delta_m3,geometry_time_open_delta_seconds" );
 
+    std::vector<prescribedCutCellFaceResult> result;
+    result.reserve( cadences.size() * faces.size() );
     std::vector<std::array<integratedFace, faces.size()>> history( cadences.size() );
     std::vector<float> endFraction( cadences.size() );
     std::vector<std::array<float, 4>> endGeometry( cadences.size() );
@@ -1744,39 +1775,51 @@ void auditPrescribedMovingCutCellSubsteps( bool convergenceAudit = false,
                 !field.getSweptFaceFlux().usedSweptFlux )
                 fail( "moving-step history was not observed" );
 
+            // Match the SAME physical h=0.25m face segment at both spatial
+            // resolutions. At h=0.125, this is two adjacent U/V subfaces.
+            // Sum transport volumes, but average OPEN time by physical length.
             for( std::size_t i = 0; i < faces.size(); ++i )
             {
                 const monitoredFace face = faces[i];
-                const float open = face.isU
-                    ? field.getSweptUTimeMeanOpenFraction( face.x, face.y )
-                    : field.getSweptVTimeMeanOpenFraction( face.x, face.y );
-                const double linear = face.isU
-                    ? field.getSweptULinearVelocityProxyVolume( face.x, face.y, subDt )
-                    : field.getSweptVLinearVelocityProxyVolume( face.x, face.y, subDt );
-                const int cellX = face.isU ? face.x - 1 : face.x;
-                const int cellY = face.isU ? face.y : face.y - 1;
-                const auto budget = field.getCutCellVolumeBudget( cellX, cellY, subDt );
-                if( !budget.valid || !budget.hasVolumeHistory ||
-                    !budget.hasSweptHistory || !std::isfinite( open ) ||
-                    open < 0.0f || open > 1.0f + 1.0e-5f ||
-                    !std::isfinite( linear ) )
-                    fail( "nonfinite or missing moving-face volume history" );
                 integratedFace& value = integrated[i];
-                value.timeOpen += static_cast<double>( open ) * subDt;
-                value.macLinear += linear;
-                value.macEndpoint += budget.macOutwardVolume[face.isU ? 1 : 3];
-                value.solidSwept += budget.solidSweptOutwardVolume[face.isU ? 1 : 3];
-                if( open > 0.0f && open < 1.0f )
-                    ++value.movingSamples;
-                if( !std::isfinite( value.timeOpen ) ||
-                    !std::isfinite( value.macEndpoint ) ||
-                    !std::isfinite( value.macLinear ) ||
-                    !std::isfinite( value.solidSwept ) )
-                    fail( "nonfinite accumulated moving-face volume" );
-                observedVelocityHistoryDifference |= steps > 1 &&
-                    std::abs( linear - budget.macOutwardVolume[face.isU ? 1 : 3] ) >
-                        1.0e-11;
-                observedGeometryMotion |= open > 0.0f && open < 1.0f;
+                for( int segment = 0; segment < faceSegments; ++segment )
+                {
+                    const int faceX = face.x * faceSegments +
+                        ( face.isU ? 0 : segment );
+                    const int faceY = face.y * faceSegments +
+                        ( face.isU ? segment : 0 );
+                    const float open = face.isU
+                        ? field.getSweptUTimeMeanOpenFraction( faceX, faceY )
+                        : field.getSweptVTimeMeanOpenFraction( faceX, faceY );
+                    const double linear = face.isU
+                        ? field.getSweptULinearVelocityProxyVolume( faceX, faceY, subDt )
+                        : field.getSweptVLinearVelocityProxyVolume( faceX, faceY, subDt );
+                    const int cellX = face.isU ? faceX - 1 : faceX;
+                    const int cellY = face.isU ? faceY : faceY - 1;
+                    const auto budget = field.getCutCellVolumeBudget( cellX, cellY, subDt );
+                    if( !budget.valid || !budget.hasVolumeHistory ||
+                        !budget.hasSweptHistory || !std::isfinite( open ) ||
+                        open < 0.0f || open > 1.0f + 1.0e-5f ||
+                        !std::isfinite( linear ) )
+                        fail( "nonfinite or missing moving-face volume history" );
+                    // Only the aperture time integral is length averaged:
+                    // every m^3 flux has already integrated its own face h.
+                    value.timeOpen += static_cast<double>( open ) * subDt / faceSegments;
+                    value.macLinear += linear;
+                    value.macEndpoint += budget.macOutwardVolume[face.isU ? 1 : 3];
+                    value.solidSwept += budget.solidSweptOutwardVolume[face.isU ? 1 : 3];
+                    if( open > 0.0f && open < 1.0f )
+                        ++value.movingSamples;
+                    if( !std::isfinite( value.timeOpen ) ||
+                        !std::isfinite( value.macEndpoint ) ||
+                        !std::isfinite( value.macLinear ) ||
+                        !std::isfinite( value.solidSwept ) )
+                        fail( "nonfinite accumulated moving-face volume" );
+                    observedVelocityHistoryDifference |= steps > 1 &&
+                        std::abs( linear - budget.macOutwardVolume[face.isU ? 1 : 3] ) >
+                            1.0e-11;
+                    observedGeometryMotion |= open > 0.0f && open < 1.0f;
+                }
             }
         }
 
@@ -1785,12 +1828,13 @@ void auditPrescribedMovingCutCellSubsteps( bool convergenceAudit = false,
             std::abs( circle.transform.rotation.c - std::cos( finishAngle ) ) > 1.0e-6f ||
             std::abs( circle.transform.rotation.s - std::sin( finishAngle ) ) > 1.0e-6f )
             fail( "prescribed rigid obstacle did not end at the same pose" );
-        endFraction[cadenceIndex] = field.getCellFluidFraction( 17, 16 );
+        endFraction[cadenceIndex] = field.getCellFluidFraction(
+            17 * faceSegments, 16 * faceSegments );
         endGeometry[cadenceIndex] = {
-            field.getCellFluidFraction( 15, 15 ),
-            field.getCellFluidFraction( 16, 16 ),
-            field.getCellFluidFraction( 17, 16 ),
-            field.getCellFluidFraction( 18, 17 ) };
+            field.getCellFluidFraction( 15 * faceSegments, 15 * faceSegments ),
+            field.getCellFluidFraction( 16 * faceSegments, 16 * faceSegments ),
+            field.getCellFluidFraction( 17 * faceSegments, 16 * faceSegments ),
+            field.getCellFluidFraction( 18 * faceSegments, 17 * faceSegments ) };
         for( std::size_t j = 0; j < endGeometry[cadenceIndex].size(); ++j )
             if( std::abs( endGeometry[cadenceIndex][j] - endGeometry[0][j] ) >
                 2.0e-5f )
@@ -1816,7 +1860,19 @@ void auditPrescribedMovingCutCellSubsteps( bool convergenceAudit = false,
 
             referenceDiffers |= k == 0 &&
                 std::abs( row.macLinear - reference.macLinear ) > 1.0e-9;
-            if( convergenceAudit )
+            result.push_back( { cadences[k], face.isU ? 0 : 1,
+                face.x, face.y, row.timeOpen, row.macEndpoint,
+                row.macLinear, row.solidSwept } );
+            if( spatialAudit )
+                std::printf( "prescribed_spatial,%s,%.9g,%d,%d,%d,%d,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                    rotating ? "rotation" : "translation", h,
+                    cadences[k], face.isU ? 0 : 1, face.x, face.y,
+                    row.timeOpen, row.macEndpoint, row.macLinear,
+                    row.solidSwept, reference.macLinear,
+                    row.macLinear - reference.macLinear,
+                    row.timeOpen - reference.timeOpen );
+            else if( convergenceAudit )
                 std::printf( "prescribed_convergence,%s,%d,%d,%d,%d,"
                     "%.9g,%.9g,%.9g,%.9g,%.9g,"
                     "%.12g,%.12g,%.12g,%.12g,%.12g,"
@@ -1867,23 +1923,100 @@ void auditPrescribedMovingCutCellSubsteps( bool convergenceAudit = false,
                 if( history[k][i].macLinear * finest[i].macLinear < 0.0 )
                     ++differentSigns;
             }
-            std::printf( "prescribed_convergence_summary,%s,%d,%zu,"
-                "%.12g,%.12g,%.12g,%.12g,%d\n",
-                rotating ? "rotation" : "translation", cadences[k], faces.size(),
-                std::sqrt( squaredReference / faces.size() ),
-                k > 0 ? std::sqrt( squaredPrevious / faces.size() ) : 0.0,
-                std::sqrt( squaredOpen / faces.size() ),
-                peakReference, differentSigns );
+            if( spatialAudit )
+                std::printf( "prescribed_spatial_temporal_summary,%s,%.9g,%d,%zu,"
+                    "%.12g,%.12g,%.12g,%d\n",
+                    rotating ? "rotation" : "translation", h, cadences[k], faces.size(),
+                    std::sqrt( squaredReference / faces.size() ),
+                    k > 0 ? std::sqrt( squaredPrevious / faces.size() ) : 0.0,
+                    std::sqrt( squaredOpen / faces.size() ), differentSigns );
+            else
+                std::printf( "prescribed_convergence_summary,%s,%d,%zu,"
+                    "%.12g,%.12g,%.12g,%.12g,%d\n",
+                    rotating ? "rotation" : "translation", cadences[k], faces.size(),
+                    std::sqrt( squaredReference / faces.size() ),
+                    k > 0 ? std::sqrt( squaredPrevious / faces.size() ) : 0.0,
+                    std::sqrt( squaredOpen / faces.size() ),
+                    peakReference, differentSigns );
         }
     if( !observedGeometryMotion || !observedVelocityHistoryDifference ||
         !referenceDiffers )
         fail( "reference did not exercise moving aperture and solved intermediate velocities" );
+    return result;
 }
 
 // Opt-in, read-only endpoint volume ledger. These are not time-centered
 // aperture integrals; every row is the LAST Fluid substep of a World frame.
 // Different h/cadences have different obstacle histories, so compare only
 // the two pressure variants inside one fixed h/cadence for causal A/B.
+// Orthogonal time/space comparisons on exactly the same physical 0.25m
+// U/V face segments. Each fine-grid shared face is counted once; never
+// compare an h=0.125 face alone with a full h=0.25 coarse face.
+void auditPrescribedSpatialTemporalConvergence()
+{
+    std::puts( "prescribed_spatial_cross,mode,fluid_substeps,face_type,face_x,"
+        "face_y,coarse_h,refined_h,coarse_mac_linear_m3,refined_mac_linear_m3,"
+        "coarse_open_time_s,refined_open_time_s,"
+        "linear_delta_m3,open_time_delta_s" );
+    std::puts( "prescribed_spatial_cross_summary,mode,fluid_substeps,faces,"
+        "rms_linear_h025_vs_h0125_m3,rms_open_time_s,"
+        "max_abs_linear_delta_m3,sign_mismatch_faces" );
+    for( bool rotating : { false, true } )
+    {
+        const auto coarse = auditPrescribedMovingCutCellSubsteps(
+            true, rotating, 0.25f, true );
+        const auto refined = auditPrescribedMovingCutCellSubsteps(
+            true, rotating, 0.125f, true );
+        if( coarse.size() != refined.size() || coarse.size() != 40 )
+        {
+            std::fputs( "spatial reference samples did not match\n", stderr );
+            std::exit( 1 );
+        }
+        // Samples are emitted in physical-face-major and cadence-minor
+        // order, so each row is the exact same time/face test.
+        for( int cadence : { 16, 32, 64, 128 } )
+        {
+            double squaredFlux = 0.0, squaredOpen = 0.0, maxAbsFlux = 0.0;
+            int signsDifferent = 0, matching = 0;
+            for( std::size_t i = 0; i < coarse.size(); ++i )
+            {
+                const auto& c = coarse[i];
+                const auto& r = refined[i];
+                if( c.substeps != r.substeps || c.faceType != r.faceType ||
+                    c.x != r.x || c.y != r.y )
+                {
+                    std::fputs( "nonmatching physical face/time samples\n", stderr );
+                    std::exit( 1 );
+                }
+                if( c.substeps != cadence ) continue;
+                const double delta = c.macLinear - r.macLinear;
+                const double openDelta = c.timeOpen - r.timeOpen;
+                squaredFlux += delta * delta;
+                squaredOpen += openDelta * openDelta;
+                maxAbsFlux = std::max( maxAbsFlux, std::abs( delta ) );
+                signsDifferent += c.macLinear * r.macLinear < 0.0;
+                ++matching;
+                std::printf( "prescribed_spatial_cross,%s,%d,%d,%d,%d,"
+                    "0.25,0.125,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                    rotating ? "rotation" : "translation",
+                    cadence, c.faceType, c.x, c.y, c.macLinear, r.macLinear,
+                    c.timeOpen, r.timeOpen, delta, openDelta );
+            }
+            if( matching != 10 || !std::isfinite( squaredFlux ) ||
+                !std::isfinite( squaredOpen ) || !std::isfinite( maxAbsFlux ) )
+            {
+                std::fputs( "invalid spatial comparison\n", stderr );
+                std::exit( 1 );
+            }
+            std::printf( "prescribed_spatial_cross_summary,%s,%d,%d,"
+                "%.12g,%.12g,%.12g,%d\n",
+                rotating ? "rotation" : "translation", cadence, matching,
+                std::sqrt( squaredFlux / matching ),
+                std::sqrt( squaredOpen / matching ), maxAbsFlux, signsDifferent );
+        }
+    }
+}
+
 void auditCutCellVolumeBudget()
 {
     std::puts( "cell_m,fluid_substeps,frame,pressure_pool,cell_x,cell_y,"
@@ -2002,6 +2135,7 @@ int main( int argc, char** argv )
     bool smallCellTimeVaryingFluxAudit = false;
     bool prescribedSubstepsAudit = false;
     bool prescribedConvergenceAudit = false;
+    bool prescribedSpatialAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -2026,6 +2160,7 @@ int main( int argc, char** argv )
         smallCellTimeVaryingFluxAudit |= std::string_view( argv[i] ) == "--small-cell-time-varying-flux-audit";
         prescribedSubstepsAudit |= std::string_view( argv[i] ) == "--small-cell-prescribed-substeps-audit";
         prescribedConvergenceAudit |= std::string_view( argv[i] ) == "--small-cell-prescribed-convergence-audit";
+        prescribedSpatialAudit |= std::string_view( argv[i] ) == "--small-cell-prescribed-spatial-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -2048,6 +2183,7 @@ int main( int argc, char** argv )
         auditPrescribedMovingCutCellSubsteps( true, true );
         return 0;
     }
+    if( prescribedSpatialAudit ) { auditPrescribedSpatialTemporalConvergence(); return 0; }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
