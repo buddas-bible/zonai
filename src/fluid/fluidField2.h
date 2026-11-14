@@ -633,9 +633,25 @@ public:
     // overrides that budget for SAME-STATE pressure-only research. Other
     // overrides are rejected without consuming the frozen copy. No change
     // to production Step(), fluid advection or the solver's default.
+    // finishStepForRestart is strictly diagnostic: also performs tracer
+    // transport and commits the current obstacles as the NEXT step's
+    // moving-geometry history on this copy. Default false preserves the
+    // original pressure-only replay semantics and all existing callers.
     // Pressure and feedback remain observable on the copy after replay.
     [[nodiscard]] std::optional<std::vector<fluidObstacleForce2>>
-        replayFrozenCutCellPressure( int pressureIterationsOverride = -1 );
+        replayFrozenCutCellPressure( int pressureIterationsOverride = -1,
+            bool finishStepForRestart = false );
+
+    // Only callable on a pre-projection frozen COPY (before its one replay).
+    // Replaces OPEN interior U/V face speeds with the same continuous
+    // world-space velocity function on any grid. Closed faces retain their
+    // prescribed moving-solid boundary speeds. Invalid samples never
+    // partially change velocities. This is an explicit synthetic
+    // counterfactual, not a physically unique prolongation/restriction.
+    // Use endpoint MAC budgets, not the original step-entry linear proxy,
+    // after this override: the recorded entry velocity history is unchanged.
+    [[nodiscard]] bool setFrozenMacVelocityForAudit(
+        const std::function<vec2(vec2)>& worldVelocity );
 
     // Opt-in single interior MAC-face stage trace; negative coordinates disable.
     // Does not change fluid velocities, projection, or geometry.
