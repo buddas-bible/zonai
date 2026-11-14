@@ -198,6 +198,11 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-anchor-audit
 
+      # Identical prescribed Capsule path, independently assembled pressure graphs.
+      - name: Compare sampled and analytic Capsule geometry (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-capsule-geometry-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -457,6 +462,11 @@ jobs:
       - name: Isolate inactive-cell pressure anchors (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-anchor-audit
+
+      # Informational sampled-vs-analytic Capsule geometry comparison.
+      - name: Compare sampled and analytic Capsule geometry (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-capsule-geometry-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
