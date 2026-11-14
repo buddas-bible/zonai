@@ -1329,6 +1329,63 @@ a per-cell epsilon or force positive fractions without a stated
 conservative volume/face topology policy, and do not change defaults
 or merge experimental pressure/tracer algorithms.
 
+### Exact analytic Capsule area-decomposition trace — 2026-11-14
+
+After confirming a positive near-tangent open wedge by independent
+point-to-segment distance integration, an on-demand
+`fluidField2::getAnalyticCapsuleCellAreaAudit` now re-evaluates the engine's
+**same** single-Capsule core + first/last half-circle routines for one
+caller-supplied obstacle and cell. It reports component covered areas,
+their raw sum, clamped covered area, signed pre-clamp remainder and stored
+fluid fraction. The callback compares this result with the independently
+integrated corner wedge; the normal Fluid Step does not call the audit.
+
+Implementation commits `8d4ca170`, `d521a672`, `e7b3c21b`.
+[Windows Release + Ubuntu Debug CI #43581074532](https://github.com/buddas-bible/zonai/actions/runs/43581074532)
+**passed on both platforms**.
+
+For h=0.125m, checkpoint 12/16, cell (28,26):
+
+| Area term, m² | Reproduced engine arithmetic, both platforms |
+| --- | ---: |
+| Whole cell | 0.015625 |
+| Core polygon covered | 0.011288604901483743 |
+| First half-cap covered | 0.0043363951027066677 |
+| Last half-cap covered | 0 |
+| **Unclamped sum covered** | **0.015625000004190412** |
+| **Signed remainder, cell minus sum** | **-4.190411906357383e-12** |
+| Stored analytic fluid fraction after clamp | **0** |
+
+The **independent positive exterior wedge** for this cell is
+5.87675484957e-11 m² on Ubuntu and 5.87661436165e-11 m² on Windows.
+The raw covered-area sum therefore **exceeds the geometric reference**
+by 6.29579600e-11 m² (Ubuntu) or 6.29565549e-11 m² (Windows),
+respectively. These values are not comparable to a normal fluid
+mass balance: they are 2D geometric areas at one frozen endpoint.
+
+The result identifies the **engine's pre-pressure, core/half-cap area
+composition and final nonnegative clamp** as the mechanism making
+this real tiny wedge inactive. It does not yet uniquely apportion the
+component error between construction of the float
+`analyticFluidCapsule::axis` / `core.vertices`, the rectangle/polygon
+intersection arithmetic, and half-circle integration. In particular,
+`TryGetAnalyticCapsule` computes a double-precision normalized axis
+but casts it to `vec2` (float) before constructing the core's float
+vertices; component area functions subsequently use double arithmetic.
+Double arithmetic on rounded geometric inputs need not preserve such
+an extremely small exterior sliver.
+
+**Next discriminating test:** reconstruct the same float-transformed
+endpoints in an independent **all-double** core/half-cap geometric
+partition, compare each covered component and the signed remainder
+with the existing on-demand audit and independent wedge, then
+extend to all near-zero cells across Windows/Ubuntu. A change to
+core construction also affects face clipping, moving-boundary flux
+and pressure connectivity; do not turn a positive tiny cell on by
+epsilon alone. Retain the baseline solver and analytic-mode default
+as-is pending conservation, two-way Body feedback and performance
+acceptance tests.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
