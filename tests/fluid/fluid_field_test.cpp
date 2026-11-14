@@ -232,6 +232,7 @@ void checkFrozenPressureReplay()
     fluidField2 reference = *frozen;
     fluidField2 sameBudget = *frozen;
     fluidField2 moreIterations = *frozen;
+    fluidField2 highJacobiReference = *frozen;
     fluidField2 finishedRestart = *frozen;
     fluidField2 manufactured = *frozen;
     manufactured.setPrePressureSnapshotObserver( {} );
@@ -255,8 +256,13 @@ void checkFrozenPressureReplay()
     reference.setAnalyticCutCellCachedSchurEdgesEnabled( false );
     check( !sameBudget.replayFrozenCutCellPressure( 0 ).has_value() &&
         !sameBudget.replayFrozenCutCellPressure( -2 ).has_value() &&
-        !sameBudget.replayFrozenCutCellPressure( 201 ).has_value(),
+        !sameBudget.replayFrozenCutCellPressure( 3201 ).has_value(),
         "invalid replay iteration budgets must not consume frozen snapshot" );
+    highJacobiReference.setPrePressureSnapshotObserver( {} );
+    check( highJacobiReference.replayFrozenCutCellPressure( 3200 ).has_value() &&
+        !highJacobiReference.replayFrozenCutCellPressure( 1 ).has_value() &&
+        std::isfinite( highJacobiReference.getCutCellPressure().pressureResidual ),
+        "bounded high-iteration frozen Jacobi reference must be one-use and finite" );
     const auto forceBaseline = baseline.replayFrozenCutCellPressure();
     const auto forceReference = reference.replayFrozenCutCellPressure();
     const auto forceSameBudget = sameBudget.replayFrozenCutCellPressure( 80 );
