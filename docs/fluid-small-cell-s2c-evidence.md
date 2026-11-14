@@ -687,6 +687,30 @@ cells. The original `--small-cell-zero-mac-reference-audit` output is
 unchanged when localization is not requested.
 
 Implementation `401acdf`; Ubuntu/Windows CI `b396d56`.
+
+**Follow-up parity hypothesis:** Initial Ubuntu 3200-iteration results
+showed top-8 shares of only **0.841%** (h=.25, checkpoint 11)
+and **0.465%** (h=.125, checkpoint 11); the top cells had
+**fluid fraction 1, four fully open faces, zero local moving-volume
+source**, and the top eight all shared the same grid-index
+`(x+y) mod 2` parity in each case. Thus the residual is broadly
+distributed, not concentrated in a particular vanishing-aperture cell.
+These observations are consistent with, but alone do **not prove**,
+an undamped bipartite/checkerboard Jacobi mode on the connected
+MAC pressure graph.
+
+The additional code commit `05b3fd6` measures the signed full-domain
+checkerboard projection of the per-cell continuity residual,
+`mean((-1)^(x+y) * residual)`, and its **squared RMS share**
+`(sum((-1)^(x+y)*r_i))² / (N * sum(r_i²))`, bounded [0,1].
+On the residual-map flag **only**, each selected frozen geometry is
+replayed at 199/200, 799/800, 1599/1600 and 3199/3200 Jacobi
+iterations. Independent copies compare the odd-vs-even target-face
+flux and full-grid compatible residual; the older default reference
+command still uses only 200/800/1600/3200. The parity audit must
+pass both-platform CI and show strong projection or oscillation
+before assigning causality. It is a diagnostic, **not** a solver
+change or an accepted physical Cut-cell correction.
 [Workflow 43567697554](https://github.com/buddas-bible/zonai/actions/runs/43567697554)
 must be verified and its CSV inspected before attributing the residual
 plateau to local aperture geometry, Jacobi slow modes, or matrix
