@@ -3027,8 +3027,10 @@ independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
             if( !ledger.active ) continue;
             active[index] = 1;
             ++output.activeCells;
-            rhs[index] = ledger.pressureSourceDeltaVolume;
-            output.sourceVolume += rhs[index];
+            // Pressure correction adds A(q) to the outward MAC volume,
+            // so canceling the moving-volume source requires A(q)=-S.
+            rhs[index] = -ledger.pressureSourceDeltaVolume;
+            output.sourceVolume += ledger.pressureSourceDeltaVolume;
             const std::array<double, 4> aperture{{
                 source.getUFaceOpenFraction( x, y ),
                 source.getUFaceOpenFraction( x + 1, y ),
