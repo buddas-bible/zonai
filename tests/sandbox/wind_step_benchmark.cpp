@@ -2996,11 +2996,13 @@ struct independentCutCellPressureResult
     double initialRmsPerSecond = 0.0, finalRmsPerSecond = 0.0;
     double targetFaceVolume = 0.0;
     double sourceVolume = 0.0;
+    double compatibilityRebalanceL1Volume = 0.0;
     bool converged = false;
 };
 
 independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
-    const fluidField2& source, float subDt, int targetSegments )
+    const fluidField2& source, float subDt, int targetSegments,
+    bool omitInactiveAnchors = false )
 {
     const int width = source.getWidth(), height = source.getHeight();
     const int count = width * height;
@@ -3090,9 +3092,28 @@ independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
             if( active[index] ) rhs[index] -= meanNegativeSource;
     }
 
+    // Optional isolated counterfactual: cut only active-to-inactive
+    // pressure edges AFTER reconstructing the original production source
+    // compatibility graph. The normal independently assembled reference
+    // always retains these anchored diagonal weights.
+    if( omitInactiveAnchors )
+        for( int index = 0; index < count; ++index )
+        {
+            if( !active[index] ) continue;
+            const auto next = neighbors( index );
+            for( int k = 0; k < 4; ++k )
+            {
+                const double opening = weights[index][k];
+                if( opening <= 0.0 || active[next[k]] ) continue;
+                weights[index][k] = 0.0;
+                diagonal[index] -= opening;
+                if( diagonal[index] < -1.0e-9 )
+                    throw std::runtime_error( "negative counterfactual diagonal" );
+            }
+        }
     // Pressure rows for inactive cells are *not* Jacobi unknowns; their
     // pressure stays 0. A positive aperture from active to inactive
-    // therefore contributes a diagonal anchored (Dirichlet-like) edge.
+    // normally contributes a diagonal anchored (Dirichlet-like) edge.
     // Other active components are genuine mean-zero Neumann systems.
     std::vector<int> activeComponent( count, -1 );
     std::vector<std::vector<int>> componentCells;
@@ -3130,6 +3151,17 @@ independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
     output.activePressureGroups = static_cast<int>( componentCells.size() );
     for( unsigned char value : anchored )
         output.anchoredPressureGroups += value != 0;
+    if( omitInactiveAnchors )
+        for( std::size_t group = 0; group < componentCells.size(); ++group )
+        {
+            if( anchored[group] ) continue;
+            const auto& region = componentCells[group];
+            double sum = 0.0;
+            for( int index : region ) sum += rhs[index];
+            output.compatibilityRebalanceL1Volume += std::abs( sum );
+            const double mean = sum / region.size();
+            for( int index : region ) rhs[index] -= mean;
+        }
 
     // Each stored weight is the positive graph edge coefficient in the
     // volume-form SPD operator A=q_i*sum(open)-sum(open*q_neighbor).
@@ -3234,7 +3266,7 @@ independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
     for( int segment = 0; segment < targetSegments; ++segment )
     {
         const int x = 16 * targetSegments + segment;
-        const double aperture = source.getVFaceOpenFraction( x, y );
+        const double aperture = weights[( y - 1 ) * width + x][3];
         output.targetFaceVolume += aperture *
             ( potential[( y - 1 ) * width + x] - potential[y * width + x] );
     }
@@ -3246,7 +3278,8 @@ independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
 }
 
 void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
-    bool compareDampedJacobi = false, bool compareIndependentPcg = false )
+    bool compareDampedJacobi = false, bool compareIndependentPcg = false,
+    bool auditAnchors = false )
 {
     constexpr float totalDt = 1.0f / 30.0f;
     constexpr int fluidSteps = 128;
@@ -3278,10 +3311,11 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
         independentCutCellPressureResult reference{};
     };
     std::vector<result> results, dampedResults;
-    std::vector<independentRecord> independentResults;
+    std::vector<independentRecord> independentResults, counterfactualResults;
     results.reserve( 2 * checkpoints.size() * budgets.size() );
     if( compareDampedJacobi ) dampedResults.reserve( results.capacity() );
     if( compareIndependentPcg ) independentResults.reserve( 4 );
+    if( auditAnchors ) counterfactualResults.reserve( 4 );
     std::puts( "zero_mac_reference,cell_m,fluid_substeps,checkpoint_16,"
         "jacobi_iterations,target_face_m3,compatible_rms_per_s,"
         "component_source_floor_rms_per_s,legacy_pressure_residual,"
@@ -3305,6 +3339,18 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
             "independent_coarse_minus_fine_face_m3,"
             "damped_3200_coarse_minus_fine_face_m3,"
             "independent_minus_damped_gap_m3,both_converged" );
+        if( auditAnchors )
+        {
+            std::puts( "zero_mac_anchor_counterfactual,cell_m,checkpoint_16,"
+                "actual_anchor_faces,actual_anchor_aperture_sum,"
+                "counterfactual_compatibility_rebalance_L1_m3,"
+                "actual_reference_face_m3,omitted_anchor_face_m3,"
+                "omitted_minus_actual_m3,actual_pcg_rms_per_s,"
+                "omitted_pcg_rms_per_s,omitted_converged" );
+            std::puts( "zero_mac_anchor_cross,checkpoint_16,"
+                "actual_coarse_minus_fine_m3,omitted_coarse_minus_fine_m3,"
+                "counterfactual_minus_actual_gap_m3,both_converged" );
+        }
     }
     if( compareDampedJacobi )
     {
@@ -3692,6 +3738,38 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
                             independent.targetFaceVolume - face );
                         if( !independent.converged )
                             fail( "independent pressure reference did not meet explicit residual" );
+                        if( auditAnchors )
+                        {
+                            const auto omitted = solveIndependentFrozenCutCellPressure(
+                                trial, subDt, segments, true );
+                            if( !omitted.converged ||
+                                omitted.activeCells != independent.activeCells ||
+                                omitted.components != independent.components ||
+                                std::abs( omitted.sourceVolume -
+                                    independent.sourceVolume ) > 1.0e-8 ||
+                                omitted.anchoredPressureGroups != 0 ||
+                                omitted.activeToInactiveOpenFaces != 0 )
+                                fail( "counterfactual pressure edge removal invalid" );
+                            if( independent.activeToInactiveOpenFaces == 0 &&
+                                ( std::abs( independent.targetFaceVolume -
+                                    omitted.targetFaceVolume ) > 1.0e-9 ||
+                                    std::abs( omitted.compatibilityRebalanceL1Volume ) >
+                                        1.0e-8 ) )
+                                fail( "counterfactual altered no-anchor control" );
+                            counterfactualResults.push_back( { h, cp, omitted } );
+                            std::printf( "zero_mac_anchor_counterfactual,%.9g,%d,"
+                                "%d,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                                "%.12g,%.12g,%d\n",
+                                h, cp, independent.activeToInactiveOpenFaces,
+                                independent.activeToInactiveApertureSum,
+                                omitted.compatibilityRebalanceL1Volume,
+                                independent.targetFaceVolume,
+                                omitted.targetFaceVolume,
+                                omitted.targetFaceVolume - independent.targetFaceVolume,
+                                independent.finalRmsPerSecond,
+                                omitted.finalRmsPerSecond,
+                                omitted.converged ? 1 : 0 );
+                        }
                     }
                     std::printf( "zero_mac_damped,%.9g,%d,%d,"
                         "%.12g,%.12g,%.12g,%.12g,"
@@ -3758,6 +3836,42 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
                 fluidSteps, checkpoint, iterations, gap,
                 coarse->compatibleRms - fine->compatibleRms,
                 gap - referenceGap, referenceCriteriaMet ? 1 : 0 );
+        }
+    }
+    if( auditAnchors )
+    {
+        if( counterfactualResults.size() != 4 || independentResults.size() != 4 )
+            fail( "anchored-face counterfactual checkpoint coverage incomplete" );
+        for( int cp : checkpoints )
+        {
+            const independentRecord *referenceCoarse = nullptr;
+            const independentRecord *referenceFine = nullptr;
+            const independentRecord *omittedCoarse = nullptr;
+            const independentRecord *omittedFine = nullptr;
+            for( const auto& row : independentResults )
+                if( row.checkpoint == cp )
+                {
+                    if( row.h == 0.25f ) referenceCoarse = &row;
+                    else if( row.h == 0.125f ) referenceFine = &row;
+                }
+            for( const auto& row : counterfactualResults )
+                if( row.checkpoint == cp )
+                {
+                    if( row.h == 0.25f ) omittedCoarse = &row;
+                    else if( row.h == 0.125f ) omittedFine = &row;
+                }
+            if( !referenceCoarse || !referenceFine || !omittedCoarse ||
+                !omittedFine ) fail( "anchor counterfactual missing matched pair" );
+            const double referenceGap =
+                referenceCoarse->reference.targetFaceVolume -
+                referenceFine->reference.targetFaceVolume;
+            const double omittedGap =
+                omittedCoarse->reference.targetFaceVolume -
+                omittedFine->reference.targetFaceVolume;
+            std::printf( "zero_mac_anchor_cross,%d,%.12g,%.12g,%.12g,%d\n",
+                cp, referenceGap, omittedGap, omittedGap - referenceGap,
+                omittedCoarse->reference.converged &&
+                    omittedFine->reference.converged ? 1 : 0 );
         }
     }
     if( compareIndependentPcg )
@@ -4025,6 +4139,7 @@ int main( int argc, char** argv )
     bool zeroMacResidualMapAudit = false;
     bool zeroMacDampedJacobiAudit = false;
     bool zeroMacIndependentPcgAudit = false;
+    bool zeroMacAnchorAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -4059,6 +4174,7 @@ int main( int argc, char** argv )
         zeroMacResidualMapAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-residual-map-audit";
         zeroMacDampedJacobiAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-damped-jacobi-audit";
         zeroMacIndependentPcgAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-independent-pcg-audit";
+        zeroMacAnchorAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-anchor-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -4105,6 +4221,11 @@ int main( int argc, char** argv )
     if( zeroMacIndependentPcgAudit )
     {
         auditFrozenZeroMacReference( false, true, true );
+        return 0;
+    }
+    if( zeroMacAnchorAudit )
+    {
+        auditFrozenZeroMacReference( false, true, true, true );
         return 0;
     }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
