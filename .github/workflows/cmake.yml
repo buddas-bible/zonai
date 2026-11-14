@@ -151,6 +151,13 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-frozen-pressure-iterations-audit
 
+      # Same world-coordinate affine face velocity replaces only frozen
+      # open MAC components. Complete cloned Step and compare 1/2/4 real
+      # following Fluid steps to the untouched frozen-state control.
+      - name: Audit matched-world MAC restarts (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-matched-world-restart-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -372,6 +379,10 @@ jobs:
       - name: Compare identical-state frozen rotating pressure iterations (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-frozen-pressure-iterations-audit
+
+      - name: Audit matched-world MAC restarts (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-matched-world-restart-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
