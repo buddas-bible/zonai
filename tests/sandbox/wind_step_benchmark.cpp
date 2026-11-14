@@ -4532,7 +4532,7 @@ void auditTinyCapsuleCorner( const fluidField2& frozen,
     const double idealBx = cx + halfLength * std::cos( nominalAngle );
     const double idealBy = cy + halfLength * std::sin( nominalAngle );
 
-    if( mode == 1 )
+    if( mode != 0 )
     {
         const auto area = frozen.getAnalyticCapsuleCellAreaAudit( capsule, x, y );
         if( !area.valid || !std::isfinite( area.componentSumCoveredArea ) ||
@@ -4541,8 +4541,23 @@ void auditTinyCapsuleCorner( const fluidField2& frozen,
             throw std::runtime_error( "Capsule analytic area decomposition not reproducible" );
         const capsuleCornerWedge2 reference = integrateCapsuleCornerWedge(
             actualA.x, actualA.y, actualB.x, actualB.y, radius, x0, y0, h );
-        auditCapsulePrecisionComponents( area, actualA, actualB,
-            shape->radius, x0, y0, h, reference.area1024 );
+        if( mode == 1 )
+            auditCapsulePrecisionComponents( area, actualA, actualB,
+                shape->radius, x0, y0, h, reference.area1024 );
+        else
+        {
+            if( !( area.signedUnclampedFluidArea > 0.0 ) ||
+                !( area.storedFluidFraction > 0.0f ) ||
+                std::abs( area.signedUnclampedFluidArea - reference.area1024 ) >
+                    5.0e-12 )
+                throw std::runtime_error(
+                    "double Capsule corner did not preserve positive exterior wedge" );
+            std::printf( "capsule_double_corner_area,%.9g,%d,%d,%d,"
+                "%.17g,%.17g,%.17g,%.17g\n",
+                h, checkpoint, x, y, area.signedUnclampedFluidArea,
+                reference.area1024, area.storedFluidFraction,
+                area.signedUnclampedFluidArea - reference.area1024 );
+        }
         std::puts( "capsule_corner_area_breakdown,cell_m,checkpoint_16,"
             "cell_x,cell_y,cell_area_m2,core_covered_m2,"
             "first_cap_covered_m2,last_cap_covered_m2,"
@@ -4635,6 +4650,11 @@ void auditFrozenCapsuleGeometryComparison()
         "reclassified_zero_cells,max_cell_fraction_difference,"
         "max_face_aperture_difference,pressure_source_L1_difference_m3,"
         "analytic_minus_sampled_target_face_m3" );
+    std::puts( "capsule_geometry_precision_pair,cell_m,checkpoint_16,"
+        "float_active,double_active,float_anchors,double_anchors,"
+        "recovered_cells,lost_cells,float_anchor_open,double_anchor_open,"
+        "float_pcg_iters,double_pcg_iters,cell_area_L1_m2,"
+        "source_L1_m3,float_target_face_m3,double_target_face_m3,double_pcg_converged" );
     std::puts( "capsule_geometry_anchor_pair,cell_m,checkpoint_16,axis,x,y,"
         "sampled_open,analytic_open,sampled_fraction_a,sampled_fraction_b,"
         "analytic_fraction_a,analytic_fraction_b,"
@@ -4645,13 +4665,14 @@ void auditFrozenCapsuleGeometryComparison()
     {
         const int segments = static_cast<int>( std::lround( 0.25f / h ) );
         const float subDt = totalDt / fluidSteps;
-        std::array<std::array<capture, 2>, 2> observations{};
-        for( int mode = 0; mode < 2; ++mode )
+        std::array<std::array<capture, 2>, 3> observations{};
+        for( int mode = 0; mode < 3; ++mode )
         {
             fluidField2 field{ 32 * segments, 32 * segments, h, { -4.0f, -4.0f } };
             field.setCutCellProjectionEnabled( true );
             field.setDisjointAnalyticCutCellEnabled( true );
             field.setAnalyticCapsuleCutCellEnabled( mode != 0 );
+            field.setAnalyticCapsuleDoubleGeometryEnabled( mode == 2 );
             if( field.getSmallCellPressureMergeFraction() != 0.0f ||
                 field.isConnectedResidualTracerRemapEnabled() )
                 fail( "experimental pressure or tracer physics enabled in geometry control" );
@@ -4677,6 +4698,7 @@ void auditFrozenCapsuleGeometryComparison()
                 const int slot = cp == checkpoints[0] ? 0 : 1;
                 capture& row = observations[mode][slot];
                 if( row.valid || frozen.isAnalyticCapsuleCutCellEnabled() != ( mode != 0 ) ||
+                    frozen.isAnalyticCapsuleDoubleGeometryEnabled() != ( mode == 2 ) ||
                     frozen.getCutCellTransition().usedDisjointAnalyticGeometry )
                     fail( "invalid Capsule frozen geometry checkpoint" );
 
@@ -4799,6 +4821,41 @@ void auditFrozenCapsuleGeometryComparison()
                 sourceDifference,
                 analytic.pressure.targetFaceVolume - sampled.pressure.targetFaceVolume );
 
+            const capture& precise = observations[2][slot];
+            if( precise.width != analytic.width ||
+                precise.height != analytic.height ||
+                precise.cells.size() != analytic.cells.size() ||
+                precise.uOpen.size() != analytic.uOpen.size() ||
+                precise.vOpen.size() != analytic.vOpen.size() )
+                fail( "double Capsule frozen grid does not match float geometry" );
+            int recoveredCells = 0, lostCells = 0;
+            double areaDifferenceL1 = 0.0, sourceDifferenceL1 = 0.0;
+            for( std::size_t i = 0; i < analytic.cells.size(); ++i )
+            {
+                recoveredCells += analytic.cells[i] == 0.0f &&
+                    precise.cells[i] > 0.0f;
+                lostCells += analytic.cells[i] > 0.0f &&
+                    precise.cells[i] == 0.0f;
+                areaDifferenceL1 += std::abs(
+                    static_cast<double>( analytic.cells[i] ) - precise.cells[i] ) *
+                    h * h;
+                sourceDifferenceL1 += std::abs(
+                    analytic.sources[i] - precise.sources[i] );
+            }
+            // This is a separately evolved geometry policy comparison,
+            // never a same-frozen-pressure-only A/B.
+            std::printf( "capsule_geometry_precision_pair,%.9g,%d,"
+                "%d,%d,%d,%d,%d,%d,%.12g,%.12g,"
+                "%d,%d,%.12g,%.12g,%.12g,%.12g,%d\n",
+                h, cp, analytic.active, precise.active,
+                analytic.anchors, precise.anchors,
+                recoveredCells, lostCells,
+                analytic.anchorOpening, precise.anchorOpening,
+                analytic.pressure.iterations, precise.pressure.iterations,
+                areaDifferenceL1, sourceDifferenceL1,
+                analytic.pressure.targetFaceVolume,
+                precise.pressure.targetFaceVolume,
+                precise.pressure.converged ? 1 : 0 );
             const int width = sampled.width, height = sampled.height;
             const auto emit = [&]( char axis, int x, int y, int ax, int ay,
                 int bx, int by, float sampledOpen, float analyticOpen )
