@@ -233,6 +233,8 @@ void checkFrozenPressureReplay()
     fluidField2 sameBudget = *frozen;
     fluidField2 moreIterations = *frozen;
     fluidField2 highJacobiReference = *frozen;
+    fluidField2 dampedJacobiReference = *frozen;
+    fluidField2 unitJacobiReference = *frozen;
     fluidField2 finishedRestart = *frozen;
     fluidField2 manufactured = *frozen;
     manufactured.setPrePressureSnapshotObserver( {} );
@@ -263,6 +265,25 @@ void checkFrozenPressureReplay()
         !highJacobiReference.replayFrozenCutCellPressure( 1 ).has_value() &&
         std::isfinite( highJacobiReference.getCutCellPressure().pressureResidual ),
         "bounded high-iteration frozen Jacobi reference must be one-use and finite" );
+    dampedJacobiReference.setPrePressureSnapshotObserver( {} );
+    unitJacobiReference.setPrePressureSnapshotObserver( {} );
+    check( !dampedJacobiReference.replayFrozenCutCellPressure(
+            80, false, 0.0f ).has_value() &&
+        !dampedJacobiReference.replayFrozenCutCellPressure(
+            80, false, -0.5f ).has_value() &&
+        !dampedJacobiReference.replayFrozenCutCellPressure(
+            80, false, 1.01f ).has_value() &&
+        !dampedJacobiReference.replayFrozenCutCellPressure(
+            80, false, std::numeric_limits<float>::quiet_NaN() ).has_value(),
+        "invalid frozen Jacobi relaxation must not consume the snapshot" );
+    const auto dampedForce = dampedJacobiReference.replayFrozenCutCellPressure(
+        200, false, 2.0f / 3.0f );
+    const auto unitForce = unitJacobiReference.replayFrozenCutCellPressure(
+        80, false, 1.0f );
+    check( dampedForce.has_value() && unitForce.has_value() &&
+        !dampedJacobiReference.replayFrozenCutCellPressure( 200 ).has_value() &&
+        std::isfinite( dampedJacobiReference.getCutCellPressure().pressureResidual ),
+        "explicit frozen Jacobi damping must be bounded, finite and one-use" );
     const auto forceBaseline = baseline.replayFrozenCutCellPressure();
     const auto forceReference = reference.replayFrozenCutCellPressure();
     const auto forceSameBudget = sameBudget.replayFrozenCutCellPressure( 80 );
@@ -278,6 +299,9 @@ void checkFrozenPressureReplay()
         !sameBudget.replayFrozenCutCellPressure( 80 ).has_value(),
         "valid replay iteration override must consume each copied snapshot exactly once" );
     check( forceBaseline.has_value() && forceReference.has_value() &&
+        unitForce.has_value() && unitForce->size() == forceBaseline->size() &&
+        Length( unitJacobiReference.getFluidMomentum() -
+            baseline.getFluidMomentum() ) < 1.0e-5f &&
         forceBaseline->size() == feedback.size() && forceReference->size() == feedback.size(),
         "both pressure solvers must replay from one identical frozen state" );
     check( !baseline.replayFrozenCutCellPressure().has_value(),
