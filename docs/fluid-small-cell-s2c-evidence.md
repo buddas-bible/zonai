@@ -794,6 +794,78 @@ where the checkerboard share is low. Any proposed production change
 requires separate regressions and costs; return afterwards to the
 actual World8/Fluid4 V(17,13) coupled pressure/tracer scene.
 
+### Frozen damped-Jacobi A/B against the -1 checkerboard mode — 2026-11-14
+
+**Question:** Does the 3200-iteration stagnation actually come from
+the undamped Jacobi checkerboard mode rather than an irreducible moving
+Cut-cell pressure-source error? Is a locally damped solve sufficient to
+establish a globally converged discrete reference?
+
+**Experiment:** New opt-in
+`--small-cell-zero-mac-damped-jacobi-audit` reuses the **same**
+pre-pressure frozen rotating capsule (h=0.25/0.125, 128 actual Fluid
+steps, rotation checkpoints 11/16 and 12/16). Copies start from
+identical zero-open-MAC fields, moving-solid swept geometry, prescribed
+closed-wall velocities and source history. On one copy, the original
+Jacobi update uses **omega=1**; on another, pressure uses the weighted
+Jacobi formula
+
+`p_new = p_old + (2/3) * (p_jacobi - p_old)`.
+
+Each copy replays **200/800/1600/3200** iterations. The diagnostic
+`replayFrozenCutCellPressure(..., jacobiRelaxation)` accepts
+finite `0 < omega <= 1` only. Nonunit omega is rejected for any
+inverse-mass or inverse-inertia obstacle; the normal world Step always
+calls `projectCutCell` with omega=1. Invalid omega is rejected before
+consuming the snapshot. A unit regression verifies that explicitly
+passing omega=1 reproduces the old copy's velocity and that damped
+snapshots remain one-use. This does **not** change production
+iterations, Schur PCG, dynamics, tracer transport or defaults.
+
+The independently reconstructed, component-compatible per-cell
+continuity RMS is measured in **1/s**, with a separate squared
+checkerboard projection share. Both paths are checked for identical
+pressure source, component count and compatibility floor.
+The cross-grid comparison is the signed endpoint MAC volume on one
+physical V(16,16) face. The diagnostic column
+`damped_reference_criteria_met` only checks *both* fields'
+`compatibleRms < 1e-3/s`; it is **not** a full independent
+convergence certificate, and a 3200-iteration reference cannot be
+accepted merely because the target face appears stable.
+
+**First Ubuntu Debug pass:**
+[workflow 43569382849](https://github.com/buddas-bible/zonai/actions/runs/43569382849).
+Windows Release was still running at the time of this evidence entry.
+
+| Grid h | Rotation | Iterations | Legacy compatible RMS (1/s) | Damped compatible RMS (1/s) | Legacy checkerboard squared share | Damped checkerboard squared share |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.25m | 11/16 | 3200 | 0.0925685451 | **0.000132951893** | 98.8489555% | 0.0000191235% |
+| 0.25m | 12/16 | 3200 | 0.0650400082 | **0.000088577782** | 98.8212793% | 0.000130344% |
+| 0.125m | 11/16 | 3200 | 0.0383750523 | **0.001083539843** | 89.1598984% | 0.0000036542% |
+| 0.125m | 12/16 | 3200 | 0.0095095928 | **0.001596167722** | 11.4411598% | 0.0000002751% |
+
+The coarse 11/16 RMS fell by roughly **696-fold**, and the fine
+11/16 RMS by about **35-fold**. The checkerboard component is nearly
+suppressed in every sampled damped state, confirming the -1-mode
+interpretation of the legacy undamped Jacobi plateau. Crucially,
+**neither fine-grid 3200-iteration state** satisfies the provisional
+`1e-3/s` compatible-RMS threshold (0.0010835 and 0.0015962).
+Damped Jacobi also has slow, non-checkerboard convergence; no
+certified pressure reference or fully spatially converged coarse/fine
+physical flux follows. At 11/16, the 3200 coarse-minus-fine target
+volume changed from **-0.000123227580358 m³** (legacy) to
+**-0.000123452339551 m³** (damped), but this
+near-face agreement does not prove full-grid convergence.
+
+**Scope/next:** Leave omega=1 in the real engine, with omega=2/3
+copy-only and opt-in. A separate residual-checked pressure reference
+(faster elliptic solver or an independently assembled linear solve)
+is still needed to distinguish remaining slow modes and spatial
+pressure discretization. Then transfer the same-state analysis to the
+**real coupled World8/Fluid4 V(17,13)** and separately measure
+normal-step performance before accepting any stabilization.
+Neither experimental pressure pooling nor tracer remap is accepted.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
