@@ -4331,6 +4331,178 @@ capsuleCornerWedge2 integrateCapsuleCornerWedge(
     return output;
 }
 
+// Independent double-coordinate core clipping and cap cross-section reference.
+// Uses the *same float-transformed endpoints* as the production Capsule, so
+// the controls isolate axis and core-vertex rounding rather than rotation
+// precision, pressure, or motion history. Only called in this opt-in audit.
+struct capsuleAuditPoint2
+{
+    double x = 0.0, y = 0.0;
+};
+
+double auditDoubleCapsuleCoreArea(
+    std::array<capsuleAuditPoint2, 4> polygon,
+    double x0, double y0, double h )
+{
+    std::array<capsuleAuditPoint2, 16> current{}, next{};
+    std::copy( polygon.begin(), polygon.end(), current.begin() );
+    int count = 4;
+    const double x1 = x0 + h, y1 = y0 + h;
+    for( int side = 0; side < 4; ++side )
+    {
+        const auto inside = [&]( capsuleAuditPoint2 point )
+        {
+            if( side == 0 ) return point.x - x0;
+            if( side == 1 ) return x1 - point.x;
+            if( side == 2 ) return point.y - y0;
+            return y1 - point.y;
+        };
+        int nextCount = 0;
+        capsuleAuditPoint2 previous = current[count - 1];
+        double before = inside( previous );
+        for( int i = 0; i < count; ++i )
+        {
+            const capsuleAuditPoint2 point = current[i];
+            const double after = inside( point );
+            if( ( before >= 0.0 ) != ( after >= 0.0 ) )
+            {
+                const double alpha = before / ( before - after );
+                next[nextCount++] = {
+                    previous.x + alpha * ( point.x - previous.x ),
+                    previous.y + alpha * ( point.y - previous.y )
+                };
+            }
+            if( after >= 0.0 ) next[nextCount++] = point;
+            previous = point;
+            before = after;
+        }
+        if( nextCount < 3 ) return 0.0;
+        current.swap( next );
+        count = nextCount;
+    }
+    const capsuleAuditPoint2 origin = current[0];
+    double twiceArea = 0.0;
+    for( int i = 1; i + 1 < count; ++i )
+        twiceArea += ( current[i].x - origin.x ) *
+            ( current[i + 1].y - origin.y ) -
+            ( current[i].y - origin.y ) *
+            ( current[i + 1].x - origin.x );
+    return 0.5 * std::abs( twiceArea );
+}
+
+double auditDoubleCapsuleCapArea(
+    bool first, capsuleAuditPoint2 a, capsuleAuditPoint2 b,
+    double axisX, double axisY, double radius,
+    double x0, double y0, double h, int count )
+{
+    if( !( std::abs( axisY ) > 1.0e-12 ) || count < 1 )
+        throw std::runtime_error( "invalid audit Capsule cap axis/count" );
+    const capsuleAuditPoint2 center = first ? a : b;
+    const double x1 = x0 + h, y1 = y0 + h;
+    const double left = std::max( x0, center.x - radius );
+    const double right = std::min( x1, center.x + radius );
+    if( right <= left ) return 0.0;
+    const double step = ( right - left ) / count;
+    double lengthSum = 0.0;
+    for( int i = 0; i < count; ++i )
+    {
+        const double x = left + ( i + 0.5 ) * step;
+        const double dx = x - center.x;
+        const double height = std::sqrt( std::max(
+            0.0, radius * radius - dx * dx ) );
+        double low = std::max( y0, center.y - height );
+        double high = std::min( y1, center.y + height );
+        const double capPlane = center.y - dx * axisX / axisY;
+        // First cap: along-axis <= 0; last cap: >= 0.
+        if( first == ( axisY > 0.0 ) ) high = std::min( high, capPlane );
+        else low = std::max( low, capPlane );
+        lengthSum += std::max( 0.0, high - low );
+    }
+    return step * lengthSum;
+}
+
+void auditCapsulePrecisionComponents(
+    const fluidCapsuleCellAreaAudit2& engine,
+    vec2 actualA, vec2 actualB, float radiusFloat,
+    double x0, double y0, double h, double wedgeArea )
+{
+    const double radius = radiusFloat;
+    const capsuleAuditPoint2 a{ actualA.x, actualA.y };
+    const capsuleAuditPoint2 b{ actualB.x, actualB.y };
+    const double dx = b.x - a.x, dy = b.y - a.y;
+    const double norm = std::hypot( dx, dy );
+    if( !( norm > 0.0 ) ) throw std::runtime_error( "invalid Capsule reference axis" );
+    const double unitX = dx / norm, unitY = dy / norm;
+    const vec2 floatAxis{ static_cast<float>( unitX ),
+        static_cast<float>( unitY ) };
+    const vec2 radiusVector = radiusFloat *
+        vec2{ -floatAxis.y, floatAxis.x };
+    const std::array<capsuleAuditPoint2, 4> roundedCore{{
+        { ( actualA - radiusVector ).x, ( actualA - radiusVector ).y },
+        { ( actualB - radiusVector ).x, ( actualB - radiusVector ).y },
+        { ( actualB + radiusVector ).x, ( actualB + radiusVector ).y },
+        { ( actualA + radiusVector ).x, ( actualA + radiusVector ).y }
+    }};
+    const std::array<capsuleAuditPoint2, 4> doubleCore{{
+        { a.x + radius * unitY, a.y - radius * unitX },
+        { b.x + radius * unitY, b.y - radius * unitX },
+        { b.x - radius * unitY, b.y + radius * unitX },
+        { a.x - radius * unitY, a.y + radius * unitX }
+    }};
+    const double coarseCore = auditDoubleCapsuleCoreArea(
+        roundedCore, x0, y0, h );
+    const double preciseCore = auditDoubleCapsuleCoreArea(
+        doubleCore, x0, y0, h );
+    const auto capArea = [&]( bool first, bool floatAxisPolicy, int count )
+    {
+        return auditDoubleCapsuleCapArea( first, a, b,
+            floatAxisPolicy ? static_cast<double>( floatAxis.x ) : unitX,
+            floatAxisPolicy ? static_cast<double>( floatAxis.y ) : unitY,
+            radius, x0, y0, h, count );
+    };
+    const double coarseFirst = capArea( true, true, 65536 );
+    const double coarseLast = capArea( false, true, 65536 );
+    const double preciseFirst = capArea( true, false, 65536 );
+    const double preciseLast = capArea( false, false, 65536 );
+    // Separate convergence budget for the one-dimensional integrals, not
+    // an assertion that sampled integration is formally exact.
+    if( std::abs( preciseFirst - capArea( true, false, 16384 ) ) > 5.0e-12 ||
+        std::abs( coarseFirst - capArea( true, true, 16384 ) ) > 5.0e-12 ||
+        std::abs( preciseLast - capArea( false, false, 16384 ) ) > 5.0e-12 ||
+        std::abs( coarseLast - capArea( false, true, 16384 ) ) > 5.0e-12 )
+        throw std::runtime_error( "Capsule cap double quadrature did not converge" );
+    const double roundedFree = h * h -
+        ( coarseCore + coarseFirst + coarseLast );
+    const double preciseFree = h * h -
+        ( preciseCore + preciseFirst + preciseLast );
+    if( std::abs( engine.coreCoveredArea - coarseCore ) > 1.0e-12 ||
+        std::abs( engine.firstCapCoveredArea - coarseFirst ) > 1.0e-11 ||
+        std::abs( engine.lastCapCoveredArea - coarseLast ) > 1.0e-11 ||
+        std::abs( engine.signedUnclampedFluidArea - roundedFree ) > 2.0e-11 ||
+        !( preciseFree > 0.0 ) ||
+        std::abs( preciseFree - wedgeArea ) > 5.0e-12 )
+        throw std::runtime_error(
+            "Capsule float/double component control disagrees with independent wedge" );
+    std::puts( "capsule_precision_components,cell_x,cell_y,"
+        "engine_core_m2,rounded_core_m2,double_core_m2,"
+        "engine_first_cap_m2,float_axis_first_cap_m2,double_axis_first_cap_m2,"
+        "engine_last_cap_m2,float_axis_last_cap_m2,double_axis_last_cap_m2,"
+        "engine_signed_free_m2,rounded_signed_free_m2,"
+        "double_signed_free_m2,independent_wedge_free_m2,"
+        "core_float_minus_double_m2,cap_float_minus_double_m2" );
+    std::printf( "capsule_precision_components,28,26,"
+        "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,"
+        "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,"
+        "%.17g,%.17g\n",
+        engine.coreCoveredArea, coarseCore, preciseCore,
+        engine.firstCapCoveredArea, coarseFirst, preciseFirst,
+        engine.lastCapCoveredArea, coarseLast, preciseLast,
+        engine.signedUnclampedFluidArea, roundedFree,
+        preciseFree, wedgeArea,
+        coarseCore - preciseCore,
+        ( coarseFirst + coarseLast ) - ( preciseFirst + preciseLast ) );
+}
+
 void auditTinyCapsuleCorner( const fluidField2& frozen,
     const fluidShapeObstacle2& capsule, int mode, int checkpoint )
 {
@@ -4369,6 +4541,8 @@ void auditTinyCapsuleCorner( const fluidField2& frozen,
             throw std::runtime_error( "Capsule analytic area decomposition not reproducible" );
         const capsuleCornerWedge2 reference = integrateCapsuleCornerWedge(
             actualA.x, actualA.y, actualB.x, actualB.y, radius, x0, y0, h );
+        auditCapsulePrecisionComponents( area, actualA, actualB,
+            shape->radius, x0, y0, h, reference.area1024 );
         std::puts( "capsule_corner_area_breakdown,cell_m,checkpoint_16,"
             "cell_x,cell_y,cell_area_m2,core_covered_m2,"
             "first_cap_covered_m2,last_cap_covered_m2,"
