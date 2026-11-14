@@ -1453,6 +1453,80 @@ near-disappearing cell), including small-face pressure and
 volume/tracer/Body conservation ledgers. Keep PR #326 Draft and
 the pressure-pooling/tracer experiments disabled by default.
 
+### Opt-in double Capsule geometry: actual field A/B and frozen-PCG gate — 2026-11-15
+
+The earlier single-cell double-axis/core decomposition is now exercised
+as an **explicitly disabled-by-default** Fluid policy,
+`setAnalyticCapsuleDoubleGeometryEnabled(true)` (and the pre-existing
+`setAnalyticCapsuleCutCellEnabled(true)`). Commits `0517f758`,
+`d4be5de8`, `a0434669` add a double-normalized Capsule axis,
+double-coordinate core vertices, and consistent double-coordinate
+**cell, shared face, swept boundary and pressure/Body face** clipping.
+The float-transformed Shape endpoints remain the same inputs.
+Single-Capsule only: disjoint/multiple-Shape paths and defaults remain
+unchanged. Policy switches invalidate obstacle and volume history.
+
+[Windows Release and Ubuntu Debug CI #43654229820](https://github.com/buddas-bible/zonai/actions/runs/43654229820)
+**both passed**, including the new three-policy prescribed-motion
+`--small-cell-capsule-geometry-audit`. Each mode follows the same
+specified 128-substep rotating Capsule trajectory separately, with
+frozen zero-open-MAC snapshots solved by independently assembled
+double-precision PCG. Geometry histories are **different states**,
+not a same-state matrix A/B. The audit prints cell area and source
+differences, pressure-anchor aperture sums, reference target face
+volumes and explicit true PCG residual/convergence.
+
+| h (m), checkpoint | Float analytic pressure anchors | Double analytic anchors | Float active cells (Windows / Ubuntu) | Double active cells (Windows / Ubuntu) |
+| --- | ---: | ---: | ---: | ---: |
+| 0.25, 11/16 | 0 | 0 | 1023 / 1023 | 1023 / 1023 |
+| 0.25, 12/16 | 0 | 0 | 1023 / 1022 | 1022 / 1022 |
+| 0.125, 11/16 | 0 | 0 | 4087 / 4087 | 4080 / 4080 |
+| **0.125, 12/16** | **2 (opening sum 0.00017798537)** | **0** | **4086 / 4080** | **4081 / 4084** |
+
+At the near-tangent witness cell (28,26), h=.125/checkpoint12:
+the existing float analytic mode retains fluid fraction **0**;
+the new double policy retains a **positive** area of
+5.87661464629e-11 m² (Windows) or 5.87675394459e-11 m²
+(Ubuntu), matching the independent signed-distance wedge to
+within 3e-18m² or 1e-17m² respectively.
+The two associated shared U/V face apertures now connect to an
+**active** cell rather than a falsely covered zero-pressure node.
+The next test commit `c2538137` guards the concrete
+2-to-0 anchor transition and independently checks both face
+apertures at this checkpoint.
+
+The **independent frozen zero-MAC PCG** at h=.125/checkpoint12
+converged under 1e-5/s true RMS in both policies and both OSes:
+float analytic 414 iterations versus double analytic **217**
+iterations. Target-face reference integrated volume was
+0.000455333857498 m³ (Windows float) versus
+0.000458961534468 m³ (Windows double);
+Ubuntu 0.000455333849517 versus 0.000458961549608 m³.
+Thus the double policy changed that reference volume by
+approximately **+3.6277e-6 m³**. It is a *geometry and history*
+difference, not a same-operator correction or proof that the
+physical reference must be the double value.
+
+**Limitations/gates:** double geometry fixes the local topology
+witness and both platforms' anchor count there, but it does not
+make every near-zero cell's classification monotonic: for
+h=.125/checkpoint11, seven float-active cells became double-inactive.
+At checkpoint12 the count/locations of newly active and newly
+inactive cells differ by OS. No acceptance of global fluid
+volume conservation, tracer advection, moving-wall flux, two-way
+Body motion, or performance has followed from this experiment.
+The disjoint multi-Shape World8/Fluid4 case is NOT covered by this
+single-Capsule geometry option. Keep S0/S2 open, PR #326 Draft,
+and all experimental options OFF by default.
+
+**Next:** localize and independently integrate near-zero
+**double-inactive** cells; quantify pressure-source and swept
+face-volume budgets as a matched physical error, then test a
+separate multi-Shape geometry policy only after it preserves
+the single-Shape regression and disjoint Shape ownership rules.
+Do not simply remove anchor edges, apply a per-cell epsilon,
+or merge pressure pooling based on pressure iteration counts.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
