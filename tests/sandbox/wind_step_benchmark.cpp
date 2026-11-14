@@ -8,6 +8,7 @@
 #include <limits>
 #include <iterator>
 #include <optional>
+#include <stdexcept>
 #include <string_view>
 #include <tuple>
 #include <utility>
@@ -3205,7 +3206,7 @@ independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
 }
 
 void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
-    bool compareDampedJacobi = false )
+    bool compareDampedJacobi = false, bool compareIndependentPcg = false )
 {
     constexpr float totalDt = 1.0f / 30.0f;
     constexpr int fluidSteps = 128;
@@ -3230,9 +3231,17 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
         int regions = 0;
         double checkerboardShare = 0.0;
     };
+    struct independentRecord
+    {
+        float h = 0.0f;
+        int checkpoint = 0;
+        independentCutCellPressureResult reference{};
+    };
     std::vector<result> results, dampedResults;
+    std::vector<independentRecord> independentResults;
     results.reserve( 2 * checkpoints.size() * budgets.size() );
     if( compareDampedJacobi ) dampedResults.reserve( results.capacity() );
+    if( compareIndependentPcg ) independentResults.reserve( 4 );
     std::puts( "zero_mac_reference,cell_m,fluid_substeps,checkpoint_16,"
         "jacobi_iterations,target_face_m3,compatible_rms_per_s,"
         "component_source_floor_rms_per_s,legacy_pressure_residual,"
@@ -3241,6 +3250,20 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
         "jacobi_iterations,coarse_minus_fine_target_m3,"
         "coarse_minus_fine_compatible_rms_per_s,"
         "difference_from_3200_target_m3,reference_criteria_met" );
+    if( compareIndependentPcg )
+    {
+        if( !compareDampedJacobi || locateResidualHotspots )
+            fail( "independent PCG requires a matched clean frozen damped pair" );
+        std::puts( "zero_mac_independent_pcg,cell_m,checkpoint_16,"
+            "active_cells,connected_regions,iterations,initial_rms_per_s,"
+            "final_explicit_rms_per_s,converged,source_m3,"
+            "independent_target_face_m3,damped_3200_target_face_m3,"
+            "independent_minus_damped_face_m3" );
+        std::puts( "zero_mac_independent_pcg_cross,checkpoint_16,"
+            "independent_coarse_minus_fine_face_m3,"
+            "damped_3200_coarse_minus_fine_face_m3,"
+            "independent_minus_damped_gap_m3,both_converged" );
+    }
     if( compareDampedJacobi )
     {
         std::puts( "zero_mac_damped,cell_m,checkpoint_16,jacobi_iterations,"
@@ -3601,6 +3624,28 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
                     dampedResults.push_back( { h, cp, iterations, face,
                         rms, floorRms, sourceVolume, pressure.pressureResidual,
                         regions, parityShare } );
+                    if( compareIndependentPcg && iterations == 3200 )
+                    {
+                        const auto independent = solveIndependentFrozenCutCellPressure(
+                            trial, subDt, segments );
+                        if( independent.components != regions ||
+                            std::abs( independent.sourceVolume - sourceVolume ) > 1.0e-8 )
+                            fail( "independent pressure assembly changed frozen source topology" );
+                        independentResults.push_back( { h, cp, independent } );
+                        std::printf( "zero_mac_independent_pcg,%.9g,%d,"
+                            "%d,%d,%d,%.12g,%.12g,%d,%.12g,"
+                            "%.12g,%.12g,%.12g\n",
+                            h, cp, independent.activeCells,
+                            independent.components, independent.iterations,
+                            independent.initialRmsPerSecond,
+                            independent.finalRmsPerSecond,
+                            independent.converged ? 1 : 0,
+                            independent.sourceVolume,
+                            independent.targetFaceVolume, face,
+                            independent.targetFaceVolume - face );
+                        if( !independent.converged )
+                            fail( "independent pressure reference did not meet explicit residual" );
+                    }
                     std::printf( "zero_mac_damped,%.9g,%d,%d,"
                         "%.12g,%.12g,%.12g,%.12g,"
                         "%.12g,%.12g,%.12g,%.12g\n",
@@ -3666,6 +3711,38 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
                 fluidSteps, checkpoint, iterations, gap,
                 coarse->compatibleRms - fine->compatibleRms,
                 gap - referenceGap, referenceCriteriaMet ? 1 : 0 );
+        }
+    }
+    if( compareIndependentPcg )
+    {
+        if( independentResults.size() != 4 )
+            fail( "independent pressure reference coverage incomplete" );
+        for( int cp : checkpoints )
+        {
+            const independentRecord *coarse = nullptr, *fine = nullptr;
+            const result *dampedCoarse = nullptr, *dampedFine = nullptr;
+            for( const independentRecord& row : independentResults )
+                if( row.checkpoint == cp )
+                {
+                    if( row.h == 0.25f ) coarse = &row;
+                    else if( row.h == 0.125f ) fine = &row;
+                }
+            for( const result& row : dampedResults )
+                if( row.checkpoint == cp && row.iterations == 3200 )
+                {
+                    if( row.h == 0.25f ) dampedCoarse = &row;
+                    else if( row.h == 0.125f ) dampedFine = &row;
+                }
+            if( !coarse || !fine || !dampedCoarse || !dampedFine )
+                fail( "independent pressure reference cross-grid pair missing" );
+            const double independentGap = coarse->reference.targetFaceVolume -
+                fine->reference.targetFaceVolume;
+            const double dampedGap = dampedCoarse->faceVolume -
+                dampedFine->faceVolume;
+            std::printf( "zero_mac_independent_pcg_cross,%d,"
+                "%.12g,%.12g,%.12g,%d\n",
+                cp, independentGap, dampedGap, independentGap - dampedGap,
+                coarse->reference.converged && fine->reference.converged ? 1 : 0 );
         }
     }
     if( compareDampedJacobi )
@@ -3900,6 +3977,7 @@ int main( int argc, char** argv )
     bool zeroMacReferenceAudit = false;
     bool zeroMacResidualMapAudit = false;
     bool zeroMacDampedJacobiAudit = false;
+    bool zeroMacIndependentPcgAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -3933,6 +4011,7 @@ int main( int argc, char** argv )
         zeroMacReferenceAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-reference-audit";
         zeroMacResidualMapAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-residual-map-audit";
         zeroMacDampedJacobiAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-damped-jacobi-audit";
+        zeroMacIndependentPcgAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-independent-pcg-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -3974,6 +4053,11 @@ int main( int argc, char** argv )
     if( zeroMacDampedJacobiAudit )
     {
         auditFrozenZeroMacReference( false, true );
+        return 0;
+    }
+    if( zeroMacIndependentPcgAudit )
+    {
+        auditFrozenZeroMacReference( false, true, true );
         return 0;
     }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
