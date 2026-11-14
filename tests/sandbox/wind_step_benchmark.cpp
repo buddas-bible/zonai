@@ -2700,18 +2700,22 @@ void auditMatchedWorldMacPressureRestart( bool probeZeroMac = false,
                             const double compatibilityError =
                                 calculatedCompatibility - pressure.compatibilityCorrection;
                             const auto [openTime, swept] = geometry( trial );
-                            const double comparisonScale = std::max( {
-                                1.0, std::abs( calculatedImbalance ),
-                                std::abs( calculatedCompatibility ) } );
+                            // These source totals nearly cancel across
+                            // cells, so a 1 m^3/s scale would mask errors.
+                            // Bound float accumulation separately from the
+                            // much smaller measured net source.
+                            const double sourceLedgerTolerance = 1.0e-6 +
+                                1.0e-5 * std::max( std::abs( sourceRate ),
+                                    regionSourceRate );
                             if( !std::isfinite( post ) ||
                                 !std::isfinite( pressure.pressureResidual ) ||
                                 !std::isfinite( pressure.divergenceAfter ) ||
                                 !std::isfinite( sourceError ) ||
                                 !std::isfinite( compatibilityError ) ||
                                 regions != pressure.connectedRegions ||
-                                std::abs( sourceError ) > 1.0e-4 * comparisonScale ||
+                                std::abs( sourceError ) > sourceLedgerTolerance ||
                                 std::abs( compatibilityError ) >
-                                    1.0e-4 * comparisonScale ||
+                                    sourceLedgerTolerance ||
                                 std::abs( openTime - zeroOpen ) > 1.0e-7 ||
                                 std::abs( swept - zeroSwept ) > 1.0e-7 )
                                 fail( "zero-MAC source/compatibility ledger mismatch" );
