@@ -3884,8 +3884,43 @@ void fluidField2::prepareCutCellVolumeChange( float timeStep )
     cutCellPressure_.unresolvedVolumeRate = static_cast<float>( unresolvedRate );
 }
 
+bool fluidField2::setFrozenMacVelocityForAudit(
+    const std::function<vec2(vec2)>& worldVelocity )
+{
+    if( !frozenPressureReplayReady_ || !cutCellProjectionEnabled_ ||
+        !worldVelocity ) return false;
+
+    // Compute into independent copies, so a nonfinite manufactured input
+    // rejects the entire write without corrupting the frozen reference.
+    std::vector<float> newU = u_;
+    std::vector<float> newV = v_;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+        {
+            if( cutCellUOpen( x, y ) <= 0.0f ) continue;
+            const vec2 position = origin_ + cellSize_ *
+                vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
+            const vec2 velocity = worldVelocity( position );
+            if( !IsFinite( velocity ) ) return false;
+            newU[uIndex( x, y )] = velocity.x;
+        }
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            if( cutCellVOpen( x, y ) <= 0.0f ) continue;
+            const vec2 position = origin_ + cellSize_ *
+                vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
+            const vec2 velocity = worldVelocity( position );
+            if( !IsFinite( velocity ) ) return false;
+            newV[vIndex( x, y )] = velocity.y;
+        }
+    u_.swap( newU );
+    v_.swap( newV );
+    return true;
+}
+
 std::optional<std::vector<fluidObstacleForce2>> fluidField2::replayFrozenCutCellPressure(
-    int pressureIterationsOverride )
+    int pressureIterationsOverride, bool finishStepForRestart )
 {
     if( !frozenPressureReplayReady_ || !cutCellProjectionEnabled_ ||
         !std::isfinite( frozenPressureTimeStep_ ) || frozenPressureTimeStep_ <= 0.0f ||
@@ -3900,6 +3935,13 @@ std::optional<std::vector<fluidObstacleForce2>> fluidField2::replayFrozenCutCell
     projectCutCell( frozenPressureTimeStep_, iterations,
         frozenPressureObstacles_, feedback );
     stepMomentum_.afterPressure = getFluidMomentum();
+    if( finishStepForRestart )
+    {
+        // Mirror the tail of fluidField2::step on this independent copy.
+        // Without this, its next step would sweep from the WRONG old pose.
+        transportTracer( frozenPressureTimeStep_ );
+        previousObstacles_ = frozenPressureObstacles_;
+    }
     return feedback;
 }
 
