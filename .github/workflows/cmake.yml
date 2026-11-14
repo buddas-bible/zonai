@@ -192,6 +192,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-independent-pcg-audit
 
+      # Read-only counterfactual removes ONLY active-to-inactive pressure
+      # anchors; records new Neumann compatibility correction and target flux.
+      - name: Isolate inactive-cell pressure anchors (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-anchor-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -445,6 +451,12 @@ jobs:
       - name: Audit independently assembled frozen Cut-cell PCG (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-independent-pcg-audit
+
+      # Read-only counterfactual removes ONLY active-to-inactive pressure
+      # anchors; records new Neumann compatibility correction and target flux.
+      - name: Isolate inactive-cell pressure anchors (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-anchor-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
