@@ -3920,16 +3920,18 @@ bool fluidField2::setFrozenMacVelocityForAudit(
 }
 
 std::optional<std::vector<fluidObstacleForce2>> fluidField2::replayFrozenCutCellPressure(
-    int pressureIterationsOverride, bool finishStepForRestart )
+    int pressureIterationsOverride, bool finishStepForRestart, float jacobiRelaxation )
 {
     if( !frozenPressureReplayReady_ || !cutCellProjectionEnabled_ ||
         !std::isfinite( frozenPressureTimeStep_ ) || frozenPressureTimeStep_ <= 0.0f ||
         ( pressureIterationsOverride != -1 &&
-            ( pressureIterationsOverride < 1 || pressureIterationsOverride > 3200 ) ) )
+            ( pressureIterationsOverride < 1 || pressureIterationsOverride > 3200 ) ) ||
+        !std::isfinite( jacobiRelaxation ) ||
+        jacobiRelaxation <= 0.0f || jacobiRelaxation > 1.0f )
         return std::nullopt;
-    // Extra iterations above the original 200 are reserved for a copied
-    // noncoupled Jacobi reference; never extend the coupled Schur PCG budget.
-    if( pressureIterationsOverride > 200 &&
+    // High budgets or damped Jacobi apply only to a frozen noncoupled
+    // diagnostic copy. Reject BEFORE consuming it, including Schur cases.
+    if( ( pressureIterationsOverride > 200 || jacobiRelaxation != 1.0f ) &&
         std::any_of( frozenPressureObstacles_.begin(), frozenPressureObstacles_.end(),
             []( const fluidShapeObstacle2& obstacle )
             {
@@ -3942,7 +3944,7 @@ std::optional<std::vector<fluidObstacleForce2>> fluidField2::replayFrozenCutCell
     const int iterations = pressureIterationsOverride == -1
         ? frozenPressureIterations_ : pressureIterationsOverride;
     projectCutCell( frozenPressureTimeStep_, iterations,
-        frozenPressureObstacles_, feedback );
+        frozenPressureObstacles_, feedback, jacobiRelaxation );
     stepMomentum_.afterPressure = getFluidMomentum();
     if( finishStepForRestart )
     {
@@ -3955,7 +3957,8 @@ std::optional<std::vector<fluidObstacleForce2>> fluidField2::replayFrozenCutCell
 }
 
 void fluidField2::projectCutCell( float timeStep, int pressureIterations,
-    std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback )
+    std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback,
+    float jacobiRelaxation )
 {
     // 유체 점유 면적의 시간 변화는 다음 보존형 연속 방정식에 직접 들어간다:
     // div(a*u_fluid) + ΔfluidFraction / dt = 0.
@@ -4093,8 +4096,15 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
                         ( right > 0.0f ? right * pressure_[cellIndex( x + 1, y )] : 0.0f ) +
                         ( bottom > 0.0f ? bottom * pressure_[cellIndex( x, y - 1 )] : 0.0f ) +
                         ( top > 0.0f ? top * pressure_[cellIndex( x, y + 1 )] : 0.0f );
-                    nextPressure_[cell] = diagonal > 0.0f
+                    const float jacobiCandidate = diagonal > 0.0f
                         ? ( sum - divergence_[cell] * pressureScale ) / diagonal : 0.0f;
+                    // Ordinary Step always passes omega=1 and remains
+                    // bit-for-bit the original update. Only a frozen copied
+                    // noncoupled replay may use diagnostic damping.
+                    nextPressure_[cell] = jacobiRelaxation == 1.0f
+                        ? jacobiCandidate
+                        : pressure_[cell] + jacobiRelaxation *
+                            ( jacobiCandidate - pressure_[cell] );
                 }
             pressure_.swap( nextPressure_ );
         }
