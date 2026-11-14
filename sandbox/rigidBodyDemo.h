@@ -464,6 +464,27 @@ public:
     {
         if( windField_ ) windField_->setFaceStageAuditTarget( x, y, isU );
     }
+    // Opt-in shrinking Cut-cell pressure pooling for end-to-end World
+    // feedback trials. Zero is the default and leaves normal physics intact.
+    void setWindSmallCellPressureMergeFraction( float fraction ) noexcept
+    {
+        if( windField_ ) windField_->setSmallCellPressureMergeFraction( fraction );
+    }
+    // Explicit tracer-only probes; never change the pressure operator.
+    void setWindTracerCellConcentration( int x, int y, float concentration ) noexcept
+    {
+        if( windField_ ) windField_->setTracerConcentration( x, y, concentration );
+    }
+    // Diagnostic-only: allow real World/Fluid interleaving to report
+    // actual post-Swept/post-MAC cell masses and directed tracer transfers.
+    void setWindTracerStageObserver( fluidField2::tracerStageObserver2 observer )
+    {
+        if( windField_ ) windField_->setTracerStageObserver( std::move( observer ) );
+    }
+    void setWindTracerTransferObserver( fluidField2::tracerTransferObserver2 observer )
+    {
+        if( windField_ ) windField_->setTracerTransferObserver( std::move( observer ) );
+    }
     void setWindPrePressureSnapshotObserver( fluidField2::prePressureSnapshotObserver2 observer )
     {
         if( windField_ ) windField_->setPrePressureSnapshotObserver( std::move( observer ) );
@@ -487,6 +508,16 @@ public:
     void setWindSweptTracerRemapEnabled( bool enabled ) noexcept
     {
         if( windField_ ) windField_->setSweptTracerRemapEnabled( enabled );
+    }
+    // Experimental partial Cut-cell tracer rerouting, independently toggled.
+    void setWindConnectedResidualTracerRemapEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setConnectedResidualTracerRemapEnabled( enabled );
+    }
+    // Opt-in S2c geometry-only time-average aperture probe.
+    void setWindSweptApertureAuditEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setSweptApertureAuditEnabled( enabled );
     }
     [[nodiscard]] bool isWindSweptTracerRemapEnabled() const noexcept
     {

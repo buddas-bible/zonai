@@ -81,6 +81,132 @@ jobs:
         if: runner.os == 'Linux'
         run: ctest --test-dir build --output-on-failure
 
+      # First continuous FSI response check. Both variants run independent
+      # but identically seeded World timelines, NOT frozen pressure replays.
+      - name: Probe continuous small-cell World feedback (Ubuntu Debug, informational)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-world-feedback-audit
+
+      - name: Probe local tracer near disappearing Cut-cell (Ubuntu Debug, informational)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-local-tracer-audit
+
+      # Also exercise the real applied-transfer ledger on Ubuntu Debug.
+      - name: Audit real small-cell applied tracer transfers (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-applied-transfer-audit
+
+      # S2c research only: same World/Fluid history, compare default tracer
+      # against opt-in partial-cell endpoint aperture redistribution.
+      - name: Compare connected residual tracer remap (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-connected-residual-audit
+
+      # S2c physical-risk probe: compare actual routing kilograms against
+      # separate endpoint-MAC and signed Swept face-volume equivalents.
+      - name: Audit connected tracer face capacity (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-connected-capacity-audit
+
+      # S2c research: per physical face, sum directed transfers once and
+      # compare independent swept-time open aperture against endpoint MAC.
+      - name: Audit grouped moving-face tracer transport (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-grouped-face-audit
+
+      # The MAC velocity history is unknown between steps; test the explicit
+      # linear-endpoint interpolation proxy, not a claim of exact A(t)u(t).
+      - name: Audit time-interpolated moving-face MAC proxy (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-time-varying-flux-audit
+
+      # S2c independent temporal-reference experiment: identical prescribed
+      # moving-solid pose/velocity, real fluid resolution 1/2/4/8/16.
+      - name: Audit prescribed moving Cut-cell Fluid substeps (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-prescribed-substeps-audit
+
+      # Same fixed path at real 1..64 Fluid dt, first a translating circle,
+      # then a rotating capsule. Output a 64-step internal reference, not
+      # a claim of analytic convergence or physically exact tracer capacity.
+      - name: Audit high-resolution translation and rotation reference (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-prescribed-convergence-audit
+
+      # S2c refinement: 16/32/64/128 solved steps at h=.25 and h=.125.
+      # Two fine half-width faces aggregate to the same coarse physical face.
+      - name: Audit prescribed time-space Cut-cell refinement (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-prescribed-spatial-audit
+
+      # S2c read-only pressure-stage forensic: same rotating V(16,16)
+      # physical face on h=.25/.125, using real 64 and 128 Fluid steps.
+      - name: Split rotating face geometry, pre-pressure and pressure flux (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-rotation-pressure-split-audit
+
+      # Same frozen geometry/MAC state, pressure Jacobi 40/120/200 copies.
+      # Live field always stays at 120 iterations (read-only A/B).
+      - name: Compare identical-state frozen rotating pressure iterations (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-frozen-pressure-iterations-audit
+
+      # Same world-coordinate affine face velocity replaces only frozen
+      # open MAC components. Complete cloned Step and compare 1/2/4 real
+      # following Fluid steps to the untouched frozen-state control.
+      - name: Audit matched-world MAC restarts (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-matched-world-restart-audit
+
+      # Frozen identical-geometry copies: zero open-fluid MAC speeds versus
+      # divergence-free affine speeds, isolating a moving-wall pressure response.
+      - name: Audit matched zero-open-MAC pressure response (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-pressure-audit
+
+      # Exactly matched frozen zero-open-MAC states at 40/80/120/200 Jacobi
+      # iterations; independently reconstruct connected source compatibility.
+      - name: Audit frozen zero-MAC pressure convergence (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-convergence-audit
+
+      # Noncoupled frozen-only 200/800/1600/3200 Jacobi reference; explicit
+      # compatibility-corrected residual evaluated via public MAC/source data.
+      - name: Audit bounded zero-MAC reference residual (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-reference-audit
+
+      - name: Localize frozen pressure residual hotspots (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-residual-map-audit
+
+      # Same pre-pressure snapshot and zero open MAC input, omega=1 versus
+      # diagnostic-only omega=2/3 at identical 200/800/1600/3200 Jacobi budgets.
+      - name: Compare frozen damped versus legacy Jacobi (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-damped-jacobi-audit
+
+      # Read-only independent Neumann graph assembly from Cut-cell public
+      # aperture/source ledgers; explicit double-precision PCG residual.
+      - name: Audit independently assembled frozen Cut-cell PCG (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-independent-pcg-audit
+
+      # Read-only counterfactual removes ONLY active-to-inactive pressure
+      # anchors; records new Neumann compatibility correction and target flux.
+      - name: Isolate inactive-cell pressure anchors (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-anchor-audit
+
+      # Identical prescribed Capsule path, independently assembled pressure graphs.
+      - name: Compare sampled and analytic Capsule geometry (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-capsule-geometry-audit
+
+      - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
+
       # Diagnostic numbers are informational; TOI may miss some intermediate rotational contacts.
       - name: Report World rotational sweep oracle (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
@@ -234,6 +360,117 @@ jobs:
       - name: Sample frozen Cut-cell pressure A-B (Windows Release, informational)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --frozen-pressure-audit
+
+      # S2c research only: same exact pre-projection state, unchanged base
+      # alongside opt-in Galerkin small-cell pressure pooling (default OFF).
+      - name: Probe connected small-cell pressure pooling (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-merge-audit
+
+      - name: Sweep frozen small-cell pressure thresholds (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-merge-threshold-audit
+
+      - name: Check frozen small-cell pressure at different cadences (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-merge-cadence-audit
+
+      - name: Probe continuous small-cell World feedback (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-world-feedback-audit
+
+      - name: Probe local tracer near disappearing Cut-cell (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-local-tracer-audit
+
+      # S2c diagnostic: reconstruct actual transferred tracer on the real
+      # World8/Fluid4 disappearing-cell path, per Cell and local stencil.
+      - name: Audit real small-cell applied tracer transfers (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-applied-transfer-audit
+
+      - name: Compare connected residual tracer remap (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-connected-residual-audit
+
+      - name: Audit connected tracer face capacity (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-connected-capacity-audit
+
+      - name: Audit grouped moving-face tracer transport (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-grouped-face-audit
+
+      - name: Audit time-interpolated moving-face MAC proxy (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-time-varying-flux-audit
+
+      - name: Audit prescribed moving Cut-cell Fluid substeps (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-prescribed-substeps-audit
+
+      - name: Audit high-resolution translation and rotation reference (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-prescribed-convergence-audit
+
+      - name: Audit prescribed time-space Cut-cell refinement (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-prescribed-spatial-audit
+
+      - name: Split rotating face geometry, pre-pressure and pressure flux (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-rotation-pressure-split-audit
+
+      - name: Compare identical-state frozen rotating pressure iterations (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-frozen-pressure-iterations-audit
+
+      - name: Audit matched-world MAC restarts (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-matched-world-restart-audit
+
+      - name: Audit matched zero-open-MAC pressure response (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-pressure-audit
+
+      - name: Audit frozen zero-MAC pressure convergence (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-convergence-audit
+
+      - name: Audit bounded zero-MAC reference residual (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-reference-audit
+
+      - name: Localize frozen pressure residual hotspots (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-residual-map-audit
+
+      # Same pre-pressure snapshot and zero open MAC input, omega=1 versus
+      # diagnostic-only omega=2/3 at identical 200/800/1600/3200 Jacobi budgets.
+      - name: Compare frozen damped versus legacy Jacobi (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\build\tests\Release\sandboxWindStepBenchmark.exe --small-cell-zero-mac-damped-jacobi-audit
+
+      # Read-only independent Neumann graph assembly from Cut-cell public
+      # aperture/source ledgers; explicit double-precision PCG residual.
+      - name: Audit independently assembled frozen Cut-cell PCG (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-independent-pcg-audit
+
+      # Read-only counterfactual removes ONLY active-to-inactive pressure
+      # anchors; records new Neumann compatibility correction and target flux.
+      - name: Isolate inactive-cell pressure anchors (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-anchor-audit
+
+      # Informational sampled-vs-analytic Capsule geometry comparison.
+      - name: Compare sampled and analytic Capsule geometry (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-capsule-geometry-audit
+
+      - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --cut-cell-volume-budget-audit
 
       # Identical World/Fluid scene using original on-the-fly IC(0) sweeps.
       # Compare with the previous cached run on this same Windows runner.

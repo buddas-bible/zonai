@@ -128,6 +128,68 @@ void checkFaceStageAudit()
     check( !monitored.getFaceStageAudit().valid, "disabled stage audit must not retain stale data" );
 }
 
+void checkSmallCellPressureMergeConfiguration()
+{
+    fluidField2 field{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    check( field.getSmallCellPressureMergeFraction() == 0.0f,
+        "connected small-cell pressure merging must be default OFF" );
+    field.setSmallCellPressureMergeFraction( 0.005f );
+    check( close( field.getSmallCellPressureMergeFraction(), 0.005f ),
+        "pressure merging must accept a small positive fluid fraction threshold" );
+    field.setSmallCellPressureMergeFraction( -0.1f );
+    field.setSmallCellPressureMergeFraction( 0.25f );
+    field.setSmallCellPressureMergeFraction( std::numeric_limits<float>::infinity() );
+    field.setSmallCellPressureMergeFraction( std::numeric_limits<float>::quiet_NaN() );
+    check( close( field.getSmallCellPressureMergeFraction(), 0.005f ),
+        "pressure merging must reject negative, excessive and nonfinite thresholds" );
+
+    // The setting is ignored by non-coupled Jacobi; its pressure/geometry
+    // and source terms are never silently adjusted.
+    fluidField2 reference = field;
+    field.setCutCellProjectionEnabled( true );
+    reference.setCutCellProjectionEnabled( true );
+    reference.setSmallCellPressureMergeFraction( 0.0f );
+    fluidShapeObstacle2 shape{};
+    shape.geometry = circle2{ {}, 0.73f };
+    shape.transform.position = { 0.14f, 0.18f };
+    shape.center = shape.transform.position;
+    std::array<fluidObstacleForce2, 1> reactionA{}, reactionB{};
+    field.addVelocity( { -1.0f, 0.0f }, { 1.4f, 0.25f }, 1.1f );
+    reference.addVelocity( { -1.0f, 0.0f }, { 1.4f, 0.25f }, 1.1f );
+    field.step( 1.0f / 60.0f, std::span<const fluidShapeObstacle2>( &shape, 1 ), reactionA );
+    reference.step( 1.0f / 60.0f, std::span<const fluidShapeObstacle2>( &shape, 1 ), reactionB );
+    check( field.getCutCellPressure().mergedPressureCells == 0 &&
+        close( field.getFlowAudit( 1.0f / 60.0f ).maxFluidFaceSpeed,
+            reference.getFlowAudit( 1.0f / 60.0f ).maxFluidFaceSpeed, 1.0e-6f ) &&
+        close( field.getCutCellPressure().divergenceAfter,
+            reference.getCutCellPressure().divergenceAfter, 1.0e-6f ) &&
+        Length( field.getFluidMomentum() - reference.getFluidMomentum() ) < 1.0e-6f &&
+        Length( reactionA[0].force - reactionB[0].force ) < 1.0e-6f,
+        "small-cell pressure merging must not alter the non-coupled reference solver" );
+    // Stationary geometry may have tiny cut cells, but its pressure
+    // topology must not change just because the experimental switch is ON.
+    shape.inverseMass = 0.5f;
+    shape.inverseInertia = 0.7f;
+    field.setCutCellCoupledProjectionEnabled( true );
+    reference.setCutCellCoupledProjectionEnabled( true );
+    field.setSmallCellPressureMergeFraction( 0.05f );
+    for( int i = 0; i < 2; ++i )
+    {
+        field.step( 1.0f / 60.0f, std::span<const fluidShapeObstacle2>( &shape, 1 ), reactionA, 200 );
+        reference.step( 1.0f / 60.0f, std::span<const fluidShapeObstacle2>( &shape, 1 ), reactionB, 200 );
+        check( field.getCutCellPressure().mergedPressureCells == 0 &&
+            close( field.getFlowAudit( 1.0f / 60.0f ).maxFluidFaceSpeed,
+                reference.getFlowAudit( 1.0f / 60.0f ).maxFluidFaceSpeed, 1.0e-6f ) &&
+            close( field.getCutCellPressure().pressureResidual,
+                reference.getCutCellPressure().pressureResidual, 1.0e-6f ) &&
+            Length( reactionA[0].force - reactionB[0].force ) < 1.0e-6f,
+            "static narrow-gap pressure geometry must not be merged by motion-only trial" );
+    }
+    field.setSmallCellPressureMergeFraction( 0.0f );
+    check( field.getSmallCellPressureMergeFraction() == 0.0f,
+        "zero threshold must disable experimental pressure merging" );
+}
+
 void checkFrozenPressureReplay()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -163,14 +225,83 @@ void checkFrozenPressureReplay()
     check( !field.replayFrozenCutCellPressure().has_value(),
         "ordinary field must not expose a replayable pressure snapshot" );
 
+    check( !field.setFrozenMacVelocityForAudit(
+        []( vec2 p ) { return vec2{ p.x, p.y }; } ),
+        "live nonfrozen field must reject manufactured MAC override" );
     fluidField2 baseline = *frozen;
     fluidField2 reference = *frozen;
+    fluidField2 sameBudget = *frozen;
+    fluidField2 moreIterations = *frozen;
+    fluidField2 highJacobiReference = *frozen;
+    fluidField2 dampedJacobiReference = *frozen;
+    fluidField2 unitJacobiReference = *frozen;
+    fluidField2 finishedRestart = *frozen;
+    fluidField2 manufactured = *frozen;
+    manufactured.setPrePressureSnapshotObserver( {} );
+    finishedRestart.setPrePressureSnapshotObserver( {} );
+
+    const auto previousAudit = manufactured.getFlowAudit( dt );
+    check( !manufactured.setFrozenMacVelocityForAudit(
+        []( vec2 ) {
+            return vec2{ std::numeric_limits<float>::quiet_NaN(), 0.0f };
+        } ) &&
+        close( previousAudit.maxFluidFaceSpeed,
+            manufactured.getFlowAudit( dt ).maxFluidFaceSpeed, 1.0e-7f ),
+        "invalid manufactured MAC function must leave frozen field unchanged" );
+    check( manufactured.setFrozenMacVelocityForAudit(
+        []( vec2 p ) { return vec2{ 0.35f - 0.06f * p.y, 0.20f + 0.09f * p.x }; } ),
+        "finite world-space MAC field must be injectable into frozen copy" );
     baseline.setPrePressureSnapshotObserver( {} );
     reference.setPrePressureSnapshotObserver( {} );
+    sameBudget.setPrePressureSnapshotObserver( {} );
+    moreIterations.setPrePressureSnapshotObserver( {} );
     reference.setAnalyticCutCellCachedSchurEdgesEnabled( false );
+    check( !sameBudget.replayFrozenCutCellPressure( 0 ).has_value() &&
+        !sameBudget.replayFrozenCutCellPressure( -2 ).has_value() &&
+        !sameBudget.replayFrozenCutCellPressure( 3201 ).has_value(),
+        "invalid replay iteration budgets must not consume frozen snapshot" );
+    highJacobiReference.setPrePressureSnapshotObserver( {} );
+    check( highJacobiReference.replayFrozenCutCellPressure( 3200 ).has_value() &&
+        !highJacobiReference.replayFrozenCutCellPressure( 1 ).has_value() &&
+        std::isfinite( highJacobiReference.getCutCellPressure().pressureResidual ),
+        "bounded high-iteration frozen Jacobi reference must be one-use and finite" );
+    dampedJacobiReference.setPrePressureSnapshotObserver( {} );
+    unitJacobiReference.setPrePressureSnapshotObserver( {} );
+    check( !dampedJacobiReference.replayFrozenCutCellPressure(
+            80, false, 0.0f ).has_value() &&
+        !dampedJacobiReference.replayFrozenCutCellPressure(
+            80, false, -0.5f ).has_value() &&
+        !dampedJacobiReference.replayFrozenCutCellPressure(
+            80, false, 1.01f ).has_value() &&
+        !dampedJacobiReference.replayFrozenCutCellPressure(
+            80, false, std::numeric_limits<float>::quiet_NaN() ).has_value(),
+        "invalid frozen Jacobi relaxation must not consume the snapshot" );
+    const auto dampedForce = dampedJacobiReference.replayFrozenCutCellPressure(
+        200, false, 2.0f / 3.0f );
+    const auto unitForce = unitJacobiReference.replayFrozenCutCellPressure(
+        80, false, 1.0f );
+    check( dampedForce.has_value() && unitForce.has_value() &&
+        !dampedJacobiReference.replayFrozenCutCellPressure( 200 ).has_value() &&
+        std::isfinite( dampedJacobiReference.getCutCellPressure().pressureResidual ),
+        "explicit frozen Jacobi damping must be bounded, finite and one-use" );
     const auto forceBaseline = baseline.replayFrozenCutCellPressure();
     const auto forceReference = reference.replayFrozenCutCellPressure();
+    const auto forceSameBudget = sameBudget.replayFrozenCutCellPressure( 80 );
+    const auto forceMoreIterations = moreIterations.replayFrozenCutCellPressure( 200 );
+    const auto forceRestart = finishedRestart.replayFrozenCutCellPressure( 80, true );
+    const auto forceManufactured = manufactured.replayFrozenCutCellPressure( 80, true );
+    check( forceRestart.has_value() && forceManufactured.has_value() &&
+        !manufactured.setFrozenMacVelocityForAudit(
+            []( vec2 ) { return vec2{}; } ) &&
+        !manufactured.replayFrozenCutCellPressure( 80, true ).has_value(),
+        "completed manufactured restart cannot be overwritten or replayed again" );
+    check( forceSameBudget.has_value() && forceMoreIterations.has_value() &&
+        !sameBudget.replayFrozenCutCellPressure( 80 ).has_value(),
+        "valid replay iteration override must consume each copied snapshot exactly once" );
     check( forceBaseline.has_value() && forceReference.has_value() &&
+        unitForce.has_value() && unitForce->size() == forceBaseline->size() &&
+        Length( unitJacobiReference.getFluidMomentum() -
+            baseline.getFluidMomentum() ) < 1.0e-5f &&
         forceBaseline->size() == feedback.size() && forceReference->size() == feedback.size(),
         "both pressure solvers must replay from one identical frozen state" );
     check( !baseline.replayFrozenCutCellPressure().has_value(),
@@ -179,10 +310,17 @@ void checkFrozenPressureReplay()
     const auto live = field.getFlowAudit( dt );
     const auto replay = baseline.getFlowAudit( dt );
     const auto other = reference.getFlowAudit( dt );
+    const auto same = sameBudget.getFlowAudit( dt );
+    const auto longer = moreIterations.getFlowAudit( dt );
     check( close( live.maxFluidFaceSpeed, replay.maxFluidFaceSpeed, 1.0e-5f ) &&
         close( live.continuityRms, replay.continuityRms, 1.0e-5f ) &&
         close( replay.maxFluidFaceSpeed, other.maxFluidFaceSpeed, 1.0e-5f ) &&
         close( replay.continuityRms, other.continuityRms, 1.0e-5f ) &&
+        close( replay.continuityRms, same.continuityRms, 1.0e-5f ) &&
+        close( replay.maxFluidFaceSpeed, same.maxFluidFaceSpeed, 1.0e-5f ) &&
+        std::isfinite( longer.continuityRms ) &&
+        std::isfinite( longer.maxFluidFaceSpeed ) &&
+        Length( baseline.getFluidMomentum() - sameBudget.getFluidMomentum() ) < 1.0e-5f &&
         Length( field.getFluidMomentum() - baseline.getFluidMomentum() ) < 1.0e-5f &&
         Length( baseline.getFluidMomentum() - reference.getFluidMomentum() ) < 1.0e-5f &&
         close( field.getCutCellPressure().divergenceAfter,
@@ -196,6 +334,31 @@ void checkFrozenPressureReplay()
         Length( ( *forceBaseline )[0].force - ( *forceReference )[0].force ) < 1.0e-5f &&
         std::abs( ( *forceBaseline )[0].torque - ( *forceReference )[0].torque ) < 1.0e-5f,
         "frozen pressure replay must preserve pressure force and torque" );
+    // A copied snapshot completed with the opt-in restart tail must have
+    // the SAME obstacle-sweep history as the live field after Step. Test the
+    // *next* real moving Step, not only identical pressure at the capture.
+    check( Length( finishedRestart.getFluidMomentum() -
+        field.getFluidMomentum() ) < 1.0e-5f,
+        "restart completion must match live post-pressure velocity" );
+    circle.transform.position += dt * circle.linearVelocity;
+    circle.center = circle.transform.position;
+    std::array<fluidObstacleForce2, 1> restartedFeedback{};
+    field.step( dt, obstacle, feedback, 80 );
+    finishedRestart.step( dt, obstacle, restartedFeedback, 80 );
+    const auto continued = field.getFlowAudit( dt );
+    const auto continuedRestart = finishedRestart.getFlowAudit( dt );
+    check( close( continued.maxFluidFaceSpeed,
+            continuedRestart.maxFluidFaceSpeed, 1.0e-5f ) &&
+        close( continued.continuityRms,
+            continuedRestart.continuityRms, 1.0e-5f ) &&
+        Length( field.getFluidMomentum() -
+            finishedRestart.getFluidMomentum() ) < 1.0e-5f &&
+        close( field.getTracerMass(), finishedRestart.getTracerMass(), 1.0e-5f ),
+        "completed frozen replay must reproduce next moving Fluid substep" );
+    const auto syntheticAudit = manufactured.getFlowAudit( dt );
+    check( std::isfinite( syntheticAudit.continuityRms ) &&
+        std::isfinite( syntheticAudit.maxFluidFaceSpeed ),
+        "manufactured field restart must remain finite after replay" );
     frozen->clear();
     check( !frozen->replayFrozenCutCellPressure().has_value(),
         "clear must invalidate a previously captured pressure state" );
@@ -3861,6 +4024,76 @@ void checkConservativeTracerTransport()
 }
 
 
+void checkCutCellVolumeLedger()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    fluidField2 fluid{ 16, 16, 0.5f, { -4.0f, -4.0f } };
+    fluid.setCutCellProjectionEnabled( true );
+    const auto noHistory = fluid.getCutCellVolumeBudget( 8, 8, dt );
+    check( noHistory.valid && !noHistory.hasVolumeHistory &&
+        !fluid.getCutCellVolumeBudget( -1, 8, dt ).valid &&
+        !fluid.getCutCellVolumeBudget( 8, 8, 0.0f ).valid &&
+        !fluid.getCutCellVolumeSummary( 0.0f ).valid,
+        "Cut-cell volume audit must reject invalid input and expose missing history" );
+
+    std::array<fluidObstacleForce2, 1> feedback{};
+    fluidShapeObstacle2 obstacle{ MakeBox( { 0.8f, 0.3f } ),
+        { { -1.0f, -0.25f }, {} }, { -1.0f, -0.25f }, {}, 0.0f };
+    fluid.step( dt, std::span<const fluidShapeObstacle2>( &obstacle, 1 ), feedback );
+    const auto first = fluid.getCutCellVolumeBudget( 9, 7, dt );
+    check( first.valid && !first.hasVolumeHistory,
+        "first obstacle snapshot must not create a fictitious volume source" );
+
+    obstacle.transform.position.x += 0.5f;
+    obstacle.center.x += 0.5f;
+    fluid.step( dt, std::span<const fluidShapeObstacle2>( &obstacle, 1 ), feedback, 160 );
+    const auto summary = fluid.getCutCellVolumeSummary( dt );
+    check( summary.valid && summary.activeCells > 0 && summary.modifiedCells > 0 &&
+        std::isfinite( summary.activePressureResidualRmsVolume ) &&
+        std::isfinite( summary.activeSnapshotResidualRmsVolume ) &&
+        std::isfinite( summary.totalSnapshotDeltaVolume ),
+        "moving obstacle must have valid finite active-cell endpoint volume budgets" );
+
+    double pressureResidualSquare = 0.0;
+    double snapshotResidualSquare = 0.0;
+    int active = 0;
+    int modified = 0;
+    for( int y = 0; y < fluid.getHeight(); ++y )
+        for( int x = 0; x < fluid.getWidth(); ++x )
+        {
+            const auto cell = fluid.getCutCellVolumeBudget( x, y, dt );
+            check( cell.valid && cell.hasVolumeHistory &&
+                std::isfinite( cell.macNetOutwardVolume ) &&
+                std::isfinite( cell.pressureResidualVolume ) &&
+                std::isfinite( cell.snapshotResidualVolume ),
+                "every Cut-cell must expose finite volume budgets after moving geometry" );
+            const double macSum = cell.macOutwardVolume[0] + cell.macOutwardVolume[1] +
+                cell.macOutwardVolume[2] + cell.macOutwardVolume[3];
+            const double sweptSum = cell.solidSweptOutwardVolume[0] +
+                cell.solidSweptOutwardVolume[1] +
+                cell.solidSweptOutwardVolume[2] +
+                cell.solidSweptOutwardVolume[3];
+            check( std::abs( macSum - cell.macNetOutwardVolume ) < 1.0e-12 &&
+                std::abs( cell.pressureResidualVolume -
+                    ( macSum + cell.pressureSourceDeltaVolume ) ) < 1.0e-12 &&
+                std::abs( cell.snapshotResidualVolume -
+                    ( macSum + cell.snapshotDeltaVolume ) ) < 1.0e-12 &&
+                std::abs( sweptSum - cell.solidSweptDivergenceVolume ) < 1.0e-12,
+                "signed Cut-cell face volumes must reconcile with their individual ledgers" );
+            if( cell.previousFraction != cell.currentFraction ) ++modified;
+            if( !cell.active ) continue;
+            ++active;
+            pressureResidualSquare += cell.pressureResidualVolume * cell.pressureResidualVolume;
+            snapshotResidualSquare += cell.snapshotResidualVolume * cell.snapshotResidualVolume;
+        }
+    check( active == summary.activeCells && modified == summary.modifiedCells &&
+        std::abs( summary.activePressureResidualRmsVolume -
+            std::sqrt( pressureResidualSquare / active ) ) < 1.0e-12 &&
+        std::abs( summary.activeSnapshotResidualRmsVolume -
+            std::sqrt( snapshotResidualSquare / active ) ) < 1.0e-12,
+        "volume summary must agree with independently scanned individual cells" );
+}
+
 void checkSweptTracerRemap()
 {
     constexpr float dt = 1.0f / 60.0f;
@@ -3879,10 +4112,16 @@ void checkSweptTracerRemap()
     check( close( legacy.getCellFluidFraction( 8, 7 ), 1.0f ),
         "baseline tracer source must be fluid before moving obstacle" );
     legacy.setTracerConcentration( 8, 7, 4.0f );
+    check( std::abs( legacy.getTracerCellMass( 8, 7 ) - 1.0 ) < 1.0e-6 &&
+        legacy.getTracerCellMass( -1, 7 ) == 0.0 &&
+        legacy.getTracerCellMass( 8, 16 ) == 0.0,
+        "raw tracer cell mass must expose stored mass and safely reject invalid coordinates" );
     oldBox.transform.position.x += 1.25f;
     oldBox.center.x += 1.25f;
     legacy.step( dt, std::span<const fluidShapeObstacle2>( &oldBox, 1 ), feedback, 160 );
     check( legacy.getSweptFaceFlux().usedSweptFlux &&
+        legacy.getTracerCellMass( 8, 7 ) > 0.999 &&
+        legacy.getTracerConcentration( 8, 7 ) == 0.0f &&
         close( legacy.getTracerStats().trappedMass, 1.0f, 1.0e-4f ) &&
         !legacy.getTracerStats().usedSweptRemap,
         "default mode must keep Part 12a trapped tracer behavior" );
@@ -3921,6 +4160,35 @@ void checkSweptTracerRemap()
     leadingBox.center.x += 1.5f;
     direct.step( dt, std::span<const fluidShapeObstacle2>( &leadingBox, 1 ), feedback, 160 );
     const fluidTracerStats2& directStats = direct.getTracerStats();
+    const auto& unresolved = directStats.unresolvedAudit;
+    check( std::abs( unresolved.totalMass - directStats.unresolvedDisplacementMass ) < 1.0e-5 &&
+        std::abs( unresolved.totalMass -
+            ( unresolved.partialCellMass + unresolved.fullyCoveredCellMass ) ) < 1.0e-10 &&
+        std::abs( unresolved.totalMass -
+            ( unresolved.connectedFluidFaceMass + unresolved.noConnectedFluidFaceMass ) ) < 1.0e-10 &&
+        std::abs( unresolved.totalMass -
+            ( unresolved.noUsableOutwardSweepMass + unresolved.insufficientOutwardSweepMass ) ) < 1.0e-10 &&
+        ( unresolved.sources == 0 || ( unresolved.worstX >= 0 && unresolved.worstY >= 0 ) ),
+        "unmatched swept remap diagnostic bins must partition the unchanged unresolved mass" );
+    if( unresolved.sources > 0 )
+    {
+        const double netMacOut = unresolved.worstMacOutwardTracerMass[0] +
+            unresolved.worstMacOutwardTracerMass[1] +
+            unresolved.worstMacOutwardTracerMass[2] +
+            unresolved.worstMacOutwardTracerMass[3];
+        const double sweptOut =
+            unresolved.worstSweptOutwardTracerMass[0] +
+            unresolved.worstSweptOutwardTracerMass[1] +
+            unresolved.worstSweptOutwardTracerMass[2] +
+            unresolved.worstSweptOutwardTracerMass[3];
+        check( std::isfinite( netMacOut ) &&
+            std::abs( unresolved.worstMassAfterMacAdvection -
+                unresolved.worstMassBeforeMacAdvection + netMacOut ) < 1.0e-9 &&
+            std::abs( sweptOut - unresolved.worstSweptTransferMass ) < 1.0e-10 &&
+            std::abs( unresolved.worstMassAfterSweptRemap -
+                unresolved.worstMassBeforeMacAdvection ) < 1.0e-12,
+            "worst unresolved source must reconcile actual limited Swept and MAC transfers" );
+    }
     check( directStats.sweptRemappedMass > 0.0f &&
         close( direct.getTracerMass(), 1.0f, 1.0e-4f ) &&
         directStats.trappedMass < 1.0e-5f,
@@ -3974,8 +4242,332 @@ void checkSweptTracerRemap()
 
     moving.clear();
     check( moving.isSweptTracerRemapEnabled() && close( moving.getTracerMass(), 0.0f ) &&
-        !moving.getTracerStats().usedSweptRemap,
+        !moving.getTracerStats().usedSweptRemap &&
+        moving.getTracerStats().unresolvedAudit.sources == 0 &&
+        moving.getTracerStats().unresolvedAudit.totalMass == 0.0,
         "clear must reset swept remap diagnostics while retaining the selected mode" );
+}
+
+// S2c: two distinct conservative operators act during a moving obstacle
+// step. Their ledgers must close separately; endpoint MAC volume flux is
+// never substituted for the time-integrated swept geometry transfer.
+// Observe the actual intermediate cell masses instead of inferring swept
+// transfer from the final state. The unobserved field is the physics oracle.
+void checkTracerStageObserverConservation()
+{
+    constexpr float dt = 1.0f / 60.0f;
+    bool observedSweptTransfer = false;
+    bool observedMacTransfer = false;
+    const std::array<vec2, 4> motions{{
+        { 0.28f, 0.0f }, { -0.28f, 0.0f },
+        { 0.0f, 0.28f }, { 0.0f, -0.28f }
+    }};
+    for( float h : { 0.5f, 0.25f } )
+        for( const vec2 motion : motions )
+            for( bool pooled : { false, true } )
+            {
+                const int count = static_cast<int>( 8.0f / h );
+                fluidField2 reference{ count, count, h, { -4.0f, -4.0f } };
+                fluidField2 observed{ count, count, h, { -4.0f, -4.0f } };
+                for( fluidField2* field : { &reference, &observed } )
+                {
+                    field->setCutCellProjectionEnabled( true );
+                    field->setCutCellCoupledProjectionEnabled( true );
+                    field->setDisjointAnalyticCutCellEnabled( true );
+                    field->setSweptTracerRemapEnabled( true );
+                    if( pooled ) field->setSmallCellPressureMergeFraction( 1.0e-4f );
+                }
+                fluidShapeObstacle2 circle{ circle2{ {}, 0.58f },
+                    { { 0.12f, -0.08f }, {} }, { 0.12f, -0.08f },
+                    {}, 0.0f, 0.0f, 0.0f };
+                std::array<fluidObstacleForce2, 1> referenceForce{}, observedForce{};
+                reference.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                    referenceForce, 120 );
+                observed.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                    observedForce, 120 );
+
+                for( int y = 0; y < count; ++y )
+                    for( int x = 0; x < count; ++x )
+                    {
+                        const vec2 center = reference.getCellCenter( x, y );
+                        if( std::abs( center.x ) < 1.2f &&
+                            std::abs( center.y ) < 1.2f )
+                        {
+                            reference.setTracerConcentration( x, y, 1.0f );
+                            observed.setTracerConcentration( x, y, 1.0f );
+                        }
+                    }
+
+                const int cells = count * count;
+                std::vector<double> beforeCells( cells ), afterSwept( cells ), afterMac( cells );
+                std::vector<double> sweptChanges( cells ), macChanges( cells );
+                double sweptApplied = 0.0, fallbackApplied = 0.0, macApplied = 0.0;
+                int transferCalls = 0;
+                observed.setTracerTransferObserver( [&]( const fluidTracerTransfer2& transfer )
+                {
+                    check( transfer.sourceCell >= 0 && transfer.sourceCell < cells &&
+                        transfer.destinationCell >= 0 && transfer.destinationCell < cells &&
+                        transfer.sourceCell != transfer.destinationCell &&
+                        std::isfinite( transfer.mass ) && transfer.mass > 0.0,
+                        "applied tracer transfer must have valid cells and positive finite mass" );
+                    const int difference = std::abs( transfer.destinationCell - transfer.sourceCell );
+                    if( transfer.kind != fluidTracerTransferKind2::fallback )
+                        check( difference == count ||
+                            ( difference == 1 && transfer.sourceCell / count ==
+                                transfer.destinationCell / count ),
+                            "Swept and MAC transfers must cross exactly one internal face" );
+                    auto& changes = transfer.kind == fluidTracerTransferKind2::macFace
+                        ? macChanges : sweptChanges;
+                    changes[transfer.sourceCell] -= transfer.mass;
+                    changes[transfer.destinationCell] += transfer.mass;
+                    if( transfer.kind == fluidTracerTransferKind2::sweptFace )
+                        sweptApplied += transfer.mass;
+                    else if( transfer.kind == fluidTracerTransferKind2::fallback )
+                        fallbackApplied += transfer.mass;
+                    else
+                        macApplied += transfer.mass;
+                    ++transferCalls;
+                } );
+                int calls = 0;
+                observed.setTracerStageObserver( [&]( const fluidField2& field,
+                    fluidTracerStage2 stage )
+                {
+                    check( calls < 2, "tracer observer must be called at most twice per step" );
+                    check( ( calls == 0 && stage == fluidTracerStage2::afterSweptRemap ) ||
+                        ( calls == 1 && stage == fluidTracerStage2::afterMacAdvection ),
+                        "tracer observer must follow swept then MAC execution order" );
+                    auto& snapshot = stage == fluidTracerStage2::afterSweptRemap
+                        ? afterSwept : afterMac;
+                    for( int y = 0; y < count; ++y )
+                        for( int x = 0; x < count; ++x )
+                            snapshot[y * count + x] = field.getTracerCellMass( x, y );
+                    ++calls;
+                } );
+
+                const auto sum = []( const std::vector<double>& values )
+                {
+                    double total = 0.0;
+                    for( double value : values ) total += value;
+                    return total;
+                };
+                for( int phase = 0; phase < 2; ++phase )
+                {
+                    calls = 0;
+                    transferCalls = 0;
+                    sweptApplied = fallbackApplied = macApplied = 0.0;
+                    std::fill( sweptChanges.begin(), sweptChanges.end(), 0.0 );
+                    std::fill( macChanges.begin(), macChanges.end(), 0.0 );
+                    for( int y = 0; y < count; ++y )
+                        for( int x = 0; x < count; ++x )
+                            beforeCells[y * count + x] = observed.getTracerCellMass( x, y );
+                    circle.transform.position += phase == 0 ? motion : -motion;
+                    circle.center = circle.transform.position;
+                    const double before = observed.getTracerMass();
+                    reference.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                        referenceForce, 120 );
+                    observed.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                        observedForce, 120 );
+                    check( calls == 2, "both tracer-stage snapshots must be observable" );
+                    observedSweptTransfer |= sweptApplied > 0.0;
+                    observedMacTransfer |= macApplied > 0.0;
+                    check( std::abs( sum( sweptChanges ) ) < 1.0e-10 &&
+                        std::abs( sum( macChanges ) ) < 1.0e-10 &&
+                        std::abs( sum( beforeCells ) - sum( afterSwept ) ) < 1.0e-10 &&
+                        std::abs( sum( afterSwept ) - sum( afterMac ) ) < 1.0e-10 &&
+                        std::abs( sweptApplied -
+                            observed.getTracerStats().sweptRemappedMass ) < 1.0e-5 &&
+                        std::abs( fallbackApplied -
+                            observed.getTracerStats().fallbackRemappedMass ) < 1.0e-5,
+                        "actual transfer events must close both mass stages and match remap counters" );
+                    check( std::abs( sum( afterSwept ) - before ) < 1.0e-6 &&
+                        std::abs( sum( afterMac ) - before ) < 1.0e-6 &&
+                        std::abs( observed.getTracerMass() - before ) < 1.0e-6,
+                        "swept and MAC stages must conserve stored mass independently" );
+                    for( int y = 0; y < count; ++y )
+                        for( int x = 0; x < count; ++x )
+                        {
+                            const int cell = y * count + x;
+                            const double actual = observed.getTracerCellMass( x, y );
+                            check( std::abs( beforeCells[cell] + sweptChanges[cell] -
+                                    afterSwept[cell] ) < 1.0e-10 &&
+                                std::abs( afterSwept[cell] + macChanges[cell] -
+                                    afterMac[cell] ) < 1.0e-10,
+                                "each cell must equal its initial mass plus signed applied transfers" );
+                            check( std::isfinite( afterSwept[cell] ) &&
+                                std::isfinite( afterMac[cell] ) &&
+                                afterSwept[cell] >= -1.0e-10 &&
+                                afterMac[cell] >= -1.0e-10 &&
+                                std::abs( actual - afterMac[cell] ) < 1.0e-12 &&
+                                std::abs( actual -
+                                    reference.getTracerCellMass( x, y ) ) < 1.0e-10,
+                                "read-only observer must preserve every stored cell mass" );
+                        }
+                    const auto& worst = observed.getTracerStats().unresolvedAudit;
+                    if( worst.sources > 0 )
+                    {
+                        const int index = worst.worstY * count + worst.worstX;
+                        check( index >= 0 && index < cells &&
+                            std::abs( afterSwept[index] -
+                                worst.worstMassAfterSweptRemap ) < 1.0e-12 &&
+                            std::abs( afterMac[index] -
+                                worst.worstMassAfterMacAdvection ) < 1.0e-12,
+                            "stage snapshots must match independently recorded worst-source ledger" );
+                    }
+                    check( Length( observed.getFluidMomentum() -
+                        reference.getFluidMomentum() ) < 1.0e-6f,
+                        "tracer observation must not alter projected MAC velocities" );
+                }
+                observed.setTracerStageObserver( {} );
+                observed.setTracerTransferObserver( {} );
+                calls = transferCalls = 0;
+                observed.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                    observedForce, 120 );
+                check( calls == 0 && transferCalls == 0,
+                    "disabled tracer observers must not receive callbacks" );
+            }
+    check( observedSweptTransfer && observedMacTransfer,
+        "regression must exercise both actual Swept and MAC transfers" );
+}
+
+void checkMovingCutCellClosureReopeningDifferential()
+{
+    constexpr float frameDt = 1.0f / 60.0f;
+    const std::array<vec2, 4> directions{{
+        { 1.0f, 0.0f }, { -1.0f, 0.0f },
+        { 0.0f, 1.0f }, { 0.0f, -1.0f }
+    }};
+
+    for( float h : { 0.5f, 0.25f } )
+        for( int fluidSubsteps : { 1, 4 } )
+            for( const vec2 direction : directions )
+            {
+                const int count = static_cast<int>( 8.0f / h );
+                fluidField2 baseline{ count, count, h, { -4.0f, -4.0f } };
+                fluidField2 pooled{ count, count, h, { -4.0f, -4.0f } };
+                for( fluidField2* field : { &baseline, &pooled } )
+                {
+                    field->setCutCellProjectionEnabled( true );
+                    field->setCutCellCoupledProjectionEnabled( true );
+                    field->setSweptTracerRemapEnabled( true );
+                }
+                pooled.setSmallCellPressureMergeFraction( 1.0e-4f );
+
+                fluidShapeObstacle2 moving{ MakeBox( { 0.8f, 0.3f } ),
+                    { {}, {} }, {}, {}, 0.0f, 0.3f, 0.2f };
+                std::array<fluidObstacleForce2, 1> forces{};
+                const float dt = frameDt / fluidSubsteps;
+                for( fluidField2* field : { &baseline, &pooled } )
+                    field->step( dt, std::span<const fluidShapeObstacle2>( &moving, 1 ),
+                        forces, 160 );
+
+                // Source lies outside the starting obstacle, then becomes
+                // covered and subsequently reopens as the solid returns.
+                const vec2 seed = 1.3f * direction;
+                const int sx = static_cast<int>( std::floor( ( seed.x + 4.0f ) / h ) );
+                const int sy = static_cast<int>( std::floor( ( seed.y + 4.0f ) / h ) );
+                check( baseline.getCellFluidFraction( sx, sy ) > 0.99f &&
+                    pooled.getCellFluidFraction( sx, sy ) > 0.99f,
+                    "directional tracer source must start in open fluid" );
+                baseline.setTracerConcentration( sx, sy, 3.0f );
+                pooled.setTracerConcentration( sx, sy, 3.0f );
+                const double initialMass = baseline.getTracerMass();
+                check( initialMass > 0.0 &&
+                    std::abs( initialMass - pooled.getTracerMass() ) < 1.0e-10,
+                    "paired Cut-cell tracer cases must start with equal mass" );
+
+                bool observedClosing = false;
+                bool observedOpening = false;
+                for( int phase = 0; phase < 2; ++phase )
+                    for( int substep = 0; substep < fluidSubsteps; ++substep )
+                    {
+                        const float progress =
+                            static_cast<float>( substep + 1 ) / fluidSubsteps;
+                        moving.transform.position = 1.5f *
+                            ( phase == 0 ? progress : 1.0f - progress ) * direction;
+                        moving.center = moving.transform.position;
+
+                        for( fluidField2* field : { &baseline, &pooled } )
+                        {
+                            field->step( dt, std::span<const fluidShapeObstacle2>( &moving, 1 ),
+                                forces, 160 );
+                            const fluidTracerStats2& tracer = field->getTracerStats();
+                            const fluidCutCellVolumeBudget2 center =
+                                field->getCutCellVolumeBudget( sx, sy, dt );
+                            check( center.valid && center.hasVolumeHistory &&
+                                center.hasSweptHistory && tracer.usedSweptRemap &&
+                                std::isfinite( tracer.afterMass ) &&
+                                std::abs( static_cast<double>( tracer.afterMass ) -
+                                    initialMass ) < 1.0e-4 &&
+                                std::abs( static_cast<double>( tracer.beforeMass ) -
+                                    initialMass ) < 1.0e-4,
+                                "moving and reopening Cut-cell must preserve total stored tracer mass" );
+
+                            if( field == &baseline )
+                            {
+                                observedClosing |= center.currentFraction <
+                                    center.previousFraction - 1.0e-5f;
+                                observedOpening |= center.currentFraction >
+                                    center.previousFraction + 1.0e-5f;
+                            }
+                            const double area = static_cast<double>( h ) * h;
+                            check( std::abs( center.snapshotDeltaVolume -
+                                static_cast<double>( center.currentFraction -
+                                    center.previousFraction ) * area ) < 1.0e-10 &&
+                                std::abs( center.pressureResidualVolume -
+                                    ( center.macNetOutwardVolume +
+                                        center.pressureSourceDeltaVolume ) ) < 1.0e-10 &&
+                                std::abs( center.snapshotResidualVolume -
+                                    ( center.macNetOutwardVolume +
+                                        center.snapshotDeltaVolume ) ) < 1.0e-10,
+                                "snapshot volume, pressure source and MAC endpoint budgets must stay distinct" );
+
+                            const std::array<std::array<int, 3>, 4> neighbors{{
+                                {{ sx - 1, sy, 1 }}, {{ sx + 1, sy, 0 }},
+                                {{ sx, sy - 1, 3 }}, {{ sx, sy + 1, 2 }}
+                            }};
+                            for( int side = 0; side < 4; ++side )
+                            {
+                                const auto& neighbor = neighbors[side];
+                                const fluidCutCellVolumeBudget2 adjacent =
+                                    field->getCutCellVolumeBudget( neighbor[0], neighbor[1], dt );
+                                check( adjacent.valid &&
+                                    std::abs( center.macOutwardVolume[side] +
+                                        adjacent.macOutwardVolume[neighbor[2]] ) < 1.0e-10 &&
+                                    std::abs( center.solidSweptOutwardVolume[side] +
+                                        adjacent.solidSweptOutwardVolume[neighbor[2]] ) < 1.0e-10,
+                                    "neighboring fluid cells must share opposite signed face-volume entries" );
+                            }
+
+                            const auto& local = tracer.unresolvedAudit;
+                            if( local.sources == 0 ) continue;
+                            double sweptOut = 0.0;
+                            double macOut = 0.0;
+                            for( int side = 0; side < 4; ++side )
+                            {
+                                sweptOut += local.worstSweptOutwardTracerMass[side];
+                                macOut += local.worstMacOutwardTracerMass[side];
+                            }
+                            const double otherSourcesInward =
+                                local.worstMassAfterSweptRemap -
+                                local.worstMassBeforeSweptRemap + sweptOut;
+                            check( std::isfinite( otherSourcesInward ) &&
+                                otherSourcesInward >= -1.0e-9 &&
+                                std::abs( sweptOut -
+                                    local.worstSweptTransferMass ) < 1.0e-9 &&
+                                std::abs( local.worstMassAfterSweptRemap -
+                                    local.worstMassBeforeMacAdvection ) < 1.0e-12 &&
+                                std::abs( local.worstMassAfterMacAdvection -
+                                    local.worstMassBeforeMacAdvection +
+                                    macOut ) < 1.0e-9 &&
+                                local.worstUnmatchedMass >= 0.0 &&
+                                local.worstDisplacedMass + 1.0e-9 >=
+                                    local.worstSweptTransferMass,
+                                "unresolved mass must remain stored while Swept and limited MAC transfers each close" );
+                        }
+                    }
+                check( observedClosing && observedOpening,
+                    "four-direction Cut-cell regression must exercise both closure and reopening" );
+            }
 }
 
 void checkSweptGeometryCorrection()
@@ -4203,6 +4795,352 @@ void checkCoupledPressureWarmStartDifferential()
         }
 }
 
+
+// S2c experimental residual routing: do not conflate an endpoint-open face
+// with the time-integrated swept flux. Only tracer moves; every new transfer
+// must be through a directly connected current-fluid face.
+void checkConnectedResidualTracerRemap()
+{
+    constexpr float frameDt = 1.0f / 60.0f;
+    const std::array<vec2, 4> motions{{
+        { 0.28f, 0.0f }, { -0.28f, 0.0f },
+        { 0.0f, 0.28f }, { 0.0f, -0.28f }
+    }};
+    bool observedConnectedTransfer = false;
+    bool observedTemporalApertureChange = false;
+    for( float h : { 0.5f, 0.25f } )
+        for( int fluidSubsteps : { 1, 4 } )
+            for( const vec2 motion : motions )
+            {
+                const int count = static_cast<int>( 8.0f / h );
+                fluidField2 original{ count, count, h, { -4.0f, -4.0f } };
+                fluidField2 candidate{ count, count, h, { -4.0f, -4.0f } };
+                check( !original.isConnectedResidualTracerRemapEnabled() &&
+                    !candidate.isConnectedResidualTracerRemapEnabled(),
+                    "experimental connected residual remap must be disabled by default" );
+                for( fluidField2* field : { &original, &candidate } )
+                {
+                    field->setCutCellProjectionEnabled( true );
+                    field->setCutCellCoupledProjectionEnabled( true );
+                    field->setDisjointAnalyticCutCellEnabled( true );
+                    field->setSweptTracerRemapEnabled( true );
+                }
+                candidate.setConnectedResidualTracerRemapEnabled( true );
+                candidate.setSweptApertureAuditEnabled( true );
+                check( !candidate.hasSweptApertureAudit() &&
+                    !original.hasSweptApertureAudit(),
+                    "time-sampled aperture diagnostics must require valid moving history" );
+                fluidShapeObstacle2 circle{ circle2{ {}, 0.58f },
+                    { { 0.12f, -0.08f }, {} }, { 0.12f, -0.08f },
+                    {}, 0.0f, 0.0f, 0.0f };
+                const float fluidDt = frameDt / fluidSubsteps;
+                std::array<fluidObstacleForce2, 1> originalForce{}, candidateForce{};
+                for( fluidField2* field : { &original, &candidate } )
+                    field->step( fluidDt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                        field == &original ? originalForce : candidateForce, 120 );
+
+                for( int y = 0; y < count; ++y )
+                    for( int x = 0; x < count; ++x )
+                    {
+                        const vec2 point = original.getCellCenter( x, y );
+                        if( std::abs( point.x ) < 1.2f && std::abs( point.y ) < 1.2f )
+                        {
+                            original.setTracerConcentration( x, y, 1.0f );
+                            candidate.setTracerConcentration( x, y, 1.0f );
+                        }
+                    }
+                const double initialMass = original.getTracerMass();
+                double observedMass = 0.0;
+                int observedTransfers = 0;
+                candidate.setTracerTransferObserver( [&]( const fluidTracerTransfer2& transfer )
+                {
+                    if( transfer.kind != fluidTracerTransferKind2::connectedResidual ) return;
+                    const int sx = transfer.sourceCell % count, sy = transfer.sourceCell / count;
+                    const int dx = transfer.destinationCell % count, dy = transfer.destinationCell / count;
+                    check( transfer.sourceCell >= 0 && transfer.sourceCell < count * count &&
+                        transfer.destinationCell >= 0 &&
+                        transfer.destinationCell < count * count &&
+                        transfer.mass > 0.0 && std::isfinite( transfer.mass ) &&
+                        std::abs( dx - sx ) + std::abs( dy - sy ) == 1,
+                        "experimental residual tracer transfer must go to a direct neighbor" );
+                    const float open = sx != dx
+                        ? candidate.getUFaceOpenFraction( std::max( sx, dx ), sy )
+                        : candidate.getVFaceOpenFraction( sx, std::max( sy, dy ) );
+                    check( open > 0.0f &&
+                        candidate.getCellFluidFraction( sx, sy ) > 0.0f &&
+                        candidate.getCellFluidFraction( dx, dy ) > 0.0f,
+                        "experimental residual tracer must never cross closed faces" );
+                    observedMass += transfer.mass;
+                    ++observedTransfers;
+                } );
+
+                for( int phase = 0; phase < 2; ++phase )
+                    for( int substep = 0; substep < fluidSubsteps; ++substep )
+                    {
+                        const vec2 next = phase == 0 ? motion : -motion;
+                        circle.transform.position += next / static_cast<float>( fluidSubsteps );
+                        circle.center = circle.transform.position;
+                        observedMass = 0.0;
+                        observedTransfers = 0;
+                        original.step( fluidDt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                            originalForce, 120 );
+                        candidate.step( fluidDt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                            candidateForce, 120 );
+                        const auto& base = original.getTracerStats();
+                        const auto& alternate = candidate.getTracerStats();
+                        check( candidate.hasSweptApertureAudit() &&
+                            !original.hasSweptApertureAudit() &&
+                            original.getSweptULinearVelocityProxyVolume( 1, 1, fluidDt ) == 0.0 &&
+                            original.getSweptVLinearVelocityProxyVolume( 1, 1, fluidDt ) == 0.0,
+                            "moving face flux proxy must require explicit opt-in history" );
+                        check( std::isfinite( candidate.getSweptULinearVelocityProxyVolume(
+                                count / 2, count / 2, fluidDt ) ) &&
+                            std::isfinite( candidate.getSweptVLinearVelocityProxyVolume(
+                                count / 2, count / 2, fluidDt ) ) &&
+                            candidate.getSweptULinearVelocityProxyVolume(
+                                count / 2, count / 2, -fluidDt ) == 0.0 &&
+                            candidate.getSweptVLinearVelocityProxyVolume(
+                                count / 2, count / 2, 0.0f ) == 0.0 &&
+                            candidate.getSweptULinearVelocityProxyVolume( -1, 1, fluidDt ) == 0.0 &&
+                            candidate.getSweptVLinearVelocityProxyVolume( 1, count, fluidDt ) == 0.0,
+                            "time-linear MAC flux proxy must remain finite and reject invalid queries" );
+                        for( int y = 0; y < count; ++y )
+                            for( int x = 0; x < count; ++x )
+                            {
+                                if( x > 0 )
+                                {
+                                    const float mean = candidate.getSweptUTimeMeanOpenFraction( x, y );
+                                    check( std::isfinite( mean ) && mean >= 0.0f &&
+                                        mean <= 1.0f + 1.0e-5f,
+                                        "time-mean U aperture must stay in [0,1]" );
+                                    observedTemporalApertureChange |=
+                                        std::abs( mean -
+                                            candidate.getUFaceOpenFraction( x, y ) ) > 1.0e-3f;
+                                }
+                                if( y > 0 )
+                                {
+                                    const float mean = candidate.getSweptVTimeMeanOpenFraction( x, y );
+                                    check( std::isfinite( mean ) && mean >= 0.0f &&
+                                        mean <= 1.0f + 1.0e-5f,
+                                        "time-mean V aperture must stay in [0,1]" );
+                                    observedTemporalApertureChange |=
+                                        std::abs( mean -
+                                            candidate.getVFaceOpenFraction( x, y ) ) > 1.0e-3f;
+                                }
+                            }
+                        observedConnectedTransfer |= observedTransfers > 0;
+                        check( base.connectedResidualRemappedMass == 0.0f &&
+                            base.connectedResidualSources == 0 &&
+                            original.getSmallCellPressureMergeFraction() == 0.0f &&
+                            candidate.getSmallCellPressureMergeFraction() == 0.0f &&
+                            std::abs( observedMass -
+                                alternate.connectedResidualRemappedMass ) < 1.0e-5 &&
+                            ( observedTransfers > 0 ) ==
+                                ( alternate.connectedResidualSources > 0 ) &&
+                            std::abs( original.getTracerMass() - initialMass ) < 1.0e-5 &&
+                            std::abs( candidate.getTracerMass() - initialMass ) < 1.0e-5,
+                            "opt-in residual remap must conserve tracer without changing the default" );
+                        check( Length( original.getFluidMomentum() -
+                            candidate.getFluidMomentum() ) < 1.0e-6f &&
+                            std::abs( original.getFlowAudit( fluidDt ).maxFluidFaceSpeed -
+                                candidate.getFlowAudit( fluidDt ).maxFluidFaceSpeed ) < 1.0e-6f &&
+                            Length( originalForce[0].force -
+                                candidateForce[0].force ) < 1.0e-6f,
+                            "residual tracer option must not modify pressure, MAC or Body reaction" );
+                        for( int y = 0; y < count; ++y )
+                            for( int x = 0; x < count; ++x )
+                                check( std::isfinite( candidate.getTracerCellMass( x, y ) ) &&
+                                    candidate.getTracerCellMass( x, y ) >= -1.0e-10,
+                                    "experimental connected remap must keep stored tracer nonnegative" );
+                    }
+                candidate.clear();
+                check( candidate.isConnectedResidualTracerRemapEnabled() &&
+                    candidate.isSweptApertureAuditEnabled() &&
+                    !candidate.hasSweptApertureAudit() &&
+                    candidate.getSweptUTimeMeanOpenFraction( 1, 1 ) == 0.0f &&
+                    candidate.getSweptULinearVelocityProxyVolume( 1, 1, fluidDt ) == 0.0 &&
+                    candidate.getSweptVLinearVelocityProxyVolume( 1, 1, fluidDt ) == 0.0 &&
+                    candidate.getTracerStats().connectedResidualSources == 0 &&
+                    candidate.getTracerStats().connectedResidualRemappedMass == 0.0f,
+                    "clear must retain opt-in mode but reset all experimental diagnostics" );
+            }
+    check( observedConnectedTransfer && observedTemporalApertureChange,
+        "moving Cut-cell must exercise connected transfer and temporal aperture variation" );
+}
+
+// Independent identity: if the obstacle never intersects a chosen face,
+// the open fraction is 1 throughout the step. The linear-velocity proxy must
+// therefore integrate exactly to h*dt*(uEntry + uProjected)/2 at that face.
+void checkTimeLinearMacProxyOnUnobstructedFace()
+{
+    constexpr float h = 0.5f;
+    constexpr float dt = 1.0f / 60.0f;
+    constexpr int fx = 4, fy = 4;
+    fluidField2 field{ 16, 16, h, { -4.0f, -4.0f } };
+    field.setCutCellProjectionEnabled( true );
+    field.setDisjointAnalyticCutCellEnabled( true );
+    field.setSweptApertureAuditEnabled( true );
+    fluidShapeObstacle2 circle{ circle2{ {}, 0.45f },
+        { { 0.0f, 0.0f }, {} }, { 0.0f, 0.0f },
+        {}, 0.0f, 0.0f, 0.0f };
+    std::array<fluidObstacleForce2, 1> forces{};
+    field.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+        forces, 120 );
+    check( !field.hasSweptApertureAudit(),
+        "static geometry must not fabricate moving-face time history" );
+
+    const vec2 uFace = field.getOrigin() +
+        h * vec2{ static_cast<float>( fx ), static_cast<float>( fy ) + 0.5f };
+    const vec2 vFace = field.getOrigin() +
+        h * vec2{ static_cast<float>( fx ) + 0.5f, static_cast<float>( fy ) };
+    field.addVelocity( uFace, { 1.2f, 0.0f }, 0.15f );
+    field.addVelocity( vFace, { 0.0f, -0.8f }, 0.15f );
+    const double initialU = field.sampleVelocity( uFace ).x;
+    const double initialV = field.sampleVelocity( vFace ).y;
+
+    circle.transform.position = { 0.23f, 0.11f };
+    circle.center = circle.transform.position;
+    field.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+        forces, 120 );
+    const double finalU = field.sampleVelocity( uFace ).x;
+    const double finalV = field.sampleVelocity( vFace ).y;
+    const double expectedU = static_cast<double>( h ) * dt *
+        ( initialU + finalU ) * 0.5;
+    const double expectedV = static_cast<double>( h ) * dt *
+        ( initialV + finalV ) * 0.5;
+    const double actualU = field.getSweptULinearVelocityProxyVolume( fx, fy, dt );
+    const double actualV = field.getSweptVLinearVelocityProxyVolume( fx, fy, dt );
+    check( field.hasSweptApertureAudit() &&
+        std::abs( field.getSweptUTimeMeanOpenFraction( fx, fy ) - 1.0f ) < 1.0e-6f &&
+        std::abs( field.getSweptVTimeMeanOpenFraction( fx, fy ) - 1.0f ) < 1.0e-6f &&
+        std::isfinite( actualU ) && std::isfinite( actualV ) &&
+        std::abs( actualU - expectedU ) < 1.0e-7 &&
+        std::abs( actualV - expectedV ) < 1.0e-7,
+        "linear MAC proxy must integrate to the trapezoidal velocity at constant aperture" );
+
+    field.setSweptApertureAuditEnabled( false );
+    check( !field.hasSweptApertureAudit() &&
+        field.getSweptULinearVelocityProxyVolume( fx, fy, dt ) == 0.0 &&
+        field.getSweptVLinearVelocityProxyVolume( fx, fy, dt ) == 0.0,
+        "disabled temporal MAC proxy must invalidate old geometry and velocity samples" );
+}
+
+void checkMovingCutCellLocalClosure()
+{
+    // Diagnostic-only: compare the stored tracer with the reported applied
+    // swept/MAC transfers. Unresolved displacement is retained mass, NOT loss.
+    constexpr float worldDt = 1.0f / 60.0f;
+    const std::array<vec2, 4> motions{{
+        { 0.28f, 0.0f }, { -0.28f, 0.0f },
+        { 0.0f, 0.28f }, { 0.0f, -0.28f }
+    }};
+    for( float h : { 0.5f, 0.25f } )
+        for( int fluidSteps : { 1, 4 } )
+            for( const vec2 motion : motions )
+            {
+                fluidField2 field{ static_cast<int>( 8.0f / h ),
+                    static_cast<int>( 8.0f / h ), h, { -4.0f, -4.0f } };
+                field.setCutCellProjectionEnabled( true );
+                field.setCutCellCoupledProjectionEnabled( true );
+                field.setDisjointAnalyticCutCellEnabled( true );
+                field.setSweptTracerRemapEnabled( true );
+                fluidShapeObstacle2 circle{ circle2{ {}, 0.58f },
+                    { { 0.12f, -0.08f }, {} }, { 0.12f, -0.08f },
+                    {}, 0.0f, 0.0f, 0.0f };
+                std::array<fluidObstacleForce2, 1> forces{};
+                const float dt = worldDt / fluidSteps;
+                field.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                    forces, 120 );
+
+                // Dye the region affected by the moving boundary, including
+                // partially open cells, without relying on a single lucky face.
+                for( int y = 0; y < field.getHeight(); ++y )
+                    for( int x = 0; x < field.getWidth(); ++x )
+                    {
+                        const float wx = -4.0f + ( x + 0.5f ) * h;
+                        const float wy = -4.0f + ( y + 0.5f ) * h;
+                        if( std::abs( wx ) < 1.2f && std::abs( wy ) < 1.2f )
+                            field.setTracerConcentration( x, y, 1.0f );
+                    }
+                const double initialMass = field.getTracerMass();
+                check( initialMass > 0.0, "moving Cut-cell closure needs seeded tracer" );
+
+                for( int substep = 0; substep < fluidSteps; ++substep )
+                {
+                    circle.transform.position += motion / static_cast<float>( fluidSteps );
+                    circle.center = circle.transform.position;
+                    const double before = field.getTracerMass();
+                    field.step( dt, std::span<const fluidShapeObstacle2>( &circle, 1 ),
+                        forces, 120 );
+                    const auto& stats = field.getTracerStats();
+                    const auto& audit = stats.unresolvedAudit;
+                    double stored = 0.0;
+                    for( int y = 0; y < field.getHeight(); ++y )
+                        for( int x = 0; x < field.getWidth(); ++x )
+                        {
+                            const double mass = field.getTracerCellMass( x, y );
+                            check( std::isfinite( mass ) && mass >= -1.0e-10,
+                                "moving Cut-cell must retain finite nonnegative cell mass" );
+                            stored += mass;
+                            const auto volume = field.getCutCellVolumeBudget( x, y, dt );
+                            check( volume.valid && volume.hasVolumeHistory &&
+                                std::abs( volume.pressureResidualVolume -
+                                    ( volume.macNetOutwardVolume +
+                                        volume.pressureSourceDeltaVolume ) ) < 1.0e-10 &&
+                                std::abs( volume.snapshotResidualVolume -
+                                    ( volume.macNetOutwardVolume +
+                                        volume.snapshotDeltaVolume ) ) < 1.0e-10,
+                                "moving Cut-cell endpoint and pressure volume ledgers must reconcile separately" );
+                            if( x + 1 < field.getWidth() )
+                            {
+                                const auto east = field.getCutCellVolumeBudget( x + 1, y, dt );
+                                check( std::abs( volume.macOutwardVolume[1] +
+                                    east.macOutwardVolume[0] ) < 1.0e-10 &&
+                                    std::abs( volume.solidSweptOutwardVolume[1] +
+                                        east.solidSweptOutwardVolume[0] ) < 1.0e-10,
+                                    "shared east/west faces must have opposite signed volume" );
+                            }
+                            if( y + 1 < field.getHeight() )
+                            {
+                                const auto north = field.getCutCellVolumeBudget( x, y + 1, dt );
+                                check( std::abs( volume.macOutwardVolume[3] +
+                                    north.macOutwardVolume[2] ) < 1.0e-10 &&
+                                    std::abs( volume.solidSweptOutwardVolume[3] +
+                                        north.solidSweptOutwardVolume[2] ) < 1.0e-10,
+                                    "shared north/south faces must have opposite signed volume" );
+                            }
+                        }
+                    check( std::abs( stored - field.getTracerMass() ) < 1.0e-7 &&
+                        std::abs( stored - before ) < 1.0e-6 &&
+                        std::abs( stats.beforeMass - before ) < 1.0e-5 &&
+                        std::abs( stats.afterMass - stored ) < 1.0e-5 &&
+                        std::abs( audit.totalMass -
+                            ( audit.partialCellMass + audit.fullyCoveredCellMass ) ) < 1.0e-9 &&
+                        std::abs( audit.totalMass -
+                            ( audit.connectedFluidFaceMass + audit.noConnectedFluidFaceMass ) ) < 1.0e-9,
+                        "swept remap and MAC advection must preserve globally stored tracer mass" );
+
+                    if( audit.sources > 0 )
+                    {
+                        const auto sum = []( const std::array<double, 4>& values )
+                        {
+                            return values[0] + values[1] + values[2] + values[3];
+                        };
+                        check( std::abs( sum( audit.worstSweptOutwardTracerMass ) -
+                            audit.worstSweptTransferMass ) < 1.0e-9 &&
+                            std::abs( audit.worstMassBeforeMacAdvection -
+                                audit.worstMassAfterSweptRemap ) < 1.0e-9 &&
+                            std::abs( audit.worstMassBeforeMacAdvection -
+                                sum( audit.worstMacOutwardTracerMass ) -
+                                audit.worstMassAfterMacAdvection ) < 1.0e-8,
+                            "worst unresolved cell must close each applied swept and MAC stage independently" );
+                    }
+                }
+                check( std::abs( field.getTracerMass() - initialMass ) < 1.0e-6,
+                    "all motion directions and fluid cadences must conserve tracer mass" );
+            }
+}
+
 } // namespace
 
 int main()
@@ -4210,6 +5148,7 @@ int main()
     checkBoundsAndSampling();
     checkLiveFlowAudit();
     checkFaceStageAudit();
+    checkSmallCellPressureMergeConfiguration();
     checkFrozenPressureReplay();
     checkStepTimingProfiler();
     checkPressureProjection();
@@ -4262,5 +5201,11 @@ int main()
     checkConservativeMacAdvection();
     checkConservativeTracerTransport();
     checkSweptTracerRemap();
+    checkMovingCutCellClosureReopeningDifferential();
+    checkTracerStageObserverConservation();
+    checkConnectedResidualTracerRemap();
+    checkTimeLinearMacProxyOnUnobstructedFace();
+    checkMovingCutCellLocalClosure();
+    checkCutCellVolumeLedger();
     checkSweptGeometryCorrection();
 }

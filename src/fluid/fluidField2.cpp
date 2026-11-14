@@ -1166,6 +1166,15 @@ void fluidField2::clear() noexcept
     std::fill( tracerVFlux_.begin(), tracerVFlux_.end(), 0.0 );
     tracerEnabled_ = false;
     tracerStats_ = {};
+    sweptApertureAuditValid_ = false;
+    // Retain the user-selected observer mode across clear(), like the
+    // other opt-in swept diagnostics. Never retain a stale quadrature.
+    sweptUTimeMeanOpen_.clear();
+    sweptVTimeMeanOpen_.clear();
+    sweptUAlphaOpenMoment_.clear();
+    sweptVAlphaOpenMoment_.clear();
+    sweptUStartVelocity_.clear();
+    sweptVStartVelocity_.clear();
     std::fill( pressure_.begin(), pressure_.end(), 0.0f );
     std::fill( nextPressure_.begin(), nextPressure_.end(), 0.0f );
     std::fill( divergence_.begin(), divergence_.end(), 0.0f );
@@ -1252,6 +1261,12 @@ float fluidField2::getTracerMass() const noexcept
     double mass = 0.0;
     for( const double value : tracerMass_ ) mass += value;
     return static_cast<float>( mass );
+}
+
+double fluidField2::getTracerCellMass( int x, int y ) const noexcept
+{
+    if( x < 0 || x >= width_ || y < 0 || y >= height_ ) return 0.0;
+    return tracerMass_[cellIndex( x, y )];
 }
 
 vec2 fluidField2::getCellCenter( int x, int y ) const noexcept
@@ -1499,6 +1514,41 @@ void fluidField2::updateObstacles( std::span<const fluidShapeObstacle2> obstacle
         static_cast<float>( solidTransition_.exposedCells - solidTransition_.coveredCells ) * cellSize_ * cellSize_;
 }
 
+fluidCapsuleCellAreaAudit2 fluidField2::getAnalyticCapsuleCellAreaAudit(
+    const fluidShapeObstacle2& obstacle, int x, int y ) const noexcept
+{
+    fluidCapsuleCellAreaAudit2 result{};
+    if( !analyticCapsuleCutCellEnabled_ ||
+        x < 0 || x >= width_ || y < 0 || y >= height_ ) return result;
+    analyticFluidCapsule capsule{};
+    if( !TryGetAnalyticCapsule( std::span<const fluidShapeObstacle2>( &obstacle, 1 ),
+        capsule ) ) return result;
+
+    const double h = cellSize_;
+    const double left = origin_.x + x * h;
+    const double bottom = origin_.y + y * h;
+    const double right = left + h, top = bottom + h;
+    result.cellArea = h * h;
+    result.coreCoveredArea = ConvexPolygonRectangleArea(
+        capsule.core, left, bottom, right, top );
+    result.firstCapCoveredArea = CapsuleCapRectangleArea(
+        capsule, true, left, bottom, right, top );
+    result.lastCapCoveredArea = CapsuleCapRectangleArea(
+        capsule, false, left, bottom, right, top );
+    result.componentSumCoveredArea =
+        result.coreCoveredArea + result.firstCapCoveredArea +
+        result.lastCapCoveredArea;
+    result.clampedCoveredArea = std::clamp(
+        result.componentSumCoveredArea, 0.0, result.cellArea );
+    result.signedUnclampedFluidArea =
+        result.cellArea - result.componentSumCoveredArea;
+    result.recomputedFluidFraction = std::clamp(
+        1.0 - result.clampedCoveredArea / result.cellArea, 0.0, 1.0 );
+    result.storedFluidFraction = cellFluidFraction_[cellIndex( x, y )];
+    result.valid = true;
+    return result;
+}
+
 float fluidField2::getCellFluidFraction( int x, int y ) const noexcept
 {
     return x >= 0 && x < width_ && y >= 0 && y < height_ ? cellFluidFraction_[cellIndex( x, y )] : 0.0f;
@@ -1512,6 +1562,49 @@ float fluidField2::getUFaceOpenFraction( int x, int y ) const noexcept
 float fluidField2::getVFaceOpenFraction( int x, int y ) const noexcept
 {
     return x >= 0 && x < width_ && y > 0 && y < height_ ? vOpenFraction_[vIndex( x, y )] : 0.0f;
+}
+
+float fluidField2::getSweptUTimeMeanOpenFraction( int x, int y ) const noexcept
+{
+    return sweptApertureAuditValid_ && x > 0 && x < width_ &&
+        y >= 0 && y < height_ ? sweptUTimeMeanOpen_[uIndex( x, y )] : 0.0f;
+}
+
+float fluidField2::getSweptVTimeMeanOpenFraction( int x, int y ) const noexcept
+{
+    return sweptApertureAuditValid_ && x >= 0 && x < width_ &&
+        y > 0 && y < height_ ? sweptVTimeMeanOpen_[vIndex( x, y )] : 0.0f;
+}
+
+double fluidField2::getSweptULinearVelocityProxyVolume(
+    int x, int y, float timeStep ) const noexcept
+{
+    if( !sweptApertureAuditValid_ || x <= 0 || x >= width_ ||
+        y < 0 || y >= height_ || !std::isfinite( timeStep ) ||
+        timeStep <= 0.0f || sweptUStartVelocity_.size() != u_.size() ) return 0.0;
+    const int index = uIndex( x, y );
+    const double averageOpen = sweptUTimeMeanOpen_[index];
+    const double alphaMoment = sweptUAlphaOpenMoment_[index];
+    // Linear MAC velocity is an explicit hypothesis, NOT a measured u(t).
+    const double before = sweptUStartVelocity_[index];
+    const double after = u_[index];
+    return static_cast<double>( cellSize_ ) * timeStep *
+        ( before * ( averageOpen - alphaMoment ) + after * alphaMoment );
+}
+
+double fluidField2::getSweptVLinearVelocityProxyVolume(
+    int x, int y, float timeStep ) const noexcept
+{
+    if( !sweptApertureAuditValid_ || x < 0 || x >= width_ ||
+        y <= 0 || y >= height_ || !std::isfinite( timeStep ) ||
+        timeStep <= 0.0f || sweptVStartVelocity_.size() != v_.size() ) return 0.0;
+    const int index = vIndex( x, y );
+    const double averageOpen = sweptVTimeMeanOpen_[index];
+    const double alphaMoment = sweptVAlphaOpenMoment_[index];
+    const double before = sweptVStartVelocity_[index];
+    const double after = v_[index];
+    return static_cast<double>( cellSize_ ) * timeStep *
+        ( before * ( averageOpen - alphaMoment ) + after * alphaMoment );
 }
 
 float fluidField2::getUFaceSolidVelocity( int x, int y ) const noexcept
@@ -2352,6 +2445,7 @@ void fluidField2::remapTracerSwept()
             const double sweptTransfer = std::min( displaced, requested );
             tracerStats_.sweptRequestedMass += static_cast<float>( requested );
             tracerStats_.sweptLimitedMass += static_cast<float>( std::max( 0.0, requested - displaced ) );
+            std::array<double, 4> appliedSweptOutward{};
             if( sweptTransfer > 0.0 )
             {
                 // 공유 swept face가 기록한 체적 비율대로 각 recipient에게
@@ -2359,6 +2453,7 @@ void fluidField2::remapTracerSwept()
                 // 모든 원천 계산은 이 Step 시작 질량만 참조하므로 순서 독립.
                 double remaining = sweptTransfer;
                 int lastDestination = -1;
+                int lastDirection = -1;
                 for( int direction = 0; direction < 4; ++direction )
                 {
                     if( outward[direction] <= 0.0 ) continue;
@@ -2367,19 +2462,87 @@ void fluidField2::remapTracerSwept()
                     nextTracerMass_[source] -= transfer;
                     nextTracerMass_[neighbors[direction]] += transfer;
                     tracerStats_.sweptRemappedMass += static_cast<float>( transfer );
+                    appliedSweptOutward[direction] += transfer;
+                    if( tracerTransferObserver_ && transfer > 0.0 )
+                        tracerTransferObserver_( { fluidTracerTransferKind2::sweptFace,
+                            source, neighbors[direction], transfer } );
                     remaining -= transfer;
                     lastDestination = neighbors[direction];
+                    lastDirection = direction;
                 }
                 if( remaining > 0.0 && lastDestination >= 0 )
                 {
                     nextTracerMass_[source] -= remaining;
                     nextTracerMass_[lastDestination] += remaining;
                     tracerStats_.sweptRemappedMass += static_cast<float>( remaining );
+                    appliedSweptOutward[lastDirection] += remaining;
+                    if( tracerTransferObserver_ )
+                        tracerTransferObserver_( { fluidTracerTransferKind2::sweptFace,
+                            source, lastDestination, remaining } );
                 }
             }
 
             const double unmatched = displaced - sweptTransfer;
             if( unmatched <= 1.0e-12 * std::max( 1.0, displaced ) ) continue;
+
+            // S2c opt-in experiment: the swept-face integral may be inward
+            // on every neighbor even though this cell's fluid fraction fell.
+            // For a still-partial cell, redistribute ONLY the unmatched
+            // mass through currently open fluid-fluid faces, proportional
+            // to each aperture. This is a geometric hypothesis, not a
+            // physically derived space-time face flux. Keep the baseline
+            // gain-based fallback and the fully-covered handling unchanged.
+            if( connectedResidualTracerRemapEnabled_ && current > 0.0 )
+            {
+                const std::array<float, 4> openings{{
+                    cutCellUOpen( x, y ), cutCellUOpen( x + 1, y ),
+                    cutCellVOpen( x, y ), cutCellVOpen( x, y + 1 )
+                }};
+                std::array<double, 4> weights{};
+                double totalWeight = 0.0;
+                for( int direction = 0; direction < 4; ++direction )
+                {
+                    const int neighbor = neighbors[direction];
+                    if( neighbor >= 0 && cellFluidFraction_[neighbor] > 0.0f &&
+                        std::isfinite( openings[direction] ) && openings[direction] > 0.0f )
+                    {
+                        weights[direction] = openings[direction];
+                        totalWeight += weights[direction];
+                    }
+                }
+                if( totalWeight > 0.0 )
+                {
+                    double remaining = unmatched;
+                    int lastDestination = -1;
+                    for( int direction = 0; direction < 4; ++direction )
+                    {
+                        if( weights[direction] <= 0.0 ) continue;
+                        const int destination = neighbors[direction];
+                        const double transfer = std::min( remaining,
+                            unmatched * weights[direction] / totalWeight );
+                        if( transfer <= 0.0 ) continue;
+                        nextTracerMass_[source] -= transfer;
+                        nextTracerMass_[destination] += transfer;
+                        tracerStats_.connectedResidualRemappedMass += static_cast<float>( transfer );
+                        if( tracerTransferObserver_ )
+                            tracerTransferObserver_( { fluidTracerTransferKind2::connectedResidual,
+                                source, destination, transfer } );
+                        remaining -= transfer;
+                        lastDestination = destination;
+                    }
+                    if( remaining > 0.0 && lastDestination >= 0 )
+                    {
+                        nextTracerMass_[source] -= remaining;
+                        nextTracerMass_[lastDestination] += remaining;
+                        tracerStats_.connectedResidualRemappedMass += static_cast<float>( remaining );
+                        if( tracerTransferObserver_ )
+                            tracerTransferObserver_( { fluidTracerTransferKind2::connectedResidual,
+                                source, lastDestination, remaining } );
+                    }
+                    ++tracerStats_.connectedResidualSources;
+                    continue;
+                }
+            }
 
             // 적분된 swept 체적이 감소한 cut-cell 체적보다 작을 수 있다.
             // 완전 차폐 셀에서는 기존의 가장 가까운 활성 유체로 이동하고,
@@ -2388,8 +2551,10 @@ void fluidField2::remapTracerSwept()
             int destination = -1;
             if( current <= 0.0 )
                 destination = cutCellNearestFluid_[source];
-            else
+            else if( !connectedResidualTracerRemapEnabled_ )
             {
+                // Strict opt-in routing must NOT silently fall back to
+                // gain-only neighbors across a geometrically closed face.
                 float largestGain = 0.0f;
                 for( const int neighbor : neighbors )
                 {
@@ -2408,11 +2573,75 @@ void fluidField2::remapTracerSwept()
                 nextTracerMass_[source] -= unmatched;
                 nextTracerMass_[destination] += unmatched;
                 tracerStats_.fallbackRemappedMass += static_cast<float>( unmatched );
+                if( tracerTransferObserver_ )
+                    tracerTransferObserver_( { fluidTracerTransferKind2::fallback,
+                        source, destination, unmatched } );
             }
             else
+            {
                 tracerStats_.unresolvedDisplacementMass += static_cast<float>( unmatched );
+                auto& audit = tracerStats_.unresolvedAudit;
+                audit.totalMass += unmatched;
+                ++audit.sources;
+                if( current > 0.0 ) audit.partialCellMass += unmatched;
+                else audit.fullyCoveredCellMass += unmatched;
+
+                // The swept volume may have the right outward sign but its
+                // destination can still be fully solid or its current shared
+                // face can be geometrically closed. This is diagnostic only:
+                // the existing remapper's transfer decisions do not change.
+                const std::array<float, 4> faceOpen{{
+                    cutCellUOpen( x, y ), cutCellUOpen( x + 1, y ),
+                    cutCellVOpen( x, y ), cutCellVOpen( x, y + 1 )
+                }};
+                bool hasConnectedFace = false;
+                std::array<float, 4> fractions{};
+                std::array<float, 4> gains{};
+                for( int direction = 0; direction < 4; ++direction )
+                {
+                    const int neighbor = neighbors[direction];
+                    if( neighbor < 0 ) continue;
+                    fractions[direction] = cellFluidFraction_[neighbor];
+                    gains[direction] = fractions[direction] -
+                        previousCellFluidFraction_[neighbor];
+                    if( faceOpen[direction] > 0.0f && fractions[direction] > 0.0f )
+                        hasConnectedFace = true;
+                }
+                if( hasConnectedFace ) audit.connectedFluidFaceMass += unmatched;
+                else audit.noConnectedFluidFaceMass += unmatched;
+                if( totalOutwardVolume > 0.0 ) audit.insufficientOutwardSweepMass += unmatched;
+                else audit.noUsableOutwardSweepMass += unmatched;
+
+                if( unmatched > audit.worstUnmatchedMass )
+                {
+                    audit.worstX = x;
+                    audit.worstY = y;
+                    audit.worstUnmatchedMass = unmatched;
+                    audit.worstDisplacedMass = displaced;
+                    audit.worstSweptTransferMass = sweptTransfer;
+                    audit.worstSweptOutwardTracerMass = appliedSweptOutward;
+                    audit.worstPreviousFraction = static_cast<float>( previous );
+                    audit.worstCurrentFraction = static_cast<float>( current );
+                    audit.worstFaceOpen = faceOpen;
+                    audit.worstNeighborFraction = fractions;
+                    audit.worstNeighborGain = gains;
+                    audit.worstRawOutwardSweptVolume = {{
+                        -static_cast<double>( sweptUVolume_[uIndex( x, y )] ),
+                        static_cast<double>( sweptUVolume_[uIndex( x + 1, y )] ),
+                        -static_cast<double>( sweptVVolume_[vIndex( x, y )] ),
+                        static_cast<double>( sweptVVolume_[vIndex( x, y + 1 )] )
+                    }};
+                }
+            }
         }
 
+    auto& worst = tracerStats_.unresolvedAudit;
+    if( worst.sources > 0 )
+    {
+        const int cell = cellIndex( worst.worstX, worst.worstY );
+        worst.worstMassBeforeSweptRemap = tracerMass_[cell];
+        worst.worstMassAfterSweptRemap = nextTracerMass_[cell];
+    }
     tracerMass_.swap( nextTracerMass_ );
 }
 
@@ -2423,6 +2652,13 @@ void fluidField2::transportTracer( float timeStep )
 
     tracerStats_.beforeMass = getTracerMass();
     remapTracerSwept();
+    if( tracerStageObserver_ )
+        tracerStageObserver_( *this, fluidTracerStage2::afterSweptRemap );
+    auto& worst = tracerStats_.unresolvedAudit;
+    const bool trackWorst = worst.sources > 0 && worst.worstX >= 0 &&
+        worst.worstX < width_ && worst.worstY >= 0 && worst.worstY < height_;
+    const int trackedCell = trackWorst ? cellIndex( worst.worstX, worst.worstY ) : -1;
+    if( trackWorst ) worst.worstMassBeforeMacAdvection = tracerMass_[trackedCell];
     const double area = static_cast<double>( cellSize_ ) * cellSize_;
     double maxSpeed = 0.0;
     for( int y = 0; y < height_; ++y )
@@ -2500,6 +2736,10 @@ void fluidField2::transportTracer( float timeStep )
                 const double transfer = limitedFlux( flux, flux >= 0.0 ? left : right );
                 nextTracerMass_[left] -= transfer;
                 nextTracerMass_[right] += transfer;
+                if( tracerTransferObserver_ && transfer != 0.0 )
+                    tracerTransferObserver_( { fluidTracerTransferKind2::macFace,
+                        transfer > 0.0 ? left : right, transfer > 0.0 ? right : left,
+                        std::abs( transfer ) } );
             }
         for( int y = 1; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
@@ -2510,9 +2750,55 @@ void fluidField2::transportTracer( float timeStep )
                 const double transfer = limitedFlux( flux, flux >= 0.0 ? bottom : top );
                 nextTracerMass_[bottom] -= transfer;
                 nextTracerMass_[top] += transfer;
+                if( tracerTransferObserver_ && transfer != 0.0 )
+                    tracerTransferObserver_( { fluidTracerTransferKind2::macFace,
+                        transfer > 0.0 ? bottom : top, transfer > 0.0 ? top : bottom,
+                        std::abs( transfer ) } );
             }
+        if( trackWorst )
+        {
+            // Read the *same limited* face transfers just applied above.
+            // tracerMass_ is still the donor snapshot until the swap below.
+            // Inspect only four faces instead of branching at every MAC
+            // face; on the default no-unresolved path no extra work occurs.
+            const int x = worst.worstX;
+            const int y = worst.worstY;
+            const auto measureU = [&]( int faceX, int direction, double sign )
+            {
+                if( faceX <= 0 || faceX >= width_ ) return;
+                const int face = uIndex( faceX, y );
+                const double flux = tracerUFlux_[face];
+                const int donor = flux >= 0.0
+                    ? cellIndex( faceX - 1, y ) : cellIndex( faceX, y );
+                worst.worstMacOutwardTracerMass[direction] +=
+                    sign * limitedFlux( flux, donor );
+                worst.worstMacOutwardFluidVolume[direction] +=
+                    sign * static_cast<double>( u_[face] ) *
+                    advectionUOpen( faceX, y ) * lengthTime;
+            };
+            const auto measureV = [&]( int faceY, int direction, double sign )
+            {
+                if( faceY <= 0 || faceY >= height_ ) return;
+                const int face = vIndex( x, faceY );
+                const double flux = tracerVFlux_[face];
+                const int donor = flux >= 0.0
+                    ? cellIndex( x, faceY - 1 ) : cellIndex( x, faceY );
+                worst.worstMacOutwardTracerMass[direction] +=
+                    sign * limitedFlux( flux, donor );
+                worst.worstMacOutwardFluidVolume[direction] +=
+                    sign * static_cast<double>( v_[face] ) *
+                    advectionVOpen( x, faceY ) * lengthTime;
+            };
+            measureU( x, 0, -1.0 );
+            measureU( x + 1, 1, 1.0 );
+            measureV( y, 2, -1.0 );
+            measureV( y + 1, 3, 1.0 );
+        }
         tracerMass_.swap( nextTracerMass_ );
     }
+    if( trackWorst ) worst.worstMassAfterMacAdvection = tracerMass_[trackedCell];
+    if( tracerStageObserver_ )
+        tracerStageObserver_( *this, fluidTracerStage2::afterMacAdvection );
 
     double trapped = 0.0;
     for( int y = 0; y < height_; ++y )
@@ -2559,6 +2845,16 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         elapsed += std::chrono::duration<double, std::milli>( now - sectionStarted ).count();
         sectionStarted = now;
     };
+
+    // Snapshot actual MAC entry velocities before geometry, advection or
+    // pressure. These are only the interpolation endpoint of a diagnostic,
+    // not a fictitious velocity history.
+    if( sweptApertureAuditEnabled_ && cutCellProjectionEnabled_ )
+    {
+        sweptUStartVelocity_ = u_;
+        sweptVStartVelocity_ = v_;
+    }
+    else sweptApertureAuditValid_ = false;
 
     faceStageAudit_ = {};
     const bool auditFace = faceStageAuditEnabled_ && cutCellProjectionEnabled_;
@@ -3027,6 +3323,7 @@ float fluidField2::cutCellFluxDivergenceRms( float inverseTimeStep ) const noexc
 void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidShapeObstacle2> obstacles )
 {
     sweptFaceFlux_ = {};
+    sweptApertureAuditValid_ = false;
     std::fill( sweptUVolume_.begin(), sweptUVolume_.end(), 0.0f );
     std::fill( sweptVVolume_.begin(), sweptVVolume_.end(), 0.0f );
 
@@ -3377,6 +3674,84 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
         }
     }
 
+    if( sweptApertureAuditEnabled_ )
+    {
+        // S2c diagnostic ONLY. Sample open geometry at the same accepted
+        // midpoint times as solid swept flux, independently of solid speed.
+        // Reconstruct intermediate poses for this optional pass rather than
+        // introducing extra work in the normal geometry/pressure solver.
+        // These are quadrature averages A(t) / h, NOT the swept solid flux.
+        sweptUTimeMeanOpen_.assign( u_.size(), 0.0f );
+        sweptVTimeMeanOpen_.assign( v_.size(), 0.0f );
+        sweptUAlphaOpenMoment_.assign( u_.size(), 0.0f );
+        sweptVAlphaOpenMoment_.assign( v_.size(), 0.0f );
+        const double inverseSamples = 1.0 / timeSamples;
+        for( int sampleIndex = 0; sampleIndex < timeSamples; ++sampleIndex )
+        {
+            const float alpha = ( sampleIndex + 0.5f ) / timeSamples;
+            for( std::size_t i = 0; i < obstacles.size(); ++i )
+            {
+                const auto& startShape = previousObstacles_[i];
+                const auto& endShape = obstacles[i];
+                intermediate[i].transform.position =
+                    startShape.transform.position +
+                    alpha * ( endShape.transform.position - startShape.transform.position );
+                intermediate[i].transform.rotation =
+                    rot2::FromRadians( startAngles[i] + angularSpeeds[i] * timeStep * alpha );
+            }
+            const auto analyticShapes = disjointAnalyticCutCellEnabled_
+                ? BuildDisjointAnalyticShapes( intermediate ) :
+                    std::vector<analyticDisjointShape2>{};
+            const auto openAt = [&]( bool vertical, int x, int y )
+            {
+                const double h = cellSize_;
+                const double normal = vertical ? origin_.x + x * h : origin_.y + y * h;
+                const double low = vertical ? origin_.y + y * h : origin_.x + x * h;
+                double blocked = 0.0;
+                if( !analyticShapes.empty() )
+                    ForEachAnalyticFacePortion( analyticShapes, vertical, normal,
+                        low, low + h, [&]( std::size_t, analyticCircleInterval clipped )
+                        {
+                            blocked += clipped.length;
+                        } );
+                else
+                    for( int sub = 0; sub < faceSamples; ++sub )
+                    {
+                        const double t = ( sub + 0.5 ) / faceSamples;
+                        const vec2 point = vertical
+                            ? vec2{ static_cast<float>( normal ),
+                                static_cast<float>( low + h * t ) }
+                            : vec2{ static_cast<float>( low + h * t ),
+                                static_cast<float>( normal ) };
+                        for( const auto& shape : intermediate )
+                            if( ContainsFluidObstacle( shape, point ) )
+                            {
+                                blocked += h / faceSamples;
+                                break;
+                            }
+                    }
+                return static_cast<float>( std::clamp( 1.0 - blocked / h, 0.0, 1.0 ) );
+            };
+            for( int y = 0; y < height_; ++y )
+                for( int x = 1; x < width_; ++x )
+                {
+                    const int index = uIndex( x, y );
+                    const double sample = inverseSamples * openAt( true, x, y );
+                    sweptUTimeMeanOpen_[index] += static_cast<float>( sample );
+                    sweptUAlphaOpenMoment_[index] += static_cast<float>( alpha * sample );
+                }
+            for( int y = 1; y < height_; ++y )
+                for( int x = 0; x < width_; ++x )
+                {
+                    const int index = vIndex( x, y );
+                    const double sample = inverseSamples * openAt( false, x, y );
+                    sweptVTimeMeanOpen_[index] += static_cast<float>( sample );
+                    sweptVAlphaOpenMoment_[index] += static_cast<float>( alpha * sample );
+                }
+        }
+        sweptApertureAuditValid_ = true;
+    }
+
     double absoluteFlux = 0.0;
     for( const float flux : sweptUVolume_ ) absoluteFlux += std::abs( flux );
     for( const float flux : sweptVVolume_ ) absoluteFlux += std::abs( flux );
@@ -3544,22 +3919,81 @@ void fluidField2::prepareCutCellVolumeChange( float timeStep )
     cutCellPressure_.unresolvedVolumeRate = static_cast<float>( unresolvedRate );
 }
 
-std::optional<std::vector<fluidObstacleForce2>> fluidField2::replayFrozenCutCellPressure()
+bool fluidField2::setFrozenMacVelocityForAudit(
+    const std::function<vec2(vec2)>& worldVelocity )
 {
     if( !frozenPressureReplayReady_ || !cutCellProjectionEnabled_ ||
-        !std::isfinite( frozenPressureTimeStep_ ) || frozenPressureTimeStep_ <= 0.0f )
+        !worldVelocity ) return false;
+
+    // Compute into independent copies, so a nonfinite manufactured input
+    // rejects the entire write without corrupting the frozen reference.
+    std::vector<float> newU = u_;
+    std::vector<float> newV = v_;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+        {
+            if( cutCellUOpen( x, y ) <= 0.0f ) continue;
+            const vec2 position = origin_ + cellSize_ *
+                vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
+            const vec2 velocity = worldVelocity( position );
+            if( !IsFinite( velocity ) ) return false;
+            newU[uIndex( x, y )] = velocity.x;
+        }
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            if( cutCellVOpen( x, y ) <= 0.0f ) continue;
+            const vec2 position = origin_ + cellSize_ *
+                vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
+            const vec2 velocity = worldVelocity( position );
+            if( !IsFinite( velocity ) ) return false;
+            newV[vIndex( x, y )] = velocity.y;
+        }
+    u_.swap( newU );
+    v_.swap( newV );
+    return true;
+}
+
+std::optional<std::vector<fluidObstacleForce2>> fluidField2::replayFrozenCutCellPressure(
+    int pressureIterationsOverride, bool finishStepForRestart, float jacobiRelaxation )
+{
+    if( !frozenPressureReplayReady_ || !cutCellProjectionEnabled_ ||
+        !std::isfinite( frozenPressureTimeStep_ ) || frozenPressureTimeStep_ <= 0.0f ||
+        ( pressureIterationsOverride != -1 &&
+            ( pressureIterationsOverride < 1 || pressureIterationsOverride > 3200 ) ) ||
+        !std::isfinite( jacobiRelaxation ) ||
+        jacobiRelaxation <= 0.0f || jacobiRelaxation > 1.0f )
+        return std::nullopt;
+    // High budgets or damped Jacobi apply only to a frozen noncoupled
+    // diagnostic copy. Reject BEFORE consuming it, including Schur cases.
+    if( ( pressureIterationsOverride > 200 || jacobiRelaxation != 1.0f ) &&
+        std::any_of( frozenPressureObstacles_.begin(), frozenPressureObstacles_.end(),
+            []( const fluidShapeObstacle2& obstacle )
+            {
+                return obstacle.inverseMass > 0.0f || obstacle.inverseInertia > 0.0f;
+            } ) )
         return std::nullopt;
     frozenPressureReplayReady_ = false;
     std::vector<fluidObstacleForce2> feedback( frozenPressureObstacles_.size() );
     pressureMomentum_ = {};
-    projectCutCell( frozenPressureTimeStep_, frozenPressureIterations_,
-        frozenPressureObstacles_, feedback );
+    const int iterations = pressureIterationsOverride == -1
+        ? frozenPressureIterations_ : pressureIterationsOverride;
+    projectCutCell( frozenPressureTimeStep_, iterations,
+        frozenPressureObstacles_, feedback, jacobiRelaxation );
     stepMomentum_.afterPressure = getFluidMomentum();
+    if( finishStepForRestart )
+    {
+        // Mirror the tail of fluidField2::step on this independent copy.
+        // Without this, its next step would sweep from the WRONG old pose.
+        transportTracer( frozenPressureTimeStep_ );
+        previousObstacles_ = frozenPressureObstacles_;
+    }
     return feedback;
 }
 
 void fluidField2::projectCutCell( float timeStep, int pressureIterations,
-    std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback )
+    std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback,
+    float jacobiRelaxation )
 {
     // 유체 점유 면적의 시간 변화는 다음 보존형 연속 방정식에 직접 들어간다:
     // div(a*u_fluid) + ΔfluidFraction / dt = 0.
@@ -3697,8 +4131,15 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
                         ( right > 0.0f ? right * pressure_[cellIndex( x + 1, y )] : 0.0f ) +
                         ( bottom > 0.0f ? bottom * pressure_[cellIndex( x, y - 1 )] : 0.0f ) +
                         ( top > 0.0f ? top * pressure_[cellIndex( x, y + 1 )] : 0.0f );
-                    nextPressure_[cell] = diagonal > 0.0f
+                    const float jacobiCandidate = diagonal > 0.0f
                         ? ( sum - divergence_[cell] * pressureScale ) / diagonal : 0.0f;
+                    // Ordinary Step always passes omega=1 and remains
+                    // bit-for-bit the original update. Only a frozen copied
+                    // noncoupled replay may use diagnostic damping.
+                    nextPressure_[cell] = jacobiRelaxation == 1.0f
+                        ? jacobiCandidate
+                        : pressure_[cell] + jacobiRelaxation *
+                            ( jacobiCandidate - pressure_[cell] );
                 }
             pressure_.swap( nextPressure_ );
         }
@@ -3809,6 +4250,11 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
         // swept volume·tracer mass와 이 예측 증분을 이중 적용하지 않는다.
         double squaredContinuity = 0.0;
         double volumeL1 = 0.0;
+        // P^T continuity must be checked in the SAME pooled groups as
+        // P^T A P. A tiny child cell need not independently satisfy div=0.
+        const bool groupedPressure = cutCellPressure_.mergedPressureCells > 0;
+        auto& groupError = coupledPressureScratch_.smallCellReducedPreconditioner;
+        if( groupedPressure ) groupError.assign( pressure_.size(), 0.0 );
         for( int y = 0; y < height_; ++y )
             for( int x = 0; x < width_; ++x )
             {
@@ -3827,8 +4273,28 @@ void fluidField2::projectCutCell( float timeStep, int pressureIterations,
                 const double error = static_cast<double>( fluidFlux + solidFlux ) / cellSize_ +
                     static_cast<double>( cutCellVolumeRate_[cell] ) / timeStep - mean;
                 squaredContinuity += error * error;
+                if( groupedPressure )
+                {
+                    const int root = coupledPressureScratch_.smallCellPressureRoots[cell];
+                    groupError[root] += error;
+                    if( root != cell )
+                        cutCellPressure_.virtualInternalExchangeVolume +=
+                            static_cast<float>( std::abs( error ) * timeStep * cellSize_ * cellSize_ );
+                }
                 volumeL1 += std::abs( static_cast<double>( solidFlux ) ) * cellSize_ * timeStep;
             }
+        if( groupedPressure )
+        {
+            double totalSquared = 0.0;
+            const auto& roots = coupledPressureScratch_.smallCellPressureRoots;
+            for( std::size_t i = 0; i < roots.size(); ++i )
+                if( cellFluidFraction_[i] > 0.0f &&
+                    roots[i] == static_cast<int>( i ) ) totalSquared += groupError[i] * groupError[i];
+            const int groups = cutCellPressure_.activeCells - cutCellPressure_.mergedPressureCells;
+            if( groups > 0 )
+                cutCellPressure_.groupedPredictedContinuityRms =
+                    static_cast<float>( std::sqrt( totalSquared / groups ) );
+        }
         cutCellPressure_.predictedContinuityRms = cutCellPressure_.activeCells > 0
             ? static_cast<float>( std::sqrt( squaredContinuity / cutCellPressure_.activeCells ) ) : 0.0f;
         cutCellPressure_.predictedSolidVolumeL1 = static_cast<float>( volumeL1 );
@@ -3941,6 +4407,65 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         nextPhase( phase::done );
         return true;
     }
+
+    // Experimental virtual pressure-cell merging: each tiny active cell
+    // pools its pressure with the most-open directly connected neighbor that
+    // is at least the chosen fluid-fraction threshold. Never cross a closed
+    // face or join two slivers into a cycle. All original face geometry and
+    // swept source remain untouched.
+    auto& pressureRoot = scratch.smallCellPressureRoots;
+    int mergedCells = 0;
+    if( cutCell && smallCellPressureMergeFraction_ > 0.0f )
+    {
+        pressureRoot.resize( rhs.size() );
+        for( std::size_t i = 0; i < rhs.size(); ++i )
+            pressureRoot[i] = static_cast<int>( i );
+        for( int y = 0; y < height_; ++y )
+            for( int xCell = 0; xCell < width_; ++xCell )
+            {
+                const int cell = cellIndex( xCell, y );
+                const float fraction = cellFluidFraction_[cell];
+                if( fraction <= 0.0f || fraction >= smallCellPressureMergeFraction_ ||
+                    !volumeSourceValid_ || previousCellFluidFraction_[cell] <= fraction ) continue;
+                int neighbor = -1;
+                float bestOpening = 0.0f;
+                const auto visit = [&]( int other, float opening )
+                {
+                    if( opening <= bestOpening ||
+                        cellFluidFraction_[other] < smallCellPressureMergeFraction_ ) return;
+                    neighbor = other;
+                    bestOpening = opening;
+                };
+                if( xCell > 0 ) visit( cell - 1, cutCellUOpen( xCell, y ) );
+                if( xCell + 1 < width_ ) visit( cell + 1, cutCellUOpen( xCell + 1, y ) );
+                if( y > 0 ) visit( cell - width_, cutCellVOpen( xCell, y ) );
+                if( y + 1 < height_ ) visit( cell + width_, cutCellVOpen( xCell, y + 1 ) );
+                if( neighbor >= 0 )
+                {
+                    pressureRoot[cell] = neighbor;
+                    ++mergedCells;
+                    cutCellPressure_.mergedFluidFraction += fraction;
+                    cutCellPressure_.mergedSnapshotDecreaseVolume +=
+                        ( previousCellFluidFraction_[cell] - fraction ) *
+                        cellSize_ * cellSize_;
+                }
+                else ++cutCellPressure_.unmergedSmallPressureCells;
+            }
+        // P^T*b: accumulate every cell's original conservation RHS, including
+        // tiny swept-volume sources, in the retained neighbor's pressure row.
+        for( std::size_t i = 0; i < rhs.size(); ++i )
+            if( pressureRoot[i] != static_cast<int>( i ) )
+            {
+                rhs[pressureRoot[i]] += rhs[i];
+                rhs[i] = 0.0;
+            }
+    }
+    cutCellPressure_.mergedPressureCells = mergedCells;
+    const bool merging = mergedCells > 0;
+    const auto pressureCell = [&]( int cell )
+    {
+        return merging ? pressureRoot[cell] : cell;
+    };
 
     auto& dynamicResponseOwners = scratch.dynamicResponseOwners;
     dynamicResponseOwners.clear();
@@ -4237,9 +4762,11 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         {
             for( const coupledPressureEdge& edge : laplacianEdges )
             {
-                const double d = edge.weight * ( values[edge.first] - values[edge.second] );
-                result[edge.first] += d;
-                result[edge.second] -= d;
+                const int first = pressureCell( edge.first );
+                const int second = pressureCell( edge.second );
+                const double d = edge.weight * ( values[first] - values[second] );
+                result[first] += d;
+                result[second] -= d;
             }
         }
         else
@@ -4252,9 +4779,10 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     const int left = cellIndex( x - 1, y ), right = cellIndex( x, y );
                     if( !cutCell && ( solidOwner_[left] >= 0 || solidOwner_[right] >= 0 ) ) continue;
                     const double weight = cutCell ? cutCellUOpen( x, y ) : 1.0;
-                    const double d = weight * ( values[left] - values[right] );
-                    result[left] += d;
-                    result[right] -= d;
+                    const int a = pressureCell( left ), b = pressureCell( right );
+                    const double d = weight * ( values[a] - values[b] );
+                    result[a] += d;
+                    result[b] -= d;
                 }
             for( int y = 1; y < height_; ++y )
                 for( int x = 0; x < width_; ++x )
@@ -4262,15 +4790,16 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                     const int bottom = cellIndex( x, y - 1 ), top = cellIndex( x, y );
                     if( !cutCell && ( solidOwner_[bottom] >= 0 || solidOwner_[top] >= 0 ) ) continue;
                     const double weight = cutCell ? cutCellVOpen( x, y ) : 1.0;
-                    const double d = weight * ( values[bottom] - values[top] );
-                    result[bottom] += d;
-                    result[top] -= d;
+                    const int a = pressureCell( bottom ), b = pressureCell( top );
+                    const double d = weight * ( values[a] - values[b] );
+                    result[a] += d;
+                    result[b] -= d;
                 }
         }
         for( const coupledPressureFace& face : faces )
         {
             coupledBodyResponse& body = response[face.owner];
-            const double p = values[face.cell];
+            const double p = values[pressureCell( face.cell )];
             body.fx += p * face.fx;
             body.fy += p * face.fy;
             body.torque += p * face.torque;
@@ -4279,7 +4808,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         {
             const fluidShapeObstacle2& obstacle = obstacles[static_cast<std::size_t>( face.owner )];
             const coupledBodyResponse& body = response[face.owner];
-            result[face.cell] += static_cast<double>( obstacle.inverseMass ) *
+            result[pressureCell( face.cell )] += static_cast<double>( obstacle.inverseMass ) *
                 ( face.fx * body.fx + face.fy * body.fy ) +
                 static_cast<double>( obstacle.inverseInertia ) * face.torque * body.torque;
         }
@@ -4314,6 +4843,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
                 validGuess = false;
                 break;
             }
+            if( merging && pressureRoot[i] != static_cast<int>( i ) ) continue;
             x[i] = static_cast<double>( pressure_[i] );
         }
         if( validGuess )
@@ -4587,13 +5117,35 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
             }
     };
 
+    // P^T M_full^-1 P is symmetric positive definite for the pooled solve.
+    // Keep the original IC(0) on the unmodified five-point grid; lift the
+    // reduced residual to every member, then restrict the preconditioned
+    // vector by group sum. No IC(0) on a non-Cartesian merged graph required.
     const auto timedPreconditioner = [&]( const std::vector<double>& source )
     {
-        if( !profile ) { applyPreconditioner( source ); return; }
-        const auto begin = clock::now();
-        applyPreconditioner( source );
-        timing.preconditioner += std::chrono::duration<double, std::milli>( clock::now() - begin ).count();
-        ++timing.preconditionerApplications;
+        const auto begin = profile ? clock::now() : clock::time_point{};
+        if( merging )
+        {
+            auto& lifted = scratch.smallCellLiftedResidual;
+            lifted.resize( source.size() );
+            for( std::size_t i = 0; i < source.size(); ++i )
+                lifted[i] = cellFluidFraction_[i] > 0.0f
+                    ? source[pressureRoot[i]] : 0.0;
+            applyPreconditioner( lifted );
+            auto& reduced = scratch.smallCellReducedPreconditioner;
+            reduced.assign( source.size(), 0.0 );
+            for( std::size_t i = 0; i < source.size(); ++i )
+                if( cellFluidFraction_[i] > 0.0f )
+                    reduced[pressureRoot[i]] += z[i];
+            z.swap( reduced );
+        }
+        else applyPreconditioner( source );
+        if( profile )
+        {
+            timing.preconditioner += std::chrono::duration<double, std::milli>(
+                clock::now() - begin ).count();
+            ++timing.preconditionerApplications;
+        }
     };
     const auto timedMultiply = [&]( const std::vector<double>& source, std::vector<double>& target )
     {
@@ -4612,7 +5164,17 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     const auto forEachPcgCell = [&]( const auto& visit )
     {
         if( activePcgVectors )
-            for( int cell : incompleteActiveCells ) visit( static_cast<std::size_t>( cell ) );
+        {
+            for( int cell : incompleteActiveCells )
+                if( !merging || pressureRoot[cell] == cell )
+                    visit( static_cast<std::size_t>( cell ) );
+        }
+        else if( merging )
+        {
+            for( std::size_t cell = 0; cell < rhs.size(); ++cell )
+                if( cellFluidFraction_[cell] > 0.0f &&
+                    pressureRoot[cell] == static_cast<int>( cell ) ) visit( cell );
+        }
         else
             for( std::size_t cell = 0; cell < rhs.size(); ++cell ) visit( cell );
     };
@@ -4706,7 +5268,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     for( std::size_t i = 0; i < rhs.size(); ++i )
     {
         if( cutCell ? cellFluidFraction_[i] <= 0.0f : solidOwner_[i] >= 0 ) { pressure_[i] = 0.0f; continue; }
-        const double value = x[i] - gauge;
+        const double value = x[pressureCell( static_cast<int>( i ) )] - gauge;
         if( !std::isfinite( value ) || std::abs( value ) > std::numeric_limits<float>::max() )
             return fail( fluidCoupledPressureStatus2::invalidPressure );
         pressure_[i] = static_cast<float>( value );
@@ -4867,6 +5429,115 @@ void fluidField2::project( float timeStep, int pressureIterations,
     pressureMomentum_.fluid = getFluidMomentum() - beforePressure;
     pressureMomentum_.solid = timeStep * solidForce;
     pressureMomentum_.wall = timeStep * vec2{ static_cast<float>( wallX ), static_cast<float>( wallY ) };
+}
+
+fluidCutCellVolumeBudget2 fluidField2::getCutCellVolumeBudget(
+    int x, int y, float timeStep ) const noexcept
+{
+    fluidCutCellVolumeBudget2 result{};
+    if( !cutCellProjectionEnabled_ || !std::isfinite( timeStep ) || timeStep <= 0.0f ||
+        x < 0 || x >= width_ || y < 0 || y >= height_ ) return result;
+
+    result.valid = true;
+    result.hasVolumeHistory = cutCellPressure_.hasVolumeHistory;
+    result.hasSweptHistory = sweptFaceFlux_.usedSweptFlux;
+    const int cell = cellIndex( x, y );
+    result.currentFraction = cellFluidFraction_[cell];
+    result.previousFraction = previousCellFluidFraction_[cell];
+    result.active = result.currentFraction > 0.0f;
+    const double area = static_cast<double>( cellSize_ ) * cellSize_;
+    const double faceScale = static_cast<double>( cellSize_ ) * timeStep;
+    result.macOutwardVolume = {{
+        -static_cast<double>( cutCellUOpen( x, y ) ) * u_[uIndex( x, y )] * faceScale,
+        static_cast<double>( cutCellUOpen( x + 1, y ) ) * u_[uIndex( x + 1, y )] * faceScale,
+        -static_cast<double>( cutCellVOpen( x, y ) ) * v_[vIndex( x, y )] * faceScale,
+        static_cast<double>( cutCellVOpen( x, y + 1 ) ) * v_[vIndex( x, y + 1 )] * faceScale
+    }};
+    for( const double volume : result.macOutwardVolume )
+        result.macNetOutwardVolume += volume;
+
+    if( result.hasVolumeHistory )
+    {
+        result.snapshotDeltaVolume =
+            static_cast<double>( result.currentFraction - result.previousFraction ) * area;
+        result.pressureSourceDeltaVolume = static_cast<double>( cutCellVolumeRate_[cell] ) * area;
+    }
+    if( result.hasSweptHistory )
+    {
+        result.solidSweptOutwardVolume = {{
+            -static_cast<double>( sweptUVolume_[uIndex( x, y )] ),
+            static_cast<double>( sweptUVolume_[uIndex( x + 1, y )] ),
+            -static_cast<double>( sweptVVolume_[vIndex( x, y )] ),
+            static_cast<double>( sweptVVolume_[vIndex( x, y + 1 )] )
+        }};
+        for( const double volume : result.solidSweptOutwardVolume )
+            result.solidSweptDivergenceVolume += volume;
+    }
+    // The two geometric residuals are meaningful only when history exists.
+    // For static first snapshots this still reports the endpoint MAC flux.
+    result.pressureResidualVolume =
+        result.macNetOutwardVolume + result.pressureSourceDeltaVolume;
+    result.snapshotResidualVolume =
+        result.macNetOutwardVolume + result.snapshotDeltaVolume;
+    result.sweptResidualVolume =
+        result.macNetOutwardVolume + result.solidSweptDivergenceVolume;
+    return result;
+}
+
+fluidCutCellVolumeSummary2 fluidField2::getCutCellVolumeSummary(
+    float timeStep ) const noexcept
+{
+    fluidCutCellVolumeSummary2 result{};
+    if( !cutCellProjectionEnabled_ || !std::isfinite( timeStep ) || timeStep <= 0.0f )
+        return result;
+
+    result.valid = true;
+    double pressureSquared = 0.0;
+    double snapshotSquared = 0.0;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const fluidCutCellVolumeBudget2 cell =
+                getCutCellVolumeBudget( x, y, timeStep );
+            result.totalSnapshotDeltaVolume += cell.snapshotDeltaVolume;
+            result.totalPressureSourceDeltaVolume += cell.pressureSourceDeltaVolume;
+            result.totalMacNetOutwardVolume += cell.macNetOutwardVolume;
+            if( cell.hasSweptHistory )
+                result.totalAbsSweptSnapshotMismatchVolume +=
+                    std::abs( cell.solidSweptDivergenceVolume - cell.snapshotDeltaVolume );
+            if( cell.hasVolumeHistory && cell.previousFraction != cell.currentFraction )
+            {
+                ++result.modifiedCells;
+                if( !cell.active ) ++result.modifiedFullyCoveredCells;
+            }
+            if( !cell.active ) continue;
+
+            ++result.activeCells;
+            pressureSquared += cell.pressureResidualVolume * cell.pressureResidualVolume;
+            snapshotSquared += cell.snapshotResidualVolume * cell.snapshotResidualVolume;
+            if( std::abs( cell.pressureResidualVolume ) >
+                result.maxAbsPressureResidualVolume )
+            {
+                result.maxAbsPressureResidualVolume = std::abs( cell.pressureResidualVolume );
+                result.worstPressureX = x;
+                result.worstPressureY = y;
+            }
+            if( std::abs( cell.snapshotResidualVolume ) >
+                result.maxAbsSnapshotResidualVolume )
+            {
+                result.maxAbsSnapshotResidualVolume = std::abs( cell.snapshotResidualVolume );
+                result.worstSnapshotX = x;
+                result.worstSnapshotY = y;
+            }
+        }
+    if( result.activeCells > 0 )
+    {
+        result.activePressureResidualRmsVolume =
+            std::sqrt( pressureSquared / result.activeCells );
+        result.activeSnapshotResidualRmsVolume =
+            std::sqrt( snapshotSquared / result.activeCells );
+    }
+    return result;
 }
 
 fluidFlowAudit2 fluidField2::getFlowAudit( float timeStep ) const noexcept

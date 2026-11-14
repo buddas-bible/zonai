@@ -250,6 +250,24 @@ struct fluidCutCellPressure2
     int coupledIterations = 0;
     float coupledRelativeResidual = 0.0f;
     bool usedIncompleteCholesky = false;
+    // Experimental Galerkin pressure pooling P^T (L + B M^-1 B^T) P.
+    // A disappearing fluid cell shares pressure with a connected larger cell.
+    // Volume-source RHS is summed (not discarded); individual sliver
+    // continuity can remain nonzero even when the group constraint converges.
+    int mergedPressureCells = 0;
+    int unmergedSmallPressureCells = 0;
+    float mergedFluidFraction = 0.0f;
+    // Snapshot decrease in fluid area for merged shrinking cells (m^3,
+    // unit depth). Not swept transfer or actual tracer mass movement.
+    float mergedSnapshotDecreaseVolume = 0.0f;
+    // RMS of grouped flux+moving-volume continuity (including Body response);
+    // each merged group is one conservation row, NOT exact child-cell continuity.
+    // Valid only when mergedPressureCells > 0 and coupled PCG has converged.
+    float groupedPredictedContinuityRms = 0.0f;
+    // L1 volume hypothetically exchanged within pooled cells to satisfy
+    // group-only continuity (m^3 with unit depth, one Fluid substep).
+    // This is NOT actual tracer remap or guaranteed pointwise conservation.
+    float virtualInternalExchangeVolume = 0.0f;
     // opt-in 측정: Schur PCG 호출에 소비된 wall clock 시간(ms). 전체 Field Step은 아님.
     double coupledSolveMilliseconds = 0.0;
     fluidCoupledPressureTiming2 coupledTiming{};
@@ -304,8 +322,87 @@ struct fluidAdvectionStats2
     [[nodiscard]] vec2 delta() const noexcept { return after - before; }
 };
 
+// Diagnostic accounting for displaced tracer that the swept face + fallback
+// remapper did not move in a single Fluid substep. All masses are kg for unit
+// depth. Each unresolved source is counted in exactly one bin in EACH of the
+// three mutually exclusive pairs (partial/solid, connected/disconnected,
+// no-outward-sweep/insufficient-sweep). The pairs are different explanations,
+// not additional mass to sum together.
+struct fluidSweptTracerUnresolvedAudit2
+{
+    double totalMass = 0.0;
+    double partialCellMass = 0.0;
+    double fullyCoveredCellMass = 0.0;
+    double connectedFluidFaceMass = 0.0;
+    double noConnectedFluidFaceMass = 0.0;
+    double noUsableOutwardSweepMass = 0.0;
+    double insufficientOutwardSweepMass = 0.0;
+    int sources = 0;
+
+    // Largest unresolved source, ordered West, East, South, North.
+    int worstX = -1;
+    int worstY = -1;
+    double worstUnmatchedMass = 0.0;
+    double worstDisplacedMass = 0.0;
+    double worstSweptTransferMass = 0.0;
+    float worstPreviousFraction = 0.0f;
+    float worstCurrentFraction = 0.0f;
+    std::array<float, 4> worstFaceOpen{};
+    std::array<float, 4> worstNeighborFraction{};
+    std::array<float, 4> worstNeighborGain{};
+    // Signed swept volume (m^3), outward-positive from the source;
+    // includes blocked/closed destinations BEFORE remapper filtering.
+    std::array<double, 4> worstRawOutwardSweptVolume{};
+    // The exact MAC tracer transport, AFTER remap and AFTER the usual
+    // donor-outflow limiter, accumulated across every tracer CFL substep.
+    // W/E/S/N positive means mass left this source cell (kg).
+    std::array<double, 4> worstMacOutwardTracerMass{};
+    // Nominal open-fluid volume through each MAC face (m^3/unit depth):
+    // velocity * open aperture * h * dt. Not mass and not limited.
+    std::array<double, 4> worstMacOutwardFluidVolume{};
+    // This is the *applied* swept remap from the worst donor, by W/E/S/N.
+    // Values exclude directionally blocked or inward signed swept faces.
+    std::array<double, 4> worstSweptOutwardTracerMass{};
+    // Snapshot in that source before/after ALL simultaneous swept transfers.
+    // The difference also includes incoming swept remaps from OTHER sources.
+    double worstMassBeforeSweptRemap = 0.0;
+    double worstMassAfterSweptRemap = 0.0;
+    double worstMassBeforeMacAdvection = 0.0;
+    double worstMassAfterMacAdvection = 0.0;
+};
+
 // 양수 수동 tracer의 보존형 유량 수송. 질량은 셀에 보관하며 외곽 유량은 0.
 // trappedMass는 현재 solid가 차지한 셀에 남아 있는 질량: 물리적인 displaced-fluid remap이 아님.
+// Diagnostic callback boundaries for the two conservative tracer operators.
+// Every callback observes the actual stored per-cell mass; no snapshot copy
+// occurs in the engine when the observer is absent.
+enum class fluidTracerStage2
+{
+    afterSweptRemap,
+    afterMacAdvection
+};
+
+// Actual, applied tracer transfer (kg, unit depth), not a requested swept
+// volume or an unresolved displacement. Cell IDs use y * width + x.
+// Swept/MAC face transfers are between neighbors; fallback can jump across
+// fully covered cells. Every record subtracts mass from one cell and adds it
+// to another, so the sum of records is independently conservative.
+enum class fluidTracerTransferKind2
+{
+    sweptFace,
+    fallback,
+    macFace,
+    connectedResidual // Research only: endpoint-open neighboring face.
+};
+
+struct fluidTracerTransfer2
+{
+    fluidTracerTransferKind2 kind = fluidTracerTransferKind2::sweptFace;
+    int sourceCell = -1;
+    int destinationCell = -1;
+    double mass = 0.0;
+};
+
 struct fluidTracerStats2
 {
     float beforeMass = 0.0f;
@@ -318,7 +415,12 @@ struct fluidTracerStats2
     float sweptLimitedMass = 0.0f;
     float sweptRemappedMass = 0.0f;
     float fallbackRemappedMass = 0.0f;
+    // Experimental-only aperture-weighted transfer of remaining displaced
+    // tracer across currently open adjacent faces. Not a swept volume flux.
+    float connectedResidualRemappedMass = 0.0f;
+    int connectedResidualSources = 0;
     float unresolvedDisplacementMass = 0.0f;
+    fluidSweptTracerUnresolvedAudit2 unresolvedAudit{};
     bool usedSweptRemap = false;
     float maxCfl = 0.0f;
     int substeps = 0;
@@ -330,6 +432,72 @@ struct fluidTracerStats2
 // Side-effect-free snapshot of the current MAC face state. Not a stored Step result.
 // For Cut-cell, continuity includes the latest swept-volume source; the
 // predicted post-pressure solid flux is a separate diagnostic.
+// Read-only Cut-cell volume ledger for one current Fluid substep (unit depth).
+// Signed volume is outward-positive from (x,y), in m^3.
+// MAC uses the *current/endpoint* face open fraction and velocity times dt.
+// It is NOT the actual time-integral of a changing space-time aperture.
+// The pressure source may use swept volume and relocation from solid cells;
+// therefore snapshot, swept and pressure-source residuals are distinct.
+struct fluidCutCellVolumeBudget2
+{
+    bool valid = false;
+    bool hasVolumeHistory = false;
+    bool hasSweptHistory = false;
+    bool active = false;
+    float previousFraction = 0.0f;
+    float currentFraction = 0.0f;
+    std::array<double, 4> macOutwardVolume{}; // W/E/S/N, m^3
+    std::array<double, 4> solidSweptOutwardVolume{}; // W/E/S/N, m^3
+    double snapshotDeltaVolume = 0.0;
+    double pressureSourceDeltaVolume = 0.0;
+    double solidSweptDivergenceVolume = 0.0;
+    double macNetOutwardVolume = 0.0;
+    double pressureResidualVolume = 0.0; // MAC + solver source
+    double snapshotResidualVolume = 0.0; // MAC + geometric delta
+    double sweptResidualVolume = 0.0; // MAC + signed solid swept divergence
+};
+
+// On-demand trace of the existing SINGLE-Capsule analytic cell-area path.
+// Re-evaluates the caller-supplied shape at the specified grid cell, without
+// mutating the Field or checking that it matches the most recent Step.
+// In m^2 except fractions; retains the signed pre-clamp area remainder.
+struct fluidCapsuleCellAreaAudit2
+{
+    bool valid = false;
+    double cellArea = 0.0;
+    double coreCoveredArea = 0.0;
+    double firstCapCoveredArea = 0.0;
+    double lastCapCoveredArea = 0.0;
+    double componentSumCoveredArea = 0.0;
+    double clampedCoveredArea = 0.0;
+    double signedUnclampedFluidArea = 0.0;
+    double recomputedFluidFraction = 0.0;
+    float storedFluidFraction = 0.0f;
+};
+
+// O(grid) opt-in summary; does not run or allocate in the normal Step.
+// RMS metrics count active fluid cells only; totalSnapshotDeltaVolume and
+// modifiedCellCount account for fully covered cells as well.
+struct fluidCutCellVolumeSummary2
+{
+    bool valid = false;
+    int activeCells = 0;
+    int modifiedCells = 0;
+    int modifiedFullyCoveredCells = 0;
+    double totalSnapshotDeltaVolume = 0.0;
+    double totalPressureSourceDeltaVolume = 0.0;
+    double totalMacNetOutwardVolume = 0.0;
+    double totalAbsSweptSnapshotMismatchVolume = 0.0;
+    double activePressureResidualRmsVolume = 0.0;
+    double activeSnapshotResidualRmsVolume = 0.0;
+    double maxAbsPressureResidualVolume = 0.0;
+    double maxAbsSnapshotResidualVolume = 0.0;
+    int worstPressureX = -1;
+    int worstPressureY = -1;
+    int worstSnapshotX = -1;
+    int worstSnapshotY = -1;
+};
+
 struct fluidFlowAudit2
 {
     float continuityRms = 0.0f;     // 1/s
@@ -446,6 +614,26 @@ public:
     }
     [[nodiscard]] bool isStepTimingEnabled() const noexcept { return stepTimingEnabled_; }
 
+    // Opt-in read-only tracer-stage observer. Its field reference is valid
+    // only during this call. Snapshot/copy the queried masses if persistence
+    // is needed; callback exceptions propagate like other observers.
+    using tracerStageObserver2 = std::function<void(const fluidField2&, fluidTracerStage2)>;
+    void setTracerStageObserver( tracerStageObserver2 observer )
+    {
+        tracerStageObserver_ = std::move( observer );
+    }
+
+    // Opt-in per-transfer read-only ledger for Swept, fallback and limited
+    // MAC advection. Disabled by default, no storage/allocation when unused.
+    // Records correspond to applied transfers; unresolved material stays in
+    // its source cell and emits no transfer record. Observer must not reenter
+    // or mutate the field while it is stepping.
+    using tracerTransferObserver2 = std::function<void(const fluidTracerTransfer2&)>;
+    void setTracerTransferObserver( tracerTransferObserver2 observer )
+    {
+        tracerTransferObserver_ = std::move( observer );
+    }
+
     // S0 diagnostic only. Called after advection/boundaries, immediately
     // before Cut-cell projection. The caller can COPY this field to freeze
     // every MAC face, geometry/swept history, warm-start pressure and cache.
@@ -459,9 +647,33 @@ public:
 
     // Executes only Cut-cell pressure on a COPY made inside the observer.
     // One replay per copy; returns nullopt for an ordinary/later Field state.
+    // -1 uses the captured normal Step iteration budget. [1,200] replays
+    // the original pressure budget on a frozen COPY; (200,3200] is
+    // diagnostic-only, NONCOUPLED Jacobi reference research. Higher budgets
+    // with a movable inverse-mass/inertia obstacle are rejected atomically.
+    // No change to production Step(), advection or solver defaults.
+    // finishStepForRestart is strictly diagnostic: also performs tracer
+    // transport and commits the current obstacles as the NEXT step's
+    // moving-geometry history on this copy. Default false preserves the
+    // original pressure-only replay semantics and all existing callers.
     // Pressure and feedback remain observable on the copy after replay.
+    // Optional [0,1] Jacobi relaxation is a frozen COPY-ONLY diagnostic:
+    // (0,1] is accepted, 1 keeps the original undamped algorithm.
+    // A nonunit value is rejected for any movable coupled obstacle.
     [[nodiscard]] std::optional<std::vector<fluidObstacleForce2>>
-        replayFrozenCutCellPressure();
+        replayFrozenCutCellPressure( int pressureIterationsOverride = -1,
+            bool finishStepForRestart = false, float jacobiRelaxation = 1.0f );
+
+    // Only callable on a pre-projection frozen COPY (before its one replay).
+    // Replaces OPEN interior U/V face speeds with the same continuous
+    // world-space velocity function on any grid. Closed faces retain their
+    // prescribed moving-solid boundary speeds. Invalid samples never
+    // partially change velocities. This is an explicit synthetic
+    // counterfactual, not a physically unique prolongation/restriction.
+    // Use endpoint MAC budgets, not the original step-entry linear proxy,
+    // after this override: the recorded entry velocity history is unchanged.
+    [[nodiscard]] bool setFrozenMacVelocityForAudit(
+        const std::function<vec2(vec2)>& worldVelocity );
 
     // Opt-in single interior MAC-face stage trace; negative coordinates disable.
     // Does not change fluid velocities, projection, or geometry.
@@ -526,6 +738,23 @@ public:
     // 수렴한 경우에만 Body 압력 반력을 돌려주며, 실패 시 해당 압력을 생략한다.
     void setCutCellCoupledProjectionEnabled( bool enabled ) noexcept { cutCellCoupledProjectionEnabled_ = enabled; }
     [[nodiscard]] bool isCutCellCoupledProjectionEnabled() const noexcept { return cutCellCoupledProjectionEnabled_; }
+
+    // Experimental shrinking small-cell pressure pooling. Default 0 disables it.
+    // Only active on valid moving-geometry history and a shrinking fluid
+    // fraction. Stationary narrow gaps retain the original pressure cells.
+    // Only used with coupled Cut-cell PCG: p = P*q, solve P^T*A*P with
+    // A = L + B*M^-1*B^T, and preserve sum of moving-volume RHS per group.
+    // Reject non-finite/negative/too-large thresholds. The inherited IC(0)
+    // preconditioner is lifted/restricted with P to stay SPD.
+    void setSmallCellPressureMergeFraction( float fraction ) noexcept
+    {
+        if( fraction >= 0.0f && fraction <= 0.05f )
+            smallCellPressureMergeFraction_ = fraction;
+    }
+    [[nodiscard]] float getSmallCellPressureMergeFraction() const noexcept
+    {
+        return smallCellPressureMergeFraction_;
+    }
 
     // 분석적 다중 Cut-cell Schur의 전처리기 비교용 설정. 기본 IC(0),
     // OFF는 기존 Jacobi. 원래 Schur 행렬/수렴 허용오차/기하 이력은 그대로 둔다.
@@ -741,6 +970,49 @@ public:
     void setSweptTracerRemapEnabled( bool enabled ) noexcept { sweptTracerRemapEnabled_ = enabled; }
     [[nodiscard]] bool isSweptTracerRemapEnabled() const noexcept { return sweptTracerRemapEnabled_; }
 
+    // S2c research ONLY, default OFF. If a *partially open* shrinking cell
+    // cannot evacuate all displaced tracer through outward swept volumes,
+    // distribute its remaining mass to adjacent fluid cells using positive
+    // endpoint face apertures. Never cross a closed face or extend the swept
+    // transfer limit; only tracer is changed, not pressure or MAC velocities.
+    // Endpoint aperture is NOT a space-time fluid-flux reconstruction.
+    // Fully covered sources retain the existing nearest-fluid fallback.
+    void setConnectedResidualTracerRemapEnabled( bool enabled ) noexcept
+    {
+        connectedResidualTracerRemapEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isConnectedResidualTracerRemapEnabled() const noexcept
+    {
+        return connectedResidualTracerRemapEnabled_;
+    }
+
+    // S2c read-only diagnostic. Midpoint quadrature of the moving obstacle's
+    // actual *open face length* at the same selected time samples as Swept
+    // solid flux. Separate from swept solid normal velocity and endpoint MAC.
+    // OFF by default: no grid-sized arrays or extra clipping per normal Step.
+    void setSweptApertureAuditEnabled( bool enabled ) noexcept
+    {
+        sweptApertureAuditEnabled_ = enabled;
+        if( !enabled )
+        {
+            sweptApertureAuditValid_ = false;
+            sweptUTimeMeanOpen_.clear();
+            sweptVTimeMeanOpen_.clear();
+            sweptUAlphaOpenMoment_.clear();
+            sweptVAlphaOpenMoment_.clear();
+            sweptUStartVelocity_.clear();
+            sweptVStartVelocity_.clear();
+        }
+    }
+    [[nodiscard]] bool isSweptApertureAuditEnabled() const noexcept
+    {
+        return sweptApertureAuditEnabled_;
+    }
+    [[nodiscard]] bool hasSweptApertureAudit() const noexcept
+    {
+        return sweptApertureAuditValid_;
+    }
+
     // 지정 위치 주변 face 속도에 world-space 속도 변화(m/s)를 더함.
     // 소스가 격자 바깥이거나 radius가 유효하지 않으면 아무 일도 하지 않음.
     void addVelocity( vec2 position, vec2 velocityDelta, float radius );
@@ -773,6 +1045,16 @@ public:
     // Explicit diagnostic: reads the current field, including changes after Step.
     // Not called on the normal simulation path; timeStep must be finite and positive.
     [[nodiscard]] fluidFlowAudit2 getFlowAudit( float timeStep ) const noexcept;
+    // Read-only diagnostic of core + two half-circle covered areas for one
+    // supplied Capsule; available only when analytic Capsule mode is enabled.
+    [[nodiscard]] fluidCapsuleCellAreaAudit2 getAnalyticCapsuleCellAreaAudit(
+        const fluidShapeObstacle2& capsule, int x, int y ) const noexcept;
+    // Endpoint (not time-centered) MAC-vs-geometry and pressure-source ledgers.
+    // Invalid coordinates / nonpositive dt return valid=false.
+    [[nodiscard]] fluidCutCellVolumeBudget2 getCutCellVolumeBudget(
+        int x, int y, float timeStep ) const noexcept;
+    [[nodiscard]] fluidCutCellVolumeSummary2 getCutCellVolumeSummary(
+        float timeStep ) const noexcept;
     [[nodiscard]] const fluidFaceStageAudit2& getFaceStageAudit() const noexcept { return faceStageAudit_; }
 
     // 내부 fluid-fluid MAC face 속도를 dual-cell mass로 적분한 운동량.
@@ -791,12 +1073,30 @@ public:
     [[nodiscard]] const fluidAdvectionStats2& getAdvectionStats() const noexcept { return advectionStats_; }
     [[nodiscard]] float getTracerConcentration( int x, int y ) const noexcept;
     [[nodiscard]] float getTracerMass() const noexcept;
+    // Raw stored cell mass (kg, unit depth), including tracer trapped in
+    // fully covered cells where concentration queries return zero.
+    // Diagnostic only: does not normalize by current fluid fraction.
+    [[nodiscard]] double getTracerCellMass( int x, int y ) const noexcept;
     [[nodiscard]] const fluidTracerStats2& getTracerStats() const noexcept { return tracerStats_; }
     // 기하 표본의 유체 면적 비율 [0,1]. 범위 밖은 0.
     // 외곽 wall face는 기하상 열려있어도 닫힌 경계이므로 0.
     [[nodiscard]] float getCellFluidFraction( int x, int y ) const noexcept;
     [[nodiscard]] float getUFaceOpenFraction( int x, int y ) const noexcept;
     [[nodiscard]] float getVFaceOpenFraction( int x, int y ) const noexcept;
+    // Time-average OPEN fraction on one interior face over the most recent
+    // valid swept moving-geometry interval. Zero if unavailable/invalid.
+    // Approximate quadrature, not an exact space-time interface integral.
+    [[nodiscard]] float getSweptUTimeMeanOpenFraction( int x, int y ) const noexcept;
+    [[nodiscard]] float getSweptVTimeMeanOpenFraction( int x, int y ) const noexcept;
+    // S2c DIAGNOSTIC, not a measured time-dependent velocity field. Computes
+    // h*dt*∫_0^1 open(alpha)*lerp(uAtStepEntry, uAfterPressure, alpha)dalpha.
+    // The two velocity endpoints are known but their intermediate history is
+    // not. Only valid during/after the latest step's pressure+tracer stage.
+    // Invalid/missing time samples return zero. Signed +U/+V canonical face.
+    [[nodiscard]] double getSweptULinearVelocityProxyVolume(
+        int x, int y, float timeStep ) const noexcept;
+    [[nodiscard]] double getSweptVLinearVelocityProxyVolume(
+        int x, int y, float timeStep ) const noexcept;
     // Sub-face에서 막힌 구간의 평균 solid 법선 속도. 부분 개방 U/V의 fluid 성분과 별개.
     [[nodiscard]] float getUFaceSolidVelocity( int x, int y ) const noexcept;
     [[nodiscard]] float getVFaceSolidVelocity( int x, int y ) const noexcept;
@@ -836,7 +1136,8 @@ private:
     void synchronizeCutCellBoundaries( float timeStep, std::span<const fluidShapeObstacle2> obstacles,
         std::span<const fluidObstacleForce2> feedback );
     void projectCutCell( float timeStep, int pressureIterations,
-        std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback );
+        std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback,
+        float jacobiRelaxation = 1.0f );
     void applySolidBoundaries( std::span<const fluidShapeObstacle2> obstacles,
         std::span<const fluidObstacleForce2> pressureFeedback = {}, float timeStep = 0.0f );
     [[nodiscard]] bool solveCoupledPressure( float timeStep, int iterations,
@@ -907,6 +1208,9 @@ private:
         std::vector<incompleteForwardCoefficients> incompleteSplitForward;
         std::vector<incompleteBackwardCoefficients> incompleteSplitBackward;
         std::vector<int> incompleteActiveCells;
+        std::vector<int> smallCellPressureRoots;
+        std::vector<double> smallCellLiftedResidual;
+        std::vector<double> smallCellReducedPreconditioner;
         std::vector<double> rhs;
         std::vector<double> x;
         std::vector<double> residual;
@@ -968,8 +1272,21 @@ private:
     fluidSweptFaceFlux2 sweptFaceFlux_{};
     fluidAdvectionStats2 advectionStats_{};
     fluidTracerStats2 tracerStats_{};
+    tracerStageObserver2 tracerStageObserver_{};
+    tracerTransferObserver2 tracerTransferObserver_{};
+    std::vector<float> sweptUTimeMeanOpen_;
+    std::vector<float> sweptVTimeMeanOpen_;
+    // Temporal first moments ∫alpha*open(alpha)dalpha, plus actual MAC
+    // face velocity at entry to this Fluid step. No normal-step allocations.
+    std::vector<float> sweptUAlphaOpenMoment_;
+    std::vector<float> sweptVAlphaOpenMoment_;
+    std::vector<float> sweptUStartVelocity_;
+    std::vector<float> sweptVStartVelocity_;
+    bool sweptApertureAuditEnabled_ = false;
+    bool sweptApertureAuditValid_ = false;
     bool tracerEnabled_ = false;
     bool sweptTracerRemapEnabled_ = false;
+    bool connectedResidualTracerRemapEnabled_ = false;
     bool sweptGeometryCorrectionEnabled_ = false;
     bool adaptiveSweptSamplingEnabled_ = false;
     int cutCellSampleCount_ = 4;
@@ -983,6 +1300,7 @@ private:
     bool previousPartialCircleOverlap_ = false;
     bool cutCellProjectionEnabled_ = false;
     bool cutCellCoupledProjectionEnabled_ = false;
+    float smallCellPressureMergeFraction_ = 0.0f;
     bool analyticCutCellIncompleteCholeskyEnabled_ = true;
     bool analyticCutCellCachedIc0Enabled_ = true;
     bool analyticCutCellActiveIc0SweepEnabled_ = true;
