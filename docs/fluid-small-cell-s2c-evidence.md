@@ -422,6 +422,119 @@ Then apply the resulting stage separation to the actual coupled
 World8/Fluid4 disappearing V(17,13) tracer scene and measure optional
 diagnostic overhead before deciding on any physical correction.
 
+### Frozen zero-open-MAC Jacobi iteration sensitivity and independently reconstructed source ledger — 2026-11-14
+
+**Question:** Could the h=0.25 vs h=0.125 rotating V(16,16) difference
+persist merely because the *current* 120-iteration Jacobi pressure projection
+is not sufficiently converged? And, when all OPEN interior face velocities
+are explicitly set to zero, does the source that drives pressure really
+come from moving-volume geometry rather than hidden MAC advection?
+
+**Implementation:** `--small-cell-zero-mac-convergence-audit` builds on
+the previous frozen-state control without changing production code.
+At the same 64/128 actual Fluid-step trajectories, and at 11/16 and
+12/16 rotation checkpoints, it takes four **independent frozen copies**,
+zeros only open interior U/V velocities, preserves closed-face prescribed
+wall velocities and geometry, and replays pressure at exactly
+**40/80/120/200 Jacobi iterations**. Each copy uses the exact same
+moving-solid pressure source and pressure compatibility correction.
+For each physical 0.25m target V face, the fine result is the sum of
+two half-width faces. The original untouched live 120-iteration Step
+and the earlier zero-open-MAC 120-iteration replay remain reference
+checks. The `replayFrozenCutCellPressure` API's existing [1,200]
+diagnostic iteration limit is unchanged.
+
+The audit separately walks the **public fluid-cell and open-face graph**
+to count connected fluid components and accumulate the stored
+`pressureSourceDeltaVolume` for each component. It compares the
+independently reconstructed global signed source + unresolved correction
+against `sourceImbalance`, and the sum of per-region absolute sources
++ absolute unresolved correction against `compatibilityCorrection`.
+This covers one source equation with the internal OPEN-face velocity
+explicitly zero; it is **not** independent reconstruction of the
+pressure matrix itself. For the cells on each side of the measured V face,
+it separately records source volume, snapshot volume, Swept solid
+divergence, post-pressure MAC divergence and the remaining local
+continuity budget. The local cell collections are **not identical
+world-space physical control volumes** between h=.25 and h=.125, so their
+volume totals must not be directly interpreted as a convergence rate.
+The test rejects changed geometry/sources between iteration budgets,
+nonfinite results, missing checkpoints, unmatched face grouping, or a
+120-iteration replay that differs from the prior zero-MAC control.
+
+**Validated first code CI:** [workflow 43564705365](https://github.com/buddas-bible/zonai/actions/runs/43564705365)
+**success on Ubuntu Debug and Windows Release**. Both platforms
+printed the following signed target-face **coarse minus fine**
+post-projection MAC volumes (m³) to the shown precision:
+
+| Actual Fluid substeps | Rotation | Jacobi 40 | Jacobi 80 | Jacobi 120 | Jacobi 200 |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 64 | 11/16 | -0.000192770186 | -0.000225416831 | -0.000236558181 | -0.000243831749 |
+| 64 | 12/16 | +0.000146485997 | +0.000109661687 | +0.000097969242 | +0.000091041195 |
+| 128 | 11/16 | -0.000096063010 | -0.000112253495 | -0.000117721446 | -0.000121248582 |
+| 128 | 12/16 | +0.000084176912 | +0.000065553844 | +0.000059612254 | +0.000056065249 |
+
+At 128 steps, rotation 11/16, the h=.25 pressureResidual
+decreased from 0.0967633 (40 iterations) to 0.0433588 (120)
+to **0.0342637 (200)**; h=.125 decreased from 0.1229897
+to 0.0400728 to **0.0240927**. The existing reported
+`pressureResidual` for noncoupled Jacobi is a legacy residual
+quantity, **not** a certified true relative PCG residual or
+physical transport conservation error. In the same checkpoint
+the coarse-minus-fine face-volume gap still moved by
+**-3.52713608e-6m³ between 120 and 200** (~2.9% of the
+200-iteration signed gap magnitude). At 64 steps/11/16 the
+120→200 gap shift was **-7.27356760e-6m³**. Hence 200 iterations
+are **not a demonstrated converged reference** and the
+previous finite-120 cross-grid result cannot be attributed solely
+to geometry or exclusively to old velocity history.
+
+The **frozen zero-MAC moving-volume source does not vanish**.
+For the local lower/upper cells adjoining the target face at
+128 steps/11/16, the independently queried (unit-depth)
+pressure-source volumes were approximately **0.000768736791m³**
+on h=.25 and **0.000781493087m³** on h=.125. Their local
+snapshot changes happened to sum to zero at this checkpoint,
+while the separate signed Swept divergences were about
+0.001084959491m³ and 0.000781493069m³, respectively.
+These are **different geometric quantities** and may not be
+substituted for a measured time-integrated fluid flux. Per-grid
+source, snapshot, Swept and fluid-component topology were
+invariant across the four Jacobi budgets; all reported cases
+had one connected active fluid region.
+
+**Numerical source-ledger caveat:** full-grid connected sums
+nearly cancel, making their final net source of order
+1e-7m³/s. The independent source/compatibility reconstruction
+differed from the solver's stored float ledger by up to
+approximately **3.74e-7m³/s** in the first successful
+Ubuntu/Windows run. That small **absolute** difference is
+not negligible relative to the much smaller signed net source.
+A follow-on assertion correction (`3302f73`) narrows the
+acceptance to `1e-6 + 1e-5 * max(abs(sourceRate),
+regionAbsoluteSourceRate)` m³/s, rather than scaling it to
+1m³/s; its own CI must pass before calling that stronger
+criterion verified. Do not claim exact component-source
+closure from the earlier wide-tolerance run.
+
+**Scope/decision:** This remains one isolated **diagnostic** of a
+prescribed kinematic rotating capsule using the **noncoupled
+Jacobi** Cut-cell projection, not a production Schur PCG solver
+change or a validation of the real World8/Fluid4 disappearing
+tracer. Neither pressure pooling nor connected-residual tracer
+redistribution is accepted. No default changes, speed clamps,
+new fluid forces or tracer-capacity fixes are included.
+
+**Next atomic S2c task:** obtain a genuinely convergence-tested
+pressure reference for the same frozen state (bounded independent
+reference solve, with residual defined against the assembled
+discrete equation rather than an iteration count alone);
+then repeat geometry/source/velocity-stage comparison in
+the real coupled World8/Fluid4 near-closing V(17,13)
+case. Avoid comparing one target face's open-time
+alone as proof that two full pressure systems share their
+surrounding geometry and compatibility constraints.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
