@@ -629,10 +629,11 @@ public:
 
     // Executes only Cut-cell pressure on a COPY made inside the observer.
     // One replay per copy; returns nullopt for an ordinary/later Field state.
-    // -1 uses the captured normal Step iteration budget; [1,200] explicitly
-    // overrides that budget for SAME-STATE pressure-only research. Other
-    // overrides are rejected without consuming the frozen copy. No change
-    // to production Step(), fluid advection or the solver's default.
+    // -1 uses the captured normal Step iteration budget. [1,200] replays
+    // the original pressure budget on a frozen COPY; (200,3200] is
+    // diagnostic-only, NONCOUPLED Jacobi reference research. Higher budgets
+    // with a movable inverse-mass/inertia obstacle are rejected atomically.
+    // No change to production Step(), advection or solver defaults.
     // finishStepForRestart is strictly diagnostic: also performs tracer
     // transport and commits the current obstacles as the NEXT step's
     // moving-geometry history on this copy. Default false preserves the
