@@ -639,9 +639,12 @@ public:
     // moving-geometry history on this copy. Default false preserves the
     // original pressure-only replay semantics and all existing callers.
     // Pressure and feedback remain observable on the copy after replay.
+    // Optional [0,1] Jacobi relaxation is a frozen COPY-ONLY diagnostic:
+    // (0,1] is accepted, 1 keeps the original undamped algorithm.
+    // A nonunit value is rejected for any movable coupled obstacle.
     [[nodiscard]] std::optional<std::vector<fluidObstacleForce2>>
         replayFrozenCutCellPressure( int pressureIterationsOverride = -1,
-            bool finishStepForRestart = false );
+            bool finishStepForRestart = false, float jacobiRelaxation = 1.0f );
 
     // Only callable on a pre-projection frozen COPY (before its one replay).
     // Replaces OPEN interior U/V face speeds with the same continuous
@@ -1111,7 +1114,8 @@ private:
     void synchronizeCutCellBoundaries( float timeStep, std::span<const fluidShapeObstacle2> obstacles,
         std::span<const fluidObstacleForce2> feedback );
     void projectCutCell( float timeStep, int pressureIterations,
-        std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback );
+        std::span<const fluidShapeObstacle2> obstacles, std::span<fluidObstacleForce2> feedback,
+        float jacobiRelaxation = 1.0f );
     void applySolidBoundaries( std::span<const fluidShapeObstacle2> obstacles,
         std::span<const fluidObstacleForce2> pressureFeedback = {}, float timeStep = 0.0f );
     [[nodiscard]] bool solveCoupledPressure( float timeStep, int iterations,
