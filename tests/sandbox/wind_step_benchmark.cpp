@@ -3021,7 +3021,12 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
             "iterations,active_cells,global_compatible_rms_per_s,"
             "top8_squared_residual_share,tiny_fraction_squared_share,"
             "tiny_positive_aperture_squared_share,"
-            "near_target_squared_share,max_abs_residual_per_s" );
+            "near_target_squared_share,max_abs_residual_per_s,"
+            "checkerboard_signed_mean_per_s,checkerboard_squared_share" );
+        std::puts( "zero_mac_jacobi_parity,cell_m,checkpoint_16,"
+            "even_iteration,odd_compatible_rms_per_s,"
+            "even_compatible_rms_per_s,odd_face_m3,even_face_m3,"
+            "even_minus_odd_face_m3" );
         std::puts( "zero_mac_hotspot,cell_m,checkpoint_16,iterations,rank,"
             "x,y,world_center_x_m,world_center_y_m,compatible_residual_per_s,"
             "fraction,min_positive_open,max_open,positive_faces,"
@@ -3186,7 +3191,7 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
                     } );
                 double totalSquared = 0.0, topSquared = 0.0;
                 double tinyFractionSquared = 0.0, tinyApertureSquared = 0.0;
-                double nearTargetSquared = 0.0;
+                double nearTargetSquared = 0.0, signedCheckerboardSum = 0.0;
                 for( std::size_t i = 0; i < cellsWithResidual.size(); ++i )
                 {
                     const hotspotCell& row = cellsWithResidual[i];
@@ -3197,6 +3202,8 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
                         fail( "nonfinite compatible residual hotspot" );
                     const double energy = row.residual * row.residual;
                     totalSquared += energy;
+                    signedCheckerboardSum +=
+                        ( ( row.x + row.y ) & 1 ) ? -row.residual : row.residual;
                     if( i < 8 ) topSquared += energy;
                     if( row.fluidFraction < 0.01f )
                         tinyFractionSquared += energy;
@@ -3209,15 +3216,24 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
                     1.0e-7 * std::max( 1.0, totalSquared / fluidCells ) )
                     fail( "independent hotspot residual does not match global RMS" );
                 const double denominator = totalSquared > 0.0 ? totalSquared : 1.0;
+                const double parityMean = signedCheckerboardSum / fluidCells;
+                const double parityShare =
+                    signedCheckerboardSum * signedCheckerboardSum /
+                    ( fluidCells * denominator );
+                if( !std::isfinite( parityMean ) || !std::isfinite( parityShare ) ||
+                    parityShare > 1.0 + 1.0e-6 )
+                    fail( "checkerboard residual projection violated its bound" );
                 std::printf( "zero_mac_hotspot_summary,%.9g,%d,%d,%d,"
-                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g\n",
                     h, checkpoint, iterations, fluidCells,
                     std::sqrt( totalSquared / fluidCells ),
                     topSquared / denominator,
                     tinyFractionSquared / denominator,
                     tinyApertureSquared / denominator,
                     nearTargetSquared / denominator,
-                    std::abs( cellsWithResidual.front().residual ) );
+                    std::abs( cellsWithResidual.front().residual ),
+                    parityMean, parityShare );
                 for( std::size_t i = 0; i < std::min<std::size_t>(
                     8, cellsWithResidual.size() ); ++i )
                 {
@@ -3252,8 +3268,9 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
             if( observed != 0 ) fail( "duplicated frozen checkpoint" );
             ++observed;
             std::optional<result> previous;
-            for( int iterations : budgets )
+            for( int iterations : { 199, 200, 799, 800, 1599, 1600, 3199, 3200 } )
             {
+                if( !locateResidualHotspots && ( iterations & 1 ) ) continue;
                 fluidField2 trial = frozen;
                 trial.setPrePressureSnapshotObserver( {} );
                 if( !trial.setFrozenMacVelocityForAudit(
@@ -3283,8 +3300,15 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
                     fail( "extended Jacobi reference residual unexpectedly increased" );
                 const result row{ h, cp, iterations, face, rms, floorRms,
                     sourceVolume, pressure.pressureResidual, regions };
+                if( locateResidualHotspots && ( iterations & 1 ) == 0 &&
+                    previous && previous->iterations == iterations - 1 )
+                    std::printf( "zero_mac_jacobi_parity,%.9g,%d,%d,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                        h, cp, iterations, previous->compatibleRms, rms,
+                        previous->faceVolume, face,
+                        face - previous->faceVolume );
                 previous = row;
-                results.push_back( row );
+                if( ( iterations & 1 ) == 0 ) results.push_back( row );
                 std::printf( "zero_mac_reference,%.9g,%d,%d,%d,"
                     "%.12g,%.12g,%.12g,%.9g,%.12g,%d\n",
                     h, fluidSteps, cp, iterations, face, rms, floorRms,
