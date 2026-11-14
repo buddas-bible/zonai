@@ -2976,6 +2976,259 @@ void auditMatchedWorldMacPressureRestart( bool probeZeroMac = false,
         fail( "matched-state restart did not exercise history replacement and propagation" );
 }
 
+// S2c reference diagnostic: the SAME frozen, zero-open-MAC pressure RHS
+// is solved with increasingly long Jacobi budgets. Independently compute
+// the discrete compatible continuity residual from the resulting MAC flux,
+// current volume source and per-connected-component source mean. This is
+// not the exact continuum moving-wall flux, nor a Schur PCG reference.
+void auditFrozenZeroMacReference()
+{
+    constexpr float totalDt = 1.0f / 30.0f;
+    constexpr int fluidSteps = 128;
+    constexpr float startAngle = 0.18f, endAngle = 1.28f;
+    constexpr vec2 center{ -0.20f, -0.12f };
+    constexpr std::array<int, 2> checkpoints{{ 11, 12 }};
+    constexpr std::array<int, 4> budgets{{ 200, 800, 1600, 3200 }};
+    const auto fail = []( const char* message )
+    {
+        std::fprintf( stderr, "frozen zero-MAC reference: %s\n", message );
+        std::exit( 1 );
+    };
+    struct result
+    {
+        float h = 0.0f;
+        int checkpoint = 0, iterations = 0;
+        double faceVolume = 0.0;
+        double compatibleRms = 0.0;
+        double compatibilityFloorRms = 0.0;
+        double sourceVolume = 0.0;
+        float legacyResidual = 0.0f;
+        int regions = 0;
+    };
+    std::vector<result> results;
+    results.reserve( 2 * checkpoints.size() * budgets.size() );
+    std::puts( "zero_mac_reference,cell_m,fluid_substeps,checkpoint_16,"
+        "jacobi_iterations,target_face_m3,compatible_rms_per_s,"
+        "component_source_floor_rms_per_s,legacy_pressure_residual,"
+        "active_source_volume_m3,fluid_regions" );
+    std::puts( "zero_mac_reference_cross,fluid_substeps,checkpoint_16,"
+        "jacobi_iterations,coarse_minus_fine_target_m3,"
+        "coarse_minus_fine_compatible_rms_per_s,"
+        "difference_from_3200_target_m3,reference_criteria_met" );
+
+    for( float h : { 0.25f, 0.125f } )
+    {
+        const int segments = static_cast<int>( std::lround( 0.25f / h ) );
+        const float subDt = totalDt / fluidSteps;
+        fluidField2 field{ 32 * segments, 32 * segments, h, { -4.0f, -4.0f } };
+        field.setCutCellProjectionEnabled( true );
+        field.setDisjointAnalyticCutCellEnabled( true );
+        field.setSweptApertureAuditEnabled( true );
+        if( field.isConnectedResidualTracerRemapEnabled() ||
+            field.getSmallCellPressureMergeFraction() != 0.0f )
+            fail( "experimental fluid physics enabled in reference" );
+        fluidShapeObstacle2 capsule{
+            capsule2{ { -0.63f, 0.0f }, { 0.63f, 0.0f }, 0.19f },
+            { center, rot2::FromRadians( startAngle ) }, center,
+            {}, 0.0f, 0.0f, 0.0f };
+        capsule.angularVelocity = ( endAngle - startAngle ) / totalDt;
+        std::array<fluidObstacleForce2, 1> feedback{};
+        field.step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+            feedback, 120 );
+        field.addVelocity( { -0.24f, -0.30f }, { 1.3f, 0.65f }, 0.65f );
+        field.addVelocity( { 0.35f, 0.25f }, { -0.55f, 0.8f }, 0.60f );
+
+        const auto targetFace = [&]( const fluidField2& source )
+        {
+            double volume = 0.0;
+            for( int segment = 0; segment < segments; ++segment )
+            {
+                const int x = 16 * segments + segment;
+                const int y = 16 * segments;
+                const auto budget = source.getCutCellVolumeBudget( x, y - 1, subDt );
+                if( !budget.valid ) fail( "target face budget unavailable" );
+                volume += budget.macOutwardVolume[3];
+            }
+            return volume;
+        };
+
+        // An independent public-query evaluation of the compatible
+        // post-projection residual. For a closed Neumann component, pressure
+        // cannot eliminate the mean initial source. Remove that mean in
+        // VOLUME units per cell before computing RMS in 1/second.
+        const auto compatibleResidual = [&]( const fluidField2& source )
+        {
+            const int width = source.getWidth();
+            const int height = source.getHeight();
+            const int cells = width * height;
+            std::vector<unsigned char> visited( cells, 0 );
+            std::vector<int> queue;
+            queue.reserve( cells );
+            double squared = 0.0, squaredFloor = 0.0, summedSource = 0.0;
+            int fluidCells = 0, components = 0;
+            for( int start = 0; start < cells; ++start )
+            {
+                const int sx = start % width, sy = start / width;
+                if( visited[start] || source.getCellFluidFraction( sx, sy ) <= 0.0f )
+                    continue;
+                visited[start] = 1;
+                queue.clear();
+                queue.push_back( start );
+                double regionSource = 0.0;
+                for( std::size_t head = 0; head < queue.size(); ++head )
+                {
+                    const int index = queue[head];
+                    const int x = index % width, y = index / width;
+                    const auto budget = source.getCutCellVolumeBudget( x, y, subDt );
+                    if( !budget.valid || !budget.hasVolumeHistory )
+                        fail( "missing pressure source for connected residual" );
+                    regionSource += budget.pressureSourceDeltaVolume;
+                    const auto visit = [&]( int nx, int ny, float opening )
+                    {
+                        if( opening <= 0.0f || nx < 0 || nx >= width ||
+                            ny < 0 || ny >= height ||
+                            source.getCellFluidFraction( nx, ny ) <= 0.0f )
+                            return;
+                        const int neighbor = ny * width + nx;
+                        if( visited[neighbor] ) return;
+                        visited[neighbor] = 1;
+                        queue.push_back( neighbor );
+                    };
+                    visit( x - 1, y, source.getUFaceOpenFraction( x, y ) );
+                    visit( x + 1, y, source.getUFaceOpenFraction( x + 1, y ) );
+                    visit( x, y - 1, source.getVFaceOpenFraction( x, y ) );
+                    visit( x, y + 1, source.getVFaceOpenFraction( x, y + 1 ) );
+                }
+                const double meanSource = regionSource / queue.size();
+                summedSource += regionSource;
+                fluidCells += static_cast<int>( queue.size() );
+                ++components;
+                for( const int cell : queue )
+                {
+                    const auto budget = source.getCutCellVolumeBudget(
+                        cell % width, cell / width, subDt );
+                    const double corrected = budget.pressureResidualVolume - meanSource;
+                    squared += corrected * corrected;
+                    squaredFloor += meanSource * meanSource;
+                }
+            }
+            if( fluidCells == 0 ) fail( "reference has no active fluid cells" );
+            const double scale = static_cast<double>( h ) * h * subDt;
+            return std::tuple{
+                std::sqrt( squared / fluidCells ) / scale,
+                std::sqrt( squaredFloor / fluidCells ) / scale,
+                summedSource, components };
+        };
+
+        int currentStep = -1, observed = 0;
+        field.setPrePressureSnapshotObserver( [&]( const fluidField2& frozen )
+        {
+            const int step = currentStep + 1;
+            const int cp = step * 16 / fluidSteps;
+            if( step * 16 != cp * fluidSteps ||
+                std::find( checkpoints.begin(), checkpoints.end(), cp ) ==
+                    checkpoints.end() ) return;
+            if( observed != 0 ) fail( "duplicated frozen checkpoint" );
+            ++observed;
+            std::optional<result> previous;
+            for( int iterations : budgets )
+            {
+                fluidField2 trial = frozen;
+                trial.setPrePressureSnapshotObserver( {} );
+                if( !trial.setFrozenMacVelocityForAudit(
+                    []( vec2 ) { return vec2{}; } ) )
+                    fail( "frozen zero-MAC override refused" );
+                // Actual open-face MAC speed is zero before the replay;
+                // only the moving-volume source remains in pressure RHS.
+                if( std::abs( targetFace( trial ) ) > 1.0e-12 )
+                    fail( "reference input target face was not zero" );
+                if( !trial.replayFrozenCutCellPressure( iterations ).has_value() )
+                    fail( "bounded frozen noncoupled Jacobi replay refused" );
+                const auto [rms, floorRms, sourceVolume, regions] =
+                    compatibleResidual( trial );
+                const auto& pressure = trial.getCutCellPressure();
+                const double face = targetFace( trial );
+                if( !std::isfinite( rms ) || !std::isfinite( floorRms ) ||
+                    !std::isfinite( sourceVolume ) || !std::isfinite( face ) ||
+                    !std::isfinite( pressure.pressureResidual ) ||
+                    pressure.usedCoupledProjection || pressure.coupledSolveFailed ||
+                    pressure.connectedRegions != regions )
+                    fail( "invalid independently reconstructed Jacobi reference" );
+                if( previous && ( regions != previous->regions ||
+                    std::abs( sourceVolume - previous->sourceVolume ) > 1.0e-8 ) )
+                    fail( "frozen pressure source changed with Jacobi budget" );
+                if( previous && iterations == 3200 &&
+                    rms > previous->compatibleRms * 1.01 + 1.0e-6 )
+                    fail( "extended Jacobi reference residual unexpectedly increased" );
+                const result row{ h, cp, iterations, face, rms, floorRms,
+                    sourceVolume, pressure.pressureResidual, regions };
+                previous = row;
+                results.push_back( row );
+                std::printf( "zero_mac_reference,%.9g,%d,%d,%d,"
+                    "%.12g,%.12g,%.12g,%.9g,%.12g,%d\n",
+                    h, fluidSteps, cp, iterations, face, rms, floorRms,
+                    pressure.pressureResidual, sourceVolume, regions );
+            }
+        } );
+
+        for( int step = 0; step < fluidSteps; ++step )
+        {
+            currentStep = step;
+            observed = 0;
+            capsule.transform.rotation = rot2::FromRadians( startAngle +
+                static_cast<float>( step + 1 ) / fluidSteps *
+                ( endAngle - startAngle ) );
+            field.step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                feedback, 120 );
+            const int cp = ( step + 1 ) * 16 / fluidSteps;
+            const bool due = ( step + 1 ) * 16 == cp * fluidSteps &&
+                std::find( checkpoints.begin(), checkpoints.end(), cp ) !=
+                    checkpoints.end();
+            if( ( observed == 1 ) != due )
+                fail( "frozen reference checkpoint coverage mismatch" );
+        }
+    }
+
+    if( results.size() != 16 )
+        fail( "expected two grids, two checkpoints and four Jacobi references" );
+    for( int checkpoint : checkpoints )
+    {
+        const result *refCoarse = nullptr, *refFine = nullptr;
+        for( const auto& record : results )
+            if( record.checkpoint == checkpoint && record.iterations == 3200 )
+            {
+                if( record.h == 0.25f ) refCoarse = &record;
+                else if( record.h == 0.125f ) refFine = &record;
+            }
+        if( !refCoarse || !refFine ) fail( "missing 3200-iteration reference pair" );
+        const double referenceGap = refCoarse->faceVolume - refFine->faceVolume;
+        for( int iterations : budgets )
+        {
+            const result *coarse = nullptr, *fine = nullptr;
+            for( const auto& record : results )
+                if( record.checkpoint == checkpoint &&
+                    record.iterations == iterations )
+                {
+                    if( record.h == 0.25f ) coarse = &record;
+                    else if( record.h == 0.125f ) fine = &record;
+                }
+            if( !coarse || !fine ) fail( "missing matching cross-grid reference" );
+            const double gap = coarse->faceVolume - fine->faceVolume;
+            // Convergence is explicitly assessed, never inferred from a
+            // fixed iteration count or from close target flux alone.
+            const bool referenceCriteriaMet =
+                refCoarse->compatibleRms < 1.0e-3 &&
+                refFine->compatibleRms < 1.0e-3 &&
+                std::abs( gap - referenceGap ) < 1.0e-6;
+            std::printf( "zero_mac_reference_cross,%d,%d,%d,"
+                "%.12g,%.12g,%.12g,%d\n",
+                fluidSteps, checkpoint, iterations, gap,
+                coarse->compatibleRms - fine->compatibleRms,
+                gap - referenceGap, referenceCriteriaMet ? 1 : 0 );
+        }
+    }
+}
+
 // Opt-in, read-only endpoint volume ledger. These are not time-centered
 // aperture integrals; every row is the LAST Fluid substep of a World frame.
 // Different h/cadences have different obstacle histories, so compare only
