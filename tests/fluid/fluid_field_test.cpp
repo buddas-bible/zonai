@@ -225,10 +225,29 @@ void checkFrozenPressureReplay()
     check( !field.replayFrozenCutCellPressure().has_value(),
         "ordinary field must not expose a replayable pressure snapshot" );
 
+    check( !field.setFrozenMacVelocityForAudit(
+        []( vec2 p ) { return vec2{ p.x, p.y }; } ),
+        "live nonfrozen field must reject manufactured MAC override" );
     fluidField2 baseline = *frozen;
     fluidField2 reference = *frozen;
     fluidField2 sameBudget = *frozen;
     fluidField2 moreIterations = *frozen;
+    fluidField2 finishedRestart = *frozen;
+    fluidField2 manufactured = *frozen;
+    manufactured.setPrePressureSnapshotObserver( {} );
+    finishedRestart.setPrePressureSnapshotObserver( {} );
+
+    const auto previousAudit = manufactured.getFlowAudit( dt );
+    check( !manufactured.setFrozenMacVelocityForAudit(
+        []( vec2 ) {
+            return vec2{ std::numeric_limits<float>::quiet_NaN(), 0.0f };
+        } ) &&
+        close( previousAudit.maxFluidFaceSpeed,
+            manufactured.getFlowAudit( dt ).maxFluidFaceSpeed, 1.0e-7f ),
+        "invalid manufactured MAC function must leave frozen field unchanged" );
+    check( manufactured.setFrozenMacVelocityForAudit(
+        []( vec2 p ) { return vec2{ 0.35f - 0.06f * p.y, 0.20f + 0.09f * p.x }; } ),
+        "finite world-space MAC field must be injectable into frozen copy" );
     baseline.setPrePressureSnapshotObserver( {} );
     reference.setPrePressureSnapshotObserver( {} );
     sameBudget.setPrePressureSnapshotObserver( {} );
@@ -242,6 +261,13 @@ void checkFrozenPressureReplay()
     const auto forceReference = reference.replayFrozenCutCellPressure();
     const auto forceSameBudget = sameBudget.replayFrozenCutCellPressure( 80 );
     const auto forceMoreIterations = moreIterations.replayFrozenCutCellPressure( 200 );
+    const auto forceRestart = finishedRestart.replayFrozenCutCellPressure( 80, true );
+    const auto forceManufactured = manufactured.replayFrozenCutCellPressure( 80, true );
+    check( forceRestart.has_value() && forceManufactured.has_value() &&
+        !manufactured.setFrozenMacVelocityForAudit(
+            []( vec2 ) { return vec2{}; } ) &&
+        !manufactured.replayFrozenCutCellPressure( 80, true ).has_value(),
+        "completed manufactured restart cannot be overwritten or replayed again" );
     check( forceSameBudget.has_value() && forceMoreIterations.has_value() &&
         !sameBudget.replayFrozenCutCellPressure( 80 ).has_value(),
         "valid replay iteration override must consume each copied snapshot exactly once" );
@@ -278,6 +304,31 @@ void checkFrozenPressureReplay()
         Length( ( *forceBaseline )[0].force - ( *forceReference )[0].force ) < 1.0e-5f &&
         std::abs( ( *forceBaseline )[0].torque - ( *forceReference )[0].torque ) < 1.0e-5f,
         "frozen pressure replay must preserve pressure force and torque" );
+    // A copied snapshot completed with the opt-in restart tail must have
+    // the SAME obstacle-sweep history as the live field after Step. Test the
+    // *next* real moving Step, not only identical pressure at the capture.
+    check( Length( finishedRestart.getFluidMomentum() -
+        field.getFluidMomentum() ) < 1.0e-5f,
+        "restart completion must match live post-pressure velocity" );
+    circle.transform.position += dt * circle.linearVelocity;
+    circle.center = circle.transform.position;
+    std::array<fluidObstacleForce2, 1> restartedFeedback{};
+    field.step( dt, obstacle, feedback, 80 );
+    finishedRestart.step( dt, obstacle, restartedFeedback, 80 );
+    const auto continued = field.getFlowAudit( dt );
+    const auto continuedRestart = finishedRestart.getFlowAudit( dt );
+    check( close( continued.maxFluidFaceSpeed,
+            continuedRestart.maxFluidFaceSpeed, 1.0e-5f ) &&
+        close( continued.continuityRms,
+            continuedRestart.continuityRms, 1.0e-5f ) &&
+        Length( field.getFluidMomentum() -
+            finishedRestart.getFluidMomentum() ) < 1.0e-5f &&
+        close( field.getTracerMass(), finishedRestart.getTracerMass(), 1.0e-5f ),
+        "completed frozen replay must reproduce next moving Fluid substep" );
+    const auto syntheticAudit = manufactured.getFlowAudit( dt );
+    check( std::isfinite( syntheticAudit.continuityRms ) &&
+        std::isfinite( syntheticAudit.maxFluidFaceSpeed ),
+        "manufactured field restart must remain finite after replay" );
     frozen->clear();
     check( !frozen->replayFrozenCutCellPressure().has_value(),
         "clear must invalidate a previously captured pressure state" );
