@@ -716,6 +716,84 @@ must be verified and its CSV inspected before attributing the residual
 plateau to local aperture geometry, Jacobi slow modes, or matrix
 inconsistency. Neither pressure pooling nor tracer remap is enabled.
 
+### Frozen Jacobi checkerboard eigenmode confirmed by odd/even control — 2026-11-14
+
+**Validated:** opt-in residual-map code `401acdf`,
+[workflow 43567697554](https://github.com/buddas-bible/zonai/actions/runs/43567697554)
+**Ubuntu Debug and Windows Release success**. Follow-on odd/even and
+full-grid checkerboard projection `05b3fd6`,
+[workflow 43568312090](https://github.com/buddas-bible/zonai/actions/runs/43568312090)
+**Ubuntu Debug and Windows Release success**; all published CSV values
+below match across the two runners to displayed precision.
+
+The 3200-iteration **compatible continuity residual** decomposes as:
+
+| Grid h | Rotation checkpoint | RMS (1/s) | Squared residual in signed checkerboard projection | Top-eight-cell squared share | Tiny fraction / positive aperture <1% squared share |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.25m | 11/16 | 0.0925685451 | **98.8489555%** | 0.8414542% | 0% / 0% |
+| 0.25m | 12/16 | 0.0650400082 | **98.8212793%** | 0.8413770% | 0% / 0% |
+| 0.125m | 11/16 | 0.0383750523 | **89.1598984%** | 0.4653814% | 0% / 0% |
+| 0.125m | 12/16 | 0.0095095928 | **11.4411598%** | 0.7174071% | 0% / 0% |
+
+All top-eight cells at the coarse 11/16 3200-iteration snapshot had
+`fluidFraction=1`, four open faces with `aperture=1`, and zero local
+moving-volume source. A representative highest residual cell was
+(x=1, y=30), world-center (-3.625m, 3.625m), far from the target V
+face. The fine-grid largest residual at the same checkpoint was
+(x=62, y=2), world-center (3.8125m, -3.6875m), likewise far from
+the moving capsule. The tiny-cell categories contributing 0% directly
+**do not imply** that moving Cut-cell geometry did not excite the
+global error mode; they show the *remaining residual* is not localized
+on those cells.
+
+**Independent odd/even control:** At h=.25, 11/16, the signed
+checkerboard component changes from **+0.0920342600/s** after 3199
+Jacobi iterations to **-0.0920342506/s** after 3200. The compatible
+RMS stays practically unchanged (0.0925685630/s versus
+0.0925685451/s). Their target V-face volumes differ by
+**+3.89354945e-7 m³** (even minus odd). At h=.25, 12/16,
+the parity component flips from -0.0646555831/s to
++0.0646555519/s, and target-face volume changes
+by -2.73901983e-7 m³. The fine h=.125 11/16 snapshot has
+89.16% of its residual in the checkerboard pattern at 3200;
+at 12/16, only 11.44%: other slowly converging components
+remain. Thus an apparent near-plateau in total residual
+is **not an accepted convergence limit**.
+
+**Mechanism:** The ordinary noncoupled projection is an undamped
+Jacobi update on the open-face-weighted orthogonal cell adjacency
+graph. For every active degree-positive cell i, its homogeneous
+iteration satisfies `e_next[i] = sum_j(a_ij * e[j]) / sum_j(a_ij)`.
+On a bipartite 4-neighbor grid the checkerboard vector
+`e[i] = (-1)^(x_i+y_i)` obeys `e_next[i] = -e[i]` because every
+neighbor has opposite parity. This is the **undamped -1 eigenmode**,
+so adding further even iteration counts cannot remove its
+component. This same high-frequency undamped-Jacobi issue is
+described in Gilbert Strang's MIT *Iterative Methods*, section 6.2:
+https://math.mit.edu/classes/18.086/2006/am62.pdf .
+This reasoning assumes the actual face graph/pressure rows follow the
+stated noncoupled Jacobi discretization; the measured >98% coarse
+projection and odd/even sign flip directly corroborate it here.
+
+**Engineering decision:** This is a reproducible numerical solver
+issue in the **frozen prescribed-kinematic, noncoupled Jacobi** control.
+It is not proof that the real **coupled Schur PCG**
+World8/Fluid4 tracer problem has the same mode. Do not interpret
+the 3200-step solution as a spatially converged pressure reference,
+and do not enable pressure pooling, connected-residual tracer
+redistribution, velocity clamps or a default Jacobi replacement.
+The existing code/CI adds diagnostic observation only, preserving
+production defaults and PR #326 Draft status.
+
+**Next atomic S2c experiment:** on identical frozen inputs, compare
+the legacy undamped Jacobi with a **diagnostic-only damped Jacobi
+control (e.g. omega=2/3)** and/or a separately residual-checked
+pressure solve. Verify full-grid compatible RMS and target flux at
+identical iteration/work budgets, including fine h=.125 at 12/16
+where the checkerboard share is low. Any proposed production change
+requires separate regressions and costs; return afterwards to the
+actual World8/Fluid4 V(17,13) coupled pressure/tracer scene.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
