@@ -180,6 +180,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-residual-map-audit
 
+      # Same pre-pressure snapshot and zero open MAC input, omega=1 versus
+      # diagnostic-only omega=2/3 at identical 200/800/1600/3200 Jacobi budgets.
+      - name: Compare frozen damped versus legacy Jacobi (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-damped-jacobi-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -421,6 +427,12 @@ jobs:
       - name: Localize frozen pressure residual hotspots (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-residual-map-audit
+
+      # Same pre-pressure snapshot and zero open MAC input, omega=1 versus
+      # diagnostic-only omega=2/3 at identical 200/800/1600/3200 Jacobi budgets.
+      - name: Compare frozen damped versus legacy Jacobi (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\build\tests\Release\sandboxWindStepBenchmark.exe --small-cell-zero-mac-damped-jacobi-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
