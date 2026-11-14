@@ -4248,6 +4248,241 @@ void auditCutCellVolumeBudget()
 }
 
 
+
+// S2c geometry-only control: hold the prescribed rotating Capsule, grid,
+// fluid cadence and checkpoint fixed while switching only the existing
+// opt-in analytic Capsule geometry. The underlying Fluid histories are
+// separately evolved; pressure results are independently assembled from
+// each frozen geometry after zeroing the MAC input. Not a same-state
+// pressure-operator counterfactual or a production stabilization proposal.
+void auditFrozenCapsuleGeometryComparison()
+{
+    constexpr float totalDt = 1.0f / 30.0f;
+    constexpr int fluidSteps = 128;
+    constexpr float startAngle = 0.18f, endAngle = 1.28f;
+    constexpr vec2 center{ -0.20f, -0.12f };
+    constexpr std::array<int, 2> checkpoints{{ 11, 12 }};
+    const auto fail = []( const char* message ) { throw std::runtime_error( message ); };
+    struct capture
+    {
+        bool valid = false;
+        int width = 0, height = 0, active = 0, anchors = 0;
+        double anchorOpening = 0.0;
+        std::vector<float> cells, uOpen, vOpen;
+        std::vector<double> sources;
+        independentCutCellPressureResult pressure{};
+    };
+
+    std::puts( "capsule_geometry_summary,cell_m,checkpoint_16,analytic,"
+        "active_cells,anchor_faces,anchor_aperture_sum,pcg_iterations,"
+        "pcg_explicit_rms_per_s,reference_target_face_m3,"
+        "pressure_source_active_m3,pcg_converged" );
+    std::puts( "capsule_geometry_pair,cell_m,checkpoint_16,"
+        "sampled_active,analytic_active,sampled_anchors,analytic_anchors,"
+        "sampled_anchor_aperture,analytic_anchor_aperture,"
+        "reclassified_zero_cells,max_cell_fraction_difference,"
+        "max_face_aperture_difference,pressure_source_L1_difference_m3,"
+        "analytic_minus_sampled_target_face_m3" );
+    std::puts( "capsule_geometry_anchor_pair,cell_m,checkpoint_16,axis,x,y,"
+        "sampled_open,analytic_open,sampled_fraction_a,sampled_fraction_b,"
+        "analytic_fraction_a,analytic_fraction_b,"
+        "sampled_source_a_m3,sampled_source_b_m3,"
+        "analytic_source_a_m3,analytic_source_b_m3" );
+
+    for( float h : { 0.25f, 0.125f } )
+    {
+        const int segments = static_cast<int>( std::lround( 0.25f / h ) );
+        const float subDt = totalDt / fluidSteps;
+        std::array<std::array<capture, 2>, 2> observations{};
+        for( int mode = 0; mode < 2; ++mode )
+        {
+            fluidField2 field{ 32 * segments, 32 * segments, h, { -4.0f, -4.0f } };
+            field.setCutCellProjectionEnabled( true );
+            field.setDisjointAnalyticCutCellEnabled( true );
+            field.setAnalyticCapsuleCutCellEnabled( mode != 0 );
+            if( field.getSmallCellPressureMergeFraction() != 0.0f ||
+                field.isConnectedResidualTracerRemapEnabled() )
+                fail( "experimental pressure or tracer physics enabled in geometry control" );
+            fluidShapeObstacle2 capsule{
+                capsule2{ { -0.63f, 0.0f }, { 0.63f, 0.0f }, 0.19f },
+                { center, rot2::FromRadians( startAngle ) }, center,
+                {}, 0.0f, 0.0f, 0.0f };
+            capsule.angularVelocity = ( endAngle - startAngle ) / totalDt;
+            std::array<fluidObstacleForce2, 1> feedback{};
+            field.step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                feedback, 120 );
+            field.addVelocity( { -0.24f, -0.30f }, { 1.3f, 0.65f }, 0.65f );
+            field.addVelocity( { 0.35f, 0.25f }, { -0.55f, 0.8f }, 0.60f );
+
+            int currentStep = -1;
+            field.setPrePressureSnapshotObserver( [&]( const fluidField2& frozen )
+            {
+                const int step = currentStep + 1;
+                const int cp = step * 16 / fluidSteps;
+                if( step * 16 != cp * fluidSteps ||
+                    std::find( checkpoints.begin(), checkpoints.end(), cp ) ==
+                        checkpoints.end() ) return;
+                const int slot = cp == checkpoints[0] ? 0 : 1;
+                capture& row = observations[mode][slot];
+                if( row.valid || frozen.isAnalyticCapsuleCutCellEnabled() != ( mode != 0 ) ||
+                    frozen.getCutCellTransition().usedDisjointAnalyticGeometry )
+                    fail( "invalid Capsule frozen geometry checkpoint" );
+
+                fluidField2 trial = frozen;
+                trial.setPrePressureSnapshotObserver( {} );
+                if( !trial.setFrozenMacVelocityForAudit(
+                    []( vec2 ) { return vec2{}; } ) )
+                    fail( "frozen Capsule geometry MAC override refused" );
+                row.width = trial.getWidth();
+                row.height = trial.getHeight();
+                const int width = row.width, height = row.height;
+                row.cells.resize( width * height );
+                row.sources.resize( width * height );
+                row.uOpen.resize( ( width + 1 ) * height );
+                row.vOpen.resize( width * ( height + 1 ) );
+                const auto cellIndex = [width]( int x, int y ) { return y * width + x; };
+                for( int y = 0; y < height; ++y )
+                    for( int x = 0; x < width; ++x )
+                    {
+                        const int cell = cellIndex( x, y );
+                        const auto budget = trial.getCutCellVolumeBudget( x, y, subDt );
+                        if( !budget.valid || !budget.hasVolumeHistory )
+                            fail( "missing frozen Capsule geometry source" );
+                        row.cells[cell] = budget.currentFraction;
+                        row.sources[cell] = budget.pressureSourceDeltaVolume;
+                        row.active += budget.currentFraction > 0.0f;
+                    }
+                for( int y = 0; y < height; ++y )
+                    for( int x = 0; x <= width; ++x )
+                    {
+                        const float open = trial.getUFaceOpenFraction( x, y );
+                        row.uOpen[y * ( width + 1 ) + x] = open;
+                        if( x > 0 && x < width && open > 0.0f &&
+                            ( row.cells[cellIndex( x - 1, y )] > 0.0f ) !=
+                            ( row.cells[cellIndex( x, y )] > 0.0f ) )
+                        {
+                            ++row.anchors;
+                            row.anchorOpening += open;
+                        }
+                    }
+                for( int y = 0; y <= height; ++y )
+                    for( int x = 0; x < width; ++x )
+                    {
+                        const float open = trial.getVFaceOpenFraction( x, y );
+                        row.vOpen[y * width + x] = open;
+                        if( y > 0 && y < height && open > 0.0f &&
+                            ( row.cells[cellIndex( x, y - 1 )] > 0.0f ) !=
+                            ( row.cells[cellIndex( x, y )] > 0.0f ) )
+                        {
+                            ++row.anchors;
+                            row.anchorOpening += open;
+                        }
+                    }
+                row.pressure = solveIndependentFrozenCutCellPressure(
+                    trial, subDt, segments );
+                if( row.pressure.activeCells != row.active ||
+                    row.pressure.activeToInactiveOpenFaces != row.anchors ||
+                    std::abs( row.pressure.activeToInactiveApertureSum -
+                        row.anchorOpening ) > 1.0e-7 ||
+                    !std::isfinite( row.pressure.targetFaceVolume ) ||
+                    !std::isfinite( row.pressure.finalRmsPerSecond ) )
+                    fail( "independent Capsule pressure/geometry ledger mismatch" );
+                row.valid = true;
+                std::printf( "capsule_geometry_summary,%.9g,%d,%d,%d,%d,"
+                    "%.12g,%d,%.12g,%.12g,%.12g,%d\n",
+                    h, cp, mode, row.active, row.anchors, row.anchorOpening,
+                    row.pressure.iterations, row.pressure.finalRmsPerSecond,
+                    row.pressure.targetFaceVolume, row.pressure.sourceVolume,
+                    row.pressure.converged ? 1 : 0 );
+            } );
+
+            for( int step = 0; step < fluidSteps; ++step )
+            {
+                currentStep = step;
+                capsule.transform.rotation = rot2::FromRadians( startAngle +
+                    static_cast<float>( step + 1 ) / fluidSteps *
+                    ( endAngle - startAngle ) );
+                field.step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                    feedback, 120 );
+            }
+            if( !observations[mode][0].valid || !observations[mode][1].valid )
+                fail( "missing Capsule geometry checkpoint" );
+        }
+
+        for( int slot = 0; slot < 2; ++slot )
+        {
+            const capture& sampled = observations[0][slot];
+            const capture& analytic = observations[1][slot];
+            const int cp = checkpoints[slot];
+            if( sampled.width != analytic.width ||
+                sampled.height != analytic.height ||
+                sampled.cells.size() != analytic.cells.size() ||
+                sampled.uOpen.size() != analytic.uOpen.size() ||
+                sampled.vOpen.size() != analytic.vOpen.size() )
+                fail( "Capsule geometry comparison grid mismatch" );
+            double maxCellDifference = 0.0, maxFaceDifference = 0.0;
+            double sourceDifference = 0.0;
+            int reclassified = 0;
+            for( std::size_t i = 0; i < sampled.cells.size(); ++i )
+            {
+                maxCellDifference = std::max( maxCellDifference,
+                    std::abs( static_cast<double>( sampled.cells[i] ) - analytic.cells[i] ) );
+                sourceDifference += std::abs( sampled.sources[i] - analytic.sources[i] );
+                reclassified += sampled.cells[i] == 0.0f && analytic.cells[i] > 0.0f;
+            }
+            for( std::size_t i = 0; i < sampled.uOpen.size(); ++i )
+                maxFaceDifference = std::max( maxFaceDifference, std::abs(
+                    static_cast<double>( sampled.uOpen[i] ) - analytic.uOpen[i] ) );
+            for( std::size_t i = 0; i < sampled.vOpen.size(); ++i )
+                maxFaceDifference = std::max( maxFaceDifference, std::abs(
+                    static_cast<double>( sampled.vOpen[i] ) - analytic.vOpen[i] ) );
+
+            std::printf( "capsule_geometry_pair,%.9g,%d,%d,%d,%d,%d,"
+                "%.12g,%.12g,%d,%.12g,%.12g,%.12g,%.12g\n",
+                h, cp, sampled.active, analytic.active,
+                sampled.anchors, analytic.anchors,
+                sampled.anchorOpening, analytic.anchorOpening,
+                reclassified, maxCellDifference, maxFaceDifference,
+                sourceDifference,
+                analytic.pressure.targetFaceVolume - sampled.pressure.targetFaceVolume );
+
+            const int width = sampled.width, height = sampled.height;
+            const auto emit = [&]( char axis, int x, int y, int ax, int ay,
+                int bx, int by, float sampledOpen, float analyticOpen )
+            {
+                const int ai = ay * width + ax, bi = by * width + bx;
+                const bool sampledAnchor = sampledOpen > 0.0f &&
+                    ( ( sampled.cells[ai] > 0.0f ) != ( sampled.cells[bi] > 0.0f ) );
+                const bool analyticAnchor = analyticOpen > 0.0f &&
+                    ( ( analytic.cells[ai] > 0.0f ) != ( analytic.cells[bi] > 0.0f ) );
+                if( !sampledAnchor && !analyticAnchor ) return;
+                std::printf( "capsule_geometry_anchor_pair,%.9g,%d,%c,%d,%d,"
+                    "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+                    "%.12g,%.12g,%.12g,%.12g\n",
+                    h, cp, axis, x, y, sampledOpen, analyticOpen,
+                    sampled.cells[ai], sampled.cells[bi],
+                    analytic.cells[ai], analytic.cells[bi],
+                    sampled.sources[ai], sampled.sources[bi],
+                    analytic.sources[ai], analytic.sources[bi] );
+            };
+            for( int y = 0; y < height; ++y )
+                for( int x = 1; x < width; ++x )
+                {
+                    const int i = y * ( width + 1 ) + x;
+                    emit( 'U', x, y, x - 1, y, x, y,
+                        sampled.uOpen[i], analytic.uOpen[i] );
+                }
+            for( int y = 1; y < height; ++y )
+                for( int x = 0; x < width; ++x )
+                {
+                    const int i = y * width + x;
+                    emit( 'V', x, y, x, y - 1, x, y,
+                        sampled.vOpen[i], analytic.vOpen[i] );
+                }
+        }
+    }
+}
+
 } // namespace
 
 int main( int argc, char** argv )
@@ -4284,6 +4519,7 @@ int main( int argc, char** argv )
     bool zeroMacDampedJacobiAudit = false;
     bool zeroMacIndependentPcgAudit = false;
     bool zeroMacAnchorAudit = false;
+    bool capsuleGeometryAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -4319,6 +4555,7 @@ int main( int argc, char** argv )
         zeroMacDampedJacobiAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-damped-jacobi-audit";
         zeroMacIndependentPcgAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-independent-pcg-audit";
         zeroMacAnchorAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-anchor-audit";
+        capsuleGeometryAudit |= std::string_view( argv[i] ) == "--small-cell-capsule-geometry-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -4372,6 +4609,7 @@ int main( int argc, char** argv )
         auditFrozenZeroMacReference( false, true, true, true );
         return 0;
     }
+    if( capsuleGeometryAudit ) { auditFrozenCapsuleGeometryComparison(); return 0; }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
