@@ -457,6 +457,24 @@ struct fluidCutCellVolumeBudget2
     double sweptResidualVolume = 0.0; // MAC + signed solid swept divergence
 };
 
+// On-demand trace of the existing SINGLE-Capsule analytic cell-area path.
+// Re-evaluates the caller-supplied shape at the specified grid cell, without
+// mutating the Field or checking that it matches the most recent Step.
+// In m^2 except fractions; retains the signed pre-clamp area remainder.
+struct fluidCapsuleCellAreaAudit2
+{
+    bool valid = false;
+    double cellArea = 0.0;
+    double coreCoveredArea = 0.0;
+    double firstCapCoveredArea = 0.0;
+    double lastCapCoveredArea = 0.0;
+    double componentSumCoveredArea = 0.0;
+    double clampedCoveredArea = 0.0;
+    double signedUnclampedFluidArea = 0.0;
+    double recomputedFluidFraction = 0.0;
+    float storedFluidFraction = 0.0f;
+};
+
 // O(grid) opt-in summary; does not run or allocate in the normal Step.
 // RMS metrics count active fluid cells only; totalSnapshotDeltaVolume and
 // modifiedCellCount account for fully covered cells as well.
@@ -1027,6 +1045,10 @@ public:
     // Explicit diagnostic: reads the current field, including changes after Step.
     // Not called on the normal simulation path; timeStep must be finite and positive.
     [[nodiscard]] fluidFlowAudit2 getFlowAudit( float timeStep ) const noexcept;
+    // Read-only diagnostic of core + two half-circle covered areas for one
+    // supplied Capsule; available only when analytic Capsule mode is enabled.
+    [[nodiscard]] fluidCapsuleCellAreaAudit2 getAnalyticCapsuleCellAreaAudit(
+        const fluidShapeObstacle2& capsule, int x, int y ) const noexcept;
     // Endpoint (not time-centered) MAC-vs-geometry and pressure-source ledgers.
     // Invalid coordinates / nonpositive dt return valid=false.
     [[nodiscard]] fluidCutCellVolumeBudget2 getCutCellVolumeBudget(
