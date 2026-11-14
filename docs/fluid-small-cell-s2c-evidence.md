@@ -1168,6 +1168,49 @@ discrete fluid state, so distinguish that experiment from a same-frozen-state
 pressure-only A/B. Do not simply erase anchored pressure faces, clamp
 velocities or enable either experimental pressure pooling or tracer rerouting.
 
+### Prescribed rotating Capsule: sampled versus analytic geometry A/B — 2026-11-14
+
+The independent coarse-midpoint oracle in the previous section passed
+Ubuntu Debug CI at [run 43577219383](https://github.com/buddas-bible/zonai/actions/runs/43577219383).
+It matches the engine's four face points and 4×4 cell occupancy without using
+the engine's clipping routines. Its separate 96×96 midpoint witness shows
+positive fluid area where the baseline discrete cell is entirely inactive.
+For example, h=0.125m at checkpoint 12/16:
+
+| Covered-by-N=4 cell | Discrete fluid fraction | Independent N=96 estimated fluid fraction | Adjacent open face |
+| --- | ---: | ---: | --- |
+| (30,29) | 0 | 0.00716146 | U(31,29), sampled open 0.25 |
+| (32,32) | 0 | 0.02832031 | U(33,32), sampled open 0.25 |
+| (31,34) | 0 | 0.01019965 | U(31,34), sampled open 0.25 |
+| (32,32) | 0 | 0.02832031 | V(32,32), sampled open 0.25 |
+
+These values are **point-sampled area estimates**, not analytic exact volumes
+or an accepted repair. They demonstrate that cell and face N=4 support
+decisions can disagree along the same continuous Capsule boundary.
+This supplies a concrete pressure-anchor mechanism without establishing
+whether analytic geometry resolves the real coupled World8/Fluid4 spike.
+
+The next standalone, opt-in --small-cell-capsule-geometry-audit
+(commit 23158412, CI wiring 9258ddbc) runs the **same prescribed rotation**
+at h=0.25/0.125, 128 Fluid substeps, checkpoints 11/16 and 12/16,
+with baseline sampled geometry and the existing analytic-Capsule mode
+separately. Each pre-pressure snapshot is copied and given zero-open-MAC
+input for an independently assembled double-precision reference PCG;
+the original Fluid/pressure solver is not modified. CSV includes active
+fluid cells, active-to-inactive pressure anchors and aperture sums,
+sampled-versus-analytic fractions and face apertures on affected faces,
+source-volume differences, pressure true residual and target-face volume.
+
+**Interpretation gate:** geometry, pressure source and previous Fluid states
+may differ between the two separately evolved variants, even though
+the prescribed solid path and zero-MAC diagnostic input match.
+This is a **geometry-policy sensitivity control**, not a same-snapshot
+pressure-matrix A/B and not proof of mass preservation or physical stability.
+Review Windows and Ubuntu CSV, including any analytic-mode anchors or
+reference PCG failures, before deciding on a numerical change.
+Keep experimental pressure pooling and connected tracer rerouting OFF,
+and PR #326 Draft.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
