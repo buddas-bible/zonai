@@ -3810,6 +3810,9 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
                             fail( "independent pressure reference did not meet explicit residual" );
                         if( auditAnchors )
                         {
+                            auditFrozenInactiveNeighborFaces( trial, subDt, cp,
+                                independent.activeToInactiveOpenFaces,
+                                independent.activeToInactiveApertureSum );
                             const auto omitted = solveIndependentFrozenCutCellPressure(
                                 trial, subDt, segments, true );
                             if( !omitted.converged ||
