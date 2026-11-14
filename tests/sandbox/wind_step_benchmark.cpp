@@ -2981,7 +2981,7 @@ void auditMatchedWorldMacPressureRestart( bool probeZeroMac = false,
 // the discrete compatible continuity residual from the resulting MAC flux,
 // current volume source and per-connected-component source mean. This is
 // not the exact continuum moving-wall flux, nor a Schur PCG reference.
-void auditFrozenZeroMacReference()
+void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
 {
     constexpr float totalDt = 1.0f / 30.0f;
     constexpr int fluidSteps = 128;
@@ -3015,6 +3015,19 @@ void auditFrozenZeroMacReference()
         "jacobi_iterations,coarse_minus_fine_target_m3,"
         "coarse_minus_fine_compatible_rms_per_s,"
         "difference_from_3200_target_m3,reference_criteria_met" );
+    if( locateResidualHotspots )
+    {
+        std::puts( "zero_mac_hotspot_summary,cell_m,checkpoint_16,"
+            "iterations,active_cells,global_compatible_rms_per_s,"
+            "top8_squared_residual_share,tiny_fraction_squared_share,"
+            "tiny_positive_aperture_squared_share,"
+            "near_target_squared_share,max_abs_residual_per_s" );
+        std::puts( "zero_mac_hotspot,cell_m,checkpoint_16,iterations,rank,"
+            "x,y,world_center_x_m,world_center_y_m,compatible_residual_per_s,"
+            "fraction,min_positive_open,max_open,positive_faces,"
+            "source_m3,snapshot_m3,swept_divergence_m3,"
+            "post_mac_net_m3,manhattan_from_target_cells" );
+    }
 
     for( float h : { 0.25f, 0.125f } )
     {
@@ -3056,7 +3069,18 @@ void auditFrozenZeroMacReference()
         // post-projection residual. For a closed Neumann component, pressure
         // cannot eliminate the mean initial source. Remove that mean in
         // VOLUME units per cell before computing RMS in 1/second.
-        const auto compatibleResidual = [&]( const fluidField2& source )
+        struct hotspotCell
+        {
+            int x = 0, y = 0;
+            double residual = 0.0;
+            double source = 0.0, snapshot = 0.0, swept = 0.0, mac = 0.0;
+            float fluidFraction = 0.0f;
+            float minPositiveOpen = 0.0f, maxOpen = 0.0f;
+            int positiveFaces = 0;
+            int targetDistance = 0;
+        };
+        const auto compatibleResidual = [&]( const fluidField2& source,
+            int checkpoint, int iterations )
         {
             const int width = source.getWidth();
             const int height = source.getHeight();
@@ -3066,6 +3090,8 @@ void auditFrozenZeroMacReference()
             queue.reserve( cells );
             double squared = 0.0, squaredFloor = 0.0, summedSource = 0.0;
             int fluidCells = 0, components = 0;
+            std::vector<hotspotCell> cellsWithResidual;
+            if( locateResidualHotspots ) cellsWithResidual.reserve( cells );
             for( int start = 0; start < cells; ++start )
             {
                 const int sx = start % width, sy = start / width;
@@ -3110,10 +3136,105 @@ void auditFrozenZeroMacReference()
                     const double corrected = budget.pressureResidualVolume - meanSource;
                     squared += corrected * corrected;
                     squaredFloor += meanSource * meanSource;
+                    if( locateResidualHotspots )
+                    {
+                        const int x = cell % width, y = cell / width;
+                        const std::array<float, 4> apertures{{
+                            source.getUFaceOpenFraction( x, y ),
+                            source.getUFaceOpenFraction( x + 1, y ),
+                            source.getVFaceOpenFraction( x, y ),
+                            source.getVFaceOpenFraction( x, y + 1 )
+                        }};
+                        float minPositive = 1.0f, maxOpen = 0.0f;
+                        int positiveFaces = 0;
+                        for( const float aperture : apertures )
+                        {
+                            if( aperture <= 0.0f ) continue;
+                            ++positiveFaces;
+                            minPositive = std::min( minPositive, aperture );
+                            maxOpen = std::max( maxOpen, aperture );
+                        }
+                        if( positiveFaces == 0 ) minPositive = 0.0f;
+                        const int targetX = 16 * segments;
+                        const int targetY = 16 * segments;
+                        const int distance = std::abs( x - targetX ) +
+                            std::min( std::abs( y - targetY ),
+                                std::abs( y - ( targetY - 1 ) ) );
+                        const double scale = static_cast<double>( h ) * h * subDt;
+                        cellsWithResidual.push_back( { x, y,
+                            corrected / scale, budget.pressureSourceDeltaVolume,
+                            budget.snapshotDeltaVolume,
+                            budget.solidSweptDivergenceVolume,
+                            budget.macNetOutwardVolume, budget.currentFraction,
+                            minPositive, maxOpen, positiveFaces, distance } );
+                    }
                 }
             }
             if( fluidCells == 0 ) fail( "reference has no active fluid cells" );
             const double scale = static_cast<double>( h ) * h * subDt;
+            if( locateResidualHotspots )
+            {
+                if( cellsWithResidual.size() != static_cast<std::size_t>( fluidCells ) )
+                    fail( "hotspot ledger did not cover every active cell" );
+                std::sort( cellsWithResidual.begin(), cellsWithResidual.end(),
+                    []( const hotspotCell& a, const hotspotCell& b )
+                    {
+                        if( std::abs( a.residual ) != std::abs( b.residual ) )
+                            return std::abs( a.residual ) > std::abs( b.residual );
+                        if( a.y != b.y ) return a.y < b.y;
+                        return a.x < b.x;
+                    } );
+                double totalSquared = 0.0, topSquared = 0.0;
+                double tinyFractionSquared = 0.0, tinyApertureSquared = 0.0;
+                double nearTargetSquared = 0.0;
+                for( std::size_t i = 0; i < cellsWithResidual.size(); ++i )
+                {
+                    const hotspotCell& row = cellsWithResidual[i];
+                    if( !std::isfinite( row.residual ) ||
+                        !std::isfinite( row.source ) ||
+                        !std::isfinite( row.mac ) ||
+                        !std::isfinite( row.fluidFraction ) )
+                        fail( "nonfinite compatible residual hotspot" );
+                    const double energy = row.residual * row.residual;
+                    totalSquared += energy;
+                    if( i < 8 ) topSquared += energy;
+                    if( row.fluidFraction < 0.01f )
+                        tinyFractionSquared += energy;
+                    if( row.positiveFaces > 0 && row.minPositiveOpen < 0.01f )
+                        tinyApertureSquared += energy;
+                    if( row.targetDistance <= 3 ) nearTargetSquared += energy;
+                }
+                if( std::abs( totalSquared / fluidCells -
+                    squared / ( fluidCells * scale * scale ) ) >
+                    1.0e-7 * std::max( 1.0, totalSquared / fluidCells ) )
+                    fail( "independent hotspot residual does not match global RMS" );
+                const double denominator = totalSquared > 0.0 ? totalSquared : 1.0;
+                std::printf( "zero_mac_hotspot_summary,%.9g,%d,%d,%d,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                    h, checkpoint, iterations, fluidCells,
+                    std::sqrt( totalSquared / fluidCells ),
+                    topSquared / denominator,
+                    tinyFractionSquared / denominator,
+                    tinyApertureSquared / denominator,
+                    nearTargetSquared / denominator,
+                    std::abs( cellsWithResidual.front().residual ) );
+                for( std::size_t i = 0; i < std::min<std::size_t>(
+                    8, cellsWithResidual.size() ); ++i )
+                {
+                    const hotspotCell& row = cellsWithResidual[i];
+                    const vec2 world = source.getCellCenter( row.x, row.y );
+                    std::printf( "zero_mac_hotspot,%.9g,%d,%d,%zu,"
+                        "%d,%d,%.9g,%.9g,%.12g,"
+                        "%.9g,%.9g,%.9g,%d,"
+                        "%.12g,%.12g,%.12g,%.12g,%d\n",
+                        h, checkpoint, iterations, i + 1,
+                        row.x, row.y, world.x, world.y, row.residual,
+                        row.fluidFraction, row.minPositiveOpen,
+                        row.maxOpen, row.positiveFaces,
+                        row.source, row.snapshot, row.swept, row.mac,
+                        row.targetDistance );
+                }
+            }
             return std::tuple{
                 std::sqrt( squared / fluidCells ) / scale,
                 std::sqrt( squaredFloor / fluidCells ) / scale,
@@ -3145,7 +3266,7 @@ void auditFrozenZeroMacReference()
                 if( !trial.replayFrozenCutCellPressure( iterations ).has_value() )
                     fail( "bounded frozen noncoupled Jacobi replay refused" );
                 const auto [rms, floorRms, sourceVolume, regions] =
-                    compatibleResidual( trial );
+                    compatibleResidual( trial, cp, iterations );
                 const auto& pressure = trial.getCutCellPressure();
                 const double face = targetFace( trial );
                 if( !std::isfinite( rms ) || !std::isfinite( floorRms ) ||
@@ -3426,6 +3547,7 @@ int main( int argc, char** argv )
     bool zeroMacPressureAudit = false;
     bool zeroMacConvergenceAudit = false;
     bool zeroMacReferenceAudit = false;
+    bool zeroMacResidualMapAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -3457,6 +3579,7 @@ int main( int argc, char** argv )
         zeroMacPressureAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-pressure-audit";
         zeroMacConvergenceAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-convergence-audit";
         zeroMacReferenceAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-reference-audit";
+        zeroMacResidualMapAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-residual-map-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -3490,6 +3613,11 @@ int main( int argc, char** argv )
         return 0;
     }
     if( zeroMacReferenceAudit ) { auditFrozenZeroMacReference(); return 0; }
+    if( zeroMacResidualMapAudit )
+    {
+        auditFrozenZeroMacReference( true );
+        return 0;
+    }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
