@@ -337,6 +337,59 @@ The geometric/swept phase at each horizon is equal between **evolved** and **syn
 
 **Acceptance consequence:** S2c still lacks an independently validated *physical* space-time tracer flux bound. No production settings or pressure/Tracer equations have changed; pressure pooling and connected-residual routing remain OFF, and PR #326 remains Draft. Next investigate the **matched-world pressure stage** with a controlled geometry/source alignment or a convergence-tested reference projection (rather than only its signed target-face flux), then carry the diagnostic back to the coupled World8/Fluid4 small-cell tracer disappearance. Measure both production and opt-in probe overhead before considering defaults.
 
+### Zero-open-MAC frozen pressure control — 2026-11-14
+
+The prior **matched continuous-world affine** checkpoint still produced a significant
+h=0.25 vs h=0.125 **post-projection** V(16,16) flux difference. This by itself
+cannot assign error to the pressure operator: the two grids have different
+discrete moving-boundary geometry and pressure volume sources. The
+`--small-cell-zero-mac-pressure-audit` trial adds a third frozen copy at each
+11/16 and 12/16 pure-capsule rotation checkpoint, for 64 and 128 actual Fluid
+substeps, on both grids.
+
+- **Natural**: preserve the actual pre-projection history; complete the copied
+  step and advance up to four real subsequent Fluid steps (existing test).
+- **Affine**: replace only *open interior* MAC face velocities with the same
+  divergence-free world-coordinate affine field on both grids (existing test).
+- **Zero-open-MAC**: on another copy of the same frozen Step, set only *open
+  interior* face velocities to zero. Retain the moving capsule's swept geometry,
+  volume-rate source and **closed-face moving-solid velocities**. Execute the
+  ordinary 120-iteration pressure projection once, read-only with respect to
+  the original field. This is **not** a stationary-wall or zero-total-RHS case.
+
+The new per-grid CSV reports pre-pressure/post-pressure *signed physical-face
+MAC volumes*, their difference, pressure residual, signed solid swept volume
+and open-time exposure. The cross-grid CSV reports:
+
+`affineProjectionGap = (affinePost_coarse - affinePre_coarse) - (affinePost_fine - affinePre_fine)`
+
+`zeroProjectionGap = (zeroPost_coarse - zeroPre_coarse) - (zeroPost_fine - zeroPre_fine)`
+
+`velocityDependentGap = affineProjectionGap - zeroProjectionGap`.
+
+These are identities for two **different discrete grids**, not an exact
+projection truncation-error estimate, a pressure-operator-only difference or
+a physical space-time tracer-flux bound. In particular, changing open MAC
+velocities also changes their divergence contribution to each pressure RHS.
+The zero-input response can retain wall-motion, geometry and numerical
+effects. The test asserts finite pressure and tracer-independent operation,
+equal geometry/swept ledgers across cloned inputs, full checkpoint coverage,
+and closure of the comparison algebra. The original benchmark command retains
+its exact behavior when the new flag is absent.
+
+Implementation: `98bf088` (separate opt-in frozen zero-MAC probe),
+`2923837` (Ubuntu Debug/Windows Release CI step). Initial validation:
+[workflow 43555705311](https://github.com/buddas-bible/zonai/actions/runs/43555705311).
+CI conclusions and actual measured numbers must be checked before treating
+this as verified; no change to defaults, pressure/Schur, coupled Body forces,
+tracer routing or speed clamps.
+
+**Next:** use the three input conditions at equal pose/time to determine
+whether the observed cross-grid projection response is dominated by the
+moving-wall/geometry source or by the velocity-dependent contribution,
+then return to the real World8/Fluid4 disappearing V(17,13) tracer case.
+The opt-in pressure pooling and connected-residual routing remain Draft/OFF.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
