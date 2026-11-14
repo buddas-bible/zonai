@@ -2422,6 +2422,246 @@ void auditRotatingFrozenPressureIterationSweep()
             }
 }
 
+// S2c controlled short restart. "Matched" means the SAME continuous
+// analytic velocity function sampled at the two staggered MAC grids, NOT
+// identical arrays or a mathematically exact cross-grid restriction.
+// Geometry, swept displacement and solid velocity remain independently
+// discretized. The injected state is copied from frozen pre-pressure fields,
+// then replayed through their actual normal pressure solver. In contrast,
+// history resumes from the untouched frozen state. Both advance 1/2/4
+// actual following Fluid steps with the SAME prescribed capsule motion.
+void auditMatchedWorldMacPressureRestart()
+{
+    constexpr float totalDt = 1.0f / 30.0f;
+    constexpr float startAngle = 0.18f, endAngle = 1.28f;
+    constexpr vec2 center{ -0.20f, -0.12f };
+    constexpr float angularSpeed = ( endAngle - startAngle ) / totalDt;
+    constexpr std::array<int, 2> checkpoints{{ 11, 12 }};
+    constexpr std::array<int, 4> horizons{{ 0, 1, 2, 4 }};
+    const auto fail = []( const char* message )
+    {
+        std::fprintf( stderr, "matched-world MAC pressure restart: %s\n", message );
+        std::exit( 1 );
+    };
+    // Smooth, exactly divergence-free affine velocity on R². On every
+    // OPEN MAC face both grids sample this SAME world-coordinate function;
+    // closed faces retain their independently sampled solid boundary speed.
+    const auto worldVelocity = []( vec2 p ) -> vec2
+    {
+        return { 0.30f - 0.08f * ( p.y + 0.12f ),
+            0.42f + 0.12f * ( p.x + 0.20f ) };
+    };
+    struct result
+    {
+        float h = 0.0f;
+        int fluidSteps = 0, checkpoint = 0, horizon = 0;
+        double naturalPre = 0.0, matchedPre = 0.0;
+        double naturalPost = 0.0, matchedPost = 0.0;
+        double openTime = 0.0, sweptVolume = 0.0;
+    };
+    std::vector<result> results;
+    results.reserve( 2 * 2 * checkpoints.size() * horizons.size() );
+    std::puts( "matched_world_restart,cell_m,fluid_substeps,"
+        "checkpoint_16,horizon_steps,angle_rad,"
+        "captured_evolved_pre_m3,captured_matched_world_pre_m3,"
+        "evolved_post_m3,matched_world_post_m3,"
+        "time_mean_open_seconds,solid_swept_m3" );
+    std::puts( "matched_world_cross,fluid_substeps,checkpoint_16,"
+        "horizon_steps,evolved_coarse_minus_fine_m3,"
+        "matched_coarse_minus_fine_m3,"
+        "history_excess_gap_m3,captured_evolved_pre_gap_m3,"
+        "captured_matched_pre_gap_m3" );
+
+    for( float h : { 0.25f, 0.125f } )
+        for( int fluidSteps : { 64, 128 } )
+        {
+            const int segments = static_cast<int>( std::lround( 0.25f / h ) );
+            const float dt = totalDt / fluidSteps;
+            fluidField2 field{ 32 * segments, 32 * segments, h, { -4.0f, -4.0f } };
+            field.setCutCellProjectionEnabled( true );
+            field.setDisjointAnalyticCutCellEnabled( true );
+            field.setSweptApertureAuditEnabled( true );
+            if( field.isConnectedResidualTracerRemapEnabled() ||
+                field.getSmallCellPressureMergeFraction() != 0.0f )
+                fail( "experimental production physics unexpectedly enabled" );
+            fluidShapeObstacle2 capsule{
+                capsule2{ { -0.63f, 0.0f }, { 0.63f, 0.0f }, 0.19f },
+                { center, rot2::FromRadians( startAngle ) }, center,
+                {}, 0.0f, 0.0f, 0.0f };
+            std::array<fluidObstacleForce2, 1> feedback{};
+            field.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                feedback, 120 );
+            field.addVelocity( { -0.24f, -0.30f }, { 1.3f, 0.65f }, 0.65f );
+            field.addVelocity( { 0.35f, 0.25f }, { -0.55f, 0.8f }, 0.60f );
+
+            // Every row reads the SAME 0.25m world-space V(16,16)
+            // segment: one coarse face or two summed half-length fine faces.
+            const auto measure = [&]( const fluidField2& f ) -> double
+            {
+                double volume = 0.0;
+                for( int i = 0; i < segments; ++i )
+                {
+                    const int x = 16 * segments + i;
+                    const int y = 16 * segments;
+                    const auto budget = f.getCutCellVolumeBudget( x, y - 1, dt );
+                    if( !budget.valid || !std::isfinite( budget.macOutwardVolume[3] ) )
+                        fail( "invalid shared physical-face flux budget" );
+                    volume += budget.macOutwardVolume[3];
+                }
+                return volume;
+            };
+            const auto geometry = [&]( const fluidField2& f )
+            {
+                double openTime = 0.0, swept = 0.0;
+                for( int i = 0; i < segments; ++i )
+                {
+                    const int x = 16 * segments + i;
+                    const int y = 16 * segments;
+                    openTime += f.getSweptVTimeMeanOpenFraction( x, y ) *
+                        dt / segments;
+                    swept += f.getCutCellVolumeBudget(
+                        x, y - 1, dt ).solidSweptOutwardVolume[3];
+                }
+                return std::pair{ openTime, swept };
+            };
+            std::optional<fluidField2> history, manufactured;
+            double naturalPre = 0.0, matchedPre = 0.0;
+            int currentStep = -1, observed = 0;
+
+            field.setPrePressureSnapshotObserver( [&]( const fluidField2& frozen )
+            {
+                const int oneBased = currentStep + 1;
+                const int cp = oneBased * 16 / fluidSteps;
+                if( oneBased * 16 != cp * fluidSteps ||
+                    std::find( checkpoints.begin(), checkpoints.end(), cp ) ==
+                        checkpoints.end() ) return;
+                if( observed != 0 || !frozen.hasSweptApertureAudit() )
+                    fail( "missing or duplicated checkpointed frozen snapshot" );
+                observed = 1;
+                history.emplace( frozen );
+                manufactured.emplace( frozen );
+                history->setPrePressureSnapshotObserver( {} );
+                manufactured->setPrePressureSnapshotObserver( {} );
+                naturalPre = measure( *history );
+                if( !manufactured->setFrozenMacVelocityForAudit( worldVelocity ) )
+                    fail( "manufactured continuous world velocity override rejected" );
+                matchedPre = measure( *manufactured );
+                if( !history->replayFrozenCutCellPressure( 120, true ).has_value() ||
+                    !manufactured->replayFrozenCutCellPressure( 120, true ).has_value() )
+                    fail( "pressure-only completion failed on copied states" );
+            } );
+
+            for( int step = 0; step < fluidSteps; ++step )
+            {
+                currentStep = step;
+                observed = 0;
+                const float alpha = static_cast<float>( step + 1 ) / fluidSteps;
+                capsule.transform.rotation = rot2::FromRadians(
+                    startAngle + alpha * ( endAngle - startAngle ) );
+                capsule.angularVelocity = angularSpeed;
+                field.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                    feedback, 120 );
+                const int oneBased = step + 1;
+                const int cp = oneBased * 16 / fluidSteps;
+                const bool due = oneBased * 16 == cp * fluidSteps &&
+                    std::find( checkpoints.begin(), checkpoints.end(), cp ) !=
+                        checkpoints.end();
+                if( ( observed == 1 ) != due )
+                    fail( "frozen checkpoint callback coverage mismatch" );
+                if( !due ) continue;
+                if( !history || !manufactured )
+                    fail( "missing pair of completed restarts" );
+
+                // The natural replay copy MUST reproduce the live original
+                // at this exact state (not just pressure iteration count).
+                if( std::abs( measure( *history ) - measure( field ) ) > 1.0e-8 ||
+                    Length( history->getFluidMomentum() -
+                        field.getFluidMomentum() ) > 1.0e-5f )
+                    fail( "completed natural replay does not equal live post-Step field" );
+
+                for( int horizon = 0; horizon <= 4; ++horizon )
+                {
+                    if( horizon > 0 )
+                    {
+                        const float forwardAlpha = static_cast<float>(
+                            step + horizon + 1 ) / fluidSteps;
+                        capsule.transform.rotation = rot2::FromRadians(
+                            startAngle + forwardAlpha * ( endAngle - startAngle ) );
+                        std::array<fluidObstacleForce2, 1> naturalFeedback{}, matchedFeedback{};
+                        history->step( dt,
+                            std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                            naturalFeedback, 120 );
+                        manufactured->step( dt,
+                            std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                            matchedFeedback, 120 );
+                    }
+                    if( std::find( horizons.begin(), horizons.end(), horizon ) ==
+                        horizons.end() ) continue;
+                    const double naturalPost = measure( *history );
+                    const double matchedPost = measure( *manufactured );
+                    const auto [naturalOpen, naturalSwept] = geometry( *history );
+                    const auto [matchedOpen, matchedSwept] = geometry( *manufactured );
+                    if( !std::isfinite( naturalPost ) ||
+                        !std::isfinite( matchedPost ) ||
+                        std::abs( naturalOpen - matchedOpen ) > 1.0e-7 ||
+                        std::abs( naturalSwept - matchedSwept ) > 1.0e-7 )
+                        fail( "restart changed the prescribed solid geometry/flux" );
+                    results.push_back( { h, fluidSteps, cp, horizon,
+                        naturalPre, matchedPre, naturalPost, matchedPost,
+                        naturalOpen, naturalSwept } );
+                    std::printf( "matched_world_restart,%.9g,%d,%d,%d,%.9g,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                        h, fluidSteps, cp, horizon,
+                        startAngle + static_cast<float>( step + horizon + 1 ) /
+                            fluidSteps * ( endAngle - startAngle ),
+                        naturalPre, matchedPre, naturalPost, matchedPost,
+                        naturalOpen, naturalSwept );
+                }
+                history.reset();
+                manufactured.reset();
+            }
+        }
+
+    if( results.size() != 32 )
+        fail( "not all 2x2x2x4 physical-face restart checkpoints were recorded" );
+    bool foundInputHistoryDifference = false, foundPropagation = false;
+    for( int fluidSteps : { 64, 128 } )
+        for( int checkpoint : checkpoints )
+            for( int horizon : horizons )
+            {
+                const result *coarse = nullptr, *fine = nullptr;
+                for( const result& row : results )
+                    if( row.fluidSteps == fluidSteps &&
+                        row.checkpoint == checkpoint && row.horizon == horizon )
+                    {
+                        if( row.h == 0.25f ) coarse = &row;
+                        else if( row.h == 0.125f ) fine = &row;
+                    }
+                if( !coarse || !fine )
+                    fail( "missing matched world-time and physical-face pair" );
+                const double historyGap = coarse->naturalPost - fine->naturalPost;
+                const double matchedGap = coarse->matchedPost - fine->matchedPost;
+                const double excess = historyGap - matchedGap;
+                const double historyPre = coarse->naturalPre - fine->naturalPre;
+                const double matchedPre = coarse->matchedPre - fine->matchedPre;
+                if( !std::isfinite( historyGap ) ||
+                    !std::isfinite( matchedGap ) || !std::isfinite( excess ) ||
+                    !std::isfinite( historyPre ) ||
+                    !std::isfinite( matchedPre ) )
+                    fail( "nonfinite matched-state cross-grid comparison" );
+                foundInputHistoryDifference |= horizon == 0 &&
+                    std::abs( historyPre - matchedPre ) > 1.0e-8;
+                foundPropagation |= horizon == 4 &&
+                    std::abs( excess ) > 1.0e-8;
+                std::printf( "matched_world_cross,%d,%d,%d,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                    fluidSteps, checkpoint, horizon,
+                    historyGap, matchedGap, excess, historyPre, matchedPre );
+            }
+    if( !foundInputHistoryDifference || !foundPropagation )
+        fail( "matched-state restart did not exercise history replacement and propagation" );
+}
+
 // Opt-in, read-only endpoint volume ledger. These are not time-centered
 // aperture integrals; every row is the LAST Fluid substep of a World frame.
 // Different h/cadences have different obstacle histories, so compare only
@@ -2615,6 +2855,7 @@ int main( int argc, char** argv )
     bool prescribedSpatialAudit = false;
     bool prescribedRotationPressureSplitAudit = false;
     bool frozenPressureIterationAudit = false;
+    bool matchedWorldPressureRestartAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -2642,6 +2883,7 @@ int main( int argc, char** argv )
         prescribedSpatialAudit |= std::string_view( argv[i] ) == "--small-cell-prescribed-spatial-audit";
         prescribedRotationPressureSplitAudit |= std::string_view( argv[i] ) == "--small-cell-rotation-pressure-split-audit";
         frozenPressureIterationAudit |= std::string_view( argv[i] ) == "--small-cell-frozen-pressure-iterations-audit";
+        matchedWorldPressureRestartAudit |= std::string_view( argv[i] ) == "--small-cell-matched-world-restart-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -2667,6 +2909,7 @@ int main( int argc, char** argv )
     if( prescribedSpatialAudit ) { auditPrescribedSpatialTemporalConvergence(); return 0; }
     if( prescribedRotationPressureSplitAudit ) { auditPrescribedRotatingFacePressureSplit(); return 0; }
     if( frozenPressureIterationAudit ) { auditRotatingFrozenPressureIterationSweep(); return 0; }
+    if( matchedWorldPressureRestartAudit ) { auditMatchedWorldMacPressureRestart(); return 0; }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
