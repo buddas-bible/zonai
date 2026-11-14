@@ -718,6 +718,16 @@ public:
     void setAnalyticCapsuleCutCellEnabled( bool enabled ) noexcept;
     [[nodiscard]] bool isAnalyticCapsuleCutCellEnabled() const noexcept { return analyticCapsuleCutCellEnabled_; }
 
+    // S2c RESEARCH ONLY. Single Capsule geometry uses double axis and core
+    // vertices in cell/face/FSI/swept integrations. No effect while the
+    // single-Capsule analytic policy is disabled; defaults OFF.
+    // Switching policies invalidates previous volume and obstacle history.
+    void setAnalyticCapsuleDoubleGeometryEnabled( bool enabled ) noexcept;
+    [[nodiscard]] bool isAnalyticCapsuleDoubleGeometryEnabled() const noexcept
+    {
+        return analyticCapsuleDoubleGeometryEnabled_;
+    }
+
     // 단일 radius>0인 strictly convex Polygon의 core/edge/corner 분석적 적분.
     // 기본 OFF. 다중·미지원 Shape은 기존 공간 표본 경로.
     void setAnalyticRoundedPolygonCutCellEnabled( bool enabled ) noexcept;
@@ -1293,6 +1303,7 @@ private:
     bool analyticCircleCutCellEnabled_ = false;
     bool analyticPolygonCutCellEnabled_ = false;
     bool analyticCapsuleCutCellEnabled_ = false;
+    bool analyticCapsuleDoubleGeometryEnabled_ = false;
     bool analyticRoundedPolygonCutCellEnabled_ = false;
     bool disjointAnalyticCutCellEnabled_ = false;
     bool previousDisjointAnalyticGeometry_ = false;
