@@ -1386,6 +1386,73 @@ epsilon alone. Retain the baseline solver and analytic-mode default
 as-is pending conservation, two-way Body feedback and performance
 acceptance tests.
 
+### Axis and core-vertex precision controls — 2026-11-15
+
+Commit [`badb9b74`](https://github.com/buddas-bible/zonai/commit/badb9b74eee2cb878a578b809be9f59acd00da62)
+extends the single-cell (28,26) oracle with an **independent** all-double
+rectangular core clip and independent one-dimensional cap cross-section
+integrals. For reproducibility it starts from the **same already
+float-transformed Capsule endpoints** as the engine and reconstructs
+both a rounded-float-axis/float-core-vertex partition and a
+double-normalized-axis/double-core-vertex partition. The only differences
+between these two controls are the axis and core-vertex rounding.
+Cap midpoint integration is checked at 16,384 versus 65,536 slices.
+No production geometry or pressure code was changed.
+
+[GitHub Actions run 43631292578](https://github.com/buddas-bible/zonai/actions/runs/43631292578)
+**passed Windows Release and Ubuntu Debug**, including new strict
+same-input reproduction and positive-double-remainder checks.
+
+For h=0.125m, checkpoint 12/16, cell (28,26):
+
+| Independent component comparison (m²) | Windows Release | Ubuntu Debug |
+| --- | ---: | ---: |
+| Engine/float-core area | 0.011288604901483743 | 0.011288604901483743 |
+| Double-core area | 0.011288605196665229 | 0.011288604881778193 |
+| **Float minus double core area** | **-2.95181486892e-10** | **+1.97055496920e-11** |
+| Engine/float-axis first cap area | approx. 0.0043363951027 | approx. 0.0043363951027 |
+| Double-axis first cap area | 0.004336394744327535 | 0.004336395059209390 |
+| **Float minus double first cap area** | **+3.58133721463e-10** | **+4.32518664981e-11** |
+| Existing engine signed free area, before clamp | -4.19041190636e-12 | -4.19041190636e-12 |
+| **All-double reconstructed positive free area** | **+5.90072365969e-11** | **+5.90124164812e-11** |
+| Independent signed-distance wedge area | +5.87661436165e-11 | +5.87675484957e-11 |
+
+The independent **float reconstruction** reproduces the engine's
+core exactly and the first cap within 2.5e-13m² on both platforms.
+This localizes the spurious negative remainder to geometry rounding,
+rather than an entirely unrelated pressure matrix or an unverified
+integration call. The independent double construction leaves a
+small positive free region and agrees with the separate signed-distance
+wedge within approximately 2.5e-13m².
+
+**Cross-platform caveat:** the separate double-core and double-cap
+values differ substantially between Windows and Ubuntu, and the
+individual float-minus-double contributions even differ in sign for
+the core. Nevertheless, the respective total exterior areas remain
+close, owing to component cancellation. This test does not yet
+identify the exact source of the platform-dependent endpoint
+difference, and it does **not** prove the full analytic geometry
+policy is stable for arbitrarily thin cells or two-way FSI.
+
+The result suggests avoiding double arithmetic applied **after**
+the capsule axis and polygon vertices have already been rounded to
+float. A potential experimental production option would construct
+axis, core vertices and cap partition consistently in double
+precision for single-Capsule Cut-cells. That requires consistent
+cell **and shared-face** aperture calculations, swept-volume/source
+history, pressure graph topology, and performance tests before
+any default change. Do not simply mark the cell as active with an
+epsilon: the tiny positive fraction can become an ill-conditioned
+pressure unknown and alter tracer/Body feedback.
+
+**Next experiment:** add diagnostic printing of the exact
+float-transformed Capsule endpoints/axis across the two compilers,
+then compare a separately opted-in double-geometry policy on
+identical prescribed motion (and on the frozen real World8/Fluid4
+near-disappearing cell), including small-face pressure and
+volume/tracer/Body conservation ledgers. Keep PR #326 Draft and
+the pressure-pooling/tracer experiments disabled by default.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
