@@ -585,6 +585,63 @@ bring the matched-stage analysis back to real coupled World8/Fluid4
 near-closing V(17,13). If not, test an independently validated pressure
 reference solve before changing physical tracer transport or defaults.
 
+### High-iteration frozen reference outcome — 2026-11-14
+
+[CI 43566519525](https://github.com/buddas-bible/zonai/actions/runs/43566519525)
+**passed on both Ubuntu Debug and Windows Release**. The new
+`--small-cell-zero-mac-reference-audit` emitted 16 per-grid replay
+records and 8 cross-grid records. The displayed values agree exactly
+across those two build configurations; this is not a guarantee of
+bitwise equality across other CPUs or future compilers.
+
+At 128 real Fluid steps, checkpoint **11/16** (same prescribed rotating
+capsule geometry, one target physical V segment), the independently
+reconstructed **component-compatible continuum-form continuity
+residual** was:
+
+| Jacobi iterations | h=0.25 compatible RMS (1/s) | h=0.125 compatible RMS (1/s) | Coarse minus fine V-face volume (m³) |
+| ---: | ---: | ---: | ---: |
+| 200 | 0.137054977421 | 0.192741665056 | -0.000121248581872 |
+| 800 | 0.0956050610453 | 0.0644154321626 | -0.000123136993711 |
+| 1600 | 0.0926427767761 | 0.0475187080614 | -0.000123192190098 |
+| 3200 | **0.0925685450706** | **0.0383750523** | **-0.000123227580358** |
+
+At checkpoint **12/16**, the same 3200-iteration residuals were
+0.0650400081773 (h=0.25) and 0.00950959280973 (h=0.125) 1/s;
+the coarse-minus-fine V-face volume was +0.0000541209271464 m³.
+**All cross-grid rows reported `reference_criteria_met=0`**.
+Specifically, although the 1600→3200 face gap changed by only
+~3.54e-8 m³ (checkpoint 11/16) and ~4.32e-9 m³ (checkpoint
+12/16), both compatible RMS values remained above the diagnostic
+1e-3/s criterion. The target face appears nearly iteration-stable,
+**but the full discrete pressure solution is not certified converged**.
+
+The independently reconstructed component-source floor was zero
+to within 2.86e-9/s for the shown cases, and each field reported
+one open-face-connected fluid region. Therefore the large residual
+is not explained *solely* by removing a nonzero region-average
+Neumann source in this experiment. The h=0.25 residual decreases
+very little between 1600 and 3200 iterations; potential causes
+include slow modes on the cut-cell graph, insufficient iterative
+precision, or discretization/assembly inconsistency. This test
+**does not identify which explanation is correct**.
+
+This is not an independent matrix-inversion reference: it exercises
+the existing noncoupled Jacobi operator and evaluates its resulting
+endpoint MAC/source continuity separately. A genuinely
+convergence-certified pressure solution has **not** been obtained.
+No production solver, pressure pooling, connected-residual tracer,
+two-way Body feedback or default was changed.
+
+**Next atomic experiment:** locate the cells and connected faces
+responsible for the largest *compatible* residual at 200/1600/3200
+using identical frozen inputs; distinguish slow Jacobi modes from
+a non-reducible residual floor and identify whether these cells
+are near vanishing Cut-cell apertures. Only then evaluate a
+separate higher-precision/independent pressure reference and
+return to the actual coupled World8/Fluid4 near-disappearing
+V(17,13) tracer scene.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
