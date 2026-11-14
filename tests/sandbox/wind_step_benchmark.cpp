@@ -3293,6 +3293,10 @@ void auditFrozenInactiveNeighborFaces( const fluidField2& source,
     // are intentionally NOT used. These are sampled estimates, not exact
     // geometric predicates or a replacement for the production Cut-cell grid.
     constexpr int samples = 96;
+    const int discreteSamples = source.getCutCellSampleCount();
+    if( discreteSamples != 4 || source.isAnalyticCapsuleCutCellEnabled() ||
+        source.getCutCellTransition().usedDisjointAnalyticGeometry )
+        throw std::runtime_error( "prescribed anchor reference no longer uses sampled Cut-cells" );
     constexpr double halfLength = 0.63;
     constexpr double radiusSquared = 0.19 * 0.19;
     const double axisX = std::cos( static_cast<double>( capsuleAngle ) );
@@ -3306,30 +3310,30 @@ void auditFrozenInactiveNeighborFaces( const fluidField2& source,
         dy -= along * axisY;
         return dx * dx + dy * dy > radiusSquared;
     };
-    const auto sampleCell = [&]( int x, int y )
+    const auto sampleCell = [&]( int x, int y, int count )
     {
         int open = 0;
-        for( int sy = 0; sy < samples; ++sy )
-            for( int sx = 0; sx < samples; ++sx )
+        for( int sy = 0; sy < count; ++sy )
+            for( int sx = 0; sx < count; ++sx )
             {
-                const double px = origin.x + ( x + ( sx + 0.5 ) / samples ) * h;
-                const double py = origin.y + ( y + ( sy + 0.5 ) / samples ) * h;
+                const double px = origin.x + ( x + ( sx + 0.5 ) / count ) * h;
+                const double py = origin.y + ( y + ( sy + 0.5 ) / count ) * h;
                 open += freeAt( px, py );
             }
-        return static_cast<double>( open ) / ( samples * samples );
+        return static_cast<double>( open ) / ( count * count );
     };
-    const auto sampleFace = [&]( char axis, int x, int y )
+    const auto sampleFace = [&]( char axis, int x, int y, int count )
     {
         int open = 0;
-        for( int i = 0; i < samples; ++i )
+        for( int i = 0; i < count; ++i )
         {
             const double px = origin.x + ( x +
-                ( axis == 'V' ? ( i + 0.5 ) / samples : 0.0 ) ) * h;
+                ( axis == 'V' ? ( i + 0.5 ) / count : 0.0 ) ) * h;
             const double py = origin.y + ( y +
-                ( axis == 'U' ? ( i + 0.5 ) / samples : 0.0 ) ) * h;
+                ( axis == 'U' ? ( i + 0.5 ) / count : 0.0 ) ) * h;
             open += freeAt( px, py );
         }
-        return static_cast<double>( open ) / samples;
+        return static_cast<double>( open ) / count;
     };
     int seen = 0;
     double sumOpening = 0.0;
@@ -3337,7 +3341,9 @@ void auditFrozenInactiveNeighborFaces( const fluidField2& source,
         "world_x,world_y,endpoint_open,swept_mean_open,"
         "side_a_fluid_fraction,side_b_fluid_fraction,"
         "side_a_pressure_source_m3,side_b_pressure_source_m3,"
-        "solid_face_speed_mps,reference_samples,reference_face_open,"
+        "solid_face_speed_mps,discrete_reference_face_open,"
+        "discrete_reference_side_a_fluid,discrete_reference_side_b_fluid,"
+        "reference_samples,reference_face_open,"
         "reference_side_a_fluid,reference_side_b_fluid" );
     const auto emit = [&]( char axis, int x, int y, vec2 point,
         int ax, int ay, int bx, int by,
@@ -3356,9 +3362,19 @@ void auditFrozenInactiveNeighborFaces( const fluidField2& source,
             opening < 0.0f || opening > 1.0f ||
             timeMean < 0.0f || timeMean > 1.0f )
             throw std::runtime_error( "nonfinite or invalid frozen anchor" );
-        const double referenceFace = sampleFace( axis, x, y );
-        const double referenceA = sampleCell( ax, ay );
-        const double referenceB = sampleCell( bx, by );
+        // Reproduce the exact 4-point/4x4 midpoint discretization first.
+        // A mismatch here would refute the sampling-resolution diagnosis.
+        const double discreteFace = sampleFace( axis, x, y, discreteSamples );
+        const double discreteA = sampleCell( ax, ay, discreteSamples );
+        const double discreteB = sampleCell( bx, by, discreteSamples );
+        if( std::abs( discreteFace - opening ) > 1.0e-6 ||
+            std::abs( discreteA - a.currentFraction ) > 1.0e-6 ||
+            std::abs( discreteB - b.currentFraction ) > 1.0e-6 )
+            throw std::runtime_error(
+                "independent coarse capsule sampling does not reproduce Cut-cell fractions" );
+        const double referenceFace = sampleFace( axis, x, y, samples );
+        const double referenceA = sampleCell( ax, ay, samples );
+        const double referenceB = sampleCell( bx, by, samples );
         if( !std::isfinite( referenceFace ) ||
             !std::isfinite( referenceA ) || !std::isfinite( referenceB ) )
             throw std::runtime_error( "invalid independent capsule geometry reference" );
@@ -3366,11 +3382,13 @@ void auditFrozenInactiveNeighborFaces( const fluidField2& source,
         sumOpening += opening;
         std::printf( "zero_mac_anchor_face,%.9g,%d,%c,%d,%d,"
             "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
-            "%.12g,%.12g,%.9g,%d,%.9g,%.9g,%.9g\n",
+            "%.12g,%.12g,%.9g,%.9g,%.9g,%.9g,"
+            "%d,%.9g,%.9g,%.9g\n",
             h, checkpoint, axis, x, y, point.x, point.y,
             opening, timeMean, a.currentFraction, b.currentFraction,
             a.pressureSourceDeltaVolume, b.pressureSourceDeltaVolume,
-            solidSpeed, samples, referenceFace, referenceA, referenceB );
+            solidSpeed, discreteFace, discreteA, discreteB,
+            samples, referenceFace, referenceA, referenceB );
     };
     for( int y = 0; y < source.getHeight(); ++y )
         for( int x = 1; x < source.getWidth(); ++x )
