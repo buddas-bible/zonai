@@ -833,9 +833,13 @@ physical V(16,16) face. The diagnostic column
 convergence certificate, and a 3200-iteration reference cannot be
 accepted merely because the target face appears stable.
 
-**First Ubuntu Debug pass:**
-[workflow 43569382849](https://github.com/buddas-bible/zonai/actions/runs/43569382849).
-Windows Release was still running at the time of this evidence entry.
+**Validated on both platforms:**
+[workflow 43569382849](https://github.com/buddas-bible/zonai/actions/runs/43569382849)
+**success on Ubuntu Debug and Windows Release**, including full existing
+regression jobs and both new damped-Jacobi A/B steps. All 16 per-grid
+damped comparison rows and eight cross-grid rows match between platforms
+to their displayed precision; this does not establish bitwise identity
+across all build environments.
 
 | Grid h | Rotation | Iterations | Legacy compatible RMS (1/s) | Damped compatible RMS (1/s) | Legacy checkerboard squared share | Damped checkerboard squared share |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
