@@ -1514,6 +1514,41 @@ void fluidField2::updateObstacles( std::span<const fluidShapeObstacle2> obstacle
         static_cast<float>( solidTransition_.exposedCells - solidTransition_.coveredCells ) * cellSize_ * cellSize_;
 }
 
+fluidCapsuleCellAreaAudit2 fluidField2::getAnalyticCapsuleCellAreaAudit(
+    const fluidShapeObstacle2& obstacle, int x, int y ) const noexcept
+{
+    fluidCapsuleCellAreaAudit2 result{};
+    if( !analyticCapsuleCutCellEnabled_ ||
+        x < 0 || x >= width_ || y < 0 || y >= height_ ) return result;
+    analyticFluidCapsule capsule{};
+    if( !TryGetAnalyticCapsule( std::span<const fluidShapeObstacle2>( &obstacle, 1 ),
+        capsule ) ) return result;
+
+    const double h = cellSize_;
+    const double left = origin_.x + x * h;
+    const double bottom = origin_.y + y * h;
+    const double right = left + h, top = bottom + h;
+    result.cellArea = h * h;
+    result.coreCoveredArea = ConvexPolygonRectangleArea(
+        capsule.core, left, bottom, right, top );
+    result.firstCapCoveredArea = CapsuleCapRectangleArea(
+        capsule, true, left, bottom, right, top );
+    result.lastCapCoveredArea = CapsuleCapRectangleArea(
+        capsule, false, left, bottom, right, top );
+    result.componentSumCoveredArea =
+        result.coreCoveredArea + result.firstCapCoveredArea +
+        result.lastCapCoveredArea;
+    result.clampedCoveredArea = std::clamp(
+        result.componentSumCoveredArea, 0.0, result.cellArea );
+    result.signedUnclampedFluidArea =
+        result.cellArea - result.componentSumCoveredArea;
+    result.recomputedFluidFraction = std::clamp(
+        1.0 - result.clampedCoveredArea / result.cellArea, 0.0, 1.0 );
+    result.storedFluidFraction = cellFluidFraction_[cellIndex( x, y )];
+    result.valid = true;
+    return result;
+}
+
 float fluidField2::getCellFluidFraction( int x, int y ) const noexcept
 {
     return x >= 0 && x < width_ && y >= 0 && y < height_ ? cellFluidFraction_[cellIndex( x, y )] : 0.0f;
