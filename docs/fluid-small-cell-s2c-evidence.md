@@ -1004,6 +1004,54 @@ do **not** alter the engine's Cut-cell geometry, pressure
 defaults or connected tracer transport. Then return to the
 World8/Fluid4 V(17,13) fully coupled scene.
 
+### Anchored inactive-neighbor edge counterfactual — 2026-11-14
+
+The converged independent pressure-reference control revealed a much
+larger-than-expected target-face deviation from finite 3200-iteration
+damped Jacobi on h=0.125 at checkpoint 12/16. Three of four tested
+snapshots retain positive aperture edges from an active pressure cell to
+an inactive, zero-pressure neighbor. The next opt-in test
+`--small-cell-zero-mac-anchor-audit` isolates this particular discrete
+boundary/conditioning hypothesis without altering the engine.
+
+It evaluates two **independently assembled double-precision PCG**
+systems on the exact same frozen source, open MAC input and moving
+geometry:
+
+1. **Actual discrete reference:** preserve all positive open-face
+   weights (including active-to-inactive, with the inactive pressure
+   unknown pinned to zero), and preserve the solver's original
+   full-graph source compatibility correction
+2. **Counterfactual pressure operator:** remove only positive
+   active-to-inactive pressure edges *after* computing the original
+   full-graph compatibility source; preserve every active-to-active
+   face, source volume and frozen physical geometry, then separately
+   report any additional active-pressure-component mean-source
+   subtraction required to make the newly unanchored Neumann system
+   solvable
+
+Both calculations independently recompute `Aq-b` RMS and must meet
+the `1e-5/s` PCG diagnostic criterion. Their target physical V-face
+volumes and coarse-minus-fine gaps are compared at identical 11/16 and
+12/16 checkpoints, including a **no-anchor control** (h=0.25 at
+12/16), which must reproduce the actual reference within
+`1e-9m³` if there is no operator change. The CSV reports
+`compatibilityRebalanceL1Volume` to make any changed constraint
+explicit rather than treating the two matrices as identical.
+
+This is an intentional *pressure-matrix-only counterfactual*, **not
+a production proposal to delete geometric face apertures**.
+Deleting an active-to-inactive edge from the pressure operator
+does not physically close a moving fluid channel or establish
+correct time-integrated face capacity. The exact geometric origin of
+those inconsistent positive-open edges still requires investigation.
+Do not interpret it as a confirmed physical leak or apply the
+counterfactual to World8/Fluid4 yet.
+
+Implementation `92abb9a`, Ubuntu/Windows CI `628e366`.
+CI conclusions and emitted CSV are required before assigning causal
+influence or accepting any change.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
