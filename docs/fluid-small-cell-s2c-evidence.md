@@ -892,7 +892,7 @@ the original frozen moving-volume source and component connectivity.
 The independently assembled **volume-form operator** for the
 zero-initial-open-MAC case is
 `(Aq)_i = sum_open_faces(a_ij * (q_i - q_j))`,
-`b_i = sourceVolume_i - mean(sourceVolume)_connected_region`,
+`b_i = -(sourceVolume_i - mean(sourceVolume)_connected_region)`,
 and `q = dt² * pressure`. The pressure-corrected endpoint MAC volume
 on an oriented V face is
 `a * (q_lower - q_upper)`, summed across both fine-grid segments
