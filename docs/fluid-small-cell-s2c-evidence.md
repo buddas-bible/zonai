@@ -1103,6 +1103,28 @@ of inconsistent geometry before proposing any correction.
 Then reproduce this separation in the actual World8/Fluid4
 coupled V(17,13) case.
 
+### Exact anchored-face coordinate ledger — 2026-11-14
+
+After isolating the anchored-pressure-edge sensitivity, the same
+`--small-cell-zero-mac-anchor-audit` additionally emits one
+`zero_mac_anchor_face` row for **each unique U/V face** with positive
+endpoint opening and precisely one zero-fluid-fraction neighbor.
+Each row records face orientation, integer and world-space face
+position, endpoint opening, **separate swept time-mean opening**,
+the two adjacent current cell fractions and stored pressure-source
+volumes, and the prescribed solid face velocity. The independent
+face scan must match the pressure assembly's exact anchor count and
+aperture sum (absolute tolerance `1e-7`). In particular, a boundary
+may have a nonzero swept time-mean exposure while its endpoint face
+is closed, or vice versa: these quantities must not be conflated.
+
+Commits `b89de78`, `66d729a` add the read-only position
+and face-ledger checks. They do not change production Cut-cell
+geometry or declare positive-open/covered-cell adjacency
+automatically invalid: actual obstacle shape sampling and
+boundary-point classification remain to be investigated based on
+the measured coordinates.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
