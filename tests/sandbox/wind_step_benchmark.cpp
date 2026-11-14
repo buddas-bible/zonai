@@ -4249,6 +4249,159 @@ void auditCutCellVolumeBudget()
 
 
 
+// Independent signed-distance / one-dimensional integration oracle for the
+// tiny lower-right open wedge of the rotating Capsule at h=.125, cp=12/16.
+// No engine cell-area/clipped-face helper is called, and no solver state is
+// changed. For this controlled corner, bottom/right are open only near their
+// intersection and the opposite sides are strictly inside the Capsule.
+struct capsuleCornerWedge2
+{
+    double cornerClearance = 0.0;
+    double bottomOpenLength = 0.0;
+    double rightOpenLength = 0.0;
+    double area128 = 0.0;
+    double area1024 = 0.0;
+};
+
+capsuleCornerWedge2 integrateCapsuleCornerWedge(
+    double ax, double ay, double bx, double by, double radius,
+    double x0, double y0, double h )
+{
+    const double x1 = x0 + h, y1 = y0 + h;
+    const double dx = bx - ax, dy = by - ay;
+    const double lengthSquared = dx * dx + dy * dy;
+    if( !( lengthSquared > 0.0 ) || !( radius > 0.0 ) )
+        throw std::runtime_error( "invalid capsule corner distance oracle" );
+    const auto signedDistance = [&]( double x, double y )
+    {
+        const double t = std::clamp(
+            ( ( x - ax ) * dx + ( y - ay ) * dy ) / lengthSquared, 0.0, 1.0 );
+        return std::hypot( x - ( ax + t * dx ), y - ( ay + t * dy ) ) - radius;
+    };
+    const double corner = signedDistance( x1, y0 );
+    if( !( corner > 0.0 ) ||
+        !( signedDistance( x0, y0 ) < 0.0 ) ||
+        !( signedDistance( x1, y1 ) < 0.0 ) ||
+        !( signedDistance( x0, y1 ) < 0.0 ) )
+        throw std::runtime_error( "capsule corner witness topology changed" );
+    // The exterior is to the RIGHT of the bottom crossing and BELOW
+    // the right crossing. Bisection is confined to independently
+    // verified sign changes, not to engine's analytic clipping intervals.
+    const auto crossing = []( double lo, double hi, auto positiveAtHigh )
+    {
+        for( int iteration = 0; iteration < 75; ++iteration )
+        {
+            const double middle = 0.5 * ( lo + hi );
+            if( positiveAtHigh( middle ) ) hi = middle;
+            else lo = middle;
+        }
+        return 0.5 * ( lo + hi );
+    };
+    const double bottomCross = crossing( x0, x1,
+        [&]( double x ) { return signedDistance( x, y0 ) > 0.0; } );
+    const double rightCross = crossing( y0, y1,
+        [&]( double y ) { return signedDistance( x1, y ) < 0.0; } );
+
+    capsuleCornerWedge2 output{};
+    output.cornerClearance = corner;
+    output.bottomOpenLength = x1 - bottomCross;
+    output.rightOpenLength = rightCross - y0;
+    const auto integrate = [&]( int count )
+    {
+        const double step = output.bottomOpenLength / count;
+        double sum = 0.0;
+        for( int i = 0; i < count; ++i )
+        {
+            const double x = bottomCross + ( i + 0.5 ) * step;
+            const double yCross = crossing( y0, y1,
+                [&]( double y ) { return signedDistance( x, y ) < 0.0; } );
+            sum += yCross - y0;
+        }
+        return step * sum;
+    };
+    output.area128 = integrate( 128 );
+    output.area1024 = integrate( 1024 );
+    if( !( output.bottomOpenLength > 0.0 ) ||
+        !( output.rightOpenLength > 0.0 ) ||
+        !( output.area1024 > 0.0 ) ||
+        !std::isfinite( output.area1024 ) ||
+        std::abs( output.area128 - output.area1024 ) >
+            1.0e-3 * output.area1024 + 1.0e-15 )
+        throw std::runtime_error( "independent capsule wedge quadrature failed" );
+    return output;
+}
+
+void auditTinyCapsuleCorner( const fluidField2& frozen,
+    const fluidShapeObstacle2& capsule, int mode, int checkpoint )
+{
+    if( frozen.getCellSize() != 0.125f || checkpoint != 12 ) return;
+    constexpr int x = 28, y = 26;
+    const double h = frozen.getCellSize();
+    const vec2 origin = frozen.getOrigin();
+    const double x0 = origin.x + x * h, y0 = origin.y + y * h;
+    const auto* shape = std::get_if<capsule2>( &capsule.geometry );
+    if( !shape ) throw std::runtime_error( "independent corner audit expects Capsule" );
+
+    const vec2 actualA = TransformPoint( capsule.transform, shape->center1 );
+    const vec2 actualB = TransformPoint( capsule.transform, shape->center2 );
+    const double radius = shape->radius;
+    // Pure double-angle reference; the production endpoints above retain
+    // its float rot2/TransformPoint path for an exact input comparison.
+    constexpr float startAngle = 0.18f, endAngle = 1.28f;
+    const double nominalAngle = static_cast<double>( startAngle ) +
+        12.0 / 16.0 * ( static_cast<double>( endAngle ) -
+            static_cast<double>( startAngle ) );
+    const double cx = capsule.transform.position.x;
+    const double cy = capsule.transform.position.y;
+    const double halfLength = 0.5 * static_cast<double>(
+        shape->center2.x - shape->center1.x );
+    const double idealAx = cx - halfLength * std::cos( nominalAngle );
+    const double idealAy = cy - halfLength * std::sin( nominalAngle );
+    const double idealBx = cx + halfLength * std::cos( nominalAngle );
+    const double idealBy = cy + halfLength * std::sin( nominalAngle );
+
+    std::puts( "capsule_corner_oracle,analytic,endpoint_policy,radius_ulp,"
+        "corner_clearance_m,bottom_open_m,right_open_m,"
+        "exterior_area_m2,exterior_fraction,quadrature_difference_m2,"
+        "engine_cell_fraction,engine_bottom_face_open,"
+        "engine_right_face_open,oracle_bottom_face_open,"
+        "oracle_right_face_open" );
+    for( int policy = 0; policy < 2; ++policy )
+        for( int ulp = -1; ulp <= 1; ++ulp )
+        {
+            const double testedRadius = ulp == -1
+                ? std::nextafter( shape->radius, 0.0f )
+                : ulp == 1
+                    ? std::nextafter( shape->radius,
+                        std::numeric_limits<float>::infinity() )
+                    : radius;
+            const capsuleCornerWedge2 wedge = policy == 0
+                ? integrateCapsuleCornerWedge(
+                    actualA.x, actualA.y, actualB.x, actualB.y,
+                    testedRadius, x0, y0, h )
+                : integrateCapsuleCornerWedge(
+                    idealAx, idealAy, idealBx, idealBy,
+                    testedRadius, x0, y0, h );
+            const double bottomOpen = wedge.bottomOpenLength / h;
+            const double rightOpen = wedge.rightOpenLength / h;
+            const float engineBottom = frozen.getVFaceOpenFraction( x, y );
+            const float engineRight = frozen.getUFaceOpenFraction( x + 1, y );
+            if( policy == 0 && ulp == 0 && mode == 1 &&
+                ( std::abs( bottomOpen - engineBottom ) > 1.0e-5 ||
+                  std::abs( rightOpen - engineRight ) > 1.0e-5 ) )
+                throw std::runtime_error( "independent capsule faces disagree with analytic clipping" );
+            std::printf( "capsule_corner_oracle,%d,%d,%d,"
+                "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                "%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                mode, policy, ulp, wedge.cornerClearance,
+                wedge.bottomOpenLength, wedge.rightOpenLength,
+                wedge.area1024, wedge.area1024 / ( h * h ),
+                wedge.area128 - wedge.area1024,
+                frozen.getCellFluidFraction( x, y ),
+                engineBottom, engineRight, bottomOpen, rightOpen );
+        }
+}
+
 // S2c geometry-only control: hold the prescribed rotating Capsule, grid,
 // fluid cadence and checkpoint fixed while switching only the existing
 // opt-in analytic Capsule geometry. The underlying Fluid histories are
@@ -4387,6 +4540,7 @@ void auditFrozenCapsuleGeometryComparison()
                     !std::isfinite( row.pressure.targetFaceVolume ) ||
                     !std::isfinite( row.pressure.finalRmsPerSecond ) )
                     fail( "independent Capsule pressure/geometry ledger mismatch" );
+                auditTinyCapsuleCorner( frozen, capsule, mode, cp );
                 row.valid = true;
                 std::printf( "capsule_geometry_summary,%.9g,%d,%d,%d,%d,"
                     "%.12g,%d,%.12g,%.12g,%.12g,%d\n",
