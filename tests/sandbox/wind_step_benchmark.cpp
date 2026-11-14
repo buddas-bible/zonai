@@ -3425,6 +3425,7 @@ int main( int argc, char** argv )
     bool matchedWorldPressureRestartAudit = false;
     bool zeroMacPressureAudit = false;
     bool zeroMacConvergenceAudit = false;
+    bool zeroMacReferenceAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -3455,6 +3456,7 @@ int main( int argc, char** argv )
         matchedWorldPressureRestartAudit |= std::string_view( argv[i] ) == "--small-cell-matched-world-restart-audit";
         zeroMacPressureAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-pressure-audit";
         zeroMacConvergenceAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-convergence-audit";
+        zeroMacReferenceAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-reference-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -3487,6 +3489,7 @@ int main( int argc, char** argv )
         auditMatchedWorldMacPressureRestart( true, true );
         return 0;
     }
+    if( zeroMacReferenceAudit ) { auditFrozenZeroMacReference(); return 0; }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
