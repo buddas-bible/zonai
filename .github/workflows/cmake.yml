@@ -176,6 +176,10 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-reference-audit
 
+      - name: Localize frozen pressure residual hotspots (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-residual-map-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -413,6 +417,10 @@ jobs:
       - name: Audit bounded zero-MAC reference residual (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-reference-audit
+
+      - name: Localize frozen pressure residual hotspots (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-residual-map-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
