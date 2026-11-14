@@ -2431,7 +2431,8 @@ void auditRotatingFrozenPressureIterationSweep()
 // then replayed through their actual normal pressure solver. In contrast,
 // history resumes from the untouched frozen state. Both advance 1/2/4
 // actual following Fluid steps with the SAME prescribed capsule motion.
-void auditMatchedWorldMacPressureRestart( bool probeZeroMac = false )
+void auditMatchedWorldMacPressureRestart( bool probeZeroMac = false,
+    bool sweepZeroMacJacobi = false )
 {
     constexpr float totalDt = 1.0f / 30.0f;
     constexpr float startAngle = 0.18f, endAngle = 1.28f;
@@ -2471,6 +2472,30 @@ void auditMatchedWorldMacPressureRestart( bool probeZeroMac = false )
         float residual = 0.0f;
     };
     std::vector<zeroResult> zeroResults;
+    struct jacobiResult
+    {
+        float h = 0.0f;
+        int fluidSteps = 0, checkpoint = 0, iterations = 0;
+        double post = 0.0, residual = 0.0;
+        double sourceRate = 0.0, compatibility = 0.0;
+        double localSource = 0.0, localSnapshot = 0.0, localSwept = 0.0;
+        double localAfter = 0.0, localResidual = 0.0;
+        int regions = 0;
+    };
+    std::vector<jacobiResult> jacobiResults;
+    if( sweepZeroMacJacobi )
+    {
+        jacobiResults.reserve( 2 * 2 * checkpoints.size() * 4 );
+        std::puts( "zero_mac_jacobi,cell_m,fluid_substeps,checkpoint_16,"
+            "jacobi_iterations,post_face_m3,pressure_residual,divergence_after,"
+            "source_imbalance_m3_per_s,compatibility_m3_per_s,regions,"
+            "local_pressure_source_m3,local_snapshot_m3,local_swept_divergence_m3,"
+            "local_post_mac_outward_m3,local_post_continuity_m3,"
+            "source_ledger_error_m3_per_s,compatibility_ledger_error_m3_per_s" );
+        std::puts( "zero_mac_jacobi_cross,fluid_substeps,checkpoint_16,"
+            "jacobi_iterations,coarse_minus_fine_post_m3,"
+            "coarse_minus_fine_residual,delta_gap_from_200_m3" );
+    }
     if( probeZeroMac )
     {
         zeroResults.reserve( 2 * 2 * checkpoints.size() );
@@ -2588,6 +2613,161 @@ void auditMatchedWorldMacPressureRestart( bool probeZeroMac = false )
                     const auto [zeroOpen, zeroSwept] = geometry( zero );
                     const auto [naturalOpen, naturalSwept] = geometry( *history );
                     const float residual = zero.getCutCellPressure().pressureResidual;
+                    if( sweepZeroMacJacobi )
+                    {
+                        // Every budget uses a fresh copy of the EXACT same
+                        // zero-open-MAC frozen pre-pressure geometry/velocity.
+                        // Zero interior MAC flux still leaves moving-solid
+                        // pressure sources and a compatibility constraint.
+                        const auto auditLedger = [&]( const fluidField2& f )
+                        {
+                            const int width = f.getWidth();
+                            const int height = f.getHeight();
+                            const int count = width * height;
+                            std::vector<unsigned char> visited( count, 0 );
+                            std::vector<int> queue;
+                            queue.reserve( count );
+                            double sourceTotal = 0.0;
+                            double absoluteRegionSource = 0.0;
+                            int regions = 0;
+                            for( int sy = 0; sy < height; ++sy )
+                                for( int sx = 0; sx < width; ++sx )
+                                {
+                                    const int start = sy * width + sx;
+                                    if( visited[start] ||
+                                        f.getCellFluidFraction( sx, sy ) <= 0.0f )
+                                        continue;
+                                    visited[start] = 1;
+                                    queue.clear();
+                                    queue.push_back( start );
+                                    double regionSource = 0.0;
+                                    for( std::size_t head = 0; head < queue.size(); ++head )
+                                    {
+                                        const int cell = queue[head];
+                                        const int x = cell % width, y = cell / width;
+                                        const auto budget = f.getCutCellVolumeBudget(
+                                            x, y, dt );
+                                        if( !budget.valid || !budget.hasVolumeHistory )
+                                            fail( "zero-MAC pressure source history missing" );
+                                        regionSource += budget.pressureSourceDeltaVolume;
+                                        const auto visit = [&]( int nx, int ny, float open )
+                                        {
+                                            if( open <= 0.0f || nx < 0 || ny < 0 ||
+                                                nx >= width || ny >= height ||
+                                                f.getCellFluidFraction( nx, ny ) <= 0.0f )
+                                                return;
+                                            const int neighbor = ny * width + nx;
+                                            if( visited[neighbor] ) return;
+                                            visited[neighbor] = 1;
+                                            queue.push_back( neighbor );
+                                        };
+                                        visit( x - 1, y, f.getUFaceOpenFraction( x, y ) );
+                                        visit( x + 1, y, f.getUFaceOpenFraction( x + 1, y ) );
+                                        visit( x, y - 1, f.getVFaceOpenFraction( x, y ) );
+                                        visit( x, y + 1, f.getVFaceOpenFraction( x, y + 1 ) );
+                                    }
+                                    sourceTotal += regionSource;
+                                    absoluteRegionSource += std::abs( regionSource );
+                                    ++regions;
+                                }
+                            return std::tuple{ sourceTotal / dt,
+                                absoluteRegionSource / dt, regions };
+                        };
+                        std::optional<jacobiResult> previous;
+                        for( int iterations : { 40, 80, 120, 200 } )
+                        {
+                            fluidField2 trial = frozen;
+                            trial.setPrePressureSnapshotObserver( {} );
+                            if( !trial.setFrozenMacVelocityForAudit(
+                                []( vec2 ) { return vec2{}; } ) )
+                                fail( "frozen zero-MAC Jacobi input rejected" );
+                            const double pre = measure( trial );
+                            if( std::abs( pre ) > 1.0e-12 ||
+                                !trial.replayFrozenCutCellPressure( iterations ).has_value() )
+                                fail( "zero-MAC Jacobi replay not started from zero face flux" );
+                            const double post = measure( trial );
+                            const auto& pressure = trial.getCutCellPressure();
+                            const auto [sourceRate, regionSourceRate, regions] =
+                                auditLedger( trial );
+                            const double calculatedImbalance =
+                                sourceRate + pressure.unresolvedVolumeRate;
+                            const double calculatedCompatibility =
+                                regionSourceRate + std::abs(
+                                    static_cast<double>( pressure.unresolvedVolumeRate ) );
+                            const double sourceError =
+                                calculatedImbalance - pressure.sourceImbalance;
+                            const double compatibilityError =
+                                calculatedCompatibility - pressure.compatibilityCorrection;
+                            const auto [openTime, swept] = geometry( trial );
+                            const double comparisonScale = std::max( {
+                                1.0, std::abs( calculatedImbalance ),
+                                std::abs( calculatedCompatibility ) } );
+                            if( !std::isfinite( post ) ||
+                                !std::isfinite( pressure.pressureResidual ) ||
+                                !std::isfinite( pressure.divergenceAfter ) ||
+                                !std::isfinite( sourceError ) ||
+                                !std::isfinite( compatibilityError ) ||
+                                regions != pressure.connectedRegions ||
+                                std::abs( sourceError ) > 1.0e-4 * comparisonScale ||
+                                std::abs( compatibilityError ) >
+                                    1.0e-4 * comparisonScale ||
+                                std::abs( openTime - zeroOpen ) > 1.0e-7 ||
+                                std::abs( swept - zeroSwept ) > 1.0e-7 )
+                                fail( "zero-MAC source/compatibility ledger mismatch" );
+                            double localSource = 0.0, localSnapshot = 0.0;
+                            double localSwept = 0.0, localAfter = 0.0;
+                            double localResidual = 0.0;
+                            for( int segment = 0; segment < segments; ++segment )
+                                for( int offset : { -1, 0 } )
+                                {
+                                    const int x = 16 * segments + segment;
+                                    const int y = 16 * segments + offset;
+                                    const auto b = trial.getCutCellVolumeBudget( x, y, dt );
+                                    if( !b.valid || !b.hasVolumeHistory )
+                                        fail( "local moving-volume budget unavailable" );
+                                    localSource += b.pressureSourceDeltaVolume;
+                                    localSnapshot += b.snapshotDeltaVolume;
+                                    localSwept += b.solidSweptDivergenceVolume;
+                                    localAfter += b.macNetOutwardVolume;
+                                    localResidual += b.pressureResidualVolume;
+                                }
+                            const jacobiResult record{ h, fluidSteps, cp, iterations,
+                                post, pressure.pressureResidual, sourceRate,
+                                pressure.compatibilityCorrection, localSource,
+                                localSnapshot, localSwept, localAfter, localResidual,
+                                pressure.connectedRegions };
+                            if( previous &&
+                                ( previous->regions != record.regions ||
+                                    std::abs( previous->sourceRate - record.sourceRate ) >
+                                        1.0e-7 ||
+                                    std::abs( previous->compatibility -
+                                        record.compatibility ) > 1.0e-7 ||
+                                    std::abs( previous->localSource -
+                                        record.localSource ) > 1.0e-8 ||
+                                    std::abs( previous->localSnapshot -
+                                        record.localSnapshot ) > 1.0e-8 ||
+                                    std::abs( previous->localSwept -
+                                        record.localSwept ) > 1.0e-8 ) )
+                                fail( "frozen pressure source changed with Jacobi iteration count" );
+                            previous = record;
+                            jacobiResults.push_back( record );
+                            std::printf( "zero_mac_jacobi,%.9g,%d,%d,%d,"
+                                "%.12g,%.9g,%.9g,%.12g,%.12g,%d,"
+                                "%.12g,%.12g,%.12g,%.12g,%.12g,"
+                                "%.12g,%.12g\n",
+                                h, fluidSteps, cp, iterations, post,
+                                pressure.pressureResidual, pressure.divergenceAfter,
+                                pressure.sourceImbalance, pressure.compatibilityCorrection,
+                                pressure.connectedRegions, localSource, localSnapshot,
+                                localSwept, localAfter, localResidual,
+                                sourceError, compatibilityError );
+                            if( iterations == 120 &&
+                                ( std::abs( post - zeroPost ) > 1.0e-10 ||
+                                    std::abs( pressure.pressureResidual - residual ) >
+                                        1.0e-7 ) )
+                                fail( "120-iteration frozen zero-MAC trial differs from baseline" );
+                        }
+                    }
                     if( !std::isfinite( zeroPre ) || !std::isfinite( zeroPost ) ||
                         !std::isfinite( residual ) ||
                         std::abs( zeroOpen - naturalOpen ) > 1.0e-7 ||
@@ -2742,6 +2922,51 @@ void auditMatchedWorldMacPressureRestart( bool probeZeroMac = false )
                         velocityDependentGap, zeroPostGap );
                 }
             }
+    if( sweepZeroMacJacobi )
+    {
+        if( jacobiResults.size() != 32 )
+            fail( "zero-MAC Jacobi convergence checkpoints missing" );
+        for( int steps : { 64, 128 } )
+            for( int checkpoint : checkpoints )
+            {
+                double referenceGap = 0.0;
+                for( int iteration : { 40, 80, 120, 200 } )
+                {
+                    const jacobiResult *coarse = nullptr, *fine = nullptr;
+                    for( const jacobiResult& sample : jacobiResults )
+                        if( sample.fluidSteps == steps &&
+                            sample.checkpoint == checkpoint &&
+                            sample.iterations == iteration )
+                        {
+                            if( sample.h == 0.25f ) coarse = &sample;
+                            else if( sample.h == 0.125f ) fine = &sample;
+                        }
+                    if( !coarse || !fine )
+                        fail( "zero-MAC Jacobi cross-grid pair missing" );
+                    const double gap = coarse->post - fine->post;
+                    if( iteration == 200 ) referenceGap = gap;
+                }
+                for( int iteration : { 40, 80, 120, 200 } )
+                {
+                    const jacobiResult *coarse = nullptr, *fine = nullptr;
+                    for( const jacobiResult& sample : jacobiResults )
+                        if( sample.fluidSteps == steps &&
+                            sample.checkpoint == checkpoint &&
+                            sample.iterations == iteration )
+                        {
+                            if( sample.h == 0.25f ) coarse = &sample;
+                            else if( sample.h == 0.125f ) fine = &sample;
+                        }
+                    if( !coarse || !fine )
+                        fail( "zero-MAC Jacobi cross-grid pair missing" );
+                    const double gap = coarse->post - fine->post;
+                    std::printf( "zero_mac_jacobi_cross,%d,%d,%d,"
+                        "%.12g,%.12g,%.12g\n",
+                        steps, checkpoint, iteration, gap,
+                        coarse->residual - fine->residual, gap - referenceGap );
+                }
+            }
+    }
     if( !foundInputHistoryDifference || !foundPropagation )
         fail( "matched-state restart did not exercise history replacement and propagation" );
 }
@@ -2941,6 +3166,7 @@ int main( int argc, char** argv )
     bool frozenPressureIterationAudit = false;
     bool matchedWorldPressureRestartAudit = false;
     bool zeroMacPressureAudit = false;
+    bool zeroMacConvergenceAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -2970,6 +3196,7 @@ int main( int argc, char** argv )
         frozenPressureIterationAudit |= std::string_view( argv[i] ) == "--small-cell-frozen-pressure-iterations-audit";
         matchedWorldPressureRestartAudit |= std::string_view( argv[i] ) == "--small-cell-matched-world-restart-audit";
         zeroMacPressureAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-pressure-audit";
+        zeroMacConvergenceAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-convergence-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -2997,6 +3224,11 @@ int main( int argc, char** argv )
     if( frozenPressureIterationAudit ) { auditRotatingFrozenPressureIterationSweep(); return 0; }
     if( matchedWorldPressureRestartAudit ) { auditMatchedWorldMacPressureRestart(); return 0; }
     if( zeroMacPressureAudit ) { auditMatchedWorldMacPressureRestart( true ); return 0; }
+    if( zeroMacConvergenceAudit )
+    {
+        auditMatchedWorldMacPressureRestart( true, true );
+        return 0;
+    }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
