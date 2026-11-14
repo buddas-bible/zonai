@@ -372,23 +372,55 @@ projection truncation-error estimate, a pressure-operator-only difference or
 a physical space-time tracer-flux bound. In particular, changing open MAC
 velocities also changes their divergence contribution to each pressure RHS.
 The zero-input response can retain wall-motion, geometry and numerical
-effects. The test asserts finite pressure and tracer-independent operation,
-equal geometry/swept ledgers across cloned inputs, full checkpoint coverage,
-and closure of the comparison algebra. The original benchmark command retains
-its exact behavior when the new flag is absent.
+effects. The test asserts finite pressure, equal geometry/swept ledgers
+across cloned inputs, full checkpoint coverage, and closure of the comparison
+algebra. The zero-pressure replay does not execute tracer transport; tracer
+independence is not inferred from a new tracer-mass regression. The original
+benchmark command retains its exact behavior when the new flag is absent.
 
-Implementation: `98bf088` (separate opt-in frozen zero-MAC probe),
-`2923837` (Ubuntu Debug/Windows Release CI step). Initial validation:
-[workflow 43555705311](https://github.com/buddas-bible/zonai/actions/runs/43555705311).
-CI conclusions and actual measured numbers must be checked before treating
-this as verified; no change to defaults, pressure/Schur, coupled Body forces,
-tracer routing or speed clamps.
+**Validated:** `98bf088` (opt-in frozen zero-MAC probe), `2923837`
+(Ubuntu Debug/Windows Release CI), [workflow 43555705311](https://github.com/buddas-bible/zonai/actions/runs/43555705311)
+**success on both platforms**, including full existing tests and the new
+audit. Ubuntu and Windows printed the following signed physical-face
+coarse-minus-fine projection changes identically to the shown precision
+(unit-depth m³; negative/positive are canonical face directions):
 
-**Next:** use the three input conditions at equal pose/time to determine
-whether the observed cross-grid projection response is dominated by the
-moving-wall/geometry source or by the velocity-dependent contribution,
-then return to the real World8/Fluid4 disappearing V(17,13) tracer case.
-The opt-in pressure pooling and connected-residual routing remain Draft/OFF.
+| Fluid steps | Rotation checkpoint | Affine projection gap | Zero-open-MAC projection gap | Affine minus zero projection gap |
+| ---: | ---: | ---: | ---: | ---: |
+| 64 | 11/16 | -0.000236343585329 | -0.000236558181464 | +0.000000214596135 |
+| 64 | 12/16 | +0.000096197078210 | +0.000097969241583 | -0.000001772163373 |
+| 128 | 11/16 | -0.000117614302942 | -0.000117721445789 | +0.000000107142847 |
+| 128 | 12/16 | +0.000058726451396 | +0.000059612253685 | -0.000000885802290 |
+
+On this prescribed rotating capsule, the cross-grid response to the
+**zero-open-MAC** pressure input accounts for nearly all of the affine
+projection gap at the sampled checkpoints. The added velocity-dependent
+projection gap is only about 0.09–1.8% of the zero-MAC gap in magnitude.
+For 128 steps at checkpoint 11/16, the two grids even report the same
+**target physical-face** time-mean aperture exposure (0.000130208340124 s)
+and solid swept volume (0.00028198203654 m³), while their zero-input
+post-pressure MAC face volumes are 0.000288905187366 m³ (coarse) and
+0.000406626633155 m³ (fine). Equality of one target face's geometric
+ledger is **not** equality of the full surrounding pressure discretization,
+cell-volume source, connected region or boundary conditions.
+
+**Limitations:** The replay uses a prescribed kinematic capsule and the
+ordinary **120-iteration Cut-cell Jacobi** projection, not the fully coupled
+Schur PCG/Body trajectory of World8/Fluid4. Raw pressure residuals on the
+zero-input checkpoints remain ~0.0303–0.0464; this is not a
+convergence-certified reference pressure solution. The matched fields
+differ in discrete grid geometry, pressure operator, compatible source
+correction and potentially wall conditions. No production stabilization or
+physical tracer-capacity bound follows from this control. Defaults,
+pressure/Schur implementations, Body forces, tracer routing and clamps
+are unchanged; pressure pooling and connected residual remap stay Draft/OFF.
+
+**Next:** perform a **same-frozen-zero-MAC Jacobi iteration sweep** with
+pressure residual and face-flux convergence controls; audit cell-local
+moving-volume source and connected-region compatibility around V(16,16).
+Then apply the resulting stage separation to the actual coupled
+World8/Fluid4 disappearing V(17,13) tracer scene and measure optional
+diagnostic overhead before deciding on any physical correction.
 
 ### Remaining S2c acceptance gate
 
