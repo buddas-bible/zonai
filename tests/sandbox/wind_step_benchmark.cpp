@@ -4600,7 +4600,7 @@ void auditTinyCapsuleCorner( const fluidField2& frozen,
             const double rightOpen = wedge.rightOpenLength / h;
             const float engineBottom = frozen.getVFaceOpenFraction( x, y );
             const float engineRight = frozen.getUFaceOpenFraction( x + 1, y );
-            if( policy == 0 && ulp == 0 && mode == 1 &&
+            if( policy == 0 && ulp == 0 && mode != 0 &&
                 ( std::abs( bottomOpen - engineBottom ) > 1.0e-5 ||
                   std::abs( rightOpen - engineRight ) > 1.0e-5 ) )
                 throw std::runtime_error( "independent capsule faces disagree with analytic clipping" );
@@ -4842,6 +4842,10 @@ void auditFrozenCapsuleGeometryComparison()
                 sourceDifferenceL1 += std::abs(
                     analytic.sources[i] - precise.sources[i] );
             }
+            if( h == 0.125f && cp == 12 &&
+                ( analytic.anchors != 2 || precise.anchors != 0 ||
+                  !precise.pressure.converged ) )
+                fail( "double Capsule pressure-anchor recovery regression" );
             // This is a separately evolved geometry policy comparison,
             // never a same-frozen-pressure-only A/B.
             std::printf( "capsule_geometry_precision_pair,%.9g,%d,"
