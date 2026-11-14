@@ -3014,8 +3014,6 @@ independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
     std::vector<double> potential( count, 0.0 ), residual( count, 0.0 );
     std::vector<double> preconditioned( count, 0.0 ), direction( count, 0.0 );
     std::vector<double> product( count, 0.0 );
-    std::vector<int> component( count, -1 );
-    std::vector<std::vector<int>> componentCells;
     independentCutCellPressureResult output{};
 
     for( int y = 0; y < height; ++y )
