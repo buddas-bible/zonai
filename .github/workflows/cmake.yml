@@ -170,6 +170,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-convergence-audit
 
+      # Noncoupled frozen-only 200/800/1600/3200 Jacobi reference; explicit
+      # compatibility-corrected residual evaluated via public MAC/source data.
+      - name: Audit bounded zero-MAC reference residual (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-reference-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -403,6 +409,10 @@ jobs:
       - name: Audit frozen zero-MAC pressure convergence (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-convergence-audit
+
+      - name: Audit bounded zero-MAC reference residual (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-reference-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
