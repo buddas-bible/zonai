@@ -642,6 +642,56 @@ separate higher-precision/independent pressure reference and
 return to the actual coupled World8/Fluid4 near-disappearing
 V(17,13) tracer scene.
 
+### Per-cell localization of the unconverged frozen Jacobi residual — 2026-11-14
+
+**Question:** The zero-open-MAC frozen pressure reference remained above
+the diagnostic compatible-continuity threshold after 3200 Jacobi iterations,
+especially h=0.25 at rotation checkpoint 11/16. Is the residual supported
+mainly in tiny Cut-cells/near-closing open faces, near the target physical
+V(16,16), or in remote connected fluid cells? Do the dominant sites
+change from 200 to 3200 iterations?
+
+The new **opt-in** `--small-cell-zero-mac-residual-map-audit` executes
+the *same* 128-step prescribed rotating-capsule frozen reference at
+h=0.25 and 0.125 with checkpoints 11/16 and 12/16. It reuses the existing
+200/800/1600/3200 Jacobi replays and exact connected-component
+compatibility-source subtraction; no change to production projection.
+For every active cell it reconstructs the signed
+`(postPressureMacNetVolume + pressureSourceVolume - componentMeanSourceVolume) / (h² dt)`
+(1/s) using the public per-cell volume ledger.
+
+Each grid/checkpoint/iteration reports the **top eight signed residual
+cells**, their integer coordinates and cell world-space center, current
+fluid fraction, smallest strictly positive surrounding U/V open
+fraction, largest opening, number of open faces, moving-volume pressure
+source, distinct snapshot/Swept volumes, endpoint MAC net outward
+volume and Manhattan distance from either cell adjoining the target
+physical face. To separate a local spike from a globally spread slow
+error, it also reports **squared residual shares** for:
+
+- top eight cells overall;
+- cells with current fluid fraction <0.01;
+- cells with at least one strictly positive open face below 0.01;
+- cells within three cell-index Manhattan steps of the target physical
+  V-face-adjoining cells.
+
+These sets **can overlap** and their shares must not be summed.
+A tiny fraction or positive aperture is a geometric classification,
+not automatically the cause of solver failure. Cross-grid cell indices
+are not identical world-space control volumes. All reported
+"residual energy shares" are mathematical squared-continuity-error
+shares, **not fluid mechanical energy**. The test checks that the
+independently summed per-cell squared residual reproduces the
+previous component-compatible global RMS, rejecting missing or nonfinite
+cells. The original `--small-cell-zero-mac-reference-audit` output is
+unchanged when localization is not requested.
+
+Implementation `401acdf`; Ubuntu/Windows CI `b396d56`.
+[Workflow 43567697554](https://github.com/buddas-bible/zonai/actions/runs/43567697554)
+must be verified and its CSV inspected before attributing the residual
+plateau to local aperture geometry, Jacobi slow modes, or matrix
+inconsistency. Neither pressure pooling nor tracer remap is enabled.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
