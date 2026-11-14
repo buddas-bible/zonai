@@ -3283,17 +3283,62 @@ independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
 // swept time-mean opening separately rather than treating it as the
 // endpoint pressure aperture or declaring a physical leak.
 void auditFrozenInactiveNeighborFaces( const fluidField2& source,
-    float subDt, int checkpoint, int expectedCount, double expectedOpening )
+    float subDt, int checkpoint, int expectedCount, double expectedOpening,
+    vec2 capsuleCenter, float capsuleAngle )
 {
     const float h = source.getCellSize();
     const vec2 origin = source.getOrigin();
+    // Independent midpoint geometry oracle for this prescribed single capsule.
+    // The fluid solver's analytic rectangle areas and clipped face intervals
+    // are intentionally NOT used. These are sampled estimates, not exact
+    // geometric predicates or a replacement for the production Cut-cell grid.
+    constexpr int samples = 96;
+    constexpr double halfLength = 0.63;
+    constexpr double radiusSquared = 0.19 * 0.19;
+    const double axisX = std::cos( static_cast<double>( capsuleAngle ) );
+    const double axisY = std::sin( static_cast<double>( capsuleAngle ) );
+    const auto freeAt = [&]( double px, double py )
+    {
+        double dx = px - capsuleCenter.x, dy = py - capsuleCenter.y;
+        const double along = std::clamp( dx * axisX + dy * axisY,
+            -halfLength, halfLength );
+        dx -= along * axisX;
+        dy -= along * axisY;
+        return dx * dx + dy * dy > radiusSquared;
+    };
+    const auto sampleCell = [&]( int x, int y )
+    {
+        int open = 0;
+        for( int sy = 0; sy < samples; ++sy )
+            for( int sx = 0; sx < samples; ++sx )
+            {
+                const double px = origin.x + ( x + ( sx + 0.5 ) / samples ) * h;
+                const double py = origin.y + ( y + ( sy + 0.5 ) / samples ) * h;
+                open += freeAt( px, py );
+            }
+        return static_cast<double>( open ) / ( samples * samples );
+    };
+    const auto sampleFace = [&]( char axis, int x, int y )
+    {
+        int open = 0;
+        for( int i = 0; i < samples; ++i )
+        {
+            const double px = origin.x + ( x +
+                ( axis == 'V' ? ( i + 0.5 ) / samples : 0.0 ) ) * h;
+            const double py = origin.y + ( y +
+                ( axis == 'U' ? ( i + 0.5 ) / samples : 0.0 ) ) * h;
+            open += freeAt( px, py );
+        }
+        return static_cast<double>( open ) / samples;
+    };
     int seen = 0;
     double sumOpening = 0.0;
     std::puts( "zero_mac_anchor_face,cell_m,checkpoint_16,axis,face_x,face_y,"
         "world_x,world_y,endpoint_open,swept_mean_open,"
         "side_a_fluid_fraction,side_b_fluid_fraction,"
         "side_a_pressure_source_m3,side_b_pressure_source_m3,"
-        "solid_face_speed_mps" );
+        "solid_face_speed_mps,reference_samples,reference_face_open,"
+        "reference_side_a_fluid,reference_side_b_fluid" );
     const auto emit = [&]( char axis, int x, int y, vec2 point,
         int ax, int ay, int bx, int by,
         float opening, float timeMean, float solidSpeed )
@@ -3311,15 +3356,21 @@ void auditFrozenInactiveNeighborFaces( const fluidField2& source,
             opening < 0.0f || opening > 1.0f ||
             timeMean < 0.0f || timeMean > 1.0f )
             throw std::runtime_error( "nonfinite or invalid frozen anchor" );
+        const double referenceFace = sampleFace( axis, x, y );
+        const double referenceA = sampleCell( ax, ay );
+        const double referenceB = sampleCell( bx, by );
+        if( !std::isfinite( referenceFace ) ||
+            !std::isfinite( referenceA ) || !std::isfinite( referenceB ) )
+            throw std::runtime_error( "invalid independent capsule geometry reference" );
         ++seen;
         sumOpening += opening;
         std::printf( "zero_mac_anchor_face,%.9g,%d,%c,%d,%d,"
             "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
-            "%.12g,%.12g,%.9g\n",
+            "%.12g,%.12g,%.9g,%d,%.9g,%.9g,%.9g\n",
             h, checkpoint, axis, x, y, point.x, point.y,
             opening, timeMean, a.currentFraction, b.currentFraction,
             a.pressureSourceDeltaVolume, b.pressureSourceDeltaVolume,
-            solidSpeed );
+            solidSpeed, samples, referenceFace, referenceA, referenceB );
     };
     for( int y = 0; y < source.getHeight(); ++y )
         for( int x = 1; x < source.getWidth(); ++x )
@@ -3812,7 +3863,9 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
                         {
                             auditFrozenInactiveNeighborFaces( trial, subDt, cp,
                                 independent.activeToInactiveOpenFaces,
-                                independent.activeToInactiveApertureSum );
+                                independent.activeToInactiveApertureSum,
+                                center, startAngle +
+                                    ( endAngle - startAngle ) * cp / 16.0f );
                             const auto omitted = solveIndependentFrozenCutCellPressure(
                                 trial, subDt, segments, true );
                             if( !omitted.converged ||
