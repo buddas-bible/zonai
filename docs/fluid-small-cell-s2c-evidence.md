@@ -1125,6 +1125,49 @@ automatically invalid: actual obstacle shape sampling and
 boundary-point classification remain to be investigated based on
 the measured coordinates.
 
+### Single rotating capsule: sampled-cell versus sampled-face witness — 2026-11-14
+
+The frozen zero-MAC reference uses **one** rotating Capsule, not a disjoint multi-Shape
+set. In `fluidField2.cpp`, `BuildDisjointAnalyticShapes` returns empty for fewer
+than two obstacles; the individual analytic Capsule Cut-cell option is OFF in this
+benchmark. Consequently, `updateCutCellGeometry` uses its fallback **4×4 midpoint
+cell occupancy** and **four midpoint points per MAC face**, rather than analytic
+Capsule rectangle areas. These two quadratures need not have identical support:
+a positive-open face can border a cell classified as exactly zero fluid because
+all sixteen cell samples miss a narrow, real fluid wedge.
+
+The previous coordinate-ledger run records positive openings of 0.25 or 0.5
+next to zero-fraction cells. This is evidence of **discrete support
+inconsistency**, not proof of negative physical volume, an incorrect exact
+Capsule intersection routine, or a defective pressure PCG solve.
+
+To test the hypothesis independently, the opt-in
+`--small-cell-zero-mac-anchor-audit` now evaluates the known capsule as a
+point-to-rotated-segment distance, not by calling the engine's clipping or
+occupancy routines. The first independent midpoint evaluation uses **the
+same N=4** and must reproduce every stored face opening and both cell
+fractions within `1e-6`. A separate N=96 face/cell midpoint estimate is
+reported in the same CSV for each unique anchored physical face. This
+distinguishes `N=4` quadrature artifacts from large-scale genuine blocked
+geometry, without altering the solver or the pressure-operator
+counterfactual.
+
+Implementation: `0f490ce5` (high-resolution geometry witness) and
+`f83f821b` (enforced independent coarse-oracle match), on PR #326.
+CI references: [first oracle run](https://github.com/buddas-bible/zonai/actions/runs/43576922437)
+and [coarse-oracle assertion run](https://github.com/buddas-bible/zonai/actions/runs/43577219383).
+Verify both Windows and Ubuntu conclusions and the new face rows before
+assigning a quantitative correction; this section documents the method, **not**
+an accepted numerical fix.
+
+**Next decision:** after checking the CSV, compare the same prescribed capsule
+and timestamps with the existing opt-in analytic-Capsule geometry, and
+independently report cell fractions, face apertures, pressure anchors, source
+volumes, and target-face convergence. Geometry alternatives change the
+discrete fluid state, so distinguish that experiment from a same-frozen-state
+pressure-only A/B. Do not simply erase anchored pressure faces, clamp
+velocities or enable either experimental pressure pooling or tracer rerouting.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
