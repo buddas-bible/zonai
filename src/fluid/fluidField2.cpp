@@ -338,6 +338,82 @@ double ConvexPolygonRectangleArea( const analyticFluidPolygon& polygon,
     return std::clamp( 0.5 * std::abs( area2 ), 0.0, ( x1 - x0 ) * ( y1 - y0 ) );
 }
 
+// Research-only double-coordinate Capsule core. The ordinary polygon path
+// remains float-backed, and no other Shape geometry changes with this mode.
+analyticCircleInterval ClipPreciseCapsuleCoreFace(
+    const std::array<analyticPoint2, 4>& vertices,
+    bool vertical, double coordinate, double low, double high )
+{
+    double enter = low;
+    double exit = high;
+    for( int i = 0; i < 4; ++i )
+    {
+        const analyticPoint2 a = vertices[i];
+        const analyticPoint2 b = vertices[( i + 1 ) % 4];
+        const double ex = b.x - a.x, ey = b.y - a.y;
+        const double constant = vertical
+            ? -ex * a.y - ey * ( coordinate - a.x )
+            : ex * ( coordinate - a.y ) + ey * a.x;
+        const double slope = vertical ? ex : -ey;
+        if( slope == 0.0 )
+        {
+            if( constant < 0.0 ) return {};
+            continue;
+        }
+        const double boundary = -constant / slope;
+        if( slope > 0.0 ) enter = std::max( enter, boundary );
+        else exit = std::min( exit, boundary );
+        if( exit <= enter ) return {};
+    }
+    return { exit - enter, 0.5 * ( enter + exit ) };
+}
+
+double PreciseCapsuleCoreRectangleArea(
+    const std::array<analyticPoint2, 4>& vertices,
+    double x0, double y0, double x1, double y1 )
+{
+    std::array<analyticPoint2, 12> current{}, next{};
+    std::copy( vertices.begin(), vertices.end(), current.begin() );
+    int count = 4;
+    for( int side = 0; side < 4; ++side )
+    {
+        const auto distance = [&]( analyticPoint2 point )
+        {
+            if( side == 0 ) return point.x - x0;
+            if( side == 1 ) return x1 - point.x;
+            if( side == 2 ) return point.y - y0;
+            return y1 - point.y;
+        };
+        int nextCount = 0;
+        analyticPoint2 previous = current[count - 1];
+        double before = distance( previous );
+        for( int i = 0; i < count; ++i )
+        {
+            const analyticPoint2 point = current[i];
+            const double after = distance( point );
+            if( ( before >= 0.0 ) != ( after >= 0.0 ) )
+            {
+                const double t = before / ( before - after );
+                next[nextCount++] = { previous.x + t * ( point.x - previous.x ),
+                    previous.y + t * ( point.y - previous.y ) };
+            }
+            if( after >= 0.0 ) next[nextCount++] = point;
+            previous = point;
+            before = after;
+        }
+        if( nextCount < 3 ) return 0.0;
+        current.swap( next );
+        count = nextCount;
+    }
+    const analyticPoint2 origin = current[0];
+    double area2 = 0.0;
+    for( int i = 1; i + 1 < count; ++i )
+        area2 += ( current[i].x - origin.x ) * ( current[i + 1].y - origin.y ) -
+            ( current[i].y - origin.y ) * ( current[i + 1].x - origin.x );
+    return std::clamp( 0.5 * std::abs( area2 ), 0.0,
+        ( x1 - x0 ) * ( y1 - y0 ) );
+}
+
 // Capsule는 선분과 원판의 Minkowski 합. 중앙 직사각형과 양 끝의
 // 분리된 반원 영역으로 나눠 각 cell 면적을 정확히 적분한다.
 struct analyticFluidCapsule
@@ -346,9 +422,14 @@ struct analyticFluidCapsule
     analyticFluidCircle last{};
     analyticFluidPolygon core{};
     vec2 axis{};
+    // Enabled only by the independent opt-in single-Capsule experiment.
+    std::array<analyticPoint2, 4> preciseCore{};
+    double preciseAxisX = 0.0, preciseAxisY = 0.0;
+    bool usePreciseGeometry = false;
 };
 
-bool TryGetAnalyticCapsule( std::span<const fluidShapeObstacle2> obstacles, analyticFluidCapsule& result )
+bool TryGetAnalyticCapsule( std::span<const fluidShapeObstacle2> obstacles,
+    analyticFluidCapsule& result, bool usePreciseGeometry = false )
 {
     if( obstacles.size() != 1 || !IsValidFluidObstacle( obstacles.front() ) ) return false;
     const auto* shape = std::get_if<capsule2>( &obstacles.front().geometry );
@@ -374,6 +455,24 @@ bool TryGetAnalyticCapsule( std::span<const fluidShapeObstacle2> obstacles, anal
     result.core.vertices[1] = b - radiusVector;
     result.core.vertices[2] = b + radiusVector;
     result.core.vertices[3] = a + radiusVector;
+    result.usePreciseGeometry = usePreciseGeometry;
+    if( usePreciseGeometry )
+    {
+        const double ux = dx / length, uy = dy / length;
+        const double radius = shape->radius;
+        result.preciseAxisX = ux;
+        result.preciseAxisY = uy;
+        result.preciseCore = {{
+            { static_cast<double>( a.x ) + radius * uy,
+              static_cast<double>( a.y ) - radius * ux },
+            { static_cast<double>( b.x ) + radius * uy,
+              static_cast<double>( b.y ) - radius * ux },
+            { static_cast<double>( b.x ) - radius * uy,
+              static_cast<double>( b.y ) + radius * ux },
+            { static_cast<double>( a.x ) - radius * uy,
+              static_cast<double>( a.y ) + radius * ux }
+        }};
+    }
     return true;
 }
 
@@ -387,12 +486,12 @@ analyticCircleInterval ClipCapsuleCapFace( const analyticFluidCapsule& capsule,
     double exit = whole.midpoint + 0.5 * whole.length;
     // first cap: (p-a)·axis <= 0. last cap: (p-b)·axis >= 0.
     const double direction = firstCap ? -1.0 : 1.0;
-    const double slope = direction * ( vertical ? capsule.axis.y : capsule.axis.x );
+    const double ux = capsule.usePreciseGeometry ? capsule.preciseAxisX : capsule.axis.x;
+    const double uy = capsule.usePreciseGeometry ? capsule.preciseAxisY : capsule.axis.y;
+    const double slope = direction * ( vertical ? uy : ux );
     const double intercept = direction * ( vertical
-        ? static_cast<double>( capsule.axis.x ) * ( coordinate - circle.center.x ) -
-            static_cast<double>( capsule.axis.y ) * circle.center.y
-        : -static_cast<double>( capsule.axis.x ) * circle.center.x +
-            static_cast<double>( capsule.axis.y ) * ( coordinate - circle.center.y ) );
+        ? ux * ( coordinate - circle.center.x ) - uy * circle.center.y
+        : -ux * circle.center.x + uy * ( coordinate - circle.center.y ) );
     if( std::abs( slope ) <= 1.0e-14 )
     {
         if( intercept < 0.0 ) return {};
@@ -420,7 +519,10 @@ analyticCircleInterval ClipCapsuleFace( const analyticFluidCapsule& capsule,
                  : ( coordinate <= minY || coordinate >= maxY || high <= minX || low >= maxX ) )
         return {};
     const std::array<analyticCircleInterval, 3> parts{
-        ClipPolygonFace( capsule.core, vertical, coordinate, low, high ),
+        capsule.usePreciseGeometry
+            ? ClipPreciseCapsuleCoreFace(
+                capsule.preciseCore, vertical, coordinate, low, high )
+            : ClipPolygonFace( capsule.core, vertical, coordinate, low, high ),
         ClipCapsuleCapFace( capsule, true, vertical, coordinate, low, high ),
         ClipCapsuleCapFace( capsule, false, vertical, coordinate, low, high )
     };
@@ -497,11 +599,12 @@ double CapsuleCapRectangleArea( const analyticFluidCapsule& capsule, bool firstC
     std::array<analyticPoint2, 8> next{};
     const analyticFluidCircle& circle = firstCap ? capsule.first : capsule.last;
     const double direction = firstCap ? -1.0 : 1.0;
+    const double ux = capsule.usePreciseGeometry ? capsule.preciseAxisX : capsule.axis.x;
+    const double uy = capsule.usePreciseGeometry ? capsule.preciseAxisY : capsule.axis.y;
     const auto signedDistance = [&]( analyticPoint2 p )
     {
-        return direction * (
-            static_cast<double>( capsule.axis.x ) * ( p.x - circle.center.x ) +
-            static_cast<double>( capsule.axis.y ) * ( p.y - circle.center.y ) );
+        return direction * ( ux * ( p.x - circle.center.x ) +
+            uy * ( p.y - circle.center.y ) );
     };
     int count = 4;
     int nextCount = 0;
@@ -536,7 +639,10 @@ double CapsuleRectangleArea( const analyticFluidCapsule& capsule,
     const double minY = std::min( capsule.first.center.y, capsule.last.center.y ) - r;
     const double maxY = std::max( capsule.first.center.y, capsule.last.center.y ) + r;
     if( x1 <= minX || x0 >= maxX || y1 <= minY || y0 >= maxY ) return 0.0;
-    const double area = ConvexPolygonRectangleArea( capsule.core, x0, y0, x1, y1 ) +
+    const double coreArea = capsule.usePreciseGeometry
+        ? PreciseCapsuleCoreRectangleArea( capsule.preciseCore, x0, y0, x1, y1 )
+        : ConvexPolygonRectangleArea( capsule.core, x0, y0, x1, y1 );
+    const double area = coreArea +
         CapsuleCapRectangleArea( capsule, true, x0, y0, x1, y1 ) +
         CapsuleCapRectangleArea( capsule, false, x0, y0, x1, y1 );
     return std::clamp( area, 0.0, ( x1 - x0 ) * ( y1 - y0 ) );
@@ -1139,6 +1245,13 @@ void fluidField2::setAnalyticCapsuleCutCellEnabled( bool enabled ) noexcept
     invalidateObstacleHistory();
 }
 
+void fluidField2::setAnalyticCapsuleDoubleGeometryEnabled( bool enabled ) noexcept
+{
+    if( analyticCapsuleDoubleGeometryEnabled_ == enabled ) return;
+    analyticCapsuleDoubleGeometryEnabled_ = enabled;
+    invalidateObstacleHistory();
+}
+
 void fluidField2::setAnalyticRoundedPolygonCutCellEnabled( bool enabled ) noexcept
 {
     if( analyticRoundedPolygonCutCellEnabled_ == enabled ) return;
@@ -1522,15 +1635,16 @@ fluidCapsuleCellAreaAudit2 fluidField2::getAnalyticCapsuleCellAreaAudit(
         x < 0 || x >= width_ || y < 0 || y >= height_ ) return result;
     analyticFluidCapsule capsule{};
     if( !TryGetAnalyticCapsule( std::span<const fluidShapeObstacle2>( &obstacle, 1 ),
-        capsule ) ) return result;
+        capsule, analyticCapsuleDoubleGeometryEnabled_ ) ) return result;
 
     const double h = cellSize_;
     const double left = origin_.x + x * h;
     const double bottom = origin_.y + y * h;
     const double right = left + h, top = bottom + h;
     result.cellArea = h * h;
-    result.coreCoveredArea = ConvexPolygonRectangleArea(
-        capsule.core, left, bottom, right, top );
+    result.coreCoveredArea = capsule.usePreciseGeometry
+        ? PreciseCapsuleCoreRectangleArea( capsule.preciseCore, left, bottom, right, top )
+        : ConvexPolygonRectangleArea( capsule.core, left, bottom, right, top );
     result.firstCapCoveredArea = CapsuleCapRectangleArea(
         capsule, true, left, bottom, right, top );
     result.lastCapCoveredArea = CapsuleCapRectangleArea(
@@ -1855,7 +1969,8 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
         const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
             TryGetAnalyticPolygon( obstacles, polygon );
         const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
-            analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule );
+            analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule,
+                analyticCapsuleDoubleGeometryEnabled_ );
         const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
             analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded );
         if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
@@ -3189,7 +3304,8 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
     const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
         TryGetAnalyticPolygon( obstacles, polygon );
     const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
-        analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule );
+        analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule,
+                analyticCapsuleDoubleGeometryEnabled_ );
     const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
         analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded );
     if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
@@ -3540,7 +3656,8 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
             const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
                 TryGetAnalyticPolygon( intermediate, polygon );
             const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
-                analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( intermediate, capsule );
+                analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( intermediate, capsule,
+                    analyticCapsuleDoubleGeometryEnabled_ );
             const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
                 analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( intermediate, rounded );
             if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
@@ -4571,7 +4688,8 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
         const bool polygonGeometry = !circleGeometry && analyticPolygonCutCellEnabled_ &&
             TryGetAnalyticPolygon( obstacles, polygon );
         const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
-            analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule );
+            analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule,
+                analyticCapsuleDoubleGeometryEnabled_ );
         const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
             analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded );
         if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
