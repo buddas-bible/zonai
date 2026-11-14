@@ -2981,7 +2981,8 @@ void auditMatchedWorldMacPressureRestart( bool probeZeroMac = false,
 // the discrete compatible continuity residual from the resulting MAC flux,
 // current volume source and per-connected-component source mean. This is
 // not the exact continuum moving-wall flux, nor a Schur PCG reference.
-void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
+void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
+    bool compareDampedJacobi = false )
 {
     constexpr float totalDt = 1.0f / 30.0f;
     constexpr int fluidSteps = 128;
@@ -3004,9 +3005,11 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
         double sourceVolume = 0.0;
         float legacyResidual = 0.0f;
         int regions = 0;
+        double checkerboardShare = 0.0;
     };
-    std::vector<result> results;
+    std::vector<result> results, dampedResults;
     results.reserve( 2 * checkpoints.size() * budgets.size() );
+    if( compareDampedJacobi ) dampedResults.reserve( results.capacity() );
     std::puts( "zero_mac_reference,cell_m,fluid_substeps,checkpoint_16,"
         "jacobi_iterations,target_face_m3,compatible_rms_per_s,"
         "component_source_floor_rms_per_s,legacy_pressure_residual,"
@@ -3015,6 +3018,18 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
         "jacobi_iterations,coarse_minus_fine_target_m3,"
         "coarse_minus_fine_compatible_rms_per_s,"
         "difference_from_3200_target_m3,reference_criteria_met" );
+    if( compareDampedJacobi )
+    {
+        std::puts( "zero_mac_damped,cell_m,checkpoint_16,jacobi_iterations,"
+            "legacy_compatible_rms_per_s,damped_compatible_rms_per_s,"
+            "legacy_checkerboard_squared_share,damped_checkerboard_squared_share,"
+            "legacy_target_face_m3,damped_target_face_m3,damped_minus_legacy_m3,"
+            "component_source_floor_per_s" );
+        std::puts( "zero_mac_damped_cross,checkpoint_16,jacobi_iterations,"
+            "legacy_coarse_minus_fine_m3,damped_coarse_minus_fine_m3,"
+            "damped_coarse_compatible_rms_per_s,damped_fine_compatible_rms_per_s,"
+            "damped_reference_criteria_met" );
+    }
     if( locateResidualHotspots )
     {
         std::puts( "zero_mac_hotspot_summary,cell_m,checkpoint_16,"
@@ -3094,6 +3109,7 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
             std::vector<int> queue;
             queue.reserve( cells );
             double squared = 0.0, squaredFloor = 0.0, summedSource = 0.0;
+            double parityVolume = 0.0;
             int fluidCells = 0, components = 0;
             std::vector<hotspotCell> cellsWithResidual;
             if( locateResidualHotspots ) cellsWithResidual.reserve( cells );
@@ -3141,6 +3157,8 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
                     const double corrected = budget.pressureResidualVolume - meanSource;
                     squared += corrected * corrected;
                     squaredFloor += meanSource * meanSource;
+                    parityVolume += ( ( cell % width + cell / width ) & 1 )
+                        ? -corrected : corrected;
                     if( locateResidualHotspots )
                     {
                         const int x = cell % width, y = cell / width;
@@ -3251,10 +3269,15 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
                         row.targetDistance );
                 }
             }
+            const double checkerboardShare = squared > 0.0
+                ? parityVolume * parityVolume / ( fluidCells * squared ) : 0.0;
+            if( !std::isfinite( checkerboardShare ) ||
+                checkerboardShare < 0.0 || checkerboardShare > 1.0 + 1.0e-5 )
+                fail( "invalid independently projected checkerboard share" );
             return std::tuple{
                 std::sqrt( squared / fluidCells ) / scale,
                 std::sqrt( squaredFloor / fluidCells ) / scale,
-                summedSource, components };
+                summedSource, components, checkerboardShare };
         };
 
         int currentStep = -1, observed = 0;
@@ -3282,7 +3305,7 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
                     fail( "reference input target face was not zero" );
                 if( !trial.replayFrozenCutCellPressure( iterations ).has_value() )
                     fail( "bounded frozen noncoupled Jacobi replay refused" );
-                const auto [rms, floorRms, sourceVolume, regions] =
+                const auto [rms, floorRms, sourceVolume, regions, checkerboardShare] =
                     compatibleResidual( trial, cp, iterations );
                 const auto& pressure = trial.getCutCellPressure();
                 const double face = targetFace( trial );
@@ -3299,7 +3322,8 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
                     rms > previous->compatibleRms * 1.01 + 1.0e-6 )
                     fail( "extended Jacobi reference residual unexpectedly increased" );
                 const result row{ h, cp, iterations, face, rms, floorRms,
-                    sourceVolume, pressure.pressureResidual, regions };
+                    sourceVolume, pressure.pressureResidual, regions,
+                    checkerboardShare };
                 if( locateResidualHotspots && ( iterations & 1 ) == 0 &&
                     previous && previous->iterations == iterations - 1 )
                     std::printf( "zero_mac_jacobi_parity,%.9g,%d,%d,"
@@ -3314,6 +3338,54 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
                     h, fluidSteps, cp, iterations, face, rms, floorRms,
                     pressure.pressureResidual, sourceVolume, regions );
             }
+            if( compareDampedJacobi )
+                for( const int iterations : budgets )
+                {
+                    // Both paths start from one immutable pre-projection
+                    // snapshot, including the SAME zeroed open MAC input.
+                    // Only omega differs; no production step uses damping.
+                    fluidField2 trial = frozen;
+                    trial.setPrePressureSnapshotObserver( {} );
+                    if( !trial.setFrozenMacVelocityForAudit(
+                        []( vec2 ) { return vec2{}; } ) ||
+                        std::abs( targetFace( trial ) ) > 1.0e-12 )
+                        fail( "damped replay did not receive zero-open-MAC input" );
+                    if( !trial.replayFrozenCutCellPressure(
+                        iterations, false, 2.0f / 3.0f ).has_value() )
+                        fail( "frozen damped Jacobi copy replay rejected" );
+                    const auto [rms, floorRms, sourceVolume, regions, parityShare] =
+                        compatibleResidual( trial, cp, iterations );
+                    const auto& pressure = trial.getCutCellPressure();
+                    const double face = targetFace( trial );
+                    const result *baseline = nullptr;
+                    for( const result& record : results )
+                        if( record.h == h && record.checkpoint == cp &&
+                            record.iterations == iterations )
+                        {
+                            baseline = &record;
+                            break;
+                        }
+                    if( !baseline ||
+                        !std::isfinite( rms ) || !std::isfinite( face ) ||
+                        !std::isfinite( floorRms ) ||
+                        !std::isfinite( parityShare ) ||
+                        pressure.usedCoupledProjection || pressure.coupledSolveFailed ||
+                        pressure.connectedRegions != regions ||
+                        baseline->regions != regions ||
+                        std::abs( baseline->sourceVolume - sourceVolume ) > 1.0e-8 ||
+                        std::abs( baseline->compatibilityFloorRms - floorRms ) > 1.0e-8 )
+                        fail( "damped and undamped frozen pressure sources differ" );
+                    dampedResults.push_back( { h, cp, iterations, face,
+                        rms, floorRms, sourceVolume, pressure.pressureResidual,
+                        regions, parityShare } );
+                    std::printf( "zero_mac_damped,%.9g,%d,%d,"
+                        "%.12g,%.12g,%.12g,%.12g,"
+                        "%.12g,%.12g,%.12g,%.12g\n",
+                        h, cp, iterations, baseline->compatibleRms, rms,
+                        baseline->checkerboardShare, parityShare,
+                        baseline->faceVolume, face,
+                        face - baseline->faceVolume, floorRms );
+                }
         } );
 
         for( int step = 0; step < fluidSteps; ++step )
@@ -3334,7 +3406,8 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
         }
     }
 
-    if( results.size() != 16 )
+    if( results.size() != 16 ||
+        ( compareDampedJacobi && dampedResults.size() != 16 ) )
         fail( "expected two grids, two checkpoints and four Jacobi references" );
     for( int checkpoint : checkpoints )
     {
@@ -3372,6 +3445,37 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false )
                 gap - referenceGap, referenceCriteriaMet ? 1 : 0 );
         }
     }
+    if( compareDampedJacobi )
+        for( const int cp : checkpoints )
+            for( const int iterations : budgets )
+            {
+                const auto lookup = [&]( const std::vector<result>& rows, float h )
+                    -> const result*
+                {
+                    for( const result& row : rows )
+                        if( row.h == h && row.checkpoint == cp &&
+                            row.iterations == iterations ) return &row;
+                    return nullptr;
+                };
+                const result *legacyCoarse = lookup( results, 0.25f );
+                const result *legacyFine = lookup( results, 0.125f );
+                const result *dampedCoarse = lookup( dampedResults, 0.25f );
+                const result *dampedFine = lookup( dampedResults, 0.125f );
+                if( !legacyCoarse || !legacyFine || !dampedCoarse || !dampedFine )
+                    fail( "missing matched damped Jacobi grid comparison" );
+                const double legacyGap = legacyCoarse->faceVolume -
+                    legacyFine->faceVolume;
+                const double dampedGap = dampedCoarse->faceVolume -
+                    dampedFine->faceVolume;
+                const bool residualThresholdMet =
+                    dampedCoarse->compatibleRms < 1.0e-3 &&
+                    dampedFine->compatibleRms < 1.0e-3;
+                std::printf( "zero_mac_damped_cross,%d,%d,"
+                    "%.12g,%.12g,%.12g,%.12g,%d\n",
+                    cp, iterations, legacyGap, dampedGap,
+                    dampedCoarse->compatibleRms, dampedFine->compatibleRms,
+                    residualThresholdMet ? 1 : 0 );
+            }
 }
 
 // Opt-in, read-only endpoint volume ledger. These are not time-centered
@@ -3572,6 +3676,7 @@ int main( int argc, char** argv )
     bool zeroMacConvergenceAudit = false;
     bool zeroMacReferenceAudit = false;
     bool zeroMacResidualMapAudit = false;
+    bool zeroMacDampedJacobiAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -3604,6 +3709,7 @@ int main( int argc, char** argv )
         zeroMacConvergenceAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-convergence-audit";
         zeroMacReferenceAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-reference-audit";
         zeroMacResidualMapAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-residual-map-audit";
+        zeroMacDampedJacobiAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-damped-jacobi-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -3640,6 +3746,11 @@ int main( int argc, char** argv )
     if( zeroMacResidualMapAudit )
     {
         auditFrozenZeroMacReference( true );
+        return 0;
+    }
+    if( zeroMacDampedJacobiAudit )
+    {
+        auditFrozenZeroMacReference( false, true );
         return 0;
     }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
