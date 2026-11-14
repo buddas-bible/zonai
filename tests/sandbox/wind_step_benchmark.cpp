@@ -2990,6 +2990,9 @@ void auditMatchedWorldMacPressureRestart( bool probeZeroMac = false,
 struct independentCutCellPressureResult
 {
     int iterations = 0, activeCells = 0, components = 0;
+    int activePressureGroups = 0, anchoredPressureGroups = 0;
+    int activeToInactiveOpenFaces = 0;
+    double activeToInactiveApertureSum = 0.0;
     double initialRmsPerSecond = 0.0, finalRmsPerSecond = 0.0;
     double targetFaceVolume = 0.0;
     double sourceVolume = 0.0;
@@ -3024,13 +3027,17 @@ independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
                 throw std::runtime_error( "missing independent reference source" );
             if( ledger.active != ( source.getCellFluidFraction( x, y ) > 0.0f ) )
                 throw std::runtime_error( "reference active-cell mask mismatch" );
-            if( !ledger.active ) continue;
-            active[index] = 1;
-            ++output.activeCells;
-            // Pressure correction adds A(q) to the outward MAC volume,
-            // so canceling the moving-volume source requires A(q)=-S.
-            rhs[index] = -ledger.pressureSourceDeltaVolume;
-            output.sourceVolume += ledger.pressureSourceDeltaVolume;
+            active[index] = ledger.active ? 1 : 0;
+            if( ledger.active )
+            {
+                ++output.activeCells;
+                // Correction adds A(q) to net outward MAC volume.
+                rhs[index] = -ledger.pressureSourceDeltaVolume;
+                output.sourceVolume += ledger.pressureSourceDeltaVolume;
+            }
+            // A positive face on a fully covered cell can still appear
+            // in the real analytic aperture graph. Query ALL cells so
+            // our compatibility-component walk matches the engine.
             const std::array<double, 4> aperture{{
                 source.getUFaceOpenFraction( x, y ),
                 source.getUFaceOpenFraction( x + 1, y ),
@@ -3042,7 +3049,7 @@ independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
             {
                 if( !std::isfinite( w ) || w < 0.0 || w > 1.0 )
                     throw std::runtime_error( "invalid independent reference aperture" );
-                diagonal[index] += w;
+                if( ledger.active ) diagonal[index] += w;
             }
         }
 
@@ -3052,30 +3059,17 @@ independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
             index - 1, index + 1, index - width, index + width
         }};
     };
-    for( int y = 0; y < height; ++y )
-        for( int x = 0; x < width; ++x )
-        {
-            const int index = y * width + x;
-            if( !active[index] ) continue;
-            const auto next = neighbors( index );
-            const std::array<bool, 4> valid{{
-                x > 0, x + 1 < width, y > 0, y + 1 < height
-            }};
-            for( int k = 0; k < 4; ++k )
-                if( weights[index][k] > 0.0 &&
-                    ( !valid[k] || !active[next[k]] ) )
-                    throw std::runtime_error(
-                        "nonzero aperture outside the reference active graph" );
-        }
-
+    // The production compatibility graph visits any positive-open face,
+    // including a node with zero fluid fraction. Such nodes contribute
+    // zero divergence but count toward a component's mean-source divisor.
+    // Reconstruct this graph separately from the active pressure unknowns.
+    std::vector<int> fullComponent( count, -1 );
     for( int seed = 0; seed < count; ++seed )
     {
-        if( !active[seed] || component[seed] >= 0 ) continue;
-        const int componentId = static_cast<int>( componentCells.size() );
-        componentCells.emplace_back();
-        std::vector<int>& region = componentCells.back();
-        region.push_back( seed );
-        component[seed] = componentId;
+        if( !active[seed] || fullComponent[seed] >= 0 ) continue;
+        const int regionId = output.components++;
+        std::vector<int> region{ seed };
+        fullComponent[seed] = regionId;
         for( std::size_t head = 0; head < region.size(); ++head )
         {
             const int index = region[head];
@@ -3083,17 +3077,61 @@ independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
             for( int k = 0; k < 4; ++k )
             {
                 if( weights[index][k] <= 0.0 ) continue;
-                if( component[next[k]] >= 0 ) continue;
-                component[next[k]] = componentId;
+                if( next[k] < 0 || next[k] >= count )
+                    throw std::runtime_error( "open face exits independent grid" );
+                if( fullComponent[next[k]] >= 0 ) continue;
+                fullComponent[next[k]] = regionId;
                 region.push_back( next[k] );
             }
         }
-        double regionSource = 0.0;
-        for( int index : region ) regionSource += rhs[index];
-        const double mean = regionSource / region.size();
-        for( int index : region ) rhs[index] -= mean;
+        double negativeSource = 0.0;
+        for( int index : region )
+            if( active[index] ) negativeSource += rhs[index];
+        const double meanNegativeSource = negativeSource / region.size();
+        for( int index : region )
+            if( active[index] ) rhs[index] -= meanNegativeSource;
     }
-    output.components = static_cast<int>( componentCells.size() );
+
+    // Pressure rows for inactive cells are *not* Jacobi unknowns; their
+    // pressure stays 0. A positive aperture from active to inactive
+    // therefore contributes a diagonal anchored (Dirichlet-like) edge.
+    // Other active components are genuine mean-zero Neumann systems.
+    std::vector<int> activeComponent( count, -1 );
+    std::vector<std::vector<int>> componentCells;
+    std::vector<unsigned char> anchored;
+    for( int seed = 0; seed < count; ++seed )
+    {
+        if( !active[seed] || activeComponent[seed] >= 0 ) continue;
+        const int regionId = static_cast<int>( componentCells.size() );
+        componentCells.emplace_back();
+        anchored.push_back( 0 );
+        std::vector<int>& region = componentCells.back();
+        region.push_back( seed );
+        activeComponent[seed] = regionId;
+        for( std::size_t head = 0; head < region.size(); ++head )
+        {
+            const int index = region[head];
+            const auto next = neighbors( index );
+            for( int k = 0; k < 4; ++k )
+            {
+                const double opening = weights[index][k];
+                if( opening <= 0.0 ) continue;
+                if( !active[next[k]] )
+                {
+                    anchored[regionId] = 1;
+                    ++output.activeToInactiveOpenFaces;
+                    output.activeToInactiveApertureSum += opening;
+                    continue;
+                }
+                if( activeComponent[next[k]] >= 0 ) continue;
+                activeComponent[next[k]] = regionId;
+                region.push_back( next[k] );
+            }
+        }
+    }
+    output.activePressureGroups = static_cast<int>( componentCells.size() );
+    for( unsigned char value : anchored )
+        output.anchoredPressureGroups += value != 0;
 
     // Each stored weight is the positive graph edge coefficient in the
     // volume-form SPD operator A=q_i*sum(open)-sum(open*q_neighbor).
@@ -3120,11 +3158,13 @@ independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
             if( active[i] ) sum += a[i] * b[i];
         return sum;
     };
-    // Enforce one mean-zero gauge per Neumann component.
+    // Only true unanchored Neumann pressure groups have gauge freedom.
     const auto removeMeans = [&]( std::vector<double>& values )
     {
-        for( const auto& region : componentCells )
+        for( std::size_t group = 0; group < componentCells.size(); ++group )
         {
+            if( anchored[group] ) continue;
+            const auto& region = componentCells[group];
             double sum = 0.0;
             for( int index : region ) sum += values[index];
             const double mean = sum / region.size();
@@ -3257,7 +3297,9 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
         if( !compareDampedJacobi || locateResidualHotspots )
             fail( "independent PCG requires a matched clean frozen damped pair" );
         std::puts( "zero_mac_independent_pcg,cell_m,checkpoint_16,"
-            "active_cells,connected_regions,iterations,initial_rms_per_s,"
+            "active_cells,compatibility_regions,pressure_groups,"
+            "anchored_groups,open_active_to_inactive_faces,"
+            "open_active_to_inactive_sum,iterations,initial_rms_per_s,"
             "final_explicit_rms_per_s,converged,source_m3,"
             "independent_target_face_m3,damped_3200_target_face_m3,"
             "independent_minus_damped_face_m3" );
@@ -3635,10 +3677,15 @@ void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
                             fail( "independent pressure assembly changed frozen source topology" );
                         independentResults.push_back( { h, cp, independent } );
                         std::printf( "zero_mac_independent_pcg,%.9g,%d,"
-                            "%d,%d,%d,%.12g,%.12g,%d,%.12g,"
+                            "%d,%d,%d,%d,%d,%.12g,%d,%.12g,%.12g,%d,%.12g,"
                             "%.12g,%.12g,%.12g\n",
                             h, cp, independent.activeCells,
-                            independent.components, independent.iterations,
+                            independent.components,
+                            independent.activePressureGroups,
+                            independent.anchoredPressureGroups,
+                            independent.activeToInactiveOpenFaces,
+                            independent.activeToInactiveApertureSum,
+                            independent.iterations,
                             independent.initialRmsPerSecond,
                             independent.finalRmsPerSecond,
                             independent.converged ? 1 : 0,
