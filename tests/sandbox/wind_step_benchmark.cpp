@@ -4360,6 +4360,31 @@ void auditTinyCapsuleCorner( const fluidField2& frozen,
     const double idealBx = cx + halfLength * std::cos( nominalAngle );
     const double idealBy = cy + halfLength * std::sin( nominalAngle );
 
+    if( mode == 1 )
+    {
+        const auto area = frozen.getAnalyticCapsuleCellAreaAudit( capsule, x, y );
+        if( !area.valid || !std::isfinite( area.componentSumCoveredArea ) ||
+            !std::isfinite( area.signedUnclampedFluidArea ) ||
+            std::abs( area.recomputedFluidFraction - area.storedFluidFraction ) > 1.0e-7 )
+            throw std::runtime_error( "Capsule analytic area decomposition not reproducible" );
+        const capsuleCornerWedge2 reference = integrateCapsuleCornerWedge(
+            actualA.x, actualA.y, actualB.x, actualB.y, radius, x0, y0, h );
+        std::puts( "capsule_corner_area_breakdown,cell_m,checkpoint_16,"
+            "cell_x,cell_y,cell_area_m2,core_covered_m2,"
+            "first_cap_covered_m2,last_cap_covered_m2,"
+            "sum_covered_m2,clamped_covered_m2,"
+            "unclamped_free_m2,stored_free_fraction,"
+            "independent_free_m2,covered_minus_reference_m2" );
+        std::printf( "capsule_corner_area_breakdown,%.9g,%d,%d,%d,"
+            "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,"
+            "%.17g,%.12g,%.17g,%.17g\n",
+            h, checkpoint, x, y, area.cellArea, area.coreCoveredArea,
+            area.firstCapCoveredArea, area.lastCapCoveredArea,
+            area.componentSumCoveredArea, area.clampedCoveredArea,
+            area.signedUnclampedFluidArea, area.storedFluidFraction,
+            reference.area1024,
+            area.componentSumCoveredArea - ( area.cellArea - reference.area1024 ) );
+    }
     std::puts( "capsule_corner_oracle,analytic,endpoint_policy,radius_ulp,"
         "corner_clearance_m,bottom_open_m,right_open_m,"
         "exterior_area_m2,exterior_fraction,quadrature_difference_m2,"
