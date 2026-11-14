@@ -1211,6 +1211,55 @@ reference PCG failures, before deciding on a numerical change.
 Keep experimental pressure pooling and connected tracer rerouting OFF,
 and PR #326 Draft.
 
+### Prescribed Capsule geometry A/B observations — run 43578243918
+
+[CI run 43578243918](https://github.com/buddas-bible/zonai/actions/runs/43578243918)
+completed **success on Windows and Ubuntu**, including the opt-in
+same-prescribed-motion geometry comparison. The double-precision
+independently assembled pressure references report convergence at the
+specified explicit residual tolerance (under 1e-5/s) in both modes.
+The following table compares active-to-inactive **pressure anchors**;
+these are not proof of a whole-fluid mass leak.
+
+| Grid h / checkpoint | Sampled N=4 anchors (sum opening) | Analytic Capsule anchors (sum opening) | Analytic minus sampled target-face m³ |
+| --- | --- | --- | ---: |
+| 0.25 / 11 | 3 (1.0) | 0 (0) | +0.000113940671 |
+| 0.25 / 12 | 0 (0) | 0 (0) | +0.000058012498 |
+| 0.125 / 11 | 4 (1.0) | 0 (0) | -0.000015339097 |
+| 0.125 / 12 | 4 (1.0) | **2 (0.00017798537)** | **+0.00024808895** |
+
+At h=0.125/checkpoint12, the two remaining analytic-only anchors
+are U(29,26) (open 0.000108855966) and V(28,26) (open
+0.0000691294044). Both touch the same analytic zero-fraction cell
+(28,26). They are **much smaller** than the four N=4 support
+mismatches, but cannot be silently deleted or assumed to be real
+fluid channels without an independent geometric tolerance study.
+
+Windows Release and Ubuntu Debug agree on anchor counts, sums
+and the target-face pressure difference to the shown precision.
+They do **not** have identical analytic active-cell counts at
+h=0.125/checkpoint12 (Windows 4086; Ubuntu 4080). Those near-zero
+fraction classifications require a separate precision/roundoff
+audit before treating the analytic model as a fully robust solution.
+
+Crucially, removing large sampled anchors **does not imply that
+the pressure answer improved**: the h=0.125/checkpoint12 target-face
+reference changed by +2.48089e-4 m³, while the pressure source and
+geometry also changed. The experiment compares two separately
+evolved Fluid histories with the same prescribed solid path and
+zeroed MAC input for each independent pressure reference.
+Do not attribute the entire target-face difference to just the
+anchor edges, nor generalize these isolated references to the
+actual World8/Fluid4 coupled spike.
+
+**Next narrowly scoped task:** quantify the two analytic-only tiny
+anchor faces and cell (28,26) with independent double-precision
+signed-distance and interval/area geometry, including tangent and
+float-roundoff perturbations; compare h=0.125/checkpoint12
+Windows/Ubuntu active-mask differences. Keep the default geometry
+policy unchanged until conservation, topology and full two-way
+Body feedback tests justify a physical fix.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
