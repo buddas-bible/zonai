@@ -158,6 +158,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-matched-world-restart-audit
 
+      # Frozen identical-geometry copies: zero open-fluid MAC speeds versus
+      # divergence-free affine speeds, isolating a moving-wall pressure response.
+      - name: Audit matched zero-open-MAC pressure response (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-pressure-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -383,6 +389,10 @@ jobs:
       - name: Audit matched-world MAC restarts (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-matched-world-restart-audit
+
+      - name: Audit matched zero-open-MAC pressure response (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-pressure-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
