@@ -2981,6 +2981,229 @@ void auditMatchedWorldMacPressureRestart( bool probeZeroMac = false,
 // the discrete compatible continuity residual from the resulting MAC flux,
 // current volume source and per-connected-component source mean. This is
 // not the exact continuum moving-wall flux, nor a Schur PCG reference.
+// Independent S2c reference of the noncoupled Cut-cell pressure equation.
+// Assemble its physical *volume* operator from public face apertures and the
+// frozen moving-volume pressure-source ledger, then solve the symmetric
+// Neumann graph using double-precision diagonal-preconditioned CG. This
+// deliberately does not call the engine's Jacobi/Schur pressure solvers.
+struct independentCutCellPressureResult
+{
+    int iterations = 0, activeCells = 0, components = 0;
+    double initialRmsPerSecond = 0.0, finalRmsPerSecond = 0.0;
+    double targetFaceVolume = 0.0;
+    double sourceVolume = 0.0;
+    bool converged = false;
+};
+
+independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
+    const fluidField2& source, float subDt, int targetSegments )
+{
+    const int width = source.getWidth(), height = source.getHeight();
+    const int count = width * height;
+    const double scale = static_cast<double>( source.getCellSize() ) *
+        source.getCellSize() * subDt;
+    if( count == 0 || !( scale > 0.0 ) )
+        throw std::runtime_error( "invalid independent reference grid" );
+    std::vector<unsigned char> active( count, 0 );
+    std::vector<std::array<double, 4>> weights( count );
+    std::vector<double> diagonal( count, 0.0 ), rhs( count, 0.0 );
+    std::vector<double> potential( count, 0.0 ), residual( count, 0.0 );
+    std::vector<double> preconditioned( count, 0.0 ), direction( count, 0.0 );
+    std::vector<double> product( count, 0.0 );
+    std::vector<int> component( count, -1 );
+    std::vector<std::vector<int>> componentCells;
+    independentCutCellPressureResult output{};
+
+    for( int y = 0; y < height; ++y )
+        for( int x = 0; x < width; ++x )
+        {
+            const int index = y * width + x;
+            const auto ledger = source.getCutCellVolumeBudget( x, y, subDt );
+            if( !ledger.valid || !ledger.hasVolumeHistory )
+                throw std::runtime_error( "missing independent reference source" );
+            if( ledger.active != ( source.getCellFluidFraction( x, y ) > 0.0f ) )
+                throw std::runtime_error( "reference active-cell mask mismatch" );
+            if( !ledger.active ) continue;
+            active[index] = 1;
+            ++output.activeCells;
+            rhs[index] = ledger.pressureSourceDeltaVolume;
+            output.sourceVolume += rhs[index];
+            const std::array<double, 4> aperture{{
+                source.getUFaceOpenFraction( x, y ),
+                source.getUFaceOpenFraction( x + 1, y ),
+                source.getVFaceOpenFraction( x, y ),
+                source.getVFaceOpenFraction( x, y + 1 )
+            }};
+            weights[index] = aperture;
+            for( const double w : aperture )
+            {
+                if( !std::isfinite( w ) || w < 0.0 || w > 1.0 )
+                    throw std::runtime_error( "invalid independent reference aperture" );
+                diagonal[index] += w;
+            }
+        }
+
+    const auto neighbors = [width]( int index )
+    {
+        return std::array<int, 4>{{
+            index - 1, index + 1, index - width, index + width
+        }};
+    };
+    for( int y = 0; y < height; ++y )
+        for( int x = 0; x < width; ++x )
+        {
+            const int index = y * width + x;
+            if( !active[index] ) continue;
+            const auto next = neighbors( index );
+            const std::array<bool, 4> valid{{
+                x > 0, x + 1 < width, y > 0, y + 1 < height
+            }};
+            for( int k = 0; k < 4; ++k )
+                if( weights[index][k] > 0.0 &&
+                    ( !valid[k] || !active[next[k]] ) )
+                    throw std::runtime_error(
+                        "nonzero aperture outside the reference active graph" );
+        }
+
+    for( int seed = 0; seed < count; ++seed )
+    {
+        if( !active[seed] || component[seed] >= 0 ) continue;
+        const int componentId = static_cast<int>( componentCells.size() );
+        componentCells.emplace_back();
+        std::vector<int>& region = componentCells.back();
+        region.push_back( seed );
+        component[seed] = componentId;
+        for( std::size_t head = 0; head < region.size(); ++head )
+        {
+            const int index = region[head];
+            const auto next = neighbors( index );
+            for( int k = 0; k < 4; ++k )
+            {
+                if( weights[index][k] <= 0.0 ) continue;
+                if( component[next[k]] >= 0 ) continue;
+                component[next[k]] = componentId;
+                region.push_back( next[k] );
+            }
+        }
+        double regionSource = 0.0;
+        for( int index : region ) regionSource += rhs[index];
+        const double mean = regionSource / region.size();
+        for( int index : region ) rhs[index] -= mean;
+    }
+    output.components = static_cast<int>( componentCells.size() );
+
+    // Each stored weight is the positive graph edge coefficient in the
+    // volume-form SPD operator A=q_i*sum(open)-sum(open*q_neighbor).
+    // One unit of q is dt² times one unit of physical pressure.
+    const auto apply = [&]( const std::vector<double>& input,
+        std::vector<double>& values )
+    {
+        std::fill( values.begin(), values.end(), 0.0 );
+        for( int index = 0; index < count; ++index )
+        {
+            if( !active[index] ) continue;
+            const auto next = neighbors( index );
+            values[index] = diagonal[index] * input[index];
+            for( int k = 0; k < 4; ++k )
+                if( weights[index][k] > 0.0 )
+                    values[index] -= weights[index][k] * input[next[k]];
+        }
+    };
+    const auto inner = [&]( const std::vector<double>& a,
+        const std::vector<double>& b )
+    {
+        double sum = 0.0;
+        for( int i = 0; i < count; ++i )
+            if( active[i] ) sum += a[i] * b[i];
+        return sum;
+    };
+    // Enforce one mean-zero gauge per Neumann component.
+    const auto removeMeans = [&]( std::vector<double>& values )
+    {
+        for( const auto& region : componentCells )
+        {
+            double sum = 0.0;
+            for( int index : region ) sum += values[index];
+            const double mean = sum / region.size();
+            for( int index : region ) values[index] -= mean;
+        }
+    };
+    const auto rms = [&]( const std::vector<double>& values )
+    {
+        return std::sqrt( inner( values, values ) / output.activeCells ) / scale;
+    };
+    residual = rhs;
+    removeMeans( residual );
+    output.initialRmsPerSecond = rms( residual );
+
+    double currentRms = output.initialRmsPerSecond;
+    const double stopRms = 1.0e-5; // diagnostic tolerance, 1/s
+    constexpr int maxIterations = 10000;
+    if( currentRms > stopRms )
+    {
+        for( int i = 0; i < count; ++i )
+            if( active[i] && diagonal[i] > 0.0 )
+                preconditioned[i] = residual[i] / diagonal[i];
+        removeMeans( preconditioned );
+        direction = preconditioned;
+        double rz = inner( residual, preconditioned );
+        for( int iteration = 1; iteration <= maxIterations; ++iteration )
+        {
+            apply( direction, product );
+            const double denominator = inner( direction, product );
+            if( !( denominator > 0.0 ) || !std::isfinite( denominator ) ||
+                !( rz > 0.0 ) || !std::isfinite( rz ) )
+                break;
+            const double alpha = rz / denominator;
+            for( int i = 0; i < count; ++i )
+            {
+                if( !active[i] ) continue;
+                potential[i] += alpha * direction[i];
+                residual[i] -= alpha * product[i];
+            }
+            removeMeans( residual );
+            output.iterations = iteration;
+            currentRms = rms( residual );
+            if( currentRms <= stopRms ) break;
+            for( int i = 0; i < count; ++i )
+                preconditioned[i] = active[i] && diagonal[i] > 0.0
+                    ? residual[i] / diagonal[i] : 0.0;
+            removeMeans( preconditioned );
+            const double nextRz = inner( residual, preconditioned );
+            if( !( nextRz > 0.0 ) || !std::isfinite( nextRz ) )
+                break;
+            const double beta = nextRz / rz;
+            for( int i = 0; i < count; ++i )
+                direction[i] = preconditioned[i] + beta * direction[i];
+            removeMeans( direction );
+            rz = nextRz;
+        }
+    }
+
+    // Re-evaluate A*q-b independently of the CG recurrence, which can
+    // underestimate the true residual when roundoff accumulates.
+    apply( potential, product );
+    for( int index = 0; index < count; ++index )
+        residual[index] = product[index] - rhs[index];
+    output.finalRmsPerSecond = rms( residual );
+    output.converged = std::isfinite( output.finalRmsPerSecond ) &&
+        output.finalRmsPerSecond < stopRms;
+
+    const int y = 16 * targetSegments;
+    for( int segment = 0; segment < targetSegments; ++segment )
+    {
+        const int x = 16 * targetSegments + segment;
+        const double aperture = source.getVFaceOpenFraction( x, y );
+        output.targetFaceVolume += aperture *
+            ( potential[( y - 1 ) * width + x] - potential[y * width + x] );
+    }
+    if( !std::isfinite( output.targetFaceVolume ) ||
+        !std::isfinite( output.sourceVolume ) ||
+        output.activeCells == 0 )
+        throw std::runtime_error( "nonfinite independent pressure reference" );
+    return output;
+}
+
 void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
     bool compareDampedJacobi = false )
 {
