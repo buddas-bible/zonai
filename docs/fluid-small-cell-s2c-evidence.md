@@ -535,6 +535,56 @@ case. Avoid comparing one target face's open-time
 alone as proof that two full pressure systems share their
 surrounding geometry and compatibility constraints.
 
+### Independent compatible-residual pressure reference probe — 2026-11-14
+
+Previous same-state 40/80/120/200 Jacobi measurements did not converge
+sufficiently to certify the coarse/fine target V(16,16) pressure difference.
+The new opt-in `--small-cell-zero-mac-reference-audit` repeats the same
+prescribed capsule rotation at 128 *real* Fluid steps and captures frozen
+11/16 and 12/16 checkpoints at h=0.25/0.125. On separate frozen copies,
+only OPEN interior MAC velocities are set to zero; moving-solid geometry,
+closed-face prescribed velocities and pressure-source history are retained.
+The original noncoupled Cut-cell Jacobi solver is replayed at
+**200 / 800 / 1600 / 3200 iterations**. The frozen-copy override accepts
+iterations above 200 only for obstacles without inverse mass/inertia; the
+live Step and Schur PCG iteration budget remain unchanged.
+
+For each open-face-connected fluid region, let S_i be its stored
+pressure-source volume, F_i its *post-projection endpoint MAC net
+outward* volume, and mean(S)_region the source volume summed over that
+region divided by its active-cell count. Independently reconstruct
+
+`compatibleRms = sqrt(sum_active((F_i + S_i - mean(S)_region)^2)/N) / (h*h*dt)`
+
+in 1/s, and separately report the RMS of the component source mean as
+an **incompatible Neumann source floor**, not a solver error.
+This uses the implemented discrete source and post-projection MAC
+operator, **not** an exact time-integrated physical fluid-face flux or a
+new independent direct linear solver. Full domain and local moving-wall
+geometry can still differ across coarse and fine grids.
+
+The experiment checks finite output, component/source identity across
+the copied budgets, zero initial open-MAC face flux, replay safety and
+cross-grid face pairing. It reports `reference_criteria_met=1` only
+when both grids reach compatibleRms below **1e-3 / s** and the selected
+face gap is within **1e-6 m³** of the 3200-iteration gap. These thresholds
+are diagnostic hypotheses, *not production acceptance*. If the criteria
+are not met, the result remains **unconverged** even at 3200 iterations.
+
+Implementation: `eef4d99` (frozen-only iteration guard),
+`b0eca6f` (API contract), `211dcaf` (unit bound/one-use regression),
+`d673f5b`, `67701a6` (independent residual benchmark),
+`112ec36` (Ubuntu Debug and Windows Release CI).
+[Workflow 43566519525](https://github.com/buddas-bible/zonai/actions/runs/43566519525)
+must be checked for both platform results and actual residual/face-volume
+values before declaring convergence.
+
+**Next:** if the discrete reference converges, distinguish remaining
+spatial pressure/geometry discrepancy from the previous history and
+bring the matched-stage analysis back to real coupled World8/Fluid4
+near-closing V(17,13). If not, test an independently validated pressure
+reference solve before changing physical tracer transport or defaults.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
