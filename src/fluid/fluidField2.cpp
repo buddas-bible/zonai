@@ -3925,7 +3925,16 @@ std::optional<std::vector<fluidObstacleForce2>> fluidField2::replayFrozenCutCell
     if( !frozenPressureReplayReady_ || !cutCellProjectionEnabled_ ||
         !std::isfinite( frozenPressureTimeStep_ ) || frozenPressureTimeStep_ <= 0.0f ||
         ( pressureIterationsOverride != -1 &&
-            ( pressureIterationsOverride < 1 || pressureIterationsOverride > 200 ) ) )
+            ( pressureIterationsOverride < 1 || pressureIterationsOverride > 3200 ) ) )
+        return std::nullopt;
+    // Extra iterations above the original 200 are reserved for a copied
+    // noncoupled Jacobi reference; never extend the coupled Schur PCG budget.
+    if( pressureIterationsOverride > 200 &&
+        std::any_of( frozenPressureObstacles_.begin(), frozenPressureObstacles_.end(),
+            []( const fluidShapeObstacle2& obstacle )
+            {
+                return obstacle.inverseMass > 0.0f || obstacle.inverseInertia > 0.0f;
+            } ) )
         return std::nullopt;
     frozenPressureReplayReady_ = false;
     std::vector<fluidObstacleForce2> feedback( frozenPressureObstacles_.size() );
