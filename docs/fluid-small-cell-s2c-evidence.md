@@ -955,6 +955,55 @@ evidence that the real **coupled World8/Fluid4 near-closing
 V(17,13)** pressure/Body dynamics share this noncoupled Jacobi mode.
 No pressure-pooling or connected-residual-tracer variant is accepted.
 
+### First cross-platform independent pressure reference outcome — 2026-11-14
+
+The duplicate local `componentCells` declaration in the initial anchored
+graph split prevented compilation; `fe1cedf` removes it. In
+[workflow 43573744077](https://github.com/buddas-bible/zonai/actions/runs/43573744077),
+**Ubuntu Debug completed successfully** and the independently assembled
+double-precision PCG reached the explicit volume-form pressure residual
+threshold `< 1e-5/s` at all four frozen checkpoints. Windows must be
+checked separately before asserting matching cross-platform results.
+
+| Grid h | Rotation | Independent PCG iterations | Explicit RMS (1/s) | PCG physical V-face volume (m³) | Damped Jacobi 3200 V-face volume (m³) |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.25 | 11/16 | 161 | 0.00000955518 | 0.000287553307 | 0.000290708445 |
+| 0.25 | 12/16 | 126 | 0.00000880323 | 0.000419161684 | 0.000419163353 |
+| 0.125 | 11/16 | 330 | 0.00000972744 | 0.000424229862 | 0.000414160785 |
+| 0.125 | 12/16 | 326 | 0.00000967737 | 0.000199157174 | 0.000364916480 |
+
+All fields have one compatibility-connected fluid region and one active
+pressure group. At h=.25/11 there are **three** open active-to-inactive
+faces (apertures summing to 1); at h=.25/12 there are **none**;
+at both h=.125 checkpoints there are **four** (sum 1).
+The pressure group is anchored in the three cases with such faces.
+A zero-fluid cell in the compatibility traversal is *not* a solved
+pressure unknown, so this boundary condition matters for the
+reference linear system.
+
+The huge **0.00016575930649m³** PCG-minus-damped
+target-face difference at h=.125/12 is real in the emitted
+Ubuntu benchmark, despite the damped 3200-step RMS appearing small
+(`0.00159617/s`). The target face and local pressure response
+cannot be certified merely from a small global continuity RMS or
+endpoint-flux change between two Jacobi budgets. At h=.25/12,
+where no active-to-inactive face is present, the PCG-minus-damped
+face difference is only **-1.67e-9m³**. These four cases suggest that
+the anchored inactive-cell edges may matter, but they do **not**
+establish causality: resolution, geometry, pressure conditioning and
+checkpoint differ simultaneously. Do not mistake this **discrete
+PCG/finite-Jacobi** difference for an actual space-time tracer leak.
+
+**Next atomic investigation:** on the *same frozen* h=.125/12
+snapshot, run a separately labeled independent pressure-operator
+counterfactual that removes only active-to-inactive aperture
+anchors, preserving other open-open weights and reporting any
+necessary per-Neumann-group compatibility rebalancing. Compare
+explicit true residual, target face and cross-grid difference;
+do **not** alter the engine's Cut-cell geometry, pressure
+defaults or connected tracer transport. Then return to the
+World8/Fluid4 V(17,13) fully coupled scene.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
