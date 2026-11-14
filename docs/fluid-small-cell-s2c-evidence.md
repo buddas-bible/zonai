@@ -1052,6 +1052,57 @@ Implementation `92abb9a`, Ubuntu/Windows CI `628e366`.
 CI conclusions and emitted CSV are required before assigning causal
 influence or accepting any change.
 
+### Same-snapshot anchored-edge causality control — 2026-11-14
+
+The initial new
+[workflow 43574557305](https://github.com/buddas-bible/zonai/actions/runs/43574557305)
+**passed on Ubuntu Debug**, including all existing regressions and
+the separately assembled anchor counterfactual. Windows must be
+checked for a completed success and matching CSV before declaring
+cross-platform validation.
+
+| Grid h | Checkpoint | Active-to-inactive positive faces | Actual operator PCG V(m³) | Omit-anchor PCG V(m³) | Damped Jacobi 3200 V(m³) |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.25 | 11/16 | 3 (sum a=1) | 0.000287553307 | 0.000290717179 | 0.000290708445 |
+| 0.25 | 12/16 | 0 | 0.000419161684 | 0.000419161684 | 0.000419163353 |
+| 0.125 | 11/16 | 4 (sum a=1) | 0.000424229862 | 0.000414197073 | 0.000414160785 |
+| 0.125 | 12/16 | 4 (sum a=1) | **0.000199157174** | **0.000364877017** | **0.000364916480** |
+
+On the **exact same frozen** h=.125/12 source, removing only
+active-to-inactive edges from the standalone pressure matrix changes
+the converged PCG V-face volume by **+0.000165719843204m³**,
+almost all of the previously observed **+0.00016575930649m³**
+damped-Jacobi versus anchored-PCG discrepancy. The new no-anchor
+reference is within **3.94633e-8m³** of the 3200-step damped
+Jacobi, though the finite-iteration damped state is not itself a
+certified converged solution. At h=.25/12, where no such anchor exists,
+the two independently solved references have **identical** target
+face volume.
+
+Both independent PCG variants passed the explicit full-operator
+residual threshold `1e-5/s` at all sampled checkpoints.
+The additional active-group Neumann compatibility correction was
+zero or within **3.5e-14m³** of zero. Therefore the dramatic V-face
+difference is not caused by an arbitrary change in source
+compatibility in this experiment. The converged true operator
+includes an anchored inactive-cell pressure row, while the finite
+damped Jacobi behaves very close to the counterfactual **unanchored**
+operator at this sampling horizon. This isolates a strong causal
+**discrete pressure boundary-condition sensitivity** rather than
+proving an unphysical fluid mass leak.
+
+The operator-only control does **not** change fluid geometry, face
+apertures, source history, coupled Body dynamics, actual solver,
+tracer routing or defaults. Simply deleting pressure anchors in
+production would be premature. **Next:** print the exact grid and
+world positions of positive-open faces adjacent to inactive cells,
+check shared-face/active-fraction classification and moving-solid
+sampling (including strict boundary/tangent cases), and verify whether
+these pressure anchors are intended boundary conditions or artifacts
+of inconsistent geometry before proposing any correction.
+Then reproduce this separation in the actual World8/Fluid4
+coupled V(17,13) case.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
