@@ -1260,6 +1260,75 @@ Windows/Ubuntu active-mask differences. Keep the default geometry
 policy unchanged until conservation, topology and full two-way
 Body feedback tests justify a physical fix.
 
+### Tiny analytic Capsule corner: independent exterior-area witness — 2026-11-14
+
+The new read-only, single-cell `capsule_corner_oracle` output in
+`--small-cell-capsule-geometry-audit` tests the two tiny analytic-only
+anchors remaining at h=0.125m, checkpoint 12/16. Their shared inactive
+cell is (28,26); its adjacent analytic face apertures are
+V(28,26) = 0.0000691294044373 and U(29,26) = 0.000108855965664.
+The engine stores that cell's fluid fraction as **exactly zero**.
+
+An independent point-to-segment capsule **signed-distance** function
+uses the floating-point-transformed capsule endpoints and bisection to
+find where the capsule boundary crosses the cell's bottom and right
+edges. It integrates the tiny exposed lower-right wedge over its own
+narrow x-range with 128 and 1024 one-dimensional midpoint slices.
+It does **not** call engine face clipping, capsule area or pressure
+projection routines, and does not affect the simulated field.
+
+[CI #43579391847](https://github.com/buddas-bible/zonai/actions/runs/43579391847)
+passed **Windows Release and Ubuntu Debug**, including existing tests
+and the new wedge oracle.
+
+| Diagnostic (float-derived transform, nominal radius) | Windows Release | Ubuntu Debug |
+| --- | ---: | ---: |
+| Corner signed clearance (m) | 7.29305747e-6 | 7.29314458e-6 |
+| Independent lower-edge exposed length (m) | 8.63940600e-6 | 8.63950908e-6 |
+| Independent right-edge exposed length (m) | 1.36042093e-5 | 1.36043722e-5 |
+| Independent positive fluid area (m²) | **5.87661436e-11** | **5.87675485e-11** |
+| Area / cell area | **3.76103319e-9** | **3.76112310e-9** |
+| Engine analytic cell fluid fraction | **0** | **0** |
+| `area128 - area1024` (m²) | -1.69e-23 | +1.31e-22 |
+
+Changing the radius by **one float ULP in either direction** and
+using separately constructed double-angle ideal endpoints still
+leaves a positive exterior wedge on both platforms. For the actual
+float endpoints, the `-1/+1 ULP` Windows-area range was
+5.90065307e-11 to 5.85262472e-11 m² (Ubuntu:
+5.90079384e-11 to 5.85276492e-11 m²). The independently recovered
+face fractions agree with the engine's analytic clipped face openings
+within the diagnostic 1e-5 bound. Thus the face is not merely an
+isolated noisy positive aperture; a corresponding very small
+two-dimensional open wedge also exists.
+
+**Interpretation:** the current analytic Capsule cell-fraction path
+reports zero where independently reconstructed signed-distance
+geometry has a positive (but tiny) open area. This is concrete
+**near-full-cell geometric support inconsistency**, rather than
+proof that solver PCG failed or that pressure anchors can safely be
+removed. The small nonzero cross-platform difference in the
+independent wedge is consistent with differing float-transformed
+endpoints, but these measurements alone do not establish the exact
+source of the engine's area calculation error. A 1024-slice agreement
+does not constitute a formal exact-integration proof.
+
+In the broader same-path geometry comparison, analytic h=.125,
+checkpoint12 active-cell counts were **4086 Windows vs 4080 Ubuntu**,
+while the anchor count/aperture sum remained 2 / 0.000177985370101
+on both. This local witness explains one shared zero-fraction
+classification, **not the six-cell platform difference**.
+
+**Next bounded experiment:** inspect the analytic Capsule covered-area
+decomposition (float core vertices, polygon rectangle clip, two
+half-disk cap contributions) around this precise cell, using independent
+double-precision reference geometry and tracing cancellation in
+`1 - coveredArea/cellArea`. Then audit all cross-platform
+near-zero cells and compare source/pressure budgets. Do not introduce
+a per-cell epsilon or force positive fractions without a stated
+conservative volume/face topology policy, and do not change defaults
+or merge experimental pressure/tracer algorithms.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
