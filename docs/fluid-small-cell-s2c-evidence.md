@@ -870,6 +870,64 @@ pressure discretization. Then transfer the same-state analysis to the
 normal-step performance before accepting any stabilization.
 Neither experimental pressure pooling nor tracer remap is accepted.
 
+### Independently assembled frozen pressure PCG reference — 2026-11-14
+
+The damped-Jacobi A/B experiment suppressed the bipartite checkerboard
+mode but did **not** meet the fine-grid residual threshold by 3200
+iterations. The next diagnostic is implemented as
+`--small-cell-zero-mac-independent-pcg-audit` in
+`tests/sandbox/wind_step_benchmark.cpp`. It deliberately leaves all
+production `fluidField2::step`, Schur PCG, body dynamics and tracer
+transport unchanged.
+
+For the **same** h=0.25/0.125, 128 real Fluid-step rotating-capsule
+snapshots at checkpoints 11/16 and 12/16, the command preserves the
+zero-open-MAC frozen input and compares both legacy omega=1 and
+frozen-only damped omega=2/3 Jacobi at 200/800/1600/3200 iterations.
+In addition, it constructs a **separate double-precision Neumann graph
+system** from the public post-pressure `getCutCellVolumeBudget`
+`pressureSourceDeltaVolume` and U/V face open fractions, preserving
+the original frozen moving-volume source and component connectivity.
+
+The independently assembled **volume-form operator** for the
+zero-initial-open-MAC case is
+`(Aq)_i = sum_open_faces(a_ij * (q_i - q_j))`,
+`b_i = sourceVolume_i - mean(sourceVolume)_connected_region`,
+and `q = dt² * pressure`. The pressure-corrected endpoint MAC volume
+on an oriented V face is
+`a * (q_lower - q_upper)`, summed across both fine-grid segments
+when applicable. This is a **discrete pressure reference**, not
+an exact time-integrated moving-wall transport reference.
+Fully covered cells are not pressure unknowns. One constant
+pressure gauge per active connected region is projected out.
+
+The standalone solver uses double-precision diagonal-preconditioned
+conjugate gradients up to 10,000 iterations. Its **explicit** residual
+`Aq-b` is recomputed after the solve (not trusted solely from
+the recurrence); the diagnostic convergence threshold is
+`sqrt(sum_active((Aq-b)_i²)/N)/(h²dt) < 1e-5/s`.
+Nonfinite/invalid apertures, invalid adjacency, changed connected
+component counts or pressure-source ledgers, and a nonconverged
+reference are treated as test failures. The resulting physical-face
+volume is compared independently against the **3200-iteration
+damped-Jacobi** output, and both coarse/fine pressure-reference
+faces are compared at the same world time.
+
+Commits: `f0557f6` (standalone independent Neumann PCG),
+`1e5b314` (same-frozen snapshot comparison and CSV),
+`df7b359` (Ubuntu Debug / Windows Release CI).
+CI and actual values must be inspected before drawing any
+convergence or physics conclusions.
+
+**Limitation:** Both solvers still use the *same Cut-cell geometric
+sampling, finite-volume pressure-source ledger and endpoint MAC
+aperture model*. A successful double-precision residual only
+certifies convergence to that **discrete equation**. It is not
+proof of physically correct space-time tracer capacity, nor
+evidence that the real **coupled World8/Fluid4 near-closing
+V(17,13)** pressure/Body dynamics share this noncoupled Jacobi mode.
+No pressure-pooling or connected-residual-tracer variant is accepted.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
