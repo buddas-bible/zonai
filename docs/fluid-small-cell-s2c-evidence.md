@@ -887,7 +887,14 @@ frozen-only damped omega=2/3 Jacobi at 200/800/1600/3200 iterations.
 In addition, it constructs a **separate double-precision Neumann graph
 system** from the public post-pressure `getCutCellVolumeBudget`
 `pressureSourceDeltaVolume` and U/V face open fractions, preserving
-the original frozen moving-volume source and component connectivity.
+the original frozen moving-volume source and the original
+**compatibility traversal**, including zero-fluid cells reached across
+positive-open faces. Those zero-fluid cells have no pressure unknown;
+the existing Jacobi matrix still includes their edge weight in the
+active neighbor's diagonal (an anchored, Dirichlet-like row). An
+independent reference therefore must not assume that every positive
+aperture links two active pressure unknowns, or force a mean-zero gauge
+on an anchored component.
 
 The independently assembled **volume-form operator** for the
 zero-initial-open-MAC case is
@@ -898,22 +905,42 @@ on an oriented V face is
 `a * (q_lower - q_upper)`, summed across both fine-grid segments
 when applicable. This is a **discrete pressure reference**, not
 an exact time-integrated moving-wall transport reference.
-Fully covered cells are not pressure unknowns. One constant
-pressure gauge per active connected region is projected out.
+Fully covered cells are not pressure unknowns. A constant
+pressure gauge is projected out **only** for unanchored components;
+positive apertures to zero-pressure inactive neighbors are preserved
+as diagonal edges. The compatibility-source mean is reconstructed
+using the production graph's full traversal count (which may include
+inactive cells), distinct from the unknown count.
 
 The standalone solver uses double-precision diagonal-preconditioned
 conjugate gradients up to 10,000 iterations. Its **explicit** residual
 `Aq-b` is recomputed after the solve (not trusted solely from
 the recurrence); the diagnostic convergence threshold is
 `sqrt(sum_active((Aq-b)_i²)/N)/(h²dt) < 1e-5/s`.
-Nonfinite/invalid apertures, invalid adjacency, changed connected
-component counts or pressure-source ledgers, and a nonconverged
-reference are treated as test failures. The resulting physical-face
+Nonfinite/invalid apertures, truly out-of-grid adjacency,
+changed compatibility region counts or pressure-source ledgers, and
+a nonconverged reference are treated as test failures.
+The diagnostic also prints the count and summed aperture of
+active-to-inactive positive-open faces and the number of pressure
+unknown components anchored by them. The resulting physical-face
 volume is compared independently against the **3200-iteration
 damped-Jacobi** output, and both coarse/fine pressure-reference
 faces are compared at the same world time.
 
-Commits: `f0557f6` (standalone independent Neumann PCG),
+The **first CI** [43572701343](https://github.com/buddas-bible/zonai/actions/runs/43572701343)
+found a nonzero aperture connecting an active and fully covered cell,
+and correctly rejected the initial *pure Neumann unknown graph*
+assumption before emitting a false reference. The frozen Jacobi
+assembly, however, includes that face in the active diagonal and
+holds the inactive pressure at zero. Commit `c921a46` adapts only
+the independent benchmark to reproduce this actual mixed
+anchored/Neumann discrete operator and the production compatibility
+graph traversal. This discrepancy in the originally assumed geometry
+graph is worth investigating separately; it is **not** by itself
+proof that a physical fluid leak occurred. Its corrected CI results
+are required before validating the reference.
+
+Commits: `f0557f6` (standalone independent graph PCG),
 `1e5b314` (same-frozen snapshot comparison and CSV),
 `df7b359` (Ubuntu Debug / Windows Release CI).
 CI and actual values must be inspected before drawing any
