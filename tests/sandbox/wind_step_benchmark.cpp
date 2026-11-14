@@ -3277,6 +3277,76 @@ independentCutCellPressureResult solveIndependentFrozenCutCellPressure(
     return output;
 }
 
+// Report every physically shared MAC face whose discrete endpoint opening
+// is positive even though exactly one neighboring cell is fully covered.
+// A moving boundary may cross this face during the step, so report the
+// swept time-mean opening separately rather than treating it as the
+// endpoint pressure aperture or declaring a physical leak.
+void auditFrozenInactiveNeighborFaces( const fluidField2& source,
+    float subDt, int checkpoint, int expectedCount, double expectedOpening )
+{
+    const float h = source.getCellSize();
+    const vec2 origin = source.getOrigin();
+    int seen = 0;
+    double sumOpening = 0.0;
+    std::puts( "zero_mac_anchor_face,cell_m,checkpoint_16,axis,face_x,face_y,"
+        "world_x,world_y,endpoint_open,swept_mean_open,"
+        "side_a_fluid_fraction,side_b_fluid_fraction,"
+        "side_a_pressure_source_m3,side_b_pressure_source_m3,"
+        "solid_face_speed_mps" );
+    const auto emit = [&]( char axis, int x, int y, vec2 point,
+        int ax, int ay, int bx, int by,
+        float opening, float timeMean, float solidSpeed )
+    {
+        if( opening <= 0.0f ) return;
+        const auto a = source.getCutCellVolumeBudget( ax, ay, subDt );
+        const auto b = source.getCutCellVolumeBudget( bx, by, subDt );
+        if( !a.valid || !b.valid )
+            throw std::runtime_error( "invalid frozen anchor face ledger" );
+        const bool aActive = a.currentFraction > 0.0f;
+        const bool bActive = b.currentFraction > 0.0f;
+        if( aActive == bActive ) return;
+        if( !std::isfinite( opening ) || !std::isfinite( timeMean ) ||
+            !std::isfinite( solidSpeed ) ||
+            opening < 0.0f || opening > 1.0f ||
+            timeMean < 0.0f || timeMean > 1.0f )
+            throw std::runtime_error( "nonfinite or invalid frozen anchor" );
+        ++seen;
+        sumOpening += opening;
+        std::printf( "zero_mac_anchor_face,%.9g,%d,%c,%d,%d,"
+            "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+            "%.12g,%.12g,%.9g\n",
+            h, checkpoint, axis, x, y, point.x, point.y,
+            opening, timeMean, a.currentFraction, b.currentFraction,
+            a.pressureSourceDeltaVolume, b.pressureSourceDeltaVolume,
+            solidSpeed );
+    };
+    for( int y = 0; y < source.getHeight(); ++y )
+        for( int x = 1; x < source.getWidth(); ++x )
+        {
+            const float opening = source.getUFaceOpenFraction( x, y );
+            const vec2 point = origin + h * vec2{
+                static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
+            emit( 'U', x, y, point, x - 1, y, x, y, opening,
+                source.getSweptUTimeMeanOpenFraction( x, y ),
+                source.getUFaceSolidVelocity( x, y ) );
+        }
+    for( int y = 1; y < source.getHeight(); ++y )
+        for( int x = 0; x < source.getWidth(); ++x )
+        {
+            const float opening = source.getVFaceOpenFraction( x, y );
+            const vec2 point = origin + h * vec2{
+                static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
+            emit( 'V', x, y, point, x, y - 1, x, y, opening,
+                source.getSweptVTimeMeanOpenFraction( x, y ),
+                source.getVFaceSolidVelocity( x, y ) );
+        }
+    if( seen != expectedCount ||
+        std::abs( sumOpening - expectedOpening ) > 1.0e-7 )
+        throw std::runtime_error(
+            "frozen anchor face scan disagrees with independent pressure graph" );
+}
+
 void auditFrozenZeroMacReference( bool locateResidualHotspots = false,
     bool compareDampedJacobi = false, bool compareIndependentPcg = false,
     bool auditAnchors = false )
