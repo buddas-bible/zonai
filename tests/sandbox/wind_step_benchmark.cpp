@@ -2431,7 +2431,7 @@ void auditRotatingFrozenPressureIterationSweep()
 // then replayed through their actual normal pressure solver. In contrast,
 // history resumes from the untouched frozen state. Both advance 1/2/4
 // actual following Fluid steps with the SAME prescribed capsule motion.
-void auditMatchedWorldMacPressureRestart()
+void auditMatchedWorldMacPressureRestart( bool probeZeroMac = false )
 {
     constexpr float totalDt = 1.0f / 30.0f;
     constexpr float startAngle = 0.18f, endAngle = 1.28f;
@@ -2462,6 +2462,26 @@ void auditMatchedWorldMacPressureRestart()
     };
     std::vector<result> results;
     results.reserve( 2 * 2 * checkpoints.size() * horizons.size() );
+    struct zeroResult
+    {
+        float h = 0.0f;
+        int fluidSteps = 0, checkpoint = 0;
+        double pre = 0.0, post = 0.0;
+        double openTime = 0.0, sweptVolume = 0.0;
+        float residual = 0.0f;
+    };
+    std::vector<zeroResult> zeroResults;
+    if( probeZeroMac )
+    {
+        zeroResults.reserve( 2 * 2 * checkpoints.size() );
+        std::puts( "zero_mac_pressure,cell_m,fluid_substeps,checkpoint_16,"
+            "zero_pre_m3,zero_post_m3,zero_projection_delta_m3,"
+            "pressure_residual,time_mean_open_seconds,solid_swept_m3" );
+        std::puts( "zero_mac_cross,fluid_substeps,checkpoint_16,"
+            "affine_pre_gap_m3,zero_pre_gap_m3,"
+            "affine_projection_gap_m3,zero_projection_gap_m3,"
+            "velocity_dependent_projection_gap_m3,zero_post_gap_m3" );
+    }
     std::puts( "matched_world_restart,cell_m,fluid_substeps,"
         "checkpoint_16,horizon_steps,angle_rad,"
         "captured_evolved_pre_m3,captured_matched_world_pre_m3,"
@@ -2550,6 +2570,36 @@ void auditMatchedWorldMacPressureRestart()
                 if( !history->replayFrozenCutCellPressure( 120, true ).has_value() ||
                     !manufactured->replayFrozenCutCellPressure( 120, true ).has_value() )
                     fail( "pressure-only completion failed on copied states" );
+                if( probeZeroMac )
+                {
+                    // The third copy retains the SAME moving-solid geometry,
+                    // pressure source and closed-face wall velocities. Only
+                    // its open interior MAC velocities become zero. This
+                    // does not isolate an exact continuous physical flux.
+                    fluidField2 zero = frozen;
+                    zero.setPrePressureSnapshotObserver( {} );
+                    if( !zero.setFrozenMacVelocityForAudit(
+                        []( vec2 ) { return vec2{}; } ) )
+                        fail( "zero-open-MAC frozen override rejected" );
+                    const double zeroPre = measure( zero );
+                    if( !zero.replayFrozenCutCellPressure( 120 ).has_value() )
+                        fail( "zero-open-MAC pressure replay failed" );
+                    const double zeroPost = measure( zero );
+                    const auto [zeroOpen, zeroSwept] = geometry( zero );
+                    const auto [naturalOpen, naturalSwept] = geometry( *history );
+                    const float residual = zero.getCutCellPressure().pressureResidual;
+                    if( !std::isfinite( zeroPre ) || !std::isfinite( zeroPost ) ||
+                        !std::isfinite( residual ) ||
+                        std::abs( zeroOpen - naturalOpen ) > 1.0e-7 ||
+                        std::abs( zeroSwept - naturalSwept ) > 1.0e-7 )
+                        fail( "zero-MAC copy changed geometry or produced nonfinite pressure" );
+                    zeroResults.push_back( { h, fluidSteps, cp,
+                        zeroPre, zeroPost, zeroOpen, zeroSwept, residual } );
+                    std::printf( "zero_mac_pressure,%.9g,%d,%d,"
+                        "%.12g,%.12g,%.12g,%.9g,%.12g,%.12g\n",
+                        h, fluidSteps, cp, zeroPre, zeroPost,
+                        zeroPost - zeroPre, residual, zeroOpen, zeroSwept );
+                }
             } );
 
             for( int step = 0; step < fluidSteps; ++step )
@@ -2625,6 +2675,8 @@ void auditMatchedWorldMacPressureRestart()
 
     if( results.size() != 32 )
         fail( "not all 2x2x2x4 physical-face restart checkpoints were recorded" );
+    if( probeZeroMac && zeroResults.size() != 8 )
+        fail( "not all 2x2x2 zero-open-MAC pressure probes were recorded" );
     bool foundInputHistoryDifference = false, foundPropagation = false;
     for( int fluidSteps : { 64, 128 } )
         for( int checkpoint : checkpoints )
@@ -2658,6 +2710,37 @@ void auditMatchedWorldMacPressureRestart()
                     "%.12g,%.12g,%.12g,%.12g,%.12g\n",
                     fluidSteps, checkpoint, horizon,
                     historyGap, matchedGap, excess, historyPre, matchedPre );
+                if( probeZeroMac && horizon == 0 )
+                {
+                    const zeroResult *coarseZero = nullptr, *fineZero = nullptr;
+                    for( const zeroResult& row : zeroResults )
+                        if( row.fluidSteps == fluidSteps && row.checkpoint == checkpoint )
+                        {
+                            if( row.h == 0.25f ) coarseZero = &row;
+                            else if( row.h == 0.125f ) fineZero = &row;
+                        }
+                    if( !coarseZero || !fineZero ||
+                        std::abs( coarseZero->openTime - coarse->openTime ) > 1.0e-7 ||
+                        std::abs( fineZero->openTime - fine->openTime ) > 1.0e-7 ||
+                        std::abs( coarseZero->sweptVolume - coarse->sweptVolume ) > 1.0e-7 ||
+                        std::abs( fineZero->sweptVolume - fine->sweptVolume ) > 1.0e-7 )
+                        fail( "zero-MAC and affine copies do not share moving geometry" );
+                    const double zeroPreGap = coarseZero->pre - fineZero->pre;
+                    const double zeroPostGap = coarseZero->post - fineZero->post;
+                    const double affineProjectionGap = matchedGap - matchedPre;
+                    const double zeroProjectionGap = zeroPostGap - zeroPreGap;
+                    const double velocityDependentGap =
+                        affineProjectionGap - zeroProjectionGap;
+                    if( !std::isfinite( velocityDependentGap ) ||
+                        std::abs( ( matchedGap - zeroPostGap ) -
+                            ( matchedPre - zeroPreGap ) - velocityDependentGap ) > 1.0e-9 )
+                        fail( "matched affine/zero pressure decomposition does not close" );
+                    std::printf( "zero_mac_cross,%d,%d,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                        fluidSteps, checkpoint, matchedPre, zeroPreGap,
+                        affineProjectionGap, zeroProjectionGap,
+                        velocityDependentGap, zeroPostGap );
+                }
             }
     if( !foundInputHistoryDifference || !foundPropagation )
         fail( "matched-state restart did not exercise history replacement and propagation" );
@@ -2857,6 +2940,7 @@ int main( int argc, char** argv )
     bool prescribedRotationPressureSplitAudit = false;
     bool frozenPressureIterationAudit = false;
     bool matchedWorldPressureRestartAudit = false;
+    bool zeroMacPressureAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -2885,6 +2969,7 @@ int main( int argc, char** argv )
         prescribedRotationPressureSplitAudit |= std::string_view( argv[i] ) == "--small-cell-rotation-pressure-split-audit";
         frozenPressureIterationAudit |= std::string_view( argv[i] ) == "--small-cell-frozen-pressure-iterations-audit";
         matchedWorldPressureRestartAudit |= std::string_view( argv[i] ) == "--small-cell-matched-world-restart-audit";
+        zeroMacPressureAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-pressure-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -2911,6 +2996,7 @@ int main( int argc, char** argv )
     if( prescribedRotationPressureSplitAudit ) { auditPrescribedRotatingFacePressureSplit(); return 0; }
     if( frozenPressureIterationAudit ) { auditRotatingFrozenPressureIterationSweep(); return 0; }
     if( matchedWorldPressureRestartAudit ) { auditMatchedWorldMacPressureRestart(); return 0; }
+    if( zeroMacPressureAudit ) { auditMatchedWorldMacPressureRestart( true ); return 0; }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
