@@ -186,6 +186,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-damped-jacobi-audit
 
+      # Read-only independent Neumann graph assembly from Cut-cell public
+      # aperture/source ledgers; explicit double-precision PCG residual.
+      - name: Audit independently assembled frozen Cut-cell PCG (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-zero-mac-independent-pcg-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -433,6 +439,12 @@ jobs:
       - name: Compare frozen damped versus legacy Jacobi (Windows Release)
         if: runner.os == 'Windows'
         run: .\build\tests\Release\sandboxWindStepBenchmark.exe --small-cell-zero-mac-damped-jacobi-audit
+
+      # Read-only independent Neumann graph assembly from Cut-cell public
+      # aperture/source ledgers; explicit double-precision PCG residual.
+      - name: Audit independently assembled frozen Cut-cell PCG (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-zero-mac-independent-pcg-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
