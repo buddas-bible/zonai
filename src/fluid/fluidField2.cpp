@@ -1718,6 +1718,27 @@ float fluidField2::getVFaceOpenFraction( int x, int y ) const noexcept
     return x >= 0 && x < width_ && y > 0 && y < height_ ? vOpenFraction_[vIndex( x, y )] : 0.0f;
 }
 
+std::optional<double> fluidField2::getAnalyticCapsuleFaceOpenFractionForAudit(
+    const fluidShapeObstacle2& obstacle, bool isU, int x, int y ) const noexcept
+{
+    if( !analyticCapsuleCutCellEnabled_ ||
+        ( isU ? ( x <= 0 || x >= width_ || y < 0 || y >= height_ )
+              : ( x < 0 || x >= width_ || y <= 0 || y >= height_ ) ) )
+        return std::nullopt;
+
+    analyticFluidCapsule capsule{};
+    if( !TryGetAnalyticCapsule( std::span<const fluidShapeObstacle2>( &obstacle, 1 ),
+        capsule, analyticCapsuleDoubleGeometryEnabled_ ) )
+        return std::nullopt;
+
+    const double h = cellSize_;
+    const double normal = isU ? origin_.x + x * h : origin_.y + y * h;
+    const double low = isU ? origin_.y + y * h : origin_.x + x * h;
+    const analyticCircleInterval clipped =
+        ClipCapsuleFace( capsule, isU, normal, low, low + h );
+    return std::clamp( 1.0 - clipped.length / h, 0.0, 1.0 );
+}
+
 float fluidField2::getSweptUTimeMeanOpenFraction( int x, int y ) const noexcept
 {
     return sweptApertureAuditValid_ && x > 0 && x < width_ &&
@@ -3884,6 +3905,24 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
             const auto analyticShapes = disjointAnalyticCutCellEnabled_
                 ? BuildDisjointAnalyticShapes( intermediate ) :
                     std::vector<analyticDisjointShape2>{};
+            // Match the SINGLE-shape analytic geometry used by the live
+            // Cut-cell and swept-solid flux paths. A sampled face stencil
+            // can report zero for a genuine near-tangent opening.
+            analyticFluidCircle circle{};
+            analyticFluidPolygon polygon{};
+            analyticFluidCapsule capsule{};
+            analyticFluidRoundedPolygon rounded{};
+            const bool circleGeometry = analyticShapes.empty() &&
+                analyticCircleCutCellEnabled_ && TryGetAnalyticCircle( intermediate, circle );
+            const bool polygonGeometry = !circleGeometry && analyticShapes.empty() &&
+                analyticPolygonCutCellEnabled_ && TryGetAnalyticPolygon( intermediate, polygon );
+            const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
+                analyticShapes.empty() && analyticCapsuleCutCellEnabled_ &&
+                TryGetAnalyticCapsule( intermediate, capsule, analyticCapsuleDoubleGeometryEnabled_ );
+            const bool roundedGeometry = !circleGeometry && !polygonGeometry &&
+                !capsuleGeometry && analyticShapes.empty() &&
+                analyticRoundedPolygonCutCellEnabled_ &&
+                TryGetAnalyticRoundedPolygon( intermediate, rounded );
             const auto openAt = [&]( bool vertical, int x, int y )
             {
                 const double h = cellSize_;
@@ -3896,6 +3935,17 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                         {
                             blocked += clipped.length;
                         } );
+                else if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
+                {
+                    const analyticCircleInterval clipped = circleGeometry
+                        ? ClipCircleFace( circle, vertical, normal, low, low + h )
+                        : polygonGeometry
+                            ? ClipPolygonFace( polygon, vertical, normal, low, low + h )
+                            : capsuleGeometry
+                                ? ClipCapsuleFace( capsule, vertical, normal, low, low + h )
+                                : ClipRoundedPolygonFace( rounded, vertical, normal, low, low + h );
+                    blocked = clipped.length;
+                }
                 else
                     for( int sub = 0; sub < faceSamples; ++sub )
                     {
