@@ -544,6 +544,12 @@ struct fluidFaceStageAudit2
     float afterBoundary = 0.0f;
     float afterAdvection = 0.0f;
     float afterPressure = 0.0f;
+    // Signed m^3 through this U/V face during obstacle motion, BEFORE and
+    // AFTER optional swept-geometry reconciliation. Captured inside Step,
+    // never reconstructed from the post-pressure MAC face velocity.
+    bool hasSweptHistory = false;
+    float rawSweptVolume = 0.0f;
+    float reconciledSweptVolume = 0.0f;
     // The two cells sharing the monitored face. These are sampled after the
     // pressure solve and never change pressure or the fluid boundary.
     float lowerCellFraction = 0.0f;
