@@ -2940,5 +2940,68 @@ void checkDemoUi()
         }
     }
     checkSplineRailInspector();
+
+    // Real Wind view: toggle render-only scalar layers without changing
+    // tracer kg, fluid momentum or the actual World/Fluid integration.
+    // This headless ImGui check verifies emitted geometry, not final pixels.
+    {
+        auto wind = createDemoView( demoKind::windFlow );
+        auto& view = static_cast<rigidBodyDemoUi&>( *wind );
+        auto& viz = view.editWindVisualization();
+        if( !viz.dye || !viz.vectors || viz.speedHeatmap ||
+            viz.pressureHeatmap || viz.cutCells )
+        {
+            std::fprintf( stderr, "Wind visualization defaults changed\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        view.seedWindTracer();
+        const fluidField2* field = view.getWindField();
+        if( !field || field->getTracerMass() <= 0.0f )
+        {
+            std::fprintf( stderr, "Wind view dye seed missing\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        const float massBefore = field->getTracerMass();
+        const vec2 momentumBefore = field->getFluidMomentum();
+        viz.vectors = false;
+        viz.dye = false;
+        const auto countVertices = [&]()
+        {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
+            ImGui::SetNextWindowSize( { 850.0f, 680.0f } );
+            ImGui::Begin( "Wind visualization test" );
+            debugCamera camera{};
+            camera.center = getDemoEntry( demoKind::windFlow ).cameraCenter;
+            camera.pixelsPerMeter = getDemoEntry( demoKind::windFlow ).pixelsPerMeter;
+            ImDrawList* list = ImGui::GetWindowDrawList();
+            debugDraw draw{ list, camera, ImGui::GetCursorScreenPos(),
+                { 850.0f, 650.0f } };
+            const int before = list->VtxBuffer.Size;
+            view.draw( draw );
+            const int vertices = list->VtxBuffer.Size - before;
+            ImGui::End();
+            ImGui::Render();
+            return vertices;
+        };
+        const int background = countVertices();
+        viz.dye = true;
+        const int dyed = countVertices();
+        viz.speedHeatmap = true;
+        const int velocity = countVertices();
+        viz.pressureHeatmap = true;
+        const int pressure = countVertices();
+        viz.cutCells = true;
+        const int cutCells = countVertices();
+        if( !( dyed > background && velocity > dyed &&
+            pressure > velocity && cutCells >= pressure ) ||
+            field->getTracerMass() != massBefore ||
+            field->getFluidMomentum() != momentumBefore )
+        {
+            std::fprintf( stderr, "Wind visualization layers or read-only contract failed: %d %d %d %d %d\n",
+                background, dyed, velocity, pressure, cutCells );
+            std::exit( EXIT_FAILURE );
+        }
+    }
     ImGui::DestroyContext();
 }
