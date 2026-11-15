@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <limits>
 #include <iterator>
+#include <numeric>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
@@ -6100,7 +6101,7 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false, bool pressure
                                 throw std::runtime_error( "nonfinite independent Galerkin oracle" );
                             std::printf( "capsule_hotspot_pressure_oracle,%d,%.9g,%d,%d,%d,"
                                 "%.12g,%.12g,%.12g,%d,%d,%.12g,%.12g,"
-                                "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\\n",
+                                "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
                                 branch, threshold, merged, activeRoots,
                                 root[leftCell] == root[rightCell] ? 1 : 0,
                                 sourceBefore, sourceAfter, gaugeAdjustment,
@@ -6407,7 +6408,11 @@ int main( int argc, char** argv )
     }
     if( capsuleGeometryAudit ) { auditFrozenCapsuleGeometryComparison(); return 0; }
     if( capsuleMovingTransportAudit ) { auditMovingCapsuleGuardTransport(); return 0; }
-    if( capsuleHotspotLedgerAudit ) { auditMovingCapsuleGuardTransport( true ); return 0; }
+    if( capsuleHotspotLedgerAudit || capsulePressureOracleAudit )
+    {
+        auditMovingCapsuleGuardTransport( true, capsulePressureOracleAudit );
+        return 0;
+    }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
