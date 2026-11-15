@@ -1104,6 +1104,14 @@ public:
     [[nodiscard]] float getCellFluidFraction( int x, int y ) const noexcept;
     [[nodiscard]] float getUFaceOpenFraction( int x, int y ) const noexcept;
     [[nodiscard]] float getVFaceOpenFraction( int x, int y ) const noexcept;
+    // Side-effect-free single-Capsule analytic face query at a caller-supplied
+    // pose. Independent of current Step/pressure and swept sample history.
+    // Nullopt for invalid geometry, disabled analytic mode or exterior face.
+    // The returned value is the geometric [0,1] opening; it does not enforce
+    // active fluid on both sides or represent a time-averaged aperture.
+    [[nodiscard]] std::optional<double> getAnalyticCapsuleFaceOpenFractionForAudit(
+        const fluidShapeObstacle2& capsule, bool isU, int x, int y ) const noexcept;
+
     // Time-average OPEN fraction on one interior face over the most recent
     // valid swept moving-geometry interval. Zero if unavailable/invalid.
     // Approximate quadrature, not an exact space-time interface integral.
