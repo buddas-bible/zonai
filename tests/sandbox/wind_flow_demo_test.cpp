@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 
 using namespace zonai;
 using namespace zonai::sandbox;
@@ -1435,6 +1436,47 @@ void checkSandboxConservativeAdvectionTrial()
         "wind reset must preserve algorithm choice and clear its diagnostics" );
 }
 
+void checkWindDyeEmitter()
+{
+    // A passive tracer-only source: no velocity, pressure or Body change.
+    // The model/engine default must remain OFF for existing physics tests.
+    constexpr float dt = 1.0f / 60.0f;
+    rigidBodyDemo base{ demoKind::windFlow };
+    rigidBodyDemo dyed{ demoKind::windFlow };
+    check( !base.isWindDyeEmitterEnabled() &&
+        !dyed.isWindDyeEmitterEnabled(),
+        "headless Wind dye source must default disabled" );
+    dyed.setWindDyeEmitterRate( -3.0f );
+    check( dyed.getWindDyeEmitterRate() == 0.0f,
+        "negative passive dye source rate must clamp to zero" );
+    dyed.setWindDyeEmitterRate( std::numeric_limits<float>::quiet_NaN() );
+    check( dyed.getWindDyeEmitterRate() == 0.0f,
+        "nonfinite passive dye source rate must be rejected" );
+    dyed.setWindDyeEmitterRate( 2.5f );
+    dyed.setWindDyeEmitterEnabled( true );
+    for( int frame = 0; frame < 8; ++frame )
+    {
+        base.step( dt, 4 );
+        dyed.step( dt, 4 );
+        check( close( base.getWindField()->getTracerMass(), 0.0f ) &&
+            dyed.getWindField()->getTracerMass() > 0.0f &&
+            near( base.getWindField()->getFluidMomentum(),
+                dyed.getWindField()->getFluidMomentum(), 1.0e-5f ),
+            "passive dye injection must create only tracer mass" );
+        for( std::size_t i = 0; i < base.getShapes().size(); ++i )
+        {
+            const auto first = base.getShapes()[i].bodyHandle;
+            const auto second = dyed.getShapes()[i].bodyHandle;
+            check( near( base.getWorld().GetBodyTransform( first ).position,
+                dyed.getWorld().GetBodyTransform( second ).position, 1.0e-5f ),
+                "passive dye emission cannot alter rigid-body motion" );
+        }
+    }
+    dyed.setWindDyeEmitterEnabled( false );
+    check( !dyed.isWindDyeEmitterEnabled(),
+        "continuous dye source must be independently switchable" );
+}
+
 } // namespace
 
 int main()
@@ -1464,4 +1506,5 @@ int main()
     checkSandboxDisjointAnalyticMultiShapeMode();
     checkSandboxAnalyticCapsuleMode();
     checkSandboxConservativeAdvectionTrial();
+    checkWindDyeEmitter();
 }
