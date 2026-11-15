@@ -401,6 +401,9 @@ bool drawCollisionBits( const char* label, const char* id, std::uint64_t& bits, 
 rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
 {
     if( kind == demoKind::collisionComparison || kind == demoKind::frictionComparison || kind == demoKind::restitutionComparison || kind == demoKind::boxStack || kind == demoKind::ccdComparison || kind == demoKind::collisionFilterComparison || kind == demoKind::sensorWallComparison || kind == demoKind::sleepWakeComparison || kind == demoKind::dampingComparison || kind == demoKind::gravityScaleComparison || kind == demoKind::massImpulseComparison || kind == demoKind::impulsePointComparison || kind == demoKind::rotationalInertiaComparison || kind == demoKind::forceImpulseComparison || kind == demoKind::torqueImpulseComparison || kind == demoKind::dynamicKinematicComparison || kind == demoKind::compoundCenterComparison || kind == demoKind::fastRotationComparison || kind == demoKind::maximumLinearSpeedComparison || kind == demoKind::frictionMixingComparison || kind == demoKind::restitutionMixingComparison || kind == demoKind::lowSpeedRestitutionComparison || kind == demoKind::collisionGroupComparison || kind == demoKind::movingPlatformFrictionComparison || kind == demoKind::rollingSlidingFrictionComparison || kind == demoKind::frictionForceComparison || kind == demoKind::obliqueImpactFrictionComparison || kind == demoKind::collisionMassRatioComparison || kind == demoKind::centralOffsetImpactComparison || kind == demoKind::springDampingComparison || kind == demoKind::distanceMotorForceComparison || kind == demoKind::distanceLimitMotorComparison || kind == demoKind::revoluteMotorTorqueComparison || kind == demoKind::revoluteLimitMotorComparison || kind == demoKind::suspensionLoadComparison || kind == demoKind::suspensionLimitComparison || kind == demoKind::suspensionMotorComparison || kind == demoKind::weldElasticityComparison ) showLabels_ = true;
+    // Only the interactive Wind view starts with a visible dye source.
+    // The underlying physics model and headless benchmarks still default OFF.
+    if( kind == demoKind::windFlow ) setWindDyeEmitterEnabled( true );
     selectedShapeIndex_ = kind == demoKind::playground || kind == demoKind::motorCar ? 2 : 1;
     if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
@@ -1284,6 +1287,16 @@ void rigidBodyDemoUi::drawExperimentControls()
             "자홍색 = 비유한 속도/압력 진단값" );
         ImGui::TextDisabled( "염료가 아직 없으면 아래 버튼으로 주입하세요." );
         if( ImGui::Button( "염료 주입###WindTracerSeed" ) ) seedWindTracer();
+        bool continuousDye = isWindDyeEmitterEnabled();
+        if( ImGui::Checkbox( "염료 연속 주입###WindVisualContinuousDye", &continuousDye ) )
+            setWindDyeEmitterEnabled( continuousDye );
+        if( continuousDye )
+        {
+            float rate = getWindDyeEmitterRate();
+            if( ImGui::SliderFloat( "염료 주입량###WindVisualDyeRate",
+                &rate, 0.0f, 10.0f, "%.2f kg/s" ) )
+                setWindDyeEmitterRate( rate );
+        }
         bool sweptTracer = isWindSweptTracerRemapEnabled();
         if( ImGui::Checkbox( "이동 강체의 tracer 재배치 (실험)###WindSweptTracerRemap", &sweptTracer ) )
             setWindSweptTracerRemapEnabled( sweptTracer );
