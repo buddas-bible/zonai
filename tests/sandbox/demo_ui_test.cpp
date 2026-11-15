@@ -2948,7 +2948,8 @@ void checkDemoUi()
         auto wind = createDemoView( demoKind::windFlow );
         auto& view = static_cast<rigidBodyDemoUi&>( *wind );
         auto& viz = view.editWindVisualization();
-        if( !viz.dye || !viz.vectors || viz.speedHeatmap ||
+        if( !view.isWindDyeEmitterEnabled() ||
+            !viz.dye || !viz.vectors || viz.speedHeatmap ||
             viz.pressureHeatmap || viz.cutCells )
         {
             std::fprintf( stderr, "Wind visualization defaults changed\n" );
