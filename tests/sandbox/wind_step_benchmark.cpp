@@ -4871,6 +4871,17 @@ void auditFrozenCapsuleGeometryComparison()
                 std::printf( "capsule_active_mask,%.9g,%d,%d,%d,%016llx\n",
                     h, cp, mode, row.active,
                     static_cast<unsigned long long>( maskHash ) );
+                // Recorded independently from green Windows Release and
+                // Ubuntu Debug runs. Catch location changes even when the
+                // active-cell *count* stays the same.
+                if( mode == 3 && h == 0.125f )
+                {
+                    const std::uint64_t expected = cp == 11
+                        ? UINT64_C( 0x8787b49d7bcf8e49 )
+                        : UINT64_C( 0x8d0ee9a33f07407c );
+                    if( maskHash != expected )
+                        fail( "guarded Capsule active-mask parity regression" );
+                }
                 row.valid = true;
                 std::printf( "capsule_geometry_summary,%.9g,%d,%d,%d,%d,"
                     "%.12g,%d,%.12g,%.12g,%.12g,%d\n",
