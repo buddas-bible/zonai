@@ -214,6 +214,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-capsule-hotspot-ledger-audit
 
+      # Frozen-only independent noncoupled P^T L P experiment at step 96.
+      # Actual Field and World pressure/velocity remain unchanged.
+      - name: Compare matched noncoupled pressure Galerkin oracle (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-capsule-noncoupled-pressure-oracle
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -488,6 +494,10 @@ jobs:
       - name: Trace moving Capsule frozen hotspot ledger (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-capsule-hotspot-ledger-audit
+
+      - name: Compare matched noncoupled pressure Galerkin oracle (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-capsule-noncoupled-pressure-oracle
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
