@@ -5189,7 +5189,7 @@ void auditFrozenCapsuleGeometryComparison()
 // only the convex full-coverage guard differs. Pressure/advective histories
 // are separately evolved and the obstacle is KINEMATIC, so returned forces
 // are observations, not an integrated two-way World/body trajectory.
-void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
+void auditMovingCapsuleGuardTransport( bool hotspotLedger = false, bool pressureOracle = false )
 {
     constexpr float h = 0.125f;
     constexpr float totalDt = 1.0f / 30.0f;
@@ -5387,6 +5387,15 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
             "float_minus_reported_m3ps,double_minus_float_m3ps,"
             "float_order_source_imbalance_m3ps,reported_source_imbalance_m3ps,"
             "source_imbalance_gap_m3ps,max_cell_rhs_diff_per_s" );
+        if( pressureOracle )
+            std::puts( "capsule_hotspot_pressure_oracle,branch,merge_fraction,"
+                "merged_cells,active_roots,target_face_internal,source_sum_before_m3,"
+                "source_sum_after_m3,neumann_gauge_adjustment_L1_m3,"
+                "iterations,grouped_converged,initial_group_rms_per_s,"
+                "final_group_rms_per_s,final_pointwise_rms_per_s,"
+                "target_predicted_U_mps,max_predicted_face_mps,"
+                "max_open_weighted_predicted_mps,pressure_impulse_x_Ns,"
+                "pressure_impulse_y_Ns,merged_child_residual_L1_m3" );
     }
     std::puts( "capsule_moving_velocity_hotspot,step,mode,axis,face_x,face_y,"
         "face_velocity_mps,open_fraction,open_weighted_speed_mps,"
@@ -5815,6 +5824,290 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                             pressure.sourceImbalance ) > toleranceM3ps )
                         throw std::runtime_error(
                             "matched float-order Cut-cell source compatibility drift" );
+
+                    if( pressureOracle )
+                        for( const float threshold : { 0.0f, 1.0e-6f, 1.0e-4f } )
+                        {
+                            // S2c frozen-only counterfactual. q = dt^2 * pressure;
+                            // A(q) is face open fraction * pressure potential
+                            // difference in m^3. P^T*A*P is formed by mapping
+                            // each tiny shrinking cell to a larger OPEN neighbor.
+                            // No prescribed solid feedback or tracer is advanced.
+                            const int cells = width * height;
+                            const double volumeScale =
+                                static_cast<double>( h ) * h * subDt;
+                            std::vector<int> root( cells );
+                            std::iota( root.begin(), root.end(), 0 );
+                            int merged = 0;
+                            if( threshold > 0.0f )
+                                for( int cell = 0; cell < cells; ++cell )
+                                {
+                                    if( component[cell] < 0 ) continue;
+                                    const int x = cell % width, y = cell / width;
+                                    const float current = projected.getCellFluidFraction( x, y );
+                                    const float previous = projected.getCutCellVolumeBudget(
+                                        x, y, subDt ).previousFraction;
+                                    if( !( current > 0.0f && current < threshold &&
+                                            previous > current ) ) continue;
+                                    float bestOpen = 0.0f;
+                                    int best = -1;
+                                    const auto consider = [&]( int nx, int ny, float opening )
+                                    {
+                                        if( opening <= bestOpen ||
+                                            projected.getCellFluidFraction( nx, ny ) < threshold )
+                                            return;
+                                        bestOpen = opening;
+                                        best = ny * width + nx;
+                                    };
+                                    if( x > 0 )
+                                        consider( x - 1, y,
+                                            projected.getUFaceOpenFraction( x, y ) );
+                                    if( x + 1 < width )
+                                        consider( x + 1, y,
+                                            projected.getUFaceOpenFraction( x + 1, y ) );
+                                    if( y > 0 )
+                                        consider( x, y - 1,
+                                            projected.getVFaceOpenFraction( x, y ) );
+                                    if( y + 1 < height )
+                                        consider( x, y + 1,
+                                            projected.getVFaceOpenFraction( x, y + 1 ) );
+                                    if( best >= 0 )
+                                    {
+                                        if( component[cell] != component[best] )
+                                            throw std::runtime_error( "pressure pool crossed closed region" );
+                                        root[cell] = best;
+                                        ++merged;
+                                    }
+                                }
+                            std::vector<double> originalB( cells, 0.0 );
+                            std::vector<double> b( cells, 0.0 ), diagonal( cells, 0.0 );
+                            double sourceBefore = 0.0, sourceAfter = 0.0;
+                            int activeRoots = 0;
+                            for( int cell = 0; cell < cells; ++cell )
+                            {
+                                const int region = component[cell];
+                                if( region < 0 ) continue;
+                                // Reproduce projectCutCell's float region-mean
+                                // subtraction, then convert to pressure RHS.
+                                const float mean = static_cast<float>(
+                                    regionFloatRhs[region] / regionSize[region] );
+                                const float compatible = floatCellRhs[cell] - mean;
+                                originalB[cell] = -static_cast<double>( compatible ) * volumeScale;
+                                sourceBefore += originalB[cell];
+                                b[root[cell]] += originalB[cell];
+                                if( root[cell] == cell ) ++activeRoots;
+                            }
+                            for( int cell = 0; cell < cells; ++cell )
+                                if( component[cell] >= 0 && root[cell] == cell )
+                                    sourceAfter += b[cell];
+                            if( std::abs( sourceAfter - sourceBefore ) > 1.0e-11 ||
+                                activeRoots != pressure.activeCells - merged )
+                                throw std::runtime_error( "Galerkin source restriction lost cell volume" );
+
+                            struct faceEdge
+                            {
+                                int a, b;
+                                double opening;
+                                bool isU;
+                                int x, y;
+                            };
+                            std::vector<faceEdge> edges;
+                            edges.reserve( static_cast<std::size_t>( cells ) * 2 );
+                            const auto addEdge = [&]( int a, int d, float opening,
+                                bool isU, int x, int y )
+                            {
+                                if( opening <= 0.0f ) return;
+                                if( component[a] < 0 || component[d] < 0 )
+                                    throw std::runtime_error( "active pressure edge reaches solid" );
+                                edges.push_back( { a, d, opening, isU, x, y } );
+                                if( root[a] != root[d] )
+                                {
+                                    diagonal[root[a]] += opening;
+                                    diagonal[root[d]] += opening;
+                                }
+                            };
+                            for( int y = 0; y < height; ++y )
+                                for( int x = 1; x < width; ++x )
+                                    addEdge( y * width + x - 1, y * width + x,
+                                        projected.getUFaceOpenFraction( x, y ), true, x, y );
+                            for( int y = 1; y < height; ++y )
+                                for( int x = 0; x < width; ++x )
+                                    addEdge( ( y - 1 ) * width + x, y * width + x,
+                                        projected.getVFaceOpenFraction( x, y ), false, x, y );
+
+                            // One Neumann gauge per connected component. Restrict
+                            // and solve on the retained pressure root nodes.
+                            const auto removeGauge = [&]( std::vector<double>& v )
+                            {
+                                for( std::size_t region = 0; region < regionSize.size(); ++region )
+                                {
+                                    double sum = 0.0;
+                                    int roots = 0;
+                                    for( int cell = 0; cell < cells; ++cell )
+                                        if( component[cell] == static_cast<int>( region ) &&
+                                            root[cell] == cell )
+                                        {
+                                            sum += v[cell];
+                                            ++roots;
+                                        }
+                                    if( roots == 0 )
+                                        throw std::runtime_error( "empty Galerkin pressure group" );
+                                    const double mean = sum / roots;
+                                    for( int cell = 0; cell < cells; ++cell )
+                                        if( component[cell] == static_cast<int>( region ) &&
+                                            root[cell] == cell )
+                                            v[cell] -= mean;
+                                }
+                            };
+                            std::vector<double> correctedB = b;
+                            removeGauge( correctedB );
+                            double gaugeAdjustment = 0.0;
+                            for( int cell = 0; cell < cells; ++cell )
+                                if( component[cell] >= 0 && root[cell] == cell )
+                                    gaugeAdjustment += std::abs( correctedB[cell] - b[cell] );
+                            const auto multiply = [&]( const std::vector<double>& src,
+                                std::vector<double>& out )
+                            {
+                                std::fill( out.begin(), out.end(), 0.0 );
+                                for( const faceEdge& edge : edges )
+                                {
+                                    const int a = root[edge.a], d = root[edge.b];
+                                    if( a == d ) continue;
+                                    const double flux = edge.opening * ( src[a] - src[d] );
+                                    out[a] += flux;
+                                    out[d] -= flux;
+                                }
+                            };
+                            const auto dot = [&]( const std::vector<double>& a,
+                                const std::vector<double>& d )
+                            {
+                                double result = 0.0;
+                                for( int cell = 0; cell < cells; ++cell )
+                                    if( component[cell] >= 0 && root[cell] == cell )
+                                        result += a[cell] * d[cell];
+                                return result;
+                            };
+                            const auto rms = [&]( const std::vector<double>& v )
+                            {
+                                return std::sqrt( dot( v, v ) / activeRoots ) / volumeScale;
+                            };
+                            std::vector<double> q( cells, 0.0 ), residual = correctedB;
+                            std::vector<double> z( cells, 0.0 ), direction( cells, 0.0 );
+                            std::vector<double> product( cells, 0.0 );
+                            const double initialRms = rms( residual );
+                            constexpr double targetRmsPerSecond = 1.0e-4;
+                            constexpr int maxIterations = 3200;
+                            int iterations = 0;
+                            if( initialRms > targetRmsPerSecond )
+                            {
+                                for( int cell = 0; cell < cells; ++cell )
+                                    if( component[cell] >= 0 && root[cell] == cell &&
+                                        diagonal[cell] > 0.0 )
+                                        z[cell] = residual[cell] / diagonal[cell];
+                                removeGauge( z );
+                                direction = z;
+                                double rz = dot( residual, z );
+                                for( int iteration = 1; iteration <= maxIterations; ++iteration )
+                                {
+                                    multiply( direction, product );
+                                    const double denominator = dot( direction, product );
+                                    if( !( denominator > 0.0 ) || !( rz > 0.0 ) ||
+                                        !std::isfinite( denominator ) || !std::isfinite( rz ) )
+                                        break;
+                                    const double alpha = rz / denominator;
+                                    for( int cell = 0; cell < cells; ++cell )
+                                        if( component[cell] >= 0 && root[cell] == cell )
+                                        {
+                                            q[cell] += alpha * direction[cell];
+                                            residual[cell] -= alpha * product[cell];
+                                        }
+                                    removeGauge( residual );
+                                    iterations = iteration;
+                                    if( rms( residual ) <= targetRmsPerSecond ) break;
+                                    for( int cell = 0; cell < cells; ++cell )
+                                        z[cell] = component[cell] >= 0 && root[cell] == cell &&
+                                            diagonal[cell] > 0.0
+                                            ? residual[cell] / diagonal[cell] : 0.0;
+                                    removeGauge( z );
+                                    const double nextRz = dot( residual, z );
+                                    if( !( nextRz > 0.0 ) || !std::isfinite( nextRz ) )
+                                        break;
+                                    const double beta = nextRz / rz;
+                                    for( int cell = 0; cell < cells; ++cell )
+                                        if( component[cell] >= 0 && root[cell] == cell )
+                                            direction[cell] = z[cell] + beta * direction[cell];
+                                    removeGauge( direction );
+                                    rz = nextRz;
+                                }
+                            }
+                            // Rebuild the TRUE grouped and per-cell operator
+                            // residual, independent of the CG recurrence.
+                            multiply( q, product );
+                            double squaredGroup = 0.0;
+                            for( int cell = 0; cell < cells; ++cell )
+                                if( component[cell] >= 0 && root[cell] == cell )
+                                {
+                                    const double err = product[cell] - correctedB[cell];
+                                    squaredGroup += err * err;
+                                }
+                            const double groupRms = std::sqrt(
+                                squaredGroup / activeRoots ) / volumeScale;
+                            std::vector<double> cellAx( cells, 0.0 );
+                            double maxSpeed = 0.0, maxWeighted = 0.0;
+                            double targetSpeed = 0.0, impulseX = 0.0, impulseY = 0.0;
+                            for( const faceEdge& edge : edges )
+                            {
+                                const double volume = edge.opening *
+                                    ( q[root[edge.a]] - q[root[edge.b]] );
+                                cellAx[edge.a] += volume;
+                                cellAx[edge.b] -= volume;
+                                const auto speed = edge.isU
+                                    ? frozen.getUFaceVelocityForAudit( edge.x, edge.y )
+                                    : frozen.getVFaceVelocityForAudit( edge.x, edge.y );
+                                if( !speed )
+                                    throw std::runtime_error( "missing oracle frozen MAC input" );
+                                const double delta = volume /
+                                    ( edge.opening * h * subDt );
+                                const double after = *speed + delta;
+                                maxSpeed = std::max( maxSpeed, std::abs( after ) );
+                                maxWeighted = std::max( maxWeighted,
+                                    edge.opening * std::abs( after ) );
+                                const double impulse = static_cast<double>( h ) * h *
+                                    edge.opening * delta;
+                                if( edge.isU )
+                                {
+                                    impulseX += impulse;
+                                    if( edge.x == hotspotX && edge.y == hotspotY )
+                                        targetSpeed = after;
+                                }
+                                else impulseY += impulse;
+                            }
+                            double squaredPointwise = 0.0, virtualL1 = 0.0;
+                            for( int cell = 0; cell < cells; ++cell )
+                            {
+                                if( component[cell] < 0 ) continue;
+                                const double err = cellAx[cell] - originalB[cell];
+                                squaredPointwise += err * err;
+                                if( root[cell] != cell ) virtualL1 += std::abs( err );
+                            }
+                            const double pointwiseRms = std::sqrt(
+                                squaredPointwise / pressure.activeCells ) / volumeScale;
+                            const bool converged = std::isfinite( groupRms ) &&
+                                groupRms < targetRmsPerSecond;
+                            if( !std::isfinite( maxSpeed ) || !std::isfinite( pointwiseRms ) ||
+                                !std::isfinite( impulseX ) || !std::isfinite( impulseY ) ||
+                                !std::isfinite( virtualL1 ) || !std::isfinite( groupRms ) )
+                                throw std::runtime_error( "nonfinite independent Galerkin oracle" );
+                            std::printf( "capsule_hotspot_pressure_oracle,%d,%.9g,%d,%d,%d,"
+                                "%.12g,%.12g,%.12g,%d,%d,%.12g,%.12g,"
+                                "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\\n",
+                                branch, threshold, merged, activeRoots,
+                                root[leftCell] == root[rightCell] ? 1 : 0,
+                                sourceBefore, sourceAfter, gaugeAdjustment,
+                                iterations, converged ? 1 : 0, initialRms,
+                                groupRms, pointwiseRms, targetSpeed, maxSpeed,
+                                maxWeighted, impulseX, impulseY, virtualL1 );
+                        }
                 };
                 if( mode == 0 )
                 {
@@ -6018,6 +6311,7 @@ int main( int argc, char** argv )
     bool capsuleGeometryAudit = false;
     bool capsuleMovingTransportAudit = false;
     bool capsuleHotspotLedgerAudit = false;
+    bool capsulePressureOracleAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -6056,6 +6350,8 @@ int main( int argc, char** argv )
         capsuleGeometryAudit |= std::string_view( argv[i] ) == "--small-cell-capsule-geometry-audit";
         capsuleMovingTransportAudit |= std::string_view( argv[i] ) == "--small-cell-capsule-moving-transport-audit";
         capsuleHotspotLedgerAudit |= std::string_view( argv[i] ) == "--small-cell-capsule-hotspot-ledger-audit";
+        capsulePressureOracleAudit |= std::string_view( argv[i] ) ==
+            "--small-cell-capsule-noncoupled-pressure-oracle";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
