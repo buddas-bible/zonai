@@ -1108,6 +1108,14 @@ public:
     // 기하 표본의 유체 면적 비율 [0,1]. 범위 밖은 0.
     // 외곽 wall face는 기하상 열려있어도 닫힌 경계이므로 0.
     [[nodiscard]] float getCellFluidFraction( int x, int y ) const noexcept;
+    // Renderer-only signed pressure sample (density=1). Neumann gauge is
+    // arbitrary: display relative differences, never absolute pressure.
+    [[nodiscard]] float getCellPressureForVisualization( int x, int y ) const noexcept
+    {
+        return x >= 0 && x < width_ && y >= 0 && y < height_
+            && cellFluidFraction_[cellIndex( x, y )] > 0.0f
+            ? pressure_[cellIndex( x, y )] : 0.0f;
+    }
     [[nodiscard]] float getUFaceOpenFraction( int x, int y ) const noexcept;
     [[nodiscard]] float getVFaceOpenFraction( int x, int y ) const noexcept;
     // S2c independent float-order pressure RHS audit. Return the STORED MAC
