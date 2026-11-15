@@ -203,6 +203,11 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-capsule-geometry-audit
 
+      # Prescribed moving-Capsule guard A/B with staged tracer and pressure feedback.
+      - name: Audit moving Capsule tracer and feedback (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-capsule-moving-transport-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -467,6 +472,11 @@ jobs:
       - name: Compare sampled and analytic Capsule geometry (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-capsule-geometry-audit
+
+      # Same moving-Capsule transport A/B on MSVC Release.
+      - name: Audit moving Capsule tracer and feedback (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-capsule-moving-transport-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
