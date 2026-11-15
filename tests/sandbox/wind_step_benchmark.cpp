@@ -5623,7 +5623,7 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                     std::printf( "capsule_hotspot_swept,%d,"
                         "%.12g,%.12g,%.12g,%d,%.12g,%.12g,%.12g,"
                         "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
-                        "%.12g,%.12g,%.12g,%.12g\\n",
+                        "%.12g,%.12g,%.12g,%.12g\n",
                         branch, stage.rawSweptVolume,
                         stage.reconciledSweptVolume,
                         static_cast<double>( stage.reconciledSweptVolume ) -
@@ -5717,7 +5717,7 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                         throw std::runtime_error( "inconsistent matched pressure regions" );
                     std::printf( "capsule_hotspot_region,%d,%d,%d,"
                         "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
-                        "%.12g,%.12g,%.12g\\n",
+                        "%.12g,%.12g,%.12g\n",
                         branch, region, regionSize[region], regionMac[region],
                         regionSource[region], regionSnapshot[region],
                         regionSwept[region], regionRhs[region],
