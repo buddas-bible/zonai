@@ -1254,7 +1254,7 @@ void rigidBodyDemoUi::drawExperimentControls()
         if( ImGui::Button( "이류 비교 프리셋 (와류 + 외력/강체 OFF)###WindAdvectionTrial" ) )
             beginWindAdvectionTrial();
         if( ImGui::Button( "현재 흐름에 와류 추가###WindVortex" ) ) addWindVortex();
-        ImGui::SeparatorText( "유체 시각화 (렌더링 전용)" );
+        ImGui::SeparatorText( "유체 시각화 / 염료 소스" );
         ImGui::Checkbox( "염료 표시###WindVisualDye", &windVisualization_.dye );
         ImGui::SameLine();
         ImGui::Checkbox( "속도 벡터###WindVisualVectors", &windVisualization_.vectors );
