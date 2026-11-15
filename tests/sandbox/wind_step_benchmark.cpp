@@ -5801,6 +5801,20 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                         sourceImbalance, pressure.sourceImbalance,
                         static_cast<double>( sourceImbalance ) -
                             pressure.sourceImbalance, maxCellRhsDiff );
+                    // Match the production float per-face/cell operation
+                    // order rather than imposing double-volume arithmetic on
+                    // a solver that intentionally stores float divergence.
+                    // Both independently reconstructed global invariants
+                    // must agree within a small ABSOLUTE physical volume rate.
+                    constexpr double toleranceM3ps = 1.0e-10;
+                    if( !std::isfinite( floatCompatibility ) ||
+                        !std::isfinite( maxCellRhsDiff ) ||
+                        std::abs( floatCompatibility -
+                            pressure.compatibilityCorrection ) > toleranceM3ps ||
+                        std::abs( static_cast<double>( sourceImbalance ) -
+                            pressure.sourceImbalance ) > toleranceM3ps )
+                        throw std::runtime_error(
+                            "matched float-order Cut-cell source compatibility drift" );
                 };
                 if( mode == 0 )
                 {
