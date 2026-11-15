@@ -266,9 +266,17 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 // Explicit passive mass source at one fluid cell. Physics force
                 // and pressure are unchanged; tracerStats will include this
                 // injected mass as the START inventory of the fluid substep.
-                const int x = std::clamp( windField_->getWidth() / 4,
+                const float h = windField_->getCellSize();
+                const vec2 lower = windField_->getOrigin();
+                const float sourceX = lower.x + std::min(
+                    2.5f, 0.25f * windField_->getWidth() * h );
+                // Follow the actual Wind source location after grid resizing,
+                // rather than assuming the default 24x14 cell coordinates.
+                const int x = std::clamp( static_cast<int>(
+                    std::floor( ( sourceX - lower.x ) / h ) ),
                     1, windField_->getWidth() - 2 );
-                const int y = std::clamp( windField_->getHeight() / 2 - 1,
+                const int y = std::clamp( static_cast<int>(
+                    std::floor( -lower.y / h ) ),
                     1, windField_->getHeight() - 2 );
                 // Match fluidField2::tracerCellFraction(): binary occupancy
                 // in the standard solver, geometric fraction in Cut-cell mode.
