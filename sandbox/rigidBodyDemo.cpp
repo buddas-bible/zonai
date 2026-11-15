@@ -270,7 +270,11 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                     1, windField_->getWidth() - 2 );
                 const int y = std::clamp( windField_->getHeight() / 2 - 1,
                     1, windField_->getHeight() - 2 );
-                const float fraction = windField_->getCellFluidFraction( x, y );
+                // Match fluidField2::tracerCellFraction(): binary occupancy
+                // in the standard solver, geometric fraction in Cut-cell mode.
+                const float fraction = windField_->isCutCellProjectionEnabled()
+                    ? windField_->getCellFluidFraction( x, y )
+                    : ( windField_->isSolidCell( x, y ) ? 0.0f : 1.0f );
                 const double volume = static_cast<double>( fraction ) *
                     windField_->getCellSize() * windField_->getCellSize();
                 if( volume > 0.0 )
