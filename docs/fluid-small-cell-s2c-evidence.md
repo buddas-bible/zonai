@@ -2039,6 +2039,107 @@ source, momentum/Body impulse, local tracer transfers, and
 independent velocity/CFL acceptance criteria. No velocity clamp
 or default physics change has been accepted.
 
+### Frozen step-96 NONCOUPLED Galerkin pressure-pooling oracle — 2026-11-16
+
+**Motivation:** the severe rotating single-Capsule U(29,26) velocity spike
+(~5,486 m/s) happens in the **noncoupled Cut-cell Jacobi** path.
+PR #326's existing small-cell pressure pooling is inside the coupled
+Schur/PCG path and does not affect this prescribed kinematic Capsule.
+Simply turning its original opt-in pooling flag ON could not test this
+hotspot; a separate pressure-only oracle was necessary.
+
+**New code and gate:** `tests/sandbox/wind_step_benchmark.cpp`
+adds the explicit CLI
+`--small-cell-capsule-noncoupled-pressure-oracle`. Commit
+`7efea14e` builds an **independent frozen pressure operator** from the
+REAL pre-pressure staggered MAC state, current per-cell pressure sources,
+endpoint active-to-active aperture graph, and solver float-order
+per-region Neumann compatibility. The field at step 96 of the real
+128-substep prescribed-Capsule history is split into the existing
+swept-geometry-correction OFF/ON *matched step-entry copies*.
+Each branch is evaluated at merge-fraction thresholds `0`,
+`1e-6`, and `1e-4`. Eligible *shrinking* active slivers share a
+pressure unknown with their most-open directly connected neighbor
+whose fluid fraction is at least the threshold; all original cell
+RHSs are **summed** (`P^T b`), not dropped or clamped.
+The matrix-free weighted-face operator is `P^T L P`; it solves
+in volume units with `q = dt^2 pressure`, independent double
+PCG with per-region Neumann gauge, Jacobi preconditioning, and a
+true explicitly re-evaluated grouped residual.
+The per-cell residual and target/maximum predicted MAC speed are
+calculated independently from the resulting pressure potential.
+Volume source equality before/after restriction is an enforced
+`1e-11 m³` absolute gate. No normal-step work or solver code change.
+Commit `052c666b` correctly **excludes active/inactive faces** from
+this pressure oracle even when the raw geometric face opening is
+positive; the real `cutCellU/VOpen` operator makes the same distinction.
+Both operating systems execute the oracle in CI (workflow commit
+`252b053d`).
+
+**Cross-platform verified:** [CI #43747040464](https://github.com/buddas-bible/zonai/actions/runs/43747040464)
+passed Ubuntu Debug **112/112**, Windows Debug **115/115**, Windows
+Release **52/52**; the standalone pressure oracle passed on
+Ubuntu Debug and Windows Release. The earlier unmasked oracle
+[CI #43746904715](https://github.com/buddas-bible/zonai/actions/runs/43746904715)
+also passed, but the corrected masked graph above is authoritative.
+
+| Selected U(29,26) metric | Ubuntu original | Ubuntu pooled 1 cell | Windows original | Windows pooled 1 cell |
+| --- | ---: | ---: | ---: | ---: |
+| Total active pressure roots | 4084 | 4083 | 4081 | 4080 |
+| PCG iterations | 135 | 133 | 135 | 133 |
+| Explicit **group** residual RMS (1/s) | 9.53160e-5 | 8.99281e-5 | 9.53438e-5 | 8.99595e-5 |
+| **Per-cell** continuity residual RMS (1/s) | 9.53160e-5 | **0.172104** | 9.53438e-5 | **0.172167** |
+| Target U and global max predicted face speed (m/s) | 5486.275 | **23.1379** | 5486.341 | **23.1379** |
+| Max open-weighted predicted face speed (m/s) | 16.2388 | 16.2414 | 16.2388 | 16.2414 |
+| Pressure fluid X impulse proxy (N·s) | 0.101005 | **0.0859253** | 0.101004 | **0.0859238** |
+| **Unresolved merged-child local residual L1 (m³)** | 0 | **3.1645195e-5** | 0 | **3.1645197e-5** |
+
+The other swept-correction-ON branch also reproduces this tradeoff:
+Ubuntu `5472.267 → 23.1379 m/s` and pointwise RMS
+`~9.51e-5 → 0.171662 1/s`; Windows `5472.333 → 23.1379 m/s`,
+pointwise RMS `~9.51e-5 → 0.171725 1/s`.
+Both `1e-6` and `1e-4` thresholds select the same **one
+shrinking sliver** at this snapshot. It shares the U(29,26) pressure
+unknown with the neighboring larger cell, making that face's
+pressure gradient zero **by construction**. Other faces are still
+checked for displaced maxima. Both grouped and unpooled independent
+PCG solves satisfy the **1e-4 s⁻¹ group residual target**.
+The restricted signed source sum is exactly the same as the
+unrestricted signed source sum at reported precision (before
+the separately measured Neumann gauge correction, order 1e-11 m³).
+Linux/Windows have independently evolved float histories and
+slightly different numbers of positive-active cells (4084/4081);
+these are not claims of bitwise cross-platform determinism.
+
+**Critical rejection of early physical acceptance:** the dramatic
+drop in *raw* speed is achieved by deleting the sliver's
+**individual** continuity row, not by actually moving the displaced
+fluid. Its unfulfilled local exchange `~3.16e-5 m³` is roughly
+`5.4e5` times the current sliver fluid volume
+(`~5.88e-11 m³`). It is a **virtual grouped residual**, not
+a measured tracer transfer, swept flux, or realized internal
+fluid volume. The fluid impulse proxy changes by about 15% in
+X; no consistent equal/opposite Body or wall impulse was computed
+for this frozen alternative. Therefore **do not enable this
+pooling in production or mark FSI, mass transport, pointwise
+continuity, energy, or stability acceptance as passed**.
+Actual `projectCutCell` (120 Jacobi iterations) is also distinct
+from the independent PCG oracle (135/133 iterations); parity of
+their ~5,486m/s result is a useful control, not a general solver
+equivalence proof.
+
+**Next S2c experiment, still opt-in:** construct an explicit
+*conservative internal face-exchange ledger* for the same pooled
+root, on the same frozen states and the actual swept/time-open
+aperture. Derive the transfer needed by each omitted child
+continuity equation, enforce equal/opposite source volume and
+nonnegative tracer donor limits, account for the enormous
+exchange-to-sliver-volume ratio, and reconcile it with fluid/Body
+pressure impulses. Test h/time/cadence and full two-way moving
+Body/joint trajectories before any solver integration.
+Preserve existing S0–S9 roadmap and keep PR #326 Draft,
+#322 independent, runtime physics defaults unchanged.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
