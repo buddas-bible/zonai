@@ -136,6 +136,27 @@ void debugDraw::DrawAABB( const aabb2& box, ImU32 color, float thickness ) const
     drawList_->AddRect( min, max, color, 0.0f, 0, thickness );
 }
 
+void debugDraw::DrawFilledAABB( const aabb2& box, ImU32 color ) const
+{
+    if( ( color & IM_COL32_A_MASK ) == 0 ) return;
+    const ImVec2 min = ToScreen( { box.min.x, box.max.y } );
+    const ImVec2 max = ToScreen( { box.max.x, box.min.y } );
+    if( min.x >= max.x || min.y >= max.y ) return;
+    drawList_->AddRectFilled( min, max, color );
+}
+
+void debugDraw::DrawGradientAABB( const aabb2& box, ImU32 topLeft, ImU32 topRight,
+    ImU32 bottomRight, ImU32 bottomLeft ) const
+{
+    if( ( ( topLeft | topRight | bottomRight | bottomLeft ) & IM_COL32_A_MASK ) == 0 )
+        return;
+    const ImVec2 min = ToScreen( { box.min.x, box.max.y } );
+    const ImVec2 max = ToScreen( { box.max.x, box.min.y } );
+    if( min.x >= max.x || min.y >= max.y ) return;
+    drawList_->AddRectFilledMultiColor( min, max, topLeft, topRight,
+        bottomRight, bottomLeft );
+}
+
 void debugDraw::DrawTree( const dynamicTree& tree, const char* treeName, bool showLeaves, bool showInternal, bool showLabels, ImU32 leafColor, ImU32 internalColor ) const
 {
     constexpr ImU32 ROOT_COLOR = IM_COL32( 245, 245, 245, 235 );
