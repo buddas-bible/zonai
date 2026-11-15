@@ -5289,6 +5289,11 @@ void auditMovingCapsuleGuardTransport()
                     record.maxStageMassDefect, std::abs( mass - seededMass ) );
             } );
 
+    std::puts( "capsule_moving_velocity_hotspot,step,mode,axis,face_x,face_y,"
+        "face_velocity_mps,open_fraction,open_weighted_speed_mps,"
+        "nominal_open_flux_m3,lower_cell_fraction,upper_cell_fraction,"
+        "lower_pressure_source_m3,upper_pressure_source_m3,"
+        "lower_pressure_residual_m3,upper_pressure_residual_m3" );
     std::puts( "capsule_moving_transport,step,checkpoint_16,mode,"
         "fluid_volume_m3,snapshot_delta_m3,pressure_source_m3,"
         "swept_geometry_mismatch_m3,tracer_mass_kg,trapped_mass_kg,"
@@ -5324,6 +5329,33 @@ void auditMovingCapsuleGuardTransport()
                 !std::isfinite( feedback[mode].torque ) )
                 throw std::runtime_error( "nonfinite moving Capsule volume/pressure/force ledger" );
             budgets[mode] = summary;
+            if( flow.maxFluidFaceSpeed > 1000.0f )
+            {
+                const int fx = flow.maxFaceX, fy = flow.maxFaceY;
+                const int lx = flow.maxFaceIsU ? fx - 1 : fx;
+                const int ly = flow.maxFaceIsU ? fy : fy - 1;
+                const int ux = fx, uy = fy;
+                if( fx < 0 || fy < 0 ||
+                    lx < 0 || ly < 0 || ux >= field.getWidth() ||
+                    uy >= field.getHeight() )
+                    throw std::runtime_error( "invalid extreme Capsule MAC face" );
+                const auto lower = field.getCutCellVolumeBudget( lx, ly, subDt );
+                const auto upper = field.getCutCellVolumeBudget( ux, uy, subDt );
+                if( !lower.valid || !upper.valid )
+                    throw std::runtime_error( "invalid extreme Capsule face ledger" );
+                const double nominalFlux = static_cast<double>( h ) * subDt *
+                    flow.maxFaceOpenFraction * flow.maxFaceVelocity;
+                std::printf( "capsule_moving_velocity_hotspot,%d,%d,%c,%d,%d,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g,%.12g,%.12g\n",
+                    step + 1, mode, flow.maxFaceIsU ? 'U' : 'V',
+                    fx, fy, flow.maxFaceVelocity, flow.maxFaceOpenFraction,
+                    flow.maxFaceOpenFraction * flow.maxFluidFaceSpeed,
+                    nominalFlux, lower.currentFraction, upper.currentFraction,
+                    lower.pressureSourceDeltaVolume,
+                    upper.pressureSourceDeltaVolume,
+                    lower.pressureResidualVolume, upper.pressureResidualVolume );
+            }
             tracer[mode] = totalMass( field );
             double actualVolume = 0.0;
             for( int y = 0; y < field.getHeight(); ++y )
