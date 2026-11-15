@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
 #include <limits>
 #include <iterator>
 #include <optional>
@@ -4716,6 +4717,8 @@ void auditFrozenCapsuleGeometryComparison()
         "double_pressure_source_m3,float_swept_divergence_m3,"
         "double_swept_divergence_m3,float_W,float_E,float_S,float_N,"
         "double_W,double_E,double_S,double_N" );
+    std::puts( "capsule_active_mask,cell_m,checkpoint_16,mode,"
+        "active_cells,fnv1a64_row_major_bits" );
     std::puts( "capsule_full_coverage_summary,cell_m,checkpoint_16,"
         "double_active,guard_active,proven_covered_double,"
         "proven_covered_guard,guard_removed,guard_false_zero,"
@@ -4857,6 +4860,17 @@ void auditFrozenCapsuleGeometryComparison()
                     !std::isfinite( row.pressure.finalRmsPerSecond ) )
                     fail( "independent Capsule pressure/geometry ledger mismatch" );
                 auditTinyCapsuleCorner( frozen, capsule, mode, cp );
+                // Cross-toolchain identity witness: hash the entire row-major
+                // binary active mask, not just the active-cell count.
+                std::uint64_t maskHash = UINT64_C( 14695981039346656037 );
+                for( float fraction : row.cells )
+                {
+                    maskHash ^= fraction > 0.0f ? UINT64_C( 1 ) : UINT64_C( 0 );
+                    maskHash *= UINT64_C( 1099511628211 );
+                }
+                std::printf( "capsule_active_mask,%.9g,%d,%d,%d,%016llx\n",
+                    h, cp, mode, row.active,
+                    static_cast<unsigned long long>( maskHash ) );
                 row.valid = true;
                 std::printf( "capsule_geometry_summary,%.9g,%d,%d,%d,%d,"
                     "%.12g,%d,%.12g,%.12g,%.12g,%d\n",
