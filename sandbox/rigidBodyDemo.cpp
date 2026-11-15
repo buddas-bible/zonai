@@ -261,6 +261,27 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 const vec2 velocityDelta{ windSourceStrength_ * windTimeStep, 0.5f * windSourceStrength_ * windTimeStep * std::sin( 1.7f * windTime_ ) };
                 windField_->addVelocity( source, velocityDelta, 1.7f );
             }
+            if( windDyeEmitterEnabled_ && windDyeEmitterRate_ > 0.0f )
+            {
+                // Explicit passive mass source at one fluid cell. Physics force
+                // and pressure are unchanged; tracerStats will include this
+                // injected mass as the START inventory of the fluid substep.
+                const int x = std::clamp( windField_->getWidth() / 4,
+                    1, windField_->getWidth() - 2 );
+                const int y = std::clamp( windField_->getHeight() / 2 - 1,
+                    1, windField_->getHeight() - 2 );
+                const float fraction = windField_->getCellFluidFraction( x, y );
+                const double volume = static_cast<double>( fraction ) *
+                    windField_->getCellSize() * windField_->getCellSize();
+                if( volume > 0.0 )
+                {
+                    const double current = windField_->getTracerCellMass( x, y );
+                    const double next = ( current +
+                        static_cast<double>( windDyeEmitterRate_ ) * windTimeStep ) / volume;
+                    if( std::isfinite( next ) && next <= std::numeric_limits<float>::max() )
+                        windField_->setTracerConcentration( x, y, static_cast<float>( next ) );
+                }
+            }
             // fluidField2는 World나 Body를 소유하지 않음. 매 Step마다 실제 pose/속도를 전달함.
             const std::size_t obstacleCount = shapes_.size();
             windObstacleSnapshots_.assign( obstacleCount, {} );
@@ -1557,6 +1578,11 @@ void rigidBodyDemo::addWindVortex()
         const vec2 tangent{ -radial.y, radial.x };
         windField_->addVelocity( radius * radial, speed * tangent, 0.65f );
     }
+}
+
+void rigidBodyDemo::setWindDyeEmitterRate( float rate ) noexcept
+{
+    if( std::isfinite( rate ) ) windDyeEmitterRate_ = std::clamp( rate, 0.0f, 10.0f );
 }
 
 void rigidBodyDemo::seedWindTracer()
