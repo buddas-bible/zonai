@@ -648,6 +648,39 @@ double CapsuleRectangleArea( const analyticFluidCapsule& capsule,
     return std::clamp( area, 0.0, ( x1 - x0 ) * ( y1 - y0 ) );
 }
 
+// A convex Capsule contains the entire axis-aligned cell if it contains all
+// four corners. Use the original float-transformed endpoints in double for
+// the actual shape witness, not the rounded core/cap area decomposition.
+// Only evaluated for candidate positive cells whose four MAC faces are closed.
+bool IsCertainlyCoveredCapsuleCell( const analyticFluidCapsule& capsule,
+    double x0, double y0, double x1, double y1 )
+{
+    const double ax = capsule.first.center.x, ay = capsule.first.center.y;
+    const double bx = capsule.last.center.x, by = capsule.last.center.y;
+    const double dx = bx - ax, dy = by - ay;
+    const double lengthSquared = dx * dx + dy * dy;
+    const double radius = capsule.first.radius;
+    const double scale = std::max( { 1.0, radius,
+        std::abs( ax ), std::abs( ay ), std::abs( bx ), std::abs( by ),
+        std::abs( x0 ), std::abs( y0 ), std::abs( x1 ), std::abs( y1 ) } );
+    // Deliberately conservative double-precision arithmetic margin:
+    // do not classify a near-tangent corner as covered.
+    const double margin = 64.0 * std::numeric_limits<double>::epsilon() * scale;
+    if( !( radius > margin ) || !( lengthSquared > 0.0 ) ) return false;
+    const double safeRadiusSquared = ( radius - margin ) * ( radius - margin );
+    for( const double y : { y0, y1 } )
+        for( const double x : { x0, x1 } )
+        {
+            const double t = std::clamp(
+                ( ( x - ax ) * dx + ( y - ay ) * dy ) / lengthSquared,
+                0.0, 1.0 );
+            const double ex = x - ( ax + t * dx );
+            const double ey = y - ( ay + t * dy );
+            if( !( ex * ex + ey * ey < safeRadiusSquared ) ) return false;
+        }
+    return true;
+}
+
 // Rounded Polygon = convex core + 각 변 외부 strip + 각 꼭짓점의 바깥 원호 sector.
 // 세 부분은 convex shape의 nearest-feature Voronoi 영역으로 면적이 겹치지 않는다.
 struct analyticFluidRoundedPolygon
@@ -1249,6 +1282,13 @@ void fluidField2::setAnalyticCapsuleDoubleGeometryEnabled( bool enabled ) noexce
 {
     if( analyticCapsuleDoubleGeometryEnabled_ == enabled ) return;
     analyticCapsuleDoubleGeometryEnabled_ = enabled;
+    invalidateObstacleHistory();
+}
+
+void fluidField2::setAnalyticCapsuleFullCoverageGuardEnabled( bool enabled ) noexcept
+{
+    if( analyticCapsuleFullCoverageGuardEnabled_ == enabled ) return;
+    analyticCapsuleFullCoverageGuardEnabled_ = enabled;
     invalidateObstacleHistory();
 }
 
@@ -2039,6 +2079,31 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
                             Cross( shape.angularVelocity, point - shape.center ) ).y;
                     }
                 }
+            if( capsuleGeometry && capsule.usePreciseGeometry &&
+                analyticCapsuleFullCoverageGuardEnabled_ )
+            {
+                // This pass happens AFTER shared-face clipping and BEFORE
+                // moving-volume and pressure-source calculations. It is an
+                // opt-in geometric proof, not a small-fraction cutoff.
+                for( int y = 0; y < height_; ++y )
+                    for( int x = 0; x < width_; ++x )
+                    {
+                        const int cell = cellIndex( x, y );
+                        const float fraction = cellFluidFraction_[cell];
+                        if( fraction <= 0.0f || fraction >= 1.0f ) continue;
+                        // Never erase a cell while any of its actual stored
+                        // shared MAC apertures can carry fluid.
+                        if( uOpenFraction_[uIndex( x, y )] > 0.0f ||
+                            uOpenFraction_[uIndex( x + 1, y )] > 0.0f ||
+                            vOpenFraction_[vIndex( x, y )] > 0.0f ||
+                            vOpenFraction_[vIndex( x, y + 1 )] > 0.0f ) continue;
+                        const double left = origin_.x + x * h;
+                        const double bottom = origin_.y + y * h;
+                        if( IsCertainlyCoveredCapsuleCell(
+                            capsule, left, bottom, left + h, bottom + h ) )
+                            cellFluidFraction_[cell] = 0.0f;
+                    }
+            }
         }
         else
         {
