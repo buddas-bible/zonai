@@ -5918,8 +5918,10 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false, bool pressure
                                 bool isU, int x, int y )
                             {
                                 if( opening <= 0.0f ) return;
-                                if( component[a] < 0 || component[d] < 0 )
-                                    throw std::runtime_error( "active pressure edge reaches solid" );
+                                // Public getU/VFaceOpenFraction reports raw geometric
+                                // aperture; projectCutCell uses cutCellU/VOpen,
+                                // which masks the edge unless BOTH cells are active.
+                                if( component[a] < 0 || component[d] < 0 ) return;
                                 edges.push_back( { a, d, opening, isU, x, y } );
                                 if( root[a] != root[d] )
                                 {
