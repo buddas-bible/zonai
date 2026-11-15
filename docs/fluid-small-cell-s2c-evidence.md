@@ -1978,6 +1978,67 @@ the rounded diagnostic or treat this result as a GPU/CPU parity test.
 Keep PR #326 Draft, PR #322 independent and all new physical
 strategies OFF by default.
 
+### Step-96 pressure Neumann compatibility: reproduce solver float order — 2026-11-16
+
+**Scope:** S2c read-only investigation, on the exact same 96/128
+prescribed rotating-Capsule checkpoint as the matched swept-source
+audit above. PR #326 adds:
+- `getUFaceVelocityForAudit` and `getVFaceVelocityForAudit` as
+  side-effect-free optional raw stored MAC component queries
+  (commit `26144c71`).
+- An independent connected-component region walk on the real
+  **pre-pressure frozen** MAC snapshot using **the current step's
+  projected** `pressureSourceDeltaVolume` (not the stale frozen
+  `cutCellVolumeRate_`). Each face performs
+  `float(open) * float(velocity)`, each cell computes the same
+  `float((uE-uW+vN-vS)/h + volumeRate/dt)` as
+  `projectCutCell`; only **then** is each float divergence
+  accumulated into a double region sum. A second control independently
+  uses double MAC/volume budgets as before (commit `ed650351`).
+- Commit `7a40d134` asserts reconstructed region compatibility and
+  total source imbalance agree with the reported float solver values
+  within an absolute **1e-10 m³/s**; `d9f4924e` checks raw face
+  query bounds. These latter regression gates are code-bearing
+  follow-ups to the initial evidence run below.
+
+**Cross-platform initial reproduction:** [Actions #43737915486](https://github.com/buddas-bible/zonai/actions/runs/43737915486)
+passed Ubuntu Debug **112/112**, Windows Debug **115/115**,
+Windows Release **52/52**, including the opt-in step-96 audit.
+
+| Step-96 metric (m³/s) | Ubuntu original | Ubuntu geometry-corrected | Windows original | Windows geometry-corrected |
+| --- | ---: | ---: | ---: | ---: |
+| Solver-reported region compatibility | 7.70847691456e-7 | 8.43490852276e-7 | 3.53840732714e-7 | 5.62456989428e-7 |
+| Independent **float-order** compatibility | 7.70847691456e-7 | 8.43490852276e-7 | 3.53840732714e-7 | 5.62456989428e-7 |
+| float-order minus solver | **0** | **0** | **0** | **0** |
+| Older double-budget minus solver | -4.07631906621e-7 | -5.22184581113e-7 | +9.37505393076e-9 | -1.99241202783e-7 |
+| Independent float-order source imbalance minus solver | **0** | **0** | **0** | **0** |
+
+The monitored connected region contains **4077 active fluid cells**.
+The maximum individual cell RHS discrepancy between the
+double-budget calculation and the float-order evaluation is
+7.55e-6..1.91e-5 s⁻¹ across these branches/platforms. The
+region sums demonstrate that the previously reported mismatch
+was **due to the independent diagnostic not reproducing the
+float face/cell operation order**, not evidence of an independently
+different Neumann correction in this selected scenario. This
+is a **discrete arithmetic identity check**, not a proof of
+continuous mass conservation, physical fluid transport, solver
+accuracy, or cross-platform bitwise-deterministic dynamics.
+The different Ubuntu/Windows absolute region compatibility
+values may also reflect differences earlier in their separately
+evolved float histories; do not attribute that variation to one
+specific CPU operation without a frozen binary-identical input.
+
+**Decision:** Do not change the pressure source solver simply to
+force agreement with the old double-budget diagnostic. Maintain
+both diagnostic estimates, labeled with their distinct semantics.
+The severe ~5.5 km/s tiny-face raw velocity persists and needs
+a separate **conservative pressure/geometry discretization**
+experiment on identical frozen states. Preserve summed volume
+source, momentum/Body impulse, local tracer transfers, and
+independent velocity/CFL acceptance criteria. No velocity clamp
+or default physics change has been accepted.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
