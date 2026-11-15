@@ -728,6 +728,17 @@ public:
         return analyticCapsuleDoubleGeometryEnabled_;
     }
 
+    // S2c RESEARCH ONLY. Under the double Capsule geometry policy, certify
+    // fully covered cells by convex corner containment and four closed MAC
+    // faces, then remove spurious positive roundoff from their fluid fraction.
+    // Never uses a small-fraction epsilon to decide occupancy. Defaults OFF.
+    // As with other geometry modes, changing it invalidates volume history.
+    void setAnalyticCapsuleFullCoverageGuardEnabled( bool enabled ) noexcept;
+    [[nodiscard]] bool isAnalyticCapsuleFullCoverageGuardEnabled() const noexcept
+    {
+        return analyticCapsuleFullCoverageGuardEnabled_;
+    }
+
     // 단일 radius>0인 strictly convex Polygon의 core/edge/corner 분석적 적분.
     // 기본 OFF. 다중·미지원 Shape은 기존 공간 표본 경로.
     void setAnalyticRoundedPolygonCutCellEnabled( bool enabled ) noexcept;
@@ -1304,6 +1315,7 @@ private:
     bool analyticPolygonCutCellEnabled_ = false;
     bool analyticCapsuleCutCellEnabled_ = false;
     bool analyticCapsuleDoubleGeometryEnabled_ = false;
+    bool analyticCapsuleFullCoverageGuardEnabled_ = false;
     bool analyticRoundedPolygonCutCellEnabled_ = false;
     bool disjointAnalyticCutCellEnabled_ = false;
     bool previousDisjointAnalyticGeometry_ = false;
