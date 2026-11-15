@@ -1110,6 +1110,22 @@ public:
     [[nodiscard]] float getCellFluidFraction( int x, int y ) const noexcept;
     [[nodiscard]] float getUFaceOpenFraction( int x, int y ) const noexcept;
     [[nodiscard]] float getVFaceOpenFraction( int x, int y ) const noexcept;
+    // S2c independent float-order pressure RHS audit. Return the STORED MAC
+    // velocity component, not interpolated sampleVelocity, and without
+    // multiplying by open fraction. A frozen pre-pressure copy gives the
+    // exact input to projectCutCell. No solver mutation or normal-step work.
+    [[nodiscard]] std::optional<float> getUFaceVelocityForAudit(
+        int x, int y ) const noexcept
+    {
+        if( x < 0 || x > width_ || y < 0 || y >= height_ ) return std::nullopt;
+        return u_[uIndex( x, y )];
+    }
+    [[nodiscard]] std::optional<float> getVFaceVelocityForAudit(
+        int x, int y ) const noexcept
+    {
+        if( x < 0 || x >= width_ || y < 0 || y > height_ ) return std::nullopt;
+        return v_[vIndex( x, y )];
+    }
     // Side-effect-free single-Capsule analytic face query at a caller-supplied
     // pose. Independent of current Step/pressure and swept sample history.
     // Nullopt for invalid geometry, disabled analytic mode or exterior face.
