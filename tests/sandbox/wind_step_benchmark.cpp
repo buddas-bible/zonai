@@ -5397,6 +5397,17 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false, bool pressure
                 "target_predicted_U_mps,max_predicted_face_mps,"
                 "max_open_weighted_predicted_mps,pressure_impulse_x_Ns,"
                 "pressure_impulse_y_Ns,merged_child_residual_L1_m3" );
+        if( pressureOracle )
+            std::puts( "capsule_hotspot_internal_transfer,branch,merge_fraction,"
+                "child_cell,parent_cell,axis,face_x,face_y,"
+                "required_child_outward_m3,source_cell,destination_cell,"
+                "start_open,end_open,time_mean_open,pre_pressure_face_mps,"
+                "needed_time_mean_speed_mps,needed_endpoint_speed_mps,"
+                "reference_time_open_volume_m3,donor_previous_volume_m3,"
+                "donor_current_volume_m3,donor_current_mass_kg,"
+                "bounded_volume_m3,bounded_mass_kg,"
+                "unfulfilled_volume_m3,pair_volume_net_m3,pair_mass_net_kg,"
+                "child_pointwise_residual_m3,root_group_residual_m3" );
     }
     std::puts( "capsule_moving_velocity_hotspot,step,mode,axis,face_x,face_y,"
         "face_velocity_mps,open_fraction,open_weighted_speed_mps,"
@@ -6110,6 +6121,169 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false, bool pressure
                                 iterations, converged ? 1 : 0, initialRms,
                                 groupRms, pointwiseRms, targetSpeed, maxSpeed,
                                 maxWeighted, impulseX, impulseY, virtualL1 );
+                            // Pressure grouping removed individual continuity
+                            // rows. These are COUNTERFACTUAL internal face
+                            // exchanges, not applied tracer/solid-fluid flux.
+                            // The signed child deficit is booked equally and
+                            // oppositely on its chosen parent. Do not count
+                            // an already-swept donor volume a second time.
+                            std::vector<double> donorRemainingVolume( cells, 0.0 );
+                            std::vector<double> donorRemainingMass( cells, 0.0 );
+                            std::vector<double> requiredPairBalance( cells, 0.0 );
+                            double requestedAbsolute = 0.0, acceptedAbsolute = 0.0;
+                            double signedPairVolume = 0.0, signedPairMass = 0.0;
+                            for( int cell = 0; cell < cells; ++cell )
+                            {
+                                if( component[cell] < 0 ) continue;
+                                const int x = cell % width, y = cell / width;
+                                const double volume = static_cast<double>(
+                                    projected.getCellFluidFraction( x, y ) ) * h * h;
+                                const double mass = projected.getTracerCellMass( x, y );
+                                if( !std::isfinite( volume ) || volume < 0.0 ||
+                                    !std::isfinite( mass ) || mass < 0.0 )
+                                    throw std::runtime_error( "invalid pooled donor inventory" );
+                                donorRemainingVolume[cell] = volume;
+                                donorRemainingMass[cell] = mass;
+                            }
+                            for( int child = 0; child < cells; ++child )
+                            {
+                                if( component[child] < 0 || root[child] == child ) continue;
+                                const int parent = root[child];
+                                const int cx = child % width, cy = child / width;
+                                const int px = parent % width, py = parent / width;
+                                if( std::abs( px - cx ) + std::abs( py - cy ) != 1 )
+                                    throw std::runtime_error( "non-neighbor Galerkin child" );
+                                const bool isU = py == cy;
+                                const int fx = isU ? std::max( cx, px ) : cx;
+                                const int fy = isU ? cy : std::max( cy, py );
+                                const double endpointOpen = isU
+                                    ? projected.getUFaceOpenFraction( fx, fy )
+                                    : projected.getVFaceOpenFraction( fx, fy );
+                                if( endpointOpen <= 0.0 )
+                                    throw std::runtime_error( "pooled transfer crossed closed face" );
+                                // A(child)+internalOutward(child) = b(child).
+                                // Thus the required CHILD-outward signed
+                                // amount is b(child)-A(child), not the total
+                                // swept face volume or the endpoint MAC flux.
+                                const double requiredChildOutward =
+                                    originalB[child] - cellAx[child];
+                                requiredPairBalance[child] += requiredChildOutward;
+                                requiredPairBalance[parent] -= requiredChildOutward;
+                                requestedAbsolute += std::abs( requiredChildOutward );
+                                const int donor = requiredChildOutward >= 0.0 ? child : parent;
+                                const int recipient = donor == child ? parent : child;
+                                const int dx = donor % width, dy = donor / width;
+                                const double donorCurrentVolume = static_cast<double>(
+                                    projected.getCellFluidFraction( dx, dy ) ) * h * h;
+                                const double donorPreviousVolume =
+                                    projected.getCutCellVolumeBudget( dx, dy, subDt )
+                                        .previousFraction * h * h;
+                                const double donorCurrentMass =
+                                    projected.getTracerCellMass( dx, dy );
+                                // Time aperture is an analytic Capsule sample,
+                                // on THIS moving physical face; the stored
+                                // endpoint open fraction is not substituted.
+                                constexpr int timeSamples = 256;
+                                double openSum = 0.0;
+                                for( int sample = 0; sample < timeSamples; ++sample )
+                                {
+                                    const auto opening =
+                                        projected.getAnalyticCapsuleFaceOpenFractionForAudit(
+                                            capsuleAtAlpha( ( sample + 0.5 ) / timeSamples ),
+                                            isU, fx, fy );
+                                    if( !opening || !std::isfinite( *opening ) ||
+                                        *opening < 0.0 || *opening > 1.0 )
+                                        throw std::runtime_error(
+                                            "invalid moving pooled-face time aperture" );
+                                    openSum += *opening;
+                                }
+                                const double meanOpen = openSum / timeSamples;
+                                const auto startOpen =
+                                    projected.getAnalyticCapsuleFaceOpenFractionForAudit(
+                                        capsuleAtAlpha( 0.0 ), isU, fx, fy );
+                                const auto faceVelocity = isU
+                                    ? frozen.getUFaceVelocityForAudit( fx, fy )
+                                    : frozen.getVFaceVelocityForAudit( fx, fy );
+                                if( !startOpen || !faceVelocity ||
+                                    !std::isfinite( *faceVelocity ) ||
+                                    !std::isfinite( donorPreviousVolume ) )
+                                    throw std::runtime_error(
+                                        "invalid moving pooled-face reference" );
+                                const double needed = std::abs( requiredChildOutward );
+                                const double timeCapacityPerSpeed = h * subDt * meanOpen;
+                                const double endpointCapacityPerSpeed = h * subDt * endpointOpen;
+                                const double neededMeanSpeed = timeCapacityPerSpeed > 0.0
+                                    ? needed / timeCapacityPerSpeed : 0.0;
+                                const double neededEndpointSpeed = endpointCapacityPerSpeed > 0.0
+                                    ? needed / endpointCapacityPerSpeed : 0.0;
+                                // This time-open velocity CAPACITY is only a
+                                // diagnostic reference at PRE-pressure speed:
+                                // the real within-step MAC history is unknown.
+                                // It is not a physically mandated speed cap.
+                                const double referenceCapacity =
+                                    timeCapacityPerSpeed * std::abs( *faceVelocity );
+                                const double remainingVolume = donorRemainingVolume[donor];
+                                const double remainingMass = donorRemainingMass[donor];
+                                const double acceptedVolume = std::min(
+                                    { needed, referenceCapacity, remainingVolume } );
+                                const double concentration = remainingVolume > 0.0
+                                    ? remainingMass / remainingVolume : 0.0;
+                                const double acceptedMass = std::min(
+                                    remainingMass, acceptedVolume * concentration );
+                                donorRemainingVolume[donor] -= acceptedVolume;
+                                donorRemainingMass[donor] -= acceptedMass;
+                                acceptedAbsolute += acceptedVolume;
+                                // Book both sides, even though we DO NOT
+                                // mutate either cell of the actual Field.
+                                const double childSigned = donor == child
+                                    ? acceptedVolume : -acceptedVolume;
+                                const double parentSigned = -childSigned;
+                                const double massSigned = donor == child
+                                    ? acceptedMass : -acceptedMass;
+                                signedPairVolume += childSigned + parentSigned;
+                                signedPairMass += massSigned - massSigned;
+                                const double rootResidual =
+                                    product[parent] - correctedB[parent];
+                                if( !std::isfinite( neededMeanSpeed ) ||
+                                    !std::isfinite( neededEndpointSpeed ) ||
+                                    !std::isfinite( acceptedVolume ) ||
+                                    acceptedVolume < 0.0 ||
+                                    acceptedVolume > remainingVolume + 1.0e-12 ||
+                                    acceptedMass < 0.0 ||
+                                    acceptedMass > remainingMass + 1.0e-12 )
+                                    throw std::runtime_error(
+                                        "invalid donor-bounded pooled transfer" );
+                                std::printf(
+                                    "capsule_hotspot_internal_transfer,%d,%.9g,"
+                                    "%d,%d,%c,%d,%d,"
+                                    "%.12g,%d,%d,%.12g,%.12g,%.12g,%.12g,"
+                                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                                    "%.12g,%.12g,%.12g,%.12g,%.12g,"
+                                    "%.12g,%.12g\n",
+                                    branch, threshold, child, parent,
+                                    isU ? 'U' : 'V', fx, fy,
+                                    requiredChildOutward, donor, recipient,
+                                    *startOpen, endpointOpen, meanOpen,
+                                    *faceVelocity, neededMeanSpeed, neededEndpointSpeed,
+                                    referenceCapacity, donorPreviousVolume,
+                                    donorCurrentVolume, donorCurrentMass,
+                                    acceptedVolume, acceptedMass,
+                                    needed - acceptedVolume,
+                                    childSigned + parentSigned,
+                                    massSigned - massSigned,
+                                    cellAx[child] - originalB[child],
+                                    rootResidual );
+                            }
+                            double requiredL1 = 0.0;
+                            for( int cell = 0; cell < cells; ++cell )
+                                if( component[cell] >= 0 && root[cell] != cell )
+                                    requiredL1 += std::abs( requiredPairBalance[cell] );
+                            if( std::abs( requiredL1 - virtualL1 ) > 1.0e-8 ||
+                                std::abs( signedPairVolume ) > 1.0e-12 ||
+                                std::abs( signedPairMass ) > 1.0e-12 ||
+                                acceptedAbsolute > requestedAbsolute + 1.0e-12 )
+                                throw std::runtime_error(
+                                    "pooled virtual transfer failed paired conservation audit" );
                         }
                 };
                 if( mode == 0 )
