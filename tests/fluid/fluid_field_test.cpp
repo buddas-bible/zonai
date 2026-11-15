@@ -4992,10 +4992,31 @@ void checkAnalyticCapsuleTemporalApertureAudit()
         "analytic Capsule aperture query must clip a partial face and reject exterior faces" );
 
     field.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ), feedback, 120 );
+    // Both branches begin at precisely the same previous obstacle pose,
+    // MAC state and pressure cache. The selected-face audit is read-only.
+    field.setFaceStageAuditTarget( fx, fy, true );
+    fluidField2 corrected = field;
+    corrected.setSweptGeometryCorrectionEnabled( true );
     capsule.transform.position.y += 0.005f;
     capsule.center = capsule.transform.position;
     capsule.linearVelocity = { 0.0f, 0.005f / dt };
     field.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ), feedback, 120 );
+    std::array<fluidObstacleForce2, 1> correctedFeedback{};
+    corrected.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+        correctedFeedback, 120 );
+    const auto& baseFace = field.getFaceStageAudit();
+    const auto& correctedFace = corrected.getFaceStageAudit();
+    const auto& correction = corrected.getSweptFaceFlux();
+    check( baseFace.valid && correctedFace.valid &&
+        baseFace.hasSweptHistory && correctedFace.hasSweptHistory &&
+        std::isfinite( baseFace.rawSweptVolume ) &&
+        std::abs( static_cast<double>( baseFace.rawSweptVolume ) -
+            correctedFace.rawSweptVolume ) < 1.0e-9 &&
+        baseFace.rawSweptVolume == baseFace.reconciledSweptVolume &&
+        std::abs( static_cast<double>( correctedFace.reconciledSweptVolume ) -
+            correctedFace.rawSweptVolume ) <=
+            static_cast<double>( correction.correctionAbsoluteFlux ) + 1.0e-8,
+        "matched moving-face raw/reconciled audit must preserve the original sweep" );
     auto midpoint = capsule;
     midpoint.transform.position.y -= 0.0025f;
     midpoint.center = midpoint.transform.position;
