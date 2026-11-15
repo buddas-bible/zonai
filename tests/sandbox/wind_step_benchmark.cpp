@@ -5189,7 +5189,7 @@ void auditFrozenCapsuleGeometryComparison()
 // only the convex full-coverage guard differs. Pressure/advective histories
 // are separately evolved and the obstacle is KINEMATIC, so returned forces
 // are observations, not an integrated two-way World/body trajectory.
-void auditMovingCapsuleGuardTransport()
+void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
 {
     constexpr float h = 0.125f;
     constexpr float totalDt = 1.0f / 30.0f;
@@ -5258,6 +5258,56 @@ void auditMovingCapsuleGuardTransport()
         totalMass( withGuard ) != seededMass )
         throw std::runtime_error( "moving Capsule policies seeded different tracer mass" );
 
+    // S2c forensic-only witness. No callback, snapshot copy or solver change
+    // is installed by the legacy moving-Capsule transport invocation.
+    constexpr int hotspotStep = 96;
+    constexpr int hotspotX = 29, hotspotY = 26;
+    constexpr int leftX = hotspotX - 1;
+    constexpr int leftCell = hotspotY * 64 + leftX;
+    constexpr int rightCell = hotspotY * 64 + hotspotX;
+    int activeStep = 0;
+    struct hotspotRecord
+    {
+        std::optional<fluidField2> frozen{};
+        std::array<double, 4> signedTransfer{}; // swept, fallback, MAC, connected
+        std::array<std::array<double, 2>, 2> stageMass{}; // swept/MAC, left/right
+        int stageSamples = 0;
+        int directedTransfers = 0;
+    };
+    std::array<hotspotRecord, 2> hotspot{};
+    if( hotspotLedger )
+        for( int mode = 0; mode < 2; ++mode )
+        {
+            fields[mode]->setFaceStageAuditTarget( hotspotX, hotspotY, true );
+            fields[mode]->setPrePressureSnapshotObserver(
+                [&, mode]( const fluidField2& frozen )
+                {
+                    if( activeStep == hotspotStep )
+                    {
+                        if( hotspot[mode].frozen )
+                            throw std::runtime_error( "duplicated hotspot frozen checkpoint" );
+                        hotspot[mode].frozen.emplace( frozen );
+                    }
+                } );
+            fields[mode]->setTracerTransferObserver(
+                [&, mode]( const fluidTracerTransfer2& transfer )
+                {
+                    if( activeStep != hotspotStep ) return;
+                    const bool positive = transfer.sourceCell == leftCell &&
+                        transfer.destinationCell == rightCell;
+                    const bool negative = transfer.sourceCell == rightCell &&
+                        transfer.destinationCell == leftCell;
+                    if( !positive && !negative ) return;
+                    const auto kind = static_cast<int>( transfer.kind );
+                    if( kind < 0 || kind >= 4 || !std::isfinite( transfer.mass ) ||
+                        transfer.mass < 0.0 )
+                        throw std::runtime_error( "invalid hotspot applied transfer" );
+                    hotspot[mode].signedTransfer[kind] +=
+                        positive ? transfer.mass : -transfer.mass;
+                    ++hotspot[mode].directedTransfers;
+                } );
+        }
+
     struct transportLedger
     {
         int sweptStages = 0;
@@ -5287,8 +5337,34 @@ void auditMovingCapsuleGuardTransport()
                     throw std::runtime_error( "nonfinite moving Capsule tracer stage mass" );
                 record.maxStageMassDefect = std::max(
                     record.maxStageMassDefect, std::abs( mass - seededMass ) );
+                if( hotspotLedger && activeStep == hotspotStep )
+                {
+                    const int index = stage == fluidTracerStage2::afterSweptRemap ? 0 : 1;
+                    hotspot[mode].stageMass[index] = {{
+                        field.getTracerCellMass( leftX, hotspotY ),
+                        field.getTracerCellMass( hotspotX, hotspotY ) }};
+                    ++hotspot[mode].stageSamples;
+                }
             } );
 
+    if( hotspotLedger )
+    {
+        std::puts( "capsule_hotspot_cell,mode,side,current_fraction,current_volume_m3,"
+            "snapshot_delta_m3,swept_outward_m3,pressure_source_m3,"
+            "source_minus_snapshot_m3,pre_mac_outward_m3,"
+            "post_mac_outward_m3,pre_residual_m3,post_residual_m3" );
+        std::puts( "capsule_hotspot_face,mode,pre_velocity_mps,post_velocity_mps,"
+            "pressure_delta_mps,pressure_impulse_proxy_Ns,endpoint_open,"
+            "time_mean_open,nominal_endpoint_flux_m3,"
+            "linear_time_proxy_flux_m3,small_cell_volume_m3,"
+            "nominal_to_cell_volume_ratio,replay_minus_live_flux_m3,"
+            "global_compatibility_m3ps" );
+        std::puts( "capsule_hotspot_tracer,mode,applied_swept_signed_kg,"
+            "applied_fallback_signed_kg,applied_mac_signed_kg,"
+            "applied_connected_signed_kg,left_after_swept_kg,"
+            "right_after_swept_kg,left_after_mac_kg,right_after_mac_kg,"
+            "direct_pair_transfers" );
+    }
     std::puts( "capsule_moving_velocity_hotspot,step,mode,axis,face_x,face_y,"
         "face_velocity_mps,open_fraction,open_weighted_speed_mps,"
         "nominal_open_flux_m3,lower_cell_fraction,upper_cell_fraction,"
@@ -5305,6 +5381,7 @@ void auditMovingCapsuleGuardTransport()
     double maxSnapshotSourceDifference = 0.0;
     for( int step = 0; step < steps; ++step )
     {
+        activeStep = step + 1;
         capsule.transform.rotation = rot2::FromRadians( startAngle +
             static_cast<float>( step + 1 ) / steps *
             ( endAngle - startAngle ) );
@@ -5318,6 +5395,96 @@ void auditMovingCapsuleGuardTransport()
             field.step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
                 forces, 120 );
             feedback[mode] = forces[0];
+            if( hotspotLedger && activeStep == hotspotStep )
+            {
+                auto& record = hotspot[mode];
+                if( !record.frozen || record.stageSamples != 2 )
+                    throw std::runtime_error( "missing hotspot snapshot or tracer stages" );
+                const auto& before = *record.frozen;
+                const auto preLeft = before.getCutCellVolumeBudget(
+                    leftX, hotspotY, subDt );
+                const auto preRight = before.getCutCellVolumeBudget(
+                    hotspotX, hotspotY, subDt );
+                const auto postLeft = field.getCutCellVolumeBudget(
+                    leftX, hotspotY, subDt );
+                const auto postRight = field.getCutCellVolumeBudget(
+                    hotspotX, hotspotY, subDt );
+                const auto& face = field.getFaceStageAudit();
+                if( !preLeft.valid || !preRight.valid ||
+                    !postLeft.valid || !postRight.valid ||
+                    !face.valid || !face.isU ||
+                    face.x != hotspotX || face.y != hotspotY ||
+                    !preLeft.hasVolumeHistory || !preLeft.hasSweptHistory )
+                    throw std::runtime_error( "invalid actual hotspot pressure stage" );
+
+                // Re-project an independent deep copy, keeping the real
+                // World/Fluid path and all applied tracer transfers untouched.
+                fluidField2 replay = before;
+                replay.setPrePressureSnapshotObserver( {} );
+                const auto replayFeedback = replay.replayFrozenCutCellPressure();
+                if( !replayFeedback )
+                    throw std::runtime_error( "hotspot frozen pressure replay refused" );
+                const auto replayLeft = replay.getCutCellVolumeBudget(
+                    leftX, hotspotY, subDt );
+                const double replayFluxError =
+                    replayLeft.macOutwardVolume[1] - postLeft.macOutwardVolume[1];
+                const double faceVolume = postLeft.macOutwardVolume[1];
+                const double open = field.getUFaceOpenFraction(
+                    hotspotX, hotspotY );
+                const double meanOpen = field.getSweptUTimeMeanOpenFraction(
+                    hotspotX, hotspotY );
+                const double proxy = field.getSweptULinearVelocityProxyVolume(
+                    hotspotX, hotspotY, subDt );
+                const double smallVolume = static_cast<double>(
+                    postLeft.currentFraction ) * h * h;
+                const double impulseProxy = static_cast<double>( h ) * h * open *
+                    ( face.afterPressure - face.afterAdvection );
+                const double ratio = smallVolume > 0.0
+                    ? std::abs( faceVolume ) / smallVolume : 0.0;
+                const std::array<fluidCutCellVolumeBudget2, 2> pre{{
+                    preLeft, preRight }};
+                const std::array<fluidCutCellVolumeBudget2, 2> post{{
+                    postLeft, postRight }};
+                for( int side = 0; side < 2; ++side )
+                {
+                    const auto& a = pre[side];
+                    const auto& b = post[side];
+                    const int direction = side == 0 ? 1 : 0;
+                    std::printf( "capsule_hotspot_cell,%d,%d,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                        "%.12g,%.12g,%.12g,%.12g\n",
+                        mode, side, b.currentFraction,
+                        static_cast<double>( b.currentFraction ) * h * h,
+                        b.snapshotDeltaVolume, b.solidSweptDivergenceVolume,
+                        b.pressureSourceDeltaVolume,
+                        b.pressureSourceDeltaVolume - b.snapshotDeltaVolume,
+                        a.macOutwardVolume[direction],
+                        b.macOutwardVolume[direction],
+                        a.pressureResidualVolume, b.pressureResidualVolume );
+                }
+                std::printf( "capsule_hotspot_face,%d,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                    mode, face.afterAdvection, face.afterPressure,
+                    face.afterPressure - face.afterAdvection,
+                    impulseProxy, open, meanOpen, faceVolume, proxy,
+                    smallVolume, ratio, replayFluxError,
+                    field.getCutCellPressure().compatibilityCorrection );
+                std::printf( "capsule_hotspot_tracer,%d,"
+                    "%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g,%.12g,%.12g,%d\n",
+                    mode, record.signedTransfer[0],
+                    record.signedTransfer[1], record.signedTransfer[2],
+                    record.signedTransfer[3],
+                    record.stageMass[0][0], record.stageMass[0][1],
+                    record.stageMass[1][0], record.stageMass[1][1],
+                    record.directedTransfers );
+                if( !std::isfinite( replayFluxError ) ||
+                    !std::isfinite( ratio ) || !std::isfinite( proxy ) ||
+                    !std::isfinite( impulseProxy ) )
+                    throw std::runtime_error( "nonfinite hotspot frozen ledger" );
+                record.frozen.reset();
+            }
             const auto summary = field.getCutCellVolumeSummary( subDt );
             const auto flow = field.getFlowAudit( subDt );
             const auto swept = field.getSweptFaceFlux();
@@ -5406,7 +5573,14 @@ void auditMovingCapsuleGuardTransport()
                 budgets[1].totalPressureSourceDeltaVolume ) );
     }
     for( int mode = 0; mode < 2; ++mode )
+    {
         fields[mode]->setTracerStageObserver( {} );
+        if( hotspotLedger )
+        {
+            fields[mode]->setPrePressureSnapshotObserver( {} );
+            fields[mode]->setTracerTransferObserver( {} );
+        }
+    }
 
     std::puts( "capsule_moving_summary,seeded_cells,seeded_mass_kg,"
         "guard0_swept_stages,guard1_swept_stages,"
@@ -5493,6 +5667,7 @@ int main( int argc, char** argv )
     bool zeroMacAnchorAudit = false;
     bool capsuleGeometryAudit = false;
     bool capsuleMovingTransportAudit = false;
+    bool capsuleHotspotLedgerAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -5530,6 +5705,7 @@ int main( int argc, char** argv )
         zeroMacAnchorAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-anchor-audit";
         capsuleGeometryAudit |= std::string_view( argv[i] ) == "--small-cell-capsule-geometry-audit";
         capsuleMovingTransportAudit |= std::string_view( argv[i] ) == "--small-cell-capsule-moving-transport-audit";
+        capsuleHotspotLedgerAudit |= std::string_view( argv[i] ) == "--small-cell-capsule-hotspot-ledger-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -5585,6 +5761,7 @@ int main( int argc, char** argv )
     }
     if( capsuleGeometryAudit ) { auditFrozenCapsuleGeometryComparison(); return 0; }
     if( capsuleMovingTransportAudit ) { auditMovingCapsuleGuardTransport(); return 0; }
+    if( capsuleHotspotLedgerAudit ) { auditMovingCapsuleGuardTransport( true ); return 0; }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
