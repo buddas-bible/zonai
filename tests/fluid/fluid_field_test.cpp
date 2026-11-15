@@ -4984,6 +4984,15 @@ void checkAnalyticCapsuleTemporalApertureAudit()
         capsule2{ { -0.63f, 0.0f }, { 0.63f, 0.0f }, 0.19f },
         { {}, {} }, {}, {}, 0.0f, 0.0f, 0.0f };
     std::array<fluidObstacleForce2, 1> feedback{};
+    const auto uVelocity = field.getUFaceVelocityForAudit( fx, fy );
+    const auto vVelocity = field.getVFaceVelocityForAudit( fx, fy );
+    check( uVelocity && vVelocity &&
+        std::isfinite( *uVelocity ) && std::isfinite( *vVelocity ) &&
+        !field.getUFaceVelocityForAudit( -1, fy ) &&
+        !field.getUFaceVelocityForAudit( field.getWidth() + 1, fy ) &&
+        !field.getVFaceVelocityForAudit( fx, -1 ) &&
+        !field.getVFaceVelocityForAudit( fx, field.getHeight() + 1 ),
+        "raw MAC audit queries must preserve stored finite faces and reject out-of-range indices" );
     const auto initial = field.getAnalyticCapsuleFaceOpenFractionForAudit(
         capsule, true, fx, fy );
     check( initial && std::abs( *initial - 0.24 ) < 1.0e-5 &&
