@@ -5381,6 +5381,12 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
             "swept_divergence_m3,pre_projection_rhs_m3,"
             "per_cell_removed_mean_m3,reported_compatibility_m3ps,"
             "reconstructed_compatibility_m3ps,compatibility_gap_m3ps" );
+        std::puts( "capsule_hotspot_float_rhs,branch,region,region_cells,"
+            "float_order_region_sum_per_s,float_order_region_mean_per_s,"
+            "float_order_compatibility_m3ps,reported_compatibility_m3ps,"
+            "float_minus_reported_m3ps,double_minus_float_m3ps,"
+            "float_order_source_imbalance_m3ps,reported_source_imbalance_m3ps,"
+            "source_imbalance_gap_m3ps,max_cell_rhs_diff_per_s" );
     }
     std::puts( "capsule_moving_velocity_hotspot,step,mode,axis,face_x,face_y,"
         "face_velocity_mps,open_fraction,open_weighted_speed_mps,"
@@ -5648,7 +5654,43 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                     pending.reserve( width * height );
                     std::vector<double> regionRhs, regionMac, regionSource;
                     std::vector<double> regionSnapshot, regionSwept;
+                    std::vector<double> regionFloatRhs;
                     std::vector<int> regionSize;
+                    double maxCellRhsDiff = 0.0;
+                    const auto floatU = [&]( int x, int y )
+                    {
+                        if( x <= 0 || x >= width || y < 0 || y >= height ||
+                            projected.getCellFluidFraction( x - 1, y ) <= 0.0f ||
+                            projected.getCellFluidFraction( x, y ) <= 0.0f )
+                            return 0.0f;
+                        const auto velocity = frozen.getUFaceVelocityForAudit( x, y );
+                        if( !velocity ) throw std::runtime_error( "invalid frozen U face" );
+                        return projected.getUFaceOpenFraction( x, y ) * *velocity;
+                    };
+                    const auto floatV = [&]( int x, int y )
+                    {
+                        if( x < 0 || x >= width || y <= 0 || y >= height ||
+                            projected.getCellFluidFraction( x, y - 1 ) <= 0.0f ||
+                            projected.getCellFluidFraction( x, y ) <= 0.0f )
+                            return 0.0f;
+                        const auto velocity = frozen.getVFaceVelocityForAudit( x, y );
+                        if( !velocity ) throw std::runtime_error( "invalid frozen V face" );
+                        return projected.getVFaceOpenFraction( x, y ) * *velocity;
+                    };
+                    // The production operator intentionally rounds each
+                    // open*velocity product and the signed cell divergence
+                    // to float BEFORE accumulating connected regions in
+                    // double. Previous diagnostics worked in double m^3.
+                    const auto floatRhs = [&]( int x, int y, double sourceVolume )
+                    {
+                        const float rate = static_cast<float>(
+                            sourceVolume / ( static_cast<double>( h ) * h ) );
+                        const float inverseCell = 1.0f / h;
+                        return ( floatU( x + 1, y ) - floatU( x, y ) +
+                            floatV( x, y + 1 ) - floatV( x, y ) ) *
+                            inverseCell + rate / subDt;
+                    };
+                    std::vector<float> floatCellRhs( width * height, 0.0f );
                     for( int y = 0; y < height; ++y )
                         for( int x = 0; x < width; ++x )
                         {
@@ -5662,6 +5704,7 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                             regionSource.push_back( 0.0 );
                             regionSnapshot.push_back( 0.0 );
                             regionSwept.push_back( 0.0 );
+                            regionFloatRhs.push_back( 0.0 );
                             regionSize.push_back( 0 );
                             pending.clear();
                             pending.push_back( start );
@@ -5682,6 +5725,17 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                                 regionSwept[region] += post.solidSweptDivergenceVolume;
                                 regionRhs[region] += pre.macNetOutwardVolume +
                                     post.pressureSourceDeltaVolume;
+                                const float rhs = floatRhs(
+                                    cx, cy, post.pressureSourceDeltaVolume );
+                                if( !std::isfinite( rhs ) )
+                                    throw std::runtime_error( "nonfinite reconstructed float RHS" );
+                                floatCellRhs[cell] = rhs;
+                                regionFloatRhs[region] += rhs;
+                                maxCellRhsDiff = std::max( maxCellRhsDiff,
+                                    std::abs( static_cast<double>( rhs ) -
+                                        ( pre.macNetOutwardVolume +
+                                            post.pressureSourceDeltaVolume ) /
+                                        ( static_cast<double>( h ) * h * subDt ) ) );
                                 ++regionSize[region];
                                 const auto visit = [&]( int nx, int ny, float open )
                                 {
@@ -5710,6 +5764,17 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                         pressure.unresolvedVolumeRate ) );
                     for( const double rhs : regionRhs )
                         reconstructed += std::abs( rhs ) / subDt;
+                    double floatCompatibility = std::abs( static_cast<double>(
+                        pressure.unresolvedVolumeRate ) );
+                    double globalFloatSum = 0.0;
+                    for( const double sum : regionFloatRhs )
+                        floatCompatibility += std::abs( sum ) * h * h;
+                    // Production sumDivergence uses active-cell row-major
+                    // traversal, independent of flood-fill queue order.
+                    for( const float cell : floatCellRhs ) globalFloatSum += cell;
+                    const float sourceImbalance =
+                        static_cast<float>( globalFloatSum * h * h ) +
+                            pressure.unresolvedVolumeRate;
                     const int region = component[leftCell];
                     if( region < 0 || component[rightCell] != region ||
                         pressure.connectedRegions != static_cast<int>( regionRhs.size() ) ||
@@ -5724,6 +5789,18 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                         regionRhs[region] / regionSize[region],
                         pressure.compatibilityCorrection, reconstructed,
                         reconstructed - pressure.compatibilityCorrection );
+                    std::printf( "capsule_hotspot_float_rhs,%d,%d,%d,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                        "%.12g,%.12g,%.12g,%.12g\n",
+                        branch, region, regionSize[region],
+                        regionFloatRhs[region],
+                        regionFloatRhs[region] / regionSize[region],
+                        floatCompatibility, pressure.compatibilityCorrection,
+                        floatCompatibility - pressure.compatibilityCorrection,
+                        reconstructed - floatCompatibility,
+                        sourceImbalance, pressure.sourceImbalance,
+                        static_cast<double>( sourceImbalance ) -
+                            pressure.sourceImbalance, maxCellRhsDiff );
                 };
                 if( mode == 0 )
                 {
