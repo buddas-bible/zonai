@@ -4616,6 +4616,52 @@ void auditTinyCapsuleCorner( const fluidField2& frozen,
         }
 }
 
+// Convex Capsule: a rectangle with all four corners inside the continuous
+// solid is completely covered; a corner strictly outside proves a positive
+// open wedge. The witness uses only float-transformed Shape endpoints and
+// independent point-to-segment signed distance (no engine cut-cell geometry).
+// Near-zero distances stay uncertain rather than being forced to a class.
+struct capsuleCornerTopologyWitness
+{
+    double minClearance = std::numeric_limits<double>::infinity();
+    double maxClearance = -std::numeric_limits<double>::infinity();
+    int exteriorCorners = 0;
+    int classification = 0; // -1 definitely covered, +1 definitely open, 0 uncertain
+};
+
+capsuleCornerTopologyWitness classifyCapsuleCellCorners(
+    vec2 first, vec2 last, double radius, vec2 origin,
+    double h, int x, int y )
+{
+    const double ax = first.x, ay = first.y;
+    const double bx = last.x, by = last.y;
+    const double dx = bx - ax, dy = by - ay;
+    const double squaredLength = dx * dx + dy * dy;
+    if( !( squaredLength > 0.0 ) || !( radius > 0.0 ) )
+        throw std::runtime_error( "invalid independent Capsule corner input" );
+    capsuleCornerTopologyWitness result{};
+    for( int iy = 0; iy <= 1; ++iy )
+        for( int ix = 0; ix <= 1; ++ix )
+        {
+            const double px = static_cast<double>( origin.x ) + ( x + ix ) * h;
+            const double py = static_cast<double>( origin.y ) + ( y + iy ) * h;
+            const double t = std::clamp(
+                ( ( px - ax ) * dx + ( py - ay ) * dy ) / squaredLength,
+                0.0, 1.0 );
+            const double clearance = std::hypot( px - ( ax + t * dx ),
+                py - ( ay + t * dy ) ) - radius;
+            result.minClearance = std::min( result.minClearance, clearance );
+            result.maxClearance = std::max( result.maxClearance, clearance );
+            result.exteriorCorners += clearance > 0.0;
+        }
+    // A tiny tolerance is only for the independent diagnostic confidence;
+    // it never alters the physical cell mask or the pressure graph.
+    constexpr double confidence = 1.0e-10;
+    result.classification = result.maxClearance > confidence ? 1 :
+        result.maxClearance < -confidence ? -1 : 0;
+    return result;
+}
+
 // S2c geometry-only control: hold the prescribed rotating Capsule, grid,
 // fluid cadence and checkpoint fixed while switching only the existing
 // opt-in analytic Capsule geometry. The underlying Fluid histories are
@@ -4635,8 +4681,10 @@ void auditFrozenCapsuleGeometryComparison()
         bool valid = false;
         int width = 0, height = 0, active = 0, anchors = 0;
         double anchorOpening = 0.0;
-        std::vector<float> cells, uOpen, vOpen;
-        std::vector<double> sources;
+        std::vector<float> cells, previousCells, uOpen, vOpen;
+        std::vector<double> sources, snapshotDeltas, sweptDivergences;
+        vec2 first{}, last{}, origin{};
+        double radius = 0.0;
         independentCutCellPressureResult pressure{};
     };
 
@@ -4655,6 +4703,18 @@ void auditFrozenCapsuleGeometryComparison()
         "recovered_cells,lost_cells,float_anchor_open,double_anchor_open,"
         "float_pcg_iters,double_pcg_iters,cell_area_L1_m2,"
         "source_L1_m3,float_target_face_m3,double_target_face_m3,double_pcg_converged" );
+    std::puts( "capsule_corner_topology_summary,cell_m,checkpoint_16,"
+        "mode,float_active,double_active,proven_open_but_zero,"
+        "proven_covered_but_active,near_tangent_uncertain,"
+        "max_false_zero_clearance_m,max_false_positive_depth_m" );
+    std::puts( "capsule_corner_topology_cell,cell_m,checkpoint_16,x,y,"
+        "float_fraction,double_fraction,corner_class,corner_exterior_count,"
+        "minimum_corner_clearance_m,maximum_corner_clearance_m,"
+        "float_previous,double_previous,float_snapshot_delta_m3,"
+        "double_snapshot_delta_m3,float_pressure_source_m3,"
+        "double_pressure_source_m3,float_swept_divergence_m3,"
+        "double_swept_divergence_m3,float_W,float_E,float_S,float_N,"
+        "double_W,double_E,double_S,double_N" );
     std::puts( "capsule_geometry_anchor_pair,cell_m,checkpoint_16,axis,x,y,"
         "sampled_open,analytic_open,sampled_fraction_a,sampled_fraction_b,"
         "analytic_fraction_a,analytic_fraction_b,"
@@ -4709,9 +4769,18 @@ void auditFrozenCapsuleGeometryComparison()
                     fail( "frozen Capsule geometry MAC override refused" );
                 row.width = trial.getWidth();
                 row.height = trial.getHeight();
+                row.origin = trial.getOrigin();
+                const auto* shape = std::get_if<capsule2>( &capsule.geometry );
+                if( !shape ) fail( "missing prescribed Capsule geometry" );
+                row.first = TransformPoint( capsule.transform, shape->center1 );
+                row.last = TransformPoint( capsule.transform, shape->center2 );
+                row.radius = shape->radius;
                 const int width = row.width, height = row.height;
                 row.cells.resize( width * height );
+                row.previousCells.resize( width * height );
                 row.sources.resize( width * height );
+                row.snapshotDeltas.resize( width * height );
+                row.sweptDivergences.resize( width * height );
                 row.uOpen.resize( ( width + 1 ) * height );
                 row.vOpen.resize( width * ( height + 1 ) );
                 const auto cellIndex = [width]( int x, int y ) { return y * width + x; };
@@ -4723,7 +4792,11 @@ void auditFrozenCapsuleGeometryComparison()
                         if( !budget.valid || !budget.hasVolumeHistory )
                             fail( "missing frozen Capsule geometry source" );
                         row.cells[cell] = budget.currentFraction;
+                        row.previousCells[cell] = budget.previousFraction;
                         row.sources[cell] = budget.pressureSourceDeltaVolume;
+                        row.snapshotDeltas[cell] = budget.snapshotDeltaVolume;
+                        row.sweptDivergences[cell] =
+                            budget.solidSweptDivergenceVolume;
                         row.active += budget.currentFraction > 0.0f;
                     }
                 for( int y = 0; y < height; ++y )
@@ -4842,6 +4915,91 @@ void auditFrozenCapsuleGeometryComparison()
                 sourceDifferenceL1 += std::abs(
                     analytic.sources[i] - precise.sources[i] );
             }
+            if( analytic.first.x != precise.first.x ||
+                analytic.first.y != precise.first.y ||
+                analytic.last.x != precise.last.x ||
+                analytic.last.y != precise.last.y ||
+                analytic.radius != precise.radius ||
+                analytic.origin.x != precise.origin.x ||
+                analytic.origin.y != precise.origin.y )
+                fail( "different actual Capsule endpoints in geometry precision A/B" );
+            int floatFalseZero = 0, doubleFalseZero = 0;
+            int floatFalsePositive = 0, doubleFalsePositive = 0;
+            int uncertain = 0, printed = 0;
+            double maxFalseZero = 0.0, maxFalsePositiveDepth = 0.0;
+            const int width = analytic.width, height = analytic.height;
+            for( int y = 0; y < height; ++y )
+                for( int x = 0; x < width; ++x )
+                {
+                    const int i = y * width + x;
+                    const auto witness = classifyCapsuleCellCorners(
+                        precise.first, precise.last, precise.radius,
+                        precise.origin, h, x, y );
+                    const bool floatActive = analytic.cells[i] > 0.0f;
+                    const bool doubleActive = precise.cells[i] > 0.0f;
+                    const bool floatFalseZeroHere =
+                        !floatActive && witness.classification == 1;
+                    const bool doubleFalseZeroHere =
+                        !doubleActive && witness.classification == 1;
+                    const bool floatFalsePositiveHere =
+                        floatActive && witness.classification == -1;
+                    const bool doubleFalsePositiveHere =
+                        doubleActive && witness.classification == -1;
+                    floatFalseZero += floatFalseZeroHere;
+                    doubleFalseZero += doubleFalseZeroHere;
+                    floatFalsePositive += floatFalsePositiveHere;
+                    doubleFalsePositive += doubleFalsePositiveHere;
+                    uncertain += witness.classification == 0;
+                    if( floatFalseZeroHere || doubleFalseZeroHere )
+                        maxFalseZero = std::max( maxFalseZero,
+                            witness.maxClearance );
+                    if( floatFalsePositiveHere || doubleFalsePositiveHere )
+                        maxFalsePositiveDepth = std::max( maxFalsePositiveDepth,
+                            -witness.maxClearance );
+                    const bool transition = floatActive != doubleActive;
+                    const bool anomaly = floatFalseZeroHere ||
+                        doubleFalseZeroHere || floatFalsePositiveHere ||
+                        doubleFalsePositiveHere;
+                    if( !transition && !anomaly ) continue;
+                    if( ++printed > 160 )
+                        fail( "unexpectedly many Capsule precision topology cells" );
+                    const auto printFaces = [&]( const capture& row )
+                    {
+                        return std::array<float, 4>{
+                            row.uOpen[y * ( width + 1 ) + x],
+                            row.uOpen[y * ( width + 1 ) + x + 1],
+                            row.vOpen[y * width + x],
+                            row.vOpen[( y + 1 ) * width + x]
+                        };
+                    };
+                    const auto fFaces = printFaces( analytic );
+                    const auto dFaces = printFaces( precise );
+                    std::printf( "capsule_corner_topology_cell,%.9g,%d,%d,%d,"
+                        "%.12g,%.12g,%d,%d,%.12g,%.12g,"
+                        "%.12g,%.12g,%.12g,%.12g,"
+                        "%.12g,%.12g,%.12g,%.12g,"
+                        "%.9g,%.9g,%.9g,%.9g,"
+                        "%.9g,%.9g,%.9g,%.9g\n",
+                        h, cp, x, y, analytic.cells[i], precise.cells[i],
+                        witness.classification, witness.exteriorCorners,
+                        witness.minClearance, witness.maxClearance,
+                        analytic.previousCells[i], precise.previousCells[i],
+                        analytic.snapshotDeltas[i], precise.snapshotDeltas[i],
+                        analytic.sources[i], precise.sources[i],
+                        analytic.sweptDivergences[i],
+                        precise.sweptDivergences[i],
+                        fFaces[0], fFaces[1], fFaces[2], fFaces[3],
+                        dFaces[0], dFaces[1], dFaces[2], dFaces[3] );
+                }
+            std::printf( "capsule_corner_topology_summary,%.9g,%d,"
+                "%d,%d,%d,%d,%d,%d,%.12g,%.12g\n",
+                h, cp, analytic.active, precise.active,
+                floatFalseZero, doubleFalseZero,
+                floatFalsePositive, doubleFalsePositive,
+                maxFalseZero, maxFalsePositiveDepth );
+            if( !std::isfinite( maxFalseZero ) ||
+                !std::isfinite( maxFalsePositiveDepth ) )
+                fail( "nonfinite independent Capsule topology witness" );
             if( h == 0.125f && cp == 12 &&
                 ( analytic.anchors != 2 || precise.anchors != 0 ||
                   !precise.pressure.converged ) )
@@ -4860,7 +5018,6 @@ void auditFrozenCapsuleGeometryComparison()
                 analytic.pressure.targetFaceVolume,
                 precise.pressure.targetFaceVolume,
                 precise.pressure.converged ? 1 : 0 );
-            const int width = sampled.width, height = sampled.height;
             const auto emit = [&]( char axis, int x, int y, int ax, int ay,
                 int bx, int by, float sampledOpen, float analyticOpen )
             {
