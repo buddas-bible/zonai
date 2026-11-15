@@ -2996,7 +2996,7 @@ void checkDemoUi()
         if( !( dyed > background && velocity > dyed &&
             pressure > velocity && cutCells >= pressure ) ||
             field->getTracerMass() != massBefore ||
-            field->getFluidMomentum() != momentumBefore )
+            zonai::LengthSquared( field->getFluidMomentum() - momentumBefore ) > 0.0f )
         {
             std::fprintf( stderr, "Wind visualization layers or read-only contract failed: %d %d %d %d %d\n",
                 background, dyed, velocity, pressure, cutCells );
