@@ -1527,6 +1527,90 @@ the single-Shape regression and disjoint Shape ownership rules.
 Do not simply remove anchor edges, apply a per-cell epsilon,
 or merge pressure pooling based on pressure iteration counts.
 
+### Independently classified near-zero Capsule cells — 2026-11-15
+
+Commits [`937a0d63`](https://github.com/buddas-bible/zonai/commit/937a0d63aac1c3e570b2191cd949be5f946866a7)
+and [`51a612ce`](https://github.com/buddas-bible/zonai/commit/51a612ce4c78de07b1fe7354fa38b6d0a263a3d8)
+extend the **three-mode prescribed-motion geometry test**, not
+production physics. At each frozen checkpoint, the audit independently
+rebuilds the point-to-segment signed distance to the Capsule using the
+same float-transformed endpoints/radius. It classifies **all** cell
+rectangles from four corner signed clearances, with a strict
+1e-10m confidence margin:
+
+- If any corner lies confidently outside a convex Capsule, an open
+  area must exist; a zero stored fluid fraction is a **false zero**.
+- If all four corners lie confidently inside a convex Capsule, the
+  whole rectangular cell is covered; any positive stored fraction is
+  a **false positive** (spurious pressure-active cell).
+- Near-tangent cases inside that margin are *unknown*, not forced into
+  either conclusion. No near-tangent unknown cells occurred at these
+  four checkpoints on either OS.
+
+For each reclassified or provably misclassified cell the CSV
+`capsule_corner_topology_cell` logs coordinates, float/double
+fractions, independent corner clearances, all four MAC openings,
+previous fractions, snapshot volume changes, pressure sources and
+swept-face divergence volumes. The geometry histories are separately
+evolved and should not be confused with the same-state pressure
+matrix-only counterfactual.
+
+[CI #43656830145](https://github.com/buddas-bible/zonai/actions/runs/43656830145)
+**passed Windows Release and Ubuntu Debug**. Summary:
+
+| Grid / checkpoint | False zeros: float / double (Windows, Ubuntu) | False positives: float / double Windows | False positives: float / double Ubuntu |
+| --- | --- | --- | --- |
+| h=.25, 11/16 | 0 / 0 (both) | 0 / 0 | 0 / 0 |
+| h=.25, 12/16 | 0 / 0 (both) | **1 / 0** | 0 / 0 |
+| h=.125, 11/16 | 0 / 0 (both) | **9 / 2** | **9 / 2** |
+| **h=.125, 12/16** | **1 / 0 (both)** | **10 / 4** | **4 / 7** |
+
+The genuine corner wedge in cell **(28,26)** at h=.125,
+checkpoint12 has positive exterior clearance
+7.29305747e-6m (Windows) / 7.29314458e-6m (Ubuntu);
+the float analytic path marked it as zero and the double path
+restores a fraction approximately 3.761e-9. It corresponds to
+the two former active-to-inactive positive-opening pressure faces.
+
+The reverse changes **are not uniformly loss of real fluid**.
+At h=.125/checkpoint11 the seven cells losing float-active status
+in the double path are inside the Capsule by at least
+approximately **0.026m** at their furthest corners, on both
+platforms; the original float fractions were numerical artifacts
+(typically 1e-16, but (27,26) was 1.52e-8 and (33,34)
+was 6.25e-9). All reported false-positive cases in this
+trajectory have **zero endpoint open MAC faces** and
+negligible snapshot volume residuals, but their active flags
+can still change the independent pressure graph.
+
+**Remaining defect:** even the double geometry path produces
+spurious fluid fractions for cells provably fully inside the
+convex Capsule. It produces 2 false positives at h=.125/checkpoint11
+on both OSes, and **4 Windows / 7 Ubuntu** at checkpoint12.
+These counts vary across compilers although the independent
+corner geometry is confidently covered, indicating the
+core/half-cap area partition still retains near-full-cell
+cancellation error. A double-coordinate construction alone
+does **not** establish platform-stable cell masks or
+pressure-source consistency.
+
+The follow-up test commit
+[`c2c2dfcf`](https://github.com/buddas-bible/zonai/commit/c2c2dfcf81c92ad3f6896bf3c00aa0b03d826bf2)
+turns **zero proven-open / zero stored double-fraction** into a
+cross-platform enforced regression assertion. The fully
+covered but spuriously active cells remain *reported*, not
+silently fixed or swept into a cell-fraction epsilon.
+
+**Next bounded work:** separately prototype an opt-in convex
+full-coverage guard for near-zero double-Capsule fractions,
+based on all four corners being **strictly** inside and
+consistent zero-open shared faces. Compare it against the
+current double path in the same prescribed trajectory and then
+the real World8/Fluid4 coupled-feedback path, with source/swept
+volume, tracer transport, PCG conditioning and performance
+acceptance. Do not change any default or broaden to
+multi-Shape/disjoint ownership before these gates.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
