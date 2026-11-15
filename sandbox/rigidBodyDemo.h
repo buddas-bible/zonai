@@ -525,6 +525,10 @@ public:
     }
     void addWindVortex();
     void seedWindTracer();
+    void setWindDyeEmitterRate( float rate ) noexcept;
+    void setWindDyeEmitterEnabled( bool enabled ) noexcept { windDyeEmitterEnabled_ = enabled; }
+    [[nodiscard]] bool isWindDyeEmitterEnabled() const noexcept { return windDyeEmitterEnabled_; }
+    [[nodiscard]] float getWindDyeEmitterRate() const noexcept { return windDyeEmitterRate_; }
     void beginWindAdvectionTrial();
     void resetWindFlow();
     [[nodiscard]] float getWindSourceStrength() const noexcept { return windSourceStrength_; }
@@ -758,6 +762,8 @@ private:
     std::optional<fluidField2> windField_{};
     float windSourceStrength_ = 6.0f;
     float windDragCoefficient_ = 3.0f;
+    float windDyeEmitterRate_ = 2.5f; // Passive tracer kg/s; no fluid momentum source.
+    bool windDyeEmitterEnabled_ = false; // Physics/headless default unchanged.
     float windTime_ = 0.0f;
     bool windSourceEnabled_ = true;
     bool windObstacleCouplingEnabled_ = true;
