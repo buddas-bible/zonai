@@ -5368,6 +5368,19 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
             "first_open_alpha,last_open_alpha,max_midpoint_open,"
             "mean_open,alpha_open_moment,mean_open_capacity_m3_per_mps,"
             "built_in_mean_open,endpoint_open_analytic,endpoint_open_stored" );
+        std::puts( "capsule_hotspot_swept,branch,raw_face_m3,reconciled_face_m3,"
+            "face_correction_m3,corrected_faces,correction_abs_flux_m3,"
+            "raw_geometry_mismatch_m3,final_geometry_mismatch_m3,"
+            "left_pressure_source_m3,right_pressure_source_m3,"
+            "left_pre_mac_out_m3,right_pre_mac_out_m3,"
+            "left_final_mac_out_m3,right_final_mac_out_m3,"
+            "left_final_pressure_residual_m3,right_final_pressure_residual_m3,"
+            "pressure_compatibility_m3ps,max_raw_face_velocity_mps" );
+        std::puts( "capsule_hotspot_region,branch,region,region_cells,"
+            "pre_mac_net_m3,pressure_source_m3,snapshot_delta_m3,"
+            "swept_divergence_m3,pre_projection_rhs_m3,"
+            "per_cell_removed_mean_m3,reported_compatibility_m3ps,"
+            "reconstructed_compatibility_m3ps,compatibility_gap_m3ps" );
     }
     std::puts( "capsule_moving_velocity_hotspot,step,mode,axis,face_x,face_y,"
         "face_velocity_mps,open_fraction,open_weighted_speed_mps,"
@@ -5398,6 +5411,35 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
             // Only the witness step needs the extra time-quadrature grids.
             if( hotspotLedger && activeStep == hotspotStep )
                 field.setSweptApertureAuditEnabled( true );
+            // Matched STEP-ENTRY state only: the alt is cloned before any
+            // geometry/advection/pressure work on step 96, and differs ONLY
+            // by enabling the existing opt-in swept-geometry reconciliation.
+            // Never evolve the alternative as a separate multi-step history.
+            std::optional<fluidField2> matchedCorrected{};
+            std::optional<fluidField2> matchedCorrectedFrozen{};
+            if( hotspotLedger && activeStep == hotspotStep && mode == 0 )
+            {
+                matchedCorrected.emplace( field );
+                fluidField2& alternative = *matchedCorrected;
+                alternative.setSweptGeometryCorrectionEnabled( true );
+                alternative.setSweptApertureAuditEnabled( false );
+                alternative.setTracerStageObserver( {} );
+                alternative.setTracerTransferObserver( {} );
+                alternative.setFaceStageAuditTarget( hotspotX, hotspotY, true );
+                alternative.setPrePressureSnapshotObserver(
+                    [&]( const fluidField2& snapshot )
+                    {
+                        if( matchedCorrectedFrozen )
+                            throw std::runtime_error( "duplicate corrected frozen snapshot" );
+                        matchedCorrectedFrozen.emplace( snapshot );
+                    } );
+                std::array<fluidObstacleForce2, 1> alternativeForces{};
+                alternative.step( subDt,
+                    std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                    alternativeForces, 120 );
+                if( !matchedCorrectedFrozen )
+                    throw std::runtime_error( "missing corrected frozen snapshot" );
+            }
             std::array<fluidObstacleForce2, 1> forces{};
             field.step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
                 forces, 120 );
@@ -5552,6 +5594,153 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                     !std::isfinite( ratio ) || !std::isfinite( proxy ) ||
                     !std::isfinite( impulseProxy ) )
                     throw std::runtime_error( "nonfinite hotspot frozen ledger" );
+
+                // Reconstruct the actual pre-compatibility RHS by combining
+                // the SAME step's frozen pre-pressure MAC and the current
+                // post-projection source. The frozen cutCellVolumeRate_ is
+                // from the previous solve, so it MUST NOT be read here.
+                const auto auditBranch = [&]( int branch,
+                    const fluidField2& frozen, const fluidField2& projected )
+                {
+                    const auto& stage = projected.getFaceStageAudit();
+                    const auto& swept = projected.getSweptFaceFlux();
+                    const auto& pressure = projected.getCutCellPressure();
+                    const auto beforeLeft = frozen.getCutCellVolumeBudget(
+                        leftX, hotspotY, subDt );
+                    const auto beforeRight = frozen.getCutCellVolumeBudget(
+                        hotspotX, hotspotY, subDt );
+                    const auto afterLeft = projected.getCutCellVolumeBudget(
+                        leftX, hotspotY, subDt );
+                    const auto afterRight = projected.getCutCellVolumeBudget(
+                        hotspotX, hotspotY, subDt );
+                    if( !stage.valid || !stage.hasSweptHistory ||
+                        !beforeLeft.valid || !beforeRight.valid ||
+                        !afterLeft.valid || !afterRight.valid ||
+                        !std::isfinite( stage.rawSweptVolume ) ||
+                        !std::isfinite( stage.reconciledSweptVolume ) )
+                        throw std::runtime_error( "invalid matched swept-volume audit" );
+                    const auto flow = projected.getFlowAudit( subDt );
+                    std::printf( "capsule_hotspot_swept,%d,"
+                        "%.12g,%.12g,%.12g,%d,%.12g,%.12g,%.12g,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                        "%.12g,%.12g,%.12g,%.12g\\n",
+                        branch, stage.rawSweptVolume,
+                        stage.reconciledSweptVolume,
+                        static_cast<double>( stage.reconciledSweptVolume ) -
+                            stage.rawSweptVolume,
+                        swept.correctedFaces, swept.correctionAbsoluteFlux,
+                        swept.rawGeometryMismatch, swept.geometryMismatch,
+                        afterLeft.pressureSourceDeltaVolume,
+                        afterRight.pressureSourceDeltaVolume,
+                        beforeLeft.macNetOutwardVolume,
+                        beforeRight.macNetOutwardVolume,
+                        afterLeft.macNetOutwardVolume,
+                        afterRight.macNetOutwardVolume,
+                        afterLeft.pressureResidualVolume,
+                        afterRight.pressureResidualVolume,
+                        pressure.compatibilityCorrection,
+                        flow.maxFluidFaceSpeed );
+
+                    const int width = projected.getWidth();
+                    const int height = projected.getHeight();
+                    std::vector<int> component( width * height, -1 );
+                    std::vector<int> pending;
+                    pending.reserve( width * height );
+                    std::vector<double> regionRhs, regionMac, regionSource;
+                    std::vector<double> regionSnapshot, regionSwept;
+                    std::vector<int> regionSize;
+                    for( int y = 0; y < height; ++y )
+                        for( int x = 0; x < width; ++x )
+                        {
+                            const int start = y * width + x;
+                            if( component[start] >= 0 ||
+                                projected.getCellFluidFraction( x, y ) <= 0.0f )
+                                continue;
+                            const int region = static_cast<int>( regionRhs.size() );
+                            regionRhs.push_back( 0.0 );
+                            regionMac.push_back( 0.0 );
+                            regionSource.push_back( 0.0 );
+                            regionSnapshot.push_back( 0.0 );
+                            regionSwept.push_back( 0.0 );
+                            regionSize.push_back( 0 );
+                            pending.clear();
+                            pending.push_back( start );
+                            component[start] = region;
+                            for( std::size_t i = 0; i < pending.size(); ++i )
+                            {
+                                const int cell = pending[i];
+                                const int cx = cell % width, cy = cell / width;
+                                const auto pre = frozen.getCutCellVolumeBudget(
+                                    cx, cy, subDt );
+                                const auto post = projected.getCutCellVolumeBudget(
+                                    cx, cy, subDt );
+                                if( !pre.valid || !post.valid || !post.active )
+                                    throw std::runtime_error( "invalid matched region cell" );
+                                regionMac[region] += pre.macNetOutwardVolume;
+                                regionSource[region] += post.pressureSourceDeltaVolume;
+                                regionSnapshot[region] += post.snapshotDeltaVolume;
+                                regionSwept[region] += post.solidSweptDivergenceVolume;
+                                regionRhs[region] += pre.macNetOutwardVolume +
+                                    post.pressureSourceDeltaVolume;
+                                ++regionSize[region];
+                                const auto visit = [&]( int nx, int ny, float open )
+                                {
+                                    const int neighbor = ny * width + nx;
+                                    if( open <= 0.0f || component[neighbor] >= 0 ||
+                                        projected.getCellFluidFraction( nx, ny ) <= 0.0f )
+                                        return;
+                                    component[neighbor] = region;
+                                    pending.push_back( neighbor );
+                                };
+                                if( cx > 0 )
+                                    visit( cx - 1, cy,
+                                        projected.getUFaceOpenFraction( cx, cy ) );
+                                if( cx + 1 < width )
+                                    visit( cx + 1, cy,
+                                        projected.getUFaceOpenFraction( cx + 1, cy ) );
+                                if( cy > 0 )
+                                    visit( cx, cy - 1,
+                                        projected.getVFaceOpenFraction( cx, cy ) );
+                                if( cy + 1 < height )
+                                    visit( cx, cy + 1,
+                                        projected.getVFaceOpenFraction( cx, cy + 1 ) );
+                            }
+                        }
+                    double reconstructed = std::abs( static_cast<double>(
+                        pressure.unresolvedVolumeRate ) );
+                    for( const double rhs : regionRhs )
+                        reconstructed += std::abs( rhs ) / subDt;
+                    const int region = component[leftCell];
+                    if( region < 0 || component[rightCell] != region ||
+                        pressure.connectedRegions != static_cast<int>( regionRhs.size() ) ||
+                        !std::isfinite( reconstructed ) )
+                        throw std::runtime_error( "inconsistent matched pressure regions" );
+                    std::printf( "capsule_hotspot_region,%d,%d,%d,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                        "%.12g,%.12g,%.12g\\n",
+                        branch, region, regionSize[region], regionMac[region],
+                        regionSource[region], regionSnapshot[region],
+                        regionSwept[region], regionRhs[region],
+                        regionRhs[region] / regionSize[region],
+                        pressure.compatibilityCorrection, reconstructed,
+                        reconstructed - pressure.compatibilityCorrection );
+                };
+                if( mode == 0 )
+                {
+                    if( !matchedCorrected || !matchedCorrectedFrozen )
+                        throw std::runtime_error( "missing matched correction control" );
+                    const auto& originalFace = field.getFaceStageAudit();
+                    const auto& alternateFace = matchedCorrected->getFaceStageAudit();
+                    if( !originalFace.hasSweptHistory ||
+                        !alternateFace.hasSweptHistory ||
+                        std::abs( static_cast<double>( originalFace.rawSweptVolume ) -
+                            alternateFace.rawSweptVolume ) > 1.0e-8 ||
+                        field.getSweptFaceFlux().correctedFaces != 0 )
+                        throw std::runtime_error(
+                            "matched histories did not preserve raw swept input" );
+                    auditBranch( 0, before, field );
+                    auditBranch( 1, *matchedCorrectedFrozen, *matchedCorrected );
+                }
                 record.frozen.reset();
                 field.setSweptApertureAuditEnabled( false );
             }
