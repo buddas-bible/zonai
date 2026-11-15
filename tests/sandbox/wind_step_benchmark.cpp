@@ -5213,6 +5213,9 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
     capsule.angularVelocity = ( endAngle - startAngle ) / totalDt;
     for( fluidField2* field : fields )
     {
+        // Required for mean-open and linear-in-time velocity-proxy witnesses;
+        // never enabled on the original moving-Capsule comparison path.
+        if( hotspotLedger ) field->setSweptApertureAuditEnabled( true );
         if( field->getSmallCellPressureMergeFraction() != 0.0f ||
             field->isConnectedResidualTracerRemapEnabled() ||
             field->isCutCellCoupledProjectionEnabled() )
@@ -5414,7 +5417,8 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                     !postLeft.valid || !postRight.valid ||
                     !face.valid || !face.isU ||
                     face.x != hotspotX || face.y != hotspotY ||
-                    !preLeft.hasVolumeHistory || !preLeft.hasSweptHistory )
+                    !preLeft.hasVolumeHistory || !preLeft.hasSweptHistory ||
+                    !field.hasSweptApertureAudit() )
                     throw std::runtime_error( "invalid actual hotspot pressure stage" );
 
                 // Re-project an independent deep copy, keeping the real
