@@ -108,7 +108,12 @@ void drawWindScalarLayers( debugDraw& draw, const fluidField2& field,
     if( !showDye && !showSpeed && !showPressure && !settings.cutCells ) return;
 
     std::vector<float> tileDye;
-    if( showDye ) tileDye.assign( tilesX * tilesY, 0.0f );
+    std::vector<bool> tileHasFluid;
+    if( showDye )
+    {
+        tileDye.assign( tilesX * tilesY, 0.0f );
+        tileHasFluid.assign( tilesX * tilesY, false );
+    }
     double totalPressure = 0.0;
     int pressureCells = 0;
     if( showPressure )
@@ -141,7 +146,9 @@ void drawWindScalarLayers( debugDraw& draw, const fluidField2& field,
                         massWeightedConcentration += static_cast<double>( fraction ) * concentration;
                         fractionSum += fraction;
                     }
-                tileDye[ty * tilesX + tx] = fractionSum > 0.0
+                const int tile = ty * tilesX + tx;
+                tileHasFluid[tile] = fractionSum > 0.0;
+                tileDye[tile] = fractionSum > 0.0
                     ? static_cast<float>( massWeightedConcentration / fractionSum ) : 0.0f;
             }
         const auto cornerConcentration = [&]( int cx, int cy )
@@ -159,6 +166,7 @@ void drawWindScalarLayers( debugDraw& draw, const fluidField2& field,
         for( int ty = 0; ty < tilesY; ++ty )
             for( int tx = 0; tx < tilesX; ++tx )
             {
+                if( !tileHasFluid[ty * tilesX + tx] ) continue;
                 const float bl = cornerConcentration( tx, ty );
                 const float br = cornerConcentration( tx + 1, ty );
                 const float tr = cornerConcentration( tx + 1, ty + 1 );
