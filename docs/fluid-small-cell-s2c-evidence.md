@@ -1892,6 +1892,92 @@ preserving total source and Body impulse; then verify coupled World
 trajectories at multiple cadences. Keep #326 Draft and every new
 physical option OFF.
 
+### Step-96 matched-entry swept reconciliation and pressure-source ledger — 2026-11-15
+
+PR #326 commits `ab63875a` and `9efe2be5` extend the **existing opt-in
+single-face stage observer** with a raw swept-solid face volume captured
+immediately after `updateSweptSolidFlux` and a reconciled swept-solid
+volume captured immediately after `reconcileSweptSolidFlux`. No
+reconstruction from post-pressure MAC velocities is used. The normal
+Field step does not allocate or run additional diagnostics when the
+observer is not selected.
+
+Commits `d2819da5`, `a577920c`, and `269fb9df` extend the
+existing `--small-cell-capsule-hotspot-ledger-audit`: clone the actual
+fluid Field **immediately before the 96th fluid Step**; the original
+continues with `sweptGeometryCorrectionEnabled=false`, while a
+one-step-only copy enables the already implemented optional geometric
+flux reconciliation. Both receive identical Capsule transforms,
+velocities, step duration, and pressure iteration budget. The copied
+Field is not reused as a separate 128-step history. The test asserts
+identical raw swept face flux between copies and verifies the
+read-only audit against a partial-open Capsule fixture.
+
+**Verified:** [CI #43721676946](https://github.com/buddas-bible/zonai/actions/runs/43721676946),
+Ubuntu Debug 112/112 CTest, Windows Debug 115/115 CTest, Windows
+Release 52/52 CTest, and both opt-in 96th-step headless audits pass.
+No runtime physics, defaults, tracer remap or Body trajectory changed
+by the new trace itself.
+
+| Measured quantity | Ubuntu baseline | Ubuntu corrected clone | Windows baseline | Windows corrected clone |
+| --- | ---: | ---: | ---: | ---: |
+| Raw U(29,26) swept solid face volume (m³) | 0.000582699140068 | 0.000582699140068 | 0.000582699140068 | 0.000582699140068 |
+| Reconciled U(29,26) swept solid face volume (m³) | 0.000582699140068 | 0.000582780281547 | 0.000582699140068 | 0.000582780281547 |
+| Corrected faces | 0 | 15 | 0 | 15 |
+| Final swept/snapshot L1 mismatch (m³) | 9.11950e-7 | 3.22179e-7 | 9.13260e-7 | 3.28506e-7 |
+| Left-cell pressure source (m³) | -3.17711674143e-5 | -3.16900259349e-5 | -3.17711674143e-5 | -3.16900259349e-5 |
+| Right-cell pressure source (m³) | -0.000672970549203 | -0.000673051690683 | -0.000672970549203 | -0.000673051690683 |
+| Max raw fluid-face velocity (m/s) | 5486.27637 | 5472.26855 | 5486.34229 | 5472.33496 |
+| Active cells in connected hotspot region | 4077 | 4077 | 4077 | 4077 |
+
+The chosen U face gains **8.11414793134e-8 m³** of swept-solid
+flux. Its adjacent current-active pressure sources change in
+opposite directions by approximately the same magnitude: this
+is a conservative pairwise *source redistribution*, not a new
+body force or a transported tracer-mass measurement. The
+optional reconciliation substantially reduces geometric mismatch
+(approximately 64–65%), but the maximum *raw* MAC velocity is
+only ~0.255% lower. The huge velocity is therefore **not explained
+solely by raw swept geometry mismatch** in this same-entry,
+prescribed-kinematic Capsule control. The original endpoint-open
+face remains O(1e-4); no claim of stabilized FSI or pressure pooling
+acceptance follows.
+
+**Connected-component and precision caveat:** the read-only audit
+reconstructs each active region's pre-pressure net MAC volume plus
+**current projected** pressure source, then separately sums region
+imbalance and applies the unresolved-source term, matching the
+discrete conservation *expression* but with double accumulation
+from public per-cell budgets. The solver accumulates float
+divergences and removes the per-region float mean. In this 4077-cell
+region the double reconstruction of reported compatibility is
+roughly 3.2–3.6e-7 m³/s; solver-reported totals range from
+3.54e-7 to 8.43e-7 m³/s across OS/branch, an absolute difference
+of order 1e-7 m³/s. This has **not** been independently attributed
+solely to float rounding. It is tiny compared with the local
+left-cell volume source (~3.17e-5 m³ each 0.000260417s), but it
+demands a solver-operation-order-matched float reconstruction
+before using this audit as a compatibility/conservation proof.
+Do **not** claim exact pressure-source/global volume closure from
+the rounded diagnostic or treat this result as a GPU/CPU parity test.
+
+**Next S2c acceptance-gated experiment:**
+1. Reconstruct `(fluxE-fluxW+fluxN-fluxS)/h + volumeRate/dt` with
+   the solver's float operation order, compare per-cell and
+   per-component source sums and the reported mean subtraction, and
+   isolate any remaining reproducible discrepancy.
+2. On the exact same frozen state, evaluate **pressure projection
+   alternatives** that account for extremely small endpoint
+   apertures and finite swept displacement, including
+   source-conservative small-cell grouping/flux redistribution.
+   Preserve summed source, effective face momentum and Body impulse;
+   do not introduce arbitrary velocity clamps.
+3. Run opt-in multi-grid/multi-cadence **coupled** Body, joint and
+   tracer tests before considering any default change.
+
+Keep PR #326 Draft, PR #322 independent and all new physical
+strategies OFF by default.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
