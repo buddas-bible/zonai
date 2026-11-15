@@ -5364,6 +5364,10 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
             "applied_connected_signed_kg,left_after_swept_kg,"
             "right_after_swept_kg,left_after_mac_kg,right_after_mac_kg,"
             "direct_pair_transfers" );
+        std::puts( "capsule_hotspot_temporal,mode,samples,nonzero_midpoints,"
+            "first_open_alpha,last_open_alpha,max_midpoint_open,"
+            "mean_open,alpha_open_moment,mean_open_capacity_m3_per_mps,"
+            "built_in_mean_open,endpoint_open_analytic,endpoint_open_stored" );
     }
     std::puts( "capsule_moving_velocity_hotspot,step,mode,axis,face_x,face_y,"
         "face_velocity_mps,open_fraction,open_weighted_speed_mps,"
@@ -5441,6 +5445,62 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                     hotspotX, hotspotY, subDt );
                 const double meanOpenCapacity =
                     static_cast<double>( h ) * subDt * meanOpen;
+                // Re-evaluate only the selected face with analytic Capsule
+                // clipping and progressively finer time midpoint grids.
+                // This is an independent time-quadrature control, NOT a
+                // measured time history of fluid face velocity.
+                const auto capsuleAtAlpha = [&]( double alpha )
+                {
+                    fluidShapeObstacle2 shape = capsule;
+                    const float phase = ( static_cast<float>( hotspotStep - 1 ) +
+                        static_cast<float>( alpha ) ) / steps;
+                    shape.transform.rotation = rot2::FromRadians(
+                        startAngle + phase * ( endAngle - startAngle ) );
+                    return shape;
+                };
+                const auto analyticEnd = field.getAnalyticCapsuleFaceOpenFractionForAudit(
+                    capsuleAtAlpha( 1.0 ), true, hotspotX, hotspotY );
+                if( !analyticEnd || !std::isfinite( *analyticEnd ) ||
+                    std::abs( *analyticEnd - open ) > 1.0e-6 )
+                    throw std::runtime_error( "Capsule endpoint analytic aperture mismatch" );
+                const std::array<int, 7> sampleCounts{{
+                    field.getSweptFaceFlux().timeSamples,
+                    16, 64, 256, 1024, 4096, 16384
+                }};
+                for( const int count : sampleCounts )
+                {
+                    if( count <= 0 )
+                        throw std::runtime_error( "invalid Capsule time quadrature count" );
+                    double summedOpen = 0.0, firstOpen = -1.0, lastOpen = -1.0;
+                    double alphaMoment = 0.0, peakOpen = 0.0;
+                    int nonzero = 0;
+                    for( int i = 0; i < count; ++i )
+                    {
+                        const double alpha = ( i + 0.5 ) / count;
+                        const auto sampled = field.getAnalyticCapsuleFaceOpenFractionForAudit(
+                            capsuleAtAlpha( alpha ), true, hotspotX, hotspotY );
+                        if( !sampled || !std::isfinite( *sampled ) ||
+                            *sampled < 0.0 || *sampled > 1.0 )
+                            throw std::runtime_error( "nonfinite Capsule temporal aperture" );
+                        summedOpen += *sampled;
+                        alphaMoment += alpha * *sampled;
+                        peakOpen = std::max( peakOpen, *sampled );
+                        if( *sampled > 0.0 )
+                        {
+                            if( nonzero == 0 ) firstOpen = alpha;
+                            lastOpen = alpha;
+                            ++nonzero;
+                        }
+                    }
+                    const double mean = summedOpen / count;
+                    const double moment = alphaMoment / count;
+                    std::printf( "capsule_hotspot_temporal,%d,%d,%d,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                        "%.12g,%.12g,%.12g\n",
+                        mode, count, nonzero, firstOpen, lastOpen, peakOpen,
+                        mean, moment, static_cast<double>( h ) * subDt * mean,
+                        meanOpen, *analyticEnd, open );
+                }
                 const double smallVolume = static_cast<double>(
                     postLeft.currentFraction ) * h * h;
                 const double impulseProxy = static_cast<double>( h ) * h * open *
