@@ -5001,6 +5001,12 @@ void auditFrozenCapsuleGeometryComparison()
             if( !std::isfinite( maxFalseZero ) ||
                 !std::isfinite( maxFalsePositiveDepth ) )
                 fail( "nonfinite independent Capsule topology witness" );
+            // A strictly exterior corner proves positive open area for a
+            // convex Capsule. This assertion is checked on both toolchains;
+            // false-positive fully covered cells are still informational,
+            // not silently suppressed in the experiment.
+            if( doubleFalseZero != 0 )
+                fail( "double Capsule lost an independently proven open cell" );
             if( h == 0.125f && cp == 12 &&
                 ( analytic.anchors != 2 || precise.anchors != 0 ||
                   !precise.pressure.converged ) )
