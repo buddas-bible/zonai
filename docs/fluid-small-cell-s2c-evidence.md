@@ -1710,6 +1710,127 @@ guard. Neither double geometry nor this guard is enabled by
 default; PR #326 remains Draft pending physical, two-way coupling
 and repeatable performance gates.
 
+### Live prescribed Capsule transport and extreme face-speed witness — 2026-11-15
+
+Commits [`3f2153a2`](https://github.com/buddas-bible/zonai/commit/3f2153a2ed9593943100e0c1423d9bd330a1d476)
+and [`50ff1835`](https://github.com/buddas-bible/zonai/commit/50ff183534e7d46ffc43d920a366d036ad84c7c5)
+add an independent **live fluid Step** audit,
+`--small-cell-capsule-moving-transport-audit`, to both CI OSes.
+Unlike the previous zero-MAC frozen PCG oracle, it evolves MAC
+velocities, pressure, rotating solid geometry and conservative tracer
+over 128 substeps of a 1/30-second prescribed rotating Capsule.
+The two separately evolved variants differ **only** in the optional
+convex full-coverage guard; both use single-Capsule
+double-precision geometry, swept tracer remapping and ordinary
+Cut-cell projection. The existing connected-residual tracer
+experiment, small-cell pressure pooling, dynamic Body inverse
+mass and coupled Schur pressure are all **disabled**.
+The Capsule's motion is **kinematically prescribed**: returned
+`fluidObstacleForce2` feedback is measured but **NOT**
+integrated into a rigid Body trajectory. This is *not* a two-way
+FSI acceptance test.
+
+At initialization 247 fully open cells common to both variants
+receive identical tracer concentrations (initial total
+**1.72629459528 kg**). The test independently sums raw
+double-precision tracer cell masses at both actual applied
+tracer stages (`afterSweptRemap` and `afterMacAdvection`),
+and at the end of each Fluid substep. It records face velocity,
+pressure force/torque, current fluid volume, swept geometry
+mismatch, pressure-source volume and actual tracer transfer
+ledgers at every 8th substep. A 1e-6 kg scaled absolute
+stage-mass check and finite physical-budget checks are enforced;
+pressure-force difference is informational, not silently asserted
+to be zero.
+
+[Windows Release and Ubuntu Debug CI #43697427172](https://github.com/buddas-bible/zonai/actions/runs/43697427172)
+**both passed**.
+
+| 128-step live transport result | Windows Release | Ubuntu Debug |
+| --- | ---: | ---: |
+| Stages observed per mode (swept + MAC) | 128 + 128 | 128 + 128 |
+| Maximum absolute tracer mass defect, either policy | 3.77476e-15 kg | 3.77476e-15 kg |
+| Maximum double-summed fluid volume difference between policies | 0 m³ | 0 m³ |
+| Maximum pressure-source volume difference | 2.91038e-11 m³ | 2.91038e-11 m³ |
+| Maximum emitted pressure force difference | 141.0173 N | 141.0171 N |
+| Maximum emitted torque difference | 41.2512 N·m | 41.2513 N·m |
+| Largest single-mode force magnitude seen | 1154.153 N | 1154.153 N |
+| Maximum swept geometry mismatch (either mode) | 1.275028e-4 m³ | 1.275028e-4 m³ |
+| Sum of applied swept tracer remaps, unguarded / guarded | 0.082747 / 0.057826 kg | 0.081796 / 0.057826 kg |
+| Sum of unresolved tracer displacement, unguarded / guarded | 0.230027 / 0.257237 kg | 0.230854 / 0.257237 kg |
+
+The tracer remap/unresolved numbers are **sums of substep
+transfer metrics**, not the final missing mass (which was
+conserved to ~4e-15 kg). Their sizeable mode dependence
+demonstrates why **global tracer mass conservation alone
+does not establish physically correct local transport**. The
+kinematically emitted pressure forces also differ; their
+maxima do **not** necessarily occur at the same substep as
+the maximum face speed. There is no claim that either policy
+is a validated physical reference.
+
+Commit [`b52afcab`](https://github.com/buddas-bible/zonai/commit/b52afcabd61d2eb3f4b5b388a826c7f57dc4376f)
+adds `capsule_moving_velocity_hotspot` records for every
+open MAC face with computed speed over 1000 m/s, logging
+the location, open fraction, aperture-weighted speed,
+**nominal** one-substep face volume and both adjacent
+cell/source/residual ledgers.
+[CI #43698532451](https://github.com/buddas-bible/zonai/actions/runs/43698532451)
+**passed both OSes**. Both variants identified exactly the
+same extreme face at the same time:
+
+| h=0.125m, substep 96/128 | Windows Release | Ubuntu Debug |
+| --- | ---: | ---: |
+| Axis, shared face | **U(29,26)** | **U(29,26)** |
+| Signed open-face velocity | **5486.3423 m/s** | **5486.2764 m/s** |
+| Endpoint open fraction | 0.0001088336721 | 0.0001088349745 |
+| Open-weighted face speed | 0.5970988 m/s | 0.5970988 m/s |
+| Nominal one-step open face volume `h*dt*open*u` | 1.9436810e-5 m³ | 1.9436809e-5 m³ |
+| Fluid fraction of left cell (28,26) | 3.7610333e-9 | 3.7611225e-9 |
+| Fluid fraction of right cell (29,26) | 0.6825421 | 0.6825422 |
+| Pressure-source volume on left cell | -3.1771167e-5 m³ | -3.1771167e-5 m³ |
+| Left pressure residual volume | -1.975e-12 m³ | -2.095e-12 m³ |
+
+At h=.125m the tiny left cell's fluid volume is
+approximately **5.877e-11 m³**, whereas the **nominal**
+one-step `open*velocity*faceLength*dt` is about
+**3.3e5 times that volume**. The local pressure-source
+volume magnitude is about **5.4e5 times that tiny
+current cell volume**. The pressure residual of the tiny
+cell is numerically small, but this does NOT imply a
+physical, stable or capacity-respecting face flux.
+Neither the still-present real near-tangent sliver nor
+its extreme velocity is removed by the convex
+full-coverage guard. The guard only removes **provably
+fully covered false-positive** cells.
+
+**Interpretation limitations:** `h*dt*open*u` uses the
+endpoint open fraction and endpoint velocity; it is NOT
+the exact time integral of a moving-face flux, and it
+cannot by itself establish the true physical fluid
+transport. The saved velocity is a discrete face
+unknown, not necessarily a realized trajectory for
+a fluid particle. These ratios nevertheless isolate
+a numerically severe small-cell scale disparity and
+show why global mass/error and PCG convergence are
+insufficient as S2c acceptance tests.
+
+**Next bounded S2c priority:** use the actual frozen
+step-96 state and two adjacent cells at U(29,26) to
+separate the *raw swept solid source* from its
+pressure-compatibility correction, the discrete
+pressure impulse, the time-averaged aperture
+capacity and the tracer's **applied** neighbor
+transfers. Test a mathematically conservative small-
+cell pressure aggregation/flux-limiting candidate
+only in a separately opted-in A/B against this
+frozen state, maintaining valid Body impulse
+accounting and avoiding a trivial raw-speed cap.
+Then extend to actual two-way World Body motion
+with comparable physical initial states and
+repeatable benchmark timing. Keep PR #326 Draft
+and all new options OFF by default.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
