@@ -4704,9 +4704,10 @@ void auditFrozenCapsuleGeometryComparison()
         "float_pcg_iters,double_pcg_iters,cell_area_L1_m2,"
         "source_L1_m3,float_target_face_m3,double_target_face_m3,double_pcg_converged" );
     std::puts( "capsule_corner_topology_summary,cell_m,checkpoint_16,"
-        "mode,float_active,double_active,proven_open_but_zero,"
-        "proven_covered_but_active,near_tangent_uncertain,"
-        "max_false_zero_clearance_m,max_false_positive_depth_m" );
+        "float_active,double_active,float_false_zero,double_false_zero,"
+        "float_false_positive,double_false_positive,"
+        "uncertain_corner_cells,max_false_zero_clearance_m,"
+        "max_false_positive_depth_m" );
     std::puts( "capsule_corner_topology_cell,cell_m,checkpoint_16,x,y,"
         "float_fraction,double_fraction,corner_class,corner_exterior_count,"
         "minimum_corner_clearance_m,maximum_corner_clearance_m,"
@@ -4992,10 +4993,10 @@ void auditFrozenCapsuleGeometryComparison()
                         dFaces[0], dFaces[1], dFaces[2], dFaces[3] );
                 }
             std::printf( "capsule_corner_topology_summary,%.9g,%d,"
-                "%d,%d,%d,%d,%d,%d,%.12g,%.12g\n",
+                "%d,%d,%d,%d,%d,%d,%d,%.12g,%.12g\n",
                 h, cp, analytic.active, precise.active,
                 floatFalseZero, doubleFalseZero,
-                floatFalsePositive, doubleFalsePositive,
+                floatFalsePositive, doubleFalsePositive, uncertain,
                 maxFalseZero, maxFalsePositiveDepth );
             if( !std::isfinite( maxFalseZero ) ||
                 !std::isfinite( maxFalsePositiveDepth ) )
