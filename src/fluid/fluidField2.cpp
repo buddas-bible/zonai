@@ -3087,7 +3087,18 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     if( cutCellProjectionEnabled_ )
     {
         updateSweptSolidFlux( timeStep, obstacles );
+        if( auditFace && sweptFaceFlux_.usedSweptFlux )
+        {
+            faceStageAudit_.hasSweptHistory = true;
+            faceStageAudit_.rawSweptVolume = faceStageAuditIsU_
+                ? sweptUVolume_[uIndex( faceStageAuditX_, faceStageAuditY_ )]
+                : sweptVVolume_[vIndex( faceStageAuditX_, faceStageAuditY_ )];
+        }
         reconcileSweptSolidFlux();
+        if( auditFace && faceStageAudit_.hasSweptHistory )
+            faceStageAudit_.reconciledSweptVolume = faceStageAuditIsU_
+                ? sweptUVolume_[uIndex( faceStageAuditX_, faceStageAuditY_ )]
+                : sweptVVolume_[vIndex( faceStageAuditX_, faceStageAuditY_ )];
     }
     else sweptFaceFlux_ = {};
     record( stepTiming_.swept );
