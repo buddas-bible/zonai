@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <numbers>
+#include <vector>
 #include <imgui.h>
 #include <imgui_internal.h>
 
@@ -28,6 +29,248 @@ struct shapeColors
     ImU32 outline = 0;
     ImU32 fill = 0;
 };
+float positiveFinite( float value ) noexcept
+{
+    return std::isfinite( value ) && value > 0.0f ? value : 0.0f;
+}
+
+ImU32 visualizationColor( float r, float g, float b, float alpha ) noexcept
+{
+    const auto byte = []( float value )
+    {
+        return static_cast<int>( std::clamp( value, 0.0f, 255.0f ) );
+    };
+    return IM_COL32( byte( r ), byte( g ), byte( b ), byte( alpha ) );
+}
+
+// Render-only palettes. Quantities remain untouched in fluidField2.
+ImU32 dyeColor( float concentration, const windVisualization2& settings ) noexcept
+{
+    if( !std::isfinite( concentration ) || concentration <= 0.0f ) return 0;
+    const float reference = std::max( 0.001f, settings.dyeReference );
+    const float intensity = 1.0f - std::exp(
+        -1.7f * std::clamp( concentration / reference, 0.0f, 16.0f ) );
+    const float opacity = std::clamp( settings.dyeOpacity, 0.0f, 1.0f );
+    return visualizationColor( 30.0f + 112.0f * intensity,
+        120.0f + 130.0f * intensity, 205.0f + 48.0f * intensity,
+        240.0f * intensity * opacity );
+}
+
+ImU32 speedColor( float speed, const windVisualization2& settings ) noexcept
+{
+    if( !std::isfinite( speed ) || speed < 0.0f ) return 0;
+    const float t = std::clamp( speed / std::max( settings.speedReference, 0.001f ),
+        0.0f, 1.0f );
+    const float opacity = std::clamp( settings.overlayOpacity, 0.0f, 1.0f );
+    if( t < 0.5f )
+    {
+        const float a = t * 2.0f;
+        return visualizationColor( 23.0f + 80.0f * a, 55.0f + 170.0f * a,
+            128.0f + 90.0f * a, 190.0f * opacity );
+    }
+    const float a = ( t - 0.5f ) * 2.0f;
+    return visualizationColor( 103.0f + 152.0f * a, 225.0f - 160.0f * a,
+        218.0f - 170.0f * a, 230.0f * opacity );
+}
+
+ImU32 pressureColor( float difference, const windVisualization2& settings ) noexcept
+{
+    if( !std::isfinite( difference ) ) return 0;
+    const float t = std::clamp(
+        std::abs( difference ) / std::max( settings.pressureReference, 0.001f ),
+        0.0f, 1.0f );
+    const float opacity = std::clamp( settings.overlayOpacity, 0.0f, 1.0f );
+    return difference >= 0.0f
+        ? visualizationColor( 105.0f + 150.0f * t, 112.0f - 52.0f * t,
+            132.0f - 65.0f * t, ( 45.0f + 200.0f * t ) * opacity )
+        : visualizationColor( 93.0f - 54.0f * t, 120.0f + 70.0f * t,
+            150.0f + 104.0f * t, ( 45.0f + 200.0f * t ) * opacity );
+}
+
+void drawWindScalarLayers( debugDraw& draw, const fluidField2& field,
+    const windVisualization2& settings )
+{
+    const int width = field.getWidth(), height = field.getHeight();
+    if( width <= 0 || height <= 0 ) return;
+    const float cellSize = field.getCellSize();
+    const vec2 origin = field.getOrigin();
+    // Keep scalar-field debug quads bounded even on the largest 128² field.
+    // Tile dye = fluid-fraction-weighted mean; tile speed = highest open MAC
+    // face, so an isolated extreme face is NOT hidden by render decimation.
+    constexpr int maxTiles = 4096;
+    const int stride = std::max( 1, static_cast<int>( std::ceil(
+        std::sqrt( static_cast<float>( width * height ) / maxTiles ) ) ) );
+    const int tilesX = ( width + stride - 1 ) / stride;
+    const int tilesY = ( height + stride - 1 ) / stride;
+    const bool showDye = settings.dye;
+    const bool showSpeed = settings.speedHeatmap;
+    const bool showPressure = settings.pressureHeatmap;
+    if( !showDye && !showSpeed && !showPressure && !settings.cutCells ) return;
+
+    std::vector<float> tileDye;
+    if( showDye ) tileDye.assign( tilesX * tilesY, 0.0f );
+    double totalPressure = 0.0;
+    int pressureCells = 0;
+    if( showPressure )
+        for( int y = 0; y < height; ++y )
+            for( int x = 0; x < width; ++x )
+            {
+                if( field.getCellFluidFraction( x, y ) <= 0.0f ) continue;
+                const float p = field.getCellPressureForVisualization( x, y );
+                if( !std::isfinite( p ) ) continue;
+                totalPressure += p;
+                ++pressureCells;
+            }
+    const double meanPressure = pressureCells > 0
+        ? totalPressure / pressureCells : 0.0;
+
+    // Render dye below all other diagnostics, so smoke remains readable
+    // when vector arrows or open-face geometry are toggled on.
+    if( showDye )
+    {
+        for( int ty = 0; ty < tilesY; ++ty )
+            for( int tx = 0; tx < tilesX; ++tx )
+            {
+                double massWeightedConcentration = 0.0, fractionSum = 0.0;
+                for( int y = ty * stride; y < std::min( height, ( ty + 1 ) * stride ); ++y )
+                    for( int x = tx * stride; x < std::min( width, ( tx + 1 ) * stride ); ++x )
+                    {
+                        const float fraction = positiveFinite( field.getCellFluidFraction( x, y ) );
+                        const float concentration = positiveFinite(
+                            field.getTracerConcentration( x, y ) );
+                        massWeightedConcentration += static_cast<double>( fraction ) * concentration;
+                        fractionSum += fraction;
+                    }
+                tileDye[ty * tilesX + tx] = fractionSum > 0.0
+                    ? static_cast<float>( massWeightedConcentration / fractionSum ) : 0.0f;
+            }
+        const auto cornerConcentration = [&]( int cx, int cy )
+        {
+            float value = 0.0f;
+            int count = 0;
+            for( int y = std::max( 0, cy - 1 ); y <= std::min( tilesY - 1, cy ); ++y )
+                for( int x = std::max( 0, cx - 1 ); x <= std::min( tilesX - 1, cx ); ++x )
+                {
+                    value += tileDye[y * tilesX + x];
+                    ++count;
+                }
+            return count > 0 ? value / count : 0.0f;
+        };
+        for( int ty = 0; ty < tilesY; ++ty )
+            for( int tx = 0; tx < tilesX; ++tx )
+            {
+                const float bl = cornerConcentration( tx, ty );
+                const float br = cornerConcentration( tx + 1, ty );
+                const float tr = cornerConcentration( tx + 1, ty + 1 );
+                const float tl = cornerConcentration( tx, ty + 1 );
+                if( std::max( { bl, br, tr, tl } ) <= 0.0f ) continue;
+                const aabb2 bounds{
+                    origin + cellSize * vec2{ static_cast<float>( tx * stride ),
+                        static_cast<float>( ty * stride ) },
+                    origin + cellSize * vec2{
+                        static_cast<float>( std::min( width, ( tx + 1 ) * stride ) ),
+                        static_cast<float>( std::min( height, ( ty + 1 ) * stride ) ) }
+                };
+                draw.DrawGradientAABB( bounds, dyeColor( tl, settings ),
+                    dyeColor( tr, settings ), dyeColor( br, settings ),
+                    dyeColor( bl, settings ) );
+            }
+    }
+
+    if( showSpeed || showPressure )
+        for( int ty = 0; ty < tilesY; ++ty )
+            for( int tx = 0; tx < tilesX; ++tx )
+            {
+                float peakSpeed = 0.0f;
+                double peakPressure = 0.0;
+                bool active = false;
+                for( int y = ty * stride; y < std::min( height, ( ty + 1 ) * stride ); ++y )
+                    for( int x = tx * stride; x < std::min( width, ( tx + 1 ) * stride ); ++x )
+                    {
+                        if( field.getCellFluidFraction( x, y ) <= 0.0f ) continue;
+                        active = true;
+                        if( showPressure )
+                        {
+                            const float pressure = field.getCellPressureForVisualization( x, y );
+                            const double difference = static_cast<double>( pressure ) - meanPressure;
+                            if( std::isfinite( difference ) &&
+                                std::abs( difference ) > std::abs( peakPressure ) )
+                                peakPressure = difference;
+                        }
+                        if( !showSpeed ) continue;
+                        const auto addFace = [&]( const std::optional<float>& speed, float opening )
+                        {
+                            if( opening > 0.0f && speed && std::isfinite( *speed ) )
+                                peakSpeed = std::max( peakSpeed, std::abs( *speed ) );
+                        };
+                        // Only OPEN fluid-fluid faces; closed solid-wall
+                        // boundary velocities are not fluid speed hotspots.
+                        if( x > 0 && field.getCellFluidFraction( x - 1, y ) > 0.0f )
+                            addFace( field.getUFaceVelocityForAudit( x, y ),
+                                field.getUFaceOpenFraction( x, y ) );
+                        if( x + 1 < width && field.getCellFluidFraction( x + 1, y ) > 0.0f )
+                            addFace( field.getUFaceVelocityForAudit( x + 1, y ),
+                                field.getUFaceOpenFraction( x + 1, y ) );
+                        if( y > 0 && field.getCellFluidFraction( x, y - 1 ) > 0.0f )
+                            addFace( field.getVFaceVelocityForAudit( x, y ),
+                                field.getVFaceOpenFraction( x, y ) );
+                        if( y + 1 < height && field.getCellFluidFraction( x, y + 1 ) > 0.0f )
+                            addFace( field.getVFaceVelocityForAudit( x, y + 1 ),
+                                field.getVFaceOpenFraction( x, y + 1 ) );
+                    }
+                if( !active ) continue;
+                const aabb2 bounds{
+                    origin + cellSize * vec2{ static_cast<float>( tx * stride ),
+                        static_cast<float>( ty * stride ) },
+                    origin + cellSize * vec2{
+                        static_cast<float>( std::min( width, ( tx + 1 ) * stride ) ),
+                        static_cast<float>( std::min( height, ( ty + 1 ) * stride ) ) }
+                };
+                if( showSpeed ) draw.DrawFilledAABB( bounds, speedColor( peakSpeed, settings ) );
+                if( showPressure ) draw.DrawFilledAABB( bounds,
+                    pressureColor( static_cast<float>( peakPressure ), settings ) );
+            }
+
+    if( settings.cutCells )
+        for( int y = 0; y < height; ++y )
+            for( int x = 0; x < width; ++x )
+            {
+                const float fraction = field.getCellFluidFraction( x, y );
+                const aabb2 bounds{
+                    origin + cellSize * vec2{ static_cast<float>( x ), static_cast<float>( y ) },
+                    origin + cellSize * vec2{ static_cast<float>( x + 1 ), static_cast<float>( y + 1 ) }
+                };
+                if( fraction > 0.0f && fraction < 0.99999f )
+                {
+                    const bool tiny = fraction < 1.0e-4f;
+                    draw.DrawFilledAABB( bounds, tiny
+                        ? IM_COL32( 255, 45, 70, 115 )
+                        : IM_COL32( 255, 165, 60, 45 ) );
+                    draw.DrawAABB( bounds, tiny
+                        ? IM_COL32( 255, 75, 100, 255 )
+                        : IM_COL32( 255, 200, 85, 210 ), tiny ? 2.5f : 1.0f );
+                }
+                // A colored face denotes geometric partial aperture, not
+                // time-averaged opening nor necessarily applied fluid flux.
+                if( x + 1 < width )
+                {
+                    const float open = field.getUFaceOpenFraction( x + 1, y );
+                    if( open > 0.0f && open < 0.9999f )
+                        draw.DrawSegment( { { bounds.max.x, bounds.min.y },
+                            { bounds.max.x, bounds.max.y } },
+                            IM_COL32( 250, 180, 70, 225 ), 2.0f );
+                }
+                if( y + 1 < height )
+                {
+                    const float open = field.getVFaceOpenFraction( x, y + 1 );
+                    if( open > 0.0f && open < 0.9999f )
+                        draw.DrawSegment( { { bounds.min.x, bounds.max.y },
+                            { bounds.max.x, bounds.max.y } },
+                            IM_COL32( 250, 180, 70, 225 ), 2.0f );
+                }
+            }
+}
+
 
 const char* getBodyTypeName( bodyType type )
 {
@@ -225,23 +468,30 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
             draw.DrawSegment( { { upper.x, lower.y }, upper }, FIELD_BORDER, 1.5f );
             draw.DrawSegment( { upper, { lower.x, upper.y } }, FIELD_BORDER, 1.5f );
             draw.DrawSegment( { { lower.x, upper.y }, lower }, FIELD_BORDER, 1.5f );
-            // 큰 Field에서는 렌더링 자체가 프레임을 잡아먹지 않게 표시 밀도를 제한.
-            const float cellsPerArrow = static_cast<float>( field->getWidth() * field->getHeight() ) / 350.0f;
-            const int drawStride = std::max( 2, static_cast<int>( std::ceil( std::sqrt( cellsPerArrow ) ) ) );
-            for( int y = 0; y < field->getHeight(); y += drawStride )
-                for( int x = 0; x < field->getWidth(); x += drawStride )
-                {
-                    const vec2 point = field->getCellCenter( x, y );
-                    if( field->isSolidCell( x, y ) )
+            drawWindScalarLayers( draw, *field, windVisualization_ );
+            if( windVisualization_.vectors )
+            {
+                // Limit vector density separately from scalar color tiles.
+                const float cellsPerArrow = static_cast<float>(
+                    field->getWidth() * field->getHeight() ) / 350.0f;
+                const int drawStride = std::max( 2, static_cast<int>(
+                    std::ceil( std::sqrt( cellsPerArrow ) ) ) );
+                for( int y = 0; y < field->getHeight(); y += drawStride )
+                    for( int x = 0; x < field->getWidth(); x += drawStride )
                     {
-                        draw.DrawPoint( point, IM_COL32( 255, 155, 85, 150 ), 3.0f );
-                        continue;
+                        const vec2 point = field->getCellCenter( x, y );
+                        if( field->isSolidCell( x, y ) )
+                        {
+                            draw.DrawPoint( point, IM_COL32( 255, 155, 85, 150 ), 3.0f );
+                            continue;
+                        }
+                        const vec2 velocity = field->sampleVelocity( point );
+                        const float speed = Length( velocity );
+                        if( std::isfinite( speed ) && speed > 0.025f )
+                            draw.DrawArrow( point, velocity, WIND_COLOR,
+                                std::min( 0.48f, 0.12f + 0.12f * speed ) );
                     }
-                    const vec2 velocity = field->sampleVelocity( point );
-                    const float speed = Length( velocity );
-                    if( speed > 0.025f )
-                        draw.DrawArrow( point, velocity, WIND_COLOR, std::min( 0.48f, 0.12f + 0.12f * speed ) );
-                }
+            }
             const vec2 source{ lower.x + std::min( 2.5f, 0.25f * ( upper.x - lower.x ) ), 0.0f };
             draw.DrawPoint( source, IM_COL32( 250, 200, 90, 245 ), 6.0f );
             draw.DrawLabel( source + vec2{ 0.0f, -0.45f }, "바람 소스", IM_COL32( 250, 200, 90, 245 ) );
@@ -979,7 +1229,36 @@ void rigidBodyDemoUi::drawExperimentControls()
         if( ImGui::Button( "이류 비교 프리셋 (와류 + 외력/강체 OFF)###WindAdvectionTrial" ) )
             beginWindAdvectionTrial();
         if( ImGui::Button( "현재 흐름에 와류 추가###WindVortex" ) ) addWindVortex();
-        if( ImGui::Button( "수동 추적 물질 주입###WindTracerSeed" ) ) seedWindTracer();
+        ImGui::SeparatorText( "유체 시각화 (렌더링 전용)" );
+        ImGui::Checkbox( "염료 표시###WindVisualDye", &windVisualization_.dye );
+        ImGui::SameLine();
+        ImGui::Checkbox( "속도 벡터###WindVisualVectors", &windVisualization_.vectors );
+        ImGui::Checkbox( "속도 히트맵###WindVisualSpeed", &windVisualization_.speedHeatmap );
+        ImGui::SameLine();
+        ImGui::Checkbox( "압력 히트맵###WindVisualPressure", &windVisualization_.pressureHeatmap );
+        ImGui::Checkbox( "Cut-cell / 열린 면###WindVisualCutCells", &windVisualization_.cutCells );
+        if( windVisualization_.dye )
+        {
+            ImGui::SliderFloat( "염료 기준 농도###WindVisualDyeRange",
+                &windVisualization_.dyeReference, 0.1f, 20.0f, "%.2f kg/m³" );
+            ImGui::SliderFloat( "염료 불투명도###WindVisualDyeOpacity",
+                &windVisualization_.dyeOpacity, 0.0f, 1.0f, "%.2f" );
+        }
+        if( windVisualization_.speedHeatmap )
+            ImGui::SliderFloat( "최대 속도 색상 기준###WindVisualSpeedRange",
+                &windVisualization_.speedReference, 0.1f, 100.0f, "%.2f m/s",
+                ImGuiSliderFlags_Logarithmic );
+        if( windVisualization_.pressureHeatmap )
+            ImGui::SliderFloat( "압력 차이 색상 기준###WindVisualPressureRange",
+                &windVisualization_.pressureReference, 0.1f, 1000.0f, "%.2f",
+                ImGuiSliderFlags_Logarithmic );
+        if( windVisualization_.speedHeatmap || windVisualization_.pressureHeatmap )
+            ImGui::SliderFloat( "진단 레이어 불투명도###WindVisualDebugOpacity",
+                &windVisualization_.overlayOpacity, 0.0f, 1.0f, "%.2f" );
+        ImGui::TextDisabled( "염료=실제 Tracer 농도 | 속도=열린 MAC 면의 최대 절댓값" );
+        ImGui::TextDisabled( "압력=활성 셀 평균 대비 차이 (Neumann 기준 임의)" );
+        ImGui::TextDisabled( "히트맵은 표시 범위에서 포화. 물리 속도를 제한하지 않습니다." );
+        if( ImGui::Button( "염료 주입###WindTracerSeed" ) ) seedWindTracer();
         bool sweptTracer = isWindSweptTracerRemapEnabled();
         if( ImGui::Checkbox( "이동 강체의 tracer 재배치 (실험)###WindSweptTracerRemap", &sweptTracer ) )
             setWindSweptTracerRemapEnabled( sweptTracer );
