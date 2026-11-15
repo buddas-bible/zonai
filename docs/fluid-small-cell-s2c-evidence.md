@@ -1831,6 +1831,67 @@ with comparable physical initial states and
 repeatable benchmark timing. Keep PR #326 Draft
 and all new options OFF by default.
 
+### Step-96 Capsule aperture audit: spatial aliasing isolated — 2026-11-15
+
+PR #326 commits `53063d41`, `72a977a2`, `66b161c3`, `e06fc42a` fix a **diagnostic** mismatch and add
+an explicit high-resolution, single-face time-quadrature witness. Previous
+`getSweptUTimeMeanOpenFraction(29,26)` reported **0** even though
+the endpoint U aperture was **0.000108835**. The pressure and swept-solid
+flux paths used single-Capsule analytic clipping, whereas the opt-in
+time-aperture observer used spatial midpoint stencil sampling unless
+`BuildDisjointAnalyticShapes` succeeded. The Capsule-only audit used the
+sampled fallback. The observer now selects the same analytic primitive
+clipping as the live Cut-cell geometry for single Circle/Polygon/Capsule/
+RoundedPolygon, while other geometries retain their original fallback.
+A read-only on-demand single-Capsule face query makes temporal resolution
+checks independent of the whole-field time audit. No production
+advection, pressure, Schur, solid flux or tracer model was changed.
+
+[Ubuntu Debug CI #43714973788](https://github.com/buddas-bible/zonai/actions/runs/43714973788)
+passed its 112 CTest tests and the opt-in 128-step Capsule audit.
+The endpoint-geometry analytic query agrees with the stored U(29,26)
+opening within 3e-12 in the printed control. The two guard modes
+produced the same displayed aperture values:
+
+| Midpoint time samples | Nonzero samples | Mean open fraction |
+| ---: | ---: | ---: |
+| 1 (actual accepted swept-time sample) | 1 | 0.0399289856 |
+| 16 | 16 | 0.0398327543 |
+| 64 | 64 | 0.0398324559 |
+| 256 | 256 | 0.0398324794 |
+| 1024 | 1024 | 0.0398324420 |
+| 4096 | 4096 | 0.0398324535 |
+| 16384 | 16384 | 0.0398325807 |
+
+The original **zero was spatial aliasing of the narrow opening, not
+time-midpoint aliasing** in this controlled single-Capsule case.
+The previous accepted 1-point time sample, once geometrically
+consistent, differs from the 16384-point analytic-time reference by
+approximately 0.24% of the reference. This does not prove that one
+time sample suffices for other solid trajectories or topology changes.
+
+At the same U face, raw pre/post-pressure velocities remain
+23.1379/5486.2764 m/s, while current endpoint aperture is
+0.000108835. The *nominal endpoint* face volume is
+1.94368e-5 m³ versus the **linear-endpoint velocity hypothesis**
+integrated against the sampled time aperture at 1-point resolution
+of **0.00358077 m³**. These are two diagnostic approximations;
+**neither is an actual measured fluid-particle transport or a
+conservation-certified moving-face flux**. The directly applied tracer
+transfer between the two adjacent cells is zero/negligible here;
+global tracer conservation alone is not physical local validation.
+The pressure-only frozen replay still reproduces the observed
+endpoint flux, not a physical resolution of its scale.
+
+**Next bounded step:** separate the exact single-face space-time
+solid swept integral from reconciled displacement and the
+region-compatibility-adjusted pressure source at the identical
+step-96 checkpoint. Investigate conservative time-consistent
+moving-face/source treatment on independent frozen copies while
+preserving total source and Body impulse; then verify coupled World
+trajectories at multiple cadences. Keep #326 Draft and every new
+physical option OFF.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
