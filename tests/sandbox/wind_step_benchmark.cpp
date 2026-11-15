@@ -6129,6 +6129,8 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false, bool pressure
                             // an already-swept donor volume a second time.
                             std::vector<double> donorRemainingVolume( cells, 0.0 );
                             std::vector<double> donorRemainingMass( cells, 0.0 );
+                            std::vector<double> scratchVolumeDelta( cells, 0.0 );
+                            std::vector<double> scratchMassDelta( cells, 0.0 );
                             std::vector<double> requiredPairBalance( cells, 0.0 );
                             double requestedAbsolute = 0.0, acceptedAbsolute = 0.0;
                             double signedPairVolume = 0.0, signedPairMass = 0.0;
@@ -6232,6 +6234,10 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false, bool pressure
                                     remainingMass, acceptedVolume * concentration );
                                 donorRemainingVolume[donor] -= acceptedVolume;
                                 donorRemainingMass[donor] -= acceptedMass;
+                                scratchVolumeDelta[donor] -= acceptedVolume;
+                                scratchVolumeDelta[recipient] += acceptedVolume;
+                                scratchMassDelta[donor] -= acceptedMass;
+                                scratchMassDelta[recipient] += acceptedMass;
                                 acceptedAbsolute += acceptedVolume;
                                 // Book both sides, even though we DO NOT
                                 // mutate either cell of the actual Field.
@@ -6275,10 +6281,29 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false, bool pressure
                                     rootResidual );
                             }
                             double requiredL1 = 0.0;
+                            double inventoryDeltaVolume = 0.0, inventoryDeltaMass = 0.0;
                             for( int cell = 0; cell < cells; ++cell )
-                                if( component[cell] >= 0 && root[cell] != cell )
+                            {
+                                if( component[cell] < 0 ) continue;
+                                if( root[cell] != cell )
                                     requiredL1 += std::abs( requiredPairBalance[cell] );
+                                inventoryDeltaVolume += scratchVolumeDelta[cell];
+                                inventoryDeltaMass += scratchMassDelta[cell];
+                                const int x = cell % width, y = cell / width;
+                                const double initialVolume = static_cast<double>(
+                                    projected.getCellFluidFraction( x, y ) ) * h * h;
+                                const double initialMass =
+                                    projected.getTracerCellMass( x, y );
+                                if( initialVolume + scratchVolumeDelta[cell] < -1.0e-12 ||
+                                    initialMass + scratchMassDelta[cell] < -1.0e-12 ||
+                                    donorRemainingVolume[cell] < -1.0e-12 ||
+                                    donorRemainingMass[cell] < -1.0e-12 )
+                                    throw std::runtime_error(
+                                        "hypothetical pooled transfer overdrawn inventory" );
+                            }
                             if( std::abs( requiredL1 - virtualL1 ) > 1.0e-8 ||
+                                std::abs( inventoryDeltaVolume ) > 1.0e-12 ||
+                                std::abs( inventoryDeltaMass ) > 1.0e-12 ||
                                 std::abs( signedPairVolume ) > 1.0e-12 ||
                                 std::abs( signedPairMass ) > 1.0e-12 ||
                                 acceptedAbsolute > requestedAbsolute + 1.0e-12 )
