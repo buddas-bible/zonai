@@ -2140,6 +2140,123 @@ Body/joint trajectories before any solver integration.
 Preserve existing S0–S9 roadmap and keep PR #326 Draft,
 #322 independent, runtime physics defaults unchanged.
 
+### Frozen pressure-pool internal exchange vs time-open face and post-transport inventory — 2026-11-16
+
+**Why:** the independent noncoupled pressure Galerkin oracle at the real rotating
+Capsule **step 96/128**, U(29,26), proved it can suppress a raw
+~5.5 km/s pressure velocity by merging one shrinking sliver with its
+neighbor, but left **~3.16e-5 m³** of pointwise continuity
+unfulfilled. That is a group-row omission, **not** an observed physical
+tracer transfer or evidence that all that water is still resident in
+the sliver.
+
+**Implemented opt-in, no production/World changes:**
+- Commit `893388e1` extends the existing separate
+  `--small-cell-capsule-noncoupled-pressure-oracle`, not the ordinary
+  `--small-cell-capsule-hotspot-ledger-audit`. For every grouped
+  child (c), after the independently solved `P^T L P` equation,
+  it calculates the signed child-outward **necessary internal exchange**
+  `b[c] - (A_full * Pq)[c]`, gives the connected parent the exact
+  opposite signed request, and reconstructs the actual face from
+  neighboring cell indices.
+- A **256-midpoint** independently analytic moving-Capsule face
+  aperture integral over *the same* step 95→96 (not the endpoint
+  aperture and not a measured (u(t))) provides a `meanOpen`.
+  It prints the speed **needed** to move the required amount if velocity
+  were time-constant, and a distinct **reference capacity** using
+  the stored *pre-pressure* face speed as a stationary hypothetical
+  proxy. These are explicitly NOT actual time-resolved volume fluxes,
+  guaranteed speed bounds, or a replacement for moving-solid swept
+  flux.
+- A hypothetical **additional** remap, evaluated *after the normal
+  step's swept + MAC tracer transport*, is limited by both the
+  reference-time-open face capacity and the donor's **remaining
+  endpoint cell volume**. Candidate tracer kg use the donor's
+  current stored mass/volume, and are additionally limited by the
+  donor's remaining kg. Both sides are recorded with equal/opposite
+  signed volume and mass. No real Field state or tracer is mutated.
+- Commit `0f4755a3` strengthens this to a scratch-array inventory
+  test for all active cells: net hypothetical volume and mass deltas
+  must each sum to zero, no donor can send more than its *original*
+  post-transport inventory even when several children share a donor,
+  no resulting hypothetical inventory can go negative, and the
+  total requested child exchanges must equal the earlier independently
+  reported `virtualInternalExchangeVolume` within 1e-8 m³.
+  This check is **bookkeeping conservation**, not physical
+  transported-fluid acceptance.
+
+**First cross-platform code-verification:** [CI #43759253449](https://github.com/buddas-bible/zonai/actions/runs/43759253449)
+passed Ubuntu Debug **112/112**, Windows Debug **115/115** and
+Windows Release **52/52**, including the new
+`capsule_hotspot_internal_transfer` rows on both platforms.
+The additional scratch-inventory regression is [CI #43759839143](https://github.com/buddas-bible/zonai/actions/runs/43759839143)
+(consult current job status; it was executing when this evidence was prepared).
+
+| Step-96 U(29,26), no swept-geometry correction | Ubuntu Debug | Windows Release |
+| --- | ---: | ---: |
+| Grouped child→parent cell index | 1692→1693 | 1692→1693 |
+| Required child→parent internal volume (m³) | 3.16451948118e-5 | 3.16451967589e-5 |
+| Aperture at step START | 0.0791688242854 | 0.0791688242854 |
+| Aperture at step END | 0.000108834974526 | 0.00010883367213 |
+| 256-point **time-mean aperture** | 0.0398324793615 | 0.0398324850844 |
+| Existing **pre-pressure** U velocity (m/s) | 23.1379013062 | 23.1378936768 |
+| Constant `u` hypothetically required using time-mean opening (m/s) | 24.4057198924 | 24.4057178876 |
+| Required using ENDPOINT opening held for entire step (m/s) | 8932.24203113 | 8932.34947153 |
+| Pre-pressure speed × time-mean area **proxy** (m³) | 3.00013028748e-5 | 3.00012972927e-5 |
+| Donor volume at step START (m³) | 3.16900877806e-5 | 3.16900877806e-5 |
+| Donor volume at step END (m³) | 5.87675394459e-11 | 5.87661447282e-11 |
+| Donor stored **after both tracer stages** (kg) | 0 | 0 |
+| Bounded **extra post-step** hypothetical transfer (m³) | 5.87675394459e-11 | 5.87661447282e-11 |
+| Remaining omitted child volume after this extra transfer (m³) | 3.16451360443e-5 | 3.16451379927e-5 |
+| Net recorded pair volume and tracer kg | **0 / 0** | **0 / 0** |
+
+With optional swept-geometry reconciliation ON in the *one-step
+matched clone*, required child volume is `3.15640535679e-5 m³`
+Ubuntu / `3.15640555106e-5 m³` Windows. The inferred
+time-mean constant velocity is `24.3431 m/s`. Geometry is
+identical, so time-open aperture and current tiny donor volume
+remain essentially the same. The paired hypothetical delta remains
+zero. Windows measured a **numerically negligible**
+`3.2614e-231 kg` in the corrected clone's donor after transport,
+not evidence of a substantial releasable tracer reserve.
+
+**Interpretation and NON-acceptance:**
+1. A shrinking sliver's initial volume `3.169e-5 m³` is close to
+   the group's missing per-cell continuity `3.1645e-5 m³`.
+   It should be accounted for **during** the moving-interface
+   substep; it is **not** proof of an additional `3.1645e-5 m³`
+   physically still inside the *end* cell. The existing tracer
+   remapper has already run, and the donor carries zero (or
+   numerically negligible) remaining tracer. A naive extra
+   post-step remap would double-count prior transport.
+2. At the observed pre-pressure speed, the time-open face proxy is
+   `3.00013e-5 m³`, near but smaller than the necessary internal
+   exchange. Since **true within-step fluid U(t) is unknown**, do
+   NOT call this a proven physical capacity limit or declare
+   `24.4 m/s` the physically correct solved speed. In particular
+   aperture integrals `∫A(t)dt` and `∫A(t)u(t)dt` are different
+   quantities.
+3. The endpoint-only interpretation instead demands ~8.9 km/s
+   *for the whole-step equivalent exchange*, explaining the severe
+   discretization sensitivity without proving the cause of every
+   velocity spike or physical mass conservation. The actual
+   noncoupled field, grouped oracle and tracer-remap histories are
+   separate numerical processes.
+4. The pressure pooling still violates pointwise continuity and
+   changes its independent fluid impulse proxy. This ledger does
+   not calculate an equal/opposite pressure force on a movable
+   Body. **Do not enable the pool in ordinary physics or claim
+   stable coupled FSI, water, sail, cloth or joints.**
+
+**Next gated work:** measure or solve an explicitly time-consistent
+face flux and moving-solid source on the same split substep, preserving
+the integration of open area AND velocity, and compare it against
+actually applied swept-tracer exchange **before** any new transport
+is added. Then test local/region continuity, Body+wall impulse
+closure, positivity, closed/reopening pockets, h/substep
+convergence and disabled-mode performance. Keep PR #326 Draft
+and PR #322 independent, no default physics changes.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
