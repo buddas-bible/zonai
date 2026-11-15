@@ -1611,6 +1611,105 @@ volume, tracer transport, PCG conditioning and performance
 acceptance. Do not change any default or broaden to
 multi-Shape/disjoint ownership before these gates.
 
+### Opt-in convex full-coverage guard and active-mask parity — 2026-11-15
+
+Commits [`907a7368`](https://github.com/buddas-bible/zonai/commit/907a73681b73d698894f0f522890a77c4a60506f)
+and [`91308434`](https://github.com/buddas-bible/zonai/commit/91308434ffead8574dd254495b1e8a29ba265ced)
+introduce `setAnalyticCapsuleFullCoverageGuardEnabled(bool)` as an
+independent **OFF-by-default** experimental policy, effective only
+with single-Capsule **double** analytic geometry enabled. When that
+geometry's calculated fluid fraction is strictly between 0 and 1,
+all **four stored shared MAC apertures** must first be exactly closed.
+Only then a separate, original-endpoint, double-precision
+point-to-segment distance witness checks that **all four rectangular
+cell corners lie strictly inside** the convex Capsule by a
+64-double-ULP scaled arithmetic margin. By convexity this certifies
+the **entire cell** is covered; the cell's spurious positive fraction
+is set to 0 before moving-volume history and pressure sources are
+assembled. Neither the value of the original fraction nor an
+arbitrary near-zero fraction threshold decides occupancy. The actual
+shared-face aperture data are untouched. Switching the option
+invalidates geometry and volume histories.
+
+Commit [`7b742662`](https://github.com/buddas-bible/zonai/commit/7b74266235b36d274e1f88e7e4febb22286f6c20)
+adds a **four-mode** comparison of sampled, float analytic, double
+analytic, and double analytic + guard policies. Independent signed
+distance, four-face identity, geometry/pressure-source/swept ledgers,
+and an independently assembled frozen zero-MAC PCG check that
+corrected cells are certified fully covered and that no confidently
+open cell was deleted.
+
+[CI run #43692261160](https://github.com/buddas-bible/zonai/actions/runs/43692261160)
+**passed Windows Release and Ubuntu Debug**.
+
+| h=0.125m, checkpoint | Double active (Windows / Ubuntu) | Guarded active (both) | Corrected cells (Windows / Ubuntu) | Guarded false zeros / false positives (both) | Frozen PCG iterations (both policies) |
+| --- | --- | ---: | --- | --- | ---: |
+| 11/16 | 4080 / 4080 | **4078** | 2 / 2 | **0 / 0** | 214 |
+| 12/16 | 4081 / 4084 | **4077** | 4 / 7 | **0 / 0** | 217 |
+
+At h=0.25m both checkpoints require no corrections from the
+already double-geometry path. The small genuine open wedge at
+h=.125, checkpoint12, cell (28,26) **remains active**, and both
+preexisting active-to-inactive pressure anchors remain absent in
+the guarded mode. Shared face apertures compare exactly equal
+between the double and guarded modes at both grid resolutions.
+All independent frozen PCG checks converged.
+
+At h=.125m/checkpoints 11 and 12, the L1 differences in
+pressure-source volumes and swept divergences were **0** in
+both OSes. Snapshot-volume L1 changes were at most
+3.47e-17m³, consistent with removal of positive machine-rounding
+remainders in fully covered cells. This is **not** validation of
+moving-solid geometric mass conservation or of tracer remapping
+in a two-way coupled World.
+
+The diagnostic wall-clock profiler totals for 128 prescribed
+Fluid substeps (and separate copies of the pressure solve):
+- Ubuntu Debug, h=.125: `geometry` 50.903ms (double) vs
+  53.139ms (guarded); `total` 5285.813ms vs 5249.578ms.
+- Windows Release, h=.125: `geometry` 15.275ms (double)
+  vs 14.206ms (guarded); `total` 730.267ms vs 655.409ms.
+
+These **single-run CI timings are not a performance acceptance
+or reliable proof of speedup/slowdown**: different compilers, noisy
+runners and sequential trial order dominate differences that are
+small compared with the pressure solve. The guarded policy scans
+the grid after area and face computation, but executes its more
+expensive corner witness only on positive, non-full cells with
+four closed MAC faces. Repeat controlled performance runs before
+broader enabling.
+
+Commit [`c1f7f84a`](https://github.com/buddas-bible/zonai/commit/c1f7f84af993f5698de38ddc764cf5e3618ccd6a)
+adds a row-major FNV-1a **binary active-mask** checksum for each
+mode/checkpoint, not merely the count. In
+[CI #43692996036](https://github.com/buddas-bible/zonai/actions/runs/43692996036),
+**both platforms passed** and the guarded masks matched across
+toolchains exactly at the two h=.125 checkpoints:
+
+| Checkpoint | Windows Release FNV-1a 64 | Ubuntu Debug FNV-1a 64 |
+| --- | --- | --- |
+| 11/16 | `8787b49d7bcf8e49` | `8787b49d7bcf8e49` |
+| 12/16 | `8d0ee9a33f07407c` | `8d0ee9a33f07407c` |
+
+The unguarded double mask at 12/16 instead differed across
+toolchains (`6b305b093bd54132` Windows,
+`add3e65393a27a17` Ubuntu). A matching 64-bit checksum
+is strong evidence for matching masks in **this specific fixed
+trajectory**, not a formal universal geometry proof. Commit
+[`5e132955`](https://github.com/buddas-bible/zonai/commit/5e132955a415f9bae7005680e082f7dd8550af5d)
+pins these observed values as per-toolchain regression goldens.
+
+**Remaining acceptance gates:** test moving/rotating single-Capsule
+volume and tracer transport against independent swept-surface and
+face-capacity references at near-disappearing cells; independently
+compare the *actual* pressure source and full rigid Body response
+under matched physical initial conditions. The World8/Fluid4
+multi-Shape experiment currently exercises a different disjoint
+analytic geometry path and is **not** covered by this single-Capsule
+guard. Neither double geometry nor this guard is enabled by
+default; PR #326 remains Draft pending physical, two-way coupling
+and repeatable performance gates.
+
 ### Remaining S2c acceptance gate
 
 1. **Physical acceptance, not just mass conservation:** compare the new endpoint-aperture transfer with the *time-integrated open-face* fluid capacity, moving-solid surface flux, pressure source and local concentration. Identify false evacuation through tiny apertures and unphysical redistribution into inflowing neighbors. Treat total tracer mass as necessary but insufficient.
