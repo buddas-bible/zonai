@@ -5213,9 +5213,6 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
     capsule.angularVelocity = ( endAngle - startAngle ) / totalDt;
     for( fluidField2* field : fields )
     {
-        // Required for mean-open and linear-in-time velocity-proxy witnesses;
-        // never enabled on the original moving-Capsule comparison path.
-        if( hotspotLedger ) field->setSweptApertureAuditEnabled( true );
         if( field->getSmallCellPressureMergeFraction() != 0.0f ||
             field->isConnectedResidualTracerRemapEnabled() ||
             field->isCutCellCoupledProjectionEnabled() )
@@ -5353,12 +5350,12 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
     if( hotspotLedger )
     {
         std::puts( "capsule_hotspot_cell,mode,side,current_fraction,current_volume_m3,"
-            "snapshot_delta_m3,swept_outward_m3,pressure_source_m3,"
+            "snapshot_delta_m3,reconciled_swept_outward_m3,pressure_source_m3,"
             "source_minus_snapshot_m3,pre_mac_outward_m3,"
-            "post_mac_outward_m3,pre_residual_m3,post_residual_m3" );
+            "post_mac_outward_m3,pre_flux_plus_current_source_m3,post_residual_m3" );
         std::puts( "capsule_hotspot_face,mode,pre_velocity_mps,post_velocity_mps,"
             "pressure_delta_mps,pressure_impulse_proxy_Ns,endpoint_open,"
-            "time_mean_open,nominal_endpoint_flux_m3,"
+            "time_mean_open,mean_open_capacity_m3_per_mps,nominal_endpoint_flux_m3,"
             "linear_time_proxy_flux_m3,small_cell_volume_m3,"
             "nominal_to_cell_volume_ratio,replay_minus_live_flux_m3,"
             "global_compatibility_m3ps" );
@@ -5394,6 +5391,9 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
         for( int mode = 0; mode < 2; ++mode )
         {
             fluidField2& field = *fields[mode];
+            // Only the witness step needs the extra time-quadrature grids.
+            if( hotspotLedger && activeStep == hotspotStep )
+                field.setSweptApertureAuditEnabled( true );
             std::array<fluidObstacleForce2, 1> forces{};
             field.step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
                 forces, 120 );
@@ -5439,6 +5439,8 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                     hotspotX, hotspotY );
                 const double proxy = field.getSweptULinearVelocityProxyVolume(
                     hotspotX, hotspotY, subDt );
+                const double meanOpenCapacity =
+                    static_cast<double>( h ) * subDt * meanOpen;
                 const double smallVolume = static_cast<double>(
                     postLeft.currentFraction ) * h * h;
                 const double impulseProxy = static_cast<double>( h ) * h * open *
@@ -5464,15 +5466,18 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                         b.pressureSourceDeltaVolume - b.snapshotDeltaVolume,
                         a.macOutwardVolume[direction],
                         b.macOutwardVolume[direction],
-                        a.pressureResidualVolume, b.pressureResidualVolume );
+                        // Frozen cutCellVolumeRate_ belongs to the prior solve.
+                        // Combine its CURRENT projected source with frozen MAC.
+                        a.macNetOutwardVolume + b.pressureSourceDeltaVolume,
+                        b.pressureResidualVolume );
                 }
                 std::printf( "capsule_hotspot_face,%d,"
-                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
                     "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
                     mode, face.afterAdvection, face.afterPressure,
                     face.afterPressure - face.afterAdvection,
-                    impulseProxy, open, meanOpen, faceVolume, proxy,
-                    smallVolume, ratio, replayFluxError,
+                    impulseProxy, open, meanOpen, meanOpenCapacity,
+                    faceVolume, proxy, smallVolume, ratio, replayFluxError,
                     field.getCutCellPressure().compatibilityCorrection );
                 std::printf( "capsule_hotspot_tracer,%d,"
                     "%.12g,%.12g,%.12g,%.12g,"
@@ -5488,6 +5493,7 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false )
                     !std::isfinite( impulseProxy ) )
                     throw std::runtime_error( "nonfinite hotspot frozen ledger" );
                 record.frozen.reset();
+                field.setSweptApertureAuditEnabled( false );
             }
             const auto summary = field.getCutCellVolumeSummary( subDt );
             const auto flow = field.getFlowAudit( subDt );
