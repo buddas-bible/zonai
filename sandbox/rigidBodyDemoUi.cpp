@@ -191,7 +191,7 @@ void drawWindScalarLayers( debugDraw& draw, const fluidField2& field,
             {
                 float peakSpeed = 0.0f;
                 double peakPressure = 0.0;
-                bool active = false;
+                bool active = false, invalid = false;
                 for( int y = ty * stride; y < std::min( height, ( ty + 1 ) * stride ); ++y )
                     for( int x = tx * stride; x < std::min( width, ( tx + 1 ) * stride ); ++x )
                     {
@@ -201,15 +201,18 @@ void drawWindScalarLayers( debugDraw& draw, const fluidField2& field,
                         {
                             const float pressure = field.getCellPressureForVisualization( x, y );
                             const double difference = static_cast<double>( pressure ) - meanPressure;
-                            if( std::isfinite( difference ) &&
-                                std::abs( difference ) > std::abs( peakPressure ) )
+                            if( !std::isfinite( difference ) )
+                                invalid = true;
+                            else if( std::abs( difference ) > std::abs( peakPressure ) )
                                 peakPressure = difference;
                         }
                         if( !showSpeed ) continue;
                         const auto addFace = [&]( const std::optional<float>& speed, float opening )
                         {
-                            if( opening > 0.0f && speed && std::isfinite( *speed ) )
-                                peakSpeed = std::max( peakSpeed, std::abs( *speed ) );
+                            if( opening <= 0.0f || !speed ) return;
+                            if( !std::isfinite( *speed ) )
+                                invalid = true;
+                            else peakSpeed = std::max( peakSpeed, std::abs( *speed ) );
                         };
                         // Only OPEN fluid-fluid faces; closed solid-wall
                         // boundary velocities are not fluid speed hotspots.
@@ -234,9 +237,20 @@ void drawWindScalarLayers( debugDraw& draw, const fluidField2& field,
                         static_cast<float>( std::min( width, ( tx + 1 ) * stride ) ),
                         static_cast<float>( std::min( height, ( ty + 1 ) * stride ) ) }
                 };
-                if( showSpeed ) draw.DrawFilledAABB( bounds, speedColor( peakSpeed, settings ) );
-                if( showPressure ) draw.DrawFilledAABB( bounds,
-                    pressureColor( static_cast<float>( peakPressure ), settings ) );
+                // A saturated magenta tile is an invalid numerical value,
+                // distinct from the red color of a large but finite speed.
+                constexpr ImU32 INVALID_COLOR = IM_COL32( 255, 0, 220, 225 );
+                if( showSpeed )
+                    draw.DrawFilledAABB( bounds,
+                        invalid ? INVALID_COLOR : speedColor( peakSpeed, settings ) );
+                if( showPressure )
+                {
+                    const double limit = 2.0 * std::max( settings.pressureReference, 0.001f );
+                    const float display = static_cast<float>(
+                        std::clamp( peakPressure, -limit, limit ) );
+                    draw.DrawFilledAABB( bounds,
+                        invalid ? INVALID_COLOR : pressureColor( display, settings ) );
+                }
             }
 
     if( settings.cutCells )
