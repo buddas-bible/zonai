@@ -1280,6 +1280,9 @@ void rigidBodyDemoUi::drawExperimentControls()
         ImGui::TextDisabled( "염료=실제 Tracer 농도 | 속도=열린 MAC 면의 최대 절댓값" );
         ImGui::TextDisabled( "압력=활성 셀 평균 대비 차이 (Neumann 기준 임의)" );
         ImGui::TextDisabled( "히트맵은 표시 범위에서 포화. 물리 속도를 제한하지 않습니다." );
+        ImGui::TextColored( ImVec4{ 0.95f, 0.35f, 0.9f, 1.0f },
+            "자홍색 = 비유한 속도/압력 진단값" );
+        ImGui::TextDisabled( "염료가 아직 없으면 아래 버튼으로 주입하세요." );
         if( ImGui::Button( "염료 주입###WindTracerSeed" ) ) seedWindTracer();
         bool sweptTracer = isWindSweptTracerRemapEnabled();
         if( ImGui::Checkbox( "이동 강체의 tracer 재배치 (실험)###WindSweptTracerRemap", &sweptTracer ) )
