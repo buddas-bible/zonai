@@ -4716,6 +4716,23 @@ void auditFrozenCapsuleGeometryComparison()
         "double_pressure_source_m3,float_swept_divergence_m3,"
         "double_swept_divergence_m3,float_W,float_E,float_S,float_N,"
         "double_W,double_E,double_S,double_N" );
+    std::puts( "capsule_full_coverage_summary,cell_m,checkpoint_16,"
+        "double_active,guard_active,proven_covered_double,"
+        "proven_covered_guard,guard_removed,guard_false_zero,"
+        "guard_anchor_faces,guard_pcg_iterations,guard_pcg_converged,"
+        "fraction_removed_area_m2,pressure_source_L1_m3,"
+        "snapshot_L1_m3,swept_divergence_L1_m3,"
+        "max_shared_face_difference,pressure_target_face_difference_m3" );
+    std::puts( "capsule_full_coverage_cell,cell_m,checkpoint_16,x,y,"
+        "double_fraction,guard_fraction,corner_class,"
+        "min_corner_clearance_m,max_corner_clearance_m,"
+        "double_previous,guard_previous,"
+        "double_snapshot_delta_m3,guard_snapshot_delta_m3,"
+        "double_pressure_source_m3,guard_pressure_source_m3,"
+        "double_swept_divergence_m3,guard_swept_divergence_m3" );
+    std::puts( "capsule_full_coverage_timing,cell_m,mode,"
+        "steps,geometry_total_ms,swept_total_ms,pressure_total_ms,"
+        "fluid_total_ms" );
     std::puts( "capsule_geometry_anchor_pair,cell_m,checkpoint_16,axis,x,y,"
         "sampled_open,analytic_open,sampled_fraction_a,sampled_fraction_b,"
         "analytic_fraction_a,analytic_fraction_b,"
@@ -4726,14 +4743,17 @@ void auditFrozenCapsuleGeometryComparison()
     {
         const int segments = static_cast<int>( std::lround( 0.25f / h ) );
         const float subDt = totalDt / fluidSteps;
-        std::array<std::array<capture, 2>, 3> observations{};
-        for( int mode = 0; mode < 3; ++mode )
+        std::array<std::array<capture, 2>, 4> observations{};
+        std::array<fluidStepTiming2, 4> timings{};
+        for( int mode = 0; mode < 4; ++mode )
         {
             fluidField2 field{ 32 * segments, 32 * segments, h, { -4.0f, -4.0f } };
             field.setCutCellProjectionEnabled( true );
             field.setDisjointAnalyticCutCellEnabled( true );
             field.setAnalyticCapsuleCutCellEnabled( mode != 0 );
-            field.setAnalyticCapsuleDoubleGeometryEnabled( mode == 2 );
+            field.setAnalyticCapsuleDoubleGeometryEnabled( mode >= 2 );
+            field.setAnalyticCapsuleFullCoverageGuardEnabled( mode == 3 );
+            field.setStepTimingEnabled( mode >= 2 );
             if( field.getSmallCellPressureMergeFraction() != 0.0f ||
                 field.isConnectedResidualTracerRemapEnabled() )
                 fail( "experimental pressure or tracer physics enabled in geometry control" );
@@ -4759,7 +4779,8 @@ void auditFrozenCapsuleGeometryComparison()
                 const int slot = cp == checkpoints[0] ? 0 : 1;
                 capture& row = observations[mode][slot];
                 if( row.valid || frozen.isAnalyticCapsuleCutCellEnabled() != ( mode != 0 ) ||
-                    frozen.isAnalyticCapsuleDoubleGeometryEnabled() != ( mode == 2 ) ||
+                    frozen.isAnalyticCapsuleDoubleGeometryEnabled() != ( mode >= 2 ) ||
+                    frozen.isAnalyticCapsuleFullCoverageGuardEnabled() != ( mode == 3 ) ||
                     frozen.getCutCellTransition().usedDisjointAnalyticGeometry )
                     fail( "invalid Capsule frozen geometry checkpoint" );
 
@@ -4853,7 +4874,14 @@ void auditFrozenCapsuleGeometryComparison()
                     ( endAngle - startAngle ) );
                 field.step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
                     feedback, 120 );
+                if( mode >= 2 ) timings[mode].accumulate( field.getStepTiming() );
             }
+            if( mode >= 2 )
+                std::printf( "capsule_full_coverage_timing,%.9g,%d,%d,"
+                    "%.12g,%.12g,%.12g,%.12g\n",
+                    h, mode, fluidSteps,
+                    timings[mode].geometry, timings[mode].swept,
+                    timings[mode].pressure, timings[mode].total );
             if( !observations[mode][0].valid || !observations[mode][1].valid )
                 fail( "missing Capsule geometry checkpoint" );
         }
@@ -4896,6 +4924,13 @@ void auditFrozenCapsuleGeometryComparison()
                 analytic.pressure.targetFaceVolume - sampled.pressure.targetFaceVolume );
 
             const capture& precise = observations[2][slot];
+            const capture& guarded = observations[3][slot];
+            if( precise.width != guarded.width ||
+                precise.height != guarded.height ||
+                precise.cells.size() != guarded.cells.size() ||
+                precise.uOpen != guarded.uOpen ||
+                precise.vOpen != guarded.vOpen )
+                fail( "full-coverage guard modified shared face geometry" );
             if( precise.width != analytic.width ||
                 precise.height != analytic.height ||
                 precise.cells.size() != analytic.cells.size() ||
@@ -4922,11 +4957,21 @@ void auditFrozenCapsuleGeometryComparison()
                 analytic.last.y != precise.last.y ||
                 analytic.radius != precise.radius ||
                 analytic.origin.x != precise.origin.x ||
-                analytic.origin.y != precise.origin.y )
+                analytic.origin.y != precise.origin.y ||
+                precise.first.x != guarded.first.x ||
+                precise.first.y != guarded.first.y ||
+                precise.last.x != guarded.last.x ||
+                precise.last.y != guarded.last.y ||
+                precise.radius != guarded.radius ||
+                precise.origin.x != guarded.origin.x ||
+                precise.origin.y != guarded.origin.y )
                 fail( "different actual Capsule endpoints in geometry precision A/B" );
             int floatFalseZero = 0, doubleFalseZero = 0;
             int floatFalsePositive = 0, doubleFalsePositive = 0;
             int uncertain = 0, printed = 0;
+            int guardedFalseZero = 0, guardedFalsePositive = 0, guardRemoved = 0;
+            double guardRemovedArea = 0.0, guardSourceL1 = 0.0;
+            double guardSnapshotL1 = 0.0, guardSweptL1 = 0.0;
             double maxFalseZero = 0.0, maxFalsePositiveDepth = 0.0;
             const int width = analytic.width, height = analytic.height;
             for( int y = 0; y < height; ++y )
@@ -4938,6 +4983,43 @@ void auditFrozenCapsuleGeometryComparison()
                         precise.origin, h, x, y );
                     const bool floatActive = analytic.cells[i] > 0.0f;
                     const bool doubleActive = precise.cells[i] > 0.0f;
+                    const bool guardActive = guarded.cells[i] > 0.0f;
+                    guardedFalseZero += !guardActive && witness.classification == 1;
+                    guardedFalsePositive += guardActive && witness.classification == -1;
+                    if( doubleActive && !guardActive )
+                    {
+                        if( witness.classification != -1 )
+                            fail( "full-coverage guard deleted an unproven solid cell" );
+                        const auto closedFaces = [&]( const capture& row )
+                        {
+                            return row.uOpen[y * ( width + 1 ) + x] == 0.0f &&
+                                row.uOpen[y * ( width + 1 ) + x + 1] == 0.0f &&
+                                row.vOpen[y * width + x] == 0.0f &&
+                                row.vOpen[( y + 1 ) * width + x] == 0.0f;
+                        };
+                        if( !closedFaces( precise ) || !closedFaces( guarded ) )
+                            fail( "full-coverage guard removed open MAC-face cell" );
+                        ++guardRemoved;
+                        guardRemovedArea += static_cast<double>( precise.cells[i] ) * h * h;
+                        std::printf( "capsule_full_coverage_cell,%.9g,%d,%d,%d,"
+                            "%.12g,%.12g,%d,%.12g,%.12g,"
+                            "%.12g,%.12g,%.12g,%.12g,"
+                            "%.12g,%.12g,%.12g,%.12g\n",
+                            h, cp, x, y, precise.cells[i], guarded.cells[i],
+                            witness.classification, witness.minClearance,
+                            witness.maxClearance,
+                            precise.previousCells[i], guarded.previousCells[i],
+                            precise.snapshotDeltas[i], guarded.snapshotDeltas[i],
+                            precise.sources[i], guarded.sources[i],
+                            precise.sweptDivergences[i], guarded.sweptDivergences[i] );
+                    }
+                    else if( precise.cells[i] != guarded.cells[i] )
+                        fail( "full-coverage guard modified unguarded cell fraction" );
+                    guardSourceL1 += std::abs( precise.sources[i] - guarded.sources[i] );
+                    guardSnapshotL1 += std::abs(
+                        precise.snapshotDeltas[i] - guarded.snapshotDeltas[i] );
+                    guardSweptL1 += std::abs(
+                        precise.sweptDivergences[i] - guarded.sweptDivergences[i] );
                     const bool floatFalseZeroHere =
                         !floatActive && witness.classification == 1;
                     const bool doubleFalseZeroHere =
@@ -5001,6 +5083,22 @@ void auditFrozenCapsuleGeometryComparison()
             if( !std::isfinite( maxFalseZero ) ||
                 !std::isfinite( maxFalsePositiveDepth ) )
                 fail( "nonfinite independent Capsule topology witness" );
+            if( guardedFalseZero != 0 || guardedFalsePositive != 0 ||
+                guarded.anchors != precise.anchors ||
+                !guarded.pressure.converged ||
+                guarded.active != precise.active - guardRemoved )
+                fail( "full-coverage guarded Capsule geometry/pressure regression" );
+            std::printf( "capsule_full_coverage_summary,%.9g,%d,"
+                "%d,%d,%d,%d,%d,%d,%d,%d,%d,"
+                "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                h, cp, precise.active, guarded.active,
+                doubleFalsePositive, guardedFalsePositive,
+                guardRemoved, guardedFalseZero, guarded.anchors,
+                guarded.pressure.iterations, guarded.pressure.converged ? 1 : 0,
+                guardRemovedArea, guardSourceL1, guardSnapshotL1,
+                guardSweptL1, 0.0,
+                guarded.pressure.targetFaceVolume -
+                    precise.pressure.targetFaceVolume );
             // A strictly exterior corner proves positive open area for a
             // convex Capsule. This assertion is checked on both toolchains;
             // false-positive fully covered cells are still informational,
