@@ -5184,6 +5184,245 @@ void auditFrozenCapsuleGeometryComparison()
     }
 }
 
+// Live prescribed-motion complement to the frozen zero-MAC geometry oracle.
+// Both fields receive identical transforms, velocity sources and tracer seed;
+// only the convex full-coverage guard differs. Pressure/advective histories
+// are separately evolved and the obstacle is KINEMATIC, so returned forces
+// are observations, not an integrated two-way World/body trajectory.
+void auditMovingCapsuleGuardTransport()
+{
+    constexpr float h = 0.125f;
+    constexpr float totalDt = 1.0f / 30.0f;
+    constexpr int steps = 128;
+    constexpr float subDt = totalDt / steps;
+    constexpr float startAngle = 0.18f, endAngle = 1.28f;
+    constexpr vec2 center{ -0.20f, -0.12f };
+
+    fluidField2 withoutGuard{ 64, 64, h, { -4.0f, -4.0f } };
+    withoutGuard.setCutCellProjectionEnabled( true );
+    withoutGuard.setAnalyticCapsuleCutCellEnabled( true );
+    withoutGuard.setAnalyticCapsuleDoubleGeometryEnabled( true );
+    withoutGuard.setSweptTracerRemapEnabled( true );
+    fluidField2 withGuard = withoutGuard;
+    withGuard.setAnalyticCapsuleFullCoverageGuardEnabled( true );
+    std::array<fluidField2*, 2> fields{{ &withoutGuard, &withGuard }};
+    fluidShapeObstacle2 capsule{
+        capsule2{ { -0.63f, 0.0f }, { 0.63f, 0.0f }, 0.19f },
+        { center, rot2::FromRadians( startAngle ) }, center,
+        {}, 0.0f, 0.0f, 0.0f };
+    capsule.angularVelocity = ( endAngle - startAngle ) / totalDt;
+    for( fluidField2* field : fields )
+    {
+        if( field->getSmallCellPressureMergeFraction() != 0.0f ||
+            field->isConnectedResidualTracerRemapEnabled() ||
+            field->isCutCellCoupledProjectionEnabled() )
+            throw std::runtime_error( "moving Capsule transport control enabled unrelated physics" );
+        std::array<fluidObstacleForce2, 1> forces{};
+        field->step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+            forces, 120 );
+    }
+
+    // Seed only completely fluid cells near the swept Capsule region, so
+    // both policies start with the same EXACT stored tracer mass.
+    int seeded = 0;
+    for( int y = 24; y <= 39; ++y )
+        for( int x = 23; x <= 41; ++x )
+        {
+            if( withoutGuard.getCellFluidFraction( x, y ) != 1.0f ||
+                withGuard.getCellFluidFraction( x, y ) != 1.0f ) continue;
+            const double dx = ( x + 0.5 - 31.0 ) * h;
+            const double dy = ( y + 0.5 - 31.0 ) * h;
+            const float concentration = static_cast<float>(
+                0.25 + 1.75 * std::exp( -3.5 * ( dx * dx + dy * dy ) ) );
+            for( fluidField2* field : fields )
+                field->setTracerConcentration( x, y, concentration );
+            ++seeded;
+        }
+    if( seeded < 20 )
+        throw std::runtime_error( "moving Capsule did not seed enough shared open cells" );
+    for( fluidField2* field : fields )
+    {
+        field->addVelocity( { -0.24f, -0.30f }, { 1.3f, 0.65f }, 0.65f );
+        field->addVelocity( { 0.35f, 0.25f }, { -0.55f, 0.8f }, 0.60f );
+    }
+    const auto totalMass = []( const fluidField2& field )
+    {
+        double mass = 0.0;
+        for( int y = 0; y < field.getHeight(); ++y )
+            for( int x = 0; x < field.getWidth(); ++x )
+                mass += field.getTracerCellMass( x, y );
+        return mass;
+    };
+    const double seededMass = totalMass( withoutGuard );
+    if( !( seededMass > 0.0 ) ||
+        totalMass( withGuard ) != seededMass )
+        throw std::runtime_error( "moving Capsule policies seeded different tracer mass" );
+
+    struct transportLedger
+    {
+        int sweptStages = 0;
+        int macStages = 0;
+        double maxStageMassDefect = 0.0;
+        double maxStepMassDefect = 0.0;
+        double maxVolumeDrift = 0.0;
+        double maxSweptMismatch = 0.0;
+        double peakForce = 0.0;
+        double peakTorque = 0.0;
+        double sumRemappedMass = 0.0;
+        double sumFallbackMass = 0.0;
+        double sumUnresolvedMass = 0.0;
+    };
+    std::array<transportLedger, 2> ledgers{};
+    for( int mode = 0; mode < 2; ++mode )
+        fields[mode]->setTracerStageObserver(
+            [&, mode]( const fluidField2& field, fluidTracerStage2 stage )
+            {
+                auto& record = ledgers[mode];
+                if( stage == fluidTracerStage2::afterSweptRemap )
+                    ++record.sweptStages;
+                else if( stage == fluidTracerStage2::afterMacAdvection )
+                    ++record.macStages;
+                const double mass = totalMass( field );
+                if( !std::isfinite( mass ) )
+                    throw std::runtime_error( "nonfinite moving Capsule tracer stage mass" );
+                record.maxStageMassDefect = std::max(
+                    record.maxStageMassDefect, std::abs( mass - seededMass ) );
+            } );
+
+    std::puts( "capsule_moving_transport,step,checkpoint_16,mode,"
+        "fluid_volume_m3,snapshot_delta_m3,pressure_source_m3,"
+        "swept_geometry_mismatch_m3,tracer_mass_kg,trapped_mass_kg,"
+        "swept_remapped_kg,fallback_remapped_kg,unresolved_kg,"
+        "max_face_velocity_mps,force_x_N,force_y_N,torque_Nm,"
+        "pressure_active_cells,pressure_residual_rms_m3" );
+    double maxVolumeDifference = 0.0, maxTracerDifference = 0.0;
+    double maxForceDifference = 0.0, maxTorqueDifference = 0.0;
+    double maxSnapshotSourceDifference = 0.0;
+    for( int step = 0; step < steps; ++step )
+    {
+        capsule.transform.rotation = rot2::FromRadians( startAngle +
+            static_cast<float>( step + 1 ) / steps *
+            ( endAngle - startAngle ) );
+        std::array<fluidObstacleForce2, 2> feedback{};
+        std::array<double, 2> volume{}, tracer{};
+        std::array<fluidCutCellVolumeSummary2, 2> budgets{};
+        for( int mode = 0; mode < 2; ++mode )
+        {
+            fluidField2& field = *fields[mode];
+            std::array<fluidObstacleForce2, 1> forces{};
+            field.step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                forces, 120 );
+            feedback[mode] = forces[0];
+            const auto summary = field.getCutCellVolumeSummary( subDt );
+            const auto flow = field.getFlowAudit( subDt );
+            const auto swept = field.getSweptFaceFlux();
+            const auto tracerStats = field.getTracerStats();
+            if( !summary.valid || !std::isfinite( flow.maxFluidFaceSpeed ) ||
+                !std::isfinite( swept.geometryMismatch ) ||
+                !std::isfinite( feedback[mode].force.x ) ||
+                !std::isfinite( feedback[mode].force.y ) ||
+                !std::isfinite( feedback[mode].torque ) )
+                throw std::runtime_error( "nonfinite moving Capsule volume/pressure/force ledger" );
+            budgets[mode] = summary;
+            tracer[mode] = totalMass( field );
+            double actualVolume = 0.0;
+            for( int y = 0; y < field.getHeight(); ++y )
+                for( int x = 0; x < field.getWidth(); ++x )
+                    actualVolume += field.getCellFluidFraction( x, y ) * h * h;
+            volume[mode] = actualVolume;
+            auto& ledger = ledgers[mode];
+            ledger.maxStepMassDefect = std::max( ledger.maxStepMassDefect,
+                std::abs( tracer[mode] - seededMass ) );
+            ledger.maxSweptMismatch = std::max( ledger.maxSweptMismatch,
+                static_cast<double>( swept.geometryMismatch ) );
+            ledger.peakForce = std::max( ledger.peakForce,
+                static_cast<double>( Length( feedback[mode].force ) ) );
+            ledger.peakTorque = std::max( ledger.peakTorque,
+                std::abs( static_cast<double>( feedback[mode].torque ) ) );
+            ledger.sumRemappedMass += tracerStats.sweptRemappedMass;
+            ledger.sumFallbackMass += tracerStats.fallbackRemappedMass;
+            ledger.sumUnresolvedMass += tracerStats.unresolvedDisplacementMass;
+            if( step % 8 == 7 || step == steps - 1 )
+                std::printf( "capsule_moving_transport,%d,%d,%d,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g,%.12g,%d,%.12g\n",
+                    step + 1, ( step + 1 ) / 8, mode,
+                    volume[mode], summary.totalSnapshotDeltaVolume,
+                    summary.totalPressureSourceDeltaVolume,
+                    swept.geometryMismatch, tracer[mode],
+                    tracerStats.trappedMass, tracerStats.sweptRemappedMass,
+                    tracerStats.fallbackRemappedMass,
+                    tracerStats.unresolvedDisplacementMass,
+                    flow.maxFluidFaceSpeed,
+                    feedback[mode].force.x, feedback[mode].force.y,
+                    feedback[mode].torque, summary.activeCells,
+                    summary.activePressureResidualRmsVolume );
+        }
+        maxVolumeDifference = std::max( maxVolumeDifference,
+            std::abs( volume[0] - volume[1] ) );
+        maxTracerDifference = std::max( maxTracerDifference,
+            std::abs( tracer[0] - tracer[1] ) );
+        maxForceDifference = std::max( maxForceDifference,
+            static_cast<double>( Length( feedback[0].force -
+                feedback[1].force ) ) );
+        maxTorqueDifference = std::max( maxTorqueDifference,
+            std::abs( static_cast<double>(
+                feedback[0].torque - feedback[1].torque ) ) );
+        maxSnapshotSourceDifference = std::max( maxSnapshotSourceDifference,
+            std::abs( budgets[0].totalPressureSourceDeltaVolume -
+                budgets[1].totalPressureSourceDeltaVolume ) );
+    }
+    for( int mode = 0; mode < 2; ++mode )
+        fields[mode]->setTracerStageObserver( {} );
+
+    std::puts( "capsule_moving_summary,seeded_cells,seeded_mass_kg,"
+        "guard0_swept_stages,guard1_swept_stages,"
+        "guard0_mac_stages,guard1_mac_stages,"
+        "max_stage_mass_defect_kg,max_step_mass_defect_kg,"
+        "max_volume_difference_m3,max_tracer_difference_kg,"
+        "max_force_difference_N,max_torque_difference_Nm,"
+        "max_pressure_source_difference_m3,"
+        "guard0_peak_force_N,guard1_peak_force_N,"
+        "guard0_swept_mismatch_m3,guard1_swept_mismatch_m3,"
+        "guard0_remapped_kg,guard1_remapped_kg,"
+        "guard0_unresolved_kg,guard1_unresolved_kg" );
+    std::printf( "capsule_moving_summary,%d,%.12g,%d,%d,%d,%d,"
+        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+        seeded, seededMass,
+        ledgers[0].sweptStages, ledgers[1].sweptStages,
+        ledgers[0].macStages, ledgers[1].macStages,
+        std::max( ledgers[0].maxStageMassDefect,
+            ledgers[1].maxStageMassDefect ),
+        std::max( ledgers[0].maxStepMassDefect,
+            ledgers[1].maxStepMassDefect ),
+        maxVolumeDifference, maxTracerDifference,
+        maxForceDifference, maxTorqueDifference,
+        maxSnapshotSourceDifference,
+        ledgers[0].peakForce, ledgers[1].peakForce,
+        ledgers[0].maxSweptMismatch, ledgers[1].maxSweptMismatch,
+        ledgers[0].sumRemappedMass, ledgers[1].sumRemappedMass,
+        ledgers[0].sumUnresolvedMass, ledgers[1].sumUnresolvedMass );
+
+    // Tracer transfers are conservative whether or not the guard is enabled;
+    // the two pressure histories may still diverge, so force differences
+    // remain measurements rather than a fabricated zero-difference target.
+    const double absoluteMassBudget = 1.0e-6 * std::max( 1.0, seededMass );
+    for( const transportLedger& ledger : ledgers )
+        if( ledger.macStages != steps || ledger.sweptStages != steps ||
+            !std::isfinite( ledger.maxStepMassDefect ) ||
+            !std::isfinite( ledger.maxStageMassDefect ) ||
+            ledger.maxStageMassDefect > absoluteMassBudget ||
+            ledger.maxStepMassDefect > absoluteMassBudget )
+            throw std::runtime_error( "moving Capsule stage-level tracer conservation regression" );
+    if( !std::isfinite( maxVolumeDifference ) ||
+        !std::isfinite( maxForceDifference ) ||
+        !std::isfinite( maxTorqueDifference ) ||
+        !std::isfinite( maxSnapshotSourceDifference ) )
+        throw std::runtime_error( "nonfinite moving Capsule guard counterfactual" );
+}
+
 } // namespace
 
 int main( int argc, char** argv )
@@ -5221,6 +5460,7 @@ int main( int argc, char** argv )
     bool zeroMacIndependentPcgAudit = false;
     bool zeroMacAnchorAudit = false;
     bool capsuleGeometryAudit = false;
+    bool capsuleMovingTransportAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -5257,6 +5497,7 @@ int main( int argc, char** argv )
         zeroMacIndependentPcgAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-independent-pcg-audit";
         zeroMacAnchorAudit |= std::string_view( argv[i] ) == "--small-cell-zero-mac-anchor-audit";
         capsuleGeometryAudit |= std::string_view( argv[i] ) == "--small-cell-capsule-geometry-audit";
+        capsuleMovingTransportAudit |= std::string_view( argv[i] ) == "--small-cell-capsule-moving-transport-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -5311,6 +5552,7 @@ int main( int argc, char** argv )
         return 0;
     }
     if( capsuleGeometryAudit ) { auditFrozenCapsuleGeometryComparison(); return 0; }
+    if( capsuleMovingTransportAudit ) { auditMovingCapsuleGuardTransport(); return 0; }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
     if( warmStartSweep )
     {
