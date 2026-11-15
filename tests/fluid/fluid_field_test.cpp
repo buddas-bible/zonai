@@ -4968,6 +4968,55 @@ void checkConnectedResidualTracerRemap()
         "moving Cut-cell must exercise connected transfer and temporal aperture variation" );
 }
 
+// The time aperture audit must use the same analytic Capsule geometry as
+// endpoint Cut-cell faces. Spatial midpoint stencils would quantize 0.23
+// opening to the face sample count and fail this narrow-motion regression.
+void checkAnalyticCapsuleTemporalApertureAudit()
+{
+    constexpr float h = 0.25f, dt = 1.0f / 60.0f;
+    constexpr int fx = 8, fy = 8;
+    fluidField2 field{ 16, 16, h, { -2.0f, -2.0f } };
+    field.setCutCellProjectionEnabled( true );
+    field.setAnalyticCapsuleCutCellEnabled( true );
+    field.setAnalyticCapsuleDoubleGeometryEnabled( true );
+    field.setSweptApertureAuditEnabled( true );
+    fluidShapeObstacle2 capsule{
+        capsule2{ { -0.63f, 0.0f }, { 0.63f, 0.0f }, 0.19f },
+        { {}, {} }, {}, {}, 0.0f, 0.0f, 0.0f };
+    std::array<fluidObstacleForce2, 1> feedback{};
+    const auto initial = field.getAnalyticCapsuleFaceOpenFractionForAudit(
+        capsule, true, fx, fy );
+    check( initial && std::abs( *initial - 0.24 ) < 1.0e-5 &&
+        !field.getAnalyticCapsuleFaceOpenFractionForAudit( capsule, true, 0, fy ) &&
+        !field.getAnalyticCapsuleFaceOpenFractionForAudit( capsule, false, fx, 0 ),
+        "analytic Capsule aperture query must clip a partial face and reject exterior faces" );
+
+    field.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ), feedback, 120 );
+    capsule.transform.position.y += 0.005f;
+    capsule.center = capsule.transform.position;
+    capsule.linearVelocity = { 0.0f, 0.005f / dt };
+    field.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ), feedback, 120 );
+    auto midpoint = capsule;
+    midpoint.transform.position.y -= 0.0025f;
+    midpoint.center = midpoint.transform.position;
+    const auto expectedMid = field.getAnalyticCapsuleFaceOpenFractionForAudit(
+        midpoint, true, fx, fy );
+    const auto expectedEnd = field.getAnalyticCapsuleFaceOpenFractionForAudit(
+        capsule, true, fx, fy );
+    const double observedMean = field.getSweptUTimeMeanOpenFraction( fx, fy );
+    const double observedEnd = field.getUFaceOpenFraction( fx, fy );
+    check( expectedMid && expectedEnd && field.hasSweptApertureAudit() &&
+        std::abs( *expectedMid - 0.23 ) < 1.0e-5 &&
+        std::abs( *expectedEnd - observedEnd ) < 1.0e-5 &&
+        std::abs( observedMean - *expectedMid ) < 2.0e-3 &&
+        std::isfinite( field.getSweptULinearVelocityProxyVolume( fx, fy, dt ) ),
+        "single-Capsule time aperture must match analytic geometry, not quantized samples" );
+
+    field.setAnalyticCapsuleCutCellEnabled( false );
+    check( !field.getAnalyticCapsuleFaceOpenFractionForAudit( capsule, true, fx, fy ),
+        "analytic Capsule read-only face query must reject disabled geometry" );
+}
+
 // Independent identity: if the obstacle never intersects a chosen face,
 // the open fraction is 1 throughout the step. The linear-velocity proxy must
 // therefore integrate exactly to h*dt*(uEntry + uProjected)/2 at that face.
@@ -5204,6 +5253,7 @@ int main()
     checkMovingCutCellClosureReopeningDifferential();
     checkTracerStageObserverConservation();
     checkConnectedResidualTracerRemap();
+    checkAnalyticCapsuleTemporalApertureAudit();
     checkTimeLinearMacProxyOnUnobstructedFace();
     checkMovingCutCellLocalClosure();
     checkCutCellVolumeLedger();
