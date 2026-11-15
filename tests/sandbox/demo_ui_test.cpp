@@ -2955,14 +2955,14 @@ void checkDemoUi()
             std::exit( EXIT_FAILURE );
         }
         view.seedWindTracer();
-        const fluidField2* field = view.getWindField();
+        const zonai::fluidField2* field = view.getWindField();
         if( !field || field->getTracerMass() <= 0.0f )
         {
             std::fprintf( stderr, "Wind view dye seed missing\n" );
             std::exit( EXIT_FAILURE );
         }
         const float massBefore = field->getTracerMass();
-        const vec2 momentumBefore = field->getFluidMomentum();
+        const zonai::vec2 momentumBefore = field->getFluidMomentum();
         viz.vectors = false;
         viz.dye = false;
         const auto countVertices = [&]()
