@@ -1601,6 +1601,7 @@ void rigidBodyDemo::beginWindAdvectionTrial()
     windSourceEnabled_ = false;
     windObstacleCouplingEnabled_ = false;
     windDragCoefficient_ = 0.0f;
+    windDyeEmitterEnabled_ = false; // Isolated advection must not inject external tracer mass.
     addWindVortex();
 }
 
