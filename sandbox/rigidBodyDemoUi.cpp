@@ -1383,6 +1383,28 @@ void rigidBodyDemoUi::drawExperimentControls()
         ImGui::TextDisabled( "염료=실제 Tracer 농도 | 속도=열린 MAC 면의 최대 절댓값" );
         ImGui::TextDisabled( "압력=활성 셀 평균 대비 차이 (Neumann 기준 임의)" );
         ImGui::TextDisabled( "히트맵은 표시 범위에서 포화. 물리 속도를 제한하지 않습니다." );
+        if( windVisualization_.dye )
+            ImGui::TextColored( ImVec4{ 0.43f, 0.85f, 1.0f, 1.0f },
+                "염료: 투명 = 없음 / 청록색 = Tracer 농도 높음" );
+        if( windVisualization_.speedHeatmap )
+        {
+            ImGui::TextColored( ImVec4{ 0.11f, 0.25f, 0.54f, 1.0f }, "저속" );
+            ImGui::SameLine();
+            ImGui::TextColored( ImVec4{ 0.45f, 0.88f, 0.85f, 1.0f }, "중간" );
+            ImGui::SameLine();
+            ImGui::TextColored( ImVec4{ 1.0f, 0.28f, 0.19f, 1.0f },
+                "빠름 (%.2g m/s 이상)", windVisualization_.speedReference );
+        }
+        if( windVisualization_.pressureHeatmap )
+        {
+            ImGui::TextColored( ImVec4{ 0.15f, 0.72f, 0.99f, 1.0f }, "음압" );
+            ImGui::SameLine();
+            ImGui::TextColored( ImVec4{ 0.99f, 0.3f, 0.26f, 1.0f },
+                "양압 (상대 압력 기준 ±%.2g)", windVisualization_.pressureReference );
+        }
+        if( windVisualization_.cutCells )
+            ImGui::TextColored( ImVec4{ 1.0f, 0.65f, 0.25f, 1.0f },
+                "주황=부분 개방 / 빨강=극소 셀(<1e-4)" );
         ImGui::TextColored( ImVec4{ 0.95f, 0.35f, 0.9f, 1.0f },
             "자홍색 = 비유한 속도/압력 진단값" );
         ImGui::TextDisabled( "염료가 아직 없으면 아래 버튼으로 주입하세요." );
@@ -2941,6 +2963,13 @@ void rigidBodyDemoUi::drawWindProbeControls()
     if( ImGui::Button( "선택 해제###WindProbeClear" ) )
     {
         windProbeX_ = windProbeY_ = -1;
+        windProbeFaceX_ = windProbeFaceY_ = -1;
+    }
+    int coordinates[2]{ std::max( 0, windProbeX_ ), std::max( 0, windProbeY_ ) };
+    if( ImGui::InputInt2( "셀 좌표 (x,y)###WindProbeCoordinates", coordinates ) )
+    {
+        windProbeX_ = std::clamp( coordinates[0], 0, field->getWidth() - 1 );
+        windProbeY_ = std::clamp( coordinates[1], 0, field->getHeight() - 1 );
         windProbeFaceX_ = windProbeFaceY_ = -1;
     }
 
