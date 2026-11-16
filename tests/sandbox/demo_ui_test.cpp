@@ -3087,7 +3087,7 @@ void checkDemoUi()
         viz.continuityHeatmap = true;
         if( vertices() != cold || view.focusWorstWindResidual() )
         {
-            std::fprintf( stderr, "Uninitialized Wind continuity map was not inert\\n" );
+            std::fprintf( stderr, "Uninitialized Wind continuity map was not inert\n" );
             std::exit( EXIT_FAILURE );
         }
         view.setWindCutCellProjectionEnabled( true );
@@ -3096,7 +3096,7 @@ void checkDemoUi()
         const float dt = view.getWindLastFluidTimeStep();
         if( !field || !field->isCutCellProjectionEnabled() || !( dt > 0.0f ) )
         {
-            std::fprintf( stderr, "Wind residual layer lacks a real Fluid step\\n" );
+            std::fprintf( stderr, "Wind residual layer lacks a real Fluid step\n" );
             std::exit( EXIT_FAILURE );
         }
         const auto summary = field->getCutCellVolumeSummary( dt );
@@ -3115,7 +3115,7 @@ void checkDemoUi()
             field->getTracerMass() != mass ||
             zonai::LengthSquared( field->getFluidMomentum() - momentum ) > 0.0f )
         {
-            std::fprintf( stderr, "Wind continuity layer or probe failed read-only check\\n" );
+            std::fprintf( stderr, "Wind continuity layer or probe failed read-only check\n" );
             std::exit( EXIT_FAILURE );
         }
     }
