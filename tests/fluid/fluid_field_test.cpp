@@ -433,6 +433,12 @@ void checkBoundsAndSampling()
         close( field.getCellCenter( 0, 0 ).y, -1.75f ), "cell center does not respect origin and spacing" );
     check( close( field.getDivergenceRms(), 0.0f ) && close( field.sampleVelocity( { 0.0f, 0.0f } ).x, 0.0f ),
         "new fluid field must be at rest" );
+    check( field.getCellPressureForVisualization( -1, 0 ) == 0.0f &&
+        field.getCellPressureForVisualization( 0, -1 ) == 0.0f &&
+        field.getCellPressureForVisualization( field.getWidth(), 0 ) == 0.0f &&
+        field.getCellPressureForVisualization( 0, field.getHeight() ) == 0.0f &&
+        field.getCellPressureForVisualization( 3, 4 ) == 0.0f,
+        "read-only visualization pressure must reject out-of-bounds and start with zero" );
 
     field.addVelocity( { -2.0f, 0.0f }, { 4.0f, 0.0f }, 1.0f );
     check( field.sampleVelocity( { -2.0f, 0.0f } ).x > 2.0f,
