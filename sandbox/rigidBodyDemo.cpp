@@ -351,6 +351,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                     std::span<fluidObstacleForce2>( windObstacleFeedback_ ).subspan( 3 ) );
             }
             else windField_->step( windTimeStep );
+            windLastFluidTimeStep_ = windTimeStep;
             if( windStepProfilingEnabled_ )
             {
                 windFieldTiming_.accumulate( windField_->getStepTiming() );
@@ -1624,6 +1625,7 @@ void rigidBodyDemo::resetWindFlow()
     windFieldTiming_ = {};
     windCoupledTiming_ = {};
     windCouplingAudit_ = {};
+    windLastFluidTimeStep_ = 0.0f;
     windPressureForces_.fill( {} );
     windDragBodyImpulse_ = {};
     windDragFluidImpulse_ = {};
