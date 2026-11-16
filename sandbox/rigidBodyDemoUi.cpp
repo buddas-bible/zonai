@@ -87,8 +87,25 @@ ImU32 pressureColor( float difference, const windVisualization2& settings ) noex
             150.0f + 104.0f * t, ( 45.0f + 200.0f * t ) * opacity );
 }
 
+// Signed endpoint continuity budget, NOT time-integrated transport.
+ImU32 continuityColor( double residualRate, const windVisualization2& settings ) noexcept
+{
+    if( !std::isfinite( residualRate ) ) return IM_COL32( 255, 0, 220, 225 );
+    const double reference = std::max( static_cast<double>( settings.continuityReference ), 1.0e-9 );
+    const float intensity = static_cast<float>( std::clamp(
+        std::abs( residualRate ) / reference, 0.0, 1.0 ) );
+    const float opacity = std::clamp( settings.overlayOpacity, 0.0f, 1.0f );
+    return residualRate >= 0.0
+        ? visualizationColor( 125.0f + 130.0f * intensity,
+            95.0f - 52.0f * intensity, 100.0f - 60.0f * intensity,
+            ( 35.0f + 205.0f * intensity ) * opacity )
+        : visualizationColor( 70.0f - 40.0f * intensity,
+            122.0f + 65.0f * intensity, 180.0f + 75.0f * intensity,
+            ( 35.0f + 205.0f * intensity ) * opacity );
+}
+
 void drawWindScalarLayers( debugDraw& draw, const fluidField2& field,
-    const windVisualization2& settings )
+    const windVisualization2& settings, float fluidTimeStep )
 {
     const int width = field.getWidth(), height = field.getHeight();
     if( width <= 0 || height <= 0 ) return;
@@ -105,7 +122,11 @@ void drawWindScalarLayers( debugDraw& draw, const fluidField2& field,
     const bool showDye = settings.dye;
     const bool showSpeed = settings.speedHeatmap;
     const bool showPressure = settings.pressureHeatmap;
-    if( !showDye && !showSpeed && !showPressure && !settings.cutCells ) return;
+    const bool showContinuity = settings.continuityHeatmap &&
+        field.isCutCellProjectionEnabled() && std::isfinite( fluidTimeStep ) &&
+        fluidTimeStep > 0.0f;
+    if( !showDye && !showSpeed && !showPressure && !showContinuity &&
+        !settings.cutCells ) return;
 
     std::vector<float> tileDye;
     std::vector<bool> tileHasFluid;
@@ -252,6 +273,38 @@ void drawWindScalarLayers( debugDraw& draw, const fluidField2& field,
                         invalid ? INVALID_COLOR : pressureColor( display, settings ) );
                 }
             }
+
+    if( showContinuity )
+    {
+        // Preserve the strongest signed residual in each decimated tile.
+        const double scale = static_cast<double>( cellSize ) * cellSize * fluidTimeStep;
+        for( int ty = 0; ty < tilesY; ++ty )
+            for( int tx = 0; tx < tilesX; ++tx )
+            {
+                double peak = 0.0;
+                bool active = false, invalid = false;
+                for( int y = ty * stride; y < std::min( height, ( ty + 1 ) * stride ); ++y )
+                    for( int x = tx * stride; x < std::min( width, ( tx + 1 ) * stride ); ++x )
+                    {
+                        const auto budget = field.getCutCellVolumeBudget( x, y, fluidTimeStep );
+                        if( !budget.valid || !budget.hasVolumeHistory || !budget.active ) continue;
+                        active = true;
+                        const double rate = budget.pressureResidualVolume / scale;
+                        if( !std::isfinite( rate ) ) invalid = true;
+                        else if( std::abs( rate ) > std::abs( peak ) ) peak = rate;
+                    }
+                if( !active || ( peak == 0.0 && !invalid ) ) continue;
+                const aabb2 bounds{
+                    origin + cellSize * vec2{ static_cast<float>( tx * stride ),
+                        static_cast<float>( ty * stride ) },
+                    origin + cellSize * vec2{
+                        static_cast<float>( std::min( width, ( tx + 1 ) * stride ) ),
+                        static_cast<float>( std::min( height, ( ty + 1 ) * stride ) ) }
+                };
+                draw.DrawFilledAABB( bounds, invalid
+                    ? IM_COL32( 255, 0, 220, 225 ) : continuityColor( peak, settings ) );
+            }
+    }
 
     if( settings.cutCells )
         for( int y = 0; y < height; ++y )
@@ -447,6 +500,22 @@ bool rigidBodyDemoUi::focusPeakWindFace() noexcept
     return peak >= 0.0f;
 }
 
+bool rigidBodyDemoUi::focusWorstWindResidual() noexcept
+{
+    const fluidField2* field = getWindField();
+    const float dt = getWindLastFluidTimeStep();
+    if( getKind() != demoKind::windFlow || !field ||
+        !field->isCutCellProjectionEnabled() || !( dt > 0.0f ) ) return false;
+
+    const fluidCutCellVolumeSummary2 summary = field->getCutCellVolumeSummary( dt );
+    if( !summary.valid || summary.worstPressureX < 0 ||
+        summary.worstPressureY < 0 ) return false;
+    windProbeX_ = summary.worstPressureX;
+    windProbeY_ = summary.worstPressureY;
+    windProbeFaceX_ = windProbeFaceY_ = -1;
+    return true;
+}
+
 void rigidBodyDemoUi::handleInput( const demoInput& input )
 {
     if( getKind() == demoKind::windFlow && input.mousePressed && input.insertControlPoint )
@@ -559,7 +628,7 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
             draw.DrawSegment( { { upper.x, lower.y }, upper }, FIELD_BORDER, 1.5f );
             draw.DrawSegment( { upper, { lower.x, upper.y } }, FIELD_BORDER, 1.5f );
             draw.DrawSegment( { { lower.x, upper.y }, lower }, FIELD_BORDER, 1.5f );
-            drawWindScalarLayers( draw, *field, windVisualization_ );
+            drawWindScalarLayers( draw, *field, windVisualization_, getWindLastFluidTimeStep() );
             if( windVisualization_.vectors )
             {
                 // Limit vector density separately from scalar color tiles.
@@ -1362,6 +1431,7 @@ void rigidBodyDemoUi::drawExperimentControls()
         ImGui::SameLine();
         ImGui::Checkbox( "압력 히트맵###WindVisualPressure", &windVisualization_.pressureHeatmap );
         ImGui::Checkbox( "Cut-cell / 열린 면###WindVisualCutCells", &windVisualization_.cutCells );
+        ImGui::Checkbox( "연속성 잔차 히트맵###WindVisualContinuity", &windVisualization_.continuityHeatmap );
         if( windVisualization_.dye )
         {
             ImGui::SliderFloat( "염료 기준 농도###WindVisualDyeRange",
@@ -1377,7 +1447,12 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::SliderFloat( "압력 차이 색상 기준###WindVisualPressureRange",
                 &windVisualization_.pressureReference, 0.1f, 1000.0f, "%.2f",
                 ImGuiSliderFlags_Logarithmic );
-        if( windVisualization_.speedHeatmap || windVisualization_.pressureHeatmap )
+        if( windVisualization_.continuityHeatmap )
+            ImGui::SliderFloat( "연속성 잔차 색상 기준###WindVisualContinuityRange",
+                &windVisualization_.continuityReference, 1.0e-5f, 1000.0f, "%.5g 1/s",
+                ImGuiSliderFlags_Logarithmic );
+        if( windVisualization_.speedHeatmap || windVisualization_.pressureHeatmap ||
+            windVisualization_.continuityHeatmap )
             ImGui::SliderFloat( "진단 레이어 불투명도###WindVisualDebugOpacity",
                 &windVisualization_.overlayOpacity, 0.0f, 1.0f, "%.2f" );
         ImGui::TextDisabled( "염료=실제 Tracer 농도 | 속도=열린 MAC 면의 최대 절댓값" );
@@ -1401,6 +1476,15 @@ void rigidBodyDemoUi::drawExperimentControls()
             ImGui::SameLine();
             ImGui::TextColored( ImVec4{ 0.99f, 0.3f, 0.26f, 1.0f },
                 "양압 (상대 압력 기준 ±%.2g)", windVisualization_.pressureReference );
+        }
+        if( windVisualization_.continuityHeatmap )
+        {
+            ImGui::TextColored( ImVec4{ 0.12f, 0.72f, 1.0f, 1.0f }, "음의 체적 잔차" );
+            ImGui::SameLine();
+            ImGui::TextColored( ImVec4{ 1.0f, 0.24f, 0.16f, 1.0f },
+                "양의 잔차 (기준 ±%.5g 1/s)", windVisualization_.continuityReference );
+            ImGui::TextDisabled( "종료 MAC + 압력용 체적 소스 / (셀 체적 x dt)" );
+            ImGui::TextDisabled( "시간 적분 유량·실제 Tracer 질량 오차를 뜻하지 않음" );
         }
         if( windVisualization_.cutCells )
             ImGui::TextColored( ImVec4{ 1.0f, 0.65f, 0.25f, 1.0f },
@@ -2965,6 +3049,8 @@ void rigidBodyDemoUi::drawWindProbeControls()
         windProbeX_ = windProbeY_ = -1;
         windProbeFaceX_ = windProbeFaceY_ = -1;
     }
+    if( ImGui::Button( "최대 연속성 잔차 셀 찾기###WindProbeWorstResidual" ) )
+        (void)focusWorstWindResidual();
     int coordinates[2]{ std::max( 0, windProbeX_ ), std::max( 0, windProbeY_ ) };
     if( ImGui::InputInt2( "셀 좌표 (x,y)###WindProbeCoordinates", coordinates ) )
     {
@@ -3056,16 +3142,28 @@ void rigidBodyDemoUi::drawWindProbeControls()
         {
             ImGui::Text( "최근 Fluid 구간 %.8g초 / 이전 체적 비율 %.9g",
                 dt, budget.previousFraction );
+            ImGui::Text( "종료 MAC 유출 (W/E/S/N): %+.7g / %+.7g / %+.7g / %+.7g m³",
+                budget.macOutwardVolume[0], budget.macOutwardVolume[1],
+                budget.macOutwardVolume[2], budget.macOutwardVolume[3] );
+            ImGui::Text( "종료 MAC 순유출 %+.8g m³", budget.macNetOutwardVolume );
             if( budget.hasVolumeHistory )
             {
                 ImGui::Text( "체적 소스 변화 %+.8g m³ / 스냅샷 변화 %+.8g m³",
                     budget.pressureSourceDeltaVolume, budget.snapshotDeltaVolume );
-                ImGui::Text( "압력 연속성 잔차 %+.8g m³",
-                    budget.pressureResidualVolume );
+                ImGui::Text( "압력 연속성 잔차 %+.8g m³ / %+.6g 1/s",
+                    budget.pressureResidualVolume,
+                    budget.pressureResidualVolume / ( static_cast<double>( h ) * h * dt ) );
+                ImGui::Text( "스냅샷 기반 잔차 %+.8g m³",
+                    budget.snapshotResidualVolume );
             }
             if( budget.hasSweptHistory )
-                ImGui::Text( "고체 Swept 면 합계 %+.8g m³",
-                    budget.solidSweptDivergenceVolume );
+            {
+                ImGui::Text( "고체 Swept 유출 (W/E/S/N): %+.7g / %+.7g / %+.7g / %+.7g m³",
+                    budget.solidSweptOutwardVolume[0], budget.solidSweptOutwardVolume[1],
+                    budget.solidSweptOutwardVolume[2], budget.solidSweptOutwardVolume[3] );
+                ImGui::Text( "고체 Swept 합계 %+.8g m³ / MAC+Swept 잔차 %+.8g m³",
+                    budget.solidSweptDivergenceVolume, budget.sweptResidualVolume );
+            }
             ImGui::TextDisabled(
                 "MAC/체적 잔차는 종료 시점 기하 기반. 실제 시간별 유량 적분이 아님" );
         }
