@@ -1458,6 +1458,9 @@ void checkWindDyeEmitter()
     {
         base.step( dt, 4 );
         dyed.step( dt, 4 );
+        check( base.getWindLastFluidTimeStep() > 0.0f &&
+            close( base.getWindLastFluidTimeStep(), dyed.getWindLastFluidTimeStep(), 1.0e-8f ),
+            "Wind volume inspector interval must match the actual completed Fluid substep" );
         check( close( base.getWindField()->getTracerMass(), 0.0f ) &&
             dyed.getWindField()->getTracerMass() > 0.0f &&
             near( base.getWindField()->getFluidMomentum(),
@@ -1475,6 +1478,9 @@ void checkWindDyeEmitter()
     dyed.setWindDyeEmitterEnabled( false );
     check( !dyed.isWindDyeEmitterEnabled(),
         "continuous dye source must be independently switchable" );
+    dyed.resetWindFlow();
+    check( dyed.getWindLastFluidTimeStep() == 0.0f,
+        "clearing the fluid must invalidate its previous cell-volume ledger interval" );
 }
 
 } // namespace
