@@ -2950,7 +2950,7 @@ void checkDemoUi()
         auto& viz = view.editWindVisualization();
         if( !view.isWindDyeEmitterEnabled() ||
             !viz.dye || !viz.vectors || viz.speedHeatmap ||
-            viz.pressureHeatmap || viz.cutCells )
+            viz.pressureHeatmap || viz.continuityHeatmap || viz.cutCells )
         {
             std::fprintf( stderr, "Wind visualization defaults changed\n" );
             std::exit( EXIT_FAILURE );
@@ -3052,6 +3052,70 @@ void checkDemoUi()
             zonai::LengthSquared( field->getFluidMomentum() - momentumBefore ) > 0.0f )
         {
             std::fprintf( stderr, "Wind out-of-field probe changed physics or kept stale selection\n" );
+            std::exit( EXIT_FAILURE );
+        }
+    }
+    // V2 read-only continuity residual: no history means no overlay.
+    // After a REAL Wind step, the map and selected worst cell use the
+    // last completed Fluid substep (not the World step length).
+    {
+        auto wind = createDemoView( demoKind::windFlow );
+        auto& view = static_cast<rigidBodyDemoUi&>( *wind );
+        auto& viz = view.editWindVisualization();
+        viz.dye = viz.vectors = viz.speedHeatmap = false;
+        viz.pressureHeatmap = viz.cutCells = false;
+        const auto vertices = [&]()
+        {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
+            ImGui::SetNextWindowSize( { 850.0f, 680.0f } );
+            ImGui::Begin( "Wind continuity test" );
+            debugCamera camera{};
+            camera.center = getDemoEntry( demoKind::windFlow ).cameraCenter;
+            camera.pixelsPerMeter = getDemoEntry( demoKind::windFlow ).pixelsPerMeter;
+            ImDrawList* list = ImGui::GetWindowDrawList();
+            debugDraw draw{ list, camera, ImGui::GetCursorScreenPos(),
+                { 850.0f, 650.0f } };
+            const int before = list->VtxBuffer.Size;
+            view.draw( draw );
+            const int count = list->VtxBuffer.Size - before;
+            ImGui::End();
+            ImGui::Render();
+            return count;
+        };
+        const int cold = vertices();
+        viz.continuityHeatmap = true;
+        if( vertices() != cold || view.focusWorstWindResidual() )
+        {
+            std::fprintf( stderr, "Uninitialized Wind continuity map was not inert\\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        view.setWindCutCellProjectionEnabled( true );
+        view.step( 1.0f / 60.0f, 4 );
+        const auto* field = view.getWindField();
+        const float dt = view.getWindLastFluidTimeStep();
+        if( !field || !field->isCutCellProjectionEnabled() || !( dt > 0.0f ) )
+        {
+            std::fprintf( stderr, "Wind residual layer lacks a real Fluid step\\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        const auto summary = field->getCutCellVolumeSummary( dt );
+        const double mass = field->getTracerMass();
+        const zonai::vec2 momentum = field->getFluidMomentum();
+        viz.continuityHeatmap = false;
+        const int baseline = vertices();
+        viz.continuityHeatmap = true;
+        const int withResidual = vertices();
+        const bool focused = view.focusWorstWindResidual();
+        const bool available = summary.worstPressureX >= 0 && summary.worstPressureY >= 0;
+        if( !summary.valid || focused != available ||
+            ( focused && ( view.getWindProbeX() != summary.worstPressureX ||
+                view.getWindProbeY() != summary.worstPressureY ) ) ||
+            ( summary.maxAbsPressureResidualVolume > 0.0 && withResidual <= baseline ) ||
+            field->getTracerMass() != mass ||
+            zonai::LengthSquared( field->getFluidMomentum() - momentum ) > 0.0f )
+        {
+            std::fprintf( stderr, "Wind continuity layer or probe failed read-only check\\n" );
             std::exit( EXIT_FAILURE );
         }
     }
