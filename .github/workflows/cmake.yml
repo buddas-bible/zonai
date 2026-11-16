@@ -220,6 +220,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-capsule-noncoupled-pressure-oracle
 
+      # Same real step-95 entry, 1/2/4/8 actually integrated Fluid steps
+      # over original step 96; applied face tracer kg vs MAC/open/solid budgets.
+      - name: Compare step-96 integrated Capsule flux and applied tracer (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-capsule-step96-split-flux-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -497,7 +503,11 @@ jobs:
 
       - name: Compare matched noncoupled pressure Galerkin oracle (Windows Release)
         if: runner.os == 'Windows'
-        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-capsule-noncoupled-pressure-oracle
+        run: .\build\tests\Release\sandboxWindStepBenchmark.exe --small-cell-capsule-noncoupled-pressure-oracle
+
+      - name: Compare step-96 integrated Capsule flux and applied tracer (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\build\tests\Release\sandboxWindStepBenchmark.exe --small-cell-capsule-step96-split-flux-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
