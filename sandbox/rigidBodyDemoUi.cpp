@@ -287,7 +287,9 @@ void drawWindScalarLayers( debugDraw& draw, const fluidField2& field,
                     for( int x = tx * stride; x < std::min( width, ( tx + 1 ) * stride ); ++x )
                     {
                         const auto budget = field.getCutCellVolumeBudget( x, y, fluidTimeStep );
-                        if( !budget.valid || !budget.hasVolumeHistory || !budget.active ) continue;
+                        // Even the first geometry snapshot has an endpoint MAC
+                        // residual; the unavailable volume history contributes zero.
+                        if( !budget.valid || !budget.active ) continue;
                         active = true;
                         const double rate = budget.pressureResidualVolume / scale;
                         if( !std::isfinite( rate ) ) invalid = true;
