@@ -38,6 +38,11 @@ public:
     {
         return windVisualization_;
     }
+    [[nodiscard]] int getWindProbeX() const noexcept { return windProbeX_; }
+    [[nodiscard]] int getWindProbeY() const noexcept { return windProbeY_; }
+    // Reads active fluid-fluid MAC faces and focuses the largest raw speed.
+    // Does not change any simulated velocity, tracer or obstacle.
+    [[nodiscard]] bool focusPeakWindFace() noexcept;
 
 private:
 #pragma region Controls
@@ -47,6 +52,7 @@ private:
     void drawSplineEditorControls();
     void drawMouseControls();
     void drawDebugSettings();
+    void drawWindProbeControls();
 #pragma endregion Controls
     int selectedShapeIndex_ = 0;
     shapeId selectedShape_{};
@@ -64,6 +70,11 @@ private:
     float splineRailReprojectDistance_ = 0.5f;
     std::optional<bool> splineRailReprojectResult_{};
     windVisualization2 windVisualization_{};
+    int windProbeX_ = -1;
+    int windProbeY_ = -1;
+    int windProbeFaceX_ = -1;
+    int windProbeFaceY_ = -1;
+    bool windProbeFaceIsU_ = true;
     bool showGrid_ = true;
     bool showShapeAABBs_ = false;
     bool showFatAABBs_ = false;
