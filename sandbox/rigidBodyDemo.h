@@ -539,6 +539,8 @@ public:
     [[nodiscard]] int getWindCouplingSteps() const noexcept { return windCouplingSteps_; }
     [[nodiscard]] int getWindFluidSubstepCount() const noexcept { return windFluidSubstepCount_; }
     [[nodiscard]] float getWindFluidMilliseconds() const noexcept { return windFluidMilliseconds_; }
+    // Last completed Fluid interval, NOT frame dt; for read-only cell ledgers.
+    [[nodiscard]] float getWindLastFluidTimeStep() const noexcept { return windLastFluidTimeStep_; }
     [[nodiscard]] float getWindWorldMilliseconds() const noexcept { return windWorldMilliseconds_; }
     [[nodiscard]] const fluidStepTiming2& getWindFieldTiming() const noexcept { return windFieldTiming_; }
     [[nodiscard]] const fluidCoupledPressureTiming2& getWindCoupledTiming() const noexcept { return windCoupledTiming_; }
@@ -775,6 +777,7 @@ private:
     int windCouplingSteps_ = 0;
     int windFluidSubstepCount_ = 1; // World Substep과 독립적인 Fluid 압력/이류 횟수.
     float windFluidMilliseconds_ = 0.0f;
+    float windLastFluidTimeStep_ = 0.0f;
     float windWorldMilliseconds_ = 0.0f;
     bool windStepProfilingEnabled_ = false;
     bool windCouplingAuditEnabled_ = false;
