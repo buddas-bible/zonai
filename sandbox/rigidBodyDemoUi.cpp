@@ -408,8 +408,74 @@ rigidBodyDemoUi::rigidBodyDemoUi( demoKind kind ) : rigidBodyDemo( kind )
     if( getShapes().size() > static_cast<std::size_t>( selectedShapeIndex_ ) ) selectedShape_ = getShapes()[selectedShapeIndex_].shapeHandle;
 }
 
+
+bool rigidBodyDemoUi::focusPeakWindFace() noexcept
+{
+    const fluidField2* field = getWindField();
+    if( getKind() != demoKind::windFlow || !field ) return false;
+
+    float peak = -1.0f;
+    const auto consider = [&]( bool isU, int x, int y, float opening,
+        float firstFraction, float secondFraction, std::optional<float> speed )
+    {
+        if( !( opening > 0.0f && firstFraction > 0.0f && secondFraction > 0.0f ) ||
+            !speed || !std::isfinite( *speed ) ) return;
+        const float magnitude = std::abs( *speed );
+        if( magnitude <= peak ) return;
+        peak = magnitude;
+        windProbeFaceX_ = x;
+        windProbeFaceY_ = y;
+        windProbeFaceIsU_ = isU;
+        // Prefer the smaller adjacent cell: important for disappearing slivers.
+        windProbeX_ = isU ? ( firstFraction <= secondFraction ? x - 1 : x ) : x;
+        windProbeY_ = isU ? y : ( firstFraction <= secondFraction ? y - 1 : y );
+    };
+
+    for( int y = 0; y < field->getHeight(); ++y )
+        for( int x = 1; x < field->getWidth(); ++x )
+            consider( true, x, y, field->getUFaceOpenFraction( x, y ),
+                field->getCellFluidFraction( x - 1, y ),
+                field->getCellFluidFraction( x, y ),
+                field->getUFaceVelocityForAudit( x, y ) );
+
+    for( int y = 1; y < field->getHeight(); ++y )
+        for( int x = 0; x < field->getWidth(); ++x )
+            consider( false, x, y, field->getVFaceOpenFraction( x, y ),
+                field->getCellFluidFraction( x, y - 1 ),
+                field->getCellFluidFraction( x, y ),
+                field->getVFaceVelocityForAudit( x, y ) );
+    return peak >= 0.0f;
+}
+
 void rigidBodyDemoUi::handleInput( const demoInput& input )
 {
+    if( getKind() == demoKind::windFlow && input.mousePressed && input.insertControlPoint )
+    {
+        // Ctrl+click selects one cell without creating a MouseJoint or
+        // editing physics. Any other mouse/keyboard input keeps its route.
+        windProbeFaceX_ = windProbeFaceY_ = -1;
+        const fluidField2* field = getWindField();
+        if( field && IsFinite( input.mousePosition ) )
+        {
+            const vec2 local = ( input.mousePosition - field->getOrigin() ) /
+                field->getCellSize();
+            if( std::isfinite( local.x ) && std::isfinite( local.y ) &&
+                local.x >= 0.0f && local.y >= 0.0f &&
+                local.x < field->getWidth() && local.y < field->getHeight() )
+            {
+                windProbeX_ = static_cast<int>( std::floor( local.x ) );
+                windProbeY_ = static_cast<int>( std::floor( local.y ) );
+            }
+            else windProbeX_ = windProbeY_ = -1;
+        }
+        else windProbeX_ = windProbeY_ = -1;
+        demoInput forwarded = input;
+        forwarded.mousePressed = false;
+        forwarded.mouseHeld = false;
+        rigidBodyDemo::handleInput( forwarded );
+        return;
+    }
+
     if( getKind() == demoKind::splineRail )
     {
         if( input.mousePressed ) splineRailSelecting_ = input.mouseHeld && input.selectReprojectionSegment && !input.insertControlPoint;
@@ -898,6 +964,40 @@ void rigidBodyDemoUi::draw( debugDraw& draw ) const
             }
         }
     }
+
+    if( getKind() == demoKind::windFlow )
+        if( const fluidField2* field = getWindField() )
+        {
+            if( windProbeX_ >= 0 && windProbeY_ >= 0 &&
+                windProbeX_ < field->getWidth() && windProbeY_ < field->getHeight() )
+            {
+                const vec2 origin = field->getOrigin();
+                const float h = field->getCellSize();
+                const aabb2 box{
+                    origin + h * vec2{ static_cast<float>( windProbeX_ ),
+                        static_cast<float>( windProbeY_ ) },
+                    origin + h * vec2{ static_cast<float>( windProbeX_ + 1 ),
+                        static_cast<float>( windProbeY_ + 1 ) }
+                };
+                draw.DrawAABB( box, IM_COL32( 75, 250, 235, 250 ), 3.0f );
+                char label[48]{};
+                std::snprintf( label, sizeof( label ), "(%d,%d)",
+                    windProbeX_, windProbeY_ );
+                draw.DrawLabel( field->getCellCenter( windProbeX_, windProbeY_ ),
+                    label, IM_COL32( 75, 250, 235, 255 ) );
+            }
+            if( windProbeFaceX_ >= 0 && windProbeFaceY_ >= 0 )
+            {
+                const float h = field->getCellSize();
+                const vec2 origin = field->getOrigin();
+                const float x = static_cast<float>( windProbeFaceX_ );
+                const float y = static_cast<float>( windProbeFaceY_ );
+                const vec2 a = origin + h * vec2{ x, y };
+                const vec2 b = a + h * ( windProbeFaceIsU_
+                    ? vec2{ 0.0f, 1.0f } : vec2{ 1.0f, 0.0f } );
+                draw.DrawSegment( { a, b }, IM_COL32( 255, 85, 230, 255 ), 4.0f );
+            }
+        }
 }
 
 #pragma endregion DemoView
