@@ -3003,6 +3003,42 @@ void checkDemoUi()
                 background, dyed, velocity, pressure, cutCells );
             std::exit( EXIT_FAILURE );
         }
+
+        // The largest open MAC face can be selected on a fresh field even
+        // without velocity, and Ctrl-click probes a particular cell instead
+        // of creating a MouseJoint at that world's point.
+        if( !view.focusPeakWindFace() ||
+            view.getWindProbeX() < 0 || view.getWindProbeY() < 0 )
+        {
+            std::fprintf( stderr, "Wind largest-open-face inspector unavailable\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        const int focusedGeometry = countVertices();
+        if( focusedGeometry <= cutCells )
+        {
+            std::fprintf( stderr, "Wind focused probe did not highlight its cell\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        demoInput probe{};
+        probe.mousePressed = probe.mouseHeld = true;
+        probe.insertControlPoint = true;
+        probe.mousePosition = field->getCellCenter( 6, 6 );
+        view.handleInput( probe );
+        if( view.getWindProbeX() != 6 || view.getWindProbeY() != 6 ||
+            view.getWorld().IsValid( view.getMouseJoint() ) )
+        {
+            std::fprintf( stderr, "Wind Ctrl-click did not select cell independently of MouseJoint\n" );
+            std::exit( EXIT_FAILURE );
+        }
+        probe.mousePosition = { 1.0e6f, 1.0e6f };
+        view.handleInput( probe );
+        if( view.getWindProbeX() != -1 || view.getWindProbeY() != -1 ||
+            field->getTracerMass() != massBefore ||
+            zonai::LengthSquared( field->getFluidMomentum() - momentumBefore ) > 0.0f )
+        {
+            std::fprintf( stderr, "Wind out-of-field probe changed physics or kept stale selection\n" );
+            std::exit( EXIT_FAILURE );
+        }
     }
     ImGui::DestroyContext();
 }
