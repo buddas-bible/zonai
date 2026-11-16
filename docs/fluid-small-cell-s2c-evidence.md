@@ -2264,3 +2264,67 @@ and PR #322 independent, no default physics changes.
 3. On the same actual World8/Fluid4 source (18,13), independently compare baseline/pressure-pool and baseline/connected-tracer alternatives, plus combined alternatives **only after** each independent effect is understood. Compare same-state pressure continuity and separate continuous histories. Never add endpoint MAC kg-equivalent flux to Swept tracer kg and call it a conservative space-time flux.
 4. Measure normal-step overhead (feature disabled) and optional observer/remap overhead enabled. Keep **both experimental controls OFF by default**, PR #326 Draft, and PR #322 sampling independent. No solver merge until supported by physical and performance acceptance evidence.
 
+### Step-96 exact-entry substep refinement vs applied tracer face ledger — 2026-11-17
+
+**Scope (read-only benchmark, S2c):** \`sandboxWindStepBenchmark
+--small-cell-capsule-step96-split-flux-audit\` reuses the already
+established prescribed rotating single-Capsule test (h=0.125m,
+64×64, angle 0.18→1.28 rad over 128 Fluid steps, no coupled Body).
+Immediately before its **96th real step**, the current step-95 Field
+state is cloned. Independent clones then traverse **exactly the same
+geometric angle interval** using 1, 2, 4 or 8 *actually executed*
+Fluid substeps (each with its own advection, swept geometry, Cut-cell
+pressure projection and applied tracer transport). The 1-substep
+unmodified-tracer clone must reproduce the unmodified live step-96
+stored endpoint face MAC volume, left pressure source and global tracer
+kg within explicit numerical tolerances.
+
+Two completely separate passive-dye controls are evaluated:
+(1) actual historical tracer from the 95-step run and
+(2) same step-95 fluid/solid/pressure state but a **controlled
+1 kg/m³ tracer concentration** assigned only at the shrinking left
+cell (28,26) on each copied Field before stepping. No tracer is
+injected into the original Field, and neither experiment enables
+small-cell Galerkin pressure pooling or connected-residual remap.
+
+For U(29,26), the CSV \`capsule_step96_split\` reports independently:
+
+- Sum of actual **post-projection stored endpoint MAC** face volume
+  \`Σ open_end * u_end * h * dt_small\`, plus **pre-pressure** endpoint
+  volume seen in the real pre-pressure callback.
+- Sum of \`getSweptULinearVelocityProxyVolume\`, explicitly a
+  *hypothetical* within-substep velocity interpolation rather than
+  the exact integral of \`open(t)*u(t)\`.
+- Sum of per-substep time-mean opening × \`dt_small\`
+  (aperture exposure), and separately the **solid swept-face volume**,
+  left/right **pressure volume sources**, left snapshot volume change,
+  and accumulated left post-pressure continuity residual.
+- Exactly **applied, signed** left↔right tracer kg from the existing
+  \`setTracerTransferObserver\`, separated into sweptFace, fallback,
+  MAC and connectedResidual kinds. These kg are neither face volume
+  nor a pressure-induced virtual child→parent exchange.
+- Global before/after tracer mass, remaining left-cell tracer mass and
+  cell fluid volume, plus maximum sampled endpoint raw face speed.
+  Source-sum equality and convergence across different substep counts
+  are **not assumed**; actual discrete pressure and advection
+  histories diverge when the cadence changes.
+
+A cloned 1-substep path is an **identical-entry control**. Its
+higher-cadence siblings are a meaningful *discrete refinement
+comparison*, **not** samples of an independently known continuous
+velocity history inside the original coarse step. Even 8 real
+substeps do not certify physical space-time mass/energy conservation,
+and the endpoint volume sum and linear proxy must not be silently
+added to the already applied Swept tracer kg. Any observed
+difference flags a pressure/geometry/advection coupling question,
+not an accepted replacement for the current transport solver.
+
+**Verification:** Linux Debug + Windows Release opt-in benchmark
+steps are registered in \`.github/workflows/cmake.yml\`; check the
+CI triggered by this change for compiler, parity and numerical
+regression before treating the experiment as verified. The ordinary
+field/World solver and all default options remain unchanged.
+Keep PR #326 Draft and PR #322 separately Draft; next acceptance
+requires independent actual time-consistent fluid-face flux with a
+moving-interface balance and pressure/Body+wall impulse closure,
+then geometry reopening, h/cadence and performance controls.
