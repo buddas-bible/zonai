@@ -3030,6 +3030,21 @@ void checkDemoUi()
             std::fprintf( stderr, "Wind Ctrl-click did not select cell independently of MouseJoint\n" );
             std::exit( EXIT_FAILURE );
         }
+        // Exercise the live ImGui inspector path, not just its marker draw.
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos( { 0.0f, 0.0f } );
+        ImGui::SetNextWindowSize( { 440.0f, 4000.0f } );
+        ImGui::Begin( "Wind cell inspector test" );
+        ImGui::GetStateStorage()->SetInt( ImGui::GetID( "WindProbeInspector" ), 1 );
+        view.drawControls();
+        ImGui::End();
+        ImGui::Render();
+        if( field->getTracerMass() != massBefore ||
+            zonai::LengthSquared( field->getFluidMomentum() - momentumBefore ) > 0.0f )
+        {
+            std::fprintf( stderr, "Wind ImGui cell inspector mutated physics\n" );
+            std::exit( EXIT_FAILURE );
+        }
         probe.mousePosition = { 1.0e6f, 1.0e6f };
         view.handleInput( probe );
         if( view.getWindProbeX() != -1 || view.getWindProbeY() != -1 ||
