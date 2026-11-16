@@ -5185,12 +5185,171 @@ void auditFrozenCapsuleGeometryComparison()
     }
 }
 
+// Compare the SAME step-95 entry field across genuinely integrated smaller
+// Fluid substeps. Each substep solves its own Cut-cell pressure and tracer
+// transport: this is a refinement reference, NOT an exact continuous flux.
+struct capsuleStep96SplitResult
+{
+    double endpointMacVolume = 0.0;
+    double prePressureMacVolume = 0.0;
+    double linearMacProxyVolume = 0.0;
+    double openExposureSeconds = 0.0;
+    double solidSweptFaceVolume = 0.0;
+    double leftPressureSourceVolume = 0.0;
+    double rightPressureSourceVolume = 0.0;
+    double leftSnapshotDeltaVolume = 0.0;
+    double leftPressureResidualVolume = 0.0;
+    std::array<double, 4> signedAppliedPairMass{}; // swept/fallback/MAC/connected, +left->right
+    double massBefore = 0.0;
+    double massAfter = 0.0;
+    double leftMassAfter = 0.0;
+    double leftVolumeAfter = 0.0;
+    double maxAbsRawFaceVelocity = 0.0;
+    int prePressureObservations = 0;
+    int sweptStages = 0;
+    int macStages = 0;
+};
+
+capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
+    const fluidField2& stepEntry, fluidShapeObstacle2 capsule,
+    float startAngle, float endAngle, int totalSteps, float duration,
+    int splitCount, bool controlledDonorTracer )
+{
+    if( splitCount < 1 ) throw std::runtime_error( "invalid Capsule split count" );
+    constexpr int faceX = 29, faceY = 26, leftX = faceX - 1;
+    const int left = faceY * stepEntry.getWidth() + leftX;
+    const int right = left + 1;
+    const float h = stepEntry.getCellSize();
+    const float dt = duration / splitCount;
+    fluidField2 field = stepEntry;
+    field.setTracerStageObserver( {} );
+    field.setTracerTransferObserver( {} );
+    field.setPrePressureSnapshotObserver( {} );
+    field.setSweptApertureAuditEnabled( true );
+    if( field.getSmallCellPressureMergeFraction() != 0.0f ||
+        field.isConnectedResidualTracerRemapEnabled() ||
+        field.isCutCellCoupledProjectionEnabled() )
+        throw std::runtime_error( "Capsule split reference altered default solver" );
+    if( controlledDonorTracer )
+    {
+        // Passive dye ONLY on copied fields. 1 kg/m^3 in the shrinking
+        // cell at step 95, not an extra post-step volume or mass remap.
+        if( field.getCellFluidFraction( leftX, faceY ) <= 0.0f )
+            throw std::runtime_error( "Capsule step-95 controlled donor is not fluid" );
+        field.setTracerConcentration( leftX, faceY, 1.0f );
+    }
+    const auto mass = []( const fluidField2& state )
+    {
+        double sum = 0.0;
+        for( int y = 0; y < state.getHeight(); ++y )
+            for( int x = 0; x < state.getWidth(); ++x )
+                sum += state.getTracerCellMass( x, y );
+        return sum;
+    };
+    capsuleStep96SplitResult result{};
+    result.massBefore = mass( field );
+    field.setTracerTransferObserver( [&]( const fluidTracerTransfer2& transfer )
+    {
+        if( !std::isfinite( transfer.mass ) || transfer.mass < 0.0 )
+            throw std::runtime_error( "nonfinite actual Capsule tracer transfer" );
+        const int kind = static_cast<int>( transfer.kind );
+        if( kind < 0 || kind >= static_cast<int>( result.signedAppliedPairMass.size() ) )
+            throw std::runtime_error( "unknown Capsule tracer transfer kind" );
+        if( transfer.sourceCell == left && transfer.destinationCell == right )
+            result.signedAppliedPairMass[kind] += transfer.mass;
+        else if( transfer.sourceCell == right && transfer.destinationCell == left )
+            result.signedAppliedPairMass[kind] -= transfer.mass;
+    } );
+    field.setTracerStageObserver( [&]( const fluidField2&, fluidTracerStage2 stage )
+    {
+        if( stage == fluidTracerStage2::afterSweptRemap ) ++result.sweptStages;
+        else if( stage == fluidTracerStage2::afterMacAdvection ) ++result.macStages;
+    } );
+    field.setPrePressureSnapshotObserver( [&]( const fluidField2& frozen )
+    {
+        const auto budget = frozen.getCutCellVolumeBudget( leftX, faceY, dt );
+        if( !budget.valid || !budget.hasSweptHistory )
+            throw std::runtime_error( "missing split pre-pressure face state" );
+        result.prePressureMacVolume += budget.macOutwardVolume[1];
+        ++result.prePressureObservations;
+    } );
+
+    for( int segment = 0; segment < splitCount; ++segment )
+    {
+        // alpha is measured along the SAME original step-95->96 rotation,
+        // using each actual smaller solver step rather than interpolated u(t).
+        const float alpha = ( 95.0f + static_cast<float>( segment + 1 ) /
+            splitCount ) / totalSteps;
+        capsule.transform.rotation = rot2::FromRadians(
+            startAngle + alpha * ( endAngle - startAngle ) );
+        std::array<fluidObstacleForce2, 1> feedback{};
+        field.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+            feedback, 120 );
+        const auto leftCell = field.getCutCellVolumeBudget( leftX, faceY, dt );
+        const auto rightCell = field.getCutCellVolumeBudget( faceX, faceY, dt );
+        const auto faceVelocity = field.getUFaceVelocityForAudit( faceX, faceY );
+        if( !leftCell.valid || !rightCell.valid ||
+            !leftCell.hasVolumeHistory || !leftCell.hasSweptHistory ||
+            !field.hasSweptApertureAudit() || !faceVelocity ||
+            !std::isfinite( *faceVelocity ) ||
+            !std::isfinite( leftCell.macOutwardVolume[1] ) )
+            throw std::runtime_error( "invalid integrated Capsule split face state" );
+
+        result.endpointMacVolume += leftCell.macOutwardVolume[1];
+        result.linearMacProxyVolume += field.getSweptULinearVelocityProxyVolume(
+            faceX, faceY, dt );
+        result.openExposureSeconds +=
+            field.getSweptUTimeMeanOpenFraction( faceX, faceY ) * dt;
+        result.solidSweptFaceVolume += leftCell.solidSweptOutwardVolume[1];
+        result.leftPressureSourceVolume += leftCell.pressureSourceDeltaVolume;
+        result.rightPressureSourceVolume += rightCell.pressureSourceDeltaVolume;
+        result.leftSnapshotDeltaVolume += leftCell.snapshotDeltaVolume;
+        result.leftPressureResidualVolume += leftCell.pressureResidualVolume;
+        result.maxAbsRawFaceVelocity = std::max(
+            result.maxAbsRawFaceVelocity, static_cast<double>( std::abs( *faceVelocity ) ) );
+        result.leftVolumeAfter = static_cast<double>(
+            leftCell.currentFraction ) * h * h;
+        result.leftMassAfter = field.getTracerCellMass( leftX, faceY );
+        if( result.leftMassAfter < -1.0e-12 ||
+            !std::isfinite( feedback[0].force.x ) ||
+            !std::isfinite( feedback[0].force.y ) ||
+            !std::isfinite( feedback[0].torque ) )
+            throw std::runtime_error( "nonfinite or negative Capsule split state" );
+    }
+    result.massAfter = mass( field );
+    if( result.prePressureObservations != splitCount ||
+        result.sweptStages != splitCount || result.macStages != splitCount ||
+        !std::isfinite( result.linearMacProxyVolume ) ||
+        !std::isfinite( result.openExposureSeconds ) ||
+        result.openExposureSeconds < 0.0 ||
+        result.openExposureSeconds > duration + 1.0e-6 ||
+        std::abs( result.massAfter - result.massBefore ) >
+            1.0e-6 * std::max( 1.0, result.massBefore ) )
+        throw std::runtime_error( "Capsule split stage/positivity/mass gate failed" );
+
+    std::printf( "capsule_step96_split,%d,%d,%.12g,%.12g,%.12g,%.12g,"
+        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+        controlledDonorTracer ? 1 : 0, splitCount,
+        result.openExposureSeconds, result.prePressureMacVolume,
+        result.endpointMacVolume, result.linearMacProxyVolume,
+        result.solidSweptFaceVolume, result.leftPressureSourceVolume,
+        result.rightPressureSourceVolume, result.leftSnapshotDeltaVolume,
+        result.leftPressureResidualVolume,
+        result.signedAppliedPairMass[0], result.signedAppliedPairMass[1],
+        result.signedAppliedPairMass[2], result.signedAppliedPairMass[3],
+        result.massBefore, result.massAfter, result.leftMassAfter,
+        result.leftVolumeAfter, result.maxAbsRawFaceVelocity );
+    return result;
+}
+
 // Live prescribed-motion complement to the frozen zero-MAC geometry oracle.
 // Both fields receive identical transforms, velocity sources and tracer seed;
 // only the convex full-coverage guard differs. Pressure/advective histories
 // are separately evolved and the obstacle is KINEMATIC, so returned forces
 // are observations, not an integrated two-way World/body trajectory.
-void auditMovingCapsuleGuardTransport( bool hotspotLedger = false, bool pressureOracle = false )
+void auditMovingCapsuleGuardTransport( bool hotspotLedger = false,
+    bool pressureOracle = false, bool step96SplitFlux = false )
 {
     constexpr float h = 0.125f;
     constexpr float totalDt = 1.0f / 30.0f;
@@ -5420,6 +5579,16 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false, bool pressure
         "swept_remapped_kg,fallback_remapped_kg,unresolved_kg,"
         "max_face_velocity_mps,force_x_N,force_y_N,torque_Nm,"
         "pressure_active_cells,pressure_residual_rms_m3" );
+    if( step96SplitFlux )
+        std::puts( "capsule_step96_split,controlled_donor_tracer,fluid_substeps,"
+            "face_open_exposure_s,pre_pressure_endpoint_mac_m3,"
+            "post_pressure_endpoint_mac_m3,linear_velocity_aperture_proxy_m3,"
+            "solid_swept_face_m3,left_pressure_source_m3,right_pressure_source_m3,"
+            "left_snapshot_delta_m3,left_pressure_residual_sum_m3,"
+            "actual_swept_pair_signed_kg,actual_fallback_pair_signed_kg,"
+            "actual_mac_pair_signed_kg,actual_connected_pair_signed_kg,"
+            "total_mass_before_kg,total_mass_after_kg,left_final_tracer_kg,"
+            "left_final_fluid_volume_m3,max_raw_face_speed_mps" );
     double maxVolumeDifference = 0.0, maxTracerDifference = 0.0;
     double maxForceDifference = 0.0, maxTorqueDifference = 0.0;
     double maxSnapshotSourceDifference = 0.0;
@@ -5435,6 +5604,21 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false, bool pressure
         for( int mode = 0; mode < 2; ++mode )
         {
             fluidField2& field = *fields[mode];
+            // The reference runs start from the IDENTICAL step-95 entry.
+            // Only the copied fields get actual finer Fluid integration or
+            // controlled passive tracer, never the authoritative replay.
+            std::optional<capsuleStep96SplitResult> singleReference{};
+            if( step96SplitFlux && activeStep == hotspotStep && mode == 0 )
+            {
+                for( int seed = 0; seed < 2; ++seed )
+                    for( int split : { 1, 2, 4, 8 } )
+                    {
+                        const auto result = auditCapsuleStep96SplitFlux(
+                            field, capsule, startAngle, endAngle, steps,
+                            subDt, split, seed != 0 );
+                        if( seed == 0 && split == 1 ) singleReference = result;
+                    }
+            }
             // Only the witness step needs the extra time-quadrature grids.
             if( hotspotLedger && activeStep == hotspotStep )
                 field.setSweptApertureAuditEnabled( true );
@@ -5471,6 +5655,20 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false, bool pressure
             field.step( subDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
                 forces, 120 );
             feedback[mode] = forces[0];
+            if( singleReference )
+            {
+                const auto actual = field.getCutCellVolumeBudget(
+                    leftX, hotspotY, subDt );
+                const double actualMass = totalMass( field );
+                if( !actual.valid ||
+                    std::abs( actual.macOutwardVolume[1] -
+                        singleReference->endpointMacVolume ) > 1.0e-8 ||
+                    std::abs( actual.pressureSourceDeltaVolume -
+                        singleReference->leftPressureSourceVolume ) > 1.0e-8 ||
+                    std::abs( actualMass - singleReference->massAfter ) > 1.0e-8 )
+                    throw std::runtime_error(
+                        "identical step-95 entry split-1 reference differs from live Step" );
+            }
             if( hotspotLedger && activeStep == hotspotStep )
             {
                 auto& record = hotspot[mode];
@@ -6514,6 +6712,7 @@ int main( int argc, char** argv )
     bool capsuleMovingTransportAudit = false;
     bool capsuleHotspotLedgerAudit = false;
     bool capsulePressureOracleAudit = false;
+    bool capsuleStep96SplitFluxAudit = false;
     bool cutCellVolumeAudit = false;
     for( int i = 1; i < argc; ++i )
     {
@@ -6554,6 +6753,8 @@ int main( int argc, char** argv )
         capsuleHotspotLedgerAudit |= std::string_view( argv[i] ) == "--small-cell-capsule-hotspot-ledger-audit";
         capsulePressureOracleAudit |= std::string_view( argv[i] ) ==
             "--small-cell-capsule-noncoupled-pressure-oracle";
+        capsuleStep96SplitFluxAudit |= std::string_view( argv[i] ) ==
+            "--small-cell-capsule-step96-split-flux-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
@@ -6612,6 +6813,11 @@ int main( int argc, char** argv )
     if( capsuleHotspotLedgerAudit || capsulePressureOracleAudit )
     {
         auditMovingCapsuleGuardTransport( true, capsulePressureOracleAudit );
+        return 0;
+    }
+    if( capsuleStep96SplitFluxAudit )
+    {
+        auditMovingCapsuleGuardTransport( false, false, true );
         return 0;
     }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
