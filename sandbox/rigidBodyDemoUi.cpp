@@ -1397,6 +1397,9 @@ void rigidBodyDemoUi::drawExperimentControls()
                 &rate, 0.0f, 10.0f, "%.2f kg/s" ) )
                 setWindDyeEmitterRate( rate );
         }
+        if( ImGui::CollapsingHeader( "선택 셀·면 조사###WindProbeInspector" ) )
+            drawWindProbeControls();
+
         bool sweptTracer = isWindSweptTracerRemapEnabled();
         if( ImGui::Checkbox( "이동 강체의 tracer 재배치 (실험)###WindSweptTracerRemap", &sweptTracer ) )
             setWindSweptTracerRemapEnabled( sweptTracer );
@@ -2923,6 +2926,122 @@ void rigidBodyDemoUi::drawDebugSettings()
 
     ImGui::TextWrapped( "접촉 정보는 간격·수직 충격량·마찰 충격량을 표시합니다. 청록색 화살표는 속도이며 어두운 오브젝트는 수면 중입니다." );
     ImGui::TextWrapped( "이벤트 표시: 녹색 시작·주황색 종료는 발생 당시 두 Shape의 AABB 중심 사이에 남긴 근사 위치입니다. 빨간색 충격은 Solver 접점·법선입니다. 시간 경과에 따라 투명해지며 삭제된 Shape의 종료는 위치 없이 최근 Step 개수에만 포함됩니다." );
+}
+
+
+void rigidBodyDemoUi::drawWindProbeControls()
+{
+    const fluidField2* field = getWindField();
+    if( !field ) return;
+
+    ImGui::TextDisabled( "Ctrl+왼쪽 클릭: 셀 선택 (물체 조작 없이 조사)" );
+    if( ImGui::Button( "현재 최대 속도 면 찾기###WindProbePeak" ) )
+        (void)focusPeakWindFace();
+    ImGui::SameLine();
+    if( ImGui::Button( "선택 해제###WindProbeClear" ) )
+    {
+        windProbeX_ = windProbeY_ = -1;
+        windProbeFaceX_ = windProbeFaceY_ = -1;
+    }
+
+    const int x = windProbeX_, y = windProbeY_;
+    if( x < 0 || y < 0 || x >= field->getWidth() || y >= field->getHeight() )
+    {
+        ImGui::TextDisabled( "선택된 유체 셀이 없습니다." );
+        return;
+    }
+
+    const float fraction = field->getCellFluidFraction( x, y );
+    const float h = field->getCellSize();
+    const vec2 center = field->getCellCenter( x, y );
+    const vec2 velocity = field->sampleVelocity( center );
+    const float pressure = field->getCellPressureForVisualization( x, y );
+    const double tracerMass = field->getTracerCellMass( x, y );
+    const float tracerConcentration = field->getTracerConcentration( x, y );
+
+    ImGui::Text( "선택 셀 (%d, %d) / 중심 (%.3f, %.3f)m", x, y, center.x, center.y );
+    ImGui::Text( "유체 체적 비율 %.9g / 셀 유체 체적 %.9g m³",
+        fraction, static_cast<double>( fraction ) * h * h );
+    ImGui::Text( "염료 농도 %.6g kg/m³ / 저장 질량 %.8g kg",
+        tracerConcentration, tracerMass );
+    ImGui::Text( "중심 보간 속도 (%.5g, %.5g) m/s", velocity.x, velocity.y );
+
+    if( fraction > 0.0f )
+    {
+        // Gauge-independent comparison of the selected active cell against
+        // the same global active-cell pressure average used by its heatmap.
+        double totalPressure = 0.0;
+        int active = 0;
+        for( int cy = 0; cy < field->getHeight(); ++cy )
+            for( int cx = 0; cx < field->getWidth(); ++cx )
+                if( field->getCellFluidFraction( cx, cy ) > 0.0f )
+                {
+                    const float p = field->getCellPressureForVisualization( cx, cy );
+                    if( !std::isfinite( p ) ) continue;
+                    totalPressure += p;
+                    ++active;
+                }
+        const double reference = active > 0 ? totalPressure / active : 0.0;
+        ImGui::Text( "셀 압력 %.7g / 전체 활성 셀 평균 대비 %+.7g",
+            pressure, static_cast<double>( pressure ) - reference );
+    }
+    else ImGui::TextDisabled( "완전 고체 셀: 압력/농도는 표시 대상이 아님" );
+
+    ImGui::Text( "열린 U 면 W %.7g / E %.7g",
+        field->getUFaceOpenFraction( x, y ),
+        field->getUFaceOpenFraction( x + 1, y ) );
+    ImGui::Text( "열린 V 면 S %.7g / N %.7g",
+        field->getVFaceOpenFraction( x, y ),
+        field->getVFaceOpenFraction( x, y + 1 ) );
+
+    const auto west = field->getUFaceVelocityForAudit( x, y );
+    const auto east = field->getUFaceVelocityForAudit( x + 1, y );
+    const auto south = field->getVFaceVelocityForAudit( x, y );
+    const auto north = field->getVFaceVelocityForAudit( x, y + 1 );
+    if( west && east && south && north )
+    {
+        ImGui::Text( "저장 MAC U: W %+.6g / E %+.6g m/s", *west, *east );
+        ImGui::Text( "저장 MAC V: S %+.6g / N %+.6g m/s", *south, *north );
+    }
+
+    if( windProbeFaceX_ >= 0 && windProbeFaceY_ >= 0 )
+    {
+        const auto speed = windProbeFaceIsU_
+            ? field->getUFaceVelocityForAudit( windProbeFaceX_, windProbeFaceY_ )
+            : field->getVFaceVelocityForAudit( windProbeFaceX_, windProbeFaceY_ );
+        const float opening = windProbeFaceIsU_
+            ? field->getUFaceOpenFraction( windProbeFaceX_, windProbeFaceY_ )
+            : field->getVFaceOpenFraction( windProbeFaceX_, windProbeFaceY_ );
+        if( speed )
+            ImGui::Text( "고속 면 %c(%d,%d): 속도 %+.7g m/s / 개방률 %.7g",
+                windProbeFaceIsU_ ? 'U' : 'V',
+                windProbeFaceX_, windProbeFaceY_, *speed, opening );
+    }
+
+    if( const float dt = getWindLastFluidTimeStep();
+        field->isCutCellProjectionEnabled() && dt > 0.0f )
+    {
+        const fluidCutCellVolumeBudget2 budget =
+            field->getCutCellVolumeBudget( x, y, dt );
+        if( budget.valid )
+        {
+            ImGui::Text( "최근 Fluid 구간 %.8g초 / 이전 체적 비율 %.9g",
+                dt, budget.previousFraction );
+            if( budget.hasVolumeHistory )
+            {
+                ImGui::Text( "체적 소스 변화 %+.8g m³ / 스냅샷 변화 %+.8g m³",
+                    budget.pressureSourceDeltaVolume, budget.snapshotDeltaVolume );
+                ImGui::Text( "압력 연속성 잔차 %+.8g m³",
+                    budget.pressureResidualVolume );
+            }
+            if( budget.hasSweptHistory )
+                ImGui::Text( "고체 Swept 면 합계 %+.8g m³",
+                    budget.solidSweptDivergenceVolume );
+            ImGui::TextDisabled(
+                "MAC/체적 잔차는 종료 시점 기하 기반. 실제 시간별 유량 적분이 아님" );
+        }
+    }
+    else ImGui::TextDisabled( "Cut-cell 체적 장부: 활성화 후 한 Fluid Step 필요" );
 }
 
 #pragma endregion Controls
