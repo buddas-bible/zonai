@@ -2328,3 +2328,40 @@ Keep PR #326 Draft and PR #322 separately Draft; next acceptance
 requires independent actual time-consistent fluid-face flux with a
 moving-interface balance and pressure/Body+wall impulse closure,
 then geometry reopening, h/cadence and performance controls.
+
+### Measured step-96 split-refinement results — 2026-11-17
+
+**Code-bearing CI passed:** [GitHub Actions #43936620326](https://github.com/buddas-bible/zonai/actions/runs/43936620326) completed successfully on Ubuntu Debug and Windows Release, including both new `--small-cell-capsule-step96-split-flux-audit` steps, the ordinary CTests, and the existing pressure/Cut-cell audits. This run is on commit `6dd9b973` (the benchmark implementation `94a0b486` plus CI registration); subsequent documentation-only commits do not alter solver or benchmark code.
+
+The following matched comparisons are **separately evolved actual 1/2/4/8-step Fluid histories from one identical step-95 entry**. They are not a reconstruction of a unique within-step velocity of the 1-step baseline. The face is U(29,26), with world cell size 0.125m and one 1/128-th of the prescribed 1/30s total rotation interval.
+
+| Quantity (Ubuntu Debug, original tracer history) | 1 split | 2 splits | 4 splits | 8 splits |
+| --- | ---: | ---: | ---: | ---: |
+| Maximum raw U(29,26) speed (m/s) | 5486.276 | 2762.238 | 1392.036 | 704.831 |
+| Summed **pre-pressure endpoint** MAC face volume (m³) | 8.1973e-8 | 1.52152e-5 | 2.07701e-5 | 2.19025e-5 |
+| Summed **post-pressure endpoint** MAC face volume (m³) | 1.94368e-5 | 2.03211e-5 | 2.07561e-5 | 2.09689e-5 |
+| Hypothetical velocity-linear face volume proxy (m³) | 3.58077e-3 | 4.78506e-4 | 8.34847e-5 | 3.15554e-5 |
+| Time-open face exposure (s) | 1.03982e-5 | 1.03795e-5 | 1.03746e-5 | 1.03734e-5 |
+| Summed left pressure-source volume (m³) | -3.17712e-5 | -3.17105e-5 | -3.16949e-5 | -3.16911e-5 |
+
+Windows Release independently reproduced the 1→8 raw velocity change **5486.342→704.840 m/s** and the post-pressure endpoint volume sum **1.943681e-5→2.096891e-5 m³**, with negligible differences in the stable geometry and pressure-source budgets. Both platforms successfully enforced **split=1 same-state parity** against the real original Field (post-pressure face MAC volume, left pressure source, and total tracer mass). Even though max raw velocity changes substantially with finer time integration, the pressure-source and face exposure sums are comparatively steady. This is a discretization diagnostic, not a verified physical fix or a proof of monotonic convergence.
+
+For a separate **controlled dye donor** of 1 kg/m³ in the shrinking left cell immediately before the split interval (copies only), actual applied signed left→right transfers across **this one face** were:
+
+| Measured tracer mass (Ubuntu Debug, kg) | 1 split | 2 splits | 4 splits | 8 splits |
+| --- | ---: | ---: | ---: | ---: |
+| Applied Swept face transfer | 2.216863e-5 | 1.651754e-5 | 1.117561e-5 | 1.103088e-5 |
+| Applied MAC face transfer | 3.59525e-11 | 5.19428e-6 | 1.031080e-5 | 1.050809e-5 |
+| Signed fallback / connected-residual on this pair | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| **Swept + MAC direct pair** | ~2.216866e-5 | ~2.171182e-5 | ~2.148641e-5 | ~2.153896e-5 |
+
+Windows Release produced essentially the same numbers (Swept 1→8: **2.216863e-5→1.103088e-5 kg**; MAC: **3.59517e-11→1.050808e-5 kg**). The **global** tracer mass remained equal before/after every tested interval at printed precision (initial 1.72632628537 kg in the controlled-donor condition, including historical dye); the shrinking left cell ended with approximately zero tracer while its geometric fluid volume was ~5.877e-11 m³. Its local dye could have moved through OTHER adjacent faces or fallback paths: direct U(29,26) pair mass **does not close the donor's complete tracer ledger**. Do not equate these kg with the ~3.16e-5 m³ omitted child continuity in the independently pooled pressure oracle.
+
+**Findings / rejection of early physical acceptance:**
+
+1. The available *actual* fine-step MAC and tracer histories show strong sensitivity in the split between Swept remap and MAC advection, even though the combined direct-pair transported dye is of similar order. The current pressure/transport split has not demonstrated a time-consistent single-face conservation identity.
+2. The 1-step velocity-linear proxy is **0.00358 m³**, vastly larger than the actual 1-step *endpoint-based* face-volume sum **1.94e-5 m³**. The former is NOT measured material transport: it linearly invents intermediate velocity in the presence of an endpoint spike. By 8 substeps the proxy is ~3.16e-5 m³, but it is still a hypothetical interpolation model.
+3. The raw hotspot velocity falls roughly with refinement (5486→705 m/s) while the left pressure-source volume and time-open aperture exposure change comparatively little. This supports **time/pressure discretization sensitivity** as a concrete area for investigation. It does **not** establish a physically correct speed, numerical convergence, admissible implicit transfer, or conservation of water, energy, pressure–Body impulses, or joints.
+4. Both platforms pass the diagnostic's validity, stage count and global tracer mass gates. These gates are bookkeeping checks for *this* replay, not a high-resolution, continuous moving-interface solution or GPU/CPU parity.
+
+**Next bounded S2c experiment:** independently close the **entire shrinking donor** tracer inventory by recording the actually applied Swept/MAC/fallback transfers on *all four faces and any nonlocal destinations* at this exact step-95 entry, separately for 1/2/4/8 substeps. Compare that with the donor's snapshot change and pressure-source budget without converting tracer kg into volume using an endpoint-only concentration or double-counting Swept transfers. Only after this full local ledger should a conservative moving-interface discretization be proposed, then test h/cadence, reopening/closing, coupled Body+wall feedback and disabled-mode overhead. Both experimental physics options stay OFF; PR #326 and #322 remain Draft.
