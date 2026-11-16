@@ -12,11 +12,13 @@ struct windVisualization2
     bool vectors = true;
     bool speedHeatmap = false;
     bool pressureHeatmap = false;
+    bool continuityHeatmap = false;
     bool cutCells = false;
     float dyeReference = 4.0f; // kg/m^3 for near-saturation
     float dyeOpacity = 0.90f;
     float speedReference = 8.0f; // m/s, saturated face-speed display
     float pressureReference = 10.0f; // relative pressure, density = 1
+    float continuityReference = 1.0f; // signed pressure volume residual / (h*h*dt), 1/s
     float overlayOpacity = 0.55f;
 };
 
@@ -43,6 +45,7 @@ public:
     // Reads active fluid-fluid MAC faces and focuses the largest raw speed.
     // Does not change any simulated velocity, tracer or obstacle.
     [[nodiscard]] bool focusPeakWindFace() noexcept;
+    [[nodiscard]] bool focusWorstWindResidual() noexcept;
 
 private:
 #pragma region Controls
