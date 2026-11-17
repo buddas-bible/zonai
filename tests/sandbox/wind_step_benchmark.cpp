@@ -5736,7 +5736,7 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false,
         std::puts( "capsule_step96_donor_volume,controlled_donor_tracer,"
             "fluid_substeps,route_WESN,pre_pressure_endpoint_mac_out_m3,"
             "post_pressure_endpoint_mac_out_m3,solid_swept_out_m3" );
-        std::puts( "capsule_step96_split,controlled_donor_tracer,fluid_substeps,
+        std::puts( "capsule_step96_split,controlled_donor_tracer,fluid_substeps,"
             "face_open_exposure_s,pre_pressure_endpoint_mac_m3,"
             "post_pressure_endpoint_mac_m3,linear_velocity_aperture_proxy_m3,"
             "solid_swept_face_m3,left_pressure_source_m3,right_pressure_source_m3,"
