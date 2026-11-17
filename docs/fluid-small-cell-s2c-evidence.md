@@ -2365,3 +2365,95 @@ Windows Release produced essentially the same numbers (Swept 1→8: **2.216863e-
 4. Both platforms pass the diagnostic's validity, stage count and global tracer mass gates. These gates are bookkeeping checks for *this* replay, not a high-resolution, continuous moving-interface solution or GPU/CPU parity.
 
 **Next bounded S2c experiment:** independently close the **entire shrinking donor** tracer inventory by recording the actually applied Swept/MAC/fallback transfers on *all four faces and any nonlocal destinations* at this exact step-95 entry, separately for 1/2/4/8 substeps. Compare that with the donor's snapshot change and pressure-source budget without converting tracer kg into volume using an endpoint-only concentration or double-counting Swept transfers. Only after this full local ledger should a conservative moving-interface discretization be proposed, then test h/cadence, reopening/closing, coupled Body+wall feedback and disabled-mode overhead. Both experimental physics options stay OFF; PR #326 and #322 remain Draft.
+
+### Step-96 full four-face donor tracer inventory closure — 2026-11-18
+
+**Implementation:** `ad1af6e5` adds W/E/S/N + nonlocal **actual applied**
+per-kind tracer-transfer bookkeeping to the *existing*
+`--small-cell-capsule-step96-split-flux-audit`; `8ff51d4e`
+fixes the benchmark's CSV header literal. **Cross-platform validation:**
+[Actions #44148962605](https://github.com/buddas-bible/zonai/actions/runs/44148962605)
+completed **success** on both **Ubuntu Debug** and **Windows Release**,
+including ordinary CTests, prior S2c audits, and the new donor-closure
+assertions. PR #326 remains Draft; PR #322 remains independent Draft.
+
+**Identical-entry controls:** Step-95 Field snapshots, the exact same
+step-96 physical Capsule rotation and geometry, but 1/2/4/8 genuinely
+computed Fluid substeps. Both the existing tracer history and an
+additional *cloned-only* 1 kg/m³ controlled donor tracer at
+cell **(28,26)** are checked. No physical field, pressure equation,
+World feedback or transport default changes. Source/destination cell
+indices are reconstructed from the **already applied**
+`fluidTracerTransfer2` events, never inferred from potential MAC or
+Swept capacities. Event direction is relative to the donor cell:
+W/E/S/N, with `X` for nonadjacent fallback, separately tallying
+outgoing and incoming. Swept, fallback, limited MAC and the disabled
+connected-residual experiment have distinct channels. The audit checks
+the following on **every substep**, including after Swept remap and
+after MAC transport:
+
+```text
+afterSwept = beforeSubstep - observedSweptNetOut
+                          - observedFallbackNetOut
+                          - observedConnectedNetOut
+afterMac = afterSwept - observedMacNetOut
+afterEntireInterval = beforeInterval + Σ(applied incoming kg) - Σ(applied outgoing kg)
+```
+
+On both platforms, for the controlled donor, the initial stored mass
+was **3.16900877806e-5 kg** and the final donor mass was approximately
+zero for all four cadence variants. The **maximum** absolute
+substep/stage inventory residual on the 8-split run was approximately
+**3.39e-21 kg** (Ubuntu and Windows), far below its explicit
+`1e-12 + 1e-6 * initialDonorMass` kg regression tolerance.
+The existing 1-split cloned path independently matches the actual
+unmodified Field. The unseeded historical tracer control begins with
+only subnormal rounding-level donor mass; it does not supply evidence
+for a meaningful donor leak.
+
+| Applied controlled-donor transport (Ubuntu Debug, kg) | 1 split | 2 splits | 4 splits | 8 splits |
+| --- | ---: | ---: | ---: | ---: |
+| Swept **East** | 2.2168626982e-5 | 1.65175436491e-5 | 1.11756104252e-5 | 1.10308792646e-5 |
+| Swept **South** | 9.52140203104e-6 | 7.18722248664e-6 | 4.88571413661e-6 | 4.81820594219e-6 |
+| Actual limited MAC **East** | 3.59525199076e-11 | 5.19428034257e-6 | 1.03108034342e-5 | 1.05080856409e-5 |
+| Actual limited MAC **South** | 2.28150195384e-11 | 2.79104130224e-6 | 5.31795978458e-6 | 5.33291693297e-6 |
+| Applied West / North, all kinds | 0 | 0 | 0 | 0 |
+| Applied adjacent/nonlocal fallback, all directions | 0 | 0 | 0 | 0 |
+| Applied connected-residual experiment | 0 (OFF) | 0 | 0 | 0 |
+
+The combined **East + South Swept/MAC transfer** accounts for all
+**3.16900877806e-5 kg** of the original controlled donor mass; the
+remaining ~1e-22–1e-37 kg signed incoming differences are numerical
+roundoff and not meaningful material recycling. Windows Release
+agrees to displayed precision. The earlier one-face
+U(29,26) audit excluded the real **South** transport; it was not
+missing tracer or a physical volume created by the pressure-pooling
+oracle. The actual operator split changes substantially as time steps
+are refined: at 1 split nearly all dye is moved by **Swept**; by 8
+splits Swept and MAC account for approximately half each, with
+the same final donor mass. This is strong evidence of *discrete
+operator/cadence sensitivity*, not proof of a physically correct flux.
+
+**Do not equate the closed dye ledger to fluid volume/impulse
+conservation.** In the 1-split control the measured signed
+solid-Swept volumes on donor W/E/S/N were approximately
+`[-6.0961413e-4, +5.8269914e-4, +2.5026867e-4,
+-2.5512485e-4] m³`, whereas applied dye crosses
+**only East and South**. Their signed geometric cancellation gives
+~`-3.1771e-5 m³`, comparable to that step's pressure-source
+volume. Neither the large *individual* solid-swept face volumes nor
+post-pressure endpoint MAC volumes are time-integrated physical
+open-fluid tracer transfers. Mass closure of the tracer bookkeeping
+does not validate the pressure operator, group-only Galerkin
+continuity, physical fluid inventory, or a Body+wall impulse pair.
+
+**Updated S2c next gate:** derive a time-consistent moving-interface
+*geometric conservation* and open-face **fluid** volume budget,
+including measured/independently resolved temporal face velocity,
+without duplicating the already applied Swept/tracer flux. Test it
+at the same step-95 entry against the donor's W/E/S/N
+pre-/post-pressure MAC volumes, signed swept geometry source, and
+local continuity. Then expand to nearly closed/reopened pockets,
+h/cadence sensitivity, and genuinely two-way World + wall impulse
+closure. Do not enable pressure pooling, change default transport,
+or claim fluid/FSI acceptance based solely on this tracer test.
