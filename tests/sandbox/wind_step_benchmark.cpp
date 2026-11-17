@@ -5200,6 +5200,18 @@ struct capsuleStep96SplitResult
     double leftSnapshotDeltaVolume = 0.0;
     double leftPressureResidualVolume = 0.0;
     std::array<double, 4> signedAppliedPairMass{}; // swept/fallback/MAC/connected, +left->right
+    // [transfer kind][W,E,S,N,nonlocal][outward/inward] — applied mass, kg.
+    std::array<std::array<std::array<double, 2>, 5>, 4> donorTransfers{};
+    std::array<std::array<int, 5>, 4> donorTransferCounts{};
+    std::array<double, 4> donorPreMacOutwardVolume{};
+    std::array<double, 4> donorPostMacOutwardVolume{};
+    std::array<double, 4> donorSolidSweptOutwardVolume{};
+    double donorMassBefore = 0.0;
+    double donorMassAfterLastSwept = 0.0;
+    double donorExpectedFinalMass = 0.0;
+    double maxSweptStageMassDefect = 0.0;
+    double maxMacStageMassDefect = 0.0;
+    double maxStepMassDefect = 0.0;
     double massBefore = 0.0;
     double massAfter = 0.0;
     double leftMassAfter = 0.0;
@@ -5248,6 +5260,12 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
     };
     capsuleStep96SplitResult result{};
     result.massBefore = mass( field );
+    result.donorMassBefore = field.getTracerCellMass( leftX, faceY );
+    // This ledger observes transfers, not tracer creation: compare each
+    // completed Swept and MAC stage against the exact applied per-cell events.
+    double segmentStartMass = result.donorMassBefore;
+    double segmentSweptMass = segmentStartMass;
+    std::array<double, 4> segmentNetOutwardByKind{};
     field.setTracerTransferObserver( [&]( const fluidTracerTransfer2& transfer )
     {
         if( !std::isfinite( transfer.mass ) || transfer.mass < 0.0 )
@@ -5259,11 +5277,51 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
             result.signedAppliedPairMass[kind] += transfer.mass;
         else if( transfer.sourceCell == right && transfer.destinationCell == left )
             result.signedAppliedPairMass[kind] -= transfer.mass;
+
+        const bool outgoing = transfer.sourceCell == left;
+        const bool incoming = transfer.destinationCell == left;
+        if( !outgoing && !incoming ) return;
+        if( outgoing && incoming )
+            throw std::runtime_error( "self-transfer in Capsule donor ledger" );
+        const int other = outgoing ? transfer.destinationCell : transfer.sourceCell;
+        const int width = field.getWidth();
+        // W/E/S/N for the donor regardless of transfer direction;
+        // X records fallback across nonadjacent (possibly covered) cells.
+        const int direction = other == left - 1 ? 0 :
+            other == left + 1 ? 1 :
+            other == left - width ? 2 :
+            other == left + width ? 3 : 4;
+        if( other < 0 || other >= width * field.getHeight() ||
+            ( direction == 4 && transfer.kind != fluidTracerTransferKind2::fallback ) )
+            throw std::runtime_error( "non-neighbor swept/MAC transfer in donor ledger" );
+        result.donorTransfers[kind][direction][outgoing ? 0 : 1] += transfer.mass;
+        ++result.donorTransferCounts[kind][direction];
+        segmentNetOutwardByKind[kind] += outgoing ? transfer.mass : -transfer.mass;
     } );
-    field.setTracerStageObserver( [&]( const fluidField2&, fluidTracerStage2 stage )
+    field.setTracerStageObserver( [&]( const fluidField2& stageField, fluidTracerStage2 stage )
     {
-        if( stage == fluidTracerStage2::afterSweptRemap ) ++result.sweptStages;
-        else if( stage == fluidTracerStage2::afterMacAdvection ) ++result.macStages;
+        const double actual = stageField.getTracerCellMass( leftX, faceY );
+        if( !std::isfinite( actual ) || actual < -1.0e-12 )
+            throw std::runtime_error( "negative/nonfinite Capsule stage donor mass" );
+        if( stage == fluidTracerStage2::afterSweptRemap )
+        {
+            // Swept, fallback and optional connectedResidual run BEFORE MAC.
+            const double expected = segmentStartMass -
+                segmentNetOutwardByKind[0] - segmentNetOutwardByKind[1] -
+                segmentNetOutwardByKind[3];
+            result.maxSweptStageMassDefect = std::max(
+                result.maxSweptStageMassDefect, std::abs( actual - expected ) );
+            result.donorMassAfterLastSwept = actual;
+            segmentSweptMass = actual;
+            ++result.sweptStages;
+        }
+        else if( stage == fluidTracerStage2::afterMacAdvection )
+        {
+            const double expected = segmentSweptMass - segmentNetOutwardByKind[2];
+            result.maxMacStageMassDefect = std::max(
+                result.maxMacStageMassDefect, std::abs( actual - expected ) );
+            ++result.macStages;
+        }
     } );
     field.setPrePressureSnapshotObserver( [&]( const fluidField2& frozen )
     {
@@ -5271,6 +5329,9 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
         if( !budget.valid || !budget.hasSweptHistory )
             throw std::runtime_error( "missing split pre-pressure face state" );
         result.prePressureMacVolume += budget.macOutwardVolume[1];
+        for( int direction = 0; direction < 4; ++direction )
+            result.donorPreMacOutwardVolume[direction] +=
+                budget.macOutwardVolume[direction];
         ++result.prePressureObservations;
     } );
 
@@ -5278,6 +5339,8 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
     {
         // alpha is measured along the SAME original step-95->96 rotation,
         // using each actual smaller solver step rather than interpolated u(t).
+        segmentStartMass = field.getTracerCellMass( leftX, faceY );
+        segmentNetOutwardByKind = {};
         const float alpha = ( 95.0f + static_cast<float>( segment + 1 ) /
             splitCount ) / totalSteps;
         capsule.transform.rotation = rot2::FromRadians(
@@ -5305,18 +5368,63 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
         result.rightPressureSourceVolume += rightCell.pressureSourceDeltaVolume;
         result.leftSnapshotDeltaVolume += leftCell.snapshotDeltaVolume;
         result.leftPressureResidualVolume += leftCell.pressureResidualVolume;
+        for( int direction = 0; direction < 4; ++direction )
+        {
+            result.donorPostMacOutwardVolume[direction] +=
+                leftCell.macOutwardVolume[direction];
+            result.donorSolidSweptOutwardVolume[direction] +=
+                leftCell.solidSweptOutwardVolume[direction];
+        }
+        const double localPressureIdentity =
+            leftCell.macNetOutwardVolume + leftCell.pressureSourceDeltaVolume;
+        if( std::abs( leftCell.pressureResidualVolume -
+                localPressureIdentity ) > 1.0e-12 )
+            throw std::runtime_error( "Capsule local pressure ledger identity failed" );
         result.maxAbsRawFaceVelocity = std::max(
             result.maxAbsRawFaceVelocity, static_cast<double>( std::abs( *faceVelocity ) ) );
         result.leftVolumeAfter = static_cast<double>(
             leftCell.currentFraction ) * h * h;
         result.leftMassAfter = field.getTracerCellMass( leftX, faceY );
-        if( result.leftMassAfter < -1.0e-12 ||
+        const double appliedNetOutward = std::accumulate(
+            segmentNetOutwardByKind.begin(), segmentNetOutwardByKind.end(), 0.0 );
+        const double expectedMass = segmentStartMass - appliedNetOutward;
+        result.maxStepMassDefect = std::max( result.maxStepMassDefect,
+            std::abs( result.leftMassAfter - expectedMass ) );
+        if( result.sweptStages != segment + 1 ||
+            result.macStages != segment + 1 ||
+            result.leftMassAfter < -1.0e-12 ||
             !std::isfinite( feedback[0].force.x ) ||
             !std::isfinite( feedback[0].force.y ) ||
             !std::isfinite( feedback[0].torque ) )
             throw std::runtime_error( "nonfinite or negative Capsule split state" );
     }
     result.massAfter = mass( field );
+    double totalOutward = 0.0, totalInward = 0.0;
+    for( int kind = 0; kind < 4; ++kind )
+        for( int direction = 0; direction < 5; ++direction )
+        {
+            totalOutward += result.donorTransfers[kind][direction][0];
+            totalInward += result.donorTransfers[kind][direction][1];
+        }
+    result.donorExpectedFinalMass =
+        result.donorMassBefore - totalOutward + totalInward;
+    const double inventoryTolerance =
+        1.0e-12 + 1.0e-6 * result.donorMassBefore;
+    if( std::abs( result.leftMassAfter -
+            result.donorExpectedFinalMass ) > inventoryTolerance ||
+        result.maxSweptStageMassDefect > inventoryTolerance ||
+        result.maxMacStageMassDefect > inventoryTolerance ||
+        result.maxStepMassDefect > inventoryTolerance )
+        throw std::runtime_error(
+            "Capsule donor actual-transfer ledger fails stage/global continuity" );
+    for( int kind = 0; kind < 4; ++kind )
+    {
+        const double eastNet = result.donorTransfers[kind][1][0] -
+            result.donorTransfers[kind][1][1];
+        if( std::abs( eastNet - result.signedAppliedPairMass[kind] ) >
+            inventoryTolerance )
+            throw std::runtime_error( "Capsule donor East pair audit disagrees" );
+    }
     if( result.prePressureObservations != splitCount ||
         result.sweptStages != splitCount || result.macStages != splitCount ||
         !std::isfinite( result.linearMacProxyVolume ) ||
@@ -5327,6 +5435,39 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
             1.0e-6 * std::max( 1.0, result.massBefore ) )
         throw std::runtime_error( "Capsule split stage/positivity/mass gate failed" );
 
+    std::printf( "capsule_step96_donor_balance,%d,%d,%.12g,%.12g,"
+        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+        "%.12g,%.12g,%.12g,%.12g\n",
+        controlledDonorTracer ? 1 : 0, splitCount,
+        result.donorMassBefore, result.donorMassAfterLastSwept,
+        result.leftMassAfter, totalOutward, totalInward,
+        result.donorExpectedFinalMass,
+        result.leftMassAfter - result.donorExpectedFinalMass,
+        result.maxSweptStageMassDefect, result.maxMacStageMassDefect,
+        result.maxStepMassDefect,
+        result.donorTransfers[1][4][0], result.donorTransfers[1][4][1] );
+    constexpr std::array<char, 5> routes{{ 'W', 'E', 'S', 'N', 'X' }};
+    for( int direction = 0; direction < 5; ++direction )
+    {
+        int eventCount = 0;
+        for( int kind = 0; kind < 4; ++kind )
+            eventCount += result.donorTransferCounts[kind][direction];
+        const auto& a = result.donorTransfers;
+        std::printf( "capsule_step96_donor_route,%d,%d,%c,"
+            "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%d\n",
+            controlledDonorTracer ? 1 : 0, splitCount, routes[direction],
+            a[0][direction][0], a[0][direction][1],
+            a[1][direction][0], a[1][direction][1],
+            a[2][direction][0], a[2][direction][1],
+            a[3][direction][0], a[3][direction][1], eventCount );
+        if( direction < 4 )
+            std::printf( "capsule_step96_donor_volume,%d,%d,%c,"
+                "%.12g,%.12g,%.12g\n",
+                controlledDonorTracer ? 1 : 0, splitCount, routes[direction],
+                result.donorPreMacOutwardVolume[direction],
+                result.donorPostMacOutwardVolume[direction],
+                result.donorSolidSweptOutwardVolume[direction] );
+    }
     std::printf( "capsule_step96_split,%d,%d,%.12g,%.12g,%.12g,%.12g,"
         "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
         "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
@@ -5580,7 +5721,22 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false,
         "max_face_velocity_mps,force_x_N,force_y_N,torque_Nm,"
         "pressure_active_cells,pressure_residual_rms_m3" );
     if( step96SplitFlux )
-        std::puts( "capsule_step96_split,controlled_donor_tracer,fluid_substeps,"
+    {
+        std::puts( "capsule_step96_donor_balance,controlled_donor_tracer,"
+            "fluid_substeps,donor_mass_before_kg,donor_mass_after_last_swept_kg,"
+            "donor_mass_after_mac_kg,total_observed_out_kg,"
+            "total_observed_in_kg,predicted_final_kg,"
+            "actual_minus_predicted_kg,max_swept_stage_defect_kg,"
+            "max_mac_stage_defect_kg,max_step_defect_kg,"
+            "nonlocal_fallback_out_kg,nonlocal_fallback_in_kg" );
+        std::puts( "capsule_step96_donor_route,controlled_donor_tracer,"
+            "fluid_substeps,route_WESN_or_X,swept_out_kg,swept_in_kg,"
+            "fallback_out_kg,fallback_in_kg,mac_out_kg,mac_in_kg,"
+            "connected_out_kg,connected_in_kg,applied_event_count" );
+        std::puts( "capsule_step96_donor_volume,controlled_donor_tracer,"
+            "fluid_substeps,route_WESN,pre_pressure_endpoint_mac_out_m3,"
+            "post_pressure_endpoint_mac_out_m3,solid_swept_out_m3" );
+        std::puts( "capsule_step96_split,controlled_donor_tracer,fluid_substeps,
             "face_open_exposure_s,pre_pressure_endpoint_mac_m3,"
             "post_pressure_endpoint_mac_m3,linear_velocity_aperture_proxy_m3,"
             "solid_swept_face_m3,left_pressure_source_m3,right_pressure_source_m3,"
@@ -5589,6 +5745,7 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false,
             "actual_mac_pair_signed_kg,actual_connected_pair_signed_kg,"
             "total_mass_before_kg,total_mass_after_kg,left_final_tracer_kg,"
             "left_final_fluid_volume_m3,max_raw_face_speed_mps" );
+    }
     double maxVolumeDifference = 0.0, maxTracerDifference = 0.0;
     double maxForceDifference = 0.0, maxTorqueDifference = 0.0;
     double maxSnapshotSourceDifference = 0.0;
