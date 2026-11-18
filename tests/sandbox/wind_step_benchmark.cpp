@@ -6416,7 +6416,7 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false,
             "donor_post_residual_m3,donor_compatible_residual_m3,"
             "region_compatible_rms_m3,donor_pressure_source_m3,"
             "global_compatibility_correction_m3ps,"
-            "global_pressure_residual_m3ps,cell_area_m2" );
+            "legacy_pressure_residual_native_units,cell_area_m2" );
         std::puts( "capsule_step96_reopen_step,seed,splits,substep,"
             "previous_fraction,current_fraction,snapshot_delta_m3,"
             "swept_divergence_m3,pressure_source_m3,pre_mac_net_m3,"
