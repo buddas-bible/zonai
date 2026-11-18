@@ -983,6 +983,21 @@ public:
     void setAdaptiveSweptSamplingEnabled( bool enabled ) noexcept { adaptiveSweptSamplingEnabled_ = enabled; }
     [[nodiscard]] bool isAdaptiveSweptSamplingEnabled() const noexcept { return adaptiveSweptSamplingEnabled_; }
 
+    // S2c DIAGNOSTIC ONLY, default OFF. A translation-only Capsule may be
+    // safely inside the Field even when its enclosing *circle* intersects a
+    // wall. If both endpoint shape AABBs fit strictly inside the Field and
+    // orientation is unchanged, allow the existing Swept quadrature.
+    // This is a controlled counterfactual, NOT a general boundary-clipped
+    // moving-obstacle solution or a production behavior change.
+    void setTightTranslatingCapsuleSweptBoundsAuditEnabled( bool enabled ) noexcept
+    {
+        tightTranslatingCapsuleSweptBoundsAuditEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isTightTranslatingCapsuleSweptBoundsAuditEnabled() const noexcept
+    {
+        return tightTranslatingCapsuleSweptBoundsAuditEnabled_;
+    }
+
     // MAC dual control volume의 upwind flux-form 이류. 선택형이며 기본 false.
     // 고정된 현재 open fraction에 대한 face 운동량만 보존한다.
     void setConservativeAdvectionEnabled( bool enabled ) noexcept { conservativeAdvectionEnabled_ = enabled; }
@@ -1348,6 +1363,7 @@ private:
     bool connectedResidualTracerRemapEnabled_ = false;
     bool sweptGeometryCorrectionEnabled_ = false;
     bool adaptiveSweptSamplingEnabled_ = false;
+    bool tightTranslatingCapsuleSweptBoundsAuditEnabled_ = false;
     int cutCellSampleCount_ = 4;
     bool analyticCircleCutCellEnabled_ = false;
     bool analyticPolygonCutCellEnabled_ = false;
