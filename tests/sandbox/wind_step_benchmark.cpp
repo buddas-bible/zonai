@@ -5304,7 +5304,7 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
         return static_cast<double>( direction == 0 || direction == 2 ? -1 : 1 )
             * *velocity;
     };
-    const auto faceRate = [&]( const fluidField2& state, int direction )
+    const auto faceOpen = [&]( const fluidField2& state, int direction )
     {
         const bool isU = direction < 2;
         const int fx = direction == 1 ? faceX : leftX;
@@ -5313,7 +5313,11 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
                                : state.getVFaceOpenFraction( fx, fy );
         if( !std::isfinite( open ) || open < 0.0f || open > 1.0f )
             throw std::runtime_error( "invalid Capsule MAC face opening" );
-        return signedFaceVelocity( state, direction ) * open;
+        return static_cast<double>( open );
+    };
+    const auto faceRate = [&]( const fluidField2& state, int direction )
+    {
+        return signedFaceVelocity( state, direction ) * faceOpen( state, direction );
     };
     // This ledger observes transfers, not tracer creation: compare each
     // completed Swept and MAC stage against the exact applied per-cell events.
@@ -5377,6 +5381,10 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
             ++result.macStages;
         }
     } );
+    // Capture actual evolved MAC states at the solver's pre-projection
+    // boundary. These are stage observations, NOT a time-resolved u(t).
+    std::array<double, 4> prePressureVelocities{};
+    std::array<double, 4> prePressureOpenings{};
     field.setPrePressureSnapshotObserver( [&]( const fluidField2& frozen )
     {
         const auto budget = frozen.getCutCellVolumeBudget( leftX, faceY, dt );
@@ -5384,8 +5392,19 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
             throw std::runtime_error( "missing split pre-pressure face state" );
         result.prePressureMacVolume += budget.macOutwardVolume[1];
         for( int direction = 0; direction < 4; ++direction )
+        {
+            prePressureVelocities[direction] =
+                signedFaceVelocity( frozen, direction );
+            prePressureOpenings[direction] = faceOpen( frozen, direction );
+            const double observedVolume = static_cast<double>( h ) * dt *
+                prePressureVelocities[direction] * prePressureOpenings[direction];
+            if( std::abs( observedVolume -
+                    budget.macOutwardVolume[direction] ) > 1.0e-10 )
+                throw std::runtime_error(
+                    "Capsule pre-pressure MAC face budget mismatch" );
             result.donorPreMacOutwardVolume[direction] +=
                 budget.macOutwardVolume[direction];
+        }
         ++result.prePressureObservations;
     } );
 
@@ -5397,10 +5416,12 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
         segmentNetOutwardByKind = {};
         std::array<double, 4> startRates{};
         std::array<double, 4> startVelocities{};
+        std::array<double, 4> startOpenings{};
         for( int direction = 0; direction < 4; ++direction )
         {
             startRates[direction] = faceRate( field, direction );
             startVelocities[direction] = signedFaceVelocity( field, direction );
+            startOpenings[direction] = faceOpen( field, direction );
         }
         const double previousStoredFraction =
             field.getCellFluidFraction( leftX, faceY );
@@ -5463,10 +5484,34 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
             result.donorMaxAbsAnalyticFractionGap > 1.0e-4 )
             throw std::runtime_error( "Capsule independent geometry witness mismatch" );
         previousAnalytic = nextAnalytic;
+        if( result.prePressureObservations != segment + 1 )
+            throw std::runtime_error( "Capsule pressure-stage observer count mismatch" );
         for( int direction = 0; direction < 4; ++direction )
         {
             const double endRate = faceRate( field, direction );
             const double endVelocity = signedFaceVelocity( field, direction );
+            const double endOpen = faceOpen( field, direction );
+            const double preRate = prePressureVelocities[direction] *
+                prePressureOpenings[direction];
+            const double preVolume = static_cast<double>( h ) * dt * preRate;
+            const double endVolume = leftCell.macOutwardVolume[direction];
+            if( std::abs( endOpen - prePressureOpenings[direction] ) > 1.0e-6 ||
+                std::abs( static_cast<double>( h ) * dt * endRate -
+                    endVolume ) > 1.0e-10 )
+                throw std::runtime_error(
+                    "Capsule pre/post pressure face geometry mismatch" );
+            // Pre and post are actual solver snapshots, not intermediate
+            // samples of a continuous time integral. Preserve outward signs.
+            std::printf( "capsule_step96_stage_face,%d,%d,%d,%c,"
+                "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                "%.12g,%.12g,%.12g,%.12g\\n",
+                controlledDonorTracer ? 1 : 0, splitCount, segment,
+                std::array<char, 4>{{ 'W', 'E', 'S', 'N' }}[direction],
+                startOpenings[direction], prePressureOpenings[direction],
+                endOpen, startVelocities[direction],
+                prePressureVelocities[direction], endVelocity,
+                static_cast<double>( h ) * dt * startRates[direction],
+                preVolume, endVolume, endVolume - preVolume );
             // Independent analytic Capsule face opening at fixed time midpoint
             // grids. This recomputes geometry with the public read-only
             // analytic face query; no pressure or tracer state is changed.
@@ -5999,6 +6044,13 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false,
             "analytic256_linear_proxy_m3,analytic256_early_proxy_m3,"
             "analytic256_late_proxy_m3,post_pressure_endpoint_mac_m3,"
             "solid_swept_outward_m3" );
+        std::puts( "capsule_step96_stage_face,controlled_donor_tracer,"
+            "fluid_substeps,substep,face_WESN,"
+            "start_open_fraction,pre_pressure_open_fraction,"
+            "post_pressure_open_fraction,start_signed_velocity_mps,"
+            "pre_pressure_signed_velocity_mps,post_pressure_signed_velocity_mps,"
+            "start_mac_outward_m3,pre_pressure_mac_outward_m3,"
+            "post_pressure_mac_outward_m3,pressure_stage_delta_outward_m3" );
         std::puts( "capsule_step96_gcl,controlled_donor_tracer,fluid_substeps,"
             "analytic_snapshot_delta_m3,stored_snapshot_delta_m3,"
             "swept_solid_divergence_m3,stored_minus_swept_gcl_m3,"
