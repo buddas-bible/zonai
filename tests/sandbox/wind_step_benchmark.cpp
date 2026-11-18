@@ -7729,6 +7729,12 @@ void auditWindBoundaryPressureSpike()
         "face_UV,face_x,face_y,face_open,pre_pressure_speed_mps,"
         "post_pressure_speed_mps,first_fraction,second_fraction,"
         "first_pressure_residual_m3,second_pressure_residual_m3" );
+    std::puts( "wind_boundary_capsule_guard,coverage_guard,step,"
+        "used_swept,phantom_active_cells,phantom_source_m3,"
+        "max_pressure_residual_m3,compatibility_rate_m3ps,"
+        "pressure_span,maximum_open_face_speed_mps,"
+        "snapshot_volume_delta_m3,total_pressure_source_m3,"
+        "capsule_force_y_N" );
     std::puts( "wind_boundary_pressure_summary,source_on,measured_swept_steps,"
         "measured_fallback_steps,swept_to_fallback,fallback_to_swept,"
         "fall_backs_with_physical_clearance,peak_swept_pressure_span,"
@@ -8119,6 +8125,97 @@ void auditWindBoundaryPressureSpike()
         }};
         for( double value : peaks ) std::printf( ",%.12g", value );
         std::putchar( '\n' );
+    }
+    // Independent S2c coverage-guard axis. Both copies use the SAME
+    // double-precision analytic Capsule geometry and prescribed motion;
+    // guard alone differs, from the first snapshot onward. Do NOT change
+    // coverage policy mid-run: the normal setter invalidates volume history.
+    // A strictly covered cell with all four apertures zero must not remain
+    // an active source-only pressure row due to roundoff.
+    for( bool coverageGuard : { false, true } )
+    {
+        fluidField2 guardedField{ width, height, h, origin };
+        guardedField.setCutCellProjectionEnabled( true );
+        guardedField.setAnalyticCapsuleCutCellEnabled( true );
+        guardedField.setAnalyticCapsuleDoubleGeometryEnabled( true );
+        guardedField.setAnalyticCapsuleFullCoverageGuardEnabled( coverageGuard );
+        fluidShapeObstacle2 guardedCapsule{
+            capsule2{ { -halfLength, 0.0f }, { halfLength, 0.0f }, radius },
+            { { 0.0f, startY }, rot2::FromRadians( 0.0f ) },
+            { 0.0f, startY }, {}, 0.0f, 0.0f, 0.0f
+        };
+        float priorY = startY;
+        for( int frame = 0; frame < totalSteps; ++frame )
+        {
+            const float fraction = frame < halfSteps
+                ? static_cast<float>( frame + 1 ) / halfSteps
+                : static_cast<float>( totalSteps - frame - 1 ) / halfSteps;
+            const float y = startY + ( lowerY - startY ) * fraction;
+            guardedCapsule.transform.position = { 0.0f, y };
+            guardedCapsule.center = guardedCapsule.transform.position;
+            guardedCapsule.linearVelocity = { 0.0f, ( y - priorY ) / stepDt };
+            std::array<fluidObstacleForce2, 1> feedback{};
+            guardedField.step( stepDt,
+                std::span<const fluidShapeObstacle2>( &guardedCapsule, 1 ),
+                feedback, 80 );
+            if( frame == 4 || frame == 9 || frame == 16 || frame == 26 )
+            {
+                int phantom = 0;
+                double phantomSource = 0.0;
+                double pMin = 0.0, pMax = 0.0;
+                int active = 0;
+                for( int cy = 0; cy < height; ++cy )
+                    for( int cx = 0; cx < width; ++cx )
+                    {
+                        const float current = guardedField.getCellFluidFraction(
+                            cx, cy );
+                        if( current <= 0.0f ) continue;
+                        const double pressure =
+                            guardedField.getCellPressureForVisualization( cx, cy );
+                        if( active == 0 ) pMin = pMax = pressure;
+                        else
+                        {
+                            pMin = std::min( pMin, pressure );
+                            pMax = std::max( pMax, pressure );
+                        }
+                        ++active;
+                        if( current >= 1.0e-12f ||
+                            guardedField.getUFaceOpenFraction( cx, cy ) > 0.0f ||
+                            guardedField.getUFaceOpenFraction( cx + 1, cy ) > 0.0f ||
+                            guardedField.getVFaceOpenFraction( cx, cy ) > 0.0f ||
+                            guardedField.getVFaceOpenFraction( cx, cy + 1 ) > 0.0f )
+                            continue;
+                        ++phantom;
+                        phantomSource += guardedField.getCutCellVolumeBudget(
+                            cx, cy, stepDt ).pressureSourceDeltaVolume;
+                    }
+                const auto budget =
+                    guardedField.getCutCellVolumeSummary( stepDt );
+                const auto& pressure = guardedField.getCutCellPressure();
+                const auto flow = guardedField.getFlowAudit( stepDt );
+                if( !budget.valid || active < 1 ||
+                    !std::isfinite( phantomSource ) ||
+                    !std::isfinite( pMin ) || !std::isfinite( pMax ) ||
+                    !std::isfinite( feedback[0].force.y ) ||
+                    !std::isfinite( flow.maxFluidFaceSpeed ) )
+                    fail( "invalid double-Capsule coverage control" );
+                std::printf( "wind_boundary_capsule_guard,%d,%d,%d,%d",
+                    coverageGuard ? 1 : 0, frame,
+                    guardedField.getSweptFaceFlux().usedSweptFlux ? 1 : 0,
+                    phantom );
+                const std::array<double, 9> metrics{{
+                    phantomSource, budget.maxAbsPressureResidualVolume,
+                    pressure.compatibilityCorrection, pMax - pMin,
+                    flow.maxFluidFaceSpeed,
+                    budget.totalSnapshotDeltaVolume,
+                    budget.totalPressureSourceDeltaVolume,
+                    feedback[0].force.y, pressure.pressureResidual
+                }};
+                for( double value : metrics ) std::printf( ",%.12g", value );
+                std::putchar( '\n' );
+            }
+            priorY = y;
+        }
     }
 }
 
