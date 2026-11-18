@@ -5205,7 +5205,16 @@ struct capsuleStep96SplitResult
     std::array<std::array<int, 5>, 4> donorTransferCounts{};
     std::array<double, 4> donorPreMacOutwardVolume{};
     std::array<double, 4> donorPostMacOutwardVolume{};
+    std::array<double, 4> donorStartMacOutwardVolume{};
+    std::array<double, 4> donorTrapezoidMacOutwardVolume{};
+    std::array<double, 4> donorOpenExposureSeconds{};
     std::array<double, 4> donorSolidSweptOutwardVolume{};
+    double donorAnalyticSnapshotDeltaVolume = 0.0;
+    double donorGeometricSnapshotDeltaVolume = 0.0;
+    double donorPressureSourceVolume = 0.0;
+    double donorMaxAbsAnalyticFractionGap = 0.0;
+    double donorMaxAbsLocalGclDefectVolume = 0.0;
+    double donorMaxAbsLocalPressureResidualVolume = 0.0;
     double donorMassBefore = 0.0;
     double donorMassAfterLastSwept = 0.0;
     double donorExpectedFinalMass = 0.0;
@@ -5261,6 +5270,34 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
     capsuleStep96SplitResult result{};
     result.massBefore = mass( field );
     result.donorMassBefore = field.getTracerCellMass( leftX, faceY );
+    // GCL reference is an independent analytic Capsule area reevaluation at
+    // the two actual poses, not a rewritten/corrected solver cell fraction.
+    fluidShapeObstacle2 previousCapsule = capsule;
+    previousCapsule.transform.rotation = rot2::FromRadians(
+        startAngle + ( 95.0f / totalSteps ) * ( endAngle - startAngle ) );
+    auto previousAnalytic = field.getAnalyticCapsuleCellAreaAudit(
+        previousCapsule, leftX, faceY );
+    if( !previousAnalytic.valid )
+        throw std::runtime_error( "missing Capsule starting analytic area witness" );
+    // Canonical source-cell outward rate: u*open or v*open, m/s.
+    // The start velocity is from the genuinely evolved previous Field step,
+    // NOT the snapshot after advection/before the current pressure projection.
+    const auto faceRate = [&]( const fluidField2& state, int direction )
+    {
+        const bool isU = direction < 2;
+        const int fx = direction == 1 ? faceX : leftX;
+        const int fy = direction == 3 ? faceY + 1 : faceY;
+        const auto velocity = isU
+            ? state.getUFaceVelocityForAudit( fx, fy )
+            : state.getVFaceVelocityForAudit( fx, fy );
+        const float open = isU ? state.getUFaceOpenFraction( fx, fy )
+                               : state.getVFaceOpenFraction( fx, fy );
+        if( !velocity || !std::isfinite( *velocity ) ||
+            !std::isfinite( open ) || open < 0.0f || open > 1.0f )
+            throw std::runtime_error( "invalid Capsule MAC face endpoint sample" );
+        return static_cast<double>( direction == 0 || direction == 2 ? -1 : 1 )
+            * *velocity * open;
+    };
     // This ledger observes transfers, not tracer creation: compare each
     // completed Swept and MAC stage against the exact applied per-cell events.
     double segmentStartMass = result.donorMassBefore;
@@ -5341,6 +5378,11 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
         // using each actual smaller solver step rather than interpolated u(t).
         segmentStartMass = field.getTracerCellMass( leftX, faceY );
         segmentNetOutwardByKind = {};
+        std::array<double, 4> startRates{};
+        for( int direction = 0; direction < 4; ++direction )
+            startRates[direction] = faceRate( field, direction );
+        const double previousStoredFraction =
+            field.getCellFluidFraction( leftX, faceY );
         const float alpha = ( 95.0f + static_cast<float>( segment + 1 ) /
             splitCount ) / totalSteps;
         capsule.transform.rotation = rot2::FromRadians(
@@ -5368,8 +5410,52 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
         result.rightPressureSourceVolume += rightCell.pressureSourceDeltaVolume;
         result.leftSnapshotDeltaVolume += leftCell.snapshotDeltaVolume;
         result.leftPressureResidualVolume += leftCell.pressureResidualVolume;
+        const auto nextAnalytic = field.getAnalyticCapsuleCellAreaAudit(
+            capsule, leftX, faceY );
+        if( !nextAnalytic.valid ||
+            !std::isfinite( nextAnalytic.recomputedFluidFraction ) )
+            throw std::runtime_error( "missing Capsule ending analytic area witness" );
+        const double cellArea = static_cast<double>( h ) * h;
+        const double analyticDelta = cellArea *
+            ( nextAnalytic.recomputedFluidFraction -
+                previousAnalytic.recomputedFluidFraction );
+        const double snapshotDelta = cellArea *
+            ( static_cast<double>( leftCell.currentFraction ) -
+                previousStoredFraction );
+        result.donorAnalyticSnapshotDeltaVolume += analyticDelta;
+        result.donorGeometricSnapshotDeltaVolume += snapshotDelta;
+        result.donorPressureSourceVolume += leftCell.pressureSourceDeltaVolume;
+        result.donorMaxAbsAnalyticFractionGap = std::max({
+            result.donorMaxAbsAnalyticFractionGap,
+            std::abs( previousAnalytic.recomputedFluidFraction -
+                previousStoredFraction ),
+            std::abs( nextAnalytic.recomputedFluidFraction -
+                static_cast<double>( leftCell.currentFraction ) )
+        } );
+        result.donorMaxAbsLocalGclDefectVolume = std::max(
+            result.donorMaxAbsLocalGclDefectVolume,
+            std::abs( snapshotDelta - leftCell.solidSweptDivergenceVolume ) );
+        result.donorMaxAbsLocalPressureResidualVolume = std::max(
+            result.donorMaxAbsLocalPressureResidualVolume,
+            std::abs( leftCell.pressureResidualVolume ) );
+        if( std::abs( snapshotDelta - leftCell.snapshotDeltaVolume ) > 1.0e-12 ||
+            result.donorMaxAbsAnalyticFractionGap > 1.0e-4 )
+            throw std::runtime_error( "Capsule independent geometry witness mismatch" );
+        previousAnalytic = nextAnalytic;
         for( int direction = 0; direction < 4; ++direction )
         {
+            const double endRate = faceRate( field, direction );
+            result.donorStartMacOutwardVolume[direction] +=
+                static_cast<double>( h ) * dt * startRates[direction];
+            result.donorTrapezoidMacOutwardVolume[direction] +=
+                static_cast<double>( h ) * dt * 0.5 *
+                ( startRates[direction] + endRate );
+            const bool isU = direction < 2;
+            const int fx = direction == 1 ? faceX : leftX;
+            const int fy = direction == 3 ? faceY + 1 : faceY;
+            result.donorOpenExposureSeconds[direction] +=
+                ( isU ? field.getSweptUTimeMeanOpenFraction( fx, fy )
+                      : field.getSweptVTimeMeanOpenFraction( fx, fy ) ) * dt;
             result.donorPostMacOutwardVolume[direction] +=
                 leftCell.macOutwardVolume[direction];
             result.donorSolidSweptOutwardVolume[direction] +=
@@ -5399,6 +5485,62 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
             throw std::runtime_error( "nonfinite or negative Capsule split state" );
     }
     result.massAfter = mass( field );
+    const auto sumFour = []( const std::array<double, 4>& values )
+    {
+        return std::accumulate( values.begin(), values.end(), 0.0 );
+    };
+    const double sweptGeometryDelta =
+        sumFour( result.donorSolidSweptOutwardVolume );
+    const double startMacNet = sumFour( result.donorStartMacOutwardVolume );
+    const double preMacNet = sumFour( result.donorPreMacOutwardVolume );
+    const double postMacNet = sumFour( result.donorPostMacOutwardVolume );
+    const double trapezoidMacNet = sumFour(
+        result.donorTrapezoidMacOutwardVolume );
+    // Read-only, independently reconstructed identities. These assert only
+    // that the recorded geometry/pressure snapshots were accounted for,
+    // NOT that trapezoid face flux is the true moving-interface integral.
+    const double tolerance = 1.0e-10;
+    if( std::abs( result.donorGeometricSnapshotDeltaVolume -
+            result.leftSnapshotDeltaVolume ) > tolerance ||
+        std::abs( result.donorAnalyticSnapshotDeltaVolume -
+            result.donorGeometricSnapshotDeltaVolume ) > 1.0e-6 ||
+        std::abs( result.donorPressureSourceVolume -
+            result.leftPressureSourceVolume ) > tolerance ||
+        std::abs( postMacNet + result.donorPressureSourceVolume -
+            result.leftPressureResidualVolume ) > tolerance ||
+        !std::isfinite( trapezoidMacNet ) ||
+        !std::isfinite( startMacNet ) || !std::isfinite( preMacNet ) )
+        throw std::runtime_error( "Capsule GCL/pressure reference bookkeeping failed" );
+    // Print both GCL discrepancy and time-quadrature discrepancies. Neither
+    // is coerced toward zero by changing transport or the pressure operator.
+    std::printf( "capsule_step96_gcl,%d,%d,"
+        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+        controlledDonorTracer ? 1 : 0, splitCount,
+        result.donorAnalyticSnapshotDeltaVolume,
+        result.donorGeometricSnapshotDeltaVolume,
+        sweptGeometryDelta,
+        result.donorGeometricSnapshotDeltaVolume - sweptGeometryDelta,
+        result.donorPressureSourceVolume,
+        result.donorPressureSourceVolume -
+            result.donorGeometricSnapshotDeltaVolume,
+        startMacNet, preMacNet, postMacNet,
+        trapezoidMacNet, postMacNet - trapezoidMacNet,
+        result.leftPressureResidualVolume,
+        result.donorMaxAbsLocalGclDefectVolume,
+        result.donorMaxAbsLocalPressureResidualVolume,
+        result.donorMaxAbsAnalyticFractionGap );
+    const std::array<char, 4> faceNames{{ 'W', 'E', 'S', 'N' }};
+    for( int direction = 0; direction < 4; ++direction )
+        std::printf( "capsule_step96_gcl_face,%d,%d,%c,"
+            "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+            controlledDonorTracer ? 1 : 0, splitCount, faceNames[direction],
+            result.donorOpenExposureSeconds[direction],
+            result.donorStartMacOutwardVolume[direction],
+            result.donorPreMacOutwardVolume[direction],
+            result.donorPostMacOutwardVolume[direction],
+            result.donorTrapezoidMacOutwardVolume[direction],
+            result.donorSolidSweptOutwardVolume[direction] );
     double totalOutward = 0.0, totalInward = 0.0;
     for( int kind = 0; kind < 4; ++kind )
         for( int direction = 0; direction < 5; ++direction )
@@ -5722,6 +5864,22 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false,
         "pressure_active_cells,pressure_residual_rms_m3" );
     if( step96SplitFlux )
     {
+        std::puts( "capsule_step96_gcl,controlled_donor_tracer,fluid_substeps,"
+            "analytic_snapshot_delta_m3,stored_snapshot_delta_m3,"
+            "swept_solid_divergence_m3,stored_minus_swept_gcl_m3,"
+            "pressure_source_m3,pressure_source_minus_snapshot_m3,"
+            "start_mac_outward_sum_m3,pre_pressure_mac_outward_sum_m3,"
+            "post_pressure_mac_outward_sum_m3,"
+            "actual_endpoint_trapezoid_mac_outward_sum_m3,"
+            "post_minus_trapezoid_m3,pressure_residual_sum_m3,"
+            "max_local_gcl_defect_m3,max_local_pressure_residual_m3,"
+            "max_analytic_vs_stored_fraction_gap" );
+        std::puts( "capsule_step96_gcl_face,controlled_donor_tracer,"
+            "fluid_substeps,face_WESN,face_open_exposure_s,"
+            "start_mac_outward_m3,pre_pressure_mac_outward_m3,"
+            "post_pressure_mac_outward_m3,"
+            "actual_endpoint_trapezoid_mac_outward_m3,"
+            "solid_swept_outward_m3" );
         std::puts( "capsule_step96_donor_balance,controlled_donor_tracer,"
             "fluid_substeps,donor_mass_before_kg,donor_mass_after_last_swept_kg,"
             "donor_mass_after_mac_kg,total_observed_out_kg,"
