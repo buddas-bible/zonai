@@ -7710,6 +7710,15 @@ void auditWindBoundaryPressureSpike()
         "total_pressure_source_volume_m3,total_snapshot_delta_m3,"
         "total_mac_endpoint_volume_m3,swept_snapshot_mismatch_l1_m3,"
         "force_x_N,force_y_N,torque_Nm" );
+    std::puts( "wind_boundary_pressure_cell_hotspot,source_on,step,"
+        "role,cell_x,cell_y,previous_fraction,current_fraction,"
+        "snapshot_delta_m3,pressure_source_m3,swept_divergence_m3,"
+        "post_mac_net_m3,pressure_residual_m3,relative_pressure,"
+        "open_w,open_e,open_s,open_n" );
+    std::puts( "wind_boundary_pressure_face_hotspot,source_on,step,"
+        "face_UV,face_x,face_y,face_open,pre_pressure_speed_mps,"
+        "post_pressure_speed_mps,first_fraction,second_fraction,"
+        "first_pressure_residual_m3,second_pressure_residual_m3" );
     std::puts( "wind_boundary_pressure_summary,source_on,measured_swept_steps,"
         "measured_fallback_steps,swept_to_fallback,fallback_to_swept,"
         "fall_backs_with_physical_clearance,peak_swept_pressure_span,"
@@ -7818,7 +7827,7 @@ void auditWindBoundaryPressureSpike()
             double peakDelta = 0.0;
             bool deltaIsU = true;
             int deltaX = -1, deltaY = -1;
-            float deltaOpen = 0.0f;
+            float deltaOpen = 0.0f, deltaBefore = 0.0f, deltaAfter = 0.0f;
             const auto consider = [&]( bool isU, int x, int y,
                 float open, float before, std::optional<float> after )
             {
@@ -7832,6 +7841,8 @@ void auditWindBoundaryPressureSpike()
                 deltaX = x;
                 deltaY = y;
                 deltaOpen = open;
+                deltaBefore = before;
+                deltaAfter = *after;
             };
             for( int cellY = 0; cellY < height; ++cellY )
                 for( int faceX = 1; faceX < width; ++faceX )
@@ -7948,6 +7959,56 @@ void auditWindBoundaryPressureSpike()
                 static_cast<double>( feedback[0].force.x ),
                 static_cast<double>( feedback[0].force.y ),
                 static_cast<double>( feedback[0].torque ) );
+            const auto printCell = [&]( const char* role, int cx, int cy )
+            {
+                if( cx < 0 || cy < 0 || cx >= width || cy >= height )
+                    return;
+                const auto budget = field.getCutCellVolumeBudget(
+                    cx, cy, stepDt );
+                if( !budget.valid )
+                    fail( "invalid boundary hotspot cell budget" );
+                std::printf( "wind_boundary_pressure_cell_hotspot,%d,%d,%s,%d,%d",
+                    wind ? 1 : 0, frame, role, cx, cy );
+                const std::array<double, 12> values{{
+                    budget.previousFraction, budget.currentFraction,
+                    budget.snapshotDeltaVolume, budget.pressureSourceDeltaVolume,
+                    budget.solidSweptDivergenceVolume, budget.macNetOutwardVolume,
+                    budget.pressureResidualVolume,
+                    static_cast<double>(
+                        field.getCellPressureForVisualization( cx, cy ) ) - mean,
+                    field.getUFaceOpenFraction( cx, cy ),
+                    field.getUFaceOpenFraction( cx + 1, cy ),
+                    field.getVFaceOpenFraction( cx, cy ),
+                    field.getVFaceOpenFraction( cx, cy + 1 )
+                }};
+                for( double value : values ) std::printf( ",%.12g", value );
+                std::putchar( '\n' );
+            };
+            printCell( "worst_continuity", summary.worstPressureX,
+                summary.worstPressureY );
+            printCell( "peak_relative_pressure", peakX, peakY );
+            if( deltaX >= 0 && deltaY >= 0 )
+            {
+                const int firstX = deltaIsU ? deltaX - 1 : deltaX;
+                const int firstY = deltaIsU ? deltaY : deltaY - 1;
+                const int secondX = deltaX, secondY = deltaY;
+                printCell( "peak_delta_first", firstX, firstY );
+                printCell( "peak_delta_second", secondX, secondY );
+                const auto first = field.getCutCellVolumeBudget(
+                    firstX, firstY, stepDt );
+                const auto second = field.getCutCellVolumeBudget(
+                    secondX, secondY, stepDt );
+                std::printf( "wind_boundary_pressure_face_hotspot,%d,%d,%c,%d,%d",
+                    wind ? 1 : 0, frame, deltaIsU ? 'U' : 'V',
+                    deltaX, deltaY );
+                const std::array<double, 7> face{{
+                    deltaOpen, deltaBefore, deltaAfter,
+                    first.currentFraction, second.currentFraction,
+                    first.pressureResidualVolume, second.pressureResidualVolume
+                }};
+                for( double value : face ) std::printf( ",%.12g", value );
+                std::putchar( '\n' );
+            }
             previousY = y;
         }
         if( toFallback < 1 || toSwept < 1 || fallbackInside < 1 ||
