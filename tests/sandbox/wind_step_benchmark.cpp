@@ -5850,38 +5850,51 @@ double auditFrozenReopeningPressure(
     const int donor = donorY * width + donorX;
     const auto index = [&]( int x, int y ) { return y * width + x; };
 
-    std::vector<unsigned char> reached( width * height, 0 );
-    std::vector<int> queue;
-    if( frozen.getCellFluidFraction( donorX, donorY ) <= 0.0f )
-        throw std::runtime_error( "frozen reopening donor is covered" );
-    reached[donor] = 1;
-    queue.push_back( donor );
-    for( std::size_t read = 0; read < queue.size(); ++read )
+    // Reconstruct EVERY open-face-connected Neumann component, not only
+    // the donor's large region: other pockets can dominate the global
+    // compatibility budget while the donor-region mean stays near zero.
+    std::vector<int> regionOf( width * height, -1 );
+    std::vector<std::vector<int>> regions;
+    for( int start = 0; start < width * height; ++start )
     {
-        const int cell = queue[read];
-        const int x = cell % width;
-        const int y = cell / width;
-        const auto visit = [&]( int neighborX, int neighborY, float open )
+        const int startX = start % width, startY = start / width;
+        if( frozen.getCellFluidFraction( startX, startY ) <= 0.0f ||
+            regionOf[start] >= 0 ) continue;
+        const int id = static_cast<int>( regions.size() );
+        regions.emplace_back();
+        auto& cells = regions.back();
+        cells.push_back( start );
+        regionOf[start] = id;
+        for( std::size_t read = 0; read < cells.size(); ++read )
         {
-            if( open <= 0.0f ||
-                frozen.getCellFluidFraction( neighborX, neighborY ) <= 0.0f )
-                return;
-            const int neighbor = index( neighborX, neighborY );
-            if( reached[neighbor] ) return;
-            reached[neighbor] = 1;
-            queue.push_back( neighbor );
-        };
-        if( x > 0 ) visit( x - 1, y,
-            frozen.getUFaceOpenFraction( x, y ) );
-        if( x + 1 < width ) visit( x + 1, y,
-            frozen.getUFaceOpenFraction( x + 1, y ) );
-        if( y > 0 ) visit( x, y - 1,
-            frozen.getVFaceOpenFraction( x, y ) );
-        if( y + 1 < height ) visit( x, y + 1,
-            frozen.getVFaceOpenFraction( x, y + 1 ) );
+            const int cell = cells[read];
+            const int x = cell % width, y = cell / width;
+            const auto visit = [&]( int nx, int ny, float open )
+            {
+                if( open <= 0.0f ||
+                    frozen.getCellFluidFraction( nx, ny ) <= 0.0f )
+                    return;
+                const int neighbor = index( nx, ny );
+                if( regionOf[neighbor] >= 0 ) return;
+                regionOf[neighbor] = id;
+                cells.push_back( neighbor );
+            };
+            if( x > 0 ) visit( x - 1, y,
+                frozen.getUFaceOpenFraction( x, y ) );
+            if( x + 1 < width ) visit( x + 1, y,
+                frozen.getUFaceOpenFraction( x + 1, y ) );
+            if( y > 0 ) visit( x, y - 1,
+                frozen.getVFaceOpenFraction( x, y ) );
+            if( y + 1 < height ) visit( x, y + 1,
+                frozen.getVFaceOpenFraction( x, y + 1 ) );
+        }
     }
+    if( regionOf[donor] < 0 )
+        throw std::runtime_error( "frozen reopening donor region missing" );
+    const int donorRegion = regionOf[donor];
+    const auto& queue = regions[donorRegion];
     if( queue.empty() )
-        throw std::runtime_error( "frozen reopening region is empty" );
+        throw std::runtime_error( "frozen reopening donor region empty" );
 
     const double area = static_cast<double>( frozen.getCellSize() ) *
         frozen.getCellSize();
@@ -5947,6 +5960,74 @@ double auditFrozenReopeningPressure(
             std::abs( meanVolume - initialMean ) > 1.0e-10 )
             throw std::runtime_error(
                 "reopening frozen geometry/source changed with Jacobi budget" );
+
+        // Recompute the raw RHS for each connected pocket from the SAME
+        // frozen MAC and the pressure replay's moving-volume source.
+        // A nonzero global correction can come from other pockets even
+        // when this donor component's uncorrected sum is ~zero.
+        double componentAbsoluteSourceRate = 0.0;
+        for( std::size_t id = 0; id < regions.size(); ++id )
+        {
+            const auto& cells = regions[id];
+            double componentRaw = 0.0, componentPost = 0.0;
+            for( int cell : cells )
+            {
+                const int cx = cell % width, cy = cell / width;
+                const auto before =
+                    frozen.getCutCellVolumeBudget( cx, cy, dt );
+                const auto after =
+                    replay.getCutCellVolumeBudget( cx, cy, dt );
+                if( !before.valid || !after.valid || !after.active )
+                    throw std::runtime_error(
+                        "frozen reopening regional budget is invalid" );
+                componentRaw += before.macNetOutwardVolume +
+                    after.pressureSourceDeltaVolume;
+                componentPost += after.pressureResidualVolume;
+            }
+            const double componentMean = componentRaw / cells.size();
+            double squared = 0.0;
+            for( int cell : cells )
+            {
+                const auto after = replay.getCutCellVolumeBudget(
+                    cell % width, cell / width, dt );
+                const double remaining =
+                    after.pressureResidualVolume - componentMean;
+                squared += remaining * remaining;
+            }
+            const double rms = std::sqrt( squared / cells.size() );
+            componentAbsoluteSourceRate += std::abs( componentRaw ) / dt;
+            if( !std::isfinite( componentRaw ) ||
+                !std::isfinite( componentPost ) || !std::isfinite( rms ) )
+                throw std::runtime_error(
+                    "nonfinite frozen reopening regional compatibility" );
+            std::printf( "capsule_step96_reopen_region,%d,%d,%d,%zu,%zu,%d,%d",
+                splits, part, iterations, id, cells.size(), cells.front(),
+                static_cast<int>( id ) == donorRegion ? 1 : 0 );
+            const std::array<double, 5> measures{{
+                componentRaw, componentMean, componentPost,
+                componentPost - componentRaw, rms
+            }};
+            for( double value : measures ) std::printf( ",%.12g", value );
+            std::putchar( '\n' );
+        }
+        const double computedCompatibility =
+            std::abs( static_cast<double>( pressure.unresolvedVolumeRate ) ) +
+            componentAbsoluteSourceRate;
+        if( !std::isfinite( computedCompatibility ) )
+            throw std::runtime_error(
+                "nonfinite reconstructed reopening compatibility" );
+        std::printf( "capsule_step96_reopen_compat,%d,%d,%d,%zu,%d",
+            splits, part, iterations, regions.size(), pressure.connectedRegions );
+        const std::array<double, 5> compatibility{{
+            static_cast<double>( pressure.compatibilityCorrection ),
+            computedCompatibility,
+            static_cast<double>( pressure.compatibilityCorrection ) -
+                computedCompatibility,
+            static_cast<double>( pressure.unresolvedVolumeRate ),
+            componentAbsoluteSourceRate
+        }};
+        for( double value : compatibility ) std::printf( ",%.12g", value );
+        std::putchar( '\n' );
 
         // The area-weighted region sum is a measured, uncorrected
         // compatibility imbalance. It may differ from the solver's
@@ -6409,6 +6490,16 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false,
         "pressure_active_cells,pressure_residual_rms_m3" );
     if( step96SplitFlux )
     {
+        std::puts( "capsule_step96_reopen_region,splits,substep,"
+            "pressure_iterations,region_id,region_cells,first_cell_id,"
+            "contains_donor,raw_rhs_volume_m3,raw_rhs_mean_m3,"
+            "post_residual_sum_m3,post_minus_raw_m3,"
+            "compatible_residual_rms_m3" );
+        std::puts( "capsule_step96_reopen_compat,splits,substep,"
+            "pressure_iterations,reconstructed_regions,solver_regions,"
+            "solver_compatibility_rate_m3ps,recomputed_compatibility_rate_m3ps,"
+            "solver_minus_recomputed_m3ps,unresolved_volume_rate_m3ps,"
+            "sum_abs_component_rhs_rate_m3ps" );
         std::puts( "capsule_step96_reopen_frozen,splits,substep,"
             "pressure_iterations,connected_regions,donor_region_cells,"
             "region_raw_rhs_volume_m3,region_mean_compatibility_volume_m3,"
