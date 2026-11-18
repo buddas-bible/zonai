@@ -5836,6 +5836,138 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
     return result;
 }
 
+// Same pre-pressure Field, geometry, current MAC velocity and obstacle pose
+// across all budgets. Split-96 reopening's 120-iteration live result is
+// checked against the independent 120-iteration frozen replay afterward.
+// The component mean is reconstructed from volume-valued pre-MAC + source:
+// it is a Neumann compatibility floor, not the exact pressure error itself.
+double auditFrozenReopeningPressure(
+    const fluidField2& frozen, float dt, int splits, int part )
+{
+    constexpr int donorX = 28, donorY = 26;
+    const int width = frozen.getWidth();
+    const int height = frozen.getHeight();
+    const int donor = donorY * width + donorX;
+    const auto index = [&]( int x, int y ) { return y * width + x; };
+
+    std::vector<unsigned char> reached( width * height, 0 );
+    std::vector<int> queue;
+    if( frozen.getCellFluidFraction( donorX, donorY ) <= 0.0f )
+        throw std::runtime_error( "frozen reopening donor is covered" );
+    reached[donor] = 1;
+    queue.push_back( donor );
+    for( std::size_t read = 0; read < queue.size(); ++read )
+    {
+        const int cell = queue[read];
+        const int x = cell % width;
+        const int y = cell / width;
+        const auto visit = [&]( int neighborX, int neighborY, float open )
+        {
+            if( open <= 0.0f ||
+                frozen.getCellFluidFraction( neighborX, neighborY ) <= 0.0f )
+                return;
+            const int neighbor = index( neighborX, neighborY );
+            if( reached[neighbor] ) return;
+            reached[neighbor] = 1;
+            queue.push_back( neighbor );
+        };
+        if( x > 0 ) visit( x - 1, y,
+            frozen.getUFaceOpenFraction( x, y ) );
+        if( x + 1 < width ) visit( x + 1, y,
+            frozen.getUFaceOpenFraction( x + 1, y ) );
+        if( y > 0 ) visit( x, y - 1,
+            frozen.getVFaceOpenFraction( x, y ) );
+        if( y + 1 < height ) visit( x, y + 1,
+            frozen.getVFaceOpenFraction( x, y + 1 ) );
+    }
+    if( queue.empty() )
+        throw std::runtime_error( "frozen reopening region is empty" );
+
+    const double area = static_cast<double>( frozen.getCellSize() ) *
+        frozen.getCellSize();
+    double initialSource = 0.0;
+    double initialMean = 0.0;
+    int initialRegions = -1;
+    double baselineResidual = 0.0;
+    for( const int iterations : { 120, 240, 480 } )
+    {
+        fluidField2 replay = frozen;
+        replay.setPrePressureSnapshotObserver( {} );
+        const auto forces = replay.replayFrozenCutCellPressure( iterations );
+        if( !forces || forces->size() != 1 ||
+            replay.replayFrozenCutCellPressure().has_value() )
+            throw std::runtime_error( "frozen reopening replay not one-use" );
+        const auto& pressure = replay.getCutCellPressure();
+        if( pressure.usedCoupledProjection || pressure.coupledSolveFailed ||
+            pressure.connectedRegions < 1 )
+            throw std::runtime_error( "frozen reopening unexpectedly coupled" );
+
+        double rawSum = 0.0, postSum = 0.0, compatibleSquared = 0.0;
+        for( const int cell : queue )
+        {
+            const int x = cell % width, y = cell / width;
+            const auto before = frozen.getCutCellVolumeBudget( x, y, dt );
+            const auto after = replay.getCutCellVolumeBudget( x, y, dt );
+            if( !before.valid || !after.valid || !after.active ||
+                !after.hasVolumeHistory || !after.hasSweptHistory )
+                throw std::runtime_error( "frozen reopening component budget missing" );
+            rawSum += before.macNetOutwardVolume +
+                after.pressureSourceDeltaVolume;
+            postSum += after.pressureResidualVolume;
+        }
+        const double meanVolume = rawSum / queue.size();
+        for( const int cell : queue )
+        {
+            const int x = cell % width, y = cell / width;
+            const auto budget = replay.getCutCellVolumeBudget( x, y, dt );
+            const double compatible = budget.pressureResidualVolume - meanVolume;
+            compatibleSquared += compatible * compatible;
+        }
+        const auto donorBudget =
+            replay.getCutCellVolumeBudget( donorX, donorY, dt );
+        const double compatibleRms =
+            std::sqrt( compatibleSquared / queue.size() );
+        const double source = donorBudget.pressureSourceDeltaVolume;
+        if( !std::isfinite( meanVolume ) ||
+            !std::isfinite( compatibleRms ) ||
+            !std::isfinite( donorBudget.pressureResidualVolume ) ||
+            !std::isfinite( pressure.compatibilityCorrection ) ||
+            !std::isfinite( pressure.pressureResidual ) ||
+            !std::isfinite( postSum ) )
+            throw std::runtime_error( "nonfinite frozen reopening diagnostics" );
+        if( initialRegions < 0 )
+        {
+            initialRegions = pressure.connectedRegions;
+            initialSource = source;
+            initialMean = meanVolume;
+            baselineResidual = donorBudget.pressureResidualVolume;
+        }
+        else if( pressure.connectedRegions != initialRegions ||
+            std::abs( source - initialSource ) > 1.0e-10 ||
+            std::abs( meanVolume - initialMean ) > 1.0e-10 )
+            throw std::runtime_error(
+                "reopening frozen geometry/source changed with Jacobi budget" );
+
+        // The area-weighted region sum is a measured, uncorrected
+        // compatibility imbalance. It may differ from the solver's
+        // global compatibilityCorrection, which also includes other regions
+        // and unresolved sources. Never label a 3x3 patch as a full region.
+        std::printf( "capsule_step96_reopen_frozen,%d,%d,%d,%d,%zu",
+            splits, part, iterations, pressure.connectedRegions, queue.size() );
+        const std::array<double, 11> metrics{{
+            rawSum, meanVolume, postSum, postSum - rawSum,
+            donorBudget.pressureResidualVolume,
+            donorBudget.pressureResidualVolume - meanVolume,
+            compatibleRms, source,
+            static_cast<double>( pressure.compatibilityCorrection ),
+            static_cast<double>( pressure.pressureResidual ), area
+        }};
+        for( double value : metrics ) std::printf( ",%.12g", value );
+        std::putchar( '\n' );
+    }
+    return baselineResidual;
+}
+
 // Reverse prescribed motion on copies of the same actually evolved closing
 // step-96 Field. This does not reverse the dissipative fluid integrator.
 void auditCapsuleStep96Reopening( const fluidField2& step95,
@@ -5920,6 +6052,8 @@ void auditCapsuleStep96Reopening( const fluidField2& step95,
         return result;
     };
     double preNet = 0.0, appliedDonorKg = 0.0;
+    std::optional<double> frozen120DonorResidual{};
+    int currentPart = -1;
     int snapshots = 0;
     std::array<std::array<double, 2>, 4> preFaces{};
     std::array<double, 3> prePatch{};
@@ -5937,6 +6071,12 @@ void auditCapsuleStep96Reopening( const fluidField2& step95,
         if( !donor.valid ) throw std::runtime_error( "missing pre-pressure reopening state" );
         preNet = donor.macNetOutwardVolume;
         prePatch = samplePatch( pre );
+        // Only the unseeded control needs the expensive three-budget replay.
+        // Capture first and last real reverse substeps, without replacing
+        // the live 120-iteration physics.
+        if( !seeded && ( currentPart == 0 || currentPart + 1 == splits ) )
+            frozen120DonorResidual = auditFrozenReopeningPressure(
+                pre, dt, splits, currentPart );
         for( int direction = 0; direction < 4; ++direction )
         {
             preFaces[direction] = faceState( pre, direction );
@@ -5953,6 +6093,8 @@ void auditCapsuleStep96Reopening( const fluidField2& step95,
         const double massBefore = tracerMass( field );
         const double donorBefore = field.getTracerCellMass( x, y );
         appliedDonorKg = 0.0;
+        frozen120DonorResidual.reset();
+        currentPart = part;
         std::array<std::array<double, 2>, 4> startFaces{};
         for( int dir = 0; dir < 4; ++dir ) startFaces[dir] = faceState( field, dir );
         setPose( 96.0 - static_cast<double>( part + 1 ) / splits );
@@ -5968,6 +6110,11 @@ void auditCapsuleStep96Reopening( const fluidField2& step95,
             donor.solidSweptDivergenceVolume;
         const double donorAfter = field.getTracerCellMass( x, y );
         const double massDefect = donorAfter - donorBefore - appliedDonorKg;
+        if( frozen120DonorResidual &&
+            std::abs( *frozen120DonorResidual -
+                donor.pressureResidualVolume ) > 1.0e-9 )
+            throw std::runtime_error(
+                "same-state 120-iteration frozen/live reopening pressure disagreed" );
         const double massAfter = tracerMass( field );
         const double massTolerance = 1.0e-12 +
             1.0e-6 * std::max( 1.0, massBefore );
@@ -6262,6 +6409,14 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false,
         "pressure_active_cells,pressure_residual_rms_m3" );
     if( step96SplitFlux )
     {
+        std::puts( "capsule_step96_reopen_frozen,splits,substep,"
+            "pressure_iterations,connected_regions,donor_region_cells,"
+            "region_raw_rhs_volume_m3,region_mean_compatibility_volume_m3,"
+            "region_post_residual_sum_m3,region_post_minus_raw_m3,"
+            "donor_post_residual_m3,donor_compatible_residual_m3,"
+            "region_compatible_rms_m3,donor_pressure_source_m3,"
+            "global_compatibility_correction_m3ps,"
+            "global_pressure_residual_m3ps,cell_area_m2" );
         std::puts( "capsule_step96_reopen_step,seed,splits,substep,"
             "previous_fraction,current_fraction,snapshot_delta_m3,"
             "swept_divergence_m3,pressure_source_m3,pre_mac_net_m3,"
