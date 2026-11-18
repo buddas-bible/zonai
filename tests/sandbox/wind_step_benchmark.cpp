@@ -5836,6 +5836,194 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
     return result;
 }
 
+// Reverse prescribed motion on copies of the same actually evolved closing
+// step-96 Field. This does not reverse the dissipative fluid integrator.
+void auditCapsuleStep96Reopening( const fluidField2& step95,
+    fluidShapeObstacle2 capsule, float startAngle, float endAngle,
+    int totalSteps, float duration, int splits, bool seeded )
+{
+    if( splits < 1 ) throw std::runtime_error( "invalid reopening split count" );
+    constexpr int x = 28, y = 26;
+    constexpr std::array<char, 4> faceNames{{ 'W', 'E', 'S', 'N' }};
+    fluidField2 field = step95;
+    field.setTracerTransferObserver( {} );
+    field.setTracerStageObserver( {} );
+    field.setPrePressureSnapshotObserver( {} );
+    field.setSweptApertureAuditEnabled( true );
+    if( field.getSmallCellPressureMergeFraction() != 0.0f ||
+        field.isConnectedResidualTracerRemapEnabled() ||
+        field.isCutCellCoupledProjectionEnabled() )
+        throw std::runtime_error( "reopening witness altered default solver" );
+    if( seeded )
+    {
+        if( field.getCellFluidFraction( x, y ) <= 0.0f )
+            throw std::runtime_error( "invalid reopening donor seed" );
+        field.setTracerConcentration( x, y, 1.0f );
+    }
+    const auto setPose = [&]( double position )
+    {
+        capsule.transform.rotation = rot2::FromRadians( startAngle +
+            static_cast<float>( position / totalSteps ) *
+            ( endAngle - startAngle ) );
+    };
+    setPose( 96.0 );
+    std::array<fluidObstacleForce2, 1> warmForces{};
+    field.step( duration, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+        warmForces, 120 );
+    const double closedFraction = field.getCellFluidFraction( x, y );
+    if( !std::isfinite( closedFraction ) || closedFraction <= 0.0 )
+        throw std::runtime_error( "invalid reopening closed fraction" );
+
+    const float dt = duration / splits;
+    const double faceVolumeScale = static_cast<double>( field.getCellSize() ) * dt;
+    capsule.angularVelocity = -( endAngle - startAngle ) /
+        ( duration * totalSteps );
+    const auto faceState = [&]( const fluidField2& state, int direction )
+    {
+        const bool isU = direction < 2;
+        const int fx = direction == 1 ? x + 1 : x;
+        const int fy = direction == 3 ? y + 1 : y;
+        const float open = isU ? state.getUFaceOpenFraction( fx, fy ) :
+                                 state.getVFaceOpenFraction( fx, fy );
+        const auto velocity = isU ? state.getUFaceVelocityForAudit( fx, fy ) :
+                                    state.getVFaceVelocityForAudit( fx, fy );
+        if( !velocity || !std::isfinite( *velocity ) ||
+            !std::isfinite( open ) || open < 0.0f || open > 1.0f )
+            throw std::runtime_error( "invalid reopening face state" );
+        return std::array<double, 2>{{
+            static_cast<double>( open ),
+            ( direction == 0 || direction == 2 ? -1.0 : 1.0 ) * *velocity
+        }};
+    };
+    const auto tracerMass = []( const fluidField2& state )
+    {
+        double total = 0.0;
+        for( int cy = 0; cy < state.getHeight(); ++cy )
+            for( int cx = 0; cx < state.getWidth(); ++cx )
+                total += state.getTracerCellMass( cx, cy );
+        return total;
+    };
+    // Sum a fixed 3x3 ACTIVE-cell patch. It is not a closed component.
+    const auto samplePatch = [&]( const fluidField2& state )
+    {
+        std::array<double, 3> result{}; // net MAC volume, source, active cells
+        for( int py = y - 1; py <= y + 1; ++py )
+            for( int px = x - 1; px <= x + 1; ++px )
+            {
+                const auto cell = state.getCutCellVolumeBudget( px, py, dt );
+                if( !cell.valid ) throw std::runtime_error( "invalid reopening patch" );
+                if( !cell.active ) continue;
+                result[0] += cell.macNetOutwardVolume;
+                result[1] += cell.pressureSourceDeltaVolume;
+                result[2] += 1.0;
+            }
+        return result;
+    };
+    double preNet = 0.0, appliedDonorKg = 0.0;
+    int snapshots = 0;
+    std::array<std::array<double, 2>, 4> preFaces{};
+    std::array<double, 3> prePatch{};
+    field.setTracerTransferObserver( [&]( const fluidTracerTransfer2& event )
+    {
+        if( !std::isfinite( event.mass ) || event.mass < 0.0 )
+            throw std::runtime_error( "nonfinite reopening tracer transfer" );
+        const int donor = y * field.getWidth() + x;
+        if( event.sourceCell == donor ) appliedDonorKg -= event.mass;
+        if( event.destinationCell == donor ) appliedDonorKg += event.mass;
+    } );
+    field.setPrePressureSnapshotObserver( [&]( const fluidField2& pre )
+    {
+        const auto donor = pre.getCutCellVolumeBudget( x, y, dt );
+        if( !donor.valid ) throw std::runtime_error( "missing pre-pressure reopening state" );
+        preNet = donor.macNetOutwardVolume;
+        prePatch = samplePatch( pre );
+        for( int direction = 0; direction < 4; ++direction )
+        {
+            preFaces[direction] = faceState( pre, direction );
+            if( std::abs( faceVolumeScale * preFaces[direction][0] *
+                    preFaces[direction][1] -
+                    donor.macOutwardVolume[direction] ) > 1.0e-10 )
+                throw std::runtime_error( "reopening pre-MAC face mismatch" );
+        }
+        ++snapshots;
+    } );
+    double previousFraction = closedFraction;
+    for( int part = 0; part < splits; ++part )
+    {
+        const double massBefore = tracerMass( field );
+        const double donorBefore = field.getTracerCellMass( x, y );
+        appliedDonorKg = 0.0;
+        std::array<std::array<double, 2>, 4> startFaces{};
+        for( int dir = 0; dir < 4; ++dir ) startFaces[dir] = faceState( field, dir );
+        setPose( 96.0 - static_cast<double>( part + 1 ) / splits );
+        std::array<fluidObstacleForce2, 1> feedback{};
+        field.step( dt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+            feedback, 120 );
+        const auto donor = field.getCutCellVolumeBudget( x, y, dt );
+        const auto postPatch = samplePatch( field );
+        const double fraction = field.getCellFluidFraction( x, y );
+        const double required = -( preNet + donor.pressureSourceDeltaVolume );
+        const double applied = donor.macNetOutwardVolume - preNet;
+        const double gcl = donor.snapshotDeltaVolume -
+            donor.solidSweptDivergenceVolume;
+        const double donorAfter = field.getTracerCellMass( x, y );
+        const double massDefect = donorAfter - donorBefore - appliedDonorKg;
+        const double massAfter = tracerMass( field );
+        const double massTolerance = 1.0e-12 +
+            1.0e-6 * std::max( 1.0, massBefore );
+        if( snapshots != part + 1 || !donor.valid ||
+            !donor.hasVolumeHistory || !donor.hasSweptHistory ||
+            !std::isfinite( fraction ) ||
+            fraction + 1.0e-7 < previousFraction ||
+            std::abs( applied - required -
+                donor.pressureResidualVolume ) > 1.0e-10 ||
+            std::abs( massDefect ) > massTolerance ||
+            std::abs( massAfter - massBefore ) > massTolerance ||
+            prePatch[2] != postPatch[2] ||
+            !std::isfinite( feedback[0].force.x ) ||
+            !std::isfinite( feedback[0].force.y ) ||
+            !std::isfinite( feedback[0].torque ) )
+            throw std::runtime_error( "reopening pressure/mass stage regression" );
+
+        std::printf( "capsule_step96_reopen_step,%d,%d,%d",
+            seeded ? 1 : 0, splits, part );
+        const std::array<double, 19> measurements{{
+            previousFraction, fraction, donor.snapshotDeltaVolume,
+            donor.solidSweptDivergenceVolume, donor.pressureSourceDeltaVolume,
+            preNet, donor.macNetOutwardVolume, required, applied,
+            donor.pressureResidualVolume, gcl,
+            prePatch[0], postPatch[0], postPatch[1],
+            postPatch[0] + postPatch[1],
+            donorBefore, donorAfter, appliedDonorKg, massDefect
+        }};
+        for( double value : measurements ) std::printf( ",%.12g", value );
+        std::putchar( '\n' );
+        for( int dir = 0; dir < 4; ++dir )
+        {
+            const auto endFace = faceState( field, dir );
+            const double preVolume = faceVolumeScale *
+                preFaces[dir][0] * preFaces[dir][1];
+            const double postVolume = donor.macOutwardVolume[dir];
+            if( std::abs( preFaces[dir][0] - endFace[0] ) > 1.0e-6 ||
+                std::abs( faceVolumeScale * endFace[0] *
+                    endFace[1] - postVolume ) > 1.0e-10 )
+                throw std::runtime_error( "reopening post-MAC face mismatch" );
+            std::printf( "capsule_step96_reopen_face,%d,%d,%d,%c",
+                seeded ? 1 : 0, splits, part, faceNames[dir] );
+            const std::array<double, 8> faceMeasurements{{
+                startFaces[dir][0], preFaces[dir][0], endFace[0],
+                startFaces[dir][1], preFaces[dir][1], endFace[1],
+                preVolume, postVolume
+            }};
+            for( double value : faceMeasurements ) std::printf( ",%.12g", value );
+            std::putchar( '\n' );
+        }
+        previousFraction = fraction;
+    }
+    if( previousFraction <= closedFraction )
+        throw std::runtime_error( "reopening did not expand donor fluid volume" );
+}
+
 // Live prescribed-motion complement to the frozen zero-MAC geometry oracle.
 // Both fields receive identical transforms, velocity sources and tracer seed;
 // only the convex full-coverage guard differs. Pressure/advective histories
@@ -6074,6 +6262,18 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false,
         "pressure_active_cells,pressure_residual_rms_m3" );
     if( step96SplitFlux )
     {
+        std::puts( "capsule_step96_reopen_step,seed,splits,substep,"
+            "previous_fraction,current_fraction,snapshot_delta_m3,"
+            "swept_divergence_m3,pressure_source_m3,pre_mac_net_m3,"
+            "post_mac_net_m3,required_correction_m3,applied_correction_m3,"
+            "pressure_residual_m3,gcl_defect_m3,patch_pre_mac_m3,"
+            "patch_post_mac_m3,patch_source_m3,patch_residual_m3,"
+            "donor_mass_before_kg,donor_mass_after_kg,"
+            "donor_net_applied_transfer_kg,donor_mass_defect_kg" );
+        std::puts( "capsule_step96_reopen_face,seed,splits,substep,"
+            "face_WESN,start_open,pre_open,post_open,"
+            "start_signed_mps,pre_signed_mps,post_signed_mps,"
+            "pre_mac_outward_m3,post_mac_outward_m3" );
         std::puts( "capsule_step96_time_models,controlled_donor_tracer,"
             "fluid_substeps,analytic64_linear_proxy_net_m3,"
             "analytic256_linear_proxy_net_m3,internal_linear_proxy_net_m3,"
@@ -6170,6 +6370,9 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false,
                             field, capsule, startAngle, endAngle, steps,
                             subDt, split, seed != 0 );
                         if( seed == 0 && split == 1 ) singleReference = result;
+                        auditCapsuleStep96Reopening( field, capsule,
+                            startAngle, endAngle, steps, subDt,
+                            split, seed != 0 );
                     }
             }
             // Only the witness step needs the extra time-quadrature grids.
