@@ -2812,8 +2812,8 @@ momentum budgets. Do not use reduced raw velocity alone to merge #326.
 ### Step-96 matched closing-to-reopening Cut-cell reference — 2026-11-18
 
 **Opt-in test-only implementation:** commit [0f107596](https://github.com/buddas-bible/zonai/commit/0f1075969995f032157124e764ea634e0e447db6)
-extends the existing \`sandboxWindStepBenchmark --small-cell-capsule-step96-split-flux-audit\`
-with \`auditCapsuleStep96Reopening\`. **CI**:
+extends the existing `sandboxWindStepBenchmark --small-cell-capsule-step96-split-flux-audit`
+with `auditCapsuleStep96Reopening`. **CI**:
 [Actions #44326324331](https://github.com/buddas-bible/zonai/actions/runs/44326324331)
 completed **success** on Ubuntu Debug (35/35 successful job steps) and
 Windows Release (65/65). No production solver, pressure source, default
@@ -2829,7 +2829,7 @@ PR #326 remains experimental Draft; PR #322 stays separate and Draft.
    Only after that step is complete install the diagnostic observers.
 3. Reverse the prescribed Capsule **pose sequence and angular velocity**
    from original step 96 toward step 95 using 1, 2, 4 or 8 **real**
-   \`fluidField2::step\` calls. This is **not** a mathematical time reversal
+   `fluidField2::step` calls. This is **not** a mathematical time reversal
    of the dissipative fluid integrator: each reverse trial has the
    identical initial closing-state Field but subsequently follows its
    own evolved pressure/advective path.
@@ -2839,11 +2839,11 @@ PR #326 remains experimental Draft; PR #322 stays separate and Draft.
    required/applied pressure correction and residual. Independently
    inspect W/E/S/N opening, signed MAC velocity and face volume at the
    actual start, pre-pressure and post-pressure stages. The new
-   \`capsule_step96_reopen_step\` and \`capsule_step96_reopen_face\`
+   `capsule_step96_reopen_step` and `capsule_step96_reopen_face`
    streams are read-only and do **not** claim a continuous
-   \`∫ A(t)u(t)dt\` measurement.
+   `∫ A(t)u(t)dt` measurement.
 5. Observe **actual applied** donor-local tracer transfer events and
-   verify \`m_after = m_before + Σ(transfers_in - transfers_out)\`, plus
+   verify `m_after = m_before + Σ(transfers_in - transfers_out)`, plus
    total tracer mass and finite obstacle feedback. Also report the
    *fixed 3×3 active-cell patch* pre-/post-pressure MAC volumes and
    post-pressure source: that patch is **not** an independently closed
@@ -2852,8 +2852,8 @@ PR #326 remains experimental Draft; PR #322 stays separate and Draft.
 #### Observed reverse-motion numerical behaviour
 
 The donor starts near vanishing at
-\`fraction ≈ 3.76103×10⁻⁹\` (Windows; Linux
-\`3.76112×10⁻⁹\`) and reopens to **0.00202816562** under
+`fraction ≈ 3.76103×10⁻⁹` (Windows; Linux
+`3.76112×10⁻⁹`) and reopens to **0.00202816562** under
 all four actual reverse cadences. The same final geometry but different
 Fluid substep histories is a deliberate control.
 
@@ -2875,7 +2875,7 @@ or establishes full-space-time fluid conservation.
 
 The actual donor transfer-event ledger agrees with donor mass to
 floating-point precision (the maximum observed Windows donor mass
-defect is under \`7e-21 kg\` in the unseeded copy), and the global
+defect is under `7e-21 kg` in the unseeded copy), and the global
 passive tracer mass gate passes. All **15 paired substep**
 pressure/geometry records and **60 paired face** observations between
 seeded and unseeded copies are exactly equal on both platforms.
