@@ -5530,9 +5530,6 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
             result.donorTrapezoidMacOutwardVolume[direction] +=
                 static_cast<double>( h ) * dt * 0.5 *
                 ( startRates[direction] + endRate );
-            const bool isU = direction < 2;
-            const int fx = direction == 1 ? faceX : leftX;
-            const int fy = direction == 3 ? faceY + 1 : faceY;
             result.donorOpenExposureSeconds[direction] +=
                 ( isU ? field.getSweptUTimeMeanOpenFraction( fx, fy )
                       : field.getSweptVTimeMeanOpenFraction( fx, fy ) ) * dt;
