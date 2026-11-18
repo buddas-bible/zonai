@@ -7698,7 +7698,7 @@ void auditWindBoundaryPressureSpike()
     std::puts( "wind_boundary_pressure_step,source_on,step,pose_y_m,"
         "conservative_bottom_clearance_m,actual_capsule_bottom_clearance_m,"
         "expected_swept,used_swept,has_volume_history,swept_time_samples,"
-        "pressure_source_rate_m3ps,source_imbalance_m3ps,"
+        "snapshot_volume_rate_m3ps,source_imbalance_m3ps,"
         "compatibility_rate_m3ps,pressure_residual_native,"
         "continuity_before_per_s,continuity_after_per_s,"
         "pre_max_open_face_mps,post_max_open_face_mps,"
@@ -7891,7 +7891,7 @@ void auditWindBoundaryPressureSpike()
                     if( actualClearance > 0.0f ) ++fallbackInside;
                 }
                 if( previousUsed && !swept.usedSweptFlux ) ++toFallback;
-                if( !previousUsed && swept.usedSweptFlux ) ++toSwept;
+                if( frame > 1 && !previousUsed && swept.usedSweptFlux ) ++toSwept;
             }
             previousUsed = swept.usedSweptFlux;
             const double span = maxPressure - minPressure;
@@ -7950,7 +7950,7 @@ void auditWindBoundaryPressureSpike()
                 static_cast<double>( feedback[0].torque ) );
             previousY = y;
         }
-        if( toFallback < 1 || toSwept < 2 || fallbackInside < 1 ||
+        if( toFallback < 1 || toSwept < 1 || fallbackInside < 1 ||
             sweptCount < 1 || fallbackCount < 1 )
             fail( "Capsule did not cross both Swept guard thresholds while inside" );
 
