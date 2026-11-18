@@ -2509,10 +2509,15 @@ endpoint volume (`donorPreMacOutwardVolume`) is also separately
 recorded to reveal how advection/boundaries and pressure change the
 face field within the substep.
 
-**Validated Ubuntu Debug:** [workflow #44246966255](https://github.com/buddas-bible/zonai/actions/runs/44246966255)
-completed Ubuntu **success** including the extended benchmark.
-Windows Release was still running when this note was first prepared;
-check that job separately before asserting cross-platform parity.
+**Cross-platform validation:** [workflow #44246966255](https://github.com/buddas-bible/zonai/actions/runs/44246966255)
+completed **success on Ubuntu Debug and Windows Release**, including
+the extended step-96 GCL/face-quadrature benchmark and prior regressions.
+Windows Release independently measured a 1→8-split GCL defect of
+**8.11383998184e-8 → 1.09195212594e-9 m³**, endpoint-trapezoid
+proxy of **6.27358065645e-5 → 3.72981393595e-5 m³**, and
+post-pressure discrete residual of **-1.97535535834e-12 →
+5.3736811554e-9 m³**. Differences from the Ubuntu values below
+are floating-point/platform noise, not a different physical conclusion.
 
 | Actual step-95 entry / prescribed step-96 donor (28,26), m³ unless noted | 1 split | 2 splits | 4 splits | 8 splits |
 | --- | ---: | ---: | ---: | ---: |
