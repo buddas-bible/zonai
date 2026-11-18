@@ -5291,7 +5291,7 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
     // Canonical source-cell outward rate: u*open or v*open, m/s.
     // The start velocity is from the genuinely evolved previous Field step,
     // NOT the snapshot after advection/before the current pressure projection.
-    const auto faceVelocity = [&]( const fluidField2& state, int direction )
+    const auto signedFaceVelocity = [&]( const fluidField2& state, int direction )
     {
         const bool isU = direction < 2;
         const int fx = direction == 1 ? faceX : leftX;
@@ -5313,7 +5313,7 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
                                : state.getVFaceOpenFraction( fx, fy );
         if( !std::isfinite( open ) || open < 0.0f || open > 1.0f )
             throw std::runtime_error( "invalid Capsule MAC face opening" );
-        return faceVelocity( state, direction ) * open;
+        return signedFaceVelocity( state, direction ) * open;
     };
     // This ledger observes transfers, not tracer creation: compare each
     // completed Swept and MAC stage against the exact applied per-cell events.
@@ -5400,7 +5400,7 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
         for( int direction = 0; direction < 4; ++direction )
         {
             startRates[direction] = faceRate( field, direction );
-            startVelocities[direction] = faceVelocity( field, direction );
+            startVelocities[direction] = signedFaceVelocity( field, direction );
         }
         const double previousStoredFraction =
             field.getCellFluidFraction( leftX, faceY );
@@ -5466,7 +5466,7 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
         for( int direction = 0; direction < 4; ++direction )
         {
             const double endRate = faceRate( field, direction );
-            const double endVelocity = faceVelocity( field, direction );
+            const double endVelocity = signedFaceVelocity( field, direction );
             // Independent analytic Capsule face opening at fixed time midpoint
             // grids. This recomputes geometry with the public read-only
             // analytic face query; no pressure or tracer state is changed.
@@ -5622,7 +5622,7 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
     for( int direction = 0; direction < 4; ++direction )
         std::printf( "capsule_step96_time_face,%d,%d,%c,"
             "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
-            "%.12g,%.12g,%.12g,%.12g\n",
+            "%.12g,%.12g,%.12g\n",
             controlledDonorTracer ? 1 : 0, splitCount,
             std::array<char, 4>{{ 'W', 'E', 'S', 'N' }}[direction],
             result.donorOpenExposureSeconds[direction],
