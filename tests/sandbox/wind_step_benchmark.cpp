@@ -5221,6 +5221,8 @@ struct capsuleStep96SplitResult
     double donorAnalyticSnapshotDeltaVolume = 0.0;
     double donorGeometricSnapshotDeltaVolume = 0.0;
     double donorPressureSourceVolume = 0.0;
+    double donorRequiredPressureCorrectionVolume = 0.0;
+    double donorAppliedPressureCorrectionVolume = 0.0;
     double donorMaxAbsAnalyticFractionGap = 0.0;
     double donorMaxAbsLocalGclDefectVolume = 0.0;
     double donorMaxAbsLocalPressureResidualVolume = 0.0;
@@ -5385,12 +5387,14 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
     // boundary. These are stage observations, NOT a time-resolved u(t).
     std::array<double, 4> prePressureVelocities{};
     std::array<double, 4> prePressureOpenings{};
+    double prePressureMacNetThisStep = 0.0;
     field.setPrePressureSnapshotObserver( [&]( const fluidField2& frozen )
     {
         const auto budget = frozen.getCutCellVolumeBudget( leftX, faceY, dt );
         if( !budget.valid || !budget.hasSweptHistory )
             throw std::runtime_error( "missing split pre-pressure face state" );
         result.prePressureMacVolume += budget.macOutwardVolume[1];
+        prePressureMacNetThisStep = budget.macNetOutwardVolume;
         for( int direction = 0; direction < 4; ++direction )
         {
             prePressureVelocities[direction] =
@@ -5486,6 +5490,39 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
         previousAnalytic = nextAnalytic;
         if( result.prePressureObservations != segment + 1 )
             throw std::runtime_error( "Capsule pressure-stage observer count mismatch" );
+        // A local discrete pressure correction is the face-volume change
+        // from the actual pre-projection state to the actual post-projection
+        // state. It must cover the pre-state flux plus the EXISTING solver
+        // source, up to the measured pressure residual. This is an identity
+        // of the accepted operator, NOT the true time integral of A(t)u(t).
+        const double preNet = prePressureMacNetThisStep;
+        const double postNet = leftCell.macNetOutwardVolume;
+        const double source = leftCell.pressureSourceDeltaVolume;
+        const double requiredCorrection = -( preNet + source );
+        const double appliedCorrection = postNet - preNet;
+        const double closure = appliedCorrection - requiredCorrection;
+        const double gclDefect = leftCell.snapshotDeltaVolume -
+            leftCell.solidSweptDivergenceVolume;
+        const double snapshotResidual = postNet + leftCell.snapshotDeltaVolume;
+        const double sourceMinusSnapshot = source - leftCell.snapshotDeltaVolume;
+        if( !std::isfinite( preNet ) || !std::isfinite( postNet ) ||
+            !std::isfinite( requiredCorrection ) ||
+            std::abs( closure - leftCell.pressureResidualVolume ) > 1.0e-10 ||
+            std::abs( snapshotResidual -
+                ( leftCell.pressureResidualVolume - sourceMinusSnapshot ) ) > 1.0e-10 )
+            throw std::runtime_error( "Capsule per-substep pressure volume ledger failed" );
+        result.donorRequiredPressureCorrectionVolume += requiredCorrection;
+        result.donorAppliedPressureCorrectionVolume += appliedCorrection;
+        std::printf( "capsule_step96_pressure_step,%d,%d,%d,"
+            "%.12g,%.12g,%.12g,%.12g,%.12g,"
+            "%.12g,%.12g,%.12g,%.12g,%.12g,"
+            "%.12g,%.12g,%.12g\n",
+            controlledDonorTracer ? 1 : 0, splitCount, segment,
+            leftCell.previousFraction, leftCell.currentFraction,
+            leftCell.snapshotDeltaVolume, leftCell.solidSweptDivergenceVolume,
+            source, preNet, postNet, requiredCorrection, appliedCorrection,
+            leftCell.pressureResidualVolume, gclDefect, sourceMinusSnapshot,
+            snapshotResidual );
         for( int direction = 0; direction < 4; ++direction )
         {
             const double endRate = faceRate( field, direction );
@@ -5634,6 +5671,13 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
         std::abs( result.donorPressureSourceVolume -
             result.leftPressureSourceVolume ) > tolerance ||
         std::abs( postMacNet + result.donorPressureSourceVolume -
+            result.leftPressureResidualVolume ) > tolerance ||
+        std::abs( result.donorAppliedPressureCorrectionVolume -
+            ( postMacNet - preMacNet ) ) > tolerance ||
+        std::abs( result.donorRequiredPressureCorrectionVolume +
+            preMacNet + result.donorPressureSourceVolume ) > tolerance ||
+        std::abs( result.donorAppliedPressureCorrectionVolume -
+            result.donorRequiredPressureCorrectionVolume -
             result.leftPressureResidualVolume ) > tolerance ||
         !std::isfinite( trapezoidMacNet ) ||
         !std::isfinite( startMacNet ) || !std::isfinite( preMacNet ) ||
@@ -6051,6 +6095,13 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false,
             "pre_pressure_signed_velocity_mps,post_pressure_signed_velocity_mps,"
             "start_mac_outward_m3,pre_pressure_mac_outward_m3,"
             "post_pressure_mac_outward_m3,pressure_stage_delta_outward_m3" );
+        std::puts( "capsule_step96_pressure_step,controlled_donor_tracer,"
+            "fluid_substeps,substep,previous_fraction,current_fraction,"
+            "snapshot_delta_m3,swept_solid_divergence_m3,pressure_source_m3,"
+            "pre_pressure_mac_net_m3,post_pressure_mac_net_m3,"
+            "required_pressure_correction_m3,applied_pressure_correction_m3,"
+            "pressure_residual_m3,stored_minus_swept_gcl_m3,"
+            "source_minus_stored_m3,post_plus_stored_m3" );
         std::puts( "capsule_step96_gcl,controlled_donor_tracer,fluid_substeps,"
             "analytic_snapshot_delta_m3,stored_snapshot_delta_m3,"
             "swept_solid_divergence_m3,stored_minus_swept_gcl_m3,"
