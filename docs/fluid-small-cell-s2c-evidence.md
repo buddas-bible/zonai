@@ -2902,3 +2902,44 @@ the donor/region residual and Wall/Body pressure impulse ledgers.
 Keep the standard path unchanged, avoid pressure/velocity caps, and
 test genuine two-way World coupling only after the kinematic
 reopening witness is explained.
+
+### S2c reopening frozen Jacobi budgets and all-region source reconstruction — 2026-11-18
+
+**Verified test-only work:** [6bef7884](https://github.com/buddas-bible/zonai/commit/6bef7884fa9d50b8dc25364728e01f6709853d11) adds the same-state replay comparison, [2e209b6c](https://github.com/buddas-bible/zonai/commit/2e209b6ce1d8090541d6ee86d94667094a5c5ffc) corrects the legacy pressure-residual unit label, and [95353e0a](https://github.com/buddas-bible/zonai/commit/95353e0a8f6f91d7c523bd17404a5a84e05d7e6d) reconstructs *all* open-face-connected components rather than only the donor's component. The successive actual code CI runs [#44330584260](https://github.com/buddas-bible/zonai/actions/runs/44330584260) and [#44333657485](https://github.com/buddas-bible/zonai/actions/runs/44333657485) both finished **success on Ubuntu Debug (35/35) and Windows Release (65/65)**. All these changes are in the opt-in `--small-cell-capsule-step96-split-flux-audit`; default fluid physics and PR #322 remain unchanged.
+
+#### Identical frozen pressure system
+
+At the actual **first and last reverse-opening substeps** of each 1/2/4/8-split trial (deduplicating the 1-split case), the pre-projection Field is deep-copied and its actual MAC velocities, geometry and obstacles preserved. On independent copies, invoke the existing `replayFrozenCutCellPressure(120/240/480)`; do **not** manufacture a zero-MAC state or use a different geometry. The 120-iteration replay must match the live 120-iteration donor volume residual to `1e-9 m³`. Across budgets, assert identical donor pressure source and number of connected regions.
+
+The production Neumann RHS is constructed from float expressions of current-open-fraction MAC flux plus moving-volume source, then averaged over each connected region. Independently reconstruct each active component by traversing only strictly positive-aperture faces. For each region, report the actual pre-projection MAC volume plus post-replay source, the corresponding mean per cell, the sum of post-pressure residuals and the mean-removed regional RMS. Record the component's representative cell ID and whether it contains the target donor. Reconstruct the *whole-domain* compatibility rate as `abs(unresolvedVolumeRate) + Σ abs(component raw RHS volume / dt)` and compare to the solver's `compatibilityCorrection`; keep their difference visible **without forcing equality** because the two assembly paths are not yet mathematically demonstrated equivalent.
+
+The run emits three opt-in CSV families:
+`capsule_step96_reopen_frozen`, `capsule_step96_reopen_region`, and `capsule_step96_reopen_compat`. The `pressureResidual` value in the legacy noncoupled Jacobi diagnostics is in its existing native units, **not** asserted to be `m³/s`.
+
+#### Same-state Jacobi response (donor absolute pointwise volume residual, m³)
+
+| Reverse checkpoint | 120 iters Ubuntu | 240 iters Ubuntu | 480 iters Ubuntu | 120 iters Windows | 480 iters Windows |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 split, first/last | 1.66240780106e-6 | 8.12970276265e-7 | 3.75538355307e-7 | 1.66257009175e-6 | 3.75575728057e-7 |
+| 2 splits, first | 1.20469833564e-5 | 5.59880293112e-6 | 2.57446235647e-6 | 1.20469357553e-5 | 2.57451078381e-6 |
+| 2 splits, last | 1.10313116799e-5 | 6.99753968267e-6 | 4.01310841289e-6 | 1.10311620794e-5 | 4.01298136800e-6 |
+| 8 splits, last | 5.16712741783e-7 | 4.55392691371e-7 | 3.94888692419e-7 | 5.16728988503e-7 | 3.94899571532e-7 |
+
+The corresponding donor component contains **4,077 active cells** in every recorded checkpoint; the number of pressure regions in the entire field varies between 4 and 7 as the geometry changes, but stays exactly the same across 120/240/480 replays of any given snapshot. The donor component's uncorrected RHS mean is on the order of `10⁻¹⁴ m³/cell` or smaller, far below its `10⁻⁵–10⁻⁷ m³` pointwise residual. Increasing Jacobi iterations reduces that residual, establishing an **iteration-sensitivity/slow-convergence contribution** at these fixed states; 480 iterations do not demonstrate convergence.
+
+At **2-split first reopening**, the independently reconstructed donor-region source sum is about `-2.18e-11 m³`. The post-pressure sum agrees with it within roughly `1e-17 m³`, despite the substantial individual-cell residual. That distinguishes a spatially distributed residual from a newly introduced whole-region volume leak in this diagnostic reconstruction.
+
+#### Global compatibility difference is NOT sourced by the detached 1-cell pockets
+
+| First reverse substep | Solver compatibility rate, Ubuntu (m³/s) | Independent double volume reconstruction, Ubuntu (m³/s) | Solver compatibility rate, Windows (m³/s) | Independent reconstruction, Windows (m³/s) |
+| --- | ---: | ---: | ---: | ---: |
+| 1 split | 9.62059857557e-7 | 3.63215790184e-7 | 8.27734766062e-7 | 3.63215773143e-7 |
+| 2 splits | 3.07760346914e-5 | 1.67638201232e-7 | 2.79350133496e-5 | 1.67638000573e-7 |
+| 4 splits | 1.71406900336e-5 | 2.79398617198e-8 | 2.17695742322e-5 | 2.79404474166e-8 |
+| 8 splits | 1.43019060488e-5 | 6.50846530199e-15 | 1.43183860928e-5 | 4.73107856322e-14 |
+
+All reported components and reconstructed components have identical counts on each corresponding platform/cadence. For the **2-split first** opening there are precisely one large 4,077-cell donor component and three detached **single-cell** components; the latter each have independently reconstructed raw RHS **zero**. The recorded `unresolvedVolumeRate` is zero in both platforms. Thus the difference between the float-assembled *reported* compatibility rate and the double *independently reconstructed* compatibility rate **cannot be attributed to those zero-RHS detached components or the unresolved-source term**.
+
+**Hypothesis to verify, not an accepted fix:** `projectCutCell` builds each `divergence_[cell]` from **float-ordered** face products, differences, cell-size division and source division before accumulating connected-region sums. The independent public budget multiplies stored face speeds/open fractions and volume source in **double**. Algebraic equivalence does not imply identical cancellation in finite precision. However, the current witness does **not** prove all the discrepancy is float rounding; additional operator/source-stage ordering and boundary-flux bookkeeping remain possibilities. No solver correction, pressure cap, altered source, or new activation threshold was applied.
+
+**Next narrow gate:** on the *same immutable reopening pre-projection snapshot*, independently reproduce the exact `float` expression and region-wise summation order that `projectCutCell` uses, then compare its component sums with (a) reported `compatibilityCorrection`, (b) double budget reconstruction, and (c) analytic/Swept GCL. Determine whether float RHS cancellation is a substantial source of inter-platform variation before testing an opt-in double-accumulated RHS or alternate preconditioned solver. Keep the pressure equation and two-way Body/wall momentum checks separate acceptance gates.
