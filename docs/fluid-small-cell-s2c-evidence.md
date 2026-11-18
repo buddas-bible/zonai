@@ -2457,3 +2457,106 @@ local continuity. Then expand to nearly closed/reopened pockets,
 h/cadence sensitivity, and genuinely two-way World + wall impulse
 closure. Do not enable pressure pooling, change default transport,
 or claim fluid/FSI acceptance based solely on this tracer test.
+
+### Step-96 independent endpoint geometry GCL and actual-substep face quadrature — 2026-11-18
+
+**Bounded, read-only S2c experiment:** commit `28532ffc` extends the
+previously validated `--small-cell-capsule-step96-split-flux-audit`.
+No solver, transport, Body feedback, pressure-pooling default or
+aperture-sampler PR is changed. Starting from the *identical* step-95
+Field, use the same prescribed step-96 Capsule rotation at real
+1/2/4/8 Fluid substeps. On each copied Field, compare the *same*
+donor (28,26) and its four faces (W/E/S/N). The original historical
+tracer and controlled-donor variants share the same geometrical and
+MAC history; their separate applied transfer ledgers continue to
+enforce the prior tracer conservation gates.
+
+Independently re-evaluate the **existing analytic Capsule area code**
+at actual starting/ending obstacle poses with
+`getAnalyticCapsuleCellAreaAudit`. This is independent of the *stored
+Field fraction*, **not** an independent geometry implementation.
+Compare that endpoint area difference against the telescoping stored
+occupancy change and the already-applied moving-solid Swept volumes,
+all in unit-depth m³:
+
+```text
+dV_analytic = h^2 * (analyticFraction_end - analyticFraction_start)
+dV_stored   = Σ_substeps h^2 * (storedFraction_end - storedFraction_start)
+V_swept     = Σ_substeps Σ_W,E,S,N (signed solidSweptOutwardVolume)
+GCL_defect  = dV_stored - V_swept
+```
+
+Read the *actual stored* MAC velocity and endpoint open fraction
+at **each** substep entry and exit (the entry is the previous
+evolved Field state). Alongside the pre-pressure and post-projection
+MAC snapshot volumes, compare a physically dimensioned **trapezoid
+proxy** formed from those **actual** endpoints:
+
+```text
+V_mac_start = Σ_substeps Σ_faces h*dt_i*(open_start * velocity_start)_out
+V_mac_end   = Σ_substeps Σ_faces h*dt_i*(open_end   * velocity_end)_out
+V_mac_trap  = 1/2 * (V_mac_start + V_mac_end)
+P_residual  = V_mac_end + Σ_substeps pressureSourceDeltaVolume
+```
+
+The arithmetic trapezoid is **not** the true integral
+`∫open(t)*u(t)*h dt` of the original one-step velocity field.
+Advection, pressure projection and moving boundaries create different
+intra-step paths at each cadence; only endpoint velocities are
+observed. Do not identify this proxy with water mass, original-step
+advection, or already applied swept/tracer transfers. The pre-pressure
+endpoint volume (`donorPreMacOutwardVolume`) is also separately
+recorded to reveal how advection/boundaries and pressure change the
+face field within the substep.
+
+**Validated Ubuntu Debug:** [workflow #44246966255](https://github.com/buddas-bible/zonai/actions/runs/44246966255)
+completed Ubuntu **success** including the extended benchmark.
+Windows Release was still running when this note was first prepared;
+check that job separately before asserting cross-platform parity.
+
+| Actual step-95 entry / prescribed step-96 donor (28,26), m³ unless noted | 1 split | 2 splits | 4 splits | 8 splits |
+| --- | ---: | ---: | ---: | ---: |
+| Analytic endpoint `dV` | -3.16900281243e-5 | -3.16900281243e-5 | -3.16900281243e-5 | -3.16900281243e-5 |
+| Stored telescoping `dV` | -3.16900290130e-5 | -3.16900290130e-5 | -3.16900290130e-5 | -3.16900290130e-5 |
+| Summed solid Swept divergence | -3.17711674143e-5 | -3.17105441354e-5 | -3.16949299304e-5 | -3.16911209666e-5 |
+| **GCL defect = stored - Swept** | **8.11384012131e-8** | **2.05151223717e-8** | **4.90091733168e-9** | **1.09195352066e-9** |
+| Summed pressure source | -3.17711674143e-5 | -3.17105441354e-5 | -3.16949299304e-5 | -3.16911209666e-5 |
+| Starting-state MAC endpoint quadrature | 9.37004514461e-5 | 7.05682398326e-5 | 5.31119104994e-5 | 4.28997868122e-5 |
+| Pre-pressure MAC endpoint quadrature | 1.24958062097e-7 | 2.33356258099e-5 | 3.17095227470e-5 | 3.32186244581e-5 |
+| Post-pressure MAC endpoint quadrature | 3.17711653192e-5 | 3.17139294361e-5 | 3.17004999999e-5 | 3.16964968331e-5 |
+| **Actual-endpoint trapezoid proxy** | **6.27358083826e-5** | **5.11410846344e-5** | **4.24062052497e-5** | **3.72981418227e-5** |
+| Post MAC - trapezoid proxy | -3.09646430634e-5 | -1.94271551982e-5 | -1.07057052498e-5 | -5.60164498959e-6 |
+| Sum of discrete post-pressure residual volumes | -2.09504133741e-12 | 3.38530071518e-9 | 5.57006950034e-9 | 5.37586649596e-9 |
+| Max absolute **per-substep** GCL defect | 8.11384012131e-8 | 1.06507428363e-8 | 1.47656464833e-9 | 2.85581336357e-10 |
+
+The maximum analytic-vs-stored fluid fraction discrepancy was
+**5.68828317782e-11**. The equal endpoint occupancy across the four
+splits and very small recomputed-area discrepancy distinguish the
+time-integrated swept-geometry mismatch from an evident endpoint
+occupancy discrepancy in this specific witness. In this mode, the
+pressure source equals the signed Swept divergence (to printed
+precision), but differs from the exact endpoint occupancy change;
+therefore a small pressure residual proves only the chosen
+**discrete** operator relation, not geometric conservation.
+
+The total **GCL defect** falls ~74× from 1→8 splits, while the
+absolute gap between the post-projection endpoint quadrature and
+the independent evolved-endpoint trapezoid proxy is still
+**5.60e-6 m³** at 8 splits — more than three orders of magnitude
+larger than the donor's GCL defect. Also note that the pressure
+residual is **not** monotonically decreasing with time refinement.
+Do **not** infer a converged physical space-time face flux or repair
+the pressure solver by replacing its source with the trapezoid proxy.
+Pressure, geometry and transport remain separate finite-step
+operators; the difference is a falsifiable diagnostic, not proof
+of which approximate quadrature equals physical advection.
+
+**Next gate (still open):** reconstruct an independently consistent
+moving-interface finite-volume flux balance for **all four** fluid
+faces with a time-resolved \(A(t)u(t)\) and the moving-solid interface
+source, plus local/region pressure continuity and equal/opposite
+Body+wall momentum. Then test nearly closed/reopened pockets,
+h/cadence and performance. Compare to the existing *actual* applied
+Swept/MAC tracer kg without double-counting them. Keep both
+pressure pooling (#326) and independent aperture sampler (#322)
+Draft and default OFF; no physical-acceptance claim.
