@@ -5209,6 +5209,15 @@ struct capsuleStep96SplitResult
     std::array<double, 4> donorTrapezoidMacOutwardVolume{};
     std::array<double, 4> donorOpenExposureSeconds{};
     std::array<double, 4> donorSolidSweptOutwardVolume{};
+    // Independent analytic-geometry aperture quadrature at two fixed orders;
+    // all velocity histories below are expressly HYPOTHETICAL interpolants.
+    std::array<double, 4> donorAnalyticOpenExposure64{};
+    std::array<double, 4> donorAnalyticOpenExposure256{};
+    std::array<double, 4> donorAnalyticLinearFlux64{};
+    std::array<double, 4> donorAnalyticLinearFlux256{};
+    std::array<double, 4> donorAnalyticEarlyFlux256{};
+    std::array<double, 4> donorAnalyticLateFlux256{};
+    std::array<double, 4> donorInternalLinearFlux{};
     double donorAnalyticSnapshotDeltaVolume = 0.0;
     double donorGeometricSnapshotDeltaVolume = 0.0;
     double donorPressureSourceVolume = 0.0;
@@ -5282,7 +5291,7 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
     // Canonical source-cell outward rate: u*open or v*open, m/s.
     // The start velocity is from the genuinely evolved previous Field step,
     // NOT the snapshot after advection/before the current pressure projection.
-    const auto faceRate = [&]( const fluidField2& state, int direction )
+    const auto faceVelocity = [&]( const fluidField2& state, int direction )
     {
         const bool isU = direction < 2;
         const int fx = direction == 1 ? faceX : leftX;
@@ -5290,13 +5299,21 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
         const auto velocity = isU
             ? state.getUFaceVelocityForAudit( fx, fy )
             : state.getVFaceVelocityForAudit( fx, fy );
+        if( !velocity || !std::isfinite( *velocity ) )
+            throw std::runtime_error( "invalid Capsule MAC face velocity" );
+        return static_cast<double>( direction == 0 || direction == 2 ? -1 : 1 )
+            * *velocity;
+    };
+    const auto faceRate = [&]( const fluidField2& state, int direction )
+    {
+        const bool isU = direction < 2;
+        const int fx = direction == 1 ? faceX : leftX;
+        const int fy = direction == 3 ? faceY + 1 : faceY;
         const float open = isU ? state.getUFaceOpenFraction( fx, fy )
                                : state.getVFaceOpenFraction( fx, fy );
-        if( !velocity || !std::isfinite( *velocity ) ||
-            !std::isfinite( open ) || open < 0.0f || open > 1.0f )
-            throw std::runtime_error( "invalid Capsule MAC face endpoint sample" );
-        return static_cast<double>( direction == 0 || direction == 2 ? -1 : 1 )
-            * *velocity * open;
+        if( !std::isfinite( open ) || open < 0.0f || open > 1.0f )
+            throw std::runtime_error( "invalid Capsule MAC face opening" );
+        return faceVelocity( state, direction ) * open;
     };
     // This ledger observes transfers, not tracer creation: compare each
     // completed Swept and MAC stage against the exact applied per-cell events.
@@ -5379,8 +5396,12 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
         segmentStartMass = field.getTracerCellMass( leftX, faceY );
         segmentNetOutwardByKind = {};
         std::array<double, 4> startRates{};
+        std::array<double, 4> startVelocities{};
         for( int direction = 0; direction < 4; ++direction )
+        {
             startRates[direction] = faceRate( field, direction );
+            startVelocities[direction] = faceVelocity( field, direction );
+        }
         const double previousStoredFraction =
             field.getCellFluidFraction( leftX, faceY );
         const float alpha = ( 95.0f + static_cast<float>( segment + 1 ) /
@@ -5445,6 +5466,65 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
         for( int direction = 0; direction < 4; ++direction )
         {
             const double endRate = faceRate( field, direction );
+            const double endVelocity = faceVelocity( field, direction );
+            // Independent analytic Capsule face opening at fixed time midpoint
+            // grids. This recomputes geometry with the public read-only
+            // analytic face query; no pressure or tracer state is changed.
+            // Velocity interpolation is NOT observed inside this substep:
+            // alpha, alpha^2 and (2alpha-alpha^2) are three endpoint-matched
+            // hypotheses which expose physical non-identifiability.
+            const bool isU = direction < 2;
+            const int fx = direction == 1 ? faceX : leftX;
+            const int fy = direction == 3 ? faceY + 1 : faceY;
+            const auto integrate = [&]( int samples,
+                double& exposure, double& linearFlux,
+                double* earlyFlux, double* lateFlux )
+            {
+                for( int sample = 0; sample < samples; ++sample )
+                {
+                    const double alpha = ( sample + 0.5 ) / samples;
+                    const double globalStep = 95.0 +
+                        ( segment + alpha ) / splitCount;
+                    fluidShapeObstacle2 intermediateCapsule = capsule;
+                    intermediateCapsule.transform.rotation = rot2::FromRadians(
+                        startAngle + static_cast<float>( globalStep / totalSteps ) *
+                            ( endAngle - startAngle ) );
+                    const auto opening =
+                        field.getAnalyticCapsuleFaceOpenFractionForAudit(
+                            intermediateCapsule, isU, fx, fy );
+                    if( !opening || !std::isfinite( *opening ) ||
+                        *opening < 0.0 || *opening > 1.0 )
+                        throw std::runtime_error(
+                            "invalid independently sampled Capsule face opening" );
+                    const double weight = static_cast<double>( dt ) / samples;
+                    const double velocityChange = endVelocity -
+                        startVelocities[direction];
+                    exposure += weight * *opening;
+                    linearFlux += static_cast<double>( h ) * weight * *opening *
+                        ( startVelocities[direction] + alpha * velocityChange );
+                    if( earlyFlux )
+                        *earlyFlux += static_cast<double>( h ) * weight * *opening *
+                            ( startVelocities[direction] +
+                                ( 2.0 * alpha - alpha * alpha ) * velocityChange );
+                    if( lateFlux )
+                        *lateFlux += static_cast<double>( h ) * weight * *opening *
+                            ( startVelocities[direction] +
+                                alpha * alpha * velocityChange );
+                }
+            };
+            integrate( 64, result.donorAnalyticOpenExposure64[direction],
+                result.donorAnalyticLinearFlux64[direction],
+                nullptr, nullptr );
+            integrate( 256, result.donorAnalyticOpenExposure256[direction],
+                result.donorAnalyticLinearFlux256[direction],
+                &result.donorAnalyticEarlyFlux256[direction],
+                &result.donorAnalyticLateFlux256[direction] );
+            const double signedInternalProxy = isU
+                ? field.getSweptULinearVelocityProxyVolume( fx, fy, dt )
+                : field.getSweptVLinearVelocityProxyVolume( fx, fy, dt );
+            result.donorInternalLinearFlux[direction] +=
+                ( direction == 0 || direction == 2 ? -1.0 : 1.0 ) *
+                    signedInternalProxy;
             result.donorStartMacOutwardVolume[direction] +=
                 static_cast<double>( h ) * dt * startRates[direction];
             result.donorTrapezoidMacOutwardVolume[direction] +=
@@ -5496,6 +5576,11 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
     const double postMacNet = sumFour( result.donorPostMacOutwardVolume );
     const double trapezoidMacNet = sumFour(
         result.donorTrapezoidMacOutwardVolume );
+    const double analytic64LinearNet = sumFour( result.donorAnalyticLinearFlux64 );
+    const double analytic256LinearNet = sumFour( result.donorAnalyticLinearFlux256 );
+    const double internalLinearNet = sumFour( result.donorInternalLinearFlux );
+    const double earlyLinearNet = sumFour( result.donorAnalyticEarlyFlux256 );
+    const double lateLinearNet = sumFour( result.donorAnalyticLateFlux256 );
     // Read-only, independently reconstructed identities. These assert only
     // that the recorded geometry/pressure snapshots were accounted for,
     // NOT that trapezoid face flux is the true moving-interface integral.
@@ -5509,8 +5594,47 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
         std::abs( postMacNet + result.donorPressureSourceVolume -
             result.leftPressureResidualVolume ) > tolerance ||
         !std::isfinite( trapezoidMacNet ) ||
-        !std::isfinite( startMacNet ) || !std::isfinite( preMacNet ) )
+        !std::isfinite( startMacNet ) || !std::isfinite( preMacNet ) ||
+        !std::isfinite( analytic256LinearNet ) ||
+        !std::isfinite( earlyLinearNet ) || !std::isfinite( lateLinearNet ) )
         throw std::runtime_error( "Capsule GCL/pressure reference bookkeeping failed" );
+    // Distinguish precise *geometric* midpoint integration from unknown
+    // within-step velocities: the 64->256 comparison is ONLY a quadrature
+    // study of the same hypothetical velocity model.
+    for( int direction = 0; direction < 4; ++direction )
+    {
+        const double lower = result.donorAnalyticOpenExposure256[direction];
+        const double upper = result.donorOpenExposureSeconds[direction];
+        if( !std::isfinite( lower ) || !std::isfinite( upper ) ||
+            lower < 0.0 || lower > duration + 1.0e-7 ||
+            upper < 0.0 || upper > duration + 1.0e-7 ||
+            !std::isfinite( result.donorAnalyticLinearFlux64[direction] ) ||
+            !std::isfinite( result.donorInternalLinearFlux[direction] ) )
+            throw std::runtime_error( "Capsule time quadrature validity failed" );
+    }
+    std::printf( "capsule_step96_time_models,%d,%d,"
+        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+        controlledDonorTracer ? 1 : 0, splitCount,
+        analytic64LinearNet, analytic256LinearNet, internalLinearNet,
+        earlyLinearNet, lateLinearNet, postMacNet,
+        analytic256LinearNet - postMacNet,
+        earlyLinearNet - lateLinearNet );
+    for( int direction = 0; direction < 4; ++direction )
+        std::printf( "capsule_step96_time_face,%d,%d,%c,"
+            "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+            "%.12g,%.12g,%.12g,%.12g\n",
+            controlledDonorTracer ? 1 : 0, splitCount,
+            std::array<char, 4>{{ 'W', 'E', 'S', 'N' }}[direction],
+            result.donorOpenExposureSeconds[direction],
+            result.donorAnalyticOpenExposure64[direction],
+            result.donorAnalyticOpenExposure256[direction],
+            result.donorInternalLinearFlux[direction],
+            result.donorAnalyticLinearFlux64[direction],
+            result.donorAnalyticLinearFlux256[direction],
+            result.donorAnalyticEarlyFlux256[direction],
+            result.donorAnalyticLateFlux256[direction],
+            result.donorPostMacOutwardVolume[direction],
+            result.donorSolidSweptOutwardVolume[direction] );
     // Print both GCL discrepancy and time-quadrature discrepancies. Neither
     // is coerced toward zero by changing transport or the pressure operator.
     std::printf( "capsule_step96_gcl,%d,%d,"
@@ -5864,6 +5988,20 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false,
         "pressure_active_cells,pressure_residual_rms_m3" );
     if( step96SplitFlux )
     {
+        std::puts( "capsule_step96_time_models,controlled_donor_tracer,"
+            "fluid_substeps,analytic64_linear_proxy_net_m3,"
+            "analytic256_linear_proxy_net_m3,internal_linear_proxy_net_m3,"
+            "analytic256_early_proxy_net_m3,analytic256_late_proxy_net_m3,"
+            "endpoint_post_pressure_mac_net_m3,"
+            "analytic256_linear_minus_endpoint_m3,"
+            "early_minus_late_model_spread_m3" );
+        std::puts( "capsule_step96_time_face,controlled_donor_tracer,"
+            "fluid_substeps,face_WESN,internal_open_exposure_s,"
+            "analytic64_open_exposure_s,analytic256_open_exposure_s,"
+            "internal_linear_proxy_m3,analytic64_linear_proxy_m3,"
+            "analytic256_linear_proxy_m3,analytic256_early_proxy_m3,"
+            "analytic256_late_proxy_m3,post_pressure_endpoint_mac_m3,"
+            "solid_swept_outward_m3" );
         std::puts( "capsule_step96_gcl,controlled_donor_tracer,fluid_substeps,"
             "analytic_snapshot_delta_m3,stored_snapshot_delta_m3,"
             "swept_solid_divergence_m3,stored_minus_swept_gcl_m3,"
