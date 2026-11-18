@@ -3558,11 +3558,34 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
             !HasSameFluidGeometry( start.geometry, finish.geometry ) ) return;
         const float radius = FluidGeometryRadius( finish.geometry );
         if( !std::isfinite( radius ) || radius < 0.0f ) return;
-        for( const fluidShapeObstacle2* shape : { &start, &finish } )
+        const auto conservativeInside = [&]( const fluidShapeObstacle2& shape )
         {
-            const vec2 p = shape->transform.position;
-            if( p.x - radius <= origin_.x || p.x + radius >= limitX ||
-                p.y - radius <= origin_.y || p.y + radius >= limitY ) return;
+            const vec2 p = shape.transform.position;
+            return p.x - radius > origin_.x && p.x + radius < limitX &&
+                p.y - radius > origin_.y && p.y + radius < limitY;
+        };
+        if( !conservativeInside( start ) || !conservativeInside( finish ) )
+        {
+            // Controlled opt-in S2c counterfactual. For a Capsule whose
+            // orientation is EXACTLY unchanged, its shape AABB moves linearly,
+            // so strict containment at both endpoints also certifies every
+            // intermediate pose. The old enclosing-circle conservative guard
+            // remains the only production path, and rotations/other shapes
+            // still reject the entire swept interval.
+            if( !tightTranslatingCapsuleSweptBoundsAuditEnabled_ ||
+                !std::holds_alternative<capsule2>( finish.geometry ) ||
+                start.transform.rotation.c != finish.transform.rotation.c ||
+                start.transform.rotation.s != finish.transform.rotation.s )
+                return;
+            for( const fluidShapeObstacle2* shape : { &start, &finish } )
+            {
+                const aabb2 bounds = ComputeShapeAABB(
+                    shape->geometry, shape->transform );
+                if( !IsValidAABB( bounds ) ||
+                    bounds.min.x <= origin_.x || bounds.max.x >= limitX ||
+                    bounds.min.y <= origin_.y || bounds.max.y >= limitY )
+                    return;
+            }
         }
 
         const vec2 displacement = finish.transform.position - start.transform.position;
