@@ -5504,7 +5504,7 @@ capsuleStep96SplitResult auditCapsuleStep96SplitFlux(
             // samples of a continuous time integral. Preserve outward signs.
             std::printf( "capsule_step96_stage_face,%d,%d,%d,%c,"
                 "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
-                "%.12g,%.12g,%.12g,%.12g\\n",
+                "%.12g,%.12g,%.12g,%.12g\n",
                 controlledDonorTracer ? 1 : 0, splitCount, segment,
                 std::array<char, 4>{{ 'W', 'E', 'S', 'N' }}[direction],
                 startOpenings[direction], prePressureOpenings[direction],
