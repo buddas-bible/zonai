@@ -7674,6 +7674,299 @@ void auditMovingCapsuleGuardTransport( bool hotspotLedger = false,
         throw std::runtime_error( "nonfinite moving Capsule guard counterfactual" );
 }
 
+// Read-only controlled reproduction for the Wind Sandbox screenshot:
+// a horizontal Capsule never physically intersects the bottom wall, yet
+// updateSweptSolidFlux() rejects its conservative enclosing *radius* once
+// the center approaches that wall. The normal user Wind source is replayed
+// independently ON and OFF. This is not a coupled Body/World proof.
+void auditWindBoundaryPressureSpike()
+{
+    constexpr int width = 64, height = 64;
+    constexpr float h = 0.125f, stepDt = 1.0f / 60.0f;
+    constexpr vec2 origin{ -4.0f, -4.0f };
+    constexpr float radius = 0.19f, halfLength = 0.63f;
+    constexpr float boundRadius = halfLength + radius;
+    constexpr float startY = -3.02f, lowerY = -3.55f;
+    constexpr int halfSteps = 16, totalSteps = 2 * halfSteps;
+    constexpr vec2 source{ -2.0f, 0.0f };
+    constexpr float sourceStrength = 6.0f;
+    const auto fail = []( const char* message )
+    {
+        throw std::runtime_error( message );
+    };
+
+    std::puts( "wind_boundary_pressure_step,source_on,step,pose_y_m,"
+        "conservative_bottom_clearance_m,actual_capsule_bottom_clearance_m,"
+        "expected_swept,used_swept,has_volume_history,swept_time_samples,"
+        "pressure_source_rate_m3ps,source_imbalance_m3ps,"
+        "compatibility_rate_m3ps,pressure_residual_native,"
+        "continuity_before_per_s,continuity_after_per_s,"
+        "pre_max_open_face_mps,post_max_open_face_mps,"
+        "max_pressure_stage_delta_mps,max_delta_face_u,"
+        "max_delta_face_x,max_delta_face_y,max_delta_face_open,"
+        "pressure_min_relative,pressure_max_relative,pressure_peak_relative,"
+        "pressure_peak_x,pressure_peak_y,"
+        "max_endpoint_continuity_volume_m3,worst_cell_x,worst_cell_y,"
+        "total_pressure_source_volume_m3,total_snapshot_delta_m3,"
+        "total_mac_endpoint_volume_m3,swept_snapshot_mismatch_l1_m3,"
+        "force_x_N,force_y_N,torque_Nm" );
+    std::puts( "wind_boundary_pressure_summary,source_on,measured_swept_steps,"
+        "measured_fallback_steps,swept_to_fallback,fallback_to_swept,"
+        "fall_backs_with_physical_clearance,peak_swept_pressure_span,"
+        "peak_fallback_pressure_span,peak_swept_stage_delta_mps,"
+        "peak_fallback_stage_delta_mps,peak_swept_endpoint_residual_m3,"
+        "peak_fallback_endpoint_residual_m3" );
+
+    for( const bool wind : { false, true } )
+    {
+        fluidField2 field{ width, height, h, origin };
+        field.setCutCellProjectionEnabled( true );
+        field.setAnalyticCapsuleCutCellEnabled( true );
+        if( field.isCutCellCoupledProjectionEnabled() ||
+            field.getSmallCellPressureMergeFraction() != 0.0f ||
+            field.isConnectedResidualTracerRemapEnabled() )
+            fail( "boundary pressure audit changed normal solver settings" );
+
+        fluidShapeObstacle2 capsule{
+            capsule2{ { -halfLength, 0.0f }, { halfLength, 0.0f }, radius },
+            { { 0.0f, startY }, rot2::FromRadians( 0.0f ) },
+            { 0.0f, startY }, {}, 0.0f, 0.0f, 0.0f
+        };
+        const int uCount = ( width + 1 ) * height;
+        const int vCount = width * ( height + 1 );
+        std::vector<float> preU( uCount, 0.0f ), preV( vCount, 0.0f );
+        fluidFlowAudit2 preFlow{};
+        int pressureSnapshots = 0;
+        field.setPrePressureSnapshotObserver( [&]( const fluidField2& pre )
+        {
+            ++pressureSnapshots;
+            preFlow = pre.getFlowAudit( stepDt );
+            for( int y = 0; y < height; ++y )
+                for( int x = 1; x < width; ++x )
+                {
+                    const auto speed = pre.getUFaceVelocityForAudit( x, y );
+                    if( !speed || !std::isfinite( *speed ) )
+                        fail( "boundary pressure pre-U is nonfinite" );
+                    preU[y * ( width + 1 ) + x] = *speed;
+                }
+            for( int y = 1; y < height; ++y )
+                for( int x = 0; x < width; ++x )
+                {
+                    const auto speed = pre.getVFaceVelocityForAudit( x, y );
+                    if( !speed || !std::isfinite( *speed ) )
+                        fail( "boundary pressure pre-V is nonfinite" );
+                    preV[y * width + x] = *speed;
+                }
+        } );
+
+        int sweptCount = 0, fallbackCount = 0;
+        int toFallback = 0, toSwept = 0, fallbackInside = 0;
+        double sweptPeakSpan = 0.0, fallbackPeakSpan = 0.0;
+        double sweptPeakDelta = 0.0, fallbackPeakDelta = 0.0;
+        double sweptPeakResidual = 0.0, fallbackPeakResidual = 0.0;
+        float previousY = startY;
+        bool previousUsed = false;
+        for( int frame = 0; frame < totalSteps; ++frame )
+        {
+            const float fraction = frame < halfSteps
+                ? static_cast<float>( frame + 1 ) / halfSteps
+                : static_cast<float>( totalSteps - frame - 1 ) / halfSteps;
+            const float y = startY + ( lowerY - startY ) * fraction;
+            capsule.transform.position = { 0.0f, y };
+            capsule.center = capsule.transform.position;
+            capsule.linearVelocity = { 0.0f, ( y - previousY ) / stepDt };
+            capsule.angularVelocity = 0.0f;
+            const float conservativeClearance =
+                std::min( y, previousY ) - boundRadius - origin.y;
+            const float actualClearance = y - radius - origin.y;
+            if( actualClearance <= 0.0f )
+                fail( "controlled Capsule actually crossed the fluid wall" );
+
+            if( wind )
+            {
+                const float time = ( frame + 1 ) * stepDt;
+                field.addVelocity( source, {
+                    sourceStrength * stepDt,
+                    0.5f * sourceStrength * stepDt * std::sin( 1.7f * time )
+                }, 1.7f );
+            }
+            std::array<fluidObstacleForce2, 1> feedback{};
+            field.step( stepDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                feedback, 80 );
+            if( pressureSnapshots != frame + 1 )
+                fail( "missing boundary pre-pressure snapshot" );
+
+            const fluidSweptFaceFlux2 swept = field.getSweptFaceFlux();
+            const bool expected = frame > 0 && conservativeClearance > 0.0f;
+            if( swept.usedSweptFlux != expected )
+                fail( "Swept guard did not match conservative-radius eligibility" );
+
+            const fluidFlowAudit2 postFlow = field.getFlowAudit( stepDt );
+            const fluidCutCellPressure2 projection = field.getCutCellPressure();
+            const fluidCutCellVolumeSummary2 summary =
+                field.getCutCellVolumeSummary( stepDt );
+            if( !summary.valid || summary.activeCells <= 0 ||
+                !std::isfinite( postFlow.maxFluidFaceSpeed ) ||
+                !std::isfinite( projection.pressureResidual ) ||
+                !std::isfinite( projection.sourceImbalance ) ||
+                !std::isfinite( projection.compatibilityCorrection ) ||
+                !std::isfinite( feedback[0].force.x ) ||
+                !std::isfinite( feedback[0].force.y ) ||
+                !std::isfinite( feedback[0].torque ) )
+                fail( "invalid finite boundary pressure / force budget" );
+
+            double peakDelta = 0.0;
+            bool deltaIsU = true;
+            int deltaX = -1, deltaY = -1;
+            float deltaOpen = 0.0f;
+            const auto consider = [&]( bool isU, int x, int y,
+                float open, float before, std::optional<float> after )
+            {
+                if( !( open > 0.0f ) || !after || !std::isfinite( *after ) )
+                    return;
+                const double change =
+                    std::abs( static_cast<double>( *after ) - before );
+                if( change <= peakDelta ) return;
+                peakDelta = change;
+                deltaIsU = isU;
+                deltaX = x;
+                deltaY = y;
+                deltaOpen = open;
+            };
+            for( int cellY = 0; cellY < height; ++cellY )
+                for( int faceX = 1; faceX < width; ++faceX )
+                    if( field.getCellFluidFraction( faceX - 1, cellY ) > 0.0f &&
+                        field.getCellFluidFraction( faceX, cellY ) > 0.0f )
+                        consider( true, faceX, cellY,
+                            field.getUFaceOpenFraction( faceX, cellY ),
+                            preU[cellY * ( width + 1 ) + faceX],
+                            field.getUFaceVelocityForAudit( faceX, cellY ) );
+            for( int faceY = 1; faceY < height; ++faceY )
+                for( int cellX = 0; cellX < width; ++cellX )
+                    if( field.getCellFluidFraction( cellX, faceY - 1 ) > 0.0f &&
+                        field.getCellFluidFraction( cellX, faceY ) > 0.0f )
+                        consider( false, cellX, faceY,
+                            field.getVFaceOpenFraction( cellX, faceY ),
+                            preV[faceY * width + cellX],
+                            field.getVFaceVelocityForAudit( cellX, faceY ) );
+
+            double pressureSum = 0.0, minPressure = 0.0, maxPressure = 0.0;
+            int active = 0;
+            for( int cy = 0; cy < height; ++cy )
+                for( int cx = 0; cx < width; ++cx )
+                    if( field.getCellFluidFraction( cx, cy ) > 0.0f )
+                    {
+                        const double p = field.getCellPressureForVisualization( cx, cy );
+                        if( !std::isfinite( p ) )
+                            fail( "nonfinite boundary visual pressure" );
+                        if( active == 0 ) minPressure = maxPressure = p;
+                        else
+                        {
+                            minPressure = std::min( minPressure, p );
+                            maxPressure = std::max( maxPressure, p );
+                        }
+                        pressureSum += p;
+                        ++active;
+                    }
+            const double mean = pressureSum / active;
+            double peakRelative = 0.0;
+            int peakX = -1, peakY = -1;
+            for( int cy = 0; cy < height; ++cy )
+                for( int cx = 0; cx < width; ++cx )
+                    if( field.getCellFluidFraction( cx, cy ) > 0.0f )
+                    {
+                        const double p = field.getCellPressureForVisualization( cx, cy );
+                        if( std::abs( p - mean ) <= peakRelative ) continue;
+                        peakRelative = std::abs( p - mean );
+                        peakX = cx;
+                        peakY = cy;
+                    }
+
+            if( frame > 0 )
+            {
+                if( swept.usedSweptFlux ) ++sweptCount;
+                else
+                {
+                    ++fallbackCount;
+                    if( actualClearance > 0.0f ) ++fallbackInside;
+                }
+                if( previousUsed && !swept.usedSweptFlux ) ++toFallback;
+                if( !previousUsed && swept.usedSweptFlux ) ++toSwept;
+            }
+            previousUsed = swept.usedSweptFlux;
+            const double span = maxPressure - minPressure;
+            if( swept.usedSweptFlux )
+            {
+                sweptPeakSpan = std::max( sweptPeakSpan, span );
+                sweptPeakDelta = std::max( sweptPeakDelta, peakDelta );
+                sweptPeakResidual = std::max(
+                    sweptPeakResidual, summary.maxAbsPressureResidualVolume );
+            }
+            else if( frame > 0 )
+            {
+                fallbackPeakSpan = std::max( fallbackPeakSpan, span );
+                fallbackPeakDelta = std::max( fallbackPeakDelta, peakDelta );
+                fallbackPeakResidual = std::max(
+                    fallbackPeakResidual, summary.maxAbsPressureResidualVolume );
+            }
+
+            std::printf( "wind_boundary_pressure_step,%d,%d",
+                wind ? 1 : 0, frame );
+            const std::array<double, 5> geometry{{
+                y, conservativeClearance, actualClearance,
+                expected ? 1.0 : 0.0,
+                swept.usedSweptFlux ? 1.0 : 0.0
+            }};
+            for( double value : geometry ) std::printf( ",%.12g", value );
+            std::printf( ",%d,%d", projection.hasVolumeHistory ? 1 : 0,
+                swept.timeSamples );
+            const std::array<double, 11> physics{{
+                projection.volumeRate, projection.sourceImbalance,
+                projection.compatibilityCorrection, projection.pressureResidual,
+                projection.divergenceBefore, projection.divergenceAfter,
+                preFlow.maxFluidFaceSpeed, postFlow.maxFluidFaceSpeed,
+                peakDelta, deltaIsU ? 1.0 : 0.0, static_cast<double>( deltaX )
+            }};
+            for( double value : physics ) std::printf( ",%.12g", value );
+            std::printf( ",%d,%.12g", deltaY, static_cast<double>( deltaOpen ) );
+            const std::array<double, 3> pressure{{
+                minPressure - mean, maxPressure - mean, peakRelative
+            }};
+            for( double value : pressure ) std::printf( ",%.12g", value );
+            std::printf( ",%d,%d", peakX, peakY );
+            const std::array<double, 7> volume{{
+                summary.maxAbsPressureResidualVolume,
+                static_cast<double>( summary.worstPressureX ),
+                static_cast<double>( summary.worstPressureY ),
+                summary.totalPressureSourceDeltaVolume,
+                summary.totalSnapshotDeltaVolume,
+                summary.totalMacNetOutwardVolume,
+                summary.totalAbsSweptSnapshotMismatchVolume
+            }};
+            for( double value : volume ) std::printf( ",%.12g", value );
+            std::printf( ",%.12g,%.12g,%.12g\n",
+                static_cast<double>( feedback[0].force.x ),
+                static_cast<double>( feedback[0].force.y ),
+                static_cast<double>( feedback[0].torque ) );
+            previousY = y;
+        }
+        if( toFallback < 1 || toSwept < 2 || fallbackInside < 1 ||
+            sweptCount < 1 || fallbackCount < 1 )
+            fail( "Capsule did not cross both Swept guard thresholds while inside" );
+
+        std::printf( "wind_boundary_pressure_summary,%d,%d,%d,%d,%d,%d",
+            wind ? 1 : 0, sweptCount, fallbackCount, toFallback,
+            toSwept, fallbackInside );
+        const std::array<double, 6> peaks{{
+            sweptPeakSpan, fallbackPeakSpan,
+            sweptPeakDelta, fallbackPeakDelta,
+            sweptPeakResidual, fallbackPeakResidual
+        }};
+        for( double value : peaks ) std::printf( ",%.12g", value );
+        std::putchar( '\n' );
+    }
+}
+
 } // namespace
 
 int main( int argc, char** argv )
@@ -7716,6 +8009,7 @@ int main( int argc, char** argv )
     bool capsulePressureOracleAudit = false;
     bool capsuleStep96SplitFluxAudit = false;
     bool cutCellVolumeAudit = false;
+    bool windBoundaryPressureAudit = false;
     for( int i = 1; i < argc; ++i )
     {
         csv |= std::string_view( argv[i] ) == "--csv";
@@ -7758,6 +8052,7 @@ int main( int argc, char** argv )
         capsuleStep96SplitFluxAudit |= std::string_view( argv[i] ) ==
             "--small-cell-capsule-step96-split-flux-audit";
         cutCellVolumeAudit |= std::string_view( argv[i] ) == "--cut-cell-volume-budget-audit";
+        windBoundaryPressureAudit |= std::string_view( argv[i] ) == "--wind-boundary-pressure-spike-audit";
     }
     if( couplingAudit ) { auditCoupling(); return 0; }
     if( faceStageAudit ) { auditFaceStages(); return 0; }
@@ -7823,6 +8118,7 @@ int main( int argc, char** argv )
         return 0;
     }
     if( cutCellVolumeAudit ) { auditCutCellVolumeBudget(); return 0; }
+    if( windBoundaryPressureAudit ) { auditWindBoundaryPressureSpike(); return 0; }
     if( warmStartSweep )
     {
         std::puts( "cell_m,world_substeps,fluid_substeps,warm_start,frames,"
