@@ -2565,3 +2565,87 @@ h/cadence and performance. Compare to the existing *actual* applied
 Swept/MAC tracer kg without double-counting them. Keep both
 pressure pooling (#326) and independent aperture sampler (#322)
 Draft and default OFF; no physical-acceptance claim.
+
+### Step-96 temporal aperture convergence and face-velocity non-uniqueness — 2026-11-18
+
+**Bounded reference on PR #326 (still Draft):**
+`tests/sandbox/wind_step_benchmark.cpp` (code commits
+`264bee68`, `898f92a7`, `798753cb`) extends the same
+`--small-cell-capsule-step96-split-flux-audit`. The experiment
+reuses the **same step-95 entry field**, the **same prescribed Capsule
+rotation**, and **1/2/4/8 genuinely stepped** copies. It is opt-in
+read-only instrumentation; the original Fluid/World solver, pressure,
+body feedback, and default tracer transport remain unchanged.
+The prior 4-face donor tracer and GCL ledgers are retained.
+
+**What the new geometry reference really measures:** For each donor
+(28,26) face W/E/S/N and each actual Fluid substep, reconstruct the
+rigid Capsule pose at 64 and 256 midpoint times and query the existing
+analytic face clipper via
+`getAnalyticCapsuleFaceOpenFractionForAudit`. Sum the independent
+geometric open exposures (`seconds`) and then calculate alternative
+hypothetical velocities against the **same** sampled aperture:
+
+```text
+alpha = (sample + 0.5)/samples in each actually stepped time interval
+A(alpha) = analytic open fraction at the reconstructed Capsule pose
+u0 = signed MAC velocity captured at Fluid substep entry
+u1 = signed MAC velocity captured after its pressure projection
+V_model = h * dt * midpointMean[ A(alpha) * u_model(alpha) ]
+velocity models (same endpoints u0 and u1):
+  u_linear(alpha) = u0 + alpha*(u1-u0)
+  u_early(alpha)  = u0 + (2*alpha-alpha^2)*(u1-u0)
+  u_late(alpha)   = u0 + alpha^2*(u1-u0)
+```
+
+The 64↔256 comparison tests **geometric aperture quadrature
+sensitivity** *under an assumed linear face-velocity path*,
+not the convergence of the actual unknown `u(t)`.
+The same 256-point open geometry with *early* and *late* endpoint-
+matched velocities supplies an illustrative **non-uniqueness range**:
+those are all compatible with measured endpoints but none is asserted
+to be the physical motion. Separately record the solver's existing
+sampled `sweptU/VTimeMeanOpen`, current
+`getSweptU/VLinearVelocityProxyVolume`, and the actual post-pressure
+**endpoint** MAC volume budget for each face. The latter remains a
+discrete operator output, not a measured time-integrated physical
+flux. The outgoing sign on W and S is negative; E and N positive.
+Different tracer-seeding copies must share the same geometry/flow
+outputs; dye kg is **never** converted into m³ to manufacture closure.
+
+**Read-only CSV streams:**
+`capsule_step96_time_face` records per-face 64/256 aperture
+exposure, 64/256 linear-velocity proxy, 256 early/late proxies,
+internal sampled geometric exposure, internal linear proxy,
+endpoint MAC volume and signed solid Swept volume;
+`capsule_step96_time_models` sums the modeled net outward volumes
+and explicitly reports the endpoint-vs-model and early-vs-late
+differences. Existing `capsule_step96_gcl`,
+`capsule_step96_gcl_face` and `capsule_step96_donor_balance`
+remain the independently checkable geometric/discrete-pressure/
+applied-tracer witnesses.
+
+**Acceptance boundary:** These tests may support the accuracy of
+time-integrated *aperture geometry* or disprove that endpoints
+determine a unique time-integrated flow, but they do **not** provide
+a measured true `integral A(t)*u(t) dt`. An accepted moving-interface
+volume/pressure/impulse discretization still needs a temporally
+consistent fluid flux history (or explicit in-step time-integral
+operator) and equal/opposite Body+wall coupling. Do not replace
+the pressure source or transport with any of these models, or
+turn on small-cell pooling. Subsequent targeted development should
+sample *actual evolved intermediate fluid velocity* at a fixed
+matching geometry history and verify closed/reopened pockets,
+h/cadence, 4-face local and region volume, plus joint/Body feedback.
+
+**Relevant numerical formulation references** (motivation and
+acceptance criteria, not proof that zonai implements them):
+- [Integrated Space-Time Finite Volume Method and Moving Boundary
+  Problems](https://www.sciencedirect.com/science/article/pii/S0021999199963246):
+  conservation over space-time control volumes and GCL.
+- [Improved mass conservation and reduced spurious pressure oscillations
+  near moving sharp interfaces](https://www.sciencedirect.com/science/article/pii/S0021999111003524):
+  GCL violation as a source of pressure artifacts.
+- [Conservative and consistent implicit Cartesian cut-cell method for
+  moving geometries](https://www.sciencedirect.com/science/article/pii/S0021999122001863):
+  pressure/velocity coupling and local conservation in moving cut cells.
