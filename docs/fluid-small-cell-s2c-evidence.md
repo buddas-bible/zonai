@@ -2649,3 +2649,87 @@ acceptance criteria, not proof that zonai implements them):
 - [Conservative and consistent implicit Cartesian cut-cell method for
   moving geometries](https://www.sciencedirect.com/science/article/pii/S0021999122001863):
   pressure/velocity coupling and local conservation in moving cut cells.
+
+#### Measured temporal aperture quadrature — Linux Debug / Windows Release
+
+**Validated implementation CI:** [Actions #44256868806](https://github.com/buddas-bible/zonai/actions/runs/44256868806)
+**Ubuntu Debug success (35/35 job steps) and Windows Release success
+(65/65 job steps)**. The benchmark, ordinary tests and previous Cut-cell
+regressions passed. First attempts `264bee68` and `898f92a7`
+had test-source compile errors (local shadowing and duplicate face
+coordinates); final compiled code is `798753cb`. The following data
+are from that **successful** run, not those failed attempts.
+
+| Actual step-95 entry; step-96 donor four-face model (Ubuntu Debug, m³) | 1 split | 2 splits | 4 splits | 8 splits |
+| --- | ---: | ---: | ---: | ---: |
+| Existing internal aperture-moment **linear proxy** | 5.87313793075e-3 | 7.80767666652e-4 | 1.33638810928e-4 | 4.86594697907e-5 |
+| Independent 64-time-midpoint geometric **linear proxy** | 3.93685850367e-3 | 5.37598185352e-4 | 1.03233522727e-4 | 4.48725766939e-5 |
+| Independent 256-time-midpoint geometric **linear proxy** | 3.93642408811e-3 | 5.37543342808e-4 | 1.03226250660e-4 | 4.48718584830e-5 |
+| 256-sample **early** changing-velocity hypothesis | 5.87706827116e-3 | 7.81991266400e-4 | 1.33602403614e-4 | 4.83957691946e-5 |
+| 256-sample **late** changing-velocity hypothesis | 1.99577990505e-3 | 2.93095419216e-4 | 7.28500977067e-5 | 4.13479477714e-5 |
+| Early-late hypothesis difference | 3.88128836611e-3 | 4.88895847185e-4 | 6.07523059068e-5 | 7.04782142317e-6 |
+| Actual solver **post-pressure endpoint** MAC net (not time integral) | 3.17711653192e-5 | 3.17139294361e-5 | 3.17004999999e-5 | 3.16964968331e-5 |
+
+Windows Release agrees to floating-point/platform precision: at
+1 split the independent 64/256 linear proxies were
+`3.93690575629e-3 / 3.93647199454e-3 m³`,
+the internal proxy `5.87320802967e-3 m³`, and the early/late
+spread `3.88133558103e-3 m³`. At 8 splits Windows reported
+`4.48720273430e-5 m³` for independent 256, versus
+`4.86596128581e-5 m³` internally. Controlled-donor tracer and
+unseeded history have the same geometric/velocity model outputs
+at each cadence, as expected; the dye seed changes only passive kg.
+
+**Specific finding: the FIRST time moment of aperture is not resolved
+merely because its mean appears accurate.** On the 1-split East face,
+the internal one-step open exposure was
+`1.03981737993e-5 s`, versus the independent 256-point
+`1.03730420414e-5 s` (about **0.24%**). On South it was
+`6.66627011014e-6 s` vs `6.67102022991e-6 s`
+(about **0.071%**). Yet the corresponding internal **linear-time
+velocity proxies** are `3.58076510621e-3 m³` (East) and
+`2.29237282454e-3 m³` (South), compared with independent
+256-point linear proxies of `2.40059686251e-3` and
+`1.53582722559e-3 m³` respectively. Summed, the existing
+internal proxy is about **49% larger** than the independently
+sampled **same linear velocity hypothesis**, even though the
+64→256 independent total changes by only about **0.011%**.
+This separates inadequate **time weighting of aperture** from
+uncertainty in the real fluid velocity history.
+
+**Root-cause constraint from the actual code path:** In
+`fluidField2::updateSweptSolidFlux` the default
+`timeSamples = clamp(ceil(maximumTravel / (0.25*h)), 1, 32)`;
+`adaptiveSweptSamplingEnabled_` is false in this control. The
+prescribed rotating Capsule moves approximately
+`0.00859 rad` per original step, with a maximal traveled distance
+about `0.007 m`, below `0.25*h = 0.03125 m`. Consequently
+the accepted swept/aperture quadrature is **one temporal midpoint
+per actual Fluid substep**. A single midpoint can approximate the
+zeroth opening moment yet still misrepresent
+`∫alpha*A(alpha)dalpha`, which the internal linear-velocity
+proxy uses. This is an identified **diagnostic quadrature limitation**,
+not proof that physically correct pressure requires 64 or 256
+samples everywhere. Do not globally raise normal-step samples
+without a disabled-path performance and conservation assessment.
+
+At 8 actual smaller fluid substeps the independent 256-point
+linear proxy is **4.48718584830e-5 m³**, the internal proxy
+**4.86594697907e-5 m³**, and the post-pressure endpoint
+MAC operator **3.16964968331e-5 m³**. The early/late
+interpolants **still differ by 7.04782142317e-6 m³** despite
+the converged aperture quadrature. This is a structural
+**velocity-history underdetermination**: improving the aperture
+integral alone does **not** reveal the physical moving-boundary
+volume flux or establish pressure/FSI conservation.
+
+**Next bounded implementation gate:** instrument **actual**
+substep-resolved, post-advection/pre-pressure and post-projection
+MAC velocities on W/E/S/N at matched geometric time points, or
+design the pressure/transport operator to consume and conserve
+a common space-time face-volume integral. Use the above 64↔256
+aperture reference to isolate pure geometric weighting, then
+compare independently to the `dV_stored` and four signed
+solid-Swept fluxes and actual applied tracer kg. Test a near-open,
+near-closed and reopening cut cell, region closure and paired
+Body+wall feedback before any solver change/merger.
