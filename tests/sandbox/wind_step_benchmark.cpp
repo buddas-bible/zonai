@@ -7710,6 +7710,16 @@ void auditWindBoundaryPressureSpike()
         "total_pressure_source_volume_m3,total_snapshot_delta_m3,"
         "total_mac_endpoint_volume_m3,swept_snapshot_mismatch_l1_m3,"
         "force_x_N,force_y_N,torque_Nm" );
+    std::puts( "wind_boundary_pressure_counterfactual,source_on,step,"
+        "default_swept,tight_swept,"
+        "default_snapshot_delta_m3,tight_snapshot_delta_m3,"
+        "default_source_delta_m3,tight_source_delta_m3,"
+        "default_pressure_span,tight_pressure_span,"
+        "default_max_open_face_mps,tight_max_open_face_mps,"
+        "default_max_pressure_residual_m3,tight_max_pressure_residual_m3,"
+        "default_compatibility_rate_m3ps,tight_compatibility_rate_m3ps,"
+        "default_force_y_N,tight_force_y_N,"
+        "tight_pre_pressure_max_open_face_mps" );
     std::puts( "wind_boundary_pressure_cell_hotspot,source_on,step,"
         "role,cell_x,cell_y,previous_fraction,current_fraction,"
         "snapshot_delta_m3,pressure_source_m3,swept_divergence_m3,"
@@ -7798,6 +7808,20 @@ void auditWindBoundaryPressureSpike()
                     sourceStrength * stepDt,
                     0.5f * sourceStrength * stepDt * std::sin( 1.7f * time )
                 }, 1.7f );
+            }
+            // Identical fluid entry state, imposed pose and source on both
+            // copies. Only the conservative-radius eligibility changes.
+            // These four checkpoints lie inside the real shape AABB, but
+            // outside its enclosing circle and must use snapshot fallback
+            // on the untouched solver path.
+            const bool compareTight = frame == 4 || frame == 9 ||
+                frame == 16 || frame == 26;
+            std::optional<fluidField2> tight;
+            if( compareTight )
+            {
+                tight.emplace( field );
+                tight->setPrePressureSnapshotObserver( {} );
+                tight->setTightTranslatingCapsuleSweptBoundsAuditEnabled( true );
             }
             std::array<fluidObstacleForce2, 1> feedback{};
             field.step( stepDt, std::span<const fluidShapeObstacle2>( &capsule, 1 ),
@@ -7906,6 +7930,76 @@ void auditWindBoundaryPressureSpike()
             }
             previousUsed = swept.usedSweptFlux;
             const double span = maxPressure - minPressure;
+            if( tight )
+            {
+                float tightPrePressureMax = 0.0f;
+                int tightSnapshots = 0;
+                tight->setPrePressureSnapshotObserver(
+                    [&]( const fluidField2& pre )
+                    {
+                        ++tightSnapshots;
+                        tightPrePressureMax =
+                            pre.getFlowAudit( stepDt ).maxFluidFaceSpeed;
+                    } );
+                std::array<fluidObstacleForce2, 1> tightFeedback{};
+                tight->step( stepDt,
+                    std::span<const fluidShapeObstacle2>( &capsule, 1 ),
+                    tightFeedback, 80 );
+                const auto tightSwept = tight->getSweptFaceFlux();
+                const auto tightSummary = tight->getCutCellVolumeSummary( stepDt );
+                const auto tightProjection = tight->getCutCellPressure();
+                const auto tightFlow = tight->getFlowAudit( stepDt );
+                double tightMin = 0.0, tightMax = 0.0;
+                int tightActive = 0;
+                for( int cy = 0; cy < height; ++cy )
+                    for( int cx = 0; cx < width; ++cx )
+                        if( tight->getCellFluidFraction( cx, cy ) > 0.0f )
+                        {
+                            const double p =
+                                tight->getCellPressureForVisualization( cx, cy );
+                            if( !std::isfinite( p ) )
+                                fail( "counterfactual pressure is nonfinite" );
+                            if( tightActive == 0 ) tightMin = tightMax = p;
+                            else
+                            {
+                                tightMin = std::min( tightMin, p );
+                                tightMax = std::max( tightMax, p );
+                            }
+                            ++tightActive;
+                        }
+                if( swept.usedSweptFlux || !tightSwept.usedSweptFlux ||
+                    !tightSummary.valid || tightActive != active ||
+                    tightSnapshots != 1 ||
+                    std::abs( summary.totalSnapshotDeltaVolume -
+                        tightSummary.totalSnapshotDeltaVolume ) > 1.0e-10 ||
+                    !std::isfinite( tightFlow.maxFluidFaceSpeed ) ||
+                    !std::isfinite( tightProjection.compatibilityCorrection ) ||
+                    !std::isfinite( tightFeedback[0].force.y ) )
+                    fail( "tight Capsule clone was not an equivalent endpoint" );
+                std::printf(
+                    "wind_boundary_pressure_counterfactual,%d,%d,%d,%d",
+                    wind ? 1 : 0, frame,
+                    swept.usedSweptFlux ? 1 : 0,
+                    tightSwept.usedSweptFlux ? 1 : 0 );
+                const std::array<double, 15> comparison{{
+                    summary.totalSnapshotDeltaVolume,
+                    tightSummary.totalSnapshotDeltaVolume,
+                    summary.totalPressureSourceDeltaVolume,
+                    tightSummary.totalPressureSourceDeltaVolume,
+                    span, tightMax - tightMin,
+                    postFlow.maxFluidFaceSpeed,
+                    tightFlow.maxFluidFaceSpeed,
+                    summary.maxAbsPressureResidualVolume,
+                    tightSummary.maxAbsPressureResidualVolume,
+                    projection.compatibilityCorrection,
+                    tightProjection.compatibilityCorrection,
+                    feedback[0].force.y,
+                    tightFeedback[0].force.y,
+                    tightPrePressureMax
+                }};
+                for( double value : comparison ) std::printf( ",%.12g", value );
+                std::putchar( '\n' );
+            }
             if( swept.usedSweptFlux )
             {
                 sweptPeakSpan = std::max( sweptPeakSpan, span );
