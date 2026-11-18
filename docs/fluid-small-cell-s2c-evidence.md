@@ -2733,3 +2733,78 @@ compare independently to the `dV_stored` and four signed
 solid-Swept fluxes and actual applied tracer kg. Test a near-open,
 near-closed and reopening cut cell, region closure and paired
 Body+wall feedback before any solver change/merger.
+
+### Step-96 observed MAC pressure-stage velocity and per-substep source/flux closure — 2026-11-18
+
+**Verified prior stage witness:** commit `627139d1` extends only the
+opt-in `--small-cell-capsule-step96-split-flux-audit`. GitHub Actions
+[run #44268890599](https://github.com/buddas-bible/zonai/actions/runs/44268890599)
+finished **success on Ubuntu Debug and Windows Release**. It records
+each genuinely evolved Fluid substep's MAC W/E/S/N face opening and signed
+normal velocity at (1) the previous completed-step entry, (2) the actual
+post-advection/pre-pressure snapshot, and (3) after pressure projection.
+For each face the stage-volume entries are `h*dt*opening*velocity` with
+outward W/S signs, **not** a measured continuous-time flux integral.
+
+For the same step-95 entry and prescribed rotating Capsule step 96,
+the donor (28,26) has the following **summed per-substep endpoint**
+volume budgets from the successful **Ubuntu Debug** run (unit-depth m³
+except last column). These are sums across the actual 1/2/4/8 stepped
+intervals, *not* one synthetic step evaluated with alternate cadence.
+
+| Actual Fluid splits | Pre-pressure MAC outward | Post-pressure MAC outward | Applied pressure face-volume delta | Post-pressure discrete residual | Stored-minus-Swept GCL defect | Last-substep East post-pressure raw velocity (m/s) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.24958062097e-7 | 3.17711653192e-5 | +3.16462072571e-5 | -2.09504133741e-12 | +8.11384012131e-8 | 5486.27636719 |
+| 2 | 2.33356258099e-5 | 3.17139294361e-5 | +8.3783036262e-6 | +3.38530071518e-9 | +2.05151223717e-8 | 2762.23779297 |
+| 4 | 3.17095227470e-5 | 3.17004999999e-5 | -9.0227471e-9 | +5.57006950034e-9 | +4.90091733168e-9 | 1392.03552246 |
+| 8 | 3.32186244581e-5 | 3.16964968331e-5 | -1.522127625e-6 | +5.37586649596e-9 | +1.09195352066e-9 | 704.831115723 |
+
+On the final substep for each cadence, **both East and South face raw
+velocities remain around 19–24 m/s before projection but increase sharply
+after projection**. The final East open fraction is about
+`1.08835e-4` and South about `6.91161e-5` on Ubuntu; opening is
+unchanged by the pressure stage. The same face's high raw velocity
+therefore corresponds to a far smaller **open-weighted throughput** than
+the unweighted m/s reading suggests. Windows Release independently
+reproduces the same stage pattern and near-identical values.
+
+**Interpretation bound:** `projectCutCell` assembles its face flux
+using the current `cutCellUOpen/VOpen` and the moving-volume source
+`cutCellVolumeRate` prepared from existing geometry/Swept history.
+For one unsplit step, the pressure-stage correction must replace an
+almost-zero pre-pressure net (`1.25e-7 m³`) with approximately
+`3.177e-5 m³` post-pressure outward flux to balance that existing
+source. It solves the *discrete* row to about `2.1e-12 m³`, while the
+independent endpoint snapshot and applied Swept geometry disagree by
+`8.11e-8 m³` (about 0.26% of the source magnitude). Thus **the
+measured GCL discrepancy alone is far smaller than the face-volume
+correction required by the model**. At eight smaller steps GCL improves
+substantially but the final nearly closed-face raw speed remains
+`~705 m/s`. This supports a mixed-time source/end-face-area numerical
+conditioning hypothesis, **not** a proof that either endpoint flux or
+an assumed time-interpolated velocity is the true physical flux.
+
+**New bounded ledger:** commit `a0b85df5` records
+`capsule_step96_pressure_step` separately for every actual substep and
+both tracer-seeding controls. For each donor:
+```text
+required_pressure_correction = -(pre_pressure_mac_net + pressure_source)
+applied_pressure_correction = post_pressure_mac_net - pre_pressure_mac_net
+applied - required = post_pressure_mac_net + pressure_source
+GCL_defect = stored_snapshot_delta - solid_swept_divergence
+snapshot_residual = post_pressure_mac_net + stored_snapshot_delta
+```
+It checks the pressure identities **per step** and again summed across
+all splits, explicitly retaining the independent GCL difference.
+This is a *diagnostic* identity of the existing solver; it does not
+claim physical conservation, measure intra-step `u(t)`, silently move
+tracer volume, alter a pressure source, or enable either experimental
+pressure pooling or aperture-aware sampling. The new per-step ledger
+requires successful CI/replay inspection before it is treated as verified.
+
+**Next acceptance gate:** compare the new per-step ledger between
+unseeded and controlled-dye copies, and between Ubuntu and Windows,
+particularly the last closing substep; then repeat for reopening and
+near-open faces, establish a common space-time face-volume flux with
+moving-interface GCL, and close corresponding region and Body/wall
+momentum budgets. Do not use reduced raw velocity alone to merge #326.
