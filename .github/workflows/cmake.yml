@@ -226,6 +226,13 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-capsule-step96-split-flux-audit
 
+      # Capsule remains geometrically inside the wall while its enclosing
+      # radius crosses the swept-history guard. Test wind source ON/OFF;
+      # report pressure-stage peak and continuity budget with default Jacobi.
+      - name: Audit boundary-adjacent Capsule pressure spike (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --wind-boundary-pressure-spike-audit
+
       - name: Audit Cut-cell endpoint volume budgets (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --cut-cell-volume-budget-audit
@@ -508,6 +515,10 @@ jobs:
       - name: Compare step-96 integrated Capsule flux and applied tracer (Windows Release)
         if: runner.os == 'Windows'
         run: .\build\tests\Release\sandboxWindStepBenchmark.exe --small-cell-capsule-step96-split-flux-audit
+
+      - name: Audit boundary-adjacent Capsule pressure spike (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\build\tests\Release\sandboxWindStepBenchmark.exe --wind-boundary-pressure-spike-audit
 
       - name: Audit Cut-cell endpoint volume budgets (Windows Release, informational)
         if: runner.os == 'Windows'
