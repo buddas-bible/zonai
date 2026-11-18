@@ -7734,7 +7734,7 @@ void auditWindBoundaryPressureSpike()
         "max_pressure_residual_m3,compatibility_rate_m3ps,"
         "pressure_span,maximum_open_face_speed_mps,"
         "snapshot_volume_delta_m3,total_pressure_source_m3,"
-        "capsule_force_y_N" );
+        "capsule_force_y_N,legacy_pressure_residual_native" );
     std::puts( "wind_boundary_pressure_summary,source_on,measured_swept_steps,"
         "measured_fallback_steps,swept_to_fallback,fallback_to_swept,"
         "fall_backs_with_physical_clearance,peak_swept_pressure_span,"
