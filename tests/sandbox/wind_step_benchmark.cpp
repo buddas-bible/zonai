@@ -7729,6 +7729,11 @@ void auditWindBoundaryPressureSpike()
         "face_UV,face_x,face_y,face_open,pre_pressure_speed_mps,"
         "post_pressure_speed_mps,first_fraction,second_fraction,"
         "first_pressure_residual_m3,second_pressure_residual_m3" );
+    std::puts( "wind_boundary_factorial,coverage_guard,tight_swept,step,"
+        "used_swept,phantom_closed_active_cells,phantom_source_m3,"
+        "pressure_span,peak_open_face_speed_mps,peak_cell_residual_m3,"
+        "compatibility_rate_m3ps,snapshot_delta_m3,"
+        "pressure_source_delta_m3,force_y_N" );
     std::puts( "wind_boundary_capsule_guard,coverage_guard,step,"
         "used_swept,phantom_active_cells,phantom_source_m3,"
         "max_pressure_residual_m3,compatibility_rate_m3ps,"
@@ -8154,11 +8159,26 @@ void auditWindBoundaryPressureSpike()
             guardedCapsule.transform.position = { 0.0f, y };
             guardedCapsule.center = guardedCapsule.transform.position;
             guardedCapsule.linearVelocity = { 0.0f, ( y - priorY ) / stepDt };
+            const bool checkpoint = frame == 4 || frame == 9 ||
+                frame == 16 || frame == 26;
+            // Both guard settings independently evolve their own default
+            // history. For each guard and checkpoint, the tight path is a
+            // copy of exactly the SAME pre-step Field (including pressure
+            // and volume history). Only its Swept eligibility changes.
+            // Comparing guard=0 to guard=1 is NOT a same-step counterfactual:
+            // the full-coverage setter must be chosen before history starts.
+            std::optional<fluidField2> tightReplay;
+            if( checkpoint )
+            {
+                tightReplay.emplace( guardedField );
+                tightReplay->setPrePressureSnapshotObserver( {} );
+                tightReplay->setTightTranslatingCapsuleSweptBoundsAuditEnabled( true );
+            }
             std::array<fluidObstacleForce2, 1> feedback{};
             guardedField.step( stepDt,
                 std::span<const fluidShapeObstacle2>( &guardedCapsule, 1 ),
                 feedback, 80 );
-            if( frame == 4 || frame == 9 || frame == 16 || frame == 26 )
+            if( checkpoint )
             {
                 int phantom = 0;
                 double phantomSource = 0.0;
@@ -8213,6 +8233,85 @@ void auditWindBoundaryPressureSpike()
                 }};
                 for( double value : metrics ) std::printf( ",%.12g", value );
                 std::putchar( '\n' );
+
+                const auto recordFactorial = [&]( const fluidField2& sample,
+                    const fluidObstacleForce2& force, bool tight )
+                {
+                    const auto volume =
+                        sample.getCutCellVolumeSummary( stepDt );
+                    const auto& pressure = sample.getCutCellPressure();
+                    const auto speed = sample.getFlowAudit( stepDt );
+                    double minimum = 0.0, maximum = 0.0;
+                    int count = 0, phantomCells = 0;
+                    double phantomSource = 0.0;
+                    for( int cy = 0; cy < height; ++cy )
+                        for( int cx = 0; cx < width; ++cx )
+                        {
+                            const float fraction =
+                                sample.getCellFluidFraction( cx, cy );
+                            if( fraction <= 0.0f ) continue;
+                            const double value =
+                                sample.getCellPressureForVisualization( cx, cy );
+                            if( count == 0 ) minimum = maximum = value;
+                            else
+                            {
+                                minimum = std::min( minimum, value );
+                                maximum = std::max( maximum, value );
+                            }
+                            ++count;
+                            if( fraction >= 1.0e-12f ||
+                                sample.getUFaceOpenFraction( cx, cy ) > 0.0f ||
+                                sample.getUFaceOpenFraction( cx + 1, cy ) > 0.0f ||
+                                sample.getVFaceOpenFraction( cx, cy ) > 0.0f ||
+                                sample.getVFaceOpenFraction( cx, cy + 1 ) > 0.0f )
+                                continue;
+                            ++phantomCells;
+                            phantomSource += sample.getCutCellVolumeBudget(
+                                cx, cy, stepDt ).pressureSourceDeltaVolume;
+                        }
+                    if( !volume.valid || count <= 0 ||
+                        !std::isfinite( phantomSource ) ||
+                        !std::isfinite( maximum - minimum ) ||
+                        !std::isfinite( speed.maxFluidFaceSpeed ) ||
+                        !std::isfinite( pressure.compatibilityCorrection ) ||
+                        !std::isfinite( force.force.y ) )
+                        fail( "nonfinite factorial pressure/volume sample" );
+                    if( coverageGuard && phantomCells != 0 )
+                        fail( "certified full-coverage guard left phantom cells" );
+                    std::printf( "wind_boundary_factorial,%d,%d,%d,%d,%d",
+                        coverageGuard ? 1 : 0, tight ? 1 : 0,
+                        frame, sample.getSweptFaceFlux().usedSweptFlux ? 1 : 0,
+                        phantomCells );
+                    const std::array<double, 8> numbers{{
+                        phantomSource, maximum - minimum,
+                        speed.maxFluidFaceSpeed,
+                        volume.maxAbsPressureResidualVolume,
+                        pressure.compatibilityCorrection,
+                        volume.totalSnapshotDeltaVolume,
+                        volume.totalPressureSourceDeltaVolume,
+                        force.force.y
+                    }};
+                    for( double value : numbers ) std::printf( ",%.12g", value );
+                    std::putchar( '\n' );
+                    return std::array<double, 2>{{
+                        volume.totalSnapshotDeltaVolume,
+                        static_cast<double>( count )
+                    }};
+                };
+                const auto defaultGeometry = recordFactorial(
+                    guardedField, feedback[0], false );
+                std::array<fluidObstacleForce2, 1> tightForce{};
+                tightReplay->step( stepDt,
+                    std::span<const fluidShapeObstacle2>(
+                        &guardedCapsule, 1 ), tightForce, 80 );
+                const auto tightGeometry = recordFactorial(
+                    *tightReplay, tightForce[0], true );
+                if( guardedField.getSweptFaceFlux().usedSweptFlux ||
+                    !tightReplay->getSweptFaceFlux().usedSweptFlux ||
+                    std::abs( defaultGeometry[0] - tightGeometry[0] ) >
+                        1.0e-10 ||
+                    defaultGeometry[1] != tightGeometry[1] )
+                    fail( "factorial guard path changed current geometry" );
             }
             priorY = y;
         }
