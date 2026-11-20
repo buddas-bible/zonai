@@ -224,6 +224,40 @@ struct fluidCutCellPressureImpulse2
     [[nodiscard]] vec2 residual() const noexcept { return fluid + solid + wall; }
 };
 
+// Research-only decomposition of the *existing* analytic coupled pressure
+// impulse by pressure unknown (N*s, unit density and unit depth). The fluid
+// term is an algebraic pressure-gradient face contribution, not the observed
+// float-rounded delta velocity on each face. Solid is the exact Schur B face
+// coefficient, wall is the domain-edge traction used by the current ledger.
+// Its total is a diagnostic discrete exchange coefficient, NOT proof of a
+// continuum-accurate surface traction. Gauge is the solver's own pressure.
+struct fluidCutCellPressureCellImpulseAudit2
+{
+    int x = 0;
+    int y = 0;
+    double pressure = 0.0;
+    double fluidX = 0.0;
+    double fluidY = 0.0;
+    double solidX = 0.0;
+    double solidY = 0.0;
+    double wallX = 0.0;
+    double wallY = 0.0;
+    double openWest = 0.0;
+    double openEast = 0.0;
+    double openSouth = 0.0;
+    double openNorth = 0.0;
+    double fraction = 0.0;
+
+    [[nodiscard]] double residualX() const noexcept
+    {
+        return fluidX + solidX + wallX;
+    }
+    [[nodiscard]] double residualY() const noexcept
+    {
+        return fluidY + solidY + wallY;
+    }
+};
+
 // 부분 개방 면의 유량을 사용하는 실험용 압력 투영 결과.
 // divergenceBefore/After는 div(a*u) + ΔfluidFraction/dt의 RMS (1/s).
 // sourceImbalance: 닫힌 도메인에서 압력으로 해소할 수 없는 전체 유량 (m³/s).
