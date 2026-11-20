@@ -624,7 +624,7 @@ void auditSmallCellWorldPressureImpulse()
         vec2 fluidImpulse{}, solidImpulse{}, wallImpulse{};
         int fluidObservations = 0, coupledObservations = 0;
         int analyticObservations = 0, failedObservations = 0;
-        scene.getWindField()->setTracerStageObserver(
+        scene.setWindTracerStageObserverForAudit(
             [&]( const fluidField2& field, fluidTracerStage2 stage )
             {
                 if( stage != fluidTracerStage2::afterSweptRemap ) return;
