@@ -1490,6 +1490,12 @@ void rigidBodyDemo::setWindFluidSubstepCount( int count ) noexcept
     windFluidSubstepCount_ = std::clamp( count, 1, 32 );
 }
 
+void rigidBodyDemo::setWindTracerStageObserverForAudit(
+    fluidField2::tracerStageObserver2 observer )
+{
+    if( windField_ ) windField_->setTracerStageObserver( std::move( observer ) );
+}
+
 void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
 {
     if( kind_ != demoKind::windFlow || !windField_ || !std::isfinite( cellSize ) ) return;
