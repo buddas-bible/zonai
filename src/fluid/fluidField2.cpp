@@ -5719,6 +5719,60 @@ void fluidField2::project( float timeStep, int pressureIterations,
     pressureMomentum_.wall = timeStep * vec2{ static_cast<float>( wallX ), static_cast<float>( wallY ) };
 }
 
+std::optional<std::vector<fluidCutCellPressureCellImpulseAudit2>>
+fluidField2::getCutCellPressureCellImpulseAudit( float timeStep ) const
+{
+    if( !std::isfinite( timeStep ) || timeStep <= 0.0f ||
+        !cutCellPressure_.hasAnalyticImpulseBudget ||
+        !cutCellPressure_.usedCoupledProjection ||
+        cutCellPressure_.coupledSolveFailed ||
+        !cutCellTransition_.usedDisjointAnalyticGeometry ||
+        cutCellPressure_.mergedPressureCells != 0 )
+        return std::nullopt;
+
+    const double scale = static_cast<double>( timeStep ) * cellSize_;
+    std::vector<fluidCutCellPressureCellImpulseAudit2> cells;
+    cells.reserve( pressure_.size() );
+    for( int y = 0; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const int cell = cellIndex( x, y );
+            fluidCutCellPressureCellImpulseAudit2 row{};
+            row.x = x;
+            row.y = y;
+            row.fraction = cellFluidFraction_[cell];
+            row.pressure = pressure_[cell];
+            if( row.fraction > 0.0 )
+            {
+                row.openWest = cutCellUOpen( x, y );
+                row.openEast = cutCellUOpen( x + 1, y );
+                row.openSouth = cutCellVOpen( x, y );
+                row.openNorth = cutCellVOpen( x, y + 1 );
+                row.fluidX = row.pressure * scale * ( row.openEast - row.openWest );
+                row.fluidY = row.pressure * scale * ( row.openNorth - row.openSouth );
+                // Mirror the analytic pressure exchange ledger, which
+                // includes the full exterior wall pressure at edge cells.
+                row.wallX = row.pressure * scale *
+                    ( ( x == width_ - 1 ? 1 : 0 ) - ( x == 0 ? 1 : 0 ) );
+                row.wallY = row.pressure * scale *
+                    ( ( y == height_ - 1 ? 1 : 0 ) - ( y == 0 ? 1 : 0 ) );
+            }
+            cells.push_back( row );
+        }
+    // The same assembled B coefficients used for the converged Schur
+    // operator and feedback, not a second geometric clipping algorithm.
+    for( const coupledPressureFace& face : coupledPressureScratch_.faces )
+    {
+        if( face.cell < 0 ||
+            static_cast<std::size_t>( face.cell ) >= cells.size() )
+            return std::nullopt;
+        auto& row = cells[face.cell];
+        row.solidX += static_cast<double>( timeStep ) * row.pressure * face.fx;
+        row.solidY += static_cast<double>( timeStep ) * row.pressure * face.fy;
+    }
+    return cells;
+}
+
 fluidCutCellVolumeBudget2 fluidField2::getCutCellVolumeBudget(
     int x, int y, float timeStep ) const noexcept
 {
