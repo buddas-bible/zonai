@@ -574,6 +574,160 @@ void auditSmallCellPressureCadences()
 }
 
 // Unlike a frozen one-substep replay this runs TWO independent, initially
+// S2c bounded real-World pressure exchange forensic. The actual Wind sandbox
+// couples Cut-cell Schur PCG to three dynamic World bodies, at World8 with
+// Fluid1/2/4/8. Tracer-stage callback runs AFTER pressure; read the existing
+// analytic pressure impulse ledger once per Fluid step, before the next World
+// step changes the body velocity. No new pressure or force integration path.
+// All cadences start from separately constructed, identical initial scenes.
+void auditSmallCellWorldPressureImpulse()
+{
+    constexpr int frames = 8;
+    std::puts( "world_pressure_exchange,fluid_splits,frame,observed_fluid_steps,"
+        "coupled_steps,analytic_impulse_steps,failed_steps,"
+        "pressure_fluid_jx_ns,pressure_fluid_jy_ns,"
+        "pressure_solid_jx_ns,pressure_solid_jy_ns,"
+        "pressure_wall_jx_ns,pressure_wall_jy_ns,"
+        "pressure_exchange_residual_x_ns,pressure_exchange_residual_y_ns,"
+        "world_applied_pressure_jx_ns,world_applied_pressure_jy_ns,"
+        "world_applied_pressure_torque_ns_m,"
+        "world_body_linear_delta_x_ns,world_body_linear_delta_y_ns,"
+        "world_body_spin_delta_ns_m,"
+        "world_linear_minus_pressure_x_ns,world_linear_minus_pressure_y_ns,"
+        "world_spin_minus_pressure_torque_ns_m,"
+        "last_pressure_status,last_face_speed_mps,tracer_mass_kg" );
+
+    int totalAnalytic = 0;
+    for( const int fluidSplits : { 1, 2, 4, 8 } )
+    {
+        rigidBodyDemo scene{ demoKind::windFlow };
+        scene.configureWindField( 48, 28, 0.25f );
+        scene.setWindCutCellProjectionEnabled( true );
+        scene.setWindCutCellCoupledProjectionEnabled( true );
+        scene.setWindDisjointAnalyticEnabled( true );
+        scene.setWindSynchronizedCouplingEnabled( true );
+        scene.setWindObstacleCouplingEnabled( true );
+        scene.setWindFluidSubstepCount( fluidSplits );
+        scene.setWindCouplingAuditEnabled( true );
+        scene.setWindSourceStrength( 8.0f );
+        scene.setWindDragCoefficient( 0.0f );
+        scene.setWindSmallCellPressureMergeFraction( 0.0f );
+        scene.seedWindTracer(); // Enables read-only after-pressure stage callbacks.
+        const auto shapes = scene.getShapes();
+        if( shapes.size() < 3 || !scene.getWindField() ||
+            scene.getWindField()->getSmallCellPressureMergeFraction() != 0.0f )
+            throw std::runtime_error( "invalid matched World impulse setup" );
+        scene.getWorld().SetBodyLinearVelocity(
+            shapes[0].bodyHandle, { 0.7f, -0.10f } );
+        scene.getWorld().SetBodyAngularVelocity( shapes[1].bodyHandle, 0.5f );
+
+        vec2 fluidImpulse{}, solidImpulse{}, wallImpulse{};
+        int fluidObservations = 0, coupledObservations = 0;
+        int analyticObservations = 0, failedObservations = 0;
+        scene.getWindField()->setTracerStageObserver(
+            [&]( const fluidField2& field, fluidTracerStage2 stage )
+            {
+                if( stage != fluidTracerStage2::afterSweptRemap ) return;
+                ++fluidObservations;
+                const fluidCutCellPressure2& pressure = field.getCutCellPressure();
+                if( pressure.usedCoupledProjection ) ++coupledObservations;
+                if( pressure.coupledSolveFailed ) ++failedObservations;
+                if( !pressure.hasAnalyticImpulseBudget ) return;
+                ++analyticObservations;
+                fluidImpulse += pressure.impulse.fluid;
+                solidImpulse += pressure.impulse.solid;
+                wallImpulse += pressure.impulse.wall;
+            } );
+
+        for( int frame = 0; frame < frames; ++frame )
+        {
+            fluidImpulse = solidImpulse = wallImpulse = {};
+            fluidObservations = coupledObservations = 0;
+            analyticObservations = failedObservations = 0;
+            std::array<vec2, 3> velocitiesBefore{};
+            std::array<float, 3> angularBefore{}, masses{}, inertias{};
+            for( std::size_t i = 0; i < 3; ++i )
+            {
+                const bodyId body = shapes[i].bodyHandle;
+                masses[i] = scene.getWorld().GetBodyMass( body );
+                inertias[i] = scene.getWorld().GetBodyRotationalInertia( body );
+                velocitiesBefore[i] = scene.getWorld().GetBodyLinearVelocity( body );
+                angularBefore[i] = scene.getWorld().GetBodyAngularVelocity( body );
+                if( !( masses[i] > 0.0f && inertias[i] > 0.0f ) )
+                    throw std::runtime_error( "invalid World pressure body mass" );
+            }
+
+            scene.step( dt, worldSubsteps );
+            if( scene.getWindCouplingSteps() != fluidSplits ||
+                fluidObservations != fluidSplits || failedObservations > 0 )
+                throw std::runtime_error( "real World/Fluid pressure cadence drift" );
+            totalAnalytic += analyticObservations;
+
+            vec2 worldLinearDelta{}, appliedPressure{};
+            double worldSpinDelta = 0.0, appliedTorque = 0.0;
+            const auto pressureForces = scene.getWindPressureForces();
+            if( pressureForces.size() < 3 )
+                throw std::runtime_error( "missing applied World pressure forces" );
+            for( std::size_t i = 0; i < 3; ++i )
+            {
+                const bodyId body = shapes[i].bodyHandle;
+                worldLinearDelta += masses[i] * (
+                    scene.getWorld().GetBodyLinearVelocity( body ) -
+                    velocitiesBefore[i] );
+                worldSpinDelta += static_cast<double>( inertias[i] ) *
+                    ( scene.getWorld().GetBodyAngularVelocity( body ) -
+                        angularBefore[i] );
+                appliedPressure += dt * pressureForces[i].force;
+                appliedTorque += dt * pressureForces[i].torque;
+            }
+
+            const vec2 exchangeResidual =
+                fluidImpulse + solidImpulse + wallImpulse;
+            const vec2 worldMinusPressure =
+                worldLinearDelta - appliedPressure;
+            const double spinMinusPressure =
+                worldSpinDelta - appliedTorque;
+            const fluidField2& field = *scene.getWindField();
+            const auto& status = field.getCutCellPressure();
+            const double faceSpeed = field.getFlowAudit( dt / fluidSplits )
+                .maxFluidFaceSpeed;
+            const std::array<double, 19> values{{
+                fluidImpulse.x, fluidImpulse.y,
+                solidImpulse.x, solidImpulse.y,
+                wallImpulse.x, wallImpulse.y,
+                exchangeResidual.x, exchangeResidual.y,
+                appliedPressure.x, appliedPressure.y, appliedTorque,
+                worldLinearDelta.x, worldLinearDelta.y, worldSpinDelta,
+                worldMinusPressure.x, worldMinusPressure.y,
+                spinMinusPressure, faceSpeed, field.getTracerMass()
+            }};
+            for( const double value : values )
+                if( !std::isfinite( value ) )
+                    throw std::runtime_error( "nonfinite real World pressure impulse" );
+
+            // Only claim solver-to-World *applied-force bookkeeping* when
+            // the existing analytic ledger covered EVERY Fluid substep.
+            // The World delta may also include contacts, gravity, damping or
+            // solver limits and therefore is a separate observed quantity.
+            if( analyticObservations == fluidSplits )
+            {
+                const double absTol = 1.0e-4 * std::max(
+                    1.0, static_cast<double>( Length( appliedPressure ) ) );
+                if( Length( solidImpulse - appliedPressure ) > absTol )
+                    throw std::runtime_error(
+                        "Cut-cell PCG solid impulse differs from applied World pressure" );
+            }
+            std::printf( "world_pressure_exchange,%d,%d,%d,%d,%d,%d",
+                fluidSplits, frame, fluidObservations, coupledObservations,
+                analyticObservations, failedObservations );
+            for( const double value : values ) std::printf( ",%.12g", value );
+            std::printf( ",%d\n", static_cast<int>( status.coupledStatus ) );
+        }
+    }
+    if( totalAnalytic == 0 )
+        throw std::runtime_error( "World coupled analytic pressure impulse was never sampled" );
+}
+
 // identical, real World/Fluid timelines with force/torque feedback, collisions,
 // advection and moving solid geometry. Once the first pressure merge occurs,
 // later geometry/forces necessarily diverge; the numbers are no longer
@@ -8737,6 +8891,7 @@ int main( int argc, char** argv )
     bool smallCellThresholdSweep = false;
     bool smallCellCadenceAudit = false;
     bool smallCellWorldFeedbackAudit = false;
+    bool smallCellWorldImpulseAudit = false;
     bool smallCellLocalTracerAudit = false;
     bool smallCellTransferLedgerAudit = false;
     bool smallCellConnectedResidualAudit = false;
@@ -8778,6 +8933,7 @@ int main( int argc, char** argv )
         smallCellThresholdSweep |= std::string_view( argv[i] ) == "--small-cell-merge-threshold-audit";
         smallCellCadenceAudit |= std::string_view( argv[i] ) == "--small-cell-merge-cadence-audit";
         smallCellWorldFeedbackAudit |= std::string_view( argv[i] ) == "--small-cell-world-feedback-audit";
+        smallCellWorldImpulseAudit |= std::string_view( argv[i] ) == "--small-cell-world-impulse-audit";
         smallCellLocalTracerAudit |= std::string_view( argv[i] ) == "--small-cell-local-tracer-audit";
         smallCellTransferLedgerAudit |= std::string_view( argv[i] ) == "--small-cell-applied-transfer-audit";
         smallCellConnectedResidualAudit |= std::string_view( argv[i] ) == "--small-cell-connected-residual-audit";
@@ -8814,6 +8970,7 @@ int main( int argc, char** argv )
     if( smallCellThresholdSweep ) { auditFrozenPressure( true, true ); return 0; }
     if( smallCellCadenceAudit ) { auditSmallCellPressureCadences(); return 0; }
     if( smallCellWorldFeedbackAudit ) { auditSmallCellWorldFeedback(); return 0; }
+    if( smallCellWorldImpulseAudit ) { auditSmallCellWorldPressureImpulse(); return 0; }
     if( smallCellLocalTracerAudit ) { auditSmallCellLocalTracer(); return 0; }
     if( smallCellTransferLedgerAudit ) { auditSmallCellAppliedTransfers(); return 0; }
     if( smallCellConnectedResidualAudit ) { auditSmallCellAppliedTransfers( true ); return 0; }
