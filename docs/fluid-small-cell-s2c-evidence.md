@@ -3015,3 +3015,34 @@ The E/N endpoint apertures are closed. The **internal** south-face quadrature di
 For the same tight-Swept donor, the endpoint open-volume balance nearly cancels the moving-pressure source, but the two **hypothetical** time-dependent velocity models exceed endpoint volume by a large margin. This identifies a **sensitive endpoint-vs-time-aperture interpretation**, not a measured physical fluid-flow error: neither assumed velocity history is the actual intra-step `u(t)`. In the guard-ON history the prescribed Capsule reports `force.y ≈ 38.444 N`, whereas guard-OFF reports `≈ 42.807 N`; those reactions reflect different evolved histories and cannot prove causal Body momentum coupling. There is still no seeded tracer or wall/Body impulse closure in this local test.
 
 **Next bounded gate:** capture a physically meaningful *time-resolved* face velocity history and applied fluid/tracer plus moving-boundary flux on the same pre-step state, or explicitly bound the uncertainty from endpoint-only MAC data, then compare the stage-integrated donor/region balance with the pressure source and GCL before altering the production pressure operator.
+
+
+### Frame-9 near-wall Capsule: matched-entry time-substep replay — 2026-11-20
+
+**Verification:** [`6e2b42d`](https://github.com/buddas-bible/zonai/commit/6e2b42d11324dc4a5840fd6d0d282895b282ee68) extends the existing `--wind-boundary-pressure-spike-audit` with **1/2/4/8 actual Fluid steps**, each independently launched from the same deep-copied pre-frame-9 Field and following the same linear prescribed Capsule pose path. [GitHub Actions #44747540978](https://github.com/buddas-bible/zonai/actions/runs/44747540978) finished **SUCCESS on both Ubuntu Debug and Windows Release**, including the new boundary-pressure audit. This is a **test-only counterfactual on a prescribed kinematic obstacle**, not a new production integrator, dynamic Body feedback validation, or a measurement of the original unsplit step's continuous `u(t)`.
+
+For each full-coverage guard history (ON/OFF were evolved independently), the four split counts share an identical pre-step Field and identical passive tracer seed `1 kg/m³` in donor cell **(26,4)**. Each substep records the actual pre-pressure and post-pressure MAC face speeds, endpoint MAC flux, existing Swept time-mean aperture multiplied by the *substep's* final velocity (piecewise-constant proxy), start→end linearly interpolated velocity proxy, pressure source, geometry/swept GCL, pressure volume residual, applied tracer transfers and prescribed Capsule pressure force/torque. Force is integrated as `Σ F_sub dt_sub`; it **cannot** establish equal-and-opposite dynamic Body momentum transfer. The split-1 seeded replay is checked against the unseeded original solver output to ensure passive tracer does not alter fluid pressure or force.
+
+#### Same-entry comparison, full-coverage guard ON (Windows Release)
+
+All volumes below are *cumulative outward signed* donor volumes over the same total frame interval, in m³; the last three measured/proxy columns must **not** be treated as the same physical quantity.
+
+| Fluid splits | Applied pressure source (m³) | Summed post-pressure endpoint MAC (m³) | Piecewise post-speed × time-mean aperture proxy (m³) | Piecewise linear-MAC proxy (m³) | Sum pressure residual (m³) | Snapshot minus Swept GCL (m³) | Prescribed force-y impulse (N·s) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | -9.24216118e-4 | 9.23571139e-4 | 1.30568389e-2 | 6.01478902e-3 | -6.44978e-7 | -2.12229206e-5 | 0.640733 |
+| 2 | -9.24216118e-4 | 9.20892002e-4 | 2.58084908e-3 | 2.14991819e-3 | -3.32412e-6 | -2.12228915e-5 | 0.786579 |
+| 4 | -9.39764897e-4 | 9.36576335e-4 | 1.32852582e-3 | 1.39925464e-3 | -3.18856e-6 | -5.67411189e-6 | 0.930322 |
+| 8 | -9.43987805e-4 | 9.41577575e-4 | 1.07877196e-3 | 1.16447053e-3 | -2.41023e-6 | -1.45121885e-6 | 1.036430 |
+
+The guard-OFF history exhibits the same qualitative behavior: final endpoint MAC roughly 9.24e-4→9.41e-4 m³, piecewise constant proxy 1.30538e-2→1.07870e-3 m³, and force-y impulse 0.713455→1.167329 N·s. Ubuntu Debug agrees with Windows Release on geometry and mass and has small platform-level floating-point differences in residual/force values.
+
+**Observations and limits:**
+1. **The large proxy/endpoint discrepancy is strongly time-resolution dependent.** Guard ON, the fixed-post-velocity × time-mean-aperture proxy decreases about **12.1×** between one and eight substeps. The linear proxy decreases about **5.2×**. Neither is an actual intra-substep velocity integral; the pressure-advection trajectory itself changes when substeps are added.
+2. **The donor geometric GCL discrepancy decreases under refinement:** its absolute cumulative snapshot-minus-Swept mismatch falls from **2.12e-5 to 1.45e-6 m³** (~14.6×). The donor's snapshot delta itself telescopes to **-9.45439038e-4 m³** at every split count, establishing identical final geometry.
+3. **The donor pressure volume residual does not improve monotonically:** it is about **-6.45e-7, -3.32e-6, -3.19e-6, -2.41e-6 m³** for 1/2/4/8. More substeps do not automatically fix the pressure equation or establish time-consistent continuity.
+4. **Integrated prescribed obstacle reaction changes materially:** guard ON `F_y dt` grows from about **0.641 to 1.036 N·s** across the same interval. This is *not* a conserved dynamic two-way momentum ledger and is a warning against calling the time-resolution experiment a validated force fix.
+5. The seeded donor starts with **0.000946723856 kg**, is essentially evacuated in each replay, and the global tracer mass remains **0.000946723856 kg**. The emitted donor transfer ledger matches its mass change, while cumulative applied MAC transfer totals may exceed the initial donor mass due to repeated onward transfers; that **does not indicate tracer mass creation**. Swept/fallback/connected transfer categories were zero in this controlled run.
+
+The regression rejects nonfinite pre/post pressure states, invalid Swept history, endpoint MAC face-budget differences, total tracer mass/real applied donor-transfer mismatches, mismatched final geometry, and any split-1 tracer-induced pressure/force drift. It leaves the normal Cut-cell physics untouched; the old conservative Swept radius guard and the experimental full-coverage/tight eligibility settings remain default OFF.
+
+**Next S2c gate:** before selecting a space-time pressure operator, capture the **per-substep pressure impulse, wall/Body pressure force budget and same-state coupled World** using the measured 1/2/4/8 cadence response; then include applied tracer and independent geometry-source accounting across open/closed/reopening topologies. A 1→8 cadence sweep is not a true continuum or pressure-convergence proof. No pressure/velocity cap or unconditional solver merge is supported by these data.
