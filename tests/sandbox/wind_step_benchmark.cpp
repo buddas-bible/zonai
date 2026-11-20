@@ -574,6 +574,155 @@ void auditSmallCellPressureCadences()
 }
 
 // Unlike a frozen one-substep replay this runs TWO independent, initially
+// Read-only per-pressure-unknown accounting of the startup Schur exchange.
+// Geometry/World inputs are identical to the prior first-history experiment.
+// None, horizontal, vertical and combined Wind sources separate the forcing
+// component that excites the observed Y pressure-exchange defect.
+void auditFirstCutCellPressureCoefficients()
+{
+    std::puts( "world_pressure_coeff_summary,forcing_mode,source_u_mps,"
+        "source_v_mps,active_cells,used_coupled,pcg_failed,"
+        "ledger_residual_x_ns,ledger_residual_y_ns,"
+        "cell_residual_x_ns,cell_residual_y_ns,"
+        "cell_fluid_x_ns,cell_fluid_y_ns,"
+        "cell_solid_x_ns,cell_solid_y_ns,"
+        "cell_wall_x_ns,cell_wall_y_ns,"
+        "largest_abs_cell_residual_y_ns,top8_abs_cell_residual_y_ns,"
+        "pressure_compatibility_m3ps" );
+    std::puts( "world_pressure_coeff_cell,forcing_mode,rank,x,y,"
+        "fraction,pressure,open_w,open_e,open_s,open_n,"
+        "fluid_x_ns,fluid_y_ns,solid_x_ns,solid_y_ns,"
+        "wall_x_ns,wall_y_ns,total_x_ns,total_y_ns" );
+
+    for( const int forcing : { 0, 1, 2, 3 } )
+    {
+        rigidBodyDemo scene{ demoKind::windFlow };
+        scene.configureWindField( 48, 28, 0.25f );
+        scene.setWindCutCellProjectionEnabled( true );
+        scene.setWindCutCellCoupledProjectionEnabled( true );
+        scene.setWindDisjointAnalyticEnabled( true );
+        scene.setWindSynchronizedCouplingEnabled( true );
+        scene.setWindObstacleCouplingEnabled( true );
+        scene.setWindDragCoefficient( 0.0f );
+        scene.setWindSmallCellPressureMergeFraction( 0.0f );
+        const auto shapes = scene.getShapes();
+        if( shapes.size() < 3 || !scene.getWindField() )
+            throw std::runtime_error( "missing World for pressure coefficient audit" );
+        scene.getWorld().SetBodyLinearVelocity(
+            shapes[0].bodyHandle, { 0.7f, -0.10f } );
+        scene.getWorld().SetBodyAngularVelocity( shapes[1].bodyHandle, 0.5f );
+
+        std::array<fluidShapeObstacle2, 3> obstacles{};
+        for( int i = 0; i < 3; ++i )
+        {
+            const bodyId body = shapes[i].bodyHandle;
+            const transform2 transform = scene.getWorld().GetBodyTransform( body );
+            const float mass = scene.getWorld().GetBodyMass( body );
+            const float inertia = scene.getWorld().GetBodyRotationalInertia( body );
+            if( !( mass > 0.0f && inertia > 0.0f ) )
+                throw std::runtime_error( "invalid pressure coefficient Body mass" );
+            obstacles[i] = {
+                scene.getWorld().GetShape( shapes[i].shapeHandle ).geometry,
+                transform,
+                TransformPoint( transform, scene.getWorld().GetBodyLocalCenter( body ) ),
+                scene.getWorld().GetBodyLinearVelocity( body ),
+                scene.getWorld().GetBodyAngularVelocity( body ),
+                1.0f / mass, 1.0f / inertia
+            };
+        }
+        fluidField2 field = *scene.getWindField();
+        const float h = field.getCellSize();
+        const float sourceX = field.getOrigin().x +
+            std::min( 2.5f, 0.25f * field.getWidth() * h );
+        const float sourceU = ( forcing & 1 ) ? 8.0f * dt : 0.0f;
+        const float sourceV = ( forcing & 2 )
+            ? 4.0f * dt * std::sin( 1.7f * dt ) : 0.0f;
+        if( forcing != 0 )
+            field.addVelocity( { sourceX, 0.0f }, { sourceU, sourceV }, 1.7f );
+        std::array<fluidObstacleForce2, 3> forces{};
+        field.step( dt, obstacles, forces, 200 );
+        const auto& projection = field.getCutCellPressure();
+        auto opt = field.getCutCellPressureCellImpulseAudit( dt );
+        if( !opt || !projection.usedCoupledProjection ||
+            !projection.hasAnalyticImpulseBudget ||
+            projection.coupledSolveFailed ||
+            projection.mergedPressureCells != 0 )
+            throw std::runtime_error( "invalid cell pressure exchange audit" );
+        auto& cells = *opt;
+        const auto& ledger = projection.impulse;
+        double fluidX = 0.0, fluidY = 0.0;
+        double solidX = 0.0, solidY = 0.0;
+        double wallX = 0.0, wallY = 0.0;
+        int active = 0;
+        for( const auto& cell : cells )
+        {
+            if( cell.fraction > 0.0 ) ++active;
+            fluidX += cell.fluidX;
+            fluidY += cell.fluidY;
+            solidX += cell.solidX;
+            solidY += cell.solidY;
+            wallX += cell.wallX;
+            wallY += cell.wallY;
+        }
+        const double sumX = fluidX + solidX + wallX;
+        const double sumY = fluidY + solidY + wallY;
+        const double tolerance = 1.0e-5 * std::max( 1.0,
+            std::max( static_cast<double>( Length( ledger.fluid ) ),
+                static_cast<double>( Length( ledger.wall ) ) ) );
+        if( std::abs( fluidX - ledger.fluid.x ) > tolerance ||
+            std::abs( fluidY - ledger.fluid.y ) > tolerance ||
+            std::abs( solidX - ledger.solid.x ) > tolerance ||
+            std::abs( solidY - ledger.solid.y ) > tolerance ||
+            std::abs( wallX - ledger.wall.x ) > tolerance ||
+            std::abs( wallY - ledger.wall.y ) > tolerance ||
+            std::abs( sumX - ledger.residual().x ) > tolerance ||
+            std::abs( sumY - ledger.residual().y ) > tolerance )
+            throw std::runtime_error(
+                "pressure-cell coefficient totals do not reconstruct live PCG" );
+
+        std::sort( cells.begin(), cells.end(), []( const auto& a, const auto& b )
+        {
+            const double aa = std::abs( a.residualY() );
+            const double bb = std::abs( b.residualY() );
+            if( aa != bb ) return aa > bb;
+            return a.y != b.y ? a.y < b.y : a.x < b.x;
+        } );
+        const double largest = cells.empty() ? 0.0 :
+            std::abs( cells.front().residualY() );
+        double top8 = 0.0;
+        for( std::size_t i = 0; i < std::min<std::size_t>( 8, cells.size() ); ++i )
+            top8 += std::abs( cells[i].residualY() );
+        const std::array<double, 14> numbers{{
+            static_cast<double>( ledger.residual().x ),
+            static_cast<double>( ledger.residual().y ),
+            sumX, sumY, fluidX, fluidY, solidX, solidY,
+            wallX, wallY, largest, top8,
+            static_cast<double>( projection.compatibilityCorrection ),
+            static_cast<double>( field.getFlowAudit( dt ).maxFluidFaceSpeed )
+        }};
+        for( double v : numbers )
+            if( !std::isfinite( v ) )
+                throw std::runtime_error( "nonfinite pressure coefficient result" );
+        std::printf( "world_pressure_coeff_summary,%d,%.12g,%.12g,%d,%d,%d",
+            forcing, static_cast<double>( sourceU ), static_cast<double>( sourceV ),
+            active, projection.usedCoupledProjection ? 1 : 0,
+            projection.coupledSolveFailed ? 1 : 0 );
+        for( int i = 0; i < 13; ++i ) std::printf( ",%.12g", numbers[i] );
+        std::putchar( '\n' );
+        for( std::size_t rank = 0; rank < std::min<std::size_t>( 12, cells.size() ); ++rank )
+        {
+            const auto& c = cells[rank];
+            std::printf( "world_pressure_coeff_cell,%d,%zu,%d,%d,"
+                "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                forcing, rank + 1, c.x, c.y, c.fraction, c.pressure,
+                c.openWest, c.openEast, c.openSouth, c.openNorth,
+                c.fluidX, c.fluidY, c.solidX, c.solidY,
+                c.wallX, c.wallY, c.residualX(), c.residualY() );
+        }
+    }
+}
+
 // S2c startup controlled comparison: the same first Fluid input and actual
 // World obstacle snapshot, with or without an explicitly primed (stationary)
 // geometry-only history. No World step, no alteration of normal Fluid Step.
@@ -9105,6 +9254,7 @@ int main( int argc, char** argv )
     bool smallCellWorldFeedbackAudit = false;
     bool smallCellWorldImpulseAudit = false;
     bool firstCutCellHistoryAudit = false;
+    bool firstPressureCoefficientAudit = false;
     bool smallCellLocalTracerAudit = false;
     bool smallCellTransferLedgerAudit = false;
     bool smallCellConnectedResidualAudit = false;
@@ -9148,6 +9298,7 @@ int main( int argc, char** argv )
         smallCellWorldFeedbackAudit |= std::string_view( argv[i] ) == "--small-cell-world-feedback-audit";
         smallCellWorldImpulseAudit |= std::string_view( argv[i] ) == "--small-cell-world-impulse-audit";
         firstCutCellHistoryAudit |= std::string_view( argv[i] ) == "--small-cell-first-history-audit";
+        firstPressureCoefficientAudit |= std::string_view( argv[i] ) == "--small-cell-pressure-coefficient-audit";
         smallCellLocalTracerAudit |= std::string_view( argv[i] ) == "--small-cell-local-tracer-audit";
         smallCellTransferLedgerAudit |= std::string_view( argv[i] ) == "--small-cell-applied-transfer-audit";
         smallCellConnectedResidualAudit |= std::string_view( argv[i] ) == "--small-cell-connected-residual-audit";
@@ -9186,6 +9337,7 @@ int main( int argc, char** argv )
     if( smallCellWorldFeedbackAudit ) { auditSmallCellWorldFeedback(); return 0; }
     if( smallCellWorldImpulseAudit ) { auditSmallCellWorldPressureImpulse(); return 0; }
     if( firstCutCellHistoryAudit ) { auditFirstCutCellHistoryImpulse(); return 0; }
+    if( firstPressureCoefficientAudit ) { auditFirstCutCellPressureCoefficients(); return 0; }
     if( smallCellLocalTracerAudit ) { auditSmallCellLocalTracer(); return 0; }
     if( smallCellTransferLedgerAudit ) { auditSmallCellAppliedTransfers(); return 0; }
     if( smallCellConnectedResidualAudit ) { auditSmallCellAppliedTransfers( true ); return 0; }
