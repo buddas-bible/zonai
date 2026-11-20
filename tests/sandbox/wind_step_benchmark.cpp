@@ -595,7 +595,7 @@ void auditSmallCellWorldPressureImpulse()
         "world_body_spin_delta_ns_m,"
         "world_linear_minus_pressure_x_ns,world_linear_minus_pressure_y_ns,"
         "world_spin_minus_pressure_torque_ns_m,"
-        "last_pressure_status,last_face_speed_mps,tracer_mass_kg" );
+        "last_face_speed_mps,tracer_mass_kg,last_pressure_status" );
 
     int totalAnalytic = 0;
     for( const int fluidSplits : { 1, 2, 4, 8 } )
