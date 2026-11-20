@@ -99,6 +99,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-first-history-audit
 
+      # S2c: per-pressure-cell MAC/Schur/wall coefficients, horizontal and
+      # vertical Wind forcing separated; zero solver mutations.
+      - name: Rank first-step Cut-cell pressure exchange coefficients (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-pressure-coefficient-audit
+
       - name: Probe local tracer near disappearing Cut-cell (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-local-tracer-audit
@@ -428,6 +434,10 @@ jobs:
       - name: Audit first Cut-cell geometry history and pressure impulse (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-first-history-audit
+
+      - name: Rank first-step Cut-cell pressure exchange coefficients (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-pressure-coefficient-audit
 
       - name: Probe local tracer near disappearing Cut-cell (Windows Release, informational)
         if: runner.os == 'Windows'
