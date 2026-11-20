@@ -1079,6 +1079,15 @@ public:
     // unsupported geometry는 비점유로 처리. feedback은 obstacle 순서와 1:1 대응.
     void step( float timeStep, std::span<const fluidShapeObstacle2> obstacles,
         std::span<fluidObstacleForce2> feedback, int pressureIterations = 80 );
+
+    // S2c diagnostic ONLY: initialize the previous Cut-cell solid geometry
+    // at the supplied pose without advancing advection, pressure, tracer or
+    // world time. Permitted only on a fresh Field without obstacle history.
+    // The NEXT normal Step must supply the same obstacle list/order; this is
+    // a same-entry history counterfactual, not a production initialization.
+    // Returns false without modifying the Field when preconditions fail.
+    [[nodiscard]] bool primeCutCellHistoryForAudit(
+        std::span<const fluidShapeObstacle2> obstacles );
 #pragma endregion Simulation
 
 #pragma region Queries
