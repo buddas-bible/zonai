@@ -574,6 +574,209 @@ void auditSmallCellPressureCadences()
 }
 
 // Unlike a frozen one-substep replay this runs TWO independent, initially
+// S2c startup controlled comparison: the same first Fluid input and actual
+// World obstacle snapshot, with or without an explicitly primed (stationary)
+// geometry-only history. No World step, no alteration of normal Fluid Step.
+void auditFirstCutCellHistoryImpulse()
+{
+    std::puts( "world_pressure_first_history,source_on,history_primed,"
+        "has_volume_history,used_swept,used_coupled,pcg_failed,"
+        "fluid_jx_ns,fluid_jy_ns,solid_jx_ns,solid_jy_ns,"
+        "wall_jx_ns,wall_jy_ns,residual_jx_ns,residual_jy_ns,"
+        "independent_fluid_jx_ns,independent_fluid_jy_ns,"
+        "independent_wall_jx_ns,independent_wall_jy_ns,"
+        "solid_feedback_jx_ns,solid_feedback_jy_ns,"
+        "solid_feedback_torque_ns_m,changed_cells,"
+        "pressure_source_m3,compatibility_m3ps,peak_face_speed_mps" );
+
+    for( const bool sourceOn : { false, true } )
+    {
+        rigidBodyDemo scene{ demoKind::windFlow };
+        scene.configureWindField( 48, 28, 0.25f );
+        scene.setWindCutCellProjectionEnabled( true );
+        scene.setWindCutCellCoupledProjectionEnabled( true );
+        scene.setWindDisjointAnalyticEnabled( true );
+        scene.setWindSynchronizedCouplingEnabled( true );
+        scene.setWindObstacleCouplingEnabled( true );
+        scene.setWindDragCoefficient( 0.0f );
+        scene.setWindSmallCellPressureMergeFraction( 0.0f );
+        const auto shapes = scene.getShapes();
+        if( shapes.size() < 3 || !scene.getWindField() )
+            throw std::runtime_error( "first-history missing World obstacles" );
+        scene.getWorld().SetBodyLinearVelocity( shapes[0].bodyHandle,
+            { 0.7f, -0.10f } );
+        scene.getWorld().SetBodyAngularVelocity( shapes[1].bodyHandle, 0.5f );
+
+        std::array<fluidShapeObstacle2, 3> obstacles{};
+        for( int i = 0; i < 3; ++i )
+        {
+            const bodyId body = shapes[i].bodyHandle;
+            const transform2 transform = scene.getWorld().GetBodyTransform( body );
+            const float mass = scene.getWorld().GetBodyMass( body );
+            const float inertia = scene.getWorld().GetBodyRotationalInertia( body );
+            if( !( mass > 0.0f && inertia > 0.0f ) )
+                throw std::runtime_error( "first-history invalid Body mass" );
+            obstacles[i] = {
+                scene.getWorld().GetShape( shapes[i].shapeHandle ).geometry,
+                transform,
+                TransformPoint( transform, scene.getWorld().GetBodyLocalCenter( body ) ),
+                scene.getWorld().GetBodyLinearVelocity( body ),
+                scene.getWorld().GetBodyAngularVelocity( body ),
+                1.0f / mass, 1.0f / inertia
+            };
+        }
+
+        fluidField2 entry = *scene.getWindField();
+        if( sourceOn )
+        {
+            const float h = entry.getCellSize();
+            const float width = entry.getWidth() * h;
+            const float x = entry.getOrigin().x +
+                std::min( 2.5f, 0.25f * width );
+            entry.addVelocity( { x, 0.0f },
+                { 8.0f * dt, 4.0f * dt * std::sin( 1.7f * dt ) }, 1.7f );
+        }
+
+        const auto openMomentum = []( const fluidField2& field )
+        {
+            const double h = field.getCellSize();
+            const double area = h * h;
+            vec2 momentum{};
+            for( int y = 0; y < field.getHeight(); ++y )
+                for( int x = 1; x < field.getWidth(); ++x )
+                {
+                    if( field.getCellFluidFraction( x - 1, y ) <= 0.0f ||
+                        field.getCellFluidFraction( x, y ) <= 0.0f ) continue;
+                    const auto velocity = field.getUFaceVelocityForAudit( x, y );
+                    if( !velocity ) throw std::runtime_error( "missing U face" );
+                    momentum.x += static_cast<float>(
+                        area * field.getUFaceOpenFraction( x, y ) * *velocity );
+                }
+            for( int y = 1; y < field.getHeight(); ++y )
+                for( int x = 0; x < field.getWidth(); ++x )
+                {
+                    if( field.getCellFluidFraction( x, y - 1 ) <= 0.0f ||
+                        field.getCellFluidFraction( x, y ) <= 0.0f ) continue;
+                    const auto velocity = field.getVFaceVelocityForAudit( x, y );
+                    if( !velocity ) throw std::runtime_error( "missing V face" );
+                    momentum.y += static_cast<float>(
+                        area * field.getVFaceOpenFraction( x, y ) * *velocity );
+                }
+            return momentum;
+        };
+        const auto wallImpulse = []( const fluidField2& field )
+        {
+            const int w = field.getWidth();
+            const int h = field.getHeight();
+            const double scale = static_cast<double>(
+                field.getCellSize() ) * dt;
+            double jx = 0.0, jy = 0.0;
+            for( int y = 0; y < h; ++y )
+            {
+                jx -= field.getCellPressureForVisualization( 0, y ) * scale;
+                jx += field.getCellPressureForVisualization( w - 1, y ) * scale;
+            }
+            for( int x = 0; x < w; ++x )
+            {
+                jy -= field.getCellPressureForVisualization( x, 0 ) * scale;
+                jy += field.getCellPressureForVisualization( x, h - 1 ) * scale;
+            }
+            return std::array<double, 2>{{ jx, jy }};
+        };
+
+        fluidField2 cold = entry;
+        fluidField2 primed = entry;
+        if( !primed.primeCutCellHistoryForAudit( obstacles ) ||
+            primed.primeCutCellHistoryForAudit( obstacles ) )
+            throw std::runtime_error( "first-history prime must succeed once" );
+        // Prime must not change MAC velocities, tracer mass or pressure.
+        // The solid mask/face opening changes intentionally.
+        if( std::abs( primed.getTracerMass() - cold.getTracerMass() ) > 1.0e-7 ||
+            std::abs( primed.getFluidKineticEnergy() -
+                cold.getFluidKineticEnergy() ) > 1.0e-5 )
+            throw std::runtime_error( "first-history prime advanced physical time" );
+
+        std::array<fluidField2*, 2> paths{{ &cold, &primed }};
+        std::array<fluidCutCellPressureImpulse2, 2> impulses{};
+        for( int mode = 0; mode < 2; ++mode )
+        {
+            fluidField2& field = *paths[mode];
+            std::optional<vec2> beforePressure{};
+            field.setPrePressureSnapshotObserver(
+                [&]( const fluidField2& snapshot )
+                {
+                    if( beforePressure )
+                        throw std::runtime_error( "duplicate first-history pressure entry" );
+                    beforePressure = openMomentum( snapshot );
+                } );
+            std::array<fluidObstacleForce2, 3> forces{};
+            field.step( dt, obstacles, forces, 200 );
+            const fluidCutCellPressure2& pressure = field.getCutCellPressure();
+            if( !beforePressure ||
+                !pressure.hasAnalyticImpulseBudget ||
+                !pressure.usedCoupledProjection ||
+                pressure.coupledSolveFailed ||
+                pressure.hasVolumeHistory != ( mode == 1 ) )
+                throw std::runtime_error( "invalid first-history coupled A/B" );
+            const auto independentWall = wallImpulse( field );
+            const vec2 independentFluid = openMomentum( field ) - *beforePressure;
+            vec2 solidFeedback{};
+            double feedbackTorque = 0.0;
+            for( const fluidObstacleForce2& force : forces )
+            {
+                solidFeedback += dt * force.force;
+                feedbackTorque += static_cast<double>( dt ) * force.torque;
+            }
+            const auto& impulse = pressure.impulse;
+            impulses[mode] = impulse;
+            const double tol = 1.0e-4;
+            if( Length( independentFluid - impulse.fluid ) > tol ||
+                std::abs( independentWall[0] - impulse.wall.x ) > tol ||
+                std::abs( independentWall[1] - impulse.wall.y ) > tol ||
+                Length( solidFeedback - impulse.solid ) > tol )
+                throw std::runtime_error( "first-history independent pressure ledger drift" );
+
+            const auto summary = field.getCutCellVolumeSummary( dt );
+            const auto flow = field.getFlowAudit( dt );
+            const vec2 residual = impulse.residual();
+            const std::array<double, 19> numbers{{
+                impulse.fluid.x, impulse.fluid.y,
+                impulse.solid.x, impulse.solid.y,
+                impulse.wall.x, impulse.wall.y,
+                residual.x, residual.y,
+                independentFluid.x, independentFluid.y,
+                independentWall[0], independentWall[1],
+                solidFeedback.x, solidFeedback.y, feedbackTorque,
+                static_cast<double>( summary.modifiedCells ),
+                summary.totalPressureSourceDeltaVolume,
+                pressure.compatibilityCorrection,
+                flow.maxFluidFaceSpeed
+            }};
+            for( const double value : numbers )
+                if( !std::isfinite( value ) )
+                    throw std::runtime_error( "nonfinite first-history pressure comparison" );
+            std::printf( "world_pressure_first_history,%d,%d,%d,%d,%d,%d",
+                sourceOn ? 1 : 0, mode, pressure.hasVolumeHistory ? 1 : 0,
+                field.getSweptFaceFlux().usedSweptFlux ? 1 : 0,
+                pressure.usedCoupledProjection ? 1 : 0,
+                pressure.coupledSolveFailed ? 1 : 0 );
+            for( const double value : numbers ) std::printf( ",%.12g", value );
+            std::putchar( '\n' );
+        }
+        // On a fixed first pose both variants must use the same endpoint
+        // analytical solid coverage. Do not demand the SAME pressure or
+        // residual: that is precisely the first-history hypothesis under test.
+        for( int y = 0; y < cold.getHeight(); ++y )
+            for( int x = 0; x < cold.getWidth(); ++x )
+                if( std::abs( cold.getCellFluidFraction( x, y ) -
+                    primed.getCellFluidFraction( x, y ) ) > 1.0e-6 )
+                    throw std::runtime_error( "first-history endpoint geometry mismatch" );
+        const vec2 difference = impulses[1].residual() - impulses[0].residual();
+        std::printf( "world_pressure_first_history_delta,%d,%.12g,%.12g\n",
+            sourceOn ? 1 : 0, difference.x, difference.y );
+    }
+}
+
 // S2c bounded real-World pressure exchange forensic. The actual Wind sandbox
 // couples Cut-cell Schur PCG to three dynamic World bodies, at World8 with
 // Fluid1/2/4/8. Tracer-stage callback runs AFTER pressure; read the existing
@@ -8892,6 +9095,7 @@ int main( int argc, char** argv )
     bool smallCellCadenceAudit = false;
     bool smallCellWorldFeedbackAudit = false;
     bool smallCellWorldImpulseAudit = false;
+    bool firstCutCellHistoryAudit = false;
     bool smallCellLocalTracerAudit = false;
     bool smallCellTransferLedgerAudit = false;
     bool smallCellConnectedResidualAudit = false;
@@ -8934,6 +9138,7 @@ int main( int argc, char** argv )
         smallCellCadenceAudit |= std::string_view( argv[i] ) == "--small-cell-merge-cadence-audit";
         smallCellWorldFeedbackAudit |= std::string_view( argv[i] ) == "--small-cell-world-feedback-audit";
         smallCellWorldImpulseAudit |= std::string_view( argv[i] ) == "--small-cell-world-impulse-audit";
+        firstCutCellHistoryAudit |= std::string_view( argv[i] ) == "--small-cell-first-history-audit";
         smallCellLocalTracerAudit |= std::string_view( argv[i] ) == "--small-cell-local-tracer-audit";
         smallCellTransferLedgerAudit |= std::string_view( argv[i] ) == "--small-cell-applied-transfer-audit";
         smallCellConnectedResidualAudit |= std::string_view( argv[i] ) == "--small-cell-connected-residual-audit";
@@ -8971,6 +9176,7 @@ int main( int argc, char** argv )
     if( smallCellCadenceAudit ) { auditSmallCellPressureCadences(); return 0; }
     if( smallCellWorldFeedbackAudit ) { auditSmallCellWorldFeedback(); return 0; }
     if( smallCellWorldImpulseAudit ) { auditSmallCellWorldPressureImpulse(); return 0; }
+    if( firstCutCellHistoryAudit ) { auditFirstCutCellHistoryImpulse(); return 0; }
     if( smallCellLocalTracerAudit ) { auditSmallCellLocalTracer(); return 0; }
     if( smallCellTransferLedgerAudit ) { auditSmallCellAppliedTransfers(); return 0; }
     if( smallCellConnectedResidualAudit ) { auditSmallCellAppliedTransfers( true ); return 0; }
