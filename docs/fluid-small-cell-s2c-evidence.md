@@ -2973,3 +2973,22 @@ The original screenshot is a wind-flow Sandbox pressure-heatmap observation; its
 5. **Frame 16 pressure shock is a separate control issue.** The prescribed Capsule trajectory abruptly reverses its normal velocity at that frame. A relative pressure span near 349 and a large negative obstacle force near -450 N remain in all four combinations. They cannot be ascribed uniquely to a Swept guard, missing coverage, or unstable feedback from the live World, since this motion is externally imposed with no dynamic Body integration.
 
 **Limits and next S2c acceptance gate.** This 2×2 matrix is *same pre-step state* for tight OFF/ON **within each coverage-guard history**, but the guard ON/OFF cases have different evolved histories. The work proves neither a robust general open-boundary solution nor full Fluid+Body momentum conservation, nor a corrected physical moving-interface space-time flux. The default-off full-coverage guard still needs broader analytic Capsule tracer/geometry/World feedback regression before any production activation. The tight translation-only allowance should remain research-only, because merely lifting the guard can **worsen** residual. Next compare actual *time-mean aperture/velocity* and applied tracer plus Body/wall impulse on precisely the same near-closing frame-9 field (including source/GCL closure), before designing an opt-in space-time pressure operator shared across transport and FSI. No blanket numerical pressure/velocity clamp, no branch merge, and no changes to default source boundaries are justified yet.
+
+
+### S2c near-wall Capsule frame-9 time-aperture / pressure-flux control — 2026-11-20
+
+**New test-only instrumentation:** [`420dbd3d`](https://github.com/buddas-bible/zonai/commit/420dbd3d345b47636d0e0f5313c9927fbf9060d5) extends the existing `--wind-boundary-pressure-spike-audit` in `tests/sandbox/wind_step_benchmark.cpp`, without changing any default fluid pressure, geometry, advection or Body integration policy.
+
+Within each pre-existing full-coverage-guard history, the frame-9 tight-Swept branch starts from the **same pre-step Field** as its normal-Swept counterpart. The research-only time-aperture observer is enabled **only** on the tight-Swept copy at that checkpoint, after cloning the actual history. The paired physical endpoint geometry and total stored snapshot volume are still checked for equality by the original 2×2 test. Guard-OFF and guard-ON histories are **not** same-state comparisons.
+
+For the established near-closing donor **(26,4)**, the new CSV records the four signed outward MAC faces (W, E, S, N):
+
+- Direct face-open queries at start/end Capsule poses and two **independent 64/256 midpoint analytic-Capsule time quadratures** of open face fraction.
+- The optional internal Swept integrator's **time-mean open fraction** at its actual accepted quadrature budget, separately from the geometric endpoint open fraction.
+- Stored MAC face velocity at step entry, immediately before pressure projection, and after pressure; the matching endpoint pre-/post-pressure outward fluid volume.
+- A hypothesis-only `h dt ∫ A(α) lerp(u_entry,u_post,α) dα` **linear-MAC velocity proxy** from existing research getters, plus `h dt mean(A) u_post` as an independent fixed-endpoint-speed assumption. Neither is an observation of the actual intermediate fluid velocity.
+- The donor's pressure source, swept-solid divergence, snapshot volume change, endpoint MAC pressure residual, proxy/source residual, GCL difference, and externally prescribed obstacle reaction force/torque. These quantities are **separate ledgers**, not interchangeable conservation terms.
+
+The diagnostic rows are `wind_boundary_time_face` and `wind_boundary_time_balance`. Assertions check finite outputs, valid Swept/aperture and one pre-pressure observation, agreement between analytic and actual end-face aperture, and consistency of the four outward endpoint face volumes with the existing public donor MAC budget. They **do not** assert that either velocity proxy is physically accurate, that pressure spikes have been removed, or that the source term must vanish.
+
+**Remaining acceptance limits:** This kinematic Capsule test does not seed/verify applied tracer mass, capture continuous `u(t)`, or close equal-and-opposite moving **dynamic** Body/wall impulse. The diagnostic cannot justify enabling a time-integrated pressure operator or the tight-Swept guard in production. Examine the platform-specific CI CSV values and geometry/source/transport ledger before selecting any physical fix.
