@@ -1154,6 +1154,11 @@ public:
     [[nodiscard]] const fluidSolidTransition2& getSolidTransition() const noexcept { return solidTransition_; }
     [[nodiscard]] const fluidCutCellTransition2& getCutCellTransition() const noexcept { return cutCellTransition_; }
     [[nodiscard]] const fluidCutCellPressure2& getCutCellPressure() const noexcept { return cutCellPressure_; }
+    // Allocates only when explicitly queried after a converged, unpooled,
+    // disjoint-analytic coupled Cut-cell pressure step. Returns nullopt for
+    // unsupported solver states; normal pressure projection is unchanged.
+    [[nodiscard]] std::optional<std::vector<fluidCutCellPressureCellImpulseAudit2>>
+        getCutCellPressureCellImpulseAudit( float timeStep ) const;
     [[nodiscard]] const fluidSweptFaceFlux2& getSweptFaceFlux() const noexcept { return sweptFaceFlux_; }
     [[nodiscard]] const fluidAdvectionStats2& getAdvectionStats() const noexcept { return advectionStats_; }
     [[nodiscard]] float getTracerConcentration( int x, int y ) const noexcept;
