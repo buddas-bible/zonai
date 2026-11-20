@@ -689,12 +689,21 @@ void auditFirstCutCellHistoryImpulse()
         if( !primed.primeCutCellHistoryForAudit( obstacles ) ||
             primed.primeCutCellHistoryForAudit( obstacles ) )
             throw std::runtime_error( "first-history prime must succeed once" );
-        // Prime must not change MAC velocities, tracer mass or pressure.
-        // The solid mask/face opening changes intentionally.
-        if( std::abs( primed.getTracerMass() - cold.getTracerMass() ) > 1.0e-7 ||
-            std::abs( primed.getFluidKineticEnergy() -
-                cold.getFluidKineticEnergy() ) > 1.0e-5 )
-            throw std::runtime_error( "first-history prime advanced physical time" );
+        // Prime must not change stored MAC velocities or tracer inventory.
+        // Energy getters are aperture-weighted: they legitimately differ
+        // because the cold Field has no solid mask yet.
+        if( std::abs( primed.getTracerMass() - cold.getTracerMass() ) > 1.0e-7 )
+            throw std::runtime_error( "first-history prime changed tracer" );
+        for( int y = 0; y < cold.getHeight(); ++y )
+            for( int x = 1; x < cold.getWidth(); ++x )
+                if( cold.getUFaceVelocityForAudit( x, y ) !=
+                    primed.getUFaceVelocityForAudit( x, y ) )
+                    throw std::runtime_error( "first-history prime altered U velocity" );
+        for( int y = 1; y < cold.getHeight(); ++y )
+            for( int x = 0; x < cold.getWidth(); ++x )
+                if( cold.getVFaceVelocityForAudit( x, y ) !=
+                    primed.getVFaceVelocityForAudit( x, y ) )
+                    throw std::runtime_error( "first-history prime altered V velocity" );
 
         std::array<fluidField2*, 2> paths{{ &cold, &primed }};
         std::array<fluidCutCellPressureImpulse2, 2> impulses{};
