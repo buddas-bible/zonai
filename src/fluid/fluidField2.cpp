@@ -1617,6 +1617,27 @@ void fluidField2::step( float timeStep, int pressureIterations )
     step( timeStep, std::span<const fluidShapeObstacle2>{}, std::span<fluidObstacleForce2>{}, pressureIterations );
 }
 
+bool fluidField2::primeCutCellHistoryForAudit(
+    std::span<const fluidShapeObstacle2> obstacles )
+{
+    if( !cutCellProjectionEnabled_ || hasCutCellHistory_ ||
+        volumeSourceValid_ || !previousObstacles_.empty() ||
+        obstacles.empty() ||
+        !std::all_of( obstacles.begin(), obstacles.end(), []( const fluidShapeObstacle2& shape )
+        {
+            return IsValidFluidObstacle( shape );
+        } ) )
+        return false;
+
+    // Exactly the same occupancy and aperture routines as a normal Step,
+    // deliberately WITHOUT remapping, advecting or projecting MAC velocities.
+    // All prior solid-face masks and the stored previous pose are now valid.
+    updateObstacles( obstacles );
+    updateCutCellGeometry( obstacles );
+    previousObstacles_.assign( obstacles.begin(), obstacles.end() );
+    return true;
+}
+
 void fluidField2::updateObstacles( std::span<const fluidShapeObstacle2> obstacles )
 {
     std::copy( solidOwner_.begin(), solidOwner_.end(), previousSolidOwner_.begin() );
