@@ -93,6 +93,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-world-impulse-audit
 
+      # Fresh Fluid, same World obstacles and MAC state; only previous
+      # geometry/history differs. No default solver changes.
+      - name: Audit first Cut-cell geometry history and pressure impulse (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --small-cell-first-history-audit
+
       - name: Probe local tracer near disappearing Cut-cell (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-local-tracer-audit
@@ -418,6 +424,10 @@ jobs:
       - name: Audit real World Cut-cell pressure impulse (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-world-impulse-audit
+
+      - name: Audit first Cut-cell geometry history and pressure impulse (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-first-history-audit
 
       - name: Probe local tracer near disappearing Cut-cell (Windows Release, informational)
         if: runner.os == 'Windows'
