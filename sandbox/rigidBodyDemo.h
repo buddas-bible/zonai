@@ -281,6 +281,9 @@ public:
     void setWindSourceStrength( float strength );
     void setWindDragCoefficient( float rate );
     void setWindFluidSubstepCount( int count ) noexcept;
+    // Diagnostic-only observer forwarded to the owned Fluid Field. Do not
+    // expose mutable Field access through the Sandbox public query API.
+    void setWindTracerStageObserverForAudit( fluidField2::tracerStageObserver2 observer );
     // Instrumentation only. Also forces the requested Fluid cadence while
     // comparing coupled vs uncoupled scenes; normal scheduling stays unchanged.
     void setWindCouplingAuditEnabled( bool enabled ) noexcept { windCouplingAuditEnabled_ = enabled; }
