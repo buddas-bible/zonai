@@ -7740,6 +7740,28 @@ void auditWindBoundaryPressureSpike()
         "pressure_span,maximum_open_face_speed_mps,"
         "snapshot_volume_delta_m3,total_pressure_source_m3,"
         "capsule_force_y_N,legacy_pressure_residual_native" );
+    std::puts( "wind_boundary_time_face,coverage_guard,step,face_WESN,"
+        "outward_sign,start_analytic_open,end_analytic_open,"
+        "stored_endpoint_open,swept_internal_mean_open,"
+        "analytic64_mean_open,analytic256_mean_open,"
+        "step_entry_speed_mps,pre_pressure_speed_mps,"
+        "post_pressure_speed_mps,pre_endpoint_outward_m3,"
+        "post_endpoint_outward_m3,linear_velocity_proxy_outward_m3,"
+        "time_mean_open_fixed_post_speed_outward_m3,"
+        "pressure_stage_outward_delta_m3" );
+    std::puts( "wind_boundary_time_balance,coverage_guard,step,"
+        "donor_x,donor_y,donor_fraction,"
+        "donor_snapshot_delta_m3,donor_swept_solid_divergence_m3,"
+        "donor_pressure_source_m3,donor_post_mac_outward_m3,"
+        "donor_pressure_residual_m3,"
+        "four_face_pre_endpoint_outward_m3,"
+        "four_face_post_endpoint_outward_m3,"
+        "four_face_linear_velocity_proxy_outward_m3,"
+        "four_face_fixed_post_time_open_outward_m3,"
+        "linear_proxy_plus_source_m3,"
+        "endpoint_minus_proxy_m3,"
+        "snapshot_minus_swept_gcl_m3,"
+        "obstacle_force_y_N,obstacle_torque_Nm" );
     std::puts( "wind_boundary_pressure_summary,source_on,measured_swept_steps,"
         "measured_fallback_steps,swept_to_fallback,fallback_to_swept,"
         "fall_backs_with_physical_clearance,peak_swept_pressure_span,"
@@ -8173,6 +8195,10 @@ void auditWindBoundaryPressureSpike()
                 tightReplay.emplace( guardedField );
                 tightReplay->setPrePressureSnapshotObserver( {} );
                 tightReplay->setTightTranslatingCapsuleSweptBoundsAuditEnabled( true );
+                // Capture aperture-time geometry only on the matched frame-9
+                // counterfactual. Default fluid stepping stays unchanged.
+                if( frame == 9 )
+                    tightReplay->setSweptApertureAuditEnabled( true );
             }
             std::array<fluidObstacleForce2, 1> feedback{};
             guardedField.step( stepDt,
@@ -8300,6 +8326,38 @@ void auditWindBoundaryPressureSpike()
                 };
                 const auto defaultGeometry = recordFactorial(
                     guardedField, feedback[0], false );
+                // The two solver paths start from the same saved Field. These
+                // four donor faces are read before pressure, so the endpoint
+                // model is not mistaken for a measured intra-step u(t).
+                constexpr int donorX = 26, donorY = 4;
+                constexpr std::array<int, 4> faceX{{ 26, 27, 26, 26 }};
+                constexpr std::array<int, 4> faceY{{ 4, 4, 4, 5 }};
+                constexpr std::array<bool, 4> faceIsU{{ true, true, false, false }};
+                constexpr std::array<double, 4> outward{{ -1.0, 1.0, -1.0, 1.0 }};
+                constexpr std::array<char, 4> faceLabel{{ 'W', 'E', 'S', 'N' }};
+                const auto readFace = [&]( const fluidField2& observed, int index )
+                {
+                    const auto velocity = faceIsU[index]
+                        ? observed.getUFaceVelocityForAudit( faceX[index], faceY[index] )
+                        : observed.getVFaceVelocityForAudit( faceX[index], faceY[index] );
+                    if( !velocity || !std::isfinite( *velocity ) )
+                        fail( "invalid frame-9 donor face velocity" );
+                    return static_cast<double>( *velocity );
+                };
+                std::array<double, 4> entryVelocity{}, preVelocity{};
+                int capturedPrePressure = 0;
+                if( frame == 9 )
+                {
+                    for( int i = 0; i < 4; ++i )
+                        entryVelocity[i] = readFace( *tightReplay, i );
+                    tightReplay->setPrePressureSnapshotObserver(
+                        [&]( const fluidField2& pre )
+                        {
+                            ++capturedPrePressure;
+                            for( int i = 0; i < 4; ++i )
+                                preVelocity[i] = readFace( pre, i );
+                        } );
+                }
                 std::array<fluidObstacleForce2, 1> tightForce{};
                 tightReplay->step( stepDt,
                     std::span<const fluidShapeObstacle2>(
@@ -8312,6 +8370,128 @@ void auditWindBoundaryPressureSpike()
                         1.0e-10 ||
                     defaultGeometry[1] != tightGeometry[1] )
                     fail( "factorial guard path changed current geometry" );
+                if( frame == 9 )
+                {
+                    if( capturedPrePressure != 1 ||
+                        !tightReplay->hasSweptApertureAudit() ||
+                        !tightReplay->getSweptFaceFlux().usedSweptFlux )
+                        fail( "frame-9 aperture / pre-pressure history unavailable" );
+                    const auto budget =
+                        tightReplay->getCutCellVolumeBudget( donorX, donorY, stepDt );
+                    if( !budget.valid || !budget.active ||
+                        !( budget.currentFraction > 0.0 ) )
+                        fail( "frame-9 donor no longer a true open Cut-cell" );
+
+                    // Independent analytic Capsule geometry quadrature at
+                    // 64/256 time midpoints. Neither reconstructs real u(t).
+                    // The production aperture audit uses the Swept integrator's
+                    // accepted sample count and is recorded separately.
+                    const auto analyticOpen = [&]( double alpha, int index )
+                    {
+                        fluidShapeObstacle2 at = guardedCapsule;
+                        at.transform.position.y =
+                            priorY + static_cast<float>( alpha ) * ( y - priorY );
+                        at.center = at.transform.position;
+                        const auto open =
+                            tightReplay->getAnalyticCapsuleFaceOpenFractionForAudit(
+                                at, faceIsU[index], faceX[index], faceY[index] );
+                        if( !open || !std::isfinite( *open ) ||
+                            *open < 0.0 || *open > 1.0 )
+                            fail( "invalid analytic frame-9 Capsule opening" );
+                        return *open;
+                    };
+                    const auto analyticMean = [&]( int samples, int index )
+                    {
+                        double sum = 0.0;
+                        for( int k = 0; k < samples; ++k )
+                            sum += analyticOpen( ( k + 0.5 ) / samples, index );
+                        return sum / samples;
+                    };
+
+                    double preNet = 0.0, postNet = 0.0;
+                    double proxyNet = 0.0, fixedPostNet = 0.0;
+                    for( int i = 0; i < 4; ++i )
+                    {
+                        const bool isU = faceIsU[i];
+                        const int xFace = faceX[i], yFace = faceY[i];
+                        const double endOpen = isU
+                            ? tightReplay->getUFaceOpenFraction( xFace, yFace )
+                            : tightReplay->getVFaceOpenFraction( xFace, yFace );
+                        const double meanOpen = isU
+                            ? tightReplay->getSweptUTimeMeanOpenFraction( xFace, yFace )
+                            : tightReplay->getSweptVTimeMeanOpenFraction( xFace, yFace );
+                        const double endSpeed = readFace( *tightReplay, i );
+                        const double scale = outward[i] * h * stepDt;
+                        const double preVolume = scale * endOpen * preVelocity[i];
+                        const double postVolume = scale * endOpen * endSpeed;
+                        // This proxy assumes linear MAC velocity between the
+                        // measured step ENTRY and post-pressure endpoints.
+                        const double proxyVolume = outward[i] * ( isU
+                            ? tightReplay->getSweptULinearVelocityProxyVolume(
+                                xFace, yFace, stepDt )
+                            : tightReplay->getSweptVLinearVelocityProxyVolume(
+                                xFace, yFace, stepDt ) );
+                        const double fixedPostVolume = scale * meanOpen * endSpeed;
+                        const double startOpen = analyticOpen( 0.0, i );
+                        const double analyticEnd = analyticOpen( 1.0, i );
+                        const double mean64 = analyticMean( 64, i );
+                        const double mean256 = analyticMean( 256, i );
+                        const std::array<double, 14> values{{
+                            outward[i], startOpen, analyticEnd, endOpen,
+                            meanOpen, mean64, mean256,
+                            entryVelocity[i], preVelocity[i], endSpeed,
+                            preVolume, postVolume, proxyVolume,
+                            fixedPostVolume
+                        }};
+                        for( double value : values )
+                            if( !std::isfinite( value ) )
+                                fail( "nonfinite frame-9 time face quantity" );
+                        if( !( meanOpen >= 0.0 && meanOpen <= 1.0 ) ||
+                            std::abs( analyticEnd - endOpen ) > 1.0e-4 )
+                            fail( "frame-9 analytic endpoint differs from live face" );
+                        std::printf( "wind_boundary_time_face,%d,%d,%c",
+                            coverageGuard ? 1 : 0, frame, faceLabel[i] );
+                        for( double value : values )
+                            std::printf( ",%.12g", value );
+                        std::printf( ",%.12g\n", postVolume - preVolume );
+                        preNet += preVolume;
+                        postNet += postVolume;
+                        proxyNet += proxyVolume;
+                        fixedPostNet += fixedPostVolume;
+                    }
+                    // Local time-integrated fluid flux is UNKNOWN: proxyNet
+                    // and fixedPostNet are counterfactuals, not conservation
+                    // certificates. Solid swept flux and pressure source are
+                    // separate ledgers. Prescribed Capsule force is not an
+                    // equal-and-opposite dynamic Body impulse.
+                    std::printf( "wind_boundary_time_balance,%d,%d,%d,%d",
+                        coverageGuard ? 1 : 0, frame, donorX, donorY );
+                    const std::array<double, 15> values{{
+                        budget.currentFraction,
+                        budget.snapshotDeltaVolume,
+                        budget.solidSweptDivergenceVolume,
+                        budget.pressureSourceDeltaVolume,
+                        budget.macNetOutwardVolume,
+                        budget.pressureResidualVolume,
+                        preNet, postNet, proxyNet, fixedPostNet,
+                        proxyNet + budget.pressureSourceDeltaVolume,
+                        postNet - proxyNet,
+                        budget.snapshotDeltaVolume -
+                            budget.solidSweptDivergenceVolume,
+                        tightForce[0].force.y, tightForce[0].torque
+                    }};
+                    for( double value : values )
+                    {
+                        if( !std::isfinite( value ) )
+                            fail( "nonfinite frame-9 space-time budget" );
+                        std::printf( ",%.12g", value );
+                    }
+                    std::putchar( '\n' );
+                    // The four face endpoint sum must reproduce the public
+                    // Cut-cell MAC budget exactly up to float accumulation.
+                    if( std::abs( postNet - budget.macNetOutwardVolume ) > 1.0e-7 )
+                        fail( "frame-9 signed endpoint MAC budget drift" );
+                }
             }
             priorY = y;
         }
