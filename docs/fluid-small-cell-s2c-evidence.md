@@ -2992,3 +2992,26 @@ For the established near-closing donor **(26,4)**, the new CSV records the four 
 The diagnostic rows are `wind_boundary_time_face` and `wind_boundary_time_balance`. Assertions check finite outputs, valid Swept/aperture and one pre-pressure observation, agreement between analytic and actual end-face aperture, and consistency of the four outward endpoint face volumes with the existing public donor MAC budget. They **do not** assert that either velocity proxy is physically accurate, that pressure spikes have been removed, or that the source term must vanish.
 
 **Remaining acceptance limits:** This kinematic Capsule test does not seed/verify applied tracer mass, capture continuous `u(t)`, or close equal-and-opposite moving **dynamic** Body/wall impulse. The diagnostic cannot justify enabling a time-integrated pressure operator or the tight-Swept guard in production. Examine the platform-specific CI CSV values and geometry/source/transport ledger before selecting any physical fix.
+
+
+#### First measured frame-9 same-input tight-Swept time-aperture rows (Windows Release)
+
+[CI #44695952853](https://github.com/buddas-bible/zonai/actions/runs/44695952853) completed **Windows job SUCCESS**, including the new frame-9 assertions, on code commit `420dbd3d`. These numbers are from `wind_boundary_time_face` and `wind_boundary_time_balance`. The Ubuntu job was still running when recorded. The tight-Swept copy shares the exact *pre-step* Field with the normal-Swept control **for each coverage-guard history**. Coverage guards OFF/ON have different histories, so their force responses are not same-state counterfactuals.
+
+| Coverage guard | Face | Start open | End open | Internal mean open | Independent 256-midpoint mean | Post-pressure signed speed (m/s) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| OFF | W | 0.27652639 | 0.01152700 | 0.14402670 | 0.14402670 | -18.01707 |
+| OFF | S | 0.52025561 | 0.01432638 | 0.22320743 | 0.22833263 | -16.44612 |
+| ON | W | 0.27652639 | 0.01152700 | 0.14402670 | 0.14402670 | -17.98427 |
+| ON | S | 0.52025561 | 0.01432638 | 0.22320743 | 0.22833263 | -16.47377 |
+
+The E/N endpoint apertures are closed. The **internal** south-face quadrature differs visibly from the independent 256-midpoint result (0.22320743 vs 0.22833263); do not treat this difference as a new solver error or assume internal time quadrature convergence without a controlled sample-refinement trial.
+
+| Coverage guard | Endpoint post-pressure outward MAC volume (m³) | Linear step-entry→post velocity proxy (m³) | Fixed post-speed × time-mean-open proxy (m³) | Moving pressure source (m³) | Endpoint pressure residual (m³) | Stored snapshot minus Swept GCL (m³) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| OFF | 0.00092353371 | 0.00601053729 | 0.01305382521 | -0.00092421612 | -6.82408e-7 | -2.12229206e-5 |
+| ON | 0.00092357114 | 0.00601478902 | 0.01305683890 | -0.00092421612 | -6.44978e-7 | -2.12229206e-5 |
+
+For the same tight-Swept donor, the endpoint open-volume balance nearly cancels the moving-pressure source, but the two **hypothetical** time-dependent velocity models exceed endpoint volume by a large margin. This identifies a **sensitive endpoint-vs-time-aperture interpretation**, not a measured physical fluid-flow error: neither assumed velocity history is the actual intra-step `u(t)`. In the guard-ON history the prescribed Capsule reports `force.y ≈ 38.444 N`, whereas guard-OFF reports `≈ 42.807 N`; those reactions reflect different evolved histories and cannot prove causal Body momentum coupling. There is still no seeded tracer or wall/Body impulse closure in this local test.
+
+**Next bounded gate:** capture a physically meaningful *time-resolved* face velocity history and applied fluid/tracer plus moving-boundary flux on the same pre-step state, or explicitly bound the uncertainty from endpoint-only MAC data, then compare the stage-integrated donor/region balance with the pressure source and GCL before altering the production pressure operator.
