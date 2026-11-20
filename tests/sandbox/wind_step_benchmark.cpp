@@ -7762,6 +7762,26 @@ void auditWindBoundaryPressureSpike()
         "endpoint_minus_proxy_m3,"
         "snapshot_minus_swept_gcl_m3,"
         "obstacle_force_y_N,obstacle_torque_Nm" );
+    std::puts( "wind_boundary_refined_step,coverage_guard,splits,part,"
+        "alpha_end,pose_y_m,donor_fraction,donor_snapshot_m3,"
+        "donor_swept_solid_m3,donor_pressure_source_m3,"
+        "donor_pre_endpoint_mac_m3,donor_post_endpoint_mac_m3,"
+        "donor_time_mean_fixed_post_mac_m3,"
+        "donor_time_linear_velocity_proxy_m3,"
+        "donor_pressure_residual_m3,"
+        "donor_gcl_mismatch_m3,force_y_N,torque_Nm,"
+        "tracer_mass_kg,donor_tracer_mass_kg" );
+    std::puts( "wind_boundary_refined_summary,coverage_guard,splits,"
+        "donor_start_mass_kg,donor_final_mass_kg,donor_applied_transfer_delta_kg,"
+        "initial_total_tracer_kg,final_total_tracer_kg,"
+        "sum_snapshot_m3,sum_swept_solid_m3,sum_pressure_source_m3,"
+        "sum_pre_endpoint_mac_m3,sum_post_endpoint_mac_m3,"
+        "sum_time_mean_fixed_post_mac_m3,"
+        "sum_time_linear_velocity_proxy_m3,"
+        "sum_pressure_residual_m3,sum_gcl_mismatch_m3,"
+        "sum_force_y_impulse_Ns,sum_torque_impulse_Nms,"
+        "applied_swept_kg,applied_fallback_kg,applied_mac_kg,"
+        "applied_connected_kg,applied_event_count" );
     std::puts( "wind_boundary_pressure_summary,source_on,measured_swept_steps,"
         "measured_fallback_steps,swept_to_fallback,fallback_to_swept,"
         "fall_backs_with_physical_clearance,peak_swept_pressure_span,"
@@ -8344,6 +8364,12 @@ void auditWindBoundaryPressureSpike()
                         fail( "invalid frame-9 donor face velocity" );
                     return static_cast<double>( *velocity );
                 };
+                // Preserve one immutable frame-9 pre-step Field for all
+                // 1/2/4/8 split counterfactuals. The refined trajectories
+                // are independently stepped and are NOT samples of the
+                // unsplit step's unknowable continuous u(t).
+                std::optional<fluidField2> frame9Entry;
+                if( frame == 9 ) frame9Entry.emplace( *tightReplay );
                 std::array<double, 4> entryVelocity{}, preVelocity{};
                 int capturedPrePressure = 0;
                 if( frame == 9 )
@@ -8491,6 +8517,202 @@ void auditWindBoundaryPressureSpike()
                     // Cut-cell MAC budget exactly up to float accumulation.
                     if( std::abs( postNet - budget.macNetOutwardVolume ) > 1.0e-7 )
                         fail( "frame-9 signed endpoint MAC budget drift" );
+
+                    // Compare independently computed, physically stepped MAC
+                    // states at 1/2/4/8 time resolutions, all from the same
+                    // pre-step Field. Reintegrating pressure and advection
+                    // changes the numerical trajectory; this is convergence
+                    // evidence, NOT the exact u(t) in the 1-step model.
+                    for( const int splits : { 1, 2, 4, 8 } )
+                    {
+                        fluidField2 refined = *frame9Entry;
+                        refined.setPrePressureSnapshotObserver( {} );
+                        refined.setTracerTransferObserver( {} );
+                        refined.setTracerStageObserver( {} );
+                        refined.setSweptApertureAuditEnabled( true );
+                        // Identical passive-dye seed in all four copies.
+                        // The unseeded reference is used only to verify
+                        // pressure/geometry are insensitive to this seed.
+                        if( refined.getCellFluidFraction( donorX, donorY ) <= 0.0f )
+                            fail( "frame-9 donor was not fluid before movement" );
+                        refined.setTracerConcentration( donorX, donorY, 1.0f );
+                        const double startMass = refined.getTracerMass();
+                        const double startDonorMass =
+                            refined.getTracerCellMass( donorX, donorY );
+                        if( startMass <= 0.0 || startDonorMass <= 0.0 )
+                            fail( "frame-9 tracer seed was not accepted" );
+
+                        const float subDt = stepDt / splits;
+                        const double faceScale =
+                            static_cast<double>( h ) * subDt;
+                        const int donorCell = donorY * width + donorX;
+                        double appliedDonorMassDelta = 0.0;
+                        std::array<double, 4> appliedKindMass{};
+                        int appliedCount = 0, prePressureCount = 0;
+                        std::array<double, 4> refinedPreVelocity{};
+                        refined.setPrePressureSnapshotObserver(
+                            [&]( const fluidField2& beforePressure )
+                            {
+                                ++prePressureCount;
+                                for( int i = 0; i < 4; ++i )
+                                    refinedPreVelocity[i] =
+                                        readFace( beforePressure, i );
+                            } );
+                        refined.setTracerTransferObserver(
+                            [&]( const fluidTracerTransfer2& event )
+                            {
+                                if( !std::isfinite( event.mass ) ||
+                                    event.mass < 0.0 )
+                                    fail( "invalid refined applied tracer transfer" );
+                                const int kind = static_cast<int>( event.kind );
+                                if( kind < 0 || kind >= 4 )
+                                    fail( "unknown refined tracer transfer kind" );
+                                appliedKindMass[kind] += event.mass;
+                                ++appliedCount;
+                                if( event.sourceCell == donorCell )
+                                    appliedDonorMassDelta -= event.mass;
+                                if( event.destinationCell == donorCell )
+                                    appliedDonorMassDelta += event.mass;
+                            } );
+                        double sumSnapshot = 0.0, sumSwept = 0.0;
+                        double sumSource = 0.0, sumPre = 0.0, sumPost = 0.0;
+                        double sumMeanPost = 0.0, sumLinear = 0.0;
+                        double sumResidual = 0.0, sumGcl = 0.0;
+                        double impulseY = 0.0, angularImpulse = 0.0;
+                        for( int part = 0; part < splits; ++part )
+                        {
+                            const float alpha =
+                                static_cast<float>( part + 1 ) / splits;
+                            const float poseY = part + 1 == splits ? y :
+                                priorY + alpha * ( y - priorY );
+                            fluidShapeObstacle2 moving = guardedCapsule;
+                            moving.transform.position.y = poseY;
+                            moving.center = moving.transform.position;
+                            moving.linearVelocity.y = ( y - priorY ) / stepDt;
+
+                            std::array<fluidObstacleForce2, 1> forces{};
+                            const int previousPreCount = prePressureCount;
+                            refined.step( subDt,
+                                std::span<const fluidShapeObstacle2>(
+                                    &moving, 1 ), forces, 80 );
+                            const auto local = refined.getCutCellVolumeBudget(
+                                donorX, donorY, subDt );
+                            if( prePressureCount != previousPreCount + 1 ||
+                                !local.valid || !local.active ||
+                                !refined.getSweptFaceFlux().usedSweptFlux ||
+                                !refined.hasSweptApertureAudit() )
+                                fail( "incomplete frame-9 refined pressure history" );
+                            double pre = 0.0, post = 0.0, meanPost = 0.0;
+                            double linear = 0.0;
+                            for( int i = 0; i < 4; ++i )
+                            {
+                                const double open = faceIsU[i]
+                                    ? refined.getUFaceOpenFraction(
+                                        faceX[i], faceY[i] )
+                                    : refined.getVFaceOpenFraction(
+                                        faceX[i], faceY[i] );
+                                const double mean = faceIsU[i]
+                                    ? refined.getSweptUTimeMeanOpenFraction(
+                                        faceX[i], faceY[i] )
+                                    : refined.getSweptVTimeMeanOpenFraction(
+                                        faceX[i], faceY[i] );
+                                const double after = readFace( refined, i );
+                                const double signedScale = outward[i] * faceScale;
+                                pre += signedScale * open *
+                                    refinedPreVelocity[i];
+                                post += signedScale * open * after;
+                                // Piecewise constant post-pressure velocity
+                                // times true time-quadrature aperture only.
+                                meanPost += signedScale * mean * after;
+                                // Independent piecewise linear velocity
+                                // assumption on each newly solved substep.
+                                linear += outward[i] * ( faceIsU[i]
+                                    ? refined.getSweptULinearVelocityProxyVolume(
+                                        faceX[i], faceY[i], subDt )
+                                    : refined.getSweptVLinearVelocityProxyVolume(
+                                        faceX[i], faceY[i], subDt ) );
+                            }
+                            if( std::abs( post - local.macNetOutwardVolume ) >
+                                    1.0e-7 )
+                                fail( "refined endpoint MAC outward budget drift" );
+                            const double mass = refined.getTracerMass();
+                            const double donorMass =
+                                refined.getTracerCellMass( donorX, donorY );
+                            const std::array<double, 16> row{{
+                                alpha, poseY, local.currentFraction,
+                                local.snapshotDeltaVolume,
+                                local.solidSweptDivergenceVolume,
+                                local.pressureSourceDeltaVolume,
+                                pre, post, meanPost, linear,
+                                local.pressureResidualVolume,
+                                local.snapshotDeltaVolume -
+                                    local.solidSweptDivergenceVolume,
+                                forces[0].force.y, forces[0].torque,
+                                mass, donorMass
+                            }};
+                            std::printf( "wind_boundary_refined_step,%d,%d,%d",
+                                coverageGuard ? 1 : 0, splits, part );
+                            for( double value : row )
+                            {
+                                if( !std::isfinite( value ) )
+                                    fail( "nonfinite frame-9 refined step budget" );
+                                std::printf( ",%.12g", value );
+                            }
+                            std::putchar( '\n' );
+                            sumSnapshot += local.snapshotDeltaVolume;
+                            sumSwept += local.solidSweptDivergenceVolume;
+                            sumSource += local.pressureSourceDeltaVolume;
+                            sumPre += pre;
+                            sumPost += post;
+                            sumMeanPost += meanPost;
+                            sumLinear += linear;
+                            sumResidual += local.pressureResidualVolume;
+                            sumGcl += local.snapshotDeltaVolume -
+                                local.solidSweptDivergenceVolume;
+                            impulseY += static_cast<double>(
+                                forces[0].force.y ) * subDt;
+                            angularImpulse += static_cast<double>(
+                                forces[0].torque ) * subDt;
+                        }
+                        const double endMass = refined.getTracerMass();
+                        const double endDonorMass =
+                            refined.getTracerCellMass( donorX, donorY );
+                        const std::array<double, 20> summary{{
+                            startDonorMass, endDonorMass,
+                            appliedDonorMassDelta, startMass, endMass,
+                            sumSnapshot, sumSwept, sumSource,
+                            sumPre, sumPost, sumMeanPost, sumLinear,
+                            sumResidual, sumGcl, impulseY, angularImpulse,
+                            appliedKindMass[0], appliedKindMass[1],
+                            appliedKindMass[2], appliedKindMass[3]
+                        }};
+                        std::printf( "wind_boundary_refined_summary,%d,%d",
+                            coverageGuard ? 1 : 0, splits );
+                        for( const double value : summary )
+                        {
+                            if( !std::isfinite( value ) )
+                                fail( "nonfinite frame-9 refined cumulative budget" );
+                            std::printf( ",%.12g", value );
+                        }
+                        std::printf( ",%d\n", appliedCount );
+                        const double massTolerance = 1.0e-5 *
+                            std::max( 1.0, startMass );
+                        if( std::abs( endMass - startMass ) > massTolerance ||
+                            std::abs( endDonorMass - startDonorMass -
+                                appliedDonorMassDelta ) > massTolerance )
+                            fail( "refined frame-9 applied tracer mass drift" );
+                        if( std::abs( sumSnapshot -
+                                budget.snapshotDeltaVolume ) > 1.0e-7 )
+                            fail( "refined frame-9 final geometry volume drift" );
+                        if( splits == 1 &&
+                            ( std::abs( sumSource -
+                                    budget.pressureSourceDeltaVolume ) > 1.0e-7 ||
+                              std::abs( sumPost -
+                                    budget.macNetOutwardVolume ) > 1.0e-7 ||
+                              std::abs( impulseY - static_cast<double>(
+                                    tightForce[0].force.y ) * stepDt ) > 1.0e-5 ) )
+                            fail( "same-entry 1-split tracer altered pressure physics" );
+                    }
                 }
             }
             priorY = y;
