@@ -682,7 +682,20 @@ void auditCapsuleTangentFacePressure()
                 pressure.coupledSolveFailed ||
                 !pressure.hasAnalyticImpulseBudget ||
                 pressure.mergedPressureCells != 0 )
+            {
+                std::fprintf( stderr,
+                    "tangent_invalid,scenario=%d,policy=%d,status=%d,"
+                    "coupled=%d,failed=%d,has_impulse=%d,merged=%d,"
+                    "iterations=%d,relative_residual=%.12g,active=%d\\n",
+                    scenario, policy, static_cast<int>( pressure.coupledStatus ),
+                    pressure.usedCoupledProjection ? 1 : 0,
+                    pressure.coupledSolveFailed ? 1 : 0,
+                    pressure.hasAnalyticImpulseBudget ? 1 : 0,
+                    pressure.mergedPressureCells, pressure.coupledIterations,
+                    static_cast<double>( pressure.coupledRelativeResidual ),
+                    pressure.activeCells );
                 throw std::runtime_error( "invalid tangent pressure coupled solve" );
+            }
             const double mass = field.getTracerMass();
             if( !std::isfinite( mass ) ||
                 std::abs( mass - beforeMass ) > 1.0e-6 )
