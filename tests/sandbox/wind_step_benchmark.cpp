@@ -844,6 +844,91 @@ void auditCapsuleTangentFacePressure()
     }
 }
 
+// Read-only reconstruction of the current nearest-active pressure source
+// routing. Unlike physical open-face connectivity, this flood fill crosses
+// blocked faces. The audit characterizes the behavior, not a proposed fix.
+void auditCapsulePressureSourceRouting( const fluidField2& field,
+    int width, int height, float dt, bool aligned, int frame, int policy,
+    int targetX, int targetY )
+{
+    const int count = width * height;
+    std::vector<fluidCutCellVolumeBudget2> cells;
+    cells.reserve( count );
+    std::vector<int> nearest( count, -1 );
+    std::vector<int> queue;
+    queue.reserve( count );
+    for( int y = 0; y < height; ++y )
+        for( int x = 0; x < width; ++x )
+        {
+            cells.push_back( field.getCutCellVolumeBudget( x, y, dt ) );
+            const int index = y * width + x;
+            if( cells.back().active )
+            {
+                nearest[index] = index;
+                queue.push_back( index );
+            }
+        }
+    for( std::size_t read = 0; read < queue.size(); ++read )
+    {
+        const int index = queue[read];
+        const int x = index % width, y = index / width;
+        const auto visit = [&]( int adjacent )
+        {
+            if( nearest[adjacent] >= 0 ) return;
+            nearest[adjacent] = nearest[index];
+            queue.push_back( adjacent );
+        };
+        if( x > 0 ) visit( index - 1 );
+        if( x + 1 < width ) visit( index + 1 );
+        if( y > 0 ) visit( index - width );
+        if( y + 1 < height ) visit( index + width );
+    }
+    const int target = targetY * width + targetX;
+    struct donor
+    {
+        int index = -1;
+        double sweptVolume = 0.0;
+    };
+    std::vector<donor> donors;
+    double reconstructedImport = 0.0;
+    for( int i = 0; i < count; ++i )
+    {
+        if( cells[i].active || nearest[i] != target ||
+            cells[i].solidSweptDivergenceVolume == 0.0 ) continue;
+        reconstructedImport += cells[i].solidSweptDivergenceVolume;
+        donors.push_back( { i, cells[i].solidSweptDivergenceVolume } );
+    }
+    std::sort( donors.begin(), donors.end(), []( const donor& a, const donor& b )
+    {
+        return std::abs( a.sweptVolume ) > std::abs( b.sweptVolume );
+    } );
+    const auto& cell = cells[target];
+    const double observedImport = cell.pressureSourceDeltaVolume -
+        cell.solidSweptDivergenceVolume;
+    const std::array<double, 4> opens{{
+        field.getUFaceOpenFraction( targetX, targetY ),
+        field.getUFaceOpenFraction( targetX + 1, targetY ),
+        field.getVFaceOpenFraction( targetX, targetY ),
+        field.getVFaceOpenFraction( targetX, targetY + 1 )
+    }};
+    std::printf( "capsule_tangent_source_route,%d,%d,%d,%d,%d,"
+        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%zu,"
+        "%.12g,%.12g,%.12g,%.12g\n",
+        aligned ? 1 : 0, frame, policy, targetX, targetY,
+        static_cast<double>( cell.previousFraction ),
+        static_cast<double>( cell.currentFraction ),
+        cell.solidSweptDivergenceVolume, cell.pressureSourceDeltaVolume,
+        observedImport, reconstructedImport, donors.size(),
+        opens[0], opens[1], opens[2], opens[3] );
+    for( std::size_t i = 0; i < std::min<std::size_t>( donors.size(), 8 ); ++i )
+    {
+        const donor& d = donors[i];
+        std::printf( "capsule_tangent_source_donor,%d,%d,%d,%d,%d,%d,%d,"
+            "%.12g\n", aligned ? 1 : 0, frame, policy, targetX, targetY,
+            d.index % width, d.index / width, d.sweptVolume );
+    }
+}
+
 // Controlled moving-Capsule S2c policy A/B. Both policies are fixed before
 // the first step, and the same prescribed obstacle path and Wind forcing are
 // supplied to independent copies. The frame-9 entry velocities are compared
@@ -1126,6 +1211,14 @@ void auditCapsuleTangentMovingPressure()
                             flow.maxFaceY,
                             static_cast<double>( flow.maxFaceVelocity ),
                             static_cast<double>( flow.maxFaceOpenFraction ) );
+                        auditCapsulePressureSourceRouting( field, width, height,
+                            dt, aligned, frame, policy, worstX, worstY );
+                        // Compare the same nearly covered cell in both policies,
+                        // even when the global worst cell is elsewhere.
+                        if( aligned && frame == 9 &&
+                            ( worstX != 30 || worstY != 6 ) )
+                            auditCapsulePressureSourceRouting( field, width, height,
+                                dt, aligned, frame, policy, 30, 6 );
                     }
                 }
             priorY = y;
