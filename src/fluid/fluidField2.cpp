@@ -426,10 +426,12 @@ struct analyticFluidCapsule
     std::array<analyticPoint2, 4> preciseCore{};
     double preciseAxisX = 0.0, preciseAxisY = 0.0;
     bool usePreciseGeometry = false;
+    bool includeTangentFaceContacts = false;
 };
 
 bool TryGetAnalyticCapsule( std::span<const fluidShapeObstacle2> obstacles,
-    analyticFluidCapsule& result, bool usePreciseGeometry = false )
+    analyticFluidCapsule& result, bool usePreciseGeometry = false,
+    bool includeTangentFaceContacts = false )
 {
     if( obstacles.size() != 1 || !IsValidFluidObstacle( obstacles.front() ) ) return false;
     const auto* shape = std::get_if<capsule2>( &obstacles.front().geometry );
@@ -456,6 +458,7 @@ bool TryGetAnalyticCapsule( std::span<const fluidShapeObstacle2> obstacles,
     result.core.vertices[2] = b + radiusVector;
     result.core.vertices[3] = a + radiusVector;
     result.usePreciseGeometry = usePreciseGeometry;
+    result.includeTangentFaceContacts = includeTangentFaceContacts;
     if( usePreciseGeometry )
     {
         const double ux = dx / length, uy = dy / length;
@@ -515,8 +518,16 @@ analyticCircleInterval ClipCapsuleFace( const analyticFluidCapsule& capsule,
     const double maxX = std::max( capsule.first.center.x, capsule.last.center.x ) + r;
     const double minY = std::min( capsule.first.center.y, capsule.last.center.y ) - r;
     const double maxY = std::max( capsule.first.center.y, capsule.last.center.y ) + r;
-    if( vertical ? ( coordinate <= minX || coordinate >= maxX || high <= minY || low >= maxY )
-                 : ( coordinate <= minY || coordinate >= maxY || high <= minX || low >= maxX ) )
+    // Exactly grid-aligned flat Capsule core sides have a positive tangent
+    // contact interval; legacy early reject drops these boundary faces.
+    const bool outsideX = capsule.includeTangentFaceContacts
+        ? coordinate < minX || coordinate > maxX
+        : coordinate <= minX || coordinate >= maxX;
+    const bool outsideY = capsule.includeTangentFaceContacts
+        ? coordinate < minY || coordinate > maxY
+        : coordinate <= minY || coordinate >= maxY;
+    if( vertical ? ( outsideX || high <= minY || low >= maxY )
+                 : ( outsideY || high <= minX || low >= maxX ) )
         return {};
     const std::array<analyticCircleInterval, 3> parts{
         capsule.usePreciseGeometry
@@ -1051,7 +1062,7 @@ bool HasPartialCircleOverlap( const analyticDisjointShape2& first,
 }
 
 std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
-    std::span<const fluidShapeObstacle2> obstacles )
+    std::span<const fluidShapeObstacle2> obstacles, bool includeTangentFaces = false )
 {
     if( obstacles.size() < 2 ) return {};
     std::vector<analyticDisjointShape2> shapes;
@@ -1066,7 +1077,8 @@ std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
         analyticFluidPolygon polygon{};
         analyticFluidRoundedPolygon rounded{};
         if( TryGetAnalyticCircle( single, circle ) ) analytic.geometry = circle;
-        else if( TryGetAnalyticCapsule( single, capsule ) ) analytic.geometry = capsule;
+        else if( TryGetAnalyticCapsule( single, capsule, false, includeTangentFaces ) )
+            analytic.geometry = capsule;
         else if( TryGetAnalyticPolygon( single, polygon ) ) analytic.geometry = polygon;
         else if( TryGetAnalyticRoundedPolygon( single, rounded ) ) analytic.geometry = rounded;
         else return {};
@@ -1289,6 +1301,13 @@ void fluidField2::setAnalyticCapsuleFullCoverageGuardEnabled( bool enabled ) noe
 {
     if( analyticCapsuleFullCoverageGuardEnabled_ == enabled ) return;
     analyticCapsuleFullCoverageGuardEnabled_ = enabled;
+    invalidateObstacleHistory();
+}
+
+void fluidField2::setAnalyticCapsuleTangentFaceAuditEnabled( bool enabled ) noexcept
+{
+    if( analyticCapsuleTangentFaceAuditEnabled_ == enabled ) return;
+    analyticCapsuleTangentFaceAuditEnabled_ = enabled;
     invalidateObstacleHistory();
 }
 
@@ -1696,7 +1715,8 @@ fluidCapsuleCellAreaAudit2 fluidField2::getAnalyticCapsuleCellAreaAudit(
         x < 0 || x >= width_ || y < 0 || y >= height_ ) return result;
     analyticFluidCapsule capsule{};
     if( !TryGetAnalyticCapsule( std::span<const fluidShapeObstacle2>( &obstacle, 1 ),
-        capsule, analyticCapsuleDoubleGeometryEnabled_ ) ) return result;
+        capsule, analyticCapsuleDoubleGeometryEnabled_,
+            analyticCapsuleTangentFaceAuditEnabled_ ) ) return result;
 
     const double h = cellSize_;
     const double left = origin_.x + x * h;
@@ -1749,7 +1769,8 @@ std::optional<double> fluidField2::getAnalyticCapsuleFaceOpenFractionForAudit(
 
     analyticFluidCapsule capsule{};
     if( !TryGetAnalyticCapsule( std::span<const fluidShapeObstacle2>( &obstacle, 1 ),
-        capsule, analyticCapsuleDoubleGeometryEnabled_ ) )
+        capsule, analyticCapsuleDoubleGeometryEnabled_,
+            analyticCapsuleTangentFaceAuditEnabled_ ) )
         return std::nullopt;
 
     const double h = cellSize_;
@@ -1824,7 +1845,7 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     // Rebuild for this World snapshot. Swept intermediate snapshots differ.
     analyticDisjointCache_.reset();
     auto disjointShapes = disjointAnalyticCutCellEnabled_
-        ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+        ? BuildDisjointAnalyticShapes( obstacles, analyticCapsuleTangentFaceAuditEnabled_ ) : std::vector<analyticDisjointShape2>{};
     const bool disjointGeometry = !disjointShapes.empty();
     analyticUBlockedFaces_.clear();
     analyticVBlockedFaces_.clear();
@@ -2052,7 +2073,8 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
             TryGetAnalyticPolygon( obstacles, polygon );
         const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
             analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule,
-                analyticCapsuleDoubleGeometryEnabled_ );
+                analyticCapsuleDoubleGeometryEnabled_,
+            analyticCapsuleTangentFaceAuditEnabled_ );
         const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
             analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded );
         if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
@@ -3352,7 +3374,7 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
     int partialFaces = 0;
     const auto referenceShapes = analyticDisjointCache_
         ? std::vector<analyticDisjointShape2>{} : disjointAnalyticCutCellEnabled_
-            ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+            ? BuildDisjointAnalyticShapes( obstacles, analyticCapsuleTangentFaceAuditEnabled_ ) : std::vector<analyticDisjointShape2>{};
     const auto& disjointShapes = analyticDisjointCache_
         ? analyticDisjointCache_->shapes : referenceShapes;
     if( !disjointShapes.empty() )
@@ -3423,7 +3445,8 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
         TryGetAnalyticPolygon( obstacles, polygon );
     const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
         analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule,
-                analyticCapsuleDoubleGeometryEnabled_ );
+                analyticCapsuleDoubleGeometryEnabled_,
+            analyticCapsuleTangentFaceAuditEnabled_ );
     const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
         analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded );
     if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
@@ -3670,7 +3693,7 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
             }
 
             const auto disjointShapes = disjointAnalyticCutCellEnabled_
-                ? BuildDisjointAnalyticShapes( intermediate ) : std::vector<analyticDisjointShape2>{};
+                ? BuildDisjointAnalyticShapes( intermediate, analyticCapsuleTangentFaceAuditEnabled_ ) : std::vector<analyticDisjointShape2>{};
             if( !disjointShapes.empty() )
             {
                 const double h = cellSize_;
@@ -3798,7 +3821,8 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                 TryGetAnalyticPolygon( intermediate, polygon );
             const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
                 analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( intermediate, capsule,
-                    analyticCapsuleDoubleGeometryEnabled_ );
+                    analyticCapsuleDoubleGeometryEnabled_,
+            analyticCapsuleTangentFaceAuditEnabled_ );
             const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
                 analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( intermediate, rounded );
             if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
@@ -3958,7 +3982,7 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                     rot2::FromRadians( startAngles[i] + angularSpeeds[i] * timeStep * alpha );
             }
             const auto analyticShapes = disjointAnalyticCutCellEnabled_
-                ? BuildDisjointAnalyticShapes( intermediate ) :
+                ? BuildDisjointAnalyticShapes( intermediate, analyticCapsuleTangentFaceAuditEnabled_ ) :
                     std::vector<analyticDisjointShape2>{};
             // Match the SINGLE-shape analytic geometry used by the live
             // Cut-cell and swept-solid flux paths. A sampled face stencil
@@ -3973,7 +3997,8 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
                 analyticPolygonCutCellEnabled_ && TryGetAnalyticPolygon( intermediate, polygon );
             const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
                 analyticShapes.empty() && analyticCapsuleCutCellEnabled_ &&
-                TryGetAnalyticCapsule( intermediate, capsule, analyticCapsuleDoubleGeometryEnabled_ );
+                TryGetAnalyticCapsule( intermediate, capsule, analyticCapsuleDoubleGeometryEnabled_,
+            analyticCapsuleTangentFaceAuditEnabled_ );
             const bool roundedGeometry = !circleGeometry && !polygonGeometry &&
                 !capsuleGeometry && analyticShapes.empty() &&
                 analyticRoundedPolygonCutCellEnabled_ &&
@@ -4787,7 +4812,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     {
         const auto referenceShapes = analyticDisjointCache_
             ? std::vector<analyticDisjointShape2>{} : disjointAnalyticCutCellEnabled_
-                ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+                ? BuildDisjointAnalyticShapes( obstacles, analyticCapsuleTangentFaceAuditEnabled_ ) : std::vector<analyticDisjointShape2>{};
         const auto& disjointShapes = analyticDisjointCache_
             ? analyticDisjointCache_->shapes : referenceShapes;
         if( !disjointShapes.empty() )
@@ -4859,7 +4884,8 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
             TryGetAnalyticPolygon( obstacles, polygon );
         const bool capsuleGeometry = !circleGeometry && !polygonGeometry &&
             analyticCapsuleCutCellEnabled_ && TryGetAnalyticCapsule( obstacles, capsule,
-                analyticCapsuleDoubleGeometryEnabled_ );
+                analyticCapsuleDoubleGeometryEnabled_,
+            analyticCapsuleTangentFaceAuditEnabled_ );
         const bool roundedGeometry = !circleGeometry && !polygonGeometry && !capsuleGeometry &&
             analyticRoundedPolygonCutCellEnabled_ && TryGetAnalyticRoundedPolygon( obstacles, rounded );
         if( circleGeometry || polygonGeometry || capsuleGeometry || roundedGeometry )
