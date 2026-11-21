@@ -581,7 +581,7 @@ void auditSmallCellPressureCadences()
 void auditCapsuleTangentFacePressure()
 {
     std::puts( "capsule_tangent_summary,case_id,inclusive,active_cells,"
-        "changed_faces,source_u_mps,source_v_mps,exchange_x_ns,"
+        "source_u_mps,source_v_mps,exchange_x_ns,"
         "exchange_y_ns,abs_six_cell_y_ns,signed_six_cell_y_ns,"
         "coupled_failed,pressure_relative_residual,tracer_kg,"
         "step_ms" );
@@ -728,10 +728,10 @@ void auditCapsuleTangentFacePressure()
                     }
 
             residualY[policy] = pressure.impulse.residual().y;
-            std::printf( "capsule_tangent_summary,%d,%d,%d,%d,"
+            std::printf( "capsule_tangent_summary,%d,%d,%d,"
                 "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
                 "%d,%.12g,%.12g,%.12g\n",
-                scenario, policy, pressure.activeCells, changedFaces,
+                scenario, policy, pressure.activeCells,
                 static_cast<double>( sourceU ), static_cast<double>( sourceV ),
                 static_cast<double>( pressure.impulse.residual().x ),
                 residualY[policy], absoluteSix, signedSix,
