@@ -1052,35 +1052,23 @@ void auditCapsuleTangentMovingPressure()
                         std::printf( ",%.12g", v );
                     }
                     std::putchar( '\n' );
-                    // Identify the worst global continuity cell independently
-                    // of the donor. Read-only: this cannot alter the solver.
+                    // The summary has already localized the global maximum;
+                    // log its actual pressure/geometry terms and the adjacent
+                    // four cells without adding a second full-grid traversal.
                     if( frame == 9 || frame == 10 )
                     {
-                        double worstMagnitude = -1.0;
-                        int worstX = -1, worstY = -1;
-                        fluidCutCellVolumeBudget2 worst{};
-                        for( int cy = 0; cy < height; ++cy )
-                            for( int cx = 0; cx < width; ++cx )
-                            {
-                                const auto candidate =
-                                    field.getCutCellVolumeBudget( cx, cy, dt );
-                                if( !candidate.valid || !candidate.active ) continue;
-                                const double magnitude =
-                                    std::abs( candidate.pressureResidualVolume );
-                                if( !std::isfinite( magnitude ) )
-                                    throw std::runtime_error(
-                                        "moving tangent nonfinite cell residual" );
-                                if( magnitude > worstMagnitude )
-                                {
-                                    worstMagnitude = magnitude;
-                                    worstX = cx;
-                                    worstY = cy;
-                                    worst = candidate;
-                                }
-                            }
-                        if( worstX < 0 )
+                        const int worstX = volume.worstPressureX;
+                        const int worstY = volume.worstPressureY;
+                        if( worstX < 0 || worstY < 0 )
                             throw std::runtime_error(
-                                "moving tangent missing active pressure cell" );
+                                "moving tangent missing worst pressure cell" );
+                        const auto worst = field.getCutCellVolumeBudget(
+                            worstX, worstY, dt );
+                        if( !worst.valid || !worst.active ||
+                            std::abs( std::abs( worst.pressureResidualVolume ) -
+                                volume.maxAbsPressureResidualVolume ) > 1.0e-12 )
+                            throw std::runtime_error(
+                                "moving tangent inconsistent global residual maximum" );
                         std::printf( "capsule_tangent_worst_cell,%d,%d,%d,%d,%d,"
                             "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
                             aligned ? 1 : 0, frame, policy, worstX, worstY,
@@ -1089,6 +1077,55 @@ void auditCapsuleTangentMovingPressure()
                             worst.solidSweptDivergenceVolume,
                             worst.pressureResidualVolume,
                             volume.maxAbsPressureResidualVolume );
+
+                        // Index 0 is the worst cell; 1..4 are W/E/S/N.
+                        constexpr std::array<int, 5> dx{{ 0, -1, 1, 0, 0 }};
+                        constexpr std::array<int, 5> dy{{ 0, 0, 0, -1, 1 }};
+                        for( int neighbor = 0; neighbor < 5; ++neighbor )
+                        {
+                            const int cx = worstX + dx[neighbor];
+                            const int cy = worstY + dy[neighbor];
+                            if( cx < 0 || cx >= width ||
+                                cy < 0 || cy >= height ) continue;
+                            const auto cell = field.getCutCellVolumeBudget(
+                                cx, cy, dt );
+                            if( !cell.valid )
+                                throw std::runtime_error(
+                                    "moving tangent invalid neighbor budget" );
+                            const std::array<double, 13> values{{
+                                cell.previousFraction, cell.currentFraction,
+                                cell.snapshotDeltaVolume,
+                                cell.pressureSourceDeltaVolume,
+                                cell.solidSweptDivergenceVolume,
+                                cell.macNetOutwardVolume,
+                                cell.pressureResidualVolume,
+                                cell.snapshotResidualVolume,
+                                cell.sweptResidualVolume,
+                                field.getUFaceOpenFraction( cx, cy ),
+                                field.getUFaceOpenFraction( cx + 1, cy ),
+                                field.getVFaceOpenFraction( cx, cy ),
+                                field.getVFaceOpenFraction( cx, cy + 1 )
+                            }};
+                            std::printf(
+                                "capsule_tangent_pressure_stencil,%d,%d,%d,%d,%d,%d,%d",
+                                aligned ? 1 : 0, frame, policy, neighbor,
+                                cx, cy, cell.active ? 1 : 0 );
+                            for( const double value : values )
+                            {
+                                if( !std::isfinite( value ) )
+                                    throw std::runtime_error(
+                                        "moving tangent nonfinite stencil budget" );
+                                std::printf( ",%.12g", value );
+                            }
+                            std::putchar( '\n' );
+                        }
+                        std::printf( "capsule_tangent_peak_face,%d,%d,%d,%d,%d,%d,"
+                            "%.12g,%.12g\n",
+                            aligned ? 1 : 0, frame, policy,
+                            flow.maxFaceIsU ? 1 : 0, flow.maxFaceX,
+                            flow.maxFaceY,
+                            static_cast<double>( flow.maxFaceVelocity ),
+                            static_cast<double>( flow.maxFaceOpenFraction ) );
                     }
                 }
             priorY = y;
