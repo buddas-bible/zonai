@@ -757,6 +757,11 @@ void auditCapsuleTangentFacePressure()
                 static_cast<double>( pressure.coupledRelativeResidual ),
                 mass, field.getStepTiming().total );
         }
+        int changedUFaces = 0, changedVFaces = 0;
+        int fullLengthFaces = 0, partialLengthFaces = 0;
+        std::puts( "capsule_tangent_changed_face,case_id,UV,x,y,legacy_open,"
+            "inclusive_open,raw_restored_length_m,flat_core_oracle_length_m,"
+            "is_tangent_flat_side" );
         for( int y = 0; y < entry.getHeight(); ++y )
             for( int x = 0; x < entry.getWidth(); ++x )
             {
@@ -769,20 +774,64 @@ void auditCapsuleTangentFacePressure()
                     replay[1].getCellPressureForVisualization( x, y ) ) > 1.0e-6 )
                     throw std::runtime_error(
                         "tangent policy changed rotated/Circle pressure" );
-                if( x > 0 &&
-                    std::abs( replay[0].getUFaceOpenFraction( x, y ) -
-                    replay[1].getUFaceOpenFraction( x, y ) ) > 1.0e-6 )
+                const auto compareFace = [&]( bool vertical )
+                {
+                    const float oldOpen = vertical
+                        ? replay[0].getUFaceOpenFraction( x, y )
+                        : replay[0].getVFaceOpenFraction( x, y );
+                    const float newOpen = vertical
+                        ? replay[1].getUFaceOpenFraction( x, y )
+                        : replay[1].getVFaceOpenFraction( x, y );
+                    if( std::abs( newOpen - oldOpen ) <= 1.0e-6f )
+                        return;
                     ++changedFaces;
-                if( y > 0 &&
-                    std::abs( replay[0].getVFaceOpenFraction( x, y ) -
-                    replay[1].getVFaceOpenFraction( x, y ) ) > 1.0e-6 )
-                    ++changedFaces;
+                    if( vertical ) ++changedUFaces;
+                    else ++changedVFaces;
+                    const double length = static_cast<double>( h ) *
+                        ( static_cast<double>( oldOpen ) - newOpen );
+                    const double coordinate = vertical
+                        ? entry.getOrigin().x + x * h
+                        : entry.getOrigin().y + y * h;
+                    const bool onFlatSide = scenario == 0 && !vertical &&
+                        ( std::abs( coordinate - ( axisStart.y - capsule->radius ) ) <
+                              1.0e-6 ||
+                          std::abs( coordinate - ( axisStart.y + capsule->radius ) ) <
+                              1.0e-6 );
+                    const double faceLeft = entry.getOrigin().x + x * h;
+                    const double oracle = onFlatSide
+                        ? std::max( 0.0, std::min( faceLeft + h, endX ) -
+                            std::max( faceLeft, startX ) )
+                        : 0.0;
+                    std::printf( "capsule_tangent_changed_face,%d,%c,%d,%d,"
+                        "%.12g,%.12g,%.12g,%.12g,%d\n",
+                        scenario, vertical ? 'U' : 'V', x, y,
+                        static_cast<double>( oldOpen ),
+                        static_cast<double>( newOpen ), length, oracle,
+                        onFlatSide ? 1 : 0 );
+                    if( scenario == 0 )
+                    {
+                        if( !onFlatSide || length <= 0.0 ||
+                            std::abs( length - oracle ) > 1.0e-6 )
+                            throw std::runtime_error(
+                                "tangent face differed outside independent flat-side oracle" );
+                        if( std::abs( length - h ) <= 1.0e-6 )
+                            ++fullLengthFaces;
+                        else ++partialLengthFaces;
+                    }
+                };
+                if( x > 0 ) compareFace( true );
+                if( y > 0 ) compareFace( false );
             }
         std::printf( "capsule_tangent_comparison,%d,%d,%.12g,%.12g\n",
             scenario, changedFaces, residualY[0], residualY[1] );
         if( scenario == 0 )
         {
-            if( changedFaces < 6 ||
+            std::printf( "capsule_tangent_changed_summary,%d,%d,%d,%d,%d\n",
+                changedFaces, changedUFaces, changedVFaces,
+                fullLengthFaces, partialLengthFaces );
+            if( changedFaces != 10 || changedUFaces != 0 ||
+                changedVFaces != 10 || fullLengthFaces != 6 ||
+                partialLengthFaces != 4 ||
                 std::abs( residualY[0] ) < 1.0e-3 ||
                 std::abs( residualY[1] ) >
                     0.05 * std::abs( residualY[0] ) )
