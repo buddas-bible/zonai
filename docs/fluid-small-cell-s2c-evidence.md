@@ -3119,3 +3119,35 @@ The combined Y residual is almost the algebraic sum of the independently forced 
 **Do not overgeneralize:** This is the startup, stationary-pose three-Body diagnostic with Wind source; it is not the separate moving, boundary-adjacent frame-9 Capsule blow-up. It localizes a concrete discretization inconsistency and suggests a possible geometric fix, but **does not establish that this single bug causes the later pressure spikes**. It is not appropriate to clamp forces or simply adjust the global wall impulse to hide the missing local interface traction.
 
 **Next bounded proof/fix:** Add an independent *exact flat-side face interval oracle* at the two grid-aligned Capsule AABB tangent coordinates. Compare raw geometric aperture, effective pressure/MAC aperture, and the compiled Schur B normal coefficient at the six cells; validate the inferred missing interval length. Then run an **opt-in matched-state** boundary rule experiment replacing Capsule's tangent-face AABB early reject with a geometrically inclusive test, rerunning all six-cell coefficients, global pressure exchange, rotated and circular-tangent controls, tracer transport, and CPU cost. Keep legacy solver defaults and experimental pressure pooling OFF until this isolated counterfactual and CI establish that the correction is safe.
+
+
+### S2c opt-in Capsule grid-tangent face inclusion — 2026-11-21
+
+**Observed source defect, now causally isolated in the controlled startup case.** The horizontal Capsule core has two straight boundary segments at world Y 0.75 and 1.25 m, exactly coincident with V face grid lines on a 0.25 m MAC grid. Legacy `ClipCapsuleFace()` uses `coordinate <= minY || coordinate >= maxY` to reject any Capsule AABB tangent face. This rejects the **positive-length flat-core** segment, even while `cutCellVOpen()` correctly disables fluid transport on a face adjoining a completely solid cell. The pressure Schur assembly receives no solid-normal traction coefficient there. The six pressure cells at (24–26,16) and (24–26,19) therefore carry a pressure-gradient fluid Y impulse with no opposite Body Y impulse.
+
+**Experiment only, original defaults unchanged:** [`8e6517dc`](https://github.com/buddas-bible/zonai/commit/8e6517dc27e082c580957ab9ea8819f46e788401) implements `setAnalyticCapsuleTangentFaceAuditEnabled(bool)`, default **false**. The opt-in path uses inclusive extrema for Capsule's face AABB *early rejection* only (`coordinate < min || coordinate > max`); the existing precise polygon/cap clipping still decides whether the intersection really has positive length. The same policy is threaded through both single-Capsule and disjoint multi-shape analytic geometry, face apertures, bounded face clipping, Schur traction, swept-solid integration and optional research geometry snapshots. Switching the policy invalidates previous moving-solid volume history, preventing mixed-geometry false sources. No global/static switch, no correction impulse, no velocity/pressure clamp, no enabled production path.
+
+**Controlled A/B regression:** [`4f716b30`](https://github.com/buddas-bible/zonai/commit/4f716b303d5bf4d4c989baf773759ef2fab9bfea) and follow-up [`33481f6f`](https://github.com/buddas-bible/zonai/commit/33481f6fc9c272cf8c34db57870c2a60b357bc39) provide `--capsule-tangent-pressure-audit` (Ubuntu Debug and Windows Release CI). Each pair starts from identical copied first-step Field MAC state and world obstacle geometry, feeds the same first-frame Wind source, then runs the actual coupled PCG with policy OFF/ON and 200 iteration budget. There are also a Capsule rotated by 0.23 rad and an exact-grid-tangent standalone Circle, for which the Capsule-only policy must not change the pressure field or effective apertures. The standalone Circle intentionally does **not** expose the analytic multi-shape impulse ledger; its pressure is compared directly instead. The initial CI attempt failed because the test incorrectly required that ledger for this single-Circle fallback; that **test requirement** was corrected without changing the physics.
+
+#### Matched first-step Windows Release results (2026-11-21)
+
+| Quantity | Legacy (OFF) | Inclusive Capsule tangent (ON) |
+| --- | ---: | ---: |
+| Coupled PCG | converged | converged |
+| Total pressure exchange residual Y (N·s) | -0.002693135757 | +9.31322574615e-10 |
+| Six aligned boundary cells' absolute residual sum (N·s) | 0.0292036787005 | 0 |
+| Six aligned boundary cells' signed residual sum (N·s) | -0.00269313568015 | 0 |
+| Each of the six V faces' raw blocked length (m) | 0 | 0.25 |
+| Independent geometric straight-side face intersection (m) | 0.25 | 0.25 |
+| Number of raw open-face fractions changed by the policy | \- | **10** across the field |
+| Coupled relative pressure solver residual | 9.26849e-6 | 5.42466e-6 |
+| Tracer inventory (kg) | 0.0625 | 0.0625 |
+| One-sample elapsed Field step (ms) | 2.3264 | 2.2208 |
+
+The absolute Y exchange residual decreases by approximately **99.9999654%** for this matched case, and each of the six measured pressure cells exhibits equal-and-opposite pressure-driven MAC/solid impulse after correction. **Do not interpret** the single timing pair as a performance speedup; benchmark in a sustained, controlled fixture before making any cost claim. The 10 raw-face changes exceed the six specifically proven flat-side cells: all extra changes must be inspected before enabling this option generally.
+
+**Control cases:** The 0.23 rad rotated Capsule has **zero** changed face apertures and identical pressure exchange residual (`-1.39698386192e-9 N·s`) in both branches. The single-Circle tangent fixture likewise has **zero** changed faces and identical pressure field; its non-disjoint pressure impulse ledger is correctly not asserted. Both controls preserve `0.0625 kg` tracer inventory. The test also compares *all* cell fluid fractions across matched branches, rejecting any unintended cell-area change.
+
+**Verification:** [GitHub Actions #44842165828](https://github.com/buddas-bible/zonai/actions/runs/44842165828) — the new Capsule tangent A/B step succeeded on **Ubuntu Debug and Windows Release**; the Windows full job finished **SUCCESS**. The Ubuntu full job was continuing its preexisting late-stage pressure regressions at the moment this entry was written. The earlier failed intermediate workflows were superseded by the corrected Circle control.
+
+**Acceptance boundary:** This is strong evidence for a specific **discrete static first-step momentum-accounting** bug at a grid-aligned Capsule's flat-side tangency. The coupled World8 dynamics, moving-solid GCL, tracer exchange under a moving interface, near-wall frame-9 pressure spikes, other aligned polygon degeneracies, and all 10 modified raw faces require independent matched-state validation. Keep the toggle OFF by default, PR #326 Draft and unmerged. Next S2c gate: inspect the four additional modified faces, replay moving/swept Capsule states with opt-in OFF/ON from identical pre-step copies, and run rotational/near-wall regression and controlled CPU samples before any production default change.
