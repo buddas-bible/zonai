@@ -105,6 +105,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-pressure-coefficient-audit
 
+      # Default-off Capsule tangent-face contact counterfactual: same initial
+      # MAC/obstacle state, with Circle and rotated-Capsule controls.
+      - name: Audit inclusive Capsule tangent pressure exchange (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --capsule-tangent-pressure-audit
+
       - name: Probe local tracer near disappearing Cut-cell (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-local-tracer-audit
@@ -438,6 +444,10 @@ jobs:
       - name: Rank first-step Cut-cell pressure exchange coefficients (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --small-cell-pressure-coefficient-audit
+
+      - name: Audit inclusive Capsule tangent pressure exchange (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --capsule-tangent-pressure-audit
 
       - name: Probe local tracer near disappearing Cut-cell (Windows Release, informational)
         if: runner.os == 'Windows'
