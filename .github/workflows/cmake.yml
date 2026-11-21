@@ -111,6 +111,12 @@ jobs:
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --capsule-tangent-pressure-audit
 
+      # S2c moving prescribed Capsule: original near-wall frame 9 and a
+      # true grid-tangent frame 9, both policies from identical starts.
+      - name: Audit moving Capsule tangent and frame-9 pressure (Ubuntu Debug)
+        if: runner.os == 'Linux'
+        run: ./build/tests/sandboxWindStepBenchmark --capsule-tangent-moving-audit
+
       - name: Probe local tracer near disappearing Cut-cell (Ubuntu Debug, informational)
         if: runner.os == 'Linux'
         run: ./build/tests/sandboxWindStepBenchmark --small-cell-local-tracer-audit
@@ -448,6 +454,10 @@ jobs:
       - name: Audit inclusive Capsule tangent pressure exchange (Windows Release)
         if: runner.os == 'Windows'
         run: .\\build\\tests\\Release\\sandboxWindStepBenchmark.exe --capsule-tangent-pressure-audit
+
+      - name: Audit moving Capsule tangent and frame-9 pressure (Windows Release)
+        if: runner.os == 'Windows'
+        run: .\build\tests\Release\sandboxWindStepBenchmark.exe --capsule-tangent-moving-audit
 
       - name: Probe local tracer near disappearing Cut-cell (Windows Release, informational)
         if: runner.os == 'Windows'
