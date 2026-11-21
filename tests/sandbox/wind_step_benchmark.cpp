@@ -680,7 +680,7 @@ void auditCapsuleTangentFacePressure()
             const auto& pressure = field.getCutCellPressure();
             if( !pressure.usedCoupledProjection ||
                 pressure.coupledSolveFailed ||
-                !pressure.hasAnalyticImpulseBudget ||
+                ( scenario != 2 && !pressure.hasAnalyticImpulseBudget ) ||
                 pressure.mergedPressureCells != 0 )
             {
                 std::fprintf( stderr,
@@ -700,8 +700,13 @@ void auditCapsuleTangentFacePressure()
             if( !std::isfinite( mass ) ||
                 std::abs( mass - beforeMass ) > 1.0e-6 )
                 throw std::runtime_error( "Capsule tangent tracer mass drift" );
-            const auto ledger = field.getCutCellPressureCellImpulseAudit( dt );
-            if( !ledger ) throw std::runtime_error( "missing tangent cell ledger" );
+            // Existing pressure impulse ledger covers analytic multi-shape
+            // Schur only; the single-Circle control checks pressure directly.
+            const auto ledger = scenario == 2
+                ? std::optional<std::vector<fluidCutCellPressureCellImpulseAudit2>>{}
+                : field.getCutCellPressureCellImpulseAudit( dt );
+            if( scenario != 2 && !ledger )
+                throw std::runtime_error( "missing tangent multi-shape cell ledger" );
             double signedSix = 0.0, absoluteSix = 0.0;
             if( scenario == 0 )
                 for( const int faceY : { 17, 19 } )
@@ -759,6 +764,11 @@ void auditCapsuleTangentFacePressure()
                     replay[1].getCellFluidFraction( x, y ) ) > 1.0e-6 )
                     throw std::runtime_error(
                         "tangent policy changed cell area rather than face clip" );
+                if( scenario != 0 && std::abs(
+                    replay[0].getCellPressureForVisualization( x, y ) -
+                    replay[1].getCellPressureForVisualization( x, y ) ) > 1.0e-6 )
+                    throw std::runtime_error(
+                        "tangent policy changed rotated/Circle pressure" );
                 if( x > 0 &&
                     std::abs( replay[0].getUFaceOpenFraction( x, y ) -
                     replay[1].getUFaceOpenFraction( x, y ) ) > 1.0e-6 )
