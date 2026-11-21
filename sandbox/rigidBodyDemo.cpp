@@ -261,6 +261,39 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                 const vec2 velocityDelta{ windSourceStrength_ * windTimeStep, 0.5f * windSourceStrength_ * windTimeStep * std::sin( 1.7f * windTime_ ) };
                 windField_->addVelocity( source, velocityDelta, 1.7f );
             }
+            if( windDyeEmitterEnabled_ && windDyeEmitterRate_ > 0.0f )
+            {
+                // Explicit passive mass source at one fluid cell. Physics force
+                // and pressure are unchanged; tracerStats will include this
+                // injected mass as the START inventory of the fluid substep.
+                const float h = windField_->getCellSize();
+                const vec2 lower = windField_->getOrigin();
+                const float sourceX = lower.x + std::min(
+                    2.5f, 0.25f * windField_->getWidth() * h );
+                // Follow the actual Wind source location after grid resizing,
+                // rather than assuming the default 24x14 cell coordinates.
+                const int x = std::clamp( static_cast<int>(
+                    std::floor( ( sourceX - lower.x ) / h ) ),
+                    1, windField_->getWidth() - 2 );
+                const int y = std::clamp( static_cast<int>(
+                    std::floor( -lower.y / h ) ),
+                    1, windField_->getHeight() - 2 );
+                // Match fluidField2::tracerCellFraction(): binary occupancy
+                // in the standard solver, geometric fraction in Cut-cell mode.
+                const float fraction = windField_->isCutCellProjectionEnabled()
+                    ? windField_->getCellFluidFraction( x, y )
+                    : ( windField_->isSolidCell( x, y ) ? 0.0f : 1.0f );
+                const double volume = static_cast<double>( fraction ) *
+                    windField_->getCellSize() * windField_->getCellSize();
+                if( volume > 0.0 )
+                {
+                    const double current = windField_->getTracerCellMass( x, y );
+                    const double next = ( current +
+                        static_cast<double>( windDyeEmitterRate_ ) * windTimeStep ) / volume;
+                    if( std::isfinite( next ) && next <= std::numeric_limits<float>::max() )
+                        windField_->setTracerConcentration( x, y, static_cast<float>( next ) );
+                }
+            }
             // fluidField2는 World나 Body를 소유하지 않음. 매 Step마다 실제 pose/속도를 전달함.
             const std::size_t obstacleCount = shapes_.size();
             windObstacleSnapshots_.assign( obstacleCount, {} );
@@ -318,6 +351,7 @@ void rigidBodyDemo::step( float timeStep, int subStepCount )
                     std::span<fluidObstacleForce2>( windObstacleFeedback_ ).subspan( 3 ) );
             }
             else windField_->step( windTimeStep );
+            windLastFluidTimeStep_ = windTimeStep;
             if( windStepProfilingEnabled_ )
             {
                 windFieldTiming_.accumulate( windField_->getStepTiming() );
@@ -1456,6 +1490,12 @@ void rigidBodyDemo::setWindFluidSubstepCount( int count ) noexcept
     windFluidSubstepCount_ = std::clamp( count, 1, 32 );
 }
 
+void rigidBodyDemo::setWindTracerStageObserverForAudit(
+    fluidField2::tracerStageObserver2 observer )
+{
+    if( windField_ ) windField_->setTracerStageObserver( std::move( observer ) );
+}
+
 void rigidBodyDemo::configureWindField( int width, int height, float cellSize )
 {
     if( kind_ != demoKind::windFlow || !windField_ || !std::isfinite( cellSize ) ) return;
@@ -1559,6 +1599,11 @@ void rigidBodyDemo::addWindVortex()
     }
 }
 
+void rigidBodyDemo::setWindDyeEmitterRate( float rate ) noexcept
+{
+    if( std::isfinite( rate ) ) windDyeEmitterRate_ = std::clamp( rate, 0.0f, 10.0f );
+}
+
 void rigidBodyDemo::seedWindTracer()
 {
     if( kind_ != demoKind::windFlow || !windField_ ) return;
@@ -1575,6 +1620,7 @@ void rigidBodyDemo::beginWindAdvectionTrial()
     windSourceEnabled_ = false;
     windObstacleCouplingEnabled_ = false;
     windDragCoefficient_ = 0.0f;
+    windDyeEmitterEnabled_ = false; // Isolated advection must not inject external tracer mass.
     addWindVortex();
 }
 
@@ -1585,6 +1631,7 @@ void rigidBodyDemo::resetWindFlow()
     windFieldTiming_ = {};
     windCoupledTiming_ = {};
     windCouplingAudit_ = {};
+    windLastFluidTimeStep_ = 0.0f;
     windPressureForces_.fill( {} );
     windDragBodyImpulse_ = {};
     windDragFluidImpulse_ = {};

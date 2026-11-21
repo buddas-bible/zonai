@@ -27,6 +27,11 @@ public:
     void DrawShape( const shapeGeometry& geometry, const transform2& transform, ImU32 outlineColor, ImU32 fillColor ) const;
 
     void DrawAABB( const aabb2& box, ImU32 color, float thickness = 1.0f ) const;
+    // Transparent scalar-field tiles in world coordinates; no physics write.
+    void DrawFilledAABB( const aabb2& box, ImU32 color ) const;
+    // Corner order follows world/screen coordinates: TL, TR, BR, BL.
+    void DrawGradientAABB( const aabb2& box, ImU32 topLeft, ImU32 topRight,
+        ImU32 bottomRight, ImU32 bottomLeft ) const;
 
     // dynamicTree의 live node AABB와 debug metadata를 world 위에 표시함.
     void DrawTree( const dynamicTree& tree, const char* treeName, bool showLeaves, bool showInternal, bool showLabels, ImU32 leafColor, ImU32 internalColor ) const;

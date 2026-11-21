@@ -281,6 +281,9 @@ public:
     void setWindSourceStrength( float strength );
     void setWindDragCoefficient( float rate );
     void setWindFluidSubstepCount( int count ) noexcept;
+    // Diagnostic-only observer forwarded to the owned Fluid Field. Do not
+    // expose mutable Field access through the Sandbox public query API.
+    void setWindTracerStageObserverForAudit( fluidField2::tracerStageObserver2 observer );
     // Instrumentation only. Also forces the requested Fluid cadence while
     // comparing coupled vs uncoupled scenes; normal scheduling stays unchanged.
     void setWindCouplingAuditEnabled( bool enabled ) noexcept { windCouplingAuditEnabled_ = enabled; }
@@ -464,6 +467,27 @@ public:
     {
         if( windField_ ) windField_->setFaceStageAuditTarget( x, y, isU );
     }
+    // Opt-in shrinking Cut-cell pressure pooling for end-to-end World
+    // feedback trials. Zero is the default and leaves normal physics intact.
+    void setWindSmallCellPressureMergeFraction( float fraction ) noexcept
+    {
+        if( windField_ ) windField_->setSmallCellPressureMergeFraction( fraction );
+    }
+    // Explicit tracer-only probes; never change the pressure operator.
+    void setWindTracerCellConcentration( int x, int y, float concentration ) noexcept
+    {
+        if( windField_ ) windField_->setTracerConcentration( x, y, concentration );
+    }
+    // Diagnostic-only: allow real World/Fluid interleaving to report
+    // actual post-Swept/post-MAC cell masses and directed tracer transfers.
+    void setWindTracerStageObserver( fluidField2::tracerStageObserver2 observer )
+    {
+        if( windField_ ) windField_->setTracerStageObserver( std::move( observer ) );
+    }
+    void setWindTracerTransferObserver( fluidField2::tracerTransferObserver2 observer )
+    {
+        if( windField_ ) windField_->setTracerTransferObserver( std::move( observer ) );
+    }
     void setWindPrePressureSnapshotObserver( fluidField2::prePressureSnapshotObserver2 observer )
     {
         if( windField_ ) windField_->setPrePressureSnapshotObserver( std::move( observer ) );
@@ -488,12 +512,26 @@ public:
     {
         if( windField_ ) windField_->setSweptTracerRemapEnabled( enabled );
     }
+    // Experimental partial Cut-cell tracer rerouting, independently toggled.
+    void setWindConnectedResidualTracerRemapEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setConnectedResidualTracerRemapEnabled( enabled );
+    }
+    // Opt-in S2c geometry-only time-average aperture probe.
+    void setWindSweptApertureAuditEnabled( bool enabled ) noexcept
+    {
+        if( windField_ ) windField_->setSweptApertureAuditEnabled( enabled );
+    }
     [[nodiscard]] bool isWindSweptTracerRemapEnabled() const noexcept
     {
         return windField_ && windField_->isSweptTracerRemapEnabled();
     }
     void addWindVortex();
     void seedWindTracer();
+    void setWindDyeEmitterRate( float rate ) noexcept;
+    void setWindDyeEmitterEnabled( bool enabled ) noexcept { windDyeEmitterEnabled_ = enabled; }
+    [[nodiscard]] bool isWindDyeEmitterEnabled() const noexcept { return windDyeEmitterEnabled_; }
+    [[nodiscard]] float getWindDyeEmitterRate() const noexcept { return windDyeEmitterRate_; }
     void beginWindAdvectionTrial();
     void resetWindFlow();
     [[nodiscard]] float getWindSourceStrength() const noexcept { return windSourceStrength_; }
@@ -504,6 +542,8 @@ public:
     [[nodiscard]] int getWindCouplingSteps() const noexcept { return windCouplingSteps_; }
     [[nodiscard]] int getWindFluidSubstepCount() const noexcept { return windFluidSubstepCount_; }
     [[nodiscard]] float getWindFluidMilliseconds() const noexcept { return windFluidMilliseconds_; }
+    // Last completed Fluid interval, NOT frame dt; for read-only cell ledgers.
+    [[nodiscard]] float getWindLastFluidTimeStep() const noexcept { return windLastFluidTimeStep_; }
     [[nodiscard]] float getWindWorldMilliseconds() const noexcept { return windWorldMilliseconds_; }
     [[nodiscard]] const fluidStepTiming2& getWindFieldTiming() const noexcept { return windFieldTiming_; }
     [[nodiscard]] const fluidCoupledPressureTiming2& getWindCoupledTiming() const noexcept { return windCoupledTiming_; }
@@ -727,6 +767,8 @@ private:
     std::optional<fluidField2> windField_{};
     float windSourceStrength_ = 6.0f;
     float windDragCoefficient_ = 3.0f;
+    float windDyeEmitterRate_ = 2.5f; // Passive tracer kg/s; no fluid momentum source.
+    bool windDyeEmitterEnabled_ = false; // Physics/headless default unchanged.
     float windTime_ = 0.0f;
     bool windSourceEnabled_ = true;
     bool windObstacleCouplingEnabled_ = true;
@@ -738,6 +780,7 @@ private:
     int windCouplingSteps_ = 0;
     int windFluidSubstepCount_ = 1; // World Substep과 독립적인 Fluid 압력/이류 횟수.
     float windFluidMilliseconds_ = 0.0f;
+    float windLastFluidTimeStep_ = 0.0f;
     float windWorldMilliseconds_ = 0.0f;
     bool windStepProfilingEnabled_ = false;
     bool windCouplingAuditEnabled_ = false;
