@@ -876,8 +876,13 @@ void auditCapsuleTangentMovingPressure()
         std::array<fluidField2, 2> fields{{ initial, initial }};
         fields[1].setAnalyticCapsuleTangentFaceAuditEnabled( true );
         for( auto& field : fields ) field.setStepTimingEnabled( true );
+        // The original near-wall fixture retains radius=0.19f. The
+        // exact-tangent control uses 3/16 m: center and radius are then
+        // exactly representable floats at the selected grid line. With
+        // 0.19f, double(center)-double(radius) misses -3.5 by 5.96e-8 m.
+        const float testRadius = aligned ? 0.1875f : radius;
         fluidShapeObstacle2 moving{
-            capsule2{ { -halfLength, 0.0f }, { halfLength, 0.0f }, radius },
+            capsule2{ { -halfLength, 0.0f }, { halfLength, 0.0f }, testRadius },
             { { 0.0f, startY }, {} }, { 0.0f, startY },
             {}, 0.0f, 0.0f, 0.0f
         };
@@ -891,11 +896,17 @@ void auditCapsuleTangentMovingPressure()
             float y = startY + ( lowerY - startY ) * fraction;
             // The second path crosses a *true* grid tangent on frame 9;
             // the ordinary boundary-spike frame 9 remains unmodified.
-            if( aligned && frame == 9 ) y = -3.5f + radius;
+            if( aligned && frame == 9 )
+            {
+                y = -3.5f + testRadius;
+                if( static_cast<double>( y ) -
+                    static_cast<double>( testRadius ) != -3.5 )
+                    throw std::runtime_error( "tangent fixture not binary-exact" );
+            }
             moving.transform.position.y = y;
             moving.center = moving.transform.position;
             moving.linearVelocity.y = ( y - priorY ) / dt;
-            if( y - radius <= origin.y )
+            if( y - testRadius <= origin.y )
                 throw std::runtime_error( "moving tangent Capsule hit outer wall" );
             for( auto& field : fields )
             {
@@ -972,8 +983,16 @@ void auditCapsuleTangentMovingPressure()
             if( frame == 9 )
             {
                 if( aligned && ( changedU != 0 || changedV < 6 ) )
+                {
+                    std::fprintf( stderr,
+                        "moving_tangent_bad_faces,u=%d,v=%d,y=%.12g,"
+                        "radius=%.12g,bottom=%.12g\n",
+                        changedU, changedV, static_cast<double>( y ),
+                        static_cast<double>( testRadius ),
+                        static_cast<double>( y ) - testRadius );
                     throw std::runtime_error(
                         "moving grid-tangent frame failed to restore flat-side V faces" );
+                }
                 if( !aligned && changedU + changedV != 0 )
                     throw std::runtime_error(
                         "ordinary frame-9 unexpectedly hit exact tangent" );
