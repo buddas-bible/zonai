@@ -779,6 +779,15 @@ public:
         return analyticCapsuleFullCoverageGuardEnabled_;
     }
 
+    // S2c RESEARCH ONLY: include exactly grid-aligned Capsule flat sides in
+    // the analytic face intersection. Legacy tangent exclusion remains the
+    // default. Toggling resets moving-solid volume history.
+    void setAnalyticCapsuleTangentFaceAuditEnabled( bool enabled ) noexcept;
+    [[nodiscard]] bool isAnalyticCapsuleTangentFaceAuditEnabled() const noexcept
+    {
+        return analyticCapsuleTangentFaceAuditEnabled_;
+    }
+
     // 단일 radius>0인 strictly convex Polygon의 core/edge/corner 분석적 적분.
     // 기본 OFF. 다중·미지원 Shape은 기존 공간 표본 경로.
     void setAnalyticRoundedPolygonCutCellEnabled( bool enabled ) noexcept;
@@ -1418,6 +1427,7 @@ private:
     bool analyticCapsuleCutCellEnabled_ = false;
     bool analyticCapsuleDoubleGeometryEnabled_ = false;
     bool analyticCapsuleFullCoverageGuardEnabled_ = false;
+    bool analyticCapsuleTangentFaceAuditEnabled_ = false;
     bool analyticRoundedPolygonCutCellEnabled_ = false;
     bool disjointAnalyticCutCellEnabled_ = false;
     bool previousDisjointAnalyticGeometry_ = false;
