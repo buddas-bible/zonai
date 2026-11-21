@@ -574,6 +574,204 @@ void auditSmallCellPressureCadences()
 }
 
 // Unlike a frozen one-substep replay this runs TWO independent, initially
+// S2c exactly grid-aligned Capsule tangent-side regression. Legacy and
+// inclusive runs consume identical MAC input/obstacle snapshots; the latter
+// changes only the analytic Capsule face early-rejection rule. Neither path
+// is used by normal World code until a caller explicitly opts in.
+void auditCapsuleTangentFacePressure()
+{
+    std::puts( "capsule_tangent_summary,case_id,inclusive,active_cells,"
+        "changed_faces,source_u_mps,source_v_mps,exchange_x_ns,"
+        "exchange_y_ns,abs_six_cell_y_ns,signed_six_cell_y_ns,"
+        "coupled_failed,pressure_relative_residual,tracer_kg,"
+        "step_ms" );
+    std::puts( "capsule_tangent_face,inclusive,x,face_y,"
+        "expected_flat_contact_m,raw_blocked_m,"
+        "fluid_y_ns,solid_y_ns,wall_y_ns,total_y_ns" );
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.configureWindField( 48, 28, 0.25f );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindCutCellCoupledProjectionEnabled( true );
+    scene.setWindDisjointAnalyticEnabled( true );
+    scene.setWindSynchronizedCouplingEnabled( true );
+    scene.setWindObstacleCouplingEnabled( true );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.setWindSmallCellPressureMergeFraction( 0.0f );
+    const auto shapes = scene.getShapes();
+    if( shapes.size() < 3 || !scene.getWindField() )
+        throw std::runtime_error( "missing Capsule tangent World fixture" );
+    scene.getWorld().SetBodyLinearVelocity(
+        shapes[0].bodyHandle, { 0.7f, -0.10f } );
+    scene.getWorld().SetBodyAngularVelocity( shapes[1].bodyHandle, 0.5f );
+
+    std::array<fluidShapeObstacle2, 3> obstacles{};
+    for( int i = 0; i < 3; ++i )
+    {
+        const bodyId body = shapes[i].bodyHandle;
+        const transform2 transform = scene.getWorld().GetBodyTransform( body );
+        const float mass = scene.getWorld().GetBodyMass( body );
+        const float inertia = scene.getWorld().GetBodyRotationalInertia( body );
+        if( !( mass > 0.0f && inertia > 0.0f ) )
+            throw std::runtime_error( "invalid Capsule tangent body mass" );
+        obstacles[i] = {
+            scene.getWorld().GetShape( shapes[i].shapeHandle ).geometry,
+            transform,
+            TransformPoint( transform, scene.getWorld().GetBodyLocalCenter( body ) ),
+            scene.getWorld().GetBodyLinearVelocity( body ),
+            scene.getWorld().GetBodyAngularVelocity( body ),
+            1.0f / mass, 1.0f / inertia
+        };
+    }
+    const auto* capsule = std::get_if<capsule2>( &obstacles[1].geometry );
+    if( !capsule ) throw std::runtime_error( "expected Capsule in fixture" );
+    const vec2 axisStart = TransformPoint(
+        obstacles[1].transform, capsule->center1 );
+    const vec2 axisEnd = TransformPoint(
+        obstacles[1].transform, capsule->center2 );
+    if( std::abs( axisStart.y - axisEnd.y ) > 1.0e-6f )
+        throw std::runtime_error( "Capsule tangent fixture not horizontal" );
+
+    const auto entry = *scene.getWindField();
+    const float h = entry.getCellSize();
+    const float sourceX = entry.getOrigin().x +
+        std::min( 2.5f, 0.25f * entry.getWidth() * h );
+    const float sourceU = 8.0f * dt;
+    const float sourceV = 4.0f * dt * std::sin( 1.7f * dt );
+    const double startX = std::min( axisStart.x, axisEnd.x );
+    const double endX = std::max( axisStart.x, axisEnd.x );
+
+    for( const int scenario : { 0, 1, 2 } )
+    {
+        auto fixture = obstacles;
+        std::span<const fluidShapeObstacle2> chosen( fixture );
+        if( scenario == 1 )
+        {
+            fixture[1].transform.rotation = rot2::FromRadians( 0.23f );
+            const bodyId body = shapes[1].bodyHandle;
+            fixture[1].center = TransformPoint( fixture[1].transform,
+                scene.getWorld().GetBodyLocalCenter( body ) );
+        }
+        else if( scenario == 2 )
+        {
+            // A circle touching a grid line has only a zero-length tangent
+            // at the extreme point, unlike a Capsule core flat side.
+            fixture[0].geometry = circle2{ {}, 0.25f };
+            fixture[0].transform.position.y = 1.0f;
+            fixture[0].center = fixture[0].transform.position;
+            chosen = std::span<const fluidShapeObstacle2>(
+                fixture.data(), 1 );
+        }
+
+        std::array<fluidField2, 2> replay{{ entry, entry }};
+        std::array<double, 2> residualY{};
+        int changedFaces = 0;
+        for( int policy = 0; policy < 2; ++policy )
+        {
+            auto& field = replay[policy];
+            field.setAnalyticCapsuleTangentFaceAuditEnabled( policy == 1 );
+            if( scenario == 2 ) field.setAnalyticCircleCutCellEnabled( true );
+            field.setStepTimingEnabled( true );
+            field.setTracerConcentration( 10, 12, 1.0f );
+            const double beforeMass = field.getTracerMass();
+            field.addVelocity( { sourceX, 0.0f },
+                { sourceU, sourceV }, 1.7f );
+            std::vector<fluidObstacleForce2> feedback( chosen.size() );
+            field.step( dt, chosen, feedback, 200 );
+            const auto& pressure = field.getCutCellPressure();
+            if( !pressure.usedCoupledProjection ||
+                pressure.coupledSolveFailed ||
+                !pressure.hasAnalyticImpulseBudget ||
+                pressure.mergedPressureCells != 0 )
+                throw std::runtime_error( "invalid tangent pressure coupled solve" );
+            const double mass = field.getTracerMass();
+            if( !std::isfinite( mass ) ||
+                std::abs( mass - beforeMass ) > 1.0e-6 )
+                throw std::runtime_error( "Capsule tangent tracer mass drift" );
+            const auto ledger = field.getCutCellPressureCellImpulseAudit( dt );
+            if( !ledger ) throw std::runtime_error( "missing tangent cell ledger" );
+            double signedSix = 0.0, absoluteSix = 0.0;
+            if( scenario == 0 )
+                for( const int faceY : { 17, 19 } )
+                    for( int x = 24; x <= 26; ++x )
+                    {
+                        const int cellY = faceY == 17 ? 16 : 19;
+                        const auto& cell = ( *ledger )[cellY * field.getWidth() + x];
+                        const double faceCoordinate = field.getOrigin().y + faceY * h;
+                        const double tangentY = axisStart.y +
+                            ( faceY == 17 ? -capsule->radius : capsule->radius );
+                        if( std::abs( faceCoordinate - tangentY ) > 1.0e-6 )
+                            throw std::runtime_error( "Capsule side not grid-aligned" );
+                        const double faceLeft = field.getOrigin().x + x * h;
+                        const double expectedLength = std::max( 0.0,
+                            std::min( faceLeft + h, endX ) -
+                            std::max( faceLeft, startX ) );
+                        const double observedLength = h *
+                            ( 1.0 - field.getVFaceOpenFraction( x, faceY ) );
+                        if( std::abs( expectedLength - h ) > 1.0e-6 ||
+                            cell.fraction < 1.0 - 1.0e-6 )
+                            throw std::runtime_error( "invalid tangent face fixture" );
+                        if( policy == 1 &&
+                            ( std::abs( observedLength - expectedLength ) > 1.0e-6 ||
+                              std::abs( cell.residualY() ) > 2.0e-6 ) )
+                            throw std::runtime_error(
+                                "inclusive tangent did not restore MAC/Schur cancellation" );
+                        if( policy == 0 && observedLength > 1.0e-6 )
+                            throw std::runtime_error( "legacy tangent unexpectedly included" );
+                        if( std::abs( cell.wallY ) > 1.0e-8 )
+                            throw std::runtime_error( "tangent interior cell has wall impulse" );
+                        signedSix += cell.residualY();
+                        absoluteSix += std::abs( cell.residualY() );
+                        std::printf( "capsule_tangent_face,%d,%d,%d,"
+                            "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                            policy, x, faceY, expectedLength, observedLength,
+                            cell.fluidY, cell.solidY, cell.wallY, cell.residualY() );
+                    }
+
+            residualY[policy] = pressure.impulse.residual().y;
+            std::printf( "capsule_tangent_summary,%d,%d,%d,%d,"
+                "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                "%d,%.12g,%.12g,%.12g\n",
+                scenario, policy, pressure.activeCells, changedFaces,
+                static_cast<double>( sourceU ), static_cast<double>( sourceV ),
+                static_cast<double>( pressure.impulse.residual().x ),
+                residualY[policy], absoluteSix, signedSix,
+                pressure.coupledSolveFailed ? 1 : 0,
+                static_cast<double>( pressure.coupledRelativeResidual ),
+                mass, field.getStepTiming().total );
+        }
+        for( int y = 0; y < entry.getHeight(); ++y )
+            for( int x = 0; x < entry.getWidth(); ++x )
+            {
+                if( std::abs( replay[0].getCellFluidFraction( x, y ) -
+                    replay[1].getCellFluidFraction( x, y ) ) > 1.0e-6 )
+                    throw std::runtime_error(
+                        "tangent policy changed cell area rather than face clip" );
+                if( x > 0 &&
+                    std::abs( replay[0].getUFaceOpenFraction( x, y ) -
+                    replay[1].getUFaceOpenFraction( x, y ) ) > 1.0e-6 )
+                    ++changedFaces;
+                if( y > 0 &&
+                    std::abs( replay[0].getVFaceOpenFraction( x, y ) -
+                    replay[1].getVFaceOpenFraction( x, y ) ) > 1.0e-6 )
+                    ++changedFaces;
+            }
+        std::printf( "capsule_tangent_comparison,%d,%d,%.12g,%.12g\n",
+            scenario, changedFaces, residualY[0], residualY[1] );
+        if( scenario == 0 )
+        {
+            if( changedFaces < 6 ||
+                std::abs( residualY[0] ) < 1.0e-3 ||
+                std::abs( residualY[1] ) >
+                    0.05 * std::abs( residualY[0] ) )
+                throw std::runtime_error(
+                    "tangent policy failed to reduce grid-aligned pressure mismatch" );
+        }
+        else if( changedFaces != 0 ||
+            std::abs( residualY[1] - residualY[0] ) > 1.0e-6 )
+            throw std::runtime_error( "tangent policy changed rotated or Circle control" );
+    }
+}
+
 // Read-only per-pressure-unknown accounting of the startup Schur exchange.
 // Geometry/World inputs are identical to the prior first-history experiment.
 // None, horizontal, vertical and combined Wind sources separate the forcing
@@ -9255,6 +9453,7 @@ int main( int argc, char** argv )
     bool smallCellWorldImpulseAudit = false;
     bool firstCutCellHistoryAudit = false;
     bool firstPressureCoefficientAudit = false;
+    bool capsuleTangentPressureAudit = false;
     bool smallCellLocalTracerAudit = false;
     bool smallCellTransferLedgerAudit = false;
     bool smallCellConnectedResidualAudit = false;
@@ -9299,6 +9498,7 @@ int main( int argc, char** argv )
         smallCellWorldImpulseAudit |= std::string_view( argv[i] ) == "--small-cell-world-impulse-audit";
         firstCutCellHistoryAudit |= std::string_view( argv[i] ) == "--small-cell-first-history-audit";
         firstPressureCoefficientAudit |= std::string_view( argv[i] ) == "--small-cell-pressure-coefficient-audit";
+        capsuleTangentPressureAudit |= std::string_view( argv[i] ) == "--capsule-tangent-pressure-audit";
         smallCellLocalTracerAudit |= std::string_view( argv[i] ) == "--small-cell-local-tracer-audit";
         smallCellTransferLedgerAudit |= std::string_view( argv[i] ) == "--small-cell-applied-transfer-audit";
         smallCellConnectedResidualAudit |= std::string_view( argv[i] ) == "--small-cell-connected-residual-audit";
@@ -9338,6 +9538,7 @@ int main( int argc, char** argv )
     if( smallCellWorldImpulseAudit ) { auditSmallCellWorldPressureImpulse(); return 0; }
     if( firstCutCellHistoryAudit ) { auditFirstCutCellHistoryImpulse(); return 0; }
     if( firstPressureCoefficientAudit ) { auditFirstCutCellPressureCoefficients(); return 0; }
+    if( capsuleTangentPressureAudit ) { auditCapsuleTangentFacePressure(); return 0; }
     if( smallCellLocalTracerAudit ) { auditSmallCellLocalTracer(); return 0; }
     if( smallCellTransferLedgerAudit ) { auditSmallCellAppliedTransfers(); return 0; }
     if( smallCellConnectedResidualAudit ) { auditSmallCellAppliedTransfers( true ); return 0; }
