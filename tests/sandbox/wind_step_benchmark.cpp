@@ -844,6 +844,201 @@ void auditCapsuleTangentFacePressure()
     }
 }
 
+// Controlled moving-Capsule S2c policy A/B. Both policies are fixed before
+// the first step, and the same prescribed obstacle path and Wind forcing are
+// supplied to independent copies. The frame-9 entry velocities are compared
+// explicitly; a later trajectory difference is not a frozen-state comparison.
+void auditCapsuleTangentMovingPressure()
+{
+    constexpr int width = 64, height = 64;
+    constexpr float h = 0.125f, dt = 1.0f / 60.0f;
+    constexpr float radius = 0.19f, halfLength = 0.63f;
+    constexpr float startY = -3.02f, lowerY = -3.55f;
+    constexpr vec2 origin{ -4.0f, -4.0f };
+    constexpr int donorX = 26, donorY = 4;
+    std::puts( "capsule_tangent_motion,aligned_frame9,frame,policy,pose_y,"
+        "pre_mac_max_diff,pre_fraction_max_diff,changed_u,changed_v,"
+        "swept,donor_fraction,donor_snapshot_m3,donor_source_m3,"
+        "donor_gcl_m3,donor_residual_m3,global_residual_m3,"
+        "pressure_span,peak_fluid_face_mps,force_y_N,tracer_mass_kg,step_ms" );
+
+    for( const bool aligned : { false, true } )
+    {
+        fluidField2 initial{ width, height, h, origin };
+        initial.setCutCellProjectionEnabled( true );
+        initial.setAnalyticCapsuleCutCellEnabled( true );
+        initial.setAnalyticCapsuleDoubleGeometryEnabled( true );
+        initial.setAnalyticCapsuleFullCoverageGuardEnabled( true );
+        initial.setTightTranslatingCapsuleSweptBoundsAuditEnabled( true );
+        if( initial.isCutCellCoupledProjectionEnabled() ||
+            initial.getSmallCellPressureMergeFraction() != 0.0f )
+            throw std::runtime_error( "moving tangent reference solver changed" );
+        std::array<fluidField2, 2> fields{{ initial, initial }};
+        fields[1].setAnalyticCapsuleTangentFaceAuditEnabled( true );
+        for( auto& field : fields ) field.setStepTimingEnabled( true );
+        fluidShapeObstacle2 moving{
+            capsule2{ { -halfLength, 0.0f }, { halfLength, 0.0f }, radius },
+            { { 0.0f, startY }, {} }, { 0.0f, startY },
+            {}, 0.0f, 0.0f, 0.0f
+        };
+        float priorY = startY;
+        std::array<double, 2> seedMass{};
+        for( int frame = 0; frame < 27; ++frame )
+        {
+            const float fraction = frame < 16
+                ? static_cast<float>( frame + 1 ) / 16.0f
+                : static_cast<float>( 31 - frame ) / 16.0f;
+            float y = startY + ( lowerY - startY ) * fraction;
+            // The second path crosses a *true* grid tangent on frame 9;
+            // the ordinary boundary-spike frame 9 remains unmodified.
+            if( aligned && frame == 9 ) y = -3.5f + radius;
+            moving.transform.position.y = y;
+            moving.center = moving.transform.position;
+            moving.linearVelocity.y = ( y - priorY ) / dt;
+            if( y - radius <= origin.y )
+                throw std::runtime_error( "moving tangent Capsule hit outer wall" );
+            for( auto& field : fields )
+            {
+                if( frame == 9 )
+                    field.setTracerConcentration( donorX, donorY, 1.0f );
+                const float time = ( frame + 1 ) * dt;
+                field.addVelocity( { -2.0f, 0.0f },
+                    { 6.0f * dt, 3.0f * dt * std::sin( 1.7f * time ) },
+                    1.7f );
+            }
+            if( frame == 9 )
+                for( int policy = 0; policy < 2; ++policy )
+                {
+                    seedMass[policy] = fields[policy].getTracerMass();
+                    if( seedMass[policy] <= 0.0 )
+                        throw std::runtime_error( "moving tangent seed missing" );
+                }
+            double maxEntryMacDiff = 0.0, maxEntryFractionDiff = 0.0;
+            if( frame == 9 )
+            {
+                for( int cy = 0; cy < height; ++cy )
+                    for( int cx = 0; cx < width; ++cx )
+                    {
+                        maxEntryFractionDiff = std::max( maxEntryFractionDiff,
+                            std::abs( static_cast<double>(
+                                fields[0].getCellFluidFraction( cx, cy ) ) -
+                                fields[1].getCellFluidFraction( cx, cy ) ) );
+                        if( cx > 0 )
+                            maxEntryMacDiff = std::max( maxEntryMacDiff,
+                                std::abs( static_cast<double>(
+                                    *fields[0].getUFaceVelocityForAudit( cx, cy ) ) -
+                                    *fields[1].getUFaceVelocityForAudit( cx, cy ) ) );
+                        if( cy > 0 )
+                            maxEntryMacDiff = std::max( maxEntryMacDiff,
+                                std::abs( static_cast<double>(
+                                    *fields[0].getVFaceVelocityForAudit( cx, cy ) ) -
+                                    *fields[1].getVFaceVelocityForAudit( cx, cy ) ) );
+                    }
+                if( maxEntryMacDiff > 1.0e-6 ||
+                    maxEntryFractionDiff > 1.0e-6 )
+                    throw std::runtime_error(
+                        "moving tangent frame-9 entry Fields were not matched" );
+            }
+            std::array<fluidObstacleForce2, 2> forces{};
+            for( int policy = 0; policy < 2; ++policy )
+            {
+                std::array<fluidObstacleForce2, 1> feedback{};
+                fields[policy].step( dt,
+                    std::span<const fluidShapeObstacle2>( &moving, 1 ),
+                    feedback, 80 );
+                forces[policy] = feedback[0];
+                if( frame >= 9 &&
+                    std::abs( fields[policy].getTracerMass() -
+                        seedMass[policy] ) > 1.0e-5 )
+                    throw std::runtime_error( "moving tangent tracer not conserved" );
+            }
+            int changedU = 0, changedV = 0;
+            for( int cy = 0; cy < height; ++cy )
+                for( int cx = 0; cx < width; ++cx )
+                {
+                    if( std::abs(
+                        fields[0].getCellFluidFraction( cx, cy ) -
+                        fields[1].getCellFluidFraction( cx, cy ) ) > 1.0e-6 )
+                        throw std::runtime_error( "moving tangent changed cell volume" );
+                    if( cx > 0 && std::abs(
+                        fields[0].getUFaceOpenFraction( cx, cy ) -
+                        fields[1].getUFaceOpenFraction( cx, cy ) ) > 1.0e-6 )
+                        ++changedU;
+                    if( cy > 0 && std::abs(
+                        fields[0].getVFaceOpenFraction( cx, cy ) -
+                        fields[1].getVFaceOpenFraction( cx, cy ) ) > 1.0e-6 )
+                        ++changedV;
+                }
+            if( frame == 9 )
+            {
+                if( aligned && ( changedU != 0 || changedV < 6 ) )
+                    throw std::runtime_error(
+                        "moving grid-tangent frame failed to restore flat-side V faces" );
+                if( !aligned && changedU + changedV != 0 )
+                    throw std::runtime_error(
+                        "ordinary frame-9 unexpectedly hit exact tangent" );
+            }
+
+            if( frame == 4 || frame == 9 || frame == 10 ||
+                frame == 16 || frame == 26 )
+                for( int policy = 0; policy < 2; ++policy )
+                {
+                    const auto& field = fields[policy];
+                    const auto donor = field.getCutCellVolumeBudget(
+                        donorX, donorY, dt );
+                    const auto volume = field.getCutCellVolumeSummary( dt );
+                    const auto flow = field.getFlowAudit( dt );
+                    if( !donor.valid || !volume.valid ||
+                        !std::isfinite( flow.maxFluidFaceSpeed ) ||
+                        !std::isfinite( forces[policy].force.y ) )
+                        throw std::runtime_error( "moving tangent invalid pressure budget" );
+                    double minPressure = 0.0, maxPressure = 0.0;
+                    int active = 0;
+                    for( int cy = 0; cy < height; ++cy )
+                        for( int cx = 0; cx < width; ++cx )
+                            if( field.getCellFluidFraction( cx, cy ) > 0.0f )
+                            {
+                                const double p =
+                                    field.getCellPressureForVisualization( cx, cy );
+                                if( !std::isfinite( p ) )
+                                    throw std::runtime_error( "moving tangent nonfinite pressure" );
+                                if( active++ == 0 ) minPressure = maxPressure = p;
+                                else
+                                {
+                                    minPressure = std::min( minPressure, p );
+                                    maxPressure = std::max( maxPressure, p );
+                                }
+                            }
+                    const std::array<double, 11> numbers{{
+                        donor.currentFraction, donor.snapshotDeltaVolume,
+                        donor.pressureSourceDeltaVolume,
+                        donor.snapshotDeltaVolume -
+                            donor.solidSweptDivergenceVolume,
+                        donor.pressureResidualVolume,
+                        volume.maxAbsPressureResidualVolume,
+                        maxPressure - minPressure, flow.maxFluidFaceSpeed,
+                        forces[policy].force.y, field.getTracerMass(),
+                        field.getStepTiming().total
+                    }};
+                    std::printf( "capsule_tangent_motion,%d,%d,%d,"
+                        "%.12g,%.12g,%.12g,%d,%d,%d",
+                        aligned ? 1 : 0, frame, policy,
+                        static_cast<double>( y ), maxEntryMacDiff,
+                        maxEntryFractionDiff, changedU, changedV,
+                        field.getSweptFaceFlux().usedSweptFlux ? 1 : 0 );
+                    for( const double v : numbers )
+                    {
+                        if( !std::isfinite( v ) )
+                            throw std::runtime_error( "moving tangent nonfinite metric" );
+                        std::printf( ",%.12g", v );
+                    }
+                    std::putchar( '\n' );
+                }
+            priorY = y;
+        }
+    }
+}
+
 // Read-only per-pressure-unknown accounting of the startup Schur exchange.
 // Geometry/World inputs are identical to the prior first-history experiment.
 // None, horizontal, vertical and combined Wind sources separate the forcing
@@ -9526,6 +9721,7 @@ int main( int argc, char** argv )
     bool firstCutCellHistoryAudit = false;
     bool firstPressureCoefficientAudit = false;
     bool capsuleTangentPressureAudit = false;
+    bool capsuleTangentMovingAudit = false;
     bool smallCellLocalTracerAudit = false;
     bool smallCellTransferLedgerAudit = false;
     bool smallCellConnectedResidualAudit = false;
@@ -9571,6 +9767,7 @@ int main( int argc, char** argv )
         firstCutCellHistoryAudit |= std::string_view( argv[i] ) == "--small-cell-first-history-audit";
         firstPressureCoefficientAudit |= std::string_view( argv[i] ) == "--small-cell-pressure-coefficient-audit";
         capsuleTangentPressureAudit |= std::string_view( argv[i] ) == "--capsule-tangent-pressure-audit";
+        capsuleTangentMovingAudit |= std::string_view( argv[i] ) == "--capsule-tangent-moving-audit";
         smallCellLocalTracerAudit |= std::string_view( argv[i] ) == "--small-cell-local-tracer-audit";
         smallCellTransferLedgerAudit |= std::string_view( argv[i] ) == "--small-cell-applied-transfer-audit";
         smallCellConnectedResidualAudit |= std::string_view( argv[i] ) == "--small-cell-connected-residual-audit";
@@ -9611,6 +9808,7 @@ int main( int argc, char** argv )
     if( firstCutCellHistoryAudit ) { auditFirstCutCellHistoryImpulse(); return 0; }
     if( firstPressureCoefficientAudit ) { auditFirstCutCellPressureCoefficients(); return 0; }
     if( capsuleTangentPressureAudit ) { auditCapsuleTangentFacePressure(); return 0; }
+    if( capsuleTangentMovingAudit ) { auditCapsuleTangentMovingPressure(); return 0; }
     if( smallCellLocalTracerAudit ) { auditSmallCellLocalTracer(); return 0; }
     if( smallCellTransferLedgerAudit ) { auditSmallCellAppliedTransfers(); return 0; }
     if( smallCellConnectedResidualAudit ) { auditSmallCellAppliedTransfers( true ); return 0; }
