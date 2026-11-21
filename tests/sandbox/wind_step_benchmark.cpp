@@ -1052,6 +1052,44 @@ void auditCapsuleTangentMovingPressure()
                         std::printf( ",%.12g", v );
                     }
                     std::putchar( '\n' );
+                    // Identify the worst global continuity cell independently
+                    // of the donor. Read-only: this cannot alter the solver.
+                    if( frame == 9 || frame == 10 )
+                    {
+                        double worstMagnitude = -1.0;
+                        int worstX = -1, worstY = -1;
+                        fluidCutCellVolumeBudget2 worst{};
+                        for( int cy = 0; cy < height; ++cy )
+                            for( int cx = 0; cx < width; ++cx )
+                            {
+                                const auto candidate =
+                                    field.getCutCellVolumeBudget( cx, cy, dt );
+                                if( !candidate.valid || !candidate.active ) continue;
+                                const double magnitude =
+                                    std::abs( candidate.pressureResidualVolume );
+                                if( !std::isfinite( magnitude ) )
+                                    throw std::runtime_error(
+                                        "moving tangent nonfinite cell residual" );
+                                if( magnitude > worstMagnitude )
+                                {
+                                    worstMagnitude = magnitude;
+                                    worstX = cx;
+                                    worstY = cy;
+                                    worst = candidate;
+                                }
+                            }
+                        if( worstX < 0 )
+                            throw std::runtime_error(
+                                "moving tangent missing active pressure cell" );
+                        std::printf( "capsule_tangent_worst_cell,%d,%d,%d,%d,%d,"
+                            "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                            aligned ? 1 : 0, frame, policy, worstX, worstY,
+                            worst.currentFraction, worst.snapshotDeltaVolume,
+                            worst.pressureSourceDeltaVolume,
+                            worst.solidSweptDivergenceVolume,
+                            worst.pressureResidualVolume,
+                            volume.maxAbsPressureResidualVolume );
+                    }
                 }
             priorY = y;
         }
