@@ -1011,9 +1011,11 @@ void auditCapsuleTangentPressureRegions( const fluidField2& field,
                     if( opening <= 0.0f || nx < 0 || nx >= width ||
                         ny < 0 || ny >= height ) return;
                     const int adjacent = ny * width + nx;
-                    if( component[adjacent] >= 0 ) return;
-                    // Mirror projectCutCell's BFS exactly: it checks the
-                    // shared opening, not the neighbor's active fraction.
+                    // cutCellUOpen/cutCellVOpen require positive fractions
+                    // on BOTH sides, unlike the raw face-open query.
+                    if( component[adjacent] >= 0 ||
+                        !field.getCutCellVolumeBudget( nx, ny, dt ).active )
+                        return;
                     component[adjacent] = region;
                     queue.push_back( adjacent );
                 };
