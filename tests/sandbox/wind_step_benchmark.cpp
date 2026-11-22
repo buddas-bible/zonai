@@ -1130,23 +1130,37 @@ void auditCapsuleTangentMovingPressure()
                         }
                     const double tracerDiff = std::abs( static_cast<double>(
                         observed.getTracerMass() ) - control.getTracerMass() );
-                    const double forceDiff = std::max(
+                    const double forceDiff = std::max({
                         std::abs( static_cast<double>( forces[policy].force.x ) -
                             controlFeedback[0].force.x ),
                         std::abs( static_cast<double>( forces[policy].force.y ) -
-                            controlFeedback[0].force.y ) );
+                            controlFeedback[0].force.y ),
+                        std::abs( static_cast<double>( forces[policy].torque ) -
+                            controlFeedback[0].torque )
+                    });
+                    const auto observedBudget = observed.getCutCellVolumeSummary( dt );
+                    const auto controlBudget = control.getCutCellVolumeSummary( dt );
+                    const double budgetDiff = std::max({
+                        std::abs( observedBudget.totalPressureSourceDeltaVolume -
+                            controlBudget.totalPressureSourceDeltaVolume ),
+                        std::abs( observedBudget.maxAbsPressureResidualVolume -
+                            controlBudget.maxAbsPressureResidualVolume ),
+                        std::abs( observedBudget.totalSnapshotDeltaVolume -
+                            controlBudget.totalSnapshotDeltaVolume )
+                    });
                     std::printf( "capsule_tangent_aperture_audit_inert,%d,"
-                        "%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
                         policy, maxMacDiff, maxFractionDiff,
-                        maxPressureDiff, tracerDiff, forceDiff );
+                        maxPressureDiff, tracerDiff, forceDiff, budgetDiff );
                     if( !std::isfinite( maxMacDiff ) ||
                         !std::isfinite( maxFractionDiff ) ||
                         !std::isfinite( maxPressureDiff ) ||
                         !std::isfinite( tracerDiff ) ||
                         !std::isfinite( forceDiff ) ||
+                        !std::isfinite( budgetDiff ) ||
                         maxMacDiff > 1.0e-6 || maxFractionDiff > 1.0e-6 ||
                         maxPressureDiff > 1.0e-5 || tracerDiff > 1.0e-8 ||
-                        forceDiff > 1.0e-5 )
+                        forceDiff > 1.0e-5 || budgetDiff > 1.0e-8 )
                         throw std::runtime_error(
                             "moving Capsule aperture audit altered physical step" );
                 }
