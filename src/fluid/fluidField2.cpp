@@ -4224,6 +4224,67 @@ void fluidField2::prepareCutCellVolumeChange( float timeStep )
             else unresolvedRate += static_cast<double>( change ) * scale;
         }
     }
+    // S2c opt-in experiment, not a production space-time continuity solve.
+    // The existing nearest-fluid fallback can place swept RHS into a
+    // positive-but-numerically-vanishing island with no endpoint-open faces.
+    // Its Neumann pressure row has no velocity unknown to counter the source.
+    // Require an observed moving-geometry aperture and transfer the ENTIRE
+    // signed RHS to an endpoint-active neighbor that was open during the step.
+    // This is an explicit approximate alternative to endpoint isolation:
+    // no velocity, tracer or momentum is transported, and no source is lost.
+    if( temporalIsolatedVolumeSourceRelayEnabled_ &&
+        sweptFaceFlux_.usedSweptFlux && sweptApertureAuditValid_ )
+    {
+        constexpr float vanishingFraction = 1.0e-12f;
+        const auto endpointClosed = [&]( int x, int y )
+        {
+            return cutCellUOpen( x, y ) == 0.0f &&
+                cutCellUOpen( x + 1, y ) == 0.0f &&
+                cutCellVOpen( x, y ) == 0.0f &&
+                cutCellVOpen( x, y + 1 ) == 0.0f;
+        };
+        for( int y = 0; y < height_; ++y )
+            for( int x = 0; x < width_; ++x )
+            {
+                const int index = cellIndex( x, y );
+                const float fraction = cellFluidFraction_[index];
+                if( fraction <= 0.0f || fraction > vanishingFraction ||
+                    fraction >= previousCellFluidFraction_[index] ||
+                    cutCellVolumeRate_[index] >= 0.0f ||
+                    !endpointClosed( x, y ) ) continue;
+
+                int recipient = -1;
+                float greatestMeanOpen = 0.0f;
+                const auto consider = [&]( int nx, int ny, float meanOpen )
+                {
+                    if( nx < 0 || nx >= width_ || ny < 0 || ny >= height_ ||
+                        meanOpen <= greatestMeanOpen ) return;
+                    const int adjacent = cellIndex( nx, ny );
+                    // Do not cascade pressure source through another sliver.
+                    if( cellFluidFraction_[adjacent] <= vanishingFraction )
+                        return;
+                    recipient = adjacent;
+                    greatestMeanOpen = meanOpen;
+                };
+                consider( x - 1, y,
+                    getSweptUTimeMeanOpenFraction( x, y ) );
+                consider( x + 1, y,
+                    getSweptUTimeMeanOpenFraction( x + 1, y ) );
+                consider( x, y - 1,
+                    getSweptVTimeMeanOpenFraction( x, y ) );
+                consider( x, y + 1,
+                    getSweptVTimeMeanOpenFraction( x, y + 1 ) );
+                if( recipient < 0 ) continue;
+
+                const float signedSource = cutCellVolumeRate_[index];
+                cutCellVolumeRate_[recipient] += signedSource;
+                cutCellVolumeRate_[index] = 0.0f;
+                ++cutCellPressure_.temporalRelayedCells;
+                cutCellPressure_.temporalRelayedSourceVolume +=
+                    static_cast<double>( signedSource ) * cellSize_ * cellSize_;
+            }
+    }
+
     if( sweptFaceFlux_.usedSweptFlux && !sweptGeometryCorrectionEnabled_ )
         sweptFaceFlux_.rawGeometryMismatch = sweptFaceFlux_.geometryMismatch;
     cutCellPressure_.volumeRate = static_cast<float>( volumeRate );
