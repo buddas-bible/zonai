@@ -1096,7 +1096,7 @@ void auditCapsuleTangentPressureRegions( const fluidField2& field,
 // while all of the route cells have positive analytic fluid area. The
 // result is a geometric opportunity, NOT a measured pressure/MAC flux.
 void auditCapsuleTimeCoherentPath( const fluidField2& field,
-    const fluidShapeObstacle2& moving, float previousY, int policy )
+    const fluidShapeObstacle2& moving, float previousY, float dt, int policy )
 {
     constexpr int sampleCount = 128;
     constexpr int x = 30, y = 6;
@@ -1161,6 +1161,54 @@ void auditCapsuleTimeCoherentPath( const fluidField2& field,
         concurrentWestNorth, concurrentEastNorth,
         meanWest, meanEast, meanNorth,
         storedWest, storedEast, storedNorth );
+    // Velocity capacity is deliberately a COUNTERFACTUAL: the interface's
+    // actual fluid velocity history is not known. Each swept donor would
+    // need its own signed volume to fit through the indicated mean aperture
+    // if it were transported solely across this interface.
+    const auto westDonor = field.getCutCellVolumeBudget( x - 1, y, dt );
+    const auto eastDonor = field.getCutCellVolumeBudget( x + 1, y, dt );
+    const auto target = field.getCutCellVolumeBudget( x, y, dt );
+    const double faceTimeArea =
+        static_cast<double>( field.getCellSize() ) * dt;
+    const double requiredWest = meanWest > 0.0
+        ? std::abs( westDonor.solidSweptDivergenceVolume ) /
+            ( faceTimeArea * meanWest ) : 0.0;
+    const double requiredEast = meanEast > 0.0
+        ? std::abs( eastDonor.solidSweptDivergenceVolume ) /
+            ( faceTimeArea * meanEast ) : 0.0;
+    const double requiredNorth = meanNorth > 0.0
+        ? std::abs( target.pressureSourceDeltaVolume ) /
+            ( faceTimeArea * meanNorth ) : 0.0;
+    const double westProxy =
+        field.getSweptULinearVelocityProxyVolume( x, y, dt );
+    const double eastProxy =
+        field.getSweptULinearVelocityProxyVolume( x + 1, y, dt );
+    const double southProxy =
+        field.getSweptVLinearVelocityProxyVolume( x, y, dt );
+    const double northProxy =
+        field.getSweptVLinearVelocityProxyVolume( x, y + 1, dt );
+    const double proxyOutward = -westProxy + eastProxy -
+        southProxy + northProxy;
+    const double proxyResidual = proxyOutward +
+        target.pressureSourceDeltaVolume;
+    const double endpointPeak =
+        field.getFlowAudit( dt ).maxFluidFaceSpeed;
+    const std::array<double, 9> quantities{{
+        requiredWest, requiredEast, requiredNorth,
+        westProxy, eastProxy, southProxy, northProxy,
+        proxyResidual, endpointPeak
+    }};
+    for( const double value : quantities )
+        if( !std::isfinite( value ) )
+            throw std::runtime_error(
+                "Capsule moving path proxy has nonfinite volume/speed" );
+    std::printf( "capsule_tangent_path_capacity,%d,"
+        "%.12g,%.12g,%.12g,%.12g,%.12g,"
+        "%.12g,%.12g,%.12g,%.12g\n",
+        policy, requiredWest, requiredEast, requiredNorth,
+        westProxy, eastProxy, southProxy, northProxy,
+        proxyResidual, endpointPeak );
+
     // The independent 128-point check and the Swept integrator may use
     // different midpoint counts, so compare approximate openings only.
     if( std::abs( storedWest - meanWest ) > 0.01 ||
@@ -1461,7 +1509,7 @@ void auditCapsuleTangentMovingPressure()
                     // four cells without adding a second full-grid traversal.
                     if( aligned && frame == 9 )
                     {
-                        auditCapsuleTimeCoherentPath( field, moving, priorY, policy );
+                        auditCapsuleTimeCoherentPath( field, moving, priorY, dt, policy );
                         auditCapsuleTangentPressureRegions(
                             field, width, height, dt, policy );
                     }
