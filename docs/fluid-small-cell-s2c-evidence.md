@@ -3226,3 +3226,25 @@ The default **OFF** tangent face geometry reports an open north face at (30,6) d
 Commit [`831f538`](https://github.com/buddas-bible/zonai/commit/831f538b43869886af422c0333a56f7713cd5cc0) adds matched-entry **observer ON/OFF** cloned-step regression comparing all stored MAC velocities, occupancies, pressures, tracer inventory and obstacle feedback at aligned frame 9. This guards that enabling the time-aperture observer does not perturb the actual trajectory. Its CI was likewise still running when written.
 
 **Next decision:** Inspect W/E/S/N time-mean openings and the independent observer-inert result across **both** platforms. Distinguish a temporary space-time connection from a physically supported mass/pressure flux. Before changing the source relocation algorithm, require an opt-in conservative model with explicit treatment for vanishing isolated pressure rows, disconnected/reopening faces, body force/torque, tracer and pressure source mass budgets, and the original unaligned frame-9 control. Do not silently suppress source, introduce a global occupancy cutoff, or merge this draft on local-only improvements.
+
+### 2026-11-23 — moving Capsule: mean-open boundary paths versus simultaneous geometry
+
+The previously pending read-only geometry and observer tests have now completed successfully on **both Ubuntu Debug and Windows Release**:
+[CI #44995218968](https://github.com/buddas-bible/zonai/actions/runs/44995218968) (time-midpoint face audit),
+[CI #44995680351](https://github.com/buddas-bible/zonai/actions/runs/44995680351) (same-entry observer ON/OFF),
+and [CI #44995775769](https://github.com/buddas-bible/zonai/actions/runs/44995775769) (force/torque/volume-budget parity). In the last run, both policy variants recorded **zero** difference in the measured stored MAC velocities, cell fractions, pressures, total dye mass, force/torque and volume budgets between cloned observer ON and OFF pressure steps.
+
+At exact grid-tangent frame 9, target cell **(30,6)** has a pressure-source volume of -0.00210937857628 m³. The independent time-mean swept aperture diagnostics report identical intermediate geometry between tangent face policies but distinct **endpoint** geometry:
+
+| Face at (30,6), W/E/S/N | Time-mean open fraction, both policies | Endpoint OFF | Endpoint ON |
+| --- | ---: | ---: | ---: |
+| W: U(30,6) | 0.0224990845 | 0 | 0 |
+| E: U(31,6) | 0.0224990845 | 0 | 0 |
+| S: V(30,6) | 0 | 0 | 0 |
+| N: V(30,7) | 1 | 1 | 0 |
+
+**Interpretation:** W and E were open over part of the moving interval even though they are closed at the endpoint. N was open during essentially the entire sampled moving interval, but the optional inclusive-tangent policy considers it closed exactly at the final pose. This is a topology discontinuity relevant to where a pressure-volume source could have traveled. It is **not proof of actual pressure transport**: independent face-time means do not establish that a complete path was open at the *same time*, nor do they account for the solid's moving surface, fluid velocity, or any time-integrated signed flux.
+
+Commit [`be426e7`](https://github.com/buddas-bible/zonai/commit/be426e770796c7b93b52ee2b2e3c0749306b9aa0) adds a deliberately **independent 128-midpoint same-instant Capsule geometry probe** on the existing frame-9 benchmark. At every sample it reconstructs the Capsule pose, the W/E/N face openings, and the positive analytic fluid area in source (29,6)/(31,6), target (30,6), and upper receiving cell (30,7). It records the count of instants where W→target→N or E→target→N are simultaneously geometrically possible and the sum of minimum path apertures. The 128-point independent mean is compared with the existing Swept midpoints using a numerical tolerance, rather than assumed equal. This remains a **geometric possibility test**, not a measured transport capacity or a proposed production source relocation scheme.
+
+**Acceptance gate:** inspect the coherent path evidence on both platforms before changing the solver. If paths are simultaneous, investigate signed moving-interface swept source, time-dependent fluid MAC flux and pressure-component compatibility; if not, reject endpoint-only or mean-open-based source routing as physically unsupported. In all cases preserve global signed source, trace disconnected slivers separately, compare the original unaligned frame-9 17.95 m/s control, and keep the experiment default-OFF.
