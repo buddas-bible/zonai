@@ -1249,7 +1249,8 @@ void auditCapsuleTangentMovingPressure()
         initial.setAnalyticCapsuleFullCoverageGuardEnabled( true );
         initial.setTightTranslatingCapsuleSweptBoundsAuditEnabled( true );
         if( initial.isCutCellCoupledProjectionEnabled() ||
-            initial.getSmallCellPressureMergeFraction() != 0.0f )
+            initial.getSmallCellPressureMergeFraction() != 0.0f ||
+            initial.isTemporalIsolatedVolumeSourceRelayEnabled() )
             throw std::runtime_error( "moving tangent reference solver changed" );
         std::array<fluidField2, 2> fields{{ initial, initial }};
         fields[1].setAnalyticCapsuleTangentFaceAuditEnabled( true );
@@ -1331,9 +1332,15 @@ void auditCapsuleTangentMovingPressure()
             // Deep-copy the same frame-9 entry before enabling time-aperture
             // diagnostics. Verify the observers do not perturb actual physics.
             std::optional<std::array<fluidField2, 2>> unobserved;
+            std::optional<fluidField2> temporalRelay;
             if( aligned && frame == 9 )
             {
                 unobserved.emplace( fields );
+                // Identical step-entry and analytic tangent geometry. Only
+                // the opt-in isolated-source relay differs from policy ON.
+                temporalRelay.emplace( fields[1] );
+                temporalRelay->setSweptApertureAuditEnabled( true );
+                temporalRelay->setTemporalIsolatedVolumeSourceRelayEnabled( true );
                 for( auto& field : fields )
                     field.setSweptApertureAuditEnabled( true );
             }
@@ -1349,6 +1356,64 @@ void auditCapsuleTangentMovingPressure()
                     std::abs( fields[policy].getTracerMass() -
                         seedMass[policy] ) > 1.0e-5 )
                     throw std::runtime_error( "moving tangent tracer not conserved" );
+            }
+            if( temporalRelay )
+            {
+                std::array<fluidObstacleForce2, 1> relayFeedback{};
+                temporalRelay->step( dt,
+                    std::span<const fluidShapeObstacle2>( &moving, 1 ),
+                    relayFeedback, 80 );
+                const fluidField2& baseline = fields[1];
+                const auto baselineVolume = baseline.getCutCellVolumeSummary( dt );
+                const auto relayVolume = temporalRelay->getCutCellVolumeSummary( dt );
+                const auto baselineIsland =
+                    baseline.getCutCellVolumeBudget( 30, 6, dt );
+                const auto relayIsland =
+                    temporalRelay->getCutCellVolumeBudget( 30, 6, dt );
+                const auto baselineNorth =
+                    baseline.getCutCellVolumeBudget( 30, 7, dt );
+                const auto relayNorth =
+                    temporalRelay->getCutCellVolumeBudget( 30, 7, dt );
+                const auto& relayPressure = temporalRelay->getCutCellPressure();
+                const double totalSourceDifference =
+                    relayVolume.totalPressureSourceDeltaVolume -
+                    baselineVolume.totalPressureSourceDeltaVolume;
+                const double relayForceDifference =
+                    static_cast<double>( relayFeedback[0].force.y ) -
+                    forces[1].force.y;
+                const double relayTracerDifference =
+                    static_cast<double>( temporalRelay->getTracerMass() ) -
+                    baseline.getTracerMass();
+                std::printf( "capsule_tangent_relay_ab,%d,%.12g,%.12g,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g,%.12g,%.12g\n",
+                    relayPressure.temporalRelayedCells,
+                    relayPressure.temporalRelayedSourceVolume,
+                    baselineIsland.pressureSourceDeltaVolume,
+                    relayIsland.pressureSourceDeltaVolume,
+                    baselineNorth.pressureSourceDeltaVolume,
+                    relayNorth.pressureSourceDeltaVolume,
+                    totalSourceDifference,
+                    baselineVolume.maxAbsPressureResidualVolume,
+                    relayVolume.maxAbsPressureResidualVolume,
+                    relayForceDifference, relayTracerDifference,
+                    baseline.getFlowAudit( dt ).maxFluidFaceSpeed,
+                    temporalRelay->getFlowAudit( dt ).maxFluidFaceSpeed );
+                if( relayPressure.temporalRelayedCells != 1 ||
+                    !baselineVolume.valid || !relayVolume.valid ||
+                    !std::isfinite( totalSourceDifference ) ||
+                    !std::isfinite( relayForceDifference ) ||
+                    !std::isfinite( relayTracerDifference ) ||
+                    std::abs( relayIsland.pressureSourceDeltaVolume ) > 1.0e-9 ||
+                    std::abs( relayPressure.temporalRelayedSourceVolume -
+                        baselineIsland.pressureSourceDeltaVolume ) > 1.0e-8 ||
+                    std::abs( ( relayNorth.pressureSourceDeltaVolume -
+                        baselineNorth.pressureSourceDeltaVolume ) -
+                        baselineIsland.pressureSourceDeltaVolume ) > 1.0e-8 ||
+                    std::abs( totalSourceDifference ) > 1.0e-8 ||
+                    std::abs( relayTracerDifference ) > 1.0e-5 )
+                    throw std::runtime_error(
+                        "moving Capsule opt-in pressure source relay violated ledger" );
             }
             if( unobserved )
                 for( int policy = 0; policy < 2; ++policy )
