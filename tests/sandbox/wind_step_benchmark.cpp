@@ -1073,11 +1073,15 @@ void auditCapsuleTangentMovingPressure()
                     throw std::runtime_error(
                         "moving tangent frame-9 entry Fields were not matched" );
             }
-            // Collect midpoint open geometry on only the matched tangent
-            // step. This does not change the physical pressure or tracer path.
+            // Deep-copy the same frame-9 entry before enabling time-aperture
+            // diagnostics. Verify the observers do not perturb actual physics.
+            std::optional<std::array<fluidField2, 2>> unobserved;
             if( aligned && frame == 9 )
+            {
+                unobserved.emplace( fields );
                 for( auto& field : fields )
                     field.setSweptApertureAuditEnabled( true );
+            }
             std::array<fluidObstacleForce2, 2> forces{};
             for( int policy = 0; policy < 2; ++policy )
             {
@@ -1091,6 +1095,61 @@ void auditCapsuleTangentMovingPressure()
                         seedMass[policy] ) > 1.0e-5 )
                     throw std::runtime_error( "moving tangent tracer not conserved" );
             }
+            if( unobserved )
+                for( int policy = 0; policy < 2; ++policy )
+                {
+                    auto& control = ( *unobserved )[policy];
+                    std::array<fluidObstacleForce2, 1> controlFeedback{};
+                    control.step( dt,
+                        std::span<const fluidShapeObstacle2>( &moving, 1 ),
+                        controlFeedback, 80 );
+                    const auto& observed = fields[policy];
+                    double maxMacDiff = 0.0, maxFractionDiff = 0.0;
+                    double maxPressureDiff = 0.0;
+                    for( int cy = 0; cy < height; ++cy )
+                        for( int cx = 0; cx < width; ++cx )
+                        {
+                            maxFractionDiff = std::max( maxFractionDiff,
+                                std::abs( static_cast<double>(
+                                    observed.getCellFluidFraction( cx, cy ) ) -
+                                    control.getCellFluidFraction( cx, cy ) ) );
+                            maxPressureDiff = std::max( maxPressureDiff,
+                                std::abs( static_cast<double>(
+                                    observed.getCellPressureForVisualization( cx, cy ) ) -
+                                    control.getCellPressureForVisualization( cx, cy ) ) );
+                            if( cx > 0 )
+                                maxMacDiff = std::max( maxMacDiff,
+                                    std::abs( static_cast<double>(
+                                        *observed.getUFaceVelocityForAudit( cx, cy ) ) -
+                                        *control.getUFaceVelocityForAudit( cx, cy ) ) );
+                            if( cy > 0 )
+                                maxMacDiff = std::max( maxMacDiff,
+                                    std::abs( static_cast<double>(
+                                        *observed.getVFaceVelocityForAudit( cx, cy ) ) -
+                                        *control.getVFaceVelocityForAudit( cx, cy ) ) );
+                        }
+                    const double tracerDiff = std::abs( static_cast<double>(
+                        observed.getTracerMass() ) - control.getTracerMass() );
+                    const double forceDiff = std::max(
+                        std::abs( static_cast<double>( forces[policy].force.x ) -
+                            controlFeedback[0].force.x ),
+                        std::abs( static_cast<double>( forces[policy].force.y ) -
+                            controlFeedback[0].force.y ) );
+                    std::printf( "capsule_tangent_aperture_audit_inert,%d,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                        policy, maxMacDiff, maxFractionDiff,
+                        maxPressureDiff, tracerDiff, forceDiff );
+                    if( !std::isfinite( maxMacDiff ) ||
+                        !std::isfinite( maxFractionDiff ) ||
+                        !std::isfinite( maxPressureDiff ) ||
+                        !std::isfinite( tracerDiff ) ||
+                        !std::isfinite( forceDiff ) ||
+                        maxMacDiff > 1.0e-6 || maxFractionDiff > 1.0e-6 ||
+                        maxPressureDiff > 1.0e-5 || tracerDiff > 1.0e-8 ||
+                        forceDiff > 1.0e-5 )
+                        throw std::runtime_error(
+                            "moving Capsule aperture audit altered physical step" );
+                }
             int changedU = 0, changedV = 0;
             for( int cy = 0; cy < height; ++cy )
                 for( int cx = 0; cx < width; ++cx )
