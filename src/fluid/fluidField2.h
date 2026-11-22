@@ -274,6 +274,10 @@ struct fluidCutCellPressure2
     float volumeRate = 0.0f;
     float redistributedVolumeRate = 0.0f;
     float unresolvedVolumeRate = 0.0f;
+    // S2c experimental endpoint-island source relay, not measured MAC flow.
+    // Counts are diagnostic only; default solver never enables this.
+    int temporalRelayedCells = 0;
+    double temporalRelayedSourceVolume = 0.0;
     int activeCells = 0;
     int connectedRegions = 0;
     bool hasVolumeHistory = false;
@@ -1021,6 +1025,21 @@ public:
     void setSweptGeometryCorrectionEnabled( bool enabled ) noexcept { sweptGeometryCorrectionEnabled_ = enabled; }
     [[nodiscard]] bool isSweptGeometryCorrectionEnabled() const noexcept { return sweptGeometryCorrectionEnabled_; }
 
+    // S2c RESEARCH ONLY (default OFF): after the swept-volume RHS is
+    // assembled, relay a numerically vanishing isolated positive-fluid
+    // cell's signed pressure source to an endpoint-active neighbor through
+    // the widest positive *time-mean* opening. Requires the independently
+    // enabled Swept aperture audit. Does NOT transport tracer or represent
+    // a measured time-dependent flux; do not ship as a production default.
+    void setTemporalIsolatedVolumeSourceRelayEnabled( bool enabled ) noexcept
+    {
+        temporalIsolatedVolumeSourceRelayEnabled_ = enabled;
+    }
+    [[nodiscard]] bool isTemporalIsolatedVolumeSourceRelayEnabled() const noexcept
+    {
+        return temporalIsolatedVolumeSourceRelayEnabled_;
+    }
+
     // 선택형 swept face 시간 표본 재계산: 셀 점유 변화 대비 L1 오차가 감소할 때만 채택.
     // 기본 OFF. 국소 면 flux 재배분과 독립이며 선택한 공간 표본 수는 유지한다.
     void setAdaptiveSweptSamplingEnabled( bool enabled ) noexcept { adaptiveSweptSamplingEnabled_ = enabled; }
@@ -1419,6 +1438,7 @@ private:
     bool sweptTracerRemapEnabled_ = false;
     bool connectedResidualTracerRemapEnabled_ = false;
     bool sweptGeometryCorrectionEnabled_ = false;
+    bool temporalIsolatedVolumeSourceRelayEnabled_ = false;
     bool adaptiveSweptSamplingEnabled_ = false;
     bool tightTranslatingCapsuleSweptBoundsAuditEnabled_ = false;
     int cutCellSampleCount_ = 4;
