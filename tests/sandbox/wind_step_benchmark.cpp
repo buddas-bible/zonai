@@ -1161,6 +1161,10 @@ void auditCapsuleTimeCoherentPath( const fluidField2& field,
         concurrentWestNorth, concurrentEastNorth,
         meanWest, meanEast, meanNorth,
         storedWest, storedEast, storedNorth );
+    if( westPathSamples == 0 || eastPathSamples == 0 ||
+        concurrentWestNorth <= 0.0 || concurrentEastNorth <= 0.0 )
+        throw std::runtime_error(
+            "moving Capsule lost simultaneous W/E-to-N geometry paths" );
     // Velocity capacity is deliberately a COUNTERFACTUAL: the interface's
     // actual fluid velocity history is not known. Each swept donor would
     // need its own signed volume to fit through the indicated mean aperture
