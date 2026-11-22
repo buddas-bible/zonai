@@ -927,6 +927,44 @@ void auditCapsulePressureSourceRouting( const fluidField2& field,
             "%.12g\n", aligned ? 1 : 0, frame, policy, targetX, targetY,
             d.index % width, d.index / width, d.sweptVolume );
     }
+    // Independently audit the source-routing arithmetic. This does NOT
+    // assert that relocating through blocked endpoints is physically sound.
+    const double sourceTolerance = 1.0e-8 *
+        std::max( 1.0, std::abs( cell.pressureSourceDeltaVolume ) );
+    if( !std::isfinite( observedImport ) ||
+        !std::isfinite( reconstructedImport ) ||
+        std::abs( observedImport - reconstructedImport ) > sourceTolerance )
+        throw std::runtime_error(
+            "moving tangent pressure source routing provenance mismatch" );
+
+    if( aligned && frame == 9 )
+    {
+        if( !field.hasSweptApertureAudit() )
+            throw std::runtime_error(
+                "moving tangent lacks time-sampled open-face audit" );
+        const std::array<double, 4> timeMeanOpen{{
+            field.getSweptUTimeMeanOpenFraction( targetX, targetY ),
+            field.getSweptUTimeMeanOpenFraction( targetX + 1, targetY ),
+            field.getSweptVTimeMeanOpenFraction( targetX, targetY ),
+            field.getSweptVTimeMeanOpenFraction( targetX, targetY + 1 )
+        }};
+        // Face order W/E/S/N. Signed swept volumes and time-mean open
+        // fractions come from different integrals, not an exact MAC flux.
+        for( int face = 0; face < 4; ++face )
+        {
+            const double integrated = timeMeanOpen[face];
+            const double endpoint = opens[face];
+            if( !std::isfinite( integrated ) ||
+                integrated < 0.0 || integrated > 1.0 ||
+                !std::isfinite( endpoint ) )
+                throw std::runtime_error(
+                    "moving tangent invalid time-mean face geometry" );
+            std::printf( "capsule_tangent_source_face_time,%d,%d,%d,%d,%d,%d,"
+                "%.12g,%.12g,%.12g\n",
+                aligned ? 1 : 0, frame, policy, targetX, targetY, face,
+                endpoint, integrated, cell.solidSweptOutwardVolume[face] );
+        }
+    }
 }
 
 // Controlled moving-Capsule S2c policy A/B. Both policies are fixed before
@@ -1035,6 +1073,11 @@ void auditCapsuleTangentMovingPressure()
                     throw std::runtime_error(
                         "moving tangent frame-9 entry Fields were not matched" );
             }
+            // Collect midpoint open geometry on only the matched tangent
+            // step. This does not change the physical pressure or tracer path.
+            if( aligned && frame == 9 )
+                for( auto& field : fields )
+                    field.setSweptApertureAuditEnabled( true );
             std::array<fluidObstacleForce2, 2> forces{};
             for( int policy = 0; policy < 2; ++policy )
             {
@@ -1221,6 +1264,9 @@ void auditCapsuleTangentMovingPressure()
                                 dt, aligned, frame, policy, 30, 6 );
                     }
                 }
+            if( aligned && frame == 9 )
+                for( auto& field : fields )
+                    field.setSweptApertureAuditEnabled( false );
             priorY = y;
         }
     }
