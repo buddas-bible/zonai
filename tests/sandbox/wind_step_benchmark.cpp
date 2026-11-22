@@ -1011,9 +1011,9 @@ void auditCapsuleTangentPressureRegions( const fluidField2& field,
                     if( opening <= 0.0f || nx < 0 || nx >= width ||
                         ny < 0 || ny >= height ) return;
                     const int adjacent = ny * width + nx;
-                    if( component[adjacent] >= 0 ||
-                        !field.getCutCellVolumeBudget( nx, ny, dt ).active )
-                        return;
+                    if( component[adjacent] >= 0 ) return;
+                    // Mirror projectCutCell's BFS exactly: it checks the
+                    // shared opening, not the neighbor's active fraction.
                     component[adjacent] = region;
                     queue.push_back( adjacent );
                 };
@@ -1047,13 +1047,19 @@ void auditCapsuleTangentPressureRegions( const fluidField2& field,
         totalMac += region.macVolume;
     }
     // Same signed source is retained; no clamp, deletion or creation.
-    const double shiftedSliverSource =
-        sliver.pressureSourceVolume - source.pressureSourceDeltaVolume;
-    const double shiftedUpperSource =
-        upper.pressureSourceVolume + source.pressureSourceDeltaVolume;
-    const double shiftedTotal = totalSource -
-        sliver.pressureSourceVolume - upper.pressureSourceVolume +
-        shiftedSliverSource + shiftedUpperSource;
+    // A within-component relocation changes only a local row, not the
+    // region budget. Only split components have independent RHS ledgers.
+    const bool split = sliverRegion != upperRegion;
+    const double shiftedSliverSource = split
+        ? sliver.pressureSourceVolume - source.pressureSourceDeltaVolume
+        : sliver.pressureSourceVolume;
+    const double shiftedUpperSource = split
+        ? upper.pressureSourceVolume + source.pressureSourceDeltaVolume
+        : upper.pressureSourceVolume;
+    const double shiftedTotal = split
+        ? totalSource - sliver.pressureSourceVolume -
+            upper.pressureSourceVolume + shiftedSliverSource + shiftedUpperSource
+        : totalSource;
     const double tolerance = 1.0e-10 *
         std::max( 1.0, std::abs( totalSource ) );
     if( !std::isfinite( totalSource ) ||
