@@ -967,6 +967,110 @@ void auditCapsulePressureSourceRouting( const fluidField2& field,
     }
 }
 
+// Independently reconstruct the endpoint-open pressure components of the
+// exact-tangent frame. This tests whether a disappearing sliver is a true
+// singleton Neumann row, rather than just a visually tiny Cut-cell.
+// The hypothetical source shift to (30,7) is ledger arithmetic ONLY;
+// it does not change the pressure solve or claim a physically legal path.
+void auditCapsuleTangentPressureRegions( const fluidField2& field,
+    int width, int height, float dt, int policy )
+{
+    struct regionBudget
+    {
+        int cells = 0;
+        double macVolume = 0.0;
+        double pressureSourceVolume = 0.0;
+    };
+    const int count = width * height;
+    std::vector<int> component( count, -1 );
+    std::vector<int> queue;
+    queue.reserve( count );
+    std::vector<regionBudget> regions;
+    for( int y = 0; y < height; ++y )
+        for( int x = 0; x < width; ++x )
+        {
+            const int seed = y * width + x;
+            if( component[seed] >= 0 ||
+                !field.getCutCellVolumeBudget( x, y, dt ).active ) continue;
+            const int region = static_cast<int>( regions.size() );
+            regions.emplace_back();
+            queue.clear();
+            queue.push_back( seed );
+            component[seed] = region;
+            for( std::size_t read = 0; read < queue.size(); ++read )
+            {
+                const int index = queue[read];
+                const int cx = index % width, cy = index / width;
+                const auto cell = field.getCutCellVolumeBudget( cx, cy, dt );
+                ++regions[region].cells;
+                regions[region].macVolume += cell.macNetOutwardVolume;
+                regions[region].pressureSourceVolume +=
+                    cell.pressureSourceDeltaVolume;
+                const auto visit = [&]( int nx, int ny, float opening )
+                {
+                    if( opening <= 0.0f || nx < 0 || nx >= width ||
+                        ny < 0 || ny >= height ) return;
+                    const int adjacent = ny * width + nx;
+                    if( component[adjacent] >= 0 ||
+                        !field.getCutCellVolumeBudget( nx, ny, dt ).active )
+                        return;
+                    component[adjacent] = region;
+                    queue.push_back( adjacent );
+                };
+                visit( cx - 1, cy, field.getUFaceOpenFraction( cx, cy ) );
+                visit( cx + 1, cy, field.getUFaceOpenFraction( cx + 1, cy ) );
+                visit( cx, cy - 1, field.getVFaceOpenFraction( cx, cy ) );
+                visit( cx, cy + 1, field.getVFaceOpenFraction( cx, cy + 1 ) );
+            }
+        }
+
+    constexpr int x = 30, y = 6;
+    const int sliverRegion = component[y * width + x];
+    const int upperRegion = component[( y + 1 ) * width + x];
+    if( sliverRegion < 0 || upperRegion < 0 )
+        throw std::runtime_error(
+            "moving tangent pressure region missing sliver or upper neighbor" );
+    const auto source = field.getCutCellVolumeBudget( x, y, dt );
+    const regionBudget& sliver = regions[sliverRegion];
+    const regionBudget& upper = regions[upperRegion];
+    if( policy == 1 && ( sliverRegion == upperRegion || sliver.cells != 1 ) )
+        throw std::runtime_error(
+            "moving tangent ON sliver is no longer an isolated pressure row" );
+    if( policy == 0 && sliverRegion != upperRegion )
+        throw std::runtime_error(
+            "moving tangent OFF sliver lost its north-face connection" );
+
+    double totalSource = 0.0, totalMac = 0.0;
+    for( const auto& region : regions )
+    {
+        totalSource += region.pressureSourceVolume;
+        totalMac += region.macVolume;
+    }
+    // Same signed source is retained; no clamp, deletion or creation.
+    const double shiftedSliverSource =
+        sliver.pressureSourceVolume - source.pressureSourceDeltaVolume;
+    const double shiftedUpperSource =
+        upper.pressureSourceVolume + source.pressureSourceDeltaVolume;
+    const double shiftedTotal = totalSource -
+        sliver.pressureSourceVolume - upper.pressureSourceVolume +
+        shiftedSliverSource + shiftedUpperSource;
+    const double tolerance = 1.0e-10 *
+        std::max( 1.0, std::abs( totalSource ) );
+    if( !std::isfinite( totalSource ) ||
+        !std::isfinite( totalMac ) ||
+        std::abs( shiftedTotal - totalSource ) > tolerance )
+        throw std::runtime_error(
+            "hypothetical pressure source routing failed signed conservation" );
+    std::printf( "capsule_tangent_pressure_regions,%d,%zu,%d,%d,%d,%d,"
+        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+        policy, regions.size(), sliverRegion, upperRegion,
+        sliver.cells, upper.cells,
+        sliver.pressureSourceVolume, sliver.macVolume,
+        upper.pressureSourceVolume, upper.macVolume,
+        shiftedSliverSource, shiftedUpperSource,
+        totalSource, totalMac );
+}
+
 // Read-only same-instant geometry probe. Averaging the openings of different
 // faces separately cannot establish that an entire route was open at once.
 // This independent midpoint oracle checks W->center->N and E->center->N
@@ -1337,7 +1441,11 @@ void auditCapsuleTangentMovingPressure()
                     // log its actual pressure/geometry terms and the adjacent
                     // four cells without adding a second full-grid traversal.
                     if( aligned && frame == 9 )
+                    {
                         auditCapsuleTimeCoherentPath( field, moving, priorY, policy );
+                        auditCapsuleTangentPressureRegions(
+                            field, width, height, dt, policy );
+                    }
                     if( frame == 9 || frame == 10 )
                     {
                         const int worstX = volume.worstPressureX;
