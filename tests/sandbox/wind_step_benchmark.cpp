@@ -1024,6 +1024,10 @@ void auditCapsuleTangentPressureRegions( const fluidField2& field,
             }
         }
 
+    if( static_cast<int>( regions.size() ) !=
+        field.getCutCellPressure().connectedRegions )
+        throw std::runtime_error(
+            "moving tangent independent pressure region count disagrees with solver" );
     constexpr int x = 30, y = 6;
     const int sliverRegion = component[y * width + x];
     const int upperRegion = component[( y + 1 ) * width + x];
@@ -1075,6 +1079,13 @@ void auditCapsuleTangentPressureRegions( const fluidField2& field,
         upper.pressureSourceVolume, upper.macVolume,
         shiftedSliverSource, shiftedUpperSource,
         totalSource, totalMac );
+    // The region mean-removal in the Neumann pressure solve can hide this
+    // raw incompatibility: a one-cell, four-closed-face region has no
+    // internal velocity unknown that could correct a nonzero source.
+    if( policy == 1 && sliver.cells == 1 &&
+        std::abs( sliver.macVolume ) > 1.0e-12 )
+        throw std::runtime_error(
+            "isolated tangent pressure row unexpectedly has endpoint MAC flux" );
 }
 
 // Read-only same-instant geometry probe. Averaging the openings of different
