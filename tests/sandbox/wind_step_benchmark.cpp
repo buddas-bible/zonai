@@ -967,6 +967,86 @@ void auditCapsulePressureSourceRouting( const fluidField2& field,
     }
 }
 
+// Read-only same-instant geometry probe. Averaging the openings of different
+// faces separately cannot establish that an entire route was open at once.
+// This independent midpoint oracle checks W->center->N and E->center->N
+// while all of the route cells have positive analytic fluid area. The
+// result is a geometric opportunity, NOT a measured pressure/MAC flux.
+void auditCapsuleTimeCoherentPath( const fluidField2& field,
+    const fluidShapeObstacle2& moving, float previousY, int policy )
+{
+    constexpr int sampleCount = 128;
+    constexpr int x = 30, y = 6;
+    double meanWest = 0.0, meanEast = 0.0, meanNorth = 0.0;
+    double concurrentWestNorth = 0.0, concurrentEastNorth = 0.0;
+    int westPathSamples = 0, eastPathSamples = 0;
+    for( int sample = 0; sample < sampleCount; ++sample )
+    {
+        const float alpha = ( sample + 0.5f ) / sampleCount;
+        fluidShapeObstacle2 probe = moving;
+        probe.transform.position.y = previousY +
+            alpha * ( moving.transform.position.y - previousY );
+        probe.center = probe.transform.position;
+        const auto west = field.getAnalyticCapsuleFaceOpenFractionForAudit(
+            probe, true, x, y );
+        const auto east = field.getAnalyticCapsuleFaceOpenFractionForAudit(
+            probe, true, x + 1, y );
+        const auto north = field.getAnalyticCapsuleFaceOpenFractionForAudit(
+            probe, false, x, y + 1 );
+        const auto left = field.getAnalyticCapsuleCellAreaAudit(
+            probe, x - 1, y );
+        const auto center = field.getAnalyticCapsuleCellAreaAudit(
+            probe, x, y );
+        const auto right = field.getAnalyticCapsuleCellAreaAudit(
+            probe, x + 1, y );
+        const auto upper = field.getAnalyticCapsuleCellAreaAudit(
+            probe, x, y + 1 );
+        if( !west || !east || !north || !left.valid || !center.valid ||
+            !right.valid || !upper.valid )
+            throw std::runtime_error(
+                "Capsule time-coherent geometry oracle unavailable" );
+        if( !std::isfinite( *west ) || !std::isfinite( *east ) ||
+            !std::isfinite( *north ) || *west < 0.0 || *east < 0.0 ||
+            *north < 0.0 || *west > 1.0 || *east > 1.0 ||
+            *north > 1.0 )
+            throw std::runtime_error( "Capsule invalid intermediate opening" );
+        meanWest += *west / sampleCount;
+        meanEast += *east / sampleCount;
+        meanNorth += *north / sampleCount;
+        const bool centerOpen = center.recomputedFluidFraction > 0.0 &&
+            upper.recomputedFluidFraction > 0.0;
+        if( centerOpen && left.recomputedFluidFraction > 0.0 &&
+            *west > 0.0 && *north > 0.0 )
+        {
+            ++westPathSamples;
+            concurrentWestNorth += std::min( *west, *north ) / sampleCount;
+        }
+        if( centerOpen && right.recomputedFluidFraction > 0.0 &&
+            *east > 0.0 && *north > 0.0 )
+        {
+            ++eastPathSamples;
+            concurrentEastNorth += std::min( *east, *north ) / sampleCount;
+        }
+    }
+    const double storedWest = field.getSweptUTimeMeanOpenFraction( x, y );
+    const double storedEast = field.getSweptUTimeMeanOpenFraction( x + 1, y );
+    const double storedNorth = field.getSweptVTimeMeanOpenFraction( x, y + 1 );
+    std::printf( "capsule_tangent_coherent_path,%d,%d,%d,"
+        "%.12g,%.12g,%.12g,%.12g,%.12g,"
+        "%.12g,%.12g,%.12g\n",
+        policy, westPathSamples, eastPathSamples,
+        concurrentWestNorth, concurrentEastNorth,
+        meanWest, meanEast, meanNorth,
+        storedWest, storedEast, storedNorth );
+    // The independent 128-point check and the Swept integrator may use
+    // different midpoint counts, so compare approximate openings only.
+    if( std::abs( storedWest - meanWest ) > 0.01 ||
+        std::abs( storedEast - meanEast ) > 0.01 ||
+        std::abs( storedNorth - meanNorth ) > 0.01 )
+        throw std::runtime_error(
+            "Capsule time-averaged openings disagree with geometry oracle" );
+}
+
 // Controlled moving-Capsule S2c policy A/B. Both policies are fixed before
 // the first step, and the same prescribed obstacle path and Wind forcing are
 // supplied to independent copies. The frame-9 entry velocities are compared
@@ -1256,6 +1336,8 @@ void auditCapsuleTangentMovingPressure()
                     // The summary has already localized the global maximum;
                     // log its actual pressure/geometry terms and the adjacent
                     // four cells without adding a second full-grid traversal.
+                    if( aligned && frame == 9 )
+                        auditCapsuleTimeCoherentPath( field, moving, priorY, policy );
                     if( frame == 9 || frame == 10 )
                     {
                         const int worstX = volume.worstPressureX;
