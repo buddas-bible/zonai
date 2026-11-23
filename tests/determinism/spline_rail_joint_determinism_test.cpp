@@ -13,6 +13,7 @@
 
 #include "math/deterministicMath.h"
 #include "joint_cache_snapshot.h"
+#include "joint_substep_trace.h"
 #include "world_state_snapshot.h"
 
 using namespace zonai;
@@ -179,6 +180,13 @@ struct splineRailFixture
 void runFixture( bool loop, std::FILE* output )
 {
     splineRailFixture first( loop ), second( loop );
+    jointSubstepTraceRecorder firstTrace{}, secondTrace{};
+    firstTrace.bodies.assign( first.bodies.begin(), first.bodies.end() );
+    secondTrace.bodies.assign( second.bodies.begin(), second.bodies.end() );
+    firstTrace.joints.push_back( first.rail );
+    secondTrace.joints.push_back( second.rail );
+    jointSubstepTraceAccess::install( first.simulation, firstTrace );
+    jointSubstepTraceAccess::install( second.simulation, secondTrace );
     const char* label = loop ? "loop" : "open";
 
     for( std::uint32_t tick = 0; tick <= 240; ++tick )
@@ -187,6 +195,11 @@ void runFixture( bool loop, std::FILE* output )
         {
             first.advance( tick );
             second.advance( tick );
+            compareAndEmitJointSubsteps( firstTrace, secondTrace,
+                label, tick,
+                splineRailFixture::substeps, output );
+            firstTrace.records.clear();
+            secondTrace.records.clear();
         }
 
         const stateSnapshot left = first.capture( tick );
@@ -216,6 +229,9 @@ void runFixture( bool loop, std::FILE* output )
             }
         }
     }
+
+    jointSubstepTraceAccess::uninstall( first.simulation );
+    jointSubstepTraceAccess::uninstall( second.simulation );
 
     if( output && std::ferror( output ) )
         throw std::runtime_error( "Spline Rail fingerprint output failed" );
