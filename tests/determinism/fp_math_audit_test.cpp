@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "math/deterministicMath.h"
 #include "math/rot2.h"
 #include "math/vec2.h"
 
@@ -104,6 +105,10 @@ void emitFingerprint( std::FILE* stream )
         outputFloat( stream, "libm.atan2f", i, std::atan2( angle, 0.75f ) );
         outputDouble( stream, "libm.atan2", i,
             std::atan2( static_cast<double>( angle ), 0.75 ) );
+        outputDouble( stream, "zonai.hypot", i,
+            deterministicHypot( static_cast<double>( angle ), 0.75 ) );
+        // Keep the known platform-dependent libm sample as a research
+        // diagnostic; R2a's strict gate must not hide existing differences.
         outputDouble( stream, "libm.hypot", i,
             std::hypot( static_cast<double>( angle ), 0.75 ) );
         outputFloat( stream, "sqrtf", i, std::sqrt( angle * angle + 0.5625f ) );
