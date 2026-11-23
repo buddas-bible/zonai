@@ -893,3 +893,8 @@ add_test(NAME fpMathAuditTests COMMAND fpMathAuditTests)
 add_executable(deterministicHypotTests math/deterministic_hypot_test.cpp)
 target_link_libraries(deterministicHypotTests PRIVATE zonai::zonai)
 add_test(NAME deterministicHypotTests COMMAND deterministicHypotTests)
+
+# R2a-4: compare per-Tick Spline Rail World and Joint observable bits.
+add_executable(splineRailDeterminismTests determinism/spline_rail_joint_determinism_test.cpp)
+target_link_libraries(splineRailDeterminismTests PRIVATE zonai::zonai)
+add_test(NAME splineRailDeterminismTests COMMAND splineRailDeterminismTests)
