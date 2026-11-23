@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <numbers>
 #include <span>
 #include <utility>
 #include <stdexcept>
@@ -128,6 +129,18 @@ struct splineRailFixture
         writer.writeFloat( "rail.currentSpeed", data.currentSpeed );
         writer.writeFloat( "rail.currentAngularSpeed", data.currentAngularSpeed );
         writer.writeFloat( "rail.currentAngle", data.currentAngle );
+        // Read-only diagnostics of the follow-tangent angle math. Both raw
+        // inputs are already present in this snapshot; the libm outputs
+        // let us distinguish a transcendental difference from a solver one.
+        const transform2 poseA = simulation.GetBodyTransform( bodies[0] );
+        const transform2 poseB = simulation.GetBodyTransform( bodies[1] );
+        const rot2 relativeRotation = Inverse( poseA.rotation ) * poseB.rotation;
+        const float tangentAngle = std::atan2( data.tangent.y, data.tangent.x );
+        const float relativeAngle = std::atan2( relativeRotation.s, relativeRotation.c );
+        writer.writeFloat( "diagnostic.tangentAtan2", tangentAngle );
+        writer.writeFloat( "diagnostic.relativeAtan2", relativeAngle );
+        writer.writeFloat( "diagnostic.angleRemainder",
+            std::remainder( relativeAngle - tangentAngle, 2.0f * std::numbers::pi_v<float> ) );
         writer.writeFloat( "rail.lateralError", data.lateralError );
         writer.writeFloat( "rail.anchorA.x", data.anchorA.x );
         writer.writeFloat( "rail.anchorA.y", data.anchorA.y );
