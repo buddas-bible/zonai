@@ -33,6 +33,13 @@ target_compile_features(zonai
         cxx_std_20
 )
 
+# Substep trace is a test-build-only observer, absent from production builds
+# configured with ZONAI_BUILD_TESTS=OFF. Keep the definition consistent for
+# the library and all test consumers because it changes world class layout.
+if(ZONAI_BUILD_TESTS)
+    target_compile_definitions(zonai PUBLIC ZONAI_TEST_SUBSTEP_TRACE=1)
+endif()
+
 # Deterministic physics requires identical FP contraction/reassociation policy
 # across the engine and consumers compiling math in zonai's public headers.
 # This is not by itself a cross-platform determinism guarantee: libm routines,
