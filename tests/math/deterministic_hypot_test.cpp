@@ -99,7 +99,7 @@ void testScaleAndAccuracy()
         { 1e308, 1e-308 }, { 1e-308, 1e-308 },
         { 1e200, 1e200 }, { 1e-200, 1e-200 },
         { 1e-300, 1e300 }, { 1e-300, 1e-200 },
-        { -5e-324, 3e-324 }
+        { -subnormal, subnormal }
     } };
 
     for( const auto& [x, y] : cases )
