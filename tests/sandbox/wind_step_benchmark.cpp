@@ -1601,6 +1601,31 @@ void auditCapsuleTangentMovingPressure()
                         baselinePost, relayPost,
                         baselinePost - *prePressureBaselineU,
                         relayPost - *prePressureRelayU );
+                    // A large velocity on a 1%-open face is not the same
+                    // as a large transferred volume. This endpoint-weighted
+                    // pressure flux change is a control-volume approximation,
+                    // NOT time-integrated pressure flux through moving geometry.
+                    const double endpointOpen =
+                        baseline.getUFaceOpenFraction( 26, 4 );
+                    const double timeMeanOpen =
+                        baseline.getSweptUTimeMeanOpenFraction( 26, 4 );
+                    const double openWeightedPressureDeltaVolume =
+                        static_cast<double>( h ) * dt * endpointOpen *
+                        ( baselinePost - *prePressureBaselineU );
+                    const double timeLinearVolume =
+                        baseline.getSweptULinearVelocityProxyVolume( 26, 4, dt );
+                    const double endpointNetFaceVolume =
+                        static_cast<double>( h ) * dt * endpointOpen * baselinePost;
+                    std::printf( "capsule_unaligned_pressure_face_volume,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                        endpointOpen, timeMeanOpen,
+                        openWeightedPressureDeltaVolume,
+                        endpointNetFaceVolume, timeLinearVolume );
+                    if( !std::isfinite( openWeightedPressureDeltaVolume ) ||
+                        !std::isfinite( endpointNetFaceVolume ) ||
+                        !std::isfinite( timeLinearVolume ) )
+                        throw std::runtime_error(
+                            "original near-wall pressure face volume nonfinite" );
                     const auto left = baseline.getCutCellVolumeBudget( 25, 4, dt );
                     const auto right = baseline.getCutCellVolumeBudget( 26, 4, dt );
                     std::printf( "capsule_relay_unaligned_peak_face,"
