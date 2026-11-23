@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "math/deterministicMath.h"
 #include "world_state_snapshot.h"
 
 using namespace zonai;
@@ -137,6 +138,10 @@ struct splineRailFixture
         const rot2 relativeRotation = Inverse( poseA.rotation ) * poseB.rotation;
         const float tangentAngle = std::atan2( data.tangent.y, data.tangent.x );
         const float relativeAngle = std::atan2( relativeRotation.s, relativeRotation.c );
+        writer.writeFloat( "diagnostic.zonaiTangentAtan2",
+            deterministicAtan2( data.tangent.y, data.tangent.x ) );
+        writer.writeFloat( "diagnostic.zonaiRelativeAtan2",
+            deterministicAtan2( relativeRotation.s, relativeRotation.c ) );
         writer.writeFloat( "diagnostic.tangentAtan2", tangentAngle );
         writer.writeFloat( "diagnostic.relativeAtan2", relativeAngle );
         writer.writeFloat( "diagnostic.angleRemainder",
