@@ -872,3 +872,9 @@ add_test(NAME sandboxWindFlowDemoTests COMMAND sandboxWindFlowDemoTests)
 add_executable(sandboxWindStepBenchmark sandbox/wind_step_benchmark.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
 target_include_directories(sandboxWindStepBenchmark PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxWindStepBenchmark PRIVATE zonai::zonai)
+
+
+# R1a: deterministic, field-wise public World/Body snapshot; no physics changes.
+add_executable(worldStateSnapshotTests determinism/world_state_snapshot_test.cpp)
+target_link_libraries(worldStateSnapshotTests PRIVATE zonai::zonai)
+add_test(NAME worldStateSnapshotTests COMMAND worldStateSnapshotTests)
