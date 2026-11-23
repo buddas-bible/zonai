@@ -1342,7 +1342,7 @@ void auditCapsuleTangentMovingPressure()
             // Deep-copy the same frame-9 entry before enabling time-aperture
             // diagnostics. Verify the observers do not perturb actual physics.
             std::optional<std::array<fluidField2, 2>> unobserved;
-            if( aligned && frame == 9 )
+            if( frame == 9 )
             {
                 unobserved.emplace( fields );
                 // Identical step-entry and analytic tangent geometry. Only
@@ -1426,11 +1426,11 @@ void auditCapsuleTangentMovingPressure()
                     if( !std::isfinite( value ) )
                         throw std::runtime_error(
                             "Capsule relay trajectory produced nonfinite metric" );
-                std::printf( "capsule_tangent_relay_trajectory,%d,"
+                std::printf( "capsule_tangent_relay_trajectory,%d,%d,"
                     "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
                     "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
                     "%.12g,%.12g,%d,%.12g\n",
-                    frame, totalSourceDiff, baselineTracerMass - relayTracerMass,
+                    aligned ? 1 : 0, frame, totalSourceDiff, baselineTracerMass - relayTracerMass,
                     massL1, maxFaceDelta, forceDeltaX, forceDeltaY,
                     torqueDelta, momentumDeltaX, momentumDeltaY,
                     energyDelta, baselinePeak, relayPeak,
@@ -1444,7 +1444,28 @@ void auditCapsuleTangentMovingPressure()
                     std::abs( relayTracerMass - seedMass[1] ) > 1.0e-5 )
                     throw std::runtime_error(
                         "Capsule relay trajectory failed total source/tracer conservation" );
-                if( frame == 9 )
+                if( !aligned && frame == 9 )
+                {
+                    const auto left = baseline.getCutCellVolumeBudget( 25, 4, dt );
+                    const auto right = baseline.getCutCellVolumeBudget( 26, 4, dt );
+                    std::printf( "capsule_relay_unaligned_peak_face,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                        "%.12g,%.12g,%.12g,%d\n",
+                        static_cast<double>( baseline.getUFaceOpenFraction( 26, 4 ) ),
+                        static_cast<double>(
+                            baseline.getSweptUTimeMeanOpenFraction( 26, 4 ) ),
+                        static_cast<double>(
+                            *baseline.getUFaceVelocityForAudit( 26, 4 ) ),
+                        static_cast<double>(
+                            *temporalRelay->getUFaceVelocityForAudit( 26, 4 ) ),
+                        left.pressureSourceDeltaVolume,
+                        right.pressureSourceDeltaVolume,
+                        baselineVolume.maxAbsPressureResidualVolume,
+                        relayVolume.maxAbsPressureResidualVolume,
+                        maxFaceDelta,
+                        temporalRelay->getCutCellPressure().temporalRelayedCells );
+                }
+                if( aligned && frame == 9 )
                 {
                     const auto baselineIsland =
                         baseline.getCutCellVolumeBudget( 30, 6, dt );
@@ -1744,7 +1765,7 @@ void auditCapsuleTangentMovingPressure()
                                 dt, aligned, frame, policy, 30, 6 );
                     }
                 }
-            if( aligned && frame == 9 )
+            if( frame == 9 )
                 for( auto& field : fields )
                     field.setSweptApertureAuditEnabled( false );
             priorY = y;
