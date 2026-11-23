@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "joint_cache_snapshot.h"
+#include "joint_substep_trace.h"
 #include "world_state_snapshot.h"
 
 using namespace zonai;
@@ -224,6 +225,13 @@ struct jointFixture
 void runScene( jointSceneType type, std::FILE* output )
 {
     jointFixture first( type ), second( type );
+    jointSubstepTraceRecorder firstTrace{}, secondTrace{};
+    firstTrace.bodies.assign( first.bodies.begin(), first.bodies.end() );
+    secondTrace.bodies.assign( second.bodies.begin(), second.bodies.end() );
+    firstTrace.joints.push_back( first.constraint );
+    secondTrace.joints.push_back( second.constraint );
+    jointSubstepTraceAccess::install( first.simulation, firstTrace );
+    jointSubstepTraceAccess::install( second.simulation, secondTrace );
 
     for( std::uint32_t tick = 0; tick <= 180; ++tick )
     {
@@ -231,6 +239,11 @@ void runScene( jointSceneType type, std::FILE* output )
         {
             first.advance( tick );
             second.advance( tick );
+            compareAndEmitJointSubsteps( firstTrace, secondTrace,
+                sceneName( type ), tick,
+                jointFixture::substeps, output );
+            firstTrace.records.clear();
+            secondTrace.records.clear();
         }
 
         const stateSnapshot left = first.capture( tick );
@@ -261,6 +274,9 @@ void runScene( jointSceneType type, std::FILE* output )
             }
         }
     }
+
+    jointSubstepTraceAccess::uninstall( first.simulation );
+    jointSubstepTraceAccess::uninstall( second.simulation );
 
     if( output && std::ferror( output ) )
         throw std::runtime_error( "Joint fingerprint output failed" );
