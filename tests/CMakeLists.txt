@@ -908,3 +908,8 @@ add_test(NAME deterministicAtan2Tests COMMAND deterministicAtan2Tests)
 add_executable(standardJointDeterminismTests determinism/standard_joint_determinism_test.cpp)
 target_link_libraries(standardJointDeterminismTests PRIVATE zonai::zonai)
 add_test(NAME standardJointDeterminismTests COMMAND standardJointDeterminismTests)
+
+# R2a-7: inspect persistent solver caches directly through the test-only friend bridge.
+add_executable(jointCacheSnapshotTests determinism/joint_cache_snapshot_test.cpp)
+target_link_libraries(jointCacheSnapshotTests PRIVATE zonai::zonai)
+add_test(NAME jointCacheSnapshotTests COMMAND jointCacheSnapshotTests)
