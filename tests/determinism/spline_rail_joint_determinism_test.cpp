@@ -180,6 +180,7 @@ struct splineRailFixture
 void runFixture( bool loop, std::FILE* output )
 {
     splineRailFixture first( loop ), second( loop );
+    splineRailFixture withoutObserver( loop );
     jointSubstepTraceRecorder firstTrace{}, secondTrace{};
     firstTrace.bodies.assign( first.bodies.begin(), first.bodies.end() );
     secondTrace.bodies.assign( second.bodies.begin(), second.bodies.end() );
@@ -195,6 +196,7 @@ void runFixture( bool loop, std::FILE* output )
         {
             first.advance( tick );
             second.advance( tick );
+            withoutObserver.advance( tick );
             compareAndEmitJointSubsteps( firstTrace, secondTrace,
                 label, tick,
                 splineRailFixture::substeps, output );
@@ -217,6 +219,13 @@ void runFixture( bool loop, std::FILE* output )
         }
 
         check( left.bytes == right.bytes, "separate World instances must match exactly" );
+        // Explicitly verify that registering the read-only observer did not
+        // perturb a third otherwise-identical, completely unobserved World.
+        const stateSnapshot control = withoutObserver.capture( tick );
+        if( const auto difference = firstDifference( left, control ) )
+            throw std::runtime_error( std::string( "tracing changed authoritative state: " ) +
+                difference->field );
+        check( left.bytes == control.bytes, "tracing must not change physics" );
 
         if( output )
         {
