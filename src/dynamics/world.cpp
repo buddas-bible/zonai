@@ -2451,7 +2451,7 @@ void world::Step( float timeStep, int subStepCount )
         {
             if( jointSubstepObserver_ != nullptr )
                 jointSubstepObserver_( *this, stage, index, jointConstraints,
-                    jointSubstepObserverContext_ );
+                    contactConstraints, islandGraph, jointSubstepObserverContext_ );
         };
         traceJointStage( jointTraceStage2::prepare, -1 );
 #endif
@@ -2608,6 +2608,10 @@ void world::Step( float timeStep, int subStepCount )
 
             ApplyRestitutionContacts( constraints );
         }
+
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+        traceJointStage( jointTraceStage2::restitution, subStepCount );
+#endif
 
         // -----------------------------------------------------
         // 6. Limit final speed and classify fast bodies for continuous collision
