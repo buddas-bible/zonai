@@ -225,6 +225,7 @@ struct jointFixture
 void runScene( jointSceneType type, std::FILE* output )
 {
     jointFixture first( type ), second( type );
+    jointFixture withoutObserver( type );
     jointSubstepTraceRecorder firstTrace{}, secondTrace{};
     firstTrace.bodies.assign( first.bodies.begin(), first.bodies.end() );
     secondTrace.bodies.assign( second.bodies.begin(), second.bodies.end() );
@@ -239,6 +240,7 @@ void runScene( jointSceneType type, std::FILE* output )
         {
             first.advance( tick );
             second.advance( tick );
+            withoutObserver.advance( tick );
             compareAndEmitJointSubsteps( firstTrace, secondTrace,
                 sceneName( type ), tick,
                 jointFixture::substeps, output );
@@ -262,6 +264,13 @@ void runScene( jointSceneType type, std::FILE* output )
 
         check( left.bytes == right.bytes,
             "independent World instances must produce identical snapshot bytes" );
+        // Explicitly verify that registering the read-only observer did not
+        // perturb a third otherwise-identical, completely unobserved World.
+        const stateSnapshot control = withoutObserver.capture( tick );
+        if( const auto difference = firstDifference( left, control ) )
+            throw std::runtime_error( std::string( "tracing changed authoritative state: " ) +
+                difference->field );
+        check( left.bytes == control.bytes, "tracing must not change physics" );
 
         if( output )
         {
