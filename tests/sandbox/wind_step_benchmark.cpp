@@ -1267,6 +1267,9 @@ void auditCapsuleTangentMovingPressure()
         };
         float priorY = startY;
         std::array<double, 2> seedMass{};
+        // Continue one matched relay-vs-baseline trajectory after the
+        // frame-9 frozen comparison; do not confuse it with matched-state A/B.
+        std::optional<fluidField2> temporalRelay;
         for( int frame = 0; frame < 27; ++frame )
         {
             const float fraction = frame < 16
@@ -1293,6 +1296,13 @@ void auditCapsuleTangentMovingPressure()
                     field.setTracerConcentration( donorX, donorY, 1.0f );
                 const float time = ( frame + 1 ) * dt;
                 field.addVelocity( { -2.0f, 0.0f },
+                    { 6.0f * dt, 3.0f * dt * std::sin( 1.7f * time ) },
+                    1.7f );
+            }
+            if( temporalRelay )
+            {
+                const float time = ( frame + 1 ) * dt;
+                temporalRelay->addVelocity( { -2.0f, 0.0f },
                     { 6.0f * dt, 3.0f * dt * std::sin( 1.7f * time ) },
                     1.7f );
             }
@@ -1332,7 +1342,6 @@ void auditCapsuleTangentMovingPressure()
             // Deep-copy the same frame-9 entry before enabling time-aperture
             // diagnostics. Verify the observers do not perturb actual physics.
             std::optional<std::array<fluidField2, 2>> unobserved;
-            std::optional<fluidField2> temporalRelay;
             if( aligned && frame == 9 )
             {
                 unobserved.emplace( fields );
@@ -1363,9 +1372,80 @@ void auditCapsuleTangentMovingPressure()
                 temporalRelay->step( dt,
                     std::span<const fluidShapeObstacle2>( &moving, 1 ),
                     relayFeedback, 80 );
-                const fluidField2& baseline = fields[1];
+                const auto relayForce = relayFeedback[0];
+                const auto& baseline = fields[1];
                 const auto baselineVolume = baseline.getCutCellVolumeSummary( dt );
                 const auto relayVolume = temporalRelay->getCutCellVolumeSummary( dt );
+                const double totalSourceDiff =
+                    relayVolume.totalPressureSourceDeltaVolume -
+                    baselineVolume.totalPressureSourceDeltaVolume;
+                const double baselineTracerMass = baseline.getTracerMass();
+                const double relayTracerMass = temporalRelay->getTracerMass();
+                double massL1 = 0.0, maxFaceDelta = 0.0;
+                for( int cy = 0; cy < height; ++cy )
+                    for( int cx = 0; cx < width; ++cx )
+                    {
+                        massL1 += std::abs(
+                            temporalRelay->getTracerCellMass( cx, cy ) -
+                            baseline.getTracerCellMass( cx, cy ) );
+                        if( cx > 0 )
+                            maxFaceDelta = std::max( maxFaceDelta,
+                                std::abs( static_cast<double>(
+                                    *temporalRelay->getUFaceVelocityForAudit( cx, cy ) ) -
+                                    *baseline.getUFaceVelocityForAudit( cx, cy ) ) );
+                        if( cy > 0 )
+                            maxFaceDelta = std::max( maxFaceDelta,
+                                std::abs( static_cast<double>(
+                                    *temporalRelay->getVFaceVelocityForAudit( cx, cy ) ) -
+                                    *baseline.getVFaceVelocityForAudit( cx, cy ) ) );
+                    }
+                const double forceDeltaX =
+                    static_cast<double>( relayForce.force.x ) - forces[1].force.x;
+                const double forceDeltaY =
+                    static_cast<double>( relayForce.force.y ) - forces[1].force.y;
+                const double torqueDelta =
+                    static_cast<double>( relayForce.torque ) - forces[1].torque;
+                const vec2 baselineMomentum = baseline.getFluidMomentum();
+                const vec2 relayMomentum = temporalRelay->getFluidMomentum();
+                const double momentumDeltaX =
+                    static_cast<double>( relayMomentum.x ) - baselineMomentum.x;
+                const double momentumDeltaY =
+                    static_cast<double>( relayMomentum.y ) - baselineMomentum.y;
+                const double energyDelta = temporalRelay->getFluidKineticEnergy() -
+                    baseline.getFluidKineticEnergy();
+                const double baselinePeak = baseline.getFlowAudit( dt ).maxFluidFaceSpeed;
+                const double relayPeak = temporalRelay->getFlowAudit( dt ).maxFluidFaceSpeed;
+                const std::array<double, 13> metrics{{
+                    totalSourceDiff, baselineTracerMass - relayTracerMass,
+                    massL1, maxFaceDelta, forceDeltaX, forceDeltaY,
+                    torqueDelta, momentumDeltaX, momentumDeltaY,
+                    energyDelta, baselinePeak, relayPeak,
+                    relayVolume.maxAbsPressureResidualVolume
+                }};
+                for( const double value : metrics )
+                    if( !std::isfinite( value ) )
+                        throw std::runtime_error(
+                            "Capsule relay trajectory produced nonfinite metric" );
+                std::printf( "capsule_tangent_relay_trajectory,%d,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                    "%.12g,%.12g,%d,%.12g\n",
+                    frame, totalSourceDiff, baselineTracerMass - relayTracerMass,
+                    massL1, maxFaceDelta, forceDeltaX, forceDeltaY,
+                    torqueDelta, momentumDeltaX, momentumDeltaY,
+                    energyDelta, baselinePeak, relayPeak,
+                    baselineVolume.maxAbsPressureResidualVolume,
+                    relayVolume.maxAbsPressureResidualVolume,
+                    temporalRelay->getCutCellPressure().temporalRelayedCells,
+                    temporalRelay->getCutCellPressure().temporalRelayedSourceVolume );
+                if( !baselineVolume.valid || !relayVolume.valid ||
+                    std::abs( totalSourceDiff ) > 1.0e-6 ||
+                    std::abs( baselineTracerMass - relayTracerMass ) > 1.0e-5 ||
+                    std::abs( relayTracerMass - seedMass[1] ) > 1.0e-5 )
+                    throw std::runtime_error(
+                        "Capsule relay trajectory failed total source/tracer conservation" );
+                if( frame == 9 )
+                {
                 const auto baselineIsland =
                     baseline.getCutCellVolumeBudget( 30, 6, dt );
                 const auto relayIsland =
@@ -1414,6 +1494,7 @@ void auditCapsuleTangentMovingPressure()
                     std::abs( relayTracerDifference ) > 1.0e-5 )
                     throw std::runtime_error(
                         "moving Capsule opt-in pressure source relay violated ledger" );
+                }
             }
             if( unobserved )
                 for( int policy = 0; policy < 2; ++policy )
