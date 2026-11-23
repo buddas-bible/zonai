@@ -53,7 +53,23 @@ fpMathAuditTests --emit <path.tsv>
 - 새 Math fingerprint 비교는 각 줄의 원시 비트가 하나라도 다르면 CI를 **실패**시킨다. 최초 `operation/sample` 및 양쪽 비트값을 `fp-comparison.txt`로 보존한다.
 - 차이가 나는 경우 바로 억지로 허용하지 않는다. `rot2`나 Joint `atan2`에 필요한 결정론 함수를 채택하되, 물리 정확성·기존 테스트·성능은 별도로 검증하고 좁은 후속 PR에서 교체한다.
 
-## 5. 기존 기능과 구분
+## 5. 실제 첫 교차 플랫폼 측정 (2026-11-24 KST)
+
+첫 [R2a CI #45213806852](https://github.com/buddas-bible/zonai/actions/runs/45213806852)에서 다음 사실이 확인됐다.
+
+- **R1c World replay**: `identical replay archives: 61 snapshots`로 통과.
+- **FP 계약 검사**: Ubuntu, Windows의 audit 실행·샘플 생성은 성공.
+- **Math fingerprint 비교**: **실패(정상적인 위험 검출)**. 최초 차이는 `libm.hypot.02`의 double 반환값.
+  - Ubuntu/GCC: `3fe8365f6c143f12`
+  - Windows/MSVC: `3fe8365f6c143f11`
+  - 이 샘플의 입력은 `double(0.1f)`, `0.75`. 해당 값에서 서로 1 ULP 차이가 난다.
+- 이후 최초 차이뿐 아니라 **연산 종류별 총 불일치 수를 보고하도록** CI를 확장했다.
+
+이는 R1c fixture가 서로 다른 물리 상태를 만들었다는 의미가 아니다. 그러나 `std::hypot(double)`이 실제 authoritative 코드에서 사용되므로 완전 결정론이 보장되지 않는 위험을 실제로 증명했다. 동일 API를 계속 사용하면서 비교를 허용 오차로 변경하지 않는다.
+
+**후속 R2a-2**에서는 알고리즘별 호출 위치 및 입력 범위, 안정성과 수치 정밀도를 먼저 기록한 뒤 **공통 결정론적 수학 함수**를 좁은 영역부터 도입하고, 정확성·전체 회귀·성능·결정론을 통과한 사용처만 교체한다. `std::hypot`을 무조건 `sqrt(x*x+y*y)`로 교체하면 큰/작은 수에서 overflow, underflow가 발생할 수 있어 그런 변경은 금지한다.
+
+## 6. 기존 기능과 구분
 
 이 작업은 **정적 분석에서 발견한 위험 경로와 최소 입력 범위의 실제 raw-bit 비교**만 검사한다. 관측되는 Math fingerprint가 일치해도 전체 엔진 결정론 통과 증거가 아니며, 다음 단계에서 Body/Shape/Contact/Joint/CCD 내부 권위 상태를 포함하는 테스트를 확장해야 한다.
 
