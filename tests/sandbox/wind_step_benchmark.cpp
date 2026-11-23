@@ -1222,6 +1222,80 @@ void auditCapsuleTimeCoherentPath( const fluidField2& field,
             "Capsule time-averaged openings disagree with geometry oracle" );
 }
 
+// Original non-tangent frame-9 frozen pressure-only experiment. A fixed
+// pre-pressure MAC/geometry/RHS state separates Jacobi convergence from
+// history-dependent advection and obstacle motion. None of these variants
+// modifies the live Field or its default 80-iteration projection.
+[[nodiscard]] double auditCapsuleUnalignedFrozenPressure(
+    const fluidField2& frozen, float dt )
+{
+    constexpr int faceX = 26, faceY = 4;
+    const double before = *frozen.getUFaceVelocityForAudit( faceX, faceY );
+    const double h = frozen.getCellSize();
+    const double opening = frozen.getUFaceOpenFraction( faceX, faceY );
+    if( !( opening > 0.0 && opening < 1.0 ) || !std::isfinite( before ) )
+        throw std::runtime_error(
+            "original near-wall frozen pressure aperture invalid" );
+
+    double after80 = std::numeric_limits<double>::quiet_NaN();
+    double previousResidual = std::numeric_limits<double>::quiet_NaN();
+    for( const int iterations : { 40, 80, 160, 320, 640, 1280 } )
+    {
+        fluidField2 trial = frozen;
+        trial.setPrePressureSnapshotObserver( {} );
+        const auto feedback = trial.replayFrozenCutCellPressure( iterations );
+        if( !feedback || feedback->size() != 1 )
+            throw std::runtime_error(
+                "original near-wall frozen pressure replay rejected" );
+        const double after = *trial.getUFaceVelocityForAudit( faceX, faceY );
+        const double pressureLeft =
+            trial.getCellPressureForVisualization( faceX - 1, faceY );
+        const double pressureRight =
+            trial.getCellPressureForVisualization( faceX, faceY );
+        const double pressureJump = pressureRight - pressureLeft;
+        const double predictedDelta = -( dt / h ) * pressureJump;
+        const double actualDelta = after - before;
+        const auto left = trial.getCutCellVolumeBudget( faceX - 1, faceY, dt );
+        const auto right = trial.getCutCellVolumeBudget( faceX, faceY, dt );
+        const auto volume = trial.getCutCellVolumeSummary( dt );
+        const auto& stats = trial.getCutCellPressure();
+        const double pressureRms = stats.pressureResidual;
+        const std::array<double, 11> audit{{
+            after, pressureLeft, pressureRight, pressureJump,
+            actualDelta, predictedDelta, pressureRms,
+            left.pressureResidualVolume, right.pressureResidualVolume,
+            volume.maxAbsPressureResidualVolume,
+            trial.getFlowAudit( dt ).maxFluidFaceSpeed
+        }};
+        for( const double value : audit )
+            if( !std::isfinite( value ) )
+                throw std::runtime_error(
+                    "original near-wall frozen Jacobi generated nonfinite result" );
+        if( !left.valid || !right.valid || !volume.valid ||
+            std::abs( predictedDelta - actualDelta ) > 1.0e-4 ||
+            std::abs( trial.getUFaceOpenFraction( faceX, faceY ) -
+                opening ) > 1.0e-8 )
+            throw std::runtime_error(
+                "original near-wall pressure gradient does not close" );
+        // The signed pressure jump is physical only up to this local
+        // difference; absolute Neumann pressure has an arbitrary gauge.
+        std::printf( "capsule_unaligned_frozen_pressure,%d,"
+            "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+            "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+            iterations, opening, before, after,
+            pressureJump, actualDelta, predictedDelta,
+            pressureRms, left.pressureResidualVolume,
+            right.pressureResidualVolume,
+            volume.maxAbsPressureResidualVolume,
+            trial.getFlowAudit( dt ).maxFluidFaceSpeed,
+            std::isfinite( previousResidual )
+                ? pressureRms - previousResidual : 0.0 );
+        if( iterations == 80 ) after80 = after;
+        previousResidual = pressureRms;
+    }
+    return after80;
+}
+
 // Controlled moving-Capsule S2c policy A/B. Both policies are fixed before
 // the first step, and the same prescribed obstacle path and Wind forcing are
 // supplied to independent copies. The frame-9 entry velocities are compared
@@ -1344,6 +1418,7 @@ void auditCapsuleTangentMovingPressure()
             // Capture the actual pre-projection near-wall face, rather
             // than inferring the pressure impulse from a later speed alone.
             std::optional<float> prePressureBaselineU, prePressureRelayU;
+            std::optional<double> frozenPressure80U;
             std::optional<std::array<fluidField2, 2>> unobserved;
             if( frame == 9 )
             {
@@ -1365,6 +1440,8 @@ void auditCapsuleTangentMovingPressure()
                                     "duplicate original Capsule pre-pressure sample" );
                             prePressureBaselineU =
                                 *frozen.getUFaceVelocityForAudit( 26, 4 );
+                            frozenPressure80U =
+                                auditCapsuleUnalignedFrozenPressure( frozen, dt );
                         } );
                     temporalRelay->setPrePressureSnapshotObserver(
                         [&]( const fluidField2& frozen )
@@ -1471,9 +1548,12 @@ void auditCapsuleTangentMovingPressure()
                 if( !aligned && frame == 9 )
                 {
                     if( !prePressureBaselineU || !prePressureRelayU ||
+                        !frozenPressure80U ||
                         !std::isfinite( *prePressureBaselineU ) ||
                         !std::isfinite( *prePressureRelayU ) ||
-                        std::abs( *prePressureBaselineU - *prePressureRelayU ) > 1.0e-6f )
+                        std::abs( *prePressureBaselineU - *prePressureRelayU ) > 1.0e-6f ||
+                        std::abs( *frozenPressure80U -
+                            *baseline.getUFaceVelocityForAudit( 26, 4 ) ) > 1.0e-5 )
                         throw std::runtime_error(
                             "original near-wall frozen pre-pressure velocity differs" );
                     const double baselinePost =
