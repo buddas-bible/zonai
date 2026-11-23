@@ -350,8 +350,8 @@ splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const tra
     frame.translation = frame.distance - joint.referenceDistance;
     frame.parameter = { index, static_cast<float>( t ) };
     const rot2 rotation = Inverse( bodyA.rotation ) * bodyB.rotation;
-    const float target = joint.rotationMode == splineRailRotationMode::fixed ? joint.referenceAngle : std::atan2( tangent.y, tangent.x ) + joint.tangentOffset;
-    frame.angleError = std::remainder( std::atan2( rotation.s, rotation.c ) - target, 2.0f * std::numbers::pi_v<float> );
+    const float target = joint.rotationMode == splineRailRotationMode::fixed ? joint.referenceAngle : deterministicAtan2( tangent.y, tangent.x ) + joint.tangentOffset;
+    frame.angleError = std::remainder( deterministicAtan2( rotation.s, rotation.c ) - target, 2.0f * std::numbers::pi_v<float> );
     frame.valid = IsFinite( frame.anchorA ) && std::isfinite( frame.translation ) && std::isfinite( frame.curvature ) && std::isfinite( frame.angleError );
     return frame;
 }
