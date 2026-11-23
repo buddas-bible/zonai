@@ -203,7 +203,9 @@ void selfTest()
         "first divergence must name the original Tick and changed Body field" );
 
     const replayArchive modifiedFromDiskFormat = decodeReplayArchive( encodeReplayArchive( modified ) );
-    check( firstReplayDifference( first, modifiedFromDiskFormat ) == divergence,
+    const auto diskMismatch = firstReplayDifference( first, modifiedFromDiskFormat );
+    check( diskMismatch && diskMismatch->tick == divergenceTick &&
+        diskMismatch->difference.field == target,
         "archive comparison must reproduce field mismatch after binary round-trip" );
 
     replayInput invalid = input;
