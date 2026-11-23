@@ -923,3 +923,8 @@ add_test(NAME contactIslandDeterminismTests COMMAND contactIslandDeterminismTest
 add_executable(contactLifecycleDeterminismTests determinism/contact_lifecycle_determinism_test.cpp)
 target_link_libraries(contactLifecycleDeterminismTests PRIVATE zonai::zonai)
 add_test(NAME contactLifecycleDeterminismTests COMMAND contactLifecycleDeterminismTests)
+
+# R3c: bitwise Tick-by-Tick MAC velocity, Cut-cell geometry/history and pressure feedback.
+add_executable(fluidStateDeterminismTests determinism/fluid_state_determinism_test.cpp)
+target_link_libraries(fluidStateDeterminismTests PRIVATE zonai::zonai)
+add_test(NAME fluidStateDeterminismTests COMMAND fluidStateDeterminismTests)
