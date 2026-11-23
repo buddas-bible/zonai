@@ -46,7 +46,7 @@ jobs:
           -DZONAI_BUILD_SANDBOX=OFF
 
       - name: Build replay tool
-        run: cmake --build build --target worldReplayTests fpMathAuditTests splineRailDeterminismTests --parallel 2
+        run: cmake --build build --target worldReplayTests fpMathAuditTests splineRailDeterminismTests standardJointDeterminismTests --parallel 2
 
       - name: Record one canonical input and replay on Ubuntu
         shell: bash
@@ -58,6 +58,7 @@ jobs:
           ./build/tests/worldReplayTests --verify build/determinism-artifacts/ubuntu.ztr
           ./build/tests/fpMathAuditTests --emit build/determinism-artifacts/fp-ubuntu.tsv
           ./build/tests/splineRailDeterminismTests --emit build/determinism-artifacts/spline-ubuntu.tsv
+          ./build/tests/standardJointDeterminismTests --emit build/determinism-artifacts/joints-ubuntu.tsv
           cp ./build/tests/worldReplayTests build/determinism-artifacts/worldReplayTests
 
       - name: Upload shared recorded input
@@ -76,6 +77,7 @@ jobs:
             build/determinism-artifacts/ubuntu.ztr
             build/determinism-artifacts/fp-ubuntu.tsv
             build/determinism-artifacts/spline-ubuntu.tsv
+            build/determinism-artifacts/joints-ubuntu.tsv
             build/determinism-artifacts/worldReplayTests
           if-no-files-found: error
           retention-days: 14
@@ -109,7 +111,7 @@ jobs:
           -DZONAI_BUILD_SANDBOX=OFF
 
       - name: Build replay tool
-        run: cmake --build build --config Debug --target worldReplayTests fpMathAuditTests splineRailDeterminismTests --parallel
+        run: cmake --build build --config Debug --target worldReplayTests fpMathAuditTests splineRailDeterminismTests standardJointDeterminismTests --parallel
 
       - name: Replay identical input on Windows
         shell: pwsh
@@ -123,6 +125,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\build\tests\Debug\splineRailDeterminismTests.exe --emit build/determinism-artifacts/spline-windows.tsv
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build\tests\Debug\standardJointDeterminismTests.exe --emit build/determinism-artifacts/joints-windows.tsv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Windows replay
         uses: actions/upload-artifact@v4
@@ -132,6 +136,7 @@ jobs:
             build/determinism-artifacts/windows.ztr
             build/determinism-artifacts/fp-windows.tsv
             build/determinism-artifacts/spline-windows.tsv
+            build/determinism-artifacts/joints-windows.tsv
           if-no-files-found: error
           retention-days: 14
 
@@ -168,6 +173,38 @@ jobs:
           set -e
           cat comparison.txt
           exit "$result"
+
+      - name: Strict standard Joint Tick physics compare
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee joints-comparison.txt
+          from itertools import zip_longest
+          from pathlib import Path
+          import sys
+
+          ubuntu = Path("artifacts/ubuntu/joints-ubuntu.tsv").read_text(encoding="utf-8").splitlines()
+          windows = Path("artifacts/windows/joints-windows.tsv").read_text(encoding="utf-8").splitlines()
+          mismatches = 0
+          first = None
+
+          for row, (u, w) in enumerate(zip_longest(ubuntu, windows), 1):
+              if u == w:
+                  continue
+              mismatches += 1
+              if first is None:
+                  first = (row, (u or w or "missing").split("\t", 1)[0], u, w)
+
+          if first is not None:
+              row, field, u, w = first
+              print(f"Joint physics divergence: row={row} field={field}")
+              print(f"Ubuntu:  {u if u is not None else '<missing>'}")
+              print(f"Windows: {w if w is not None else '<missing>'}")
+              print(f"Total standard Joint mismatches: {mismatches}/{max(len(ubuntu), len(windows))}")
+              sys.exit(1)
+
+          print(f"identical standard Joint Tick fields: {len(ubuntu)} rows")
+          PY
 
       - name: Strict Spline Rail Joint Tick state and libm diagnostic compare
         shell: bash
@@ -259,5 +296,6 @@ jobs:
             comparison.txt
             fp-comparison.txt
             spline-comparison.txt
+            joints-comparison.txt
           if-no-files-found: warn
           retention-days: 14
