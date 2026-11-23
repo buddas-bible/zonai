@@ -116,6 +116,23 @@ void emitFingerprint( std::FILE* stream )
         outputFloat( stream, "sqrtf", i, std::sqrt( angle * angle + 0.5625f ) );
     }
 
+    // Exact float pairs recovered from the first Spline Rail cross-platform
+    // trace: closed-loop tick 1 relative angle, open tick 4 tangent angle,
+    // and closed-loop tick 2 tangent angle. Capture known libm divergence
+    // without treating it as an acceptable physics difference.
+    constexpr std::array<std::array<std::uint32_t, 2>, 3> railAtan2InputBits{ {
+        { 0x3c216d9au, 0x3f7ffcd3u },
+        { 0xbd0ffd6bu, 0x3f7fd77eu },
+        { 0x3f7d908fu, 0xbe0ce895u }
+    } };
+
+    for( std::size_t i = 0; i < railAtan2InputBits.size(); ++i )
+    {
+        const float y = std::bit_cast<float>( railAtan2InputBits[i][0] );
+        const float x = std::bit_cast<float>( railAtan2InputBits[i][1] );
+        outputFloat( stream, "libm.railAtan2", i, std::atan2( y, x ) );
+    }
+
     const std::array<float, 5> rangeInputs{ 0.0f, 0.125f, 0.25f, 0.5f, 0.875f };
     for( std::size_t i = 0; i < rangeInputs.size(); ++i )
     {
