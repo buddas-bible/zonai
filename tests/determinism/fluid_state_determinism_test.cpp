@@ -7,9 +7,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <functional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace zonai
@@ -42,11 +44,18 @@ struct fluidStateTraceProbe2
             appendScalar( trace, key + "[" + std::to_string( i ) + "]", values[i] );
     }
 
+    static void setStageObserver( fluidField2& field,
+        std::function<void(const fluidField2&, int)> callback )
+    {
+        field.determinismStageObserver_ = std::move( callback );
+    }
+
     static void capture( const fluidField2& field, std::string& trace, const std::string& key )
     {
         appendVector( trace, key + ".u", field.u_ );
         appendVector( trace, key + ".v", field.v_ );
         appendVector( trace, key + ".pressure", field.pressure_ );
+        appendVector( trace, key + ".divergence", field.divergence_ );
         appendVector( trace, key + ".tracerMass", field.tracerMass_ );
         appendVector( trace, key + ".solidOwner", field.solidOwner_ );
         appendVector( trace, key + ".previousSolidOwner", field.previousSolidOwner_ );
@@ -111,8 +120,12 @@ struct fluidScene
     std::array<zonai::fluidObstacleForce2, 1> feedback{};
     bool sawFractionalCell = false;
     bool sawFlow = false;
+    bool traceStages = true;
+    int capturedStages = 0;
+    std::string stageTrace{};
 
-    explicit fluidScene( bool analytic )
+    explicit fluidScene( bool analytic, bool enableStages = true )
+        : traceStages( enableStages )
     {
         field.setCutCellProjectionEnabled( true );
         field.setAnalyticCircleCutCellEnabled( analytic );
@@ -125,15 +138,39 @@ struct fluidScene
         obstacle.linearVelocity = { 0.14f, -0.06f };
     }
 
-    void advance( int tick )
+    void advance( int tick, const char* sceneName )
     {
         if( tick % 6 == 0 )
             field.addVelocity( { -0.7f, 0.05f }, { 0.15f, -0.04f }, 0.6f );
 
         obstacle.transform.position += timeStep * obstacle.linearVelocity;
         obstacle.center = obstacle.transform.position;
+        if( traceStages && tick == 1 )
+        {
+            const std::string prefix = std::string( sceneName ) + ".tick.1.stage.";
+            zonai::fluidStateTraceProbe2::setStageObserver( field,
+                [this, prefix]( const zonai::fluidField2& snapshot, int phase )
+                {
+                    static constexpr std::array<const char*, 10> names{
+                        "00-entry", "01-occupancy", "02-geometry",
+                        "03-swept", "04-remap", "05-firstBoundary",
+                        "06-advection", "07-secondBoundary",
+                        "08-pressure", "09-tracer"
+                    };
+                    check( phase >= 0 && phase < static_cast<int>( names.size() ),
+                        "Fluid emitted an unknown Step phase" );
+                    zonai::fluidStateTraceProbe2::capture( snapshot, stageTrace,
+                        prefix + names[phase] );
+                    ++capturedStages;
+                } );
+        }
         field.step( timeStep, std::span<const zonai::fluidShapeObstacle2>( &obstacle, 1 ),
             feedback, 60 );
+        if( traceStages && tick == 1 )
+        {
+            zonai::fluidStateTraceProbe2::setStageObserver( field, {} );
+            check( capturedStages == 10, "Fluid Stage hook did not visit all ten phases" );
+        }
 
         for( int y = 0; y < field.getHeight(); ++y )
             for( int x = 0; x < field.getWidth(); ++x )
@@ -153,15 +190,25 @@ std::string runScene( const char* sceneName, bool analytic )
 {
     fluidScene first{ analytic };
     fluidScene second{ analytic };
+    fluidScene control{ analytic, false };
     std::string trace;
     std::string secondTrace;
+    std::string controlTrace;
 
     for( int tick = 0; tick <= tickCount; ++tick )
     {
         if( tick != 0 )
         {
-            first.advance( tick );
-            second.advance( tick );
+            first.advance( tick, sceneName );
+            second.advance( tick, sceneName );
+            control.advance( tick, sceneName );
+        }
+
+        if( tick == 1 )
+        {
+            check( first.stageTrace == second.stageTrace,
+                "two independently instrumented Fields differ within one process" );
+            trace.append( first.stageTrace );
         }
 
         const std::string prefix = std::string( sceneName ) + ".tick." + std::to_string( tick );
@@ -171,6 +218,10 @@ std::string runScene( const char* sceneName, bool analytic )
         zonai::fluidStateTraceProbe2::capture( second.field, secondTrace, prefix );
         check( trace.compare( firstStart, secondTrace.size(), secondTrace ) == 0,
             "two independent Fluid simulations diverged in one process" );
+        controlTrace.clear();
+        zonai::fluidStateTraceProbe2::capture( control.field, controlTrace, prefix );
+        check( trace.compare( firstStart, controlTrace.size(), controlTrace ) == 0,
+            "Fluid Stage observer perturbed authoritative field state" );
 
         zonai::fluidStateTraceProbe2::appendScalar( trace, prefix + ".force.x", first.feedback[0].force.x );
         zonai::fluidStateTraceProbe2::appendScalar( trace, prefix + ".force.y", first.feedback[0].force.y );
@@ -184,8 +235,9 @@ std::string runScene( const char* sceneName, bool analytic )
             "Fluid pressure feedback diverged in one process" );
     }
 
-    check( first.sawFractionalCell && second.sawFractionalCell &&
-        first.sawFlow && second.sawFlow, "Fluid fixture did not exercise Cut-cell and flow" );
+    check( first.sawFractionalCell && second.sawFractionalCell && control.sawFractionalCell &&
+        first.sawFlow && second.sawFlow && control.sawFlow,
+        "Fluid fixture did not exercise Cut-cell and flow" );
     return trace;
 }
 
