@@ -120,7 +120,6 @@ struct fluidStateTraceProbe2
         appendScalar( trace, key + ".current.y", current.y );
         appendScalar( trace, key + ".previous.x", previous.x );
         appendScalar( trace, key + ".previous.y", previous.y );
-        appendScalar( trace, key + ".result.u", result.x );
 
         const vec2 sourceGrid = ( point - field.origin_ ) / field.cellSize_;
         appendScalar( trace, key + ".sourceGrid.x", sourceGrid.x );
@@ -143,6 +142,7 @@ struct fluidStateTraceProbe2
         appendScalar( trace, key + ".reconstructedMatches", static_cast<int>(
             std::bit_cast<std::uint32_t>( reconstructed ) ==
                 std::bit_cast<std::uint32_t>( result.x ) ) );
+        appendScalar( trace, key + ".result.u", result.x );
         return result.x;
     }
 
