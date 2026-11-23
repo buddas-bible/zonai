@@ -39,6 +39,15 @@ void checkPair( double x, double y )
     check( actual >= std::max( std::fabs( x ), std::fabs( y ) ) ||
         std::isinf( actual ), "hypotenuse smaller than input magnitude" );
 
+    const double conservative = deterministicHypotUpperBound( x, y );
+    check( !std::isnan( conservative ), "conservative bound is NaN for finite input" );
+    check( std::bit_cast<std::uint64_t>( conservative ) ==
+        std::bit_cast<std::uint64_t>( deterministicHypotUpperBound( y, x ) ),
+        "upper-bound operand symmetry" );
+    check( std::bit_cast<std::uint64_t>( conservative ) ==
+        std::bit_cast<std::uint64_t>( deterministicHypotUpperBound( -x, -y ) ),
+        "upper-bound sign symmetry" );
+
     const double transposed = deterministicHypot( y, x );
     const double reflected = deterministicHypot( -x, -y );
 
@@ -50,6 +59,7 @@ void checkPair( double x, double y )
     if( std::isinf( oracle ) )
     {
         check( std::isinf( actual ), "overflow semantics differ from std::hypot" );
+        check( std::isinf( conservative ), "overflowed upper bound must be infinite" );
         return;
     }
 
@@ -63,6 +73,17 @@ void checkPair( double x, double y )
         ? expectedBits - actualBits : actualBits - expectedBits;
 
     check( distance <= 4, "scaled result exceeds 4 ULP from std::hypot" );
+    // Empirically validate the outward margin against platform libm oracles.
+    // This tests the chosen coverage; it does not prove bounds for all inputs.
+    check( conservative >= oracle, "conservative bound is smaller than std::hypot" );
+    if( oracle == 0.0 )
+        check( conservative == 0.0, "exact zero must remain zero" );
+    else if( std::isfinite( conservative ) )
+    {
+        const std::uint64_t upperBits = std::bit_cast<std::uint64_t>( conservative );
+        check( upperBits >= expectedBits && upperBits - expectedBits <= 20,
+            "conservative bound widened by more than 20 ULP" );
+    }
 }
 
 void testSpecialValues()
@@ -79,6 +100,14 @@ void testSpecialValues()
         "infinity must dominate NaN regardless of order" );
     check( std::isnan( deterministicHypot( nan, 1.0 ) ),
         "NaN with finite input must produce NaN" );
+    check( deterministicHypotUpperBound( -0.0, -0.0 ) == 0.0 &&
+        !std::signbit( deterministicHypotUpperBound( -0.0, -0.0 ) ),
+        "conservative zero must remain positive" );
+    check( std::isinf( deterministicHypotUpperBound( inf, nan ) ),
+        "conservative infinity must dominate NaN" );
+    check( std::isnan( deterministicHypotUpperBound( nan, 1.0 ) ),
+        "conservative NaN handling" );
+
 }
 
 void testScaleAndAccuracy()
