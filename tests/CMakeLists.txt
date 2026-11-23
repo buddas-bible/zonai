@@ -878,3 +878,8 @@ target_link_libraries(sandboxWindStepBenchmark PRIVATE zonai::zonai)
 add_executable(worldStateSnapshotTests determinism/world_state_snapshot_test.cpp)
 target_link_libraries(worldStateSnapshotTests PRIVATE zonai::zonai)
 add_test(NAME worldStateSnapshotTests COMMAND worldStateSnapshotTests)
+
+# R1b: portable Tick input logs and canonical World trace replay/compare CLI.
+add_executable(worldReplayTests determinism/world_replay_test.cpp)
+target_link_libraries(worldReplayTests PRIVATE zonai::zonai)
+add_test(NAME worldReplayTests COMMAND worldReplayTests)
