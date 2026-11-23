@@ -7,6 +7,7 @@
 #include <numbers>
 #include <utility>
 #include "dynamics/constraintSoftness2.h"
+#include "math/deterministicMath.h"
 
 namespace zonai
 {
@@ -22,7 +23,7 @@ vec2 pointAt( const preparedSplineSegment2& segment, double t )
 
 double speedAt( const preparedSplineSegment2& segment, double t )
 {
-    return std::hypot( segment.tangent1.x + t * ( 2.0 * segment.quadratic.x + 3.0 * t * segment.cubic.x ), segment.tangent1.y + t * ( 2.0 * segment.quadratic.y + 3.0 * t * segment.cubic.y ) );
+    return deterministicHypot( segment.tangent1.x + t * ( 2.0 * segment.quadratic.x + 3.0 * t * segment.cubic.x ), segment.tangent1.y + t * ( 2.0 * segment.quadratic.y + 3.0 * t * segment.cubic.y ) );
 }
 
 double arcLength( const preparedSplineSegment2& segment, double end )
@@ -88,7 +89,7 @@ bool regular( const preparedSplineSegment2& segment )
         }
         minimum = std::min( minimum, speedAt( segment, 0.5 * ( a + b ) ) );
     }
-    const double scale = std::hypot( ax, ay ) + std::hypot( bx, by ) + std::hypot( cx, cy );
+    const double scale = deterministicHypot( ax, ay ) + deterministicHypot( bx, by ) + deterministicHypot( cx, cy );
     return std::isfinite( minimum ) && minimum > 64.0 * std::numeric_limits<float>::epsilon() * scale;
 }
 
@@ -327,7 +328,7 @@ splineRailFrame2 getSplineRailFrame( const splineRailJointSim2& joint, const tra
     if( !std::isfinite( t ) ) return frame;
     const auto& segment = curves[index];
     const double dx = segment.tangent1.x + t * ( 2.0 * segment.quadratic.x + 3.0 * t * segment.cubic.x ), dy = segment.tangent1.y + t * ( 2.0 * segment.quadratic.y + 3.0 * t * segment.cubic.y );
-    const double speed = std::hypot( dx, dy );
+    const double speed = deterministicHypot( dx, dy );
     if( !std::isfinite( speed ) || speed <= 0.0 ) return frame;
     frame.localPoint = pointAt( segment, t );
     frame.anchorA = TransformPoint( bodyA, frame.localPoint );
