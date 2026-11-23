@@ -153,6 +153,7 @@ enum class jointTraceStage2 : std::uint8_t
     solveBias,
     integratedPosition,
     solveRelax,
+    restitution,
     store
 };
 #endif
@@ -1481,7 +1482,8 @@ private:
     // Test-only observer of transient constraints and Body State; excluded
     // entirely from production class layout if tests are disabled.
     using jointSubstepObserver = void (*)( const world&, jointTraceStage2, int,
-        std::span<const jointConstraint>, void* );
+        std::span<const jointConstraint>, std::span<const contactConstraint2>,
+        const islandGraph2&, void* );
     jointSubstepObserver jointSubstepObserver_ = nullptr;
     void* jointSubstepObserverContext_ = nullptr;
 #endif
