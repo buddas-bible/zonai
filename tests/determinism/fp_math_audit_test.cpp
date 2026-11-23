@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
 #include <string>
 
@@ -156,6 +157,23 @@ void emitFingerprint( std::FILE* stream )
         const float y = std::bit_cast<float>( yBits );
         const float x = std::bit_cast<float>( xBits );
         outputFloat( stream, "zonai.atan2Wide", i, deterministicAtan2( y, x ) );
+    }
+
+    // Read-only angle wrap audit. Do not replace the solver's remainder
+    // until we know whether its finite-domain results differ across OSes.
+    constexpr std::array<float, 16> angleWrapInputs{
+        0.0f, -0.0f, 0.1f, -0.1f,
+        std::numbers::pi_v<float>, -std::numbers::pi_v<float>,
+        2.0f * std::numbers::pi_v<float>, -2.0f * std::numbers::pi_v<float>,
+        3.0f * std::numbers::pi_v<float>, -3.0f * std::numbers::pi_v<float>,
+        0.5f * std::numbers::pi_v<float>, -0.5f * std::numbers::pi_v<float>,
+        10.0f, -10.0f, 1000.0f, -1000.0f
+    };
+    for( std::size_t i = 0; i < angleWrapInputs.size(); ++i )
+    {
+        outputFloat( stream, "libm.angleRemainder", i,
+            std::remainder( angleWrapInputs[i],
+                2.0f * std::numbers::pi_v<float> ) );
     }
 
     const std::array<float, 5> rangeInputs{ 0.0f, 0.125f, 0.25f, 0.5f, 0.875f };
