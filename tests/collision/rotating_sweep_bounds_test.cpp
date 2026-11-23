@@ -1,5 +1,6 @@
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
