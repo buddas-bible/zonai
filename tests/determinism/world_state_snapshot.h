@@ -135,8 +135,8 @@ private:
             leftHasExtra ? left.fields[shared].name : right.fields[shared].name,
             leftHasExtra ? left.fields[shared].bits : 0,
             leftHasExtra ? 0 : right.fields[shared].bits,
-            leftHasExtra ? left.fields[shared].byteCount : 0,
-            leftHasExtra ? 0 : right.fields[shared].byteCount
+            static_cast<std::uint8_t>( leftHasExtra ? left.fields[shared].byteCount : 0 ),
+            static_cast<std::uint8_t>( leftHasExtra ? 0 : right.fields[shared].byteCount )
         };
     }
 
