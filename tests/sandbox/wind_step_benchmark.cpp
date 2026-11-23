@@ -1446,54 +1446,54 @@ void auditCapsuleTangentMovingPressure()
                         "Capsule relay trajectory failed total source/tracer conservation" );
                 if( frame == 9 )
                 {
-                const auto baselineIsland =
-                    baseline.getCutCellVolumeBudget( 30, 6, dt );
-                const auto relayIsland =
-                    temporalRelay->getCutCellVolumeBudget( 30, 6, dt );
-                const auto baselineNorth =
-                    baseline.getCutCellVolumeBudget( 30, 7, dt );
-                const auto relayNorth =
-                    temporalRelay->getCutCellVolumeBudget( 30, 7, dt );
-                const auto& relayPressure = temporalRelay->getCutCellPressure();
-                const double totalSourceDifference =
-                    relayVolume.totalPressureSourceDeltaVolume -
-                    baselineVolume.totalPressureSourceDeltaVolume;
-                const double relayForceDifference =
-                    static_cast<double>( relayFeedback[0].force.y ) -
-                    forces[1].force.y;
-                const double relayTracerDifference =
-                    static_cast<double>( temporalRelay->getTracerMass() ) -
-                    baseline.getTracerMass();
-                std::printf( "capsule_tangent_relay_ab,%d,%.12g,%.12g,"
-                    "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
-                    "%.12g,%.12g,%.12g,%.12g\n",
-                    relayPressure.temporalRelayedCells,
-                    relayPressure.temporalRelayedSourceVolume,
-                    baselineIsland.pressureSourceDeltaVolume,
-                    relayIsland.pressureSourceDeltaVolume,
-                    baselineNorth.pressureSourceDeltaVolume,
-                    relayNorth.pressureSourceDeltaVolume,
-                    totalSourceDifference,
-                    baselineVolume.maxAbsPressureResidualVolume,
-                    relayVolume.maxAbsPressureResidualVolume,
-                    relayForceDifference, relayTracerDifference,
-                    baseline.getFlowAudit( dt ).maxFluidFaceSpeed,
-                    temporalRelay->getFlowAudit( dt ).maxFluidFaceSpeed );
-                if( relayPressure.temporalRelayedCells != 1 ||
-                    !baselineVolume.valid || !relayVolume.valid ||
-                    !std::isfinite( totalSourceDifference ) ||
-                    !std::isfinite( relayForceDifference ) ||
-                    !std::isfinite( relayTracerDifference ) ||
-                    std::abs( relayIsland.pressureSourceDeltaVolume ) > 1.0e-9 ||
-                    std::abs( relayPressure.temporalRelayedSourceVolume -
-                        baselineIsland.pressureSourceDeltaVolume ) > 1.0e-8 ||
-                    std::abs( ( relayNorth.pressureSourceDeltaVolume -
-                        baselineNorth.pressureSourceDeltaVolume ) -
-                        baselineIsland.pressureSourceDeltaVolume ) > 1.0e-8 ||
-                    std::abs( totalSourceDifference ) > 1.0e-8 ||
-                    std::abs( relayTracerDifference ) > 1.0e-5 )
-                    throw std::runtime_error(
-                        "moving Capsule opt-in pressure source relay violated ledger" );
+                    const auto baselineIsland =
+                        baseline.getCutCellVolumeBudget( 30, 6, dt );
+                    const auto relayIsland =
+                        temporalRelay->getCutCellVolumeBudget( 30, 6, dt );
+                    const auto baselineNorth =
+                        baseline.getCutCellVolumeBudget( 30, 7, dt );
+                    const auto relayNorth =
+                        temporalRelay->getCutCellVolumeBudget( 30, 7, dt );
+                    const auto& relayPressure = temporalRelay->getCutCellPressure();
+                    const double totalSourceDifference =
+                        relayVolume.totalPressureSourceDeltaVolume -
+                        baselineVolume.totalPressureSourceDeltaVolume;
+                    const double relayForceDifference =
+                        static_cast<double>( relayFeedback[0].force.y ) -
+                        forces[1].force.y;
+                    const double relayTracerDifference =
+                        static_cast<double>( temporalRelay->getTracerMass() ) -
+                        baseline.getTracerMass();
+                    std::printf( "capsule_tangent_relay_ab,%d,%.12g,%.12g,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,"
+                        "%.12g,%.12g,%.12g,%.12g\n",
+                        relayPressure.temporalRelayedCells,
+                        relayPressure.temporalRelayedSourceVolume,
+                        baselineIsland.pressureSourceDeltaVolume,
+                        relayIsland.pressureSourceDeltaVolume,
+                        baselineNorth.pressureSourceDeltaVolume,
+                        relayNorth.pressureSourceDeltaVolume,
+                        totalSourceDifference,
+                        baselineVolume.maxAbsPressureResidualVolume,
+                        relayVolume.maxAbsPressureResidualVolume,
+                        relayForceDifference, relayTracerDifference,
+                        baseline.getFlowAudit( dt ).maxFluidFaceSpeed,
+                        temporalRelay->getFlowAudit( dt ).maxFluidFaceSpeed );
+                    if( relayPressure.temporalRelayedCells != 1 ||
+                        !baselineVolume.valid || !relayVolume.valid ||
+                        !std::isfinite( totalSourceDifference ) ||
+                        !std::isfinite( relayForceDifference ) ||
+                        !std::isfinite( relayTracerDifference ) ||
+                        std::abs( relayIsland.pressureSourceDeltaVolume ) > 1.0e-9 ||
+                        std::abs( relayPressure.temporalRelayedSourceVolume -
+                            baselineIsland.pressureSourceDeltaVolume ) > 1.0e-8 ||
+                        std::abs( ( relayNorth.pressureSourceDeltaVolume -
+                            baselineNorth.pressureSourceDeltaVolume ) -
+                            baselineIsland.pressureSourceDeltaVolume ) > 1.0e-8 ||
+                        std::abs( totalSourceDifference ) > 1.0e-8 ||
+                        std::abs( relayTracerDifference ) > 1.0e-5 )
+                        throw std::runtime_error(
+                            "moving Capsule opt-in pressure source relay violated ledger" );
                 }
             }
             if( unobserved )
