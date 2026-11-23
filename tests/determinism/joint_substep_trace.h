@@ -5,6 +5,8 @@
 #endif
 
 #include <algorithm>
+#include <array>
+#include <cstdio>
 #include <bit>
 #include <cstdint>
 #include <span>
@@ -32,6 +34,78 @@ struct jointSubstepTraceRecorder
     std::vector<jointId> joints{};
     std::vector<jointSubstepTraceRecord> records{};
 };
+
+[[nodiscard]] inline const char* jointTraceStageName( jointTraceStage2 stage )
+{
+    switch( stage )
+    {
+    case jointTraceStage2::prepare: return "prepare";
+    case jointTraceStage2::integratedVelocity: return "integratedVelocity";
+    case jointTraceStage2::warmStart: return "warmStart";
+    case jointTraceStage2::solveBias: return "solveBias";
+    case jointTraceStage2::integratedPosition: return "integratedPosition";
+    case jointTraceStage2::solveRelax: return "solveRelax";
+    case jointTraceStage2::store: return "store";
+    }
+    throw std::logic_error( "unknown Joint trace stage" );
+}
+
+// Validate the true engine phase sequence, then compare complete transient
+// snapshots from separate World instances. Emit every raw field only once.
+inline void compareAndEmitJointSubsteps( const jointSubstepTraceRecorder& left,
+    const jointSubstepTraceRecorder& right, const char* scene,
+    std::uint32_t tick, int subStepCount, std::FILE* output )
+{
+    const std::size_t expected = static_cast<std::size_t>( 2 + 5 * subStepCount );
+    if( left.records.size() != expected || right.records.size() != expected )
+        throw std::logic_error( std::string( scene ) +
+            ": expected one Prepare, five phases per substep and one Store" );
+
+    for( std::size_t i = 0; i < expected; ++i )
+    {
+        const jointTraceStage2 stage = i == 0 ? jointTraceStage2::prepare :
+            i == expected - 1 ? jointTraceStage2::store :
+            std::array<jointTraceStage2, 5>{
+                jointTraceStage2::integratedVelocity, jointTraceStage2::warmStart,
+                jointTraceStage2::solveBias, jointTraceStage2::integratedPosition,
+                jointTraceStage2::solveRelax
+            }[( i - 1 ) % 5];
+        const int index = i == 0 ? -1 :
+            i == expected - 1 ? subStepCount : static_cast<int>( ( i - 1 ) / 5 );
+        const jointSubstepTraceRecord& a = left.records[i];
+        const jointSubstepTraceRecord& b = right.records[i];
+
+        if( a.stage != stage || b.stage != stage ||
+            a.subStepIndex != index || b.subStepIndex != index )
+            throw std::logic_error( std::string( scene ) + ": substep phase ordering changed" );
+
+        const auto first = firstDifference( a.snapshot, b.snapshot );
+        if( first || a.snapshot.bytes != b.snapshot.bytes )
+        {
+            const std::string field = first ? first->field : "snapshot.rawBytes";
+            throw std::runtime_error( std::string( scene ) + " Tick " +
+                std::to_string( tick ) + " substep " + std::to_string( index ) +
+                " stage " + jointTraceStageName( stage ) +
+                " first mismatch " + field );
+        }
+
+        if( output )
+        {
+            for( const snapshotField& field : a.snapshot.fields )
+            {
+                std::fprintf( output, "%s.tick.%03u.substep.%d.%s.%s\t%016llx/%u\n",
+                    scene, tick, index, jointTraceStageName( stage ),
+                    field.name.c_str(),
+                    static_cast<unsigned long long>( field.bits ),
+                    static_cast<unsigned>( field.byteCount ) );
+            }
+        }
+    }
+
+    if( output && std::ferror( output ) )
+        throw std::runtime_error( "substep trace output failed" );
+}
+
 
 // Narrow read-only callback installed by tests. In production builds the
 // observer fields and all invocations are compiled out of world entirely.
@@ -115,7 +189,12 @@ private:
                     };
 
                     writer.writeS32( prefix + "slot", index );
-                    writer.writeS32( prefix + "bodyA", constraint.bodyIdA );
+                    // Mouse constraints intentionally have only bodyB. They
+                    // are not yet tracked, but std::visit instantiates all arms.
+                    if constexpr( std::is_same_v<constraintType, mouseJointConstraint2> )
+                        writer.writeS32( prefix + "bodyA", -1 );
+                    else
+                        writer.writeS32( prefix + "bodyA", constraint.bodyIdA );
                     writer.writeS32( prefix + "bodyB", constraint.bodyIdB );
 
                     if constexpr( std::is_same_v<constraintType, revoluteJointConstraint2> )
