@@ -164,24 +164,38 @@ jobs:
           cat comparison.txt
           exit "$result"
 
-      - name: Strict FP math fingerprint compare (fail at first differing operation)
+      - name: Strict FP math fingerprint compare (report all mismatch families)
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY' | tee fp-comparison.txt
+          from collections import OrderedDict
           from itertools import zip_longest
           from pathlib import Path
           import sys
 
           ubuntu = Path("artifacts/ubuntu/fp-ubuntu.tsv").read_text(encoding="utf-8").splitlines()
           windows = Path("artifacts/windows/fp-windows.tsv").read_text(encoding="utf-8").splitlines()
+          failures = []
+          families = OrderedDict()
+
           for line, (u, w) in enumerate(zip_longest(ubuntu, windows), 1):
-              if u != w:
-                  key = (u or w or "missing").split("\t", 1)[0]
-                  print(f"FP divergence: line={line} operation={key}")
-                  print(f"Ubuntu:  {u if u is not None else '<missing>'}")
-                  print(f"Windows: {w if w is not None else '<missing>'}")
-                  sys.exit(1)
+              if u == w:
+                  continue
+              key = (u or w or "missing").split("\t", 1)[0]
+              family = key.rsplit(".", 1)[0]
+              failures.append((line, key, u, w))
+              families.setdefault(family, [0, key])[0] += 1
+
+          if failures:
+              line, key, u, w = failures[0]
+              print(f"FP divergence: line={line} operation={key}")
+              print(f"Ubuntu:  {u if u is not None else '<missing>'}")
+              print(f"Windows: {w if w is not None else '<missing>'}")
+              print(f"Total FP mismatches: {len(failures)}/{max(len(ubuntu), len(windows))}")
+              for family, (count, example) in families.items():
+                  print(f"  {family}: {count} mismatches (first: {example})")
+              sys.exit(1)
 
           print(f"identical FP math fingerprints: {len(ubuntu)} operation samples")
           PY
