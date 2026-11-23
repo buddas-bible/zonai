@@ -93,15 +93,18 @@ void verifyRawCacheAndReset()
     check( fieldBits( initial, "cache.joint[1].subStepTime" ) == 0,
         "cache time step starts at zero" );
 
-    first.simulation.Step( 1.0f / 60.0f, 4 );
-    second.simulation.Step( 1.0f / 60.0f, 4 );
+    // One substep captures the immediately solved motor impulse. With four
+    // substeps, an unloaded motor may have no corrective impulse in the last
+    // substep after it has already reached the requested angular speed.
+    first.simulation.Step( 1.0f / 60.0f, 1 );
+    second.simulation.Step( 1.0f / 60.0f, 1 );
     const stateSnapshot warmed = first.capture();
     check( warmed.bytes == second.capture().bytes,
         "persistent cache bits must match between two World instances" );
     check( fieldBits( warmed, "cache.joint[1].motorImpulse" ) != 0,
         "running motor must accumulate nonzero angular impulse" );
     check( fieldBits( warmed, "cache.joint[1].subStepTime" ) ==
-        std::bit_cast<std::uint32_t>( ( 1.0f / 60.0f ) / 4.0f ),
+        std::bit_cast<std::uint32_t>( 1.0f / 60.0f ),
         "cached impulse substep time is stored exactly" );
     check( warmed.bytes != initial.bytes,
         "running the solver must update persistent cache state" );
