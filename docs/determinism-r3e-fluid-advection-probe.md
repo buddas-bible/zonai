@@ -35,3 +35,31 @@ R3d에서 차이가 처음 확인된 16×12 유체 격자의 \`u[71] = U(3,4)\`�
 - 수렴·성능·다른 Cut-cell/PCG·World↔Fluid 결합 전체를 이 장면 하나만으로 보증하지 않는다.
 
 결과에서 최초 차이를 일으키는 연산이 검증되면 후속 별도 수정에서 결정론적 보간의 정확성·성능·전체 회귀를 비교하고 수용 여부를 판단한다.
+
+## 실제 R3e 첫 실행 증거 (원시 CI artifact 대조)
+
+- CI: https://github.com/buddas-bible/zonai/actions/runs/45272708528
+- 양 플랫폼 standalone Fluid 추적 생성 성공. 기존 World/Contact/Joint/Spline 권위 비교와 engine-owned math 388개 일치. Fluid strict 비교는 실패 (물리 차이이므로 정상적으로 적색).
+- 전체 312,474행 중 48,159행 차이. 이전 기록 순서에서는 첫 차이가 `sampledCutCell.tick.1.advectionProbe.result.u`였으므로, 계산 순서를 따라 출력하도록 테스트의 행 순서를 바로잡아 재검증한다.
+
+| 구간 | Ubuntu 원시 비트 | Windows 원시 비트 |
+| --- | --- | --- |
+| 현재 속도 X | `3f12fd58` | `3f12fd58` |
+| 현재 속도 Y | `3dffa54c` | `3dffa54c` |
+| 역추적 X | `bfa13994` | `bfa13994` |
+| 역추적 Y | `bec110b0` | `bec110b0` |
+| 최종 보간 tx | `3f763360` | `3f763360` |
+| 최종 보간 ty | `3f7ddea0` | `3f7ddea0` |
+| U stencil a,b,c,d | `00000000,3e110d4d,3d094d24,3f12fd58` | 동일 |
+| 첫 번째 `std::lerp` (bottom) | `3e0b7fe4` | `3e0b7fe4` |
+| **두 번째 `std::lerp` (top)** | **`3f0db109`** | **`3f0db10a`** |
+| 최종 U 보간 | `3f0ccd7a` | `3f0ccd7b` |
+| 실제 Stage-06 U(3,4) | `3f0ccd7a` | `3f0ccd7b` |
+
+- `sourceUMatches`, `sourceVMatches`, `reconstructedMatches`, `previewMatchesActual` 네 플래그가 **Ubuntu/Windows 모두 1**이었다. 진단용 재계산과 실물리 이류 출력을 비트 단위로 교차 확인했다.
+- 결과적으로 이 장면의 첫 차이는 역추적 좌표·보간 입력이 아니라 **동일한 입력에 대한 두 번째 `std::lerp(c,d,tx)` 출력**에서 발생한다.
+- 위 결과로 `std::lerp` 호출의 플랫폼 의존 비트 차이는 증명됐지만, 그 아래의 라이브러리 알고리즘과 컴파일러 코드 생성 중 정확한 책임은 아직 구분하지 않았다.
+
+### 후속 R3f 수용 단위
+
+현재 `fluidField2::sampleComponent()`의 세 `std::lerp`를 곧바로 바꾸지 말 것. 먼저 C++20 정의역/NaN·Inf/정확한 끝점/부호와 유효 범위 안전성을 정의한 engine-owned 보간 함수를 별도 순수 테스트로 검증한다. Windows/Ubuntu raw-bit 비교, 기존 sampled/analytic 장면 32 Tick, 전체 CTest, 물리 변화·성능 비교를 통과해야만 실제 Fluid 호출부 이관을 검토한다. 기존 strict 게이트·실험용 Fluid #326 분리는 유지한다.
