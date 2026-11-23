@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <span>
+#include <utility>
 #include <stdexcept>
 #include <string>
 
