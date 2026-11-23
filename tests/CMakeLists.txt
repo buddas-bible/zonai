@@ -898,3 +898,8 @@ add_test(NAME deterministicHypotTests COMMAND deterministicHypotTests)
 add_executable(splineRailDeterminismTests determinism/spline_rail_joint_determinism_test.cpp)
 target_link_libraries(splineRailDeterminismTests PRIVATE zonai::zonai)
 add_test(NAME splineRailDeterminismTests COMMAND splineRailDeterminismTests)
+
+# R2a-5: bitwise portable atan2 and precise IEEE quadrant regression.
+add_executable(deterministicAtan2Tests math/deterministic_atan2_test.cpp)
+target_link_libraries(deterministicAtan2Tests PRIVATE zonai::zonai)
+add_test(NAME deterministicAtan2Tests COMMAND deterministicAtan2Tests)
