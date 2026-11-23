@@ -40,7 +40,7 @@ namespace zonai
 }
 
 
-    
+
 // For broad-phase and CCD *upper bounds*, unlike ordinary Euclidean lengths.
 // The scaled hypot result may round below the exact distance; advance 16
 // representable binary64 values toward +infinity to protect conservative
@@ -55,14 +55,14 @@ namespace zonai
     if( !std::isfinite( magnitude ) || magnitude == 0.0 )
         return magnitude;
 
-    constexpr std::uint64_t POSITIVE_INFINITY_BITS = 0x7ff0000000000000ull;
-    constexpr std::uint64_t OUTWARD_ULPS = 16;
+    constexpr std::uint64_t positiveInfinityBits = 0x7ff0000000000000ull;
+    constexpr std::uint64_t outwardUlps = 16;
     const std::uint64_t bits = std::bit_cast<std::uint64_t>( magnitude );
 
     // Positive IEEE-754 binary64 finite encodings are monotonically ordered.
     // Saturating avoids encoding a NaN when expanding a value near DBL_MAX.
-    return std::bit_cast<double>( bits >= POSITIVE_INFINITY_BITS - OUTWARD_ULPS
-        ? POSITIVE_INFINITY_BITS : bits + OUTWARD_ULPS );
+    return std::bit_cast<double>( bits >= positiveInfinityBits - outwardUlps
+        ? positiveInfinityBits : bits + outwardUlps );
 }
 
 } // namespace zonai
