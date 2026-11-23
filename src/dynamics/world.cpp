@@ -16,6 +16,7 @@
 #include "collision/timeOfImpact2.h"
 #include "dynamics/bodyShape.h"
 #include "dynamics/constants.h"
+#include "math/deterministicMath.h"
 
 namespace zonai
 {
@@ -836,7 +837,7 @@ revoluteJointData world::getRevoluteJointData( jointId id ) const
     data.anchorB = TransformPoint( bodySims_[sim.bodyIdB].transform, sim.localAnchorB );
 
     const rot2 relativeRotation = Inverse( bodySims_[sim.bodyIdA].transform.rotation * rot2::FromRadians( sim.referenceAngle ) ) * bodySims_[sim.bodyIdB].transform.rotation;
-    data.currentAngle = std::atan2( relativeRotation.s, relativeRotation.c );
+    data.currentAngle = deterministicAtan2( relativeRotation.s, relativeRotation.c );
     data.force = sim.subStepTime > 0.0f ? sim.impulse / sim.subStepTime : vec2{};
     data.collideConnected = joints_[index].collideConnected;
     data.referenceAngle = sim.referenceAngle;
@@ -988,7 +989,7 @@ prismaticJointData world::getPrismaticJointData( jointId id ) const
     data.currentTranslation = Dot( data.axis, d );
     data.lateralError = Dot( perpendicular, d );
     const rot2 relativeRotation = Inverse( bodySims_[sim.bodyIdA].transform.rotation * rot2::FromRadians( sim.referenceAngle ) ) * bodySims_[sim.bodyIdB].transform.rotation;
-    data.currentAngle = std::atan2( relativeRotation.s, relativeRotation.c );
+    data.currentAngle = deterministicAtan2( relativeRotation.s, relativeRotation.c );
     const float axialImpulse = sim.springImpulse + sim.motorImpulse + sim.lowerImpulse - sim.upperImpulse;
     data.force = sim.subStepTime > 0.0f ? ( sim.impulse.x * perpendicular + axialImpulse * data.axis ) / sim.subStepTime : vec2{};
     data.torque = sim.subStepTime > 0.0f ? sim.impulse.y / sim.subStepTime : 0.0f;
@@ -1096,7 +1097,7 @@ weldJointData world::getWeldJointData( jointId id ) const
     data.anchorA = TransformPoint( bodySims_[sim.bodyIdA].transform, sim.localAnchorA );
     data.anchorB = TransformPoint( bodySims_[sim.bodyIdB].transform, sim.localAnchorB );
     const rot2 relativeRotation = Inverse( bodySims_[sim.bodyIdA].transform.rotation * rot2::FromRadians( sim.referenceAngle ) ) * bodySims_[sim.bodyIdB].transform.rotation;
-    data.currentAngle = std::atan2( relativeRotation.s, relativeRotation.c );
+    data.currentAngle = deterministicAtan2( relativeRotation.s, relativeRotation.c );
     data.referenceAngle = sim.referenceAngle;
     data.linearHertz = sim.linearHertz;
     data.linearDampingRatio = sim.linearDampingRatio;
