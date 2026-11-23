@@ -12,6 +12,7 @@
 #include <string>
 
 #include "math/deterministicMath.h"
+#include "joint_cache_snapshot.h"
 #include "world_state_snapshot.h"
 
 using namespace zonai;
@@ -164,6 +165,13 @@ struct splineRailFixture
         stateSnapshot added = std::move( writer ).finish();
         snapshot.bytes.insert( snapshot.bytes.end(), added.bytes.begin(), added.bytes.end() );
         snapshot.fields.insert( snapshot.fields.end(), added.fields.begin(), added.fields.end() );
+
+        // Persisted solver state is different from the public reaction query:
+        // compare individual cached impulses and warm-start dt, not only their sum.
+        const std::array<jointId, 1> jointIds{ rail };
+        stateSnapshot cache = jointCacheSnapshotAccess::capture( simulation, jointIds );
+        snapshot.bytes.insert( snapshot.bytes.end(), cache.bytes.begin(), cache.bytes.end() );
+        snapshot.fields.insert( snapshot.fields.end(), cache.fields.begin(), cache.fields.end() );
         return snapshot;
     }
 };
