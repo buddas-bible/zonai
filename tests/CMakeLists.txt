@@ -872,3 +872,54 @@ add_test(NAME sandboxWindFlowDemoTests COMMAND sandboxWindFlowDemoTests)
 add_executable(sandboxWindStepBenchmark sandbox/wind_step_benchmark.cpp "${PROJECT_SOURCE_DIR}/sandbox/demo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyDemo.cpp" "${PROJECT_SOURCE_DIR}/sandbox/rigidBodyJointDemo.cpp")
 target_include_directories(sandboxWindStepBenchmark PRIVATE "${PROJECT_SOURCE_DIR}/sandbox")
 target_link_libraries(sandboxWindStepBenchmark PRIVATE zonai::zonai)
+
+
+# R1a: deterministic, field-wise public World/Body snapshot; no physics changes.
+add_executable(worldStateSnapshotTests determinism/world_state_snapshot_test.cpp)
+target_link_libraries(worldStateSnapshotTests PRIVATE zonai::zonai)
+add_test(NAME worldStateSnapshotTests COMMAND worldStateSnapshotTests)
+
+# R1b: portable Tick input logs and canonical World trace replay/compare CLI.
+add_executable(worldReplayTests determinism/world_replay_test.cpp)
+target_link_libraries(worldReplayTests PRIVATE zonai::zonai)
+add_test(NAME worldReplayTests COMMAND worldReplayTests)
+
+# R2a: verify FP contraction policy and emit platform-specific exact math bits.
+add_executable(fpMathAuditTests determinism/fp_math_audit_test.cpp)
+target_link_libraries(fpMathAuditTests PRIVATE zonai::zonai)
+add_test(NAME fpMathAuditTests COMMAND fpMathAuditTests)
+
+# R2a-2: range-safe deterministic binary64 magnitude and precision regression.
+add_executable(deterministicHypotTests math/deterministic_hypot_test.cpp)
+target_link_libraries(deterministicHypotTests PRIVATE zonai::zonai)
+add_test(NAME deterministicHypotTests COMMAND deterministicHypotTests)
+
+# R2a-4: compare per-Tick Spline Rail World and Joint observable bits.
+add_executable(splineRailDeterminismTests determinism/spline_rail_joint_determinism_test.cpp)
+target_link_libraries(splineRailDeterminismTests PRIVATE zonai::zonai)
+add_test(NAME splineRailDeterminismTests COMMAND splineRailDeterminismTests)
+
+# R2a-5: bitwise portable atan2 and precise IEEE quadrant regression.
+add_executable(deterministicAtan2Tests math/deterministic_atan2_test.cpp)
+target_link_libraries(deterministicAtan2Tests PRIVATE zonai::zonai)
+add_test(NAME deterministicAtan2Tests COMMAND deterministicAtan2Tests)
+
+# R2a-6: strict Tick-level World/Body and reaction-force regressions for four Joint kinds.
+add_executable(standardJointDeterminismTests determinism/standard_joint_determinism_test.cpp)
+target_link_libraries(standardJointDeterminismTests PRIVATE zonai::zonai)
+add_test(NAME standardJointDeterminismTests COMMAND standardJointDeterminismTests)
+
+# R2a-7: inspect persistent solver caches directly through the test-only friend bridge.
+add_executable(jointCacheSnapshotTests determinism/joint_cache_snapshot_test.cpp)
+target_link_libraries(jointCacheSnapshotTests PRIVATE zonai::zonai)
+add_test(NAME jointCacheSnapshotTests COMMAND jointCacheSnapshotTests)
+
+# R2a-8: strict transient Contact/Island ordering, manifold and impulse replay.
+add_executable(contactIslandDeterminismTests determinism/contact_island_determinism_test.cpp)
+target_link_libraries(contactIslandDeterminismTests PRIVATE zonai::zonai)
+add_test(NAME contactIslandDeterminismTests COMMAND contactIslandDeterminismTests)
+
+# R2a-9: Contact generation/recycling/free-list and Sleep/Wake island transitions.
+add_executable(contactLifecycleDeterminismTests determinism/contact_lifecycle_determinism_test.cpp)
+target_link_libraries(contactLifecycleDeterminismTests PRIVATE zonai::zonai)
+add_test(NAME contactLifecycleDeterminismTests COMMAND contactLifecycleDeterminismTests)
