@@ -33,6 +33,13 @@ struct jointSubstepTraceRecorder
     std::vector<bodyId> bodies{};
     std::vector<jointId> joints{};
     std::vector<jointSubstepTraceRecord> records{};
+    // R2a-8: active Contact and Island graph fields only for contact fixtures.
+    bool captureContactAndIsland = false;
+    std::size_t maxContacts = 0;
+    std::size_t maxIslands = 0;
+    int maxPointCount = 0;
+    bool sawNormalImpulse = false;
+    bool sawTangentImpulse = false;
 };
 
 [[nodiscard]] inline const char* jointTraceStageName( jointTraceStage2 stage )
@@ -45,6 +52,7 @@ struct jointSubstepTraceRecorder
     case jointTraceStage2::solveBias: return "solveBias";
     case jointTraceStage2::integratedPosition: return "integratedPosition";
     case jointTraceStage2::solveRelax: return "solveRelax";
+    case jointTraceStage2::restitution: return "restitution";
     case jointTraceStage2::store: return "store";
     }
     throw std::logic_error( "unknown Joint trace stage" );
@@ -56,14 +64,15 @@ inline void compareAndEmitJointSubsteps( const jointSubstepTraceRecorder& left,
     const jointSubstepTraceRecorder& right, const char* scene,
     std::uint32_t tick, int subStepCount, std::FILE* output )
 {
-    const std::size_t expected = static_cast<std::size_t>( 2 + 5 * subStepCount );
+    const std::size_t expected = static_cast<std::size_t>( 3 + 5 * subStepCount );
     if( left.records.size() != expected || right.records.size() != expected )
         throw std::logic_error( std::string( scene ) +
-            ": expected one Prepare, five phases per substep and one Store" );
+            ": expected one Prepare, five phases per substep, Restitution and Store" );
 
     for( std::size_t i = 0; i < expected; ++i )
     {
         const jointTraceStage2 stage = i == 0 ? jointTraceStage2::prepare :
+            i == expected - 2 ? jointTraceStage2::restitution :
             i == expected - 1 ? jointTraceStage2::store :
             std::array<jointTraceStage2, 5>{
                 jointTraceStage2::integratedVelocity, jointTraceStage2::warmStart,
@@ -71,7 +80,7 @@ inline void compareAndEmitJointSubsteps( const jointSubstepTraceRecorder& left,
                 jointTraceStage2::solveRelax
             }[( i - 1 ) % 5];
         const int index = i == 0 ? -1 :
-            i == expected - 1 ? subStepCount : static_cast<int>( ( i - 1 ) / 5 );
+            i >= expected - 2 ? subStepCount : static_cast<int>( ( i - 1 ) / 5 );
         const jointSubstepTraceRecord& a = left.records[i];
         const jointSubstepTraceRecord& b = right.records[i];
 
@@ -128,7 +137,8 @@ struct jointSubstepTraceAccess
 
 private:
     static void capture( const world& simulation, jointTraceStage2 stage,
-        int subStepIndex, std::span<const world::jointConstraint> constraints, void* context )
+        int subStepIndex, std::span<const world::jointConstraint> constraints,
+        std::span<const contactConstraint2> contacts, const islandGraph2& graph, void* context )
     {
         auto& recorder = *static_cast<jointSubstepTraceRecorder*>( context );
         stateSnapshotWriter writer{};
