@@ -133,6 +133,13 @@ concept worldCollisionCallback = requires( Callback& callback, const contactData
     { callback( contactData ) } -> std::same_as<void>;
 };
 
+// Forward declaration for the test-only Joint cache reader. This adds no
+// runtime state or public physics API.
+namespace determinism::test
+{
+struct jointCacheSnapshotAccess;
+}
+
 class world
 {
 public:
@@ -1325,6 +1332,9 @@ public:
 #pragma endregion DiagnosticQueries
 
 private:
+    // Read-only deterministic regression inspection of persistent Joint caches.
+    friend struct determinism::test::jointCacheSnapshotAccess;
+
     // Public handle이 world 수명을 구분할 때 사용하는 opaque token.
     std::uint64_t worldToken_ = 0;
 
