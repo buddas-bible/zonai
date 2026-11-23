@@ -86,7 +86,7 @@ namespace zonai
     constexpr double tanPiOverEight = 0.41421356237309504880168872420969808;
     constexpr float piFloat = static_cast<float>( pi );
     constexpr float halfPiFloat = static_cast<float>( halfPi );
-    constexpr float quarterPiFloat = static_cast<float>( quarterPi );
+    constexpr float threeQuarterPiFloat = static_cast<float>( 3.0 * quarterPi );
 
     if( std::isnan( x ) || std::isnan( y ) )
         return std::numeric_limits<float>::quiet_NaN();
@@ -105,7 +105,7 @@ namespace zonai
     {
         if( std::isinf( x ) )
         {
-            const float angle = negativeX ? 3.0f * quarterPiFloat : quarterPiFloat;
+            const float angle = negativeX ? threeQuarterPiFloat : static_cast<float>( quarterPi );
             return negativeY ? -angle : angle;
         }
 
