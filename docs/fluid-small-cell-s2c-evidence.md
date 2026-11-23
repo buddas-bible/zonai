@@ -3286,3 +3286,25 @@ This selected recipient is an *approximation* and does **not** guarantee space-t
 [Commit `dbd85e6`](https://github.com/buddas-bible/zonai/commit/dbd85e637b763261c8f587cec932bf7b8d3a351d) adds a **matched-entry frame-9 A/B cloned step**: tangent ON, baseline unchanged versus tangent ON with relay ON and swept observer ON. It checks one relayed cell, local island and north-neighbor RHS changes, whole-field signed source conservation, and tracer inventory, while printing global worst pressure volume residual, pressure-force difference, and max endpoint MAC speed. **Do not assume that the A/B candidate improves pressure or remains numerically stable until its CI logs are read.** It does not compare long-term coupled World response, tracer distribution, momentum and torque over many steps.
 
 **Follow-up gates:** Analyze Ubuntu and Windows logs from the candidate. If it improves the isolated pressure volume residual, run an *actual reprojected* adversarial A/B suite covering near-zero but nonzero area, disconnected positive pockets, reopening and closing history, moving-vs-static shapes, original nonaligned frame 9, reaction force/torque, tracer transfer distribution and longer-horizon stability. Compare paired benchmark times. A successful single prescribed snapshot is **necessary but insufficient** to make the alternative the default.
+
+### 2026-11-23 — relay A/B actual results and multi-step diagnostics
+
+**Verified CI:** [#45080016619](https://github.com/buddas-bible/zonai/actions/runs/45080016619) and [#45080103536](https://github.com/buddas-bible/zonai/actions/runs/45080103536) both completed SUCCESS in Ubuntu Debug and Windows Release. The `capsule_tangent_relay_ab` output is identical within cross-platform floating-point tolerance:
+
+| Metric, aligned exact-tangent frame 9 | Baseline tangent ON | Opt-in signed source relay |
+| --- | ---: | ---: |
+| Cell (30,6) source volume (m³) | -0.00210937857628 | 0 |
+| Cell (30,7) source volume (m³) | 0 | -0.00210937857628 |
+| Whole-grid source difference (m³) | — | 0 |
+| Maximum raw pressure-volume residual (m³) | 0.00210937857628 | 0.0006388575 (Ubuntu), 0.0006388608 (Windows) |
+| Maximum open fluid-face speed (m/s) | 3.6103897 | 3.6387150 |
+| Y force difference, relay-baseline (N) | — | -3.73154 (Ubuntu), -3.73151 (Windows) |
+| Total dye mass difference (kg) | — | 0 |
+
+The worst raw pressure-volume residual drops by about **69.7%**, but maximum face speed **increases** and fluid-on-solid Y reaction changes by ~-3.73N. This is **not** an accepted physical correction or proof of stable two-way coupling. No mass of tracer was directly moved by the pressure-source relay, so equal *total* tracer mass does not establish an identical spatial distribution.
+
+**New targeted scope:** [`2012a8d`](https://github.com/buddas-bible/zonai/commit/2012a8d04f5d76a10b2bf3a96e89d3f44382ccb3) carries the frame-9 identical-state opt-in replica forward through the remaining prescribed Capsule motion. It prints each frame's whole-grid signed source difference, total and **per-cell** dye-mass L1 mismatch, maximum local MAC velocity difference, obstacle forces and torque, fluid momentum/partial kinetic energy differences, peak open-fluid speed and global pressure-volume residual, with finite-valued and total-source/tracer-mass guards. Starting the clone at frame 9 and letting the two trajectories diverge explicitly avoids claiming later steps are still identical-state A/B comparisons.
+
+[`9b0747d`](https://github.com/buddas-bible/zonai/commit/9b0747ddd1a9546063f8cd535e356cb518d0d66c) performs the same controlled opt-in vs baseline trajectory on the **original unaligned, radius=0.19m** case and reports face U(26,4)'s actual endpoint aperture, integrated moving aperture, speed, adjacent pressure sources and field worst residual at the historical frame-9 near-wall spike. This is a **non-tangent negative/control test**, not evidence that the opt-in fixes the ~17.95m/s historical speed.
+
+**Acceptance rule:** Use these new results to decide whether the current opt-in branch should remain an experimental diagnostic, be redesigned or be removed. A lower raw volume residual by itself does not justify adoption if reaction force, momentum, dye distribution or peak speed regress. No change to the default solver was made; PR #326 remains Draft. The new runs were pending when written, so do not record their results before examining both platform logs.
