@@ -1,7 +1,7 @@
 name: Cross-platform Physics Determinism (R1c)
 
-# Strict comparison for the current R1a/R1b public World/Body snapshot fixture.
-# This does not yet certify hidden Contact/Joint/Fluid authoritative state.
+# Strict comparison for tested World/Contact/Joint and R3c Fluid state fixtures.
+# It does not certify every possible game scene or external libm behavior.
 on:
   pull_request:
     branches:
@@ -46,7 +46,7 @@ jobs:
           -DZONAI_BUILD_SANDBOX=OFF
 
       - name: Build replay tool
-        run: cmake --build build --target worldReplayTests fpMathAuditTests splineRailDeterminismTests standardJointDeterminismTests jointCacheSnapshotTests contactIslandDeterminismTests contactLifecycleDeterminismTests --parallel 2
+        run: cmake --build build --target worldReplayTests fpMathAuditTests splineRailDeterminismTests standardJointDeterminismTests jointCacheSnapshotTests contactIslandDeterminismTests contactLifecycleDeterminismTests fluidStateDeterminismTests --parallel 2
 
       - name: Record one canonical input and replay on Ubuntu
         shell: bash
@@ -62,6 +62,7 @@ jobs:
           ./build/tests/jointCacheSnapshotTests
           ./build/tests/contactIslandDeterminismTests --emit build/determinism-artifacts/contact-islands-ubuntu.tsv
           ./build/tests/contactLifecycleDeterminismTests --emit build/determinism-artifacts/contact-lifecycle-ubuntu.tsv
+          ./build/tests/fluidStateDeterminismTests --emit build/determinism-artifacts/fluid-ubuntu.tsv
           cp ./build/tests/worldReplayTests build/determinism-artifacts/worldReplayTests
 
       - name: Upload shared recorded input
@@ -83,6 +84,7 @@ jobs:
             build/determinism-artifacts/joints-ubuntu.tsv
             build/determinism-artifacts/contact-islands-ubuntu.tsv
             build/determinism-artifacts/contact-lifecycle-ubuntu.tsv
+            build/determinism-artifacts/fluid-ubuntu.tsv
             build/determinism-artifacts/worldReplayTests
           if-no-files-found: error
           retention-days: 14
@@ -116,7 +118,7 @@ jobs:
           -DZONAI_BUILD_SANDBOX=OFF
 
       - name: Build replay tool
-        run: cmake --build build --config Debug --target worldReplayTests fpMathAuditTests splineRailDeterminismTests standardJointDeterminismTests jointCacheSnapshotTests contactIslandDeterminismTests contactLifecycleDeterminismTests --parallel
+        run: cmake --build build --config Debug --target worldReplayTests fpMathAuditTests splineRailDeterminismTests standardJointDeterminismTests jointCacheSnapshotTests contactIslandDeterminismTests contactLifecycleDeterminismTests fluidStateDeterminismTests --parallel
 
       - name: Replay identical input on Windows
         shell: pwsh
@@ -138,6 +140,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\build\tests\Debug\contactLifecycleDeterminismTests.exe --emit build/determinism-artifacts/contact-lifecycle-windows.tsv
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build\tests\Debug\fluidStateDeterminismTests.exe --emit build/determinism-artifacts/fluid-windows.tsv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Windows replay
         uses: actions/upload-artifact@v4
@@ -150,6 +154,7 @@ jobs:
             build/determinism-artifacts/joints-windows.tsv
             build/determinism-artifacts/contact-islands-windows.tsv
             build/determinism-artifacts/contact-lifecycle-windows.tsv
+            build/determinism-artifacts/fluid-windows.tsv
           if-no-files-found: error
           retention-days: 14
 
@@ -332,6 +337,38 @@ jobs:
               sys.exit(1)
           PY
 
+      - name: Strict Fluid MAC, Cut-cell history and pressure feedback bits
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee fluid-comparison.txt
+          from itertools import zip_longest
+          from pathlib import Path
+          import sys
+
+          ubuntu = Path("artifacts/ubuntu/fluid-ubuntu.tsv").read_text(encoding="utf-8").splitlines()
+          windows = Path("artifacts/windows/fluid-windows.tsv").read_text(encoding="utf-8").splitlines()
+          first = None
+          count = 0
+          for row, (u, w) in enumerate(zip_longest(ubuntu, windows), 1):
+              if u == w:
+                  continue
+              count += 1
+              if first is None:
+                  first = (row, (u or w or "missing").split("\t", 1)[0], u, w)
+
+          print(f"Fluid authoritative MAC/Cut-cell/feedback rows: {max(len(ubuntu), len(windows))}")
+          print(f"Exact-bit mismatches: {count}")
+          if first is not None:
+              row, key, u, w = first
+              print(f"First Fluid divergence: row={row} field={key}")
+              print(f"Ubuntu:  {u if u is not None else '<missing>'}")
+              print(f"Windows: {w if w is not None else '<missing>'}")
+              sys.exit(1)
+
+          print("identical tested Fluid MAC, geometry/history and pressure feedback fields")
+          PY
+
       - name: Strict engine-owned math fingerprint (retain libm diagnostics)
         if: always()
         shell: bash
@@ -396,6 +433,7 @@ jobs:
             joints-comparison.txt
             contact-islands-comparison.txt
             contact-lifecycle-comparison.txt
+            fluid-comparison.txt
           if-no-files-found: warn
           retention-days: 14
 
