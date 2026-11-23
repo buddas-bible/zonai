@@ -321,8 +321,8 @@ inline void validateReplayInput( const replayInput& input )
         return replayMismatch{
             0,
             { "input.byte[" + std::to_string( i ) + "]",
-                i < left.inputBytes.size() ? left.inputBytes[i] : 0,
-                i < right.inputBytes.size() ? right.inputBytes[i] : 0,
+                static_cast<std::uint64_t>( i < left.inputBytes.size() ? left.inputBytes[i] : 0 ),
+                static_cast<std::uint64_t>( i < right.inputBytes.size() ? right.inputBytes[i] : 0 ),
                 static_cast<std::uint8_t>( i < left.inputBytes.size() ? 1 : 0 ),
                 static_cast<std::uint8_t>( i < right.inputBytes.size() ? 1 : 0 ) }
         };
