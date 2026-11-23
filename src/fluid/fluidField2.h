@@ -1023,6 +1023,9 @@ private:
     int faceStageAuditX_ = -1;
     int faceStageAuditY_ = -1;
     fluidFaceStageAudit2 faceStageAudit_{};
+    // Test-only opt-in hook. Captures read-only Field state at fixed Step phases.
+    // No callback or stage allocation in ordinary simulation.
+    std::function<void(const fluidField2&, int)> determinismStageObserver_{};
 #pragma endregion Data
 };
 
