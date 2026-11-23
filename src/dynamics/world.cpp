@@ -2444,6 +2444,18 @@ void world::Step( float timeStep, int subStepCount )
                 jointSims_[index] ) );
         }
 
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+        // Observation happens between existing solver phases. The callback
+        // receives only const references; it cannot influence warm starting.
+        const auto traceJointStage = [&]( jointTraceStage2 stage, int index )
+        {
+            if( jointSubstepObserver_ != nullptr )
+                jointSubstepObserver_( *this, stage, index, jointConstraints,
+                    jointSubstepObserverContext_ );
+        };
+        traceJointStage( jointTraceStage2::prepare, -1 );
+#endif
+
         for( int subStepIndex = 0; subStepIndex < subStepCount; ++subStepIndex )
         {
             ( void )subStepIndex;
@@ -2490,6 +2502,10 @@ void world::Step( float timeStep, int subStepCount )
                 bodyState.angularVelocity = bodyState.angularVelocity * angularDamping + angularVelocityDelta;
             }
 
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+            traceJointStage( jointTraceStage2::integratedVelocity, subStepIndex );
+#endif
+
             // -------------------------------------------------
             // 4-2. Warm start
             // -------------------------------------------------
@@ -2501,6 +2517,10 @@ void world::Step( float timeStep, int subStepCount )
                 WarmStartContacts( constraints );
             }
 
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+            traceJointStage( jointTraceStage2::warmStart, subStepIndex );
+#endif
+
             // -------------------------------------------------
             // 4-3. Solve with penetration / speculative bias
             // -------------------------------------------------
@@ -2511,6 +2531,10 @@ void world::Step( float timeStep, int subStepCount )
                 solveJoints( std::span<jointConstraint>{ jointConstraints }.subspan( island.jointStart, island.jointCount ), true );
                 SolveContactConstraints( constraints, true );
             }
+
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+            traceJointStage( jointTraceStage2::solveBias, subStepIndex );
+#endif
 
             // -------------------------------------------------
             // 4-4. Integrate island position deltas
@@ -2556,6 +2580,10 @@ void world::Step( float timeStep, int subStepCount )
                 }
             }
 
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+            traceJointStage( jointTraceStage2::integratedPosition, subStepIndex );
+#endif
+
             // -------------------------------------------------
             // 4-5. Relax contact velocities
             // -------------------------------------------------
@@ -2566,6 +2594,9 @@ void world::Step( float timeStep, int subStepCount )
                 solveJoints( std::span<jointConstraint>{ jointConstraints }.subspan( island.jointStart, island.jointCount ), false );
                 SolveContactConstraints( constraints, false );
             }
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+            traceJointStage( jointTraceStage2::solveRelax, subStepIndex );
+#endif
         }
 
         // -----------------------------------------------------
@@ -2750,6 +2781,11 @@ void world::Step( float timeStep, int subStepCount )
         }
 
         StoreContactConstraintImpulses( contactConstraints );
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+        // JointSim caches are committed once per complete Step, never
+        // between substeps. This is the only Store-stage observation.
+        traceJointStage( jointTraceStage2::store, subStepCount );
+#endif
 
         // Contact별 가장 큰 실제 접근 속도를 가진 접점 하나만 보고함.
         // normal impulse와 종전 접근 속도가 모두 있어야 하므로 resting/warm-only contact는 제외함.
