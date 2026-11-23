@@ -1,5 +1,6 @@
 #include "fluid/fluidField2.h"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
@@ -48,6 +49,101 @@ struct fluidStateTraceProbe2
         std::function<void(const fluidField2&, int)> callback )
     {
         field.determinismStageObserver_ = std::move( callback );
+    }
+
+
+    // R3e: reconstruct the exact semi-Lagrangian U(3,4) backtrace and
+    // bilinear stencil from the read-only Stage-05 input. The production
+    // Step and its interpolation are deliberately left unchanged.
+    static float captureComponent( const std::vector<float>& values,
+        int width, int height, float x, float y,
+        std::string& trace, const std::string& key )
+    {
+        appendScalar( trace, key + ".inputX", x );
+        appendScalar( trace, key + ".inputY", y );
+        x = std::clamp( x, 0.0f, static_cast<float>( width - 1 ) );
+        y = std::clamp( y, 0.0f, static_cast<float>( height - 1 ) );
+        const int i = static_cast<int>( x );
+        const int j = static_cast<int>( y );
+        const int i1 = std::min( i + 1, width - 1 );
+        const int j1 = std::min( j + 1, height - 1 );
+        const float tx = x - i;
+        const float ty = y - j;
+
+        const float a = values[j * width + i];
+        const float b = values[j * width + i1];
+        const float c = values[j1 * width + i];
+        const float d = values[j1 * width + i1];
+        const float bottom = std::lerp( a, b, tx );
+        const float top = std::lerp( c, d, tx );
+        const float result = std::lerp( bottom, top, ty );
+
+        appendScalar( trace, key + ".i", i );
+        appendScalar( trace, key + ".j", j );
+        appendScalar( trace, key + ".i1", i1 );
+        appendScalar( trace, key + ".j1", j1 );
+        appendScalar( trace, key + ".tx", tx );
+        appendScalar( trace, key + ".ty", ty );
+        appendScalar( trace, key + ".a", a );
+        appendScalar( trace, key + ".b", b );
+        appendScalar( trace, key + ".c", c );
+        appendScalar( trace, key + ".d", d );
+        appendScalar( trace, key + ".bottom", bottom );
+        appendScalar( trace, key + ".top", top );
+        appendScalar( trace, key + ".output", result );
+        return result;
+    }
+
+    static float readTargetU( const fluidField2& field )
+    {
+        return field.u_[4 * ( field.width_ + 1 ) + 3];
+    }
+
+    static float captureUAdvectionProbe( const fluidField2& field,
+        float timeStep, std::string& trace, const std::string& key )
+    {
+        // R3d first divergence: 16x12 domain, U face index 71 = U(3,4).
+        constexpr int targetX = 3;
+        constexpr int targetY = 4;
+        if( field.getWidth() != 16 || field.getHeight() != 12 )
+            throw std::runtime_error( "advection probe expects the R3d 16x12 fixture" );
+
+        const vec2 point = field.origin_ + field.cellSize_ *
+            vec2{ static_cast<float>( targetX ), static_cast<float>( targetY ) + 0.5f };
+        const vec2 current = field.sampleFrom( field.u_, field.v_, point );
+        const vec2 previous = point - timeStep * current;
+        const vec2 result = field.sampleFrom( field.u_, field.v_, previous );
+
+        appendScalar( trace, key + ".point.x", point.x );
+        appendScalar( trace, key + ".point.y", point.y );
+        appendScalar( trace, key + ".current.x", current.x );
+        appendScalar( trace, key + ".current.y", current.y );
+        appendScalar( trace, key + ".previous.x", previous.x );
+        appendScalar( trace, key + ".previous.y", previous.y );
+        appendScalar( trace, key + ".result.u", result.x );
+
+        const vec2 sourceGrid = ( point - field.origin_ ) / field.cellSize_;
+        appendScalar( trace, key + ".sourceGrid.x", sourceGrid.x );
+        appendScalar( trace, key + ".sourceGrid.y", sourceGrid.y );
+        const float currentU = captureComponent( field.u_, field.width_ + 1, field.height_,
+            sourceGrid.x, sourceGrid.y - 0.5f, trace, key + ".sourceU" );
+        const float currentV = captureComponent( field.v_, field.width_, field.height_ + 1,
+            sourceGrid.x - 0.5f, sourceGrid.y, trace, key + ".sourceV" );
+        appendScalar( trace, key + ".sourceUMatches", static_cast<int>(
+            std::bit_cast<std::uint32_t>( currentU ) == std::bit_cast<std::uint32_t>( current.x ) ) );
+        appendScalar( trace, key + ".sourceVMatches", static_cast<int>(
+            std::bit_cast<std::uint32_t>( currentV ) == std::bit_cast<std::uint32_t>( current.y ) ) );
+
+        const vec2 destinationGrid = ( previous - field.origin_ ) / field.cellSize_;
+        appendScalar( trace, key + ".destinationGrid.x", destinationGrid.x );
+        appendScalar( trace, key + ".destinationGrid.y", destinationGrid.y );
+        const float reconstructed = captureComponent( field.u_, field.width_ + 1,
+            field.height_, destinationGrid.x, destinationGrid.y - 0.5f,
+            trace, key + ".destinationU" );
+        appendScalar( trace, key + ".reconstructedMatches", static_cast<int>(
+            std::bit_cast<std::uint32_t>( reconstructed ) ==
+                std::bit_cast<std::uint32_t>( result.x ) ) );
+        return result.x;
     }
 
     static void capture( const fluidField2& field, std::string& trace, const std::string& key )
@@ -123,6 +219,8 @@ struct fluidScene
     bool traceStages = true;
     int capturedStages = 0;
     std::string stageTrace{};
+    std::string advectionTrace{};
+    float advectionPreviewU = 0.0f;
 
     explicit fluidScene( bool analytic, bool enableStages = true )
         : traceStages( enableStages )
@@ -148,6 +246,7 @@ struct fluidScene
         if( traceStages && tick == 1 )
         {
             const std::string prefix = std::string( sceneName ) + ".tick.1.stage.";
+            const std::string probePrefix = std::string( sceneName ) + ".tick.1.advectionProbe";
             zonai::fluidStateTraceProbe2::setStageObserver( field,
                 [this, prefix]( const zonai::fluidField2& snapshot, int phase )
                 {
@@ -159,6 +258,21 @@ struct fluidScene
                     };
                     check( phase >= 0 && phase < static_cast<int>( names.size() ),
                         "Fluid emitted an unknown Step phase" );
+                    if( phase == 5 )
+                        advectionPreviewU = zonai::fluidStateTraceProbe2::captureUAdvectionProbe(
+                            snapshot, timeStep, advectionTrace, probePrefix );
+                    if( phase == 6 )
+                    {
+                        // Observe whether a read-only evaluation actually reproduces
+                        // the real Step's U(3,4) output in this compiler.
+                        const float real = zonai::fluidStateTraceProbe2::readTargetU( snapshot );
+                        zonai::fluidStateTraceProbe2::appendScalar( advectionTrace,
+                            probePrefix + ".previewMatchesActual", static_cast<int>(
+                                std::bit_cast<std::uint32_t>( real ) ==
+                                std::bit_cast<std::uint32_t>( advectionPreviewU ) ) );
+                        zonai::fluidStateTraceProbe2::appendScalar( advectionTrace,
+                            probePrefix + ".actualU", real );
+                    }
                     zonai::fluidStateTraceProbe2::capture( snapshot, stageTrace,
                         prefix + names[phase] );
                     ++capturedStages;
@@ -206,8 +320,11 @@ std::string runScene( const char* sceneName, bool analytic )
 
         if( tick == 1 )
         {
-            check( first.stageTrace == second.stageTrace,
+            check( first.stageTrace == second.stageTrace &&
+                first.advectionTrace == second.advectionTrace,
                 "two independently instrumented Fields differ within one process" );
+            // Compare the detailed backtrace/stencil before Stage-06 raw grid.
+            trace.append( first.advectionTrace );
             trace.append( first.stageTrace );
         }
 
