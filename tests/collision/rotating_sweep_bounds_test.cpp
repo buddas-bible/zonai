@@ -96,6 +96,49 @@ void verifyRandomSweeps()
     std::printf( "Rotating arc bounds verified: %d cases x %d time samples\n", CASE_COUNT, SAMPLES + 1 );
 }
 
+// Narrow arcs and large World coordinates amplify cancellation near a swept
+// AABB face. Every sampled float transform must remain inside the broadphase
+// candidate envelope after the deterministic radius migration.
+void verifyShiftedNarrowSweepBounds()
+{
+    const shapeGeometry geometry = capsule2{ { 3.5f, -0.02f },
+        { 3.55f, 0.02f }, 0.015f };
+    const shapeProxy2 proxy = MakeShapeProxy( geometry );
+
+    for( const float origin : { 0.0f, 4096.0f, 65536.0f } )
+    {
+        for( const float radians : { -1.5707963267948966f, -0.25f,
+            0.25f, 1.5707963267948966f } )
+        {
+            const transform2 start{ { origin, -origin },
+                rot2::FromRadians( 0.125f ) };
+            const vec2 endPosition = start.position + vec2{ 0.125f, -0.125f };
+            const rot2 endRotation = start.rotation * rot2::FromRadians( radians );
+            aabb2 bounds{};
+            check( TryComputeRotatingSweepBounds( proxy, start, endPosition,
+                endRotation, radians, bounds ), "shifted narrow sweep must be valid" );
+
+            const sweep2 sweep{ {}, start.position, endPosition,
+                start.rotation, endRotation };
+
+            for( int i = 0; i <= 1024; ++i )
+            {
+                const float fraction = static_cast<float>( i ) / 1024.0f;
+                const aabb2 exact = ComputeShapeAABB( geometry,
+                    GetSweepTransform( sweep, fraction ) );
+                if( !ContainsAABB( bounds, exact ) )
+                {
+                    std::fprintf( stderr,
+                        "Shifted narrow sweep omitted geometry: origin=%g radians=%g fraction=%g\n",
+                        static_cast<double>( origin ), static_cast<double>( radians ),
+                        static_cast<double>( fraction ) );
+                    check( false, "conservative rotated bounds must enclose every sampled point" );
+                }
+            }
+        }
+    }
+}
+
 void verifyPivotReductionAndWorldHits()
 {
     const shapeGeometry probe = circle2{ { 3.0f, 0.0f }, 0.2f };
@@ -141,5 +184,6 @@ void verifyPivotReductionAndWorldHits()
 int main()
 {
     verifyRandomSweeps();
+    verifyShiftedNarrowSweepBounds();
     verifyPivotReductionAndWorldHits();
 }
