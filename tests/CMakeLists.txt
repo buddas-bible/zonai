@@ -913,3 +913,8 @@ add_test(NAME standardJointDeterminismTests COMMAND standardJointDeterminismTest
 add_executable(jointCacheSnapshotTests determinism/joint_cache_snapshot_test.cpp)
 target_link_libraries(jointCacheSnapshotTests PRIVATE zonai::zonai)
 add_test(NAME jointCacheSnapshotTests COMMAND jointCacheSnapshotTests)
+
+# R2a-8: strict transient Contact/Island ordering, manifold and impulse replay.
+add_executable(contactIslandDeterminismTests determinism/contact_island_determinism_test.cpp)
+target_link_libraries(contactIslandDeterminismTests PRIVATE zonai::zonai)
+add_test(NAME contactIslandDeterminismTests COMMAND contactIslandDeterminismTests)
