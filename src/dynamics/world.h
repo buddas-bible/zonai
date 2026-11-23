@@ -138,7 +138,24 @@ concept worldCollisionCallback = requires( Callback& callback, const contactData
 namespace determinism::test
 {
 struct jointCacheSnapshotAccess;
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+struct jointSubstepTraceAccess;
+#endif
 }
+
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+// The actual solver sequence has one Prepare and one Store per full Step.
+enum class jointTraceStage2 : std::uint8_t
+{
+    prepare,
+    integratedVelocity,
+    warmStart,
+    solveBias,
+    integratedPosition,
+    solveRelax,
+    store
+};
+#endif
 
 class world
 {
@@ -1334,6 +1351,9 @@ public:
 private:
     // Read-only deterministic regression inspection of persistent Joint caches.
     friend struct determinism::test::jointCacheSnapshotAccess;
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+    friend struct determinism::test::jointSubstepTraceAccess;
+#endif
 
     // Public handle이 world 수명을 구분할 때 사용하는 opaque token.
     std::uint64_t worldToken_ = 0;
@@ -1457,6 +1477,14 @@ private:
 #pragma region JointSolver
 
     using jointConstraint = std::variant<distanceJointConstraint2, filterJointConstraint2, motorJointConstraint2, moverJointConstraint2, pogoJointConstraint2, mouseJointConstraint2, prismaticJointConstraint2, splineRailJointConstraint2, revoluteJointConstraint2, weldJointConstraint2, wheelJointConstraint2>;
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+    // Test-only observer of transient constraints and Body State; excluded
+    // entirely from production class layout if tests are disabled.
+    using jointSubstepObserver = void (*)( const world&, jointTraceStage2, int,
+        std::span<const jointConstraint>, void* );
+    jointSubstepObserver jointSubstepObserver_ = nullptr;
+    void* jointSubstepObserverContext_ = nullptr;
+#endif
     void warmStartJoints( std::span<jointConstraint> constraints );
     void solveJoints( std::span<jointConstraint> constraints, bool useBias );
 
