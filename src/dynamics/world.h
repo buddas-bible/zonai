@@ -20,6 +20,7 @@
 #include "collision/shapeCast2.h"
 #include "collision/rotatingSweepBounds2.h"
 #include "collision/timeOfImpact2.h"
+#include "math/deterministicMath.h"
 #include "dynamics/body.h"
 #include "dynamics/bodyDef.h"
 #include "dynamics/bodySim.h"
@@ -131,6 +132,13 @@ template <typename Callback>
 concept worldCollisionCallback = requires( Callback& callback, const contactData& contactData ) {
     { callback( contactData ) } -> std::same_as<void>;
 };
+
+// Forward declaration for the test-only Joint cache reader. This adds no
+// runtime state or public physics API.
+namespace determinism::test
+{
+struct jointCacheSnapshotAccess;
+}
 
 class world
 {
@@ -759,7 +767,7 @@ public:
             localMinY = std::min( localMinY, static_cast<double>( point.y ) );
             localMaxX = std::max( localMaxX, static_cast<double>( point.x ) );
             localMaxY = std::max( localMaxY, static_cast<double>( point.y ) );
-            const double radius = std::hypot( static_cast<double>( point.x ),
+            const double radius = deterministicHypotUpperBound( static_cast<double>( point.x ),
                 static_cast<double>( point.y ) ) + movingProxy.radius;
             maxRadius = std::max( maxRadius, radius );
         }
@@ -907,7 +915,7 @@ public:
 
                 const double deltaX = targetX - ( startX + nearestTime * dx );
                 const double deltaY = targetY - ( startY + nearestTime * dy );
-                const double targetRotationLength = std::hypot(
+                const double targetRotationLength = deterministicHypotUpperBound(
                     static_cast<double>( targetTransform.rotation.c ),
                     static_cast<double>( targetTransform.rotation.s ) );
                 // World의 local transform이 정확히 단위 회전이 아니어도
@@ -1324,6 +1332,9 @@ public:
 #pragma endregion DiagnosticQueries
 
 private:
+    // Read-only deterministic regression inspection of persistent Joint caches.
+    friend struct determinism::test::jointCacheSnapshotAccess;
+
     // Public handle이 world 수명을 구분할 때 사용하는 opaque token.
     std::uint64_t worldToken_ = 0;
 
