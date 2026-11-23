@@ -918,3 +918,8 @@ add_test(NAME jointCacheSnapshotTests COMMAND jointCacheSnapshotTests)
 add_executable(contactIslandDeterminismTests determinism/contact_island_determinism_test.cpp)
 target_link_libraries(contactIslandDeterminismTests PRIVATE zonai::zonai)
 add_test(NAME contactIslandDeterminismTests COMMAND contactIslandDeterminismTests)
+
+# R2a-9: Contact generation/recycling/free-list and Sleep/Wake island transitions.
+add_executable(contactLifecycleDeterminismTests determinism/contact_lifecycle_determinism_test.cpp)
+target_link_libraries(contactLifecycleDeterminismTests PRIVATE zonai::zonai)
+add_test(NAME contactLifecycleDeterminismTests COMMAND contactLifecycleDeterminismTests)
