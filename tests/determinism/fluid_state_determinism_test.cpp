@@ -248,7 +248,7 @@ struct fluidScene
             const std::string prefix = std::string( sceneName ) + ".tick.1.stage.";
             const std::string probePrefix = std::string( sceneName ) + ".tick.1.advectionProbe";
             zonai::fluidStateTraceProbe2::setStageObserver( field,
-                [this, prefix]( const zonai::fluidField2& snapshot, int phase )
+                [this, prefix, probePrefix]( const zonai::fluidField2& snapshot, int phase )
                 {
                     static constexpr std::array<const char*, 10> names{
                         "00-entry", "01-occupancy", "02-geometry",
