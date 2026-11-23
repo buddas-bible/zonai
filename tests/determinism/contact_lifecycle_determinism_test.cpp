@@ -358,7 +358,9 @@ void runScene( const char* sceneName, std::FILE* output )
 
     first.verify();
     second.verify();
-    unobserved.verify();
+    // The control World intentionally has no observer, so it cannot
+    // accumulate island-stage coverage flags. Its full authoritative
+    // Tick snapshots were still checked against both traced Worlds.
     jointSubstepTraceAccess::uninstall( first.simulation );
     jointSubstepTraceAccess::uninstall( second.simulation );
     if( output && std::ferror( output ) )
