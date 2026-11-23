@@ -1341,6 +1341,9 @@ void auditCapsuleTangentMovingPressure()
             }
             // Deep-copy the same frame-9 entry before enabling time-aperture
             // diagnostics. Verify the observers do not perturb actual physics.
+            // Capture the actual pre-projection near-wall face, rather
+            // than inferring the pressure impulse from a later speed alone.
+            std::optional<float> prePressureBaselineU, prePressureRelayU;
             std::optional<std::array<fluidField2, 2>> unobserved;
             if( frame == 9 )
             {
@@ -1352,6 +1355,27 @@ void auditCapsuleTangentMovingPressure()
                 temporalRelay->setTemporalIsolatedVolumeSourceRelayEnabled( true );
                 for( auto& field : fields )
                     field.setSweptApertureAuditEnabled( true );
+                if( !aligned )
+                {
+                    fields[1].setPrePressureSnapshotObserver(
+                        [&]( const fluidField2& frozen )
+                        {
+                            if( prePressureBaselineU )
+                                throw std::runtime_error(
+                                    "duplicate original Capsule pre-pressure sample" );
+                            prePressureBaselineU =
+                                *frozen.getUFaceVelocityForAudit( 26, 4 );
+                        } );
+                    temporalRelay->setPrePressureSnapshotObserver(
+                        [&]( const fluidField2& frozen )
+                        {
+                            if( prePressureRelayU )
+                                throw std::runtime_error(
+                                    "duplicate relay Capsule pre-pressure sample" );
+                            prePressureRelayU =
+                                *frozen.getUFaceVelocityForAudit( 26, 4 );
+                        } );
+                }
             }
             std::array<fluidObstacleForce2, 2> forces{};
             for( int policy = 0; policy < 2; ++policy )
@@ -1446,6 +1470,23 @@ void auditCapsuleTangentMovingPressure()
                         "Capsule relay trajectory failed total source/tracer conservation" );
                 if( !aligned && frame == 9 )
                 {
+                    if( !prePressureBaselineU || !prePressureRelayU ||
+                        !std::isfinite( *prePressureBaselineU ) ||
+                        !std::isfinite( *prePressureRelayU ) ||
+                        std::abs( *prePressureBaselineU - *prePressureRelayU ) > 1.0e-6f )
+                        throw std::runtime_error(
+                            "original near-wall frozen pre-pressure velocity differs" );
+                    const double baselinePost =
+                        *baseline.getUFaceVelocityForAudit( 26, 4 );
+                    const double relayPost =
+                        *temporalRelay->getUFaceVelocityForAudit( 26, 4 );
+                    std::printf( "capsule_relay_unaligned_pressure_impulse,"
+                        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+                        static_cast<double>( *prePressureBaselineU ),
+                        static_cast<double>( *prePressureRelayU ),
+                        baselinePost, relayPost,
+                        baselinePost - *prePressureBaselineU,
+                        relayPost - *prePressureRelayU );
                     const auto left = baseline.getCutCellVolumeBudget( 25, 4, dt );
                     const auto right = baseline.getCutCellVolumeBudget( 26, 4, dt );
                     std::printf( "capsule_relay_unaligned_peak_face,"
@@ -1766,8 +1807,15 @@ void auditCapsuleTangentMovingPressure()
                     }
                 }
             if( frame == 9 )
+            {
                 for( auto& field : fields )
                     field.setSweptApertureAuditEnabled( false );
+                if( !aligned )
+                {
+                    fields[1].setPrePressureSnapshotObserver( {} );
+                    temporalRelay->setPrePressureSnapshotObserver( {} );
+                }
+            }
             priorY = y;
         }
     }
