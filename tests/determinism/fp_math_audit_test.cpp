@@ -148,8 +148,13 @@ void emitFingerprint( std::FILE* stream )
     };
     for( std::size_t i = 0; i < 256; ++i )
     {
-        const float y = std::bit_cast<float>( nextAtanBits() );
-        const float x = std::bit_cast<float>( nextAtanBits() );
+        std::uint32_t yBits = nextAtanBits(), xBits = nextAtanBits();
+        // Keep the large corpus finite; NaN/Inf and signed-zero semantics
+        // are checked separately by deterministicAtan2Tests.
+        if( ( yBits & 0x7f800000u ) == 0x7f800000u ) yBits &= 0xff7fffffu;
+        if( ( xBits & 0x7f800000u ) == 0x7f800000u ) xBits &= 0xff7fffffu;
+        const float y = std::bit_cast<float>( yBits );
+        const float x = std::bit_cast<float>( xBits );
         outputFloat( stream, "zonai.atan2Wide", i, deterministicAtan2( y, x ) );
     }
 
