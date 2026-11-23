@@ -136,6 +136,108 @@ struct jointSubstepTraceAccess
         simulation.jointSubstepObserverContext_ = nullptr;
     }
 
+    // R2a-9: capture active/free Contact slots, recycling anchors, simplex
+    // cache and stable generations without serializing pointers or padding.
+    [[nodiscard]] static stateSnapshot captureContactLifecycle( const world& simulation )
+    {
+        stateSnapshotWriter writer{};
+        writer.writeU32( "lifecycle.schema.version", 1 );
+        writer.writeU64( "lifecycle.liveCount", simulation.contactCount_ );
+        writer.writeU64( "lifecycle.slotCount", simulation.contacts_.size() );
+        writer.writeS32( "lifecycle.freeHead", simulation.contactFreeList_ );
+        writer.writeU64( "lifecycle.recycledThisUpdate", simulation.recycledContactCount_ );
+
+        std::size_t live = 0;
+        std::size_t free = 0;
+        for( std::size_t i = 0; i < simulation.contacts_.size(); ++i )
+        {
+            const contact2& slot = simulation.contacts_[i];
+            const contactSim2& sim = simulation.contactSims_[i];
+            const std::string p = "lifecycle.slot[" + std::to_string( i ) + "].";
+            const bool active = slot.contactId != contact2::NULL_INDEX;
+            writer.writeBool( p + "active", active );
+            writer.writeU32( p + "generation", slot.generation );
+            writer.writeS32( p + "freeNext", slot.nextFreeId );
+
+            if( !active )
+            {
+                ++free;
+                if( sim.contactId != contactSim2::NULL_INDEX ||
+                    sim.manifold.pointCount != 0 || sim.recycleCacheValid )
+                    throw std::logic_error( "freed Contact retains hot simulation state" );
+                for( const contactImpulse2& point : sim.impulses )
+                {
+                    if( point.normalImpulse != 0.0f || point.tangentImpulse != 0.0f )
+                        throw std::logic_error( "freed Contact retains warm-start impulses" );
+                }
+                continue;
+            }
+
+            ++live;
+            if( slot.contactId != static_cast<std::int32_t>( i ) ||
+                sim.contactId != static_cast<std::int32_t>( i ) ||
+                sim.simplexCache.count > sim.simplexCache.indexA.size() )
+                throw std::logic_error( "active Contact slot/hot-data mismatch" );
+            writer.writeBool( p + "enableRecycling", slot.enableRecycling );
+            writer.writeBool( p + "recycleCacheValid", sim.recycleCacheValid );
+            writer.writeS32( p + "shapeA", sim.shapeIdA );
+            writer.writeS32( p + "shapeB", sim.shapeIdB );
+            writer.writeS32( p + "bodyA", sim.bodyIdA );
+            writer.writeS32( p + "bodyB", sim.bodyIdB );
+            writer.writeU16( p + "simplex.count", sim.simplexCache.count );
+            for( std::size_t j = 0; j < sim.simplexCache.count; ++j )
+            {
+                const std::string n = p + "simplex[" + std::to_string( j ) + "].";
+                writer.writeU16( n + "indexA", sim.simplexCache.indexA[j] );
+                writer.writeU16( n + "indexB", sim.simplexCache.indexB[j] );
+            }
+
+            if( !sim.recycleCacheValid ) continue;
+
+            const auto vec = [&]( std::string name, vec2 v )
+            {
+                writer.writeFloat( p + name + ".x", v.x );
+                writer.writeFloat( p + name + ".y", v.y );
+            };
+            const auto rot = [&]( std::string name, rot2 rotation )
+            {
+                writer.writeFloat( p + name + ".c", rotation.c );
+                writer.writeFloat( p + name + ".s", rotation.s );
+            };
+            vec( "cachedTransform.position", sim.cachedRelativeTransform.position );
+            rot( "cachedTransform.rotation", sim.cachedRelativeTransform.rotation );
+            rot( "cachedRotationA", sim.cachedRotationA );
+            rot( "cachedRotationB", sim.cachedRotationB );
+            for( int j = 0; j < sim.manifold.pointCount; ++j )
+            {
+                const std::string n = "recyclePoint[" + std::to_string( j ) + "].";
+                vec( n + "anchorA", sim.recyclePointA[j] );
+                vec( n + "anchorB", sim.recyclePointB[j] );
+                writer.writeFloat( p + n + "separation", sim.recycleSeparation[j] );
+            }
+        }
+
+        if( live != simulation.contactCount_ || live + free != simulation.contacts_.size() )
+            throw std::logic_error( "Contact lifecycle active/free count mismatch" );
+
+        std::vector<bool> visited( simulation.contacts_.size(), false );
+        std::size_t walked = 0;
+        for( std::int32_t index = simulation.contactFreeList_;
+            index != contact2::NULL_INDEX; index = simulation.contacts_[index].nextFreeId )
+        {
+            if( index < 0 || static_cast<std::size_t>( index ) >= visited.size() ||
+                visited[index] || simulation.contacts_[index].contactId != contact2::NULL_INDEX )
+                throw std::logic_error( "Contact free-list cycle or invalid link" );
+            visited[index] = true;
+            writer.writeS32( "lifecycle.freeOrder[" + std::to_string( walked ) + "]", index );
+            ++walked;
+        }
+        if( walked != free )
+            throw std::logic_error( "Contact free-list length does not equal retired slots" );
+
+        return std::move( writer ).finish();
+    }
+
     // Stable persistent Contact slots after the final collision refresh.
     // Unlike transient constraints, this can also be called at Tick boundaries.
     [[nodiscard]] static stateSnapshot capturePersistentContacts( const world& simulation )
