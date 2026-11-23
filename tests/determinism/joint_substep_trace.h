@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <bit>
 #include <cstdint>
+#include <cmath>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -135,6 +136,62 @@ struct jointSubstepTraceAccess
         simulation.jointSubstepObserverContext_ = nullptr;
     }
 
+    // Stable persistent Contact slots after the final collision refresh.
+    // Unlike transient constraints, this can also be called at Tick boundaries.
+    [[nodiscard]] static stateSnapshot capturePersistentContacts( const world& simulation )
+    {
+        stateSnapshotWriter writer{};
+        writer.writeU32( "contactCache.schema.version", 1 );
+        writer.writeU64( "contactCache.liveCount", simulation.contactCount_ );
+        std::size_t counted = 0;
+
+        for( std::size_t i = 0; i < simulation.contactSims_.size(); ++i )
+        {
+            const contactSim2& sim = simulation.contactSims_[i];
+            if( sim.contactId == contactSim2::NULL_INDEX ) continue;
+
+            const contact2& slot = simulation.contacts_[i];
+            if( sim.contactId != static_cast<std::int32_t>( i ) ||
+                slot.contactId != static_cast<std::int32_t>( i ) )
+                throw std::logic_error( "Contact stable slot and hot cache disagree" );
+
+            if( sim.manifold.pointCount < 0 ||
+                sim.manifold.pointCount > static_cast<int>( MAX_MANIFOLD_POINTS ) )
+                throw std::logic_error( "invalid persistent Contact manifold point count" );
+
+            ++counted;
+            const std::string p = "contactCache.slot[" + std::to_string( i ) + "].";
+            writer.writeS32( p + "id", sim.contactId );
+            writer.writeU32( p + "generation", slot.generation );
+            writer.writeS32( p + "shapeA", sim.shapeIdA );
+            writer.writeS32( p + "shapeB", sim.shapeIdB );
+            writer.writeS32( p + "bodyA", sim.bodyIdA );
+            writer.writeS32( p + "bodyB", sim.bodyIdB );
+            writer.writeBool( p + "recycleValid", sim.recycleCacheValid );
+            writer.writeU32( p + "pointCount",
+                static_cast<std::uint32_t>( sim.manifold.pointCount ) );
+            writer.writeFloat( p + "normal.x", sim.manifold.normal.x );
+            writer.writeFloat( p + "normal.y", sim.manifold.normal.y );
+
+            for( int j = 0; j < sim.manifold.pointCount; ++j )
+            {
+                const auto& point = sim.manifold.points[j];
+                const auto& impulse = sim.impulses[j];
+                const std::string base = p + "point[" + std::to_string( j ) + "].";
+                writer.writeU16( base + "id", point.id );
+                writer.writeFloat( base + "position.x", point.point.x );
+                writer.writeFloat( base + "position.y", point.point.y );
+                writer.writeFloat( base + "separation", point.separation );
+                writer.writeFloat( base + "normalImpulse", impulse.normalImpulse );
+                writer.writeFloat( base + "tangentImpulse", impulse.tangentImpulse );
+            }
+        }
+
+        if( counted != simulation.contactCount_ )
+            throw std::logic_error( "active Contact cache count mismatch" );
+        return std::move( writer ).finish();
+    }
+
 private:
     static void capture( const world& simulation, jointTraceStage2 stage,
         int subStepIndex, std::span<const world::jointConstraint> constraints,
@@ -147,6 +204,98 @@ private:
         writer.writeU32( "substep.stage", static_cast<std::uint32_t>( stage ) );
         writer.writeS32( "substep.index", subStepIndex );
         writer.writeU32( "substep.constraintCount", static_cast<std::uint32_t>( constraints.size() ) );
+
+        if( recorder.captureContactAndIsland )
+        {
+            if( contacts.size() != graph.contactIds.size() )
+                throw std::logic_error( "Contact constraint order does not match island graph" );
+
+            recorder.maxContacts = std::max( recorder.maxContacts, contacts.size() );
+            recorder.maxIslands = std::max( recorder.maxIslands, graph.islands.size() );
+            writer.writeU32( "island.schema.version", 1 );
+            writer.writeU32( "island.count", static_cast<std::uint32_t>( graph.islands.size() ) );
+            writer.writeU32( "island.bodyCount", static_cast<std::uint32_t>( graph.bodyIds.size() ) );
+            writer.writeU32( "island.contactCount", static_cast<std::uint32_t>( graph.contactIds.size() ) );
+            writer.writeU32( "island.jointCount", static_cast<std::uint32_t>( graph.jointIds.size() ) );
+
+            for( std::size_t i = 0; i < graph.islands.size(); ++i )
+            {
+                const island2& island = graph.islands[i];
+                const std::string p = "island[" + std::to_string( i ) + "].";
+                writer.writeU64( p + "bodyStart", island.bodyStart );
+                writer.writeU64( p + "bodyCount", island.bodyCount );
+                writer.writeU64( p + "contactStart", island.contactStart );
+                writer.writeU64( p + "contactCount", island.contactCount );
+                writer.writeU64( p + "jointStart", island.jointStart );
+                writer.writeU64( p + "jointCount", island.jointCount );
+                if( island.bodyStart + island.bodyCount > graph.bodyIds.size() ||
+                    island.contactStart + island.contactCount > graph.contactIds.size() ||
+                    island.jointStart + island.jointCount > graph.jointIds.size() )
+                    throw std::logic_error( "invalid Island graph flat ranges" );
+            }
+
+            for( std::size_t i = 0; i < graph.bodyIds.size(); ++i )
+                writer.writeS32( "island.bodyOrder[" + std::to_string( i ) + "]", graph.bodyIds[i] );
+            for( std::size_t i = 0; i < graph.contactIds.size(); ++i )
+                writer.writeS32( "island.contactOrder[" + std::to_string( i ) + "]", graph.contactIds[i] );
+            for( std::size_t i = 0; i < graph.jointIds.size(); ++i )
+                writer.writeS32( "island.jointOrder[" + std::to_string( i ) + "]", graph.jointIds[i] );
+
+            for( std::size_t i = 0; i < contacts.size(); ++i )
+            {
+                const contactConstraint2& c = contacts[i];
+                if( c.contactId != graph.contactIds[i] ||
+                    c.contactId < 0 ||
+                    static_cast<std::size_t>( c.contactId ) >= simulation.contactSims_.size() )
+                    throw std::logic_error( "Contact constraint index/order mismatch" );
+                if( c.pointCount < 0 ||
+                    c.pointCount > static_cast<int>( MAX_MANIFOLD_POINTS ) )
+                    throw std::logic_error( "invalid transient Contact point count" );
+
+                const contactSim2& sim = simulation.contactSims_[c.contactId];
+                if( c.pointCount != sim.manifold.pointCount )
+                    throw std::logic_error( "Contact constraint/manifold point count mismatch" );
+                const std::string p = "contact[" + std::to_string( i ) + "].";
+                writer.writeS32( p + "id", c.contactId );
+                writer.writeU32( p + "generation", simulation.contacts_[c.contactId].generation );
+                writer.writeS32( p + "bodyA", c.bodyIdA );
+                writer.writeS32( p + "bodyB", c.bodyIdB );
+                writer.writeU32( p + "pointCount", static_cast<std::uint32_t>( c.pointCount ) );
+                writer.writeFloat( p + "normal.x", c.normal.x );
+                writer.writeFloat( p + "normal.y", c.normal.y );
+                writer.writeFloat( p + "friction", c.friction );
+                writer.writeFloat( p + "restitution", c.restitution );
+                writer.writeFloat( p + "softness.biasRate", c.softness.biasRate );
+                writer.writeFloat( p + "softness.massScale", c.softness.massScale );
+                writer.writeFloat( p + "softness.impulseScale", c.softness.impulseScale );
+                writer.writeFloat( p + "maxPushSpeed", c.maxPushSpeed );
+                writer.writeFloat( p + "invTimeStep", c.invTimeStep );
+                recorder.maxPointCount = std::max( recorder.maxPointCount, c.pointCount );
+
+                for( int j = 0; j < c.pointCount; ++j )
+                {
+                    const contactConstraintPoint2& point = c.points[j];
+                    const std::string n = p + "point[" + std::to_string( j ) + "].";
+                    writer.writeU16( n + "featureId", sim.manifold.points[j].id );
+                    writer.writeFloat( n + "anchorA.x", point.anchorA.x );
+                    writer.writeFloat( n + "anchorA.y", point.anchorA.y );
+                    writer.writeFloat( n + "anchorB.x", point.anchorB.x );
+                    writer.writeFloat( n + "anchorB.y", point.anchorB.y );
+                    writer.writeFloat( n + "baseSeparation", point.baseSeparation );
+                    writer.writeFloat( n + "relativeNormalVelocity", point.relativeNormalVelocity );
+                    writer.writeFloat( n + "normalMass", point.normalMass );
+                    writer.writeFloat( n + "tangentMass", point.tangentMass );
+                    writer.writeFloat( n + "normalImpulse", point.normalImpulse );
+                    writer.writeFloat( n + "totalNormalImpulse", point.totalNormalImpulse );
+                    writer.writeFloat( n + "restitutionImpulse", point.restitutionImpulse );
+                    writer.writeFloat( n + "tangentImpulse", point.tangentImpulse );
+                    if( point.normalImpulse > 0.0f )
+                        recorder.sawNormalImpulse = true;
+                    if( point.tangentImpulse != 0.0f )
+                        recorder.sawTangentImpulse = true;
+                }
+            }
+        }
 
         for( const bodyId id : recorder.bodies )
         {
@@ -287,6 +436,14 @@ private:
         {
             const stateSnapshot persistent = jointCacheSnapshotAccess::capture(
                 simulation, recorder.joints );
+            snapshot.bytes.insert( snapshot.bytes.end(),
+                persistent.bytes.begin(), persistent.bytes.end() );
+            snapshot.fields.insert( snapshot.fields.end(),
+                persistent.fields.begin(), persistent.fields.end() );
+        }
+        if( recorder.captureContactAndIsland && stage == jointTraceStage2::store )
+        {
+            const stateSnapshot persistent = capturePersistentContacts( simulation );
             snapshot.bytes.insert( snapshot.bytes.end(),
                 persistent.bytes.begin(), persistent.bytes.end() );
             snapshot.fields.insert( snapshot.fields.end(),
