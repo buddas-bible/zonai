@@ -883,3 +883,8 @@ add_test(NAME worldStateSnapshotTests COMMAND worldStateSnapshotTests)
 add_executable(worldReplayTests determinism/world_replay_test.cpp)
 target_link_libraries(worldReplayTests PRIVATE zonai::zonai)
 add_test(NAME worldReplayTests COMMAND worldReplayTests)
+
+# R2a: verify FP contraction policy and emit platform-specific exact math bits.
+add_executable(fpMathAuditTests determinism/fp_math_audit_test.cpp)
+target_link_libraries(fpMathAuditTests PRIVATE zonai::zonai)
+add_test(NAME fpMathAuditTests COMMAND fpMathAuditTests)
