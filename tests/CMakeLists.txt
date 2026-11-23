@@ -903,3 +903,8 @@ add_test(NAME splineRailDeterminismTests COMMAND splineRailDeterminismTests)
 add_executable(deterministicAtan2Tests math/deterministic_atan2_test.cpp)
 target_link_libraries(deterministicAtan2Tests PRIVATE zonai::zonai)
 add_test(NAME deterministicAtan2Tests COMMAND deterministicAtan2Tests)
+
+# R2a-6: strict Tick-level World/Body and reaction-force regressions for four Joint kinds.
+add_executable(standardJointDeterminismTests determinism/standard_joint_determinism_test.cpp)
+target_link_libraries(standardJointDeterminismTests PRIVATE zonai::zonai)
+add_test(NAME standardJointDeterminismTests COMMAND standardJointDeterminismTests)
