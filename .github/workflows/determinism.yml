@@ -46,7 +46,7 @@ jobs:
           -DZONAI_BUILD_SANDBOX=OFF
 
       - name: Build replay tool
-        run: cmake --build build --target worldReplayTests --parallel 2
+        run: cmake --build build --target worldReplayTests fpMathAuditTests --parallel 2
 
       - name: Record one canonical input and replay on Ubuntu
         shell: bash
@@ -56,6 +56,7 @@ jobs:
           ./build/tests/worldReplayTests --record-input build/determinism-artifacts/shared.zin
           ./build/tests/worldReplayTests --replay build/determinism-artifacts/shared.zin build/determinism-artifacts/ubuntu.ztr
           ./build/tests/worldReplayTests --verify build/determinism-artifacts/ubuntu.ztr
+          ./build/tests/fpMathAuditTests --emit build/determinism-artifacts/fp-ubuntu.tsv
           cp ./build/tests/worldReplayTests build/determinism-artifacts/worldReplayTests
 
       - name: Upload shared recorded input
@@ -72,6 +73,7 @@ jobs:
           name: r1c-ubuntu-trace
           path: |
             build/determinism-artifacts/ubuntu.ztr
+            build/determinism-artifacts/fp-ubuntu.tsv
             build/determinism-artifacts/worldReplayTests
           if-no-files-found: error
           retention-days: 14
@@ -105,7 +107,7 @@ jobs:
           -DZONAI_BUILD_SANDBOX=OFF
 
       - name: Build replay tool
-        run: cmake --build build --config Debug --target worldReplayTests --parallel
+        run: cmake --build build --config Debug --target worldReplayTests fpMathAuditTests --parallel
 
       - name: Replay identical input on Windows
         shell: pwsh
@@ -115,12 +117,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\build\tests\Debug\worldReplayTests.exe --verify build/determinism-artifacts/windows.ztr
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build\tests\Debug\fpMathAuditTests.exe --emit build/determinism-artifacts/fp-windows.tsv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Windows replay
         uses: actions/upload-artifact@v4
         with:
           name: r1c-windows-trace
-          path: build/determinism-artifacts/windows.ztr
+          path: |
+            build/determinism-artifacts/windows.ztr
+            build/determinism-artifacts/fp-windows.tsv
           if-no-files-found: error
           retention-days: 14
 
@@ -158,11 +164,35 @@ jobs:
           cat comparison.txt
           exit "$result"
 
+      - name: Strict FP math fingerprint compare (fail at first differing operation)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee fp-comparison.txt
+          from itertools import zip_longest
+          from pathlib import Path
+          import sys
+
+          ubuntu = Path("artifacts/ubuntu/fp-ubuntu.tsv").read_text(encoding="utf-8").splitlines()
+          windows = Path("artifacts/windows/fp-windows.tsv").read_text(encoding="utf-8").splitlines()
+          for line, (u, w) in enumerate(zip_longest(ubuntu, windows), 1):
+              if u != w:
+                  key = (u or w or "missing").split("\t", 1)[0]
+                  print(f"FP divergence: line={line} operation={key}")
+                  print(f"Ubuntu:  {u if u is not None else '<missing>'}")
+                  print(f"Windows: {w if w is not None else '<missing>'}")
+                  sys.exit(1)
+
+          print(f"identical FP math fingerprints: {len(ubuntu)} operation samples")
+          PY
+
       - name: Preserve comparison evidence on success or failure
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: r1c-comparison-report
-          path: comparison.txt
+          path: |
+            comparison.txt
+            fp-comparison.txt
           if-no-files-found: warn
           retention-days: 14
