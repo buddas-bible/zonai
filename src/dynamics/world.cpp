@@ -16,6 +16,7 @@
 #include "collision/timeOfImpact2.h"
 #include "dynamics/bodyShape.h"
 #include "dynamics/constants.h"
+#include "math/deterministicMath.h"
 
 namespace zonai
 {
@@ -836,7 +837,7 @@ revoluteJointData world::getRevoluteJointData( jointId id ) const
     data.anchorB = TransformPoint( bodySims_[sim.bodyIdB].transform, sim.localAnchorB );
 
     const rot2 relativeRotation = Inverse( bodySims_[sim.bodyIdA].transform.rotation * rot2::FromRadians( sim.referenceAngle ) ) * bodySims_[sim.bodyIdB].transform.rotation;
-    data.currentAngle = std::atan2( relativeRotation.s, relativeRotation.c );
+    data.currentAngle = deterministicAtan2( relativeRotation.s, relativeRotation.c );
     data.force = sim.subStepTime > 0.0f ? sim.impulse / sim.subStepTime : vec2{};
     data.collideConnected = joints_[index].collideConnected;
     data.referenceAngle = sim.referenceAngle;
@@ -988,7 +989,7 @@ prismaticJointData world::getPrismaticJointData( jointId id ) const
     data.currentTranslation = Dot( data.axis, d );
     data.lateralError = Dot( perpendicular, d );
     const rot2 relativeRotation = Inverse( bodySims_[sim.bodyIdA].transform.rotation * rot2::FromRadians( sim.referenceAngle ) ) * bodySims_[sim.bodyIdB].transform.rotation;
-    data.currentAngle = std::atan2( relativeRotation.s, relativeRotation.c );
+    data.currentAngle = deterministicAtan2( relativeRotation.s, relativeRotation.c );
     const float axialImpulse = sim.springImpulse + sim.motorImpulse + sim.lowerImpulse - sim.upperImpulse;
     data.force = sim.subStepTime > 0.0f ? ( sim.impulse.x * perpendicular + axialImpulse * data.axis ) / sim.subStepTime : vec2{};
     data.torque = sim.subStepTime > 0.0f ? sim.impulse.y / sim.subStepTime : 0.0f;
@@ -1096,7 +1097,7 @@ weldJointData world::getWeldJointData( jointId id ) const
     data.anchorA = TransformPoint( bodySims_[sim.bodyIdA].transform, sim.localAnchorA );
     data.anchorB = TransformPoint( bodySims_[sim.bodyIdB].transform, sim.localAnchorB );
     const rot2 relativeRotation = Inverse( bodySims_[sim.bodyIdA].transform.rotation * rot2::FromRadians( sim.referenceAngle ) ) * bodySims_[sim.bodyIdB].transform.rotation;
-    data.currentAngle = std::atan2( relativeRotation.s, relativeRotation.c );
+    data.currentAngle = deterministicAtan2( relativeRotation.s, relativeRotation.c );
     data.referenceAngle = sim.referenceAngle;
     data.linearHertz = sim.linearHertz;
     data.linearDampingRatio = sim.linearDampingRatio;
@@ -2443,6 +2444,18 @@ void world::Step( float timeStep, int subStepCount )
                 jointSims_[index] ) );
         }
 
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+        // Observation happens between existing solver phases. The callback
+        // receives only const references; it cannot influence warm starting.
+        const auto traceJointStage = [&]( jointTraceStage2 stage, int index )
+        {
+            if( jointSubstepObserver_ != nullptr )
+                jointSubstepObserver_( *this, stage, index, jointConstraints,
+                    jointSubstepObserverContext_ );
+        };
+        traceJointStage( jointTraceStage2::prepare, -1 );
+#endif
+
         for( int subStepIndex = 0; subStepIndex < subStepCount; ++subStepIndex )
         {
             ( void )subStepIndex;
@@ -2489,6 +2502,10 @@ void world::Step( float timeStep, int subStepCount )
                 bodyState.angularVelocity = bodyState.angularVelocity * angularDamping + angularVelocityDelta;
             }
 
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+            traceJointStage( jointTraceStage2::integratedVelocity, subStepIndex );
+#endif
+
             // -------------------------------------------------
             // 4-2. Warm start
             // -------------------------------------------------
@@ -2500,6 +2517,10 @@ void world::Step( float timeStep, int subStepCount )
                 WarmStartContacts( constraints );
             }
 
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+            traceJointStage( jointTraceStage2::warmStart, subStepIndex );
+#endif
+
             // -------------------------------------------------
             // 4-3. Solve with penetration / speculative bias
             // -------------------------------------------------
@@ -2510,6 +2531,10 @@ void world::Step( float timeStep, int subStepCount )
                 solveJoints( std::span<jointConstraint>{ jointConstraints }.subspan( island.jointStart, island.jointCount ), true );
                 SolveContactConstraints( constraints, true );
             }
+
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+            traceJointStage( jointTraceStage2::solveBias, subStepIndex );
+#endif
 
             // -------------------------------------------------
             // 4-4. Integrate island position deltas
@@ -2555,6 +2580,10 @@ void world::Step( float timeStep, int subStepCount )
                 }
             }
 
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+            traceJointStage( jointTraceStage2::integratedPosition, subStepIndex );
+#endif
+
             // -------------------------------------------------
             // 4-5. Relax contact velocities
             // -------------------------------------------------
@@ -2565,6 +2594,9 @@ void world::Step( float timeStep, int subStepCount )
                 solveJoints( std::span<jointConstraint>{ jointConstraints }.subspan( island.jointStart, island.jointCount ), false );
                 SolveContactConstraints( constraints, false );
             }
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+            traceJointStage( jointTraceStage2::solveRelax, subStepIndex );
+#endif
         }
 
         // -----------------------------------------------------
@@ -2749,6 +2781,11 @@ void world::Step( float timeStep, int subStepCount )
         }
 
         StoreContactConstraintImpulses( contactConstraints );
+#if defined(ZONAI_TEST_SUBSTEP_TRACE)
+        // JointSim caches are committed once per complete Step, never
+        // between substeps. This is the only Store-stage observation.
+        traceJointStage( jointTraceStage2::store, subStepCount );
+#endif
 
         // Contact별 가장 큰 실제 접근 속도를 가진 접점 하나만 보고함.
         // normal impulse와 종전 접근 속도가 모두 있어야 하므로 resting/warm-only contact는 제외함.
