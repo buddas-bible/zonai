@@ -46,7 +46,7 @@ jobs:
           -DZONAI_BUILD_SANDBOX=OFF
 
       - name: Build replay tool
-        run: cmake --build build --target worldReplayTests fpMathAuditTests splineRailDeterminismTests standardJointDeterminismTests jointCacheSnapshotTests contactIslandDeterminismTests --parallel 2
+        run: cmake --build build --target worldReplayTests fpMathAuditTests splineRailDeterminismTests standardJointDeterminismTests jointCacheSnapshotTests contactIslandDeterminismTests contactLifecycleDeterminismTests --parallel 2
 
       - name: Record one canonical input and replay on Ubuntu
         shell: bash
@@ -61,6 +61,7 @@ jobs:
           ./build/tests/standardJointDeterminismTests --emit build/determinism-artifacts/joints-ubuntu.tsv
           ./build/tests/jointCacheSnapshotTests
           ./build/tests/contactIslandDeterminismTests --emit build/determinism-artifacts/contact-islands-ubuntu.tsv
+          ./build/tests/contactLifecycleDeterminismTests --emit build/determinism-artifacts/contact-lifecycle-ubuntu.tsv
           cp ./build/tests/worldReplayTests build/determinism-artifacts/worldReplayTests
 
       - name: Upload shared recorded input
@@ -81,6 +82,7 @@ jobs:
             build/determinism-artifacts/spline-ubuntu.tsv
             build/determinism-artifacts/joints-ubuntu.tsv
             build/determinism-artifacts/contact-islands-ubuntu.tsv
+            build/determinism-artifacts/contact-lifecycle-ubuntu.tsv
             build/determinism-artifacts/worldReplayTests
           if-no-files-found: error
           retention-days: 14
@@ -114,7 +116,7 @@ jobs:
           -DZONAI_BUILD_SANDBOX=OFF
 
       - name: Build replay tool
-        run: cmake --build build --config Debug --target worldReplayTests fpMathAuditTests splineRailDeterminismTests standardJointDeterminismTests jointCacheSnapshotTests contactIslandDeterminismTests --parallel
+        run: cmake --build build --config Debug --target worldReplayTests fpMathAuditTests splineRailDeterminismTests standardJointDeterminismTests jointCacheSnapshotTests contactIslandDeterminismTests contactLifecycleDeterminismTests --parallel
 
       - name: Replay identical input on Windows
         shell: pwsh
@@ -134,6 +136,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\build\tests\Debug\contactIslandDeterminismTests.exe --emit build/determinism-artifacts/contact-islands-windows.tsv
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build\tests\Debug\contactLifecycleDeterminismTests.exe --emit build/determinism-artifacts/contact-lifecycle-windows.tsv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Windows replay
         uses: actions/upload-artifact@v4
@@ -145,6 +149,7 @@ jobs:
             build/determinism-artifacts/spline-windows.tsv
             build/determinism-artifacts/joints-windows.tsv
             build/determinism-artifacts/contact-islands-windows.tsv
+            build/determinism-artifacts/contact-lifecycle-windows.tsv
           if-no-files-found: error
           retention-days: 14
 
@@ -181,6 +186,37 @@ jobs:
           set -e
           cat comparison.txt
           exit "$result"
+
+      - name: Strict Contact generation, recycle cache and Sleep/Wake comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee contact-lifecycle-comparison.txt
+          from itertools import zip_longest
+          from pathlib import Path
+          import sys
+
+          ubuntu = Path("artifacts/ubuntu/contact-lifecycle-ubuntu.tsv").read_text(encoding="utf-8").splitlines()
+          windows = Path("artifacts/windows/contact-lifecycle-windows.tsv").read_text(encoding="utf-8").splitlines()
+          first = None
+          mismatches = 0
+          for row, (a, b) in enumerate(zip_longest(ubuntu, windows), 1):
+              if a == b:
+                  continue
+              mismatches += 1
+              if first is None:
+                  first = (row, (a or b or "missing").split("\t", 1)[0], a, b)
+
+          if first is not None:
+              row, field, a, b = first
+              print(f"Contact lifecycle first divergence: row={row} field={field}")
+              print(f"Ubuntu:  {a if a is not None else '<missing>'}")
+              print(f"Windows: {b if b is not None else '<missing>'}")
+              print(f"Total Contact lifecycle mismatches: {mismatches}/{max(len(ubuntu), len(windows))}")
+              sys.exit(1)
+
+          print(f"identical Contact lifecycle and Sleep/Wake fields: {len(ubuntu)} rows")
+          PY
 
       - name: Strict Contact/Island order, impulses and cache compare
         shell: bash
@@ -338,5 +374,6 @@ jobs:
             spline-comparison.txt
             joints-comparison.txt
             contact-islands-comparison.txt
+            contact-lifecycle-comparison.txt
           if-no-files-found: warn
           retention-days: 14
