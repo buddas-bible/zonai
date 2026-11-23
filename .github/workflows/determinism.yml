@@ -1,0 +1,212 @@
+name: Cross-platform Physics Determinism (R1c)
+
+# Strict comparison for the current R1a/R1b public World/Body snapshot fixture.
+# This does not yet certify hidden Contact/Joint/Fluid authoritative state.
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "third_party/**"
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - ".github/workflows/determinism.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu-trace:
+    name: Ubuntu x64 / produce shared input and trace
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install CMake 4.2
+        run: python3 -m pip install "cmake>=4.2,<4.3"
+
+      - name: Record toolchain
+        run: |
+          cmake --version
+          g++ --version
+          uname -a
+
+      - name: Configure Ubuntu Debug
+        run: >
+          cmake
+          -S .
+          -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DZONAI_BUILD_TESTS=ON
+          -DZONAI_BUILD_SANDBOX=OFF
+
+      - name: Build replay tool
+        run: cmake --build build --target worldReplayTests fpMathAuditTests --parallel 2
+
+      - name: Record one canonical input and replay on Ubuntu
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/determinism-artifacts
+          ./build/tests/worldReplayTests --record-input build/determinism-artifacts/shared.zin
+          ./build/tests/worldReplayTests --replay build/determinism-artifacts/shared.zin build/determinism-artifacts/ubuntu.ztr
+          ./build/tests/worldReplayTests --verify build/determinism-artifacts/ubuntu.ztr
+          ./build/tests/fpMathAuditTests --emit build/determinism-artifacts/fp-ubuntu.tsv
+          cp ./build/tests/worldReplayTests build/determinism-artifacts/worldReplayTests
+
+      - name: Upload shared recorded input
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1c-shared-input
+          path: build/determinism-artifacts/shared.zin
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Ubuntu replay and comparer
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1c-ubuntu-trace
+          path: |
+            build/determinism-artifacts/ubuntu.ztr
+            build/determinism-artifacts/fp-ubuntu.tsv
+            build/determinism-artifacts/worldReplayTests
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-trace:
+    name: Windows x64 / replay exact Ubuntu-recorded input
+    needs: ubuntu-trace
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download shared input (do not regenerate)
+        uses: actions/download-artifact@v4
+        with:
+          name: r1c-shared-input
+          path: test-data
+
+      - name: Record toolchain
+        run: cmake --version
+
+      - name: Configure Windows Debug
+        run: >
+          cmake
+          -S .
+          -B build
+          -G "Visual Studio 18 2026"
+          -A x64
+          -DZONAI_BUILD_TESTS=ON
+          -DZONAI_BUILD_SANDBOX=OFF
+
+      - name: Build replay tool
+        run: cmake --build build --config Debug --target worldReplayTests fpMathAuditTests --parallel
+
+      - name: Replay identical input on Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "build/determinism-artifacts" | Out-Null
+          & .\build\tests\Debug\worldReplayTests.exe --replay test-data/shared.zin build/determinism-artifacts/windows.ztr
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build\tests\Debug\worldReplayTests.exe --verify build/determinism-artifacts/windows.ztr
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build\tests\Debug\fpMathAuditTests.exe --emit build/determinism-artifacts/fp-windows.tsv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Windows replay
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1c-windows-trace
+          path: |
+            build/determinism-artifacts/windows.ztr
+            build/determinism-artifacts/fp-windows.tsv
+          if-no-files-found: error
+          retention-days: 14
+
+  compare:
+    name: Strict Ubuntu / Windows bitwise Tick comparison
+    needs:
+      - ubuntu-trace
+      - windows-trace
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Download Ubuntu trace and comparer
+        uses: actions/download-artifact@v4
+        with:
+          name: r1c-ubuntu-trace
+          path: artifacts/ubuntu
+
+      - name: Download Windows trace
+        uses: actions/download-artifact@v4
+        with:
+          name: r1c-windows-trace
+          path: artifacts/windows
+
+      - name: Strict replay compare (fail at first difference)
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x artifacts/ubuntu/worldReplayTests
+          set +e
+          artifacts/ubuntu/worldReplayTests --compare \
+            artifacts/ubuntu/ubuntu.ztr \
+            artifacts/windows/windows.ztr > comparison.txt 2>&1
+          result=$?
+          set -e
+          cat comparison.txt
+          exit "$result"
+
+      - name: Strict FP math fingerprint compare (report all mismatch families)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee fp-comparison.txt
+          from collections import OrderedDict
+          from itertools import zip_longest
+          from pathlib import Path
+          import sys
+
+          ubuntu = Path("artifacts/ubuntu/fp-ubuntu.tsv").read_text(encoding="utf-8").splitlines()
+          windows = Path("artifacts/windows/fp-windows.tsv").read_text(encoding="utf-8").splitlines()
+          failures = []
+          families = OrderedDict()
+
+          for line, (u, w) in enumerate(zip_longest(ubuntu, windows), 1):
+              if u == w:
+                  continue
+              key = (u or w or "missing").split("\t", 1)[0]
+              family = key.rsplit(".", 1)[0]
+              failures.append((line, key, u, w))
+              families.setdefault(family, [0, key])[0] += 1
+
+          if failures:
+              line, key, u, w = failures[0]
+              print(f"FP divergence: line={line} operation={key}")
+              print(f"Ubuntu:  {u if u is not None else '<missing>'}")
+              print(f"Windows: {w if w is not None else '<missing>'}")
+              print(f"Total FP mismatches: {len(failures)}/{max(len(ubuntu), len(windows))}")
+              for family, (count, example) in families.items():
+                  print(f"  {family}: {count} mismatches (first: {example})")
+              sys.exit(1)
+
+          print(f"identical FP math fingerprints: {len(ubuntu)} operation samples")
+          PY
+
+      - name: Preserve comparison evidence on success or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1c-comparison-report
+          path: |
+            comparison.txt
+            fp-comparison.txt
+          if-no-files-found: warn
+          retention-days: 14
