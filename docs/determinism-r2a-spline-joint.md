@@ -50,7 +50,20 @@
 - 기존 R1c `worldReplayTests`의 **61개 스냅샷 비교**를 유지한다.
 - 기존 연구용 표준 라이브러리 `libm.hypot` 2건과 `libm.acos` 1건의 교차 플랫폼 **비트 차이를 숨기거나 허용 오차로 바꾸지 않는다**. 따라서 기존 strict FP 전체 Gate는 적색으로 남을 수 있으며, 이때 새 Spline Gate의 성공/실패를 **구별해서** 보고한다.
 
-## 5. 합격 조건과 후속 단계
+## 5. 실제 첫 교차 플랫폼 불일치 (2026-11-24 KST)
+
+첫 [R2a-4 CI #45227670332](https://github.com/buddas-bible/zonai/actions/runs/45227670332)에서 기존 R1c World Replay는 61/61 상태가 비트 동일했지만 **새로운 Spline Rail 검사에서 실제 Joint 물리 불일치를 처음 발견**했다.
+
+- 열린 레일의 물리 관측값은 두 플랫폼에서 일치한 반면, 닫힌 레일은 Tick 0·1의 관측 상태가 일치하다가 **Tick 2의 `body[2].angularVelocity`에서 처음 달라졌다**. Ubuntu/GCC `0x3fe74256`, Windows/MSVC `0x3fe74257` (1 ULP).
+- 동일 Tick 2의 Body `rotation.c/s`, `rail.tangent.x/y` 등 입력 관측값은 일치하지만 `rail.currentAngle`은 Ubuntu `0xbdd2c73e`, Windows `0xbdd2c74f`로 달랐고, 반력·토크와 이후 Body 회전으로 차이가 전파된다.
+- 읽기 전용 `atan2` 및 `remainder` 진단을 추가한 [재검증 #45228590416](https://github.com/buddas-bible/zonai/actions/runs/45228590416)에서는 **닫힌 레일 Tick 1의 동일 회전 입력에 대한 `std::atan2(float)` 출력이 이미 1 ULP 달랐음**을 확인했다: Ubuntu `0x3c216e45`, Windows `0x3c216e44`. 원시 입력은 `y=0x3c216d9a`, `x=0x3f7ffcd3`로 양쪽 동일했다.
+- 열린 레일에서도 Tick 4의 동일 접선 입력(`y=0xbd0ffd6b`, `x=0x3f7fd77e`)에 대한 `atan2` 진단 출력이 1 ULP 달랐다. 또한 닫힌 레일 Tick 2의 tangent `atan2` 차이를 확인했다.
+- 이는 **실제 라이브러리 `atan2`의 플랫폼별 차이를 입증**한다. 다만 최초 Body 각속도 차이의 원인이 오직 이 함수 한 곳인지, 숨겨진 Joint Impulse/서브스텝 중간값도 기여하는지는 아직 분리되지 않았다. 해결됐다고 선언하지 않는다.
+- 두 범주의 차이를 분리하기 위해 CI 비교기를 바꿔 **첫 권위 관측 상태 불일치와 첫 libm 진단 불일치를 모두 출력하고 엄격히 실패**하도록 했다. 정확한 3쌍의 입력/출력 비트도 FP 감사에 등록했다.
+
+**후속 R2a-5:** 현대 Box2D의 결정을 재검토하여 정확도·범위·비트 동일성을 검증한 공통 `atan2` 및 각도 정규화 경로를 별도의 작은 PR로 구현하고, 우선 Spline Rail Follow-Tangent의 두 `std::atan2` 호출에 제한하여 적용한다. 이후 Warm Start/내부 Solver 캐시와 Substep 차이를 추가 스냅샷으로 검사한다. `std::remainder` 등 다른 libm 함수는 먼저 동일 입력의 실제 차이를 확인한다.
+
+## 6. 합격 조건과 후속 단계
 
 1. Windows/Ubuntu Debug의 전체 CTest 통과(기존 수치 허용 오차 불변).
 2. 기존 Windows Release 선택적 회귀·정보성 성능 샘플 통과.
