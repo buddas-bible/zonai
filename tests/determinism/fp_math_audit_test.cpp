@@ -102,6 +102,8 @@ void emitFingerprint( std::FILE* stream )
         outputFloat( stream, "rot2.sin", i, rotation.s );
         outputFloat( stream, "rotated.x", i, rotated.x );
         outputFloat( stream, "rotated.y", i, rotated.y );
+        outputFloat( stream, "zonai.atan2f", i,
+            deterministicAtan2( angle, 0.75f ) );
         outputFloat( stream, "libm.atan2f", i, std::atan2( angle, 0.75f ) );
         outputDouble( stream, "libm.atan2", i,
             std::atan2( static_cast<double>( angle ), 0.75 ) );
@@ -130,7 +132,25 @@ void emitFingerprint( std::FILE* stream )
     {
         const float y = std::bit_cast<float>( railAtan2InputBits[i][0] );
         const float x = std::bit_cast<float>( railAtan2InputBits[i][1] );
+        outputFloat( stream, "zonai.railAtan2", i,
+            deterministicAtan2( y, x ) );
         outputFloat( stream, "libm.railAtan2", i, std::atan2( y, x ) );
+    }
+
+    // Broad raw-bit sample, not only the three known libm failures.
+    std::uint64_t atan2Seed = 0x6d6174682d617432ull;
+    const auto nextAtanBits = [&]() -> std::uint32_t
+    {
+        atan2Seed ^= atan2Seed >> 12;
+        atan2Seed ^= atan2Seed << 25;
+        atan2Seed ^= atan2Seed >> 27;
+        return static_cast<std::uint32_t>( atan2Seed * 2685821657736338717ull );
+    };
+    for( std::size_t i = 0; i < 256; ++i )
+    {
+        const float y = std::bit_cast<float>( nextAtanBits() );
+        const float x = std::bit_cast<float>( nextAtanBits() );
+        outputFloat( stream, "zonai.atan2Wide", i, deterministicAtan2( y, x ) );
     }
 
     const std::array<float, 5> rangeInputs{ 0.0f, 0.125f, 0.25f, 0.5f, 0.875f };
