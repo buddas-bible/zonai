@@ -1293,6 +1293,40 @@ void auditCapsuleTimeCoherentPath( const fluidField2& field,
         if( iterations == 80 ) after80 = after;
         previousResidual = pressureRms;
     }
+    // Independent manufactured zero-OPEN-MAC reference. This is not the
+    // real preceding velocity field: it isolates the moving-volume source
+    // from wind/advection-driven divergence on this identical geometry.
+    fluidField2 zeroMac = frozen;
+    zeroMac.setPrePressureSnapshotObserver( {} );
+    if( !zeroMac.setFrozenMacVelocityForAudit(
+        []( vec2 ) { return vec2{}; } ) )
+        throw std::runtime_error(
+            "original near-wall frozen zero-open-MAC reference rejected" );
+    const double zeroBefore =
+        *zeroMac.getUFaceVelocityForAudit( faceX, faceY );
+    const auto feedback = zeroMac.replayFrozenCutCellPressure( 80 );
+    if( !feedback || feedback->size() != 1 )
+        throw std::runtime_error(
+            "original near-wall frozen zero-open-MAC replay failed" );
+    const double zeroAfter =
+        *zeroMac.getUFaceVelocityForAudit( faceX, faceY );
+    const double zeroJump =
+        static_cast<double>( zeroMac.getCellPressureForVisualization(
+            faceX, faceY ) ) -
+        zeroMac.getCellPressureForVisualization( faceX - 1, faceY );
+    const double zeroPredicted = -( dt / h ) * zeroJump;
+    const auto zeroVolume = zeroMac.getCutCellVolumeSummary( dt );
+    if( !zeroVolume.valid || !std::isfinite( zeroAfter ) ||
+        !std::isfinite( zeroJump ) ||
+        std::abs( zeroAfter - zeroBefore - zeroPredicted ) > 1.0e-4 )
+        throw std::runtime_error(
+            "original near-wall zero-open-MAC pressure gradient invalid" );
+    std::printf( "capsule_unaligned_frozen_zero_mac,"
+        "%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
+        opening, zeroBefore, zeroAfter, zeroJump,
+        zeroMac.getCutCellPressure().pressureResidual,
+        zeroVolume.maxAbsPressureResidualVolume,
+        after80 - before );
     return after80;
 }
 
