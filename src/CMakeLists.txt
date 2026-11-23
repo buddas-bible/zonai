@@ -33,7 +33,15 @@ target_compile_features(zonai
         cxx_std_20
 )
 
+# Deterministic physics requires identical FP contraction/reassociation policy
+# across the engine and consumers compiling math in zonai's public headers.
+# This is not by itself a cross-platform determinism guarantee: libm routines,
+# FP environment, traversal order and CPU behavior are audited separately.
 if(MSVC)
-    # 상위 프로젝트의 consumer도 zonai 헤더의 한글 주석을 UTF-8로 읽게 함.
-    target_compile_options(zonai PUBLIC /utf-8)
+    # Since VS 2022, /fp:precise leaves fp_contract off by default.
+    # Do not append /fp:contract or /fp:fast from consumer targets.
+    # Preserve UTF-8 for public headers with Korean comments.
+    target_compile_options(zonai PUBLIC /utf-8 /fp:precise)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
+    target_compile_options(zonai PUBLIC -fno-fast-math -ffp-contract=off)
 endif()
