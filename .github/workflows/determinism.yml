@@ -177,7 +177,7 @@ jobs:
           cat comparison.txt
           exit "$result"
 
-      - name: Strict standard Joint Tick physics and persistent cache compare
+      - name: Strict standard Joint transient substep and Tick cache compare
         shell: bash
         run: |
           set -euo pipefail
@@ -209,7 +209,7 @@ jobs:
           print(f"identical standard Joint Tick fields: {len(ubuntu)} rows")
           PY
 
-      - name: Strict Spline Rail Joint Tick state, cache and libm diagnostic compare
+      - name: Strict Spline Rail transient substep, Tick cache and libm compare
         shell: bash
         run: |
           set -euo pipefail
