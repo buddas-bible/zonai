@@ -888,3 +888,8 @@ add_test(NAME worldReplayTests COMMAND worldReplayTests)
 add_executable(fpMathAuditTests determinism/fp_math_audit_test.cpp)
 target_link_libraries(fpMathAuditTests PRIVATE zonai::zonai)
 add_test(NAME fpMathAuditTests COMMAND fpMathAuditTests)
+
+# R2a-2: range-safe deterministic binary64 magnitude and precision regression.
+add_executable(deterministicHypotTests math/deterministic_hypot_test.cpp)
+target_link_libraries(deterministicHypotTests PRIVATE zonai::zonai)
+add_test(NAME deterministicHypotTests COMMAND deterministicHypotTests)
