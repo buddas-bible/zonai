@@ -107,6 +107,8 @@ void emitFingerprint( std::FILE* stream )
             std::atan2( static_cast<double>( angle ), 0.75 ) );
         outputDouble( stream, "zonai.hypot", i,
             deterministicHypot( static_cast<double>( angle ), 0.75 ) );
+        outputDouble( stream, "zonai.hypotUpper", i,
+            deterministicHypotUpperBound( static_cast<double>( angle ), 0.75 ) );
         // Keep the known platform-dependent libm sample as a research
         // diagnostic; R2a's strict gate must not hide existing differences.
         outputDouble( stream, "libm.hypot", i,
