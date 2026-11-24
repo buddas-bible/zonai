@@ -2303,9 +2303,10 @@ struct fluidStateTraceProbe2
     // geometry, not the predicted geometry. Do not project or commit either.
     static void captureCorrectedEndpoint( const fluidField2& field,
         const std::vector<float>& startFraction, const continuationPressure& candidate,
-        float timeStep, std::string& trace, int index )
+        float timeStep, std::string& trace, int index, bool persistent = false )
     {
-        const std::string key = "forwardCorrectedEndpoint.interval" + std::to_string( index );
+        const std::string key = std::string( persistent ? "forwardPersistentTransfer.interval" :
+            "forwardCorrectedEndpoint.interval" ) + std::to_string( index );
         const double h = field.cellSize_, dt = timeStep, area = h * h;
         const auto n = startFraction.size();
         std::vector<double> velocityVolume( n ), fluxVolume( n );
@@ -2392,12 +2393,16 @@ struct fluidStateTraceProbe2
     // fixed. The blocked fraction times actual solid velocity is the solid
     // flux; do not substitute the previous interval's volume difference.
     static void captureInstantaneousEndpoint( const fluidField2& field,
-        const continuationPressure& candidate, std::string& trace, int index )
+        const continuationPressure& candidate, std::string& trace, int index,
+        std::vector<float>* committedU = nullptr, std::vector<float>* committedV = nullptr )
     {
-        const std::string key = "forwardInstantaneousEndpoint.interval" + std::to_string( index );
+        if( ( committedU == nullptr ) != ( committedV == nullptr ) )
+            throw std::runtime_error( "R4v incomplete endpoint output" );
+        const std::string key = std::string( committedU ? "forwardPersistentEndpoint.interval" :
+            "forwardInstantaneousEndpoint.interval" ) + std::to_string( index );
         const std::size_t n = field.cellFluidFraction_.size();
         const double h = field.cellSize_;
-        struct endpointEdge { int first, second; double aperture, velocity, matched; };
+        struct endpointEdge { int first, second; double aperture, velocity, matched; bool isU; int face; };
         std::vector<endpointEdge> edges;
         std::vector<int> parent( n, -1 ), count( n );
         std::vector<double> solid( n ), copied( n ), matched( n ), diagonal( n ), sums( n );
@@ -2437,7 +2442,7 @@ struct fluidStateTraceProbe2
                 throw std::runtime_error( key + " invalid endpoint seed" );
             const int l = root( left ), r = root( right );
             if( l != r ) parent[std::max( l, r )] = std::min( l, r );
-            edges.push_back( { left, right, a, velocity, fluxMatched } );
+            edges.push_back( { left, right, a, velocity, fluxMatched, isU, f } );
             diagonal[left] += a; diagonal[right] += a;
             copied[left] += a * velocity; copied[right] -= a * velocity;
             matched[left] += a * fluxMatched; matched[right] -= a * fluxMatched;
@@ -2496,6 +2501,12 @@ struct fluidStateTraceProbe2
         // invented zero-velocity boundary or an accepted projection.
         const bool supported = unsupported == 0;
         out( ".supported", static_cast<int>( supported ) );
+        if( committedU )
+        {
+            if( !supported ) throw std::runtime_error( key + " cannot commit unsupported endpoint" );
+            committedU->assign( field.u_.size(), 0.0f );
+            committedV->assign( field.v_.size(), 0.0f );
+        }
         for( bool preserveFlux : { false, true } )
         {
             const auto& before = preserveFlux ? matched : copied;
@@ -2555,6 +2566,8 @@ struct fluidStateTraceProbe2
                 const double correction = p[e.first] - p[e.second];
                 // Test the velocity representation that can actually be stored.
                 const float velocity = static_cast<float>( seed + correction );
+                if( committedU && !preserveFlux )
+                    ( e.isU ? *committedU : *committedV )[e.face] = velocity;
                 const double flux = e.aperture * velocity;
                 after[e.first] += flux; after[e.second] -= flux;
                 seedPeak = std::max( seedPeak, std::abs( seed ) );
@@ -2583,6 +2596,13 @@ struct fluidStateTraceProbe2
         }
     }
 
+    struct forwardEndpointState
+    {
+        fluidField2 field;
+        std::vector<fluidShapeObstacle2> poses;
+        std::vector<fluidObstacleForce2> feedback;
+    };
+
     // R4k: independent forward pressure trial at a sampled R4j start.
     // Freeze the incoming MAC trial velocity: no forward advection or
     // persistent candidate commit is implied by this geometry-only test.
@@ -2592,7 +2612,8 @@ struct fluidStateTraceProbe2
         int index, double responseScale = 1.0, int correctionBudget = 3, int samples = 64,
         bool adaptiveEndpoint = false, forwardTiming* timing = nullptr,
         double relativeSquaredTolerance = 1.0e-16, bool warmStart = false,
-        std::vector<float>* forwardPressureHistory = nullptr, bool auditEndpoint = false )
+        std::vector<float>* forwardPressureHistory = nullptr, bool auditEndpoint = false,
+        forwardEndpointState* committed = nullptr )
     {
         const auto totalStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
         using namespace sandbox;
@@ -2612,7 +2633,10 @@ struct fluidStateTraceProbe2
         if( forwardPressureHistory && !warmStart )
             throw std::runtime_error( "R4s pressure history requires warm start" );
         const bool usedPreviousForward = forwardPressureHistory && !forwardPressureHistory->empty();
-        const std::string name = forwardPressureHistory ? "forwardPressureHistory" :
+        if( committed && ( !auditEndpoint || !warmStart || forwardPressureHistory ) )
+            throw std::runtime_error( "R4v invalid endpoint commit configuration" );
+        const std::string name = committed ? "forwardPersistent" :
+            forwardPressureHistory ? "forwardPressureHistory" :
             warmStart ? "forwardWarmStart" : experimentalResidual ?
             ( relativeSquaredTolerance == 1.0e-12 ? "forwardResidual12" : "forwardResidual10" ) :
             adaptiveEndpoint ? "forwardAdaptiveEndpoint" :
@@ -2701,8 +2725,19 @@ struct fluidStateTraceProbe2
         rebuild( corrected );
         if( auditEndpoint )
         {
-            captureCorrectedEndpoint( forward, startFraction, candidate, dt, trace, index );
-            captureInstantaneousEndpoint( forward, candidate, trace, index );
+            captureCorrectedEndpoint( forward, startFraction, candidate, dt, trace, index, committed != nullptr );
+            std::vector<float> endpointU, endpointV;
+            captureInstantaneousEndpoint( forward, candidate, trace, index,
+                committed ? &endpointU : nullptr, committed ? &endpointV : nullptr );
+            if( committed )
+            {
+                forward.u_ = std::move( endpointU ); forward.v_ = std::move( endpointV );
+                forward.pressure_ = candidate.pressure;
+                forward.applyCutCellBoundaries();
+                forward.previousObstacles_ = corrected;
+                forward.frozenPressureObstacles_ = corrected;
+                forward.previousCellFluidFraction_ = forward.cellFluidFraction_;
+            }
         }
 
         const std::size_t n = startFraction.size();
@@ -2834,6 +2869,27 @@ struct fluidStateTraceProbe2
             // Carry only the binary32 pressure seed, not the candidate World
             // or field. This is an independent matched-state experiment.
             *forwardPressureHistory = std::move( candidate.pressure );
+        }
+        if( committed )
+        {
+            if( unsupportedCells != 0 ) throw std::runtime_error( key + " unsupported corrected volume" );
+            appendVector( trace, key + ".endpointU", forward.u_ );
+            appendVector( trace, key + ".endpointV", forward.v_ );
+            appendVector( trace, key + ".endpointPressure", forward.pressure_ );
+            appendVector( trace, key + ".endpointFraction", forward.cellFluidFraction_ );
+            for( std::size_t j = 0; j < corrected.size(); ++j )
+            {
+                const auto k = ".body[" + std::to_string( j ) + "]";
+                out( k + ".position.x", corrected[j].transform.position.x );
+                out( k + ".position.y", corrected[j].transform.position.y );
+                out( k + ".rotation.c", corrected[j].transform.rotation.c );
+                out( k + ".rotation.s", corrected[j].transform.rotation.s );
+                out( k + ".velocity.x", corrected[j].linearVelocity.x );
+                out( k + ".velocity.y", corrected[j].linearVelocity.y );
+            }
+            committed->field = std::move( forward );
+            committed->poses = corrected;
+            committed->feedback = candidate.feedback;
         }
         if( timing ) timing->totalMs = elapsedMs( totalStart, benchmarkClock::now() );
     }
@@ -3085,6 +3141,73 @@ struct fluidStateTraceProbe2
         appendVector( trace, key + ".pressure", field.pressure_ );
         appendVector( trace, key + ".divergence", field.divergence_ );
         appendVector( trace, key + ".volumeRate", field.cutCellVolumeRate_ );
+    }
+
+    // R4v: carry the reconstructed endpoint MAC and free-body poses
+    // forward, rather than sampling a separate lagged trajectory each time.
+    static void captureForwardContinuation( const fluidField2& initial,
+        const fluidField2& initialProjection, std::span<const fluidObstacleForce2> initialLoad,
+        std::string& trace )
+    {
+        constexpr int first = 43, intervals = 4;
+        const float dt = initial.frozenPressureTimeStep_;
+        forwardEndpointState state{ initial, initial.frozenPressureObstacles_,
+            std::vector<fluidObstacleForce2>( initialLoad.begin(), initialLoad.end() ) };
+        if( state.poses.size() != 3 || initialLoad.size() != 3 || dt <= 0.0f ||
+            initial.width_ != 48 || initial.height_ != 28 )
+            throw std::runtime_error( "R4v invalid initial fixture" );
+        state.field.setPrePressureSnapshotObserver( {} );
+        setStageObserver( state.field, {} );
+        state.field.tracerEnabled_ = false;
+        float windTime = 0.0f;
+        for( int i = 0; i <= first; ++i ) windTime += dt;
+        for( int step = 0; step < intervals; ++step )
+        {
+            fluidField2 pre = state.field;
+            if( step > 0 )
+            {
+                windTime += dt;
+                const float sourceX = pre.getOrigin().x +
+                    std::min( 2.5f, 0.25f * pre.getWidth() * pre.getCellSize() );
+                pre.addVelocity( { sourceX, 0.0f }, { 8.0f * dt,
+                    0.5f * 8.0f * dt * rot2::FromRadians( 1.7f * windTime ).s }, 1.7f );
+                // Advect on the actual start geometry, before the forward
+                // pressure/geometry trial. No discarded pressure solve.
+                pre.applyCutCellBoundaries();
+                if( pre.conservativeAdvectionEnabled_ )
+                    pre.advectConservative( dt );
+                else
+                {
+                    std::fill( pre.nextU_.begin(), pre.nextU_.end(), 0.0f );
+                    std::fill( pre.nextV_.begin(), pre.nextV_.end(), 0.0f );
+                    for( int y = 0; y < pre.height_; ++y )
+                        for( int x = 1; x < pre.width_; ++x )
+                        {
+                            const vec2 point = pre.origin_ + pre.cellSize_ *
+                                vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
+                            const vec2 previous = point - dt * pre.sampleFrom( pre.u_, pre.v_, point );
+                            pre.nextU_[pre.uIndex( x, y )] = pre.sampleFrom( pre.u_, pre.v_, previous ).x;
+                        }
+                    for( int y = 1; y < pre.height_; ++y )
+                        for( int x = 0; x < pre.width_; ++x )
+                        {
+                            const vec2 point = pre.origin_ + pre.cellSize_ *
+                                vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
+                            const vec2 previous = point - dt * pre.sampleFrom( pre.u_, pre.v_, point );
+                            pre.nextV_[pre.vIndex( x, y )] = pre.sampleFrom( pre.u_, pre.v_, previous ).y;
+                        }
+                    pre.u_.swap( pre.nextU_ ); pre.v_.swap( pre.nextV_ );
+                }
+                pre.applyCutCellBoundaries();
+            }
+            // Keep reference/seed and start poses independent of the output
+            // object so an accepted commit cannot alias its input.
+            const fluidField2& seed = step == 0 ? initialProjection : state.field;
+            const auto poses = state.poses;
+            const auto load = state.feedback;
+            captureForwardPredictor( pre, seed, poses, load, trace, first + step,
+                0.75, 0, 16, true, nullptr, 1.0e-10, true, nullptr, true, &state );
+        }
     }
 
     static void captureTargetV( const fluidField2& field, std::string& trace,
@@ -4434,6 +4557,7 @@ std::string runNearClosedFaceScene()
     };
     cadenceReplay( *frozen, baseline, *a, "cadence43", true, 0 );
     probe::captureLaggedContinuation( *frozen, baseline, trace );
+    probe::captureForwardContinuation( *frozen, baseline, *a, trace );
     // Adjacent actual intervals exercise the transition before/after the spike.
     // They are separate frozen solves, not a candidate-driven trajectory.
     for( std::size_t i = 0; i < adjacent.size(); ++i )
