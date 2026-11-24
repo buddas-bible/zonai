@@ -435,6 +435,7 @@ jobs:
               "forwardBudgetCost": 36,
               "forwardQuadrature16": 172, "forwardQuadrature32": 172,
               "forwardQuadratureCost": 36,
+              "forwardAdaptiveEndpoint": 188,
           }
           topology = totals.get("topologyQuadrature", 0)
           # 49 second-resolution output rows, six quadrature headers,
