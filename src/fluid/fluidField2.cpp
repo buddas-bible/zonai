@@ -145,7 +145,7 @@ struct analyticCircleInterval
 };
 
 // 월드 축에 평행한 MAC face와 원의 교차 구간 [min,max]를 정확히 잘라냄.
-analyticCircleInterval ClipCircleFace( const analyticFluidCircle& circle,
+analyticCircleInterval ClipCircleFace( const auto& circle,
     bool vertical, double coordinate, double low, double high )
 {
     const double normal = vertical ? circle.center.x : circle.center.y;
@@ -254,15 +254,15 @@ bool TryGetAnalyticPolygon( std::span<const fluidShapeObstacle2> obstacles, anal
 
 // 공유 MAC face의 line segment를 polygon의 CCW half-planes에 clip.
 // 결과 길이/중심점은 면적 개방율, 강체 표면 속도, Schur 힘과 swept flux가 공유한다.
-analyticCircleInterval ClipPolygonFace( const analyticFluidPolygon& polygon,
+analyticCircleInterval ClipPolygonFace( const auto& polygon,
     bool vertical, double coordinate, double low, double high )
 {
     double enter = low;
     double exit = high;
     for( int i = 0; i < polygon.count; ++i )
     {
-        const vec2 a = polygon.vertices[i];
-        const vec2 b = polygon.vertices[( i + 1 ) % polygon.count];
+        const auto a = polygon.vertices[i];
+        const auto b = polygon.vertices[( i + 1 ) % polygon.count];
         const double ex = static_cast<double>( b.x ) - a.x;
         const double ey = static_cast<double>( b.y ) - a.y;
         // cross(edge, P(t)-a) >= 0, t is tangent position.
@@ -291,7 +291,7 @@ struct analyticPoint2
 
 // Sutherland-Hodgman 4 half-plane rectangle clipping. Convex input has
 // <=MAX_POLYGON_VERTICES+4 clipped vertices; no per-cell heap allocations.
-double ConvexPolygonRectangleArea( const analyticFluidPolygon& polygon,
+double ConvexPolygonRectangleArea( const auto& polygon,
     double x0, double y0, double x1, double y1 )
 {
     constexpr std::size_t capacity = MAX_POLYGON_VERTICES + 8;
@@ -378,10 +378,46 @@ bool TryGetAnalyticCapsule( std::span<const fluidShapeObstacle2> obstacles, anal
     return true;
 }
 
-analyticCircleInterval ClipCapsuleCapFace( const analyticFluidCapsule& capsule,
+// R4ac: keep derived capsule geometry in double precision through the
+// existing clipping and area integration. World poses remain binary32.
+struct preciseAnalyticCapsule
+{
+    struct circle { analyticPoint2 center{}; double radius = 0.0; };
+    struct polygon { std::array<analyticPoint2, 4> vertices{}; int count = 4; };
+    circle first{}, last{};
+    polygon core{};
+    analyticPoint2 axis{};
+};
+
+bool TryGetPreciseAnalyticCapsule( const fluidShapeObstacle2& obstacle, preciseAnalyticCapsule& result )
+{
+    const auto* shape = std::get_if<capsule2>( &obstacle.geometry );
+    if( !shape || !IsValidFluidObstacle( obstacle ) || !std::isfinite( shape->radius ) ||
+        shape->radius <= 0.0f || !IsFinite( shape->center1 ) || !IsFinite( shape->center2 ) ) return false;
+    const double c = obstacle.transform.rotation.c, s = obstacle.transform.rotation.s;
+    const auto transform = [&]( vec2 p ) -> analyticPoint2
+    {
+        return { static_cast<double>( obstacle.transform.position.x ) + ( c * p.x - s * p.y ),
+            static_cast<double>( obstacle.transform.position.y ) + ( s * p.x + c * p.y ) };
+    };
+    const auto a = transform( shape->center1 ), b = transform( shape->center2 );
+    const double dx = b.x - a.x, dy = b.y - a.y;
+    const double length = std::sqrt( dx * dx + dy * dy );
+    if( !std::isfinite( length ) || length <= 1.0e-5 ) return false;
+    const double r = shape->radius;
+    result = {};
+    result.first = { a, r }; result.last = { b, r };
+    result.axis = { dx / length, dy / length };
+    const double rx = -r * result.axis.y, ry = r * result.axis.x;
+    result.core.vertices = {{ { a.x - rx, a.y - ry }, { b.x - rx, b.y - ry },
+        { b.x + rx, b.y + ry }, { a.x + rx, a.y + ry } }};
+    return true;
+}
+
+analyticCircleInterval ClipCapsuleCapFace( const auto& capsule,
     bool firstCap, bool vertical, double coordinate, double low, double high )
 {
-    const analyticFluidCircle& circle = firstCap ? capsule.first : capsule.last;
+    const auto& circle = firstCap ? capsule.first : capsule.last;
     const auto whole = ClipCircleFace( circle, vertical, coordinate, low, high );
     if( whole.length <= 0.0 ) return {};
     double enter = whole.midpoint - 0.5 * whole.length;
@@ -408,7 +444,7 @@ analyticCircleInterval ClipCapsuleCapFace( const analyticFluidCapsule& capsule,
         : analyticCircleInterval{};
 }
 
-analyticCircleInterval ClipCapsuleFace( const analyticFluidCapsule& capsule,
+analyticCircleInterval ClipCapsuleFace( const auto& capsule,
     bool vertical, double coordinate, double low, double high )
 {
     // 대부분의 MAC face는 Capsule AABB 외부다. 정확한 클리핑 이전에 제외.
@@ -440,7 +476,7 @@ analyticCircleInterval ClipCapsuleFace( const analyticFluidCapsule& capsule,
 // CCW polygon과 원판의 정확한 교차 면적: 각 선분을 원 교차점에서
 // 분할하고 내부는 signed triangle, 외부는 signed circular sector로 적분.
 // 참조: KACTL CirclePolygonIntersection (CC0).
-double CircleClippedPolygonArea( analyticFluidCircle circle,
+double CircleClippedPolygonArea( auto circle,
     const std::array<analyticPoint2, 8>& vertices, int count )
 {
     if( count < 3 ) return 0.0;
@@ -489,14 +525,14 @@ double CircleClippedPolygonArea( analyticFluidCircle circle,
 }
 
 // Cell을 Capsule 축의 양쪽 끝 반평면으로 잘라 독립적인 반원 영역을 얻는다.
-double CapsuleCapRectangleArea( const analyticFluidCapsule& capsule, bool firstCap,
+double CapsuleCapRectangleArea( const auto& capsule, bool firstCap,
     double x0, double y0, double x1, double y1 )
 {
     std::array<analyticPoint2, 8> current{{
         { x0, y0 }, { x1, y0 }, { x1, y1 }, { x0, y1 }
     }};
     std::array<analyticPoint2, 8> next{};
-    const analyticFluidCircle& circle = firstCap ? capsule.first : capsule.last;
+    const auto& circle = firstCap ? capsule.first : capsule.last;
     const double direction = firstCap ? -1.0 : 1.0;
     const auto signedDistance = [&]( analyticPoint2 p )
     {
@@ -528,7 +564,7 @@ double CapsuleCapRectangleArea( const analyticFluidCapsule& capsule, bool firstC
     return CircleClippedPolygonArea( circle, current, count );
 }
 
-double CapsuleRectangleArea( const analyticFluidCapsule& capsule,
+double CapsuleRectangleArea( const auto& capsule,
     double x0, double y0, double x1, double y1 )
 {
     const double r = capsule.first.radius;
@@ -860,7 +896,7 @@ bool AreDisjointFluidShapes( const fluidShapeObstacle2& first,
 struct analyticDisjointShape2
 {
     std::variant<analyticFluidCircle, analyticFluidPolygon,
-        analyticFluidCapsule, analyticFluidRoundedPolygon> geometry{};
+        analyticFluidCapsule, analyticFluidRoundedPolygon, preciseAnalyticCapsule> geometry{};
     aabb2 bounds{};
     bool occluded = false;
     bool partialCircleOverlap = false;
@@ -913,7 +949,7 @@ bool HasPartialCircleOverlap( const analyticDisjointShape2& first,
 }
 
 std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
-    std::span<const fluidShapeObstacle2> obstacles )
+    std::span<const fluidShapeObstacle2> obstacles, bool preciseCapsule = false )
 {
     if( obstacles.size() < 2 ) return {};
     std::vector<analyticDisjointShape2> shapes;
@@ -928,6 +964,12 @@ std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
         analyticFluidPolygon polygon{};
         analyticFluidRoundedPolygon rounded{};
         if( TryGetAnalyticCircle( single, circle ) ) analytic.geometry = circle;
+        else if( preciseCapsule && std::holds_alternative<capsule2>( obstacle.geometry ) )
+        {
+            preciseAnalyticCapsule precise{};
+            if( !TryGetPreciseAnalyticCapsule( obstacle, precise ) ) return {};
+            analytic.geometry = precise;
+        }
         else if( TryGetAnalyticCapsule( single, capsule ) ) analytic.geometry = capsule;
         else if( TryGetAnalyticPolygon( single, polygon ) ) analytic.geometry = polygon;
         else if( TryGetAnalyticRoundedPolygon( single, rounded ) ) analytic.geometry = rounded;
@@ -935,6 +977,24 @@ std::vector<analyticDisjointShape2> BuildDisjointAnalyticShapes(
 
         analytic.bounds = ComputeShapeAABB( obstacle.geometry, obstacle.transform );
         if( !IsValidAABB( analytic.bounds ) ) return {};
+        if( const auto* precise = std::get_if<preciseAnalyticCapsule>( &analytic.geometry ) )
+        {
+            const double r = precise->first.radius;
+            // The float broad-phase bound may round inside the precise
+            // clipping geometry. Outward-round the precise capsule bounds.
+            const auto lower = []( double v ) { return std::nextafter( static_cast<float>( v ),
+                -std::numeric_limits<float>::infinity() ); };
+            const auto upper = []( double v ) { return std::nextafter( static_cast<float>( v ),
+                std::numeric_limits<float>::infinity() ); };
+            analytic.bounds.min.x = std::min( analytic.bounds.min.x,
+                lower( std::min( precise->first.center.x, precise->last.center.x ) - r ) );
+            analytic.bounds.min.y = std::min( analytic.bounds.min.y,
+                lower( std::min( precise->first.center.y, precise->last.center.y ) - r ) );
+            analytic.bounds.max.x = std::max( analytic.bounds.max.x,
+                upper( std::max( precise->first.center.x, precise->last.center.x ) + r ) );
+            analytic.bounds.max.y = std::max( analytic.bounds.max.y,
+                upper( std::max( precise->first.center.y, precise->last.center.y ) + r ) );
+        }
         // 실제 분리된 Shape는 원래대로 합산한다. 두 원의 엄격한 포함 관계에
         // 한해서만 내부 원의 모든 면적/face 반력을 무시한다.
         for( std::size_t i = 0; i < shapes.size(); ++i )
@@ -974,7 +1034,7 @@ double DisjointShapeRectangleArea( const analyticDisjointShape2& shape,
             return CircleRectangleArea( geometry, x0, y0, x1, y1 );
         else if constexpr( std::is_same_v<T, analyticFluidPolygon> )
             return ConvexPolygonRectangleArea( geometry, x0, y0, x1, y1 );
-        else if constexpr( std::is_same_v<T, analyticFluidCapsule> )
+        else if constexpr( std::is_same_v<T, analyticFluidCapsule> || std::is_same_v<T, preciseAnalyticCapsule> )
             return CapsuleRectangleArea( geometry, x0, y0, x1, y1 );
         else return RoundedPolygonRectangleArea( geometry, x0, y0, x1, y1 );
     }, shape.geometry );
@@ -996,7 +1056,7 @@ analyticCircleInterval ClipDisjointShapeFace( const analyticDisjointShape2& shap
             return ClipCircleFace( geometry, vertical, coordinate, low, high );
         else if constexpr( std::is_same_v<T, analyticFluidPolygon> )
             return ClipPolygonFace( geometry, vertical, coordinate, low, high );
-        else if constexpr( std::is_same_v<T, analyticFluidCapsule> )
+        else if constexpr( std::is_same_v<T, analyticFluidCapsule> || std::is_same_v<T, preciseAnalyticCapsule> )
             return ClipCapsuleFace( geometry, vertical, coordinate, low, high );
         else return ClipRoundedPolygonFace( geometry, vertical, coordinate, low, high );
     }, shape.geometry );
@@ -1536,7 +1596,7 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
     // Rebuild for this World snapshot. Swept intermediate snapshots differ.
     analyticDisjointCache_.reset();
     auto disjointShapes = disjointAnalyticCutCellEnabled_
-        ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+        ? BuildDisjointAnalyticShapes( obstacles, preciseDisjointCapsuleEnabled_ ) : std::vector<analyticDisjointShape2>{};
     const bool disjointGeometry = !disjointShapes.empty();
     analyticUBlockedFaces_.clear();
     analyticVBlockedFaces_.clear();
@@ -2834,7 +2894,7 @@ void fluidField2::synchronizeCutCellBoundaries( float timeStep,
     int partialFaces = 0;
     const auto referenceShapes = analyticDisjointCache_
         ? std::vector<analyticDisjointShape2>{} : disjointAnalyticCutCellEnabled_
-            ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+            ? BuildDisjointAnalyticShapes( obstacles, preciseDisjointCapsuleEnabled_ ) : std::vector<analyticDisjointShape2>{};
     const auto& disjointShapes = analyticDisjointCache_
         ? analyticDisjointCache_->shapes : referenceShapes;
     if( !disjointShapes.empty() )
@@ -3127,7 +3187,7 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
             }
 
             const auto disjointShapes = disjointAnalyticCutCellEnabled_
-                ? BuildDisjointAnalyticShapes( intermediate ) : std::vector<analyticDisjointShape2>{};
+                ? BuildDisjointAnalyticShapes( intermediate, preciseDisjointCapsuleEnabled_ ) : std::vector<analyticDisjointShape2>{};
             if( !disjointShapes.empty() )
             {
                 const double h = cellSize_;
@@ -3986,7 +4046,7 @@ bool fluidField2::solveCoupledPressure( float timeStep, int iterations,
     {
         const auto referenceShapes = analyticDisjointCache_
             ? std::vector<analyticDisjointShape2>{} : disjointAnalyticCutCellEnabled_
-                ? BuildDisjointAnalyticShapes( obstacles ) : std::vector<analyticDisjointShape2>{};
+                ? BuildDisjointAnalyticShapes( obstacles, preciseDisjointCapsuleEnabled_ ) : std::vector<analyticDisjointShape2>{};
         const auto& disjointShapes = analyticDisjointCache_
             ? analyticDisjointCache_->shapes : referenceShapes;
         if( !disjointShapes.empty() )
