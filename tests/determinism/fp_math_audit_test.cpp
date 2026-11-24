@@ -322,19 +322,22 @@ void auditSinCos( std::FILE* stream )
 }
 
 // R3o: reconstruct the wind source's actual float time recurrence for
-// the 180-tick, eight-World/four-Fluid-substep Sandbox fixture. This is a
+// the eight-World/four-Fluid-substep Sandbox fixture. R3r extends the
+// recurrence to 360 ticks, preserving the first 180 ticks. This is a
 // separate diagnostic, not a capture of the source's production locals.
 void auditWindSource( std::FILE* stream )
 {
     constexpr float timeStep = 1.0f / 60.0f;
     constexpr int worldSubsteps = 8;
     constexpr int fluidSubsteps = 4;
-    constexpr int tickCount = 180;
+    constexpr int tickCount = 360;
+    constexpr float boundedLimit = 0x1.921fb6p+2f;
     constexpr float strength = 8.0f;
     constexpr float worldSubstepTime = timeStep / worldSubsteps;
     constexpr float windTimeStep = worldSubstepTime * ( worldSubsteps / fluidSubsteps );
     float windTime = 0.0f;
     bool sawPositive = false, sawNegative = false;
+    bool sawBounded = false, sawLarge = false, sawPositiveAfterCrossing = false;
     for( std::size_t i = 0; i < tickCount * fluidSubsteps; ++i )
     {
         windTime += windTimeStep;
@@ -345,8 +348,25 @@ void auditWindSource( std::FILE* stream )
         const float legacy = std::sin( input );
         const float candidate = rot2::FromRadians( angle ).s;
         check( std::bit_cast<std::uint32_t>( candidate ) ==
-            std::bit_cast<std::uint32_t>( deterministicSinCosBounded( angle ).sine ),
-            "R3p wind source must use the bounded rotation path throughout this recurrence" );
+            std::bit_cast<std::uint32_t>( deterministicSinCos( angle ).sine ),
+            "R3r wind source full-range rotation dispatch" );
+        if( angle <= boundedLimit )
+        {
+            sawBounded = true;
+            check( std::bit_cast<std::uint32_t>( candidate ) ==
+                std::bit_cast<std::uint32_t>( deterministicSinCosBounded( angle ).sine ),
+                "R3r preserve bounded wind source bits" );
+        }
+        else
+        {
+            sawLarge = true;
+            sawPositiveAfterCrossing |= candidate > 0.0f;
+        }
+        const double reference = std::sin( static_cast<double>( angle ) );
+        check( std::abs( static_cast<double>( candidate ) - reference ) <=
+            2.0 * std::numeric_limits<float>::epsilon() * std::abs( reference ) +
+            std::numeric_limits<float>::denorm_min(),
+            "R3r wind sine numerical reference" );
         const float legacyDelta = 0.5f * strength * windTimeStep * legacy;
         const float candidateDelta = 0.5f * strength * windTimeStep * candidate;
         // Exact engine candidate results from both R3o platform traces.
@@ -364,7 +384,7 @@ void auditWindSource( std::FILE* stream )
                     std::bit_cast<std::uint32_t>( candidateDelta ) == witness.delta,
                     "R3p exact wind source witness" );
         check( std::isfinite( legacyDelta ) && std::isfinite( candidateDelta ),
-            "wind source bounded recurrence produced a nonfinite result" );
+            "wind source full-range recurrence produced a nonfinite result" );
         sawPositive |= candidate > 0.0f;
         sawNegative |= candidate < 0.0f;
         if( stream )
@@ -377,8 +397,9 @@ void auditWindSource( std::FILE* stream )
             outputFloat( stream, "libm.windSource.deltaY", i, legacyDelta );
         }
     }
-    check( sawPositive && sawNegative && windTime > 2.99f && windTime < 3.01f,
-        "wind source recurrence did not exercise both oscillation signs" );
+    check( sawPositive && sawNegative && sawBounded && sawLarge &&
+        sawPositiveAfterCrossing && windTime > 5.99f && windTime < 6.01f,
+        "wind source recurrence must exercise both signs and cross the old bounded limit" );
 }
 
 // R3q: test the full-range candidate before migrating rot2.
