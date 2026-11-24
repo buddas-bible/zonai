@@ -3068,8 +3068,8 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
 
         const vec2 displacement = finish.transform.position - start.transform.position;
         linearSpeeds[i] = displacement / timeStep;
-        const float startAngle = std::atan2( start.transform.rotation.s, start.transform.rotation.c );
-        const float endAngle = std::atan2( finish.transform.rotation.s, finish.transform.rotation.c );
+        const float startAngle = deterministicAtan2( start.transform.rotation.s, start.transform.rotation.c );
+        const float endAngle = deterministicAtan2( finish.transform.rotation.s, finish.transform.rotation.c );
         const float deltaAngle = std::remainder( endAngle - startAngle, 2.0f * std::numbers::pi_v<float> );
         startAngles[i] = startAngle;
         angularSpeeds[i] = deltaAngle / timeStep;
