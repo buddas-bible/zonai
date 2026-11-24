@@ -255,6 +255,30 @@ void emitFingerprint( std::FILE* stream )
         outputFloat( stream, "libm.railAtan2", i, std::atan2( y, x ) );
     }
 
+    // R3i swept-rotation witnesses: identical float operands, divergent
+    // std::atan2 outputs on Ubuntu/Windows, identical engine candidate.
+    struct sweptAngleCase
+    {
+        std::uint32_t y, x, expected;
+    };
+    constexpr std::array<sweptAngleCase, 4> sweptCases{ {
+        { 0x3dfd4d3cu, 0x3f7e08ceu, 0x3dfdf3b6u },
+        { 0x3e50f43au, 0x3f7a9d10u, 0x3e526e97u },
+        { 0x3ec9d0e7u, 0x3f6b45feu, 0x3ecf7200u },
+        { 0x3e9a4d99u, 0x3f7418fcu, 0x3e9cbd68u }
+    } };
+    for( std::size_t i = 0; i < sweptCases.size(); ++i )
+    {
+        const auto& item = sweptCases[i];
+        const float y = std::bit_cast<float>( item.y );
+        const float x = std::bit_cast<float>( item.x );
+        const float angle = deterministicAtan2( y, x );
+        check( std::bit_cast<std::uint32_t>( angle ) == item.expected,
+            "R3i swept rotation exact-bit witness" );
+        outputFloat( stream, "zonai.sweptAtan2", i, angle );
+        outputFloat( stream, "libm.sweptAtan2", i, std::atan2( y, x ) );
+    }
+
     // Broad raw-bit sample, not only the three known libm failures.
     std::uint64_t atan2Seed = 0x6d6174682d617432ull;
     const auto nextAtanBits = [&]() -> std::uint32_t
