@@ -853,7 +853,7 @@ struct worldFluidScene
 };
 
 std::string runWorldFluidScene( const char* name, bool drag,
-    fluidJointKind jointKind = fluidJointKind::none )
+    fluidJointKind jointKind = fluidJointKind::none, int frameCount = 12 )
 {
     using probe = zonai::fluidStateTraceProbe2;
     using namespace zonai::determinism::test;
@@ -872,7 +872,9 @@ std::string runWorldFluidScene( const char* name, bool drag,
     bool sawPressure = false, sawDragBody = false, sawDragFluid = false;
     bool sawCoupled = false, sawDisjoint = false, sawFlow = false;
 
-    for( int tick = 0; tick <= 12; ++tick )
+    // R3o extends the proven two-way drag path without replacing the short
+    // fixtures. Keep per-frame raw rows and the same observer/control checks.
+    for( int tick = 0; tick <= frameCount; ++tick )
     {
         const std::string key = std::string( name ) + ".tick." + std::to_string( tick );
         if( tick != 0 )
@@ -995,6 +997,7 @@ int main( int argc, char** argv )
         trace += runWorldFluidScene( "worldFluidDrag", true );
         trace += runWorldFluidScene( "worldFluidRevolute", true, fluidJointKind::revolute );
         trace += runWorldFluidScene( "worldFluidWeld", true, fluidJointKind::weld );
+        trace += runWorldFluidScene( "worldFluidDrag180", true, fluidJointKind::none, 180 );
 
         if( argc == 3 )
         {
