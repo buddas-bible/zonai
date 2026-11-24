@@ -411,12 +411,13 @@ jobs:
               "worldFluidPressure": 186339, "worldFluidDrag": 186339,
               "worldFluidRevolute": 191508, "worldFluidWeld": 191011,
               "worldFluidDrag180": 1272627,
+              "worldFluidDrag360Continuation": 1934160,
           }
-          continuation = "worldFluidDrag360Continuation"
-          if (set(totals) != set(expected) | {continuation} or
+          assembly = "worldFluidAnchoredAssembly"
+          if (set(totals) != set(expected) | {assembly} or
               any(totals.get(scene) != n for scene, n in expected.items()) or
-              totals.get(continuation, 0) <= 0):
-              sys.exit("Fluid trace coverage changed or continuation missing")
+              totals.get(assembly, 0) <= 0):
+              sys.exit("Fluid trace coverage changed or anchored assembly missing")
 
           print("identical tested Fluid MAC, geometry/history and pressure feedback fields")
           PY
