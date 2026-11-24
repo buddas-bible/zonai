@@ -888,7 +888,7 @@ struct fluidStateTraceProbe2
                 appendScalar( trace, prefix + ".current", before.cellFluidFraction_[i] );
                 appendScalar( trace, prefix + ".meanFraction", fraction[i] );
                 appendScalar( trace, prefix + ".meanOpeningSum", opening );
-                std::printf( "%s x %d y %d previous %.9g current %.9g mean fraction %.9g mean opening %.9g\\n",
+                std::printf( "%s x %d y %d previous %.9g current %.9g mean fraction %.9g mean opening %.9g\n",
                     prefix.c_str(), x, y, before.previousCellFluidFraction_[i], before.cellFluidFraction_[i],
                     fraction[i], opening );
                 if( fraction[i] <= 0.0 || opening <= 0.0 )
