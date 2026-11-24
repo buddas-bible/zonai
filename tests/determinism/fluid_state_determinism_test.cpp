@@ -888,6 +888,184 @@ struct fluidStateTraceProbe2
             key.c_str(), closedFaces, closedTransfer, peakEndpoint, limitedDonors, unservedVolume, identityError );
     }
 
+    // R4e: retain the quadrature's actual apertures and each panel's
+    // start geometry. The solved interval velocity is constant in this
+    // model; the tracer consumer alone advances chronologically.
+    struct transportPanel
+    {
+        double weight;
+        std::vector<float> startFraction, uOpen, vOpen;
+    };
+
+    static void captureChronologicalTransport( const fluidField2& before,
+        const intervalTransport& interval, const std::vector<double>& uVelocity,
+        const std::vector<double>& vVelocity, const std::vector<transportPanel>& panels,
+        double weightSum, std::string& trace, const std::string& key )
+    {
+        const std::size_t n = before.cellFluidFraction_.size();
+        const double h = before.cellSize_, area = h * h, dt = before.frozenPressureTimeStep_;
+        struct transferEdge { int donor, recipient; double volume; bool closedEnd; };
+        struct panelTransfers { std::vector<transferEdge> edges; std::vector<double> outgoing; };
+        std::vector<panelTransfers> transfers;
+        std::vector<double> uSum( interval.uTransfer.size() ), vSum( interval.vTransfer.size() );
+        std::vector<double> modelVolume( n );
+        for( std::size_t i = 0; i < n; ++i )
+            modelVolume[i] = area * before.previousCellFluidFraction_[i];
+        double unserved = 0.0, closedTransfer = 0.0;
+        int limitedDonors = 0;
+        for( const auto& panel : panels )
+        {
+            if( panel.weight <= 0.0 || panel.startFraction.size() != n )
+                throw std::runtime_error( key + " invalid transport panel" );
+            auto& batch = transfers.emplace_back();
+            batch.outgoing.resize( n );
+            const auto face = [&]( bool isU, int x, int y )
+            {
+                const int index = isU ? before.uIndex( x, y ) : before.vIndex( x, y );
+                const double aperture = isU ? panel.uOpen[index] : panel.vOpen[index];
+                const double velocity = isU ? uVelocity[index] : vVelocity[index];
+                const double amount = dt * h * ( panel.weight / weightSum ) * aperture * velocity;
+                if( !std::isfinite( amount ) ) throw std::runtime_error( key + " invalid panel transfer" );
+                ( isU ? uSum : vSum )[index] += amount;
+                if( amount == 0.0 ) return;
+                const int a = before.cellIndex( x - ( isU ? 1 : 0 ), y - ( isU ? 0 : 1 ) );
+                const int b = before.cellIndex( x, y );
+                const int donor = amount > 0.0 ? a : b, recipient = amount > 0.0 ? b : a;
+                const bool closed = ( isU ? before.cutCellUOpen( x, y ) : before.cutCellVOpen( x, y ) ) == 0.0f;
+                const double volume = std::abs( amount );
+                batch.outgoing[donor] += volume;
+                batch.edges.push_back( { donor, recipient, volume, closed } );
+                if( closed ) closedTransfer += volume;
+                modelVolume[a] -= amount; modelVolume[b] += amount;
+            };
+            for( int y = 0; y < before.height_; ++y )
+                for( int x = 1; x < before.width_; ++x ) face( true, x, y );
+            for( int y = 1; y < before.height_; ++y )
+                for( int x = 0; x < before.width_; ++x ) face( false, x, y );
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                const double capacity = area * panel.startFraction[i];
+                if( !std::isfinite( capacity ) || capacity < 0.0 || capacity > area )
+                    throw std::runtime_error( key + " invalid panel start volume" );
+                if( batch.outgoing[i] > capacity )
+                {
+                    ++limitedDonors;
+                    unserved += batch.outgoing[i] - capacity;
+                }
+            }
+        }
+        double transferError = 0.0, transferL1 = 0.0;
+        const auto compare = [&]( const std::vector<double>& actual, const std::vector<double>& expected )
+        {
+            for( std::size_t i = 0; i < actual.size(); ++i )
+            {
+                transferError += std::abs( actual[i] - expected[i] );
+                transferL1 += std::abs( expected[i] );
+            }
+        };
+        compare( uSum, interval.uTransfer ); compare( vSum, interval.vTransfer );
+        if( transferError > 1.0e-12 * std::max( transferL1, 1.0e-12 ) )
+            throw std::runtime_error( key + " chronological transfers differ from interval ledger" );
+        double geometryModelL1 = 0.0, negativeModelVolume = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            geometryModelL1 += std::abs( modelVolume[i] - area * before.cellFluidFraction_[i] );
+            negativeModelVolume += std::max( 0.0, -modelVolume[i] );
+        }
+        const auto out = [&]( const std::string& name, auto value )
+        {
+            if( !std::isfinite( static_cast<double>( value ) ) )
+                throw std::runtime_error( key + name + " nonfinite chronological output" );
+            appendScalar( trace, key + name, value );
+        };
+        out( ".panels", static_cast<int>( panels.size() ) );
+        out( ".transferErrorL1", transferError ); out( ".transferL1", transferL1 );
+        out( ".closedTransferL1", closedTransfer ); out( ".limitedPanelDonors", limitedDonors );
+        out( ".unservedPanelVolume", unserved );
+        out( ".geometryModelL1", geometryModelL1 ); out( ".negativeModelVolume", negativeModelVolume );
+        for( bool uniform : { true, false } )
+        {
+            std::vector<double> mass = before.tracerMass_;
+            if( mass.size() != n ) throw std::runtime_error( key + " missing tracer state" );
+            if( uniform )
+                for( std::size_t i = 0; i < n; ++i ) mass[i] = area * before.previousCellFluidFraction_[i];
+            double initialMass = 0.0, moved = 0.0, closedMass = 0.0, maxPanelError = 0.0;
+            double trappedBefore = 0.0;
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                if( !std::isfinite( mass[i] ) || mass[i] < 0.0 )
+                    throw std::runtime_error( key + " invalid initial mass" );
+                initialMass += mass[i];
+                if( before.previousCellFluidFraction_[i] == 0.0f ) trappedBefore += mass[i];
+            }
+            for( std::size_t step = 0; step < panels.size(); ++step )
+            {
+                const auto& panel = panels[step];
+                const auto& batch = transfers[step];
+                std::vector<double> remaining = mass, received( n );
+                for( const auto& e : batch.edges )
+                {
+                    const double capacity = area * panel.startFraction[e.donor];
+                    if( capacity <= 0.0 ) continue;
+                    const double request = mass[e.donor] *
+                        ( e.volume / std::max( capacity, batch.outgoing[e.donor] ) );
+                    const double amount = std::min( remaining[e.donor], request );
+                    remaining[e.donor] -= amount;
+                    received[e.recipient] += amount;
+                    moved += amount;
+                    if( e.closedEnd ) closedMass += amount;
+                }
+                double total = 0.0;
+                for( std::size_t i = 0; i < n; ++i )
+                {
+                    mass[i] = remaining[i] + received[i];
+                    if( !std::isfinite( mass[i] ) || mass[i] < 0.0 )
+                        throw std::runtime_error( key + " invalid panel tracer mass" );
+                    total += mass[i];
+                }
+                maxPanelError = std::max( maxPanelError, std::abs( total - initialMass ) );
+                if( maxPanelError > 1.0e-12 * std::max( 1.0, initialMass ) )
+                    throw std::runtime_error( key + " chronological mass conservation failed" );
+            }
+            double finalMass = 0.0, trappedAfter = 0.0, closingMass = 0.0;
+            double geometryError = 0.0, modelError = 0.0, maxConcentration = 0.0;
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                finalMass += mass[i];
+                const double endVolume = area * before.cellFluidFraction_[i];
+                if( endVolume == 0.0 )
+                {
+                    trappedAfter += mass[i];
+                    if( before.previousCellFluidFraction_[i] > 0.0f ) closingMass += mass[i];
+                }
+                else maxConcentration = std::max( maxConcentration, mass[i] / endVolume );
+                if( uniform )
+                {
+                    geometryError += std::abs( mass[i] - endVolume );
+                    modelError += std::abs( mass[i] - modelVolume[i] );
+                }
+            }
+            const std::string prefix = uniform ? ".uniform" : ".seeded";
+            out( prefix + ".beforeMass", initialMass ); out( prefix + ".afterMass", finalMass );
+            out( prefix + ".massError", finalMass - initialMass );
+            out( prefix + ".maxPanelMassError", maxPanelError );
+            out( prefix + ".movedMass", moved ); out( prefix + ".closedFaceMass", closedMass );
+            out( prefix + ".trappedBefore", trappedBefore ); out( prefix + ".trappedAfter", trappedAfter );
+            out( prefix + ".closingMass", closingMass );
+            out( prefix + ".uniformGeometryError", geometryError );
+            out( prefix + ".uniformModelError", modelError );
+            out( prefix + ".maxEndConcentration", maxConcentration );
+            appendVector( trace, key + prefix + ".mass", mass );
+            std::printf( "%s%s panels %zu mass error %.9g trapped %.9g closing mass %.9g "
+                "geometry error %.9g model error %.9g max end concentration %.9g\n",
+                key.c_str(), prefix.c_str(), panels.size(), finalMass - initialMass,
+                trappedAfter, closingMass, geometryError, modelError, maxConcentration );
+        }
+        std::printf( "%s transfer error %.9g unserved panel volume %.9g limited donors %d "
+            "geometry/model gap %.9g negative model volume %.9g\n",
+            key.c_str(), transferError, unserved, limitedDonors, geometryModelL1, negativeModelVolume );
+    }
+
     // R4a: independent, test-only interval-average pressure model. Reuse the
     // production analytic geometry and boundary assembly at quadrature poses.
     // Do not write averaged apertures into the live endpoint field.
@@ -922,7 +1100,9 @@ struct fluidStateTraceProbe2
             omega[i] = std::remainder( endAngle - angle[i], 2.0f * std::numbers::pi_v<float> ) /
                 before.frozenPressureTimeStep_;
         }
-        const auto setPose = [&]( float alpha )
+        fluidField2 panelGeometry = geometry;
+        std::vector<transportPanel> transportPanels;
+        const auto setPose = [&]( fluidField2& target, float alpha )
         {
             for( std::size_t i = 0; i < owners; ++i )
             {
@@ -932,9 +1112,9 @@ struct fluidStateTraceProbe2
                     angle[i] + omega[i] * before.frozenPressureTimeStep_ * alpha );
                 poses[i].center = start[i].center + alpha * ( finish[i].center - start[i].center );
             }
-            geometry.updateObstacles( poses );
-            geometry.updateCutCellGeometry( poses );
-            if( !geometry.cutCellTransition_.usedDisjointAnalyticGeometry )
+            target.updateObstacles( poses );
+            target.updateCutCellGeometry( poses );
+            if( !target.cutCellTransition_.usedDisjointAnalyticGeometry )
                 throw std::runtime_error( key + " nonanalytic quadrature geometry" );
         };
 
@@ -946,7 +1126,7 @@ struct fluidStateTraceProbe2
             std::vector<bool> supported( n );
             for( int step = 0; step < samples; ++step )
             {
-                setPose( ( step + 0.5f ) / samples );
+                setPose( geometry, ( step + 0.5f ) / samples );
                 for( std::size_t i = 0; i < n; ++i )
                     supported[i] = supported[i] || geometry.cellFluidFraction_[i] > 0.0f;
             }
@@ -956,16 +1136,35 @@ struct fluidStateTraceProbe2
             if( missed.empty() )
                 throw std::runtime_error( key + " historical midpoint coverage failure not reproduced" );
         }
-        const auto integrate = [&]( float alpha, double weight )
+        const auto integrate = [&]( float alpha, double weight, double lo )
         {
-            setPose( alpha );
+            transportPanel panel{ weight, {}, std::vector<float>( before.u_.size() ),
+                std::vector<float>( before.v_.size() ) };
+            if( lo == 0.0 ) panel.startFraction = before.previousCellFluidFraction_;
+            else
+            {
+                setPose( panelGeometry, static_cast<float>( lo ) );
+                panel.startFraction = panelGeometry.cellFluidFraction_;
+            }
+            setPose( geometry, alpha );
             for( std::size_t i = 0; i < n; ++i ) fraction[i] += weight * geometry.cellFluidFraction_[i];
             for( int y = 0; y < geometry.height_; ++y )
                 for( int x = 1; x < geometry.width_; ++x )
-                    meanU[geometry.uIndex( x, y )] += weight * geometry.cutCellUOpen( x, y );
+                {
+                    const int index = geometry.uIndex( x, y );
+                    const float aperture = geometry.cutCellUOpen( x, y );
+                    panel.uOpen[index] = aperture;
+                    meanU[index] += weight * aperture;
+                }
             for( int y = 1; y < geometry.height_; ++y )
                 for( int x = 0; x < geometry.width_; ++x )
-                    meanV[geometry.vIndex( x, y )] += weight * geometry.cutCellVOpen( x, y );
+                {
+                    const int index = geometry.vIndex( x, y );
+                    const float aperture = geometry.cutCellVOpen( x, y );
+                    panel.vOpen[index] = aperture;
+                    meanV[index] += weight * aperture;
+                }
+            transportPanels.push_back( std::move( panel ) );
             // Same geometry and same quadrature weight for L and B.
             std::fill( geometry.divergence_.begin(), geometry.divergence_.end(), 0.0f );
             if( !geometry.solveCoupledPressure( static_cast<float>( dt ), 200, poses, true ) )
@@ -980,7 +1179,7 @@ struct fluidStateTraceProbe2
         if( endpointDepth == 0 )
         {
             for( int step = 0; step < samples; ++step )
-                integrate( ( step + 0.5f ) / samples, 1.0 );
+                integrate( ( step + 0.5f ) / samples, 1.0, static_cast<double>( step ) / samples );
             weightSum = samples;
         }
         else
@@ -996,7 +1195,7 @@ struct fluidStateTraceProbe2
                 const float alpha = static_cast<float>( 0.5 * ( lo + hi ) );
                 if( !( alpha > 0.0f && alpha < 1.0f && weight > 0.0 ) )
                     throw std::runtime_error( key + " invalid refined panel" );
-                integrate( alpha, weight );
+                integrate( alpha, weight, lo );
                 weightSum += weight;
             };
             const double width = 1.0 / samples;
@@ -1299,6 +1498,7 @@ struct fluidStateTraceProbe2
         }
 
         const auto correctedSource = correctedVolume;
+        std::vector<double> intervalUVelocity( before.u_.size() ), intervalVVelocity( before.v_.size() );
         intervalTransport transport{
             std::vector<double>( before.u_.size() ), std::vector<double>( before.v_.size() ),
             std::vector<double>( before.u_.size() ), std::vector<double>( before.v_.size() ) };
@@ -1316,6 +1516,7 @@ struct fluidStateTraceProbe2
             const double velocity = e.velocity + dt / h * ( p[e.first] - p[e.second] );
             const double transfer = dt * h * e.a * velocity;
             ( e.isU ? transport.uTransfer : transport.vTransfer )[e.index] = transfer;
+            ( e.isU ? intervalUVelocity : intervalVVelocity )[e.index] = velocity;
             intervalTransferL1 += std::abs( transfer );
             addTransfer( volume, e, transfer );
             addTransfer( correctedVolume, e, transfer );
@@ -1402,6 +1603,8 @@ struct fluidStateTraceProbe2
             velocityL1, fluxL1, fluxHandoffPeak, targetFluxVelocity );
         captureIntervalTransport( before, transport, correctedSource, correctedVolume, trace,
             "intervalTransport." + handoffKey );
+        captureChronologicalTransport( before, transport, intervalUVelocity, intervalVVelocity,
+            transportPanels, weightSum, trace, "chronologicalTracer." + handoffKey );
     }
 
     static void captureProjection( const fluidField2& field, std::string& trace, const std::string& key )
