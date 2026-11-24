@@ -3251,6 +3251,115 @@ struct fluidStateTraceProbe2
                                 "unapplied force %.9g torque %.9g\n", iterationKey.c_str(),
                                 appliedForceDelta, appliedTorqueDelta, unappliedForce, unappliedTorque );
                         }
+                        // R4ab: isolate the actual half-relaxation pass4 -> pass5
+                        // geometry jump. Replace one body's endpoint at a time,
+                        // then all endpoints. None of the probes is applied.
+                        if( relaxation == 0.5f && pass == 3 )
+                        {
+                            for( int changed = 0; changed <= static_cast<int>( estimate.size() ); ++changed )
+                            {
+                                const std::string probeKey = "forwardGeometrySensitivity.interval" +
+                                    std::to_string( index ) + ".body" + std::to_string( changed );
+                                auto probePoses = estimate;
+                                if( changed == static_cast<int>( estimate.size() ) )
+                                    probePoses = nextEstimate;
+                                else
+                                    probePoses[changed] = nextEstimate[changed];
+                                fluidField2 probeField = fixed;
+                                probeField.updateObstacles( probePoses );
+                                probeField.updateCutCellGeometry( probePoses );
+                                if( !probeField.cutCellTransition_.usedDisjointAnalyticGeometry )
+                                    throw std::runtime_error( probeKey + " probe geometry not analytic" );
+                                probeField.previousCellFluidFraction_ = startFraction;
+                                probeField.previousObstacles_ = start;
+                                probeField.frozenPressureObstacles_ = probePoses;
+                                probeField.volumeSourceValid_ = true;
+                                probeField.u_ = input.u_; probeField.v_ = input.v_;
+                                continuationPressure probe;
+                                std::string probeScratch;
+                                captureSpaceTimeProjection( probeField, forward, trial.feedback, probeScratch,
+                                    probeKey + ".projection", 16, probeKey + ".volume", false,
+                                    16, probeKey + ".topology", 0.0, &probe, 0, true,
+                                    nullptr, 1.0e-16, false, {}, true, true );
+                                double volumeDelta = 0.0, volumeSigned = 0.0, maxVolumeDelta = 0.0;
+                                double compatibilityDelta = 0.0, compatibilitySigned = 0.0;
+                                double apertureDelta = 0.0, maxApertureDelta = 0.0;
+                                double forceDelta = 0.0, torqueDelta = 0.0, pressureDelta = 0.0;
+                                int volumeCell = -1, topologyChanges = 0, apertureChanges = 0;
+                                int supportChanges = 0, negativeCells = 0;
+                                double negative = 0.0, gap = 0.0;
+                                for( std::size_t i = 0; i < probe.fluxVolume.size(); ++i )
+                                {
+                                    const double dv = area * ( static_cast<double>( probeField.cellFluidFraction_[i] ) -
+                                        fixed.cellFluidFraction_[i] );
+                                    volumeDelta += std::abs( dv ); volumeSigned += dv;
+                                    if( std::abs( dv ) > maxVolumeDelta )
+                                    {
+                                        maxVolumeDelta = std::abs( dv );
+                                        volumeCell = static_cast<int>( i );
+                                    }
+                                    topologyChanges += ( probeField.cellFluidFraction_[i] > 0.0f ) !=
+                                        ( fixed.cellFluidFraction_[i] > 0.0f );
+                                    supportChanges += ( probe.component[i] >= 0 ) != ( trial.component[i] >= 0 );
+                                    const double dc = probe.compatibilityVolume[i] - trial.compatibilityVolume[i];
+                                    compatibilityDelta += std::abs( dc ); compatibilitySigned += dc;
+                                    pressureDelta = std::max( pressureDelta, std::abs(
+                                        static_cast<double>( probe.pressure[i] ) - trial.pressure[i] ) );
+                                    if( probe.fluxVolume[i] < 0.0 )
+                                    {
+                                        negative -= probe.fluxVolume[i]; ++negativeCells;
+                                    }
+                                    gap += std::abs( area * probeField.cellFluidFraction_[i] - probe.fluxVolume[i] );
+                                }
+                                const auto compareApertures = [&]( const std::vector<double>& a,
+                                    const std::vector<double>& b )
+                                {
+                                    if( a.size() != b.size() )
+                                        throw std::runtime_error( probeKey + " aperture size mismatch" );
+                                    for( std::size_t i = 0; i < a.size(); ++i )
+                                    {
+                                        const double da = std::abs( a[i] - b[i] );
+                                        apertureDelta += da;
+                                        maxApertureDelta = std::max( maxApertureDelta, da );
+                                        apertureChanges += ( a[i] > 0.0 ) != ( b[i] > 0.0 );
+                                    }
+                                };
+                                compareApertures( probe.meanU, trial.meanU );
+                                compareApertures( probe.meanV, trial.meanV );
+                                for( std::size_t j = 0; j < probe.feedback.size(); ++j )
+                                {
+                                    forceDelta = std::max( forceDelta, std::max(
+                                        std::abs( static_cast<double>( probe.feedback[j].force.x ) - trial.feedback[j].force.x ),
+                                        std::abs( static_cast<double>( probe.feedback[j].force.y ) - trial.feedback[j].force.y ) ) );
+                                    torqueDelta = std::max( torqueDelta, std::abs(
+                                        static_cast<double>( probe.feedback[j].torque ) - trial.feedback[j].torque ) );
+                                }
+                                const auto emitProbe = [&]( const char* suffix, auto value )
+                                {
+                                    if( !std::isfinite( static_cast<double>( value ) ) )
+                                        throw std::runtime_error( probeKey + suffix + " nonfinite sensitivity" );
+                                    appendScalar( trace, probeKey + suffix, value );
+                                };
+                                emitProbe( ".volumeL1", volumeDelta ); emitProbe( ".volumeSigned", volumeSigned );
+                                emitProbe( ".maxVolumeDelta", maxVolumeDelta ); emitProbe( ".maxVolumeCell", volumeCell );
+                                emitProbe( ".topologyChanges", topologyChanges ); emitProbe( ".supportChanges", supportChanges );
+                                emitProbe( ".compatibilityL1", compatibilityDelta ); emitProbe( ".compatibilitySigned", compatibilitySigned );
+                                emitProbe( ".meanApertureL1", apertureDelta ); emitProbe( ".maxMeanApertureDelta", maxApertureDelta );
+                                emitProbe( ".apertureSupportChanges", apertureChanges ); emitProbe( ".pressureMaxDelta", pressureDelta );
+                                emitProbe( ".forceMaxDelta", forceDelta ); emitProbe( ".torqueMaxDelta", torqueDelta );
+                                emitProbe( ".negativeVolume", negative ); emitProbe( ".negativeCells", negativeCells );
+                                emitProbe( ".geometryGap", gap ); emitProbe( ".peak", probe.intervalPeak );
+                                emitProbe( ".iterations", probe.initialIterations ); emitProbe( ".trueResidualSquared", probe.trueResidualSquared );
+                                std::printf( "%s volume L1 %.9g signed %.9g max %.9g cell %d "
+                                    "compatibility L1 %.9g signed %.9g aperture L1 %.9g max %.9g "
+                                    "topology %d/%d/%d pressure delta %.9g force delta %.9g torque delta %.9g "
+                                    "negative %.9g (%d cells) gap %.9g PCG %d\n",
+                                    probeKey.c_str(), volumeDelta, volumeSigned, maxVolumeDelta, volumeCell,
+                                    compatibilityDelta, compatibilitySigned, apertureDelta, maxApertureDelta,
+                                    topologyChanges, supportChanges, apertureChanges, pressureDelta,
+                                    forceDelta, torqueDelta, negative, negativeCells, gap, probe.initialIterations );
+                            }
+                        }
                         estimate = nextEstimate;
                         estimateLoad = std::move( appliedLoad );
                     }
