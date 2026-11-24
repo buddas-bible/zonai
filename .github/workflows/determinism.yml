@@ -415,12 +415,13 @@ jobs:
               "worldFluidAnchoredAssembly": 902840,
               "fluidStabilityAudit": 206880,
               "worldFluidContactAssembly": 870485,
+              "nearClosedFace": 23910,
           }
-          stress = "nearClosedFace"
-          if (set(totals) != set(expected) | {stress} or
+          source = "volumeSourceAudit"
+          if (set(totals) != set(expected) | {source} or
               any(totals.get(scene) != n for scene, n in expected.items()) or
-              totals.get(stress, 0) <= 0):
-              sys.exit("Fluid trace coverage changed or near-closed face replay missing")
+              totals.get(source, 0) <= 0):
+              sys.exit("Fluid trace coverage changed or volume source audit missing")
 
           print("identical tested Fluid MAC, geometry/history and pressure feedback fields")
           PY
