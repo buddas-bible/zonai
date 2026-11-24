@@ -1444,7 +1444,8 @@ struct fluidStateTraceProbe2
         continuationPressure* continuation = nullptr, int correctionBudget = 3,
         bool adaptiveEndpoint = false, forwardTiming* timing = nullptr,
         double relativeSquaredTolerance = 1.0e-16, bool warmStart = false,
-        std::span<const float> previousForwardPressure = {}, bool captureEndpoint = false )
+        std::span<const float> previousForwardPressure = {}, bool captureEndpoint = false,
+        bool volumeWeightedCompatibility = false )
     {
         if( !previousForwardPressure.empty() && !warmStart )
             throw std::runtime_error( key + " previous pressure requires warm start" );
@@ -1454,7 +1455,13 @@ struct fluidStateTraceProbe2
         if( relativeSquaredTolerance != 1.0e-16 && ( !adaptiveEndpoint ||
             ( relativeSquaredTolerance != 1.0e-12 && relativeSquaredTolerance != 1.0e-10 ) ) )
             throw std::runtime_error( key + " invalid experimental residual budget" );
-        if( responseScale != 1.0 && responseScale != 0.75 )
+        const bool fixedGeometry = responseScale == 0.0;
+        if( fixedGeometry && ( !continuation || !captureEndpoint || correctionBudget != 0 ||
+            !adaptiveEndpoint || warmStart || relativeSquaredTolerance != 1.0e-16 ) )
+            throw std::runtime_error( key + " invalid actual-geometry diagnostic" );
+        if( volumeWeightedCompatibility && !fixedGeometry )
+            throw std::runtime_error( key + " weighted compatibility requires fixed geometry" );
+        if( !fixedGeometry && responseScale != 1.0 && responseScale != 0.75 )
             throw std::runtime_error( key + " unsupported free-body cadence response" );
         if( correctionBudget < 0 || correctionBudget > 3 || ( !continuation && correctionBudget != 3 ) )
             throw std::runtime_error( key + " invalid correction budget" );
@@ -1705,6 +1712,30 @@ struct fluidStateTraceProbe2
         };
         const double scale = h * h / dt;
         for( std::size_t i = 0; i < n; ++i ) rhs[i] = -scale * rawDivergence[i];
+        if( volumeWeightedCompatibility )
+        {
+            // Compatibility is an RHS correction, not the pressure gauge.
+            // Assign it only to cells with actual endpoint fluid volume.
+            std::vector<double> componentRhs( n ), componentVolume( n );
+            for( std::size_t i = 0; i < n; ++i )
+                if( parent[i] >= 0 )
+                {
+                    componentRhs[parent[i]] += rhs[i];
+                    componentVolume[parent[i]] += before.cellFluidFraction_[i];
+                }
+            for( std::size_t i = 0; i < n; ++i )
+                if( parent[i] >= 0 )
+                {
+                    const int c = parent[i];
+                    if( componentVolume[c] > 0.0 )
+                        rhs[i] -= componentRhs[c] *
+                            ( static_cast<double>( before.cellFluidFraction_[i] ) / componentVolume[c] );
+                    else if( componentRhs[c] != 0.0 )
+                        throw std::runtime_error( key + " component lacks endpoint compatibility capacity" );
+                }
+        }
+        // Remove the remaining roundoff in the compatible RHS. For the
+        // original path this is still the original uniform projection.
         zeroMean( rhs );
         double compatibilityL1 = 0.0;
         for( std::size_t i = 0; i < n; ++i )
@@ -2057,10 +2088,13 @@ struct fluidStateTraceProbe2
                 if( !IsFinite( dx ) || !std::isfinite( da ) )
                     throw std::runtime_error( defectKey + " invalid trial displacement" );
                 const rot2 delta = rot2::FromRadians( da );
-                endpoint[j].center = finish[j].center + dx;
-                endpoint[j].transform.position = endpoint[j].center +
-                    Rotate( delta, finish[j].transform.position - finish[j].center );
-                endpoint[j].transform.rotation = delta * finish[j].transform.rotation;
+                if( !fixedGeometry )
+                {
+                    endpoint[j].center = finish[j].center + dx;
+                    endpoint[j].transform.position = endpoint[j].center +
+                        Rotate( delta, finish[j].transform.position - finish[j].center );
+                    endpoint[j].transform.rotation = delta * finish[j].transform.rotation;
+                }
                 state.forceChange = std::max( state.forceChange, std::max(
                     std::abs( f.fx - baselineFeedback[j].force.x ),
                     std::abs( f.fy - baselineFeedback[j].force.y ) ) );
@@ -2717,6 +2751,85 @@ struct fluidStateTraceProbe2
             linear, inflow, outflow );
     }
 
+    // R4y: replay the measured closing-cell interval using its actual loaded
+    // endpoint, with body response disabled. Neither comparison is committed.
+    static void captureActualGeometryLedger( const fluidField2& input, const fluidField2& endpoint,
+        const std::vector<fluidShapeObstacle2>& start, const std::vector<fluidShapeObstacle2>& corrected,
+        const continuationPressure& coupled, std::string& trace, int index )
+    {
+        fluidField2 fixed = endpoint;
+        fixed.previousCellFluidFraction_ = input.cellFluidFraction_;
+        fixed.previousObstacles_ = start;
+        fixed.frozenPressureObstacles_ = corrected;
+        fixed.volumeSourceValid_ = true;
+        fixed.u_ = input.u_; fixed.v_ = input.v_;
+        const double h = fixed.cellSize_, area = h * h;
+        const int target = fixed.cellIndex( 17, 14 );
+        if( coupled.fluxVolume[target] >= 0.0 || fixed.cellFluidFraction_[target] != 0.0f )
+            throw std::runtime_error( "R4y historical closing-cell defect not reproduced" );
+        for( bool weighted : { false, true } )
+        {
+            const std::string key = std::string( "forwardActualGeometry.interval" ) + std::to_string( index ) +
+                ( weighted ? ".weighted" : ".uniform" );
+            continuationPressure trial;
+            std::string scratch;
+            captureSpaceTimeProjection( fixed, endpoint, coupled.feedback, scratch,
+                key + ".projection", 16, key + ".volume", false, 16, key + ".topology",
+                0.0, &trial, 0, true, nullptr, 1.0e-16, false, {}, true, weighted );
+            double negative = 0.0, minimum = 0.0, gap = 0.0, unsupportedVolume = 0.0;
+            double totalLedger = 0.0, totalActual = 0.0, maxForceDelta = 0.0, maxTorqueDelta = 0.0;
+            int negativeCells = 0, unsupportedCells = 0;
+            for( std::size_t i = 0; i < trial.fluxVolume.size(); ++i )
+            {
+                const double volume = trial.fluxVolume[i];
+                const double actual = area * fixed.cellFluidFraction_[i];
+                const double error = actual - volume;
+                totalLedger += volume; totalActual += actual;
+                gap += std::abs( error );
+                minimum = std::min( minimum, volume );
+                if( volume < 0.0 ) { negative -= volume; ++negativeCells; }
+                if( trial.component[i] < 0 )
+                {
+                    unsupportedCells += error != 0.0;
+                    unsupportedVolume += std::abs( error );
+                }
+            }
+            for( std::size_t j = 0; j < coupled.feedback.size(); ++j )
+            {
+                maxForceDelta = std::max( maxForceDelta, std::max(
+                    std::abs( static_cast<double>( trial.feedback[j].force.x ) - coupled.feedback[j].force.x ),
+                    std::abs( static_cast<double>( trial.feedback[j].force.y ) - coupled.feedback[j].force.y ) ) );
+                maxTorqueDelta = std::max( maxTorqueDelta,
+                    std::abs( static_cast<double>( trial.feedback[j].torque ) - coupled.feedback[j].torque ) );
+            }
+            const auto out = [&]( const char* suffix, auto value )
+            {
+                if( !std::isfinite( static_cast<double>( value ) ) )
+                    throw std::runtime_error( key + suffix + " nonfinite actual geometry audit" );
+                appendScalar( trace, key + suffix, value );
+            };
+            out( ".targetCoupledVolume", coupled.fluxVolume[target] );
+            out( ".targetActualVolume", area * fixed.cellFluidFraction_[target] );
+            out( ".targetLedgerVolume", trial.fluxVolume[target] );
+            out( ".targetBodyResponse", trial.bodyVolume[target] );
+            out( ".targetCompatibility", trial.compatibilityVolume[target] );
+            out( ".targetLinearResidual", trial.linearVolumeResidual[target] );
+            out( ".negativeVolume", negative ); out( ".negativeCells", negativeCells );
+            out( ".minimumVolume", minimum ); out( ".actualGap", gap );
+            out( ".unsupportedCells", unsupportedCells ); out( ".unsupportedVolume", unsupportedVolume );
+            out( ".uncoveredEndpointFaces", trial.uncoveredEndpointFaces );
+            out( ".totalLedgerMinusActual", totalLedger - totalActual );
+            out( ".intervalPeak", trial.intervalPeak ); out( ".initialIterations", trial.initialIterations );
+            out( ".trueResidualSquared", trial.trueResidualSquared );
+            out( ".maxForceDelta", maxForceDelta ); out( ".maxTorqueDelta", maxTorqueDelta );
+            std::printf( "%s target %.9g m^2 compatibility %.9g linear %.9g negative %.9g (%d cells) "
+                "actual gap %.9g unsupported %d peak %.9g PCG %d unapplied force delta %.9g torque delta %.9g\n",
+                key.c_str(), trial.fluxVolume[target], trial.compatibilityVolume[target],
+                trial.linearVolumeResidual[target], negative, negativeCells, gap, unsupportedCells,
+                trial.intervalPeak, trial.initialIterations, maxForceDelta, maxTorqueDelta );
+        }
+    }
+
     // R4k: independent forward pressure trial at a sampled R4j start.
     // Freeze the incoming MAC trial velocity: no forward advection or
     // persistent candidate commit is implied by this geometry-only test.
@@ -2988,6 +3101,7 @@ struct fluidStateTraceProbe2
         {
             if( unsupportedCells != 0 ) throw std::runtime_error( key + " unsupported corrected volume" );
             captureMinimumVolumeCell( input, forward, startFraction, predictedFraction, candidate, dt, trace, index );
+            if( index == 57 ) captureActualGeometryLedger( input, forward, start, corrected, candidate, trace, index );
             appendVector( trace, key + ".endpointU", forward.u_ );
             appendVector( trace, key + ".endpointV", forward.v_ );
             appendVector( trace, key + ".endpointPressure", forward.pressure_ );
