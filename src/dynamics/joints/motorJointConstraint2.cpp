@@ -4,6 +4,8 @@
 #include <cassert>
 #include <cmath>
 
+#include "math/deterministicMath.h"
+
 namespace zonai
 {
 
@@ -106,7 +108,7 @@ void solveMotorJointConstraint( motorJointConstraint2& constraint, bodyState& bo
     if( constraint.angularHertz > 0.0f && constraint.maxAngularSpringImpulse > 0.0f && constraint.angularMass > 0.0f )
     {
         const rot2 rotation = Inverse( bodyStateA.deltaRotation ) * bodyStateB.deltaRotation * constraint.relativeRotation;
-        const float angle = std::atan2( rotation.s, rotation.c );
+        const float angle = deterministicAtan2( rotation.s, rotation.c );
         const float relativeVelocity = bodyStateB.angularVelocity - bodyStateA.angularVelocity;
 
         const float oldImpulse = constraint.angularSpringImpulse;
