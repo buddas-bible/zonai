@@ -748,7 +748,8 @@ struct fluidStateTraceProbe2
     // Do not write averaged apertures into the live endpoint field.
     static void captureSpaceTimeProjection( const fluidField2& before, const fluidField2& baseline,
         std::span<const fluidObstacleForce2> baselineFeedback, std::string& trace,
-        const std::string& key, int samples )
+        const std::string& key, int samples, const std::string& handoffKey,
+        bool requireTarget = true )
     {
         const auto& start = before.previousObstacles_;
         const auto& finish = before.frozenPressureObstacles_;
@@ -1001,7 +1002,8 @@ struct fluidStateTraceProbe2
             if( !e.isU && e.index == targetIndex ) { targetSpeed = velocity; targetOpening = e.a; }
             fluidQuadratic += e.a * difference * difference;
         }
-        if( targetOpening <= 0.0 ) throw std::runtime_error( key + " historical face absent from interval graph" );
+        if( requireTarget && targetOpening <= 0.0 )
+            throw std::runtime_error( key + " historical face absent from interval graph" );
         const auto emit = [&]( const std::string& name, auto value )
         {
             if( !std::isfinite( static_cast<double>( value ) ) )
@@ -1038,6 +1040,135 @@ struct fluidStateTraceProbe2
             "compatibility L1 %.9g closed-end faces %d\n",
             key.c_str(), peak, endOpenPeak, targetSpeed, targetOpening, iterations,
             trueSquared, unprojectedSquared, forceChange, torqueChange, compatibilityL1, closedEndFaces );
+
+        // R4b: independently reconstruct the integrated volume balance in
+        // physical units (m^2 for unit depth), then compare two endpoint
+        // representations. Neither representation is written to a field.
+        // The original volume source and predicted body response are fixed.
+        const double area = h * h;
+        std::vector<double> volume( n ), correctedVolume( n ), velocityHandoff( n ), fluxHandoff( n );
+        double sourceVolume = 0.0, sourceL1 = 0.0, compatibilityVolume = 0.0;
+        int closingCells = 0, openingCells = 0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            const double change = area * ( static_cast<double>( before.cellFluidFraction_[i] ) -
+                before.previousCellFluidFraction_[i] );
+            sourceVolume += change;
+            sourceL1 += std::abs( change );
+            closingCells += before.previousCellFluidFraction_[i] > 0.0f && before.cellFluidFraction_[i] == 0.0f;
+            openingCells += before.previousCellFluidFraction_[i] == 0.0f && before.cellFluidFraction_[i] > 0.0f;
+            double bodyVolume = 0.0;
+            for( std::size_t j = 0; j < owners; ++j )
+            {
+                const auto& c = coefficients[i * owners + j];
+                const auto& f = force[j];
+                bodyVolume += dt * dt * ( static_cast<double>( finish[j].inverseMass ) *
+                    ( c.fx * f.fx + c.fy * f.fy ) +
+                    static_cast<double>( finish[j].inverseInertia ) * c.torque * f.torque );
+            }
+            const double removed = dt * area * ( rawDivergence[i] + rhs[i] / scale );
+            compatibilityVolume += std::abs( removed );
+            volume[i] = change + bodyVolume;
+            correctedVolume[i] = volume[i] - removed;
+            velocityHandoff[i] = correctedVolume[i];
+            fluxHandoff[i] = correctedVolume[i];
+        }
+
+        double lostClosedTransfer = 0.0, velocityTransferError = 0.0, fluxTransferError = 0.0;
+        double fluxHandoffPeak = 0.0, velocityHandoffPeak = 0.0;
+        double targetFluxVelocity = 0.0, targetEndOpening = 0.0;
+        double intervalTransferL1 = 0.0;
+        int closedTransferFaces = 0;
+        const auto addTransfer = []( std::vector<double>& v, const edge& e, double amount )
+        {
+            v[e.first] += amount; v[e.second] -= amount;
+        };
+        for( const auto& e : edges )
+        {
+            const double velocity = e.velocity + dt / h * ( p[e.first] - p[e.second] );
+            const double transfer = dt * h * e.a * velocity;
+            intervalTransferL1 += std::abs( transfer );
+            addTransfer( volume, e, transfer );
+            addTransfer( correctedVolume, e, transfer );
+            const int stride = before.width_ + ( e.isU ? 1 : 0 );
+            const int x = e.index % stride, y = e.index / stride;
+            const double endOpen = e.isU ? before.cutCellUOpen( x, y ) : before.cutCellVOpen( x, y );
+            const double velocityTransfer = dt * h * endOpen * velocity;
+            double fluxTransfer = 0.0;
+            if( endOpen > 0.0 )
+            {
+                const double fluxVelocity = e.a * velocity / endOpen;
+                if( !std::isfinite( fluxVelocity ) )
+                    throw std::runtime_error( handoffKey + " nonfinite endpoint transfer velocity" );
+                fluxTransfer = dt * h * endOpen * fluxVelocity;
+                fluxHandoffPeak = std::max( fluxHandoffPeak, std::abs( fluxVelocity ) );
+                velocityHandoffPeak = std::max( velocityHandoffPeak, std::abs( velocity ) );
+                if( !e.isU && e.index == targetIndex )
+                {
+                    targetFluxVelocity = fluxVelocity; targetEndOpening = endOpen;
+                }
+            }
+            else
+            {
+                lostClosedTransfer += std::abs( transfer );
+                closedTransferFaces += transfer != 0.0;
+            }
+            velocityTransferError += std::abs( velocityTransfer - transfer );
+            fluxTransferError += std::abs( fluxTransfer - transfer );
+            addTransfer( velocityHandoff, e, velocityTransfer );
+            addTransfer( fluxHandoff, e, fluxTransfer );
+        }
+        // Volume residual must agree with the independently evaluated,
+        // unprojected matrix residual. Recompute it after ap was projected.
+        multiply( p, ap );
+        double identityError = 0.0, rawL1 = 0.0, rawSum = 0.0, correctedL1 = 0.0;
+        double correctedMax = 0.0, velocityL1 = 0.0, fluxL1 = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            const double expected = dt * area * ( ap[i] - rhs[i] ) / scale;
+            identityError = std::max( identityError, std::abs( correctedVolume[i] - expected ) );
+            rawSum += volume[i];
+            rawL1 += std::abs( volume[i] );
+            correctedL1 += std::abs( correctedVolume[i] );
+            correctedMax = std::max( correctedMax, std::abs( correctedVolume[i] ) );
+            velocityL1 += std::abs( velocityHandoff[i] );
+            fluxL1 += std::abs( fluxHandoff[i] );
+        }
+        if( identityError > 1.0e-12 * std::max( 1.0, sourceL1 + intervalTransferL1 ) )
+            throw std::runtime_error( handoffKey + " independent volume balance identity failed" );
+        const auto out = [&]( const char* name, auto value )
+        {
+            if( !std::isfinite( static_cast<double>( value ) ) )
+                throw std::runtime_error( handoffKey + name + " nonfinite handoff output" );
+            appendScalar( trace, handoffKey + name, value );
+        };
+        out( ".sourceVolume", sourceVolume );
+        out( ".sourceL1", sourceL1 );
+        out( ".compatibilityVolumeL1", compatibilityVolume );
+        out( ".closingCells", closingCells );
+        out( ".openingCells", openingCells );
+        out( ".intervalTransferL1", intervalTransferL1 );
+        out( ".rawVolumeSum", rawSum );
+        out( ".rawVolumeL1", rawL1 );
+        out( ".correctedVolumeL1", correctedL1 );
+        out( ".correctedVolumeMax", correctedMax );
+        out( ".identityError", identityError );
+        out( ".closedTransferFaces", closedTransferFaces );
+        out( ".lostClosedTransferL1", lostClosedTransfer );
+        out( ".velocityTransferErrorL1", velocityTransferError );
+        out( ".fluxTransferErrorL1", fluxTransferError );
+        out( ".velocityHandoffVolumeL1", velocityL1 );
+        out( ".fluxHandoffVolumeL1", fluxL1 );
+        out( ".velocityHandoffPeak", velocityHandoffPeak );
+        out( ".fluxHandoffPeak", fluxHandoffPeak );
+        out( ".targetEndOpening", targetEndOpening );
+        out( ".targetFluxVelocity", targetFluxVelocity );
+        std::printf( "%s source %.9g m^2 compatibility L1 %.9g raw volume L1 %.9g corrected L1 %.9g "
+            "identity error %.9g closing/opening cells %d/%d closed transfer %.9g "
+            "velocity handoff L1 %.9g flux handoff L1 %.9g flux-matched peak %.9g m/s target %.9g m/s\n",
+            handoffKey.c_str(), sourceVolume, compatibilityVolume, rawL1, correctedL1,
+            identityError, closingCells, openingCells, lostClosedTransfer,
+            velocityL1, fluxL1, fluxHandoffPeak, targetFluxVelocity );
     }
 
     static void captureProjection( const fluidField2& field, std::string& trace, const std::string& key )
@@ -2234,6 +2365,7 @@ std::string runNearClosedFaceScene()
     configureNearClosedFaceScene( scene, fluidSubsteps );
     auto& field = const_cast<fluidField2&>( *scene.getWindField() );
     std::optional<fluidField2> frozen;
+    std::array<std::optional<fluidField2>, 2> adjacent;
     std::vector<float> beforeU, beforeV;
     std::string trace, liveProjection;
     int calls = 0, frozenCalls = 0, validBudgets = 0;
@@ -2244,6 +2376,8 @@ std::string runNearClosedFaceScene()
     scene.setWindPrePressureSnapshotObserver( [&]( const fluidField2& snapshot )
     {
         if( frozenCalls == targetIndex ) frozen.emplace( snapshot );
+        else if( frozenCalls == targetIndex - 1 ) adjacent[0].emplace( snapshot );
+        else if( frozenCalls == targetIndex + 1 ) adjacent[1].emplace( snapshot );
         ++frozenCalls;
     } );
     probe::setStageObserver( field, [&]( const fluidField2& snapshot, int phase )
@@ -2370,7 +2504,25 @@ std::string runNearClosedFaceScene()
     probe::captureSpaceTimeAperture( *frozen, baseline, trace, "spaceTimeApertureAudit.frozen", 17, 13 );
     for( int samples : { 8, 32 } )
         probe::captureSpaceTimeProjection( *frozen, baseline, *a, trace,
-            "spaceTimeProjection.midpoint" + std::to_string( samples ), samples );
+            "spaceTimeProjection.midpoint" + std::to_string( samples ), samples,
+            "intervalHandoff.target.midpoint" + std::to_string( samples ) );
+    // Adjacent actual intervals exercise the transition before/after the spike.
+    // They are separate frozen solves, not a candidate-driven trajectory.
+    for( std::size_t i = 0; i < adjacent.size(); ++i )
+    {
+        check( adjacent[i].has_value(), "R4b adjacent frozen interval missing" );
+        const auto& input = *adjacent[i];
+        fluidField2 output = input;
+        output.setPrePressureSnapshotObserver( {} );
+        probe::setStageObserver( output, {} );
+        const auto feedback = output.replayFrozenCutCellPressure();
+        check( feedback && feedback->size() == 3 &&
+            output.getCutCellPressure().coupledStatus == fluidCoupledPressureStatus2::converged,
+            "R4b adjacent baseline projection failed" );
+        const auto key = "intervalHandoff.adjacent" + std::to_string( i == 0 ? targetIndex - 1 : targetIndex + 1 );
+        probe::captureSpaceTimeProjection( input, output, *feedback, trace,
+            key + ".projection", 64, key + ".volume", false );
+    }
     for( bool corrected : { false, true } )
     {
         fluidField2 input = *frozen;
