@@ -1,7 +1,5 @@
 #pragma once
 
-#include <cmath>
-
 #include "math/deterministicMath.h"
 #include "math/vec2.h"
 
@@ -15,16 +13,8 @@ struct rot2
 
     static rot2 FromRadians( float radians )
     {
-        // Use the validated binary32 rotation contract in its supported range.
-        // Preserve arbitrary-angle API behavior outside it until deterministic
-        // full-range argument reduction has been independently validated.
-        constexpr float limit = 0x1.921fb6p+2f;
-        if( radians >= -limit && radians <= limit )
-        {
-            const auto rotation = deterministicSinCosBounded( radians );
-            return { rotation.cosine, rotation.sine };
-        }
-        return { std::cos( radians ), std::sin( radians ) };
+        const auto rotation = deterministicSinCos( radians );
+        return { rotation.cosine, rotation.sine };
     }
 };
 
