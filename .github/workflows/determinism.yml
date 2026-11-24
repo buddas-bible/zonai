@@ -593,3 +593,53 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  forward-cost-research:
+    name: R4p Release forward predictor timing (research)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install CMake
+        run: python3 -m pip install "cmake>=4.2,<4.3"
+      - name: Record environment
+        run: |
+          cmake --version
+          g++ --version
+          uname -a
+          lscpu
+      - name: Build Release fixture
+        run: |
+          cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DZONAI_BUILD_TESTS=ON -DZONAI_BUILD_SANDBOX=OFF
+          cmake --build build-release --target fluidStateDeterminismTests --parallel 2
+      - name: Measure repeated matched forward trials
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./build-release/tests/fluidStateDeterminismTests --benchmark-forward > forward-cost.log
+          python3 - <<'PY'
+          import math, re, statistics
+          from pathlib import Path
+
+          pattern = re.compile(r"R4p timing interval=(\d+) variant=(\d+) repeat=(\d+) quadrature_ms=([\d.]+) linear_ms=([\d.]+) total_ms=([\d.]+)")
+          rows = {}
+          for line in Path("forward-cost.log").read_text().splitlines():
+              m = pattern.fullmatch(line)
+              if m:
+                  key = tuple(map(int, m.groups()[:3]))
+                  values = tuple(map(float, m.groups()[3:]))
+                  assert key not in rows and all(math.isfinite(v) and v >= 0 for v in values)
+                  rows[key] = values
+          assert set(rows) == {(i, v, r) for i in range(43, 47) for v in range(3) for r in range(3)}
+          for i in range(43, 47):
+              for v, label in enumerate(("fixed64", "fixed16", "adaptive16")):
+                  samples = [rows[i, v, r] for r in range(3)]
+                  med = [statistics.median(col) for col in zip(*samples)]
+                  print(f"R4p interval={i} {label}: median quadrature={med[0]:.3f} ms linear={med[1]:.3f} ms diagnostic total={med[2]:.3f} ms")
+          PY
+      - name: Upload timing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4p-forward-cost
+          path: forward-cost.log
+          retention-days: 14
