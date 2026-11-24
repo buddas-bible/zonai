@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -30,6 +31,17 @@ namespace zonai
 // allocator capacity, wall-clock timings, or disposable PCG scratch buffers.
 struct fluidStateTraceProbe2
 {
+    static inline bool benchmarkForward = false;
+    using benchmarkClock = std::chrono::steady_clock;
+    struct forwardTiming
+    {
+        double quadratureMs = 0.0, linearMs = 0.0, totalMs = 0.0;
+    };
+    static double elapsedMs( benchmarkClock::time_point start, benchmarkClock::time_point finish )
+    {
+        return std::chrono::duration<double, std::milli>( finish - start ).count();
+    }
+
     template<typename T>
     static void appendScalar( std::string& trace, const std::string& key, T value )
     {
@@ -1427,7 +1439,7 @@ struct fluidStateTraceProbe2
         bool requireTarget = true, int endpointDepth = 0,
         const std::string& topologyKey = {}, double responseScale = 1.0,
         continuationPressure* continuation = nullptr, int correctionBudget = 3,
-        bool adaptiveEndpoint = false )
+        bool adaptiveEndpoint = false, forwardTiming* timing = nullptr )
     {
         if( responseScale != 1.0 && responseScale != 0.75 )
             throw std::runtime_error( key + " unsupported free-body cadence response" );
@@ -1480,6 +1492,7 @@ struct fluidStateTraceProbe2
 
         // Preserve the old midpoint arithmetic and trace exactly unless
         // the explicit endpoint refinement experiment is requested.
+        const auto quadratureStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
         std::vector<int> missed;
         if( endpointDepth > 0 )
         {
@@ -1603,6 +1616,8 @@ struct fluidStateTraceProbe2
             }
         }
 
+        const auto linearStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
+        if( timing ) timing->quadratureMs = elapsedMs( quadratureStart, linearStart );
         std::vector<edge> edges;
         std::vector<double> rhs( n ), diagonal( n ), rawDivergence( n );
         std::vector<int> parent( n, -1 ), count( n );
@@ -1772,6 +1787,7 @@ struct fluidStateTraceProbe2
         }
         if( !std::isfinite( trueSquared ) || trueSquared > tolerance )
             throw std::runtime_error( key + " experimental true residual failed" );
+        if( timing ) timing->linearMs = elapsedMs( linearStart, benchmarkClock::now() );
 
         double peak = 0.0, endOpenPeak = 0.0, targetSpeed = 0.0, targetOpening = 0.0;
         double fluidQuadratic = 0.0, bodyQuadratic = 0.0, forceChange = 0.0, torqueChange = 0.0;
@@ -2248,8 +2264,9 @@ struct fluidStateTraceProbe2
         const fluidField2& laggedField, const std::vector<fluidShapeObstacle2>& start,
         const std::vector<fluidObstacleForce2>& laggedLoad, std::string& trace,
         int index, double responseScale = 1.0, int correctionBudget = 3, int samples = 64,
-        bool adaptiveEndpoint = false )
+        bool adaptiveEndpoint = false, forwardTiming* timing = nullptr )
     {
+        const auto totalStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
         using namespace sandbox;
         if( responseScale != 1.0 && responseScale != 0.75 )
             throw std::runtime_error( "R4l unsupported forward response scale" );
@@ -2337,7 +2354,7 @@ struct fluidStateTraceProbe2
         // Neither the lagged nor the candidate load is applied twice.
         captureSpaceTimeProjection( forward, laggedField, laggedLoad, scratch,
             key + ".projection", samples, key + ".volume", false, 16,
-            key + ".topology", responseScale, &candidate, correctionBudget, adaptiveEndpoint );
+            key + ".topology", responseScale, &candidate, correctionBudget, adaptiveEndpoint, timing );
         const auto corrected = run( candidate.feedback );
         rebuild( corrected );
 
@@ -2447,6 +2464,7 @@ struct fluidStateTraceProbe2
             "unsupported cells %d unsupported volume %.9g interval peak %.9g m/s negative volume %.9g\n",
             key.c_str(), predictedGap, rawL1, candidate.finalGap, unsupportedCells, unsupportedL1,
             candidate.intervalPeak, candidate.negativeVolume );
+        if( timing ) timing->totalMs = elapsedMs( totalStart, benchmarkClock::now() );
     }
 
     // R4j: actual persistent free-body World + MAC continuation. This
@@ -2632,6 +2650,31 @@ struct fluidStateTraceProbe2
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75, 0, 32 );
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75, 0, 16 );
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75, 0, 16, true );
+                    if( benchmarkForward )
+                    {
+                        // Existing calls warm up the same fixture. Rotate the
+                        // measured order; timing never enters the exact trace.
+                        std::array<std::string, 3> reference;
+                        for( int repeat = 0; repeat < 3; ++repeat )
+                        {
+                            for( int slot = 0; slot < 3; ++slot )
+                            {
+                                const int variant = ( slot + repeat ) % 3;
+                                const int samples = variant == 0 ? 64 : 16;
+                                const bool adaptive = variant == 2;
+                                forwardTiming timing;
+                                std::string measured;
+                                captureForwardPredictor( *pre, field, poses, feedback, measured,
+                                    initialIndex + step, 0.75, 0, samples, adaptive, &timing );
+                                if( repeat == 0 ) reference[variant] = std::move( measured );
+                                else if( measured != reference[variant] )
+                                    throw std::runtime_error( "R4p repeated benchmark trace differs" );
+                                std::printf( "R4p timing interval=%d variant=%d repeat=%d quadrature_ms=%.6f "
+                                    "linear_ms=%.6f total_ms=%.6f\\n", initialIndex + step, variant, repeat,
+                                    timing.quadratureMs, timing.linearMs, timing.totalMs );
+                            }
+                        }
+                    }
                 }
                 maxPeak = std::max( maxPeak, static_cast<double>( flow.maxFluidFaceSpeed ) );
                 maxContinuity = std::max( maxContinuity, static_cast<double>( flow.continuityRms ) );
@@ -4092,9 +4135,16 @@ int main( int argc, char** argv )
 {
     try
     {
+        if( argc == 2 && std::string( argv[1] ) == "--benchmark-forward" )
+        {
+            zonai::fluidStateTraceProbe2::benchmarkForward = true;
+            const auto trace = runNearClosedFaceScene();
+            if( trace.empty() ) throw std::runtime_error( "R4p missing fixture trace" );
+            return EXIT_SUCCESS;
+        }
         if( argc != 1 && ( argc != 3 || std::string( argv[1] ) != "--emit" ) )
         {
-            std::fprintf( stderr, "Usage: fluidStateDeterminismTests [--emit TRACE.tsv]\n" );
+            std::fprintf( stderr, "Usage: fluidStateDeterminismTests [--emit TRACE.tsv | --benchmark-forward]\n" );
             return EXIT_FAILURE;
         }
 
