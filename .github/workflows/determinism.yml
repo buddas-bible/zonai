@@ -423,9 +423,13 @@ jobs:
               "spaceTimeProjection": 56,
               "intervalHandoff": 140,
           }
-          if (set(totals) != set(expected) or
-              any(totals.get(scene) != n for scene, n in expected.items())):
-              sys.exit("Fluid trace coverage changed or space-time/cadence audit missing")
+          topology = totals.get("topologyQuadrature", 0)
+          # 49 second-resolution output rows, six quadrature headers,
+          # four fields per missed cell at each of the two resolutions.
+          if (set(totals) != set(expected) | {"topologyQuadrature"} or
+              any(totals.get(scene) != n for scene, n in expected.items()) or
+              topology < 63 or (topology - 55) % 8 != 0):
+              sys.exit("Fluid trace coverage changed or endpoint refinement audit missing")
 
           print("identical tested Fluid MAC, geometry/history and pressure feedback fields")
           PY
