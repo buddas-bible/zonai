@@ -1422,6 +1422,7 @@ struct fluidStateTraceProbe2
         std::vector<double> fluxVolume;
         std::vector<int> component;
         double trueResidualSquared = 0.0, initialResidualSquared = 0.0;
+        double seedResidualSquared = 0.0;
         int initialIterations = 0;
         int correctionIterations = 0, defectEvaluations = 0;
         int missedMidpointCells = 0, selectedEndpointDepth = 0;
@@ -1440,8 +1441,11 @@ struct fluidStateTraceProbe2
         const std::string& topologyKey = {}, double responseScale = 1.0,
         continuationPressure* continuation = nullptr, int correctionBudget = 3,
         bool adaptiveEndpoint = false, forwardTiming* timing = nullptr,
-        double relativeSquaredTolerance = 1.0e-16 )
+        double relativeSquaredTolerance = 1.0e-16, bool warmStart = false )
     {
+        if( warmStart && ( !continuation || !adaptiveEndpoint || correctionBudget != 0 ||
+            relativeSquaredTolerance != 1.0e-10 ) )
+            throw std::runtime_error( key + " invalid forward warm-start fixture" );
         if( relativeSquaredTolerance != 1.0e-16 && ( !adaptiveEndpoint ||
             ( relativeSquaredTolerance != 1.0e-12 && relativeSquaredTolerance != 1.0e-10 ) ) )
             throw std::runtime_error( key + " invalid experimental residual budget" );
@@ -1751,10 +1755,28 @@ struct fluidStateTraceProbe2
                 z[i] = diagonal[i] > 0.0 ? r[i] / diagonal[i] : 0.0;
             zeroMean( z );
         };
+        const double rhsSquared = dot( rhs, rhs );
+        if( warmStart )
+        {
+            if( baseline.pressure_.size() != n )
+                throw std::runtime_error( key + " invalid warm pressure size" );
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                if( !std::isfinite( baseline.pressure_[i] ) )
+                    throw std::runtime_error( key + " nonfinite warm pressure" );
+                if( parent[i] >= 0 ) p[i] = baseline.pressure_[i];
+            }
+            // Reproject the lagged pressure onto the forward graph gauge.
+            // Recompute the residual; no old search direction is reused.
+            zeroMean( p );
+            multiply( p, ap ); zeroMean( ap );
+            for( std::size_t i = 0; i < n; ++i ) r[i] = rhs[i] - ap[i];
+        }
         precondition();
         d = z;
         double rz = dot( r, z ), squared = dot( r, r );
-        const double initial = squared;
+        const double seedSquared = squared;
+        const double initial = warmStart ? rhsSquared : squared;
         const double tolerance = std::max( 1.0e-24, initial * relativeSquaredTolerance );
         int iterations = 0;
         for( ; iterations < 2000 && squared > tolerance; ++iterations )
@@ -2248,6 +2270,7 @@ struct fluidStateTraceProbe2
             }
             continuation->trueResidualSquared = trueSquared;
             continuation->initialResidualSquared = initial;
+            continuation->seedResidualSquared = seedSquared;
             continuation->initialIterations = iterations;
             continuation->correctionIterations = correctionIterations;
             continuation->defectEvaluations = defectEvaluations;
@@ -2270,7 +2293,7 @@ struct fluidStateTraceProbe2
         const std::vector<fluidObstacleForce2>& laggedLoad, std::string& trace,
         int index, double responseScale = 1.0, int correctionBudget = 3, int samples = 64,
         bool adaptiveEndpoint = false, forwardTiming* timing = nullptr,
-        double relativeSquaredTolerance = 1.0e-16 )
+        double relativeSquaredTolerance = 1.0e-16, bool warmStart = false )
     {
         const auto totalStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
         using namespace sandbox;
@@ -2285,7 +2308,9 @@ struct fluidStateTraceProbe2
         if( experimentalResidual && ( !adaptiveEndpoint ||
             ( relativeSquaredTolerance != 1.0e-12 && relativeSquaredTolerance != 1.0e-10 ) ) )
             throw std::runtime_error( "R4q invalid forward residual configuration" );
-        const std::string name = experimentalResidual ?
+        if( warmStart && ( !adaptiveEndpoint || relativeSquaredTolerance != 1.0e-10 ) )
+            throw std::runtime_error( "R4r invalid warm-start configuration" );
+        const std::string name = warmStart ? "forwardWarmStart" : experimentalResidual ?
             ( relativeSquaredTolerance == 1.0e-12 ? "forwardResidual12" : "forwardResidual10" ) :
             adaptiveEndpoint ? "forwardAdaptiveEndpoint" :
             samples != 64 ? "forwardQuadrature" + std::to_string( samples ) :
@@ -2367,7 +2392,7 @@ struct fluidStateTraceProbe2
         captureSpaceTimeProjection( forward, laggedField, laggedLoad, scratch,
             key + ".projection", samples, key + ".volume", false, 16,
             key + ".topology", responseScale, &candidate, correctionBudget, adaptiveEndpoint, timing,
-            relativeSquaredTolerance );
+            relativeSquaredTolerance, warmStart );
         const auto corrected = run( candidate.feedback );
         rebuild( corrected );
 
@@ -2481,6 +2506,14 @@ struct fluidStateTraceProbe2
             out( ".trueRelativeSquaredResidual", relativeSquared );
             std::printf( "%s initial PCG %d true relative squared residual %.9g target %.9g\n",
                 key.c_str(), candidate.initialIterations, relativeSquared, relativeSquaredTolerance );
+        }
+        if( warmStart )
+        {
+            const double seedRelativeSquared = candidate.initialResidualSquared > 0.0 ?
+                candidate.seedResidualSquared / candidate.initialResidualSquared : 0.0;
+            out( ".seedRelativeSquaredResidual", seedRelativeSquared );
+            std::printf( "%s seed relative squared residual %.9g\n",
+                key.c_str(), seedRelativeSquared );
         }
         std::printf( "%s predicted gap %.9g actual corrected gap %.9g m^2 modeled gap %.9g "
             "unsupported cells %d unsupported volume %.9g interval peak %.9g m/s negative volume %.9g\n",
@@ -2676,25 +2709,27 @@ struct fluidStateTraceProbe2
                         0.75, 0, 16, true, nullptr, 1.0e-12 );
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step,
                         0.75, 0, 16, true, nullptr, 1.0e-10 );
+                    captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step,
+                        0.75, 0, 16, true, nullptr, 1.0e-10, true );
                     if( benchmarkForward )
                     {
                         // Existing calls warm up the same fixture. Rotate the
                         // measured order; timing never enters the exact trace.
-                        std::array<std::string, 5> reference;
-                        for( int repeat = 0; repeat < 5; ++repeat )
+                        std::array<std::string, 6> reference;
+                        for( int repeat = 0; repeat < 6; ++repeat )
                         {
-                            for( int slot = 0; slot < 5; ++slot )
+                            for( int slot = 0; slot < 6; ++slot )
                             {
-                                const int variant = ( slot + repeat ) % 5;
+                                const int variant = ( slot + repeat ) % 6;
                                 const int samples = variant == 0 ? 64 : 16;
                                 const bool adaptive = variant >= 2;
                                 const double relativeSquaredTolerance = variant == 3 ? 1.0e-12 :
-                                    variant == 4 ? 1.0e-10 : 1.0e-16;
+                                    variant >= 4 ? 1.0e-10 : 1.0e-16;
                                 forwardTiming timing;
                                 std::string measured;
                                 captureForwardPredictor( *pre, field, poses, feedback, measured,
                                     initialIndex + step, 0.75, 0, samples, adaptive, &timing,
-                                    relativeSquaredTolerance );
+                                    relativeSquaredTolerance, variant == 5 );
                                 if( repeat == 0 ) reference[variant] = std::move( measured );
                                 else if( measured != reference[variant] )
                                     throw std::runtime_error( "R4p repeated benchmark trace differs" );
