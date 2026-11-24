@@ -1072,7 +1072,8 @@ struct fluidStateTraceProbe2
     static void captureGeometricConservation( const fluidField2& before,
         const intervalTransport& transport, const std::vector<fluidField2::coupledBodyResponse>& force,
         const std::vector<double>& bodyVolume, const std::vector<double>& removedVolume,
-        const std::vector<double>& correctedResidual, std::string& trace, const std::string& key )
+        const std::vector<double>& correctedResidual, std::string& trace, const std::string& key,
+        double responseScale = 1.0 )
     {
         const auto& obstacles = before.frozenPressureObstacles_;
         const std::size_t n = before.cellFluidFraction_.size();
@@ -1133,9 +1134,9 @@ struct fluidStateTraceProbe2
         std::vector<float> rotation( obstacles.size() );
         for( std::size_t j = 0; j < obstacles.size(); ++j )
         {
-            displacement[j] = { static_cast<float>( dt * dt * obstacles[j].inverseMass * force[j].fx ),
-                static_cast<float>( dt * dt * obstacles[j].inverseMass * force[j].fy ) };
-            rotation[j] = static_cast<float>( dt * dt * obstacles[j].inverseInertia * force[j].torque );
+            displacement[j] = { static_cast<float>( responseScale * ( dt * dt * obstacles[j].inverseMass * force[j].fx ) ),
+                static_cast<float>( responseScale * ( dt * dt * obstacles[j].inverseMass * force[j].fy ) ) };
+            rotation[j] = static_cast<float>( responseScale * ( dt * dt * obstacles[j].inverseInertia * force[j].torque ) );
             const auto k = ".body[" + std::to_string( j ) + "]";
             out( k + ".dx", displacement[j].x ); out( k + ".dy", displacement[j].y );
             out( k + ".angle", rotation[j] );
@@ -1406,8 +1407,10 @@ struct fluidStateTraceProbe2
         std::span<const fluidObstacleForce2> baselineFeedback, std::string& trace,
         const std::string& key, int samples, const std::string& handoffKey,
         bool requireTarget = true, int endpointDepth = 0,
-        const std::string& topologyKey = {} )
+        const std::string& topologyKey = {}, double responseScale = 1.0 )
     {
+        if( responseScale != 1.0 && responseScale != 0.75 )
+            throw std::runtime_error( key + " unsupported free-body cadence response" );
         const auto& start = before.previousObstacles_;
         const auto& finish = before.frozenPressureObstacles_;
         const std::size_t n = before.cellFluidFraction_.size(), owners = finish.size();
@@ -1677,16 +1680,16 @@ struct fluidStateTraceProbe2
                 {
                     const auto& c = coefficients[i * owners + j];
                     const auto& f = force[j];
-                    out[i] += static_cast<double>( finish[j].inverseMass ) * ( c.fx * f.fx + c.fy * f.fy ) +
-                        static_cast<double>( finish[j].inverseInertia ) * c.torque * f.torque;
+                    out[i] += responseScale * ( static_cast<double>( finish[j].inverseMass ) * ( c.fx * f.fx + c.fy * f.fy ) +
+                        static_cast<double>( finish[j].inverseInertia ) * c.torque * f.torque );
                 }
         };
         for( std::size_t i = 0; i < n; ++i )
             for( std::size_t j = 0; j < owners; ++j )
             {
                 const auto& c = coefficients[i * owners + j];
-                diagonal[i] += static_cast<double>( finish[j].inverseMass ) * ( c.fx * c.fx + c.fy * c.fy ) +
-                    static_cast<double>( finish[j].inverseInertia ) * c.torque * c.torque;
+                diagonal[i] += responseScale * ( static_cast<double>( finish[j].inverseMass ) * ( c.fx * c.fx + c.fy * c.fy ) +
+                    static_cast<double>( finish[j].inverseInertia ) * c.torque * c.torque );
             }
 
         std::vector<double> p( n ), r = rhs, z( n ), d( n ), ap( n );
@@ -1769,8 +1772,8 @@ struct fluidStateTraceProbe2
         for( std::size_t j = 0; j < owners; ++j )
         {
             const auto& f = force[j];
-            bodyQuadratic += static_cast<double>( finish[j].inverseMass ) * ( f.fx * f.fx + f.fy * f.fy ) +
-                static_cast<double>( finish[j].inverseInertia ) * f.torque * f.torque;
+            bodyQuadratic += responseScale * ( static_cast<double>( finish[j].inverseMass ) * ( f.fx * f.fx + f.fy * f.fy ) +
+                static_cast<double>( finish[j].inverseInertia ) * f.torque * f.torque );
             forceChange = std::max( forceChange, std::max(
                 std::abs( f.fx - baselineFeedback[j].force.x ), std::abs( f.fy - baselineFeedback[j].force.y ) ) );
             torqueChange = std::max( torqueChange, std::abs( f.torque - baselineFeedback[j].torque ) );
@@ -1819,9 +1822,9 @@ struct fluidStateTraceProbe2
             {
                 const auto& c = coefficients[i * owners + j];
                 const auto& f = force[j];
-                bodyVolume += dt * dt * ( static_cast<double>( finish[j].inverseMass ) *
+                bodyVolume += responseScale * ( dt * dt * ( static_cast<double>( finish[j].inverseMass ) *
                     ( c.fx * f.fx + c.fy * f.fy ) +
-                    static_cast<double>( finish[j].inverseInertia ) * c.torque * f.torque );
+                    static_cast<double>( finish[j].inverseInertia ) * c.torque * f.torque ) );
             }
             const double removed = dt * area * ( rawDivergence[i] + rhs[i] / scale );
             compatibilityVolume += std::abs( removed );
@@ -1942,7 +1945,7 @@ struct fluidStateTraceProbe2
         captureChronologicalTransport( before, transport, intervalUVelocity, intervalVVelocity,
             transportPanels, weightSum, trace, "chronologicalTracer." + handoffKey );
         captureGeometricConservation( before, transport, force, bodyVolumeAudit, removedVolumeAudit,
-            correctedVolume, trace, "geometricConservation." + handoffKey );
+            correctedVolume, trace, "geometricConservation." + handoffKey, responseScale );
         // R4g: defect correction on the fixed interval graph. The exact
         // binary32 endpoint rebuild replaces only the linearized volume
         // response in the residual, not the averaged L/B operator.
@@ -1969,9 +1972,9 @@ struct fluidStateTraceProbe2
             for( std::size_t j = 0; j < owners; ++j )
             {
                 const auto& f = force[j];
-                const vec2 dx{ static_cast<float>( dt * dt * finish[j].inverseMass * f.fx ),
-                    static_cast<float>( dt * dt * finish[j].inverseMass * f.fy ) };
-                const float da = static_cast<float>( dt * dt * finish[j].inverseInertia * f.torque );
+                const vec2 dx{ static_cast<float>( responseScale * ( dt * dt * finish[j].inverseMass * f.fx ) ),
+                    static_cast<float>( responseScale * ( dt * dt * finish[j].inverseMass * f.fy ) ) };
+                const float da = static_cast<float>( responseScale * ( dt * dt * finish[j].inverseInertia * f.torque ) );
                 if( !IsFinite( dx ) || !std::isfinite( da ) )
                     throw std::runtime_error( defectKey + " invalid trial displacement" );
                 const rot2 delta = rot2::FromRadians( da );
@@ -3483,6 +3486,26 @@ std::string runNearClosedFaceScene()
         probe::captureSpaceTimeProjection( *frozen, baseline, *a, trace,
             "spaceTimeProjection.midpoint" + std::to_string( samples ), samples,
             "intervalHandoff.target.midpoint" + std::to_string( samples ) );
+    // R4i: separate diagnostic namespace for the two-substep free-body
+    // displacement model. Preserve all prior trace rows and their keys.
+    const auto cadenceReplay = [&]( const fluidField2& input, const fluidField2& output,
+        std::span<const fluidObstacleForce2> feedback, const std::string& label,
+        bool requireTarget, int endpointDepth )
+    {
+        std::string variant;
+        probe::captureSpaceTimeProjection( input, output, feedback, variant,
+            label + ".projection", endpointDepth > 0 ? 64 : 32,
+            label + ".volume", requireTarget, endpointDepth, label + ".topology", 0.75 );
+        std::size_t begin = 0;
+        while( begin < variant.size() )
+        {
+            const auto end = variant.find( '\n', begin );
+            check( end != std::string::npos, "R4i unterminated cadence trace" );
+            trace.append( "cadencePressure." ).append( variant, begin, end - begin + 1 );
+            begin = end + 1;
+        }
+    };
+    cadenceReplay( *frozen, baseline, *a, "cadence43", true, 0 );
     // Adjacent actual intervals exercise the transition before/after the spike.
     // They are separate frozen solves, not a candidate-driven trajectory.
     for( std::size_t i = 0; i < adjacent.size(); ++i )
@@ -3504,6 +3527,8 @@ std::string runNearClosedFaceScene()
             probe::captureSpaceTimeProjection( input, output, *feedback, trace,
                 "topologyQuadrature.depth16.projection", 64, "topologyQuadrature.depth16.volume",
                 false, 16, "topologyQuadrature.depth16" );
+        if( i == 1 )
+            cadenceReplay( input, output, *feedback, "cadence44", false, 16 );
     }
     for( bool corrected : { false, true } )
     {
