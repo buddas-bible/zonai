@@ -422,6 +422,7 @@ jobs:
               "nearClosedCadence": 16320,
               "spaceTimeProjection": 56,
               "intervalHandoff": 140,
+              "intervalTransport": 41250,
           }
           topology = totals.get("topologyQuadrature", 0)
           # 49 second-resolution output rows, six quadrature headers,
