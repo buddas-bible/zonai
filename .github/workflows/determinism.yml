@@ -447,6 +447,7 @@ jobs:
               "forwardActualGeometry": 38,
               "forwardGeometryFeedback": 60,
               "forwardRelaxedGeometryFeedback": 300,
+              "forwardGeometrySensitivity": 80,
           }
           topology = totals.get("topologyQuadrature", 0)
           # 49 second-resolution output rows, six quadrature headers,
