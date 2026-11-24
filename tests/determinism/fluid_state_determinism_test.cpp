@@ -3107,110 +3107,153 @@ struct fluidStateTraceProbe2
                 // R4z: bounded fixed-point experiment. Every pressure load is
                 // replayed from the original World state, never accumulated
                 // on a previous trial's endpoint. Keep the accepted trajectory.
-                auto estimate = corrected;
-                auto estimateLoad = candidate.feedback;
-                for( int pass = 0; pass < 3; ++pass )
+                // Compare deterministic load relaxation without treating the
+                // partially applied load as the full pressure solution.
+                for( float relaxation : { 1.0f, 0.5f, 0.25f } )
                 {
-                    const std::string iterationKey = "forwardGeometryFeedback.interval" +
-                        std::to_string( index ) + ".pass" + std::to_string( pass + 1 );
-                    fluidField2 fixed = forward;
-                    fixed.updateObstacles( estimate );
-                    fixed.updateCutCellGeometry( estimate );
-                    if( !fixed.cutCellTransition_.usedDisjointAnalyticGeometry )
-                        throw std::runtime_error( iterationKey + " estimated geometry not analytic" );
-                    fixed.previousCellFluidFraction_ = startFraction;
-                    fixed.previousObstacles_ = start;
-                    fixed.frozenPressureObstacles_ = estimate;
-                    fixed.volumeSourceValid_ = true;
-                    fixed.u_ = input.u_; fixed.v_ = input.v_;
-                    continuationPressure trial;
-                    std::string trialScratch;
-                    captureSpaceTimeProjection( fixed, forward, estimateLoad, trialScratch,
-                        iterationKey + ".projection", 16, iterationKey + ".volume", false,
-                        16, iterationKey + ".topology", 0.0, &trial, 0, true,
-                        nullptr, 1.0e-16, false, {}, true, true );
-                    const auto nextEstimate = run( trial.feedback );
-                    fluidField2 actual = fixed;
-                    actual.updateObstacles( nextEstimate );
-                    actual.updateCutCellGeometry( nextEstimate );
-                    if( !actual.cutCellTransition_.usedDisjointAnalyticGeometry )
-                        throw std::runtime_error( iterationKey + " loaded geometry not analytic" );
-                    double negative = 0.0, minimum = 0.0, guessedGap = 0.0, actualGap = 0.0;
-                    double maxResidual = 0.0, geometryDelta = 0.0, unsupportedVolume = 0.0;
-                    int negativeCells = 0, unsupportedCells = 0, uncoveredFaces = 0;
-                    for( std::size_t i = 0; i < trial.fluxVolume.size(); ++i )
+                    auto estimate = corrected;
+                    auto estimateLoad = candidate.feedback;
+                    for( int pass = 0; pass < ( relaxation == 1.0f ? 3 : 6 ); ++pass )
                     {
-                        const double volume = trial.fluxVolume[i];
-                        const double guessed = area * fixed.cellFluidFraction_[i];
-                        const double measured = area * actual.cellFluidFraction_[i];
-                        const double error = std::abs( measured - volume );
-                        if( volume < 0.0 ) { negative -= volume; ++negativeCells; }
-                        minimum = std::min( minimum, volume );
-                        guessedGap += std::abs( guessed - volume );
-                        actualGap += error;
-                        maxResidual = std::max( maxResidual, error );
-                        geometryDelta += std::abs( measured - guessed );
-                        if( trial.component[i] < 0 )
+                        const std::string iterationKey = std::string( relaxation == 1.0f ?
+                            "forwardGeometryFeedback.interval" : "forwardRelaxedGeometryFeedback.interval" ) +
+                            std::to_string( index ) + ( relaxation == 1.0f ? "" :
+                                relaxation == 0.5f ? ".half" : ".quarter" ) +
+                            ".pass" + std::to_string( pass + 1 );
+                        fluidField2 fixed = forward;
+                        fixed.updateObstacles( estimate );
+                        fixed.updateCutCellGeometry( estimate );
+                        if( !fixed.cutCellTransition_.usedDisjointAnalyticGeometry )
+                            throw std::runtime_error( iterationKey + " estimated geometry not analytic" );
+                        fixed.previousCellFluidFraction_ = startFraction;
+                        fixed.previousObstacles_ = start;
+                        fixed.frozenPressureObstacles_ = estimate;
+                        fixed.volumeSourceValid_ = true;
+                        fixed.u_ = input.u_; fixed.v_ = input.v_;
+                        continuationPressure trial;
+                        std::string trialScratch;
+                        captureSpaceTimeProjection( fixed, forward, estimateLoad, trialScratch,
+                            iterationKey + ".projection", 16, iterationKey + ".volume", false,
+                            16, iterationKey + ".topology", 0.0, &trial, 0, true,
+                            nullptr, 1.0e-16, false, {}, true, true );
+                        auto appliedLoad = trial.feedback;
+                        if( relaxation != 1.0f )
+                            for( std::size_t j = 0; j < appliedLoad.size(); ++j )
+                            {
+                                appliedLoad[j].force = estimateLoad[j].force +
+                                    relaxation * ( trial.feedback[j].force - estimateLoad[j].force );
+                                appliedLoad[j].torque = estimateLoad[j].torque +
+                                    relaxation * ( trial.feedback[j].torque - estimateLoad[j].torque );
+                            }
+                        const auto nextEstimate = run( appliedLoad );
+                        fluidField2 actual = fixed;
+                        actual.updateObstacles( nextEstimate );
+                        actual.updateCutCellGeometry( nextEstimate );
+                        if( !actual.cutCellTransition_.usedDisjointAnalyticGeometry )
+                            throw std::runtime_error( iterationKey + " loaded geometry not analytic" );
+                        double negative = 0.0, minimum = 0.0, guessedGap = 0.0, actualGap = 0.0;
+                        double maxResidual = 0.0, geometryDelta = 0.0, unsupportedVolume = 0.0;
+                        int negativeCells = 0, unsupportedCells = 0, uncoveredFaces = 0;
+                        for( std::size_t i = 0; i < trial.fluxVolume.size(); ++i )
                         {
-                            unsupportedCells += error != 0.0;
-                            unsupportedVolume += error;
+                            const double volume = trial.fluxVolume[i];
+                            const double guessed = area * fixed.cellFluidFraction_[i];
+                            const double measured = area * actual.cellFluidFraction_[i];
+                            const double error = std::abs( measured - volume );
+                            if( volume < 0.0 ) { negative -= volume; ++negativeCells; }
+                            minimum = std::min( minimum, volume );
+                            guessedGap += std::abs( guessed - volume );
+                            actualGap += error;
+                            maxResidual = std::max( maxResidual, error );
+                            geometryDelta += std::abs( measured - guessed );
+                            if( trial.component[i] < 0 )
+                            {
+                                unsupportedCells += error != 0.0;
+                                unsupportedVolume += error;
+                            }
                         }
+                        for( int y = 0; y < actual.height_; ++y )
+                            for( int x = 1; x < actual.width_; ++x )
+                                uncoveredFaces += actual.cutCellUOpen( x, y ) > 0.0f &&
+                                    trial.meanU[actual.uIndex( x, y )] <= 0.0;
+                        for( int y = 1; y < actual.height_; ++y )
+                            for( int x = 0; x < actual.width_; ++x )
+                                uncoveredFaces += actual.cutCellVOpen( x, y ) > 0.0f &&
+                                    trial.meanV[actual.vIndex( x, y )] <= 0.0;
+                        double maxForceDelta = 0.0, maxTorqueDelta = 0.0;
+                        double maxCenterDelta = 0.0, maxRotationDelta = 0.0;
+                        for( std::size_t j = 0; j < estimate.size(); ++j )
+                        {
+                            maxForceDelta = std::max( maxForceDelta, std::max(
+                                std::abs( static_cast<double>( trial.feedback[j].force.x ) - estimateLoad[j].force.x ),
+                                std::abs( static_cast<double>( trial.feedback[j].force.y ) - estimateLoad[j].force.y ) ) );
+                            maxTorqueDelta = std::max( maxTorqueDelta, std::abs(
+                                static_cast<double>( trial.feedback[j].torque ) - estimateLoad[j].torque ) );
+                            maxCenterDelta = std::max( maxCenterDelta, std::max(
+                                std::abs( static_cast<double>( nextEstimate[j].center.x ) - estimate[j].center.x ),
+                                std::abs( static_cast<double>( nextEstimate[j].center.y ) - estimate[j].center.y ) ) );
+                            maxRotationDelta = std::max( maxRotationDelta, std::max(
+                                std::abs( static_cast<double>( nextEstimate[j].transform.rotation.c ) -
+                                    estimate[j].transform.rotation.c ),
+                                std::abs( static_cast<double>( nextEstimate[j].transform.rotation.s ) -
+                                    estimate[j].transform.rotation.s ) ) );
+                        }
+                        const auto emit = [&]( const char* suffix, auto value )
+                        {
+                            if( !std::isfinite( static_cast<double>( value ) ) )
+                                throw std::runtime_error( iterationKey + suffix + " nonfinite geometry feedback" );
+                            appendScalar( trace, iterationKey + suffix, value );
+                        };
+                        const int target = actual.cellIndex( 17, 14 );
+                        emit( ".targetLedger", trial.fluxVolume[target] );
+                        emit( ".targetGuess", area * fixed.cellFluidFraction_[target] );
+                        emit( ".targetActual", area * actual.cellFluidFraction_[target] );
+                        emit( ".negativeVolume", negative ); emit( ".negativeCells", negativeCells );
+                        emit( ".minimumVolume", minimum ); emit( ".guessedGap", guessedGap );
+                        emit( ".actualGap", actualGap ); emit( ".maxActualResidual", maxResidual );
+                        emit( ".geometryDeltaL1", geometryDelta ); emit( ".unsupportedCells", unsupportedCells );
+                        emit( ".unsupportedVolume", unsupportedVolume ); emit( ".uncoveredActualFaces", uncoveredFaces );
+                        emit( ".intervalPeak", trial.intervalPeak ); emit( ".initialIterations", trial.initialIterations );
+                        emit( ".trueResidualSquared", trial.trueResidualSquared );
+                        emit( ".maxForceDelta", maxForceDelta ); emit( ".maxTorqueDelta", maxTorqueDelta );
+                        emit( ".maxCenterComponentDelta", maxCenterDelta );
+                        emit( ".maxRotationComponentDelta", maxRotationDelta );
+                        std::printf( "%s ledger %.9g negative %.9g (%d cells) guessed gap %.9g actual gap %.9g "
+                            "geometry delta %.9g unsupported %d uncovered faces %d peak %.9g "
+                            "PCG %d force delta %.9g torque delta %.9g center delta %.9g rotation delta %.9g\n",
+                            iterationKey.c_str(), trial.fluxVolume[target], negative, negativeCells,
+                            guessedGap, actualGap, geometryDelta, unsupportedCells, uncoveredFaces,
+                            trial.intervalPeak, trial.initialIterations, maxForceDelta, maxTorqueDelta,
+                            maxCenterDelta, maxRotationDelta );
+                        if( relaxation != 1.0f )
+                        {
+                            double appliedForceDelta = 0.0, appliedTorqueDelta = 0.0;
+                            double unappliedForce = 0.0, unappliedTorque = 0.0;
+                            for( std::size_t j = 0; j < appliedLoad.size(); ++j )
+                            {
+                                appliedForceDelta = std::max( appliedForceDelta, std::max(
+                                    std::abs( static_cast<double>( appliedLoad[j].force.x ) - estimateLoad[j].force.x ),
+                                    std::abs( static_cast<double>( appliedLoad[j].force.y ) - estimateLoad[j].force.y ) ) );
+                                appliedTorqueDelta = std::max( appliedTorqueDelta, std::abs(
+                                    static_cast<double>( appliedLoad[j].torque ) - estimateLoad[j].torque ) );
+                                unappliedForce = std::max( unappliedForce, std::max(
+                                    std::abs( static_cast<double>( trial.feedback[j].force.x ) - appliedLoad[j].force.x ),
+                                    std::abs( static_cast<double>( trial.feedback[j].force.y ) - appliedLoad[j].force.y ) ) );
+                                unappliedTorque = std::max( unappliedTorque, std::abs(
+                                    static_cast<double>( trial.feedback[j].torque ) - appliedLoad[j].torque ) );
+                            }
+                            emit( ".relaxation", relaxation );
+                            emit( ".appliedForceDelta", appliedForceDelta );
+                            emit( ".appliedTorqueDelta", appliedTorqueDelta );
+                            emit( ".unappliedForce", unappliedForce );
+                            emit( ".unappliedTorque", unappliedTorque );
+                            std::printf( "%s applied force delta %.9g torque delta %.9g "
+                                "unapplied force %.9g torque %.9g\n", iterationKey.c_str(),
+                                appliedForceDelta, appliedTorqueDelta, unappliedForce, unappliedTorque );
+                        }
+                        estimate = nextEstimate;
+                        estimateLoad = std::move( appliedLoad );
                     }
-                    for( int y = 0; y < actual.height_; ++y )
-                        for( int x = 1; x < actual.width_; ++x )
-                            uncoveredFaces += actual.cutCellUOpen( x, y ) > 0.0f &&
-                                trial.meanU[actual.uIndex( x, y )] <= 0.0;
-                    for( int y = 1; y < actual.height_; ++y )
-                        for( int x = 0; x < actual.width_; ++x )
-                            uncoveredFaces += actual.cutCellVOpen( x, y ) > 0.0f &&
-                                trial.meanV[actual.vIndex( x, y )] <= 0.0;
-                    double maxForceDelta = 0.0, maxTorqueDelta = 0.0;
-                    double maxCenterDelta = 0.0, maxRotationDelta = 0.0;
-                    for( std::size_t j = 0; j < estimate.size(); ++j )
-                    {
-                        maxForceDelta = std::max( maxForceDelta, std::max(
-                            std::abs( static_cast<double>( trial.feedback[j].force.x ) - estimateLoad[j].force.x ),
-                            std::abs( static_cast<double>( trial.feedback[j].force.y ) - estimateLoad[j].force.y ) ) );
-                        maxTorqueDelta = std::max( maxTorqueDelta, std::abs(
-                            static_cast<double>( trial.feedback[j].torque ) - estimateLoad[j].torque ) );
-                        maxCenterDelta = std::max( maxCenterDelta, std::max(
-                            std::abs( static_cast<double>( nextEstimate[j].center.x ) - estimate[j].center.x ),
-                            std::abs( static_cast<double>( nextEstimate[j].center.y ) - estimate[j].center.y ) ) );
-                        maxRotationDelta = std::max( maxRotationDelta, std::max(
-                            std::abs( static_cast<double>( nextEstimate[j].transform.rotation.c ) -
-                                estimate[j].transform.rotation.c ),
-                            std::abs( static_cast<double>( nextEstimate[j].transform.rotation.s ) -
-                                estimate[j].transform.rotation.s ) ) );
-                    }
-                    const auto emit = [&]( const char* suffix, auto value )
-                    {
-                        if( !std::isfinite( static_cast<double>( value ) ) )
-                            throw std::runtime_error( iterationKey + suffix + " nonfinite geometry feedback" );
-                        appendScalar( trace, iterationKey + suffix, value );
-                    };
-                    const int target = actual.cellIndex( 17, 14 );
-                    emit( ".targetLedger", trial.fluxVolume[target] );
-                    emit( ".targetGuess", area * fixed.cellFluidFraction_[target] );
-                    emit( ".targetActual", area * actual.cellFluidFraction_[target] );
-                    emit( ".negativeVolume", negative ); emit( ".negativeCells", negativeCells );
-                    emit( ".minimumVolume", minimum ); emit( ".guessedGap", guessedGap );
-                    emit( ".actualGap", actualGap ); emit( ".maxActualResidual", maxResidual );
-                    emit( ".geometryDeltaL1", geometryDelta ); emit( ".unsupportedCells", unsupportedCells );
-                    emit( ".unsupportedVolume", unsupportedVolume ); emit( ".uncoveredActualFaces", uncoveredFaces );
-                    emit( ".intervalPeak", trial.intervalPeak ); emit( ".initialIterations", trial.initialIterations );
-                    emit( ".trueResidualSquared", trial.trueResidualSquared );
-                    emit( ".maxForceDelta", maxForceDelta ); emit( ".maxTorqueDelta", maxTorqueDelta );
-                    emit( ".maxCenterComponentDelta", maxCenterDelta );
-                    emit( ".maxRotationComponentDelta", maxRotationDelta );
-                    std::printf( "%s ledger %.9g negative %.9g (%d cells) guessed gap %.9g actual gap %.9g "
-                        "geometry delta %.9g unsupported %d uncovered faces %d peak %.9g "
-                        "PCG %d force delta %.9g torque delta %.9g center delta %.9g rotation delta %.9g\n",
-                        iterationKey.c_str(), trial.fluxVolume[target], negative, negativeCells,
-                        guessedGap, actualGap, geometryDelta, unsupportedCells, uncoveredFaces,
-                        trial.intervalPeak, trial.initialIterations, maxForceDelta, maxTorqueDelta,
-                        maxCenterDelta, maxRotationDelta );
-                    estimate = nextEstimate;
-                    estimateLoad = std::move( trial.feedback );
                 }
             }
             appendVector( trace, key + ".endpointU", forward.u_ );
