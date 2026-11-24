@@ -1108,24 +1108,34 @@ std::string runWorldFluidScene( const char* name, bool drag,
                         // received converged Fluid pressure. Check actual
                         // captured solver fields, not broad-phase pairs.
                         const auto& fields = record.snapshot.fields;
-                        bool positiveNormal = false, sharedIsland = false;
+                        bool sharedImpulse = false;
+                        const auto fieldValue = [&]( const std::string& name )
+                        {
+                            const auto item = std::find_if( fields.begin(), fields.end(),
+                                [&]( const auto& value ) { return value.name == name; } );
+                            check( item != fields.end(), "R3u missing island range field" );
+                            return item->bits;
+                        };
                         for( const auto& f : fields )
                         {
-                            if( f.name.starts_with( "contact[" ) &&
-                                f.name.ends_with( ".normalImpulse" ) && f.byteCount == 4 )
-                                positiveNormal |= std::bit_cast<float>(
-                                    static_cast<std::uint32_t>( f.bits ) ) > 0.0f;
-                            if( f.name.starts_with( "island[" ) &&
-                                f.name.ends_with( ".jointCount" ) && f.bits >= 2 )
+                            if( !f.name.starts_with( "island[" ) ||
+                                !f.name.ends_with( ".jointCount" ) || f.bits < 2 ) continue;
+                            const auto island = f.name.substr( 0, f.name.size() - 11 );
+                            const auto first = fieldValue( island + ".contactStart" );
+                            const auto count = fieldValue( island + ".contactCount" );
+                            // Contact snapshots follow the flat island graph order.
+                            for( auto c = first; c < first + count; ++c )
                             {
-                                const auto contactKey = f.name.substr( 0, f.name.size() - 11 ) + ".contactCount";
-                                const auto match = std::find_if( fields.begin(), fields.end(),
-                                    [&]( const auto& item ) { return item.name == contactKey; } );
-                                sharedIsland |= match != fields.end() && match->bits > 0;
+                                const auto contact = "contact[" + std::to_string( c ) + "].";
+                                for( const auto& point : fields )
+                                    if( point.name.starts_with( contact ) &&
+                                        point.name.ends_with( ".normalImpulse" ) && point.byteCount == 4 )
+                                        sharedImpulse |= std::bit_cast<float>(
+                                            static_cast<std::uint32_t>( point.bits ) ) > 0.0f;
                             }
                         }
                         const auto interval = i / recordsPerInterval;
-                        combined[interval] |= positiveNormal && sharedIsland && coupledIntervals[interval];
+                        combined[interval] |= sharedImpulse && coupledIntervals[interval];
                     }
                 }
                 if( contactScenario )
