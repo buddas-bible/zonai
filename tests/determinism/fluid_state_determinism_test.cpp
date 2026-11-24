@@ -1421,6 +1421,7 @@ struct fluidStateTraceProbe2
         // Signed interval transfers accumulated in physical volume units.
         std::vector<double> fluxVolume;
         std::vector<double> meanU, meanV, intervalU, intervalV;
+        std::vector<double> bodyVolume, compatibilityVolume, linearVolumeResidual;
         std::vector<int> component;
         double trueResidualSquared = 0.0, initialResidualSquared = 0.0;
         double seedResidualSquared = 0.0;
@@ -2269,6 +2270,12 @@ struct fluidStateTraceProbe2
                 continuation->meanU = meanU; continuation->meanV = meanV;
                 continuation->intervalU.resize( meanU.size() );
                 continuation->intervalV.resize( meanV.size() );
+                if( correctionBudget == 0 )
+                {
+                    continuation->bodyVolume = bodyVolumeAudit;
+                    continuation->compatibilityVolume = removedVolumeAudit;
+                    continuation->linearVolumeResidual = correctedVolume;
+                }
             }
             for( std::size_t i = 0; i < n; ++i )
                 continuation->fluxVolume[i] = area * before.previousCellFluidFraction_[i];
@@ -2630,6 +2637,86 @@ struct fluidStateTraceProbe2
         std::vector<fluidObstacleForce2> feedback;
     };
 
+    // R4x: localize the minimum supported ledger volume without changing
+    // the solver, the endpoint state or the deterministic traversal.
+    static void captureMinimumVolumeCell( const fluidField2& input,
+        const fluidField2& endpoint, const std::vector<float>& startFraction,
+        const std::vector<float>& predictedFraction, const continuationPressure& candidate,
+        float timeStep, std::string& trace, int index )
+    {
+        const std::string key = "forwardPersistentMinimumVolume.interval" + std::to_string( index );
+        const double h = input.cellSize_, dt = timeStep, area = h * h;
+        const std::size_t n = startFraction.size();
+        if( candidate.bodyVolume.size() != n || candidate.compatibilityVolume.size() != n ||
+            candidate.linearVolumeResidual.size() != n )
+            throw std::runtime_error( key + " missing zero-correction decomposition" );
+        int minimum = -1, negativeCount = 0;
+        double negativeSum = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            const double volume = candidate.fluxVolume[i];
+            if( volume < 0.0 )
+            {
+                ++negativeCount;
+                negativeSum -= volume;
+                if( candidate.component[i] < 0 )
+                    throw std::runtime_error( key + " negative volume outside interval support" );
+            }
+            if( candidate.component[i] >= 0 &&
+                ( minimum < 0 || volume < candidate.fluxVolume[minimum] ) )
+                minimum = static_cast<int>( i );
+        }
+        if( minimum < 0 || negativeSum != candidate.negativeVolume )
+            throw std::runtime_error( key + " inconsistent negative-volume ledger" );
+        const auto out = [&]( const std::string& suffix, auto value )
+        {
+            if( !std::isfinite( static_cast<double>( value ) ) )
+                throw std::runtime_error( key + suffix + " nonfinite cell diagnostic" );
+            appendScalar( trace, key + suffix, value );
+        };
+        const int x = minimum % input.width_, y = minimum / input.width_;
+        const double start = area * startFraction[minimum];
+        const double predicted = area * predictedFraction[minimum];
+        const double actual = area * endpoint.cellFluidFraction_[minimum];
+        const double ledger = candidate.fluxVolume[minimum];
+        const double body = candidate.bodyVolume[minimum];
+        const double compatibility = candidate.compatibilityVolume[minimum];
+        const double linear = candidate.linearVolumeResidual[minimum];
+        const double identity = predicted + body - compatibility - linear - ledger;
+        double inflow = 0.0, outflow = 0.0;
+        const auto face = [&]( const char* name, bool isU, int fx, int fy, double sign )
+        {
+            const int f = isU ? input.uIndex( fx, fy ) : input.vIndex( fx, fy );
+            const double startOpen = isU ? input.cutCellUOpen( fx, fy ) : input.cutCellVOpen( fx, fy );
+            const double mean = isU ? candidate.meanU[f] : candidate.meanV[f];
+            const double actualOpen = isU ? endpoint.cutCellUOpen( fx, fy ) : endpoint.cutCellVOpen( fx, fy );
+            const double velocity = isU ? candidate.intervalU[f] : candidate.intervalV[f];
+            const double transfer = sign * ( dt * h * mean * velocity );
+            inflow += std::max( 0.0, transfer ); outflow += std::max( 0.0, -transfer );
+            const std::string prefix = std::string( "." ) + name;
+            out( prefix + ".startOpen", startOpen ); out( prefix + ".meanOpen", mean );
+            out( prefix + ".actualOpen", actualOpen ); out( prefix + ".velocity", velocity );
+            out( prefix + ".inwardTransfer", transfer );
+            if( negativeCount > 0 )
+                std::printf( "%s%s aperture %.9g / %.9g / %.9g velocity %.9g inward %.9g m^2\n",
+                    key.c_str(), prefix.c_str(), startOpen, mean, actualOpen, velocity, transfer );
+        };
+        face( "west", true, x, y, 1.0 ); face( "east", true, x + 1, y, -1.0 );
+        face( "south", false, x, y, 1.0 ); face( "north", false, x, y + 1, -1.0 );
+        if( std::abs( identity ) > 1.0e-12 ||
+            std::abs( start + inflow - outflow - ledger ) > 1.0e-12 )
+            throw std::runtime_error( key + " local volume identity failed" );
+        out( ".cell", minimum ); out( ".negativeCount", negativeCount ); out( ".negativeSum", negativeSum );
+        out( ".start", start ); out( ".predicted", predicted ); out( ".actual", actual );
+        out( ".ledger", ledger ); out( ".bodyResponse", body ); out( ".compatibilityRemoved", compatibility );
+        out( ".linearResidual", linear ); out( ".identityError", identity );
+        out( ".inflow", inflow ); out( ".outflow", outflow );
+        std::printf( "%s cell (%d,%d) negative cells %d start %.9g predicted %.9g actual %.9g "
+            "ledger %.9g body %.9g compatibility %.9g linear %.9g inflow %.9g outflow %.9g m^2\n",
+            key.c_str(), x, y, negativeCount, start, predicted, actual, ledger, body, compatibility,
+            linear, inflow, outflow );
+    }
+
     // R4k: independent forward pressure trial at a sampled R4j start.
     // Freeze the incoming MAC trial velocity: no forward advection or
     // persistent candidate commit is implied by this geometry-only test.
@@ -2900,6 +2987,7 @@ struct fluidStateTraceProbe2
         if( committed )
         {
             if( unsupportedCells != 0 ) throw std::runtime_error( key + " unsupported corrected volume" );
+            captureMinimumVolumeCell( input, forward, startFraction, predictedFraction, candidate, dt, trace, index );
             appendVector( trace, key + ".endpointU", forward.u_ );
             appendVector( trace, key + ".endpointV", forward.v_ );
             appendVector( trace, key + ".endpointPressure", forward.pressure_ );
