@@ -6,6 +6,7 @@
 
 #include "collision/aabb2.h"
 #include "collision/shapeProxy2.h"
+#include "math/deterministicMath.h"
 #include "math/transform2.h"
 
 namespace zonai
@@ -23,9 +24,9 @@ inline bool TryComputeRotatingSweepBounds( const shapeProxy2& proxy, const trans
         !std::isfinite( proxy.radius ) || proxy.radius < 0.0f ||
         !std::isfinite( rotationRadians ) || std::fabs( rotationRadians ) > 1.5707963267948966f ) return false;
 
-    const double startLength = std::hypot( static_cast<double>( start.rotation.c ),
+    const double startLength = deterministicHypot( static_cast<double>( start.rotation.c ),
         static_cast<double>( start.rotation.s ) );
-    const double endLength = std::hypot( static_cast<double>( endRotation.c ),
+    const double endLength = deterministicHypot( static_cast<double>( endRotation.c ),
         static_cast<double>( endRotation.s ) );
     if( !std::isfinite( startLength ) || !std::isfinite( endLength ) ||
         startLength == 0.0 || endLength == 0.0 ) return false;
@@ -49,7 +50,7 @@ inline bool TryComputeRotatingSweepBounds( const shapeProxy2& proxy, const trans
 
         const double x = point.x;
         const double y = point.y;
-        const double radius = std::hypot( x, y );
+        const double radius = deterministicHypotUpperBound( x, y );
         if( !std::isfinite( radius ) ) return false;
         maxLocalRadius = std::max( maxLocalRadius, radius );
 
