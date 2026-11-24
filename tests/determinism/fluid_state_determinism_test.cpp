@@ -36,6 +36,7 @@ struct fluidStateTraceProbe2
     struct forwardTiming
     {
         double quadratureMs = 0.0, linearMs = 0.0, totalMs = 0.0;
+        double setupMs = 0.0, pressureMs = 0.0, endpointMs = 0.0;
     };
     static double elapsedMs( benchmarkClock::time_point start, benchmarkClock::time_point finish )
     {
@@ -2953,10 +2954,14 @@ struct fluidStateTraceProbe2
             // pressure, followed by a fixed-geometry interval solve. The
             // newly computed load is applied only in the next interval.
             const std::string splitKey = "forwardStaggered.interval" + std::to_string( index );
+            const auto pressureStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
+            if( timing ) timing->setupMs = elapsedMs( totalStart, pressureStart );
             captureSpaceTimeProjection( forward, laggedField, laggedLoad, scratch,
                 splitKey + ".projection", 16, splitKey + ".volume", false,
                 16, splitKey + ".topology", 0.0, &candidate, 0, true,
-                nullptr, 1.0e-16, false, {}, true, true );
+                timing, 1.0e-16, false, {}, true, true );
+            const auto pressureEnd = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
+            if( timing ) timing->pressureMs = elapsedMs( pressureStart, pressureEnd );
             double gap = 0.0, negative = 0.0, unsupported = 0.0;
             int negativeCells = 0, unsupportedCells = 0;
             for( std::size_t i = 0; i < startFraction.size(); ++i )
@@ -2973,6 +2978,7 @@ struct fluidStateTraceProbe2
             }
             if( unsupportedCells != 0 )
                 throw std::runtime_error( splitKey + " unsupported volume" );
+            const auto endpointStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
             std::vector<float> endpointU, endpointV;
             captureInstantaneousEndpoint( forward, candidate, trace, index, &endpointU, &endpointV, true );
             forward.u_ = std::move( endpointU ); forward.v_ = std::move( endpointV );
@@ -2981,6 +2987,7 @@ struct fluidStateTraceProbe2
             forward.previousObstacles_ = predicted;
             forward.frozenPressureObstacles_ = predicted;
             forward.previousCellFluidFraction_ = forward.cellFluidFraction_;
+            if( timing ) timing->endpointMs = elapsedMs( endpointStart, benchmarkClock::now() );
             const auto emit = [&]( const std::string& suffix, auto value )
             {
                 if( !std::isfinite( static_cast<double>( value ) ) )
@@ -3026,6 +3033,7 @@ struct fluidStateTraceProbe2
             committed->field = std::move( forward );
             committed->poses = predicted;
             committed->feedback = std::move( candidate.feedback );
+            if( timing ) timing->totalMs = elapsedMs( totalStart, benchmarkClock::now() );
             return;
         }
         // Use the lagged load only as the reference for diagnostic deltas.
@@ -3834,9 +3842,11 @@ struct fluidStateTraceProbe2
     // forward, rather than sampling a separate lagged trajectory each time.
     static void captureForwardContinuation( const fluidField2& initial,
         const fluidField2& initialProjection, std::span<const fluidObstacleForce2> initialLoad,
-        std::string& trace, bool staggered = false )
+        std::string& trace, bool staggered = false, int benchmarkRepeat = -1 )
     {
         constexpr int first = 43, intervals = 16;
+        if( benchmarkRepeat >= 0 && !staggered )
+            throw std::runtime_error( "R4ae timing requires staggered trajectory" );
         const float dt = initial.frozenPressureTimeStep_;
         forwardEndpointState state{ initial, initial.frozenPressureObstacles_,
             std::vector<fluidObstacleForce2>( initialLoad.begin(), initialLoad.end() ) };
@@ -3858,6 +3868,7 @@ struct fluidStateTraceProbe2
         for( int i = 0; i <= first; ++i ) windTime += dt;
         for( int step = 0; step < intervals; ++step )
         {
+            const auto stepStart = benchmarkRepeat >= 0 ? benchmarkClock::now() : benchmarkClock::time_point{};
             fluidField2 pre = state.field;
             if( step > 0 )
             {
@@ -3900,8 +3911,19 @@ struct fluidStateTraceProbe2
             const fluidField2& seed = step == 0 ? initialProjection : state.field;
             const auto poses = state.poses;
             const auto load = state.feedback;
+            forwardTiming timing{};
+            const auto prepared = benchmarkRepeat >= 0 ? benchmarkClock::now() : benchmarkClock::time_point{};
             captureForwardPredictor( pre, seed, poses, load, trace, first + step,
-                0.75, 0, 16, true, nullptr, 1.0e-10, true, nullptr, true, &state, staggered );
+                0.75, 0, 16, true, benchmarkRepeat >= 0 ? &timing : nullptr,
+                1.0e-10, true, nullptr, true, &state, staggered );
+            if( benchmarkRepeat >= 0 )
+            {
+                const double total = elapsedMs( stepStart, benchmarkClock::now() );
+                std::printf( "R4ae timing interval=%d repeat=%d prepare_ms=%.6f setup_ms=%.6f "
+                    "quadrature_ms=%.6f linear_ms=%.6f pressure_ms=%.6f endpoint_ms=%.6f total_ms=%.6f\n",
+                    first + step, benchmarkRepeat, elapsedMs( stepStart, prepared ), timing.setupMs,
+                    timing.quadratureMs, timing.linearMs, timing.pressureMs, timing.endpointMs, total );
+            }
         }
     }
 
@@ -5253,7 +5275,19 @@ std::string runNearClosedFaceScene()
     cadenceReplay( *frozen, baseline, *a, "cadence43", true, 0 );
     probe::captureLaggedContinuation( *frozen, baseline, trace );
     probe::captureForwardContinuation( *frozen, baseline, *a, trace );
-    probe::captureForwardContinuation( *frozen, baseline, *a, trace, true );
+    if( probe::benchmarkForward )
+    {
+        std::string reference;
+        probe::captureForwardContinuation( *frozen, baseline, *a, reference, true, 0 );
+        for( int repeat = 1; repeat < 3; ++repeat )
+        {
+            std::string repeated;
+            probe::captureForwardContinuation( *frozen, baseline, *a, repeated, true, repeat );
+            check( repeated == reference, "R4ae staggered benchmark replay differs" );
+        }
+        trace += reference;
+    }
+    else probe::captureForwardContinuation( *frozen, baseline, *a, trace, true );
     // Adjacent actual intervals exercise the transition before/after the spike.
     // They are separate frozen solves, not a candidate-driven trajectory.
     for( std::size_t i = 0; i < adjacent.size(); ++i )
