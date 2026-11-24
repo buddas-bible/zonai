@@ -375,6 +375,235 @@ std::string runScene( const char* sceneName, bool analytic )
     return trace;
 }
 
+// R3h: keep the original R3c-g fixtures byte-for-byte. New scenes
+// exercise independent geometry/pressure paths and feed coupled pressure
+// feedback into obstacle snapshots, without pretending to be World::Step.
+enum class geometrySceneKind
+{
+    sampledMixed,
+    analyticCapsule,
+    analyticPolygon,
+    coupledDisjoint
+};
+
+struct geometryScene
+{
+    zonai::fluidField2 field{ 24, 16, 0.5f, { -6.0f, -4.0f } };
+    std::vector<zonai::fluidShapeObstacle2> obstacles;
+    std::vector<zonai::fluidObstacleForce2> feedback;
+    std::vector<float> angles;
+    geometrySceneKind kind;
+    bool observed;
+    bool sawFractionalCell = false;
+    bool sawAnalyticFraction = false;
+    bool sawSwept = false;
+    bool sawFlow = false;
+    bool sawFeedback = false;
+    bool sawCoupled = false;
+    bool sawIc0 = false;
+    bool sawDisjoint = false;
+    std::string stages;
+
+    explicit geometryScene( geometrySceneKind sceneKind, bool observe )
+        : kind( sceneKind ), observed( observe )
+    {
+        using namespace zonai;
+        field.setCutCellProjectionEnabled( true );
+        field.setCutCellSampleCount( 4 );
+        field.setAnalyticCapsuleCutCellEnabled( kind == geometrySceneKind::analyticCapsule );
+        field.setAnalyticPolygonCutCellEnabled( kind == geometrySceneKind::analyticPolygon );
+        field.setDisjointAnalyticCutCellEnabled( kind == geometrySceneKind::coupledDisjoint );
+        field.setCutCellCoupledProjectionEnabled( kind == geometrySceneKind::coupledDisjoint );
+        field.setTracerConcentration( 8, 7, 1.0f );
+        field.addVelocity( { -1.4f, 0.2f }, { 1.2f, -0.1f }, 1.5f );
+
+        const auto add = [&]( shapeGeometry geometry, vec2 center, float angle,
+            vec2 velocity, float omega, float inverseMass = 0.0f, float inverseInertia = 0.0f )
+        {
+            obstacles.push_back( { std::move( geometry ), { center, rot2::FromRadians( angle ) },
+                center, velocity, omega, inverseMass, inverseInertia } );
+            angles.push_back( angle );
+        };
+
+        if( kind == geometrySceneKind::analyticCapsule )
+            add( capsule2{ { -0.70f, 0.0f }, { 0.70f, 0.0f }, 0.30f },
+                { 0.13f, -0.17f }, 0.19f, { 0.16f, -0.07f }, 0.31f );
+        else if( kind == geometrySceneKind::analyticPolygon )
+            add( MakeBox( { 0.63f, 0.33f } ), { 0.13f, -0.20f },
+                0.41f, { 0.15f, 0.08f }, -0.29f );
+        else
+        {
+            const bool coupled = kind == geometrySceneKind::coupledDisjoint;
+            polygon2 rounded = MakeBox( { 0.34f, 0.29f } );
+            rounded.radius = 0.17f;
+            add( circle2{ {}, 0.42f }, { -3.4f, -1.15f }, 0.0f, {}, 0.0f );
+            add( capsule2{ { -0.4f, 0.0f }, { 0.4f, 0.0f }, 0.23f },
+                { -1.5f, 1.1f }, 0.11f, { 0.16f, -0.07f }, 0.21f,
+                coupled ? 0.5f : 0.0f, coupled ? 1.0f : 0.0f );
+            add( MakeBox( { 0.46f, 0.31f } ), { 1.4f, -1.1f }, 0.32f,
+                { -0.08f, 0.12f }, -0.17f,
+                coupled ? 0.4f : 0.0f, coupled ? 0.8f : 0.0f );
+            add( rounded, { 3.65f, 1.0f }, 0.21f, {}, 0.0f );
+        }
+        feedback.resize( obstacles.size() );
+    }
+
+    void capture( std::string& trace, const std::string& key ) const
+    {
+        using probe = zonai::fluidStateTraceProbe2;
+        const auto scalar = [&]( const char* name, auto value )
+        {
+            probe::appendScalar( trace, key + name, value );
+        };
+        probe::capture( field, trace, key );
+        const auto& geometry = field.getCutCellTransition();
+        const auto& swept = field.getSweptFaceFlux();
+        const auto& pressure = field.getCutCellPressure();
+        scalar( ".geometry.disjoint", static_cast<int>( geometry.usedDisjointAnalyticGeometry ) );
+        scalar( ".geometry.partialCells", geometry.partialCells );
+        scalar( ".geometry.disjointShapes", geometry.disjointAnalyticShapes );
+        scalar( ".swept.used", static_cast<int>( swept.usedSweptFlux ) );
+        scalar( ".swept.samples", swept.timeSamples );
+        scalar( ".swept.mismatch", swept.geometryMismatch );
+        scalar( ".pcg.used", static_cast<int>( pressure.usedCoupledProjection ) );
+        scalar( ".pcg.failed", static_cast<int>( pressure.coupledSolveFailed ) );
+        scalar( ".pcg.status", static_cast<int>( pressure.coupledStatus ) );
+        scalar( ".pcg.iterations", pressure.coupledIterations );
+        scalar( ".pcg.relativeResidual", pressure.coupledRelativeResidual );
+        scalar( ".pcg.ic0", static_cast<int>( pressure.usedIncompleteCholesky ) );
+        scalar( ".pcg.synchronizedPartialFaces", pressure.synchronizedPartialFaces );
+        scalar( ".pcg.predictedContinuityRms", pressure.predictedContinuityRms );
+
+        for( std::size_t i = 0; i < obstacles.size(); ++i )
+        {
+            const auto& body = obstacles[i];
+            const auto& reaction = feedback[i];
+            const std::string prefix = key + ".body[" + std::to_string( i ) + "]";
+            probe::appendScalar( trace, prefix + ".position.x", body.transform.position.x );
+            probe::appendScalar( trace, prefix + ".position.y", body.transform.position.y );
+            probe::appendScalar( trace, prefix + ".rotation.c", body.transform.rotation.c );
+            probe::appendScalar( trace, prefix + ".rotation.s", body.transform.rotation.s );
+            probe::appendScalar( trace, prefix + ".angle", angles[i] );
+            probe::appendScalar( trace, prefix + ".velocity.x", body.linearVelocity.x );
+            probe::appendScalar( trace, prefix + ".velocity.y", body.linearVelocity.y );
+            probe::appendScalar( trace, prefix + ".omega", body.angularVelocity );
+            probe::appendScalar( trace, prefix + ".inverseMass", body.inverseMass );
+            probe::appendScalar( trace, prefix + ".inverseInertia", body.inverseInertia );
+            probe::appendScalar( trace, prefix + ".force.x", reaction.force.x );
+            probe::appendScalar( trace, prefix + ".force.y", reaction.force.y );
+            probe::appendScalar( trace, prefix + ".torque", reaction.torque );
+        }
+    }
+
+    void advance( int tick, const std::string& key )
+    {
+        using namespace zonai;
+        if( tick % 4 == 0 )
+            field.addVelocity( { -1.4f, 0.2f }, { 0.13f, -0.04f }, 1.5f );
+        for( std::size_t i = 0; i < obstacles.size(); ++i )
+        {
+            auto& body = obstacles[i];
+            body.transform.position += timeStep * body.linearVelocity;
+            body.center = body.transform.position;
+            angles[i] += timeStep * body.angularVelocity;
+            body.transform.rotation = rot2::FromRadians( angles[i] );
+        }
+        stages.clear();
+        int observedStages = 0;
+        if( observed && tick <= 2 )
+        {
+            fluidStateTraceProbe2::setStageObserver( field,
+                [&]( const fluidField2&, int phase )
+                {
+                    check( phase == observedStages, "R3h phase order changed" );
+                    capture( stages, key + ".stage." + std::to_string( phase ) );
+                    ++observedStages;
+                } );
+        }
+
+        field.step( timeStep, obstacles, feedback, 200 );
+        fluidStateTraceProbe2::setStageObserver( field, {} );
+        if( observed && tick <= 2 )
+            check( observedStages == 10, "R3h missed a stage" );
+
+        for( int y = 0; y < field.getHeight(); ++y )
+            for( int x = 0; x < field.getWidth(); ++x )
+            {
+                const float fraction = field.getCellFluidFraction( x, y );
+                check( std::isfinite( fraction ) && fraction >= 0.0f && fraction <= 1.0f,
+                    "R3h invalid fluid fraction" );
+                sawFractionalCell |= fraction > 0.0f && fraction < 1.0f;
+                // Four-by-four sampled geometry has multiples of 1/16.
+                sawAnalyticFraction |= fraction * 16.0f != std::floor( fraction * 16.0f );
+            }
+
+        const auto audit = field.getFlowAudit( timeStep );
+        check( audit.nonFiniteFluidFaces == 0 && std::isfinite( audit.continuityRms ),
+            "R3h non-finite velocity or continuity" );
+        sawFlow |= audit.maxFluidFaceSpeed > 0.01f;
+        sawSwept |= field.getSweptFaceFlux().usedSweptFlux;
+        const auto& pressure = field.getCutCellPressure();
+        sawDisjoint |= field.getCutCellTransition().usedDisjointAnalyticGeometry;
+        sawCoupled |= pressure.usedCoupledProjection &&
+            pressure.coupledStatus == fluidCoupledPressureStatus2::converged;
+        sawIc0 |= pressure.usedCoupledProjection && pressure.usedIncompleteCholesky;
+        for( std::size_t i = 0; i < obstacles.size(); ++i )
+        {
+            auto& body = obstacles[i];
+            const auto& reaction = feedback[i];
+            check( std::isfinite( reaction.force.x ) && std::isfinite( reaction.force.y ) &&
+                std::isfinite( reaction.torque ), "R3h non-finite pressure feedback" );
+            if( body.inverseMass > 0.0f )
+            {
+                sawFeedback |= reaction.force.x != 0.0f || reaction.force.y != 0.0f ||
+                    reaction.torque != 0.0f;
+                body.linearVelocity += ( timeStep * body.inverseMass ) * reaction.force;
+                body.angularVelocity += timeStep * body.inverseInertia * reaction.torque;
+                check( std::isfinite( body.linearVelocity.x ) &&
+                    std::isfinite( body.linearVelocity.y ) && std::isfinite( body.angularVelocity ),
+                    "R3h non-finite pressure-driven body velocity" );
+            }
+        }
+    }
+
+    void verifyCoverage() const
+    {
+        check( sawFractionalCell && sawFlow && sawSwept,
+            "R3h fixture must exercise partial cells, flow and swept history" );
+        if( kind != geometrySceneKind::sampledMixed )
+            check( sawAnalyticFraction, "R3h analytic geometry fell back to sampled cells" );
+        if( kind == geometrySceneKind::coupledDisjoint )
+            check( sawDisjoint && sawCoupled && sawIc0 && sawFeedback,
+                "R3h fixture must exercise analytic Schur IC0 and nonzero feedback" );
+    }
+};
+
+std::string runGeometryScene( const char* name, geometrySceneKind kind )
+{
+    constexpr int geometryTickCount = 12;
+    geometryScene first{ kind, true };
+    geometryScene control{ kind, false };
+    std::string trace;
+    for( int tick = 0; tick <= geometryTickCount; ++tick )
+    {
+        const std::string key = std::string( name ) + ".tick." + std::to_string( tick );
+        if( tick != 0 )
+        {
+            first.advance( tick, key );
+            control.advance( tick, key );
+            trace.append( first.stages );
+        }
+        std::string a, b;
+        first.capture( a, key );
+        control.capture( b, key );
+        check( a == b, "R3h independent observed/control state or feedback differs" );
+        trace.append( a );
+    }
+    first.verifyCoverage();
+    control.verifyCoverage();
+    return trace;
+}
+
 } // namespace
 
 int main( int argc, char** argv )
@@ -387,8 +616,12 @@ int main( int argc, char** argv )
             return EXIT_FAILURE;
         }
 
-        const std::string trace =
+        std::string trace =
             runScene( "sampledCutCell", false ) + runScene( "analyticCircle", true );
+        trace += runGeometryScene( "sampledMixed", geometrySceneKind::sampledMixed );
+        trace += runGeometryScene( "analyticCapsule", geometrySceneKind::analyticCapsule );
+        trace += runGeometryScene( "analyticPolygon", geometrySceneKind::analyticPolygon );
+        trace += runGeometryScene( "coupledDisjoint", geometrySceneKind::coupledDisjoint );
 
         if( argc == 3 )
         {
@@ -399,7 +632,7 @@ int main( int argc, char** argv )
             check( written == trace.size() && closed == 0, "cannot write Fluid state trace" );
         }
 
-        std::puts( "Fluid sampled/analytic MAC state and pressure feedback replay passed" );
+        std::puts( "Fluid sampled/analytic geometry, MAC state and pressure feedback replay passed" );
         return EXIT_SUCCESS;
     }
     catch( const std::exception& error )
