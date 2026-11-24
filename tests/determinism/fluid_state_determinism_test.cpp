@@ -155,8 +155,9 @@ struct fluidStateTraceProbe2
     // R3i: read-only reconstruction of updateSweptSolidFlux's rotation
     // extraction. Called immediately after the swept stage, before remap,
     // only when the real solver reports that the swept path executed.
-    // This records the standard-library operation separately from the
-    // candidate engine atan2; it does not alter any physical state.
+    // R3j mirrors the production deterministicAtan2 path. Historical
+    // candidate fields are retained as aliases for row-by-row comparison;
+    // the original libm witnesses live in the separate FP diagnostic.
     static void captureSweptRotation( const fluidField2& field,
         std::span<const fluidShapeObstacle2> obstacles, float timeStep,
         std::string& trace, const std::string& key )
@@ -201,10 +202,8 @@ struct fluidStateTraceProbe2
             scalar( ".intermediateAngle", intermediateAngle );
             scalar( ".intermediate.c", intermediateRotation.c );
             scalar( ".intermediate.s", intermediateRotation.s );
-            scalar( ".candidateStartAngle",
-                deterministicAtan2( start.transform.rotation.s, start.transform.rotation.c ) );
-            scalar( ".candidateEndAngle",
-                deterministicAtan2( finish.transform.rotation.s, finish.transform.rotation.c ) );
+            scalar( ".candidateStartAngle", startAngle );
+            scalar( ".candidateEndAngle", endAngle );
         }
     }
 
