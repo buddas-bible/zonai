@@ -2560,6 +2560,8 @@ struct fluidStateTraceProbe2
                 throw std::runtime_error( key + " endpoint true residual failed" );
             auto after = solid;
             double seedPeak = 0.0, peak = 0.0, maxCorrection = 0.0, weightedCorrection = 0.0;
+            double correctionMomentumX = 0.0, correctionMomentumY = 0.0;
+            double seedEnergy = 0.0, reconstructedEnergy = 0.0;
             for( const auto& e : edges )
             {
                 const double seed = preserveFlux ? e.matched : e.velocity;
@@ -2567,7 +2569,16 @@ struct fluidStateTraceProbe2
                 // Test the velocity representation that can actually be stored.
                 const float velocity = static_cast<float>( seed + correction );
                 if( committedU && !preserveFlux )
+                {
                     ( e.isU ? *committedU : *committedV )[e.face] = velocity;
+                    // Unit density/depth, aperture-weighted MAC face proxy.
+                    // It measures the reconstruction alone, not total momentum.
+                    const double weight = h * h * e.aperture;
+                    ( e.isU ? correctionMomentumX : correctionMomentumY ) +=
+                        weight * ( static_cast<double>( velocity ) - seed );
+                    seedEnergy += 0.5 * weight * seed * seed;
+                    reconstructedEnergy += 0.5 * weight * static_cast<double>( velocity ) * velocity;
+                }
                 const double flux = e.aperture * velocity;
                 after[e.first] += flux; after[e.second] -= flux;
                 seedPeak = std::max( seedPeak, std::abs( seed ) );
@@ -2590,6 +2601,22 @@ struct fluidStateTraceProbe2
             out( prefix + ".seedPeak", seedPeak ); out( prefix + ".peak", peak );
             out( prefix + ".maxCorrection", maxCorrection ); out( prefix + ".weightedCorrectionSquared", weightedCorrection );
             out( prefix + ".iterations", iterations ); out( prefix + ".trueResidualSquared", trueSquared );
+            if( committedU && !preserveFlux )
+            {
+                const std::string budgetKey = "forwardPersistentMomentum.interval" + std::to_string( index );
+                const auto emit = [&]( const char* suffix, double value )
+                {
+                    if( !std::isfinite( value ) )
+                        throw std::runtime_error( budgetKey + " nonfinite reconstruction budget" );
+                    appendScalar( trace, budgetKey + suffix, value );
+                };
+                emit( ".correctionMomentumX", correctionMomentumX );
+                emit( ".correctionMomentumY", correctionMomentumY );
+                emit( ".seedEnergy", seedEnergy );
+                emit( ".reconstructedEnergy", reconstructedEnergy );
+                std::printf( "%s correction momentum proxy (%.9g, %.9g) energy proxy %.9g -> %.9g\n",
+                    budgetKey.c_str(), correctionMomentumX, correctionMomentumY, seedEnergy, reconstructedEnergy );
+            }
             std::printf( "%s%s supported %d instantaneous RMS %.9g -> %.9g /s peak %.9g -> %.9g m/s "
                 "compatibility L1 %.9g PCG %d\n", key.c_str(), prefix.c_str(), static_cast<int>( supported ),
                 beforeRms, afterRms, seedPeak, peak, compatibilityL1, iterations );
@@ -2887,6 +2914,30 @@ struct fluidStateTraceProbe2
                 out( k + ".velocity.x", corrected[j].linearVelocity.x );
                 out( k + ".velocity.y", corrected[j].linearVelocity.y );
             }
+            double bodyDeltaX = 0.0, bodyDeltaY = 0.0, pressureImpulseX = 0.0, pressureImpulseY = 0.0;
+            for( std::size_t j = 0; j < corrected.size(); ++j )
+            {
+                if( start[j].inverseMass <= 0.0f )
+                    throw std::runtime_error( key + " non-dynamic momentum fixture" );
+                const double mass = 1.0 / static_cast<double>( start[j].inverseMass );
+                bodyDeltaX += mass * ( static_cast<double>( corrected[j].linearVelocity.x ) -
+                    start[j].linearVelocity.x );
+                bodyDeltaY += mass * ( static_cast<double>( corrected[j].linearVelocity.y ) -
+                    start[j].linearVelocity.y );
+                pressureImpulseX += static_cast<double>( dt ) * candidate.feedback[j].force.x;
+                pressureImpulseY += static_cast<double>( dt ) * candidate.feedback[j].force.y;
+            }
+            const std::string budgetKey = "forwardPersistentMomentum.interval" + std::to_string( index );
+            const auto emitBudget = [&]( const char* suffix, double value )
+            {
+                if( !std::isfinite( value ) )
+                    throw std::runtime_error( budgetKey + " nonfinite body budget" );
+                appendScalar( trace, budgetKey + suffix, value );
+            };
+            emitBudget( ".bodyDeltaX", bodyDeltaX ); emitBudget( ".bodyDeltaY", bodyDeltaY );
+            emitBudget( ".pressureImpulseX", pressureImpulseX ); emitBudget( ".pressureImpulseY", pressureImpulseY );
+            std::printf( "%s body delta (%.9g, %.9g) applied pressure impulse (%.9g, %.9g)\n",
+                budgetKey.c_str(), bodyDeltaX, bodyDeltaY, pressureImpulseX, pressureImpulseY );
             committed->field = std::move( forward );
             committed->poses = corrected;
             committed->feedback = candidate.feedback;
@@ -3149,7 +3200,7 @@ struct fluidStateTraceProbe2
         const fluidField2& initialProjection, std::span<const fluidObstacleForce2> initialLoad,
         std::string& trace )
     {
-        constexpr int first = 43, intervals = 4;
+        constexpr int first = 43, intervals = 16;
         const float dt = initial.frozenPressureTimeStep_;
         forwardEndpointState state{ initial, initial.frozenPressureObstacles_,
             std::vector<fluidObstacleForce2>( initialLoad.begin(), initialLoad.end() ) };
