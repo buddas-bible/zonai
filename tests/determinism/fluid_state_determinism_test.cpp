@@ -1,5 +1,6 @@
 #include "fluid/fluidField2.h"
 #include "math/deterministicMath.h"
+#include "collision/shapeGeometry.h"
 #include "rigidBodyDemo.h"
 #include "world_state_snapshot.h"
 #include "joint_substep_trace.h"
@@ -13,6 +14,7 @@
 #include <cstdlib>
 #include <exception>
 #include <functional>
+#include <limits>
 #include <numbers>
 #include <stdexcept>
 #include <string>
@@ -679,7 +681,7 @@ std::string runGeometryScene( const char* name, geometrySceneKind kind )
 
 // R3m uses the real headless Sandbox interleave, not a duplicated FSI
 // integrator. Keep the standalone Fluid fixtures and their keys unchanged.
-enum class fluidJointKind { none, revolute, weld };
+enum class fluidJointKind { none, revolute, weld, anchoredAssembly };
 
 struct worldFluidScene
 {
@@ -690,6 +692,8 @@ struct worldFluidScene
     bool dragEnabled;
     fluidJointKind jointKind;
     zonai::jointId joint{};
+    zonai::jointId anchorJoint{};
+    zonai::bodyId anchorBody{};
 
     explicit worldFluidScene( bool drag, fluidJointKind kind = fluidJointKind::none )
         : dragEnabled( drag ), jointKind( kind )
@@ -739,8 +743,25 @@ struct worldFluidScene
                 def.localAnchorB = localB;
                 joint = world.createWeldJoint( def );
             }
-            check( world.IsValid( joint ) && world.getJointCount() == 1,
-                "R3n expected one dynamic-to-dynamic Joint" );
+            if( jointKind == fluidJointKind::anchoredAssembly )
+            {
+                // The original joint is a Weld. Attach its circle to a
+                // shapeless static Body with a limited Revolute Joint.
+                // The anchor is a World constraint, not a Fluid obstacle.
+                anchorBody = world.CreateBody( zonai::bodyType::Static, { a.position, {} } );
+                zonai::revoluteJointDef def{};
+                def.bodyA = anchorBody;
+                def.bodyB = bodies[0];
+                def.enableLimit = true;
+                def.lowerAngle = -0.35f;
+                def.upperAngle = 0.35f;
+                anchorJoint = world.createRevoluteJoint( def );
+                check( world.IsValid( anchorBody ) && world.IsValid( anchorJoint ),
+                    "R3t expected a valid static pivot" );
+            }
+            check( world.IsValid( joint ) &&
+                world.getJointCount() == ( jointKind == fluidJointKind::anchoredAssembly ? 2u : 1u ),
+                "expected valid dynamic-to-dynamic Joint and optional pivot" );
         }
     }
 
@@ -762,12 +783,12 @@ struct worldFluidScene
     {
         if( jointKind == fluidJointKind::none ) return;
         using probe = zonai::fluidStateTraceProbe2;
-        const auto capture = [&]( const auto& data )
+        const auto capture = [&]( const auto& data, const std::string& prefix )
         {
             const auto scalar = [&]( const char* name, float value )
             {
                 check( std::isfinite( value ), "R3n nonfinite Joint reaction/anchor" );
-                probe::appendScalar( trace, key + name, value );
+                probe::appendScalar( trace, prefix + name, value );
             };
             scalar( ".anchorA.x", data.anchorA.x );
             scalar( ".anchorA.y", data.anchorA.y );
@@ -779,11 +800,21 @@ struct worldFluidScene
             scalar( ".torque", data.torque );
         };
         if( jointKind == fluidJointKind::revolute )
-            capture( demo.getWorld().getRevoluteJointData( joint ) );
-        else capture( demo.getWorld().getWeldJointData( joint ) );
-        const std::array<zonai::jointId, 1> joints{ joint };
-        appendSnapshot( trace, key,
-            zonai::determinism::test::jointCacheSnapshotAccess::capture( demo.getWorld(), joints ) );
+            capture( demo.getWorld().getRevoluteJointData( joint ), key );
+        else capture( demo.getWorld().getWeldJointData( joint ), key );
+        if( jointKind == fluidJointKind::anchoredAssembly )
+        {
+            capture( demo.getWorld().getRevoluteJointData( anchorJoint ), key + ".pivot" );
+            const std::array<zonai::jointId, 2> joints{ joint, anchorJoint };
+            appendSnapshot( trace, key,
+                zonai::determinism::test::jointCacheSnapshotAccess::capture( demo.getWorld(), joints ) );
+        }
+        else
+        {
+            const std::array<zonai::jointId, 1> joints{ joint };
+            appendSnapshot( trace, key,
+                zonai::determinism::test::jointCacheSnapshotAccess::capture( demo.getWorld(), joints ) );
+        }
     }
 
     bool hasJointReaction() const
@@ -798,10 +829,32 @@ struct worldFluidScene
         return hasReaction( demo.getWorld().getWeldJointData( joint ) );
     }
 
+    float domainMargin() const
+    {
+        const auto& field = *demo.getWindField();
+        const auto lower = field.getOrigin();
+        const auto upper = lower + field.getCellSize() *
+            zonai::vec2{ static_cast<float>( field.getWidth() ), static_cast<float>( field.getHeight() ) };
+        float margin = std::numeric_limits<float>::max();
+        for( const auto& visual : demo.getShapes() )
+        {
+            // Recompute geometric bounds, not the speculative broad-phase AABB.
+            const auto box = zonai::ComputeShapeAABB(
+                demo.getWorld().GetShape( visual.shapeHandle ).geometry,
+                demo.getWorld().GetBodyTransform( visual.bodyHandle ) );
+            check( zonai::IsValidAABB( box ), "R3t invalid geometric bounds" );
+            margin = std::min( { margin, box.min.x - lower.x, box.min.y - lower.y,
+                upper.x - box.max.x, upper.y - box.max.y } );
+        }
+        return margin;
+    }
+
     void captureWorld( std::string& trace, const std::string& key, int tick ) const
     {
+        auto tracked = bodies;
+        if( jointKind == fluidJointKind::anchoredAssembly ) tracked.push_back( anchorBody );
         const auto snapshot = zonai::determinism::test::captureWorldState(
-            demo.getWorld(), bodies, static_cast<std::uint64_t>( tick ), timeStep, worldSubsteps );
+            demo.getWorld(), tracked, static_cast<std::uint64_t>( tick ), timeStep, worldSubsteps );
         appendSnapshot( trace, key + ".world", snapshot );
         captureJoint( trace, key + ".joint" );
     }
@@ -864,8 +917,24 @@ std::string runWorldFluidScene( const char* name, bool drag,
     {
         jointTrace.bodies = observed.bodies;
         jointTrace.joints.push_back( observed.joint );
+        if( jointKind == fluidJointKind::anchoredAssembly )
+        {
+            jointTrace.bodies.push_back( observed.anchorBody );
+            jointTrace.joints.push_back( observed.anchorJoint );
+        }
     }
-    bool sawJointReaction = false;
+    bool sawJointReaction = false, sawAnchorReaction = false;
+    const bool sustained = continuationName != nullptr || jointKind == fluidJointKind::anchoredAssembly;
+    int activeIntervals = 0, exchangeFrames = 0;
+    float minimumMargin = std::numeric_limits<float>::max();
+    float maximumFaceSpeed = 0.0f, maximumContinuity = 0.0f;
+    const auto checkDomain = [&]( const std::string& key )
+    {
+        const float margin = observed.domainMargin();
+        if( !std::isfinite( margin ) || margin < 0.0f )
+            throw std::runtime_error( key + " geometric obstacle escaped Fluid domain" );
+        minimumMargin = std::min( minimumMargin, margin );
+    };
     // The demo owns a non-const Field; its public getter is intentionally
     // read-only. Use the existing test-only friend observer, not a new API.
     auto& field = const_cast<zonai::fluidField2&>( *observed.demo.getWindField() );
@@ -901,6 +970,8 @@ std::string runWorldFluidScene( const char* name, bool drag,
                     check( phase == calls % 10, "R3m unexpected Fluid stage sequence" );
                     const int interval = calls / 10;
                     ++calls;
+                    if( sustained && phase == 0 )
+                        checkDomain( key + ".interval." + std::to_string( interval ) );
                     // Input after source injection and output before drag/World
                     // integration, for every Fluid interval of the first two ticks.
                     if( traceCrossing || ( tick <= 2 && ( phase == 0 || phase == 9 ) ) )
@@ -937,6 +1008,15 @@ std::string runWorldFluidScene( const char* name, bool drag,
                             throw std::runtime_error( key + ".interval." + std::to_string( interval ) +
                                 " pressure solve failure, status=" +
                                 std::to_string( static_cast<int>( pressure.coupledStatus ) ) );
+                        if( sustained )
+                        {
+                            if( !pressure.usedCoupledProjection ||
+                                pressure.coupledStatus != zonai::fluidCoupledPressureStatus2::converged ||
+                                snapshot.getCutCellTransition().partialCells <= 0 )
+                                throw std::runtime_error( key + ".interval." + std::to_string( interval ) +
+                                    " sustained coupled projection coverage lost" );
+                            ++activeIntervals;
+                        }
                         if( frameCount > 12 )
                         {
                             const auto flow = snapshot.getFlowAudit( timeStep / worldFluidScene::fluidSubsteps );
@@ -944,6 +1024,11 @@ std::string runWorldFluidScene( const char* name, bool drag,
                                 !std::isfinite( flow.maxFluidFaceSpeed ) )
                                 throw std::runtime_error( key + ".interval." + std::to_string( interval ) +
                                     " nonfinite flow after projection" );
+                            if( sustained )
+                            {
+                                maximumFaceSpeed = std::max( maximumFaceSpeed, flow.maxFluidFaceSpeed );
+                                maximumContinuity = std::max( maximumContinuity, flow.continuityRms );
+                            }
                             const std::string prefix = key + ".interval." + std::to_string( interval ) + ".projection";
                             probe::appendScalar( trace, prefix + ".continuityRms", flow.continuityRms );
                             probe::appendScalar( trace, prefix + ".maxFaceSpeed", flow.maxFluidFaceSpeed );
@@ -989,6 +1074,12 @@ std::string runWorldFluidScene( const char* name, bool drag,
                 jointTrace.records.clear();
             }
             sawJointReaction |= observed.hasJointReaction();
+            if( jointKind == fluidJointKind::anchoredAssembly )
+            {
+                const auto reaction = observed.demo.getWorld().getRevoluteJointData( observed.anchorJoint );
+                sawAnchorReaction |= reaction.force.x != 0.0f || reaction.force.y != 0.0f ||
+                    reaction.torque != 0.0f;
+            }
             control.demo.step( timeStep, worldFluidScene::worldSubsteps );
             check( calls == 10 * worldFluidScene::fluidSubsteps &&
                 observed.demo.getWindCouplingSteps() == worldFluidScene::fluidSubsteps &&
@@ -1001,7 +1092,18 @@ std::string runWorldFluidScene( const char* name, bool drag,
             sawDragBody |= bodyImpulse.x != 0.0f || bodyImpulse.y != 0.0f;
             sawDragFluid |= fluidImpulse.x != 0.0f || fluidImpulse.y != 0.0f;
             sawFlow |= field.getFlowAudit( timeStep / worldFluidScene::fluidSubsteps ).maxFluidFaceSpeed > 0.01f;
+            if( sustained )
+            {
+                for( const auto& force : observed.demo.getWindPressureForces() )
+                    if( force.force.x == 0.0f && force.force.y == 0.0f && force.torque == 0.0f )
+                        throw std::runtime_error( key + " missing per-body pressure exchange" );
+                if( ( bodyImpulse.x == 0.0f && bodyImpulse.y == 0.0f ) ||
+                    ( fluidImpulse.x == 0.0f && fluidImpulse.y == 0.0f ) )
+                    throw std::runtime_error( key + " missing aggregate two-way drag exchange" );
+                ++exchangeFrames;
+            }
         }
+        if( sustained ) checkDomain( key );
         std::string a, b;
         observed.captureFrame( a, key, tick );
         control.captureFrame( b, key, tick );
@@ -1015,6 +1117,16 @@ std::string runWorldFluidScene( const char* name, bool drag,
         "R3m drag path coverage differs from requested setting" );
     if( jointKind != fluidJointKind::none )
         check( sawJointReaction, "R3n expected a nonzero Joint reaction" );
+    if( jointKind == fluidJointKind::anchoredAssembly )
+        check( sawAnchorReaction, "R3t expected nonzero pivot reaction" );
+    if( sustained )
+    {
+        check( activeIntervals == frameCount * worldFluidScene::fluidSubsteps &&
+            exchangeFrames == frameCount, "R3t incomplete sustained coupling coverage" );
+        std::printf( "%s sustained coupling: %d intervals, %d exchange frames, "
+            "min geometric margin %.9g m, max face speed %.9g m/s, max continuity RMS %.9g 1/s\n",
+            name, activeIntervals, exchangeFrames, minimumMargin, maximumFaceSpeed, maximumContinuity );
+    }
     return trace;
 }
 
@@ -1042,6 +1154,8 @@ int main( int argc, char** argv )
         trace += runWorldFluidScene( "worldFluidWeld", true, fluidJointKind::weld );
         trace += runWorldFluidScene( "worldFluidDrag180", true, fluidJointKind::none, 360,
             "worldFluidDrag360Continuation" );
+        trace += runWorldFluidScene( "worldFluidAnchoredAssembly", true,
+            fluidJointKind::anchoredAssembly, 120 );
 
         if( argc == 3 )
         {
