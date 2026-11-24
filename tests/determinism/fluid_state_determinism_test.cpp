@@ -853,7 +853,8 @@ struct worldFluidScene
 };
 
 std::string runWorldFluidScene( const char* name, bool drag,
-    fluidJointKind jointKind = fluidJointKind::none, int frameCount = 12 )
+    fluidJointKind jointKind = fluidJointKind::none, int frameCount = 12,
+    const char* continuationName = nullptr )
 {
     using probe = zonai::fluidStateTraceProbe2;
     using namespace zonai::determinism::test;
@@ -872,11 +873,19 @@ std::string runWorldFluidScene( const char* name, bool drag,
     bool sawPressure = false, sawDragBody = false, sawDragFluid = false;
     bool sawCoupled = false, sawDisjoint = false, sawFlow = false;
 
-    // R3o extends the proven two-way drag path without replacing the short
-    // fixtures. Keep per-frame raw rows and the same observer/control checks.
+    // R3s continues the same observed/control Worlds, without resetting
+    // the field or source clock. Keep the first 180 ticks' trace keys intact.
+    // The second name labels only the continuation, not a new simulation.
+    check( ( frameCount > 180 ) == ( continuationName != nullptr ),
+        "extended Fluid replay must label its continuation" );
     for( int tick = 0; tick <= frameCount; ++tick )
     {
-        const std::string key = std::string( name ) + ".tick." + std::to_string( tick );
+        const char* scene = tick > 180 ? continuationName : name;
+        const std::string key = std::string( scene ) + ".tick." + std::to_string( tick );
+        // Around the former 2*pi limit (near tick 222), capture all ten
+        // Fluid phases. This narrows a new mismatch without tracing all
+        // 1,440 intervals at full-grid granularity.
+        const bool traceCrossing = continuationName && tick >= 221 && tick <= 223;
         if( tick != 0 )
         {
             int calls = 0;
@@ -894,7 +903,7 @@ std::string runWorldFluidScene( const char* name, bool drag,
                     ++calls;
                     // Input after source injection and output before drag/World
                     // integration, for every Fluid interval of the first two ticks.
-                    if( tick <= 2 && ( phase == 0 || phase == 9 ) )
+                    if( traceCrossing || ( tick <= 2 && ( phase == 0 || phase == 9 ) ) )
                     {
                         const std::string prefix = key + ".interval." + std::to_string( interval ) +
                             ".stage." + std::to_string( phase );
@@ -903,7 +912,8 @@ std::string runWorldFluidScene( const char* name, bool drag,
                     }
                     // In the extended run, retain compact per-interval
                     // observations instead of multiplying every raw-grid row
-                    // by 720. Full raw fields are still compared every frame.
+                    // by the number of intervals. Full raw fields are still
+                    // compared every frame.
                     if( frameCount > 12 && phase == 0 )
                     {
                         const float width = snapshot.getWidth() * snapshot.getCellSize();
@@ -995,7 +1005,8 @@ std::string runWorldFluidScene( const char* name, bool drag,
         std::string a, b;
         observed.captureFrame( a, key, tick );
         control.captureFrame( b, key, tick );
-        check( a == b, "R3m observed and independent control World/Fluid states differ" );
+        if( a != b )
+            throw std::runtime_error( key + " observed and independent control World/Fluid states differ" );
         trace.append( a );
     }
     check( sawCoupled && sawDisjoint && sawPressure && sawFlow,
@@ -1029,7 +1040,8 @@ int main( int argc, char** argv )
         trace += runWorldFluidScene( "worldFluidDrag", true );
         trace += runWorldFluidScene( "worldFluidRevolute", true, fluidJointKind::revolute );
         trace += runWorldFluidScene( "worldFluidWeld", true, fluidJointKind::weld );
-        trace += runWorldFluidScene( "worldFluidDrag180", true, fluidJointKind::none, 180 );
+        trace += runWorldFluidScene( "worldFluidDrag180", true, fluidJointKind::none, 360,
+            "worldFluidDrag360Continuation" );
 
         if( argc == 3 )
         {
