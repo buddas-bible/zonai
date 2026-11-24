@@ -226,6 +226,9 @@ void auditSinCos( std::FILE* stream )
     {
         const auto& item = exactCases[i];
         const auto result = deterministicSinCosBounded( fromBits( item.angle ) );
+        const auto rotation = rot2::FromRadians( fromBits( item.angle ) );
+        check( bits( rotation.c ) == bits( result.cosine ) &&
+            bits( rotation.s ) == bits( result.sine ), "rot2 bounded exact-bit dispatch" );
         check( bits( result.cosine ) == item.cosine && bits( result.sine ) == item.sine,
             "bounded sine/cosine exact-bit fixture" );
         if( stream )
@@ -264,6 +267,9 @@ void auditSinCos( std::FILE* stream )
     const auto verify = [&]( const char* cosKey, const char* sinKey, std::size_t i, float angle )
     {
         const auto result = deterministicSinCosBounded( angle );
+        const auto rotation = rot2::FromRadians( angle );
+        check( bits( rotation.c ) == bits( result.cosine ) &&
+            bits( rotation.s ) == bits( result.sine ), "rot2 bounded dispatch" );
         const auto opposite = deterministicSinCosBounded( -angle );
         check( std::isfinite( result.cosine ) && std::isfinite( result.sine ) &&
             std::abs( result.cosine ) <= 1.0f && std::abs( result.sine ) <= 1.0f,
@@ -291,6 +297,30 @@ void auditSinCos( std::FILE* stream )
             outputFloat( stream, sinKey, i, result.sine );
         }
     };
+
+    // The unbounded legacy path is still available. It is deliberately
+    // NOT an authoritative cross-platform fingerprint until range reduction
+    // is implemented and validated. Test same-platform compatibility.
+    constexpr std::array<std::uint32_t, 8> legacyAngles{
+        0x40c90fdcu, 0xc0c90fdcu, 0x42c80000u, 0xc2c80000u,
+        0x4b800000u, 0xcb800000u, 0x7f7fffffu, 0xff7fffffu
+    };
+    for( const auto raw : legacyAngles )
+    {
+        volatile float input = fromBits( raw );
+        const float angle = input;
+        const auto rotation = rot2::FromRadians( angle );
+        check( bits( rotation.c ) == bits( std::cos( angle ) ) &&
+            bits( rotation.s ) == bits( std::sin( angle ) ),
+            "rot2 legacy large-angle compatibility" );
+    }
+    for( const auto raw : { 0x7f800000u, 0xff800000u, 0x7fc12345u } )
+    {
+        volatile float input = fromBits( raw );
+        const auto rotation = rot2::FromRadians( input );
+        check( std::isnan( rotation.c ) && std::isnan( rotation.s ),
+            "rot2 legacy non-finite behavior" );
+    }
 
     constexpr float limit = 0x1.921fb6p+2f;
     for( std::size_t i = 0; i <= 4096; ++i )
