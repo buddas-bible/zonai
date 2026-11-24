@@ -2230,10 +2230,13 @@ struct fluidStateTraceProbe2
     static void captureForwardPredictor( const fluidField2& input,
         const fluidField2& laggedField, const std::vector<fluidShapeObstacle2>& start,
         const std::vector<fluidObstacleForce2>& laggedLoad, std::string& trace,
-        int index )
+        int index, double responseScale = 1.0 )
     {
         using namespace sandbox;
-        const std::string key = "forwardPredictor.interval" + std::to_string( index );
+        if( responseScale != 1.0 && responseScale != 0.75 )
+            throw std::runtime_error( "R4l unsupported forward response scale" );
+        const std::string key = std::string( responseScale == 1.0 ?
+            "forwardPredictor.interval" : "forwardCadence.interval" ) + std::to_string( index );
         const float dt = input.frozenPressureTimeStep_;
         const double area = static_cast<double>( input.cellSize_ ) * input.cellSize_;
         const auto run = [&]( const std::vector<fluidObstacleForce2>& loads )
@@ -2307,7 +2310,7 @@ struct fluidStateTraceProbe2
         // Neither the lagged nor the candidate load is applied twice.
         captureSpaceTimeProjection( forward, laggedField, laggedLoad, scratch,
             key + ".projection", 64, key + ".volume", false, 16,
-            key + ".topology", 1.0, &candidate );
+            key + ".topology", responseScale, &candidate );
         const auto corrected = run( candidate.feedback );
         rebuild( corrected );
 
@@ -2563,7 +2566,10 @@ struct fluidStateTraceProbe2
                     out( k + ".next.omega", next[j].angularVelocity );
                 }
                 if( model == 1 )
+                {
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step );
+                    captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75 );
+                }
                 maxPeak = std::max( maxPeak, static_cast<double>( flow.maxFluidFaceSpeed ) );
                 maxContinuity = std::max( maxContinuity, static_cast<double>( flow.continuityRms ) );
                 maxNegative = std::max( maxNegative, candidate.negativeVolume );
