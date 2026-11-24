@@ -646,7 +646,7 @@ analyticCircleInterval ClipRoundedCornerFace( const analyticFluidRoundedPolygon&
     const vec2 vertex = polygon.core.vertices[vertexIndex];
     const vec2 previous = polygon.outwardNormals[( vertexIndex + count - 1 ) % count];
     const vec2 next = polygon.outwardNormals[vertexIndex];
-    const auto chord = ClipCircleFace( { vertex, polygon.radius },
+    const auto chord = ClipCircleFace( analyticFluidCircle{ vertex, polygon.radius },
         vertical, coordinate, low, high );
     if( chord.length <= 0.0 ) return {};
 
@@ -752,7 +752,7 @@ double RoundedCornerRectangleArea( const analyticFluidRoundedPolygon& polygon, i
         vertices = nextCount;
     }
     return vertices >= 3
-        ? CircleClippedPolygonArea( { vertex, polygon.radius }, current, vertices ) : 0.0;
+        ? CircleClippedPolygonArea( analyticFluidCircle{ vertex, polygon.radius }, current, vertices ) : 0.0;
 }
 
 double RoundedPolygonRectangleArea( const analyticFluidRoundedPolygon& polygon,
