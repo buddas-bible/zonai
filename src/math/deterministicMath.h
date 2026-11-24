@@ -94,6 +94,72 @@ namespace zonai
 }
 
 
+// Candidate bounded sine/cosine pair for finite binary32 radians in
+// [-float(2*pi), +float(2*pi)]. Not a general FromRadians replacement:
+// arbitrary finite angles need a separate range reduction contract.
+struct deterministicSinCosResult
+{
+    float cosine;
+    float sine;
+};
+
+[[nodiscard]] inline deterministicSinCosResult deterministicSinCosBounded( float radians ) noexcept
+{
+    static_assert( sizeof( float ) == sizeof( std::uint32_t ) );
+    static_assert( std::numeric_limits<float>::is_iec559 );
+    static_assert( std::numeric_limits<double>::is_iec559 );
+
+    constexpr float limit = 0x1.921fb6p+2f;
+    constexpr double twoOverPi = 0.636619772367581343075535053490057448;
+    // Split pi/2 so cancellation near quadrant boundaries retains precision.
+    constexpr double halfPiHigh = 0x1.921fb54400000p+0;
+    constexpr double halfPiLow = 6.07710050650619224932e-11;
+
+    if( !std::isfinite( radians ) || radians < -limit || radians > limit )
+    {
+        const float nan = std::bit_cast<float>( 0x7fc00000u );
+        return { nan, nan };
+    }
+    if( radians == 0.0f ) return { 1.0f, radians };
+
+    const double angle = std::fabs( static_cast<double>( radians ) );
+    const int quadrant = static_cast<int>( angle * twoOverPi + 0.5 );
+    const double reduced = ( angle - quadrant * halfPiHigh ) - quadrant * halfPiLow;
+    const double square = reduced * reduced;
+
+    // Taylor polynomials on approximately [-pi/4, pi/4].
+    // Fixed binary64 Horner order, no FMA or fast-math.
+    constexpr std::array<double, 8> sineCoefficients{
+        -1.0 / 6.0, 1.0 / 120.0, -1.0 / 5040.0, 1.0 / 362880.0,
+        -1.0 / 39916800.0, 1.0 / 6227020800.0,
+        -1.0 / 1307674368000.0, 1.0 / 355687428096000.0
+    };
+    constexpr std::array<double, 8> cosineCoefficients{
+        -1.0 / 2.0, 1.0 / 24.0, -1.0 / 720.0, 1.0 / 40320.0,
+        -1.0 / 3628800.0, 1.0 / 479001600.0,
+        -1.0 / 87178291200.0, 1.0 / 20922789888000.0
+    };
+    double sinePolynomial = sineCoefficients.back();
+    double cosinePolynomial = cosineCoefficients.back();
+    for( int i = static_cast<int>( sineCoefficients.size() ) - 2; i >= 0; --i )
+    {
+        sinePolynomial = sineCoefficients[static_cast<std::size_t>( i )] + square * sinePolynomial;
+        cosinePolynomial = cosineCoefficients[static_cast<std::size_t>( i )] + square * cosinePolynomial;
+    }
+    const double s = reduced * ( 1.0 + square * sinePolynomial );
+    const double c = 1.0 + square * cosinePolynomial;
+    double cosine = c, sine = s;
+    switch( quadrant & 3 )
+    {
+    case 1: cosine = -s; sine = c; break;
+    case 2: cosine = -c; sine = -s; break;
+    case 3: cosine = s; sine = -c; break;
+    default: break;
+    }
+    if( radians < 0.0f ) sine = -sine;
+    return { static_cast<float>( cosine ), static_cast<float>( sine ) };
+}
+
 // Deterministic atan2 for IEEE-754 binary32 input and output.
 //
 // Keep the transcendental path independent of the platform C library.
