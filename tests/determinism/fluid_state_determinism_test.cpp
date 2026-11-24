@@ -2388,6 +2388,201 @@ struct fluidStateTraceProbe2
             key.c_str(), ledgerL1, velocityL1, fluxL1, velocityPeak, fluxPeak, lostTransfer, unsupported );
     }
 
+    // R4u: instantaneous endpoint continuity with the loaded World held
+    // fixed. The blocked fraction times actual solid velocity is the solid
+    // flux; do not substitute the previous interval's volume difference.
+    static void captureInstantaneousEndpoint( const fluidField2& field,
+        const continuationPressure& candidate, std::string& trace, int index )
+    {
+        const std::string key = "forwardInstantaneousEndpoint.interval" + std::to_string( index );
+        const std::size_t n = field.cellFluidFraction_.size();
+        const double h = field.cellSize_;
+        struct endpointEdge { int first, second; double aperture, velocity, matched; };
+        std::vector<endpointEdge> edges;
+        std::vector<int> parent( n, -1 ), count( n );
+        std::vector<double> solid( n ), copied( n ), matched( n ), diagonal( n ), sums( n );
+        int active = 0, unsupported = 0, maskedOpenFaces = 0;
+        for( std::size_t i = 0; i < n; ++i )
+            if( field.cellFluidFraction_[i] > 0.0f )
+            {
+                parent[i] = static_cast<int>( i );
+                ++active;
+            }
+        const auto root = [&]( int i )
+        {
+            while( parent[i] != i ) i = parent[i];
+            return i;
+        };
+        const auto face = [&]( bool isU, int x, int y )
+        {
+            const int f = isU ? field.uIndex( x, y ) : field.vIndex( x, y );
+            const int left = field.cellIndex( x - ( isU ? 1 : 0 ), y - ( isU ? 0 : 1 ) );
+            const int right = field.cellIndex( x, y );
+            const double geometricOpen = isU ? field.uOpenFraction_[f] : field.vOpenFraction_[f];
+            const double solidVelocity = isU ? field.uSolidVelocity_[f] : field.vSolidVelocity_[f];
+            const double blockedFlux = ( 1.0 - geometricOpen ) * solidVelocity;
+            solid[left] += blockedFlux; solid[right] -= blockedFlux;
+            const double a = isU ? field.cutCellUOpen( x, y ) : field.cutCellVOpen( x, y );
+            maskedOpenFaces += geometricOpen > 0.0 && a == 0.0;
+            if( a <= 0.0 ) return;
+            const double mean = isU ? candidate.meanU[f] : candidate.meanV[f];
+            if( mean <= 0.0 )
+            {
+                ++unsupported;
+                return;
+            }
+            const double velocity = isU ? candidate.intervalU[f] : candidate.intervalV[f];
+            const double fluxMatched = mean * velocity / a;
+            if( !std::isfinite( fluxMatched ) )
+                throw std::runtime_error( key + " invalid endpoint seed" );
+            const int l = root( left ), r = root( right );
+            if( l != r ) parent[std::max( l, r )] = std::min( l, r );
+            edges.push_back( { left, right, a, velocity, fluxMatched } );
+            diagonal[left] += a; diagonal[right] += a;
+            copied[left] += a * velocity; copied[right] -= a * velocity;
+            matched[left] += a * fluxMatched; matched[right] -= a * fluxMatched;
+        };
+        for( int y = 0; y < field.height_; ++y )
+            for( int x = 1; x < field.width_; ++x ) face( true, x, y );
+        for( int y = 1; y < field.height_; ++y )
+            for( int x = 0; x < field.width_; ++x ) face( false, x, y );
+        if( active == 0 || edges.empty() ) throw std::runtime_error( key + " empty endpoint graph" );
+        int regions = 0;
+        double inactiveSolidL1 = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            if( parent[i] >= 0 )
+            {
+                parent[i] = root( static_cast<int>( i ) );
+                ++count[parent[i]];
+                copied[i] += solid[i]; matched[i] += solid[i];
+            }
+            else inactiveSolidL1 += std::abs( solid[i] ) / h;
+        }
+        for( int c : count ) regions += c > 0;
+        const auto zeroMean = [&]( std::vector<double>& v )
+        {
+            std::fill( sums.begin(), sums.end(), 0.0 );
+            for( std::size_t i = 0; i < n; ++i )
+                if( parent[i] >= 0 ) sums[parent[i]] += v[i];
+            for( std::size_t i = 0; i < n; ++i )
+                if( parent[i] >= 0 ) v[i] -= sums[parent[i]] / count[parent[i]];
+        };
+        const auto dot = [&]( const std::vector<double>& a, const std::vector<double>& b )
+        {
+            double sum = 0.0;
+            for( std::size_t i = 0; i < n; ++i ) sum += a[i] * b[i];
+            return sum;
+        };
+        const auto multiply = [&]( const std::vector<double>& p, std::vector<double>& out )
+        {
+            std::fill( out.begin(), out.end(), 0.0 );
+            for( const auto& e : edges )
+            {
+                const double flux = e.aperture * ( p[e.first] - p[e.second] );
+                out[e.first] += flux; out[e.second] -= flux;
+            }
+        };
+        const auto out = [&]( const std::string& suffix, auto value )
+        {
+            if( !std::isfinite( static_cast<double>( value ) ) )
+                throw std::runtime_error( key + suffix + " nonfinite instantaneous audit" );
+            appendScalar( trace, key + suffix, value );
+        };
+        out( ".active", active ); out( ".regions", regions );
+        out( ".unsupportedOpenFaces", unsupported ); out( ".maskedOpenFaces", maskedOpenFaces );
+        out( ".inactiveSolidL1", inactiveSolidL1 );
+        // Unsupported open faces are a reported failed handoff, not an
+        // invented zero-velocity boundary or an accepted projection.
+        const bool supported = unsupported == 0;
+        out( ".supported", static_cast<int>( supported ) );
+        for( bool preserveFlux : { false, true } )
+        {
+            const auto& before = preserveFlux ? matched : copied;
+            const std::string prefix = preserveFlux ? ".flux" : ".copy";
+            std::vector<double> rhs( n ), p( n ), r( n ), z( n ), d( n ), ap( n );
+            for( std::size_t i = 0; i < n; ++i )
+                if( parent[i] >= 0 ) rhs[i] = -before[i];
+            zeroMean( rhs );
+            double compatibilityL1 = 0.0;
+            for( std::size_t i = 0; i < n; ++i )
+                if( parent[i] >= 0 ) compatibilityL1 += std::abs( rhs[i] + before[i] ) / h;
+            r = rhs;
+            const auto precondition = [&]()
+            {
+                for( std::size_t i = 0; i < n; ++i )
+                    z[i] = diagonal[i] > 0.0 ? r[i] / diagonal[i] : 0.0;
+                zeroMean( z );
+            };
+            precondition(); d = z;
+            double rz = dot( r, z ), squared = dot( r, r );
+            const double initial = squared;
+            const double tolerance = std::max( 1.0e-24, initial * 1.0e-10 );
+            int iterations = 0;
+            if( supported )
+                for( ; iterations < 2000 && squared > tolerance; ++iterations )
+                {
+                    multiply( d, ap ); zeroMean( ap );
+                    const double denominator = dot( d, ap );
+                    if( !std::isfinite( denominator ) || denominator <= 0.0 ||
+                        !std::isfinite( rz ) || rz <= 0.0 )
+                        throw std::runtime_error( key + " endpoint PCG breakdown" );
+                    const double alpha = rz / denominator;
+                    for( std::size_t i = 0; i < n; ++i ) { p[i] += alpha * d[i]; r[i] -= alpha * ap[i]; }
+                    squared = dot( r, r );
+                    if( !std::isfinite( squared ) ) throw std::runtime_error( key + " endpoint residual nonfinite" );
+                    if( squared <= tolerance ) { ++iterations; break; }
+                    precondition();
+                    const double next = dot( r, z ), beta = next / rz;
+                    for( std::size_t i = 0; i < n; ++i ) d[i] = z[i] + beta * d[i];
+                    rz = next;
+                }
+            zeroMean( p );
+            multiply( p, ap ); zeroMean( ap );
+            double trueSquared = 0.0;
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                const double residual = rhs[i] - ap[i];
+                trueSquared += residual * residual;
+            }
+            if( supported && ( !std::isfinite( trueSquared ) || trueSquared > tolerance ) )
+                throw std::runtime_error( key + " endpoint true residual failed" );
+            auto after = solid;
+            double seedPeak = 0.0, peak = 0.0, maxCorrection = 0.0, weightedCorrection = 0.0;
+            for( const auto& e : edges )
+            {
+                const double seed = preserveFlux ? e.matched : e.velocity;
+                const double correction = p[e.first] - p[e.second];
+                // Test the velocity representation that can actually be stored.
+                const float velocity = static_cast<float>( seed + correction );
+                const double flux = e.aperture * velocity;
+                after[e.first] += flux; after[e.second] -= flux;
+                seedPeak = std::max( seedPeak, std::abs( seed ) );
+                peak = std::max( peak, std::abs( static_cast<double>( velocity ) ) );
+                maxCorrection = std::max( maxCorrection, std::abs( correction ) );
+                weightedCorrection += e.aperture * correction * correction;
+            }
+            double beforeSquared = 0.0, afterSquared = 0.0, afterMax = 0.0;
+            for( std::size_t i = 0; i < n; ++i )
+                if( parent[i] >= 0 )
+                {
+                    beforeSquared += before[i] * before[i];
+                    afterSquared += after[i] * after[i];
+                    afterMax = std::max( afterMax, std::abs( after[i] ) / h );
+                }
+            const double beforeRms = std::sqrt( beforeSquared / active ) / h;
+            const double afterRms = std::sqrt( afterSquared / active ) / h;
+            out( prefix + ".beforeRms", beforeRms ); out( prefix + ".afterRms", afterRms );
+            out( prefix + ".afterMax", afterMax ); out( prefix + ".compatibilityL1", compatibilityL1 );
+            out( prefix + ".seedPeak", seedPeak ); out( prefix + ".peak", peak );
+            out( prefix + ".maxCorrection", maxCorrection ); out( prefix + ".weightedCorrectionSquared", weightedCorrection );
+            out( prefix + ".iterations", iterations ); out( prefix + ".trueResidualSquared", trueSquared );
+            std::printf( "%s%s supported %d instantaneous RMS %.9g -> %.9g /s peak %.9g -> %.9g m/s "
+                "compatibility L1 %.9g PCG %d\n", key.c_str(), prefix.c_str(), static_cast<int>( supported ),
+                beforeRms, afterRms, seedPeak, peak, compatibilityL1, iterations );
+        }
+    }
+
     // R4k: independent forward pressure trial at a sampled R4j start.
     // Freeze the incoming MAC trial velocity: no forward advection or
     // persistent candidate commit is implied by this geometry-only test.
@@ -2504,7 +2699,11 @@ struct fluidStateTraceProbe2
             std::span<const float>( *forwardPressureHistory ) : std::span<const float>{}, auditEndpoint );
         const auto corrected = run( candidate.feedback );
         rebuild( corrected );
-        if( auditEndpoint ) captureCorrectedEndpoint( forward, startFraction, candidate, dt, trace, index );
+        if( auditEndpoint )
+        {
+            captureCorrectedEndpoint( forward, startFraction, candidate, dt, trace, index );
+            captureInstantaneousEndpoint( forward, candidate, trace, index );
+        }
 
         const std::size_t n = startFraction.size();
         std::vector<double> residual( n ), sums( n );
