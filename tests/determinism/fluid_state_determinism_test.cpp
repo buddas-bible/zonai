@@ -1,5 +1,7 @@
 #include "fluid/fluidField2.h"
 #include "math/deterministicMath.h"
+#include "rigidBodyDemo.h"
+#include "world_state_snapshot.h"
 
 #include <algorithm>
 #include <array>
@@ -674,6 +676,167 @@ std::string runGeometryScene( const char* name, geometrySceneKind kind )
     return trace;
 }
 
+// R3m uses the real headless Sandbox interleave, not a duplicated FSI
+// integrator. Keep the standalone Fluid fixtures and their keys unchanged.
+struct worldFluidScene
+{
+    static constexpr int worldSubsteps = 8;
+    static constexpr int fluidSubsteps = 4;
+    zonai::sandbox::rigidBodyDemo demo{ zonai::sandbox::demoKind::windFlow };
+    std::vector<zonai::bodyId> bodies;
+    bool dragEnabled;
+
+    explicit worldFluidScene( bool drag ) : dragEnabled( drag )
+    {
+        demo.configureWindField( 24, 14, 0.5f );
+        demo.setWindCutCellProjectionEnabled( true );
+        demo.setWindCutCellCoupledProjectionEnabled( true );
+        demo.setWindDisjointAnalyticEnabled( true );
+        demo.setWindObstacleCouplingEnabled( true );
+        demo.setWindSynchronizedCouplingEnabled( true );
+        demo.setWindFluidSubstepCount( fluidSubsteps );
+        demo.setWindSourceEnabled( true );
+        demo.setWindSourceStrength( 8.0f );
+        demo.setWindDragCoefficient( drag ? 3.0f : 0.0f );
+        demo.setWindStepProfilingEnabled( false );
+        demo.setWindCouplingAuditEnabled( false );
+        for( const auto& shape : demo.getShapes() ) bodies.push_back( shape.bodyHandle );
+        check( bodies.size() == 3, "R3m expected three Sandbox bodies" );
+        demo.getWorld().SetBodyLinearVelocity( bodies[0], { 0.7f, -0.10f } );
+        demo.getWorld().SetBodyAngularVelocity( bodies[1], 0.5f );
+    }
+
+    void captureWorld( std::string& trace, const std::string& key, int tick ) const
+    {
+        const auto snapshot = zonai::determinism::test::captureWorldState(
+            demo.getWorld(), bodies, static_cast<std::uint64_t>( tick ), timeStep, worldSubsteps );
+        for( const auto& field : snapshot.fields )
+        {
+            char bits[32]{};
+            std::snprintf( bits, sizeof( bits ), "%0*llx/%u",
+                static_cast<int>( field.byteCount ) * 2,
+                static_cast<unsigned long long>( field.bits ), static_cast<unsigned>( field.byteCount ) );
+            trace.append( key ).append( ".world." ).append( field.name )
+                .append( "\t" ).append( bits ).append( "\n" );
+        }
+    }
+
+    void captureFluid( std::string& trace, const std::string& key,
+        const zonai::fluidField2& field ) const
+    {
+        using probe = zonai::fluidStateTraceProbe2;
+        probe::capture( field, trace, key + ".fluid" );
+        const auto& p = field.getCutCellPressure();
+        const auto& g = field.getCutCellTransition();
+        probe::appendScalar( trace, key + ".pcg.used", static_cast<int>( p.usedCoupledProjection ) );
+        probe::appendScalar( trace, key + ".pcg.failed", static_cast<int>( p.coupledSolveFailed ) );
+        probe::appendScalar( trace, key + ".pcg.status", static_cast<int>( p.coupledStatus ) );
+        probe::appendScalar( trace, key + ".pcg.iterations", p.coupledIterations );
+        probe::appendScalar( trace, key + ".pcg.ic0", static_cast<int>( p.usedIncompleteCholesky ) );
+        probe::appendScalar( trace, key + ".pcg.relativeResidual", p.coupledRelativeResidual );
+        probe::appendScalar( trace, key + ".geometry.disjoint", static_cast<int>( g.usedDisjointAnalyticGeometry ) );
+        probe::appendScalar( trace, key + ".geometry.partialCells", g.partialCells );
+    }
+
+    void captureFrame( std::string& trace, const std::string& key, int tick ) const
+    {
+        using probe = zonai::fluidStateTraceProbe2;
+        captureWorld( trace, key, tick );
+        captureFluid( trace, key, *demo.getWindField() );
+        probe::appendScalar( trace, key + ".fluidSteps", demo.getWindCouplingSteps() );
+        const auto vec = [&]( const std::string& name, zonai::vec2 v )
+        {
+            check( std::isfinite( v.x ) && std::isfinite( v.y ), "R3m nonfinite exchange" );
+            probe::appendScalar( trace, key + name + ".x", v.x );
+            probe::appendScalar( trace, key + name + ".y", v.y );
+        };
+        const auto forces = demo.getWindPressureForces();
+        check( forces.size() == bodies.size(), "R3m pressure feedback count" );
+        for( std::size_t i = 0; i < forces.size(); ++i )
+        {
+            const auto prefix = ".pressureForce[" + std::to_string( i ) + "]";
+            vec( prefix, forces[i].force );
+            check( std::isfinite( forces[i].torque ), "R3m nonfinite torque" );
+            probe::appendScalar( trace, key + prefix + ".torque", forces[i].torque );
+        }
+        vec( ".dragBodyImpulse", demo.getWindDragBodyImpulse() );
+        vec( ".dragFluidImpulse", demo.getWindDragFluidImpulse() );
+        const auto flow = demo.getWindField()->getFlowAudit( timeStep / fluidSubsteps );
+        check( flow.nonFiniteFluidFaces == 0 && std::isfinite( flow.continuityRms ) &&
+            std::isfinite( flow.maxFluidFaceSpeed ), "R3m nonfinite live field" );
+    }
+};
+
+std::string runWorldFluidScene( const char* name, bool drag )
+{
+    using probe = zonai::fluidStateTraceProbe2;
+    worldFluidScene observed{ drag }, control{ drag };
+    // The demo owns a non-const Field; its public getter is intentionally
+    // read-only. Use the existing test-only friend observer, not a new API.
+    auto& field = const_cast<zonai::fluidField2&>( *observed.demo.getWindField() );
+    std::string trace;
+    bool sawPressure = false, sawDragBody = false, sawDragFluid = false;
+    bool sawCoupled = false, sawDisjoint = false, sawFlow = false;
+
+    for( int tick = 0; tick <= 12; ++tick )
+    {
+        const std::string key = std::string( name ) + ".tick." + std::to_string( tick );
+        if( tick != 0 )
+        {
+            int calls = 0;
+            probe::setStageObserver( field,
+                [&]( const zonai::fluidField2& snapshot, int phase )
+                {
+                    check( phase == calls % 10, "R3m unexpected Fluid stage sequence" );
+                    const int interval = calls / 10;
+                    ++calls;
+                    // Input after source injection and output before drag/World
+                    // integration, for every Fluid interval of the first two ticks.
+                    if( tick <= 2 && ( phase == 0 || phase == 9 ) )
+                    {
+                        const std::string prefix = key + ".interval." + std::to_string( interval ) +
+                            ".stage." + std::to_string( phase );
+                        observed.captureWorld( trace, prefix, tick );
+                        observed.captureFluid( trace, prefix, snapshot );
+                    }
+                    if( phase == 9 )
+                    {
+                        const auto& pressure = snapshot.getCutCellPressure();
+                        sawCoupled |= pressure.usedCoupledProjection &&
+                            !pressure.coupledSolveFailed && pressure.usedIncompleteCholesky;
+                        sawDisjoint |= snapshot.getCutCellTransition().usedDisjointAnalyticGeometry;
+                        check( !pressure.coupledSolveFailed &&
+                            std::isfinite( pressure.pressureResidual ), "R3m pressure solve failure" );
+                    }
+                } );
+            observed.demo.step( timeStep, worldFluidScene::worldSubsteps );
+            probe::setStageObserver( field, {} );
+            control.demo.step( timeStep, worldFluidScene::worldSubsteps );
+            check( calls == 10 * worldFluidScene::fluidSubsteps &&
+                observed.demo.getWindCouplingSteps() == worldFluidScene::fluidSubsteps &&
+                control.demo.getWindCouplingSteps() == worldFluidScene::fluidSubsteps,
+                "R3m expected four actual Fluid/World intervals" );
+            for( const auto& force : observed.demo.getWindPressureForces() )
+                sawPressure |= force.force.x != 0.0f || force.force.y != 0.0f || force.torque != 0.0f;
+            const auto bodyImpulse = observed.demo.getWindDragBodyImpulse();
+            const auto fluidImpulse = observed.demo.getWindDragFluidImpulse();
+            sawDragBody |= bodyImpulse.x != 0.0f || bodyImpulse.y != 0.0f;
+            sawDragFluid |= fluidImpulse.x != 0.0f || fluidImpulse.y != 0.0f;
+            sawFlow |= field.getFlowAudit( timeStep / worldFluidScene::fluidSubsteps ).maxFluidFaceSpeed > 0.01f;
+        }
+        std::string a, b;
+        observed.captureFrame( a, key, tick );
+        control.captureFrame( b, key, tick );
+        check( a == b, "R3m observed and independent control World/Fluid states differ" );
+        trace.append( a );
+    }
+    check( sawCoupled && sawDisjoint && sawPressure && sawFlow,
+        "R3m did not exercise actual analytic coupled pressure feedback" );
+    check( sawDragBody == drag && sawDragFluid == drag,
+        "R3m drag path coverage differs from requested setting" );
+    return trace;
+}
+
 } // namespace
 
 int main( int argc, char** argv )
@@ -692,6 +855,8 @@ int main( int argc, char** argv )
         trace += runGeometryScene( "analyticCapsule", geometrySceneKind::analyticCapsule );
         trace += runGeometryScene( "analyticPolygon", geometrySceneKind::analyticPolygon );
         trace += runGeometryScene( "coupledDisjoint", geometrySceneKind::coupledDisjoint );
+        trace += runWorldFluidScene( "worldFluidPressure", false );
+        trace += runWorldFluidScene( "worldFluidDrag", true );
 
         if( argc == 3 )
         {
@@ -702,7 +867,7 @@ int main( int argc, char** argv )
             check( written == trace.size() && closed == 0, "cannot write Fluid state trace" );
         }
 
-        std::puts( "Fluid sampled/analytic geometry, MAC state and pressure feedback replay passed" );
+        std::puts( "Fluid standalone and World/Fluid interleave replay passed" );
         return EXIT_SUCCESS;
     }
     catch( const std::exception& error )
