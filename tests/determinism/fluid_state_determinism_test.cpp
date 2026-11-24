@@ -1066,6 +1066,175 @@ struct fluidStateTraceProbe2
             key.c_str(), transferError, unserved, limitedDonors, geometryModelL1, negativeModelVolume );
     }
 
+    // R4f: audit the model's predicted solid volume change against an
+    // actual geometric rebuild after a pressure-induced pose perturbation.
+    // This is a counterfactual free-body displacement, not a World step.
+    static void captureGeometricConservation( const fluidField2& before,
+        const intervalTransport& transport, const std::vector<fluidField2::coupledBodyResponse>& force,
+        const std::vector<double>& bodyVolume, const std::vector<double>& removedVolume,
+        const std::vector<double>& correctedResidual, std::string& trace, const std::string& key )
+    {
+        const auto& obstacles = before.frozenPressureObstacles_;
+        const std::size_t n = before.cellFluidFraction_.size();
+        const double h = before.cellSize_, area = h * h, dt = before.frozenPressureTimeStep_;
+        if( obstacles.size() != force.size() || bodyVolume.size() != n ||
+            removedVolume.size() != n || correctedResidual.size() != n )
+            throw std::runtime_error( key + " invalid conservation inputs" );
+
+        std::vector<double> fluxVolume( n );
+        for( std::size_t i = 0; i < n; ++i )
+            fluxVolume[i] = area * before.previousCellFluidFraction_[i];
+        for( int y = 0; y < before.height_; ++y )
+            for( int x = 1; x < before.width_; ++x )
+            {
+                const double q = transport.uTransfer[before.uIndex( x, y )];
+                fluxVolume[before.cellIndex( x - 1, y )] -= q;
+                fluxVolume[before.cellIndex( x, y )] += q;
+            }
+        for( int y = 1; y < before.height_; ++y )
+            for( int x = 0; x < before.width_; ++x )
+            {
+                const double q = transport.vTransfer[before.vIndex( x, y )];
+                fluxVolume[before.cellIndex( x, y - 1 )] -= q;
+                fluxVolume[before.cellIndex( x, y )] += q;
+            }
+
+        const auto out = [&]( const std::string& name, auto value )
+        {
+            if( !std::isfinite( static_cast<double>( value ) ) )
+                throw std::runtime_error( key + name + " nonfinite geometric conservation output" );
+            appendScalar( trace, key + name, value );
+        };
+        double bodyL1 = 0.0, removedL1 = 0.0, residualL1 = 0.0, geometryGap = 0.0;
+        double identityError = 0.0, negativeVolume = 0.0, bodySum = 0.0, removedSum = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            const double gap = fluxVolume[i] - area * before.cellFluidFraction_[i];
+            identityError = std::max( identityError,
+                std::abs( gap - ( bodyVolume[i] - removedVolume[i] - correctedResidual[i] ) ) );
+            bodyL1 += std::abs( bodyVolume[i] );
+            removedL1 += std::abs( removedVolume[i] );
+            residualL1 += std::abs( correctedResidual[i] );
+            geometryGap += std::abs( gap );
+            negativeVolume += std::max( 0.0, -fluxVolume[i] );
+            bodySum += bodyVolume[i];
+            removedSum += removedVolume[i];
+        }
+        if( identityError > 1.0e-12 * std::max( 1.0, geometryGap ) )
+            throw std::runtime_error( key + " geometric gap decomposition failed" );
+        out( ".bodyVolumeL1", bodyL1 ); out( ".compatibilityL1", removedL1 );
+        out( ".correctedResidualL1", residualL1 ); out( ".geometryGapL1", geometryGap );
+        out( ".identityError", identityError ); out( ".negativeFluxVolume", negativeVolume );
+        out( ".bodyVolumeSum", bodySum ); out( ".compatibilitySum", removedSum );
+
+        // Same pressure impulse and dt^2 displacement as the Schur volume
+        // term. Use exact endpoint poses, not reconstructed angles.
+        std::vector<vec2> displacement( obstacles.size() );
+        std::vector<float> rotation( obstacles.size() );
+        for( std::size_t j = 0; j < obstacles.size(); ++j )
+        {
+            displacement[j] = { static_cast<float>( dt * dt * obstacles[j].inverseMass * force[j].fx ),
+                static_cast<float>( dt * dt * obstacles[j].inverseMass * force[j].fy ) };
+            rotation[j] = static_cast<float>( dt * dt * obstacles[j].inverseInertia * force[j].torque );
+            const auto k = ".body[" + std::to_string( j ) + "]";
+            out( k + ".dx", displacement[j].x ); out( k + ".dy", displacement[j].y );
+            out( k + ".angle", rotation[j] );
+        }
+        fluidField2 geometry = before;
+        geometry.setPrePressureSnapshotObserver( {} );
+        setStageObserver( geometry, {} );
+        geometry.setCoupledPressureWarmStartEnabled( false );
+        geometry.setCoupledPressureWarmStartProbeEnabled( false );
+        const auto rebuild = [&]( float factor )
+        {
+            std::vector<fluidShapeObstacle2> poses( obstacles.begin(), obstacles.end() );
+            if( factor != 0.0f )
+                for( std::size_t j = 0; j < poses.size(); ++j )
+                {
+                    const rot2 delta = rot2::FromRadians( factor * rotation[j] );
+                    poses[j].center = obstacles[j].center + factor * displacement[j];
+                    poses[j].transform.position = poses[j].center +
+                        Rotate( delta, obstacles[j].transform.position - obstacles[j].center );
+                    poses[j].transform.rotation = delta * obstacles[j].transform.rotation;
+                }
+            geometry.updateObstacles( poses );
+            geometry.updateCutCellGeometry( poses );
+            if( !geometry.cutCellTransition_.usedDisjointAnalyticGeometry )
+                throw std::runtime_error( key + " nonanalytic perturbed endpoint geometry" );
+            std::vector<double> volumes( n );
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                const double fraction = geometry.cellFluidFraction_[i];
+                if( !std::isfinite( fraction ) || fraction < 0.0 || fraction > 1.0 )
+                    throw std::runtime_error( key + " invalid perturbed geometry" );
+                volumes[i] = area * fraction;
+            }
+            return volumes;
+        };
+        const auto endpoint = rebuild( 0.0f );
+        double endpointRebuildL1 = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+            endpointRebuildL1 += std::abs( endpoint[i] - area * before.cellFluidFraction_[i] );
+        if( endpointRebuildL1 != 0.0 )
+            throw std::runtime_error( key + " unchanged endpoint reconstruction differs" );
+        out( ".endpointRebuildL1", endpointRebuildL1 );
+
+        // Independent endpoint derivative from the same boundary coefficient
+        // assembly, to distinguish time averaging from geometric linearization.
+        std::fill( geometry.divergence_.begin(), geometry.divergence_.end(), 0.0f );
+        if( !geometry.solveCoupledPressure( static_cast<float>( dt ), 200, obstacles, true ) )
+            throw std::runtime_error( key + " endpoint coefficient assembly failed" );
+        std::vector<double> endpointLinear( n );
+        for( const auto& f : geometry.coupledPressureScratch_.faces )
+        {
+            const auto j = static_cast<std::size_t>( f.owner );
+            endpointLinear[f.cell] += static_cast<double>( f.fx ) * displacement[j].x +
+                static_cast<double>( f.fy ) * displacement[j].y + f.torque * rotation[j];
+        }
+
+        const auto plus = rebuild( 1.0f );
+        const auto minus = rebuild( -1.0f );
+        const auto half = rebuild( 0.5f );
+        double actualL1 = 0.0, actualSum = 0.0, meanLinearError = 0.0, endLinearError = 0.0;
+        double centeredError = 0.0, halfError = 0.0, predictedGapL1 = 0.0, predictedWithCompatibilityL1 = 0.0;
+        double meanVsEndL1 = 0.0;
+        int newlyClosed = 0, newlyOpen = 0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            const double change = plus[i] - endpoint[i];
+            const double central = 0.5 * ( plus[i] - minus[i] );
+            actualL1 += std::abs( change ); actualSum += change;
+            meanLinearError += std::abs( change - bodyVolume[i] );
+            endLinearError += std::abs( change - endpointLinear[i] );
+            centeredError += std::abs( central - endpointLinear[i] );
+            halfError += std::abs( 2.0 * ( half[i] - endpoint[i] ) - change );
+            meanVsEndL1 += std::abs( bodyVolume[i] - endpointLinear[i] );
+            predictedGapL1 += std::abs( fluxVolume[i] - plus[i] );
+            predictedWithCompatibilityL1 += std::abs( fluxVolume[i] - plus[i] + removedVolume[i] );
+            newlyClosed += endpoint[i] > 0.0 && plus[i] == 0.0;
+            newlyOpen += endpoint[i] == 0.0 && plus[i] > 0.0;
+        }
+        out( ".actualVolumeChangeL1", actualL1 ); out( ".actualVolumeChangeSum", actualSum );
+        out( ".meanLinearErrorL1", meanLinearError ); out( ".endpointLinearErrorL1", endLinearError );
+        out( ".centeredLinearErrorL1", centeredError ); out( ".halfScaleErrorL1", halfError );
+        out( ".meanVsEndpointLinearL1", meanVsEndL1 );
+        out( ".predictedGeometryGapL1", predictedGapL1 );
+        out( ".predictedWithCompatibilityGapL1", predictedWithCompatibilityL1 );
+        out( ".newlyClosed", newlyClosed ); out( ".newlyOpen", newlyOpen );
+
+        const int witness = before.cellIndex( 17, 13 );
+        out( ".witness.endVolume", endpoint[witness] ); out( ".witness.fluxVolume", fluxVolume[witness] );
+        out( ".witness.meanLinear", bodyVolume[witness] ); out( ".witness.endLinear", endpointLinear[witness] );
+        out( ".witness.plusVolume", plus[witness] ); out( ".witness.minusVolume", minus[witness] );
+        out( ".witness.halfVolume", half[witness] ); out( ".witness.compatibility", removedVolume[witness] );
+        std::printf( "%s gap %.9g m^2 body L1 %.9g compatibility L1 %.9g residual L1 %.9g "
+            "identity %.9g actual perturbation L1 %.9g mean linear error %.9g endpoint linear error %.9g "
+            "perturbed gap %.9g compatibility-adjusted gap %.9g newly closed/open %d/%d\n",
+            key.c_str(), geometryGap, bodyL1, removedL1, residualL1, identityError,
+            actualL1, meanLinearError, endLinearError, predictedGapL1,
+            predictedWithCompatibilityL1, newlyClosed, newlyOpen );
+    }
+
     // R4a: independent, test-only interval-average pressure model. Reuse the
     // production analytic geometry and boundary assembly at quadrature poses.
     // Do not write averaged apertures into the live endpoint field.
@@ -1470,6 +1639,7 @@ struct fluidStateTraceProbe2
         // The original volume source and predicted body response are fixed.
         const double area = h * h;
         std::vector<double> volume( n ), correctedVolume( n ), velocityHandoff( n ), fluxHandoff( n );
+        std::vector<double> bodyVolumeAudit( n ), removedVolumeAudit( n );
         double sourceVolume = 0.0, sourceL1 = 0.0, compatibilityVolume = 0.0;
         int closingCells = 0, openingCells = 0;
         for( std::size_t i = 0; i < n; ++i )
@@ -1491,6 +1661,8 @@ struct fluidStateTraceProbe2
             }
             const double removed = dt * area * ( rawDivergence[i] + rhs[i] / scale );
             compatibilityVolume += std::abs( removed );
+            bodyVolumeAudit[i] = bodyVolume;
+            removedVolumeAudit[i] = removed;
             volume[i] = change + bodyVolume;
             correctedVolume[i] = volume[i] - removed;
             velocityHandoff[i] = correctedVolume[i];
@@ -1605,6 +1777,8 @@ struct fluidStateTraceProbe2
             "intervalTransport." + handoffKey );
         captureChronologicalTransport( before, transport, intervalUVelocity, intervalVVelocity,
             transportPanels, weightSum, trace, "chronologicalTracer." + handoffKey );
+        captureGeometricConservation( before, transport, force, bodyVolumeAudit, removedVolumeAudit,
+            correctedVolume, trace, "geometricConservation." + handoffKey );
     }
 
     static void captureProjection( const fluidField2& field, std::string& trace, const std::string& key )
