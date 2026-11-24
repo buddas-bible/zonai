@@ -2445,11 +2445,13 @@ struct fluidStateTraceProbe2
     static void captureInstantaneousEndpoint( const fluidField2& field,
         const continuationPressure& candidate, std::string& trace, int index,
         std::vector<float>* committedU = nullptr, std::vector<float>* committedV = nullptr,
-        bool staggered = false )
+        bool staggered = false, bool optimized = false )
     {
+        if( optimized && !staggered ) throw std::runtime_error( "R4ag invalid endpoint mode" );
         if( ( committedU == nullptr ) != ( committedV == nullptr ) )
             throw std::runtime_error( "R4v incomplete endpoint output" );
-        const std::string key = std::string( staggered ? "forwardStaggeredEndpoint.interval" :
+        const std::string key = std::string( optimized ? "forwardOptimizedEndpoint.interval" :
+            staggered ? "forwardStaggeredEndpoint.interval" :
             committedU ? "forwardPersistentEndpoint.interval" :
             "forwardInstantaneousEndpoint.interval" ) + std::to_string( index );
         const std::size_t n = field.cellFluidFraction_.size();
@@ -2656,7 +2658,8 @@ struct fluidStateTraceProbe2
             out( prefix + ".iterations", iterations ); out( prefix + ".trueResidualSquared", trueSquared );
             if( committedU && !preserveFlux )
             {
-                const std::string budgetKey = std::string( staggered ? "forwardStaggeredMomentum.interval" :
+                const std::string budgetKey = std::string( optimized ? "forwardOptimizedMomentum.interval" :
+                    staggered ? "forwardStaggeredMomentum.interval" :
                     "forwardPersistentMomentum.interval" ) + std::to_string( index );
                 const auto emit = [&]( const char* suffix, double value )
                 {
@@ -2853,7 +2856,7 @@ struct fluidStateTraceProbe2
         bool adaptiveEndpoint = false, forwardTiming* timing = nullptr,
         double relativeSquaredTolerance = 1.0e-16, bool warmStart = false,
         std::vector<float>* forwardPressureHistory = nullptr, bool auditEndpoint = false,
-        forwardEndpointState* committed = nullptr, bool staggered = false )
+        forwardEndpointState* committed = nullptr, bool staggered = false, bool optimized = false )
     {
         const auto totalStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
         using namespace sandbox;
@@ -2928,6 +2931,7 @@ struct fluidStateTraceProbe2
             return result;
         };
 
+        if( optimized && !staggered ) throw std::runtime_error( "R4ag invalid forward mode" );
         if( staggered && ( !committed || !input.preciseDisjointCapsuleEnabled_ ) )
             throw std::runtime_error( "R4ad invalid staggered fixture" );
         const auto predicted = run( staggered ? laggedLoad : std::vector<fluidObstacleForce2>( start.size() ) );
@@ -2961,19 +2965,20 @@ struct fluidStateTraceProbe2
             // R4ad: one explicit body step using the previously computed
             // pressure, followed by a fixed-geometry interval solve. The
             // newly computed load is applied only in the next interval.
-            const std::string splitKey = "forwardStaggered.interval" + std::to_string( index );
+            const std::string splitKey = std::string( optimized ? "forwardOptimized.interval" :
+                "forwardStaggered.interval" ) + std::to_string( index );
             const auto pressureStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
             if( timing ) timing->setupMs = elapsedMs( totalStart, pressureStart );
             captureSpaceTimeProjection( forward, laggedField, laggedLoad, scratch,
                 splitKey + ".projection", 16, splitKey + ".volume", false,
                 16, splitKey + ".topology", 0.0, &candidate, 0, true,
-                timing, 1.0e-16, false, {}, true, true );
+                timing, optimized ? 1.0e-10 : 1.0e-16, optimized, {}, true, true, optimized );
             const auto pressureEnd = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
             if( timing ) timing->pressureMs = elapsedMs( pressureStart, pressureEnd );
             // R4af: matched-state pressure-only trials. Do not replace the
             // accepted candidate or include trial time in the R4ae total.
             // Benchmark probes are timed separately in Release.
-            for( int variant = 0; variant < 3; ++variant )
+            for( int variant = 0; !optimized && variant < 3; ++variant )
             {
                 const bool warm = variant != 0;
                 const double tolerance = variant == 2 ? 1.0e-10 : 1.0e-16;
@@ -3066,7 +3071,7 @@ struct fluidStateTraceProbe2
                 throw std::runtime_error( splitKey + " unsupported volume" );
             const auto endpointStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
             std::vector<float> endpointU, endpointV;
-            captureInstantaneousEndpoint( forward, candidate, trace, index, &endpointU, &endpointV, true );
+            captureInstantaneousEndpoint( forward, candidate, trace, index, &endpointU, &endpointV, true, optimized );
             forward.u_ = std::move( endpointU ); forward.v_ = std::move( endpointV );
             forward.pressure_ = candidate.pressure;
             forward.applyCutCellBoundaries();
@@ -3085,6 +3090,13 @@ struct fluidStateTraceProbe2
             emit( ".unsupportedCells", unsupportedCells );
             emit( ".peak", candidate.intervalPeak ); emit( ".iterations", candidate.initialIterations );
             emit( ".trueResidualSquared", candidate.trueResidualSquared );
+            if( optimized )
+            {
+                emit( ".relativeSquaredResidual", candidate.initialResidualSquared > 0.0 ?
+                    candidate.trueResidualSquared / candidate.initialResidualSquared : 0.0 );
+                emit( ".seedRelativeSquared", candidate.initialResidualSquared > 0.0 ?
+                    candidate.seedResidualSquared / candidate.initialResidualSquared : 0.0 );
+            }
             double maxForceDelta = 0.0, maxTorqueDelta = 0.0;
             for( std::size_t j = 0; j < predicted.size(); ++j )
             {
@@ -3928,7 +3940,7 @@ struct fluidStateTraceProbe2
     // forward, rather than sampling a separate lagged trajectory each time.
     static void captureForwardContinuation( const fluidField2& initial,
         const fluidField2& initialProjection, std::span<const fluidObstacleForce2> initialLoad,
-        std::string& trace, bool staggered = false, int benchmarkRepeat = -1 )
+        std::string& trace, bool staggered = false, int benchmarkRepeat = -1, bool optimized = false )
     {
         constexpr int first = 43, intervals = 16;
         if( benchmarkRepeat >= 0 && !staggered )
@@ -4001,13 +4013,13 @@ struct fluidStateTraceProbe2
             const auto prepared = benchmarkRepeat >= 0 ? benchmarkClock::now() : benchmarkClock::time_point{};
             captureForwardPredictor( pre, seed, poses, load, trace, first + step,
                 0.75, 0, 16, true, benchmarkRepeat >= 0 ? &timing : nullptr,
-                1.0e-10, true, nullptr, true, &state, staggered );
+                1.0e-10, true, nullptr, true, &state, staggered, optimized );
             if( benchmarkRepeat >= 0 )
             {
                 const double total = elapsedMs( stepStart, prepared ) + timing.totalMs;
-                std::printf( "R4ae timing interval=%d repeat=%d prepare_ms=%.6f setup_ms=%.6f "
+                std::printf( "%s timing interval=%d repeat=%d prepare_ms=%.6f setup_ms=%.6f "
                     "quadrature_ms=%.6f linear_ms=%.6f pressure_ms=%.6f endpoint_ms=%.6f total_ms=%.6f\n",
-                    first + step, benchmarkRepeat, elapsedMs( stepStart, prepared ), timing.setupMs,
+                    optimized ? "R4ag" : "R4ae", first + step, benchmarkRepeat, elapsedMs( stepStart, prepared ), timing.setupMs,
                     timing.quadratureMs, timing.linearMs, timing.pressureMs, timing.endpointMs, total );
             }
         }
@@ -5374,6 +5386,19 @@ std::string runNearClosedFaceScene()
         trace += reference;
     }
     else probe::captureForwardContinuation( *frozen, baseline, *a, trace, true );
+    if( probe::benchmarkForward )
+    {
+        std::string reference;
+        probe::captureForwardContinuation( *frozen, baseline, *a, reference, true, 0, true );
+        for( int repeat = 1; repeat < 3; ++repeat )
+        {
+            std::string repeated;
+            probe::captureForwardContinuation( *frozen, baseline, *a, repeated, true, repeat, true );
+            check( repeated == reference, "R4ag optimized benchmark replay differs" );
+        }
+        trace += reference;
+    }
+    else probe::captureForwardContinuation( *frozen, baseline, *a, trace, true, -1, true );
     // Adjacent actual intervals exercise the transition before/after the spike.
     // They are separate frozen solves, not a candidate-driven trajectory.
     for( std::size_t i = 0; i < adjacent.size(); ++i )
