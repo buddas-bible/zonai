@@ -428,6 +428,7 @@ jobs:
               "geometryDefectCorrection": 340,
               "worldPressureResponse": 2520,
               "cadencePressure": 23267,
+              "laggedContinuation": 65988,
           }
           topology = totals.get("topologyQuadrature", 0)
           # 49 second-resolution output rows, six quadrature headers,
