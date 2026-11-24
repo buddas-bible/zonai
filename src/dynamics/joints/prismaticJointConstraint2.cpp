@@ -4,6 +4,8 @@
 #include <cassert>
 #include <cmath>
 
+#include "math/deterministicMath.h"
+
 namespace zonai
 {
 
@@ -188,7 +190,7 @@ void solvePrismaticJointConstraint( prismaticJointConstraint2& constraint, bodyS
     if( useBias )
     {
         const rot2 rotation = Inverse( bodyStateA.deltaRotation ) * bodyStateB.deltaRotation * constraint.relativeRotation;
-        const vec2 separation{ Dot( perpendicular, d ), std::atan2( rotation.s, rotation.c ) };
+        const vec2 separation{ Dot( perpendicular, d ), deterministicAtan2( rotation.s, rotation.c ) };
         bias = constraint.softness.biasRate * separation;
         massScale = constraint.softness.massScale;
         impulseScale = constraint.softness.impulseScale;

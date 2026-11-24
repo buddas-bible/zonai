@@ -1,6 +1,7 @@
 #include "fluid/fluidField2.h"
 
 #include "collision/distance2.h"
+#include "math/deterministicMath.h"
 
 #include <algorithm>
 #include <array>
@@ -1269,9 +1270,9 @@ float fluidField2::sampleComponent( const std::vector<float>& values, int width,
     const int j1 = std::min( j + 1, height - 1 );
     const float tx = x - i;
     const float ty = y - j;
-    const float bottom = std::lerp( values[j * width + i], values[j * width + i1], tx );
-    const float top = std::lerp( values[j1 * width + i], values[j1 * width + i1], tx );
-    return std::lerp( bottom, top, ty );
+    const float bottom = deterministicLerp( values[j * width + i], values[j * width + i1], tx );
+    const float top = deterministicLerp( values[j1 * width + i], values[j1 * width + i1], tx );
+    return deterministicLerp( bottom, top, ty );
 }
 
 vec2 fluidField2::sampleFrom( const std::vector<float>& u, const std::vector<float>& v, vec2 position ) const noexcept
@@ -2578,14 +2579,17 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     }
 
     stepMomentum_.before = getFluidMomentum();
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 0 );
     record( stepTiming_.other );
     updateObstacles( obstacles );
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 1 );
     record( stepTiming_.occupancy );
     updateCutCellGeometry( obstacles );
     if( auditFace )
         faceStageAudit_.openFraction = faceStageAuditIsU_
             ? cutCellUOpen( faceStageAuditX_, faceStageAuditY_ )
             : cutCellVOpen( faceStageAuditX_, faceStageAuditY_ );
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 2 );
     record( stepTiming_.geometry );
     if( cutCellProjectionEnabled_ )
     {
@@ -2593,14 +2597,17 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         reconcileSweptSolidFlux();
     }
     else sweptFaceFlux_ = {};
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 3 );
     record( stepTiming_.swept );
     remapExposedFaces();
     if( auditFace ) faceStageAudit_.afterRemap = readAuditFace();
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 4 );
     record( stepTiming_.remap );
     stepMomentum_.afterObstacles = getFluidMomentum();
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
     else applySolidBoundaries( obstacles );
     if( auditFace ) faceStageAudit_.afterBoundary = readAuditFace();
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 5 );
 
     advectionStats_ = {};
     advectionStats_.conservative = conservativeAdvectionEnabled_;
@@ -2632,10 +2639,12 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         v_.swap( nextV_ );
         advectionStats_.substeps = 1;
     }
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 6 );
     record( stepTiming_.advection );
     if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
     else applySolidBoundaries( obstacles );
     if( auditFace ) faceStageAudit_.afterAdvection = readAuditFace();
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 7 );
     advectionStats_.after = getAdvectionFaceMomentum();
     stepMomentum_.afterAdvection = getFluidMomentum();
     record( stepTiming_.boundaries );
@@ -2668,6 +2677,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
         project( timeStep, std::clamp( pressureIterations, 1, 200 ), obstacles, feedback );
     }
     stepMomentum_.afterPressure = getFluidMomentum();
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 8 );
     if( auditFace )
     {
         faceStageAudit_.afterPressure = readAuditFace();
@@ -2746,6 +2756,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     }
     record( stepTiming_.pressure );
     transportTracer( timeStep );
+    if( determinismStageObserver_ ) determinismStageObserver_( *this, 9 );
     record( stepTiming_.tracer );
     previousObstacles_.assign( obstacles.begin(), obstacles.end() );
     record( stepTiming_.other );
@@ -3057,8 +3068,8 @@ void fluidField2::updateSweptSolidFlux( float timeStep, std::span<const fluidSha
 
         const vec2 displacement = finish.transform.position - start.transform.position;
         linearSpeeds[i] = displacement / timeStep;
-        const float startAngle = std::atan2( start.transform.rotation.s, start.transform.rotation.c );
-        const float endAngle = std::atan2( finish.transform.rotation.s, finish.transform.rotation.c );
+        const float startAngle = deterministicAtan2( start.transform.rotation.s, start.transform.rotation.c );
+        const float endAngle = deterministicAtan2( finish.transform.rotation.s, finish.transform.rotation.c );
         const float deltaAngle = std::remainder( endAngle - startAngle, 2.0f * std::numbers::pi_v<float> );
         startAngles[i] = startAngle;
         angularSpeeds[i] = deltaAngle / timeStep;

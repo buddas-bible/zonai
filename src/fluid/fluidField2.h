@@ -429,6 +429,9 @@ struct fluidStepTiming2
 // 내부 Circle/Capsule/Convex Polygon solid 경계 face는 no-through로 처리함.
 class fluidField2
 {
+    // R3c read-only friend: tests capture raw MAC state without a public debug API.
+    friend struct fluidStateTraceProbe2;
+
 public:
 #pragma region Lifetime
     // 너비와 높이는 cell 개수. 최소 2, 최대 256. origin은 좌하단 경계.
@@ -1020,6 +1023,9 @@ private:
     int faceStageAuditX_ = -1;
     int faceStageAuditY_ = -1;
     fluidFaceStageAudit2 faceStageAudit_{};
+    // Test-only opt-in hook. Captures read-only Field state at fixed Step phases.
+    // No callback or stage allocation in ordinary simulation.
+    std::function<void(const fluidField2&, int)> determinismStageObserver_{};
 #pragma endregion Data
 };
 
