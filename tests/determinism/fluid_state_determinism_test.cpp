@@ -16,6 +16,7 @@
 #include <functional>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -360,6 +361,22 @@ struct fluidStateTraceProbe2
             vec( ".impulse.residual", p.impulse.residual() );
         }
         return result;
+    }
+
+    static void captureProjection( const fluidField2& field, std::string& trace, const std::string& key )
+    {
+        appendVector( trace, key + ".u", field.u_ );
+        appendVector( trace, key + ".v", field.v_ );
+        appendVector( trace, key + ".pressure", field.pressure_ );
+        appendVector( trace, key + ".divergence", field.divergence_ );
+        appendVector( trace, key + ".volumeRate", field.cutCellVolumeRate_ );
+    }
+
+    static void captureTargetV( const fluidField2& field, std::string& trace,
+        const std::string& key, int x, int y )
+    {
+        appendScalar( trace, key + ".raw", field.v_[field.vIndex( x, y )] );
+        appendScalar( trace, key + ".open", field.cutCellVOpen( x, y ) );
     }
 
     static void capturePrePressure( const fluidField2& field,
@@ -1420,6 +1437,178 @@ std::string runWorldFluidScene( const char* name, bool drag,
     return trace;
 }
 
+// R3w: reproduce the actual historical fine-grid frozen-pressure fixture.
+// Do not force a particular peak: deterministic math changes may move it.
+// The fixed historical index is compared against the live projection, while
+// all 64 intervals are inspected for the true maximum in the current build.
+std::string runNearClosedFaceScene()
+{
+    using probe = zonai::fluidStateTraceProbe2;
+    using namespace zonai;
+    using namespace zonai::sandbox;
+    constexpr int frames = 16;
+    constexpr int fluidSubsteps = 4;
+    constexpr int targetIndex = 43; // warmup 4 + measured frame 6, interval 3 (zero-based)
+    constexpr float h = 0.25f;
+    constexpr float subDt = timeStep / fluidSubsteps;
+    rigidBodyDemo scene{ demoKind::windFlow };
+    scene.configureWindField( 48, 28, h );
+    scene.setWindCutCellProjectionEnabled( true );
+    scene.setWindCutCellCoupledProjectionEnabled( true );
+    scene.setWindDisjointAnalyticEnabled( true );
+    scene.setWindFluidSubstepCount( fluidSubsteps );
+    scene.setWindFaceStageAuditTarget( 17, 13, false );
+    scene.setWindObstacleCouplingEnabled( true );
+    scene.setWindSynchronizedCouplingEnabled( true );
+    scene.setWindSourceEnabled( true );
+    scene.setWindSourceStrength( 8.0f );
+    scene.setWindDragCoefficient( 0.0f );
+    scene.seedWindTracer();
+    scene.getWorld().SetBodyLinearVelocity( scene.getShapes()[0].bodyHandle, { 0.7f, -0.10f } );
+    scene.getWorld().SetBodyAngularVelocity( scene.getShapes()[1].bodyHandle, 0.5f );
+    auto& field = const_cast<fluidField2&>( *scene.getWindField() );
+    std::optional<fluidField2> frozen;
+    std::vector<float> beforeU, beforeV;
+    std::string trace, liveProjection;
+    int calls = 0, frozenCalls = 0, validBudgets = 0;
+    float maxSpeed = 0.0f, maxDelta = 0.0f;
+    int peakIndex = -1, peakX = -1, peakY = -1;
+    bool peakIsU = true;
+    float peakOpen = 0.0f, targetOpen = 0.0f, targetBefore = 0.0f, targetAfter = 0.0f;
+    scene.setWindPrePressureSnapshotObserver( [&]( const fluidField2& snapshot )
+    {
+        if( frozenCalls == targetIndex ) frozen.emplace( snapshot );
+        ++frozenCalls;
+    } );
+    probe::setStageObserver( field, [&]( const fluidField2& snapshot, int phase )
+    {
+        check( phase == calls % 10, "R3w Fluid phase order" );
+        const int index = calls / 10;
+        ++calls;
+        const std::string key = "nearClosedFace.tick." + std::to_string( index / fluidSubsteps + 1 ) +
+            ".interval." + std::to_string( index % fluidSubsteps ) + ".stage." + std::to_string( phase );
+        probe::captureTargetV( snapshot, trace, key + ".targetV", 17, 13 );
+        if( phase >= 4 && phase <= 8 )
+        {
+            if( phase == 7 ) probe::capturePrePressure( snapshot, beforeU, beforeV );
+            const auto sample = probe::captureStabilityPhase( snapshot, trace, key,
+                phase == 8 ? &beforeU : nullptr, phase == 8 ? &beforeV : nullptr );
+            if( phase == 8 )
+            {
+                const auto& p = snapshot.getCutCellPressure();
+                if( !p.usedCoupledProjection || p.coupledSolveFailed ||
+                    p.coupledStatus != fluidCoupledPressureStatus2::converged )
+                    throw std::runtime_error( key + " coupled projection failed" );
+                validBudgets += static_cast<int>( p.hasAnalyticImpulseBudget );
+                maxDelta = std::max( maxDelta, sample.deltaPeak );
+                if( sample.peak > maxSpeed )
+                {
+                    maxSpeed = sample.peak; peakIndex = index; peakX = sample.peakX;
+                    peakY = sample.peakY; peakIsU = sample.peakIsU; peakOpen = sample.peakOpen;
+                }
+                if( index == targetIndex ) probe::captureProjection( snapshot, liveProjection, "projection" );
+            }
+        }
+        if( phase == 9 )
+        {
+            const auto& a = snapshot.getFaceStageAudit();
+            check( a.valid && !a.isU && a.x == 17 && a.y == 13,
+                "R3w fixed face audit target missing" );
+            const auto emit = [&]( const std::string& name, auto value )
+            {
+                if( !std::isfinite( static_cast<double>( value ) ) )
+                    throw std::runtime_error( key + name + " nonfinite face audit" );
+                probe::appendScalar( trace, key + name, value );
+            };
+            emit( ".face.open", a.openFraction );
+            emit( ".face.beforeGeometry", a.beforeGeometry );
+            emit( ".face.afterRemap", a.afterRemap );
+            emit( ".face.afterBoundary", a.afterBoundary );
+            emit( ".face.afterAdvection", a.afterAdvection );
+            emit( ".face.afterPressure", a.afterPressure );
+            emit( ".face.predictedDelta", a.predictedPressureDelta );
+            emit( ".face.lowerFraction", a.lowerCellFraction );
+            emit( ".face.upperFraction", a.upperCellFraction );
+            emit( ".face.lowerVolumeRate", a.lowerVolumeRate );
+            emit( ".face.upperVolumeRate", a.upperVolumeRate );
+            emit( ".face.lowerPressure", a.lowerPressure );
+            emit( ".face.upperPressure", a.upperPressure );
+            const auto row = [&]( const std::string& prefix, const fluidFaceCellPressureAudit2& r )
+            {
+                emit( prefix + ".west", r.westOpen ); emit( prefix + ".east", r.eastOpen );
+                emit( prefix + ".south", r.southOpen ); emit( prefix + ".north", r.northOpen );
+                emit( prefix + ".rhs", r.rhs ); emit( prefix + ".laplacian", r.laplacian );
+                emit( prefix + ".schur", r.schur ); emit( prefix + ".residual", r.rowResidual );
+                emit( prefix + ".flux", r.finalOpenFlux ); emit( prefix + ".continuity", r.rawContinuity );
+            };
+            row( ".lowerRow", a.lowerRow ); row( ".upperRow", a.upperRow );
+            if( index == targetIndex )
+            {
+                targetOpen = a.openFraction; targetBefore = a.afterAdvection; targetAfter = a.afterPressure;
+            }
+        }
+    } );
+    for( int tick = 0; tick < frames; ++tick ) scene.step( timeStep, 8 );
+    probe::setStageObserver( field, {} );
+    scene.setWindPrePressureSnapshotObserver( {} );
+    check( calls == frames * fluidSubsteps * 10 && frozenCalls == frames * fluidSubsteps &&
+        frozen.has_value() && !liveProjection.empty(), "R3w incomplete historical replay" );
+
+    // Replay on independent deep copies of the same pre-pressure state.
+    // Cached/default must reproduce live pressure exactly. The uncached
+    // variant is a differential diagnostic, not a claim of same bits A/B.
+    fluidField2 baseline = *frozen, reference = *frozen;
+    for( auto* copy : { &baseline, &reference } )
+    {
+        copy->setPrePressureSnapshotObserver( {} );
+        probe::setStageObserver( *copy, {} );
+    }
+    reference.setAnalyticCutCellCachedSchurEdgesEnabled( false );
+    const auto a = baseline.replayFrozenCutCellPressure();
+    const auto b = reference.replayFrozenCutCellPressure();
+    check( a && b && a->size() == 3 && b->size() == 3, "R3w frozen replay feedback missing" );
+    std::string baselineProjection;
+    probe::captureProjection( baseline, baselineProjection, "projection" );
+    check( baselineProjection == liveProjection, "R3w default frozen pressure differs from live stage 8" );
+    const auto compareReplay = [&]( const char* label, const fluidField2& copy,
+        const std::vector<fluidObstacleForce2>& feedback )
+    {
+        const std::string key = std::string( "nearClosedFace.frozen." ) + label;
+        const auto& p = copy.getCutCellPressure();
+        check( p.usedCoupledProjection && !p.coupledSolveFailed &&
+            p.coupledStatus == fluidCoupledPressureStatus2::converged, "R3w frozen PCG failed" );
+        probe::captureProjection( copy, trace, key );
+        probe::captureTargetV( copy, trace, key + ".targetV", 17, 13 );
+        probe::captureStabilityPhase( copy, trace, key + ".ledger", &beforeU, &beforeV );
+        // Feedback is pressure-only (no tracer transport or World integration).
+        for( std::size_t i = 0; i < feedback.size(); ++i )
+        {
+            const auto prefix = key + ".body[" + std::to_string( i ) + "]";
+            probe::appendScalar( trace, prefix + ".force.x", feedback[i].force.x );
+            probe::appendScalar( trace, prefix + ".force.y", feedback[i].force.y );
+            probe::appendScalar( trace, prefix + ".torque", feedback[i].torque );
+        }
+        probe::appendScalar( trace, key + ".tracerMass", copy.getTracerMass() );
+    };
+    // Use the actual frozen pre-pressure velocities, not the last live interval.
+    probe::capturePrePressure( *frozen, beforeU, beforeV );
+    compareReplay( "cached", baseline, *a );
+    compareReplay( "uncached", reference, *b );
+    float forceDifference = 0.0f, torqueDifference = 0.0f;
+    for( std::size_t i = 0; i < a->size(); ++i )
+    {
+        const auto d = ( *a )[i].force - ( *b )[i].force;
+        forceDifference = std::max( forceDifference, std::max( std::abs( d.x ), std::abs( d.y ) ) );
+        torqueDifference = std::max( torqueDifference, std::abs( ( *a )[i].torque - ( *b )[i].torque ) );
+    }
+    std::printf( "R3w fine grid: %d intervals, %d analytic budgets, peak %.9g m/s at index %d %c(%d,%d), "
+        "opening %.9g, max projection delta %.9g m/s; historical V(17,13) index 43 open %.9g, "
+        "before %.9g, after %.9g; cached/uncached max force component difference %.9g, torque %.9g\n",
+        frozenCalls, validBudgets, maxSpeed, peakIndex, peakIsU ? 'U' : 'V', peakX, peakY,
+        peakOpen, maxDelta, targetOpen, targetBefore, targetAfter, forceDifference, torqueDifference );
+    return trace;
+}
+
 } // namespace
 
 int main( int argc, char** argv )
@@ -1448,6 +1637,7 @@ int main( int argc, char** argv )
             fluidJointKind::anchoredAssembly, 120 );
         trace += runWorldFluidScene( "worldFluidContactAssembly", true,
             fluidJointKind::anchoredAssembly, 60, nullptr, true );
+        trace += runNearClosedFaceScene();
 
         if( argc == 3 )
         {
