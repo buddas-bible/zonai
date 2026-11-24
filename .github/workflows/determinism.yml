@@ -1,0 +1,583 @@
+name: Cross-platform Physics Determinism (R1c)
+
+# Strict comparison for tested World/Contact/Joint and Fluid/World interleave fixtures.
+# It does not certify every possible game scene or external libm behavior.
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "src/**"
+      - "sandbox/**"
+      - "tests/**"
+      - "third_party/**"
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - ".github/workflows/determinism.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu-trace:
+    name: Ubuntu x64 / produce shared input and trace
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install CMake 4.2
+        run: python3 -m pip install "cmake>=4.2,<4.3"
+
+      - name: Record toolchain
+        run: |
+          cmake --version
+          g++ --version
+          uname -a
+
+      - name: Configure Ubuntu Debug
+        run: >
+          cmake
+          -S .
+          -B build
+          -DCMAKE_BUILD_TYPE=Debug
+          -DZONAI_BUILD_TESTS=ON
+          -DZONAI_BUILD_SANDBOX=OFF
+
+      - name: Build replay tool
+        run: cmake --build build --target worldReplayTests fpMathAuditTests splineRailDeterminismTests standardJointDeterminismTests jointCacheSnapshotTests contactIslandDeterminismTests contactLifecycleDeterminismTests fluidStateDeterminismTests --parallel 2
+
+      - name: Record one canonical input and replay on Ubuntu
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/determinism-artifacts
+          ./build/tests/worldReplayTests --record-input build/determinism-artifacts/shared.zin
+          ./build/tests/worldReplayTests --replay build/determinism-artifacts/shared.zin build/determinism-artifacts/ubuntu.ztr
+          ./build/tests/worldReplayTests --verify build/determinism-artifacts/ubuntu.ztr
+          ./build/tests/fpMathAuditTests --emit build/determinism-artifacts/fp-ubuntu.tsv
+          ./build/tests/splineRailDeterminismTests --emit build/determinism-artifacts/spline-ubuntu.tsv
+          ./build/tests/standardJointDeterminismTests --emit build/determinism-artifacts/joints-ubuntu.tsv
+          ./build/tests/jointCacheSnapshotTests
+          ./build/tests/contactIslandDeterminismTests --emit build/determinism-artifacts/contact-islands-ubuntu.tsv
+          ./build/tests/contactLifecycleDeterminismTests --emit build/determinism-artifacts/contact-lifecycle-ubuntu.tsv
+          ./build/tests/fluidStateDeterminismTests --emit build/determinism-artifacts/fluid-ubuntu.tsv
+          cp ./build/tests/worldReplayTests build/determinism-artifacts/worldReplayTests
+
+      - name: Upload shared recorded input
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1c-shared-input
+          path: build/determinism-artifacts/shared.zin
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Ubuntu replay and comparer
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1c-ubuntu-trace
+          path: |
+            build/determinism-artifacts/ubuntu.ztr
+            build/determinism-artifacts/fp-ubuntu.tsv
+            build/determinism-artifacts/spline-ubuntu.tsv
+            build/determinism-artifacts/joints-ubuntu.tsv
+            build/determinism-artifacts/contact-islands-ubuntu.tsv
+            build/determinism-artifacts/contact-lifecycle-ubuntu.tsv
+            build/determinism-artifacts/fluid-ubuntu.tsv
+            build/determinism-artifacts/worldReplayTests
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-trace:
+    name: Windows x64 / replay exact Ubuntu-recorded input
+    needs: ubuntu-trace
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download shared input (do not regenerate)
+        uses: actions/download-artifact@v4
+        with:
+          name: r1c-shared-input
+          path: test-data
+
+      - name: Record toolchain
+        run: cmake --version
+
+      - name: Configure Windows Debug
+        run: >
+          cmake
+          -S .
+          -B build
+          -G "Visual Studio 18 2026"
+          -A x64
+          -DZONAI_BUILD_TESTS=ON
+          -DZONAI_BUILD_SANDBOX=OFF
+
+      - name: Build replay tool
+        run: cmake --build build --config Debug --target worldReplayTests fpMathAuditTests splineRailDeterminismTests standardJointDeterminismTests jointCacheSnapshotTests contactIslandDeterminismTests contactLifecycleDeterminismTests fluidStateDeterminismTests --parallel
+
+      - name: Replay identical input on Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "build/determinism-artifacts" | Out-Null
+          & .\build\tests\Debug\worldReplayTests.exe --replay test-data/shared.zin build/determinism-artifacts/windows.ztr
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build\tests\Debug\worldReplayTests.exe --verify build/determinism-artifacts/windows.ztr
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build\tests\Debug\fpMathAuditTests.exe --emit build/determinism-artifacts/fp-windows.tsv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build\tests\Debug\splineRailDeterminismTests.exe --emit build/determinism-artifacts/spline-windows.tsv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build\tests\Debug\standardJointDeterminismTests.exe --emit build/determinism-artifacts/joints-windows.tsv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build\tests\Debug\jointCacheSnapshotTests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build\tests\Debug\contactIslandDeterminismTests.exe --emit build/determinism-artifacts/contact-islands-windows.tsv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build\tests\Debug\contactLifecycleDeterminismTests.exe --emit build/determinism-artifacts/contact-lifecycle-windows.tsv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build\tests\Debug\fluidStateDeterminismTests.exe --emit build/determinism-artifacts/fluid-windows.tsv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Windows replay
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1c-windows-trace
+          path: |
+            build/determinism-artifacts/windows.ztr
+            build/determinism-artifacts/fp-windows.tsv
+            build/determinism-artifacts/spline-windows.tsv
+            build/determinism-artifacts/joints-windows.tsv
+            build/determinism-artifacts/contact-islands-windows.tsv
+            build/determinism-artifacts/contact-lifecycle-windows.tsv
+            build/determinism-artifacts/fluid-windows.tsv
+          if-no-files-found: error
+          retention-days: 14
+
+  compare:
+    name: Required strict engine physics and math bits
+    needs:
+      - ubuntu-trace
+      - windows-trace
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Download Ubuntu trace and comparer
+        uses: actions/download-artifact@v4
+        with:
+          name: r1c-ubuntu-trace
+          path: artifacts/ubuntu
+
+      - name: Download Windows trace
+        uses: actions/download-artifact@v4
+        with:
+          name: r1c-windows-trace
+          path: artifacts/windows
+
+      - name: Strict replay compare (fail at first difference)
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x artifacts/ubuntu/worldReplayTests
+          set +e
+          artifacts/ubuntu/worldReplayTests --compare \
+            artifacts/ubuntu/ubuntu.ztr \
+            artifacts/windows/windows.ztr > comparison.txt 2>&1
+          result=$?
+          set -e
+          cat comparison.txt
+          exit "$result"
+
+      - name: Strict Contact generation, recycle cache and Sleep/Wake comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee contact-lifecycle-comparison.txt
+          from itertools import zip_longest
+          from pathlib import Path
+          import sys
+
+          ubuntu = Path("artifacts/ubuntu/contact-lifecycle-ubuntu.tsv").read_text(encoding="utf-8").splitlines()
+          windows = Path("artifacts/windows/contact-lifecycle-windows.tsv").read_text(encoding="utf-8").splitlines()
+          first = None
+          mismatches = 0
+          for row, (a, b) in enumerate(zip_longest(ubuntu, windows), 1):
+              if a == b:
+                  continue
+              mismatches += 1
+              if first is None:
+                  first = (row, (a or b or "missing").split("\t", 1)[0], a, b)
+
+          if first is not None:
+              row, field, a, b = first
+              print(f"Contact lifecycle first divergence: row={row} field={field}")
+              print(f"Ubuntu:  {a if a is not None else '<missing>'}")
+              print(f"Windows: {b if b is not None else '<missing>'}")
+              print(f"Total Contact lifecycle mismatches: {mismatches}/{max(len(ubuntu), len(windows))}")
+              sys.exit(1)
+
+          print(f"identical Contact lifecycle and Sleep/Wake fields: {len(ubuntu)} rows")
+          PY
+
+      - name: Strict Contact/Island order, impulses and cache compare
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee contact-islands-comparison.txt
+          from itertools import zip_longest
+          from pathlib import Path
+          import sys
+
+          ubuntu = Path("artifacts/ubuntu/contact-islands-ubuntu.tsv").read_text(encoding="utf-8").splitlines()
+          windows = Path("artifacts/windows/contact-islands-windows.tsv").read_text(encoding="utf-8").splitlines()
+          total = 0
+          first = None
+
+          for row, (a, b) in enumerate(zip_longest(ubuntu, windows), 1):
+              if a == b:
+                  continue
+              total += 1
+              if first is None:
+                  first = (row, (a or b or "missing").split("\t", 1)[0], a, b)
+
+          if first is not None:
+              row, field, a, b = first
+              print(f"Contact/Island first divergence: row={row} field={field}")
+              print(f"Ubuntu:  {a if a is not None else '<missing>'}")
+              print(f"Windows: {b if b is not None else '<missing>'}")
+              print(f"Total Contact/Island mismatches: {total}/{max(len(ubuntu), len(windows))}")
+              sys.exit(1)
+
+          print(f"identical Contact/Island substep fields: {len(ubuntu)} rows")
+          PY
+
+      - name: Strict standard Joint transient substep and Tick cache compare
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee joints-comparison.txt
+          from itertools import zip_longest
+          from pathlib import Path
+          import sys
+
+          ubuntu = Path("artifacts/ubuntu/joints-ubuntu.tsv").read_text(encoding="utf-8").splitlines()
+          windows = Path("artifacts/windows/joints-windows.tsv").read_text(encoding="utf-8").splitlines()
+          mismatches = 0
+          first = None
+
+          for row, (u, w) in enumerate(zip_longest(ubuntu, windows), 1):
+              if u == w:
+                  continue
+              mismatches += 1
+              if first is None:
+                  first = (row, (u or w or "missing").split("\t", 1)[0], u, w)
+
+          if first is not None:
+              row, field, u, w = first
+              print(f"Joint physics divergence: row={row} field={field}")
+              print(f"Ubuntu:  {u if u is not None else '<missing>'}")
+              print(f"Windows: {w if w is not None else '<missing>'}")
+              print(f"Total standard Joint mismatches: {mismatches}/{max(len(ubuntu), len(windows))}")
+              sys.exit(1)
+
+          print(f"identical standard Joint Tick fields: {len(ubuntu)} rows")
+          PY
+
+      - name: Strict Spline Rail physical state (report external libm difference)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee spline-comparison.txt
+          from itertools import zip_longest
+          from pathlib import Path
+          import sys
+
+          ubuntu = Path("artifacts/ubuntu/spline-ubuntu.tsv").read_text(encoding="utf-8").splitlines()
+          windows = Path("artifacts/windows/spline-windows.tsv").read_text(encoding="utf-8").splitlines()
+          first_physics = None
+          first_math = None
+          physics_count = 0
+          math_count = 0
+
+          for line, (u, w) in enumerate(zip_longest(ubuntu, windows), 1):
+              if u == w:
+                  continue
+              key = (u or w or "missing").split("\t", 1)[0]
+              difference = (line, key, u, w)
+              if any(key.endswith(".diagnostic." + op) for op in (
+                      "tangentAtan2", "relativeAtan2", "angleRemainder")):
+                  math_count += 1
+                  if first_math is None:
+                      first_math = difference
+              else:
+                  physics_count += 1
+                  if first_physics is None:
+                      first_physics = difference
+
+          for label, first in (("Spline Rail physics", first_physics),
+                               ("Spline Rail libm diagnostic", first_math)):
+              if first is not None:
+                  line, key, u, w = first
+                  print(f"{label} divergence: line={line} field={key}")
+                  print(f"Ubuntu:  {u if u is not None else '<missing>'}")
+                  print(f"Windows: {w if w is not None else '<missing>'}")
+
+          print(f"Spline Rail comparison: physics={physics_count} "
+                f"diagnostics={math_count} rows={max(len(ubuntu), len(windows))}")
+          # The diagnostic std::atan2/remainder probes are *not* used to
+          # advance the solver. Strictly gate the actual physics and the
+          # deterministic zonai diagnostic outputs; retain all libm evidence.
+          if math_count:
+              print(f"::warning title=Spline Rail external math diagnostic::{math_count} non-authoritative libm fields differ; see spline-comparison.txt")
+          if physics_count:
+              sys.exit(1)
+          PY
+
+      - name: Strict Fluid MAC, Cut-cell history and pressure feedback bits
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee fluid-comparison.txt
+          from itertools import zip_longest
+          from pathlib import Path
+          import sys
+
+          # Stream the growing trace instead of retaining both multi-million
+          # row files and all of their decoded strings in memory.
+          def rows(path):
+              with Path(path).open(encoding="utf-8") as stream:
+                  for line in stream:
+                      yield line.rstrip("\n")
+
+          ubuntu = rows("artifacts/ubuntu/fluid-ubuntu.tsv")
+          windows = rows("artifacts/windows/fluid-windows.tsv")
+          first = None
+          count = 0
+          totals = {}
+          mismatches = {}
+          first_by_scene = {}
+          first_swept_probe = {}
+          first_state = {}
+          row = 0
+          for row, (u, w) in enumerate(zip_longest(ubuntu, windows), 1):
+              key = (u or w or "missing").split("\t", 1)[0]
+              scene = key.split(".", 1)[0]
+              totals[scene] = totals.get(scene, 0) + 1
+              if u == w:
+                  continue
+              count += 1
+              mismatches[scene] = mismatches.get(scene, 0) + 1
+              entry = (row, key, u, w)
+              first_by_scene.setdefault(scene, entry)
+              if ".sweptProbe." in key:
+                  first_swept_probe.setdefault(scene, entry)
+              else:
+                  first_state.setdefault(scene, entry)
+              if first is None:
+                  first = entry
+
+          print(f"Fluid authoritative MAC/Cut-cell/feedback rows: {row}")
+          print(f"Exact-bit mismatches: {count}")
+          for scene, total in totals.items():
+              print(f"Scene {scene}: {mismatches.get(scene, 0)}/{total} mismatches")
+              if scene in first_by_scene:
+                  row, key, u, w = first_by_scene[scene]
+                  print(f"  first: row={row} field={key}")
+                  print(f"  Ubuntu:  {u if u is not None else '<missing>'}")
+                  print(f"  Windows: {w if w is not None else '<missing>'}")
+              for label, group in (("swept reconstruction", first_swept_probe), ("non-swept-probe trace", first_state)):
+                  if scene not in group:
+                      continue
+                  row, key, u, w = group[scene]
+                  print(f"  first {label}: row={row} field={key}")
+                  print(f"    Ubuntu:  {u if u is not None else '<missing>'}")
+                  print(f"    Windows: {w if w is not None else '<missing>'}")
+          if first is not None:
+              row, key, u, w = first
+              print(f"First Fluid divergence: row={row} field={key}")
+              print(f"Ubuntu:  {u if u is not None else '<missing>'}")
+              print(f"Windows: {w if w is not None else '<missing>'}")
+              sys.exit(1)
+
+          expected = {
+              "sampledCutCell": 156237, "analyticCircle": 156237,
+              "sampledMixed": 383569, "analyticCapsule": 308458,
+              "analyticPolygon": 236692, "coupledDisjoint": 456043,
+              "worldFluidPressure": 186339, "worldFluidDrag": 186339,
+              "worldFluidRevolute": 191508, "worldFluidWeld": 191011,
+              "worldFluidDrag180": 1272627,
+              "worldFluidDrag360Continuation": 1934160,
+              "worldFluidAnchoredAssembly": 902840,
+              "fluidStabilityAudit": 206880,
+              "worldFluidContactAssembly": 870485,
+              "nearClosedFace": 23910,
+              "sliverFluxAudit": 162,
+              "volumeSourceAudit": 217,
+              "spaceTimeApertureAudit": 70,
+              "nearClosedCadence": 16320,
+              "spaceTimeProjection": 56,
+              "intervalHandoff": 140,
+              "intervalTransport": 41250,
+              "chronologicalTracer": 13610,
+          }
+          topology = totals.get("topologyQuadrature", 0)
+          # 49 second-resolution output rows, six quadrature headers,
+          # four fields per missed cell at each of the two resolutions.
+          if (set(totals) != set(expected) | {"topologyQuadrature"} or
+              any(totals.get(scene) != n for scene, n in expected.items()) or
+              topology < 63 or (topology - 55) % 8 != 0):
+              sys.exit("Fluid trace coverage changed or endpoint refinement audit missing")
+
+          print("identical tested Fluid MAC, geometry/history and pressure feedback fields")
+          PY
+
+      - name: Strict engine-owned math fingerprint (retain libm diagnostics)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee fp-comparison.txt
+          from collections import Counter
+          from itertools import zip_longest
+          from pathlib import Path
+          import sys
+
+          ubuntu = Path("artifacts/ubuntu/fp-ubuntu.tsv").read_text(encoding="utf-8").splitlines()
+          windows = Path("artifacts/windows/fp-windows.tsv").read_text(encoding="utf-8").splitlines()
+          authoritative = []
+          external_libm = []
+          engine_samples = 0
+
+          for line, (u, w) in enumerate(zip_longest(ubuntu, windows), 1):
+              key = (u or w or "missing").split("\t", 1)[0]
+              if not key.startswith("libm."):
+                  engine_samples += 1
+              if u == w:
+                  continue
+              mismatch = (line, key, u, w)
+              if key.startswith("libm."):
+                  external_libm.append(mismatch)
+              else:
+                  authoritative.append(mismatch)
+
+          print(f"Engine-owned FP math: {engine_samples} samples, "
+                f"{len(authoritative)} raw-bit mismatches")
+          if external_libm:
+              groups = Counter(k.rsplit(".", 1)[0] for _, k, _, _ in external_libm)
+              print(f"External stdlib diagnostics: {len(external_libm)} raw-bit mismatches")
+              for family, count in sorted(groups.items()):
+                  print(f"  {family}: {count}")
+              print("::warning title=External libm fingerprint::"
+                    "Platform differences retained in fp-comparison.txt and "
+                    "the separate strict libm diagnostic job")
+
+          if authoritative:
+              line, key, u, w = authoritative[0]
+              print(f"Authoritative math divergence: line={line} field={key}")
+              print(f"Ubuntu:  {u if u is not None else '<missing>'}")
+              print(f"Windows: {w if w is not None else '<missing>'}")
+              for line, key, u, w in authoritative[1:8]:
+                  print(f"  additional engine math mismatch: line={line} field={key}")
+              sys.exit(1)
+
+          print("identical engine-owned FP math samples")
+          PY
+
+      - name: Preserve comparison evidence on success or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1c-comparison-report
+          path: |
+            comparison.txt
+            fp-comparison.txt
+            spline-comparison.txt
+            joints-comparison.txt
+            contact-islands-comparison.txt
+            contact-lifecycle-comparison.txt
+            fluid-comparison.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+  external-libm-audit:
+    name: Strict external libm research fingerprint (known divergences)
+    needs:
+      - ubuntu-trace
+      - windows-trace
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Download Ubuntu raw math and Spline diagnostics
+        uses: actions/download-artifact@v4
+        with:
+          name: r1c-ubuntu-trace
+          path: artifacts/ubuntu
+
+      - name: Download Windows raw math and Spline diagnostics
+        uses: actions/download-artifact@v4
+        with:
+          name: r1c-windows-trace
+          path: artifacts/windows
+
+      - name: Strict standard-library math diagnostic comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee libm-diagnostic-comparison.txt
+          from collections import Counter
+          from itertools import zip_longest
+          from pathlib import Path
+          import sys
+
+          cases = (
+              ("FP library", "fp", lambda key: key.startswith("libm.")),
+              ("Spline library", "spline", lambda key: any(
+                  key.endswith(".diagnostic." + name)
+                  for name in ("tangentAtan2", "relativeAtan2", "angleRemainder"))),
+          )
+          count = 0
+          for label, category, is_external in cases:
+              ubuntu = Path(f"artifacts/ubuntu/{'fp' if category == 'fp' else 'spline'}-ubuntu.tsv").read_text(encoding="utf-8").splitlines()
+              windows = Path(f"artifacts/windows/{'fp' if category == 'fp' else 'spline'}-windows.tsv").read_text(encoding="utf-8").splitlines()
+              mismatches = []
+              for row, (u, w) in enumerate(zip_longest(ubuntu, windows), 1):
+                  key = (u or w or "missing").split("\t", 1)[0]
+                  if is_external(key) and u != w:
+                      mismatches.append((row, key, u, w))
+
+              print(f"{label}: {len(mismatches)} exact-bit stdlib mismatches")
+              for family, number in sorted(Counter(
+                  key.rsplit(".", 1)[0] if category == "fp" else key.rsplit(".diagnostic.", 1)[-1]
+                  for _, key, _, _ in mismatches
+              ).items()):
+                  print(f"  {family}: {number}")
+              if mismatches:
+                  first = mismatches[0]
+                  print(f"  First: row={first[0]} field={first[1]}")
+                  print(f"  Ubuntu:  {first[2] if first[2] is not None else '<missing>'}")
+                  print(f"  Windows: {first[3] if first[3] is not None else '<missing>'}")
+              count += len(mismatches)
+
+          if count:
+              print(f"EXTERNAL LIBM BIT DIVERGENCE: {count} samples; strict research check FAILED")
+              print("These samples are not silently skipped, and the authoritative physics job")
+              print("retains strict bitwise checks for all engine-owned computation and state.")
+              sys.exit(1)
+
+          print("identical external stdlib math fingerprints")
+          PY
+
+      - name: Preserve strict external libm diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r3a-external-libm-research-report
+          path: libm-diagnostic-comparison.txt
+          if-no-files-found: warn
+          retention-days: 14
+
