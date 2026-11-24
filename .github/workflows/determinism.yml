@@ -421,6 +421,7 @@ jobs:
               "spaceTimeApertureAudit": 70,
               "nearClosedCadence": 16320,
               "spaceTimeProjection": 56,
+              "intervalHandoff": 140,
           }
           if (set(totals) != set(expected) or
               any(totals.get(scene) != n for scene, n in expected.items())):
