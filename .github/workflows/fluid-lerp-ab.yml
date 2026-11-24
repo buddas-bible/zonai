@@ -1,14 +1,15 @@
-name: Fluid swept rotation A/B (R3j)
+name: Fluid bounded rotation A/B (R3l)
 
 # Same-runner Release comparison, separate from the strict raw-bit gate.
-# R3j compares only the swept angle migration against pinned R3i.
-# Historical R3g interpolation results remain in run 45347667921.
+# R3l compares bounded rot2 dispatch against pinned R3k.
+# Historical R3g and R3j results remain in runs 45347667921 and 45401846930.
 on:
   pull_request:
     branches: [master]
     paths:
       - "src/fluid/fluidField2.cpp"
       - "src/math/deterministicMath.h"
+      - "src/math/rot2.h"
       - ".github/workflows/fluid-lerp-ab.yml"
   workflow_dispatch:
 
@@ -25,7 +26,7 @@ jobs:
           path: candidate
       - uses: actions/checkout@v4
         with:
-          ref: bb344d2f158091afc0df0e9441c2d02b481e14e8
+          ref: 3aa89f8a6d0baf7022e35bf08297169c4fe61722
           path: baseline
       - name: Build the same existing Release benchmark on both revisions
         shell: bash
@@ -109,6 +110,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fluid-swept-rotation-ab
+          name: fluid-bounded-rotation-ab
           path: reports/
           if-no-files-found: warn
