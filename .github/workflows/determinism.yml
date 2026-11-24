@@ -452,6 +452,8 @@ jobs:
               "forwardStaggered": 88080, "forwardStaggeredEndpoint": 256,
               "forwardStaggeredMomentum": 64,
               "forwardFixedPressureCost": 624,
+              "forwardOptimized": 88112, "forwardOptimizedEndpoint": 256,
+              "forwardOptimizedMomentum": 64,
           }
           topology = totals.get("topologyQuadrature", 0)
           # 49 second-resolution output rows, six quadrature headers,
@@ -679,6 +681,19 @@ jobs:
               for v, label in enumerate(("fixedColdStrict", "fixedWarmStrict", "fixedWarmResidual10")):
                   med = [statistics.median(col) for col in zip(*fixed[i, v])]
                   print(f"R4af interval={i} {label}: median linear={med[0]:.3f} ms pressure={med[1]:.3f} ms")
+          optimized_pattern = re.compile(r"R4ag timing interval=(\d+) repeat=(\d+) prepare_ms=([\d.]+) setup_ms=([\d.]+) quadrature_ms=([\d.]+) linear_ms=([\d.]+) pressure_ms=([\d.]+) endpoint_ms=([\d.]+) total_ms=([\d.]+)")
+          optimized = {}
+          for line in Path("forward-cost.log").read_text().splitlines():
+              m = optimized_pattern.fullmatch(line)
+              if m:
+                  key = tuple(map(int, m.groups()[:2]))
+                  values = tuple(map(float, m.groups()[2:]))
+                  assert key not in optimized and all(math.isfinite(v) and v >= 0 for v in values)
+                  optimized[key] = values
+          assert set(optimized) == {(i, r) for i in range(43, 59) for r in range(3)}
+          for i in range(43, 59):
+              med = [statistics.median(col) for col in zip(*(optimized[i, r] for r in range(3)))]
+              print(f"R4ag interval={i}: median prepare={med[0]:.3f} ms setup={med[1]:.3f} ms quadrature={med[2]:.3f} ms linear={med[3]:.3f} ms pressure={med[4]:.3f} ms endpoint={med[5]:.3f} ms diagnostic total={med[6]:.3f} ms")
           PY
       - name: Upload timing evidence
         if: always()
