@@ -347,8 +347,15 @@ jobs:
           from pathlib import Path
           import sys
 
-          ubuntu = Path("artifacts/ubuntu/fluid-ubuntu.tsv").read_text(encoding="utf-8").splitlines()
-          windows = Path("artifacts/windows/fluid-windows.tsv").read_text(encoding="utf-8").splitlines()
+          # Stream the growing trace instead of retaining both multi-million
+          # row files and all of their decoded strings in memory.
+          def rows(path):
+              with Path(path).open(encoding="utf-8") as stream:
+                  for line in stream:
+                      yield line.rstrip("\n")
+
+          ubuntu = rows("artifacts/ubuntu/fluid-ubuntu.tsv")
+          windows = rows("artifacts/windows/fluid-windows.tsv")
           first = None
           count = 0
           totals = {}
@@ -356,6 +363,7 @@ jobs:
           first_by_scene = {}
           first_swept_probe = {}
           first_state = {}
+          row = 0
           for row, (u, w) in enumerate(zip_longest(ubuntu, windows), 1):
               key = (u or w or "missing").split("\t", 1)[0]
               scene = key.split(".", 1)[0]
@@ -373,7 +381,7 @@ jobs:
               if first is None:
                   first = entry
 
-          print(f"Fluid authoritative MAC/Cut-cell/feedback rows: {max(len(ubuntu), len(windows))}")
+          print(f"Fluid authoritative MAC/Cut-cell/feedback rows: {row}")
           print(f"Exact-bit mismatches: {count}")
           for scene, total in totals.items():
               print(f"Scene {scene}: {mismatches.get(scene, 0)}/{total} mismatches")
@@ -395,6 +403,20 @@ jobs:
               print(f"Ubuntu:  {u if u is not None else '<missing>'}")
               print(f"Windows: {w if w is not None else '<missing>'}")
               sys.exit(1)
+
+          expected = {
+              "sampledCutCell": 156237, "analyticCircle": 156237,
+              "sampledMixed": 383569, "analyticCapsule": 308458,
+              "analyticPolygon": 236692, "coupledDisjoint": 456043,
+              "worldFluidPressure": 186339, "worldFluidDrag": 186339,
+              "worldFluidRevolute": 191508, "worldFluidWeld": 191011,
+              "worldFluidDrag180": 1272627,
+          }
+          continuation = "worldFluidDrag360Continuation"
+          if (set(totals) != set(expected) | {continuation} or
+              any(totals.get(scene) != n for scene, n in expected.items()) or
+              totals.get(continuation, 0) <= 0):
+              sys.exit("Fluid trace coverage changed or continuation missing")
 
           print("identical tested Fluid MAC, geometry/history and pressure feedback fields")
           PY
