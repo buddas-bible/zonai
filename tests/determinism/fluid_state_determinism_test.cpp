@@ -743,6 +743,303 @@ struct fluidStateTraceProbe2
         }
     }
 
+    // R4a: independent, test-only interval-average pressure model. Reuse the
+    // production analytic geometry and boundary assembly at quadrature poses.
+    // Do not write averaged apertures into the live endpoint field.
+    static void captureSpaceTimeProjection( const fluidField2& before, const fluidField2& baseline,
+        std::span<const fluidObstacleForce2> baselineFeedback, std::string& trace,
+        const std::string& key, int samples )
+    {
+        const auto& start = before.previousObstacles_;
+        const auto& finish = before.frozenPressureObstacles_;
+        const std::size_t n = before.cellFluidFraction_.size(), owners = finish.size();
+        const double h = before.cellSize_, dt = before.frozenPressureTimeStep_;
+        if( samples <= 0 || owners != 3 || start.size() != owners || baselineFeedback.size() != owners ||
+            !before.volumeSourceValid_ || dt <= 0.0 )
+            throw std::runtime_error( key + " invalid frozen geometry history" );
+        using response = fluidField2::coupledBodyResponse;
+        struct edge { int first, second; double a, velocity; bool isU; int index; };
+        std::vector<double> meanU( before.u_.size() ), meanV( before.v_.size() ), fraction( n );
+        std::vector<response> coefficients( n * owners );
+        fluidField2 geometry = before;
+        geometry.setPrePressureSnapshotObserver( {} );
+        setStageObserver( geometry, {} );
+        geometry.setCoupledPressureWarmStartEnabled( false );
+        geometry.setCoupledPressureWarmStartProbeEnabled( false );
+        std::vector<fluidShapeObstacle2> poses( finish.begin(), finish.end() );
+        std::vector<float> angle( owners ), omega( owners );
+        for( std::size_t i = 0; i < owners; ++i )
+        {
+            angle[i] = deterministicAtan2( start[i].transform.rotation.s, start[i].transform.rotation.c );
+            const float endAngle = deterministicAtan2( finish[i].transform.rotation.s, finish[i].transform.rotation.c );
+            omega[i] = std::remainder( endAngle - angle[i], 2.0f * std::numbers::pi_v<float> ) /
+                before.frozenPressureTimeStep_;
+        }
+        for( int step = 0; step < samples; ++step )
+        {
+            const float alpha = ( step + 0.5f ) / samples;
+            for( std::size_t i = 0; i < owners; ++i )
+            {
+                poses[i].transform.position = start[i].transform.position +
+                    alpha * ( finish[i].transform.position - start[i].transform.position );
+                poses[i].transform.rotation = rot2::FromRadians(
+                    angle[i] + omega[i] * before.frozenPressureTimeStep_ * alpha );
+                // Interpolate COM separately from the shape transform.
+                poses[i].center = start[i].center + alpha * ( finish[i].center - start[i].center );
+            }
+            geometry.updateObstacles( poses );
+            geometry.updateCutCellGeometry( poses );
+            if( !geometry.cutCellTransition_.usedDisjointAnalyticGeometry )
+                throw std::runtime_error( key + " nonanalytic quadrature geometry" );
+            for( std::size_t i = 0; i < n; ++i ) fraction[i] += geometry.cellFluidFraction_[i];
+            for( int y = 0; y < geometry.height_; ++y )
+                for( int x = 1; x < geometry.width_; ++x )
+                    meanU[geometry.uIndex( x, y )] += geometry.cutCellUOpen( x, y );
+            for( int y = 1; y < geometry.height_; ++y )
+                for( int x = 0; x < geometry.width_; ++x )
+                    meanV[geometry.vIndex( x, y )] += geometry.cutCellVOpen( x, y );
+            // A zero-RHS production solve assembles the exact current
+            // boundary coefficients without needing to expose a new API.
+            std::fill( geometry.divergence_.begin(), geometry.divergence_.end(), 0.0f );
+            if( !geometry.solveCoupledPressure( static_cast<float>( dt ), 200, poses, true ) )
+                throw std::runtime_error( key + " zero-RHS boundary assembly failed" );
+            for( const auto& f : geometry.coupledPressureScratch_.faces )
+            {
+                auto& c = coefficients[static_cast<std::size_t>( f.cell ) * owners + f.owner];
+                c.fx += f.fx; c.fy += f.fy; c.torque += f.torque;
+            }
+        }
+        for( double& a : meanU ) a /= samples;
+        for( double& a : meanV ) a /= samples;
+        for( double& a : fraction ) a /= samples;
+        for( auto& c : coefficients )
+        {
+            c.fx /= samples; c.fy /= samples; c.torque /= samples;
+        }
+
+        std::vector<edge> edges;
+        std::vector<double> rhs( n ), diagonal( n ), rawDivergence( n );
+        std::vector<int> parent( n, -1 ), count( n );
+        int active = 0, closedEndFaces = 0;
+        double sourceSum = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            // Endpoint volume difference, with no donor relocation/deletion.
+            const double change = static_cast<double>( before.cellFluidFraction_[i] ) -
+                before.previousCellFluidFraction_[i];
+            if( fraction[i] <= 0.0 )
+            {
+                if( change != 0.0 )
+                    throw std::runtime_error( key + " changed volume missed by midpoint quadrature" );
+                continue;
+            }
+            parent[i] = static_cast<int>( i );
+            ++active;
+            sourceSum += change;
+            rawDivergence[i] = change / dt;
+        }
+        const auto root = [&]( int i )
+        {
+            while( parent[i] != i ) i = parent[i];
+            return i;
+        };
+        const auto addEdge = [&]( bool isU, int x, int y )
+        {
+            const int index = isU ? before.uIndex( x, y ) : before.vIndex( x, y );
+            const double a = isU ? meanU[index] : meanV[index];
+            if( a <= 0.0 ) return;
+            const int left = before.cellIndex( x - ( isU ? 1 : 0 ), y - ( isU ? 0 : 1 ) );
+            const int right = before.cellIndex( x, y );
+            if( parent[left] < 0 || parent[right] < 0 )
+                throw std::runtime_error( key + " open face lacks interval-active cell" );
+            const int l = root( left ), r = root( right );
+            if( l != r ) parent[std::max( l, r )] = std::min( l, r );
+            // A frozen endpoint velocity is only a trial interval velocity,
+            // including boundary values on faces closed at the endpoint.
+            const double u = isU ? before.u_[index] : before.v_[index];
+            const float endOpen = isU ? before.cutCellUOpen( x, y ) : before.cutCellVOpen( x, y );
+            closedEndFaces += endOpen == 0.0f;
+            edges.push_back( { left, right, a, u, isU, index } );
+            diagonal[left] += a; diagonal[right] += a;
+            const double flux = a * u / h;
+            rawDivergence[left] += flux; rawDivergence[right] -= flux;
+        };
+        for( int y = 0; y < before.height_; ++y )
+            for( int x = 1; x < before.width_; ++x ) addEdge( true, x, y );
+        for( int y = 1; y < before.height_; ++y )
+            for( int x = 0; x < before.width_; ++x ) addEdge( false, x, y );
+        int regions = 0;
+        for( std::size_t i = 0; i < n; ++i )
+            if( parent[i] >= 0 )
+            {
+                parent[i] = root( static_cast<int>( i ) );
+                ++count[parent[i]];
+            }
+        for( int c : count ) regions += c > 0;
+        if( active == 0 || edges.empty() ) throw std::runtime_error( key + " empty interval graph" );
+        // Explicit component zero-mean constraint. Unlike production, the
+        // prototype solves P A P p = P b and reports the unprojected residual.
+        std::vector<double> sums( n );
+        const auto zeroMean = [&]( std::vector<double>& v )
+        {
+            std::fill( sums.begin(), sums.end(), 0.0 );
+            for( std::size_t i = 0; i < n; ++i )
+                if( parent[i] >= 0 ) sums[parent[i]] += v[i];
+            for( std::size_t i = 0; i < n; ++i )
+                if( parent[i] >= 0 ) v[i] -= sums[parent[i]] / count[parent[i]];
+        };
+        const double scale = h * h / dt;
+        for( std::size_t i = 0; i < n; ++i ) rhs[i] = -scale * rawDivergence[i];
+        zeroMean( rhs );
+        double compatibilityL1 = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+            compatibilityL1 += std::abs( rhs[i] + scale * rawDivergence[i] );
+        std::vector<response> force( owners );
+        const auto transpose = [&]( const std::vector<double>& p )
+        {
+            std::fill( force.begin(), force.end(), response{} );
+            for( std::size_t i = 0; i < n; ++i )
+                for( std::size_t j = 0; j < owners; ++j )
+                {
+                    const auto& c = coefficients[i * owners + j];
+                    auto& f = force[j];
+                    f.fx += c.fx * p[i]; f.fy += c.fy * p[i]; f.torque += c.torque * p[i];
+                }
+        };
+        const auto multiply = [&]( const std::vector<double>& p, std::vector<double>& out )
+        {
+            std::fill( out.begin(), out.end(), 0.0 );
+            for( const auto& e : edges )
+            {
+                const double d = e.a * ( p[e.first] - p[e.second] );
+                out[e.first] += d; out[e.second] -= d;
+            }
+            transpose( p );
+            for( std::size_t i = 0; i < n; ++i )
+                for( std::size_t j = 0; j < owners; ++j )
+                {
+                    const auto& c = coefficients[i * owners + j];
+                    const auto& f = force[j];
+                    out[i] += static_cast<double>( finish[j].inverseMass ) * ( c.fx * f.fx + c.fy * f.fy ) +
+                        static_cast<double>( finish[j].inverseInertia ) * c.torque * f.torque;
+                }
+        };
+        for( std::size_t i = 0; i < n; ++i )
+            for( std::size_t j = 0; j < owners; ++j )
+            {
+                const auto& c = coefficients[i * owners + j];
+                diagonal[i] += static_cast<double>( finish[j].inverseMass ) * ( c.fx * c.fx + c.fy * c.fy ) +
+                    static_cast<double>( finish[j].inverseInertia ) * c.torque * c.torque;
+            }
+
+        std::vector<double> p( n ), r = rhs, z( n ), d( n ), ap( n );
+        const auto dot = [&]( const std::vector<double>& a, const std::vector<double>& b )
+        {
+            double sum = 0.0;
+            for( std::size_t i = 0; i < n; ++i ) sum += a[i] * b[i];
+            return sum;
+        };
+        const auto precondition = [&]()
+        {
+            for( std::size_t i = 0; i < n; ++i )
+                z[i] = diagonal[i] > 0.0 ? r[i] / diagonal[i] : 0.0;
+            zeroMean( z );
+        };
+        precondition();
+        d = z;
+        double rz = dot( r, z ), squared = dot( r, r );
+        const double initial = squared;
+        const double tolerance = std::max( 1.0e-24, initial * 1.0e-16 );
+        int iterations = 0;
+        for( ; iterations < 2000 && squared > tolerance; ++iterations )
+        {
+            multiply( d, ap ); zeroMean( ap );
+            const double denominator = dot( d, ap );
+            if( !std::isfinite( denominator ) || denominator <= 0.0 || !std::isfinite( rz ) || rz <= 0.0 )
+                throw std::runtime_error( key + " experimental PCG breakdown" );
+            const double alpha = rz / denominator;
+            for( std::size_t i = 0; i < n; ++i ) { p[i] += alpha * d[i]; r[i] -= alpha * ap[i]; }
+            squared = dot( r, r );
+            if( !std::isfinite( squared ) ) throw std::runtime_error( key + " nonfinite PCG residual" );
+            if( squared <= tolerance ) { ++iterations; break; }
+            precondition();
+            const double next = dot( r, z );
+            const double beta = next / rz;
+            for( std::size_t i = 0; i < n; ++i ) d[i] = z[i] + beta * d[i];
+            rz = next;
+        }
+        zeroMean( p );
+        multiply( p, ap );
+        double unprojectedSquared = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            const double error = rhs[i] - ap[i];
+            unprojectedSquared += error * error;
+        }
+        zeroMean( ap );
+        double trueSquared = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            const double error = rhs[i] - ap[i];
+            trueSquared += error * error;
+        }
+        if( !std::isfinite( trueSquared ) || trueSquared > tolerance )
+            throw std::runtime_error( key + " experimental true residual failed" );
+
+        double peak = 0.0, endOpenPeak = 0.0, targetSpeed = 0.0, targetOpening = 0.0;
+        double fluidQuadratic = 0.0, bodyQuadratic = 0.0, forceChange = 0.0, torqueChange = 0.0;
+        const int targetIndex = before.vIndex( 17, 13 );
+        for( const auto& e : edges )
+        {
+            const double difference = p[e.first] - p[e.second];
+            const double velocity = e.velocity + dt / h * difference;
+            peak = std::max( peak, std::abs( velocity ) );
+            const int x = e.index % ( before.width_ + ( e.isU ? 1 : 0 ) );
+            const int y = e.index / ( before.width_ + ( e.isU ? 1 : 0 ) );
+            if( ( e.isU ? before.cutCellUOpen( x, y ) : before.cutCellVOpen( x, y ) ) > 0.0f )
+                endOpenPeak = std::max( endOpenPeak, std::abs( velocity ) );
+            if( !e.isU && e.index == targetIndex ) { targetSpeed = velocity; targetOpening = e.a; }
+            fluidQuadratic += e.a * difference * difference;
+        }
+        if( targetOpening <= 0.0 ) throw std::runtime_error( key + " historical face absent from interval graph" );
+        const auto emit = [&]( const std::string& name, auto value )
+        {
+            if( !std::isfinite( static_cast<double>( value ) ) )
+                throw std::runtime_error( key + name + " nonfinite prototype output" );
+            appendScalar( trace, key + name, value );
+        };
+        for( std::size_t j = 0; j < owners; ++j )
+        {
+            const auto& f = force[j];
+            bodyQuadratic += static_cast<double>( finish[j].inverseMass ) * ( f.fx * f.fx + f.fy * f.fy ) +
+                static_cast<double>( finish[j].inverseInertia ) * f.torque * f.torque;
+            forceChange = std::max( forceChange, std::max(
+                std::abs( f.fx - baselineFeedback[j].force.x ), std::abs( f.fy - baselineFeedback[j].force.y ) ) );
+            torqueChange = std::max( torqueChange, std::abs( f.torque - baselineFeedback[j].torque ) );
+            const auto k = ".body[" + std::to_string( j ) + "]";
+            emit( k + ".force.x", f.fx ); emit( k + ".force.y", f.fy ); emit( k + ".torque", f.torque );
+        }
+        const double quadratic = dot( p, ap );
+        const double adjointError = quadratic - fluidQuadratic - bodyQuadratic;
+        if( std::abs( adjointError ) > 1.0e-10 * std::max( 1.0, std::abs( quadratic ) ) )
+            throw std::runtime_error( key + " interval operator energy identity failed" );
+        emit( ".active", active ); emit( ".regions", regions ); emit( ".closedEndFaces", closedEndFaces );
+        emit( ".iterations", iterations ); emit( ".sourceSum", sourceSum );
+        emit( ".compatibilityL1", compatibilityL1 ); emit( ".rhsSquared", initial );
+        emit( ".projectedResidualSquared", trueSquared ); emit( ".unprojectedResidualSquared", unprojectedSquared );
+        emit( ".peak", peak ); emit( ".endOpenPeak", endOpenPeak );
+        emit( ".targetSpeed", targetSpeed ); emit( ".targetOpening", targetOpening );
+        emit( ".baselineTargetSpeed", baseline.v_[targetIndex] );
+        emit( ".fluidQuadratic", fluidQuadratic ); emit( ".bodyQuadratic", bodyQuadratic );
+        emit( ".adjointError", adjointError ); emit( ".maxForceComponentChange", forceChange );
+        emit( ".maxTorqueChange", torqueChange );
+        std::printf( "%s interval peak %.9g m/s endpoint-open peak %.9g target %.9g opening %.9g "
+            "PCG %d projected residual^2 %.9g unprojected residual^2 %.9g force delta %.9g torque delta %.9g "
+            "compatibility L1 %.9g closed-end faces %d\n",
+            key.c_str(), peak, endOpenPeak, targetSpeed, targetOpening, iterations,
+            trueSquared, unprojectedSquared, forceChange, torqueChange, compatibilityL1, closedEndFaces );
+    }
+
     static void captureProjection( const fluidField2& field, std::string& trace, const std::string& key )
     {
         appendVector( trace, key + ".u", field.u_ );
@@ -2071,6 +2368,9 @@ std::string runNearClosedFaceScene()
     probe::captureSliverFluxBudget( *frozen, baseline, trace, "sliverFluxAudit.baseline", 17, 13 );
     probe::captureSliverSampling( baseline, trace, "sliverFluxAudit.sampling" );
     probe::captureSpaceTimeAperture( *frozen, baseline, trace, "spaceTimeApertureAudit.frozen", 17, 13 );
+    for( int samples : { 8, 32 } )
+        probe::captureSpaceTimeProjection( *frozen, baseline, *a, trace,
+            "spaceTimeProjection.midpoint" + std::to_string( samples ), samples );
     for( bool corrected : { false, true } )
     {
         fluidField2 input = *frozen;
