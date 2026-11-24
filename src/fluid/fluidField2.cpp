@@ -1,6 +1,7 @@
 #include "fluid/fluidField2.h"
 
 #include "collision/distance2.h"
+#include "math/deterministicMath.h"
 
 #include <algorithm>
 #include <array>
@@ -1269,9 +1270,9 @@ float fluidField2::sampleComponent( const std::vector<float>& values, int width,
     const int j1 = std::min( j + 1, height - 1 );
     const float tx = x - i;
     const float ty = y - j;
-    const float bottom = std::lerp( values[j * width + i], values[j * width + i1], tx );
-    const float top = std::lerp( values[j1 * width + i], values[j1 * width + i1], tx );
-    return std::lerp( bottom, top, ty );
+    const float bottom = deterministicLerp( values[j * width + i], values[j * width + i1], tx );
+    const float top = deterministicLerp( values[j1 * width + i], values[j1 * width + i1], tx );
+    return deterministicLerp( bottom, top, ty );
 }
 
 vec2 fluidField2::sampleFrom( const std::vector<float>& u, const std::vector<float>& v, vec2 position ) const noexcept
