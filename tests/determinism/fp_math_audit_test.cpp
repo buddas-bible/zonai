@@ -190,6 +190,128 @@ void auditLerp( std::FILE* stream )
     }
 }
 
+// R3k candidate contract, independent of rot2 and Fluid production paths.
+void auditSinCos( std::FILE* stream )
+{
+    const auto bits = []( float value ) { return std::bit_cast<std::uint32_t>( value ); };
+    const auto fromBits = []( std::uint32_t value ) { return std::bit_cast<float>( value ); };
+    struct angleCase
+    {
+        std::uint32_t angle, cosine, sine;
+    };
+    // Exact binary32 inputs and rounded high-precision reference values,
+    // including the two R3j witnesses and adjacent quadrant boundaries.
+    constexpr std::array<angleCase, 19> exactCases{ {
+        { 0x00000000u, 0x3f800000u, 0x00000000u },
+        { 0x80000000u, 0x3f800000u, 0x80000000u },
+        { 0x00000001u, 0x3f800000u, 0x00000001u },
+        { 0x80000001u, 0x3f800000u, 0x80000001u },
+        { 0x3e0d4fdfu, 0x3f7d90f5u, 0x3e0cdd28u },
+        { 0x3e67983bu, 0x3f797b01u, 0x3e65a013u },
+        { 0x3f490fdau, 0x3f3504f4u, 0x3f3504f3u },
+        { 0x3f490fdbu, 0x3f3504f3u, 0x3f3504f3u },
+        { 0x3f490fdcu, 0x3f3504f2u, 0x3f3504f4u },
+        { 0x3fc90fdau, 0x33a22169u, 0x3f800000u },
+        { 0x3fc90fdbu, 0xb33bbd2eu, 0x3f800000u },
+        { 0x3fc90fdcu, 0xb42eef4cu, 0x3f800000u },
+        { 0x40490fdau, 0xbf800000u, 0x34222169u },
+        { 0x40490fdbu, 0xbf800000u, 0xb3bbbd2eu },
+        { 0x40490fdcu, 0xbf800000u, 0xb4aeef4cu },
+        { 0x4096cbe4u, 0x324cde2eu, 0xbf800000u },
+        { 0x40c90fdau, 0x3f800000u, 0xb4a22169u },
+        { 0x40c90fdbu, 0x3f800000u, 0x343bbd2eu },
+        { 0xc0c90fdbu, 0x3f800000u, 0xb43bbd2eu }
+    } };
+    for( std::size_t i = 0; i < exactCases.size(); ++i )
+    {
+        const auto& item = exactCases[i];
+        const auto result = deterministicSinCosBounded( fromBits( item.angle ) );
+        check( bits( result.cosine ) == item.cosine && bits( result.sine ) == item.sine,
+            "bounded sine/cosine exact-bit fixture" );
+        if( stream )
+        {
+            outputFloat( stream, "zonai.sinCosExact.cos", i, result.cosine );
+            outputFloat( stream, "zonai.sinCosExact.sin", i, result.sine );
+        }
+    }
+    // Keep the observed libm witnesses outside the authoritative fingerprint.
+    if( stream )
+    {
+        for( std::size_t i = 4; i < 6; ++i )
+        {
+            volatile float input = fromBits( exactCases[i].angle );
+            const float angle = input;
+            outputFloat( stream, "libm.rotationWitness.sin", i - 4, std::sin( angle ) );
+            outputFloat( stream, "libm.rotationWitness.cos", i - 4, std::cos( angle ) );
+        }
+    }
+
+    constexpr std::array<std::uint32_t, 5> invalidCases{
+        0x40c90fdcu, 0xc0c90fdcu, 0x7f800000u, 0xff800000u, 0x7fc12345u
+    };
+    for( std::size_t i = 0; i < invalidCases.size(); ++i )
+    {
+        const auto result = deterministicSinCosBounded( fromBits( invalidCases[i] ) );
+        check( bits( result.cosine ) == 0x7fc00000u && bits( result.sine ) == 0x7fc00000u,
+            "bounded sine/cosine canonical invalid-input NaN" );
+        if( stream )
+        {
+            std::fprintf( stream, "zonai.sinCosInvalid.cos.%02zu\t%08x\n", i, bits( result.cosine ) );
+            std::fprintf( stream, "zonai.sinCosInvalid.sin.%02zu\t%08x\n", i, bits( result.sine ) );
+        }
+    }
+
+    const auto verify = [&]( const char* cosKey, const char* sinKey, std::size_t i, float angle )
+    {
+        const auto result = deterministicSinCosBounded( angle );
+        const auto opposite = deterministicSinCosBounded( -angle );
+        check( std::isfinite( result.cosine ) && std::isfinite( result.sine ) &&
+            std::abs( result.cosine ) <= 1.0f && std::abs( result.sine ) <= 1.0f,
+            "bounded sine/cosine finite range" );
+        check( bits( opposite.cosine ) == bits( result.cosine ) &&
+            bits( opposite.sine ) == ( bits( result.sine ) ^ 0x80000000u ),
+            "bounded sine/cosine even/odd symmetry" );
+        const double c = result.cosine, s = result.sine;
+        check( std::abs( c * c + s * s - 1.0 ) <= 2.0e-7,
+            "bounded sine/cosine rotation norm" );
+        // Accuracy check only: the reference libm is not an exact-bit oracle.
+        const double referenceCos = std::cos( static_cast<double>( angle ) );
+        const double referenceSin = std::sin( static_cast<double>( angle ) );
+        const auto close = []( double value, double reference )
+        {
+            const double tolerance = 2.0 * std::numeric_limits<float>::epsilon() *
+                std::abs( reference ) + std::numeric_limits<float>::denorm_min();
+            return std::abs( value - reference ) <= tolerance;
+        };
+        check( close( c, referenceCos ) && close( s, referenceSin ),
+            "bounded sine/cosine numerical reference" );
+        if( stream )
+        {
+            outputFloat( stream, cosKey, i, result.cosine );
+            outputFloat( stream, sinKey, i, result.sine );
+        }
+    };
+
+    constexpr float limit = 0x1.921fb6p+2f;
+    for( std::size_t i = 0; i <= 4096; ++i )
+    {
+        const float angle = static_cast<float>( static_cast<int>( i ) - 2048 ) * ( limit / 2048.0f );
+        verify( "zonai.sinCosGrid.cos", "zonai.sinCosGrid.sin", i, angle );
+    }
+
+    std::uint64_t seed = 0x73696e636f732d6bull;
+    for( std::size_t i = 0; i < 1024; ++i )
+    {
+        seed ^= seed >> 12;
+        seed ^= seed << 25;
+        seed ^= seed >> 27;
+        const auto raw = static_cast<std::uint32_t>( seed * 2685821657736338717ull );
+        const auto magnitude = ( raw & 0x7fffffffu ) % 0x40c90fdcu;
+        const float angle = fromBits( magnitude | ( raw & 0x80000000u ) );
+        verify( "zonai.sinCosWide.cos", "zonai.sinCosWide.sin", i, angle );
+    }
+}
+
 void emitFingerprint( std::FILE* stream )
 {
     // Use exact source IEEE-754 bits rather than decimal angle parsing.
@@ -339,6 +461,7 @@ int main( int argc, char** argv )
         if( argc == 1 )
         {
             auditLerp( nullptr );
+            auditSinCos( nullptr );
             std::puts( "FP math contract audit passed" );
             return EXIT_SUCCESS;
         }
@@ -354,6 +477,7 @@ int main( int argc, char** argv )
 
         emitFingerprint( stream );
         auditLerp( stream );
+        auditSinCos( stream );
         if( std::fclose( stream ) != 0 )
             throw std::runtime_error( "cannot close FP audit output" );
 
