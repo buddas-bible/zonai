@@ -1406,6 +1406,11 @@ struct fluidStateTraceProbe2
     {
         std::vector<float> u, v, pressure;
         std::vector<fluidObstacleForce2> feedback;
+        // Signed interval transfers accumulated in physical volume units.
+        std::vector<double> fluxVolume;
+        std::vector<int> component;
+        double trueResidualSquared = 0.0;
+        int initialIterations = 0;
         double initialGap = 0.0, finalGap = 0.0, negativeVolume = 0.0, intervalPeak = 0.0;
         int uncoveredEndpointFaces = 0;
         bool stalled = false;
@@ -2196,6 +2201,20 @@ struct fluidStateTraceProbe2
                 for( int x = 0; x < before.width_; ++x )
                     continuation->uncoveredEndpointFaces += before.cutCellVOpen( x, y ) > 0.0f &&
                         meanV[before.vIndex( x, y )] <= 0.0;
+            continuation->fluxVolume.resize( n );
+            continuation->component = parent;
+            for( std::size_t i = 0; i < n; ++i )
+                continuation->fluxVolume[i] = area * before.previousCellFluidFraction_[i];
+            for( const auto& e : edges )
+            {
+                const double velocity = e.velocity + dt / h *
+                    ( correctedPressure[e.first] - correctedPressure[e.second] );
+                const double transfer = dt * h * e.a * velocity;
+                continuation->fluxVolume[e.first] -= transfer;
+                continuation->fluxVolume[e.second] += transfer;
+            }
+            continuation->trueResidualSquared = trueSquared;
+            continuation->initialIterations = iterations;
             continuation->initialGap = initialGap;
             continuation->finalGap = current.rawL1;
             continuation->negativeVolume = current.negativeFlux;
@@ -2203,6 +2222,170 @@ struct fluidStateTraceProbe2
             continuation->stalled = stalled;
         }
 
+    }
+
+    // R4k: independent forward pressure trial at a sampled R4j start.
+    // Freeze the incoming MAC trial velocity: no forward advection or
+    // persistent candidate commit is implied by this geometry-only test.
+    static void captureForwardPredictor( const fluidField2& input,
+        const fluidField2& laggedField, const std::vector<fluidShapeObstacle2>& start,
+        const std::vector<fluidObstacleForce2>& laggedLoad, std::string& trace,
+        int index )
+    {
+        using namespace sandbox;
+        const std::string key = "forwardPredictor.interval" + std::to_string( index );
+        const float dt = input.frozenPressureTimeStep_;
+        const double area = static_cast<double>( input.cellSize_ ) * input.cellSize_;
+        const auto run = [&]( const std::vector<fluidObstacleForce2>& loads )
+        {
+            rigidBodyDemo scene{ demoKind::windFlow };
+            auto& world = scene.getWorld();
+            if( scene.getShapes().size() != start.size() || loads.size() != start.size() )
+                throw std::runtime_error( key + " invalid forward fixture" );
+            auto result = start;
+            for( std::size_t j = 0; j < start.size(); ++j )
+            {
+                const auto id = scene.getShapes()[j].bodyHandle;
+                if( 1.0f / world.GetBodyMass( id ) != start[j].inverseMass ||
+                    1.0f / world.GetBodyRotationalInertia( id ) != start[j].inverseInertia ||
+                    world.GetBodyLinearDamping( id ) != 0.0f || world.GetBodyAngularDamping( id ) != 0.0f )
+                    throw std::runtime_error( key + " forward fixture mass/damping differs" );
+                world.SetBodyTransform( id, start[j].transform );
+                world.SetBodyLinearVelocity( id, start[j].linearVelocity );
+                world.SetBodyAngularVelocity( id, start[j].angularVelocity );
+                const vec2 center = TransformPoint( world.GetBodyTransform( id ), world.GetBodyLocalCenter( id ) );
+                if( center.x != start[j].center.x || center.y != start[j].center.y ||
+                    !IsFinite( loads[j].force ) || !std::isfinite( loads[j].torque ) )
+                    throw std::runtime_error( key + " invalid start COM or pressure load" );
+                world.ApplyForceToCenter( id, loads[j].force );
+                world.ApplyTorque( id, loads[j].torque );
+            }
+            world.Step( dt, 2 );
+            for( std::size_t j = 0; j < start.size(); ++j )
+            {
+                const auto id = scene.getShapes()[j].bodyHandle;
+                if( world.GetBody( id ).contactCount != 0 || world.GetBody( id ).jointCount != 0 )
+                    throw std::runtime_error( key + " unexpected forward constraint" );
+                result[j].transform = world.GetBodyTransform( id );
+                result[j].center = TransformPoint( result[j].transform, world.GetBodyLocalCenter( id ) );
+                result[j].linearVelocity = world.GetBodyLinearVelocity( id );
+                result[j].angularVelocity = world.GetBodyAngularVelocity( id );
+                if( !IsFinite( result[j].center ) || !IsFinite( result[j].linearVelocity ) ||
+                    !std::isfinite( result[j].angularVelocity ) )
+                    throw std::runtime_error( key + " invalid forward World result" );
+            }
+            return result;
+        };
+
+        const auto predicted = run( std::vector<fluidObstacleForce2>( start.size() ) );
+        fluidField2 forward = input;
+        forward.setPrePressureSnapshotObserver( {} );
+        setStageObserver( forward, {} );
+        forward.tracerEnabled_ = false;
+        const auto rebuild = [&]( const std::vector<fluidShapeObstacle2>& poses )
+        {
+            forward.updateObstacles( poses );
+            forward.updateCutCellGeometry( poses );
+            if( !forward.cutCellTransition_.usedDisjointAnalyticGeometry )
+                throw std::runtime_error( key + " forward geometry not analytic" );
+        };
+        rebuild( start );
+        const auto startFraction = forward.cellFluidFraction_;
+        if( startFraction != input.cellFluidFraction_ )
+            throw std::runtime_error( key + " start geometry differs from frozen input" );
+        rebuild( predicted );
+        const auto predictedFraction = forward.cellFluidFraction_;
+        forward.previousCellFluidFraction_ = startFraction;
+        forward.previousObstacles_ = start;
+        forward.frozenPressureObstacles_ = predicted;
+        forward.volumeSourceValid_ = true;
+        forward.u_ = input.u_;
+        forward.v_ = input.v_;
+        continuationPressure candidate;
+        std::string scratch;
+        // Use the lagged load only as the reference for diagnostic deltas.
+        // Neither the lagged nor the candidate load is applied twice.
+        captureSpaceTimeProjection( forward, laggedField, laggedLoad, scratch,
+            key + ".projection", 64, key + ".volume", false, 16,
+            key + ".topology", 1.0, &candidate );
+        const auto corrected = run( candidate.feedback );
+        rebuild( corrected );
+
+        const std::size_t n = startFraction.size();
+        std::vector<double> residual( n ), sums( n );
+        std::vector<int> counts( n );
+        double rawL1 = 0.0, maxResidual = 0.0, unsupportedL1 = 0.0;
+        double startVolume = 0.0, correctedVolume = 0.0, fluxVolume = 0.0, predictedGap = 0.0;
+        int unsupportedCells = 0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            const double fraction = forward.cellFluidFraction_[i];
+            const double modeled = candidate.fluxVolume[i];
+            if( !std::isfinite( fraction ) || fraction < 0.0 || fraction > 1.0 ||
+                !std::isfinite( modeled ) )
+                throw std::runtime_error( key + " invalid measured endpoint volume" );
+            residual[i] = area * fraction - modeled;
+            rawL1 += std::abs( residual[i] );
+            maxResidual = std::max( maxResidual, std::abs( residual[i] ) );
+            predictedGap += std::abs( area * predictedFraction[i] - modeled );
+            startVolume += area * startFraction[i];
+            correctedVolume += area * fraction;
+            fluxVolume += modeled;
+            const int component = candidate.component[i];
+            if( component >= 0 )
+            {
+                sums[component] += residual[i];
+                ++counts[component];
+            }
+            else
+            {
+                unsupportedL1 += std::abs( residual[i] );
+                unsupportedCells += residual[i] != 0.0;
+            }
+        }
+        double projectedL1 = 0.0, projectedSquared = 0.0, compatibility = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            const int component = candidate.component[i];
+            if( component < 0 ) continue;
+            const double mean = sums[component] / counts[component];
+            const double projected = residual[i] - mean;
+            compatibility += std::abs( mean );
+            projectedL1 += std::abs( projected );
+            projectedSquared += projected * projected;
+        }
+        const auto out = [&]( const std::string& suffix, auto value )
+        {
+            if( !std::isfinite( static_cast<double>( value ) ) )
+                throw std::runtime_error( key + suffix + " nonfinite forward audit" );
+            appendScalar( trace, key + suffix, value );
+        };
+        out( ".rawL1", rawL1 ); out( ".maxResidual", maxResidual );
+        out( ".projectedL1", projectedL1 ); out( ".projectedSquared", projectedSquared );
+        out( ".compatibilityL1", compatibility ); out( ".negativeModelVolume", candidate.negativeVolume );
+        out( ".unsupportedL1", unsupportedL1 ); out( ".unsupportedCells", unsupportedCells );
+        out( ".intervalPeak", candidate.intervalPeak ); out( ".initialDefect", candidate.initialGap );
+        out( ".modelFinalDefect", candidate.finalGap ); out( ".uncoveredPredictedFaces", candidate.uncoveredEndpointFaces );
+        out( ".stalled", static_cast<int>( candidate.stalled ) ); out( ".startVolume", startVolume );
+        out( ".correctedVolume", correctedVolume ); out( ".fluxVolume", fluxVolume );
+        out( ".predictedGap", predictedGap ); out( ".linearResidualSquared", candidate.trueResidualSquared );
+        out( ".initialIterations", candidate.initialIterations );
+        for( std::size_t j = 0; j < start.size(); ++j )
+        {
+            const auto k = ".body[" + std::to_string( j ) + "]";
+            out( k + ".force.x", candidate.feedback[j].force.x );
+            out( k + ".force.y", candidate.feedback[j].force.y );
+            out( k + ".torque", candidate.feedback[j].torque );
+            out( k + ".predicted.center.x", predicted[j].center.x );
+            out( k + ".predicted.center.y", predicted[j].center.y );
+            out( k + ".corrected.center.x", corrected[j].center.x );
+            out( k + ".corrected.center.y", corrected[j].center.y );
+            out( k + ".corrected.omega", corrected[j].angularVelocity );
+        }
+        std::printf( "%s predicted gap %.9g actual corrected gap %.9g m^2 modeled gap %.9g "
+            "unsupported cells %d unsupported volume %.9g interval peak %.9g m/s negative volume %.9g\n",
+            key.c_str(), predictedGap, rawL1, candidate.finalGap, unsupportedCells, unsupportedL1,
+            candidate.intervalPeak, candidate.negativeVolume );
     }
 
     // R4j: actual persistent free-body World + MAC continuation. This
@@ -2379,6 +2562,8 @@ struct fluidStateTraceProbe2
                     out( k + ".next.velocity.y", next[j].linearVelocity.y );
                     out( k + ".next.omega", next[j].angularVelocity );
                 }
+                if( model == 1 )
+                    captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step );
                 maxPeak = std::max( maxPeak, static_cast<double>( flow.maxFluidFaceSpeed ) );
                 maxContinuity = std::max( maxContinuity, static_cast<double>( flow.continuityRms ) );
                 maxNegative = std::max( maxNegative, candidate.negativeVolume );
