@@ -436,6 +436,7 @@ jobs:
               "forwardQuadrature16": 172, "forwardQuadrature32": 172,
               "forwardQuadratureCost": 36,
               "forwardAdaptiveEndpoint": 188,
+              "forwardResidual12": 196, "forwardResidual10": 196,
           }
           topology = totals.get("topologyQuadrature", 0)
           # 49 second-resolution output rows, six quadrature headers,
@@ -629,10 +630,10 @@ jobs:
                   values = tuple(map(float, m.groups()[3:]))
                   assert key not in rows and all(math.isfinite(v) and v >= 0 for v in values)
                   rows[key] = values
-          assert set(rows) == {(i, v, r) for i in range(43, 47) for v in range(3) for r in range(3)}
+          assert set(rows) == {(i, v, r) for i in range(43, 47) for v in range(5) for r in range(5)}
           for i in range(43, 47):
-              for v, label in enumerate(("fixed64", "fixed16", "adaptive16")):
-                  samples = [rows[i, v, r] for r in range(3)]
+              for v, label in enumerate(("fixed64", "fixed16", "adaptive16", "residual12", "residual10")):
+                  samples = [rows[i, v, r] for r in range(5)]
                   med = [statistics.median(col) for col in zip(*samples)]
                   print(f"R4p interval={i} {label}: median quadrature={med[0]:.3f} ms linear={med[1]:.3f} ms diagnostic total={med[2]:.3f} ms")
           PY
