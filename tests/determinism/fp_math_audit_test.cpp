@@ -364,9 +364,26 @@ void auditWindSource( std::FILE* stream )
         // engine's operation order identical to rigidBodyDemo::step().
         volatile float input = angle;
         const float legacy = std::sin( input );
-        const float candidate = deterministicSinCosBounded( angle ).sine;
+        const float candidate = rot2::FromRadians( angle ).s;
+        check( std::bit_cast<std::uint32_t>( candidate ) ==
+            std::bit_cast<std::uint32_t>( deterministicSinCosBounded( angle ).sine ),
+            "R3p wind source must use the bounded rotation path throughout this recurrence" );
         const float legacyDelta = 0.5f * strength * windTimeStep * legacy;
         const float candidateDelta = 0.5f * strength * windTimeStep * candidate;
+        // Exact engine candidate results from both R3o platform traces.
+        // Keep old libm outputs diagnostic; never assert they must differ.
+        struct windWitness { std::size_t index; std::uint32_t angle, sine, delta; };
+        constexpr std::array<windWitness, 3> witnesses{ {
+            { 49, 0x3eb55554u, 0x3eb190edu, 0x3bbd6764u },
+            { 372, 0x40291814u, 0x3ef53d85u, 0x3c02cb7bu },
+            { 394, 0x40331149u, 0x3eac831du, 0x3bb80353u }
+        } };
+        for( const auto& witness : witnesses )
+            if( i == witness.index )
+                check( std::bit_cast<std::uint32_t>( angle ) == witness.angle &&
+                    std::bit_cast<std::uint32_t>( candidate ) == witness.sine &&
+                    std::bit_cast<std::uint32_t>( candidateDelta ) == witness.delta,
+                    "R3p exact wind source witness" );
         check( std::isfinite( legacyDelta ) && std::isfinite( candidateDelta ),
             "wind source bounded recurrence produced a nonfinite result" );
         sawPositive |= candidate > 0.0f;
