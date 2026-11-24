@@ -2670,7 +2670,7 @@ struct fluidStateTraceProbe2
                                 else if( measured != reference[variant] )
                                     throw std::runtime_error( "R4p repeated benchmark trace differs" );
                                 std::printf( "R4p timing interval=%d variant=%d repeat=%d quadrature_ms=%.6f "
-                                    "linear_ms=%.6f total_ms=%.6f\\n", initialIndex + step, variant, repeat,
+                                    "linear_ms=%.6f total_ms=%.6f\n", initialIndex + step, variant, repeat,
                                     timing.quadratureMs, timing.linearMs, timing.totalMs );
                             }
                         }
