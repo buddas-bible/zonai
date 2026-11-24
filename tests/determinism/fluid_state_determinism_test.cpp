@@ -479,6 +479,168 @@ struct fluidStateTraceProbe2
             after.pressure_[target] - after.pressure_[lower], after.v_[after.vIndex( x, y )] );
     }
 
+    // R3y: local flux feasibility for the actual projected sliver. The
+    // predicted solid response and compatibility correction are held fixed.
+    // A lower bound on max |u| is not a proposed pressure/velocity clamp.
+    static void captureSliverFluxBudget( const fluidField2& before, const fluidField2& after,
+        std::string& trace, const std::string& key, int x, int y )
+    {
+        const int cell = after.cellIndex( x, y );
+        const double h = after.cellSize_;
+        const double dt = before.frozenPressureTimeStep_;
+        double opening = 0.0, preFlux = 0.0, postFlux = 0.0, solidFlux = 0.0;
+        double peak = 0.0, weightedSquaredSpeed = 0.0, laplacian = 0.0;
+        const auto emit = [&]( const std::string& name, auto value )
+        {
+            if( !std::isfinite( static_cast<double>( value ) ) )
+                throw std::runtime_error( key + name + " nonfinite flux budget" );
+            appendScalar( trace, key + name, value );
+        };
+        const auto face = [&]( const char* name, bool isU, int fx, int fy, int neighbor, double sign )
+        {
+            const int index = isU ? after.uIndex( fx, fy ) : after.vIndex( fx, fy );
+            const double a = isU ? after.cutCellUOpen( fx, fy ) : after.cutCellVOpen( fx, fy );
+            const double u0 = isU ? before.u_[index] : before.v_[index];
+            const double u1 = isU ? after.u_[index] : after.v_[index];
+            const double ds = isU ? after.pressureUSolidFlux_[index] : after.pressureVSolidFlux_[index];
+            opening += a;
+            preFlux += sign * a * u0;
+            postFlux += sign * a * u1;
+            solidFlux += sign * ds;
+            if( a > 0.0 )
+            {
+                peak = std::max( peak, std::abs( u1 ) );
+                weightedSquaredSpeed += a * u1 * u1;
+                laplacian += a * ( static_cast<double>( after.pressure_[cell] ) - after.pressure_[neighbor] );
+            }
+            const std::string p = std::string( "." ) + name;
+            emit( p + ".open", a );
+            emit( p + ".before", u0 );
+            emit( p + ".after", u1 );
+            emit( p + ".outwardFlux", sign * a * u1 );
+            emit( p + ".predictedSolidFlux", sign * ds );
+        };
+        face( "west", true, x, y, after.cellIndex( x - 1, y ), -1.0 );
+        face( "east", true, x + 1, y, after.cellIndex( x + 1, y ), 1.0 );
+        face( "south", false, x, y, after.cellIndex( x, y - 1 ), -1.0 );
+        face( "north", false, x, y + 1, after.cellIndex( x, y + 1 ), 1.0 );
+        if( opening <= 0.0 ) throw std::runtime_error( key + " target cell has no open face" );
+
+        // The adjusted pre-projection divergence is the actual stored RHS
+        // source, including the component mean correction. Reconstruct the
+        // required net open flux with the solid prediction held at its
+        // computed value (rounding differs from the float production row).
+        const double requiredFlux = preFlux - h * after.divergence_[cell] - solidFlux;
+        const double requiredPeak = std::abs( requiredFlux ) / opening;
+        const double observedBound = std::abs( postFlux ) / opening;
+        if( observedBound > peak + 1.0e-12 * std::max( 1.0, peak ) )
+            throw std::runtime_error( key + " triangle inequality violated" );
+
+        // Aggregate B coefficients by body before taking the diagonal of
+        // B M^-1 B^T; summing individual face squares would miss cancellation.
+        const auto& obstacles = before.frozenPressureObstacles_;
+        std::vector<fluidField2::coupledBodyResponse> local( obstacles.size() ), global( obstacles.size() );
+        for( const auto& f : after.coupledPressureScratch_.faces )
+        {
+            auto& g = global[static_cast<std::size_t>( f.owner )];
+            const double p = after.pressure_[f.cell];
+            g.fx += p * f.fx; g.fy += p * f.fy; g.torque += p * f.torque;
+            if( f.cell != cell ) continue;
+            auto& b = local[static_cast<std::size_t>( f.owner )];
+            b.fx += f.fx; b.fy += f.fy; b.torque += f.torque;
+        }
+        double schurDiagonal = 0.0, schurRow = 0.0;
+        for( std::size_t i = 0; i < obstacles.size(); ++i )
+        {
+            const auto& b = local[i];
+            const auto& g = global[i];
+            const double im = obstacles[i].inverseMass, ii = obstacles[i].inverseInertia;
+            schurDiagonal += im * ( b.fx * b.fx + b.fy * b.fy ) + ii * b.torque * b.torque;
+            schurRow += im * ( b.fx * g.fx + b.fy * g.fy ) + ii * b.torque * g.torque;
+        }
+        const double rhs = after.coupledPressureScratch_.rhs[cell];
+        emit( ".openingSum", opening );
+        emit( ".preFlux", preFlux );
+        emit( ".postFlux", postFlux );
+        emit( ".solidFlux", solidFlux );
+        emit( ".requiredOpenFlux", requiredFlux );
+        emit( ".fluxError", postFlux - requiredFlux );
+        emit( ".requiredPeakLowerBound", requiredPeak );
+        emit( ".observedPeakLowerBound", observedBound );
+        emit( ".actualLocalPeak", peak );
+        emit( ".weightedSquaredSpeed", weightedSquaredSpeed );
+        emit( ".minimumWeightedSquaredSpeed", postFlux * postFlux / opening );
+        emit( ".rhs", rhs );
+        emit( ".laplacianDiagonal", opening );
+        emit( ".schurDiagonal", schurDiagonal );
+        emit( ".schurRow", schurRow );
+        emit( ".laplacianRow", laplacian );
+        emit( ".rowResidual", rhs - laplacian - schurRow );
+        emit( ".sourceFractionChange", after.cutCellVolumeRate_[cell] );
+        emit( ".sourceRate", after.cutCellVolumeRate_[cell] / dt );
+        std::printf( "%s opening sum %.9g required flux %.9g observed flux %.9g "
+            "solid flux %.9g minimum required peak %.9g m/s actual local peak %.9g m/s "
+            "Schur diagonal %.9g L diagonal %.9g row residual %.9g\n",
+            key.c_str(), opening, requiredFlux, postFlux, solidFlux, requiredPeak, peak,
+            schurDiagonal, opening, rhs - laplacian - schurRow );
+    }
+
+    // Read-only R3y candidate corresponding to the aperture-normalized
+    // interpolation in experimental #322, using current effective openings.
+    // This is not wired into the production sampler, drag, or advection.
+    static float apertureSample( const fluidField2& field, bool isU, float x, float y )
+    {
+        const int width = field.width_ + ( isU ? 1 : 0 );
+        const int height = field.height_ + ( isU ? 0 : 1 );
+        const auto& values = isU ? field.u_ : field.v_;
+        x = std::clamp( x, 0.0f, static_cast<float>( width - 1 ) );
+        y = std::clamp( y, 0.0f, static_cast<float>( height - 1 ) );
+        const int i = static_cast<int>( x ), j = static_cast<int>( y );
+        const int i1 = std::min( i + 1, width - 1 ), j1 = std::min( j + 1, height - 1 );
+        const float tx = x - i, ty = y - j;
+        const auto open = [&]( int a, int b ) { return isU ? field.cutCellUOpen( a, b ) : field.cutCellVOpen( a, b ); };
+        const float o00 = open( i, j ), o10 = open( i1, j ), o01 = open( i, j1 ), o11 = open( i1, j1 );
+        if( o00 == 1.0f && o10 == 1.0f && o01 == 1.0f && o11 == 1.0f )
+            return field.sampleComponent( values, width, height, x, y );
+        const std::array<float, 4> weights{
+            ( 1.0f - tx ) * ( 1.0f - ty ) * o00, tx * ( 1.0f - ty ) * o10,
+            ( 1.0f - tx ) * ty * o01, tx * ty * o11 };
+        const std::array<int, 4> indices{ j * width + i, j * width + i1, j1 * width + i, j1 * width + i1 };
+        const float total = weights[0] + weights[1] + weights[2] + weights[3];
+        if( total <= 0.0f ) return 0.0f;
+        float sum = 0.0f;
+        for( std::size_t k = 0; k < weights.size(); ++k )
+            if( weights[k] > 0.0f ) sum += weights[k] * values[indices[k]];
+        return sum / total;
+    }
+
+    static void captureSliverSampling( const fluidField2& field, std::string& trace,
+        const std::string& key )
+    {
+        // Same frozen post-projection data, sample on the face, at both
+        // adjacent cell centers and along the connecting segment.
+        for( int i = 0; i <= 8; ++i )
+        {
+            const float y = 12.5f + 0.125f * i;
+            const vec2 point = field.origin_ + field.cellSize_ * vec2{ 17.5f, y };
+            const vec2 standard = field.sampleVelocity( point );
+            const vec2 grid = ( point - field.origin_ ) / field.cellSize_;
+            const vec2 candidate{ apertureSample( field, true, grid.x, grid.y - 0.5f ),
+                apertureSample( field, false, grid.x - 0.5f, grid.y ) };
+            if( !IsFinite( standard ) || !IsFinite( candidate ) )
+                throw std::runtime_error( key + " nonfinite sampling witness" );
+            const auto p = key + ".point[" + std::to_string( i ) + "]";
+            appendScalar( trace, p + ".gridY", y );
+            appendScalar( trace, p + ".standard.x", standard.x );
+            appendScalar( trace, p + ".standard.y", standard.y );
+            appendScalar( trace, p + ".candidate.x", candidate.x );
+            appendScalar( trace, p + ".candidate.y", candidate.y );
+            if( i == 0 || i == 4 || i == 8 )
+                std::printf( "%s grid y %.9g standard v %.9g weighted v %.9g\n",
+                    key.c_str(), y, standard.y, candidate.y );
+        }
+    }
+
     static void captureProjection( const fluidField2& field, std::string& trace, const std::string& key )
     {
         appendVector( trace, key + ".u", field.u_ );
@@ -1714,6 +1876,8 @@ std::string runNearClosedFaceScene()
     // Do not erase a volume source or alter any aperture to reduce speed.
     const std::string sourceKey = "volumeSourceAudit.frozen.";
     probe::captureVolumeSourceAudit( *frozen, baseline, trace, sourceKey + "baseline", 17, 13 );
+    probe::captureSliverFluxBudget( *frozen, baseline, trace, "sliverFluxAudit.baseline", 17, 13 );
+    probe::captureSliverSampling( baseline, trace, "sliverFluxAudit.sampling" );
     for( bool corrected : { false, true } )
     {
         fluidField2 input = *frozen;
@@ -1730,6 +1894,8 @@ std::string runNearClosedFaceScene()
             p.coupledStatus == fluidCoupledPressureStatus2::converged,
             "R3x source replay pressure failed" );
         probe::captureVolumeSourceAudit( input, output, trace, key, 17, 13 );
+        probe::captureSliverFluxBudget( input, output, trace,
+            corrected ? "sliverFluxAudit.correctedSwept" : "sliverFluxAudit.snapshot", 17, 13 );
         const auto sample = probe::captureStabilityPhase( output, trace, key + ".ledger", &beforeU, &beforeV );
         float maxForceChange = 0.0f, maxTorqueChange = 0.0f;
         for( std::size_t i = 0; i < feedback->size(); ++i )
