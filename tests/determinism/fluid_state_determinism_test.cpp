@@ -1,4 +1,5 @@
 #include "fluid/fluidField2.h"
+#include "math/deterministicMath.h"
 
 #include <algorithm>
 #include <array>
@@ -53,8 +54,8 @@ struct fluidStateTraceProbe2
 
 
     // R3e: reconstruct the exact semi-Lagrangian U(3,4) backtrace and
-    // bilinear stencil from the read-only Stage-05 input. The production
-    // Step and its interpolation are deliberately left unchanged.
+    // bilinear stencil from the read-only Stage-05 input. Mirror the R3g
+    // production interpolation and require bitwise agreement with Step.
     static float captureComponent( const std::vector<float>& values,
         int width, int height, float x, float y,
         std::string& trace, const std::string& key )
@@ -74,9 +75,9 @@ struct fluidStateTraceProbe2
         const float b = values[j * width + i1];
         const float c = values[j1 * width + i];
         const float d = values[j1 * width + i1];
-        const float bottom = std::lerp( a, b, tx );
-        const float top = std::lerp( c, d, tx );
-        const float result = std::lerp( bottom, top, ty );
+        const float bottom = deterministicLerp( a, b, tx );
+        const float top = deterministicLerp( c, d, tx );
+        const float result = deterministicLerp( bottom, top, ty );
 
         appendScalar( trace, key + ".i", i );
         appendScalar( trace, key + ".j", j );
@@ -143,6 +144,10 @@ struct fluidStateTraceProbe2
             std::bit_cast<std::uint32_t>( reconstructed ) ==
                 std::bit_cast<std::uint32_t>( result.x ) ) );
         appendScalar( trace, key + ".result.u", result.x );
+        if( std::bit_cast<std::uint32_t>( currentU ) != std::bit_cast<std::uint32_t>( current.x ) ||
+            std::bit_cast<std::uint32_t>( currentV ) != std::bit_cast<std::uint32_t>( current.y ) ||
+            std::bit_cast<std::uint32_t>( reconstructed ) != std::bit_cast<std::uint32_t>( result.x ) )
+            throw std::runtime_error( "advection interpolation probe differs from production sampling" );
         return result.x;
     }
 
@@ -272,6 +277,9 @@ struct fluidScene
                                 std::bit_cast<std::uint32_t>( advectionPreviewU ) ) );
                         zonai::fluidStateTraceProbe2::appendScalar( advectionTrace,
                             probePrefix + ".actualU", real );
+                        check( std::bit_cast<std::uint32_t>( real ) ==
+                            std::bit_cast<std::uint32_t>( advectionPreviewU ),
+                            "advection probe differs from production Step" );
                     }
                     zonai::fluidStateTraceProbe2::capture( snapshot, stageTrace,
                         prefix + names[phase] );
@@ -333,22 +341,31 @@ std::string runScene( const char* sceneName, bool analytic )
         zonai::fluidStateTraceProbe2::capture( first.field, trace, prefix );
         secondTrace.clear();
         zonai::fluidStateTraceProbe2::capture( second.field, secondTrace, prefix );
-        check( trace.compare( firstStart, secondTrace.size(), secondTrace ) == 0,
+        check( trace.size() - firstStart == secondTrace.size() &&
+            trace.compare( firstStart, secondTrace.size(), secondTrace ) == 0,
             "two independent Fluid simulations diverged in one process" );
         controlTrace.clear();
         zonai::fluidStateTraceProbe2::capture( control.field, controlTrace, prefix );
-        check( trace.compare( firstStart, controlTrace.size(), controlTrace ) == 0,
+        check( trace.size() - firstStart == controlTrace.size() &&
+            trace.compare( firstStart, controlTrace.size(), controlTrace ) == 0,
             "Fluid Stage observer perturbed authoritative field state" );
 
         zonai::fluidStateTraceProbe2::appendScalar( trace, prefix + ".force.x", first.feedback[0].force.x );
         zonai::fluidStateTraceProbe2::appendScalar( trace, prefix + ".force.y", first.feedback[0].force.y );
         zonai::fluidStateTraceProbe2::appendScalar( trace, prefix + ".torque", first.feedback[0].torque );
-        check( std::bit_cast<std::uint32_t>( first.feedback[0].force.x ) ==
-                std::bit_cast<std::uint32_t>( second.feedback[0].force.x ) &&
-            std::bit_cast<std::uint32_t>( first.feedback[0].force.y ) ==
-                std::bit_cast<std::uint32_t>( second.feedback[0].force.y ) &&
-            std::bit_cast<std::uint32_t>( first.feedback[0].torque ) ==
-                std::bit_cast<std::uint32_t>( second.feedback[0].torque ),
+        const auto& force = first.feedback[0];
+        const auto sameFeedback = [&]( const zonai::fluidObstacleForce2& other )
+        {
+            return std::bit_cast<std::uint32_t>( force.force.x ) ==
+                    std::bit_cast<std::uint32_t>( other.force.x ) &&
+                std::bit_cast<std::uint32_t>( force.force.y ) ==
+                    std::bit_cast<std::uint32_t>( other.force.y ) &&
+                std::bit_cast<std::uint32_t>( force.torque ) ==
+                    std::bit_cast<std::uint32_t>( other.torque );
+        };
+        check( std::isfinite( force.force.x ) && std::isfinite( force.force.y ) &&
+            std::isfinite( force.torque ), "non-finite Fluid pressure feedback" );
+        check( sameFeedback( second.feedback[0] ) && sameFeedback( control.feedback[0] ),
             "Fluid pressure feedback diverged in one process" );
     }
 
