@@ -995,6 +995,8 @@ private:
     bool analyticCutCellIndexedBoundaryFacesEnabled_ = true;
     bool analyticCutCellIndexedBoundarySyncEnabled_ = true;
     bool analyticCutCellBoundedCellAreasEnabled_ = true;
+    // R4ac matched-state precision probe; default production path unchanged.
+    bool preciseDisjointCapsuleEnabled_ = false;
     bool analyticCutCellBoundedFaceClippingEnabled_ = true;
     bool analyticCutCellMovableSchurFacesEnabled_ = true;
     bool analyticCutCellCurrentGeometryReuseEnabled_ = true;
