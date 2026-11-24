@@ -694,9 +694,11 @@ struct worldFluidScene
     zonai::jointId joint{};
     zonai::jointId anchorJoint{};
     zonai::bodyId anchorBody{};
+    bool contactScenario = false;
 
-    explicit worldFluidScene( bool drag, fluidJointKind kind = fluidJointKind::none )
-        : dragEnabled( drag ), jointKind( kind )
+    explicit worldFluidScene( bool drag, fluidJointKind kind = fluidJointKind::none,
+        bool contact = false )
+        : dragEnabled( drag ), jointKind( kind ), contactScenario( contact )
     {
         demo.configureWindField( 24, 14, 0.5f );
         demo.setWindCutCellProjectionEnabled( true );
@@ -714,6 +716,16 @@ struct worldFluidScene
         check( bodies.size() == 3, "R3m expected three Sandbox bodies" );
         demo.getWorld().SetBodyLinearVelocity( bodies[0], { 0.7f, -0.10f } );
         demo.getWorld().SetBodyAngularVelocity( bodies[1], 0.5f );
+        if( contactScenario )
+        {
+            check( jointKind == fluidJointKind::anchoredAssembly && drag,
+                "R3u contact scene requires the anchored assembly and two-way drag" );
+            // Capsule right extent initially x=1.1, box left extent x=1.19.
+            // A closing velocity and a small tangential component exercise a
+            // genuine Contact solve without starting with overlapping solids.
+            demo.getWorld().SetBodyTransform( bodies[2], { { 1.64f, 1.0f }, {} } );
+            demo.getWorld().SetBodyLinearVelocity( bodies[2], { -1.5f, 0.15f } );
+        }
 
         // Join two dynamic obstacles, with coincident initial world anchors.
         // Neither geometry nor fluid coupling is replaced by a special fixture.
@@ -899,6 +911,14 @@ struct worldFluidScene
         }
         vec( ".dragBodyImpulse", demo.getWindDragBodyImpulse() );
         vec( ".dragFluidImpulse", demo.getWindDragFluidImpulse() );
+        if( contactScenario )
+        {
+            using access = zonai::determinism::test::jointSubstepTraceAccess;
+            appendSnapshot( trace, key + ".persistentContact",
+                access::capturePersistentContacts( demo.getWorld() ) );
+            appendSnapshot( trace, key + ".contactLifecycle",
+                access::captureContactLifecycle( demo.getWorld() ) );
+        }
         const auto flow = demo.getWindField()->getFlowAudit( timeStep / fluidSubsteps );
         check( flow.nonFiniteFluidFaces == 0 && std::isfinite( flow.continuityRms ) &&
             std::isfinite( flow.maxFluidFaceSpeed ), "R3m nonfinite live field" );
@@ -907,12 +927,13 @@ struct worldFluidScene
 
 std::string runWorldFluidScene( const char* name, bool drag,
     fluidJointKind jointKind = fluidJointKind::none, int frameCount = 12,
-    const char* continuationName = nullptr )
+    const char* continuationName = nullptr, bool contactScenario = false )
 {
     using probe = zonai::fluidStateTraceProbe2;
     using namespace zonai::determinism::test;
-    worldFluidScene observed{ drag, jointKind }, control{ drag, jointKind };
+    worldFluidScene observed{ drag, jointKind, contactScenario }, control{ drag, jointKind, contactScenario };
     jointSubstepTraceRecorder jointTrace{};
+    jointTrace.captureContactAndIsland = contactScenario;
     if( jointKind != fluidJointKind::none )
     {
         jointTrace.bodies = observed.bodies;
@@ -924,6 +945,9 @@ std::string runWorldFluidScene( const char* name, bool drag,
         }
     }
     bool sawJointReaction = false, sawAnchorReaction = false;
+    bool sawCombinedSolve = false;
+    int firstCombinedTick = -1, firstCombinedInterval = -1;
+    int combinedIntervals = 0;
     const bool sustained = continuationName != nullptr || jointKind == fluidJointKind::anchoredAssembly;
     int activeIntervals = 0, exchangeFrames = 0;
     float minimumMargin = std::numeric_limits<float>::max();
@@ -958,7 +982,9 @@ std::string runWorldFluidScene( const char* name, bool drag,
         if( tick != 0 )
         {
             int calls = 0;
-            const bool traceJoint = jointKind != fluidJointKind::none && tick <= 2;
+            std::array<bool, worldFluidScene::fluidSubsteps> coupledIntervals{};
+            const bool traceJoint = jointKind != fluidJointKind::none &&
+                ( tick <= 2 || contactScenario );
             if( traceJoint )
             {
                 jointTrace.records.clear();
@@ -1004,6 +1030,10 @@ std::string runWorldFluidScene( const char* name, bool drag,
                         sawCoupled |= pressure.usedCoupledProjection &&
                             !pressure.coupledSolveFailed && pressure.usedIncompleteCholesky;
                         sawDisjoint |= snapshot.getCutCellTransition().usedDisjointAnalyticGeometry;
+                        if( contactScenario )
+                            coupledIntervals[static_cast<std::size_t>( interval )] =
+                                pressure.usedCoupledProjection &&
+                                pressure.coupledStatus == zonai::fluidCoupledPressureStatus2::converged;
                         if( pressure.coupledSolveFailed || !std::isfinite( pressure.pressureResidual ) )
                             throw std::runtime_error( key + ".interval." + std::to_string( interval ) +
                                 " pressure solve failure, status=" +
@@ -1048,6 +1078,7 @@ std::string runWorldFluidScene( const char* name, bool drag,
                 constexpr int recordsPerInterval = 3 + 5 * substeps;
                 check( jointTrace.records.size() == intervals * recordsPerInterval,
                     "R3n expected Joint substep stages in all four World intervals" );
+                std::array<bool, intervals> combined{};
                 for( std::size_t i = 0; i < jointTrace.records.size(); ++i )
                 {
                     const auto& record = jointTrace.records[i];
@@ -1070,6 +1101,46 @@ std::string runWorldFluidScene( const char* name, bool drag,
                         std::to_string( i / recordsPerInterval ) + ".substep." +
                         std::to_string( record.subStepIndex ) + "." + jointTraceStageName( record.stage );
                     worldFluidScene::appendSnapshot( trace, prefix, record.snapshot );
+                    if( contactScenario && record.stage == zonai::jointTraceStage2::solveBias )
+                    {
+                        // A positive Contact impulse and both joints in a
+                        // shared island, during the interval that just
+                        // received converged Fluid pressure. Check actual
+                        // captured solver fields, not broad-phase pairs.
+                        const auto& fields = record.snapshot.fields;
+                        bool positiveNormal = false, sharedIsland = false;
+                        for( const auto& f : fields )
+                        {
+                            if( f.name.starts_with( "contact[" ) &&
+                                f.name.ends_with( ".normalImpulse" ) && f.byteCount == 4 )
+                                positiveNormal |= std::bit_cast<float>(
+                                    static_cast<std::uint32_t>( f.bits ) ) > 0.0f;
+                            if( f.name.starts_with( "island[" ) &&
+                                f.name.ends_with( ".jointCount" ) && f.bits >= 2 )
+                            {
+                                const auto contactKey = f.name.substr( 0, f.name.size() - 11 ) + ".contactCount";
+                                const auto match = std::find_if( fields.begin(), fields.end(),
+                                    [&]( const auto& item ) { return item.name == contactKey; } );
+                                sharedIsland |= match != fields.end() && match->bits > 0;
+                            }
+                        }
+                        const auto interval = i / recordsPerInterval;
+                        combined[interval] |= positiveNormal && sharedIsland && coupledIntervals[interval];
+                    }
+                }
+                if( contactScenario )
+                {
+                    for( int interval = 0; interval < intervals; ++interval )
+                    {
+                        if( !combined[static_cast<std::size_t>( interval )] ) continue;
+                        ++combinedIntervals;
+                        if( !sawCombinedSolve )
+                        {
+                            firstCombinedTick = tick;
+                            firstCombinedInterval = interval;
+                        }
+                        sawCombinedSolve = true;
+                    }
                 }
                 jointTrace.records.clear();
             }
@@ -1119,6 +1190,15 @@ std::string runWorldFluidScene( const char* name, bool drag,
         check( sawJointReaction, "R3n expected a nonzero Joint reaction" );
     if( jointKind == fluidJointKind::anchoredAssembly )
         check( sawAnchorReaction, "R3t expected nonzero pivot reaction" );
+    if( contactScenario )
+    {
+        check( jointTrace.maxContacts > 0 && jointTrace.sawNormalImpulse && sawCombinedSolve,
+            "R3u expected a positive Contact impulse with both Joints in one island after coupled Fluid projection" );
+        std::printf( "%s combined solve: %d intervals, first tick %d interval %d, "
+            "max Contacts %zu, friction impulse observed %d\n",
+            name, combinedIntervals, firstCombinedTick, firstCombinedInterval,
+            jointTrace.maxContacts, static_cast<int>( jointTrace.sawTangentImpulse ) );
+    }
     if( sustained )
     {
         check( activeIntervals == frameCount * worldFluidScene::fluidSubsteps &&
@@ -1156,6 +1236,8 @@ int main( int argc, char** argv )
             "worldFluidDrag360Continuation" );
         trace += runWorldFluidScene( "worldFluidAnchoredAssembly", true,
             fluidJointKind::anchoredAssembly, 120 );
+        trace += runWorldFluidScene( "worldFluidContactAssembly", true,
+            fluidJointKind::anchoredAssembly, 60, nullptr, true );
 
         if( argc == 3 )
         {
