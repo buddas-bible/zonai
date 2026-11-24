@@ -449,7 +449,7 @@ jobs:
               "forwardRelaxedGeometryFeedback": 300,
               "forwardGeometrySensitivity": 80,
               "forwardPreciseCapsule": 19,
-              "forwardStaggered": 88016, "forwardStaggeredEndpoint": 256,
+              "forwardStaggered": 88080, "forwardStaggeredEndpoint": 256,
               "forwardStaggeredMomentum": 64,
           }
           topology = totals.get("topologyQuadrature", 0)
@@ -650,6 +650,19 @@ jobs:
                   samples = [rows[i, v, r] for r in range(7)]
                   med = [statistics.median(col) for col in zip(*samples)]
                   print(f"R4p interval={i} {label}: median quadrature={med[0]:.3f} ms linear={med[1]:.3f} ms diagnostic total={med[2]:.3f} ms")
+          staggered_pattern = re.compile(r"R4ae timing interval=(\d+) repeat=(\d+) prepare_ms=([\d.]+) setup_ms=([\d.]+) quadrature_ms=([\d.]+) linear_ms=([\d.]+) pressure_ms=([\d.]+) endpoint_ms=([\d.]+) total_ms=([\d.]+)")
+          staggered = {}
+          for line in Path("forward-cost.log").read_text().splitlines():
+              m = staggered_pattern.fullmatch(line)
+              if m:
+                  key = tuple(map(int, m.groups()[:2]))
+                  values = tuple(map(float, m.groups()[2:]))
+                  assert key not in staggered and all(math.isfinite(v) and v >= 0 for v in values)
+                  staggered[key] = values
+          assert set(staggered) == {(i, r) for i in range(43, 59) for r in range(3)}
+          for i in range(43, 59):
+              med = [statistics.median(col) for col in zip(*(staggered[i, r] for r in range(3)))]
+              print(f"R4ae interval={i}: median prepare={med[0]:.3f} ms setup={med[1]:.3f} ms quadrature={med[2]:.3f} ms linear={med[3]:.3f} ms pressure={med[4]:.3f} ms endpoint={med[5]:.3f} ms diagnostic total={med[6]:.3f} ms")
           PY
       - name: Upload timing evidence
         if: always()
