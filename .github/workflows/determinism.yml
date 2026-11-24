@@ -413,6 +413,7 @@ jobs:
               "worldFluidDrag180": 1272627,
               "worldFluidDrag360Continuation": 1934160,
               "worldFluidAnchoredAssembly": 902840,
+              "fluidStabilityAudit": 206880,
           }
           assembly = "worldFluidContactAssembly"
           if (set(totals) != set(expected) | {assembly} or
