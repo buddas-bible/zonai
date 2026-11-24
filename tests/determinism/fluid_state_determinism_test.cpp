@@ -2435,11 +2435,13 @@ struct fluidStateTraceProbe2
     // flux; do not substitute the previous interval's volume difference.
     static void captureInstantaneousEndpoint( const fluidField2& field,
         const continuationPressure& candidate, std::string& trace, int index,
-        std::vector<float>* committedU = nullptr, std::vector<float>* committedV = nullptr )
+        std::vector<float>* committedU = nullptr, std::vector<float>* committedV = nullptr,
+        bool staggered = false )
     {
         if( ( committedU == nullptr ) != ( committedV == nullptr ) )
             throw std::runtime_error( "R4v incomplete endpoint output" );
-        const std::string key = std::string( committedU ? "forwardPersistentEndpoint.interval" :
+        const std::string key = std::string( staggered ? "forwardStaggeredEndpoint.interval" :
+            committedU ? "forwardPersistentEndpoint.interval" :
             "forwardInstantaneousEndpoint.interval" ) + std::to_string( index );
         const std::size_t n = field.cellFluidFraction_.size();
         const double h = field.cellSize_;
@@ -2550,6 +2552,7 @@ struct fluidStateTraceProbe2
         }
         for( bool preserveFlux : { false, true } )
         {
+            if( staggered && preserveFlux ) break;
             const auto& before = preserveFlux ? matched : copied;
             const std::string prefix = preserveFlux ? ".flux" : ".copy";
             std::vector<double> rhs( n ), p( n ), r( n ), z( n ), d( n ), ap( n );
@@ -2644,7 +2647,8 @@ struct fluidStateTraceProbe2
             out( prefix + ".iterations", iterations ); out( prefix + ".trueResidualSquared", trueSquared );
             if( committedU && !preserveFlux )
             {
-                const std::string budgetKey = "forwardPersistentMomentum.interval" + std::to_string( index );
+                const std::string budgetKey = std::string( staggered ? "forwardStaggeredMomentum.interval" :
+                    "forwardPersistentMomentum.interval" ) + std::to_string( index );
                 const auto emit = [&]( const char* suffix, double value )
                 {
                     if( !std::isfinite( value ) )
@@ -2840,7 +2844,7 @@ struct fluidStateTraceProbe2
         bool adaptiveEndpoint = false, forwardTiming* timing = nullptr,
         double relativeSquaredTolerance = 1.0e-16, bool warmStart = false,
         std::vector<float>* forwardPressureHistory = nullptr, bool auditEndpoint = false,
-        forwardEndpointState* committed = nullptr )
+        forwardEndpointState* committed = nullptr, bool staggered = false )
     {
         const auto totalStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
         using namespace sandbox;
@@ -2915,7 +2919,9 @@ struct fluidStateTraceProbe2
             return result;
         };
 
-        const auto predicted = run( std::vector<fluidObstacleForce2>( start.size() ) );
+        if( staggered && ( !committed || !input.preciseDisjointCapsuleEnabled_ ) )
+            throw std::runtime_error( "R4ad invalid staggered fixture" );
+        const auto predicted = run( staggered ? laggedLoad : std::vector<fluidObstacleForce2>( start.size() ) );
         fluidField2 forward = input;
         forward.setPrePressureSnapshotObserver( {} );
         setStageObserver( forward, {} );
@@ -2941,6 +2947,87 @@ struct fluidStateTraceProbe2
         forward.v_ = input.v_;
         continuationPressure candidate;
         std::string scratch;
+        if( staggered )
+        {
+            // R4ad: one explicit body step using the previously computed
+            // pressure, followed by a fixed-geometry interval solve. The
+            // newly computed load is applied only in the next interval.
+            const std::string splitKey = "forwardStaggered.interval" + std::to_string( index );
+            captureSpaceTimeProjection( forward, laggedField, laggedLoad, scratch,
+                splitKey + ".projection", 16, splitKey + ".volume", false,
+                16, splitKey + ".topology", 0.0, &candidate, 0, true,
+                nullptr, 1.0e-16, false, {}, true, true );
+            double gap = 0.0, negative = 0.0, unsupported = 0.0;
+            int negativeCells = 0, unsupportedCells = 0;
+            for( std::size_t i = 0; i < startFraction.size(); ++i )
+            {
+                const double volume = candidate.fluxVolume[i];
+                const double error = std::abs( area * predictedFraction[i] - volume );
+                gap += error;
+                if( volume < 0.0 ) { negative -= volume; ++negativeCells; }
+                if( candidate.component[i] < 0 )
+                {
+                    unsupported += error;
+                    unsupportedCells += error != 0.0;
+                }
+            }
+            if( unsupportedCells != 0 )
+                throw std::runtime_error( splitKey + " unsupported volume" );
+            std::vector<float> endpointU, endpointV;
+            captureInstantaneousEndpoint( forward, candidate, trace, index, &endpointU, &endpointV, true );
+            forward.u_ = std::move( endpointU ); forward.v_ = std::move( endpointV );
+            forward.pressure_ = candidate.pressure;
+            forward.applyCutCellBoundaries();
+            forward.previousObstacles_ = predicted;
+            forward.frozenPressureObstacles_ = predicted;
+            forward.previousCellFluidFraction_ = forward.cellFluidFraction_;
+            const auto emit = [&]( const std::string& suffix, auto value )
+            {
+                if( !std::isfinite( static_cast<double>( value ) ) )
+                    throw std::runtime_error( splitKey + suffix + " nonfinite staggered state" );
+                appendScalar( trace, splitKey + suffix, value );
+            };
+            emit( ".actualGap", gap ); emit( ".negativeVolume", negative );
+            emit( ".negativeCells", negativeCells ); emit( ".unsupportedVolume", unsupported );
+            emit( ".unsupportedCells", unsupportedCells );
+            emit( ".peak", candidate.intervalPeak ); emit( ".iterations", candidate.initialIterations );
+            emit( ".trueResidualSquared", candidate.trueResidualSquared );
+            double maxForceDelta = 0.0, maxTorqueDelta = 0.0;
+            for( std::size_t j = 0; j < predicted.size(); ++j )
+            {
+                const auto k = ".body[" + std::to_string( j ) + "]";
+                emit( k + ".position.x", predicted[j].transform.position.x );
+                emit( k + ".position.y", predicted[j].transform.position.y );
+                emit( k + ".rotation.c", predicted[j].transform.rotation.c );
+                emit( k + ".rotation.s", predicted[j].transform.rotation.s );
+                emit( k + ".velocity.x", predicted[j].linearVelocity.x );
+                emit( k + ".velocity.y", predicted[j].linearVelocity.y );
+                emit( k + ".omega", predicted[j].angularVelocity );
+                emit( k + ".appliedForce.x", laggedLoad[j].force.x );
+                emit( k + ".appliedForce.y", laggedLoad[j].force.y );
+                emit( k + ".appliedTorque", laggedLoad[j].torque );
+                emit( k + ".nextForce.x", candidate.feedback[j].force.x );
+                emit( k + ".nextForce.y", candidate.feedback[j].force.y );
+                emit( k + ".nextTorque", candidate.feedback[j].torque );
+                maxForceDelta = std::max( maxForceDelta, std::max(
+                    std::abs( static_cast<double>( candidate.feedback[j].force.x ) - laggedLoad[j].force.x ),
+                    std::abs( static_cast<double>( candidate.feedback[j].force.y ) - laggedLoad[j].force.y ) ) );
+                maxTorqueDelta = std::max( maxTorqueDelta, std::abs(
+                    static_cast<double>( candidate.feedback[j].torque ) - laggedLoad[j].torque ) );
+            }
+            emit( ".maxForceDelta", maxForceDelta ); emit( ".maxTorqueDelta", maxTorqueDelta );
+            appendVector( trace, splitKey + ".endpointU", forward.u_ );
+            appendVector( trace, splitKey + ".endpointV", forward.v_ );
+            appendVector( trace, splitKey + ".endpointPressure", forward.pressure_ );
+            appendVector( trace, splitKey + ".endpointFraction", forward.cellFluidFraction_ );
+            std::printf( "%s gap %.9g negative %.9g (%d cells) peak %.9g PCG %d "
+                "next force delta %.9g torque delta %.9g\n", splitKey.c_str(), gap, negative,
+                negativeCells, candidate.intervalPeak, candidate.initialIterations, maxForceDelta, maxTorqueDelta );
+            committed->field = std::move( forward );
+            committed->poses = predicted;
+            committed->feedback = std::move( candidate.feedback );
+            return;
+        }
         // Use the lagged load only as the reference for diagnostic deltas.
         // Neither the lagged nor the candidate load is applied twice.
         captureSpaceTimeProjection( forward, laggedField, laggedLoad, scratch,
@@ -3747,7 +3834,7 @@ struct fluidStateTraceProbe2
     // forward, rather than sampling a separate lagged trajectory each time.
     static void captureForwardContinuation( const fluidField2& initial,
         const fluidField2& initialProjection, std::span<const fluidObstacleForce2> initialLoad,
-        std::string& trace )
+        std::string& trace, bool staggered = false )
     {
         constexpr int first = 43, intervals = 16;
         const float dt = initial.frozenPressureTimeStep_;
@@ -3759,6 +3846,14 @@ struct fluidStateTraceProbe2
         state.field.setPrePressureSnapshotObserver( {} );
         setStageObserver( state.field, {} );
         state.field.tracerEnabled_ = false;
+        if( staggered )
+        {
+            state.field.preciseDisjointCapsuleEnabled_ = true;
+            state.field.updateObstacles( state.poses );
+            state.field.updateCutCellGeometry( state.poses );
+            if( !state.field.cutCellTransition_.usedDisjointAnalyticGeometry )
+                throw std::runtime_error( "R4ad initial precise geometry not analytic" );
+        }
         float windTime = 0.0f;
         for( int i = 0; i <= first; ++i ) windTime += dt;
         for( int step = 0; step < intervals; ++step )
@@ -3806,7 +3901,7 @@ struct fluidStateTraceProbe2
             const auto poses = state.poses;
             const auto load = state.feedback;
             captureForwardPredictor( pre, seed, poses, load, trace, first + step,
-                0.75, 0, 16, true, nullptr, 1.0e-10, true, nullptr, true, &state );
+                0.75, 0, 16, true, nullptr, 1.0e-10, true, nullptr, true, &state, staggered );
         }
     }
 
@@ -5158,6 +5253,7 @@ std::string runNearClosedFaceScene()
     cadenceReplay( *frozen, baseline, *a, "cadence43", true, 0 );
     probe::captureLaggedContinuation( *frozen, baseline, trace );
     probe::captureForwardContinuation( *frozen, baseline, *a, trace );
+    probe::captureForwardContinuation( *frozen, baseline, *a, trace, true );
     // Adjacent actual intervals exercise the transition before/after the spike.
     // They are separate frozen solves, not a candidate-driven trajectory.
     for( std::size_t i = 0; i < adjacent.size(); ++i )
