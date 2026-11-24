@@ -416,12 +416,13 @@ jobs:
               "fluidStabilityAudit": 206880,
               "worldFluidContactAssembly": 870485,
               "nearClosedFace": 23910,
+              "sliverFluxAudit": 162,
           }
           source = "volumeSourceAudit"
           if (set(totals) != set(expected) | {source} or
               any(totals.get(scene) != n for scene, n in expected.items()) or
               totals.get(source, 0) <= 0):
-              sys.exit("Fluid trace coverage changed or volume source audit missing")
+              sys.exit("Fluid trace coverage changed or sliver/source audit missing")
 
           print("identical tested Fluid MAC, geometry/history and pressure feedback fields")
           PY
