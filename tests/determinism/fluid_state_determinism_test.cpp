@@ -743,6 +743,151 @@ struct fluidStateTraceProbe2
         }
     }
 
+    // R4d: independent representations. Closed endpoint faces have no
+    // endpoint *fluid* velocity, but can carry a historical interval transfer.
+    // This is not a complete MAC state (solid velocities are separate).
+    struct intervalTransport
+    {
+        std::vector<double> uTransfer, vTransfer;
+        std::vector<double> uEndpointFluid, vEndpointFluid;
+    };
+
+    static void captureIntervalTransport( const fluidField2& before, const intervalTransport& state,
+        const std::vector<double>& source, const std::vector<double>& expectedResidual,
+        std::string& trace, const std::string& key )
+    {
+        const std::size_t n = before.cellFluidFraction_.size();
+        const double area = static_cast<double>( before.cellSize_ ) * before.cellSize_;
+        struct transferEdge { int donor, recipient; double volume; bool closedEnd; };
+        std::vector<transferEdge> edges;
+        std::vector<double> residual = source, outgoing( n ), capacity( n );
+        double closedTransfer = 0.0, peakEndpoint = 0.0, transferL1 = 0.0;
+        int closedFaces = 0;
+        const auto face = [&]( bool isU, int x, int y )
+        {
+            const int index = isU ? before.uIndex( x, y ) : before.vIndex( x, y );
+            const double transfer = isU ? state.uTransfer[index] : state.vTransfer[index];
+            const double endpoint = isU ? state.uEndpointFluid[index] : state.vEndpointFluid[index];
+            const bool closed = ( isU ? before.cutCellUOpen( x, y ) : before.cutCellVOpen( x, y ) ) == 0.0f;
+            if( !std::isfinite( transfer ) || !std::isfinite( endpoint ) || ( closed && endpoint != 0.0 ) )
+                throw std::runtime_error( key + " invalid separated face state" );
+            peakEndpoint = std::max( peakEndpoint, std::abs( endpoint ) );
+            if( transfer == 0.0 ) return;
+            const int a = before.cellIndex( x - ( isU ? 1 : 0 ), y - ( isU ? 0 : 1 ) );
+            const int b = before.cellIndex( x, y );
+            residual[a] += transfer; residual[b] -= transfer;
+            const int donor = transfer > 0.0 ? a : b;
+            const int recipient = transfer > 0.0 ? b : a;
+            const double amount = std::abs( transfer );
+            outgoing[donor] += amount;
+            transferL1 += amount;
+            edges.push_back( { donor, recipient, amount, closed } );
+            if( closed ) { ++closedFaces; closedTransfer += amount; }
+        };
+        for( int y = 0; y < before.height_; ++y )
+            for( int x = 1; x < before.width_; ++x ) face( true, x, y );
+        for( int y = 1; y < before.height_; ++y )
+            for( int x = 0; x < before.width_; ++x ) face( false, x, y );
+        double identityError = 0.0, residualL1 = 0.0, unservedVolume = 0.0;
+        int limitedDonors = 0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            capacity[i] = area * before.previousCellFluidFraction_[i];
+            identityError = std::max( identityError, std::abs( residual[i] - expectedResidual[i] ) );
+            residualL1 += std::abs( residual[i] );
+            if( outgoing[i] > capacity[i] )
+            {
+                ++limitedDonors;
+                unservedVolume += outgoing[i] - capacity[i];
+            }
+        }
+        if( identityError != 0.0 )
+            throw std::runtime_error( key + " stored transfer did not reproduce integrated volume ledger" );
+        const auto out = [&]( const std::string& name, auto value )
+        {
+            if( !std::isfinite( static_cast<double>( value ) ) )
+                throw std::runtime_error( key + name + " nonfinite transport output" );
+            appendScalar( trace, key + name, value );
+        };
+        out( ".closedFaces", closedFaces ); out( ".closedTransferL1", closedTransfer );
+        out( ".peakEndpointFluid", peakEndpoint ); out( ".transferL1", transferL1 );
+        out( ".identityError", identityError ); out( ".residualL1", residualL1 );
+        out( ".limitedDonors", limitedDonors ); out( ".unservedDonorVolume", unservedVolume );
+        appendVector( trace, key + ".uTransfer", state.uTransfer );
+        appendVector( trace, key + ".vTransfer", state.vTransfer );
+        appendVector( trace, key + ".uEndpointFluid", state.uEndpointFluid );
+        appendVector( trace, key + ".vEndpointFluid", state.vEndpointFluid );
+
+        // One simultaneous donor-limited scalar transport experiment. Each
+        // signed interval transfer is consumed once, even if its face closed.
+        // No swept tracer remap (would count displacement twice). No source
+        // deletion or forced evacuation. Limit tracer, never the fluid ledger.
+        for( bool uniform : { true, false } )
+        {
+            const auto& initial = uniform ? capacity : before.tracerMass_;
+            if( initial.size() != n ) throw std::runtime_error( key + " tracer storage mismatch" );
+            std::vector<double> remaining = initial, received( n );
+            double beforeMass = 0.0, afterMass = 0.0, trappedBefore = 0.0, trappedAfter = 0.0;
+            double closedMass = 0.0, movedMass = 0.0, endpointError = 0.0;
+            double closingMassBefore = 0.0, closingMassAfter = 0.0;
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                if( !std::isfinite( initial[i] ) || initial[i] < 0.0 )
+                    throw std::runtime_error( key + " invalid initial tracer mass" );
+                beforeMass += initial[i];
+                if( capacity[i] == 0.0 ) trappedBefore += initial[i];
+                if( capacity[i] > 0.0 && before.cellFluidFraction_[i] == 0.0f )
+                    closingMassBefore += initial[i];
+            }
+            for( const auto& e : edges )
+            {
+                if( capacity[e.donor] <= 0.0 ) continue;
+                // Scale all simultaneous outgoing requests by the same
+                // donor capacity; remaining cap is only a roundoff guard.
+                const double requested = initial[e.donor] *
+                    ( e.volume / std::max( capacity[e.donor], outgoing[e.donor] ) );
+                const double mass = std::min( remaining[e.donor], requested );
+                remaining[e.donor] -= mass;
+                received[e.recipient] += mass;
+                movedMass += mass;
+                if( e.closedEnd ) closedMass += mass;
+            }
+            std::vector<double> result( n );
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                result[i] = remaining[i] + received[i];
+                if( !std::isfinite( result[i] ) || result[i] < 0.0 )
+                    throw std::runtime_error( key + " invalid transported mass" );
+                afterMass += result[i];
+                if( before.cellFluidFraction_[i] == 0.0f )
+                {
+                    trappedAfter += result[i];
+                    if( capacity[i] > 0.0 ) closingMassAfter += result[i];
+                }
+                if( uniform )
+                    endpointError += std::abs( result[i] - area * before.cellFluidFraction_[i] );
+            }
+            const double massError = afterMass - beforeMass;
+            if( std::abs( massError ) > 1.0e-12 * std::max( 1.0, beforeMass ) )
+                throw std::runtime_error( key + " interval tracer mass conservation failed" );
+            const std::string prefix = uniform ? ".uniform" : ".seeded";
+            out( prefix + ".beforeMass", beforeMass ); out( prefix + ".afterMass", afterMass );
+            out( prefix + ".massError", massError ); out( prefix + ".movedMass", movedMass );
+            out( prefix + ".closedFaceMass", closedMass );
+            out( prefix + ".trappedBefore", trappedBefore ); out( prefix + ".trappedAfter", trappedAfter );
+            out( prefix + ".closingMassBefore", closingMassBefore ); out( prefix + ".closingMassAfter", closingMassAfter );
+            out( prefix + ".uniformEndpointError", endpointError );
+            appendVector( trace, key + prefix + ".mass", result );
+            std::printf( "%s%s mass before %.9g after %.9g error %.9g trapped %.9g closed face mass %.9g "
+                "closing mass remaining %.9g uniform endpoint error %.9g\n",
+                key.c_str(), prefix.c_str(), beforeMass, afterMass, massError, trappedAfter,
+                closedMass, closingMassAfter, endpointError );
+        }
+        std::printf( "%s closed faces %d retained transfer %.9g m^2 endpoint fluid peak %.9g m/s "
+            "limited donors %d unserved donor volume %.9g m^2 ledger identity %.9g\n",
+            key.c_str(), closedFaces, closedTransfer, peakEndpoint, limitedDonors, unservedVolume, identityError );
+    }
+
     // R4a: independent, test-only interval-average pressure model. Reuse the
     // production analytic geometry and boundary assembly at quadrature poses.
     // Do not write averaged apertures into the live endpoint field.
@@ -1153,6 +1298,10 @@ struct fluidStateTraceProbe2
             fluxHandoff[i] = correctedVolume[i];
         }
 
+        const auto correctedSource = correctedVolume;
+        intervalTransport transport{
+            std::vector<double>( before.u_.size() ), std::vector<double>( before.v_.size() ),
+            std::vector<double>( before.u_.size() ), std::vector<double>( before.v_.size() ) };
         double lostClosedTransfer = 0.0, velocityTransferError = 0.0, fluxTransferError = 0.0;
         double fluxHandoffPeak = 0.0, velocityHandoffPeak = 0.0;
         double targetFluxVelocity = 0.0, targetEndOpening = 0.0;
@@ -1166,12 +1315,15 @@ struct fluidStateTraceProbe2
         {
             const double velocity = e.velocity + dt / h * ( p[e.first] - p[e.second] );
             const double transfer = dt * h * e.a * velocity;
+            ( e.isU ? transport.uTransfer : transport.vTransfer )[e.index] = transfer;
             intervalTransferL1 += std::abs( transfer );
             addTransfer( volume, e, transfer );
             addTransfer( correctedVolume, e, transfer );
             const int stride = before.width_ + ( e.isU ? 1 : 0 );
             const int x = e.index % stride, y = e.index / stride;
             const double endOpen = e.isU ? before.cutCellUOpen( x, y ) : before.cutCellVOpen( x, y );
+            ( e.isU ? transport.uEndpointFluid : transport.vEndpointFluid )[e.index] =
+                endOpen > 0.0 ? velocity : 0.0;
             const double velocityTransfer = dt * h * endOpen * velocity;
             double fluxTransfer = 0.0;
             if( endOpen > 0.0 )
@@ -1248,6 +1400,8 @@ struct fluidStateTraceProbe2
             handoffKey.c_str(), sourceVolume, compatibilityVolume, rawL1, correctedL1,
             identityError, closingCells, openingCells, lostClosedTransfer,
             velocityL1, fluxL1, fluxHandoffPeak, targetFluxVelocity );
+        captureIntervalTransport( before, transport, correctedSource, correctedVolume, trace,
+            "intervalTransport." + handoffKey );
     }
 
     static void captureProjection( const fluidField2& field, std::string& trace, const std::string& key )
