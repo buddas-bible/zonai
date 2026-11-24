@@ -1400,6 +1400,17 @@ struct fluidStateTraceProbe2
         }
     }
 
+    // R4j: hand off accepted pressure/velocity/feedback together. The
+    // historical interval transfer is not used as an endpoint flux.
+    struct continuationPressure
+    {
+        std::vector<float> u, v, pressure;
+        std::vector<fluidObstacleForce2> feedback;
+        double initialGap = 0.0, finalGap = 0.0, negativeVolume = 0.0, intervalPeak = 0.0;
+        int uncoveredEndpointFaces = 0;
+        bool stalled = false;
+    };
+
     // R4a: independent, test-only interval-average pressure model. Reuse the
     // production analytic geometry and boundary assembly at quadrature poses.
     // Do not write averaged apertures into the live endpoint field.
@@ -1407,7 +1418,8 @@ struct fluidStateTraceProbe2
         std::span<const fluidObstacleForce2> baselineFeedback, std::string& trace,
         const std::string& key, int samples, const std::string& handoffKey,
         bool requireTarget = true, int endpointDepth = 0,
-        const std::string& topologyKey = {}, double responseScale = 1.0 )
+        const std::string& topologyKey = {}, double responseScale = 1.0,
+        continuationPressure* continuation = nullptr )
     {
         if( responseScale != 1.0 && responseScale != 0.75 )
             throw std::runtime_error( key + " unsupported free-body cadence response" );
@@ -1469,7 +1481,7 @@ struct fluidStateTraceProbe2
             for( std::size_t i = 0; i < n; ++i )
                 if( !supported[i] && before.cellFluidFraction_[i] != before.previousCellFluidFraction_[i] )
                     missed.push_back( static_cast<int>( i ) );
-            if( missed.empty() )
+            if( missed.empty() && !continuation )
                 throw std::runtime_error( key + " historical midpoint coverage failure not reproduced" );
         }
         const auto integrate = [&]( float alpha, double weight, double lo )
@@ -1940,12 +1952,15 @@ struct fluidStateTraceProbe2
             handoffKey.c_str(), sourceVolume, compatibilityVolume, rawL1, correctedL1,
             identityError, closingCells, openingCells, lostClosedTransfer,
             velocityL1, fluxL1, fluxHandoffPeak, targetFluxVelocity );
-        captureIntervalTransport( before, transport, correctedSource, correctedVolume, trace,
-            "intervalTransport." + handoffKey );
-        captureChronologicalTransport( before, transport, intervalUVelocity, intervalVVelocity,
-            transportPanels, weightSum, trace, "chronologicalTracer." + handoffKey );
-        captureGeometricConservation( before, transport, force, bodyVolumeAudit, removedVolumeAudit,
-            correctedVolume, trace, "geometricConservation." + handoffKey, responseScale );
+        if( !continuation )
+        {
+            captureIntervalTransport( before, transport, correctedSource, correctedVolume, trace,
+                "intervalTransport." + handoffKey );
+            captureChronologicalTransport( before, transport, intervalUVelocity, intervalVVelocity,
+                transportPanels, weightSum, trace, "chronologicalTracer." + handoffKey );
+            captureGeometricConservation( before, transport, force, bodyVolumeAudit, removedVolumeAudit,
+                correctedVolume, trace, "geometricConservation." + handoffKey, responseScale );
+        }
         // R4g: defect correction on the fixed interval graph. The exact
         // binary32 endpoint rebuild replaces only the linearized volume
         // response in the residual, not the averaged L/B operator.
@@ -2146,9 +2161,222 @@ struct fluidStateTraceProbe2
         // evaluateDefect/PCG may leave force scratch from a rejected trial.
         // Recompute the accepted pressure's feedback before World replay.
         transpose( correctedPressure );
-        captureWorldPressureResponse( before, baselineFeedback, force, trace,
-            "worldPressureResponse." + handoffKey );
+        if( !continuation )
+            captureWorldPressureResponse( before, baselineFeedback, force, trace,
+                "worldPressureResponse." + handoffKey );
+        else
+        {
+            continuation->u = before.u_;
+            continuation->v = before.v_;
+            continuation->pressure.resize( n );
+            for( std::size_t i = 0; i < n; ++i )
+                continuation->pressure[i] = static_cast<float>( correctedPressure[i] );
+            continuation->feedback.resize( owners );
+            for( std::size_t i = 0; i < owners; ++i )
+            {
+                continuation->feedback[i].force = { static_cast<float>( force[i].fx ), static_cast<float>( force[i].fy ) };
+                continuation->feedback[i].torque = static_cast<float>( force[i].torque );
+            }
+            for( const auto& e : edges )
+            {
+                const double velocity = e.velocity + dt / h *
+                    ( correctedPressure[e.first] - correctedPressure[e.second] );
+                const int stride = before.width_ + ( e.isU ? 1 : 0 );
+                const int x = e.index % stride, y = e.index / stride;
+                if( ( e.isU ? before.cutCellUOpen( x, y ) : before.cutCellVOpen( x, y ) ) > 0.0f )
+                    ( e.isU ? continuation->u : continuation->v )[e.index] = static_cast<float>( velocity );
+            }
+            // If an endpoint-open face has no interval support, retain
+            // its pre-pressure value and disclose this explicit fallback.
+            for( int y = 0; y < before.height_; ++y )
+                for( int x = 1; x < before.width_; ++x )
+                    continuation->uncoveredEndpointFaces += before.cutCellUOpen( x, y ) > 0.0f &&
+                        meanU[before.uIndex( x, y )] <= 0.0;
+            for( int y = 1; y < before.height_; ++y )
+                for( int x = 0; x < before.width_; ++x )
+                    continuation->uncoveredEndpointFaces += before.cutCellVOpen( x, y ) > 0.0f &&
+                        meanV[before.vIndex( x, y )] <= 0.0;
+            continuation->initialGap = initialGap;
+            continuation->finalGap = current.rawL1;
+            continuation->negativeVolume = current.negativeFlux;
+            continuation->intervalPeak = current.peak;
+            continuation->stalled = stalled;
+        }
 
+    }
+
+    // R4j: actual persistent free-body World + MAC continuation. This
+    // deliberately exercises the *lagged* production scheduling, not a
+    // forward space-time predictor/corrector. Tracer is excluded.
+    static void captureLaggedContinuation( const fluidField2& initial, std::string& trace )
+    {
+        using namespace sandbox;
+        constexpr int intervals = 4, worldSubsteps = 2, initialIndex = 43;
+        const float dt = initial.frozenPressureTimeStep_;
+        const auto& obstacles = initial.frozenPressureObstacles_;
+        if( obstacles.size() != 3 || dt <= 0.0f )
+            throw std::runtime_error( "R4j missing continuation input" );
+        for( int model : { 0, 1, 2 } )
+        {
+            const std::string name = model == 0 ? "production" : model == 1 ? "fullResponse" : "cadenceResponse";
+            rigidBodyDemo scene{ demoKind::windFlow };
+            auto& world = scene.getWorld();
+            if( scene.getShapes().size() != obstacles.size() )
+                throw std::runtime_error( "R4j fixture shape count changed" );
+            for( std::size_t j = 0; j < obstacles.size(); ++j )
+            {
+                const auto id = scene.getShapes()[j].bodyHandle;
+                if( 1.0f / world.GetBodyMass( id ) != obstacles[j].inverseMass ||
+                    1.0f / world.GetBodyRotationalInertia( id ) != obstacles[j].inverseInertia )
+                    throw std::runtime_error( "R4j fixture mass differs" );
+                world.SetBodyTransform( id, obstacles[j].transform );
+                world.SetBodyLinearVelocity( id, obstacles[j].linearVelocity );
+                world.SetBodyAngularVelocity( id, obstacles[j].angularVelocity );
+                const vec2 center = TransformPoint( world.GetBodyTransform( id ), world.GetBodyLocalCenter( id ) );
+                if( center.x != obstacles[j].center.x || center.y != obstacles[j].center.y )
+                    throw std::runtime_error( "R4j fixture COM differs" );
+            }
+            const auto snapshot = [&]()
+            {
+                std::vector<fluidShapeObstacle2> poses = obstacles;
+                for( std::size_t j = 0; j < poses.size(); ++j )
+                {
+                    const auto id = scene.getShapes()[j].bodyHandle;
+                    poses[j].transform = world.GetBodyTransform( id );
+                    poses[j].center = TransformPoint( poses[j].transform, world.GetBodyLocalCenter( id ) );
+                    poses[j].linearVelocity = world.GetBodyLinearVelocity( id );
+                    poses[j].angularVelocity = world.GetBodyAngularVelocity( id );
+                }
+                return poses;
+            };
+            fluidField2 field = initial;
+            field.setPrePressureSnapshotObserver( {} );
+            setStageObserver( field, {} );
+            field.tracerEnabled_ = false;
+            field.setCoupledPressureWarmStartEnabled( false );
+            field.setCoupledPressureWarmStartProbeEnabled( false );
+            float windTime = 0.0f;
+            for( int i = 0; i <= initialIndex; ++i ) windTime += dt;
+            double maxPeak = 0.0, maxContinuity = 0.0, maxNegative = 0.0;
+            for( int step = 0; step < intervals; ++step )
+            {
+                const std::string key = "laggedContinuation." + name + ".interval" +
+                    std::to_string( initialIndex + step );
+                std::optional<fluidField2> pre;
+                std::vector<fluidObstacleForce2> feedback( obstacles.size() );
+                const auto poses = snapshot();
+                if( step == 0 )
+                {
+                    pre.emplace( initial );
+                    const auto replay = field.replayFrozenCutCellPressure();
+                    if( !replay || replay->size() != feedback.size() )
+                        throw std::runtime_error( key + " missing initial pressure replay" );
+                    feedback = *replay;
+                    field.previousObstacles_ = poses;
+                }
+                else
+                {
+                    // Same source schedule as the historical Sandbox; this
+                    // initial snapshot already includes source increment 44.
+                    windTime += dt;
+                    const float sourceX = field.getOrigin().x +
+                        std::min( 2.5f, 0.25f * field.getWidth() * field.getCellSize() );
+                    field.addVelocity( { sourceX, 0.0f }, { 8.0f * dt,
+                        0.5f * 8.0f * dt * rot2::FromRadians( 1.7f * windTime ).s }, 1.7f );
+                    field.setPrePressureSnapshotObserver( [&]( const fluidField2& input ) { pre.emplace( input ); } );
+                    field.step( dt, poses, feedback, 200 );
+                    field.setPrePressureSnapshotObserver( {} );
+                }
+                if( !pre || !pre->volumeSourceValid_ )
+                    throw std::runtime_error( key + " missing pre-pressure history" );
+                pre->setPrePressureSnapshotObserver( {} );
+                setStageObserver( *pre, {} );
+                const auto productionStatus = field.getCutCellPressure().coupledStatus;
+                const bool productionFailed = field.getCutCellPressure().coupledSolveFailed;
+                const auto productionFlow = field.getFlowAudit( dt );
+                continuationPressure candidate;
+                if( model != 0 )
+                {
+                    std::string scratch;
+                    captureSpaceTimeProjection( *pre, field, feedback, scratch, key + ".projection",
+                        step == 0 ? 32 : 64, key + ".volume", step == 0, step == 0 ? 0 : 16,
+                        key + ".topology", model == 1 ? 1.0 : 0.75, &candidate );
+                    field.u_ = candidate.u; field.v_ = candidate.v; field.pressure_ = candidate.pressure;
+                    feedback = candidate.feedback;
+                    // The discarded production projection changed solid
+                    // boundary speed. Restore pre-projection values before
+                    // syncing with the accepted candidate load, exactly once.
+                    field.uSolidVelocity_ = pre->uSolidVelocity_;
+                    field.vSolidVelocity_ = pre->vSolidVelocity_;
+                    field.cutCellPressure_ = {};
+                    field.synchronizeCutCellBoundaries( dt, poses, feedback );
+                }
+                // The historical frozen replay does not finalize obstacle
+                // history. Every next step consumes the actual current pose.
+                field.previousObstacles_ = poses;
+                const auto flow = field.getFlowAudit( dt );
+                if( flow.nonFiniteFluidFaces != 0 || !std::isfinite( flow.continuityRms ) )
+                    throw std::runtime_error( key + " nonfinite committed field" );
+                const auto out = [&]( const std::string& suffix, auto value )
+                {
+                    if( !std::isfinite( static_cast<double>( value ) ) )
+                        throw std::runtime_error( key + suffix + " nonfinite continuation" );
+                    appendScalar( trace, key + suffix, value );
+                };
+                out( ".productionStatus", static_cast<int>( productionStatus ) );
+                out( ".productionFailed", static_cast<int>( productionFailed ) );
+                out( ".productionPeak", productionFlow.maxFluidFaceSpeed );
+                out( ".endpointPeak", flow.maxFluidFaceSpeed );
+                out( ".endpointContinuity", flow.continuityRms );
+                out( ".peakOpening", flow.maxFaceOpenFraction );
+                out( ".initialDefect", candidate.initialGap );
+                out( ".finalDefect", candidate.finalGap );
+                out( ".negativeVolume", candidate.negativeVolume );
+                out( ".intervalPeak", candidate.intervalPeak );
+                out( ".uncoveredEndpointFaces", candidate.uncoveredEndpointFaces );
+                out( ".stalled", static_cast<int>( candidate.stalled ) );
+                out( ".windTime", windTime );
+                appendVector( trace, key + ".u", field.u_ );
+                appendVector( trace, key + ".v", field.v_ );
+                appendVector( trace, key + ".pressure", field.pressure_ );
+                appendVector( trace, key + ".fraction", field.cellFluidFraction_ );
+                for( std::size_t j = 0; j < poses.size(); ++j )
+                {
+                    const auto id = scene.getShapes()[j].bodyHandle;
+                    const auto& load = feedback[j];
+                    world.ApplyForceToCenter( id, load.force );
+                    world.ApplyTorque( id, load.torque );
+                }
+                world.Step( dt, worldSubsteps );
+                const auto next = snapshot();
+                for( std::size_t j = 0; j < next.size(); ++j )
+                {
+                    const auto id = scene.getShapes()[j].bodyHandle;
+                    if( world.GetBody( id ).contactCount != 0 || world.GetBody( id ).jointCount != 0 )
+                        throw std::runtime_error( key + " unexpected constraint in free-body trajectory" );
+                    const auto k = ".body[" + std::to_string( j ) + "]";
+                    out( k + ".force.x", feedback[j].force.x ); out( k + ".force.y", feedback[j].force.y );
+                    out( k + ".torque", feedback[j].torque );
+                    out( k + ".next.position.x", next[j].transform.position.x );
+                    out( k + ".next.position.y", next[j].transform.position.y );
+                    out( k + ".next.rotation.c", next[j].transform.rotation.c );
+                    out( k + ".next.rotation.s", next[j].transform.rotation.s );
+                    out( k + ".next.velocity.x", next[j].linearVelocity.x );
+                    out( k + ".next.velocity.y", next[j].linearVelocity.y );
+                    out( k + ".next.omega", next[j].angularVelocity );
+                }
+                maxPeak = std::max( maxPeak, static_cast<double>( flow.maxFluidFaceSpeed ) );
+                maxContinuity = std::max( maxContinuity, static_cast<double>( flow.continuityRms ) );
+                maxNegative = std::max( maxNegative, candidate.negativeVolume );
+                std::printf( "%s endpoint peak %.9g m/s endpoint continuity %.9g /s "
+                    "candidate gap %.9g negative volume %.9g uncovered faces %d production failed %d\n",
+                    key.c_str(), flow.maxFluidFaceSpeed, flow.continuityRms, candidate.finalGap,
+                    candidate.negativeVolume, candidate.uncoveredEndpointFaces, static_cast<int>( productionFailed ) );
+            }
+            std::printf( "R4j %s %d persistent intervals max endpoint peak %.9g m/s "
+                "max endpoint continuity %.9g /s max negative volume %.9g m^2\n",
+                name.c_str(), intervals, maxPeak, maxContinuity, maxNegative );
+        }
     }
 
     static void captureProjection( const fluidField2& field, std::string& trace, const std::string& key )
@@ -3506,6 +3734,7 @@ std::string runNearClosedFaceScene()
         }
     };
     cadenceReplay( *frozen, baseline, *a, "cadence43", true, 0 );
+    probe::captureLaggedContinuation( *frozen, trace );
     // Adjacent actual intervals exercise the transition before/after the spike.
     // They are separate frozen solves, not a candidate-driven trajectory.
     for( std::size_t i = 0; i < adjacent.size(); ++i )
