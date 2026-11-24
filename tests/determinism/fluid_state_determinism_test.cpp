@@ -2208,7 +2208,8 @@ struct fluidStateTraceProbe2
     // R4j: actual persistent free-body World + MAC continuation. This
     // deliberately exercises the *lagged* production scheduling, not a
     // forward space-time predictor/corrector. Tracer is excluded.
-    static void captureLaggedContinuation( const fluidField2& initial, std::string& trace )
+    static void captureLaggedContinuation( const fluidField2& initial,
+        const fluidField2& expectedInitialProjection, std::string& trace )
     {
         using namespace sandbox;
         constexpr int intervals = 4, worldSubsteps = 2, initialIndex = 43;
@@ -2272,6 +2273,11 @@ struct fluidStateTraceProbe2
                     if( !replay || replay->size() != feedback.size() )
                         throw std::runtime_error( key + " missing initial pressure replay" );
                     feedback = *replay;
+                    std::string actual, expected;
+                    captureProjection( field, actual, "initial" );
+                    captureProjection( expectedInitialProjection, expected, "initial" );
+                    if( actual != expected )
+                        throw std::runtime_error( key + " initial production replay differs from historical projection" );
                     field.previousObstacles_ = poses;
                 }
                 else
@@ -2315,7 +2321,13 @@ struct fluidStateTraceProbe2
                 // history. Every next step consumes the actual current pose.
                 field.previousObstacles_ = poses;
                 const auto flow = field.getFlowAudit( dt );
-                if( flow.nonFiniteFluidFaces != 0 || !std::isfinite( flow.continuityRms ) )
+                const auto finite = []( const std::vector<float>& values )
+                {
+                    return std::all_of( values.begin(), values.end(), []( float v ) { return std::isfinite( v ); } );
+                };
+                if( flow.nonFiniteFluidFaces != 0 || !std::isfinite( flow.continuityRms ) ||
+                    !finite( field.u_ ) || !finite( field.v_ ) || !finite( field.pressure_ ) ||
+                    !finite( field.cellFluidFraction_ ) )
                     throw std::runtime_error( key + " nonfinite committed field" );
                 const auto out = [&]( const std::string& suffix, auto value )
                 {
@@ -2344,6 +2356,8 @@ struct fluidStateTraceProbe2
                 {
                     const auto id = scene.getShapes()[j].bodyHandle;
                     const auto& load = feedback[j];
+                    if( !IsFinite( load.force ) || !std::isfinite( load.torque ) )
+                        throw std::runtime_error( key + " nonfinite committed pressure load" );
                     world.ApplyForceToCenter( id, load.force );
                     world.ApplyTorque( id, load.torque );
                 }
@@ -3734,7 +3748,7 @@ std::string runNearClosedFaceScene()
         }
     };
     cadenceReplay( *frozen, baseline, *a, "cadence43", true, 0 );
-    probe::captureLaggedContinuation( *frozen, trace );
+    probe::captureLaggedContinuation( *frozen, baseline, trace );
     // Adjacent actual intervals exercise the transition before/after the spike.
     // They are separate frozen solves, not a candidate-driven trajectory.
     for( std::size_t i = 0; i < adjacent.size(); ++i )
