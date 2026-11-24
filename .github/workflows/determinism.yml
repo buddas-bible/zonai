@@ -425,6 +425,7 @@ jobs:
               "intervalTransport": 41250,
               "chronologicalTracer": 13610,
               "geometricConservation": 185,
+              "geometryDefectCorrection": 340,
           }
           topology = totals.get("topologyQuadrature", 0)
           # 49 second-resolution output rows, six quadrature headers,
