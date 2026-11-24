@@ -1779,6 +1779,204 @@ struct fluidStateTraceProbe2
             transportPanels, weightSum, trace, "chronologicalTracer." + handoffKey );
         captureGeometricConservation( before, transport, force, bodyVolumeAudit, removedVolumeAudit,
             correctedVolume, trace, "geometricConservation." + handoffKey );
+        // R4g: defect correction on the fixed interval graph. The exact
+        // binary32 endpoint rebuild replaces only the linearized volume
+        // response in the residual, not the averaged L/B operator.
+        // Each iterate is a counterfactual pose from the original endpoint.
+        const std::string defectKey = "geometryDefectCorrection." + handoffKey;
+        struct defectState
+        {
+            std::vector<double> residual;
+            double rawL1 = 0.0, projectedL1 = 0.0, squared = 0.0, compatibilityL1 = 0.0;
+            double negativeFlux = 0.0, peak = 0.0, target = 0.0, unsupported = 0.0;
+            double forceChange = 0.0, torqueChange = 0.0;
+            int closed = 0, opened = 0;
+            bool analytic = true;
+        };
+        fluidField2 defectGeometry = before;
+        defectGeometry.setPrePressureSnapshotObserver( {} );
+        setStageObserver( defectGeometry, {} );
+        const auto evaluateDefect = [&]( const std::vector<double>& pressure )
+        {
+            defectState state;
+            state.residual.resize( n );
+            transpose( pressure );
+            std::vector<fluidShapeObstacle2> endpoint( finish.begin(), finish.end() );
+            for( std::size_t j = 0; j < owners; ++j )
+            {
+                const auto& f = force[j];
+                const vec2 dx{ static_cast<float>( dt * dt * finish[j].inverseMass * f.fx ),
+                    static_cast<float>( dt * dt * finish[j].inverseMass * f.fy ) };
+                const float da = static_cast<float>( dt * dt * finish[j].inverseInertia * f.torque );
+                if( !IsFinite( dx ) || !std::isfinite( da ) )
+                    throw std::runtime_error( defectKey + " invalid trial displacement" );
+                const rot2 delta = rot2::FromRadians( da );
+                endpoint[j].center = finish[j].center + dx;
+                endpoint[j].transform.position = endpoint[j].center +
+                    Rotate( delta, finish[j].transform.position - finish[j].center );
+                endpoint[j].transform.rotation = delta * finish[j].transform.rotation;
+                state.forceChange = std::max( state.forceChange, std::max(
+                    std::abs( f.fx - baselineFeedback[j].force.x ),
+                    std::abs( f.fy - baselineFeedback[j].force.y ) ) );
+                state.torqueChange = std::max( state.torqueChange, std::abs( f.torque - baselineFeedback[j].torque ) );
+            }
+            defectGeometry.updateObstacles( endpoint );
+            defectGeometry.updateCutCellGeometry( endpoint );
+            state.analytic = defectGeometry.cutCellTransition_.usedDisjointAnalyticGeometry;
+            std::vector<double> fluxVolume( n );
+            for( std::size_t i = 0; i < n; ++i )
+                fluxVolume[i] = area * before.previousCellFluidFraction_[i];
+            for( const auto& e : edges )
+            {
+                const double velocity = e.velocity + dt / h * ( pressure[e.first] - pressure[e.second] );
+                const double transfer = dt * h * e.a * velocity;
+                fluxVolume[e.first] -= transfer;
+                fluxVolume[e.second] += transfer;
+                state.peak = std::max( state.peak, std::abs( velocity ) );
+                if( !e.isU && e.index == targetIndex ) state.target = velocity;
+            }
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                const double fraction = defectGeometry.cellFluidFraction_[i];
+                if( !std::isfinite( fraction ) || fraction < 0.0 || fraction > 1.0 ||
+                    !std::isfinite( fluxVolume[i] ) )
+                    throw std::runtime_error( defectKey + " invalid trial volume" );
+                const double error = area * fraction - fluxVolume[i];
+                state.residual[i] = error;
+                state.rawL1 += std::abs( error );
+                state.negativeFlux += std::max( 0.0, -fluxVolume[i] );
+                if( parent[i] < 0 ) state.unsupported += std::abs( error );
+                state.closed += before.cellFluidFraction_[i] > 0.0f && fraction == 0.0;
+                state.opened += before.cellFluidFraction_[i] == 0.0f && fraction > 0.0;
+            }
+            const auto raw = state.residual;
+            zeroMean( state.residual );
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                state.compatibilityL1 += std::abs( raw[i] - state.residual[i] );
+                state.projectedL1 += std::abs( state.residual[i] );
+                state.squared += state.residual[i] * state.residual[i];
+            }
+            return state;
+        };
+        // Solve P A P dp = -P(volume defect)/dt^2 with the unchanged
+        // positive operator. The real endpoint derivative is only
+        // approximated by the averaged B, so verify the actual new defect.
+        const auto solveCorrection = [&]( const std::vector<double>& error,
+            std::vector<double>& correction, int& steps, double& relativeSquared )
+        {
+            std::vector<double> b( n ), residual( n ), pre( n ), direction( n ), product( n );
+            for( std::size_t i = 0; i < n; ++i ) b[i] = -error[i] / ( dt * dt );
+            zeroMean( b );
+            residual = b;
+            const double initialSquared = dot( b, b );
+            const double limit = std::max( 1.0e-24, initialSquared * 1.0e-16 );
+            const auto applyPre = [&]()
+            {
+                for( std::size_t i = 0; i < n; ++i )
+                    pre[i] = diagonal[i] > 0.0 ? residual[i] / diagonal[i] : 0.0;
+                zeroMean( pre );
+            };
+            correction.assign( n, 0.0 );
+            applyPre();
+            direction = pre;
+            double rz = dot( residual, pre ), norm = initialSquared;
+            for( steps = 0; steps < 2000 && norm > limit; )
+            {
+                multiply( direction, product ); zeroMean( product );
+                const double denominator = dot( direction, product );
+                if( !std::isfinite( denominator ) || denominator <= 0.0 ||
+                    !std::isfinite( rz ) || rz <= 0.0 )
+                    throw std::runtime_error( defectKey + " correction PCG breakdown" );
+                const double alpha = rz / denominator;
+                for( std::size_t i = 0; i < n; ++i )
+                {
+                    correction[i] += alpha * direction[i];
+                    residual[i] -= alpha * product[i];
+                }
+                ++steps;
+                norm = dot( residual, residual );
+                if( !std::isfinite( norm ) ) throw std::runtime_error( defectKey + " nonfinite correction residual" );
+                if( norm <= limit ) break;
+                applyPre();
+                const double next = dot( residual, pre ), beta = next / rz;
+                for( std::size_t i = 0; i < n; ++i ) direction[i] = pre[i] + beta * direction[i];
+                rz = next;
+            }
+            zeroMean( correction );
+            multiply( correction, product ); zeroMean( product );
+            double actual = 0.0;
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                const double delta = b[i] - product[i];
+                actual += delta * delta;
+            }
+            if( !std::isfinite( actual ) || actual > limit )
+                throw std::runtime_error( defectKey + " correction true residual failed" );
+            relativeSquared = initialSquared > 0.0 ? actual / initialSquared : 0.0;
+        };
+
+        std::vector<double> correctedPressure = p;
+        auto current = evaluateDefect( correctedPressure );
+        if( !current.analytic || current.unsupported != 0.0 )
+            throw std::runtime_error( defectKey + " baseline trial lacks interval graph support" );
+        double initialGap = current.rawL1;
+        bool stalled = false;
+        for( int pass = 0; pass <= 3; ++pass )
+        {
+            int steps = 0, trials = 0;
+            double acceptedStep = 0.0, relativeSquared = 0.0;
+            if( pass > 0 && !stalled )
+            {
+                std::vector<double> correction;
+                solveCorrection( current.residual, correction, steps, relativeSquared );
+                // Fixed deterministic backtracking. Reject invalid geometry
+                // or any step which fails to decrease both raw L1 and
+                // projected squared defect. Do not discard unsupported rows.
+                for( double alpha : { 1.0, 0.5, 0.25, 0.125 } )
+                {
+                    ++trials;
+                    auto trialPressure = correctedPressure;
+                    for( std::size_t i = 0; i < n; ++i ) trialPressure[i] += alpha * correction[i];
+                    zeroMean( trialPressure );
+                    auto trial = evaluateDefect( trialPressure );
+                    if( trial.analytic && trial.unsupported == 0.0 &&
+                        trial.rawL1 < current.rawL1 && trial.squared < current.squared )
+                    {
+                        correctedPressure = std::move( trialPressure );
+                        current = std::move( trial );
+                        acceptedStep = alpha;
+                        break;
+                    }
+                }
+                stalled = acceptedStep == 0.0;
+            }
+            const auto k = defectKey + ".pass" + std::to_string( pass );
+            const auto write = [&]( const char* name, auto value )
+            {
+                if( !std::isfinite( static_cast<double>( value ) ) )
+                    throw std::runtime_error( k + name + " nonfinite defect output" );
+                appendScalar( trace, k + name, value );
+            };
+            write( ".rawL1", current.rawL1 ); write( ".projectedL1", current.projectedL1 );
+            write( ".projectedSquared", current.squared ); write( ".compatibilityL1", current.compatibilityL1 );
+            write( ".negativeFluxVolume", current.negativeFlux ); write( ".peak", current.peak );
+            write( ".target", current.target ); write( ".unsupported", current.unsupported );
+            write( ".forceChange", current.forceChange ); write( ".torqueChange", current.torqueChange );
+            write( ".closed", current.closed ); write( ".opened", current.opened );
+            write( ".acceptedStep", acceptedStep ); write( ".pcgIterations", steps );
+            write( ".trials", trials ); write( ".linearRelativeResidualSquared", relativeSquared );
+            write( ".stalled", static_cast<int>( stalled ) );
+            std::printf( "%s raw gap %.9g m^2 projected L1 %.9g negative volume %.9g "
+                "peak %.9g m/s force delta %.9g N torque delta %.9g Nm "
+                "accepted alpha %.9g PCG %d trials %d stalled %d\n",
+                k.c_str(), current.rawL1, current.projectedL1, current.negativeFlux,
+                current.peak, current.forceChange, current.torqueChange,
+                acceptedStep, steps, trials, static_cast<int>( stalled ) );
+        }
+        if( current.rawL1 > initialGap )
+            throw std::runtime_error( defectKey + " accepted geometric defect increased" );
+
     }
 
     static void captureProjection( const fluidField2& field, std::string& trace, const std::string& key )
