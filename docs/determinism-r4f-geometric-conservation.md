@@ -1,0 +1,18 @@
+# R4f — geometric conservation gap and predicted endpoint motion
+
+Base: [R4e #372](https://github.com/buddas-bible/zonai/pull/372), `b7eab27ccf11bae82a940b96e290f9abc444e989`.
+
+## Verified evidence
+
+[R4d required CI](https://github.com/buddas-bible/zonai/actions/runs/45422523613) passed 7,721,613 Fluid/diagnostic rows and 25,596 engine math rows exactly. [R4e Ubuntu producer](https://github.com/buddas-bible/zonai/actions/runs/45423393112) passed. Index 43 midpoint32: chronological donor shortfall zero (previous 3.19872643e-8 m²), uniform geometric error L1 2.78397406e-5, flux-only model error L1 2.12608707e-7, geometric/model gap 2.78575635e-5 m², negative flux-only volume 3.19872643e-8 m². At index 44 depth16, chronological uniform trapped mass zero, geometry error 2.68478788e-5, model error 1.85058842e-7, donor shortfall 1.61793682e-11 m². The seeded tracer did not exercise mass in the closing sliver. All chronological mass checks passed. Windows comparison pending at implementation. The persistent geometry discrepancy dominates the observed uniform-field error, but its component contributions need direct verification.
+
+## Experiment
+
+- For each of the five existing frozen candidate solutions independently reconstruct flux-only final volume from original previous geometry and stored signed face transfer. Preserve the signed per-cell linear solid response, compatibility removal, and corrected volume residual from the pressure solve. Verify the identity V_flux - V_end = V_body - V_removed - R_corrected; report L1 magnitudes, signed sums and negative model volume separately. The global mass check alone does not establish geometric conservation.
+- Use the candidate force/torque and endpoint inverse mass/inertia to define an explicit free-body pose perturbation dt² M^-1 f. Translate the COM and rotate shape origin around it using deterministic rotation. This is a counterfactual displacement consistent with the model's linear response term, not a prediction of actual World integration or the physical trajectory during the interval.
+- Rebuild exact analytic endpoint geometry on a private copy; require unchanged endpoint fractions to reproduce exactly. Reuse the zero-RHS production assembly to obtain the endpoint B coefficients. Rebuild perturbed endpoint geometry at +1, -1, +0.5 displacement scale. Compare exact geometric volume changes to interval-average linear response and endpoint linear derivative, central difference and half-scale consistency. Record newly open/closed cells and historical (17,13) witness. Report remaining flux/perturbed geometry gap both raw and with compatibility term added for attribution only; do not add any scalar source, alter transfers, or modify live geometry.
+- Retain all existing traces; add 37 fields per frozen solution (185 total). Require exact comparison. Expected total 7,735,408 Fluid/diagnostic rows with one historical missed cell; engine math unchanged.
+
+## Acceptance and limitations
+
+Review R4e final Windows comparison, then both R4f producers, strict comparison and full CMake. Evaluate whether the mean geometry derivative predicts actual endpoint change adequately and whether residual volume discrepancies remain when the same pressure response is represented geometrically. A pose perturbation uses binary32 geometry, so tiny displacements may be affected by rounding; compare the different perturbation scales before interpreting errors. A smaller corrected discrepancy is not sufficient to accept a live algorithm: actual World integration, topology, conservative transport, compatibility and repeated candidate steps need a coherent contract. No claim of exact GCL satisfaction, no production change or performance optimization. Master and #322/#326 untouched.

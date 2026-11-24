@@ -1,7 +1,6 @@
 #pragma once
 
-#include <cmath>
-
+#include "math/deterministicMath.h"
 #include "math/vec2.h"
 
 namespace zonai
@@ -12,7 +11,11 @@ struct rot2
     float c = 1.0f;
     float s = 0.0f;
 
-    static rot2 FromRadians( float radians ) { return { std::cos( radians ), std::sin( radians ) }; }
+    static rot2 FromRadians( float radians )
+    {
+        const auto rotation = deterministicSinCos( radians );
+        return { rotation.cosine, rotation.sine };
+    }
 };
 
 inline rot2 operator*( const rot2& a, const rot2& b )
