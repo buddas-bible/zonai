@@ -181,8 +181,8 @@ struct fluidStateTraceProbe2
             scalar( ".start.s", start.transform.rotation.s );
             scalar( ".finish.c", finish.transform.rotation.c );
             scalar( ".finish.s", finish.transform.rotation.s );
-            const float startAngle = std::atan2( start.transform.rotation.s, start.transform.rotation.c );
-            const float endAngle = std::atan2( finish.transform.rotation.s, finish.transform.rotation.c );
+            const float startAngle = deterministicAtan2( start.transform.rotation.s, start.transform.rotation.c );
+            const float endAngle = deterministicAtan2( finish.transform.rotation.s, finish.transform.rotation.c );
             const float deltaAngle = std::remainder( endAngle - startAngle, twoPi );
             const float angularSpeed = deltaAngle / timeStep;
             const vec2 linearSpeed = ( finish.transform.position - start.transform.position ) / timeStep;
