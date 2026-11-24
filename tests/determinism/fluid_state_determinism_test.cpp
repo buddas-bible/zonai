@@ -296,10 +296,10 @@ struct fluidStateTraceProbe2
         scalar( ".peakX", result.peakX );
         scalar( ".peakY", result.peakY );
         scalar( ".peakOpen", result.peakOpen );
-        scalar( ".openLe001.count", result.narrowCount );
-        scalar( ".openLe001.peak", result.narrowPeak );
-        scalar( ".openLe0001.count", result.tinyCount );
-        scalar( ".openLe0001.peak", result.tinyPeak );
+        scalar( ".openLe1Percent.count", result.narrowCount );
+        scalar( ".openLe1Percent.peak", result.narrowPeak );
+        scalar( ".openLePoint1Percent.count", result.tinyCount );
+        scalar( ".openLePoint1Percent.peak", result.tinyPeak );
         if( beforeU && beforeV )
         {
             if( result.deltaX < 0 ) throw std::runtime_error( key + " no projected face" );
@@ -1354,6 +1354,15 @@ std::string runWorldFluidScene( const char* name, bool drag,
             const auto fluidImpulse = observed.demo.getWindDragFluidImpulse();
             sawDragBody |= bodyImpulse.x != 0.0f || bodyImpulse.y != 0.0f;
             sawDragFluid |= fluidImpulse.x != 0.0f || fluidImpulse.y != 0.0f;
+            if( stabilityAudit )
+            {
+                const double rx = static_cast<double>( bodyImpulse.x ) + fluidImpulse.x;
+                const double ry = static_cast<double>( bodyImpulse.y ) + fluidImpulse.y;
+                const std::string prefix = "fluidStabilityAudit." + key + ".dragResidual";
+                probe::appendScalar( stabilityTrace, prefix + ".x", rx );
+                probe::appendScalar( stabilityTrace, prefix + ".y", ry );
+                probe::appendScalar( stabilityTrace, prefix + ".normSquared", rx * rx + ry * ry );
+            }
             sawFlow |= field.getFlowAudit( timeStep / worldFluidScene::fluidSubsteps ).maxFluidFaceSpeed > 0.01f;
             if( sustained )
             {
