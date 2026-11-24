@@ -2238,12 +2238,16 @@ struct fluidStateTraceProbe2
     static void captureForwardPredictor( const fluidField2& input,
         const fluidField2& laggedField, const std::vector<fluidShapeObstacle2>& start,
         const std::vector<fluidObstacleForce2>& laggedLoad, std::string& trace,
-        int index, double responseScale = 1.0, int correctionBudget = 3 )
+        int index, double responseScale = 1.0, int correctionBudget = 3, int samples = 64 )
     {
         using namespace sandbox;
         if( responseScale != 1.0 && responseScale != 0.75 )
             throw std::runtime_error( "R4l unsupported forward response scale" );
-        const std::string name = responseScale == 1.0 ? "forwardPredictor" :
+        if( samples != 64 && ( ( samples != 16 && samples != 32 ) ||
+            responseScale != 0.75 || correctionBudget != 0 ) )
+            throw std::runtime_error( "R4n unsupported quadrature budget" );
+        const std::string name = samples != 64 ? "forwardQuadrature" + std::to_string( samples ) :
+            responseScale == 1.0 ? "forwardPredictor" :
             correctionBudget == 3 ? "forwardCadence" :
             "forwardBudget" + std::to_string( correctionBudget );
         const std::string key = name + ".interval" + std::to_string( index );
@@ -2319,7 +2323,7 @@ struct fluidStateTraceProbe2
         // Use the lagged load only as the reference for diagnostic deltas.
         // Neither the lagged nor the candidate load is applied twice.
         captureSpaceTimeProjection( forward, laggedField, laggedLoad, scratch,
-            key + ".projection", 64, key + ".volume", false, 16,
+            key + ".projection", samples, key + ".volume", false, 16,
             key + ".topology", responseScale, &candidate, correctionBudget );
         const auto corrected = run( candidate.feedback );
         rebuild( corrected );
@@ -2395,7 +2399,7 @@ struct fluidStateTraceProbe2
             out( k + ".corrected.center.y", corrected[j].center.y );
             out( k + ".corrected.omega", corrected[j].angularVelocity );
         }
-        if( responseScale == 0.75 )
+        if( responseScale == 0.75 && samples == 64 )
         {
             const std::string costKey = "forwardBudgetCost.pass" + std::to_string( correctionBudget ) +
                 ".interval" + std::to_string( index );
@@ -2405,6 +2409,16 @@ struct fluidStateTraceProbe2
             std::printf( "%s initial PCG %d correction PCG %d defect evaluations %d\n",
                 costKey.c_str(), candidate.initialIterations, candidate.correctionIterations,
                 candidate.defectEvaluations );
+        }
+        if( responseScale == 0.75 && correctionBudget == 0 )
+        {
+            const std::string costKey = "forwardQuadratureCost.samples" + std::to_string( samples ) +
+                ".interval" + std::to_string( index );
+            appendScalar( trace, costKey + ".midpointCoverageChecks", samples );
+            appendScalar( trace, costKey + ".weightedPanels", samples + 32 );
+            appendScalar( trace, costKey + ".initialIterations", candidate.initialIterations );
+            std::printf( "%s midpoint checks %d weighted panels %d initial PCG %d\n",
+                costKey.c_str(), samples, samples + 32, candidate.initialIterations );
         }
         std::printf( "%s predicted gap %.9g actual corrected gap %.9g m^2 modeled gap %.9g "
             "unsupported cells %d unsupported volume %.9g interval peak %.9g m/s negative volume %.9g\n",
@@ -2592,6 +2606,8 @@ struct fluidStateTraceProbe2
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75 );
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75, 0 );
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75, 1 );
+                    captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75, 0, 32 );
+                    captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75, 0, 16 );
                 }
                 maxPeak = std::max( maxPeak, static_cast<double>( flow.maxFluidFaceSpeed ) );
                 maxContinuity = std::max( maxContinuity, static_cast<double>( flow.continuityRms ) );
