@@ -9,6 +9,33 @@
 namespace zonai
 {
 
+// Linear interpolation of finite binary32 endpoints for t in [0, 1].
+// Explicit endpoint handling preserves their exact bits (including signed zero).
+// A binary64 convex combination avoids binary32 overflow in b-a and fixes
+// the operation order across standard libraries. Requires round-to-nearest,
+// gradual underflow, and the engine's non-contracting FP policy.
+// Invalid inputs (non-finite endpoints/weight or weight outside [0,1])
+// return a canonical quiet NaN; extrapolation is deliberately unsupported.
+[[nodiscard]] inline float deterministicLerp( float a, float b, float t ) noexcept
+{
+    static_assert( sizeof( float ) == sizeof( std::uint32_t ) );
+    static_assert( std::numeric_limits<float>::is_iec559 );
+    static_assert( std::numeric_limits<double>::is_iec559 );
+
+    if( !std::isfinite( a ) || !std::isfinite( b ) ||
+        !std::isfinite( t ) || t < 0.0f || t > 1.0f )
+        return std::bit_cast<float>( 0x7fc00000u );
+
+    if( t == 0.0f ) return a;
+    if( t == 1.0f ) return b;
+    if( a == b ) return a;
+
+    const double weight = static_cast<double>( t );
+    const double left = ( 1.0 - weight ) * static_cast<double>( a );
+    const double right = weight * static_cast<double>( b );
+    return static_cast<float>( left + right );
+}
+
 // Deterministic two-component Euclidean magnitude for binary64 physics math.
 //
 // Divide by the larger magnitude before squaring so finite input pairs with
