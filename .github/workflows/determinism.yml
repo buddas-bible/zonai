@@ -413,11 +413,11 @@ jobs:
               "worldFluidDrag180": 1272627,
               "worldFluidDrag360Continuation": 1934160,
           }
-          assembly = "worldFluidAnchoredAssembly"
-          if (set(totals) != set(expected) | {assembly} or
+          assemblies = {"worldFluidAnchoredAssembly", "worldFluidContactAssembly"}
+          if (set(totals) != set(expected) | assemblies or
               any(totals.get(scene) != n for scene, n in expected.items()) or
-              totals.get(assembly, 0) <= 0):
-              sys.exit("Fluid trace coverage changed or anchored assembly missing")
+              any(totals.get(scene, 0) <= 0 for scene in assemblies)):
+              sys.exit("Fluid trace coverage changed or assembly missing")
 
           print("identical tested Fluid MAC, geometry/history and pressure feedback fields")
           PY
