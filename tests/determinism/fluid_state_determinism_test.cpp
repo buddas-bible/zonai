@@ -1450,7 +1450,6 @@ std::string runNearClosedFaceScene()
     constexpr int fluidSubsteps = 4;
     constexpr int targetIndex = 43; // warmup 4 + measured frame 6, interval 3 (zero-based)
     constexpr float h = 0.25f;
-    constexpr float subDt = timeStep / fluidSubsteps;
     rigidBodyDemo scene{ demoKind::windFlow };
     scene.configureWindField( 48, 28, h );
     scene.setWindCutCellProjectionEnabled( true );
