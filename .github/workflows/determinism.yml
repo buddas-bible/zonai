@@ -350,15 +350,31 @@ jobs:
           windows = Path("artifacts/windows/fluid-windows.tsv").read_text(encoding="utf-8").splitlines()
           first = None
           count = 0
+          totals = {}
+          mismatches = {}
+          first_by_scene = {}
           for row, (u, w) in enumerate(zip_longest(ubuntu, windows), 1):
+              key = (u or w or "missing").split("\t", 1)[0]
+              scene = key.split(".", 1)[0]
+              totals[scene] = totals.get(scene, 0) + 1
               if u == w:
                   continue
               count += 1
+              mismatches[scene] = mismatches.get(scene, 0) + 1
+              entry = (row, key, u, w)
+              first_by_scene.setdefault(scene, entry)
               if first is None:
-                  first = (row, (u or w or "missing").split("\t", 1)[0], u, w)
+                  first = entry
 
           print(f"Fluid authoritative MAC/Cut-cell/feedback rows: {max(len(ubuntu), len(windows))}")
           print(f"Exact-bit mismatches: {count}")
+          for scene, total in totals.items():
+              print(f"Scene {scene}: {mismatches.get(scene, 0)}/{total} mismatches")
+              if scene in first_by_scene:
+                  row, key, u, w = first_by_scene[scene]
+                  print(f"  first: row={row} field={key}")
+                  print(f"  Ubuntu:  {u if u is not None else '<missing>'}")
+                  print(f"  Windows: {w if w is not None else '<missing>'}")
           if first is not None:
               row, key, u, w = first
               print(f"First Fluid divergence: row={row} field={key}")
