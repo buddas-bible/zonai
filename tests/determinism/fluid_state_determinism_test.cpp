@@ -1411,6 +1411,7 @@ struct fluidStateTraceProbe2
         std::vector<int> component;
         double trueResidualSquared = 0.0;
         int initialIterations = 0;
+        int correctionIterations = 0, defectEvaluations = 0;
         double initialGap = 0.0, finalGap = 0.0, negativeVolume = 0.0, intervalPeak = 0.0;
         int uncoveredEndpointFaces = 0;
         bool stalled = false;
@@ -1424,10 +1425,12 @@ struct fluidStateTraceProbe2
         const std::string& key, int samples, const std::string& handoffKey,
         bool requireTarget = true, int endpointDepth = 0,
         const std::string& topologyKey = {}, double responseScale = 1.0,
-        continuationPressure* continuation = nullptr )
+        continuationPressure* continuation = nullptr, int correctionBudget = 3 )
     {
         if( responseScale != 1.0 && responseScale != 0.75 )
             throw std::runtime_error( key + " unsupported free-body cadence response" );
+        if( correctionBudget < 0 || correctionBudget > 3 || ( !continuation && correctionBudget != 3 ) )
+            throw std::runtime_error( key + " invalid correction budget" );
         const auto& start = before.previousObstacles_;
         const auto& finish = before.frozenPressureObstacles_;
         const std::size_t n = before.cellFluidFraction_.size(), owners = finish.size();
@@ -2109,7 +2112,8 @@ struct fluidStateTraceProbe2
             throw std::runtime_error( defectKey + " baseline trial lacks interval graph support" );
         double initialGap = current.rawL1;
         bool stalled = false;
-        for( int pass = 0; pass <= 3; ++pass )
+        int correctionIterations = 0, defectEvaluations = 1;
+        for( int pass = 0; pass <= correctionBudget; ++pass )
         {
             int steps = 0, trials = 0;
             double acceptedStep = 0.0, relativeSquared = 0.0;
@@ -2117,6 +2121,7 @@ struct fluidStateTraceProbe2
             {
                 std::vector<double> correction;
                 solveCorrection( current.residual, correction, steps, relativeSquared );
+                correctionIterations += steps;
                 // Fixed deterministic backtracking. Reject invalid geometry
                 // or any step which fails to decrease both raw L1 and
                 // projected squared defect. Do not discard unsupported rows.
@@ -2127,6 +2132,7 @@ struct fluidStateTraceProbe2
                     for( std::size_t i = 0; i < n; ++i ) trialPressure[i] += alpha * correction[i];
                     zeroMean( trialPressure );
                     auto trial = evaluateDefect( trialPressure );
+                    ++defectEvaluations;
                     if( trial.analytic && trial.unsupported == 0.0 &&
                         trial.rawL1 < current.rawL1 && trial.squared < current.squared )
                     {
@@ -2215,6 +2221,8 @@ struct fluidStateTraceProbe2
             }
             continuation->trueResidualSquared = trueSquared;
             continuation->initialIterations = iterations;
+            continuation->correctionIterations = correctionIterations;
+            continuation->defectEvaluations = defectEvaluations;
             continuation->initialGap = initialGap;
             continuation->finalGap = current.rawL1;
             continuation->negativeVolume = current.negativeFlux;
@@ -2230,13 +2238,15 @@ struct fluidStateTraceProbe2
     static void captureForwardPredictor( const fluidField2& input,
         const fluidField2& laggedField, const std::vector<fluidShapeObstacle2>& start,
         const std::vector<fluidObstacleForce2>& laggedLoad, std::string& trace,
-        int index, double responseScale = 1.0 )
+        int index, double responseScale = 1.0, int correctionBudget = 3 )
     {
         using namespace sandbox;
         if( responseScale != 1.0 && responseScale != 0.75 )
             throw std::runtime_error( "R4l unsupported forward response scale" );
-        const std::string key = std::string( responseScale == 1.0 ?
-            "forwardPredictor.interval" : "forwardCadence.interval" ) + std::to_string( index );
+        const std::string name = responseScale == 1.0 ? "forwardPredictor" :
+            correctionBudget == 3 ? "forwardCadence" :
+            "forwardBudget" + std::to_string( correctionBudget );
+        const std::string key = name + ".interval" + std::to_string( index );
         const float dt = input.frozenPressureTimeStep_;
         const double area = static_cast<double>( input.cellSize_ ) * input.cellSize_;
         const auto run = [&]( const std::vector<fluidObstacleForce2>& loads )
@@ -2310,7 +2320,7 @@ struct fluidStateTraceProbe2
         // Neither the lagged nor the candidate load is applied twice.
         captureSpaceTimeProjection( forward, laggedField, laggedLoad, scratch,
             key + ".projection", 64, key + ".volume", false, 16,
-            key + ".topology", responseScale, &candidate );
+            key + ".topology", responseScale, &candidate, correctionBudget );
         const auto corrected = run( candidate.feedback );
         rebuild( corrected );
 
@@ -2384,6 +2394,17 @@ struct fluidStateTraceProbe2
             out( k + ".corrected.center.x", corrected[j].center.x );
             out( k + ".corrected.center.y", corrected[j].center.y );
             out( k + ".corrected.omega", corrected[j].angularVelocity );
+        }
+        if( responseScale == 0.75 )
+        {
+            const std::string costKey = "forwardBudgetCost.pass" + std::to_string( correctionBudget ) +
+                ".interval" + std::to_string( index );
+            appendScalar( trace, costKey + ".initialIterations", candidate.initialIterations );
+            appendScalar( trace, costKey + ".correctionIterations", candidate.correctionIterations );
+            appendScalar( trace, costKey + ".defectEvaluations", candidate.defectEvaluations );
+            std::printf( "%s initial PCG %d correction PCG %d defect evaluations %d\n",
+                costKey.c_str(), candidate.initialIterations, candidate.correctionIterations,
+                candidate.defectEvaluations );
         }
         std::printf( "%s predicted gap %.9g actual corrected gap %.9g m^2 modeled gap %.9g "
             "unsupported cells %d unsupported volume %.9g interval peak %.9g m/s negative volume %.9g\n",
@@ -2569,6 +2590,8 @@ struct fluidStateTraceProbe2
                 {
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step );
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75 );
+                    captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75, 0 );
+                    captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75, 1 );
                 }
                 maxPeak = std::max( maxPeak, static_cast<double>( flow.maxFluidFaceSpeed ) );
                 maxContinuity = std::max( maxContinuity, static_cast<double>( flow.continuityRms ) );
