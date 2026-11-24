@@ -267,6 +267,9 @@ void auditSinCos( std::FILE* stream )
     const auto verify = [&]( const char* cosKey, const char* sinKey, std::size_t i, float angle )
     {
         const auto result = deterministicSinCosBounded( angle );
+        const auto full = deterministicSinCos( angle );
+        check( bits( full.cosine ) == bits( result.cosine ) &&
+            bits( full.sine ) == bits( result.sine ), "full-range bounded compatibility" );
         const auto rotation = rot2::FromRadians( angle );
         check( bits( rotation.c ) == bits( result.cosine ) &&
             bits( rotation.s ) == bits( result.sine ), "rot2 bounded dispatch" );
@@ -400,6 +403,106 @@ void auditWindSource( std::FILE* stream )
     }
     check( sawPositive && sawNegative && windTime > 2.99f && windTime < 3.01f,
         "wind source recurrence did not exercise both oscillation signs" );
+}
+
+// R3q: test the full-range candidate before migrating rot2.
+// Exact cases were generated with 130 decimal digits of reference precision,
+// using the exact binary32 input rather than its decimal display value.
+void auditFullRangeSinCos( std::FILE* stream )
+{
+    const auto bits = []( float value ) { return std::bit_cast<std::uint32_t>( value ); };
+    const auto fromBits = []( std::uint32_t value ) { return std::bit_cast<float>( value ); };
+    struct angleCase { std::uint32_t angle, cosine, sine; };
+    constexpr std::array<angleCase, 19> cases{ {
+        { 0x40c90fdcu, 0x3f800000u, 0x352eef4cu },
+        { 0xc0c90fdcu, 0x3f800000u, 0xb52eef4cu },
+        { 0x41200000u, 0xbf56cd64u, 0xbf0b44f8u },
+        { 0xc1200000u, 0xbf56cd64u, 0x3f0b44f8u },
+        { 0x42c80000u, 0x3f5cc0eeu, 0xbf01a12eu },
+        { 0x447a0000u, 0x3f0ff813u, 0x3f53ae61u },
+        { 0x4b800000u, 0x3f2056b4u, 0xbf47917cu },
+        { 0x4f000000u, 0x3e738617u, 0xbf78a7c9u },
+        { 0x5f123456u, 0xbe37ffeau, 0x3f7bd553u },
+        { 0x6f123456u, 0x3ea09f65u, 0x3f731389u },
+        { 0x7f7fffffu, 0x3f5a5f96u, 0xbf0599b3u },
+        { 0xff7fffffu, 0x3f5a5f96u, 0x3f0599b3u },
+        { 0x4b7fffffu, 0xbea29962u, 0xbf72bf60u },
+        { 0x4b800001u, 0x3ee57c2au, 0x3f64d864u },
+        { 0x7effffffu, 0xbf7669f3u, 0x3e8acc3cu },
+        { 0x7f000000u, 0x3f482b8fu, 0x3f1f9631u },
+        { 0x6b490fdbu, 0x3d51b651u, 0x3f7faa0cu },
+        { 0x5bc90fdbu, 0x3e40f52du, 0xbf7b69f6u },
+        { 0x4ac90fdbu, 0x3f7bb5a6u, 0x3e3ab063u }
+    } };
+    for( std::size_t i = 0; i < cases.size(); ++i )
+    {
+        const auto& item = cases[i];
+        const auto result = deterministicSinCos( fromBits( item.angle ) );
+        check( bits( result.cosine ) == item.cosine && bits( result.sine ) == item.sine,
+            "full-range sine/cosine exact-bit fixture" );
+        if( stream )
+        {
+            outputFloat( stream, "zonai.fullSinCosExact.cos", i, result.cosine );
+            outputFloat( stream, "zonai.fullSinCosExact.sin", i, result.sine );
+        }
+    }
+
+    constexpr std::array<std::uint32_t, 3> invalid{ 0x7f800000u, 0xff800000u, 0x7fc12345u };
+    for( std::size_t i = 0; i < invalid.size(); ++i )
+    {
+        const auto result = deterministicSinCos( fromBits( invalid[i] ) );
+        check( bits( result.cosine ) == 0x7fc00000u && bits( result.sine ) == 0x7fc00000u,
+            "full-range sine/cosine canonical invalid result" );
+        if( stream )
+        {
+            std::fprintf( stream, "zonai.fullSinCosInvalid.cos.%02zu\t%08x\n", i, bits( result.cosine ) );
+            std::fprintf( stream, "zonai.fullSinCosInvalid.sin.%02zu\t%08x\n", i, bits( result.sine ) );
+        }
+    }
+
+    // 32 deterministic mantissas per exponent, including both endpoints,
+    // across all large-angle binary32 exponent bins. Check both signs.
+    std::uint64_t seed = 0x66756c6c73696e71ull;
+    std::size_t index = 0;
+    for( std::uint32_t exponent = 129; exponent <= 254; ++exponent )
+    {
+        for( std::uint32_t sample = 0; sample < 32; ++sample, ++index )
+        {
+            seed ^= seed >> 12;
+            seed ^= seed << 25;
+            seed ^= seed >> 27;
+            const auto raw = static_cast<std::uint32_t>( seed * 2685821657736338717ull );
+            const std::uint32_t mantissa = sample == 0 ? 0u :
+                sample == 1 ? 0x007fffffu : raw & 0x007fffffu;
+            const float angle = fromBits( ( exponent << 23 ) | mantissa | ( raw & 0x80000000u ) );
+            const auto result = deterministicSinCos( angle );
+            const auto opposite = deterministicSinCos( -angle );
+            check( std::isfinite( result.cosine ) && std::isfinite( result.sine ) &&
+                std::abs( result.cosine ) <= 1.0f && std::abs( result.sine ) <= 1.0f,
+                "full-range sine/cosine finite range" );
+            check( bits( opposite.cosine ) == bits( result.cosine ) &&
+                bits( opposite.sine ) == ( bits( result.sine ) ^ 0x80000000u ),
+                "full-range sine/cosine even/odd symmetry" );
+            const double c = result.cosine, s = result.sine;
+            check( std::abs( c * c + s * s - 1.0 ) <= 2.0e-7,
+                "full-range sine/cosine rotation norm" );
+            // Numerical oracle only, not an exact platform reference.
+            const auto close = []( double value, double reference )
+            {
+                return std::abs( value - reference ) <=
+                    2.0 * std::numeric_limits<float>::epsilon() * std::abs( reference ) +
+                    std::numeric_limits<float>::denorm_min();
+            };
+            check( close( c, std::cos( static_cast<double>( angle ) ) ) &&
+                close( s, std::sin( static_cast<double>( angle ) ) ),
+                "full-range sine/cosine numerical reference" );
+            if( stream )
+            {
+                outputFloat( stream, "zonai.fullSinCosWide.cos", index, result.cosine );
+                outputFloat( stream, "zonai.fullSinCosWide.sin", index, result.sine );
+            }
+        }
+    }
 }
 
 void emitFingerprint( std::FILE* stream )
@@ -553,6 +656,7 @@ int main( int argc, char** argv )
             auditLerp( nullptr );
             auditSinCos( nullptr );
             auditWindSource( nullptr );
+            auditFullRangeSinCos( nullptr );
             std::puts( "FP math contract audit passed" );
             return EXIT_SUCCESS;
         }
@@ -570,6 +674,7 @@ int main( int argc, char** argv )
         auditLerp( stream );
         auditSinCos( stream );
         auditWindSource( stream );
+        auditFullRangeSinCos( stream );
         if( std::fclose( stream ) != 0 )
             throw std::runtime_error( "cannot close FP audit output" );
 
