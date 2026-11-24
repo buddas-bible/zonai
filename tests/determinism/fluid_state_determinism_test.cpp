@@ -1235,6 +1235,170 @@ struct fluidStateTraceProbe2
             predictedWithCompatibilityL1, newlyClosed, newlyOpen );
     }
 
+    // R4h: matched fresh Worlds initialized from the actual frozen obstacle
+    // state. Step the real rigid solver with/without pressure load, never
+    // call the fluid step. No copy of live World contact/cache history.
+    static void captureWorldPressureResponse( const fluidField2& before,
+        std::span<const fluidObstacleForce2> baselineFeedback,
+        const std::vector<fluidField2::coupledBodyResponse>& candidate,
+        std::string& trace, const std::string& key )
+    {
+        using namespace sandbox;
+        const auto& initial = before.frozenPressureObstacles_;
+        const float dt = before.frozenPressureTimeStep_;
+        const double area = static_cast<double>( before.cellSize_ ) * before.cellSize_;
+        if( initial.size() != 3 || baselineFeedback.size() != 3 || candidate.size() != 3 || dt <= 0.0f )
+            throw std::runtime_error( key + " invalid World response fixture" );
+        const auto run = [&]( int substeps, const std::array<fluidObstacleForce2, 3>& load )
+        {
+            rigidBodyDemo scene{ demoKind::windFlow };
+            auto& world = scene.getWorld();
+            if( scene.getShapes().size() != initial.size() )
+                throw std::runtime_error( key + " World fixture shape count changed" );
+            std::vector<fluidShapeObstacle2> result( initial.begin(), initial.end() );
+            for( std::size_t j = 0; j < initial.size(); ++j )
+            {
+                const auto id = scene.getShapes()[j].bodyHandle;
+                if( 1.0f / world.GetBodyMass( id ) != initial[j].inverseMass ||
+                    1.0f / world.GetBodyRotationalInertia( id ) != initial[j].inverseInertia ||
+                    world.GetBodyLinearDamping( id ) != 0.0f || world.GetBodyAngularDamping( id ) != 0.0f )
+                    throw std::runtime_error( key + " World mass/damping differs from free response model" );
+                world.SetBodyTransform( id, initial[j].transform );
+                world.SetBodyLinearVelocity( id, initial[j].linearVelocity );
+                world.SetBodyAngularVelocity( id, initial[j].angularVelocity );
+                const vec2 center = TransformPoint( world.GetBodyTransform( id ), world.GetBodyLocalCenter( id ) );
+                if( center.x != initial[j].center.x || center.y != initial[j].center.y )
+                    throw std::runtime_error( key + " World initial COM differs" );
+                world.ApplyForceToCenter( id, load[j].force );
+                world.ApplyTorque( id, load[j].torque );
+            }
+            world.Step( dt, substeps );
+            for( std::size_t j = 0; j < initial.size(); ++j )
+            {
+                const auto id = scene.getShapes()[j].bodyHandle;
+                if( world.GetBody( id ).contactCount != 0 || world.GetBody( id ).jointCount != 0 )
+                    throw std::runtime_error( key + " unexpected constraint in free-body comparison" );
+                auto& body = result[j];
+                body.transform = world.GetBodyTransform( id );
+                body.center = TransformPoint( body.transform, world.GetBodyLocalCenter( id ) );
+                body.linearVelocity = world.GetBodyLinearVelocity( id );
+                body.angularVelocity = world.GetBodyAngularVelocity( id );
+                if( !IsFinite( body.center ) || !IsFinite( body.linearVelocity ) ||
+                    !std::isfinite( body.angularVelocity ) )
+                    throw std::runtime_error( key + " nonfinite World response" );
+            }
+            return result;
+        };
+        fluidField2 geometry = before;
+        geometry.setPrePressureSnapshotObserver( {} );
+        setStageObserver( geometry, {} );
+        const auto rebuild = [&]( const std::vector<fluidShapeObstacle2>& poses )
+        {
+            geometry.updateObstacles( poses );
+            geometry.updateCutCellGeometry( poses );
+            if( !geometry.cutCellTransition_.usedDisjointAnalyticGeometry )
+                throw std::runtime_error( key + " World response geometry not analytic" );
+            std::vector<double> volume;
+            volume.reserve( geometry.cellFluidFraction_.size() );
+            for( float fraction : geometry.cellFluidFraction_ )
+            {
+                if( !std::isfinite( fraction ) || fraction < 0.0f || fraction > 1.0f )
+                    throw std::runtime_error( key + " invalid World response fraction" );
+                volume.push_back( area * fraction );
+            }
+            return volume;
+        };
+        const std::array<fluidObstacleForce2, 3> zero{};
+        for( int substeps : { 1, 2, 4, 8 } )
+        {
+            const auto control = run( substeps, zero );
+            const auto controlVolume = rebuild( control );
+            // Semi-implicit Euler under constant force, no damping,
+            // constraints or velocity caps: sum the N acceleration kicks.
+            const double cadence = ( substeps + 1.0 ) / ( 2.0 * substeps );
+            for( bool corrected : { false, true } )
+            {
+                std::array<fluidObstacleForce2, 3> load{};
+                for( std::size_t j = 0; j < load.size(); ++j )
+                {
+                    if( corrected )
+                    {
+                        load[j].force = { static_cast<float>( candidate[j].fx ), static_cast<float>( candidate[j].fy ) };
+                        load[j].torque = static_cast<float>( candidate[j].torque );
+                    }
+                    else load[j] = baselineFeedback[j];
+                }
+                const auto loaded = run( substeps, load );
+                const auto prefix = key + ".steps" + std::to_string( substeps ) + ( corrected ? ".candidate" : ".baseline" );
+                const auto out = [&]( const std::string& name, auto value )
+                {
+                    if( !std::isfinite( static_cast<double>( value ) ) )
+                        throw std::runtime_error( prefix + name + " nonfinite response output" );
+                    appendScalar( trace, prefix + name, value );
+                };
+                auto full = control, discrete = control;
+                double maxFullError = 0.0, maxDiscreteError = 0.0;
+                for( std::size_t j = 0; j < load.size(); ++j )
+                {
+                    const auto k = ".body[" + std::to_string( j ) + "]";
+                    const vec2 dx = loaded[j].center - control[j].center;
+                    const vec2 dv = loaded[j].linearVelocity - control[j].linearVelocity;
+                    const float dw = loaded[j].angularVelocity - control[j].angularVelocity;
+                    const rot2 relative = loaded[j].transform.rotation * Inverse( control[j].transform.rotation );
+                    const float da = deterministicAtan2( relative.s, relative.c );
+                    const double fullX = static_cast<double>( dt ) * dt * initial[j].inverseMass * load[j].force.x;
+                    const double fullY = static_cast<double>( dt ) * dt * initial[j].inverseMass * load[j].force.y;
+                    const double fullAngle = static_cast<double>( dt ) * dt * initial[j].inverseInertia * load[j].torque;
+                    const auto predict = [&]( fluidShapeObstacle2& pose, double factor )
+                    {
+                        const rot2 delta = rot2::FromRadians( static_cast<float>( factor * fullAngle ) );
+                        pose.center = control[j].center + vec2{ static_cast<float>( factor * fullX ),
+                            static_cast<float>( factor * fullY ) };
+                        pose.transform.position = pose.center +
+                            Rotate( delta, control[j].transform.position - control[j].center );
+                        pose.transform.rotation = delta * control[j].transform.rotation;
+                    };
+                    predict( full[j], 1.0 ); predict( discrete[j], cadence );
+                    out( k + ".force.x", load[j].force.x ); out( k + ".force.y", load[j].force.y );
+                    out( k + ".torque", load[j].torque );
+                    out( k + ".dx", dx.x ); out( k + ".dy", dx.y ); out( k + ".da", da );
+                    out( k + ".dv.x", dv.x ); out( k + ".dv.y", dv.y ); out( k + ".dw", dw );
+                    out( k + ".full.dx", fullX ); out( k + ".full.dy", fullY ); out( k + ".full.da", fullAngle );
+                    out( k + ".cadence.dx", cadence * fullX ); out( k + ".cadence.dy", cadence * fullY );
+                    out( k + ".cadence.da", cadence * fullAngle );
+                    out( k + ".cadence.error.x", dx.x - cadence * fullX );
+                    out( k + ".cadence.error.y", dx.y - cadence * fullY );
+                    out( k + ".cadence.error.angle", da - cadence * fullAngle );
+                    maxFullError = std::max( maxFullError, std::max( std::abs( dx.x - fullX ), std::abs( dx.y - fullY ) ) );
+                    maxDiscreteError = std::max( maxDiscreteError, std::max(
+                        std::abs( dx.x - cadence * fullX ), std::abs( dx.y - cadence * fullY ) ) );
+                }
+                const auto actualVolume = rebuild( loaded ), fullVolume = rebuild( full ),
+                    discreteVolume = rebuild( discrete );
+                double actualL1 = 0.0, fullError = 0.0, discreteError = 0.0, actualSum = 0.0;
+                int closed = 0, opened = 0;
+                for( std::size_t i = 0; i < actualVolume.size(); ++i )
+                {
+                    actualL1 += std::abs( actualVolume[i] - controlVolume[i] );
+                    actualSum += actualVolume[i] - controlVolume[i];
+                    fullError += std::abs( fullVolume[i] - actualVolume[i] );
+                    discreteError += std::abs( discreteVolume[i] - actualVolume[i] );
+                    closed += controlVolume[i] > 0.0 && actualVolume[i] == 0.0;
+                    opened += controlVolume[i] == 0.0 && actualVolume[i] > 0.0;
+                }
+                out( ".cadenceFactor", cadence );
+                out( ".maxFullPositionError", maxFullError ); out( ".maxCadencePositionError", maxDiscreteError );
+                out( ".actualVolumeL1", actualL1 ); out( ".actualVolumeSum", actualSum );
+                out( ".fullVolumeErrorL1", fullError ); out( ".cadenceVolumeErrorL1", discreteError );
+                out( ".closed", closed ); out( ".opened", opened );
+                std::printf( "%s factor %.9g position error full %.9g cadence %.9g m "
+                    "actual volume L1 %.9g full error %.9g cadence error %.9g m^2 closed/open %d/%d\n",
+                    prefix.c_str(), cadence, maxFullError, maxDiscreteError, actualL1,
+                    fullError, discreteError, closed, opened );
+            }
+        }
+    }
+
     // R4a: independent, test-only interval-average pressure model. Reuse the
     // production analytic geometry and boundary assembly at quadrature poses.
     // Do not write averaged apertures into the live endpoint field.
@@ -1976,6 +2140,11 @@ struct fluidStateTraceProbe2
         }
         if( current.rawL1 > initialGap )
             throw std::runtime_error( defectKey + " accepted geometric defect increased" );
+        // evaluateDefect/PCG may leave force scratch from a rejected trial.
+        // Recompute the accepted pressure's feedback before World replay.
+        transpose( correctedPressure );
+        captureWorldPressureResponse( before, baselineFeedback, force, trace,
+            "worldPressureResponse." + handoffKey );
 
     }
 
