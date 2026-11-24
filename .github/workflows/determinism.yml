@@ -443,6 +443,7 @@ jobs:
               "forwardInstantaneousEndpoint": 104,
               "forwardPersistent": 88384, "forwardPersistentTransfer": 224,
               "forwardPersistentEndpoint": 416, "forwardPersistentMomentum": 128,
+              "forwardPersistentMinimumVolume": 528,
           }
           topology = totals.get("topologyQuadrature", 0)
           # 49 second-resolution output rows, six quadrature headers,
