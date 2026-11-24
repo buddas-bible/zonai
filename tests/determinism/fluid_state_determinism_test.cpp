@@ -901,14 +901,46 @@ std::string runWorldFluidScene( const char* name, bool drag,
                         observed.captureWorld( trace, prefix, tick );
                         observed.captureFluid( trace, prefix, snapshot );
                     }
+                    // In the extended run, retain compact per-interval
+                    // observations instead of multiplying every raw-grid row
+                    // by 720. Full raw fields are still compared every frame.
+                    if( frameCount > 12 && phase == 0 )
+                    {
+                        const float width = snapshot.getWidth() * snapshot.getCellSize();
+                        const zonai::vec2 source{ snapshot.getOrigin().x +
+                            std::min( 2.5f, 0.25f * width ), 0.0f };
+                        const auto velocity = snapshot.sampleVelocity( source );
+                        check( std::isfinite( velocity.x ) && std::isfinite( velocity.y ),
+                            "R3o nonfinite source-region velocity" );
+                        const std::string prefix = key + ".interval." + std::to_string( interval ) +
+                            ".sourceSample";
+                        probe::appendScalar( trace, prefix + ".x", velocity.x );
+                        probe::appendScalar( trace, prefix + ".y", velocity.y );
+                    }
                     if( phase == 9 )
                     {
                         const auto& pressure = snapshot.getCutCellPressure();
                         sawCoupled |= pressure.usedCoupledProjection &&
                             !pressure.coupledSolveFailed && pressure.usedIncompleteCholesky;
                         sawDisjoint |= snapshot.getCutCellTransition().usedDisjointAnalyticGeometry;
-                        check( !pressure.coupledSolveFailed &&
-                            std::isfinite( pressure.pressureResidual ), "R3m pressure solve failure" );
+                        if( pressure.coupledSolveFailed || !std::isfinite( pressure.pressureResidual ) )
+                            throw std::runtime_error( key + ".interval." + std::to_string( interval ) +
+                                " pressure solve failure, status=" +
+                                std::to_string( static_cast<int>( pressure.coupledStatus ) ) );
+                        if( frameCount > 12 )
+                        {
+                            const auto flow = snapshot.getFlowAudit( timeStep / worldFluidScene::fluidSubsteps );
+                            if( flow.nonFiniteFluidFaces != 0 || !std::isfinite( flow.continuityRms ) ||
+                                !std::isfinite( flow.maxFluidFaceSpeed ) )
+                                throw std::runtime_error( key + ".interval." + std::to_string( interval ) +
+                                    " nonfinite flow after projection" );
+                            const std::string prefix = key + ".interval." + std::to_string( interval ) + ".projection";
+                            probe::appendScalar( trace, prefix + ".continuityRms", flow.continuityRms );
+                            probe::appendScalar( trace, prefix + ".maxFaceSpeed", flow.maxFluidFaceSpeed );
+                            probe::appendScalar( trace, prefix + ".pcg.used", static_cast<int>( pressure.usedCoupledProjection ) );
+                            probe::appendScalar( trace, prefix + ".pcg.status", static_cast<int>( pressure.coupledStatus ) );
+                            probe::appendScalar( trace, prefix + ".pcg.iterations", pressure.coupledIterations );
+                        }
                     }
                 } );
             observed.demo.step( timeStep, worldFluidScene::worldSubsteps );
