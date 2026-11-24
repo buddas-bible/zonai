@@ -353,6 +353,8 @@ jobs:
           totals = {}
           mismatches = {}
           first_by_scene = {}
+          first_swept_probe = {}
+          first_state = {}
           for row, (u, w) in enumerate(zip_longest(ubuntu, windows), 1):
               key = (u or w or "missing").split("\t", 1)[0]
               scene = key.split(".", 1)[0]
@@ -363,6 +365,10 @@ jobs:
               mismatches[scene] = mismatches.get(scene, 0) + 1
               entry = (row, key, u, w)
               first_by_scene.setdefault(scene, entry)
+              if ".sweptProbe." in key:
+                  first_swept_probe.setdefault(scene, entry)
+              else:
+                  first_state.setdefault(scene, entry)
               if first is None:
                   first = entry
 
@@ -375,6 +381,13 @@ jobs:
                   print(f"  first: row={row} field={key}")
                   print(f"  Ubuntu:  {u if u is not None else '<missing>'}")
                   print(f"  Windows: {w if w is not None else '<missing>'}")
+              for label, group in (("swept reconstruction", first_swept_probe), ("non-swept-probe trace", first_state)):
+                  if scene not in group:
+                      continue
+                  row, key, u, w = group[scene]
+                  print(f"  first {label}: row={row} field={key}")
+                  print(f"    Ubuntu:  {u if u is not None else '<missing>'}")
+                  print(f"    Windows: {w if w is not None else '<missing>'}")
           if first is not None:
               row, key, u, w = first
               print(f"First Fluid divergence: row={row} field={key}")
