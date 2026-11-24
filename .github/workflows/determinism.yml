@@ -440,6 +440,7 @@ jobs:
               "forwardWarmStart": 200,
               "forwardPressureHistory": 204,
               "forwardCorrectedEndpoint": 56,
+              "forwardInstantaneousEndpoint": 104,
           }
           topology = totals.get("topologyQuadrature", 0)
           # 49 second-resolution output rows, six quadrature headers,
