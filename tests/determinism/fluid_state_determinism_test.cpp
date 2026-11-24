@@ -749,7 +749,8 @@ struct fluidStateTraceProbe2
     static void captureSpaceTimeProjection( const fluidField2& before, const fluidField2& baseline,
         std::span<const fluidObstacleForce2> baselineFeedback, std::string& trace,
         const std::string& key, int samples, const std::string& handoffKey,
-        bool requireTarget = true )
+        bool requireTarget = true, int endpointDepth = 0,
+        const std::string& topologyKey = {} )
     {
         const auto& start = before.previousObstacles_;
         const auto& finish = before.frozenPressureObstacles_;
@@ -776,46 +777,123 @@ struct fluidStateTraceProbe2
             omega[i] = std::remainder( endAngle - angle[i], 2.0f * std::numbers::pi_v<float> ) /
                 before.frozenPressureTimeStep_;
         }
-        for( int step = 0; step < samples; ++step )
+        const auto setPose = [&]( float alpha )
         {
-            const float alpha = ( step + 0.5f ) / samples;
             for( std::size_t i = 0; i < owners; ++i )
             {
                 poses[i].transform.position = start[i].transform.position +
                     alpha * ( finish[i].transform.position - start[i].transform.position );
                 poses[i].transform.rotation = rot2::FromRadians(
                     angle[i] + omega[i] * before.frozenPressureTimeStep_ * alpha );
-                // Interpolate COM separately from the shape transform.
                 poses[i].center = start[i].center + alpha * ( finish[i].center - start[i].center );
             }
             geometry.updateObstacles( poses );
             geometry.updateCutCellGeometry( poses );
             if( !geometry.cutCellTransition_.usedDisjointAnalyticGeometry )
                 throw std::runtime_error( key + " nonanalytic quadrature geometry" );
-            for( std::size_t i = 0; i < n; ++i ) fraction[i] += geometry.cellFluidFraction_[i];
+        };
+
+        // Preserve the old midpoint arithmetic and trace exactly unless
+        // the explicit endpoint refinement experiment is requested.
+        std::vector<int> missed;
+        if( endpointDepth > 0 )
+        {
+            std::vector<bool> supported( n );
+            for( int step = 0; step < samples; ++step )
+            {
+                setPose( ( step + 0.5f ) / samples );
+                for( std::size_t i = 0; i < n; ++i )
+                    supported[i] = supported[i] || geometry.cellFluidFraction_[i] > 0.0f;
+            }
+            for( std::size_t i = 0; i < n; ++i )
+                if( !supported[i] && before.cellFluidFraction_[i] != before.previousCellFluidFraction_[i] )
+                    missed.push_back( static_cast<int>( i ) );
+            if( missed.empty() )
+                throw std::runtime_error( key + " historical midpoint coverage failure not reproduced" );
+        }
+        const auto integrate = [&]( float alpha, double weight )
+        {
+            setPose( alpha );
+            for( std::size_t i = 0; i < n; ++i ) fraction[i] += weight * geometry.cellFluidFraction_[i];
             for( int y = 0; y < geometry.height_; ++y )
                 for( int x = 1; x < geometry.width_; ++x )
-                    meanU[geometry.uIndex( x, y )] += geometry.cutCellUOpen( x, y );
+                    meanU[geometry.uIndex( x, y )] += weight * geometry.cutCellUOpen( x, y );
             for( int y = 1; y < geometry.height_; ++y )
                 for( int x = 0; x < geometry.width_; ++x )
-                    meanV[geometry.vIndex( x, y )] += geometry.cutCellVOpen( x, y );
-            // A zero-RHS production solve assembles the exact current
-            // boundary coefficients without needing to expose a new API.
+                    meanV[geometry.vIndex( x, y )] += weight * geometry.cutCellVOpen( x, y );
+            // Same geometry and same quadrature weight for L and B.
             std::fill( geometry.divergence_.begin(), geometry.divergence_.end(), 0.0f );
             if( !geometry.solveCoupledPressure( static_cast<float>( dt ), 200, poses, true ) )
                 throw std::runtime_error( key + " zero-RHS boundary assembly failed" );
             for( const auto& f : geometry.coupledPressureScratch_.faces )
             {
                 auto& c = coefficients[static_cast<std::size_t>( f.cell ) * owners + f.owner];
-                c.fx += f.fx; c.fy += f.fy; c.torque += f.torque;
+                c.fx += weight * f.fx; c.fy += weight * f.fy; c.torque += weight * f.torque;
             }
+        };
+        double weightSum = 0.0;
+        if( endpointDepth == 0 )
+        {
+            for( int step = 0; step < samples; ++step )
+                integrate( ( step + 0.5f ) / samples, 1.0 );
+            weightSum = samples;
         }
-        for( double& a : meanU ) a /= samples;
-        for( double& a : meanV ) a /= samples;
-        for( double& a : fraction ) a /= samples;
+        else
+        {
+            if( samples < 2 || endpointDepth > 16 )
+                throw std::runtime_error( key + " unsupported endpoint refinement" );
+            // Subdivide only the first and last uniform panels into a
+            // dyadic sequence approaching the endpoints. All samples are
+            // interior midpoints; no artificial endpoint aperture floor.
+            const auto panel = [&]( double lo, double hi )
+            {
+                const double weight = hi - lo;
+                const float alpha = static_cast<float>( 0.5 * ( lo + hi ) );
+                if( !( alpha > 0.0f && alpha < 1.0f && weight > 0.0 ) )
+                    throw std::runtime_error( key + " invalid refined panel" );
+                integrate( alpha, weight );
+                weightSum += weight;
+            };
+            const double width = 1.0 / samples;
+            double tiny = width;
+            for( int i = 0; i < endpointDepth; ++i ) tiny *= 0.5;
+            panel( 0.0, tiny );
+            for( double a = tiny; a < width; a *= 2.0 ) panel( a, 2.0 * a );
+            for( int step = 1; step < samples - 1; ++step )
+                panel( step * width, ( step + 1 ) * width );
+            for( double a = width; a > tiny; a *= 0.5 ) panel( 1.0 - a, 1.0 - 0.5 * a );
+            panel( 1.0 - tiny, 1.0 );
+            if( std::abs( weightSum - 1.0 ) > 1.0e-14 )
+                throw std::runtime_error( key + " refined quadrature weights do not sum to one" );
+        }
+        for( double& a : meanU ) a /= weightSum;
+        for( double& a : meanV ) a /= weightSum;
+        for( double& a : fraction ) a /= weightSum;
         for( auto& c : coefficients )
         {
-            c.fx /= samples; c.fy /= samples; c.torque /= samples;
+            c.fx /= weightSum; c.fy /= weightSum; c.torque /= weightSum;
+        }
+        if( endpointDepth > 0 )
+        {
+            appendScalar( trace, topologyKey + ".missedCount", static_cast<int>( missed.size() ) );
+            appendScalar( trace, topologyKey + ".panelCount", samples + 2 * endpointDepth );
+            appendScalar( trace, topologyKey + ".weightSum", weightSum );
+            for( int i : missed )
+            {
+                const int x = i % before.width_, y = i / before.width_;
+                const double opening = meanU[before.uIndex( x, y )] + meanU[before.uIndex( x + 1, y )] +
+                    meanV[before.vIndex( x, y )] + meanV[before.vIndex( x, y + 1 )];
+                const auto prefix = topologyKey + ".cell[" + std::to_string( i ) + "]";
+                appendScalar( trace, prefix + ".previous", before.previousCellFluidFraction_[i] );
+                appendScalar( trace, prefix + ".current", before.cellFluidFraction_[i] );
+                appendScalar( trace, prefix + ".meanFraction", fraction[i] );
+                appendScalar( trace, prefix + ".meanOpeningSum", opening );
+                std::printf( "%s x %d y %d previous %.9g current %.9g mean fraction %.9g mean opening %.9g\\n",
+                    prefix.c_str(), x, y, before.previousCellFluidFraction_[i], before.cellFluidFraction_[i],
+                    fraction[i], opening );
+                if( fraction[i] <= 0.0 || opening <= 0.0 )
+                    throw std::runtime_error( prefix + " endpoint refinement did not recover open support" );
+            }
         }
 
         std::vector<edge> edges;
@@ -831,7 +909,8 @@ struct fluidStateTraceProbe2
             if( fraction[i] <= 0.0 )
             {
                 if( change != 0.0 )
-                    throw std::runtime_error( key + " changed volume missed by midpoint quadrature" );
+                    throw std::runtime_error( key + " changed volume missed by quadrature at cell " +
+                        std::to_string( i ) );
                 continue;
             }
             parent[i] = static_cast<int>( i );
@@ -2521,7 +2600,12 @@ std::string runNearClosedFaceScene()
             "R4b adjacent baseline projection failed" );
         const auto key = "intervalHandoff.adjacent" + std::to_string( i == 0 ? targetIndex - 1 : targetIndex + 1 );
         probe::captureSpaceTimeProjection( input, output, *feedback, trace,
-            key + ".projection", 64, key + ".volume", false );
+            key + ".projection", 64, key + ".volume", false, i == 1 ? 12 : 0,
+            "topologyQuadrature.depth12" );
+        if( i == 1 )
+            probe::captureSpaceTimeProjection( input, output, *feedback, trace,
+                "topologyQuadrature.depth16.projection", 64, "topologyQuadrature.depth16.volume",
+                false, 16, "topologyQuadrature.depth16" );
     }
     for( bool corrected : { false, true } )
     {
