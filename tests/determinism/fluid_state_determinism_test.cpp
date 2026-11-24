@@ -1446,20 +1446,24 @@ struct fluidStateTraceProbe2
         bool adaptiveEndpoint = false, forwardTiming* timing = nullptr,
         double relativeSquaredTolerance = 1.0e-16, bool warmStart = false,
         std::span<const float> previousForwardPressure = {}, bool captureEndpoint = false,
-        bool volumeWeightedCompatibility = false )
+        bool volumeWeightedCompatibility = false, bool skipFixedBodyProducts = false )
     {
         if( !previousForwardPressure.empty() && !warmStart )
             throw std::runtime_error( key + " previous pressure requires warm start" );
         if( warmStart && ( !continuation || !adaptiveEndpoint || correctionBudget != 0 ||
-            relativeSquaredTolerance != 1.0e-10 ) )
+            ( relativeSquaredTolerance != 1.0e-10 &&
+                !( skipFixedBodyProducts && responseScale == 0.0 && relativeSquaredTolerance == 1.0e-16 ) ) ) )
             throw std::runtime_error( key + " invalid forward warm-start fixture" );
         if( relativeSquaredTolerance != 1.0e-16 && ( !adaptiveEndpoint ||
             ( relativeSquaredTolerance != 1.0e-12 && relativeSquaredTolerance != 1.0e-10 ) ) )
             throw std::runtime_error( key + " invalid experimental residual budget" );
         const bool fixedGeometry = responseScale == 0.0;
         if( fixedGeometry && ( !continuation || !captureEndpoint || correctionBudget != 0 ||
-            !adaptiveEndpoint || warmStart || relativeSquaredTolerance != 1.0e-16 ) )
+            !adaptiveEndpoint || ( !skipFixedBodyProducts &&
+                ( warmStart || relativeSquaredTolerance != 1.0e-16 ) ) ) )
             throw std::runtime_error( key + " invalid actual-geometry diagnostic" );
+        if( skipFixedBodyProducts && !fixedGeometry )
+            throw std::runtime_error( key + " fast fixed operator requires fixed geometry" );
         if( volumeWeightedCompatibility && !fixedGeometry )
             throw std::runtime_error( key + " weighted compatibility requires fixed geometry" );
         if( !fixedGeometry && responseScale != 1.0 && responseScale != 0.75 )
@@ -1761,6 +1765,7 @@ struct fluidStateTraceProbe2
                 const double d = e.a * ( p[e.first] - p[e.second] );
                 out[e.first] += d; out[e.second] -= d;
             }
+            if( skipFixedBodyProducts ) return;
             transpose( p );
             for( std::size_t i = 0; i < n; ++i )
                 for( std::size_t j = 0; j < owners; ++j )
@@ -1837,6 +1842,9 @@ struct fluidStateTraceProbe2
         }
         zeroMean( p );
         multiply( p, ap );
+        // The fixed operator omits B M^-1 B^T, but the final pressure
+        // traction still needs B^T p in the original accumulation order.
+        if( skipFixedBodyProducts ) transpose( p );
         double unprojectedSquared = 0.0;
         for( std::size_t i = 0; i < n; ++i )
         {
@@ -2962,6 +2970,84 @@ struct fluidStateTraceProbe2
                 timing, 1.0e-16, false, {}, true, true );
             const auto pressureEnd = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
             if( timing ) timing->pressureMs = elapsedMs( pressureStart, pressureEnd );
+            // R4af: matched-state pressure-only trials. Do not replace the
+            // accepted candidate or include trial time in the R4ae total.
+            // Benchmark probes are timed separately in Release.
+            for( int variant = 0; variant < 3; ++variant )
+            {
+                const bool warm = variant != 0;
+                const double tolerance = variant == 2 ? 1.0e-10 : 1.0e-16;
+                const std::string trialKey = "forwardFixedPressureCost.interval" +
+                    std::to_string( index ) + ".variant" + std::to_string( variant );
+                continuationPressure alternative;
+                std::string alternativeScratch;
+                forwardTiming trialTiming{};
+                const auto trialStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
+                captureSpaceTimeProjection( forward, laggedField, laggedLoad, alternativeScratch,
+                    trialKey + ".projection", 16, trialKey + ".volume", false,
+                    16, trialKey + ".topology", 0.0, &alternative, 0, true,
+                    timing ? &trialTiming : nullptr, tolerance, warm, {}, true, true, true );
+                const auto trialEnd = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
+                double gap = 0.0, negative = 0.0, pressureDelta = 0.0, velocityDelta = 0.0;
+                double forceDelta = 0.0, torqueDelta = 0.0, ledgerDelta = 0.0;
+                int negativeCells = 0, unsupportedCells = 0;
+                for( std::size_t i = 0; i < alternative.fluxVolume.size(); ++i )
+                {
+                    const double volume = alternative.fluxVolume[i];
+                    const double error = std::abs( area * predictedFraction[i] - volume );
+                    gap += error;
+                    ledgerDelta = std::max( ledgerDelta, std::abs( volume - candidate.fluxVolume[i] ) );
+                    if( volume < 0.0 ) { negative -= volume; ++negativeCells; }
+                    unsupportedCells += alternative.component[i] < 0 && error != 0.0;
+                    pressureDelta = std::max( pressureDelta, std::abs(
+                        static_cast<double>( alternative.pressure[i] ) - candidate.pressure[i] ) );
+                }
+                const auto compareVelocity = [&]( const std::vector<double>& a, const std::vector<double>& b )
+                {
+                    for( std::size_t i = 0; i < a.size(); ++i )
+                        velocityDelta = std::max( velocityDelta, std::abs( a[i] - b[i] ) );
+                };
+                compareVelocity( alternative.intervalU, candidate.intervalU );
+                compareVelocity( alternative.intervalV, candidate.intervalV );
+                for( std::size_t j = 0; j < alternative.feedback.size(); ++j )
+                {
+                    forceDelta = std::max( forceDelta, std::max(
+                        std::abs( static_cast<double>( alternative.feedback[j].force.x ) - candidate.feedback[j].force.x ),
+                        std::abs( static_cast<double>( alternative.feedback[j].force.y ) - candidate.feedback[j].force.y ) ) );
+                    torqueDelta = std::max( torqueDelta, std::abs(
+                        static_cast<double>( alternative.feedback[j].torque ) - candidate.feedback[j].torque ) );
+                }
+                if( variant == 0 && ( pressureDelta != 0.0 || velocityDelta != 0.0 ||
+                    forceDelta != 0.0 || torqueDelta != 0.0 || ledgerDelta != 0.0 ||
+                    alternative.initialIterations != candidate.initialIterations ||
+                    alternative.trueResidualSquared != candidate.trueResidualSquared ) )
+                    throw std::runtime_error( trialKey + " fixed operator changed numerical result" );
+                const auto emitTrial = [&]( const char* suffix, auto value )
+                {
+                    if( !std::isfinite( static_cast<double>( value ) ) )
+                        throw std::runtime_error( trialKey + suffix + " nonfinite fixed pressure trial" );
+                    appendScalar( trace, trialKey + suffix, value );
+                };
+                emitTrial( ".iterations", alternative.initialIterations );
+                emitTrial( ".relativeSquaredResidual", alternative.initialResidualSquared > 0.0 ?
+                    alternative.trueResidualSquared / alternative.initialResidualSquared : 0.0 );
+                emitTrial( ".seedRelativeSquared", alternative.initialResidualSquared > 0.0 ?
+                    alternative.seedResidualSquared / alternative.initialResidualSquared : 0.0 );
+                emitTrial( ".negativeVolume", negative ); emitTrial( ".negativeCells", negativeCells );
+                emitTrial( ".unsupportedCells", unsupportedCells ); emitTrial( ".actualGap", gap );
+                emitTrial( ".pressureDelta", pressureDelta ); emitTrial( ".velocityDelta", velocityDelta );
+                emitTrial( ".forceDelta", forceDelta ); emitTrial( ".torqueDelta", torqueDelta );
+                emitTrial( ".ledgerDelta", ledgerDelta ); emitTrial( ".peak", alternative.intervalPeak );
+                std::printf( "%s PCG %d negative %.9g (%d cells) gap %.9g pressure delta %.9g "
+                    "velocity delta %.9g force delta %.9g torque delta %.9g ledger delta %.9g\n",
+                    trialKey.c_str(), alternative.initialIterations, negative, negativeCells, gap,
+                    pressureDelta, velocityDelta, forceDelta, torqueDelta, ledgerDelta );
+                if( timing )
+                    std::printf( "R4af timing interval=%d variant=%d linear_ms=%.6f pressure_ms=%.6f\n",
+                        index, variant, trialTiming.linearMs, elapsedMs( trialStart, trialEnd ) );
+            }
+            const auto trialsEnd = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
+            const double trialsMs = timing ? elapsedMs( pressureEnd, trialsEnd ) : 0.0;
             double gap = 0.0, negative = 0.0, unsupported = 0.0;
             int negativeCells = 0, unsupportedCells = 0;
             for( std::size_t i = 0; i < startFraction.size(); ++i )
@@ -3033,7 +3119,7 @@ struct fluidStateTraceProbe2
             committed->field = std::move( forward );
             committed->poses = predicted;
             committed->feedback = std::move( candidate.feedback );
-            if( timing ) timing->totalMs = elapsedMs( totalStart, benchmarkClock::now() );
+            if( timing ) timing->totalMs = elapsedMs( totalStart, benchmarkClock::now() ) - trialsMs;
             return;
         }
         // Use the lagged load only as the reference for diagnostic deltas.
@@ -3918,7 +4004,7 @@ struct fluidStateTraceProbe2
                 1.0e-10, true, nullptr, true, &state, staggered );
             if( benchmarkRepeat >= 0 )
             {
-                const double total = elapsedMs( stepStart, benchmarkClock::now() );
+                const double total = elapsedMs( stepStart, prepared ) + timing.totalMs;
                 std::printf( "R4ae timing interval=%d repeat=%d prepare_ms=%.6f setup_ms=%.6f "
                     "quadrature_ms=%.6f linear_ms=%.6f pressure_ms=%.6f endpoint_ms=%.6f total_ms=%.6f\n",
                     first + step, benchmarkRepeat, elapsedMs( stepStart, prepared ), timing.setupMs,
