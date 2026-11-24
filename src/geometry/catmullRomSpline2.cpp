@@ -1,4 +1,5 @@
 #include "geometry/catmullRomSpline2.h"
+#include "math/deterministicMath.h"
 
 #include <cassert>
 #include <cmath>
@@ -78,7 +79,7 @@ std::optional<double> IntegrateSegmentLength( vec2 startPoint, vec2 endPoint, ve
     // 미분 다항식을 double로 평가해 float t 반올림이 적분 수렴을 막지 않게 함.
     const auto speed = [&]( double t )
     {
-        return std::hypot( tangent1.x + t * ( 2.0 * qx + t * 3.0 * cx ), tangent1.y + t * ( 2.0 * qy + t * 3.0 * cy ) );
+        return deterministicHypot( tangent1.x + t * ( 2.0 * qx + t * 3.0 * cx ), tangent1.y + t * ( 2.0 * qy + t * 3.0 * cy ) );
     };
     const auto integrate = [&]( auto&& self, double a, double b, double fa, double fm, double fb, double estimate, double error, int depth ) -> std::optional<double>
     {
@@ -144,7 +145,7 @@ double GetPositionError( vec2 point, vec2 a, vec2 b, vec2 tangent1, vec2 tangent
     const double cx = tangent1.x + static_cast<double>( tangent2.x ) - 2.0 * dx, cy = tangent1.y + static_cast<double>( tangent2.y ) - 2.0 * dy;
     const double ex = ( static_cast<double>( point.x ) - a.x ) - t * ( tangent1.x + t * ( qx + t * cx ) );
     const double ey = ( static_cast<double>( point.y ) - a.y ) - t * ( tangent1.y + t * ( qy + t * cy ) );
-    return std::hypot( ex, ey );
+    return deterministicHypot( ex, ey );
 }
 
 std::optional<vec2> GetPositionByParameter( const catmullRomSpline2& spline, std::size_t segment, float t, double tolerance )
@@ -281,7 +282,7 @@ std::optional<double> preparedCatmullRomSpline2::curvature( std::size_t segmentI
     const vec2 second = secondDerivative( segmentIndex, t );
     if( !IsFinite( first ) || !IsFinite( second ) ) return {};
 
-    const double speed = std::hypot( static_cast<double>( first.x ), static_cast<double>( first.y ) );
+    const double speed = deterministicHypot( static_cast<double>( first.x ), static_cast<double>( first.y ) );
     if( speed == 0.0 ) return {};
 
     const double cross = static_cast<double>( first.x ) * second.y - static_cast<double>( first.y ) * second.x;
@@ -345,7 +346,7 @@ std::optional<splineSample2> preparedCatmullRomSpline2::evaluateSample( std::siz
     if( t > 0.0f && t < 1.0f && GetPositionError( point, segment.start, segment.end, segment.tangent1, segment.tangent2, t ) > 0.25 * tolerance ) return {};
 
     const vec2 first = derivative( segmentIndex, t );
-    const double speed = std::hypot( static_cast<double>( first.x ), static_cast<double>( first.y ) );
+    const double speed = deterministicHypot( static_cast<double>( first.x ), static_cast<double>( first.y ) );
     if( !std::isfinite( speed ) || speed <= 0.0 ) return {};
     return splineSample2{ point, { static_cast<float>( first.x / speed ), static_cast<float>( first.y / speed ) } };
 }
@@ -653,7 +654,7 @@ std::optional<double> Curvature( const catmullRomSpline2& spline, std::size_t se
     const vec2 second = SecondDerivative( spline, segmentIndex, t );
     if( !IsFinite( first ) || !IsFinite( second ) ) return {};
 
-    const double speed = std::hypot( static_cast<double>( first.x ), static_cast<double>( first.y ) );
+    const double speed = deterministicHypot( static_cast<double>( first.x ), static_cast<double>( first.y ) );
     if( speed == 0.0 ) return {};
 
     const double cross = static_cast<double>( first.x ) * second.y - static_cast<double>( first.y ) * second.x;
@@ -923,7 +924,7 @@ template <typename SegmentAt, typename EvaluatePoint, typename PositionAt> std::
             // Evaluate의 float 계수와 반올림 여유로 실제 평가점의 오차도 포함함.
             const double x = std::abs( static_cast<double>( a.x ) ) + std::abs( static_cast<double>( tangent1.x ) ) + std::abs( static_cast<double>( quadratic.x ) ) + std::abs( static_cast<double>( cubic.x ) );
             const double y = std::abs( static_cast<double>( a.y ) ) + std::abs( static_cast<double>( tangent1.y ) ) + std::abs( static_cast<double>( quadratic.y ) ) + std::abs( static_cast<double>( cubic.y ) );
-            evaluationError = 8.0 * std::numeric_limits<float>::epsilon() * std::hypot( x, y ) + 16.0 * std::numeric_limits<float>::denorm_min();
+            evaluationError = 8.0 * std::numeric_limits<float>::epsilon() * deterministicHypot( x, y ) + 16.0 * std::numeric_limits<float>::denorm_min();
         }
         if( end < 1.0 ) trim( curve, end, true );
         if( begin > 0.0 ) trim( curve, begin / end, false );
@@ -1202,7 +1203,7 @@ std::optional<splineSample2> EvaluateByDistance( const catmullRomSpline2& spline
         const auto point = GetPositionByParameter( spline, segment, t, tolerance );
         if( !point ) return {};
         const vec2 derivative = Derivative( spline, segment, t );
-        const double speed = std::hypot( static_cast<double>( derivative.x ), static_cast<double>( derivative.y ) );
+        const double speed = deterministicHypot( static_cast<double>( derivative.x ), static_cast<double>( derivative.y ) );
         if( !std::isfinite( speed ) || speed <= 0.0 ) return {};
         return splineSample2{ *point, { static_cast<float>( derivative.x / speed ), static_cast<float>( derivative.y / speed ) } };
     };
@@ -1254,7 +1255,7 @@ template <typename SegmentAt, typename EvaluatePoint, typename ControlScale> std
         const double dx = std::max( { minX - point.x, 0.0, point.x - maxX } );
         const double dy = std::max( { minY - point.y, 0.0, point.y - maxY } );
         // Hull 경계의 하한에 분할 반올림 여유를 남겨 조기 종료를 피함.
-        return std::max( 0.0, std::hypot( dx, dy ) - roundoff * ( depth + 1 ) );
+        return std::max( 0.0, deterministicHypot( dx, dy ) - roundoff * ( depth + 1 ) );
     };
     splineClosestPoint2 best{};
     double bestDistance = std::numeric_limits<double>::infinity();
@@ -1273,10 +1274,10 @@ template <typename SegmentAt, typename EvaluatePoint, typename ControlScale> std
             const double cx = tangent1.x + static_cast<double>( tangent2.x ) - 2.0 * dx, cy = tangent1.y + static_cast<double>( tangent2.y ) - 2.0 * dy;
             const double ex = ( static_cast<double>( candidate.x ) - a.x ) - t * ( tangent1.x + t * ( qx + t * cx ) );
             const double ey = ( static_cast<double>( candidate.y ) - a.y ) - t * ( tangent1.y + t * ( qy + t * cy ) );
-            if( std::hypot( ex, ey ) > 0.25 * tolerance ) return;
+            if( deterministicHypot( ex, ey ) > 0.25 * tolerance ) return;
         }
         const double dx = static_cast<double>( candidate.x ) - point.x, dy = static_cast<double>( candidate.y ) - point.y;
-        const double distance = std::hypot( dx, dy );
+        const double distance = deterministicHypot( dx, dy );
         if( distance < bestDistance || ( distance == bestDistance && ( segment < best.segmentIndex || ( segment == best.segmentIndex && t < best.t ) ) ) )
         {
             best = { candidate, segment, t, dx * dx + dy * dy };
