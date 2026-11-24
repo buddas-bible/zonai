@@ -94,37 +94,17 @@ namespace zonai
 }
 
 
-// Candidate bounded sine/cosine pair for finite binary32 radians in
-// [-float(2*pi), +float(2*pi)]. Not a general FromRadians replacement:
-// arbitrary finite angles need a separate range reduction contract.
 struct deterministicSinCosResult
 {
     float cosine;
     float sine;
 };
 
-[[nodiscard]] inline deterministicSinCosResult deterministicSinCosBounded( float radians ) noexcept
+namespace detail
 {
-    static_assert( sizeof( float ) == sizeof( std::uint32_t ) );
-    static_assert( std::numeric_limits<float>::is_iec559 );
-    static_assert( std::numeric_limits<double>::is_iec559 );
 
-    constexpr float limit = 0x1.921fb6p+2f;
-    constexpr double twoOverPi = 0.636619772367581343075535053490057448;
-    // Split pi/2 so cancellation near quadrant boundaries retains precision.
-    constexpr double halfPiHigh = 0x1.921fb54400000p+0;
-    constexpr double halfPiLow = 6.07710050650619224932e-11;
-
-    if( !std::isfinite( radians ) || radians < -limit || radians > limit )
-    {
-        const float nan = std::bit_cast<float>( 0x7fc00000u );
-        return { nan, nan };
-    }
-    if( radians == 0.0f ) return { 1.0f, radians };
-
-    const double angle = std::fabs( static_cast<double>( radians ) );
-    const int quadrant = static_cast<int>( angle * twoOverPi + 0.5 );
-    const double reduced = ( angle - quadrant * halfPiHigh ) - quadrant * halfPiLow;
+[[nodiscard]] inline deterministicSinCosResult evaluateReducedSinCos( double reduced, int quadrant, bool negative ) noexcept
+{
     const double square = reduced * reduced;
 
     // Taylor polynomials on approximately [-pi/4, pi/4].
@@ -156,8 +136,113 @@ struct deterministicSinCosResult
     case 3: cosine = s; sine = -c; break;
     default: break;
     }
-    if( radians < 0.0f ) sine = -sine;
+    if( negative ) sine = -sine;
     return { static_cast<float>( cosine ), static_cast<float>( sine ) };
+}
+
+} // namespace detail
+
+// Deterministic bounded sine/cosine for finite binary32 radians in
+// [-float(2*pi), +float(2*pi)]. Invalid inputs return canonical qNaNs.
+[[nodiscard]] inline deterministicSinCosResult deterministicSinCosBounded( float radians ) noexcept
+{
+    static_assert( sizeof( float ) == sizeof( std::uint32_t ) );
+    static_assert( std::numeric_limits<float>::is_iec559 );
+    static_assert( std::numeric_limits<double>::is_iec559 );
+
+    constexpr float limit = 0x1.921fb6p+2f;
+    constexpr double twoOverPi = 0.636619772367581343075535053490057448;
+    // Split pi/2 so cancellation near quadrant boundaries retains precision.
+    constexpr double halfPiHigh = 0x1.921fb54400000p+0;
+    constexpr double halfPiLow = 6.07710050650619224932e-11;
+
+    if( !std::isfinite( radians ) || radians < -limit || radians > limit )
+    {
+        const float nan = std::bit_cast<float>( 0x7fc00000u );
+        return { nan, nan };
+    }
+    if( radians == 0.0f ) return { 1.0f, radians };
+
+    const double angle = std::fabs( static_cast<double>( radians ) );
+    const int quadrant = static_cast<int>( angle * twoOverPi + 0.5 );
+    const double reduced = ( angle - quadrant * halfPiHigh ) - quadrant * halfPiLow;
+    return detail::evaluateReducedSinCos( reduced, quadrant, radians < 0.0f );
+}
+
+// Full binary32 candidate. Retain the exact bounded path for small angles;
+// larger finite values use integer Payne-Hanek style argument reduction.
+// The table is floor((2/pi)*2^256), least-significant 32-bit limb first.
+// No floating-point quotient of a huge angle and no platform libm reduction.
+[[nodiscard]] inline deterministicSinCosResult deterministicSinCos( float radians ) noexcept
+{
+    constexpr float limit = 0x1.921fb6p+2f;
+    if( !std::isfinite( radians ) )
+    {
+        const float nan = std::bit_cast<float>( 0x7fc00000u );
+        return { nan, nan };
+    }
+    if( radians >= -limit && radians <= limit )
+        return deterministicSinCosBounded( radians );
+
+    const auto raw = std::bit_cast<std::uint32_t>( radians );
+    const bool negative = ( raw & 0x80000000u ) != 0;
+    const int exponent = static_cast<int>( ( raw >> 23 ) & 0xffu );
+    const std::uint32_t significand = ( raw & 0x007fffffu ) | 0x00800000u;
+    // abs(x) = significand * 2^(exponent-150). Since |x| > 2*pi,
+    // exponent is in [129,254] and the binary point lies at bit [152,277].
+    const int shift = 406 - exponent;
+    constexpr std::array<std::uint32_t, 8> twoOverPi{
+        0xdebbc561u, 0xfe5163abu, 0x3c439041u, 0xdb629599u,
+        0xf534ddc0u, 0xfc2757d1u, 0x4e441529u, 0xa2f9836eu
+    };
+    std::array<std::uint32_t, 9> product{};
+    std::uint64_t carry = 0;
+    for( std::size_t i = 0; i < twoOverPi.size(); ++i )
+    {
+        const std::uint64_t value = static_cast<std::uint64_t>( significand ) * twoOverPi[i] + carry;
+        product[i] = static_cast<std::uint32_t>( value );
+        carry = value >> 32;
+    }
+    product.back() = static_cast<std::uint32_t>( carry );
+
+    const auto bit = [&]( int index )
+    {
+        return ( product[static_cast<std::size_t>( index / 32 )] >> ( index % 32 ) ) & 1u;
+    };
+    const bool roundUp = bit( shift - 1 ) != 0;
+    const int quadrant = static_cast<int>( ( bit( shift ) | ( bit( shift + 1 ) << 1 ) ) +
+        static_cast<unsigned>( roundUp ) ) & 3;
+
+    // Recover the magnitude of the signed fractional distance to the
+    // nearest integer. Two's complement avoids subtracting nearly equal
+    // doubles when the fractional part is close to one.
+    if( roundUp )
+    {
+        carry = 1;
+        for( auto& limb : product )
+        {
+            const std::uint64_t value = static_cast<std::uint64_t>( ~limb ) + carry;
+            limb = static_cast<std::uint32_t>( value );
+            carry = value >> 32;
+        }
+    }
+
+    double fraction = 0.0;
+    const int wholeLimbs = shift / 32;
+    for( int i = 0; i < wholeLimbs; ++i )
+        fraction = ( fraction + product[static_cast<std::size_t>( i )] ) * 0x1p-32;
+
+    const int remainingBits = shift % 32;
+    if( remainingBits != 0 )
+    {
+        const std::uint32_t divisor = 1u << remainingBits;
+        const std::uint32_t high = product[static_cast<std::size_t>( wholeLimbs )] & ( divisor - 1u );
+        fraction = ( fraction + high ) / static_cast<double>( divisor );
+    }
+
+    constexpr double halfPi = 0x1.921fb54442d18p+0;
+    const double reduced = ( roundUp ? -fraction : fraction ) * halfPi;
+    return detail::evaluateReducedSinCos( reduced, quadrant, negative );
 }
 
 // Deterministic atan2 for IEEE-754 binary32 input and output.
