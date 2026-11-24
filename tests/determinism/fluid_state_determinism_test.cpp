@@ -3251,6 +3251,90 @@ struct fluidStateTraceProbe2
                                 "unapplied force %.9g torque %.9g\n", iterationKey.c_str(),
                                 appliedForceDelta, appliedTorqueDelta, unappliedForce, unappliedTorque );
                         }
+                        // R4ac: replay the same two endpoint estimates with
+                        // precise capsule construction, including the common start.
+                        if( relaxation == 0.5f && pass == 3 )
+                        {
+                            fluidField2 preciseStart = input;
+                            preciseStart.preciseDisjointCapsuleEnabled_ = true;
+                            preciseStart.updateObstacles( start );
+                            preciseStart.updateCutCellGeometry( start );
+                            if( !preciseStart.cutCellTransition_.usedDisjointAnalyticGeometry )
+                                throw std::runtime_error( "R4ac precise start geometry not analytic" );
+                            std::array<continuationPressure, 2> results;
+                            std::array<std::vector<float>, 2> fractions;
+                            for( int k = 0; k < 2; ++k )
+                            {
+                                const auto& poses = k == 0 ? estimate : nextEstimate;
+                                fluidField2 geometry = preciseStart;
+                                geometry.updateObstacles( poses );
+                                geometry.updateCutCellGeometry( poses );
+                                if( !geometry.cutCellTransition_.usedDisjointAnalyticGeometry )
+                                    throw std::runtime_error( "R4ac precise endpoint not analytic" );
+                                fractions[k] = geometry.cellFluidFraction_;
+                                geometry.previousCellFluidFraction_ = preciseStart.cellFluidFraction_;
+                                geometry.previousObstacles_ = start;
+                                geometry.frozenPressureObstacles_ = poses;
+                                geometry.volumeSourceValid_ = true;
+                                geometry.u_ = input.u_; geometry.v_ = input.v_;
+                                const std::string probeKey = "forwardPreciseCapsule.interval" +
+                                    std::to_string( index ) + ".estimate" + std::to_string( k );
+                                std::string preciseScratch;
+                                captureSpaceTimeProjection( geometry, forward, trial.feedback, preciseScratch,
+                                    probeKey + ".projection", 16, probeKey + ".volume", false, 16,
+                                    probeKey + ".topology", 0.0, &results[k], 0, true,
+                                    nullptr, 1.0e-16, false, {}, true, true );
+                                double signedChange = 0.0, gap = 0.0;
+                                for( std::size_t i = 0; i < fractions[k].size(); ++i )
+                                {
+                                    signedChange += area * ( static_cast<double>( fractions[k][i] ) -
+                                        preciseStart.cellFluidFraction_[i] );
+                                    gap += std::abs( area * fractions[k][i] - results[k].fluxVolume[i] );
+                                }
+                                appendScalar( trace, probeKey + ".signedVolumeChange", signedChange );
+                                appendScalar( trace, probeKey + ".geometryGap", gap );
+                                appendScalar( trace, probeKey + ".negativeVolume", results[k].negativeVolume );
+                                appendScalar( trace, probeKey + ".peak", results[k].intervalPeak );
+                                appendScalar( trace, probeKey + ".iterations", results[k].initialIterations );
+                                appendScalar( trace, probeKey + ".trueResidualSquared", results[k].trueResidualSquared );
+                                std::printf( "%s signed volume %.9g gap %.9g negative %.9g peak %.9g PCG %d\n",
+                                    probeKey.c_str(), signedChange, gap, results[k].negativeVolume,
+                                    results[k].intervalPeak, results[k].initialIterations );
+                            }
+                            double volumeL1 = 0.0, signedVolume = 0.0, compatibilityL1 = 0.0;
+                            double forceDelta = 0.0, torqueDelta = 0.0, pressureDelta = 0.0;
+                            int topologyChanges = 0;
+                            for( std::size_t i = 0; i < fractions[0].size(); ++i )
+                            {
+                                const double dv = area * ( static_cast<double>( fractions[1][i] ) - fractions[0][i] );
+                                volumeL1 += std::abs( dv ); signedVolume += dv;
+                                topologyChanges += ( fractions[0][i] > 0.0f ) != ( fractions[1][i] > 0.0f );
+                                compatibilityL1 += std::abs( results[1].compatibilityVolume[i] -
+                                    results[0].compatibilityVolume[i] );
+                                pressureDelta = std::max( pressureDelta, std::abs(
+                                    static_cast<double>( results[1].pressure[i] ) - results[0].pressure[i] ) );
+                            }
+                            for( std::size_t j = 0; j < results[0].feedback.size(); ++j )
+                            {
+                                forceDelta = std::max( forceDelta, std::max(
+                                    std::abs( static_cast<double>( results[1].feedback[j].force.x ) - results[0].feedback[j].force.x ),
+                                    std::abs( static_cast<double>( results[1].feedback[j].force.y ) - results[0].feedback[j].force.y ) ) );
+                                torqueDelta = std::max( torqueDelta, std::abs(
+                                    static_cast<double>( results[1].feedback[j].torque ) - results[0].feedback[j].torque ) );
+                            }
+                            const std::string probeKey = "forwardPreciseCapsule.interval" + std::to_string( index ) + ".delta";
+                            appendScalar( trace, probeKey + ".volumeL1", volumeL1 );
+                            appendScalar( trace, probeKey + ".signedVolume", signedVolume );
+                            appendScalar( trace, probeKey + ".topologyChanges", topologyChanges );
+                            appendScalar( trace, probeKey + ".compatibilityL1", compatibilityL1 );
+                            appendScalar( trace, probeKey + ".pressureMaxDelta", pressureDelta );
+                            appendScalar( trace, probeKey + ".forceMaxDelta", forceDelta );
+                            appendScalar( trace, probeKey + ".torqueMaxDelta", torqueDelta );
+                            std::printf( "%s volume L1 %.9g signed %.9g compatibility %.9g topology %d "
+                                "pressure delta %.9g force delta %.9g torque delta %.9g\n",
+                                probeKey.c_str(), volumeL1, signedVolume, compatibilityL1, topologyChanges,
+                                pressureDelta, forceDelta, torqueDelta );
+                        }
                         // R4ab: isolate the actual half-relaxation pass4 -> pass5
                         // geometry jump. Replace one body's endpoint at a time,
                         // then all endpoints. None of the probes is applied.
