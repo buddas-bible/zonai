@@ -641,6 +641,108 @@ struct fluidStateTraceProbe2
         }
     }
 
+    // R3z: integrate the effective open-face area along the same swept
+    // transform path, on a geometry-only private copy. Neither its masks
+    // nor its history are used by the live pressure or rigid body solver.
+    static void captureSpaceTimeAperture( const fluidField2& before, const fluidField2& after,
+        std::string& trace, const std::string& key, int x, int y )
+    {
+        const auto& start = before.previousObstacles_;
+        const auto& finish = before.frozenPressureObstacles_;
+        if( start.size() != finish.size() || start.empty() || !before.volumeSourceValid_ ||
+            !before.sweptFaceFlux_.usedSweptFlux )
+            throw std::runtime_error( key + " missing swept geometry history" );
+        fluidField2 geometry = before;
+        geometry.setPrePressureSnapshotObserver( {} );
+        setStageObserver( geometry, {} );
+        const int cell = before.cellIndex( x, y );
+        const auto measure = [&]( const fluidField2& field )
+        {
+            return std::array<double, 5>{ field.cutCellUOpen( x, y ), field.cutCellUOpen( x + 1, y ),
+                field.cutCellVOpen( x, y ), field.cutCellVOpen( x, y + 1 ), field.cellFluidFraction_[cell] };
+        };
+        const auto total = []( const std::array<double, 5>& a ) { return a[0] + a[1] + a[2] + a[3]; };
+        const auto rebuild = [&]( std::span<const fluidShapeObstacle2> poses )
+        {
+            geometry.updateObstacles( poses );
+            geometry.updateCutCellGeometry( poses );
+            if( !geometry.cutCellTransition_.usedDisjointAnalyticGeometry )
+                throw std::runtime_error( key + " intermediate geometry fell back from analytic mode" );
+            const auto a = measure( geometry );
+            for( double value : a )
+                if( !std::isfinite( value ) || value < 0.0 || value > 1.0 )
+                    throw std::runtime_error( key + " invalid intermediate geometry" );
+            return a;
+        };
+        const auto first = rebuild( start );
+        const auto last = rebuild( finish );
+        if( first[4] != before.previousCellFluidFraction_[cell] || last != measure( before ) )
+            throw std::runtime_error( key + " endpoint geometry reconstruction differs" );
+        // Same signed flux definition as R3y. Freeze the original source,
+        // compatibility correction and computed solid response for the bound.
+        const double preFlux = last[1] * before.u_[before.uIndex( x + 1, y )] -
+            last[0] * before.u_[before.uIndex( x, y )] +
+            last[3] * before.v_[before.vIndex( x, y + 1 )] -
+            last[2] * before.v_[before.vIndex( x, y )];
+        const double solidFlux = static_cast<double>( after.pressureUSolidFlux_[after.uIndex( x + 1, y )] ) -
+            after.pressureUSolidFlux_[after.uIndex( x, y )] +
+            after.pressureVSolidFlux_[after.vIndex( x, y + 1 )] -
+            after.pressureVSolidFlux_[after.vIndex( x, y )];
+        const double requiredFlux = preFlux - static_cast<double>( after.cellSize_ ) *
+            after.divergence_[cell] - solidFlux;
+        if( total( last ) <= 0.0 ) throw std::runtime_error( key + " missing endpoint opening" );
+        appendScalar( trace, key + ".requiredFlux", requiredFlux );
+        appendScalar( trace, key + ".endBound", std::abs( requiredFlux ) / total( last ) );
+        const auto emit = [&]( const std::string& prefix, const std::array<double, 5>& a )
+        {
+            constexpr std::array<const char*, 5> names{ ".west", ".east", ".south", ".north", ".fraction" };
+            for( std::size_t i = 0; i < names.size(); ++i )
+                appendScalar( trace, prefix + names[i], a[i] );
+            appendScalar( trace, prefix + ".openingSum", total( a ) );
+        };
+        emit( key + ".start", first );
+        emit( key + ".end", last );
+
+        std::vector<fluidShapeObstacle2> poses( finish.begin(), finish.end() );
+        std::vector<float> startAngles( start.size() ), angularSpeeds( start.size() );
+        const float dt = before.frozenPressureTimeStep_;
+        for( std::size_t i = 0; i < start.size(); ++i )
+        {
+            startAngles[i] = deterministicAtan2( start[i].transform.rotation.s, start[i].transform.rotation.c );
+            const float endAngle = deterministicAtan2( finish[i].transform.rotation.s, finish[i].transform.rotation.c );
+            const float delta = std::remainder( endAngle - startAngles[i], 2.0f * std::numbers::pi_v<float> );
+            angularSpeeds[i] = delta / dt;
+        }
+        // Match production midpoint transform arithmetic; finer quadrature
+        // measures the time aperture, not an alternate pressure solve.
+        for( int samples : { 1, 2, 4, 8, 16, 32, 64 } )
+        {
+            std::array<double, 5> mean{};
+            for( int step = 0; step < samples; ++step )
+            {
+                const float alpha = ( step + 0.5f ) / samples;
+                for( std::size_t i = 0; i < poses.size(); ++i )
+                {
+                    poses[i].transform.position = start[i].transform.position +
+                        alpha * ( finish[i].transform.position - start[i].transform.position );
+                    poses[i].transform.rotation = rot2::FromRadians( startAngles[i] + angularSpeeds[i] * dt * alpha );
+                }
+                const auto a = rebuild( poses );
+                for( std::size_t i = 0; i < a.size(); ++i ) mean[i] += a[i];
+            }
+            for( double& a : mean ) a /= samples;
+            const double opening = total( mean );
+            if( opening <= 0.0 ) throw std::runtime_error( key + " missing average opening" );
+            const std::string prefix = key + ".midpoint" + std::to_string( samples );
+            emit( prefix, mean );
+            const double bound = std::abs( requiredFlux ) / opening;
+            appendScalar( trace, prefix + ".conditionalBound", bound );
+            appendScalar( trace, prefix + ".openingRatioToEnd", opening / total( last ) );
+            std::printf( "%s average opening %.9g ratio to end %.9g conditional speed bound %.9g m/s\n",
+                prefix.c_str(), opening, opening / total( last ), bound );
+        }
+    }
+
     static void captureProjection( const fluidField2& field, std::string& trace, const std::string& key )
     {
         appendVector( trace, key + ".u", field.u_ );
@@ -1719,16 +1821,9 @@ std::string runWorldFluidScene( const char* name, bool drag,
 // Do not force a particular peak: deterministic math changes may move it.
 // The fixed historical index is compared against the live projection, while
 // all 64 intervals are inspected for the true maximum in the current build.
-std::string runNearClosedFaceScene()
+void configureNearClosedFaceScene( zonai::sandbox::rigidBodyDemo& scene, int fluidSubsteps )
 {
-    using probe = zonai::fluidStateTraceProbe2;
-    using namespace zonai;
-    using namespace zonai::sandbox;
-    constexpr int frames = 16;
-    constexpr int fluidSubsteps = 4;
-    constexpr int targetIndex = 43; // warmup 4 + measured frame 6, interval 3 (zero-based)
     constexpr float h = 0.25f;
-    rigidBodyDemo scene{ demoKind::windFlow };
     scene.configureWindField( 48, 28, h );
     scene.setWindCutCellProjectionEnabled( true );
     scene.setWindCutCellCoupledProjectionEnabled( true );
@@ -1743,6 +1838,103 @@ std::string runNearClosedFaceScene()
     scene.seedWindTracer();
     scene.getWorld().SetBodyLinearVelocity( scene.getShapes()[0].bodyHandle, { 0.7f, -0.10f } );
     scene.getWorld().SetBodyAngularVelocity( scene.getShapes()[1].bodyHandle, 0.5f );
+}
+
+// Real cadence experiment, same initial state and total time, not a
+// same-state pressure comparison. Include all intervals, including warmup.
+std::string runNearClosedCadenceAudit( float baselinePeak )
+{
+    using namespace zonai;
+    using namespace zonai::sandbox;
+    using probe = zonai::fluidStateTraceProbe2;
+    constexpr int frames = 16;
+    std::string trace;
+    for( int fluidSubsteps : { 1, 2, 4, 8 } )
+    {
+        rigidBodyDemo scene{ demoKind::windFlow };
+        configureNearClosedFaceScene( scene, fluidSubsteps );
+        auto& field = const_cast<fluidField2&>( *scene.getWindField() );
+        const std::string prefix = "nearClosedCadence.steps" + std::to_string( fluidSubsteps );
+        std::vector<float> beforeU, beforeV;
+        int calls = 0, failed = 0, converged = 0, peakIndex = -1;
+        float peak = 0.0f, maxDelta = 0.0f, maxContinuity = 0.0f, peakOpen = 0.0f;
+        probe::setStageObserver( field, [&]( const fluidField2& snapshot, int phase )
+        {
+            check( phase == calls % 10, "R3z cadence phase order" );
+            const int index = calls++ / 10;
+            if( phase == 7 ) probe::capturePrePressure( snapshot, beforeU, beforeV );
+            if( phase != 8 ) return;
+            const std::string key = prefix + ".interval." + std::to_string( index );
+            const auto a = probe::captureStabilityPhase( snapshot, trace, key, &beforeU, &beforeV );
+            const auto& p = snapshot.getCutCellPressure();
+            const auto flow = snapshot.getFlowAudit( timeStep / fluidSubsteps );
+            check( flow.nonFiniteFluidFaces == 0 && std::isfinite( flow.continuityRms ),
+                "R3z nonfinite cadence flow" );
+            failed += static_cast<int>( p.coupledSolveFailed );
+            converged += static_cast<int>( p.usedCoupledProjection &&
+                p.coupledStatus == fluidCoupledPressureStatus2::converged );
+            probe::appendScalar( trace, key + ".failed", static_cast<int>( p.coupledSolveFailed ) );
+            probe::appendScalar( trace, key + ".status", static_cast<int>( p.coupledStatus ) );
+            probe::appendScalar( trace, key + ".iterations", p.coupledIterations );
+            probe::appendScalar( trace, key + ".continuity", flow.continuityRms );
+            probe::captureTargetV( snapshot, trace, key + ".target", 17, 13 );
+            maxDelta = std::max( maxDelta, a.deltaPeak );
+            maxContinuity = std::max( maxContinuity, flow.continuityRms );
+            if( a.peak > peak )
+            {
+                peak = a.peak; peakIndex = index; peakOpen = a.peakOpen;
+            }
+        } );
+        for( int tick = 1; tick <= frames; ++tick )
+        {
+            scene.step( timeStep, 8 );
+            const auto feedback = scene.getWindPressureForces();
+            check( feedback.size() == 3, "R3z cadence feedback count" );
+            for( std::size_t i = 0; i < feedback.size(); ++i )
+            {
+                const auto key = prefix + ".frame." + std::to_string( tick ) + ".body[" + std::to_string( i ) + "]";
+                const auto body = scene.getShapes()[i].bodyHandle;
+                const auto transform = scene.getWorld().GetBodyTransform( body );
+                const auto velocity = scene.getWorld().GetBodyLinearVelocity( body );
+                const float angular = scene.getWorld().GetBodyAngularVelocity( body );
+                check( IsFinite( transform.position ) && IsFinite( velocity ) && std::isfinite( angular ) &&
+                    std::isfinite( transform.rotation.c ) && std::isfinite( transform.rotation.s ) &&
+                    IsFinite( feedback[i].force ) && std::isfinite( feedback[i].torque ),
+                    "R3z cadence nonfinite body state" );
+                probe::appendScalar( trace, key + ".position.x", transform.position.x );
+                probe::appendScalar( trace, key + ".position.y", transform.position.y );
+                probe::appendScalar( trace, key + ".rotation.c", transform.rotation.c );
+                probe::appendScalar( trace, key + ".rotation.s", transform.rotation.s );
+                probe::appendScalar( trace, key + ".velocity.x", velocity.x );
+                probe::appendScalar( trace, key + ".velocity.y", velocity.y );
+                probe::appendScalar( trace, key + ".omega", angular );
+                probe::appendScalar( trace, key + ".force.x", feedback[i].force.x );
+                probe::appendScalar( trace, key + ".force.y", feedback[i].force.y );
+                probe::appendScalar( trace, key + ".torque", feedback[i].torque );
+            }
+        }
+        probe::setStageObserver( field, {} );
+        check( calls == frames * fluidSubsteps * 10, "R3z cadence incomplete trace" );
+        if( fluidSubsteps == 4 )
+            check( std::bit_cast<std::uint32_t>( peak ) == std::bit_cast<std::uint32_t>( baselinePeak ),
+                "R3z four-substep control did not reproduce historical peak" );
+        std::printf( "R3z cadence World8/Fluid%d: %d converged, %d failed, peak %.9g m/s index %d "
+            "opening %.9g, max delta %.9g m/s, max continuity %.9g /s\n",
+            fluidSubsteps, converged, failed, peak, peakIndex, peakOpen, maxDelta, maxContinuity );
+    }
+    return trace;
+}
+
+std::string runNearClosedFaceScene()
+{
+    using probe = zonai::fluidStateTraceProbe2;
+    using namespace zonai;
+    using namespace zonai::sandbox;
+    constexpr int frames = 16;
+    constexpr int fluidSubsteps = 4;
+    constexpr int targetIndex = 43; // warmup 4 + measured frame 6, interval 3 (zero-based)
+    rigidBodyDemo scene{ demoKind::windFlow };
+    configureNearClosedFaceScene( scene, fluidSubsteps );
     auto& field = const_cast<fluidField2&>( *scene.getWindField() );
     std::optional<fluidField2> frozen;
     std::vector<float> beforeU, beforeV;
@@ -1878,6 +2070,7 @@ std::string runNearClosedFaceScene()
     probe::captureVolumeSourceAudit( *frozen, baseline, trace, sourceKey + "baseline", 17, 13 );
     probe::captureSliverFluxBudget( *frozen, baseline, trace, "sliverFluxAudit.baseline", 17, 13 );
     probe::captureSliverSampling( baseline, trace, "sliverFluxAudit.sampling" );
+    probe::captureSpaceTimeAperture( *frozen, baseline, trace, "spaceTimeApertureAudit.frozen", 17, 13 );
     for( bool corrected : { false, true } )
     {
         fluidField2 input = *frozen;
@@ -1933,6 +2126,7 @@ std::string runNearClosedFaceScene()
         "before %.9g, after %.9g; cached/uncached max force component difference %.9g, torque %.9g\n",
         frozenCalls, validBudgets, maxSpeed, peakIndex, peakIsU ? 'U' : 'V', peakX, peakY,
         peakOpen, maxDelta, targetOpen, targetBefore, targetAfter, forceDifference, torqueDifference );
+    trace += runNearClosedCadenceAudit( maxSpeed );
     return trace;
 }
 
