@@ -212,6 +212,162 @@ struct fluidStateTraceProbe2
         }
     }
 
+    // R3v: measure only interior open MAC faces, with the same effective
+    // aperture as the actual Cut-cell pressure update. This is a partial
+    // dual-face ledger, not the kinetic energy of the entire coupled system.
+    struct stabilitySample
+    {
+        double momentumX = 0.0, momentumY = 0.0, energy = 0.0;
+        float peak = 0.0f, weightedPeak = 0.0f;
+        float tinyPeak = 0.0f, narrowPeak = 0.0f;
+        int tinyCount = 0, narrowCount = 0;
+        bool peakIsU = true;
+        int peakX = -1, peakY = -1;
+        float peakOpen = 0.0f;
+        float deltaPeak = 0.0f;
+        bool deltaIsU = true;
+        int deltaX = -1, deltaY = -1;
+    };
+
+    static stabilitySample captureStabilityPhase( const fluidField2& field, std::string& trace,
+        const std::string& key, const std::vector<float>* beforeU = nullptr,
+        const std::vector<float>* beforeV = nullptr )
+    {
+        stabilitySample result{};
+        const double area = static_cast<double>( field.cellSize_ ) * field.cellSize_;
+        const auto observe = [&]( bool isU, int x, int y )
+        {
+            const int index = isU ? field.uIndex( x, y ) : field.vIndex( x, y );
+            const float open = isU ? field.cutCellUOpen( x, y ) : field.cutCellVOpen( x, y );
+            const float v = isU ? field.u_[index] : field.v_[index];
+            if( !std::isfinite( open ) || open < 0.0f || open > 1.0f || !std::isfinite( v ) )
+                throw std::runtime_error( key + " invalid face velocity or aperture" );
+            if( open == 0.0f ) return;
+            const double mass = area * open;
+            if( isU ) result.momentumX += mass * v;
+            else result.momentumY += mass * v;
+            result.energy += 0.5 * mass * static_cast<double>( v ) * v;
+            const float magnitude = std::abs( v );
+            result.weightedPeak = std::max( result.weightedPeak, open * magnitude );
+            if( magnitude > result.peak || result.peakX < 0 )
+            {
+                result.peak = magnitude;
+                result.peakIsU = isU;
+                result.peakX = x; result.peakY = y; result.peakOpen = open;
+            }
+            if( open <= 0.01f )
+            {
+                ++result.narrowCount;
+                result.narrowPeak = std::max( result.narrowPeak, magnitude );
+            }
+            if( open <= 0.001f )
+            {
+                ++result.tinyCount;
+                result.tinyPeak = std::max( result.tinyPeak, magnitude );
+            }
+            if( beforeU && beforeV )
+            {
+                const float before = isU ? ( *beforeU )[index] : ( *beforeV )[index];
+                const float delta = std::abs( v - before );
+                if( delta > result.deltaPeak || result.deltaX < 0 )
+                {
+                    result.deltaPeak = delta;
+                    result.deltaIsU = isU; result.deltaX = x; result.deltaY = y;
+                }
+            }
+        };
+        for( int y = 0; y < field.height_; ++y )
+            for( int x = 1; x < field.width_; ++x ) observe( true, x, y );
+        for( int y = 1; y < field.height_; ++y )
+            for( int x = 0; x < field.width_; ++x ) observe( false, x, y );
+        if( result.peakX < 0 || !std::isfinite( result.energy ) ||
+            !std::isfinite( result.momentumX ) || !std::isfinite( result.momentumY ) )
+            throw std::runtime_error( key + " invalid open-face ledger" );
+        const auto scalar = [&]( const char* name, auto value )
+        {
+            appendScalar( trace, key + name, value );
+        };
+        scalar( ".momentum.x", result.momentumX );
+        scalar( ".momentum.y", result.momentumY );
+        scalar( ".energy", result.energy );
+        scalar( ".peak", result.peak );
+        scalar( ".weightedPeak", result.weightedPeak );
+        scalar( ".peakIsU", static_cast<int>( result.peakIsU ) );
+        scalar( ".peakX", result.peakX );
+        scalar( ".peakY", result.peakY );
+        scalar( ".peakOpen", result.peakOpen );
+        scalar( ".openLe001.count", result.narrowCount );
+        scalar( ".openLe001.peak", result.narrowPeak );
+        scalar( ".openLe0001.count", result.tinyCount );
+        scalar( ".openLe0001.peak", result.tinyPeak );
+        if( beforeU && beforeV )
+        {
+            if( result.deltaX < 0 ) throw std::runtime_error( key + " no projected face" );
+            const auto captureFace = [&]( const std::string& prefix, bool isU, int x, int y )
+            {
+                const int index = isU ? field.uIndex( x, y ) : field.vIndex( x, y );
+                const int lower = field.cellIndex( x - ( isU ? 1 : 0 ), y - ( isU ? 0 : 1 ) );
+                const int upper = field.cellIndex( x, y );
+                const float open = isU ? field.cutCellUOpen( x, y ) : field.cutCellVOpen( x, y );
+                const float before = isU ? ( *beforeU )[index] : ( *beforeV )[index];
+                const float after = isU ? field.u_[index] : field.v_[index];
+                const auto emit = [&]( const char* name, auto value )
+                {
+                    appendScalar( trace, key + prefix + name, value );
+                };
+                emit( ".isU", static_cast<int>( isU ) );
+                emit( ".x", x ); emit( ".y", y ); emit( ".open", open );
+                emit( ".before", before ); emit( ".after", after );
+                emit( ".delta", after - before );
+                emit( ".lowerPressure", field.pressure_[lower] );
+                emit( ".upperPressure", field.pressure_[upper] );
+                emit( ".pressureJump", field.pressure_[upper] - field.pressure_[lower] );
+                emit( ".lowerFraction", field.cellFluidFraction_[lower] );
+                emit( ".upperFraction", field.cellFluidFraction_[upper] );
+                emit( ".lowerVolumeRate", field.cutCellVolumeRate_[lower] );
+                emit( ".upperVolumeRate", field.cutCellVolumeRate_[upper] );
+            };
+            captureFace( ".peakFace", result.peakIsU, result.peakX, result.peakY );
+            captureFace( ".deltaFace", result.deltaIsU, result.deltaX, result.deltaY );
+            float minimum = std::numeric_limits<float>::max();
+            float maximum = -minimum;
+            for( std::size_t i = 0; i < field.pressure_.size(); ++i )
+            {
+                if( field.cellFluidFraction_[i] <= 0.0f ) continue;
+                const float pressure = field.pressure_[i];
+                if( !std::isfinite( pressure ) )
+                    throw std::runtime_error( key + " nonfinite active-cell pressure" );
+                minimum = std::min( minimum, pressure );
+                maximum = std::max( maximum, pressure );
+            }
+            scalar( ".pressureMin", minimum );
+            scalar( ".pressureMax", maximum );
+            const auto& p = field.getCutCellPressure();
+            scalar( ".pressureResidual", p.pressureResidual );
+            scalar( ".predictedContinuityRms", p.predictedContinuityRms );
+            scalar( ".hasAnalyticImpulseBudget", static_cast<int>( p.hasAnalyticImpulseBudget ) );
+            // Only valid when the flag is set; always emit fixed schema.
+            const auto vec = [&]( const std::string& name, vec2 value )
+            {
+                if( !std::isfinite( value.x ) || !std::isfinite( value.y ) )
+                    throw std::runtime_error( key + " nonfinite pressure impulse ledger" );
+                appendScalar( trace, key + name + ".x", value.x );
+                appendScalar( trace, key + name + ".y", value.y );
+            };
+            vec( ".impulse.fluid", p.impulse.fluid );
+            vec( ".impulse.solid", p.impulse.solid );
+            vec( ".impulse.wall", p.impulse.wall );
+            vec( ".impulse.residual", p.impulse.residual() );
+        }
+        return result;
+    }
+
+    static void capturePrePressure( const fluidField2& field,
+        std::vector<float>& u, std::vector<float>& v )
+    {
+        u = field.u_; v = field.v_;
+    }
+
     static void capture( const fluidField2& field, std::string& trace, const std::string& key )
     {
         appendVector( trace, key + ".u", field.u_ );
@@ -963,6 +1119,14 @@ std::string runWorldFluidScene( const char* name, bool drag,
     // read-only. Use the existing test-only friend observer, not a new API.
     auto& field = const_cast<zonai::fluidField2&>( *observed.demo.getWindField() );
     std::string trace;
+    std::string stabilityTrace;
+    std::vector<float> prePressureU, prePressureV;
+    double energyBeforePressure = 0.0;
+    float auditMaxSpeed = 0.0f, auditMaxPressureDelta = 0.0f;
+    int auditedIntervals = 0, analyticBudgets = 0;
+    // Audit the two already verified sustained fixtures, not the pending
+    // R3u contact fixture. Keep their old authoritative rows unchanged.
+    const bool stabilityAudit = sustained && !contactScenario;
     bool sawPressure = false, sawDragBody = false, sawDragFluid = false;
     bool sawCoupled = false, sawDisjoint = false, sawFlow = false;
 
@@ -998,6 +1162,24 @@ std::string runWorldFluidScene( const char* name, bool drag,
                     ++calls;
                     if( sustained && phase == 0 )
                         checkDomain( key + ".interval." + std::to_string( interval ) );
+                    if( stabilityAudit && phase >= 4 && phase <= 8 )
+                    {
+                        const std::string auditKey = "fluidStabilityAudit." + key + ".interval." +
+                            std::to_string( interval ) + ".stage." + std::to_string( phase );
+                        if( phase == 7 ) probe::capturePrePressure( snapshot, prePressureU, prePressureV );
+                        const auto sample = probe::captureStabilityPhase( snapshot, stabilityTrace, auditKey,
+                            phase == 8 ? &prePressureU : nullptr, phase == 8 ? &prePressureV : nullptr );
+                        if( phase == 7 ) energyBeforePressure = sample.energy;
+                        if( phase == 8 )
+                        {
+                            ++auditedIntervals;
+                            analyticBudgets += static_cast<int>( snapshot.getCutCellPressure().hasAnalyticImpulseBudget );
+                            auditMaxSpeed = std::max( auditMaxSpeed, sample.peak );
+                            auditMaxPressureDelta = std::max( auditMaxPressureDelta, sample.deltaPeak );
+                            probe::appendScalar( stabilityTrace, auditKey + ".energyDelta",
+                                sample.energy - energyBeforePressure );
+                        }
+                    }
                     // Input after source injection and output before drag/World
                     // integration, for every Fluid interval of the first two ticks.
                     if( traceCrossing || ( tick <= 2 && ( phase == 0 || phase == 9 ) ) )
@@ -1216,6 +1398,15 @@ std::string runWorldFluidScene( const char* name, bool drag,
         std::printf( "%s sustained coupling: %d intervals, %d exchange frames, "
             "min geometric margin %.9g m, max face speed %.9g m/s, max continuity RMS %.9g 1/s\n",
             name, activeIntervals, exchangeFrames, minimumMargin, maximumFaceSpeed, maximumContinuity );
+    }
+    if( stabilityAudit )
+    {
+        check( auditedIntervals == frameCount * worldFluidScene::fluidSubsteps,
+            "R3v incomplete phase audit" );
+        std::printf( "%s stability audit: %d intervals, %d valid analytic budgets, "
+            "max projected face %.9g m/s, max pressure velocity delta %.9g m/s\n",
+            name, auditedIntervals, analyticBudgets, auditMaxSpeed, auditMaxPressureDelta );
+        trace.append( stabilityTrace );
     }
     return trace;
 }
