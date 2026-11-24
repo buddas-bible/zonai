@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <exception>
 #include <functional>
+#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -149,6 +150,62 @@ struct fluidStateTraceProbe2
             std::bit_cast<std::uint32_t>( reconstructed ) != std::bit_cast<std::uint32_t>( result.x ) )
             throw std::runtime_error( "advection interpolation probe differs from production sampling" );
         return result.x;
+    }
+
+    // R3i: read-only reconstruction of updateSweptSolidFlux's rotation
+    // extraction. Called immediately after the swept stage, before remap,
+    // only when the real solver reports that the swept path executed.
+    // This records the standard-library operation separately from the
+    // candidate engine atan2; it does not alter any physical state.
+    static void captureSweptRotation( const fluidField2& field,
+        std::span<const fluidShapeObstacle2> obstacles, float timeStep,
+        std::string& trace, const std::string& key )
+    {
+        const auto& swept = field.getSweptFaceFlux();
+        if( !swept.usedSweptFlux ) return;
+        if( field.previousObstacles_.size() != obstacles.size() || swept.timeSamples <= 0 )
+            throw std::runtime_error( "R3i swept probe has inconsistent history" );
+
+        constexpr float twoPi = 2.0f * std::numbers::pi_v<float>;
+        for( std::size_t i = 0; i < obstacles.size(); ++i )
+        {
+            const auto& start = field.previousObstacles_[i];
+            const auto& finish = obstacles[i];
+            const std::string prefix = key + ".body[" + std::to_string( i ) + "]";
+            const auto scalar = [&]( const char* name, auto value )
+            {
+                appendScalar( trace, prefix + name, value );
+            };
+
+            scalar( ".start.c", start.transform.rotation.c );
+            scalar( ".start.s", start.transform.rotation.s );
+            scalar( ".finish.c", finish.transform.rotation.c );
+            scalar( ".finish.s", finish.transform.rotation.s );
+            const float startAngle = std::atan2( start.transform.rotation.s, start.transform.rotation.c );
+            const float endAngle = std::atan2( finish.transform.rotation.s, finish.transform.rotation.c );
+            const float deltaAngle = std::remainder( endAngle - startAngle, twoPi );
+            const float angularSpeed = deltaAngle / timeStep;
+            const vec2 linearSpeed = ( finish.transform.position - start.transform.position ) / timeStep;
+            scalar( ".startAngle", startAngle );
+            scalar( ".endAngle", endAngle );
+            scalar( ".deltaAngle", deltaAngle );
+            scalar( ".angularSpeed", angularSpeed );
+            scalar( ".linearSpeed.x", linearSpeed.x );
+            scalar( ".linearSpeed.y", linearSpeed.y );
+            // The selected number of samples is reported by the real solver.
+            // Reconstruct the first intermediate orientation, not a new solver.
+            const float alpha = 0.5f / swept.timeSamples;
+            const float intermediateAngle = startAngle + angularSpeed * timeStep * alpha;
+            const auto intermediateRotation = rot2::FromRadians( intermediateAngle );
+            scalar( ".samples", swept.timeSamples );
+            scalar( ".intermediateAngle", intermediateAngle );
+            scalar( ".intermediate.c", intermediateRotation.c );
+            scalar( ".intermediate.s", intermediateRotation.s );
+            scalar( ".candidateStartAngle",
+                deterministicAtan2( start.transform.rotation.s, start.transform.rotation.c ) );
+            scalar( ".candidateEndAngle",
+                deterministicAtan2( finish.transform.rotation.s, finish.transform.rotation.c ) );
+        }
     }
 
     static void capture( const fluidField2& field, std::string& trace, const std::string& key )
@@ -495,6 +552,17 @@ struct geometryScene
         }
     }
 
+    [[nodiscard]] bool traceTick( int tick ) const
+    {
+        // Retain R3h's first two ticks and extend through each scene's
+        // first mismatching end-of-tick snapshot. Earlier intermediate
+        // differences could have been invisible in the old end snapshots.
+        const int last = kind == geometrySceneKind::sampledMixed ? 4 :
+            kind == geometrySceneKind::analyticCapsule ? 3 :
+            kind == geometrySceneKind::analyticPolygon ? 2 : 5;
+        return observed && tick <= last;
+    }
+
     void advance( int tick, const std::string& key )
     {
         using namespace zonai;
@@ -510,12 +578,15 @@ struct geometryScene
         }
         stages.clear();
         int observedStages = 0;
-        if( observed && tick <= 2 )
+        if( traceTick( tick ) )
         {
             fluidStateTraceProbe2::setStageObserver( field,
-                [&]( const fluidField2&, int phase )
+                [&]( const fluidField2& snapshot, int phase )
                 {
                     check( phase == observedStages, "R3h phase order changed" );
+                    if( phase == 3 )
+                        fluidStateTraceProbe2::captureSweptRotation( snapshot, obstacles,
+                            timeStep, stages, key + ".sweptProbe" );
                     capture( stages, key + ".stage." + std::to_string( phase ) );
                     ++observedStages;
                 } );
@@ -523,8 +594,8 @@ struct geometryScene
 
         field.step( timeStep, obstacles, feedback, 200 );
         fluidStateTraceProbe2::setStageObserver( field, {} );
-        if( observed && tick <= 2 )
-            check( observedStages == 10, "R3h missed a stage" );
+        if( traceTick( tick ) )
+            check( observedStages == 10, "R3i missed a stage" );
 
         for( int y = 0; y < field.getHeight(); ++y )
             for( int x = 0; x < field.getWidth(); ++x )
