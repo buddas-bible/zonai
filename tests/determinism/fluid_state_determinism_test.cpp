@@ -1420,6 +1420,7 @@ struct fluidStateTraceProbe2
         std::vector<fluidObstacleForce2> feedback;
         // Signed interval transfers accumulated in physical volume units.
         std::vector<double> fluxVolume;
+        std::vector<double> meanU, meanV, intervalU, intervalV;
         std::vector<int> component;
         double trueResidualSquared = 0.0, initialResidualSquared = 0.0;
         double seedResidualSquared = 0.0;
@@ -1442,7 +1443,7 @@ struct fluidStateTraceProbe2
         continuationPressure* continuation = nullptr, int correctionBudget = 3,
         bool adaptiveEndpoint = false, forwardTiming* timing = nullptr,
         double relativeSquaredTolerance = 1.0e-16, bool warmStart = false,
-        std::span<const float> previousForwardPressure = {} )
+        std::span<const float> previousForwardPressure = {}, bool captureEndpoint = false )
     {
         if( !previousForwardPressure.empty() && !warmStart )
             throw std::runtime_error( key + " previous pressure requires warm start" );
@@ -2263,6 +2264,12 @@ struct fluidStateTraceProbe2
                         meanV[before.vIndex( x, y )] <= 0.0;
             continuation->fluxVolume.resize( n );
             continuation->component = parent;
+            if( captureEndpoint )
+            {
+                continuation->meanU = meanU; continuation->meanV = meanV;
+                continuation->intervalU.resize( meanU.size() );
+                continuation->intervalV.resize( meanV.size() );
+            }
             for( std::size_t i = 0; i < n; ++i )
                 continuation->fluxVolume[i] = area * before.previousCellFluidFraction_[i];
             for( const auto& e : edges )
@@ -2272,6 +2279,8 @@ struct fluidStateTraceProbe2
                 const double transfer = dt * h * e.a * velocity;
                 continuation->fluxVolume[e.first] -= transfer;
                 continuation->fluxVolume[e.second] += transfer;
+                if( captureEndpoint )
+                    ( e.isU ? continuation->intervalU : continuation->intervalV )[e.index] = velocity;
             }
             continuation->trueResidualSquared = trueSquared;
             continuation->initialResidualSquared = initial;
@@ -2290,6 +2299,95 @@ struct fluidStateTraceProbe2
 
     }
 
+    // R4t: compare endpoint representations on the actual loaded World
+    // geometry, not the predicted geometry. Do not project or commit either.
+    static void captureCorrectedEndpoint( const fluidField2& field,
+        const std::vector<float>& startFraction, const continuationPressure& candidate,
+        float timeStep, std::string& trace, int index )
+    {
+        const std::string key = "forwardCorrectedEndpoint.interval" + std::to_string( index );
+        const double h = field.cellSize_, dt = timeStep, area = h * h;
+        const auto n = startFraction.size();
+        std::vector<double> velocityVolume( n ), fluxVolume( n );
+        double velocityTransferL1 = 0.0, fluxTransferL1 = 0.0, lostTransfer = 0.0;
+        double velocityPeak = 0.0, fluxPeak = 0.0, smallestOpen = 1.0;
+        int unsupported = 0, closed = 0, openFaces = 0;
+        for( std::size_t i = 0; i < n; ++i )
+            velocityVolume[i] = fluxVolume[i] = area * field.cellFluidFraction_[i];
+        const auto face = [&]( bool isU, int x, int y )
+        {
+            const int f = isU ? field.uIndex( x, y ) : field.vIndex( x, y );
+            const double a = isU ? candidate.meanU[f] : candidate.meanV[f];
+            const double v = isU ? candidate.intervalU[f] : candidate.intervalV[f];
+            const double open = isU ? field.cutCellUOpen( x, y ) : field.cutCellVOpen( x, y );
+            const int left = field.cellIndex( x - ( isU ? 1 : 0 ), y - ( isU ? 0 : 1 ) );
+            const int right = field.cellIndex( x, y );
+            const double transfer = dt * h * a * v;
+            if( open <= 0.0 )
+            {
+                closed += transfer != 0.0;
+                lostTransfer += std::abs( transfer );
+                velocityTransferL1 += std::abs( transfer );
+                fluxTransferL1 += std::abs( transfer );
+                return;
+            }
+            ++openFaces;
+            smallestOpen = std::min( smallestOpen, open );
+            if( a <= 0.0 )
+            {
+                // No invented velocity or silent endpoint fallback.
+                ++unsupported;
+                return;
+            }
+            const double fluxVelocity = a * v / open;
+            const double velocityTransfer = dt * h * open * v;
+            const double fluxTransfer = dt * h * open * fluxVelocity;
+            if( !std::isfinite( fluxVelocity ) || !std::isfinite( velocityTransfer ) ||
+                !std::isfinite( fluxTransfer ) )
+                throw std::runtime_error( key + " nonfinite corrected endpoint remap" );
+            velocityPeak = std::max( velocityPeak, std::abs( v ) );
+            fluxPeak = std::max( fluxPeak, std::abs( fluxVelocity ) );
+            velocityTransferL1 += std::abs( velocityTransfer - transfer );
+            fluxTransferL1 += std::abs( fluxTransfer - transfer );
+            velocityVolume[left] += velocityTransfer; velocityVolume[right] -= velocityTransfer;
+            fluxVolume[left] += fluxTransfer; fluxVolume[right] -= fluxTransfer;
+        };
+        for( int y = 0; y < field.height_; ++y )
+            for( int x = 1; x < field.width_; ++x ) face( true, x, y );
+        for( int y = 1; y < field.height_; ++y )
+            for( int x = 0; x < field.width_; ++x ) face( false, x, y );
+        double ledgerL1 = 0.0, velocityL1 = 0.0, fluxL1 = 0.0;
+        double velocityMax = 0.0, fluxMax = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            const double start = area * startFraction[i];
+            const double ledger = area * field.cellFluidFraction_[i] - candidate.fluxVolume[i];
+            const double velocity = velocityVolume[i] - start;
+            const double flux = fluxVolume[i] - start;
+            ledgerL1 += std::abs( ledger );
+            velocityL1 += std::abs( velocity ); fluxL1 += std::abs( flux );
+            velocityMax = std::max( velocityMax, std::abs( velocity ) );
+            fluxMax = std::max( fluxMax, std::abs( flux ) );
+        }
+        const auto out = [&]( const char* suffix, auto value )
+        {
+            if( !std::isfinite( static_cast<double>( value ) ) )
+                throw std::runtime_error( key + suffix + " nonfinite endpoint audit" );
+            appendScalar( trace, key + suffix, value );
+        };
+        out( ".ledgerL1", ledgerL1 );
+        out( ".velocityTransferL1", velocityTransferL1 ); out( ".fluxTransferL1", fluxTransferL1 );
+        out( ".velocityVolumeL1", velocityL1 ); out( ".fluxVolumeL1", fluxL1 );
+        out( ".velocityVolumeMax", velocityMax ); out( ".fluxVolumeMax", fluxMax );
+        out( ".velocityPeak", velocityPeak ); out( ".fluxPeak", fluxPeak );
+        out( ".lostClosedTransfer", lostTransfer ); out( ".closedTransferFaces", closed );
+        out( ".unsupportedOpenFaces", unsupported ); out( ".openFaces", openFaces );
+        out( ".smallestOpen", smallestOpen );
+        std::printf( "%s ledger gap %.9g velocity gap %.9g flux gap %.9g m^2 "
+            "velocity peak %.9g flux peak %.9g m/s closed transfer %.9g unsupported faces %d\n",
+            key.c_str(), ledgerL1, velocityL1, fluxL1, velocityPeak, fluxPeak, lostTransfer, unsupported );
+    }
+
     // R4k: independent forward pressure trial at a sampled R4j start.
     // Freeze the incoming MAC trial velocity: no forward advection or
     // persistent candidate commit is implied by this geometry-only test.
@@ -2299,7 +2397,7 @@ struct fluidStateTraceProbe2
         int index, double responseScale = 1.0, int correctionBudget = 3, int samples = 64,
         bool adaptiveEndpoint = false, forwardTiming* timing = nullptr,
         double relativeSquaredTolerance = 1.0e-16, bool warmStart = false,
-        std::vector<float>* forwardPressureHistory = nullptr )
+        std::vector<float>* forwardPressureHistory = nullptr, bool auditEndpoint = false )
     {
         const auto totalStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
         using namespace sandbox;
@@ -2403,9 +2501,10 @@ struct fluidStateTraceProbe2
             key + ".projection", samples, key + ".volume", false, 16,
             key + ".topology", responseScale, &candidate, correctionBudget, adaptiveEndpoint, timing,
             relativeSquaredTolerance, warmStart, usedPreviousForward ?
-            std::span<const float>( *forwardPressureHistory ) : std::span<const float>{} );
+            std::span<const float>( *forwardPressureHistory ) : std::span<const float>{}, auditEndpoint );
         const auto corrected = run( candidate.feedback );
         rebuild( corrected );
+        if( auditEndpoint ) captureCorrectedEndpoint( forward, startFraction, candidate, dt, trace, index );
 
         const std::size_t n = startFraction.size();
         std::vector<double> residual( n ), sums( n );
@@ -2729,7 +2828,7 @@ struct fluidStateTraceProbe2
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step,
                         0.75, 0, 16, true, nullptr, 1.0e-10 );
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step,
-                        0.75, 0, 16, true, nullptr, 1.0e-10, true );
+                        0.75, 0, 16, true, nullptr, 1.0e-10, true, nullptr, true );
                     const auto previousForwardPressure = forwardPressureHistory;
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step,
                         0.75, 0, 16, true, nullptr, 1.0e-10, true, &forwardPressureHistory );
