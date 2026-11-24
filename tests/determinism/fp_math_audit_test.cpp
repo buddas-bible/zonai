@@ -73,6 +73,123 @@ void outputDouble( std::FILE* stream, const char* operation, std::size_t sample,
         operation, sample, static_cast<unsigned long long>( bits ) );
 }
 
+// The bounded interpolation contract is deliberately tested independently
+// of Fluid. Do not replace the production sampleComponent path in R3f.
+void auditLerp( std::FILE* stream )
+{
+    const auto bits = []( float value ) { return std::bit_cast<std::uint32_t>( value ); };
+    const auto fromBits = []( std::uint32_t value ) { return std::bit_cast<float>( value ); };
+    const float maximum = std::numeric_limits<float>::max();
+    const float tiny = std::numeric_limits<float>::denorm_min();
+
+    struct lerpCase
+    {
+        float a, b, t;
+        std::uint32_t expected;
+    };
+    const std::array<lerpCase, 15> exactCases{ {
+        { -0.0f, 1.0f, 0.0f, 0x80000000u },
+        { 1.0f, -0.0f, 1.0f, 0x80000000u },
+        { -0.0f, 0.0f, 0.5f, 0x80000000u },
+        { 0.0f, -0.0f, 0.5f, 0x00000000u },
+        { 1.0f, 2.0f, 0.25f, 0x3fa00000u },
+        { 2.0f, 1.0f, 0.25f, 0x3fe00000u },
+        { -1.0f, 1.0f, 0.5f, 0x00000000u },
+        { -maximum, maximum, 0.5f, 0x00000000u },
+        { maximum, -maximum, 0.25f, 0x7effffffu },
+        { maximum, maximum, 0.5f, 0x7f7fffffu },
+        { tiny, tiny, 0.5f, 0x00000001u },
+        { tiny, 3.0f * tiny, 0.5f, 0x00000002u },
+        { 0.0f, tiny, 0.5f, 0x00000000u },
+        { 0.0f, 3.0f * tiny, 0.5f, 0x00000002u },
+        // R3e observed identical operands, but std::lerp produced
+        // 3f0db109 on Ubuntu and 3f0db10a on Windows.
+        { fromBits( 0x3d094d24u ), fromBits( 0x3f12fd58u ),
+            fromBits( 0x3f763360u ), 0x3f0db10au }
+    } };
+
+    for( std::size_t i = 0; i < exactCases.size(); ++i )
+    {
+        const auto& item = exactCases[i];
+        const float result = deterministicLerp( item.a, item.b, item.t );
+        check( bits( result ) == item.expected, "bounded lerp exact-bit fixture" );
+        if( stream ) outputFloat( stream, "zonai.lerpExact", i, result );
+    }
+
+    const float infinity = std::numeric_limits<float>::infinity();
+    const float nan = fromBits( 0x7fc12345u );
+    const std::array<std::array<float, 3>, 7> invalidCases{ {
+        { infinity, 1.0f, 0.5f }, { 1.0f, -infinity, 0.0f },
+        { nan, 1.0f, 0.5f }, { 1.0f, nan, 0.5f },
+        { 0.0f, 1.0f, nan }, { 0.0f, 1.0f, -0.01f },
+        { 0.0f, 1.0f, 1.01f }
+    } };
+    for( std::size_t i = 0; i < invalidCases.size(); ++i )
+    {
+        const auto& item = invalidCases[i];
+        const auto result = bits( deterministicLerp( item[0], item[1], item[2] ) );
+        check( result == 0x7fc00000u, "bounded lerp canonical invalid-input NaN" );
+        if( stream ) std::fprintf( stream, "zonai.lerpInvalid.%02zu\t%08x\n", i, result );
+    }
+
+    std::uint64_t seed = 0x6c6572702d723366ull;
+    const auto nextBits = [&]() -> std::uint32_t
+    {
+        seed ^= seed >> 12;
+        seed ^= seed << 25;
+        seed ^= seed >> 27;
+        return static_cast<std::uint32_t>( seed * 2685821657736338717ull );
+    };
+    const auto nextFinite = [&]()
+    {
+        auto value = nextBits();
+        if( ( value & 0x7f800000u ) == 0x7f800000u ) value &= 0xff7fffffu;
+        return fromBits( value );
+    };
+    constexpr std::array<float, 5> weights{ 0.0f, 0.25f, 0.5f, 0.75f, 1.0f };
+
+    for( std::size_t i = 0; i < 1024; ++i )
+    {
+        const float a = nextFinite(), b = nextFinite();
+        const float t = static_cast<float>( nextBits() >> 8 ) * 0x1p-24f;
+        const float low = a < b ? a : b;
+        const float high = a < b ? b : a;
+        const float result = deterministicLerp( a, b, t );
+
+        check( std::isfinite( result ) && result >= low && result <= high,
+            "bounded lerp escaped finite endpoint interval" );
+        check( bits( deterministicLerp( a, b, 0.0f ) ) == bits( a ) &&
+            bits( deterministicLerp( a, b, 1.0f ) ) == bits( b ),
+            "bounded lerp endpoint bits" );
+
+        float previous = a;
+        for( const float weight : weights )
+        {
+            const float sample = deterministicLerp( a, b, weight );
+            check( std::isfinite( sample ) && sample >= low && sample <= high,
+                "bounded lerp fixed-weight interval" );
+            check( a <= b ? sample >= previous : sample <= previous,
+                "bounded lerp fixed-weight monotonicity" );
+            previous = sample;
+        }
+
+        // Independent difference-form double reference. A scale-relative
+        // error budget also covers cancellation near zero and subnormals.
+        // The cross-OS fingerprint remains strict (no tolerance).
+        const double reference = static_cast<double>( a ) +
+            ( static_cast<double>( b ) - static_cast<double>( a ) ) * static_cast<double>( t );
+        const double scaleA = std::fabs( static_cast<double>( a ) );
+        const double scaleB = std::fabs( static_cast<double>( b ) );
+        const double scale = scaleA < scaleB ? scaleB : scaleA;
+        const double budget = scale * std::numeric_limits<float>::epsilon() +
+            static_cast<double>( tiny );
+        check( std::fabs( static_cast<double>( result ) - reference ) <= budget,
+            "bounded lerp reference error" );
+
+        if( stream ) outputFloat( stream, "zonai.lerpWide", i, result );
+    }
+}
+
 void emitFingerprint( std::FILE* stream )
 {
     // Use exact source IEEE-754 bits rather than decimal angle parsing.
@@ -197,6 +314,7 @@ int main( int argc, char** argv )
 
         if( argc == 1 )
         {
+            auditLerp( nullptr );
             std::puts( "FP math contract audit passed" );
             return EXIT_SUCCESS;
         }
@@ -211,6 +329,7 @@ int main( int argc, char** argv )
         if( stream == nullptr ) throw std::runtime_error( "cannot create FP audit output" );
 
         emitFingerprint( stream );
+        auditLerp( stream );
         if( std::fclose( stream ) != 0 )
             throw std::runtime_error( "cannot close FP audit output" );
 
