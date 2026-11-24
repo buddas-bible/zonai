@@ -1,9 +1,9 @@
-name: Fluid wind source A/B (R3p)
+name: Fluid full-range rotation A/B (R3r)
 
 # Same-runner Release comparison, separate from the strict raw-bit gate.
-# R3p compares wind source dispatch against pinned R3o.
-# R3g/R3j/R3l historical results: 45347667921, 45401846930, 45404039709.
-# The existing short benchmark is informational; strict 180-tick replay is separate.
+# R3r compares full-range rot2 dispatch against pinned R3q.
+# Historical R3p wind-source A/B: 45407924878.
+# This short benchmark checks the existing small-angle path, not large-angle cost.
 on:
   pull_request:
     branches: [master]
@@ -28,7 +28,7 @@ jobs:
           path: candidate
       - uses: actions/checkout@v4
         with:
-          ref: d2ea30759a911c965b30526003b3736ba8faa3aa
+          ref: eeeecbcc4aca6d028e9fa500713a49db7a8ab342
           path: baseline
       - name: Build the same existing Release benchmark on both revisions
         shell: bash
@@ -112,6 +112,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fluid-wind-source-ab
+          name: fluid-full-range-rotation-ab
           path: reports/
           if-no-files-found: warn
