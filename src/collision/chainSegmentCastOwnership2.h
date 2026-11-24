@@ -4,6 +4,7 @@
 #include "collision/distance2.h"
 #include "collision/narrowphase/collide.h"
 #include "collision/sweep2.h"
+#include "math/deterministicMath.h"
 
 #include <algorithm>
 #include <array>
@@ -118,7 +119,7 @@ inline chainSweepContact2 FindOwnedChainSweepContact( const chainSegment2& chain
     double radius = movingProxy.radius;
     for( int i = 0; i < movingProxy.count; ++i )
         radius = std::max( radius,
-            std::hypot( static_cast<double>( movingProxy.points[i].x ),
+            deterministicHypotUpperBound( static_cast<double>( movingProxy.points[i].x ),
                 static_cast<double>( movingProxy.points[i].y ) ) + movingProxy.radius );
 
     // Nlerp의 최소 회전 길이로 전체 sweep의 각속도 상한을 계산함.
@@ -134,7 +135,7 @@ inline chainSweepContact2 FindOwnedChainSweepContact( const chainSegment2& chain
     const double angularSpeed = std::fabs( movingSweep.q1.c * movingSweep.q2.s -
         movingSweep.q1.s * movingSweep.q2.c ) / minRotationLength2;
     const vec2 translation = movingSweep.c2 - movingSweep.c1;
-    const double speed = 1.001 * ( std::hypot( static_cast<double>( translation.x ),
+    const double speed = 1.001 * ( deterministicHypotUpperBound( static_cast<double>( translation.x ),
         static_cast<double>( translation.y ) ) + angularSpeed * radius );
     if( !std::isfinite( speed ) ) return {};
 

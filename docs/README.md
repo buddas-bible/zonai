@@ -2,6 +2,8 @@
 
 Sandbox의 [Inspector 분류·레이어 체크 목록·공통 충돌 매트릭스](sandbox-inspector.md)를 제공한다.
 
+현재 게임용 안정성·엔진 전체 결정론 전환을 위한 코드 정리 계획은 [R0 코드 감사 및 리팩토링 기준선](engine-stability-refactor-r0.md)을 참조한다. 실제 구현 완료 여부는 최신 코드·PR·CI로 확인한다.
+
 현재 감사 완료 범위와 다음 작업은 [감사 현황](audit-status.md)에서 확인한다. 개별 보고서의 다음 작업/미병합/CI 대기 문구는 작성 당시의 기록이며, 최신 진행 순서는 감사 현황을 따른다.
 
 감사 상세 기록:
@@ -17,7 +19,7 @@ Sandbox의 [Inspector 분류·레이어 체크 목록·공통 충돌 매트릭�
 - [World Query / Sensor API](world-query-sensor-audit.md)
 - [Contact recycling/cache](contact-cache-audit.md)
 
-선택형 Sandbox: [설계](superpowers/specs/2026-10-06-sandbox-demo-design.md), [데모 추가와 학습 방향](sandbox-demos.md). Mouse Joint: [수학·수명·조작·검증](mouse-joint.md). Distance: [spring·Hertz·감쇠](distance-spring.md), [limit·min/max·한쪽 방향 제약](distance-limit.md), [motor·속도·힘 한도](distance-motor.md). Revolute: [회전축](revolute-joint.md), [각도 제한](revolute-limit.md), [회전 모터](revolute-motor.md). Wheel: [기본 서스펜션·축 이동·자유 회전](wheel-joint.md), [이동 범위 제한](wheel-limit.md), [회전 모터](wheel-motor.md). 연결 장치: [모터 자동차](motor-car.md). 다음 구현은 관절 제한 렉돌이다.
+선택형 Sandbox: [설계](superpowers/specs/2026-10-06-sandbox-demo-design.md), [데모 추가와 학습 방향](sandbox-demos.md). Mouse Joint: [수학·수명·조작·검증](mouse-joint.md). Distance: [spring·Hertz·감쇠](distance-spring.md), [limit·min/max·한쪽 방향 제약](distance-limit.md), [motor·속도·힘 한도](distance-motor.md). Revolute: [회전축](revolute-joint.md), [각도 제한](revolute-limit.md), [회전 모터](revolute-motor.md). Wheel: [기본 서스펜션·축 이동·자유 회전](wheel-joint.md), [이동 범위 제한](wheel-limit.md), [회전 모터](wheel-motor.md). 연결 장치: [모터 자동차](motor-car.md), [관절 제한 렉돌](ragdoll.md).
 
 첫 Joint: [기본 Distance Joint 설계](superpowers/specs/2026-10-06-distance-joint-design.md), [구현·학습·검증 기록](basic-distance-joint.md).
 
