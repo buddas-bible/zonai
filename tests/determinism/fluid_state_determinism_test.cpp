@@ -1412,6 +1412,7 @@ struct fluidStateTraceProbe2
         double trueResidualSquared = 0.0;
         int initialIterations = 0;
         int correctionIterations = 0, defectEvaluations = 0;
+        int missedMidpointCells = 0, selectedEndpointDepth = 0;
         double initialGap = 0.0, finalGap = 0.0, negativeVolume = 0.0, intervalPeak = 0.0;
         int uncoveredEndpointFaces = 0;
         bool stalled = false;
@@ -1425,12 +1426,15 @@ struct fluidStateTraceProbe2
         const std::string& key, int samples, const std::string& handoffKey,
         bool requireTarget = true, int endpointDepth = 0,
         const std::string& topologyKey = {}, double responseScale = 1.0,
-        continuationPressure* continuation = nullptr, int correctionBudget = 3 )
+        continuationPressure* continuation = nullptr, int correctionBudget = 3,
+        bool adaptiveEndpoint = false )
     {
         if( responseScale != 1.0 && responseScale != 0.75 )
             throw std::runtime_error( key + " unsupported free-body cadence response" );
         if( correctionBudget < 0 || correctionBudget > 3 || ( !continuation && correctionBudget != 3 ) )
             throw std::runtime_error( key + " invalid correction budget" );
+        if( adaptiveEndpoint && ( !continuation || endpointDepth != 16 || correctionBudget != 0 ) )
+            throw std::runtime_error( key + " invalid adaptive endpoint fixture" );
         const auto& start = before.previousObstacles_;
         const auto& finish = before.frozenPressureObstacles_;
         const std::size_t n = before.cellFluidFraction_.size(), owners = finish.size();
@@ -1491,6 +1495,9 @@ struct fluidStateTraceProbe2
                     missed.push_back( static_cast<int>( i ) );
             if( missed.empty() && !continuation )
                 throw std::runtime_error( key + " historical midpoint coverage failure not reproduced" );
+            // Skip endpoint refinement only when the uniform scan finds
+            // no changed-volume cell with missing midpoint support.
+            if( adaptiveEndpoint && missed.empty() ) endpointDepth = 0;
         }
         const auto integrate = [&]( float alpha, double weight, double lo )
         {
@@ -2223,6 +2230,8 @@ struct fluidStateTraceProbe2
             continuation->initialIterations = iterations;
             continuation->correctionIterations = correctionIterations;
             continuation->defectEvaluations = defectEvaluations;
+            continuation->missedMidpointCells = static_cast<int>( missed.size() );
+            continuation->selectedEndpointDepth = endpointDepth;
             continuation->initialGap = initialGap;
             continuation->finalGap = current.rawL1;
             continuation->negativeVolume = current.negativeFlux;
@@ -2238,7 +2247,8 @@ struct fluidStateTraceProbe2
     static void captureForwardPredictor( const fluidField2& input,
         const fluidField2& laggedField, const std::vector<fluidShapeObstacle2>& start,
         const std::vector<fluidObstacleForce2>& laggedLoad, std::string& trace,
-        int index, double responseScale = 1.0, int correctionBudget = 3, int samples = 64 )
+        int index, double responseScale = 1.0, int correctionBudget = 3, int samples = 64,
+        bool adaptiveEndpoint = false )
     {
         using namespace sandbox;
         if( responseScale != 1.0 && responseScale != 0.75 )
@@ -2246,7 +2256,10 @@ struct fluidStateTraceProbe2
         if( samples != 64 && ( ( samples != 16 && samples != 32 ) ||
             responseScale != 0.75 || correctionBudget != 0 ) )
             throw std::runtime_error( "R4n unsupported quadrature budget" );
-        const std::string name = samples != 64 ? "forwardQuadrature" + std::to_string( samples ) :
+        if( adaptiveEndpoint && ( samples != 16 || responseScale != 0.75 || correctionBudget != 0 ) )
+            throw std::runtime_error( "R4o invalid adaptive endpoint configuration" );
+        const std::string name = adaptiveEndpoint ? "forwardAdaptiveEndpoint" :
+            samples != 64 ? "forwardQuadrature" + std::to_string( samples ) :
             responseScale == 1.0 ? "forwardPredictor" :
             correctionBudget == 3 ? "forwardCadence" :
             "forwardBudget" + std::to_string( correctionBudget );
@@ -2324,7 +2337,7 @@ struct fluidStateTraceProbe2
         // Neither the lagged nor the candidate load is applied twice.
         captureSpaceTimeProjection( forward, laggedField, laggedLoad, scratch,
             key + ".projection", samples, key + ".volume", false, 16,
-            key + ".topology", responseScale, &candidate, correctionBudget );
+            key + ".topology", responseScale, &candidate, correctionBudget, adaptiveEndpoint );
         const auto corrected = run( candidate.feedback );
         rebuild( corrected );
 
@@ -2410,7 +2423,7 @@ struct fluidStateTraceProbe2
                 costKey.c_str(), candidate.initialIterations, candidate.correctionIterations,
                 candidate.defectEvaluations );
         }
-        if( responseScale == 0.75 && correctionBudget == 0 )
+        if( responseScale == 0.75 && correctionBudget == 0 && !adaptiveEndpoint )
         {
             const std::string costKey = "forwardQuadratureCost.samples" + std::to_string( samples ) +
                 ".interval" + std::to_string( index );
@@ -2419,6 +2432,16 @@ struct fluidStateTraceProbe2
             appendScalar( trace, costKey + ".initialIterations", candidate.initialIterations );
             std::printf( "%s midpoint checks %d weighted panels %d initial PCG %d\n",
                 costKey.c_str(), samples, samples + 32, candidate.initialIterations );
+        }
+        if( adaptiveEndpoint )
+        {
+            out( ".midpointCoverageChecks", samples );
+            out( ".weightedPanels", samples + 2 * candidate.selectedEndpointDepth );
+            out( ".missedMidpointCells", candidate.missedMidpointCells );
+            out( ".selectedEndpointDepth", candidate.selectedEndpointDepth );
+            std::printf( "%s midpoint checks %d weighted panels %d missed cells %d selected depth %d\n",
+                key.c_str(), samples, samples + 2 * candidate.selectedEndpointDepth,
+                candidate.missedMidpointCells, candidate.selectedEndpointDepth );
         }
         std::printf( "%s predicted gap %.9g actual corrected gap %.9g m^2 modeled gap %.9g "
             "unsupported cells %d unsupported volume %.9g interval peak %.9g m/s negative volume %.9g\n",
@@ -2608,6 +2631,7 @@ struct fluidStateTraceProbe2
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75, 1 );
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75, 0, 32 );
                     captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75, 0, 16 );
+                    captureForwardPredictor( *pre, field, poses, feedback, trace, initialIndex + step, 0.75, 0, 16, true );
                 }
                 maxPeak = std::max( maxPeak, static_cast<double>( flow.maxFluidFaceSpeed ) );
                 maxContinuity = std::max( maxContinuity, static_cast<double>( flow.continuityRms ) );
