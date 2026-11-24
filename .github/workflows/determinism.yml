@@ -1,6 +1,6 @@
 name: Cross-platform Physics Determinism (R1c)
 
-# Strict comparison for tested World/Contact/Joint and R3c Fluid state fixtures.
+# Strict comparison for tested World/Contact/Joint and Fluid/World interleave fixtures.
 # It does not certify every possible game scene or external libm behavior.
 on:
   pull_request:
@@ -8,6 +8,7 @@ on:
       - master
     paths:
       - "src/**"
+      - "sandbox/**"
       - "tests/**"
       - "third_party/**"
       - "CMakeLists.txt"
