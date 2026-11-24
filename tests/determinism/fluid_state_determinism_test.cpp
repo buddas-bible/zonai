@@ -363,6 +363,122 @@ struct fluidStateTraceProbe2
         return result;
     }
 
+    // R3x: replay existing volume-source choices on a private frozen copy.
+    // Keep original geometry, U/V, obstacle state, and pressure operator.
+    // Snapshot fallback is already implemented in prepareCutCellVolumeChange.
+    static void useSnapshotVolumeSource( fluidField2& field )
+    {
+        if( !field.frozenPressureReplayReady_ || !field.volumeSourceValid_ )
+            throw std::runtime_error( "R3x snapshot source requires valid frozen history" );
+        field.sweptFaceFlux_.usedSweptFlux = false;
+    }
+
+    static void useCorrectedSweptVolumeSource( fluidField2& field )
+    {
+        if( !field.frozenPressureReplayReady_ || !field.sweptFaceFlux_.usedSweptFlux ||
+            field.sweptGeometryCorrectionEnabled_ )
+            throw std::runtime_error( "R3x correction requires uncorrected frozen swept flux" );
+        field.setSweptGeometryCorrectionEnabled( true );
+        field.reconcileSweptSolidFlux();
+    }
+
+    static void captureVolumeSourceAudit( const fluidField2& before, const fluidField2& after,
+        std::string& trace, const std::string& key, int x, int y )
+    {
+        const int target = after.cellIndex( x, y );
+        const float area = after.cellSize_ * after.cellSize_;
+        const float dt = before.frozenPressureTimeStep_;
+        const auto sweptChange = [&]( int i )
+        {
+            const int cx = i % after.width_, cy = i / after.width_;
+            return ( before.sweptUVolume_[before.uIndex( cx + 1, cy )] -
+                before.sweptUVolume_[before.uIndex( cx, cy )] +
+                before.sweptVVolume_[before.vIndex( cx, cy + 1 )] -
+                before.sweptVVolume_[before.vIndex( cx, cy )] ) / area;
+        };
+        const auto snapshotChange = [&]( int i )
+        {
+            return before.cellFluidFraction_[i] - before.previousCellFluidFraction_[i];
+        };
+        const auto usedChange = [&]( int i )
+        {
+            return before.sweptFaceFlux_.usedSweptFlux ? sweptChange( i ) : snapshotChange( i );
+        };
+        float reconstructed = 0.0f, relocated = 0.0f;
+        int donors = 0;
+        double globalSnapshot = 0.0, globalSwept = 0.0, globalAssigned = 0.0;
+        for( int i = 0; i < static_cast<int>( before.cellFluidFraction_.size() ); ++i )
+        {
+            const float change = usedChange( i );
+            globalSnapshot += snapshotChange( i );
+            globalSwept += sweptChange( i );
+            globalAssigned += after.cutCellVolumeRate_[i];
+            if( i == target ) reconstructed += change;
+            else if( before.cellFluidFraction_[i] <= 0.0f && change != 0.0f &&
+                after.cutCellNearestFluid_[i] == target )
+            {
+                reconstructed += change;
+                relocated += change;
+                ++donors;
+                const auto prefix = key + ".donor[" + std::to_string( i ) + "]";
+                appendScalar( trace, prefix + ".snapshot", snapshotChange( i ) );
+                appendScalar( trace, prefix + ".swept", sweptChange( i ) );
+                appendScalar( trace, prefix + ".assigned", change );
+            }
+        }
+        if( before.cellFluidFraction_[target] <= 0.0f ||
+            std::bit_cast<std::uint32_t>( reconstructed ) !=
+            std::bit_cast<std::uint32_t>( after.cutCellVolumeRate_[target] ) )
+            throw std::runtime_error( key + " source attribution differs from actual projected row" );
+
+        const float west = before.cutCellUOpen( x, y ) * before.u_[before.uIndex( x, y )];
+        const float east = before.cutCellUOpen( x + 1, y ) * before.u_[before.uIndex( x + 1, y )];
+        const float south = before.cutCellVOpen( x, y ) * before.v_[before.vIndex( x, y )];
+        const float north = before.cutCellVOpen( x, y + 1 ) * before.v_[before.vIndex( x, y + 1 )];
+        const float velocityDivergence = ( east - west + north - south ) * ( 1.0f / after.cellSize_ );
+        const float sourceDivergence = reconstructed / dt;
+        const float rawDivergence = velocityDivergence + sourceDivergence;
+        const auto emit = [&]( const char* name, auto value )
+        {
+            if( !std::isfinite( static_cast<double>( value ) ) )
+                throw std::runtime_error( key + name + " nonfinite source audit" );
+            appendScalar( trace, key + name, value );
+        };
+        emit( ".previousFraction", before.previousCellFluidFraction_[target] );
+        emit( ".currentFraction", before.cellFluidFraction_[target] );
+        emit( ".snapshotChange", snapshotChange( target ) );
+        emit( ".sweptChange", sweptChange( target ) );
+        emit( ".usedSwept", static_cast<int>( before.sweptFaceFlux_.usedSweptFlux ) );
+        emit( ".directChange", usedChange( target ) );
+        emit( ".relocatedChange", relocated );
+        emit( ".donorCount", donors );
+        emit( ".assignedChange", reconstructed );
+        emit( ".westFlux", west ); emit( ".eastFlux", east );
+        emit( ".southFlux", south ); emit( ".northFlux", north );
+        emit( ".velocityDivergence", velocityDivergence );
+        emit( ".sourceDivergence", sourceDivergence );
+        emit( ".rawDivergence", rawDivergence );
+        emit( ".compatibilityAdjustedDivergence", after.divergence_[target] );
+        emit( ".compatibilityRemoved", rawDivergence - after.divergence_[target] );
+        emit( ".globalSnapshotChange", globalSnapshot );
+        emit( ".globalSweptChange", globalSwept );
+        emit( ".globalAssignedChange", globalAssigned );
+        emit( ".globalUnresolvedVolumeRate", after.cutCellPressure_.unresolvedVolumeRate );
+        emit( ".globalRelocatedVolumeRate", after.cutCellPressure_.redistributedVolumeRate );
+        emit( ".geometryMismatch", after.sweptFaceFlux_.geometryMismatch );
+        const int lower = after.cellIndex( x, y - 1 );
+        emit( ".faceSpeed", after.v_[after.vIndex( x, y )] );
+        emit( ".faceOpen", after.cutCellVOpen( x, y ) );
+        emit( ".pressureJump", after.pressure_[target] - after.pressure_[lower] );
+        std::printf( "%s previous fraction %.9g current %.9g snapshot %.9g swept %.9g "
+            "assigned %.9g relocated %.9g donors %d velocity divergence %.9g source divergence %.9g "
+            "adjusted divergence %.9g pressure jump %.9g target speed %.9g\n",
+            key.c_str(), before.previousCellFluidFraction_[target], before.cellFluidFraction_[target],
+            snapshotChange( target ), sweptChange( target ), reconstructed, relocated, donors,
+            velocityDivergence, sourceDivergence, after.divergence_[target],
+            after.pressure_[target] - after.pressure_[lower], after.v_[after.vIndex( x, y )] );
+    }
+
     static void captureProjection( const fluidField2& field, std::string& trace, const std::string& key )
     {
         appendVector( trace, key + ".u", field.u_ );
@@ -1593,6 +1709,52 @@ std::string runNearClosedFaceScene()
     probe::capturePrePressure( *frozen, beforeU, beforeV );
     compareReplay( "cached", baseline, *a );
     compareReplay( "uncached", reference, *b );
+
+    // Separate source audit segment; preserve every R3w trace row.
+    // Do not erase a volume source or alter any aperture to reduce speed.
+    const std::string sourceKey = "volumeSourceAudit.frozen.";
+    probe::captureVolumeSourceAudit( *frozen, baseline, trace, sourceKey + "baseline", 17, 13 );
+    for( bool corrected : { false, true } )
+    {
+        fluidField2 input = *frozen;
+        input.setPrePressureSnapshotObserver( {} );
+        probe::setStageObserver( input, {} );
+        if( corrected ) probe::useCorrectedSweptVolumeSource( input );
+        else probe::useSnapshotVolumeSource( input );
+        fluidField2 output = input;
+        const auto feedback = output.replayFrozenCutCellPressure();
+        const std::string key = sourceKey + ( corrected ? "correctedSwept" : "snapshot" );
+        check( feedback && feedback->size() == a->size(), "R3x source replay missing feedback" );
+        const auto& p = output.getCutCellPressure();
+        check( p.usedCoupledProjection && !p.coupledSolveFailed &&
+            p.coupledStatus == fluidCoupledPressureStatus2::converged,
+            "R3x source replay pressure failed" );
+        probe::captureVolumeSourceAudit( input, output, trace, key, 17, 13 );
+        const auto sample = probe::captureStabilityPhase( output, trace, key + ".ledger", &beforeU, &beforeV );
+        float maxForceChange = 0.0f, maxTorqueChange = 0.0f;
+        for( std::size_t i = 0; i < feedback->size(); ++i )
+        {
+            const auto prefix = key + ".body[" + std::to_string( i ) + "]";
+            const auto& force = ( *feedback )[i];
+            check( std::isfinite( force.force.x ) && std::isfinite( force.force.y ) &&
+                std::isfinite( force.torque ), "R3x nonfinite source replay feedback" );
+            probe::appendScalar( trace, prefix + ".force.x", force.force.x );
+            probe::appendScalar( trace, prefix + ".force.y", force.force.y );
+            probe::appendScalar( trace, prefix + ".torque", force.torque );
+            const auto d = force.force - ( *a )[i].force;
+            maxForceChange = std::max( maxForceChange, std::max( std::abs( d.x ), std::abs( d.y ) ) );
+            maxTorqueChange = std::max( maxTorqueChange, std::abs( force.torque - ( *a )[i].torque ) );
+        }
+        probe::appendScalar( trace, key + ".maxForceComponentChange", maxForceChange );
+        probe::appendScalar( trace, key + ".maxTorqueChange", maxTorqueChange );
+        probe::appendScalar( trace, key + ".continuityRms", output.getFlowAudit( timeStep / fluidSubsteps ).continuityRms );
+        probe::appendScalar( trace, key + ".pcgIterations", p.coupledIterations );
+        probe::appendScalar( trace, key + ".tracerMass", output.getTracerMass() );
+        std::printf( "%s peak %.9g m/s pressure delta %.9g m/s max force component change %.9g N "
+            "max torque change %.9g Nm continuity %.9g /s\n",
+            key.c_str(), sample.peak, sample.deltaPeak, maxForceChange, maxTorqueChange,
+            output.getFlowAudit( timeStep / fluidSubsteps ).continuityRms );
+    }
     float forceDifference = 0.0f, torqueDifference = 0.0f;
     for( std::size_t i = 0; i < a->size(); ++i )
     {
