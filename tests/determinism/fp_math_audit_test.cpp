@@ -342,6 +342,49 @@ void auditSinCos( std::FILE* stream )
     }
 }
 
+// R3o: reconstruct the wind source's actual float time recurrence for
+// the 180-tick, eight-World/four-Fluid-substep Sandbox fixture. This is a
+// separate diagnostic, not a capture of the source's production locals.
+void auditWindSource( std::FILE* stream )
+{
+    constexpr float timeStep = 1.0f / 60.0f;
+    constexpr int worldSubsteps = 8;
+    constexpr int fluidSubsteps = 4;
+    constexpr int tickCount = 180;
+    constexpr float strength = 8.0f;
+    constexpr float worldSubstepTime = timeStep / worldSubsteps;
+    constexpr float windTimeStep = worldSubstepTime * ( worldSubsteps / fluidSubsteps );
+    float windTime = 0.0f;
+    bool sawPositive = false, sawNegative = false;
+    for( std::size_t i = 0; i < tickCount * fluidSubsteps; ++i )
+    {
+        windTime += windTimeStep;
+        const float angle = 1.7f * windTime;
+        // Prevent compile-time folding of the stdlib witness. Keep the
+        // engine's operation order identical to rigidBodyDemo::step().
+        volatile float input = angle;
+        const float legacy = std::sin( input );
+        const float candidate = deterministicSinCosBounded( angle ).sine;
+        const float legacyDelta = 0.5f * strength * windTimeStep * legacy;
+        const float candidateDelta = 0.5f * strength * windTimeStep * candidate;
+        check( std::isfinite( legacyDelta ) && std::isfinite( candidateDelta ),
+            "wind source bounded recurrence produced a nonfinite result" );
+        sawPositive |= candidate > 0.0f;
+        sawNegative |= candidate < 0.0f;
+        if( stream )
+        {
+            outputFloat( stream, "zonai.windSource.time", i, windTime );
+            outputFloat( stream, "zonai.windSource.angle", i, angle );
+            outputFloat( stream, "zonai.windSource.candidateSin", i, candidate );
+            outputFloat( stream, "zonai.windSource.candidateDeltaY", i, candidateDelta );
+            outputFloat( stream, "libm.windSource.sin", i, legacy );
+            outputFloat( stream, "libm.windSource.deltaY", i, legacyDelta );
+        }
+    }
+    check( sawPositive && sawNegative && windTime > 2.99f && windTime < 3.01f,
+        "wind source recurrence did not exercise both oscillation signs" );
+}
+
 void emitFingerprint( std::FILE* stream )
 {
     // Use exact source IEEE-754 bits rather than decimal angle parsing.
@@ -492,6 +535,7 @@ int main( int argc, char** argv )
         {
             auditLerp( nullptr );
             auditSinCos( nullptr );
+            auditWindSource( nullptr );
             std::puts( "FP math contract audit passed" );
             return EXIT_SUCCESS;
         }
@@ -508,6 +552,7 @@ int main( int argc, char** argv )
         emitFingerprint( stream );
         auditLerp( stream );
         auditSinCos( stream );
+        auditWindSource( stream );
         if( std::fclose( stream ) != 0 )
             throw std::runtime_error( "cannot close FP audit output" );
 
