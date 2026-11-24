@@ -1,7 +1,8 @@
-name: Fluid interpolation A/B (R3g)
+name: Fluid swept rotation A/B (R3j)
 
 # Same-runner Release comparison, separate from the strict raw-bit gate.
-# The historical baseline is intentional: changing it invalidates this audit.
+# R3j compares only the swept angle migration against pinned R3i.
+# Historical R3g interpolation results remain in run 45347667921.
 on:
   pull_request:
     branches: [master]
@@ -24,7 +25,7 @@ jobs:
           path: candidate
       - uses: actions/checkout@v4
         with:
-          ref: 6904f042f2c1f8cc8b0bee3dcf99c2c6be015591
+          ref: bb344d2f158091afc0df0e9441c2d02b481e14e8
           path: baseline
       - name: Build the same existing Release benchmark on both revisions
         shell: bash
@@ -80,13 +81,13 @@ jobs:
           baseline, candidate = timing("baseline"), timing("candidate")
           assert baseline[0].keys() == candidate[0].keys()
           print("Release timing: median of three benchmark medians; informational only")
-          print("cell_m,fluid_substeps,baseline_advection_ms,candidate_advection_ms,baseline_field_ms,candidate_field_ms,baseline_failed_frames_max,candidate_failed_frames_max")
+          print("cell_m,fluid_substeps,baseline_swept_ms,candidate_swept_ms,baseline_advection_ms,candidate_advection_ms,baseline_field_ms,candidate_field_ms,baseline_failed_frames_max,candidate_failed_frames_max")
           for key in sorted(baseline[0]):
               def metric(runs, field):
                   return median(float(r[key][field]) for r in runs)
               def failures(runs):
                   return max(int(r[key]["pcg_failed_frames"]) for r in runs)
-              print(f"{key[0]},{key[2]},{metric(baseline, 'advection_ms'):.4f},{metric(candidate, 'advection_ms'):.4f},{metric(baseline, 'field_ms'):.4f},{metric(candidate, 'field_ms'):.4f},{failures(baseline)},{failures(candidate)}")
+              print(f"{key[0]},{key[2]},{metric(baseline, 'swept_ms'):.4f},{metric(candidate, 'swept_ms'):.4f},{metric(baseline, 'advection_ms'):.4f},{metric(candidate, 'advection_ms'):.4f},{metric(baseline, 'field_ms'):.4f},{metric(candidate, 'field_ms'):.4f},{failures(baseline)},{failures(candidate)}")
 
           audit_keys = (*keys, "obstacle_coupling", "drag", "frame")
           def audit(revision):
@@ -108,6 +109,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fluid-lerp-ab
+          name: fluid-swept-rotation-ab
           path: reports/
           if-no-files-found: warn
