@@ -818,7 +818,8 @@ struct fluidStateTraceProbe2
 
     static void captureIntervalTransport( const fluidField2& before, const intervalTransport& state,
         const std::vector<double>& source, const std::vector<double>& expectedResidual,
-        std::string& trace, const std::string& key )
+        std::string& trace, const std::string& key,
+        std::array<std::vector<double>, 2>* transportedMass = nullptr )
     {
         const std::size_t n = before.cellFluidFraction_.size();
         const double area = static_cast<double>( before.cellSize_ ) * before.cellSize_;
@@ -942,6 +943,7 @@ struct fluidStateTraceProbe2
             out( prefix + ".closingMassBefore", closingMassBefore ); out( prefix + ".closingMassAfter", closingMassAfter );
             out( prefix + ".uniformEndpointError", endpointError );
             appendVector( trace, key + prefix + ".mass", result );
+            if( transportedMass ) ( *transportedMass )[uniform ? 0 : 1] = result;
             std::printf( "%s%s mass before %.9g after %.9g error %.9g trapped %.9g closed face mass %.9g "
                 "closing mass remaining %.9g uniform endpoint error %.9g\n",
                 key.c_str(), prefix.c_str(), beforeMass, afterMass, massError, trappedAfter,
@@ -3081,6 +3083,90 @@ struct fluidStateTraceProbe2
             throw std::runtime_error( "R4ap clean transport changed" );
         std::puts( "R4ap synthetic multiple/split/no-capacity/nonclosing/large/clean cases passed" );
     }
+    // R4aq: exercise the existing donor-limited tracer consumer on the
+    // repaired transport ledger without feeding it back into pressure/MAC.
+    static void auditRepairedTracerTransport( const fluidField2& field,
+        const std::vector<float>& startFraction, const continuationPressure& candidate,
+        const std::vector<transportRepairFace>& original, const transportRepairResult& repair, int index )
+    {
+        const double area = static_cast<double>( field.cellSize_ ) * field.cellSize_;
+        const std::size_t n = startFraction.size();
+        fluidField2 copy = field;
+        copy.previousCellFluidFraction_ = startFraction;
+        copy.tracerMass_.resize( n );
+        std::vector<double> source( n );
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            // A reproducible nonuniform concentration, with no initial mass
+            // in solid cells. This is not the live tracer history.
+            copy.tracerMass_[i] = area * startFraction[i] * ( 1.0 + ( i % 7 ) / 8.0 );
+            source[i] = area * ( static_cast<double>( field.cellFluidFraction_[i] ) - startFraction[i] );
+        }
+        const auto consume = [&]( const std::vector<transportRepairFace>& faces, const char* suffix )
+        {
+            intervalTransport state{
+                std::vector<double>( field.u_.size() ), std::vector<double>( field.v_.size() ),
+                std::vector<double>( field.u_.size() ), std::vector<double>( field.v_.size() ) };
+            std::vector<double> expected = source;
+            std::size_t cursor = 0;
+            const auto collect = [&]( bool isU, int x, int y )
+            {
+                const int f = isU ? field.uIndex( x, y ) : field.vIndex( x, y );
+                const double aperture = ( isU ? candidate.meanU : candidate.meanV )[f];
+                const double endpointOpen = isU ? field.cutCellUOpen( x, y ) : field.cutCellVOpen( x, y );
+                if( endpointOpen > 0.0 )
+                    ( isU ? state.uEndpointFluid : state.vEndpointFluid )[f] =
+                        ( isU ? candidate.intervalU : candidate.intervalV )[f];
+                if( aperture <= 0.0 ) return;
+                const int a = field.cellIndex( x - ( isU ? 1 : 0 ), y - ( isU ? 0 : 1 ) );
+                const int b = field.cellIndex( x, y );
+                if( cursor >= faces.size() || faces[cursor].first != a || faces[cursor].second != b )
+                    throw std::runtime_error( "R4aq transport face mapping differs" );
+                const double amount = faces[cursor++].amount;
+                ( isU ? state.uTransfer : state.vTransfer )[f] = amount;
+                if( amount != 0.0 ) { expected[a] += amount; expected[b] -= amount; }
+            };
+            for( int y = 0; y < field.height_; ++y )
+                for( int x = 1; x < field.width_; ++x ) collect( true, x, y );
+            for( int y = 1; y < field.height_; ++y )
+                for( int x = 0; x < field.width_; ++x ) collect( false, x, y );
+            if( cursor != faces.size() ) throw std::runtime_error( "R4aq unused transfer face" );
+            std::array<std::vector<double>, 2> mass;
+            std::string scratch;
+            captureIntervalTransport( copy, state, source, expected, scratch,
+                "R4aq.interval" + std::to_string( index ) + suffix, &mass );
+            return mass;
+        };
+        const auto originalMass = consume( original, ".original" );
+        const auto repairedMass = consume( repair.faces, ".repaired" );
+        if( repair.changedFaces == 0 && originalMass != repairedMass )
+            throw std::runtime_error( "R4aq no-op transport changed tracer" );
+        for( std::size_t mode = 0; mode < repairedMass.size(); ++mode )
+        {
+            double deltaL1 = 0.0, closedBefore = 0.0, closedAfter = 0.0;
+            double modelGap = 0.0, geometryGap = 0.0;
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                const double oldMass = originalMass[mode][i], newMass = repairedMass[mode][i];
+                deltaL1 += std::abs( newMass - oldMass );
+                if( field.cellFluidFraction_[i] == 0.0f )
+                {
+                    closedBefore += oldMass; closedAfter += newMass;
+                }
+                if( mode == 0 )
+                {
+                    modelGap += std::abs( newMass - repair.ledger[i] );
+                    geometryGap += std::abs( newMass - area * field.cellFluidFraction_[i] );
+                }
+            }
+            if( !std::isfinite( deltaL1 ) || !std::isfinite( closedAfter ) )
+                throw std::runtime_error( "R4aq nonfinite tracer comparison" );
+            std::printf( "R4aq interval%d mode %zu deltaL1 %.17g closedBefore %.17g closedAfter %.17g "
+                "uniformModelGap %.17g uniformGeometryGap %.17g\n",
+                index, mode, deltaL1, closedBefore, closedAfter, modelGap, geometryGap );
+        }
+    }
+
     static void auditClosingTransportRepair( const fluidField2& field,
         const std::vector<float>& startFraction, const continuationPressure& candidate,
         float dt, int index )
@@ -3113,6 +3199,7 @@ struct fluidStateTraceProbe2
         if( !result ) throw std::runtime_error( "R4ap unsupported closing transport repair" );
         if( index == 64 && result->repaired != 1 )
             throw std::runtime_error( "R4ap historical deficit not repaired" );
+        auditRepairedTracerTransport( field, startFraction, candidate, faces, *result, index );
         std::printf( "R4ap interval%d repaired %d changedFaces %d reduction %.17g conservationError %.17g\n",
             index, result->repaired, result->changedFaces, result->reduction, result->conservationError );
     }
