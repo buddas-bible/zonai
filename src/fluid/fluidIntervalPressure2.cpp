@@ -210,15 +210,61 @@ void addIntervalPressureSchurDiagonal( std::span<const intervalPressureResponse>
         }
 }
 
+intervalPressureOperator::intervalPressureOperator( const intervalPressureGraph& graph,
+    std::span<const intervalPressureResponse> coefficients,
+    std::span<const intervalPressureBody> bodies, std::span<intervalPressureResponse> force,
+    std::span<double> sums, double responseScale, bool skipFixedBodyProducts )
+    : graph( graph ), coefficients( coefficients ), bodies( bodies ), force( force ),
+      sums( sums ), responseScale( responseScale ), skipFixedBodyProducts( skipFixedBodyProducts )
+{
+    const std::size_t n = graph.parent.size(), owners = bodies.size();
+    if( graph.diagonal.size() != n || graph.count.size() != n || sums.size() != n ||
+        force.size() != owners || ( owners != 0 && n > std::numeric_limits<std::size_t>::max() / owners ) ||
+        coefficients.size() != n * owners || !std::isfinite( responseScale ) || responseScale < 0.0 ||
+        ( skipFixedBodyProducts && responseScale != 0.0 ) )
+        throw std::invalid_argument( "interval pressure: invalid operator extents or scale" );
+    for( int root : graph.parent )
+        if( root < -1 || ( root >= 0 &&
+            ( static_cast<std::size_t>( root ) >= n || graph.count[root] <= 0 ) ) )
+            throw std::invalid_argument( "interval pressure: invalid operator component" );
+    for( const auto& e : graph.edges )
+        if( e.first < 0 || e.second < 0 || static_cast<std::size_t>( e.first ) >= n ||
+            static_cast<std::size_t>( e.second ) >= n || !std::isfinite( e.a ) || e.a <= 0.0 )
+            throw std::invalid_argument( "interval pressure: invalid operator edge" );
+}
+
+void intervalPressureOperator::project( std::span<double> values ) const
+{
+    projectIntervalPressureGauge( values, graph.parent, graph.count, sums );
+}
+
+void intervalPressureOperator::transpose( std::span<const double> pressure ) const
+{
+    transposeIntervalPressureBodies( coefficients, pressure, force );
+}
+
+void intervalPressureOperator::multiply( std::span<const double> pressure, std::span<double> out ) const
+{
+    multiplyIntervalPressureGraph( graph.edges, pressure, out );
+    if( skipFixedBodyProducts ) return;
+    transpose( pressure );
+    addIntervalPressureSchur( coefficients, bodies, force, responseScale, out );
+}
+
+void intervalPressureOperator::addDiagonal( std::span<double> diagonal ) const
+{
+    addIntervalPressureSchurDiagonal( coefficients, bodies, responseScale, diagonal );
+}
+
 intervalPressureResult solveIntervalPressure(
-    const std::vector<double>& rhs, const std::vector<double>& diagonal,
-    const std::vector<int>& parent, std::span<const float> seed, bool warmStart,
-    double dt, double relativeSquaredTolerance,
-    const std::vector<std::pair<std::size_t, double>>& closingRows,
-    const intervalPressureMultiply& multiply, const intervalPressureGauge& zeroMean )
+    const std::vector<double>& rhs, const intervalPressureOperator& op,
+    std::span<const float> seed, bool warmStart, double dt, double relativeSquaredTolerance,
+    const std::vector<std::pair<std::size_t, double>>& closingRows )
 {
     const std::size_t n = rhs.size();
-    if( diagonal.size() != n || parent.size() != n || !multiply || !zeroMean ||
+    const auto& diagonal = op.graph.diagonal;
+    const auto& parent = op.graph.parent;
+    if( diagonal.size() != n || parent.size() != n ||
         !std::isfinite( dt ) || dt <= 0.0 ||
         !std::isfinite( relativeSquaredTolerance ) || relativeSquaredTolerance <= 0.0 )
         throw std::invalid_argument( "interval pressure: invalid linear system input" );
@@ -240,7 +286,7 @@ intervalPressureResult solveIntervalPressure(
     {
         for( std::size_t i = 0; i < n; ++i )
             z[i] = diagonal[i] > 0.0 ? r[i] / diagonal[i] : 0.0;
-        zeroMean( z );
+        op.project( z );
     };
     const double rhsSquared = dot( rhs, rhs );
     if( warmStart )
@@ -255,8 +301,8 @@ intervalPressureResult solveIntervalPressure(
         }
         // Reproject the seed pressure onto the forward graph gauge.
         // Recompute the residual; no old search direction is reused.
-        zeroMean( p );
-        multiply( p, ap ); zeroMean( ap );
+        op.project( p );
+        op.multiply( p, ap ); op.project( ap );
         for( std::size_t i = 0; i < n; ++i ) r[i] = rhs[i] - ap[i];
     }
     precondition();
@@ -277,7 +323,7 @@ intervalPressureResult solveIntervalPressure(
     int iterations = 0;
     for( ; iterations < 2000 && ( squared > tolerance || !closingResidualSatisfied( r ) ); ++iterations )
     {
-        multiply( d, ap ); zeroMean( ap );
+        op.multiply( d, ap ); op.project( ap );
         const double denominator = dot( d, ap );
         if( !std::isfinite( denominator ) || denominator <= 0.0 || !std::isfinite( rz ) || rz <= 0.0 )
             throw std::runtime_error( "interval pressure: experimental PCG breakdown" );
@@ -292,8 +338,8 @@ intervalPressureResult solveIntervalPressure(
         for( std::size_t i = 0; i < n; ++i ) d[i] = z[i] + beta * d[i];
         rz = next;
     }
-    zeroMean( p );
-    multiply( p, ap );
+    op.project( p );
+    op.multiply( p, ap );
     double unprojectedSquared = 0.0;
     for( std::size_t i = 0; i < n; ++i )
     {
@@ -307,7 +353,7 @@ intervalPressureResult solveIntervalPressure(
         if( !closingResidualSatisfied( r ) )
             throw std::runtime_error( "interval pressure: true closing-cell residual failed" );
     }
-    zeroMean( ap );
+    op.project( ap );
     double trueSquared = 0.0;
     for( std::size_t i = 0; i < n; ++i )
     {
@@ -316,6 +362,7 @@ intervalPressureResult solveIntervalPressure(
     }
     if( !std::isfinite( trueSquared ) || trueSquared > tolerance )
         throw std::runtime_error( "interval pressure: experimental true residual failed" );
+    if( op.skipFixedBodyProducts ) op.transpose( p );
     return { std::move( p ), std::move( ap ), initial, seedSquared,
         trueSquared, unprojectedSquared, iterations };
 }
