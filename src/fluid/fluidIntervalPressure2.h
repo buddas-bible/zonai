@@ -21,6 +21,28 @@ struct intervalPressureEdge
     int index;
 };
 
+struct intervalPressureFaceInput
+{
+    std::span<const double> meanOpen;
+    std::span<const float> velocity, endpointOpen;
+};
+
+struct intervalPressureGraph
+{
+    std::vector<intervalPressureEdge> edges;
+    std::vector<double> diagonal, rawDivergence;
+    std::vector<int> parent, count;
+    int active = 0, regions = 0, closedEndFaces = 0;
+    double sourceSum = 0.0;
+};
+
+// Endpoint openness is masked by the adjacent endpoint cell fractions.
+// Build in canonical U-then-V order, with minimum-index component roots.
+[[nodiscard]] intervalPressureGraph buildIntervalPressureGraph( int width, int height,
+    double h, double dt, std::span<const double> meanFraction,
+    std::span<const float> previousFraction, std::span<const float> endpointFraction,
+    const intervalPressureFaceInput& u, const intervalPressureFaceInput& v );
+
 // Internal kernels: caller supplies valid graph indices, matching extents,
 // positive component counts and nonaliasing scratch/output vectors.
 void projectIntervalPressureGauge( std::span<double> values, std::span<const int> parent,
