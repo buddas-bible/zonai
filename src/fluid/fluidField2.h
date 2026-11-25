@@ -24,6 +24,8 @@ struct intervalPressurePoseMotion;
 struct intervalPressureQuadrature;
 struct intervalPressureGeometryIntegral;
 struct intervalPressureGeometryPreparation;
+struct intervalPressureLinearOptions;
+struct intervalPressureLinearState;
 }
 
 
@@ -843,6 +845,9 @@ private:
     // Prepare a complete geometry integral without changing the frozen field.
     [[nodiscard]] fluidDetail::intervalPressureGeometryPreparation prepareIntervalPressureGeometry(
         int samples, int endpointDepth, bool adaptiveEndpoint, bool refineEndpointFaces ) const;
+    [[nodiscard]] fluidDetail::intervalPressureLinearState solvePreparedIntervalPressure(
+        const fluidDetail::intervalPressureGeometryIntegral& integral,
+        const fluidDetail::intervalPressureLinearOptions& options, std::span<const float> seed ) const;
     void remapExposedFaces();
     [[nodiscard]] float advectionUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float advectionVOpen( int x, int y ) const noexcept;
