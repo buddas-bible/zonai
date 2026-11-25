@@ -2202,6 +2202,53 @@ void fluidField2::integrateIntervalPressurePanels( fluidField2& geometry, fluidF
     fluidDetail::normalizeIntervalPressureQuadrature( weightSum, meanU, meanV, fraction, coefficients );
 }
 
+fluidDetail::intervalPressureGeometryPreparation fluidField2::prepareIntervalPressureGeometry(
+    int samples, int endpointDepth, bool adaptiveEndpoint, bool refineEndpointFaces ) const
+{
+    const auto& start = previousObstacles_;
+    const auto& finish = frozenPressureObstacles_;
+    if( samples <= 0 || endpointDepth < 0 || endpointDepth > 16 ||
+        ( endpointDepth > 0 && samples < 2 ) ||
+        samples > std::numeric_limits<int>::max() - 2 * endpointDepth ||
+        start.size() != finish.size() || !volumeSourceValid_ ||
+        !std::isfinite( frozenPressureTimeStep_ ) || frozenPressureTimeStep_ <= 0.0f )
+        throw std::invalid_argument( "interval pressure: invalid geometry preparation input" );
+
+    fluidDetail::intervalPressureGeometryPreparation result;
+    result.endpointDepth = endpointDepth;
+    fluidField2 geometry = *this;
+    geometry.setPrePressureSnapshotObserver( {} );
+    geometry.determinismStageObserver_ = {};
+    geometry.setCoupledPressureWarmStartEnabled( false );
+    geometry.setCoupledPressureWarmStartProbeEnabled( false );
+    std::vector<fluidShapeObstacle2> poses( finish.begin(), finish.end() );
+    const auto motion = fluidDetail::prepareIntervalPressurePoseMotion( start, finish, frozenPressureTimeStep_ );
+    fluidField2 panelGeometry = geometry;
+    if( endpointDepth > 0 )
+    {
+        fluidDetail::intervalPressureCoverage coverage( width_, height_,
+            { cellFluidFraction_, uOpenFraction_, vOpenFraction_ }, refineEndpointFaces );
+        for( int step = 0; step < samples; ++step )
+        {
+            fluidDetail::sampleIntervalPressurePoses( start, finish, motion,
+                frozenPressureTimeStep_, ( step + 0.5f ) / samples, poses );
+            if( !geometry.rebuildIntervalPressureGeometry( poses ) )
+                throw std::runtime_error( "interval pressure: nonanalytic coverage geometry" );
+            coverage.observe( { geometry.cellFluidFraction_, geometry.uOpenFraction_, geometry.vOpenFraction_ } );
+        }
+        result.missed = coverage.missingCells( previousCellFluidFraction_, cellFluidFraction_ );
+        result.missedFaces = coverage.missingFaces();
+        if( adaptiveEndpoint && result.missed.empty() && result.missedFaces.empty() )
+            result.endpointDepth = 0;
+    }
+    const auto quadrature = fluidDetail::buildIntervalPressureQuadrature( samples, result.endpointDepth );
+    integrateIntervalPressurePanels( geometry, panelGeometry, poses, motion, quadrature, result.integral );
+    if( result.integral.transportPanels.size() != quadrature.panels.size() ||
+        result.integral.weightSum != quadrature.weightSum )
+        throw std::runtime_error( "interval pressure: geometry panel schedule mismatch" );
+    return result;
+}
+
 void fluidField2::remapExposedFaces()
 {
     // 새로 열린 fluid-fluid face가 이전 rigid boundary의 속도를 그대로 상속하지 않도록
