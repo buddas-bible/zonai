@@ -3179,6 +3179,99 @@ struct fluidStateTraceProbe2
     // R4ax: compare the same repaired signed transfers redistributed
     // according to their sampled aperture-time weights, with actual
     // geometric panel-start capacity instead of linear model capacity.
+    // R4ba: consume the original signed transfer schedule in bounded
+    // simultaneous passes. Incoming volume/mass becomes available only
+    // in the next pass; no face is executed beyond its requested amount.
+    struct throughflowAudit
+    {
+        int passes = 0;
+        double unserved = 0.0;
+    };
+
+    static throughflowAudit consumeThroughflowPanel(
+        const std::vector<transportRepairFace>& faces, const std::vector<double>& amounts,
+        std::vector<double>& volume, std::vector<double>& mass, std::vector<double>& uniform )
+    {
+        constexpr int maxPasses = 8;
+        const std::size_t n = volume.size();
+        std::vector<double> pending( amounts.size() ), outgoing( n );
+        if( faces.size() != amounts.size() || mass.size() != n || uniform.size() != n )
+            throw std::runtime_error( "R4ba mismatched throughflow dimensions" );
+        for( std::size_t j = 0; j < amounts.size(); ++j )
+            pending[j] = std::abs( amounts[j] );
+        throughflowAudit result;
+        for( int pass = 0; pass < maxPasses; ++pass )
+        {
+            std::fill( outgoing.begin(), outgoing.end(), 0.0 );
+            bool hasPending = false;
+            for( std::size_t j = 0; j < amounts.size(); ++j )
+            {
+                if( pending[j] == 0.0 ) continue;
+                hasPending = true;
+                const auto& edge = faces[j];
+                outgoing[amounts[j] > 0.0 ? edge.first : edge.second] += pending[j];
+            }
+            if( !hasPending ) break;
+            ++result.passes;
+            auto remainingVolume = volume, remainingMass = mass, remainingUniform = uniform;
+            std::vector<double> receivedVolume( n ), receivedMass( n ), receivedUniform( n );
+            bool progress = false;
+            for( std::size_t j = 0; j < amounts.size(); ++j )
+            {
+                if( pending[j] == 0.0 ) continue;
+                const auto& edge = faces[j];
+                const int donor = amounts[j] > 0.0 ? edge.first : edge.second;
+                const int recipient = amounts[j] > 0.0 ? edge.second : edge.first;
+                const double capacity = volume[donor];
+                if( capacity <= 0.0 ) continue;
+                const double requested = outgoing[donor] <= capacity ? pending[j] :
+                    pending[j] * ( capacity / outgoing[donor] );
+                const double moved = std::min( pending[j], std::min( remainingVolume[donor], requested ) );
+                if( moved <= 0.0 ) continue;
+                const double ratio = moved / capacity;
+                const double movedMass = std::min( remainingMass[donor], mass[donor] * ratio );
+                const double movedUniform = std::min( remainingUniform[donor], uniform[donor] * ratio );
+                pending[j] -= moved;
+                remainingVolume[donor] -= moved; receivedVolume[recipient] += moved;
+                remainingMass[donor] -= movedMass; receivedMass[recipient] += movedMass;
+                remainingUniform[donor] -= movedUniform; receivedUniform[recipient] += movedUniform;
+                progress = true;
+            }
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                volume[i] = remainingVolume[i] + receivedVolume[i];
+                mass[i] = remainingMass[i] + receivedMass[i];
+                uniform[i] = remainingUniform[i] + receivedUniform[i];
+                if( !std::isfinite( volume[i] ) || volume[i] < 0.0 ||
+                    !std::isfinite( mass[i] ) || mass[i] < 0.0 ||
+                    !std::isfinite( uniform[i] ) || uniform[i] < 0.0 )
+                    throw std::runtime_error( "R4ba invalid throughflow state" );
+            }
+            if( !progress ) break;
+        }
+        for( double amount : pending ) result.unserved += amount;
+        return result;
+    }
+
+    static void auditThroughflowSynthetic()
+    {
+        const std::vector<transportRepairFace> chain{{ 0, 1, 0.5 }, { 1, 2, 0.5 }};
+        const std::vector<double> requested{ 0.5, 0.5 };
+        std::vector<double> volume{ 1.0, 0.0, 0.0 }, uniform = volume;
+        std::vector<double> mass{ 2.0, 0.0, 0.0 };
+        const auto chainResult = consumeThroughflowPanel( chain, requested, volume, mass, uniform );
+        if( chainResult.passes != 2 || chainResult.unserved != 0.0 ||
+            volume != std::vector<double>{ 0.5, 0.0, 0.5 } || uniform != volume ||
+            mass != std::vector<double>{ 1.0, 0.0, 1.0 } )
+            throw std::runtime_error( "R4ba zero-start donor chain regression" );
+        const std::vector<transportRepairFace> cycle{{ 0, 1, 0.5 }, { 1, 0, 0.5 }};
+        volume = { 0.0, 0.0 }; uniform = volume; mass = volume;
+        const auto cycleResult = consumeThroughflowPanel( cycle, requested, volume, mass, uniform );
+        if( cycleResult.passes != 1 || cycleResult.unserved != 1.0 ||
+            volume != std::vector<double>{ 0.0, 0.0 } || uniform != volume || mass != volume )
+            throw std::runtime_error( "R4ba unsupported empty cycle regression" );
+    }
+
     static void auditGeometricTracerPanels( const fluidField2& field,
         const continuationPressure& candidate, const transportRepairResult& repair,
         const std::vector<double>& seed, const tracerPanelResult& equalPanels, int index,
@@ -3218,6 +3311,10 @@ struct fluidStateTraceProbe2
         // R4az: matched alternative consumes the same face schedule using
         // the carried modeled volume, not a reset to geometric capacity.
         auto modeledMass = seed, modeledUniform = uniform;
+        auto throughVolume = ledger, throughMass = seed, throughUniform = uniform;
+        int throughMaxPasses = 0, throughTotalPasses = 0;
+        double throughUnserved = 0.0, throughMaxUniformError = 0.0;
+        if( index == 113 ) auditThroughflowSynthetic();
         std::vector<double> modeledCapacity( n );
         double modeledUnserved = 0.0, modeledZeroCapacityOutgoing = 0.0;
         double maxModeledUniformError = 0.0, maxModeledGeometryError = 0.0;
@@ -3255,6 +3352,14 @@ struct fluidStateTraceProbe2
                 panelVolume[edge.first] -= amount; panelVolume[edge.second] += amount;
                 ledger[edge.first] -= amount; ledger[edge.second] += amount;
             }
+            const auto through = consumeThroughflowPanel( repair.faces, amounts,
+                throughVolume, throughMass, throughUniform );
+            throughMaxPasses = std::max( throughMaxPasses, through.passes );
+            throughTotalPasses += through.passes;
+            throughUnserved += through.unserved;
+            for( std::size_t i = 0; i < n; ++i )
+                throughMaxUniformError = std::max( throughMaxUniformError,
+                    std::abs( throughUniform[i] - throughVolume[i] ) );
             std::vector<double> remaining = mass, received( n );
             std::vector<double> uniformRemaining = uniform, uniformReceived( n );
             std::vector<double> modeledRemaining = modeledMass, modeledReceived( n );
@@ -3389,6 +3494,32 @@ struct fluidStateTraceProbe2
             }
             else modelPeak = std::max( modelPeak, modeledMass[i] / volume );
         }
+        double throughMassTotal = 0.0, throughUniformTotal = 0.0, throughVolumeTotal = 0.0;
+        double throughTrapped = 0.0, throughUniformTrapped = 0.0, throughUniformEndL1 = 0.0;
+        double throughPeak = 0.0, throughDeltaL1 = 0.0, throughModelGap = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            const double volume = area * field.cellFluidFraction_[i];
+            throughMassTotal += throughMass[i]; throughUniformTotal += throughUniform[i];
+            throughVolumeTotal += throughVolume[i];
+            throughUniformEndL1 += std::abs( throughUniform[i] - volume );
+            throughDeltaL1 += std::abs( throughMass[i] - modeledMass[i] );
+            throughModelGap += std::abs( throughVolume[i] - ledger[i] );
+            if( volume == 0.0 )
+            {
+                throughTrapped += throughMass[i]; throughUniformTrapped += throughUniform[i];
+            }
+            else throughPeak = std::max( throughPeak, throughMass[i] / volume );
+        }
+        const double throughMassError = throughMassTotal - initialMass;
+        const double throughUniformMassError = throughUniformTotal - uniformInitialMass;
+        const double throughTolerance = 1.0e-12 * std::max( 1.0, uniformInitialMass );
+        if( std::abs( throughMassError ) > 1.0e-12 * std::max( 1.0, initialMass ) ||
+            std::abs( throughUniformMassError ) > throughTolerance ||
+            std::abs( throughVolumeTotal - uniformInitialMass ) > throughTolerance ||
+            throughModelGap > 2.0 * throughUnserved + throughTolerance ||
+            throughMaxUniformError > 1.0e-12 * area )
+            throw std::runtime_error( "R4ba throughflow conservation or uniform identity failed" );
         const double modelMassError = modelMassTotal - initialMass;
         const double modelUniformMassError = modelUniformTotal - uniformInitialMass;
         if( std::abs( modelMassError ) > 1.0e-12 * std::max( 1.0, initialMass ) ||
@@ -3434,6 +3565,19 @@ struct fluidStateTraceProbe2
         emit( ".modeledMassError", modelMassError );
         emit( ".modeledUniformMassError", modelUniformMassError );
         emit( ".modeledPeak", modelPeak ); emit( ".modeledDeltaL1", modelDeltaL1 );
+        emit( ".throughMaxPasses", throughMaxPasses ); emit( ".throughTotalPasses", throughTotalPasses );
+        emit( ".throughUnserved", throughUnserved ); emit( ".throughModelGap", throughModelGap );
+        emit( ".throughUniformError", throughMaxUniformError );
+        emit( ".throughUniformTrapped", throughUniformTrapped ); emit( ".throughTrapped", throughTrapped );
+        emit( ".throughUniformEndL1", throughUniformEndL1 );
+        emit( ".throughMassError", throughMassError ); emit( ".throughUniformMassError", throughUniformMassError );
+        emit( ".throughPeak", throughPeak ); emit( ".throughDeltaL1", throughDeltaL1 );
+        std::printf( "R4ba interval%d maxPasses %d totalPasses %d unserved %.17g modelGap %.17g "
+            "uniformError %.17g uniformTrapped %.17g trapped %.17g uniformEndL1 %.17g "
+            "massError %.17g uniformMassError %.17g peak %.17g deltaL1 %.17g\n", index,
+            throughMaxPasses, throughTotalPasses, throughUnserved, throughModelGap, throughMaxUniformError,
+            throughUniformTrapped, throughTrapped, throughUniformEndL1, throughMassError,
+            throughUniformMassError, throughPeak, throughDeltaL1 );
         std::printf( "R4az interval%d limited %d unserved %.17g zeroCapacityOutgoing %.17g "
             "uniformModelError %.17g uniformGeometryError %.17g uniformTrapped %.17g "
             "trapped %.17g uniformEndL1 %.17g massError %.17g uniformMassError %.17g "
