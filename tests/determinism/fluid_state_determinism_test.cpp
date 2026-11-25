@@ -1586,17 +1586,17 @@ struct fluidStateTraceProbe2
 
         const auto linearStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
         if( timing ) timing->quadratureMs = elapsedMs( quadratureStart, linearStart );
-        auto graph = fluidDetail::buildIntervalPressureGraph( before.width_, before.height_, h, dt,
-            fraction, before.previousCellFluidFraction_, before.cellFluidFraction_,
-            { meanU, before.u_, before.uOpenFraction_ }, { meanV, before.v_, before.vOpenFraction_ } );
+        const std::span<const float> seed = previousForwardPressure.empty() ?
+            std::span<const float>( baseline.pressure_ ) : previousForwardPressure;
+        const fluidDetail::intervalPressureLinearOptions linearOptions{
+            responseScale, volumeWeightedCompatibility, skipFixedBodyProducts, warmStart,
+            relativeSquaredTolerance, closingVolumeRelativeTolerance };
+        auto linear = before.solvePreparedIntervalPressure( preparedGeometry.integral, linearOptions, seed );
+        auto& graph = linear.graph;
         auto& [edges, diagonal, rawDivergence, parent, count, active, regions, closedEndFaces, sourceSum] = graph;
-        std::vector<double> rhs( n );
-        // Explicit component zero-mean constraint. Unlike production, the
-        // prototype solves P A P p = P b and reports the unprojected residual.
-        std::vector<double> sums( n );
-        const double scale = h * h / dt;
-        const auto rhsResult = fluidDetail::buildIntervalPressureRhs( graph, before.cellFluidFraction_,
-            scale, volumeWeightedCompatibility, rhs, sums );
+        auto& rhs = linear.rhs;
+        const auto& rhsResult = linear.rhsResult;
+        const double scale = linear.scale;
         if( rhsResult.failedComponent >= 0 )
         {
             const int c = rhsResult.failedComponent;
@@ -1624,14 +1624,11 @@ struct fluidStateTraceProbe2
             throw std::runtime_error( key + " component lacks endpoint compatibility capacity" );
         }
         const double compatibilityL1 = rhsResult.compatibilityL1;
-        std::vector<response> force( owners );
-        std::vector<fluidDetail::intervalPressureBody> bodies( owners );
-        for( std::size_t j = 0; j < owners; ++j )
-            bodies[j] = { static_cast<double>( finish[j].inverseMass ),
-                static_cast<double>( finish[j].inverseInertia ) };
-        const fluidDetail::intervalPressureOperator pressureOperator( graph, coefficients, bodies,
-            force, sums, responseScale, skipFixedBodyProducts );
-        pressureOperator.addDiagonal( diagonal );
+        if( !linear.solution )
+            throw std::runtime_error( key + " missing interval pressure solution" );
+        auto& force = linear.force;
+        const fluidDetail::intervalPressureOperator pressureOperator( graph, coefficients, linear.bodies,
+            force, linear.sums, responseScale, skipFixedBodyProducts );
 
         const auto dot = [&]( const std::vector<double>& a, const std::vector<double>& b )
         {
@@ -1639,18 +1636,8 @@ struct fluidStateTraceProbe2
             for( std::size_t i = 0; i < n; ++i ) sum += a[i] * b[i];
             return sum;
         };
-        std::vector<std::pair<std::size_t, double>> closingRows;
-        if( closingVolumeRelativeTolerance > 0.0 )
-            for( std::size_t i = 0; i < n; ++i )
-                if( parent[i] >= 0 && before.previousCellFluidFraction_[i] > 0.0f &&
-                    before.cellFluidFraction_[i] == 0.0f )
-                    closingRows.emplace_back( i, std::max( 1.0e-18,
-                        closingVolumeRelativeTolerance * h * h * before.previousCellFluidFraction_[i] ) );
-        const std::span<const float> seed = previousForwardPressure.empty() ?
-            std::span<const float>( baseline.pressure_ ) : previousForwardPressure;
-        auto solved = fluidDetail::solveIntervalPressure( rhs, pressureOperator, seed, warmStart,
-            dt, relativeSquaredTolerance, closingRows );
-        auto& [p, ap, initial, seedSquared, trueSquared, unprojectedSquared, iterations] = solved;
+        const auto& closingRows = linear.closingRows;
+        auto& [p, ap, initial, seedSquared, trueSquared, unprojectedSquared, iterations] = *linear.solution;
         if( closingVolumeRelativeTolerance > 0.0 )
             std::printf( "%s R4am closing rows %zu relative tolerance %.9g PCG %d\n",
                 key.c_str(), closingRows.size(), closingVolumeRelativeTolerance, iterations );
@@ -3162,6 +3149,16 @@ struct fluidStateTraceProbe2
         if( !geometryHistoryRejected || !geometryScheduleRejected )
             throw std::runtime_error( "R4bu invalid geometry preparation accepted" );
         std::puts( "R4bu interval geometry preparation regressions passed" );
+
+        bool linearHistoryRejected = false;
+        try
+        {
+            (void)noIntervalHistory.solvePreparedIntervalPressure( {}, {}, {} );
+        }
+        catch( const std::invalid_argument& ) { linearHistoryRejected = true; }
+        if( !linearHistoryRejected )
+            throw std::runtime_error( "R4bv invalid frozen linear history accepted" );
+        std::puts( "R4bv interval linear solve regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
