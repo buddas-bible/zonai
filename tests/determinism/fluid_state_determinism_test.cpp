@@ -1941,7 +1941,7 @@ struct fluidStateTraceProbe2
         double targetFluxVelocity = 0.0, targetEndOpening = 0.0;
         double intervalTransferL1 = 0.0;
         int closedTransferFaces = 0;
-        const auto addTransfer = []( std::vector<double>& v, const edge& e, double amount )
+        const auto addTransfer = []( std::vector<double>& v, const fluidDetail::intervalPressureEdge& e, double amount )
         {
             v[e.first] += amount; v[e.second] -= amount;
         };
