@@ -3077,6 +3077,93 @@ struct fluidStateTraceProbe2
         if( !candidateLedgerRejected )
             throw std::runtime_error( "R4ca inconsistent candidate ledger accepted" );
         std::puts( "R4ca repaired pressure candidate transport regressions passed" );
+
+        fluidField2 transaction( 2, 2, 1.0f );
+        transaction.volumeSourceValid_ = true;
+        transaction.frozenPressureTimeStep_ = 1.0f;
+        transaction.frozenPressureObstacles_.resize( 1 );
+        transaction.previousCellFluidFraction_ = { 1.0f, 0.0f, 0.0f, 0.0f };
+        transaction.cellFluidFraction_ = { 0.0f, 1.0f, 0.0f, 0.0f };
+        transaction.tracerEnabled_ = true;
+        transaction.tracerMass_ = { 2.0, 0.0, 0.0, 0.0 };
+        transaction.tracerStats_.substeps = 9;
+        fluidDetail::intervalPressureCandidate transactionCandidate;
+        transactionCandidate.u = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+        transactionCandidate.v = transactionCandidate.u;
+        transactionCandidate.pressure = { 1.0f, -1.0f, 0.0f, 0.0f };
+        transactionCandidate.component = { 0, 0, -1, -1 };
+        transactionCandidate.feedback = { {{ 2.0f, 3.0f }, 4.0f} };
+        transactionCandidate.meanU = { 0.0, 1.0, 0.0, 0.0, 0.0, 0.0 };
+        transactionCandidate.meanV.assign( 6, 0.0 );
+        transactionCandidate.intervalU = transactionCandidate.meanU;
+        transactionCandidate.intervalV.assign( 6, 0.0 );
+        transactionCandidate.fluxVolume = { 0.0, 1.0, 0.0, 0.0 };
+        std::vector<fluidObstacleForce2> transactionFeedback{ {{ 7.0f, 8.0f }, 9.0f} };
+        const auto unchangedTransaction = [&]()
+        {
+            return transaction.u_ == std::vector<float>( 6 ) && transaction.v_ == std::vector<float>( 6 ) &&
+                transaction.pressure_ == std::vector<float>( 4 ) &&
+                transaction.tracerMass_ == std::vector<double>{ 2.0, 0.0, 0.0, 0.0 } &&
+                transaction.tracerStats_.substeps == 9 &&
+                transactionFeedback[0].force.x == 7.0f && transactionFeedback[0].force.y == 8.0f &&
+                transactionFeedback[0].torque == 9.0f;
+        };
+        auto rejectedTransaction = transactionCandidate;
+        rejectedTransaction.intervalU[1] = 1.125;
+        rejectedTransaction.fluxVolume = { -0.125, 1.125, 0.0, 0.0 };
+        if( transaction.commitIntervalPressureCandidate( rejectedTransaction, {}, 0.0, transactionFeedback ) ||
+            !unchangedTransaction() )
+            throw std::runtime_error( "R4cb unsupported transport changed transaction" );
+        rejectedTransaction = transactionCandidate;
+        rejectedTransaction.pressure[0] = std::numeric_limits<float>::infinity();
+        bool transactionInputRejected = false;
+        try { (void)transaction.commitIntervalPressureCandidate( rejectedTransaction, {}, 0.0, transactionFeedback ); }
+        catch( const std::invalid_argument& ) { transactionInputRejected = true; }
+        if( !transactionInputRejected || !unchangedTransaction() )
+            throw std::runtime_error( "R4cb invalid transaction changed state" );
+        transaction.tracerEnabled_ = false;
+        if( transaction.commitIntervalPressureCandidate( transactionCandidate, {}, 0.0, transactionFeedback ) ||
+            !unchangedTransaction() )
+            throw std::runtime_error( "R4cb disabled tracer changed transaction" );
+        transaction.tracerEnabled_ = true;
+        // Nonzero endpoint MAC value on a separate open face makes the
+        // replacement observable without confusing it with interval flux.
+        transactionCandidate.u[4] = 0.25f;
+        transactionCandidate.v[3] = -0.5f;
+        if( !transaction.commitIntervalPressureCandidate( transactionCandidate, {}, 0.0, transactionFeedback ) ||
+            transaction.u_ != transactionCandidate.u || transaction.v_ != transactionCandidate.v ||
+            transaction.pressure_ != transactionCandidate.pressure ||
+            transaction.tracerMass_ != std::vector<double>{ 0.0, 2.0, 0.0, 0.0 } ||
+            transaction.tracerStats_.beforeMass != 2.0f || transaction.tracerStats_.afterMass != 2.0f ||
+            transaction.tracerStats_.substeps != 1 || transactionFeedback[0].force.x != 2.0f ||
+            transactionFeedback[0].force.y != 3.0f || transactionFeedback[0].torque != 4.0f )
+            throw std::runtime_error( "R4cb accepted interval transaction differs" );
+
+        // Empty-volume circulation: the signed ledger balances, but no
+        // donor can serve the requests. No partial scalar or MAC commit.
+        fluidField2 cycleTransaction( 2, 2, 1.0f );
+        cycleTransaction.volumeSourceValid_ = true;
+        cycleTransaction.frozenPressureTimeStep_ = 1.0f;
+        cycleTransaction.tracerEnabled_ = true;
+        cycleTransaction.previousCellFluidFraction_.assign( 4, 0.0f );
+        cycleTransaction.cellFluidFraction_.assign( 4, 0.0f );
+        cycleTransaction.tracerStats_.substeps = 11;
+        auto cycleCandidate = transactionCandidate;
+        cycleCandidate.feedback.clear();
+        cycleCandidate.meanU = { 0.0, 1.0, 0.0, 0.0, 1.0, 0.0 };
+        cycleCandidate.meanV = { 0.0, 0.0, 1.0, 1.0, 0.0, 0.0 };
+        cycleCandidate.intervalU = { 0.0, 0.5, 0.0, 0.0, -0.5, 0.0 };
+        cycleCandidate.intervalV = { 0.0, 0.0, -0.5, 0.5, 0.0, 0.0 };
+        cycleCandidate.fluxVolume.assign( 4, 0.0 );
+        const std::vector<transportPanel> transactionPanels{
+            { 1.0, std::vector<float>( 4 ), { 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f },
+                { 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f } } };
+        if( cycleTransaction.commitIntervalPressureCandidate( cycleCandidate, transactionPanels, 1.0, {} ) ||
+            cycleTransaction.u_ != std::vector<float>( 6 ) || cycleTransaction.v_ != std::vector<float>( 6 ) ||
+            cycleTransaction.pressure_ != std::vector<float>( 4 ) ||
+            cycleTransaction.tracerMass_ != std::vector<double>( 4 ) || cycleTransaction.tracerStats_.substeps != 11 )
+            throw std::runtime_error( "R4cb unserved transport changed transaction" );
+        std::puts( "R4cb atomic field candidate transaction regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
@@ -3511,23 +3598,29 @@ struct fluidStateTraceProbe2
             adaptivePanels, history.hybrid );
         auto& [mass, volume, panels, maxPasses, totalPasses, unserved, transferError] = computed;
 
-        // The accepted pressure candidate now reaches actual field-owned
-        // scalar storage through the private complete-only entry point.
-        // Preserve the surrounding research trajectory: this copy is not
-        // committed to World or the live pressure/geometry state.
+        // Exercise the full single-field transaction on a separate copy.
+        // The research trajectory and its World state remain independent.
         fluidField2 accepted = field;
         accepted.tracerEnabled_ = true;
         accepted.tracerMass_ = history.hybrid;
-        const bool committed = accepted.commitIntervalTracer( startVolume, repair, mapping,
-            candidate.geometricPanels, candidate.geometricWeightSum );
+        std::vector<fluidObstacleForce2> acceptedFeedback( candidate.feedback.size() );
+        const bool committed = accepted.commitIntervalPressureCandidate( candidate,
+            candidate.geometricPanels, candidate.geometricWeightSum, acceptedFeedback );
         if( committed != ( unserved == 0.0 ) ||
             accepted.tracerMass_ != ( committed ? mass : history.hybrid ) ||
-            accepted.u_ != field.u_ || accepted.v_ != field.v_ ||
-            accepted.pressure_ != field.pressure_ ||
+            accepted.u_ != ( committed ? candidate.u : field.u_ ) ||
+            accepted.v_ != ( committed ? candidate.v : field.v_ ) ||
+            accepted.pressure_ != ( committed ? candidate.pressure : field.pressure_ ) ||
             accepted.cellFluidFraction_ != field.cellFluidFraction_ ||
             accepted.previousCellFluidFraction_ != field.previousCellFluidFraction_ ||
             accepted.uOpenFraction_ != field.uOpenFraction_ || accepted.vOpenFraction_ != field.vOpenFraction_ )
-            throw std::runtime_error( "R4bi field interval handoff differs" );
+            throw std::runtime_error( "R4cb field interval transaction differs" );
+        if( committed )
+            for( std::size_t j = 0; j < acceptedFeedback.size(); ++j )
+                if( acceptedFeedback[j].force.x != candidate.feedback[j].force.x ||
+                    acceptedFeedback[j].force.y != candidate.feedback[j].force.y ||
+                    acceptedFeedback[j].torque != candidate.feedback[j].torque )
+                    throw std::runtime_error( "R4cb accepted feedback differs" );
         if( committed && accepted.tracerStats_.substeps != panels )
             throw std::runtime_error( "R4bi field panel count differs" );
         if( !committed )
