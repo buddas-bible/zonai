@@ -3187,16 +3187,72 @@ struct fluidStateTraceProbe2
         std::vector<double> volume{ 1.0, 0.0, 0.0 }, uniform = volume;
         std::vector<double> mass{ 2.0, 0.0, 0.0 };
         const auto chainResult = fluidDetail::consumeThroughflowPanel( chain, requested, volume, mass, uniform );
-        if( chainResult.passes != 2 || chainResult.unserved != 0.0 ||
+        if( !chainResult.committed || chainResult.passes != 2 || chainResult.unserved != 0.0 ||
             volume != std::vector<double>{ 0.5, 0.0, 0.5 } || uniform != volume ||
             mass != std::vector<double>{ 1.0, 0.0, 1.0 } )
             throw std::runtime_error( "R4ba zero-start donor chain regression" );
         const std::vector<transportRepairFace> cycle{{ 0, 1, 0.5 }, { 1, 0, 0.5 }};
         volume = { 0.0, 0.0 }; uniform = volume; mass = volume;
         const auto cycleResult = fluidDetail::consumeThroughflowPanel( cycle, requested, volume, mass, uniform );
-        if( cycleResult.passes != 1 || cycleResult.unserved != 1.0 ||
+        if( cycleResult.committed || cycleResult.passes != 1 || cycleResult.unserved != 1.0 ||
             volume != std::vector<double>{ 0.0, 0.0 } || uniform != volume || mass != volume )
             throw std::runtime_error( "R4ba unsupported empty cycle regression" );
+
+        const std::vector<transportRepairFace> single{{ 0, 1, 2.0 }};
+        const std::vector<double> excessive{ 2.0 };
+        volume = { 1.0, 0.0 }; uniform = volume; mass = { 3.0, 0.0 };
+        const auto rejected = fluidDetail::consumeThroughflowPanel( single, excessive, volume, mass, uniform );
+        if( rejected.committed || rejected.unserved != 1.0 ||
+            volume != std::vector<double>{ 1.0, 0.0 } || uniform != volume ||
+            mass != std::vector<double>{ 3.0, 0.0 } )
+            throw std::runtime_error( "R4be incomplete transaction changed state" );
+        const auto partial = fluidDetail::consumeThroughflowPanel( single, excessive, volume, mass, uniform,
+            fluidDetail::throughflowCommitMode::allowPartial );
+        if( !partial.committed || partial.unserved != 1.0 ||
+            volume != std::vector<double>{ 0.0, 1.0 } || uniform != volume ||
+            mass != std::vector<double>{ 0.0, 3.0 } )
+            throw std::runtime_error( "R4be explicit partial transaction differs" );
+
+        const auto rejectInvalid = [&]( const std::vector<transportRepairFace>& faces,
+            const std::vector<double>& amounts, std::vector<double> v,
+            std::vector<double> m, std::vector<double> u )
+        {
+            const auto originalV = v, originalM = m, originalU = u;
+            const auto identical = []( const std::vector<double>& a, const std::vector<double>& b )
+            {
+                if( a.size() != b.size() ) return false;
+                for( std::size_t i = 0; i < a.size(); ++i )
+                    if( std::bit_cast<std::uint64_t>( a[i] ) != std::bit_cast<std::uint64_t>( b[i] ) )
+                        return false;
+                return true;
+            };
+            bool threw = false;
+            try { (void)fluidDetail::consumeThroughflowPanel( faces, amounts, v, m, u ); }
+            catch( const std::exception& ) { threw = true; }
+            if( !threw || !identical( v, originalV ) || !identical( m, originalM ) ||
+                !identical( u, originalU ) )
+                throw std::runtime_error( "R4be invalid transaction was not atomic" );
+        };
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        const double largest = std::numeric_limits<double>::max();
+        rejectInvalid( single, {}, { 1.0, 0.0 }, { 1.0, 0.0 }, { 1.0, 0.0 } );
+        rejectInvalid( single, { 0.5 }, { 1.0, 0.0 }, { 1.0 }, { 1.0, 0.0 } );
+        rejectInvalid( {{ -1, 1, 0.0 }}, { 0.0 }, { 1.0, 0.0 }, { 1.0, 0.0 }, { 1.0, 0.0 } );
+        rejectInvalid( {{ 0, 2, 0.0 }}, { 0.0 }, { 1.0, 0.0 }, { 1.0, 0.0 }, { 1.0, 0.0 } );
+        rejectInvalid( {{ 0, 0, 0.0 }}, { 0.0 }, { 1.0, 0.0 }, { 1.0, 0.0 }, { 1.0, 0.0 } );
+        rejectInvalid( single, { nan }, { 1.0, 0.0 }, { 1.0, 0.0 }, { 1.0, 0.0 } );
+        rejectInvalid( {}, {}, { 1.0, 0.0 }, { nan, 0.0 }, { 1.0, 0.0 } );
+        rejectInvalid( {}, {}, { -1.0, 0.0 }, { 1.0, 0.0 }, { 1.0, 0.0 } );
+        rejectInvalid( single, { largest }, { largest, largest }, { 1.0, 0.0 }, { 1.0, 0.0 } );
+        rejectInvalid( {{ 0, 1, largest }, { 0, 2, largest }}, { largest, largest },
+            { 1.0, 0.0, 0.0 }, { 1.0, 0.0, 0.0 }, { 1.0, 0.0, 0.0 } );
+        volume = { 1.0, 0.0 }; mass = volume;
+        bool aliasRejected = false;
+        try { (void)fluidDetail::consumeThroughflowPanel( single, excessive, volume, mass, volume ); }
+        catch( const std::invalid_argument& ) { aliasRejected = true; }
+        if( !aliasRejected || volume != std::vector<double>{ 1.0, 0.0 } || mass != volume )
+            throw std::runtime_error( "R4be aliased output accepted" );
+        std::puts( "R4be transactional transport regressions passed" );
     }
 
     static void auditGeometricTracerPanels( const fluidField2& field,
@@ -3280,7 +3336,7 @@ struct fluidStateTraceProbe2
                 ledger[edge.first] -= amount; ledger[edge.second] += amount;
             }
             const auto through = fluidDetail::consumeThroughflowPanel( repair.faces, amounts,
-                throughVolume, throughMass, throughUniform );
+                throughVolume, throughMass, throughUniform, fluidDetail::throughflowCommitMode::allowPartial );
             throughMaxPasses = std::max( throughMaxPasses, through.passes );
             throughTotalPasses += through.passes;
             throughUnserved += through.unserved;
@@ -3594,7 +3650,8 @@ struct fluidStateTraceProbe2
                         throw std::runtime_error( "R4bb nonfinite sampled transfer" );
                     sums[j] += amounts[j];
                 }
-                const auto result = fluidDetail::consumeThroughflowPanel( repair.faces, amounts, volume, mass, uniform );
+                const auto result = fluidDetail::consumeThroughflowPanel( repair.faces, amounts, volume, mass, uniform,
+                    fluidDetail::throughflowCommitMode::allowPartial );
                 maxPasses = std::max( maxPasses, result.passes );
                 totalPasses += result.passes;
                 unserved += result.unserved;
