@@ -4213,14 +4213,15 @@ struct fluidStateTraceProbe2
             // newly computed load is applied only in the next interval.
             const std::string splitKey = std::string( optimized ? "forwardOptimized.interval" :
                 "forwardStaggered.interval" ) + std::to_string( index );
-            const auto pressureStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
+            const bool auditIntegrated = optimized && !timing && ( index == 43 || index == 64 );
+            const auto pressureStart = ( timing || auditIntegrated ) ? benchmarkClock::now() : benchmarkClock::time_point{};
             if( timing ) timing->setupMs = elapsedMs( totalStart, pressureStart );
             captureSpaceTimeProjection( forward, laggedField, laggedLoad, scratch,
                 splitKey + ".projection", 16, splitKey + ".volume", false,
                 16, splitKey + ".topology", 0.0, &candidate, 0, true,
                 timing, optimized ? 1.0e-10 : 1.0e-16, optimized, {}, true, true, optimized,
                 0.0, optimized );
-            const auto pressureEnd = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
+            const auto pressureEnd = ( timing || auditIntegrated ) ? benchmarkClock::now() : benchmarkClock::time_point{};
             if( timing ) timing->pressureMs = elapsedMs( pressureStart, pressureEnd );
             if( optimized && !timing )
             {
@@ -4228,7 +4229,7 @@ struct fluidStateTraceProbe2
                     committed->tracerAudit, trace );
                 // Exercise the complete library entry on matched independent
                 // copies at the first interval and the historical repair case.
-                if( index == 43 || index == 64 )
+                if( auditIntegrated )
                 {
                     fluidField2 integrated = forward, staged = forward;
                     integrated.tracerEnabled_ = staged.tracerEnabled_ = true;
@@ -4239,10 +4240,18 @@ struct fluidStateTraceProbe2
                     std::vector<fluidObstacleForce2> integratedFeedback( candidate.feedback.size() ),
                         stagedFeedback( candidate.feedback.size() );
                     const fluidDetail::intervalPressureStepOptions options;
-                    if( !integrated.solveAndCommitIntervalPressure( options, laggedField.pressure_,
-                            laggedLoad, integratedFeedback ) ||
-                        !staged.commitIntervalPressureCandidate( candidate, candidate.geometricPanels,
-                            candidate.geometricWeightSum, stagedFeedback ) ||
+                    // Time only the two independent solve/commit paths. The staged
+                    // projection includes fixture diagnostics, so its total is a
+                    // research reference, not a production performance baseline.
+                    const auto integratedStart = benchmarkClock::now();
+                    const bool integratedAccepted = integrated.solveAndCommitIntervalPressure(
+                        options, laggedField.pressure_, laggedLoad, integratedFeedback );
+                    const auto integratedEnd = benchmarkClock::now();
+                    const auto stagedStart = benchmarkClock::now();
+                    const bool stagedAccepted = staged.commitIntervalPressureCandidate( candidate,
+                        candidate.geometricPanels, candidate.geometricWeightSum, stagedFeedback );
+                    const auto stagedEnd = benchmarkClock::now();
+                    if( !integratedAccepted || !stagedAccepted ||
                         integrated.u_ != staged.u_ || integrated.v_ != staged.v_ ||
                         integrated.pressure_ != staged.pressure_ || integrated.tracerMass_ != staged.tracerMass_ ||
                         integrated.tracerStats_.substeps != staged.tracerStats_.substeps ||
@@ -4257,6 +4266,14 @@ struct fluidStateTraceProbe2
                             integratedFeedback[j].torque != stagedFeedback[j].torque )
                             throw std::runtime_error( "R4cc integrated feedback differs" );
                     std::printf( "R4cc integrated interval%d matches staged reference\n", index );
+                    const double stagedProjectionMs = elapsedMs( pressureStart, pressureEnd );
+                    const double stagedCommitMs = elapsedMs( stagedStart, stagedEnd );
+                    const double integratedMs = elapsedMs( integratedStart, integratedEnd );
+                    // Wall-clock observations are deliberately excluded from the
+                    // deterministic trace and the existing forward timing suite.
+                    std::printf( "R4cd interval=%d staged_projection_fixture_ms=%.6f "
+                        "staged_commit_ms=%.6f staged_total_fixture_ms=%.6f integrated_ms=%.6f\n",
+                        index, stagedProjectionMs, stagedCommitMs, stagedProjectionMs + stagedCommitMs, integratedMs );
                 }
             }
             // R4al: isolate the negative modeled volume on the exact
