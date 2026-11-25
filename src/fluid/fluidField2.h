@@ -20,6 +20,9 @@ namespace fluidDetail
 struct transportRepairResult;
 struct transportFaceSample;
 struct transportPanel;
+struct intervalPressurePoseMotion;
+struct intervalPressureQuadrature;
+struct intervalPressureGeometryIntegral;
 }
 
 
@@ -831,6 +834,11 @@ private:
     void updateCutCellGeometry( std::span<const fluidShapeObstacle2> obstacles );
     // Rebuild one quadrature pose on an isolated scratch field.
     [[nodiscard]] bool rebuildIntervalPressureGeometry( std::span<const fluidShapeObstacle2> obstacles );
+    // Use distinct isolated scratch fields; preserve the frozen source.
+    void integrateIntervalPressurePanels( fluidField2& geometry, fluidField2& panelGeometry,
+        std::span<fluidShapeObstacle2> poses, std::span<const fluidDetail::intervalPressurePoseMotion> motion,
+        const fluidDetail::intervalPressureQuadrature& quadrature,
+        fluidDetail::intervalPressureGeometryIntegral& integral ) const;
     void remapExposedFaces();
     [[nodiscard]] float advectionUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float advectionVOpen( int x, int y ) const noexcept;
