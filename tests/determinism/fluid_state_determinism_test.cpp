@@ -2353,10 +2353,7 @@ struct fluidStateTraceProbe2
         const continuationPressure& coupled, std::string& trace, int index )
     {
         fluidField2 fixed = endpoint;
-        fixed.previousCellFluidFraction_ = input.cellFluidFraction_;
-        fixed.previousObstacles_ = start;
-        fixed.frozenPressureObstacles_ = corrected;
-        fixed.volumeSourceValid_ = true;
+        fixed.setIntervalPressureHistory( input.frozenPressureTimeStep_, input.cellFluidFraction_, start, corrected );
         fixed.u_ = input.u_; fixed.v_ = input.v_;
         const double h = fixed.cellSize_, area = h * h;
         const int target = fixed.cellIndex( 17, 14 );
@@ -3188,6 +3185,44 @@ struct fluidStateTraceProbe2
             transactionFeedback[0].torque != 4.0f )
             throw std::runtime_error( "R4cc disabled integrated step changed state" );
         std::puts( "R4cc integrated field solve rejection regressions passed" );
+
+        fluidField2 history( 2, 2, 1.0f );
+        const std::vector<float> startFractions{ 1.0f, 0.5f, 0.0f, 1.0f };
+        std::vector<fluidShapeObstacle2> startPoses( 1 ), finishPoses( 1 );
+        startPoses[0].center = { 1.0f, 2.0f };
+        finishPoses[0].center = { 3.0f, 4.0f };
+        history.setIntervalPressureHistory( 0.125f, startFractions, startPoses, finishPoses );
+        // Swapped, aliased pose spans must be copied before any replacement.
+        history.setIntervalPressureHistory( 0.25f, history.previousCellFluidFraction_,
+            history.frozenPressureObstacles_, history.previousObstacles_ );
+        const auto unchangedHistory = [&]()
+        {
+            return history.volumeSourceValid_ && !history.frozenPressureReplayReady_ &&
+                history.frozenPressureTimeStep_ == 0.25f &&
+                history.previousCellFluidFraction_ == startFractions &&
+                history.previousObstacles_.size() == 1 && history.frozenPressureObstacles_.size() == 1 &&
+                history.previousObstacles_[0].center.x == 3.0f && history.previousObstacles_[0].center.y == 4.0f &&
+                history.frozenPressureObstacles_[0].center.x == 1.0f && history.frozenPressureObstacles_[0].center.y == 2.0f;
+        };
+        if( !unchangedHistory() ) throw std::runtime_error( "R4ci history alias regression" );
+        auto invalidFractions = startFractions;
+        invalidFractions[1] = std::numeric_limits<float>::quiet_NaN();
+        for( int invalid = 0; invalid < 4; ++invalid )
+        {
+            bool rejected = false;
+            try
+            {
+                history.setIntervalPressureHistory( invalid == 0 ? 0.0f : 0.5f,
+                    invalid == 1 ? std::span<const float>{} :
+                        std::span<const float>( invalid == 2 ? invalidFractions : startFractions ),
+                    startPoses, invalid == 3 ? std::span<const fluidShapeObstacle2>{} :
+                        std::span<const fluidShapeObstacle2>( finishPoses ) );
+            }
+            catch( const std::invalid_argument& ) { rejected = true; }
+            if( !rejected || !unchangedHistory() )
+                throw std::runtime_error( "R4ci invalid input changed interval history" );
+        }
+        std::puts( "R4ci frozen interval history regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
@@ -4198,10 +4233,7 @@ struct fluidStateTraceProbe2
             throw std::runtime_error( key + " start geometry differs from frozen input" );
         rebuild( predicted );
         const auto predictedFraction = forward.cellFluidFraction_;
-        forward.previousCellFluidFraction_ = startFraction;
-        forward.previousObstacles_ = start;
-        forward.frozenPressureObstacles_ = predicted;
-        forward.volumeSourceValid_ = true;
+        forward.setIntervalPressureHistory( dt, startFraction, start, predicted );
         forward.u_ = input.u_;
         forward.v_ = input.v_;
         continuationPressure candidate;
@@ -4914,10 +4946,7 @@ struct fluidStateTraceProbe2
                         fixed.updateCutCellGeometry( estimate );
                         if( !fixed.cutCellTransition_.usedDisjointAnalyticGeometry )
                             throw std::runtime_error( iterationKey + " estimated geometry not analytic" );
-                        fixed.previousCellFluidFraction_ = startFraction;
-                        fixed.previousObstacles_ = start;
-                        fixed.frozenPressureObstacles_ = estimate;
-                        fixed.volumeSourceValid_ = true;
+                        fixed.setIntervalPressureHistory( dt, startFraction, start, estimate );
                         fixed.u_ = input.u_; fixed.v_ = input.v_;
                         continuationPressure trial;
                         std::string trialScratch;
@@ -5061,10 +5090,7 @@ struct fluidStateTraceProbe2
                                 if( !geometry.cutCellTransition_.usedDisjointAnalyticGeometry )
                                     throw std::runtime_error( "R4ac precise endpoint not analytic" );
                                 fractions[k] = geometry.cellFluidFraction_;
-                                geometry.previousCellFluidFraction_ = preciseStart.cellFluidFraction_;
-                                geometry.previousObstacles_ = start;
-                                geometry.frozenPressureObstacles_ = poses;
-                                geometry.volumeSourceValid_ = true;
+                                geometry.setIntervalPressureHistory( dt, preciseStart.cellFluidFraction_, start, poses );
                                 geometry.u_ = input.u_; geometry.v_ = input.v_;
                                 const std::string probeKey = "forwardPreciseCapsule.interval" +
                                     std::to_string( index ) + ".estimate" + std::to_string( k );
@@ -5143,10 +5169,7 @@ struct fluidStateTraceProbe2
                                 probeField.updateCutCellGeometry( probePoses );
                                 if( !probeField.cutCellTransition_.usedDisjointAnalyticGeometry )
                                     throw std::runtime_error( probeKey + " probe geometry not analytic" );
-                                probeField.previousCellFluidFraction_ = startFraction;
-                                probeField.previousObstacles_ = start;
-                                probeField.frozenPressureObstacles_ = probePoses;
-                                probeField.volumeSourceValid_ = true;
+                                probeField.setIntervalPressureHistory( dt, startFraction, start, probePoses );
                                 probeField.u_ = input.u_; probeField.v_ = input.v_;
                                 continuationPressure probe;
                                 std::string probeScratch;
