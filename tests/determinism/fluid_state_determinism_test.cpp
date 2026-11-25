@@ -3102,6 +3102,26 @@ struct fluidStateTraceProbe2
         catch( const std::invalid_argument& ) { badLedgerRejected = true; }
         if( !badLedgerRejected ) throw std::runtime_error( "R4bg inconsistent ledger accepted" );
         std::puts( "R4bg hybrid interval regressions passed" );
+
+        // A 2x2 MAC fixture: internal U faces precede internal V faces.
+        const std::vector<double> uMean{ 0.0, 0.5, 0.0, 0.0, 1.0, 0.0 };
+        const std::vector<double> vMean{ 0.0, 0.0, 0.0, 0.25, 0.0, 0.0 };
+        const auto mac = fluidDetail::buildMacTransportInput( 2, 2, 2.0, 0.5,
+            uMean, vMean, { 0.0, 2.0, 0.0, 0.0, -3.0, 0.0 },
+            { 0.0, 0.0, 99.0, 4.0, 0.0, 0.0 } );
+        if( mac.faces.size() != 3 || mac.mapping.size() != 3 ||
+            mac.faces[0].first != 0 || mac.faces[0].second != 1 || mac.faces[0].amount != 1.0 ||
+            mac.faces[1].first != 2 || mac.faces[1].second != 3 || mac.faces[1].amount != -3.0 ||
+            mac.faces[2].first != 1 || mac.faces[2].second != 3 || mac.faces[2].amount != 1.0 ||
+            !mac.mapping[0].isU || mac.mapping[0].index != 1 ||
+            !mac.mapping[1].isU || mac.mapping[1].index != 4 ||
+            mac.mapping[2].isU || mac.mapping[2].index != 3 )
+            throw std::runtime_error( "R4bh canonical MAC mapping regression" );
+        bool invalidMacRejected = false;
+        try { (void)fluidDetail::buildMacTransportInput( 2, 2, 1.0, 1.0, {}, vMean, {}, vMean ); }
+        catch( const std::invalid_argument& ) { invalidMacRejected = true; }
+        if( !invalidMacRejected ) throw std::runtime_error( "R4bh invalid MAC extent accepted" );
+        std::puts( "R4bh canonical MAC transport regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
@@ -3189,6 +3209,7 @@ struct fluidStateTraceProbe2
 
     static void auditGeometricTracerPanels( const fluidField2& field,
         const continuationPressure& candidate, const transportRepairResult& repair,
+        const std::vector<fluidDetail::transportFaceSample>& mapping,
         const std::vector<double>& seed, const tracerPanelResult& equalPanels, int index,
         std::string& trace )
     {
@@ -3196,25 +3217,8 @@ struct fluidStateTraceProbe2
         const double h = field.cellSize_, area = h * h;
         if( candidate.geometricPanels.empty() || candidate.geometricWeightSum <= 0.0 )
             throw std::runtime_error( "R4ax missing sampled panel geometry" );
-        std::vector<fluidDetail::transportFaceSample> mapping;
-        const auto collect = [&]( bool isU, int x, int y )
-        {
-            const int f = isU ? field.uIndex( x, y ) : field.vIndex( x, y );
-            const double mean = ( isU ? candidate.meanU : candidate.meanV )[f];
-            if( mean <= 0.0 ) return;
-            const int a = field.cellIndex( x - ( isU ? 1 : 0 ), y - ( isU ? 0 : 1 ) );
-            const int b = field.cellIndex( x, y );
-            if( mapping.size() >= repair.faces.size() ||
-                repair.faces[mapping.size()].first != a || repair.faces[mapping.size()].second != b )
-                throw std::runtime_error( "R4ax geometric face mapping differs" );
-            mapping.push_back( { isU, f, mean } );
-        };
-        for( int y = 0; y < field.height_; ++y )
-            for( int x = 1; x < field.width_; ++x ) collect( true, x, y );
-        for( int y = 1; y < field.height_; ++y )
-            for( int x = 0; x < field.width_; ++x ) collect( false, x, y );
         if( mapping.size() != repair.faces.size() )
-            throw std::runtime_error( "R4ax missing geometric faces" );
+            throw std::runtime_error( "R4bh geometric mapping size differs" );
         auto mass = seed;
         // R4ay: a unit-concentration scalar must reproduce geometric
         // volume if every panel obeys discrete geometric conservation
@@ -3517,32 +3521,11 @@ struct fluidStateTraceProbe2
 
     static hybridTracerResult consumeHybridTracer( const fluidField2& field,
         const continuationPressure& candidate, const transportRepairResult& repair,
+        const std::vector<fluidDetail::transportFaceSample>& mapping,
         const std::vector<double>& startVolume, const std::vector<double>& outgoing,
         int adaptivePanels, const std::vector<double>& seed )
     {
         const double h = field.cellSize_, area = h * h;
-        std::vector<fluidDetail::transportFaceSample> mapping;
-        if( adaptivePanels != 1 )
-        {
-            const auto collect = [&]( bool isU, int x, int y )
-            {
-                const int f = isU ? field.uIndex( x, y ) : field.vIndex( x, y );
-                const double mean = ( isU ? candidate.meanU : candidate.meanV )[f];
-                if( mean <= 0.0 ) return;
-                const int a = field.cellIndex( x - ( isU ? 1 : 0 ), y - ( isU ? 0 : 1 ) );
-                const int b = field.cellIndex( x, y );
-                if( mapping.size() >= repair.faces.size() ||
-                    repair.faces[mapping.size()].first != a || repair.faces[mapping.size()].second != b )
-                    throw std::runtime_error( "R4bb face mapping differs" );
-                mapping.push_back( { isU, f, mean } );
-            };
-            for( int y = 0; y < field.height_; ++y )
-                for( int x = 1; x < field.width_; ++x ) collect( true, x, y );
-            for( int y = 1; y < field.height_; ++y )
-                for( int x = 0; x < field.width_; ++x ) collect( false, x, y );
-            if( mapping.size() != repair.faces.size() )
-                throw std::runtime_error( "R4bb missing mapped faces" );
-        }
         // Independent engine-side path selection must agree with the
         // existing equal-panel donor bound for the one-panel case.
         auto result = fluidDetail::consumeHybridTransport( repair, startVolume, seed, area,
@@ -3559,6 +3542,7 @@ struct fluidStateTraceProbe2
 
     static void auditHybridTracer( const fluidField2& field,
         const continuationPressure& candidate, const transportRepairResult& repair,
+        const std::vector<fluidDetail::transportFaceSample>& mapping,
         const std::vector<double>& startVolume, const std::vector<double>& outgoing,
         int adaptivePanels, const tracerPanelResult& adaptiveResult, persistentTracerAudit& history,
         int index, std::string& trace )
@@ -3568,7 +3552,7 @@ struct fluidStateTraceProbe2
         if( history.intervals == 0 ) history.hybrid = history.repaired;
         if( history.hybrid.size() != n )
             throw std::runtime_error( "R4bb missing hybrid tracer history" );
-        auto computed = consumeHybridTracer( field, candidate, repair, startVolume, outgoing,
+        auto computed = consumeHybridTracer( field, candidate, repair, mapping, startVolume, outgoing,
             adaptivePanels, history.hybrid );
         auto& [mass, volume, panels, maxPasses, totalPasses, unserved, transferError] = computed;
         if( adaptivePanels == 1 && history.hybrid == history.adaptive && mass != adaptiveResult.mass )
@@ -3652,8 +3636,8 @@ struct fluidStateTraceProbe2
 
     static void auditAdaptiveTracerPanels( const fluidField2& field,
         const std::vector<float>& startFraction, const continuationPressure& candidate,
-        const transportRepairResult& repair, const std::vector<double>& nextRepaired,
-        persistentTracerAudit& history, int index,
+        const transportRepairResult& repair, const std::vector<fluidDetail::transportFaceSample>& mapping,
+        const std::vector<double>& nextRepaired, persistentTracerAudit& history, int index,
         std::string& trace )
     {
         const double area = static_cast<double>( field.cellSize_ ) * field.cellSize_;
@@ -3711,8 +3695,8 @@ struct fluidStateTraceProbe2
         emit( ".peakConcentration", peak ); emit( ".trapped", trapped );
         emit( ".massError", massError ); emit( ".deltaL1", deltaL1 );
         if( panels > 1 )
-            auditGeometricTracerPanels( field, candidate, repair, history.adaptive, result, index, trace );
-        auditHybridTracer( field, candidate, repair, initialVolume, outgoing, panels,
+            auditGeometricTracerPanels( field, candidate, repair, mapping, history.adaptive, result, index, trace );
+        auditHybridTracer( field, candidate, repair, mapping, initialVolume, outgoing, panels,
             result, history, index, trace );
         history.adaptive = std::move( result.mass );
         if( history.intervals + 1 == optimizedContinuationIntervals )
@@ -3726,7 +3710,8 @@ struct fluidStateTraceProbe2
     // repaired transport ledger without feeding it back into pressure/MAC.
     static void auditRepairedTracerTransport( const fluidField2& field,
         const std::vector<float>& startFraction, const continuationPressure& candidate,
-        const std::vector<transportRepairFace>& original, const transportRepairResult& repair, int index,
+        const std::vector<transportRepairFace>& original, const transportRepairResult& repair,
+        const std::vector<fluidDetail::transportFaceSample>& mapping, int index,
         persistentTracerAudit& history, std::string& trace )
     {
         const double area = static_cast<double>( field.cellSize_ ) * field.cellSize_;
@@ -3952,7 +3937,7 @@ struct fluidStateTraceProbe2
             }
         }
 
-        auditAdaptiveTracerPanels( field, startFraction, candidate, repair, nextRepaired, history, index, trace );
+        auditAdaptiveTracerPanels( field, startFraction, candidate, repair, mapping, nextRepaired, history, index, trace );
         history.original = std::move( nextOriginal );
         history.repaired = std::move( nextRepaired );
         ++history.intervals;
@@ -4007,28 +3992,17 @@ struct fluidStateTraceProbe2
             start[i] = area * startFraction[i];
             endpoint[i] = area * field.cellFluidFraction_[i];
         }
-        std::vector<transportRepairFace> faces;
-        const auto collect = [&]( bool isU, int x, int y )
-        {
-            const int f = isU ? field.uIndex( x, y ) : field.vIndex( x, y );
-            const double aperture = ( isU ? candidate.meanU : candidate.meanV )[f];
-            if( aperture <= 0.0 ) return;
-            const int a = field.cellIndex( x - ( isU ? 1 : 0 ), y - ( isU ? 0 : 1 ) );
-            const int b = field.cellIndex( x, y );
-            faces.push_back( { a, b, static_cast<double>( dt ) * h * aperture *
-                ( isU ? candidate.intervalU : candidate.intervalV )[f] } );
-        };
-        for( int y = 0; y < field.height_; ++y )
-            for( int x = 1; x < field.width_; ++x ) collect( true, x, y );
-        for( int y = 1; y < field.height_; ++y )
-            for( int x = 0; x < field.width_; ++x ) collect( false, x, y );
+        const auto input = fluidDetail::buildMacTransportInput( field.width_, field.height_,
+            h, static_cast<double>( dt ), candidate.meanU, candidate.meanV,
+            candidate.intervalU, candidate.intervalV );
+        const auto& faces = input.faces;
         if( fluidDetail::rebuildTransportLedger( start, faces ) != candidate.fluxVolume )
             throw std::runtime_error( "R4ap baseline transport ledger differs" );
         const auto result = fluidDetail::repairClosingTransport( start, endpoint, faces );
         if( !result ) throw std::runtime_error( "R4ap unsupported closing transport repair" );
         if( index == 64 && result->repaired != 1 )
             throw std::runtime_error( "R4ap historical deficit not repaired" );
-        auditRepairedTracerTransport( field, startFraction, candidate, faces, *result, index, history, trace );
+        auditRepairedTracerTransport( field, startFraction, candidate, faces, *result, input.mapping, index, history, trace );
         std::printf( "R4ap interval%d repaired %d changedFaces %d reduction %.17g conservationError %.17g\n",
             index, result->repaired, result->changedFaces, result->reduction, result->conservationError );
     }
