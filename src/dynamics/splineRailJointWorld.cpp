@@ -4,6 +4,8 @@
 #include <cmath>
 #include <limits>
 
+#include "math/deterministicMath.h"
+
 namespace zonai
 {
 namespace
@@ -58,7 +60,7 @@ jointId world::createSplineRailJoint( const splineRailJointDef& definition )
     sim.trackingValid = true;
     const rot2 relative = Inverse( bodySims_[a].transform.rotation ) * bodySims_[b].transform.rotation;
     const vec2 tangent = InverseRotate( bodySims_[a].transform.rotation, frame.tangent );
-    sim.tangentOffset = std::atan2( relative.s, relative.c ) - std::atan2( tangent.y, tangent.x );
+    sim.tangentOffset = deterministicAtan2( relative.s, relative.c ) - deterministicAtan2( tangent.y, tangent.x );
     const std::int32_t index = allocateJoint( a, b, definition.collideConnected );
     sim.jointId = index;
     jointSims_[index] = std::move( sim );
@@ -130,7 +132,7 @@ void world::setSplineRailJointRotation( jointId id, splineRailRotationMode mode,
         if( !frame.valid ) return;
         const rot2 relative = Inverse( bodySims_[sim.bodyIdA].transform.rotation ) * bodySims_[sim.bodyIdB].transform.rotation;
         const vec2 tangent = InverseRotate( bodySims_[sim.bodyIdA].transform.rotation, frame.tangent );
-        sim.tangentOffset = std::atan2( relative.s, relative.c ) - std::atan2( tangent.y, tangent.x );
+        sim.tangentOffset = deterministicAtan2( relative.s, relative.c ) - deterministicAtan2( tangent.y, tangent.x );
     }
     sim.rotationMode = mode;
     sim.enableAngularSpring = enableAngularSpring;
@@ -219,11 +221,11 @@ bool world::rebaseSplineRailJointRotation( jointId id )
     const auto frame = getSplineRailFrame( sim, a, b, sim.parameter, true, sim.distanceOffset );
     if( !sim.trackingValid || !frame.valid ) return false;
     const rot2 relative = Inverse( a.rotation ) * b.rotation;
-    float angle = std::atan2( relative.s, relative.c );
+    float angle = deterministicAtan2( relative.s, relative.c );
     if( sim.rotationMode == splineRailRotationMode::followTangent )
     {
         const vec2 tangent = InverseRotate( a.rotation, frame.tangent );
-        angle -= std::atan2( tangent.y, tangent.x );
+        angle -= deterministicAtan2( tangent.y, tangent.x );
     }
     if( !std::isfinite( angle ) ) return false;
     float& reference = sim.rotationMode == splineRailRotationMode::fixed ? sim.referenceAngle : sim.tangentOffset;
