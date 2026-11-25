@@ -95,6 +95,47 @@ std::optional<transportRepairResult> repairClosingTransport(
         return std::nullopt;
     return result;
 }
+macTransportInput buildMacTransportInput( int width, int height,
+    double cellSize, double dt, const std::vector<double>& meanU,
+    const std::vector<double>& meanV, const std::vector<double>& intervalU,
+    const std::vector<double>& intervalV )
+{
+    const auto maxIndex = static_cast<std::size_t>( std::numeric_limits<int>::max() );
+    if( width <= 0 || height <= 0 || !std::isfinite( cellSize ) || cellSize <= 0.0 ||
+        !std::isfinite( dt ) || dt <= 0.0 )
+        throw std::invalid_argument( "fluid transport: invalid MAC dimensions or scale" );
+    const auto w = static_cast<std::size_t>( width ), h = static_cast<std::size_t>( height );
+    if( w >= maxIndex || h >= maxIndex || w + 1 > maxIndex / h || w > maxIndex / ( h + 1 ) )
+        throw std::invalid_argument( "fluid transport: MAC index overflow" );
+    const std::size_t uCount = ( w + 1 ) * h, vCount = w * ( h + 1 );
+    if( meanU.size() != uCount || intervalU.size() != uCount ||
+        meanV.size() != vCount || intervalV.size() != vCount )
+        throw std::invalid_argument( "fluid transport: mismatched MAC arrays" );
+    macTransportInput result;
+    const auto collect = [&]( bool isU, int x, int y )
+    {
+        const int f = isU ? y * ( width + 1 ) + x : y * width + x;
+        const double aperture = ( isU ? meanU : meanV )[f];
+        const double velocity = ( isU ? intervalU : intervalV )[f];
+        if( !std::isfinite( aperture ) || aperture < 0.0 || aperture > 1.0 ||
+            !std::isfinite( velocity ) )
+            throw std::invalid_argument( "fluid transport: invalid interior MAC face" );
+        if( aperture == 0.0 ) return;
+        const int a = ( y - ( isU ? 0 : 1 ) ) * width + x - ( isU ? 1 : 0 );
+        const int b = y * width + x;
+        const double amount = dt * cellSize * aperture * velocity;
+        if( !std::isfinite( amount ) )
+            throw std::runtime_error( "fluid transport: MAC transfer overflow" );
+        result.faces.push_back( { a, b, amount } );
+        result.mapping.push_back( { isU, f, aperture } );
+    };
+    for( int y = 0; y < height; ++y )
+        for( int x = 1; x < width; ++x ) collect( true, x, y );
+    for( int y = 1; y < height; ++y )
+        for( int x = 0; x < width; ++x ) collect( false, x, y );
+    return result;
+}
+
 std::vector<double> buildTransportPanelAmounts(
     const std::vector<transportRepairFace>& faces,
     const std::vector<transportFaceSample>& mapping,
