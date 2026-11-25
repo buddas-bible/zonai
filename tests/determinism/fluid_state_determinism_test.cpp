@@ -1467,24 +1467,17 @@ struct fluidStateTraceProbe2
 
     // R4j: hand off accepted pressure/velocity/feedback together. The
     // historical interval transfer is not used as an endpoint flux.
-    struct continuationPressure
+    struct continuationPressure : fluidDetail::intervalPressureCandidate
     {
-        std::vector<float> u, v, pressure;
-        std::vector<fluidObstacleForce2> feedback;
-        // Signed interval transfers accumulated in physical volume units.
-        std::vector<double> fluxVolume;
-        std::vector<double> meanU, meanV, intervalU, intervalV;
         std::vector<double> bodyVolume, compatibilityVolume, linearVolumeResidual;
         std::vector<transportPanel> geometricPanels;
         double geometricWeightSum = 0.0;
-        std::vector<int> component;
         double trueResidualSquared = 0.0, initialResidualSquared = 0.0;
         double seedResidualSquared = 0.0;
         int initialIterations = 0;
         int correctionIterations = 0, defectEvaluations = 0;
         int missedMidpointCells = 0, selectedEndpointDepth = 0;
         double initialGap = 0.0, finalGap = 0.0, negativeVolume = 0.0, intervalPeak = 0.0;
-        int uncoveredEndpointFaces = 0;
         bool stalled = false;
     };
 
@@ -1853,7 +1846,6 @@ struct fluidStateTraceProbe2
         const std::string defectKey = "geometryDefectCorrection." + handoffKey;
         auto defect = before.correctIntervalPressureDefect( pressureOperator, p,
             baselineFeedback, targetIndex, correctionBudget );
-        auto& correctedPressure = defect.pressure;
         const auto& current = defect.final;
         const double initialGap = defect.initialGap;
         const bool stalled = defect.stalled;
@@ -1894,29 +1886,10 @@ struct fluidStateTraceProbe2
                 "worldPressureResponse." + handoffKey );
         else
         {
-            auto reconstructed = fluidDetail::reconstructIntervalPressure( before.width_, before.height_, h, dt,
-                graph, correctedPressure, before.previousCellFluidFraction_, before.cellFluidFraction_,
-                { meanU, before.u_, before.uOpenFraction_ }, { meanV, before.v_, before.vOpenFraction_ },
-                captureEndpoint );
-            continuation->u = std::move( reconstructed.u );
-            continuation->v = std::move( reconstructed.v );
-            continuation->fluxVolume = std::move( reconstructed.fluxVolume );
-            continuation->uncoveredEndpointFaces = reconstructed.uncoveredEndpointFaces;
-            continuation->pressure.resize( n );
-            for( std::size_t i = 0; i < n; ++i )
-                continuation->pressure[i] = static_cast<float>( correctedPressure[i] );
-            continuation->feedback.resize( owners );
-            for( std::size_t i = 0; i < owners; ++i )
-            {
-                continuation->feedback[i].force = { static_cast<float>( force[i].fx ), static_cast<float>( force[i].fy ) };
-                continuation->feedback[i].torque = static_cast<float>( force[i].torque );
-            }
-            continuation->component = parent;
+            static_cast<fluidDetail::intervalPressureCandidate&>( *continuation ) =
+                before.buildIntervalPressureCandidate( preparedGeometry.integral, linear, defect, captureEndpoint );
             if( captureEndpoint )
             {
-                continuation->meanU = meanU; continuation->meanV = meanV;
-                continuation->intervalU = std::move( reconstructed.intervalU );
-                continuation->intervalV = std::move( reconstructed.intervalV );
                 if( correctionBudget == 0 )
                 {
                     continuation->bodyVolume = bodyVolumeAudit;
@@ -3052,6 +3025,13 @@ struct fluidStateTraceProbe2
         if( !defectBudgetRejected || !defectCorrectionHistoryRejected )
             throw std::runtime_error( "R4by invalid defect correction accepted" );
         std::puts( "R4by interval defect iteration regressions passed" );
+
+        bool candidateHistoryRejected = false;
+        try { (void)noIntervalHistory.buildIntervalPressureCandidate( {}, {}, {}, false ); }
+        catch( const std::invalid_argument& ) { candidateHistoryRejected = true; }
+        if( !candidateHistoryRejected )
+            throw std::runtime_error( "R4bz invalid pressure candidate accepted" );
+        std::puts( "R4bz interval candidate regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
