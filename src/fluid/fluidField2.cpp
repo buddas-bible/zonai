@@ -2134,6 +2134,13 @@ void fluidField2::updateCutCellGeometry( std::span<const fluidShapeObstacle2> ob
             analyticDisjointCache2{ std::move( disjointShapes ) } );
 }
 
+bool fluidField2::rebuildIntervalPressureGeometry( std::span<const fluidShapeObstacle2> obstacles )
+{
+    updateObstacles( obstacles );
+    updateCutCellGeometry( obstacles );
+    return cutCellTransition_.usedDisjointAnalyticGeometry;
+}
+
 void fluidField2::remapExposedFaces()
 {
     // 새로 열린 fluid-fluid face가 이전 rigid boundary의 속도를 그대로 상속하지 않도록
