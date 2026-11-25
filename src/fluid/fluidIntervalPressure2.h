@@ -1,16 +1,12 @@
 #pragma once
 
 #include <cstddef>
-#include <functional>
 #include <span>
 #include <utility>
 #include <vector>
 
 namespace zonai::fluidDetail
 {
-
-using intervalPressureMultiply = std::function<void( const std::vector<double>&, std::vector<double>& )>;
-using intervalPressureGauge = std::function<void( std::vector<double>& )>;
 
 // Canonical interior face order and metadata retained for endpoint reconstruction.
 struct intervalPressureEdge
@@ -89,6 +85,29 @@ void addIntervalPressureSchur( std::span<const intervalPressureResponse> coeffic
 void addIntervalPressureSchurDiagonal( std::span<const intervalPressureResponse> coefficients,
     std::span<const intervalPressureBody> bodies, double responseScale, std::span<double> diagonal );
 
+// Non-owning operator for one frozen interval. Graph, coefficients and
+// body masses stay fixed; only force and gauge scratch are written.
+// Buffers must outlive this operator and must not alias.
+struct intervalPressureOperator
+{
+    const intervalPressureGraph& graph;
+    std::span<const intervalPressureResponse> coefficients;
+    std::span<const intervalPressureBody> bodies;
+    std::span<intervalPressureResponse> force;
+    std::span<double> sums;
+    double responseScale;
+    bool skipFixedBodyProducts;
+
+    intervalPressureOperator( const intervalPressureGraph& graph,
+        std::span<const intervalPressureResponse> coefficients,
+        std::span<const intervalPressureBody> bodies, std::span<intervalPressureResponse> force,
+        std::span<double> sums, double responseScale, bool skipFixedBodyProducts );
+    void project( std::span<double> values ) const;
+    void transpose( std::span<const double> pressure ) const;
+    void multiply( std::span<const double> pressure, std::span<double> out ) const;
+    void addDiagonal( std::span<double> diagonal ) const;
+};
+
 struct intervalPressureResult
 {
     std::vector<double> pressure, projectedProduct;
@@ -96,15 +115,14 @@ struct intervalPressureResult
     int iterations;
 };
 
-// Fixed-order projected Jacobi-PCG on a caller-assembled positive operator.
-// The multiply and gauge callbacks must preserve the deterministic graph
-// order and vector extents. No geometry, World state or pressure commit.
+// Fixed-order projected Jacobi-PCG on a prepared interval operator.
+// graph.diagonal includes the Schur diagonal (addDiagonal once before solving).
+// The final traction is retained in operator force scratch even for fixed geometry.
 // Closing-row bounds constrain dt^2 times the true unprojected residual.
+// No geometry, World state or pressure commit.
 [[nodiscard]] intervalPressureResult solveIntervalPressure(
-    const std::vector<double>& rhs, const std::vector<double>& diagonal,
-    const std::vector<int>& parent, std::span<const float> seed, bool warmStart,
-    double dt, double relativeSquaredTolerance,
-    const std::vector<std::pair<std::size_t, double>>& closingRows,
-    const intervalPressureMultiply& multiply, const intervalPressureGauge& zeroMean );
+    const std::vector<double>& rhs, const intervalPressureOperator& op,
+    std::span<const float> seed, bool warmStart, double dt, double relativeSquaredTolerance,
+    const std::vector<std::pair<std::size_t, double>>& closingRows );
 
 }
