@@ -15,6 +15,25 @@ namespace zonai
 
 struct analyticDisjointCache2;
 
+namespace fluidDetail
+{
+struct transportRepairResult;
+struct transportFaceSample;
+struct transportPanel;
+struct intervalPressurePoseMotion;
+struct intervalPressureQuadrature;
+struct intervalPressureGeometryIntegral;
+struct intervalPressureGeometryPreparation;
+struct intervalPressureLinearOptions;
+struct intervalPressureStepOptions;
+struct intervalPressureLinearState;
+struct intervalPressureOperator;
+struct intervalPressureDefect;
+struct intervalPressureDefectResult;
+struct intervalPressureCandidate;
+}
+
+
 // Body 좌표가 아닌 유체 world 좌표. 원형 solid의 cell-centered occupancy 근사.
 struct fluidCircleObstacle2
 {
@@ -429,6 +448,9 @@ struct fluidStepTiming2
 // 내부 Circle/Capsule/Convex Polygon solid 경계 face는 no-through로 처리함.
 class fluidField2
 {
+    // R3c read-only friend: tests capture raw MAC state without a public debug API.
+    friend struct fluidStateTraceProbe2;
+
 public:
 #pragma region Lifetime
     // 너비와 높이는 cell 개수. 최소 2, 최대 256. origin은 좌하단 경계.
@@ -818,13 +840,61 @@ private:
     static float sampleComponent( const std::vector<float>& values, int width, int height, float x, float y ) noexcept;
     void updateObstacles( std::span<const fluidShapeObstacle2> obstacles );
     void updateCutCellGeometry( std::span<const fluidShapeObstacle2> obstacles );
+    // Rebuild one quadrature pose on an isolated scratch field.
+    [[nodiscard]] bool rebuildIntervalPressureGeometry( std::span<const fluidShapeObstacle2> obstacles );
+    // Use distinct isolated scratch fields; preserve the frozen source.
+    void integrateIntervalPressurePanels( fluidField2& geometry, fluidField2& panelGeometry,
+        std::span<fluidShapeObstacle2> poses, std::span<const fluidDetail::intervalPressurePoseMotion> motion,
+        const fluidDetail::intervalPressureQuadrature& quadrature,
+        fluidDetail::intervalPressureGeometryIntegral& integral ) const;
+    // Prepare a complete geometry integral without changing the frozen field.
+    [[nodiscard]] fluidDetail::intervalPressureGeometryPreparation prepareIntervalPressureGeometry(
+        int samples, int endpointDepth, bool adaptiveEndpoint, bool refineEndpointFaces ) const;
+    [[nodiscard]] fluidDetail::intervalPressureLinearState solvePreparedIntervalPressure(
+        const fluidDetail::intervalPressureGeometryIntegral& integral,
+        const fluidDetail::intervalPressureLinearOptions& options, std::span<const float> seed ) const;
+    // Evaluate one counterfactual endpoint from frozen poses on a scratch field.
+    [[nodiscard]] fluidDetail::intervalPressureDefect evaluateIntervalPressureDefect(
+        fluidField2& defectGeometry, const fluidDetail::intervalPressureOperator& op,
+        std::span<const double> pressure, std::span<const fluidObstacleForce2> baselineFeedback,
+        int targetIndex ) const;
+    // Bounded deterministic backtracking; only the accepted pressure and
+    // its traction are returned. No mutation of the frozen source field.
+    [[nodiscard]] fluidDetail::intervalPressureDefectResult correctIntervalPressureDefect(
+        const fluidDetail::intervalPressureOperator& op, std::span<const double> pressure,
+        std::span<const fluidObstacleForce2> baselineFeedback, int targetIndex, int correctionBudget ) const;
+    // All inputs must belong to the same frozen interval. linear.force
+    // must hold the final accepted traction restored by defect correction.
+    [[nodiscard]] fluidDetail::intervalPressureCandidate buildIntervalPressureCandidate(
+        const fluidDetail::intervalPressureGeometryIntegral& integral,
+        const fluidDetail::intervalPressureLinearState& linear,
+        const fluidDetail::intervalPressureDefectResult& defect, bool captureIntervalVelocity ) const;
     void remapExposedFaces();
     [[nodiscard]] float advectionUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float advectionVOpen( int x, int y ) const noexcept;
     [[nodiscard]] vec2 getAdvectionFaceMomentum() const noexcept;
+    void advectSemiLagrangian( float timeStep );
     void advectConservative( float timeStep );
     [[nodiscard]] float tracerCellFraction( int x, int y ) const noexcept;
     void transportTracer( float timeStep );
+    // Accepted interval-average pressure transport only. The caller owns
+    // geometry/pressure preparation; never consume endpoint MAC as interval flux.
+    [[nodiscard]] bool commitIntervalTracer(
+        const std::vector<double>& startVolume, const fluidDetail::transportRepairResult& repair,
+        const std::vector<fluidDetail::transportFaceSample>& mapping,
+        const std::vector<fluidDetail::transportPanel>& sampledPanels, double weightSum );
+    // Experimental single-field transaction on matching frozen geometry.
+    // No World mutation; the caller owns interval provenance and cadence.
+    // Disabled tracer or unsupported transport leaves all outputs unchanged.
+    [[nodiscard]] bool commitIntervalPressureCandidate(
+        const fluidDetail::intervalPressureCandidate& candidate,
+        const std::vector<fluidDetail::transportPanel>& sampledPanels, double weightSum,
+        std::span<fluidObstacleForce2> feedback );
+    // Complete field-only solve/commit for a matching predicted endpoint.
+    // Nonzero body response is not supported until World can commit too.
+    [[nodiscard]] bool solveAndCommitIntervalPressure(
+        const fluidDetail::intervalPressureStepOptions& options, std::span<const float> seed,
+        std::span<const fluidObstacleForce2> baselineFeedback, std::span<fluidObstacleForce2> feedback );
     void remapTracerSwept();
     [[nodiscard]] float cutCellUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellVOpen( int x, int y ) const noexcept;
@@ -992,6 +1062,10 @@ private:
     bool analyticCutCellIndexedBoundaryFacesEnabled_ = true;
     bool analyticCutCellIndexedBoundarySyncEnabled_ = true;
     bool analyticCutCellBoundedCellAreasEnabled_ = true;
+    // R4ac matched-state precision probe; default production path unchanged.
+    bool preciseDisjointCapsuleEnabled_ = false;
+    // R4aj: certify near-full analytic cells with strictly interior corners.
+    bool certifiedFullCellCoverageEnabled_ = false;
     bool analyticCutCellBoundedFaceClippingEnabled_ = true;
     bool analyticCutCellMovableSchurFacesEnabled_ = true;
     bool analyticCutCellCurrentGeometryReuseEnabled_ = true;
@@ -1020,6 +1094,9 @@ private:
     int faceStageAuditX_ = -1;
     int faceStageAuditY_ = -1;
     fluidFaceStageAudit2 faceStageAudit_{};
+    // Test-only opt-in hook. Captures read-only Field state at fixed Step phases.
+    // No callback or stage allocation in ordinary simulation.
+    std::function<void(const fluidField2&, int)> determinismStageObserver_{};
 #pragma endregion Data
 };
 
