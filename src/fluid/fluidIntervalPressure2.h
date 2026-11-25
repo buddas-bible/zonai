@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -244,6 +245,31 @@ struct intervalPressureResult
     std::vector<double> pressure, projectedProduct;
     double initialSquared, seedSquared, trueSquared, unprojectedSquared;
     int iterations;
+};
+
+struct intervalPressureLinearOptions
+{
+    double responseScale = 1.0;
+    bool volumeWeightedCompatibility = false;
+    bool skipFixedBodyProducts = false;
+    bool warmStart = false;
+    double relativeSquaredTolerance = 1.0e-16;
+    double closingVolumeRelativeTolerance = 0.0;
+};
+
+// Own the prepared operator buffers; non-owning operator views are created
+// only after this object has reached its destination. A missing solution
+// denotes incompatible RHS capacity, never an accepted pressure.
+struct intervalPressureLinearState
+{
+    intervalPressureGraph graph;
+    std::vector<double> rhs, sums;
+    intervalPressureRhsResult rhsResult;
+    std::vector<intervalPressureBody> bodies;
+    std::vector<intervalPressureResponse> force;
+    std::vector<std::pair<std::size_t, double>> closingRows;
+    std::optional<intervalPressureResult> solution;
+    double scale = 0.0;
 };
 
 // Fixed-order projected Jacobi-PCG on a prepared interval operator.
