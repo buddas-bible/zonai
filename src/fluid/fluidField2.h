@@ -873,6 +873,9 @@ private:
     [[nodiscard]] float advectionUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float advectionVOpen( int x, int y ) const noexcept;
     [[nodiscard]] vec2 getAdvectionFaceMomentum() const noexcept;
+    // Use the caller's current geometry; do not rebuild or advance it here.
+    void applyAdvectionBoundaries( std::span<const fluidShapeObstacle2> obstacles );
+    void advectVelocity( float timeStep );
     void advectSemiLagrangian( float timeStep );
     void advectConservative( float timeStep );
     [[nodiscard]] float tracerCellFraction( int x, int y ) const noexcept;
