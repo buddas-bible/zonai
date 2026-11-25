@@ -842,6 +842,10 @@ private:
     void updateCutCellGeometry( std::span<const fluidShapeObstacle2> obstacles );
     // Rebuild one quadrature pose on an isolated scratch field.
     [[nodiscard]] bool rebuildIntervalPressureGeometry( std::span<const fluidShapeObstacle2> obstacles );
+    // Caller supplies matching analytic endpoint geometry and stable owner order.
+    // This records interval history, not the one-use projection observer state.
+    void setIntervalPressureHistory( float timeStep, std::span<const float> startFraction,
+        std::span<const fluidShapeObstacle2> start, std::span<const fluidShapeObstacle2> finish );
     // Use distinct isolated scratch fields; preserve the frozen source.
     void integrateIntervalPressurePanels( fluidField2& geometry, fluidField2& panelGeometry,
         std::span<fluidShapeObstacle2> poses, std::span<const fluidDetail::intervalPressurePoseMotion> motion,
