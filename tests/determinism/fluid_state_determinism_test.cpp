@@ -3273,6 +3273,113 @@ struct fluidStateTraceProbe2
         };
         auditTopology( history.original, nextOriginal, ".original" );
         auditTopology( history.repaired, nextRepaired, ".repaired" );
+
+        // R4av: matched scalar-only experiment on the concentration spike.
+        // Divide the same signed interval transfers into equal panels and
+        // use linearly evolving modeled volume for donor capacity. This is
+        // not a reconstruction of actual time-varying geometric apertures.
+        if( index == 163 )
+        {
+            constexpr std::size_t target = 643;
+            if( target >= n || startFraction[target] <= 0.0f ||
+                field.cellFluidFraction_[target] <= 0.0f )
+                throw std::runtime_error( "R4av historical shrinking cell missing" );
+            const std::string key = "forwardTracerPanelComparison.interval163";
+            std::vector<double> initialVolume( n ), outgoing( n );
+            double targetIncoming = 0.0;
+            for( std::size_t i = 0; i < n; ++i )
+                initialVolume[i] = area * startFraction[i];
+            for( const auto& f : repair.faces )
+            {
+                const int donor = f.amount >= 0.0 ? f.first : f.second;
+                const int recipient = f.amount >= 0.0 ? f.second : f.first;
+                const double amount = std::abs( f.amount );
+                outgoing[donor] += amount;
+                if( static_cast<std::size_t>( recipient ) == target ) targetIncoming += amount;
+            }
+            const double actualVolume = area * field.cellFluidFraction_[target];
+            const double startMass = history.repaired[target];
+            const double startConcentration = startMass / initialVolume[target];
+            double totalInitialMass = 0.0;
+            for( double mass : history.repaired ) totalInitialMass += mass;
+            const auto emit = [&]( const std::string& suffix, double value )
+            {
+                if( !std::isfinite( value ) )
+                    throw std::runtime_error( key + suffix + " nonfinite comparison" );
+                appendScalar( trace, key + suffix, value );
+            };
+            emit( ".startVolume", initialVolume[target] );
+            emit( ".actualEndVolume", actualVolume );
+            emit( ".modeledEndVolume", repair.ledger[target] );
+            emit( ".outgoing", outgoing[target] );
+            emit( ".incoming", targetIncoming );
+            emit( ".startMass", startMass );
+            emit( ".startConcentration", startConcentration );
+            std::printf( "R4av cell643 start %.17g modeledEnd %.17g actualEnd %.17g incoming %.17g "
+                "outgoing %.17g startConcentration %.17g\n", initialVolume[target], repair.ledger[target],
+                actualVolume, targetIncoming, outgoing[target], startConcentration );
+            for( int panels : { 1, 2, 4, 8, 16 } )
+            {
+                auto mass = history.repaired;
+                double unserved = 0.0;
+                for( int panel = 0; panel < panels; ++panel )
+                {
+                    const double alpha = static_cast<double>( panel ) / panels;
+                    std::vector<double> capacity( n ), remaining = mass, received( n );
+                    for( std::size_t i = 0; i < n; ++i )
+                    {
+                        capacity[i] = ( 1.0 - alpha ) * initialVolume[i] + alpha * repair.ledger[i];
+                        if( !std::isfinite( capacity[i] ) || capacity[i] < 0.0 )
+                            throw std::runtime_error( "R4av invalid panel capacity" );
+                        unserved += std::max( 0.0, outgoing[i] / panels - capacity[i] );
+                    }
+                    for( const auto& f : repair.faces )
+                    {
+                        if( f.amount == 0.0 ) continue;
+                        const int donor = f.amount > 0.0 ? f.first : f.second;
+                        const int recipient = f.amount > 0.0 ? f.second : f.first;
+                        if( capacity[donor] <= 0.0 ) continue;
+                        const double requested = mass[donor] * ( ( std::abs( f.amount ) / panels ) /
+                            std::max( capacity[donor], outgoing[donor] / panels ) );
+                        const double moved = std::min( remaining[donor], requested );
+                        remaining[donor] -= moved;
+                        received[recipient] += moved;
+                    }
+                    for( std::size_t i = 0; i < n; ++i )
+                    {
+                        mass[i] = remaining[i] + received[i];
+                        if( !std::isfinite( mass[i] ) || mass[i] < 0.0 )
+                            throw std::runtime_error( "R4av invalid scalar mass" );
+                    }
+                }
+                if( panels == 1 && mass != nextRepaired )
+                    throw std::runtime_error( "R4av one-panel reference differs" );
+                double total = 0.0, peak = 0.0, trapped = 0.0, deltaL1 = 0.0;
+                for( std::size_t i = 0; i < n; ++i )
+                {
+                    total += mass[i];
+                    deltaL1 += std::abs( mass[i] - nextRepaired[i] );
+                    const double volume = area * field.cellFluidFraction_[i];
+                    if( volume > 0.0 ) peak = std::max( peak, mass[i] / volume );
+                    else trapped += mass[i];
+                }
+                const double massError = total - totalInitialMass;
+                if( std::abs( massError ) > 1.0e-12 * std::max( 1.0, totalInitialMass ) )
+                    throw std::runtime_error( "R4av panel mass conservation failed" );
+                const std::string prefix = ".panels" + std::to_string( panels );
+                const double concentration = mass[target] / actualVolume;
+                emit( prefix + ".targetConcentration", concentration );
+                emit( prefix + ".peakConcentration", peak );
+                emit( prefix + ".massError", massError );
+                emit( prefix + ".trapped", trapped );
+                emit( prefix + ".unserved", unserved );
+                emit( prefix + ".deltaL1", deltaL1 );
+                std::printf( "R4av panels %d targetConcentration %.17g peak %.17g massError %.17g "
+                    "trapped %.17g unserved %.17g deltaL1 %.17g\n", panels, concentration, peak,
+                    massError, trapped, unserved, deltaL1 );
+            }
+        }
+
         history.original = std::move( nextOriginal );
         history.repaired = std::move( nextRepaired );
         ++history.intervals;
