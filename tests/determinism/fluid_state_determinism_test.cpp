@@ -3049,6 +3049,58 @@ struct fluidStateTraceProbe2
                 timing, optimized ? 1.0e-10 : 1.0e-16, optimized, {}, true, true, optimized );
             const auto pressureEnd = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
             if( timing ) timing->pressureMs = elapsedMs( pressureStart, pressureEnd );
+            // R4al: isolate the negative modeled volume on the exact
+            // accepted optimized input. Probe strict solves without
+            // committing either alternative or changing trace coverage.
+            if( optimized && !timing && index == 64 )
+            {
+                std::string diagnostic;
+                captureMinimumVolumeCell( input, forward, startFraction, predictedFraction,
+                    candidate, dt, diagnostic, index );
+                const auto minimum = std::min_element( candidate.fluxVolume.begin(), candidate.fluxVolume.end() );
+                if( minimum == candidate.fluxVolume.end() || *minimum >= 0.0 )
+                    throw std::runtime_error( splitKey + " R4al historical negative volume not reproduced" );
+                const std::size_t target = static_cast<std::size_t>( minimum - candidate.fluxVolume.begin() );
+                const auto report = [&]( const char* name, const continuationPressure& trial )
+                {
+                    if( trial.component != candidate.component || trial.meanU != candidate.meanU ||
+                        trial.meanV != candidate.meanV ||
+                        trial.linearVolumeResidual.size() != startFraction.size() ||
+                        trial.compatibilityVolume.size() != startFraction.size() )
+                        throw std::runtime_error( splitKey + " R4al matched geometry differs" );
+                    int negatives = 0;
+                    double negativeSum = 0.0, gap = 0.0;
+                    for( std::size_t j = 0; j < trial.fluxVolume.size(); ++j )
+                    {
+                        const double volume = trial.fluxVolume[j];
+                        if( !std::isfinite( volume ) )
+                            throw std::runtime_error( splitKey + " R4al nonfinite volume" );
+                        if( volume < 0.0 ) { negativeSum -= volume; ++negatives; }
+                        const double error = std::abs( area * predictedFraction[j] - volume );
+                        if( trial.component[j] < 0 && error != 0.0 )
+                            throw std::runtime_error( splitKey + " R4al unsupported trial volume" );
+                        gap += error;
+                    }
+                    std::printf( "R4al interval64 %s cell %zu start %.17g endpoint %.17g ledger %.17g "
+                        "compatibility %.17g linear %.17g negative %.17g cells %d gap %.17g "
+                        "PCG %d residualSquared %.17g\n", name, target, area * startFraction[target],
+                        area * predictedFraction[target], trial.fluxVolume[target],
+                        trial.compatibilityVolume[target], trial.linearVolumeResidual[target],
+                        negativeSum, negatives, gap, trial.initialIterations, trial.trueResidualSquared );
+                };
+                report( "warmResidual10", candidate );
+                for( bool warm : { false, true } )
+                {
+                    const std::string trialKey = splitKey + ( warm ? ".R4alWarmStrict" : ".R4alColdStrict" );
+                    continuationPressure trial;
+                    std::string trialScratch;
+                    captureSpaceTimeProjection( forward, laggedField, laggedLoad, trialScratch,
+                        trialKey + ".projection", 16, trialKey + ".volume", false,
+                        16, trialKey + ".topology", 0.0, &trial, 0, true,
+                        nullptr, 1.0e-16, warm, {}, true, true, true );
+                    report( warm ? "warmStrict" : "coldStrict", trial );
+                }
+            }
             // R4af: matched-state pressure-only trials. Do not replace the
             // accepted candidate or include trial time in the R4ae total.
             // Benchmark probes are timed separately in Release.
