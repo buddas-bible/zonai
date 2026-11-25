@@ -1541,7 +1541,6 @@ struct fluidStateTraceProbe2
             !before.volumeSourceValid_ || dt <= 0.0 )
             throw std::runtime_error( key + " invalid frozen geometry history" );
         using response = fluidDetail::intervalPressureResponse;
-        using edge = fluidDetail::intervalPressureEdge;
         std::vector<double> meanU( before.u_.size() ), meanV( before.v_.size() ), fraction( n );
         std::vector<response> coefficients( n * owners );
         fluidField2 geometry = before;
@@ -1733,67 +1732,11 @@ struct fluidStateTraceProbe2
 
         const auto linearStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
         if( timing ) timing->quadratureMs = elapsedMs( quadratureStart, linearStart );
-        std::vector<edge> edges;
-        std::vector<double> rhs( n ), diagonal( n ), rawDivergence( n );
-        std::vector<int> parent( n, -1 ), count( n );
-        int active = 0, closedEndFaces = 0;
-        double sourceSum = 0.0;
-        for( std::size_t i = 0; i < n; ++i )
-        {
-            // Endpoint volume difference, with no donor relocation/deletion.
-            const double change = static_cast<double>( before.cellFluidFraction_[i] ) -
-                before.previousCellFluidFraction_[i];
-            if( fraction[i] <= 0.0 )
-            {
-                if( change != 0.0 )
-                    throw std::runtime_error( key + " changed volume missed by quadrature at cell " +
-                        std::to_string( i ) );
-                continue;
-            }
-            parent[i] = static_cast<int>( i );
-            ++active;
-            sourceSum += change;
-            rawDivergence[i] = change / dt;
-        }
-        const auto root = [&]( int i )
-        {
-            while( parent[i] != i ) i = parent[i];
-            return i;
-        };
-        const auto addEdge = [&]( bool isU, int x, int y )
-        {
-            const int index = isU ? before.uIndex( x, y ) : before.vIndex( x, y );
-            const double a = isU ? meanU[index] : meanV[index];
-            if( a <= 0.0 ) return;
-            const int left = before.cellIndex( x - ( isU ? 1 : 0 ), y - ( isU ? 0 : 1 ) );
-            const int right = before.cellIndex( x, y );
-            if( parent[left] < 0 || parent[right] < 0 )
-                throw std::runtime_error( key + " open face lacks interval-active cell" );
-            const int l = root( left ), r = root( right );
-            if( l != r ) parent[std::max( l, r )] = std::min( l, r );
-            // A frozen endpoint velocity is only a trial interval velocity,
-            // including boundary values on faces closed at the endpoint.
-            const double u = isU ? before.u_[index] : before.v_[index];
-            const float endOpen = isU ? before.cutCellUOpen( x, y ) : before.cutCellVOpen( x, y );
-            closedEndFaces += endOpen == 0.0f;
-            edges.push_back( { left, right, a, u, isU, index } );
-            diagonal[left] += a; diagonal[right] += a;
-            const double flux = a * u / h;
-            rawDivergence[left] += flux; rawDivergence[right] -= flux;
-        };
-        for( int y = 0; y < before.height_; ++y )
-            for( int x = 1; x < before.width_; ++x ) addEdge( true, x, y );
-        for( int y = 1; y < before.height_; ++y )
-            for( int x = 0; x < before.width_; ++x ) addEdge( false, x, y );
-        int regions = 0;
-        for( std::size_t i = 0; i < n; ++i )
-            if( parent[i] >= 0 )
-            {
-                parent[i] = root( static_cast<int>( i ) );
-                ++count[parent[i]];
-            }
-        for( int c : count ) regions += c > 0;
-        if( active == 0 || edges.empty() ) throw std::runtime_error( key + " empty interval graph" );
+        auto graph = fluidDetail::buildIntervalPressureGraph( before.width_, before.height_, h, dt,
+            fraction, before.previousCellFluidFraction_, before.cellFluidFraction_,
+            { meanU, before.u_, before.uOpenFraction_ }, { meanV, before.v_, before.vOpenFraction_ } );
+        auto& [edges, diagonal, rawDivergence, parent, count, active, regions, closedEndFaces, sourceSum] = graph;
+        std::vector<double> rhs( n );
         // Explicit component zero-mean constraint. Unlike production, the
         // prototype solves P A P p = P b and reports the unprojected residual.
         std::vector<double> sums( n );
@@ -3137,6 +3080,50 @@ struct fluidStateTraceProbe2
             bodyDiagonal != std::vector<double>{ 3.375, 3.0 } )
             throw std::runtime_error( "R4bl fixed geometry response regression" );
         std::puts( "R4bl interval pressure Schur regressions passed" );
+
+        // 3x2 MAC graph: U(1,0), then V(0,1), with an active singleton.
+        // A positive mean aperture may be closed at the endpoint.
+        const std::vector<double> meanCells{ 1.0, 1.0, 0.0, 0.5, 0.0, 1.0 };
+        const std::vector<float> previousCells{ 1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f };
+        const std::vector<float> endpointCells{ 0.5f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };
+        std::vector<double> graphU( 8 ), graphV( 9 );
+        std::vector<float> graphUVelocity( 8 ), graphVVelocity( 9 ),
+            graphUEnd( 8, 1.0f ), graphVEnd( 9, 1.0f );
+        graphU[1] = 0.5; graphV[3] = 0.25;
+        graphUVelocity[1] = 2.0f; graphVVelocity[3] = 4.0f;
+        const auto assembled = fluidDetail::buildIntervalPressureGraph( 3, 2, 2.0, 0.5,
+            meanCells, previousCells, endpointCells,
+            { graphU, graphUVelocity, graphUEnd }, { graphV, graphVVelocity, graphVEnd } );
+        if( assembled.active != 4 || assembled.regions != 2 || assembled.closedEndFaces != 1 ||
+            assembled.sourceSum != -1.5 || assembled.edges.size() != 2 ||
+            assembled.parent != std::vector<int>{ 0, 0, -1, 0, -1, 5 } ||
+            assembled.count != std::vector<int>{ 3, 0, 0, 0, 0, 1 } ||
+            assembled.diagonal != std::vector<double>{ 0.75, 0.5, 0.0, 0.25, 0.0, 0.0 } ||
+            assembled.rawDivergence != std::vector<double>{ 0.0, -0.5, 0.0, -2.5, 0.0, 0.0 } ||
+            !assembled.edges[0].isU || assembled.edges[0].index != 1 ||
+            assembled.edges[0].first != 0 || assembled.edges[0].second != 1 ||
+            assembled.edges[1].isU || assembled.edges[1].index != 3 ||
+            assembled.edges[1].first != 0 || assembled.edges[1].second != 3 )
+            throw std::runtime_error( "R4bm canonical graph assembly regression" );
+        bool unsupportedRejected = false, extentRejected = false;
+        graphU[2] = 0.5;
+        try
+        {
+            (void)fluidDetail::buildIntervalPressureGraph( 3, 2, 2.0, 0.5,
+                meanCells, previousCells, endpointCells,
+                { graphU, graphUVelocity, graphUEnd }, { graphV, graphVVelocity, graphVEnd } );
+        }
+        catch( const std::runtime_error& ) { unsupportedRejected = true; }
+        try
+        {
+            (void)fluidDetail::buildIntervalPressureGraph( 3, 2, 2.0, 0.5,
+                meanCells, previousCells, endpointCells,
+                { graphU, {}, graphUEnd }, { graphV, graphVVelocity, graphVEnd } );
+        }
+        catch( const std::invalid_argument& ) { extentRejected = true; }
+        if( !unsupportedRejected || !extentRejected )
+            throw std::runtime_error( "R4bm invalid graph input accepted" );
+        std::puts( "R4bm interval graph assembly regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
