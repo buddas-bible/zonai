@@ -2685,6 +2685,22 @@ vec2 fluidField2::getAdvectionFaceMomentum() const noexcept
     return { static_cast<float>( sumU * mass ), static_cast<float>( sumV * mass ) };
 }
 
+void fluidField2::applyAdvectionBoundaries( std::span<const fluidShapeObstacle2> obstacles )
+{
+    if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
+    else applySolidBoundaries( obstacles );
+}
+
+void fluidField2::advectVelocity( float timeStep )
+{
+    if( conservativeAdvectionEnabled_ ) advectConservative( timeStep );
+    else
+    {
+        advectSemiLagrangian( timeStep );
+        advectionStats_.substeps = 1;
+    }
+}
+
 void fluidField2::advectSemiLagrangian( float timeStep )
 {
     // 기존 반 라그랑주 이류: 읽기 전용 source로부터 face별 역추적.
@@ -3240,8 +3256,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     if( determinismStageObserver_ ) determinismStageObserver_( *this, 4 );
     record( stepTiming_.remap );
     stepMomentum_.afterObstacles = getFluidMomentum();
-    if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
-    else applySolidBoundaries( obstacles );
+    applyAdvectionBoundaries( obstacles );
     if( auditFace ) faceStageAudit_.afterBoundary = readAuditFace();
     if( determinismStageObserver_ ) determinismStageObserver_( *this, 5 );
 
@@ -3249,16 +3264,10 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     advectionStats_.conservative = conservativeAdvectionEnabled_;
     advectionStats_.before = getAdvectionFaceMomentum();
     record( stepTiming_.boundaries );
-    if( conservativeAdvectionEnabled_ ) advectConservative( timeStep );
-    else
-    {
-        advectSemiLagrangian( timeStep );
-        advectionStats_.substeps = 1;
-    }
+    advectVelocity( timeStep );
     if( determinismStageObserver_ ) determinismStageObserver_( *this, 6 );
     record( stepTiming_.advection );
-    if( cutCellProjectionEnabled_ ) applyCutCellBoundaries();
-    else applySolidBoundaries( obstacles );
+    applyAdvectionBoundaries( obstacles );
     if( auditFace ) faceStageAudit_.afterAdvection = readAuditFace();
     if( determinismStageObserver_ ) determinismStageObserver_( *this, 7 );
     advectionStats_.after = getAdvectionFaceMomentum();
