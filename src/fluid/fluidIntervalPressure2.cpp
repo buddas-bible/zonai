@@ -28,6 +28,48 @@ void multiplyIntervalPressureGraph( std::span<const intervalPressureEdge> edges,
     }
 }
 
+void transposeIntervalPressureBodies( std::span<const intervalPressureResponse> coefficients,
+    std::span<const double> pressure, std::span<intervalPressureResponse> force )
+{
+    const std::size_t owners = force.size();
+    std::fill( force.begin(), force.end(), intervalPressureResponse{} );
+    for( std::size_t i = 0; i < pressure.size(); ++i )
+        for( std::size_t j = 0; j < owners; ++j )
+        {
+            const auto& c = coefficients[i * owners + j];
+            auto& f = force[j];
+            f.fx += c.fx * pressure[i]; f.fy += c.fy * pressure[i]; f.torque += c.torque * pressure[i];
+        }
+}
+
+void addIntervalPressureSchur( std::span<const intervalPressureResponse> coefficients,
+    std::span<const intervalPressureBody> bodies, std::span<const intervalPressureResponse> force,
+    double responseScale, std::span<double> out )
+{
+    const std::size_t owners = bodies.size();
+    for( std::size_t i = 0; i < out.size(); ++i )
+        for( std::size_t j = 0; j < owners; ++j )
+        {
+            const auto& c = coefficients[i * owners + j];
+            const auto& f = force[j];
+            out[i] += responseScale * ( bodies[j].inverseMass * ( c.fx * f.fx + c.fy * f.fy ) +
+                bodies[j].inverseInertia * c.torque * f.torque );
+        }
+}
+
+void addIntervalPressureSchurDiagonal( std::span<const intervalPressureResponse> coefficients,
+    std::span<const intervalPressureBody> bodies, double responseScale, std::span<double> diagonal )
+{
+    const std::size_t owners = bodies.size();
+    for( std::size_t i = 0; i < diagonal.size(); ++i )
+        for( std::size_t j = 0; j < owners; ++j )
+        {
+            const auto& c = coefficients[i * owners + j];
+            diagonal[i] += responseScale * ( bodies[j].inverseMass * ( c.fx * c.fx + c.fy * c.fy ) +
+                bodies[j].inverseInertia * c.torque * c.torque );
+        }
+}
+
 intervalPressureResult solveIntervalPressure(
     const std::vector<double>& rhs, const std::vector<double>& diagonal,
     const std::vector<int>& parent, std::span<const float> seed, bool warmStart,
