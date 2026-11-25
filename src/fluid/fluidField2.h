@@ -15,6 +15,14 @@ namespace zonai
 
 struct analyticDisjointCache2;
 
+namespace fluidDetail
+{
+struct transportRepairResult;
+struct transportFaceSample;
+struct transportPanel;
+}
+
+
 // Body 좌표가 아닌 유체 world 좌표. 원형 solid의 cell-centered occupancy 근사.
 struct fluidCircleObstacle2
 {
@@ -429,6 +437,9 @@ struct fluidStepTiming2
 // 내부 Circle/Capsule/Convex Polygon solid 경계 face는 no-through로 처리함.
 class fluidField2
 {
+    // R3c read-only friend: tests capture raw MAC state without a public debug API.
+    friend struct fluidStateTraceProbe2;
+
 public:
 #pragma region Lifetime
     // 너비와 높이는 cell 개수. 최소 2, 최대 256. origin은 좌하단 경계.
@@ -825,6 +836,12 @@ private:
     void advectConservative( float timeStep );
     [[nodiscard]] float tracerCellFraction( int x, int y ) const noexcept;
     void transportTracer( float timeStep );
+    // Accepted interval-average pressure transport only. The caller owns
+    // geometry/pressure preparation; never consume endpoint MAC as interval flux.
+    [[nodiscard]] bool commitIntervalTracer(
+        const std::vector<double>& startVolume, const fluidDetail::transportRepairResult& repair,
+        const std::vector<fluidDetail::transportFaceSample>& mapping,
+        const std::vector<fluidDetail::transportPanel>& sampledPanels, double weightSum );
     void remapTracerSwept();
     [[nodiscard]] float cutCellUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellVOpen( int x, int y ) const noexcept;
@@ -992,6 +1009,10 @@ private:
     bool analyticCutCellIndexedBoundaryFacesEnabled_ = true;
     bool analyticCutCellIndexedBoundarySyncEnabled_ = true;
     bool analyticCutCellBoundedCellAreasEnabled_ = true;
+    // R4ac matched-state precision probe; default production path unchanged.
+    bool preciseDisjointCapsuleEnabled_ = false;
+    // R4aj: certify near-full analytic cells with strictly interior corners.
+    bool certifiedFullCellCoverageEnabled_ = false;
     bool analyticCutCellBoundedFaceClippingEnabled_ = true;
     bool analyticCutCellMovableSchurFacesEnabled_ = true;
     bool analyticCutCellCurrentGeometryReuseEnabled_ = true;
@@ -1020,6 +1041,9 @@ private:
     int faceStageAuditX_ = -1;
     int faceStageAuditY_ = -1;
     fluidFaceStageAudit2 faceStageAudit_{};
+    // Test-only opt-in hook. Captures read-only Field state at fixed Step phases.
+    // No callback or stage allocation in ordinary simulation.
+    std::function<void(const fluidField2&, int)> determinismStageObserver_{};
 #pragma endregion Data
 };
 
