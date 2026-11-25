@@ -2821,7 +2821,7 @@ struct fluidStateTraceProbe2
     static constexpr int optimizedContinuationIntervals = 240;
     struct persistentTracerAudit
     {
-        std::vector<double> original, repaired;
+        std::vector<double> original, repaired, adaptive;
         double initialMass = 0.0;
         int intervals = 0;
     };
@@ -3122,6 +3122,119 @@ struct fluidStateTraceProbe2
             throw std::runtime_error( "R4ap clean transport changed" );
         std::puts( "R4ap synthetic multiple/split/no-capacity/nonclosing/large/clean cases passed" );
     }
+    // R4aw: reuse exactly the matched R4av scalar update for a carried
+    // adaptive history. Pressure, geometry and signed transfers are fixed.
+    struct tracerPanelResult
+    {
+        std::vector<double> mass;
+        double unserved;
+    };
+    static tracerPanelResult consumeTracerPanels( const std::vector<double>& seed,
+        const std::vector<double>& initialVolume, const std::vector<double>& endpointVolume,
+        const std::vector<double>& outgoing, const std::vector<transportRepairFace>& faces, int panels )
+    {
+        const std::size_t n = seed.size();
+        auto mass = seed;
+        double unserved = 0.0;
+        for( int panel = 0; panel < panels; ++panel )
+        {
+            const double alpha = static_cast<double>( panel ) / panels;
+            std::vector<double> capacity( n ), remaining = mass, received( n );
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                capacity[i] = ( 1.0 - alpha ) * initialVolume[i] + alpha * endpointVolume[i];
+                if( !std::isfinite( capacity[i] ) || capacity[i] < 0.0 )
+                    throw std::runtime_error( "R4av invalid panel capacity" );
+                unserved += std::max( 0.0, outgoing[i] / panels - capacity[i] );
+            }
+            for( const auto& f : faces )
+            {
+                if( f.amount == 0.0 ) continue;
+                const int donor = f.amount > 0.0 ? f.first : f.second;
+                const int recipient = f.amount > 0.0 ? f.second : f.first;
+                if( capacity[donor] <= 0.0 ) continue;
+                const double requested = mass[donor] * ( ( std::abs( f.amount ) / panels ) /
+                    std::max( capacity[donor], outgoing[donor] / panels ) );
+                const double moved = std::min( remaining[donor], requested );
+                remaining[donor] -= moved;
+                received[recipient] += moved;
+            }
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                mass[i] = remaining[i] + received[i];
+                if( !std::isfinite( mass[i] ) || mass[i] < 0.0 )
+                    throw std::runtime_error( "R4av invalid scalar mass" );
+            }
+        }
+        return { std::move( mass ), unserved };
+    }
+    static void auditAdaptiveTracerPanels( const fluidField2& field,
+        const std::vector<float>& startFraction, const transportRepairResult& repair,
+        const std::vector<double>& nextRepaired, persistentTracerAudit& history, int index,
+        std::string& trace )
+    {
+        const double area = static_cast<double>( field.cellSize_ ) * field.cellSize_;
+        const std::size_t n = startFraction.size();
+        std::vector<double> initialVolume( n ), outgoing( n );
+        for( std::size_t i = 0; i < n; ++i ) initialVolume[i] = area * startFraction[i];
+        for( const auto& f : repair.faces )
+            outgoing[f.amount >= 0.0 ? f.first : f.second] += std::abs( f.amount );
+        if( history.intervals == 0 ) history.adaptive = history.repaired;
+        if( history.adaptive.size() != n )
+            throw std::runtime_error( "R4aw missing adaptive scalar history" );
+
+        // For linearly evolving volume, minimum panel-start capacity
+        // occurs at the first or last panel. Choose the smallest power of
+        // two with no predicted donor shortage, within a fixed work cap.
+        constexpr int maxPanels = 64;
+        const auto fits = [&]( int panels )
+        {
+            const double alpha = static_cast<double>( panels - 1 ) / panels;
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                const double last = ( 1.0 - alpha ) * initialVolume[i] + alpha * repair.ledger[i];
+                if( outgoing[i] / panels > std::min( initialVolume[i], last ) ) return false;
+            }
+            return true;
+        };
+        int panels = 1;
+        while( panels < maxPanels && !fits( panels ) ) panels *= 2;
+        const bool limited = !fits( panels );
+        auto result = consumeTracerPanels( history.adaptive, initialVolume,
+            repair.ledger, outgoing, repair.faces, panels );
+        if( !limited && result.unserved != 0.0 )
+            throw std::runtime_error( "R4aw donor bound did not hold" );
+        if( panels == 1 && history.adaptive == history.repaired && result.mass != nextRepaired )
+            throw std::runtime_error( "R4aw one-panel reference differs" );
+        double total = 0.0, peak = 0.0, trapped = 0.0, deltaL1 = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            total += result.mass[i];
+            deltaL1 += std::abs( result.mass[i] - nextRepaired[i] );
+            const double volume = area * field.cellFluidFraction_[i];
+            if( volume > 0.0 ) peak = std::max( peak, result.mass[i] / volume );
+            else trapped += result.mass[i];
+        }
+        const double massError = total - history.initialMass;
+        if( std::abs( massError ) > 1.0e-12 * std::max( 1.0, history.initialMass ) )
+            throw std::runtime_error( "R4aw cumulative scalar mass conservation failed" );
+        const std::string key = "forwardAdaptiveTracer.interval" + std::to_string( index );
+        const auto emit = [&]( const char* suffix, double value )
+        {
+            if( !std::isfinite( value ) ) throw std::runtime_error( key + suffix + " nonfinite audit" );
+            appendScalar( trace, key + suffix, value );
+        };
+        emit( ".panels", panels ); emit( ".limited", limited ); emit( ".unserved", result.unserved );
+        emit( ".peakConcentration", peak ); emit( ".trapped", trapped );
+        emit( ".massError", massError ); emit( ".deltaL1", deltaL1 );
+        history.adaptive = std::move( result.mass );
+        if( history.intervals + 1 == optimizedContinuationIntervals )
+            appendVector( trace, key + ".mass", history.adaptive );
+        std::printf( "R4aw interval%d panels %d limited %d unserved %.17g peak %.17g trapped %.17g "
+            "massError %.17g deltaL1 %.17g\n", index, panels, static_cast<int>( limited ),
+            result.unserved, peak, trapped, massError, deltaL1 );
+    }
+
     // R4aq: exercise the existing donor-limited tracer consumer on the
     // repaired transport ledger without feeding it back into pressure/MAC.
     static void auditRepairedTracerTransport( const fluidField2& field,
@@ -3320,38 +3433,10 @@ struct fluidStateTraceProbe2
                 actualVolume, targetIncoming, outgoing[target], startConcentration );
             for( int panels : { 1, 2, 4, 8, 16 } )
             {
-                auto mass = history.repaired;
-                double unserved = 0.0;
-                for( int panel = 0; panel < panels; ++panel )
-                {
-                    const double alpha = static_cast<double>( panel ) / panels;
-                    std::vector<double> capacity( n ), remaining = mass, received( n );
-                    for( std::size_t i = 0; i < n; ++i )
-                    {
-                        capacity[i] = ( 1.0 - alpha ) * initialVolume[i] + alpha * repair.ledger[i];
-                        if( !std::isfinite( capacity[i] ) || capacity[i] < 0.0 )
-                            throw std::runtime_error( "R4av invalid panel capacity" );
-                        unserved += std::max( 0.0, outgoing[i] / panels - capacity[i] );
-                    }
-                    for( const auto& f : repair.faces )
-                    {
-                        if( f.amount == 0.0 ) continue;
-                        const int donor = f.amount > 0.0 ? f.first : f.second;
-                        const int recipient = f.amount > 0.0 ? f.second : f.first;
-                        if( capacity[donor] <= 0.0 ) continue;
-                        const double requested = mass[donor] * ( ( std::abs( f.amount ) / panels ) /
-                            std::max( capacity[donor], outgoing[donor] / panels ) );
-                        const double moved = std::min( remaining[donor], requested );
-                        remaining[donor] -= moved;
-                        received[recipient] += moved;
-                    }
-                    for( std::size_t i = 0; i < n; ++i )
-                    {
-                        mass[i] = remaining[i] + received[i];
-                        if( !std::isfinite( mass[i] ) || mass[i] < 0.0 )
-                            throw std::runtime_error( "R4av invalid scalar mass" );
-                    }
-                }
+                auto result = consumeTracerPanels( history.repaired, initialVolume,
+                    repair.ledger, outgoing, repair.faces, panels );
+                const auto& mass = result.mass;
+                const double unserved = result.unserved;
                 if( panels == 1 && mass != nextRepaired )
                     throw std::runtime_error( "R4av one-panel reference differs" );
                 double total = 0.0, peak = 0.0, trapped = 0.0, deltaL1 = 0.0;
@@ -3380,6 +3465,7 @@ struct fluidStateTraceProbe2
             }
         }
 
+        auditAdaptiveTracerPanels( field, startFraction, repair, nextRepaired, history, index, trace );
         history.original = std::move( nextOriginal );
         history.repaired = std::move( nextRepaired );
         ++history.intervals;
