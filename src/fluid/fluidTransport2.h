@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <vector>
 
 namespace zonai::fluidDetail
@@ -11,6 +12,38 @@ struct transportRepairFace
     int first, second;
     double amount;
 };
+
+struct transportRepairResult
+{
+    std::vector<transportRepairFace> faces;
+    std::vector<double> ledger;
+    int repaired = 0, changedFaces = 0;
+    double reduction = 0.0, conservationError = 0.0;
+};
+// Fixed input-face order. Requires valid indices and finite signed amounts.
+[[nodiscard]] std::vector<double> rebuildTransportLedger( const std::vector<double>& start,
+    const std::vector<transportRepairFace>& faces );
+
+// Bounded conservative repair of tiny negative closing-cell volumes.
+// Returns no result for unsupported geometry/deficits; inputs unchanged.
+[[nodiscard]] std::optional<transportRepairResult> repairClosingTransport(
+    const std::vector<double>& start, const std::vector<double>& endpoint,
+    const std::vector<transportRepairFace>& faces );
+
+struct transportFaceSample
+{
+    bool isU;
+    int index;
+    double mean;
+};
+
+// Map interval signed face amounts to a sampled time panel. Mapping must
+// match the interval face order. No normalization or aperture floor.
+[[nodiscard]] std::vector<double> buildTransportPanelAmounts(
+    const std::vector<transportRepairFace>& faces,
+    const std::vector<transportFaceSample>& mapping,
+    const std::vector<float>& uOpen, const std::vector<float>& vOpen,
+    double weight, double weightSum );
 
 enum class throughflowCommitMode
 {
