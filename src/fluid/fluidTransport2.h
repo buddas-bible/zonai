@@ -73,4 +73,40 @@ struct throughflowAudit
     std::vector<double>& volume, std::vector<double>& mass, std::vector<double>& uniform,
     throughflowCommitMode mode = throughflowCommitMode::completeOnly );
 
+struct transportPanel
+{
+    double weight;
+    std::vector<float> startFraction, uOpen, vOpen;
+};
+
+struct tracerPanelResult
+{
+    std::vector<double> mass;
+    double unserved;
+};
+
+// Research reference for equal signed-transfer panels. Inputs must be
+// validated, including the outgoing volume array and cell indices.
+[[nodiscard]] tracerPanelResult consumeTracerPanels( const std::vector<double>& seed,
+    const std::vector<double>& initialVolume, const std::vector<double>& endpointVolume,
+    const std::vector<double>& outgoing, const std::vector<transportRepairFace>& faces, int panels );
+
+struct hybridTracerResult
+{
+    std::vector<double> mass, volume;
+    int panels, maxPasses, totalPasses;
+    double unserved, transferError;
+};
+
+// Consume an already repaired interval. Select the single-panel path
+// only if every donor has enough start volume. Otherwise use the sampled
+// aperture schedule. Complete-only mode returns no result on unserved
+// volume; no caller-owned state is mutated. Invalid inputs throw.
+[[nodiscard]] std::optional<hybridTracerResult> consumeHybridTransport(
+    const transportRepairResult& repair, const std::vector<double>& startVolume,
+    const std::vector<double>& seed, double cellArea,
+    const std::vector<transportFaceSample>& mapping,
+    const std::vector<transportPanel>& sampledPanels, double weightSum,
+    throughflowCommitMode mode = throughflowCommitMode::completeOnly );
+
 }
