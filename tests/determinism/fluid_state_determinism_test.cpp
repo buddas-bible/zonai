@@ -959,11 +959,7 @@ struct fluidStateTraceProbe2
     // R4e: retain the quadrature's actual apertures and each panel's
     // start geometry. The solved interval velocity is constant in this
     // model; the tracer consumer alone advances chronologically.
-    struct transportPanel
-    {
-        double weight;
-        std::vector<float> startFraction, uOpen, vOpen;
-    };
+    using transportPanel = fluidDetail::transportPanel;
 
     static void captureChronologicalTransport( const fluidField2& before,
         const intervalTransport& interval, const std::vector<double>& uVelocity,
@@ -3065,53 +3061,51 @@ struct fluidStateTraceProbe2
         reject( mapping, { 0.5f }, 0.0, 2.0 );
         reject( mapping, { 0.5f }, 3.0, 2.0 );
         std::puts( "R4bf sampled schedule regressions passed" );
+
+        // R4bg: library interval entry chooses its own path and never
+        // changes the caller's scalar/volume input, even on rejection.
+        const std::vector<double> chainStart{ 1.0, 0.0, 0.0 }, chainMass{ 2.0, 0.0, 0.0 };
+        const auto chainRepair = fluidDetail::repairClosingTransport( chainStart,
+            { 0.5, 0.0, 0.5 }, {{ 0, 1, 0.5 }, { 1, 2, 0.5 }} );
+        if( !chainRepair ) throw std::runtime_error( "R4bg chain repair missing" );
+        const std::vector<fluidDetail::transportFaceSample> chainMap{{ true, 0, 1.0 }, { true, 1, 1.0 }};
+        const std::vector<transportPanel> chainPanels{{ 1.0, {}, { 1.0f, 1.0f }, {} }};
+        const auto chainResult = fluidDetail::consumeHybridTransport( *chainRepair, chainStart,
+            chainMass, 1.0, chainMap, chainPanels, 1.0 );
+        if( !chainResult || chainResult->totalPasses != 2 || chainResult->unserved != 0.0 ||
+            chainResult->volume != std::vector<double>{ 0.5, 0.0, 0.5 } ||
+            chainResult->mass != std::vector<double>{ 1.0, 0.0, 1.0 } )
+            throw std::runtime_error( "R4bg hybrid chain regression" );
+        const auto simple = fluidDetail::repairClosingTransport( chainStart, { 0.5, 0.5, 0.0 },
+            {{ 0, 1, 0.5 }} );
+        if( !simple ) throw std::runtime_error( "R4bg fast path repair missing" );
+        const auto fast = fluidDetail::consumeHybridTransport( *simple, chainStart, chainMass,
+            1.0, {}, {}, 0.0 );
+        if( !fast || fast->panels != 1 || fast->totalPasses != 1 || fast->unserved != 0.0 ||
+            fast->volume != std::vector<double>{ 0.5, 0.5, 0.0 } ||
+            fast->mass != std::vector<double>{ 1.0, 1.0, 0.0 } )
+            throw std::runtime_error( "R4bg hybrid fast path regression" );
+        const std::vector<double> empty{ 0.0, 0.0 };
+        const auto cycle = fluidDetail::repairClosingTransport( empty, empty,
+            {{ 0, 1, 0.5 }, { 1, 0, 0.5 }} );
+        if( !cycle || fluidDetail::consumeHybridTransport( *cycle, empty, empty,
+            1.0, chainMap, chainPanels, 1.0 ) )
+            throw std::runtime_error( "R4bg unsupported interval was accepted" );
+        const auto partial = fluidDetail::consumeHybridTransport( *cycle, empty, empty,
+            1.0, chainMap, chainPanels, 1.0, fluidDetail::throughflowCommitMode::allowPartial );
+        if( !partial || partial->unserved != 1.0 || partial->volume != empty || partial->mass != empty )
+            throw std::runtime_error( "R4bg partial interval regression" );
+        auto bad = *simple;
+        bad.ledger[0] = 0.75;
+        bool badLedgerRejected = false;
+        try { (void)fluidDetail::consumeHybridTransport( bad, chainStart, chainMass, 1.0, {}, {}, 0.0 ); }
+        catch( const std::invalid_argument& ) { badLedgerRejected = true; }
+        if( !badLedgerRejected ) throw std::runtime_error( "R4bg inconsistent ledger accepted" );
+        std::puts( "R4bg hybrid interval regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
-    struct tracerPanelResult
-    {
-        std::vector<double> mass;
-        double unserved;
-    };
-    static tracerPanelResult consumeTracerPanels( const std::vector<double>& seed,
-        const std::vector<double>& initialVolume, const std::vector<double>& endpointVolume,
-        const std::vector<double>& outgoing, const std::vector<transportRepairFace>& faces, int panels )
-    {
-        const std::size_t n = seed.size();
-        auto mass = seed;
-        double unserved = 0.0;
-        for( int panel = 0; panel < panels; ++panel )
-        {
-            const double alpha = static_cast<double>( panel ) / panels;
-            std::vector<double> capacity( n ), remaining = mass, received( n );
-            for( std::size_t i = 0; i < n; ++i )
-            {
-                capacity[i] = ( 1.0 - alpha ) * initialVolume[i] + alpha * endpointVolume[i];
-                if( !std::isfinite( capacity[i] ) || capacity[i] < 0.0 )
-                    throw std::runtime_error( "R4av invalid panel capacity" );
-                unserved += std::max( 0.0, outgoing[i] / panels - capacity[i] );
-            }
-            for( const auto& f : faces )
-            {
-                if( f.amount == 0.0 ) continue;
-                const int donor = f.amount > 0.0 ? f.first : f.second;
-                const int recipient = f.amount > 0.0 ? f.second : f.first;
-                if( capacity[donor] <= 0.0 ) continue;
-                const double requested = mass[donor] * ( ( std::abs( f.amount ) / panels ) /
-                    std::max( capacity[donor], outgoing[donor] / panels ) );
-                const double moved = std::min( remaining[donor], requested );
-                remaining[donor] -= moved;
-                received[recipient] += moved;
-            }
-            for( std::size_t i = 0; i < n; ++i )
-            {
-                mass[i] = remaining[i] + received[i];
-                if( !std::isfinite( mass[i] ) || mass[i] < 0.0 )
-                    throw std::runtime_error( "R4av invalid scalar mass" );
-            }
-        }
-        return { std::move( mass ), unserved };
-    }
+    using tracerPanelResult = fluidDetail::tracerPanelResult;
     // R4ax: compare the same repaired signed transfers redistributed
     // according to their sampled aperture-time weights, with actual
     // geometric panel-start capacity instead of linear model capacity.
@@ -3519,38 +3513,17 @@ struct fluidStateTraceProbe2
     // transfer when the donor bound holds; otherwise reuse the pressure
     // quadrature schedule with bounded throughflow. Reset modeled volume
     // to actual start geometry each interval, not scalar mass.
-    struct hybridTracerResult
-    {
-        std::vector<double> mass, volume;
-        int panels, maxPasses, totalPasses;
-        double unserved, transferError;
-    };
+    using hybridTracerResult = fluidDetail::hybridTracerResult;
 
     static hybridTracerResult consumeHybridTracer( const fluidField2& field,
         const continuationPressure& candidate, const transportRepairResult& repair,
         const std::vector<double>& startVolume, const std::vector<double>& outgoing,
         int adaptivePanels, const std::vector<double>& seed )
     {
-        const std::size_t n = startVolume.size();
         const double h = field.cellSize_, area = h * h;
-        auto mass = seed;
-        auto volume = startVolume, uniform = startVolume;
-        int panels = 1, maxPasses = 1, totalPasses = 1;
-        double unserved = 0.0, transferError = 0.0;
-        if( adaptivePanels == 1 )
+        std::vector<fluidDetail::transportFaceSample> mapping;
+        if( adaptivePanels != 1 )
         {
-            auto single = consumeTracerPanels( mass, startVolume, repair.ledger,
-                outgoing, repair.faces, 1 );
-            if( single.unserved != 0.0 )
-                throw std::runtime_error( "R4bb unsupported fast path" );
-            mass = std::move( single.mass );
-            volume = repair.ledger;
-        }
-        else
-        {
-            if( candidate.geometricPanels.empty() || candidate.geometricWeightSum <= 0.0 )
-                throw std::runtime_error( "R4bb missing sampled panel geometry" );
-            std::vector<fluidDetail::transportFaceSample> mapping;
             const auto collect = [&]( bool isU, int x, int y )
             {
                 const int f = isU ? field.uIndex( x, y ) : field.vIndex( x, y );
@@ -3569,35 +3542,19 @@ struct fluidStateTraceProbe2
                 for( int x = 0; x < field.width_; ++x ) collect( false, x, y );
             if( mapping.size() != repair.faces.size() )
                 throw std::runtime_error( "R4bb missing mapped faces" );
-            panels = static_cast<int>( candidate.geometricPanels.size() );
-            maxPasses = totalPasses = 0;
-            std::vector<double> amounts( mapping.size() ), sums( mapping.size() );
-            for( const auto& panel : candidate.geometricPanels )
-            {
-                amounts = fluidDetail::buildTransportPanelAmounts( repair.faces, mapping,
-                    panel.uOpen, panel.vOpen, panel.weight, candidate.geometricWeightSum );
-                for( std::size_t j = 0; j < mapping.size(); ++j )
-                    sums[j] += amounts[j];
-                const auto result = fluidDetail::consumeThroughflowPanel( repair.faces, amounts, volume, mass, uniform,
-                    fluidDetail::throughflowCommitMode::allowPartial );
-                maxPasses = std::max( maxPasses, result.passes );
-                totalPasses += result.passes;
-                unserved += result.unserved;
-                for( std::size_t i = 0; i < n; ++i )
-                    if( std::abs( uniform[i] - volume[i] ) > 1.0e-12 * area )
-                        throw std::runtime_error( "R4bb uniform executed volume identity failed" );
-            }
-            double transferL1 = 0.0;
-            for( std::size_t j = 0; j < sums.size(); ++j )
-            {
-                transferError += std::abs( sums[j] - repair.faces[j].amount );
-                transferL1 += std::abs( repair.faces[j].amount );
-            }
-            if( transferError > 1.0e-12 * std::max( transferL1, 1.0e-12 ) )
-                throw std::runtime_error( "R4bb sampled schedule differs from interval requests" );
         }
-        return { std::move( mass ), std::move( volume ), panels, maxPasses, totalPasses,
-            unserved, transferError };
+        // Independent engine-side path selection must agree with the
+        // existing equal-panel donor bound for the one-panel case.
+        auto result = fluidDetail::consumeHybridTransport( repair, startVolume, seed, area,
+            mapping, candidate.geometricPanels, candidate.geometricWeightSum,
+            fluidDetail::throughflowCommitMode::allowPartial );
+        bool single = true;
+        for( std::size_t i = 0; i < startVolume.size(); ++i )
+            if( outgoing[i] > startVolume[i] ) { single = false; break; }
+        if( !result || single != ( adaptivePanels == 1 ) ||
+            ( single && result->panels != 1 ) )
+            throw std::runtime_error( "R4bg hybrid path selection differs" );
+        return std::move( *result );
     }
 
     static void auditHybridTracer( const fluidField2& field,
@@ -3622,7 +3579,7 @@ struct fluidStateTraceProbe2
         // the deterministic trace, and no timed trial commits history.
         if( benchmarkTracer )
         {
-            const auto reference = consumeTracerPanels( history.hybrid, startVolume,
+            const auto reference = fluidDetail::consumeTracerPanels( history.hybrid, startVolume,
                 repair.ledger, outgoing, repair.faces, adaptivePanels );
             for( int repeat = 0; repeat < 7; ++repeat )
             {
@@ -3630,7 +3587,7 @@ struct fluidStateTraceProbe2
                 const auto measureAdaptive = [&]()
                 {
                     const auto begin = benchmarkClock::now();
-                    const auto trial = consumeTracerPanels( history.hybrid, startVolume,
+                    const auto trial = fluidDetail::consumeTracerPanels( history.hybrid, startVolume,
                         repair.ledger, outgoing, repair.faces, adaptivePanels );
                     adaptiveMs = elapsedMs( begin, benchmarkClock::now() );
                     if( trial.mass != reference.mass || trial.unserved != reference.unserved )
@@ -3726,7 +3683,7 @@ struct fluidStateTraceProbe2
         int panels = 1;
         while( panels < maxPanels && !fits( panels ) ) panels *= 2;
         const bool limited = !fits( panels );
-        auto result = consumeTracerPanels( history.adaptive, initialVolume,
+        auto result = fluidDetail::consumeTracerPanels( history.adaptive, initialVolume,
             repair.ledger, outgoing, repair.faces, panels );
         if( !limited && result.unserved != 0.0 )
             throw std::runtime_error( "R4aw donor bound did not hold" );
@@ -3963,7 +3920,7 @@ struct fluidStateTraceProbe2
                 actualVolume, targetIncoming, outgoing[target], startConcentration );
             for( int panels : { 1, 2, 4, 8, 16 } )
             {
-                auto result = consumeTracerPanels( history.repaired, initialVolume,
+                auto result = fluidDetail::consumeTracerPanels( history.repaired, initialVolume,
                     repair.ledger, outgoing, repair.faces, panels );
                 const auto& mass = result.mass;
                 const double unserved = result.unserved;
