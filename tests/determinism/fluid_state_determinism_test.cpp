@@ -5595,28 +5595,7 @@ struct fluidStateTraceProbe2
                 pre.applyCutCellBoundaries();
                 if( pre.conservativeAdvectionEnabled_ )
                     pre.advectConservative( dt );
-                else
-                {
-                    std::fill( pre.nextU_.begin(), pre.nextU_.end(), 0.0f );
-                    std::fill( pre.nextV_.begin(), pre.nextV_.end(), 0.0f );
-                    for( int y = 0; y < pre.height_; ++y )
-                        for( int x = 1; x < pre.width_; ++x )
-                        {
-                            const vec2 point = pre.origin_ + pre.cellSize_ *
-                                vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
-                            const vec2 previous = point - dt * pre.sampleFrom( pre.u_, pre.v_, point );
-                            pre.nextU_[pre.uIndex( x, y )] = pre.sampleFrom( pre.u_, pre.v_, previous ).x;
-                        }
-                    for( int y = 1; y < pre.height_; ++y )
-                        for( int x = 0; x < pre.width_; ++x )
-                        {
-                            const vec2 point = pre.origin_ + pre.cellSize_ *
-                                vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
-                            const vec2 previous = point - dt * pre.sampleFrom( pre.u_, pre.v_, point );
-                            pre.nextV_[pre.vIndex( x, y )] = pre.sampleFrom( pre.u_, pre.v_, previous ).y;
-                        }
-                    pre.u_.swap( pre.nextU_ ); pre.v_.swap( pre.nextV_ );
-                }
+                else pre.advectSemiLagrangian( dt );
                 pre.applyCutCellBoundaries();
             }
             // Keep reference/seed and start poses independent of the output
