@@ -1,4 +1,5 @@
 #include "fluid/fluidField2.h"
+#include "fluid/fluidTransport2.h"
 #include "math/deterministicMath.h"
 #include "collision/shapeGeometry.h"
 #include "rigidBodyDemo.h"
@@ -3005,11 +3006,7 @@ struct fluidStateTraceProbe2
     // Repair only small closing-cell deficits using existing outward
     // transfers to cells with positive endpoint volume. No partial result
     // escapes when the deterministic greedy repair cannot satisfy its gates.
-    struct transportRepairFace
-    {
-        int first, second;
-        double amount;
-    };
+    using transportRepairFace = fluidDetail::transportRepairFace;
     struct transportRepairResult
     {
         std::vector<transportRepairFace> faces;
@@ -3183,91 +3180,20 @@ struct fluidStateTraceProbe2
     // R4ba: consume the original signed transfer schedule in bounded
     // simultaneous passes. Incoming volume/mass becomes available only
     // in the next pass; no face is executed beyond its requested amount.
-    struct throughflowAudit
-    {
-        int passes = 0;
-        double unserved = 0.0;
-    };
-
-    static throughflowAudit consumeThroughflowPanel(
-        const std::vector<transportRepairFace>& faces, const std::vector<double>& amounts,
-        std::vector<double>& volume, std::vector<double>& mass, std::vector<double>& uniform )
-    {
-        constexpr int maxPasses = 8;
-        const std::size_t n = volume.size();
-        std::vector<double> pending( amounts.size() ), outgoing( n );
-        if( faces.size() != amounts.size() || mass.size() != n || uniform.size() != n )
-            throw std::runtime_error( "R4ba mismatched throughflow dimensions" );
-        for( std::size_t j = 0; j < amounts.size(); ++j )
-            pending[j] = std::abs( amounts[j] );
-        throughflowAudit result;
-        for( int pass = 0; pass < maxPasses; ++pass )
-        {
-            std::fill( outgoing.begin(), outgoing.end(), 0.0 );
-            bool hasPending = false;
-            for( std::size_t j = 0; j < amounts.size(); ++j )
-            {
-                if( pending[j] == 0.0 ) continue;
-                hasPending = true;
-                const auto& edge = faces[j];
-                outgoing[amounts[j] > 0.0 ? edge.first : edge.second] += pending[j];
-            }
-            if( !hasPending ) break;
-            ++result.passes;
-            auto remainingVolume = volume, remainingMass = mass, remainingUniform = uniform;
-            std::vector<double> receivedVolume( n ), receivedMass( n ), receivedUniform( n );
-            bool progress = false;
-            for( std::size_t j = 0; j < amounts.size(); ++j )
-            {
-                if( pending[j] == 0.0 ) continue;
-                const auto& edge = faces[j];
-                const int donor = amounts[j] > 0.0 ? edge.first : edge.second;
-                const int recipient = amounts[j] > 0.0 ? edge.second : edge.first;
-                const double capacity = volume[donor];
-                if( capacity <= 0.0 ) continue;
-                const double requested = outgoing[donor] <= capacity ? pending[j] :
-                    pending[j] * ( capacity / outgoing[donor] );
-                const double moved = std::min( pending[j], std::min( remainingVolume[donor], requested ) );
-                if( moved <= 0.0 ) continue;
-                const double ratio = moved / capacity;
-                const double movedMass = std::min( remainingMass[donor], mass[donor] * ratio );
-                const double movedUniform = std::min( remainingUniform[donor], uniform[donor] * ratio );
-                pending[j] -= moved;
-                remainingVolume[donor] -= moved; receivedVolume[recipient] += moved;
-                remainingMass[donor] -= movedMass; receivedMass[recipient] += movedMass;
-                remainingUniform[donor] -= movedUniform; receivedUniform[recipient] += movedUniform;
-                progress = true;
-            }
-            for( std::size_t i = 0; i < n; ++i )
-            {
-                volume[i] = remainingVolume[i] + receivedVolume[i];
-                mass[i] = remainingMass[i] + receivedMass[i];
-                uniform[i] = remainingUniform[i] + receivedUniform[i];
-                if( !std::isfinite( volume[i] ) || volume[i] < 0.0 ||
-                    !std::isfinite( mass[i] ) || mass[i] < 0.0 ||
-                    !std::isfinite( uniform[i] ) || uniform[i] < 0.0 )
-                    throw std::runtime_error( "R4ba invalid throughflow state" );
-            }
-            if( !progress ) break;
-        }
-        for( double amount : pending ) result.unserved += amount;
-        return result;
-    }
-
     static void auditThroughflowSynthetic()
     {
         const std::vector<transportRepairFace> chain{{ 0, 1, 0.5 }, { 1, 2, 0.5 }};
         const std::vector<double> requested{ 0.5, 0.5 };
         std::vector<double> volume{ 1.0, 0.0, 0.0 }, uniform = volume;
         std::vector<double> mass{ 2.0, 0.0, 0.0 };
-        const auto chainResult = consumeThroughflowPanel( chain, requested, volume, mass, uniform );
+        const auto chainResult = fluidDetail::consumeThroughflowPanel( chain, requested, volume, mass, uniform );
         if( chainResult.passes != 2 || chainResult.unserved != 0.0 ||
             volume != std::vector<double>{ 0.5, 0.0, 0.5 } || uniform != volume ||
             mass != std::vector<double>{ 1.0, 0.0, 1.0 } )
             throw std::runtime_error( "R4ba zero-start donor chain regression" );
         const std::vector<transportRepairFace> cycle{{ 0, 1, 0.5 }, { 1, 0, 0.5 }};
         volume = { 0.0, 0.0 }; uniform = volume; mass = volume;
-        const auto cycleResult = consumeThroughflowPanel( cycle, requested, volume, mass, uniform );
+        const auto cycleResult = fluidDetail::consumeThroughflowPanel( cycle, requested, volume, mass, uniform );
         if( cycleResult.passes != 1 || cycleResult.unserved != 1.0 ||
             volume != std::vector<double>{ 0.0, 0.0 } || uniform != volume || mass != volume )
             throw std::runtime_error( "R4ba unsupported empty cycle regression" );
@@ -3353,7 +3279,7 @@ struct fluidStateTraceProbe2
                 panelVolume[edge.first] -= amount; panelVolume[edge.second] += amount;
                 ledger[edge.first] -= amount; ledger[edge.second] += amount;
             }
-            const auto through = consumeThroughflowPanel( repair.faces, amounts,
+            const auto through = fluidDetail::consumeThroughflowPanel( repair.faces, amounts,
                 throughVolume, throughMass, throughUniform );
             throughMaxPasses = std::max( throughMaxPasses, through.passes );
             throughTotalPasses += through.passes;
@@ -3668,7 +3594,7 @@ struct fluidStateTraceProbe2
                         throw std::runtime_error( "R4bb nonfinite sampled transfer" );
                     sums[j] += amounts[j];
                 }
-                const auto result = consumeThroughflowPanel( repair.faces, amounts, volume, mass, uniform );
+                const auto result = fluidDetail::consumeThroughflowPanel( repair.faces, amounts, volume, mass, uniform );
                 maxPasses = std::max( maxPasses, result.passes );
                 totalPasses += result.passes;
                 unserved += result.unserved;
