@@ -46,6 +46,35 @@ void projectIntervalPressureGauge( std::span<double> values, std::span<const int
 void multiplyIntervalPressureGraph( std::span<const intervalPressureEdge> edges,
     std::span<const double> pressure, std::span<double> out );
 
+// Use the same arithmetic in diagnostics and accepted reconstruction.
+[[nodiscard]] inline double intervalFaceVelocity( const intervalPressureEdge& e,
+    std::span<const double> pressure, double h, double dt )
+{
+    return e.velocity + dt / h * ( pressure[e.first] - pressure[e.second] );
+}
+
+[[nodiscard]] inline double intervalFaceTransfer( const intervalPressureEdge& e,
+    double velocity, double h, double dt )
+{
+    return dt * h * e.a * velocity;
+}
+
+struct intervalPressureReconstruction
+{
+    std::vector<float> u, v;
+    std::vector<double> fluxVolume, intervalU, intervalV;
+    int uncoveredEndpointFaces = 0;
+};
+
+// Reconstruct a candidate without mutating the field. Keep pre-pressure
+// velocities on closed/unsupported endpoint faces; integrate signed
+// interval transfers independently of the endpoint aperture.
+[[nodiscard]] intervalPressureReconstruction reconstructIntervalPressure(
+    int width, int height, double h, double dt, const intervalPressureGraph& graph,
+    std::span<const double> pressure, std::span<const float> previousFraction,
+    std::span<const float> endpointFraction, const intervalPressureFaceInput& u,
+    const intervalPressureFaceInput& v, bool captureIntervalVelocity );
+
 struct intervalPressureRhsResult
 {
     double compatibilityL1 = 0.0;
