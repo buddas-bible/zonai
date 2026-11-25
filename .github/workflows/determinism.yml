@@ -456,6 +456,7 @@ jobs:
               "forwardOptimizedMomentum": 960, "forwardExtendedAudit": 2880,
               "forwardPersistentTracer": 7060,
               "forwardTracerReopening": 3120,
+              "forwardTracerPanelComparison": 37,
           }
           topology = totals.get("topologyQuadrature", 0)
           # 49 second-resolution output rows, six quadrature headers,
