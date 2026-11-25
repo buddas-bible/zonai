@@ -1497,8 +1497,13 @@ struct fluidStateTraceProbe2
         bool adaptiveEndpoint = false, forwardTiming* timing = nullptr,
         double relativeSquaredTolerance = 1.0e-16, bool warmStart = false,
         std::span<const float> previousForwardPressure = {}, bool captureEndpoint = false,
-        bool volumeWeightedCompatibility = false, bool skipFixedBodyProducts = false )
+        bool volumeWeightedCompatibility = false, bool skipFixedBodyProducts = false,
+        double closingVolumeRelativeTolerance = 0.0 )
     {
+        if( closingVolumeRelativeTolerance != 0.0 &&
+            ( !std::isfinite( closingVolumeRelativeTolerance ) || closingVolumeRelativeTolerance < 0.0 ||
+                !skipFixedBodyProducts || responseScale != 0.0 || !warmStart || !volumeWeightedCompatibility ) )
+            throw std::runtime_error( key + " invalid closing-cell residual probe" );
         if( !previousForwardPressure.empty() && !warmStart )
             throw std::runtime_error( key + " previous pressure requires warm start" );
         if( warmStart && ( !continuation || !adaptiveEndpoint || correctionBudget != 0 ||
@@ -1896,8 +1901,24 @@ struct fluidStateTraceProbe2
         const double seedSquared = squared;
         const double initial = warmStart ? rhsSquared : squared;
         const double tolerance = std::max( 1.0e-24, initial * relativeSquaredTolerance );
+        // R4am: the fixed-geometry volume residual equals dt^2 times
+        // the pressure row residual. A small global norm alone does not
+        // bound error relative to the fluid expelled by a closing cell.
+        std::vector<std::pair<std::size_t, double>> closingRows;
+        if( closingVolumeRelativeTolerance > 0.0 )
+            for( std::size_t i = 0; i < n; ++i )
+                if( parent[i] >= 0 && before.previousCellFluidFraction_[i] > 0.0f &&
+                    before.cellFluidFraction_[i] == 0.0f )
+                    closingRows.emplace_back( i, std::max( 1.0e-18,
+                        closingVolumeRelativeTolerance * h * h * before.previousCellFluidFraction_[i] ) );
+        const auto closingResidualSatisfied = [&]( const std::vector<double>& residual )
+        {
+            for( const auto& [i, bound] : closingRows )
+                if( !( dt * dt * std::abs( residual[i] ) <= bound ) ) return false;
+            return true;
+        };
         int iterations = 0;
-        for( ; iterations < 2000 && squared > tolerance; ++iterations )
+        for( ; iterations < 2000 && ( squared > tolerance || !closingResidualSatisfied( r ) ); ++iterations )
         {
             multiply( d, ap ); zeroMean( ap );
             const double denominator = dot( d, ap );
@@ -1907,7 +1928,7 @@ struct fluidStateTraceProbe2
             for( std::size_t i = 0; i < n; ++i ) { p[i] += alpha * d[i]; r[i] -= alpha * ap[i]; }
             squared = dot( r, r );
             if( !std::isfinite( squared ) ) throw std::runtime_error( key + " nonfinite PCG residual" );
-            if( squared <= tolerance ) { ++iterations; break; }
+            if( squared <= tolerance && closingResidualSatisfied( r ) ) { ++iterations; break; }
             precondition();
             const double next = dot( r, z );
             const double beta = next / rz;
@@ -1924,6 +1945,16 @@ struct fluidStateTraceProbe2
         {
             const double error = rhs[i] - ap[i];
             unprojectedSquared += error * error;
+        }
+        if( closingVolumeRelativeTolerance > 0.0 )
+        {
+            // Check independently recomputed unprojected rows, not merely
+            // the recursive PCG residual. This bounds magnitude, not sign.
+            for( std::size_t i = 0; i < n; ++i ) r[i] = rhs[i] - ap[i];
+            if( !closingResidualSatisfied( r ) )
+                throw std::runtime_error( key + " true closing-cell residual failed" );
+            std::printf( "%s R4am closing rows %zu relative tolerance %.9g PCG %d\n",
+                key.c_str(), closingRows.size(), closingVolumeRelativeTolerance, iterations );
         }
         zeroMean( ap );
         double trueSquared = 0.0;
@@ -3099,6 +3130,18 @@ struct fluidStateTraceProbe2
                         16, trialKey + ".topology", 0.0, &trial, 0, true,
                         nullptr, 1.0e-16, warm, {}, true, true, true );
                     report( warm ? "warmStrict" : "coldStrict", trial );
+                }
+                for( double localTolerance : { 1.0e-8, 1.0e-10 } )
+                {
+                    const char* name = localTolerance == 1.0e-8 ? "closingRelative8" : "closingRelative10";
+                    const std::string trialKey = splitKey + ".R4am." + name;
+                    continuationPressure trial;
+                    std::string trialScratch;
+                    captureSpaceTimeProjection( forward, laggedField, laggedLoad, trialScratch,
+                        trialKey + ".projection", 16, trialKey + ".volume", false,
+                        16, trialKey + ".topology", 0.0, &trial, 0, true,
+                        nullptr, 1.0e-10, true, {}, true, true, true, localTolerance );
+                    report( name, trial );
                 }
             }
             // R4af: matched-state pressure-only trials. Do not replace the
