@@ -3219,6 +3219,70 @@ struct fluidStateTraceProbe2
                     conservationError, gapBefore, gapAfter, maxDelta, changedVelocity - oldVelocity,
                     changedCells, candidate.initialIterations );
 
+                // R4ao: distinguish a transport-only correction from an
+                // interval pressure update. A nonzero circulation around an
+                // alternate graph path cannot come from a scalar pressure.
+                std::vector<std::vector<int>> adjacency( startFraction.size() );
+                const auto connect = [&]( bool isU, int fx, int fy )
+                {
+                    const int f = isU ? forward.uIndex( fx, fy ) : forward.vIndex( fx, fy );
+                    if( ( isU == chosen.isU && f == chosen.face ) ||
+                        ( isU ? candidate.meanU : candidate.meanV )[f] <= 0.0 ) return;
+                    const int a = forward.cellIndex( fx - ( isU ? 1 : 0 ), fy - ( isU ? 0 : 1 ) );
+                    const int b = forward.cellIndex( fx, fy );
+                    adjacency[a].push_back( b );
+                    adjacency[b].push_back( a );
+                };
+                for( int fy = 0; fy < forward.height_; ++fy )
+                    for( int fx = 1; fx < forward.width_; ++fx ) connect( true, fx, fy );
+                for( int fy = 1; fy < forward.height_; ++fy )
+                    for( int fx = 0; fx < forward.width_; ++fx ) connect( false, fx, fy );
+                std::vector<int> distance( startFraction.size(), -1 );
+                std::vector<int> pending{ static_cast<int>( target ) };
+                distance[target] = 0;
+                for( std::size_t i = 0; i < pending.size(); ++i )
+                    for( int neighbor : adjacency[pending[i]] )
+                        if( distance[neighbor] < 0 )
+                        {
+                            distance[neighbor] = distance[pending[i]] + 1;
+                            pending.push_back( neighbor );
+                        }
+                const int alternativePath = distance[chosen.neighbor];
+                const double velocityDelta = changedVelocity - oldVelocity;
+                const double cycleCirculation = alternativePath >= 0 ? h * std::abs( velocityDelta ) : 0.0;
+                const double weight = h * h *
+                    ( chosen.isU ? candidate.meanU : candidate.meanV )[chosen.face];
+                const double momentumProxy = weight * velocityDelta;
+                const double energyProxy = 0.5 * weight * velocityDelta * ( changedVelocity + oldVelocity );
+                const int stride = forward.width_ + ( chosen.isU ? 1 : 0 );
+                const int fx = chosen.face % stride, fy = chosen.face / stride;
+                const double endpointOpening = chosen.isU ? forward.cutCellUOpen( fx, fy ) :
+                    forward.cutCellVOpen( fx, fy );
+                if( endpointOpening != 0.0 )
+                    throw std::runtime_error( splitKey + " R4ao corrected face still open at endpoint" );
+
+                // The corrected face disappears from the endpoint MAC graph.
+                // Independently reconstruct both outputs to verify that the
+                // correction is transport-only for this particular interval.
+                continuationPressure correctedTransport = candidate;
+                correctedTransport.intervalU = trialU; correctedTransport.intervalV = trialV;
+                correctedTransport.fluxVolume = corrected;
+                std::vector<float> originalU, originalV, correctedU, correctedV;
+                std::string originalEndpoint, correctedEndpoint;
+                captureInstantaneousEndpoint( forward, candidate, originalEndpoint, index,
+                    &originalU, &originalV, true, true );
+                captureInstantaneousEndpoint( forward, correctedTransport, correctedEndpoint, index,
+                    &correctedU, &correctedV, true, true );
+                if( originalU != correctedU || originalV != correctedV ||
+                    originalEndpoint != correctedEndpoint )
+                    throw std::runtime_error( splitKey + " R4ao transport correction changed endpoint" );
+                if( !std::isfinite( cycleCirculation ) || !std::isfinite( momentumProxy ) ||
+                    !std::isfinite( energyProxy ) )
+                    throw std::runtime_error( splitKey + " R4ao nonfinite transport audit" );
+                std::printf( "R4ao interval64 alternativePath %d cycleCirculation %.17g "
+                    "momentumProxy %.17g energyProxy %.17g endpointOpening %.17g "
+                    "endpointIdentical 1 pressureUnchanged 1\n",
+                    alternativePath, cycleCirculation, momentumProxy, energyProxy, endpointOpening );
                 for( bool warm : { false, true } )
                 {
                     const std::string trialKey = splitKey + ( warm ? ".R4alWarmStrict" : ".R4alColdStrict" );
