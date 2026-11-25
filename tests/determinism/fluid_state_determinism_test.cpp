@@ -1745,58 +1745,35 @@ struct fluidStateTraceProbe2
             fluidDetail::projectIntervalPressureGauge( v, parent, count, sums );
         };
         const double scale = h * h / dt;
-        for( std::size_t i = 0; i < n; ++i ) rhs[i] = -scale * rawDivergence[i];
-        if( volumeWeightedCompatibility )
+        const auto rhsResult = fluidDetail::buildIntervalPressureRhs( graph, before.cellFluidFraction_,
+            scale, volumeWeightedCompatibility, rhs, sums );
+        if( rhsResult.failedComponent >= 0 )
         {
-            // Compatibility is an RHS correction, not the pressure gauge.
-            // Assign it only to cells with actual endpoint fluid volume.
-            std::vector<double> componentRhs( n ), componentVolume( n );
-            for( std::size_t i = 0; i < n; ++i )
-                if( parent[i] >= 0 )
-                {
-                    componentRhs[parent[i]] += rhs[i];
-                    componentVolume[parent[i]] += before.cellFluidFraction_[i];
-                }
-            for( std::size_t i = 0; i < n; ++i )
-                if( parent[i] >= 0 )
-                {
-                    const int c = parent[i];
-                    if( componentVolume[c] > 0.0 )
-                        rhs[i] -= componentRhs[c] *
-                            ( static_cast<double>( before.cellFluidFraction_[i] ) / componentVolume[c] );
-                    else if( componentRhs[c] != 0.0 )
-                    {
-                        // A disappearing interval component has no endpoint
-                        // recipient. Preserve the failure and expose its geometry
-                        // and source/flux balance before choosing a remedy.
-                        std::fprintf( stderr,
-                            "%s endpointCapacity root %d cells %d rhs %.17g endpointFraction %.17g dt %.17g h %.17g\n",
-                            key.c_str(), c, count[c], componentRhs[c], componentVolume[c], dt, h );
-                        for( std::size_t j = 0; j < n; ++j )
-                        {
-                            if( parent[j] != c ) continue;
-                            const int x = static_cast<int>( j ) % before.width_;
-                            const int y = static_cast<int>( j ) / before.width_;
-                            const double previous = before.previousCellFluidFraction_[j];
-                            const double current = before.cellFluidFraction_[j];
-                            const double source = ( current - previous ) / dt;
-                            std::fprintf( stderr,
-                                "%s endpointCapacity cell %zu x %d y %d previous %.17g current %.17g mean %.17g source %.17g fluxDivergence %.17g rhs %.17g meanOpen L/R/B/T %.17g %.17g %.17g %.17g\n",
-                                key.c_str(), j, x, y, previous, current, fraction[j], source,
-                                rawDivergence[j] - source, rhs[j],
-                                meanU[before.uIndex( x, y )], meanU[before.uIndex( x + 1, y )],
-                                meanV[before.vIndex( x, y )], meanV[before.vIndex( x, y + 1 )] );
-                        }
-                        throw std::runtime_error( key + " component lacks endpoint compatibility capacity" );
-                    }
-                }
+            const int c = rhsResult.failedComponent;
+            // A disappearing interval component has no endpoint
+            // recipient. Preserve the failure and expose its geometry
+            // and source/flux balance before choosing a remedy.
+            std::fprintf( stderr,
+                "%s endpointCapacity root %d cells %d rhs %.17g endpointFraction %.17g dt %.17g h %.17g\n",
+                key.c_str(), c, count[c], rhsResult.componentRhs, rhsResult.componentVolume, dt, h );
+            for( std::size_t j = 0; j < n; ++j )
+            {
+                if( parent[j] != c ) continue;
+                const int x = static_cast<int>( j ) % before.width_;
+                const int y = static_cast<int>( j ) / before.width_;
+                const double previous = before.previousCellFluidFraction_[j];
+                const double current = before.cellFluidFraction_[j];
+                const double source = ( current - previous ) / dt;
+                std::fprintf( stderr,
+                    "%s endpointCapacity cell %zu x %d y %d previous %.17g current %.17g mean %.17g source %.17g fluxDivergence %.17g rhs %.17g meanOpen L/R/B/T %.17g %.17g %.17g %.17g\n",
+                    key.c_str(), j, x, y, previous, current, fraction[j], source,
+                    rawDivergence[j] - source, rhs[j],
+                    meanU[before.uIndex( x, y )], meanU[before.uIndex( x + 1, y )],
+                    meanV[before.vIndex( x, y )], meanV[before.vIndex( x, y + 1 )] );
+            }
+            throw std::runtime_error( key + " component lacks endpoint compatibility capacity" );
         }
-        // Remove the remaining roundoff in the compatible RHS. For the
-        // original path this is still the original uniform projection.
-        zeroMean( rhs );
-        double compatibilityL1 = 0.0;
-        for( std::size_t i = 0; i < n; ++i )
-            compatibilityL1 += std::abs( rhs[i] + scale * rawDivergence[i] );
+        const double compatibilityL1 = rhsResult.compatibilityL1;
         std::vector<response> force( owners );
         std::vector<fluidDetail::intervalPressureBody> bodies( owners );
         for( std::size_t j = 0; j < owners; ++j )
@@ -3124,6 +3101,46 @@ struct fluidStateTraceProbe2
         if( !unsupportedRejected || !extentRejected )
             throw std::runtime_error( "R4bm invalid graph input accepted" );
         std::puts( "R4bm interval graph assembly regressions passed" );
+
+        // Two components: the closing cell retains its physical RHS in
+        // weighted mode while the endpoint-open cells absorb compatibility.
+        fluidDetail::intervalPressureGraph rhsGraph;
+        rhsGraph.rawDivergence = { -4.0, -4.0, 2.0, -2.0, 0.0 };
+        rhsGraph.parent = { 0, 0, 0, 3, -1 };
+        rhsGraph.count = { 3, 0, 0, 1, 0 };
+        std::vector<float> rhsEndpoint{ 0.0f, 0.5f, 0.5f, 1.0f, 0.0f };
+        std::vector<double> rhsOutput( 5 ), rhsScratch( 5, 99.0 );
+        const auto rhsWeighted = fluidDetail::buildIntervalPressureRhs( rhsGraph, rhsEndpoint,
+            1.0, true, rhsOutput, rhsScratch );
+        if( rhsWeighted.failedComponent != -1 || rhsWeighted.compatibilityL1 != 8.0 ||
+            rhsOutput != std::vector<double>{ 4.0, 1.0, -5.0, 0.0, 0.0 } )
+            throw std::runtime_error( "R4bn weighted compatibility regression" );
+        const auto rhsUniform = fluidDetail::buildIntervalPressureRhs( rhsGraph, rhsEndpoint,
+            1.0, false, rhsOutput, rhsScratch );
+        if( rhsUniform.failedComponent != -1 || rhsUniform.compatibilityL1 != 8.0 ||
+            rhsOutput != std::vector<double>{ 2.0, 2.0, -4.0, 0.0, 0.0 } )
+            throw std::runtime_error( "R4bn uniform compatibility regression" );
+        rhsEndpoint[1] = rhsEndpoint[2] = 0.0f;
+        const auto rhsFailure = fluidDetail::buildIntervalPressureRhs( rhsGraph, rhsEndpoint,
+            1.0, true, rhsOutput, rhsScratch );
+        if( rhsFailure.failedComponent != 0 || rhsFailure.componentRhs != 6.0 ||
+            rhsFailure.componentVolume != 0.0 )
+            throw std::runtime_error( "R4bn missing endpoint capacity regression" );
+        rhsGraph.rawDivergence[1] = 2.0;
+        const auto rhsZeroCapacity = fluidDetail::buildIntervalPressureRhs( rhsGraph, rhsEndpoint,
+            1.0, true, rhsOutput, rhsScratch );
+        if( rhsZeroCapacity.failedComponent != -1 || rhsZeroCapacity.compatibilityL1 != 2.0 ||
+            rhsOutput != std::vector<double>{ 4.0, -2.0, -2.0, 0.0, 0.0 } )
+            throw std::runtime_error( "R4bn compatible zero capacity regression" );
+        bool rhsExtentRejected = false;
+        try
+        {
+            (void)fluidDetail::buildIntervalPressureRhs( rhsGraph, rhsEndpoint,
+                1.0, true, rhsOutput, {} );
+        }
+        catch( const std::invalid_argument& ) { rhsExtentRejected = true; }
+        if( !rhsExtentRejected ) throw std::runtime_error( "R4bn invalid RHS extent accepted" );
+        std::puts( "R4bn interval pressure RHS regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
