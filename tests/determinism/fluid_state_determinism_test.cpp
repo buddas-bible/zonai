@@ -1,5 +1,6 @@
 #include "fluid/fluidField2.h"
 #include "fluid/fluidTransport2.h"
+#include "fluid/fluidIntervalPressure2.h"
 #include "math/deterministicMath.h"
 #include "collision/shapeGeometry.h"
 #include "rigidBodyDemo.h"
@@ -1896,47 +1897,12 @@ struct fluidStateTraceProbe2
                     static_cast<double>( finish[j].inverseInertia ) * c.torque * c.torque );
             }
 
-        std::vector<double> p( n ), r = rhs, z( n ), d( n ), ap( n );
         const auto dot = [&]( const std::vector<double>& a, const std::vector<double>& b )
         {
             double sum = 0.0;
             for( std::size_t i = 0; i < n; ++i ) sum += a[i] * b[i];
             return sum;
         };
-        const auto precondition = [&]()
-        {
-            for( std::size_t i = 0; i < n; ++i )
-                z[i] = diagonal[i] > 0.0 ? r[i] / diagonal[i] : 0.0;
-            zeroMean( z );
-        };
-        const double rhsSquared = dot( rhs, rhs );
-        if( warmStart )
-        {
-            const std::span<const float> seed = previousForwardPressure.empty() ?
-                std::span<const float>( baseline.pressure_ ) : previousForwardPressure;
-            if( seed.size() != n )
-                throw std::runtime_error( key + " invalid warm pressure size" );
-            for( std::size_t i = 0; i < n; ++i )
-            {
-                if( !std::isfinite( seed[i] ) )
-                    throw std::runtime_error( key + " nonfinite warm pressure" );
-                if( parent[i] >= 0 ) p[i] = seed[i];
-            }
-            // Reproject the seed pressure onto the forward graph gauge.
-            // Recompute the residual; no old search direction is reused.
-            zeroMean( p );
-            multiply( p, ap ); zeroMean( ap );
-            for( std::size_t i = 0; i < n; ++i ) r[i] = rhs[i] - ap[i];
-        }
-        precondition();
-        d = z;
-        double rz = dot( r, z ), squared = dot( r, r );
-        const double seedSquared = squared;
-        const double initial = warmStart ? rhsSquared : squared;
-        const double tolerance = std::max( 1.0e-24, initial * relativeSquaredTolerance );
-        // R4am: the fixed-geometry volume residual equals dt^2 times
-        // the pressure row residual. A small global norm alone does not
-        // bound error relative to the fluid expelled by a closing cell.
         std::vector<std::pair<std::size_t, double>> closingRows;
         if( closingVolumeRelativeTolerance > 0.0 )
             for( std::size_t i = 0; i < n; ++i )
@@ -1944,60 +1910,17 @@ struct fluidStateTraceProbe2
                     before.cellFluidFraction_[i] == 0.0f )
                     closingRows.emplace_back( i, std::max( 1.0e-18,
                         closingVolumeRelativeTolerance * h * h * before.previousCellFluidFraction_[i] ) );
-        const auto closingResidualSatisfied = [&]( const std::vector<double>& residual )
-        {
-            for( const auto& [i, bound] : closingRows )
-                if( !( dt * dt * std::abs( residual[i] ) <= bound ) ) return false;
-            return true;
-        };
-        int iterations = 0;
-        for( ; iterations < 2000 && ( squared > tolerance || !closingResidualSatisfied( r ) ); ++iterations )
-        {
-            multiply( d, ap ); zeroMean( ap );
-            const double denominator = dot( d, ap );
-            if( !std::isfinite( denominator ) || denominator <= 0.0 || !std::isfinite( rz ) || rz <= 0.0 )
-                throw std::runtime_error( key + " experimental PCG breakdown" );
-            const double alpha = rz / denominator;
-            for( std::size_t i = 0; i < n; ++i ) { p[i] += alpha * d[i]; r[i] -= alpha * ap[i]; }
-            squared = dot( r, r );
-            if( !std::isfinite( squared ) ) throw std::runtime_error( key + " nonfinite PCG residual" );
-            if( squared <= tolerance && closingResidualSatisfied( r ) ) { ++iterations; break; }
-            precondition();
-            const double next = dot( r, z );
-            const double beta = next / rz;
-            for( std::size_t i = 0; i < n; ++i ) d[i] = z[i] + beta * d[i];
-            rz = next;
-        }
-        zeroMean( p );
-        multiply( p, ap );
+        const std::span<const float> seed = previousForwardPressure.empty() ?
+            std::span<const float>( baseline.pressure_ ) : previousForwardPressure;
+        auto solved = fluidDetail::solveIntervalPressure( rhs, diagonal, parent, seed, warmStart,
+            dt, relativeSquaredTolerance, closingRows, multiply, zeroMean );
+        auto& [p, ap, initial, seedSquared, trueSquared, unprojectedSquared, iterations] = solved;
         // The fixed operator omits B M^-1 B^T, but the final pressure
         // traction still needs B^T p in the original accumulation order.
         if( skipFixedBodyProducts ) transpose( p );
-        double unprojectedSquared = 0.0;
-        for( std::size_t i = 0; i < n; ++i )
-        {
-            const double error = rhs[i] - ap[i];
-            unprojectedSquared += error * error;
-        }
         if( closingVolumeRelativeTolerance > 0.0 )
-        {
-            // Check independently recomputed unprojected rows, not merely
-            // the recursive PCG residual. This bounds magnitude, not sign.
-            for( std::size_t i = 0; i < n; ++i ) r[i] = rhs[i] - ap[i];
-            if( !closingResidualSatisfied( r ) )
-                throw std::runtime_error( key + " true closing-cell residual failed" );
             std::printf( "%s R4am closing rows %zu relative tolerance %.9g PCG %d\n",
                 key.c_str(), closingRows.size(), closingVolumeRelativeTolerance, iterations );
-        }
-        zeroMean( ap );
-        double trueSquared = 0.0;
-        for( std::size_t i = 0; i < n; ++i )
-        {
-            const double error = rhs[i] - ap[i];
-            trueSquared += error * error;
-        }
-        if( !std::isfinite( trueSquared ) || trueSquared > tolerance )
-            throw std::runtime_error( key + " experimental true residual failed" );
         if( timing ) timing->linearMs = elapsedMs( linearStart, benchmarkClock::now() );
 
         double peak = 0.0, endOpenPeak = 0.0, targetSpeed = 0.0, targetOpening = 0.0;
@@ -3160,6 +3083,42 @@ struct fluidStateTraceProbe2
             trial.u_ != beforeU || trial.v_ != beforeV || trial.pressure_ != beforePressure )
             throw std::runtime_error( "R4bi field interval commit regression" );
         std::puts( "R4bi field interval commit regressions passed" );
+
+        // Exact two-cell Neumann Laplacian: p = (+0.5, -0.5).
+        const auto multiply = []( const std::vector<double>& p, std::vector<double>& out )
+        {
+            out[0] = p[0] - p[1]; out[1] = -out[0];
+        };
+        const auto gauge = []( std::vector<double>& p )
+        {
+            const double mean = ( p[0] + p[1] ) / 2.0;
+            p[0] -= mean; p[1] -= mean;
+        };
+        const std::vector<double> pressureRhs{ 1.0, -1.0 }, pressureDiagonal{ 1.0, 1.0 };
+        const std::vector<int> parent{ 0, 0 };
+        const std::vector<std::pair<std::size_t, double>> closingRows{{ 0, 0.0 }};
+        const auto cold = fluidDetail::solveIntervalPressure( pressureRhs, pressureDiagonal,
+            parent, {}, false, 1.0, 1.0e-16, closingRows, multiply, gauge );
+        const std::vector<float> pressureSeed{ 1.5f, 0.5f };
+        const auto warm = fluidDetail::solveIntervalPressure( pressureRhs, pressureDiagonal,
+            parent, pressureSeed, true, 1.0, 1.0e-16, closingRows, multiply, gauge );
+        if( cold.pressure != std::vector<double>{ 0.5, -0.5 } ||
+            cold.projectedProduct != pressureRhs || cold.iterations != 1 ||
+            warm.pressure != cold.pressure || warm.iterations != 0 ||
+            cold.trueSquared != 0.0 || warm.trueSquared != 0.0 ||
+            cold.unprojectedSquared != 0.0 || warm.unprojectedSquared != 0.0 )
+            throw std::runtime_error( "R4bj projected pressure regression" );
+        bool breakdownRejected = false;
+        const auto zeroOperator = []( const std::vector<double>&, std::vector<double>& out )
+        { std::fill( out.begin(), out.end(), 0.0 ); };
+        try
+        {
+            (void)fluidDetail::solveIntervalPressure( pressureRhs, pressureDiagonal,
+                parent, {}, false, 1.0, 1.0e-16, {}, zeroOperator, gauge );
+        }
+        catch( const std::runtime_error& ) { breakdownRejected = true; }
+        if( !breakdownRejected ) throw std::runtime_error( "R4bj invalid operator accepted" );
+        std::puts( "R4bj projected pressure regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
