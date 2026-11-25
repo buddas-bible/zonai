@@ -3060,6 +3060,44 @@ bool fluidField2::commitIntervalTracer(
     return true;
 }
 
+bool fluidField2::commitIntervalPressureCandidate(
+    const fluidDetail::intervalPressureCandidate& candidate,
+    const std::vector<fluidDetail::transportPanel>& sampledPanels, double weightSum,
+    std::span<fluidObstacleForce2> feedback )
+{
+    if( !tracerEnabled_ ) return false;
+    if( !volumeSourceValid_ || candidate.u.size() != u_.size() || candidate.v.size() != v_.size() ||
+        candidate.pressure.size() != pressure_.size() || candidate.component.size() != pressure_.size() ||
+        candidate.feedback.size() != frozenPressureObstacles_.size() || feedback.size() != candidate.feedback.size() )
+        throw std::invalid_argument( "fluidField2: invalid interval pressure candidate extent or history" );
+    if( candidate.uncoveredEndpointFaces != 0 ) return false;
+    const auto finite = []( float value ) { return std::isfinite( value ); };
+    if( !std::all_of( candidate.u.begin(), candidate.u.end(), finite ) ||
+        !std::all_of( candidate.v.begin(), candidate.v.end(), finite ) ||
+        !std::all_of( candidate.pressure.begin(), candidate.pressure.end(), finite ) )
+        throw std::invalid_argument( "fluidField2: nonfinite interval pressure candidate" );
+    for( const auto& load : candidate.feedback )
+        if( !IsFinite( load.force ) || !std::isfinite( load.torque ) )
+            throw std::invalid_argument( "fluidField2: nonfinite interval feedback" );
+
+    const auto transport = fluidDetail::prepareIntervalPressureTransport( width_, height_, cellSize_,
+        frozenPressureTimeStep_, previousCellFluidFraction_, cellFluidFraction_, candidate );
+    if( !transport ) return false;
+    // Allocate every replacement before scalar commit. The existing
+    // complete-only scalar entry cannot modify state on failure.
+    auto u = candidate.u, v = candidate.v, pressure = candidate.pressure;
+    const auto loads = candidate.feedback;
+    if( !commitIntervalTracer( transport->startVolume, transport->repair,
+        transport->original.mapping, sampledPanels, weightSum ) ) return false;
+
+    // No allocation, callback or potentially throwing operation follows
+    // successful scalar commit. This is a logical single-thread transaction.
+    static_assert( std::is_nothrow_copy_assignable_v<fluidObstacleForce2> );
+    u_.swap( u ); v_.swap( v ); pressure_.swap( pressure );
+    for( std::size_t i = 0; i < feedback.size(); ++i ) feedback[i] = loads[i];
+    return true;
+}
+
 void fluidField2::step( float timeStep, std::span<const fluidCircleObstacle2> obstacles,
     std::span<fluidObstacleForce2> feedback, int pressureIterations )
 {
