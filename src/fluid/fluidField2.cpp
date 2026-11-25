@@ -2685,6 +2685,31 @@ vec2 fluidField2::getAdvectionFaceMomentum() const noexcept
     return { static_cast<float>( sumU * mass ), static_cast<float>( sumV * mass ) };
 }
 
+void fluidField2::advectSemiLagrangian( float timeStep )
+{
+    // 기존 반 라그랑주 이류: 읽기 전용 source로부터 face별 역추적.
+    std::fill( nextU_.begin(), nextU_.end(), 0.0f );
+    std::fill( nextV_.begin(), nextV_.end(), 0.0f );
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+        {
+            const vec2 point = origin_ + cellSize_ * vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
+            const vec2 previous = point - timeStep * sampleFrom( u_, v_, point );
+            nextU_[uIndex( x, y )] = sampleFrom( u_, v_, previous ).x;
+        }
+
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+        {
+            const vec2 point = origin_ + cellSize_ * vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
+            const vec2 previous = point - timeStep * sampleFrom( u_, v_, point );
+            nextV_[vIndex( x, y )] = sampleFrom( u_, v_, previous ).y;
+        }
+
+    u_.swap( nextU_ );
+    v_.swap( nextV_ );
+}
+
 void fluidField2::advectConservative( float timeStep )
 {
     // 고정된 현재 face 개방율에 대해 U/V dual control volume의 flux-form upwind 이류.
@@ -3227,27 +3252,7 @@ void fluidField2::step( float timeStep, std::span<const fluidShapeObstacle2> obs
     if( conservativeAdvectionEnabled_ ) advectConservative( timeStep );
     else
     {
-        // 기존 반 라그랑주 이류: 읽기 전용 source로부터 face별 역추적.
-        std::fill( nextU_.begin(), nextU_.end(), 0.0f );
-    std::fill( nextV_.begin(), nextV_.end(), 0.0f );
-    for( int y = 0; y < height_; ++y )
-        for( int x = 1; x < width_; ++x )
-        {
-            const vec2 point = origin_ + cellSize_ * vec2{ static_cast<float>( x ), static_cast<float>( y ) + 0.5f };
-            const vec2 previous = point - timeStep * sampleFrom( u_, v_, point );
-            nextU_[uIndex( x, y )] = sampleFrom( u_, v_, previous ).x;
-        }
-
-    for( int y = 1; y < height_; ++y )
-        for( int x = 0; x < width_; ++x )
-        {
-            const vec2 point = origin_ + cellSize_ * vec2{ static_cast<float>( x ) + 0.5f, static_cast<float>( y ) };
-            const vec2 previous = point - timeStep * sampleFrom( u_, v_, point );
-            nextV_[vIndex( x, y )] = sampleFrom( u_, v_, previous ).y;
-        }
-
-        u_.swap( nextU_ );
-        v_.swap( nextV_ );
+        advectSemiLagrangian( timeStep );
         advectionStats_.substeps = 1;
     }
     if( determinismStageObserver_ ) determinismStageObserver_( *this, 6 );
