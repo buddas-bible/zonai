@@ -1541,7 +1541,7 @@ struct fluidStateTraceProbe2
             !before.volumeSourceValid_ || dt <= 0.0 )
             throw std::runtime_error( key + " invalid frozen geometry history" );
         using response = fluidField2::coupledBodyResponse;
-        struct edge { int first, second; double a, velocity; bool isU; int index; };
+        using edge = fluidDetail::intervalPressureEdge;
         std::vector<double> meanU( before.u_.size() ), meanV( before.v_.size() ), fraction( n );
         std::vector<response> coefficients( n * owners );
         fluidField2 geometry = before;
@@ -1799,11 +1799,7 @@ struct fluidStateTraceProbe2
         std::vector<double> sums( n );
         const auto zeroMean = [&]( std::vector<double>& v )
         {
-            std::fill( sums.begin(), sums.end(), 0.0 );
-            for( std::size_t i = 0; i < n; ++i )
-                if( parent[i] >= 0 ) sums[parent[i]] += v[i];
-            for( std::size_t i = 0; i < n; ++i )
-                if( parent[i] >= 0 ) v[i] -= sums[parent[i]] / count[parent[i]];
+            fluidDetail::projectIntervalPressureGauge( v, parent, count, sums );
         };
         const double scale = h * h / dt;
         for( std::size_t i = 0; i < n; ++i ) rhs[i] = -scale * rawDivergence[i];
@@ -1872,12 +1868,7 @@ struct fluidStateTraceProbe2
         };
         const auto multiply = [&]( const std::vector<double>& p, std::vector<double>& out )
         {
-            std::fill( out.begin(), out.end(), 0.0 );
-            for( const auto& e : edges )
-            {
-                const double d = e.a * ( p[e.first] - p[e.second] );
-                out[e.first] += d; out[e.second] -= d;
-            }
+            fluidDetail::multiplyIntervalPressureGraph( edges, p, out );
             if( skipFixedBodyProducts ) return;
             transpose( p );
             for( std::size_t i = 0; i < n; ++i )
@@ -3119,6 +3110,24 @@ struct fluidStateTraceProbe2
         catch( const std::runtime_error& ) { breakdownRejected = true; }
         if( !breakdownRejected ) throw std::runtime_error( "R4bj invalid operator accepted" );
         std::puts( "R4bj projected pressure regressions passed" );
+
+        // Disconnected components, a singleton and an inactive cell.
+        const std::vector<int> graphParent{ 0, 0, 2, 2, 4, -1 };
+        const std::vector<int> graphCount{ 2, 0, 2, 0, 1, 0 };
+        std::vector<double> graphPressure{ 4.0, 2.0, -1.0, 3.0, 8.0, 7.0 };
+        std::vector<double> graphSums( 6, 99.0 ), graphProduct( 6, 99.0 );
+        const std::vector<fluidDetail::intervalPressureEdge> graphEdges{
+            { 0, 1, 0.5, 0.0, true, 1 }, { 2, 3, 2.0, 0.0, false, 2 } };
+        fluidDetail::projectIntervalPressureGauge( graphPressure, graphParent, graphCount, graphSums );
+        if( graphPressure != std::vector<double>{ 1.0, -1.0, -2.0, 2.0, 0.0, 7.0 } )
+            throw std::runtime_error( "R4bk disconnected graph gauge regression" );
+        fluidDetail::multiplyIntervalPressureGraph( graphEdges, graphPressure, graphProduct );
+        if( graphProduct != std::vector<double>{ 1.0, -1.0, -8.0, 8.0, 0.0, 0.0 } )
+            throw std::runtime_error( "R4bk weighted graph multiply regression" );
+        fluidDetail::projectIntervalPressureGauge( graphPressure, graphParent, graphCount, graphSums );
+        if( graphPressure != std::vector<double>{ 1.0, -1.0, -2.0, 2.0, 0.0, 7.0 } )
+            throw std::runtime_error( "R4bk gauge scratch reuse regression" );
+        std::puts( "R4bk interval pressure graph regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
