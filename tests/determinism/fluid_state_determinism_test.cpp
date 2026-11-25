@@ -3164,6 +3164,30 @@ struct fluidStateTraceProbe2
             cycleTransaction.tracerMass_ != std::vector<double>( 4 ) || cycleTransaction.tracerStats_.substeps != 11 )
             throw std::runtime_error( "R4cb unserved transport changed transaction" );
         std::puts( "R4cb atomic field candidate transaction regressions passed" );
+
+        fluidDetail::intervalPressureStepOptions coupledStepOptions;
+        coupledStepOptions.linear.responseScale = 1.0;
+        bool coupledStepRejected = false;
+        const auto transactionBeforePressure = transaction.pressure_;
+        const auto transactionBeforeMass = transaction.tracerMass_;
+        const auto transactionBeforeU = transaction.u_, transactionBeforeV = transaction.v_;
+        try
+        {
+            (void)transaction.solveAndCommitIntervalPressure( coupledStepOptions, transaction.pressure_,
+                transactionFeedback, transactionFeedback );
+        }
+        catch( const std::invalid_argument& ) { coupledStepRejected = true; }
+        if( !coupledStepRejected || transaction.pressure_ != transactionBeforePressure ||
+            transaction.tracerMass_ != transactionBeforeMass || transaction.u_ != transactionBeforeU ||
+            transaction.v_ != transactionBeforeV || transactionFeedback[0].torque != 4.0f )
+            throw std::runtime_error( "R4cc unsupported coupled step changed state" );
+        transaction.tracerEnabled_ = false;
+        if( transaction.solveAndCommitIntervalPressure( {}, {}, transactionFeedback, transactionFeedback ) ||
+            transaction.pressure_ != transactionBeforePressure || transaction.tracerMass_ != transactionBeforeMass ||
+            transaction.u_ != transactionBeforeU || transaction.v_ != transactionBeforeV ||
+            transactionFeedback[0].torque != 4.0f )
+            throw std::runtime_error( "R4cc disabled integrated step changed state" );
+        std::puts( "R4cc integrated field solve rejection regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
@@ -4199,8 +4223,42 @@ struct fluidStateTraceProbe2
             const auto pressureEnd = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
             if( timing ) timing->pressureMs = elapsedMs( pressureStart, pressureEnd );
             if( optimized && !timing )
+            {
                 auditClosingTransportRepair( forward, startFraction, candidate, dt, index,
                     committed->tracerAudit, trace );
+                // Exercise the complete library entry on matched independent
+                // copies at the first interval and the historical repair case.
+                if( index == 43 || index == 64 )
+                {
+                    fluidField2 integrated = forward, staged = forward;
+                    integrated.tracerEnabled_ = staged.tracerEnabled_ = true;
+                    integrated.tracerMass_.resize( startFraction.size() );
+                    for( std::size_t j = 0; j < startFraction.size(); ++j )
+                        integrated.tracerMass_[j] = area * startFraction[j] * ( 1.0 + ( j % 7 ) / 8.0 );
+                    staged.tracerMass_ = integrated.tracerMass_;
+                    std::vector<fluidObstacleForce2> integratedFeedback( candidate.feedback.size() ),
+                        stagedFeedback( candidate.feedback.size() );
+                    const fluidDetail::intervalPressureStepOptions options;
+                    if( !integrated.solveAndCommitIntervalPressure( options, laggedField.pressure_,
+                            laggedLoad, integratedFeedback ) ||
+                        !staged.commitIntervalPressureCandidate( candidate, candidate.geometricPanels,
+                            candidate.geometricWeightSum, stagedFeedback ) ||
+                        integrated.u_ != staged.u_ || integrated.v_ != staged.v_ ||
+                        integrated.pressure_ != staged.pressure_ || integrated.tracerMass_ != staged.tracerMass_ ||
+                        integrated.tracerStats_.substeps != staged.tracerStats_.substeps ||
+                        integrated.cellFluidFraction_ != forward.cellFluidFraction_ ||
+                        integrated.previousCellFluidFraction_ != forward.previousCellFluidFraction_ ||
+                        integrated.uOpenFraction_ != forward.uOpenFraction_ ||
+                        integrated.vOpenFraction_ != forward.vOpenFraction_ )
+                        throw std::runtime_error( "R4cc integrated interval differs from staged reference" );
+                    for( std::size_t j = 0; j < integratedFeedback.size(); ++j )
+                        if( integratedFeedback[j].force.x != stagedFeedback[j].force.x ||
+                            integratedFeedback[j].force.y != stagedFeedback[j].force.y ||
+                            integratedFeedback[j].torque != stagedFeedback[j].torque )
+                            throw std::runtime_error( "R4cc integrated feedback differs" );
+                    std::printf( "R4cc integrated interval%d matches staged reference\n", index );
+                }
+            }
             // R4al: isolate the negative modeled volume on the exact
             // accepted optimized input. Probe strict solves without
             // committing either alternative or changing trace coverage.
