@@ -3215,6 +3215,13 @@ struct fluidStateTraceProbe2
         std::vector<double> uniform( n ), ledger( n ), panelVolume( n ), incoming( n );
         for( std::size_t i = 0; i < n; ++i )
             uniform[i] = ledger[i] = area * candidate.geometricPanels.front().startFraction[i];
+        // R4az: matched alternative consumes the same face schedule using
+        // the carried modeled volume, not a reset to geometric capacity.
+        auto modeledMass = seed, modeledUniform = uniform;
+        std::vector<double> modeledCapacity( n );
+        double modeledUnserved = 0.0, modeledZeroCapacityOutgoing = 0.0;
+        double maxModeledUniformError = 0.0, maxModeledGeometryError = 0.0;
+        int modeledLimited = 0;
         double uniformInitialMass = 0.0;
         for( double value : uniform ) uniformInitialMass += value;
         double panelGeometryL1 = 0.0, maxPanelGeometryError = 0.0;
@@ -3232,6 +3239,7 @@ struct fluidStateTraceProbe2
                 throw std::runtime_error( "R4ax invalid sampled panel" );
             std::fill( outgoing.begin(), outgoing.end(), 0.0 );
             std::fill( incoming.begin(), incoming.end(), 0.0 );
+            modeledCapacity = ledger;
             for( std::size_t i = 0; i < n; ++i ) panelVolume[i] = area * panel.startFraction[i];
             for( std::size_t j = 0; j < mapping.size(); ++j )
             {
@@ -3249,11 +3257,21 @@ struct fluidStateTraceProbe2
             }
             std::vector<double> remaining = mass, received( n );
             std::vector<double> uniformRemaining = uniform, uniformReceived( n );
+            std::vector<double> modeledRemaining = modeledMass, modeledReceived( n );
+            std::vector<double> modeledUniformRemaining = modeledUniform, modeledUniformReceived( n );
             for( std::size_t i = 0; i < n; ++i )
             {
                 const double capacity = area * panel.startFraction[i];
                 if( capacity < 0.0 || capacity > area || !std::isfinite( capacity ) )
                     throw std::runtime_error( "R4ax invalid geometric capacity" );
+                if( !std::isfinite( modeledCapacity[i] ) || modeledCapacity[i] < 0.0 )
+                    throw std::runtime_error( "R4az negative or invalid carried start volume" );
+                if( outgoing[i] > modeledCapacity[i] )
+                {
+                    ++modeledLimited;
+                    modeledUnserved += outgoing[i] - modeledCapacity[i];
+                    if( modeledCapacity[i] == 0.0 ) modeledZeroCapacityOutgoing += outgoing[i];
+                }
                 if( outgoing[i] > capacity )
                 {
                     ++limitedDonors;
@@ -3268,6 +3286,18 @@ struct fluidStateTraceProbe2
                 if( amount == 0.0 ) continue;
                 const int donor = amount > 0.0 ? edge.first : edge.second;
                 const int recipient = amount > 0.0 ? edge.second : edge.first;
+                const double modelCapacity = modeledCapacity[donor];
+                if( modelCapacity > 0.0 )
+                {
+                    const double ratio = std::abs( amount ) /
+                        std::max( modelCapacity, outgoing[donor] );
+                    const double movedModel = std::min( modeledRemaining[donor], modeledMass[donor] * ratio );
+                    modeledRemaining[donor] -= movedModel; modeledReceived[recipient] += movedModel;
+                    const double movedUniform = std::min( modeledUniformRemaining[donor],
+                        modeledUniform[donor] * ratio );
+                    modeledUniformRemaining[donor] -= movedUniform;
+                    modeledUniformReceived[recipient] += movedUniform;
+                }
                 const double capacity = area * panel.startFraction[donor];
                 if( capacity <= 0.0 ) continue;
                 const double request = mass[donor] * ( std::abs( amount ) /
@@ -3287,6 +3317,16 @@ struct fluidStateTraceProbe2
                     throw std::runtime_error( "R4ax invalid geometric scalar mass" );
                 uniform[i] = uniformRemaining[i] + uniformReceived[i];
                 const double endVolume = area * endFraction[i];
+                modeledMass[i] = modeledRemaining[i] + modeledReceived[i];
+                modeledUniform[i] = modeledUniformRemaining[i] + modeledUniformReceived[i];
+                if( !std::isfinite( modeledMass[i] ) || modeledMass[i] < 0.0 ||
+                    !std::isfinite( modeledUniform[i] ) || modeledUniform[i] < 0.0 ||
+                    !std::isfinite( ledger[i] ) || ledger[i] < 0.0 )
+                    throw std::runtime_error( "R4az invalid modeled mass or intermediate volume" );
+                maxModeledUniformError = std::max( maxModeledUniformError,
+                    std::abs( modeledUniform[i] - ledger[i] ) );
+                maxModeledGeometryError = std::max( maxModeledGeometryError,
+                    std::abs( modeledUniform[i] - endVolume ) );
                 const double localError = std::abs( panelVolume[i] - endVolume );
                 panelGeometryL1 += localError;
                 maxPanelGeometryError = std::max( maxPanelGeometryError, localError );
@@ -3335,6 +3375,29 @@ struct fluidStateTraceProbe2
             ledgerError += std::abs( ledger[i] - repair.ledger[i] );
             if( volume == 0.0 ) uniformTrapped += uniform[i];
         }
+        double modelMassTotal = 0.0, modelUniformTotal = 0.0, modelTrapped = 0.0;
+        double modelUniformTrapped = 0.0, modelUniformEndL1 = 0.0, modelPeak = 0.0, modelDeltaL1 = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            const double volume = area * field.cellFluidFraction_[i];
+            modelMassTotal += modeledMass[i]; modelUniformTotal += modeledUniform[i];
+            modelUniformEndL1 += std::abs( modeledUniform[i] - volume );
+            modelDeltaL1 += std::abs( modeledMass[i] - mass[i] );
+            if( volume == 0.0 )
+            {
+                modelTrapped += modeledMass[i]; modelUniformTrapped += modeledUniform[i];
+            }
+            else modelPeak = std::max( modelPeak, modeledMass[i] / volume );
+        }
+        const double modelMassError = modelMassTotal - initialMass;
+        const double modelUniformMassError = modelUniformTotal - uniformInitialMass;
+        if( std::abs( modelMassError ) > 1.0e-12 * std::max( 1.0, initialMass ) ||
+            std::abs( modelUniformMassError ) > 1.0e-12 * std::max( 1.0, uniformInitialMass ) )
+            throw std::runtime_error( "R4az modeled capacity mass conservation failed" );
+        // With no donor limiting, a uniform scalar should reproduce the
+        // integrated volume, not necessarily the independently sampled geometry.
+        if( modeledLimited == 0 && maxModeledUniformError > 1.0e-12 * area )
+            throw std::runtime_error( "R4az uniform scalar failed modeled volume identity" );
         const double uniformMassError = uniformTotal - uniformInitialMass;
         if( std::abs( uniformMassError ) > 1.0e-12 * std::max( 1.0, uniformInitialMass ) ||
             ledgerError > 1.0e-12 * std::max( 1.0, uniformInitialMass ) )
@@ -3360,6 +3423,24 @@ struct fluidStateTraceProbe2
         emit( ".maxUniformConcentration", maxUniformConcentration );
         emit( ".uniformTrapped", uniformTrapped ); emit( ".uniformEndL1", uniformEndL1 );
         emit( ".uniformMassError", uniformMassError ); emit( ".ledgerError", ledgerError );
+        emit( ".modeledLimited", modeledLimited );
+        emit( ".modeledUnserved", modeledUnserved );
+        emit( ".modeledZeroCapacityOutgoing", modeledZeroCapacityOutgoing );
+        emit( ".modeledUniformError", maxModeledUniformError );
+        emit( ".modeledGeometryError", maxModeledGeometryError );
+        emit( ".modeledUniformTrapped", modelUniformTrapped );
+        emit( ".modeledTrapped", modelTrapped );
+        emit( ".modeledUniformEndL1", modelUniformEndL1 );
+        emit( ".modeledMassError", modelMassError );
+        emit( ".modeledUniformMassError", modelUniformMassError );
+        emit( ".modeledPeak", modelPeak ); emit( ".modeledDeltaL1", modelDeltaL1 );
+        std::printf( "R4az interval%d limited %d unserved %.17g zeroCapacityOutgoing %.17g "
+            "uniformModelError %.17g uniformGeometryError %.17g uniformTrapped %.17g "
+            "trapped %.17g uniformEndL1 %.17g massError %.17g uniformMassError %.17g "
+            "peak %.17g deltaL1 %.17g\n", index, modeledLimited, modeledUnserved,
+            modeledZeroCapacityOutgoing, maxModeledUniformError, maxModeledGeometryError,
+            modelUniformTrapped, modelTrapped, modelUniformEndL1, modelMassError,
+            modelUniformMassError, modelPeak, modelDeltaL1 );
         std::printf( "R4ay interval%d panelGeometryL1 %.17g maxPanelError %.17g intermediateNegative %.17g "
             "maxUniformError %.17g maxUniformConcentration %.17g uniformTrapped %.17g "
             "uniformEndL1 %.17g uniformMassError %.17g ledgerError %.17g\n", index, panelGeometryL1,
