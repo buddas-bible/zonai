@@ -1549,29 +1549,15 @@ struct fluidStateTraceProbe2
         geometry.setCoupledPressureWarmStartEnabled( false );
         geometry.setCoupledPressureWarmStartProbeEnabled( false );
         std::vector<fluidShapeObstacle2> poses( finish.begin(), finish.end() );
-        std::vector<float> angle( owners ), omega( owners );
-        for( std::size_t i = 0; i < owners; ++i )
-        {
-            angle[i] = deterministicAtan2( start[i].transform.rotation.s, start[i].transform.rotation.c );
-            const float endAngle = deterministicAtan2( finish[i].transform.rotation.s, finish[i].transform.rotation.c );
-            omega[i] = std::remainder( endAngle - angle[i], 2.0f * std::numbers::pi_v<float> ) /
-                before.frozenPressureTimeStep_;
-        }
+        const auto motion = fluidDetail::prepareIntervalPressurePoseMotion( start, finish,
+            before.frozenPressureTimeStep_ );
         fluidField2 panelGeometry = geometry;
         std::vector<transportPanel> transportPanels;
         const auto setPose = [&]( fluidField2& target, float alpha )
         {
-            for( std::size_t i = 0; i < owners; ++i )
-            {
-                poses[i].transform.position = start[i].transform.position +
-                    alpha * ( finish[i].transform.position - start[i].transform.position );
-                poses[i].transform.rotation = rot2::FromRadians(
-                    angle[i] + omega[i] * before.frozenPressureTimeStep_ * alpha );
-                poses[i].center = start[i].center + alpha * ( finish[i].center - start[i].center );
-            }
-            target.updateObstacles( poses );
-            target.updateCutCellGeometry( poses );
-            if( !target.cutCellTransition_.usedDisjointAnalyticGeometry )
+            fluidDetail::sampleIntervalPressurePoses( start, finish, motion,
+                before.frozenPressureTimeStep_, alpha, poses );
+            if( !target.rebuildIntervalPressureGeometry( poses ) )
                 throw std::runtime_error( key + " nonanalytic quadrature geometry" );
         };
 
@@ -3179,6 +3165,53 @@ struct fluidStateTraceProbe2
         catch( const std::invalid_argument& ) { coverageExtentRejected = true; }
         if( !coverageExtentRejected ) throw std::runtime_error( "R4br invalid sample extent accepted" );
         std::puts( "R4br interval geometry coverage regressions passed" );
+
+        // A rotation crossing the signed-pi branch must follow the short
+        // arc; geometry metadata and endpoint velocities remain frozen.
+        std::vector<fluidShapeObstacle2> poseStart( 2 ), poseFinish( 2 );
+        poseStart[0].transform.position = { 0.0f, 2.0f };
+        poseStart[0].center = { 1.0f, 3.0f };
+        poseStart[0].transform.rotation = rot2::FromRadians( 3.0f );
+        poseFinish[0].geometry = circle2{ {}, 0.25f };
+        poseFinish[0].transform.position = { 4.0f, 6.0f };
+        poseFinish[0].center = { 5.0f, 7.0f };
+        poseFinish[0].transform.rotation = rot2::FromRadians( -3.0f );
+        poseFinish[0].linearVelocity = { 2.0f, -1.0f };
+        poseFinish[0].angularVelocity = 4.0f;
+        poseFinish[0].inverseMass = 0.5f;
+        poseFinish[0].inverseInertia = 0.25f;
+        poseStart[1].transform.rotation = poseFinish[1].transform.rotation = rot2::FromRadians( 0.0f );
+        constexpr float poseDt = 0.5f, poseAlpha = 0.25f;
+        const auto poseMotion = fluidDetail::prepareIntervalPressurePoseMotion( poseStart, poseFinish, poseDt );
+        auto poseSample = poseFinish;
+        fluidDetail::sampleIntervalPressurePoses( poseStart, poseFinish, poseMotion, poseDt, poseAlpha, poseSample );
+        const float referenceAngle = deterministicAtan2( poseStart[0].transform.rotation.s, poseStart[0].transform.rotation.c );
+        const float referenceEnd = deterministicAtan2( poseFinish[0].transform.rotation.s, poseFinish[0].transform.rotation.c );
+        const float referenceOmega = std::remainder( referenceEnd - referenceAngle,
+            2.0f * std::numbers::pi_v<float> ) / poseDt;
+        const auto referenceRotation = rot2::FromRadians( referenceAngle + referenceOmega * poseDt * poseAlpha );
+        if( poseMotion[0].angle != referenceAngle || poseMotion[0].omega != referenceOmega ||
+            !( poseMotion[0].omega > 0.0f && poseMotion[0].omega < 1.0f ) ||
+            poseSample[0].transform.position.x != 1.0f || poseSample[0].transform.position.y != 3.0f ||
+            poseSample[0].center.x != 2.0f || poseSample[0].center.y != 4.0f ||
+            poseSample[0].transform.rotation.s != referenceRotation.s ||
+            poseSample[0].transform.rotation.c != referenceRotation.c ||
+            poseSample[0].linearVelocity.x != 2.0f || poseSample[0].linearVelocity.y != -1.0f ||
+            poseSample[0].angularVelocity != 4.0f || poseSample[0].inverseMass != 0.5f ||
+            poseSample[0].inverseInertia != 0.25f ||
+            std::get<circle2>( poseSample[0].geometry ).radius != 0.25f || poseMotion[1].omega != 0.0f )
+            throw std::runtime_error( "R4bs interval pose interpolation regression" );
+        bool poseExtentRejected = false, poseAlphaRejected = false;
+        try { (void)fluidDetail::prepareIntervalPressurePoseMotion( poseStart, {}, poseDt ); }
+        catch( const std::invalid_argument& ) { poseExtentRejected = true; }
+        try
+        {
+            fluidDetail::sampleIntervalPressurePoses( poseStart, poseFinish, poseMotion, poseDt, 1.5f, poseSample );
+        }
+        catch( const std::invalid_argument& ) { poseAlphaRejected = true; }
+        if( !poseExtentRejected || !poseAlphaRejected )
+            throw std::runtime_error( "R4bs invalid pose history accepted" );
+        std::puts( "R4bs interval pose regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
