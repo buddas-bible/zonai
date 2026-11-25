@@ -2374,6 +2374,80 @@ fluidDetail::intervalPressureDefect fluidField2::evaluateIntervalPressureDefect(
     return state;
 }
 
+fluidDetail::intervalPressureDefectResult fluidField2::correctIntervalPressureDefect(
+    const fluidDetail::intervalPressureOperator& op, std::span<const double> pressure,
+    std::span<const fluidObstacleForce2> baselineFeedback, int targetIndex, int correctionBudget ) const
+{
+    const std::size_t n = cellFluidFraction_.size();
+    const double dt = frozenPressureTimeStep_;
+    if( correctionBudget < 0 || correctionBudget > 3 || !volumeSourceValid_ ||
+        pressure.size() != n || op.graph.parent.size() != n ||
+        baselineFeedback.size() != frozenPressureObstacles_.size() )
+        throw std::invalid_argument( "interval pressure: invalid defect correction input" );
+    fluidField2 defectGeometry = *this;
+    defectGeometry.setPrePressureSnapshotObserver( {} );
+    defectGeometry.determinismStageObserver_ = {};
+    const auto evaluateDefect = [&]( const std::vector<double>& trialPressure )
+    {
+        return evaluateIntervalPressureDefect( defectGeometry, op, trialPressure, baselineFeedback, targetIndex );
+    };
+    fluidDetail::intervalPressureDefectResult result;
+    result.pressure.assign( pressure.begin(), pressure.end() );
+    auto current = evaluateDefect( result.pressure );
+    if( !current.analytic || current.unsupported != 0.0 )
+        throw std::runtime_error( "interval pressure: baseline trial lacks interval graph support" );
+    result.initialGap = current.rawL1;
+    result.defectEvaluations = 1;
+    result.passes.reserve( static_cast<std::size_t>( correctionBudget + 1 ) );
+    // The actual endpoint derivative is only approximated by the averaged
+    // operator. Accept only a supported trial reducing both defect norms.
+    for( int pass = 0; pass <= correctionBudget; ++pass )
+    {
+        int steps = 0, trials = 0;
+        double acceptedStep = 0.0, relativeSquared = 0.0;
+        if( pass > 0 && !result.stalled )
+        {
+            const auto solvedCorrection = fluidDetail::solveIntervalPressureCorrection(
+                current.residual, op, dt );
+            const auto& correction = solvedCorrection.pressure;
+            steps = solvedCorrection.iterations;
+            relativeSquared = solvedCorrection.relativeSquared;
+            result.correctionIterations += steps;
+            // Fixed deterministic backtracking. Reject invalid geometry
+            // or any step which fails to decrease both raw L1 and
+            // projected squared defect. Do not discard unsupported rows.
+            for( double alpha : { 1.0, 0.5, 0.25, 0.125 } )
+            {
+                ++trials;
+                auto trialPressure = result.pressure;
+                for( std::size_t i = 0; i < n; ++i ) trialPressure[i] += alpha * correction[i];
+                op.project( trialPressure );
+                auto trial = evaluateDefect( trialPressure );
+                ++result.defectEvaluations;
+                if( trial.analytic && trial.unsupported == 0.0 &&
+                    trial.rawL1 < current.rawL1 && trial.squared < current.squared )
+                {
+                    result.pressure = std::move( trialPressure );
+                    current = std::move( trial );
+                    acceptedStep = alpha;
+                    break;
+                }
+            }
+            result.stalled = acceptedStep == 0.0;
+        }
+        result.passes.push_back( { current.rawL1, current.projectedL1, current.squared, current.compatibilityL1,
+            current.negativeFlux, current.peak, current.target, current.unsupported,
+            current.forceChange, current.torqueChange, current.closed, current.opened,
+            acceptedStep, steps, trials, relativeSquared, result.stalled } );
+    }
+    if( current.rawL1 > result.initialGap )
+        throw std::runtime_error( "interval pressure: accepted geometric defect increased" );
+    result.final = std::move( current );
+    // A rejected trial or PCG multiply may have overwritten force scratch.
+    op.transpose( result.pressure );
+    return result;
+}
+
 void fluidField2::remapExposedFaces()
 {
     // 새로 열린 fluid-fluid face가 이전 rigid boundary의 속도를 그대로 상속하지 않도록
