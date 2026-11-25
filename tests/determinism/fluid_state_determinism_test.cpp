@@ -2787,11 +2787,18 @@ struct fluidStateTraceProbe2
         }
     }
 
+    struct persistentTracerAudit
+    {
+        std::vector<double> original, repaired;
+        double initialMass = 0.0;
+        int intervals = 0;
+    };
     struct forwardEndpointState
     {
         fluidField2 field;
         std::vector<fluidShapeObstacle2> poses;
         std::vector<fluidObstacleForce2> feedback;
+        persistentTracerAudit tracerAudit{};
     };
 
     // R4x: localize the minimum supported ledger volume without changing
@@ -3087,7 +3094,8 @@ struct fluidStateTraceProbe2
     // repaired transport ledger without feeding it back into pressure/MAC.
     static void auditRepairedTracerTransport( const fluidField2& field,
         const std::vector<float>& startFraction, const continuationPressure& candidate,
-        const std::vector<transportRepairFace>& original, const transportRepairResult& repair, int index )
+        const std::vector<transportRepairFace>& original, const transportRepairResult& repair, int index,
+        persistentTracerAudit& history, std::string& trace )
     {
         const double area = static_cast<double>( field.cellSize_ ) * field.cellSize_;
         const std::size_t n = startFraction.size();
@@ -3102,8 +3110,10 @@ struct fluidStateTraceProbe2
             copy.tracerMass_[i] = area * startFraction[i] * ( 1.0 + ( i % 7 ) / 8.0 );
             source[i] = area * ( static_cast<double>( field.cellFluidFraction_[i] ) - startFraction[i] );
         }
-        const auto consume = [&]( const std::vector<transportRepairFace>& faces, const char* suffix )
+        const auto consume = [&]( const std::vector<transportRepairFace>& faces, const char* suffix,
+            const std::vector<double>* seed = nullptr )
         {
+            if( seed ) copy.tracerMass_ = *seed;
             intervalTransport state{
                 std::vector<double>( field.u_.size() ), std::vector<double>( field.v_.size() ),
                 std::vector<double>( field.u_.size() ), std::vector<double>( field.v_.size() ) };
@@ -3165,11 +3175,68 @@ struct fluidStateTraceProbe2
                 "uniformModelGap %.17g uniformGeometryGap %.17g\n",
                 index, mode, deltaL1, closedBefore, closedAfter, modelGap, geometryGap );
         }
+        // R4ar: seed once, then carry both scalar histories independently
+        // through the accepted common pressure/World trajectory.
+        if( history.intervals == 0 )
+        {
+            history.original = copy.tracerMass_;
+            history.repaired = history.original;
+            for( double mass : history.original ) history.initialMass += mass;
+        }
+        if( index != 43 + history.intervals || history.original.size() != n ||
+            history.repaired.size() != n )
+            throw std::runtime_error( "R4ar missing persistent tracer history" );
+        auto nextOriginal = consume( original, ".persistentOriginal", &history.original )[1];
+        auto nextRepaired = consume( repair.faces, ".persistentRepaired", &history.repaired )[1];
+        if( repair.changedFaces == 0 && history.original == history.repaired &&
+            nextOriginal != nextRepaired )
+            throw std::runtime_error( "R4ar identical input transport diverged" );
+        history.original = std::move( nextOriginal );
+        history.repaired = std::move( nextRepaired );
+        ++history.intervals;
+        double massOriginal = 0.0, massRepaired = 0.0, trappedOriginal = 0.0, trappedRepaired = 0.0;
+        double peakOriginal = 0.0, peakRepaired = 0.0, deltaL1 = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            const double a = history.original[i], b = history.repaired[i];
+            massOriginal += a; massRepaired += b;
+            deltaL1 += std::abs( a - b );
+            const double volume = area * field.cellFluidFraction_[i];
+            if( volume == 0.0 ) { trappedOriginal += a; trappedRepaired += b; }
+            else
+            {
+                peakOriginal = std::max( peakOriginal, a / volume );
+                peakRepaired = std::max( peakRepaired, b / volume );
+            }
+        }
+        const double errorOriginal = massOriginal - history.initialMass;
+        const double errorRepaired = massRepaired - history.initialMass;
+        if( std::abs( errorOriginal ) > 1.0e-12 * std::max( 1.0, history.initialMass ) ||
+            std::abs( errorRepaired ) > 1.0e-12 * std::max( 1.0, history.initialMass ) )
+            throw std::runtime_error( "R4ar cumulative tracer mass conservation failed" );
+        const std::string key = "forwardPersistentTracer.interval" + std::to_string( index );
+        const auto emit = [&]( const char* suffix, double value )
+        {
+            if( !std::isfinite( value ) ) throw std::runtime_error( key + suffix + " nonfinite tracer audit" );
+            appendScalar( trace, key + suffix, value );
+        };
+        emit( ".deltaL1", deltaL1 ); emit( ".originalMassError", errorOriginal );
+        emit( ".repairedMassError", errorRepaired ); emit( ".originalTrapped", trappedOriginal );
+        emit( ".repairedTrapped", trappedRepaired ); emit( ".originalPeakConcentration", peakOriginal );
+        emit( ".repairedPeakConcentration", peakRepaired );
+        if( history.intervals == 64 )
+        {
+            appendVector( trace, key + ".originalMass", history.original );
+            appendVector( trace, key + ".repairedMass", history.repaired );
+        }
+        std::printf( "R4ar interval%d deltaL1 %.17g massErrors %.17g/%.17g trapped %.17g/%.17g "
+            "peakConcentration %.17g/%.17g\n", index, deltaL1, errorOriginal, errorRepaired,
+            trappedOriginal, trappedRepaired, peakOriginal, peakRepaired );
     }
 
     static void auditClosingTransportRepair( const fluidField2& field,
         const std::vector<float>& startFraction, const continuationPressure& candidate,
-        float dt, int index )
+        float dt, int index, persistentTracerAudit& history, std::string& trace )
     {
         const double h = field.cellSize_, area = h * h;
         std::vector<double> start( startFraction.size() ), endpoint( start.size() );
@@ -3199,7 +3266,7 @@ struct fluidStateTraceProbe2
         if( !result ) throw std::runtime_error( "R4ap unsupported closing transport repair" );
         if( index == 64 && result->repaired != 1 )
             throw std::runtime_error( "R4ap historical deficit not repaired" );
-        auditRepairedTracerTransport( field, startFraction, candidate, faces, *result, index );
+        auditRepairedTracerTransport( field, startFraction, candidate, faces, *result, index, history, trace );
         std::printf( "R4ap interval%d repaired %d changedFaces %d reduction %.17g conservationError %.17g\n",
             index, result->repaired, result->changedFaces, result->reduction, result->conservationError );
     }
@@ -3334,7 +3401,8 @@ struct fluidStateTraceProbe2
             const auto pressureEnd = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
             if( timing ) timing->pressureMs = elapsedMs( pressureStart, pressureEnd );
             if( optimized && !timing )
-                auditClosingTransportRepair( forward, startFraction, candidate, dt, index );
+                auditClosingTransportRepair( forward, startFraction, candidate, dt, index,
+                    committed->tracerAudit, trace );
             // R4al: isolate the negative modeled volume on the exact
             // accepted optimized input. Probe strict solves without
             // committing either alternative or changing trace coverage.
