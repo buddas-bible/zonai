@@ -1,0 +1,13 @@
+# R4k — independent forward predictor, frozen MAC trial
+
+Base: [R4j #377](https://github.com/buddas-bible/zonai/pull/377), 942c3aaff0740923821037b4d285b9668150301b. Required R4j engine comparison passed 7,827,523 Fluid rows and 25,596 engine math samples; external libm diagnostic still fails. The full-response candidate removes the observed spike and negative modeled volume across four lagged intervals, but endpoint continuity worsens.
+
+## Implementation
+
+At each of the four full-response lagged trajectory starts (43–46), independently initialize a fresh actual Sandbox World from the same captured start pose/velocity/mass/COM. Step twice-substepped World with zero pressure to predict the endpoint. Rebuild analytic start and predicted geometry on a private field copy, keep the incoming frozen pre-pressure MAC trial velocity, assemble the existing mean-aperture full-response operator over the predicted forward interval (64 midpoints, 16 endpoint refinement levels), and evaluate the candidate. Apply the selected load once in a second fresh World initialized at the identical start. Rebuild measured corrected geometry. The lagged path is unchanged and the independent trial never commits to it.
+
+Retain the accepted signed interval flux volume ledger and graph component labels. Compare the actual corrected endpoint against the ledger: raw L1, maximum local residual, projected L1/squared residual, compatibility, unsupported cell count/volume, modeled negative volume, and predicted endpoint gap. Report candidate modeled defect, initial linear true residual and iteration count, interval peak and feedback/COM. Do not silently discard unsupported volume. Preserve previous trace rows, add 19 scalars + 24 body scalars per interval = 172 exact rows; expected 7,827,695 Fluid rows.
+
+## Acceptance and limits
+
+Both OS producers, strict comparison, full CMake and actual result review are required. This is only the first R4k geometry/load audit with a frozen incoming trial velocity; it is not a consistent forward advection or persistent forward integrator. Predicted-open endpoint faces are not a corrected endpoint velocity field; no endpoint continuity claim. No tracer, drag, contact or joint constraints in this experiment. No timing/performance claim, no production solver/default/tolerance changes, master unchanged. The lagged load is only a reference for pressure diagnostics, not ground truth. Report any support/solver failure rather than falling back. If measured closure is inadequate, investigate a simpler stable game-oriented model before adding repeated predictor iterations.
