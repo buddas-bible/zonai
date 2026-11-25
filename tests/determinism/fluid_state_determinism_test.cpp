@@ -2787,6 +2787,7 @@ struct fluidStateTraceProbe2
         }
     }
 
+    static constexpr int optimizedContinuationIntervals = 240;
     struct persistentTracerAudit
     {
         std::vector<double> original, repaired;
@@ -3274,7 +3275,7 @@ struct fluidStateTraceProbe2
         emit( ".repairedMassError", errorRepaired ); emit( ".originalTrapped", trappedOriginal );
         emit( ".repairedTrapped", trappedRepaired ); emit( ".originalPeakConcentration", peakOriginal );
         emit( ".repairedPeakConcentration", peakRepaired );
-        if( history.intervals == 64 )
+        if( history.intervals == 64 || history.intervals == optimizedContinuationIntervals )
         {
             appendVector( trace, key + ".originalMass", history.original );
             appendVector( trace, key + ".repairedMass", history.repaired );
@@ -4648,7 +4649,7 @@ struct fluidStateTraceProbe2
         std::string& trace, bool staggered = false, int benchmarkRepeat = -1, bool optimized = false )
     {
         constexpr int first = 43;
-        const int intervals = optimized ? 64 : 16;
+        const int intervals = optimized ? optimizedContinuationIntervals : 16;
         if( benchmarkRepeat >= 0 && !staggered )
             throw std::runtime_error( "R4ae timing requires staggered trajectory" );
         const float dt = initial.frozenPressureTimeStep_;
