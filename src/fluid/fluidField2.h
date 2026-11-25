@@ -26,6 +26,8 @@ struct intervalPressureGeometryIntegral;
 struct intervalPressureGeometryPreparation;
 struct intervalPressureLinearOptions;
 struct intervalPressureLinearState;
+struct intervalPressureOperator;
+struct intervalPressureDefect;
 }
 
 
@@ -848,6 +850,11 @@ private:
     [[nodiscard]] fluidDetail::intervalPressureLinearState solvePreparedIntervalPressure(
         const fluidDetail::intervalPressureGeometryIntegral& integral,
         const fluidDetail::intervalPressureLinearOptions& options, std::span<const float> seed ) const;
+    // Evaluate one counterfactual endpoint from frozen poses on a scratch field.
+    [[nodiscard]] fluidDetail::intervalPressureDefect evaluateIntervalPressureDefect(
+        fluidField2& defectGeometry, const fluidDetail::intervalPressureOperator& op,
+        std::span<const double> pressure, std::span<const fluidObstacleForce2> baselineFeedback,
+        int targetIndex ) const;
     void remapExposedFaces();
     [[nodiscard]] float advectionUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float advectionVOpen( int x, int y ) const noexcept;
