@@ -1500,8 +1500,10 @@ struct fluidStateTraceProbe2
         double relativeSquaredTolerance = 1.0e-16, bool warmStart = false,
         std::span<const float> previousForwardPressure = {}, bool captureEndpoint = false,
         bool volumeWeightedCompatibility = false, bool skipFixedBodyProducts = false,
-        double closingVolumeRelativeTolerance = 0.0 )
+        double closingVolumeRelativeTolerance = 0.0, bool refineEndpointFaces = false )
     {
+        if( refineEndpointFaces && ( !adaptiveEndpoint || !captureEndpoint || responseScale != 0.0 ) )
+            throw std::runtime_error( key + " invalid endpoint-face refinement fixture" );
         if( closingVolumeRelativeTolerance != 0.0 &&
             ( !std::isfinite( closingVolumeRelativeTolerance ) || closingVolumeRelativeTolerance < 0.0 ||
                 !skipFixedBodyProducts || responseScale != 0.0 || !warmStart || !volumeWeightedCompatibility ) )
@@ -1577,14 +1579,33 @@ struct fluidStateTraceProbe2
         // the explicit endpoint refinement experiment is requested.
         const auto quadratureStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
         std::vector<int> missed;
+        struct missingFace { bool isU; int x, y; };
+        std::vector<missingFace> missedFaces;
         if( endpointDepth > 0 )
         {
             std::vector<bool> supported( n );
+            // R4au: cell support does not imply support of every face.
+            // Only inspect endpoint-open faces on the optimized path.
+            if( refineEndpointFaces )
+            {
+                for( int y = 0; y < before.height_; ++y )
+                    for( int x = 1; x < before.width_; ++x )
+                        if( before.cutCellUOpen( x, y ) > 0.0f ) missedFaces.push_back( { true, x, y } );
+                for( int y = 1; y < before.height_; ++y )
+                    for( int x = 0; x < before.width_; ++x )
+                        if( before.cutCellVOpen( x, y ) > 0.0f ) missedFaces.push_back( { false, x, y } );
+            }
             for( int step = 0; step < samples; ++step )
             {
                 setPose( geometry, ( step + 0.5f ) / samples );
                 for( std::size_t i = 0; i < n; ++i )
                     supported[i] = supported[i] || geometry.cellFluidFraction_[i] > 0.0f;
+                if( refineEndpointFaces )
+                    std::erase_if( missedFaces, [&]( const missingFace& f )
+                    {
+                        return ( f.isU ? geometry.cutCellUOpen( f.x, f.y ) :
+                            geometry.cutCellVOpen( f.x, f.y ) ) > 0.0f;
+                    } );
             }
             for( std::size_t i = 0; i < n; ++i )
                 if( !supported[i] && before.cellFluidFraction_[i] != before.previousCellFluidFraction_[i] )
@@ -1593,7 +1614,7 @@ struct fluidStateTraceProbe2
                 throw std::runtime_error( key + " historical midpoint coverage failure not reproduced" );
             // Skip endpoint refinement only when the uniform scan finds
             // no changed-volume cell with missing midpoint support.
-            if( adaptiveEndpoint && missed.empty() ) endpointDepth = 0;
+            if( adaptiveEndpoint && missed.empty() && missedFaces.empty() ) endpointDepth = 0;
         }
         const auto integrate = [&]( float alpha, double weight, double lo )
         {
@@ -1675,6 +1696,16 @@ struct fluidStateTraceProbe2
         for( auto& c : coefficients )
         {
             c.fx /= weightSum; c.fy /= weightSum; c.torque /= weightSum;
+        }
+        for( const auto& f : missedFaces )
+        {
+            const int index = f.isU ? before.uIndex( f.x, f.y ) : before.vIndex( f.x, f.y );
+            const double mean = ( f.isU ? meanU : meanV )[index];
+            const double end = f.isU ? before.cutCellUOpen( f.x, f.y ) : before.cutCellVOpen( f.x, f.y );
+            std::printf( "%s R4au missed endpoint %c(%d,%d) end %.17g refinedMean %.17g depth %d\n",
+                key.c_str(), f.isU ? 'U' : 'V', f.x, f.y, end, mean, endpointDepth );
+            if( !( mean > 0.0 ) )
+                throw std::runtime_error( key + " R4au endpoint-face refinement did not recover support" );
         }
         if( endpointDepth > 0 )
         {
@@ -3448,7 +3479,8 @@ struct fluidStateTraceProbe2
             captureSpaceTimeProjection( forward, laggedField, laggedLoad, scratch,
                 splitKey + ".projection", 16, splitKey + ".volume", false,
                 16, splitKey + ".topology", 0.0, &candidate, 0, true,
-                timing, optimized ? 1.0e-10 : 1.0e-16, optimized, {}, true, true, optimized );
+                timing, optimized ? 1.0e-10 : 1.0e-16, optimized, {}, true, true, optimized,
+                0.0, optimized );
             const auto pressureEnd = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
             if( timing ) timing->pressureMs = elapsedMs( pressureStart, pressureEnd );
             if( optimized && !timing )
