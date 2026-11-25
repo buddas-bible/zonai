@@ -9,15 +9,36 @@ namespace zonai::fluidDetail
 
 throughflowAudit consumeThroughflowPanel(
     const std::vector<transportRepairFace>& faces, const std::vector<double>& amounts,
-    std::vector<double>& volume, std::vector<double>& mass, std::vector<double>& uniform )
+    std::vector<double>& outputVolume, std::vector<double>& outputMass,
+    std::vector<double>& outputUniform, throughflowCommitMode mode )
 {
     constexpr int maxPasses = 8;
-    const std::size_t n = volume.size();
+    const std::size_t n = outputVolume.size();
+    if( faces.size() != amounts.size() || outputMass.size() != n || outputUniform.size() != n ||
+        &outputVolume == &outputMass || &outputVolume == &outputUniform ||
+        &outputMass == &outputUniform || &amounts == &outputVolume ||
+        &amounts == &outputMass || &amounts == &outputUniform )
+        throw std::invalid_argument( "fluid transport: mismatched or aliased arrays" );
+    if( mode != throughflowCommitMode::completeOnly && mode != throughflowCommitMode::allowPartial )
+        throw std::invalid_argument( "fluid transport: invalid commit mode" );
+    for( std::size_t i = 0; i < n; ++i )
+        if( !std::isfinite( outputVolume[i] ) || outputVolume[i] < 0.0 ||
+            !std::isfinite( outputMass[i] ) || outputMass[i] < 0.0 ||
+            !std::isfinite( outputUniform[i] ) || outputUniform[i] < 0.0 )
+            throw std::invalid_argument( "fluid transport: invalid initial state" );
     std::vector<double> pending( amounts.size() ), outgoing( n );
-    if( faces.size() != amounts.size() || mass.size() != n || uniform.size() != n )
-        throw std::runtime_error( "fluid transport: mismatched throughflow dimensions" );
     for( std::size_t j = 0; j < amounts.size(); ++j )
+    {
+        const auto& face = faces[j];
+        if( face.first < 0 || face.second < 0 || face.first == face.second ||
+            static_cast<std::size_t>( face.first ) >= n ||
+            static_cast<std::size_t>( face.second ) >= n || !std::isfinite( amounts[j] ) )
+            throw std::invalid_argument( "fluid transport: invalid face transfer" );
         pending[j] = std::abs( amounts[j] );
+    }
+    // Work on independent copies, including for partial research commits.
+    // Numerical failure must not expose a partly executed panel.
+    auto volume = outputVolume, mass = outputMass, uniform = outputUniform;
     throughflowAudit result;
     for( int pass = 0; pass < maxPasses; ++pass )
     {
@@ -28,7 +49,10 @@ throughflowAudit consumeThroughflowPanel(
             if( pending[j] == 0.0 ) continue;
             hasPending = true;
             const auto& edge = faces[j];
-            outgoing[amounts[j] > 0.0 ? edge.first : edge.second] += pending[j];
+            auto& demand = outgoing[amounts[j] > 0.0 ? edge.first : edge.second];
+            demand += pending[j];
+            if( !std::isfinite( demand ) )
+                throw std::runtime_error( "fluid transport: outgoing volume overflow" );
         }
         if( !hasPending ) break;
         ++result.passes;
@@ -69,6 +93,15 @@ throughflowAudit consumeThroughflowPanel(
         if( !progress ) break;
     }
     for( double amount : pending ) result.unserved += amount;
+    if( !std::isfinite( result.unserved ) )
+        throw std::runtime_error( "fluid transport: remaining volume overflow" );
+    result.committed = result.unserved == 0.0 || mode == throughflowCommitMode::allowPartial;
+    if( result.committed )
+    {
+        outputVolume.swap( volume );
+        outputMass.swap( mass );
+        outputUniform.swap( uniform );
+    }
     return result;
 }
 
