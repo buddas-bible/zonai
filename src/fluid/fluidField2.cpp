@@ -2290,6 +2290,90 @@ fluidDetail::intervalPressureLinearState fluidField2::solvePreparedIntervalPress
     return state;
 }
 
+fluidDetail::intervalPressureDefect fluidField2::evaluateIntervalPressureDefect(
+    fluidField2& defectGeometry, const fluidDetail::intervalPressureOperator& op,
+    std::span<const double> pressure, std::span<const fluidObstacleForce2> baselineFeedback,
+    int targetIndex ) const
+{
+    const double h = cellSize_, dt = frozenPressureTimeStep_, area = h * h;
+    const auto& finish = frozenPressureObstacles_;
+    const std::size_t n = cellFluidFraction_.size(), owners = finish.size();
+    if( &defectGeometry == this || defectGeometry.width_ != width_ || defectGeometry.height_ != height_ ||
+        !volumeSourceValid_ || !std::isfinite( h ) || h <= 0.0 || !std::isfinite( dt ) || dt <= 0.0 ||
+        previousCellFluidFraction_.size() != n || op.graph.parent.size() != n ||
+        pressure.size() != n || op.force.size() != owners || baselineFeedback.size() != owners )
+        throw std::invalid_argument( "interval pressure: invalid defect evaluation input" );
+    for( double value : pressure )
+        if( !std::isfinite( value ) )
+            throw std::invalid_argument( "interval pressure: nonfinite defect pressure" );
+    const auto& force = op.force;
+    const auto& edges = op.graph.edges;
+    const auto& parent = op.graph.parent;
+    const double responseScale = op.responseScale;
+    const bool fixedGeometry = responseScale == 0.0;
+    fluidDetail::intervalPressureDefect state;
+    state.residual.resize( n );
+    op.transpose( pressure );
+    std::vector<fluidShapeObstacle2> endpoint( finish.begin(), finish.end() );
+    for( std::size_t j = 0; j < owners; ++j )
+    {
+        const auto& f = force[j];
+        const vec2 dx{ static_cast<float>( responseScale * ( dt * dt * finish[j].inverseMass * f.fx ) ),
+            static_cast<float>( responseScale * ( dt * dt * finish[j].inverseMass * f.fy ) ) };
+        const float da = static_cast<float>( responseScale * ( dt * dt * finish[j].inverseInertia * f.torque ) );
+        if( !IsFinite( dx ) || !std::isfinite( da ) )
+            throw std::runtime_error( "interval pressure: invalid trial displacement" );
+        const rot2 delta = rot2::FromRadians( da );
+        if( !fixedGeometry )
+        {
+            endpoint[j].center = finish[j].center + dx;
+            endpoint[j].transform.position = endpoint[j].center +
+                Rotate( delta, finish[j].transform.position - finish[j].center );
+            endpoint[j].transform.rotation = delta * finish[j].transform.rotation;
+        }
+        state.forceChange = std::max( state.forceChange, std::max(
+            std::abs( f.fx - baselineFeedback[j].force.x ),
+            std::abs( f.fy - baselineFeedback[j].force.y ) ) );
+        state.torqueChange = std::max( state.torqueChange, std::abs( f.torque - baselineFeedback[j].torque ) );
+    }
+    state.analytic = defectGeometry.rebuildIntervalPressureGeometry( endpoint );
+    std::vector<double> fluxVolume( n );
+    for( std::size_t i = 0; i < n; ++i )
+        fluxVolume[i] = area * previousCellFluidFraction_[i];
+    for( const auto& e : edges )
+    {
+        const double velocity = fluidDetail::intervalFaceVelocity( e, pressure, h, dt );
+        const double transfer = fluidDetail::intervalFaceTransfer( e, velocity, h, dt );
+        fluxVolume[e.first] -= transfer;
+        fluxVolume[e.second] += transfer;
+        state.peak = std::max( state.peak, std::abs( velocity ) );
+        if( !e.isU && e.index == targetIndex ) state.target = velocity;
+    }
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        const double fraction = defectGeometry.cellFluidFraction_[i];
+        if( !std::isfinite( fraction ) || fraction < 0.0 || fraction > 1.0 ||
+            !std::isfinite( fluxVolume[i] ) )
+            throw std::runtime_error( "interval pressure: invalid trial volume" );
+        const double error = area * fraction - fluxVolume[i];
+        state.residual[i] = error;
+        state.rawL1 += std::abs( error );
+        state.negativeFlux += std::max( 0.0, -fluxVolume[i] );
+        if( parent[i] < 0 ) state.unsupported += std::abs( error );
+        state.closed += cellFluidFraction_[i] > 0.0f && fraction == 0.0;
+        state.opened += cellFluidFraction_[i] == 0.0f && fraction > 0.0;
+    }
+    const auto raw = state.residual;
+    op.project( state.residual );
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        state.compatibilityL1 += std::abs( raw[i] - state.residual[i] );
+        state.projectedL1 += std::abs( state.residual[i] );
+        state.squared += state.residual[i] * state.residual[i];
+    }
+    return state;
+}
+
 void fluidField2::remapExposedFaces()
 {
     // 새로 열린 fluid-fluid face가 이전 rigid boundary의 속도를 그대로 상속하지 않도록
