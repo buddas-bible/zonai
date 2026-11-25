@@ -1655,48 +1655,11 @@ struct fluidStateTraceProbe2
                 c.fx += weight * f.fx; c.fy += weight * f.fy; c.torque += weight * f.torque;
             }
         };
-        double weightSum = 0.0;
-        if( endpointDepth == 0 )
-        {
-            for( int step = 0; step < samples; ++step )
-                integrate( ( step + 0.5f ) / samples, 1.0, static_cast<double>( step ) / samples );
-            weightSum = samples;
-        }
-        else
-        {
-            if( samples < 2 || endpointDepth > 16 )
-                throw std::runtime_error( key + " unsupported endpoint refinement" );
-            // Subdivide only the first and last uniform panels into a
-            // dyadic sequence approaching the endpoints. All samples are
-            // interior midpoints; no artificial endpoint aperture floor.
-            const auto panel = [&]( double lo, double hi )
-            {
-                const double weight = hi - lo;
-                const float alpha = static_cast<float>( 0.5 * ( lo + hi ) );
-                if( !( alpha > 0.0f && alpha < 1.0f && weight > 0.0 ) )
-                    throw std::runtime_error( key + " invalid refined panel" );
-                integrate( alpha, weight, lo );
-                weightSum += weight;
-            };
-            const double width = 1.0 / samples;
-            double tiny = width;
-            for( int i = 0; i < endpointDepth; ++i ) tiny *= 0.5;
-            panel( 0.0, tiny );
-            for( double a = tiny; a < width; a *= 2.0 ) panel( a, 2.0 * a );
-            for( int step = 1; step < samples - 1; ++step )
-                panel( step * width, ( step + 1 ) * width );
-            for( double a = width; a > tiny; a *= 0.5 ) panel( 1.0 - a, 1.0 - 0.5 * a );
-            panel( 1.0 - tiny, 1.0 );
-            if( std::abs( weightSum - 1.0 ) > 1.0e-14 )
-                throw std::runtime_error( key + " refined quadrature weights do not sum to one" );
-        }
-        for( double& a : meanU ) a /= weightSum;
-        for( double& a : meanV ) a /= weightSum;
-        for( double& a : fraction ) a /= weightSum;
-        for( auto& c : coefficients )
-        {
-            c.fx /= weightSum; c.fy /= weightSum; c.torque /= weightSum;
-        }
+        const auto quadrature = fluidDetail::buildIntervalPressureQuadrature( samples, endpointDepth );
+        for( const auto& panel : quadrature.panels )
+            integrate( panel.alpha, panel.weight, panel.lo );
+        const double weightSum = quadrature.weightSum;
+        fluidDetail::normalizeIntervalPressureQuadrature( weightSum, meanU, meanV, fraction, coefficients );
         for( const auto& f : missedFaces )
         {
             const int index = f.isU ? before.uIndex( f.x, f.y ) : before.vIndex( f.x, f.y );
@@ -3159,6 +3122,55 @@ struct fluidStateTraceProbe2
         catch( const std::invalid_argument& ) { reconstructionRejected = true; }
         if( !reconstructionRejected ) throw std::runtime_error( "R4bp invalid reconstruction extent accepted" );
         std::puts( "R4bp interval pressure reconstruction regressions passed" );
+
+        const auto uniformQuadrature = fluidDetail::buildIntervalPressureQuadrature( 4, 0 );
+        if( uniformQuadrature.weightSum != 4.0 || uniformQuadrature.panels.size() != 4 )
+            throw std::runtime_error( "R4bq uniform quadrature size regression" );
+        for( std::size_t i = 0; i < uniformQuadrature.panels.size(); ++i )
+        {
+            const auto& panel = uniformQuadrature.panels[i];
+            if( panel.alpha != ( static_cast<float>( i ) + 0.5f ) / 4.0f ||
+                panel.weight != 1.0 || panel.lo != static_cast<double>( i ) / 4.0 )
+                throw std::runtime_error( "R4bq uniform midpoint arithmetic regression" );
+        }
+        const auto refinedQuadrature = fluidDetail::buildIntervalPressureQuadrature( 4, 2 );
+        const std::vector<double> expectedPanelWeights{ 0.0625, 0.0625, 0.125, 0.25,
+            0.25, 0.125, 0.0625, 0.0625 };
+        if( refinedQuadrature.weightSum != 1.0 || refinedQuadrature.panels.size() != expectedPanelWeights.size() )
+            throw std::runtime_error( "R4bq refined quadrature size regression" );
+        double panelStart = 0.0;
+        for( std::size_t i = 0; i < expectedPanelWeights.size(); ++i )
+        {
+            const auto& panel = refinedQuadrature.panels[i];
+            const double weight = expectedPanelWeights[i];
+            if( panel.lo != panelStart || panel.weight != weight ||
+                panel.alpha != static_cast<float>( panelStart + 0.5 * weight ) )
+                throw std::runtime_error( "R4bq refined quadrature panel order regression" );
+            panelStart += weight;
+        }
+        std::vector<double> quadratureU{ 2.0, 4.0 }, quadratureV{ 1.0 },
+            quadratureFraction{ 3.0, 0.0 };
+        std::vector<fluidDetail::intervalPressureResponse> quadratureCoefficients{{ 4.0, -2.0, 1.0 }};
+        fluidDetail::normalizeIntervalPressureQuadrature( uniformQuadrature.weightSum,
+            quadratureU, quadratureV, quadratureFraction, quadratureCoefficients );
+        if( quadratureU != std::vector<double>{ 0.5, 1.0 } ||
+            quadratureV != std::vector<double>{ 0.25 } ||
+            quadratureFraction != std::vector<double>{ 0.75, 0.0 } ||
+            quadratureCoefficients[0].fx != 1.0 || quadratureCoefficients[0].fy != -0.5 ||
+            quadratureCoefficients[0].torque != 0.25 )
+            throw std::runtime_error( "R4bq quadrature normalization regression" );
+        bool quadratureDepthRejected = false, quadratureWeightRejected = false;
+        try { (void)fluidDetail::buildIntervalPressureQuadrature( 4, 17 ); }
+        catch( const std::invalid_argument& ) { quadratureDepthRejected = true; }
+        try
+        {
+            fluidDetail::normalizeIntervalPressureQuadrature( 0.0, quadratureU, quadratureV,
+                quadratureFraction, quadratureCoefficients );
+        }
+        catch( const std::invalid_argument& ) { quadratureWeightRejected = true; }
+        if( !quadratureDepthRejected || !quadratureWeightRejected )
+            throw std::runtime_error( "R4bq invalid quadrature input accepted" );
+        std::puts( "R4bq interval quadrature regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
