@@ -272,6 +272,16 @@ struct intervalPressureLinearState
     double scale = 0.0;
 };
 
+struct intervalPressureDefect
+{
+    std::vector<double> residual;
+    double rawL1 = 0.0, projectedL1 = 0.0, squared = 0.0, compatibilityL1 = 0.0;
+    double negativeFlux = 0.0, peak = 0.0, target = 0.0, unsupported = 0.0;
+    double forceChange = 0.0, torqueChange = 0.0;
+    int closed = 0, opened = 0;
+    bool analytic = true;
+};
+
 struct intervalPressureCorrection
 {
     std::vector<double> pressure;
