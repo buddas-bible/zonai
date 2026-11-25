@@ -3032,6 +3032,51 @@ struct fluidStateTraceProbe2
         if( !candidateHistoryRejected )
             throw std::runtime_error( "R4bz invalid pressure candidate accepted" );
         std::puts( "R4bz interval candidate regressions passed" );
+
+        // A pressure-derived closing-cell deficit is repaired on a copy
+        // of the signed transfer ledger. The tracer must consume the
+        // repaired request completely and conserve its input mass.
+        const std::vector<float> transportStartFraction{ 1.0f, 0.0f },
+            transportEndFraction{ 0.0f, 1.0f };
+        fluidDetail::intervalPressureCandidate transportCandidate;
+        transportCandidate.meanU = { 0.0, 1.0, 0.0 };
+        transportCandidate.meanV.assign( 4, 0.0 );
+        transportCandidate.intervalU = { 0.0, 1.0 + small, 0.0 };
+        transportCandidate.intervalV.assign( 4, 0.0 );
+        transportCandidate.fluxVolume = { -small, 1.0 + small };
+        const auto preparedTransport = fluidDetail::prepareIntervalPressureTransport( 2, 1, 1.0, 1.0,
+            transportStartFraction, transportEndFraction, transportCandidate );
+        if( !preparedTransport || preparedTransport->repair.repaired != 1 ||
+            preparedTransport->repair.changedFaces != 1 ||
+            preparedTransport->original.faces[0].amount != 1.0 + small ||
+            preparedTransport->repair.ledger[0] < 0.0 ||
+            transportCandidate.fluxVolume != std::vector<double>{ -small, 1.0 + small } )
+            throw std::runtime_error( "R4ca candidate repair regression" );
+        const auto transported = fluidDetail::consumeHybridTransport( preparedTransport->repair,
+            preparedTransport->startVolume, { 2.0, 0.0 }, 1.0,
+            preparedTransport->original.mapping, {}, 0.0 );
+        if( !transported || transported->unserved != 0.0 ||
+            transported->volume != preparedTransport->repair.ledger ||
+            transported->mass[0] + transported->mass[1] != 2.0 )
+            throw std::runtime_error( "R4ca repaired candidate tracer conservation regression" );
+        auto excessiveCandidate = transportCandidate;
+        excessiveCandidate.intervalU[1] = 1.125;
+        excessiveCandidate.fluxVolume = { -0.125, 1.125 };
+        if( fluidDetail::prepareIntervalPressureTransport( 2, 1, 1.0, 1.0,
+            transportStartFraction, transportEndFraction, excessiveCandidate ) )
+            throw std::runtime_error( "R4ca excessive candidate deficit accepted" );
+        auto inconsistentCandidate = transportCandidate;
+        inconsistentCandidate.fluxVolume[0] = 0.0;
+        bool candidateLedgerRejected = false;
+        try
+        {
+            (void)fluidDetail::prepareIntervalPressureTransport( 2, 1, 1.0, 1.0,
+                transportStartFraction, transportEndFraction, inconsistentCandidate );
+        }
+        catch( const std::invalid_argument& ) { candidateLedgerRejected = true; }
+        if( !candidateLedgerRejected )
+            throw std::runtime_error( "R4ca inconsistent candidate ledger accepted" );
+        std::puts( "R4ca repaired pressure candidate transport regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
@@ -3917,21 +3962,12 @@ struct fluidStateTraceProbe2
         const std::vector<float>& startFraction, const continuationPressure& candidate,
         float dt, int index, persistentTracerAudit& history, std::string& trace )
     {
-        const double h = field.cellSize_, area = h * h;
-        std::vector<double> start( startFraction.size() ), endpoint( start.size() );
-        for( std::size_t i = 0; i < start.size(); ++i )
-        {
-            start[i] = area * startFraction[i];
-            endpoint[i] = area * field.cellFluidFraction_[i];
-        }
-        const auto input = fluidDetail::buildMacTransportInput( field.width_, field.height_,
-            h, static_cast<double>( dt ), candidate.meanU, candidate.meanV,
-            candidate.intervalU, candidate.intervalV );
+        const auto prepared = fluidDetail::prepareIntervalPressureTransport( field.width_, field.height_,
+            field.cellSize_, static_cast<double>( dt ), startFraction, field.cellFluidFraction_, candidate );
+        if( !prepared ) throw std::runtime_error( "R4ap unsupported closing transport repair" );
+        const auto& input = prepared->original;
         const auto& faces = input.faces;
-        if( fluidDetail::rebuildTransportLedger( start, faces ) != candidate.fluxVolume )
-            throw std::runtime_error( "R4ap baseline transport ledger differs" );
-        const auto result = fluidDetail::repairClosingTransport( start, endpoint, faces );
-        if( !result ) throw std::runtime_error( "R4ap unsupported closing transport repair" );
+        const auto* result = &prepared->repair;
         if( index == 64 && result->repaired != 1 )
             throw std::runtime_error( "R4ap historical deficit not repaired" );
         auditRepairedTracerTransport( field, startFraction, candidate, faces, *result, input.mapping, index, history, trace );
