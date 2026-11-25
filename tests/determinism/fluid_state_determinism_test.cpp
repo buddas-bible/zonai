@@ -1541,53 +1541,16 @@ struct fluidStateTraceProbe2
             !before.volumeSourceValid_ || dt <= 0.0 )
             throw std::runtime_error( key + " invalid frozen geometry history" );
         using response = fluidDetail::intervalPressureResponse;
-        fluidDetail::intervalPressureGeometryIntegral integral{
-            std::vector<double>( before.u_.size() ), std::vector<double>( before.v_.size() ),
-            std::vector<double>( n ), std::vector<response>( n * owners ), {}, 0.0 };
-        auto& [meanU, meanV, fraction, coefficients, transportPanels, weightSum] = integral;
-        fluidField2 geometry = before;
-        geometry.setPrePressureSnapshotObserver( {} );
-        setStageObserver( geometry, {} );
-        geometry.setCoupledPressureWarmStartEnabled( false );
-        geometry.setCoupledPressureWarmStartProbeEnabled( false );
-        std::vector<fluidShapeObstacle2> poses( finish.begin(), finish.end() );
-        const auto motion = fluidDetail::prepareIntervalPressurePoseMotion( start, finish,
-            before.frozenPressureTimeStep_ );
-        fluidField2 panelGeometry = geometry;
-        const auto setPose = [&]( fluidField2& target, float alpha )
-        {
-            fluidDetail::sampleIntervalPressurePoses( start, finish, motion,
-                before.frozenPressureTimeStep_, alpha, poses );
-            if( !target.rebuildIntervalPressureGeometry( poses ) )
-                throw std::runtime_error( key + " nonanalytic quadrature geometry" );
-        };
-
-        // Preserve the old midpoint arithmetic and trace exactly unless
-        // the explicit endpoint refinement experiment is requested.
+        // Includes scratch preparation as well as the ordered quadrature.
         const auto quadratureStart = timing ? benchmarkClock::now() : benchmarkClock::time_point{};
-        std::vector<int> missed;
-        std::vector<fluidDetail::intervalPressureMissingFace> missedFaces;
-        if( endpointDepth > 0 )
-        {
-            fluidDetail::intervalPressureCoverage coverage( before.width_, before.height_,
-                { before.cellFluidFraction_, before.uOpenFraction_, before.vOpenFraction_ }, refineEndpointFaces );
-            for( int step = 0; step < samples; ++step )
-            {
-                setPose( geometry, ( step + 0.5f ) / samples );
-                coverage.observe( { geometry.cellFluidFraction_, geometry.uOpenFraction_, geometry.vOpenFraction_ } );
-            }
-            missed = coverage.missingCells( before.previousCellFluidFraction_, before.cellFluidFraction_ );
-            missedFaces = coverage.missingFaces();
-            if( missed.empty() && !continuation )
-                throw std::runtime_error( key + " historical midpoint coverage failure not reproduced" );
-            // Skip endpoint refinement only when the uniform scan finds
-            // no changed-volume cell with missing midpoint support.
-            if( adaptiveEndpoint && missed.empty() && missedFaces.empty() ) endpointDepth = 0;
-        }
-        const auto quadrature = fluidDetail::buildIntervalPressureQuadrature( samples, endpointDepth );
-        before.integrateIntervalPressurePanels( geometry, panelGeometry, poses, motion, quadrature, integral );
-        if( transportPanels.size() != quadrature.panels.size() || weightSum != quadrature.weightSum )
-            throw std::runtime_error( key + " interval geometry panel schedule mismatch" );
+        auto preparedGeometry = before.prepareIntervalPressureGeometry( samples, endpointDepth,
+            adaptiveEndpoint, refineEndpointFaces );
+        auto& [meanU, meanV, fraction, coefficients, transportPanels, weightSum] = preparedGeometry.integral;
+        const auto& missed = preparedGeometry.missed;
+        const auto& missedFaces = preparedGeometry.missedFaces;
+        if( endpointDepth > 0 && missed.empty() && !continuation )
+            throw std::runtime_error( key + " historical midpoint coverage failure not reproduced" );
+        endpointDepth = preparedGeometry.endpointDepth;
         for( const auto& f : missedFaces )
         {
             const int index = f.isU ? before.uIndex( f.x, f.y ) : before.vIndex( f.x, f.y );
@@ -3187,6 +3150,18 @@ struct fluidStateTraceProbe2
         if( !poseExtentRejected || !poseAlphaRejected )
             throw std::runtime_error( "R4bs invalid pose history accepted" );
         std::puts( "R4bs interval pose regressions passed" );
+
+        // A newly constructed field has no frozen interval history.
+        // Reject preparation before creating any scratch geometry.
+        const fluidField2 noIntervalHistory( 2, 2, 1.0f );
+        bool geometryHistoryRejected = false, geometryScheduleRejected = false;
+        try { (void)noIntervalHistory.prepareIntervalPressureGeometry( 4, 0, false, false ); }
+        catch( const std::invalid_argument& ) { geometryHistoryRejected = true; }
+        try { (void)noIntervalHistory.prepareIntervalPressureGeometry( 0, 17, true, true ); }
+        catch( const std::invalid_argument& ) { geometryScheduleRejected = true; }
+        if( !geometryHistoryRejected || !geometryScheduleRejected )
+            throw std::runtime_error( "R4bu invalid geometry preparation accepted" );
+        std::puts( "R4bu interval geometry preparation regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
