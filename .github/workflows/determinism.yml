@@ -697,6 +697,38 @@ jobs:
                   assert key not in optimized and all(math.isfinite(v) and v >= 0 for v in values)
                   optimized[key] = values
           assert set(optimized) == {(i, r) for i in range(43, 283) for r in range(3)}
+
+          # R4ce emits four balanced pairs in each of the three optimized
+          # trajectory repeats. Verify coverage before publishing medians.
+          import os
+          paired_pattern = re.compile(r"R4ce timing interval=(\d+) pair=(\d+) integrated_first=(\d+) integrated_ms=([\d.]+) staged_fixture_ms=([\d.]+)")
+          paired = {}
+          for line in Path("forward-cost.log").read_text().splitlines():
+              if not line.startswith("R4ce timing "):
+                  continue
+              m = paired_pattern.fullmatch(line)
+              assert m, f"Malformed interval benchmark row: {line}"
+              i, pair, integrated_first = map(int, m.groups()[:3])
+              values = tuple(map(float, m.groups()[3:]))
+              assert all(math.isfinite(v) and v >= 0 for v in values)
+              samples = paired.setdefault(i, [])
+              assert pair == len(samples) % 4 and integrated_first == int(pair % 2 == 0)
+              samples.append(values)
+          assert set(paired) == {43, 64}
+          assert all(len(samples) == 12 for samples in paired.values())
+          report = [
+              "### R4ce matched interval pressure solve + commit (Release)",
+              "",
+              "| Interval | Pairs | Integrated median (ms) | Staged fixture median (ms) |",
+              "| --- | ---: | ---: | ---: |",
+          ]
+          for i in (43, 64):
+              integrated, staged = map(statistics.median, zip(*paired[i]))
+              print(f"R4cf interval={i} pairs=12 integrated_median_ms={integrated:.6f} staged_fixture_median_ms={staged:.6f}")
+              report.append(f"| {i} | 12 | {integrated:.6f} | {staged:.6f} |")
+          report.extend(["", "Staged timings include fixture diagnostics. These are research measurements, not a production speedup or a full World/Fluid Step benchmark."])
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
+              summary.write("\n".join(report) + "\n")
           for i in range(43, 283):
               med = [statistics.median(col) for col in zip(*(optimized[i, r] for r in range(3)))]
               print(f"R4ag interval={i}: median prepare={med[0]:.3f} ms setup={med[1]:.3f} ms quadrature={med[2]:.3f} ms linear={med[3]:.3f} ms pressure={med[4]:.3f} ms endpoint={med[5]:.3f} ms diagnostic total={med[6]:.3f} ms")
