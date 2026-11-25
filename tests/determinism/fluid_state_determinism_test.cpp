@@ -1851,58 +1851,21 @@ struct fluidStateTraceProbe2
         // response in the residual, not the averaged L/B operator.
         // Each iterate is a counterfactual pose from the original endpoint.
         const std::string defectKey = "geometryDefectCorrection." + handoffKey;
-        fluidField2 defectGeometry = before;
-        defectGeometry.setPrePressureSnapshotObserver( {} );
-        setStageObserver( defectGeometry, {} );
-        const auto evaluateDefect = [&]( const std::vector<double>& pressure )
-        {
-            return before.evaluateIntervalPressureDefect( defectGeometry, pressureOperator,
-                pressure, baselineFeedback, targetIndex );
-        };
-        // Solve P A P dp = -P(volume defect)/dt^2 with the unchanged
-        // positive operator. The real endpoint derivative is only
-        // approximated by the averaged B, so verify the actual new defect.
-        std::vector<double> correctedPressure = p;
-        auto current = evaluateDefect( correctedPressure );
-        if( !current.analytic || current.unsupported != 0.0 )
-            throw std::runtime_error( defectKey + " baseline trial lacks interval graph support" );
-        double initialGap = current.rawL1;
-        bool stalled = false;
-        int correctionIterations = 0, defectEvaluations = 1;
+        auto defect = before.correctIntervalPressureDefect( pressureOperator, p,
+            baselineFeedback, targetIndex, correctionBudget );
+        auto& correctedPressure = defect.pressure;
+        const auto& current = defect.final;
+        const double initialGap = defect.initialGap;
+        const bool stalled = defect.stalled;
+        const int correctionIterations = defect.correctionIterations, defectEvaluations = defect.defectEvaluations;
+        if( defect.passes.size() != static_cast<std::size_t>( correctionBudget + 1 ) )
+            throw std::runtime_error( defectKey + " defect pass count mismatch" );
         for( int pass = 0; pass <= correctionBudget; ++pass )
         {
-            int steps = 0, trials = 0;
-            double acceptedStep = 0.0, relativeSquared = 0.0;
-            if( pass > 0 && !stalled )
-            {
-                const auto solvedCorrection = fluidDetail::solveIntervalPressureCorrection(
-                    current.residual, pressureOperator, dt );
-                const auto& correction = solvedCorrection.pressure;
-                steps = solvedCorrection.iterations;
-                relativeSquared = solvedCorrection.relativeSquared;
-                correctionIterations += steps;
-                // Fixed deterministic backtracking. Reject invalid geometry
-                // or any step which fails to decrease both raw L1 and
-                // projected squared defect. Do not discard unsupported rows.
-                for( double alpha : { 1.0, 0.5, 0.25, 0.125 } )
-                {
-                    ++trials;
-                    auto trialPressure = correctedPressure;
-                    for( std::size_t i = 0; i < n; ++i ) trialPressure[i] += alpha * correction[i];
-                    pressureOperator.project( trialPressure );
-                    auto trial = evaluateDefect( trialPressure );
-                    ++defectEvaluations;
-                    if( trial.analytic && trial.unsupported == 0.0 &&
-                        trial.rawL1 < current.rawL1 && trial.squared < current.squared )
-                    {
-                        correctedPressure = std::move( trialPressure );
-                        current = std::move( trial );
-                        acceptedStep = alpha;
-                        break;
-                    }
-                }
-                stalled = acceptedStep == 0.0;
-            }
+            const auto& current = defect.passes[pass];
+            const int steps = current.steps, trials = current.trials;
+            const double acceptedStep = current.acceptedStep, relativeSquared = current.relativeSquared;
+            const bool stalled = current.stalled;
             const auto k = defectKey + ".pass" + std::to_string( pass );
             const auto write = [&]( const char* name, auto value )
             {
@@ -1926,11 +1889,6 @@ struct fluidStateTraceProbe2
                 current.peak, current.forceChange, current.torqueChange,
                 acceptedStep, steps, trials, static_cast<int>( stalled ) );
         }
-        if( current.rawL1 > initialGap )
-            throw std::runtime_error( defectKey + " accepted geometric defect increased" );
-        // evaluateDefect/PCG may leave force scratch from a rejected trial.
-        // Recompute the accepted pressure's feedback before World replay.
-        pressureOperator.transpose( correctedPressure );
         if( !continuation )
             captureWorldPressureResponse( before, baselineFeedback, force, trace,
                 "worldPressureResponse." + handoffKey );
@@ -3077,6 +3035,23 @@ struct fluidStateTraceProbe2
         if( !defectHistoryRejected || !defectAliasRejected )
             throw std::runtime_error( "R4bx invalid defect evaluation accepted" );
         std::puts( "R4bx interval defect evaluation regressions passed" );
+
+        bool defectBudgetRejected = false, defectCorrectionHistoryRejected = false;
+        try
+        {
+            (void)noIntervalHistory.correctIntervalPressureDefect( exactOperator,
+                exactCorrection.pressure, {}, -1, 4 );
+        }
+        catch( const std::invalid_argument& ) { defectBudgetRejected = true; }
+        try
+        {
+            (void)noIntervalHistory.correctIntervalPressureDefect( exactOperator,
+                exactCorrection.pressure, {}, -1, 0 );
+        }
+        catch( const std::invalid_argument& ) { defectCorrectionHistoryRejected = true; }
+        if( !defectBudgetRejected || !defectCorrectionHistoryRejected )
+            throw std::runtime_error( "R4by invalid defect correction accepted" );
+        std::puts( "R4by interval defect iteration regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
