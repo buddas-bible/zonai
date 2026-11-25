@@ -315,6 +315,24 @@ struct intervalPressureCandidate
     int uncoveredEndpointFaces = 0;
 };
 
+// Preserve the original canonical mapping for comparison and sampled
+// tracer transport. A successful repair conserves total interval volume,
+// but need not match every endpoint cell's geometric capacity.
+struct intervalPressureTransport
+{
+    std::vector<double> startVolume;
+    macTransportInput original;
+    transportRepairResult repair;
+};
+
+// Candidate must capture interval apertures and velocities. Endpoint
+// fractions describe the actual geometry selected for this interval.
+// No pressure, velocity or tracer mutation; unsupported repair returns
+// no result. Malformed input or inconsistent original ledger throws.
+[[nodiscard]] std::optional<intervalPressureTransport> prepareIntervalPressureTransport(
+    int width, int height, double h, double dt, std::span<const float> startFraction,
+    std::span<const float> endpointFraction, const intervalPressureCandidate& candidate );
+
 struct intervalPressureCorrection
 {
     std::vector<double> pressure;
