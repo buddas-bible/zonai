@@ -881,6 +881,13 @@ private:
         const std::vector<double>& startVolume, const fluidDetail::transportRepairResult& repair,
         const std::vector<fluidDetail::transportFaceSample>& mapping,
         const std::vector<fluidDetail::transportPanel>& sampledPanels, double weightSum );
+    // Experimental single-field transaction on matching frozen geometry.
+    // No World mutation; the caller owns interval provenance and cadence.
+    // Disabled tracer or unsupported transport leaves all outputs unchanged.
+    [[nodiscard]] bool commitIntervalPressureCandidate(
+        const fluidDetail::intervalPressureCandidate& candidate,
+        const std::vector<fluidDetail::transportPanel>& sampledPanels, double weightSum,
+        std::span<fluidObstacleForce2> feedback );
     void remapTracerSwept();
     [[nodiscard]] float cutCellUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellVOpen( int x, int y ) const noexcept;
