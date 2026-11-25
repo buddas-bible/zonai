@@ -829,6 +829,8 @@ private:
     static float sampleComponent( const std::vector<float>& values, int width, int height, float x, float y ) noexcept;
     void updateObstacles( std::span<const fluidShapeObstacle2> obstacles );
     void updateCutCellGeometry( std::span<const fluidShapeObstacle2> obstacles );
+    // Rebuild one quadrature pose on an isolated scratch field.
+    [[nodiscard]] bool rebuildIntervalPressureGeometry( std::span<const fluidShapeObstacle2> obstacles );
     void remapExposedFaces();
     [[nodiscard]] float advectionUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float advectionVOpen( int x, int y ) const noexcept;
