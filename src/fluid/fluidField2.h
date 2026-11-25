@@ -906,6 +906,12 @@ private:
     [[nodiscard]] bool solveAndCommitIntervalPressure(
         const fluidDetail::intervalPressureStepOptions& options, std::span<const float> seed,
         std::span<const fluidObstacleForce2> baselineFeedback, std::span<fluidObstacleForce2> feedback );
+    // Return a solved isolated endpoint, or no value on unsupported transport.
+    // Source is already advected on start geometry; World publication is external.
+    [[nodiscard]] std::optional<fluidField2> solveIntervalPressureEndpoint( float timeStep,
+        std::span<const fluidShapeObstacle2> start, std::span<const fluidShapeObstacle2> finish,
+        const fluidDetail::intervalPressureStepOptions& options, std::span<const float> seed,
+        std::span<const fluidObstacleForce2> baselineFeedback, std::span<fluidObstacleForce2> feedback ) const;
     void remapTracerSwept();
     [[nodiscard]] float cutCellUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellVOpen( int x, int y ) const noexcept;
