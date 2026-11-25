@@ -8,6 +8,22 @@
 namespace zonai::fluidDetail
 {
 
+struct intervalPressurePanel
+{
+    float alpha;
+    double weight, lo;
+};
+
+struct intervalPressureQuadrature
+{
+    std::vector<intervalPressurePanel> panels;
+    double weightSum = 0.0;
+};
+
+// Uniform midpoint mode retains unit weights and binary32 midpoint
+// arithmetic. Refined mode uses dyadic subdivisions of the end panels.
+[[nodiscard]] intervalPressureQuadrature buildIntervalPressureQuadrature( int samples, int endpointDepth );
+
 // Canonical interior face order and metadata retained for endpoint reconstruction.
 struct intervalPressureEdge
 {
@@ -96,6 +112,11 @@ struct intervalPressureResponse
     double fy = 0.0;
     double torque = 0.0;
 };
+
+// Normalize accumulated cut-cell fractions, apertures and body coefficients
+// with the same panel weight sum. No geometry or field mutation.
+void normalizeIntervalPressureQuadrature( double weightSum, std::span<double> meanU,
+    std::span<double> meanV, std::span<double> fraction, std::span<intervalPressureResponse> coefficients );
 
 struct intervalPressureBody
 {
