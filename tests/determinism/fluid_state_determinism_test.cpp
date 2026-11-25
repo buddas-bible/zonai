@@ -3942,7 +3942,8 @@ struct fluidStateTraceProbe2
         const fluidField2& initialProjection, std::span<const fluidObstacleForce2> initialLoad,
         std::string& trace, bool staggered = false, int benchmarkRepeat = -1, bool optimized = false )
     {
-        constexpr int first = 43, intervals = 16;
+        constexpr int first = 43;
+        const int intervals = optimized ? 64 : 16;
         if( benchmarkRepeat >= 0 && !staggered )
             throw std::runtime_error( "R4ae timing requires staggered trajectory" );
         const float dt = initial.frozenPressureTimeStep_;
@@ -4014,6 +4015,75 @@ struct fluidStateTraceProbe2
             captureForwardPredictor( pre, seed, poses, load, trace, first + step,
                 0.75, 0, 16, true, benchmarkRepeat >= 0 ? &timing : nullptr,
                 1.0e-10, true, nullptr, true, &state, staggered, optimized );
+            if( optimized )
+            {
+                // R4ah: audit actual carried state, not the predictor's
+                // intermediate interval field. Keep body impulse accounting
+                // separate from the fluid momentum reconstruction proxy.
+                const std::string auditKey = "forwardExtendedAudit.interval" + std::to_string( first + step );
+                double peakU = 0.0, peakV = 0.0, peakBodySpeed = 0.0, peakOmega = 0.0;
+                double peakAppliedForce = 0.0, peakNextForce = 0.0;
+                double maxLinearImpulseError = 0.0, maxAngularImpulseError = 0.0;
+                double bodyKineticEnergy = 0.0, volume = 0.0;
+                const auto peakComponent = [&]( const std::vector<float>& values )
+                {
+                    double peak = 0.0;
+                    for( float v : values )
+                    {
+                        if( !std::isfinite( v ) ) throw std::runtime_error( auditKey + " nonfinite committed MAC" );
+                        peak = std::max( peak, std::abs( static_cast<double>( v ) ) );
+                    }
+                    return peak;
+                };
+                peakU = peakComponent( state.field.u_ );
+                peakV = peakComponent( state.field.v_ );
+                const auto norm = []( vec2 v )
+                {
+                    const double x = v.x, y = v.y;
+                    return std::sqrt( x * x + y * y );
+                };
+                for( std::size_t j = 0; j < poses.size(); ++j )
+                {
+                    const auto& before = poses[j];
+                    const auto& after = state.poses[j];
+                    if( before.inverseMass <= 0.0f || before.inverseInertia <= 0.0f )
+                        throw std::runtime_error( auditKey + " invalid free-body inertia" );
+                    const double mass = 1.0 / before.inverseMass, inertia = 1.0 / before.inverseInertia;
+                    const double speed = norm( after.linearVelocity ), omega = after.angularVelocity;
+                    peakBodySpeed = std::max( peakBodySpeed, speed );
+                    peakOmega = std::max( peakOmega, std::abs( omega ) );
+                    peakAppliedForce = std::max( peakAppliedForce, norm( load[j].force ) );
+                    peakNextForce = std::max( peakNextForce, norm( state.feedback[j].force ) );
+                    const double ex = mass * ( static_cast<double>( after.linearVelocity.x ) - before.linearVelocity.x ) -
+                        static_cast<double>( dt ) * load[j].force.x;
+                    const double ey = mass * ( static_cast<double>( after.linearVelocity.y ) - before.linearVelocity.y ) -
+                        static_cast<double>( dt ) * load[j].force.y;
+                    maxLinearImpulseError = std::max( maxLinearImpulseError, std::sqrt( ex * ex + ey * ey ) );
+                    maxAngularImpulseError = std::max( maxAngularImpulseError, std::abs(
+                        inertia * ( omega - before.angularVelocity ) - static_cast<double>( dt ) * load[j].torque ) );
+                    bodyKineticEnergy += 0.5 * ( mass * speed * speed + inertia * omega * omega );
+                }
+                const double h = state.field.cellSize_;
+                for( float fraction : state.field.cellFluidFraction_ ) volume += h * h * fraction;
+                const double cflBound = dt * ( peakU + peakV ) / h;
+                const auto emit = [&]( const char* suffix, double value )
+                {
+                    if( !std::isfinite( value ) ) throw std::runtime_error( auditKey + suffix + " nonfinite audit" );
+                    appendScalar( trace, auditKey + suffix, value );
+                };
+                emit( ".elapsed", static_cast<double>( dt ) * ( step + 1 ) );
+                emit( ".peakU", peakU ); emit( ".peakV", peakV ); emit( ".cflBound", cflBound );
+                emit( ".peakBodySpeed", peakBodySpeed ); emit( ".peakOmega", peakOmega );
+                emit( ".peakAppliedForce", peakAppliedForce ); emit( ".peakNextForce", peakNextForce );
+                emit( ".maxLinearImpulseError", maxLinearImpulseError );
+                emit( ".maxAngularImpulseError", maxAngularImpulseError );
+                emit( ".bodyKineticEnergy", bodyKineticEnergy ); emit( ".geometricVolume", volume );
+                std::printf( "%s elapsed %.9g s peak U/V %.9g/%.9g CFL bound %.9g body speed %.9g omega %.9g "
+                    "applied/next force %.9g/%.9g impulse errors %.9g/%.9g body energy %.9g volume %.9g\n",
+                    auditKey.c_str(), static_cast<double>( dt ) * ( step + 1 ), peakU, peakV, cflBound,
+                    peakBodySpeed, peakOmega, peakAppliedForce, peakNextForce, maxLinearImpulseError,
+                    maxAngularImpulseError, bodyKineticEnergy, volume );
+            }
             if( benchmarkRepeat >= 0 )
             {
                 const double total = elapsedMs( stepStart, prepared ) + timing.totalMs;
