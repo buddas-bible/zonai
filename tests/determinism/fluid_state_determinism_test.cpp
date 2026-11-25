@@ -2829,7 +2829,7 @@ struct fluidStateTraceProbe2
     static constexpr int optimizedContinuationIntervals = 240;
     struct persistentTracerAudit
     {
-        std::vector<double> original, repaired, adaptive;
+        std::vector<double> original, repaired, adaptive, hybrid;
         double initialMass = 0.0;
         int intervals = 0;
     };
@@ -3597,6 +3597,131 @@ struct fluidStateTraceProbe2
             transferError, massError, peak, trapped, deltaL1, equalPanels.unserved );
     }
 
+    // R4bb: carry a fourth, hybrid scalar history. Use one interval
+    // transfer when the donor bound holds; otherwise reuse the pressure
+    // quadrature schedule with bounded throughflow. Reset modeled volume
+    // to actual start geometry each interval, not scalar mass.
+    static void auditHybridTracer( const fluidField2& field,
+        const continuationPressure& candidate, const transportRepairResult& repair,
+        const std::vector<double>& startVolume, const std::vector<double>& outgoing,
+        int adaptivePanels, const tracerPanelResult& adaptiveResult, persistentTracerAudit& history,
+        int index, std::string& trace )
+    {
+        const std::size_t n = startVolume.size();
+        const double h = field.cellSize_, area = h * h;
+        if( history.intervals == 0 ) history.hybrid = history.repaired;
+        if( history.hybrid.size() != n )
+            throw std::runtime_error( "R4bb missing hybrid tracer history" );
+        auto mass = history.hybrid;
+        auto volume = startVolume, uniform = startVolume;
+        int panels = 1, maxPasses = 1, totalPasses = 1;
+        double unserved = 0.0, transferError = 0.0;
+        if( adaptivePanels == 1 )
+        {
+            auto single = consumeTracerPanels( mass, startVolume, repair.ledger,
+                outgoing, repair.faces, 1 );
+            if( single.unserved != 0.0 )
+                throw std::runtime_error( "R4bb unsupported fast path" );
+            mass = std::move( single.mass );
+            volume = repair.ledger;
+            if( history.hybrid == history.adaptive && mass != adaptiveResult.mass )
+                throw std::runtime_error( "R4bb identical fast-path input differs" );
+        }
+        else
+        {
+            if( candidate.geometricPanels.empty() || candidate.geometricWeightSum <= 0.0 )
+                throw std::runtime_error( "R4bb missing sampled panel geometry" );
+            struct faceMapping { bool isU; int face; double mean; };
+            std::vector<faceMapping> mapping;
+            const auto collect = [&]( bool isU, int x, int y )
+            {
+                const int f = isU ? field.uIndex( x, y ) : field.vIndex( x, y );
+                const double mean = ( isU ? candidate.meanU : candidate.meanV )[f];
+                if( mean <= 0.0 ) return;
+                const int a = field.cellIndex( x - ( isU ? 1 : 0 ), y - ( isU ? 0 : 1 ) );
+                const int b = field.cellIndex( x, y );
+                if( mapping.size() >= repair.faces.size() ||
+                    repair.faces[mapping.size()].first != a || repair.faces[mapping.size()].second != b )
+                    throw std::runtime_error( "R4bb face mapping differs" );
+                mapping.push_back( { isU, f, mean } );
+            };
+            for( int y = 0; y < field.height_; ++y )
+                for( int x = 1; x < field.width_; ++x ) collect( true, x, y );
+            for( int y = 1; y < field.height_; ++y )
+                for( int x = 0; x < field.width_; ++x ) collect( false, x, y );
+            if( mapping.size() != repair.faces.size() )
+                throw std::runtime_error( "R4bb missing mapped faces" );
+            panels = static_cast<int>( candidate.geometricPanels.size() );
+            maxPasses = totalPasses = 0;
+            std::vector<double> amounts( mapping.size() ), sums( mapping.size() );
+            for( const auto& panel : candidate.geometricPanels )
+            {
+                for( std::size_t j = 0; j < mapping.size(); ++j )
+                {
+                    const auto& f = mapping[j];
+                    const double aperture = ( f.isU ? panel.uOpen : panel.vOpen )[f.face];
+                    amounts[j] = repair.faces[j].amount *
+                        ( ( panel.weight / candidate.geometricWeightSum ) * aperture / f.mean );
+                    if( !std::isfinite( amounts[j] ) )
+                        throw std::runtime_error( "R4bb nonfinite sampled transfer" );
+                    sums[j] += amounts[j];
+                }
+                const auto result = consumeThroughflowPanel( repair.faces, amounts, volume, mass, uniform );
+                maxPasses = std::max( maxPasses, result.passes );
+                totalPasses += result.passes;
+                unserved += result.unserved;
+                for( std::size_t i = 0; i < n; ++i )
+                    if( std::abs( uniform[i] - volume[i] ) > 1.0e-12 * area )
+                        throw std::runtime_error( "R4bb uniform executed volume identity failed" );
+            }
+            double transferL1 = 0.0;
+            for( std::size_t j = 0; j < sums.size(); ++j )
+            {
+                transferError += std::abs( sums[j] - repair.faces[j].amount );
+                transferL1 += std::abs( repair.faces[j].amount );
+            }
+            if( transferError > 1.0e-12 * std::max( transferL1, 1.0e-12 ) )
+                throw std::runtime_error( "R4bb sampled schedule differs from interval requests" );
+        }
+        double total = 0.0, peak = 0.0, trapped = 0.0, deltaL1 = 0.0, modelGap = 0.0;
+        double totalVolume = 0.0, initialVolume = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            if( !std::isfinite( mass[i] ) || mass[i] < 0.0 ||
+                !std::isfinite( volume[i] ) || volume[i] < 0.0 )
+                throw std::runtime_error( "R4bb invalid hybrid state" );
+            total += mass[i]; totalVolume += volume[i]; initialVolume += startVolume[i];
+            modelGap += std::abs( volume[i] - repair.ledger[i] );
+            deltaL1 += std::abs( mass[i] - adaptiveResult.mass[i] );
+            const double actual = area * field.cellFluidFraction_[i];
+            if( actual > 0.0 ) peak = std::max( peak, mass[i] / actual );
+            else trapped += mass[i];
+        }
+        const double massError = total - history.initialMass;
+        const double volumeError = totalVolume - initialVolume;
+        const double volumeTolerance = 1.0e-12 * std::max( 1.0, initialVolume );
+        if( std::abs( massError ) > 1.0e-12 * std::max( 1.0, history.initialMass ) ||
+            std::abs( volumeError ) > volumeTolerance ||
+            modelGap > 2.0 * unserved + volumeTolerance )
+            throw std::runtime_error( "R4bb hybrid conservation audit failed" );
+        const std::string key = "forwardHybridTracer.interval" + std::to_string( index );
+        const auto emit = [&]( const char* suffix, double value )
+        {
+            if( !std::isfinite( value ) ) throw std::runtime_error( key + suffix + " nonfinite audit" );
+            appendScalar( trace, key + suffix, value );
+        };
+        emit( ".panels", panels ); emit( ".maxPasses", maxPasses ); emit( ".totalPasses", totalPasses );
+        emit( ".unserved", unserved ); emit( ".transferError", transferError );
+        emit( ".modelGap", modelGap ); emit( ".volumeError", volumeError ); emit( ".massError", massError );
+        emit( ".peakConcentration", peak ); emit( ".trapped", trapped ); emit( ".deltaL1", deltaL1 );
+        history.hybrid = std::move( mass );
+        if( history.intervals + 1 == optimizedContinuationIntervals )
+            appendVector( trace, key + ".mass", history.hybrid );
+        std::printf( "R4bb interval%d panels %d maxPasses %d totalPasses %d unserved %.17g "
+            "modelGap %.17g massError %.17g peak %.17g trapped %.17g deltaL1 %.17g\n", index,
+            panels, maxPasses, totalPasses, unserved, modelGap, massError, peak, trapped, deltaL1 );
+    }
+
     static void auditAdaptiveTracerPanels( const fluidField2& field,
         const std::vector<float>& startFraction, const continuationPressure& candidate,
         const transportRepairResult& repair, const std::vector<double>& nextRepaired,
@@ -3659,6 +3784,8 @@ struct fluidStateTraceProbe2
         emit( ".massError", massError ); emit( ".deltaL1", deltaL1 );
         if( panels > 1 )
             auditGeometricTracerPanels( field, candidate, repair, history.adaptive, result, index, trace );
+        auditHybridTracer( field, candidate, repair, initialVolume, outgoing, panels,
+            result, history, index, trace );
         history.adaptive = std::move( result.mass );
         if( history.intervals + 1 == optimizedContinuationIntervals )
             appendVector( trace, key + ".mass", history.adaptive );
