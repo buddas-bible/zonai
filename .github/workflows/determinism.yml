@@ -701,10 +701,46 @@ jobs:
               med = [statistics.median(col) for col in zip(*(optimized[i, r] for r in range(3)))]
               print(f"R4ag interval={i}: median prepare={med[0]:.3f} ms setup={med[1]:.3f} ms quadrature={med[2]:.3f} ms linear={med[3]:.3f} ms pressure={med[4]:.3f} ms endpoint={med[5]:.3f} ms diagnostic total={med[6]:.3f} ms")
           PY
+      - name: Measure matched scalar transport consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./build-release/tests/fluidStateDeterminismTests --benchmark-tracer > tracer-cost.log
+          python3 - <<'PY'
+          import math, re, statistics
+          from pathlib import Path
+
+          pattern = re.compile(r"R4bc timing interval=(\d+) repeat=(\d+) adaptive_panels=(\d+) hybrid_panels=(\d+) hybrid_passes=(\d+) adaptive_ms=([\d.]+) hybrid_ms=([\d.]+)")
+          rows = {}
+          for line in Path("tracer-cost.log").read_text().splitlines():
+              m = pattern.fullmatch(line)
+              if m:
+                  i, repeat, adaptive, hybrid, passes = map(int, m.groups()[:5])
+                  values = tuple(map(float, m.groups()[5:]))
+                  assert (i, repeat) not in rows
+                  assert min(adaptive, hybrid, passes) > 0
+                  assert all(math.isfinite(v) and v >= 0 for v in values)
+                  rows[i, repeat] = (adaptive, hybrid, passes, *values)
+          assert set(rows) == {(i, r) for i in range(43, 283) for r in range(7)}
+          fast = []
+          slow = []
+          for i in range(43, 283):
+              samples = [rows[i, r] for r in range(7)]
+              assert all(s[:3] == samples[0][:3] for s in samples)
+              a, h, p = samples[0][:3]
+              med = tuple(statistics.median(col) for col in zip(*(s[3:] for s in samples)))
+              (fast if a == 1 else slow).append(med)
+              if a != 1:
+                  print(f"R4bc interval={i} adaptive_panels={a} hybrid_panels={h} hybrid_passes={p} median adaptive={med[0]:.6f} ms hybrid={med[1]:.6f} ms")
+          for label, group in (("fast", fast), ("slow", slow), ("all", fast + slow)):
+              print(f"R4bc {label} intervals={len(group)} sum of interval medians: adaptive={sum(s[0] for s in group):.6f} ms hybrid={sum(s[1] for s in group):.6f} ms")
+          PY
       - name: Upload timing evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: r4p-forward-cost
-          path: forward-cost.log
+          path: |
+            forward-cost.log
+            tracer-cost.log
           retention-days: 14
