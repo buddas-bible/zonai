@@ -3219,6 +3219,22 @@ bool fluidField2::solveAndCommitIntervalPressure(
     return commitIntervalPressureCandidate( candidate, integral.transportPanels, integral.weightSum, feedback );
 }
 
+std::optional<fluidField2> fluidField2::solveIntervalPressureEndpoint( float timeStep,
+    std::span<const fluidShapeObstacle2> start, std::span<const fluidShapeObstacle2> finish,
+    const fluidDetail::intervalPressureStepOptions& options, std::span<const float> seed,
+    std::span<const fluidObstacleForce2> baselineFeedback, std::span<fluidObstacleForce2> feedback ) const
+{
+    if( !tracerEnabled_ ) return std::nullopt;
+    auto endpoint = prepareIntervalPressureEndpoint( timeStep, start, finish );
+    if( !endpoint.solveAndCommitIntervalPressure( options, seed, baselineFeedback, feedback ) )
+        return std::nullopt;
+
+    // Feedback was published by the successful field solve. Returning the
+    // accepted endpoint must not allocate or throw after that publication.
+    static_assert( std::is_nothrow_move_constructible_v<fluidField2> );
+    return std::optional<fluidField2>( std::move( endpoint ) );
+}
+
 void fluidField2::step( float timeStep, std::span<const fluidCircleObstacle2> obstacles,
     std::span<fluidObstacleForce2> feedback, int pressureIterations )
 {
