@@ -25,6 +25,7 @@ struct intervalPressureQuadrature;
 struct intervalPressureGeometryIntegral;
 struct intervalPressureGeometryPreparation;
 struct intervalPressureLinearOptions;
+struct intervalPressureStepOptions;
 struct intervalPressureLinearState;
 struct intervalPressureOperator;
 struct intervalPressureDefect;
@@ -888,6 +889,11 @@ private:
         const fluidDetail::intervalPressureCandidate& candidate,
         const std::vector<fluidDetail::transportPanel>& sampledPanels, double weightSum,
         std::span<fluidObstacleForce2> feedback );
+    // Complete field-only solve/commit for a matching predicted endpoint.
+    // Nonzero body response is not supported until World can commit too.
+    [[nodiscard]] bool solveAndCommitIntervalPressure(
+        const fluidDetail::intervalPressureStepOptions& options, std::span<const float> seed,
+        std::span<const fluidObstacleForce2> baselineFeedback, std::span<fluidObstacleForce2> feedback );
     void remapTracerSwept();
     [[nodiscard]] float cutCellUOpen( int x, int y ) const noexcept;
     [[nodiscard]] float cutCellVOpen( int x, int y ) const noexcept;
