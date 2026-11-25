@@ -531,6 +531,43 @@ void intervalPressureOperator::addDiagonal( std::span<double> diagonal ) const
     addIntervalPressureSchurDiagonal( coefficients, bodies, responseScale, diagonal );
 }
 
+std::optional<intervalPressureTransport> prepareIntervalPressureTransport(
+    int width, int height, double h, double dt, std::span<const float> startFraction,
+    std::span<const float> endpointFraction, const intervalPressureCandidate& candidate )
+{
+    auto original = buildMacTransportInput( width, height, h, dt,
+        candidate.meanU, candidate.meanV, candidate.intervalU, candidate.intervalV );
+    // buildMacTransportInput has already validated the grid and scales.
+    const std::size_t n = static_cast<std::size_t>( width ) * static_cast<std::size_t>( height );
+    const double area = h * h;
+    if( startFraction.size() != n || endpointFraction.size() != n ||
+        candidate.fluxVolume.size() != n || !std::isfinite( area ) || area <= 0.0 )
+        throw std::invalid_argument( "interval pressure: invalid transport cell extents or area" );
+    std::vector<double> start( n ), endpoint( n );
+    double startTotal = 0.0;
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        if( !std::isfinite( startFraction[i] ) || startFraction[i] < 0.0f || startFraction[i] > 1.0f ||
+            !std::isfinite( endpointFraction[i] ) || endpointFraction[i] < 0.0f || endpointFraction[i] > 1.0f )
+            throw std::invalid_argument( "interval pressure: invalid transport fraction" );
+        start[i] = area * startFraction[i];
+        endpoint[i] = area * endpointFraction[i];
+        startTotal += start[i];
+    }
+    if( !std::isfinite( startTotal ) )
+        throw std::invalid_argument( "interval pressure: transport volume overflow" );
+    if( rebuildTransportLedger( start, original.faces ) != candidate.fluxVolume )
+        throw std::invalid_argument( "interval pressure: inconsistent candidate transport ledger" );
+    auto repair = repairClosingTransport( start, endpoint, original.faces );
+    if( !repair ) return std::nullopt;
+    double repairedTotal = 0.0;
+    for( double volume : repair->ledger ) repairedTotal += volume;
+    if( !std::isfinite( repairedTotal ) ||
+        std::abs( repairedTotal - startTotal ) > 1.0e-12 * std::max( 1.0, startTotal ) )
+        return std::nullopt;
+    return intervalPressureTransport{ std::move( start ), std::move( original ), std::move( *repair ) };
+}
+
 intervalPressureCorrection solveIntervalPressureCorrection(
     std::span<const double> error, const intervalPressureOperator& op, double dt )
 {
