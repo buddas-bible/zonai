@@ -66,6 +66,57 @@ struct fluidStateTraceProbe2
             appendScalar( trace, key + "[" + std::to_string( i ) + "]", values[i] );
     }
 
+    // R4ak: a real triangular fluid sliver below the R4aj candidate
+    // threshold must not disappear just because its fraction is tiny.
+    static void checkCertifiedCellCoverage()
+    {
+        constexpr float delta = 0x1p-23f;
+        for( bool bounded : { false, true } )
+        {
+            for( float cut : { -delta, delta } )
+            {
+                // Target [0,1]^2. The diagonal edge x+y=2-cut
+                // either covers the rectangle or leaves area cut^2/2.
+                const std::array<vec2, 5> vertices{{
+                    { -1.0f, -1.0f }, { 2.0f, -1.0f }, { 2.0f, -cut },
+                    { -cut, 2.0f }, { -1.0f, 2.0f }
+                }};
+                const std::array<fluidShapeObstacle2, 2> obstacles{{
+                    { MakePolygon( vertices ), { {}, rot2::FromRadians( 0.0f ) },
+                        {}, {}, 0.0f, 0.0f, 0.0f },
+                    { circle2{ {}, 0.25f }, { { 4.0f, 4.0f }, rot2::FromRadians( 0.0f ) },
+                        { 4.0f, 4.0f }, {}, 0.0f, 0.0f, 0.0f }
+                }};
+                const auto measure = [&]( bool certified )
+                {
+                    fluidField2 field{ 8, 8, 1.0f, { -2.0f, -2.0f } };
+                    field.setCutCellProjectionEnabled( true );
+                    field.setDisjointAnalyticCutCellEnabled( true );
+                    field.setAnalyticCutCellBoundedCellAreasEnabled( bounded );
+                    field.certifiedFullCellCoverageEnabled_ = certified;
+                    field.updateObstacles( obstacles );
+                    field.updateCutCellGeometry( obstacles );
+                    if( !field.cutCellTransition_.usedDisjointAnalyticGeometry )
+                        throw std::runtime_error( "R4ak coverage fixture not analytic" );
+                    return field.cellFluidFraction_[field.cellIndex( 2, 2 )];
+                };
+                const float raw = measure( false ), certified = measure( true );
+                const double expected = cut > 0.0f ? 0.5 * static_cast<double>( cut ) * cut : 0.0;
+                std::printf( "R4ak coverage bounded %d cut %.9g raw %.17g certified %.17g expected %.17g\n",
+                    static_cast<int>( bounded ), cut, raw, certified, expected );
+                if( cut > 0.0f )
+                {
+                    if( !( raw > 0.0f && raw <= 64.0 * std::numeric_limits<double>::epsilon() &&
+                        raw == certified && std::abs( certified - expected ) <=
+                            4.0 * std::numeric_limits<double>::epsilon() ) )
+                        throw std::runtime_error( "R4ak genuine tiny sliver not preserved" );
+                }
+                else if( certified != 0.0f )
+                    throw std::runtime_error( "R4ak fully covered cell not zero" );
+            }
+        }
+    }
+
     static void setStageObserver( fluidField2& field,
         std::function<void(const fluidField2&, int)> callback )
     {
@@ -3992,6 +4043,23 @@ struct fluidStateTraceProbe2
         for( int step = 0; step < intervals; ++step )
         {
             const auto stepStart = benchmarkRepeat >= 0 ? benchmarkClock::now() : benchmarkClock::time_point{};
+            if( optimized && benchmarkRepeat < 0 && first + step == 65 )
+            {
+                // Rebuild the actual failing start pose on an independent
+                // copy with the certificate disabled; do not change state.
+                fluidField2 raw = state.field;
+                raw.certifiedFullCellCoverageEnabled_ = false;
+                raw.updateObstacles( state.poses );
+                raw.updateCutCellGeometry( state.poses );
+                const int cell = raw.cellIndex( 27, 18 );
+                const float original = raw.cellFluidFraction_[cell];
+                const float corrected = state.field.cellFluidFraction_[cell];
+                std::printf( "R4ak interval65 cell891 original %.17g corrected %.17g\n", original, corrected );
+                if( !raw.cutCellTransition_.usedDisjointAnalyticGeometry ||
+                    !( original > 0.0f && original <= 64.0 * std::numeric_limits<double>::epsilon() &&
+                        corrected == 0.0f ) )
+                    throw std::runtime_error( "R4ak interval65 full coverage regression" );
+            }
             fluidField2 pre = state.field;
             if( step > 0 )
             {
@@ -5594,6 +5662,8 @@ int main( int argc, char** argv )
             std::fprintf( stderr, "Usage: fluidStateDeterminismTests [--emit TRACE.tsv | --benchmark-forward]\n" );
             return EXIT_FAILURE;
         }
+
+        zonai::fluidStateTraceProbe2::checkCertifiedCellCoverage();
 
         std::string trace =
             runScene( "sampledCutCell", false ) + runScene( "analyticCircle", true );
