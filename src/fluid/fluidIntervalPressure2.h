@@ -191,6 +191,14 @@ struct intervalPressureGeometryIntegral
     double weightSum = 0.0;
 };
 
+struct intervalPressureGeometryPreparation
+{
+    intervalPressureGeometryIntegral integral;
+    std::vector<int> missed;
+    std::vector<intervalPressureMissingFace> missedFaces;
+    int endpointDepth = 0;
+};
+
 struct intervalPressureBody
 {
     double inverseMass = 0.0;
