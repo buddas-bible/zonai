@@ -5,6 +5,8 @@
 #include <utility>
 #include <vector>
 
+#include "fluid/fluidTransport2.h"
+
 namespace zonai
 {
 struct fluidShapeObstacle2;
@@ -177,6 +179,17 @@ struct intervalPressureResponse
 // with the same panel weight sum. No geometry or field mutation.
 void normalizeIntervalPressureQuadrature( double weightSum, std::span<double> meanU,
     std::span<double> meanV, std::span<double> fraction, std::span<intervalPressureResponse> coefficients );
+
+// Weighted geometry and traction coefficients from the same ordered
+// quadrature panels. The means are normalized, transport panels retain
+// their original weights and panel-start capacities.
+struct intervalPressureGeometryIntegral
+{
+    std::vector<double> meanU, meanV, fraction;
+    std::vector<intervalPressureResponse> coefficients;
+    std::vector<transportPanel> transportPanels;
+    double weightSum = 0.0;
+};
 
 struct intervalPressureBody
 {
