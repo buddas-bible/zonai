@@ -1541,8 +1541,10 @@ struct fluidStateTraceProbe2
             !before.volumeSourceValid_ || dt <= 0.0 )
             throw std::runtime_error( key + " invalid frozen geometry history" );
         using response = fluidDetail::intervalPressureResponse;
-        std::vector<double> meanU( before.u_.size() ), meanV( before.v_.size() ), fraction( n );
-        std::vector<response> coefficients( n * owners );
+        fluidDetail::intervalPressureGeometryIntegral integral{
+            std::vector<double>( before.u_.size() ), std::vector<double>( before.v_.size() ),
+            std::vector<double>( n ), std::vector<response>( n * owners ), {}, 0.0 };
+        auto& [meanU, meanV, fraction, coefficients, transportPanels, weightSum] = integral;
         fluidField2 geometry = before;
         geometry.setPrePressureSnapshotObserver( {} );
         setStageObserver( geometry, {} );
@@ -1552,7 +1554,6 @@ struct fluidStateTraceProbe2
         const auto motion = fluidDetail::prepareIntervalPressurePoseMotion( start, finish,
             before.frozenPressureTimeStep_ );
         fluidField2 panelGeometry = geometry;
-        std::vector<transportPanel> transportPanels;
         const auto setPose = [&]( fluidField2& target, float alpha )
         {
             fluidDetail::sampleIntervalPressurePoses( start, finish, motion,
@@ -1583,36 +1584,10 @@ struct fluidStateTraceProbe2
             // no changed-volume cell with missing midpoint support.
             if( adaptiveEndpoint && missed.empty() && missedFaces.empty() ) endpointDepth = 0;
         }
-        const auto integrate = [&]( float alpha, double weight, double lo )
-        {
-            transportPanel panel{ weight, {}, std::vector<float>( before.u_.size() ),
-                std::vector<float>( before.v_.size() ) };
-            if( lo == 0.0 ) panel.startFraction = before.previousCellFluidFraction_;
-            else
-            {
-                setPose( panelGeometry, static_cast<float>( lo ) );
-                panel.startFraction = panelGeometry.cellFluidFraction_;
-            }
-            setPose( geometry, alpha );
-            fluidDetail::accumulateIntervalPressureGeometry( geometry.width_, geometry.height_,
-                { geometry.cellFluidFraction_, geometry.uOpenFraction_, geometry.vOpenFraction_ }, weight,
-                fraction, meanU, meanV, panel.uOpen, panel.vOpen );
-            transportPanels.push_back( std::move( panel ) );
-            // Same geometry and same quadrature weight for L and B.
-            std::fill( geometry.divergence_.begin(), geometry.divergence_.end(), 0.0f );
-            if( !geometry.solveCoupledPressure( static_cast<float>( dt ), 200, poses, true ) )
-                throw std::runtime_error( key + " zero-RHS boundary assembly failed" );
-            for( const auto& f : geometry.coupledPressureScratch_.faces )
-            {
-                auto& c = coefficients[static_cast<std::size_t>( f.cell ) * owners + f.owner];
-                c.fx += weight * f.fx; c.fy += weight * f.fy; c.torque += weight * f.torque;
-            }
-        };
         const auto quadrature = fluidDetail::buildIntervalPressureQuadrature( samples, endpointDepth );
-        for( const auto& panel : quadrature.panels )
-            integrate( panel.alpha, panel.weight, panel.lo );
-        const double weightSum = quadrature.weightSum;
-        fluidDetail::normalizeIntervalPressureQuadrature( weightSum, meanU, meanV, fraction, coefficients );
+        before.integrateIntervalPressurePanels( geometry, panelGeometry, poses, motion, quadrature, integral );
+        if( transportPanels.size() != quadrature.panels.size() || weightSum != quadrature.weightSum )
+            throw std::runtime_error( key + " interval geometry panel schedule mismatch" );
         for( const auto& f : missedFaces )
         {
             const int index = f.isU ? before.uIndex( f.x, f.y ) : before.vIndex( f.x, f.y );
