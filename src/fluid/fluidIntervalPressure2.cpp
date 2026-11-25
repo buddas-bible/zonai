@@ -1,8 +1,11 @@
 #include "fluid/fluidIntervalPressure2.h"
+#include "fluid/fluidField2.h"
+#include "math/deterministicMath.h"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <string>
 #include <stdexcept>
 
@@ -50,6 +53,39 @@ intervalPressureQuadrature buildIntervalPressureQuadrature( int samples, int end
             throw std::runtime_error( "interval pressure: refined quadrature weights do not sum to one" );
     }
     return result;
+}
+
+std::vector<intervalPressurePoseMotion> prepareIntervalPressurePoseMotion(
+    std::span<const fluidShapeObstacle2> start, std::span<const fluidShapeObstacle2> finish, float dt )
+{
+    if( start.size() != finish.size() || !std::isfinite( dt ) || dt <= 0.0f )
+        throw std::invalid_argument( "interval pressure: invalid pose history" );
+    std::vector<intervalPressurePoseMotion> motion( finish.size() );
+    for( std::size_t i = 0; i < finish.size(); ++i )
+    {
+        motion[i].angle = deterministicAtan2( start[i].transform.rotation.s, start[i].transform.rotation.c );
+        const float endAngle = deterministicAtan2( finish[i].transform.rotation.s, finish[i].transform.rotation.c );
+        motion[i].omega = std::remainder( endAngle - motion[i].angle, 2.0f * std::numbers::pi_v<float> ) / dt;
+        if( !std::isfinite( motion[i].angle ) || !std::isfinite( motion[i].omega ) )
+            throw std::invalid_argument( "interval pressure: invalid angular pose history" );
+    }
+    return motion;
+}
+
+void sampleIntervalPressurePoses( std::span<const fluidShapeObstacle2> start,
+    std::span<const fluidShapeObstacle2> finish, std::span<const intervalPressurePoseMotion> motion,
+    float dt, float alpha, std::span<fluidShapeObstacle2> poses )
+{
+    if( start.size() != finish.size() || motion.size() != finish.size() || poses.size() != finish.size() ||
+        !std::isfinite( dt ) || dt <= 0.0f || !std::isfinite( alpha ) || alpha < 0.0f || alpha > 1.0f )
+        throw std::invalid_argument( "interval pressure: invalid pose sample" );
+    for( std::size_t i = 0; i < finish.size(); ++i )
+    {
+        poses[i].transform.position = start[i].transform.position +
+            alpha * ( finish[i].transform.position - start[i].transform.position );
+        poses[i].transform.rotation = rot2::FromRadians( motion[i].angle + motion[i].omega * dt * alpha );
+        poses[i].center = start[i].center + alpha * ( finish[i].center - start[i].center );
+    }
 }
 
 namespace
