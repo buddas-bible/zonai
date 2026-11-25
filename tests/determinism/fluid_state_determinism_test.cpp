@@ -1135,7 +1135,7 @@ struct fluidStateTraceProbe2
     // actual geometric rebuild after a pressure-induced pose perturbation.
     // This is a counterfactual free-body displacement, not a World step.
     static void captureGeometricConservation( const fluidField2& before,
-        const intervalTransport& transport, const std::vector<fluidField2::coupledBodyResponse>& force,
+        const intervalTransport& transport, const std::vector<fluidDetail::intervalPressureResponse>& force,
         const std::vector<double>& bodyVolume, const std::vector<double>& removedVolume,
         const std::vector<double>& correctedResidual, std::string& trace, const std::string& key,
         double responseScale = 1.0 )
@@ -1540,7 +1540,7 @@ struct fluidStateTraceProbe2
         if( samples <= 0 || owners != 3 || start.size() != owners || baselineFeedback.size() != owners ||
             !before.volumeSourceValid_ || dt <= 0.0 )
             throw std::runtime_error( key + " invalid frozen geometry history" );
-        using response = fluidField2::coupledBodyResponse;
+        using response = fluidDetail::intervalPressureResponse;
         using edge = fluidDetail::intervalPressureEdge;
         std::vector<double> meanU( before.u_.size() ), meanV( before.v_.size() ), fraction( n );
         std::vector<response> coefficients( n * owners );
@@ -1855,38 +1855,22 @@ struct fluidStateTraceProbe2
         for( std::size_t i = 0; i < n; ++i )
             compatibilityL1 += std::abs( rhs[i] + scale * rawDivergence[i] );
         std::vector<response> force( owners );
+        std::vector<fluidDetail::intervalPressureBody> bodies( owners );
+        for( std::size_t j = 0; j < owners; ++j )
+            bodies[j] = { static_cast<double>( finish[j].inverseMass ),
+                static_cast<double>( finish[j].inverseInertia ) };
         const auto transpose = [&]( const std::vector<double>& p )
         {
-            std::fill( force.begin(), force.end(), response{} );
-            for( std::size_t i = 0; i < n; ++i )
-                for( std::size_t j = 0; j < owners; ++j )
-                {
-                    const auto& c = coefficients[i * owners + j];
-                    auto& f = force[j];
-                    f.fx += c.fx * p[i]; f.fy += c.fy * p[i]; f.torque += c.torque * p[i];
-                }
+            fluidDetail::transposeIntervalPressureBodies( coefficients, p, force );
         };
         const auto multiply = [&]( const std::vector<double>& p, std::vector<double>& out )
         {
             fluidDetail::multiplyIntervalPressureGraph( edges, p, out );
             if( skipFixedBodyProducts ) return;
             transpose( p );
-            for( std::size_t i = 0; i < n; ++i )
-                for( std::size_t j = 0; j < owners; ++j )
-                {
-                    const auto& c = coefficients[i * owners + j];
-                    const auto& f = force[j];
-                    out[i] += responseScale * ( static_cast<double>( finish[j].inverseMass ) * ( c.fx * f.fx + c.fy * f.fy ) +
-                        static_cast<double>( finish[j].inverseInertia ) * c.torque * f.torque );
-                }
+            fluidDetail::addIntervalPressureSchur( coefficients, bodies, force, responseScale, out );
         };
-        for( std::size_t i = 0; i < n; ++i )
-            for( std::size_t j = 0; j < owners; ++j )
-            {
-                const auto& c = coefficients[i * owners + j];
-                diagonal[i] += responseScale * ( static_cast<double>( finish[j].inverseMass ) * ( c.fx * c.fx + c.fy * c.fy ) +
-                    static_cast<double>( finish[j].inverseInertia ) * c.torque * c.torque );
-            }
+        fluidDetail::addIntervalPressureSchurDiagonal( coefficients, bodies, responseScale, diagonal );
 
         const auto dot = [&]( const std::vector<double>& a, const std::vector<double>& b )
         {
@@ -3128,6 +3112,31 @@ struct fluidStateTraceProbe2
         if( graphPressure != std::vector<double>{ 1.0, -1.0, -2.0, 2.0, 0.0, 7.0 } )
             throw std::runtime_error( "R4bk gauge scratch reuse regression" );
         std::puts( "R4bk interval pressure graph regressions passed" );
+
+        // Two cells and two owners; the fixed owner retains traction but
+        // contributes no inverse-mass/inertia response to the Schur operator.
+        const std::vector<fluidDetail::intervalPressureResponse> bodyCoefficients{
+            { 1.0, 2.0, 3.0 }, { 2.0, 0.0, 1.0 },
+            { -1.0, 1.0, 2.0 }, { 0.0, 3.0, -2.0 } };
+        const std::vector<fluidDetail::intervalPressureBody> bodyMasses{{ 0.5, 0.25 }, { 0.0, 0.0 }};
+        const std::vector<double> bodyPressure{ 2.0, -1.0 };
+        std::vector<fluidDetail::intervalPressureResponse> bodyForce( 2, { 9.0, 9.0, 9.0 } );
+        fluidDetail::transposeIntervalPressureBodies( bodyCoefficients, bodyPressure, bodyForce );
+        if( bodyForce[0].fx != 3.0 || bodyForce[0].fy != 3.0 || bodyForce[0].torque != 4.0 ||
+            bodyForce[1].fx != 4.0 || bodyForce[1].fy != -3.0 || bodyForce[1].torque != 4.0 )
+            throw std::runtime_error( "R4bl body traction transpose regression" );
+        std::vector<double> bodyProduct{ 1.0, 2.0 }, bodyDiagonal{ 1.0, 2.0 };
+        fluidDetail::addIntervalPressureSchur( bodyCoefficients, bodyMasses, bodyForce, 0.5, bodyProduct );
+        fluidDetail::addIntervalPressureSchurDiagonal( bodyCoefficients, bodyMasses, 0.5, bodyDiagonal );
+        if( bodyProduct != std::vector<double>{ 4.75, 3.0 } ||
+            bodyDiagonal != std::vector<double>{ 3.375, 3.0 } )
+            throw std::runtime_error( "R4bl Schur product/diagonal regression" );
+        fluidDetail::addIntervalPressureSchur( bodyCoefficients, bodyMasses, bodyForce, 0.0, bodyProduct );
+        fluidDetail::addIntervalPressureSchurDiagonal( bodyCoefficients, bodyMasses, 0.0, bodyDiagonal );
+        if( bodyProduct != std::vector<double>{ 4.75, 3.0 } ||
+            bodyDiagonal != std::vector<double>{ 3.375, 3.0 } )
+            throw std::runtime_error( "R4bl fixed geometry response regression" );
+        std::puts( "R4bl interval pressure Schur regressions passed" );
     }
     // R4aw: reuse exactly the matched R4av scalar update for a carried
     // adaptive history. Pressure, geometry and signed transfers are fixed.
