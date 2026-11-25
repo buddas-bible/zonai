@@ -52,6 +52,100 @@ intervalPressureQuadrature buildIntervalPressureQuadrature( int samples, int end
     return result;
 }
 
+namespace
+{
+void validateIntervalPressureGeometrySample( int width, int height, const intervalPressureGeometrySample& sample )
+{
+    const auto maxIndex = static_cast<std::size_t>( std::numeric_limits<int>::max() );
+    if( width <= 0 || height <= 0 || width == std::numeric_limits<int>::max() ||
+        height == std::numeric_limits<int>::max() )
+        throw std::invalid_argument( "interval pressure: invalid geometry dimensions" );
+    const auto w = static_cast<std::size_t>( width ), rows = static_cast<std::size_t>( height );
+    if( w + 1 > maxIndex / rows || w > maxIndex / ( rows + 1 ) ||
+        sample.fraction.size() != w * rows || sample.uOpen.size() != ( w + 1 ) * rows ||
+        sample.vOpen.size() != w * ( rows + 1 ) )
+        throw std::invalid_argument( "interval pressure: invalid geometry extents" );
+}
+
+float intervalPressureOpen( int width, const intervalPressureGeometrySample& sample, bool isU, int x, int y )
+{
+    const int right = y * width + x, left = right - ( isU ? 1 : width );
+    if( sample.fraction[left] == 0.0f || sample.fraction[right] == 0.0f ) return 0.0f;
+    return isU ? sample.uOpen[y * ( width + 1 ) + x] : sample.vOpen[right];
+}
+}
+
+intervalPressureCoverage::intervalPressureCoverage( int width, int height,
+    const intervalPressureGeometrySample& endpoint, bool refineEndpointFaces )
+    : width_( width ), height_( height )
+{
+    validateIntervalPressureGeometrySample( width_, height_, endpoint );
+    supported_.resize( endpoint.fraction.size() );
+    if( !refineEndpointFaces ) return;
+    for( int y = 0; y < height_; ++y )
+        for( int x = 1; x < width_; ++x )
+            if( intervalPressureOpen( width_, endpoint, true, x, y ) > 0.0f )
+                missingFaces_.push_back( { true, x, y } );
+    for( int y = 1; y < height_; ++y )
+        for( int x = 0; x < width_; ++x )
+            if( intervalPressureOpen( width_, endpoint, false, x, y ) > 0.0f )
+                missingFaces_.push_back( { false, x, y } );
+}
+
+void intervalPressureCoverage::observe( const intervalPressureGeometrySample& sample )
+{
+    validateIntervalPressureGeometrySample( width_, height_, sample );
+    for( std::size_t i = 0; i < supported_.size(); ++i )
+        supported_[i] = supported_[i] || sample.fraction[i] > 0.0f;
+    std::erase_if( missingFaces_, [&]( const intervalPressureMissingFace& f )
+    {
+        return intervalPressureOpen( width_, sample, f.isU, f.x, f.y ) > 0.0f;
+    } );
+}
+
+std::vector<int> intervalPressureCoverage::missingCells( std::span<const float> previous,
+    std::span<const float> endpoint ) const
+{
+    if( previous.size() != supported_.size() || endpoint.size() != supported_.size() )
+        throw std::invalid_argument( "interval pressure: invalid coverage cell extents" );
+    std::vector<int> missed;
+    for( std::size_t i = 0; i < supported_.size(); ++i )
+        if( !supported_[i] && endpoint[i] != previous[i] )
+            missed.push_back( static_cast<int>( i ) );
+    return missed;
+}
+
+void accumulateIntervalPressureGeometry( int width, int height,
+    const intervalPressureGeometrySample& sample, double weight,
+    std::span<double> fraction, std::span<double> meanU, std::span<double> meanV,
+    std::span<float> panelU, std::span<float> panelV )
+{
+    validateIntervalPressureGeometrySample( width, height, sample );
+    if( fraction.size() != sample.fraction.size() || meanU.size() != sample.uOpen.size() ||
+        meanV.size() != sample.vOpen.size() || panelU.size() != meanU.size() || panelV.size() != meanV.size() ||
+        !std::isfinite( weight ) || weight <= 0.0 )
+        throw std::invalid_argument( "interval pressure: invalid geometry accumulation input" );
+    std::fill( panelU.begin(), panelU.end(), 0.0f );
+    std::fill( panelV.begin(), panelV.end(), 0.0f );
+    for( std::size_t i = 0; i < fraction.size(); ++i ) fraction[i] += weight * sample.fraction[i];
+    for( int y = 0; y < height; ++y )
+        for( int x = 1; x < width; ++x )
+        {
+            const int index = y * ( width + 1 ) + x;
+            const float aperture = intervalPressureOpen( width, sample, true, x, y );
+            panelU[index] = aperture;
+            meanU[index] += weight * aperture;
+        }
+    for( int y = 1; y < height; ++y )
+        for( int x = 0; x < width; ++x )
+        {
+            const int index = y * width + x;
+            const float aperture = intervalPressureOpen( width, sample, false, x, y );
+            panelV[index] = aperture;
+            meanV[index] += weight * aperture;
+        }
+}
+
 intervalPressureGraph buildIntervalPressureGraph( int width, int height,
     double h, double dt, std::span<const double> meanFraction,
     std::span<const float> previousFraction, std::span<const float> endpointFraction,
