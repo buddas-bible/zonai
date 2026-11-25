@@ -531,6 +531,74 @@ void intervalPressureOperator::addDiagonal( std::span<double> diagonal ) const
     addIntervalPressureSchurDiagonal( coefficients, bodies, responseScale, diagonal );
 }
 
+intervalPressureCorrection solveIntervalPressureCorrection(
+    std::span<const double> error, const intervalPressureOperator& op, double dt )
+{
+    const std::size_t n = op.graph.parent.size();
+    const auto& diagonal = op.graph.diagonal;
+    if( error.size() != n || diagonal.size() != n || !std::isfinite( dt ) || dt <= 0.0 )
+        throw std::invalid_argument( "interval pressure: invalid correction input" );
+    for( std::size_t i = 0; i < n; ++i )
+        if( !std::isfinite( error[i] ) || !std::isfinite( diagonal[i] ) || diagonal[i] < 0.0 )
+            throw std::invalid_argument( "interval pressure: invalid correction row" );
+    const auto dot = [&]( const std::vector<double>& a, const std::vector<double>& b )
+    {
+        double sum = 0.0;
+        for( std::size_t i = 0; i < n; ++i ) sum += a[i] * b[i];
+        return sum;
+    };
+    std::vector<double> b( n ), residual( n ), pre( n ), direction( n ), product( n );
+    for( std::size_t i = 0; i < n; ++i ) b[i] = -error[i] / ( dt * dt );
+    op.project( b );
+    residual = b;
+    const double initialSquared = dot( b, b );
+    const double limit = std::max( 1.0e-24, initialSquared * 1.0e-16 );
+    const auto applyPre = [&]()
+    {
+        for( std::size_t i = 0; i < n; ++i )
+            pre[i] = diagonal[i] > 0.0 ? residual[i] / diagonal[i] : 0.0;
+        op.project( pre );
+    };
+    std::vector<double> correction( n );
+    int steps = 0;
+    applyPre();
+    direction = pre;
+    double rz = dot( residual, pre ), norm = initialSquared;
+    for( steps = 0; steps < 2000 && norm > limit; )
+    {
+        op.multiply( direction, product ); op.project( product );
+        const double denominator = dot( direction, product );
+        if( !std::isfinite( denominator ) || denominator <= 0.0 ||
+            !std::isfinite( rz ) || rz <= 0.0 )
+            throw std::runtime_error( "interval pressure: correction PCG breakdown" );
+        const double alpha = rz / denominator;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            correction[i] += alpha * direction[i];
+            residual[i] -= alpha * product[i];
+        }
+        ++steps;
+        norm = dot( residual, residual );
+        if( !std::isfinite( norm ) ) throw std::runtime_error( "interval pressure: nonfinite correction residual" );
+        if( norm <= limit ) break;
+        applyPre();
+        const double next = dot( residual, pre ), beta = next / rz;
+        for( std::size_t i = 0; i < n; ++i ) direction[i] = pre[i] + beta * direction[i];
+        rz = next;
+    }
+    op.project( correction );
+    op.multiply( correction, product ); op.project( product );
+    double actual = 0.0;
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        const double delta = b[i] - product[i];
+        actual += delta * delta;
+    }
+    if( !std::isfinite( actual ) || actual > limit )
+        throw std::runtime_error( "interval pressure: correction true residual failed" );
+    return { std::move( correction ), steps, initialSquared > 0.0 ? actual / initialSquared : 0.0 };
+}
+
 intervalPressureResult solveIntervalPressure(
     const std::vector<double>& rhs, const intervalPressureOperator& op,
     std::span<const float> seed, bool warmStart, double dt, double relativeSquaredTolerance,
