@@ -7,6 +7,7 @@
 
 #include "collision/constants.h"
 #include "collision/distance2.h"
+#include "math/deterministicMath.h"
 
 namespace zonai
 {
@@ -337,7 +338,7 @@ double ComputeSweepSpeedBound( const shapeProxy2& proxy, const sweep2& sweep )
 {
     const double dx = static_cast<double>( sweep.c2.x ) - sweep.c1.x;
     const double dy = static_cast<double>( sweep.c2.y ) - sweep.c1.y;
-    const double linearSpeed = std::hypot( dx, dy );
+    const double linearSpeed = deterministicHypotUpperBound( dx, dy );
 
     const double q1x = sweep.q1.c;
     const double q1y = sweep.q1.s;
@@ -364,7 +365,7 @@ double ComputeSweepSpeedBound( const shapeProxy2& proxy, const sweep2& sweep )
     {
         const vec2 relative = proxy.points[i] - sweep.localCenter;
         radius = std::max( radius,
-            std::hypot( static_cast<double>( relative.x ), static_cast<double>( relative.y ) ) );
+            deterministicHypotUpperBound( static_cast<double>( relative.x ), static_cast<double>( relative.y ) ) );
     }
 
     // float sin/cos 구성과 GJK 거리는 반올림되므로 상한에 소폭 여유를 둠.
