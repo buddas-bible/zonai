@@ -28,6 +28,30 @@ void projectIntervalPressureGauge( std::span<double> values, std::span<const int
 void multiplyIntervalPressureGraph( std::span<const intervalPressureEdge> edges,
     std::span<const double> pressure, std::span<double> out );
 
+struct intervalPressureResponse
+{
+    double fx = 0.0;
+    double fy = 0.0;
+    double torque = 0.0;
+};
+
+struct intervalPressureBody
+{
+    double inverseMass = 0.0;
+    double inverseInertia = 0.0;
+};
+
+// Dense cell-major, owner-minor B coefficients. The caller supplies
+// matching extents and nonaliasing buffers. Transpose includes fixed owners;
+// the Schur product and diagonal use their inverse mass and inertia.
+void transposeIntervalPressureBodies( std::span<const intervalPressureResponse> coefficients,
+    std::span<const double> pressure, std::span<intervalPressureResponse> force );
+void addIntervalPressureSchur( std::span<const intervalPressureResponse> coefficients,
+    std::span<const intervalPressureBody> bodies, std::span<const intervalPressureResponse> force,
+    double responseScale, std::span<double> out );
+void addIntervalPressureSchurDiagonal( std::span<const intervalPressureResponse> coefficients,
+    std::span<const intervalPressureBody> bodies, double responseScale, std::span<double> diagonal );
+
 struct intervalPressureResult
 {
     std::vector<double> pressure, projectedProduct;
