@@ -272,6 +272,19 @@ struct intervalPressureLinearState
     double scale = 0.0;
 };
 
+struct intervalPressureCorrection
+{
+    std::vector<double> pressure;
+    int iterations;
+    double relativeSquared;
+};
+
+// Solve P A P dp = -P(volume defect)/dt^2 on the same prepared graph.
+// No trial geometry or acceptance decision. The caller must recompute
+// traction for the final accepted pressure after any correction trials.
+[[nodiscard]] intervalPressureCorrection solveIntervalPressureCorrection(
+    std::span<const double> error, const intervalPressureOperator& op, double dt );
+
 // Fixed-order projected Jacobi-PCG on a prepared interval operator.
 // graph.diagonal includes the Schur diagonal (addDiagonal once before solving).
 // The final traction is retained in operator force scratch even for fixed geometry.
