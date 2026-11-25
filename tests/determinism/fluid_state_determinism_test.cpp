@@ -1476,6 +1476,8 @@ struct fluidStateTraceProbe2
         std::vector<double> fluxVolume;
         std::vector<double> meanU, meanV, intervalU, intervalV;
         std::vector<double> bodyVolume, compatibilityVolume, linearVolumeResidual;
+        std::vector<transportPanel> geometricPanels;
+        double geometricWeightSum = 0.0;
         std::vector<int> component;
         double trueResidualSquared = 0.0, initialResidualSquared = 0.0;
         double seedResidualSquared = 0.0;
@@ -2483,6 +2485,12 @@ struct fluidStateTraceProbe2
             continuation->negativeVolume = current.negativeFlux;
             continuation->intervalPeak = current.peak;
             continuation->stalled = stalled;
+            // Only the optimized debug audit consumes the existing panel geometry.
+            if( refineEndpointFaces && !timing )
+            {
+                continuation->geometricPanels = std::move( transportPanels );
+                continuation->geometricWeightSum = weightSum;
+            }
         }
 
     }
@@ -3168,9 +3176,134 @@ struct fluidStateTraceProbe2
         }
         return { std::move( mass ), unserved };
     }
+    // R4ax: compare the same repaired signed transfers redistributed
+    // according to their sampled aperture-time weights, with actual
+    // geometric panel-start capacity instead of linear model capacity.
+    static void auditGeometricTracerPanels( const fluidField2& field,
+        const continuationPressure& candidate, const transportRepairResult& repair,
+        const std::vector<double>& seed, const tracerPanelResult& equalPanels, int index,
+        std::string& trace )
+    {
+        const std::size_t n = seed.size();
+        const double h = field.cellSize_, area = h * h;
+        if( candidate.geometricPanels.empty() || candidate.geometricWeightSum <= 0.0 )
+            throw std::runtime_error( "R4ax missing sampled panel geometry" );
+        struct faceMapping { bool isU; int index; double mean; };
+        std::vector<faceMapping> mapping;
+        const auto collect = [&]( bool isU, int x, int y )
+        {
+            const int f = isU ? field.uIndex( x, y ) : field.vIndex( x, y );
+            const double mean = ( isU ? candidate.meanU : candidate.meanV )[f];
+            if( mean <= 0.0 ) return;
+            const int a = field.cellIndex( x - ( isU ? 1 : 0 ), y - ( isU ? 0 : 1 ) );
+            const int b = field.cellIndex( x, y );
+            if( mapping.size() >= repair.faces.size() ||
+                repair.faces[mapping.size()].first != a || repair.faces[mapping.size()].second != b )
+                throw std::runtime_error( "R4ax geometric face mapping differs" );
+            mapping.push_back( { isU, f, mean } );
+        };
+        for( int y = 0; y < field.height_; ++y )
+            for( int x = 1; x < field.width_; ++x ) collect( true, x, y );
+        for( int y = 1; y < field.height_; ++y )
+            for( int x = 0; x < field.width_; ++x ) collect( false, x, y );
+        if( mapping.size() != repair.faces.size() )
+            throw std::runtime_error( "R4ax missing geometric faces" );
+        auto mass = seed;
+        std::vector<double> sums( mapping.size() ), amounts( mapping.size() ), outgoing( n );
+        double unserved = 0.0, zeroCapacityOutgoing = 0.0;
+        int limitedDonors = 0;
+        for( const auto& panel : candidate.geometricPanels )
+        {
+            if( panel.startFraction.size() != n || panel.weight <= 0.0 )
+                throw std::runtime_error( "R4ax invalid sampled panel" );
+            std::fill( outgoing.begin(), outgoing.end(), 0.0 );
+            for( std::size_t j = 0; j < mapping.size(); ++j )
+            {
+                const auto& f = mapping[j];
+                const auto& edge = repair.faces[j];
+                const double aperture = ( f.isU ? panel.uOpen : panel.vOpen )[f.index];
+                const double amount = edge.amount * ( ( panel.weight / candidate.geometricWeightSum ) *
+                    aperture / f.mean );
+                if( !std::isfinite( amount ) ) throw std::runtime_error( "R4ax nonfinite transfer" );
+                amounts[j] = amount; sums[j] += amount;
+                outgoing[amount >= 0.0 ? edge.first : edge.second] += std::abs( amount );
+            }
+            std::vector<double> remaining = mass, received( n );
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                const double capacity = area * panel.startFraction[i];
+                if( capacity < 0.0 || capacity > area || !std::isfinite( capacity ) )
+                    throw std::runtime_error( "R4ax invalid geometric capacity" );
+                if( outgoing[i] > capacity )
+                {
+                    ++limitedDonors;
+                    unserved += outgoing[i] - capacity;
+                    if( capacity == 0.0 ) zeroCapacityOutgoing += outgoing[i];
+                }
+            }
+            for( std::size_t j = 0; j < mapping.size(); ++j )
+            {
+                const auto& edge = repair.faces[j];
+                const double amount = amounts[j];
+                if( amount == 0.0 ) continue;
+                const int donor = amount > 0.0 ? edge.first : edge.second;
+                const int recipient = amount > 0.0 ? edge.second : edge.first;
+                const double capacity = area * panel.startFraction[donor];
+                if( capacity <= 0.0 ) continue;
+                const double request = mass[donor] * ( std::abs( amount ) /
+                    std::max( capacity, outgoing[donor] ) );
+                const double moved = std::min( remaining[donor], request );
+                remaining[donor] -= moved; received[recipient] += moved;
+            }
+            for( std::size_t i = 0; i < n; ++i )
+            {
+                mass[i] = remaining[i] + received[i];
+                if( !std::isfinite( mass[i] ) || mass[i] < 0.0 )
+                    throw std::runtime_error( "R4ax invalid geometric scalar mass" );
+            }
+        }
+        double transferError = 0.0, transferL1 = 0.0;
+        for( std::size_t j = 0; j < mapping.size(); ++j )
+        {
+            transferError += std::abs( sums[j] - repair.faces[j].amount );
+            transferL1 += std::abs( repair.faces[j].amount );
+        }
+        if( transferError > 1.0e-12 * std::max( transferL1, 1.0e-12 ) )
+            throw std::runtime_error( "R4ax sampled transfer sum differs from repaired interval" );
+        double initialMass = 0.0, finalMass = 0.0, peak = 0.0, trapped = 0.0, deltaL1 = 0.0;
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            initialMass += seed[i]; finalMass += mass[i];
+            deltaL1 += std::abs( mass[i] - equalPanels.mass[i] );
+            const double volume = area * field.cellFluidFraction_[i];
+            if( volume > 0.0 ) peak = std::max( peak, mass[i] / volume );
+            else trapped += mass[i];
+        }
+        const double massError = finalMass - initialMass;
+        if( std::abs( massError ) > 1.0e-12 * std::max( 1.0, initialMass ) )
+            throw std::runtime_error( "R4ax geometric tracer mass conservation failed" );
+        const std::string key = "forwardGeometricTracer.interval" + std::to_string( index );
+        const auto emit = [&]( const char* suffix, double value )
+        {
+            if( !std::isfinite( value ) ) throw std::runtime_error( key + suffix + " nonfinite comparison" );
+            appendScalar( trace, key + suffix, value );
+        };
+        emit( ".panels", static_cast<double>( candidate.geometricPanels.size() ) );
+        emit( ".limitedDonors", limitedDonors ); emit( ".unserved", unserved );
+        emit( ".zeroCapacityOutgoing", zeroCapacityOutgoing ); emit( ".transferError", transferError );
+        emit( ".massError", massError ); emit( ".peakConcentration", peak );
+        emit( ".trapped", trapped ); emit( ".deltaL1", deltaL1 );
+        std::printf( "R4ax interval%d geometricPanels %zu limitedDonors %d unserved %.17g "
+            "zeroCapacityOutgoing %.17g transferError %.17g massError %.17g peak %.17g "
+            "trapped %.17g deltaL1 %.17g equalUnserved %.17g\n",
+            index, candidate.geometricPanels.size(), limitedDonors, unserved, zeroCapacityOutgoing,
+            transferError, massError, peak, trapped, deltaL1, equalPanels.unserved );
+    }
+
     static void auditAdaptiveTracerPanels( const fluidField2& field,
-        const std::vector<float>& startFraction, const transportRepairResult& repair,
-        const std::vector<double>& nextRepaired, persistentTracerAudit& history, int index,
+        const std::vector<float>& startFraction, const continuationPressure& candidate,
+        const transportRepairResult& repair, const std::vector<double>& nextRepaired,
+        persistentTracerAudit& history, int index,
         std::string& trace )
     {
         const double area = static_cast<double>( field.cellSize_ ) * field.cellSize_;
@@ -3227,6 +3360,8 @@ struct fluidStateTraceProbe2
         emit( ".panels", panels ); emit( ".limited", limited ); emit( ".unserved", result.unserved );
         emit( ".peakConcentration", peak ); emit( ".trapped", trapped );
         emit( ".massError", massError ); emit( ".deltaL1", deltaL1 );
+        if( panels > 1 )
+            auditGeometricTracerPanels( field, candidate, repair, history.adaptive, result, index, trace );
         history.adaptive = std::move( result.mass );
         if( history.intervals + 1 == optimizedContinuationIntervals )
             appendVector( trace, key + ".mass", history.adaptive );
@@ -3465,7 +3600,7 @@ struct fluidStateTraceProbe2
             }
         }
 
-        auditAdaptiveTracerPanels( field, startFraction, repair, nextRepaired, history, index, trace );
+        auditAdaptiveTracerPanels( field, startFraction, candidate, repair, nextRepaired, history, index, trace );
         history.original = std::move( nextOriginal );
         history.repaired = std::move( nextRepaired );
         ++history.intervals;
