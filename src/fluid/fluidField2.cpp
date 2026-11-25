@@ -2163,6 +2163,28 @@ void fluidField2::setIntervalPressureHistory( float timeStep, std::span<const fl
     volumeSourceValid_ = true;
 }
 
+fluidField2 fluidField2::prepareIntervalPressureEndpoint( float timeStep,
+    std::span<const fluidShapeObstacle2> start, std::span<const fluidShapeObstacle2> finish ) const
+{
+    if( !cutCellProjectionEnabled_ || !std::isfinite( timeStep ) || timeStep <= 0.0f ||
+        start.size() != finish.size() )
+        throw std::invalid_argument( "interval pressure: invalid endpoint preparation input" );
+
+    fluidField2 endpoint = *this;
+    endpoint.setPrePressureSnapshotObserver( {} );
+    endpoint.determinismStageObserver_ = {};
+    if( !endpoint.rebuildIntervalPressureGeometry( start ) ||
+        endpoint.cellFluidFraction_ != cellFluidFraction_ )
+        throw std::runtime_error( "interval pressure: start geometry differs from source" );
+    if( !endpoint.rebuildIntervalPressureGeometry( finish ) )
+        throw std::runtime_error( "interval pressure: endpoint geometry not analytic" );
+    endpoint.setIntervalPressureHistory( timeStep, cellFluidFraction_, start, finish );
+    // Keep the incoming advected MAC trial independent of endpoint motion.
+    endpoint.u_ = u_;
+    endpoint.v_ = v_;
+    return endpoint;
+}
+
 void fluidField2::integrateIntervalPressurePanels( fluidField2& geometry, fluidField2& panelGeometry,
     std::span<fluidShapeObstacle2> poses, std::span<const fluidDetail::intervalPressurePoseMotion> motion,
     const fluidDetail::intervalPressureQuadrature& quadrature,
