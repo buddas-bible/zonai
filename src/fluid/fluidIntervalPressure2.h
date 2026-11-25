@@ -253,6 +253,16 @@ struct intervalPressureLinearOptions
     double closingVolumeRelativeTolerance = 0.0;
 };
 
+// Experimental field-only solve on an already predicted endpoint.
+// A nonzero body response scale would require a matching World/geometry
+// transaction and is deliberately rejected by the field-only entry.
+struct intervalPressureStepOptions
+{
+    int samples = 16, endpointDepth = 16, correctionBudget = 0;
+    bool adaptiveEndpoint = true, refineEndpointFaces = true;
+    intervalPressureLinearOptions linear{ 0.0, true, true, true, 1.0e-10, 0.0 };
+};
+
 // Own the prepared operator buffers; non-owning operator views are created
 // only after this object has reached its destination. A missing solution
 // denotes incompatible RHS capacity, never an accepted pressure.
