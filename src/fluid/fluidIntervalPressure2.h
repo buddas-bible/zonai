@@ -24,6 +24,45 @@ struct intervalPressureQuadrature
 // arithmetic. Refined mode uses dyadic subdivisions of the end panels.
 [[nodiscard]] intervalPressureQuadrature buildIntervalPressureQuadrature( int samples, int endpointDepth );
 
+struct intervalPressureGeometrySample
+{
+    std::span<const float> fraction, uOpen, vOpen;
+};
+
+struct intervalPressureMissingFace
+{
+    bool isU;
+    int x, y;
+};
+
+// Track the union of midpoint cell support and the remaining unsupported
+// endpoint-open faces. All arrays use the frozen MAC layout.
+class intervalPressureCoverage
+{
+public:
+    intervalPressureCoverage( int width, int height, const intervalPressureGeometrySample& endpoint,
+        bool refineEndpointFaces );
+    void observe( const intervalPressureGeometrySample& sample );
+    [[nodiscard]] std::vector<int> missingCells( std::span<const float> previous,
+        std::span<const float> endpoint ) const;
+    [[nodiscard]] const std::vector<intervalPressureMissingFace>& missingFaces() const noexcept
+    {
+        return missingFaces_;
+    }
+
+private:
+    int width_, height_;
+    std::vector<bool> supported_;
+    std::vector<intervalPressureMissingFace> missingFaces_;
+};
+
+// Accumulate cell fractions and masked interior apertures in canonical
+// order, writing a separate zero-boundary aperture snapshot for transport.
+void accumulateIntervalPressureGeometry( int width, int height,
+    const intervalPressureGeometrySample& sample, double weight,
+    std::span<double> fraction, std::span<double> meanU, std::span<double> meanV,
+    std::span<float> panelU, std::span<float> panelV );
+
 // Canonical interior face order and metadata retained for endpoint reconstruction.
 struct intervalPressureEdge
 {
